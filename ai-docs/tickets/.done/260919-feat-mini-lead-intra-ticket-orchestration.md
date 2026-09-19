@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 3c28789f79937a5d
 sage-review-completeness-reviewed: 3c28789f79937a5d
+completed: 2026-09-19
 ---
 
 # Restructure ticket-worker into direct + elevated mini-lead bodies
@@ -117,6 +118,62 @@ Rewrite `ticket-worker-elevated` into the orchestrating mini-lead prose and reti
 Verification: the merge-obligation and stop-protocol contract tests pass against
 the two remaining bodies; manifest and wsflow-drift tests are green.
 
+### Result (a6f54fe6) - 2026-09-19
+
+Rewrote `ticket-worker-elevated` into the orchestrating mini-lead body: it owns
+the whole ticket (every phase without a `### Result`, not one), decomposes along
+the interface/spine → disjoint-leaf seam with a phase-serial fresh-leaf fallback,
+runs leaves sequentially on one warm shared worktree with leaf self-verification,
+delegates to the `delegate-implementer` floor calibrated by difficulty
+(mechanical disjoint leaves down by default, hard core kept), and frames the
+interface + test-contract spine review as a named-condition recommendation, not a
+gate. Kept `role: worker`, the `worker-stop-protocol` include, the `ExploreAgent`
+/ `SpawnIdiom` spawn variables, and the route-allocation review-mapping paragraph
+(single/correctness/fit/test) verbatim. `## Inputs` and `## Constraints` are
+otherwise unchanged from the prior body (only `## Execute` diverged); no changed
+Invariants/Constraints line required the skill-authoring checklist beyond the
+inputs/constraints already in place.
+
+Retired `ticket-worker-escalated` across all three rsrc mirrors and regenerated
+both manifests: canonical via `WSRSRC_REGEN`, the `agents-plugin-wsflow` mirror
+via `WS_REGEN_WSFLOW_RSRC`, and the `agents-plugin-pi` mirror resynced
+byte-identically from canonical. The default `ticket-worker` body is untouched.
+
+Updated the tests that hard-coded the three stems: dropped `ticket-worker-escalated`
+from the Python three-stem tuples in both suites and from the Go golden render
+case (`TestPlaybookRenderGoldenTicketWorker`), and removed
+`TestTicketWorkerVariantsDifferOnlyByTier` (its byte-identity premise is exactly
+what this phase overturns). Added `test_two_worker_bodies_diverge_in_behavior_not_just_tier`
+(agents-plugin) and `test_wsflow_elevated_body_is_mini_lead_and_escalated_retired`
+(agents-plugin-wsflow) to pin the behavioral divergence and the retirement.
+
+Verification (full output read):
+- `go test ./...` (agents-plugin-tool): all 16 packages `ok`, incl. the manifest,
+  wsflow-mirror, and pi-mirror drift guards and the golden worker-render test.
+- `python3 -m unittest discover agents-plugin/tests`: 73 OK.
+- `python3 -m unittest discover agents-plugin-wsflow/tests`: 13 OK.
+- Review, partitioned correctness/fit/test: correctness clean; fit one
+  non-blocking Minor (accepted); test two Important coverage gaps, both fixed in
+  round 1; round-2 verification clean, no Critical at any point.
+
+Decisions (recorded, not escalated):
+- Retired the escalated body rather than keeping a tier-only third body; xlarge
+  reuses the elevated prose via the render `tier_override` — that wiring is
+  Phase 2, so `lead-run.md` and `TestPlaybookPrintLeadRunWorkerTierPolicy` are
+  intentionally left still naming `ticket-worker-escalated` (the deliberate
+  Phase 1/2 boundary).
+- Resolved two unenumerated consumers the ticket's ws+wsflow scope omitted: the
+  `agents-plugin-pi` rsrc mirror (guarded by `TestPiMirrorUpToDate`), resynced
+  from canonical without a version bump; and two Go tests keyed off the retired
+  three-body structure, edited/removed since Phase 1's change overturns their
+  premises.
+- Accepted fit's lone Minor: kept `## Execute` step 4 (leaf mechanics +
+  difficulty calibration) as one step rather than splitting it, since both halves
+  are the single "how to delegate a leaf" concern and splitting would make step
+  3's "the same review render step 5 uses" cross-reference stale for no gain.
+
+Commits: a6f54fe6 (body + mirrors + tests), e5e93975 (round-1 review-gap fixes).
+
 ### Phase 2: Rewrite lead-run dispatch and escalation to elevated + xlarge override
 
 Depends on Phase 1 (bodies exist) and on `260919-feat-ws-playbook-render-tier-override`
@@ -139,3 +196,65 @@ landing (the render tool must accept the tier override).
 Verification: dispatch-prose tests (incl. the wsflow mirror at
 `test_wsflow_skill_bundle.py`) pass against the new table; a render of `elevated`
 with `tier_override: xlarge` surfaces the xlarge recommended tier/model.
+
+### Result (cddc7291) - 2026-09-19
+
+Rewrote the `lead-run.md` dispatch/escalation table and render prose. The tier
+table now maps `medium → ticket-worker`, `large → ticket-worker-elevated`, and
+`xlarge → ticket-worker-elevated`, `tier_override: xlarge`; the stop-(e) retry
+ladder is `medium → ticket-worker-elevated` (large) then
+`large → ticket-worker-elevated`, `tier_override: xlarge` (xlarge), with xlarge's
+(e) still going to the user. Render step 4 threads `tier_override` when the table
+cell names it, with the rationale that the `elevated` body's frontmatter tier is
+large so xlarge dispatch needs the override to spawn at the xlarge model; the (e)
+step now takes "the retry cell from the table (its body and any `tier_override`)".
+Step 2's tier-summary line was also corrected (round-1 review) to name the body's
+frontmatter tier or the paired `tier_override` rather than "that playbook's own
+tier". No separate escalated body is named anywhere in shipped dispatch prose.
+
+Mirrored byte-identically to `agents-plugin-wsflow` (via `WS_REGEN_WSFLOW_RSRC`)
+and `agents-plugin-pi` (synced from canonical); both regenerated rsrc manifests
+plus the pi manifest updated. All three `lead-run.md` copies are byte-identical.
+
+Retired-stem sweep: a fresh `grep -rl ticket-worker-escalated` over the shipped
+and tool trees returns only the two Python test files, where the stem now appears
+solely in retirement assertions (`assertFalse((rsrc / "ticket-worker-escalated").exists())`)
+and comments — pins of the retirement, not consumers of the stem. The authoring-time
+"six-file" set had already shifted after Phase 1 (manifests regenerated, Python
+three-stem tuples dropped), so the live consumers Phase 2 resolved were the three
+`lead-run.md` copies and the Go `TestPlaybookPrintLeadRunWorkerTierPolicy` tier
+table — Phase 1's deliberately-deferred boundary — plus the two Python dispatch
+tests. The `agents-plugin-pi/rsrc/lead-run/lead-run.md` and the Go test were
+unenumerated in the phase plan's six-file list; both resolved (pi guarded by
+`TestPiMirrorUpToDate`, the Go test updated in lockstep).
+
+Tests updated: Go `TestPlaybookPrintLeadRunWorkerTierPolicy` (new table rows +
+new pins for the tier_override render instruction, the retry-cell carry, and a
+rendered-body `assertNotIn("ticket-worker-escalated")`); `test_skill_dispatch_contracts.py`
+(updated render-name pin, `tier_override` dispatch pins, and negative pins for the
+retired render-name form and the escalated stem).
+
+Verification (full output read):
+- `go test ./...` (agents-plugin-tool): all 16 packages `ok`, incl. the manifest,
+  wsflow-mirror, and pi-mirror drift guards, the golden worker-render test, and
+  the tier-policy test.
+- `python3 -m unittest discover agents-plugin/tests`: 73 OK.
+- `python3 -m unittest discover agents-plugin-wsflow/tests`: 13 OK.
+- The `tier_override` render primitive (elevated body at xlarge) is exercised
+  end-to-end by the sibling feat's `TestPlaybookRenderToolTierOverride` /
+  `TestRenderPlaybookBodyTierOverride`, both re-run green; the live MCP server
+  binary predates the arg, so the source-level tests are the authoritative check.
+- Review, partitioned correctness/fit/test: fit clean; correctness one Minor
+  (step-2 prose accuracy, fixed); test two Minor (missing negative assertions,
+  fixed). Round-2 verification clean; no Critical at any point.
+
+Decisions (recorded, not escalated):
+- Represented xlarge dispatch in the tier table by pairing the `elevated` body
+  with `` `tier_override: xlarge` `` in the cell rather than adding a fourth
+  table column, keeping the two-column body/retry shape the Go test already pins.
+- Synced the `agents-plugin-pi` rsrc mirror and updated the Go tier-policy test
+  even though the phase plan's six-file grep set predated Phase 1 and named
+  neither; both are live consumers of the retired stem in the current tree.
+
+Commits: 2a53266c (dispatch rewrite + mirrors + tests), cddc7291 (round-1
+review-Minor fixes).

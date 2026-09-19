@@ -491,7 +491,7 @@ func TestPlaybookRenderWritesTmpFile(t *testing.T) {
 
 	s := newTestServerWithHarness(t, "claude")
 
-	path, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "delegate-pb", nil, wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil)
+	path, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "delegate-pb", nil, wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil, "")
 	if err != nil {
 		t.Fatalf("renderPlaybook: %v", err)
 	}
@@ -1171,7 +1171,7 @@ func TestRenderPlaybookWsflowProductModeUsesShippedDelegate(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", cacheHome)
 	s := newTestServerWithHarness(t, "codex")
 
-	path, tier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer", shippedImplementerContext(), wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil)
+	path, tier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer", shippedImplementerContext(), wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil, "")
 	if err != nil {
 		t.Fatalf("renderPlaybook: %v", err)
 	}
@@ -1205,7 +1205,7 @@ func TestRenderPlaybookShippedImplementerDeclaredContext(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", cacheHome)
 	s := newTestServerWithHarness(t, "codex")
 
-	path, tier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer", shippedImplementerContext(), wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil)
+	path, tier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer", shippedImplementerContext(), wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil, "")
 	if err != nil {
 		t.Fatalf("renderPlaybook: %v", err)
 	}
@@ -1269,7 +1269,7 @@ func TestRenderPlaybookShippedImplementerRelayDeclaredContext(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", cacheHome)
 	s := newTestServerWithHarness(t, "codex")
 
-	path, tier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer-relay", shippedImplementerRelayContext(), wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil)
+	path, tier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer-relay", shippedImplementerRelayContext(), wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil, "")
 	if err != nil {
 		t.Fatalf("renderPlaybook: %v", err)
 	}
@@ -1353,7 +1353,7 @@ func TestRenderPlaybookShippedImplementerElevatedDeclaredContext(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", cacheHome)
 	s := newTestServerWithHarness(t, "codex")
 
-	path, tier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer-elevated", shippedImplementerElevatedContext(), wsconfig.Options{CacheHome: cacheHome}, worktreeRoot, "", "", nil)
+	path, tier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer-elevated", shippedImplementerElevatedContext(), wsconfig.Options{CacheHome: cacheHome}, worktreeRoot, "", "", nil, "")
 	if err != nil {
 		t.Fatalf("renderPlaybook: %v", err)
 	}
@@ -1485,7 +1485,7 @@ func renderedImplementerDispositionEnumerations(t *testing.T) (relayProcess stri
 
 	render := func(name string, ctx map[string]string) string {
 		t.Helper()
-		path, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, name, ctx, wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil)
+		path, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, name, ctx, wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil, "")
 		if err != nil {
 			t.Fatalf("%s renderPlaybook: %v", name, err)
 		}
@@ -1610,7 +1610,7 @@ func TestRenderPlaybookShippedReviewAdjudicatorDeclaredContext(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", cacheHome)
 	s := newTestServerWithHarness(t, "codex")
 
-	path, tier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "review-adjudicator", shippedReviewAdjudicatorContext(), wsconfig.Options{CacheHome: cacheHome}, worktreeRoot, "", "", nil)
+	path, tier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "review-adjudicator", shippedReviewAdjudicatorContext(), wsconfig.Options{CacheHome: cacheHome}, worktreeRoot, "", "", nil, "")
 	if err != nil {
 		t.Fatalf("renderPlaybook: %v", err)
 	}
@@ -1672,7 +1672,7 @@ func TestRenderPlaybookWsflowLegacyPromptStemsAppendContext(t *testing.T) {
 
 	codeReviewerPath, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "code-reviewer", map[string]string{
 		"note": "see ws/tickets.query for details",
-	}, wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil)
+	}, wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil, "")
 	if err != nil {
 		t.Fatalf("renderPlaybook code-reviewer with legacy context: %v", err)
 	}
@@ -1699,7 +1699,7 @@ func TestRenderPlaybookFullWsStillRejectsUndeclaredContext(t *testing.T) {
 
 	if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "code-reviewer", map[string]string{
 		"note": "ordinary full ws context remains template vars",
-	}, wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil); err == nil {
+	}, wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil, ""); err == nil {
 		t.Fatal("full ws renderPlaybook accepted undeclared context for code-reviewer")
 	} else {
 		var undeclared wsrsrc.ErrUndeclaredVar
@@ -1710,7 +1710,7 @@ func TestRenderPlaybookFullWsStillRejectsUndeclaredContext(t *testing.T) {
 
 	ctx := shippedImplementerContext()
 	ctx["Undeclared"] = "must fail"
-	if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer", ctx, wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil); err == nil {
+	if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer", ctx, wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil, ""); err == nil {
 		t.Fatal("full ws renderPlaybook accepted undeclared context for implementer")
 	} else {
 		var undeclared wsrsrc.ErrUndeclaredVar
@@ -1721,7 +1721,7 @@ func TestRenderPlaybookFullWsStillRejectsUndeclaredContext(t *testing.T) {
 
 	implCtx := shippedImplementerContext()
 	implCtx["BriefPath"] = "ai-docs/.plans/legacy-brief.md"
-	if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer", implCtx, wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil); err == nil {
+	if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer", implCtx, wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil, ""); err == nil {
 		t.Fatal("full ws renderPlaybook accepted BriefPath for implementer")
 	} else {
 		var undeclared wsrsrc.ErrUndeclaredVar
@@ -1732,7 +1732,7 @@ func TestRenderPlaybookFullWsStillRejectsUndeclaredContext(t *testing.T) {
 
 	relayBriefCtx := shippedImplementerRelayContext()
 	relayBriefCtx["BriefPath"] = "ai-docs/.plans/legacy-brief.md"
-	if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer-relay", relayBriefCtx, wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil); err == nil {
+	if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer-relay", relayBriefCtx, wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil, ""); err == nil {
 		t.Fatal("full ws renderPlaybook accepted BriefPath for implementer-relay")
 	} else {
 		var undeclared wsrsrc.ErrUndeclaredVar
@@ -1743,7 +1743,7 @@ func TestRenderPlaybookFullWsStillRejectsUndeclaredContext(t *testing.T) {
 
 	relayCtx := shippedImplementerRelayContext()
 	relayCtx["Undeclared"] = "must fail"
-	if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer-relay", relayCtx, wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil); err == nil {
+	if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer-relay", relayCtx, wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil, ""); err == nil {
 		t.Fatal("full ws renderPlaybook accepted undeclared context for implementer-relay")
 	} else {
 		var undeclared wsrsrc.ErrUndeclaredVar
@@ -1757,7 +1757,7 @@ func TestRenderPlaybookFullWsStillRejectsUndeclaredContext(t *testing.T) {
 	elevatedTypoCtx := shippedImplementerElevatedContext()
 	delete(elevatedTypoCtx, "PriorFixCommits")
 	elevatedTypoCtx["PriorFixCommit"] = "abc123"
-	if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer-elevated", elevatedTypoCtx, wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil); err == nil {
+	if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer-elevated", elevatedTypoCtx, wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil, ""); err == nil {
 		t.Fatal("full ws renderPlaybook accepted a misspelled PriorFixCommits for implementer-elevated")
 	} else {
 		var undeclared wsrsrc.ErrUndeclaredVar
@@ -1768,7 +1768,7 @@ func TestRenderPlaybookFullWsStillRejectsUndeclaredContext(t *testing.T) {
 
 	elevatedCtx := shippedImplementerElevatedContext()
 	elevatedCtx["Undeclared"] = "must fail"
-	if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer-elevated", elevatedCtx, wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil); err == nil {
+	if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer-elevated", elevatedCtx, wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil, ""); err == nil {
 		t.Fatal("full ws renderPlaybook accepted undeclared context for implementer-elevated")
 	} else {
 		var undeclared wsrsrc.ErrUndeclaredVar
@@ -1789,7 +1789,7 @@ func TestRenderPlaybookWsflowNonLegacyStemRejectsUndeclaredContext(t *testing.T)
 
 	if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer", map[string]string{
 		"note": "wsflow non-legacy stems still require declared template vars",
-	}, wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil); err == nil {
+	}, wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil, ""); err == nil {
 		t.Fatal("wsflow non-legacy renderPlaybook accepted undeclared context")
 	} else {
 		var undeclared wsrsrc.ErrUndeclaredVar
@@ -1800,7 +1800,7 @@ func TestRenderPlaybookWsflowNonLegacyStemRejectsUndeclaredContext(t *testing.T)
 
 	if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer-relay", map[string]string{
 		"note": "implementer-relay is not a wsflow legacy freeform stem",
-	}, wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil); err == nil {
+	}, wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil, ""); err == nil {
 		t.Fatal("wsflow non-legacy renderPlaybook accepted undeclared implementer-relay context")
 	} else {
 		var undeclared wsrsrc.ErrUndeclaredVar
@@ -2362,7 +2362,7 @@ func TestPlaybookDocumentAuditProducts(t *testing.T) {
 			if err := os.WriteFile(target, []byte("# Project\n\nUse the existing conventions.\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			path, tier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "fresh-read-doc-auditor", map[string]string{"TargetFiles": target}, opts, "", "", "", nil)
+			path, tier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "fresh-read-doc-auditor", map[string]string{"TargetFiles": target}, opts, "", "", "", nil, "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -2516,7 +2516,7 @@ func TestSkillsCallEnterTools(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.playbook, func(t *testing.T) {
-			body, _, err := renderPlaybookBody(s, rsrcRoot, tc.playbook, nil, wsconfig.Options{}, "", "", "", nil)
+			body, _, err := renderPlaybookBody(s, rsrcRoot, tc.playbook, nil, wsconfig.Options{}, "", "", "", nil, "")
 			if err != nil {
 				t.Fatalf("renderPlaybookBody(%q): %v", tc.playbook, err)
 			}
@@ -2640,7 +2640,7 @@ func TestRenderMintsLeadScopedChildKeyForWorkerPlaybook(t *testing.T) {
 	mintRoot := "/work/tree-a"
 	parentKey := "parent-key-fixture"
 
-	body, _, err := renderPlaybookBody(s, root, "worker-pb", nil, wsconfig.Options{}, mintRoot, parentKey, "", nil)
+	body, _, err := renderPlaybookBody(s, root, "worker-pb", nil, wsconfig.Options{}, mintRoot, parentKey, "", nil, "")
 	if err != nil {
 		t.Fatalf("renderPlaybookBody: %v", err)
 	}
@@ -2673,14 +2673,13 @@ func TestPlaybookRenderGoldenTicketWorker(t *testing.T) {
 			for _, tc := range []struct{ name, tier string }{
 				{"ticket-worker", "medium"},
 				{"ticket-worker-elevated", "large"},
-				{"ticket-worker-escalated", "xlarge"},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					rsrcRoot := filepath.Join("..", "..", "..", map[string]string{"ws": "agents-plugin", "wsflow": "agents-plugin-wsflow"}[product], "rsrc")
 					s := newTestServerWithHarness(t, "claude")
 					mintRoot := "/work/tree-a"
 
-					body, tier, err := renderPlaybookBody(s, rsrcRoot, tc.name, nil, wsconfig.Options{}, mintRoot, "", "", nil)
+					body, tier, err := renderPlaybookBody(s, rsrcRoot, tc.name, nil, wsconfig.Options{}, mintRoot, "", "", nil, "")
 					if err != nil {
 						t.Fatalf("renderPlaybookBody: %v", err)
 					}
@@ -2761,8 +2760,15 @@ func TestPlaybookPrintLeadRunWorkerTierPolicy(t *testing.T) {
 				"Read the selected ticket's whole body and grade its risk against the Risk Rubric below",
 				"The tier sets the worker's model; the worker's route sets review breadth.",
 				"| medium | `ticket-worker` | `ticket-worker-elevated` |",
-				"| large | `ticket-worker-elevated` | `ticket-worker-escalated` |",
-				"| xlarge | `ticket-worker-escalated` | none: its (e) goes to the user |",
+				"| large | `ticket-worker-elevated` | `ticket-worker-elevated`, `tier_override: xlarge` |",
+				"| xlarge | `ticket-worker-elevated`, `tier_override: xlarge` | none: its (e) goes to the user |",
+				// xlarge reuses the elevated body via a render-time tier override
+				// (the escalated body is retired), so the render step must pass
+				// tier_override for the elevated body — whose frontmatter tier is
+				// large — to spawn at the xlarge model. Pin that dispatch rule and
+				// the retry cell's carry of any tier_override.
+				"When the table cell pairs the body with `tier_override: xlarge`, pass that argument too",
+				"repeat Spawn steps 4 to 6 with the retry cell from the table (its body and any `tier_override`)",
 				// The Risk Rubric is a bundled rsrc doc pulled in through
 				// lead-run.md's `includes: - risk-rubric` frontmatter, not
 				// inlined in lead-run.md itself — assert its own content
@@ -2819,24 +2825,15 @@ func TestPlaybookPrintLeadRunWorkerTierPolicy(t *testing.T) {
 			if strings.Contains(body, "flagship class") || strings.Contains(body, "{{.") {
 				t.Error("rendered policy retains a fixed flagship floor or template variable")
 			}
+			// The escalated body is retired: xlarge reuses the elevated body via
+			// tier_override. The tier-table pins are positive assertIn, so without
+			// this a regression re-naming ticket-worker-escalated in a table row
+			// (a row can name a non-existent body without failing render) slips
+			// through. Pin the dispatch prose names no retired escalated body.
+			if strings.Contains(body, "ticket-worker-escalated") {
+				t.Error("rendered lead-run dispatch prose names the retired ticket-worker-escalated body")
+			}
 		})
-	}
-}
-
-func TestTicketWorkerVariantsDifferOnlyByTier(t *testing.T) {
-	root := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
-	base, err := os.ReadFile(filepath.Join(root, "ticket-worker", "ticket-worker.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for name, tier := range map[string]string{"ticket-worker-elevated": "large", "ticket-worker-escalated": "xlarge"} {
-		data, err := os.ReadFile(filepath.Join(root, name, name+".md"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := strings.Replace(string(data), "tier: "+tier+"\n", "tier: medium\n", 1); got != string(base) {
-			t.Errorf("%s differs from the base beyond tier frontmatter", name)
-		}
 	}
 }
 

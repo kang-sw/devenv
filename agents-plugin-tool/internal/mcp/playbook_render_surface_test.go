@@ -81,7 +81,7 @@ func TestRenderMintsChildKeyForLeadDelegatePlaybook(t *testing.T) {
 	s := newTestServerWithHarness(t, "claude")
 	mintRoot := "/work/tree-a"
 
-	body, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, mintRoot, "", "", nil)
+	body, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, mintRoot, "", "", nil, "")
 	if err != nil {
 		t.Fatalf("renderPlaybookBody: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestRenderMintsChildKeyForLeadDelegatePlaybook(t *testing.T) {
 	}
 
 	// A second render mints a DISTINCT key (registry uniqueness).
-	body2, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, mintRoot, "", "", nil)
+	body2, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, mintRoot, "", "", nil, "")
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (2nd): %v", err)
 	}
@@ -116,7 +116,7 @@ func TestRenderNoMintForNonLeadCaller(t *testing.T) {
 	s := newTestServerWithHarness(t, "claude")
 
 	// mintRoot empty → caller is not a lead → no mint, no key block.
-	body, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, "", "", "", nil)
+	body, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, "", "", "", nil, "")
 	if err != nil {
 		t.Fatalf("renderPlaybookBody: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestRenderNoMintForNonDelegateRole(t *testing.T) {
 	s := newTestServerWithHarness(t, "claude")
 
 	// Lead caller (mintRoot set) but the playbook role is not delegate-eligible → no mint.
-	body, _, err := renderPlaybookBody(s, root, "delegate-pb", nil, wsconfig.Options{}, "/work/tree-a", "", "", nil)
+	body, _, err := renderPlaybookBody(s, root, "delegate-pb", nil, wsconfig.Options{}, "/work/tree-a", "", "", nil, "")
 	if err != nil {
 		t.Fatalf("renderPlaybookBody: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestRenderRootOverrideBindsChildKey(t *testing.T) {
 
 	// renderPlaybookBody binds the minted key to mintRoot; the dispatch passes
 	// root_override as mintRoot when set (server.go playbook.render handler).
-	body, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, overrideRoot, "", "", nil)
+	body, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, overrideRoot, "", "", nil, "")
 	if err != nil {
 		t.Fatalf("renderPlaybookBody: %v", err)
 	}
@@ -225,6 +225,64 @@ func TestRenderDispatchSeparatesResourceAndWorktreeRoots(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestPlaybookRenderToolTierOverride drives tier_override through the actual
+// playbook.render MCP tool dispatch (callToolOnce), not renderPlaybookBody
+// directly, so the argument-key wiring at the "playbook.render" case in
+// server.go and the resulting recommended-tier/recommended-model response
+// lines are covered end to end — mirroring the in-file root_override
+// precedent in TestRenderDispatchSeparatesResourceAndWorktreeRoots.
+func TestPlaybookRenderToolTierOverride(t *testing.T) {
+	useLeadProfile(t)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	rsrcRoot := buildTestRsrcTree(t, map[string]string{
+		"tier-override-pb/tier-override-pb.md": tierOverridePlaybookContent,
+	})
+	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+	repo := initGitRepo(t)
+	runGit(t, repo, "commit", "--allow-empty", "-m", "initial")
+	s := NewServer(repo, "test")
+	s.observeHarness("test", "codex")
+	leadKey, err := s.sessions.mint(repo, roleLead, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("override reflected in response payload and body", func(t *testing.T) {
+		resp := callToolOnce(t, s, 1, "playbook.render", map[string]any{
+			"name":          "tier-override-pb",
+			"session_key":   leadKey,
+			"tier_override": "large",
+		})
+		if toolIsError(t, resp) {
+			t.Fatalf("playbook.render with tier_override: %s", resp)
+		}
+		text := toolText(t, resp)
+		if !strings.Contains(text, "recommended-tier: large") || !strings.Contains(text, "recommended-model: gpt-5.6-sol") {
+			t.Fatalf("response payload did not reflect tier_override: %q", text)
+		}
+		path := strings.Split(strings.TrimSpace(text), "\n")[0]
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(body), "Model: gpt-5.6-sol") {
+			t.Fatalf("rendered body did not reflect tier_override: %s", body)
+		}
+	})
+
+	t.Run("unknown tier_override is rejected, not coerced", func(t *testing.T) {
+		resp := callToolOnce(t, s, 2, "playbook.render", map[string]any{
+			"name":          "tier-override-pb",
+			"session_key":   leadKey,
+			"tier_override": "bogus-tier",
+		})
+		if !toolIsError(t, resp) {
+			t.Fatalf("playbook.render accepted an unknown tier_override instead of rejecting it: %s", resp)
+		}
+	})
 }
 
 // --- integration: workflow preference writers ---
@@ -305,7 +363,7 @@ func TestRenderGoldenShippedDelegateChildKey(t *testing.T) {
 			if name == "implementer" {
 				ctx = shippedImplementerContext()
 			}
-			body, _, err := renderPlaybookBody(s, rsrcRoot, name, ctx, wsconfig.Options{CacheHome: t.TempDir()}, mintRoot, "", "", nil)
+			body, _, err := renderPlaybookBody(s, rsrcRoot, name, ctx, wsconfig.Options{CacheHome: t.TempDir()}, mintRoot, "", "", nil, "")
 			if err != nil {
 				t.Fatalf("renderPlaybookBody(%s): %v", name, err)
 			}
@@ -352,7 +410,7 @@ func TestRenderGoldenShippedDelegatesContainNoModelAliases(t *testing.T) {
 		if name == "implementer" {
 			ctx = shippedImplementerContext()
 		}
-		body, _, err := renderPlaybookBody(s, rsrcRoot, name, ctx, wsconfig.Options{CacheHome: t.TempDir()}, "", "", "", nil)
+		body, _, err := renderPlaybookBody(s, rsrcRoot, name, ctx, wsconfig.Options{CacheHome: t.TempDir()}, "", "", "", nil, "")
 		if err != nil {
 			t.Fatalf("renderPlaybookBody(%s, %q): %v", name, harness, err)
 		}
@@ -395,7 +453,7 @@ func TestRenderGoldenShippedPhase4Delegates(t *testing.T) {
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
 			s := newTestServerWithHarness(t, "claude")
-			body, _, err := renderPlaybookBody(s, rsrcRoot, name, nil, wsconfig.Options{CacheHome: t.TempDir()}, mintRoot, "", "", nil)
+			body, _, err := renderPlaybookBody(s, rsrcRoot, name, nil, wsconfig.Options{CacheHome: t.TempDir()}, mintRoot, "", "", nil, "")
 			if err != nil {
 				t.Fatalf("renderPlaybookBody(%s): %v", name, err)
 			}
@@ -429,7 +487,7 @@ func TestRenderGoldenShippedReviewPartitionIncludesBase(t *testing.T) {
 	for _, name := range []string{"code-review-correctness", "code-review-fit", "code-review-test"} {
 		t.Run(name, func(t *testing.T) {
 			s := newTestServerWithHarness(t, "claude")
-			body, _, err := renderPlaybookBody(s, rsrcRoot, name, nil, wsconfig.Options{CacheHome: t.TempDir()}, "", "", "", nil)
+			body, _, err := renderPlaybookBody(s, rsrcRoot, name, nil, wsconfig.Options{CacheHome: t.TempDir()}, "", "", "", nil, "")
 			if err != nil {
 				t.Fatalf("renderPlaybookBody(%s): %v", name, err)
 			}
@@ -544,7 +602,7 @@ func TestRenderReturnsFrontmatterRecommendedTier(t *testing.T) {
 		if name == "implementer" {
 			ctx = shippedImplementerContext()
 		}
-		_, tier, err := renderPlaybookBody(s, rsrcRoot, name, ctx, wsconfig.Options{CacheHome: t.TempDir()}, "", "", "", nil)
+		_, tier, err := renderPlaybookBody(s, rsrcRoot, name, ctx, wsconfig.Options{CacheHome: t.TempDir()}, "", "", "", nil, "")
 		if err != nil {
 			t.Fatalf("renderPlaybookBody(%s): %v", name, err)
 		}
@@ -552,4 +610,91 @@ func TestRenderReturnsFrontmatterRecommendedTier(t *testing.T) {
 			t.Errorf("shipped %s recommended tier = %q, want %q (from frontmatter)", name, tier, wantTier)
 		}
 	}
+}
+
+// tierOverridePlaybookContent declares frontmatter tier: medium and substitutes
+// {{.RoleModel}} inline, so a render's in-body model text moves with whichever
+// tier actually governed resolution (frontmatter, or a render-time override).
+const tierOverridePlaybookContent = `---
+kind: render
+tier: medium
+variables:
+  - RoleModel
+---
+# Tier Override Playbook
+
+Model: {{.RoleModel}}
+`
+
+// TestRenderPlaybookBodyTierOverride verifies playbook.render's tier_override:
+// present, it replaces the frontmatter tier for both the returned
+// recommendedTier (which withRecommendedRenderBinding turns into the
+// recommended-tier/recommended-model payload lines) and the in-body RoleModel
+// substitution; absent, the frontmatter tier still governs (regression guard
+// for TestRenderReturnsFrontmatterRecommendedTier); an unknown override tier
+// is rejected rather than coerced.
+func TestRenderPlaybookBodyTierOverride(t *testing.T) {
+	root := buildTestRsrcTree(t, map[string]string{
+		"tier-override-pb/tier-override-pb.md": tierOverridePlaybookContent,
+	})
+	configOpts := isolatedPlaybookConfigOptions(t)
+
+	t.Run("override replaces frontmatter tier and RoleModel", func(t *testing.T) {
+		s := newTestServerWithHarness(t, "codex")
+		body, tier, err := renderPlaybookBody(s, root, "tier-override-pb", nil, configOpts, "", "", "", nil, "large")
+		if err != nil {
+			t.Fatalf("renderPlaybookBody with tier_override: %v", err)
+		}
+		if tier != "large" {
+			t.Errorf("recommendedTier = %q, want override tier %q", tier, "large")
+		}
+		if !strings.Contains(body, "Model: gpt-5.6-sol") {
+			t.Errorf("body RoleModel did not reflect the large-tier override:\n%s", body)
+		}
+		if strings.Contains(body, "Model: gpt-5.6-terra") {
+			t.Errorf("body RoleModel still reflects the frontmatter medium tier despite override:\n%s", body)
+		}
+		payload := withRecommendedRenderBinding("path", s.currentHarness(), tier, configOpts)
+		if !strings.Contains(payload, "recommended-tier: large") || !strings.Contains(payload, "recommended-model: gpt-5.6-sol") {
+			t.Errorf("recommended payload did not reflect the override: %q", payload)
+		}
+	})
+
+	t.Run("absent override leaves frontmatter tier and RoleModel unchanged", func(t *testing.T) {
+		s := newTestServerWithHarness(t, "codex")
+		body, tier, err := renderPlaybookBody(s, root, "tier-override-pb", nil, configOpts, "", "", "", nil, "")
+		if err != nil {
+			t.Fatalf("renderPlaybookBody without tier_override: %v", err)
+		}
+		if tier != "medium" {
+			t.Errorf("recommendedTier = %q, want frontmatter tier %q", tier, "medium")
+		}
+		if !strings.Contains(body, "Model: gpt-5.6-terra") {
+			t.Errorf("body RoleModel did not reflect the frontmatter medium tier:\n%s", body)
+		}
+	})
+
+	t.Run("unknown override tier is rejected, not coerced", func(t *testing.T) {
+		s := newTestServerWithHarness(t, "codex")
+		if _, _, err := renderPlaybookBody(s, root, "tier-override-pb", nil, configOpts, "", "", "", nil, "bogus-tier"); err == nil {
+			t.Fatal("renderPlaybookBody accepted an unknown tier_override instead of rejecting it")
+		}
+	})
+
+	t.Run("accepted alias normalizes to first-class tier vocabulary", func(t *testing.T) {
+		// ResolveAgentTierForHarness accepts alias spellings ("Large", "opus")
+		// as valid tiers; the recommendedTier return channel must still surface
+		// the canonical small/medium/large/xlarge form, not the caller's raw
+		// alias, since the lead reads that line as its dispatch tier.
+		for _, alias := range []string{"Large", "opus", " LARGE "} {
+			s := newTestServerWithHarness(t, "codex")
+			_, tier, err := renderPlaybookBody(s, root, "tier-override-pb", nil, configOpts, "", "", "", nil, alias)
+			if err != nil {
+				t.Fatalf("renderPlaybookBody with tier_override %q: %v", alias, err)
+			}
+			if tier != "large" {
+				t.Errorf("tier_override %q normalized to %q, want %q", alias, tier, "large")
+			}
+		}
+	})
 }

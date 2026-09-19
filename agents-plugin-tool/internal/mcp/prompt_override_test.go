@@ -84,7 +84,7 @@ func TestOverrideNoOverrideSeedRenders(t *testing.T) {
 	s := newTestServerWithHarness(t, "claude")
 
 	// nil lookup: every override-point falls back to its seed.
-	body, _, err := renderPlaybookBody(s, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", "", nil)
+	body, _, err := renderPlaybookBody(s, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", "", nil, "")
 	if err != nil {
 		t.Fatalf("renderPlaybookBody: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestOverridePerHarnessReplacement(t *testing.T) {
 
 	// Claude harness: should get the per-harness override.
 	sClaude := newTestServerWithHarness(t, "claude")
-	bodyClaude, _, err := renderPlaybookBody(sClaude, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", "", lookup)
+	bodyClaude, _, err := renderPlaybookBody(sClaude, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", "", lookup, "")
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (claude): %v", err)
 	}
@@ -141,7 +141,7 @@ func TestOverridePerHarnessReplacement(t *testing.T) {
 
 	// Codex harness: no codex-specific or "all" override → must fall back to seed.
 	sCodex := newTestServerWithHarness(t, "codex")
-	bodyCodex, _, err := renderPlaybookBody(sCodex, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", "", lookup)
+	bodyCodex, _, err := renderPlaybookBody(sCodex, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", "", lookup, "")
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (codex): %v", err)
 	}
@@ -173,7 +173,7 @@ func TestOverrideAllBucketFallback(t *testing.T) {
 
 	// Claude harness: no claude-specific override → "all" applies.
 	sClaude := newTestServerWithHarness(t, "claude")
-	bodyClaude, _, err := renderPlaybookBody(sClaude, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", "", lookup)
+	bodyClaude, _, err := renderPlaybookBody(sClaude, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", "", lookup, "")
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (claude): %v", err)
 	}
@@ -186,7 +186,7 @@ func TestOverrideAllBucketFallback(t *testing.T) {
 
 	// Codex harness: same expectation.
 	sCodex := newTestServerWithHarness(t, "codex")
-	bodyCodex, _, err := renderPlaybookBody(sCodex, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", "", lookup)
+	bodyCodex, _, err := renderPlaybookBody(sCodex, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", "", lookup, "")
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (codex): %v", err)
 	}
@@ -199,7 +199,7 @@ func TestOverrideAllBucketFallback(t *testing.T) {
 		"SeedSection/claude": "claude wins",
 		"SeedSection/all":    "all-bucket",
 	})
-	bodyBoth, _, err := renderPlaybookBody(sClaude, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", "", lookupBoth)
+	bodyBoth, _, err := renderPlaybookBody(sClaude, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", "", lookupBoth, "")
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (both): %v", err)
 	}
@@ -220,7 +220,7 @@ func TestOverrideEmptySeedSlot(t *testing.T) {
 	s := newTestServerWithHarness(t, "claude")
 
 	// No override stored: extension slot must render nothing (empty body).
-	bodyNoOverride, _, err := renderPlaybookBody(s, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", "", nil)
+	bodyNoOverride, _, err := renderPlaybookBody(s, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", "", nil, "")
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (no override): %v", err)
 	}
@@ -233,7 +233,7 @@ func TestOverrideEmptySeedSlot(t *testing.T) {
 	lookup := staticLookup(map[string]string{
 		"ExtSlot/claude": "injected extension text",
 	})
-	bodyWithOverride, _, err := renderPlaybookBody(s, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", "", lookup)
+	bodyWithOverride, _, err := renderPlaybookBody(s, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", "", lookup, "")
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (with override): %v", err)
 	}
