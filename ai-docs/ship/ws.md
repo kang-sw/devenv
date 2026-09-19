@@ -114,8 +114,13 @@ push — all pushes below are reversible-only-before-they-run.
 
 ## Post-ship
 
-- Watch the `ws-mcp release` workflow run for `v<version>` to green (build +
-  publish GitHub release assets, windows-smoke).
+- **Automatically** watch the `ws-mcp release` workflow run for `v<version>` to
+  green (build + publish GitHub release assets, windows-smoke). This is an
+  unprompted post-ship step: attach to the run without asking the user for
+  approval, and report only the terminal result — green, or the failure with
+  its failing job/step. Monitoring is read-only and pushes nothing, so it never
+  needs a confirmation gate. (`gh run watch <run-id> --exit-status` attaches and
+  exits non-zero on failure.)
 - Return to `develop` (`git checkout develop`). The next develop merge resumes
   normal development without a version bump; the next ship owns the next patch
   bump.
