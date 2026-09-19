@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: ce50a4c1cfe3609e
 sage-review-design-reviewed: ce50a4c1cfe3609e
+completed: 2026-09-19
 ---
 
 # Factor lead-use-mailbox "arm the wait" into a harness-aware include
@@ -164,3 +165,57 @@ still carries Codex's registered-address-conditional nuance intact (whether that
 nuance lives inline in the base include or in its own `arm-the-wait.codex.md`).
 Also confirm `{{.MailboxWaitCommand}}` substitution still resolves in the
 refactored arm section.
+
+### Result (f17a9b6) - 2026-09-19
+
+Landed on `impl/develop/fade-snort-grief` (base `develop` @ `b55784d3`) across
+two commits: `8ed4ad6` (the split) and `f17a9b6` (round-1 review fixes).
+
+- Split `## On: arm the wait` out of
+  `agents-plugin/rsrc/lead-use-mailbox/lead-use-mailbox.md` into a new
+  `arm-the-wait` include (`agents-plugin/rsrc/lead-use-mailbox/arm-the-wait.md`),
+  stated host-neutrally as a capability condition ("arm the wait only if your
+  harness does not already deliver arriving mail to you as a turn-starting
+  message"), with Claude's and Codex's existing behavior kept as in-base
+  examples/nuance (minimum-viable structure: no separate `arm-the-wait.codex.md`
+  was needed). Added `arm-the-wait.pi.md` stating pi's adapter already arms the
+  waiter and pushes mail for the session's lead/owner role.
+- Registered both new files in `manifest.json` and resynced the
+  `agents-plugin-pi` and `agents-plugin-wsflow` rsrc mirrors via manual
+  `rsync` (not `bump-ws-version.sh`, which is release-scoped and also bumps
+  the plugin version, per commit `0fa9d218`).
+- Round-1 review (partitioned: correctness + test) raised one Important each:
+  a leftover host-neutral-skeleton sentence in `On: remote-control another
+  session` restated Codex's registered-address-conditional nuance as a
+  blanket rule, contradicting the new pi overlay for a pi target; and the
+  harness-differentiated composition had zero automated regression coverage.
+  Both fixed in `f17a9b6`: the remote-control step now defers to whatever
+  condition the reader's own `On: arm the wait` render states, and
+  `agents-plugin-tool/internal/wsrsrc/lead_use_mailbox_arm_wait_test.go` was
+  added, table-driven over harness `""`/`claude`/`codex`/`pi`, asserting the
+  pi overlay composes with no base leakage and the non-pi renders keep the
+  Codex nuance, the Claude example, and the `{{.MailboxWaitCommand}}`
+  placeholder. Also fixed two Minor findings from the same round (restored the
+  general arm occasion-trigger to the shared launch step; scoped the pi
+  overlay's auto-arm claim to the lead/owner role, matching
+  `shouldArmMailboxWaiter`'s `role === undefined` gate in
+  `agents-plugin-pi/src/mailbox-waiter.ts`). Round 2 (both partitions)
+  verified the fixes with no new blocking findings.
+- Decisions taken within contract: kept the Codex nuance inline in the base
+  include rather than adding a separate `arm-the-wait.codex.md` — the
+  host-neutral base carries the condition cleanly, satisfying the ticket's
+  "minimum viable structure" option.
+- Verification: `go test ./... -count=1` in `agents-plugin-tool` (all
+  packages pass, including `internal/wsrsrc`'s
+  `TestPiMirrorUpToDate`/`TestWsflowRsrcMirrorUpToDate`/`TestValidateRealTree`
+  and the new harness-composition test); `python3 -m unittest discover
+  agents-plugin-wsflow/tests` (12 tests, OK); `npm test` in
+  `agents-plugin-pi` (1589 pass, 0 fail). All three harness renders
+  (default/Claude, Codex, pi) of `lead-use-mailbox` were checked directly via
+  `wsrsrc.Load`, now pinned by the committed regression test rather than a
+  one-off manual check.
+- Unresolved (observation only, not a stop): a cross-harness remote-control
+  scenario (a Codex lead mailing a pi target) still reads the *reader's own*
+  harness's arm-the-wait condition rather than the target's; this is
+  strictly better than the pre-fix self-contradiction and was not required by
+  this ticket's contract, but is left as a possible future refinement.
