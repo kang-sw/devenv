@@ -1,5 +1,7 @@
 ---
 kind: print
+includes:
+  - arm-the-wait
 ---
 
 # Use Mailbox
@@ -63,25 +65,6 @@ Wake
 3. Reply with whichever handle the received envelope carried; it already
    identifies you correctly to a sender who may hold no durable address of
    their own.
-
-## On: arm the wait
-
-1. Whenever you actually intend to sit idle waiting on a peer, launch
-   `{{.MailboxWaitCommand}}` as a background process through your harness's
-   own background-task capability, never inline and never in a poll loop.
-   Treat its exit as your cue to come back; read what it printed and act.
-2. On a harness that re-invokes you when a background task completes (for
-   example Claude's own background-task notification), this is the actual
-   wake mechanism — arm it whenever you go idle, whether or not you hold a
-   registered address.
-3. On a harness whose own turn-boundary hook already re-invokes you when
-   unread mail is pending once you hold a registered address (for example
-   Codex's `Stop` hook, once its deployment trusts it), that wake fires
-   without you arming anything; you still need step 1 there if you have no
-   registered address.
-4. Either wake path is best-effort while you or your user are genuinely away
-   from the harness: it fires promptly once the harness next actually takes a
-   turn, not necessarily the instant mail arrives.
 
 ## On: remote-control another session
 
