@@ -5,6 +5,7 @@ related:
   260909-research-ws-refoundation-evidence-audit: binding anchor for worker-interpreter / lead-surface / stop-conditions topics
   260605-research-ws-native-subagent-pivot: prior harness-infrastructure anchor (native-subagent, mailbox process-scope, ferrule auth)
   260611-research-ws-per-role-delegation-tuning-config: per-role delegation tuning (tier + prompt) surface this may consume
+  260919-feat-ws-playbook-render-tier-override: split-out tooling gate — render-time tier override that lets one elevated body serve large+xlarge
 ---
 
 # Intra-ticket sequential mini-lead orchestration for elevated ticket workers
@@ -65,8 +66,9 @@ SendMessage. No harness modification is required, so this can ship in ws proper
 ## Playbook restructure
 
 Today three ticket-worker playbook bodies (`ticket-worker` = medium,
-`ticket-worker-elevated` = large, `ticket-worker-escalated` = xlarge) are
-byte-identical, differing only in frontmatter `tier:`. That duplication is
+`ticket-worker-elevated` = large, `ticket-worker-escalated` = xlarge) differ
+by a single frontmatter line (`tier:` medium/large/xlarge) and are otherwise
+byte-identical. That duplication is
 retired and replaced with **two distinct prose bodies** that now differ in
 behavior, not a number:
 
@@ -87,10 +89,12 @@ permission" decision.
 ### Verified Findings
 <!-- Evidence-backed observations from scoped exploration this session (2026-09-19); file paths are search anchors, exact lines to be reconfirmed at implementation. -->
 
-- The three `ticket-worker*` playbooks under `agents-plugin/rsrc/` share
-  byte-identical bodies and differ only in frontmatter `tier:`
-  (medium/large/xlarge). Tier is purely a model-selection knob; it does not
-  change the stop list, spawn rights, or review requirements.
+- The three `ticket-worker*` playbooks under `agents-plugin/rsrc/` differ by
+  exactly one line — the frontmatter `tier:` value (medium/large/xlarge); their
+  body prose is otherwise byte-identical (confirmed by diff, and by three
+  distinct SHA-256 entries in each package's `rsrc/manifest.json`). Tier is
+  purely a model-selection knob; it does not change the stop list, spawn rights,
+  or review requirements.
 - Workers are not server-side restricted from spawning further children:
   `playbook.render` maps `role: worker` → lead-equivalent key scope
   (`childRoleForPlaybookRole` in `agents-plugin-tool/internal/mcp/playbook_tools.go`),
@@ -121,7 +125,13 @@ permission" decision.
   parent-owned bookkeeping only.
 - `config.resolve_agent(tier, harness)` is the read-only resolver
   (`wsconfig.ResolveAgentTierForHarness`) that turns a tier into a concrete
-  `{backend, model, effort}`.
+  `{backend, model, effort}`. The config layer already supports resolution
+  decoupled from a playbook's frontmatter tier (`ResolveAgentForHarnessConfig`,
+  `config.go:220-263`), but `playbook.render` never threads an override into it:
+  `RoleModel` and the `recommended-tier`/`recommended-model` binding derive
+  solely from `pb.Meta.Tier`. That render gap — the gate for "xlarge = elevated +
+  override" — is split out as the actionable feat
+  `260919-feat-ws-playbook-render-tier-override`.
 
 ### Confirmed Decisions
 <!-- User-confirmed in lead-discuss 2026-09-19. -->
@@ -166,9 +176,11 @@ permission" decision.
 ### Open Questions
 <!-- Implementation-time checks; resolve during the actionable child, not from evidence alone. -->
 
-- Does the `playbook.render`/spawn path accept a **model override decoupled from
-  frontmatter `tier:`**? If not, a small tooling addition is in scope — this
-  feasibility gates the "xlarge = elevated + override" approach.
+- **Resolved / split out.** Whether `playbook.render` accepts a tier override
+  decoupled from frontmatter `tier:` — it does not today; the config resolver
+  supports it but render never threads it. Carved out as the actionable feat
+  `260919-feat-ws-playbook-render-tier-override` (todo), which gates the "xlarge =
+  elevated + override" approach.
 - `lead-run` dispatch table and escalation ladder: the stop-(e)
   medium→large→xlarge ladder must become "large → `elevated` + xlarge model
   override" rather than rendering a separate escalated body. Confirm the exact
