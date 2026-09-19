@@ -57,6 +57,12 @@ verify-leaf. The mini-lead may batch build/test points across a coherent group
 of edits to amortize a heavy build, a scheduling win a single reactive worker
 does not get.
 
+The seam need not be parallel. When a ticket decomposes only phase-serially, the
+mini-lead still runs each phase as its own fresh-context leaf — sequential
+execution needs no parallelism to keep the orchestrator's context clean. Direct
+in-context implementation is for the small or non-decomposable-and-hard core,
+keyed to difficulty, not to whether leaves could run concurrently.
+
 Everything here uses **existing primitives** — workers already hold
 lead-capability keys (`role: worker` → lead scope) and can `ferrule`, spawn
 native subagents, `worktree.acquire`, and message children via native
@@ -132,6 +138,17 @@ permission" decision.
   solely from `pb.Meta.Tier`. That render gap — the gate for "xlarge = elevated +
   override" — is split out as the actionable feat
   `260919-feat-ws-playbook-render-tier-override`.
+- Phase scoping is a **soft, tier-blind body rule, not a hard stop.** `lead-run`
+  hands the worker the whole ticket (one worker per ticket, no per-phase slicing);
+  the body scopes execution to the earliest phase without a `### Result`
+  (`ticket-worker.md:22-25,81-84`) and closes a phase with the clean terminal
+  `[ok] + completion: phase` (`worker-stop-protocol.md:111-112`) — none of the
+  hard stops (a)-(e) covers "later phases remain." The stop logic carries no
+  `tier:`/`RoleModel` gating, so a large worker reads the same weak boundary as a
+  medium one under "everything else is yours to decide"
+  (`worker-stop-protocol.md:14-15`); this is why phase-overrun clusters in
+  large-tier workers. It reconciles epic Decision 4 (whole ticket) with the
+  observed per-phase execution — one mechanism, not a conflict.
 
 ### Confirmed Decisions
 <!-- User-confirmed in lead-discuss 2026-09-19. -->
@@ -161,14 +178,16 @@ permission" decision.
    mini-lead). xlarge = `elevated` prose + xlarge model override via
    `config.resolve_agent`, not a third body. Both keep `role: worker`;
    difference is prose, not permission.
-6. **Delegation is opportunistic, not mandatory.** The mini-lead implements the
-   hard, high-leverage, or non-decomposable work directly — that is why it is
-   the expensive model — and delegates only mechanical, disjoint,
-   cheaply-verifiable leaves. A ticket with no cleanly-delegable leaves
-   degenerates to direct implementation; the `elevated` body must never push
-   hard work to a cheap implementer merely to delegate (cheap model × hard task
-   → Critical-finding churn, more review rounds, escalation — the opposite of
-   the intended saving).
+6. **Delegation is calibrated by difficulty, not by a quota.** The mini-lead
+   delegates mechanical, disjoint, cheaply-verifiable leaves to fresh implementers
+   by default, and keeps the hard, high-leverage, or non-decomposable work on
+   itself — that is what the expensive model is for. Both directions carry weight:
+   a confident large worker must not hoard mechanical grind into a drifting
+   context (the same overreach that carries it past the soft phase boundary — see
+   Verified Findings), nor push hard work onto a cheap implementer to manufacture
+   a delegation (cheap model × hard task → Critical churn and re-review, the
+   opposite of the saving). A ticket with no clean mechanical leaf simply runs
+   direct — that is calibration, not a shortfall.
 
 ### Proposals
 <!-- none: the design above was confirmed, not left as candidate. -->
@@ -188,9 +207,6 @@ permission" decision.
 - Reference sweep for the removed `ticket-worker-escalated` body and any
   consumer keying off the now-stale frontmatter `tier:` — `lead-run` table,
   wsflow skill-shim drift tests, runtime-contract tests, manifests.
-- **Reconcile current `lead-run` phase handling**: epic Decision 4 says the
-  worker gets the whole ticket, but the observed drift bug is phase-scoped.
-  Establish what actually happens today before designing the replacement.
 - Final integration/full-test at ticket end: does the last leaf cover it, or
   does the mini-lead run a final verification pass?
 
