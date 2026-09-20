@@ -799,6 +799,33 @@ func TestImplMergeMCPAuthorityAndSchema(t *testing.T) {
 	}
 }
 
+// TestGitMergeRejectsNonArrayAIContext covers the ai_context type-coercion
+// trap: a caller passing the dash-bulleted prose string shape a commit
+// message's `## AI Context` block takes everywhere else in the workflow must
+// get a type-accurate rejection, not the misleading "requires nonempty
+// ai_context" message stringList's silent nil-coercion would otherwise
+// produce (indistinguishable from an omitted field).
+func TestGitMergeRejectsNonArrayAIContext(t *testing.T) {
+	root, branch := mergeFixture(t, "develop")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	s := NewServer(root, "test")
+	key, err := s.sessions.mint(canonicalRootForTest(t, root), roleLead, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp := callToolOnce(t, s, 1, "git.merge", map[string]any{
+		"session_key": key, "branch": branch, "title": "merge(test): land impl",
+		"ai_context": "- Test prose string instead of array.",
+	})
+	out := toolText(t, resp)
+	if !strings.Contains(out, "ai_context must be an array of strings") || !strings.Contains(out, "got string") {
+		t.Fatalf("expected type-accurate ai_context rejection, got: %s", out)
+	}
+	if strings.Contains(out, "requires nonempty ai_context") {
+		t.Fatalf("must not fall through to the emptiness message: %s", out)
+	}
+}
+
 func TestGenericMergePromotion(t *testing.T) {
 	for _, branch := range []string{"goal/develop/topic", "epic/topic", "feature/topic", "develop"} {
 		for _, explicit := range []bool{false, true} {

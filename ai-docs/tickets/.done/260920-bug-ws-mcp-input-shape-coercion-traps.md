@@ -5,6 +5,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 975e826f0e6baf69
 sage-review-completeness-reviewed: 975e826f0e6baf69
+completed: 2026-09-20
 ---
 
 # ws MCP input-shape coercion traps
@@ -125,3 +126,37 @@ Fix both coercion traps; they share the root cause but are independent edits.
   Constraints and record it. Cover the wrong-type-present case (distinct from
   genuinely-empty) with a test; keep the existing "present but all blank"
   classification intact.
+
+### Result (1dcaf32e) - 2026-09-20
+
+Both coercion traps fixed on `impl/develop/grant-film-grass`.
+
+- `internal/wsdoc/ticket_create.go`: added `stemDatePrefixRe`/`splitDatePrefix`
+  and hoisted `today`'s computation ahead of the stem check. A leading
+  `\d{6}-` equal to today is stripped (harmless duplicate); a differing one is
+  rejected with a message naming the embedded date, today, and the
+  dateless-stem contract, with no filesystem write. No-prefix stems pass
+  through unchanged.
+- `internal/mcp/server.go`: added `typedArrayRejection`/`jsonValueTypeName`
+  and applied them per call site (`git.commit`, `git.merge`), not inside
+  `stringList`/`stringListKeepBlank` — decisions: per-call is the narrower,
+  lower-blast-radius option the Constraints offered, since those helpers are
+  also shared by `updated_tickets`, `stems`, and note/todo arrays whose
+  mismatch shape this fix's evidence does not cover; `paths` and
+  `updated_tickets` at the same two call sites remain silently coerced,
+  matching that explicit narrowing rather than an oversight. Explicit JSON
+  `null` is treated as absent, not as a type mismatch (documented in the
+  helper's doc comment).
+- Verification: `go vet ./...` clean; `go test ./...` all packages `ok`
+  (`cmd/ws-mcp`, `internal/mcp`, `internal/wsdoc`, and 12 others).
+- Review: single-reviewer round 1 verdict "clean with 4 minor remaining", 0
+  Critical/Important. Fixed the one worth fixing (git.commit's ai_context
+  debug event was skipped on the new reject path; restored it with a
+  `type_mismatch: true` marker and a regression test). The other three minors
+  are pre-existing, deliberate, or already documented narrowings noted for
+  the record, not follow-up work: explicit-`null` handling is intentional and
+  documented; the `format: "json"` rejection returning plain text matches
+  existing root-resolution-error precedent; `stemDatePrefixRe`'s looser tail
+  vs. the package's `ticketStemRE` is an accepted, unavoidable duplication
+  given the need for a capture-split.
+- Commits: `1dcaf32e` (fix), `a5a75598` (debug-event follow-up).

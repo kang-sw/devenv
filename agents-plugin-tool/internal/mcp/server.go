@@ -1094,6 +1094,10 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		expectedTarget, _ := params.Arguments["expected_target_oid"].(string)
 		title, _ := params.Arguments["title"].(string)
 		description, _ := params.Arguments["description"].(string)
+		mergeAIContextRaw, mergeAIContextPresent := params.Arguments["ai_context"]
+		if err := typedArrayRejection("ai_context", mergeAIContextRaw, mergeAIContextPresent); err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
 		// Resolve the worktree pool root the same way worktree.acquire does, so a
 		// held-target refusal can name a parallel lead's housekeeping checkout as
 		// such. Any failure passes "" (unknown pool) rather than failing the merge.
@@ -1108,7 +1112,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			}
 		}
 		result, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, target, wsgit.CommitOptions{
-			Title: title, Description: description, AIContext: stringList(params.Arguments["ai_context"]), UpdatedTickets: stringList(params.Arguments["updated_tickets"]),
+			Title: title, Description: description, AIContext: stringList(mergeAIContextRaw), UpdatedTickets: stringList(params.Arguments["updated_tickets"]),
 		}, implMergeAcknowledgement{ReleaseTargetOverride: releaseOverride, ExpectedSourceOID: expectedSource, ExpectedTargetOID: expectedTarget}, mergePoolRoot)
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, result, err)
@@ -1199,6 +1203,21 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 					aiContextRawBytes += len(text)
 				}
 			}
+		}
+		if err := typedArrayRejection("ai_context", aiContextRawValue, aiContextPresent); err != nil {
+			// Emit the debug event on the reject path too — the ring buffer
+			// exists specifically to diagnose ai_context arrival shape, and a
+			// wrong-type call is exactly the case it needs to catch.
+			// type_mismatch distinguishes it from the absent/empty/all-blank
+			// events normalizeCommitOptions classifies below.
+			appendDebugEvent("git.commit.ai_context_received", map[string]any{
+				"present":               aiContextPresent,
+				"raw_entry_count":       aiContextRawEntryCount,
+				"raw_bytes":             aiContextRawBytes,
+				"post_trim_entry_count": 0,
+				"type_mismatch":         true,
+			})
+			return toolTextResponse(req.ID, "", err)
 		}
 		// Use stringListKeepBlank, not stringList: stringList silently drops
 		// exact-empty-string entries, which would make an ["" ] payload
@@ -4529,6 +4548,47 @@ func reviewMarkerJSONValue(entry wsreview.Entry, found bool) reviewMarkerJSON {
 func optString(value any) string {
 	text, _ := value.(string)
 	return text
+}
+
+// typedArrayRejection returns a type-accurate error when a caller supplied a
+// present, non-null value for an array-typed argument that is not a JSON
+// array — for example a dash-bulleted prose string, the shape a commit
+// message's `## AI Context` block takes everywhere else in the workflow,
+// passed where ai_context expects one bullet per array element. It returns
+// nil when the value is absent, explicit null, or already an array; those
+// cases fall through unchanged to stringList/stringListKeepBlank's existing
+// empty-vs-absent classification. Applied per call site (git.commit's and
+// git.merge's ai_context) rather than inside stringList/stringListKeepBlank
+// themselves: those helpers are also shared by other array-typed args
+// (updated_tickets, stems, note/todo arrays) whose mismatch shape this fix's
+// evidence does not cover, so a helper-level reject would widen the blast
+// radius beyond what was verified.
+func typedArrayRejection(argName string, value any, present bool) error {
+	if !present || value == nil {
+		return nil
+	}
+	if _, ok := value.([]any); ok {
+		return nil
+	}
+	return fmt.Errorf("%s must be an array of strings, one bullet per element; got %s", argName, jsonValueTypeName(value))
+}
+
+// jsonValueTypeName names a decoded JSON-RPC argument's dynamic type for a
+// type-accurate rejection message. Go's encoding/json decodes into exactly
+// these dynamic types for a map[string]any argument value.
+func jsonValueTypeName(value any) string {
+	switch value.(type) {
+	case string:
+		return "string"
+	case bool:
+		return "boolean"
+	case float64:
+		return "number"
+	case map[string]any:
+		return "object"
+	default:
+		return fmt.Sprintf("%T", value)
+	}
 }
 
 func stringList(value any) []string {
