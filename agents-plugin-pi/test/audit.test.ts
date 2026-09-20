@@ -35,6 +35,7 @@ import {
 } from "../src/audit.ts";
 import type { RpcAgentRecord, RpcAgentRegistry } from "../src/spawner.ts";
 import type { ConversationViewComponent } from "../src/conversation-view.ts";
+import { DELEGATION_ENV } from "../src/delegation-policy.ts";
 import { visibleWidth } from "../src/text-width.ts";
 
 function record(overrides: Partial<RpcAgentRecord> = {}): RpcAgentRecord {
@@ -260,6 +261,29 @@ describe("buildAuditPickerItems", () => {
     ]);
   });
 
+  test("renders propagated descendants as parent-grouped, indented liveness context while preserving local dormant roots", () => {
+    const NOW = Date.parse("2026-09-09T10:00:00.000Z");
+    const parent = record({
+      agentId: "parent00-0000-0000-0000-000000000000",
+      alias: "parent",
+      client: {} as never,
+      running: true,
+      runStartedAt: NOW - 5_000,
+      subtreeDescendants: [
+        { id: "child000-0000-0000-0000-000000000000", parentId: null, depth: 0, role: "explore", live: true },
+        { id: "grand000-0000-0000-0000-000000000000", parentId: "child000-0000-0000-0000-000000000000", depth: 1, role: "worker", live: false },
+      ],
+    });
+    const dormant = record({ agentId: "dormant0-0000-0000-0000-000000000000", alias: "local-dormant", lastLeadPromptAt: NOW - 1_000 });
+
+    assert.deepEqual(buildAuditPickerItems(registryOf(dormant, parent), NOW), [
+      { value: parent.agentId, label: "parent · running · — · ctx ? · running for 5s" },
+      { value: "child000-0000-0000-0000-000000000000", label: "│ child000 · explore · running" },
+      { value: "grand000-0000-0000-0000-000000000000", label: "│ │ grand000 · worker · dormant" },
+      { value: dormant.agentId, label: "local-dormant · dormant · — · ctx ? · last active 1s ago" },
+    ]);
+  });
+
   test("an empty registry yields no items", () => {
     assert.deepEqual(buildAuditPickerItems(new Map(), Date.now()), []);
   });
@@ -412,6 +436,65 @@ describe("registerAuditCommands", () => {
     const cancelledComponent = await cancelled.componentReady;
     cancelledComponent.handleInput?.("\x1b");
     assert.equal(await cancelledResult, undefined, "Esc cancels through the framed wrapper");
+  });
+
+  test("the framed picker skips non-openable descendant context during keyboard selection", async () => {
+    const parent = record({
+      agentId: "parent00-0000-0000-0000-000000000000",
+      alias: "parent",
+      client: {} as never,
+      running: true,
+      subtreeDescendants: [
+        { id: "child000-0000-0000-0000-000000000000", parentId: null, depth: 0, role: "explore", live: true },
+        { id: "grand000-0000-0000-0000-000000000000", parentId: "child000-0000-0000-0000-000000000000", depth: 1, role: "worker", live: false },
+      ],
+    });
+    const sibling = record({ agentId: "sibling0-0000-0000-0000-000000000000", alias: "sibling", client: {} as never, running: true });
+    const opened = fakePickerCtx();
+    const result = openPicker(opened.ctx as never, registryOf(parent, sibling));
+    const component = await opened.componentReady;
+
+    const initial = component.render(100).join("\n");
+    assert.match(initial, /→ parent/);
+    assert.match(initial, /  │ child000 · explore · running/);
+    assert.match(initial, /  │ │ grand000 · worker · dormant/);
+    component.handleInput?.("\x1b[B");
+    const moved = component.render(100).join("\n");
+    assert.match(moved, /→ sibling/, "Down skips both non-openable descendant rows");
+    assert.doesNotMatch(moved, /→ .*child000|→ .*grand000/);
+    component.handleInput?.("\r");
+    assert.equal(await result, sibling.agentId);
+  });
+
+  test("a locally openable picker choice still reaches the conversation viewer", async () => {
+    const registry = registryOf(record({ agentId: "a1", alias: "scout", client: { onEvent: () => () => {} } as never, running: true }));
+    const { pi, commands } = fakePi();
+    registerAuditCommands(pi, registry, undefined, "tui");
+    let customCalls = 0;
+    let viewerOpened = false;
+    const ctx = {
+      mode: "tui",
+      ui: {
+        notify: () => {},
+        custom: async (factory: (...args: unknown[]) => unknown) => {
+          const call = customCalls++;
+          let resolveDone!: (value: unknown) => void;
+          const done = new Promise((resolve) => { resolveDone = resolve; });
+          const built = await factory({ requestRender: () => {} }, undefined, undefined, resolveDone);
+          const component = built as PickerComponent;
+          if (call === 0) component.handleInput?.("\r");
+          else {
+            viewerOpened = true;
+            component.handleInput?.("\x1b");
+          }
+          return done;
+        },
+      },
+    };
+
+    await commands.get("audit")!.handler("", ctx);
+    assert.equal(viewerOpened, true);
+    assert.equal(customCalls, 2, "picker selection opens exactly one viewer overlay");
   });
 
   test("the framed picker drops whole context/model fields before narrowing protected identity, status, and activity", async () => {
@@ -651,30 +734,37 @@ describe("openViewer (shared view/steering overlay and one-overlay-at-a-time sin
   });
 
   test("finish sends one lead-attributed handoff only for owner-held work and closes", async () => {
-    const followed: string[] = [];
-    const live = record({
-      agentId: "a1",
-      running: true,
-      streaming: true,
-      lastWriter: "owner",
-      client: {
-        onEvent: () => () => {},
-        followUp: async (text: string) => { followed.push(text); },
-        steer: async () => {},
-      } as never,
-    });
-    const registry = registryOf(live);
-    const opened = fakeViewerCtx();
-    const promise = openViewer(opened.ctx as never, registry, "a1", { pi: {} as ExtensionAPI, cwd: process.cwd(), extensionPath: "test-extension.ts" });
-    const component = await opened.componentReady;
-    component.handleInput("\r");
-    component.handleInput("\x1b");
-    component.handleInput("\x1b[C");
-    component.handleInput("\r");
-    await promise;
-    assert.equal(followed.length, 1);
-    assert.match(followed[0]!, /owner has finished steering/i);
-    assert.equal(live.lastWriter, "lead");
+    const priorDelegation = process.env[DELEGATION_ENV];
+    delete process.env[DELEGATION_ENV];
+    try {
+      const followed: string[] = [];
+      const live = record({
+        agentId: "a1",
+        running: true,
+        streaming: true,
+        lastWriter: "owner",
+        client: {
+          onEvent: () => () => {},
+          followUp: async (text: string) => { followed.push(text); },
+          steer: async () => {},
+        } as never,
+      });
+      const registry = registryOf(live);
+      const opened = fakeViewerCtx();
+      const promise = openViewer(opened.ctx as never, registry, "a1", { pi: {} as ExtensionAPI, cwd: process.cwd(), extensionPath: "test-extension.ts" });
+      const component = await opened.componentReady;
+      component.handleInput("\r");
+      component.handleInput("\x1b");
+      component.handleInput("\x1b[C");
+      component.handleInput("\r");
+      await promise;
+      assert.equal(followed.length, 1);
+      assert.match(followed[0]!, /owner has finished steering/i);
+      assert.equal(live.lastWriter, "lead");
+    } finally {
+      if (priorDelegation === undefined) delete process.env[DELEGATION_ENV];
+      else process.env[DELEGATION_ENV] = priorDelegation;
+    }
   });
 
   test("finish with no owner send closes without dispatching a lead handoff", async () => {
