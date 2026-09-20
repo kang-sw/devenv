@@ -10,7 +10,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
 import { RpcClient } from "@earendil-works/pi-coding-agent";
-import { buildAgentRows, buildWidgetLines, createAgentWidgetController, shouldArmAgentWidget, AGENT_STATE_BULLET, AGENT_STATUS_KEY, AGENT_WIDGET_KEY, AGENT_WIDGET_ROW_CAP, AGENT_WIDGET_ATTENTION_TICK_MS, AGENT_WIDGET_TICK_MS, type AgentRowState } from "../src/agent-widget.ts";
+import { buildAgentRows, buildAgentTree, buildWidgetLines, createAgentWidgetController, shouldArmAgentWidget, AGENT_STATE_BULLET, AGENT_STATUS_KEY, AGENT_WIDGET_KEY, AGENT_WIDGET_ROW_CAP, AGENT_WIDGET_ATTENTION_TICK_MS, AGENT_WIDGET_TICK_MS, type AgentRowState } from "../src/agent-widget.ts";
 import type { RpcAgentRecord, RpcAgentRegistry } from "../src/spawner.ts";
 import type { ThreadRecord } from "../src/ask.ts";
 import { visibleWidth } from "../src/text-width.ts";
@@ -54,6 +54,29 @@ function registryOf(...records: RpcAgentRecord[]): RpcAgentRegistry {
   for (const r of records) map.set(r.agentId, r);
   return map;
 }
+
+describe("buildAgentTree", () => {
+  test("unions local records with propagated descendants as a parent-grouped three-level tree", () => {
+    const root = record({
+      agentId: "root-root-0000-0000-000000000000",
+      spawnRole: "execute-worker",
+      client: {} as never,
+      running: true,
+      subtreeDescendants: [
+        { id: "child-child-0000-000000000000", parentId: null, depth: 0, role: "explore", live: true },
+        { id: "grand-grand-0000-000000000000", parentId: "child-child-0000-000000000000", depth: 1, role: "worker", live: false },
+      ],
+    });
+    const sibling = record({ agentId: "sibling-0000-0000-000000000000", spawnRole: "fork" });
+
+    assert.deepEqual(buildAgentTree(registryOf(root, sibling)), [
+      { id: root.agentId, parentId: null, depth: 0, role: "execute", state: "running", live: true, openable: true },
+      { id: "child-child-0000-000000000000", parentId: root.agentId, depth: 1, role: "explore", state: "running", live: true, openable: false },
+      { id: "grand-grand-0000-000000000000", parentId: "child-child-0000-000000000000", depth: 2, role: "worker", state: undefined, live: false, openable: false },
+      { id: sibling.agentId, parentId: null, depth: 0, role: "fork", state: undefined, live: false, openable: true },
+    ]);
+  });
+});
 
 describe("buildAgentRows", () => {
   test("a plain live (client-holding) non-threadBound record is a running row with no answer hint", () => {
@@ -212,9 +235,62 @@ describe("buildAgentRows", () => {
       ["10000000", "20000000", "40000000", "30000000"],
     );
   });
+
+  test("keeps live propagated descendants grouped under their local parent and filters dormant propagated rows", () => {
+    const parent = record({
+      agentId: "parent00-0000-0000-0000-000000000000",
+      client: {} as never,
+      running: true,
+      runStartedAt: NOW - 4_000,
+      subtreeDescendants: [
+        { id: "child000-0000-0000-0000-000000000000", parentId: null, depth: 0, role: "explore", live: true },
+        { id: "grand000-0000-0000-0000-000000000000", parentId: "child000-0000-0000-0000-000000000000", depth: 1, role: "worker", live: true },
+        { id: "dormant0-0000-0000-0000-000000000000", parentId: null, depth: 0, role: "fork", live: false },
+      ],
+    });
+    const rows = buildAgentRows(registryOf(parent), [], NOW);
+    assert.deepEqual(rows.map(({ name, role, state, depth, livenessOnly }) => ({ name, role, state, depth, livenessOnly })), [
+      { name: "parent00", role: "worker", state: "running", depth: undefined, livenessOnly: undefined },
+      { name: "child000", role: "explore", state: "running", depth: 1, livenessOnly: true },
+      { name: "grand000", role: "worker", state: "running", depth: 2, livenessOnly: true },
+    ]);
+  });
+
+  test("preserves synthetic thread union and settled-local filtering while building tree-backed rows", () => {
+    const settled = record({
+      agentId: "settled0-0000-0000-0000-000000000000",
+      subtreeDescendants: [{ id: "dormant0-0000-0000-0000-000000000000", parentId: null, depth: 0, role: "worker", live: false }],
+    });
+    const pending = thread({ threadId: "q-tree", status: "pending", respondentAgentId: undefined, touchedAt: new Date(NOW - 2_000).toISOString() });
+    assert.deepEqual(buildAgentRows(registryOf(settled), [pending], NOW), [
+      { name: "a question", role: "thread", state: "awaiting-owner", elapsedMs: 2_000, lastActivityMs: 2_000, answerHint: "/answer q-tree" },
+    ]);
+  });
 });
 
 describe("buildWidgetLines", () => {
+  test("renders one gutter segment per propagated depth and no invented deep-row telemetry", () => {
+    const parent = record({
+      agentId: "parent00-0000-0000-0000-000000000000",
+      client: {} as never,
+      running: true,
+      subtreeDescendants: [
+        { id: "child000-0000-0000-0000-000000000000", parentId: null, depth: 0, role: "explore", live: true },
+        { id: "grand000-0000-0000-0000-000000000000", parentId: "child000-0000-0000-0000-000000000000", depth: 1, role: "worker", live: true },
+      ],
+    });
+    const lines = buildWidgetLines(buildAgentRows(registryOf(parent), [], NOW), 0, 120)!;
+    assert.match(lines[0], /^· parent00 · worker · running/);
+    assert.equal(lines[1], "│ · child000 · explore · running");
+    assert.equal(lines[2], "│ │ · grand000 · worker · running");
+    assert.ok(lines.every((line) => !line.includes("dormant")));
+    assert.ok(lines.slice(1).every((line) => !line.includes("0s") && !line.includes("$—")), "propagated rows expose liveness only, not fabricated clocks or telemetry");
+    for (const width of [0, 1, 2, 3, 4, 8, 20]) {
+      const narrow = buildWidgetLines(buildAgentRows(registryOf(parent), [], NOW), 0, width)!;
+      assert.ok(narrow.every((line) => visibleWidth(line) <= width), `nested gutter remains bounded at width=${width}`);
+    }
+  });
+
   test("owner-question titles never reach the gutter; one valid qN command leads the row", () => {
     const title = "very long\u001b[31m owner\nquestion\u0000 title that must never render";
     const rows = buildAgentRows(registryOf(), [thread({ threadId: "q42", title })], NOW);
@@ -408,6 +484,17 @@ describe("buildWidgetLines", () => {
     assert.ok(lines.slice(0, 3).every((l, i) => l.includes(`t${i + 1}`)), "all 3 awaiting rows are kept verbatim");
     assert.ok(lines[3].includes("r4") && lines[4].includes("r3"), "the two KEPT running rows are the longest-elapsed (r4, r3), not merely the first two in array order");
     assert.equal(lines[lines.length - 1], "+2 more", "4 running rows minus the 2 slots left after 3 awaiting rows = 2 hidden (the shortest-elapsed r2/r1)");
+  });
+
+  test("over-cap trimming retains parent-child adjacency instead of regrouping all awaiting rows", () => {
+    const parent = { name: "parent", role: "worker" as const, state: "waiting-on-children" as const, elapsedMs: 5_000, lastActivityMs: 5_000 };
+    const child = { ...runningRow(0, "child"), depth: 1, livenessOnly: true as const };
+    const delivery = { name: "delivery", role: "worker" as const, state: "pending-delivery" as const, elapsedMs: 4_000, lastActivityMs: 4_000 };
+    const lines = buildWidgetLines([parent, child, delivery, runningRow(3, "r3"), runningRow(2, "r2"), runningRow(1, "r1")], 0, 80)!;
+    assert.match(lines[0], /parent/);
+    assert.match(lines[1], /^│ · child · worker · running$/, "the visible child stays immediately below its parent");
+    assert.match(lines[2], /delivery/);
+    assert.equal(lines.at(-1), "+1 more");
   });
 
   test("awaiting rows alone exceeding the cap are NEVER folded — no tail line is added in that case", () => {
