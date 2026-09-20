@@ -74,9 +74,9 @@
  * already-tracked `sessionPath` with no RPC round-trip.
  */
 
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, watch, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -109,7 +109,7 @@ import { CHILD_MANAGEMENT_TOOLS, DEFAULT_MAX_AGENT_DEPTH, DELEGATION_ENV, SUBTRE
 import { normalizeWriteScopes, type EffectiveWriteCapability, type WriteScope } from "./write-scopes.ts";
 import { createWebSearch } from "./web-search.ts";
 import { clearWebReadiness, verifyWebReadiness, WEB_HOME_ENV, WEB_NONCE_ENV } from "./web-readiness.ts";
-import { beginSubtreeDispatch, installSubtreePublisher, publishSubtree, readSubtreeChannel, readSubtreeSnapshot, subtreeWaiting, type SubtreeChannel } from "./subtree-lifecycle.ts";
+import { beginSubtreeDispatch, installSubtreePublisher, publishSubtree, readSubtreeChannel, readSubtreeSnapshot, subtreeWaiting, type SubtreeChannel, type SubtreeDescendant } from "./subtree-lifecycle.ts";
 import { PUSH_BATCH_CUSTOM_TYPE, PUSH_BATCH_VERSION, type PushBatchItem, type PushBatchItemState } from "./push-protocol.ts";
 import { persistAgentCostCheckpoint, persistEvictedAgentCost, registerAgentCostOwner } from "./agent-footer.ts";
 
@@ -460,6 +460,8 @@ export interface RpcAgentRecord {
   /** Persisted authority and one-edge semantic lifecycle; independent of owner holds. */
   delegation?: DelegationPolicy;
   subtreeChannel?: SubtreeChannel;
+  /** Last advisory identity tree published by this child process. */
+  subtreeDescendants?: SubtreeDescendant[];
   waitingOnChildren?: boolean;
   /** Last successful writer to this child. Absence is the legacy/lead default. */
   lastWriter?: "lead" | "owner";
@@ -1782,12 +1784,17 @@ function advanceWorkGeneration(record: RpcAgentRecord): void {
   clearTerminalFacts(record);
 }
 
-function clearLiveState(record: RpcAgentRecord): void {
+function clearLiveState(record: RpcAgentRecord, registry?: RpcAgentRegistry): void {
   record.unsubscribe?.();
   record.unsubscribe = undefined;
   record.client = undefined;
   record.streaming = false;
   record.running = false;
+  record.waitingOnChildren = false;
+  record.subtreeRevision = undefined;
+  record.subtreeDescendants = [];
+  publishSubtree(registry);
+  triggerAgentWidgetRefresh();
 }
 
 /**
@@ -1831,7 +1838,7 @@ export function markAgentExited(
 ): void {
   if (!record.client) return;
   const hadQueuedSuccessor = (record.pendingQueuedWork?.length ?? 0) > 0;
-  clearLiveState(record);
+  clearLiveState(record, registry);
   record.pendingQueuedWork = undefined;
   if (record.ownership) updateOwnership(record.ownership.home, { liveness: { lifecycle: "unknown", running: false, observedAt: Date.now() } });
   triggerAgentWidgetRefresh();
@@ -1891,7 +1898,7 @@ export function pushSpawnFailed(
   record: RpcAgentRecord,
   err: unknown,
 ): void {
-  clearLiveState(record);
+  clearLiveState(record, registry);
   pushToLead(pi, registry, record, "ws-agent-settled", { reason: "spawn-failed", error: err instanceof Error ? err.message : String(err) }, "followUp");
   triggerAgentWidgetRefresh();
 }
@@ -2346,6 +2353,40 @@ export function applyRpcEvent(
  * Duplicate events join the generation latch; replacement work invalidates a
  * late harvest. Owner-held output uses the owner notification route.
  */
+function refreshObservedSubtree(registry: RpcAgentRegistry | undefined, record: RpcAgentRecord): void {
+  if (!record.subtreeChannel) return;
+  const snapshot = readSubtreeSnapshot(record.subtreeChannel);
+  record.waitingOnChildren = subtreeWaiting(snapshot);
+  record.subtreeRevision = snapshot?.revision;
+  record.subtreeDescendants = snapshot?.descendants ?? [];
+  publishSubtree(registry);
+  triggerAgentWidgetRefresh();
+}
+
+function watchObservedSubtree(
+  registry: RpcAgentRegistry | undefined,
+  record: RpcAgentRecord,
+  client: RpcClient,
+  generation: number,
+): (() => void) | undefined {
+  const channel = record.subtreeChannel;
+  if (!channel) return undefined;
+  try {
+    const target = basename(channel.path);
+    const watcher = watch(dirname(channel.path), { persistent: false }, (_event, filename) => {
+      if (filename !== null && String(filename) !== target) return;
+      if (record.client !== client || record.launchGeneration !== generation) return;
+      refreshObservedSubtree(registry, record);
+    });
+    watcher.on("error", () => watcher.close());
+    return () => watcher.close();
+  } catch {
+    // The RPC event stream retains the conservative read path when native
+    // directory notifications are unavailable for this child home.
+    return undefined;
+  }
+}
+
 export function attachEventListener(
   pi: ExtensionAPI | undefined,
   registry: RpcAgentRegistry | undefined,
@@ -2390,7 +2431,7 @@ export function attachEventListener(
       refreshing = false;
     })();
   };
-  record.unsubscribe = client.onEvent((evt) => {
+  const unsubscribeEvents = client.onEvent((evt) => {
     const e = evt as { type?: string; toolName?: string; args?: unknown; toolCallId?: string; isError?: unknown; result?: unknown; message?: unknown };
     if (record.client !== client || record.launchGeneration !== generation) return;
     if (e.type === "message_start") observeQueuedWorkBoundary(record, e.message);
@@ -2401,11 +2442,7 @@ export function attachEventListener(
         record.lastTextGeneration = record.workGeneration;
       }
     }
-    if (record.subtreeChannel) {
-      const snapshot = readSubtreeSnapshot(record.subtreeChannel);
-      record.waitingOnChildren = subtreeWaiting(snapshot);
-      record.subtreeRevision = snapshot?.revision;
-    }
+    refreshObservedSubtree(registry, record);
     const outcome = applyRpcEvent(record, e);
     publishSubtree(registry);
     if (e.type === "agent_start" || e.type === "agent_settled" || e.type === "message_end" || e.type === "message_update" || e.type === "thinking_level_changed" || e.type === "compaction_end") {
@@ -2475,6 +2512,11 @@ export function attachEventListener(
       approvalHook(record);
     }
   });
+  const unsubscribeSubtree = watchObservedSubtree(registry, record, client, generation);
+  record.unsubscribe = () => {
+    unsubscribeEvents();
+    unsubscribeSubtree?.();
+  };
 }
 
 /**
@@ -2948,7 +2990,7 @@ export async function spawnAgent(
     await promptAgent(record, client, params.prompt);
     publishSubtree(registry, true);
   } catch (err) {
-    clearLiveState(record);
+    clearLiveState(record, registry);
     try { await client.stop(); } catch { /* best effort */ }
     pushSpawnFailed(ctx.pi, registry, record, err);
     throw err;
@@ -3103,7 +3145,7 @@ export async function sendToAgent(
     } catch (err) {
       // Cleanup may await while a new instruction replaces this operation or
       // launch. Only its owner may clear the record; always stop our own client.
-      if (ownsFailure() && record.client === client) clearLiveState(record);
+      if (ownsFailure() && record.client === client) clearLiveState(record, registry);
       try { await client.stop(); } catch { /* best effort */ }
       // A finish-owned failure is rethrown to the coordinator's sole terminal
       // selector. Ordinary resumes retain spawn-failed; stale work gets neither.
@@ -3340,7 +3382,7 @@ export async function stopAgent(
     // already finished parking — the automatic park path (which now runs
     // after every settle, not just on an explicit stop) makes this window
     // hot enough to close rather than accept.
-    clearLiveState(record);
+    clearLiveState(record, registry);
     let stopped = true;
     try {
       await client.abort();

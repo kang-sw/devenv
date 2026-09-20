@@ -25,7 +25,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getMarkdownTheme, getSelectListTheme } from "@earendil-works/pi-coding-agent";
 import { isOwnerHeld, lastActivityAt, resolveAgentId, sendToAgent, type RpcAgentRecord, type RpcAgentRegistry } from "./spawner.ts";
 import { touchOwnership } from "./agent-storage.ts";
-import { AGENT_STATE_LABEL, AGENT_STATE_RANK, classifyRegistryRowState, formatCompactDuration, formatContextTokens, rowName, type AgentRowState } from "./agent-widget.ts";
+import { AGENT_STATE_LABEL, AGENT_STATE_RANK, buildAgentTree, formatCompactDuration, formatContextTokens, rowName, type AgentRowState } from "./agent-widget.ts";
 import {
   ConversationViewComponent,
   conversationOverlayHeight,
@@ -231,20 +231,19 @@ export function createAuditChannel(
 }
 
 // ---------------------------------------------------------------------------
-// The picker's row builder — the registry's visible lifecycle tiers
-// (`agent-widget.ts`'s own naming/ordering rules, reused verbatim) plus a
-// picker-only dormant tier by last activity.
+// The picker's row builder — the shared local-plus-propagated tree with the
+// registry's visible lifecycle tiers plus a picker-only dormant tier by last
+// activity. Propagated rows are display-only tree context.
 // ---------------------------------------------------------------------------
 
 /**
- * One row per registry child, visible AND dormant. Visible tiers reuse
- * `agent-widget.ts`'s own `classifyRegistryRowState` and its state ordering
- * verbatim. The final picker-only tier contains every `undefined` (dormant)
- * record, ordered by `spawner.ts`'s `lastActivityAt`, most-recent first —
- * the widget itself never rows a dormant child at all. Unlike
- * `agent-widget.ts`'s `buildAgentRows`, this reads the registry alone (no
- * `ThreadRecord` union) — the ticket scopes the picker to "the registry's
- * children," not `ask.ts`'s pending-thread rows.
+ * One local root row per registry child, visible AND dormant, with its
+ * propagated descendants retained immediately below it as indented context.
+ * Local visible tiers reuse `buildAgentTree`'s authoritative state and the
+ * widget's ordering verbatim. The final picker-only tier contains every local
+ * `undefined` (dormant) record, ordered by `spawner.ts`'s `lastActivityAt`,
+ * most-recent first. Unlike `buildAgentRows`, this has no `ThreadRecord`
+ * union; propagated identities come only from each registry record's subtree.
  */
 interface AuditPickerRow {
   agentId: string;
@@ -256,6 +255,17 @@ interface AuditPickerRow {
   state?: AgentRowState;
   elapsedMs: number;
   lastActivity?: number;
+}
+
+/** Internal selection metadata; `SelectList` still receives its unchanged
+ * `SelectItem` shape and simply ignores this extra wrapper-owned field. */
+interface AuditPickerItem extends SelectItem {
+  openable: boolean;
+}
+
+interface AuditPickerBlock {
+  root: AuditPickerRow;
+  items: AuditPickerItem[];
 }
 
 /** The widget's alias > title > short-id identity rule. */
@@ -300,18 +310,36 @@ export function formatAuditPickerLabel(row: Omit<AuditPickerRow, "agentId" | "st
   return fitProtectedAuditFields(row.identity, row.status, row.activity, width);
 }
 
-export function buildAuditPickerItems(registry: RpcAgentRegistry, now: number, labelWidth = Number.POSITIVE_INFINITY): SelectItem[] {
-  const live: AuditPickerRow[] = [];
-  const dormant: AuditPickerRow[] = [];
+function buildAuditPickerRows(registry: RpcAgentRegistry, now: number, labelWidth = Number.POSITIVE_INFINITY): AuditPickerItem[] {
+  const live: AuditPickerBlock[] = [];
+  const dormant: AuditPickerBlock[] = [];
+  let block: AuditPickerBlock | undefined;
 
-  for (const record of registry.values()) {
-    const state = classifyRegistryRowState(record);
+  for (const node of buildAgentTree(registry)) {
+    if (node.depth > 0) {
+      if (!block) continue;
+      const status = node.state === undefined ? "dormant" : AGENT_STATE_LABEL[node.state];
+      block.items.push({
+        value: node.id,
+        label: truncateToWidth(`${"│ ".repeat(node.depth)}${node.id.slice(0, 8)} · ${node.role} · ${status}`, labelWidth),
+        openable: node.openable,
+      });
+      continue;
+    }
+
+    const record = registry.get(node.id);
+    if (!record) {
+      block = undefined;
+      continue;
+    }
+    const state = node.state;
     const identity = auditIdentity(record);
     const model = record.telemetry?.model ?? record.observedModel ?? "—";
     const contextTokens = formatContextTokens(record.telemetry?.contextTokens ?? record.observedContextTokens);
+    let root: AuditPickerRow;
     if (state === undefined) {
       const activityAt = lastActivityAt(record);
-      dormant.push({
+      root = {
         agentId: record.agentId,
         identity,
         status: "dormant",
@@ -320,34 +348,43 @@ export function buildAuditPickerItems(registry: RpcAgentRegistry, now: number, l
         activity: formatDormantActivity(now, activityAt),
         elapsedMs: elapsedSince(now, activityAt),
         lastActivity: activityAt,
-      });
-      continue;
+      };
+    } else {
+      const elapsedMs = elapsedSince(now, record.runStartedAt ?? now);
+      root = {
+        agentId: record.agentId,
+        identity,
+        status: AGENT_STATE_LABEL[state],
+        model,
+        contextTokens,
+        activity: state === "idle-awaiting-owner"
+          ? formatDormantActivity(now, lastActivityAt(record))
+          : `running for ${formatCompactDuration(elapsedMs)}`,
+        state,
+        elapsedMs,
+      };
     }
-    const elapsedMs = elapsedSince(now, record.runStartedAt ?? now);
-    live.push({
-      agentId: record.agentId,
-      identity,
-      status: AGENT_STATE_LABEL[state],
-      model,
-      contextTokens,
-      activity: state === "idle-awaiting-owner"
-        ? formatDormantActivity(now, lastActivityAt(record))
-        : `running for ${formatCompactDuration(elapsedMs)}`,
-      state,
-      elapsedMs,
-    });
+    block = {
+      root,
+      items: [{
+        value: root.agentId,
+        label: formatAuditPickerLabel(root, labelWidth),
+        openable: node.openable,
+      }],
+    };
+    (state === undefined ? dormant : live).push(block);
   }
 
   live.sort((a, b) => {
-    const rankDiff = AGENT_STATE_RANK[a.state!] - AGENT_STATE_RANK[b.state!];
-    return rankDiff !== 0 ? rankDiff : b.elapsedMs - a.elapsedMs;
+    const rankDiff = AGENT_STATE_RANK[a.root.state!] - AGENT_STATE_RANK[b.root.state!];
+    return rankDiff !== 0 ? rankDiff : b.root.elapsedMs - a.root.elapsedMs;
   });
-  dormant.sort((a, b) => b.lastActivity! - a.lastActivity!);
+  dormant.sort((a, b) => b.root.lastActivity! - a.root.lastActivity!);
+  return [...live, ...dormant].flatMap((candidate) => candidate.items);
+}
 
-  return [...live, ...dormant].map(({ agentId, identity, status, model, contextTokens, activity }) => ({
-    value: agentId,
-    label: formatAuditPickerLabel({ identity, status, model, contextTokens, activity }, labelWidth),
-  }));
+export function buildAuditPickerItems(registry: RpcAgentRegistry, now: number, labelWidth = Number.POSITIVE_INFINITY): SelectItem[] {
+  return buildAuditPickerRows(registry, now, labelWidth).map(({ openable: _openable, ...item }) => item);
 }
 
 // ---------------------------------------------------------------------------
@@ -424,13 +461,14 @@ const AUDIT_OVERLAY_OPTIONS = { overlay: true, overlayOptions: { width: "80%", m
  * all input directly to the list and only requests a repaint after it acts.
  */
 function wrapAuditPicker(
-  itemsForLabelWidth: (width: number) => SelectItem[],
+  itemsForLabelWidth: (width: number) => AuditPickerItem[],
   tui: ConversationViewTui,
   header: string,
   theme: SelectListTheme,
   done: (result: string | undefined) => void,
 ): Component {
   let labelWidth = -1;
+  let itemCount = 0;
   let selectedValue: string | undefined;
   let list: SelectList | undefined;
 
@@ -438,13 +476,16 @@ function wrapAuditPicker(
     if (list && nextLabelWidth === labelWidth) return list;
     const items = itemsForLabelWidth(nextLabelWidth);
     const next = new SelectList(items, Math.min(10, items.length), theme);
-    const selectedIndex = selectedValue === undefined ? 0 : items.findIndex((item) => item.value === selectedValue);
-    next.setSelectedIndex(selectedIndex >= 0 ? selectedIndex : 0);
-    next.onSelectionChange = (item) => { selectedValue = item.value; };
-    next.onSelect = (item) => done(item.value);
+    const retainedIndex = selectedValue === undefined ? -1 : items.findIndex((item) => item.value === selectedValue && item.openable);
+    const firstOpenable = items.findIndex((item) => item.openable);
+    next.setSelectedIndex(retainedIndex >= 0 ? retainedIndex : Math.max(0, firstOpenable));
+    next.onSelect = (item) => {
+      if (items.find((candidate) => candidate.value === item.value)?.openable) done(item.value);
+    };
     next.onCancel = () => done(undefined);
     list = next;
     labelWidth = nextLabelWidth;
+    itemCount = items.length;
     return next;
   }
 
@@ -464,22 +505,31 @@ function wrapAuditPicker(
     },
     handleInput(data: string): void {
       const currentList = ensureList(labelWidth < 0 ? 0 : labelWidth);
+      const before = currentList.getSelectedItem();
       currentList.handleInput(data);
-      selectedValue = currentList.getSelectedItem()?.value ?? selectedValue;
+      let selected = currentList.getSelectedItem() as AuditPickerItem | null;
+      // SelectList has no disabled-item contract. When navigation steps onto
+      // propagated context, replay that same movement until the shared tree's
+      // `openable` authority says the row can own selection. Guard `onSelect`
+      // above independently so Enter can never return a context-only id.
+      for (let skipped = 0; selected && selected.value !== before?.value && !selected.openable && skipped < itemCount; skipped++) {
+        currentList.handleInput(data);
+        selected = currentList.getSelectedItem() as AuditPickerItem | null;
+      }
+      if (selected?.openable) selectedValue = selected.value;
       tui.requestRender();
     },
   };
 }
 
 /**
- * Opens the picker: one row per registry child (running and dormant, via
- * `buildAuditPickerItems`), arrow keys move, Enter selects, Esc cancels —
- * `SelectList`'s own `handleInput` already implements all three. Resolves
- * the selected `agentId`, or `undefined` on cancel / when there is nothing
- * to audit.
+ * Opens the picker: one openable row per registry child (running and dormant)
+ * plus indented, non-selectable propagated descendants. Arrow keys move among
+ * local rows, Enter selects, and Esc cancels. Resolves the selected local
+ * `agentId`, or `undefined` on cancel / when there is nothing to audit.
  */
 export async function openPicker(ctx: AuditUiCtx & { ui?: { custom?: unknown } }, rpcRegistry: RpcAgentRegistry): Promise<string | undefined> {
-  const items = buildAuditPickerItems(rpcRegistry, Date.now());
+  const items = buildAuditPickerRows(rpcRegistry, Date.now());
   if (items.length === 0) {
     notify(ctx, "ws: no live or recent subagents to audit.", "info");
     return undefined;
@@ -498,7 +548,7 @@ export async function openPicker(ctx: AuditUiCtx & { ui?: { custom?: unknown } }
   return (ctx as unknown as AuditCustomUiCtx).ui.custom<string | undefined>(
     (tui, hostTheme, _keybindings, done) =>
       wrapAuditPicker(
-        (labelWidth) => buildAuditPickerItems(rpcRegistry, Date.now(), labelWidth),
+        (labelWidth) => buildAuditPickerRows(rpcRegistry, Date.now(), labelWidth),
         tui,
         hostTheme?.fg?.("accent", "ws audit: select subagent") ?? "ws audit: select subagent",
         theme ?? IDENTITY_SELECT_LIST_THEME,

@@ -37,6 +37,7 @@
 
 import type { ThreadRecord } from "./ask.ts";
 import { isOwnerHeld, lastActivityAt, type RpcAgentRecord, type RpcAgentRegistry, type SpawnAgentRole } from "./spawner.ts";
+import type { SubtreeDescendantRole } from "./subtree-lifecycle.ts";
 import { visibleWidth } from "./text-width.ts";
 import { isLeadOrFork, type SpawnRole } from "./process-role.ts";
 
@@ -59,7 +60,8 @@ export const AGENT_WIDGET_ATTENTION_TICK_MS = 330;
 export const DEFAULT_AGENT_WIDGET_WIDTH = 80;
 
 /** One live-agent row's display role. `"thread"` overrides the record's own `spawnRole` label only for a `threadBound` record whose bound thread is `origin: "lead-ask"`. `"explore"` is a persistent researcher role — see `roleFromSpawnRole`. */
-export type AgentRowRole = "worker" | "execute" | "fork" | "thread" | "explore";
+export type AgentTreeRole = SubtreeDescendantRole;
+export type AgentRowRole = AgentTreeRole | "thread";
 
 /** One live-agent row's state, in display precedence order. Execution,
  * descendant waits, delivery, and owner action remain distinct. */
@@ -71,9 +73,9 @@ export interface AgentRow {
   name: string;
   role: AgentRowRole;
   state: AgentRowState;
-  /** Milliseconds since the clock this row's state uses — `ThreadRecord.touchedAt` for a `"thread"` row, `RpcAgentRecord.runStartedAt` otherwise. Never negative. */
+  /** Milliseconds since the clock this row's state uses — `ThreadRecord.touchedAt` for a `"thread"` row, `RpcAgentRecord.runStartedAt` otherwise. Zero is an unused placeholder on `livenessOnly` rows. Never negative. */
   elapsedMs: number;
-  /** Milliseconds since `spawner.ts`'s `lastActivityAt` (last prompt/report/owner-send) for an RPC-backed row; for a pure synthetic thread row (no backing record) this is the same `ThreadRecord.touchedAt` delta as `elapsedMs`, the best available activity signal. Never negative. 260914: replaces the removed `ctx` label as the live panel's per-row activity cue. */
+  /** Milliseconds since `spawner.ts`'s `lastActivityAt` (last prompt/report/owner-send) for an RPC-backed row; for a pure synthetic thread row (no backing record) this is the same `ThreadRecord.touchedAt` delta as `elapsedMs`, the best available activity signal. Zero is an unused placeholder on `livenessOnly` rows. Never negative. 260914: replaces the removed `ctx` label as the live panel's per-row activity cue. */
   lastActivityMs: number;
   /** The valid `/answer <id>` command for an owner-question row. */
   answerHint?: string;
@@ -83,6 +85,10 @@ export interface AgentRow {
   effort?: string;
   contextTokens?: number;
   estimatedUsd?: number;
+  /** Propagated descendants alone carry depth; locally-owned and synthetic thread rows remain at depth zero without changing their established data shape. */
+  depth?: number;
+  /** Cross-process descendants expose process liveness only, so rendering must not invent clocks, telemetry, or local affordances for them. */
+  livenessOnly?: true;
 }
 
 const BOLD = "\u001b[1m";
@@ -150,7 +156,7 @@ const STATE_BULLET_COLOR: Readonly<Partial<Record<AgentRowState, "warning" | "er
 };
 
 /** `worker -> "worker"`, `execute-worker -> "execute"`, `fork -> "fork"`, `explore -> "explore"` (260906); an unset `spawnRole` (should not happen post-spawn, but never throw) falls back to `"worker"`. */
-function roleFromSpawnRole(spawnRole: SpawnAgentRole | undefined): AgentRowRole {
+function roleFromSpawnRole(spawnRole: SpawnAgentRole | undefined): AgentTreeRole {
   if (spawnRole === "execute-worker") return "execute";
   if (spawnRole === "fork") return "fork";
   if (spawnRole === "explore") return "explore";
@@ -178,6 +184,84 @@ export function classifyRegistryRowState(record: RpcAgentRecord): AgentRowState 
   if (record.waitingOnChildren) return "waiting-on-children";
   if (record.terminalDelivery && record.terminalDelivery.state !== "enqueued") return "pending-delivery";
   return undefined;
+}
+
+/** Shared local-plus-propagated tree contract used by the live gutter now and the audit picker in Phase 3. */
+export interface AgentTreeNode {
+  id: string;
+  parentId: string | null;
+  depth: number;
+  role: AgentTreeRole;
+  /** `undefined` is the dormant tier. Propagated nodes can only be `running` or dormant because the cross-process contract carries liveness alone. */
+  state: AgentRowState | undefined;
+  live: boolean;
+  /** Only records owned by this process have a locally reachable conversation stream. */
+  openable: boolean;
+}
+
+/**
+ * Builds one parent-before-child tree from this process's registry and every
+ * direct child's propagated identity snapshot. Local records remain the
+ * authoritative source for their rich state; cross-process descendants are
+ * deliberately reduced to `running` versus dormant from `live` alone.
+ */
+export function buildAgentTree(records: RpcAgentRegistry): AgentTreeNode[] {
+  const nodes = new Map<string, AgentTreeNode>();
+  const children = new Map<string, AgentTreeNode[]>();
+  const roots: AgentTreeNode[] = [];
+  const localIds = new Set(records.keys());
+
+  const add = (node: AgentTreeNode): boolean => {
+    if (nodes.has(node.id)) return false;
+    nodes.set(node.id, node);
+    if (node.parentId === null) roots.push(node);
+    else {
+      const siblings = children.get(node.parentId) ?? [];
+      siblings.push(node);
+      children.set(node.parentId, siblings);
+    }
+    return true;
+  };
+
+  for (const record of records.values()) {
+    const root: AgentTreeNode = {
+      id: record.agentId,
+      parentId: null,
+      depth: 0,
+      role: roleFromSpawnRole(record.spawnRole),
+      state: classifyRegistryRowState(record),
+      live: record.client !== undefined,
+      openable: true,
+    };
+    add(root);
+
+    // Phase 1 guarantees parent-before-child snapshots. Keep the check here so
+    // a stale or malformed advisory edge cannot detach a row into this tree.
+    const branchIds = new Set([record.agentId]);
+    for (const descendant of record.subtreeDescendants ?? []) {
+      const parentId = descendant.parentId ?? record.agentId;
+      const parent = nodes.get(parentId);
+      if (!parent || !branchIds.has(parentId) || localIds.has(descendant.id)) continue;
+      const node: AgentTreeNode = {
+        id: descendant.id,
+        parentId,
+        depth: parent.depth + 1,
+        role: descendant.role,
+        state: descendant.live ? "running" : undefined,
+        live: descendant.live,
+        openable: false,
+      };
+      if (add(node)) branchIds.add(node.id);
+    }
+  }
+
+  const ordered: AgentTreeNode[] = [];
+  const visit = (node: AgentTreeNode): void => {
+    ordered.push(node);
+    for (const child of children.get(node.id) ?? []) visit(child);
+  };
+  for (const root of roots) visit(root);
+  return ordered;
 }
 
 /** A thread the widget still owes the owner an answer on — the two `countPending`-adjacent statuses that ever yield a row. Dormant/closed threads never do. */
@@ -228,32 +312,49 @@ function clampElapsed(deltaMs: number): number {
  * match (the ticket's Entry-B-only role override); a fork-raised match keeps
  * the record's own `spawnRole` label (typically `"fork"`).
  *
- * Sort: state rank first, elapsed descending within each state. No cap here —
- * the display cap to `AGENT_WIDGET_ROW_CAP` with its `+N more` tail is
- * `buildWidgetLines`'s own rendering concern, not a property of this
- * function's row count (260914 dropped the `ws: N agents` heading that used
- * to read this count; the owner now counts visible rows by eye).
+ * Sort: root-level subtree blocks use state rank first and elapsed descending
+ * within each state, preserving the former flat ordering while descendants
+ * stay immediately below their parent. No cap here — the display cap to
+ * `AGENT_WIDGET_ROW_CAP` with its `+N more` tail is `buildWidgetLines`'s own
+ * rendering concern, not a property of this function's row count (260914
+ * dropped the `ws: N agents` heading that used to read this count; the owner
+ * now counts visible rows by eye).
  */
 export function buildAgentRows(records: RpcAgentRegistry, threads: readonly ThreadRecord[], now: number): AgentRow[] {
-  const rows: AgentRow[] = [];
+  const tree = buildAgentTree(records);
   const coveredThreadIds = new Set<string>();
+  const rowById = new Map<string, AgentRow>();
 
-  for (const record of records.values()) {
-    const state = classifyRegistryRowState(record);
-    if (state === undefined) continue;
+  for (const node of tree) {
+    if (!node.openable) {
+      // Dormant propagated identities remain available to the shared tree for
+      // Phase 3's picker, but the live gutter admits only real process liveness.
+      if (node.state !== "running") continue;
+      rowById.set(node.id, {
+        name: node.id.slice(0, 8),
+        role: node.role,
+        state: "running",
+        elapsedMs: 0,
+        lastActivityMs: 0,
+        depth: node.depth,
+        livenessOnly: true,
+      });
+      continue;
+    }
 
+    const record = records.get(node.id);
+    const state = node.state;
+    if (!record || state === undefined) continue;
     const boundThread = record.threadBound
       ? threads.find((t) => t.respondentAgentId === record.agentId && isLiveThreadStatus(t.status))
       : undefined;
     if (boundThread) coveredThreadIds.add(boundThread.threadId);
 
     const isAwaitingOwnerWithThread = state === "awaiting-owner" && boundThread !== undefined;
-
     const elapsedMs = isAwaitingOwnerWithThread ? clampElapsed(now - Date.parse(boundThread!.touchedAt)) : clampElapsed(now - (record.runStartedAt ?? now));
-
-    rows.push({
+    rowById.set(node.id, {
       name: rowName(record),
-      role: isAwaitingOwnerWithThread && boundThread!.origin === "lead-ask" ? "thread" : roleFromSpawnRole(record.spawnRole),
+      role: isAwaitingOwnerWithThread && boundThread!.origin === "lead-ask" ? "thread" : node.role,
       state,
       elapsedMs,
       lastActivityMs: clampElapsed(now - lastActivityAt(record)),
@@ -266,31 +367,45 @@ export function buildAgentRows(records: RpcAgentRegistry, threads: readonly Thre
     });
   }
 
+  // Preserve each subtree as a contiguous block while retaining the flat
+  // panel's state/elapsed ordering between root-level blocks.
+  const blocks: AgentRow[][] = [];
+  let block: AgentRow[] | undefined;
+  for (const node of tree) {
+    if (node.depth === 0) {
+      block = [];
+      blocks.push(block);
+    }
+    const row = rowById.get(node.id);
+    if (row) block?.push(row);
+  }
+
   for (const thread of threads) {
     if (!isLiveThreadStatus(thread.status) || coveredThreadIds.has(thread.threadId)) continue;
-    rows.push({
+    const elapsedMs = clampElapsed(now - Date.parse(thread.touchedAt));
+    blocks.push([{
       name: sanitizeDisplayTitle(thread.title, thread.threadId),
       role: "thread",
       state: "awaiting-owner",
-      elapsedMs: clampElapsed(now - Date.parse(thread.touchedAt)),
+      elapsedMs,
       // No backing RpcAgentRecord for a pure synthetic thread row, so there is
       // no spawner.ts `lastActivityAt` to read — the thread's own touchedAt
       // delta (identical to elapsedMs here) is the best available signal.
-      lastActivityMs: clampElapsed(now - Date.parse(thread.touchedAt)),
+      lastActivityMs: elapsedMs,
       answerHint: `/answer ${thread.threadId}`,
       ...(thread.forkResume?.telemetry?.model ?? thread.forkResume?.observedModel ? { model: thread.forkResume?.telemetry?.model ?? thread.forkResume?.observedModel } : {}),
       ...(thread.forkResume?.telemetry?.effort ?? thread.forkResume?.observedEffort ? { effort: thread.forkResume?.telemetry?.effort ?? thread.forkResume?.observedEffort } : {}),
       ...((thread.forkResume?.telemetry?.contextTokens ?? thread.forkResume?.observedContextTokens) !== undefined ? { contextTokens: thread.forkResume?.telemetry?.contextTokens ?? thread.forkResume?.observedContextTokens } : {}),
       ...(thread.forkResume?.telemetry?.estimatedUsd !== undefined ? { estimatedUsd: thread.forkResume.telemetry.estimatedUsd } : {}),
-    });
+    }]);
   }
 
-  rows.sort((a, b) => {
-    const rankDiff = AGENT_STATE_RANK[a.state] - AGENT_STATE_RANK[b.state];
-    return rankDiff !== 0 ? rankDiff : b.elapsedMs - a.elapsedMs;
+  const nonEmptyBlocks = blocks.filter((candidate) => candidate.length > 0);
+  nonEmptyBlocks.sort((a, b) => {
+    const rankDiff = AGENT_STATE_RANK[a[0].state] - AGENT_STATE_RANK[b[0].state];
+    return rankDiff !== 0 ? rankDiff : b[0].elapsedMs - a[0].elapsedMs;
   });
-
-  return rows;
+  return nonEmptyBlocks.flat();
 }
 
 /** `Xs` under a minute, `Xm` under an hour, else `XhYYm` — a compact, always-non-negative elapsed label. */
@@ -369,9 +484,21 @@ function formatBullet(state: AgentRowState, width: number, ownerActionColor: Own
   return { text: styled, width: visibleWidth(candidate) };
 }
 
+/** One dim `│ ` lane per propagated depth, clipped before the state bullet at narrow widths. */
+function formatDepthGutter(depth: number, width: number, theme: AgentWidgetTheme | undefined): { text: string; width: number } {
+  let plain = "";
+  for (let lane = 0; lane < depth && visibleWidth(plain) < width; lane++) {
+    const remaining = width - visibleWidth(plain);
+    plain += remaining >= 2 ? "│ " : "│";
+  }
+  return { text: theme && plain ? theme.fg("dim", plain) : plain, width: visibleWidth(plain) };
+}
+
 function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, ownerActionColor: OwnerActionColor | undefined, theme?: AgentWidgetTheme): string {
-  const bullet = formatBullet(row.state, width, ownerActionColor, theme);
-  const bodyWidth = Math.max(0, width - bullet.width);
+  const gutter = formatDepthGutter(row.depth ?? 0, width, theme);
+  const rowWidth = Math.max(0, width - gutter.width);
+  const bullet = formatBullet(row.state, rowWidth, ownerActionColor, theme);
+  const bodyWidth = Math.max(0, rowWidth - bullet.width);
   const ownerAction = isAttentionState(row.state);
   const primary = row.answerHint
     ? ownerAnswerCue(row.answerHint, bodyWidth)
@@ -379,6 +506,9 @@ function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, ownerActio
       ? `⚠ OWNER ACTION · ${sanitizeDisplayTitle(row.name, "owner action")}`
       : row.name;
   const stateLabel = AGENT_STATE_LABEL[row.state];
+  if (row.livenessOnly) {
+    return gutter.text + bullet.text + truncateToWidth(`${primary} · ${row.role} · ${stateLabel}`, bodyWidth);
+  }
   const durationPrefix = `${primary} · ${row.role} · ${stateLabel} · ${formatCompactDuration(row.elapsedMs)} (`;
   const activity = formatCompactDuration(row.lastActivityMs);
   const base = `${durationPrefix}${activity})`;
@@ -437,7 +567,7 @@ function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, ownerActio
     const cueEnd = Math.min(content.length, primary.length);
     content = semanticBold(content.slice(0, cueEnd), ownerActionColor, theme) + content.slice(cueEnd);
   }
-  return bullet.text + content + suffix;
+  return gutter.text + bullet.text + content + suffix;
 }
 
 /**
@@ -491,9 +621,16 @@ export function buildWidgetLines(rows: readonly AgentRow[], pendingCount: number
   if (awaiting.length + running.length <= AGENT_WIDGET_ROW_CAP) {
     shown = rows;
   } else {
-    const runningSlots = Math.max(0, AGENT_WIDGET_ROW_CAP - awaiting.length);
-    shown = [...awaiting, ...running.slice(0, runningSlots)];
-    hiddenRunning = running.length - runningSlots;
+    let runningSlots = Math.max(0, AGENT_WIDGET_ROW_CAP - awaiting.length);
+    const retained: AgentRow[] = [];
+    for (const row of rows) {
+      if (row.state !== "running") retained.push(row);
+      else if (runningSlots > 0) {
+        retained.push(row);
+        runningSlots--;
+      } else hiddenRunning++;
+    }
+    shown = retained;
   }
 
   const lines = shown.map((row) => formatRow(row, width, emphasizeOwnerAttention && isAttentionState(row.state) ? ownerActionColor : undefined, theme));
