@@ -1193,9 +1193,6 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		title, _ := params.Arguments["title"].(string)
 		description, _ := params.Arguments["description"].(string)
 		aiContextRawValue, aiContextPresent := params.Arguments["ai_context"]
-		if err := typedArrayRejection("ai_context", aiContextRawValue, aiContextPresent); err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
 		aiContextItems, aiContextIsArray := aiContextRawValue.([]any)
 		aiContextRawEntryCount := -1
 		aiContextRawBytes := 0
@@ -1206,6 +1203,21 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 					aiContextRawBytes += len(text)
 				}
 			}
+		}
+		if err := typedArrayRejection("ai_context", aiContextRawValue, aiContextPresent); err != nil {
+			// Emit the debug event on the reject path too — the ring buffer
+			// exists specifically to diagnose ai_context arrival shape, and a
+			// wrong-type call is exactly the case it needs to catch.
+			// type_mismatch distinguishes it from the absent/empty/all-blank
+			// events normalizeCommitOptions classifies below.
+			appendDebugEvent("git.commit.ai_context_received", map[string]any{
+				"present":               aiContextPresent,
+				"raw_entry_count":       aiContextRawEntryCount,
+				"raw_bytes":             aiContextRawBytes,
+				"post_trim_entry_count": 0,
+				"type_mismatch":         true,
+			})
+			return toolTextResponse(req.ID, "", err)
 		}
 		// Use stringListKeepBlank, not stringList: stringList silently drops
 		// exact-empty-string entries, which would make an ["" ] payload
