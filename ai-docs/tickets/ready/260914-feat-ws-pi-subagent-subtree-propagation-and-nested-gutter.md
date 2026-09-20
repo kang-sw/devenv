@@ -3,6 +3,11 @@ title: "Recursive subagent tracking: cross-process subtree propagation + nested 
 related:
   260914-feat-ws-pi-agent-widget-recursive-gutter-and-state-bullets: split-from; that ticket owns the flat-panel polish (bullets/activity/ctx/heading), this owns the tree
   260906-workset-ws-pi-dogfood-ux: source collection; inclusion only
+  260908-epic-ws-pi-subagent-conversation-view: coordination (not parent); Phase 3 re-points the `/audit` picker this epic's audit-window child owns onto the shared tree — must not break its viewer/openViewer path or the human-only-surface rule; this ticket honors the epic's "session_children stays out of boundary" decision
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 5f5078312f800d5c
+sage-review-completeness-reviewed: 5f5078312f800d5c
 ---
 
 # Recursive subagent tracking: cross-process subtree propagation + nested gutter
@@ -100,8 +105,12 @@ row-primitive module the picker imports from — `audit.ts` pulls
 `classifyRegistryRowState`, `rowName`, `AgentRowState`, `AGENT_STATE_RANK/LABEL`
 from it). It produces tree nodes `{id, parentId, depth, role, state, live,
 openable}` from the union of the local registry and the propagated descendant
-list. Both `buildAgentRows` (gutter, `agent-widget.ts:237`) and
-`buildAuditPickerItems` (picker, `audit.ts:303`) are re-pointed to consume it.
+list. `state` for a local row comes from `classifyRegistryRowState`; a
+propagated (cross-process) row has no local registry record and carries only
+`live`, so the tree-builder synthesizes its `state` from that `live` boolean
+alone (deep rows are liveness-only, per Phase 2's verification boundary). Both
+`buildAgentRows` (gutter, `agent-widget.ts:237`) and `buildAuditPickerItems`
+(picker, `audit.ts:303`) are re-pointed to consume it.
 
 Rejected: separate tree wiring per call site — duplicates the tree and lets the
 two consumers diverge. The tree model is a **superset**; each renderer keeps its
@@ -135,6 +144,33 @@ belongs to the subagent-conversation-view epic's cross-child work.
 - Code citations above are as-of-now evidence; anchor edits by function/type
   name (`publishSubtree`, `subtreeWaiting`, `buildAgentRows`,
   `buildAuditPickerItems`, `installSubtreePublisher`), not by line number.
+
+## Prior Decisions
+
+- 260916-feat-pi-agent-gutter-active-time-placement (2026-09-16, ticket Decisions): "Relocate the existing active-time entry from its separate trailing position; do not delete or replace that entry." — bearing: constrains
+- 260914-feat-ws-pi-agent-widget-recursive-gutter-and-state-bullets (2026-09-15, commit 734d03e6): "Closing after both review rounds completed: round 1 non-clean (1 Important, fixed), round 2 clean." — bearing: supports
+- 260913-bug-ws-pi-settled-agent-falsely-remains-running (2026-09-13, commit 6bafc76f): "Treat only running or streaming RPC work as autonomous execution; descendant waits and pending terminal admission remain protected but distinct lifecycle states." — bearing: constrains
+- 260912-feat-ws-pi-recursive-worker-subtree-lifecycle (2026-09-13, ticket Result f7b3f670): "an explicit nested stop is its synchronous disposition and emits no redundant worker-local stopped follow-up; terminal report/exit obligations clear only when Pi accepts direct-parent enqueue" — bearing: supports
+- 260914-subtree-propagation (2026-09-14, commit 9b46c059): "the recursive nested-gutter tree was split into 260914-subtree-propagation because RpcAgentRegistry is per-process and exposes no cross-boundary…" — bearing: supports
+- (no ticket) (2026-09-14, commit 2b6c1984): "Kept in idea/ (not ready) because the cross-process descendant-identity mechanism is unbuilt; needs a design pass before it can be a phased actionable ticket." — bearing: supports
+- 260908-feat-ws-pi-subagent-audit-window-and-owner-steering (2026-09-09, commit 33ae460e): "The picker's live tiers reuse agent-widget.ts's classifyRegistryRowState/ rowName/state-rank ordering verbatim; the picker's own dormant tier (registry-only, no ThreadRecord union" — bearing: supports
+- 260905-feat-ws-pi-live-agent-widget (2026-09-05, commit ae03bcc2): "Wiring mirrors the existing leadIdleRef pattern so spawner.ts registry-transition points can trigger a re-render without either module importing agent-widget.ts (golden rule)" — bearing: constrains
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-pi/src/spawner.ts, agents-plugin-pi/src/subtree-lifecycle.ts, agents-plugin-pi/src/agent-widget.ts, agents-plugin-pi/src/audit.ts |
+| scope.surface | cross-module | SubtreeSnapshot (subtree-lifecycle.ts#L8) and the new tree-builder (agent-widget.ts, D4) are consumed across spawner.ts, subtree-lifecycle.ts, agent-widget.ts, and audit.ts |
+| scope.new_public_symbol | yes | advisory descendant-identity list added to SubtreeSnapshot (subtree-lifecycle.ts#L8) and the new exported tree-builder in agent-widget.ts (D4) |
+| scope.new_type_contract | yes | descendant list shape {id, parentId, depth, role, live} (D1) and tree node shape {id, parentId, depth, role, state, live, openable} (D4) |
+| scope.test_surface | existing | agents-plugin-pi/test/recursive-worker.test.ts, test/agent-widget.test.ts, test/audit.test.ts already cover the touched modules |
+| complexity.reuse_points | confirmed | subtreeWaiting/publishSubtree/readSubtreeSnapshot (subtree-lifecycle.ts), buildAgentRows (agent-widget.ts#L237), buildAuditPickerItems (audit.ts#L303) all verified present at the cited sites |
+| complexity.side_effect_risk | moderate | Phase 1 edits the exact wait/settle read site (spawner.ts#L2404-L2408) that sets record.waitingOnChildren, though D2 keeps the new list additive-only |
+| risk.correctness | moderate | the per-hop merge must not perturb subtreeWaiting/waitingOnChildren, a site 260913-bug-ws-pi-settled-agent-falsely-remains-running recently hardened |
+| risk.fit | low | reuses the existing subtree channel, RpcAgentRegistry, and the shared agent-widget.ts row-primitive module audit.ts already imports from |
+| risk.test | moderate | 3-level-tree, cross-process-liveness, and guard-bound coverage does not exist yet; only count-based subtree tests (recursive-worker.test.ts) exist today |
+| risk.security_or_contract | low | D1 keeps this off the shared ws-mcp session_children contract; no new cross-package public API is added |
 
 ## Phases
 
