@@ -37,6 +37,7 @@
 
 import type { ThreadRecord } from "./ask.ts";
 import { isOwnerHeld, lastActivityAt, type RpcAgentRecord, type RpcAgentRegistry, type SpawnAgentRole } from "./spawner.ts";
+import type { SubtreeDescendantRole } from "./subtree-lifecycle.ts";
 import { visibleWidth } from "./text-width.ts";
 import { isLeadOrFork, type SpawnRole } from "./process-role.ts";
 
@@ -59,7 +60,8 @@ export const AGENT_WIDGET_ATTENTION_TICK_MS = 330;
 export const DEFAULT_AGENT_WIDGET_WIDTH = 80;
 
 /** One live-agent row's display role. `"thread"` overrides the record's own `spawnRole` label only for a `threadBound` record whose bound thread is `origin: "lead-ask"`. `"explore"` is a persistent researcher role — see `roleFromSpawnRole`. */
-export type AgentRowRole = "worker" | "execute" | "fork" | "thread" | "explore";
+export type AgentTreeRole = SubtreeDescendantRole;
+export type AgentRowRole = AgentTreeRole | "thread";
 
 /** One live-agent row's state, in display precedence order. Execution,
  * descendant waits, delivery, and owner action remain distinct. */
@@ -154,7 +156,7 @@ const STATE_BULLET_COLOR: Readonly<Partial<Record<AgentRowState, "warning" | "er
 };
 
 /** `worker -> "worker"`, `execute-worker -> "execute"`, `fork -> "fork"`, `explore -> "explore"` (260906); an unset `spawnRole` (should not happen post-spawn, but never throw) falls back to `"worker"`. */
-function roleFromSpawnRole(spawnRole: SpawnAgentRole | undefined): AgentRowRole {
+function roleFromSpawnRole(spawnRole: SpawnAgentRole | undefined): AgentTreeRole {
   if (spawnRole === "execute-worker") return "execute";
   if (spawnRole === "fork") return "fork";
   if (spawnRole === "explore") return "explore";
@@ -189,7 +191,7 @@ export interface AgentTreeNode {
   id: string;
   parentId: string | null;
   depth: number;
-  role: Exclude<AgentRowRole, "thread">;
+  role: AgentTreeRole;
   /** `undefined` is the dormant tier. Propagated nodes can only be `running` or dormant because the cross-process contract carries liveness alone. */
   state: AgentRowState | undefined;
   live: boolean;

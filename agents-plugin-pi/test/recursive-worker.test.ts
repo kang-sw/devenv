@@ -29,6 +29,7 @@ import {
   leadIdleRef,
   leadWakeStartPendingRef,
   listAgents,
+  markAgentExited,
   OWNER_TERMINAL_RETRY_DELAY_MS,
   ownerNotifyRef,
   probeAgentLiveness,
@@ -164,11 +165,11 @@ test("subtree publication merges three identity levels without changing authorit
   assert.equal(subtreeWaiting(snapshot), true, "identity rows are not an input to wait/settle");
 });
 
-test("subtree identity guards bound pathological breadth and depth without corrupting counts", () => {
+test("subtree identity breadth guard retains exactly the bounded shallow prefix without corrupting counts", () => {
   const descendants = Array.from({ length: MAX_SUBTREE_DESCENDANTS + 20 }, (_, index) => ({
-    id: `nested-${index}`,
-    parentId: index === 0 ? null : `nested-${index - 1}`,
-    depth: index,
+    id: `sibling-${index}`,
+    parentId: null,
+    depth: 0,
     role: "worker" as const,
     live: true,
   }));
@@ -177,12 +178,96 @@ test("subtree identity guards bound pathological breadth and depth without corru
   installSubtreePublisher(registry, undefined, () => 0);
 
   const snapshot = publishSubtree(registry)!;
-  assert.ok(snapshot.descendants.length <= MAX_SUBTREE_DESCENDANTS);
-  assert.ok(snapshot.descendants.every((row) => row.depth <= MAX_SUBTREE_DESCENDANT_DEPTH));
+  assert.equal(snapshot.descendants.length, MAX_SUBTREE_DESCENDANTS);
+  assert.equal(snapshot.descendants[0]?.id, "guard-root");
+  assert.equal(snapshot.descendants.at(-1)?.id, `sibling-${MAX_SUBTREE_DESCENDANTS - 2}`);
   assert.deepEqual(
     { outstanding: snapshot.outstanding, active: snapshot.active, deliveries: snapshot.deliveries },
     { outstanding: 0, active: 1, deliveries: 0 },
   );
+});
+
+test("subtree identity depth guard retains the boundary and drops the next nested row without corrupting counts", () => {
+  const descendants = Array.from({ length: MAX_SUBTREE_DESCENDANT_DEPTH + 2 }, (_, index) => ({
+    id: `deep-${index}`,
+    parentId: index === 0 ? null : `deep-${index - 1}`,
+    depth: index,
+    role: "worker" as const,
+    live: true,
+  }));
+  const child = record("depth-root", { running: true, subtreeDescendants: descendants });
+  const registry: RpcAgentRegistry = new Map([[child.agentId, child]]);
+  installSubtreePublisher(registry, undefined, () => 0);
+
+  const snapshot = publishSubtree(registry)!;
+  assert.equal(snapshot.descendants.at(-1)?.depth, MAX_SUBTREE_DESCENDANT_DEPTH);
+  assert.equal(snapshot.descendants.at(-1)?.id, `deep-${MAX_SUBTREE_DESCENDANT_DEPTH - 1}`);
+  assert.equal(snapshot.descendants.some((row) => row.id === `deep-${MAX_SUBTREE_DESCENDANT_DEPTH}`), false);
+  assert.deepEqual(
+    { outstanding: snapshot.outstanding, active: snapshot.active, deliveries: snapshot.deliveries },
+    { outstanding: 0, active: 1, deliveries: 0 },
+  );
+});
+
+test("losing a direct child clears and republishes cached descendant liveness", () => {
+  const channel = { path: join(home(), "root-subtree.json"), nonce: "root" };
+  const h = pushHarness([]);
+  const child = record("child", {
+    client: h.client,
+    running: true,
+    waitingOnChildren: true,
+    subtreeRevision: 4,
+    subtreeDescendants: [{ id: "grandchild", parentId: null, depth: 0, role: "worker", live: true }],
+  });
+  const registry: RpcAgentRegistry = new Map([[child.agentId, child]]);
+  installSubtreePublisher(registry, channel, () => 0);
+
+  markAgentExited(h.pi, registry, child, { suppressTerminal: true });
+
+  assert.equal(child.waitingOnChildren, false);
+  assert.equal(child.subtreeRevision, undefined);
+  assert.deepEqual(child.subtreeDescendants, []);
+  assert.deepEqual(readSubtreeSnapshot(channel)?.descendants, [
+    { id: "child", parentId: null, depth: 0, role: "worker", live: false },
+  ]);
+});
+
+test("channel notifications propagate a nested parent edge through two process hops", async () => {
+  const leafChannel = { path: join(home(), "leaf-subtree.json"), nonce: "leaf" };
+  const middleChannel = { path: join(home(), "middle-subtree.json"), nonce: "middle" };
+  const middleHarness = pushHarness([]);
+  const rootHarness = pushHarness([]);
+  const child = record("child", { client: middleHarness.client, subtreeChannel: leafChannel });
+  const middleRegistry: RpcAgentRegistry = new Map([[child.agentId, child]]);
+  installSubtreePublisher(middleRegistry, middleChannel, () => 0);
+  attachEventListener(middleHarness.pi, middleRegistry, child, middleHarness.client);
+
+  const parent = record("parent", { client: rootHarness.client, subtreeChannel: middleChannel });
+  const rootRegistry: RpcAgentRegistry = new Map([[parent.agentId, parent]]);
+  installSubtreePublisher(rootRegistry, undefined, () => 0);
+  attachEventListener(rootHarness.pi, rootRegistry, parent, rootHarness.client);
+
+  try {
+    const grandchild = record("grandchild", { client: {} as never, running: true, spawnRole: "explore" });
+    installSubtreePublisher(new Map([[grandchild.agentId, grandchild]]), leafChannel, () => 0);
+    const deadline = Date.now() + 2_000;
+    while (!parent.subtreeDescendants?.some((row) => row.id === grandchild.agentId) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    assert.deepEqual(parent.subtreeDescendants, [
+      { id: "child", parentId: null, depth: 0, role: "worker", live: true },
+      { id: "grandchild", parentId: "child", depth: 1, role: "explore", live: true },
+    ]);
+    assert.deepEqual(publishSubtree(rootRegistry)?.descendants, [
+      { id: "parent", parentId: null, depth: 0, role: "worker", live: true },
+      { id: "child", parentId: "parent", depth: 1, role: "worker", live: true },
+      { id: "grandchild", parentId: "child", depth: 2, role: "explore", live: true },
+    ]);
+  } finally {
+    child.unsubscribe?.();
+    parent.unsubscribe?.();
+  }
 });
 
 test("ordinary settlement yields exactly one terminal result and clears execution before delivery", async () => {
