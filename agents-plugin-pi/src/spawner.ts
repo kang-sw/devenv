@@ -109,7 +109,7 @@ import { CHILD_MANAGEMENT_TOOLS, DEFAULT_MAX_AGENT_DEPTH, DELEGATION_ENV, SUBTRE
 import { normalizeWriteScopes, type EffectiveWriteCapability, type WriteScope } from "./write-scopes.ts";
 import { createWebSearch } from "./web-search.ts";
 import { clearWebReadiness, verifyWebReadiness, WEB_HOME_ENV, WEB_NONCE_ENV } from "./web-readiness.ts";
-import { beginSubtreeDispatch, installSubtreePublisher, publishSubtree, readSubtreeChannel, readSubtreeSnapshot, subtreeWaiting, type SubtreeChannel } from "./subtree-lifecycle.ts";
+import { beginSubtreeDispatch, installSubtreePublisher, publishSubtree, readSubtreeChannel, readSubtreeSnapshot, subtreeWaiting, type SubtreeChannel, type SubtreeDescendant } from "./subtree-lifecycle.ts";
 import { PUSH_BATCH_CUSTOM_TYPE, PUSH_BATCH_VERSION, type PushBatchItem, type PushBatchItemState } from "./push-protocol.ts";
 import { persistAgentCostCheckpoint, persistEvictedAgentCost, registerAgentCostOwner } from "./agent-footer.ts";
 
@@ -460,6 +460,8 @@ export interface RpcAgentRecord {
   /** Persisted authority and one-edge semantic lifecycle; independent of owner holds. */
   delegation?: DelegationPolicy;
   subtreeChannel?: SubtreeChannel;
+  /** Last advisory identity tree published by this child process. */
+  subtreeDescendants?: SubtreeDescendant[];
   waitingOnChildren?: boolean;
   /** Last successful writer to this child. Absence is the legacy/lead default. */
   lastWriter?: "lead" | "owner";
@@ -2405,6 +2407,8 @@ export function attachEventListener(
       const snapshot = readSubtreeSnapshot(record.subtreeChannel);
       record.waitingOnChildren = subtreeWaiting(snapshot);
       record.subtreeRevision = snapshot?.revision;
+      record.subtreeDescendants = snapshot?.descendants ?? [];
+      triggerAgentWidgetRefresh();
     }
     const outcome = applyRpcEvent(record, e);
     publishSubtree(registry);

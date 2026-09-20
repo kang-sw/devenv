@@ -13,6 +13,9 @@ import {
 import {
   beginSubtreeDispatch,
   installSubtreePublisher,
+  MAX_SUBTREE_DESCENDANT_DEPTH,
+  MAX_SUBTREE_DESCENDANTS,
+  publishSubtree,
   readSubtreeSnapshot,
   subtreeOutstanding,
   subtreeWaiting,
@@ -135,6 +138,53 @@ test("dispatch admission is published as outstanding until registration complete
   assert.equal(subtreeWaiting(readSubtreeSnapshot(channel)), false);
 });
 
+test("subtree publication merges three identity levels without changing authoritative counts", () => {
+  const child = record("child", {
+    client: {} as never,
+    running: true,
+    spawnRole: "worker",
+    subtreeDescendants: [
+      { id: "grandchild", parentId: null, depth: 0, role: "explore", live: true },
+      { id: "great-grandchild", parentId: "grandchild", depth: 1, role: "execute", live: false },
+    ],
+  });
+  const registry: RpcAgentRegistry = new Map([[child.agentId, child]]);
+  installSubtreePublisher(registry, undefined, () => 2);
+
+  const snapshot = publishSubtree(registry)!;
+  assert.deepEqual(snapshot.descendants, [
+    { id: "child", parentId: null, depth: 0, role: "worker", live: true },
+    { id: "grandchild", parentId: "child", depth: 1, role: "explore", live: true },
+    { id: "great-grandchild", parentId: "grandchild", depth: 2, role: "execute", live: false },
+  ]);
+  assert.deepEqual(
+    { outstanding: snapshot.outstanding, active: snapshot.active, deliveries: snapshot.deliveries, delegated: snapshot.delegated, revision: snapshot.revision },
+    { outstanding: 0, active: 1, deliveries: 2, delegated: true, revision: 0 },
+  );
+  assert.equal(subtreeWaiting(snapshot), true, "identity rows are not an input to wait/settle");
+});
+
+test("subtree identity guards bound pathological breadth and depth without corrupting counts", () => {
+  const descendants = Array.from({ length: MAX_SUBTREE_DESCENDANTS + 20 }, (_, index) => ({
+    id: `nested-${index}`,
+    parentId: index === 0 ? null : `nested-${index - 1}`,
+    depth: index,
+    role: "worker" as const,
+    live: true,
+  }));
+  const child = record("guard-root", { running: true, subtreeDescendants: descendants });
+  const registry: RpcAgentRegistry = new Map([[child.agentId, child]]);
+  installSubtreePublisher(registry, undefined, () => 0);
+
+  const snapshot = publishSubtree(registry)!;
+  assert.ok(snapshot.descendants.length <= MAX_SUBTREE_DESCENDANTS);
+  assert.ok(snapshot.descendants.every((row) => row.depth <= MAX_SUBTREE_DESCENDANT_DEPTH));
+  assert.deepEqual(
+    { outstanding: snapshot.outstanding, active: snapshot.active, deliveries: snapshot.deliveries },
+    { outstanding: 0, active: 1, deliveries: 0 },
+  );
+});
+
 test("ordinary settlement yields exactly one terminal result and clears execution before delivery", async () => {
   const sent: any[] = [];
   const h = pushHarness(sent);
@@ -211,6 +261,9 @@ test("a settled parent waits for descendants without remaining globally running"
   await drain();
   assert.equal(parent.running, false);
   assert.equal(parent.waitingOnChildren, true);
+  assert.deepEqual(parent.subtreeDescendants, [
+    { id: "grandchild", parentId: null, depth: 0, role: "worker", live: false },
+  ], "the same child snapshot read that drives waiting also retains advisory identity");
   assert.equal(hasRunningAgents(registry), false);
   assert.equal(listAgents(registry)[0]?.status, "waiting-on-children");
   assert.equal(sent.length, 0);
