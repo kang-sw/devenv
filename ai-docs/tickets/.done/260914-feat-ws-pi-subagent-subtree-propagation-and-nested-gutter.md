@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 5f5078312f800d5c
 sage-review-completeness-reviewed: 5f5078312f800d5c
+completed: 2026-09-20
 ---
 
 # Recursive subagent tracking: cross-process subtree propagation + nested gutter
@@ -246,3 +247,8 @@ openable agent still opens its viewer, and the dormant tier is preserved.
 - Reused `buildAgentTree` in `/audit`, preserving local tier ordering and dormant roots while placing propagated descendants directly beneath their local ancestor.
 - Descendant context rows are visibly indented and keyboard navigation skips them through the `openable` contract; direct local rows still open the existing viewer unchanged.
 - Verification: `node --test test/audit.test.ts` passed 50/50; the final package suite passed 1,602 tests with 0 failures and 2 skips.
+
+
+## Resolution (2026-09-20)
+
+Implemented bounded recursive subtree identity propagation, shared nested tree rendering in the live gutter and `/audit`, push notifications across process hops, non-openable propagated audit context rows, and regression coverage for lifecycle invariants and guard limits.
