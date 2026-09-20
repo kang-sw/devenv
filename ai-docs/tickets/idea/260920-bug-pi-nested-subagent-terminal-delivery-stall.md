@@ -22,6 +22,15 @@ Expected behavior: when a nested child settles, its direct parent receives the
 terminal delivery without external prompting and can leave
 `waiting-on-children` once its subtree is quiescent.
 
+## Decisions
+
+- Recursive subagent terminal messages must not be lost. Delivery must reach the
+  direct parent and be consumed without an unrelated external prompt, including
+  after a child stop/resume recovery.
+- Do not solve delivery reliability by imposing a lifetime timeout on
+  subagents. Agents remain unbounded; this ticket restores lossless delivery and
+  parent wake-up behavior.
+
 ## Open Questions
 
 - Did the terminal result reach the parent's delivery queue but fail to wake it,
