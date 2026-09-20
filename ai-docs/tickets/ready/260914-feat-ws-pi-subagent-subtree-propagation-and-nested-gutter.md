@@ -192,6 +192,12 @@ correct `parentId`/`depth`, (b) the count fields and `subtreeWaiting`/
 trees, (c) the guard bound truncates a pathological tree without corrupting
 counts.
 
+### Result (5886d3b7) - 2026-09-20
+
+- Extended the private subtree snapshot with bounded advisory descendant identity and rebuilt parent/depth edges at each process hop without changing authoritative `outstanding`, `active`, or `deliveries` counts.
+- Round-1 review identified idle-parent notification and stale teardown gaps; `2f4771f3` added native channel-write subscriptions, generation fencing, descendant invalidation on direct-child teardown, and exact breadth/depth boundary coverage.
+- Verification: focused recursive subtree tests passed 4/4; the final package suite passed 1,602 tests with 0 failures and 2 skips.
+
 ### Phase 2: Shared tree-builder + nested gutter render
 
 Depends on Phase 1.
@@ -211,6 +217,12 @@ correct indentation and parent grouping, deep rows show real liveness, and
 non-tree inclusion (thread rows, filtering) is unchanged from the flat-panel
 baseline.
 
+### Result (ab8b02f6) - 2026-09-20
+
+- Added the shared `buildAgentTree` projection and rendered each live descendant under its parent with one `│ ` gutter segment per depth while preserving existing local row state and telemetry behavior.
+- Propagated descendants remain liveness-only and non-openable; dormant propagated rows are omitted from the live gutter. `2f4771f3` unified the tree role type with the subtree transport role contract after fit review.
+- Verification: `node --test test/agent-widget.test.ts` passed 50/50; the final package suite passed 1,602 tests with 0 failures and 2 skips.
+
 ### Phase 3: Audit picker consumes the shared tree (non-openable grandchildren)
 
 Depends on Phase 2.
@@ -228,3 +240,9 @@ reachability) — out of scope per D5, deferred to the conversation-view epic.
 Verification boundary: tests assert the picker lists the tree with correct
 depth, an unreachable grandchild is present but non-selectable, a locally
 openable agent still opens its viewer, and the dormant tier is preserved.
+
+### Result (33630931) - 2026-09-20
+
+- Reused `buildAgentTree` in `/audit`, preserving local tier ordering and dormant roots while placing propagated descendants directly beneath their local ancestor.
+- Descendant context rows are visibly indented and keyboard navigation skips them through the `openable` contract; direct local rows still open the existing viewer unchanged.
+- Verification: `node --test test/audit.test.ts` passed 50/50; the final package suite passed 1,602 tests with 0 failures and 2 skips.
