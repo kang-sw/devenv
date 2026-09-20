@@ -4,9 +4,28 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
+
+// stemDatePrefixRe matches a leading YYMMDD- date prefix on a caller-supplied
+// stem — the shape "stem" takes everywhere else in the workflow (ticket
+// filenames, git log --grep, and every ticket reference), but not the
+// dateless-semantic shape TicketCreate contractually expects. No ticket
+// category is numeric (feat/bug/refactor/chore/research/epic/...), so a
+// leading 6-digit prefix never misclassifies a valid semantic stem.
+var stemDatePrefixRe = regexp.MustCompile(`^(\d{6})-(.+)$`)
+
+// splitDatePrefix reports whether stem carries a leading YYMMDD- prefix and,
+// if so, returns the embedded date and the remaining dateless stem.
+func splitDatePrefix(stem string) (embedded, rest string, ok bool) {
+	m := stemDatePrefixRe.FindStringSubmatch(stem)
+	if m == nil {
+		return "", "", false
+	}
+	return m[1], m[2], true
+}
 
 type TicketCreateOptions struct {
 	Stem         string // semantic stem (no date prefix)
@@ -33,6 +52,27 @@ func TicketCreate(root string, opts TicketCreateOptions) (TicketCreateResult, er
 		return TicketCreateResult{}, fmt.Errorf("stem must not be empty")
 	}
 
+	today := strings.TrimSpace(opts.Today)
+	if today == "" {
+		today = time.Now().Format("060102")
+	}
+
+	// stem is contractually dateless; TicketCreate prepends today's date
+	// below. A caller passing the dated form "stem" takes everywhere else
+	// (filenames, git log --grep, ticket references) would otherwise double
+	// the prefix silently. A prefix equal to today is a harmless duplicate —
+	// strip and proceed; a prefix that differs from today is ambiguous
+	// between an intentional backdate and a mistake, so it is rejected
+	// rather than silently honored or silently re-dated.
+	if embedded, rest, ok := splitDatePrefix(stem); ok {
+		if embedded != today {
+			return TicketCreateResult{}, fmt.Errorf(
+				"stem carries date prefix %q but today is %s; pass a dateless semantic stem (the date is prepended automatically)",
+				embedded+"-", today)
+		}
+		stem = rest
+	}
+
 	category, _, _ := strings.Cut(stem, "-")
 	state := strings.TrimSpace(opts.InitialState)
 	if state == "ready" && nonImplementationCategories[category] {
@@ -49,11 +89,6 @@ func TicketCreate(root string, opts TicketCreateOptions) (TicketCreateResult, er
 	case "idea", "todo", "ready":
 	default:
 		return TicketCreateResult{}, fmt.Errorf("initial_state must be idea, todo, or ready")
-	}
-
-	today := strings.TrimSpace(opts.Today)
-	if today == "" {
-		today = time.Now().Format("060102")
 	}
 
 	fullStem := today + "-" + stem

@@ -312,6 +312,53 @@ func TestTicketCreateDatePrefix(t *testing.T) {
 	}
 }
 
+// TestTicketCreateDatePrefixDedup covers the create_empty coercion trap: stem
+// is contractually dateless, but a caller passing the dated form "stem" takes
+// everywhere else (filenames, git log --grep, ticket references) must not
+// silently double the prefix. A leading YYMMDD- equal to today is a harmless
+// duplicate (stripped); one that differs is ambiguous (rejected); no prefix
+// passes through unchanged.
+func TestTicketCreateDatePrefixDedup(t *testing.T) {
+	t.Run("equal-today dedup", func(t *testing.T) {
+		root := t.TempDir()
+		res, err := TicketCreate(root, TicketCreateOptions{Stem: "260101-feat-foo", InitialState: "idea", Today: "260101"})
+		if err != nil {
+			t.Fatalf("TicketCreate: %v", err)
+		}
+		if res.Path != "ai-docs/tickets/idea/260101-feat-foo.md" {
+			t.Fatalf("path = %q, want the date prefix deduped, not doubled", res.Path)
+		}
+	})
+
+	t.Run("differ-reject", func(t *testing.T) {
+		root := t.TempDir()
+		_, err := TicketCreate(root, TicketCreateOptions{Stem: "260102-feat-foo", InitialState: "idea", Today: "260101"})
+		if err == nil {
+			t.Fatal("expected rejection for a stem date prefix that differs from today, got nil")
+		}
+		msg := err.Error()
+		for _, want := range []string{"260102", "260101", "dateless semantic stem"} {
+			if !strings.Contains(msg, want) {
+				t.Fatalf("error %q missing %q", msg, want)
+			}
+		}
+		if _, statErr := os.Stat(filepath.Join(root, "ai-docs")); !os.IsNotExist(statErr) {
+			t.Fatalf("rejected creation must not touch the filesystem: %v", statErr)
+		}
+	})
+
+	t.Run("no-prefix passthrough", func(t *testing.T) {
+		root := t.TempDir()
+		res, err := TicketCreate(root, TicketCreateOptions{Stem: "feat-foo", InitialState: "idea", Today: "260101"})
+		if err != nil {
+			t.Fatalf("TicketCreate: %v", err)
+		}
+		if res.Path != "ai-docs/tickets/idea/260101-feat-foo.md" {
+			t.Fatalf("path = %q, want today's date prepended once", res.Path)
+		}
+	})
+}
+
 func TestTicketCreateActionableTodoHasNoReviewPosture(t *testing.T) {
 	for _, category := range []string{"feat", "bug", "refactor", "chore"} {
 		root := t.TempDir()

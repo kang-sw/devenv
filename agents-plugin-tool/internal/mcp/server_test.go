@@ -2524,6 +2524,40 @@ func TestServeStdioGitCommitAIContextConditionsAndDebugEvent(t *testing.T) {
 	}
 }
 
+// TestServeStdioGitCommitRejectsNonArrayAIContext covers the ai_context
+// type-coercion trap distinct from the absent/empty/all-blank diagnostics
+// TestServeStdioGitCommitAIContextConditionsAndDebugEvent covers: a caller
+// passing a dash-bulleted prose string (the shape a commit message's
+// `## AI Context` block takes everywhere else in the workflow) must get a
+// type-accurate rejection, not stringListKeepBlank's silent nil-coercion
+// collapsing it into "no ai_context field was received" — indistinguishable
+// from an omitted field.
+func TestServeStdioGitCommitRejectsNonArrayAIContext(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	mustWrite(t, root, "file.txt", "one\n")
+	runGit(t, root, "add", "file.txt")
+	runGit(t, root, "commit", "-m", "initial")
+	mustWrite(t, root, "file.txt", "one\ntwo\n")
+
+	server := NewServer(root, "test")
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt"],"title":"test: prose ai_context","ai_context":"- User intent: prose string instead of array."}}}`
+
+	var out bytes.Buffer
+	if err := serveStdioWithSession(t, server, root, input, &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	resp := strings.TrimSpace(out.String())
+	text := toolText(t, resp)
+	if !strings.Contains(resp, `"isError":true`) || !strings.Contains(text, "ai_context must be an array of strings") || !strings.Contains(text, "got string") {
+		t.Fatalf("git.commit with prose-string ai_context = %s", resp)
+	}
+	if strings.Contains(text, "no ai_context field was received") {
+		t.Fatalf("must not fall through to the absent-field message: %s", text)
+	}
+}
+
 func TestAPIListDomains(t *testing.T) {
 	root := t.TempDir()
 	useLeadProfile(t)
