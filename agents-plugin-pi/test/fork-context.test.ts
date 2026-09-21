@@ -1,9 +1,13 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { applyForkAffinity, captureForkContext, captureRegisteredTools, classifyForkRegistrations, compareForkRegistrations, parseForkContext, readForkLaunchContext, restoreForkContext, writePrivateJson } from "../src/fork-context.ts";
+
+function renameFailure(code: string): NodeJS.ErrnoException {
+  return Object.assign(new Error(code), { code });
+}
 
 describe("ForkContext", () => {
   const context = captureForkContext({
@@ -48,6 +52,105 @@ describe("ForkContext", () => {
       const path = join(directory, "launch.json");
       writePrivateJson(path, { nonce: "nonce", readinessPath: join(directory, "ready.json") });
       assert.throws(() => readForkLaunchContext({ WS_PI_FORK_CONTEXT: path }), /malformed launch envelope/);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("retries Windows EPERM and EBUSY renames with exponential synchronous backoff", () => {
+    const directory = mkdtempSync(join(tmpdir(), "ws-pi-fork-context-"));
+    try {
+      for (const code of ["EPERM", "EBUSY"]) {
+        const path = join(directory, `${code}.json`);
+        const temporary = `${path}.${code}.tmp`;
+        const delays: number[] = [];
+        let attempts = 0;
+        writeFileSync(path, JSON.stringify({ previous: code }));
+        writePrivateJson(path, { replacement: code }, {
+          platform: "win32",
+          temporaryName: () => code,
+          sleep: milliseconds => delays.push(milliseconds),
+          rename: (source, destination) => {
+            attempts += 1;
+            assert.equal(source, temporary);
+            assert.equal(destination, path);
+            if (attempts === 1) {
+              assert.deepEqual(JSON.parse(readFileSync(path, "utf8")), { previous: code });
+              throw renameFailure(code);
+            }
+            renameSync(source, destination);
+          },
+        });
+        assert.equal(attempts, 2);
+        assert.deepEqual(delays, [10]);
+        assert.deepEqual(JSON.parse(readFileSync(path, "utf8")), { replacement: code });
+        assert.equal(existsSync(temporary), false);
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("does not retry ineligible rename failures", () => {
+    const directory = mkdtempSync(join(tmpdir(), "ws-pi-fork-context-"));
+    try {
+      for (const { platform, code } of [{ platform: "win32" as const, code: "EACCES" }, { platform: "linux" as const, code: "EPERM" }]) {
+        const path = join(directory, `${platform}-${code}.json`);
+        const temporary = `${path}.${platform}-${code}.tmp`;
+        const failure = renameFailure(code);
+        const delays: number[] = [];
+        let attempts = 0;
+        writeFileSync(path, JSON.stringify({ previous: code }));
+        assert.throws(() => writePrivateJson(path, { replacement: code }, {
+          platform,
+          temporaryName: () => `${platform}-${code}`,
+          sleep: milliseconds => delays.push(milliseconds),
+          rename: () => { attempts += 1; throw failure; },
+        }), error => error === failure);
+        assert.equal(attempts, 1);
+        assert.deepEqual(delays, []);
+        assert.deepEqual(JSON.parse(readFileSync(path, "utf8")), { previous: code });
+        assert.equal(existsSync(temporary), false);
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("preserves destination and removes the temporary file after exhausted Windows retries", () => {
+    const directory = mkdtempSync(join(tmpdir(), "ws-pi-fork-context-"));
+    try {
+      const path = join(directory, "exhausted.json");
+      const temporary = `${path}.fixed.tmp`;
+      const failures = Array.from({ length: 5 }, () => renameFailure("EPERM"));
+      const delays: number[] = [];
+      let attempts = 0;
+      writeFileSync(path, JSON.stringify({ previous: true }));
+      assert.throws(() => writePrivateJson(path, { replacement: true }, {
+        platform: "win32",
+        temporaryName: () => "fixed",
+        sleep: milliseconds => delays.push(milliseconds),
+        rename: source => {
+          assert.equal(source, temporary);
+          assert.deepEqual(JSON.parse(readFileSync(path, "utf8")), { previous: true });
+          throw failures[attempts++];
+        },
+      }), error => error === failures[4]);
+      assert.equal(attempts, 5);
+      assert.deepEqual(delays, [10, 20, 40, 80]);
+      assert.deepEqual(JSON.parse(readFileSync(path, "utf8")), { previous: true });
+      assert.equal(existsSync(temporary), false);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("writes readable JSON normally", () => {
+    const directory = mkdtempSync(join(tmpdir(), "ws-pi-fork-context-"));
+    try {
+      const path = join(directory, "normal.json");
+      writePrivateJson(path, { nested: ["normal", 1] });
+      assert.deepEqual(JSON.parse(readFileSync(path, "utf8")), { nested: ["normal", 1] });
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

@@ -135,12 +135,46 @@ export interface ForkReadiness {
   error?: string;
 }
 
-export function writePrivateJson(path: string, data: unknown): void {
+export interface PrivateJsonWriteHooks {
+  platform?: NodeJS.Platform;
+  rename?: typeof renameSync;
+  sleep?: (milliseconds: number) => void;
+  temporaryName?: () => string;
+}
+
+const privateJsonSleeper = new Int32Array(new SharedArrayBuffer(4));
+
+function sleepPrivateJson(milliseconds: number): void {
+  Atomics.wait(privateJsonSleeper, 0, 0, milliseconds);
+}
+
+function isRetryableWindowsRenameError(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  return code === "EPERM" || code === "EBUSY";
+}
+
+/** The optional hooks are a focused deterministic test seam; production callers use two arguments. */
+export function writePrivateJson(path: string, data: unknown, hooks: PrivateJsonWriteHooks = {}): void {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  const temporary = `${path}.${randomUUID()}.tmp`;
-  writeFileSync(temporary, JSON.stringify(data), { mode: 0o600 });
-  chmodSync(temporary, 0o600);
-  renameSync(temporary, path);
+  const temporary = `${path}.${(hooks.temporaryName ?? randomUUID)()}.tmp`;
+  const rename = hooks.rename ?? renameSync;
+  const platform = hooks.platform ?? process.platform;
+  const sleep = hooks.sleep ?? sleepPrivateJson;
+  try {
+    writeFileSync(temporary, JSON.stringify(data), { mode: 0o600 });
+    chmodSync(temporary, 0o600);
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        rename(temporary, path);
+        return;
+      } catch (error) {
+        if (platform !== "win32" || !isRetryableWindowsRenameError(error) || attempt === 4) throw error;
+        sleep(10 * 2 ** attempt);
+      }
+    }
+  } finally {
+    try { rmSync(temporary, { force: true }); } catch { /* Preserve the write failure. */ }
+  }
 }
 
 export function readForkLaunchContext(env: NodeJS.ProcessEnv): { context?: ForkContext; nonce: string; readinessPath: string } | undefined {
