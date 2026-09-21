@@ -136,7 +136,7 @@ describe("copy-skills entrypoint", () => {
 
       const result = spawnSync(process.execPath, [join(pluginDir, "scripts", "copy-skills.mjs")], { encoding: "utf8" });
       assert.equal(result.status, 0, result.stderr || result.stdout);
-      assert.match(result.stdout, /copied .*validated playbook targets/s);
+      assert.match(result.stdout, /synchronized .*validated playbook targets/s);
       assert.equal(existsSync(join(generated, "lead-write-ticket")), false);
       assert.equal(existsSync(join(generated, "stale-extra.md")), false);
       assert.equal(readFileSync(join(generated, "lead-ticket", "SKILL.md"), "utf8"), 'playbook.read(name: "lead-ticket")');
