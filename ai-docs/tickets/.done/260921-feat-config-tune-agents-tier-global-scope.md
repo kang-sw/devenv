@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: f867e66063b53f6a
 sage-review-completeness-reviewed: f867e66063b53f6a
+completed: 2026-09-21
 ---
 
 # Allow global scope override for agents.tier model-tier tuning
@@ -169,3 +170,27 @@ Work:
 Verification: `go test ./...` under `agents-plugin-tool/` (at minimum the mcp
 and wsconfig packages) passes; new tests cover global write + leaf overlay
 precedence; catalog output for `agents.tier` advertises the scope selector.
+
+### Result (fdb7f271) - 2026-09-21
+
+- Added project/global scope selection to `agents.tier`, including explicit
+  rejection of `session` and `repo`, and preserved project as the omitted-scope
+  default. The registry now advertises both writable scopes.
+- Added the structured global writer and a shared `builtin < global < project`
+  tier/harness leaf merge. Both fixed-tier introspection and agent-spawn
+  resolution use it; `config.list` now uses the same reader for its current
+  mappings.
+- Kept `AgentTier` outside the scalar resolver. Project writes now persist a
+  sparse alias leaf so an untouched project harness can inherit global config.
+  The CLI remains project-only because it has no scope flag, as allowed.
+- Added MCP and wsconfig coverage for scope validation, catalog disclosure,
+  global persistence, global-only spawn resolution, and project-over-global
+  precedence on the same leaf.
+- Verification: `go build ./...`, `go vet ./...`, and `go test ./...` from
+  `agents-plugin-tool/` passed. Partitioned correctness and test reviews found
+  two issues; both fixes passed their fresh round-2 verification.
+
+
+## Resolution (2026-09-21)
+
+Implemented project/global `agents.tier` compound writes with builtin < global < project per-tier/harness resolution, catalog disclosure, and regression coverage. Full Go build, vet, and test suite passed; correctness and test review rounds passed after two resolved findings.

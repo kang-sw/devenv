@@ -64,38 +64,104 @@ type AgentTier struct {
 }
 
 func Load(opts Options) (Config, error) {
+	stored, err := loadProjectConfig(opts)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg := effectiveAgentConfig(stored)
+	cfg.Overrides = stored.Overrides
+	return cfg, nil
+}
+
+// loadProjectConfig reads only the persisted project layer. Unlike Load, it
+// does not add builtin aliases: callers that combine project and global layers
+// must distinguish an absent leaf from a builtin fallback.
+func loadProjectConfig(opts Options) (Config, error) {
 	path, err := Path(opts)
 	if err != nil {
 		return Config{}, err
 	}
+	return loadConfigFile(path, "project")
+}
+
+func loadConfigFile(path, scope string) (Config, error) {
 	raw, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return defaultConfig(), nil
+		return Config{}, nil
 	}
 	if err != nil {
-		return Config{}, fmt.Errorf("read ws config: %w", err)
+		return Config{}, fmt.Errorf("read %s ws config: %w", scope, err)
 	}
 	var cfg Config
 	if err := json.Unmarshal(raw, &cfg); err != nil {
-		return Config{}, fmt.Errorf("parse ws config: %w", err)
+		return Config{}, fmt.Errorf("parse %s ws config: %w", scope, err)
 	}
-	if cfg.SchemaVersion == 0 {
-		cfg.SchemaVersion = schemaVersion
-	}
-	if cfg.Agents.Tiers == nil {
-		cfg.Agents.Tiers = map[string]AgentTier{}
-	}
-	// Load-time key migration: normalize legacy light/core/deep keys to capability
-	// vocabulary (small/medium/large). This is in-memory only — no file rewrite,
-	// no schemaVersion bump. Precedence: if both a legacy key and its capability
-	// key already exist, the capability key wins; the legacy duplicate is dropped.
-	normalizeLegacyTierKeys(cfg.Agents.Tiers, cfg.Agents.ModelAliases)
-	applyDefaultTiers(cfg.Agents.Tiers)
-	if cfg.Agents.ModelAliases == nil {
-		cfg.Agents.ModelAliases = map[string]map[string]AgentTier{}
-	}
-	applyDefaultModelAliases(cfg.Agents.Tiers, cfg.Agents.ModelAliases)
 	return cfg, nil
+}
+
+// effectiveAgentConfig overlays sparse config layers onto builtin tier aliases.
+// Later layers win per tier/harness leaf, rather than replacing a whole tier map.
+func effectiveAgentConfig(layers ...Config) Config {
+	cfg := Config{
+		SchemaVersion: schemaVersion,
+		Agents: AgentsConfig{
+			Tiers:        map[string]AgentTier{},
+			ModelAliases: map[string]map[string]AgentTier{},
+		},
+	}
+	for _, layer := range layers {
+		normalizeLegacyTierKeys(layer.Agents.Tiers, layer.Agents.ModelAliases)
+		mergeAgentConfig(&cfg, layer)
+	}
+	explicitTiers := make(map[string]bool, len(cfg.Agents.Tiers))
+	for tier := range cfg.Agents.Tiers {
+		explicitTiers[tier] = true
+	}
+	applyDefaultTiers(cfg.Agents.Tiers)
+
+	// Legacy configurations that define a tier but no aliases expect that tier
+	// to seed every alias. Once a layer defines any alias leaf, however, missing
+	// siblings are builtin leaves, not implicit copies of that layer's default
+	// tier: this preserves sparse project/global leaf overlays.
+	aliasTiers := defaultConfig().Agents.Tiers
+	for tier, mapping := range cfg.Agents.Tiers {
+		if explicitTiers[tier] || len(cfg.Agents.ModelAliases[tier]) == 0 {
+			aliasTiers[tier] = mapping
+		}
+	}
+	storedAliases := cfg.Agents.ModelAliases
+	cfg.Agents.ModelAliases = defaultModelAliases(aliasTiers)
+	mergeAgentConfig(&cfg, Config{Agents: AgentsConfig{ModelAliases: storedAliases}})
+	return cfg
+}
+
+func mergeAgentConfig(dst *Config, src Config) {
+	for tier, mapping := range src.Agents.Tiers {
+		dst.Agents.Tiers[tier] = mapping
+	}
+	for tier, byHarness := range src.Agents.ModelAliases {
+		if dst.Agents.ModelAliases[tier] == nil {
+			dst.Agents.ModelAliases[tier] = map[string]AgentTier{}
+		}
+		for harness, mapping := range byHarness {
+			dst.Agents.ModelAliases[tier][harness] = mapping
+		}
+	}
+}
+
+// LoadAgentTierConfig returns effective AgentTier values after applying the
+// builtin < global < project leaf overlay. It intentionally leaves Overrides
+// alone: scalar overrides remain the Resolver's responsibility.
+func LoadAgentTierConfig(opts Options) (Config, error) {
+	globalCfg, err := loadGlobalConfig(opts)
+	if err != nil {
+		return Config{}, err
+	}
+	projectCfg, err := loadProjectConfig(opts)
+	if err != nil {
+		return Config{}, err
+	}
+	return effectiveAgentConfig(globalCfg, projectCfg), nil
 }
 
 // normalizeLegacyTierKeys migrates persisted light/core/deep map keys to their
@@ -140,14 +206,45 @@ func Show(opts Options) (View, error) {
 	if err != nil {
 		return View{}, err
 	}
-	return View{Path: path, Config: cfg}, nil
+	return View{Path: path, Config: presentationAgentConfig(cfg)}, nil
+}
+
+// presentationAgentConfig keeps the legacy Tiers view aligned with an explicit
+// default alias without making that compatibility view part of read precedence.
+func presentationAgentConfig(cfg Config) Config {
+	for tier, aliases := range cfg.Agents.ModelAliases {
+		if mapping, ok := aliases["default"]; ok {
+			cfg.Agents.Tiers[tier] = mapping
+		}
+	}
+	return cfg
 }
 
 func SetAgentsTier(opts Options, tier, backend, model string, effortValues ...string) (Config, error) {
 	return SetAgentsTierForHarness(opts, tier, backend, model, "", effortValues...)
 }
 
+// SetAgentsTierForHarness writes one tier/harness leaf to project scope.
 func SetAgentsTierForHarness(opts Options, tier, backend, model, harness string, effortValues ...string) (Config, error) {
+	cfg, err := setAgentsTierForHarness(opts, false, tier, backend, model, harness, effortValues...)
+	if err != nil {
+		return Config{}, err
+	}
+	return presentationAgentConfig(effectiveAgentConfig(cfg)), nil
+}
+
+// SetGlobalAgentsTierForHarness writes one tier/harness leaf to the cross-project
+// global config. It stays separate from the resolver because AgentTier is a
+// structured value, not a resolver override string.
+func SetGlobalAgentsTierForHarness(opts Options, tier, backend, model, harness string, effortValues ...string) (Config, error) {
+	cfg, err := setAgentsTierForHarness(opts, true, tier, backend, model, harness, effortValues...)
+	if err != nil {
+		return Config{}, err
+	}
+	return presentationAgentConfig(effectiveAgentConfig(cfg)), nil
+}
+
+func setAgentsTierForHarness(opts Options, global bool, tier, backend, model, harness string, effortValues ...string) (Config, error) {
 	tier = normalizedTier(tier)
 	if tier == "" {
 		return Config{}, fmt.Errorf("tier must be small, medium, large, or xlarge")
@@ -163,22 +260,33 @@ func SetAgentsTierForHarness(opts Options, tier, backend, model, harness string,
 	if backend == "" {
 		backend = InferBackend(model)
 	}
-	cfg, err := Load(opts)
+
+	var stored Config
+	if global {
+		stored, err = loadGlobalConfig(opts)
+	} else {
+		stored, err = loadProjectConfig(opts)
+	}
 	if err != nil {
 		return Config{}, err
 	}
-	if cfg.Agents.ModelAliases == nil {
-		cfg.Agents.ModelAliases = map[string]map[string]AgentTier{}
+	normalizeLegacyTierKeys(stored.Agents.Tiers, stored.Agents.ModelAliases)
+	effective := effectiveAgentConfig(stored)
+	if stored.Agents.Tiers == nil {
+		stored.Agents.Tiers = map[string]AgentTier{}
 	}
-	if cfg.Agents.ModelAliases[tier] == nil {
-		cfg.Agents.ModelAliases[tier] = map[string]AgentTier{}
+	if stored.Agents.ModelAliases == nil {
+		stored.Agents.ModelAliases = map[string]map[string]AgentTier{}
+	}
+	if stored.Agents.ModelAliases[tier] == nil {
+		stored.Agents.ModelAliases[tier] = map[string]AgentTier{}
 	}
 	key, err := aliasTargetKey(harness)
 	if err != nil {
 		return Config{}, err
 	}
-	existing := cfg.Agents.ModelAliases[tier][key]
-	if fallback, ok := cfg.Agents.Tiers[tier]; ok {
+	existing := effective.Agents.ModelAliases[tier][key]
+	if fallback, ok := effective.Agents.Tiers[tier]; ok {
 		if strings.TrimSpace(existing.Backend) == "" && strings.TrimSpace(existing.Model) == "" {
 			existing = fallback
 		}
@@ -201,11 +309,11 @@ func SetAgentsTierForHarness(opts Options, tier, backend, model, harness string,
 	} else {
 		mapping.Effort = ""
 	}
-	cfg.Agents.ModelAliases[tier][key] = mapping
-	if key == "default" {
-		cfg.Agents.Tiers[tier] = mapping
+	stored.Agents.ModelAliases[tier][key] = mapping
+	if global {
+		return stored, saveGlobal(opts, stored)
 	}
-	return cfg, save(opts, cfg)
+	return stored, save(opts, stored)
 }
 
 func ResolveAgent(opts Options, tier, backend, model string) (string, string, error) {
@@ -237,7 +345,7 @@ func ResolveAgentForHarnessConfig(opts Options, tier, backend, model, harness st
 		}
 		return backend, model, "", nil
 	}
-	cfg, err := Load(opts)
+	cfg, err := LoadAgentTierConfig(opts)
 	if err != nil {
 		return "", "", "", err
 	}
@@ -275,7 +383,7 @@ func ResolveAgentTierForHarness(opts Options, tier, harness string) (backend, mo
 	if normalized == "" {
 		return "", "", "", "", fmt.Errorf("tier must be small, medium, large, or xlarge; got %q", tier)
 	}
-	cfg, err := Load(opts)
+	cfg, err := LoadAgentTierConfig(opts)
 	if err != nil {
 		return "", "", "", "", err
 	}
@@ -503,6 +611,18 @@ func save(opts Options, cfg Config) error {
 	if err != nil {
 		return err
 	}
+	return saveConfigFile(path, cfg)
+}
+
+func saveGlobal(opts Options, cfg Config) error {
+	path, err := GlobalPath(opts)
+	if err != nil {
+		return err
+	}
+	return saveConfigFile(path, cfg)
+}
+
+func saveConfigFile(path string, cfg Config) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create ws config dir: %w", err)
 	}

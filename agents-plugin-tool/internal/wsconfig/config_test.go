@@ -188,6 +188,67 @@ func TestSetAgentsTierForHarnessTargetsHarnessAlias(t *testing.T) {
 // harness="pi" independent of the MCP dispatch layer, and that the
 // "default" bucket is left untouched (Decision: default bucket semantics
 // unchanged).
+func TestGlobalAgentsTierWriterAndProjectLeafOverlay(t *testing.T) {
+	opts := Options{
+		CacheHome:  filepath.Join(t.TempDir(), "cache"),
+		ConfigHome: filepath.Join(t.TempDir(), "global"),
+	}
+
+	if _, err := SetGlobalAgentsTierForHarness(opts, "medium", "claude", "global-claude", "claude", "low"); err != nil {
+		t.Fatalf("SetGlobalAgentsTierForHarness(claude): %v", err)
+	}
+	if _, err := SetGlobalAgentsTierForHarness(opts, "medium", "pi", "global-pi", "pi", "low"); err != nil {
+		t.Fatalf("SetGlobalAgentsTierForHarness(pi): %v", err)
+	}
+	globalCfg, err := loadGlobalConfig(opts)
+	if err != nil {
+		t.Fatalf("loadGlobalConfig: %v", err)
+	}
+	if aliases := globalCfg.Agents.ModelAliases["medium"]; len(aliases) != 2 || aliases["claude"].Model != "global-claude" || aliases["pi"].Model != "global-pi" {
+		t.Fatalf("global aliases = %#v, want only the configured leaves", aliases)
+	}
+	if _, err := SetAgentsTierForHarness(opts, "medium", "pi", "project-pi", "pi", "high"); err != nil {
+		t.Fatalf("SetAgentsTierForHarness: %v", err)
+	}
+
+	// The introspection resolver must retain a global leaf that the project did
+	// not set.
+	backend, model, effort, resolvedFrom, err := ResolveAgentTierForHarness(opts, "medium", "claude")
+	if err != nil {
+		t.Fatalf("ResolveAgentTierForHarness: %v", err)
+	}
+	if backend != "claude" || model != "global-claude" || effort != "low" || resolvedFrom != "claude" {
+		t.Fatalf("global resolution = %q/%q/%q from %q", backend, model, effort, resolvedFrom)
+	}
+
+	// A project leaf wins over the same global tier/harness leaf.
+	backend, model, effort, resolvedFrom, err = ResolveAgentTierForHarness(opts, "medium", "pi")
+	if err != nil {
+		t.Fatalf("ResolveAgentTierForHarness project leaf: %v", err)
+	}
+	if backend != "pi" || model != "project-pi" || effort != "high" || resolvedFrom != "pi" {
+		t.Fatalf("project precedence = %q/%q/%q from %q", backend, model, effort, resolvedFrom)
+	}
+
+	// The agent-spawn resolver must retain the global-only sibling and apply
+	// project precedence for the overlapping leaf, rather than replacing a
+	// whole tier map or reading only project scope.
+	backend, model, effort, err = ResolveAgentForHarnessConfig(opts, "medium", "", "", "claude")
+	if err != nil {
+		t.Fatalf("ResolveAgentForHarnessConfig global sibling: %v", err)
+	}
+	if backend != "claude" || model != "global-claude" || effort != "low" {
+		t.Fatalf("spawn-path global sibling = %q/%q/%q", backend, model, effort)
+	}
+	backend, model, effort, err = ResolveAgentForHarnessConfig(opts, "medium", "", "", "pi")
+	if err != nil {
+		t.Fatalf("ResolveAgentForHarnessConfig project leaf: %v", err)
+	}
+	if backend != "pi" || model != "project-pi" || effort != "high" {
+		t.Fatalf("spawn-path project precedence = %q/%q/%q", backend, model, effort)
+	}
+}
+
 func TestSetAgentsTierForHarnessTargetsPiAlias(t *testing.T) {
 	cache := filepath.Join(t.TempDir(), "cache")
 	cfg, err := SetAgentsTierForHarness(Options{CacheHome: cache}, "medium", "pi", "pi-model-1", "pi")

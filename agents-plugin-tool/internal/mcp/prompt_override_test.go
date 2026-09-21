@@ -1276,6 +1276,7 @@ func TestConfigTuningCatalogProjectsPromptAndSchemaKnobs(t *testing.T) {
 	assertFieldEnum(t, agentsKnob.ValueFields, "tier", []string{"small", "medium", "large", "xlarge"})
 	assertFieldEnum(t, agentsKnob.ValueFields, "effort", []string{"", "none", "low", "medium", "high", "xhigh"})
 	assertFieldEnum(t, agentsKnob.SelectorFields, "harness", []string{"claude", "codex", "pi", "default"})
+	assertFieldEnum(t, agentsKnob.SelectorFields, "scope", []string{"project", "global"})
 }
 
 func TestConfigTuneSageReviewScopesAndValidation(t *testing.T) {
@@ -1400,6 +1401,7 @@ func TestConfigTuningCatalogNoAgentShape(t *testing.T) {
 	assertFieldEnum(t, agentsKnob.ValueFields, "tier", []string{"small", "medium", "large", "xlarge"})
 	assertFieldEnum(t, agentsKnob.ValueFields, "effort", []string{"", "none", "low", "medium", "high", "xhigh"})
 	assertFieldEnum(t, agentsKnob.SelectorFields, "harness", []string{"claude", "codex", "pi", "default"})
+	assertFieldEnum(t, agentsKnob.SelectorFields, "scope", []string{"project", "global"})
 }
 
 // TestConfigTuningCatalogNoAgentCutHonorsNoAgentVisible exercises the agentless
