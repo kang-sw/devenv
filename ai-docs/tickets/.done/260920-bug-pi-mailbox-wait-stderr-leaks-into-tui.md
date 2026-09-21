@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 3d1d9c0a1a19c3f0
 sage-review-completeness-reviewed: 3d1d9c0a1a19c3f0
+completed: 2026-09-21
 ---
 
 # pi mailbox-wait subprocess stderr leaks into the TUI
@@ -95,3 +96,9 @@ stderr routing changes here.
 does not reach `console.error` / the raw TTY and that the child's stderr instead
 lands on the injected diagnostic sink; existing waiter tests stay green; the
 non-TUI path (if any) is unaffected.
+
+### Result (6d7b1a7e) - 2026-09-21
+
+- Routed mailbox child stderr and waiter-loop failures through the owner TUI's notification API; unconfigured diagnostic sinks now discard output instead of falling back to `console.error`.
+- Added subprocess stderr-routing coverage and a regression that an omitted loop error sink never writes to the terminal. Focused `node --test test/mailbox-waiter.test.ts` passed (30 tests).
+- Review: round 1 found the omitted-loop-sink coverage gap, resolved in `f458e244`; round 2 verified the fix with no remaining findings. The full `npm test` run was environment-blocked by the isolated worktree's missing dependencies and, after a temporary dependency link, unrelated web-search fixture failures; the focused affected suite passed.
