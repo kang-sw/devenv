@@ -54,6 +54,7 @@
     "playbook.read": ">=0.46.15-dev <0.47.0",
     "playbook.render": ">=0.46.15-dev <0.47.0",
     "git.status": ">=0.46.15-dev <0.47.0",
+    "git.resolve_impl_branch": ">=0.46.15-dev <0.47.0",
     "git.diff": ">=0.46.15-dev <0.47.0",
     "git.log": ">=0.46.15-dev <0.47.0",
     "rationale.query": ">=0.46.15-dev <0.47.0",

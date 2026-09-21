@@ -282,7 +282,7 @@ func TestResolveImplementAheadOfMergeRootBlocksRenameRegardlessOfAllowRename(t *
 	if result.Verdict.BranchPlan.SuspectedOwnerStem != "old" {
 		t.Fatalf("suspected owner stem = %q, want %q", result.Verdict.BranchPlan.SuspectedOwnerStem, "old")
 	}
-	for _, want := range []string{"session context", "explore", "old"} {
+	for _, want := range []string{"branch identity blocker", "lead", "identity_vouch", "worker must not self-authorize", "old"} {
 		if !strings.Contains(result.NextInstruction, want) {
 			t.Fatalf("next instruction missing %q: %q", want, result.NextInstruction)
 		}

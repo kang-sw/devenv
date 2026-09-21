@@ -400,9 +400,10 @@ class WsflowSkillBundleTest(unittest.TestCase):
         self.assertIn("The approved batch is the concurrency cap.", run)
         self.assertIn("Render `ticket-batch-selector` and spawn it at its recommended tier", run)
         self.assertIn(
-            "{{.McpNamespace}}/worktree.acquire(base: <your branch>, target_branch:"
-            " <that ticket's impl/<parent>/<slug> branch>, session_key: <your key>)`"
-            " and keep the `worker_key` it returns",
+            "For each approved ticket, resolve its canonical branch with "
+            "`{{.McpNamespace}}/git.resolve_impl_branch` against your exact base branch, "
+            "then pass that returned branch verbatim as `target_branch` to "
+            "`{{.McpNamespace}}/worktree.acquire`. Keep the `worker_key` it returns",
             run,
         )
         self.assertIn("it is the sole branch owner, so skip Spawn step 3", run)
