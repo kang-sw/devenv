@@ -195,14 +195,17 @@ func TestGlobalAgentsTierWriterAndProjectLeafOverlay(t *testing.T) {
 	}
 
 	if _, err := SetGlobalAgentsTierForHarness(opts, "medium", "claude", "global-claude", "claude", "low"); err != nil {
-		t.Fatalf("SetGlobalAgentsTierForHarness: %v", err)
+		t.Fatalf("SetGlobalAgentsTierForHarness(claude): %v", err)
+	}
+	if _, err := SetGlobalAgentsTierForHarness(opts, "medium", "pi", "global-pi", "pi", "low"); err != nil {
+		t.Fatalf("SetGlobalAgentsTierForHarness(pi): %v", err)
 	}
 	globalCfg, err := loadGlobalConfig(opts)
 	if err != nil {
 		t.Fatalf("loadGlobalConfig: %v", err)
 	}
-	if aliases := globalCfg.Agents.ModelAliases["medium"]; len(aliases) != 1 || aliases["claude"].Model != "global-claude" {
-		t.Fatalf("global aliases = %#v, want only the configured leaf", aliases)
+	if aliases := globalCfg.Agents.ModelAliases["medium"]; len(aliases) != 2 || aliases["claude"].Model != "global-claude" || aliases["pi"].Model != "global-pi" {
+		t.Fatalf("global aliases = %#v, want only the configured leaves", aliases)
 	}
 	if _, err := SetAgentsTierForHarness(opts, "medium", "pi", "project-pi", "pi", "high"); err != nil {
 		t.Fatalf("SetAgentsTierForHarness: %v", err)
@@ -218,14 +221,31 @@ func TestGlobalAgentsTierWriterAndProjectLeafOverlay(t *testing.T) {
 		t.Fatalf("global resolution = %q/%q/%q from %q", backend, model, effort, resolvedFrom)
 	}
 
-	// The agent-spawn resolver must use the project leaf while retaining the
-	// global leaf above, rather than replacing a whole tier map at either layer.
+	// A project leaf wins over the same global tier/harness leaf.
+	backend, model, effort, resolvedFrom, err = ResolveAgentTierForHarness(opts, "medium", "pi")
+	if err != nil {
+		t.Fatalf("ResolveAgentTierForHarness project leaf: %v", err)
+	}
+	if backend != "pi" || model != "project-pi" || effort != "high" || resolvedFrom != "pi" {
+		t.Fatalf("project precedence = %q/%q/%q from %q", backend, model, effort, resolvedFrom)
+	}
+
+	// The agent-spawn resolver must retain the global-only sibling and apply
+	// project precedence for the overlapping leaf, rather than replacing a
+	// whole tier map or reading only project scope.
+	backend, model, effort, err = ResolveAgentForHarnessConfig(opts, "medium", "", "", "claude")
+	if err != nil {
+		t.Fatalf("ResolveAgentForHarnessConfig global sibling: %v", err)
+	}
+	if backend != "claude" || model != "global-claude" || effort != "low" {
+		t.Fatalf("spawn-path global sibling = %q/%q/%q", backend, model, effort)
+	}
 	backend, model, effort, err = ResolveAgentForHarnessConfig(opts, "medium", "", "", "pi")
 	if err != nil {
-		t.Fatalf("ResolveAgentForHarnessConfig: %v", err)
+		t.Fatalf("ResolveAgentForHarnessConfig project leaf: %v", err)
 	}
 	if backend != "pi" || model != "project-pi" || effort != "high" {
-		t.Fatalf("spawn-path resolution = %q/%q/%q", backend, model, effort)
+		t.Fatalf("spawn-path project precedence = %q/%q/%q", backend, model, effort)
 	}
 }
 
