@@ -9,10 +9,12 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import { join } from "node:path";
 import {
   buildMailboxPushMessage,
   buildMailboxWaitArgv,
   createBridgeDrain,
+  createSubprocessWait,
   mapMailboxWaitExit,
   resolveMailboxSelfSlug,
   shouldArmMailboxWaiter,
@@ -133,6 +135,20 @@ describe("startMailboxWaiter", () => {
     assert.ok(errors.some((message) => message.includes("wait failed")), "the wait failure is reported");
   });
 
+  test("an omitted error sink does not write waiter failures to console.error", async (t) => {
+    const consoleErrors: unknown[][] = [];
+    t.mock.method(console, "error", (...args: unknown[]) => { consoleErrors.push(args); });
+    let calls = 0;
+    const waiter = startMailboxWaiter({
+      runWait: async () => calls++ === 0 ? Promise.reject(new Error("spawn boom")) : "stopped",
+      drainMail: () => Promise.resolve([]),
+      admit: () => assert.fail("no mail is admitted after a failed wait"),
+      sleep: immediateSleep,
+    });
+    await waiter.done;
+    assert.deepEqual(consoleErrors, [], "an omitted sink must not write waiter failures to the terminal");
+  });
+
   test("a mail wake that drains nothing (peek/drain race) re-arms without admitting or backing off", async () => {
     const admitted: MailboxEnvelope[] = [];
     const sleeps: number[] = [];
@@ -197,6 +213,33 @@ describe("buildMailboxPushMessage", () => {
     const message = buildMailboxPushMessage({ from: "alice@machine", reply_to: "id:beef", content: "hi", sent_at: "  2026-09-15T00:00:00Z  " });
     assert.equal(message.content, "mail from alice@machine (2026-09-15T00:00:00Z):\nhi");
     assert.deepEqual(message.details, { from: "alice@machine", reply_to: "id:beef", content: "hi", sent_at: "2026-09-15T00:00:00Z" });
+  });
+});
+
+describe("createSubprocessWait", () => {
+  test("child stderr is silent by default and reaches an injected diagnostic sink", async (t) => {
+    const consoleErrors: unknown[][] = [];
+    t.mock.method(console, "error", (...args: unknown[]) => { consoleErrors.push(args); });
+    const missingLauncher = join(process.cwd(), "__ws-mailbox-waiter-missing-launcher__.py");
+
+    const defaultOutcome = await createSubprocessWait({
+      launcherPath: missingLauncher,
+      pluginDir: process.cwd(),
+      sessionKey: "my-key",
+    })(new AbortController().signal);
+    assert.equal(defaultOutcome, "error");
+    assert.deepEqual(consoleErrors, [], "an omitted sink must not write child stderr to the terminal");
+
+    const diagnostics: string[] = [];
+    const injectedOutcome = await createSubprocessWait({
+      launcherPath: missingLauncher,
+      pluginDir: process.cwd(),
+      sessionKey: "my-key",
+      onStderr: (line) => diagnostics.push(line),
+    })(new AbortController().signal);
+    assert.equal(injectedOutcome, "error");
+    assert.ok(diagnostics.length > 0, "the injected sink receives the child's stderr");
+    assert.deepEqual(consoleErrors, [], "an injected sink replaces the raw-terminal default");
   });
 });
 
