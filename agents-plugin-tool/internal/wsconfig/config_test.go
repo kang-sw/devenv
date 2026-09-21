@@ -188,6 +188,47 @@ func TestSetAgentsTierForHarnessTargetsHarnessAlias(t *testing.T) {
 // harness="pi" independent of the MCP dispatch layer, and that the
 // "default" bucket is left untouched (Decision: default bucket semantics
 // unchanged).
+func TestGlobalAgentsTierWriterAndProjectLeafOverlay(t *testing.T) {
+	opts := Options{
+		CacheHome:  filepath.Join(t.TempDir(), "cache"),
+		ConfigHome: filepath.Join(t.TempDir(), "global"),
+	}
+
+	if _, err := SetGlobalAgentsTierForHarness(opts, "medium", "claude", "global-claude", "claude", "low"); err != nil {
+		t.Fatalf("SetGlobalAgentsTierForHarness: %v", err)
+	}
+	globalCfg, err := loadGlobalConfig(opts)
+	if err != nil {
+		t.Fatalf("loadGlobalConfig: %v", err)
+	}
+	if aliases := globalCfg.Agents.ModelAliases["medium"]; len(aliases) != 1 || aliases["claude"].Model != "global-claude" {
+		t.Fatalf("global aliases = %#v, want only the configured leaf", aliases)
+	}
+	if _, err := SetAgentsTierForHarness(opts, "medium", "pi", "project-pi", "pi", "high"); err != nil {
+		t.Fatalf("SetAgentsTierForHarness: %v", err)
+	}
+
+	// The introspection resolver must retain a global leaf that the project did
+	// not set.
+	backend, model, effort, resolvedFrom, err := ResolveAgentTierForHarness(opts, "medium", "claude")
+	if err != nil {
+		t.Fatalf("ResolveAgentTierForHarness: %v", err)
+	}
+	if backend != "claude" || model != "global-claude" || effort != "low" || resolvedFrom != "claude" {
+		t.Fatalf("global resolution = %q/%q/%q from %q", backend, model, effort, resolvedFrom)
+	}
+
+	// The agent-spawn resolver must use the project leaf while retaining the
+	// global leaf above, rather than replacing a whole tier map at either layer.
+	backend, model, effort, err = ResolveAgentForHarnessConfig(opts, "medium", "", "", "pi")
+	if err != nil {
+		t.Fatalf("ResolveAgentForHarnessConfig: %v", err)
+	}
+	if backend != "pi" || model != "project-pi" || effort != "high" {
+		t.Fatalf("spawn-path resolution = %q/%q/%q", backend, model, effort)
+	}
+}
+
 func TestSetAgentsTierForHarnessTargetsPiAlias(t *testing.T) {
 	cache := filepath.Join(t.TempDir(), "cache")
 	cfg, err := SetAgentsTierForHarness(Options{CacheHome: cache}, "medium", "pi", "pi-model-1", "pi")

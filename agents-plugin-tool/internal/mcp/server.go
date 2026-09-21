@@ -855,16 +855,16 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 				}
 			}
 		}
-		// Scope: parse when non-empty. agents.tier is not resolver-backed and only
-		// writes project scope; resolver-backed keys lean on Resolver.Set/Unset for
-		// global-only + session-key enforcement.
+		// Scope: parse when non-empty. agents.tier is not resolver-backed, so its
+		// compound writer validates its own project/global axis; resolver-backed
+		// keys lean on Resolver.Set/Unset for scope enforcement.
 		scopeArg, _ := params.Arguments["scope"].(string)
 		var explicitScope wsconfig.Scope
 		if strings.TrimSpace(scopeArg) != "" {
 			explicitScope = wsconfig.Scope(strings.TrimSpace(scopeArg))
 		}
-		if entry.Key == "agents.tier" && explicitScope != "" && explicitScope != wsconfig.ScopeProject {
-			return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: agents.tier only supports project scope; got %q", explicitScope))
+		if entry.Key == "agents.tier" && explicitScope != "" && explicitScope != wsconfig.ScopeProject && explicitScope != wsconfig.ScopeGlobal {
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: agents.tier only supports project or global scope; got %q", explicitScope))
 		}
 		reset, _ := params.Arguments["reset"].(bool)
 		if reset {
@@ -930,8 +930,15 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			model, _ := rawValue["model"].(string)
 			var cfg wsconfig.Config
 			var err error
+			global := explicitScope == wsconfig.ScopeGlobal
 			if effort, effortOK := rawValue["effort"].(string); effortOK {
-				cfg, err = wsconfig.SetAgentsTierForHarness(wsconfig.Options{}, tier, backend, model, harness, effort)
+				if global {
+					cfg, err = wsconfig.SetGlobalAgentsTierForHarness(wsconfig.Options{}, tier, backend, model, harness, effort)
+				} else {
+					cfg, err = wsconfig.SetAgentsTierForHarness(wsconfig.Options{}, tier, backend, model, harness, effort)
+				}
+			} else if global {
+				cfg, err = wsconfig.SetGlobalAgentsTierForHarness(wsconfig.Options{}, tier, backend, model, harness)
 			} else {
 				cfg, err = wsconfig.SetAgentsTierForHarness(wsconfig.Options{}, tier, backend, model, harness)
 			}

@@ -1464,6 +1464,49 @@ func TestServeStdioConfigAgentsTierAcceptsHarnessCaseInsensitively(t *testing.T)
 	}
 }
 
+func TestServeStdioConfigAgentsTierScopesWriteAndResolve(t *testing.T) {
+	useLeadProfile(t)
+	root := initTicketRepo(t, "260921-feat-config-tune-agents-tier-global-scope")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "global"))
+
+	server := NewServer(root, "test")
+	inputs := []string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"config.tune","arguments":{"key":"agents.tier","scope":"global","harness":"claude","value":{"tier":"medium","backend":"claude","model":"global-claude","effort":"low"}}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"config.tune","arguments":{"key":"agents.tier","scope":"project","harness":"pi","value":{"tier":"medium","backend":"pi","model":"project-pi","effort":"high"}}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"config.resolve_agent","arguments":{"tier":"medium","harness":"claude","format":"json"}}}`,
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"config.resolve_agent","arguments":{"tier":"medium","harness":"pi","format":"json"}}}`,
+		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"config.tune","arguments":{"key":"agents.tier","scope":"session","value":{"tier":"medium"}}}}`,
+		`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"config.tune","arguments":{"key":"agents.tier","scope":"repo","value":{"tier":"medium"}}}}`,
+	}
+
+	var out bytes.Buffer
+	for _, input := range inputs {
+		out.Reset()
+		if err := server.ServeStdio(context.Background(), strings.NewReader(input+"\n"), &out); err != nil {
+			t.Fatalf("ServeStdio: %v", err)
+		}
+		byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+		for _, id := range []string{"1", "2", "3", "4"} {
+			if resp, ok := byID[id]; ok && toolIsError(t, resp) {
+				t.Fatalf("request %s failed: %s", id, resp)
+			}
+		}
+		if resp, ok := byID["5"]; ok && !toolIsError(t, resp) {
+			t.Fatalf("session scope unexpectedly succeeded: %s", resp)
+		}
+		if resp, ok := byID["6"]; ok && !toolIsError(t, resp) {
+			t.Fatalf("repo scope unexpectedly succeeded: %s", resp)
+		}
+		if resp, ok := byID["3"]; ok && !strings.Contains(toolText(t, resp), `"model":"global-claude"`) {
+			t.Fatalf("global resolution = %s", resp)
+		}
+		if resp, ok := byID["4"]; ok && !strings.Contains(toolText(t, resp), `"model":"project-pi"`) {
+			t.Fatalf("project leaf resolution = %s", resp)
+		}
+	}
+}
+
 // TestServeStdioConfigAgentsTierAcceptsTierSynonyms guards the 260814 config
 // surface swap against a regression: config.tune must NOT enum-validate the
 // agents.tier `tier` up front. The removed config.agents_tier passed the raw

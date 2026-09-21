@@ -1,14 +1,13 @@
 package wsconfig
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 )
 
 const (
-	envConfigHome       = "WS_CONFIG_HOME"
+	envConfigHome        = "WS_CONFIG_HOME"
 	defaultConfigDirName = ".ws"
 )
 
@@ -36,16 +35,5 @@ func loadGlobalConfig(opts Options) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	raw, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		return Config{}, nil // empty global layer — not an error
-	}
-	if err != nil {
-		return Config{}, fmt.Errorf("read global ws config: %w", err)
-	}
-	var cfg Config
-	if err := json.Unmarshal(raw, &cfg); err != nil {
-		return Config{}, fmt.Errorf("parse global ws config: %w", err)
-	}
-	return cfg, nil
+	return loadConfigFile(path, "global")
 }

@@ -20,6 +20,7 @@ var (
 	agentsEffortEnum      = []string{"", "none", "low", "medium", "high", "xhigh"}
 	promptHarnessEnum     = []string{"claude", "codex", "pi", "*"}
 	agentsTierHarnessEnum = []string{"claude", "codex", "pi", "default"}
+	agentsTierScopeEnum   = []string{"project", "global"}
 )
 
 // configKeyEntry is the per-key config registry row: the single source of
@@ -73,8 +74,8 @@ type configKeyEntry struct {
 
 // GlobalOnly reports whether this key's writes are constrained to
 // global/builtin scope. Delegates to wsconfig.GlobalOnly for resolver-backed
-// keys; agents.tier is not resolver-backed and has no session/global write
-// path today, so it is fixed to project scope rather than global-only.
+// keys; agents.tier is a compound writer with explicit project/global handling
+// in config.tune, so it is not global-only.
 func (e configKeyEntry) GlobalOnly() bool {
 	if !e.ResolverBacked {
 		return false
@@ -83,9 +84,8 @@ func (e configKeyEntry) GlobalOnly() bool {
 }
 
 // DefaultScope reports this key's declared default write scope. Delegates to
-// wsconfig.DefaultScope for resolver-backed keys; agents.tier is fixed to
-// wsconfig.ScopeProject (its only write path today) rather than inventing an
-// allowed-scopes declaration that doesn't exist yet.
+// wsconfig.DefaultScope for resolver-backed keys; agents.tier defaults to its
+// project-scope compound writer.
 func (e configKeyEntry) DefaultScope() wsconfig.Scope {
 	if !e.ResolverBacked {
 		return wsconfig.ScopeProject
@@ -151,6 +151,11 @@ var configRegistry = []configKeyEntry{
 				Name:        "harness",
 				Description: "Optional harness alias key to configure. When omitted, ws uses the detected MCP session harness, or default when none is known.",
 				Enum:        agentsTierHarnessEnum,
+			},
+			{
+				Name:        "scope",
+				Description: "Storage scope. When omitted the write lands in project scope.",
+				Enum:        agentsTierScopeEnum,
 			},
 		},
 		ValueFields: []tuningField{
