@@ -135,6 +135,20 @@ describe("startMailboxWaiter", () => {
     assert.ok(errors.some((message) => message.includes("wait failed")), "the wait failure is reported");
   });
 
+  test("an omitted error sink does not write waiter failures to console.error", async (t) => {
+    const consoleErrors: unknown[][] = [];
+    t.mock.method(console, "error", (...args: unknown[]) => { consoleErrors.push(args); });
+    let calls = 0;
+    const waiter = startMailboxWaiter({
+      runWait: async () => calls++ === 0 ? Promise.reject(new Error("spawn boom")) : "stopped",
+      drainMail: () => Promise.resolve([]),
+      admit: () => assert.fail("no mail is admitted after a failed wait"),
+      sleep: immediateSleep,
+    });
+    await waiter.done;
+    assert.deepEqual(consoleErrors, [], "an omitted sink must not write waiter failures to the terminal");
+  });
+
   test("a mail wake that drains nothing (peek/drain race) re-arms without admitting or backing off", async () => {
     const admitted: MailboxEnvelope[] = [];
     const sleeps: number[] = [];
