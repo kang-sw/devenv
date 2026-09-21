@@ -209,6 +209,32 @@ func Show(opts Options) (View, error) {
 	return View{Path: path, Config: presentationAgentConfig(cfg)}, nil
 }
 
+// ShowResolved is Show's display-layer sibling: it composes the agents.tier
+// model_aliases the same builtin<global<project way LoadAgentTierConfig
+// already resolves them (the same precedence the MCP config.list tuning
+// catalog surfaces via currentAgentTierMappings), instead of Show's
+// project-only Load. Path and Overrides stay project-scoped, matching Show;
+// only the agent-tier mapping gains global-scope visibility. Intended for CLI
+// display callers that want the MCP-consistent resolved view without
+// reimplementing precedence.
+func ShowResolved(opts Options) (View, error) {
+	path, err := Path(opts)
+	if err != nil {
+		return View{}, err
+	}
+	tierCfg, err := LoadAgentTierConfig(opts)
+	if err != nil {
+		return View{}, err
+	}
+	projectCfg, err := loadProjectConfig(opts)
+	if err != nil {
+		return View{}, err
+	}
+	cfg := presentationAgentConfig(tierCfg)
+	cfg.Overrides = projectCfg.Overrides
+	return View{Path: path, Config: cfg}, nil
+}
+
 // presentationAgentConfig keeps the legacy Tiers view aligned with an explicit
 // default alias without making that compatibility view part of read precedence.
 func presentationAgentConfig(cfg Config) Config {
@@ -626,6 +652,17 @@ func saveConfigFile(path string, cfg Config) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create ws config dir: %w", err)
 	}
+	// A brand-new config's zero-value Config carries SchemaVersion 0 until now
+	// (setAgentsTierForHarness's `stored` layer starts from loadProjectConfig/
+	// loadGlobalConfig, which return Config{} for a missing file). The legacy
+	// Load path always stamped 1 in-memory via effectiveAgentConfig before any
+	// caller saw it, but that stamping never reached the persisted bytes for a
+	// first-ever config.tune write. Stamp it here, at the single save chokepoint
+	// for both project and global scope, so what lands on disk matches the
+	// established schema_version:1 contract regardless of caller. This is
+	// persistence-only: in-memory resolution (effectiveAgentConfig) already
+	// normalizes to schemaVersion unconditionally and is untouched.
+	cfg.SchemaVersion = schemaVersion
 	raw, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode ws config: %w", err)

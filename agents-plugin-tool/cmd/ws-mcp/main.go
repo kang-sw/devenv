@@ -260,7 +260,11 @@ func configList(args []string) {
 	format := fs.String("format", "", `output format: text or json`)
 	_ = fs.Parse(args)
 
-	view, err := wsconfig.Show(wsconfig.Options{})
+	// ShowResolved (not Show) so CLI `config list` surfaces a global-scope
+	// agents.tier override the same way the MCP config.list surface does via
+	// LoadAgentTierConfig/currentAgentTierMappings; Show alone is project-only
+	// Load and silently drops global overrides from this display.
+	view, err := wsconfig.ShowResolved(wsconfig.Options{})
 	if outputJSON(*format) {
 		printJSONOrFatal("config list", view, err)
 		return

@@ -1,11 +1,61 @@
 package wsconfig
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// TestSaveStampsSchemaVersionOnFirstWrite guards the C2 fix: a brand-new
+// config file created by the first-ever config.tune write must persist
+// "schema_version": 1 on disk, matching the legacy Load path's in-memory
+// stamp (effectiveAgentConfig), rather than the zero value carried by the
+// pre-save `stored` layer (Config{} from a missing project/global file).
+// Covers both save chokepoints (project via save, global via saveGlobal)
+// since both route through the shared saveConfigFile.
+func TestSaveStampsSchemaVersionOnFirstWrite(t *testing.T) {
+	opts := Options{
+		CacheHome:  filepath.Join(t.TempDir(), "cache"),
+		ConfigHome: filepath.Join(t.TempDir(), "global"),
+	}
+
+	if _, err := SetAgentsTier(opts, "small", "", "claude-sonnet-4"); err != nil {
+		t.Fatalf("SetAgentsTier returned error: %v", err)
+	}
+	projectPath, err := Path(opts)
+	if err != nil {
+		t.Fatalf("Path: %v", err)
+	}
+	assertPersistedSchemaVersion(t, projectPath, 1)
+
+	if _, err := SetGlobalAgentsTierForHarness(opts, "medium", "claude", "global-claude", "claude", "low"); err != nil {
+		t.Fatalf("SetGlobalAgentsTierForHarness returned error: %v", err)
+	}
+	globalPath, err := GlobalPath(opts)
+	if err != nil {
+		t.Fatalf("GlobalPath: %v", err)
+	}
+	assertPersistedSchemaVersion(t, globalPath, 1)
+}
+
+func assertPersistedSchemaVersion(t *testing.T, path string, want int) {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var onDisk struct {
+		SchemaVersion int `json:"schema_version"`
+	}
+	if err := json.Unmarshal(raw, &onDisk); err != nil {
+		t.Fatalf("unmarshal %s: %v", path, err)
+	}
+	if onDisk.SchemaVersion != want {
+		t.Fatalf("persisted schema_version = %d, want %d (raw: %s)", onDisk.SchemaVersion, want, raw)
+	}
+}
 
 func TestSetAgentsTierInfersBackend(t *testing.T) {
 	cache := filepath.Join(t.TempDir(), "cache")
