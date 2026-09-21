@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: a25efecf8203c66d
 sage-review-completeness-reviewed: a25efecf8203c66d
+completed: 2026-09-21
 ---
 
 # Retire stale pendingApproval so an exited/stopped gated agent stops deadlocking the pi live gutter
@@ -136,3 +137,15 @@ Verification:
 - The existing live-`pendingApproval` widget test still passes (live wait is
   unaffected).
 - Run the pi package test suite.
+
+### Result (ceff0be6) - 2026-09-21
+
+- Added `pendingApproval` cleanup to `clearLiveState`, so both `markAgentExited` and `stopAgent` retire an approval wait while leaving live waits unchanged.
+- Added regression coverage for both exit and stop paths: each record is no longer classified as `awaiting-approval` and is evictable at registry capacity.
+- Verification: focused retirement test passed; `npm test` ran with 1,597 passing tests, but 15 pre-existing web-search facade failures/timeouts prevented a full-suite pass (`web-search-extension-missing`). Both independent review rounds found no findings.
+- Decision: kept cleanup at the existing shared live-state chokepoint rather than duplicating it in the exit and stop callers.
+
+
+## Resolution (2026-09-21)
+
+Implemented and independently reviewed. The full package suite remains blocked by unrelated web-search facade environment failures; focused regression coverage passes.

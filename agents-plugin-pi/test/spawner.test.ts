@@ -123,6 +123,7 @@ import {
   type ToolGroup,
 } from "../src/spawner.ts";
 import { WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV, type SpawnRole } from "../src/process-role.ts";
+import { classifyRegistryRowState } from "../src/agent-widget.ts";
 // 260906 (registerAgentTools's role-keyed explore registration): a VALUE
 // import, not `import type` — the new describe block below monkey-patches
 // RpcClient.prototype.{start,onEvent,prompt} for the lead/fork execute() path
@@ -2314,6 +2315,32 @@ describe("reserveAgentAlias", () => {
  * clauses, extracted for direct coverage for the same reason as
  * `reserveAgentAlias`.
  */
+describe("pending approval retirement", () => {
+  test("process exits and explicit stops clear pending approval, hide the gutter row, and permit eviction", async () => {
+    const exited = liveRpcRecord({ agentId: "exited", running: true, pendingApproval: { cmdId: "call-1", command: "echo hi" } });
+    const exitedRegistry: RpcAgentRegistry = new Map([[exited.agentId, exited]]);
+    markAgentExited(undefined, exitedRegistry, exited, { suppressTerminal: true });
+    assert.equal(exited.pendingApproval, undefined);
+    assert.equal(classifyRegistryRowState(exited), undefined);
+    assert.deepEqual(evictForCapacity(exitedRegistry, 1), { ok: true, evictedLabel: "exited" });
+
+    const stopped = freshRpcRecord({
+      agentId: "stopped",
+      client: {
+        abort: async () => undefined,
+        stop: async () => undefined,
+      } as unknown as RpcClient,
+      running: true,
+      pendingApproval: { cmdId: "call-2", command: "echo bye" },
+    });
+    const stoppedRegistry: RpcAgentRegistry = new Map([[stopped.agentId, stopped]]);
+    await stopAgent(stoppedRegistry, stopped.agentId, undefined, { silent: true, skipCostCheckpoint: true });
+    assert.equal(stopped.pendingApproval, undefined);
+    assert.equal(classifyRegistryRowState(stopped), undefined);
+    assert.deepEqual(evictForCapacity(stoppedRegistry, 1), { ok: true, evictedLabel: "stopped" });
+  });
+});
+
 describe("evictForCapacity", () => {
   test("under the cap is a no-op ok with no eviction", () => {
     const registry: RpcAgentRegistry = new Map([["a", freshRpcRecord({ agentId: "a" })]]);
