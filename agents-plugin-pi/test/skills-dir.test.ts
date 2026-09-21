@@ -177,6 +177,22 @@ describe("hash-gated skill synchronization", () => {
     } finally { rmSync(f.root, { recursive: true, force: true }); }
   });
 
+  test("an empty canonical root removes every generated skill and retains only its marker", () => {
+    const f = fixture();
+    try {
+      const previous = f.marker();
+      const rootInode = lstatSync(f.generated).ino;
+      rmSync(join(f.source, "lead-ticket"), { recursive: true });
+      assert.equal(f.sync(), true);
+      assert.deepEqual(readdirSync(f.generated), [markerName]);
+      assert.match(f.marker(), /^ws-skills-v1:sha256:[a-f0-9]{64}\n$/);
+      assert.notEqual(f.marker(), previous);
+      assert.equal(lstatSync(f.generated).ino, rootInode);
+      assert.deepEqual(tree(f.generated), tree(f.source));
+      runIsolated(mutationGuard + discoveryScript(f.pluginDir, f.root));
+    } finally { rmSync(f.root, { recursive: true, force: true }); }
+  });
+
   test("matching source marker cannot hide generated drift; missing and corrupt markers recover", () => {
     const f = fixture();
     try {
