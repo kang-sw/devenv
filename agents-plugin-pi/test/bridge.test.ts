@@ -72,7 +72,7 @@ const LIVE_TOOL_NAMES = [
   "route.resolve_implement", "route.resolve_proceed", "todo.add", "todo.check",
   "todo.erase", "todo.clear", "todo.list", "todo.read", "todo.reorder",
   "api.list", "config.list", "config.tune", "config.resolve_agent",
-  "git.status", "git.diff", "git.log", "git.merge_base", "git.merge",
+  "git.status", "git.resolve_impl_branch", "git.diff", "git.log", "git.merge_base", "git.merge",
   "git.commit", "project_tree", "infra.read", "convention.read", "note.write",
   "note.erase", "note.mute", "note.unmute", "note.query", "tickets.query",
   "tickets.close", "review.marker", "review.stamp", "tickets.move",
@@ -108,9 +108,9 @@ describe("sanitizeToolName", () => {
     assert.equal(sanitizeToolName("ferrule"), "ws__ferrule");
   });
 
-  test("captured tool set exactly matches the bundled 57-tool contract", () => {
+  test("captured tool set exactly matches the bundled 58-tool contract", () => {
     const bundledToolNames = Object.keys(BUNDLED_RUNTIME.tools).sort();
-    assert.equal(bundledToolNames.length, 57);
+    assert.equal(bundledToolNames.length, 58);
     assert.deepEqual([...LIVE_TOOL_NAMES].sort(), bundledToolNames);
     assert.ok(bundledToolNames.includes("git.merge"));
     for (const retiredName of RETIRED_TOOL_NAMES) {
