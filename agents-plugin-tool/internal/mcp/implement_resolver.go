@@ -12,7 +12,6 @@ import (
 
 	"github.com/kang-sw/devenv/internal/wsdoc"
 	"github.com/kang-sw/devenv/internal/wsgit"
-	"github.com/kang-sw/devenv/internal/wskey"
 )
 
 type implementInput struct {
@@ -63,10 +62,18 @@ type implementPolicyInput struct {
 	Docs   implementDocsPolicyInput   `json:"docs,omitempty"`
 }
 
+// IdentityVouch is lead judgment, bound to both the observed branch and ticket.
+// It is not inferred from target.ticket_stem or from commit contents.
+type implementIdentityVouch struct {
+	Branch     string `json:"branch"`
+	TicketStem string `json:"ticket_stem"`
+}
+
 type implementBranchPolicyInput struct {
-	MergeTarget  factString `json:"merge_target,omitempty"`
-	AllowRename  factString `json:"allow_rename,omitempty"`
-	MergeConfirm factString `json:"merge_confirm,omitempty"`
+	IdentityVouch *implementIdentityVouch `json:"identity_vouch,omitempty"`
+	MergeTarget   factString              `json:"merge_target,omitempty"`
+	AllowRename   factString              `json:"allow_rename,omitempty"`
+	MergeConfirm  factString              `json:"merge_confirm,omitempty"`
 }
 
 type implementReviewPolicyInput struct {
@@ -174,6 +181,7 @@ type normalizedImplementFacts struct {
 	MergeConfirmPolicy     string
 	ScopeSlug              string
 	TicketStem             string
+	IdentityVouch          *implementIdentityVouch
 }
 
 func parseImplementInput(args map[string]any) (implementInput, error) {
@@ -513,6 +521,18 @@ func parseImplementPolicy(raw any) (implementPolicyInput, error) {
 		if !ok {
 			return out, fmt.Errorf("policy.branch must be an object")
 		}
+		if rawVouch, present := gm["identity_vouch"]; present {
+			vouch, ok := rawVouch.(map[string]any)
+			if !ok {
+				return out, fmt.Errorf("policy.branch.identity_vouch must be an object with branch and ticket_stem")
+			}
+			branch, branchOK := vouch["branch"].(string)
+			stem, stemOK := vouch["ticket_stem"].(string)
+			if !branchOK || !stemOK || strings.TrimSpace(branch) == "" || strings.TrimSpace(stem) == "" {
+				return out, fmt.Errorf("policy.branch.identity_vouch requires nonempty branch and ticket_stem strings")
+			}
+			out.Branch.IdentityVouch = &implementIdentityVouch{Branch: strings.TrimSpace(branch), TicketStem: strings.TrimSpace(stem)}
+		}
 		if out.Branch.MergeTarget, err = parseObjectString(gm, "merge_target"); err != nil {
 			return out, fmt.Errorf("policy.branch.%w", err)
 		}
@@ -737,12 +757,13 @@ func normalizeImplementFacts(input implementInput) (normalizedImplementFacts, []
 		MergeConfirmPolicy:     factOr(policy.Branch.MergeConfirm, "ask"),
 		ScopeSlug:              strings.TrimSpace(input.Target.ScopeSlug),
 		TicketStem:             strings.TrimSpace(input.Target.TicketStem),
+		IdentityVouch:          policy.Branch.IdentityVouch,
 	}
 	if n.TicketStem != "" {
 		if n.ScopeSlug != "" {
 			warnings = append(warnings, "target.scope_slug ignored for ticket target; branch stem derived deterministically from ticket_stem")
 		}
-		n.ScopeSlug = wskey.Derive(n.TicketStem, 3)
+		n.ScopeSlug = implTicketSuffix(n.TicketStem)
 	} else if n.ScopeSlug == "" {
 		n.ScopeSlug = slugifyImplementScope(firstNonEmpty(input.Target.ScopeLabel, input.Target.TicketStem, input.Target.Label, "implementation"))
 		warnings = append(warnings, "target.scope_slug missing; derived from target label")
@@ -982,13 +1003,23 @@ func finishImplementBranchPlanTail(plan implementBranchPlan, n normalizedImpleme
 		plan.Reason = "current implementation branch matches target scope"
 		return plan
 	}
-	if obs.AheadOfMergeRoot > 0 {
+	vouched := n.IdentityVouch != nil && n.TicketStem != "" &&
+		n.IdentityVouch.TicketStem == n.TicketStem && n.IdentityVouch.Branch == obs.CurrentBranch
+	if obs.AheadOfMergeRoot > 0 && !vouched {
 		_, suspectedStem, _ := parseImplBranchRoot(obs.CurrentBranch)
 		plan.Action = "stop"
 		plan.SuspectedOwnerStem = firstNonEmpty(suspectedStem, "unknown")
 		plan.Reason = fmt.Sprintf(
 			"current implementation branch has %d unmerged commit(s) ahead of merge root %q and target scope %q differs from suspected prior work %q; starting here would mix ticket work (not overridable by allow_rename)",
 			obs.AheadOfMergeRoot, plan.MergeTarget, firstNonEmpty(n.TicketStem, "unspecified"), plan.SuspectedOwnerStem)
+		return plan
+	}
+	// A vouch lifts only the identity stop. A canonical-name collision remains
+	// blocking; sharing/tracking state keeps the vouched branch in place.
+	if vouched && !obs.TargetExists && (obs.Upstream != "" || obs.Ahead != 0 || obs.Behind != 0 || n.AllowRename != "yes") {
+		plan.Action = "continue"
+		plan.TargetBranch = obs.CurrentBranch
+		plan.Reason = "lead vouched branch identity; continue in place because rename is disabled or branch has tracking state"
 		return plan
 	}
 	if n.AllowRename != "yes" {
@@ -1037,7 +1068,7 @@ func implementBranchNextInstruction(verdict implementVerdict) string {
 	case "stop":
 		if verdict.BranchPlan.SuspectedOwnerStem != "" {
 			return fmt.Sprintf(
-				"Stop before source edits. Do not rename over unmerged work. Resolve branch identity from session context, or dispatch an explore comparing %s's commit history to the target ticket, then re-invoke route.resolve_implement. Suspected prior owner (branch-name encoded, best-effort): %s.",
+				"Stop before source edits and report the branch identity blocker to the lead. Only the lead may judge whether %s's unmerged work belongs to the target ticket and supply policy.branch.identity_vouch with branch and ticket_stem on re-invocation; the worker must not self-authorize. Suspected prior owner (branch-name encoded, best-effort): %s.",
 				verdict.BranchPlan.CurrentBranch, verdict.BranchPlan.SuspectedOwnerStem)
 		}
 		return "Stop before source edits. Report the branch safety blocker in Branch Action and ask for the missing policy or branch cleanup."

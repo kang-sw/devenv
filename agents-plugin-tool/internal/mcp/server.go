@@ -22,7 +22,6 @@ import (
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdoc"
 	"github.com/kang-sw/devenv/internal/wsgit"
-	"github.com/kang-sw/devenv/internal/wskey"
 	"github.com/kang-sw/devenv/internal/wsrationale"
 	"github.com/kang-sw/devenv/internal/wsreview"
 	"github.com/kang-sw/devenv/internal/wsrsrc"
@@ -640,6 +639,8 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		return s.handleAgendaClear(req.ID, params.Arguments)
 	case "agenda.list":
 		return s.handleAgendaList(req.ID, params.Arguments)
+	case "git.resolve_impl_branch":
+		return s.handleResolveImplBranch(req.ID, params.Arguments)
 	case "route.resolve_implement":
 		return s.handleEnterImplement(req.ID, params.Arguments)
 	case "route.resolve_proceed":
@@ -2459,17 +2460,18 @@ func activeImplTicket(root, branch string) (*implTicketStatus, error) {
 	if err != nil {
 		return nil, fmt.Errorf("git.status: inspect active ticket inventory: %w", err)
 	}
-	matches := make([]wsdoc.TicketInfo, 0, 1)
+	stems := make([]string, 0, len(candidates))
+	byStem := make(map[string]wsdoc.TicketInfo, len(candidates))
 	for _, candidate := range candidates {
-		if wskey.Derive(candidate.Stem, 3) == suffix {
-			matches = append(matches, candidate)
-		}
+		stems = append(stems, candidate.Stem)
+		byStem[candidate.Stem] = candidate
 	}
+	matches := matchImplTicketStems(suffix, stems)
 	switch len(matches) {
 	case 0:
 		return &implTicketStatus{State: "missing"}, nil
 	case 1:
-		match := matches[0]
+		match := byStem[matches[0]]
 		return &implTicketStatus{State: "active", Stem: match.Stem, Path: match.Path, Status: match.Status}, nil
 	default:
 		return &implTicketStatus{State: "ambiguous"}, nil
@@ -3438,6 +3440,20 @@ func tools() []map[string]any {
 					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
 				},
 				"required": []string{"session_key"},
+			},
+		},
+		{
+			"name":        "git.resolve_impl_branch",
+			"description": "Resolve a ticket's canonical implementation branch before worktree provisioning. Pure name resolution: base is the exact run base/current branch (including goal/* or impl/*); no branch is created. Uses the same merge-root and ticket identity authority as route.resolve_implement.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key."),
+					"ticket_stem": stringProperty("Ticket identity to derive."),
+					"base":        stringProperty("Exact base/current branch for the run; must not be detached."),
+					"format":      stringProperty("Use json for structured output; default compact text."),
+				},
+				"required": []string{"session_key", "ticket_stem", "base"},
 			},
 		},
 		{
