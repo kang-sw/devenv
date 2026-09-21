@@ -1792,6 +1792,7 @@ function clearLiveState(record: RpcAgentRecord, registry?: RpcAgentRegistry): vo
   record.client = undefined;
   record.streaming = false;
   record.running = false;
+  record.pendingApproval = undefined;
   record.waitingOnChildren = false;
   record.subtreeRevision = undefined;
   record.subtreeDescendants = [];
