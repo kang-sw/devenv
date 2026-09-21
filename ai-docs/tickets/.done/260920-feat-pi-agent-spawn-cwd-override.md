@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: a9d9858672b6f634
 sage-review-completeness-reviewed: a9d9858672b6f634
+completed: 2026-09-21
 ---
 
 # Explicit cwd override for pi ws-agent-spawn
@@ -119,3 +120,20 @@ than reverting to `sessionCtx.cwd`.
 child re-lands in the override rather than `sessionCtx.cwd`; an invalid or
 nonexistent path is rejected with a clear error; an absent argument preserves
 the current inheritance behavior.
+
+### Result (5611965a) - 2026-09-21
+
+Added `cwd_override` to `ws-agent-spawn`, validating absolute existing
+directories before admission or allocation. The selected directory is retained
+on `RpcAgentRecord` and applied for both initial launch and dormant resume;
+omitted overrides retain the inherited session cwd.
+
+Verification:
+
+- `env -u WS_PI_SPAWN_ROLE -u WS_PI_EXPLORE_MODE -u WS_PI_DELEGATION_POLICY -u WS_PI_SUBTREE_CHANNEL node --test --test-name-pattern='cwd_override' test/spawner.test.ts` passed.
+- The full `test/spawner.test.ts` run passed 193/195 tests; its two pre-existing Explore tests could not load the unavailable `pi-web-access` extension in this isolated worktree (`web-search-extension-missing`).
+- Correctness, test, and round-2 review reports were clean.
+
+Decision: validation precedes spawn admission so invalid overrides fail without
+child allocation; worktree keys remain out of scope because callers already
+hold the raw path.
