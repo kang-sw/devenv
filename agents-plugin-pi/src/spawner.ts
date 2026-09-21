@@ -2475,9 +2475,12 @@ export function attachEventListener(
     const e = evt as { type?: string; toolName?: string; args?: unknown; toolCallId?: string; isError?: unknown; result?: unknown; message?: unknown; assistantMessageEvent?: unknown };
     if (record.client !== client || record.launchGeneration !== generation) return;
     if (e.type === "message_start") observeQueuedWorkBoundary(record, e.message);
-    // Do not refresh here: token deltas are frequent; the gutter's periodic
-    // cadence observes this O(1) high-water assignment without render fan-out.
-    if (isStreamedAssistantOutput(e)) markAgentOutput(record);
+    const agentOutput = isStreamedAssistantOutput(e);
+    const streamingDelta = e.type === "message_update" && agentOutput;
+    // Token deltas update only the O(1) high-water field. Their timing and
+    // subtree/telemetry refreshes wait for message_end or the periodic gutter
+    // cadence, preventing a per-token render fan-out.
+    if (agentOutput) markAgentOutput(record);
     if (e.type === "message_end") {
       const text = assistantMessageText(e.message);
       if (text !== undefined) {
@@ -2485,13 +2488,11 @@ export function attachEventListener(
         record.lastTextGeneration = record.workGeneration;
       }
     }
-    refreshObservedSubtree(registry, record);
+    if (!streamingDelta) refreshObservedSubtree(registry, record);
     const outcome = applyRpcEvent(record, e);
     publishSubtree(registry);
-    if (e.type === "agent_start" || e.type === "agent_settled" || e.type === "message_end" || e.type === "message_update" || e.type === "thinking_level_changed" || e.type === "compaction_end") {
+    if (!streamingDelta && (e.type === "agent_start" || e.type === "agent_settled" || e.type === "message_end" || e.type === "message_update" || e.type === "thinking_level_changed" || e.type === "compaction_end")) {
       // Context occupancy changes at completed message/compaction boundaries.
-      // Streaming deltas retain the disk/state refresh without
-      // hammering get_session_stats on every token.
       refresh(e.type === "agent_settled" || e.type === "message_end" || e.type === "compaction_end");
     }
     if (outcome.push) {

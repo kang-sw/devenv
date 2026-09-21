@@ -1300,7 +1300,14 @@ describe("applyRpcEvent", () => {
       onEvent(callback: (event: unknown) => void) { listener = callback; return () => {}; },
       getState: async () => ({}),
     } as unknown as RpcClient;
-    const record = freshRpcRecord({ client, running: true, streaming: true });
+    const record = freshRpcRecord({
+      client,
+      running: true,
+      streaming: true,
+      // Spawned records carry a subtree channel; this is the path that used
+      // to fan token deltas out to the gutter through refreshObservedSubtree.
+      subtreeChannel: { path: "/tmp/ws-pi-missing-subtree.json", nonce: "test" },
+    });
     let refreshes = 0;
     agentWidgetRefreshRef.current = () => { refreshes += 1; };
     t.after(() => { agentWidgetRefreshRef.current = undefined; });
