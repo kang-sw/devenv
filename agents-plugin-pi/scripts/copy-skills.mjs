@@ -12,8 +12,8 @@ const pkgDir = dirname(dirname(fileURLToPath(import.meta.url))); // agents-plugi
 const src = join(dirname(pkgDir), "agents-plugin", "skills");
 const dest = join(pkgDir, "skills");
 
-if (syncGeneratedSkillsDir(src, dest)) {
-  console.log(`[copy-skills] copied ${src} -> ${dest}`);
+if (syncGeneratedSkillsDir(src, dest, join(pkgDir, "rsrc", "manifest.json"))) {
+  console.log(`[copy-skills] synchronized ${src} -> ${dest}`);
 } else {
   console.warn(`[copy-skills] source ${src} absent; leaving ${dest} as-is`);
 }

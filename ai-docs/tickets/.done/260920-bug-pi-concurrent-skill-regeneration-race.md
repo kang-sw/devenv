@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 3e8830d258e40407
 sage-review-completeness-reviewed: 3e8830d258e40407
+completed: 2026-09-21
 ---
 
 # Concurrent Pi resource discovery can race while regenerating the shared skills directory
@@ -97,3 +98,37 @@ with canonical source absent remains unchanged. Include a bounded concurrent
 unchanged-source run to cover the observed high-frequency spawn path, while
 recording simultaneous mismatch writers as deferred risk rather than claiming
 serialization.
+
+### Result (7a7954b9) - 2026-09-21
+
+- Runtime discovery and the pack-time script now share hash-gated incremental
+  synchronization. Unchanged discovery only reads and validates; mismatches
+  preserve unchanged entries, remove stale entries, and atomically replace
+  changed files. Source-absent packages retain their bundled skills and target
+  validation.
+- The reserved root `.ws-skills-hash` marker contains
+  `ws-skills-v1:sha256:<digest>` plus a newline. Sorted names, entry types, file
+  bytes and permission bits, literal link targets, and empty directories feed
+  the hash; mtimes do not. Comparing actual generated contents as well as the
+  marker repairs generated drift. Publication follows target validation and
+  source/generated equality checks, using a unique temporary file and rename.
+- Regression commit c8da7a8b guards filesystem mutation calls in isolated
+  discovery processes, including six barrier-synchronized processes repeatedly
+  invoking lead/worker/nested-child callbacks. It also covers additions,
+  same-mtime content changes, removals, renames, type changes, marker recovery,
+  failed validation/I/O/publication, and pack/runtime agreement.
+- Independent correctness and fit reviews were clean. Test review's one
+  Important finding, the empty-source-root boundary, was fixed in 7ab267da;
+  round two confirmed closure. No review findings remain.
+- Verification: `node --test test/skills-dir.test.ts` passed 15/15;
+  `npm test -- --test-reporter=dot` passed the full Pi suite; `git diff --check`
+  passed. Initial full-suite failures were environment-only: a symlinked
+  dependency tree violated the existing web-search realpath guard. A physical
+  worktree-local dependency copy resolved them without source/test changes.
+- Native-layer evidence: the installed Node v26 `internal/fs/cp/cp-sync`
+  implementation dispatches unfiltered recursive copying to
+  `fsBinding.cpSyncCopyDir`. This fix removes that path; the original macOS
+  crash's exact native stack was not available for confirmation.
+- Deferred by design: simultaneous first-generation/mismatch writers and
+  whole-tree reader atomicity during a mismatch. No lock, process-lifetime
+  timeout, or serialization claim was introduced.
