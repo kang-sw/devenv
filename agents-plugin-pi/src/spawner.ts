@@ -2408,12 +2408,13 @@ function watchObservedSubtree(
   record: RpcAgentRecord,
   client: RpcClient,
   generation: number,
+  watchDirectory: typeof watch,
 ): (() => void) | undefined {
   const channel = record.subtreeChannel;
   if (!channel) return undefined;
   try {
     const target = basename(channel.path);
-    const watcher = watch(dirname(channel.path), { persistent: false }, (_event, filename) => {
+    const watcher = watchDirectory(dirname(channel.path), { persistent: false }, (_event, filename) => {
       if (filename !== null && String(filename) !== target) return;
       if (record.client !== client || record.launchGeneration !== generation) return;
       refreshObservedSubtree(registry, record);
@@ -2433,6 +2434,8 @@ export function attachEventListener(
   record: RpcAgentRecord,
   client: RpcClient,
   onApprovalPending?: (record: RpcAgentRecord) => void,
+  /** Focused deterministic seam for watcher-callback tests; production uses node:fs watch. */
+  watchDirectory: typeof watch = watch,
 ): void {
   let refreshing = false;
   let dirty = false;
@@ -2556,7 +2559,7 @@ export function attachEventListener(
       approvalHook(record);
     }
   });
-  const unsubscribeSubtree = watchObservedSubtree(registry, record, client, generation);
+  const unsubscribeSubtree = watchObservedSubtree(registry, record, client, generation, watchDirectory);
   record.unsubscribe = () => {
     unsubscribeEvents();
     unsubscribeSubtree?.();

@@ -2,7 +2,7 @@ import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { RpcClient } from "@earendil-works/pi-coding-agent";
 import {
   CHILD_MANAGEMENT_TOOLS,
@@ -188,20 +188,6 @@ test("subtree publication skips equivalent writes but preserves every effective 
   assert.equal(readSubtreeSnapshot(channel)?.revision, 1);
 });
 
-test("the initial busy publication remains a hard gate before nested launch", () => {
-  const registry: RpcAgentRegistry = new Map();
-  const channel = { path: join(home(), "publisher", "subtree.json"), nonce: "hard-gate" };
-  installSubtreePublisher(registry, channel, () => 0);
-  blockPublisherPath(channel.path);
-  let launched = false;
-  assert.throws(() => {
-    const finish = beginSubtreeDispatch(registry);
-    launched = true;
-    finish();
-  });
-  assert.equal(launched, false, "grandchild launch code is unreachable after the hard gate fails");
-});
-
 test("RPC settlement survives a secondary upstream publication failure", async () => {
   const notices: string[] = [];
   const sent: any[] = [];
@@ -224,31 +210,35 @@ test("RPC settlement survives a secondary upstream publication failure", async (
   assert.deepEqual(notices, ["ws-pi-agent: subtree publication failed"], "equivalent failures are diagnosed once");
 });
 
-test("watcher publication failure is contained and watcher cleanup remains callable", async () => {
+test("watcher publication failure is contained and watcher cleanup remains callable", () => {
   const notices: string[] = [];
   const observedChannel = { path: join(home(), "observed", "subtree.json"), nonce: "observed" };
   const nestedRegistry: RpcAgentRegistry = new Map();
   installSubtreePublisher(nestedRegistry, observedChannel, () => 0);
 
+  let notify: ((event: string, filename: string | Buffer | null) => void) | undefined;
+  let closes = 0;
+  const fakeWatch = ((_path: string, _options: unknown, listener: typeof notify) => {
+    notify = listener;
+    return { on() { return this; }, close() { closes++; } };
+  }) as any;
   const h = pushHarness([]);
   const child = record("watched-child", { client: h.client, subtreeChannel: observedChannel, launchGeneration: 1 });
   const registry: RpcAgentRegistry = new Map([[child.agentId, child]]);
   const upstreamChannel = { path: join(home(), "upstream", "subtree.json"), nonce: "upstream" };
   installSubtreePublisher(registry, upstreamChannel, () => 0, (detail) => { notices.push(detail); return true; });
-  attachEventListener(h.pi, registry, child, h.client);
+  attachEventListener(h.pi, registry, child, h.client, undefined, fakeWatch);
   blockPublisherPath(upstreamChannel.path);
 
   const nested = record("nested-live", { client: {} as never, running: true, spawnRole: "explore" });
   nestedRegistry.set(nested.agentId, nested);
   publishSubtree(nestedRegistry, true);
-  const deadline = Date.now() + 2_000;
-  while (!child.subtreeDescendants?.some((row) => row.id === nested.agentId) && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
+  notify?.("rename", basename(observedChannel.path));
 
   assert.equal(child.waitingOnChildren, true);
   assert.equal(child.subtreeDescendants?.some((row) => row.id === nested.agentId), true);
   assert.doesNotThrow(() => child.unsubscribe?.(), "publication failure cannot prevent watcher cleanup");
+  assert.equal(closes, 1);
   assert.deepEqual(notices, ["ws-pi-agent: subtree publication failed"]);
 });
 

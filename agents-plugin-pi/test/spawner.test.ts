@@ -666,6 +666,38 @@ describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses ins
     assert.match(tool.parameters.properties.write_scopes!.description!, /path\.posix\.matchesGlob/);
   });
 
+  test("initial busy publication failure escapes unchanged and prevents RpcClient launch", async () => {
+    const previousSubtree = process.env[SUBTREE_ENV];
+    const root = storageRoot();
+    const channel = { path: join(root, "upstream", "subtree.json"), nonce: "hard-gate" };
+    process.env[SUBTREE_ENV] = JSON.stringify(channel);
+    const starts: Array<string | undefined> = [];
+    const rpc = installRpcHarness(undefined, cwd => starts.push(cwd));
+    let registered: ReturnType<typeof harness> | undefined;
+    try {
+      registered = harness(async () => jsonResult({}));
+      rmSync(channel.path, { force: true });
+      mkdirSync(channel.path);
+      let failure: NodeJS.ErrnoException | undefined;
+      await assert.rejects(
+        () => registered!.tool.execute("hard-gate", { system_prompt_path: "/tmp/p.md", prompt: "must not launch" }, undefined, undefined, registered!.ctx),
+        error => {
+          failure = error as NodeJS.ErrnoException;
+          return true;
+        },
+      );
+      assert.ok(failure);
+      assert.ok(["EISDIR", "ENOTEMPTY", "EPERM"].includes(failure.code ?? ""), `unexpected publication error: ${failure.message}`);
+      assert.ok(failure.message.includes(channel.path), "the original replacement failure reaches the tool caller");
+      assert.deepEqual(starts, [], "RpcClient.start is unreachable after the hard publication gate fails");
+      assert.equal(registered.handle.rpcRegistry.size, 0, "failed admission allocates no grandchild record");
+    } finally {
+      await registered?.handle.stopAll();
+      if (previousSubtree === undefined) delete process.env[SUBTREE_ENV]; else process.env[SUBTREE_ENV] = previousSubtree;
+      rpc.restore();
+    }
+  });
+
   test("a nested RPC worker receives publication diagnostics through its own session channel", async () => {
     const previousRole = process.env[WS_PI_SPAWN_ROLE_ENV];
     const previousSubtree = process.env[SUBTREE_ENV];
