@@ -124,9 +124,13 @@ turn; the next invocation merges once the holder has released it.
   decision. Then **End the turn**.
 - **(a) parent merge** — handle as **Terminal: `ready/` empty on a goal
   branch**: the same approval and the same merge.
-- **(b) unresolved decision** — read what the worker points at. If it settles
-  the question, resume the worker with the answer and its source; otherwise
-  put the open question(s) to the user and resume with the answers.
+- **(b) unresolved decision** — For a branch-identity safety stop, judge
+  ownership from cross-ticket context or a bounded explore. If the unmerged
+  work belongs to the target ticket, re-invoke its route with a vouch matching
+  the observed branch and target ticket; otherwise leave the safety stop in
+  place. For another (b), read what the worker points at. If it settles the
+  question, resume the worker with the answer and its source; otherwise put
+  the open question(s) to the user and resume with the answers.
 - **(c) contract broken** — route the worker's `proposed_resolution:` through
   `{{.SkillNamespace}}:lead-ticket` under its design-review gate, one tier
   above the worker's: revise the unimplemented phase directly, or append an
@@ -153,11 +157,11 @@ approved batch is the concurrency cap. Differences from the serial route:
 
 - Render `ticket-batch-selector` and spawn it at its recommended tier; it owns
   the parallel-safety read. Present its `batch:` with the approval request.
-- Provision each approved ticket, one at a time, with
-  `{{.McpNamespace}}/worktree.acquire(base: <your branch>, target_branch:
-  <that ticket's impl/<parent>/<slug> branch>, session_key: <your key>)` and
-  keep the `worker_key` it returns; it is the sole branch owner, so skip Spawn
-  step 3. Render each worker with
+- For each approved ticket, resolve its canonical branch with
+  `{{.McpNamespace}}/git.resolve_impl_branch` against your exact base branch,
+  then pass that returned branch verbatim as `target_branch` to
+  `{{.McpNamespace}}/worktree.acquire`. Keep the `worker_key` it returns; it
+  is the sole branch owner, so skip Spawn step 3. Render each worker with
   `root_override: <that worktree path>` and put the acquired branch on the
   task block's Branch line. When a batch worker's route verdict is not
   `continue`, follow that verdict as reported rather than re-provisioning.

@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: fa58caa8680682c2
 sage-review-completeness-reviewed: fa58caa8680682c2
+completed: 2026-09-21
 ---
 
 # Impl-branch identity: single ticket↔branch resolver authority and lead-vouched override
@@ -172,6 +173,22 @@ Verification expectations:
 - The implement resolver and `git.status` produce identical results to today
   after being routed through the shared authority (behavior-preserving refactor).
 
+### Result (065d86c2) - 2026-09-21
+
+Implemented the shared ticket suffix authority and enumerate-and-match reverse
+lookup in `impl_identity.go`; routing and active-ticket status now consume it.
+The new `git.resolve_impl_branch` MCP tool takes the exact base and ticket stem
+and returns the canonical branch before provisioning. `worktree.acquire` stays
+unchanged. Lead-run and wsflow/Pi mirrors resolve before acquisition; runtime
+inventories include the new tool.
+
+Integration coverage proves repeatability, nested-goal merge roots, provisioned
+worktree routing to `continue`, required-input validation, and compact default
+output. Round-1 test review requested request-level boundary coverage; the fix
+also exposed and corrected whitespace-padded `HEAD` validation in `b0f925b`.
+Fit review was clean; test re-review was clean. Full Go suite, MCP smoke, and
+13 wsflow package tests passed at `b0f925b` (leaf read complete output).
+
 ### Phase 2: Restore the lead's identity-override path for a stuck nonstandard branch
 
 Depends on Phase 1's shared authority.
@@ -221,3 +238,30 @@ Verification expectations:
   work still `stop`s (safety preserved).
 - The worker never self-authorizes past the safety `stop` by reading commit
   content.
+
+### Result (065d86c2) - 2026-09-21
+
+Added distinct `policy.branch.identity_vouch` with exact `branch` and
+`ticket_stem` strings. A matching lead assertion lifts only the unmerged-work
+identity stop; no commit-content inference occurs. Without a matching vouch,
+the safety stop remains. Target-name collisions remain blocking. A vouched
+branch normally renames to canonical; existing tracking state or disabled
+rename instead continues in place. Tracking observations are the existing
+conservative signal for a shared branch, not a new remote-publication probe.
+
+Correctness review found the worker's closed stop list lacked a valid encoding
+for identity escalation. `b0f925b` explicitly classifies it as stop (b), aligns
+lead-run handling, and keeps worker self-vouching forbidden across mirrors.
+Correctness re-review and test re-review are clean; no unresolved findings.
+
+Verification at `b0f925b`: targeted identity/request/playbook tests, `go test
+./...`, `scripts/smoke-ws-mcp.sh ..`, manifest/mirror regeneration tests, and
+`python3 -m unittest discover agents-plugin-wsflow/tests` all passed. Tests
+cover no-vouch refusal, wrong branch/ticket assertions, accepted rename,
+tracking continuation, malformed assertions, and canonical-name collisions.
+
+Dogfood follow-up: reviewer startup initially failed after runtime inventory
+changed. Rebuilding only the ignored local Pi runtime with exact release
+version restored startup; blank-stderr error reporting was captured separately
+as `260921-bug-pi-child-bootstrap-error-loses-diagnostic` in `9dc3b078`.
+No merge or push performed.

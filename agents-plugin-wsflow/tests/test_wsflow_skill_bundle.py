@@ -365,6 +365,9 @@ class WsflowSkillBundleTest(unittest.TestCase):
         protocol = (RSRC_DIR / "worker-stop-protocol.md").read_text(encoding="utf-8")
         self.assertIn("all merges, including impl into goal, belong to the lead", protocol)
         self.assertIn("merge_confirm: skip | ask", protocol)
+        self.assertIn("branch-identity safety stop", protocol)
+        self.assertIn("as (b); only the lead may judge", protocol)
+        self.assertIn("Do not self-vouch", protocol)
         self.assertIn("completion: phase | ticket | ad_hoc | none", protocol)
         self.assertIn("Valid terminal pairs are `[ok]` with `stop: none`", protocol)
         self.assertIn(
@@ -382,6 +385,12 @@ class WsflowSkillBundleTest(unittest.TestCase):
         self.assertNotIn("goal-to-PARENT terminal uses raw Git", run)
         self.assertIn("`completion: phase` — do not merge", run)
         self.assertIn("`completion: ticket` — merge the retained impl branch", run)
+        self.assertIn(
+            "**(b) unresolved decision** — For a branch-identity safety stop, judge ownership "
+            "from cross-ticket context or a bounded explore.",
+            run,
+        )
+        self.assertIn("If the unmerged work belongs to the target ticket, re-invoke its route", run)
         self.assertIn("incompatible values are a protocol mismatch", run)
         self.assertIn("call `{{.McpNamespace}}/git.status` and decide", run)
         self.assertIn("Branch-explicit calls need no check.", run)
@@ -400,9 +409,10 @@ class WsflowSkillBundleTest(unittest.TestCase):
         self.assertIn("The approved batch is the concurrency cap.", run)
         self.assertIn("Render `ticket-batch-selector` and spawn it at its recommended tier", run)
         self.assertIn(
-            "{{.McpNamespace}}/worktree.acquire(base: <your branch>, target_branch:"
-            " <that ticket's impl/<parent>/<slug> branch>, session_key: <your key>)`"
-            " and keep the `worker_key` it returns",
+            "For each approved ticket, resolve its canonical branch with "
+            "`{{.McpNamespace}}/git.resolve_impl_branch` against your exact base branch, "
+            "then pass that returned branch verbatim as `target_branch` to "
+            "`{{.McpNamespace}}/worktree.acquire`. Keep the `worker_key` it returns",
             run,
         )
         self.assertIn("it is the sole branch owner, so skip Spawn step 3", run)
