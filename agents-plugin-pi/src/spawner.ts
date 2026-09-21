@@ -2490,7 +2490,7 @@ export function attachEventListener(
     }
     if (!streamingDelta) refreshObservedSubtree(registry, record);
     const outcome = applyRpcEvent(record, e);
-    publishSubtree(registry);
+    if (!streamingDelta) publishSubtree(registry);
     if (!streamingDelta && (e.type === "agent_start" || e.type === "agent_settled" || e.type === "message_end" || e.type === "message_update" || e.type === "thinking_level_changed" || e.type === "compaction_end")) {
       // Context occupancy changes at completed message/compaction boundaries.
       refresh(e.type === "agent_settled" || e.type === "message_end" || e.type === "compaction_end");

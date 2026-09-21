@@ -135,7 +135,7 @@ import { classifyRegistryRowState } from "../src/agent-widget.ts";
 import { RpcClient } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { McpStdioClient, McpToolCallResult } from "../src/mcp-stdio-client.ts";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -143,6 +143,7 @@ import { DELEGATION_ENV } from "../src/delegation-policy.ts";
 import { WEB_HOME_ENV, WEB_NONCE_ENV } from "../src/web-readiness.ts";
 import { allocateAgentHome, createAgentStorageContext, updateOwnership } from "../src/agent-storage.ts";
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
+import { installSubtreePublisher } from "../src/subtree-lifecycle.ts";
 const REAL_EXTENSION_ENTRY = fileURLToPath(new URL("../src/index.ts", import.meta.url));
 async function startRpcWithWebProof(this: { options?: { env?: Record<string, string> } }) {
   const env = this.options?.env ?? {};
@@ -1308,10 +1309,14 @@ describe("applyRpcEvent", () => {
       // to fan token deltas out to the gutter through refreshObservedSubtree.
       subtreeChannel: { path: "/tmp/ws-pi-missing-subtree.json", nonce: "test" },
     });
+    const registry = new Map([[record.agentId, record]]);
+    const upstreamChannel = { path: join(storageRoot(), "upstream-subtree.json"), nonce: "parent" };
+    installSubtreePublisher(registry, upstreamChannel, () => 0);
+    const publishedBefore = statSync(upstreamChannel.path, { bigint: true }).mtimeNs;
     let refreshes = 0;
     agentWidgetRefreshRef.current = () => { refreshes += 1; };
     t.after(() => { agentWidgetRefreshRef.current = undefined; });
-    attachEventListener(undefined, new Map([[record.agentId, record]]), record, client);
+    attachEventListener(undefined, registry, record, client);
 
     listener?.({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "first" } });
     assert.equal(record.lastOutputAt, 1_000);
@@ -1319,6 +1324,7 @@ describe("applyRpcEvent", () => {
     listener?.({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", delta: "considering" } });
     assert.equal(record.lastOutputAt, 1_100);
     assert.equal(refreshes, 0, "streaming writes the high-water field only; the periodic gutter clock renders it");
+    assert.equal(statSync(upstreamChannel.path, { bigint: true }).mtimeNs, publishedBefore, "token deltas do not republish the subtree for a parent watcher to refresh");
   });
 });
 
