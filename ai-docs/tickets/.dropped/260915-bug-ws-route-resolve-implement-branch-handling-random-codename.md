@@ -1,5 +1,6 @@
 ---
 title: "route.resolve_implement branch handling is inconsistent under lead-provisioned random-codename impl branches"
+dropped: 2026-09-21
 ---
 
 # `route.resolve_implement` branch handling under pre-provisioned impl branches

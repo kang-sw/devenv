@@ -2,6 +2,7 @@
 title: "Recognize a matching ticket commit on a nonstandard implementation branch"
 related:
   260915-bug-ws-pi-widget-context-value-removed: route handling failure observed while verifying its already-landed implementation
+dropped: 2026-09-21
 ---
 
 # Recognize a matching ticket commit on a nonstandard implementation branch
