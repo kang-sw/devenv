@@ -77,6 +77,7 @@ import {
   effectiveModelEffort,
   applyRpcEvent,
   attachEventListener,
+  agentWidgetRefreshRef,
   buildPushContent,
   computeRunningStatusLine,
   hasRunningAgents,
@@ -109,6 +110,7 @@ import {
   resolveSpawnToolGroup,
   resolveAgentId,
   resolveAgentRegistryCap,
+  lastActivityAt,
   reserveAgentAlias,
   evictForCapacity,
   runSpawnGuards,
@@ -133,7 +135,7 @@ import { classifyRegistryRowState } from "../src/agent-widget.ts";
 import { RpcClient } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { McpStdioClient, McpToolCallResult } from "../src/mcp-stdio-client.ts";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -141,6 +143,7 @@ import { DELEGATION_ENV } from "../src/delegation-policy.ts";
 import { WEB_HOME_ENV, WEB_NONCE_ENV } from "../src/web-readiness.ts";
 import { allocateAgentHome, createAgentStorageContext, updateOwnership } from "../src/agent-storage.ts";
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
+import { installSubtreePublisher } from "../src/subtree-lifecycle.ts";
 const REAL_EXTENSION_ENTRY = fileURLToPath(new URL("../src/index.ts", import.meta.url));
 async function startRpcWithWebProof(this: { options?: { env?: Record<string, string> } }) {
   const env = this.options?.env ?? {};
@@ -1255,11 +1258,32 @@ describe("applyRpcEvent", () => {
     assert.equal(record.running, true, "agent_start must not disturb the fan-in latch set at prompt time");
   });
 
-  test("agent_settled flips streaming false, clears running, and reports settled so the caller can decide on the push", () => {
+  test("agent_settled flips streaming false, clears running, stamps the freeze clock, and reports settled so the caller can decide on the push", (t) => {
+    t.mock.method(Date, "now", () => 1_000);
     const record = freshRpcRecord({ streaming: true, running: true });
     assert.deepEqual(applyRpcEvent(record, { type: "agent_settled" }), { settled: true });
     assert.equal(record.streaming, false);
     assert.equal(record.running, false, "the run is over — the child stops counting toward the fan-in whatever the caller pushes");
+    assert.equal(record.settledAt, 1_000);
+    t.mock.method(Date, "now", () => 2_000);
+    applyRpcEvent(record, { type: "agent_settled" });
+    assert.equal(record.settledAt, 1_000, "a duplicate settle cannot extend the frozen duration");
+  });
+
+  test("only agent output advances the shared activity high-water mark", (t) => {
+    t.mock.method(Date, "now", () => 1_000);
+    const record = freshRpcRecord({
+      lastLeadPromptAt: 900,
+      ownerSends: [{ text: "input", at: 950 }],
+      reportLog: [{ at: 990 }],
+    });
+    assert.equal(lastActivityAt(record), 0, "lead and owner inputs plus old report bookkeeping are not output");
+
+    applyRpcEvent(record, { type: "tool_execution_start", toolName: "bash" });
+    assert.equal(lastActivityAt(record), 1_000);
+    t.mock.method(Date, "now", () => 1_100);
+    applyRpcEvent(record, { type: "tool_execution_end", toolName: "bash" });
+    assert.equal(lastActivityAt(record), 1_100);
   });
 
   test("other event types (e.g. message_update) are ignored — no streaming/running mutation, no push", () => {
@@ -1267,6 +1291,40 @@ describe("applyRpcEvent", () => {
     assert.deepEqual(applyRpcEvent(record, { type: "message_update" }), {});
     assert.equal(record.streaming, true);
     assert.equal(record.running, true);
+  });
+
+  test("streamed assistant text and thinking bump activity without per-token gutter refresh", (t) => {
+    let now = 1_000;
+    t.mock.method(Date, "now", () => now);
+    let listener: ((event: unknown) => void) | undefined;
+    const client = {
+      onEvent(callback: (event: unknown) => void) { listener = callback; return () => {}; },
+      getState: async () => ({}),
+    } as unknown as RpcClient;
+    const record = freshRpcRecord({
+      client,
+      running: true,
+      streaming: true,
+      // Spawned records carry a subtree channel; this is the path that used
+      // to fan token deltas out to the gutter through refreshObservedSubtree.
+      subtreeChannel: { path: "/tmp/ws-pi-missing-subtree.json", nonce: "test" },
+    });
+    const registry = new Map([[record.agentId, record]]);
+    const upstreamChannel = { path: join(storageRoot(), "upstream-subtree.json"), nonce: "parent" };
+    installSubtreePublisher(registry, upstreamChannel, () => 0);
+    const publishedBefore = statSync(upstreamChannel.path, { bigint: true }).mtimeNs;
+    let refreshes = 0;
+    agentWidgetRefreshRef.current = () => { refreshes += 1; };
+    t.after(() => { agentWidgetRefreshRef.current = undefined; });
+    attachEventListener(undefined, registry, record, client);
+
+    listener?.({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "first" } });
+    assert.equal(record.lastOutputAt, 1_000);
+    now = 1_100;
+    listener?.({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", delta: "considering" } });
+    assert.equal(record.lastOutputAt, 1_100);
+    assert.equal(refreshes, 0, "streaming writes the high-water field only; the periodic gutter clock renders it");
+    assert.equal(statSync(upstreamChannel.path, { bigint: true }).mtimeNs, publishedBefore, "token deltas do not republish the subtree for a parent watcher to refresh");
   });
 });
 
@@ -1903,6 +1961,25 @@ describe("pushSpawnFailed (spawnAgent's launch-failure branch)", () => {
 });
 
 describe("promptAgent (the single prompt funnel)", () => {
+  test("preserves a running run anchor across nudges, then re-arms after settle", async (t) => {
+    let now = 100;
+    t.mock.method(Date, "now", () => now);
+    const { client } = fakeRpcClient();
+    const record = freshRpcRecord({ running: true, streaming: true, runStartedAt: 10 });
+
+    await promptAgent(record, client, "nudge", { isLeadPrompt: false });
+    assert.equal(record.runStartedAt, 10, "a nudge joins the active run rather than resetting its duration");
+
+    now = 200;
+    applyRpcEvent(record, { type: "agent_settled" });
+    assert.equal(record.settledAt, 200);
+
+    now = 300;
+    await promptAgent(record, client, "next run");
+    assert.equal(record.runStartedAt, 300);
+    assert.equal(record.settledAt, undefined);
+  });
+
   test("latches execution, advances the generation, and forwards the message", async () => {
     const { client, calls } = fakeRpcClient();
     const r = freshRpcRecord({ workGeneration: 4, terminalDelivery: { generation: 4, family: "ws-agent-settled", payload: {}, state: "enqueued" } });
@@ -2349,8 +2426,8 @@ describe("evictForCapacity", () => {
   });
 
   test("at the cap evicts the dormant record with the OLDEST last-activity stamp", () => {
-    const oldest = freshRpcRecord({ agentId: "old", lastLeadPromptAt: 1_000 });
-    const newer = freshRpcRecord({ agentId: "new", lastLeadPromptAt: 5_000 });
+    const oldest = freshRpcRecord({ agentId: "old", lastOutputAt: 1_000 });
+    const newer = freshRpcRecord({ agentId: "new", lastOutputAt: 5_000 });
     const registry: RpcAgentRegistry = new Map([
       ["old", oldest],
       ["new", newer],
@@ -2361,12 +2438,12 @@ describe("evictForCapacity", () => {
     assert.equal(registry.has("new"), true);
   });
 
-  test("last-activity is max(lastLeadPromptAt, newest reportLog entry) — a quiet-but-recently-reported record is not the oldest", () => {
-    const staleReport = freshRpcRecord({ agentId: "stale", lastLeadPromptAt: 1_000, reportLog: [{ at: 1_500 }] });
-    const freshlyReported = freshRpcRecord({ agentId: "fresh", lastLeadPromptAt: 1_000, reportLog: [{ at: 9_000 }] });
+  test("last-activity follows the output high-water mark rather than input or report bookkeeping", () => {
+    const staleOutput = freshRpcRecord({ agentId: "stale", lastOutputAt: 1_500, lastLeadPromptAt: 9_000, reportLog: [{ at: 10_000 }] });
+    const freshOutput = freshRpcRecord({ agentId: "fresh", lastOutputAt: 9_000 });
     const registry: RpcAgentRegistry = new Map([
-      ["stale", staleReport],
-      ["fresh", freshlyReported],
+      ["stale", staleOutput],
+      ["fresh", freshOutput],
     ]);
     const result = evictForCapacity(registry, 2);
     assert.deepEqual(result, { ok: true, evictedLabel: "stale" });
@@ -2402,9 +2479,9 @@ describe("evictForCapacity", () => {
   });
 
   test("a cap of 1 with 3 dormant entries evicts all of them, oldest-first, and joins the labels — the spawn itself will occupy the sole slot", () => {
-    const a = freshRpcRecord({ agentId: "a", lastLeadPromptAt: 1_000 });
-    const b = freshRpcRecord({ agentId: "b", lastLeadPromptAt: 2_000 });
-    const c = freshRpcRecord({ agentId: "c", lastLeadPromptAt: 3_000 });
+    const a = freshRpcRecord({ agentId: "a", lastOutputAt: 1_000 });
+    const b = freshRpcRecord({ agentId: "b", lastOutputAt: 2_000 });
+    const c = freshRpcRecord({ agentId: "c", lastOutputAt: 3_000 });
     const registry: RpcAgentRegistry = new Map([
       ["a", a],
       ["b", b],
@@ -2489,25 +2566,18 @@ describe("evictForCapacity", () => {
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
-  test("260905 (list-model/last-report-fidelity): prefers to drop a never-active record over a revived orphan whose lastReportAtOverride is newer", () => {
-    // Review relay #1 (Critical): both records must have distinct, non-zero
-    // activity under the FIXED formula, and "revived" is inserted first so
-    // insertion-order tie-breaking cannot coincidentally produce the right
-    // answer for the wrong reason. "never" gets a small lastLeadPromptAt
-    // (100) that is unambiguously below the override (9_000) only once the
-    // override is actually honored — under the pre-fix formula (which
-    // ignores lastReportAtOverride entirely), "revived" scores activity 0
-    // (lowest) and would be evicted instead, so this test fails if the
-    // lastReportAtOverride fallback in evictForCapacity regresses.
+  test("a revived report timestamp does not impersonate fresh agent output during capacity eviction", () => {
+    // Report metadata is retained for listAgents, but the output-only clock
+    // must not protect a revived record that has produced no observed output.
     const revived = freshRpcRecord({ agentId: "revived", lastReportAtOverride: new Date(9_000).toISOString() });
-    const neverActive = freshRpcRecord({ agentId: "never", lastLeadPromptAt: 100 });
+    const outputObserved = freshRpcRecord({ agentId: "output", lastOutputAt: 100 });
     const registry: RpcAgentRegistry = new Map([
       ["revived", revived],
-      ["never", neverActive],
+      ["output", outputObserved],
     ]);
     const result = evictForCapacity(registry, 2);
-    assert.deepEqual(result, { ok: true, evictedLabel: "never" });
-    assert.equal(registry.has("revived"), true);
+    assert.deepEqual(result, { ok: true, evictedLabel: "revived" });
+    assert.equal(registry.has("output"), true);
   });
 });
 

@@ -73,9 +73,9 @@ export interface AgentRow {
   name: string;
   role: AgentRowRole;
   state: AgentRowState;
-  /** Milliseconds since the clock this row's state uses — `ThreadRecord.touchedAt` for a `"thread"` row, `RpcAgentRecord.runStartedAt` otherwise. Zero is an unused placeholder on `livenessOnly` rows. Never negative. */
+  /** Milliseconds since the clock this row's state uses — `ThreadRecord.touchedAt` for a bound thread, otherwise the current run's `runStartedAt`, frozen at `settledAt`. Zero is an unused placeholder on `livenessOnly` rows. Never negative. */
   elapsedMs: number;
-  /** Milliseconds since `spawner.ts`'s `lastActivityAt` (last prompt/report/owner-send) for an RPC-backed row; for a pure synthetic thread row (no backing record) this is the same `ThreadRecord.touchedAt` delta as `elapsedMs`, the best available activity signal. Zero is an unused placeholder on `livenessOnly` rows. Never negative. 260914: replaces the removed `ctx` label as the live panel's per-row activity cue. */
+  /** Milliseconds since `spawner.ts`'s output-only `lastActivityAt` for an RPC-backed row; for a pure synthetic thread row (no backing record) this is the same `ThreadRecord.touchedAt` delta as `elapsedMs`, the best available activity signal. Zero is an unused placeholder on `livenessOnly` rows. Never negative. 260914: replaces the removed `ctx` label as the live panel's per-row activity cue. */
   lastActivityMs: number;
   /** The valid `/answer <id>` command for an owner-question row. */
   answerHint?: string;
@@ -351,7 +351,12 @@ export function buildAgentRows(records: RpcAgentRegistry, threads: readonly Thre
     if (boundThread) coveredThreadIds.add(boundThread.threadId);
 
     const isAwaitingOwnerWithThread = state === "awaiting-owner" && boundThread !== undefined;
-    const elapsedMs = isAwaitingOwnerWithThread ? clampElapsed(now - Date.parse(boundThread!.touchedAt)) : clampElapsed(now - (record.runStartedAt ?? now));
+    // Bound-thread rows retain their distinct owner-thread clock. Every other
+    // row shows one run, ending at settlement while lingering for delivery.
+    const runEndsAt = record.settledAt ?? now;
+    const elapsedMs = isAwaitingOwnerWithThread
+      ? clampElapsed(now - Date.parse(boundThread!.touchedAt))
+      : clampElapsed(runEndsAt - (record.runStartedAt ?? runEndsAt));
     rowById.set(node.id, {
       name: rowName(record),
       role: isAwaitingOwnerWithThread && boundThread!.origin === "lead-ask" ? "thread" : node.role,

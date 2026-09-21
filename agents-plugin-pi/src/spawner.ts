@@ -486,18 +486,20 @@ export interface RpcAgentRecord {
    */
   running: boolean;
   /**
-   * 260905 (live-agent widget ticket): epoch-ms stamp of the most recent
-   * prompt ISSUED to this child, stamped unconditionally by `promptAgent`,
-   * unlike `lastLeadPromptAt` below, because the widget's "running" row is meant to
-   * show how long THIS turn has been going, and a nudge starts a new turn on
-   * the wire even though it is not a new lead-issued task boundary. Read by
-   * `agent-widget.ts`'s `buildAgentRows` as the running-row elapsed clock;
-   * left untouched by `sendToAgent`'s `steer`/`followUp` join (see that
-   * function's doc comment) — a mid-stream steer keeps ticking from the
-   * turn's original start, by design.
+   * Epoch-ms anchor for the current run. It is set when a run begins, remains
+   * stable across nudges, and is read with `settledAt` by the gutter and audit
+   * picker to show that run's duration.
    */
   runStartedAt?: number;
-  /** Epoch-ms stamp of the last lead-issued prompt, retained for activity display and attribution. */
+  /** Epoch-ms terminal boundary for the current run, cleared when a new run begins. */
+  settledAt?: number;
+  /**
+   * Epoch-ms high-water mark of observed agent output only: tool execution or
+   * streamed assistant text/thinking. The gutter and audit picker both read
+   * this through `lastActivityAt`; lead/owner inputs never advance it.
+   */
+  lastOutputAt?: number;
+  /** Epoch-ms stamp of the last lead-issued prompt, retained for attribution, not activity display. */
   lastLeadPromptAt?: number;
   /**
    * 260905: `true` for the whole lifetime of an owner discussion thread bound
@@ -1641,12 +1643,8 @@ export function pushToLead(
  * `running` from the instant the prompt is ISSUED (not when `agent_start`
  * arrives — a lead ending its turn immediately after dispatch must already
  * see it counted), starts a fresh work generation, and stamps
- * `lastLeadPromptAt`.
- *
- * 260905 (live-agent widget ticket): `runStartedAt` is stamped
- * unconditionally, unlike `lastLeadPromptAt` — the widget's elapsed clock
- * resets on a nudge too, since the nudge really did start a fresh turn on
- * the wire even though it is not a new lead-issued task boundary.
+ * `lastLeadPromptAt`. A prompt joins its active run when the child is already
+ * running; only a resting child re-arms `runStartedAt` and clears `settledAt`.
  */
 interface WriterOperation {
   writer: "lead" | "owner";
@@ -1751,10 +1749,14 @@ export async function promptAgent(
   const writer = opts?.writer ?? "lead";
   const now = Date.now();
   const writerStamp = stampWriter(record, writer, writer === "owner" ? message : undefined, writer === "lead" && opts?.isLeadPrompt !== false ? now : undefined);
+  const startsNewRun = !record.running && !record.streaming;
   record.running = true;
   record.pendingQueuedWork = undefined;
   advanceWorkGeneration(record);
-  record.runStartedAt = now;
+  if (startsNewRun) {
+    record.runStartedAt = now;
+    record.settledAt = undefined;
+  }
   if (record.ownership) observeSessionWrite(record.ownership.home, record.sessionPath);
   if (record.ownership) updateOwnership(record.ownership.home, { lastActivityAt: now, liveness: { lifecycle: "live", running: true, observedAt: now } });
   const workGeneration = record.workGeneration;
@@ -2284,10 +2286,27 @@ export interface RpcEventOutcome {
  * `attachEventListener` performs asynchronous terminal transcript harvest and
  * queue admission. Gated execution events additionally capture approval data.
  */
+
+/** Store output observation without refreshing: streaming calls this per token. */
+function markAgentOutput(record: RpcAgentRecord): void {
+  record.lastOutputAt = Date.now();
+}
+
+/** Only assistant text/thinking deltas are output; lifecycle and input events are not. */
+function isStreamedAssistantOutput(evt: { type?: string; assistantMessageEvent?: unknown; message?: unknown }): boolean {
+  if (evt.type === "message_end") return assistantMessageText(evt.message) !== undefined;
+  if (evt.type !== "message_update" || !evt.assistantMessageEvent || typeof evt.assistantMessageEvent !== "object") return false;
+  const event = evt.assistantMessageEvent as { type?: unknown; delta?: unknown };
+  return (event.type === "text_delta" || event.type === "thinking_delta") && typeof event.delta === "string";
+}
+
 export function applyRpcEvent(
   record: RpcAgentRecord,
   evt: { type?: string; toolName?: string; args?: unknown; toolCallId?: string; isError?: unknown; result?: unknown },
 ): RpcEventOutcome {
+  // Every tool call/result is agent output, including report and approval
+  // tools. Lead prompts, owner sends, and scheduler triggers never arrive here.
+  if (evt.type === "tool_execution_start" || evt.type === "tool_execution_end") markAgentOutput(record);
   if (evt.type === "tool_execution_end") {
     observeForkFinishEvent(record, evt);
     return {};
@@ -2300,9 +2319,14 @@ export function applyRpcEvent(
       // a new outer promptAgent call. This is a new own-turn generation.
       record.running = true;
       advanceWorkGeneration(record);
+      record.runStartedAt = Date.now();
+      record.settledAt = undefined;
     }
     observeForkFinishEvent(record, evt);
   } else if (evt.type === "agent_settled") {
+    // Duplicate terminal events belong to the same completed run, so the
+    // first observation is the fixed duration boundary.
+    record.settledAt ??= Date.now();
     record.streaming = false;
     // The run is over: the child stops counting toward the fan-in the instant
     // it settles, whatever the caller decides to push about it.
@@ -2448,9 +2472,15 @@ export function attachEventListener(
     })();
   };
   const unsubscribeEvents = client.onEvent((evt) => {
-    const e = evt as { type?: string; toolName?: string; args?: unknown; toolCallId?: string; isError?: unknown; result?: unknown; message?: unknown };
+    const e = evt as { type?: string; toolName?: string; args?: unknown; toolCallId?: string; isError?: unknown; result?: unknown; message?: unknown; assistantMessageEvent?: unknown };
     if (record.client !== client || record.launchGeneration !== generation) return;
     if (e.type === "message_start") observeQueuedWorkBoundary(record, e.message);
+    const agentOutput = isStreamedAssistantOutput(e);
+    const streamingDelta = e.type === "message_update" && agentOutput;
+    // Token deltas update only the O(1) high-water field. Their timing and
+    // subtree/telemetry refreshes wait for message_end or the periodic gutter
+    // cadence, preventing a per-token render fan-out.
+    if (agentOutput) markAgentOutput(record);
     if (e.type === "message_end") {
       const text = assistantMessageText(e.message);
       if (text !== undefined) {
@@ -2458,13 +2488,11 @@ export function attachEventListener(
         record.lastTextGeneration = record.workGeneration;
       }
     }
-    refreshObservedSubtree(registry, record);
+    if (!streamingDelta) refreshObservedSubtree(registry, record);
     const outcome = applyRpcEvent(record, e);
-    publishSubtree(registry);
-    if (e.type === "agent_start" || e.type === "agent_settled" || e.type === "message_end" || e.type === "message_update" || e.type === "thinking_level_changed" || e.type === "compaction_end") {
+    if (!streamingDelta) publishSubtree(registry);
+    if (!streamingDelta && (e.type === "agent_start" || e.type === "agent_settled" || e.type === "message_end" || e.type === "message_update" || e.type === "thinking_level_changed" || e.type === "compaction_end")) {
       // Context occupancy changes at completed message/compaction boundaries.
-      // Streaming deltas retain the disk/state refresh without
-      // hammering get_session_stats on every token.
       refresh(e.type === "agent_settled" || e.type === "message_end" || e.type === "compaction_end");
     }
     if (outcome.push) {
@@ -2620,18 +2648,13 @@ export function reserveAgentAlias(
 }
 
 /**
- * 260908 (subagent audit window ticket): `max(lastLeadPromptAt, last
- * reportLog entry, or — for a revived orphan with no reportLog yet — its
- * lastReportAtOverride)`, pulled out of `evictForCapacity` below as its own
- * exported pure helper so the audit picker's dormant-tier sort (`260908`
- * sibling ticket) reuses the identical "last activity" formula rather than a
- * second, potentially-drifting copy. Pure refactor: `evictForCapacity`'s own
- * behavior is unchanged.
+ * Output-only activity high-water mark, shared by the live gutter, audit
+ * picker, and dormant-capacity ordering. It deliberately excludes prompt,
+ * owner-send, and report-log bookkeeping timestamps: those are inputs or
+ * retained history, not proof that the agent is producing output.
  */
 export function lastActivityAt(record: RpcAgentRecord): number {
-  const lastReportActivity = record.reportLog.at(-1)?.at ?? (record.lastReportAtOverride ? Date.parse(record.lastReportAtOverride) : 0);
-  const lastOwnerActivity = record.ownerSends?.at(-1)?.at ?? 0;
-  return Math.max(record.lastLeadPromptAt ?? 0, lastReportActivity, lastOwnerActivity);
+  return record.lastOutputAt ?? 0;
 }
 
 /**

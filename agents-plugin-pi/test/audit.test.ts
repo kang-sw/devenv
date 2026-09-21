@@ -208,8 +208,8 @@ describe("buildAuditPickerItems", () => {
     const approval = record({ agentId: "appr-agent-id", title: "ignored title", pendingApproval: { cmdId: "c1", command: "rm -rf /" }, runStartedAt: NOW - 120_000, observedModel: "stored-model", observedContextTokens: 132_400 });
     const runningOld = record({ agentId: "run-old-id", alias: "old-runner", client: {} as never, running: true, runStartedAt: NOW - 60_000, telemetry: { version: 1, origin: { sessionId: "old", sessionPath: "/tmp/old", emptyPrefix: true }, model: "large-model", contextTokens: 1_354_100 } });
     const runningNew = record({ agentId: "run-new-id", alias: "new-runner", client: {} as never, running: true, runStartedAt: NOW - 5_000 });
-    const dormantRecent = record({ agentId: "dorm-recent-id", alias: "recent-dormant", lastLeadPromptAt: NOW - 1_000 });
-    const dormantOld = record({ agentId: "dorm-old-id", alias: "old-dormant", lastLeadPromptAt: NOW - 100_000 });
+    const dormantRecent = record({ agentId: "dorm-recent-id", alias: "recent-dormant", lastOutputAt: NOW - 1_000 });
+    const dormantOld = record({ agentId: "dorm-old-id", alias: "old-dormant", lastOutputAt: NOW - 100_000 });
 
     // Insertion order deliberately scrambled — the function must sort, not preserve Map order.
     const registry = registryOf(dormantOld, runningOld, approval, dormantRecent, owner, runningNew);
@@ -226,7 +226,7 @@ describe("buildAuditPickerItems", () => {
   test("clamps future run and activity timestamps to zero-duration labels", () => {
     const NOW = Date.parse("2026-09-09T10:00:00.000Z");
     const running = record({ agentId: "future-running-id", client: {} as never, running: true, runStartedAt: NOW + 60_000 });
-    const dormant = record({ agentId: "future-dormant-id", lastLeadPromptAt: NOW + 60_000 });
+    const dormant = record({ agentId: "future-dormant-id", lastOutputAt: NOW + 60_000 });
     assert.deepEqual(buildAuditPickerItems(registryOf(running, dormant), NOW), [
       { value: "future-running-id", label: "future-r · running · — · ctx ? · running for 0s" },
       { value: "future-dormant-id", label: "future-d · dormant · — · ctx ? · last active 0s ago" },
@@ -238,16 +238,16 @@ describe("buildAuditPickerItems", () => {
     const labelFor = (overrides: Partial<RpcAgentRecord>) => buildAuditPickerItems(registryOf(record(overrides)), NOW)[0]!.label;
 
     assert.match(labelFor({ agentId: "missing-id" }), /last active —$/);
-    assert.match(labelFor({ agentId: "zero-id", lastLeadPromptAt: 0 }), /last active —$/);
-    assert.match(labelFor({ agentId: "nan-id", lastLeadPromptAt: Number.NaN }), /last active —$/);
-    assert.match(labelFor({ agentId: "invalid-id", lastReportAtOverride: "not-a-timestamp" }), /last active —$/);
-    assert.match(labelFor({ agentId: "old-id", lastLeadPromptAt: NOW - 90_000 }), /last active 1m ago$/);
-    assert.match(labelFor({ agentId: "future-id", lastLeadPromptAt: NOW + 60_000 }), /last active 0s ago$/);
+    assert.match(labelFor({ agentId: "zero-id", lastOutputAt: 0 }), /last active —$/);
+    assert.match(labelFor({ agentId: "nan-id", lastOutputAt: Number.NaN }), /last active —$/);
+    assert.match(labelFor({ agentId: "invalid-id", lastOutputAt: Number.NaN, lastReportAtOverride: "not-a-timestamp" }), /last active —$/);
+    assert.match(labelFor({ agentId: "old-id", lastOutputAt: NOW - 90_000 }), /last active 1m ago$/);
+    assert.match(labelFor({ agentId: "future-id", lastOutputAt: NOW + 60_000 }), /last active 0s ago$/);
   });
 
   test("a plain idle record with no client/threadBound/pendingApproval is dormant (tier 4), never one of the first three tiers", () => {
     const NOW = Date.parse("2026-09-09T10:00:00.000Z");
-    const idle = record({ agentId: "idle-1", lastLeadPromptAt: NOW });
+    const idle = record({ agentId: "idle-1", lastOutputAt: NOW });
     assert.deepEqual(buildAuditPickerItems(registryOf(idle), NOW), [
       { value: "idle-1", label: "idle-1 · dormant · — · ctx ? · last active 0s ago" },
     ]);
@@ -255,9 +255,23 @@ describe("buildAuditPickerItems", () => {
 
   test("an owner-held settled record is an idle-awaiting-owner live tier, not dormant", () => {
     const NOW = Date.parse("2026-09-09T10:00:00.000Z");
-    const held = record({ agentId: "held-id", alias: "held", lastWriter: "owner", ownerSends: [{ text: "look again", at: NOW - 2_000 }] });
+    const held = record({ agentId: "held-id", alias: "held", lastWriter: "owner", ownerSends: [{ text: "look again", at: NOW - 2_000 }], lastOutputAt: NOW - 2_000 });
     assert.deepEqual(buildAuditPickerItems(registryOf(held), NOW), [
       { value: "held-id", label: "held · idle awaiting owner · — · ctx ? · last active 2s ago" },
+    ]);
+  });
+
+  test("uses the frozen settle duration for a lingering visible record", () => {
+    const NOW = Date.parse("2026-09-09T10:00:00.000Z");
+    const lingering = record({
+      agentId: "delivery-id",
+      alias: "delivery",
+      waitingOnChildren: true,
+      runStartedAt: NOW - 30_000,
+      settledAt: NOW - 10_000,
+    });
+    assert.deepEqual(buildAuditPickerItems(registryOf(lingering), NOW), [
+      { value: "delivery-id", label: "delivery · waiting on children · — · ctx ? · running for 20s" },
     ]);
   });
 
@@ -274,7 +288,7 @@ describe("buildAuditPickerItems", () => {
         { id: "grand000-0000-0000-0000-000000000000", parentId: "child000-0000-0000-0000-000000000000", depth: 1, role: "worker", live: false },
       ],
     });
-    const dormant = record({ agentId: "dormant0-0000-0000-0000-000000000000", alias: "local-dormant", lastLeadPromptAt: NOW - 1_000 });
+    const dormant = record({ agentId: "dormant0-0000-0000-0000-000000000000", alias: "local-dormant", lastOutputAt: NOW - 1_000 });
 
     assert.deepEqual(buildAuditPickerItems(registryOf(dormant, parent), NOW), [
       { value: parent.agentId, label: "parent · running · — · ctx ? · running for 5s" },
