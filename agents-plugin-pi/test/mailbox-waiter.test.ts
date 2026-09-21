@@ -9,7 +9,9 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import {
   buildMailboxPushMessage,
   buildMailboxWaitArgv,
@@ -45,6 +47,18 @@ function scriptedWait(script: MailboxWaitOutcome[]): { runWait: (signal: AbortSi
 }
 
 const immediateSleep = (): Promise<void> => Promise.resolve();
+
+async function waitForFile(path: string): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    try {
+      await access(path);
+      return;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+  }
+  throw new Error(`timed out waiting for ${path}`);
+}
 
 describe("startMailboxWaiter", () => {
   test("a mail wake drains and admits every drained envelope in order", async () => {
@@ -92,6 +106,22 @@ describe("startMailboxWaiter", () => {
     waiter.stop();
     await waiter.done; // resolves only because stop() aborted the pending wait
     assert.equal(admitted.length, 0);
+  });
+
+  test("a wait failure that arrives after stop() does not notify through a stale diagnostic sink", async () => {
+    let rejectWait!: (error: Error) => void;
+    const diagnostics: string[] = [];
+    const waiter = startMailboxWaiter({
+      runWait: () => new Promise<MailboxWaitOutcome>((_resolve, reject) => { rejectWait = reject; }),
+      drainMail: () => Promise.resolve([]),
+      admit: () => assert.fail("the stopped waiter must not admit mail"),
+      sleep: immediateSleep,
+      onError: (message) => diagnostics.push(message),
+    });
+    waiter.stop();
+    rejectWait(new Error("late subprocess error"));
+    await waiter.done;
+    assert.deepEqual(diagnostics, [], "a stopped waiter must not invoke its session-bound diagnostic sink");
   });
 
   test("a failed drain backs off before re-arming so it cannot hot-spin the peek", async () => {
@@ -240,6 +270,59 @@ describe("createSubprocessWait", () => {
     assert.equal(injectedOutcome, "error");
     assert.ok(diagnostics.length > 0, "the injected sink receives the child's stderr");
     assert.deepEqual(consoleErrors, [], "an injected sink replaces the raw-terminal default");
+  });
+
+  test("child stderr emitted after abort is not delivered to the diagnostic sink", async () => {
+    const fixtureDir = await mkdtemp(join(tmpdir(), "ws-mailbox-waiter-"));
+    const launcherPath = join(fixtureDir, "late-stderr.py");
+    const readyPath = join(fixtureDir, "ready");
+    await writeFile(launcherPath, [
+      "import signal",
+      "import sys",
+      "import time",
+      `open(${JSON.stringify(readyPath)}, \"w\").close()`,
+      "def on_term(_signum, _frame):",
+      "    sys.stderr.write('late after stop\\n')",
+      "    sys.stderr.flush()",
+      "    raise SystemExit(0)",
+      "signal.signal(signal.SIGTERM, on_term)",
+      "while True:",
+      "    time.sleep(1)",
+      "",
+    ].join("\n"));
+    const diagnostics: string[] = [];
+    const controller = new AbortController();
+    try {
+      const outcome = createSubprocessWait({
+        launcherPath,
+        pluginDir: fixtureDir,
+        sessionKey: "my-key",
+        onStderr: (line) => diagnostics.push(line),
+      })(controller.signal);
+      await waitForFile(readyPath);
+      controller.abort();
+      assert.equal(await outcome, "stopped");
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      assert.deepEqual(diagnostics, [], "a stopped subprocess must not reach its session-bound sink");
+    } finally {
+      await rm(fixtureDir, { recursive: true, force: true });
+    }
+  });
+
+  test("a throwing diagnostic sink cannot escape a child stderr callback", async () => {
+    const missingLauncher = join(process.cwd(), "__ws-mailbox-waiter-throwing-sink__.py");
+    let sinkCalls = 0;
+    const outcome = await createSubprocessWait({
+      launcherPath: missingLauncher,
+      pluginDir: process.cwd(),
+      sessionKey: "my-key",
+      onStderr: () => {
+        sinkCalls += 1;
+        throw new Error("stale extension context");
+      },
+    })(new AbortController().signal);
+    assert.equal(outcome, "error");
+    assert.ok(sinkCalls > 0, "the child reached the injected sink without letting its throw escape");
   });
 });
 

@@ -153,6 +153,7 @@ export function startMailboxWaiter(deps: MailboxWaiterDeps): MailboxWaiterHandle
   const sleep = deps.sleep ?? defaultSleep;
   const backoffMs = deps.errorBackoffMs ?? DEFAULT_ERROR_BACKOFF_MS;
   const report = (message: string): void => {
+    if (controller.signal.aborted) return;
     try {
       (deps.onError ?? (() => {}))(message);
     } catch {
@@ -269,6 +270,14 @@ export function createSubprocessWait(options: SubprocessWaitOptions): (signal: A
   const stderr = options.onStderr ?? (() => {});
   return (signal) =>
     new Promise<MailboxWaitOutcome>((resolve) => {
+      const reportStderr = (line: string): void => {
+        if (signal.aborted) return;
+        try {
+          stderr(line);
+        } catch {
+          // A stale or otherwise failing diagnostic sink must not escape a child callback.
+        }
+      };
       if (signal.aborted) {
         resolve("stopped");
         return;
@@ -292,10 +301,10 @@ export function createSubprocessWait(options: SubprocessWaitOptions): (signal: A
       signal.addEventListener("abort", onAbort, { once: true });
       child.stderr?.on("data", (chunk: Buffer) => {
         const text = chunk.toString().trimEnd();
-        if (text) stderr(text);
+        if (text) reportStderr(text);
       });
       child.on("error", (err) => {
-        stderr(`wait spawn failed: ${err.message}`);
+        reportStderr(`wait spawn failed: ${err.message}`);
         finish("error");
       });
       child.on("exit", (code, sig) => {
