@@ -667,6 +667,12 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     mailboxWaiterHandle?.stop();
     mailboxWaiterHandle = undefined;
     const armEpoch = ++mailboxWaiterEpoch;
+    // The waiter owns a child process, whose stderr must never write directly
+    // to the terminal Pi's TUI owns. UI notifications are rendered through Pi's
+    // TUI instead, while headless contexts retain their host-provided handling.
+    const reportMailboxWaiterDiagnostic = (message: string): void => {
+      ctx.ui.notify(`[ws-mailbox] ${message}`, "warning");
+    };
     const mailboxSessionKey = handle.defaultSessionKeyRef.current;
     if (shouldArmMailboxWaiter(readSpawnRole(process.env), mailboxSessionKey)) {
       const mailboxHandle = handle;
@@ -679,9 +685,16 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
       // this attempt must not overwrite it.
       if (armEpoch === mailboxWaiterEpoch) {
         mailboxWaiterHandle = startMailboxWaiter({
-          runWait: createSubprocessWait({ launcherPath, pluginDir, sessionKey: mailboxSessionKey, slug: selfSlug }),
+          runWait: createSubprocessWait({
+            launcherPath,
+            pluginDir,
+            sessionKey: mailboxSessionKey,
+            slug: selfSlug,
+            onStderr: reportMailboxWaiterDiagnostic,
+          }),
           drainMail: createBridgeDrain(mailboxCallTool, mailboxSessionKey),
           admit: (envelope) => sendToLead(pi, buildMailboxPushMessage(envelope), "steer", "always"),
+          onError: reportMailboxWaiterDiagnostic,
         });
       }
     }

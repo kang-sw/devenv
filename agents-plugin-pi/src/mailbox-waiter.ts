@@ -121,7 +121,7 @@ export interface MailboxWaiterDeps {
   errorBackoffMs?: number;
   /** Injected sleep, so tests need no real timers. */
   sleep?: (ms: number) => Promise<void>;
-  /** Diagnostic sink; defaults to `console.error`. */
+  /** Diagnostic sink; omitted diagnostics are discarded rather than written to the host terminal. */
   onError?: (message: string) => void;
 }
 
@@ -154,7 +154,7 @@ export function startMailboxWaiter(deps: MailboxWaiterDeps): MailboxWaiterHandle
   const backoffMs = deps.errorBackoffMs ?? DEFAULT_ERROR_BACKOFF_MS;
   const report = (message: string): void => {
     try {
-      (deps.onError ?? ((m: string) => console.error(`[ws-mailbox] ${m}`)))(message);
+      (deps.onError ?? (() => {}))(message);
     } catch {
       // A failing diagnostic sink must never break the loop.
     }
@@ -238,7 +238,7 @@ export interface SubprocessWaitOptions {
   slug?: string;
   /** `--timeout` value; a finite window self-heals a wedged wait and bounds the listening marker. */
   timeoutArg?: string;
-  /** Diagnostic sink for the child's stderr and spawn failures. */
+  /** Diagnostic sink for the child's stderr and spawn failures; omitted diagnostics are discarded. */
   onStderr?: (line: string) => void;
 }
 
@@ -266,7 +266,7 @@ export function buildMailboxWaitArgv(options: SubprocessWaitOptions): string[] {
  * ignored (`stdio` drops it): the drain, not the peek, is the source of truth.
  */
 export function createSubprocessWait(options: SubprocessWaitOptions): (signal: AbortSignal) => Promise<MailboxWaitOutcome> {
-  const stderr = options.onStderr ?? ((line: string) => console.error(`[ws-mailbox] ${line}`));
+  const stderr = options.onStderr ?? (() => {});
   return (signal) =>
     new Promise<MailboxWaitOutcome>((resolve) => {
       if (signal.aborted) {
