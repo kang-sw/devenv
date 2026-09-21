@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 3ad6ae289513ae33
 sage-review-completeness-reviewed: 3ad6ae289513ae33
+completed: 2026-09-21
 ---
 
 # Pi adapter: isolate subtree publication failures from nested lifecycle
@@ -76,3 +77,27 @@ Verify at least:
 - Cleanup publication failure preserves the original spawn failure.
 - Retry exhaustion diagnostics contain path, PID, nonce, revision, and attempt count without sensitive content.
 - Existing recursive waiting, nested gutter, fork, Explore, and execute-worker tests remain green, followed by the full Pi package suite.
+
+### Result (820ef482) - 2026-09-21
+
+Implemented effective-snapshot deduplication that advances only after successful replacement, preserving retries and every meaningful lifecycle transition. The initial busy publication remains a fail-closed spawn gate; later event, settlement, watcher, and cleanup publications are best-effort so they cannot mask authoritative lifecycle work or primary failures.
+
+Added bounded retry-exhaustion diagnostics containing the private channel path, writer PID, nonce, revision, and attempt count without prompt or transcript data. Root sessions retain owner notifications, while nested RPC sessions receive the same failure through a non-recursive `ws-agent-advisory` fallback; diagnostic deduplication and its cap advance only after successful delivery.
+
+Verification:
+
+- `npm test -- test/fork-context.test.ts test/recursive-worker.test.ts test/spawner.test.ts`: 234 passed, 0 failed.
+- `npm test`: 1,631 passed, 2 expected skips, 0 failed.
+- `git diff --check`: passed.
+- Partitioned correctness, fit, and test review completed. Round-one findings were fixed in `8992901f` and `820ef482`; round-two correctness and test verification reported no remaining findings.
+
+Decisions:
+
+- Kept the synchronous private JSON transport and bounded Windows rename retry instead of introducing a queue, lease, or alternate transport.
+- Used direct Pi-session advisory delivery for nested diagnostics rather than `pushToLead`, which would republish the same failing subtree.
+- Added a production-defaulted watcher-function seam so watcher failure coverage invokes the exact callback deterministically without platform-dependent `fs.watch` timing.
+
+
+## Resolution (2026-09-21)
+
+Implemented subtree snapshot deduplication, retained the initial fail-closed dispatch publication, isolated later lifecycle publication failures, and added bounded nested-session diagnostics. Focused and full Pi package suites pass; partitioned review completed with all round-one findings resolved and round-two verification clean.
