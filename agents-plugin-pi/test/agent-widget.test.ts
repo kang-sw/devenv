@@ -27,12 +27,10 @@ function record(overrides: Partial<RpcAgentRecord> = {}): RpcAgentRecord {
     streaming: false,
     running: false,
     reportLog: [],
-    // 260914: lastActivityAt (spawner.ts) reads lastLeadPromptAt/reportLog/ownerSends,
-    // defaulting a fixture with none of those to a 0 lastActivityAt and thus a huge
-    // lastActivityMs. Default to "just prompted" (zero activity elapsed) so most
-    // fixtures need no extra override; a test that cares about activity elapsing
-    // overrides this explicitly.
-    lastLeadPromptAt: NOW,
+    // lastActivityAt (spawner.ts) reads only the agent-output high-water mark.
+    // Default fixtures to output just observed so unrelated row tests retain a
+    // zero activity duration; tests concerned with clock semantics override it.
+    lastOutputAt: NOW,
     ...overrides,
   };
 }
@@ -207,6 +205,21 @@ describe("buildAgentRows", () => {
     assert.equal(rows.find((r) => r.state === "awaiting-owner")!.elapsedMs, 7_000);
     assert.equal(rows.find((r) => r.name === "cccccccc")!.elapsedMs, 3_000);
     assert.equal(rows.find((r) => r.name === "dddddddd")!.elapsedMs, 0);
+  });
+
+  test("elapsed freezes at settle for lingering non-thread rows while the bound-thread clock stays untouched", () => {
+    const frozen = record({
+      agentId: "eeeeeeee-0000-0000-0000-000000000000",
+      client: {} as never,
+      waitingOnChildren: true,
+      runStartedAt: NOW - 20_000,
+      settledAt: NOW - 5_000,
+    });
+    const bound = record({ threadBound: true, runStartedAt: NOW - 20_000, settledAt: NOW - 5_000 });
+    const threads: ThreadRecord[] = [thread({ respondentAgentId: bound.agentId, origin: "lead-ask", touchedAt: new Date(NOW - 3_000).toISOString() })];
+    const rows = buildAgentRows(registryOf(frozen, bound), threads, NOW);
+    assert.equal(rows.find((row) => row.name === "eeeeeeee")!.elapsedMs, 15_000);
+    assert.equal(rows.find((row) => row.state === "awaiting-owner")!.elapsedMs, 3_000);
   });
 
   test("elapsed never goes negative even when the source clock is in the future", () => {

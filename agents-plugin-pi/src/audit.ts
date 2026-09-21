@@ -350,7 +350,8 @@ function buildAuditPickerRows(registry: RpcAgentRegistry, now: number, labelWidt
         lastActivity: activityAt,
       };
     } else {
-      const elapsedMs = elapsedSince(now, record.runStartedAt ?? now);
+      const runEndsAt = record.settledAt ?? now;
+      const elapsedMs = elapsedSince(runEndsAt, record.runStartedAt ?? runEndsAt);
       root = {
         agentId: record.agentId,
         identity,
