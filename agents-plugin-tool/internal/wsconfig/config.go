@@ -149,7 +149,10 @@ func mergeAgentConfig(dst *Config, src Config) {
 	}
 }
 
-func loadMergedAgentConfig(opts Options) (Config, error) {
+// LoadAgentTierConfig returns effective AgentTier values after applying the
+// builtin < global < project leaf overlay. It intentionally leaves Overrides
+// alone: scalar overrides remain the Resolver's responsibility.
+func LoadAgentTierConfig(opts Options) (Config, error) {
 	globalCfg, err := loadGlobalConfig(opts)
 	if err != nil {
 		return Config{}, err
@@ -342,7 +345,7 @@ func ResolveAgentForHarnessConfig(opts Options, tier, backend, model, harness st
 		}
 		return backend, model, "", nil
 	}
-	cfg, err := loadMergedAgentConfig(opts)
+	cfg, err := LoadAgentTierConfig(opts)
 	if err != nil {
 		return "", "", "", err
 	}
@@ -380,7 +383,7 @@ func ResolveAgentTierForHarness(opts Options, tier, harness string) (backend, mo
 	if normalized == "" {
 		return "", "", "", "", fmt.Errorf("tier must be small, medium, large, or xlarge; got %q", tier)
 	}
-	cfg, err := loadMergedAgentConfig(opts)
+	cfg, err := LoadAgentTierConfig(opts)
 	if err != nil {
 		return "", "", "", "", err
 	}

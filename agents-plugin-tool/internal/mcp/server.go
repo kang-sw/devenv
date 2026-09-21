@@ -2299,7 +2299,7 @@ func currentWorkflowPreference(resolver *wsconfig.Resolver, sessionKey, itemKey 
 }
 
 func currentAgentTierMappings() ([]tuningAgentTierCurrent, error) {
-	cfg, err := wsconfig.Load(wsconfig.Options{})
+	cfg, err := wsconfig.LoadAgentTierConfig(wsconfig.Options{})
 	if err != nil {
 		return nil, err
 	}

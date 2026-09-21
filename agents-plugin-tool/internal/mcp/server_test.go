@@ -1478,6 +1478,7 @@ func TestServeStdioConfigAgentsTierScopesWriteAndResolve(t *testing.T) {
 		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"config.resolve_agent","arguments":{"tier":"medium","harness":"pi","format":"json"}}}`,
 		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"config.tune","arguments":{"key":"agents.tier","scope":"session","value":{"tier":"medium"}}}}`,
 		`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"config.tune","arguments":{"key":"agents.tier","scope":"repo","value":{"tier":"medium"}}}}`,
+		`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"config.list","arguments":{"format":"json"}}}`,
 	}
 
 	var out bytes.Buffer
@@ -1503,6 +1504,9 @@ func TestServeStdioConfigAgentsTierScopesWriteAndResolve(t *testing.T) {
 		}
 		if resp, ok := byID["4"]; ok && !strings.Contains(toolText(t, resp), `"model":"project-pi"`) {
 			t.Fatalf("project leaf resolution = %s", resp)
+		}
+		if resp, ok := byID["7"]; ok && !strings.Contains(toolText(t, resp), `"model":"global-claude"`) {
+			t.Fatalf("config.list omitted the global tier leaf: %s", resp)
 		}
 	}
 }
