@@ -153,6 +153,26 @@ function isRetryableWindowsRenameError(error: unknown): boolean {
   return code === "EPERM" || code === "EBUSY";
 }
 
+const PRIVATE_JSON_DIAGNOSTIC_FIELD_CAP = 512;
+function boundedDiagnosticField(value: unknown, fallback: string): string {
+  if (typeof value !== "string" || !value) return fallback;
+  return value.length <= PRIVATE_JSON_DIAGNOSTIC_FIELD_CAP ? value : `${value.slice(0, PRIVATE_JSON_DIAGNOSTIC_FIELD_CAP)}…`;
+}
+
+/** Builds transport-only exhaustion detail; private payload fields are never rendered. */
+function privateJsonRetryExhausted(path: string, data: unknown, attempts: number, cause: NodeJS.ErrnoException): Error {
+  const envelope = data && typeof data === "object" ? data as { nonce?: unknown; revision?: unknown } : undefined;
+  const nonce = boundedDiagnosticField(envelope?.nonce, "unavailable");
+  const revision = Number.isSafeInteger(envelope?.revision) && (envelope?.revision as number) >= 0 ? String(envelope?.revision) : "unavailable";
+  const diagnosticPath = boundedDiagnosticField(path, "unavailable");
+  const error = new Error(`ws-pi-private-json: replacement retries exhausted path=${JSON.stringify(diagnosticPath)} writer_pid=${process.pid} channel_nonce=${JSON.stringify(nonce)} snapshot_revision=${revision} attempts=${attempts}`);
+  Object.defineProperties(error, {
+    cause: { value: cause, enumerable: false },
+    code: { value: cause.code, enumerable: false },
+  });
+  return error;
+}
+
 /** The optional hooks are a focused deterministic test seam; production callers use two arguments. */
 export function writePrivateJson(path: string, data: unknown, hooks: PrivateJsonWriteHooks = {}): void {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
@@ -168,7 +188,8 @@ export function writePrivateJson(path: string, data: unknown, hooks: PrivateJson
         rename(temporary, path);
         return;
       } catch (error) {
-        if (platform !== "win32" || !isRetryableWindowsRenameError(error) || attempt === 4) throw error;
+        if (platform !== "win32" || !isRetryableWindowsRenameError(error)) throw error;
+        if (attempt === 4) throw privateJsonRetryExhausted(path, data, attempt + 1, error as NodeJS.ErrnoException);
         sleep(10 * 2 ** attempt);
       }
     }

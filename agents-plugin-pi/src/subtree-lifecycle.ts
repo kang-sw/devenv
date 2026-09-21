@@ -58,10 +58,39 @@ export function subtreeWaiting(snapshot: SubtreeSnapshot | undefined): boolean {
 export function writeSubtreeSnapshot(channel: SubtreeChannel, snapshot: Omit<SubtreeSnapshot, "nonce">): void {
   writePrivateJson(channel.path, { ...snapshot, nonce: channel.nonce });
 }
-interface Publisher { revision: number; delegated: boolean; dispatching: number; channel?: SubtreeChannel; deliveries: () => number }
+interface Publisher {
+  revision: number;
+  delegated: boolean;
+  dispatching: number;
+  channel?: SubtreeChannel;
+  deliveries: () => number;
+  lastPublished?: string;
+  diagnosticsReported: number;
+  lastDiagnostic?: string;
+  reportDiagnostic?: (detail: string) => boolean;
+}
 const publishers = new WeakMap<RpcAgentRegistry, Publisher>();
-export function installSubtreePublisher(registry: RpcAgentRegistry, channel: SubtreeChannel | undefined, deliveries: () => number): void {
-  publishers.set(registry, { revision: 0, delegated: false, dispatching: 0, channel, deliveries });
+const MAX_PUBLICATION_DIAGNOSTICS = 8;
+
+function publicationDiagnostic(publisher: Publisher, error: unknown): void {
+  const detail = error instanceof Error && error.message.startsWith("ws-pi-private-json:")
+    ? error.message
+    : "ws-pi-agent: subtree publication failed";
+  if (publisher.lastDiagnostic === detail || publisher.diagnosticsReported >= MAX_PUBLICATION_DIAGNOSTICS) return;
+  let reported = false;
+  try { reported = publisher.reportDiagnostic?.(detail) === true; } catch { /* Diagnostics never change lifecycle outcomes. */ }
+  if (!reported) return;
+  publisher.lastDiagnostic = detail;
+  publisher.diagnosticsReported++;
+}
+
+export function installSubtreePublisher(
+  registry: RpcAgentRegistry,
+  channel: SubtreeChannel | undefined,
+  deliveries: () => number,
+  reportDiagnostic?: (detail: string) => boolean,
+): void {
+  publishers.set(registry, { revision: 0, delegated: false, dispatching: 0, channel, deliveries, diagnosticsReported: 0, reportDiagnostic });
   publishSubtree(registry);
 }
 export function subtreeOutstanding(registry: RpcAgentRegistry): number {
@@ -98,7 +127,7 @@ function subtreeDescendants(registry: RpcAgentRegistry): SubtreeDescendant[] {
   return rows;
 }
 
-export function publishSubtree(registry: RpcAgentRegistry | undefined, dispatched = false): SubtreeSnapshot | undefined {
+function publishSubtreeState(registry: RpcAgentRegistry | undefined, dispatched: boolean, required: boolean): SubtreeSnapshot | undefined {
   if (!registry) return undefined;
   const p = publishers.get(registry);
   if (!p) return undefined;
@@ -110,13 +139,42 @@ export function publishSubtree(registry: RpcAgentRegistry | undefined, dispatche
   }
   p.delegated ||= registry.size > 0;
   const snapshot = { nonce: p.channel?.nonce ?? "local", outstanding, active, deliveries: p.deliveries(), delegated: p.delegated, revision: p.revision, descendants: subtreeDescendants(registry) };
-  if (p.channel) writeSubtreeSnapshot(p.channel, snapshot);
+  if (!p.channel) return snapshot;
+  const effectiveState = JSON.stringify(snapshot);
+  if (effectiveState === p.lastPublished) return snapshot;
+  try {
+    writeSubtreeSnapshot(p.channel, snapshot);
+    p.lastPublished = effectiveState;
+    p.lastDiagnostic = undefined;
+  } catch (error) {
+    if (required) throw error;
+    publicationDiagnostic(p, error);
+  }
   return snapshot;
 }
+
+/** Best-effort after dispatch admission: authoritative in-memory lifecycle always proceeds. */
+export function publishSubtree(registry: RpcAgentRegistry | undefined, dispatched = false): SubtreeSnapshot | undefined {
+  return publishSubtreeState(registry, dispatched, false);
+}
+
 export function beginSubtreeDispatch(registry: RpcAgentRegistry): () => void {
   const publisher = publishers.get(registry);
   if (!publisher) return () => {};
   publisher.dispatching++;
-  publishSubtree(registry);
-  return () => { publisher.dispatching--; publishSubtree(registry); };
+  try {
+    // This busy edge is the one hard publication gate: no child may start if
+    // its parent cannot first observe that nested dispatch is in progress.
+    publishSubtreeState(registry, false, true);
+  } catch (error) {
+    publisher.dispatching--;
+    throw error;
+  }
+  let finished = false;
+  return () => {
+    if (finished) return;
+    finished = true;
+    publisher.dispatching--;
+    publishSubtree(registry);
+  };
 }

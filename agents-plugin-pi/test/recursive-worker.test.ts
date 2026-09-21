@@ -1,8 +1,8 @@
 import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { RpcClient } from "@earendil-works/pi-coding-agent";
 import {
   CHILD_MANAGEMENT_TOOLS,
@@ -49,6 +49,11 @@ function home(): string {
   const dir = mkdtempSync(join(tmpdir(), "ws-subtree-test-"));
   dirs.push(dir);
   return dir;
+}
+function blockPublisherPath(path: string): void {
+  const directory = dirname(path);
+  rmSync(directory, { recursive: true, force: true });
+  writeFileSync(directory, "publisher directory replaced by a file");
 }
 afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
@@ -137,6 +142,104 @@ test("dispatch admission is published as outstanding until registration complete
   assert.equal(subtreeWaiting(readSubtreeSnapshot(channel)), true);
   finish();
   assert.equal(subtreeWaiting(readSubtreeSnapshot(channel)), false);
+});
+
+test("subtree publication skips equivalent writes but preserves every effective transport transition", () => {
+  const registry: RpcAgentRegistry = new Map();
+  const channel = { path: join(home(), "publisher", "subtree.json"), nonce: "dedupe-a" };
+  let deliveries = 0;
+  installSubtreePublisher(registry, channel, () => deliveries);
+  let inode = statSync(channel.path, { bigint: true }).ino;
+  const expectPhysicalWrite = (change: () => void): void => {
+    change();
+    const next = statSync(channel.path, { bigint: true }).ino;
+    assert.notEqual(next, inode);
+    inode = next;
+  };
+
+  publishSubtree(registry);
+  assert.equal(statSync(channel.path, { bigint: true }).ino, inode, "an identical effective snapshot does not replace the file");
+
+  let finish!: () => void;
+  expectPhysicalWrite(() => { finish = beginSubtreeDispatch(registry); });
+  assert.equal(readSubtreeSnapshot(channel)?.active, 1, "dispatch admission remains observable");
+  expectPhysicalWrite(finish);
+  assert.equal(readSubtreeSnapshot(channel)?.active, 0);
+
+  const child = record("dedupe-child");
+  expectPhysicalWrite(() => { registry.set(child.agentId, child); publishSubtree(registry); });
+  assert.equal(readSubtreeSnapshot(channel)?.delegated, true);
+  assert.equal(readSubtreeSnapshot(channel)?.descendants[0]?.id, child.agentId);
+
+  expectPhysicalWrite(() => { child.running = true; publishSubtree(registry); });
+  assert.equal(readSubtreeSnapshot(channel)?.active, 1);
+  expectPhysicalWrite(() => { child.waitingOnChildren = true; publishSubtree(registry); });
+  assert.equal(readSubtreeSnapshot(channel)?.outstanding, 1);
+  expectPhysicalWrite(() => { deliveries = 1; publishSubtree(registry); });
+  assert.equal(readSubtreeSnapshot(channel)?.deliveries, 1);
+  expectPhysicalWrite(() => {
+    child.subtreeDescendants = [{ id: "nested", parentId: null, depth: 0, role: "explore", live: true }];
+    publishSubtree(registry);
+  });
+  assert.equal(readSubtreeSnapshot(channel)?.descendants.some((row) => row.id === "nested"), true);
+  expectPhysicalWrite(() => { channel.nonce = "dedupe-b"; publishSubtree(registry); });
+  assert.equal(readSubtreeSnapshot(channel)?.nonce, "dedupe-b");
+  expectPhysicalWrite(() => { publishSubtree(registry, true); });
+  assert.equal(readSubtreeSnapshot(channel)?.revision, 1);
+});
+
+test("RPC settlement survives a secondary upstream publication failure", async () => {
+  const notices: string[] = [];
+  const sent: any[] = [];
+  const h = pushHarness(sent);
+  const child = record("publication-failure", { client: h.client, running: true, workGeneration: 1 });
+  const registry: RpcAgentRegistry = new Map([[child.agentId, child]]);
+  const channel = { path: join(home(), "publisher", "subtree.json"), nonce: "soft-event" };
+  installSubtreePublisher(registry, channel, () => 0, (detail) => { notices.push(detail); return true; });
+  attachEventListener(h.pi, registry, child, h.client);
+  blockPublisherPath(channel.path);
+
+  h.emit(assistantEnd("settled through publication failure"));
+  h.emit({ type: "agent_settled" });
+  await drain();
+  assert.equal(child.running, false);
+  assert.equal(child.terminalDelivery?.state, "held", "settlement admission still executes");
+  flushHeldPushes(h.pi, true);
+  await drain();
+  assert.equal(sent[0]?.details.last_message, "settled through publication failure");
+  assert.deepEqual(notices, ["ws-pi-agent: subtree publication failed"], "equivalent failures are diagnosed once");
+});
+
+test("watcher publication failure is contained and watcher cleanup remains callable", () => {
+  const notices: string[] = [];
+  const observedChannel = { path: join(home(), "observed", "subtree.json"), nonce: "observed" };
+  const nestedRegistry: RpcAgentRegistry = new Map();
+  installSubtreePublisher(nestedRegistry, observedChannel, () => 0);
+
+  let notify: ((event: string, filename: string | Buffer | null) => void) | undefined;
+  let closes = 0;
+  const fakeWatch = ((_path: string, _options: unknown, listener: typeof notify) => {
+    notify = listener;
+    return { on() { return this; }, close() { closes++; } };
+  }) as any;
+  const h = pushHarness([]);
+  const child = record("watched-child", { client: h.client, subtreeChannel: observedChannel, launchGeneration: 1 });
+  const registry: RpcAgentRegistry = new Map([[child.agentId, child]]);
+  const upstreamChannel = { path: join(home(), "upstream", "subtree.json"), nonce: "upstream" };
+  installSubtreePublisher(registry, upstreamChannel, () => 0, (detail) => { notices.push(detail); return true; });
+  attachEventListener(h.pi, registry, child, h.client, undefined, fakeWatch);
+  blockPublisherPath(upstreamChannel.path);
+
+  const nested = record("nested-live", { client: {} as never, running: true, spawnRole: "explore" });
+  nestedRegistry.set(nested.agentId, nested);
+  publishSubtree(nestedRegistry, true);
+  notify?.("rename", basename(observedChannel.path));
+
+  assert.equal(child.waitingOnChildren, true);
+  assert.equal(child.subtreeDescendants?.some((row) => row.id === nested.agentId), true);
+  assert.doesNotThrow(() => child.unsubscribe?.(), "publication failure cannot prevent watcher cleanup");
+  assert.equal(closes, 1);
+  assert.deepEqual(notices, ["ws-pi-agent: subtree publication failed"]);
 });
 
 test("subtree publication merges three identity levels without changing authoritative counts", () => {

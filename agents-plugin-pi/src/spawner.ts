@@ -2408,12 +2408,13 @@ function watchObservedSubtree(
   record: RpcAgentRecord,
   client: RpcClient,
   generation: number,
+  watchDirectory: typeof watch,
 ): (() => void) | undefined {
   const channel = record.subtreeChannel;
   if (!channel) return undefined;
   try {
     const target = basename(channel.path);
-    const watcher = watch(dirname(channel.path), { persistent: false }, (_event, filename) => {
+    const watcher = watchDirectory(dirname(channel.path), { persistent: false }, (_event, filename) => {
       if (filename !== null && String(filename) !== target) return;
       if (record.client !== client || record.launchGeneration !== generation) return;
       refreshObservedSubtree(registry, record);
@@ -2433,6 +2434,8 @@ export function attachEventListener(
   record: RpcAgentRecord,
   client: RpcClient,
   onApprovalPending?: (record: RpcAgentRecord) => void,
+  /** Focused deterministic seam for watcher-callback tests; production uses node:fs watch. */
+  watchDirectory: typeof watch = watch,
 ): void {
   let refreshing = false;
   let dirty = false;
@@ -2556,7 +2559,7 @@ export function attachEventListener(
       approvalHook(record);
     }
   });
-  const unsubscribeSubtree = watchObservedSubtree(registry, record, client, generation);
+  const unsubscribeSubtree = watchObservedSubtree(registry, record, client, generation, watchDirectory);
   record.unsubscribe = () => {
     unsubscribeEvents();
     unsubscribeSubtree?.();
@@ -3549,6 +3552,29 @@ export interface AgentToolsHandle {
  * Child management is available only within the persisted depth/capability
  * envelope. The tool-call gate enforces the same ceiling after lazy activation.
  */
+function reportSubtreePublicationDiagnostic(pi: ExtensionAPI, detail: string): boolean {
+  if (ownerNotifyRef.current) {
+    try {
+      ownerNotifyRef.current(detail, "warning");
+      return true;
+    } catch { /* Fall through to the session-owned diagnostic channel. */ }
+  }
+  const payload = { advisory: "subtree-publication-failed", detail };
+  try {
+    // Use the current Pi session directly rather than pushToLead: the latter
+    // republishes the same broken subtree and would recursively diagnose itself.
+    pi.sendMessage({
+      customType: "ws-agent-advisory",
+      content: buildPushContent("ws-agent-advisory", undefined, payload, undefined),
+      display: true,
+      details: payload,
+    }, { deliverAs: "followUp", triggerTurn: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function registerAgentTools(
   pi: ExtensionAPI,
   bridge: BridgeHandle,
@@ -3570,7 +3596,7 @@ export function registerAgentTools(
 ): AgentToolsHandle {
   const rpcRegistry: RpcAgentRegistry = new Map();
   registerAgentCostOwner(rpcRegistry, sessionCtx.storage);
-  installSubtreePublisher(rpcRegistry, readSubtreeChannel(), () => heldPushQueue.length);
+  installSubtreePublisher(rpcRegistry, readSubtreeChannel(), () => heldPushQueue.length, (detail) => reportSubtreePublicationDiagnostic(pi, detail));
   const stopLivenessProbe = startLivenessProbe(pi, rpcRegistry);
 
   /** Cap on the head-truncated query used as a spawned explore's display title. */
