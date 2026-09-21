@@ -85,9 +85,27 @@ func TestImplIdentityResolveProvisionRouteIntegration(t *testing.T) {
 
 			list := callToolsList(t, server)
 			entry := toolEntryTextByName(t, list, "git.resolve_impl_branch")
-			for _, want := range []string{"ticket_stem", "base", "format", "Pure name resolution"} {
-				if !strings.Contains(entry, want) {
-					t.Fatalf("git.resolve_impl_branch schema missing %q: %s", want, entry)
+			var schema struct {
+				InputSchema struct {
+					Properties map[string]any `json:"properties"`
+					Required   []string       `json:"required"`
+				} `json:"inputSchema"`
+			}
+			if err := json.Unmarshal([]byte(entry), &schema); err != nil {
+				t.Fatalf("parse git.resolve_impl_branch schema: %v", err)
+			}
+			for _, want := range []string{"session_key", "ticket_stem", "base", "format"} {
+				if _, ok := schema.InputSchema.Properties[want]; !ok {
+					t.Fatalf("git.resolve_impl_branch schema missing property %q: %s", want, entry)
+				}
+			}
+			required := make(map[string]bool, len(schema.InputSchema.Required))
+			for _, name := range schema.InputSchema.Required {
+				required[name] = true
+			}
+			for _, want := range []string{"session_key", "ticket_stem", "base"} {
+				if !required[want] {
+					t.Fatalf("git.resolve_impl_branch schema missing required field %q: %s", want, entry)
 				}
 			}
 
@@ -127,6 +145,52 @@ func TestImplIdentityResolveProvisionRouteIntegration(t *testing.T) {
 				t.Fatalf("provisioned canonical branch did not continue: %+v", routed.Verdict.BranchPlan)
 			}
 		})
+	}
+}
+
+func TestResolveImplBranchRequestValidationAndDefaultFormat(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	root = canonicalRootForTest(t, root)
+	runGit(t, root, "checkout", "-b", "develop")
+	runGit(t, root, "commit", "--allow-empty", "-m", "fixture")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	server := NewServer(root, "test")
+	key, err := server.sessions.mint(root, roleLead, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		args map[string]any
+		want string
+	}{
+		{name: "missing ticket stem", args: map[string]any{"base": "develop"}, want: "ticket_stem and base"},
+		{name: "missing base", args: map[string]any{"ticket_stem": "260921-feat-example"}, want: "ticket_stem and base"},
+		{name: "invalid base", args: map[string]any{"ticket_stem": "260921-feat-example", "base": "invalid..branch"}, want: "invalid branch name"},
+		{name: "detached HEAD", args: map[string]any{"ticket_stem": "260921-feat-example", "base": "HEAD"}, want: "must name a branch"},
+		{name: "trimmed detached HEAD", args: map[string]any{"ticket_stem": "260921-feat-example", "base": " HEAD "}, want: "must name a branch"},
+		{name: "detached marker", args: map[string]any{"ticket_stem": "260921-feat-example", "base": "(detached)"}, want: "must name a branch"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args := map[string]any{"session_key": key}
+			for name, value := range tc.args {
+				args[name] = value
+			}
+			response := callToolOnce(t, server, 1, "git.resolve_impl_branch", args)
+			if !toolIsError(t, response) || !strings.Contains(toolText(t, response), tc.want) {
+				t.Fatalf("request was not rejected as expected: %s", response)
+			}
+		})
+	}
+
+	stem := "260921-feat-default-format"
+	text := callToolWithKey(t, server, 2, key, "git.resolve_impl_branch", map[string]any{"ticket_stem": stem, "base": "develop"})
+	want := "branch: " + implTicketBranch("develop", stem) + "\nmerge_root: develop\n"
+	if text != want {
+		t.Fatalf("default response = %q, want compact response %q", text, want)
 	}
 }
 

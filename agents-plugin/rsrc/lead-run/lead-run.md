@@ -122,15 +122,15 @@ turn; the next invocation merges once the holder has released it.
 - `completion: ticket` — merge the retained impl branch. When that ticket was
   an epic's last open child, surface the epic to the user for a close
   decision. Then **End the turn**.
-- **branch identity** — On an unmerged branch-identity stop, judge ownership
-  from the lead's cross-ticket context or a bounded explore. If that work
-  belongs to the target ticket, re-invoke its route with a vouch matching the
-  observed branch and target ticket; otherwise leave the safety stop in place.
 - **(a) parent merge** — handle as **Terminal: `ready/` empty on a goal
   branch**: the same approval and the same merge.
-- **(b) unresolved decision** — read what the worker points at. If it settles
-  the question, resume the worker with the answer and its source; otherwise
-  put the open question(s) to the user and resume with the answers.
+- **(b) unresolved decision** — For a branch-identity safety stop, judge
+  ownership from cross-ticket context or a bounded explore. If the unmerged
+  work belongs to the target ticket, re-invoke its route with a vouch matching
+  the observed branch and target ticket; otherwise leave the safety stop in
+  place. For another (b), read what the worker points at. If it settles the
+  question, resume the worker with the answer and its source; otherwise put
+  the open question(s) to the user and resume with the answers.
 - **(c) contract broken** — route the worker's `proposed_resolution:` through
   `{{.SkillNamespace}}:lead-ticket` under its design-review gate, one tier
   above the worker's: revise the unimplemented phase directly, or append an

@@ -20,8 +20,11 @@ decide.
   merge is the veto point for every decision you took alone. A completed impl
   branch is a normal report, not stop (a); the lead integrates it.
 - **(b) An unresolved decision.** An `[escalate-to-lead]` result from a
-  delegate you spawned that the ticket does not settle, or an Open Decision
-  Queue item the ticket left open.
+  delegate you spawned that the ticket does not settle, an Open Decision Queue
+  item the ticket left open, or a branch-identity safety stop. Report the last
+  as (b); only the lead may judge whether its unmerged work belongs to the
+  target ticket and vouch for it. Do not self-vouch or infer ownership from
+  commit content.
 - **(c) A ticket decision contradicted by code reality** so it cannot be
   executed as written. Include your proposed resolution in the report.
 - **(d) An irreversible action** in the always-ask category of the Approval

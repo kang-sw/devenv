@@ -2687,7 +2687,7 @@ func TestPlaybookRenderGoldenTicketWorker(t *testing.T) {
 						t.Errorf("recommended tier = %q, want %q", tier, tc.tier)
 					}
 					// The shared protocol include must arrive with the playbook body.
-					for _, want := range []string{"# Worker Protocol", "## Stop List", "status: [ok] | [escalate-to-lead]", "completion: phase | ticket | ad_hoc | none", "Valid terminal pairs are `[ok]` with `stop: none`", "The lead owns merging after your report; do not merge.", "merge_confirm: skip | ask"} {
+					for _, want := range []string{"# Worker Protocol", "## Stop List", "branch-identity safety stop", "as (b); only the lead may judge", "Do not self-vouch", "status: [ok] | [escalate-to-lead]", "completion: phase | ticket | ad_hoc | none", "Valid terminal pairs are `[ok]` with `stop: none`", "The lead owns merging after your report; do not merge.", "merge_confirm: skip | ask"} {
 						if !strings.Contains(body, want) {
 							t.Errorf("rendered body missing protocol text %q", want)
 						}
@@ -2791,8 +2791,8 @@ func TestPlaybookPrintLeadRunWorkerTierPolicy(t *testing.T) {
 				"Leave the checkout on that impl branch, since the worker's route returns `continue` only when HEAD is that branch",
 				"Merge mid-ticket only when a dependent ticket needs the landing, through the same gate.",
 				"`completion: ticket` — merge the retained impl branch.",
-				"On an unmerged branch-identity stop, judge ownership from the lead's cross-ticket context or a bounded explore.",
-				"If that work belongs to the target ticket, re-invoke its route with a vouch matching the observed branch and target ticket",
+				"**(b) unresolved decision** — For a branch-identity safety stop, judge ownership from cross-ticket context or a bounded explore.",
+				"If the unmerged work belongs to the target ticket, re-invoke its route with a vouch matching the observed branch and target ticket",
 				"revise the unimplemented phase directly, or append an `#### Edition` when it already has a `### Result`",
 				"A `pass` commits the phase update and resumes the worker",
 				"One retry: a second (e) goes to the user.",

@@ -365,6 +365,9 @@ class WsflowSkillBundleTest(unittest.TestCase):
         protocol = (RSRC_DIR / "worker-stop-protocol.md").read_text(encoding="utf-8")
         self.assertIn("all merges, including impl into goal, belong to the lead", protocol)
         self.assertIn("merge_confirm: skip | ask", protocol)
+        self.assertIn("branch-identity safety stop", protocol)
+        self.assertIn("as (b); only the lead may judge", protocol)
+        self.assertIn("Do not self-vouch", protocol)
         self.assertIn("completion: phase | ticket | ad_hoc | none", protocol)
         self.assertIn("Valid terminal pairs are `[ok]` with `stop: none`", protocol)
         self.assertIn(
@@ -382,6 +385,12 @@ class WsflowSkillBundleTest(unittest.TestCase):
         self.assertNotIn("goal-to-PARENT terminal uses raw Git", run)
         self.assertIn("`completion: phase` — do not merge", run)
         self.assertIn("`completion: ticket` — merge the retained impl branch", run)
+        self.assertIn(
+            "**(b) unresolved decision** — For a branch-identity safety stop, judge ownership "
+            "from cross-ticket context or a bounded explore.",
+            run,
+        )
+        self.assertIn("If the unmerged work belongs to the target ticket, re-invoke its route", run)
         self.assertIn("incompatible values are a protocol mismatch", run)
         self.assertIn("call `{{.McpNamespace}}/git.status` and decide", run)
         self.assertIn("Branch-explicit calls need no check.", run)
