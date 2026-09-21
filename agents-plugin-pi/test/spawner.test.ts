@@ -1928,6 +1928,28 @@ describe("pushSpawnFailed (spawnAgent's launch-failure branch)", () => {
     assert.equal(unsubscribed, 1);
   });
 
+  test("cleanup publication failure preserves and reports the primary spawn error", () => {
+    const pi = fakePi();
+    const record = liveRpcRecord({ agentId: "cleanup-failure", running: true, streaming: true });
+    const registry: RpcAgentRegistry = new Map([[record.agentId, record]]);
+    const root = storageRoot();
+    const directory = join(root, "publisher");
+    const channel = { path: join(directory, "subtree.json"), nonce: "cleanup" };
+    installSubtreePublisher(registry, channel, () => 0);
+    rmSync(directory, { recursive: true, force: true });
+    writeFileSync(directory, "publication blocked");
+    const notices: string[] = [];
+    ownerNotifyRef.current = (message) => notices.push(message);
+    try {
+      const primary = new Error("primary spawn failure");
+      assert.doesNotThrow(() => pushSpawnFailed(pi.api, registry, record, primary));
+      assert.equal((pi.sent[0].message.details as { error?: string }).error, primary.message);
+      assert.deepEqual(notices, ["ws-pi-agent: subtree publication failed"], "secondary cleanup failures are diagnosed once");
+    } finally {
+      ownerNotifyRef.current = undefined;
+    }
+  });
+
   test("a non-Error throw is stringified rather than dropped", () => {
     const pi = fakePi();
     const record = liveRpcRecord({ agentId: "a" });

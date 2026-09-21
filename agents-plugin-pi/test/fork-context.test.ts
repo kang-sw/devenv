@@ -125,8 +125,15 @@ describe("ForkContext", () => {
       const failures = Array.from({ length: 5 }, () => renameFailure("EPERM"));
       const delays: number[] = [];
       let attempts = 0;
+      let diagnostic: Error | undefined;
       writeFileSync(path, JSON.stringify({ previous: true }));
-      assert.throws(() => writePrivateJson(path, { replacement: true }, {
+      assert.throws(() => writePrivateJson(path, {
+        replacement: true,
+        nonce: "channel-nonce",
+        revision: 17,
+        prompt: "never expose this prompt",
+        transcript: "never expose this transcript",
+      }, {
         platform: "win32",
         temporaryName: () => "fixed",
         sleep: milliseconds => delays.push(milliseconds),
@@ -135,8 +142,19 @@ describe("ForkContext", () => {
           assert.deepEqual(JSON.parse(readFileSync(path, "utf8")), { previous: true });
           throw failures[attempts++];
         },
-      }), error => error === failures[4]);
+      }), error => {
+        diagnostic = error as Error;
+        return true;
+      });
       assert.equal(attempts, 5);
+      assert.ok(diagnostic);
+      assert.ok(diagnostic.message.includes(`path=${JSON.stringify(path)}`));
+      assert.match(diagnostic.message, new RegExp(`writer_pid=${process.pid}`));
+      assert.match(diagnostic.message, /channel_nonce="channel-nonce"/);
+      assert.match(diagnostic.message, /snapshot_revision=17/);
+      assert.match(diagnostic.message, /attempts=5/);
+      assert.doesNotMatch(diagnostic.message, /never expose|prompt|transcript/);
+      assert.equal((diagnostic as NodeJS.ErrnoException).code, "EPERM");
       assert.deepEqual(delays, [10, 20, 40, 80]);
       assert.deepEqual(JSON.parse(readFileSync(path, "utf8")), { previous: true });
       assert.equal(existsSync(temporary), false);
