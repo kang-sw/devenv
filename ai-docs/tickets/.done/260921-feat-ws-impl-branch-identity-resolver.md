@@ -125,7 +125,7 @@ declared paths:
 
 | fact | value | evidence |
 |---|---|---|
-| scope.span | multi-file | agents-plugin-tool/internal/mcp/implement_resolver.go, agents-plugin-tool/internal/mcp/server.go, agents-plugin-tool/internal/wskey/wskey.go, agents-plugin/rsrc/lead-run/lead-run.md, agents-plugin-wsflow/rsrc/lead-run/lead-run.md |
+| scope.span | multi-file | agents-plugin-tool/internal/mcp/implement_resolver.go, agents-plugin-tool/internal/mcp/server.go, agents-plugin-tool/internal/wskey/wskey.go, agents-plugin/rsrc/lead-run/lead-run.md, agents-plugin-wsflow/rsrc/lead-run/lead-run.md, agents-plugin-pi/rsrc/lead-run/lead-run.md |
 | scope.surface | public-interface | new MCP tool exposed to the lead for forward ticket_stem to branch derivation, per Phase 1 |
 | scope.new_public_symbol | yes | new MCP tool for ticket_stem to branch derivation; ticket does not name it |
 | scope.new_type_contract | yes | new resolver tool request or response shape (forward ticket_stem in, branch out; reverse branch_suffix plus candidate_stems in, matched_stem out), not yet specified by the ticket |
