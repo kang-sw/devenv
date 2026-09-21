@@ -555,10 +555,10 @@ describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses ins
     execute: (id: string, params: unknown, signal?: AbortSignal, update?: unknown, ctx?: unknown) => Promise<{ content: Array<{ text: string }> }>;
   }
 
-  function installRpcHarness(onThinking?: (level: string) => void) {
+  function installRpcHarness(onThinking?: (level: string) => void, onStart?: (cwd: string | undefined) => void) {
     const original = Object.fromEntries(["start", "stop", "abort", "onEvent", "prompt", "getState", "setThinkingLevel"].map(name => [name, RpcClient.prototype[name as keyof RpcClient]]));
     Object.assign(RpcClient.prototype, {
-      start: async () => {}, stop: async () => {}, abort: async () => {},
+      start: async function(this: { options?: { cwd?: string } }) { onStart?.(this.options?.cwd); }, stop: async () => {}, abort: async () => {},
       onEvent: () => () => {}, prompt: async () => {},
       setThinkingLevel: async (level: string) => { onThinking?.(level); },
       getState: async () => ({ model: { provider: "pi", id: "small" }, thinkingLevel: "medium", sessionFile: "/tmp/ws-pi-agent-test/session.jsonl" }),
@@ -592,7 +592,7 @@ describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses ins
         hasConfiguredAuth: (model: { provider: string; id: string }) => catalog.some(entry => entry.provider === model.provider && entry.id === model.id && entry.hasAuth),
       },
     };
-    return { tool: tools.get("ws-agent-spawn")!, handle, ctx };
+    return { tool: tools.get("ws-agent-spawn")!, sendTool: tools.get("ws-agent-send")!, handle, ctx };
   }
 
   test("a named tier resolved 'unset' (resolved_from !== pi) refuses BEFORE any side effect: throws, no registry record, no session directory, no alias hold", async () => {
@@ -647,13 +647,49 @@ describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses ins
     } finally { rpc.restore(); }
   });
 
-  test("tool help advertises model selection and public write-scope semantics", () => {
+  test("tool help advertises model selection, cwd override, and public write-scope semantics", () => {
     const { tool } = harness(async () => jsonResult({}));
     assert.match(tool.description, /tier alias or concrete Pi model ID/);
     assert.match(tool.parameters.properties.model_name!.description!, /concrete Pi model ID/);
     assert.match(tool.parameters.properties.model_effort!.description!, /default/);
+    assert.match(tool.parameters.properties.cwd_override!.description!, /absolute existing directory/);
     assert.match(tool.parameters.properties.write_scopes!.description!, /absolute path/);
     assert.match(tool.parameters.properties.write_scopes!.description!, /path\.posix\.matchesGlob/);
+  });
+
+  test("cwd_override replaces inherited cwd, survives stop/resume, and validates paths before allocation", async () => {
+    const starts: Array<string | undefined> = [];
+    const rpc = installRpcHarness(undefined, cwd => starts.push(cwd));
+    try {
+      const { tool, sendTool, handle, ctx } = harness(async () => jsonResult({}));
+      const override = realpathSync(ctx.agentStorageRoot);
+      const spawned = JSON.parse((await tool.execute("override", {
+        system_prompt_path: "/tmp/p.md", prompt: "override", cwd_override: override,
+      }, undefined, undefined, ctx)).content[0]!.text);
+      assert.equal(handle.rpcRegistry.get(spawned.agent_id)!.cwdOverride, override);
+      await stopAgent(handle.rpcRegistry, spawned.agent_id, undefined, { silent: true });
+      await sendTool.execute("resume", { agent_id: spawned.agent_id, message: "resume" });
+      await tool.execute("inherited", { system_prompt_path: "/tmp/p.md", prompt: "inherited" }, undefined, undefined, ctx);
+      assert.deepEqual(starts, [override, override, "/tmp"]);
+
+      const beforeInvalid = handle.rpcRegistry.size;
+      await assert.rejects(
+        () => tool.execute("relative", { system_prompt_path: "/tmp/p.md", prompt: "relative", cwd_override: "relative" }, undefined, undefined, ctx),
+        /cwd_override must be an absolute path/,
+      );
+      await assert.rejects(
+        () => tool.execute("missing", { system_prompt_path: "/tmp/p.md", prompt: "missing", cwd_override: join(override, "missing") }, undefined, undefined, ctx),
+        /cwd_override must be an existing directory/,
+      );
+      const file = join(override, "not-a-directory");
+      writeFileSync(file, "file");
+      await assert.rejects(
+        () => tool.execute("file", { system_prompt_path: "/tmp/p.md", prompt: "file", cwd_override: file }, undefined, undefined, ctx),
+        /cwd_override must be an existing directory/,
+      );
+      assert.equal(handle.rpcRegistry.size, beforeInvalid, "invalid cwd overrides allocate no child record");
+      await handle.stopAll();
+    } finally { rpc.restore(); }
   });
 
   test("spawn admission preserves omitted legacy authority and persists restricted-child bindings", async () => {
