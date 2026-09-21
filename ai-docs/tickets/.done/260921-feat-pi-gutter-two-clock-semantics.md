@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: cf084bb561053a50
 sage-review-completeness-reviewed: cf084bb561053a50
+completed: 2026-09-21
 ---
 
 # Fix the pi live-gutter two-clock semantics (activity high-water mark and run-time freeze)
@@ -164,6 +165,21 @@ Verification:
 - Streaming a long output does not cause a re-render per token.
 - Pi package test suite passes.
 
+### Result (08ac495) - 2026-09-21
+
+- Added the shared `lastOutputAt` high-water mark, updated by tool execution
+  and assistant text/thinking output only; gutter, audit, and capacity ordering
+  now read that one field, excluding lead/owner input and report history.
+- Stream deltas update only that field and defer subtree observation,
+  publication, and telemetry refresh, preventing local and parent-watcher
+  gutter fan-out per token.
+- Verification: `npm test -- test/agent-widget.test.ts test/audit.test.ts`
+  passed (102 tests); focused spawner clock/eviction tests passed (7 tests).
+  The full `npm test` run had 1,603 passing tests but 14 unrelated failures
+  caused by the missing `pi-web-access` search extension; no affected test
+  failed. Independent correctness, fit, and test review completed; both
+  round-one streaming findings were corrected within the two-round cap.
+
 ### Phase 2: Run-time clock frozen at settle, re-armed per run
 
 Goal: `elapsedMs` accumulates across nudges within a run, freezes at settle to
@@ -187,3 +203,19 @@ Verification:
 
 Depends on Phase 1 only for shared-file coordination (both edit
 `agent-widget.ts` and `spawner.ts`), not behaviorally; order is convenience.
+
+### Result (08ac495) - 2026-09-21
+
+- Added `settledAt` and froze non-thread run duration at the first settle;
+  duplicate settle events cannot extend it. Re-prompting a resting record
+  starts a new anchor, while active nudges retain the existing run anchor.
+- Preserved the `isAwaitingOwnerWithThread` duration branch unchanged and
+  applied the frozen duration consistently in the audit picker.
+- Verification: focused spawner run-boundary tests and the complete widget/
+  audit suites passed; see Phase 1 for the full-suite environment limitation
+  and review evidence.
+
+
+## Resolution (2026-09-21)
+
+Implemented the output-only activity high-water mark and frozen per-run duration semantics, with gutter/audit coverage and two-round independent review. The full Pi suite remains environment-blocked by the missing pi-web-access search extension; affected suites pass.
