@@ -74,9 +74,9 @@
  * already-tracked `sessionPath` with no RPC round-trip.
  */
 
-import { mkdtempSync, readFileSync, rmSync, watch, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, watch, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -432,6 +432,8 @@ export interface RpcAgentRecord {
    * never throwing or guessing a tier name.
    */
   modelSource?: "tier" | "concrete" | "inherit";
+  /** Explicit spawn cwd, retained so a dormant resume launches in the same directory. */
+  cwdOverride?: string;
   /** Cached bridge `ws__*` tool names, for `--tools` re-resolution on a dormant resume. */
   wsToolNames: readonly string[];
   /** Curated `--tools` group this record was spawned with; reused unchanged on a dormant resume so `resolveTools` never silently widens/narrows a resumed child's tool surface. Set at spawn (`ctx.toolGroup ?? "full-worker"`), never mutated afterward. */
@@ -1922,6 +1924,19 @@ export interface SpawnAgentParams {
   title?: string;
   /** Optional bounded native edit/write grants for a child that is otherwise restricted. */
   writeScopes?: WriteScope[];
+  /** Optional absolute existing directory where the child process starts. */
+  cwdOverride?: string;
+}
+
+function validateCwdOverride(cwdOverride: string | undefined): string | undefined {
+  if (cwdOverride === undefined) return undefined;
+  if (!isAbsolute(cwdOverride)) throw new Error("ws-pi-agent: cwd_override must be an absolute path");
+  try {
+    if (!statSync(cwdOverride).isDirectory()) throw new Error("not a directory");
+  } catch {
+    throw new Error("ws-pi-agent: cwd_override must be an existing directory");
+  }
+  return cwdOverride;
 }
 
 export type WriteScopeDiagnostic =
@@ -2829,6 +2844,7 @@ export async function spawnAgent(
 ): Promise<{ agent_id: string; alias?: string; evicted?: string; write_scopes?: WriteScopeDiagnostic }> {
   const finishDispatch = beginSubtreeDispatch(registry);
   try {
+  const cwdOverride = validateCwdOverride(params.cwdOverride);
   const admission = resolveSpawnAdmission(ctx, params.writeScopes);
   const delegation = admission.policy;
   const verifiedPrompt = ctx.provenance ? Buffer.from(ctx.provenance.promptBase64, "base64") : undefined;
@@ -2916,6 +2932,7 @@ export async function spawnAgent(
     modelEffort: resolvedEffort,
     modelTier: params.modelName,
     modelSource: resolution.source,
+    cwdOverride,
     wsToolNames: ctx.wsToolNames,
     toolGroup,
     explicitTools: ctx.explicitTools,
@@ -2933,7 +2950,7 @@ export async function spawnAgent(
 
   const client = new RpcClient(
     buildRpcClientOptions(
-      ctx.cwd,
+      cwdOverride ?? ctx.cwd,
       modelBase,
       sessionPath,
       record.systemPromptPath,
@@ -3100,7 +3117,7 @@ export async function sendToAgent(
     // cache-and-reuse contract as `systemPromptPath`/`modelBase`.
     const client = new RpcClient(
       buildRpcClientOptions(
-        ctx.cwd,
+        record.cwdOverride ?? ctx.cwd,
         record.modelBase,
         record.sessionPath,
         record.systemPromptPath,
@@ -3577,6 +3594,10 @@ export function registerAgentTools(
           type: "string",
           description: "Optional free-text label for this agent, independent of alias (display only, never used for resolution).",
         },
+        cwd_override: {
+          type: "string",
+          description: "Optional absolute existing directory used as the spawned child's working directory. Reused when a stopped child is resumed.",
+        },
         write_scopes: {
           type: "array",
           minItems: 1,
@@ -3603,6 +3624,7 @@ export function registerAgentTools(
         model_effort?: string;
         alias?: string;
         title?: string;
+        cwd_override?: string;
         write_scopes?: WriteScope[];
       };
       let resolvedInfo: ResolvedModelInfo | undefined;
@@ -3637,6 +3659,7 @@ export function registerAgentTools(
           modelEffort: p.model_effort,
           alias: p.alias,
           title: p.title,
+          cwdOverride: p.cwd_override,
           writeScopes: p.write_scopes,
         },
       );
