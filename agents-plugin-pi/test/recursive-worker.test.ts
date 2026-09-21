@@ -204,13 +204,12 @@ test("the initial busy publication remains a hard gate before nested launch", ()
 
 test("RPC settlement survives a secondary upstream publication failure", async () => {
   const notices: string[] = [];
-  ownerNotifyRef.current = (message) => notices.push(message);
   const sent: any[] = [];
   const h = pushHarness(sent);
   const child = record("publication-failure", { client: h.client, running: true, workGeneration: 1 });
   const registry: RpcAgentRegistry = new Map([[child.agentId, child]]);
   const channel = { path: join(home(), "publisher", "subtree.json"), nonce: "soft-event" };
-  installSubtreePublisher(registry, channel, () => 0);
+  installSubtreePublisher(registry, channel, () => 0, (detail) => { notices.push(detail); return true; });
   attachEventListener(h.pi, registry, child, h.client);
   blockPublisherPath(channel.path);
 
@@ -227,7 +226,6 @@ test("RPC settlement survives a secondary upstream publication failure", async (
 
 test("watcher publication failure is contained and watcher cleanup remains callable", async () => {
   const notices: string[] = [];
-  ownerNotifyRef.current = (message) => notices.push(message);
   const observedChannel = { path: join(home(), "observed", "subtree.json"), nonce: "observed" };
   const nestedRegistry: RpcAgentRegistry = new Map();
   installSubtreePublisher(nestedRegistry, observedChannel, () => 0);
@@ -236,7 +234,7 @@ test("watcher publication failure is contained and watcher cleanup remains calla
   const child = record("watched-child", { client: h.client, subtreeChannel: observedChannel, launchGeneration: 1 });
   const registry: RpcAgentRegistry = new Map([[child.agentId, child]]);
   const upstreamChannel = { path: join(home(), "upstream", "subtree.json"), nonce: "upstream" };
-  installSubtreePublisher(registry, upstreamChannel, () => 0);
+  installSubtreePublisher(registry, upstreamChannel, () => 0, (detail) => { notices.push(detail); return true; });
   attachEventListener(h.pi, registry, child, h.client);
   blockPublisherPath(upstreamChannel.path);
 

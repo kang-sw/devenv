@@ -3549,6 +3549,29 @@ export interface AgentToolsHandle {
  * Child management is available only within the persisted depth/capability
  * envelope. The tool-call gate enforces the same ceiling after lazy activation.
  */
+function reportSubtreePublicationDiagnostic(pi: ExtensionAPI, detail: string): boolean {
+  if (ownerNotifyRef.current) {
+    try {
+      ownerNotifyRef.current(detail, "warning");
+      return true;
+    } catch { /* Fall through to the session-owned diagnostic channel. */ }
+  }
+  const payload = { advisory: "subtree-publication-failed", detail };
+  try {
+    // Use the current Pi session directly rather than pushToLead: the latter
+    // republishes the same broken subtree and would recursively diagnose itself.
+    pi.sendMessage({
+      customType: "ws-agent-advisory",
+      content: buildPushContent("ws-agent-advisory", undefined, payload, undefined),
+      display: true,
+      details: payload,
+    }, { deliverAs: "followUp", triggerTurn: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function registerAgentTools(
   pi: ExtensionAPI,
   bridge: BridgeHandle,
@@ -3570,7 +3593,7 @@ export function registerAgentTools(
 ): AgentToolsHandle {
   const rpcRegistry: RpcAgentRegistry = new Map();
   registerAgentCostOwner(rpcRegistry, sessionCtx.storage);
-  installSubtreePublisher(rpcRegistry, readSubtreeChannel(), () => heldPushQueue.length);
+  installSubtreePublisher(rpcRegistry, readSubtreeChannel(), () => heldPushQueue.length, (detail) => reportSubtreePublicationDiagnostic(pi, detail));
   const stopLivenessProbe = startLivenessProbe(pi, rpcRegistry);
 
   /** Cap on the head-truncated query used as a spawned explore's display title. */

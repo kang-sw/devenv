@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 import type { RpcAgentRecord, RpcAgentRegistry } from "./spawner.ts";
 import { SUBTREE_ENV } from "./delegation-policy.ts";
 import { writePrivateJson } from "./fork-context.ts";
-import { ownerNotifyRef } from "./owner-notify.ts";
 
 export interface SubtreeChannel { path: string; nonce: string }
 export type SubtreeDescendantRole = "worker" | "execute" | "fork" | "explore";
@@ -68,6 +67,7 @@ interface Publisher {
   lastPublished?: string;
   diagnosticsReported: number;
   lastDiagnostic?: string;
+  reportDiagnostic?: (detail: string) => boolean;
 }
 const publishers = new WeakMap<RpcAgentRegistry, Publisher>();
 const MAX_PUBLICATION_DIAGNOSTICS = 8;
@@ -77,13 +77,20 @@ function publicationDiagnostic(publisher: Publisher, error: unknown): void {
     ? error.message
     : "ws-pi-agent: subtree publication failed";
   if (publisher.lastDiagnostic === detail || publisher.diagnosticsReported >= MAX_PUBLICATION_DIAGNOSTICS) return;
+  let reported = false;
+  try { reported = publisher.reportDiagnostic?.(detail) === true; } catch { /* Diagnostics never change lifecycle outcomes. */ }
+  if (!reported) return;
   publisher.lastDiagnostic = detail;
   publisher.diagnosticsReported++;
-  try { ownerNotifyRef.current?.(detail, "warning"); } catch { /* Diagnostics never change lifecycle outcomes. */ }
 }
 
-export function installSubtreePublisher(registry: RpcAgentRegistry, channel: SubtreeChannel | undefined, deliveries: () => number): void {
-  publishers.set(registry, { revision: 0, delegated: false, dispatching: 0, channel, deliveries, diagnosticsReported: 0 });
+export function installSubtreePublisher(
+  registry: RpcAgentRegistry,
+  channel: SubtreeChannel | undefined,
+  deliveries: () => number,
+  reportDiagnostic?: (detail: string) => boolean,
+): void {
+  publishers.set(registry, { revision: 0, delegated: false, dispatching: 0, channel, deliveries, diagnosticsReported: 0, reportDiagnostic });
   publishSubtree(registry);
 }
 export function subtreeOutstanding(registry: RpcAgentRegistry): number {

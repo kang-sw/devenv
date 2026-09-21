@@ -139,11 +139,11 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DELEGATION_ENV } from "../src/delegation-policy.ts";
+import { DELEGATION_ENV, SUBTREE_ENV } from "../src/delegation-policy.ts";
 import { WEB_HOME_ENV, WEB_NONCE_ENV } from "../src/web-readiness.ts";
 import { allocateAgentHome, createAgentStorageContext, updateOwnership } from "../src/agent-storage.ts";
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
-import { installSubtreePublisher } from "../src/subtree-lifecycle.ts";
+import { installSubtreePublisher, publishSubtree } from "../src/subtree-lifecycle.ts";
 const REAL_EXTENSION_ENTRY = fileURLToPath(new URL("../src/index.ts", import.meta.url));
 async function startRpcWithWebProof(this: { options?: { env?: Record<string, string> } }) {
   const env = this.options?.env ?? {};
@@ -580,7 +580,12 @@ describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses ins
     provenance?: { class: "reviewer"; authority: "delegate"; readOnly: true; requiresChildren: false },
   ) {
     const tools = new Map<string, CapturedTool>();
-    const pi = { registerTool: (tool: CapturedTool) => tools.set(tool.name, tool), sendMessage() {}, sendUserMessage() {} } as unknown as ExtensionAPI;
+    const sent: Array<{ message: unknown; options: unknown }> = [];
+    const pi = {
+      registerTool: (tool: CapturedTool) => tools.set(tool.name, tool),
+      sendMessage: (message: unknown, options: unknown) => sent.push({ message, options }),
+      sendUserMessage() {},
+    } as unknown as ExtensionAPI;
     const bridge = {
       client: { callTool }, wsToolNames: [], defaultSessionKeyRef: { current: "lead-key" },
       ...(provenance ? { renderRegistry: { get: () => ({ ...provenance, promptBase64: Buffer.from("Test reviewer prompt").toString("base64") }) } } : {}),
@@ -596,7 +601,7 @@ describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses ins
         hasConfiguredAuth: (model: { provider: string; id: string }) => catalog.some(entry => entry.provider === model.provider && entry.id === model.id && entry.hasAuth),
       },
     };
-    return { tool: tools.get("ws-agent-spawn")!, sendTool: tools.get("ws-agent-send")!, handle, ctx };
+    return { tool: tools.get("ws-agent-spawn")!, sendTool: tools.get("ws-agent-send")!, handle, ctx, sent };
   }
 
   test("a named tier resolved 'unset' (resolved_from !== pi) refuses BEFORE any side effect: throws, no registry record, no session directory, no alias hold", async () => {
@@ -659,6 +664,39 @@ describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses ins
     assert.match(tool.parameters.properties.cwd_override!.description!, /absolute existing directory/);
     assert.match(tool.parameters.properties.write_scopes!.description!, /absolute path/);
     assert.match(tool.parameters.properties.write_scopes!.description!, /path\.posix\.matchesGlob/);
+  });
+
+  test("a nested RPC worker receives publication diagnostics through its own session channel", async () => {
+    const previousRole = process.env[WS_PI_SPAWN_ROLE_ENV];
+    const previousSubtree = process.env[SUBTREE_ENV];
+    const root = storageRoot();
+    const directory = join(root, "upstream");
+    const channel = { path: join(directory, "subtree.json"), nonce: "nested-diagnostic" };
+    process.env[WS_PI_SPAWN_ROLE_ENV] = "worker";
+    process.env[SUBTREE_ENV] = JSON.stringify(channel);
+    ownerNotifyRef.current = undefined;
+    let registered: ReturnType<typeof harness> | undefined;
+    try {
+      registered = harness(async () => jsonResult({}));
+      registered.handle.rpcRegistry.set("nested-diagnostic", freshRpcRecord({ agentId: "nested-diagnostic" }));
+      rmSync(directory, { recursive: true, force: true });
+      writeFileSync(directory, "publication blocked");
+
+      publishSubtree(registered.handle.rpcRegistry);
+
+      const emitted = registered.sent.at(-1);
+      const message = emitted?.message as { customType?: string; details?: { advisory?: string; detail?: string } } | undefined;
+      assert.equal(message?.customType, "ws-agent-advisory");
+      assert.deepEqual(message?.details, {
+        advisory: "subtree-publication-failed",
+        detail: "ws-pi-agent: subtree publication failed",
+      });
+      assert.deepEqual(emitted?.options, { deliverAs: "followUp", triggerTurn: true });
+    } finally {
+      await registered?.handle.stopAll();
+      if (previousRole === undefined) delete process.env[WS_PI_SPAWN_ROLE_ENV]; else process.env[WS_PI_SPAWN_ROLE_ENV] = previousRole;
+      if (previousSubtree === undefined) delete process.env[SUBTREE_ENV]; else process.env[SUBTREE_ENV] = previousSubtree;
+    }
   });
 
   test("cwd_override replaces inherited cwd, survives stop/resume, and validates paths before allocation", async () => {
@@ -1935,19 +1973,14 @@ describe("pushSpawnFailed (spawnAgent's launch-failure branch)", () => {
     const root = storageRoot();
     const directory = join(root, "publisher");
     const channel = { path: join(directory, "subtree.json"), nonce: "cleanup" };
-    installSubtreePublisher(registry, channel, () => 0);
+    const notices: string[] = [];
+    installSubtreePublisher(registry, channel, () => 0, (detail) => { notices.push(detail); return true; });
     rmSync(directory, { recursive: true, force: true });
     writeFileSync(directory, "publication blocked");
-    const notices: string[] = [];
-    ownerNotifyRef.current = (message) => notices.push(message);
-    try {
-      const primary = new Error("primary spawn failure");
-      assert.doesNotThrow(() => pushSpawnFailed(pi.api, registry, record, primary));
-      assert.equal((pi.sent[0].message.details as { error?: string }).error, primary.message);
-      assert.deepEqual(notices, ["ws-pi-agent: subtree publication failed"], "secondary cleanup failures are diagnosed once");
-    } finally {
-      ownerNotifyRef.current = undefined;
-    }
+    const primary = new Error("primary spawn failure");
+    assert.doesNotThrow(() => pushSpawnFailed(pi.api, registry, record, primary));
+    assert.equal((pi.sent[0].message.details as { error?: string }).error, primary.message);
+    assert.deepEqual(notices, ["ws-pi-agent: subtree publication failed"], "secondary cleanup failures are diagnosed once");
   });
 
   test("a non-Error throw is stringified rather than dropped", () => {
