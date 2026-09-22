@@ -1,7 +1,7 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { applyForkAffinity, captureForkContext, captureRegisteredTools, classifyForkRegistrations, compareForkRegistrations, parseForkContext, readForkLaunchContext, restoreForkContext, writePrivateJson } from "../src/fork-context.ts";
 
@@ -120,16 +120,18 @@ describe("ForkContext", () => {
   test("preserves destination and removes the temporary file after exhausted Windows retries", () => {
     const directory = mkdtempSync(join(tmpdir(), "ws-pi-fork-context-"));
     try {
-      const path = join(directory, "exhausted.json");
+      const path = join(directory, "p".repeat(240), "q".repeat(240), "r".repeat(100));
+      const nonce = "n".repeat(600);
       const temporary = `${path}.fixed.tmp`;
       const failures = Array.from({ length: 5 }, () => renameFailure("EPERM"));
       const delays: number[] = [];
       let attempts = 0;
       let diagnostic: Error | undefined;
+      mkdirSync(dirname(path), { recursive: true });
       writeFileSync(path, JSON.stringify({ previous: true }));
       assert.throws(() => writePrivateJson(path, {
         replacement: true,
-        nonce: "channel-nonce",
+        nonce,
         revision: 17,
         prompt: "never expose this prompt",
         transcript: "never expose this transcript",
@@ -148,9 +150,14 @@ describe("ForkContext", () => {
       });
       assert.equal(attempts, 5);
       assert.ok(diagnostic);
-      assert.ok(diagnostic.message.includes(`path=${JSON.stringify(path)}`));
+      const fields = diagnostic.message.match(/path=(.+?) writer_pid=\d+ channel_nonce=(.+?) snapshot_revision=/);
+      assert.ok(fields, "the transport diagnostic keeps both bounded fields");
+      const [, encodedPath, encodedNonce] = fields;
+      assert.equal(JSON.parse(encodedPath!), `${path.slice(0, 512)}…`);
+      assert.equal(JSON.parse(encodedNonce!), `${nonce.slice(0, 512)}…`);
+      assert.equal(JSON.parse(encodedPath!).length, 513, "the path retains 512 characters plus its truncation marker");
+      assert.equal(JSON.parse(encodedNonce!).length, 513, "the nonce retains 512 characters plus its truncation marker");
       assert.match(diagnostic.message, new RegExp(`writer_pid=${process.pid}`));
-      assert.match(diagnostic.message, /channel_nonce="channel-nonce"/);
       assert.match(diagnostic.message, /snapshot_revision=17/);
       assert.match(diagnostic.message, /attempts=5/);
       assert.doesNotMatch(diagnostic.message, /never expose|prompt|transcript/);
