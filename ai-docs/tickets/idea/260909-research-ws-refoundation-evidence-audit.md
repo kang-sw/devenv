@@ -148,3 +148,4 @@ dependencies surface as compile and test failures.
   Not decided; deferred in the epic.
 - **Telemetry before removal.** Replaced by a qualitative git-history
   analysis manual applied before and after.
+- **Lead-surface skill rename coherence** (`run`/`delegate`/`discuss` set rename): deferred to this ticket's lead-surface work; only the description tightening shipped separately as a hotfix to stop over-triggering.

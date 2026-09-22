@@ -1,6 +1,6 @@
 ---
 name: lead-run
-description: Drain the ready queue one ticket at a time, or execute implementation whose scope, behavioral impact, or review needs warrant the full worker workflow. The worker explores, implements, verifies, runs independent review, records the result, and commits.
+description: Use when the user moves to execution on a ready or directly-named ticket, or when a change's behavioral impact, cross-module scope, or review needs warrant the full worker workflow. The worker explores, implements, verifies, runs independent review, records the result, and commits.
 ---
 
 # Run
