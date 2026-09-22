@@ -99,7 +99,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -381,8 +381,15 @@ export function buildApprovalPromptText(payload: ApprovalPayload): string {
  * `WS_PI_APPROVAL_DIR`-derived approvals dir) agree on:
  * `<sessionDir>/approvals/<cmdId>.decision.json`.
  */
+function approvalDecisionFilename(cmdId: string): string {
+  // Escape percent too: a literal %7C must never alias an encoded pipe.
+  const encoded = cmdId.replace(/[<>:"/\\|?*%\u0000-\u001f\u007f-\u009f]/g,
+    (char) => `%${char.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0")}`);
+  return `${encoded}.decision.json`;
+}
+
 export function approvalDecisionPath(sessionDir: string, cmdId: string): string {
-  return join(sessionDir, "approvals", `${cmdId}.decision.json`);
+  return join(sessionDir, "approvals", approvalDecisionFilename(cmdId));
 }
 
 export interface ApprovalDecision {
@@ -513,7 +520,13 @@ export function waitForDecisionFile(path: string, signal: AbortSignal | undefine
       if (!existsSync(path)) return;
       try {
         const raw = readFileSync(path, "utf8");
-        finish(JSON.parse(raw) as ApprovalDecision);
+        const decision = JSON.parse(raw) as ApprovalDecision;
+        try {
+          unlinkSync(path);
+        } catch {
+          // Consumed decisions are transient IPC; cleanup must not gate execution.
+        }
+        finish(decision);
       } catch {
         // File may still be mid-write (partial JSON) — try again next tick.
       }
@@ -619,7 +632,7 @@ export function registerExecuteGateway(
       if (!approvalDir) {
         throw new Error(`ws-pi-agent: ${GATED_EXEC_TOOL_NAME}: ${WS_PI_APPROVAL_DIR_ENV} is unset — this tool only runs inside a ws-execute-spawned execute-worker.`);
       }
-      const decisionPath = join(approvalDir, `${toolCallId}.decision.json`);
+      const decisionPath = join(approvalDir, approvalDecisionFilename(toolCallId));
       const outcome = await waitForDecisionFile(decisionPath, signal);
 
       if (outcome === "aborted") {
