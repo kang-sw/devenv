@@ -10,6 +10,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 614367e4ab7ae20c
 sage-review-completeness-reviewed: 614367e4ab7ae20c
+completed: 2026-09-22
 ---
 
 # pi execute/approve: unsanitized cmd_id breaks approval file on Windows
@@ -138,3 +139,23 @@ run-instead files are removed; parse failures remain retryable; and cleanup
 failure does not block the decision. Manual Windows reproduction is out of
 scope for the phase (the illegal-char test stands in for it), but note any
 residual Windows-only risk under Result.
+
+### Result (528a5ccb) - 2026-09-21
+
+- Both relay sides now use one private percent-encoded filename derivation;
+  literal percent is escaped, safe IDs remain unchanged, and logical command
+  IDs remain opaque. Control coverage includes C0, DEL, and C1 characters.
+- Successfully parsed decisions are removed best-effort before delivery;
+  malformed JSON remains available for retry, and unlink failure does not
+  prevent the decision from completing.
+- Tests exercise the registered writer and reader for approve, deny, and
+  run-instead, including illegal characters, literal-percent collisions,
+  successful cleanup, malformed retries, and injected cleanup failure.
+- Verification: test delegate ran the focused execute-gateway tests (9 passed)
+  and `cd agents-plugin-pi && npm test` (1634 passed, 0 failed, 2 skipped).
+  Independent correctness and test reviews were clean.
+- Native Windows reproduction was intentionally omitted. The tests verify
+  filename characters and relay agreement on Linux; native Windows filesystem
+  behavior (including pre-existing reserved-name, path-length, and
+  case-insensitive alias limitations) was not exercised or broadened in scope.
+
