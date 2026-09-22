@@ -15,12 +15,13 @@
  * NOT covered here — genuinely live-gate only, per the plan's Verification
  * Plan split and mirroring test/spawner.test.ts's own documented pure/IO
  * split: `scrapeWorkingContext` (real `git` subprocess calls), and the
- * `ws-worker-exec`/`ws-execute`/`ws-approve`/ugly-read tool `execute()`
- * bodies (all need a live `pi --mode rpc` session or a real `RpcClient`) —
- * their pure inner logic (`sliceLines`, `resolveApprovalContextCwd`,
- * `validateApprovalDecisionInput`) is extracted and covered directly instead.
- * Exercised only by the plan's documented manual verification gate (no
- * provider credentials in this sandbox — deferred, not faked).
+ * `ws-execute`/ugly-read tool `execute()` bodies (which need a live
+ * `RpcClient` or broader filesystem coverage). Their pure inner logic
+ * (`sliceLines`, `resolveApprovalContextCwd`, `validateApprovalDecisionInput`)
+ * is extracted and covered directly instead. The registered
+ * `ws-worker-exec`/`ws-approve` filesystem decision relay is covered below
+ * with a minimal fake ExtensionAPI; live provider transport remains the
+ * documented manual gate.
  *
  * 260905 (push model): `createApprovalRelay` IS covered below (`describe
  * ("createApprovalRelay")`) — it takes `pi: ExtensionAPI` as a plain
@@ -47,7 +48,8 @@
 
 import { afterEach, test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, realpathSync, writeFileSync, rmSync } from "node:fs";
+import fs, { existsSync, mkdtempSync, realpathSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -74,7 +76,7 @@ import {
   type PendingApproval,
   type WorkingContext,
 } from "../src/execute-gateway.ts";
-import { leadIdleRef, registerPushFlush, GATED_EXEC_TOOL_NAME, TOOL_GROUPS, resolveTools, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
+import { leadIdleRef, registerPushFlush, GATED_EXEC_TOOL_NAME, TOOL_GROUPS, resolveTools, WS_PI_APPROVAL_DIR_ENV, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
 import { RpcClient } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -238,6 +240,18 @@ describe("approvalDecisionPath", () => {
     const a = approvalDecisionPath("/tmp/ws-pi-agent-x", "call-1");
     const b = approvalDecisionPath("/tmp/ws-pi-agent-x", "call-2");
     assert.notEqual(a, b);
+  });
+
+  test("keeps portable ids readable while percent-encoding every Windows-illegal and C0/C1 character injectively", () => {
+    const sessionDir = "/tmp/ws-pi-agent-x";
+    assert.equal(approvalDecisionPath(sessionDir, "call_abc-123.fc"), `${sessionDir}/approvals/call_abc-123.fc.decision.json`);
+
+    const unsafe = "call<>:\"/\\|?*%\u0000\u001f\u007f\u009f";
+    const path = approvalDecisionPath(sessionDir, unsafe);
+    const filename = path.split("/").at(-1)!;
+    assert.equal(path, `${sessionDir}/approvals/call%3C%3E%3A%22%2F%5C%7C%3F%2A%25%00%1F%7F%9F.decision.json`);
+    assert.doesNotMatch(filename, /[<>:"/\\|?*\u0000-\u001f\u007f-\u009f]/, "the on-disk filename contains no Windows-illegal or control character");
+    assert.notEqual(approvalDecisionPath(sessionDir, "call|item"), approvalDecisionPath(sessionDir, "call%7Citem"), "a literal percent sequence cannot alias an encoded pipe");
   });
 });
 
@@ -428,13 +442,33 @@ describe("waitForDecisionFile (review fix, relay #1, TEST finding #5)", () => {
     });
   });
 
-  test("a partially-written (malformed JSON) file is tolerated — polling continues until a valid decision file appears", async () => {
+  test("a malformed decision is retained for polling, then consumed after a valid retry", async () => {
     await withTempDir(async (dir) => {
       const path = join(dir, "call-3.decision.json");
       writeFileSync(path, "{not valid json");
-      setTimeout(() => writeFileSync(path, JSON.stringify({ decision: "deny", reason: "no" })), 20);
-      const result = await waitForDecisionFile(path, undefined, 5);
+      const resultPromise = waitForDecisionFile(path, undefined, 5);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      assert.ok(existsSync(path), "a parse failure must retain the rendezvous file for retry");
+      writeFileSync(path, JSON.stringify({ decision: "deny", reason: "no" }));
+      const result = await resultPromise;
       assert.deepEqual(result, { decision: "deny", reason: "no" });
+      assert.ok(!existsSync(path), "a successfully parsed retry is transient IPC and must be removed");
+    });
+  });
+
+  test("an injected unlink failure does not block a successfully parsed decision", async (t) => {
+    await withTempDir(async (dir) => {
+      const path = join(dir, "unlink-fails.decision.json");
+      writeFileSync(path, JSON.stringify({ decision: "approve" }));
+      const unlink = t.mock.method(fs, "unlinkSync", () => { throw new Error("injected unlink failure"); });
+      syncBuiltinESMExports();
+      try {
+        assert.deepEqual(await waitForDecisionFile(path, undefined, 5), { decision: "approve" });
+        assert.ok(existsSync(path), "best-effort cleanup failure retains the file without changing the decision outcome");
+      } finally {
+        unlink.mock.restore();
+        syncBuiltinESMExports();
+      }
     });
   });
 });
@@ -570,6 +604,65 @@ describe("execute-worker registration boundary", () => {
     assert.ok(active.has(GATED_EXEC_TOOL_NAME), "the execute-worker can reach that registered implementation");
     assert.ok(active.has("ws-report-to-lead"), "the execute-worker retains its report channel");
     for (const unavailable of ["bash", "edit", "write", "ws-agent-spawn"]) assert.ok(!active.has(unavailable), `execute-worker must not receive ${unavailable}`);
+  });
+});
+
+describe("registered ws-approve/ws-worker-exec decision relay", () => {
+  test("the actual writer and reader share encoded paths for approve, deny, and run-instead, then remove each consumed decision", async () => {
+    const home = mkdtempSync(join(tmpdir(), "ws-pi-agent-registered-decision-test-"));
+    const previousApprovalDir = process.env[WS_PI_APPROVAL_DIR_ENV];
+    const executions: string[] = [];
+    const registered = new Map<string, { execute: (...args: any[]) => Promise<any> }>();
+    const record = { agentId: "execute-worker-1", sessionPath: join(home, "session.jsonl"), pendingApproval: undefined as PendingApproval | undefined };
+    const registry: RpcAgentRegistry = new Map([[record.agentId, record as RpcAgentRecord]]);
+    const pi = {
+      registerTool: (tool: { name: string; execute: (...args: any[]) => Promise<any> }) => registered.set(tool.name, tool),
+      exec: async (_shell: string, args: string[]) => {
+        executions.push(args[1]!);
+        return { stdout: `ran ${args[1]}`, stderr: "", code: 0, killed: false };
+      },
+    } as unknown as ExtensionAPI;
+
+    try {
+      registerExecuteGateway(pi, {} as never, registry, { cwd: home, executeWorkerPromptPath: "/tmp/fake-execute-worker-guide.md" });
+      const writer = registered.get(APPROVE_TOOL_NAME)!;
+      const reader = registered.get(GATED_EXEC_TOOL_NAME)!;
+      assert.ok(writer, "registerExecuteGateway installs the actual ws-approve writer");
+      assert.ok(reader, "registerExecuteGateway installs the actual ws-worker-exec reader");
+      process.env[WS_PI_APPROVAL_DIR_ENV] = join(home, "approvals");
+
+      const unsafeCmdId = "call<>:\"/\\|?*%\u0000\u001f\u007f\u009f";
+      const cases = [
+        { cmdId: unsafeCmdId, decision: "approve" as const, expected: { decision: "approve" }, executed: "echo original", text: /exit code: 0/ },
+        { cmdId: "call%7C-literal", decision: "deny" as const, reason: "not approved", expected: { decision: "deny", reason: "not approved" }, executed: undefined, text: /Lead denied this command: not approved/ },
+        { cmdId: "call|run-instead", decision: "run-instead" as const, command: "echo substituted", expected: { decision: "run-instead", command: "echo substituted" }, executed: "echo substituted", text: /Lead substituted a different command/ },
+      ];
+
+      for (const item of cases) {
+        record.pendingApproval = { cmdId: item.cmdId, command: "echo original" };
+        const path = approvalDecisionPath(home, item.cmdId);
+        await writer.execute("lead-tool-call", { agent_id: record.agentId, cmd_id: item.cmdId, decision: item.decision, reason: item.reason, command: item.command });
+        assert.deepEqual(JSON.parse(readFileSync(path, "utf8")), item.expected, "the registered writer must write the encoded decision path");
+        assert.doesNotMatch(path.split("/").at(-1)!, /[<>:"/\\|?*\u0000-\u001f\u007f-\u009f]/, "the registered writer's filename must be Windows-safe");
+
+        const executionsBefore = executions.length;
+        const controller = new AbortController();
+        const abortTimer = setTimeout(() => controller.abort(), 1_000);
+        const result = await reader.execute(item.cmdId, { command: "echo original", rationale: "exercise the registered reader" }, controller.signal);
+        clearTimeout(abortTimer);
+        assert.match(result.content[0]!.text, item.text);
+        assert.ok(!existsSync(path), "the registered reader removes a successfully consumed IPC decision");
+        if (item.executed === undefined) {
+          assert.equal(executions.length, executionsBefore, "deny never runs the proposed command");
+        } else {
+          assert.equal(executions.at(-1), item.executed, "approve runs the proposal and run-instead runs the replacement");
+        }
+      }
+    } finally {
+      if (previousApprovalDir === undefined) delete process.env[WS_PI_APPROVAL_DIR_ENV];
+      else process.env[WS_PI_APPROVAL_DIR_ENV] = previousApprovalDir;
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });
 
