@@ -102,3 +102,22 @@ property; `agents-plugin-pi/test/tool-row-render.test.ts` no longer expects
 the `interrupt: true` tag. Existing owner-send, owner-finish, and fork-finish
 tests stay green; the direct `sendToAgent(..., false)` followUp test stays,
 relabelled as the internal path.
+
+### Result (a7a4a20) - 2026-09-23
+
+Removed the model-facing `interrupt` option and made lead sends steer streaming
+agents; idle and dormant sends still use `prompt()`. Preserved the internal
+`sendToAgent` follow-up path for owner/fork finish callers. Updated the tool
+description, lead guide, tool-row summary, and regression tests. The registered
+tool test covers streaming steering and live-idle prompt delivery; dormant
+resume coverage remains intact.
+
+Verification: `npm test` in `agents-plugin-pi` — 1,636 passed, 2 skipped, 0
+failed (1,638 total). Correctness review found no issues. Test review's round-one
+gap in registered-tool live-idle coverage was fixed, and round two confirmed the
+fix; unresolved findings: none.
+
+Decision: keep the internal `sendToAgent` `interrupt` parameter and
+`followUp()` branch for non-lead finish paths; remove the option only from the
+lead-facing tool schema. Only streaming lead sends switch to `steer()`; idle and
+dormant targets continue through `prompt()`.
