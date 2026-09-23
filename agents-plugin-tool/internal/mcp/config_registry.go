@@ -146,6 +146,7 @@ var configRegistry = []configKeyEntry{
 		// catalog knob id rather than a wsconfig.Item* constant.
 		Key:        "agents.tier",
 		WriterTool: "config.tune",
+		ResetTool:  "config.tune",
 		SelectorFields: []tuningField{
 			{
 				Name:        "harness",
@@ -161,7 +162,7 @@ var configRegistry = []configKeyEntry{
 		ValueFields: []tuningField{
 			{
 				Name:        "tier",
-				Description: "Capability tier to configure.",
+				Description: "Capability tier to configure; the only value field allowed when reset is true.",
 				Enum:        agentsTierEnum,
 				Required:    true,
 			},

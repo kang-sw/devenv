@@ -872,6 +872,10 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			if entry.ResetTool == "" {
 				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %s does not support reset", key))
 			}
+			if entry.Key == "agents.tier" {
+				result, err := tuneAgentsTier(params.Arguments["value"], harness, explicitScope, true)
+				return toolJSONResponse(req.ID, result, err)
+			}
 			if rawValue, hasValue := params.Arguments["value"]; hasValue {
 				if v, _ := rawValue.(string); strings.TrimSpace(v) != "" {
 					return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: value and reset are mutually exclusive"))
@@ -913,37 +917,8 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		adapter := sessionConfigAdapter{s: s.sessions}
 		switch {
 		case entry.Key == "agents.tier":
-			// agents.tier is a compound writer (Decision 9): tier/backend/model/effort
-			// travel inside the value object; harness stays the outer selector.
-			rawValue, valueOK := params.Arguments["value"].(map[string]any)
-			if !valueOK {
-				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: agents.tier value must be an object with tier/backend/model/effort fields"))
-			}
-			// Tier is intentionally NOT enum-validated here: the removed
-			// config.agents_tier passed the raw string to SetAgentsTierForHarness,
-			// whose normalizedTier owns tier validation and accepts documented
-			// synonyms (light/core/deep, haiku/sonnet/opus) case/whitespace
-			// insensitively. config.list still advertises the canonical enum via
-			// the registry ValueFields; only the write path defers to the setter,
-			// matching both the pre-collapse tool and the surviving CLI path.
-			tier, _ := rawValue["tier"].(string)
-			backend, _ := rawValue["backend"].(string)
-			model, _ := rawValue["model"].(string)
-			var cfg wsconfig.Config
-			var err error
-			global := explicitScope == wsconfig.ScopeGlobal
-			if effort, effortOK := rawValue["effort"].(string); effortOK {
-				if global {
-					cfg, err = wsconfig.SetGlobalAgentsTierForHarness(wsconfig.Options{}, tier, backend, model, harness, effort)
-				} else {
-					cfg, err = wsconfig.SetAgentsTierForHarness(wsconfig.Options{}, tier, backend, model, harness, effort)
-				}
-			} else if global {
-				cfg, err = wsconfig.SetGlobalAgentsTierForHarness(wsconfig.Options{}, tier, backend, model, harness)
-			} else {
-				cfg, err = wsconfig.SetAgentsTierForHarness(wsconfig.Options{}, tier, backend, model, harness)
-			}
-			return toolJSONResponse(req.ID, cfg, err)
+			result, err := tuneAgentsTier(params.Arguments["value"], harness, explicitScope, false)
+			return toolJSONResponse(req.ID, result, err)
 		case strings.HasPrefix(entry.Key, "prompt."):
 			// prompt override set (subsumes config.prompt.set). The text lives in the
 			// generic value argument; the harness "*" stores as "all".
@@ -2281,14 +2256,82 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 	appendKnob(agentsTierEntry, tuningKnob{
 		ID:             "agents.tier",
 		Kind:           "model_tier",
-		Description:    "Configure the backend/model mapping for a ws agent capability tier.",
+		Description:    "Configure the backend/model mapping for a ws agent capability tier. Reset takes only value.tier and removes the selected scope's harness leaf.",
 		Writer:         tuningWriter{Tool: agentsTierEntry.WriterTool, FixedArguments: map[string]string{"key": "agents.tier"}},
+		Reset:          &tuningWriter{Tool: agentsTierEntry.ResetTool, FixedArguments: map[string]string{"key": "agents.tier", "reset": "true"}},
 		SelectorFields: agentsTierEntry.SelectorFields,
 		ValueFields:    agentsTierEntry.ValueFields,
 		Current:        agentTiers,
 	})
 
 	return catalog, nil
+}
+
+// agentsTierTuneResult preserves the existing full-config response and adds
+// diagnostics only for this compound writer.
+type agentsTierTuneResult struct {
+	wsconfig.Config
+	Warnings []string `json:"warnings"`
+}
+
+func tuneAgentsTier(value any, harness string, scope wsconfig.Scope, reset bool) (agentsTierTuneResult, error) {
+	fields, ok := value.(map[string]any)
+	if !ok {
+		return agentsTierTuneResult{}, fmt.Errorf("config.tune: agents.tier value must be an object with tier/backend/model/effort fields (only tier when reset is true)")
+	}
+	// Tier validation belongs to wsconfig: it accepts legacy synonyms as well
+	// as canonical tiers, matching the CLI and the former writer.
+	tier, _ := fields["tier"].(string)
+	if reset {
+		if len(fields) != 1 {
+			return agentsTierTuneResult{}, fmt.Errorf("config.tune: agents.tier reset value must contain only tier (no backend, model, or effort)")
+		}
+	}
+	opts := wsconfig.Options{}
+	global := scope == wsconfig.ScopeGlobal
+	shadowed := false
+	if global {
+		var err error
+		shadowed, err = wsconfig.HasProjectAgentsTierLeaf(opts, tier, harness)
+		if err != nil {
+			return agentsTierTuneResult{}, fmt.Errorf("config.tune: check project agents.tier shadow: %w", err)
+		}
+	}
+	var cfg wsconfig.Config
+	var err error
+	removed := false
+	if reset {
+		if global {
+			cfg, removed, err = wsconfig.UnsetGlobalAgentsTierForHarness(opts, tier, harness)
+		} else {
+			cfg, removed, err = wsconfig.UnsetAgentsTierForHarness(opts, tier, harness)
+		}
+	} else {
+		backend, _ := fields["backend"].(string)
+		model, _ := fields["model"].(string)
+		if effort, ok := fields["effort"].(string); ok {
+			if global {
+				cfg, err = wsconfig.SetGlobalAgentsTierForHarness(opts, tier, backend, model, harness, effort)
+			} else {
+				cfg, err = wsconfig.SetAgentsTierForHarness(opts, tier, backend, model, harness, effort)
+			}
+		} else if global {
+			cfg, err = wsconfig.SetGlobalAgentsTierForHarness(opts, tier, backend, model, harness)
+		} else {
+			cfg, err = wsconfig.SetAgentsTierForHarness(opts, tier, backend, model, harness)
+		}
+	}
+	if err != nil {
+		return agentsTierTuneResult{}, err
+	}
+	result := agentsTierTuneResult{Config: cfg, Warnings: []string{}}
+	if reset && !removed {
+		result.Warnings = append(result.Warnings, "agents.tier leaf was absent in the selected scope; reset made no change")
+	}
+	if shadowed {
+		result.Warnings = append(result.Warnings, "project scope stores this agents.tier tier/harness leaf and shadows the global value")
+	}
+	return result, nil
 }
 
 func currentWorkflowPreference(resolver *wsconfig.Resolver, sessionKey, itemKey string) tuningScopedValue {
@@ -3655,15 +3698,15 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "config.tune",
-			"description": "Write one ws config knob, selected by its key (e.g. workflow.prefer_subagent, bootstrap_alarm, agents.tier, prompt.<pointId>). Call config.list first for each key's exact value domain, scope rules, and harness applicability. value is a string for scalar knobs and an object ({tier, backend, model, effort}) for agents.tier. scope is optional and backstops to the key's declared default; harness is load-bearing for prompt.* and agents.tier and warning-only (ignored) for keys that do not vary by harness. reset: true drops a knob's override back to its builtin/inherited default (only for keys that support reset). session_key is required at dispatch for lead-authority keys and prompt.* keys. Lead-only: delegate and leaf keys are blocked by the config.* prefix gate.",
+			"description": "Write one ws config knob, selected by its key (e.g. workflow.prefer_subagent, bootstrap_alarm, agents.tier, prompt.<pointId>). Call config.list first for each key's exact value domain, scope rules, and harness applicability. value is a string for scalar knobs and an object ({tier, backend, model, effort}) for agents.tier; agents.tier reset takes value: {tier} only. scope is optional and backstops to the key's declared default; harness is load-bearing for prompt.* and agents.tier and warning-only (ignored) for keys that do not vary by harness. reset: true drops a knob's override back to its builtin/inherited default (only for keys that support reset). session_key is required at dispatch for lead-authority keys and prompt.* keys. Lead-only: delegate and leaf keys are blocked by the config.* prefix gate.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"key":         stringProperty("Config knob key to write, e.g. workflow.prefer_subagent, bootstrap_alarm, agents.tier, or prompt.<pointId>. See config.list for the supported set."),
-					"value":       anyProperty("New value. A string for scalar knobs (e.g. on/off), or an object {tier, backend, model, effort} for agents.tier. Omit when reset is true."),
-					"scope":       enumStringProperty("Optional storage scope. When omitted the write lands in the key's declared default scope. Global-only keys reject non-global scopes; agents.tier only supports project scope.", wsconfig.ScopeSchemaEnum()),
+					"value":       anyProperty("New value. A string for scalar knobs (e.g. on/off), or an object {tier, backend, model, effort} for agents.tier. For agents.tier reset pass only {tier}; omit for other resets."),
+					"scope":       enumStringProperty("Optional storage scope. When omitted the write lands in the key's declared default scope. Global-only keys reject non-global scopes; agents.tier supports project and global scopes.", wsconfig.ScopeSchemaEnum()),
 					"harness":     stringProperty("Optional harness selector. Load-bearing for prompt.* (claude, codex, pi, or * for all) and agents.tier (alias key); ignored for keys that do not vary by harness. When omitted for a harness-applicable key, defaults to the current session's detected harness."),
-					"reset":       boolProperty("When true, drop the key's override and fall back to its builtin/inherited default instead of writing an explicit value. Mutually exclusive with value; only valid for keys that support reset."),
+					"reset":       boolProperty("When true, drop the key's override and fall back to its builtin/inherited default instead of writing an explicit value. Mutually exclusive with value except agents.tier, which requires value: {tier}; only valid for keys that support reset."),
 					"session_key": stringProperty("Caller's lead ws session key. Required at dispatch for lead-authority keys (global-only workflow preferences and alarms) and for prompt.* keys; also the target session for a session-scope write."),
 				},
 				"required": []string{"key"},
