@@ -6,6 +6,10 @@ related:
   260924-bug-pi-retention-fork-prune-and-cross-owner-checkpoint: TCP-independent defect found by the inventory; its checkpoint part waits for this research's usage design
   260924-bug-pi-durable-write-hygiene: TCP-independent defects found by the inventory
   260920-bug-pi-nested-subagent-terminal-delivery-stall: cause unknown; this channel is not claimed to fix it
+  260924-feat-pi-agent-channel-transport: derived child - transport abstraction, backends, bootstrap, readiness hello
+  260924-feat-pi-agent-channel-approval-decisions: derived child - approval decisions (A5)
+  260924-feat-pi-agent-channel-subtree-state: derived child - subtree snapshot (A6)
+  260924-feat-pi-agent-channel-usage-rollup: derived child - cumulative usage (A9)
 ---
 
 # Investigate a Pi parent-child control channel with a pluggable transport
@@ -120,6 +124,12 @@ An Explore inventory of `agents-plugin-pi/src/` on 2026-09-24 found 18 mechanism
   - The channel infrastructure lands first. `260923-bug-pi-execute-approval-accepted-worker-hangs` is repaired on top of it, and the incident's filename/version and ownership-ID defects stay independently diagnosable.
   - Fixes that the channel absorbs wait for it: the non-atomic approval and web-readiness writes, approval filename encoding, and the missing grandchild usage roll-up.
 - Approval *waiting* state need not survive a disconnected child channel; a fresh approval request is acceptable. This does not authorize replay or automatic re-execution of a command whose start status is uncertain.
+- **Derived children (2026-09-24).** The work is split into four `todo/` feature tickets:
+  - `260924-feat-pi-agent-channel-transport`: the transport and the readiness hello;
+  - three migrations, each `blocked-by` the transport ticket and independent of one another: `260924-feat-pi-agent-channel-approval-decisions`, `260924-feat-pi-agent-channel-subtree-state`, and `260924-feat-pi-agent-channel-usage-rollup`.
+  - Each open question below is assigned to one child's verification. A child whose verification contradicts a decision in this ledger stops and escalates.
+  - `260923-bug-pi-execute-approval-accepted-worker-hangs` is `blocked-by` the approval child.
+- **Evidence round before promotion.** The evidence-first boundary in `## Investigation Boundary` stands. The evidence is gathered now by a delegated, provider-free prototype in a separate worktree, not folded into a child's phase. Its results are recorded in this ledger and reconciled into `260924-feat-pi-agent-channel-transport` before that ticket is promoted to `ready/`.
 
 ### Proposals
 

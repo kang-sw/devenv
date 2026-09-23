@@ -1,6 +1,9 @@
 ---
 title: Pi execute-worker stays running after accepted command approval
+blocked-by: 260924-feat-pi-agent-channel-approval-decisions
 related:
+  260924-feat-pi-agent-channel-approval-decisions: prerequisite; this bug is repaired on top of channel-delivered decisions, while its incident defects (raw cmd_id vs ownership validation, code-version/path mismatch) stay diagnosed here
+  260923-research-pi-parent-child-loopback-control-channel: settled channel-first sequencing
   260905-bug-ws-pi-approval-relay-deadlocks-under-agent-wait: prior resolved approval-relay deadlock under blocking wait
   260921-bug-pi-gutter-stale-pending-approval-deadlock: prior resolved stale approval state on agent death
   260914-bug-pi-execute-worker-resume-session-home-unavailable: separate execute-worker session-home failure after settlement

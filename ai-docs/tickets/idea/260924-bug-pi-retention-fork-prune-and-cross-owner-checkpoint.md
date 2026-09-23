@@ -1,7 +1,8 @@
 ---
 title: Pi retention runs in fork children and folds cost into other owners' checkpoints without a lock
 related:
-  260923-research-pi-parent-child-loopback-control-channel: the checkpoint part waits for this research's cumulative-usage design
+  260923-research-pi-parent-child-loopback-control-channel: source of the cumulative-usage decision
+  260924-feat-pi-agent-channel-usage-rollup: the checkpoint part waits for its evicted-baseline design; the fork-prune part does not
   260924-research-pi-root-single-authority-durable-state: may later reassign who authors durable state; this ticket fixes today's concrete defects
   260908-feat-ws-pi-agent-session-disk-retention: introduced session-start retention
 ---
