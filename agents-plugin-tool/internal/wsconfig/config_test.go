@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestSaveStampsSchemaVersionOnFirstWrite guards the C2 fix: a brand-new
@@ -301,12 +302,6 @@ func TestSetAgentsTierForHarnessTargetsHarnessAlias(t *testing.T) {
 	}
 }
 
-// TestSetAgentsTierForHarnessTargetsPiAlias mirrors
-// TestSetAgentsTierForHarnessTargetsHarnessAlias for the "pi" harness,
-// proving SetAgentsTierForHarness/ResolveAgentForHarness round-trip for
-// harness="pi" independent of the MCP dispatch layer, and that the
-// "default" bucket is left untouched (Decision: default bucket semantics
-// unchanged).
 func TestGlobalAgentsTierWriterAndProjectLeafOverlay(t *testing.T) {
 	opts := Options{
 		CacheHome:  filepath.Join(t.TempDir(), "cache"),
@@ -368,6 +363,12 @@ func TestGlobalAgentsTierWriterAndProjectLeafOverlay(t *testing.T) {
 	}
 }
 
+// TestSetAgentsTierForHarnessTargetsPiAlias mirrors
+// TestSetAgentsTierForHarnessTargetsHarnessAlias for the "pi" harness,
+// proving SetAgentsTierForHarness/ResolveAgentForHarness round-trip for
+// harness="pi" independent of the MCP dispatch layer, and that the
+// "default" bucket is left untouched (Decision: default bucket semantics
+// unchanged).
 func TestSetAgentsTierForHarnessTargetsPiAlias(t *testing.T) {
 	cache := filepath.Join(t.TempDir(), "cache")
 	cfg, err := SetAgentsTierForHarness(Options{CacheHome: cache}, "medium", "pi", "pi-model-1", "pi")
@@ -930,5 +931,253 @@ func TestResolveAgentTierForHarnessRejectsUnknownTier(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "tier must be small, medium, large, or xlarge") {
 		t.Fatalf("error = %v, want it to mention the valid tier set", err)
+	}
+}
+
+func TestUnsetAgentsTierForHarnessPreservesSiblingLeaves(t *testing.T) {
+	tests := []struct {
+		name  string
+		set   func(Options, string, string, string) error
+		unset func(Options, string, string) (Config, bool, error)
+		load  func(Options) (Config, error)
+	}{
+		{
+			name: "project",
+			set: func(opts Options, tier, harness, model string) error {
+				_, err := SetAgentsTierForHarness(opts, tier, harness, model, harness)
+				return err
+			},
+			unset: UnsetAgentsTierForHarness,
+			load:  loadProjectConfig,
+		},
+		{
+			name: "global",
+			set: func(opts Options, tier, harness, model string) error {
+				_, err := SetGlobalAgentsTierForHarness(opts, tier, harness, model, harness)
+				return err
+			},
+			unset: UnsetGlobalAgentsTierForHarness,
+			load:  loadGlobalConfig,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := Options{
+				CacheHome:  filepath.Join(t.TempDir(), "cache"),
+				ConfigHome: filepath.Join(t.TempDir(), "global"),
+			}
+			if err := tc.set(opts, "large", "claude", "claude-leaf"); err != nil {
+				t.Fatalf("set claude leaf: %v", err)
+			}
+			if err := tc.set(opts, "large", "pi", "pi-sibling"); err != nil {
+				t.Fatalf("set pi leaf: %v", err)
+			}
+
+			_, removed, err := tc.unset(opts, "deep", " CLAUDE ")
+			if err != nil {
+				t.Fatalf("unset claude leaf: %v", err)
+			}
+			if !removed {
+				t.Fatal("unset did not report removing the persisted leaf")
+			}
+			stored, err := tc.load(opts)
+			if err != nil {
+				t.Fatalf("load stored config: %v", err)
+			}
+			aliases := stored.Agents.ModelAliases["large"]
+			if _, exists := aliases["claude"]; exists {
+				t.Fatalf("claude leaf remains: %#v", aliases)
+			}
+			if got := aliases["pi"].Model; got != "pi-sibling" {
+				t.Fatalf("pi sibling = %q, want pi-sibling", got)
+			}
+			if len(aliases) != 1 {
+				t.Fatalf("remaining aliases = %#v, want only pi sibling", aliases)
+			}
+		})
+	}
+}
+
+func TestUnsetAgentsTierForHarnessCleansEmptyTierMap(t *testing.T) {
+	opts := Options{CacheHome: filepath.Join(t.TempDir(), "cache")}
+	if _, err := SetAgentsTierForHarness(opts, "small", "pi", "only-leaf", "pi"); err != nil {
+		t.Fatalf("set pi leaf: %v", err)
+	}
+	_, removed, err := UnsetAgentsTierForHarness(opts, "small", "pi")
+	if err != nil {
+		t.Fatalf("unset pi leaf: %v", err)
+	}
+	if !removed {
+		t.Fatal("unset did not report removing the persisted leaf")
+	}
+	stored, err := loadProjectConfig(opts)
+	if err != nil {
+		t.Fatalf("load stored config: %v", err)
+	}
+	if _, exists := stored.Agents.ModelAliases["small"]; exists {
+		t.Fatalf("empty small alias map was retained: %#v", stored.Agents.ModelAliases)
+	}
+}
+
+func TestUnsetAgentsTierForHarnessPreservesLegacyTierFallback(t *testing.T) {
+	opts := Options{CacheHome: filepath.Join(t.TempDir(), "cache")}
+	legacy := AgentTier{Backend: "claude", Model: "legacy-large", Effort: "low"}
+	if err := save(opts, Config{Agents: AgentsConfig{
+		Tiers: map[string]AgentTier{"large": legacy},
+		ModelAliases: map[string]map[string]AgentTier{
+			"large": {"pi": {Backend: "pi", Model: "explicit-pi"}},
+		},
+	}}); err != nil {
+		t.Fatalf("save legacy config: %v", err)
+	}
+
+	cfg, removed, err := UnsetAgentsTierForHarness(opts, "large", "pi")
+	if err != nil {
+		t.Fatalf("unset pi leaf: %v", err)
+	}
+	if !removed {
+		t.Fatal("unset did not report removing the persisted leaf")
+	}
+	if got := cfg.Agents.ModelAliases["large"]["default"]; got != legacy {
+		t.Fatalf("default alias fallback = %#v, want legacy tier %#v", got, legacy)
+	}
+	if got := cfg.Agents.Tiers["large"]; got != legacy {
+		t.Fatalf("presentation tier = %#v, want legacy tier %#v", got, legacy)
+	}
+	stored, err := loadProjectConfig(opts)
+	if err != nil {
+		t.Fatalf("load stored config: %v", err)
+	}
+	if got := stored.Agents.Tiers["large"]; got != legacy {
+		t.Fatalf("persisted legacy tier = %#v, want %#v", got, legacy)
+	}
+	if _, exists := stored.Agents.ModelAliases["large"]; exists {
+		t.Fatalf("last alias removal retained an empty map: %#v", stored.Agents.ModelAliases)
+	}
+}
+
+func TestUnsetAgentsTierForHarnessNoOpDoesNotSave(t *testing.T) {
+	tests := []struct {
+		name  string
+		set   func(Options, string, string, string) error
+		unset func(Options, string, string) (Config, bool, error)
+		path  func(Options) (string, error)
+	}{
+		{
+			name: "project",
+			set: func(opts Options, tier, harness, model string) error {
+				_, err := SetAgentsTierForHarness(opts, tier, harness, model, harness)
+				return err
+			},
+			unset: UnsetAgentsTierForHarness,
+			path:  Path,
+		},
+		{
+			name: "global",
+			set: func(opts Options, tier, harness, model string) error {
+				_, err := SetGlobalAgentsTierForHarness(opts, tier, harness, model, harness)
+				return err
+			},
+			unset: UnsetGlobalAgentsTierForHarness,
+			path:  GlobalPath,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := Options{
+				CacheHome:  filepath.Join(t.TempDir(), "cache"),
+				ConfigHome: filepath.Join(t.TempDir(), "global"),
+			}
+			if err := tc.set(opts, "medium", "pi", "pi-leaf"); err != nil {
+				t.Fatalf("set pi leaf: %v", err)
+			}
+			path, err := tc.path(opts)
+			if err != nil {
+				t.Fatalf("config path: %v", err)
+			}
+			before, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read config before no-op: %v", err)
+			}
+			oldTime := time.Unix(1, 0)
+			if err := os.Chtimes(path, oldTime, oldTime); err != nil {
+				t.Fatalf("set old modification time: %v", err)
+			}
+
+			_, removed, err := tc.unset(opts, "medium", "claude")
+			if err != nil {
+				t.Fatalf("unset absent leaf: %v", err)
+			}
+			if removed {
+				t.Fatal("unset reported removing an absent leaf")
+			}
+			after, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read config after no-op: %v", err)
+			}
+			if string(after) != string(before) {
+				t.Fatalf("no-op changed persisted config:\nbefore: %s\nafter: %s", before, after)
+			}
+			info, err := os.Stat(path)
+			if err != nil {
+				t.Fatalf("stat config after no-op: %v", err)
+			}
+			if !info.ModTime().Equal(oldTime) {
+				t.Fatalf("no-op rewrote config: mtime = %v, want %v", info.ModTime(), oldTime)
+			}
+
+			missingOpts := Options{
+				CacheHome:  filepath.Join(t.TempDir(), "missing-cache"),
+				ConfigHome: filepath.Join(t.TempDir(), "missing-global"),
+			}
+			_, removed, err = tc.unset(missingOpts, "small", "pi")
+			if err != nil {
+				t.Fatalf("unset from absent config: %v", err)
+			}
+			if removed {
+				t.Fatal("unset from absent config reported a removal")
+			}
+			missingPath, err := tc.path(missingOpts)
+			if err != nil {
+				t.Fatalf("missing config path: %v", err)
+			}
+			if _, err := os.Stat(missingPath); !os.IsNotExist(err) {
+				t.Fatalf("no-op created config file or stat failed: %v", err)
+			}
+		})
+	}
+}
+
+func TestHasProjectAgentsTierLeafDoesNotCountHarnessFallback(t *testing.T) {
+	opts := Options{
+		CacheHome:  filepath.Join(t.TempDir(), "cache"),
+		ConfigHome: filepath.Join(t.TempDir(), "global"),
+	}
+	if _, err := SetAgentsTierForHarness(opts, "medium", "codex", "project-default", "default"); err != nil {
+		t.Fatalf("set default leaf: %v", err)
+	}
+
+	has, err := HasProjectAgentsTierLeaf(opts, "core", " PI ")
+	if err != nil {
+		t.Fatalf("check pi leaf: %v", err)
+	}
+	if has {
+		t.Fatal("default harness fallback was reported as a persisted pi leaf")
+	}
+	has, err = HasProjectAgentsTierLeaf(opts, "medium", "default")
+	if err != nil {
+		t.Fatalf("check default leaf: %v", err)
+	}
+	if !has {
+		t.Fatal("persisted default leaf was not found")
+	}
+	_, model, _, resolvedFrom, err := ResolveAgentTierForHarness(opts, "medium", "pi")
+	if err != nil {
+		t.Fatalf("resolve pi fallback: %v", err)
+	}
+	if model != "project-default" || resolvedFrom != "default" {
+		t.Fatalf("pi fallback = model %q from %q, want project-default from default", model, resolvedFrom)
 	}
 }

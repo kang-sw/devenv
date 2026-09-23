@@ -63,10 +63,10 @@ Examples:
 ## On: tune model tier
 
 1. Map the request to the `agents.tier` catalog knob.
-2. Choose the required tier field and any applicable optional `harness`, `backend`, `model`, and `effort` fields from the catalog metadata.
+2. Choose the required tier field and any applicable optional `harness`, `backend`, `model`, and `effort` fields from the catalog metadata. When the user wants a selected project or global scope to inherit its mapping again, offer reset; reset removes only that scope's selected `(tier, harness)` alias. An empty or `none` effort clears only effort and does not reset the alias.
 3. Confirm the Tuning Proposal with the selected fields.
-4. Call `config.tune` with `key` set to `agents.tier`, `session_key`, and the selected fields (`tier` plus optional `backend`/`model`/`effort`) as the `value` object.
-5. Report the tier and, when returned by the writer/catalog, its resolved backend/model.
+4. For a write, call `{{.McpNamespace}}/config.tune` with `key` set to `agents.tier`, `session_key`, and the selected fields (`tier` plus optional `backend`/`model`/`effort`) as the `value` object. For reset, call `{{.McpNamespace}}/config.tune` with `reset: true` and `value` containing only `tier`, retaining the selected `harness` and `scope`.
+5. Relay any warnings returned by the write or reset. Report the tier and, when returned by the writer/catalog, its resolved backend/model.
 
 ## On: unsupported axis
 

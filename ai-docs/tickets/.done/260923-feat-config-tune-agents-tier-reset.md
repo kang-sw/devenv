@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: ff82bbc4f5c10de5
 sage-review-completeness-reviewed: ff82bbc4f5c10de5
+completed: 2026-09-23
 ---
 
 # config.tune agents.tier reset and shadowed-write warning
@@ -110,3 +111,11 @@ alias leaf for a tier while it also stores a legacy `tiers` entry resolves as
 expected and leaves no empty map. For the playbook edit, the wsflow skill-shim
 and mirror drift tests pass and a `playbook.render` of `lead-tune` shows the
 reset guidance.
+
+### Result (e649dc64) - 2026-09-23
+
+- Added project/global exact-leaf unsetters, a project persisted-leaf shadow check, and `config.tune` reset using `value: {tier}`. The agents.tier JSON response now includes a `warnings` array for absent-leaf resets and exact project shadowing; a failed project shadow lookup is advisory, not a blocker to global writes or resets.
+- The `config.list` reset writer, lead-tune guidance, wsflow and Pi resource mirrors were updated. Source-backed `playbook.render` tests verify that the guidance renders with reset and warning relay instructions.
+- Verification: `go build ./...`, `go vet ./...`, isolated-home `go test ./internal/... -count=1`, `scripts/smoke-ws-mcp.sh ..`, and wsflow package tests passed. A complete Go suite passed before the post-review advisory correction; subsequent full-suite and cmd-only attempts timed out under concurrent builds, while the changed internal packages passed after that correction.
+- Decisions: preserve the compound reset shape and existing full-config JSON response; normalize legacy tier synonyms through wsconfig; treat project shadow lookup errors as warnings after the selected global operation. Lead-tune's warning relay is the explicit ticket-specific requirement despite the general skill-authoring post-call prose rule.
+- Review: correctness round 1 found the global write blocked by a broken project shadow lookup; fixed in 7b07f805 and round 2 verified clean. Fit and test reviewers withdrew findings after ticket and normalization evidence; no unresolved findings.
