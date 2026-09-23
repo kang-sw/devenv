@@ -623,8 +623,8 @@ func TestPlaybookPrintModelAliasPiHarnessFallsBackToDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
-	if !strings.Contains(body, "gpt-5.6-terra") {
-		t.Errorf("body %q: expected seeded default medium-tier model gpt-5.6-terra", body)
+	if !strings.Contains(body, "gpt-6-luna") {
+		t.Errorf("body %q: expected seeded default medium-tier model gpt-6-luna", body)
 	}
 }
 
@@ -707,7 +707,7 @@ func TestPlaybookPrintTierModelVarsFallbackOnResolverError(t *testing.T) {
 // sentence materializes the correct per-harness default small/medium models
 // with no {{. placeholder remaining — the ticket's stated verification
 // boundary. Default config: claude small=haiku medium=sonnet; codex
-// small=gpt-5.6-luna medium=gpt-5.6-terra (post 9bfe7aa3 tier-default remap).
+// small=medium=gpt-6-luna (the shipped Codex tier remap).
 func TestPlaybookPrintGoldenLeadWorkflowManualScopedExplorationTierModels(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 
@@ -717,7 +717,7 @@ func TestPlaybookPrintGoldenLeadWorkflowManualScopedExplorationTierModels(t *tes
 		mediumModel string
 	}{
 		{"claude", "haiku", "sonnet"},
-		{"codex", "gpt-5.6-luna", "gpt-5.6-terra"},
+		{"codex", "gpt-6-luna", "gpt-6-luna"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.harness, func(t *testing.T) {

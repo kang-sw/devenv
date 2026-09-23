@@ -260,7 +260,7 @@ func TestPlaybookRenderToolTierOverride(t *testing.T) {
 			t.Fatalf("playbook.render with tier_override: %s", resp)
 		}
 		text := toolText(t, resp)
-		if !strings.Contains(text, "recommended-tier: large") || !strings.Contains(text, "recommended-model: gpt-5.6-sol") {
+		if !strings.Contains(text, "recommended-tier: large") || !strings.Contains(text, "recommended-model: gpt-6-sol") {
 			t.Fatalf("response payload did not reflect tier_override: %q", text)
 		}
 		path := strings.Split(strings.TrimSpace(text), "\n")[0]
@@ -268,7 +268,7 @@ func TestPlaybookRenderToolTierOverride(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(string(body), "Model: gpt-5.6-sol") {
+		if !strings.Contains(string(body), "Model: gpt-6-sol") {
 			t.Fatalf("rendered body did not reflect tier_override: %s", body)
 		}
 	})
@@ -526,6 +526,7 @@ func TestWithRecommendedTier(t *testing.T) {
 }
 
 func TestWithRecommendedRenderBinding(t *testing.T) {
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 	cases := []struct {
 		name    string
 		harness string
@@ -535,8 +536,8 @@ func TestWithRecommendedRenderBinding(t *testing.T) {
 		{
 			name:    "default codex model and effort",
 			harness: "codex",
-			want: "path\nrecommended-tier: medium\nrecommended-model: gpt-5.6-terra\n" +
-				"recommended-reasoning-effort: high",
+			want: "path\nrecommended-tier: medium\nrecommended-model: gpt-6-luna\n" +
+				"recommended-reasoning-effort: max",
 		},
 		{
 			name:    "codex local override",
@@ -648,14 +649,14 @@ func TestRenderPlaybookBodyTierOverride(t *testing.T) {
 		if tier != "large" {
 			t.Errorf("recommendedTier = %q, want override tier %q", tier, "large")
 		}
-		if !strings.Contains(body, "Model: gpt-5.6-sol") {
+		if !strings.Contains(body, "Model: gpt-6-sol") {
 			t.Errorf("body RoleModel did not reflect the large-tier override:\n%s", body)
 		}
-		if strings.Contains(body, "Model: gpt-5.6-terra") {
+		if strings.Contains(body, "Model: gpt-6-luna") {
 			t.Errorf("body RoleModel still reflects the frontmatter medium tier despite override:\n%s", body)
 		}
 		payload := withRecommendedRenderBinding("path", s.currentHarness(), tier, configOpts)
-		if !strings.Contains(payload, "recommended-tier: large") || !strings.Contains(payload, "recommended-model: gpt-5.6-sol") {
+		if !strings.Contains(payload, "recommended-tier: large") || !strings.Contains(payload, "recommended-model: gpt-6-sol") {
 			t.Errorf("recommended payload did not reflect the override: %q", payload)
 		}
 	})
@@ -669,7 +670,7 @@ func TestRenderPlaybookBodyTierOverride(t *testing.T) {
 		if tier != "medium" {
 			t.Errorf("recommendedTier = %q, want frontmatter tier %q", tier, "medium")
 		}
-		if !strings.Contains(body, "Model: gpt-5.6-terra") {
+		if !strings.Contains(body, "Model: gpt-6-luna") {
 			t.Errorf("body RoleModel did not reflect the frontmatter medium tier:\n%s", body)
 		}
 	})

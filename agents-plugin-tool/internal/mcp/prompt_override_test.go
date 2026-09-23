@@ -1274,7 +1274,7 @@ func TestConfigTuningCatalogProjectsPromptAndSchemaKnobs(t *testing.T) {
 
 	agentsKnob := requireTuningKnob(t, catalog, "agents.tier")
 	assertFieldEnum(t, agentsKnob.ValueFields, "tier", []string{"small", "medium", "large", "xlarge"})
-	assertFieldEnum(t, agentsKnob.ValueFields, "effort", []string{"", "none", "low", "medium", "high", "xhigh"})
+	assertFieldNoEnum(t, agentsKnob.ValueFields, "effort")
 	assertFieldEnum(t, agentsKnob.SelectorFields, "harness", []string{"claude", "codex", "pi", "default"})
 	assertFieldEnum(t, agentsKnob.SelectorFields, "scope", []string{"project", "global"})
 }
@@ -1399,7 +1399,7 @@ func TestConfigTuningCatalogNoAgentShape(t *testing.T) {
 	}
 	agentsKnob := requireTuningKnob(t, catalog, "agents.tier")
 	assertFieldEnum(t, agentsKnob.ValueFields, "tier", []string{"small", "medium", "large", "xlarge"})
-	assertFieldEnum(t, agentsKnob.ValueFields, "effort", []string{"", "none", "low", "medium", "high", "xhigh"})
+	assertFieldNoEnum(t, agentsKnob.ValueFields, "effort")
 	assertFieldEnum(t, agentsKnob.SelectorFields, "harness", []string{"claude", "codex", "pi", "default"})
 	assertFieldEnum(t, agentsKnob.SelectorFields, "scope", []string{"project", "global"})
 }
@@ -1497,6 +1497,17 @@ func assertFieldEnum(t *testing.T, fields []tuningField, name string, want []str
 	}
 	if strings.Join(field.Enum, "\x00") != strings.Join(want, "\x00") {
 		t.Fatalf("field %q enum = %#v, want %#v", name, field.Enum, want)
+	}
+}
+
+func assertFieldNoEnum(t *testing.T, fields []tuningField, name string) {
+	t.Helper()
+	field := findTuningField(fields, name)
+	if field == nil {
+		t.Fatalf("missing field %q in %+v", name, fields)
+	}
+	if len(field.Enum) != 0 {
+		t.Fatalf("field %q enum = %#v, want an unrestricted string field", name, field.Enum)
 	}
 }
 
