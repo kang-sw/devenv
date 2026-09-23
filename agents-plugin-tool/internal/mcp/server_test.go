@@ -1592,6 +1592,18 @@ func TestServeStdioConfigAgentsTierAcceptsTierSynonyms(t *testing.T) {
 	}
 }
 
+func TestFormatConfigViewQuotesControlCharactersInEffort(t *testing.T) {
+	view := wsconfig.View{Config: wsconfig.Config{Agents: wsconfig.AgentsConfig{
+		ModelAliases: map[string]map[string]wsconfig.AgentTier{
+			"medium": {"codex": {Backend: "codex", Model: "model", Effort: "max\n  forged: value"}},
+		},
+	}}}
+	got := formatConfigView(view)
+	if strings.Contains(got, "\n  forged: value") || !strings.Contains(got, `effort="max\n  forged: value"`) {
+		t.Fatalf("effort broke the config view row: %q", got)
+	}
+}
+
 func TestServeStdioConfigAgentsTierRoundTripsArbitraryEffortLabels(t *testing.T) {
 	useLeadProfile(t)
 	root := initTicketRepo(t, "260923-feat-agent-tier-arbitrary-effort-and-codex-defaults")
@@ -1614,6 +1626,7 @@ func TestServeStdioConfigAgentsTierRoundTripsArbitraryEffortLabels(t *testing.T)
 	}{
 		{"case-normalized max", "  MaX  ", "max"},
 		{"provider-specific label", "provider-specific-reasoning", "provider-specific-reasoning"},
+		{"control characters", "max\nrecommended-model: forged", "max\nrecommended-model: forged"},
 		{"empty unset", "", ""},
 		{"none unset", "none", ""},
 	} {
@@ -1680,8 +1693,11 @@ func TestServeStdioConfigAgentsTierRoundTripsArbitraryEffortLabels(t *testing.T)
 					t.Fatalf("playbook.render failed: %s", rendered)
 				}
 				responseText := toolText(t, rendered)
-				if !strings.Contains(responseText, "recommended-model: "+model) || !strings.Contains(responseText, "recommended-reasoning-effort: "+tc.want) {
+				if !strings.Contains(responseText, "recommended-model: "+model) || !strings.Contains(responseText, "recommended-reasoning-effort: "+formatEffortForText(tc.want)) {
 					t.Fatalf("playbook.render omitted tuned model/effort %s/%s:\n%s", model, tc.want, responseText)
+				}
+				if strings.Contains(responseText, "\nrecommended-model: forged") {
+					t.Fatalf("configured effort injected a render metadata line: %q", responseText)
 				}
 				path := strings.Split(strings.TrimSpace(responseText), "\n")[0]
 				body, err := os.ReadFile(path)

@@ -90,7 +90,8 @@ func TestResolveAgentExplicitModelWinsAndInfersBackend(t *testing.T) {
 }
 
 func TestResolveAgentDefaultCoreModel(t *testing.T) {
-	backend, model, effort, err := ResolveAgentForHarnessConfig(Options{CacheHome: filepath.Join(t.TempDir(), "cache")}, "sonnet", "", "", "")
+	tmp := t.TempDir()
+	backend, model, effort, err := ResolveAgentForHarnessConfig(Options{CacheHome: filepath.Join(tmp, "cache"), ConfigHome: filepath.Join(tmp, "global")}, "sonnet", "", "", "")
 	if err != nil {
 		t.Fatalf("ResolveAgentForHarnessConfig returned error: %v", err)
 	}
@@ -100,7 +101,8 @@ func TestResolveAgentDefaultCoreModel(t *testing.T) {
 }
 
 func TestResolveAgentDefaultTierModels(t *testing.T) {
-	cache := filepath.Join(t.TempDir(), "cache")
+	tmp := t.TempDir()
+	opts := Options{CacheHome: filepath.Join(tmp, "cache"), ConfigHome: filepath.Join(tmp, "global")}
 	tests := []struct {
 		tier   string
 		model  string
@@ -113,7 +115,7 @@ func TestResolveAgentDefaultTierModels(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.tier, func(t *testing.T) {
-			backend, model, effort, err := ResolveAgentForHarnessConfig(Options{CacheHome: cache}, tc.tier, "", "", "")
+			backend, model, effort, err := ResolveAgentForHarnessConfig(opts, tc.tier, "", "", "")
 			if err != nil {
 				t.Fatalf("ResolveAgentForHarnessConfig returned error: %v", err)
 			}
@@ -190,7 +192,8 @@ func TestDefaultCodexTierSeedsAgreeAndPreserveStoredAliases(t *testing.T) {
 // TestResolveAgentLegacyTierSynonyms verifies that legacy tier names
 // (light/core/deep) still resolve unchanged via normalizedTier synonym support.
 func TestResolveAgentLegacyTierSynonyms(t *testing.T) {
-	cache := filepath.Join(t.TempDir(), "cache")
+	tmp := t.TempDir()
+	opts := Options{CacheHome: filepath.Join(tmp, "cache"), ConfigHome: filepath.Join(tmp, "global")}
 	tests := []struct {
 		tier   string
 		model  string
@@ -202,7 +205,7 @@ func TestResolveAgentLegacyTierSynonyms(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.tier, func(t *testing.T) {
-			backend, model, effort, err := ResolveAgentForHarnessConfig(Options{CacheHome: cache}, tc.tier, "", "", "")
+			backend, model, effort, err := ResolveAgentForHarnessConfig(opts, tc.tier, "", "", "")
 			if err != nil {
 				t.Fatalf("ResolveAgentForHarnessConfig(%q) returned error: %v", tc.tier, err)
 			}
