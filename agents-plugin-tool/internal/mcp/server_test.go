@@ -1311,7 +1311,7 @@ func TestServeStdioConfigResolveAgentFallsBackToDefault(t *testing.T) {
 	if err := json.Unmarshal([]byte(toolText(t, byID["2"])), &result); err != nil {
 		t.Fatalf("decode config.resolve_agent response: %v", err)
 	}
-	if result.Backend != "codex" || result.Model != "gpt-5.6-terra" || result.Effort != "high" {
+	if result.Backend != "codex" || result.Model != "gpt-6-luna" || result.Effort != "max" {
 		t.Fatalf("result = %#v, want the seeded default medium tier", result)
 	}
 	if result.ResolvedFrom != "default" {
@@ -1340,11 +1340,45 @@ func TestServeStdioConfigResolveAgentNoDetectedHarnessFallsBackToDefault(t *test
 	if err := json.Unmarshal([]byte(toolText(t, byID["1"])), &result); err != nil {
 		t.Fatalf("decode config.resolve_agent response: %v", err)
 	}
-	if result.Backend != "codex" || result.Model != "gpt-5.6-terra" || result.Effort != "high" {
+	if result.Backend != "codex" || result.Model != "gpt-6-luna" || result.Effort != "max" {
 		t.Fatalf("result = %#v, want the seeded default medium tier", result)
 	}
 	if result.ResolvedFrom != "default" {
 		t.Fatalf("resolved_from = %q, want %q", result.ResolvedFrom, "default")
+	}
+}
+
+// TestServeStdioConfigResolveAgentUsesDefaultCodexTierTable pins each shipped
+// Codex model/effort pair through config.resolve_agent when no harness is
+// detected, including the answering default bucket.
+func TestServeStdioConfigResolveAgentUsesDefaultCodexTierTable(t *testing.T) {
+	useLeadProfile(t)
+	root := initTicketRepo(t, "260923-feat-agent-tier-arbitrary-effort-and-codex-defaults")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "global"))
+
+	server := NewServer(root, "test")
+	for i, tc := range []struct {
+		tier, model, effort string
+	}{
+		{"small", "gpt-6-luna", "high"},
+		{"medium", "gpt-6-luna", "max"},
+		{"large", "gpt-6-sol", "high"},
+		{"xlarge", "gpt-6-sol", "max"},
+	} {
+		var out bytes.Buffer
+		input := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"config.resolve_agent","arguments":{"tier":%q,"format":"json"}}}`, tc.tier)
+		if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+			t.Fatalf("ServeStdio config.resolve_agent(%s) returned error: %v", tc.tier, err)
+		}
+		byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+		var result resolveAgentTierResponse
+		if err := json.Unmarshal([]byte(toolText(t, byID["1"])), &result); err != nil {
+			t.Fatalf("decode config.resolve_agent(%s) response: %v", tc.tier, err)
+		}
+		if result.Backend != "codex" || result.Model != tc.model || result.Effort != tc.effort || result.ResolvedFrom != "default" {
+			t.Errorf("case %d config.resolve_agent(%s) = %#v, want default/codex/%s/%s", i, tc.tier, result, tc.model, tc.effort)
+		}
 	}
 }
 
@@ -1558,6 +1592,126 @@ func TestServeStdioConfigAgentsTierAcceptsTierSynonyms(t *testing.T) {
 	}
 }
 
+func TestFormatConfigViewQuotesControlCharactersInEffort(t *testing.T) {
+	view := wsconfig.View{Config: wsconfig.Config{Agents: wsconfig.AgentsConfig{
+		ModelAliases: map[string]map[string]wsconfig.AgentTier{
+			"medium": {"codex": {Backend: "codex", Model: "model", Effort: "max\n  forged: value"}},
+		},
+	}}}
+	got := formatConfigView(view)
+	if strings.Contains(got, "\n  forged: value") || !strings.Contains(got, `effort="max\n  forged: value"`) {
+		t.Fatalf("effort broke the config view row: %q", got)
+	}
+}
+
+func TestServeStdioConfigAgentsTierRoundTripsArbitraryEffortLabels(t *testing.T) {
+	useLeadProfile(t)
+	root := initTicketRepo(t, "260923-feat-agent-tier-arbitrary-effort-and-codex-defaults")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "global"))
+	t.Setenv("WS_MCP_NO_AGENT", "")
+	t.Setenv("WS_MCP_NAMESPACE", "")
+	rsrcRoot := buildTestRsrcTree(t, map[string]string{
+		"model-pb/model-pb.md": modelAliasPlaybookContent,
+	})
+	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+
+	server := NewServer(root, "test")
+	server.observeHarness("test", "codex")
+	leadKey, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
+	const model = "mcp-arbitrary-effort-model"
+
+	for _, tc := range []struct {
+		name, input, want string
+	}{
+		{"case-normalized max", "  MaX  ", "max"},
+		{"provider-specific label", "provider-specific-reasoning", "provider-specific-reasoning"},
+		{"control characters", "max\nrecommended-model: forged", "max\nrecommended-model: forged"},
+		{"empty unset", "", ""},
+		{"none unset", "none", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			written := callToolOnce(t, server, 2, "config.tune", map[string]any{
+				"session_key": leadKey,
+				"key":         "agents.tier",
+				"harness":     "codex",
+				"value": map[string]any{
+					"tier": "medium", "backend": "codex", "model": model, "effort": tc.input,
+				},
+			})
+			if toolIsError(t, written) {
+				t.Fatalf("config.tune rejected effort %q: %s", tc.input, written)
+			}
+
+			catalog := parseTuningCatalogResponse(t, callToolOnce(t, server, 3, "config.list", map[string]any{
+				"session_key": leadKey,
+				"format":      "json",
+			}))
+			rows, ok := requireTuningKnob(t, catalog, "agents.tier").Current.([]any)
+			if !ok {
+				t.Fatalf("agents.tier current has type %T, want rows", requireTuningKnob(t, catalog, "agents.tier").Current)
+			}
+			found := false
+			for _, raw := range rows {
+				row, ok := raw.(map[string]any)
+				if !ok || row["tier"] != "medium" || row["harness"] != "codex" || row["model"] != model {
+					continue
+				}
+				found = true
+				got, _ := row["effort"].(string)
+				if got != tc.want {
+					t.Fatalf("config.list effort for %s/codex = %q, want %q (row: %#v)", model, got, tc.want, row)
+				}
+			}
+			if !found {
+				t.Fatalf("config.list omitted tuned medium/codex mapping for %s: %#v", model, rows)
+			}
+
+			resolvedResp := callToolOnce(t, server, 4, "config.resolve_agent", map[string]any{
+				"session_key": leadKey,
+				"tier":        "medium",
+				"harness":     "codex",
+				"format":      "json",
+			})
+			if toolIsError(t, resolvedResp) {
+				t.Fatalf("config.resolve_agent failed: %s", resolvedResp)
+			}
+			var resolved resolveAgentTierResponse
+			if err := json.Unmarshal([]byte(toolText(t, resolvedResp)), &resolved); err != nil {
+				t.Fatalf("decode config.resolve_agent response: %v", err)
+			}
+			if resolved.Backend != "codex" || resolved.Model != model || resolved.Effort != tc.want || resolved.ResolvedFrom != "codex" {
+				t.Fatalf("config.resolve_agent = %#v, want codex/%s/%q from codex", resolved, model, tc.want)
+			}
+
+			if tc.want != "" {
+				rendered := callToolOnce(t, server, 5, "playbook.render", map[string]any{
+					"name":        "model-pb",
+					"session_key": leadKey,
+				})
+				if toolIsError(t, rendered) {
+					t.Fatalf("playbook.render failed: %s", rendered)
+				}
+				responseText := toolText(t, rendered)
+				if !strings.Contains(responseText, "recommended-model: "+model) || !strings.Contains(responseText, "recommended-reasoning-effort: "+formatEffortForText(tc.want)) {
+					t.Fatalf("playbook.render omitted tuned model/effort %s/%s:\n%s", model, tc.want, responseText)
+				}
+				if strings.Contains(responseText, "\nrecommended-model: forged") {
+					t.Fatalf("configured effort injected a render metadata line: %q", responseText)
+				}
+				path := strings.Split(strings.TrimSpace(responseText), "\n")[0]
+				body, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !strings.Contains(string(body), "Model: "+model) {
+					t.Fatalf("rendered body omitted tuned model %s:\n%s", model, body)
+				}
+			}
+		})
+	}
+}
+
 func TestServeStdioConfigAgentsTierOmittedEffortClearsExistingEffort(t *testing.T) {
 	useLeadProfile(t)
 	root := initTicketRepo(t, "260513-feat-agent-tier-effort-config")
@@ -1683,6 +1837,7 @@ func TestWsflowModePlaybookRenderAbsorbsPromptRenderContext(t *testing.T) {
 
 func TestPlaybookRenderReturnsResolvedNativeBindings(t *testing.T) {
 	useLeadProfile(t)
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "global"))
 	root := initGitRepo(t)
 	rsrcRoot := buildTestRsrcTree(t, map[string]string{
 		"model-pb/model-pb.md": modelAliasPlaybookContent,
@@ -1703,7 +1858,7 @@ func TestPlaybookRenderReturnsResolvedNativeBindings(t *testing.T) {
 	if len(lines) != 4 || !strings.HasSuffix(lines[0], "-model-pb.md") {
 		t.Fatalf("render metadata path/tier shape = %q", responseText)
 	}
-	if got, want := strings.Join(lines[1:], "\n"), "recommended-tier: medium\nrecommended-model: gpt-5.6-terra\nrecommended-reasoning-effort: high"; got != want {
+	if got, want := strings.Join(lines[1:], "\n"), "recommended-tier: medium\nrecommended-model: gpt-6-luna\nrecommended-reasoning-effort: max"; got != want {
 		t.Fatalf("render metadata = %q, want %q", got, want)
 	}
 
@@ -1762,6 +1917,7 @@ func TestServeStdioInitializeDetectsClaudeHarnessForAgentAlias(t *testing.T) {
 	useLeadProfile(t)
 	root := initTicketRepo(t, "260508-feat-claude-harness")
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "global"))
 
 	initializeInput := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"Claude Code","version":"test"}}}`
 	resolveInput := `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"config.resolve_agent","arguments":{"tier":"medium","format":"json"}}}`
@@ -1789,6 +1945,7 @@ func TestServeStdioCodexMetadataDetectsHarnessForAgentAlias(t *testing.T) {
 	useLeadProfile(t)
 	root := initTicketRepo(t, "260508-feat-codex-harness")
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "global"))
 
 	setupInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"project_tree","arguments":{"root":%q},"_meta":{"x-codex-turn-metadata":{"workspaces":{%q:{}}}}}}`, root, root)
 	resolveInput := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"config.resolve_agent","arguments":{"tier":"medium","format":"json"}}}`
@@ -1806,8 +1963,8 @@ func TestServeStdioCodexMetadataDetectsHarnessForAgentAlias(t *testing.T) {
 	if err := json.Unmarshal([]byte(toolText(t, byID["2"])), &resolved); err != nil {
 		t.Fatalf("decode config.resolve_agent response: %v", err)
 	}
-	if resolved.ResolvedFrom != "codex" || resolved.Backend != "codex" || resolved.Model != "gpt-5.6-terra" {
-		t.Fatalf("resolved = %#v, want resolved_from/backend codex and model gpt-5.6-terra", resolved)
+	if resolved.ResolvedFrom != "codex" || resolved.Backend != "codex" || resolved.Model != "gpt-6-luna" {
+		t.Fatalf("resolved = %#v, want resolved_from/backend codex and model gpt-6-luna", resolved)
 	}
 }
 

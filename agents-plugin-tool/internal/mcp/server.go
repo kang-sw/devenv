@@ -2047,7 +2047,7 @@ func formatConfigView(view wsconfig.View) string {
 			tier := byHarness[key]
 			fmt.Fprintf(&b, "    %s: %s/%s", key, displayOrDash(tier.Backend), displayOrDash(tier.Model))
 			if tier.Effort != "" {
-				fmt.Fprintf(&b, " effort=%s", tier.Effort)
+				fmt.Fprintf(&b, " effort=%s", formatEffortForText(tier.Effort))
 			}
 			b.WriteString("\n")
 		}

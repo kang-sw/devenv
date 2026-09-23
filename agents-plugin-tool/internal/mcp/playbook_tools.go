@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsrsrc"
@@ -403,9 +405,18 @@ func withRecommendedRenderBinding(payload, harness, tier string, configOpts wsco
 		payload += "\nrecommended-model: " + model
 	}
 	if effort = strings.TrimSpace(effort); effort != "" {
-		payload += "\nrecommended-reasoning-effort: " + effort
+		payload += "\nrecommended-reasoning-effort: " + formatEffortForText(effort)
 	}
 	return payload
+}
+
+// formatEffortForText keeps provider-specific labels intact in structured
+// resolution, but quotes control characters at line-oriented display boundaries.
+func formatEffortForText(effort string) string {
+	if strings.IndexFunc(effort, unicode.IsControl) >= 0 {
+		return strconv.Quote(effort)
+	}
+	return effort
 }
 
 // childRoleForPlaybookRole maps a playbook frontmatter role string to the child key scope.

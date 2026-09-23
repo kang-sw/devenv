@@ -277,7 +277,7 @@ func configTune(args []string) {
 	tier := fs.String("tier", "", "capability tier: small, medium, large, or xlarge")
 	backend := fs.String("backend", "", "backend name; inferred from model when omitted")
 	model := fs.String("model", "", "concrete model for this alias")
-	effort := fs.String("effort", "", "portable reasoning effort for this alias: none, low, medium, high, or xhigh")
+	effort := fs.String("effort", "", "reasoning effort label for this alias (none or empty leaves backend effort unset)")
 	harness := fs.String("harness", "", "harness alias key to configure: codex, claude, pi, or default")
 	_ = fs.Parse(args)
 

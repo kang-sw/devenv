@@ -18,20 +18,20 @@ func TestTicketDesignReviewExplorationBindings(t *testing.T) {
 			rows              []string
 		}{
 			{"codex", "an explorer subagent", []string{
-				"| small | gpt-5.6-luna | medium |", "| medium | gpt-5.6-terra | high |", "| large | gpt-5.6-sol | high |",
+				"| small | gpt-6-luna | high |", "| medium | gpt-6-luna | max |", "| large | gpt-6-sol | high |",
 			}},
 			{"claude", "the Explore agent", []string{
 				"| small | haiku | |", "| medium | sonnet | |", "| large | opus | |",
 			}},
 			{"unknown-host", "an exploration agent", []string{
-				"| small | gpt-5.6-luna | medium |", "| medium | gpt-5.6-terra | high |", "| large | gpt-5.6-sol | high |",
+				"| small | gpt-6-luna | high |", "| medium | gpt-6-luna | max |", "| large | gpt-6-sol | high |",
 			}},
 		} {
 			for _, config := range []string{"default", "custom", "unset", "invalid"} {
 				t.Run(product.namespace+"/"+tc.harness+"/"+config, func(t *testing.T) {
 					t.Setenv("WS_MCP_NAMESPACE", product.namespace)
 					t.Setenv("WS_MCP_NO_AGENT", map[bool]string{true: "1", false: "0"}[product.namespace == "wsflow"])
-					opts := wsconfig.Options{CacheHome: t.TempDir()}
+					opts := wsconfig.Options{CacheHome: t.TempDir(), ConfigHome: t.TempDir()}
 					rows := tc.rows
 					if config == "custom" || config == "unset" {
 						rows = nil
