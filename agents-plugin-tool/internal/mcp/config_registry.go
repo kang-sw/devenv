@@ -17,7 +17,6 @@ var (
 	onOffEnum             = []string{"on", "off"}
 	sageReviewEnum        = []string{"off", "ask", "auto"}
 	agentsTierEnum        = []string{"small", "medium", "large", "xlarge"}
-	agentsEffortEnum      = []string{"", "none", "low", "medium", "high", "xhigh"}
 	promptHarnessEnum     = []string{"claude", "codex", "pi", "*"}
 	agentsTierHarnessEnum = []string{"claude", "codex", "pi", "default"}
 	agentsTierScopeEnum   = []string{"project", "global"}
@@ -175,8 +174,7 @@ var configRegistry = []configKeyEntry{
 			},
 			{
 				Name:        "effort",
-				Description: "Optional portable reasoning effort for this alias. Empty, omitted, or none leaves backend effort unset.",
-				Enum:        agentsEffortEnum,
+				Description: "Optional reasoning effort label for this alias. Empty, omitted, or none leaves backend effort unset; provider support is checked at launch.",
 			},
 		},
 		HarnessApplicable:     true,

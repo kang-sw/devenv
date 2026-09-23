@@ -478,10 +478,10 @@ func defaultConfig() Config {
 
 func applyDefaultTiers(tiers map[string]AgentTier) {
 	defaults := map[string]AgentTier{
-		"small":  {Backend: "codex", Model: "gpt-5.6-luna", Effort: "medium"},
-		"medium": {Backend: "codex", Model: "gpt-5.6-terra", Effort: "high"},
-		"large":  {Backend: "codex", Model: "gpt-5.6-sol", Effort: "high"},
-		"xlarge": {Backend: "codex", Model: "gpt-5.6-sol", Effort: "xhigh"},
+		"small":  {Backend: "codex", Model: "gpt-6-luna", Effort: "high"},
+		"medium": {Backend: "codex", Model: "gpt-6-luna", Effort: "max"},
+		"large":  {Backend: "codex", Model: "gpt-6-sol", Effort: "high"},
+		"xlarge": {Backend: "codex", Model: "gpt-6-sol", Effort: "max"},
 	}
 	for tier, mapping := range defaults {
 		if _, ok := tiers[tier]; !ok {
@@ -507,23 +507,23 @@ func applyDefaultModelAliases(tiers map[string]AgentTier, aliases map[string]map
 func defaultModelAliases(tiers map[string]AgentTier) map[string]map[string]AgentTier {
 	return map[string]map[string]AgentTier{
 		"small": {
-			"default": tierOrDefault(tiers, "small", AgentTier{Backend: "codex", Model: "gpt-5.6-luna", Effort: "medium"}),
-			"codex":   tierOrDefault(tiers, "small", AgentTier{Backend: "codex", Model: "gpt-5.6-luna", Effort: "medium"}),
+			"default": tierOrDefault(tiers, "small", AgentTier{Backend: "codex", Model: "gpt-6-luna", Effort: "high"}),
+			"codex":   tierOrDefault(tiers, "small", AgentTier{Backend: "codex", Model: "gpt-6-luna", Effort: "high"}),
 			"claude":  {Backend: "claude", Model: "haiku"},
 		},
 		"medium": {
-			"default": tierOrDefault(tiers, "medium", AgentTier{Backend: "codex", Model: "gpt-5.6-terra", Effort: "high"}),
-			"codex":   tierOrDefault(tiers, "medium", AgentTier{Backend: "codex", Model: "gpt-5.6-terra", Effort: "high"}),
+			"default": tierOrDefault(tiers, "medium", AgentTier{Backend: "codex", Model: "gpt-6-luna", Effort: "max"}),
+			"codex":   tierOrDefault(tiers, "medium", AgentTier{Backend: "codex", Model: "gpt-6-luna", Effort: "max"}),
 			"claude":  {Backend: "claude", Model: "sonnet"},
 		},
 		"large": {
-			"default": tierOrDefault(tiers, "large", AgentTier{Backend: "codex", Model: "gpt-5.6-sol", Effort: "high"}),
-			"codex":   tierOrDefault(tiers, "large", AgentTier{Backend: "codex", Model: "gpt-5.6-sol", Effort: "high"}),
+			"default": tierOrDefault(tiers, "large", AgentTier{Backend: "codex", Model: "gpt-6-sol", Effort: "high"}),
+			"codex":   tierOrDefault(tiers, "large", AgentTier{Backend: "codex", Model: "gpt-6-sol", Effort: "high"}),
 			"claude":  {Backend: "claude", Model: "opus"},
 		},
 		"xlarge": {
-			"default": tierOrDefault(tiers, "xlarge", AgentTier{Backend: "codex", Model: "gpt-5.6-sol", Effort: "xhigh"}),
-			"codex":   tierOrDefault(tiers, "xlarge", AgentTier{Backend: "codex", Model: "gpt-5.6-sol", Effort: "xhigh"}),
+			"default": tierOrDefault(tiers, "xlarge", AgentTier{Backend: "codex", Model: "gpt-6-sol", Effort: "max"}),
+			"codex":   tierOrDefault(tiers, "xlarge", AgentTier{Backend: "codex", Model: "gpt-6-sol", Effort: "max"}),
 			"claude":  {Backend: "claude", Model: "opus"},
 		},
 	}
@@ -606,14 +606,10 @@ func normalizeOptionalEffort(values ...string) (string, bool, error) {
 		return "", false, nil
 	}
 	value := strings.ToLower(strings.TrimSpace(values[0]))
-	switch value {
-	case "", "none":
+	if value == "" || value == "none" {
 		return "", true, nil
-	case "low", "medium", "high", "xhigh":
-		return value, true, nil
-	default:
-		return "", true, fmt.Errorf("effort must be none, low, medium, high, or xhigh")
 	}
+	return value, true, nil
 }
 
 func useAliasMappingForBackend(explicitBackend string, mapping AgentTier) bool {
