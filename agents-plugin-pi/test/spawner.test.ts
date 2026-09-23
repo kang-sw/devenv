@@ -4,9 +4,10 @@
  * async, ws-mcp-`config.resolve_agent`-backed tier resolution against a stub
  * `client.callTool`, replacing the old file-catalog-backed
  * `resolveModelForAlias`), applyRpcEvent's streaming/report bookkeeping and its
- * push OUTCOMES, listAgents's status mapping, and sendToAgent's three LIVE
+ * push OUTCOMES, listAgents's status mapping, and sendToAgent's internal LIVE
  * branches (streaming+interrupt->steer, streaming+no-interrupt->followUp,
- * idle->prompt) via a duck-typed `steer`/`followUp`/`prompt` stub cast as
+ * idle->prompt) plus the lead tool's always-steer streaming path, via a
+ * duck-typed `steer`/`followUp`/`prompt` stub cast as
  * `RpcClient` — the RPC-backed registry's seam-extractable pure/duck-typeable
  * logic (Phase 1 ticket verification boundary: "Registry/select logic
  * unit-tested where seam-extractable").
@@ -559,11 +560,15 @@ describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses ins
     execute: (id: string, params: unknown, signal?: AbortSignal, update?: unknown, ctx?: unknown) => Promise<{ content: Array<{ text: string }> }>;
   }
 
-  function installRpcHarness(onThinking?: (level: string) => void, onStart?: (cwd: string | undefined) => void) {
+  function installRpcHarness(
+    onThinking?: (level: string) => void,
+    onStart?: (cwd: string | undefined) => void,
+    onPrompt?: (message: string) => void,
+  ) {
     const original = Object.fromEntries(["start", "stop", "abort", "onEvent", "prompt", "getState", "setThinkingLevel"].map(name => [name, RpcClient.prototype[name as keyof RpcClient]]));
     Object.assign(RpcClient.prototype, {
       start: async function(this: { options?: { cwd?: string } }) { onStart?.(this.options?.cwd); }, stop: async () => {}, abort: async () => {},
-      onEvent: () => () => {}, prompt: async () => {},
+      onEvent: () => () => {}, prompt: async (message: string) => { onPrompt?.(message); },
       setThinkingLevel: async (level: string) => { onThinking?.(level); },
       getState: async () => ({ model: { provider: "pi", id: "small" }, thinkingLevel: "medium", sessionFile: "/tmp/ws-pi-agent-test/session.jsonl" }),
     });
@@ -731,9 +736,10 @@ describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses ins
     }
   });
 
-  test("cwd_override replaces inherited cwd, survives stop/resume, and validates paths before allocation", async () => {
+  test("cwd_override survives stop/resume, dormant ws-agent-send uses prompt, and paths validate before allocation", async () => {
     const starts: Array<string | undefined> = [];
-    const rpc = installRpcHarness(undefined, cwd => starts.push(cwd));
+    const prompts: string[] = [];
+    const rpc = installRpcHarness(undefined, cwd => starts.push(cwd), message => prompts.push(message));
     try {
       const { tool, sendTool, handle, ctx } = harness(async () => jsonResult({}));
       const override = realpathSync(ctx.agentStorageRoot);
@@ -741,8 +747,10 @@ describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses ins
         system_prompt_path: "/tmp/p.md", prompt: "override", cwd_override: override,
       }, undefined, undefined, ctx)).content[0]!.text);
       assert.equal(handle.rpcRegistry.get(spawned.agent_id)!.cwdOverride, override);
+      prompts.length = 0;
       await stopAgent(handle.rpcRegistry, spawned.agent_id, undefined, { silent: true });
       await sendTool.execute("resume", { agent_id: spawned.agent_id, message: "resume" });
+      assert.deepEqual(prompts, ["resume"]);
       await tool.execute("inherited", { system_prompt_path: "/tmp/p.md", prompt: "inherited" }, undefined, undefined, ctx);
       assert.deepEqual(starts, [override, override, "/tmp"]);
 
@@ -970,6 +978,7 @@ describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses ins
 describe("spawnAgent: onModelResolved (260906 Phase 2 dispatch-row rendering)", () => {
   interface CapturedTool {
     name: string;
+    parameters: { properties: Record<string, unknown> };
     execute: (
       id: string,
       params: unknown,
@@ -1083,6 +1092,26 @@ describe("spawnAgent: onModelResolved (260906 Phase 2 dispatch-row rendering)", 
       );
       assert.equal(updates.length, 0);
     } finally { rpc.restore(); }
+  });
+
+  test("ws-agent-send has no interrupt option, steers streaming targets, and prompts live-idle targets", async () => {
+    const { sendTool, handle } = harness(async () => jsonResult({}));
+    const streamingClient = fakeRpcClient();
+    handle.rpcRegistry.set("streaming", freshRpcRecord({
+      agentId: "streaming",
+      client: streamingClient.client,
+      streaming: true,
+      running: true,
+    }));
+    const idleClient = fakeRpcClient();
+    handle.rpcRegistry.set("idle", freshRpcRecord({ agentId: "idle", client: idleClient.client }));
+
+    assert.equal(Object.hasOwn(sendTool.parameters.properties, "interrupt"), false);
+    await sendTool.execute("streaming-send", { agent_id: "streaming", message: "steer this way" });
+    assert.deepEqual(streamingClient.calls, [["steer", "steer this way"]]);
+    await sendTool.execute("idle-send", { agent_id: "idle", message: "start a new run" });
+    assert.deepEqual(idleClient.calls, [["prompt", "start a new run"]]);
+    handle.rpcRegistry.clear();
   });
 
   test("ws-agent-send reconstructs the target's resolved line from the record, including the no-modelSource revived-record fallback", async () => {
@@ -2196,13 +2225,13 @@ describe("listAgents", () => {
 });
 
 describe("sendToAgent", () => {
-  test("routes active sends through steer/followUp and idle sends through prompt", async () => {
+  test("internal sends keep steer/followUp selection while idle sends use prompt", async () => {
     const activeClient = fakeRpcClient();
     const active = freshRpcRecord({ agentId: "active", client: activeClient.client, running: true, streaming: true });
     const idleClient = fakeRpcClient();
     const idle = freshRpcRecord({ agentId: "idle", client: idleClient.client });
     const registry = new Map([[active.agentId, active], [idle.agentId, idle]]);
-    await sendToAgent(registry, { cwd: "/tmp" }, "active", "queued");
+    await sendToAgent(registry, { cwd: "/tmp" }, "active", "queued", false);
     await sendToAgent(registry, { cwd: "/tmp" }, "active", "urgent", true);
     await sendToAgent(registry, { cwd: "/tmp" }, "idle", "next");
     assert.deepEqual(activeClient.calls, [["followUp", "queued"], ["steer", "urgent"]]);

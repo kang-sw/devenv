@@ -6,8 +6,9 @@
  * Phase 1 replaces the one-shot `pi --mode json -p` worker spawner with
  * persistent `RpcClient` (`--mode rpc`) children: `ws-agent-spawn` starts a
  * long-lived `pi` subprocess wired through `@earendil-works/pi-coding-agent`'s
- * `RpcClient`, `ws-agent-send` drives it (prompt/followUp/steer, branching on
- * locally-tracked streaming state — see the doc comment on `sendToAgent`),
+ * `RpcClient`, `ws-agent-send` drives it (prompt for idle/dormant targets,
+ * steer for streaming targets; internal callers can still queue with
+ * `followUp` — see the doc comment on `sendToAgent`),
  * `ws-agent-list` reports live/idle/dormant status plus each agent's last
  * report time, and `ws-agent-stop` gracefully stops a child's process while
  * keeping its `agent_id` -> session/prompt/model mapping registered for a
@@ -3052,10 +3053,8 @@ export async function spawnAgent(
 
 /**
  * Delivers `message` to `agentId`, branching on locally-tracked streaming
- * state — this is a real behavior gap in the ticket's literal
- * `followUp()`/`steer()` tool mapping, traced through the installed
- * package's RPC mode and agent-loop source: `followUp`/`steer` only
- * *enqueue*; the queue is drained solely inside an *active* agent-loop run.
+ * state. `followUp()`/`steer()` only *enqueue*; the queue is drained solely
+ * inside an *active* agent-loop run.
  * A freshly-started or freshly-resumed idle client has no active run, so
  * calling `followUp()`/`steer()` against it would silently queue a message
  * that is never delivered. So:
@@ -3074,9 +3073,8 @@ export async function spawnAgent(
  * - Live and idle (including the instant after this function's own
  *   auto-resume branch, or right after `spawnAgent`'s initial prompt
  *   settles): also `promptAgent()`, regardless of `interrupt`.
- * - Live and streaming: `interrupt ? steer() : followUp()`, per the
- *   ticket's literal flag semantics — this is the one case where an active
- *   run actually exists for the queue to drain into.
+ * - Live and streaming: internal callers choose `steer()` or `followUp()`
+ *   with `interrupt`; the lead-facing `ws-agent-send` always chooses `steer()`.
  *
  * 260905: every delivery goes through `promptAgent` (or re-marks `running`
  * for the steer/followUp branch), so the fan-in count reflects a send the
@@ -3722,21 +3720,17 @@ export function registerAgentTools(
     name: "ws-agent-send",
     label: "ws-agent-send",
     description:
-      "Send a message to a spawned agent. Delivers via prompt() when idle (including immediately after auto-resuming a dormant agent); while mid-stream, interrupt:true steers it and interrupt:false/omitted queues a follow-up. A dormant (ws-agent-stop'd) agent_id — including one revived from a ws-agent-orphaned message after a session restart — is auto-resumed from its cached session file first. Returns as soon as the message is delivered; the agent's answer arrives later as a pushed ws-agent-* message.",
+      "Send a message to a spawned agent. A running agent is steered after its current tool-call batch finishes and before its next model call; this does not cancel in-flight tool calls. An idle agent receives a new prompt. A dormant (ws-agent-stop'd) agent_id — including one revived from a ws-agent-orphaned message after a session restart — is auto-resumed from its cached session file first, then receives a new prompt. Returns as soon as the message is delivered; the agent's answer arrives later as a pushed ws-agent-* message.",
     parameters: {
       type: "object",
       properties: {
         agent_id: { type: "string", description: "agentId returned by ws-agent-spawn." },
         message: { type: "string", description: "Message text to deliver." },
-        interrupt: {
-          type: "boolean",
-          description: "While the agent is mid-stream: true steers (interrupts) it, false/omitted queues a follow-up. Ignored while idle or dormant.",
-        },
       },
       required: ["agent_id", "message"],
     } as never,
     async execute(_toolCallId, params) {
-      const p = params as { agent_id: string; message: string; interrupt?: boolean };
+      const p = params as { agent_id: string; message: string };
       // `leadSend: true`: this tool is the lead's own channel to a child (see
       // `RpcResumeCtx.leadSend`), unlike ask.ts's overlay channel.
       const result = await sendToAgent(
@@ -3744,7 +3738,7 @@ export function registerAgentTools(
         { pi, cwd: sessionCtx.cwd, extensionPath: sessionCtx.extensionPath, onApprovalPending, leadSend: true },
         p.agent_id,
         p.message,
-        p.interrupt,
+        true,
       );
       // 260906 Phase 2: ws-agent-send never resolves a model itself — the
       // line reconstructs the TARGET agent's recorded model/effort instead.

@@ -98,13 +98,12 @@ export function buildAgentSpawnSummary(args: unknown): string {
   return lines.join("\n");
 }
 
-/** `ws-agent-send`: target alias/id, `message` head, `interrupt` tag only when `true`. */
+/** `ws-agent-send`: target alias/id and `message` head. */
 export function buildAgentSendSummary(args: unknown): string {
   const a = asRecord(args);
   const lines: string[] = [];
   lines.push(`target: ${asString(a.agent_id) ?? ""}`);
   lines.push(`message: ${truncateHead(asString(a.message), SUMMARY_HEAD_CAP)}`);
-  if (asBoolean(a.interrupt) === true) lines.push("interrupt: true");
   return lines.join("\n");
 }
 
