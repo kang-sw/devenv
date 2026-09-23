@@ -1094,19 +1094,23 @@ describe("spawnAgent: onModelResolved (260906 Phase 2 dispatch-row rendering)", 
     } finally { rpc.restore(); }
   });
 
-  test("ws-agent-send has no interrupt option and always steers a streaming target", async () => {
+  test("ws-agent-send has no interrupt option, steers streaming targets, and prompts live-idle targets", async () => {
     const { sendTool, handle } = harness(async () => jsonResult({}));
-    const fake = fakeRpcClient();
+    const streamingClient = fakeRpcClient();
     handle.rpcRegistry.set("streaming", freshRpcRecord({
       agentId: "streaming",
-      client: fake.client,
+      client: streamingClient.client,
       streaming: true,
       running: true,
     }));
+    const idleClient = fakeRpcClient();
+    handle.rpcRegistry.set("idle", freshRpcRecord({ agentId: "idle", client: idleClient.client }));
 
     assert.equal(Object.hasOwn(sendTool.parameters.properties, "interrupt"), false);
-    await sendTool.execute("send", { agent_id: "streaming", message: "steer this way" });
-    assert.deepEqual(fake.calls, [["steer", "steer this way"]]);
+    await sendTool.execute("streaming-send", { agent_id: "streaming", message: "steer this way" });
+    assert.deepEqual(streamingClient.calls, [["steer", "steer this way"]]);
+    await sendTool.execute("idle-send", { agent_id: "idle", message: "start a new run" });
+    assert.deepEqual(idleClient.calls, [["prompt", "start a new run"]]);
     handle.rpcRegistry.clear();
   });
 
