@@ -6,6 +6,7 @@ related:
   260723-feat-ticket-write-verify-commit-gate: established ws/git.commit as the ticket-write chokepoint this defect routes around
 sage-review-design: completed
 sage-review-completeness: completed
+dropped: 2026-09-23
 ---
 
 # A playbook invoked inline by another playbook commits on its own, splitting one logical unit across commits

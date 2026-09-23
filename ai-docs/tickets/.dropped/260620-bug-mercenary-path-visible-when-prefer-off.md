@@ -8,6 +8,7 @@ related-mental-model:
   - mcp-runtime
   - workflow-skills
 sage-review: required
+dropped: 2026-09-23
 ---
 
 # mercenary path is too visible when prefer_mercenary is off

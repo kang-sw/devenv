@@ -4,6 +4,7 @@ related:
   260605-epic-ws-playbook-factory-pivot: playbooks are runtime-distributed contracts and must match their exposed MCP schemas
 sage-review-design: required
 sage-review-completeness: required
+dropped: 2026-09-23
 ---
 
 # lead-write-ticket playbook uses a stale tickets.create schema

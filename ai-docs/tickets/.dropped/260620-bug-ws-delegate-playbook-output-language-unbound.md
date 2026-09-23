@@ -5,6 +5,7 @@ related-mental-model:
   - named-agent-runtime
   - workflow-skills
 sage-review: required
+dropped: 2026-09-23
 ---
 
 # delegate playbooks do not bind subagent output language to English

@@ -5,6 +5,7 @@ related:
   260512-research-claude-cli-stream-json: adjacent Claude backend stream/result contract research
 related-mental-model:
   - named-agent-runtime
+dropped: 2026-09-23
 ---
 
 # ws named agent empty result after long tool-use run

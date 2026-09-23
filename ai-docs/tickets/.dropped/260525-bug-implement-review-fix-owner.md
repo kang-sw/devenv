@@ -9,6 +9,7 @@ spec:
   - 260505-implementation-workflow-skills
 related-mental-model:
   - workflow-skills
+dropped: 2026-09-23
 ---
 
 # Make implement review fixes follow implementation owner

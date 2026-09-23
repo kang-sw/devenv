@@ -2,6 +2,7 @@
 title: ws named agent fails opaquely on context exhaustion
 related:
   260609-refactor-ws-spawn-runtime-deletion-session-auth: surfaced during M3 Phase 2a survey delegation
+dropped: 2026-09-23
 ---
 
 # ws named agent fails opaquely on context exhaustion

@@ -3,6 +3,7 @@ title: Dev MCP server reports newly added rsrc files as "manifest-listed file mi
 related:
   260609-refactor-ws-spawn-runtime-deletion-session-auth: owns the rsrc loader / playbook.render surface
   260611-refactor-ws-tier-taxonomy-delegate-tier-routing: surfaced during Phase 4 delegate-prompt porting
+dropped: 2026-09-23
 ---
 
 # Dev MCP server reports newly added rsrc files as "manifest-listed file missing" until restart

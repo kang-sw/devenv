@@ -4,6 +4,7 @@ sage-review: completed
 parent: 260605-epic-ws-playbook-factory-pivot
 related:
   260622-chore-windows-shipping-hardening: predecessor; closed done — Phase A (static code hardening) and Phase B (launcher cold-load robustness) landed and were verified on Linux/WSL2 (build/test/vet + cross-compile, reviewed); this ticket is the split-out Phase C (branch-pinned Windows acceptance), which requires a real Windows host this session did not have
+dropped: 2026-09-23
 ---
 
 # Branch-pinned Windows acceptance for the playbook-factory epic

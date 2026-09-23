@@ -4,6 +4,7 @@ sage-review-design: blocked
 sage-review-completeness: required
 related:
   260612-bug-ws-rsrc-dev-server-new-file-staleness: nearly identical symptom shape (manifest/text changes not visible until restart) — may share root cause
+dropped: 2026-09-23
 ---
 
 # Playbook render uses stale plugin cache during source dogfood

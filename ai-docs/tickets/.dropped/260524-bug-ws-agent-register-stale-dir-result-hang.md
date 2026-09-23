@@ -4,6 +4,7 @@ related:
   260517-bug-ws-agent-empty-result-after-tool-use: adjacent no-result behavior after long tool-use agent runs
 related-mental-model:
   - named-agent-runtime
+dropped: 2026-09-23
 ---
 
 # Investigate ws agent stale registration and post-test result hang

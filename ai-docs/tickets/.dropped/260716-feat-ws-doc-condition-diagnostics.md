@@ -3,6 +3,7 @@ title: Hidden doc-condition diagnostics — verification crawl, consumption coun
 sage-review-design: completed
 related:
   260716-feat-mental-model-openup-injection: consumer — injection telemetry rides this substrate and its landing is gated on this ticket
+dropped: 2026-09-23
 ---
 
 # Hidden doc-condition diagnostics — verification crawl, consumption counters, workflow health metrics

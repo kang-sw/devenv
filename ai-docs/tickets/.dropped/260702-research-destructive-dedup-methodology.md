@@ -2,6 +2,7 @@
 title: "Aggressive playbook dedup: audit methodology for destructive-first section merges"
 parent: 260630-epic-skill-playbook-diet
 sage-review: required
+dropped: 2026-09-23
 ---
 
 # Aggressive playbook dedup: audit methodology for destructive-first section merges

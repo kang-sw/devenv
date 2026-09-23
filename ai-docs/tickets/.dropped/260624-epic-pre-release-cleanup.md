@@ -10,6 +10,7 @@ related:
   260622-bug-wsflow-launcher-coldload-divergence: item 6
   260624-feat-prefer-mercenary-hide-option: item 7
   260726-chore-mcp-repair-pointer-mid-procedure-skills: item 8
+dropped: 2026-09-23
 ---
 
 # Pre-release cleanup — epic merge gate items before main
