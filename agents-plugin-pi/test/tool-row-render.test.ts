@@ -159,8 +159,8 @@ describe("per-tool call summary builders", () => {
     );
   });
 
-  test("buildAgentSendSummary: target alias/id, message head, interrupt tag only when true", () => {
-    assert.equal(buildAgentSendSummary({ agent_id: "agent-1", message: "steer this way", interrupt: true }), "target: agent-1\nmessage: steer this way\ninterrupt: true");
+  test("buildAgentSendSummary: target alias/id and message head", () => {
+    assert.equal(buildAgentSendSummary({ agent_id: "agent-1", message: "steer this way" }), "target: agent-1\nmessage: steer this way");
     assert.equal(buildAgentSendSummary({ agent_id: "agent-2", message: "queued" }), "target: agent-2\nmessage: queued");
   });
 
