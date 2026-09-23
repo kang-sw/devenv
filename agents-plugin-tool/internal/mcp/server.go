@@ -2289,14 +2289,6 @@ func tuneAgentsTier(value any, harness string, scope wsconfig.Scope, reset bool)
 	}
 	opts := wsconfig.Options{}
 	global := scope == wsconfig.ScopeGlobal
-	shadowed := false
-	if global {
-		var err error
-		shadowed, err = wsconfig.HasProjectAgentsTierLeaf(opts, tier, harness)
-		if err != nil {
-			return agentsTierTuneResult{}, fmt.Errorf("config.tune: check project agents.tier shadow: %w", err)
-		}
-	}
 	var cfg wsconfig.Config
 	var err error
 	removed := false
@@ -2328,8 +2320,15 @@ func tuneAgentsTier(value any, harness string, scope wsconfig.Scope, reset bool)
 	if reset && !removed {
 		result.Warnings = append(result.Warnings, "agents.tier leaf was absent in the selected scope; reset made no change")
 	}
-	if shadowed {
-		result.Warnings = append(result.Warnings, "project scope stores this agents.tier tier/harness leaf and shadows the global value")
+	if global {
+		// Shadow detection is advisory: an unreadable project config cannot
+		// prevent a successful write or reset of the selected global file.
+		shadowed, shadowErr := wsconfig.HasProjectAgentsTierLeaf(opts, tier, harness)
+		if shadowErr != nil {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("could not check project scope for agents.tier shadowing: %v", shadowErr))
+		} else if shadowed {
+			result.Warnings = append(result.Warnings, "project scope stores this agents.tier tier/harness leaf and shadows the global value")
+		}
 	}
 	return result, nil
 }

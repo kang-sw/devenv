@@ -82,6 +82,34 @@ func TestConfigTuneAgentsTierResetAndShadow(t *testing.T) {
 	}
 }
 
+func TestConfigTuneGlobalTierIgnoresBrokenProjectShadowLookup(t *testing.T) {
+	useLeadProfile(t)
+	root := initTicketRepo(t, "260923-feat-config-tune-agents-tier-reset")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "global"))
+	projectPath, err := wsconfig.Path(wsconfig.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(projectPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(projectPath, []byte("{invalid-json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := NewServer(root, "test")
+	write := tierTune(t, s, 1, map[string]any{"key": "agents.tier", "scope": "global", "harness": "pi",
+		"value": map[string]any{"tier": "medium", "model": "global-pi"}})
+	if w := tierWarnings(t, write); len(w) != 1 || !strings.Contains(w[0].(string), "could not check project scope") {
+		t.Fatalf("write should succeed with shadow lookup diagnostic: %v", w)
+	}
+	reset := tierTune(t, s, 2, map[string]any{"key": "agents.tier", "scope": "global", "harness": "pi",
+		"reset": true, "value": map[string]any{"tier": "medium"}})
+	if w := tierWarnings(t, reset); len(w) != 1 || !strings.Contains(w[0].(string), "could not check project scope") {
+		t.Fatalf("reset should succeed with shadow lookup diagnostic: %v", w)
+	}
+}
+
 func TestConfigTuneAgentsTierResetValidationAndFallbackWarning(t *testing.T) {
 	useLeadProfile(t)
 	root := initTicketRepo(t, "260923-feat-config-tune-agents-tier-reset")
