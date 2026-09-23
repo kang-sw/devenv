@@ -270,6 +270,75 @@ func SetGlobalAgentsTierForHarness(opts Options, tier, backend, model, harness s
 	return presentationAgentConfig(effectiveAgentConfig(cfg)), nil
 }
 
+// UnsetAgentsTierForHarness removes one persisted project-scope tier/harness leaf.
+func UnsetAgentsTierForHarness(opts Options, tier, harness string) (Config, bool, error) {
+	return unsetAgentsTierForHarness(opts, false, tier, harness)
+}
+
+// UnsetGlobalAgentsTierForHarness removes one persisted global tier/harness leaf.
+func UnsetGlobalAgentsTierForHarness(opts Options, tier, harness string) (Config, bool, error) {
+	return unsetAgentsTierForHarness(opts, true, tier, harness)
+}
+
+func unsetAgentsTierForHarness(opts Options, global bool, tier, harness string) (Config, bool, error) {
+	tier = normalizedTier(tier)
+	if tier == "" {
+		return Config{}, false, fmt.Errorf("tier must be small, medium, large, or xlarge")
+	}
+	key, err := aliasTargetKey(harness)
+	if err != nil {
+		return Config{}, false, err
+	}
+
+	var stored Config
+	if global {
+		stored, err = loadGlobalConfig(opts)
+	} else {
+		stored, err = loadProjectConfig(opts)
+	}
+	if err != nil {
+		return Config{}, false, err
+	}
+	normalizeLegacyTierKeys(stored.Agents.Tiers, stored.Agents.ModelAliases)
+	byHarness := stored.Agents.ModelAliases[tier]
+	_, removed := byHarness[key]
+	if removed {
+		delete(byHarness, key)
+		if len(byHarness) == 0 {
+			delete(stored.Agents.ModelAliases, tier)
+		}
+		if global {
+			err = saveGlobal(opts, stored)
+		} else {
+			err = save(opts, stored)
+		}
+		if err != nil {
+			return Config{}, false, err
+		}
+	}
+	return presentationAgentConfig(effectiveAgentConfig(stored)), removed, nil
+}
+
+// HasProjectAgentsTierLeaf reports whether the exact tier/harness leaf is
+// persisted in the project config, without counting resolver fallbacks.
+func HasProjectAgentsTierLeaf(opts Options, tier, harness string) (bool, error) {
+	tier = normalizedTier(tier)
+	if tier == "" {
+		return false, fmt.Errorf("tier must be small, medium, large, or xlarge")
+	}
+	key, err := aliasTargetKey(harness)
+	if err != nil {
+		return false, err
+	}
+	stored, err := loadProjectConfig(opts)
+	if err != nil {
+		return false, err
+	}
+	normalizeLegacyTierKeys(stored.Agents.Tiers, stored.Agents.ModelAliases)
+	_, exists := stored.Agents.ModelAliases[tier][key]
+	return exists, nil
+}
+
 func setAgentsTierForHarness(opts Options, global bool, tier, backend, model, harness string, effortValues ...string) (Config, error) {
 	tier = normalizedTier(tier)
 	if tier == "" {
