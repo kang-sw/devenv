@@ -124,6 +124,29 @@ func TestConfigTuneAgentsTierResetValidationAndFallbackWarning(t *testing.T) {
 	}
 }
 
+func TestLeadTuneRenderExplainsAgentsTierReset(t *testing.T) {
+	useLeadProfile(t)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "global"))
+	root := initTicketRepo(t, "260923-feat-config-tune-agents-tier-reset")
+	s := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, s, 1, root, nil))
+	resp := callToolOnce(t, s, 2, "playbook.render", map[string]any{"name": "lead-tune", "session_key": key})
+	if toolIsError(t, resp) {
+		t.Fatalf("playbook.render lead-tune: %s", resp)
+	}
+	path := strings.SplitN(toolText(t, resp), "\n", 2)[0]
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read rendered lead-tune: %v", err)
+	}
+	for _, want := range []string{"reset removes only that scope's selected", "value` containing only `tier`", "Relay any warnings", "effort clears only effort"} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("rendered lead-tune missing %q: %s", want, body)
+		}
+	}
+}
+
 func TestConfigCatalogAgentsTierResetWriter(t *testing.T) {
 	useLeadProfile(t)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
