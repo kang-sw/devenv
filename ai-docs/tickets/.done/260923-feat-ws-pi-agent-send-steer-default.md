@@ -5,6 +5,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: dd88d28cb1972ada
 sage-review-completeness-reviewed: dd88d28cb1972ada
+completed: 2026-09-23
 ---
 
 # Pi ws-agent-send always steers a running subagent
@@ -121,3 +122,8 @@ Decision: keep the internal `sendToAgent` `interrupt` parameter and
 `followUp()` branch for non-lead finish paths; remove the option only from the
 lead-facing tool schema. Only streaming lead sends switch to `steer()`; idle and
 dormant targets continue through `prompt()`.
+
+
+## Resolution (2026-09-23)
+
+Phase 1 completed and reviewed. Lead streaming sends steer; idle and dormant sends still prompt. Full package tests pass.
