@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 2230a866feafc62f
 sage-review-completeness-reviewed: 2230a866feafc62f
+completed: 2026-09-23
 ---
 
 # Allow arbitrary agent tier effort and update shipped Codex defaults
