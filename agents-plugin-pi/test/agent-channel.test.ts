@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { chmodSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import net from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   CHANNEL_BOOTSTRAP_ENVS,
@@ -309,18 +309,114 @@ describe("bind order, fallback, and fail-closed diagnostics", () => {
 
   test("a stale Unix socket left by a killed listener is swept before the next bind", { skip: win }, async () => {
     const dir = socketDir();
-    const stale = join(dir, "stale.sock");
-    const listener = spawn(process.execPath, ["-e", "require('net').createServer().listen(process.argv[1],()=>console.log('L'))", stale], { stdio: ["ignore", "pipe", "inherit"] });
-    await new Promise(resolve => listener.stdout!.once("data", resolve));
-    listener.kill("SIGKILL");
-    await new Promise(resolve => listener.once("exit", resolve));
+    const { pid, paths: [stale] } = await leaveRefusedSockets(dir, ["{pid}-stale.sock"]);
+    assert.equal(stale, join(dir, `${pid}-stale.sock`));
     assert.equal(existsSync(stale), true);
     const live = await bindChannelEndpoint({ socketDir: dir });
-    assert.equal(existsSync(stale), false, "the bind's own sweep unlinked the refused socket");
+    assert.equal(existsSync(stale), false, "the bind's own sweep unlinked the dead owner's refused socket");
     assert.equal(existsSync((live.endpoint as { path: string }).path), true);
     assert.deepEqual(await sweepStaleChannelSockets(dir), [], "a live socket is probed and kept");
     assert.equal(existsSync((live.endpoint as { path: string }).path), true);
     live.close();
+  });
+
+  test("the bound socket name carries the binding pid", { skip: win }, async () => {
+    const bound = await bindChannelEndpoint({ socketDir: socketDir() });
+    assert.match(basename((bound.endpoint as { path: string }).path), new RegExp(`^${process.pid}-[0-9a-f]{12}\\.sock$`));
+    bound.close();
+  });
+});
+
+/**
+ * Leaves real refused socket files: a child listens on each name (`{pid}` is
+ * the child's pid, `{ppid}` this test process's) and is SIGKILLed, so no
+ * close unlinks them. A regular file is no substitute: connecting to one
+ * fails with ENOTSOCK on macOS, not ECONNREFUSED.
+ */
+async function leaveRefusedSockets(dir: string, names: string[]): Promise<{ pid: number; paths: string[] }> {
+  const script = `const net = require("net"), { join } = require("path");
+    const [dir, ...names] = process.argv.slice(1);
+    const paths = names.map(n => join(dir, n.replace("{pid}", String(process.pid)).replace("{ppid}", String(process.ppid))));
+    let left = paths.length;
+    for (const p of paths) net.createServer().listen(p, () => { if (--left === 0) process.stdout.write(JSON.stringify(paths) + "\\n"); });
+    setInterval(() => {}, 1000);`;
+  const listener = spawn(process.execPath, ["-e", script, dir, ...names], { stdio: ["ignore", "pipe", "inherit"] });
+  const paths = await new Promise<string[]>(resolve => {
+    let out = "";
+    listener.stdout!.on("data", chunk => { out += String(chunk); if (out.includes("\n")) resolve(JSON.parse(out)); });
+  });
+  const exited = new Promise(resolve => listener.once("exit", resolve));
+  listener.kill("SIGKILL");
+  await exited;
+  for (const path of paths) {
+    assert.equal(existsSync(path), true, "SIGKILL leaves the socket file behind");
+    const code = await new Promise<string | undefined>(resolve => {
+      const probe = net.connect({ path });
+      probe.once("connect", () => { probe.destroy(); resolve(undefined); });
+      probe.once("error", (error: NodeJS.ErrnoException) => resolve(error.code));
+    });
+    assert.equal(code, "ECONNREFUSED", `${path} is refused`);
+  }
+  return { pid: listener.pid!, paths };
+}
+
+describe("stale socket sweep: owner death, not refusal alone", { skip: win }, () => {
+  test("a refused socket named for a dead pid is unlinked; one named for a live pid is kept", async () => {
+    const dir = socketDir();
+    const { pid, paths: [dead, live] } = await leaveRefusedSockets(dir, ["{pid}-x.sock", "{ppid}-x.sock"]);
+    assert.equal(live, join(dir, `${process.pid}-x.sock`));
+    assert.throws(() => process.kill(pid, 0), (e: NodeJS.ErrnoException) => e.code === "ESRCH", "the listener's pid is dead");
+    assert.deepEqual(await sweepStaleChannelSockets(dir), [dead]);
+    assert.equal(existsSync(dead), false);
+    assert.equal(existsSync(live), true, "a live owner's refused socket may be between its bind() and listen()");
+  });
+
+  test("a legacy name without a parsable pid is never unlinked", async () => {
+    const dir = socketDir();
+    const { paths } = await leaveRefusedSockets(dir, ["0123456789ab.sock", "stale.sock", "0-x.sock", "{pid}.sock"]);
+    assert.deepEqual(await sweepStaleChannelSockets(dir), []);
+    for (const path of paths) assert.equal(existsSync(path), true, `${basename(path)} kept`);
+  });
+
+  test("a live socket survives another process sweeping the same directory continuously", async () => {
+    const dir = socketDir();
+    const sweeperScript = `import { sweepStaleChannelSockets } from ${JSON.stringify(fileURLToPath(new URL("../src/agent-channel.ts", import.meta.url)))};
+      let stop = false, sweeps = 0;
+      const removed = [];
+      process.stdin.on("end", () => { stop = true; });
+      process.stdin.resume();
+      while (!stop) {
+        removed.push(...await sweepStaleChannelSockets(process.argv[1]));
+        if (++sweeps === 1) process.stdout.write("ready\\n");
+        await new Promise(resolve => setImmediate(resolve));
+      }
+      process.stdout.write(JSON.stringify({ sweeps, removed }) + "\\n");`;
+    const sweeper = spawn(process.execPath, ["--input-type=module", "-e", sweeperScript, dir], { stdio: ["pipe", "pipe", "inherit"] });
+    let output = "";
+    await new Promise<void>(resolve => sweeper.stdout!.on("data", chunk => { output += String(chunk); if (output.startsWith("ready\n")) resolve(); }));
+    const bound: string[] = [];
+    const lost: string[] = [];
+    const deadline = Date.now() + 1_500;
+    while (Date.now() < deadline) {
+      const endpoint = await bindChannelEndpoint({ socketDir: dir });
+      assert.equal(endpoint.endpoint.kind, "pipe");
+      const path = (endpoint.endpoint as { path: string }).path;
+      bound.push(path);
+      const ok = existsSync(path) && await new Promise<boolean>(resolve => {
+        const probe = net.connect({ path });
+        probe.once("connect", () => { probe.destroy(); resolve(true); });
+        probe.once("error", () => resolve(false));
+      });
+      if (!ok) lost.push(path);
+      endpoint.close();
+    }
+    const exited = new Promise<number | null>(resolve => sweeper.once("exit", resolve));
+    sweeper.stdin!.end();
+    assert.equal(await exited, 0, output);
+    const { sweeps, removed } = JSON.parse(output.slice("ready\n".length)) as { sweeps: number; removed: string[] };
+    assert.ok(bound.length >= 20 && sweeps >= 20, `binds and sweeps overlapped (binds=${bound.length}, sweeps=${sweeps})`);
+    assert.deepEqual(lost, [], "every bound socket existed and accepted a connection after bind");
+    assert.deepEqual(removed, [], "the sweeper unlinked no socket of this live process");
   });
 });
 
