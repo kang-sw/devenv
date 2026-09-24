@@ -32,7 +32,7 @@
 
 import { test, describe, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, readFileSync, chmodSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, chmodSync, readdirSync, renameSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -317,6 +317,46 @@ describe("loadThreadRegistryFile / saveThreadRegistryFile (never-throw IO)", () 
     } finally {
       chmodSync(dir, 0o700);
     }
+  });
+
+  test("a crash during the registry write leaves the previous registry intact and no temp file", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ws-pi-ask-test-"));
+    const path = join(dir, "session.jsonl.ws-threads.json");
+    const previous = [thread({ threadId: "q1", status: "open" })];
+    saveThreadRegistryFile(path, previous);
+    let renames = 0;
+    saveThreadRegistryFile(path, [...previous, thread({ threadId: "q2" })], {
+      rename: source => {
+        renames += 1;
+        assert.match(source, /\.tmp$/, "the replacement is staged in a temp file");
+        assert.deepEqual(loadThreadRegistryFile(path), previous, "the target is untouched until the rename");
+        throw Object.assign(new Error("simulated crash"), { code: "EIO" });
+      },
+    });
+    assert.equal(renames, 1);
+    assert.deepEqual(loadThreadRegistryFile(path), previous);
+    assert.deepEqual(readdirSync(dir), ["session.jsonl.ws-threads.json"]);
+  });
+
+  test("the registry replacement retries a Windows sharing violation", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ws-pi-ask-test-"));
+    const path = join(dir, "threads.json");
+    const next = [thread({ threadId: "q2", status: "dormant" })];
+    saveThreadRegistryFile(path, [thread({ threadId: "q1" })]);
+    const delays: number[] = [];
+    let renames = 0;
+    saveThreadRegistryFile(path, next, {
+      platform: "win32",
+      sleep: milliseconds => delays.push(milliseconds),
+      rename: (source, destination) => {
+        if (++renames === 1) throw Object.assign(new Error("EBUSY"), { code: "EBUSY" });
+        renameSync(source, destination);
+      },
+    });
+    assert.equal(renames, 2);
+    assert.deepEqual(delays, [10]);
+    assert.deepEqual(loadThreadRegistryFile(path), next);
+    assert.deepEqual(readdirSync(dir), ["threads.json"]);
   });
 
   test("hydrateThreadRegistry fills the in-memory map and records the path", () => {

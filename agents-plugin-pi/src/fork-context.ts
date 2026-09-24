@@ -1,6 +1,7 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
+import { renameWithWindowsRetry, type RenameRetryHooks } from "./atomic-write.ts";
 
 /** Durable, immutable snapshot transferred from a lead to one fork child. */
 export interface ForkToolDefinition {
@@ -135,22 +136,8 @@ export interface ForkReadiness {
   error?: string;
 }
 
-export interface PrivateJsonWriteHooks {
-  platform?: NodeJS.Platform;
-  rename?: typeof renameSync;
-  sleep?: (milliseconds: number) => void;
+export interface PrivateJsonWriteHooks extends RenameRetryHooks {
   temporaryName?: () => string;
-}
-
-const privateJsonSleeper = new Int32Array(new SharedArrayBuffer(4));
-
-function sleepPrivateJson(milliseconds: number): void {
-  Atomics.wait(privateJsonSleeper, 0, 0, milliseconds);
-}
-
-function isRetryableWindowsRenameError(error: unknown): boolean {
-  const code = (error as NodeJS.ErrnoException | undefined)?.code;
-  return code === "EPERM" || code === "EBUSY";
 }
 
 const PRIVATE_JSON_DIAGNOSTIC_FIELD_CAP = 512;
@@ -177,22 +164,10 @@ function privateJsonRetryExhausted(path: string, data: unknown, attempts: number
 export function writePrivateJson(path: string, data: unknown, hooks: PrivateJsonWriteHooks = {}): void {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const temporary = `${path}.${(hooks.temporaryName ?? randomUUID)()}.tmp`;
-  const rename = hooks.rename ?? renameSync;
-  const platform = hooks.platform ?? process.platform;
-  const sleep = hooks.sleep ?? sleepPrivateJson;
   try {
     writeFileSync(temporary, JSON.stringify(data), { mode: 0o600 });
     chmodSync(temporary, 0o600);
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      try {
-        rename(temporary, path);
-        return;
-      } catch (error) {
-        if (platform !== "win32" || !isRetryableWindowsRenameError(error)) throw error;
-        if (attempt === 4) throw privateJsonRetryExhausted(path, data, attempt + 1, error as NodeJS.ErrnoException);
-        sleep(10 * 2 ** attempt);
-      }
-    }
+    renameWithWindowsRetry(temporary, path, hooks, (attempts, cause) => privateJsonRetryExhausted(path, data, attempts, cause));
   } finally {
     try { rmSync(temporary, { force: true }); } catch { /* Preserve the write failure. */ }
   }

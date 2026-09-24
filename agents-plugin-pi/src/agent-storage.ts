@@ -3,6 +3,8 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, rmdirSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve, relative, sep } from "node:path";
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
+import { renameWithWindowsRetry, type RenameRetryHooks } from "./atomic-write.ts";
 import { parseDelegationPolicy, type DelegationPolicy } from "./delegation-policy.ts";
 import { parseTelemetry, type AgentTelemetry } from "./agent-telemetry.ts";
 import { normalizeStoredExploreMode, type ExploreMode } from "./process-role.ts";
@@ -43,6 +45,7 @@ export interface OwnershipMetadata extends AgentOwnership {
   createdAt: number; lastActivityAt: number; updatedAt: number;
   /** Latest durable child-attributable usage projection, used by ancestor footer aggregation and eviction roll-up. */
   telemetry?: AgentTelemetry;
+  /** `pid` is legacy: it held the allocating parent's pid, never the child's. New records omit it; old records keep it and stay valid. */
   liveness: { lifecycle: "starting" | "live" | "stopping" | "stopped" | "unknown"; running?: boolean; observedAt?: number; pid?: number; instanceNonce?: string; threadBound?: boolean; ownerHeld?: boolean; pendingQuestion?: boolean; waitingOnChildren?: boolean; pendingDelivery?: boolean; pendingApprovalCommandId?: string; recovery?: "none" | "sidecar" | "thread" | "revived" };
   sessionSignature?: { mtimeMs: number; size: number };
 }
@@ -128,7 +131,7 @@ export function allocateAgentHome(ctx: AgentStorageContext, agentId: string, rol
   const sessionPath = join(home, "session.jsonl");
   const now = Date.now();
   const ownership: AgentOwnership = { version: OWNERSHIP_VERSION, ownerSessionId: ctx.ownerSessionId, agentId, home, role, ...(exploreMode ? { exploreMode } : {}), ...(sessionPath ? { sessionPath } : {}) };
-  writeOwnership({ ...ownership, createdAt: now, lastActivityAt: now, updatedAt: now, liveness: { lifecycle: "starting", observedAt: now, pid: process.pid, instanceNonce: randomUUID(), recovery: "none" } });
+  writeOwnership({ ...ownership, createdAt: now, lastActivityAt: now, updatedAt: now, liveness: { lifecycle: "starting", observedAt: now, instanceNonce: randomUUID(), recovery: "none" } });
   return ownership;
 }
 interface OwnershipLock { home: string; release(): void; }
@@ -176,12 +179,13 @@ function acquireOwnershipLock(home: string): OwnershipLock {
   throw new Error("ws-pi-agent: could not acquire owned-home claim");
 }
 
-function writeOwnershipUnlocked(metadata: OwnershipMetadata, home: string): void {
+function writeOwnershipUnlocked(metadata: OwnershipMetadata, home: string, hooks?: RenameRetryHooks): void {
   if (metadata.home !== home) throw new Error("ws-pi-agent: ownership home is not canonical");
   if (metadata.sessionPath) checkedSessionPath(home, metadata.sessionPath);
   const target = ownershipPath(home), temp = join(home, `.ownership-${process.pid}-${Date.now()}.tmp`);
   writeFileSync(temp, `${JSON.stringify(metadata, null, 2)}\n`, { mode: 0o600 });
-  renameSync(temp, target);
+  try { renameWithWindowsRetry(temp, target, hooks); }
+  catch (error) { try { rmSync(temp, { force: true }); } catch { /* the rename failure wins */ } throw error; }
 }
 
 function readOwnershipUnlocked(home: string): OwnershipMetadata | undefined {
@@ -194,9 +198,10 @@ function readOwnershipUnlocked(home: string): OwnershipMetadata | undefined {
   } catch { return undefined; }
 }
 
-export function writeOwnership(metadata: OwnershipMetadata): void {
+/** `hooks` is a focused deterministic test seam for the rename retry; production callers pass one argument. */
+export function writeOwnership(metadata: OwnershipMetadata, hooks?: RenameRetryHooks): void {
   const lock = acquireOwnershipLock(metadata.home);
-  try { writeOwnershipUnlocked(metadata, lock.home); } finally { lock.release(); }
+  try { writeOwnershipUnlocked(metadata, lock.home, hooks); } finally { lock.release(); }
 }
 export function readOwnership(home: string): OwnershipMetadata | undefined {
   try { return readOwnershipUnlocked(canonicalHome(home)); } catch { return undefined; }
@@ -221,12 +226,18 @@ function validDelegationDescriptor(value: unknown): boolean {
   if (value === undefined) return true;
   try { parseDelegationPolicy(value); return true; } catch { return false; }
 }
-export function updateOwnership(home: string, update: Partial<Pick<OwnershipMetadata, "lastActivityAt" | "liveness" | "delegation" | "telemetry">>): OwnershipMetadata | undefined {
+type OwnershipUpdate = Partial<Pick<OwnershipMetadata, "lastActivityAt" | "liveness" | "delegation" | "telemetry">>;
+export function updateOwnership(home: string, update: OwnershipUpdate): OwnershipMetadata | undefined {
+  return updateOwnershipWhen(home, update);
+}
+/** `needed` re-checks the locked current record; false returns it without a write. */
+function updateOwnershipWhen(home: string, update: OwnershipUpdate, needed?: (current: OwnershipMetadata) => boolean): OwnershipMetadata | undefined {
   let lock: OwnershipLock | undefined;
   try {
     lock = acquireOwnershipLock(home);
     const current = readOwnershipUnlocked(lock.home);
     if (!current) throw new Error("ownership metadata is missing or unreadable");
+    if (needed && !needed(current)) return current;
     const now = Date.now();
     const next = { ...current, ...update, liveness: { ...current.liveness, ...update.liveness }, lastActivityAt: Math.max(current.lastActivityAt, update.lastActivityAt ?? current.lastActivityAt), updatedAt: now };
     writeOwnershipUnlocked(next, lock.home);
@@ -237,6 +248,24 @@ export function updateOwnership(home: string, update: Partial<Pick<OwnershipMeta
   } finally { lock?.release(); }
 }
 export function touchOwnership(home: string): boolean { return updateOwnership(home, { lastActivityAt: Date.now() }) !== undefined; }
+
+function sameTelemetry(persisted: AgentTelemetry | undefined, next: AgentTelemetry | undefined): boolean {
+  // The persisted side is parsed JSON; round-trip the in-memory side so
+  // undefined-valued keys and key order cannot count as a change.
+  return isDeepStrictEqual(persisted ?? null, next === undefined ? null : JSON.parse(JSON.stringify(next)));
+}
+
+/**
+ * Writes telemetry only when it differs from the persisted record. An unchanged
+ * refresh takes no lock and writes nothing; because the comparison is against
+ * disk, a write that failed (for example on a busy lock) is retried by the
+ * next refresh even when memory did not change again.
+ */
+export function persistOwnershipTelemetry(home: string, telemetry: AgentTelemetry | undefined): void {
+  const persisted = readOwnership(home);
+  if (persisted && sameTelemetry(persisted.telemetry, telemetry)) return;
+  updateOwnershipWhen(home, { telemetry }, current => !sameTelemetry(current.telemetry, telemetry));
+}
 
 export type OwnedHomeRemovalResult =
   | { status: "eligible"; metadata: OwnershipMetadata }
@@ -412,29 +441,53 @@ export function pruneStaleAgentHomes(root: string, ttlDays: number | false, opti
   return result;
 }
 
-/** Samples the actual session file under the same cross-process claim used by deletion. */
+function sameSignature(persisted: OwnershipMetadata["sessionSignature"], stat: { mtimeMs: number; size: number }): boolean {
+  return !!persisted && persisted.mtimeMs === stat.mtimeMs && persisted.size === stat.size;
+}
+
+/** Stats the session file; undefined means a pending first write, which is not a change. */
+function statObservedSession(current: OwnershipMetadata, sessionPath: string): { mtimeMs: number; size: number } | undefined {
+  try { return statSync(sessionPath); } catch (error) {
+    // Pi writes a new session lazily. Absence before the first observed write
+    // is pending observation, while disappearance of known history is not.
+    if ((error as NodeJS.ErrnoException).code === "ENOENT" && !current.sessionSignature && sessionPath === current.sessionPath) return undefined;
+    throw error;
+  }
+}
+
+/**
+ * Samples the actual session file under the same cross-process claim used by
+ * deletion. A sample with nothing new to persist takes no lock and writes
+ * nothing. Because the comparison is against disk, a changed signature whose
+ * write failed (for example on a busy lock) is retried by the next sample.
+ */
 export function observeSessionWrite(home: string, sessionPath: string): void {
+  // Unlocked pre-check; anything but a clean no-change falls through to the locked path.
+  try {
+    const persisted = readOwnership(home);
+    if (persisted) {
+      const stat = statObservedSession(persisted, sessionPath);
+      if (!stat || sameSignature(persisted.sessionSignature, stat)) return;
+    }
+  } catch { /* the locked path classifies the failure */ }
   let lock: OwnershipLock | undefined;
   let current: OwnershipMetadata | undefined;
   try {
     lock = acquireOwnershipLock(home);
     current = readOwnershipUnlocked(lock.home); if (!current) return;
-    let stat;
-    try { stat = statSync(sessionPath); } catch (error) {
-      // Pi writes a new session lazily. Absence before the first observed write
-      // is pending observation, while disappearance of known history is not.
-      if ((error as NodeJS.ErrnoException).code === "ENOENT" && !current.sessionSignature && sessionPath === current.sessionPath) return;
-      throw error;
-    }
+    const stat = statObservedSession(current, sessionPath);
+    if (!stat) return;
     const signature = { mtimeMs: stat.mtimeMs, size: stat.size };
-    const changed = !current.sessionSignature || current.sessionSignature.mtimeMs !== signature.mtimeMs || current.sessionSignature.size !== signature.size;
+    // A timestamp alone is not a change: an unchanged signature writes nothing.
+    if (sameSignature(current.sessionSignature, signature)) return;
     const now = Date.now();
-    writeOwnershipUnlocked({ ...current, sessionSignature: signature, ...(changed ? { lastActivityAt: Math.max(current.lastActivityAt, now) } : {}), updatedAt: now }, lock.home);
+    writeOwnershipUnlocked({ ...current, sessionSignature: signature, lastActivityAt: Math.max(current.lastActivityAt, now), updatedAt: now }, lock.home);
   } catch (error) {
     if (error instanceof OwnershipLockBusyError) return;
     // Unknown observation remains conservative; never infer a write from directory metadata.
     reportOwnershipDiagnostic("observer-session-write", error);
-    if (lock && current) {
+    // An already-unknown record is not rewritten just to refresh timestamps.
+    if (lock && current && current.liveness.lifecycle !== "unknown") {
       try { writeOwnershipUnlocked({ ...current, updatedAt: Date.now(), liveness: { ...current.liveness, lifecycle: "unknown", observedAt: Date.now() } }, lock.home); } catch { /* the original observation failure remains diagnostic */ }
     }
   } finally { lock?.release(); }
