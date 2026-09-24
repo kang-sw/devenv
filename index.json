@@ -521,17 +521,7 @@
       "registered_at": "2026-09-24T10:41:54Z"
     },
     "260924-refactor-pi-channel-and-cost-module-boundaries": {
-      "registered_at": "2026-09-24T11:26:24Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-09-24T12:45:19Z",
-        "impl": {
-          "branch": "impl/develop/apply-king-grime"
-        }
-      }
+      "registered_at": "2026-09-24T11:26:24Z"
     }
   }
 }
