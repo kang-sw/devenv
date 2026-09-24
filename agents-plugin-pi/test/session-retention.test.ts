@@ -39,7 +39,28 @@ describe("controller session-start child retention", () => {
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
-  test("literal false disables pruning and worker/explore session starts never run global maintenance", () => {
+  test("a fork child's session start neither prunes another lead's stale home nor folds its checkpoint", (t) => {
+    const root = mkdtempSync(join(tmpdir(), "ws-pi-session-retention-"));
+    const config = join(root, "goal-loop-config.json");
+    const now = Date.parse("2026-10-10T00:00:00.000Z");
+    t.mock.method(Date, "now", () => now);
+    try {
+      writeFileSync(config, JSON.stringify({ child_retention_ttl_days: 0.5 }));
+      const stale = allocateAgentHome(createAgentStorageContext("other-lead", root), "stale-child", "worker");
+      const metadata = readOwnership(stale.home)!;
+      writeOwnership({ ...metadata, lastActivityAt: now - 86_400_000, telemetry: { version: 1, origin: { sessionId: `${stale.agentId}-session`, sessionPath: stale.sessionPath!, emptyPrefix: true }, estimatedUsd: .4 }, liveness: { ...metadata.liveness, lifecycle: "stopped", running: false } });
+      const recovered = [orphan(stale.agentId, stale.sessionPath!, stale)];
+
+      assert.strictEqual(applySessionStartAgentRetention("fork", root, config, recovered), recovered);
+      assert.equal(existsSync(stale.home), true, "a fork child never runs machine-wide retention");
+      assert.equal(existsSync(join(root, "ws-agents", "other-lead", ".cost-estimate", "checkpoint.json")), false, "a fork child never folds another owner's checkpoint");
+
+      applySessionStartAgentRetention(undefined, root, config, recovered);
+      assert.equal(existsSync(stale.home), false, "the tree-root lead still prunes the same stale home");
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test("literal false disables pruning and worker/explore/fork session starts never run global maintenance", () => {
     const root = mkdtempSync(join(tmpdir(), "ws-pi-session-retention-"));
     const config = join(root, "goal-loop-config.json");
     try {
@@ -50,6 +71,7 @@ describe("controller session-start child retention", () => {
       const prune = (_root: string, ttl: number | false) => { calls += 1; resolvedTtl = ttl; return { scanned: 0, retained: 0, failed: 0, deletedHomes: [] }; };
       assert.strictEqual(applySessionStartAgentRetention("worker", root, config, recovered, prune), recovered);
       assert.strictEqual(applySessionStartAgentRetention("explore", root, config, recovered, prune), recovered);
+      assert.strictEqual(applySessionStartAgentRetention("fork", root, config, recovered, prune), recovered);
       assert.equal(calls, 0);
       applySessionStartAgentRetention(undefined, root, config, recovered, prune);
       assert.equal(calls, 1, "a controller session invokes the seam even when the resolved TTL disables its scanner");
@@ -88,7 +110,7 @@ describe("controller session-start child retention", () => {
     ownerNotifyRef.current = message => notices.push(message);
     try {
       const recovered = [orphan("legacy", join(root, "legacy-session.jsonl"))];
-      const retained = applySessionStartAgentRetention("fork", root, config, recovered, () => { throw new Error("permission denied at /private/home"); });
+      const retained = applySessionStartAgentRetention(undefined, root, config, recovered, () => { throw new Error("permission denied at /private/home"); });
       assert.strictEqual(retained, recovered);
       assert.equal(diagnostics.mock.callCount(), 0);
       assert.deepEqual(notices, ["ws: owned-agent retention could not start; no uncertain home was removed."]);
