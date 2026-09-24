@@ -25,7 +25,7 @@ func TestMissingRefIsAbsentNotError(t *testing.T) {
 	if err != nil || view.State != ViewAbsent {
 		t.Fatalf("Read = %s, %v; want absent, nil", view.State, err)
 	}
-	state, err := cl.Check(bg)
+	state, _, err := cl.Check(bg)
 	if err != nil || state != CheckUninitialized {
 		t.Fatalf("Check = %s, %v; want uninitialized, nil", state, err)
 	}
@@ -69,7 +69,7 @@ func TestA3NoOriginIsSilentlyAbsent(t *testing.T) {
 	if res, _, err := cl.Submit(bg, &Submission{Entry: registerEntry("260924-feat-a"), Applier: &Applier{Now: h.clock.Now()}}); err != nil || res.Status != WriteAbsent {
 		t.Fatalf("Submit = %+v, %v", res, err)
 	}
-	if state, err := cl.Check(bg); err != nil || state != CheckNoOrigin {
+	if state, _, err := cl.Check(bg); err != nil || state != CheckNoOrigin {
 		t.Fatalf("Check = %s, %v", state, err)
 	}
 	if n := c.runner.remoteCount(); n != 0 {
@@ -111,6 +111,9 @@ func TestA4UnreachableWithCacheIsBoundedAndPending(t *testing.T) {
 	if err != nil || view.State != ViewStale || view.Index == nil {
 		t.Fatalf("Read = %+v, %v; want stale cache", view, err)
 	}
+	if view.TimedOut != DefaultReadTimeout {
+		t.Fatalf("TimedOut = %v, want the read timeout: a slow origin is not refreshed, not unreachable", view.TimedOut)
+	}
 
 	start = time.Now()
 	res, _, err := cl.Submit(bg, &Submission{Entry: registerEntry("260924-feat-offline"), Applier: &Applier{Now: h.clock.Now()}})
@@ -139,7 +142,7 @@ func TestA5CredentialRemoteFailsFastWithoutPrompt(t *testing.T) {
 	cl := c.client()
 
 	start := time.Now()
-	state, _ := cl.Check(bg)
+	state, _, _ := cl.Check(bg)
 	if elapsed := time.Since(start); elapsed > 3*time.Second {
 		t.Fatalf("Check took %v; a credential prompt or hang is not allowed", elapsed)
 	}
@@ -381,6 +384,9 @@ func TestF2StaleCacheServedWithAge(t *testing.T) {
 	if view.Age != 5*time.Minute {
 		t.Fatalf("Age = %v, want 5m", view.Age)
 	}
+	if view.TimedOut != 0 {
+		t.Fatalf("TimedOut = %v on a fast transport failure, want 0 (unreachable)", view.TimedOut)
+	}
 }
 
 // F3: a write in worktree A is visible to worktree B of the same clone
@@ -620,5 +626,113 @@ func TestCreateAdoptsConcurrentCreation(t *testing.T) {
 		if gitT(t, c.root, "rev-parse", CacheRef) != h.remoteTip() {
 			t.Fatal("a clone did not adopt the created index")
 		}
+	}
+}
+
+// A never-seen clone whose read-path discovery times out caches absence for
+// reads only: later reads make no remote call, and the next write still runs
+// its own discovery and finds an index present on origin.
+func TestNeverSeenReadTimeoutSilencesReadsNotWrites(t *testing.T) {
+	h := newHarness(t)
+	y := h.clone("y", "y@example.com")
+	h.initIndex(y)
+	x := h.clone("x", "x@example.com")
+	x.opts.ReadTimeout = time.Nanosecond // every read-path discovery times out
+	cl := x.client()
+	for i := 0; i < 3; i++ {
+		if view, err := cl.Read(bg); err != nil || view.State != ViewAbsent {
+			t.Fatalf("Read = %s, %v; want absent", view.State, err)
+		}
+	}
+	if n := x.runner.remoteCount(); n != 1 {
+		t.Fatalf("remote calls after three reads = %v, want one discovery", x.runner.counts)
+	}
+	res := h.submit(cl, "260924-feat-x")
+	if res.Status != WriteWritten || h.remoteIndex().Registrations["260924-feat-x"] == nil {
+		t.Fatalf("write after a read-timeout absence = %+v, want it to discover and register", res)
+	}
+	if st := cl.loadState(); st.AbsentAt != nil {
+		t.Fatalf("a successful discovery left the cached absence: %+v", st)
+	}
+}
+
+// A never-seen clone on a hanging origin pays at most one read-path and one
+// write-path discovery per absence TTL, however many reads and writes run.
+func TestNeverSeenTimeoutsCacheAbsencePerPath(t *testing.T) {
+	h := newHarness(t)
+	c := h.clone("x", "x@example.com")
+	c.opts.ReadTimeout = 200 * time.Millisecond
+	c.opts.WriteTimeout = 300 * time.Millisecond
+	hangingSSH(t, c)
+	cl := c.client()
+	read := func() {
+		t.Helper()
+		if view, err := cl.Read(bg); err != nil || view.State != ViewAbsent {
+			t.Fatalf("Read = %s, %v; want absent", view.State, err)
+		}
+	}
+	write := func(stem string) {
+		t.Helper()
+		if res := h.submit(cl, stem); res.Status != WriteAbsent {
+			t.Fatalf("Submit = %+v, want absent", res)
+		}
+	}
+	read()
+	read()
+	if n := c.runner.count("ls-remote"); n != 1 {
+		t.Fatalf("read-path discoveries = %d, want 1", n)
+	}
+	write("260924-feat-a")
+	write("260924-feat-b")
+	read()
+	write("260924-feat-c")
+	if n := c.runner.count("ls-remote"); n != 2 || c.runner.remoteCount() != n {
+		t.Fatalf("remote calls = %v, want one read-path and one write-path discovery", c.runner.counts)
+	}
+	h.clock.Advance(DefaultAbsenceTTL)
+	read()
+	if n := c.runner.count("ls-remote"); n != 3 {
+		t.Fatalf("discoveries after the absence TTL = %d, want a fresh one", n)
+	}
+}
+
+// C3: re-flushing an override close after a crash between push and pending
+// clear finds the lease already closed and writes no second version.
+func TestOverrideCloseReflushWritesNothing(t *testing.T) {
+	h := newHarness(t)
+	y := h.clone("y", "y@example.com")
+	h.initIndex(y)
+	holder := Owner{Email: "y@example.com", CloneID: "cy", Track: "develop"}
+	if _, _, err := y.client().Submit(bg, &Submission{Entry: PendingEntry{Op: OpAcquire, Stem: "260924-feat-a", Owner: holder}, Applier: &Applier{Now: h.clock.Now()}}); err != nil {
+		t.Fatal(err)
+	}
+	x := h.clone("x", "x@example.com")
+	cl := x.client()
+	if view, err := cl.Read(bg); err != nil || view.State != ViewFresh {
+		t.Fatalf("Read = %s, %v", view.State, err)
+	}
+	x.setOriginURL(unreachableURL)
+	actor := Owner{Email: "x@example.com", CloneID: "cx", Track: "develop"}
+	res, _, err := cl.Submit(bg, &Submission{
+		Entry:   PendingEntry{Op: OpClose, Stem: "260924-feat-a", Owner: actor, Override: &Override{Reason: "user closed it"}},
+		Applier: &Applier{Now: h.clock.Now()},
+	})
+	if err != nil || res.Status != WritePending {
+		t.Fatalf("offline override close = %+v, %v", res, err)
+	}
+	logBefore := gitT(t, x.root, "rev-parse", PendingRef)
+	x.setOriginURL(h.origin)
+	flush := WriteOp{Subject: "flush", Replay: (&Applier{Now: h.clock.Now()}).Replay}
+	if res, err := cl.Write(bg, flush); err != nil || res.Status != WriteWritten {
+		t.Fatalf("flush = %+v, %v", res, err)
+	}
+	tip := h.remoteTip()
+	gitT(t, x.root, "update-ref", PendingRef, logBefore) // the crash: pushed, never cleared
+	res, err = cl.Write(bg, flush)
+	if err != nil || res.Status != WriteNoChange || res.Flushed != 1 || len(res.Reports) != 0 {
+		t.Fatalf("re-flush = %+v, %v; want a silent no-change clear", res, err)
+	}
+	if h.remoteTip() != tip {
+		t.Fatal("the re-flushed override close wrote a second version")
 	}
 }

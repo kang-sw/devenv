@@ -2,18 +2,13 @@ package wsindex
 
 import (
 	"context"
-	"regexp"
 	"strings"
 
+	"github.com/kang-sw/devenv/internal/wsdoc"
 	"github.com/kang-sw/devenv/internal/wsreview"
 )
 
 const ticketsDir = "ai-docs/tickets"
-
-var ticketStemRE = regexp.MustCompile(`^\d{6}-[\w-]+$`)
-
-// ValidStem reports whether stem has the ticket stem shape.
-func ValidStem(stem string) bool { return ticketStemRE.MatchString(stem) }
 
 // OriginTickets is a review-track tree's ticket inventory.
 type OriginTickets struct {
@@ -36,6 +31,47 @@ func (c *Client) OriginTrack(ctx context.Context) string {
 	}
 	track, _ := wsreview.ResolveTrackFallback(ctx, c.root)
 	return track
+}
+
+// OnlineTrack is OriginTrack for paths that already go online (every index
+// write, acquire, init). When the clone lacks a local
+// refs/remotes/origin/HEAD, it asks origin for its default branch (the probe
+// InitSource uses) and reads the review-track declared there, falling back to
+// that branch as init does, so init, acquire, pruning, and GC resolve the
+// same track. Nothing is cached: the probe runs only on such clones. A failed
+// probe falls back to OriginTrack.
+func (c *Client) OnlineTrack(ctx context.Context) string {
+	if _, ok, err := c.refOID(ctx, "refs/remotes/"+RemoteName+"/HEAD"); err == nil && ok {
+		return c.OriginTrack(ctx)
+	}
+	defaultBranch, err := c.probeDefaultBranch(ctx)
+	if err != nil || defaultBranch == "" {
+		return c.OriginTrack(ctx)
+	}
+	if _, ok, err := c.refOID(ctx, trackingRef(defaultBranch)); err != nil || !ok {
+		_ = c.FetchTrack(ctx, defaultBranch)
+	}
+	if track := c.declaredTrackAt(ctx, trackingRef(defaultBranch)); track != "" {
+		return track
+	}
+	return defaultBranch
+}
+
+// probeDefaultBranch asks origin for its default branch with ls-remote
+// --symref; "" when origin has none (an empty or unpushed origin).
+func (c *Client) probeDefaultBranch(ctx context.Context) (string, error) {
+	rctx, cancel := context.WithTimeout(ctx, c.opts.WriteTimeout)
+	defer cancel()
+	out, err := c.remote(rctx, "ls-remote", "--symref", RemoteName, "HEAD")
+	if err != nil {
+		return "", err
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if rest, ok := strings.CutPrefix(line, "ref: refs/heads/"); ok {
+			return strings.TrimSpace(strings.SplitN(rest, "\t", 2)[0]), nil
+		}
+	}
+	return "", nil
 }
 
 func (c *Client) declaredTrackAt(ctx context.Context, rev string) string {
@@ -76,7 +112,7 @@ func (c *Client) OriginTicketsAt(ctx context.Context, branch string) OriginTicke
 		return inv
 	}
 	for _, line := range strings.Split(out, "\n") {
-		status, stem, ok := ticketPath(line)
+		status, stem, ok := wsdoc.ParseTicketPath(line)
 		if !ok {
 			continue
 		}
@@ -88,22 +124,6 @@ func (c *Client) OriginTicketsAt(ctx context.Context, branch string) OriginTicke
 		}
 	}
 	return inv
-}
-
-func ticketPath(path string) (status, stem string, ok bool) {
-	rest, found := strings.CutPrefix(strings.TrimSpace(path), ticketsDir+"/")
-	if !found {
-		return "", "", false
-	}
-	parts := strings.Split(rest, "/")
-	if len(parts) != 2 || !strings.HasSuffix(parts[1], ".md") {
-		return "", "", false
-	}
-	stem = strings.TrimSuffix(parts[1], ".md")
-	if !ticketStemRE.MatchString(stem) {
-		return "", "", false
-	}
-	return parts[0], stem, true
 }
 
 // OpenOnAnyBranch returns a lazy predicate for GC: on first use it refreshes
@@ -151,17 +171,9 @@ func (c *Client) OpenOnAnyBranch(ctx context.Context) func(stem string) (bool, e
 // AGENTS.md (falling back to the git-default heuristic), and the open tickets
 // on that track. An empty or unpushed origin yields an empty inventory.
 func (c *Client) InitSource(ctx context.Context) (string, OriginTickets, error) {
-	rctx, cancel := context.WithTimeout(ctx, c.opts.WriteTimeout)
-	defer cancel()
-	out, err := c.remote(rctx, "ls-remote", "--symref", RemoteName, "HEAD")
+	defaultBranch, err := c.probeDefaultBranch(ctx)
 	if err != nil {
 		return "", OriginTickets{}, err
-	}
-	defaultBranch := ""
-	for _, line := range strings.Split(out, "\n") {
-		if rest, ok := strings.CutPrefix(line, "ref: refs/heads/"); ok {
-			defaultBranch = strings.TrimSpace(strings.SplitN(rest, "\t", 2)[0])
-		}
 	}
 	track := ""
 	if defaultBranch != "" {
@@ -184,9 +196,10 @@ func (c *Client) InitSource(ctx context.Context) (string, OriginTickets, error) 
 // LoadContext fills what one submission needs once the index is known to be
 // in use: the recording owner's clone id (generated on first use), the
 // origin-closed set of the review-track, and, online, the lazy GC predicate.
-// The review-track is fetched first when fetchTrack is set (acquire) or when
-// the pending log holds an acquire entry the flush will replay; otherwise the
-// local remote-tracking ref is read with no network.
+// Online, the review-track resolves through OnlineTrack; offline, through
+// OriginTrack. The review-track is fetched first when fetchTrack is set
+// (acquire) or when the pending log holds an acquire entry the flush will
+// replay; otherwise the local remote-tracking ref is read with no network.
 func (c *Client) LoadContext(ctx context.Context, sub *Submission, online, fetchTrack bool) error {
 	id, err := c.CloneID(ctx)
 	if err != nil {
@@ -194,6 +207,9 @@ func (c *Client) LoadContext(ctx context.Context, sub *Submission, online, fetch
 	}
 	sub.Entry.Owner.CloneID = id
 	track := c.OriginTrack(ctx)
+	if online {
+		track = c.OnlineTrack(ctx)
+	}
 	if online && !fetchTrack {
 		pending, err := c.Pending(ctx)
 		if err != nil {

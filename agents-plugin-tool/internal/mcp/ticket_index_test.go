@@ -916,3 +916,105 @@ func TestB5GCRacesAcquire(t *testing.T) {
 }
 
 func bgCtx() context.Context { return context.Background() }
+
+// The lease acquire bypasses a cached absence and discovers an index created
+// meanwhile; the worker's impl-record acquire keeps the cache and makes no
+// remote call.
+func TestLeaseAcquireBypassesCachedAbsence(t *testing.T) {
+	e := newIxEnv(t)
+	x := e.clone("x", "a@example.com")
+	worker := e.clone("w", "a@example.com")
+	y := e.clone("y", "b@example.com")
+	x.query() // no index yet: absence cached
+	worker.query()
+	y.init()
+
+	worker.git("checkout", "--quiet", "-b", implTicketBranch("develop", stemBeta))
+	worker.runner.reset()
+	if out := worker.acquire(stemBeta); out != "ok" || worker.runner.total() != 0 {
+		t.Fatalf("impl-record acquire within the absence = %q, remote calls %v", out, worker.runner.counts)
+	}
+	if out := x.acquire(stemAlpha); !strings.Contains(out, "status: acquired") {
+		t.Fatalf("lease acquire within the absence = %s", out)
+	}
+	if l := e.lease(stemAlpha); l == nil || l.Email != "a@example.com" {
+		t.Fatalf("lease = %+v", l)
+	}
+}
+
+// C4: a takeover replayed from the pending log reports its warning in the
+// flushing tool's output.
+func TestReplayedTakeoverPrintsWarning(t *testing.T) {
+	e := newIxEnv(t)
+	x := e.clone("x", "a@example.com")
+	x2 := e.clone("x2", "a@example.com")
+	x.init()
+	x.acquire(stemAlpha)
+	x2.query() // x2 has seen the index
+	x2.offline()
+	x2.acquire(stemAlpha) // a pending takeover from the same email
+	x2.online()
+	out := x2.mustCall("tickets.move", map[string]any{"stem": stemGamma, "to": "idea"})
+	if !strings.Contains(out, "ticket-index: replayed the offline acquire of "+stemAlpha) || !strings.Contains(out, "another clone") {
+		t.Fatalf("flushing move = %s, want the replayed takeover warning", out)
+	}
+}
+
+// C5: init and its check mode print the discard report of a pending log
+// recorded against an index that was deleted meanwhile.
+func TestIndexInitReportsDiscard(t *testing.T) {
+	for _, check := range []bool{false, true} {
+		e := newIxEnv(t)
+		x := e.clone("x", "a@example.com")
+		x.init()
+		x.offline()
+		x.acquire(stemBeta) // one pending entry
+		x.online()
+		runGit(t, e.origin, "update-ref", "-d", wsindex.RemoteRef)
+		var out string
+		if check {
+			e.clone("y", "b@example.com").init() // a new index: x's pending log no longer continues it
+			out = x.mustCall("tickets.index_init", map[string]any{"check": true})
+		} else {
+			out = x.init()
+		}
+		if !strings.Contains(out, "ticket-index: 1 offline entries were discarded") {
+			t.Fatalf("check=%v: init output = %s", check, out)
+		}
+		if x.pendingCount() != 0 {
+			t.Fatalf("check=%v: pending log not discarded", check)
+		}
+	}
+}
+
+// C6: a clone without a local refs/remotes/origin/HEAD resolves the
+// review-track from origin's default branch on the online paths, so acquire
+// refuses and pruning follows the same track init registered from.
+func TestOnlineTrackWithoutLocalOriginHEAD(t *testing.T) {
+	e := newIxEnv(t)
+	x := e.clone("x", "a@example.com")
+	x.git("remote", "set-head", "origin", "-d") // the local fallback would now say main
+	if out := x.init(); !strings.Contains(out, "review_track: develop") {
+		t.Fatalf("init = %s", out)
+	}
+	e.landOnDevelop(stemAlpha, "ready", ".done") // closed on develop only
+	x.mustRefuse("tickets.acquire", ixArgs(stemAlpha), "already closed on origin")
+	x.acquire(stemBeta)
+	if _, ok := e.index().Registrations[stemAlpha]; ok {
+		t.Fatal("pruning did not follow origin's review-track")
+	}
+}
+
+// F1: the acquire lookup finds a ticket hidden by sparse checkout.
+func TestAcquireFindsSparseHiddenTicket(t *testing.T) {
+	e := newIxEnv(t)
+	x := e.clone("x", "a@example.com")
+	x.init()
+	runGit(t, x.root, "sparse-checkout", "set", "--no-cone", "/*", "!/ai-docs/tickets/ready/"+stemAlpha+".md")
+	if _, err := os.Stat(filepath.Join(x.root, "ai-docs", "tickets", "ready", stemAlpha+".md")); !os.IsNotExist(err) {
+		t.Fatalf("the sparse scope did not hide the ticket: %v", err)
+	}
+	if out := x.acquire(stemAlpha); !strings.Contains(out, "status: acquired") {
+		t.Fatalf("acquire of a sparse-hidden ticket = %s", out)
+	}
+}

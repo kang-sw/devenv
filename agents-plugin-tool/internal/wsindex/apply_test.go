@@ -293,3 +293,80 @@ func TestReplayMoveOverride(t *testing.T) {
 		t.Fatalf("override of a released lease must be a plain registration: audit %v report %q", audit, report)
 	}
 }
+
+// Live close never changes a different person's lease without an override
+// naming that holder: the lease stays, and the outcome warns instead of
+// refusing.
+func TestLiveCloseLeavesDifferentEmailLease(t *testing.T) {
+	third := Owner{Email: "z@example.com", CloneID: "cz", Track: "develop"}
+	for name, e := range map[string]PendingEntry{
+		"no override":                 {Op: OpClose, Stem: stemX, Owner: ownerA},
+		"override naming another one": withOverride(PendingEntry{Op: OpClose, Stem: stemX, Owner: ownerA}, third, "user closed it"),
+	} {
+		idx := leased(ownerB, PhaseActive)
+		out := (&Applier{Now: t0}).Live(idx, e)
+		if out.Refusal != nil || len(out.Audit) != 0 || !strings.Contains(out.Warning, "b@example.com") {
+			t.Fatalf("%s: outcome = %+v, want a warning naming the holder and no audit", name, out)
+		}
+		if l := idx.Registrations[stemX].Lease; l.Owner() != ownerB || l.Phase != PhaseActive {
+			t.Fatalf("%s: the holder's lease changed: %+v", name, l)
+		}
+	}
+	idx := leased(ownerB, PhaseActive)
+	out := (&Applier{Now: t0}).Live(idx, withOverride(PendingEntry{Op: OpClose, Stem: stemX, Owner: ownerA}, ownerB, "user closed it"))
+	if out.Warning != "" || idx.Registrations[stemX].Lease.Phase != PhaseClosed || len(out.Audit) != 1 {
+		t.Fatalf("an override naming the holder must close its lease with an audit line: %+v", out)
+	}
+	// Closing a lease another person already closed is a silent no-op.
+	idx = leased(ownerB, PhaseClosed)
+	if out := (&Applier{Now: t0}).Live(idx, PendingEntry{Op: OpClose, Stem: stemX, Owner: ownerA}); out.Warning != "" || len(out.Audit) != 0 {
+		t.Fatalf("close of an already-closed lease = %+v, want a silent no-op", out)
+	}
+}
+
+// C3: a close of an already-closed lease writes no audit line, with or
+// without an override, live or replayed.
+func TestCloseOfClosedLeaseIsNoOp(t *testing.T) {
+	e := withOverride(PendingEntry{Op: OpClose, Stem: stemX, Owner: ownerA}, ownerB, "user closed it")
+	for _, replay := range []bool{false, true} {
+		idx := leased(ownerB, PhaseClosed)
+		a := &Applier{Now: t0}
+		var audit []string
+		if replay {
+			var report string
+			audit, report = a.Replay(idx, e)
+			if report != "" {
+				t.Fatalf("replay report = %q", report)
+			}
+		} else {
+			audit = a.Live(idx, e).Audit
+		}
+		if len(audit) != 0 {
+			t.Fatalf("replay=%v: audit = %v, want none", replay, audit)
+		}
+	}
+}
+
+// C4: a replayed takeover from the same email on another clone reports the
+// takeover warning.
+func TestReplayKeepsTakeoverWarning(t *testing.T) {
+	idx := leased(ownerA, PhaseActive)
+	e := acquireEntry(ownerA2)
+	audit, report := (&Applier{Now: t0}).Replay(idx, e)
+	if len(audit) != 1 || !strings.Contains(report, "replayed the offline acquire of "+stemX) || !strings.Contains(report, "another clone") {
+		t.Fatalf("replayed takeover = %v, %q", audit, report)
+	}
+	if holderOf(t, idx) != ownerA2 {
+		t.Fatal("the replayed takeover did not move the lease")
+	}
+}
+
+// An override move's audit line carries its pending entry id when replayed.
+func TestOverrideMoveAuditCarriesEntryID(t *testing.T) {
+	idx := leased(ownerB, PhaseActive)
+	e := withOverride(PendingEntry{ID: "0123abcd", Op: OpRegister, Stem: stemX, Owner: ownerA}, ownerB, "user moved it")
+	audit, _ := (&Applier{Now: t0}).Replay(idx, e)
+	if len(audit) != 1 || !strings.Contains(audit[0], "(pending entry 0123abcd)") {
+		t.Fatalf("audit = %v", audit)
+	}
+}

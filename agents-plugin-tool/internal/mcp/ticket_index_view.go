@@ -18,6 +18,7 @@ import (
 type ownershipView struct {
 	state        wsindex.ViewState
 	age          time.Duration
+	timedOut     time.Duration // the read timeout a stale view was not refreshed within; 0 otherwise
 	pending      int
 	reports      []string
 	caller       wsindex.Owner
@@ -57,6 +58,7 @@ func (s *Server) loadOwnershipView(root string, cachedOnly bool) *ownershipView 
 	v := &ownershipView{
 		state:        view.State,
 		age:          view.Age,
+		timedOut:     view.TimedOut,
 		pending:      len(view.Pending),
 		reports:      view.Reports,
 		caller:       caller.owner,
@@ -199,7 +201,7 @@ func ownershipLine(o *wsdoc.TicketOwnership) string {
 	case wsdoc.OwnershipRemote:
 		parts = append(parts, fmt.Sprintf("held by %s (track %s)", o.Email, o.Track))
 	case wsdoc.OwnershipUnknown:
-		parts = append(parts, "unknown (origin unreachable and no cached index)")
+		parts = append(parts, "unknown (origin not reached and no cached index)")
 	}
 	if o.Level == wsdoc.OwnershipSelf || o.Level == wsdoc.OwnershipLocal || o.Level == wsdoc.OwnershipRemote {
 		if o.Phase == wsindex.PhaseClosed {
@@ -261,7 +263,13 @@ func (v *ownershipView) trailer() string {
 		if v.age >= 0 {
 			age = "age " + v.age.Truncate(time.Second).String()
 		}
-		fmt.Fprintf(&b, "ticket-index: origin unreachable; ownership is from the cached index (%s)\n", age)
+		if v.timedOut > 0 {
+			// A slow origin is not an unreachable one: the view was only not
+			// refreshed within the read bound.
+			fmt.Fprintf(&b, "ticket-index: origin did not answer within %s; ownership is from the cached index (%s), not refreshed\n", v.timedOut, age)
+		} else {
+			fmt.Fprintf(&b, "ticket-index: origin unreachable; ownership is from the cached index (%s)\n", age)
+		}
 	}
 	if v.pending > 0 {
 		fmt.Fprintf(&b, "ticket-index: %d pending offline entries; the next ticket tool that reaches origin flushes them\n", v.pending)

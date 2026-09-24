@@ -585,3 +585,58 @@ func TestDiscoveredButUnfetchedWriteFailsLoudly(t *testing.T) {
 		t.Fatalf("acquire after the fetch recovers = %s", out)
 	}
 }
+
+// A seen clone whose read times out reports the view as not refreshed, with
+// its age; a real transport failure still reports origin unreachable. The
+// JSON index_state stays "stale" either way.
+func TestSeenCloneReadTimeoutIsNotRefreshed(t *testing.T) {
+	e := newIxEnv(t)
+	x := e.clone("x", "a@example.com")
+	x.init()
+	x.acquire(stemAlpha)
+	x.server.indexOpts.ReadTimeout = 200 * time.Millisecond
+	e.clock.Advance(2 * time.Minute)
+
+	script := filepath.Join(e.dir, "hang-ssh.sh")
+	mustWrite(t, e.dir, "hang-ssh.sh", "#!/bin/sh\nexec sleep 30\n")
+	if err := os.Chmod(script, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	x.git("config", "core.sshCommand", script)
+	x.git("remote", "set-url", "origin", "ssh://git@ticket-index.invalid/repo.git")
+	out := x.query()
+	if !strings.Contains(out, "ticket-index: origin did not answer within 200ms; ownership is from the cached index (age 2m0s), not refreshed\n") ||
+		strings.Contains(out, "unreachable") || !strings.Contains(out, "ownership: yours") {
+		t.Fatalf("timed-out query = %s", out)
+	}
+	if alpha := x.queryJSON()[stemAlpha]; alpha.Ownership == nil || alpha.Ownership.IndexState != "stale" {
+		t.Fatalf("timed-out json ownership = %+v", alpha.Ownership)
+	}
+
+	x.offline()
+	if out := x.query(); !strings.Contains(out, "ticket-index: origin unreachable; ownership is from the cached index (age 2m0s)\n") {
+		t.Fatalf("unreachable query = %s", out)
+	}
+}
+
+// C2: a close whose guard read a cached view with no lease, against a fresh
+// tip where another person acquired meanwhile, leaves that lease unchanged
+// and says so in one line; the ticket file still moves.
+func TestLiveCloseLeavesLeaseAcquiredAfterGuardRead(t *testing.T) {
+	e := newIxEnv(t)
+	x := e.clone("x", "a@example.com")
+	y := e.clone("y", "b@example.com")
+	x.init() // x's cache is fresh: its guard reads it with no remote call
+	y.acquire(stemAlpha)
+
+	out := x.mustCall("tickets.close", map[string]any{"stem": stemAlpha, "status": "done"})
+	if n := strings.Count(out, "ticket-index:"); n != 1 || !strings.Contains(out, "ticket-index: "+stemAlpha+" is held by b@example.com") {
+		t.Fatalf("close output = %s, want one ticket-index line naming the holder", out)
+	}
+	if l := e.lease(stemAlpha); l.Email != "b@example.com" || l.Phase != wsindex.PhaseActive {
+		t.Fatalf("the close changed another person's lease: %+v", l)
+	}
+	if _, err := os.Stat(filepath.Join(x.root, "ai-docs", "tickets", ".done", stemAlpha+".md")); err != nil {
+		t.Fatalf("the ticket file did not move: %v", err)
+	}
+}
