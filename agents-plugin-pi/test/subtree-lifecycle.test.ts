@@ -10,7 +10,6 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
-import { ChildChannel, ParentChannel, readAndDeleteChannelBootstrap } from "../src/agent-channel.ts";
 import {
   beginSubtreeDispatch,
   installSubtreePublisher,
@@ -22,7 +21,7 @@ import {
   type SubtreeView,
 } from "../src/subtree-lifecycle.ts";
 import type { RpcAgentRecord, RpcAgentRegistry } from "../src/spawner.ts";
-import { fakeParentChannel, fakeUplink, quiescentSnapshot } from "./fixtures/subtree-channels.ts";
+import { fakeParentChannel, fakeUplink, quiescentSnapshot, subtreeChannelPair } from "./fixtures/subtree-channels.ts";
 
 const roots: string[] = [];
 const opened: Array<{ close(): void }> = [];
@@ -38,15 +37,12 @@ function record(id: string, overrides: Partial<RpcAgentRecord> = {}): RpcAgentRe
   return { agentId: id, sessionPath: `/tmp/${id}.jsonl`, wsToolNames: [], toolGroup: "full-worker", streaming: false, running: false, reportLog: [], ...overrides };
 }
 
-async function channelPair(force: "pipe" | "tcp", generation = 1) {
+async function channelPair(force: "pipe" | "tcp") {
   const socketDir = mkdtempSync(join(tmpdir(), "ws-st-"));
   roots.push(socketDir);
-  const parent = await ParentChannel.bind(generation, { force, socketDir });
-  let upstream: SubtreeUpstream | undefined;
-  const child = await ChildChannel.connect(readAndDeleteChannelBootstrap({ ...parent.bootstrapEnv() })!, { reconnect: false, resume: () => upstream?.resume() ?? {} });
-  upstream = new SubtreeUpstream(child);
-  opened.push(child, parent);
-  return { parent, child, upstream };
+  const pair = await subtreeChannelPair(1, { force, socketDir });
+  opened.push(pair.child, pair.parent);
+  return pair;
 }
 
 describe("child side: revisioned snapshots and the busy fence", () => {
@@ -154,6 +150,19 @@ describe("child side: revisioned snapshots and the busy fence", () => {
     assert.equal(link.snapshots().length, 1, "the disconnected change was not sent");
     assert.deepEqual(upstream.resume(), { subtree: publishSubtree(registry) });
     assert.equal((upstream.resume().subtree as SubtreeSnapshot).revision, 2);
+  });
+
+  test("a change published before the reconnect completes is resent once connected", () => {
+    const link = fakeUplink();
+    const registry: RpcAgentRegistry = new Map();
+    installSubtreePublisher(registry, new SubtreeUpstream(link.channel), () => 0);
+    link.disconnect();
+    // The hello's resume section was already taken at revision 1; this change lands in the handshake window.
+    registry.set("child", record("child", { running: true }));
+    publishSubtree(registry);
+    assert.equal(link.snapshots().length, 1);
+    link.reconnect();
+    assert.deepEqual(link.snapshots().map(s => ({ revision: s.revision, active: s.active })), [{ revision: 1, active: 0 }, { revision: 2, active: 1 }]);
   });
 });
 

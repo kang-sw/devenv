@@ -112,7 +112,7 @@ import { CHILD_MANAGEMENT_TOOLS, DEFAULT_MAX_AGENT_DEPTH, DELEGATION_ENV, READ_T
 import { normalizeWriteScopes, type EffectiveWriteCapability, type WriteScope } from "./write-scopes.ts";
 import { createWebSearch } from "./web-search.ts";
 import { verifyWebReadiness, WEB_HOME_ENV, WEB_READINESS_KIND } from "./web-readiness.ts";
-import { beginSubtreeDispatch, installSubtreePublisher, observeSubtreeChannel, publishSubtree, type SubtreeDescendant, type SubtreeUpstream } from "./subtree-lifecycle.ts";
+import { beginSubtreeDispatch, installSubtreePublisher, observeSubtreeChannel, publishSubtree, subtreeWaiting, type SubtreeDescendant, type SubtreeUpstream } from "./subtree-lifecycle.ts";
 import { PUSH_BATCH_CUSTOM_TYPE, PUSH_BATCH_VERSION, type PushBatchItem, type PushBatchItemState } from "./push-protocol.ts";
 import { persistAgentCostCheckpoint, persistEvictedAgentCost, registerAgentCostOwner } from "./agent-footer.ts";
 
@@ -493,6 +493,12 @@ export interface RpcAgentRecord {
   workGeneration?: number;
   /** Work generation whose ordinary settlement has entered terminal admission. */
   settlementAdmissionGeneration?: number;
+  /**
+   * Set by `attachEventListener` for the attached client: re-runs a settlement
+   * that was held on `waitingOnChildren` once the wait clears without a wake
+   * turn to come (see `observeChildSubtree`). No-op when nothing is held.
+   */
+  releaseSettlementHold?: () => void;
   /** Persistent exploration mode; meaningful only for explore records. */
   exploreMode?: ExploreMode;
   /** `true` while an agent run is actively looping (between `agent_start` and `agent_settled`). */
@@ -2505,20 +2511,36 @@ export function applyRpcEvent(
  */
 export function observeChildSubtree(registry: RpcAgentRegistry | undefined, record: RpcAgentRecord, channel: ParentChannel): void {
   record.subtreeRevision = undefined;
+  // Revision of the last quiescent snapshot with no busy snapshot applied
+  // since; `null` before this launch's first snapshot. A wait that clears at
+  // that same revision (or on the first snapshot) came from the transport
+  // alone, so a settle held meanwhile has no wake turn coming and is
+  // released here. A wait cleared by a busy-to-quiescent transition is not
+  // released: the delivery that ended it wakes the child, and that turn's
+  // own settle admits the terminal. Releasing it would report the previous
+  // generation's answer ahead of the wake turn.
+  let quiescentRevision: number | null | undefined = null;
   observeSubtreeChannel(channel, view => {
     if (record.channel !== channel) return;
+    const snapshotQuiescent = view.snapshot !== undefined && !subtreeWaiting(view.snapshot);
+    const release = record.waitingOnChildren === true && !view.waiting
+      && (quiescentRevision === null || quiescentRevision === view.snapshot?.revision);
+    if (view.snapshot && !snapshotQuiescent) quiescentRevision = undefined;
+    else if (!view.waiting) quiescentRevision = view.snapshot?.revision;
     record.waitingOnChildren = view.waiting;
     record.subtreeRevision = view.snapshot?.revision;
     record.subtreeDescendants = view.snapshot?.descendants ?? [];
     publishSubtree(registry);
     triggerAgentWidgetRefresh();
+    if (release) record.releaseSettlementHold?.();
   });
 }
 
 /**
  * Wires the child event stream to immediate reports and per-generation
  * terminal settlement. Settlement clears execution before any async work,
- * holds while the channel-delivered subtree view reads waiting, harvests the
+ * holds while the channel-delivered subtree view reads waiting (released by
+ * `releaseSettlementHold` when the wait clears with no wake turn), harvests the
  * ordinary assistant answer, admits one retryable terminal delivery, and parks
  * only after enqueue.
  * Duplicate events join the generation latch; replacement work invalidates a
@@ -2568,6 +2590,45 @@ export function attachEventListener(
       refreshing = false;
     })();
   };
+  // Terminal admission for the current work generation. A settle held on
+  // `waitingOnChildren` records its generation for `releaseSettlementHold`.
+  let heldGeneration: number | undefined;
+  const admitSettlement = () => {
+    heldGeneration = undefined;
+    const workGeneration = record.workGeneration;
+    const stillSettled = () => record.client === client && record.launchGeneration === generation && record.workGeneration === workGeneration && !record.running && !record.streaming && !record.waitingOnChildren;
+    const finish = record.forkFinish;
+    if (finish) {
+      void advanceForkFinish(record, registry ?? new Map([[record.agentId, record]]), pi as ExtensionAPI, finishResumeCtx(finish), finish);
+    } else {
+      if (record.settlementAdmissionGeneration === workGeneration) {
+        record.terminalDelivery?.retry?.();
+      } else {
+        // Latch before the asynchronous transcript harvest so duplicate
+        // settle events for one generation cannot enqueue twice.
+        record.settlementAdmissionGeneration = workGeneration;
+        const terminal = createTerminalDelivery(record, registry, pi, workGeneration);
+        void (async () => {
+          const lastMessage = await harvestLastMessage(record);
+          if (!stillSettled() || record.terminalDelivery !== terminal) return;
+          const payload = { reason: "idle", last_message: lastMessage };
+          terminal.retry = () => {
+            if (terminal.state !== undefined || !stillSettled() || record.terminalDelivery !== terminal) return;
+            pushToLead(pi, registry, record, "ws-agent-settled", payload, "followUp", terminal);
+          };
+          terminal.retry();
+          await probeAgentLiveness(pi, registry, record);
+          triggerAgentWidgetRefresh();
+        })();
+      }
+    }
+  };
+  record.releaseSettlementHold = () => {
+    if (record.client !== client || record.launchGeneration !== generation) return;
+    if (heldGeneration === undefined || heldGeneration !== record.workGeneration) return;
+    if (record.running || record.streaming || record.waitingOnChildren) return;
+    admitSettlement();
+  };
   const unsubscribeEvents = client.onEvent((evt) => {
     const e = evt as { type?: string; toolName?: string; args?: unknown; toolCallId?: string; isError?: unknown; result?: unknown; message?: unknown; assistantMessageEvent?: unknown };
     if (record.client !== client || record.launchGeneration !== generation) return;
@@ -2600,41 +2661,14 @@ export function attachEventListener(
       triggerAgentWidgetRefresh();
     }
     if (outcome.settled && record.waitingOnChildren) {
+      heldGeneration = record.workGeneration;
       clearTerminalFacts(record);
       syncOwnershipProtection(record);
       publishSubtree(registry);
       triggerAgentWidgetRefresh();
       return;
     }
-    if (outcome.settled) {
-      const workGeneration = record.workGeneration;
-      const stillSettled = () => record.client === client && record.launchGeneration === generation && record.workGeneration === workGeneration && !record.running && !record.streaming && !record.waitingOnChildren;
-      const finish = record.forkFinish;
-      if (finish) {
-        void advanceForkFinish(record, registry ?? new Map([[record.agentId, record]]), pi as ExtensionAPI, finishResumeCtx(finish), finish);
-      } else {
-        if (record.settlementAdmissionGeneration === workGeneration) {
-          record.terminalDelivery?.retry?.();
-        } else {
-          // Latch before the asynchronous transcript harvest so duplicate
-          // settle events for one generation cannot enqueue twice.
-          record.settlementAdmissionGeneration = workGeneration;
-          const terminal = createTerminalDelivery(record, registry, pi, workGeneration);
-          void (async () => {
-            const lastMessage = await harvestLastMessage(record);
-            if (!stillSettled() || record.terminalDelivery !== terminal) return;
-            const payload = { reason: "idle", last_message: lastMessage };
-            terminal.retry = () => {
-              if (terminal.state !== undefined || !stillSettled() || record.terminalDelivery !== terminal) return;
-              pushToLead(pi, registry, record, "ws-agent-settled", payload, "followUp", terminal);
-            };
-            terminal.retry();
-            await probeAgentLiveness(pi, registry, record);
-            triggerAgentWidgetRefresh();
-          })();
-        }
-      }
-    }
+    if (outcome.settled) admitSettlement();
     if (record.forkFinish && e.type === "tool_execution_end") {
       const finish = record.forkFinish;
       void advanceForkFinish(record, registry ?? new Map([[record.agentId, record]]), pi as ExtensionAPI, finishResumeCtx(finish), finish);
@@ -2958,8 +2992,8 @@ export async function spawnAgent(
   ctx: RpcSpawnCtx,
   params: SpawnAgentParams,
 ): Promise<{ agent_id: string; alias?: string; evicted?: string; write_scopes?: WriteScopeDiagnostic }> {
-  const admission = beginSubtreeDispatch(registry);
-  const finishDispatch = typeof admission === "function" ? admission : await admission;
+  const dispatchAdmission = beginSubtreeDispatch(registry);
+  const finishDispatch = typeof dispatchAdmission === "function" ? dispatchAdmission : await dispatchAdmission;
   try {
   const cwdOverride = validateCwdOverride(params.cwdOverride);
   const admission = resolveSpawnAdmission(ctx, params.writeScopes);
@@ -3204,8 +3238,8 @@ export async function sendToAgent(
 ): Promise<{ agent_id: string }> {
   // Awaited only while a busy fence is owed, keeping the dormant-resume
   // check-and-claim below in one synchronous step for a root lead.
-  const admission = beginSubtreeDispatch(registry);
-  const finishDispatch = typeof admission === "function" ? admission : await admission;
+  const dispatchAdmission = beginSubtreeDispatch(registry);
+  const finishDispatch = typeof dispatchAdmission === "function" ? dispatchAdmission : await dispatchAdmission;
   try {
   // 260905 (alias/park/cap ticket): resolve alias-or-uuid through the one
   // shared helper first; an unresolvable input falls back to the original

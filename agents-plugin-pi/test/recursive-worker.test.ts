@@ -10,7 +10,6 @@ import {
   childPolicy,
   readOnlyWsTools,
 } from "../src/delegation-policy.ts";
-import { ChildChannel, ParentChannel, readAndDeleteChannelBootstrap } from "../src/agent-channel.ts";
 import {
   beginSubtreeDispatch,
   installSubtreePublisher,
@@ -45,7 +44,7 @@ import {
   type RpcAgentRegistry,
 } from "../src/spawner.ts";
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
-import { fakeParentChannel, fakeUplink, quiescentSnapshot } from "./fixtures/subtree-channels.ts";
+import { fakeParentChannel, fakeUplink, quiescentSnapshot, subtreeChannelPair, until } from "./fixtures/subtree-channels.ts";
 
 const dirs: string[] = [];
 function home(): string {
@@ -54,21 +53,10 @@ function home(): string {
   return dir;
 }
 const opened: Array<{ close(): void }> = [];
-/** A real parent/child channel pair in this process; the child's upstream publishes over it. */
-async function channelPair(generation = 1) {
-  const parent = await ParentChannel.bind(generation, { socketDir: home() });
-  let upstream: SubtreeUpstream | undefined;
-  const child = await ChildChannel.connect(readAndDeleteChannelBootstrap({ ...parent.bootstrapEnv() })!, { reconnect: false, resume: () => upstream?.resume() ?? {} });
-  upstream = new SubtreeUpstream(child);
-  opened.push(child, parent);
-  return { parent, child, upstream };
-}
-async function until(condition: () => boolean, what: string, timeoutMs = 2_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!condition()) {
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
+async function channelPair() {
+  const pair = await subtreeChannelPair(1, { socketDir: home() });
+  opened.push(pair.child, pair.parent);
+  return pair;
 }
 afterEach(() => {
   for (const channel of opened.splice(0)) channel.close();
@@ -447,7 +435,7 @@ test("a settled parent waits for descendants without remaining globally running"
   assert.equal(sent[0].details.last_message, "settled answer");
 });
 
-test("a disconnected child channel holds settlement until a reconnected quiescent snapshot, and exit releases it", async () => {
+test("a settle held only by a disconnect is released by the reconnected quiescent snapshot, with no further turn", async () => {
   const sent: any[] = [];
   const h = pushHarness(sent);
   const channel = fakeParentChannel();
@@ -460,6 +448,7 @@ test("a disconnected child channel holds settlement until a reconnected quiescen
 
   channel.drop();
   assert.equal(parent.waitingOnChildren, true, "a disconnected channel reads as waiting");
+  h.setLast("answer while disconnected");
   h.emit(assistantEnd("answer while disconnected"));
   h.emit({ type: "agent_settled" });
   await drain();
@@ -468,37 +457,78 @@ test("a disconnected child channel holds settlement until a reconnected quiescen
   assert.equal(listAgents(registry)[0]?.status, "waiting-on-children");
 
   channel.hello({});
-  assert.equal(parent.waitingOnChildren, true, "a reconnect that carries no snapshot keeps waiting");
+  await drain();
+  flushHeldPushes(h.pi, true);
+  assert.equal(sent.length, 0, "a reconnect that carries no snapshot keeps waiting");
   channel.hello({ subtree: quiescentSnapshot(3) });
   assert.equal(parent.waitingOnChildren, false, "the reconnected quiescent snapshot releases the wait");
+  await drain();
+  flushHeldPushes(h.pi, true);
+  await drain();
+  assert.equal(sent.length, 1, "the held settle is admitted without another child turn");
+  assert.equal(sent[0].details.last_message, "answer while disconnected");
+  channel.deliver(quiescentSnapshot(3));
+  await drain();
+  flushHeldPushes(h.pi, true);
+  assert.equal(sent.length, 1, "a duplicate snapshot does not admit twice");
+});
+
+test("a settle held on busy descendants is not released by their quiescence; the wake turn settles instead", async () => {
+  const sent: any[] = [];
+  const h = pushHarness(sent);
+  const channel = fakeParentChannel();
+  const parent = record("parent", { client: h.client, delegation: worker(), running: true, workGeneration: 1, channel: channel.parent });
+  const registry = new Map([[parent.agentId, parent]]);
+  observeChildSubtree(registry, parent, channel.parent);
+  attachEventListener(h.pi, registry, parent, h.client);
+  channel.deliver(quiescentSnapshot(1));
+  channel.deliver(quiescentSnapshot(2, { outstanding: 1 }));
+  h.emit(assistantEnd("dispatched a grandchild"));
+  h.emit({ type: "agent_settled" });
+  await drain();
+  assert.equal(parent.waitingOnChildren, true);
+
+  // The grandchild's terminal is handed into the child's session: quiescent
+  // before the wake turn it triggers has started.
+  channel.deliver(quiescentSnapshot(3));
+  assert.equal(parent.waitingOnChildren, false);
+  await drain();
+  flushHeldPushes(h.pi, true);
+  assert.equal(sent.length, 0, "the previous turn's answer is not reported ahead of the wake turn");
+
   h.emit({ type: "agent_start" });
-  h.emit(assistantEnd("settled after reconnect"));
+  h.setLast("folded the grandchild result");
+  h.emit(assistantEnd("folded the grandchild result"));
   h.emit({ type: "agent_settled" });
   await drain();
   flushHeldPushes(h.pi, true);
   assert.equal(sent.length, 1);
-  assert.equal(sent[0].details.last_message, "settled after reconnect");
+  assert.equal(sent[0].details.last_message, "folded the grandchild result");
+});
 
-  heldPushQueue.length = 0;
-  const exitSent: any[] = [];
-  const exitHarness = pushHarness(exitSent);
-  const exitChannel = fakeParentChannel();
-  const exiting = record("exiting", { client: exitHarness.client, running: true, workGeneration: 1, channel: exitChannel.parent });
-  const exitRegistry = new Map([[exiting.agentId, exiting]]);
-  observeChildSubtree(exitRegistry, exiting, exitChannel.parent);
-  attachEventListener(exitHarness.pi, exitRegistry, exiting, exitHarness.client);
-  exitHarness.emit(assistantEnd("last output before exit"));
-  exitHarness.emit({ type: "agent_settled" });
+test("exit releases a wait left by a channel that dropped during outstanding work, and the closed launch cannot re-arm it", async () => {
+  const sent: any[] = [];
+  const h = pushHarness(sent);
+  const channel = fakeParentChannel();
+  const exiting = record("exiting", { client: h.client, running: true, workGeneration: 1, channel: channel.parent });
+  const registry = new Map([[exiting.agentId, exiting]]);
+  observeChildSubtree(registry, exiting, channel.parent);
+  attachEventListener(h.pi, registry, exiting, h.client);
+  channel.deliver(quiescentSnapshot(1, { active: 1 }));
+  h.emit(assistantEnd("last output before exit"));
+  h.emit({ type: "agent_settled" });
+  channel.drop();
   await drain();
-  assert.equal(exiting.waitingOnChildren, true, "a child that never connected reads as waiting");
-  markAgentExited(exitHarness.pi, exitRegistry, exiting);
+  assert.equal(exiting.waitingOnChildren, true);
+  markAgentExited(h.pi, registry, exiting);
   assert.equal(exiting.waitingOnChildren, false, "exit releases the wait");
-  assert.equal(exitChannel.closed, true);
-  exitChannel.drop();
-  assert.equal(exiting.waitingOnChildren, false, "the closed launch's late disconnect cannot re-arm the wait");
-  flushHeldPushes(exitHarness.pi, true);
-  assert.equal(exitSent.length, 1);
-  assert.equal(exitSent[0].details.reason, "exited");
+  assert.equal(channel.closed, true);
+  channel.drop();
+  channel.hello({ subtree: quiescentSnapshot(1, { active: 1 }) });
+  assert.equal(exiting.waitingOnChildren, false, "the closed launch's late callbacks cannot re-arm the wait");
+  flushHeldPushes(h.pi, true);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].details.reason, "exited");
 });
 
 test("settled prose is preserved without adapter adequacy parsing for every role", async () => {

@@ -145,7 +145,7 @@ import { closeFakeChildren, connectFakeChild } from "./fixtures/channel-child.ts
 import { allocateAgentHome, createAgentStorageContext, updateOwnership } from "../src/agent-storage.ts";
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
 import { installSubtreePublisher, SubtreeUpstream } from "../src/subtree-lifecycle.ts";
-import { fakeUplink } from "./fixtures/subtree-channels.ts";
+import { fakeUplink, until } from "./fixtures/subtree-channels.ts";
 const REAL_EXTENSION_ENTRY = fileURLToPath(new URL("../src/index.ts", import.meta.url));
 // Stands in for the child half of the control channel: the hello plus the
 // role's stage-2 readiness (web for Explore, fork for a fork launch).
@@ -702,8 +702,7 @@ describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses ins
     try {
       registered = harness(async () => jsonResult({}), undefined, undefined, new SubtreeUpstream(uplink.channel));
       const spawned = registered.tool.execute("delayed", { system_prompt_path: "/tmp/p.md", prompt: "launch after ack" }, undefined, undefined, registered.ctx);
-      const deadline = Date.now() + 2_000;
-      while (!uplink.snapshots().some(s => s.active === 1) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 5));
+      await until(() => uplink.snapshots().some(s => s.active === 1), "the busy edge");
       const busy = uplink.snapshots().find(s => s.active === 1);
       assert.ok(busy, "the busy edge is published before the wait");
       await new Promise(resolve => setTimeout(resolve, 50));
@@ -713,6 +712,64 @@ describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses ins
       const result = JSON.parse((await spawned).content[0]!.text);
       assert.equal(starts.length, 1, "the acknowledgment admits exactly one launch");
       assert.ok(registered.handle.rpcRegistry.has(result.agent_id));
+    } finally {
+      await registered?.handle.stopAll();
+      rpc.restore();
+    }
+  });
+
+  test("ws-agent-send holds a live prompt and a dormant relaunch behind the busy acknowledgment, refuses on a dropped one, and the relaunch observes its new channel", async () => {
+    const starts: Array<string | undefined> = [];
+    const prompts: string[] = [];
+    const rpc = installRpcHarness(undefined, cwd => starts.push(cwd), message => prompts.push(message));
+    const uplink = fakeUplink();
+    const hold = () => new Promise(resolve => setTimeout(resolve, 50));
+    /** Runs `op` up to its busy edge, checks nothing dispatched while unacknowledged, then acknowledges it. */
+    const fenced = async <T>(op: () => Promise<T>, dispatched: () => number): Promise<T> => {
+      const before = uplink.sent.length;
+      const count = dispatched();
+      const running = op();
+      await until(() => uplink.sent.length > before, "the busy edge");
+      await hold();
+      assert.equal(dispatched(), count, "nothing is dispatched before the acknowledgment");
+      uplink.ack(uplink.snapshots().at(-1)!.revision);
+      return running;
+    };
+    let registered: ReturnType<typeof harness> | undefined;
+    try {
+      registered = harness(async () => jsonResult({}), undefined, undefined, new SubtreeUpstream(uplink.channel, { ackTimeoutMs: 500 }));
+      const { tool, sendTool, handle, ctx } = registered;
+      const spawned = JSON.parse((await fenced(() => tool.execute("spawn", { system_prompt_path: "/tmp/p.md", prompt: "first" }, undefined, undefined, ctx), () => starts.length)).content[0]!.text);
+      const record = handle.rpcRegistry.get(spawned.agent_id)!;
+      await until(() => record.subtreeRevision !== undefined, "the child's first snapshot");
+
+      await fenced(() => sendTool.execute("live", { agent_id: spawned.agent_id, message: "live follow-up" }), () => prompts.length);
+      assert.equal(prompts.at(-1), "live follow-up");
+
+      const promptsBeforeDrop = prompts.length;
+      await assert.rejects(
+        () => sendTool.execute("dropped", { agent_id: spawned.agent_id, message: "never delivered" }),
+        /nested dispatch refused: the parent did not acknowledge revision \d+ within 500ms/,
+      );
+      assert.equal(prompts.length, promptsBeforeDrop, "a refused send prompts nothing");
+
+      await stopAgent(handle.rpcRegistry, spawned.agent_id, undefined, { silent: true });
+      const firstChannel = record.channel;
+      assert.equal(record.subtreeRevision, undefined);
+      await fenced(() => sendTool.execute("resume", { agent_id: spawned.agent_id, message: "resume" }), () => starts.length);
+      assert.equal(starts.length, 2);
+      assert.equal(prompts.at(-1), "resume");
+      assert.notEqual(record.channel, firstChannel);
+      await until(() => record.subtreeRevision !== undefined, "the relaunched child's first snapshot");
+      assert.equal(record.waitingOnChildren, false, "the relaunch observes its own channel");
+
+      // A relaunched child that never reports reads as waiting, not as the cleared default.
+      await stopAgent(handle.rpcRegistry, spawned.agent_id, undefined, { silent: true });
+      RpcClient.prototype.start = async function(this: { options?: { env?: Record<string, string>; args?: string[] } }) { await connectFakeChild(this.options?.env, this.options?.args, { subtree: null }); };
+      await fenced(() => sendTool.execute("silent", { agent_id: spawned.agent_id, message: "silent relaunch" }), () => prompts.length);
+      await hold();
+      assert.equal(record.subtreeRevision, undefined);
+      assert.equal(record.waitingOnChildren, true);
     } finally {
       await registered?.handle.stopAll();
       rpc.restore();

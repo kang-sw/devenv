@@ -98,9 +98,13 @@ export class SubtreeUpstream {
       if (msg.t === SUBTREE_ACK_MESSAGE && Number.isSafeInteger(msg.revision)) this.acknowledge(msg.revision as number);
     });
     channel.onDisconnect(() => this.refuseWaiters("the channel to the parent disconnected"));
+    // The hello's resume section is evaluated before the welcome, while
+    // `connected` is still false, so a change published in that handshake
+    // window is neither in the hello nor sent. Resending the latest snapshot
+    // once connected closes the gap; the parent reads an equal revision as a
+    // duplicate.
+    channel.onReconnect(() => this.send());
   }
-
-  get revision(): number { return this.revisionCounter; }
 
   /** Hello resume section: a reconnect restores the parent's view from the latest snapshot. */
   resume(): Record<string, unknown> {
@@ -113,9 +117,13 @@ export class SubtreeUpstream {
     if (key === this.lastState && this.latest) return this.latest;
     this.lastState = key;
     this.latest = { ...state, revision: ++this.revisionCounter };
-    try { if (this.channel.connected) this.channel.send({ t: SUBTREE_MESSAGE, snapshot: this.latest }); }
-    catch { /* a socket destroyed but not yet reported ended; the resume section carries it */ }
+    this.send();
     return this.latest;
+  }
+
+  private send(): void {
+    try { if (this.latest && this.channel.connected) this.channel.send({ t: SUBTREE_MESSAGE, snapshot: this.latest }); }
+    catch { /* a socket destroyed but not yet reported ended; the resume section carries it */ }
   }
 
   /**
