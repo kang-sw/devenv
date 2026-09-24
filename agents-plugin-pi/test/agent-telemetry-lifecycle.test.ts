@@ -17,7 +17,7 @@ function registerAgentTools(pi: any, bridge: any, sessionCtx: any, ...rest: any[
 }
 import { captureForkResume, createThreadRegistryHandle, hydrateThreadRegistry, rehydrateForkRecord, saveThreadRegistryFile } from "../src/ask.ts";
 import { persistShutdownAgentSnapshots } from "../src/index.ts";
-import { allocateAgentHome, createAgentStorageContext, readOwnership } from "../src/agent-storage.ts";
+import { allocateAgentHome, createAgentStorageContext, persistOwnershipTelemetry, readOwnership } from "../src/agent-storage.ts";
 
 const roots = new Set<string>();
 afterEach(() => { for (const root of roots) rmSync(root, { recursive: true, force: true }); roots.clear(); });
@@ -148,6 +148,26 @@ describe("agent telemetry lifecycle at production boundaries", () => {
     rmSync(lock, { recursive: true });
     assert.equal(refreshAgentTelemetry(record, state), false, "memory did not change again");
     assert.deepEqual(readOwnership(ownership.home)?.telemetry, record.telemetry, "the comparison against disk retries the failed write");
+  });
+
+  test("telemetry change detection ignores key order and undefined keys but persists a clear", () => {
+    const dir = root();
+    const ownership = allocateAgentHome(createAgentStorageContext("lead", dir), "owned", "worker");
+    const metadataFile = join(ownership.home, "ownership.json");
+    const lock = join(dirname(ownership.home), `.${ownership.agentId}.ownership-lock`);
+    const telemetry = { version: 1, origin: { sessionId: "owned", sessionPath: ownership.sessionPath!, emptyPrefix: true }, model: "p/m", estimatedUsd: .2 } as const;
+    persistOwnershipTelemetry(ownership.home, telemetry);
+    assert.deepEqual(readOwnership(ownership.home)?.telemetry, telemetry);
+
+    mkdirSync(lock); writeFileSync(join(lock, "owner.json"), JSON.stringify({ pid: 2_147_483_647 }));
+    const persisted = readFileSync(metadataFile, "utf8");
+    persistOwnershipTelemetry(ownership.home, { estimatedUsd: .2, effort: undefined, model: "p/m", origin: { emptyPrefix: true, sessionPath: ownership.sessionPath!, sessionId: "owned" }, version: 1 });
+    assert.equal(readFileSync(metadataFile, "utf8"), persisted, "reordered keys and an undefined key are not a change");
+    assert.equal(existsSync(join(lock, "owner.json")), true);
+    rmSync(lock, { recursive: true });
+
+    persistOwnershipTelemetry(ownership.home, undefined);
+    assert.equal(readOwnership(ownership.home)?.telemetry, undefined, "clearing in-memory telemetry is persisted");
   });
 
   test("collector rejection clears current selection and notifies once while preserving usage", async () => {

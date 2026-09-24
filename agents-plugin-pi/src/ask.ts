@@ -91,7 +91,6 @@
 
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { renameWithWindowsRetry, type RenameRetryHooks } from "./atomic-write.ts";
 import { execFileSync } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
@@ -129,6 +128,7 @@ import {
 } from "./conversation-view.ts";
 import { loadHostPiTui, wrapTextWithAnsi, type Component, type EditorTheme, type MarkdownTheme } from "./pi-tui.ts";
 import { captureForkContext, captureRegisteredTools, captureUnflushedForkSource, effectiveForkDescriptor, type ForkContext } from "./fork-context.ts";
+import { renameWithWindowsRetry, type RenameRetryHooks } from "./atomic-write.ts";
 import type { LeadPromptRef } from "./lead-bootstrap.ts";
 import { readOwnership, validDescriptor } from "./agent-storage.ts";
 import { parseTelemetry, type AgentTelemetry, type TelemetryOrigin } from "./agent-telemetry.ts";
