@@ -126,17 +126,45 @@ func (c *Client) pushCAS(ctx context.Context, commit, expected string) (pushOutc
 	if !ok {
 		return pushFailed, strings.TrimSpace(detail), err
 	}
-	lower := strings.ToLower(status)
-	if strings.Contains(lower, "stale info") || strings.Contains(lower, "non-fast-forward") ||
-		strings.Contains(lower, "fetch first") || strings.Contains(lower, "cannot lock ref") ||
-		strings.Contains(lower, "but expected") || strings.Contains(lower, "already exists") ||
-		// A concurrent receive holding the ref lock surfaces as a generic
-		// update failure on some servers; the bounded retry absorbs a
-		// misclassified permanent refusal.
-		strings.Contains(lower, "failed to update ref") || strings.Contains(lower, "failed to lock") {
+	if isCASLoss(status) {
 		return pushLost, status, nil
 	}
 	return pushRefused, status, err
+}
+
+// casLossPhrases are the rejection reasons that mean the remote tip moved
+// between the caller's read and its push. Matching is on the porcelain
+// status text, which differs across git versions:
+//   - client-side lease check: "stale info"; plain ref races: "non-fast-forward",
+//     "fetch first", "already exists".
+//   - receive-pack before git 2.51 updates each ref on its own and reports a
+//     lost race as "failed to update ref" (with "cannot lock ref ... but
+//     expected ..." in the detail).
+//   - receive-pack from git 2.51 batches ref updates and reports the ref
+//     transaction error itself (ref_transaction_error_msg in refs.c):
+//     "incorrect old value provided" when the tip moved, "reference does not
+//     exist" when it was deleted meanwhile, "reference already exists" when a
+//     create raced another create.
+//
+// A concurrent receive holding the ref lock surfaces as a generic update
+// failure ("failed to update ref(s)", "failed to lock"); the bounded retry
+// absorbs a misclassified permanent refusal.
+var casLossPhrases = []string{
+	"stale info", "non-fast-forward", "fetch first", "cannot lock ref",
+	"but expected", "already exists", "incorrect old value", "reference does not exist",
+	"failed to update ref", "failed to lock",
+}
+
+// isCASLoss reports whether a porcelain rejection status is a lost
+// compare-and-swap race rather than a permanent refusal.
+func isCASLoss(status string) bool {
+	lower := strings.ToLower(status)
+	for _, phrase := range casLossPhrases {
+		if strings.Contains(lower, phrase) {
+			return true
+		}
+	}
+	return false
 }
 
 // porcelainStatus extracts the rejection summary of the index ref from push
