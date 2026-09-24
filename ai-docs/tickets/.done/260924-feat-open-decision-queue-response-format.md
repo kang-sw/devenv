@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: c25fbf49ff7ac72a
 sage-review-completeness-reviewed: c25fbf49ff7ac72a
+completed: 2026-09-24
 ---
 
 # Open Decision Queue: ticket-held state, standard response format, promotion gate
@@ -304,6 +305,48 @@ Verification expectations:
   sage-review frontmatter write, no move).
 - Existing gate tests keep passing.
 
+### Result (58d063e8) - 2026-09-24
+
+- `tickets.move(to: "ready")` returns an error, and `tickets.sage_gate` returns
+  the new `stop_open_decision_queue` action, when the ticket has an exact
+  `## Open Decision Queue` line (trailing whitespace allowed) outside fenced
+  code. `sage_gate` refuses on the `ready` landing and on the epic `todo`
+  landing. Both refusals run before any write. In `sage_gate` the check
+  comes after landing validation, the `idea` skip, and the actionable-todo and
+  research/workset-todo branches. It comes before the route-facts,
+  posture-skip, freshness, and retained epic-at-ready branches.
+- The MCP layer adds a `sageGateNextInstruction` case (settle through the
+  final confirmation, delete the section, re-call). This case omits the
+  posture-uncommitted note because the stop writes nothing. The action is
+  listed in the `sage_gate` description, and the refusal is named in the
+  `tickets.move` description.
+- Fence detection follows CommonMark: at most 3 spaces of indentation, a run
+  of 3 or more backticks or tildes, and a closing fence of the same character
+  that is at least as long and has no info string. The parsers live in
+  `tickets.go`, beside the other ticket-text parsers. `hasOpenDecisionQueue`
+  sits beside `missingRouteFacts`. An unreadable file counts as no section,
+  the same as `missingRouteFacts`.
+- Tests: `tickets_open_decision_queue_test.go` covers:
+  - the heading-match table (fences, indentation, suffixes, inline mentions)
+  - `move` refusing, with no git call and unchanged bytes, then succeeding
+    after the section is deleted
+  - fenced false positives for `move` and `sage_gate`
+  - `todo` moves staying ungated
+  - `sage_gate` stops on both landings ahead of the route-facts, posture-skip
+    and freshness branches, with unchanged bytes
+  - the ungated exemptions still skipping
+  `TestServeStdioOpenDecisionQueueRefusals` checks the MCP responses.
+  The round-1 review fixes landed in 0dfbd854.
+- Verification: `go test ./internal/wsdoc -count=1` ok. The targeted
+  `./internal/mcp` tests are ok. The full `go test ./...` passes except
+  `TestServeStdioConfigResolveAgentFallsBackToDefault` and
+  `TestResolveAgentTierForHarnessFallsBackToDefault`. Both also fail at base
+  2082f452: they read the host's real agent config, which is a test-isolation
+  leak unrelated to this ticket.
+- Decision: the exact-line match lets some CommonMark-equivalent heading
+  variants through (1-3 leading spaces, closing `#`s). This is accepted as
+  specified, and the playbook tells the lead to keep the heading exact.
+
 ### Phase 2: lead-ticket playbook rewrite and task-list removal
 
 Depends on Phase 1 (the playbook states the gate as existing behavior).
@@ -320,6 +363,39 @@ Verification expectations:
   template, the `(n) [open]` one-line re-ask, the ticket-section storage and
   settlement moves, the blocking final confirmation, and the
   thought-experiment instruction.
+
+### Result (95301971) - 2026-09-24
+
+- `lead-ticket.md`:
+  - Removed the `includes: - task-list` frontmatter and all task-list wording.
+  - `## Write` gains a separate bullet: the non-authoritative section
+    exception, "persisting" defined as the commit plus any `ready/` move, and
+    the checklists satisfied after the section is deleted. The pinned first
+    sentence is unchanged.
+  - `## Open Decision Queue` is rewritten into four subsections: Queue state,
+    Trace a change before writing it, Response format, and Final
+    confirmation. Together they cover every `## Decisions` item: the last-ID
+    line under the exact heading, IDs shared across affected sections,
+    settlement moves, the first-presentation block, the `(n) [open]` re-ask,
+    this round's settlements announced on one line, the blocking final
+    confirmation, and the thought experiment.
+  - Promotion step 2 and the epic design review now settle the queue through
+    the final confirmation and delete the section before the single
+    `sage_gate` call.
+- Deleted `task-list.md` and `task-list.codex.md`, regenerated
+  `manifest.json`, and resynced the wsflow mirror (regen test) and the pi
+  mirror (`rsync --delete`).
+- `TestPlaybookPrintGoldenLeadTicket` now runs the claude and codex
+  variants, forbids `Included Guidance`, `task list` and `task-list`, and
+  pins the block template verbatim plus the new contract phrases.
+- Verification:
+  - Golden, research-outcome, batch-review, sage-order and settlement-boundary
+    tests are ok.
+  - `./internal/wsrsrc` is ok, including the pi and wsflow mirror and manifest
+    drift guards.
+  - `python3 -m unittest discover agents-plugin-wsflow/tests`: 13 tests ok.
+- Review: partitioned review (correctness, fit, test) found only minor
+  issues. They were fixed in 0dfbd854, and round 2 confirmed the fixes.
 
 ## Sage Review Round 1 (2026-09-24)
 
