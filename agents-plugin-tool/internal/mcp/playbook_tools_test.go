@@ -2302,6 +2302,90 @@ func TestPlaybookPrintGoldenLeadTicket(t *testing.T) {
 	}
 }
 
+// The ticket ownership index is enforced only by the playbooks that call it:
+// dropping the lead-run acquire step or the selectors' lease filter would
+// dispatch leased tickets with every tool test still green, so pin the
+// rendered contract phrases.
+func TestPlaybookPrintTicketIndexContracts(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	workerRecord := []string{
+		"Once the branch action has you on your impl branch, record it with `",
+		"/tickets.acquire(ticket_stem: <stem>)`. The lead's track already holds the ticket, so this call is informational",
+		"Never set its override flag.",
+	}
+	contracts := map[string][]string{
+		"lead-run": {
+			"/tickets.acquire(ticket_stem: \"<stem>\")` from the branch the worker will branch off, so the lease's track is the one the worker's impl branch merges into.",
+			"A refusal or an error ends the turn: report it to the user and dispatch nothing.",
+			"Set `dangerously_override_lease_status`, with the user's words as `reason`, only when the user explicitly told you to take the ticket over; a refusal alone is never that instruction.",
+		},
+		"ticket-worker":          workerRecord,
+		"ticket-worker-elevated": workerRecord,
+		"lead-scope-worktree": {
+			"/tickets.acquire(ticket_stem: <stem>)` from this worktree for every ticket step 5 listed as visible",
+			"set the override flag only on the user's explicit instruction to take that ticket over",
+		},
+		"ticket-selector": {
+			"inspect `ready/` with `unleased_or_mine: true` on every candidate query",
+		},
+		"ticket-batch-selector": {
+			"/tickets.query(statuses: [\"ready\"], unleased_or_mine: true, format: \"json\")`",
+			"when that returns no rows, list it once more without `unleased_or_mine` to tell an empty `ready/` from one held by others; only the filtered rows are candidates",
+		},
+		"lead-bootstrap": {
+			"/tickets.index_init(check: true)` and handle its `state:`",
+			"- `uninitialized`: explain what the index does",
+			"- `initialized`: one line saying the index is active.",
+			"- `no-origin`: one line saying the index can be set up",
+			"- `unreachable`: one line saying the check could not reach `origin`.",
+		},
+	}
+	for _, harness := range []string{"claude", "codex"} {
+		t.Run(harness, func(t *testing.T) {
+			s := newTestServerWithHarness(t, harness)
+			for name, wants := range contracts {
+				body, _, err := printPlaybook(s, rsrcRoot, name, nil, isolatedPlaybookConfigOptions(t), "", nil)
+				if err != nil {
+					t.Fatalf("printPlaybook %s: %v", name, err)
+				}
+				normalized := strings.Join(strings.Fields(body), " ")
+				for _, want := range wants {
+					if !strings.Contains(normalized, want) {
+						t.Errorf("%s: body missing ticket-index contract %q", name, want)
+					}
+				}
+				if name != "lead-run" {
+					continue
+				}
+				// The warning relay direction lives in tickets.acquire's own
+				// output, not in the playbook.
+				if strings.Contains(normalized, "relay that line to the user verbatim") {
+					t.Errorf("lead-run: body restates the acquire warning relay that the tool output carries")
+				}
+				// The lease is taken before the worker exists: acquire, then
+				// render, then spawn.
+				order := []string{
+					"/tickets.acquire(ticket_stem: \"<stem>\")` from the branch",
+					"/playbook.render(name: <the row's worker playbook>",
+					"Spawn one worker at the tier the render recommends",
+				}
+				prev := -1
+				for _, step := range order {
+					at := strings.Index(normalized, step)
+					if at < 0 {
+						t.Errorf("lead-run: body missing ordered step %q", step)
+						break
+					}
+					if at < prev {
+						t.Errorf("lead-run: %q comes before the step it must follow", step)
+					}
+					prev = at
+				}
+			}
+		})
+	}
+}
+
 func TestShippedExecutorWrapupResultIncludesBehavioralDelta(t *testing.T) {
 	path := filepath.Join("..", "..", "..", "agents-plugin", "rsrc", "executor-wrapup.md")
 	data, err := os.ReadFile(path)

@@ -69,8 +69,7 @@ the turn: relay the reason.
    impl branch merges into. A refusal or an error ends the turn: report it to
    the user and dispatch nothing. Set `dangerously_override_lease_status`, with
    the user's words as `reason`, only when the user explicitly told you to take
-   the ticket over; a refusal alone is never that instruction. A success that
-   carries a `warning:` line proceeds; relay that line to the user verbatim.
+   the ticket over; a refusal alone is never that instruction.
 5. `{{.McpNamespace}}/playbook.render(name: <the row's worker playbook>,
    session_key: <your key>)`. When the table cell pairs the body with
    `tier_override: xlarge`, pass that argument too: the `elevated` body's
