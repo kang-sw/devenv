@@ -514,6 +514,24 @@ describe("stale-record repair", () => {
     assert.deepEqual(descendantUsageValue(registry), usd(.75, 2), "after: once, live");
   });
 
+  test("a reconcile while the home is detached under a held claim keeps the entry; the rename-back then counts it live", t => {
+    silenceDiagnostics(t);
+    const { storage, registry, home } = pendingFixture();
+    let during: CumulativeCost | undefined, registeredDuring: boolean | undefined;
+    const result = removeOwnedAgentHome(readOwnership(home)!, () => {
+      during = descendantUsageValue(registry);
+      registeredDuring = registry.has("child");
+      throw new Error("injected remove failure after the detach");
+    }, undefined, retentionOptions);
+    assert.equal(result.status, "failed");
+    assert.deepEqual(during, usd(.75, 2), "during: once, through the record");
+    assert.equal(registeredDuring, true, "a detached home under a held claim is not final: the entry stays registered");
+    assert.equal(existsSync(home), true, "the rename-back restored the home");
+    assert.deepEqual(recordFiles(storage), [], "the repair deleted the record");
+    assert.deepEqual(descendantUsageValue(registry), usd(.75, 2), "after: once, live");
+    assert.equal(registry.has("child"), true);
+  });
+
   test("a failed rename-back that leaves the home off its path keeps the record", t => {
     silenceDiagnostics(t);
     const { storage, registry, home } = pendingFixture();

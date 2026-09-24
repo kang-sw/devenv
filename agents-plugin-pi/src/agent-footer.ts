@@ -4,11 +4,10 @@
  * or not: the value a hop reports upward as its descendant usage
  * (`descendantUsageValue`) and the value an eviction record holds.
  */
-import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { createFooterGitCache, type GitCacheOptions } from "./footer-git-status.ts";
 import { relative, resolve, sep } from "node:path";
-import { EVICTION_RECORD_BUCKET, hasEvictionRecord, ownerArtifactSignal, ownerStorageOf, readEvictionRecord, readEvictionRecords, readOwnerArtifacts, writeEvictionRecord, writeOwnerArtifact, type AgentOwnership, type AgentStorageContext, type OwnershipMetadata } from "./agent-storage.ts";
+import { EVICTION_RECORD_BUCKET, hasEvictionRecord, isOwnedHomeGone, ownerArtifactSignal, ownerStorageOf, readEvictionRecord, readEvictionRecords, readOwnerArtifacts, writeEvictionRecord, writeOwnerArtifact, type AgentOwnership, type AgentStorageContext, type OwnershipMetadata } from "./agent-storage.ts";
 import { isLeadOrFork, type SpawnRole } from "./process-role.ts";
 import { mergeCumulativeCost, parseCumulativeCost as parseCost, type AgentTelemetry, type CumulativeCost } from "./agent-telemetry.ts";
 import { descendantUsageOf } from "./agent-usage-rollup.ts";
@@ -161,15 +160,18 @@ class CostEstimateState {
    * left the registry. Dropping never folds: a removed child counts only
    * through its eviction record, which supersedes every live count of the
    * same agentId. A recorded registry entry is excluded from the sum; one
-   * whose home is gone (or that has none) is dropped from the registry, while
-   * a home-present one is removal-pending and stays registered.
+   * whose home is gone for good (or that has none) is dropped from the
+   * registry. A home-present one is removal-pending and stays registered, and
+   * so does one whose home is absent under a held removal claim: that remover
+   * may still rename the home back and delete the record, after which the
+   * entry must count again.
    */
   reconcile(omit: ReadonlySet<string> = new Set()): void {
     this.refreshEvictionRecords();
     const removed: string[] = [];
     for (const [agentId, record] of this.registry) {
       if (this.evictionRecords.has(agentId)) {
-        if (!record.client && !record.launching && (!record.ownership || !existsSync(record.ownership.home))) removed.push(agentId);
+        if (!record.client && !record.launching && (!record.ownership || isOwnedHomeGone(record.ownership))) removed.push(agentId);
         continue;
       }
       if (omit.has(agentId)) continue;

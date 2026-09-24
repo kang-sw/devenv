@@ -267,12 +267,28 @@ class OwnershipLockBusyError extends Error {
   constructor(cause: unknown) { super(String(cause)); this.name = "OwnershipLockBusyError"; }
 }
 
+function ownershipLockPath(home: string): string { return join(dirname(home), `.${basename(home)}.ownership-lock`); }
+
+/**
+ * True only when an owned home is gone for good: absent, with no claim held
+ * on it, and still absent after that. A remover holding the claim may yet
+ * rename a detached home back (and then delete its eviction record), so an
+ * absent home under a held claim is not final. A claim left by a crashed
+ * remover keeps this false until a later claimant reclaims it.
+ */
+export function isOwnedHomeGone(ownership: Pick<AgentOwnership, "home">): boolean {
+  const home = resolve(ownership.home);
+  if (existsSync(home)) return false;
+  if (existsSync(ownershipLockPath(home))) return false;
+  return !existsSync(home);
+}
+
 /** A sibling lock survives atomic home detachment, serializing writers with deletion across processes. */
 function acquireOwnershipLock(home: string): OwnershipLock {
   const canonical = canonicalHome(home);
   const ownerRoot = dirname(canonical);
   if (lstatSync(ownerRoot).isSymbolicLink() || realpathSync(ownerRoot) !== ownerRoot) throw new Error("ws-pi-agent: owned-home lock ancestry is symlinked");
-  const lock = join(ownerRoot, `.${basename(canonical)}.ownership-lock`);
+  const lock = ownershipLockPath(canonical);
   const ownerFile = join(lock, "owner.json");
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
