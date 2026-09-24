@@ -7,8 +7,8 @@ related:
   260728-research-duplicate-ticket-stem-silent-resolve: duplicate-stem behavior left unchanged here
 sage-review-design: completed
 sage-review-completeness: completed
-sage-review-design-reviewed: f02b97483dfe0b37
-sage-review-completeness-reviewed: f02b97483dfe0b37
+sage-review-design-reviewed: dc5ffd168dee017f
+sage-review-completeness-reviewed: dc5ffd168dee017f
 ---
 
 # Origin-backed ticket ownership index (MVP coordination overlay)
@@ -81,10 +81,49 @@ behaves exactly as it does today.
     `AGENTS.md`, falling back the same way `wsreview.ResolveTrack` does.
   - Nothing auto-creates the ref.
   - When the ref is absent, all ticket tools keep current behavior and output
-    byte-for-byte. `tickets.acquire` and `tickets.release` succeed as a no-op
-    that reports the index is absent, so playbooks proceed unchanged.
+    byte-for-byte.
+  - **Legacy mock.** In an index-absent project, `tickets.acquire` and
+    `tickets.release` are a silent mock: they perform no validation and no
+    write, and return only a plain `ok` (text `ok`; JSON `{"status":"ok"}`).
+    - The response carries no index-absent report, marker, or setup hint.
+      A downstream project that never opted in sees nothing new.
+    - The override params added to `tickets.move` and `tickets.close` are
+      ignored silently in an index-absent project.
+    - Index-absent covers: no `origin` remote, no ref found (including the
+      cached absence), and an unreachable remote when this clone has never
+      seen an index.
   - When the ref is present, it is used automatically.
-  - There is no opt-out setting in this ticket.
+  - **Setup guidance appears only at bootstrap.** The init verb stays a
+    public tool that may be called directly; only the guidance is confined.
+    The init verb has a read-only check mode that reports the index state
+    without pushing anything: `initialized`, `uninitialized` (origin
+    reachable, no ref), `no-origin`, or `unreachable`.
+    - The check bypasses the absence cache and runs a live `ls-remote`, so
+      the bootstrap prompt reflects the remote's real state. An `initialized`
+      result may refresh the local cache ref; the other states leave no local
+      trace (A12).
+    - Init against an empty or unpushed origin (no default branch, no
+      `refs/remotes/origin/HEAD`, no `AGENTS.md` on origin) falls back through
+      the review-track resolution chain and creates the ref with zero
+      registrations rather than failing. Later piggyback registration and
+      acquire cover tickets not yet pushed.
+
+    The bootstrap playbook (`lead-bootstrap`) runs this check and is the one
+    place the uninitialized state is loud:
+    - `uninitialized`: explain what the index does and that init pushes a ref
+      to `origin` with the user's credentials, then ask the user whether to set
+      it up now. On yes, run init; if init fails (for example a rejected push),
+      report the failure and continue the rest of bootstrap. On no, change
+      nothing.
+    - `no-origin`: one line saying the index can be set up by re-running
+      bootstrap once an `origin` exists.
+    - `unreachable`: one line saying the check could not reach `origin`.
+    - `initialized`: one line confirming the index is active.
+    - Only users who run bootstrap (new projects, or users aware of the
+      feature) meet the prompt. No other tool or playbook surfaces setup
+      guidance.
+  - There is no opt-out setting in this ticket. Declining at bootstrap records
+    nothing, so a later bootstrap run asks again.
 - **Record model.** A stem maps to a registration, which carries an optional
   lease:
 
@@ -120,7 +159,10 @@ behaves exactly as it does today.
     - Any write fetches the tip for its CAS, and so refreshes the cache as a
       side effect.
   - A stale view is caught at acquire, which always CASes against the fresh
-    remote tip.
+    remote tip once the index is known to exist. Within the absence TTL,
+    acquire returns the legacy mock without contacting the remote; a lease
+    missed in the window after another clone's init is the same accepted
+    window as A9.
   - The first registrant wins. A cross-branch stem collision is an accepted
     accident and is not detected.
   - No nonce and no ticket template change.
@@ -173,9 +215,9 @@ behaves exactly as it does today.
   - **Unreachable remote.** Acquire fails loudly only when this clone has seen
     an index (its local cache ref exists).
     - When no index was ever cached, or absence was the last cached result,
-      acquire treats the index as absent. It returns the no-op with an
-      unknown/stale marker. This keeps "No ref, no change" for projects that
-      never ran init while offline.
+      acquire treats the index as absent and returns the legacy mock's plain
+      `ok`. This keeps "No ref, no change" for projects that never ran init
+      while offline.
     - There is no offline queue in this ticket.
 - **Owner-conflict matrix.** One matrix governs `tickets.acquire`,
   `tickets.move`, and `tickets.close` when the ticket's lease is held by an
@@ -264,12 +306,17 @@ behaves exactly as it does today.
   - `lead-run` acquires before spawning a worker.
     - On a refusal or a loud failure, `lead-run` stops and reports.
     - It sets the override flag only on explicit user instruction.
-    - The index-absent no-op proceeds.
+    - The legacy mock's plain `ok` proceeds like any successful acquire;
+      `lead-run` text needs no index-absent branch.
+  - `lead-bootstrap` runs the init check and handles each state as described
+    under Enablement. This is the only shipped playbook that mentions setup.
   - The worker's impl-record acquire is informational, because ownership is
     already held by the lead's track. A refusal or network failure there is
     reported and never fails the worker's run.
-  - In index mode, a `lead-scope-worktree` scope assignment also acquires the
-    scoped tickets for the worktree's track. A partial refusal (some tickets
+  - A `lead-scope-worktree` scope assignment also acquires the scoped tickets
+    for the worktree's track. It calls acquire unconditionally with no
+    index-mode check; in an index-absent project the mock's `ok` makes this
+    harmless. A partial refusal (some tickets
     held by other owners) reports each refused stem and keeps the successful
     acquires.
 - **Tool surface sketch.** Parameter names follow the existing snake_case MCP
@@ -281,7 +328,8 @@ behaves exactly as it does today.
   tickets.move(..., dangerously_override_lease_status?, reason?)    # added params
   tickets.close(..., dangerously_override_lease_status?, reason?)   # added params
   tickets.query(..., <ownership filter param>?)                     # added param; name chosen by implementer
-  <init verb>(session_key)          # name chosen by implementer within tickets.* naming
+  <init verb>(session_key, <check param>?)   # names chosen by implementer within tickets.* naming;
+                                             # check mode is read-only and returns the index state
   ```
 
 ## Integration Test Scenarios
@@ -304,13 +352,17 @@ level (A2, A3, A4, F1, F2). Later phases re-run them at tool level.
 
 - A1. There is no index ref. Every existing ticket tool's output is
   byte-identical to the pre-change output. `tickets.acquire` and
-  `tickets.release` return the index-absent no-op.
+  `tickets.release` return exactly the plain `ok` (text and JSON), with no
+  index-absent wording, even for a stem with no local file. `tickets.move` and
+  `tickets.close` with the override params set produce output identical to the
+  call without them.
 - A2. There is no index ref, and repeated ticket tool calls happen within the
   absence TTL. At most one remote discovery call is made (count remote
   invocations).
 - A3. There is no `origin` remote. Every ticket tool behaves as index-absent
   with no error and no remote call.
-- A4. The remote is unreachable.
+- A4. The remote is unreachable, and this clone already has a local cache
+  ref (it has seen the index; without one, A10 applies).
   - `tickets.query` returns within the bound.
   - Mutating tools succeed without registration within the timeout.
   - `tickets.acquire` fails loudly.
@@ -326,10 +378,13 @@ level (A2, A3, A4, F1, F2). Later phases re-run them at tool level.
 - A9. The index is created by another clone after this clone cached absence.
   It is discovered once the absence TTL expires.
 - A10. A project that never ran init goes offline after its absence TTL
-  expires. `tickets.acquire` returns the index-absent no-op with an unknown
-  marker, and does not fail.
+  expires. `tickets.acquire` returns the plain `ok`, and does not fail.
 - A11. A clone that has seen an index (cache ref present) goes offline.
   `tickets.acquire` fails loudly.
+- A12. The init check mode reports `uninitialized`, `initialized`,
+  `no-origin`, and `unreachable` in the matching setups. In every state it
+  pushes nothing. In the three non-initialized states it creates no local
+  cache ref, and after an `uninitialized` check the remote still has no ref.
 
 **B. CAS and concurrency** (Phase 1, with the verbs in Phase 2)
 
@@ -491,7 +546,7 @@ level (A2, A3, A4, F1, F2). Later phases re-run them at tool level.
 
 | fact | value | evidence |
 |---|---|---|
-| scope.span | multi-file | agents-plugin-tool/internal/mcp/implement_resolver.go, new index library under agents-plugin-tool/internal/, internal/mcp ticket handlers in server.go, agents-plugin-tool/internal/wsdoc/tickets*.go, agents-plugin/rsrc/lead-run, lead-scope-worktree, ticket-selector, ticket-batch-selector plus wsflow and agents-plugin-pi rsrc mirrors |
+| scope.span | multi-file | agents-plugin-tool/internal/mcp/implement_resolver.go, new index library under agents-plugin-tool/internal/, internal/mcp ticket handlers in server.go, agents-plugin-tool/internal/wsdoc/tickets*.go, agents-plugin/rsrc/lead-run, lead-scope-worktree, lead-bootstrap, ticket-selector, ticket-batch-selector plus wsflow and agents-plugin-pi rsrc mirrors |
 | scope.surface | public-interface | new MCP tools tickets.acquire, tickets.release, init verb; changed tickets.query, tickets.move, tickets.close, git.status output; cross-module across mcp, wsdoc, wsgit, and shipped playbooks |
 | scope.new_public_symbol | yes | tickets.acquire, tickets.release, init verb within tickets.* naming |
 | scope.new_type_contract | yes | remote index record schema v1 registration, lease, meta and the acquire signature with dangerously_override_lease_status and reason |
@@ -551,6 +606,8 @@ F1, F2, F3, F4, C9; missing ref reported as absent, not as an error.
 
 **Goal.** Add `tickets.acquire`, `tickets.release`, and the init verb:
 
+- the init verb's read-only check mode
+- the legacy mock for acquire/release in index-absent projects
 - track resolution
 - the owner-conflict matrix for acquire
 - the worker `impl` record through acquire
@@ -559,7 +616,8 @@ F1, F2, F3, F4, C9; missing ref reported as absent, not as an error.
 - landed-closure pruning on every write
 - the monthly GC
 
-**Verification.** Scenarios A1, A4 (tool level), A10, A11, A6, A7, A8, B1, B4, B5, B7,
+**Verification.** Scenarios A1 (acquire/release plain `ok`; the override-param
+clause waits for Phase 3), A4 (tool level), A10, A11, A12, A6, A7, A8, B1, B4, B5, B7,
 C1, C2, C3, C4, C7, C8, D1–D5, E1 (through close), E2, E3, E4 (acquire
 refusal), E5 (acquire refusal), E6, E7, E8, E10. Every existing ticket-tool test must pass
 unchanged with no ref present.
@@ -579,7 +637,8 @@ unchanged with no ref present.
 
 **Verification.** Scenarios C5, C6, E4 (query hint), E5 (query hint), E9, F5,
 G1–G5; tool-level re-runs of A2, A3, F1, F2. The no-ref path stays
-byte-identical (A1 re-run).
+byte-identical (A1 re-run, including its override-param clause for
+`tickets.move` and `tickets.close`, which Phase 2 cannot yet exercise).
 
 ### Phase 4: Playbook integration and dogfood
 
@@ -589,8 +648,12 @@ byte-identical (A1 re-run).
   - `lead-run` acquires before worker spawn.
   - The worker playbooks (`ticket-worker`, `ticket-worker-elevated`) record the
     impl through `tickets.acquire` from the impl branch.
-  - `lead-scope-worktree` acquires on scope assignment in index mode.
+  - `lead-scope-worktree` acquires on every scope assignment, with no
+    index-mode check.
   - The queue selectors use the ownership filter.
+  - `lead-bootstrap` runs the init check after its mode handler (every mode
+    except `refuse`) and handles each state per the Enablement decision: ask
+    the user on `uninitialized`, one line otherwise.
   - Takeover flag discipline: explicit user instruction only.
 - Mirror to wsflow where `wsflow-mirroring.md` requires.
 - Keep `agents-plugin-pi/rsrc/` byte-identical for every changed playbook, so
@@ -605,6 +668,8 @@ byte-identical (A1 re-run).
 - Scenario H1, and E1 end-to-end.
 - Playbook text covers the refusal and failure handling for `lead-run` and for
   the worker impl-record acquire.
+- `lead-bootstrap` text covers all four check states, asks before init, and
+  changes nothing on decline. No other playbook mentions index setup.
 - Playbook and package tests pass, including the wsflow drift tests and
   `TestPiMirrorUpToDate`.
 - The dogfood cycle is recorded in the Result: init, acquire from a track,

@@ -255,7 +255,12 @@ registration and ownership on top without changing folder semantics.
   - It is created only by an explicit bootstrap, which reads origin's
     `AGENTS.md` and review-track rather than local state.
   - Project-wide settings live in the index, not in `AGENTS.md`.
-  - The uninitialized state may be loud.
+  - The uninitialized state is loud only at bootstrap (MVP): `lead-bootstrap`
+    runs a read-only index check and asks the user whether to set it up.
+    Opt-in is reserved for users who run bootstrap (new projects, or users
+    aware of the feature). No other tool or playbook surfaces setup guidance,
+    so a legacy downstream project that never bootstraps sees no change.
+    Declining records nothing.
 - **Status model.**
   - Stage and ownership are orthogonal axes.
   - The ownership unit is the track (work line).
@@ -283,8 +288,10 @@ registration and ownership on top without changing folder semantics.
 
   - Owner identity is the triple `(email, clone_id, track)`.
   - `tickets.release` removes only one's own lease.
-- **No-index behavior.** `tickets.acquire` and `tickets.release` are an
-  index-absent no-op.
+- **No-index behavior.** In an index-absent project `tickets.acquire` and
+  `tickets.release` are a silent mock that returns only a plain `ok`, with no
+  index-absent report or marker. A visible "index absent" response was rejected
+  because it would confuse downstream projects that never opted in.
 - **Worker impl record.** The worker records impl by calling `tickets.acquire`
   from its impl branch, which requires a matching owner triple.
   - `tickets.close` on an unleased ticket creates a `closed` lease owned by the
