@@ -6,6 +6,10 @@ related:
   260924-feat-pi-agent-channel-transport: prerequisite transport
   260921-bug-pi-subtree-publication-lifecycle-isolation: prior Windows rename-contention fix on the snapshot path this retires
   260920-bug-pi-nested-subagent-terminal-delivery-stall: cause unknown; this ticket is not claimed to fix it
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 1702acbc26b21803
+sage-review-completeness-reviewed: 1702acbc26b21803
 ---
 
 # Move Pi subtree lifecycle state onto the parent-child control channel
@@ -24,7 +28,13 @@ Each child publishes `<childHome>/subtree.json` through an atomic temp-and-renam
 
 - The whole snapshot moves to the channel: counts, the busy fence, and `descendants[]` together. Splitting identity from counts would carry one structure over two transports.
 - The child sends full revisioned snapshots, and the parent keeps the last revision it has seen.
-- The busy-before-dispatch fence waits for the parent's acknowledgment of the busy revision before a grandchild is dispatched.
+  - Revisions are scoped to one launch generation: the record's `launchGeneration`, which `260924-feat-pi-agent-channel-transport` carries in the hello and in every message.
+  - Within a generation, the child's revision counter survives reconnects, and so does the parent's last-seen value. A lower revision is ignored.
+  - When the parent accepts a hello with a new generation, it resets its last-seen revision, so a relaunched child's counter can restart low.
+  - After a reconnect, the child sends its latest snapshot in the resume section of the hello.
+  - A snapshot equal to the last one sent is not sent again. Streamed deltas and duplicate events produce no sends.
+- The busy-before-dispatch fence waits for the parent's acknowledgment of the busy revision before a grandchild is dispatched. The wait is bounded. If no acknowledgment arrives in time, or the channel is down, `beginSubtreeDispatch` refuses the dispatch. That is today's fail-closed outcome for a failed busy publication. The worker chooses the bound and records it in the Result.
+- When a direct child's live state is cleared, its cached descendants are removed and republished, as today.
 - A disconnected or not-yet-connected channel maps to "waiting", preserving today's fail-closed semantics.
 - The existing bounds on `descendants[]` (count and depth) and the durable `waitingOnChildren` mirror into ownership and sidecar records for restart recovery are preserved.
 - `subtree.json`, the `fs.watch` watcher, and the per-event synchronous read are retired. So is the subtree snapshot's own call into `writePrivateJson`. The shared helper keeps its Windows rename retry, because the fork context envelope still uses it.
@@ -65,11 +75,16 @@ Each child publishes `<childHome>/subtree.json` through an atomic temp-and-renam
 
 ### Phase 1: Channel-delivered subtree snapshots with an acknowledged busy fence
 
+Replace the snapshot file, the watcher, and the per-event read with channel snapshots. Add the busy-revision acknowledgment and its bounded fence, and report the latest snapshot in the hello's resume section. Retire `SubtreeChannel` and adjust the legacy-Explore check and the fork-resume read.
+
 Verification:
 
-- A grandchild is never dispatched before the parent acknowledges the busy revision. Test this by delaying or dropping the acknowledgment.
+- A grandchild is never dispatched before the parent acknowledges the busy revision. Test this by delaying the acknowledgment. When the acknowledgment is dropped, or the channel is down, the bounded wait refuses the dispatch.
 - A disconnect during outstanding work leaves the parent in waiting-on-children. Settlement proceeds only after a reconnected, quiescent snapshot or process exit.
-- Nested identity propagates to the root within the existing bounds.
-- No `subtree.json` is written and no watcher is installed.
-- Out-of-order or duplicate snapshots cannot regress the parent's view, because last revision wins.
+- A relaunched child whose revision counter restarts is accepted under its new generation.
+- Within one generation, out-of-order or duplicate snapshots cannot regress the parent's view.
+- Nested identity propagates to the root within the existing bounds. Clearing a direct child removes its cached descendants.
+- No `subtree.json` is written, no watcher is installed, and unchanged snapshots and streamed deltas cause no sends.
+- A new Explore record is not rejected as legacy. An older `PersistedForkResume` record that still has `subtreeChannel` loads and relaunches.
+- After a restart, the durable `waitingOnChildren` mirror in the ownership and sidecar records still restores waiting-on-children.
 - The acknowledgment latency before grandchild dispatch is recorded.

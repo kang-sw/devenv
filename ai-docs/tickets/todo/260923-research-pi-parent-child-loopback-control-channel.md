@@ -3,7 +3,8 @@ title: Investigate a Pi parent-child control channel with a pluggable transport
 related:
   260923-bug-pi-execute-approval-accepted-worker-hangs: repaired after and on top of this channel; its incident defects stay independently diagnosable
   260924-research-pi-root-single-authority-durable-state: split out; root-authored durable state is not in this scope
-  260924-bug-pi-retention-fork-prune-and-cross-owner-checkpoint: TCP-independent defect found by the inventory; its checkpoint part waits for this research's usage design
+  260924-bug-pi-retention-fork-prune-and-cross-owner-checkpoint: TCP-independent defect found by the inventory (fork-child prune gate)
+  260924-bug-pi-retention-cross-owner-checkpoint-fold: TCP-independent defect split from the retention ticket; waits for the usage-rollup fold schema
   260924-bug-pi-durable-write-hygiene: TCP-independent defects found by the inventory
   260920-bug-pi-nested-subagent-terminal-delivery-stall: cause unknown; this channel is not claimed to fix it
   260924-feat-pi-agent-channel-transport: derived child - transport abstraction, backends, bootstrap, readiness hello
@@ -71,7 +72,7 @@ An Explore inventory of `agents-plugin-pi/src/` on 2026-09-24 found 18 mechanism
 | A5 | execute-approval decision file, 200-ms poll | moves to the channel |
 | A6 | `subtree.json` snapshot plus `fs.watch`: counts, busy-before-dispatch fence, `descendants[]` | moves to the channel as a whole |
 | A7 | `ownership.json` plus lock directory | stays on the filesystem |
-| A8 | session-start retention and cross-owner checkpoint fold | out of scope; `260924-bug-pi-retention-fork-prune-and-cross-owner-checkpoint` |
+| A8 | session-start retention and cross-owner checkpoint fold | out of scope; `260924-bug-pi-retention-fork-prune-and-cross-owner-checkpoint` and `260924-bug-pi-retention-cross-owner-checkpoint-fold` |
 | A9 | parent reads the child's `session.jsonl` for telemetry | live and durable cumulative usage move to the channel; the Pi-owned file itself stays |
 | A10 | cost checkpoint | stays; its evicted-baseline fold follows the usage design here |
 | A11/A12 | shutdown sidecar and thread registry | self-owned, not parent-child; see `260921-bug-pi-subagent-registry-checkpoint` and `260924-bug-pi-durable-write-hygiene` |
@@ -168,7 +169,7 @@ A delegated, provider-free prototype ran in a separate worktree. Its code is spi
   - the whole subtree snapshot (A6): counts, the busy-before-dispatch fence, and `descendants[]`;
   - descendant usage (A9), both live and durable cumulative;
   - fork and web-tools readiness (A3, A4), folded into the authenticated channel hello.
-  `ownership.json` (A7) stays on the filesystem. Root single-authority authoring of durable state is a separate research, `260924-research-pi-root-single-authority-durable-state`. Defects independent of the channel are tracked in `260924-bug-pi-retention-fork-prune-and-cross-owner-checkpoint` and `260924-bug-pi-durable-write-hygiene`.
+  `ownership.json` (A7) stays on the filesystem. Root single-authority authoring of durable state is a separate research, `260924-research-pi-root-single-authority-durable-state`. Defects independent of the channel are tracked in `260924-bug-pi-retention-fork-prune-and-cross-owner-checkpoint`, `260924-bug-pi-retention-cross-owner-checkpoint-fold`, and `260924-bug-pi-durable-write-hygiene`.
 - **Core deliverable: a message-level transport abstraction.**
   - The backend contract is `send(msg)`, `onMessage`, and `close()`, with ordered, at-most-once delivery within one connection generation. Framing lives inside each backend.
   - Disconnect is judged by process lifecycle, not by the backend. Acknowledgment and deduplication belong to the protocol layer above the backend.

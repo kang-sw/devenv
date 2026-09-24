@@ -5,6 +5,10 @@ related:
   260923-research-pi-parent-child-loopback-control-channel: source research; its Outcome Ledger is this ticket's authority
   260924-feat-pi-agent-channel-transport: prerequisite transport
   260923-bug-pi-execute-approval-accepted-worker-hangs: blocked by this ticket; keeps its incident defects
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 3d0a60a4c4b011dc
+sage-review-completeness-reviewed: 3d0a60a4c4b011dc
 ---
 
 # Move Pi execute-approval decisions onto the parent-child control channel
@@ -19,10 +23,15 @@ Today `ws-approve` in the parent writes `<home>/approvals/<encoded cmd_id>.decis
 - The approval request stays on the Pi RPC event path.
 - Approval *waiting* state need not survive a disconnected channel; after reconnect or restart, a fresh approval request is acceptable. A command whose start status is uncertain is never replayed or re-executed automatically.
 - The child is the authority on consumption, and there is no durable "started" marker.
-  - The child sends a consumption acknowledgment for a `cmd_id` before it starts that command.
+  - This ticket defines an approval-level consumption acknowledgment message. It is not a generic transport ack. The child sends it for a `cmd_id` before it starts that command.
+  - If sending the acknowledgment fails because the connection has already ended, the child does not start the command. It keeps the `cmd_id` pending, and the next hello reports it.
+  - The pending `cmd_id` travels in the resume section of the transport's hello.
   - After a reconnect, the child's hello reports which `cmd_id` it is still waiting on, if any. A decision whose `cmd_id` is not reported as pending counts as consumed.
   - If the child process dies, its pending tool call dies with it, so the command cannot be re-executed.
 - Re-delivery is conservative. On disconnect, the parent discards every decision it sent that has not been acknowledged. It never re-sends that decision automatically, even when the child still reports the `cmd_id` as pending after reconnecting. Instead, the still-pending `cmd_id` goes back to the user as a fresh approval request, and only a decision sent over the new connection can be consumed.
+- When `ws-approve` finds no live connection, it discards the decision immediately and returns an error saying the decision was not delivered. It never reports success for an undelivered decision.
+- The decision file's helpers go with it: `approvalDecisionPath` and the Windows-safe `cmd_id` filename encoding have no other consumer (`agents-plugin-pi/src/execute-gateway.ts`).
+- A process spawned by the child, such as its shell, has no way to deliver a decision. The decision file is gone, the transport's bootstrap values (endpoint, credential, and generation, as `260924-feat-pi-agent-channel-transport` defines them) are deleted from the environment, and the channel is the child's own client socket.
 - Ownership protection keeps its lifetime. Today `pendingApproval.decisionWritten` protects the record until the decision is consumed (5e4502e1). Its replacement protects the record until the consumption acknowledgment arrives or the child exits.
 - If a mechanism above would contradict the other decisions, the worker stops and escalates.
 - The incident defects of `260923-bug-pi-execute-approval-accepted-worker-hangs` stay with that ticket: the raw `pendingApprovalCommandId` against `SAFE_COMPONENT` ownership validation, and the parent/child code-version and path mismatch.
@@ -36,7 +45,7 @@ Today `ws-approve` in the parent writes `<home>/approvals/<encoded cmd_id>.decis
 - 4455ec78 (2026-09-05, commit): "computeLeadActiveTools and validatePendingApproval are the two security-relevant pure functions ... the latter is the cmd_id race-binding" — bearing: constrains
 - 4455ec78 (2026-09-05, commit): "deny/run-instead/aborted outcomes inside ws-worker-exec are returned as ordinary tool-result content, not thrown: they are meaningful information the spawned model must read and act on" — bearing: constrains
 - 5e4502e1 (2026-09-09, commit): "[fixed] C4 approval protection lifetime through decision consumption." — bearing: constrains
-- 260921-bug-pi-approval-file-cmd-id-windows-illegal-char (2026-09-22, commit 731decce): "The implementation preserves logical cmd_ids while applying one shared injective filesystem encoding on both writer and reader paths." — bearing: constrains
+- 260921-bug-pi-approval-file-cmd-id-windows-illegal-char (2026-09-22, commit 731decce): "The implementation preserves logical cmd_ids while applying one shared injective filesystem encoding on both writer and reader paths." — bearing: superseded (the encoding is removed with the decision file; logical `cmd_id` preservation still holds)
 
 ## Route Facts
 
@@ -45,11 +54,11 @@ Today `ws-approve` in the parent writes `<home>/approvals/<encoded cmd_id>.decis
 | scope.span | multi-file | agents-plugin-pi/src/execute-gateway.ts decision writer and waitForDecisionFile reader; agents-plugin-pi/src/spawner.ts sets WS_PI_APPROVAL_DIR at L2191 and records pendingApproval at L2367; channel protocol module from 260924-feat-pi-agent-channel-transport not yet landed |
 | scope.surface | cross-module | parent ws-approve and child ws-worker-exec exchange a new channel message across the transport module, execute-gateway.ts, and spawner.ts |
 | scope.new_public_symbol | yes | channel approval decision and acknowledgment message types; names not yet chosen |
-| scope.new_type_contract | yes | approval decision message bound to cmd_id plus consumption acknowledgment and a started marker or equivalent |
+| scope.new_type_contract | yes | approval decision message bound to cmd_id, consumption acknowledgment, and the pending cmd_id reported in the reconnect hello; no durable started marker |
 | scope.test_surface | existing | agents-plugin-pi/test/execute-gateway.test.ts and agents-plugin-pi/test/spawner.test.ts cover the decision file today; transport contract suite pending 260924-feat-pi-agent-channel-transport |
 | complexity.reuse_points | unconfirmed | channel send and onMessage contract from 260924-feat-pi-agent-channel-transport is unlanded and could not be read |
 | complexity.side_effect_risk | high | the gate decides whether a shell command runs, and a disconnect mishandled could re-execute or silently apply a command |
-| risk.correctness | high | started versus unconsumed distinction across disconnect and crash is undesigned and must never replay a command |
+| risk.correctness | high | child-authoritative consumption, discard-on-disconnect of unacknowledged decisions, and re-asking the user must together never replay or silently apply a command |
 | risk.fit | moderate | builds on an unlanded transport API and must retire WS_PI_APPROVAL_DIR plus pendingApproval decisionWritten protection coherently |
 | risk.test | high | crash-after-start and disconnect-before-consumption need process-level scenarios on both pipe and TCP backends |
 | risk.security_or_contract | high | the change owns the execute-approval authorization path and the cmd_id binding that stops cross-command approval |
@@ -58,12 +67,17 @@ Today `ws-approve` in the parent writes `<home>/approvals/<encoded cmd_id>.decis
 
 ### Phase 1: Channel-delivered approval decisions
 
-Replace the decision file with a channel message. Include whatever acknowledgment the protocol layer needs so that the parent knows the decision was consumed.
+Replace the decision file with a channel message and add the consumption acknowledgment message. Report the pending `cmd_id` in the hello's resume section.
 
 Verification:
 
 - Approve and deny both reach the waiting `ws-worker-exec` over the channel, and no decision file or approval directory is created.
-- A disconnect before consumption leads to a fresh approval request, not a lost or silently applied decision. The parent never re-sends the earlier decision automatically after reconnect.
+- A disconnect before consumption leads to a fresh approval request, not a lost or silently applied decision. After reconnect, the child's hello reports the pending `cmd_id`, and the parent never re-sends the earlier decision automatically.
+- A decision sent just before a disconnect and arriving after the child reconnected is never consumed; only a decision sent over the new connection is.
+- `ws-approve` with no live connection returns a not-delivered error.
+- A failed acknowledgment send means the command does not start.
+- On both backends, a decision from anywhere other than the parent's connection is never consumed. Test this from a shell command the child runs.
+- Ownership protection holds from the approval request until the consumption acknowledgment arrives or the child exits. Sending the decision alone does not release it.
 - A child crash or disconnect after the command has started never re-executes that command.
 - Decisions for one `cmd_id` cannot satisfy a different pending command.
 - The contract suite from `260924-feat-pi-agent-channel-transport` covers the approval message types on both backends.

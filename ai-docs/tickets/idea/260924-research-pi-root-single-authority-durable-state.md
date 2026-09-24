@@ -2,7 +2,8 @@
 title: Investigate root single-authority authoring of durable Pi tree state
 related:
   260923-research-pi-parent-child-loopback-control-channel: provides the parent-child transport that descendants would use to send updates upward
-  260924-bug-pi-retention-fork-prune-and-cross-owner-checkpoint: concrete multi-writer defects this research may reframe
+  260924-bug-pi-retention-fork-prune-and-cross-owner-checkpoint: concrete retention defect this research may reframe
+  260924-bug-pi-retention-cross-owner-checkpoint-fold: concrete multi-writer checkpoint defect this research may reframe
   260924-bug-pi-durable-write-hygiene: write-mechanics fixes that stand regardless of this research
 ---
 

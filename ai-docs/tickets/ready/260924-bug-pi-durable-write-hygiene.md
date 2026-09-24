@@ -5,6 +5,10 @@ related:
   260921-refactor-pi-shared-atomic-write-util: shared atomic-write helper this work may reuse
   260921-bug-pi-subagent-registry-checkpoint: owns the shutdown sidecar's non-atomic write; excluded here
   260913-bug-ws-pi-spawn-delegation-metadata-second-write-rejection: adjacent ownership write-path defect
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-completeness-reviewed: b6f54edb69670b7a
+sage-review-design-reviewed: b6f54edb69670b7a
 ---
 
 # Pi adapter durable-file write hygiene (ownership rewrites, Windows rename retry, thread registry, liveness pid)
@@ -26,11 +30,13 @@ Items owned elsewhere are out of scope here: the non-atomic approval decision an
 ## Decisions
 
 - `ownership.json` is written only when its content changes.
-  - The 5-s observer writes only when the session signature changes, and dormant records stay observed.
-  - `refreshAgentTelemetry` writes only when telemetry changed.
+  - The 5-s observer writes only when the session signature differs from the persisted one, so a failed write, for example on a busy lock, is retried at the next sample. Dormant records stay observed.
+  - `refreshAgentTelemetry` writes only when the telemetry differs from the persisted record. The comparison is against what is on disk, not against the in-memory before/after flag. It does an unlocked read, and it takes the lock and re-checks only when there is a difference.
+    - `updateOwnership` swallows failures such as a busy lock. Comparing against disk means a failed write is retried on the next refresh.
+    - If `260924-feat-pi-agent-channel-usage-rollup` lands first, the comparison includes its descendant-usage field.
   - A timestamp by itself is not a change.
 - The ownership rename retries on Windows EPERM/EBUSY by reusing the retry that `writePrivateJson` (`agents-plugin-pi/src/fork-context.ts`) already has.
-  - Only the rename-retry loop and its test-hook seam are extracted into a shared helper. Do not route these writes through `writePrivateJson` itself.
+  - Only the rename-retry loop and its test-hook seam are extracted into a shared helper. Do not route these writes through `writePrivateJson` itself. The worker chooses which module owns the helper.
   - Each file keeps its current file mode, JSON formatting, and temp-file naming.
   - This work does not wait for `260921-refactor-pi-shared-atomic-write-util`. If that refactor lands first, use its helper instead.
 - `saveThreadRegistryFile` writes atomically: a temp write followed by a rename, with the same Windows retry. Its file mode is unchanged.
@@ -39,7 +45,7 @@ Items owned elsewhere are out of scope here: the non-atomic approval decision an
 ## Prior Decisions
 
 - 260924-feat-pi-agent-channel-subtree-state (2026-09-24, Decisions): "`subtree.json`, the `fs.watch` watcher, and the per-event synchronous read are retired. So is the subtree snapshot's own call into `writePrivateJson`. The shared helper keeps its Windows rename retry" — bearing: supports
-- 260924-feat-pi-agent-channel-usage-rollup (2026-09-24, Decisions): "The parent stores the reported cumulative value in the child's ownership telemetry. The parent is already the single writer of that record." — bearing: constrains
+- 260924-feat-pi-agent-channel-usage-rollup (2026-09-24, Decisions): "The parent stores the reported descendant value in the child's ownership telemetry, next to the existing own-usage fields. The parent is already the single writer of that record." — bearing: constrains
 - 260921-bug-pi-subtree-publication-lifecycle-isolation (2026-09-21, Decisions): "Keep the existing bounded Windows retry behavior. Async writer queues, writer leases, alternate transports, and broader registry recovery are outside this hotfix." — bearing: supports
 - b318a127 (2026-09-21, commit): "Used deterministic hooks for retry tests instead of timing-dependent Windows process contention." — bearing: supports
 - 260913-bug-ws-pi-ownership-observer-lock-contention-spams-tui (2026-09-13, commit a8a4abe6): "The observer retries through its existing lifecycle and five-second sampling points, so synchronous waiting or a new retry timer would block the Pi event loop without improving safety." — bearing: constrains
@@ -58,7 +64,7 @@ Items owned elsewhere are out of scope here: the non-atomic approval decision an
 | scope.test_surface | existing | agents-plugin-pi/test/agent-storage.test.ts, test/ownership-contention.test.ts, test/ask.test.ts, test/fork-context.test.ts, test/agent-telemetry*.test.ts |
 | complexity.reuse_points | confirmed | writePrivateJson retry loop and hooks seam at fork-context.ts#L177-L198 |
 | complexity.side_effect_risk | moderate | ownership.json writes share the lock with retention and deletion gating, and the observer error path downgrades liveness to unknown at agent-storage.ts#L434-L439 |
-| risk.correctness | moderate | the telemetry change snapshot at spawner.ts#L655-L660 compares more fields than the telemetry it writes, and a missed real change would leave durable telemetry or signature stale; updatedAt has no reader outside validOwnership |
+| risk.correctness | moderate | the existing in-memory change snapshot at spawner.ts#L655-L660 compares more fields than the telemetry it writes, which is why Decisions compare against the persisted record instead; a missed real change would leave durable telemetry or signature stale; updatedAt has no reader outside validOwnership |
 | risk.fit | low | follows the existing writePrivateJson temp-then-rename-with-retry pattern; the overlapping refactor 260921-refactor-pi-shared-atomic-write-util is addressed by a Decision |
 | risk.test | moderate | needs injected EPERM/EBUSY on a non-win32 host, a no-lock assertion for unchanged samples, and a mid-write crash simulation; only writePrivateJson has an injection seam today |
 | risk.security_or_contract | moderate | durable ownership.json schema read by retention across processes must keep accepting legacy pid at agent-storage.ts#L210; an atomic registry write via writePrivateJson would also change the ws-threads.json file mode to 0600 |
@@ -70,6 +76,7 @@ Items owned elsewhere are out of scope here: the non-atomic approval decision an
 Verification:
 
 - Repeated observer samples with an unchanged session signature, and telemetry refreshes with unchanged telemetry, perform no `ownership.json` write and take no lock.
+- A changed session signature or changed telemetry is still written. An observer or telemetry write that failed, for example on a busy lock, is written on the next sample or refresh even when nothing changed again in memory.
 - An injected EPERM/EBUSY on the ownership rename is retried and then succeeds. After the retry budget is exhausted, it fails as today.
-- A simulated crash during the thread registry write never leaves a truncated registry.
+- A crash during the thread registry write never leaves a truncated registry. Simulate the crash by failing the rename through the helper's test-hook seam, and check that the previous registry is intact.
 - Newly allocated records carry no `liveness.pid`, and records that still have the field load unchanged.
