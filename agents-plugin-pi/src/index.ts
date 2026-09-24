@@ -217,7 +217,8 @@ import { registerAuditCommands } from "./audit.ts";
 import { registerWsSkillTool } from "./lead-skills.ts";
 import { createToolPreviewTuiRef, loadToolResultTuiModules } from "./tool-result-render.ts";
 import { createAgentStorageContext, pruneStaleAgentHomes, reportOwnershipDiagnostic, type AgentStorageContext } from "./agent-storage.ts";
-import { createAgentFooterSessionLifecycle, persistOwnedTelemetryRollup, type AgentFooterContext, type AgentFooterSessionLifecycle } from "./agent-footer.ts";
+import { createAgentFooterSessionLifecycle, descendantUsageValue, persistOwnedTelemetryRollup, type AgentFooterContext, type AgentFooterSessionLifecycle } from "./agent-footer.ts";
+import { createDescendantUsageReporter, descendantUsageReporterRef, evaluateDescendantUsage } from "./agent-usage-rollup.ts";
 import { loadHostPiTui } from "./pi-tui.ts";
 import { addClaudeDelegateIfLead, registerClaudeDelegateSession } from "./claude-delegate.ts";
 import { createClaudeDesignReviewContextProvider } from "./claude-design-review.ts";
@@ -407,6 +408,13 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   const channel = channelBootstrap ? await ChildChannel.connect(channelBootstrap, { resume: () => ({ ...(subtreeUpstream?.resume() ?? {}), ...approvalGate.resume() }) }) : undefined;
   subtreeUpstream = channel ? new SubtreeUpstream(channel) : undefined;
   if (channel) approvalGate.attach(channel);
+  // One reporter per channel keeps the report sequence monotonic for the
+  // whole launch; each session_start points it at that session's registry.
+  // A factory re-run without a bootstrap (a session replacement that reuses
+  // the cached module) keeps it. A reload re-imports this module with a fresh
+  // ref and no bootstrap, so reporting stops for the rest of that launch;
+  // RPC children have no reload command.
+  if (channel) descendantUsageReporterRef.current = createDescendantUsageReporter(channel);
   const delegation = readDelegationPolicy();
   // Same-name wrappers preserve Pi's native schema, diff renderer, queue, and
   // result shape while the explicit policy — not tool visibility — authorizes
@@ -773,6 +781,11 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
       executeWorker: (record) => { record.onApprovalPending = onApprovalPending; },
     });
     publishSubtree(agentTools.rpcRegistry);
+    // A hop with a parent reports its descendant usage. After a restart the
+    // value is rebuilt here from the revived records and the checkpoint.
+    const usageRegistry = agentTools.rpcRegistry;
+    descendantUsageReporterRef.current?.setSource(() => descendantUsageValue(usageRegistry));
+    evaluateDescendantUsage();
     if (readSpawnRole(process.env) === "worker" || readSpawnRole(process.env) === "explore") {
       const orphanPush = buildOrphanPush(recoveredRegistry);
       if (orphanPush) pi.sendMessage({ customType: "ws-agent-orphaned", content: JSON.stringify(orphanPush), display: true, details: orphanPush }, { deliverAs: "nextTurn" });
@@ -964,6 +977,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     // teardown is a graceful RpcClient.stop() rather than a fire-and-forget
     // SIGTERM — see spawner.ts's AgentToolsHandle doc comment).
     await persistShutdownAgentSnapshots(agentTools, leadSidecarPath, threadHandle);
+    descendantUsageReporterRef.current?.setSource(undefined);
     agentTools = undefined;
     rpcRegistryRef.current = undefined;
     leadSessionFile = undefined;

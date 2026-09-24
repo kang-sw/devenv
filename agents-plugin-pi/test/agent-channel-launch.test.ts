@@ -12,8 +12,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RpcClient } from "@earendil-works/pi-coding-agent";
 import { createAgentStorageContext } from "../src/agent-storage.ts";
-import { CHANNEL_PROTOCOL_VERSION, connectChannelEndpoint, readAndDeleteChannelBootstrap, type ParentChannel } from "../src/agent-channel.ts";
-import { sendToAgent, spawnAgent, stopAgent, type RpcAgentRecord } from "../src/spawner.ts";
+import { CHANNEL_PROTOCOL_VERSION, connectChannelEndpoint, readAndDeleteChannelBootstrap, type ChildChannel, type ParentChannel } from "../src/agent-channel.ts";
+import { agentCostRefreshRef, sendToAgent, spawnAgent, stopAgent, type RpcAgentRecord } from "../src/spawner.ts";
+import { DESCENDANT_USAGE_MESSAGE, descendantUsageReporterRef } from "../src/agent-usage-rollup.ts";
 import { closeFakeChildren, connectFakeChild, type FakeChildOptions } from "./fixtures/channel-child.ts";
 
 const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -228,6 +229,69 @@ test("a send that arrives while a resume is failing waits, then relaunches on th
     assert.equal(record.launchGeneration, 3);
     assert.ok(record.client && record.channel?.live);
   } finally { rpc.restore(); }
+});
+
+describe("descendant-usage reports over the launch's channel", () => {
+  const usage = { knownUsd: 1.25, knownContributors: 2, unknownContributors: 0, descendants: 3 };
+
+  /**
+   * Sends one report from the child side of `record`'s current launch and
+   * returns the spy trail: the footer refresh (`agentCostRefreshRef`) and this
+   * hop's own reporter (evaluation point 2), in call order.
+   */
+  async function report(record: RpcAgentRecord, child: ChildChannel): Promise<string[]> {
+    const savedRefresh = agentCostRefreshRef.current, savedReporter = descendantUsageReporterRef.current;
+    const calls: string[] = [];
+    agentCostRefreshRef.current = () => { calls.push("refresh"); };
+    descendantUsageReporterRef.current = { setSource() {}, evaluate() { calls.push("evaluate"); } };
+    try {
+      await new Promise(resolve => setImmediate(resolve));
+      calls.length = 0;
+      child.send({ t: DESCENDANT_USAGE_MESSAGE, seq: 1, usage });
+      const deadline = Date.now() + 2_000;
+      while (!record.descendantUsage && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise(resolve => setImmediate(resolve));
+      return [...calls];
+    } finally {
+      agentCostRefreshRef.current = savedRefresh;
+      descendantUsageReporterRef.current = savedReporter;
+    }
+  }
+
+  test("spawn: a report from the child updates the record, refreshes the footer, and re-evaluates this hop's own report", async () => {
+    const rpc = installRpcHarness();
+    const registry = new Map<string, RpcAgentRecord>();
+    const ctx = contexts(registry, {});
+    try {
+      let child: ChildChannel | undefined;
+      rpc.state.hook = async function () { child = await connectFakeChild(this.options?.env, this.options?.args); };
+      const { agent_id } = await spawnAgent(registry as any, ctx.fork.spawn as any, ctx.fork.params as any);
+      const record = registry.get(agent_id)!;
+      assert.ok(child && record.channel?.live, "precondition: the fake child holds the launch's channel");
+      const calls = await report(record, child);
+      assert.deepEqual(record.descendantUsage, usage);
+      assert.deepEqual(record.descendantUsageOrder, { generation: record.launchGeneration, seq: 1 });
+      assert.deepEqual(calls, ["refresh", "evaluate"]);
+    } finally { rpc.restore(); }
+  });
+
+  test("dormant relaunch: the new launch's channel is wired the same way", async () => {
+    const rpc = installRpcHarness();
+    const registry = new Map<string, RpcAgentRecord>();
+    const ctx = contexts(registry, {});
+    try {
+      const record = await ctx.dormant("fork");
+      let child: ChildChannel | undefined;
+      rpc.state.hook = async function () { child = await connectFakeChild(this.options?.env, this.options?.args); };
+      await sendToAgent(registry as any, ctx.resume as any, record.agentId, "again");
+      assert.equal(record.launchGeneration, 2);
+      assert.ok(child && record.channel?.live, "precondition: the fake child holds the relaunch's channel");
+      const calls = await report(record, child);
+      assert.deepEqual(record.descendantUsage, usage);
+      assert.deepEqual(record.descendantUsageOrder, { generation: 2, seq: 1 });
+      assert.deepEqual(calls, ["refresh", "evaluate"]);
+    } finally { rpc.restore(); }
+  });
 });
 
 test("concurrent spawns never share a generated alias: the guards and the registration are one synchronous step after the bind", async () => {

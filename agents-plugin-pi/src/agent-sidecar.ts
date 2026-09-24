@@ -253,7 +253,14 @@ export function parseOrphans(raw: string): PersistedOrphan[] {
     const normalizedOwnership = rawOwnership && rawOwnership.exploreMode !== undefined
       ? { ...rawOwnership, exploreMode: ownershipMode }
       : rawOwnership;
-    const ownership = normalizedOwnership && validDescriptor(normalizedOwnership) && normalizedOwnership.agentId === o.agentId && normalizedOwnership.sessionPath === o.sessionPath && (() => { const disk = readOwnership(normalizedOwnership.home); return !!disk && disk.home === normalizedOwnership.home && disk.ownerSessionId === normalizedOwnership.ownerSessionId && disk.agentId === normalizedOwnership.agentId && disk.sessionPath === normalizedOwnership.sessionPath && disk.role === normalizedOwnership.role && disk.exploreMode === normalizedOwnership.exploreMode; })() ? normalizedOwnership : undefined;
+    // An owned entry whose home no longer exists was removed, and its removal
+    // (retention, possibly another owner's lead) already folded its subtree
+    // cost into this owner's checkpoint: reviving it, even as a legacy record,
+    // would count that cost twice. A home that stats but cannot be read still
+    // falls through; one that cannot be stat'ed at all reads as removed (its
+    // session file is equally unreachable).
+    if (normalizedOwnership && validDescriptor(normalizedOwnership) && normalizedOwnership.agentId === o.agentId && !existsSync(normalizedOwnership.home)) continue;
+    const ownership =normalizedOwnership && validDescriptor(normalizedOwnership) && normalizedOwnership.agentId === o.agentId && normalizedOwnership.sessionPath === o.sessionPath && (() => { const disk = readOwnership(normalizedOwnership.home); return !!disk && disk.home === normalizedOwnership.home && disk.ownerSessionId === normalizedOwnership.ownerSessionId && disk.agentId === normalizedOwnership.agentId && disk.sessionPath === normalizedOwnership.sessionPath && disk.role === normalizedOwnership.role && disk.exploreMode === normalizedOwnership.exploreMode; })() ? normalizedOwnership : undefined;
     out.push({
       agentId: o.agentId,
       alias: typeof o.alias === "string" ? o.alias : undefined,
@@ -375,10 +382,16 @@ export interface OrphanRoleWiring {
  *
  * An id already present on the registry is left untouched (a live child always
  * wins over a stale sidecar entry) and is not returned.
+ *
+ * An owned orphan whose home no longer exists is not revived: its removal
+ * (retention, possibly run by another owner's lead) already folded its
+ * subtree cost into this owner's checkpoint, so reviving it would count
+ * that cost twice.
  */
 export function reviveOrphans(registry: RpcAgentRegistry, orphans: PersistedOrphan[], wiring: OrphanRoleWiring = {}): RpcAgentRecord[] {
   const revived: RpcAgentRecord[] = [];
   for (const orphan of orphans) {
+    if (orphan.ownership && !existsSync(orphan.ownership.home)) continue;
     const existing = registry.get(orphan.agentId);
     if (existing) {
       // A live/current registration wins. A different, confirmed-stopped owned

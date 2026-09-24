@@ -12,6 +12,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: eb0729af858637e4
 sage-review-completeness-reviewed: eb0729af858637e4
+completed: 2026-09-24
 ---
 
 # Roll up cumulative descendant usage over the Pi parent-child control channel
@@ -90,3 +91,81 @@ Verification:
 - A fork hop's own usage still excludes its inherited parent-history prefix, and the widget and audit still show each direct child's context tokens.
 - No hop reads any session other than its direct children's. Unchanged values and streamed deltas send no usage message.
 - These tests fail when the fold or the checkpoint restore is removed.
+
+### Result (19e57c98) - 2026-09-24
+
+Landed in `aba83809..19e57c98` on `impl/develop/wrath-slam-never`.
+
+**What landed**
+
+- New module `agents-plugin-pi/src/agent-usage-rollup.ts`.
+  - **Message.** `descendant-usage`, with the payload `{t, gen, seq, usage}`. `usage` is a `CumulativeCost` (`knownUsd`, `knownContributors`, `unknownContributors`, `descendants`), the footer's own unit; tokens are not rolled up.
+  - **Parent side** (`acceptDescendantUsage`, `attachDescendantUsage`):
+    - it keeps the highest seq within a launch generation;
+    - the first value from a newer generation replaces the stored one;
+    - a report from an older generation is ignored;
+    - it drops a report whose channel generation is not the record's current launch.
+    - The accepted value is stored on the record and in the child's ownership telemetry as `telemetry.descendantUsage`. The ordering state is live-only, because launch generations restart with the parent process.
+  - **Child side** (`createDescendantUsageReporter`): one reporter per channel, so seq stays monotonic across session replacements. It sends only when the value changes; a zero value never sends. Its latest report rides the reconnect hello's `resume.descendantUsage` and is sent again once after the reconnect completes; the seq check drops the duplicate.
+  - **Evaluation points:**
+    - after the hop's own reduction of a direct child (`refreshAgentTelemetry`);
+    - after a direct child's report changes its stored value;
+    - once at `session_start` after revival.
+    - Streamed deltas never reach an evaluation point.
+- **Per-hop value** (`descendantUsageValue`, `agent-footer.ts`): the subtree totals of the registry-resident direct children, dormant ones included, plus the owner checkpoint's evicted baseline. A subtree total is own usage plus the last stored descendant value. Every hop that owns children has a cost estimate (`costEstimateFor`), footer or not, and the footer reuses it. The direct-child own-usage reduction is unchanged, so no hop reads any session other than its direct children's.
+- **Channel.** New `ChildChannel.provideResume(key, provider)` for feature resume state; `readiness` is a reserved key.
+- **Fold rule.** A fold happens once per actual removal:
+  - capacity eviction (`foldAndPersist`);
+  - retention (`persistOwnedTelemetryRollup`).
+  - Each folds the whole subtree: own plus the stored descendant value. `persist`/`reconcile` now drop, not fold, identities that have left the registry.
+  - Sidecar revival (`parseOrphans` and `reviveOrphans`) skips an owned entry whose home no longer exists. Its removal already folded it; without the skip, a non-root hop would have counted it twice after the root lead's cross-owner retention.
+
+**Checkpoint schema (for 260924-bug-pi-retention-cross-owner-checkpoint-fold)**
+
+- The file is unchanged at `ws-agents/<owner>/.cost-estimate/checkpoint.json`, `version: 1`, `{lead, evictedBaseline, agents[]}`.
+- `agents[].cost` now holds each direct child's **subtree** total, not own-only usage.
+- `evictedBaseline` accumulates whole removed subtrees.
+- Nothing folds at persist time. The only writers that fold are eviction, and retention's `beforeRemove`. Retention's read-modify-write still takes no lock; that race remains that ticket's.
+- The durable descendant value per child is `ownership.json` `telemetry.descendantUsage`, written only by the parent.
+
+**Verification**
+
+- Test files:
+  - `test/agent-usage-rollup.test.ts` (unit, 16 cases);
+  - `test/agent-usage-rollup.integration.test.ts` (multi-process, 8 cases);
+  - `test/fixtures/usage-hop.ts` (hop process);
+  - spawner wiring cases in `test/agent-channel-launch.test.ts`;
+  - a real-Pi `session_start` revival-and-report case in `test/agent-channel.integration.test.ts`;
+  - a footer-reuse case in `test/agent-footer.test.ts`.
+- Mapping to the verification list:
+  - **Three-level tree:** the root footer shows the grandchild's and great-grandchild's usage only through the channel while M is parked.
+  - **Restarts and resume:** child restart on a new generation, parent restart rebuilt from ownership telemetry, and resume through the reconnect hello each keep the total, with no double count.
+  - **Ordering:** duplicate, reordered and late previous-generation reports are unit-tested, and the generation replacement is also covered over the wire.
+  - **Eviction then restart:** the checkpoint `evictedBaseline` equals G own plus L, exactly once, and the root total is unchanged.
+  - **Dormant child:** it stays in the sum.
+  - **Fork hop:** its own usage still excludes the inherited prefix and keeps `contextTokens`.
+  - **Session reads:** hop-recorded read paths show only direct children's sessions, including across a restart.
+  - **Send suppression:** unchanged values send nothing.
+- Mutations, each confirmed failing and then reverted:
+  - fold own-only in `foldAndPersist` (unit and integration);
+  - `loadCheckpoint` returning empty (unit and integration);
+  - removing either spawner `attachDescendantUsage` call;
+  - removing `evaluateDescendantUsage` from the change handler;
+  - removing the `index.ts` reporter install, `setSource`, or the `session_start` evaluate;
+  - removing the telemetry-reset restore;
+  - removing the `parseOrphans` removed-home skip;
+  - removing the `reviveOrphans` gate;
+  - removing the reconnect resend.
+- Full `npm test`: 1731 tests, 1729 pass, 0 fail, 2 skipped.
+  - Two known unrelated flakes appeared intermittently in earlier runs: `recursive-worker.test.ts` "channel notifications propagate a nested parent edge through two process hops", and "iterator abort-result cannot mutate settled output". Both fail on the baseline too, and both pass on rerun.
+- The multi-process middle hops are fixture processes that run the production modules, channel, sidecar and checkpoint paths, not real Pi processes. A real Pi child cannot be made to spawn a grandchild without an LLM turn. The real-Pi integration case covers the `index.ts` wiring separately.
+
+**Known edges (accepted)**
+
+- A child with no own-usage telemetry keeps its descendant value in memory only.
+- While a child's telemetry is reset (for example after a session change), the durable descendant copy is absent until the next refresh recreates telemetry.
+- A crash that loses the sidecar under-counts.
+- Final reports sent during a child's shutdown are lost when the channel closes.
+- A `reload` re-imports the extension with a fresh reporter ref and no bootstrap, so reporting stops for that launch. RPC children have no reload command.
+- A lead-less hop's checkpoint stores a zero lead with `found: true`. The footer would show `$0.00`, not unknown, only if that session is later mounted with a footer. This was already possible after any eviction at a hop.
+- `agents-plugin-pi/` is not listed in AGENTS.md's Implementation Conventions table for `shipped-surface-boundary.md`, although its `src/` ships.

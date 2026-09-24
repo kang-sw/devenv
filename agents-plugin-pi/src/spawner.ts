@@ -108,7 +108,8 @@ import { parseApprovalConsumedMessage, pendingApprovalFromResume } from "./appro
 import { allocateAgentHome, createAgentStorageContext, inspectOwnedHomeRemoval, isOwnedSessionPath, observeSessionWrite, persistOwnershipTelemetry, readOwnership, removeOwnedAgentHome, touchOwnership, updateOwnership, writeOwnership, type AgentOwnership, type AgentStorageContext } from "./agent-storage.ts";
 import { ownerNotifyRef } from "./owner-notify.ts";
 export { ownerNotifyRef } from "./owner-notify.ts";
-import { readSessionEntries, reduceTelemetry, type AgentTelemetry, type TelemetryOrigin } from "./agent-telemetry.ts";
+import { readSessionEntries, reduceTelemetry, type AgentTelemetry, type CumulativeCost, type TelemetryOrigin } from "./agent-telemetry.ts";
+import { attachDescendantUsage, descendantUsageOf, evaluateDescendantUsage } from "./agent-usage-rollup.ts";
 import { CHILD_MANAGEMENT_TOOLS, DEFAULT_MAX_AGENT_DEPTH, DELEGATION_ENV, READ_TOOLS, NETWORK_TOOLS, childPolicy, readDelegationPolicy, readOnlyWsTools, type DelegationPolicy, type PlaybookProfile, type RenderProvenance } from "./delegation-policy.ts";
 import { normalizeWriteScopes, type EffectiveWriteCapability, type WriteScope } from "./write-scopes.ts";
 import { createWebSearch } from "./web-search.ts";
@@ -483,6 +484,14 @@ export interface RpcAgentRecord {
   /** Bumped once per process launch (spawn, dormant resume, relaunch); the channel accepts only this generation. */
   launchGeneration?: number;
   /**
+   * The child's last accepted descendant-usage report (`agent-usage-rollup.ts`):
+   * everything below it, excluding its own usage. Mirrored into `telemetry`
+   * for durability; kept here too so a telemetry reset cannot drop it.
+   */
+  descendantUsage?: CumulativeCost;
+  /** Live-only ordering state for descendant-usage reports: the accepted launch generation and its highest sequence. */
+  descendantUsageOrder?: { generation: number; seq: number };
+  /**
    * Settles (never rejects) when the launch that claimed `client` has either
    * reached its first prompt or failed. A send that lands in between waits on
    * it rather than prompting a client whose process has not started.
@@ -698,11 +707,20 @@ export function refreshAgentTelemetry(
 ): boolean {
   const snapshot = () => JSON.stringify({ telemetry: record.telemetry, floor: record.telemetryContextFloor, model: record.observedModel, effort: record.observedEffort, context: record.observedContextTokens });
   const before = snapshot();
+  // The reported descendant value is not derived from this session: it
+  // survives every reset of the own-usage telemetry below.
+  const descendants = descendantUsageOf(record);
   const finish = (): boolean => {
+    if (descendants) {
+      record.descendantUsage = descendants;
+      if (record.telemetry) record.telemetry.descendantUsage = descendants;
+    }
     const changed = before !== snapshot();
     // Compared against the persisted record, not `changed`: the snapshot covers
     // more than the durable telemetry, and a failed write must retry next refresh.
     if (record.ownership) persistOwnershipTelemetry(record.ownership.home, record.telemetry);
+    // Evaluation point 1: this hop's own reduction of a direct child ran.
+    evaluateDescendantUsage();
     return changed;
   };
   const path = state?.sessionFile ?? record.sessionPath;
@@ -1115,6 +1133,12 @@ function triggerAgentCostRefresh(): void {
   } catch {
     // Cosmetic accounting must never fail an agent lifecycle transition.
   }
+}
+
+/** A direct child's descendant report changed its stored value: refresh the footer and forward (evaluation point 2). */
+function onDescendantUsageChanged(): void {
+  triggerAgentCostRefresh();
+  evaluateDescendantUsage();
 }
 
 /** Read current idleness with the independent compaction hold composed in. Delivery also requires an initialized, live accessor. */
@@ -3189,6 +3213,7 @@ export async function spawnAgent(
     };
     registry.set(agentId, record);
     observeChildSubtree(registry, record, channel);
+    attachDescendantUsage(record, channel, onDescendantUsageChanged);
     startOwnedSessionObserver(record);
     return { agentId, eviction, sessionPath, forkSourcePath, record };
   };
@@ -3421,6 +3446,7 @@ export async function sendToAgent(
       if (record.client !== client) throw new Error("ws-pi-agent: launch stopped before the child started");
       record.channel = channel;
       observeChildSubtree(registry, record, channel);
+      attachDescendantUsage(record, channel, onDescendantUsageChanged);
       Object.assign(options.env!, channel.bootstrapEnv());
       await client.start();
       await awaitChannelStage(client, channel.hello(), ctx.channel?.helloTimeoutMs ?? CHANNEL_HELLO_TIMEOUT_MS, "hello");

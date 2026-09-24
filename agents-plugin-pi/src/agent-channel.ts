@@ -590,6 +590,7 @@ export class ChildChannel {
   private connection: ChannelConnection | undefined;
   private closedFlag = false;
   private readonly readinessByKind = new Map<string, unknown>();
+  private readonly resumeProviders = new Map<string, () => unknown>();
   private readonly messageListeners = new Set<(msg: Record<string, unknown>) => void>();
   private readonly reconnectListeners = new Set<() => void>();
   private readonly disconnectListeners = new Set<() => void>();
@@ -642,6 +643,17 @@ export class ChildChannel {
     try { if (this.connection) this.send({ t: "ready", kind, payload }); } catch { /* carried by the reconnect */ }
   }
 
+  /**
+   * Registers one feature's resume state under `key` for every later hello.
+   * A provider returning `undefined` contributes nothing to that hello.
+   * `readiness` is reserved for the channel's own sticky readiness.
+   */
+  provideResume(key: string, provider: () => unknown): () => void {
+    if (key === "readiness") throw new Error("ws-pi-channel: resume key \"readiness\" is reserved");
+    this.resumeProviders.set(key, provider);
+    return () => { if (this.resumeProviders.get(key) === provider) this.resumeProviders.delete(key); };
+  }
+
   close(): void {
     this.closedFlag = true;
     this.connection?.close();
@@ -692,7 +704,13 @@ export class ChildChannel {
         clearTimeout(timer);
         reject(new ChannelRejected("closed-before-welcome"));
       });
-      const resume = { ...(this.options.resume?.() ?? {}), ...(reconnect && this.readinessByKind.size ? { readiness: Object.fromEntries(this.readinessByKind) } : {}) };
+      const provided: Record<string, unknown> = {};
+      for (const [key, provider] of this.resumeProviders) {
+        let value: unknown;
+        try { value = provider(); } catch { continue; /* one feature's failure must not block the hello */ }
+        if (value !== undefined) provided[key] = value;
+      }
+      const resume = { ...(this.options.resume?.() ?? {}), ...provided, ...(reconnect && this.readinessByKind.size ? { readiness: Object.fromEntries(this.readinessByKind) } : {}) };
       conn.send({ t: "hello", v: CHANNEL_PROTOCOL_VERSION, cred: this.bootstrap.credential, gen: this.generation, pid: process.pid, reconnect, resume });
     });
   }
