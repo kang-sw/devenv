@@ -492,6 +492,16 @@
         }
       }
     },
+    "260924-feat-worktree-list-pool-inspection": {
+      "registered_at": "2026-09-24T11:29:12Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-09-24T11:29:12Z"
+      }
+    },
     "260924-idea-ownership-dogfood-scratch-a": {
       "registered_at": "2026-09-24T10:41:27Z"
     },
