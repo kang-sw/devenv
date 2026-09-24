@@ -476,7 +476,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-09-24T11:29:04Z"
+        "touched_at": "2026-09-24T11:29:59Z",
+        "impl": {
+          "branch": "impl/develop/twirl-sleet-curvy"
+        }
       }
     },
     "260924-feat-origin-ticket-ownership-index": {
