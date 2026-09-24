@@ -21,7 +21,7 @@ import { ChildChannel, ParentChannel } from "../src/agent-channel.ts";
 import { allocateAgentHome, createAgentStorageContext, persistOwnershipTelemetry, readEvictionRecord, readOwnership } from "../src/agent-storage.ts";
 import { createAgentFooterController, registerAgentCostOwner, type AgentFooterComponent, type AgentFooterController } from "../src/agent-footer.ts";
 import type { CumulativeCost } from "../src/agent-telemetry.ts";
-import { DESCENDANT_USAGE_MESSAGE, DESCENDANT_USAGE_RESUME_KEY, attachDescendantUsage } from "../src/agent-usage-rollup.ts";
+import { DESCENDANT_USAGE_MESSAGE, DESCENDANT_USAGE_RESUME_KEY, attachDescendantUsage, restoreDescendantUsage } from "../src/agent-usage-rollup.ts";
 import { refreshAgentTelemetry, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
 import { truncateToWidth, visibleWidth } from "../src/pi-tui.ts";
 
@@ -256,7 +256,7 @@ test("three-level tree: the grandchild's and great-grandchild's usage reach the 
   assert.ok(root.changes >= 1, "the root footer changed through accepted channel reports");
   assert.ok(m.sent >= 1, "M sent its descendant value over the channel");
   assert.ok(g.sent >= 1, "G sent its descendant value over the channel");
-  assert.deepEqual(readOwnership(root.recordM.ownership!.home)!.telemetry?.descendantUsage, G_SUBTREE);
+  assert.deepEqual(readOwnership(root.recordM.ownership!.home)!.descendantUsage, G_SUBTREE);
   assert.equal(root.recordM.telemetry?.estimatedUsd, M_OWN, "M's own usage is still the root's own reduction");
 });
 
@@ -304,7 +304,7 @@ test("parent restart: a fresh root rebuilt from M's ownership telemetry keeps th
   await root.hop!.shutdown();
   const home = root.recordM.ownership!.home;
   const durable = readOwnership(home)!;
-  assert.deepEqual(durable.telemetry?.descendantUsage, G_SUBTREE, "the reported value is durable in M's ownership telemetry");
+  assert.deepEqual(durable.descendantUsage, G_SUBTREE, "the reported value is durable in M's ownership record");
 
   // Root restart: a new registry and footer on the same root storage.
   const { version, ownerSessionId, agentId, role, sessionPath } = durable;
@@ -312,6 +312,8 @@ test("parent restart: a fresh root rebuilt from M's ownership telemetry keeps th
     agentId, sessionPath: sessionPath!, ownership: { version, ownerSessionId, agentId, home, role, sessionPath }, systemPromptPath: "usage-hop.md",
     telemetry: durable.telemetry, wsToolNames: [], toolGroup: "full-worker", spawnRole: "worker", streaming: false, running: false, reportLog: [],
   } as RpcAgentRecord;
+  // Revival's durable read (`reviveOrphans` / `rehydrateForkRecord`).
+  restoreDescendantUsage(revived);
   root.mountRegistry(revived);
   assert.equal(root.footerD(), total, "the restarted root rebuilds the total from durable state");
 

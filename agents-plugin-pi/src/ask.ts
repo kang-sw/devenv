@@ -130,6 +130,7 @@ import { loadHostPiTui, wrapTextWithAnsi, type Component, type EditorTheme, type
 import { captureForkContext, captureRegisteredTools, captureUnflushedForkSource, effectiveForkDescriptor, type ForkContext } from "./fork-context.ts";
 import { renameWithWindowsRetry, type RenameRetryHooks } from "./atomic-write.ts";
 import type { LeadPromptRef } from "./lead-bootstrap.ts";
+import { restoreDescendantUsage } from "./agent-usage-rollup.ts";
 import { readOwnership, removedAgentMessage, validDescriptor } from "./agent-storage.ts";
 import { isRemovedAgent } from "./agent-footer.ts";
 import { parseTelemetry, type AgentTelemetry, type TelemetryOrigin } from "./agent-telemetry.ts";
@@ -789,6 +790,7 @@ export function rehydrateForkRecord(agentId: string, resume: PersistedForkResume
   // Thread-only rows are rendered from forkResume while dormant; reconcile
   // the persisted child file here, never from the widget render path.
   refreshAgentTelemetry(record);
+  restoreDescendantUsage(record);
   startOwnedSessionObserver(record);
   return record;
 }

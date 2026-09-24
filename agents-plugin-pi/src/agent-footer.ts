@@ -12,7 +12,7 @@
 import { homedir } from "node:os";
 import { createFooterGitCache, type GitCacheOptions } from "./footer-git-status.ts";
 import { relative, resolve, sep } from "node:path";
-import { EVICTION_RECORD_BUCKET, hasEvictionRecord, isOwnedHomeGone, ownerArtifactSignal, ownerStorageOf, readEvictionRecord, readOwnerArtifacts, tryReadEvictionRecords, writeEvictionRecord, writeOwnerArtifact, type AgentOwnership, type AgentStorageContext, type OwnershipMetadata } from "./agent-storage.ts";
+import { EVICTION_RECORD_BUCKET, durableDescendantUsage, hasEvictionRecord, isOwnedHomeGone, ownerArtifactSignal, ownerStorageOf, readEvictionRecord, readOwnerArtifacts, tryReadEvictionRecords, writeEvictionRecord, writeOwnerArtifact, type AgentOwnership, type AgentStorageContext, type OwnershipMetadata } from "./agent-storage.ts";
 import { isLeadOrFork, type SpawnRole } from "./process-role.ts";
 import { mergeCumulativeCost as mergeAgentCost, parseCumulativeCost as parseCost, type AgentTelemetry, type CumulativeCost } from "./agent-telemetry.ts";
 import { descendantUsageOf } from "./agent-usage-rollup.ts";
@@ -298,7 +298,7 @@ function costEstimateFor(registry: RpcAgentRegistry, storage = registryStorage.g
  * subtree totals of its registry-resident direct children, dormant ones
  * included, plus its removed children (the checkpoint's legacy evicted
  * baseline and its eviction records). After a restart the sum is rebuilt from
- * the revived records' ownership telemetry, the checkpoint, and the records.
+ * the revived records' durable usage, the checkpoint, and the records.
  * Reads no session file. Undefined without an owner storage. May drop a
  * removed direct child from `registry` (see the module header).
  */
@@ -355,7 +355,7 @@ export function retentionEvictionCost(metadata: OwnershipMetadata): CumulativeCo
   const storage = ownerStorageOf(metadata);
   if (!storage || !safePart(metadata.agentId)) return undefined;
   const tracked = loadCheckpoint(storage).checkpoint.agents.find(agent => agent.agentId === metadata.agentId);
-  return mergeAgentCost(tracked?.cost, subtreeCost(metadata.telemetry, metadata.telemetry?.descendantUsage));
+  return mergeAgentCost(tracked?.cost, subtreeCost(metadata.telemetry, durableDescendantUsage(metadata)));
 }
 
 /**

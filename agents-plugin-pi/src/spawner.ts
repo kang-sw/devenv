@@ -110,7 +110,7 @@ import { PUBLIC_EXPLORE_MODE_TIERS, WS_PI_EXPLORE_MODE_ENV, WS_PI_FORK_AFFINITY_
 import { FORK_READINESS_KIND, captureForkContext, compareForkRegistrations, writePrivateJson, type ForkContext, type ForkReadiness } from "./fork-context.ts";
 import { CHANNEL_BOOTSTRAP_ENVS, ParentChannel, type ChannelBindOptions, type ChannelConnection, type ChannelHello } from "./agent-channel.ts";
 import { consumedApprovalsFromResume, parseApprovalConsumedMessage, pendingApprovalFromResume } from "./approval-protocol.ts";
-import { allocateAgentHome, createAgentStorageContext, inspectOwnedHomeRemoval, isOwnedSessionPath, observeSessionWrite, persistOwnershipTelemetry, readOwnership, removedAgentMessage, removeOwnedAgentHome, touchOwnership, updateOwnership, writeOwnership, type AgentOwnership, type AgentStorageContext } from "./agent-storage.ts";
+import { allocateAgentHome, createAgentStorageContext, inspectOwnedHomeRemoval, isOwnedSessionPath, observeSessionWrite, persistOwnershipDescendantUsage, persistOwnershipTelemetry, readOwnership, removedAgentMessage, removeOwnedAgentHome, touchOwnership, updateOwnership, writeOwnership, type AgentOwnership, type AgentStorageContext } from "./agent-storage.ts";
 import { ownerNotifyRef } from "./owner-notify.ts";
 export { ownerNotifyRef } from "./owner-notify.ts";
 import { readSessionEntries, reduceTelemetry, type AgentTelemetry, type CumulativeCost, type TelemetryOrigin } from "./agent-telemetry.ts";
@@ -494,8 +494,9 @@ export interface RpcAgentRecord {
   launchGeneration?: number;
   /**
    * The child's last accepted descendant-usage report (`agent-usage-rollup.ts`):
-   * everything below it, excluding its own usage. Mirrored into `telemetry`
-   * for durability; kept here too so a telemetry reset cannot drop it.
+   * everything below it, excluding its own usage. Persisted as the ownership
+   * record's sibling `descendantUsage` field, outside `telemetry`, so a
+   * telemetry reset cannot drop it.
    */
   descendantUsage?: CumulativeCost;
   /** Live-only ordering state for descendant-usage reports: the accepted launch generation and its highest sequence. */
@@ -735,14 +736,18 @@ export function refreshAgentTelemetry(
   // survives every reset of the own-usage telemetry below.
   const descendants = descendantUsageOf(record);
   const finish = (): boolean => {
-    if (descendants) {
-      record.descendantUsage = descendants;
-      if (record.telemetry) record.telemetry.descendantUsage = descendants;
-    }
+    if (descendants) record.descendantUsage = descendants;
+    // The legacy location is read, never written: the value lives in the
+    // record field and the ownership record's sibling field.
+    if (record.telemetry) delete record.telemetry.descendantUsage;
     const changed = before !== snapshot();
     // Compared against the persisted record, not `changed`: the snapshot covers
     // more than the durable telemetry, and a failed write must retry next refresh.
+    // The telemetry write migrates a legacy on-disk copy before dropping it.
     if (record.ownership) persistOwnershipTelemetry(record.ownership.home, record.telemetry);
+    // Retry a failed report write, but only for a value accepted live in this
+    // process: a revived record's value came from disk or an older snapshot.
+    if (record.ownership && record.descendantUsageOrder && record.descendantUsage) persistOwnershipDescendantUsage(record.ownership.home, record.descendantUsage);
     // Evaluation point 1: this hop's own reduction of a direct child ran.
     evaluateDescendantUsage();
     return changed;

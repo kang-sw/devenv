@@ -45,6 +45,13 @@ export interface OwnershipMetadata extends AgentOwnership {
   createdAt: number; lastActivityAt: number; updatedAt: number;
   /** Latest durable child-attributable usage projection, used by ancestor footer aggregation and eviction roll-up. */
   telemetry?: AgentTelemetry;
+  /**
+   * The child's last reported descendant usage, kept beside `telemetry` so a
+   * telemetry reset or an absent telemetry never touches it. Records written
+   * before this field carry the value in `telemetry.descendantUsage` instead;
+   * read through `durableDescendantUsage`.
+   */
+  descendantUsage?: CumulativeCost;
   /** `pid` is legacy: it held the allocating parent's pid, never the child's. New records omit it; old records keep it and stay valid. */
   liveness: { lifecycle: "starting" | "live" | "stopping" | "stopped" | "unknown"; running?: boolean; observedAt?: number; pid?: number; instanceNonce?: string; threadBound?: boolean; ownerHeld?: boolean; pendingQuestion?: boolean; waitingOnChildren?: boolean; pendingDelivery?: boolean; pendingApprovalCommandId?: string; recovery?: "none" | "sidecar" | "thread" | "revived" };
   sessionSignature?: { mtimeMs: number; size: number };
@@ -376,6 +383,7 @@ export function validOwnership(value: unknown): value is OwnershipMetadata {
     (l.waitingOnChildren === undefined || typeof l.waitingOnChildren === "boolean") && (l.pendingDelivery === undefined || typeof l.pendingDelivery === "boolean") &&
     (l.pendingApprovalCommandId === undefined || SAFE_COMPONENT.test(l.pendingApprovalCommandId)) &&
     (o.telemetry === undefined || parseTelemetry(o.telemetry) !== undefined) &&
+    (o.descendantUsage === undefined || parseCumulativeCost(o.descendantUsage) !== undefined) &&
     (l.recovery === undefined || ["none","sidecar","thread","revived"].includes(l.recovery)) &&
     (signature === undefined || (Number.isFinite(signature.mtimeMs) && Number.isFinite(signature.size) && signature.size >= 0));
 }
@@ -384,18 +392,19 @@ function validDelegationDescriptor(value: unknown): boolean {
   if (value === undefined) return true;
   try { parseDelegationPolicy(value); return true; } catch { return false; }
 }
-type OwnershipUpdate = Partial<Pick<OwnershipMetadata, "lastActivityAt" | "liveness" | "delegation" | "telemetry">>;
+type OwnershipUpdate = Partial<Pick<OwnershipMetadata, "lastActivityAt" | "liveness" | "delegation" | "telemetry" | "descendantUsage">>;
 export function updateOwnership(home: string, update: OwnershipUpdate): OwnershipMetadata | undefined {
   return updateOwnershipWhen(home, update);
 }
-/** `needed` re-checks the locked current record; false returns it without a write. */
-function updateOwnershipWhen(home: string, update: OwnershipUpdate, needed?: (current: OwnershipMetadata) => boolean): OwnershipMetadata | undefined {
+/** `needed` re-checks the locked current record; false returns it without a write. A function `update` is computed from that locked record. */
+function updateOwnershipWhen(home: string, updateOf: OwnershipUpdate | ((current: OwnershipMetadata) => OwnershipUpdate), needed?: (current: OwnershipMetadata) => boolean): OwnershipMetadata | undefined {
   let lock: OwnershipLock | undefined;
   try {
     lock = acquireOwnershipLock(home);
     const current = readOwnershipUnlocked(lock.home);
     if (!current) throw new Error("ownership metadata is missing or unreadable");
     if (needed && !needed(current)) return current;
+    const update = typeof updateOf === "function" ? updateOf(current) : updateOf;
     const now = Date.now();
     const next = { ...current, ...update, liveness: { ...current.liveness, ...update.liveness }, lastActivityAt: Math.max(current.lastActivityAt, update.lastActivityAt ?? current.lastActivityAt), updatedAt: now };
     writeOwnershipUnlocked(next, lock.home);
@@ -407,10 +416,15 @@ function updateOwnershipWhen(home: string, update: OwnershipUpdate, needed?: (cu
 }
 export function touchOwnership(home: string): boolean { return updateOwnership(home, { lastActivityAt: Date.now() }) !== undefined; }
 
-function sameTelemetry(persisted: AgentTelemetry | undefined, next: AgentTelemetry | undefined): boolean {
+function samePersisted(persisted: unknown, next: unknown): boolean {
   // The persisted side is parsed JSON; round-trip the in-memory side so
   // undefined-valued keys and key order cannot count as a change.
   return isDeepStrictEqual(persisted ?? null, next === undefined ? null : JSON.parse(JSON.stringify(next)));
+}
+
+/** A record's durable descendant usage: the sibling field, else the legacy copy inside its telemetry. */
+export function durableDescendantUsage(metadata: Pick<OwnershipMetadata, "descendantUsage" | "telemetry"> | undefined): CumulativeCost | undefined {
+  return metadata?.descendantUsage ?? metadata?.telemetry?.descendantUsage;
 }
 
 /**
@@ -418,11 +432,26 @@ function sameTelemetry(persisted: AgentTelemetry | undefined, next: AgentTelemet
  * refresh takes no lock and writes nothing; because the comparison is against
  * disk, a write that failed (for example on a busy lock) is retried by the
  * next refresh even when memory did not change again.
+ *
+ * Legacy migration: a record written before the sibling `descendantUsage`
+ * field keeps that value in `telemetry.descendantUsage`. When the sibling is
+ * absent on disk, the same locked write copies the legacy value into it, so
+ * replacing (or clearing) the telemetry never erases the only copy.
  */
 export function persistOwnershipTelemetry(home: string, telemetry: AgentTelemetry | undefined): void {
   const persisted = readOwnership(home);
-  if (persisted && sameTelemetry(persisted.telemetry, telemetry)) return;
-  updateOwnershipWhen(home, { telemetry }, current => !sameTelemetry(current.telemetry, telemetry));
+  if (persisted && samePersisted(persisted.telemetry, telemetry)) return;
+  updateOwnershipWhen(home, current => {
+    const legacy = current.descendantUsage === undefined ? current.telemetry?.descendantUsage : undefined;
+    return { telemetry, ...(legacy ? { descendantUsage: legacy } : {}) };
+  }, current => !samePersisted(current.telemetry, telemetry));
+}
+
+/** Writes the sibling descendant-usage field only when it differs from disk; never touches telemetry. */
+export function persistOwnershipDescendantUsage(home: string, usage: CumulativeCost): void {
+  const persisted = readOwnership(home);
+  if (persisted && samePersisted(persisted.descendantUsage, usage)) return;
+  updateOwnershipWhen(home, { descendantUsage: usage }, current => !samePersisted(current.descendantUsage, usage));
 }
 
 export type OwnedHomeRemovalResult =

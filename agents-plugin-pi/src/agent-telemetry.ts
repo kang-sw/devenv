@@ -28,9 +28,9 @@ export interface AgentTelemetry {
   partialEstimatedUsd?: number;
   /**
    * The child's last reported usage of everything below it, excluding its own
-   * usage (which the fields above reduce from its session). Written only by
-   * the parent, from the child's channel reports; never derived from the
-   * child's session file.
+   * usage (which the fields above reduce from its session). Legacy location:
+   * records written before `OwnershipMetadata.descendantUsage` carry it here.
+   * It is still parsed and read as a fallback, and no longer written.
    */
   descendantUsage?: CumulativeCost;
 }

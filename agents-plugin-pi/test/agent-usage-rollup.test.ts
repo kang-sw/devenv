@@ -11,10 +11,10 @@ import fs from "node:fs";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { afterEach, describe, test } from "node:test";
 import { ChildChannel, ParentChannel } from "../src/agent-channel.ts";
-import { allocateAgentHome, createAgentStorageContext, persistOwnershipTelemetry, readEvictionRecord, readOwnership, removeOwnedAgentHome, updateOwnership } from "../src/agent-storage.ts";
+import { allocateAgentHome, createAgentStorageContext, persistOwnershipDescendantUsage, persistOwnershipTelemetry, readEvictionRecord, readOwnership, removeOwnedAgentHome, updateOwnership } from "../src/agent-storage.ts";
 import { parseTelemetry, type CumulativeCost } from "../src/agent-telemetry.ts";
 import {
   DESCENDANT_USAGE_MESSAGE,
@@ -27,6 +27,7 @@ import {
 import { descendantUsageValue, persistAgentCostCheckpoint, persistEvictedAgentCost, registerAgentCostOwner, retentionEvictionCost } from "../src/agent-footer.ts";
 import { evictForCapacity, refreshAgentTelemetry, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
 import { captureOrphans, readAndClearSidecarAt, reviveOrphans, writeSidecarAt } from "../src/agent-sidecar.ts";
+import { captureForkResume, rehydrateForkRecord } from "../src/ask.ts";
 
 const roots = new Set<string>();
 afterEach(() => { for (const root of roots) rmSync(root, { recursive: true, force: true }); roots.clear(); });
@@ -87,28 +88,33 @@ describe("parent-side ordering", () => {
     assert.equal(acceptDescendantUsage(child, 1, { seq: 1, usage: usd(1) }), true);
   });
 
-  test("an accepted value is stored in ownership telemetry beside the own-usage fields; unchanged values write nothing", t => {
+  test("an accepted value is stored in the sibling ownership field, not in telemetry; unchanged values write nothing", t => {
     const child = record("child", createAgentStorageContext("lead", root()), .1);
     acceptDescendantUsage(child, 1, { seq: 1, usage: usd(2) });
     const persisted = readOwnership(child.ownership!.home)!;
     assert.equal(persisted.telemetry?.estimatedUsd, .1);
-    assert.deepEqual(persisted.telemetry?.descendantUsage, usd(2));
+    assert.deepEqual(persisted.descendantUsage, usd(2));
+    assert.equal(persisted.telemetry?.descendantUsage, undefined, "new writes do not populate the legacy location");
+    assert.equal(child.telemetry?.descendantUsage, undefined);
     const writes = t.mock.method(fs, "renameSync");
     syncBuiltinESMExports();
     try {
       persistOwnershipTelemetry(child.ownership!.home, child.telemetry);
-      assert.equal(writes.mock.callCount(), 0, "the write-on-change comparison covers the descendant field: no change, no write");
+      persistOwnershipDescendantUsage(child.ownership!.home, usd(2));
+      assert.equal(writes.mock.callCount(), 0, "the write-on-change comparisons are against disk: no change, no write");
       acceptDescendantUsage(child, 1, { seq: 2, usage: usd(3) });
       assert.equal(writes.mock.callCount(), 1, "a changed descendant field alone is a change");
     } finally { t.mock.restoreAll(); syncBuiltinESMExports(); }
-    assert.deepEqual(readOwnership(child.ownership!.home)!.telemetry?.descendantUsage, usd(3));
+    assert.deepEqual(readOwnership(child.ownership!.home)!.descendantUsage, usd(3));
   });
 
-  test("a child without own-usage telemetry keeps the value in memory and never clears its durable record", () => {
+  test("a child without own-usage telemetry persists the value and keeps its record intact", () => {
     const child = record("child", createAgentStorageContext("lead", root()), undefined);
     assert.equal(acceptDescendantUsage(child, 1, { seq: 1, usage: usd(2) }), true);
     assert.deepEqual(descendantUsageOf(child), usd(2));
-    assert.ok(readOwnership(child.ownership!.home), "the ownership record is intact");
+    const persisted = readOwnership(child.ownership!.home)!;
+    assert.deepEqual(persisted.descendantUsage, usd(2));
+    assert.equal(persisted.telemetry, undefined, "own usage stays unknown, not zero");
   });
 
   test("parseTelemetry keeps a valid descendant value and drops a malformed one", () => {
@@ -239,8 +245,11 @@ describe("own reduction and the reported value", () => {
     refreshAgentTelemetry(fork);
     assert.equal(fork.telemetry?.estimatedUsd, .25, "the inherited parent-history prefix is not the fork's own usage");
     assert.equal(fork.telemetry?.contextTokens, 300, "the widget/audit context field is the child's own latest occupancy");
-    assert.deepEqual(fork.telemetry?.descendantUsage, usd(2));
-    assert.deepEqual(readOwnership(fork.ownership!.home)!.telemetry?.descendantUsage, usd(2));
+    assert.deepEqual(descendantUsageOf(fork), usd(2));
+    const persisted = readOwnership(fork.ownership!.home)!;
+    assert.deepEqual(persisted.descendantUsage, usd(2));
+    assert.equal(persisted.telemetry?.estimatedUsd, .25, "precondition: the refresh wrote telemetry");
+    assert.equal(persisted.telemetry?.descendantUsage, undefined, "a telemetry write does not populate the legacy location");
   });
 
   test("a telemetry reset (a different session) drops own usage but not the reported descendant value", () => {
@@ -250,13 +259,121 @@ describe("own reduction and the reported value", () => {
     refreshAgentTelemetry(child);
     assert.equal(child.telemetry, undefined);
     assert.deepEqual(descendantUsageOf(child), usd(2));
+    const reset = readOwnership(child.ownership!.home)!;
+    assert.equal(reset.telemetry, undefined, "precondition: the reset reached disk");
+    assert.deepEqual(reset.descendantUsage, usd(2), "the reset keeps the persisted descendant value");
     // The next refresh binds telemetry to the new session; the reported value
-    // must be restored into it and into the durable ownership record.
+    // is still in memory and in the durable ownership record.
     refreshAgentTelemetry(child);
     assert.equal(child.telemetry?.origin.sessionId, "a-different-session", "precondition: telemetry was re-created for the new session");
     assert.equal(child.telemetry?.estimatedUsd, 1);
-    assert.deepEqual(child.telemetry?.descendantUsage, usd(2));
-    assert.deepEqual(readOwnership(child.ownership!.home)!.telemetry?.descendantUsage, usd(2));
+    assert.deepEqual(descendantUsageOf(child), usd(2));
+    assert.deepEqual(readOwnership(child.ownership!.home)!.descendantUsage, usd(2));
+  });
+
+  test("a telemetry reset on a revived record (no report accepted in this process) keeps the persisted value", () => {
+    const child = record("child", createAgentStorageContext("lead", root()), .1);
+    acceptDescendantUsage(child, 1, { seq: 1, usage: usd(2) });
+    const revived = { ...child } as RpcAgentRecord;
+    delete revived.descendantUsage; delete revived.descendantUsageOrder;
+    writeSession(revived.sessionPath, "a-different-session", [assistant("x", 1)]);
+    refreshAgentTelemetry(revived);
+    const persisted = readOwnership(revived.ownership!.home)!;
+    assert.equal(persisted.telemetry, undefined, "precondition: the reset reached disk");
+    assert.deepEqual(persisted.descendantUsage, usd(2));
+  });
+
+  test("a report write lost to a busy claim is retried by the next refresh", () => {
+    const child = record("child", createAgentStorageContext("lead", root()), .1);
+    const home = child.ownership!.home;
+    const lock = join(dirname(home), `.${basename(home)}.ownership-lock`);
+    fs.mkdirSync(lock);
+    writeFileSync(join(lock, "owner.json"), JSON.stringify({ pid: process.pid }));
+    try { acceptDescendantUsage(child, 1, { seq: 1, usage: usd(2) }); } finally { rmSync(lock, { recursive: true, force: true }); }
+    assert.equal(readOwnership(home)!.descendantUsage, undefined, "precondition: the claim refused the write");
+    refreshAgentTelemetry(child);
+    assert.deepEqual(readOwnership(home)!.descendantUsage, usd(2));
+  });
+
+  test("a non-fresh fork whose boundary is unknown persists the reported value without telemetry", () => {
+    const fork = record("fork", createAgentStorageContext("lead", root()), undefined);
+    writeSession(fork.sessionPath, "fork-session", [assistant("inherited", 5, 900)], "/parent/session.jsonl");
+    refreshAgentTelemetry(fork);
+    assert.equal(fork.telemetry, undefined, "precondition: the non-fresh fork branch keeps own usage unknown");
+    acceptDescendantUsage(fork, 1, { seq: 1, usage: usd(2) });
+    refreshAgentTelemetry(fork);
+    assert.equal(fork.telemetry, undefined);
+    assert.deepEqual(readOwnership(fork.ownership!.home)!.descendantUsage, usd(2));
+  });
+});
+
+describe("durable descendant usage readers", () => {
+  /** A record written before the sibling field: the value lives only inside its telemetry. */
+  function legacyRecord(agentId: string, storage: Storage, ownUsd: number, descendants: CumulativeCost): RpcAgentRecord {
+    const child = record(agentId, storage, ownUsd);
+    updateOwnership(child.ownership!.home, { telemetry: { ...child.telemetry!, descendantUsage: descendants } });
+    const persisted = readOwnership(child.ownership!.home)!;
+    assert.equal(persisted.descendantUsage, undefined, "precondition: no sibling field");
+    assert.deepEqual(persisted.telemetry?.descendantUsage, descendants, "precondition: the legacy copy");
+    return { ...child, telemetry: persisted.telemetry };
+  }
+
+  test("retention eviction cost reads the sibling value, and a legacy-only record through its telemetry", () => {
+    const storage = createAgentStorageContext("hop", root());
+    const current = record("current", storage, .5);
+    acceptDescendantUsage(current, 1, { seq: 1, usage: usd(2, 2) });
+    assert.deepEqual(retentionEvictionCost(readOwnership(current.ownership!.home)!), { knownUsd: 2.5, knownContributors: 2, unknownContributors: 0, descendants: 3 });
+    const legacy = legacyRecord("legacy", storage, .5, usd(1, 2));
+    assert.deepEqual(retentionEvictionCost(readOwnership(legacy.ownership!.home)!), { knownUsd: 1.5, knownContributors: 2, unknownContributors: 0, descendants: 3 });
+  });
+
+  test("a telemetry reset on a legacy-only record copies the value into the sibling field before the legacy copy is dropped", () => {
+    const child = legacyRecord("child", createAgentStorageContext("lead", root()), .1, usd(2));
+    writeSession(child.sessionPath, "a-different-session", [assistant("x", 1)]);
+    refreshAgentTelemetry(child);
+    assert.equal(child.telemetry, undefined, "precondition: the refresh reset own usage");
+    const persisted = readOwnership(child.ownership!.home)!;
+    assert.equal(persisted.telemetry, undefined, "the legacy copy went with the reset telemetry");
+    assert.deepEqual(persisted.descendantUsage, usd(2), "the same write migrated it into the sibling field");
+  });
+
+  test("a legacy copy never replaces an existing sibling value", () => {
+    const child = legacyRecord("child", createAgentStorageContext("lead", root()), .1, usd(1));
+    updateOwnership(child.ownership!.home, { descendantUsage: usd(3) });
+    persistOwnershipTelemetry(child.ownership!.home, undefined);
+    assert.deepEqual(readOwnership(child.ownership!.home)!.descendantUsage, usd(3));
+  });
+
+  test("sidecar revival restores the persisted value over an older snapshot copy, and a legacy-only record's copy", () => {
+    const storage = createAgentStorageContext("hop", root());
+    const current = record("current", storage, .5), legacy = legacyRecord("legacy", storage, .25, usd(1));
+    current.systemPromptPath = legacy.systemPromptPath = join(storage.root, "prompt.md");
+    acceptDescendantUsage(current, 1, { seq: 1, usage: usd(3) });
+    const orphans = captureOrphans(new Map([[current.agentId, current], [legacy.agentId, legacy]]));
+    // A pre-change snapshot carrying an older value in its telemetry.
+    for (const orphan of orphans) orphan.telemetry = { ...orphan.telemetry!, descendantUsage: usd(.5) };
+    const sidecar = join(root(), "hop.sidecar.json");
+    writeSidecarAt(sidecar, orphans);
+    const restarted: RpcAgentRegistry = new Map();
+    const revived = reviveOrphans(restarted, readAndClearSidecarAt(sidecar));
+    try {
+      assert.deepEqual(revived.map(entry => entry.agentId).sort(), ["current", "legacy"]);
+      assert.deepEqual(descendantUsageOf(restarted.get("current")!), usd(3), "the sibling value wins over the snapshot");
+      assert.deepEqual(descendantUsageOf(restarted.get("legacy")!), usd(1), "a legacy-only record still counts");
+    } finally { for (const entry of revived) entry.ownershipObserverStop?.(); }
+  });
+
+  test("a revived fork thread restores the persisted value over its snapshot copy", () => {
+    const fork = record("fork", createAgentStorageContext("hop", root()), .5);
+    fork.spawnRole = "fork";
+    acceptDescendantUsage(fork, 1, { seq: 1, usage: usd(3) });
+    const resume = captureForkResume(fork);
+    resume.telemetry = { ...resume.telemetry!, descendantUsage: usd(.5) };
+    const revived = rehydrateForkRecord(fork.agentId, resume);
+    try {
+      assert.ok(revived.ownership, "precondition: ownership re-validated against disk");
+      assert.deepEqual(descendantUsageOf(revived), usd(3));
+    } finally { revived.ownershipObserverStop?.(); }
   });
 });
 

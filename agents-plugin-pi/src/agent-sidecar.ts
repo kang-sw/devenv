@@ -42,6 +42,7 @@ import { dirname, join } from "node:path";
 import { TOOL_GROUPS, isOwnerHeld, refreshAgentTelemetry, startOwnedSessionObserver, type RpcAgentRecord, type RpcAgentRegistry, type SpawnAgentRole, type ToolGroup } from "./spawner.ts";
 import { parseForkContext, type ForkContext } from "./fork-context.ts";
 import { normalizeStoredExploreMode, type ExploreMode } from "./process-role.ts";
+import { restoreDescendantUsage } from "./agent-usage-rollup.ts";
 import { hasEvictionRecord, readOwnership, removeOwnedAgentHome, updateOwnership, validDescriptor, type AgentOwnership } from "./agent-storage.ts";
 import { parseTelemetry, type AgentTelemetry, type TelemetryOrigin } from "./agent-telemetry.ts";
 import { parseDelegationPolicy, type DelegationPolicy } from "./delegation-policy.ts";
@@ -406,6 +407,7 @@ export function reviveOrphans(registry: RpcAgentRegistry, orphans: PersistedOrph
     startOwnedSessionObserver(record);
     if (record.ownership) {
       const durable = readOwnership(record.ownership.home);
+      restoreDescendantUsage(record, durable);
       const confirmedStopped = durable?.liveness.lifecycle === "stopped" && durable.liveness.running === false;
       updateOwnership(record.ownership.home, { liveness: {
         lifecycle: confirmedStopped ? "stopped" : "unknown", running: false, observedAt: Date.now(), recovery: "sidecar",
