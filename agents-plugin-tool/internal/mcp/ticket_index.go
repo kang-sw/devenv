@@ -151,7 +151,14 @@ type indexVerbResult struct {
 	ImplBranch string   `json:"impl_branch,omitempty"`
 	Warnings   []string `json:"warnings,omitempty"`
 	Reports    []string `json:"reports,omitempty"`
+	// relayWarnings marks a lead's lease acquire: its text warnings carry the
+	// relay direction, since the lead is the caller with a user to tell.
+	relayWarnings bool
 }
+
+// relayWarningSuffix directs the lead to pass a lease warning on; the playbook
+// holds no post-call direction, so the tool output carries it.
+const relayWarningSuffix = " (tell the user this line verbatim)"
 
 func indexVerbResponse(id json.RawMessage, args map[string]any, r indexVerbResult) response {
 	if wantsJSON(args) {
@@ -168,8 +175,12 @@ func indexVerbResponse(id json.RawMessage, args map[string]any, r indexVerbResul
 	if r.ImplBranch != "" {
 		fmt.Fprintf(&b, "impl_branch: %s\n", r.ImplBranch)
 	}
+	suffix := ""
+	if r.relayWarnings {
+		suffix = relayWarningSuffix
+	}
 	for _, w := range r.Warnings {
-		fmt.Fprintf(&b, "warning: %s\n", w)
+		fmt.Fprintf(&b, "warning: %s%s\n", w, suffix)
 	}
 	for _, rep := range r.Reports {
 		fmt.Fprintf(&b, "report: %s\n", rep)
@@ -287,6 +298,9 @@ func (s *Server) handleIndexVerb(id json.RawMessage, args, meta map[string]any, 
 	if op == wsindex.OpAcquire {
 		out.Owner = sub.Entry.Owner
 		out.ImplBranch = sub.Entry.ImplBranch
+		// Keyed on the missing impl branch, not the status: a worker's impl
+		// record can also come back pending or takeover with a warning.
+		out.relayWarnings = sub.Entry.ImplBranch == ""
 	}
 	if outcome.Warning != "" {
 		out.Warnings = append(out.Warnings, outcome.Warning)

@@ -1237,6 +1237,75 @@ func TestReplayedTakeoverPrintsWarning(t *testing.T) {
 	}
 }
 
+// A lead's lease acquire carries the relay direction on its own warning
+// lines; the worker's impl record, release, JSON output, and replayed-entry
+// reports do not.
+func TestAcquireWarningRelaySuffix(t *testing.T) {
+	e := newIxEnv(t)
+	x := e.clone("x", "a@example.com")
+	x2 := e.clone("x2", "a@example.com")
+	x.init()
+	x.acquire(stemAlpha)
+	x.acquire(stemBeta)
+	x.acquire(stemGamma)
+
+	warnings := func(label, out string, relayed bool) {
+		t.Helper()
+		n := 0
+		for _, line := range strings.Split(out, "\n") {
+			if !strings.HasPrefix(line, "warning: ") {
+				if strings.Contains(line, relayWarningSuffix) {
+					t.Errorf("%s: non-warning line carries the relay suffix: %q", label, line)
+				}
+				continue
+			}
+			n++
+			if got := strings.HasSuffix(line, relayWarningSuffix); got != relayed {
+				t.Errorf("%s: relay suffix on %q = %v, want %v", label, line, got, relayed)
+			}
+		}
+		if n == 0 {
+			t.Fatalf("%s: no warning line in:\n%s", label, out)
+		}
+	}
+
+	// Lease path, online: a same-email takeover from another clone.
+	warnings("lease takeover", x2.acquire(stemAlpha), true)
+	// Impl record, online: the same takeover warning, from a worker.
+	worker := x2.worktree("x2-impl", "impl/develop/k1", "develop")
+	out := worker.acquire(stemBeta)
+	if !strings.Contains(out, "status: takeover") || !strings.Contains(out, "impl_branch: impl/develop/k1") {
+		t.Fatalf("online impl record = %s", out)
+	}
+	warnings("impl takeover", out, false)
+
+	x2.offline()
+	// Lease path, offline: a pending takeover with both warnings relayed.
+	out = x2.acquire(stemGamma)
+	if !strings.Contains(out, "status: pending") || !strings.Contains(out, "another clone") {
+		t.Fatalf("offline lease acquire = %s", out)
+	}
+	warnings("offline lease", out, true)
+	warnings("offline impl record", worker.acquire(stemAlpha), false)
+	warnings("offline release", x2.mustCall("tickets.release", ixArgs(stemBeta)), false)
+
+	// The flush replays gamma's takeover as a report line, never relayed.
+	x2.online()
+	out = x2.acquire(stemAlpha)
+	if !strings.Contains(out, "report: ticket-index: replayed the offline acquire of "+stemGamma) {
+		t.Fatalf("flushing acquire = %s, want the replayed takeover report", out)
+	}
+	if strings.Contains(out, relayWarningSuffix) {
+		t.Fatalf("flushing acquire relays a replayed entry: %s", out)
+	}
+
+	// JSON output is unchanged on the lease path.
+	out = x.acquire(stemAlpha, "format", "json")
+	if !strings.Contains(out, `"warnings"`) || strings.Contains(out, relayWarningSuffix) {
+		t.Fatalf("JSON lease takeover = %s", out)
+	}
+}
+
 // C5: init and its check mode print the discard report of a pending log
 // recorded against an index that was deleted meanwhile.
 func TestIndexInitReportsDiscard(t *testing.T) {
