@@ -78,10 +78,12 @@ export function readExploreMode(env: NodeJS.ProcessEnv): ExploreMode | undefined
  */
 export const WS_PI_PARENT_SESSION_KEY_ENV = "WS_PI_PARENT_SESSION_KEY";
 
-/** Private per-launch transport for immutable fork metadata and readiness. */
+/**
+ * Private per-launch transport for immutable fork metadata. Fork readiness no
+ * longer travels through files: it is the stage-2 readiness message on the
+ * parent-child control channel (`agent-channel.ts`).
+ */
 export const WS_PI_FORK_CONTEXT_ENV = "WS_PI_FORK_CONTEXT";
-export const WS_PI_FORK_READY_PATH_ENV = "WS_PI_FORK_READY_PATH";
-export const WS_PI_FORK_READY_NONCE_ENV = "WS_PI_FORK_READY_NONCE";
 export const WS_PI_FORK_AFFINITY_ENV = "WS_PI_FORK_AFFINITY";
 
 const VALID_ROLES: ReadonlySet<string> = new Set<SpawnRole>(["worker", "explore", "fork"]);

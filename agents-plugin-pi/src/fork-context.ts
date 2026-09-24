@@ -28,10 +28,12 @@ export interface ForkContext {
   thinkingLevel?: string;
 }
 
-export { WS_PI_FORK_CONTEXT_ENV as FORK_CONTEXT_ENV, WS_PI_FORK_READY_PATH_ENV as FORK_READY_PATH_ENV, WS_PI_FORK_READY_NONCE_ENV as FORK_READY_NONCE_ENV, WS_PI_FORK_AFFINITY_ENV as FORK_AFFINITY_ENV } from "./process-role.ts";
+export { WS_PI_FORK_CONTEXT_ENV as FORK_CONTEXT_ENV, WS_PI_FORK_AFFINITY_ENV as FORK_AFFINITY_ENV } from "./process-role.ts";
 import { WS_PI_FORK_CONTEXT_ENV as FORK_CONTEXT_ENV } from "./process-role.ts";
 export const FORK_CONTEXT_ENTRY = "ws-pi-fork-context";
 export const FORK_KEYS_ENTRY = "ws-pi-fork-keys";
+/** Readiness kind the fork child publishes on the control channel and the parent validates. */
+export const FORK_READINESS_KIND = "fork";
 
 function own<T>(value: T): T { return JSON.parse(JSON.stringify(value)) as T; }
 
@@ -125,8 +127,8 @@ export function compareForkRegistrations(expected: readonly ForkToolDefinition[]
   return formatForkRegistrationMismatch(classifyForkRegistrations(expected, actual));
 }
 
+/** Stage-2 readiness payload a fork child sends over its control channel after `session_start`. */
 export interface ForkReadiness {
-  nonce: string;
   sessionId?: string;
   sessionPath?: string;
   ownSessionKey?: string;
@@ -198,17 +200,16 @@ export function writePrivateJson(path: string, data: unknown, hooks: PrivateJson
   }
 }
 
-export function readForkLaunchContext(env: NodeJS.ProcessEnv): { context?: ForkContext; nonce: string; readinessPath: string } | undefined {
+/** The launch envelope carries the captured context in; readiness goes back over the control channel, not a file. */
+export function readForkLaunchContext(env: NodeJS.ProcessEnv): { context?: ForkContext } | undefined {
   const path = env[FORK_CONTEXT_ENV];
   if (!path) return undefined;
-  let envelope: { context?: unknown; nonce?: unknown; readinessPath?: unknown; legacy?: unknown };
+  let envelope: { context?: unknown; legacy?: unknown };
   try { envelope = JSON.parse(readFileSync(path, "utf8")) as typeof envelope; } catch { throw new Error("ws-pi-fork: malformed launch envelope"); }
-  if (typeof envelope.nonce !== "string" || !envelope.nonce || typeof envelope.readinessPath !== "string" || !envelope.readinessPath) {
-    throw new Error("ws-pi-fork: malformed launch envelope");
-  }
+  if (!envelope || typeof envelope !== "object") throw new Error("ws-pi-fork: malformed launch envelope");
   const context = parseForkContext(envelope.context);
   if (!context && !(envelope.context === undefined && envelope.legacy === true)) throw new Error("ws-pi-fork: malformed launch envelope");
-  return { context, nonce: envelope.nonce, readinessPath: envelope.readinessPath };
+  return { context };
 }
 
 /** Reads only data persisted by this child session; inherited parent entries are not trusted. */

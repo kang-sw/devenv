@@ -5,8 +5,9 @@ import { assertPolicyTool, readDelegationPolicy } from "./delegation-policy.ts";
 import { readSpawnRole } from "./process-role.ts";
 import { boundedWebFetch, WEB_FETCH_CAPS } from "./web-fetch.ts";
 import { createWebSearch, webSearchParameters } from "./web-search.ts";
-import { WEB_HOME_ENV, WEB_NONCE_ENV, writeWebReadiness } from "./web-readiness.ts";
+import { WEB_HOME_ENV, WEB_READINESS_KIND, proveWebReadiness } from "./web-readiness.ts";
 import { registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
+import type { ChildChannel } from "./agent-channel.ts";
 
 export const webFetchParameters = {
   type: "object", additionalProperties: false, required: ["url"],
@@ -16,8 +17,13 @@ export const webFetchParameters = {
   },
 };
 
-/** Only Explore receives the active web surface; other roles carry authority for delegation. */
-export function registerWebTools(pi: ExtensionAPI, extensionPath: string, tui: ToolPreviewTuiRef, env: NodeJS.ProcessEnv = process.env): void {
+/**
+ * Only Explore receives the active web surface; other roles carry authority for
+ * delegation. `channel` is the child's control channel to its parent; the
+ * readiness proof is published on it after `session_start` (stage 2), and a
+ * child without one (not spawned by the adapter) proves locally but publishes nowhere.
+ */
+export function registerWebTools(pi: ExtensionAPI, extensionPath: string, tui: ToolPreviewTuiRef, env: NodeJS.ProcessEnv = process.env, channel?: ChildChannel): void {
   if (readSpawnRole(env) !== "explore") return;
   const policy = readDelegationPolicy(env);
   const home = env[WEB_HOME_ENV] ?? "";
@@ -48,6 +54,7 @@ export function registerWebTools(pi: ExtensionAPI, extensionPath: string, tui: T
     },
   }, tui);
   pi.on("session_start", () => {
-    writeWebReadiness(pi, home, env[WEB_NONCE_ENV] ?? "", extensionPath);
+    const readiness = proveWebReadiness(pi, extensionPath);
+    channel?.publishReadiness(WEB_READINESS_KIND, readiness);
   });
 }

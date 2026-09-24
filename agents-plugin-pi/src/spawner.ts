@@ -100,8 +100,9 @@ import {
   type TierFailure,
   type TierRejection,
 } from "./model-catalog.ts";
-import { PUBLIC_EXPLORE_MODE_TIERS, WS_PI_EXPLORE_MODE_ENV, WS_PI_FORK_AFFINITY_ENV, WS_PI_FORK_CONTEXT_ENV, WS_PI_FORK_READY_NONCE_ENV, WS_PI_FORK_READY_PATH_ENV, WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV, isLeadOrFork, readSpawnRole, type ExploreMode, type PublicExploreMode, type SpawnRole } from "./process-role.ts";
-import { captureForkContext, compareForkRegistrations, removeForkTransport, writePrivateJson, type ForkContext, type ForkReadiness } from "./fork-context.ts";
+import { PUBLIC_EXPLORE_MODE_TIERS, WS_PI_EXPLORE_MODE_ENV, WS_PI_FORK_AFFINITY_ENV, WS_PI_FORK_CONTEXT_ENV, WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV, isLeadOrFork, readSpawnRole, type ExploreMode, type PublicExploreMode, type SpawnRole } from "./process-role.ts";
+import { FORK_READINESS_KIND, captureForkContext, compareForkRegistrations, writePrivateJson, type ForkContext, type ForkReadiness } from "./fork-context.ts";
+import { CHANNEL_BOOTSTRAP_ENVS, ParentChannel, type ChannelBindOptions } from "./agent-channel.ts";
 import { allocateAgentHome, createAgentStorageContext, inspectOwnedHomeRemoval, isOwnedSessionPath, observeSessionWrite, readOwnership, removeOwnedAgentHome, touchOwnership, updateOwnership, writeOwnership, type AgentOwnership, type AgentStorageContext } from "./agent-storage.ts";
 import { ownerNotifyRef } from "./owner-notify.ts";
 export { ownerNotifyRef } from "./owner-notify.ts";
@@ -109,7 +110,7 @@ import { readSessionEntries, reduceTelemetry, type AgentTelemetry, type Telemetr
 import { CHILD_MANAGEMENT_TOOLS, DEFAULT_MAX_AGENT_DEPTH, DELEGATION_ENV, SUBTREE_ENV, READ_TOOLS, NETWORK_TOOLS, childPolicy, readDelegationPolicy, readOnlyWsTools, type DelegationPolicy, type PlaybookProfile, type RenderProvenance } from "./delegation-policy.ts";
 import { normalizeWriteScopes, type EffectiveWriteCapability, type WriteScope } from "./write-scopes.ts";
 import { createWebSearch } from "./web-search.ts";
-import { clearWebReadiness, verifyWebReadiness, WEB_HOME_ENV, WEB_NONCE_ENV } from "./web-readiness.ts";
+import { verifyWebReadiness, WEB_HOME_ENV, WEB_READINESS_KIND } from "./web-readiness.ts";
 import { beginSubtreeDispatch, installSubtreePublisher, publishSubtree, readSubtreeChannel, readSubtreeSnapshot, subtreeWaiting, type SubtreeChannel, type SubtreeDescendant } from "./subtree-lifecycle.ts";
 import { PUSH_BATCH_CUSTOM_TYPE, PUSH_BATCH_VERSION, type PushBatchItem, type PushBatchItemState } from "./push-protocol.ts";
 import { persistAgentCostCheckpoint, persistEvictedAgentCost, registerAgentCostOwner } from "./agent-footer.ts";
@@ -463,6 +464,15 @@ export interface RpcAgentRecord {
   /** Persisted authority and one-edge semantic lifecycle; independent of owner holds. */
   delegation?: DelegationPolicy;
   subtreeChannel?: SubtreeChannel;
+  /**
+   * Parent side of the per-launch control channel (`agent-channel.ts`), bound
+   * before the child process is spawned and closed by `clearLiveState` with
+   * every other live-only field. Fresh endpoint and credential per launch; the
+   * child's hello and stage-2 readiness travel over it instead of files.
+   */
+  channel?: ParentChannel;
+  /** Bumped once per process launch (spawn, dormant resume, relaunch); the channel accepts only this generation. */
+  launchGeneration?: number;
   /** Last advisory identity tree published by this child process. */
   subtreeDescendants?: SubtreeDescendant[];
   waitingOnChildren?: boolean;
@@ -1793,6 +1803,12 @@ function clearLiveState(record: RpcAgentRecord, registry?: RpcAgentRegistry): vo
   record.unsubscribe?.();
   record.unsubscribe = undefined;
   record.client = undefined;
+  // The channel lives exactly as long as the launch: closing it here (stop,
+  // exit, failed launch) refuses every later connection with this credential,
+  // so a lingering child's reconnect loop can never re-attach to a record
+  // that has moved on to another generation.
+  record.channel?.close();
+  record.channel = undefined;
   record.streaming = false;
   record.running = false;
   record.pendingApproval = undefined;
@@ -2052,6 +2068,18 @@ export interface RpcSpawnCtx {
   exploreMode?: ExploreMode;
   /** Immutable lead capture supplied only to a task/discussion fork. */
   forkContext?: ForkContext;
+  /** Test seam for the control channel: forced backend and wait bounds. Production leaves it unset. */
+  channel?: ChannelLaunchOptions;
+}
+
+/**
+ * Control-channel knobs injected by tests. `bind` forces a backend (no env
+ * knob exists on purpose); the timeouts shorten the hello/readiness waits.
+ */
+export interface ChannelLaunchOptions {
+  bind?: ChannelBindOptions;
+  helloTimeoutMs?: number;
+  readinessTimeoutMs?: number;
 }
 
 export interface RpcResumeCtx {
@@ -2080,6 +2108,8 @@ export interface RpcResumeCtx {
   writer?: "lead" | "owner";
   /** Internal token carried only by a coordinator-owned closeout send. */
   finishToken?: string;
+  /** See `RpcSpawnCtx.channel`. */
+  channel?: ChannelLaunchOptions;
 }
 
 /**
@@ -2126,22 +2156,73 @@ export interface RpcResumeCtx {
  */
 export function prepareForkLaunch(context: ForkContext | undefined) {
   const directory = mkdtempSync(join(tmpdir(), "ws-pi-fork-launch-"));
-  const nonce = randomUUID();
   const contextPath = join(directory, "context.json");
-  const readinessPath = join(directory, "ready.json");
-  writePrivateJson(contextPath, { context: context ? captureForkContext(context) : undefined, ...(context ? {} : { legacy: true }), nonce, readinessPath });
-  return { contextPath, readinessPath, nonce, affinityId: context?.parentAffinityId };
+  writePrivateJson(contextPath, { context: context ? captureForkContext(context) : undefined, ...(context ? {} : { legacy: true }) });
+  return { contextPath, affinityId: context?.parentAffinityId };
 }
 
-export function validateForkReadiness(launch: ReturnType<typeof prepareForkLaunch>, record: RpcAgentRecord, state: { sessionFile?: string; sessionId?: string }): void {
-  let ready: ForkReadiness;
-  try { ready = JSON.parse(readFileSync(launch.readinessPath, "utf8")); }
-  catch { throw new Error("ws-pi-agent: fork did not publish readiness"); }
-  if (ready.nonce !== launch.nonce || !ready.ownSessionKey?.trim() || ready.error ||
+/** Bounds on the child's channel stages. 30 s matches `RpcClient`'s own per-request timeout, so a hung child is reported once, not twice. */
+export const CHANNEL_HELLO_TIMEOUT_MS = 30_000;
+export const CHANNEL_READINESS_TIMEOUT_MS = 30_000;
+const CHANNEL_LIVENESS_PROBE_MS = 500;
+
+/**
+ * Waits for one channel stage (hello or a readiness kind) while observing the
+ * child's lifecycle: the wait ends on the message, on `timeoutMs`, or as soon
+ * as the child process is gone. Liveness is probed the same way
+ * `probeAgentLiveness` does, through `getState()`; a rejection counts as an
+ * exit only when `RpcClient` recorded one (`exitError`), so a slow first
+ * response never masquerades as a crash.
+ */
+export async function awaitChannelStage<T>(
+  client: RpcClient,
+  pending: Promise<T>,
+  timeoutMs: number,
+  stage: string,
+  timeoutError: () => Error = () => new Error(`ws-pi-agent: child channel ${stage} timed out after ${timeoutMs}ms`),
+): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  let probing = true;
+  const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(timeoutError()), timeoutMs); timer.unref?.(); });
+  const exited = (async (): Promise<never> => {
+    while (probing) {
+      try { await client.getState(); } catch (error) {
+        const exitError = (client as { exitError?: unknown }).exitError;
+        if (exitError) {
+          const reason = exitError instanceof Error ? exitError.message : String(exitError ?? error);
+          const base = timeoutError().message;
+          throw new Error(`${base} (child exited before channel ${stage}: ${reason})`);
+        }
+      }
+      if (!probing) break;
+      await new Promise(resolve => { const nap = setTimeout(resolve, CHANNEL_LIVENESS_PROBE_MS); nap.unref?.(); });
+    }
+    return new Promise<never>(() => { /* stage settled elsewhere */ });
+  })();
+  exited.catch(() => { /* raced away; the rejection reached the race when it mattered */ });
+  try { return await Promise.race([pending, timeout, exited]); }
+  finally { probing = false; clearTimeout(timer); }
+}
+
+/** Stage-2 waits keep today's failure texts: a timeout reads exactly as the missing file used to. */
+function awaitForkReadiness(client: RpcClient, channel: ParentChannel, opts: ChannelLaunchOptions | undefined): Promise<unknown> {
+  return awaitChannelStage(client, channel.readiness(FORK_READINESS_KIND), opts?.readinessTimeoutMs ?? CHANNEL_READINESS_TIMEOUT_MS, "fork readiness",
+    () => new Error("ws-pi-agent: fork did not publish readiness"));
+}
+
+function awaitWebReadiness(client: RpcClient, channel: ParentChannel, opts: ChannelLaunchOptions | undefined): Promise<unknown> {
+  return awaitChannelStage(client, channel.readiness(WEB_READINESS_KIND), opts?.readinessTimeoutMs ?? CHANNEL_READINESS_TIMEOUT_MS, "web readiness",
+    () => new Error("web-search-tool-unavailable: Explore web facade readiness was not proved"));
+}
+
+export function validateForkReadiness(payload: unknown, record: RpcAgentRecord, state: { sessionFile?: string; sessionId?: string }): void {
+  if (!payload || typeof payload !== "object") throw new Error("ws-pi-agent: fork did not publish readiness");
+  const ready = payload as Partial<ForkReadiness>;
+  if (!ready.ownSessionKey?.trim() || ready.error ||
       !state.sessionFile || ready.sessionPath !== state.sessionFile || !ready.sessionId ||
       ready.ownSessionKey === record.forkContext?.parentSessionKey || record.forkContext?.parentSessionKeys?.includes(ready.ownSessionKey) || ready.sessionId === record.forkContext?.parentPiSessionId ||
       (state.sessionId && ready.sessionId !== state.sessionId)) {
-    throw new Error(`ws-pi-agent: fork readiness rejected (${ready.error ?? "nonce/key/session mismatch"})`);
+    throw new Error(`ws-pi-agent: fork readiness rejected (${ready.error ?? "key/session mismatch"})`);
   }
   if (record.forkContext) {
     const mismatch = !Array.isArray(ready.registeredTools)
@@ -2153,9 +2234,6 @@ export function validateForkReadiness(launch: ReturnType<typeof prepareForkLaunc
   if (record.ownership && !containedOwnedPath(record.ownership.home, state.sessionFile)) throw new Error("ws-pi-agent: fork readiness rejected (session escaped owned home)");
   record.sessionPath = state.sessionFile;
   if (record.ownership) { record.ownership = { ...record.ownership, sessionPath: state.sessionFile }; const metadata = readOwnership(record.ownership.home); try { if (metadata) writeOwnership({ ...metadata, sessionPath: state.sessionFile, updatedAt: Date.now(), liveness: { ...metadata.liveness, lifecycle: "live", running: true, observedAt: Date.now() } }); } catch { /* durable facts remain conservative; readiness stays usable */ } }
-  removeForkTransport(launch.contextPath);
-  removeForkTransport(launch.readinessPath);
-  rmSync(dirname(launch.contextPath), { recursive: true, force: true });
 }
 
 function containedOwnedPath(home: string, candidate: string): boolean {
@@ -2178,10 +2256,11 @@ export function buildRpcClientOptions(
   parentSessionKey?: string,
   spawnRoleOverride?: SpawnRole,
   exploreMode?: ExploreMode,
-  forkLaunch?: { contextPath: string; readinessPath: string; nonce: string; affinityId?: string },
+  forkLaunch?: { contextPath: string; affinityId?: string },
   extensionPath: string,
   delegation?: DelegationPolicy,
   subtreeChannel?: SubtreeChannel,
+  channel?: ParentChannel,
 ): RpcClientOptions {
   if (!extensionPath) throw new Error("ws-pi-agent: missing loaded extension entry path for RPC child");
   const role = spawnRoleOverride ?? (forkFrom ? "fork" : "worker");
@@ -2195,14 +2274,16 @@ export function buildRpcClientOptions(
   env[WS_PI_EXPLORE_MODE_ENV] = role === "explore" && exploreMode ? exploreMode : "";
   // Explicitly clear every fork-only marker for worker/explore descendants.
   env[WS_PI_FORK_CONTEXT_ENV] = forkLaunch?.contextPath ?? "";
-  env[WS_PI_FORK_READY_PATH_ENV] = forkLaunch?.readinessPath ?? "";
-  env[WS_PI_FORK_READY_NONCE_ENV] = forkLaunch?.nonce ?? "";
   env[WS_PI_FORK_AFFINITY_ENV] = forkLaunch?.affinityId ?? "";
   env[WS_PI_PARENT_SESSION_KEY_ENV] = role === "fork" ? parentSessionKey ?? "" : "";
   env[DELEGATION_ENV] = delegation ? JSON.stringify(delegation) : "";
   env[SUBTREE_ENV] = subtreeChannel ? JSON.stringify(subtreeChannel) : "";
   env[WEB_HOME_ENV] = role === "explore" ? dirname(sessionPath) : "";
-  env[WEB_NONCE_ENV] = role === "explore" ? subtreeChannel?.nonce ?? "" : "";
+  // The control-channel bootstrap: the child reads and deletes these before it
+  // spawns anything of its own. Cleared explicitly so a grandchild never sees
+  // its grandparent's endpoint through inheritance.
+  for (const key of CHANNEL_BOOTSTRAP_ENVS) env[key] = "";
+  if (channel) Object.assign(env, channel.bootstrapEnv());
   // RpcClient overlays env onto process.env, so deletion here would preserve a
   // stale parent value. Empty values neutralize forced bootstrap selection.
   for (const override of CHILD_BOOTSTRAP_OVERRIDE_ENVS) env[override] = "";
@@ -2974,26 +3055,6 @@ export async function spawnAgent(
   };
   registry.set(agentId, record);
   startOwnedSessionObserver(record);
-  if (role === "explore") clearWebReadiness(ownership.home);
-
-  const client = new RpcClient(
-    buildRpcClientOptions(
-      cwdOverride ?? ctx.cwd,
-      modelBase,
-      sessionPath,
-      record.systemPromptPath,
-      tools,
-      forkSourcePath,
-      ctx.forkContext?.parentSessionKey ?? ctx.parentSessionKey,
-      ctx.spawnRole === "explore" ? "explore" : undefined,
-      ctx.exploreMode,
-      forkLaunch,
-      ctx.extensionPath,
-      delegation,
-      subtreeChannel,
-    ),
-  );
-  record.client = client;
   record.launchGeneration = (record.launchGeneration ?? 0) + 1;
 
   // 260905: the record is registered BEFORE `start()`, so a failure anywhere
@@ -3001,8 +3062,33 @@ export async function spawnAgent(
   // lead's fan-in count keeps waiting on. Push `spawn-failed` and re-throw
   // unchanged — the thrown error still surfaces to the `ws-agent-spawn` caller
   // exactly as before; the push is additive, for the M/N bookkeeping.
+  let client: RpcClient | undefined;
   try {
+    // The control channel is bound before the process exists so its bootstrap
+    // rides in the child's env; a bind failure is a failed launch like any other.
+    const channel = await ParentChannel.bind(record.launchGeneration, ctx.channel?.bind);
+    record.channel = channel;
+    client = new RpcClient(
+      buildRpcClientOptions(
+        cwdOverride ?? ctx.cwd,
+        modelBase,
+        sessionPath,
+        record.systemPromptPath,
+        tools,
+        forkSourcePath,
+        ctx.forkContext?.parentSessionKey ?? ctx.parentSessionKey,
+        ctx.spawnRole === "explore" ? "explore" : undefined,
+        ctx.exploreMode,
+        forkLaunch,
+        ctx.extensionPath,
+        delegation,
+        subtreeChannel,
+        channel,
+      ),
+    );
+    record.client = client;
     await client.start();
+    await awaitChannelStage(client, channel.hello(), ctx.channel?.helloTimeoutMs ?? CHANNEL_HELLO_TIMEOUT_MS, "hello");
 
     if (ctx.forkFrom) {
       const state = await client.getState();
@@ -3012,7 +3098,7 @@ export async function spawnAgent(
           "ws-pi-agent: fork spawn: RpcClient.getState() returned no sessionFile — cannot determine the forked session's actual path",
         );
       }
-      if (forkLaunch) validateForkReadiness(forkLaunch, record, state);
+      if (forkLaunch) validateForkReadiness(await awaitForkReadiness(client, channel, ctx.channel), record, state);
     }
 
     // Read the already-folded record value, not params.modelEffort directly
@@ -3022,7 +3108,7 @@ export async function spawnAgent(
     // field).
     if (record.spawnRole === "explore") {
       await verifyResearchSelection(client, record, true);
-      verifyWebReadiness(ownership.home, subtreeChannel.nonce);
+      verifyWebReadiness(await awaitWebReadiness(client, channel, ctx.channel));
     } else {
       await applyModelEffort(client, record.modelEffort);
     }
@@ -3036,7 +3122,7 @@ export async function spawnAgent(
     publishSubtree(registry, true);
   } catch (err) {
     clearLiveState(record, registry);
-    try { await client.stop(); } catch { /* best effort */ }
+    try { await client?.stop(); } catch { /* best effort */ }
     pushSpawnFailed(ctx.pi, registry, record, err);
     throw err;
   } finally {
@@ -3129,10 +3215,11 @@ export async function sendToAgent(
     if (record.spawnRole === "explore") {
       if (!record.delegation?.network?.search || !record.delegation.network.fetch || !record.subtreeChannel) throw new Error("web-search-tool-unavailable: legacy Explore lacks network authority; start a new researcher");
       await createWebSearch({ packageRoot: dirname(dirname(ctx.extensionPath)) }).probe();
-      clearWebReadiness(dirname(record.sessionPath));
     }
     if (record.subtreeChannel) record.subtreeChannel = { ...record.subtreeChannel, nonce: randomUUID() };
     const forkLaunch = record.spawnRole === "fork" ? prepareForkLaunch(record.forkContext) : undefined;
+    record.launchGeneration = (record.launchGeneration ?? 0) + 1;
+    const generation = record.launchGeneration;
     // 260904 Phase 1 (side-thread fork): `forkFrom` is deliberately never
     // passed here — a dormant resume (including a stopped fork) always
     // resumes via `--session record.sessionPath` (the fork's own
@@ -3140,26 +3227,8 @@ export async function sendToAgent(
     // `getState()` overwrite), exactly like a normal worker resume.
     // `record.explicitTools` (when set) is reused verbatim, same
     // cache-and-reuse contract as `systemPromptPath`/`modelBase`.
-    const client = new RpcClient(
-      buildRpcClientOptions(
-        record.cwdOverride ?? ctx.cwd,
-        record.modelBase,
-        record.sessionPath,
-        record.systemPromptPath,
-        record.explicitTools ?? record.delegation?.tools.join(",") ?? resolveTools(record.toolGroup, record.wsToolNames),
-        undefined,
-        record.forkContext?.parentSessionKey,
-        record.spawnRole === "fork" ? "fork" : record.spawnRole === "explore" ? "explore" : "worker",
-        record.exploreMode,
-        forkLaunch,
-        ctx.extensionPath,
-        record.delegation,
-        record.subtreeChannel,
-      ),
-    );
-    record.client = client;
-    record.launchGeneration = (record.launchGeneration ?? 0) + 1;
-    const generation = record.launchGeneration;
+    let client: RpcClient | undefined;
+    let channel: ParentChannel | undefined;
     const finishOwner = ctx.finishToken !== undefined && record.forkFinish?.token === ctx.finishToken
       ? record.forkFinish : undefined;
     const ownsFailure = () => record.launchGeneration === generation
@@ -3173,11 +3242,35 @@ export async function sendToAgent(
       record.forkFinish.generation = record.launchGeneration;
     }
     try {
+      // Every relaunch binds a fresh endpoint and credential under the new
+      // generation; the previous launch's channel was closed with its client.
+      channel = await ParentChannel.bind(generation, ctx.channel?.bind);
+      record.channel = channel;
+      client = new RpcClient(
+        buildRpcClientOptions(
+          record.cwdOverride ?? ctx.cwd,
+          record.modelBase,
+          record.sessionPath,
+          record.systemPromptPath,
+          record.explicitTools ?? record.delegation?.tools.join(",") ?? resolveTools(record.toolGroup, record.wsToolNames),
+          undefined,
+          record.forkContext?.parentSessionKey,
+          record.spawnRole === "fork" ? "fork" : record.spawnRole === "explore" ? "explore" : "worker",
+          record.exploreMode,
+          forkLaunch,
+          ctx.extensionPath,
+          record.delegation,
+          record.subtreeChannel,
+          channel,
+        ),
+      );
+      record.client = client;
       await client.start();
-      if (forkLaunch) validateForkReadiness(forkLaunch, record, await client.getState());
+      await awaitChannelStage(client, channel.hello(), ctx.channel?.helloTimeoutMs ?? CHANNEL_HELLO_TIMEOUT_MS, "hello");
+      if (forkLaunch) validateForkReadiness(await awaitForkReadiness(client, channel, ctx.channel), record, await client.getState());
       if (record.spawnRole === "explore") {
         await verifyResearchSelection(client, record, false);
-        verifyWebReadiness(dirname(record.sessionPath), record.subtreeChannel?.nonce ?? "");
+        verifyWebReadiness(await awaitWebReadiness(client, channel, ctx.channel));
       } else {
         await applyModelEffort(client, record.modelEffort);
       }
@@ -3186,9 +3279,11 @@ export async function sendToAgent(
       attachEventListener(ctx.pi, registry, record, client, ctx.onApprovalPending);
     } catch (err) {
       // Cleanup may await while a new instruction replaces this operation or
-      // launch. Only its owner may clear the record; always stop our own client.
+      // launch. Only its owner may clear the record; always stop our own
+      // client and close our own channel (a replacement launch owns its own).
       if (ownsFailure() && record.client === client) clearLiveState(record, registry);
-      try { await client.stop(); } catch { /* best effort */ }
+      channel?.close();
+      try { await client?.stop(); } catch { /* best effort */ }
       // A finish-owned failure is rethrown to the coordinator's sole terminal
       // selector. Ordinary resumes retain spawn-failed; stale work gets neither.
       if (ownsFailure() && record.client === undefined && !finishOwner) {
@@ -3206,7 +3301,7 @@ export async function sendToAgent(
     } catch {
       // ignored — see above.
     }
-    await promptAgent(record, client, message, { writer });
+    await promptAgent(record, client!, message, { writer });
     publishSubtree(registry, true);
     return { agent_id: record.agentId };
   }
