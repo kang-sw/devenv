@@ -312,18 +312,20 @@ export function isOwnedHomeGone(ownership: Pick<AgentOwnership, "home">): boolea
  * `"removed"`: with no claim held, an eviction record or an absent home.
  * `"present"`: neither.
  *
- * Read order: home -> record -> claim -> home. A remover takes the claim
- * before it writes the record, deletes a failed removal's record before it
- * releases the claim, and renames the home back before that release, so a
- * record counts only when the claim is absent after the record read, and an
- * absent home only when it is still absent after the claim read.
+ * Read order: home -> record -> claim -> record -> home. A remover takes the
+ * claim before it writes the record, deletes a failed removal's record before
+ * it releases the claim, and renames the home back before that release, so a
+ * record counts only when the claim is absent after the record read and the
+ * record is still there after the claim read (a whole failed removal between
+ * the first two reads deleted it again), and an absent home only when it is
+ * still absent after the claim read.
  */
 export function ownedHomeRemovalState(ownership: Pick<AgentOwnership, "home" | "ownerSessionId" | "agentId">): "removed" | "claimed" | "present" {
   const home = resolve(ownership.home), claim = ownershipLockPath(home);
   const homeFirst = existsSync(home);
   const recorded = hasEvictionRecord(ownership);
   if (existsSync(claim)) return "claimed";
-  if (recorded) return "removed";
+  if (recorded && hasEvictionRecord(ownership)) return "removed";
   return !homeFirst && !existsSync(home) ? "removed" : "present";
 }
 

@@ -21,16 +21,11 @@ import { join } from "node:path";
 import * as sdk from "@earendil-works/pi-coding-agent";
 import { ParentChannel } from "../src/agent-channel.ts";
 import { observeSubtreeChannel, type SubtreeSnapshot } from "../src/subtree-lifecycle.ts";
+import { until } from "./fixtures/subtree-channels.ts";
 
 const ROLE_ENV_KEYS = ["WS_PI_SPAWN_ROLE", "WS_PI_EXPLORE_MODE", "WS_PI_DELEGATION_POLICY", "WS_PI_PARENT_SESSION_KEY"] as const;
 
-async function until(condition: () => boolean, what: string, timeoutMs = 20_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!condition()) {
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
-    await new Promise(resolve => setTimeout(resolve, 10));
-  }
-}
+const WAIT = { timeoutMs: 20_000, intervalMs: 10 };
 
 test("the real extension entry registers the push flush before the subtree publish handlers: a turn start's own snapshot carries the new count", { timeout: 120_000 }, async () => {
   const directory = mkdtempSync(join(tmpdir(), "ws-pi-flush-order-"));
@@ -71,7 +66,7 @@ test("the real extension entry registers the push flush before the subtree publi
     await session.bindExtensions({ mode: "rpc", uiContext: ui, onError: (e: any) => errors.push(String(e.error ?? e.message ?? e)) });
     assert.deepEqual(errors, []);
 
-    await until(() => snapshots.length > 0, "the session_start snapshot from the real publisher");
+    await until(() => snapshots.length > 0, "the session_start snapshot from the real publisher", WAIT);
     assert.equal(snapshots.at(-1)!.turnsStarted, 0);
     const before = snapshots.length;
     await session.extensionRunner.emit({ type: "agent_start" });
@@ -79,7 +74,7 @@ test("the real extension entry registers the push flush before the subtree publi
     // handler sends it. Swapped: the publish handler runs first and sees no
     // change (nothing is sent), and the count is left unsent until some later
     // publish, so this wait times out.
-    await until(() => snapshots.length > before, "the turn start's snapshot");
+    await until(() => snapshots.length > before, "the turn start's snapshot", WAIT);
     assert.deepEqual(snapshots.slice(before).map(s => ({ turnsStarted: s.turnsStarted, turnOwed: s.turnOwed })), [{ turnsStarted: 1, turnOwed: false }],
       "the turn start's one snapshot already carries the new count");
   } finally {

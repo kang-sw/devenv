@@ -49,7 +49,7 @@ export function parseDescendantUsageReport(value: unknown): DescendantUsageRepor
  * (a record or snapshot written before the sibling ownership field).
  */
 export function descendantUsageOf(record: Pick<RpcAgentRecord, "descendantUsage" | "telemetry">): CumulativeCost | undefined {
-  return record.descendantUsage ?? record.telemetry?.descendantUsage;
+  return durableDescendantUsage(record);
 }
 
 /**

@@ -679,9 +679,13 @@ describe("the sidecar's removal gate under a held claim", () => {
     assert.deepEqual(during!.map(entry => entry.agentId), ["child", "kept"], "the claimed entry survives the parse");
     assert.equal(readEvictionRecord(storage, "child"), undefined, "precondition: the rollback deleted the record");
     assert.equal(existsSync(claimOf(home)), false, "precondition: the claim is released");
-    const after = revive(storage, serialized);
-    assert.deepEqual(after.ids, ["child", "kept"], "still revivable");
-    assert.equal(after.owned, true);
+    // The sidecar file is deleted on read: the entry that must survive is the
+    // one parsed under the claim.
+    const registry = owner(storage);
+    const revived = reviveOrphans(registry, during!);
+    for (const entry of revived) entry.ownershipObserverStop?.();
+    assert.deepEqual(revived.map(entry => entry.agentId).sort(), ["child", "kept"], "still revivable");
+    assert.equal(registry.get("child")?.ownership?.home, home);
   });
 
   test("with no claim, a legacy absent home without a record is still dropped", () => {
@@ -708,6 +712,24 @@ describe("the sidecar's removal gate under a held claim", () => {
     finally { t.mock.restoreAll(); syncBuiltinESMExports(); }
     rmSync(claimOf(home), { recursive: true, force: true });
     assert.equal(ownedHomeRemovalState(ownership), "removed", "positive control: the same record with no claim is removal");
+  });
+
+  test("a whole failed removal between the record read and the claim read is not removal", t => {
+    const { storage, home } = sidecarFixture();
+    const ownership = readOwnership(home)!;
+    assert.equal(writeEvictionRecord(storage, "child", usd(.5)), true);
+    // The gate's record read sees the record; the remover then fails, deletes
+    // it and releases its claim before the gate's claim read.
+    const original = fs.existsSync;
+    let rolledBack = false;
+    t.mock.method(fs, "existsSync", function (this: unknown, path: fs.PathLike) {
+      if (String(path) === claimOf(home) && !rolledBack) { rolledBack = true; rmSync(join(evictedDir(storage), readdirSync(evictedDir(storage))[0])); }
+      return original.call(this, path);
+    });
+    syncBuiltinESMExports();
+    try { assert.equal(ownedHomeRemovalState(ownership), "present"); }
+    finally { t.mock.restoreAll(); syncBuiltinESMExports(); }
+    assert.equal(rolledBack, true, "precondition: the rollback ran inside the gate");
   });
 
   test("an absent home renamed back as the claim is released reads as present", t => {
