@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: b20432e837bbe60e
 sage-review-completeness-reviewed: b20432e837bbe60e
+completed: 2026-09-25
 ---
 
 # Ticket index - read timeout, absence caching, and review-sweep fixes
@@ -246,6 +247,62 @@ Implement every Decision except the F2/F4 naming, each with its own test:
 - F1: a ticket hidden by sparse checkout is found by the index paths that
   look tickets up.
 
+### Result (8bc24d33) - 2026-09-24
+
+Landed in 8bc24d33, with review fixes in d7d2a628.
+
+- **Absence by path.** `syncState` records `absent_source` (confirmed,
+  read-timeout, write-timeout; empty reads as confirmed). Reads honor every
+  cached absence and writes honor all but read-timeout. A discovery that sees
+  the ref clears it.
+  - Tests: `TestNeverSeenReadTimeoutSilencesReadsNotWrites`,
+    `TestNeverSeenTimeoutsCacheAbsencePerPath` (with `hangingSSH`, at most one
+    read-path and one write-path `ls-remote` per TTL).
+- **Lease acquire bypass.** `Submission.BypassAbsence` is set for acquire with
+  no impl branch.
+  - Test: `TestLeaseAcquireBypassesCachedAbsence`. It covers the no-ref
+    re-cache, and checks that an impl record makes no remote call.
+- **Seen-clone timeout.** `View.TimedOut` carries the read timeout. The query
+  trailer reads "origin did not answer within <t>; ownership is from the cached
+  index (age <a>), not refreshed". Unknown ownership now reads "origin not
+  reached".
+  - Tests: `TestSeenCloneReadTimeoutIsNotRefreshed`, plus the A4, F2, and F5
+    assertions.
+- **C2.** A live close leaves a different-email lease unchanged when no
+  override names that holder, and prints one line. The file still moves and
+  the write still flushes.
+  - Tests: `TestLiveCloseLeavesLeaseAcquiredAfterGuardRead`,
+    `TestLiveCloseLeavesDifferentEmailLease`.
+- **C3.** The already-closed no-op runs first in both live and replay. A
+  replayed override move's audit line carries `(pending entry <id>)`.
+  - Tests: `TestCloseOfClosedLeaseIsNoOp`,
+    `TestOverrideCloseReflushWritesNothing`,
+    `TestOverrideMoveAuditCarriesEntryID`.
+- **C4.** `Replay` reports a replayed takeover's warning.
+  - Tests: `TestReplayKeepsTakeoverWarning`,
+    `TestReplayedTakeoverPrintsWarning`.
+- **C5.** `CreateResult.Reports`, and `Check` returns its reports.
+  `index_init` prints them in text and JSON, including on a failed adopt.
+  - Test: `TestIndexInitReportsDiscard` (create, adopt, check, and JSON modes).
+- **C6.** `onlineTrack` is used by `LoadContext` when online. It shares
+  `trackAtDefaultBranch` with `InitSource`.
+  - Test: `TestOnlineTrackWithoutLocalOriginHEAD`. It covers the acquire
+    refusal and a non-acquire prune, with the default-branch tracking ref also
+    missing.
+- **F1.** `wsdoc.ValidTicketStem`, `ParseTicketPath`, `FindTicketPath`, and
+  `ErrTicketNotFound` replace the copies in wsindex and mcp.
+  - Test: `TestAcquireFindsSparseHiddenTicket`.
+- **Verification.** Every new tool-level test failed against the pre-change
+  sources. `go test -count=1` passes for `./internal/wsindex` and
+  `./internal/wsdoc`. `./internal/mcp` passes except
+  `TestServeStdioConfigResolveAgentFallsBackToDefault`, which also fails on
+  develop (environment harness detection).
+- **Decisions.**
+  - When undeclared, `onlineTrack` falls back to the default branch, which is
+    init's rule.
+  - The C2 warning names a stale override holder.
+  - The acquire lookup reports a git failure separately from not-found.
+
 ### Phase 2: Index test backfill and naming
 
 Depends on Phase 1 (tests target the Phase 1 behavior). Test-only plus the
@@ -281,3 +338,51 @@ F2 renames and F4 comments:
   remove, the 2.5-4 s wall-clock bounds in `storage_test.go` (they assert the
   timeout bound itself) to a generous multiple that survives `-race`.
 - F2 renames and the F4 file-level scenario-ID comments.
+
+### Result (2f701a55) - 2026-09-24
+
+Landed in c88daf84 (wsindex and wsdoc), 3cd6ddc1 (F2 and F4), and 2f701a55
+(mcp backfill), plus the cd02d734 comment fix.
+
+- **T1.** `TestIndexInitRejectsNonLeadKeys`. `index_init` was already
+  lead-only.
+- **T2.** `TestPiggybackWriteFailureKeepsHostMove`.
+- **T3.** `TestSageStampRegistersInIndexMode`, plus a sage_stamp step in
+  `TestNoRefPathIsByteIdentical`.
+- **T4.** Two tests:
+  - `TestLoadContextReadsClosedFromLocalTrackingRefWithoutFetch`
+  - `TestNonAcquireWritePrunesFromLocalTrackingRef`
+- **T5.** `TestB5GCRacesAcquire` now checks lease-only protection, a matching
+  `meta.last_gc`, and exactly one GC commit.
+- **T6.** Three tests:
+  - `TestIndexPushBypassesPrePushHook`
+  - `TestIndexCommitIgnoresSigningConfig`: an outcome-only guard. Current git's
+    commit-tree ignores `commit.gpgSign`, so the `store.go` comment was
+    corrected.
+  - `TestIndexPushRefusalIsNotRetried`: exactly one push.
+- **T7.** `TestInitOnUnpushedOriginRegistersNothing`.
+- **T8.** The flushed worktree path is absent from `index.json` and from the
+  history. The I3 report asserts the track, the acquire time, and the worktree
+  path.
+- **Minors.**
+  - A5 now asserts that `calls` is non-empty.
+  - `TestNeedsOverride` has `OpRegister` rows.
+  - Refused move and close leave the file and the index untouched.
+  - `TestOwnershipFilterAppliesBeforeLimit` and
+    `TestTicketsFindExcludeAppliesBeforePagination` were added.
+  - No `t.Fatal` runs off the test goroutine.
+  - `TestOfflineWritesPendAndFlush` is now
+    `TestOfflineWritesRecordSequentiallyAndFlush`.
+  - The wall-clock bounds use `boundSlack = 3`.
+- **F2.** `indexAbsentText` and `indexAbsentResponse` were renamed,
+  `holderText` was inlined, and `TestIndexAbsentVerbsAnswerPlainOK` and
+  `TestA10NeverSeenOfflineAcquireIsIndexAbsent` were renamed.
+- **F4.** A file-level scenario-ID comment is in `storage_test.go`,
+  `continuity_test.go`, and `ticket_index_test.go`.
+- **Verification.** The same package runs as Phase 1 pass, as does `-race` on
+  wsindex and on the mcp concurrency tests. Each leaf confirmed its new tests
+  with a temporary mutation that it then reverted.
+- **Review.** Partitioned, two rounds. Round 1 raised 0 Critical and 2 Major
+  (test), both fixed in d7d2a628; round 2 was clean. Two Minors were declined:
+  the `callRaw` framing duplication against the shared test helper, and the
+  signing test staying outcome-only.

@@ -140,11 +140,16 @@ func (a *Applier) Live(idx *Index, e PendingEntry) Outcome {
 }
 
 // Replay applies one pending entry during a flush. The remote wins: a
-// conflicting entry is dropped (idx unchanged) and reported.
+// conflicting entry is dropped (idx unchanged) and reported. An applied entry
+// whose live outcome carries a warning (a takeover from the same email on
+// another clone) reports that warning.
 func (a *Applier) Replay(idx *Index, e PendingEntry) ([]string, string) {
 	out := a.apply(idx, e, true)
 	if out.Refusal != nil {
 		return nil, out.Refusal.Message
+	}
+	if out.Warning != "" {
+		return out.Audit, fmt.Sprintf("replayed the offline %s of %s recorded on %s: %s", e.Op, e.Stem, recordedOn(e), out.Warning)
 	}
 	return out.Audit, ""
 }
@@ -173,8 +178,15 @@ func (a *Applier) apply(idx *Index, e PendingEntry, replay bool) Outcome {
 			}
 			// An overridden move rides its registration: the lease stays
 			// with its holder, and the commit records the actor and reason.
-			out.Audit = []string{fmt.Sprintf("move %s by %s under override of the lease held by %s, reason: %s",
-				e.Stem, e.Owner, holderOrNone(idx.Registrations[e.Stem].Lease), e.Override.Reason)}
+			// A replayed entry's line carries its pending id, so a duplicate
+			// replayed after a crash between push and clear reads as the
+			// same event.
+			line := fmt.Sprintf("move %s by %s under override of the lease held by %s, reason: %s",
+				e.Stem, e.Owner, holderOrNone(idx.Registrations[e.Stem].Lease), e.Override.Reason)
+			if e.ID != "" {
+				line += " (pending entry " + e.ID + ")"
+			}
+			out.Audit = []string{line}
 		}
 		return out
 	case OpAcquire:
@@ -187,11 +199,17 @@ func (a *Applier) apply(idx *Index, e PendingEntry, replay bool) Outcome {
 	return Outcome{Refusal: &RefusalError{Stem: e.Stem, Message: fmt.Sprintf("%s: unsupported ticket-index operation %q", e.Stem, e.Op)}}
 }
 
-func (a *Applier) conflict(e PendingEntry, holder *Lease) *RefusalError {
+// recordedOn names where a pending entry was recorded, for replay reports.
+func recordedOn(e PendingEntry) string {
 	where := "track " + e.Owner.Track
 	if e.Worktree != "" {
 		where += " (" + e.Worktree + ")"
 	}
+	return where
+}
+
+func (a *Applier) conflict(e PendingEntry, holder *Lease) *RefusalError {
+	where := recordedOn(e)
 	if holder == nil {
 		return &RefusalError{Stem: e.Stem, Message: fmt.Sprintf(
 			"ticket-index: dropped the offline %s of %s recorded on %s: the lease it overrode was released meanwhile",
@@ -301,6 +319,12 @@ func (a *Applier) close(idx *Index, e PendingEntry, at time.Time, replay bool) O
 		reg.Lease = newLease(e.Owner, PhaseClosed, at)
 		return Outcome{Effect: EffectClosed, Audit: []string{fmt.Sprintf("close %s: closed lease created for %s", e.Stem, e.Owner)}}
 	}
+	// An already-closed lease makes the close a no-op, checked first,
+	// override or not: a replayed override close writes no duplicate audit
+	// line, and closing a lease someone else already closed prints nothing.
+	if reg.Lease.Phase == PhaseClosed {
+		return Outcome{Effect: EffectClosed}
+	}
 	holder := reg.Lease.Owner()
 	if replay && !SameOwner(holder, e.Owner) {
 		if e.Override != nil && !SameOwner(holder, e.Override.Holder) {
@@ -310,8 +334,17 @@ func (a *Applier) close(idx *Index, e PendingEntry, at time.Time, replay bool) O
 			return Outcome{Refusal: a.conflict(e, reg.Lease)}
 		}
 	}
-	if reg.Lease.Phase == PhaseClosed && e.Override == nil {
-		return Outcome{Effect: EffectClosed}
+	if !replay && NeedsOverride(OpClose, holder, e.Owner) && (e.Override == nil || !SameOwner(holder, e.Override.Holder)) {
+		// The caller's guard read a cached view; the fresh tip shows a
+		// different person holding the lease with no override naming them.
+		// Their lease stays untouched; the write still registers, flushes,
+		// and prunes.
+		why := "changing another person's lease needs dangerously_override_lease_status: true with a non-empty reason, set only on the user's explicit instruction"
+		if e.Override != nil {
+			why = fmt.Sprintf("the override named %s, who no longer holds it", e.Override.Holder)
+		}
+		return Outcome{Effect: EffectRegistered, Warning: fmt.Sprintf(
+			"%s is held by %s; the close left that lease unchanged (%s)", e.Stem, holderString(reg.Lease), why)}
 	}
 	reg.Lease.Phase = PhaseClosed
 	audit := fmt.Sprintf("close %s: lease of %s set closed", e.Stem, holderString(reg.Lease))

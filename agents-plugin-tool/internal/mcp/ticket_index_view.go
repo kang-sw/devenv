@@ -18,6 +18,7 @@ import (
 type ownershipView struct {
 	state        wsindex.ViewState
 	age          time.Duration
+	timedOut     time.Duration // the read timeout a stale view was not refreshed within; 0 otherwise
 	pending      int
 	reports      []string
 	caller       wsindex.Owner
@@ -57,6 +58,7 @@ func (s *Server) loadOwnershipView(root string, cachedOnly bool) *ownershipView 
 	v := &ownershipView{
 		state:        view.State,
 		age:          view.Age,
+		timedOut:     view.TimedOut,
 		pending:      len(view.Pending),
 		reports:      view.Reports,
 		caller:       caller.owner,
@@ -199,7 +201,7 @@ func ownershipLine(o *wsdoc.TicketOwnership) string {
 	case wsdoc.OwnershipRemote:
 		parts = append(parts, fmt.Sprintf("held by %s (track %s)", o.Email, o.Track))
 	case wsdoc.OwnershipUnknown:
-		parts = append(parts, "unknown (origin unreachable and no cached index)")
+		parts = append(parts, "unknown (origin not reached and no cached index)")
 	}
 	if o.Level == wsdoc.OwnershipSelf || o.Level == wsdoc.OwnershipLocal || o.Level == wsdoc.OwnershipRemote {
 		if o.Phase == wsindex.PhaseClosed {
@@ -253,15 +255,19 @@ func (v *ownershipView) trailer() string {
 		return ""
 	}
 	var b strings.Builder
-	for _, r := range v.reports {
-		b.WriteString(indexReportLine(r) + "\n")
-	}
+	b.WriteString(joinIndexReports(v.reports))
 	if v.state == wsindex.ViewStale {
 		age := "unknown age"
 		if v.age >= 0 {
 			age = "age " + v.age.Truncate(time.Second).String()
 		}
-		fmt.Fprintf(&b, "ticket-index: origin unreachable; ownership is from the cached index (%s)\n", age)
+		if v.timedOut > 0 {
+			// A slow origin is not an unreachable one: the view was only not
+			// refreshed within the read bound.
+			fmt.Fprintf(&b, "ticket-index: origin did not answer within %s; ownership is from the cached index (%s), not refreshed\n", v.timedOut, age)
+		} else {
+			fmt.Fprintf(&b, "ticket-index: origin unreachable; ownership is from the cached index (%s)\n", age)
+		}
 	}
 	if v.pending > 0 {
 		fmt.Fprintf(&b, "ticket-index: %d pending offline entries; the next ticket tool that reaches origin flushes them\n", v.pending)
@@ -310,7 +316,7 @@ func (s *Server) guardMoveClose(root, tool, stem string, args map[string]any) (i
 	if wsindex.NeedsOverride(op, holder, v.caller) {
 		if !flag {
 			return indexGuard{}, fmt.Errorf("tickets.%s refused: %s is held by %s since %s; proceeding needs dangerously_override_lease_status: true with a non-empty reason, set only on the user's explicit instruction",
-				tool, stem, holderText(holder), lease.TouchedAt.UTC().Format(time.RFC3339))
+				tool, stem, holder.String(), lease.TouchedAt.UTC().Format(time.RFC3339))
 		}
 		if reason == "" {
 			return indexGuard{}, fmt.Errorf("tickets.%s: dangerously_override_lease_status needs a non-empty reason", tool)
@@ -318,15 +324,13 @@ func (s *Server) guardMoveClose(root, tool, stem string, args map[string]any) (i
 		g.override = &wsindex.Override{Holder: holder, Reason: reason}
 		return g, nil
 	}
-	g.warning = fmt.Sprintf("ticket-index: %s is held by %s; the lease stays with its holder", stem, holderText(holder))
+	g.warning = fmt.Sprintf("ticket-index: %s is held by %s; the lease stays with its holder", stem, holder.String())
 	return g, nil
 }
 
 func (g indexGuard) text() string {
 	var b strings.Builder
-	for _, r := range g.reports {
-		b.WriteString(indexReportLine(r) + "\n")
-	}
+	b.WriteString(joinIndexReports(g.reports))
 	if g.warning != "" {
 		b.WriteString(g.warning + "\n")
 	}

@@ -5,6 +5,10 @@ import (
 	"testing"
 )
 
+// Scenario IDs in test names (TestI18I22..., TestI21..., and so on) come from
+// ticket 260924-feat-origin-ticket-ownership-index, whose Results map each ID
+// to its test. The IDs are the traceability key; keep them.
+
 // I21: a remote tip older than the shared cache (a sibling's push landed in
 // between) is a stale read: nothing is discarded and the cache stays.
 func TestI21StaleReadKeepsCacheAndPending(t *testing.T) {

@@ -1,6 +1,7 @@
 package wsdoc
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,34 @@ import (
 )
 
 var ticketStemRE = regexp.MustCompile(`^\d{6}-[\w-]+$`)
+
+// ErrTicketNotFound is the error FindTicketPath wraps when no status
+// directory (nor, under a sparse-checkout scope, the git index) holds the
+// stem.
+var ErrTicketNotFound = errors.New("ticket not found")
+
+// ValidTicketStem reports whether stem has the ticket stem shape
+// (YYMMDD-category-name).
+func ValidTicketStem(stem string) bool { return ticketStemRE.MatchString(stem) }
+
+// ParseTicketPath splits a repository-relative forward-slash path of the form
+// ai-docs/tickets/<status>/<stem>.md into its status directory and stem,
+// rejecting any other shape and any stem that is not a ticket stem.
+func ParseTicketPath(rel string) (status, stem string, ok bool) {
+	status, stem, ok = ticketIndexPathParts(strings.TrimSpace(rel))
+	if !ok || !ticketStemRE.MatchString(stem) {
+		return "", "", false
+	}
+	return status, stem, true
+}
+
+// FindTicketPath locates stem under the five status directories and returns
+// its repository-relative path and status token. A ticket hidden by this
+// worktree's sparse-checkout scope is still found, through the git index,
+// with hidden set.
+func FindTicketPath(root, stem string) (path, status string, hidden bool, err error) {
+	return findTicketPath(root, newTicketScope(root), stem)
+}
 
 type TicketListOptions struct {
 	Statuses       []string
@@ -149,7 +178,7 @@ type TicketOwnership struct {
 	// origin review-track per the local remote-tracking ref: this checkout
 	// is stale.
 	OriginClosed bool `json:"origin_closed,omitempty"`
-	// IndexState is fresh, stale (origin unreachable; cache served), or
+	// IndexState is fresh, stale (origin not reached; cache served), or
 	// unknown; CacheAgeSeconds is the stale cache's age.
 	IndexState      string `json:"index_state,omitempty"`
 	CacheAgeSeconds int    `json:"cache_age_seconds,omitempty"`

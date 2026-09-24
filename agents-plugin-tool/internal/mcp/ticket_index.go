@@ -5,24 +5,31 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/wsdoc"
 	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wsindex"
 )
 
 // The ticket ownership index is an opt-in overlay on origin. Every entry
 // point here keeps the "no ref, no change" contract: when the index is absent
-// (no origin, no ref, cached absence, or an unreachable remote on a clone that
-// never saw an index) the ticket tools behave and print exactly as before,
-// and tickets.acquire / tickets.release answer a plain "ok" with no
+// (no origin, no ref, cached absence, or an unreachable or timed-out remote on
+// a clone that never saw an index) the ticket tools behave and print exactly
+// as before, and tickets.acquire / tickets.release answer a plain "ok" with no
 // validation. All validation therefore runs inside the index's Prepare hook,
-// which fires only once the index is known to be in use.
+// which fires only once the index is known to be in use. A cached absence
+// silences discovery for its TTL, scoped by what caused it: a read-path
+// timeout silences only reads (tickets.query, the move/close guard), so the
+// write piggybacks (move, close, create_empty, sage_stamp) still run their own
+// discovery once per TTL; a confirmed absence or a write-path timeout
+// silences both. The lead's lease acquire always asks origin (see
+// handleIndexVerb).
 
-const indexMockText = "ok"
+// indexAbsentText is what tickets.acquire / tickets.release answer while the
+// index is absent.
+const indexAbsentText = "ok"
 
 func (s *Server) indexNow() time.Time {
 	if s.indexOpts.Now != nil {
@@ -84,15 +91,6 @@ func (c indexCaller) acquireTrackError(explicitTrack string) error {
 	return nil
 }
 
-func ticketFileExists(root, stem string) bool {
-	for _, dir := range []string{"idea", "todo", "ready", ".done", ".dropped"} {
-		if info, err := os.Stat(filepath.Join(root, "ai-docs", "tickets", dir, stem+".md")); err == nil && !info.IsDir() {
-			return true
-		}
-	}
-	return false
-}
-
 func indexReportLine(report string) string {
 	if strings.HasPrefix(report, "ticket-index:") {
 		return report
@@ -102,10 +100,6 @@ func indexReportLine(report string) string {
 
 func offlineWarning(op, stem string) string {
 	return fmt.Sprintf("ticket-index: origin is unreachable; the %s of %s is recorded in this clone's pending log, unverified against origin, and is re-checked when a later ticket tool reaches origin", op, stem)
-}
-
-func holderText(o wsindex.Owner) string {
-	return o.String()
 }
 
 // ---- piggyback registration --------------------------------------------------
@@ -135,9 +129,7 @@ func (s *Server) indexPiggyback(root, op, stem string, override *wsindex.Overrid
 	}
 	res, outcome, err := cl.Submit(ctx, sub)
 	var b strings.Builder
-	for _, r := range res.Reports {
-		b.WriteString(indexReportLine(r) + "\n")
-	}
+	b.WriteString(joinIndexReports(res.Reports))
 	switch {
 	case err != nil:
 		fmt.Fprintf(&b, "ticket-index: the %s of %s was not recorded in the index: %v\n", op, stem, err)
@@ -171,7 +163,7 @@ func indexVerbResponse(id json.RawMessage, args map[string]any, r indexVerbResul
 		fmt.Fprintf(&b, "ticket_stem: %s\n", r.TicketStem)
 	}
 	if o, ok := r.Owner.(wsindex.Owner); ok {
-		fmt.Fprintf(&b, "owner: %s\n", holderText(o))
+		fmt.Fprintf(&b, "owner: %s\n", o.String())
 	}
 	if r.ImplBranch != "" {
 		fmt.Fprintf(&b, "impl_branch: %s\n", r.ImplBranch)
@@ -185,11 +177,13 @@ func indexVerbResponse(id json.RawMessage, args map[string]any, r indexVerbResul
 	return toolTextResponse(id, b.String(), nil)
 }
 
-func indexMockResponse(id json.RawMessage, args map[string]any) response {
+// indexAbsentResponse is the plain index-absent answer: no validation, no
+// index text.
+func indexAbsentResponse(id json.RawMessage, args map[string]any) response {
 	if wantsJSON(args) {
 		return toolJSONResponse(id, map[string]string{"status": "ok"}, nil)
 	}
-	return toolTextResponse(id, indexMockText, nil)
+	return toolTextResponse(id, indexAbsentText, nil)
 }
 
 func indexErrorResponse(id json.RawMessage, err error, reports []string) response {
@@ -216,7 +210,7 @@ func (s *Server) handleIndexVerb(id json.RawMessage, args, meta map[string]any, 
 	}
 	cl := s.openTicketIndex(root)
 	if cl == nil {
-		return indexMockResponse(id, args)
+		return indexAbsentResponse(id, args)
 	}
 	stem, _ := args["ticket_stem"].(string)
 	stem = strings.TrimSpace(stem)
@@ -237,9 +231,18 @@ func (s *Server) handleIndexVerb(id json.RawMessage, args, meta map[string]any, 
 			entry.Override = &wsindex.Override{Reason: reason}
 		}
 	}
-	sub := &wsindex.Submission{Entry: entry, Applier: &wsindex.Applier{Now: s.indexNow()}}
+	// The lease acquire (no impl branch) is the one ownership-bearing call: it
+	// asks origin even within a cached absence, so a clone learns of an index
+	// a collaborator just created here rather than a TTL later. The worker's
+	// impl record keeps the cache; its lead's acquire on this clone just
+	// probed.
+	sub := &wsindex.Submission{
+		Entry:         entry,
+		Applier:       &wsindex.Applier{Now: s.indexNow()},
+		BypassAbsence: op == wsindex.OpAcquire && entry.ImplBranch == "",
+	}
 	sub.Prepare = func(ctx context.Context, online bool) error {
-		if !wsindex.ValidStem(stem) {
+		if !wsdoc.ValidTicketStem(stem) {
 			return fmt.Errorf("%s: ticket_stem must be a ticket stem (YYMMDD-category-name)", tool)
 		}
 		if op == wsindex.OpAcquire {
@@ -252,24 +255,23 @@ func (s *Server) handleIndexVerb(id json.RawMessage, args, meta map[string]any, 
 			if caller.owner.Email == "" {
 				return fmt.Errorf("%s: git user.email is not set; the lease records the owner's email", tool)
 			}
-			if !ticketFileExists(root, stem) {
+			if _, _, _, err := wsdoc.FindTicketPath(root, stem); errors.Is(err, wsdoc.ErrTicketNotFound) {
 				return fmt.Errorf("%s: ticket %s does not exist in this checkout", tool, stem)
+			} else if err != nil {
+				return fmt.Errorf("%s: look up ticket %s: %w", tool, stem, err)
 			}
 		}
 		return cl.LoadContext(ctx, sub, online, op == wsindex.OpAcquire)
 	}
 	res, outcome, err := cl.Submit(ctx, sub)
-	reports := make([]string, 0, len(res.Reports))
-	for _, r := range res.Reports {
-		reports = append(reports, indexReportLine(r))
-	}
+	reports := indexReportLines(res.Reports)
 	if res.Status == wsindex.WriteAbsent {
 		if len(reports) > 0 {
 			// The index was deleted on origin and this call discarded the
 			// clone's offline entries: the one-time report still shows.
-			return indexVerbResponse(id, args, indexVerbResult{Status: indexMockText, Reports: reports})
+			return indexVerbResponse(id, args, indexVerbResult{Status: indexAbsentText, Reports: reports})
 		}
-		return indexMockResponse(id, args)
+		return indexAbsentResponse(id, args)
 	}
 	if err != nil {
 		var refusal *wsindex.RefusalError
@@ -309,15 +311,18 @@ func (s *Server) handleTicketsIndexInit(id json.RawMessage, args, meta map[strin
 	}
 	ctx := context.Background()
 	if boolArgument(args["check"]) {
-		state, checkErr := cl.Check(ctx)
+		state, reports, checkErr := cl.Check(ctx)
 		detail := ""
 		if state == wsindex.CheckUnreachable && checkErr != nil {
 			detail = checkErr.Error()
 		}
 		if wantsJSON(args) {
-			value := map[string]string{"state": string(state)}
+			value := map[string]any{"state": string(state)}
 			if detail != "" {
 				value["detail"] = detail
+			}
+			if len(reports) > 0 {
+				value["reports"] = indexReportLines(reports)
 			}
 			return toolJSONResponse(id, value, nil)
 		}
@@ -325,7 +330,7 @@ func (s *Server) handleTicketsIndexInit(id json.RawMessage, args, meta map[strin
 		if detail != "" {
 			text += "detail: " + firstLine(detail) + "\n"
 		}
-		return toolTextResponse(id, text, nil)
+		return toolTextResponse(id, text+joinIndexReports(reports), nil)
 	}
 	if !cl.HasOrigin(ctx) {
 		return toolTextResponse(id, "", fmt.Errorf("tickets.index_init: this clone has no origin remote; the ticket index lives on origin"))
@@ -344,7 +349,9 @@ func (s *Server) handleTicketsIndexInit(id json.RawMessage, args, meta map[strin
 	}
 	created, err := cl.Create(ctx, initial, fmt.Sprintf("ticket-index: init (%d open tickets from %s)", len(initial.Registrations), firstNonEmpty(track, "no review-track")))
 	if err != nil {
-		return toolTextResponse(id, "", fmt.Errorf("tickets.index_init: %w", err))
+		// A failed adopt may already have discarded the pending log; its
+		// one-time report still belongs in this output.
+		return indexErrorResponse(id, fmt.Errorf("tickets.index_init: %w", err), created.Reports)
 	}
 	status := "adopted"
 	registered := 0
@@ -352,7 +359,11 @@ func (s *Server) handleTicketsIndexInit(id json.RawMessage, args, meta map[strin
 		status, registered = "created", len(initial.Registrations)
 	}
 	if wantsJSON(args) {
-		return toolJSONResponse(id, map[string]any{"status": status, "registered": registered, "review_track": track}, nil)
+		value := map[string]any{"status": status, "registered": registered, "review_track": track}
+		if len(created.Reports) > 0 {
+			value["reports"] = indexReportLines(created.Reports)
+		}
+		return toolJSONResponse(id, value, nil)
 	}
 	text := fmt.Sprintf("status: %s\nreview_track: %s\n", status, firstNonEmpty(track, "(none)"))
 	if created.Created {
@@ -360,7 +371,25 @@ func (s *Server) handleTicketsIndexInit(id json.RawMessage, args, meta map[strin
 	} else {
 		text += "note: another clone created the index first; this clone adopted it\n"
 	}
-	return toolTextResponse(id, text, nil)
+	return toolTextResponse(id, text+joinIndexReports(created.Reports), nil)
+}
+
+// indexReportLines prefixes each report as a ticket-index line.
+func indexReportLines(reports []string) []string {
+	out := make([]string, 0, len(reports))
+	for _, r := range reports {
+		out = append(out, indexReportLine(r))
+	}
+	return out
+}
+
+// joinIndexReports renders reports as ticket-index lines, "" when none.
+func joinIndexReports(reports []string) string {
+	var b strings.Builder
+	for _, r := range reports {
+		b.WriteString(indexReportLine(r) + "\n")
+	}
+	return b.String()
 }
 
 func firstLine(s string) string {

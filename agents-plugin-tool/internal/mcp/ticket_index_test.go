@@ -1,9 +1,11 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,6 +22,9 @@ import (
 // a local bare origin whose default branch (main) declares review-track
 // develop, with develop carrying the open tickets alpha, beta, gamma and the
 // closed ticket old.
+//
+// The scenario IDs in test names and comments (A*, B*, C*, D*, E*, I*) are the
+// scenario contracts of ticket 260924-feat-origin-ticket-ownership-index.
 
 const (
 	stemAlpha = "260101-feat-alpha"
@@ -99,11 +104,12 @@ type ixCheckout struct {
 }
 
 // ixRunner wraps wsindex.ExecRunner: it counts remote git invocations by
-// subcommand and can fail index-ref fetches to simulate a transport failure
-// after a successful discovery.
+// subcommand, records each remote fetch's arguments, and can fail index-ref
+// fetches to simulate a transport failure after a successful discovery.
 type ixRunner struct {
 	mu        sync.Mutex
 	counts    map[string]int
+	fetches   []string
 	failFetch atomic.Bool
 }
 
@@ -120,6 +126,9 @@ func (r *ixRunner) Run(ctx context.Context, dir string, cmd wsindex.Command) ([]
 		}
 		r.mu.Lock()
 		r.counts[sub]++
+		if sub == "fetch" {
+			r.fetches = append(r.fetches, strings.Join(cmd.Args, " "))
+		}
 		r.mu.Unlock()
 		if sub == "fetch" && r.failFetch.Load() && strings.Contains(strings.Join(cmd.Args, " "), wsindex.RemoteRef) {
 			return nil, errors.New("injected transport failure")
@@ -144,9 +153,17 @@ func (r *ixRunner) total() int {
 	return n
 }
 
+// fetchArgs returns the arguments of each remote fetch since the last reset.
+func (r *ixRunner) fetchArgs() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.fetches...)
+}
+
 func (r *ixRunner) reset() {
 	r.mu.Lock()
 	r.counts = map[string]int{}
+	r.fetches = nil
 	r.mu.Unlock()
 }
 
@@ -187,31 +204,89 @@ func (c *ixCheckout) git(args ...string) string {
 func (c *ixCheckout) offline() { c.git("remote", "set-url", "origin", ixUnreachable) }
 func (c *ixCheckout) online()  { c.git("remote", "set-url", "origin", c.env.origin) }
 
+// hang points origin at an ssh remote whose transport never answers, so
+// every remote command runs into its timeout.
+func (c *ixCheckout) hang() {
+	c.env.t.Helper()
+	script := filepath.Join(c.env.dir, "hang-ssh.sh")
+	mustWrite(c.env.t, c.env.dir, "hang-ssh.sh", "#!/bin/sh\nexec sleep 30\n")
+	if err := os.Chmod(script, 0o755); err != nil {
+		c.env.t.Fatal(err)
+	}
+	c.git("config", "core.sshCommand", script)
+	c.git("remote", "set-url", "origin", "ssh://git@ticket-index.invalid/repo.git")
+}
+
 // call runs one tool and returns its text and whether it was an error.
 func (c *ixCheckout) call(tool string, args map[string]any) (string, bool) {
 	c.env.t.Helper()
-	line := callToolLineWithKey(c.env.t, c.server, int(ixCallID.Add(1)), c.key, tool, args)
-	var resp struct {
-		Result struct {
-			IsError bool `json:"isError"`
-			Content []struct {
-				Text string `json:"text"`
-			} `json:"content"`
-		} `json:"result"`
-		Error *struct {
-			Message string `json:"message"`
-		} `json:"error"`
+	text, isErr, err := c.callRaw(tool, args)
+	if err != nil {
+		c.env.t.Fatal(err)
 	}
-	if err := json.Unmarshal([]byte(line), &resp); err != nil {
-		c.env.t.Fatalf("%s: %v\n%s", tool, err, line)
+	return text, isErr
+}
+
+// callRaw is call without the testing.T, so a goroutine can run it and
+// hand its error back to the test goroutine (FailNow must not run off it).
+func (c *ixCheckout) callRaw(tool string, args map[string]any) (string, bool, error) {
+	if args == nil {
+		args = map[string]any{}
 	}
-	if resp.Error != nil {
-		return resp.Error.Message, true
+	args["session_key"] = c.key
+	id := ixCallID.Add(1)
+	raw, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0", "id": id, "method": "tools/call",
+		"params": map[string]any{"name": tool, "arguments": args},
+	})
+	if err != nil {
+		return "", false, err
 	}
-	if len(resp.Result.Content) != 1 {
-		c.env.t.Fatalf("%s: unexpected response %s", tool, line)
+	var out bytes.Buffer
+	if err := c.server.ServeStdio(context.Background(), strings.NewReader(string(raw)+"\n"), &out); err != nil {
+		return "", false, fmt.Errorf("%s: ServeStdio: %v", tool, err)
 	}
-	return resp.Result.Content[0].Text, resp.Result.IsError
+	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+		var resp struct {
+			ID     json.RawMessage `json:"id"`
+			Result struct {
+				IsError bool `json:"isError"`
+				Content []struct {
+					Text string `json:"text"`
+				} `json:"content"`
+			} `json:"result"`
+			Error *struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal([]byte(line), &resp); err != nil {
+			return "", false, fmt.Errorf("%s: %v\n%s", tool, err, line)
+		}
+		if string(resp.ID) != fmt.Sprint(id) {
+			continue
+		}
+		if resp.Error != nil {
+			return resp.Error.Message, true, nil
+		}
+		if len(resp.Result.Content) != 1 {
+			return "", false, fmt.Errorf("%s: unexpected response %s", tool, line)
+		}
+		return resp.Result.Content[0].Text, resp.Result.IsError, nil
+	}
+	return "", false, fmt.Errorf("%s: no response with id %d in %s", tool, id, out.String())
+}
+
+// mustCallErr is mustCall for a goroutine: it returns the failure instead
+// of failing the test.
+func (c *ixCheckout) mustCallErr(tool string, args map[string]any) error {
+	text, isErr, err := c.callRaw(tool, args)
+	if err != nil {
+		return err
+	}
+	if isErr {
+		return fmt.Errorf("%s(%v) failed: %s", tool, args, text)
+	}
+	return nil
 }
 
 // mustCall fails the test on an error response.
@@ -309,6 +384,41 @@ func (e *ixEnv) history() string {
 	return string(runGitOutput(e.t, e.origin, "log", "--format=%B", wsindex.RemoteRef))
 }
 
+// gcCommits counts the index commits that carry a GC audit line.
+func (e *ixEnv) gcCommits() int {
+	n := 0
+	for _, msg := range strings.Split(string(runGitOutput(e.t, e.origin, "log", "--format=%B%x00", wsindex.RemoteRef)), "\x00") {
+		for _, line := range strings.Split(msg, "\n") {
+			if strings.HasPrefix(line, "gc ") {
+				n++
+				break
+			}
+		}
+	}
+	return n
+}
+
+// remoteBlobsAndHistory is every index.json version on origin plus the
+// index commit messages: everything the index ever published.
+func (e *ixEnv) remoteBlobsAndHistory() string {
+	var b strings.Builder
+	for _, commit := range strings.Fields(string(runGitOutput(e.t, e.origin, "rev-list", wsindex.RemoteRef))) {
+		b.Write(runGitOutput(e.t, e.origin, "cat-file", "blob", commit+":index.json"))
+	}
+	return b.String() + e.history()
+}
+
+// pathForms returns p and its symlink-resolved form (macOS temp dirs live
+// under a /var -> /private/var link).
+func pathForms(t *testing.T, p string) []string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return []string{p, resolved}
+}
+
 // landOnDevelop moves stem to dir on origin's develop through a scratch clone.
 func (e *ixEnv) landOnDevelop(stem, from, to string) {
 	e.t.Helper()
@@ -327,9 +437,10 @@ func (e *ixEnv) landOnDevelop(stem, from, to string) {
 
 // ---- A: index absence and init ------------------------------------------------
 
-// A1, A3: acquire and release are a silent plain "ok" with no validation;
-// the mutating tools print exactly what they print without an origin.
-func TestIndexAbsentVerbsAreSilentMock(t *testing.T) {
+// A1, A3: with the index absent, acquire and release answer a plain "ok"
+// with no validation; the mutating tools print exactly what they print
+// without an origin.
+func TestIndexAbsentVerbsAnswerPlainOK(t *testing.T) {
 	e := newIxEnv(t)
 	local := t.TempDir()
 	initGit(t, local)
@@ -381,8 +492,8 @@ func TestIndexAbsentVerbsAreSilentMock(t *testing.T) {
 }
 
 // A10: a clone that never saw an index, offline after its absence TTL,
-// still gets the plain ok.
-func TestA10NeverSeenOfflineAcquireIsMock(t *testing.T) {
+// still gets the plain index-absent ok.
+func TestA10NeverSeenOfflineAcquireIsIndexAbsent(t *testing.T) {
 	e := newIxEnv(t)
 	x := e.clone("x", "x@example.com")
 	x.offline()
@@ -427,6 +538,53 @@ func TestA12InitCheckStates(t *testing.T) {
 	}
 }
 
+// tickets.index_init is lead-only: a delegate or leaf session key is refused
+// at the capability gate and creates no index ref.
+func TestIndexInitRejectsNonLeadKeys(t *testing.T) {
+	e := newIxEnv(t)
+	x := e.clone("x", "x@example.com")
+	for _, role := range []toolRole{roleDelegate, roleLeaf} {
+		key, err := x.server.sessions.mint(x.root, role, "")
+		if err != nil {
+			t.Fatalf("mint %s key: %v", role, err)
+		}
+		for _, args := range []map[string]any{{"session_key": key}, {"session_key": key, "check": true}} {
+			resp := callToolOnce(t, x.server, int(ixCallID.Add(1)), "tickets.index_init", args)
+			if !strings.Contains(resp, "tool not available in current") || !strings.Contains(resp, "-32601") {
+				t.Fatalf("%s key: want the lead-only rejection, got:\n%s", role, resp)
+			}
+		}
+	}
+	if e.remoteTip() != "" || x.hasRef(ixCacheRef) || x.runner.total() != 0 {
+		t.Fatalf("a rejected init touched the index (remote calls %v)", x.runner.counts)
+	}
+}
+
+// An origin with no branches (a clone whose work was never pushed) inits an
+// index with zero registrations: the local tickets are not origin's.
+func TestInitOnUnpushedOriginRegistersNothing(t *testing.T) {
+	e := newIxEnv(t)
+	empty := filepath.Join(e.dir, "empty.git")
+	runGit(t, e.dir, "init", "--quiet", "--bare", "-b", "main", empty)
+	local := filepath.Join(e.dir, "local")
+	runGit(t, e.dir, "init", "--quiet", "-b", "main", local)
+	runGit(t, local, "config", "user.email", "l@example.com")
+	runGit(t, local, "config", "user.name", "l")
+	runGit(t, local, "config", "commit.gpgsign", "false")
+	mustWrite(t, local, "ai-docs/tickets/ready/"+stemAlpha+".md", ixTicket("Alpha"))
+	runGit(t, local, "add", "-A")
+	runGit(t, local, "commit", "--quiet", "-m", "unpushed")
+	runGit(t, local, "remote", "add", "origin", empty)
+	e.origin = empty // e.index and e.remoteTip read the empty origin
+	x := e.login(local)
+	if out := x.init(); !strings.Contains(out, "status: created") || !strings.Contains(out, "registered: 0 open tickets") {
+		t.Fatalf("init on an unpushed origin = %s", out)
+	}
+	if idx := e.index(); len(idx.Registrations) != 0 {
+		t.Fatalf("registrations = %v, want none", idx.Stems())
+	}
+}
+
 // A6, A7, A8: concurrent init creates once and adopts once; registrations
 // come from origin's declared review-track, not the local checkout.
 func TestInitRegistersOriginReviewTrackOnce(t *testing.T) {
@@ -451,14 +609,18 @@ func TestInitRegistersOriginReviewTrackOnce(t *testing.T) {
 
 	var wg sync.WaitGroup
 	outs := make([]string, 2)
+	errs := make([]error, 2)
 	for i, c := range []*ixCheckout{x, y} {
 		wg.Add(1)
 		go func(i int, c *ixCheckout) {
 			defer wg.Done()
-			outs[i], _ = c.call("tickets.index_init", nil)
+			outs[i], _, errs[i] = c.callRaw("tickets.index_init", nil)
 		}(i, c)
 	}
 	wg.Wait()
+	if err := errors.Join(errs...); err != nil {
+		t.Fatal(err)
+	}
 	joined := strings.Join(outs, "\n")
 	if strings.Count(joined, "status: created") != 1 || strings.Count(joined, "status: adopted") != 1 {
 		t.Fatalf("concurrent init outputs:\n%s", joined)
@@ -647,10 +809,51 @@ func TestCloseLeaseAndPruneOnLanding(t *testing.T) {
 	}
 }
 
+// Landed-closure pruning on a non-acquire write reads the local tracking ref
+// of the review-track and never fetches it: a landing the clone has not
+// fetched is not pruned, and once a plain git fetch brings it in, the next
+// write prunes it with no fetch of the review-track.
+func TestNonAcquireWritePrunesFromLocalTrackingRef(t *testing.T) {
+	e := newIxEnv(t)
+	x := e.clone("x", "a@example.com")
+	x.init()
+	e.landOnDevelop(stemAlpha, "ready", ".done")
+	fetchedTrack := func() bool {
+		for _, args := range x.runner.fetchArgs() {
+			if strings.Contains(args, "refs/heads/") {
+				return true
+			}
+		}
+		return false
+	}
+
+	x.runner.reset()
+	x.mustCall("tickets.move", map[string]any{"stem": stemGamma, "to": "idea"})
+	if _, ok := e.index().Registrations[stemAlpha]; !ok {
+		t.Fatal("a landing the clone has not fetched was pruned")
+	}
+	if fetchedTrack() {
+		t.Fatalf("a non-acquire write fetched a branch: %v", x.runner.fetchArgs())
+	}
+
+	x.git("fetch", "--quiet", "origin") // outside the tool: the runner sees nothing
+	x.runner.reset()
+	x.mustCall("tickets.move", map[string]any{"stem": stemGamma, "to": "todo"})
+	if _, ok := e.index().Registrations[stemAlpha]; ok {
+		t.Fatal("the landed closure in the local tracking ref was not pruned")
+	}
+	if fetchedTrack() {
+		t.Fatalf("a non-acquire write fetched a branch: %v", x.runner.fetchArgs())
+	}
+}
+
 // ---- I: offline acquire, pending log, flush --------------------------------------
 
-// A4, A11, E10, I1, I5, I9, I11 at tool level.
-func TestOfflineWritesPendAndFlush(t *testing.T) {
+// A4, A11, E10, I1, I5, I9, I11 at tool level. The worktrees record their
+// entries one after another; the concurrent-append cases (I5-I7) are owned
+// by the library-level wsindex tests. A flushed entry's worktree path stays
+// local: it reaches neither index.json nor the index history.
+func TestOfflineWritesRecordSequentiallyAndFlush(t *testing.T) {
 	e := newIxEnv(t)
 	x := e.clone("x", "a@example.com")
 	x.init()
@@ -704,6 +907,12 @@ func TestOfflineWritesPendAndFlush(t *testing.T) {
 	if !registeredNew {
 		t.Fatalf("the offline registration did not flush: %v", idx.Stems())
 	}
+	published := e.remoteBlobsAndHistory()
+	for _, p := range pathForms(t, e.dir) {
+		if strings.Contains(published, p) {
+			t.Fatalf("a worktree path (%s) reached the remote index:\n%s", p, published)
+		}
+	}
 }
 
 // I3, I10: a conflicting pending acquire is dropped loudly; others apply.
@@ -715,10 +924,18 @@ func TestFlushDropsConflictsAndKeepsTheRest(t *testing.T) {
 	x.offline()
 	x.acquire(stemAlpha)
 	x.acquire(stemBeta)
+	y.git("checkout", "--quiet", "-b", "track/y")
 	y.acquire(stemAlpha)
+	acquiredAt := e.lease(stemAlpha).TouchedAt.UTC().Format(time.RFC3339)
 	x.online()
 	out := x.acquire(stemGamma)
-	for _, want := range []string{"report: ticket-index: dropped the offline acquire of " + stemAlpha, "track develop", "b@example.com"} {
+	// The report names the dropped entry's own track and local worktree path,
+	// the winner, and when the winner acquired.
+	recordedOn := "recorded on track develop (" + x.root + ")"
+	if resolved := pathForms(t, x.root)[1]; !strings.Contains(out, recordedOn) {
+		recordedOn = "recorded on track develop (" + resolved + ")"
+	}
+	for _, want := range []string{"report: ticket-index: dropped the offline acquire of " + stemAlpha, recordedOn, "held by b@example.com (track track/y", "since " + acquiredAt} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("flush output lacks %q:\n%s", want, out)
 		}
@@ -814,14 +1031,18 @@ func TestB1ConcurrentAcquireOneWinner(t *testing.T) {
 		text  string
 		isErr bool
 	}, len(clones))
+	errs := make([]error, len(clones))
 	for i, c := range clones {
 		wg.Add(1)
 		go func(i int, c *ixCheckout) {
 			defer wg.Done()
-			results[i].text, results[i].isErr = c.call("tickets.acquire", ixArgs(stem))
+			results[i].text, results[i].isErr, errs[i] = c.callRaw("tickets.acquire", ixArgs(stem))
 		}(i, c)
 	}
 	wg.Wait()
+	if err := errors.Join(errs...); err != nil {
+		t.Fatal(err)
+	}
 	winners := 0
 	for _, r := range results {
 		if !r.isErr {
@@ -853,10 +1074,17 @@ func TestB4RegistrationRacesAcquire(t *testing.T) {
 		c.git("commit", "--quiet", "-m", "raced")
 	}
 	var wg sync.WaitGroup
+	errs := make([]error, 2)
 	wg.Add(2)
-	go func() { defer wg.Done(); x.mustCall("tickets.move", map[string]any{"stem": stem, "to": "todo"}) }()
-	go func() { defer wg.Done(); y.acquire(stem) }()
+	go func() {
+		defer wg.Done()
+		errs[0] = x.mustCallErr("tickets.move", map[string]any{"stem": stem, "to": "todo"})
+	}()
+	go func() { defer wg.Done(); errs[1] = y.mustCallErr("tickets.acquire", ixArgs(stem)) }()
 	wg.Wait()
+	if err := errors.Join(errs...); err != nil {
+		t.Fatal(err)
+	}
 	y.mustCall("tickets.move", map[string]any{"stem": stem, "to": "todo"}) // E8
 	idx := e.index()
 	if reg := idx.Registrations[stem]; reg == nil || reg.Lease == nil || reg.Lease.Email != "b@example.com" {
@@ -865,19 +1093,27 @@ func TestB4RegistrationRacesAcquire(t *testing.T) {
 }
 
 // B5, E3, E6, E7: GC runs once per period, never prunes a leased or
-// closed-leased entry or one open on any origin branch, and a pruned
-// local-only registration is re-registered by the next piggyback.
+// closed-leased entry (even one open on no origin branch) or one open on any
+// origin branch, and a pruned local-only registration is re-registered by the
+// next piggyback.
 func TestB5GCRacesAcquire(t *testing.T) {
 	e := newIxEnv(t)
 	x := e.clone("x", "a@example.com")
 	y := e.clone("y", "b@example.com")
 	x.init()
-	// A local-only ticket, and a ticket open only on an unmerged origin branch.
+	// Local-only tickets (one unleased, one kept only by an active lease, one
+	// only by a closed lease), and a ticket open only on an unmerged origin
+	// branch.
 	const localOnly, branchOnly = "260924-feat-local-only", "260924-feat-branch-only"
-	mustWrite(t, x.root, "ai-docs/tickets/idea/"+localOnly+".md", ixTicket("Local"))
+	const leasedOnly, closedOnly = "260924-feat-leased-only", "260924-feat-closed-only"
+	for _, stem := range []string{localOnly, leasedOnly, closedOnly} {
+		mustWrite(t, x.root, "ai-docs/tickets/idea/"+stem+".md", ixTicket(stem))
+	}
 	x.git("add", "-A")
 	x.git("commit", "--quiet", "-m", "local")
 	x.mustCall("tickets.move", map[string]any{"stem": localOnly, "to": "todo"})
+	x.acquire(leasedOnly)
+	x.mustCall("tickets.close", map[string]any{"stem": closedOnly, "status": "done"})
 	feature := x.worktree("x-feature", "feature-z", "origin/develop")
 	mustWrite(t, feature.root, "ai-docs/tickets/idea/"+branchOnly+".md", ixTicket("Branch"))
 	feature.git("add", "-A")
@@ -887,26 +1123,56 @@ func TestB5GCRacesAcquire(t *testing.T) {
 	x.mustCall("tickets.close", map[string]any{"stem": stemBeta, "status": "done"}) // closed lease, never merged
 
 	e.clock.Advance(31 * 24 * time.Hour)
+	gcAt := e.clock.Now().UTC().Truncate(time.Second)
 	var wg sync.WaitGroup
+	errs := make([]error, 2)
 	wg.Add(2)
-	go func() { defer wg.Done(); x.mustCall("tickets.move", map[string]any{"stem": stemGamma, "to": "idea"}) }()
-	go func() { defer wg.Done(); y.acquire(stemAlpha) }()
+	go func() {
+		defer wg.Done()
+		errs[0] = x.mustCallErr("tickets.move", map[string]any{"stem": stemGamma, "to": "idea"})
+	}()
+	go func() { defer wg.Done(); errs[1] = y.mustCallErr("tickets.acquire", ixArgs(stemAlpha)) }()
 	wg.Wait()
+	if err := errors.Join(errs...); err != nil {
+		t.Fatal(err)
+	}
 
 	idx := e.index()
 	if _, ok := idx.Registrations[localOnly]; ok {
 		t.Fatal("E6: a local-only registration older than 30 days survived GC")
 	}
-	for _, s := range []string{stemAlpha, stemBeta, branchOnly} {
+	for _, s := range []string{stemAlpha, stemBeta, branchOnly, leasedOnly, closedOnly} {
 		if _, ok := idx.Registrations[s]; !ok {
 			t.Fatalf("GC pruned %s", s)
 		}
 	}
+	if l := idx.Registrations[leasedOnly].Lease; l == nil || l.Phase != wsindex.PhaseActive {
+		t.Fatalf("the lease-only entry lost its lease: %+v", l)
+	}
+	if l := idx.Registrations[closedOnly].Lease; l == nil || l.Phase != wsindex.PhaseClosed {
+		t.Fatalf("the closed-lease-only entry lost its lease: %+v", l)
+	}
 	if l := idx.Registrations[stemAlpha].Lease; l == nil || l.Email != "b@example.com" {
 		t.Fatalf("B5: the racing acquire was lost: %+v", l)
 	}
-	if runs := strings.Count(e.history(), "gc "+localOnly); runs != 1 {
-		t.Fatalf("GC pruned %s in %d commits, want 1", localOnly, runs)
+	// GC ran once: one GC commit, and last_gc is the race's time.
+	if idx.Meta.LastGC == nil || !idx.Meta.LastGC.Equal(gcAt) {
+		t.Fatalf("last_gc = %v, want %v", idx.Meta.LastGC, gcAt)
+	}
+	if n := e.gcCommits(); n != 1 {
+		t.Fatalf("GC commits = %d, want 1:\n%s", n, e.history())
+	}
+	// Within the period GC does not run again: the released lease-only
+	// entry, now old, unleased, and open nowhere on origin, survives the next
+	// write.
+	x.mustCall("tickets.release", ixArgs(leasedOnly))
+	e.clock.Advance(24 * time.Hour)
+	x.mustCall("tickets.move", map[string]any{"stem": stemGamma, "to": "todo"})
+	if _, ok := e.index().Registrations[leasedOnly]; !ok {
+		t.Fatal("GC ran again within its period")
+	}
+	if n := e.gcCommits(); n != 1 {
+		t.Fatalf("GC commits after a write within the period = %d, want 1", n)
 	}
 	// E7.
 	x.mustCall("tickets.move", map[string]any{"stem": localOnly, "to": "idea"})
@@ -916,3 +1182,140 @@ func TestB5GCRacesAcquire(t *testing.T) {
 }
 
 func bgCtx() context.Context { return context.Background() }
+
+// The lease acquire bypasses a cached absence and discovers an index created
+// meanwhile; the worker's impl-record acquire keeps the cache and makes no
+// remote call.
+func TestLeaseAcquireBypassesCachedAbsence(t *testing.T) {
+	e := newIxEnv(t)
+	x := e.clone("x", "a@example.com")
+	worker := e.clone("w", "a@example.com")
+	y := e.clone("y", "b@example.com")
+	x.query() // no index yet: absence cached
+	worker.query()
+
+	// With no index on origin the bypassing acquire asks once, stays the
+	// plain ok, and re-caches the absence for the reads after it.
+	x.runner.reset()
+	if out := x.acquire(stemAlpha); out != "ok" || x.runner.count("ls-remote") != 1 || x.runner.total() != 1 {
+		t.Fatalf("lease acquire with no index = %q, remote calls %v", out, x.runner.counts)
+	}
+	x.runner.reset()
+	if x.query(); x.runner.total() != 0 {
+		t.Fatalf("the acquire did not re-cache absence: query made %v", x.runner.counts)
+	}
+	y.init()
+
+	worker.git("checkout", "--quiet", "-b", implTicketBranch("develop", stemBeta))
+	worker.runner.reset()
+	if out := worker.acquire(stemBeta); out != "ok" || worker.runner.total() != 0 {
+		t.Fatalf("impl-record acquire within the absence = %q, remote calls %v", out, worker.runner.counts)
+	}
+	if out := x.acquire(stemAlpha); !strings.Contains(out, "status: acquired") {
+		t.Fatalf("lease acquire within the absence = %s", out)
+	}
+	if l := e.lease(stemAlpha); l == nil || l.Email != "a@example.com" {
+		t.Fatalf("lease = %+v", l)
+	}
+}
+
+// C4: a takeover replayed from the pending log reports its warning in the
+// flushing tool's output.
+func TestReplayedTakeoverPrintsWarning(t *testing.T) {
+	e := newIxEnv(t)
+	x := e.clone("x", "a@example.com")
+	x2 := e.clone("x2", "a@example.com")
+	x.init()
+	x.acquire(stemAlpha)
+	x2.query() // x2 has seen the index
+	x2.offline()
+	x2.acquire(stemAlpha) // a pending takeover from the same email
+	x2.online()
+	out := x2.mustCall("tickets.move", map[string]any{"stem": stemGamma, "to": "idea"})
+	if !strings.Contains(out, "ticket-index: replayed the offline acquire of "+stemAlpha) || !strings.Contains(out, "another clone") {
+		t.Fatalf("flushing move = %s, want the replayed takeover warning", out)
+	}
+}
+
+// C5: init and its check mode print the discard report of a pending log
+// recorded against an index that was deleted meanwhile.
+func TestIndexInitReportsDiscard(t *testing.T) {
+	const report = "ticket-index: 1 offline entries were discarded"
+	for _, mode := range []string{"create", "adopt", "check", "create json", "check json"} {
+		e := newIxEnv(t)
+		x := e.clone("x", "a@example.com")
+		x.init()
+		x.offline()
+		x.acquire(stemBeta) // one pending entry
+		x.online()
+		runGit(t, e.origin, "update-ref", "-d", wsindex.RemoteRef)
+		if mode != "create" && mode != "create json" {
+			e.clone("y", "b@example.com").init() // a new index: x's pending log no longer continues it
+		}
+		args := map[string]any{}
+		if strings.HasPrefix(mode, "check") {
+			args["check"] = true
+		}
+		if strings.HasSuffix(mode, "json") {
+			args["format"] = "json"
+		}
+		out := x.mustCall("tickets.index_init", args)
+		if mode == "adopt" && !strings.Contains(out, "status: adopted") {
+			t.Fatalf("%s: init output = %s", mode, out)
+		}
+		if strings.HasSuffix(mode, "json") {
+			var value struct {
+				Reports []string `json:"reports"`
+			}
+			if err := json.Unmarshal([]byte(out), &value); err != nil || len(value.Reports) != 1 || !strings.HasPrefix(value.Reports[0], report) {
+				t.Fatalf("%s: json = %s (%v)", mode, out, err)
+			}
+		} else if strings.Count(out, report) != 1 {
+			t.Fatalf("%s: init output = %s", mode, out)
+		}
+		if x.pendingCount() != 0 {
+			t.Fatalf("%s: pending log not discarded", mode)
+		}
+	}
+}
+
+// C6: a clone without a local refs/remotes/origin/HEAD resolves the
+// review-track from origin's default branch on the online paths, so acquire
+// refuses and pruning follows the same track init registered from.
+func TestOnlineTrackWithoutLocalOriginHEAD(t *testing.T) {
+	e := newIxEnv(t)
+	x := e.clone("x", "a@example.com")
+	x.git("remote", "set-head", "origin", "-d") // the local fallback would now say main
+	if out := x.init(); !strings.Contains(out, "review_track: develop") {
+		t.Fatalf("init = %s", out)
+	}
+	// The default branch's tracking ref is missing too: the online path
+	// must fetch it to read the declaration.
+	x.git("update-ref", "-d", "refs/remotes/origin/main")
+	e.landOnDevelop(stemAlpha, "ready", ".done") // closed on develop only
+	x.mustRefuse("tickets.acquire", ixArgs(stemAlpha), "already closed on origin")
+	e.landOnDevelop(stemBeta, "ready", ".done")
+	x.git("fetch", "--quiet", "origin")
+	x.mustCall("tickets.move", map[string]any{"stem": stemGamma, "to": "idea"}) // a non-acquire write prunes
+	idx := e.index()
+	for _, stem := range []string{stemAlpha, stemBeta} {
+		if _, ok := idx.Registrations[stem]; ok {
+			t.Fatalf("pruning of %s did not follow origin's review-track", stem)
+		}
+	}
+}
+
+// F1: the acquire lookup finds a ticket hidden by sparse checkout.
+func TestAcquireFindsSparseHiddenTicket(t *testing.T) {
+	e := newIxEnv(t)
+	x := e.clone("x", "a@example.com")
+	x.init()
+	runGit(t, x.root, "sparse-checkout", "set", "--no-cone", "/*", "!/ai-docs/tickets/ready/"+stemAlpha+".md")
+	if _, err := os.Stat(filepath.Join(x.root, "ai-docs", "tickets", "ready", stemAlpha+".md")); !os.IsNotExist(err) {
+		t.Fatalf("the sparse scope did not hide the ticket: %v", err)
+	}
+	if out := x.acquire(stemAlpha); !strings.Contains(out, "status: acquired") {
+		t.Fatalf("acquire of a sparse-hidden ticket = %s", out)
+	}
+	x.mustRefuse("tickets.acquire", ixArgs("260101-feat-no-such-ticket"), "does not exist in this checkout")
+}

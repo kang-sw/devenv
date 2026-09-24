@@ -87,9 +87,28 @@ func Open(ctx context.Context, root string, opts Options) (*Client, error) {
 // syncState is the clone-shared timing state behind the read TTL and the
 // absence cache. It lives in the git common dir so every worktree shares it.
 type syncState struct {
-	LastSync *time.Time `json:"last_sync,omitempty"`
-	AbsentAt *time.Time `json:"absent_at,omitempty"`
+	LastSync     *time.Time    `json:"last_sync,omitempty"`
+	AbsentAt     *time.Time    `json:"absent_at,omitempty"`
+	AbsentSource absenceSource `json:"absent_source,omitempty"`
 }
+
+// absenceSource records why a never-seen clone cached absence, which decides
+// the paths that honor it. "" (a state file from an older binary) reads as
+// confirmed.
+type absenceSource string
+
+const (
+	// absenceConfirmed: origin answered with no index ref, or failed fast
+	// (offline, refused, DNS). Every path honors it.
+	absenceConfirmed absenceSource = "confirmed"
+	// absenceReadTimeout: a read-path discovery timed out. Reads honor it;
+	// writes still run their own, longer discovery once per TTL, so an index
+	// on an origin slower than the read timeout is still found.
+	absenceReadTimeout absenceSource = "read-timeout"
+	// absenceWriteTimeout: a write-path discovery timed out. Every path
+	// honors it.
+	absenceWriteTimeout absenceSource = "write-timeout"
+)
 
 func (c *Client) statePath() string {
 	return filepath.Join(c.commonDir, stateDirName, "state.json")
@@ -127,14 +146,40 @@ func (c *Client) markSynced() {
 	c.saveState(syncState{LastSync: &now})
 }
 
-func (c *Client) markAbsent() {
+func (c *Client) markAbsent(source absenceSource) {
 	now := c.now().UTC()
-	c.saveState(syncState{AbsentAt: &now})
+	c.saveState(syncState{AbsentAt: &now, AbsentSource: source})
 }
 
-func (c *Client) absenceCached() bool {
+// clearAbsent drops a cached absence once discovery saw the index ref.
+func (c *Client) clearAbsent() {
 	st := c.loadState()
-	return st.AbsentAt != nil && c.now().Sub(*st.AbsentAt) < c.opts.AbsenceTTL
+	if st.AbsentAt == nil {
+		return
+	}
+	st.AbsentAt, st.AbsentSource = nil, ""
+	c.saveState(st)
+}
+
+// absenceCached reports whether a cached absence within the TTL silences
+// discovery on this path: reads honor every source, writes all but a read
+// timeout.
+func (c *Client) absenceCached(write bool) bool {
+	st := c.loadState()
+	if st.AbsentAt == nil || c.now().Sub(*st.AbsentAt) >= c.opts.AbsenceTTL {
+		return false
+	}
+	return !write || st.AbsentSource != absenceReadTimeout
+}
+
+// neverSeenFailure is the absence a never-seen clone caches when discovery
+// failed: a timeout is scoped to the path that timed out, anything else is
+// confirmed.
+func neverSeenFailure(timedOut bool, timeoutSource absenceSource) absenceSource {
+	if timedOut {
+		return timeoutSource
+	}
+	return absenceConfirmed
 }
 
 // ---- continuity -------------------------------------------------------------
@@ -145,8 +190,9 @@ type syncOutcome struct {
 	// discovered: discovery saw the index ref on the remote in this sync,
 	// even if the fetch that followed failed.
 	discovered bool
-	// timedOut: the remote did not answer within the timeout. A slow remote
-	// is not evidence of absence, so a never-seen clone does not cache it.
+	// timedOut: the remote did not answer within the timeout. On a seen
+	// clone it is never absence; a never-seen clone caches it as absence
+	// scoped to the path that timed out.
 	timedOut bool
 	tip      string // cache tip after reconciliation; "" unless present
 	reports  []string
@@ -160,8 +206,11 @@ func (c *Client) sync(ctx context.Context, timeout time.Duration, seen bool) (sy
 	defer cancel()
 	if !seen {
 		_, state, err := c.lsRemote(rctx)
-		if state == RemoteAbsent {
-			c.markAbsent()
+		switch state {
+		case RemoteAbsent:
+			c.markAbsent(absenceConfirmed)
+		case RemotePresent:
+			c.clearAbsent()
 		}
 		if state != RemotePresent {
 			return syncOutcome{state: state, timedOut: rctx.Err() != nil}, err
@@ -173,7 +222,7 @@ func (c *Client) sync(ctx context.Context, timeout time.Duration, seen bool) (sy
 		return syncOutcome{state: state, discovered: !seen, timedOut: rctx.Err() != nil}, err
 	case RemoteAbsent:
 		reports, derr := c.discontinue(ctx, true)
-		c.markAbsent()
+		c.markAbsent(absenceConfirmed)
 		return syncOutcome{state: RemoteAbsent, reports: reports}, derr
 	}
 	cacheTip, reports, err := c.reconcile(ctx, tip)
@@ -308,12 +357,16 @@ const (
 
 // View is one read of the index.
 type View struct {
-	State   ViewState
-	Index   *Index
-	Tip     string
-	Age     time.Duration // time since the last successful remote read; -1 when unknown
-	Pending []PendingEntry
-	Reports []string
+	State ViewState
+	Index *Index
+	Tip   string
+	Age   time.Duration // time since the last successful remote read; -1 when unknown
+	// TimedOut is the read timeout origin did not answer within when a stale
+	// view was served because of it (not refreshed, rather than unreachable);
+	// 0 otherwise.
+	TimedOut time.Duration
+	Pending  []PendingEntry
+	Reports  []string
 }
 
 // Read serves the index for display. Within the read TTL it makes no remote
@@ -331,7 +384,7 @@ func (c *Client) Read(ctx context.Context) (View, error) {
 		return view, err
 	}
 	st := c.loadState()
-	if !seen && c.absenceCached() {
+	if !seen && c.absenceCached(false) {
 		return view, nil
 	}
 	if seen && st.LastSync != nil && c.now().Sub(*st.LastSync) < c.opts.ReadTTL {
@@ -342,9 +395,6 @@ func (c *Client) Read(ctx context.Context) (View, error) {
 	case RemotePresent:
 		return c.viewFromCache(ctx, ViewFresh, 0, out.reports)
 	case RemoteAbsent:
-		if !seen {
-			c.markAbsent()
-		}
 		view.Reports = out.reports
 		return view, nil
 	}
@@ -354,19 +404,22 @@ func (c *Client) Read(ctx context.Context) (View, error) {
 		return View{State: ViewUnknown, Age: -1}, nil
 	}
 	if !seen {
-		// Never seen and unreachable: index-absent. A fast failure (offline,
-		// refused) is cached so an offline project does not pay it per call;
-		// a timeout is not, so a slow remote is asked again.
-		if !out.timedOut {
-			c.markAbsent()
-		}
+		// Never seen and unreachable: index-absent, cached so a project that
+		// never opted in does not pay the probe per call. A timeout is cached
+		// for reads only: the write path's longer discovery still runs once
+		// per TTL and finds an index on an origin slower than this timeout.
+		c.markAbsent(neverSeenFailure(out.timedOut, absenceReadTimeout))
 		return view, nil
 	}
 	age := time.Duration(-1)
 	if st.LastSync != nil {
 		age = c.now().Sub(*st.LastSync)
 	}
-	return c.viewFromCache(ctx, ViewStale, age, nil)
+	view, err = c.viewFromCache(ctx, ViewStale, age, nil)
+	if out.timedOut {
+		view.TimedOut = c.opts.ReadTimeout
+	}
+	return view, err
 }
 
 // ReadCached serves the cached index with no remote call at all: absent when
@@ -447,6 +500,9 @@ type WriteOp struct {
 	Replay   Replayer
 	Mutate   func(idx *Index) (audit []string, err error)
 	Maintain func(idx *Index) (audit []string)
+	// BypassAbsence runs discovery even within a cached absence; the result
+	// re-caches or clears it as any discovery does.
+	BypassAbsence bool
 }
 
 // WriteResult reports a write.
@@ -466,7 +522,7 @@ func (c *Client) Write(ctx context.Context, op WriteOp) (WriteResult, error) {
 	if err != nil {
 		return WriteResult{}, err
 	}
-	if !seen && c.absenceCached() {
+	if !seen && !op.BypassAbsence && c.absenceCached(true) {
 		return WriteResult{Status: WriteAbsent}, nil
 	}
 	var reports []string
@@ -484,9 +540,7 @@ func (c *Client) Write(ctx context.Context, op WriteOp) (WriteResult, error) {
 				return WriteResult{Reports: reports}, fmt.Errorf("origin holds the ticket index but it could not be fetched: %w", syncErr)
 			}
 			if !seen {
-				if !out.timedOut {
-					c.markAbsent()
-				}
+				c.markAbsent(neverSeenFailure(out.timedOut, absenceWriteTimeout))
 				return WriteResult{Status: WriteAbsent, Reports: reports}, nil
 			}
 			return WriteResult{Status: WriteUnreachable, Reports: reports}, syncErr
@@ -590,6 +644,9 @@ type Submission struct {
 	// It may fill Entry and Applier (the owner's clone id, the origin-closed
 	// set) and returns an error to abort with nothing written or recorded.
 	Prepare func(ctx context.Context, online bool) error
+	// BypassAbsence makes a never-seen clone run discovery despite a cached
+	// absence (the lease acquire, the one ownership-bearing call).
+	BypassAbsence bool
 }
 
 // Submit is the index-write path every mutating tool uses: it flushes the
@@ -608,9 +665,10 @@ func (c *Client) Submit(ctx context.Context, sub *Submission) (WriteResult, Outc
 	}
 	var outcome Outcome
 	op := WriteOp{
-		Subject:  fmt.Sprintf("ticket-index: %s %s", sub.Entry.Op, sub.Entry.Stem),
-		Replay:   a.Replay,
-		Maintain: a.Maintain,
+		Subject:       fmt.Sprintf("ticket-index: %s %s", sub.Entry.Op, sub.Entry.Stem),
+		Replay:        a.Replay,
+		Maintain:      a.Maintain,
+		BypassAbsence: sub.BypassAbsence,
 		Mutate: func(idx *Index) ([]string, error) {
 			outcome = a.Live(idx, sub.Entry)
 			if outcome.Refusal != nil {
@@ -694,6 +752,10 @@ func (c *Client) Overlay(ctx context.Context, a *Applier) (*Index, error) {
 type CreateResult struct {
 	Created bool // this call created the ref; false means an existing index was adopted
 	Tip     string
+	// Reports are the discontinuity discard reports this call's
+	// reconciliation produced (a pending log recorded against an index that
+	// was deleted or recreated).
+	Reports []string
 }
 
 // Create creates the remote index with initial as its first version, using a
@@ -725,11 +787,12 @@ func (c *Client) Create(ctx context.Context, initial *Index, subject string) (Cr
 		cancel()
 		switch outcome {
 		case pushAccepted:
-			if _, _, err := c.reconcile(ctx, commit); err != nil {
+			_, reports, err := c.reconcile(ctx, commit)
+			if err != nil {
 				return CreateResult{}, err
 			}
 			c.markSynced()
-			return CreateResult{Created: true, Tip: commit}, nil
+			return CreateResult{Created: true, Tip: commit, Reports: reports}, nil
 		case pushLost:
 			continue
 		case pushRefused:
@@ -747,9 +810,9 @@ func (c *Client) adopt(ctx context.Context) (CreateResult, error) {
 		if err == nil {
 			err = fmt.Errorf("remote index is %s", out.state)
 		}
-		return CreateResult{}, err
+		return CreateResult{Reports: out.reports}, err
 	}
-	return CreateResult{Created: false, Tip: out.tip}, nil
+	return CreateResult{Created: false, Tip: out.tip, Reports: out.reports}, nil
 }
 
 // CheckState is the live index state the init check reports.
@@ -765,19 +828,20 @@ const (
 // Check reports the live index state with one ls-remote, bypassing the
 // absence cache. It never pushes. Only an initialized result may touch local
 // state (refreshing the cache ref); the other states leave no local trace.
-func (c *Client) Check(ctx context.Context) (CheckState, error) {
+// The returned reports are the discard reports that refresh produced.
+func (c *Client) Check(ctx context.Context) (CheckState, []string, error) {
 	if !c.hasOrigin(ctx) {
-		return CheckNoOrigin, nil
+		return CheckNoOrigin, nil, nil
 	}
 	lctx, cancel := context.WithTimeout(ctx, c.opts.WriteTimeout)
 	_, state, err := c.lsRemote(lctx)
 	cancel()
 	switch state {
 	case RemoteAbsent:
-		return CheckUninitialized, nil
+		return CheckUninitialized, nil, nil
 	case RemoteUnreachable:
-		return CheckUnreachable, err
+		return CheckUnreachable, nil, err
 	}
-	_, _ = c.sync(ctx, c.opts.WriteTimeout, true)
-	return CheckInitialized, nil
+	out, _ := c.sync(ctx, c.opts.WriteTimeout, true)
+	return CheckInitialized, out.reports, nil
 }

@@ -105,6 +105,36 @@ func TestTicketsFindPaginationFollowsFilteredStatusAndStemOrder(t *testing.T) {
 	}
 }
 
+func TestTicketsFindExcludeAppliesBeforePagination(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/tickets/ready/260101-ready-a.md", "---\ntitle: A\n---\n# Shared\n")
+	mustWrite(t, root, "ai-docs/tickets/ready/260103-ready-c.md", "---\ntitle: C\n---\n# Shared\n")
+	mustWrite(t, root, "ai-docs/tickets/todo/260102-todo-b.md", "---\ntitle: B\n---\n# Shared\n")
+	mustWrite(t, root, "ai-docs/tickets/todo/260104-todo-d.md", "---\ntitle: D\n---\n# Shared\n")
+	mustWrite(t, root, "ai-docs/tickets/idea/260105-idea-e.md", "---\ntitle: E\n---\n# Shared\n")
+
+	excluded := map[string]bool{"260101-ready-a": true, "260102-todo-b": true}
+	exclude := func(ticket TicketInfo) bool { return excluded[ticket.Stem] }
+
+	// Unfiltered order is a,c,b,d,e; after the exclusion it is c,d,e. A page
+	// sliced before the exclusion would be c,b thinned to c.
+	page, err := TicketsFind(root, TicketFindOptions{Query: "Shared", Offset: 1, Limit: 2, Exclude: exclude})
+	if err != nil {
+		t.Fatalf("TicketsFind returned error: %v", err)
+	}
+	if got, want := stems(page), "260104-todo-d,260105-idea-e"; got != want {
+		t.Fatalf("excluded page stems = %s, want %s", got, want)
+	}
+
+	all, err := TicketsFind(root, TicketFindOptions{Query: "Shared", Exclude: exclude})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := stems(all), "260103-ready-c,260104-todo-d,260105-idea-e"; got != want {
+		t.Fatalf("excluded stems = %s, want %s", got, want)
+	}
+}
+
 func TestTicketsFindByMentionAndQuery(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, root, "ai-docs/tickets/todo/260504-parent-demo.md", "---\ntitle: Parent\n---\n# Parent\n")

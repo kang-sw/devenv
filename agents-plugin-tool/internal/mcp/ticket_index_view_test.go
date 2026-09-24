@@ -94,6 +94,7 @@ func TestNoRefPathIsByteIdentical(t *testing.T) {
 		{"tickets.move", ixArgs(stemGamma, append([]any{"to", "todo"}, override...)...)},
 		{"tickets.close", map[string]any{"stem": stemAlpha, "status": "done"}},
 		{"tickets.close", ixArgs(stemBeta, append([]any{"status", "dropped"}, override...)...)},
+		{"tickets.sage_stamp", map[string]any{"stem": stemGamma, "stage": "design", "verdicts": []any{map[string]any{"reviewer": "design", "verdict": "pass"}}}},
 	}
 	for _, step := range steps {
 		// ixArgs keys the stem as ticket_stem; move and close take stem.
@@ -178,7 +179,7 @@ func TestQueryUnknownWithoutCache(t *testing.T) {
 	x.acquire(stemAlpha)
 	y.runner.failFetch.Store(true)
 	out := y.query()
-	if !strings.Contains(out, "ownership: unknown") || strings.Contains(out, "held elsewhere") {
+	if !strings.Contains(out, "ownership: unknown (origin not reached and no cached index)") || strings.Contains(out, "held elsewhere") {
 		t.Fatalf("F5 query = %s", out)
 	}
 	got := y.queryJSON("unleased_or_mine", true)
@@ -449,9 +450,20 @@ func TestMoveCloseGuard(t *testing.T) {
 	x.acquire(stemGamma)
 	xb := x.worktree("x-b", "track/b", "develop")
 
+	tip := e.remoteTip()
 	y.mustRefuse("tickets.move", map[string]any{"stem": stemAlpha, "to": "todo"}, "a@example.com", "dangerously_override_lease_status")
 	y.mustRefuse("tickets.move", map[string]any{"stem": stemAlpha, "to": "todo", "dangerously_override_lease_status": true}, "reason")
 	y.mustRefuse("tickets.close", map[string]any{"stem": stemAlpha, "status": "done"}, "a@example.com")
+	// A refused move or close leaves the file in place and writes nothing.
+	if _, err := os.Stat(filepath.Join(y.root, "ai-docs", "tickets", "ready", stemAlpha+".md")); err != nil {
+		t.Fatalf("a refused move/close moved the ticket file: %v", err)
+	}
+	if got := y.git("status", "--porcelain"); got != "" {
+		t.Fatalf("a refused move/close changed the checkout:\n%s", got)
+	}
+	if e.remoteTip() != tip {
+		t.Fatal("a refused move/close wrote to the index")
+	}
 	y.mustCall("tickets.move", map[string]any{"stem": stemAlpha, "to": "todo", "dangerously_override_lease_status": true, "reason": "user moved it"})
 	if l := e.lease(stemAlpha); l.Email != "a@example.com" || l.Track != "develop" {
 		t.Fatalf("C6: an override move transferred the lease: %+v", l)
@@ -567,7 +579,7 @@ func TestDiscardReportsReachToolOutput(t *testing.T) {
 		t.Fatalf("acquire after a remote deletion = %s", out)
 	}
 	if again := y.acquire(stemAlpha); again != "ok" {
-		t.Fatalf("the next acquire is not the plain mock: %q", again)
+		t.Fatalf("the next acquire is not the plain index-absent ok: %q", again)
 	}
 }
 
@@ -583,5 +595,120 @@ func TestDiscoveredButUnfetchedWriteFailsLoudly(t *testing.T) {
 	y.runner.failFetch.Store(false)
 	if out := y.acquire(stemAlpha); !strings.Contains(out, "status: acquired") {
 		t.Fatalf("acquire after the fetch recovers = %s", out)
+	}
+}
+
+// A seen clone whose read times out reports the view as not refreshed, with
+// its age; a real transport failure still reports origin unreachable. The
+// JSON index_state stays "stale" either way.
+func TestSeenCloneReadTimeoutIsNotRefreshed(t *testing.T) {
+	e := newIxEnv(t)
+	x := e.clone("x", "a@example.com")
+	x.init()
+	x.acquire(stemAlpha)
+	x.server.indexOpts.ReadTimeout = 200 * time.Millisecond
+	e.clock.Advance(2 * time.Minute)
+	x.hang()
+	out := x.query()
+	if !strings.Contains(out, "ticket-index: origin did not answer within 200ms; ownership is from the cached index (age 2m0s), not refreshed\n") ||
+		strings.Contains(out, "unreachable") || !strings.Contains(out, "ownership: yours") {
+		t.Fatalf("timed-out query = %s", out)
+	}
+	if alpha := x.queryJSON()[stemAlpha]; alpha.Ownership == nil || alpha.Ownership.IndexState != "stale" {
+		t.Fatalf("timed-out json ownership = %+v", alpha.Ownership)
+	}
+
+	x.offline()
+	if out := x.query(); !strings.Contains(out, "ticket-index: origin unreachable; ownership is from the cached index (age 2m0s)\n") {
+		t.Fatalf("unreachable query = %s", out)
+	}
+}
+
+// C2: a close whose guard read a cached view with no lease, against a fresh
+// tip where another person acquired meanwhile, leaves that lease unchanged
+// and says so in one line; the ticket file still moves.
+func TestLiveCloseLeavesLeaseAcquiredAfterGuardRead(t *testing.T) {
+	e := newIxEnv(t)
+	x := e.clone("x", "a@example.com")
+	y := e.clone("y", "b@example.com")
+	x.init() // x's cache is fresh: its guard reads it with no remote call
+	x.offline()
+	x.acquire(stemGamma) // a pending entry the close's write must still flush
+	x.online()
+	y.acquire(stemAlpha)
+
+	out := x.mustCall("tickets.close", map[string]any{"stem": stemAlpha, "status": "done"})
+	if n := strings.Count(out, "ticket-index:"); n != 1 || !strings.Contains(out, "ticket-index: "+stemAlpha+" is held by b@example.com") {
+		t.Fatalf("close output = %s, want one ticket-index line naming the holder", out)
+	}
+	if l := e.lease(stemAlpha); l.Email != "b@example.com" || l.Phase != wsindex.PhaseActive {
+		t.Fatalf("the close changed another person's lease: %+v", l)
+	}
+	if _, err := os.Stat(filepath.Join(x.root, "ai-docs", "tickets", ".done", stemAlpha+".md")); err != nil {
+		t.Fatalf("the ticket file did not move: %v", err)
+	}
+	if l := e.lease(stemGamma); x.pendingCount() != 0 || l == nil || l.Email != "a@example.com" {
+		t.Fatalf("the warned close did not flush the pending acquire: pending %d, lease %+v", x.pendingCount(), l)
+	}
+}
+
+// The ownership filter applies before the limit: with the first-listed
+// ticket held by another person, limit 1 still returns one ticket, and
+// limit 2 returns both remaining ones.
+func TestOwnershipFilterAppliesBeforeLimit(t *testing.T) {
+	e := newIxEnv(t)
+	x := e.clone("x", "a@example.com")
+	y := e.clone("y", "b@example.com")
+	x.init()
+	var first []wsdoc.TicketInfo
+	if err := json.Unmarshal([]byte(x.query("format", "json", "limit", 1)), &first); err != nil || len(first) != 1 {
+		t.Fatalf("unfiltered limit 1 = %v (%v)", first, err)
+	}
+	held := first[0].Stem
+	y.acquire(held)
+	e.clock.Advance(2 * time.Minute) // past the read TTL: x sees y's lease
+
+	for _, limit := range []int{1, 2} {
+		got := x.queryJSON("unleased_or_mine", true, "limit", limit)
+		if _, ok := got[held]; ok || len(got) != limit {
+			t.Fatalf("filtered limit %d = %v, want %d tickets without %s", limit, keys(got), limit, held)
+		}
+	}
+}
+
+// T2: a never-seen clone discovers the index but cannot fetch it: the host
+// move still succeeds and moves the file, with exactly one ticket-index line
+// reporting the unrecorded registration.
+func TestPiggybackWriteFailureKeepsHostMove(t *testing.T) {
+	e := newIxEnv(t)
+	x := e.clone("x", "a@example.com")
+	y := e.clone("y", "b@example.com")
+	x.init()
+	y.runner.failFetch.Store(true)
+	out := y.mustCall("tickets.move", map[string]any{"stem": stemGamma, "to": "idea"})
+	if n := strings.Count(out, "ticket-index:"); n != 1 || !strings.Contains(out, "ticket-index: the register of "+stemGamma+" was not recorded in the index") {
+		t.Fatalf("move output = %s, want one ticket-index line reporting the failure", out)
+	}
+	if _, err := os.Stat(filepath.Join(y.root, "ai-docs", "tickets", "idea", stemGamma+".md")); err != nil {
+		t.Fatalf("the ticket file did not move: %v", err)
+	}
+}
+
+// T3: tickets.sage_stamp registers the stamped stem in index mode.
+func TestSageStampRegistersInIndexMode(t *testing.T) {
+	e := newIxEnv(t)
+	x := e.clone("x", "a@example.com")
+	x.init()
+	const stem = "260924-feat-stamped"
+	mustWrite(t, x.root, "ai-docs/tickets/todo/"+stem+".md", ixTicket("Stamped"))
+	if _, ok := e.index().Registrations[stem]; ok {
+		t.Fatal("setup: the local ticket is already registered")
+	}
+	out := x.mustCall("tickets.sage_stamp", map[string]any{"stem": stem, "stage": "design", "verdicts": []any{map[string]any{"reviewer": "design", "verdict": "pass"}}})
+	if strings.Contains(out, "ticket-index:") {
+		t.Fatalf("sage_stamp output = %s", out)
+	}
+	if _, ok := e.index().Registrations[stem]; !ok {
+		t.Fatal("sage_stamp did not register the stem")
 	}
 }
