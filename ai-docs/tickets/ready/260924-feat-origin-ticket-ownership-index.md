@@ -1053,3 +1053,11 @@ byte-identical (A1 re-run, including its override-param clause for
   `TestPiMirrorUpToDate`.
 - The dogfood cycle is recorded in the Result: init, acquire from a track,
   worker impl record, close to `phase: closed`, merge, and prune on landing.
+
+## Blocked (2026-09-24)
+
+Phase 4 stopped at (d): initializing `refs/ticket-index-larkspur/v1/index` on
+this repository's origin and running the dogfood cycle (H1, E1 end-to-end) is
+an outward-facing push that the Phase 1 probe authorization did not cover. The
+playbook half of Phase 4 is committed (00c0c0da, df16de9e). Awaiting the
+user's decision on origin init.
