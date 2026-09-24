@@ -2,7 +2,7 @@
  * Unit tests for approval-protocol.ts (260924-feat-pi-agent-channel-approval-
  * decisions): the message shapes both sides agree on and the child-side wait
  * (`ChildApprovalGate`) over a fake link, so the acknowledgment-send failure
- * that decides "not consumed" is deterministic here. The same gate over the
+ * that decides "not consumed" and the early-decision keep are deterministic here. The same gate over the
  * real channel, on both backends, is agent-channel.test.ts's contract case.
  */
 import { describe, test } from "node:test";
@@ -147,6 +147,57 @@ describe("ChildApprovalGate", () => {
     link.deliver(approvalDecisionMessage("call-5", { decision: "approve" }));
     assert.deepEqual(link.sent, [], "a decision after the abort is neither consumed nor acknowledged");
     assert.equal(link.listeners, 0);
+  });
+
+  test("attach keeps a decision that arrives before its wait, bounded per cmd_id, and the wait consumes it at once after acknowledging", async () => {
+    const gate = new ChildApprovalGate();
+    const link = fakeLink();
+    const detach = gate.attach(link);
+    link.deliver(approvalDecisionMessage("call-8", { decision: "approve" }));
+    link.deliver(approvalDecisionMessage("call-8", { decision: "deny", reason: "changed" }));
+    link.deliver({ t: "ready", kind: "web", payload: {} });
+    assert.deepEqual(link.sent, [], "keeping a decision is not consuming it: no acknowledgment yet");
+    assert.equal(gate.pending, undefined);
+    assert.deepEqual(await gate.waitForDecision(link, "call-8", undefined), { decision: "deny", reason: "changed" }, "the latest early decision wins");
+    assert.deepEqual(link.sent, [approvalConsumedMessage("call-8")]);
+    assert.deepEqual(gate.resume(), {});
+    // Consumed once: a second wait on the same cmd_id does not see it again.
+    assert.equal(await settled(gate.waitForDecision(link, "call-8", undefined)), "pending");
+
+    // A decision for a cmd_id with an open wait is left to that wait, never kept twice.
+    const open = gate.waitForDecision(link, "call-9", undefined);
+    link.deliver(approvalDecisionMessage("call-9", { decision: "approve" }));
+    assert.deepEqual(await open, { decision: "approve" });
+    assert.equal(await settled(gate.waitForDecision(link, "call-9", undefined)), "pending", "not buffered as well as consumed");
+
+    // The bound: the oldest early decision is dropped first.
+    for (let i = 0; i <= ChildApprovalGate.EARLY_DECISION_CAP; i++) link.deliver(approvalDecisionMessage(`bulk-${i}`, { decision: "approve" }));
+    assert.equal(await settled(gate.waitForDecision(link, "bulk-0", undefined)), "pending", "evicted");
+    assert.deepEqual(await gate.waitForDecision(link, `bulk-${ChildApprovalGate.EARLY_DECISION_CAP}`, undefined), { decision: "approve" });
+    detach();
+    link.deliver(approvalDecisionMessage("call-10", { decision: "approve" }));
+    assert.equal(await settled(gate.waitForDecision(link, "call-10", undefined)), "pending", "a detached gate keeps nothing");
+  });
+
+  test("an early decision whose acknowledgment fails is dropped, the cmd_id stays pending, and an abort forgets it", async () => {
+    const gate = new ChildApprovalGate();
+    const link = fakeLink();
+    gate.attach(link);
+    link.deliver(approvalDecisionMessage("call-11", { decision: "approve" }));
+    link.failSend = true;
+    const wait = gate.waitForDecision(link, "call-11", undefined);
+    assert.equal(await settled(wait), "pending");
+    assert.equal(gate.pending, "call-11", "reported by the next hello");
+    link.failSend = false;
+    link.deliver(approvalDecisionMessage("call-11", { decision: "deny", reason: "fresh" }));
+    assert.deepEqual(await wait, { decision: "deny", reason: "fresh" });
+
+    link.deliver(approvalDecisionMessage("call-12", { decision: "approve" }));
+    const aborted = new AbortController();
+    aborted.abort();
+    assert.equal(await gate.waitForDecision(link, "call-12", aborted.signal), "aborted");
+    assert.equal(await settled(gate.waitForDecision(link, "call-12", undefined)), "pending", "the kept decision went with the abort");
+    assert.deepEqual(link.sent, [approvalConsumedMessage("call-11")]);
   });
 
   test("two open waits keep their own cmd_id; the resume section reports the latest", async () => {

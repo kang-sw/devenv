@@ -164,9 +164,11 @@ for (const kind of ["pipe", "tcp"] as const) {
 
       // The acknowledgment cannot be sent (the connection is gone by the time
       // the decision is handled): the decision is not consumed, the cmd_id
-      // stays pending, and the child's reconnect hello reports it.
-      const severed = { send: () => { throw new Error("ws-pi-channel: not connected to the parent"); }, onMessage: (cb: (msg: Record<string, unknown>) => void) => child.onMessage(cb) };
-      const stuck = gate.waitForDecision(severed, "call-2", undefined);
+      // stays pending, and the child's reconnect hello reports it. The same
+      // wait then consumes the decision sent over the new connection.
+      let failNextSend = true;
+      const link = { send: (msg: Record<string, unknown>) => { if (failNextSend) { failNextSend = false; throw new Error("ws-pi-channel: not connected to the parent"); } child.send(msg); }, onMessage: (cb: (msg: Record<string, unknown>) => void) => child.onMessage(cb) };
+      const stuck = gate.waitForDecision(link, "call-2", undefined);
       const delivered = new Promise<void>(resolve => child.onMessage(msg => { if (msg.cmd_id === "call-2") resolve(); }));
       parent.send(approvalDecisionMessage("call-2", { decision: "approve" }));
       await delivered;
@@ -175,14 +177,11 @@ for (const kind of ["pipe", "tcp"] as const) {
       const reconnected = new Promise<Record<string, unknown>>(resolve => parent.onConnection((_conn, hello) => { if (hello.reconnect) resolve(hello.resume); }));
       parent.live!.close();
       assert.deepEqual(await reconnected, { approval: { pending: "call-2" } });
-      // Only a decision over the new connection, acknowledged over it, is consumed.
       const ack2 = collect(cb => parent.onMessage(cb), 1);
-      const fresh = gate.waitForDecision(child, "call-2", undefined);
       parent.send(approvalDecisionMessage("call-2", { decision: "deny", reason: "again" }));
-      assert.deepEqual(await fresh, { decision: "deny", reason: "again" });
+      assert.deepEqual(await stuck, { decision: "deny", reason: "again" }, "only the decision over the new connection, acknowledged over it, is consumed");
       assert.deepEqual(await ack2, [{ ...approvalConsumedMessage("call-2"), gen: 6 }]);
-      assert.equal(await Promise.race([stuck, new Promise(resolve => setTimeout(() => resolve("pending"), 30))]), "pending", "the severed wait never resolves: its acknowledgment path is gone for good");
-      assert.equal(gate.pending, "call-2", "the severed wait still reports its cmd_id until its own abort");
+      assert.equal(gate.pending, undefined);
       child.close();
       parent.close();
     });

@@ -401,6 +401,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   // cmd_id `ws-worker-exec` is still waiting on so the parent can re-ask.
   const approvalGate = new ChildApprovalGate();
   const channel = channelBootstrap ? await ChildChannel.connect(channelBootstrap, { resume: () => approvalGate.resume() }) : undefined;
+  if (channel) approvalGate.attach(channel);
   const delegation = readDelegationPolicy();
   // Same-name wrappers preserve Pi's native schema, diff renderer, queue, and
   // result shape while the explicit policy — not tool visibility — authorizes

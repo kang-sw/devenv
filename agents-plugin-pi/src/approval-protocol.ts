@@ -10,7 +10,7 @@
  *
  *   parent -> child   {t: "approval-decision", cmd_id, decision, reason?, command?}
  *   child  -> parent  {t: "approval-consumed", cmd_id}
- *   child  -> parent  hello.resume.approval = {pending: cmd_id}   (reconnect only)
+ *   child  -> parent  hello.resume.approval = {pending: cmd_id}   (in every hello; acted on for reconnect hellos)
  *
  * The child is the authority on consumption. A decision counts as consumed
  * exactly when its acknowledgment arrives, or when the child's reconnect
@@ -99,10 +99,23 @@ export interface ApprovalChildLink {
  * the parent asks the user afresh. Only a decision sent over that new
  * connection can then be consumed. A decision for any other `cmd_id` is
  * ignored by this wait, so one command's approval can never satisfy another.
+ *
+ * The parent learns the `cmd_id` from Pi's `tool_execution_start`, which Pi
+ * emits before `execute()` runs, so a fast decision can reach this process
+ * before the wait exists. `attach` keeps such early decisions (bounded, one
+ * per `cmd_id`) for the wait that follows; nothing else consumes them.
  */
 export class ChildApprovalGate {
-  /** Waiting `cmd_id`s in wait order. Gated exec calls run one at a time, so this holds at most one in practice. */
+  /** Per-child bound on early decisions kept for a wait that has not started yet; the oldest is dropped first. */
+  static readonly EARLY_DECISION_CAP = 16;
+  /**
+   * Waiting `cmd_id`s in wait order. The parent tracks one pending request
+   * per child and the hello reports one, so only the latest is reported when
+   * several wait (a parallel batch of gated calls is a pre-existing limit).
+   */
   private readonly waiting: string[] = [];
+  /** Decisions that arrived before their wait, by `cmd_id`. */
+  private readonly early = new Map<string, ApprovalDecision>();
 
   /** The `cmd_id` still waiting for a decision, if any (the latest, when several wait). */
   get pending(): string | undefined { return this.waiting.at(-1); }
@@ -111,6 +124,17 @@ export class ChildApprovalGate {
   resume(): Record<string, unknown> {
     const pending = this.pending;
     return pending ? { [APPROVAL_RESUME_KEY]: { pending } } : {};
+  }
+
+  /** Keeps decisions that arrive for a `cmd_id` with no open wait until `waitForDecision` asks for them. Returns the detach. */
+  attach(link: Pick<ApprovalChildLink, "onMessage">): () => void {
+    return link.onMessage((msg) => {
+      const parsed = parseApprovalDecisionMessage(msg);
+      if (!parsed || this.waiting.includes(parsed.cmdId)) return;
+      this.early.delete(parsed.cmdId);
+      this.early.set(parsed.cmdId, parsed.decision);
+      while (this.early.size > ChildApprovalGate.EARLY_DECISION_CAP) this.early.delete(this.early.keys().next().value!);
+    });
   }
 
   /**
@@ -133,15 +157,23 @@ export class ChildApprovalGate {
         resolve(result);
       };
       const onAbort = () => finish("aborted");
-      if (signal?.aborted) { resolve("aborted"); return; }
+      if (signal?.aborted) { this.early.delete(cmdId); resolve("aborted"); return; }
+      // Consumption is acknowledged before the command starts; a send that
+      // throws means the connection is gone: not consumed, still pending,
+      // reported by the next hello.
+      const consume = (decision: ApprovalDecision): boolean => {
+        try { link.send(approvalConsumedMessage(cmdId)); } catch { return false; }
+        finish(decision);
+        return true;
+      };
+      const earlyDecision = this.early.get(cmdId);
+      this.early.delete(cmdId);
       this.waiting.push(cmdId);
+      if (earlyDecision && consume(earlyDecision)) return;
       offMessage = link.onMessage((msg) => {
         if (settled) return;
         const parsed = parseApprovalDecisionMessage(msg);
-        if (!parsed || parsed.cmdId !== cmdId) return;
-        try { link.send(approvalConsumedMessage(cmdId)); }
-        catch { return; /* the connection is gone: not consumed, still pending, reported by the next hello */ }
-        finish(parsed.decision);
+        if (parsed && parsed.cmdId === cmdId) consume(parsed.decision);
       });
       signal?.addEventListener("abort", onAbort);
     });

@@ -2332,7 +2332,7 @@ describe("buildRpcClientOptions (WS_PI_SPAWN_ROLE_ENV placement)", () => {
     assert.equal(options.env?.WS_PI_EXPLORE_MODE, "");
   });
 
-  test("260924: no role, execute-worker included, receives a WS_PI_APPROVAL_DIR — the retired decision-file rendezvous has no env at all", () => {
+  test("260924: no role, execute-worker included, receives any approval env — the retired decision-file rendezvous has no env at all", () => {
     for (const tools of [resolveTools("full-worker"), resolveTools("execute-worker")]) {
       const options = buildRpcClientOptions("/repo", undefined, "/tmp/ws-pi-agent-z/session.jsonl", "/tmp/system.md", tools);
       assert.ok(!Object.keys(options.env ?? {}).some((key) => key.includes("APPROVAL")), tools);

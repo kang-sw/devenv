@@ -380,8 +380,6 @@ export function buildApprovalPromptText(payload: ApprovalPayload): string {
   return lines.join("\n");
 }
 
-export type { ApprovalDecision };
-
 /**
  * Pure cwd-fallback selector for the approval-relay's ground-truth context
  * scrape (review fix, relay #1, CORRECTNESS finding #1): a worker-supplied
@@ -663,7 +661,7 @@ export function registerExecuteGateway(
     name: APPROVE_TOOL_NAME,
     label: APPROVE_TOOL_NAME,
     description:
-      "Respond to a pending ws-worker-exec approval request from a ws-execute-spawned agent. decision:approve runs the command as proposed; deny(reason) rejects it (the worker re-plans); run-instead(command) substitutes a different command whose output the worker treats as authoritative. Rejected if cmd_id doesn't match the currently pending one (stale/reused cmd_id), if a decision for it is already in flight, or if the worker has no live connection (not delivered; the request is re-issued when the worker reconnects still waiting).",
+      "Respond to a pending ws-worker-exec approval request from a ws-execute-spawned agent. decision:approve runs the command as proposed; deny(reason) rejects it (the worker re-plans); run-instead(command) substitutes a different command whose output the worker treats as authoritative. Rejected if cmd_id doesn't match the currently pending one (stale/reused cmd_id), if a decision for it is already in flight or was discarded by a connection drop, or if the worker has no live connection (not delivered; in both drop cases the request is re-issued to you when the worker reconnects still waiting).",
     parameters: {
       type: "object",
       properties: {
@@ -693,16 +691,20 @@ export function registerExecuteGateway(
       }
 
       // The decision travels only over the parent's own connection. With none
-      // live it is discarded here and now — never queued, never re-sent — so
-      // the lead learns immediately that nothing was delivered.
+      // live it is discarded here and now — never queued, never re-sent — and
+      // recorded as such so the worker's reconnect hello re-issues the request
+      // to the lead (or releases it when the worker no longer waits), the same
+      // reconciliation a decision lost mid-delivery gets (`attachApprovalChannel`).
       const channel = record.channel;
-      if (!channel?.live) {
-        throw new Error(`ws-pi-agent: ${APPROVE_TOOL_NAME} not delivered: the worker has no live connection; the request is re-issued when it reconnects still waiting.`);
-      }
+      const notDelivered = (why: string) => {
+        record.pendingApproval = { ...record.pendingApproval!, decision: "discarded" };
+        return new Error(`ws-pi-agent: ${APPROVE_TOOL_NAME} not delivered: ${why} The decision was discarded; the request is re-issued to you when the worker reconnects still waiting.`);
+      };
+      if (!channel?.live) throw notDelivered("the worker has no live connection.");
       try {
         channel.send(approvalDecisionMessage(p.cmd_id, { decision: p.decision, reason: p.reason, command: p.command }));
       } catch (error) {
-        throw new Error(`ws-pi-agent: ${APPROVE_TOOL_NAME} not delivered: ${error instanceof Error ? error.message : String(error)}`);
+        throw notDelivered(`${error instanceof Error ? error.message : String(error)}.`);
       }
       record.pendingApproval = { ...record.pendingApproval!, decision: "sent" };
       if (record.ownership) touchOwnership(record.ownership.home);

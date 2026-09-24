@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import { RpcClient } from "@earendil-works/pi-coding-agent";
 import { createAgentStorageContext } from "../src/agent-storage.ts";
 import { CHANNEL_CREDENTIAL_ENV, CHANNEL_PROTOCOL_VERSION, connectChannelEndpoint, type ChannelEndpoint, type ParentChannel } from "../src/agent-channel.ts";
+import { APPROVAL_CONSUMED_MESSAGE } from "../src/approval-protocol.ts";
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const cli = join(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))), "cli.js");
@@ -271,7 +272,7 @@ for (const force of ["pipe", "tcp"] as const) {
       assert.equal(channel.endpoint.kind, force);
       assert.equal(channel.accepted, 1);
       const acks: unknown[] = [];
-      channel.onMessage(msg => { if (msg.t === "approval-consumed") acks.push(msg); });
+      channel.onMessage(msg => { if (msg.t === APPROVAL_CONSUMED_MESSAGE) acks.push(msg); });
       // The request a real tool_execution_start would have captured; the probe targets its cmd_id.
       record.pendingApproval = { cmdId: "call-forged", command: "echo forged", rationale: "probe" };
       const decisionPath = join(record.ownership.home, "approvals", "call-forged.decision.json");

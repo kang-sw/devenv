@@ -2566,7 +2566,8 @@ export interface ApprovalChannelHost {
  * - `approval-consumed` for the pending `cmd_id` releases the request and,
  *   with it, the ownership protection `syncOwnershipProtection` derives from
  *   `pendingApproval` — the one release path besides the child's exit.
- * - A disconnect discards a sent-but-unacknowledged decision (`"discarded"`).
+ * - A disconnect discards a sent-but-unacknowledged decision (`"discarded"`;
+ *   `ws-approve` records the same state when it finds no live connection).
  *   It is never re-sent: whether the child consumed it before the drop is
  *   learned only from the reconnect hello.
  * - A reconnect hello that still reports the `cmd_id` means the discarded
@@ -2602,7 +2603,8 @@ export function attachApprovalChannel(
     const pending = record.pendingApproval;
     if (!hello.reconnect || pending?.decision !== "discarded") return;
     if (pendingApprovalFromResume(hello.resume) !== pending.cmdId) { release(); return; }
-    record.pendingApproval = { cmdId: pending.cmdId, command: pending.command, rationale: pending.rationale, cwd: pending.cwd, reissued: true };
+    const { decision: _discarded, ...request } = pending;
+    record.pendingApproval = { ...request, reissued: true };
     syncOwnershipProtection(record);
     approvalHook()?.(record);
   });

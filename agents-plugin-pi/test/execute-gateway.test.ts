@@ -77,7 +77,7 @@ import {
 } from "../src/execute-gateway.ts";
 import { attachApprovalChannel, leadIdleRef, registerPushFlush, GATED_EXEC_TOOL_NAME, TOOL_GROUPS, resolveTools, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
 import { ChildChannel, ParentChannel, readAndDeleteChannelBootstrap } from "../src/agent-channel.ts";
-import { ChildApprovalGate } from "../src/approval-protocol.ts";
+import { APPROVAL_DECISION_MESSAGE, ChildApprovalGate, approvalDecisionMessage, type ApprovalChildLink } from "../src/approval-protocol.ts";
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
 import { closeFakeChildren, connectFakeChild } from "./fixtures/channel-child.ts";
 import { RpcClient } from "@earendil-works/pi-coding-agent";
@@ -473,6 +473,19 @@ describe("createApprovalRelay (260905: unconditional ws-agent-approval push)", (
     });
   });
 
+  test("a re-issued request (the earlier decision was discarded on a connection drop) says so, so the lead decides again knowingly", () => {
+    withTempCwd((cwd) => {
+      const pi = fakePi();
+      const record = freshRecord({ cmdId: "call-5", command: "echo hi", reissued: true });
+      createApprovalRelay(pi.api, { cwd }, { current: new Map([[record.agentId, record]]) })(record);
+      assert.equal(pi.sent.length, 1);
+      assert.match(String(pi.sent[0].message.details?.request), /earlier decision for this cmd_id was not delivered .* discarded; decide again/);
+      const plain = fakePi();
+      createApprovalRelay(plain.api, { cwd }, { current: new Map() })(freshRecord({ cmdId: "call-6", command: "echo hi" }));
+      assert.doesNotMatch(String(plain.sent[0].message.details?.request), /decide again/);
+    });
+  });
+
   test("no pendingApproval on the record: nothing is pushed", () => {
     withTempCwd((cwd) => {
       const pi = fakePi();
@@ -513,13 +526,22 @@ describe("execute-worker registration boundary", () => {
 describe("registered ws-approve/ws-worker-exec decision relay (260924: over the control channel)", () => {
   type Tool = { execute: (...args: any[]) => Promise<any> };
 
-  /** The parent's registry record and channel, the child's gate and channel, and both registered tools — wired the way a live launch wires them. */
-  async function harness() {
+  /**
+   * The parent's registry record and channel, the child's gate and channel,
+   * and both registered tools — wired the way a live launch wires them
+   * (`attachApprovalChannel` on the parent, `approvalGate.attach` on the
+   * child). `link` wraps the child's channel as the gate sees it, to inject
+   * the acknowledgment failures a real connection drop produces.
+   */
+  async function harness(opts: { reconnect?: boolean; link?: (child: ChildChannel) => ApprovalChildLink } = {}) {
     const home = mkdtempSync(join(tmpdir(), "ws-pi-agent-registered-decision-test-"));
     const parent = await ParentChannel.bind(1, { socketDir: join(home, "ch") });
-    const child = await ChildChannel.connect(readAndDeleteChannelBootstrap({ ...parent.bootstrapEnv() })!, { reconnect: false });
-    await parent.hello();
     const approvalGate = new ChildApprovalGate();
+    const child = await ChildChannel.connect(readAndDeleteChannelBootstrap({ ...parent.bootstrapEnv() })!, { reconnect: opts.reconnect ?? false, backoffCapMs: 50, resume: () => approvalGate.resume() });
+    approvalGate.attach(child);
+    await parent.hello();
+    const decisionsDelivered: string[] = [];
+    child.onMessage((msg) => { if (msg.t === APPROVAL_DECISION_MESSAGE) decisionsDelivered.push(String(msg.cmd_id)); });
     const executions: string[] = [];
     const registered = new Map<string, Tool>();
     const record = { agentId: "execute-worker-1", sessionPath: join(home, "session.jsonl"), channel: parent, running: true, client: {}, pendingApproval: undefined as PendingApproval | undefined } as unknown as RpcAgentRecord;
@@ -531,14 +553,28 @@ describe("registered ws-approve/ws-worker-exec decision relay (260924: over the 
         return { stdout: `ran ${args[1]}`, stderr: "", code: 0, killed: false };
       },
     } as unknown as ExtensionAPI;
-    registerExecuteGateway(pi, {} as never, registry, { cwd: home, executeWorkerPromptPath: "/tmp/fake-execute-worker-guide.md", channel: child, approvalGate });
-    const detach = attachApprovalChannel(record, parent, () => undefined);
+    registerExecuteGateway(pi, {} as never, registry, { cwd: home, executeWorkerPromptPath: "/tmp/fake-execute-worker-guide.md", channel: opts.link?.(child) ?? child, approvalGate });
+    const asked: RpcAgentRecord[] = [];
+    const detach = attachApprovalChannel(record, parent, () => (r) => asked.push(r));
     const approve = registered.get(APPROVE_TOOL_NAME)!;
     const exec = registered.get(GATED_EXEC_TOOL_NAME)!;
     assert.ok(approve && exec, "registerExecuteGateway installs both ends of the relay");
-    const released = () => new Promise<void>((resolve) => { const tick = () => record.pendingApproval === undefined ? resolve() : setTimeout(tick, 5); tick(); });
+    const until = (done: () => boolean, what: string) => new Promise<void>((resolve, reject) => {
+      const deadline = Date.now() + 5_000;
+      const tick = () => done() ? resolve() : Date.now() > deadline ? reject(new Error(`timed out waiting for ${what}`)) : setTimeout(tick, 5);
+      tick();
+    });
+    const released = () => until(() => record.pendingApproval === undefined, "the request to be released");
+    /** Drops the live connection from the parent side and, with reconnect on, waits for the child's reconnect hello. */
+    const drop = async () => {
+      const reconnected = opts.reconnect ? new Promise<void>((resolve) => { const off = parent.onConnection((_c, hello) => { if (hello.reconnect) { off(); resolve(); } }); }) : undefined;
+      const dropped = new Promise<void>((resolve) => { const off = parent.onDisconnect(() => { off(); resolve(); }); });
+      parent.live!.close();
+      await dropped;
+      await reconnected;
+    };
     const close = () => { detach(); child.close(); parent.close(); rmSync(home, { recursive: true, force: true }); };
-    return { home, parent, child, approvalGate, executions, record, approve, exec, released, close };
+    return { home, parent, child, approvalGate, executions, decisionsDelivered, asked, record, approve, exec, released, until, drop, close };
   }
 
   test("approve, deny, and run-instead reach the gated tool over the channel, the acknowledgment releases the request, and no decision file or directory is ever created", async () => {
@@ -568,7 +604,6 @@ describe("registered ws-approve/ws-worker-exec decision relay (260924: over the 
         else assert.equal(h.executions.at(-1), item.executed, "approve runs the proposal and run-instead runs the replacement");
       }
       assert.equal(existsSync(join(h.home, "approvals")), false, "no decision directory");
-      assert.ok(!Object.keys(process.env).some((key) => key.includes("WS_PI_APPROVAL")), "no decision env");
     } finally { h.close(); }
   });
 
@@ -581,7 +616,7 @@ describe("registered ws-approve/ws-worker-exec decision relay (260924: over the 
       await assert.rejects(h.approve.execute("x", { agent_id: h.record.agentId, cmd_id: "call-2", decision: "approve" }), /cmd_id mismatch/);
       assert.equal(h.record.pendingApproval?.decision, undefined, "a rejected call sends nothing");
       // A forged decision for another cmd_id over the real connection is ignored by the wait.
-      h.parent.send({ t: "approval-decision", cmd_id: "call-2", decision: "approve" });
+      h.parent.send(approvalDecisionMessage("call-2", { decision: "approve" }));
       await h.approve.execute("x", { agent_id: h.record.agentId, cmd_id: "call-1", decision: "deny", reason: "no" });
       await assert.rejects(h.approve.execute("x", { agent_id: h.record.agentId, cmd_id: "call-1", decision: "approve" }), /already sent and awaiting worker consumption/);
       assert.match((await pending).content[0].text, /Lead denied this command: no/);
@@ -590,21 +625,92 @@ describe("registered ws-approve/ws-worker-exec decision relay (260924: over the 
     } finally { h.close(); }
   });
 
-  test("ws-approve with no live connection discards immediately with a not-delivered error, sends nothing, and the request stays open for the reconnect", async () => {
-    const h = await harness();
+  test("ws-approve with no live connection discards immediately with a not-delivered error and sends nothing; the reconnect hello re-issues the request, and only the decision sent over the new connection is consumed", async () => {
+    const h = await harness({ reconnect: true });
     try {
       h.record.pendingApproval = { cmdId: "call-1", command: "echo original" };
       const controller = new AbortController();
       const pending = h.exec.execute("call-1", { command: "echo original", rationale: "r" }, controller.signal);
-      const dropped = new Promise<void>((resolve) => h.parent.onDisconnect(resolve));
-      h.child.close();
+      const dropped = new Promise<void>((resolve) => { const off = h.parent.onDisconnect(() => { off(); resolve(); }); });
+      const reconnected = new Promise<void>((resolve) => { const off = h.parent.onConnection((_c, hello) => { if (hello.reconnect) { off(); resolve(); } }); });
+      h.parent.live!.close();
       await dropped;
-      await assert.rejects(h.approve.execute("x", { agent_id: h.record.agentId, cmd_id: "call-1", decision: "approve" }), /not delivered: the worker has no live connection/);
-      assert.deepEqual(h.record.pendingApproval, { cmdId: "call-1", command: "echo original" }, "nothing was sent, so nothing is in flight or discarded");
-      assert.equal(h.approvalGate.pending, "call-1", "the child still waits; its reconnect hello would report this cmd_id");
-      controller.abort();
-      assert.match((await pending).content[0].text, /Aborted/);
-      assert.deepEqual(h.executions, []);
+      await assert.rejects(h.approve.execute("x", { agent_id: h.record.agentId, cmd_id: "call-1", decision: "approve" }), /not delivered: the worker has no live connection.*re-issued to you when the worker reconnects/);
+      assert.deepEqual(h.record.pendingApproval, { cmdId: "call-1", command: "echo original", decision: "discarded" }, "the attempt is recorded as discarded so the reconnect hello reconciles it");
+      await assert.rejects(h.approve.execute("x", { agent_id: h.record.agentId, cmd_id: "call-1", decision: "approve" }), /discarded when the worker's connection dropped/, "no retry by hand while the reconnect is pending");
+      assert.equal(h.approvalGate.pending, "call-1", "the child still waits");
+
+      await reconnected;
+      await h.until(() => h.asked.length === 1, "the re-issued request");
+      assert.deepEqual(h.record.pendingApproval, { cmdId: "call-1", command: "echo original", reissued: true }, "the reconnect hello reported the cmd_id: the lead is asked afresh");
+      assert.deepEqual(h.decisionsDelivered, [], "the parent never sent anything on its own");
+      await h.approve.execute("x", { agent_id: h.record.agentId, cmd_id: "call-1", decision: "approve" });
+      assert.match((await pending).content[0].text, /exit code: 0/);
+      await h.released();
+      assert.deepEqual(h.decisionsDelivered, ["call-1"], "exactly one decision frame, the one the lead sent over the new connection");
+      assert.deepEqual(h.executions, ["echo original"], "exactly one execution");
+    } finally { h.close(); }
+  });
+
+  test("a decision whose acknowledgment cannot be sent is not consumed: the parent discards it on the drop, never re-sends, re-asks on the reconnect hello, and the command runs exactly once on the fresh decision", async () => {
+    let failNextSend = false;
+    const h = await harness({ reconnect: true, link: (child) => ({ onMessage: (cb) => child.onMessage(cb), send: (msg) => { if (failNextSend) { failNextSend = false; throw new Error("ws-pi-channel: not connected to the parent"); } child.send(msg); } }) });
+    try {
+      h.record.pendingApproval = { cmdId: "call-1", command: "echo original" };
+      const controller = new AbortController();
+      const pending = h.exec.execute("call-1", { command: "echo original", rationale: "r" }, controller.signal);
+      failNextSend = true; // the connection ends between the decision's arrival and its acknowledgment
+      await h.approve.execute("x", { agent_id: h.record.agentId, cmd_id: "call-1", decision: "approve" });
+      await h.until(() => h.decisionsDelivered.length === 1, "the decision to reach the child");
+      assert.equal(h.record.pendingApproval?.decision, "sent");
+      assert.equal(h.approvalGate.pending, "call-1", "unacknowledged means not consumed: the child keeps waiting");
+      assert.deepEqual(h.executions, [], "the command did not start");
+
+      await h.drop();
+      await h.until(() => h.asked.length === 1, "the re-issued request");
+      assert.deepEqual(h.record.pendingApproval, { cmdId: "call-1", command: "echo original", reissued: true });
+      assert.deepEqual(h.decisionsDelivered, ["call-1"], "the discarded decision was not re-sent on the reconnect");
+      await h.approve.execute("x", { agent_id: h.record.agentId, cmd_id: "call-1", decision: "run-instead", command: "echo fresh" });
+      assert.match((await pending).content[0].text, /Lead substituted a different command/);
+      await h.released();
+      assert.deepEqual(h.executions, ["echo fresh"], "exactly one execution, from the decision sent over the new connection");
+      assert.deepEqual(h.decisionsDelivered, ["call-1", "call-1"], "two frames in total, both sent by ws-approve");
+    } finally { h.close(); }
+  });
+
+  test("an acknowledgment lost with the connection: the child consumed and ran the command once; the reconnect hello reports nothing pending, so the parent releases the request instead of re-asking or re-sending", async () => {
+    let swallowNextSend = false;
+    const h = await harness({ reconnect: true, link: (child) => ({ onMessage: (cb) => child.onMessage(cb), send: (msg) => { if (swallowNextSend) { swallowNextSend = false; return; } child.send(msg); } }) });
+    try {
+      h.record.pendingApproval = { cmdId: "call-1", command: "echo original" };
+      const controller = new AbortController();
+      const pending = h.exec.execute("call-1", { command: "echo original", rationale: "r" }, controller.signal);
+      swallowNextSend = true; // written into a socket that is already dead
+      await h.approve.execute("x", { agent_id: h.record.agentId, cmd_id: "call-1", decision: "approve" });
+      assert.match((await pending).content[0].text, /exit code: 0/);
+      assert.deepEqual(h.executions, ["echo original"]);
+      assert.equal(h.record.pendingApproval?.decision, "sent", "the parent never saw the acknowledgment");
+
+      await h.drop();
+      await h.released();
+      assert.deepEqual(h.asked, [], "nothing to re-ask: the child no longer waits");
+      assert.deepEqual(h.decisionsDelivered, ["call-1"], "nothing re-sent");
+      assert.deepEqual(h.executions, ["echo original"], "the command ran exactly once across the disconnect");
+      await assert.rejects(h.approve.execute("x", { agent_id: h.record.agentId, cmd_id: "call-1", decision: "approve" }), /no pending approval/);
+    } finally { h.close(); }
+  });
+
+  test("a decision that reaches the child before the gated tool's execute() starts is kept for it and consumed once the wait begins", async () => {
+    const h = await harness();
+    try {
+      h.record.pendingApproval = { cmdId: "call-1", command: "echo original" };
+      await h.approve.execute("x", { agent_id: h.record.agentId, cmd_id: "call-1", decision: "approve" });
+      await h.until(() => h.decisionsDelivered.length === 1, "the decision to reach the child");
+      assert.equal(h.approvalGate.pending, undefined, "no wait exists yet");
+      const result = await h.exec.execute("call-1", { command: "echo original", rationale: "r" }, new AbortController().signal);
+      assert.match(result.content[0].text, /exit code: 0/);
+      await h.released();
+      assert.deepEqual(h.executions, ["echo original"]);
     } finally { h.close(); }
   });
 
