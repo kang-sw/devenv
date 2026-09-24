@@ -138,3 +138,52 @@ The sweep also found two directions made stale or misplaced:
   `HOME` (this includes the wsrsrc mirror and manifest guards, among them
   `pi_mirror_test.go`), `python3 -m unittest discover -s agents-plugin/tests`
   and `-s agents-plugin-wsflow/tests`.
+
+### Result (d638dada) - 2026-09-25
+
+Landed on `impl/develop/civil-alias-lived` in 179332f2 (pins), cd72facc (F5),
+ec03fb88 (F6), and d638dada (review round 1 fixes).
+
+- **Pins.** `TestPlaybookPrintTicketIndexContracts` (`playbook_tools_test.go`)
+  renders lead-run, ticket-worker, ticket-worker-elevated,
+  lead-scope-worktree, ticket-selector, ticket-batch-selector, and
+  lead-bootstrap for `claude` and `codex`. It asserts the whitespace-normalized
+  contract phrases and checks lead-run's order: acquire, then render, then
+  spawn. It also pins that lead-run no longer carries the relay sentence (added
+  in review round 1). The phrases leave out the MCP namespace prefix, so the pins
+  hold under any product namespace.
+- **Non-vacuity.** Each check was mutated in the source, with the manifest
+  regenerated each time, and every mutation failed both harness subtests. That
+  covers all 18 pins: each phrase deleted or reworded, plus moving step 4 after
+  step 6 for the order check. Restoring develop's lead-run.md fails the
+  negative relay pin.
+- **F5.** The relay sentence is deleted from lead-run step 4 in the
+  `agents-plugin`, `agents-plugin-wsflow`, and `agents-plugin-pi` rsrc trees,
+  and all three manifests are regenerated. `indexVerbResponse` appends
+  ` (tell the user this line verbatim)` to `warning:` lines only when the new
+  unexported `relayWarnings` flag is set. `handleIndexVerb` sets that flag for
+  acquire calls with an empty `sub.Entry.ImplBranch`. JSON output and `report:`
+  lines are unchanged. `TestAcquireWarningRelaySuffix` (`ticket_index_test.go`)
+  pins the suffix on the lease path (online takeover, and offline pending
+  takeover plus the offline warning). It pins the suffix's absence on:
+  - the impl record (online takeover, offline pending)
+  - an offline release
+  - a replayed takeover report during a flush
+  - JSON output
+
+  Flipping the key to always-true or always-false, or suffixing report lines,
+  fails the test.
+- **F6.** The AGENTS.md Ticket System line now reads "Move status with
+  `ws/tickets.move` / `ws/tickets.close`; use `git mv` only when those tools
+  are unavailable or error." The `ws/` prefix was added in review round 1 to
+  match how AGENTS.md names tools elsewhere.
+- **Verification:**
+  - `go vet ./...`: clean.
+  - `go test ./... -count=1` in `agents-plugin-tool` with an isolated HOME:
+    all packages ok, including the wsrsrc mirror, manifest, and pi mirror
+    guards.
+  - `python3 -m unittest discover -s agents-plugin/tests`: 73 tests OK.
+  - `python3 -m unittest discover -s agents-plugin-wsflow/tests`: 13 tests OK.
+- **Review.** Round 1 was partitioned into correctness, fit, and test.
+  Correctness came back clean; fit and test each raised one minor finding,
+  and both were fixed in d638dada. Round 2 confirmed both fixes.
