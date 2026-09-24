@@ -208,6 +208,13 @@ registration and ownership on top without changing folder semantics.
 - ws-mcp has no remote git operations today. The review ledger is a tracked
   file, and `rendezvous-backend` is parsed but unused.
 - No ticket claim or lock mechanism exists. `assignee:` is advisory only.
+- The merge root can be recovered from an impl branch name even when it
+  contains `/`: `parseImplBranchRoot` splits on the last `/`, and
+  `implementMergeRootFor` returns the root.
+  - This is one level only: `goal/*` returns itself, and a rootless
+    `impl/<stem>` returns `""`.
+  - Source: `agents-plugin-tool/internal/mcp/implement_resolver.go`,
+    `parseImplBranchRoot` and `implementMergeRootFor`.
 - Per host docs and source (not live-probed), on GitHub, GitLab CE, and Gitea:
   - custom refs are pushable with developer permission
   - custom-ref pushes trigger no CI on GitLab or Gitea
@@ -224,9 +231,24 @@ registration and ownership on top without changing folder semantics.
     derived from distribution identity.
   - Plumbing-only local access, with no materialized worktree.
   - State pushes use `--no-verify`.
-- **Discovery.** The first scope is code-constant tiers 1 (custom ref) and 2
-  (branch fallback), probed in one `ls-remote`. The `AGENTS.md` custom-name
-  pointer (tier 3) is deferred.
+- **Discovery.** Discovery uses code-constant candidates probed in one
+  `ls-remote`: tier 1 (custom ref) and tier 2 (branch fallback). The first
+  implementation builds tier 1 only, with discovery shaped as a candidate list
+  so tier 2 can be added later. The `AGENTS.md` custom-name pointer (tier 3) is
+  deferred.
+- **Same-email takeover.** The MVP includes same-email takeover across clones,
+  with a warning and no flag.
+- **MVP read path.** A short-timeout fetch with a TTL cache. On fetch failure,
+  the cache is served marked stale. There is no background refresh loop in the
+  MVP.
+- **Track resolution.** Acquire records `implementMergeRootFor(<current
+  branch>)` as the track: one level, no recursion.
+  - `goal/*` is its own track.
+  - A rootless `impl/<stem>` is refused, and the caller must pass the track
+    explicitly.
+- **First probe host.** The first live probe and dogfood target this
+  repository's GitHub origin. A GitLab CE probe is deferred until on-site
+  access.
 - **Enablement.**
   - The index is on by default when it exists on the remote.
   - It is created only by an explicit bootstrap, which reads origin's
@@ -248,6 +270,12 @@ registration and ownership on top without changing folder semantics.
   - Acquire requires a local file plus registration, and piggybacks
     registration when needed.
 - **Query.** `tickets.query` shows authority intersected with local files.
+- **Lease phase.** A lease carries a binary phase, `active` or `closed`
+  (pending landing), and stage stays out of the index in the MVP.
+  - `tickets.close` sets `closed` rather than deleting the lease.
+  - Queue and view treat a `closed` lease as owned until the landed-closure
+    prune removes it. This avoids an unowned-but-still-`ready/` window between
+    an impl-branch close and its merge.
 - **Integration items.**
   - owner guard on move and close
   - auto-clear on close
@@ -283,16 +311,12 @@ registration and ownership on top without changing folder semantics.
 
 ### Open Questions
 
-- **Which origin host the first collaboration uses.** The answer scopes the
-  live probe, which should cover:
+- **GitLab CE live probe** (deferred until on-site access). It should cover:
   - ref create, fast-forward, rejection of non-fast-forward pushes, and delete
   - two racing `--force-with-lease` pushes
-  - whether GitHub triggers Actions or webhooks on a custom-ref push
   - custom-ref preservation across mirroring and backup
-- **Recovering the owning track from branch names.** Can it be recovered by
-  stripping `impl/`/`goal/` prefixes, given how `mergeRoot` values containing
-  `/` are encoded? If that is ambiguous, record the track explicitly at
-  acquire.
+- **Whether goal branches should collapse into their parent track.** Today a
+  `goal/*` branch is its own track.
 - **Epic ownership.** Epic-to-child ownership inheritance, or batch acquire.
 - **Non-ws collaborators.** Whether future collaborators all use ws. A single
   non-ws collaborator forces status authority off for that project.
