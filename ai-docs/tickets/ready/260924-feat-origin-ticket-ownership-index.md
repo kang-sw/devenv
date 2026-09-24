@@ -1054,10 +1054,140 @@ byte-identical (A1 re-run, including its override-param clause for
 - The dogfood cycle is recorded in the Result: init, acquire from a track,
   worker impl record, close to `phase: closed`, merge, and prune on landing.
 
-## Blocked (2026-09-24)
+### Result (00c0c0da) - 2026-09-24
 
-Phase 4 stopped at (d): initializing `refs/ticket-index-larkspur/v1/index` on
-this repository's origin and running the dogfood cycle (H1, E1 end-to-end) is
-an outward-facing push that the Phase 1 probe authorization did not cover. The
-playbook half of Phase 4 is committed (00c0c0da, df16de9e). Awaiting the
-user's decision on origin init.
+Phase 4 is complete up to E1's close. Close is a push that the user will run.
+The merge into develop, the develop push, and prune-on-landing are left to the
+lead and the user. Review round-1 fixes landed in df16de9e.
+
+**Playbooks.** 00c0c0da changed these playbooks in `agents-plugin/rsrc`, with
+byte-identical mirrors in `agents-plugin-wsflow/rsrc` and `agents-plugin-pi/rsrc`
+and regenerated manifests.
+
+- `lead-run`:
+  - Spawn step 4 acquires from the checkout the worker branches off.
+  - A refusal or error ends the turn.
+  - A `warning:` line is relayed verbatim.
+  - The override is used only on the user's explicit takeover instruction.
+- `ticket-worker` and `ticket-worker-elevated`:
+  - An informational impl-record acquire runs after the branch action.
+  - A failure goes to `unresolved:` and never stops the run.
+  - They never set the override.
+- `lead-scope-worktree` step 6 acquires every visible ticket and reports each
+  refused stem with its holder.
+- `ticket-selector` and `ticket-batch-selector` query with
+  `unleased_or_mine: true`. The batch selector lists unfiltered once to tell
+  "every remaining ticket blocked" apart from `ready/ empty`.
+- `lead-bootstrap` invoke step 7 runs `tickets.index_init(check: true)` in every
+  mode except `refuse`.
+  - Its new section handles `uninitialized`, `initialized`, `no-origin`, and
+    `unreachable`.
+  - On `uninitialized` it asks before init and changes nothing on decline.
+- The Pi mirror was resynced with
+  `sh agents-plugin-tool/scripts/bump-ws-version.sh 0.46.17`, the standalone
+  path, which is idempotent at the current version.
+
+**Dogfood.**
+
+Who ran what:
+
+- The auto-mode permission classifier denied the origin index push for the
+  worker and for the lead, even after the user's explicit approval.
+- The user therefore ran every push-producing step personally through `!`
+  commands. The binary was the lead-built branch binary `ws-mcp-ownership`,
+  built from ee6cb039.
+- The worker ran only read-only checks: `ls-remote`, the cache ref log, and
+  `index.json`.
+
+Init, run from the develop root checkout:
+
+- `tickets.index_init(check: true)` reported `state: uninitialized` before
+  init.
+- The init output was
+  `status: created / review_track: develop / registered: 155 open tickets`.
+- The init commit is `3ed11a3c`, with `init-nonce: 856812ea97aec36d`. It was
+  the remote ref, and the local cache
+  `refs/ticket-index-larkspur-local/v1/cache` was the same commit.
+
+E1, run on this ticket itself. A scratch stem never lands on develop, so it
+could not reach prune.
+
+1. Acquire from the develop root:
+   `status: acquired / owner: ki6080@gmail.com (track develop, clone 6b8c3f740994ed3b)`.
+   Index commit `fb897dcb`.
+2. Worker impl record, an acquire from this worktree on
+   `impl/develop/irate-growl-half`:
+   `status: impl_recorded / owner: ki6080@gmail.com (track develop, clone 6b8c3f740994ed3b) / impl_branch: impl/develop/irate-growl-half`.
+   Index commit `0c98be62`.
+3. `git.status` in this worktree, from the cache only:
+   `ticket owner: yours (track develop); impl impl/develop/irate-growl-half; since 2026-09-24T10:40:13Z`
+   and `leased to this track: 260924-feat-origin-ticket-ownership-index`.
+
+H1, run on the untracked scratch stems `260924-idea-ownership-dogfood-scratch-a`
+and `-b`. The scratch files are deleted. The different-email holder was a
+throwaway clone with `user.email h1-dogfood@example.invalid` on develop.
+
+1. The clone acquires scratch-a:
+   `status: acquired / owner: h1-dogfood@example.invalid (track develop, clone fada5a56c9701de7)`.
+   Index commit `cf2d4f82`.
+2. The worktree acquires scratch-a and is refused:
+   `tickets.acquire refused: 260924-idea-ownership-dogfood-scratch-a is held by h1-dogfood@example.invalid (track develop, clone fada5a56c9701de7) since 2026-09-24T10:41:27Z; acquiring it needs dangerously_override_lease_status: true with a non-empty reason, set only on the user's explicit instruction`.
+3. The worktree acquires scratch-b:
+   `status: acquired / owner: ki6080@gmail.com (track develop, clone 6b8c3f740994ed3b) / impl_branch: impl/develop/irate-growl-half`.
+   Index commit `47599030`.
+4. Both leases are released with `status: released`: scratch-a in `a6c5f050`
+   and scratch-b in `b7ecc518`.
+
+Every ref written:
+
+- `refs/ticket-index-larkspur/v1/index` on origin, at
+  `3ed11a3c -> fb897dcb -> 0c98be62 -> cf2d4f82 -> 47599030 -> a6c5f050 -> b7ecc518`.
+  It stays on origin by design.
+- Locally, `refs/ticket-index-larkspur-local/v1/cache` in this clone and in the
+  throwaway clone.
+- No branch or tag was pushed.
+
+State after H1, verified read-only by the worker at `b7ecc518`:
+
+- There are 158 registrations: 155 from init, this ticket, and the two scratch
+  stems.
+- The scratch stems stay registered but unleased until monthly GC prunes
+  them. They are open on no origin branch.
+- This ticket's lease is `phase: active` with
+  `impl.branch impl/develop/irate-growl-half`.
+- `meta.last_gc` is `2026-09-24T10:38:33Z`.
+
+Pending E1 steps:
+
+- **E1 step 3, close to `phase: closed`.** Close pushes the index, and the
+  classifier denies that push to agents, so the user runs `tickets.close` from
+  this worktree.
+- **E1 step 4, merge into develop and push.** The merge is the lead's job.
+  The develop push needs a separate user decision, because standing policy does
+  not push develop.
+- **E1 step 5, prune on landing.** The first index write after this ticket's
+  `.done/` file reaches `origin/develop` prunes the registration. Any acquire or
+  close counts as a write.
+
+**Findings.**
+
+- **Bug.** A fresh acquire from an impl branch records that branch as
+  `impl_branch` even when the branch belongs to a different ticket, as
+  scratch-b showed. This was not intended by the Worker impl record decision,
+  which covers only a matching lease. Captured as
+  `260924-bug-acquire-impl-record-ignores-branch-stem`.
+- **Environment, not a defect.** `workflow_manual` from the throwaway clone
+  first failed with `rsrc manifest missing at <scratchpad>/rsrc/manifest.json`.
+  The cause was a branch binary running outside the plugin tree, and setting
+  `WS_RSRC_ROOT` resolved it.
+- The worker's own init attempts were denied by the permission classifier.
+  They left no local or remote state: no refs and no clone id at that time.
+
+**Verification.**
+
+- Playbook and package tests pass, including the wsflow drift tests and
+  `TestPiMirrorUpToDate`.
+- `go test ./internal/wsrsrc/ ./internal/wsindex/ -count=1` passes.
+- The agents-plugin unittest `test_delegate_and_sibling_exact_prose` fails on
+  this branch. The failure is pre-existing and was fixed on develop by
+  `69b18630`, which this branch does not include.
