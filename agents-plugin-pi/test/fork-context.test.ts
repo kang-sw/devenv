@@ -50,8 +50,14 @@ describe("ForkContext", () => {
     const directory = mkdtempSync(join(tmpdir(), "ws-pi-fork-context-"));
     try {
       const path = join(directory, "launch.json");
-      writePrivateJson(path, { nonce: "nonce", readinessPath: join(directory, "ready.json") });
-      assert.throws(() => readForkLaunchContext({ WS_PI_FORK_CONTEXT: path }), /malformed launch envelope/);
+      for (const envelope of [{}, { context: undefined }, { legacy: false }]) {
+        writePrivateJson(path, envelope);
+        assert.throws(() => readForkLaunchContext({ WS_PI_FORK_CONTEXT: path }), /malformed launch envelope/, JSON.stringify(envelope));
+      }
+      writePrivateJson(path, { context });
+      assert.deepEqual(readForkLaunchContext({ WS_PI_FORK_CONTEXT: path }), { context });
+      writePrivateJson(path, { legacy: true });
+      assert.deepEqual(readForkLaunchContext({ WS_PI_FORK_CONTEXT: path }), { context: undefined });
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

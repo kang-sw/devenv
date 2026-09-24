@@ -10,6 +10,7 @@ import { DELEGATION_ENV, RenderRegistry, playbookProfile, type DelegationPolicy 
 import { createAgentStorageContext } from "../src/agent-storage.ts";
 import { WS_PI_SPAWN_ROLE_ENV } from "../src/process-role.ts";
 import { registerAgentTools, resolveTools, spawnAdmission, spawnAgent, stopAgent, type RpcAgentRegistry } from "../src/spawner.ts";
+import { closeFakeChildren, connectFakeChild } from "./fixtures/channel-child.ts";
 
 const roots: string[] = [];
 const originalRpc = Object.fromEntries(
@@ -19,9 +20,14 @@ const originalRpc = Object.fromEntries(
 );
 
 afterEach(() => {
+  closeFakeChildren();
   Object.assign(RpcClient.prototype, originalRpc);
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
+
+async function startWithFakeChild(this: { options?: { env?: Record<string, string>; args?: string[] } }) {
+  await connectFakeChild(this.options?.env, this.options?.args);
+}
 
 function tempRoot(): string {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "ws-pi-review-artifact-")));
@@ -88,7 +94,7 @@ test("code-review provenance requires exactly one exact-file write scope", () =>
 
 test("registered nested reviewer dispatch launches verified bytes across async model resolution", async () => {
   Object.assign(RpcClient.prototype, {
-    start: async () => {}, stop: async () => {}, abort: async () => {},
+    start: startWithFakeChild, stop: async () => {}, abort: async () => {},
     onEvent: () => () => {}, prompt: async () => {}, setThinkingLevel: async () => {},
     getState: async () => ({ sessionFile: "/tmp/offline-reviewer.jsonl", model: { provider: "offline", id: "reviewer" } }),
     getSessionStats: async () => { throw new Error("offline"); },
@@ -191,7 +197,7 @@ test("restored provenance revalidates disk and builds a fresh immutable snapshot
 
 test("spawned reviewers publish clean and non-clean artifacts through one immutable binding", async () => {
   Object.assign(RpcClient.prototype, {
-    start: async () => {},
+    start: startWithFakeChild,
     stop: async () => {},
     abort: async () => {},
     onEvent: () => () => {},

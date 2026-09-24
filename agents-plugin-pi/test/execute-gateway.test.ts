@@ -78,6 +78,7 @@ import {
 } from "../src/execute-gateway.ts";
 import { leadIdleRef, registerPushFlush, GATED_EXEC_TOOL_NAME, TOOL_GROUPS, resolveTools, WS_PI_APPROVAL_DIR_ENV, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
+import { closeFakeChildren, connectFakeChild } from "./fixtures/channel-child.ts";
 import { RpcClient } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
@@ -776,11 +777,11 @@ describe("ws-execute: onModelResolved forwarding (260906 Phase 2)", () => {
   function installRpcHarness() {
     const original = Object.fromEntries(["start", "stop", "abort", "onEvent", "prompt", "getState", "setThinkingLevel"].map(name => [name, RpcClient.prototype[name as keyof RpcClient]]));
     Object.assign(RpcClient.prototype, {
-      start: async () => {}, stop: async () => {}, abort: async () => {},
+      start: async function(this: { options?: { env?: Record<string, string>; args?: string[] } }) { await connectFakeChild(this.options?.env, this.options?.args); }, stop: async () => {}, abort: async () => {},
       onEvent: () => () => {}, prompt: async () => {}, setThinkingLevel: async () => {},
       getState: async () => ({ model: { provider: "pi", id: "small" }, thinkingLevel: "medium", sessionFile: "/tmp/ws-pi-agent-test/session.jsonl" }),
     });
-    return { restore: () => Object.assign(RpcClient.prototype, original) };
+    return { restore: () => { closeFakeChildren(); Object.assign(RpcClient.prototype, original); } };
   }
 
   function harness(callTool: (name: string, args?: unknown) => Promise<{ content: Array<{ type: string; text: string }> }>) {

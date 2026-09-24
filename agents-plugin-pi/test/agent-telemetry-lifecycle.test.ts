@@ -18,6 +18,7 @@ function registerAgentTools(pi: any, bridge: any, sessionCtx: any, ...rest: any[
 import { captureForkResume, createThreadRegistryHandle, hydrateThreadRegistry, rehydrateForkRecord, saveThreadRegistryFile } from "../src/ask.ts";
 import { persistShutdownAgentSnapshots } from "../src/index.ts";
 import { allocateAgentHome, createAgentStorageContext, readOwnership } from "../src/agent-storage.ts";
+import { closeFakeChildren, connectFakeChild } from "./fixtures/channel-child.ts";
 
 const roots = new Set<string>();
 afterEach(() => { for (const root of roots) rmSync(root, { recursive: true, force: true }); roots.clear(); });
@@ -173,7 +174,7 @@ describe("agent telemetry lifecycle at production boundaries", () => {
     const original = Object.fromEntries(["start", "stop", "abort", "onEvent", "prompt", "getState", "setThinkingLevel"].map(key => [key, RpcClient.prototype[key as keyof RpcClient]]));
     const prompts: string[] = [];
     Object.assign(RpcClient.prototype, {
-      start: async () => {}, stop: async () => {}, abort: async () => {}, onEvent: () => () => {}, setThinkingLevel: async () => {},
+      start: async function(this: { options?: { env?: Record<string, string>; args?: string[] } }) { await connectFakeChild(this.options?.env, this.options?.args); }, stop: async () => {}, abort: async () => {}, onEvent: () => () => {}, setThinkingLevel: async () => {},
       getState: async () => { throw new Error("telemetry-state-unavailable"); }, prompt: async (message: string) => { prompts.push(message); },
     });
     try {
@@ -184,7 +185,7 @@ describe("agent telemetry lifecycle at production boundaries", () => {
       const record = handle.rpcRegistry.get(JSON.parse(result.content[0].text).agent_id)!;
       assert.deepEqual(prompts, ["still dispatch"]); assert.equal(record.telemetry, undefined);
       await handle.stopAll();
-    } finally { Object.assign(RpcClient.prototype, original); }
+    } finally { closeFakeChildren(); Object.assign(RpcClient.prototype, original); }
   });
 
   test("a newer unknown floor-backed child call retains the prior valid context occupancy", () => {
@@ -201,7 +202,7 @@ describe("agent telemetry lifecycle at production boundaries", () => {
     const original = Object.fromEntries(["start", "stop", "abort", "onEvent", "prompt", "getState", "getSessionStats", "setThinkingLevel"].map(key => [key, RpcClient.prototype[key as keyof RpcClient]]));
     const prompts: string[] = []; let resumed = false;
     Object.assign(RpcClient.prototype, {
-      start: async () => {}, stop: async () => {}, abort: async () => {}, onEvent: () => () => {}, setThinkingLevel: async () => {},
+      start: async function(this: { options?: { env?: Record<string, string>; args?: string[] } }) { await connectFakeChild(this.options?.env, this.options?.args); }, stop: async () => {}, abort: async () => {}, onEvent: () => () => {}, setThinkingLevel: async () => {},
       getState: async () => ({ sessionId: "child", sessionFile: session, model: { provider: "actual", id: resumed ? "resumed" : "clamped" }, thinkingLevel: resumed ? "medium" : "low" }),
       getSessionStats: async () => ({ sessionId: "child", sessionFile: session, contextUsage: { tokens: resumed ? 71_758 : 61_782, contextWindow: 200_000, percent: 30 } }),
       prompt: async (message: string) => { prompts.push(message); },
@@ -220,7 +221,7 @@ describe("agent telemetry lifecycle at production boundaries", () => {
       assert.deepEqual(prompts, ["first", "resume"], "the actual dormant send path relaunches then prompts");
       assert.equal(record.observedModel, "actual/resumed"); assert.equal(record.observedEffort, "medium"); assert.equal(record.telemetry?.contextTokens, 71_758);
       await handle.stopAll();
-    } finally { Object.assign(RpcClient.prototype, original); }
+    } finally { closeFakeChildren(); Object.assign(RpcClient.prototype, original); }
   });
 
   test("message_end waits for state and authoritative context, coalesces bursts, and ignores an old launch", async () => {

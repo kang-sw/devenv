@@ -59,11 +59,11 @@ import {
 import { registerFork as registerForkBase } from "../src/fork.ts";
 import { leadIdleRef, registerPushFlush, flushHeldPushes, applyRpcEvent, attachEventListener, REPORT_TO_LEAD_TOOL_NAME, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
-import { WS_PI_FORK_READY_NONCE_ENV, WS_PI_FORK_READY_PATH_ENV } from "../src/process-role.ts";
+import { closeFakeChildren, connectFakeChild } from "./fixtures/channel-child.ts";
 import type { BridgeHandle } from "../src/bridge.ts";
 import { RpcClient } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 
 const TEST_EXTENSION_ENTRY = "/tmp/loaded ws adapter/index copy.ts";
 function registerFork(pi: any, bridge: any, registry: any, sessionCtx: any, ...rest: any[]) {
@@ -371,40 +371,29 @@ describe("ws-fork: onModelResolved forwarding (260906 Phase 2)", () => {
     ) => Promise<{ content: Array<{ type: string; text: string }>; details?: unknown }>;
   }
 
-  // A `ws-fork` spawn adds one extra handshake beyond the ordinary
-  // RpcClient-transport seam `test/spawner.test.ts`'s own `installRpcHarness`
-  // patches: `validateForkReadiness` (spawner.ts) reads a real
-  // `ready.json` file that a genuine forked child process would write via
-  // `WS_PI_FORK_READY_PATH_ENV`/`WS_PI_FORK_READY_NONCE_ENV` (its own env,
-  // set by `buildRpcClientOptions`). `prepareForkLaunch` creates that
-  // directory and writes the nonce/path BEFORE `client.start()` runs, so the
-  // patched `start()` below can safely write the matching readiness file
-  // itself once it exists — no real child process needed. `this.options` is
-  // a private TS field but a plain runtime property; reading it here is the
-  // only way to recover the per-spawn nonce/path pair from inside a
-  // patched prototype method with no other injectable seam.
+  // A `ws-fork` spawn waits on the child's control channel beyond the
+  // ordinary RpcClient-transport seam `test/spawner.test.ts`'s own
+  // `installRpcHarness` patches: the authenticated hello, then the fork's
+  // stage-2 readiness message that `validateForkReadiness` (spawner.ts)
+  // checks. `ParentChannel.bind` runs and its bootstrap lands in the child
+  // env (via `buildRpcClientOptions`) BEFORE `client.start()`, so the patched
+  // `start()` below plays the child half through `connectFakeChild` — no real
+  // child process needed. Its default fork readiness matches this harness's
+  // `getState()` (`<session-dir>/session.jsonl`, `fork-child-session-id`).
+  // `this.options` is a private TS field but a plain runtime property;
+  // reading it here is the only way to recover the per-spawn bootstrap from
+  // inside a patched prototype method with no other injectable seam.
   function installRpcHarness() {
     const original = Object.fromEntries(["start", "stop", "abort", "onEvent", "prompt", "getState", "setThinkingLevel"].map(name => [name, RpcClient.prototype[name as keyof RpcClient]]));
     Object.assign(RpcClient.prototype, {
       async start(this: { options?: { env?: Record<string, string>; args?: string[] } }) {
-        const env = this.options?.env;
-        const sessionDir = this.options?.args?.[this.options.args.indexOf("--session-dir") + 1];
-        const readinessPath = env?.[WS_PI_FORK_READY_PATH_ENV];
-        const nonce = env?.[WS_PI_FORK_READY_NONCE_ENV];
-        if (readinessPath && nonce) {
-          writeFileSync(readinessPath, JSON.stringify({
-            nonce,
-            ownSessionKey: "fork-child-key",
-            sessionPath: `${sessionDir}/session.jsonl`,
-            sessionId: "fork-child-session-id",
-          }));
-        }
+        await connectFakeChild(this.options?.env, this.options?.args);
       },
       stop: async () => {}, abort: async () => {},
       onEvent: () => () => {}, prompt: async () => {}, setThinkingLevel: async () => {},
       getState: async function(this: { options?: { args?: string[] } }) { const dir = this.options?.args?.[this.options.args.indexOf("--session-dir") + 1]; return { model: { provider: "pi", id: "small" }, thinkingLevel: "medium", sessionFile: `${dir}/session.jsonl`, sessionId: "fork-child-session-id" }; },
     });
-    return { restore: () => Object.assign(RpcClient.prototype, original) };
+    return { restore: () => { closeFakeChildren(); Object.assign(RpcClient.prototype, original); } };
   }
 
   function harness(callTool: (name: string, args?: unknown) => Promise<{ content: Array<{ type: string; text: string }> }>) {
