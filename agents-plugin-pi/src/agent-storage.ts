@@ -111,7 +111,7 @@ export function createAgentStorageContext(sessionId: string, agentDir = getAgent
 export function readOwnerArtifacts(ctx: AgentStorageContext, bucket: string): Array<{ name: string; content: string }> {
   return readOwnerArtifactsOrFail(ctx, bucket) ?? [];
 }
-/** Like `readOwnerArtifacts`, but a failed listing or entry read is undefined instead of an empty bucket. */
+/** Like `readOwnerArtifacts`, but a failed listing or entry read is undefined instead of an empty bucket. An absent or refused (symlinked) bucket is still an empty read. */
 function readOwnerArtifactsOrFail(ctx: AgentStorageContext, bucket: string): Array<{ name: string; content: string }> | undefined {
   const directory = ownerArtifactDirectory(ctx, bucket, false);
   if (!directory) return [];
