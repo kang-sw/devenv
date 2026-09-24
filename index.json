@@ -476,7 +476,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-09-24T10:40:00Z"
+        "touched_at": "2026-09-24T10:40:13Z",
+        "impl": {
+          "branch": "impl/develop/irate-growl-half"
+        }
       }
     }
   }
