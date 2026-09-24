@@ -469,6 +469,9 @@
     "260923-research-pi-parent-child-loopback-control-channel": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
+    "260924-bug-ticket-index-read-timeout-below-ssh-roundtrip": {
+      "registered_at": "2026-09-24T12:05:14Z"
+    },
     "260924-feat-open-decision-queue-response-format": {
       "registered_at": "2026-09-24T11:29:04Z",
       "lease": {
