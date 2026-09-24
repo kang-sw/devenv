@@ -53,12 +53,17 @@
  * `"execute-worker"` `TOOL_GROUPS` entry and its `resolveTools` threading
  * through a fake record's `toolGroup`; `applyRpcEvent`'s new
  * `pendingApproval`-capturing branch for `GATED_EXEC_TOOL_NAME`;
- * `buildRpcClientOptions`'s new `WS_PI_APPROVAL_DIR_ENV` placement; and
+ * `buildRpcClientOptions`'s role-marker placement; and
  * `inheritModelFromToolCtx` (exported out of `registerAgentTools`'s former
  * private closure for reuse by `execute-gateway.ts`). The gated-exec tool's
  * own `execute()` body, `ws-execute`/`ws-approve`'s tool registrations, and
- * the approval-request/decision file relay end-to-end are NOT covered here
+ * the approval-request/decision relay end-to-end are NOT covered here
  * — see test/execute-gateway.test.ts's header comment for that split.
+ *
+ * 260924 (channel approval decisions): `attachApprovalChannel`, the parent
+ * side of the decision hand-off, is covered over a fake channel host below
+ * (consumption acknowledgment, discard on disconnect, reconnect-hello
+ * reconciliation, ownership protection until the acknowledgment).
  *
  * 260904 Phase 1 (side-thread fork) additionally covers: `buildRpcClientOptions`'s
  * new `forkFrom`/`parentSessionKey` params (the `--fork` vs `--session` arg
@@ -101,7 +106,8 @@ import {
   REPORT_LOG_CAP,
   REPORT_TO_LEAD_TOOL_NAME,
   GATED_EXEC_TOOL_NAME,
-  WS_PI_APPROVAL_DIR_ENV,
+  attachApprovalChannel,
+  syncOwnershipProtection,
   getAgentTranscriptPath,
   listAgents,
   sendToAgent,
@@ -142,7 +148,9 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DELEGATION_ENV } from "../src/delegation-policy.ts";
 import { closeFakeChildren, connectFakeChild } from "./fixtures/channel-child.ts";
-import { allocateAgentHome, createAgentStorageContext, updateOwnership } from "../src/agent-storage.ts";
+import { allocateAgentHome, createAgentStorageContext, readOwnership, updateOwnership } from "../src/agent-storage.ts";
+import { approvalConsumedMessage } from "../src/approval-protocol.ts";
+import type { ChannelConnection, ChannelHello } from "../src/agent-channel.ts";
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
 import { installSubtreePublisher, SubtreeUpstream } from "../src/subtree-lifecycle.ts";
 import { fakeUplink, until } from "./fixtures/subtree-channels.ts";
@@ -2284,7 +2292,7 @@ describe("sendToAgent", () => {
   });
 });
 
-describe("buildRpcClientOptions (WS_PI_SPAWN_ROLE_ENV / WS_PI_APPROVAL_DIR_ENV placement)", () => {
+describe("buildRpcClientOptions (WS_PI_SPAWN_ROLE_ENV placement)", () => {
   test("neutralizes stale bootstrap overrides in the effective RPC environment for workers, forks, persistent explores, and dormant resumes", () => {
     const parent = {
       WS_MCP_BOOTSTRAP_BINARY: "/stale/ws-mcp",
@@ -2330,11 +2338,10 @@ describe("buildRpcClientOptions (WS_PI_SPAWN_ROLE_ENV / WS_PI_APPROVAL_DIR_ENV p
     }
   });
 
-  test("built options carry the worker role marker and the approvals dir derived from sessionPath's own directory", () => {
+  test("built options carry the worker role marker and no approvals dir: the decision rides the control channel, so the child gets no directory to watch", () => {
     const options = buildRpcClientOptions("/repo", "provider/model", "/tmp/ws-pi-agent-x/session.jsonl", "/tmp/system.md", "read,bash");
     assert.deepEqual(options.env, {
       [WS_PI_SPAWN_ROLE_ENV]: "worker",
-      [WS_PI_APPROVAL_DIR_ENV]: "/tmp/ws-pi-agent-x/approvals",
       WS_PI_EXPLORE_MODE: "",
       WS_PI_FORK_CONTEXT: "",
       WS_PI_FORK_AFFINITY: "",
@@ -2349,15 +2356,17 @@ describe("buildRpcClientOptions (WS_PI_SPAWN_ROLE_ENV / WS_PI_APPROVAL_DIR_ENV p
     });
   });
 
-  test("env overrides an inherited exploration mode while preserving role and approvals markers", () => {
+  test("env overrides an inherited exploration mode while preserving the role marker", () => {
     const options = buildRpcClientOptions("/repo", undefined, "/tmp/ws-pi-agent-y/session.jsonl", "/tmp/system.md", "read");
-    assert.deepEqual(new Set(Object.keys(options.env ?? {})), new Set([WS_PI_SPAWN_ROLE_ENV, WS_PI_APPROVAL_DIR_ENV, "WS_PI_EXPLORE_MODE", "WS_PI_FORK_CONTEXT", "WS_PI_FORK_AFFINITY", WS_PI_PARENT_SESSION_KEY_ENV, "WS_PI_DELEGATION_POLICY", "WS_PI_WEB_HOME", "WS_PI_CHANNEL_ENDPOINT", "WS_PI_CHANNEL_CREDENTIAL", "WS_PI_CHANNEL_GENERATION", "WS_MCP_BOOTSTRAP_BINARY", "WS_MCP_BOOTSTRAP_URL"]));
+    assert.deepEqual(new Set(Object.keys(options.env ?? {})), new Set([WS_PI_SPAWN_ROLE_ENV, "WS_PI_EXPLORE_MODE", "WS_PI_FORK_CONTEXT", "WS_PI_FORK_AFFINITY", WS_PI_PARENT_SESSION_KEY_ENV, "WS_PI_DELEGATION_POLICY", "WS_PI_WEB_HOME", "WS_PI_CHANNEL_ENDPOINT", "WS_PI_CHANNEL_CREDENTIAL", "WS_PI_CHANNEL_GENERATION", "WS_MCP_BOOTSTRAP_BINARY", "WS_MCP_BOOTSTRAP_URL"]));
     assert.equal(options.env?.WS_PI_EXPLORE_MODE, "");
   });
 
-  test("260904 Phase 1: the approvals dir is inert-but-present even for a non-execute-worker (full-worker) spawn — WS_PI_APPROVAL_DIR is always derived from sessionPath, not gated on tools", () => {
-    const options = buildRpcClientOptions("/repo", undefined, "/tmp/ws-pi-agent-z/session.jsonl", "/tmp/system.md", resolveTools("full-worker"));
-    assert.equal(options.env?.[WS_PI_APPROVAL_DIR_ENV], "/tmp/ws-pi-agent-z/approvals");
+  test("260924: no role, execute-worker included, receives any approval env — the retired decision-file rendezvous has no env at all", () => {
+    for (const tools of [resolveTools("full-worker"), resolveTools("execute-worker")]) {
+      const options = buildRpcClientOptions("/repo", undefined, "/tmp/ws-pi-agent-z/session.jsonl", "/tmp/system.md", tools);
+      assert.ok(!Object.keys(options.env ?? {}).some((key) => key.includes("APPROVAL")), tools);
+    }
   });
 
   test('forks keep their copied session under the owned --session-dir', () => {
@@ -2785,5 +2794,170 @@ describe("runSpawnGuards (260905 review relay #1: alias-clear-then-cap-reject or
     const registry: RpcAgentRegistry = new Map([["a", holder]]);
     const result = runSpawnGuards(registry, undefined, 1);
     assert.equal(result.ok, false);
+  });
+});
+
+describe("attachApprovalChannel (260924: parent side of the channel-delivered decision)", () => {
+  type Host = Parameters<typeof attachApprovalChannel>[1] & {
+    deliver(msg: Record<string, unknown>): void;
+    drop(): void;
+    reconnect(hello: Partial<ChannelHello>): void;
+    listeners(): number;
+  };
+
+  /** In-memory stand-in for the launch's `ParentChannel` subscription surface. */
+  function fakeHost(): Host {
+    const messages = new Set<(msg: Record<string, unknown>) => void>();
+    const disconnects = new Set<() => void>();
+    const connections = new Set<(conn: ChannelConnection, hello: ChannelHello) => void>();
+    return {
+      onMessage: (cb) => { messages.add(cb); return () => { messages.delete(cb); }; },
+      onDisconnect: (cb) => { disconnects.add(cb); return () => { disconnects.delete(cb); }; },
+      onConnection: (cb) => { connections.add(cb); return () => { connections.delete(cb); }; },
+      deliver: (msg) => { for (const cb of [...messages]) cb(msg); },
+      drop: () => { for (const cb of [...disconnects]) cb(); },
+      reconnect: (hello) => { for (const cb of [...connections]) cb({} as ChannelConnection, { reconnect: true, resume: {}, ...hello }); },
+      listeners: () => messages.size + disconnects.size + connections.size,
+    };
+  }
+
+  function pendingRecord(decision?: "sent" | "discarded"): RpcAgentRecord {
+    return liveRpcRecord({ running: true, pendingApproval: { cmdId: "call-1", command: "rm -rf build", rationale: "clean", cwd: "/repo/sub", decision } });
+  }
+
+  test("the child's consumption acknowledgment for the pending cmd_id releases the request and refreshes the widget; any other cmd_id or message is ignored", (t) => {
+    let refreshes = 0;
+    agentWidgetRefreshRef.current = () => { refreshes += 1; };
+    t.after(() => { agentWidgetRefreshRef.current = undefined; });
+    const host = fakeHost();
+    const record = pendingRecord("sent");
+    attachApprovalChannel(record, host, () => undefined);
+
+    host.deliver(approvalConsumedMessage("call-OTHER"));
+    host.deliver({ t: "ready", kind: "web", payload: {} });
+    host.deliver({ t: "approval-consumed" });
+    assert.equal(record.pendingApproval?.decision, "sent", "a foreign or malformed acknowledgment consumes nothing");
+    assert.equal(refreshes, 0);
+
+    host.deliver({ ...approvalConsumedMessage("call-1"), gen: 4 });
+    assert.equal(record.pendingApproval, undefined, "the acknowledged cmd_id is no longer pending");
+    assert.equal(refreshes, 1);
+  });
+
+  test("a disconnect discards a sent-but-unacknowledged decision and leaves an unanswered request untouched", () => {
+    const host = fakeHost();
+    const sent = pendingRecord("sent");
+    const unanswered = pendingRecord(undefined);
+    attachApprovalChannel(sent, host, () => undefined);
+    attachApprovalChannel(unanswered, host, () => undefined);
+
+    host.drop();
+
+    assert.equal(sent.pendingApproval?.decision, "discarded", "the decision is never re-sent; only the reconnect hello can settle it");
+    assert.equal(sent.pendingApproval?.cmdId, "call-1", "the request itself stays pending");
+    assert.deepEqual(unanswered.pendingApproval, { cmdId: "call-1", command: "rm -rf build", rationale: "clean", cwd: "/repo/sub", decision: undefined }, "nothing was in flight, nothing to discard");
+  });
+
+  test("a reconnect hello still reporting the cmd_id after a discard re-issues the request to the lead as a fresh push", () => {
+    const host = fakeHost();
+    const record = pendingRecord("sent");
+    const asked: RpcAgentRecord[] = [];
+    attachApprovalChannel(record, host, () => (r) => asked.push(r));
+    host.drop();
+
+    host.reconnect({ resume: { approval: { pending: "call-1" } } });
+
+    assert.deepEqual(record.pendingApproval, { cmdId: "call-1", command: "rm -rf build", rationale: "clean", cwd: "/repo/sub", reissued: true }, "the discarded decision is forgotten; the request is open again");
+    assert.deepEqual(asked, [record], "the lead is asked exactly once more");
+    host.reconnect({ resume: { approval: { pending: "call-1" } } });
+    assert.equal(asked.length, 1, "a re-issued request with no decision in flight is not re-asked again on a later reconnect");
+  });
+
+  test("a reconnect hello reporting no pending cmd_id after a discard means the child consumed the decision: the request is released", (t) => {
+    let refreshes = 0;
+    agentWidgetRefreshRef.current = () => { refreshes += 1; };
+    t.after(() => { agentWidgetRefreshRef.current = undefined; });
+    const host = fakeHost();
+    const record = pendingRecord("sent");
+    const asked: RpcAgentRecord[] = [];
+    attachApprovalChannel(record, host, () => (r) => asked.push(r));
+    host.drop();
+
+    host.reconnect({ resume: {} });
+
+    assert.equal(record.pendingApproval, undefined);
+    assert.equal(refreshes, 1);
+    assert.deepEqual(asked, []);
+  });
+
+  test("a reconnect hello reporting a different cmd_id after a discard also releases the old request: the child moved on without it", () => {
+    const host = fakeHost();
+    const record = pendingRecord("sent");
+    attachApprovalChannel(record, host, () => undefined);
+    host.drop();
+    host.reconnect({ resume: { approval: { pending: "call-2" } } });
+    assert.equal(record.pendingApproval, undefined, "call-2's own request arrives through the RPC event stream, not from the hello");
+  });
+
+  test("a reconnect hello with no decision in flight leaves the request alone: the lead already holds it and the RPC event stream owns it", () => {
+    const host = fakeHost();
+    const record = pendingRecord(undefined);
+    const asked: RpcAgentRecord[] = [];
+    attachApprovalChannel(record, host, () => (r) => asked.push(r));
+    host.drop();
+    host.reconnect({ resume: { approval: { pending: "call-1" } } });
+    host.reconnect({ resume: {} });
+    assert.equal(record.pendingApproval?.cmdId, "call-1");
+    assert.equal(record.pendingApproval?.decision, undefined);
+    assert.deepEqual(asked, []);
+    // A first hello (not a reconnect) never reconciles either: it belongs to a new launch.
+    record.pendingApproval = { cmdId: "call-1", command: "rm -rf build", decision: "discarded" };
+    host.reconnect({ reconnect: false, resume: { approval: { pending: "call-1" } } });
+    assert.equal(record.pendingApproval?.decision, "discarded");
+    assert.deepEqual(asked, []);
+  });
+
+  test("the approval hook resolves per event, so a record armed after the attach is still re-asked; detaching stops every subscription", () => {
+    const host = fakeHost();
+    const record = pendingRecord("sent");
+    const asked: RpcAgentRecord[] = [];
+    const detach = attachApprovalChannel(record, host, () => record.onApprovalPending);
+    record.onApprovalPending = (r) => asked.push(r);
+    host.drop();
+    host.reconnect({ resume: { approval: { pending: "call-1" } } });
+    assert.deepEqual(asked, [record]);
+
+    assert.equal(host.listeners(), 3);
+    detach();
+    assert.equal(host.listeners(), 0);
+    record.pendingApproval = { cmdId: "call-1", command: "rm -rf build", decision: "sent" };
+    host.drop();
+    host.deliver(approvalConsumedMessage("call-1"));
+    assert.equal(record.pendingApproval?.decision, "sent", "a detached host changes nothing");
+  });
+
+  test("ownership protection persists from the request through a sent decision and a discard, and is released only by the acknowledgment", () => {
+    const root = mkdtempSync(join(tmpdir(), "ws-pi-approval-protection-test-"));
+    try {
+      const ownership = allocateAgentHome(createAgentStorageContext("lead-1", root), "protected-a", "execute-worker");
+      const record = liveRpcRecord({ agentId: "protected-a", ownership, sessionPath: ownership.sessionPath, running: true, pendingApproval: { cmdId: "call-1", command: "rm -rf build" } });
+      const host = fakeHost();
+      attachApprovalChannel(record, host, () => undefined);
+      const protectedId = () => readOwnership(ownership.home)?.liveness.pendingApprovalCommandId;
+
+      assert.ok(syncOwnershipProtection(record));
+      assert.equal(protectedId(), "call-1", "the request protects the record");
+      record.pendingApproval = { ...record.pendingApproval!, decision: "sent" };
+      assert.ok(syncOwnershipProtection(record));
+      assert.equal(protectedId(), "call-1", "sending the decision alone releases nothing");
+      host.drop();
+      assert.ok(syncOwnershipProtection(record));
+      assert.equal(protectedId(), "call-1", "a discarded decision keeps the record protected");
+      host.reconnect({ resume: { approval: { pending: "call-1" } } });
+      assert.equal(protectedId(), "call-1", "a re-issued request keeps the record protected");
+      record.pendingApproval = { ...record.pendingApproval!, decision: "sent" };
+      host.deliver(approvalConsumedMessage("call-1"));
+      assert.equal(protectedId(), undefined, "the acknowledgment releases the protection");
+    } finally { rmSync(root, { recursive: true, force: true }); }
   });
 });

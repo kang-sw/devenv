@@ -103,7 +103,8 @@ import {
 } from "./model-catalog.ts";
 import { PUBLIC_EXPLORE_MODE_TIERS, WS_PI_EXPLORE_MODE_ENV, WS_PI_FORK_AFFINITY_ENV, WS_PI_FORK_CONTEXT_ENV, WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV, isLeadOrFork, readSpawnRole, type ExploreMode, type PublicExploreMode, type SpawnRole } from "./process-role.ts";
 import { FORK_READINESS_KIND, captureForkContext, compareForkRegistrations, writePrivateJson, type ForkContext, type ForkReadiness } from "./fork-context.ts";
-import { CHANNEL_BOOTSTRAP_ENVS, ParentChannel, type ChannelBindOptions } from "./agent-channel.ts";
+import { CHANNEL_BOOTSTRAP_ENVS, ParentChannel, type ChannelBindOptions, type ChannelConnection, type ChannelHello } from "./agent-channel.ts";
+import { parseApprovalConsumedMessage, pendingApprovalFromResume } from "./approval-protocol.ts";
 import { allocateAgentHome, createAgentStorageContext, inspectOwnedHomeRemoval, isOwnedSessionPath, observeSessionWrite, persistOwnershipTelemetry, readOwnership, removeOwnedAgentHome, touchOwnership, updateOwnership, writeOwnership, type AgentOwnership, type AgentStorageContext } from "./agent-storage.ts";
 import { ownerNotifyRef } from "./owner-notify.ts";
 export { ownerNotifyRef } from "./owner-notify.ts";
@@ -136,18 +137,6 @@ export const REPORT_TO_LEAD_TOOL_NAME = "ws-report-to-lead";
  * placement for the same reason.
  */
 export const GATED_EXEC_TOOL_NAME = "ws-worker-exec";
-
-/**
- * Spawn-time env var carrying the child's own approvals directory
- * (`<sessionDir>/approvals`, see `buildRpcClientOptions` below) — the only
- * channel `ws-worker-exec`'s `execute()` has to learn where to poll for its
- * decision file, since neither `sessionDir` nor `sessionPath` is otherwise
- * passed to the child process. Parallel to `WS_PI_SPAWN_ROLE_ENV`
- * (`process-role.ts`), but kept here (not there) because it is spawner-owned
- * plumbing specific to the RPC-backed path, not a role marker every spawn
- * kind needs.
- */
-export const WS_PI_APPROVAL_DIR_ENV = "WS_PI_APPROVAL_DIR";
 
 /** Parent-shell bootstrap overrides select a forced ws-mcp install. They are
  * lead-launch policy, never child-launch policy. */
@@ -376,6 +365,25 @@ export function resolveSpawnToolGroup(explicit: ToolGroup | undefined): ToolGrou
  */
 const RPC_CLI_PATH = process.argv[1];
 
+/**
+ * One gated command awaiting the lead's decision (see
+ * `RpcAgentRecord.pendingApproval`). `decision` is absent while the request
+ * is open, `"sent"` once `ws-approve` delivered a decision over the live
+ * connection (a second `ws-approve` is rejected until the child acknowledges
+ * consumption), and `"discarded"` when that connection ended before the
+ * acknowledgment — the child's reconnect hello then decides whether the
+ * command was consumed (`attachApprovalChannel`). `reissued` marks a request
+ * pushed to the lead again after such a discard.
+ */
+export interface PendingApprovalState {
+  cmdId: string;
+  command: string;
+  rationale?: string;
+  cwd?: string;
+  decision?: "sent" | "discarded";
+  reissued?: boolean;
+}
+
 export interface RpcAgentRecord {
   agentId: string;
   /**
@@ -577,10 +585,21 @@ export interface RpcAgentRecord {
   lastReportAtOverride?: string;
   /**
    * 260904 Phase 1: set by `applyRpcEvent` the instant a `tool_execution_start`
-   * for `GATED_EXEC_TOOL_NAME` is observed on this record's child; cleared by
-   * `ws-approve` once a decision is written. `undefined` means "no gated
-   * command is currently awaiting lead approval on this agent" — the
-   * condition `validatePendingApproval` (execute-gateway.ts) rejects against.
+   * for `GATED_EXEC_TOOL_NAME` is observed on this record's child. `undefined`
+   * means "no gated command is currently awaiting lead approval on this
+   * agent" — the condition `validatePendingApproval` (execute-gateway.ts)
+   * rejects against.
+   *
+   * 260924 (channel-delivered decisions): `ws-approve` sends the decision over
+   * the launch's control channel and marks `decision: "sent"`; the record is
+   * released only by the child's consumption acknowledgment, its reconnect
+   * hello no longer reporting the `cmd_id`, or the child's exit
+   * (`attachApprovalChannel`, `clearLiveState`). A disconnect before the
+   * acknowledgment turns "sent" into "discarded": that decision is never
+   * re-sent, and when the reconnect hello still reports the `cmd_id` the
+   * request is pushed to the lead again with `reissued: true`. Ownership
+   * protection (`pendingApprovalCommandId`) therefore holds from the request
+   * until consumption, not until the decision is sent.
    *
    * Review fix (relay #1): also carries `cwd`, captured from the gated-exec
    * tool call's own `args.cwd` override when the worker supplied one (the
@@ -592,7 +611,7 @@ export interface RpcAgentRecord {
    * context (branch/dirty/ahead_behind) would silently describe the wrong
    * directory to the lead.
    */
-  pendingApproval?: { cmdId: string; command: string; rationale?: string; cwd?: string; decisionWritten?: boolean };
+  pendingApproval?: PendingApprovalState;
   /**
    * 260904 Phase 2 (review relay #1 I6): consulted by `applyRpcEvent` the
    * instant a `kind:"question"` report is observed on this record. It may
@@ -1283,7 +1302,9 @@ function heldActionState(held: HeldPush): PushBatchItemState {
   if (held.family === "ws-agent-approval") {
     const cmdId = typeof held.payload.cmd_id === "string" ? held.payload.cmd_id : undefined;
     const pending = held.record?.pendingApproval;
-    return cmdId && held.record?.workGeneration === held.actionGeneration && pending?.cmdId === cmdId && pending.decisionWritten !== true
+    // A decision in flight or discarded supersedes the held request: the
+    // reconnect hello either releases it or re-issues it as a fresh push.
+    return cmdId && held.record?.workGeneration === held.actionGeneration && pending?.cmdId === cmdId && pending.decision === undefined
       ? "actionable"
       : "superseded";
   }
@@ -2158,14 +2179,9 @@ export interface RpcResumeCtx {
  *
  * 260904 Phase 1: carries `WS_PI_SPAWN_ROLE_ENV: "worker"` (see
  * `process-role.ts`), replacing the old boolean `WS_PI_AGENT_CHILD_ENV: "1"`
- * marker this function used to set. Also now carries `WS_PI_APPROVAL_DIR`,
- * derived from `sessionPath`'s own directory (`dirname(sessionPath)`, the
- * same `sessionDir` `spawnAgent`/`sendToAgent` already `mkdtempSync`'d or
- * cached — no new parameter needed since the two paths are always siblings:
- * `sessionPath` is unconditionally `join(sessionDir, "session.jsonl")`).
- * Inert for a non-`"execute-worker"` spawn (nothing in its `--tools` list can
- * ever dispatch `ws-worker-exec` to read this var), so it is folded into the
- * env unconditionally rather than threaded as an extra opt-in parameter.
+ * marker this function used to set. (The `WS_PI_APPROVAL_DIR` it once carried
+ * is gone with the decision file: 260924 moved approval decisions onto the
+ * control channel, so the child needs no approvals directory.)
  *
  * 260904 Phase 1 (side-thread fork) adds the `forkFrom`/`parentSessionKey`
  * params: when `forkFrom` is given, the emitted args swap `["--session",
@@ -2300,10 +2316,7 @@ export function buildRpcClientOptions(
   if (!extensionPath) throw new Error("ws-pi-agent: missing loaded extension entry path for RPC child");
   const role = spawnRoleOverride ?? (forkFrom ? "fork" : "worker");
   forkLaunch = role === "fork" ? forkLaunch : undefined;
-  const env: Record<string, string> = {
-    [WS_PI_SPAWN_ROLE_ENV]: role,
-    [WS_PI_APPROVAL_DIR_ENV]: join(dirname(sessionPath), "approvals"),
-  };
+  const env: Record<string, string> = { [WS_PI_SPAWN_ROLE_ENV]: role };
   // RpcClient merges this object over process.env. An explicit empty marker
   // therefore clears an inherited deep mode for every non-research launch.
   env[WS_PI_EXPLORE_MODE_ENV] = role === "explore" && exploreMode ? exploreMode : "";
@@ -2536,6 +2549,67 @@ export function observeChildSubtree(registry: RpcAgentRegistry | undefined, reco
   });
 }
 
+/** What the parent-side approval reconciliation needs from the launch's channel; `ParentChannel` satisfies it. */
+export interface ApprovalChannelHost {
+  onMessage(cb: (msg: Record<string, unknown>) => void): () => void;
+  onDisconnect(cb: () => void): () => void;
+  onConnection(cb: (conn: ChannelConnection, hello: ChannelHello) => void): () => void;
+}
+
+/**
+ * Parent side of the channel-delivered approval decision
+ * (260924-feat-pi-agent-channel-approval-decisions; the message shapes and
+ * the child's wait are `approval-protocol.ts`). The child is the authority
+ * on consumption, so this never infers that a command started:
+ *
+ * - `approval-consumed` for the pending `cmd_id` releases the request and,
+ *   with it, the ownership protection `syncOwnershipProtection` derives from
+ *   `pendingApproval` — the one release path besides the child's exit.
+ * - A disconnect discards a sent-but-unacknowledged decision (`"discarded"`;
+ *   `ws-approve` records the same state when it finds no live connection).
+ *   It is never re-sent: whether the child consumed it before the drop is
+ *   learned only from the reconnect hello.
+ * - A reconnect hello that still reports the `cmd_id` means the discarded
+ *   decision was lost: the request goes back to the lead as a fresh push
+ *   (`reissued`), and only a decision sent over the new connection can be
+ *   consumed. A hello that reports no pending `cmd_id` while a decision had
+ *   been sent means the child consumed it (its acknowledgment was lost with
+ *   the connection), so the request is released. A request with no decision
+ *   sent is left alone either way: the RPC event stream owns the request, and
+ *   the lead already holds it.
+ *
+ * Returns the detach; `clearLiveState` closes the channel itself.
+ */
+export function attachApprovalChannel(
+  record: RpcAgentRecord,
+  channel: ApprovalChannelHost,
+  approvalHook: () => ((record: RpcAgentRecord) => void) | undefined,
+): () => void {
+  const release = () => {
+    record.pendingApproval = undefined;
+    syncOwnershipProtection(record);
+    triggerAgentWidgetRefresh();
+  };
+  const offMessage = channel.onMessage((msg) => {
+    const cmdId = parseApprovalConsumedMessage(msg);
+    if (cmdId !== undefined && record.pendingApproval?.cmdId === cmdId) release();
+  });
+  const offDisconnect = channel.onDisconnect(() => {
+    const pending = record.pendingApproval;
+    if (pending?.decision === "sent") record.pendingApproval = { ...pending, decision: "discarded" };
+  });
+  const offConnection = channel.onConnection((_conn, hello) => {
+    const pending = record.pendingApproval;
+    if (!hello.reconnect || pending?.decision !== "discarded") return;
+    if (pendingApprovalFromResume(hello.resume) !== pending.cmdId) { release(); return; }
+    const { decision: _discarded, ...request } = pending;
+    record.pendingApproval = { ...request, reissued: true };
+    syncOwnershipProtection(record);
+    approvalHook()?.(record);
+  });
+  return () => { offMessage(); offDisconnect(); offConnection(); };
+}
+
 /**
  * Wires the child event stream to immediate reports and per-generation
  * terminal settlement. Settlement clears execution before any async work,
@@ -2686,7 +2760,13 @@ export function attachEventListener(
       approvalHook(record);
     }
   });
-  record.unsubscribe = unsubscribeEvents;
+  // The decision hand-off rides the launch's channel; the hook resolves per
+  // call because `record.onApprovalPending` may be armed after this attach.
+  const unsubscribeApproval = record.channel ? attachApprovalChannel(record, record.channel, () => onApprovalPending ?? record.onApprovalPending) : undefined;
+  record.unsubscribe = () => {
+    unsubscribeEvents();
+    unsubscribeApproval?.();
+  };
 }
 
 /**

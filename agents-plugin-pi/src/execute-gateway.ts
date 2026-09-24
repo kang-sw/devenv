@@ -48,22 +48,28 @@
  *     cannot progress at all until it is answered. 260905: this push is now
  *     unconditional (the `info.waiterWoken` suppression is gone along with
  *     `ws-agent-wait`); it is the sole notification path for the lead.
- *   - The decision relay (lead -> child): `ws-approve` writes
- *     `<sessionDir>/approvals/<cmd_id>.decision.json`
- *     (`approvalDecisionPath`); `ws-worker-exec`'s blocked `execute()` polls
- *     for that exact file (`waitForDecisionFile`) using the approvals
- *     directory the child learned at spawn time via the
- *     `WS_PI_APPROVAL_DIR` env var (spawner.ts's `buildRpcClientOptions`).
- *     This two-file-polling design is necessary, not incidental: Pi's RPC
- *     surface has no channel that can resolve an IN-FLIGHT tool call —
- *     `steer`/`followUp` are both turn-boundary-only (rpc.md), so nothing
- *     short of a side-channel (here, the filesystem) can unblock the
- *     specific `execute()` promise the gated-exec tool call is holding open.
+ *   - The decision relay (lead -> child,
+ *     260924-feat-pi-agent-channel-approval-decisions): `ws-approve` sends
+ *     the decision over the launch's control channel (`record.channel`,
+ *     agent-channel.ts) as an `approval-decision` message bound to the
+ *     `cmd_id`; `ws-worker-exec`'s blocked `execute()` waits on the child's
+ *     `ChildApprovalGate` (approval-protocol.ts), which acknowledges
+ *     consumption back over the same channel before the command starts. A
+ *     side-channel is necessary, not incidental: Pi's RPC surface has no
+ *     message that can resolve an IN-FLIGHT tool call — `steer`/`followUp`
+ *     are both turn-boundary-only (rpc.md). The former decision file
+ *     (`<sessionDir>/approvals/<cmd_id>.decision.json`, polled by the child
+ *     through `WS_PI_APPROVAL_DIR`) is gone: a decision reaches the child
+ *     only from the parent's own authenticated connection, so nothing the
+ *     child spawns can approve its own command. `ws-approve` with no live
+ *     connection fails with a not-delivered error and re-sends nothing;
+ *     spawner.ts's `attachApprovalChannel` reconciles a decision that was in
+ *     flight when the connection dropped.
  *   - `computeLeadActiveTools`: the §8 lead `--tools` reshaping — removes
  *     native `bash`/`read` and (footgun fix, see spawner.ts's Codebase
  *     Findings) `GATED_EXEC_TOOL_NAME` itself from the lead's active list
  *     (a lead-invoked `ws-worker-exec` call would otherwise hang forever
- *     waiting on a decision file nobody will ever write, since nothing
+ *     waiting on a decision nobody will ever send, since nothing
  *     observes the lead's OWN `tool_execution_start` the way a parent
  *     observes a spawned child's), and adds `ws-execute`/`ws-approve`/
  *     `UGLY_READ_TOOL_NAME`/`ONE_LINER_EXEC_TOOL_NAME` if not already present.
@@ -91,16 +97,15 @@
  * (5 tools + 1 injection callback) is closer in shape to spawner.ts.
  *
  * Golden rule: imports FROM spawner.ts only (`spawnAgent`,
- * `inheritModelFromToolCtx`, `GATED_EXEC_TOOL_NAME`, `WS_PI_APPROVAL_DIR_ENV`,
- * types) — spawner.ts never imports from this file, keeping it generic (no
- * `pi.sendUserMessage` dependency there). `agents-plugin-tool/` (ws-mcp Go)
- * and `agents-plugin/skills/` canonical text are both untouched by this
- * ticket.
+ * `inheritModelFromToolCtx`, `GATED_EXEC_TOOL_NAME`, types) — spawner.ts
+ * never imports from this file, keeping it generic (no `pi.sendUserMessage`
+ * dependency there). `agents-plugin-tool/` (ws-mcp Go) and
+ * `agents-plugin/skills/` canonical text are both untouched by this ticket.
  */
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, join } from "node:path";
+import { readFileSync } from "node:fs";
+import { isAbsolute, join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { BridgeHandle } from "./bridge.ts";
@@ -109,18 +114,19 @@ import { buildExecuteSummary, createDispatchToolPreview } from "./tool-row-rende
 import { modelCatalogFromToolCtx, tierWarningNotifierFromToolCtx } from "./model-catalog.ts";
 import {
   GATED_EXEC_TOOL_NAME,
-  WS_PI_APPROVAL_DIR_ENV,
   inheritModelFromToolCtx,
   pushToLead,
   resolveAgentId,
   spawnAgent,
   storageContextFromToolCtx,
   syncOwnershipProtection,
+  type PendingApprovalState,
   type ResolvedModelInfo,
   type RpcAgentRecord,
   type RpcAgentRegistry,
 } from "./spawner.ts";
 import { touchOwnership } from "./agent-storage.ts";
+import { approvalDecisionMessage, type ApprovalChildLink, type ApprovalDecision, type ChildApprovalGate } from "./approval-protocol.ts";
 
 // ---------------------------------------------------------------------------
 // Pure helpers. Unit-tested directly (test/execute-gateway.test.ts) with no
@@ -263,14 +269,8 @@ export function resolveExecuteModelAlias(complex?: boolean): string | undefined 
   return complex ? undefined : "small";
 }
 
-export interface PendingApproval {
-  cmdId: string;
-  command: string;
-  rationale?: string;
-  /** Worker-supplied per-call cwd override (mirrors `ws-worker-exec`'s own `cwd?` param) — see `resolveApprovalContextCwd`. */
-  cwd?: string;
-  decisionWritten?: boolean;
-}
+/** The record's pending-approval state (`spawner.ts`); `cwd` is the worker-supplied per-call override — see `resolveApprovalContextCwd`. */
+export type PendingApproval = PendingApprovalState;
 
 export type ValidatePendingApprovalResult = { ok: true } | { ok: false; reason: string };
 
@@ -279,7 +279,11 @@ export type ValidatePendingApprovalResult = { ok: true } | { ok: false; reason: 
  * requirement (§3/§8's Phase 1 verification boundary: "`cmd_id` stale-
  * rejection"). Rejects when there is no pending approval on the agent at
  * all, or when the given `cmdId` doesn't match the one actually pending
- * (stale/reused/wrong-agent `cmd_id`); accepts only on an exact match.
+ * (stale/reused/wrong-agent `cmd_id`); accepts only on an exact match. A
+ * decision already sent and not yet acknowledged is rejected too: the child
+ * consumes at most one decision per `cmd_id`, and a discarded one (the
+ * connection dropped first) is re-asked by `attachApprovalChannel`, never
+ * re-sent here.
  */
 export function validatePendingApproval(pending: PendingApproval | undefined, cmdId: string): ValidatePendingApprovalResult {
   if (!pending) {
@@ -288,7 +292,8 @@ export function validatePendingApproval(pending: PendingApproval | undefined, cm
   if (pending.cmdId !== cmdId) {
     return { ok: false, reason: `cmd_id mismatch: pending cmd_id is "${pending.cmdId}", got "${cmdId}"` };
   }
-  if (pending.decisionWritten) return { ok: false, reason: "approval decision is already written and awaiting worker consumption" };
+  if (pending.decision === "sent") return { ok: false, reason: "approval decision is already sent and awaiting worker consumption" };
+  if (pending.decision === "discarded") return { ok: false, reason: "approval decision was discarded when the worker's connection dropped; wait for its reconnect to re-ask or report consumption" };
   return { ok: true };
 }
 
@@ -376,29 +381,6 @@ export function buildApprovalPromptText(payload: ApprovalPayload): string {
 }
 
 /**
- * Pure path builder for the decision file both `ws-approve` (writer, parent
- * side) and `ws-worker-exec` (reader, child side — via its own
- * `WS_PI_APPROVAL_DIR`-derived approvals dir) agree on:
- * `<sessionDir>/approvals/<cmdId>.decision.json`.
- */
-function approvalDecisionFilename(cmdId: string): string {
-  // Escape percent too: a literal %7C must never alias an encoded pipe.
-  const encoded = cmdId.replace(/[<>:"/\\|?*%\u0000-\u001f\u007f-\u009f]/g,
-    (char) => `%${char.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0")}`);
-  return `${encoded}.decision.json`;
-}
-
-export function approvalDecisionPath(sessionDir: string, cmdId: string): string {
-  return join(sessionDir, "approvals", approvalDecisionFilename(cmdId));
-}
-
-export interface ApprovalDecision {
-  decision: "approve" | "deny" | "run-instead";
-  reason?: string;
-  command?: string;
-}
-
-/**
  * Pure cwd-fallback selector for the approval-relay's ground-truth context
  * scrape (review fix, relay #1, CORRECTNESS finding #1): a worker-supplied
  * per-call `cwd` override (`pending.cwd`, captured onto `record.pendingApproval`
@@ -420,12 +402,12 @@ export type ValidateApprovalDecisionResult = { ok: true } | { ok: false; reason:
  * relay #1, CORRECTNESS finding #2): the tool's own parameter schema already
  * documents `reason` as "Required context for decision:deny" and `command`
  * as needed for `decision:run-instead`, but nothing previously enforced
- * either before writing the decision file — an empty/omitted `command` on
+ * either before sending the decision — an empty/omitted `command` on
  * `run-instead` silently fell through to `ws-worker-exec`'s own `p.command`
  * fallback (treating it as a no-op approve), and an empty/omitted `reason`
  * on `deny` produced a confusing blank-reason denial. Checked BEFORE
  * `validatePendingApproval`'s race-binding gate is acted on (i.e. before any
- * decision file is written), rejecting with a reason a caller can act on.
+ * decision is sent), rejecting with a reason a caller can act on.
  * Whitespace-only values are treated the same as missing (`.trim()`).
  */
 export function validateApprovalDecisionInput(decision: "approve" | "deny" | "run-instead", reason: string | undefined, command: string | undefined): ValidateApprovalDecisionResult {
@@ -480,60 +462,6 @@ function tryGit(args: string[], cwd: string): string | undefined {
   }
 }
 
-/**
- * IO: polls (fixed-interval, cleared on resolve) for `path` to appear,
- * resolving its parsed JSON contents as soon as it does. Also resolves
- * early with `"aborted"` on `signal`'s `"abort"` event — the abort-unblocks-
- * execute path (`ws-agent-stop` -> `client.abort()` -> this tool call's own
- * `AbortSignal` fires). Mirrors the installed package's own `exec.js`
- * `execCommand` abort-listener pattern.
- *
- * Review fix (relay #1, TEST finding #5): despite living next to genuinely
- * live-gate-only code, this function itself needs only a real filesystem +
- * timers — no subprocess, model, or `RpcClient` — so it IS unit-tested
- * directly (test/execute-gateway.test.ts), using a real temp directory, a
- * delayed `writeFileSync`, and a real/aborted `AbortController`.
- */
-export function waitForDecisionFile(path: string, signal: AbortSignal | undefined, pollMs = 200): Promise<ApprovalDecision | "aborted"> {
-  return new Promise((resolve) => {
-    let settled = false;
-    let timer: ReturnType<typeof setInterval> | undefined;
-
-    const finish = (result: ApprovalDecision | "aborted") => {
-      if (settled) return;
-      settled = true;
-      if (timer) clearInterval(timer);
-      signal?.removeEventListener("abort", onAbort);
-      resolve(result);
-    };
-    const onAbort = () => finish("aborted");
-
-    if (signal) {
-      if (signal.aborted) {
-        finish("aborted");
-        return;
-      }
-      signal.addEventListener("abort", onAbort);
-    }
-
-    timer = setInterval(() => {
-      if (!existsSync(path)) return;
-      try {
-        const raw = readFileSync(path, "utf8");
-        const decision = JSON.parse(raw) as ApprovalDecision;
-        try {
-          unlinkSync(path);
-        } catch {
-          // Consumed decisions are transient IPC; cleanup must not gate execution.
-        }
-        finish(decision);
-      } catch {
-        // File may still be mid-write (partial JSON) — try again next tick.
-      }
-    }, pollMs);
-  });
-}
-
 // ---------------------------------------------------------------------------
 // IO glue: tool registration + the approval-request injection callback.
 // ---------------------------------------------------------------------------
@@ -546,6 +474,14 @@ export interface ExecuteGatewaySessionCtx {
   executeWorkerPromptPath: string;
   /** See spawner.ts's `RpcSpawnCtx.onApprovalPending` — threaded into every `spawnAgent` call this module makes for `ws-execute`. */
   onApprovalPending?: (record: RpcAgentRecord) => void;
+  /**
+   * Child side only: this process's connection to its parent (index.ts's
+   * `ChildChannel`) and the gate `ws-worker-exec` waits on. Absent in a
+   * process no parent launched (the lead), where the gated tool is not
+   * active and would have nobody to ask anyway.
+   */
+  channel?: ApprovalChildLink;
+  approvalGate?: ChildApprovalGate;
 }
 
 /**
@@ -579,13 +515,18 @@ export function createApprovalRelay(
     const pending = record.pendingApproval;
     if (!pending) return;
     const context = scrapeWorkingContext(resolveApprovalContextCwd(pending, sessionCtx.cwd));
-    const text = buildApprovalPromptText({
+    const prompt = buildApprovalPromptText({
       agent_id: record.agentId,
       cmd_id: pending.cmdId,
       command: pending.command,
       rationale: pending.rationale,
       context,
     });
+    // A re-ask after the worker's connection dropped mid-delivery: the earlier
+    // decision was discarded and the worker is still waiting on this cmd_id.
+    const text = pending.reissued
+      ? `${prompt}\n\nNote: your earlier decision for this cmd_id was not delivered (the worker's connection dropped first) and was discarded; decide again.`
+      : prompt;
     pushToLead(pi, registryRef?.current, record, "ws-agent-approval", { cmd_id: pending.cmdId, request: text }, "steer");
   };
 }
@@ -628,12 +569,14 @@ export function registerExecuteGateway(
     } as never,
     async execute(toolCallId, params, signal) {
       const p = params as { command: string; rationale: string; cwd?: string };
-      const approvalDir = process.env[WS_PI_APPROVAL_DIR_ENV];
-      if (!approvalDir) {
-        throw new Error(`ws-pi-agent: ${GATED_EXEC_TOOL_NAME}: ${WS_PI_APPROVAL_DIR_ENV} is unset — this tool only runs inside a ws-execute-spawned execute-worker.`);
+      const { channel, approvalGate } = sessionCtx;
+      if (!channel || !approvalGate) {
+        throw new Error(`ws-pi-agent: ${GATED_EXEC_TOOL_NAME}: no parent control channel — this tool only runs inside a ws-execute-spawned execute-worker.`);
       }
-      const decisionPath = join(approvalDir, approvalDecisionFilename(toolCallId));
-      const outcome = await waitForDecisionFile(decisionPath, signal);
+      // The parent learned this cmd_id from the tool_execution_start event;
+      // its decision arrives over the channel and is acknowledged before the
+      // command starts (approval-protocol.ts).
+      const outcome = await approvalGate.waitForDecision(channel, toolCallId, signal);
 
       if (outcome === "aborted") {
         return { content: [{ type: "text", text: "Aborted (ws-agent-stop) before the lead responded." }] };
@@ -718,7 +661,7 @@ export function registerExecuteGateway(
     name: APPROVE_TOOL_NAME,
     label: APPROVE_TOOL_NAME,
     description:
-      "Respond to a pending ws-worker-exec approval request from a ws-execute-spawned agent. decision:approve runs the command as proposed; deny(reason) rejects it (the worker re-plans); run-instead(command) substitutes a different command whose output the worker treats as authoritative. Rejected if cmd_id doesn't match the currently pending one (stale/reused cmd_id).",
+      "Respond to a pending ws-worker-exec approval request from a ws-execute-spawned agent. decision:approve runs the command as proposed; deny(reason) rejects it (the worker re-plans); run-instead(command) substitutes a different command whose output the worker treats as authoritative. Rejected if cmd_id doesn't match the currently pending one (stale/reused cmd_id), if a decision for it is already in flight or was discarded by a connection drop, or if the worker has no live connection (not delivered; in both drop cases the request is re-issued to you when the worker reconnects still waiting).",
     parameters: {
       type: "object",
       properties: {
@@ -747,11 +690,23 @@ export function registerExecuteGateway(
         throw new Error(`ws-pi-agent: ${APPROVE_TOOL_NAME} rejected: ${inputValidation.reason}`);
       }
 
-      const sessionDir = record.ownership?.home ?? dirname(record.sessionPath);
-      const decisionPath = approvalDecisionPath(sessionDir, p.cmd_id);
-      mkdirSync(dirname(decisionPath), { recursive: true });
-      writeFileSync(decisionPath, JSON.stringify({ decision: p.decision, reason: p.reason, command: p.command }));
-      record.pendingApproval = { ...record.pendingApproval!, decisionWritten: true };
+      // The decision travels only over the parent's own connection. With none
+      // live it is discarded here and now — never queued, never re-sent — and
+      // recorded as such so the worker's reconnect hello re-issues the request
+      // to the lead (or releases it when the worker no longer waits), the same
+      // reconciliation a decision lost mid-delivery gets (`attachApprovalChannel`).
+      const channel = record.channel;
+      const notDelivered = (why: string) => {
+        record.pendingApproval = { ...record.pendingApproval!, decision: "discarded" };
+        return new Error(`ws-pi-agent: ${APPROVE_TOOL_NAME} not delivered: ${why} The decision was discarded; the request is re-issued to you when the worker reconnects still waiting.`);
+      };
+      if (!channel?.live) throw notDelivered("the worker has no live connection.");
+      try {
+        channel.send(approvalDecisionMessage(p.cmd_id, { decision: p.decision, reason: p.reason, command: p.command }));
+      } catch (error) {
+        throw notDelivered(`${error instanceof Error ? error.message : String(error)}.`);
+      }
+      record.pendingApproval = { ...record.pendingApproval!, decision: "sent" };
       if (record.ownership) touchOwnership(record.ownership.home);
       syncOwnershipProtection(record);
 

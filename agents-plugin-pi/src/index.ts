@@ -196,6 +196,7 @@ import { registerSkillResources } from "./skills-dir.ts";
 import { computeSessionBootstrap, registerLeadBootstrap, type LeadPromptRef, type SkillsBlockCache, type WsBlockBase } from "./lead-bootstrap.ts";
 import { applyForkAffinity, captureRegisteredTools, classifyForkRegistrations, compareForkRegistrations, effectiveForkDescriptor, formatForkRegistrationMismatch, frameForkInput, readForkLaunchContext, removeForkTransport, restoreForkContext, restoreForkKeys, FORK_READINESS_KIND, type ForkContext } from "./fork-context.ts";
 import { ChildChannel, readAndDeleteChannelBootstrap } from "./agent-channel.ts";
+import { ChildApprovalGate } from "./approval-protocol.ts";
 import { isLeadOrFork, readSpawnRole, WS_PI_FORK_CONTEXT_ENV, WS_PI_PARENT_SESSION_KEY_ENV, type SpawnRole } from "./process-role.ts";
 import { createApprovalRelay, registerExecuteGateway } from "./execute-gateway.ts";
 import { buildMailboxPushMessage, createBridgeDrain, createSubprocessWait, resolveMailboxSelfSlug, shouldArmMailboxWaiter, startMailboxWaiter, type MailboxToolCall, type MailboxWaiterHandle } from "./mailbox-waiter.ts";
@@ -398,9 +399,14 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   // with no subtree upstream there is no parent to fence nested dispatch on.
   const channelBootstrap = readAndDeleteChannelBootstrap(process.env);
   let subtreeUpstream: SubtreeUpstream | undefined;
-  // Every reconnect hello carries the latest subtree snapshot in its resume section.
-  const channel = channelBootstrap ? await ChildChannel.connect(channelBootstrap, { resume: () => subtreeUpstream?.resume() ?? {} }) : undefined;
+  // The gate outlives any one connection: a reconnect hello reports the
+  // cmd_id `ws-worker-exec` is still waiting on so the parent can re-ask.
+  const approvalGate = new ChildApprovalGate();
+  // Every reconnect hello carries the latest subtree snapshot and any open
+  // approval wait in its resume section (distinct keys per feature).
+  const channel = channelBootstrap ? await ChildChannel.connect(channelBootstrap, { resume: () => ({ ...(subtreeUpstream?.resume() ?? {}), ...approvalGate.resume() }) }) : undefined;
   subtreeUpstream = channel ? new SubtreeUpstream(channel) : undefined;
+  if (channel) approvalGate.attach(channel);
   const delegation = readDelegationPolicy();
   // Same-name wrappers preserve Pi's native schema, diff renderer, queue, and
   // result shape while the explicit policy — not tool visibility — authorizes
@@ -662,6 +668,8 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
       executeWorkerPromptPath: executeWorkerGuidePath,
       extensionPath: extensionEntryPath,
       onApprovalPending,
+      channel,
+      approvalGate,
     }, toolPreviewTuiRef);
 
     // 260914 (pi native mailbox push): arm the session-bound mail waiter for an

@@ -22,6 +22,7 @@ import {
   sweepStaleChannelSockets,
   type ChannelConnection,
 } from "../src/agent-channel.ts";
+import { ChildApprovalGate, approvalConsumedMessage, approvalDecisionMessage } from "../src/approval-protocol.ts";
 
 const win = process.platform === "win32";
 const roots: string[] = [];
@@ -142,6 +143,45 @@ for (const kind of ["pipe", "tcp"] as const) {
       child.publishReadiness("fork", { ownSessionKey: "late" });
       assert.deepEqual((await again).readiness, { web: { tools: ["a"] }, fork: { ownSessionKey: "late" } });
       assert.deepEqual(await parent.readiness("fork"), { ownSessionKey: "late" });
+      child.close();
+      parent.close();
+    });
+
+    test("approval decision: consumed only after the acknowledgment is sent over this connection, one cmd_id never satisfies another, and a reconnect hello reports what is still waiting", async () => {
+      const parent = await ParentChannel.bind(6, { force: kind, socketDir: socketDir() });
+      const gate = new ChildApprovalGate();
+      const child = await ChildChannel.connect(readAndDeleteChannelBootstrap({ ...parent.bootstrapEnv() })!, { backoffCapMs: 100, resume: () => gate.resume() });
+      await parent.hello();
+
+      // Delivered, acknowledged, consumed — in that order, with the generation stamped on the acknowledgment.
+      const ack = collect(cb => parent.onMessage(cb), 1);
+      const wait = gate.waitForDecision(child, "call-1", undefined);
+      parent.send(approvalDecisionMessage("call-OTHER", { decision: "approve" }));
+      parent.send(approvalDecisionMessage("call-1", { decision: "run-instead", command: "echo x" }));
+      assert.deepEqual(await wait, { decision: "run-instead", command: "echo x" });
+      assert.deepEqual(await ack, [{ ...approvalConsumedMessage("call-1"), gen: 6 }]);
+      assert.deepEqual(gate.resume(), {});
+
+      // The acknowledgment cannot be sent (the connection is gone by the time
+      // the decision is handled): the decision is not consumed, the cmd_id
+      // stays pending, and the child's reconnect hello reports it. The same
+      // wait then consumes the decision sent over the new connection.
+      let failNextSend = true;
+      const link = { send: (msg: Record<string, unknown>) => { if (failNextSend) { failNextSend = false; throw new Error("ws-pi-channel: not connected to the parent"); } child.send(msg); }, onMessage: (cb: (msg: Record<string, unknown>) => void) => child.onMessage(cb) };
+      const stuck = gate.waitForDecision(link, "call-2", undefined);
+      const delivered = new Promise<void>(resolve => child.onMessage(msg => { if (msg.cmd_id === "call-2") resolve(); }));
+      parent.send(approvalDecisionMessage("call-2", { decision: "approve" }));
+      await delivered;
+      assert.equal(await Promise.race([stuck, new Promise(resolve => setTimeout(() => resolve("pending"), 30))]), "pending");
+      assert.equal(gate.pending, "call-2");
+      const reconnected = new Promise<Record<string, unknown>>(resolve => parent.onConnection((_conn, hello) => { if (hello.reconnect) resolve(hello.resume); }));
+      parent.live!.close();
+      assert.deepEqual(await reconnected, { approval: { pending: "call-2" } });
+      const ack2 = collect(cb => parent.onMessage(cb), 1);
+      parent.send(approvalDecisionMessage("call-2", { decision: "deny", reason: "again" }));
+      assert.deepEqual(await stuck, { decision: "deny", reason: "again" }, "only the decision over the new connection, acknowledged over it, is consumed");
+      assert.deepEqual(await ack2, [{ ...approvalConsumedMessage("call-2"), gen: 6 }]);
+      assert.equal(gate.pending, undefined);
       child.close();
       parent.close();
     });
