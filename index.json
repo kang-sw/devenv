@@ -469,6 +469,9 @@
     "260923-research-pi-parent-child-loopback-control-channel": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
+    "260924-bug-pi-removal-claim-abandonment-and-generation": {
+      "registered_at": "2026-09-24T12:38:53Z"
+    },
     "260924-bug-ticket-index-read-timeout-below-ssh-roundtrip": {
       "registered_at": "2026-09-24T12:05:14Z"
     },
