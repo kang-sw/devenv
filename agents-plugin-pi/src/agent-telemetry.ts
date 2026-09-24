@@ -48,6 +48,23 @@ export function parseCumulativeCost(value: unknown): CumulativeCost | undefined 
   return knownUsd === undefined || knownContributors === undefined || unknownContributors === undefined || descendants === undefined
     ? undefined : { knownUsd, knownContributors, unknownContributors, descendants };
 }
+/**
+ * Monotonic merge of one agent's cumulative cost: a regressing or unknown
+ * observation keeps the previous known floor and marks the sum incomplete.
+ * Shared by the owner estimate and the eviction record, whose rewrite merges
+ * with the existing record rather than letting the last write win.
+ */
+export function mergeCumulativeCost(previous: CumulativeCost | undefined, observed: CumulativeCost): CumulativeCost {
+  if (!previous) return { ...observed };
+  const regressed = observed.knownUsd < previous.knownUsd;
+  if (!regressed && observed.knownContributors > 0) return { ...observed };
+  return {
+    knownUsd: previous.knownUsd,
+    knownContributors: previous.knownContributors,
+    unknownContributors: 1,
+    descendants: 1,
+  };
+}
 function usageOf(value: unknown): { contextTokens?: number; cost?: number } | undefined {
   if (!value || typeof value !== "object") return undefined;
   const u = value as { input?: unknown; output?: unknown; cacheRead?: unknown; cacheWrite?: unknown; totalTokens?: unknown; cost?: { total?: unknown } };

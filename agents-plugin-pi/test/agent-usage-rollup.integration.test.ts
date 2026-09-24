@@ -18,7 +18,7 @@ import { createInterface } from "node:readline";
 import { test, type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
 import { ChildChannel, ParentChannel } from "../src/agent-channel.ts";
-import { allocateAgentHome, createAgentStorageContext, persistOwnershipTelemetry, readOwnership } from "../src/agent-storage.ts";
+import { allocateAgentHome, createAgentStorageContext, persistOwnershipTelemetry, readEvictionRecord, readOwnership } from "../src/agent-storage.ts";
 import { createAgentFooterController, registerAgentCostOwner, type AgentFooterComponent, type AgentFooterController } from "../src/agent-footer.ts";
 import type { CumulativeCost } from "../src/agent-telemetry.ts";
 import { DESCENDANT_USAGE_RESUME_KEY, attachDescendantUsage } from "../src/agent-usage-rollup.ts";
@@ -231,9 +231,14 @@ const usdText = (value: number) => `~$${value.toFixed(2)}`;
 const known = (knownUsd: number, contributors: number): CumulativeCost => ({ knownUsd, knownContributors: contributors, unknownContributors: 0, descendants: contributors });
 /** G's whole subtree as M counts it: G's own usage plus its stored descendant value (L). */
 const G_SUBTREE = known(G_OWN + L_OWN, 2);
-function checkpointOf(dir: string, owner: string): { evictedBaseline: CumulativeCost; agents: Array<{ agentId: string; cost: CumulativeCost }> } {
-  return JSON.parse(readFileSync(join(dir, "ws-agents", owner, ".cost-estimate", "checkpoint.json"), "utf8"));
+function evictionRecordOf(dir: string, owner: string, agentId: string): CumulativeCost | undefined {
+  return readEvictionRecord({ root: dir, ownerSessionId: owner }, agentId);
 }
+function checkpointBaselineOf(dir: string, owner: string): CumulativeCost | undefined {
+  try { return JSON.parse(readFileSync(join(dir, "ws-agents", owner, ".cost-estimate", "checkpoint.json"), "utf8")).evictedBaseline; }
+  catch { return undefined; }
+}
+const NO_COST: CumulativeCost = { knownUsd: 0, knownContributors: 0, unknownContributors: 0, descendants: 0 };
 
 test("three-level tree: the grandchild's and great-grandchild's usage reach the root footer only through the channel while M is parked", { timeout: TEST_TIMEOUT_MS }, async t => {
   const root = await Root.start(t);
@@ -371,7 +376,7 @@ test("resume: a value changed while M is disconnected arrives once through the r
   assert.equal(root.footerD(), usdText(M_OWN + G_OWN + 2 * L_OWN));
 });
 
-test("eviction then restart: M folds G's whole subtree into its evicted baseline once, and the root total survives M's restart", { timeout: TEST_TIMEOUT_MS }, async t => {
+test("eviction then restart: M records G's whole subtree once, and the root total survives M's restart", { timeout: TEST_TIMEOUT_MS }, async t => {
   const root = await Root.start(t);
   await root.settle();
   const total = usdText(M_OWN + G_OWN + L_OWN);
@@ -379,16 +384,18 @@ test("eviction then restart: M folds G's whole subtree into its evicted baseline
   const evicted = await root.hop!.command<Stats & { result: { ok: boolean; evictedLabel?: string } }>("M", "evict");
   assert.deepEqual(evicted.result, { ok: true, evictedLabel: "G" });
   assert.equal(evicted.childPresent, false, "G left M's registry");
-  assert.deepEqual(checkpointOf(root.dir, "m-session").evictedBaseline, G_SUBTREE, "the fold is G's own usage plus its stored descendant value");
-  assert.deepEqual(evicted.value, G_SUBTREE, "eviction moves G's subtree into the baseline without changing M's value");
+  assert.deepEqual(evictionRecordOf(root.dir, "m-session", "G"), G_SUBTREE, "the record is G's own usage plus its stored descendant value");
+  assert.deepEqual(checkpointBaselineOf(root.dir, "m-session") ?? NO_COST, NO_COST, "the legacy baseline is never increased");
+  assert.deepEqual(evicted.value, G_SUBTREE, "eviction moves G's subtree into its record without changing M's value");
   assert.equal(root.footerD(), total);
 
   await root.hop!.shutdown();
   const hop = await root.launch(true);
   const stats = await hop.command("M", "stats");
   assert.equal(stats.childPresent, false, "no evicted child is revived");
-  assert.deepEqual(stats.value, G_SUBTREE, "the restarted M rebuilds its value from the checkpoint alone");
-  assert.deepEqual(checkpointOf(root.dir, "m-session").evictedBaseline, G_SUBTREE, "folded exactly once");
+  assert.deepEqual(stats.value, G_SUBTREE, "the restarted M rebuilds its value from the eviction record alone");
+  assert.deepEqual(evictionRecordOf(root.dir, "m-session", "G"), G_SUBTREE, "recorded exactly once");
+  assert.deepEqual(checkpointBaselineOf(root.dir, "m-session"), NO_COST, "the restarted M's checkpoint carries no fold");
   await waitFor("the root to accept the restarted M's report", () => root.recordM.descendantUsageOrder, order => order?.generation === root.generation);
   root.refreshM();
   assert.equal(root.footerD(), total, "the root total is unchanged");

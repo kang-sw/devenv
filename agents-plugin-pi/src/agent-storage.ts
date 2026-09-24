@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { renameWithWindowsRetry, type RenameRetryHooks } from "./atomic-write.ts";
 import { parseDelegationPolicy, type DelegationPolicy } from "./delegation-policy.ts";
-import { parseTelemetry, type AgentTelemetry } from "./agent-telemetry.ts";
+import { mergeCumulativeCost, parseCumulativeCost, parseTelemetry, type AgentTelemetry, type CumulativeCost } from "./agent-telemetry.ts";
 import { normalizeStoredExploreMode, type ExploreMode } from "./process-role.ts";
 import { ownerNotifyRef, type OwnershipOwnerNotificationFingerprint } from "./owner-notify.ts";
 
@@ -60,17 +60,36 @@ function existingCheckedDirectory(path: string, root: string): string | undefine
     return real === resolved && contained(root, real) && !lstatSync(resolved).isSymbolicLink() && statSync(resolved).isDirectory() ? resolved : undefined;
   } catch { return undefined; }
 }
+/**
+ * A hidden owner-scoped bucket: one dot-prefixed component, optionally nested
+ * (`.cost-estimate/evicted`). Every level gets the same canonical containment
+ * and symlink refusal.
+ */
 function ownerArtifactDirectory(ctx: AgentStorageContext, bucket: string, create: boolean): string | undefined {
-  if (!/^\.[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(bucket)) return undefined;
+  const [head, ...nested] = bucket.split("/");
+  if (!/^\.[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(head) || nested.some(part => !SAFE_COMPONENT.test(part))) return undefined;
   try {
     const namespacePath = join(ctx.root, "ws-agents");
     const namespace = create ? checkedDirectory(namespacePath, ctx.root) : existingCheckedDirectory(namespacePath, ctx.root);
     if (!namespace) return undefined;
-    const ownerPath = join(namespace, safe(ctx.ownerSessionId, "Pi session id"));
-    const owner = create ? checkedDirectory(ownerPath, namespace) : existingCheckedDirectory(ownerPath, namespace);
-    if (!owner) return undefined;
-    const bucketPath = join(owner, bucket);
-    return create ? checkedDirectory(bucketPath, owner) : existingCheckedDirectory(bucketPath, owner);
+    let directory: string | undefined = namespace;
+    for (const part of [safe(ctx.ownerSessionId, "Pi session id"), head, ...nested]) {
+      const path: string = join(directory, part);
+      directory = create ? checkedDirectory(path, directory) : existingCheckedDirectory(path, directory);
+      if (!directory) return undefined;
+    }
+    return directory;
+  } catch { return undefined; }
+}
+/** A contained regular file in an existing bucket; undefined when absent, symlinked, or not a regular file. */
+function ownerArtifactFile(ctx: AgentStorageContext, bucket: string, name: string): string | undefined {
+  if (!SAFE_COMPONENT.test(name)) return undefined;
+  const directory = ownerArtifactDirectory(ctx, bucket, false);
+  if (!directory) return undefined;
+  const path = join(directory, name);
+  try {
+    const entry = lstatSync(path, { throwIfNoEntry: false });
+    return entry?.isFile() && realpathSync(path) === path ? path : undefined;
   } catch { return undefined; }
 }
 function canonicalHome(home: string): string { const resolved = resolve(home); if (lstatSync(resolved).isSymbolicLink()) throw new Error("ws-pi-agent: owned home is symlinked"); const real = realpathSync(resolved); if (real !== resolved) throw new Error("ws-pi-agent: owned home escapes through symlink"); return real; }
@@ -118,6 +137,115 @@ export function writeOwnerArtifact(ctx: AgentStorageContext, bucket: string, nam
     try { rmSync(temporary, { force: true }); } catch { /* original failure wins */ }
     return false;
   }
+}
+
+/** Removes one contained regular file from an owner-scoped bucket. True when it is absent afterwards; a symlinked or non-regular entry is refused. */
+export function removeOwnerArtifact(ctx: AgentStorageContext, bucket: string, name: string): boolean {
+  if (!SAFE_COMPONENT.test(name)) return false;
+  const directory = ownerArtifactDirectory(ctx, bucket, false);
+  if (!directory) return true;
+  const path = join(directory, name);
+  try {
+    const entry = lstatSync(path, { throwIfNoEntry: false });
+    if (!entry) return true;
+    if (!entry.isFile() || realpathSync(path) !== path) return false;
+    rmSync(path);
+    return true;
+  } catch { return false; }
+}
+
+/**
+ * A cheap change signal for an owner-scoped bucket's entry set: the
+ * directory's identity and mtime, without listing it. `changedAt` lets a
+ * caller refuse to trust a signal that is too recent to be distinct from a
+ * write landing in the same mtime tick.
+ */
+export function ownerArtifactSignal(ctx: AgentStorageContext, bucket: string): { key: string; changedAt: number } {
+  const directory = ownerArtifactDirectory(ctx, bucket, false);
+  if (!directory) return { key: "absent", changedAt: 0 };
+  try {
+    const stat = statSync(directory);
+    return { key: `${stat.ino}:${stat.mtimeMs}`, changedAt: stat.mtimeMs };
+  } catch { return { key: "absent", changedAt: 0 }; }
+}
+
+/** The owner storage a descriptor's home lives under, when the home has the adapter-owned `ws-agents/<owner>/<agentId>` shape. */
+export function ownerStorageOf(ownership: Pick<AgentOwnership, "home" | "ownerSessionId">): AgentStorageContext | undefined {
+  const owner = dirname(ownership.home), namespace = dirname(owner);
+  if (basename(namespace) !== "ws-agents" || basename(owner) !== ownership.ownerSessionId || !SAFE_COMPONENT.test(ownership.ownerSessionId)) return undefined;
+  return { root: dirname(namespace), ownerSessionId: ownership.ownerSessionId };
+}
+
+/**
+ * Per-child eviction records: `ws-agents/<owner>/.cost-estimate/evicted/<agentId>.json`
+ * holds a removed direct child's subtree cost (own usage plus its stored
+ * descendant usage). A hop's removed-children total is its checkpoint's legacy
+ * `evictedBaseline` plus the sum of these records, computed at read time; no
+ * step folds a record into the baseline. A record supersedes every live count
+ * of its agentId (registry, checkpoint `agents[]`, sidecar revival), and a
+ * recorded agentId is never relaunched. Written only by
+ * `removeOwnedAgentHome` under the removal lock (opt-in) and, for an unowned
+ * capacity-evicted record that has no home, by its owner.
+ */
+export const EVICTION_RECORD_BUCKET = ".cost-estimate/evicted";
+const EVICTION_RECORD_VERSION = 1;
+const EVICTION_RECORD_SUFFIX = ".json";
+function evictionRecordName(agentId: string): string | undefined { return SAFE_COMPONENT.test(agentId) ? `${agentId}${EVICTION_RECORD_SUFFIX}` : undefined; }
+function parseEvictionRecord(raw: string, agentId: string): CumulativeCost | undefined {
+  try {
+    const value = JSON.parse(raw) as { version?: unknown; agentId?: unknown; cost?: unknown } | null;
+    return value && value.version === EVICTION_RECORD_VERSION && value.agentId === agentId ? parseCumulativeCost(value.cost) : undefined;
+  } catch { return undefined; }
+}
+
+/** Every valid eviction record of one owner, read from disk. Malformed, symlinked, and temporary entries are skipped. */
+export function readEvictionRecords(ctx: AgentStorageContext): Map<string, CumulativeCost> {
+  const records = new Map<string, CumulativeCost>();
+  for (const artifact of readOwnerArtifacts(ctx, EVICTION_RECORD_BUCKET)) {
+    if (!artifact.name.endsWith(EVICTION_RECORD_SUFFIX)) continue;
+    const agentId = artifact.name.slice(0, -EVICTION_RECORD_SUFFIX.length);
+    if (!SAFE_COMPONENT.test(agentId)) continue;
+    const cost = parseEvictionRecord(artifact.content, agentId);
+    if (cost) records.set(agentId, cost);
+  }
+  return records;
+}
+
+/** One agentId's valid eviction record, read from disk. */
+export function readEvictionRecord(ctx: AgentStorageContext, agentId: string): CumulativeCost | undefined {
+  const name = evictionRecordName(agentId);
+  const path = name && ownerArtifactFile(ctx, EVICTION_RECORD_BUCKET, name);
+  if (!path) return undefined;
+  try { return parseEvictionRecord(readFileSync(path, "utf8"), agentId); } catch { return undefined; }
+}
+
+/** True when a valid eviction record exists for the descriptor's agentId under its own owner. */
+export function hasEvictionRecord(ownership: Pick<AgentOwnership, "home" | "ownerSessionId" | "agentId">): boolean {
+  const ctx = ownerStorageOf(ownership);
+  return !!ctx && readEvictionRecord(ctx, ownership.agentId) !== undefined;
+}
+
+/**
+ * Atomically writes one agentId's eviction record. A rewrite merges with the
+ * existing record (monotonic floor) instead of letting the last write win, so
+ * two writers recording the same removal leave one value.
+ */
+export function writeEvictionRecord(ctx: AgentStorageContext, agentId: string, cost: CumulativeCost): boolean {
+  const name = evictionRecordName(agentId);
+  if (!name) return false;
+  const value = mergeCumulativeCost(readEvictionRecord(ctx, agentId), cost);
+  return writeOwnerArtifact(ctx, EVICTION_RECORD_BUCKET, name, `${JSON.stringify({ version: EVICTION_RECORD_VERSION, agentId, cost: value }, null, 2)}\n`);
+}
+
+/** The refusal for any rehydrate or relaunch of a recorded agentId. */
+export function removedAgentMessage(agentId: string): string {
+  return `ws-pi-agent: agent "${agentId}" was removed by retention or eviction and cannot be resumed; start a new agent instead`;
+}
+
+/** Deletes one agentId's eviction record; true when none remains. Only a removal that ends with the home at its path calls this. */
+function removeEvictionRecord(ctx: AgentStorageContext, agentId: string): boolean {
+  const name = evictionRecordName(agentId);
+  return !!name && removeOwnerArtifact(ctx, EVICTION_RECORD_BUCKET, name);
 }
 
 export function ownershipPath(home: string): string { return join(home, "ownership.json"); }
@@ -321,11 +449,33 @@ export function inspectOwnedHomeRemoval(ownership: AgentOwnership): OwnedHomeRem
   }
 }
 
-/** Best-effort exact-home removal. A cross-process claim serializes the final eligibility check through detachment. */
+export interface OwnedHomeRemovalOptions {
+  /**
+   * Opt-in eviction record: the removed child's subtree cost, computed from
+   * the metadata that passed the final check. It is written under the removal
+   * lock before the detach; a missing value or a failed write aborts the
+   * removal with the home in place. Retention and capacity eviction opt in;
+   * the stale sidecar-duplicate discard does not, because the live
+   * registration of the same agentId already carries its cost.
+   */
+  evictionCost?: (metadata: OwnershipMetadata) => CumulativeCost | undefined;
+  /** Deterministic test seam between the record write and the detach: a throw is a detach failure, a process exit is a crash. */
+  beforeDetach?: () => void;
+}
+
+/**
+ * Best-effort exact-home removal. A cross-process claim serializes the final
+ * eligibility check, the opt-in eviction record, and detachment. Whenever the
+ * call holds the claim and ends with the home at its original path, it
+ * deletes any eviction record of that agentId, so a record exists only for a
+ * home that was, or is still being, removed; a home that ends off its path
+ * keeps its record.
+ */
 export function removeOwnedAgentHome(
   ownership: AgentOwnership,
   remove: (path: string) => void = path => rmSync(path, { recursive: true, force: false }),
   stillEligible?: (metadata: OwnershipMetadata) => boolean,
+  options: OwnedHomeRemovalOptions = {},
 ): OwnedHomeRemovalResult {
   let lock: OwnershipLock;
   try { lock = acquireOwnershipLock(ownership.home); }
@@ -340,6 +490,12 @@ export function removeOwnedAgentHome(
     if (final.status !== "eligible") return final;
     if (stillEligible && !stillEligible(final.metadata)) return { status: "retained", reason: "owned-home eligibility changed before deletion" };
     checked = final.metadata;
+    if (options.evictionCost) {
+      const storage = ownerStorageOf(ownership);
+      const cost = options.evictionCost(final.metadata);
+      if (!storage || !cost || !writeEvictionRecord(storage, ownership.agentId, cost)) throw new Error("ws-pi-agent: could not write the eviction record; the home was retained");
+    }
+    options.beforeDetach?.();
     // The sibling lock stays at the original locator while the checked home is
     // atomically detached, so a concurrent touch/resume cannot recreate or
     // mutate the path between eligibility and recursive removal.
@@ -362,6 +518,13 @@ export function removeOwnedAgentHome(
     reportOwnershipDiagnostic("home-removal", error);
     return { status: "failed", error: message };
   } finally {
+    // Stale-record repair, still under the claim: the home is back (or never
+    // left), so it is counted live again and must not also count through a
+    // record. A home that ended off its path keeps the record.
+    if (!deleted && existsSync(ownership.home)) {
+      const storage = ownerStorageOf(ownership);
+      if (storage) removeEvictionRecord(storage, ownership.agentId);
+    }
     lock.release();
     if (deleted) try { rmdirSync(ownerRoot); } catch { /* another child or sidecar still owns the lead subtree */ }
   }
@@ -378,8 +541,8 @@ interface StaleAgentPruneOptions {
   now?: () => number;
   observeSession?: (home: string, sessionPath: string) => void;
   removeOwned?: (ownership: AgentOwnership) => OwnedHomeRemovalResult;
-  /** Called under the same final-age decision before removal; false retains the home. */
-  beforeRemove?: (metadata: OwnershipMetadata) => boolean;
+  /** The removed child's eviction-record value, computed under the removal lock (see `OwnedHomeRemovalOptions.evictionCost`). */
+  evictionCost?: OwnedHomeRemovalOptions["evictionCost"];
 }
 
 /**
@@ -418,10 +581,9 @@ export function pruneStaleAgentHomes(root: string, ttlDays: number | false, opti
           if (metadata.sessionPath) observe(home, metadata.sessionPath);
           metadata = readOwnership(home);
           if (!metadata || metadata.lastActivityAt > cutoff) { result.retained += 1; continue; }
-          if (options.beforeRemove && !options.beforeRemove(metadata)) { result.retained += 1; continue; }
           const removal = options.removeOwned
             ? remove(metadata)
-            : removeOwnedAgentHome(metadata, undefined, current => current.lastActivityAt <= cutoff);
+            : removeOwnedAgentHome(metadata, undefined, current => current.lastActivityAt <= cutoff, { evictionCost: options.evictionCost });
           if (removal.status === "deleted") result.deletedHomes.push(home);
           else if (removal.status === "failed") result.failed += 1;
           else result.retained += 1;

@@ -105,7 +105,7 @@ import { PUBLIC_EXPLORE_MODE_TIERS, WS_PI_EXPLORE_MODE_ENV, WS_PI_FORK_AFFINITY_
 import { FORK_READINESS_KIND, captureForkContext, compareForkRegistrations, writePrivateJson, type ForkContext, type ForkReadiness } from "./fork-context.ts";
 import { CHANNEL_BOOTSTRAP_ENVS, ParentChannel, type ChannelBindOptions, type ChannelConnection, type ChannelHello } from "./agent-channel.ts";
 import { parseApprovalConsumedMessage, pendingApprovalFromResume } from "./approval-protocol.ts";
-import { allocateAgentHome, createAgentStorageContext, inspectOwnedHomeRemoval, isOwnedSessionPath, observeSessionWrite, persistOwnershipTelemetry, readOwnership, removeOwnedAgentHome, touchOwnership, updateOwnership, writeOwnership, type AgentOwnership, type AgentStorageContext } from "./agent-storage.ts";
+import { allocateAgentHome, createAgentStorageContext, inspectOwnedHomeRemoval, isOwnedSessionPath, observeSessionWrite, persistOwnershipTelemetry, readOwnership, removedAgentMessage, removeOwnedAgentHome, touchOwnership, updateOwnership, writeOwnership, type AgentOwnership, type AgentStorageContext } from "./agent-storage.ts";
 import { ownerNotifyRef } from "./owner-notify.ts";
 export { ownerNotifyRef } from "./owner-notify.ts";
 import { readSessionEntries, reduceTelemetry, type AgentTelemetry, type CumulativeCost, type TelemetryOrigin } from "./agent-telemetry.ts";
@@ -116,7 +116,7 @@ import { createWebSearch } from "./web-search.ts";
 import { verifyWebReadiness, WEB_HOME_ENV, WEB_READINESS_KIND } from "./web-readiness.ts";
 import { beginSubtreeDispatch, installSubtreePublisher, observeSubtreeChannel, publishSubtree, subtreeWaiting, type SubtreeDescendant, type SubtreeUpstream } from "./subtree-lifecycle.ts";
 import { PUSH_BATCH_CUSTOM_TYPE, PUSH_BATCH_VERSION, type PushBatchItem, type PushBatchItemState } from "./push-protocol.ts";
-import { persistAgentCostCheckpoint, persistEvictedAgentCost, registerAgentCostOwner } from "./agent-footer.ts";
+import { capacityEvictionCost, isRemovedAgent, persistAgentCostCheckpoint, persistEvictedAgentCost, registerAgentCostOwner } from "./agent-footer.ts";
 
 // ---------------------------------------------------------------------------
 // Pure helpers shared by persistent RPC-backed child paths.
@@ -2896,8 +2896,9 @@ export function lastActivityAt(record: RpcAgentRecord): number {
  * eligible only when durable metadata independently confirms it stopped;
  * missing or ambiguous metadata blocks both memory and disk eviction. Legacy
  * records retain registry-only eviction because their paths do not authorize
- * disk deletion. A deletion failure retains the registry record and rejects
- * the spawn so a later retention pass cannot fold the same cost a second time.
+ * disk deletion. An owned removal writes the candidate's eviction record
+ * under its lock; a deletion failure leaves no record, retains the registry
+ * record, and rejects the spawn.
  */
 export function evictForCapacity(
   registry: RpcAgentRegistry,
@@ -2924,7 +2925,9 @@ export function evictForCapacity(
       };
     }
     if (candidate.ownership) {
-      const removal = removeOwned(candidate.ownership);
+      // The removal writes the candidate's eviction record under its lock.
+      const evicted = candidate;
+      const removal = removeOwned(candidate.ownership, undefined, undefined, { evictionCost: () => capacityEvictionCost(registry, evicted) });
       if (removal.status !== "deleted") {
         return {
           ok: false,
@@ -2935,11 +2938,8 @@ export function evictForCapacity(
       }
     }
     if (!persistEvictedAgentCost(registry, candidate)) {
-      // The owned home may already be gone, but the in-memory record and its
-      // cached telemetry remain retryable. Treat it as unowned on the retry.
-      candidate.ownershipObserverStop?.();
-      candidate.ownershipObserverStop = undefined;
-      candidate.ownership = undefined;
+      // Only an unowned record reaches here (an owned one is recorded by its
+      // removal); it stays registered and retryable.
       return { ok: false, error: `ws-pi-agent: ws-agent-spawn rejected: could not preserve evicted cost telemetry for ${candidate.agentId}` };
     }
     candidate.ownershipObserverStop?.();
@@ -3352,6 +3352,8 @@ export async function sendToAgent(
   const resolvedId = resolveAgentId(registry, agentId) ?? agentId;
   const record = registry.get(resolvedId);
   if (!record) {
+    // A live owner drops a removed child from its registry; name the removal rather than an unknown id.
+    if (isRemovedAgent(registry, resolvedId)) throw new Error(removedAgentMessage(resolvedId));
     throw new Error(`ws-pi-agent: unknown agentId "${agentId}"`);
   }
   // A launch in flight has claimed `record.client` but may not have started
@@ -3368,11 +3370,19 @@ export async function sendToAgent(
 
   const writer = ctx.writer ?? "lead";
 
+  // A recorded agentId (retention or eviction removed, or is removing, its
+  // home) never relaunches: its session would start empty. Checked before the
+  // activity claim, and again after it, since the record is written under the
+  // same claim.
+  const removed = () => isRemovedAgent(registry, record.agentId, record.ownership);
+  if (!record.client && removed()) throw new Error(removedAgentMessage(record.agentId));
+
   // Claim activity before mutating a dormant record. If retention already
   // owns the cross-process deletion claim, this resume fails closed instead
   // of launching against a home that can disappear mid-start.
   const ownershipTouched = !record.ownership || touchOwnership(record.ownership.home);
   if (!record.client && !ownershipTouched) throw new Error("ws-pi-agent: owned session home is unavailable during resume");
+  if (!record.client && removed()) throw new Error(removedAgentMessage(record.agentId));
 
   // A real new instruction supersedes an in-memory `/done` operation. Its
   // late settle/park callbacks must not affect this replacement work.

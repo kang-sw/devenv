@@ -217,7 +217,7 @@ import { registerAuditCommands } from "./audit.ts";
 import { registerWsSkillTool } from "./lead-skills.ts";
 import { createToolPreviewTuiRef, loadToolResultTuiModules } from "./tool-result-render.ts";
 import { createAgentStorageContext, pruneStaleAgentHomes, reportOwnershipDiagnostic, type AgentStorageContext } from "./agent-storage.ts";
-import { createAgentFooterSessionLifecycle, descendantUsageValue, persistOwnedTelemetryRollup, type AgentFooterContext, type AgentFooterSessionLifecycle } from "./agent-footer.ts";
+import { createAgentFooterSessionLifecycle, descendantUsageValue, retentionEvictionCost, type AgentFooterContext, type AgentFooterSessionLifecycle } from "./agent-footer.ts";
 import { createDescendantUsageReporter, descendantUsageReporterRef, evaluateDescendantUsage } from "./agent-usage-rollup.ts";
 import { loadHostPiTui } from "./pi-tui.ts";
 import { addClaudeDelegateIfLead, registerClaudeDelegateSession } from "./claude-delegate.ts";
@@ -287,7 +287,7 @@ export function applySessionStartAgentRetention(
   // on the machine, so a fork child must not repeat it from inside a tree.
   if (role !== undefined) return recovered;
   try {
-    const retention = prune(root, resolveChildRetentionTtlDays(readGoalLoopConfig(configPath)), { beforeRemove: persistOwnedTelemetryRollup });
+    const retention = prune(root, resolveChildRetentionTtlDays(readGoalLoopConfig(configPath)), { evictionCost: retentionEvictionCost });
     if (retention.deletedHomes.length === 0) return recovered;
     const deletedHomes = new Set(retention.deletedHomes);
     return recovered.filter(orphan => !orphan.ownership || !deletedHomes.has(orphan.ownership.home));

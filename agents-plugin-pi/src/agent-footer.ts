@@ -2,20 +2,23 @@
  * Theme-aware replacement for Pi's built-in footer with bounded cost
  * estimates. Also owns every hop's cost estimate and owner checkpoint, footer
  * or not: the value a hop reports upward as its descendant usage
- * (`descendantUsageValue`) and the eviction fold.
+ * (`descendantUsageValue`) and the value an eviction record holds.
  */
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { createFooterGitCache, type GitCacheOptions } from "./footer-git-status.ts";
-import { basename, dirname, join, relative, resolve, sep } from "node:path";
-import { readOwnerArtifacts, writeOwnerArtifact, type AgentStorageContext, type OwnershipMetadata } from "./agent-storage.ts";
+import { relative, resolve, sep } from "node:path";
+import { EVICTION_RECORD_BUCKET, hasEvictionRecord, ownerArtifactSignal, ownerStorageOf, readEvictionRecord, readEvictionRecords, readOwnerArtifacts, writeEvictionRecord, writeOwnerArtifact, type AgentOwnership, type AgentStorageContext, type OwnershipMetadata } from "./agent-storage.ts";
 import { isLeadOrFork, type SpawnRole } from "./process-role.ts";
-import { parseCumulativeCost as parseCost, type AgentTelemetry, type CumulativeCost } from "./agent-telemetry.ts";
+import { mergeCumulativeCost, parseCumulativeCost as parseCost, type AgentTelemetry, type CumulativeCost } from "./agent-telemetry.ts";
 import { descendantUsageOf } from "./agent-usage-rollup.ts";
 import type { RpcAgentRecord, RpcAgentRegistry } from "./spawner.ts";
 
 const CHECKPOINT_BUCKET = ".cost-estimate";
 const CHECKPOINT_FILE = "checkpoint.json";
 const CHECKPOINT_VERSION = 1;
+/** An eviction-record directory signal younger than this is not trusted as unchanged: a write may share its mtime tick. */
+const EVICTED_SIGNAL_SETTLE_MS = 2_000;
 const retainedFailedCheckpoints = new Map<string, CostCheckpoint>();
 
 const emptyCost = (): CumulativeCost => ({ knownUsd: 0, knownContributors: 0, unknownContributors: 0, descendants: 0 });
@@ -38,19 +41,7 @@ function subtreeCost(telemetry: AgentTelemetry | undefined, descendants: Cumulat
   return total;
 }
 function recordSubtreeCost(record: RpcAgentRecord): CumulativeCost { return subtreeCost(record.telemetry, descendantUsageOf(record)); }
-
-/** Monotonic merge for one directly tracked agent's cumulative telemetry. */
-function mergeAgentCost(previous: CumulativeCost | undefined, observed: CumulativeCost): CumulativeCost {
-  if (!previous) return cloneCost(observed);
-  const regressed = observed.knownUsd < previous.knownUsd;
-  if (!regressed && observed.knownContributors > 0) return cloneCost(observed);
-  return {
-    knownUsd: previous.knownUsd,
-    knownContributors: previous.knownContributors,
-    unknownContributors: 1,
-    descendants: 1,
-  };
-}
+const mergeAgentCost = mergeCumulativeCost;
 
 export function formatCumulativeCost(cost: CumulativeCost): string {
   if (cost.knownContributors === 0 && cost.unknownContributors > 0) return "—";
@@ -68,6 +59,12 @@ export interface LeadUsageSummary {
 }
 
 interface StoredAgentCost { agentId: string; cost: CumulativeCost }
+/**
+ * Written only by its owner process (`persist`). `evictedBaseline` is legacy
+ * and read-only: loaded, summed, and written back unchanged, never increased.
+ * Removed children count through per-child eviction records instead (see
+ * `EVICTION_RECORD_BUCKET` in agent-storage.ts).
+ */
 interface CostCheckpoint {
   version: 1;
   lead: LeadUsageSummary;
@@ -134,19 +131,18 @@ function writeCheckpoint(storage: AgentStorageContext, checkpoint: CostCheckpoin
   return written;
 }
 function storageFromRecord(record: Pick<RpcAgentRecord, "ownership">): AgentStorageContext | undefined {
-  const home = record.ownership?.home;
-  if (!home) return undefined;
-  const owner = dirname(home), namespace = dirname(owner), root = dirname(namespace);
-  if (basename(namespace) !== "ws-agents" || basename(owner) !== record.ownership!.ownerSessionId) return undefined;
-  return { root, ownerSessionId: record.ownership!.ownerSessionId };
+  return record.ownership ? ownerStorageOf(record.ownership) : undefined;
 }
 
 class CostEstimateState {
   readonly storage: AgentStorageContext;
   readonly registry: RpcAgentRegistry;
   readonly lead: LeadUsageSummary;
+  /** Legacy, read-only: loaded and summed, never increased. */
   readonly evictedBaseline: CumulativeCost;
   readonly agents: Map<string, CumulativeCost>;
+  private evictionRecords = new Map<string, CumulativeCost>();
+  private evictionSignal: string | undefined;
   private directTotal = emptyCost();
   private acceptedObjects = new WeakSet<object>();
 
@@ -160,25 +156,56 @@ class CostEstimateState {
   }
 
   /**
-   * Refreshes each registry-resident direct child's subtree total and drops
-   * identities that left the registry. Dropping never folds: only an actual
-   * removal of a child home folds (`foldAndPersist` for capacity eviction,
-   * `persistOwnedTelemetryRollup` for retention), and until then the child's
-   * ownership telemetry keeps its durable value. That keeps the checkpoint
-   * bounded to live registry identities with at most one fold per removal.
+   * Re-reads this owner's eviction records, then refreshes each
+   * registry-resident direct child's subtree total and drops identities that
+   * left the registry. Dropping never folds: a removed child counts only
+   * through its eviction record, which supersedes every live count of the
+   * same agentId. A recorded registry entry is excluded from the sum; one
+   * whose home is gone (or that has none) is dropped from the registry, while
+   * a home-present one is removal-pending and stays registered.
    */
   reconcile(omit: ReadonlySet<string> = new Set()): void {
+    this.refreshEvictionRecords();
+    const removed: string[] = [];
     for (const [agentId, record] of this.registry) {
+      if (this.evictionRecords.has(agentId)) {
+        if (!record.client && !record.launching && (!record.ownership || !existsSync(record.ownership.home))) removed.push(agentId);
+        continue;
+      }
       if (omit.has(agentId)) continue;
       this.agents.set(agentId, mergeAgentCost(this.agents.get(agentId), recordSubtreeCost(record)));
     }
+    for (const agentId of removed) {
+      const record = this.registry.get(agentId);
+      record?.ownershipObserverStop?.();
+      if (record) record.ownershipObserverStop = undefined;
+      this.registry.delete(agentId);
+    }
     for (const agentId of [...this.agents.keys()]) {
-      if (omit.has(agentId) || !this.registry.has(agentId)) this.agents.delete(agentId);
+      if (omit.has(agentId) || this.evictionRecords.has(agentId) || !this.registry.has(agentId)) this.agents.delete(agentId);
     }
     this.recomputeDirectTotal();
   }
 
-  /** This hop's descendant usage: the evicted baseline plus the direct children's subtree totals. */
+  /**
+   * Records are always read from disk (never the retained failed-checkpoint
+   * cache), but only when the directory's change signal moved, so a
+   * reconcile with nothing new does not list the directory.
+   */
+  private refreshEvictionRecords(): void {
+    const signal = ownerArtifactSignal(this.storage, EVICTION_RECORD_BUCKET);
+    if (this.evictionSignal !== undefined && signal.key === this.evictionSignal) return;
+    this.evictionRecords = readEvictionRecords(this.storage);
+    this.evictionSignal = Date.now() - signal.changedAt > EVICTED_SIGNAL_SETTLE_MS ? signal.key : undefined;
+  }
+
+  /** The value an eviction record of this direct child holds: its tracked floor merged with its current subtree cost. */
+  evictionCost(record: RpcAgentRecord): CumulativeCost {
+    this.reconcile();
+    return mergeAgentCost(this.agents.get(record.agentId), recordSubtreeCost(record));
+  }
+
+  /** This hop's descendant usage: the legacy evicted baseline, its eviction records, and the direct children's subtree totals. */
   descendantUsage(): CumulativeCost { return cloneCost(this.directTotal); }
 
   acceptUsage(source: unknown): void {
@@ -207,20 +234,6 @@ class CostEstimateState {
     this.lead.cost.descendants = this.lead.cost.knownContributors || this.lead.cost.unknownContributors ? 1 : 0;
   }
 
-  foldAndPersist(record: RpcAgentRecord): boolean {
-    this.reconcile();
-    const stable = this.snapshot();
-    // The evicted child's whole subtree: own usage plus its last stored descendant value.
-    const cost = mergeAgentCost(this.agents.get(record.agentId), recordSubtreeCost(record));
-    addCost(this.evictedBaseline, cost);
-    this.agents.delete(record.agentId);
-    this.recomputeDirectTotal();
-    if (this.persist(new Set([record.agentId]))) return true;
-    this.restore(stable);
-    retainFailedCheckpoint(this.storage, stable);
-    return false;
-  }
-
   presentation(): { lead: LeadUsageSummary; leadCost: string; directCost: string } {
     return {
       lead: { ...this.lead, cost: cloneCost(this.lead.cost) },
@@ -247,17 +260,9 @@ class CostEstimateState {
     };
   }
 
-  private restore(checkpoint: CostCheckpoint): void {
-    Object.assign(this.lead, checkpoint.lead, { cost: cloneCost(checkpoint.lead.cost) });
-    if (checkpoint.lead.latestCacheHitRate === undefined) delete this.lead.latestCacheHitRate;
-    Object.assign(this.evictedBaseline, checkpoint.evictedBaseline);
-    this.agents.clear();
-    for (const agent of checkpoint.agents) this.agents.set(agent.agentId, cloneCost(agent.cost));
-    this.recomputeDirectTotal();
-  }
-
   private recomputeDirectTotal(): void {
     const total = cloneCost(this.evictedBaseline);
+    for (const cost of this.evictionRecords.values()) addCost(total, cost);
     for (const cost of this.agents.values()) addCost(total, cost);
     this.directTotal = total;
   }
@@ -265,7 +270,6 @@ class CostEstimateState {
 
 const registryStorage = new WeakMap<RpcAgentRegistry, AgentStorageContext>();
 const registryEstimates = new WeakMap<RpcAgentRegistry, CostEstimateState>();
-const foldedAgentRecords = new WeakSet<object>();
 export function registerAgentCostOwner(registry: RpcAgentRegistry, storage: AgentStorageContext | undefined): void {
   if (storage) registryStorage.set(registry, storage);
 }
@@ -283,9 +287,10 @@ function costEstimateFor(registry: RpcAgentRegistry, storage = registryStorage.g
 /**
  * This hop's descendant usage, the value it reports to its parent: the
  * subtree totals of its registry-resident direct children, dormant ones
- * included, plus its owner checkpoint's evicted baseline. After a restart the
- * sum is rebuilt from the revived records' ownership telemetry and the
- * checkpoint. Reads no session file. Undefined without an owner storage.
+ * included, plus its removed children (the checkpoint's legacy evicted
+ * baseline and its eviction records). After a restart the sum is rebuilt from
+ * the revived records' ownership telemetry, the checkpoint, and the records.
+ * Reads no session file. Undefined without an owner storage.
  */
 export function descendantUsageValue(registry: RpcAgentRegistry): CumulativeCost | undefined {
   const state = costEstimateFor(registry);
@@ -299,30 +304,60 @@ export function persistAgentCostCheckpoint(registry: RpcAgentRegistry): boolean 
   return registryEstimates.get(registry)?.persist() ?? true;
 }
 
-/** Folds one evicted direct record into the scalar baseline before registry/home removal. */
-export function persistEvictedAgentCost(registry: RpcAgentRegistry, record: RpcAgentRecord): boolean {
-  if (foldedAgentRecords.has(record)) return true;
-  const storage = registryStorage.get(registry) ?? storageFromRecord(record);
-  if (!safePart(record.agentId)) return false;
-  if (!storage) { foldedAgentRecords.add(record); return true; }
-  registryStorage.set(registry, storage);
-  const state = costEstimateFor(registry, storage)!;
-  const written = state.foldAndPersist(record);
-  if (written) foldedAgentRecords.add(record);
-  return written;
+/**
+ * Capacity eviction's record value for an owned direct child, passed to
+ * `removeOwnedAgentHome` so the record is written under the removal lock:
+ * the in-memory tracked floor merged with the child's subtree cost.
+ */
+export function capacityEvictionCost(registry: RpcAgentRegistry, record: RpcAgentRecord): CumulativeCost {
+  const state = costEstimateFor(registry, registryStorage.get(registry) ?? storageFromRecord(record));
+  return state ? state.evictionCost(record) : recordSubtreeCost(record);
 }
 
-/** Retention folds this direct owned record's subtree total (own plus stored descendant usage); it never discovers descendants. */
-export function persistOwnedTelemetryRollup(metadata: OwnershipMetadata): boolean {
-  const storage = storageFromRecord({ ownership: metadata } as Pick<RpcAgentRecord, "ownership">);
-  if (!storage || !safePart(metadata.agentId)) return false;
-  const { checkpoint } = loadCheckpoint(storage);
-  const agents = new Map(checkpoint.agents.map(agent => [agent.agentId, cloneCost(agent.cost)]));
-  const observed = mergeAgentCost(agents.get(metadata.agentId), subtreeCost(metadata.telemetry, metadata.telemetry?.descendantUsage));
-  addCost(checkpoint.evictedBaseline, observed);
-  agents.delete(metadata.agentId);
-  checkpoint.agents = [...agents].map(([agentId, cost]) => ({ agentId, cost }));
-  return writeCheckpoint(storage, checkpoint);
+/**
+ * Capacity eviction's cost step, after any owned home removal and before the
+ * registry drop. An owned record's removal already wrote its eviction record
+ * (`capacityEvictionCost`), so nothing is written again; an unowned record
+ * has no home, so its owner writes the record here. The legacy evicted
+ * baseline is never increased. False keeps the record for a retry.
+ */
+export function persistEvictedAgentCost(registry: RpcAgentRegistry, record: RpcAgentRecord): boolean {
+  if (!safePart(record.agentId)) return false;
+  const storage = registryStorage.get(registry) ?? storageFromRecord(record);
+  if (!storage) return true;
+  registryStorage.set(registry, storage);
+  const state = costEstimateFor(registry, storage)!;
+  if (!record.ownership && !writeEvictionRecord(storage, record.agentId, state.evictionCost(record))) {
+    console.error(`ws-pi-agent: eviction record write failed for owner ${storage.ownerSessionId}; the agent was retained`);
+    return false;
+  }
+  state.reconcile();
+  return true;
+}
+
+/**
+ * Retention's record value for a direct owned child (see
+ * `OwnedHomeRemovalOptions.evictionCost`): the owner checkpoint's tracked
+ * floor merged with the child's subtree cost (own plus stored descendant
+ * usage). Read-only: retention never writes the checkpoint.
+ */
+export function retentionEvictionCost(metadata: OwnershipMetadata): CumulativeCost | undefined {
+  const storage = ownerStorageOf(metadata);
+  if (!storage || !safePart(metadata.agentId)) return undefined;
+  const tracked = loadCheckpoint(storage).checkpoint.agents.find(agent => agent.agentId === metadata.agentId);
+  return mergeAgentCost(tracked?.cost, subtreeCost(metadata.telemetry, metadata.telemetry?.descendantUsage));
+}
+
+/**
+ * True when an eviction record marks `agentId` removed, under the
+ * descriptor's own owner or this hop's owner storage. A removed agentId is
+ * never rehydrated or relaunched: its relaunched session would start empty,
+ * so its cost would be lost or its identity conflated.
+ */
+export function isRemovedAgent(registry: RpcAgentRegistry, agentId: string, ownership?: Pick<AgentOwnership, "home" | "ownerSessionId" | "agentId">): boolean {
+  if (ownership && hasEvictionRecord(ownership)) return true;
+  const storage = registryStorage.get(registry);
+  return !!storage && safePart(agentId) && readEvictionRecord(storage, agentId) !== undefined;
 }
 
 export interface FooterPrimitives {
