@@ -1,19 +1,21 @@
-/** Per-launch proof that the exact ws extension registered both Explore web facades. */
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+/**
+ * Per-launch proof that the exact ws extension registered both Explore web
+ * facades. The child proves it in `session_start` and publishes the payload
+ * as the stage-2 readiness message on its control channel; the parent
+ * validates it at the same launch and relaunch points that used to read the
+ * `web-tools-ready.json` file. The channel's per-launch credential and
+ * generation replace the nonce that file carried.
+ */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { NETWORK_TOOLS } from "./delegation-policy.ts";
 
 export const WEB_HOME_ENV = "WS_PI_WEB_HOME";
-export const WEB_NONCE_ENV = "WS_PI_WEB_READY_NONCE";
-const READY_FILE = "web-tools-ready.json";
+/** Readiness kind the Explore child publishes on the control channel. */
+export const WEB_READINESS_KIND = "web";
 
-export function clearWebReadiness(home: string): void {
-  rmSync(join(home, READY_FILE), { force: true });
-}
+export interface WebReadiness { tools: readonly string[] }
 
-export function writeWebReadiness(pi: ExtensionAPI, home: string, nonce: string, extensionPath: string): void {
-  if (!home || !nonce) throw new Error("web-search-tool-unavailable: missing Explore launch identity");
+export function proveWebReadiness(pi: ExtensionAPI, extensionPath: string): WebReadiness {
   const registered = pi.getAllTools();
   const active = pi.getActiveTools();
   for (const name of NETWORK_TOOLS) {
@@ -22,15 +24,14 @@ export function writeWebReadiness(pi: ExtensionAPI, home: string, nonce: string,
       throw new Error("web-search-tool-unavailable: Explore web facade registration mismatch");
     }
   }
-  writeFileSync(join(home, READY_FILE), JSON.stringify({ nonce, tools: NETWORK_TOOLS }), { mode: 0o600 });
+  return { tools: NETWORK_TOOLS };
 }
 
-export function verifyWebReadiness(home: string, nonce: string): void {
-  try {
-    if (!nonce) throw new Error("missing nonce");
-    const ready = JSON.parse(readFileSync(join(home, READY_FILE), "utf8"));
-    if (ready.nonce !== nonce || JSON.stringify(ready.tools) !== JSON.stringify(NETWORK_TOOLS)) throw new Error("mismatch");
-  } catch {
+export function verifyWebReadiness(payload: unknown): void {
+  const ready = payload as (Partial<WebReadiness> & { error?: unknown }) | null | undefined;
+  // A payload carrying `error` is the child's own proof failure, published so
+  // the parent fails at once instead of at its readiness bound.
+  if (!ready || typeof ready !== "object" || ready.error !== undefined || JSON.stringify(ready.tools) !== JSON.stringify(NETWORK_TOOLS)) {
     throw new Error("web-search-tool-unavailable: Explore web facade readiness was not proved");
   }
 }

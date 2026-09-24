@@ -8,7 +8,8 @@ import { RpcClient } from "@earendil-works/pi-coding-agent";
 import { attachFirstTaskForkCacheNotice, formatFirstForkCacheNotice } from "../src/fork-cache-notice.ts";
 import { spawnAgent, sendToAgent } from "../src/spawner.ts";
 import { buildForkSpawnCtx } from "../src/fork.ts";
-import { readForkLaunchContext, writePrivateJson } from "../src/fork-context.ts";
+import { readForkLaunchContext } from "../src/fork-context.ts";
+import { closeFakeChildren, connectFakeChild } from "./fixtures/channel-child.ts";
 
 const message = (usage: unknown = { input: 189, cacheRead: 73344 }, stopReason = "toolUse") => ({ role: "assistant", content: [], usage, stopReason });
 const event = (m = message()) => ({ type: "message_end", message: m });
@@ -110,7 +111,7 @@ test("production initial spawn attaches before prompt; live/dormant sends never 
   Object.assign(proto, {
     async start() {
       this.listeners = [];
-      const envelope = readForkLaunchContext(this.options.env)!;
+      assert.ok(readForkLaunchContext(this.options.env)?.context, "every fork launch carries the captured context");
       const home = this.options.args[this.options.args.indexOf("--session-dir") + 1];
       this.sessionFile = join(home, "notice-child.jsonl");
       const metadata = readOwnership(home)!;
@@ -120,7 +121,7 @@ test("production initial spawn attaches before prompt; live/dormant sends never 
       }
       assert.equal(diagnostics.mock.callCount(), 0, "pre-start observer must not report an expected missing file");
       writeFileSync(this.sessionFile, "offline fork session\n");
-      writePrivateJson(envelope.readinessPath, { nonce: envelope.nonce, sessionId: "child-id", sessionPath: this.sessionFile, ownSessionKey: "notice-child-key", activeTools: [], registeredTools: [] });
+      await connectFakeChild(this.options.env, this.options.args, { fork: { sessionId: "child-id", sessionPath: this.sessionFile, ownSessionKey: "notice-child-key" } });
     },
     async stop() {}, async setThinkingLevel() {},
     onEvent(fn: (e: unknown) => void) { this.listeners.push(fn); return () => {}; },
@@ -140,6 +141,7 @@ test("production initial spawn attaches before prompt; live/dormant sends never 
     assert.equal(diagnostics.mock.callCount(), 0);
   } finally {
     for (const record of registry.values()) record.ownershipObserverStop?.();
+    closeFakeChildren();
     Object.assign(proto, saved);
     rmSync(root, { recursive: true, force: true });
   }

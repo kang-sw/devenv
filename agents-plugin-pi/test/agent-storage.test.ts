@@ -4,8 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, test } from "node:test";
 import { allocateAgentHome, createAgentStorageContext, inspectOwnedHomeRemoval, isOwnedSessionPath, observeSessionWrite, ownershipPath, pruneStaleAgentHomes, readOwnerArtifacts, readOwnership, removeOwnedAgentHome, reportOwnershipDiagnostic, touchOwnership, writeOwnerArtifact, writeOwnership, updateOwnership } from "../src/agent-storage.ts";
-import { writePrivateJson } from "../src/fork-context.ts";
-import { ownerNotifyRef, prepareForkLaunch, validateForkReadiness } from "../src/spawner.ts";
+import { ownerNotifyRef, validateForkReadiness } from "../src/spawner.ts";
 
 describe("agent storage", () => {
   test("ownership diagnostics are bounded per reporter session and never expose raw errors", () => {
@@ -152,18 +151,16 @@ describe("agent storage", () => {
 
   test("fork readiness rejects a terminal traversal before changing memory or disk", () => {
     const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
-    const launch = prepareForkLaunch(undefined);
     try {
       const ownership = allocateAgentHome(createAgentStorageContext("lead-1", root), "agent-7", "fork");
       const record = { ownership, sessionPath: ownership.sessionPath } as never;
       const before = readOwnership(ownership.home);
       const candidate = `${ownership.home}/..`;
-      writePrivateJson(launch.readinessPath, { nonce: launch.nonce, ownSessionKey: "child-key", sessionId: "child-id", sessionPath: candidate, activeTools: [], registeredTools: [] });
-      assert.throws(() => validateForkReadiness(launch, record, { sessionId: "child-id", sessionFile: candidate }), /escaped owned home/);
+      const ready = { ownSessionKey: "child-key", sessionId: "child-id", sessionPath: candidate, activeTools: [], registeredTools: [] };
+      assert.throws(() => validateForkReadiness(ready, record, { sessionId: "child-id", sessionFile: candidate }), /escaped owned home/);
       assert.equal(record.sessionPath, ownership.sessionPath);
       assert.deepEqual(readOwnership(ownership.home), before);
     } finally {
-      rmSync(dirname(launch.contextPath), { recursive: true, force: true });
       rmSync(root, { recursive: true, force: true });
     }
   });

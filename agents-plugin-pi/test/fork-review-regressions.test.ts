@@ -2,12 +2,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { dirname } from "node:path";
-import { applyForkAffinity, captureForkContext, effectiveForkDescriptor, frameForkInput, restoreForkKeys, writePrivateJson } from "../src/fork-context.ts";
+import { applyForkAffinity, captureForkContext, effectiveForkDescriptor, frameForkInput, restoreForkKeys } from "../src/fork-context.ts";
 import { buildRpcClientOptions as buildRpcClientOptionsBase, prepareForkLaunch, validateForkReadiness } from "../src/spawner.ts";
 import * as role from "../src/process-role.ts";
 import * as context from "../src/fork-context.ts";
 import { registerLeadBootstrap, type LeadPromptRef } from "../src/lead-bootstrap.ts";
 import { normalizeSessionKey } from "../src/bridge.ts";
+import { CHANNEL_BOOTSTRAP_ENVS } from "../src/agent-channel.ts";
 
 const TEST_EXTENSION_ENTRY = "/tmp/loaded ws adapter/index copy.ts";
 function buildRpcClientOptions(...args: any[]) {
@@ -27,20 +28,18 @@ test("C1: frame preserves every byte of task/discussion input and identifies own
   assert.match(unavailable, /parent extension was not loaded/);
 });
 
-test("C2: every launch has fresh readiness; stale nonce/key/id/path/schema/order is rejected", () => {
-  for (const patch of [ { nonce: "stale" }, { ownSessionKey: "" }, { ownSessionKey: "parent-key" }, { sessionId: "parent-id" }, { sessionId: "other-child" }, { sessionPath: "/wrong" }, { registeredTools: [] }, { activeTools: ["unknown"] }, { registeredTools: [{ ...fork.registeredTools[0], description: "changed" }] }, { error: "bootstrap failed" } ]) {
-    const launch = prepareForkLaunch(fork);
-    const record = { forkContext: fork, sessionPath: "/child" } as never;
-    const ready = { nonce: launch.nonce, ownSessionKey: "child-key", sessionId: "child-id", sessionPath: "/child", registeredTools: fork.registeredTools, activeTools: fork.activeTools };
-    try {
-      writePrivateJson(launch.readinessPath, { ...ready, ...patch });
-      assert.throws(() => validateForkReadiness(launch, record, { sessionFile: "/child", sessionId: "child-id" }), /readiness rejected/);
-    } finally { rmSync(dirname(launch.contextPath), { recursive: true, force: true }); }
+// Launch freshness itself (a stale launch's readiness never reaching the
+// current one) is the control channel's per-launch credential + generation,
+// covered in test/agent-channel.test.ts; this pins the payload validation.
+test("C2: every launch has a fresh envelope; stale key/id/path/schema/order readiness is rejected", () => {
+  for (const patch of [ { ownSessionKey: "" }, { ownSessionKey: "parent-key" }, { sessionId: "parent-id" }, { sessionId: "other-child" }, { sessionPath: "/wrong" }, { registeredTools: [] }, { activeTools: ["unknown"] }, { registeredTools: [{ ...fork.registeredTools[0], description: "changed" }] }, { error: "bootstrap failed" } ]) {
+    const ready = { ownSessionKey: "child-key", sessionId: "child-id", sessionPath: "/child", registeredTools: fork.registeredTools, activeTools: fork.activeTools };
+    assert.doesNotThrow(() => validateForkReadiness(ready, { forkContext: fork, sessionPath: "/child" } as never, { sessionFile: "/child", sessionId: "child-id" }), "the unpatched payload is accepted");
+    assert.throws(() => validateForkReadiness({ ...ready, ...patch }, { forkContext: fork, sessionPath: "/child" } as never, { sessionFile: "/child", sessionId: "child-id" }), /readiness rejected/);
   }
   const first = prepareForkLaunch(undefined), second = prepareForkLaunch(undefined);
   try {
-    assert.notEqual(first.nonce, second.nonce);
-    assert.notEqual(first.contextPath, second.contextPath);
+    assert.notEqual(dirname(first.contextPath), dirname(second.contextPath), "each launch mkdtemps its own envelope directory");
     assert.equal(context.readForkLaunchContext({ [role.WS_PI_FORK_CONTEXT_ENV]: first.contextPath })?.context, undefined, "explicit legacy exchange does not invent a historical prompt");
   } finally { for (const launch of [first, second]) rmSync(dirname(launch.contextPath), { recursive: true, force: true }); }
 });
@@ -60,11 +59,7 @@ test("C2a: readiness diagnostics identify missing, extra, reordered, and changed
     { registeredTools: [{ ...expected.registeredTools[0], parameters: { type: "object", properties: { changed: {} } } }, expected.registeredTools[1]], activeTools: expected.activeTools, diagnostic: /changed callable tools: first/ },
   ];
   for (const patch of cases) {
-    const launch = prepareForkLaunch(expected);
-    try {
-      writePrivateJson(launch.readinessPath, { nonce: launch.nonce, ownSessionKey: "child-key", sessionId: "child-id", sessionPath: "/child", ...patch });
-      assert.throws(() => validateForkReadiness(launch, { forkContext: expected } as never, { sessionFile: "/child", sessionId: "child-id" }), patch.diagnostic);
-    } finally { rmSync(dirname(launch.contextPath), { recursive: true, force: true }); }
+    assert.throws(() => validateForkReadiness({ ownSessionKey: "child-key", sessionId: "child-id", sessionPath: "/child", ...patch }, { forkContext: expected } as never, { sessionFile: "/child", sessionId: "child-id" }), patch.diagnostic);
   }
 });
 
@@ -128,7 +123,7 @@ test("C5: affinity compares complete model, auth endpoint/headers, and effective
 test("C6/I1/I2: source adapter argv and canonical markers isolate every descendant launch", () => {
   assert.equal(context.FORK_CONTEXT_ENV, role.WS_PI_FORK_CONTEXT_ENV);
   assert.equal(context.FORK_AFFINITY_ENV, role.WS_PI_FORK_AFFINITY_ENV);
-  const markers = [role.WS_PI_FORK_CONTEXT_ENV, role.WS_PI_FORK_READY_PATH_ENV, role.WS_PI_FORK_READY_NONCE_ENV, role.WS_PI_FORK_AFFINITY_ENV, role.WS_PI_PARENT_SESSION_KEY_ENV];
+  const markers = [role.WS_PI_FORK_CONTEXT_ENV, role.WS_PI_FORK_AFFINITY_ENV, role.WS_PI_PARENT_SESSION_KEY_ENV, ...CHANNEL_BOOTSTRAP_ENVS];
   const poison = Object.fromEntries(markers.map(key => [key, "poison"]));
   for (const spawnRole of ["worker", "execute-worker", "explore"] as const) for (const mode of Object.keys(role.EXPLORE_MODE_TIERS) as role.ExploreMode[]) {
     const options = buildRpcClientOptions("/repo", undefined, "/child", "/worker-prompt", "read", undefined, undefined, spawnRole, mode);

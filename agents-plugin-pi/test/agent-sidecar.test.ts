@@ -45,6 +45,7 @@ import { applyRpcEvent, evictForCapacity, listAgents, REPORT_TO_LEAD_TOOL_NAME, 
 import { RpcClient, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { allocateAgentHome, createAgentStorageContext, readOwnership, updateOwnership } from "../src/agent-storage.ts";
 import { DELEGATION_ENV } from "../src/delegation-policy.ts";
+import { closeFakeChildren, connectFakeChild } from "./fixtures/channel-child.ts";
 
 function record(overrides: Partial<RpcAgentRecord> = {}): RpcAgentRecord {
   return {
@@ -147,7 +148,7 @@ describe("captureOrphans", () => {
     const originalRpc = Object.fromEntries(["start", "stop", "abort", "onEvent", "prompt", "getState", "getSessionStats", "setThinkingLevel"].map(name => [name, RpcClient.prototype[name as keyof RpcClient]]));
     let resumedPolicy: unknown;
     Object.assign(RpcClient.prototype, {
-      async start(this: { options?: { env?: Record<string, string> } }) { resumedPolicy = JSON.parse(this.options!.env![DELEGATION_ENV]!); },
+      async start(this: { options?: { env?: Record<string, string>; args?: string[] } }) { resumedPolicy = JSON.parse(this.options!.env![DELEGATION_ENV]!); await connectFakeChild(this.options?.env, this.options?.args); },
       stop: async () => {}, abort: async () => {}, onEvent: () => () => {}, prompt: async () => {}, setThinkingLevel: async () => {},
       getState: async () => ({}), getSessionStats: async () => { throw new Error("no stats"); },
     });
@@ -178,6 +179,7 @@ describe("captureOrphans", () => {
       );
       assert.equal(widened.client, undefined, "a widened recovered binding is refused before a resume client is allocated");
     } finally {
+      closeFakeChildren();
       Object.assign(RpcClient.prototype, originalRpc);
       if (previousPolicy === undefined) delete process.env[DELEGATION_ENV]; else process.env[DELEGATION_ENV] = previousPolicy;
       rmSync(root, { recursive: true, force: true });

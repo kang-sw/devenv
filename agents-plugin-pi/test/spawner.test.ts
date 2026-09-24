@@ -141,14 +141,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DELEGATION_ENV, SUBTREE_ENV } from "../src/delegation-policy.ts";
-import { WEB_HOME_ENV, WEB_NONCE_ENV } from "../src/web-readiness.ts";
+import { closeFakeChildren, connectFakeChild } from "./fixtures/channel-child.ts";
 import { allocateAgentHome, createAgentStorageContext, updateOwnership } from "../src/agent-storage.ts";
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
 import { installSubtreePublisher, publishSubtree } from "../src/subtree-lifecycle.ts";
 const REAL_EXTENSION_ENTRY = fileURLToPath(new URL("../src/index.ts", import.meta.url));
-async function startRpcWithWebProof(this: { options?: { env?: Record<string, string> } }) {
-  const env = this.options?.env ?? {};
-  if (env[WEB_HOME_ENV]) writeFileSync(join(env[WEB_HOME_ENV], "web-tools-ready.json"), JSON.stringify({ nonce: env[WEB_NONCE_ENV], tools: ["web_search", "ws_web_fetch"] }));
+// Stands in for the child half of the control channel: the hello plus the
+// role's stage-2 readiness (web for Explore, fork for a fork launch).
+async function startRpcWithFakeChild(this: { options?: { env?: Record<string, string>; args?: string[] } }) {
+  await connectFakeChild(this.options?.env, this.options?.args);
 }
 
 // Deliberately contains spaces: argv is passed as an array, so this exact
@@ -156,7 +157,7 @@ async function startRpcWithWebProof(this: { options?: { env?: Record<string, str
 const TEST_EXTENSION_ENTRY = "/tmp/loaded ws adapter/index copy.ts";
 function buildRpcClientOptions(...args: any[]) {
   return buildRpcClientOptionsBase(
-    args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], TEST_EXTENSION_ENTRY,
+    args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], TEST_EXTENSION_ENTRY, ...args.slice(10),
   );
 }
 function registerAgentTools(pi: any, bridge: any, sessionCtx: any, ...rest: any[]) {
@@ -567,12 +568,12 @@ describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses ins
   ) {
     const original = Object.fromEntries(["start", "stop", "abort", "onEvent", "prompt", "getState", "setThinkingLevel"].map(name => [name, RpcClient.prototype[name as keyof RpcClient]]));
     Object.assign(RpcClient.prototype, {
-      start: async function(this: { options?: { cwd?: string } }) { onStart?.(this.options?.cwd); }, stop: async () => {}, abort: async () => {},
+      start: async function(this: { options?: { cwd?: string; env?: Record<string, string>; args?: string[] } }) { onStart?.(this.options?.cwd); await connectFakeChild(this.options?.env, this.options?.args); }, stop: async () => {}, abort: async () => {},
       onEvent: () => () => {}, prompt: async (message: string) => { onPrompt?.(message); },
       setThinkingLevel: async (level: string) => { onThinking?.(level); },
       getState: async () => ({ model: { provider: "pi", id: "small" }, thinkingLevel: "medium", sessionFile: "/tmp/ws-pi-agent-test/session.jsonl" }),
     });
-    return { restore: () => Object.assign(RpcClient.prototype, original) };
+    return { restore: () => { closeFakeChildren(); Object.assign(RpcClient.prototype, original); } };
   }
 
   function jsonResult(payload: unknown): McpToolCallResult {
@@ -991,11 +992,11 @@ describe("spawnAgent: onModelResolved (260906 Phase 2 dispatch-row rendering)", 
   function installRpcHarness() {
     const original = Object.fromEntries(["start", "stop", "abort", "onEvent", "prompt", "getState", "setThinkingLevel"].map(name => [name, RpcClient.prototype[name as keyof RpcClient]]));
     Object.assign(RpcClient.prototype, {
-      start: async () => {}, stop: async () => {}, abort: async () => {},
+      start: startRpcWithFakeChild, stop: async () => {}, abort: async () => {},
       onEvent: () => () => {}, prompt: async () => {}, setThinkingLevel: async () => {},
       getState: async () => ({ model: { provider: "pi", id: "small" }, thinkingLevel: "medium", sessionFile: "/tmp/ws-pi-agent-test/session.jsonl" }),
     });
-    return { restore: () => Object.assign(RpcClient.prototype, original) };
+    return { restore: () => { closeFakeChildren(); Object.assign(RpcClient.prototype, original); } };
   }
 
   function jsonResult(payload: unknown): McpToolCallResult {
@@ -1158,11 +1159,11 @@ describe("explore tool: onModelResolved / resolved-line publishing (260906 Phase
   function installRpcHarness() {
     const original = Object.fromEntries(["start", "stop", "abort", "onEvent", "prompt", "getState", "setThinkingLevel"].map(name => [name, RpcClient.prototype[name as keyof RpcClient]]));
     Object.assign(RpcClient.prototype, {
-      start: startRpcWithWebProof, stop: async () => {}, abort: async () => {},
+      start: startRpcWithFakeChild, stop: async () => {}, abort: async () => {},
       onEvent: () => () => {}, prompt: async () => {}, setThinkingLevel: async () => {},
       getState: async () => ({ model: { provider: "pi", id: "small" }, thinkingLevel: "medium", sessionFile: "/tmp/ws-pi-agent-test/session.jsonl" }),
     });
-    return { restore: () => Object.assign(RpcClient.prototype, original) };
+    return { restore: () => { closeFakeChildren(); Object.assign(RpcClient.prototype, original); } };
   }
 
   test("lead code-search Explore publishes the resolved line through spawnAgent and repeats it in the final details", async () => {
@@ -2305,14 +2306,14 @@ describe("buildRpcClientOptions (WS_PI_SPAWN_ROLE_ENV / WS_PI_APPROVAL_DIR_ENV p
       [WS_PI_APPROVAL_DIR_ENV]: "/tmp/ws-pi-agent-x/approvals",
       WS_PI_EXPLORE_MODE: "",
       WS_PI_FORK_CONTEXT: "",
-      WS_PI_FORK_READY_PATH: "",
-      WS_PI_FORK_READY_NONCE: "",
       WS_PI_FORK_AFFINITY: "",
       [WS_PI_PARENT_SESSION_KEY_ENV]: "",
       WS_PI_DELEGATION_POLICY: "",
       WS_PI_SUBTREE_CHANNEL: "",
       WS_PI_WEB_HOME: "",
-      WS_PI_WEB_READY_NONCE: "",
+      WS_PI_CHANNEL_ENDPOINT: "",
+      WS_PI_CHANNEL_CREDENTIAL: "",
+      WS_PI_CHANNEL_GENERATION: "",
       WS_MCP_BOOTSTRAP_BINARY: "",
       WS_MCP_BOOTSTRAP_URL: "",
     });
@@ -2320,7 +2321,7 @@ describe("buildRpcClientOptions (WS_PI_SPAWN_ROLE_ENV / WS_PI_APPROVAL_DIR_ENV p
 
   test("env overrides an inherited exploration mode while preserving role and approvals markers", () => {
     const options = buildRpcClientOptions("/repo", undefined, "/tmp/ws-pi-agent-y/session.jsonl", "/tmp/system.md", "read");
-    assert.deepEqual(new Set(Object.keys(options.env ?? {})), new Set([WS_PI_SPAWN_ROLE_ENV, WS_PI_APPROVAL_DIR_ENV, "WS_PI_EXPLORE_MODE", "WS_PI_FORK_CONTEXT", "WS_PI_FORK_READY_PATH", "WS_PI_FORK_READY_NONCE", "WS_PI_FORK_AFFINITY", WS_PI_PARENT_SESSION_KEY_ENV, "WS_PI_DELEGATION_POLICY", "WS_PI_SUBTREE_CHANNEL", "WS_PI_WEB_HOME", "WS_PI_WEB_READY_NONCE", "WS_MCP_BOOTSTRAP_BINARY", "WS_MCP_BOOTSTRAP_URL"]));
+    assert.deepEqual(new Set(Object.keys(options.env ?? {})), new Set([WS_PI_SPAWN_ROLE_ENV, WS_PI_APPROVAL_DIR_ENV, "WS_PI_EXPLORE_MODE", "WS_PI_FORK_CONTEXT", "WS_PI_FORK_AFFINITY", WS_PI_PARENT_SESSION_KEY_ENV, "WS_PI_DELEGATION_POLICY", "WS_PI_SUBTREE_CHANNEL", "WS_PI_WEB_HOME", "WS_PI_CHANNEL_ENDPOINT", "WS_PI_CHANNEL_CREDENTIAL", "WS_PI_CHANNEL_GENERATION", "WS_MCP_BOOTSTRAP_BINARY", "WS_MCP_BOOTSTRAP_URL"]));
     assert.equal(options.env?.WS_PI_EXPLORE_MODE, "");
   });
 

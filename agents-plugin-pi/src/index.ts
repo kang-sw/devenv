@@ -194,7 +194,8 @@ import { buildOrphanPush, captureOrphans, noSessionSidecarPath, readAndClearSide
 import { registerGoalLoop, readGoalLoopConfig, resolveAgentWaitAnimation, resolveChildRetentionTtlDays, resolveSettleDelayMs } from "./goal-loop.ts";
 import { registerSkillResources } from "./skills-dir.ts";
 import { computeSessionBootstrap, registerLeadBootstrap, type LeadPromptRef, type SkillsBlockCache, type WsBlockBase } from "./lead-bootstrap.ts";
-import { applyForkAffinity, captureRegisteredTools, classifyForkRegistrations, compareForkRegistrations, effectiveForkDescriptor, formatForkRegistrationMismatch, frameForkInput, readForkLaunchContext, removeForkTransport, restoreForkContext, restoreForkKeys, writePrivateJson, type ForkContext } from "./fork-context.ts";
+import { applyForkAffinity, captureRegisteredTools, classifyForkRegistrations, compareForkRegistrations, effectiveForkDescriptor, formatForkRegistrationMismatch, frameForkInput, readForkLaunchContext, removeForkTransport, restoreForkContext, restoreForkKeys, FORK_READINESS_KIND, type ForkContext } from "./fork-context.ts";
+import { ChildChannel, readAndDeleteChannelBootstrap } from "./agent-channel.ts";
 import { isLeadOrFork, readSpawnRole, WS_PI_FORK_CONTEXT_ENV, WS_PI_PARENT_SESSION_KEY_ENV, type SpawnRole } from "./process-role.ts";
 import { createApprovalRelay, registerExecuteGateway } from "./execute-gateway.ts";
 import { buildMailboxPushMessage, createBridgeDrain, createSubprocessWait, resolveMailboxSelfSlug, shouldArmMailboxWaiter, startMailboxWaiter, type MailboxToolCall, type MailboxWaiterHandle } from "./mailbox-waiter.ts";
@@ -385,7 +386,17 @@ function installMissingTaskForkTools(
   return { unavailableTools: comparison.missing.map((tool) => tool.name) };
 }
 
-export default function wsPiBridgeExtension(pi: ExtensionAPI) {
+export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
+  // First action of the factory, before anything this process could spawn
+  // (the ws-mcp stdio client in `startBridge`, bash tools): the channel
+  // bootstrap is read from the env and deleted so no descendant inherits the
+  // parent's endpoint or credential. A child launched by the adapter then
+  // connects and says hello here; a hello failure rejects the factory, which
+  // Pi reports as a failed extension load and exits — the parent sees a
+  // failed launch. No bootstrap (an interactive lead, or a Pi started from a
+  // worker's shell) means no channel: readiness publishing is a no-op.
+  const channelBootstrap = readAndDeleteChannelBootstrap(process.env);
+  const channel = channelBootstrap ? await ChildChannel.connect(channelBootstrap) : undefined;
   const delegation = readDelegationPolicy();
   // Same-name wrappers preserve Pi's native schema, diff renderer, queue, and
   // result shape while the explicit policy — not tool visibility — authorizes
@@ -404,7 +415,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
   // Filled before the bridge starts so native tool renderers are available
   // independently of async MCP startup; absent helpers retain Pi fallback.
   const toolPreviewTuiRef = createToolPreviewTuiRef();
-  registerWebTools(pi, extensionEntryPath, toolPreviewTuiRef);
+  registerWebTools(pi, extensionEntryPath, toolPreviewTuiRef, process.env, channel);
   let handle: BridgeHandle | undefined;
   let agentTools: AgentToolsHandle | undefined;
   // The manual-snapshot + guide-text half of the ws block, filled once per
@@ -899,7 +910,6 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
         ? "fork bootstrap did not issue a distinct current own key" : undefined;
       const readinessError = forkRegistrationError ?? registrationError ?? keyError;
       const readiness = {
-        nonce: deliveredFork?.nonce,
         sessionId: ctx.sessionManager.getSessionId(),
         sessionPath: ctx.sessionManager.getSessionFile(),
         ownSessionKey: handle.defaultSessionKeyRef.current,
@@ -910,7 +920,9 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
       // Child entries, rather than parent transcript copies or launch files, own restart lifetime.
       if (durableForkContextRef.current) pi.appendEntry("ws-pi-fork-context", { sessionId: ctx.sessionManager.getSessionId(), context: durableForkContextRef.current });
       pi.appendEntry("ws-pi-fork-keys", { sessionId: ctx.sessionManager.getSessionId(), current: handle.defaultSessionKeyRef.current, previous: previousOwnKeys });
-      if (deliveredFork) writePrivateJson(deliveredFork.readinessPath, readiness);
+      // Stage-2 readiness: the parent validates this payload over the
+      // authenticated channel (`validateForkReadiness`) before its first prompt.
+      channel?.publishReadiness(FORK_READINESS_KIND, readiness);
       removeForkTransport(process.env[WS_PI_FORK_CONTEXT_ENV]);
       forkReady = !readinessError;
     }
@@ -920,7 +932,12 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     await applySessionStartAgentFooter(agentFooterLifecycle, bootstrapRole, ctx, agentTools.rpcRegistry, dispatchStorage);
   });
 
-  pi.on("session_shutdown", async (_event, _ctx) => {
+  pi.on("session_shutdown", async (event, _ctx) => {
+    // Session replacement (`reload`/`new`/`resume`/`fork`) re-runs this
+    // factory in the same process, where the deleted bootstrap can never be
+    // read again; the adapter does not drive children through it, but the
+    // channel must outlive anything short of the process's own quit.
+    if ((event?.reason ?? "quit") === "quit") channel?.close();
     await claudeDelegateSession.shutdown();
     // 260905: snapshot the children BEFORE stopAll() tears down their live
     // clients, so the next start of this session can announce them rather

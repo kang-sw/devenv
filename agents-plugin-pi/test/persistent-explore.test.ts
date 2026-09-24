@@ -9,9 +9,9 @@ import { CHILD_MANAGEMENT_TOOLS, DELEGATION_ENV, terminalTools } from "../src/de
 import { createAgentStorageContext } from "../src/agent-storage.ts";
 import { captureOrphans, parseOrphans, reviveOrphans, serializeOrphans } from "../src/agent-sidecar.ts";
 import { EXPLORE_MODE_TIERS, WS_PI_EXPLORE_MODE_ENV, WS_PI_SPAWN_ROLE_ENV, type ExploreMode, type PublicExploreMode } from "../src/process-role.ts";
-import { WEB_HOME_ENV, WEB_NONCE_ENV } from "../src/web-readiness.ts";
 import { registerAgentTools, resolveTools, sendToAgent, spawnAdmission, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
 import type { McpToolCallResult } from "../src/mcp-stdio-client.ts";
+import { closeFakeChildren, connectFakeChild } from "./fixtures/channel-child.ts";
 
 const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const EXTENSION_ENTRY = join(PACKAGE_ROOT, "src", "index.ts");
@@ -72,8 +72,7 @@ function installRpcHarness() {
       const args = this.options?.args ?? [];
       const sessionIndex = args.indexOf("--session");
       if (sessionIndex >= 0) writeFileSync(args[sessionIndex + 1]!, "mock session\n");
-      const env = this.options?.env ?? {};
-      if (env[WEB_HOME_ENV]) writeFileSync(join(env[WEB_HOME_ENV], "web-tools-ready.json"), JSON.stringify({ nonce: env[WEB_NONCE_ENV], tools: ["web_search", "ws_web_fetch"] }));
+      await connectFakeChild(this.options?.env, args);
     },
     stop: async () => {},
     abort: async () => {},
@@ -85,7 +84,7 @@ function installRpcHarness() {
       return { model: { provider, id: id.join("/") }, thinkingLevel: effort.get(this as object) ?? "medium" };
     },
   });
-  return { clients, prompts, restore: () => Object.assign(RpcClient.prototype, original) };
+  return { clients, prompts, restore: () => { closeFakeChildren(); Object.assign(RpcClient.prototype, original); } };
 }
 
 function tierResult(tier: string, effort = "high"): McpToolCallResult {
