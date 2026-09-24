@@ -132,14 +132,15 @@ for (const mode of ["never", "late-resolve", "late-reject", "failure"] as const)
 
 for (const mode of ["late-result", "late-rejection", "abort-result"] as const) {
   test(`iterator ${mode} cannot mutate settled output or leak rejection`, { timeout: 1000 }, async () => {
-    const gate = deferred<any>(); let spawn: any; let spawns = 0; let closeCount = 0;
+    const gate = deferred<any>(); const waiting = deferred<void>(); let spawn: any; let spawns = 0; let closeCount = 0;
     const cancel = new AbortController();
-    const controller = createClaudeDelegateController(() => "/tmp", { executable: process.execPath, timeoutMs: 10, cleanupMs: 10,
+    // abort-result must settle by cancellation alone; a 10 ms deadline would race the abort under load and win as "timeout".
+    const controller = createClaudeDelegateController(() => "/tmp", { executable: process.execPath, timeoutMs: mode === "abort-result" ? 60_000 : 10, cleanupMs: 10,
       spawnProcess: () => { spawns++; return new Child() as any; },
-      loadSdk: async () => ({ query: ({ options }: any) => { spawn = options.spawnClaudeCodeProcess; return { close() { closeCount++; }, async *[Symbol.asyncIterator]() { yield await gate.promise; } }; } }) as any,
+      loadSdk: async () => ({ query: ({ options }: any) => { spawn = options.spawnClaudeCodeProcess; return { close() { closeCount++; }, async *[Symbol.asyncIterator]() { waiting.resolve(); yield await gate.promise; } }; } }) as any,
     });
-    const pending = controller.execute([item], cancel.signal); await tick();
-    if (mode === "abort-result") { gate.resolve(terminal("too late")); cancel.abort(); }
+    const pending = controller.execute([item], cancel.signal);
+    if (mode === "abort-result") { await waiting.promise; gate.resolve(terminal("too late")); cancel.abort(); } else await tick();
     const result = await pending; const snapshot = JSON.stringify(result);
     assert.equal(result[0].error?.code, mode === "abort-result" ? "cancelled" : "timeout");
     if (mode === "late-result") gate.resolve(terminal("too late"));
