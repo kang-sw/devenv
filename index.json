@@ -482,7 +482,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-09-24T15:05:49Z"
+        "touched_at": "2026-09-24T15:06:24Z",
+        "impl": {
+          "branch": "impl/develop/civil-alias-lived"
+        }
       }
     },
     "260924-chore-review-sweep-test-and-naming-minors": {
