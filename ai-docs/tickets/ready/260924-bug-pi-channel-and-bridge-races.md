@@ -143,3 +143,69 @@ Verification:
 - **C3, fork lifecycle:** the three `production fork lifecycle` tests pass with the harness relaying `agent_start`, and a child's reported `turnsStarted` counts only that child's turns.
 - **Full suite:** `npm test` in `agents-plugin-pi/` passes.
 - **Load:** each touched test file runs at least 50 times with CPU-bound processes at twice the core count, with zero failures. The Result records the counts.
+
+### Result (928a48fa) - 2026-09-24
+
+All three races are fixed. Verification passes, including the reduced load runs noted below.
+
+Commits:
+
+- `98c51a40` (A): the socket sweep unlinks a file only when its owner pid is dead and its probe is refused. Legacy names are never unlinked. This commit lacks the `Co-Authored-By` trailer. The history was deliberately not rewritten to add it.
+- `9b869b5b` (B): the exit or error handler owns the rejection. A write error only arms a 1500 ms fallback (`WRITE_ERROR_FALLBACK_MS`, unref'd).
+- `ef0961fc` (C, C1, C2, C3): a direct settle is held when the snapshot owes a turn or reports more started turns than the parent observed. The child-side `owed` is derived exactly. Attach-order invariants are recorded as comments. The fork lifecycle harness now relays `agent_start` and gives each session a fresh module.
+- `928a48fa`: fixes from review round 1.
+
+Decisions made while implementing:
+
+- `subtreeOutstanding` also counts a held settle of the current generation (`heldSettlementGeneration === workGeneration`). The ticket text did not ask for this. Without it, a middle process holding its child's settle reads quiescent upstream while that child's terminal is still coming. The parent one hop up would then admit the middle process's interim answer, which is the same bug one hop up. The count also closes the same gap on the waiting-held path. Review found it correct and in scope.
+- `owed` is `boundaryTurnOwed || pushWakeReserved`.
+  - The raw `agent_settled` clears the boundary part after its flush.
+  - The reservation part lives exactly as long as the reservation.
+  - `registerPushFlush` takes a `publish` option, so a reservation that lapses with an early-exit retry publishes that change itself.
+- C1 precondition confirmed in Pi's `agent-session.js`. `_runAgentPrompt` loops `continue()` and emits `agent_settled` in `finally`.
+- C3 isolation uses Pi's `clearExtensionCache()` (`dist/core/extensions/loader.js`) before each session's reload. It was chosen over a per-session plugin copy.
+  - Pi's own `reload()` calls the same function, and jiti runs with `moduleCache: false`.
+  - The export is outside the package `exports` map. An SDK change fails loudly: removing the call fails all three fork lifecycle tests.
+  - "A child counts only its own turns" is asserted indirectly: two starts were relayed and the fork reaches `dormant`. The adapter module instance is not reachable from the test.
+- `observeChildSubtree` releases a held settle before it publishes. This matches the order on the direct admission path.
+
+Verification:
+
+- `npm test` in `agents-plugin-pi/` at `928a48fa`: 1828 pass, 0 fail, 2 skipped. The skipped tests are pre-existing opt-in tests.
+- Each Verification bullet has a test.
+- Mutation checks, all failing as expected:
+  - A: without the pid gate, the cross-process sweep test fails.
+  - B: rejecting at once on a write error fails the write-first, fallback and spawn-error tests.
+  - C: a `turnsStarted`-only gate fails the owed-only and stale-owed tests. Dropping the direct gate fails all three direct-settle tests.
+  - C1: keeping the boundary `owed` at settle fails the continuation test. Dropping the timeout's clear or its publish fails the timeout test.
+  - C2: moving either attach after its prompt fails that path's test.
+  - C3: removing the cache clear or the relay fails all three fork lifecycle tests.
+  - The `subtreeOutstanding` generation guard reduced to `!== undefined` fails the new guard test.
+- Load: 32 CPU-bound processes on 16 cores (twice the core count).
+
+  | Test file | Clean runs | Failures |
+  |---|---|---|
+  | `agent-channel.test.ts` | 50 | 0 |
+  | `agent-channel.integration.test.ts` | 50 | 0 |
+  | `mcp-stdio-client.test.ts` | 50 | 0 |
+  | `session-bootstrap-guard.test.ts` | 50 | 0 |
+  | `recursive-worker.test.ts` | 50 | 0 |
+  | `subtree-lifecycle.test.ts` | 50 | 0 |
+  | `agent-channel-launch.test.ts` | 41 | 0 |
+  | `fork-lifecycle.integration.test.ts` | 20 | 0 |
+
+  - `agent-channel-launch.test.ts` ran 41 clean runs. The 42nd was interrupted by the stop, not failed.
+  - The C runs for `agent-channel-launch` and `fork-lifecycle` are below the required 50. The user approved the shorter run.
+  - The review-fix commit `928a48fa` had no extra load runs.
+
+Review:
+
+- Round 1 found no critical or important issues in the correctness, fit and test reviews. Its minor findings were fixed in `928a48fa`.
+- Round 2 was clean for correctness. The test review left one minor item: no test pins the observer's release-before-publish order. On the ordinary path the upstream count is the same either way.
+
+Accepted residuals:
+
+- If a parent ever misses a child's `agent_start`, every settle of that launch stays held, and every ancestor now reads waiting too. This would take a turn started before `attachEventListener`, for example by a third-party extension at child startup. C2 pins attach-before-first-prompt at both launch sites.
+- The liveness probe does not cover a record held on turn facts. That record always has a channel, so a silent child death is caught by the channel disconnect.
+- The sweep's pid check sees only its own pid namespace. A same-user Pi in another pid namespace that shares the temp directory could still be swept in its bind window.
+- The index.ts registration-order pin is a text check. The C1 behavior test also fails if the order is wrong.
