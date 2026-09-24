@@ -216,7 +216,8 @@ import { registerAuditCommands } from "./audit.ts";
 import { registerWsSkillTool } from "./lead-skills.ts";
 import { createToolPreviewTuiRef, loadToolResultTuiModules } from "./tool-result-render.ts";
 import { createAgentStorageContext, pruneStaleAgentHomes, reportOwnershipDiagnostic, type AgentStorageContext } from "./agent-storage.ts";
-import { createAgentFooterSessionLifecycle, persistOwnedTelemetryRollup, type AgentFooterContext, type AgentFooterSessionLifecycle } from "./agent-footer.ts";
+import { createAgentFooterSessionLifecycle, descendantUsageValue, persistOwnedTelemetryRollup, type AgentFooterContext, type AgentFooterSessionLifecycle } from "./agent-footer.ts";
+import { createDescendantUsageReporter, descendantUsageReporterRef } from "./agent-usage-rollup.ts";
 import { loadHostPiTui } from "./pi-tui.ts";
 import { addClaudeDelegateIfLead, registerClaudeDelegateSession } from "./claude-delegate.ts";
 import { createClaudeDesignReviewContextProvider } from "./claude-design-review.ts";
@@ -397,6 +398,10 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   // worker's shell) means no channel: readiness publishing is a no-op.
   const channelBootstrap = readAndDeleteChannelBootstrap(process.env);
   const channel = channelBootstrap ? await ChildChannel.connect(channelBootstrap) : undefined;
+  // One reporter per channel keeps the report sequence monotonic for the
+  // whole launch; each session_start points it at that session's registry.
+  // A factory re-run without a bootstrap (session replacement) keeps it.
+  if (channel) descendantUsageReporterRef.current = createDescendantUsageReporter(channel);
   const delegation = readDelegationPolicy();
   // Same-name wrappers preserve Pi's native schema, diff renderer, queue, and
   // result shape while the explicit policy — not tool visibility — authorizes
@@ -761,6 +766,11 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
       executeWorker: (record) => { record.onApprovalPending = onApprovalPending; },
     });
     publishSubtree(agentTools.rpcRegistry);
+    // A hop with a parent reports its descendant usage. After a restart the
+    // value is rebuilt here from the revived records and the checkpoint.
+    const usageRegistry = agentTools.rpcRegistry;
+    descendantUsageReporterRef.current?.setSource(() => descendantUsageValue(usageRegistry));
+    descendantUsageReporterRef.current?.evaluate();
     if (readSpawnRole(process.env) === "worker" || readSpawnRole(process.env) === "explore") {
       const orphanPush = buildOrphanPush(recoveredRegistry);
       if (orphanPush) pi.sendMessage({ customType: "ws-agent-orphaned", content: JSON.stringify(orphanPush), display: true, details: orphanPush }, { deliverAs: "nextTurn" });
@@ -952,6 +962,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     // teardown is a graceful RpcClient.stop() rather than a fire-and-forget
     // SIGTERM — see spawner.ts's AgentToolsHandle doc comment).
     await persistShutdownAgentSnapshots(agentTools, leadSidecarPath, threadHandle);
+    descendantUsageReporterRef.current?.setSource(undefined);
     agentTools = undefined;
     rpcRegistryRef.current = undefined;
     leadSessionFile = undefined;

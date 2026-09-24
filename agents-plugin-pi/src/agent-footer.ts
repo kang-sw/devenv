@@ -4,7 +4,8 @@ import { createFooterGitCache, type GitCacheOptions } from "./footer-git-status.
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { readOwnerArtifacts, writeOwnerArtifact, type AgentStorageContext, type OwnershipMetadata } from "./agent-storage.ts";
 import { isLeadOrFork, type SpawnRole } from "./process-role.ts";
-import type { AgentTelemetry } from "./agent-telemetry.ts";
+import { parseCumulativeCost, type AgentTelemetry, type CumulativeCost } from "./agent-telemetry.ts";
+import { descendantUsageOf } from "./agent-usage-rollup.ts";
 import type { RpcAgentRecord, RpcAgentRegistry } from "./spawner.ts";
 
 const CHECKPOINT_BUCKET = ".cost-estimate";
@@ -12,12 +13,7 @@ const CHECKPOINT_FILE = "checkpoint.json";
 const CHECKPOINT_VERSION = 1;
 const retainedFailedCheckpoints = new Map<string, CostCheckpoint>();
 
-export interface CumulativeCost {
-  knownUsd: number;
-  knownContributors: number;
-  unknownContributors: number;
-  descendants: number;
-}
+export type { CumulativeCost };
 
 const emptyCost = (): CumulativeCost => ({ knownUsd: 0, knownContributors: 0, unknownContributors: 0, descendants: 0 });
 function addCost(target: CumulativeCost, source: CumulativeCost): void {
@@ -27,11 +23,18 @@ function addCost(target: CumulativeCost, source: CumulativeCost): void {
   target.descendants += source.descendants;
 }
 function cloneCost(value: CumulativeCost): CumulativeCost { return { ...value }; }
-function telemetryCost(value: AgentTelemetry | undefined): CumulativeCost {
+function ownCost(value: AgentTelemetry | undefined): CumulativeCost {
   if (value?.estimatedUsd !== undefined) return { knownUsd: value.estimatedUsd, knownContributors: 1, unknownContributors: 0, descendants: 1 };
   if (value?.partialEstimatedUsd !== undefined) return { knownUsd: value.partialEstimatedUsd, knownContributors: 1, unknownContributors: 1, descendants: 1 };
   return { knownUsd: 0, knownContributors: 0, unknownContributors: 1, descendants: 1 };
 }
+/** A direct child's subtree total: its own reduced usage plus its last reported descendant usage. */
+function subtreeCost(telemetry: AgentTelemetry | undefined, descendants: CumulativeCost | undefined): CumulativeCost {
+  const total = ownCost(telemetry);
+  if (descendants) addCost(total, descendants);
+  return total;
+}
+function recordSubtreeCost(record: RpcAgentRecord): CumulativeCost { return subtreeCost(record.telemetry, descendantUsageOf(record)); }
 
 /** Monotonic merge for one directly tracked agent's cumulative telemetry. */
 function mergeAgentCost(previous: CumulativeCost | undefined, observed: CumulativeCost): CumulativeCost {
@@ -84,21 +87,8 @@ function retainFailedCheckpoint(storage: AgentStorageContext, checkpoint: CostCh
   retainedFailedCheckpoints.set(checkpointKey(storage), cloneCheckpoint(checkpoint));
 }
 const nonnegative = (value: unknown): number | undefined => typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
-const nonnegativeInteger = (value: unknown): number | undefined => {
-  const number = nonnegative(value);
-  return number !== undefined && Number.isSafeInteger(number) ? number : undefined;
-};
 function safePart(value: string): boolean { return /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(value); }
-function parseCost(value: unknown): CumulativeCost | undefined {
-  const cost = value as Partial<CumulativeCost> | null;
-  if (!cost) return undefined;
-  const knownUsd = nonnegative(cost.knownUsd);
-  const knownContributors = nonnegativeInteger(cost.knownContributors);
-  const unknownContributors = nonnegativeInteger(cost.unknownContributors);
-  const descendants = nonnegativeInteger(cost.descendants);
-  return knownUsd === undefined || knownContributors === undefined || unknownContributors === undefined || descendants === undefined
-    ? undefined : { knownUsd, knownContributors, unknownContributors, descendants };
-}
+const parseCost = parseCumulativeCost;
 function parseLeadUsage(value: unknown): LeadUsageSummary | undefined {
   const lead = value as Partial<LeadUsageSummary> | null;
   if (!lead) return undefined;
@@ -167,13 +157,27 @@ class CostEstimateState {
     this.reconcile();
   }
 
+  /**
+   * Refreshes each registry-resident direct child's subtree total and drops
+   * identities that left the registry. Dropping never folds: only an actual
+   * removal of a child home folds (`foldAndPersist` for capacity eviction,
+   * `persistOwnedTelemetryRollup` for retention), and until then the child's
+   * ownership telemetry keeps its durable value. That keeps the checkpoint
+   * bounded to live registry identities with at most one fold per removal.
+   */
   reconcile(omit: ReadonlySet<string> = new Set()): void {
     for (const [agentId, record] of this.registry) {
       if (omit.has(agentId)) continue;
-      this.agents.set(agentId, mergeAgentCost(this.agents.get(agentId), telemetryCost(record.telemetry)));
+      this.agents.set(agentId, mergeAgentCost(this.agents.get(agentId), recordSubtreeCost(record)));
+    }
+    for (const agentId of [...this.agents.keys()]) {
+      if (omit.has(agentId) || !this.registry.has(agentId)) this.agents.delete(agentId);
     }
     this.recomputeDirectTotal();
   }
+
+  /** This hop's descendant usage: the evicted baseline plus the direct children's subtree totals. */
+  directUsage(): CumulativeCost { return cloneCost(this.directTotal); }
 
   acceptUsage(source: unknown): void {
     if (!source || typeof source !== "object" || this.acceptedObjects.has(source as object)) return;
@@ -204,7 +208,8 @@ class CostEstimateState {
   foldAndPersist(record: RpcAgentRecord): boolean {
     this.reconcile();
     const stable = this.snapshot();
-    const cost = mergeAgentCost(this.agents.get(record.agentId), telemetryCost(record.telemetry));
+    // The evicted child's whole subtree: own usage plus its last stored descendant value.
+    const cost = mergeAgentCost(this.agents.get(record.agentId), recordSubtreeCost(record));
     addCost(this.evictedBaseline, cost);
     this.agents.delete(record.agentId);
     this.recomputeDirectTotal();
@@ -223,21 +228,9 @@ class CostEstimateState {
   }
 
   persist(omit: ReadonlySet<string> = new Set()): boolean {
+    // `reconcile` bounds the serialized identity set to the live registry.
     this.reconcile(omit);
     const stable = this.snapshot();
-    const activeIds = new Set([...this.registry.keys()].filter(id => !omit.has(id)));
-    for (const [agentId, cost] of [...this.agents]) {
-      if (activeIds.has(agentId)) continue;
-      addCost(this.evictedBaseline, cost);
-      this.agents.delete(agentId);
-    }
-    // The serialized identity set can never exceed the live registry it snapshots.
-    while (this.agents.size > activeIds.size) {
-      const first = this.agents.entries().next().value as [string, CumulativeCost] | undefined;
-      if (!first) break;
-      addCost(this.evictedBaseline, first[1]); this.agents.delete(first[0]);
-    }
-    this.recomputeDirectTotal();
     const written = writeCheckpoint(this.storage, this.snapshot());
     if (!written) {
       this.restore(stable);
@@ -278,7 +271,31 @@ export function registerAgentCostOwner(registry: RpcAgentRegistry, storage: Agen
   if (storage) registryStorage.set(registry, storage);
 }
 
-/** Persists the mounted registry's cached estimate at an explicit lifecycle boundary. */
+/** The registry's estimate, loading its owner checkpoint on first use. Every hop that owns children has one, footer or not. */
+function costEstimateFor(registry: RpcAgentRegistry, storage = registryStorage.get(registry)): CostEstimateState | undefined {
+  const existing = registryEstimates.get(registry);
+  if (existing && (!storage || checkpointKey(existing.storage) === checkpointKey(storage))) return existing;
+  if (!storage) return undefined;
+  const state = new CostEstimateState(storage, registry, loadCheckpoint(storage).checkpoint);
+  registryEstimates.set(registry, state);
+  return state;
+}
+
+/**
+ * This hop's descendant usage, the value it reports to its parent: the
+ * subtree totals of its registry-resident direct children, dormant ones
+ * included, plus its owner checkpoint's evicted baseline. After a restart the
+ * sum is rebuilt from the revived records' ownership telemetry and the
+ * checkpoint. Reads no session file. Undefined without an owner storage.
+ */
+export function descendantUsageValue(registry: RpcAgentRegistry): CumulativeCost | undefined {
+  const state = costEstimateFor(registry);
+  if (!state) return undefined;
+  state.reconcile();
+  return state.directUsage();
+}
+
+/** Persists the registry's cached estimate at an explicit lifecycle boundary. */
 export function persistAgentCostCheckpoint(registry: RpcAgentRegistry): boolean {
   return registryEstimates.get(registry)?.persist() ?? true;
 }
@@ -290,19 +307,19 @@ export function persistEvictedAgentCost(registry: RpcAgentRegistry, record: RpcA
   if (!safePart(record.agentId)) return false;
   if (!storage) { foldedAgentRecords.add(record); return true; }
   registryStorage.set(registry, storage);
-  const state = registryEstimates.get(registry) ?? new CostEstimateState(storage, registry, loadCheckpoint(storage).checkpoint);
+  const state = costEstimateFor(registry, storage)!;
   const written = state.foldAndPersist(record);
   if (written) foldedAgentRecords.add(record);
   return written;
 }
 
-/** Retention folds only this direct owned record; it never discovers descendants. */
+/** Retention folds this direct owned record's subtree total (own plus stored descendant usage); it never discovers descendants. */
 export function persistOwnedTelemetryRollup(metadata: OwnershipMetadata): boolean {
   const storage = storageFromRecord({ ownership: metadata } as Pick<RpcAgentRecord, "ownership">);
   if (!storage || !safePart(metadata.agentId)) return false;
   const { checkpoint } = loadCheckpoint(storage);
   const agents = new Map(checkpoint.agents.map(agent => [agent.agentId, cloneCost(agent.cost)]));
-  const observed = mergeAgentCost(agents.get(metadata.agentId), telemetryCost(metadata.telemetry));
+  const observed = mergeAgentCost(agents.get(metadata.agentId), subtreeCost(metadata.telemetry, metadata.telemetry?.descendantUsage));
   addCost(checkpoint.evictedBaseline, observed);
   agents.delete(metadata.agentId);
   checkpoint.agents = [...agents].map(([agentId, cost]) => ({ agentId, cost }));
@@ -423,7 +440,10 @@ export function createAgentFooterController(
 ): AgentFooterController {
   registerAgentCostOwner(registry, storage);
   const loaded = loadCheckpoint(storage);
-  const state = new CostEstimateState(storage, registry, loaded.checkpoint);
+  // Reuse an estimate this hop already built (an eviction or a descendant
+  // report can precede the footer mount); a second one would diverge.
+  const existing = registryEstimates.get(registry);
+  const state = existing && checkpointKey(existing.storage) === checkpointKey(storage) ? existing : new CostEstimateState(storage, registry, loaded.checkpoint);
   if (!loaded.found && ctx.sessionManager.getEntries().length > 0) {
     state.lead.cost.unknownContributors = 1;
     state.lead.cost.descendants = 1;

@@ -4,6 +4,17 @@ import { readFileSync } from "node:fs";
 import { isDeepStrictEqual } from "node:util";
 
 export interface TelemetryOrigin { sessionId: string; sessionPath: string; prefixEntryId?: string; emptyPrefix?: true }
+/**
+ * Bounded cumulative cost estimate: the footer's unit and the unit a hop
+ * reports upward as its descendant usage. `unknownContributors` makes an
+ * incomplete sum render as `+ ?`; `descendants` counts contributing agents.
+ */
+export interface CumulativeCost {
+  knownUsd: number;
+  knownContributors: number;
+  unknownContributors: number;
+  descendants: number;
+}
 export interface AgentTelemetry {
   version: 1;
   origin: TelemetryOrigin;
@@ -15,10 +26,27 @@ export interface AgentTelemetry {
   estimatedUsd?: number;
   /** Known subtotal when one or more attributable usage entries have unknown cost. */
   partialEstimatedUsd?: number;
+  /**
+   * The child's last reported usage of everything below it, excluding its own
+   * usage (which the fields above reduce from its session). Written only by
+   * the parent, from the child's channel reports; never derived from disk.
+   */
+  descendantUsage?: CumulativeCost;
 }
 type Entry = { id: string; type: string; message?: { role?: string; usage?: unknown }; usage?: unknown };
 
 const nonnegative = (v: unknown): number | undefined => typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : undefined;
+const nonnegativeInteger = (v: unknown): number | undefined => { const n = nonnegative(v); return n !== undefined && Number.isSafeInteger(n) ? n : undefined; };
+export function parseCumulativeCost(value: unknown): CumulativeCost | undefined {
+  const cost = value as Partial<CumulativeCost> | null;
+  if (!cost || typeof cost !== "object") return undefined;
+  const knownUsd = nonnegative(cost.knownUsd);
+  const knownContributors = nonnegativeInteger(cost.knownContributors);
+  const unknownContributors = nonnegativeInteger(cost.unknownContributors);
+  const descendants = nonnegativeInteger(cost.descendants);
+  return knownUsd === undefined || knownContributors === undefined || unknownContributors === undefined || descendants === undefined
+    ? undefined : { knownUsd, knownContributors, unknownContributors, descendants };
+}
 function usageOf(value: unknown): { contextTokens?: number; cost?: number } | undefined {
   if (!value || typeof value !== "object") return undefined;
   const u = value as { input?: unknown; output?: unknown; cacheRead?: unknown; cacheWrite?: unknown; totalTokens?: unknown; cost?: { total?: unknown } };
@@ -40,6 +68,8 @@ export function parseTelemetry(value: unknown): AgentTelemetry | undefined {
   if (typeof t.effort === "string" && t.effort) out.effort = t.effort;
   for (const k of ["contextTokens", "estimatedUsd", "partialEstimatedUsd"] as const) { const n = nonnegative(t[k]); if (n !== undefined) out[k] = n; }
   if (out.estimatedUsd !== undefined && out.partialEstimatedUsd !== undefined) delete out.partialEstimatedUsd;
+  const descendantUsage = parseCumulativeCost(t.descendantUsage);
+  if (descendantUsage) out.descendantUsage = descendantUsage;
   return out;
 }
 export function readSessionEntries(path: string): { headerId: string; parentSession?: string; entries: Entry[] } | { transient: true } | undefined {
