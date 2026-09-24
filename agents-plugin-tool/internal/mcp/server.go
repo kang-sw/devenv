@@ -100,7 +100,7 @@ const bootstrapToolName = "ferrule"
 // preserved no-op, since the pre-rename tickets.sage_record was reachable by
 // a delegate-scoped key.
 func isLeadOnlyTool(name string) bool {
-	return name == bootstrapToolName || name == "workflow_manual" || name == "workflow_state" || name == "tickets.sage_stamp" || name == "tickets.index_init" || name == "git.merge" || name == "worktree.acquire" || name == "worktree.release" || strings.HasPrefix(name, "lead.") || workflowPreferenceWriterTool(name)
+	return name == bootstrapToolName || name == "workflow_manual" || name == "workflow_state" || name == "tickets.sage_stamp" || name == "tickets.index_init" || name == "git.merge" || name == "worktree.acquire" || name == "worktree.release" || name == "worktree.list" || strings.HasPrefix(name, "lead.") || workflowPreferenceWriterTool(name)
 }
 
 func workflowPreferenceWriterTool(name string) bool {
@@ -1107,20 +1107,21 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		}
 		// Resolve the worktree pool root the same way worktree.acquire does, so a
 		// held-target refusal can name a parallel lead's housekeeping checkout as
-		// such. Any failure passes "" (unknown pool) rather than failing the merge.
-		mergePoolRoot := ""
+		// such. Any failure passes no pool roots (unknown pool) rather than
+		// failing the merge.
+		var mergePoolRoots []string
 		if mergeKey, ok := params.Arguments["session_key"].(string); ok && strings.TrimSpace(mergeKey) != "" {
 			adapter := sessionConfigAdapter{s: s.sessions}
 			resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
 			if poolRV, poolErr := resolver.Get(mergeKey, wsconfig.ItemWorktreePool); poolErr == nil {
 				if entries, lerr := listWorktrees(context.Background(), wsgit.ExecRunner{}, root); lerr == nil && len(entries) > 0 {
-					mergePoolRoot = resolvePoolRoot(poolRV.Value, entries[0].Path)
+					mergePoolRoots = ownedPoolRoots(poolRV.Value, entries[0].Path)
 				}
 			}
 		}
 		result, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, target, wsgit.CommitOptions{
 			Title: title, Description: description, AIContext: stringList(mergeAIContextRaw), UpdatedTickets: stringList(params.Arguments["updated_tickets"]),
-		}, implMergeAcknowledgement{ReleaseTargetOverride: releaseOverride, ExpectedSourceOID: expectedSource, ExpectedTargetOID: expectedTarget}, mergePoolRoot)
+		}, implMergeAcknowledgement{ReleaseTargetOverride: releaseOverride, ExpectedSourceOID: expectedSource, ExpectedTargetOID: expectedTarget}, mergePoolRoots)
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, result, err)
 		}
@@ -1157,6 +1158,16 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			_, _ = wsgit.ExecRunner{}.RunGit(context.Background(), result.Path, "checkout", "--detach")
 			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.acquire: mint worker key: %w", err))
 		}
+		// The lease is written only after a successful mint, so the failed-mint
+		// path above never leaves one behind. A failed lease write detaches the
+		// worktree like a failed mint: succeeding without a lease would list it
+		// as "no lease record", indistinguishable from a released worktree. The
+		// minted key is left unused and ages out through key pruning.
+		lease := worktreeLease{WorkerKey: workerKey, ParentKey: key, AcquiredAt: time.Now().UTC().Format(time.RFC3339)}
+		if err := writeWorktreeLease(context.Background(), wsgit.ExecRunner{}, result.Path, lease); err != nil {
+			_, _ = wsgit.ExecRunner{}.RunGit(context.Background(), result.Path, "checkout", "--detach")
+			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.acquire: record worktree lease: %w", err))
+		}
 		result.Path = mintPath
 		result.WorkerKey = workerKey
 		if wantsJSON(params.Arguments) {
@@ -1192,6 +1203,20 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			return toolJSONResponse(req.ID, map[string]any{"path": path, "detached": true}, nil)
 		}
 		return toolTextResponse(req.ID, fmt.Sprintf("released: %s\ndetached: true\n", path), nil)
+	case "worktree.list":
+		key, err := s.requireLeadSessionKey("worktree.list", params.Arguments)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		entry, _ := s.sessions.lookup(key) // requireLeadSessionKey verified it exists and is lead
+		adapter := sessionConfigAdapter{s: s.sessions}
+		resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
+		poolRV, _ := resolver.Get(key, wsconfig.ItemWorktreePool)
+		result, err := listPoolWorktrees(context.Background(), wsgit.ExecRunner{}, entry.root, poolRV.Value, s.sessions.recordMtime)
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, result, err)
+		}
+		return toolTextResponse(req.ID, result.text(), err)
 	case "git.commit":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -3899,7 +3924,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "worktree.acquire",
-			"description": fmt.Sprintf("Lead-only. Provision an isolated Git worktree from a recycled pool for a parallel worker: reuse an eligible idle pooled worktree or create one, create target_branch on base if it does not exist and check it out, hygiene-reset the tree, sync submodules, and mint a worktree-bound worker session key. Returns the worktree path and worker_key. The pool location is the worktree_pool config knob (default %s). With sparse_paths the worktree is created without a checkout and materializes only those cone directories — the lead's housekeeping worktree while a worker occupies the root. Defaults to text; use format=json for structured output.", defaultWorktreePoolTemplate),
+			"description": fmt.Sprintf("Lead-only. Provision an isolated Git worktree from a recycled pool for a parallel worker: reuse an eligible idle pooled worktree or create one, create target_branch on base if it does not exist and check it out, hygiene-reset the tree, sync submodules, mint a worktree-bound worker session key, and record a worktree lease (worker_key, parent_key, acquired_at) in the worktree's Git admin directory for worktree.list. Returns the worktree path and worker_key. The pool location is the worktree_pool config knob (default %s). With sparse_paths the worktree is created without a checkout and materializes only those cone directories — the lead's housekeeping worktree while a worker occupies the root. Defaults to text; use format=json for structured output.", defaultWorktreePoolTemplate),
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -3913,12 +3938,22 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "worktree.release",
-			"description": "Lead-only. Return a worktree to the pool: clean it and detach HEAD so it becomes reuse-eligible. Never deletes the worktree. Identify it by path or by a worker session key bound to it. Defaults to text; use format=json for structured output.",
+			"description": "Lead-only. Return a worktree to the pool: clean it (git reset --hard + git clean -ffdx, discarding uncommitted changes), detach HEAD so it becomes reuse-eligible, and remove its worktree lease. Never deletes the worktree and does not retire the worker key. Identify it by path or by a worker session key bound to it. Defaults to text; use format=json for structured output.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"path":   stringProperty("Absolute worktree path to release. Provide path or key."),
 					"key":    stringProperty("A worker session key bound to the worktree to release. Provide path or key."),
+					"format": stringProperty(`Optional output format. Use "json" for structured output.`),
+				},
+			},
+		},
+		{
+			"name":        "worktree.list",
+			"description": "Lead-only, read-only. List the pooled worktrees worktree.release accepts (the primary worktree and foreign worktrees are excluded; records whose directory is gone are skipped) with facts per worktree: path; branch, or detached (JSON branch null); dirty or clean, counting untracked files; HEAD's commit time; the newest mtime over the paths git status reports (dirty only); and the worktree lease written by worktree.acquire — worker_key, parent_key, acquired_at, and each key record's mtime, or record missing (JSON null) when the record was pruned — or no lease record (JSON worktree_lease null) when the worktree was released or acquired before worktree leases existed. Key records are read without refreshing their mtime. Facts only: it gives no stale or alive verdict; judging whether a holder is done is the reader's call. A clean entry carries a release nudge; a dirty entry carries none. Defaults to text; use format=json for structured output.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
 					"format": stringProperty(`Optional output format. Use "json" for structured output.`),
 				},
 			},
@@ -4368,7 +4403,7 @@ func toolSchemaRequiresSessionKey(name string) bool {
 		"rationale.query",
 		"project_tree",
 		"review.marker", "review.stamp",
-		"worktree.acquire", "worktree.release",
+		"worktree.acquire", "worktree.release", "worktree.list",
 		"tickets.query", "tickets.close", "tickets.move", "tickets.create_empty", "tickets.sage_gate", "tickets.sage_stamp", "tickets.verify",
 		"tickets.acquire", "tickets.release", "tickets.index_init", "path.generate", "playbook.render":
 		return true

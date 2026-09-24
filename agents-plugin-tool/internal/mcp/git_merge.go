@@ -73,7 +73,7 @@ func (r implMergeResult) text() string {
 	return text
 }
 
-func mergeImplBranch(ctx context.Context, root string, runner wsgit.Runner, branch, target string, message wsgit.CommitOptions, acknowledgement implMergeAcknowledgement, poolRoot string) (implMergeResult, error) {
+func mergeImplBranch(ctx context.Context, root string, runner wsgit.Runner, branch, target string, message wsgit.CommitOptions, acknowledgement implMergeAcknowledgement, poolRoots []string) (implMergeResult, error) {
 	result := implMergeResult{}
 	run := func(args ...string) (string, error) {
 		out, err := runner.RunGit(ctx, root, args...)
@@ -231,8 +231,11 @@ func mergeImplBranch(ctx context.Context, root string, runner wsgit.Runner, bran
 			case e.Prunable:
 				kind = "a stale worktree record whose directory is gone"
 				resolution = "The holder cannot release a branch it no longer has. Run `git worktree prune` in the repository, then retry git.merge unchanged."
-			case poolRoot != "" && pathUnder(poolRoot, e.Path):
-				kind = "a ws pool worktree: a parallel lead's housekeeping checkout (worktree.acquire with sparse_paths)"
+			case underAnyPool(poolRoots, e.Path):
+				// The pointer rides in the reason as well as the resolution: a
+				// non-release refusal surfaces only the reason as its error text.
+				kind = "a ws pool worktree: a parallel lead's housekeeping checkout (worktree.acquire with sparse_paths); worktree.list shows its worktree lease holder and dirty state"
+				resolution += " Inspect that holder with worktree.list: it reports the worktree lease holder and the worktree's dirty state."
 			}
 			add("target_held_elsewhere", fmt.Sprintf("Target %q is checked out at %s, %s. Nothing was merged; %q is retained and HEAD is unchanged.", mergeRoot, e.Path, kind, branch), resolution)
 			return
