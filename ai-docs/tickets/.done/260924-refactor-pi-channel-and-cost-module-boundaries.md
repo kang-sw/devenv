@@ -10,6 +10,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 40369659a50ff695
 sage-review-completeness-reviewed: 40369659a50ff695
+completed: 2026-09-24
 ---
 
 # Pi channel resume registration and cost-module boundaries cleanup
@@ -242,3 +243,51 @@ Verification expectations:
   a test load alone cannot catch a runtime-tolerated ESM cycle).
 - The three removal predicates' doc comments each state their meaning, their
   call sites, and why the other two must not be used there.
+
+### Result (5c7d1ad0) - 2026-09-24
+
+Landed in 5c7d1ad0 with round-1 review fixes in b664235c.
+
+- `agents-plugin-pi/src/agent-cost.ts` (new) owns the cost estimate and
+  checkpoint state, eviction-record values, `descendantUsageValue`, and
+  `isRemovedAgent`. `agent-footer.ts` keeps rendering, the controller, and
+  the session lifecycle, and imports only `attachFooterCostEstimate` /
+  `releaseFooterCostEstimate` from it (one-way). `formatCumulativeCost`
+  moved to `agent-telemetry.ts` and is re-exported by the footer.
+- `CostEstimateState.reconcile` became `pruneAndRecompute`: refresh records
+  -> private `pruneRemovedAgents` (the registry mutation, observer stopped
+  through `ownershipObserverStop`) -> `recomputeAgents`, on one record
+  snapshot. Every former reconcile entry point calls it in the same place.
+- `ChildChannel.composeResume` holds the hello resume merge, with the
+  unchanged precedence in its doc comment. The stale comments on
+  `ChildChannelOptions.resume` and in `index.ts` are corrected.
+- The three removal predicates each document their meaning, their call
+  sites, and why the other two do not fit there.
+- The `PendingApproval` alias is removed. Its `cwd` note moved onto
+  `PendingApprovalState.cwd`. The missing space in `agent-sidecar.ts` is
+  fixed.
+
+Verification:
+- `npm test` in `agents-plugin-pi`: 1865 tests, 1863 pass, 0 fail, 2
+  skipped.
+- The baseline at a2d64246 had 10 environmental failures (the worktree's
+  release ws-mcp runtime lacks newer tools). All pass once a source-built
+  runtime is placed in the gitignored `.runtime/`.
+- New pin: "hello resume merges the constructor source and provideResume" in
+  `agent-channel.test.ts`, for both pipe and tcp. It checks the key set, the
+  key order, and the values.
+- The import lines were read: `agent-cost.ts` has no import from the footer,
+  and `approval-protocol.ts` has no imports.
+- Review: correctness, fit, and test in round 1 found two Minor doc/type
+  items. Round 2 confirmed both fixed.
+
+Decisions:
+- The composite is named `pruneAndRecompute` so the mutation shows at every
+  call site.
+- `attachFooterCostEstimate` takes a lazy `sessionHasEntries` callback, which
+  keeps the prior short-circuit.
+- `CostEstimateState` is exported type-only.
+- `agent-footer.test.ts` also imported three moved symbols from the footer.
+  They now come from `agent-cost.ts` (import path only).
+- `FOOTER_URL` was renamed to `COST_URL`.
+- Test titles that still say "reconcile" are unchanged, per the constraint.

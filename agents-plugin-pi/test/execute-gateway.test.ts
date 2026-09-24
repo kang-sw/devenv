@@ -72,10 +72,9 @@ import {
   ONE_LINER_TIMEOUT_MS,
   ONE_LINER_OUTPUT_CAP_BYTES,
   registerExecuteGateway as registerExecuteGatewayBase,
-  type PendingApproval,
   type WorkingContext,
 } from "../src/execute-gateway.ts";
-import { attachApprovalChannel, leadIdleRef, registerPushFlush, GATED_EXEC_TOOL_NAME, TOOL_GROUPS, resolveTools, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
+import { attachApprovalChannel, leadIdleRef, registerPushFlush, GATED_EXEC_TOOL_NAME, TOOL_GROUPS, resolveTools, type PendingApprovalState, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
 import { ChildChannel, ParentChannel, readAndDeleteChannelBootstrap } from "../src/agent-channel.ts";
 import { APPROVAL_DECISION_MESSAGE, ChildApprovalGate, approvalDecisionMessage, type ApprovalChildLink } from "../src/approval-protocol.ts";
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
@@ -132,12 +131,12 @@ describe("validatePendingApproval (cmd_id race-binding)", () => {
   });
 
   test("cmd_id matches the pending one exactly -> accepted", () => {
-    const pending: PendingApproval = { cmdId: "call-1", command: "echo hi" };
+    const pending: PendingApprovalState = { cmdId: "call-1", command: "echo hi" };
     assert.deepEqual(validatePendingApproval(pending, "call-1"), { ok: true });
   });
 
   test("cmd_id mismatch (stale or wrong agent's id) -> rejected with a reason naming both ids", () => {
-    const pending: PendingApproval = { cmdId: "call-1", command: "echo hi" };
+    const pending: PendingApprovalState = { cmdId: "call-1", command: "echo hi" };
     const result = validatePendingApproval(pending, "call-STALE");
     assert.equal(result.ok, false);
     if (!result.ok) {
@@ -377,7 +376,7 @@ describe("mergeExecOutput (review relay #1, Minor a)", () => {
 });
 
 describe("createApprovalRelay (260905: unconditional ws-agent-approval push)", () => {
-  function freshRecord(pending: PendingApproval): RpcAgentRecord {
+  function freshRecord(pending: PendingApprovalState): RpcAgentRecord {
     return {
       agentId: "rpc-agent-1",
       sessionPath: "/tmp/ws-pi-agent-x/session.jsonl",
@@ -553,7 +552,7 @@ describe("registered ws-approve/ws-worker-exec decision relay (260924: over the 
     child.onMessage((msg) => { if (msg.t === APPROVAL_DECISION_MESSAGE) decisionsDelivered.push(String(msg.cmd_id)); });
     const executions: string[] = [];
     const registered = new Map<string, Tool>();
-    const record = { agentId: "execute-worker-1", sessionPath: join(home, "session.jsonl"), channel: parent, running: true, client: {}, pendingApproval: undefined as PendingApproval | undefined } as unknown as RpcAgentRecord;
+    const record = { agentId: "execute-worker-1", sessionPath: join(home, "session.jsonl"), channel: parent, running: true, client: {}, pendingApproval: undefined as PendingApprovalState | undefined } as unknown as RpcAgentRecord;
     const registry: RpcAgentRegistry = new Map([[record.agentId, record]]);
     const pi = {
       registerTool: (tool: { name: string } & Tool) => registered.set(tool.name, tool),

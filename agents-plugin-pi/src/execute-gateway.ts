@@ -269,9 +269,6 @@ export function resolveExecuteModelAlias(complex?: boolean): string | undefined 
   return complex ? undefined : "small";
 }
 
-/** The record's pending-approval state (`spawner.ts`); `cwd` is the worker-supplied per-call override — see `resolveApprovalContextCwd`. */
-export type PendingApproval = PendingApprovalState;
-
 export type ValidatePendingApprovalResult = { ok: true } | { ok: false; reason: string };
 
 /**
@@ -285,7 +282,7 @@ export type ValidatePendingApprovalResult = { ok: true } | { ok: false; reason: 
  * connection dropped first) is re-asked by `attachApprovalChannel`, never
  * re-sent here.
  */
-export function validatePendingApproval(pending: PendingApproval | undefined, cmdId: string): ValidatePendingApprovalResult {
+export function validatePendingApproval(pending: PendingApprovalState | undefined, cmdId: string): ValidatePendingApprovalResult {
   if (!pending) {
     return { ok: false, reason: "no pending approval for this agent" };
   }

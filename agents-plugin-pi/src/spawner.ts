@@ -121,7 +121,7 @@ import { createWebSearch } from "./web-search.ts";
 import { verifyWebReadiness, WEB_HOME_ENV, WEB_READINESS_KIND } from "./web-readiness.ts";
 import { beginSubtreeDispatch, installSubtreePublisher, observeSubtreeChannel, publishSubtree, type OwnTurnState, type SubtreeDescendant, type SubtreeSnapshot, type SubtreeUpstream } from "./subtree-lifecycle.ts";
 import { PUSH_BATCH_CUSTOM_TYPE, PUSH_BATCH_VERSION, type PushBatchItem, type PushBatchItemState } from "./push-protocol.ts";
-import { capacityEvictionCost, isRemovedAgent, persistAgentCostCheckpoint, persistEvictedAgentCost, registerAgentCostOwner } from "./agent-footer.ts";
+import { capacityEvictionCost, isRemovedAgent, persistAgentCostCheckpoint, persistEvictedAgentCost, registerAgentCostOwner } from "./agent-cost.ts";
 
 // ---------------------------------------------------------------------------
 // Pure helpers shared by persistent RPC-backed child paths.
@@ -388,6 +388,7 @@ export interface PendingApprovalState {
   cmdId: string;
   command: string;
   rationale?: string;
+  /** The worker-supplied per-call cwd override; see `resolveApprovalContextCwd` (execute-gateway.ts). */
   cwd?: string;
   decision?: "sent" | "discarded";
   reissued?: boolean;

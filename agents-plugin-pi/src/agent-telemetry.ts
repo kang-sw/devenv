@@ -15,6 +15,12 @@ export interface CumulativeCost {
   unknownContributors: number;
   descendants: number;
 }
+/** The footer's rendering of a cumulative cost: `—` when nothing is known, `~$N.NN` with ` + ?` when incomplete. */
+export function formatCumulativeCost(cost: CumulativeCost): string {
+  if (cost.knownContributors === 0 && cost.unknownContributors > 0) return "—";
+  const known = `~$${cost.knownUsd.toFixed(2)}`;
+  return cost.unknownContributors > 0 ? `${known} + ?` : known;
+}
 export interface AgentTelemetry {
   version: 1;
   origin: TelemetryOrigin;

@@ -132,7 +132,7 @@ import { renameWithWindowsRetry, type RenameRetryHooks } from "./atomic-write.ts
 import type { LeadPromptRef } from "./lead-bootstrap.ts";
 import { restoreDescendantUsage } from "./agent-usage-rollup.ts";
 import { readOwnership, removedAgentMessage, validDescriptor } from "./agent-storage.ts";
-import { isRemovedAgent } from "./agent-footer.ts";
+import { isRemovedAgent } from "./agent-cost.ts";
 import { parseTelemetry, type AgentTelemetry, type TelemetryOrigin } from "./agent-telemetry.ts";
 import {
   OwnerSteeringComponent,
