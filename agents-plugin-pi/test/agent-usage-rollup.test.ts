@@ -26,7 +26,7 @@ import {
 } from "../src/agent-usage-rollup.ts";
 import { descendantUsageValue, persistAgentCostCheckpoint, persistEvictedAgentCost, persistOwnedTelemetryRollup, registerAgentCostOwner } from "../src/agent-footer.ts";
 import { evictForCapacity, refreshAgentTelemetry, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
-import { captureOrphans, reviveOrphans } from "../src/agent-sidecar.ts";
+import { captureOrphans, readAndClearSidecarAt, reviveOrphans, writeSidecarAt } from "../src/agent-sidecar.ts";
 
 const roots = new Set<string>();
 afterEach(() => { for (const root of roots) rmSync(root, { recursive: true, force: true }); roots.clear(); });
@@ -337,6 +337,8 @@ describe("per-hop value and the fold rule", () => {
   test("a sidecar orphan whose home retention already removed is not revived, so its folded subtree counts once; one whose home exists still is", () => {
     const storage = createAgentStorageContext("hop", root());
     const removed = record("removed", storage, .5), kept = record("kept", storage, .25);
+    // parseOrphans keeps only an entry with a system prompt or a fork context.
+    removed.systemPromptPath = kept.systemPromptPath = join(storage.root, "prompt.md");
     acceptDescendantUsage(removed, 1, { seq: 1, usage: usd(1, 2) });
     const registry: RpcAgentRegistry = new Map([[removed.agentId, removed], [kept.agentId, kept]]);
     registerAgentCostOwner(registry, storage);
@@ -344,6 +346,8 @@ describe("per-hop value and the fold rule", () => {
     persistAgentCostCheckpoint(registry);
     const orphans = captureOrphans(registry);
     assert.deepEqual(orphans.map(orphan => [orphan.agentId, !!orphan.ownership]), [["removed", true], ["kept", true]], "precondition: both sidecar entries are owned");
+    const sidecar = join(root(), "hop.sidecar.json");
+    writeSidecarAt(sidecar, orphans);
 
     // Retention (possibly another owner's lead): fold, then remove the home.
     stopped(removed);
@@ -352,14 +356,18 @@ describe("per-hop value and the fold rule", () => {
     const folded = { knownUsd: 1.5, knownContributors: 2, unknownContributors: 0, descendants: 3 };
     assert.deepEqual(checkpoint(storage).evictedBaseline, folded, "own .5 plus stored descendant 1, folded once");
 
-    // Restart: the hop revives from the sidecar entries captured before the removal.
-    const restarted: RpcAgentRegistry = new Map();
-    registerAgentCostOwner(restarted, storage);
-    const revived = reviveOrphans(restarted, orphans);
-    try {
-      assert.deepEqual(revived.map(entry => entry.agentId), ["kept"], "positive control: the orphan whose home exists is revived");
-      assert.equal(restarted.has("removed"), false);
-      assert.deepEqual(descendantUsageValue(restarted), { knownUsd: 1.75, knownContributors: 3, unknownContributors: 0, descendants: 4 }, "baseline 1.5 plus kept .25; the removed subtree only through the baseline");
-    } finally { for (const entry of revived) entry.ownershipObserverStop?.(); }
+    // Restart: the hop revives from the sidecar written before the removal,
+    // through the production read path (which re-validates ownership against
+    // disk), and, separately, from the in-memory entries.
+    for (const [path, entries] of [["sidecar file", readAndClearSidecarAt(sidecar)], ["in-memory entries", orphans]] as const) {
+      const restarted: RpcAgentRegistry = new Map();
+      registerAgentCostOwner(restarted, storage);
+      const revived = reviveOrphans(restarted, [...entries]);
+      try {
+        assert.deepEqual(revived.map(entry => entry.agentId), ["kept"], `${path}: positive control: the orphan whose home exists is revived`);
+        assert.equal(restarted.has("removed"), false, path);
+        assert.deepEqual(descendantUsageValue(restarted), { knownUsd: 1.75, knownContributors: 3, unknownContributors: 0, descendants: 4 }, `${path}: baseline 1.5 plus kept .25; the removed subtree only through the baseline`);
+      } finally { for (const entry of revived) entry.ownershipObserverStop?.(); }
+    }
   });
 });
