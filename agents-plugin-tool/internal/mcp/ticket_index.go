@@ -20,8 +20,12 @@ import (
 // as before, and tickets.acquire / tickets.release answer a plain "ok" with no
 // validation. All validation therefore runs inside the index's Prepare hook,
 // which fires only once the index is known to be in use. A cached absence
-// silences discovery for its TTL, except for the lead's lease acquire, which
-// always asks origin (see handleIndexVerb).
+// silences discovery for its TTL, scoped by what caused it: a read-path
+// timeout silences only reads (tickets.query, the move/close guard), so the
+// write piggybacks (move, close, create_empty, sage_stamp) still run their own
+// discovery once per TTL; a confirmed absence or a write-path timeout
+// silences both. The lead's lease acquire always asks origin (see
+// handleIndexVerb).
 
 // indexAbsentText is what tickets.acquire / tickets.release answer while the
 // index is absent.
@@ -125,9 +129,7 @@ func (s *Server) indexPiggyback(root, op, stem string, override *wsindex.Overrid
 	}
 	res, outcome, err := cl.Submit(ctx, sub)
 	var b strings.Builder
-	for _, r := range res.Reports {
-		b.WriteString(indexReportLine(r) + "\n")
-	}
+	b.WriteString(joinIndexReports(res.Reports))
 	switch {
 	case err != nil:
 		fmt.Fprintf(&b, "ticket-index: the %s of %s was not recorded in the index: %v\n", op, stem, err)
@@ -253,8 +255,10 @@ func (s *Server) handleIndexVerb(id json.RawMessage, args, meta map[string]any, 
 			if caller.owner.Email == "" {
 				return fmt.Errorf("%s: git user.email is not set; the lease records the owner's email", tool)
 			}
-			if _, _, _, err := wsdoc.FindTicketPath(root, stem); err != nil {
+			if _, _, _, err := wsdoc.FindTicketPath(root, stem); errors.Is(err, wsdoc.ErrTicketNotFound) {
 				return fmt.Errorf("%s: ticket %s does not exist in this checkout", tool, stem)
+			} else if err != nil {
+				return fmt.Errorf("%s: look up ticket %s: %w", tool, stem, err)
 			}
 		}
 		return cl.LoadContext(ctx, sub, online, op == wsindex.OpAcquire)
@@ -345,7 +349,9 @@ func (s *Server) handleTicketsIndexInit(id json.RawMessage, args, meta map[strin
 	}
 	created, err := cl.Create(ctx, initial, fmt.Sprintf("ticket-index: init (%d open tickets from %s)", len(initial.Registrations), firstNonEmpty(track, "no review-track")))
 	if err != nil {
-		return toolTextResponse(id, "", fmt.Errorf("tickets.index_init: %w", err))
+		// A failed adopt may already have discarded the pending log; its
+		// one-time report still belongs in this output.
+		return indexErrorResponse(id, fmt.Errorf("tickets.index_init: %w", err), created.Reports)
 	}
 	status := "adopted"
 	registered := 0

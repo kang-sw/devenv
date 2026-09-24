@@ -1,6 +1,7 @@
 package wsdoc
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,11 @@ import (
 )
 
 var ticketStemRE = regexp.MustCompile(`^\d{6}-[\w-]+$`)
+
+// ErrTicketNotFound is the error FindTicketPath wraps when no status
+// directory (nor, under a sparse-checkout scope, the git index) holds the
+// stem.
+var ErrTicketNotFound = errors.New("ticket not found")
 
 // ValidTicketStem reports whether stem has the ticket stem shape
 // (YYMMDD-category-name).

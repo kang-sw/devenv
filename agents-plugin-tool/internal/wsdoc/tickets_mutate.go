@@ -730,7 +730,7 @@ func findTicketPath(root string, scope *ticketScope, stem string) (path string, 
 			}
 		}
 	}
-	return "", "", false, fmt.Errorf("ticket not found: %s", stem)
+	return "", "", false, fmt.Errorf("%w: %s", ErrTicketNotFound, stem)
 }
 
 // writeFrontmatterField updates or inserts scalar key/value pairs inside the

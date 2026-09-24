@@ -179,7 +179,7 @@ func TestQueryUnknownWithoutCache(t *testing.T) {
 	x.acquire(stemAlpha)
 	y.runner.failFetch.Store(true)
 	out := y.query()
-	if !strings.Contains(out, "ownership: unknown") || strings.Contains(out, "held elsewhere") {
+	if !strings.Contains(out, "ownership: unknown (origin not reached and no cached index)") || strings.Contains(out, "held elsewhere") {
 		t.Fatalf("F5 query = %s", out)
 	}
 	got := y.queryJSON("unleased_or_mine", true)
@@ -608,14 +608,7 @@ func TestSeenCloneReadTimeoutIsNotRefreshed(t *testing.T) {
 	x.acquire(stemAlpha)
 	x.server.indexOpts.ReadTimeout = 200 * time.Millisecond
 	e.clock.Advance(2 * time.Minute)
-
-	script := filepath.Join(e.dir, "hang-ssh.sh")
-	mustWrite(t, e.dir, "hang-ssh.sh", "#!/bin/sh\nexec sleep 30\n")
-	if err := os.Chmod(script, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	x.git("config", "core.sshCommand", script)
-	x.git("remote", "set-url", "origin", "ssh://git@ticket-index.invalid/repo.git")
+	x.hang()
 	out := x.query()
 	if !strings.Contains(out, "ticket-index: origin did not answer within 200ms; ownership is from the cached index (age 2m0s), not refreshed\n") ||
 		strings.Contains(out, "unreachable") || !strings.Contains(out, "ownership: yours") {
@@ -639,6 +632,9 @@ func TestLiveCloseLeavesLeaseAcquiredAfterGuardRead(t *testing.T) {
 	x := e.clone("x", "a@example.com")
 	y := e.clone("y", "b@example.com")
 	x.init() // x's cache is fresh: its guard reads it with no remote call
+	x.offline()
+	x.acquire(stemGamma) // a pending entry the close's write must still flush
+	x.online()
 	y.acquire(stemAlpha)
 
 	out := x.mustCall("tickets.close", map[string]any{"stem": stemAlpha, "status": "done"})
@@ -650,6 +646,9 @@ func TestLiveCloseLeavesLeaseAcquiredAfterGuardRead(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(x.root, "ai-docs", "tickets", ".done", stemAlpha+".md")); err != nil {
 		t.Fatalf("the ticket file did not move: %v", err)
+	}
+	if l := e.lease(stemGamma); x.pendingCount() != 0 || l == nil || l.Email != "a@example.com" {
+		t.Fatalf("the warned close did not flush the pending acquire: pending %d, lease %+v", x.pendingCount(), l)
 	}
 }
 

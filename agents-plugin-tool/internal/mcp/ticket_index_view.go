@@ -255,9 +255,7 @@ func (v *ownershipView) trailer() string {
 		return ""
 	}
 	var b strings.Builder
-	for _, r := range v.reports {
-		b.WriteString(indexReportLine(r) + "\n")
-	}
+	b.WriteString(joinIndexReports(v.reports))
 	if v.state == wsindex.ViewStale {
 		age := "unknown age"
 		if v.age >= 0 {
@@ -332,9 +330,7 @@ func (s *Server) guardMoveClose(root, tool, stem string, args map[string]any) (i
 
 func (g indexGuard) text() string {
 	var b strings.Builder
-	for _, r := range g.reports {
-		b.WriteString(indexReportLine(r) + "\n")
-	}
+	b.WriteString(joinIndexReports(g.reports))
 	if g.warning != "" {
 		b.WriteString(g.warning + "\n")
 	}

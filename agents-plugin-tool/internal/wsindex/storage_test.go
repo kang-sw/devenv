@@ -93,10 +93,7 @@ func TestA3NoOriginIsSilentlyAbsent(t *testing.T) {
 func hangingSSH(t *testing.T, c *testClone) {
 	t.Helper()
 	script := filepath.Join(c.h.dir, "hang-ssh.sh")
-	writeFile(t, script, "#!/bin/sh\nexec sleep 30\n")
-	if err := os.Chmod(script, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeExecutable(t, script, "exec sleep 30\n")
 	gitT(t, c.root, "config", "core.sshCommand", script)
 	c.setOriginURL("ssh://git@wsindex.invalid/repo.git")
 }
@@ -752,6 +749,12 @@ func TestOverrideCloseReflushWritesNothing(t *testing.T) {
 	if res, err := cl.Write(bg, flush); err != nil || res.Status != WriteWritten {
 		t.Fatalf("flush = %+v, %v", res, err)
 	}
+	if l := h.remoteIndex().Registrations["260924-feat-a"].Lease; l == nil || l.Owner() != holder || l.Phase != PhaseClosed {
+		t.Fatalf("the first flush did not close the holder's lease: %+v", l)
+	}
+	if n := strings.Count(gitT(t, h.origin, "log", "--format=%B", RemoteRef), "under override"); n != 1 {
+		t.Fatalf("override audit lines after the first flush = %d, want 1", n)
+	}
 	tip := h.remoteTip()
 	gitT(t, x.root, "update-ref", PendingRef, logBefore) // the crash: pushed, never cleared
 	res, err = cl.Write(bg, flush)
@@ -808,10 +811,10 @@ func TestLoadContextReadsClosedFromLocalTrackingRefWithoutFetch(t *testing.T) {
 	}
 }
 
-// installHook writes an executable hook script.
-func installHook(t *testing.T, hooksDir, name, body string) {
+// writeExecutable writes an executable shell script (a hook, a fake ssh or
+// signing program).
+func writeExecutable(t *testing.T, path, body string) {
 	t.Helper()
-	path := filepath.Join(hooksDir, name)
 	writeFile(t, path, "#!/bin/sh\n"+body)
 	if err := os.Chmod(path, 0o755); err != nil {
 		t.Fatal(err)
@@ -823,7 +826,7 @@ func installHook(t *testing.T, hooksDir, name, body string) {
 func TestIndexPushBypassesPrePushHook(t *testing.T) {
 	h := newHarness(t)
 	c := h.clone("x", "x@example.com")
-	installHook(t, filepath.Join(c.root, ".git", "hooks"), "pre-push", "echo 'pre-push: blocked' >&2\nexit 1\n")
+	writeExecutable(t, filepath.Join(c.root, ".git", "hooks", "pre-push"), "echo 'pre-push: blocked' >&2\nexit 1\n")
 	if out, err := exec.Command("git", "-C", c.root, "push", "--quiet", "origin", "HEAD:refs/heads/probe").CombinedOutput(); err == nil {
 		t.Fatalf("the pre-push hook did not veto a plain push: %s", out)
 	}
@@ -844,10 +847,7 @@ func TestIndexCommitIgnoresSigningConfig(t *testing.T) {
 	h := newHarness(t)
 	c := h.clone("x", "x@example.com")
 	signer := filepath.Join(h.dir, "bogus-gpg.sh")
-	writeFile(t, signer, "#!/bin/sh\necho 'bogus-gpg: no key' >&2\nexit 1\n")
-	if err := os.Chmod(signer, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeExecutable(t, signer, "echo 'bogus-gpg: no key' >&2\nexit 1\n")
 	gitT(t, c.root, "config", "commit.gpgSign", "true")
 	gitT(t, c.root, "config", "gpg.program", signer)
 	if out, err := exec.Command("git", "-C", c.root, "commit", "--quiet", "--allow-empty", "-m", "probe").CombinedOutput(); err == nil {
@@ -870,7 +870,7 @@ func TestIndexPushRefusalIsNotRetried(t *testing.T) {
 	c := h.clone("x", "x@example.com")
 	h.initIndex(c)
 	tip := h.remoteTip()
-	installHook(t, filepath.Join(h.origin, "hooks"), "pre-receive",
+	writeExecutable(t, filepath.Join(h.origin, "hooks", "pre-receive"),
 		"while read old new ref; do\n\tif [ \"$ref\" = \""+RemoteRef+"\" ]; then\n\t\techo 'index writes are disabled here' >&2\n\t\texit 1\n\tfi\ndone\nexit 0\n")
 	cl := c.client()
 	pushesBefore := c.runner.count("push")

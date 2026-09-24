@@ -313,6 +313,9 @@ func TestLiveCloseLeavesDifferentEmailLease(t *testing.T) {
 		if out.Refusal != nil || len(out.Audit) != 0 || !strings.Contains(out.Warning, "b@example.com") {
 			t.Fatalf("%s: outcome = %+v, want a warning naming the holder and no audit", name, out)
 		}
+		if named := strings.Contains(out.Warning, "the override named z@example.com"); named != (e.Override != nil) {
+			t.Fatalf("%s: warning = %q, want it to name the stale override holder exactly when one was given", name, out.Warning)
+		}
 		if l := idx.Registrations[stemX].Lease; l.Owner() != ownerB || l.Phase != PhaseActive {
 			t.Fatalf("%s: the holder's lease changed: %+v", name, l)
 		}
@@ -332,7 +335,16 @@ func TestLiveCloseLeavesDifferentEmailLease(t *testing.T) {
 // C3: a close of an already-closed lease writes no audit line, with or
 // without an override, live or replayed.
 func TestCloseOfClosedLeaseIsNoOp(t *testing.T) {
-	e := withOverride(PendingEntry{Op: OpClose, Stem: stemX, Owner: ownerA}, ownerB, "user closed it")
+	for _, e := range []PendingEntry{
+		withOverride(PendingEntry{Op: OpClose, Stem: stemX, Owner: ownerA}, ownerB, "user closed it"),
+		{Op: OpClose, Stem: stemX, Owner: ownerA}, // a different email, no override: still no report
+	} {
+		assertCloseOfClosedIsNoOp(t, e)
+	}
+}
+
+func assertCloseOfClosedIsNoOp(t *testing.T, e PendingEntry) {
+	t.Helper()
 	for _, replay := range []bool{false, true} {
 		idx := leased(ownerB, PhaseClosed)
 		a := &Applier{Now: t0}

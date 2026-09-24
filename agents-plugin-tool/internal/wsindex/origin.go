@@ -33,14 +33,14 @@ func (c *Client) OriginTrack(ctx context.Context) string {
 	return track
 }
 
-// OnlineTrack is OriginTrack for paths that already go online (every index
+// onlineTrack is OriginTrack for paths that already go online (every index
 // write, acquire, init). When the clone lacks a local
 // refs/remotes/origin/HEAD, it asks origin for its default branch (the probe
 // InitSource uses) and reads the review-track declared there, falling back to
 // that branch as init does, so init, acquire, pruning, and GC resolve the
 // same track. Nothing is cached: the probe runs only on such clones. A failed
 // probe falls back to OriginTrack.
-func (c *Client) OnlineTrack(ctx context.Context) string {
+func (c *Client) onlineTrack(ctx context.Context) string {
 	if _, ok, err := c.refOID(ctx, "refs/remotes/"+RemoteName+"/HEAD"); err == nil && ok {
 		return c.OriginTrack(ctx)
 	}
@@ -48,11 +48,22 @@ func (c *Client) OnlineTrack(ctx context.Context) string {
 	if err != nil || defaultBranch == "" {
 		return c.OriginTrack(ctx)
 	}
-	if _, ok, err := c.refOID(ctx, trackingRef(defaultBranch)); err != nil || !ok {
-		_ = c.FetchTrack(ctx, defaultBranch)
+	return c.trackAtDefaultBranch(ctx, defaultBranch, false)
+}
+
+// trackAtDefaultBranch reads the review-track declared in AGENTS.md of
+// origin's default branch, falling back to that branch itself. The branch's
+// tracking ref is fetched first when alwaysFetch is set (init) or when it is
+// missing; a failed fetch leaves the fallback.
+func (c *Client) trackAtDefaultBranch(ctx context.Context, defaultBranch string, alwaysFetch bool) string {
+	fetched := true
+	if _, ok, err := c.refOID(ctx, trackingRef(defaultBranch)); alwaysFetch || err != nil || !ok {
+		fetched = c.FetchTrack(ctx, defaultBranch) == nil
 	}
-	if track := c.declaredTrackAt(ctx, trackingRef(defaultBranch)); track != "" {
-		return track
+	if fetched {
+		if track := c.declaredTrackAt(ctx, trackingRef(defaultBranch)); track != "" {
+			return track
+		}
 	}
 	return defaultBranch
 }
@@ -177,12 +188,7 @@ func (c *Client) InitSource(ctx context.Context) (string, OriginTickets, error) 
 	}
 	track := ""
 	if defaultBranch != "" {
-		if err := c.FetchTrack(ctx, defaultBranch); err == nil {
-			track = c.declaredTrackAt(ctx, trackingRef(defaultBranch))
-		}
-		if track == "" {
-			track = defaultBranch
-		}
+		track = c.trackAtDefaultBranch(ctx, defaultBranch, true)
 	}
 	if track == "" {
 		track, _ = wsreview.ResolveTrackFallback(ctx, c.root)
@@ -196,7 +202,7 @@ func (c *Client) InitSource(ctx context.Context) (string, OriginTickets, error) 
 // LoadContext fills what one submission needs once the index is known to be
 // in use: the recording owner's clone id (generated on first use), the
 // origin-closed set of the review-track, and, online, the lazy GC predicate.
-// Online, the review-track resolves through OnlineTrack; offline, through
+// Online, the review-track resolves through onlineTrack; offline, through
 // OriginTrack. The review-track is fetched first when fetchTrack is set
 // (acquire) or when the pending log holds an acquire entry the flush will
 // replay; otherwise the local remote-tracking ref is read with no network.
@@ -206,9 +212,11 @@ func (c *Client) LoadContext(ctx context.Context, sub *Submission, online, fetch
 		return err
 	}
 	sub.Entry.Owner.CloneID = id
-	track := c.OriginTrack(ctx)
+	var track string
 	if online {
-		track = c.OnlineTrack(ctx)
+		track = c.onlineTrack(ctx)
+	} else {
+		track = c.OriginTrack(ctx)
 	}
 	if online && !fetchTrack {
 		pending, err := c.Pending(ctx)
