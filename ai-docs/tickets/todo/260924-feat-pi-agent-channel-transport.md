@@ -40,8 +40,35 @@ The research's evidence round has been reconciled into the decisions below. It w
   - The child fails closed. It awaits the accepted hello inside its extension factory and throws on failure, and Pi then exits at startup.
   - The channel is a required foundation for subagents. There is no alternative readiness path when it fails.
 - **Threat model.** Same-user processes are outside the threat model. Do not escalate same-user forgery into a blocking finding, and do not add hardening beyond the baseline. Other OS users remain in scope, and the credential is what stops them. The research ticket's `## Threat Model (Scope Note)` is the full statement.
-- **Readiness absorbed.** Fork readiness (`ready.json` in the fork launch envelope) and explore web-tools readiness (`web-tools-ready.json`) move into the authenticated channel hello, and their file handshakes are retired. The fork *context* envelope that carries input into the child is not a readiness handshake and is not retired here.
+- **Readiness absorbed.** Fork readiness (`ready.json` in the fork launch envelope) and explore web-tools readiness (`web-tools-ready.json`) move into the authenticated channel hello, and their file handshakes are retired. The fork *context* envelope that carries input into the child is not a readiness handshake and is not retired here. Web readiness stops depending on `SubtreeChannel.nonce`, including `WEB_NONCE_ENV` and `verifyWebReadiness`. `SubtreeChannel` itself is retired later, by `260924-feat-pi-agent-channel-subtree-state`.
 - **Escalation.** If verification contradicts a decision above, the worker stops and escalates instead of choosing an alternative. Example: removing the bootstrap values from `process.env` does not keep them out of the child's bash tool.
+
+## Prior Decisions
+
+- 260923-research-pi-parent-child-loopback-control-channel (2026-09-24, Confirmed Decisions): "Evidence reconciliation (2026-09-24). The following settle the evidence round's findings and are carried into 260924-feat-pi-agent-channel-transport: Connection-end obligation..." — bearing: supports
+- 424d4af3 (2026-09-24, commit): "User declared the channel a required foundation for subagents with no alternative readiness path." — bearing: supports
+- dc857cf3 (2026-09-24, commit): "Owner made the transport abstraction, not TCP, the core deliverable: backend order pipe/UDS -> loopback TCP, file backing reserved but unimplemented, fail closed with per-backend diagnostics." — bearing: supports
+- 260907-bug-ws-pi-children-inherit-stale-bootstrap-binary-env (2026-09-09, Result 649ca5cf): "Direct child environments delete the inherited bootstrap binary/URL overrides; RPC options explicitly empty them so the SDK's parent-environment merge cannot restore stale values." — bearing: constrains
+- 260924-feat-pi-agent-channel-subtree-state (2026-09-24, Decisions): "A disconnected or not-yet-connected channel maps to "waiting", preserving today's fail-closed semantics." — bearing: constrains
+- 260924-feat-pi-agent-channel-approval-decisions (2026-09-24, Decisions): "The parent sends each decision to the child as a channel message bound to its `cmd_id`. The decision file, `WS_PI_APPROVAL_DIR`, and the 200-ms poll are retired." — bearing: constrains
+- 32687830 (2026-09-12, commit): "Isolated capture plus per-launch facade provenance/nonce readiness fails before prompting and repeats on dormant/restarted launch" — bearing: constrains
+- 55172110 (2026-09-09, commit): "Reuses RpcClient's existing exit-rejection path instead of inventing a new file-based readiness/IPC protocol" — bearing: supports
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | new channel module under agents-plugin-pi/src/, agents-plugin-pi/src/spawner.ts#L2127-L2135 prepareForkLaunch ready.json, agents-plugin-pi/src/fork-context.ts#L201-L211 readForkLaunchContext, agents-plugin-pi/src/web-readiness.ts, agents-plugin-pi/src/index.ts#L386 extension factory, agents-plugin-pi/src/mcp-stdio-client.ts#L183 env spread ordering |
+| scope.surface | cross-module | spawner launch path, fork and explore web-tools readiness, extension factory startup, and a new parent-child env bootstrap contract; no ws MCP or shipped-skill surface |
+| scope.new_public_symbol | yes | adapter-internal exported channel backend contract, bind and connect entry points, and new bootstrap env names; exact names not yet chosen |
+| scope.new_type_contract | yes | backend contract send msg, onMessage, close plus connection-end event; versioned authenticated hello carrying credential and generation |
+| scope.test_surface | new-files | new backend contract suite; existing agents-plugin-pi/test/web-readiness.test.ts, fork.test.ts, spawner.test.ts, fork-context.test.ts, mcp-stdio-client.test.ts cover the retired readiness files and env paths |
+| complexity.reuse_points | confirmed | RpcClientOptions.env in node_modules/@earendil-works/pi-coding-agent/dist/modes/rpc/rpc-client.d.ts#L20; Node net listen and connect; reference prototype on unmerged spike 339f9c20 agents-plugin-pi/spike/channel-evidence/ |
+| complexity.side_effect_risk | high | deletes bootstrap values from process.env, creates and sweeps socket files under os.tmpdir, adds process exit hooks, and retires readiness files every fork and explore launch uses |
+| risk.correctness | high | connection policy, generation and reconnect semantics, hello timeout paired with lifecycle, and a fail-closed readiness gate on every subagent launch |
+| risk.fit | moderate | wsPiBridgeExtension at agents-plugin-pi/src/index.ts#L386 is synchronous today and must await the hello before any spawn including the ws-mcp stdio client |
+| risk.test | high | needs real Pi children across macOS, Linux, and native Windows plus adapter-level stop, resume, relaunch, sibling, and SIGKILL cleanup cases the evidence round left open |
+| risk.security_or_contract | high | per-launch credential is the only barrier against other OS users on loopback TCP and Windows pipes; bootstrap env removal is a normative baseline |
 
 ## Phases
 

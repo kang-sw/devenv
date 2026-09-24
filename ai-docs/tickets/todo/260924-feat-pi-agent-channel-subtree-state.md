@@ -27,8 +27,39 @@ Each child publishes `<childHome>/subtree.json` through an atomic temp-and-renam
 - The busy-before-dispatch fence waits for the parent's acknowledgment of the busy revision before a grandchild is dispatched.
 - A disconnected or not-yet-connected channel maps to "waiting", preserving today's fail-closed semantics.
 - The existing bounds on `descendants[]` (count and depth) and the durable `waitingOnChildren` mirror into ownership and sidecar records for restart recovery are preserved.
-- `subtree.json`, the `fs.watch` watcher, the per-event synchronous read, and the snapshot's Windows rename-retry path are retired.
+- `subtree.json`, the `fs.watch` watcher, and the per-event synchronous read are retired. So is the subtree snapshot's own call into `writePrivateJson`. The shared helper keeps its Windows rename retry, because the fork context envelope still uses it.
+- `SubtreeChannel` (`{path, nonce}`) is retired along with `subtree.json`.
+  - `260924-feat-pi-agent-channel-transport` moves web readiness into the hello and removes its dependency on this nonce, including `WEB_NONCE_ENV` and `verifyWebReadiness`.
+  - Here, the legacy-Explore check in `spawner.ts` drops its `!record.subtreeChannel` clause and decides legacy status from the delegation's network-authority fields alone. Otherwise every new Explore record would be rejected as legacy.
+  - A persisted `subtreeChannel` field in an older `PersistedForkResume` record is ignored on read, with no migration. The resumed child gets a fresh channel at relaunch.
 - Measure the latency of the acknowledgment round trip before grandchild dispatch and record it in the Result. If keeping dispatch acceptable would require relaxing the fence, the worker stops and escalates.
+
+## Prior Decisions
+
+- dc857cf3 (2026-09-24, commit): "Subtree state moves as a whole (splitting identity from counts would put one struct on two transports); usage is per-hop cumulative last-wins because deltas break replay safety" — bearing: supports
+- 260923-research-pi-parent-child-loopback-control-channel (2026-09-23, Confirmed Decisions): "Subtree state over the channel. The child sends full revisioned snapshots, and the last revision wins. The busy-before-dispatch fence waits for the parent's acknowledgment of the busy revision" — bearing: supports
+- 226b4a56 (2026-09-21, commit): "Only beginSubtreeDispatch's initial busy edge remains fail-closed; later publication failures are diagnosed without aborting RPC event application, settlement, watcher cleanup, or spawn-failure reporting." — bearing: constrains
+- 260921-bug-pi-subtree-publication-lifecycle-isolation (2026-09-21, Decisions): "Skip a `subtree.json` replacement when the effective snapshot is unchanged. Token streaming, duplicate filesystem notifications, and render refreshes must not create equivalent writes." — bearing: constrains
+- 08ac495b (2026-09-21, commit): "The streamed-delta path now skips subtree observation, telemetry refresh, and subtree publication" — bearing: constrains
+- 2f4771f3 (2026-09-20, commit): "opportunistic channel reads on direct-child RPC events could leave nested identities stale while the parent was idle; directory watches preserve push semantics without making advisory identity affect wait accounting." — bearing: constrains
+- 2f4771f3 (2026-09-20, commit): "Clearing a direct child's live state now also removes and republishes its cached descendants so finished nested agents cannot remain visibly live." — bearing: constrains
+- 260913-bug-ws-pi-settled-agent-falsely-remains-running (2026-09-13, Decisions): "Preserve lifecycle-only fences around settlement: work generation, descendant waiting and subtree revision, direct-parent routing, terminal queue admission and retry" — bearing: constrains
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-pi/src/subtree-lifecycle.ts, agents-plugin-pi/src/spawner.ts, agents-plugin-pi/src/fork-context.ts, plus SubtreeChannel consumers agents-plugin-pi/src/ask.ts#L386, agents-plugin-pi/src/delegation-policy.ts#L10 |
+| scope.surface | cross-module | subtree-lifecycle.ts exports SubtreeChannel, readSubtreeSnapshot, beginSubtreeDispatch consumed by spawner.ts#L113; subtreeChannel persisted in PersistedForkResume ask.ts#L386 and its nonce feeds WEB_NONCE_ENV spawner.ts#L2205 |
+| scope.new_public_symbol | unknown | ticket names no symbol and the transport message API it builds on is unlanded, pending 260924-feat-pi-agent-channel-transport |
+| scope.new_type_contract | yes | new subtree snapshot and busy-revision acknowledgment channel messages replace the SubtreeChannel path-and-nonce contract subtree-lifecycle.ts#L7 |
+| scope.test_surface | existing | agents-plugin-pi/test/recursive-worker.test.ts, test/spawner.test.ts, test/persistent-explore.test.ts, test/fork-lifecycle.integration.test.ts build subtree.json fixtures |
+| complexity.reuse_points | unconfirmed | channel transport from 260924-feat-pi-agent-channel-transport is not in the tree, ls agents-plugin-pi/src found no channel module |
+| complexity.side_effect_risk | high | retires the watcher and per-event read on the settlement path spawner.ts#L2397-L2430 and #L2495, and the SubtreeChannel nonce also drives web readiness and the legacy-Explore check spawner.ts#L3130-L3134 |
+| risk.correctness | high | the synchronous fail-closed busy edge becomes an asynchronous acknowledgment round trip, and waitingOnChildren gates parking and settlement spawner.ts#L1455-L1563 |
+| risk.fit | moderate | must fit an unlanded transport API and share the channel with the approval and usage migrations |
+| risk.test | high | verification needs delayed or dropped acknowledgments, disconnect and reconnect, out-of-order snapshots, and a latency measurement |
+| risk.security_or_contract | moderate | changes the parent-child protocol and the persisted subtreeChannel shape in fork resume and sidecar records ask.ts#L733-L776 |
 
 ## Phases
 
