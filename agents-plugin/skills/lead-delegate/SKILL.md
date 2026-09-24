@@ -1,6 +1,6 @@
 ---
 name: lead-delegate
-description: Start or continue a session-local native subagent when the user wants a bounded task handed to an executor and may steer that same agent across turns. Use for investigation, diagnosis, drafting a requested deliverable, operational chores, and eligible low-impact changes. The lead chooses the prompt, model, tools, and permissions. Route collaborative direction-setting to lead-discuss and material implementation to lead-run.
+description: Start or continue a session-local native subagent when the user wants a bounded task handed to an executor and may steer that same agent across turns. Use for investigation, diagnosis, drafting a requested deliverable, operational chores, and eligible low-impact changes. The lead chooses the prompt, model, tools, and permissions. Route collaborative direction-setting to lead-discuss; capture material implementation without a ticket through lead-ticket, then run it through lead-run.
 ---
 
 # Delegate
