@@ -468,6 +468,16 @@
     },
     "260923-research-pi-parent-child-loopback-control-channel": {
       "registered_at": "2026-09-24T10:38:33Z"
+    },
+    "260924-feat-origin-ticket-ownership-index": {
+      "registered_at": "2026-09-24T10:40:00Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-09-24T10:40:00Z"
+      }
     }
   }
 }
