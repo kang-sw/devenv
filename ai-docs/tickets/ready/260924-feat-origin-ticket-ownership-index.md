@@ -898,6 +898,67 @@ I21, I22; the view clauses of I1,
 I3, and I11 wait for Phase 3. Every existing ticket-tool test must pass
 unchanged with no ref present.
 
+### Result (57c930bb) - 2026-09-24
+
+**Tool surface.**
+
+- `tickets.acquire(ticket_stem, track?, dangerously_override_lease_status?, reason?, format?)`
+- `tickets.release(ticket_stem, format?)`
+- `tickets.index_init(check?, format?)`: lead-only, because it pushes to origin with the user's credentials.
+
+The success text is `status: <effect>`, plus `owner:`, `impl_branch:`, `warning:`, and `report:` lines. The effects are:
+
+- `acquired`
+- `takeover`
+- `refreshed`
+- `impl_recorded`
+- `released`
+- `not_leased`
+- `pending` (offline)
+
+Refusals are `isError` responses that name the holder and the flag. The legacy mock returns exactly `ok` as text, or `{"status":"ok"}` as JSON. The check mode prints `state: initialized|uninitialized|no-origin|unreachable`.
+
+All four tools were added to the three `runtime.json` files. `LIVE_TOOL_NAMES` in the Pi bridge test was updated, and its contract count went from 58 to 61.
+
+**Library (`internal/wsindex`).**
+
+- `apply.go`:
+  - `Applier.Live` and `Applier.Replay` implement the matrix, the impl record, the closed lease, the origin-closed refusal, and the replay rules (remote wins, override bound to its recorded holder, landed stems resolved silently).
+  - `Maintain` runs pruning and GC.
+  - `NeedsOverride` covers each operation's override rows.
+- `client.go`:
+  - `Submission` carries a `Prepare` hook that runs only once the index is known to be in use, so validation never reaches an index-absent project.
+  - Offline evaluation runs through `Overlay`, the cached index with this clone's pending entries replayed.
+- `origin.go`:
+  - Origin-first review-track: the `refs/remotes/origin/HEAD:AGENTS.md` declaration, then `wsreview.ResolveTrackFallback`.
+  - Best-effort track fetch and origin inventory from `ls-tree`.
+  - `LoadContext`: fetches the track for acquire, or when a pending acquire will replay; otherwise reads the local tracking ref.
+  - The lazy GC predicate and `InitSource`.
+- The MCP layer (`internal/mcp/ticket_index.go`) adds the piggyback on `create_empty`, `move`, `close` (close op), and `sage_stamp`. It prints extra lines only in index mode: reports, the offline note, or a one-line failure. It never fails the host operation.
+
+**Verification.**
+
+- `go test ./internal/wsindex/` covers:
+  - the matrix: C1–C5, C8
+  - D2 at library level
+  - C7, I13, E2, I2, I12, I4, I16, E3, E6
+  - `NeedsOverride`
+  - continuity: I18, I19, I20, I21, I22
+- `go test ./internal/mcp/ -run 'TestIndexAbsent|TestA10|TestA12|TestInit|TestAcquire|TestCloseLease|TestOffline|TestFlush|TestB1|TestB4|TestB5'` covers A1 (verbs, plus move/create_empty output identical to a no-origin repo), A3, A10, A12, A6, A7, A8, C1–C4, C8, B7, D1–D5, E4/E5 acquire refusal, I17, E1 through close and prune, E2, A4/A11/E10/I1/I5/I9/I11, I3/I10, I2/I12, I4/I13, B1, B4/E8, B5/E3/E6/E7.
+- `go test -race -count=2 ./internal/wsindex/` passes.
+- The Pi `bridge`, `native-tool-registration`, and `version-check` node tests pass.
+- Existing ticket-tool tests pass unchanged.
+- Environment-dependent failures remain, all unrelated to this change:
+  - `TestServeStdioConfigResolveAgentFallsBackToDefault` and wsconfig's `TestResolveAgentTierForHarnessFallsBackToDefault` read the developer's home config and pass with a clean HOME.
+  - `test_skill_dispatch_contracts.test_delegate_and_sibling_exact_prose` asserts a shim description that already differs on the base.
+
+**Decisions.**
+
+- Init commits carry a random `init-nonce:` line. Without it, two identical inits in the same second produce the same oid, and a delete-and-reinit reads as continuous history (found by I19).
+- Index commits use `commit-tree --no-gpg-sign`, so a user's signing config cannot prompt or fail.
+- A pending override is kept only when the overlaid view needs it. It records the overridden holder's triple so replay can compare against it.
+- GC fetches every origin head (`+refs/heads/*:refs/remotes/origin/*`) only when GC is due. If that fetch fails, GC prunes nothing.
+
 ### Phase 3: Query view, queue filter, and move/close guards
 
 **Goal.**
