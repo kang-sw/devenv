@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { describe, test } from "node:test";
 import { allocateAgentHome, createAgentStorageContext, inspectOwnedHomeRemoval, isOwnedSessionPath, observeSessionWrite, ownershipPath, pruneStaleAgentHomes, readOwnerArtifacts, readOwnership, removeOwnedAgentHome, reportOwnershipDiagnostic, touchOwnership, writeOwnerArtifact, writeOwnership, updateOwnership } from "../src/agent-storage.ts";
 import { ownerNotifyRef, validateForkReadiness } from "../src/spawner.ts";
+import { symlinkSkip } from "./fixtures/symlink-probe.ts";
 
 describe("agent storage", () => {
   test("ownership diagnostics are bounded per reporter session and never expose raw errors", () => {
@@ -76,7 +77,7 @@ describe("agent storage", () => {
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
-  test("owner artifacts use the storage boundary and refuse a symlinked bucket", () => {
+  test("owner artifacts use the storage boundary and refuse a symlinked bucket", { skip: symlinkSkip() }, () => {
     const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
     const outside = mkdtempSync(join(tmpdir(), "ws-pi-storage-outside-"));
     try {
@@ -99,7 +100,7 @@ describe("agent storage", () => {
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
-  test("rejects a pre-existing owned session symlink and metadata whose encoded home differs from its locator", () => {
+  test("rejects a pre-existing owned session symlink and metadata whose encoded home differs from its locator", { skip: symlinkSkip() }, () => {
     const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
     try {
       const context = createAgentStorageContext("lead-1", root);
@@ -117,7 +118,7 @@ describe("agent storage", () => {
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
-  test("validates the complete session candidate and regular-file type at every ownership boundary", () => {
+  test("validates the complete session candidate and regular-file type at every ownership boundary", { skip: symlinkSkip() }, () => {
     const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
     try {
       const owned = allocateAgentHome(createAgentStorageContext("lead-1", root), "agent-5", "worker");
@@ -378,7 +379,7 @@ describe("agent storage", () => {
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
-  test("retains unknown and protected children, mismatched descriptors, and homes containing symlinks", () => {
+  test("retains unknown and protected children, mismatched descriptors, and homes containing symlinks", { skip: symlinkSkip() }, () => {
     const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
     try {
       const context = createAgentStorageContext("lead-1", root);
@@ -415,7 +416,7 @@ describe("agent storage", () => {
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
-  test("refuses removal when the home, lead subtree, or namespace is redirected through a symlink", () => {
+  test("refuses removal when the home, lead subtree, or namespace is redirected through a symlink", { skip: symlinkSkip() }, () => {
     for (const level of ["home", "owner", "namespace"] as const) {
       const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
       try {
@@ -434,7 +435,7 @@ describe("agent storage", () => {
     }
   });
 
-  test("a replacement symlink racing deletion is never traversed outside the owned home", () => {
+  test("a replacement symlink racing deletion is never traversed outside the owned home", { skip: symlinkSkip() }, () => {
     const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
     try {
       const context = createAgentStorageContext("lead-1", root);

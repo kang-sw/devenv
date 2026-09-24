@@ -35,6 +35,7 @@ import { evictForCapacity, sendToAgent, type RpcAgentRecord, type RpcAgentRegist
 import { captureOrphans, readAndClearSidecarAt, reviveOrphans, writeSidecarAt } from "../src/agent-sidecar.ts";
 import { createThreadRegistryHandle, ensureRespondent, type ThreadRecord } from "../src/ask.ts";
 import { truncateToWidth, visibleWidth } from "../src/pi-tui.ts";
+import { symlinkSkip, symlinksAvailable } from "./fixtures/symlink-probe.ts";
 
 const roots = new Set<string>();
 afterEach(() => { for (const root of roots) rmSync(root, { recursive: true, force: true }); roots.clear(); });
@@ -601,6 +602,10 @@ describe("stale-record repair", () => {
   test("a failed record write removes no home", t => {
     silenceDiagnostics(t);
     for (const variant of ["no cost", "symlinked evicted directory"] as const) {
+      if (variant === "symlinked evicted directory" && !symlinksAvailable()) {
+        t.diagnostic(`${variant}: skipped; ${symlinkSkip()}`);
+        continue;
+      }
       const { storage, registry, home } = pendingFixture();
       const outside = join(root(), "outside");
       mkdirSync(outside);
@@ -734,7 +739,7 @@ describe("freshness", () => {
 });
 
 describe("containment", () => {
-  test("a symlinked evicted/ directory is refused: not read, counted, written through, or deleted through", t => {
+  test("a symlinked evicted/ directory is refused: not read, counted, written through, or deleted through", { skip: symlinkSkip() }, t => {
     silenceDiagnostics(t);
     const storage = createAgentStorageContext("lead", root());
     const child = record("child", storage, .5);
@@ -761,7 +766,7 @@ describe("containment", () => {
     assert.equal(readFileSync(join(outside, "child.json"), "utf8"), planted);
   });
 
-  test("a symlinked record file is refused: not read, counted, written through, or deleted through", t => {
+  test("a symlinked record file is refused: not read, counted, written through, or deleted through", { skip: symlinkSkip() }, t => {
     silenceDiagnostics(t);
     const storage = createAgentStorageContext("lead", root());
     const child = record("child", storage, .5);
