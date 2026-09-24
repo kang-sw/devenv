@@ -118,7 +118,7 @@ registration and ownership on top without changing folder semantics.
   - The v1 schema reserves room for the deferred status-authority fields
     (stage, project settings, terminal state), so v2 needs no migration.
 - **Registration.**
-  - Every ticket-touching tool call piggybacks an idempotent "register stem if
+  - Every mutating ticket tool call (never `tickets.query`) piggybacks an idempotent "register stem if
     absent" write.
   - The first registrant wins. A true stem collision across branches is treated
     as an accident and not handled.
@@ -154,7 +154,8 @@ registration and ownership on top without changing folder semantics.
 - **Integration.**
   - `tickets.move` and `tickets.close` block or warn on a ticket another track
     owns.
-  - `tickets.close` clears ownership automatically.
+  - `tickets.close` sets the lease phase to `closed`, and landed-closure
+    pruning clears it.
   - The owner is surfaced in `tickets.query`, `git.status`, and queue
     selection.
   - In index mode, a `lead-scope-worktree` scope assignment is an acquire.
@@ -265,11 +266,36 @@ registration and ownership on top without changing folder semantics.
   `dangerously-override-lease-status` plus a reason. There is no time-based
   threshold.
 - **Registration.**
-  - Stems register via piggyback on every ticket operation.
+  - Stems register via piggyback on every mutating ticket operation. Query
+    never registers.
   - The first registrant wins, and collisions are not handled.
   - Acquire requires a local file plus registration, and piggybacks
     registration when needed.
 - **Query.** `tickets.query` shows authority intersected with local files.
+- **Owner-conflict matrix (acquire / move / close).** The matrix applies when
+  the existing holder differs from the caller:
+
+  | existing holder | acquire | move / close |
+  |---|---|---|
+  | different email | refuse without the dangerous flag + reason | refuse without the dangerous flag + reason |
+  | same email, different clone | proceed with a warning | proceed with a warning |
+  | same clone, different track | refuse without the dangerous flag + reason | proceed with a warning |
+
+  - Owner identity is the triple `(email, clone_id, track)`.
+  - `tickets.release` removes only one's own lease.
+- **No-index behavior.** `tickets.acquire` and `tickets.release` are an
+  index-absent no-op.
+- **Worker impl record.** The worker records impl by calling `tickets.acquire`
+  from its impl branch, which requires a matching owner triple.
+  - `tickets.close` on an unleased ticket creates a `closed` lease owned by the
+    caller.
+- **Queue filter.** A server-side `tickets.query` ownership filter, following
+  the `assigned_to_me` precedent. Collapse applies only to compact text.
+- **Origin-closed check.** Acquire fetches the origin review-track and refuses a
+  stem that is absent from the index but closed there. Query and queue use the
+  local remote-tracking tree as a hint.
+  - The review-track tree serves as the done list, so the index keeps no done
+    list or tombstones.
 - **Lease phase.** A lease carries a binary phase, `active` or `closed`
   (pending landing), and stage stays out of the index in the MVP.
   - `tickets.close` sets `closed` rather than deleting the lease.
@@ -278,7 +304,8 @@ registration and ownership on top without changing folder semantics.
     an impl-branch close and its merge.
 - **Integration items.**
   - owner guard on move and close
-  - auto-clear on close
+  - close sets the lease phase to `closed`; landed-closure pruning clears it
+    (see Lease phase)
   - owner surfaced everywhere
   - scope assignment equals acquire
 - **Pruning.** Closure-landed pruning, plus a piggybacked monthly GC that never
