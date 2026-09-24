@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 94d733c9f1e322dc
 sage-review-completeness-reviewed: 94d733c9f1e322dc
+completed: 2026-09-24
 ---
 
 # Pi retention folds cost into other owners' checkpoints without a lock
@@ -134,3 +135,36 @@ Verification:
 - **Containment:** a symlinked `evicted/` directory or record path is refused, as other owner artifacts are.
 - **Fault seams:** the crash-window, rename-back and detach-failure cases are driven through `removeOwnedAgentHome`'s injectable `remove` or an equivalent test hook placed between the record write and the detach. They do not rely on timing.
 - **Full suite:** `npm test` in `agents-plugin-pi/` passes.
+
+### Result (3dc1281c) - 2026-09-24
+
+Landed on `impl/develop/plank-posh-truck` in 94c87426, 52dceca8, 03305a62, d65040e4 and 3dc1281c.
+
+- **Records.** `removeOwnedAgentHome` takes an opt-in `evictionCost` (and a `beforeDetach` test seam). It writes `ws-agents/<owner>/.cost-estimate/evicted/<agentId>.json` after the final eligibility check and before the detach, merging with any existing record (`mergeCumulativeCost` floor). A failed write fails the removal with the home kept. Its `finally` deletes the record whenever the removal held the lock and ends with the home at its path, which is the stale-record repair.
+- **Callers.** Retention passes `retentionEvictionCost` (the checkpoint's tracked floor merged with the ownership telemetry, read-only) and capacity eviction passes `capacityEvictionCost`. `persistEvictedAgentCost` writes a record only for an unowned candidate. `foldAndPersist`, `restore` and `persistOwnedTelemetryRollup` are gone, and `evictedBaseline` is legacy and read-only.
+- **Readers.** `CostEstimateState` sums baseline, records and live agents at read time. It re-reads `evicted/` on an `ino:mtimeMs` signal, which is cached only once it is older than 2 s and never after a failed read. A recorded agentId is excluded from `agents[]` and the live sum, and its registry entry is dropped only when `isOwnedHomeGone` holds: home absent, no ownership-lock claim, home still absent. It stays registered and excluded while it has a client, a launch in flight, or a home that is present or detached under a held claim.
+- **Never runs again.** `sendToAgent` refuses a recorded agentId before and after the activity claim and after the explore probe's await, with `removedAgentMessage`. The same applies to the unknown-id branch, once reconcile has already dropped the entry. `ensureRespondent` refuses a recorded fork before `rehydrateForkRecord`. `parseOrphans` and `reviveOrphans` skip a recorded agentId.
+- **Containment.** Nested owner buckets get per-level symlink refusal, and symlinked record files are refused on read, write and delete.
+
+Verification:
+
+- `test/eviction-records.test.ts` has 28 tests covering every verification bullet above, with cross-process cases synchronized by barrier files and fault seams driven through `remove`/`beforeDetach`. Each production rule was mutation-checked.
+- The old fold-asserting tests in `agent-footer`, `agent-usage-rollup` (unit and integration) and `session-retention` were rewritten to the record contract.
+- `npm test` in `agents-plugin-pi/` passes: 1797 tests, 1795 pass, 2 skipped, 0 fail.
+
+Decisions and findings:
+
+- **Held-claim drop race (03305a62).** The test leaf found that a reconcile during a held removal (home staged) dropped the registry entry. The remover's rename-back then deleted the record, so the cost was lost and resume answered "unknown agentId". It is fixed with `isOwnedHomeGone`.
+- **Review round 1.**
+  - Fixed: the untested record merge and tracked-floor merge, the settle window, the client/launching guard, a failed read hiding every record, and the post-probe gap.
+  - The registry drop stays in `reconcile`, which is the only place that reads the records; the side effect is now documented.
+- **Known limitation, accepted and not fixed.** The record rule was extended beyond the ticket's text.
+  - Scenario: a recorded orphan is skipped by sidecar revival, and its sidecar entry is consumed on read. If a later removal then repairs the record with the home in place, the child is no longer in the restarted owner's registry. It is undercounted until retention removes it (which writes a fresh record), and it cannot be resumed.
+  - Line 64's "or the next sidecar revival counts the child again" therefore does not hold across an owner restart. It is never counted twice.
+  - The reviewer's alternative (revive recorded orphans but exclude them from counts) contradicts this ticket's "Revival: sidecar revival skips an agentId that has a record", so the code follows the explicit rule.
+  - Scenario B, the held claim during revival, predates this ticket's `existsSync` skip. A follow-up idea ticket is proposed to the lead.
+- **Observations, not acted on.**
+  - A permanently unreadable record makes every reconcile rescan `evicted/`, because a failed read is never cached. That is the chosen trade-off against hiding records.
+  - One round-2 full-suite failure of the failed-read test coincided with the test reviewer's concurrent mutation checks in the same worktree. The mutation that caches the signal after a failed read gives exactly the observed value. It did not reproduce in 12 parallel runs.
+  - The re-check in `sendToAgent` after the activity claim and the post-probe re-check have no dedicated test.
+- **Environment.** The worktree's `agents-plugin-pi/node_modules` was provisioned as an untracked symlink tree. `pi-web-access` is a real copy, because the web-search realpath check requires it. It is not committed.

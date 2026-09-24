@@ -11,7 +11,8 @@
  *
  * A hop's descendant value is its cost estimate's direct total
  * (`descendantUsageValue` in `agent-footer.ts`): the subtree totals of its
- * registry-resident direct children plus its checkpoint's evicted baseline.
+ * registry-resident direct children plus its removed children (the
+ * checkpoint's legacy evicted baseline and its per-child eviction records).
  *
  * Values, not deltas, travel so a replay is harmless. Ordering is per launch:
  * every report carries the launch generation (stamped by the channel) and a

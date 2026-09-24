@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import fsPromises from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, test } from "node:test";
-import { allocateAgentHome, createAgentStorageContext, updateOwnership } from "../src/agent-storage.ts";
+import { allocateAgentHome, createAgentStorageContext, readEvictionRecord, readEvictionRecords, updateOwnership } from "../src/agent-storage.ts";
 import {
   createAgentFooterController,
   createAgentFooterSessionLifecycle,
@@ -148,7 +148,7 @@ describe("bounded direct-agent estimates", () => {
     controller.stop();
   });
 
-  test("capacity eviction folds each identity once into one bounded checkpoint", () => {
+  test("capacity eviction records each identity once; the checkpoint stays bounded and its legacy baseline unchanged", () => {
     const dir = root(), storage = createAgentStorageContext("lead", dir);
     const old = record("old", storage, .6), kept = record("kept", storage, .2);
     const registry: RpcAgentRegistry = new Map([[old.agentId, old], [kept.agentId, kept]]);
@@ -160,18 +160,19 @@ describe("bounded direct-agent estimates", () => {
     controller.refreshAgents();
     assert.match(component.render(100)[1], /D ~\$0\.80/);
     assert.equal(persistEvictedAgentCost(registry, old), true, "a retry on the same evicted record is idempotent");
+    assert.equal(readEvictionRecord(storage, "old")?.knownUsd, .6);
     controller.stop();
     const saved = checkpoint(storage);
-    assert.equal(saved.evictedBaseline.knownUsd, .6);
+    assert.equal(saved.evictedBaseline.knownUsd, 0, "the legacy baseline is never increased");
     assert.deepEqual(saved.agents.map((entry: any) => entry.agentId), ["kept"]);
     assert.ok(saved.agents.length <= registry.size, "checkpoint identity count is bounded by the registry");
     const restoredRegistry: RpcAgentRegistry = new Map([[kept.agentId, kept]]), restoredUi = context();
     const restored = createAgentFooterController(restoredUi.ctx, restoredRegistry, storage, { truncateToWidth, visibleWidth });
-    assert.match(restoredUi.mount().render(100)[1], /D ~\$0\.80/, "reload adds the evicted baseline and restored live identity exactly once");
+    assert.match(restoredUi.mount().render(100)[1], /D ~\$0\.80/, "reload adds the eviction record and restored live identity exactly once");
     restored.stop();
   });
 
-  test("many unique evictions remain one scalar baseline plus live registry identities", () => {
+  test("many unique evictions stay one record each plus live registry identities in the checkpoint", () => {
     const dir = root(), storage = createAgentStorageContext("lead", dir), kept = record("kept", storage, .2);
     kept.client = {} as any;
     const registry: RpcAgentRegistry = new Map([[kept.agentId, kept]]), ui = context();
@@ -182,9 +183,11 @@ describe("bounded direct-agent estimates", () => {
       registry.set(old.agentId, old);
       assert.deepEqual(evictForCapacity(registry, 2), { ok: true, evictedLabel: old.agentId });
     }
+    assert.equal(descendantUsageValue(registry)!.knownUsd.toFixed(2), "0.84", "64 records of .01 plus the kept .2");
     controller.stop();
     const saved = checkpoint(storage);
-    assert.equal(saved.evictedBaseline.knownUsd.toFixed(2), "0.64");
+    assert.equal(saved.evictedBaseline.knownUsd, 0);
+    assert.equal(readEvictionRecords(storage).size, 64);
     assert.deepEqual(saved.agents.map((entry: any) => entry.agentId), ["kept"]);
     assert.ok(saved.agents.length <= registry.size, "historical eviction identities never accumulate in the checkpoint");
   });
@@ -205,8 +208,9 @@ describe("bounded direct-agent estimates", () => {
     second.stop();
   });
 
-  test("failed eviction checkpoint retries without double folding", (t) => {
+  test("an unowned eviction whose record write fails retries without double counting", (t) => {
     const dir = root(), storage = createAgentStorageContext("lead", dir), child = record("child", storage, .4);
+    child.ownership = undefined;
     const registry: RpcAgentRegistry = new Map([[child.agentId, child]]), ui = context();
     const controller = createAgentFooterController(ui.ctx, registry, storage, { truncateToWidth, visibleWidth });
     const component = ui.mount(), bucket = join(storage.root, "ws-agents", storage.ownerSessionId, ".cost-estimate"), blocked = join(dir, "blocked-checkpoint");
@@ -214,14 +218,17 @@ describe("bounded direct-agent estimates", () => {
     const diagnostics = t.mock.method(console, "error", () => {});
     assert.equal(persistEvictedAgentCost(registry, child), false);
     assert.equal(persistEvictedAgentCost(registry, child), false);
-    assert.match(component.render(100)[1], /D ~\$0\.40/, "failed retries leave the mounted state unfurled");
+    assert.match(component.render(100)[1], /D ~\$0\.40/, "failed retries leave the mounted state unchanged");
     assert.ok(diagnostics.mock.callCount() >= 2, "each failed durability boundary is surfaced");
     rmSync(bucket);
     assert.equal(persistEvictedAgentCost(registry, child), true);
-    assert.equal(persistEvictedAgentCost(registry, child), true, "a committed fold stays idempotent");
+    assert.equal(persistEvictedAgentCost(registry, child), true, "a committed record stays idempotent");
+    assert.deepEqual(readEvictionRecord(storage, "child"), { knownUsd: .4, knownContributors: 1, unknownContributors: 0, descendants: 1 });
     registry.delete(child.agentId);
+    controller.refreshAgents();
+    assert.match(component.render(100)[1], /D ~\$0\.40/, "the child counts once, through its record");
     controller.stop();
-    assert.equal(checkpoint(storage).evictedBaseline.knownUsd, .4);
+    assert.equal(checkpoint(storage).evictedBaseline.knownUsd, 0);
   });
 
   test("ordinary child stop persists the post-reconciliation estimate boundary", async () => {
@@ -247,20 +254,20 @@ describe("bounded direct-agent estimates", () => {
     const old = record("old", storage, .25), child = record("child", storage, .5);
     const registry: RpcAgentRegistry = new Map([[old.agentId, old], [child.agentId, child]]);
     registerAgentCostOwner(registry, storage);
-    // Before any footer: an eviction folds and persists, then the reported
-    // value picks up a change the checkpoint does not have yet.
+    // Before any footer: an eviction records the evicted child, then the
+    // reported value picks up a change no checkpoint has yet.
     updateOwnership(old.ownership!.home, { liveness: { lifecycle: "stopped", running: false } });
     assert.deepEqual(evictForCapacity(registry, 2), { ok: true, evictedLabel: "old" });
     child.telemetry = telemetry("child-session", child.sessionPath, 1);
     assert.equal(descendantUsageValue(registry)!.knownUsd, 1.25);
-    assert.equal(checkpoint(storage).agents[0].cost.knownUsd, .5, "precondition: the checkpoint lags the in-memory estimate");
+    assert.equal(existsSync(join(storage.root, "ws-agents", storage.ownerSessionId, ".cost-estimate", "checkpoint.json")), false, "precondition: no checkpoint holds the in-memory estimate");
     // A regressing snapshot is held at the estimate's remembered maximum.
     child.telemetry = undefined;
 
     const ui = context(), controller = createAgentFooterController(ui.ctx, registry, storage, { truncateToWidth, visibleWidth });
     const component = ui.mount();
     controller.refreshAgents();
-    assert.match(component.render(100)[1], /D ~\$1\.25 \+ \?/, "the evicted baseline and the remembered 1.00, not a fresh estimate's .50 from disk");
+    assert.match(component.render(100)[1], /D ~\$1\.25 \+ \?/, "the eviction record and the remembered 1.00, not a fresh estimate's unknown from disk");
     assert.deepEqual(descendantUsageValue(registry), { knownUsd: 1.25, knownContributors: 2, unknownContributors: 1, descendants: 2 });
     child.telemetry = telemetry("child-session", child.sessionPath, 1.5);
     controller.refreshAgents();

@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "node:test";
-import { allocateAgentHome, createAgentStorageContext, readOwnership, reportOwnershipDiagnostic, writeOwnership } from "../src/agent-storage.ts";
+import { allocateAgentHome, createAgentStorageContext, readEvictionRecord, readOwnership, reportOwnershipDiagnostic, writeOwnership } from "../src/agent-storage.ts";
 import type { PersistedOrphan } from "../src/agent-sidecar.ts";
 import { applySessionShutdownOwnershipDiagnostics, applySessionStartAgentRetention, applySessionStartOwnershipDiagnostics } from "../src/index.ts";
 import { ownerNotifyRef } from "../src/spawner.ts";
@@ -33,9 +33,10 @@ describe("controller session-start child retention", () => {
       assert.equal(existsSync(stale.home), false);
       assert.equal(existsSync(recent.home), true);
       assert.deepEqual(retained.map(entry => entry.agentId), [recent.agentId, "legacy"]);
-      const saved = JSON.parse(readFileSync(join(root, "ws-agents", "other-lead", ".cost-estimate", "checkpoint.json"), "utf8"));
-      assert.deepEqual(saved.evictedBaseline, { knownUsd: .4, knownContributors: 1, unknownContributors: 0, descendants: 1 }, "retention folds only the deleted direct record into the scalar baseline");
-      assert.deepEqual(saved.agents, [], "retention does not discover or retain identities for sibling homes");
+      const owner = createAgentStorageContext("other-lead", root);
+      assert.deepEqual(readEvictionRecord(owner, stale.agentId), { knownUsd: .4, knownContributors: 1, unknownContributors: 0, descendants: 1 }, "retention records only the deleted direct child");
+      assert.equal(readEvictionRecord(owner, recent.agentId), undefined, "a retained sibling gets no record");
+      assert.equal(existsSync(join(root, "ws-agents", "other-lead", ".cost-estimate", "checkpoint.json")), false, "retention never writes another owner's checkpoint");
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
@@ -53,7 +54,7 @@ describe("controller session-start child retention", () => {
 
       assert.strictEqual(applySessionStartAgentRetention("fork", root, config, recovered), recovered);
       assert.equal(existsSync(stale.home), true, "a fork child never runs machine-wide retention");
-      assert.equal(existsSync(join(root, "ws-agents", "other-lead", ".cost-estimate", "checkpoint.json")), false, "a fork child never folds another owner's checkpoint");
+      assert.equal(existsSync(join(root, "ws-agents", "other-lead", ".cost-estimate")), false, "a fork child never records into another owner's storage");
 
       applySessionStartAgentRetention(undefined, root, config, recovered);
       assert.equal(existsSync(stale.home), false, "the tree-root lead still prunes the same stale home");

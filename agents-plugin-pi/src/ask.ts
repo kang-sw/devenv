@@ -130,7 +130,8 @@ import { loadHostPiTui, wrapTextWithAnsi, type Component, type EditorTheme, type
 import { captureForkContext, captureRegisteredTools, captureUnflushedForkSource, effectiveForkDescriptor, type ForkContext } from "./fork-context.ts";
 import { renameWithWindowsRetry, type RenameRetryHooks } from "./atomic-write.ts";
 import type { LeadPromptRef } from "./lead-bootstrap.ts";
-import { readOwnership, validDescriptor } from "./agent-storage.ts";
+import { readOwnership, removedAgentMessage, validDescriptor } from "./agent-storage.ts";
+import { isRemovedAgent } from "./agent-footer.ts";
 import { parseTelemetry, type AgentTelemetry, type TelemetryOrigin } from "./agent-telemetry.ts";
 import {
   OwnerSteeringComponent,
@@ -1475,6 +1476,13 @@ export async function ensureRespondent(
       // relaunch happens inside `sendToAgent` on the owner's first message.
       if (!thread.forkResume) {
         notify(ctx, `ws: thread ${thread.threadId}'s fork can no longer be resumed (no persisted session).`, "error");
+        return undefined;
+      }
+      // Retention or eviction removed (or is removing) this fork's home and
+      // recorded its cost; a rehydrated relaunch would start an empty session.
+      const persistedOwnership = thread.forkResume.ownership;
+      if (isRemovedAgent(rpcRegistry, agentId, persistedOwnership && validDescriptor(persistedOwnership) && persistedOwnership.agentId === agentId ? persistedOwnership : undefined)) {
+        notify(ctx, `ws: thread ${thread.threadId}'s fork cannot be resumed. ${removedAgentMessage(agentId)}.`, "error");
         return undefined;
       }
       rpcRegistry.set(agentId, rehydrateForkRecord(agentId, thread.forkResume));

@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, test } from "node:test";
 import { ChildChannel, ParentChannel } from "../src/agent-channel.ts";
-import { allocateAgentHome, createAgentStorageContext, persistOwnershipTelemetry, readOwnership, updateOwnership } from "../src/agent-storage.ts";
+import { allocateAgentHome, createAgentStorageContext, persistOwnershipTelemetry, readEvictionRecord, readOwnership, removeOwnedAgentHome, updateOwnership } from "../src/agent-storage.ts";
 import { parseTelemetry, type CumulativeCost } from "../src/agent-telemetry.ts";
 import {
   DESCENDANT_USAGE_MESSAGE,
@@ -24,7 +24,7 @@ import {
   createDescendantUsageReporter,
   descendantUsageOf,
 } from "../src/agent-usage-rollup.ts";
-import { descendantUsageValue, persistAgentCostCheckpoint, persistEvictedAgentCost, persistOwnedTelemetryRollup, registerAgentCostOwner } from "../src/agent-footer.ts";
+import { descendantUsageValue, persistAgentCostCheckpoint, persistEvictedAgentCost, registerAgentCostOwner, retentionEvictionCost } from "../src/agent-footer.ts";
 import { evictForCapacity, refreshAgentTelemetry, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
 import { captureOrphans, readAndClearSidecarAt, reviveOrphans, writeSidecarAt } from "../src/agent-sidecar.ts";
 
@@ -45,6 +45,9 @@ function record(agentId: string, storage: Storage, ownUsd: number | undefined): 
   return value;
 }
 function stopped(child: RpcAgentRecord): void { updateOwnership(child.ownership!.home, { liveness: { lifecycle: "stopped", running: false } }); }
+/** Retention's removal of one stopped child: its record is written under the removal lock. */
+function retain(child: RpcAgentRecord) { return removeOwnedAgentHome(readOwnership(child.ownership!.home)!, undefined, undefined, { evictionCost: retentionEvictionCost }); }
+const ZERO: CumulativeCost = { knownUsd: 0, knownContributors: 0, unknownContributors: 0, descendants: 0 };
 function checkpoint(storage: Storage): any {
   return JSON.parse(readFileSync(join(storage.root, "ws-agents", storage.ownerSessionId, ".cost-estimate", "checkpoint.json"), "utf8"));
 }
@@ -283,7 +286,7 @@ describe("per-hop value and the fold rule", () => {
     assert.equal(value!.unknownContributors, 0);
   });
 
-  test("evicting a direct child folds its whole subtree into the baseline exactly once, and a restart rebuilds the same value", () => {
+  test("evicting a direct child records its whole subtree exactly once, and a restart rebuilds the same value", () => {
     const storage = createAgentStorageContext("hop", root());
     const evicted = record("evicted", storage, .5), kept = record("kept", storage, .25);
     acceptDescendantUsage(evicted, 1, { seq: 1, usage: usd(2, 2) });
@@ -292,25 +295,27 @@ describe("per-hop value and the fold rule", () => {
     assert.equal(descendantUsageValue(registry)!.knownUsd, 2.75);
     stopped(evicted);
     assert.deepEqual(evictForCapacity(registry, 2), { ok: true, evictedLabel: "evicted" });
-    // Whole object: folding only the own usage still keeps knownUsd at 2.5
+    // Whole object: recording only the own usage still keeps knownUsd at 2.5
     // through the monotonic merge with the reconciled entry; the contributor
     // counts are what show it.
     const subtree = { knownUsd: 2.5, knownContributors: 2, unknownContributors: 0, descendants: 3 };
-    assert.deepEqual(checkpoint(storage).evictedBaseline, subtree, "own .5 plus stored descendant 2");
-    assert.equal(persistEvictedAgentCost(registry, evicted), true, "a retry does not fold again");
-    assert.deepEqual(checkpoint(storage).evictedBaseline, subtree);
-    assert.equal(descendantUsageValue(registry)!.knownUsd, 2.75, "eviction moves the subtree into the baseline without changing the value");
+    assert.deepEqual(readEvictionRecord(storage, "evicted"), subtree, "own .5 plus stored descendant 2");
+    assert.equal(persistEvictedAgentCost(registry, evicted), true, "a retry writes no second record");
+    assert.deepEqual(readEvictionRecord(storage, "evicted"), subtree);
+    assert.equal(descendantUsageValue(registry)!.knownUsd, 2.75, "eviction moves the subtree into its record without changing the value");
     persistAgentCostCheckpoint(registry);
+    assert.deepEqual(checkpoint(storage).evictedBaseline, ZERO, "the legacy baseline is never increased");
+    assert.deepEqual(checkpoint(storage).agents.map((entry: any) => entry.agentId), ["kept"]);
 
     // Restart: a fresh registry revived from the kept child's durable record.
     const revived = { ...kept, telemetry: readOwnership(kept.ownership!.home)!.telemetry } as RpcAgentRecord;
     delete revived.descendantUsage; delete revived.descendantUsageOrder;
     const restarted: RpcAgentRegistry = new Map([[revived.agentId, revived]]);
     registerAgentCostOwner(restarted, storage);
-    assert.equal(descendantUsageValue(restarted)!.knownUsd, 2.75, "the checkpoint restores the fold; nothing is counted twice");
+    assert.equal(descendantUsageValue(restarted)!.knownUsd, 2.75, "the record restores the removed subtree; nothing is counted twice");
   });
 
-  test("an identity that leaves the registry without a removal is dropped, not folded, so a later retention removal folds it once", () => {
+  test("an identity that leaves the registry without a removal is dropped, not recorded, so a later retention removal records it once", () => {
     const storage = createAgentStorageContext("hop", root());
     const child = record("child", storage, .5);
     acceptDescendantUsage(child, 1, { seq: 1, usage: usd(1) });
@@ -326,15 +331,18 @@ describe("per-hop value and the fold rule", () => {
     assert.equal(descendantUsageValue(restarted)!.knownUsd, 0);
     persistAgentCostCheckpoint(restarted);
     assert.equal(checkpoint(storage).evictedBaseline.knownUsd, 0, "no fold without a removal");
+    assert.equal(readEvictionRecord(storage, "child"), undefined, "no record without a removal");
     assert.deepEqual(checkpoint(storage).agents, []);
 
-    // Retention removes the home: one fold of the subtree total.
+    // Retention removes the home: one record of the subtree total.
     stopped(child);
-    assert.equal(persistOwnedTelemetryRollup(readOwnership(child.ownership!.home)!), true);
-    assert.equal(checkpoint(storage).evictedBaseline.knownUsd, 1.5);
+    assert.equal(retain(child).status, "deleted");
+    assert.equal(readEvictionRecord(storage, "child")!.knownUsd, 1.5);
+    assert.equal(descendantUsageValue(restarted)!.knownUsd, 1.5, "the live hop counts the removed child once, through its record");
+    assert.equal(checkpoint(storage).evictedBaseline.knownUsd, 0, "retention never writes the checkpoint");
   });
 
-  test("a sidecar orphan whose home retention already removed is not revived, so its folded subtree counts once; one whose home exists still is", () => {
+  test("a sidecar orphan whose home retention already removed is not revived, so its recorded subtree counts once; one whose home exists still is", () => {
     const storage = createAgentStorageContext("hop", root());
     const removed = record("removed", storage, .5), kept = record("kept", storage, .25);
     // parseOrphans keeps only an entry with a system prompt or a fork context.
@@ -349,12 +357,11 @@ describe("per-hop value and the fold rule", () => {
     const sidecar = join(root(), "hop.sidecar.json");
     writeSidecarAt(sidecar, orphans);
 
-    // Retention (possibly another owner's lead): fold, then remove the home.
+    // Retention (possibly another owner's lead): record, then remove the home.
     stopped(removed);
-    assert.equal(persistOwnedTelemetryRollup(readOwnership(removed.ownership!.home)!), true);
-    rmSync(removed.ownership!.home, { recursive: true, force: true });
-    const folded = { knownUsd: 1.5, knownContributors: 2, unknownContributors: 0, descendants: 3 };
-    assert.deepEqual(checkpoint(storage).evictedBaseline, folded, "own .5 plus stored descendant 1, folded once");
+    assert.equal(retain(removed).status, "deleted");
+    const recorded = { knownUsd: 1.5, knownContributors: 2, unknownContributors: 0, descendants: 3 };
+    assert.deepEqual(readEvictionRecord(storage, "removed"), recorded, "own .5 plus stored descendant 1, recorded once");
 
     // Restart: the hop revives from the sidecar written before the removal,
     // through the production read path (which re-validates ownership against
@@ -366,7 +373,7 @@ describe("per-hop value and the fold rule", () => {
       try {
         assert.deepEqual(revived.map(entry => entry.agentId), ["kept"], `${path}: positive control: the orphan whose home exists is revived`);
         assert.equal(restarted.has("removed"), false, path);
-        assert.deepEqual(descendantUsageValue(restarted), { knownUsd: 1.75, knownContributors: 3, unknownContributors: 0, descendants: 4 }, `${path}: baseline 1.5 plus kept .25; the removed subtree only through the baseline`);
+        assert.deepEqual(descendantUsageValue(restarted), { knownUsd: 1.75, knownContributors: 3, unknownContributors: 0, descendants: 4 }, `${path}: record 1.5 plus kept .25; the removed subtree only through its record`);
       } finally { for (const entry of revived) entry.ownershipObserverStop?.(); }
     }
   });
