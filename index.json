@@ -527,7 +527,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-09-24T12:44:41Z"
+        "touched_at": "2026-09-24T12:45:19Z",
+        "impl": {
+          "branch": "impl/develop/apply-king-grime"
+        }
       }
     }
   }
