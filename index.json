@@ -483,14 +483,7 @@
       }
     },
     "260924-idea-ownership-dogfood-scratch-a": {
-      "registered_at": "2026-09-24T10:41:27Z",
-      "lease": {
-        "email": "h1-dogfood@example.invalid",
-        "clone_id": "fada5a56c9701de7",
-        "track": "develop",
-        "phase": "active",
-        "touched_at": "2026-09-24T10:41:27Z"
-      }
+      "registered_at": "2026-09-24T10:41:27Z"
     },
     "260924-idea-ownership-dogfood-scratch-b": {
       "registered_at": "2026-09-24T10:41:54Z",
