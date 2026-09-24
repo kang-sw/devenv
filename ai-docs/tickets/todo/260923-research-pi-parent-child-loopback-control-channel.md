@@ -199,6 +199,7 @@ A delegated, provider-free prototype ran in a separate worktree. Its code is spi
     - Reserved file backend: no application-level heartbeat is used, and nothing is appended to the data files. Each side refreshes the mtime of its own lease file. A graceful close unlinks that file, and an expired mtime means a crash. Each connection is numbered and writes to its own files, so a writer that was suspended and later resumes cannot reach a successor connection. Before implementing it, measure mtime resolution and Windows `stat` freshness.
   - **Readiness boundary.** The parent treats a child as ready only after it accepts the child's hello. `RpcClient.start()` resolving does not mean the child is ready. The parent combines a hello timeout with lifecycle observation. The child fails closed: it throws from its extension factory, and Pi then exits at startup. The channel is a required foundation for subagents. If it fails, there is no alternative readiness path.
   - **Unix socket placement and cleanup.** Sockets live in a short per-user directory under `os.tmpdir()`. Each is closed in a process `exit` hook. Before binding, a sweep of that directory probes each socket with connect and unlinks it on `ECONNREFUSED`. Windows named pipes need neither step.
+    - Superseded (2026-09-24) by `260924-bug-pi-channel-and-bridge-races` Decision A (98c51a40). A refused probe alone deleted peers' live sockets during their bind-to-listen window. Sockets are now named `<pid>-<random>.sock`, and the sweep unlinks one only when its owner pid is dead and the probe is refused. A name without a parsable pid is never unlinked.
   - **Delete ordering.** The first action of the adapter's extension factory is deleting the bootstrap values from `process.env`. That happens before any process is spawned, including the ws-mcp stdio client.
 
 ### Proposals
@@ -207,8 +208,13 @@ A delegated, provider-free prototype ran in a separate worktree. Its code is spi
 
 ### Open Questions
 
-- How is an already-started command distinguished from an unconsumed approval across a disconnect? What form should a "started" marker take?
-- How should eviction fold a child's cumulative subtree usage into the owner checkpoint's evicted baseline without double counting?
+- Answered by `260924-feat-pi-agent-channel-approval-decisions`: How is an already-started command distinguished from an unconsumed approval across a disconnect? What form should a "started" marker take?
+  - There is no durable started marker. The child is the authority on consumption: it acknowledges a decision before the command starts and reports a still-waiting `cmd_id` in its reconnect hello.
+  - The 2026-09-24 review sweep found a gap in reading "not reported" as "consumed". `260924-bug-pi-review-sweep-correctness-fixes` tightens it.
+- Answered by `260924-bug-pi-retention-cross-owner-checkpoint-fold`: How should eviction fold a child's cumulative subtree usage into the owner checkpoint's evicted baseline without double counting?
+  - Every removal writes a per-child eviction record, `ws-agents/<owner>/.cost-estimate/evicted/<agentId>.json`, holding the child's own usage plus its stored descendant usage.
+  - An agentId with a record is excluded from every live count.
+  - Retention never writes `checkpoint.json`.
 - Answered by the evidence round: named-pipe default access and remote clients, Unix socket path length, location, and cleanup, bash-tool env timing and extension-load ordering, and acknowledgment latency before grandchild dispatch. See `#### Evidence round (2026-09-24)`.
 
 ### Rejected Alternatives
