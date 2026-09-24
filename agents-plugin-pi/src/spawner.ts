@@ -3400,6 +3400,8 @@ export async function sendToAgent(
     if (record.spawnRole === "explore") {
       if (!record.delegation?.network?.search || !record.delegation.network.fetch) throw new Error("web-search-tool-unavailable: legacy Explore lacks network authority; start a new researcher");
       await createWebSearch({ packageRoot: dirname(dirname(ctx.extensionPath)) }).probe();
+      // The probe yields: an in-process capacity eviction can record this agentId meanwhile.
+      if (removed()) throw new Error(removedAgentMessage(record.agentId));
     }
     const forkLaunch = record.spawnRole === "fork" ? prepareForkLaunch(record.forkContext) : undefined;
     record.launchGeneration = (record.launchGeneration ?? 0) + 1;

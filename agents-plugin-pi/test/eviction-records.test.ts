@@ -355,6 +355,44 @@ describe("crash window", () => {
   });
 });
 
+describe("record value", () => {
+  test("a rewrite merges with the existing record: a lower observation keeps the floor, a higher one replaces it", () => {
+    const storage = createAgentStorageContext("lead", root());
+    assert.equal(writeEvictionRecord(storage, "child", usd(.5)), true);
+    assert.equal(writeEvictionRecord(storage, "child", usd(.25)), true);
+    assert.deepEqual(readEvictionRecord(storage, "child"), { knownUsd: .5, knownContributors: 1, unknownContributors: 1, descendants: 1 }, "the floor survives a regressed observation");
+    assert.equal(writeEvictionRecord(storage, "child", usd(.75)), true);
+    assert.deepEqual(readEvictionRecord(storage, "child"), usd(.75));
+  });
+
+  test("a second removal whose telemetry regressed keeps the first record's floor", () => {
+    const storage = createAgentStorageContext("lead", root());
+    const child = record("child", storage, .5);
+    owner(storage, child);
+    stale(child);
+    assert.equal(writeEvictionRecord(storage, "child", usd(.5)), true, "a first removal recorded .5 and crashed before the detach");
+    const home = child.ownership!.home;
+    const metadata = readOwnership(home)!;
+    writeOwnership({ ...metadata, telemetry: { ...metadata.telemetry!, estimatedUsd: .25 } });
+    assert.deepEqual(retentionEvictionCost(readOwnership(home)!), usd(.25), "precondition: the second removal observes less");
+    assert.deepEqual(pruneStaleAgentHomes(storage.root, 1, retentionOptions).deletedHomes, [home]);
+    assert.equal(readEvictionRecord(storage, "child")!.knownUsd, .5, "the rewrite did not overwrite the floor");
+  });
+
+  test("retention's cost merges the owner checkpoint's tracked value with the ownership telemetry", () => {
+    const storage = createAgentStorageContext("lead", root());
+    const child = record("child", storage, .5);
+    const registry = owner(storage, child);
+    // The owner tracked more than the ownership telemetry on disk shows.
+    child.telemetry = { ...child.telemetry!, estimatedUsd: .75 };
+    assert.deepEqual(descendantUsageValue(registry), usd(.75), "the owner's cost state is live");
+    assert.equal(persistAgentCostCheckpoint(registry), true);
+    assert.deepEqual(checkpoint(storage).agents, [{ agentId: "child", cost: usd(.75) }]);
+    assert.equal(readOwnership(child.ownership!.home)!.telemetry!.estimatedUsd, .5, "precondition: disk telemetry is lower");
+    assert.deepEqual(retentionEvictionCost(readOwnership(child.ownership!.home)!), { knownUsd: .75, knownContributors: 1, unknownContributors: 1, descendants: 1 }, "the tracked floor wins over the regressed telemetry");
+  });
+});
+
 describe("capacity eviction and the legacy baseline", () => {
   test("a legacy nonzero evictedBaseline still counts beside retention and capacity records, and is never changed", () => {
     const storage = createAgentStorageContext("lead", root());
@@ -548,6 +586,18 @@ describe("stale-record repair", () => {
     assert.equal(registry.has("child"), false, "a recorded entry whose home is gone is dropped");
   });
 
+  test("a recorded entry with a live client or a launch in flight is excluded but never dropped", () => {
+    for (const variant of ["client", "launching"] as const) {
+      const { storage, child, registry, home } = pendingFixture();
+      if (variant === "client") child.client = {} as never;
+      else child.launching = Promise.resolve();
+      assert.equal(writeEvictionRecord(storage, "child", usd(.5)), true);
+      rmSync(home, { recursive: true });
+      assert.deepEqual(descendantUsageValue(registry), usd(.75, 2), `${variant}: once, through the record`);
+      assert.equal(registry.has("child"), true, `${variant}: the entry stays registered`);
+    }
+  });
+
   test("a failed record write removes no home", t => {
     silenceDiagnostics(t);
     for (const variant of ["no cost", "symlinked evicted directory"] as const) {
@@ -609,6 +659,43 @@ describe("freshness", () => {
       assert.match(component.render(120)[1], /D ~\$0\.88/, "the footer reflects the new record at the next refresh");
       assert.deepEqual(descendantUsageValue(registry), usd(.875, 3));
     } finally { controller.stop(); }
+  });
+
+  test("a record landing within the settle window of the last read is still seen, even with an unchanged directory signal", () => {
+    const storage = createAgentStorageContext("lead", root());
+    const kept = record("kept", storage, .25);
+    const registry = owner(storage, kept);
+    assert.equal(writeEvictionRecord(storage, "first", usd(.5)), true);
+    // Pin one recent mtime so the second write can reproduce the same signal.
+    const tick = new Date(Date.now());
+    utimesSync(evictedDir(storage), tick, tick);
+    assert.deepEqual(descendantUsageValue(registry), usd(.75, 2));
+    assert.equal(writeEvictionRecord(storage, "second", usd(.125)), true);
+    utimesSync(evictedDir(storage), tick, tick);
+    assert.deepEqual(descendantUsageValue(registry), usd(.875, 3), "a signal younger than the settle window was not cached");
+  });
+
+  test("a failed record read keeps the last good records and is retried, not cached", t => {
+    const storage = createAgentStorageContext("lead", root());
+    const kept = record("kept", storage, .25);
+    const registry = owner(storage, kept);
+    assert.equal(writeEvictionRecord(storage, "first", usd(.5)), true);
+    const past = new Date(Date.now() - 60_000);
+    utimesSync(evictedDir(storage), past, past);
+    assert.deepEqual(descendantUsageValue(registry), usd(.75, 2), "warm");
+    assert.equal(writeEvictionRecord(storage, "second", usd(.125)), true);
+    const older = new Date(Date.now() - 30_000);
+    utimesSync(evictedDir(storage), older, older);
+    const unreadable = join(evictedDir(storage), "second.json");
+    t.mock.method(fs, "readFileSync", ((original: typeof fs.readFileSync) => function (this: unknown, path: fs.PathOrFileDescriptor, ...rest: unknown[]) {
+      if (String(path) === unreadable) throw new Error("injected read failure");
+      return (original as any).call(this, path, ...rest);
+    })(fs.readFileSync));
+    syncBuiltinESMExports();
+    try {
+      assert.deepEqual(descendantUsageValue(registry), usd(.75, 2), "the failed read hides no record already counted");
+    } finally { t.mock.restoreAll(); syncBuiltinESMExports(); }
+    assert.deepEqual(descendantUsageValue(registry), usd(.875, 3), "the settled signal was not cached by the failed read");
   });
 
   test("repeated reconciles and renders with no change do not rescan evicted/", t => {

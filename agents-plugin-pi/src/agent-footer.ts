@@ -3,13 +3,18 @@
  * estimates. Also owns every hop's cost estimate and owner checkpoint, footer
  * or not: the value a hop reports upward as its descendant usage
  * (`descendantUsageValue`) and the value an eviction record holds.
+ *
+ * Side effect on the registry: every cost read reconciles against the owner's
+ * eviction records, and a recorded direct child whose home is gone for good
+ * is dropped from the registry there (its observer stopped). The records are
+ * read only at that point, so the drop lives with them.
  */
 import { homedir } from "node:os";
 import { createFooterGitCache, type GitCacheOptions } from "./footer-git-status.ts";
 import { relative, resolve, sep } from "node:path";
-import { EVICTION_RECORD_BUCKET, hasEvictionRecord, isOwnedHomeGone, ownerArtifactSignal, ownerStorageOf, readEvictionRecord, readEvictionRecords, readOwnerArtifacts, writeEvictionRecord, writeOwnerArtifact, type AgentOwnership, type AgentStorageContext, type OwnershipMetadata } from "./agent-storage.ts";
+import { EVICTION_RECORD_BUCKET, hasEvictionRecord, isOwnedHomeGone, ownerArtifactSignal, ownerStorageOf, readEvictionRecord, readOwnerArtifacts, tryReadEvictionRecords, writeEvictionRecord, writeOwnerArtifact, type AgentOwnership, type AgentStorageContext, type OwnershipMetadata } from "./agent-storage.ts";
 import { isLeadOrFork, type SpawnRole } from "./process-role.ts";
-import { mergeCumulativeCost, parseCumulativeCost as parseCost, type AgentTelemetry, type CumulativeCost } from "./agent-telemetry.ts";
+import { mergeCumulativeCost as mergeAgentCost, parseCumulativeCost as parseCost, type AgentTelemetry, type CumulativeCost } from "./agent-telemetry.ts";
 import { descendantUsageOf } from "./agent-usage-rollup.ts";
 import type { RpcAgentRecord, RpcAgentRegistry } from "./spawner.ts";
 
@@ -40,7 +45,6 @@ function subtreeCost(telemetry: AgentTelemetry | undefined, descendants: Cumulat
   return total;
 }
 function recordSubtreeCost(record: RpcAgentRecord): CumulativeCost { return subtreeCost(record.telemetry, descendantUsageOf(record)); }
-const mergeAgentCost = mergeCumulativeCost;
 
 export function formatCumulativeCost(cost: CumulativeCost): string {
   if (cost.knownContributors === 0 && cost.unknownContributors > 0) return "—";
@@ -197,8 +201,11 @@ class CostEstimateState {
   private refreshEvictionRecords(): void {
     const signal = ownerArtifactSignal(this.storage, EVICTION_RECORD_BUCKET);
     if (this.evictionSignal !== undefined && signal.key === this.evictionSignal) return;
-    this.evictionRecords = readEvictionRecords(this.storage);
-    this.evictionSignal = Date.now() - signal.changedAt > EVICTED_SIGNAL_SETTLE_MS ? signal.key : undefined;
+    const records = tryReadEvictionRecords(this.storage);
+    // A failed read keeps the last good records and caches nothing, so the
+    // next reconcile retries instead of hiding every record until evicted/ changes.
+    if (records) this.evictionRecords = records;
+    this.evictionSignal = records && Date.now() - signal.changedAt > EVICTED_SIGNAL_SETTLE_MS ? signal.key : undefined;
   }
 
   /** The value an eviction record of this direct child holds: its tracked floor merged with its current subtree cost. */
@@ -292,7 +299,8 @@ function costEstimateFor(registry: RpcAgentRegistry, storage = registryStorage.g
  * included, plus its removed children (the checkpoint's legacy evicted
  * baseline and its eviction records). After a restart the sum is rebuilt from
  * the revived records' ownership telemetry, the checkpoint, and the records.
- * Reads no session file. Undefined without an owner storage.
+ * Reads no session file. Undefined without an owner storage. May drop a
+ * removed direct child from `registry` (see the module header).
  */
 export function descendantUsageValue(registry: RpcAgentRegistry): CumulativeCost | undefined {
   const state = costEstimateFor(registry);

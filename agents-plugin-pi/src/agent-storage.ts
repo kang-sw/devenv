@@ -109,6 +109,10 @@ export function createAgentStorageContext(sessionId: string, agentDir = getAgent
 
 /** Reads contained regular files from a hidden owner-scoped adapter bucket. */
 export function readOwnerArtifacts(ctx: AgentStorageContext, bucket: string): Array<{ name: string; content: string }> {
+  return readOwnerArtifactsOrFail(ctx, bucket) ?? [];
+}
+/** Like `readOwnerArtifacts`, but a failed listing or entry read is undefined instead of an empty bucket. */
+function readOwnerArtifactsOrFail(ctx: AgentStorageContext, bucket: string): Array<{ name: string; content: string }> | undefined {
   const directory = ownerArtifactDirectory(ctx, bucket, false);
   if (!directory) return [];
   const out: Array<{ name: string; content: string }> = [];
@@ -119,7 +123,7 @@ export function readOwnerArtifacts(ctx: AgentStorageContext, bucket: string): Ar
       if (lstatSync(path).isSymbolicLink() || realpathSync(path) !== path) continue;
       out.push({ name: entry.name, content: readFileSync(path, "utf8") });
     }
-  } catch { return []; }
+  } catch { return undefined; }
   return out;
 }
 
@@ -200,8 +204,14 @@ function parseEvictionRecord(raw: string, agentId: string): CumulativeCost | und
 
 /** Every valid eviction record of one owner, read from disk. Malformed, symlinked, and temporary entries are skipped. */
 export function readEvictionRecords(ctx: AgentStorageContext): Map<string, CumulativeCost> {
+  return tryReadEvictionRecords(ctx) ?? new Map();
+}
+/** Every valid record, or undefined when the directory or one of its entries could not be read (a partial read is never returned). */
+export function tryReadEvictionRecords(ctx: AgentStorageContext): Map<string, CumulativeCost> | undefined {
+  const artifacts = readOwnerArtifactsOrFail(ctx, EVICTION_RECORD_BUCKET);
+  if (!artifacts) return undefined;
   const records = new Map<string, CumulativeCost>();
-  for (const artifact of readOwnerArtifacts(ctx, EVICTION_RECORD_BUCKET)) {
+  for (const artifact of artifacts) {
     if (!artifact.name.endsWith(EVICTION_RECORD_SUFFIX)) continue;
     const agentId = artifact.name.slice(0, -EVICTION_RECORD_SUFFIX.length);
     if (!SAFE_COMPONENT.test(agentId)) continue;
