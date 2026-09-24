@@ -37,8 +37,9 @@ export interface SubtreeSnapshot {
   /**
    * The child owes itself a turn for deliveries it has already enqueued that
    * have not started one yet (a pending wake, or a turn-boundary batch Pi
-   * continues with). Not part of `subtreeWaiting`: it gates only the release
-   * of a settle the parent already holds.
+   * continues with). Not part of `subtreeWaiting`, but the parent holds a
+   * direct settle while it is set even when the view is not waiting, and
+   * releases a held settle only once it clears (see `spawner.ts`).
    */
   turnOwed: boolean;
   /** Own turns (`agent_start`) this child process has started; rises monotonically within one launch generation. */

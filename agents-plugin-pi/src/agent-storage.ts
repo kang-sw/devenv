@@ -127,15 +127,19 @@ function readOwnerArtifactsOrFail(ctx: AgentStorageContext, bucket: string): Arr
   return out;
 }
 
-/** Atomically writes one contained regular file in an owner-scoped adapter bucket. */
-export function writeOwnerArtifact(ctx: AgentStorageContext, bucket: string, name: string, content: string): boolean {
+/**
+ * Atomically writes one contained regular file in an owner-scoped adapter
+ * bucket. `hooks` is a focused deterministic test seam for the rename retry;
+ * production callers omit it.
+ */
+export function writeOwnerArtifact(ctx: AgentStorageContext, bucket: string, name: string, content: string, hooks?: RenameRetryHooks): boolean {
   if (!SAFE_COMPONENT.test(name)) return false;
   const directory = ownerArtifactDirectory(ctx, bucket, true);
   if (!directory) return false;
   const target = join(directory, name), temporary = join(directory, `.${name}-${process.pid}-${randomUUID()}.tmp`);
   try {
     writeFileSync(temporary, content, { mode: 0o600 });
-    renameSync(temporary, target);
+    renameWithWindowsRetry(temporary, target, hooks);
     return true;
   } catch {
     try { rmSync(temporary, { force: true }); } catch { /* original failure wins */ }

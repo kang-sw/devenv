@@ -312,6 +312,40 @@ describe("agent storage", () => {
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
+  test("owner artifact rename retries Windows EPERM/EBUSY and reports failure once the budget is exhausted", () => {
+    const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
+    try {
+      const context = createAgentStorageContext("lead-1", root);
+      const bucket = join(context.root, "ws-agents", "lead-1", ".evicted");
+      for (const code of ["EPERM", "EBUSY"]) {
+        const delays: number[] = [];
+        let attempts = 0;
+        assert.equal(writeOwnerArtifact(context, ".evicted", "agent.json", code, {
+          platform: "win32",
+          sleep: milliseconds => delays.push(milliseconds),
+          rename: (source, destination) => {
+            if (++attempts === 1) throw Object.assign(new Error(code), { code });
+            renameSync(source, destination);
+          },
+        }), true);
+        assert.equal(attempts, 2);
+        assert.deepEqual(delays, [10]);
+        assert.deepEqual(readdirSync(bucket), ["agent.json"]);
+        assert.equal(readFileSync(join(bucket, "agent.json"), "utf8"), code);
+      }
+
+      let attempts = 0;
+      assert.equal(writeOwnerArtifact(context, ".evicted", "agent.json", "lost", {
+        platform: "win32",
+        sleep: () => {},
+        rename: () => { attempts++; throw Object.assign(new Error("EBUSY"), { code: "EBUSY" }); },
+      }), false);
+      assert.equal(attempts, 5);
+      assert.deepEqual(readdirSync(bucket), ["agent.json"], "no temporary file is left behind");
+      assert.equal(readFileSync(join(bucket, "agent.json"), "utf8"), "EBUSY", "the prior artifact is kept");
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
   test("new records carry no liveness pid while legacy records with one load unchanged", () => {
     const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
     try {

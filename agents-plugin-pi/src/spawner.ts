@@ -58,10 +58,13 @@
  *
  * A parent's local settle is not subtree completion. Its control channel
  * carries revisioned snapshots of active descendants and queued deliveries
- * (`subtree-lifecycle.ts`). A settle that arrives while the subtree reads
- * waiting is held: the wake turn's own settle admits its terminal, or the hold
- * is released once the child reports quiescence with no turn owed and no turn
- * start the parent has not yet seen (`observeChildSubtree`).
+ * (`subtree-lifecycle.ts`), plus the child's own wake accounting. A settle is
+ * held while the subtree reads waiting, and also while it does not but the
+ * launch's latest snapshot says a turn is still coming: a turn owed, or a turn
+ * start the parent has not yet seen on the RPC stream (`attachEventListener`).
+ * The wake turn's own settle then admits its terminal, or the hold is released
+ * once the child reports quiescence with no turn owed and no unseen turn start
+ * (`observeChildSubtree`).
  *
  * `--tools` curation (`read-only`/`read-only-explore`/`full-worker`)
  * lives only in the in-memory `TOOL_GROUPS` table and Pi CLI flags.
