@@ -318,7 +318,7 @@ func (s *Server) guardMoveClose(root, tool, stem string, args map[string]any) (i
 	if wsindex.NeedsOverride(op, holder, v.caller) {
 		if !flag {
 			return indexGuard{}, fmt.Errorf("tickets.%s refused: %s is held by %s since %s; proceeding needs dangerously_override_lease_status: true with a non-empty reason, set only on the user's explicit instruction",
-				tool, stem, holderText(holder), lease.TouchedAt.UTC().Format(time.RFC3339))
+				tool, stem, holder.String(), lease.TouchedAt.UTC().Format(time.RFC3339))
 		}
 		if reason == "" {
 			return indexGuard{}, fmt.Errorf("tickets.%s: dangerously_override_lease_status needs a non-empty reason", tool)
@@ -326,7 +326,7 @@ func (s *Server) guardMoveClose(root, tool, stem string, args map[string]any) (i
 		g.override = &wsindex.Override{Holder: holder, Reason: reason}
 		return g, nil
 	}
-	g.warning = fmt.Sprintf("ticket-index: %s is held by %s; the lease stays with its holder", stem, holderText(holder))
+	g.warning = fmt.Sprintf("ticket-index: %s is held by %s; the lease stays with its holder", stem, holder.String())
 	return g, nil
 }
 

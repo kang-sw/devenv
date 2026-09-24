@@ -20,6 +20,9 @@ import (
 // a local bare origin whose default branch (main) declares review-track
 // develop, with develop carrying the open tickets alpha, beta, gamma and the
 // closed ticket old.
+//
+// The scenario IDs in test names and comments (A*, B*, C*, D*, E*, I*) are the
+// scenario contracts of ticket 260924-feat-origin-ticket-ownership-index.
 
 const (
 	stemAlpha = "260101-feat-alpha"
@@ -327,9 +330,10 @@ func (e *ixEnv) landOnDevelop(stem, from, to string) {
 
 // ---- A: index absence and init ------------------------------------------------
 
-// A1, A3: acquire and release are a silent plain "ok" with no validation;
-// the mutating tools print exactly what they print without an origin.
-func TestIndexAbsentVerbsAreSilentMock(t *testing.T) {
+// A1, A3: with the index absent, acquire and release answer a plain "ok"
+// with no validation; the mutating tools print exactly what they print
+// without an origin.
+func TestIndexAbsentVerbsAnswerPlainOK(t *testing.T) {
 	e := newIxEnv(t)
 	local := t.TempDir()
 	initGit(t, local)
@@ -381,8 +385,8 @@ func TestIndexAbsentVerbsAreSilentMock(t *testing.T) {
 }
 
 // A10: a clone that never saw an index, offline after its absence TTL,
-// still gets the plain ok.
-func TestA10NeverSeenOfflineAcquireIsMock(t *testing.T) {
+// still gets the plain index-absent ok.
+func TestA10NeverSeenOfflineAcquireIsIndexAbsent(t *testing.T) {
 	e := newIxEnv(t)
 	x := e.clone("x", "x@example.com")
 	x.offline()

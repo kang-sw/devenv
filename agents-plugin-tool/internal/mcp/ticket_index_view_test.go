@@ -567,7 +567,7 @@ func TestDiscardReportsReachToolOutput(t *testing.T) {
 		t.Fatalf("acquire after a remote deletion = %s", out)
 	}
 	if again := y.acquire(stemAlpha); again != "ok" {
-		t.Fatalf("the next acquire is not the plain mock: %q", again)
+		t.Fatalf("the next acquire is not the plain index-absent ok: %q", again)
 	}
 }
 

@@ -23,7 +23,9 @@ import (
 // silences discovery for its TTL, except for the lead's lease acquire, which
 // always asks origin (see handleIndexVerb).
 
-const indexMockText = "ok"
+// indexAbsentText is what tickets.acquire / tickets.release answer while the
+// index is absent.
+const indexAbsentText = "ok"
 
 func (s *Server) indexNow() time.Time {
 	if s.indexOpts.Now != nil {
@@ -96,10 +98,6 @@ func offlineWarning(op, stem string) string {
 	return fmt.Sprintf("ticket-index: origin is unreachable; the %s of %s is recorded in this clone's pending log, unverified against origin, and is re-checked when a later ticket tool reaches origin", op, stem)
 }
 
-func holderText(o wsindex.Owner) string {
-	return o.String()
-}
-
 // ---- piggyback registration --------------------------------------------------
 
 // indexPiggyback submits one index write alongside a successful host
@@ -163,7 +161,7 @@ func indexVerbResponse(id json.RawMessage, args map[string]any, r indexVerbResul
 		fmt.Fprintf(&b, "ticket_stem: %s\n", r.TicketStem)
 	}
 	if o, ok := r.Owner.(wsindex.Owner); ok {
-		fmt.Fprintf(&b, "owner: %s\n", holderText(o))
+		fmt.Fprintf(&b, "owner: %s\n", o.String())
 	}
 	if r.ImplBranch != "" {
 		fmt.Fprintf(&b, "impl_branch: %s\n", r.ImplBranch)
@@ -177,11 +175,13 @@ func indexVerbResponse(id json.RawMessage, args map[string]any, r indexVerbResul
 	return toolTextResponse(id, b.String(), nil)
 }
 
-func indexMockResponse(id json.RawMessage, args map[string]any) response {
+// indexAbsentResponse is the plain index-absent answer: no validation, no
+// index text.
+func indexAbsentResponse(id json.RawMessage, args map[string]any) response {
 	if wantsJSON(args) {
 		return toolJSONResponse(id, map[string]string{"status": "ok"}, nil)
 	}
-	return toolTextResponse(id, indexMockText, nil)
+	return toolTextResponse(id, indexAbsentText, nil)
 }
 
 func indexErrorResponse(id json.RawMessage, err error, reports []string) response {
@@ -208,7 +208,7 @@ func (s *Server) handleIndexVerb(id json.RawMessage, args, meta map[string]any, 
 	}
 	cl := s.openTicketIndex(root)
 	if cl == nil {
-		return indexMockResponse(id, args)
+		return indexAbsentResponse(id, args)
 	}
 	stem, _ := args["ticket_stem"].(string)
 	stem = strings.TrimSpace(stem)
@@ -265,9 +265,9 @@ func (s *Server) handleIndexVerb(id json.RawMessage, args, meta map[string]any, 
 		if len(reports) > 0 {
 			// The index was deleted on origin and this call discarded the
 			// clone's offline entries: the one-time report still shows.
-			return indexVerbResponse(id, args, indexVerbResult{Status: indexMockText, Reports: reports})
+			return indexVerbResponse(id, args, indexVerbResult{Status: indexAbsentText, Reports: reports})
 		}
-		return indexMockResponse(id, args)
+		return indexAbsentResponse(id, args)
 	}
 	if err != nil {
 		var refusal *wsindex.RefusalError
