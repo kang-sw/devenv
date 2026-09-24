@@ -61,6 +61,11 @@ this file. The Worker Protocol appended below governs; read it first.
    `policy: {branch: {merge_confirm: "skip"}}`. A verdict that reports missing
    route facts is stop (c): the lead populates them before spawning, so reaching
    one here means the ticket was handed over out of order.
+   Once the branch action has you on your impl branch, record it with
+   `{{.McpNamespace}}/tickets.acquire(ticket_stem: <stem>)`. The lead's track
+   already holds the ticket, so this call is informational: a refusal or an
+   error goes under `unresolved:` in your report and never stops the run. Never
+   set its override flag.
 2. Survey only what the ticket leaves open. When the ticket names the files
    and the call sites, start editing. When a question needs a broad sweep,
    spawn {{.ExploreAgent}} with the question, a read-only boundary, and the

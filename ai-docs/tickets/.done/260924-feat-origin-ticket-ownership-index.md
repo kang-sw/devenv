@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 73073ae7da15060c
 sage-review-completeness-reviewed: 73073ae7da15060c
+completed: 2026-09-24
 ---
 
 # Origin-backed ticket ownership index (MVP coordination overlay)
@@ -781,6 +782,94 @@ library. Examples:
 F1, F2, F3, F4, C9, I5, I6, I7 (library level); missing ref reported as
 absent, not as an error.
 
+### Result (24898ba4) - 2026-09-24
+
+**Live probe** (GitHub `origin`, SSH, git 2.50.1, from a scratch repo with
+`GIT_TERMINAL_PROMPT=0` and `ssh -o BatchMode=yes`). No design assumption
+broke.
+
+- Create with a must-not-exist lease (`--force-with-lease=<ref>:`) was
+  accepted; a second must-not-exist create was rejected client-side as
+  `[rejected] (stale info)`.
+- A plain fast-forward push was accepted; a non-fast-forward push without
+  force was rejected `[rejected] (non-fast-forward)`.
+- Racing CAS: five rounds of two concurrent `--force-with-lease=<ref>:<tip>`
+  pushes from one expected tip. Every round exactly one won; the loser got a
+  server-side `[remote rejected] (cannot lock ref '<ref>': is at <winner> but
+  expected <tip>)`, so the CAS is enforced by the server, not only by the
+  client's advertisement check.
+- `--no-verify`: with a failing `pre-push` hook (via `-c core.hooksPath`),
+  the push without `--no-verify` was blocked; with it, the push landed.
+- Delete of a custom ref (`:<ref>`) works.
+- Actions/webhooks: a throwaway branch carrying an unfiltered `on: push`
+  workflow ran once as the control (run 35974212358, `event=push`). Two pushes
+  of workflow-bearing commits to a custom ref (create `2bb9e15`, fast-forward
+  `1e597e2`) produced no run and no check suite after three minutes (`gh run
+  list`, `commits/<sha>/check-suites` total 0). The repository has no
+  webhooks configured (`repos/.../hooks` is `[]`), so delivery could not be
+  inspected; the public events feed listed only `refs/heads/*` pushes.
+- Pushed and deleted refs, all under the throwaway namespace
+  `refs/wsprobe-260924/` plus one throwaway branch:
+  - `refs/wsprobe-260924/v1/index`: create `4c82464`, fast-forward `1b8ecf0`,
+    five race winners, `--no-verify` push `c43f194`; deleted.
+  - `refs/wsprobe-260924/v1/actions`: `2bb9e15`, `1e597e2`; deleted.
+  - `refs/heads/wsprobe-260924-actions`: `7c1e4c3`; deleted.
+  - After deletion `git ls-remote origin | grep wsprobe` matched nothing.
+  - The control workflow run record remains in the Actions history; deleting
+    it was outside the push authorization.
+
+**Library** `agents-plugin-tool/internal/wsindex/`:
+
+- Namespace constant `ticket-index-larkspur`: remote ref
+  `refs/ticket-index-larkspur/v1/index`; local cache, pending log, and fetch
+  scratch refs under `refs/ticket-index-larkspur-local/v1/`, shared by every
+  worktree of the clone.
+- Discovery walks a candidate list (tier 1 only) with one `ls-remote` while
+  the clone has never seen an index; the absence result (and an unreachable
+  result on a never-seen clone) is cached for 10 minutes in a state file in
+  the git common dir. No `origin` remote means index-absent with no remote
+  call.
+- Remote commands run with `GIT_TERMINAL_PROMPT=0`, empty `GIT_ASKPASS` and
+  `SSH_ASKPASS`, `GCM_INTERACTIVE=never`, `-c credential.interactive=false`,
+  and the configured ssh command (git's precedence) plus
+  `-o BatchMode=yes -o ConnectTimeout=5` (`-batch` for plink). Hard timeouts:
+  1.5 s for the read path, 10 s per remote command for writes; timeouts kill
+  git's whole process group.
+- Index versions are plumbing-only commits of one indented `index.json`, each
+  parented on the previous tip; audit lines go in the commit message.
+- The CAS loop fetches the tip into a scratch ref, re-applies pending entries
+  then the caller's mutation, and pushes with `--force-with-lease` and
+  `--no-verify`, at most 5 attempts before a clear error. A rejection counts as
+  a lost race only for stale-info, non-fast-forward, and ref-lock failures;
+  any other refusal fails at once.
+- Cache continuity: forward moves advance the cache under local CAS; a remote
+  tip that is an ancestor of the cache is a stale read; unrelated histories or
+  a remote answer with no ref discard the pending log (one report line when
+  N > 0) and the cache ref. A failed fetch is classified through `ls-remote`,
+  so a deleted ref reads as absence and a transport failure stays unreachable.
+- Read path: within a 60 s TTL no remote call; otherwise one bounded fetch,
+  then the stale cache with its age, or `unknown` when the index exists but no
+  cache does.
+- `clone_id` is 16 hex characters in `.git/config` (`ticketindex.cloneid`),
+  first generation serialized by a lock file in the common dir.
+- Pending log: a parentless commit holding `pending.json`, replaced under
+  `update-ref --stdin` CAS; clears remove exactly the flushed entry ids.
+- `Create` (init primitive, adopts a concurrent creation) and `Check` (live
+  state without pushing) are in place for Phase 2.
+
+**Verification.** `go test -race -count=3 ./internal/wsindex/` passed
+(88 s). Scenario tests: `TestMissingRefIsAbsentNotError`, A2, A3, A4 (hanging
+ssh: read under 2.5 s stale, write pending within the timeout), A5 (HTTP 401
+remote fails in under 3 s with the non-interactive env), A9, B2, B3 (4 clones x
+4 writes, linear chain of init + 16 versions), B6, F1, F2, F3, F4, C9, I5, I6,
+I7, plus concurrent `Create` adoption.
+
+**Decisions.** A local file remote reports concurrent lock contention as
+`[remote rejected] (failed to update ref)`, so that phrase is treated as a
+lost race; the bounded retry absorbs a misclassified permanent refusal. Timing
+state lives in a common-dir JSON file rather than git config so per-read TTL
+bookkeeping never contends with config writes.
+
 ### Phase 2: Registration, ownership verbs, and init
 
 **Goal.** Add `tickets.acquire`, `tickets.release`, and the init verb:
@@ -810,6 +899,67 @@ I21, I22; the view clauses of I1,
 I3, and I11 wait for Phase 3. Every existing ticket-tool test must pass
 unchanged with no ref present.
 
+### Result (57c930bb) - 2026-09-24
+
+**Tool surface.**
+
+- `tickets.acquire(ticket_stem, track?, dangerously_override_lease_status?, reason?, format?)`
+- `tickets.release(ticket_stem, format?)`
+- `tickets.index_init(check?, format?)`: lead-only, because it pushes to origin with the user's credentials.
+
+The success text is `status: <effect>`, plus `owner:`, `impl_branch:`, `warning:`, and `report:` lines. The effects are:
+
+- `acquired`
+- `takeover`
+- `refreshed`
+- `impl_recorded`
+- `released`
+- `not_leased`
+- `pending` (offline)
+
+Refusals are `isError` responses that name the holder and the flag. The legacy mock returns exactly `ok` as text, or `{"status":"ok"}` as JSON. The check mode prints `state: initialized|uninitialized|no-origin|unreachable`.
+
+All four tools were added to the three `runtime.json` files. `LIVE_TOOL_NAMES` in the Pi bridge test was updated, and its contract count went from 58 to 61.
+
+**Library (`internal/wsindex`).**
+
+- `apply.go`:
+  - `Applier.Live` and `Applier.Replay` implement the matrix, the impl record, the closed lease, the origin-closed refusal, and the replay rules (remote wins, override bound to its recorded holder, landed stems resolved silently).
+  - `Maintain` runs pruning and GC.
+  - `NeedsOverride` covers each operation's override rows.
+- `client.go`:
+  - `Submission` carries a `Prepare` hook that runs only once the index is known to be in use, so validation never reaches an index-absent project.
+  - Offline evaluation runs through `Overlay`, the cached index with this clone's pending entries replayed.
+- `origin.go`:
+  - Origin-first review-track: the `refs/remotes/origin/HEAD:AGENTS.md` declaration, then `wsreview.ResolveTrackFallback`.
+  - Best-effort track fetch and origin inventory from `ls-tree`.
+  - `LoadContext`: fetches the track for acquire, or when a pending acquire will replay; otherwise reads the local tracking ref.
+  - The lazy GC predicate and `InitSource`.
+- The MCP layer (`internal/mcp/ticket_index.go`) adds the piggyback on `create_empty`, `move`, `close` (close op), and `sage_stamp`. It prints extra lines only in index mode: reports, the offline note, or a one-line failure. It never fails the host operation.
+
+**Verification.**
+
+- `go test ./internal/wsindex/` covers:
+  - the matrix: C1–C5, C8
+  - D2 at library level
+  - C7, I13, E2, I2, I12, I4, I16, E3, E6
+  - `NeedsOverride`
+  - continuity: I18, I19, I20, I21, I22
+- `go test ./internal/mcp/ -run 'TestIndexAbsent|TestA10|TestA12|TestInit|TestAcquire|TestCloseLease|TestOffline|TestFlush|TestB1|TestB4|TestB5'` covers A1 (verbs, plus move/create_empty output identical to a no-origin repo), A3, A10, A12, A6, A7, A8, C1–C4, C8, B7, D1–D5, E4/E5 acquire refusal, I17, E1 through close and prune, E2, A4/A11/E10/I1/I5/I9/I11, I3/I10, I2/I12, I4/I13, B1, B4/E8, B5/E3/E6/E7.
+- `go test -race -count=2 ./internal/wsindex/` passes.
+- The Pi `bridge`, `native-tool-registration`, and `version-check` node tests pass.
+- Existing ticket-tool tests pass unchanged.
+- Environment-dependent failures remain, all unrelated to this change:
+  - `TestServeStdioConfigResolveAgentFallsBackToDefault` and wsconfig's `TestResolveAgentTierForHarnessFallsBackToDefault` read the developer's home config and pass with a clean HOME.
+  - `test_skill_dispatch_contracts.test_delegate_and_sibling_exact_prose` asserts a shim description that already differs on the base.
+
+**Decisions.**
+
+- Init commits carry a random `init-nonce:` line. Without it, two identical inits in the same second produce the same oid, and a delete-and-reinit reads as continuous history (found by I19).
+- Index commits use `commit-tree --no-gpg-sign`, so a user's signing config cannot prompt or fail.
+- A pending override is kept only when the overlaid view needs it. It records the overridden holder's triple so replay can compare against it.
+- GC fetches every origin head (`+refs/heads/*:refs/remotes/origin/*`) only when GC is due. If that fetch fails, GC prunes nothing.
+
 ### Phase 3: Query view, queue filter, and move/close guards
 
 **Goal.**
@@ -830,6 +980,43 @@ G1–G5, I8, I14, I15, I23, and the view clauses of I1, I3, and I11; tool-level
 re-runs of A2, A3, F1, F2. The no-ref path stays
 byte-identical (A1 re-run, including its override-param clause for
 `tickets.move` and `tickets.close`, which Phase 2 cannot yet exercise).
+
+### Result (a27aba50) - 2026-09-24
+
+**Surface.**
+
+- `tickets.query`:
+  - Every projection carries `ownership {level, email, track, worktree, phase, touched_at, impl_branch, provisional, origin_closed, index_state, cache_age_seconds}`.
+  - The levels are `self` (the caller's triple), `local` (another track of this clone), `remote`, `unowned`, and `unknown`. For `local`, `worktree` is computed from `git worktree list` and never stored.
+  - Compact discovery lists own and unowned tickets in full. It collapses the rest under `held elsewhere or closed on origin (N):`. Point-resolve and JSON are never collapsed.
+  - Trailing `ticket-index:` lines carry discard reports, the stale-cache age, and the pending-count marker.
+- `unleased_or_mine` keeps self, unowned, and unknown tickets, and drops tickets closed on origin. It runs through a new generic `wsdoc.TicketFindOptions.Exclude` hook before pagination, so it composes with `assigned_to_me`.
+- `tickets.move` and `tickets.close` take `dangerously_override_lease_status` and `reason`. Their guard evaluates the overlaid view, online or offline:
+  - A different email is refused without the flag and reason.
+  - Another clone or track gets a `ticket-index: ... is held by ...` warning line.
+  - The lease never moves.
+  - An override rides the piggyback write as an audited entry.
+- `git.status` adds `ticket owner:` for the active impl ticket and `leased to this track:`. JSON gains `impl_ticket.owner` and `leases`. It reads the cache only and makes no remote call.
+
+**Library changes.**
+
+- `Client.Read` reports the unknown state when discovery saw the ref but the fetch failed with no cache (F5). A never-seen, unreachable remote stays index-absent (A10).
+- A write whose index is unchanged but carries audit lines still commits. C6 found that an override move on a leased ticket otherwise left no audit.
+
+**Verification.**
+
+- `go test ./internal/mcp/ -run 'TestNoRefPath|TestQuery|TestOwnership|TestOfflineView|TestMoveCloseGuard|TestGitStatusShowsOwner'` covers:
+  - A1 with the override params on move and close, A2 and A3 (counted remote calls)
+  - F1, F2, I8 (no push on an online query), F5, I23
+  - G1, G2, C5
+  - G3, G4, G5, E4/E5 query hint, E9
+  - the view clauses of I1, I3, and I11, plus I14 and I15
+  - C6
+  - `git.status` owner
+- The full Go suite passes with a clean HOME. `go test -race -count=2 ./internal/wsindex/` passes.
+- The `agents-plugin` unittest suite fails only on the known `test_delegate_and_sibling_exact_prose`. The `wsflow` tests pass.
+
+**Decision.** The ticket leaves the GC stale flag optional ("may"), and it is not rendered. `phase closed (pending landing)` together with `since <touched_at>` gives the reader the same signal.
 
 ### Phase 4: Playbook integration and dogfood
 
@@ -868,30 +1055,140 @@ byte-identical (A1 re-run, including its override-param clause for
 - The dogfood cycle is recorded in the Result: init, acquire from a track,
   worker impl record, close to `phase: closed`, merge, and prune on landing.
 
-## Sage Review Round 1 (2026-09-24)
+### Result (00c0c0da) - 2026-09-24
 
-### Design Reviewer — block
+Phase 4 is complete up to E1's close. Close is a push that the user will run.
+The merge into develop, the develop push, and prune-on-landing are left to the
+lead and the user. Review round-1 fixes landed in df16de9e.
 
-| # | Title | Severity | Resolution |
-|---|-------|----------|------------|
-| 1 | Owner-conflict matrix incomplete (move/close guard; same-clone cross-track acquire) | important | missing |
-| 2 | Index discovery imposes network cost on uninitialized projects | important | autonomous |
-| 3 | Landed-closure pruning has no trigger | minor | autonomous |
-| 4 | Worker impl sub-record has no caller or path | minor | autonomous |
-| 5 | Queue filter mechanism diverges from assignee-filter precedent | minor | autonomous |
-| 6 | Caller's track comparison must use full owner identity | minor | autonomous |
-| 7 | Init review-track resolution reads local state; research says origin | minor | autonomous |
-| 8 | Live probe cannot answer GitHub Actions question as designed | minor | autonomous |
-| 9 | Index commit ancestry for audit trail | minor | autonomous |
+**Playbooks.** 00c0c0da changed these playbooks in `agents-plugin/rsrc`, with
+byte-identical mirrors in `agents-plugin-wsflow/rsrc` and `agents-plugin-pi/rsrc`
+and regenerated manifests.
 
-### Completeness Reviewer — block
+- `lead-run`:
+  - Spawn step 4 acquires from the checkout the worker branches off.
+  - A refusal or error ends the turn.
+  - A `warning:` line is relayed verbatim.
+  - The override is used only on the user's explicit takeover instruction.
+- `ticket-worker` and `ticket-worker-elevated`:
+  - An informational impl-record acquire runs after the branch action.
+  - A failure goes to `unresolved:` and never stops the run.
+  - They never set the override.
+- `lead-scope-worktree` step 6 acquires every visible ticket and reports each
+  refused stem with its holder.
+- `ticket-selector` and `ticket-batch-selector` query with
+  `unleased_or_mine: true`. The batch selector lists unfiltered once to tell
+  "every remaining ticket blocked" apart from `ready/ empty`.
+- `lead-bootstrap` invoke step 7 runs `tickets.index_init(check: true)` in every
+  mode except `refuse`.
+  - Its new section handles `uninitialized`, `initialized`, `no-origin`, and
+    `unreachable`.
+  - On `uninitialized` it asks before init and changes nothing on decline.
+- The Pi mirror was resynced with
+  `sh agents-plugin-tool/scripts/bump-ws-version.sh 0.46.17`, the standalone
+  path, which is idempotent at the current version.
 
-| # | Title | Severity |
-|---|-------|----------|
-| 1 | move/close owner guard says 'block or warn' | important |
-| 2 | acquire/release behavior with no index ref unstated | important |
-| 3 | How the worker writes the impl sub-record is unspecified | important |
-| 4 | Landed-closure pruning trigger not stated | minor |
-| 5 | Open-ended piggyback tool list | minor |
-| 6 | No contingency if Phase 1 live probe finds a problem | minor |
-| 7 | Unspecified tunables and display shapes | minor |
+**Dogfood.**
+
+Who ran what:
+
+- The auto-mode permission classifier denied the origin index push for the
+  worker and for the lead, even after the user's explicit approval.
+- The user therefore ran every push-producing step personally through `!`
+  commands. The binary was the lead-built branch binary `ws-mcp-ownership`,
+  built from ee6cb039.
+- The worker ran only read-only checks: `ls-remote`, the cache ref log, and
+  `index.json`.
+
+Init, run from the develop root checkout:
+
+- `tickets.index_init(check: true)` reported `state: uninitialized` before
+  init.
+- The init output was
+  `status: created / review_track: develop / registered: 155 open tickets`.
+- The init commit is `3ed11a3c`, with `init-nonce: 856812ea97aec36d`. It was
+  the remote ref, and the local cache
+  `refs/ticket-index-larkspur-local/v1/cache` was the same commit.
+
+E1, run on this ticket itself. A scratch stem never lands on develop, so it
+could not reach prune.
+
+1. Acquire from the develop root:
+   `status: acquired / owner: ki6080@gmail.com (track develop, clone 6b8c3f740994ed3b)`.
+   Index commit `fb897dcb`.
+2. Worker impl record, an acquire from this worktree on
+   `impl/develop/irate-growl-half`:
+   `status: impl_recorded / owner: ki6080@gmail.com (track develop, clone 6b8c3f740994ed3b) / impl_branch: impl/develop/irate-growl-half`.
+   Index commit `0c98be62`.
+3. `git.status` in this worktree, from the cache only:
+   `ticket owner: yours (track develop); impl impl/develop/irate-growl-half; since 2026-09-24T10:40:13Z`
+   and `leased to this track: 260924-feat-origin-ticket-ownership-index`.
+
+H1, run on the untracked scratch stems `260924-idea-ownership-dogfood-scratch-a`
+and `-b`. The scratch files are deleted. The different-email holder was a
+throwaway clone with `user.email h1-dogfood@example.invalid` on develop.
+
+1. The clone acquires scratch-a:
+   `status: acquired / owner: h1-dogfood@example.invalid (track develop, clone fada5a56c9701de7)`.
+   Index commit `cf2d4f82`.
+2. The worktree acquires scratch-a and is refused:
+   `tickets.acquire refused: 260924-idea-ownership-dogfood-scratch-a is held by h1-dogfood@example.invalid (track develop, clone fada5a56c9701de7) since 2026-09-24T10:41:27Z; acquiring it needs dangerously_override_lease_status: true with a non-empty reason, set only on the user's explicit instruction`.
+3. The worktree acquires scratch-b:
+   `status: acquired / owner: ki6080@gmail.com (track develop, clone 6b8c3f740994ed3b) / impl_branch: impl/develop/irate-growl-half`.
+   Index commit `47599030`.
+4. Both leases are released with `status: released`: scratch-a in `a6c5f050`
+   and scratch-b in `b7ecc518`.
+
+Every ref written:
+
+- `refs/ticket-index-larkspur/v1/index` on origin, at
+  `3ed11a3c -> fb897dcb -> 0c98be62 -> cf2d4f82 -> 47599030 -> a6c5f050 -> b7ecc518`.
+  It stays on origin by design.
+- Locally, `refs/ticket-index-larkspur-local/v1/cache` in this clone and in the
+  throwaway clone.
+- No branch or tag was pushed.
+
+State after H1, verified read-only by the worker at `b7ecc518`:
+
+- There are 158 registrations: 155 from init, this ticket, and the two scratch
+  stems.
+- The scratch stems stay registered but unleased until monthly GC prunes
+  them. They are open on no origin branch.
+- This ticket's lease is `phase: active` with
+  `impl.branch impl/develop/irate-growl-half`.
+- `meta.last_gc` is `2026-09-24T10:38:33Z`.
+
+Pending E1 steps:
+
+- **E1 step 3, close to `phase: closed`.** Close pushes the index, and the
+  classifier denies that push to agents, so the user runs `tickets.close` from
+  this worktree.
+- **E1 step 4, merge into develop and push.** The merge is the lead's job.
+  The develop push needs a separate user decision, because standing policy does
+  not push develop.
+- **E1 step 5, prune on landing.** The first index write after this ticket's
+  `.done/` file reaches `origin/develop` prunes the registration. Any acquire or
+  close counts as a write.
+
+**Findings.**
+
+- **Bug.** A fresh acquire from an impl branch records that branch as
+  `impl_branch` even when the branch belongs to a different ticket, as
+  scratch-b showed. This was not intended by the Worker impl record decision,
+  which covers only a matching lease. Captured as
+  `260924-bug-acquire-impl-record-ignores-branch-stem`.
+- **Environment, not a defect.** `workflow_manual` from the throwaway clone
+  first failed with `rsrc manifest missing at <scratchpad>/rsrc/manifest.json`.
+  The cause was a branch binary running outside the plugin tree, and setting
+  `WS_RSRC_ROOT` resolved it.
+- The worker's own init attempts were denied by the permission classifier.
+  They left no local or remote state: no refs and no clone id at that time.
+
+**Verification.**
+
+- Playbook and package tests pass, including the wsflow drift tests and
+  `TestPiMirrorUpToDate`.
+- `go test ./internal/wsrsrc/ ./internal/wsindex/ -count=1` passes.
+- The agents-plugin unittest `test_delegate_and_sibling_exact_prose` fails on
+  this branch. The failure is pre-existing and was fixed on develop by
+  `69b18630`, which this branch does not include.

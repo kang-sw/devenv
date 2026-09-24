@@ -22,6 +22,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdoc"
 	"github.com/kang-sw/devenv/internal/wsgit"
+	"github.com/kang-sw/devenv/internal/wsindex"
 	"github.com/kang-sw/devenv/internal/wsrationale"
 	"github.com/kang-sw/devenv/internal/wsreview"
 	"github.com/kang-sw/devenv/internal/wsrsrc"
@@ -36,6 +37,9 @@ type Server struct {
 	sessionHarness string
 	sessions       *sessionStore
 	mailbox        mailboxRuntimeState
+	// indexOpts configures the ticket ownership index client; zero values
+	// take the library defaults. Tests inject clocks and timeouts here.
+	indexOpts wsindex.Options
 }
 
 // gitStatusResult keeps the generic git observation intact while allowing the
@@ -44,6 +48,9 @@ type Server struct {
 type gitStatusResult struct {
 	wsgit.StatusResult
 	ImplTicket *implTicketStatus `json:"impl_ticket,omitempty"`
+	// Leases lists the tickets the ticket index shows leased to this
+	// worktree's owner triple; absent when the project has no index.
+	Leases []string `json:"leases,omitempty"`
 }
 
 type implTicketStatus struct {
@@ -51,6 +58,9 @@ type implTicketStatus struct {
 	Stem   string `json:"stem,omitempty"`
 	Path   string `json:"path,omitempty"`
 	Status string `json:"status,omitempty"`
+	// Owner is the active ticket's lease from the ticket index (cache only);
+	// absent when the project has no index.
+	Owner *wsdoc.TicketOwnership `json:"owner,omitempty"`
 }
 
 type toolRole string
@@ -90,7 +100,7 @@ const bootstrapToolName = "ferrule"
 // preserved no-op, since the pre-rename tickets.sage_record was reachable by
 // a delegate-scoped key.
 func isLeadOnlyTool(name string) bool {
-	return name == bootstrapToolName || name == "workflow_manual" || name == "workflow_state" || name == "tickets.sage_stamp" || name == "git.merge" || name == "worktree.acquire" || name == "worktree.release" || strings.HasPrefix(name, "lead.") || workflowPreferenceWriterTool(name)
+	return name == bootstrapToolName || name == "workflow_manual" || name == "workflow_state" || name == "tickets.sage_stamp" || name == "tickets.index_init" || name == "git.merge" || name == "worktree.acquire" || name == "worktree.release" || strings.HasPrefix(name, "lead.") || workflowPreferenceWriterTool(name)
 }
 
 func workflowPreferenceWriterTool(name string) bool {
@@ -641,6 +651,12 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		return s.handleAgendaList(req.ID, params.Arguments)
 	case "git.resolve_impl_branch":
 		return s.handleResolveImplBranch(req.ID, params.Arguments)
+	case "tickets.acquire":
+		return s.handleTicketsAcquire(req.ID, params.Arguments, params.Meta)
+	case "tickets.release":
+		return s.handleTicketsRelease(req.ID, params.Arguments, params.Meta)
+	case "tickets.index_init":
+		return s.handleTicketsIndexInit(req.ID, params.Arguments, params.Meta)
 	case "route.resolve_implement":
 		return s.handleEnterImplement(req.ID, params.Arguments)
 	case "route.resolve_proceed":
@@ -998,10 +1014,18 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			return toolTextResponse(req.ID, "", err)
 		}
 		status := gitStatusResult{StatusResult: result, ImplTicket: implTicket}
+		// The ticket index is read from the local cache only: git.status never
+		// pays a network round trip for ownership.
+		if view := s.loadOwnershipView(root, true); view != nil && view.overlay != nil {
+			if implTicket != nil && implTicket.State == "active" {
+				implTicket.Owner = view.ownership(implTicket.Stem, implTicket.Status)
+			}
+			status.Leases = view.callerLeases()
+		}
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, status, nil)
 		}
-		return toolTextResponse(req.ID, formatGitStatusWithImplTicket(result, implTicket), nil)
+		return toolTextResponse(req.ID, formatGitStatusWithImplTicket(result, implTicket)+formatIndexStatus(implTicket, status.Leases), nil)
 	case "git.diff":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -1342,11 +1366,21 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 					result.AssigneeGate = &gate
 				}
 			}
+			var ownership *ownershipView
+			if err == nil && result != nil {
+				ownership = s.loadOwnershipView(root, false)
+				if ownership != nil && ownership.state != wsindex.ViewAbsent {
+					result.Ownership = ownership.ownership(result.Stem, result.Status)
+				}
+			}
 			if wantsJSON(params.Arguments) {
 				return toolJSONResponse(req.ID, result, err)
 			}
 			if result == nil {
 				return toolTextResponse(req.ID, "", err)
+			}
+			if ownership != nil {
+				return toolTextResponse(req.ID, formatTicketsWithOwnership(ownership, []wsdoc.TicketInfo{*result}, false), err)
 			}
 			return toolTextResponse(req.ID, formatTickets([]wsdoc.TicketInfo{*result}), err)
 		}
@@ -1367,6 +1401,16 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if assigneeAware && boolArgument(params.Arguments["assigned_to_me"]) && strings.TrimSpace(currentEmail) != "" {
 			assignedToEmail = currentEmail
 		}
+		// The ticket index overlay (nil when the project has no index): the
+		// ownership filter drops others' leases and origin-closed tickets
+		// before pagination, composing with assigned_to_me.
+		ownership := s.loadOwnershipView(root, false)
+		var excludeOwned func(wsdoc.TicketInfo) bool
+		if ownership != nil && ownership.state != wsindex.ViewAbsent && boolArgument(params.Arguments["unleased_or_mine"]) {
+			excludeOwned = func(t wsdoc.TicketInfo) bool {
+				return !availableToCaller(ownership.ownership(t.Stem, t.Status))
+			}
+		}
 		result, err := wsdoc.TicketsFind(root, wsdoc.TicketFindOptions{
 			Statuses:           statuses,
 			IncludeDone:        boolArgument(params.Arguments["include_done"]),
@@ -1378,6 +1422,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			Limit:              limit,
 			Resolve:            resolve,
 			AssignedToEmail:    assignedToEmail,
+			Exclude:            excludeOwned,
 		})
 		// Attach the warning token to every returned ticket (the omit-filter, when
 		// active, has already dropped the others'-assigned ones; plain queries keep
@@ -1385,10 +1430,16 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err == nil && assigneeAware {
 			applyAssigneeGate(result, currentEmail)
 		}
+		if err == nil {
+			annotateOwnership(ownership, result)
+		}
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, result, err)
 		}
 		text := formatTickets(result)
+		if ownership != nil {
+			text = formatTicketsWithOwnership(ownership, result, true)
+		}
 		if !resolve {
 			text += ticketScopeAnnotation(root, effectiveTicketStatuses(params.Arguments))
 		}
@@ -1404,6 +1455,10 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		stem, _ := params.Arguments["stem"].(string)
 		status, _ := params.Arguments["status"].(string)
 		resolution, _ := params.Arguments["resolution"].(string)
+		guard, err := s.guardMoveClose(root, "close", stem, params.Arguments)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
 		result, err := wsdoc.TicketsClose(root, wsgit.ExecRunner{}, wsdoc.TicketCloseOptions{
 			TicketStem: stem,
 			Status:     status,
@@ -1424,6 +1479,8 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			return toolTextResponse(req.ID, "", err)
 		}
 		text := formatTicketMutate("closed", result)
+		text += guard.text()
+		text += s.indexPiggyback(root, wsindex.OpClose, strings.TrimSuffix(filepath.Base(result.NewPath), ".md"), guard.override)
 		if nudge := implementCloseMergeReviewNudge(root); nudge != "" {
 			text += "next_instruction: " + nudge + "\n"
 		}
@@ -1500,6 +1557,10 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		adapter := sessionConfigAdapter{s: s.sessions}
 		r := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
 		resolved, _ := r.Get(sessionKey, wsconfig.ItemSageReview)
+		guard, err := s.guardMoveClose(root, "move", stem, params.Arguments)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
 		result, err := wsdoc.TicketsMove(root, wsgit.ExecRunner{}, wsdoc.TicketMoveOptions{
 			TicketStem: stem,
 			To:         to,
@@ -1514,7 +1575,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			}
 			return toolTextResponse(req.ID, "", err)
 		}
-		return toolTextResponse(req.ID, formatTicketMutate("moved", result), nil)
+		return toolTextResponse(req.ID, formatTicketMutate("moved", result)+guard.text()+s.indexPiggyback(root, wsindex.OpRegister, strings.TrimSuffix(filepath.Base(result.NewPath), ".md"), guard.override), nil)
 	case "tickets.create_empty":
 		if hasSpecStemArgument(params.Arguments) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
@@ -1543,7 +1604,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		return toolTextResponse(req.ID, formatTicketCreate(result), nil)
+		return toolTextResponse(req.ID, formatTicketCreate(result)+s.indexPiggyback(root, wsindex.OpRegister, strings.TrimSuffix(filepath.Base(result.Path), ".md"), nil), nil)
 	case "tickets.template":
 		typeStr, _ := params.Arguments["type"].(string)
 		text, err := wsdoc.TicketTemplate(typeStr)
@@ -1609,7 +1670,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		return toolTextResponse(req.ID, formatSageRecord(result), nil)
+		return toolTextResponse(req.ID, formatSageRecord(result)+s.indexPiggyback(root, wsindex.OpRegister, stem, nil), nil)
 	case "tickets.verify":
 		if hasSpecStemArgument(params.Arguments) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
@@ -4003,7 +4064,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.query",
-			"description": "Query ticket paths by text query, ticket stem, or mentions of another ticket stem. A ticket_stem given alone (no query, no mentions_ticket_stem, no statuses) point-resolves that ticket and returns its status metadata, erroring if the stem is not found; this exact form remains unpaginated. Otherwise this is a discovery search, paginated after all filters in deterministic status-rank and ticket-stem order: offset defaults to 0; limit defaults to 50 and accepts 1 through 200; request the next page with offset + limit. The point-resolve projection also carries a dispatch_blocked {blocking_stem, reason} field, computed live, when the ticket declares a blocked-by: prerequisite that has not landed (the producer is not yet in .done/, or its named phase carries no ### Result); it is absent otherwise and never on a discovery listing. Every projection (discovery and point-resolve) also carries blocked_headings: the verbatim body heading lines beginning with '## Blocked', rendered as blocked_marker lines in compact text. This is advisory evidence only, distinct from the typed dispatch_blocked gate — it creates no hard block and its suffix is returned uninterpreted, so a caller reads the referenced section to judge whether the blocker is current. When the ticket-assignee-aware project flag is on, every projection also carries assignee (the ticket's assignee emails) and a computed assignee_gate {assign_any, assigned_to_current, warning}; a ticket assigned to someone else renders 'assignee: <email>   # NOT ASSIGNED TO YOU' in compact text. Setting assigned_to_me=true additionally hard-omits others'-assigned tickets from a discovery result (assign-any and self-assigned tickets remain). Both are inert while the flag is off. Defaults to compact text; use format=json for structured metadata.",
+			"description": "Query ticket paths by text query, ticket stem, or mentions of another ticket stem. A ticket_stem given alone (no query, no mentions_ticket_stem, no statuses) point-resolves that ticket and returns its status metadata, erroring if the stem is not found; this exact form remains unpaginated. Otherwise this is a discovery search, paginated after all filters in deterministic status-rank and ticket-stem order: offset defaults to 0; limit defaults to 50 and accepts 1 through 200; request the next page with offset + limit. The point-resolve projection also carries a dispatch_blocked {blocking_stem, reason} field, computed live, when the ticket declares a blocked-by: prerequisite that has not landed (the producer is not yet in .done/, or its named phase carries no ### Result); it is absent otherwise and never on a discovery listing. Every projection (discovery and point-resolve) also carries blocked_headings: the verbatim body heading lines beginning with '## Blocked', rendered as blocked_marker lines in compact text. This is advisory evidence only, distinct from the typed dispatch_blocked gate — it creates no hard block and its suffix is returned uninterpreted, so a caller reads the referenced section to judge whether the blocker is current. When the ticket-assignee-aware project flag is on, every projection also carries assignee (the ticket's assignee emails) and a computed assignee_gate {assign_any, assigned_to_current, warning}; a ticket assigned to someone else renders 'assignee: <email>   # NOT ASSIGNED TO YOU' in compact text. Setting assigned_to_me=true additionally hard-omits others'-assigned tickets from a discovery result (assign-any and self-assigned tickets remain). Both are inert while the flag is off. When the project uses the origin ticket ownership index, every projection also carries ownership {level: self|local|remote|unowned|unknown, email, track, worktree, phase, touched_at, impl_branch, provisional, origin_closed, index_state, cache_age_seconds}; compact discovery text lists the caller's own and unowned tickets in full and collapses tickets held elsewhere or closed on origin to one line each, and trailing ticket-index lines report a stale cache or pending offline entries. Defaults to compact text; use format=json for structured metadata.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -4014,6 +4075,7 @@ func tools() []map[string]any {
 					"ticket_stem":          stringProperty("Optional exact ticket stem. Given alone, point-resolves that ticket."),
 					"mentions_ticket_stem": stringProperty("Optional ticket stem that result tickets must mention."),
 					"assigned_to_me":       boolProperty("When true and the ticket-assignee-aware flag is on, hard-omits others'-assigned tickets from a discovery result (assign-any and self-assigned tickets remain). Inert while the flag is off or the caller's git identity is unknown. The selector sets this to steer to the caller's own tickets."),
+					"unleased_or_mine":     boolProperty("When true and the project uses the origin ticket ownership index, keeps only tickets whose lease is the caller's own (email, clone, track) or absent, plus tickets whose ownership is unknown, and drops tickets closed on origin; composes with assigned_to_me and applies before pagination. Inert in a project without the index. Queue selectors set this."),
 					"offset": map[string]any{
 						"type":        "integer",
 						"description": "Discovery result offset after filtering and deterministic ordering. Defaults to 0.",
@@ -4033,13 +4095,15 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.close",
-			"description": "Close a ticket to .done/ (status=done) or .dropped/ (status=dropped), writing the dated frontmatter field and optionally appending a ## Resolution section. Stages the change set atomically (frontmatter write -> git add -> git mv); does not commit.",
+			"description": "Close a ticket to .done/ (status=done) or .dropped/ (status=dropped), writing the dated frontmatter field and optionally appending a ## Resolution section. Stages the change set atomically (frontmatter write -> git add -> git mv); does not commit. With the origin ticket ownership index, a lease held by another person (email) refuses the call unless dangerously_override_lease_status is true with a reason; a lease held by another clone or track proceeds with a warning, and the lease never moves.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"stem":       stringProperty("Ticket stem (YYMMDD-category-name)."),
-					"status":     stringProperty("Close target: done or dropped."),
-					"resolution": stringProperty("Optional resolution text appended as a ## Resolution (today) section."),
+					"stem":                              stringProperty("Ticket stem (YYMMDD-category-name)."),
+					"status":                            stringProperty("Close target: done or dropped."),
+					"resolution":                        stringProperty("Optional resolution text appended as a ## Resolution (today) section."),
+					"dangerously_override_lease_status": boolProperty("With the origin ticket ownership index, proceed although another person (email) holds the ticket's lease; the lease stays with its holder and the index records the actor and reason. Set only on the user's explicit instruction; requires reason. Ignored in a project without the index."),
+					"reason":                            stringProperty("Why the lease guard is overridden. Required with dangerously_override_lease_status."),
 				},
 				"required": []string{"stem", "status"},
 			},
@@ -4071,12 +4135,14 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.move",
-			"description": "Move a ticket along the idea <-> todo <-> ready axis. Non-implementation categories (epic, research, workset) are board artifacts, never execution targets, and are rejected at the ready/ landing. Ready promotion and epic todo settlement resolve sage-review posture from config; actionable todo moves are ungated. Stages atomically; does not commit.",
+			"description": "Move a ticket along the idea <-> todo <-> ready axis. Non-implementation categories (epic, research, workset) are board artifacts, never execution targets, and are rejected at the ready/ landing. Ready promotion and epic todo settlement resolve sage-review posture from config; actionable todo moves are ungated. Stages atomically; does not commit. With the origin ticket ownership index, a lease held by another person (email) refuses the call unless dangerously_override_lease_status is true with a reason; a lease held by another clone or track proceeds with a warning, and the lease never moves.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"stem": stringProperty("Ticket stem (YYMMDD-category-name)."),
-					"to":   stringProperty("Target status: idea, todo, or ready."),
+					"stem":                              stringProperty("Ticket stem (YYMMDD-category-name)."),
+					"to":                                stringProperty("Target status: idea, todo, or ready."),
+					"dangerously_override_lease_status": boolProperty("With the origin ticket ownership index, proceed although another person (email) holds the ticket's lease; the lease stays with its holder and the index records the actor and reason. Set only on the user's explicit instruction; requires reason. Ignored in a project without the index."),
+					"reason":                            stringProperty("Why the lease guard is overridden. Required with dangerously_override_lease_status."),
 				},
 				"required": []string{"stem", "to"},
 			},
@@ -4147,6 +4213,44 @@ func tools() []map[string]any {
 					"verdicts": objectArrayProperty("Reviewer verdicts: [{reviewer, verdict, issues:[{title, severity, resolution}]}]. verdict is pass|concern|block."),
 				},
 				"required": []string{"stem", "stage", "verdicts"},
+			},
+		},
+		{
+			"name":        "tickets.acquire",
+			"description": "Lease a ticket to the caller's track in the origin ticket ownership index. The owner is (git user.email, this clone's id, track); the track is the current branch's merge root (an impl/<root>/<stem> branch records its root, and when that root's owner already holds the lease only the impl branch is recorded). A rootless impl/<stem> or implement/<stem> branch needs an explicit track; a detached HEAD is refused. A ticket already under .done/ or .dropped/ on the origin review-track is refused (pull first). A lease held by another email, or by another track of this clone, is refused unless dangerously_override_lease_status is true with a non-empty reason, which is set only on the user's explicit instruction; a lease held by the same email on another clone moves to the caller with a warning. When origin is unreachable on a clone that has used the index, the cached index decides, and a success is recorded as pending with an offline warning. In a project without the index this returns a plain ok and validates nothing. Defaults to compact text; use format=json for structured output.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"ticket_stem":                       stringProperty("Ticket stem (YYMMDD-category-name). The ticket file must exist in this checkout."),
+					"track":                             stringProperty("Optional explicit track (work line) to record, for branches with no merge root."),
+					"dangerously_override_lease_status": boolProperty("Take over a lease the ownership rules refuse. Set only on the user's explicit instruction; requires reason."),
+					"reason":                            stringProperty("Why the lease is overridden; recorded in the index history. Required with dangerously_override_lease_status."),
+					"format":                            stringProperty(`Optional output format. Use "json" for structured output.`),
+				},
+				"required": []string{"ticket_stem"},
+			},
+		},
+		{
+			"name":        "tickets.release",
+			"description": "Remove the caller's own lease on a ticket from the origin ticket ownership index. Releasing a lease held by another owner (email, clone, or track) is refused; taking it over is an acquire. Offline on a clone that has used the index, the release is recorded as pending. In a project without the index this returns a plain ok and validates nothing. Defaults to compact text; use format=json for structured output.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"ticket_stem": stringProperty("Ticket stem (YYMMDD-category-name)."),
+					"format":      stringProperty(`Optional output format. Use "json" for structured output.`),
+				},
+				"required": []string{"ticket_stem"},
+			},
+		},
+		{
+			"name":        "tickets.index_init",
+			"description": "Lead-only. Set up the origin ticket ownership index: pushes one index ref to origin with the user's git credentials and registers every open ticket (idea/, todo/, ready/) on origin's review-track. If another clone created it first, the existing index is adopted. With check=true it pushes nothing and reports the live state: initialized, uninitialized (origin reachable, no index), no-origin, or unreachable. Ask the user before running init. Defaults to compact text; use format=json for structured output.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"check":  boolProperty("When true, only report the index state; nothing is pushed or created."),
+					"format": stringProperty(`Optional output format. Use "json" for structured output.`),
+				},
 			},
 		},
 		{
@@ -4261,7 +4365,8 @@ func toolSchemaRequiresSessionKey(name string) bool {
 		"project_tree",
 		"review.marker", "review.stamp",
 		"worktree.acquire", "worktree.release",
-		"tickets.query", "tickets.close", "tickets.move", "tickets.create_empty", "tickets.sage_gate", "tickets.sage_stamp", "tickets.verify", "path.generate", "playbook.render":
+		"tickets.query", "tickets.close", "tickets.move", "tickets.create_empty", "tickets.sage_gate", "tickets.sage_stamp", "tickets.verify",
+		"tickets.acquire", "tickets.release", "tickets.index_init", "path.generate", "playbook.render":
 		return true
 	default:
 		if entry, ok := configKeyEntryForTool(name); ok {

@@ -23,7 +23,13 @@ func ResolveTrack(ctx context.Context, root string) (string, error) {
 	if policy := ReadAgentsReviewPolicy(root); policy.ReviewTrack != "" {
 		return policy.ReviewTrack, nil
 	}
+	return ResolveTrackFallback(ctx, root)
+}
 
+// ResolveTrackFallback is ResolveTrack's git-default heuristic alone, without
+// the local AGENTS.md declaration: `origin/HEAD`'s symbolic-ref target, then
+// local `main`, then `master`.
+func ResolveTrackFallback(ctx context.Context, root string) (string, error) {
 	runner := wsgit.ExecRunner{}
 
 	if out, err := runner.RunGit(ctx, root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"); err == nil {

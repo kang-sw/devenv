@@ -32,6 +32,7 @@ Mode: user request
    - **claude-migrate** - `CLAUDE.md` exists and `AGENTS.md` does not.
 5. Execute the matching handler.
 6. Run the index health check when `ai-docs/_index.md` exists.
+7. Unless the mode was refuse, run the ticket ownership index check.
 
 ## On: fresh
 
@@ -83,6 +84,24 @@ Mode: user request
 4. Replace `CLAUDE.md` body with `@AGENTS.md`.
 5. Preserve no separate Claude-only section unless explicitly requested.
 6. Commit.
+
+## On: ticket ownership index check
+
+The ticket ownership index is an optional ref on `origin` that records which
+person, clone, and branch holds each open ticket, so collaborators do not pick
+up the same ticket. Call `{{.McpNamespace}}/tickets.index_init(check: true)`
+and handle its `state:`:
+
+- `uninitialized`: explain what the index does, and that setting it up pushes
+  one ref to `origin` with the user's credentials and publishes each holder's
+  git email there. Ask whether to set it up now. On yes, call
+  `{{.McpNamespace}}/tickets.index_init()`; when it fails, report the failure
+  and finish the rest of bootstrap. On no, change nothing; a later bootstrap
+  run asks again.
+- `initialized`: one line saying the index is active.
+- `no-origin`: one line saying the index can be set up by re-running bootstrap
+  once an `origin` remote exists.
+- `unreachable`: one line saying the check could not reach `origin`.
 
 ## On: index health check
 

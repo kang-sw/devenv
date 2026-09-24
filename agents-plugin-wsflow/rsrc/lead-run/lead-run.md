@@ -62,14 +62,21 @@ the turn: relay the reason.
 3. When a goal reminder is active and the branch is not yet `goal/*`, run
    `git checkout -b goal/<current branch>/<slug>` with a random
    word-word-word slug: a slug derived from the goal text collides across
-   concurrent runs. On detached `HEAD`, skip this step, spawn on the detached
-   checkout, and tell the user.
-4. `{{.McpNamespace}}/playbook.render(name: <the row's worker playbook>,
+   concurrent runs. On detached `HEAD`, skip this step and tell the user; the
+   worker spawns on the detached checkout unless step 4's acquire refuses it.
+4. `{{.McpNamespace}}/tickets.acquire(ticket_stem: "<stem>")` from the branch
+   the worker will branch off, so the lease's track is the one the worker's
+   impl branch merges into. A refusal or an error ends the turn: report it to
+   the user and dispatch nothing. Set `dangerously_override_lease_status`, with
+   the user's words as `reason`, only when the user explicitly told you to take
+   the ticket over; a refusal alone is never that instruction. A success that
+   carries a `warning:` line proceeds; relay that line to the user verbatim.
+5. `{{.McpNamespace}}/playbook.render(name: <the row's worker playbook>,
    session_key: <your key>)`. When the table cell pairs the body with
    `tier_override: xlarge`, pass that argument too: the `elevated` body's
    frontmatter tier is large, so xlarge dispatch needs the override to spawn at
    the xlarge model rather than large. Do not read the file.
-5. Spawn one worker at the tier the render recommends, in a form that can
+6. Spawn one worker at the tier the render recommends, in a form that can
    itself spawn children ({{.SpawnIdiom}}), with this task block and nothing
    else beyond the lines **Handle the report** adds:
 
@@ -78,7 +85,7 @@ the turn: relay the reason.
    Ticket: <ticket path> (stem <stem>). Branch: <current branch>.
    ```
 
-6. Wait for the host's completion notification. Do not poll, and do not edit
+7. Wait for the host's completion notification. Do not poll, and do not edit
    the ticket or move `HEAD` meanwhile; housekeeping that cannot wait uses
    the sparse worktree the workflow manual's `### Git` section describes,
    released before **Handle the report** merges.
@@ -138,7 +145,7 @@ turn; the next invocation merges once the holder has released it.
   when it already has a `### Result`. A `pass` commits the phase update and
   resumes the worker; a `block` goes to the user with the verdict.
 - **(d) irreversible action** — ask the user; resume with the answer.
-- **(e) Critical open after the fix round** — repeat Spawn steps 4 to 6 with
+- **(e) Critical open after the fix round** — repeat Spawn steps 5 to 7 with
   the retry cell from the table (its body and any `tier_override`), on the same
   branch, adding the report's open Critical `unresolved:` line to the task
   block. One retry: a second (e) goes to the user.

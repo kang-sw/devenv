@@ -2768,7 +2768,7 @@ func TestPlaybookPrintLeadRunWorkerTierPolicy(t *testing.T) {
 				// large — to spawn at the xlarge model. Pin that dispatch rule and
 				// the retry cell's carry of any tier_override.
 				"When the table cell pairs the body with `tier_override: xlarge`, pass that argument too",
-				"repeat Spawn steps 4 to 6 with the retry cell from the table (its body and any `tier_override`)",
+				"repeat Spawn steps 5 to 7 with the retry cell from the table (its body and any `tier_override`)",
 				// The Risk Rubric is a bundled rsrc doc pulled in through
 				// lead-run.md's `includes: - risk-rubric` frontmatter, not
 				// inlined in lead-run.md itself — assert its own content
