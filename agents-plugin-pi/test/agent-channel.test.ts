@@ -1,10 +1,11 @@
 import { after, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   CHANNEL_BOOTSTRAP_ENVS,
   CHANNEL_CREDENTIAL_ENV,
@@ -156,6 +157,41 @@ for (const kind of ["pipe", "tcp"] as const) {
       await assert.rejects(ChildChannel.connect(boot, { reconnect: false }));
       if (kind === "pipe" && !win) assert.equal(existsSync((parent.endpoint as { path: string }).path), false);
     });
+
+    test("close(): a socket accepted before the close whose hello arrives after it is dropped, never welcomed", async () => {
+      const parent = await ParentChannel.bind(4, { force: kind, socketDir: socketDir() });
+      const boot = readAndDeleteChannelBootstrap({ ...parent.bootstrapEnv() })!;
+      const early = await connectChannelEndpoint(parent.endpoint);
+      early.on("error", () => { /* the parent destroyed it; the write below may fail with EPIPE */ });
+      const answer = new Promise<string>(resolve => { let got = ""; early.on("data", d => { got += String(d); }); early.on("close", () => resolve(got)); });
+      parent.close();
+      early.write(JSON.stringify({ t: "hello", v: CHANNEL_PROTOCOL_VERSION, cred: boot.credential, gen: 4, reconnect: false, resume: {} }) + "\n");
+      assert.equal(await answer, "", "no welcome and no reject line: the socket is simply destroyed");
+      assert.equal(parent.live, undefined);
+      assert.equal(parent.accepted, 0);
+    });
+
+    test("hello timeouts: the child gives up on a silent endpoint, the parent rejects a silent socket, and a probe that closes first records nothing", async () => {
+      const silent = net.createServer();
+      silent.unref();
+      const target = kind === "tcp" ? { host: "127.0.0.1", port: 0 } : { path: win ? `\\\\.\\pipe\\ws-pi-silent-${process.pid}` : join(socketDir(), "silent.sock") };
+      await new Promise<void>(resolve => silent.listen(target, resolve));
+      const endpoint = kind === "tcp" ? { kind, host: "127.0.0.1", port: (silent.address() as net.AddressInfo).port } : { kind, path: (target as { path: string }).path };
+      const startedAt = Date.now();
+      await assert.rejects(ChildChannel.connect({ endpoint, credential: "c", generation: 1 }, { reconnect: false, helloTimeoutMs: 100 }), (e: ChannelRejected) => e.reason === "timeout");
+      assert.ok(Date.now() - startedAt < 2_000);
+      silent.close();
+
+      const parent = await ParentChannel.bind(1, { force: kind, socketDir: socketDir(), helloLineTimeoutMs: 100 });
+      const probe = await connectChannelEndpoint(parent.endpoint);
+      probe.destroy();
+      const mute = await connectChannelEndpoint(parent.endpoint);
+      const answer = new Promise<string>(resolve => mute.once("data", d => resolve(String(d))));
+      assert.match(await answer, /"reason":"timeout"/);
+      assert.deepEqual(parent.rejects, ["timeout"], "the probe that closed before the bound is not a rejected hello");
+      mute.destroy();
+      parent.close();
+    });
   });
 }
 
@@ -201,6 +237,36 @@ describe("bind order, fallback, and fail-closed diagnostics", () => {
     squatter.close();
   });
 
+  test("a socket directory that is not private to this user fails the pipe bind and falls back to TCP", { skip: win }, async () => {
+    const dir = socketDir();
+    chmodSync(dir, 0o755);
+    const bound = await bindChannelEndpoint({ socketDir: dir });
+    assert.equal(bound.endpoint.kind, "tcp");
+    assert.equal(bound.fallbackFailures.length, 1);
+    assert.match(bound.fallbackFailures[0].error, /accessible to other users \(mode 755\)/);
+    bound.close();
+    chmodSync(dir, 0o700);
+    const again = await bindChannelEndpoint({ socketDir: dir });
+    assert.equal(again.endpoint.kind, "pipe");
+    again.close();
+  });
+
+  test("a parent that leaves through process.exit without closing still unlinks its Unix socket", { skip: win }, async () => {
+    const dir = socketDir();
+    const script = `import { bindChannelEndpoint } from ${JSON.stringify(fileURLToPath(new URL("../src/agent-channel.ts", import.meta.url)))};
+      const bound = await bindChannelEndpoint({ socketDir: process.argv[1] });
+      process.stdout.write(bound.endpoint.path + "\\n");
+      process.exit(0);`;
+    const child = spawn(process.execPath, ["--input-type=module", "-e", script, dir], { stdio: ["ignore", "pipe", "inherit"] });
+    let output = "";
+    child.stdout!.on("data", chunk => { output += String(chunk); });
+    const code = await new Promise<number | null>(resolve => child.once("exit", resolve));
+    assert.equal(code, 0, output);
+    const path = output.trim();
+    assert.ok(path.startsWith(dir), `bound under the given directory: ${output}`);
+    assert.equal(existsSync(path), false, "the exit hook unlinked the socket");
+  });
+
   test("a stale Unix socket left by a killed listener is swept before the next bind", { skip: win }, async () => {
     const dir = socketDir();
     const stale = join(dir, "stale.sock");
@@ -224,6 +290,11 @@ describe("bootstrap read-then-delete", () => {
     assert.deepEqual(readAndDeleteChannelBootstrap(env), { endpoint: { kind: "tcp", host: "127.0.0.1", port: 4242 }, credential: "cred", generation: 3 });
     assert.deepEqual(env, { KEEP: "1" });
     assert.equal(readAndDeleteChannelBootstrap({ KEEP: "1" }), undefined);
+    // The spawner clears inherited keys with empty strings (RpcClient overlays
+    // env on process.env, so deletion would keep a grandparent's value).
+    const cleared: NodeJS.ProcessEnv = Object.fromEntries(CHANNEL_BOOTSTRAP_ENVS.map(key => [key, ""]));
+    assert.equal(readAndDeleteChannelBootstrap(cleared), undefined);
+    assert.deepEqual(cleared, {});
   });
 
   test("a partial or malformed bootstrap throws, and is still deleted", () => {

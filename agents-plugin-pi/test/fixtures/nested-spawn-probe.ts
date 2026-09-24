@@ -1,5 +1,5 @@
 /**
- * Nested-hop probe for `test/agent-channel-live.test.ts`: run through a real
+ * Nested-hop probe for `test/agent-channel.integration.test.ts`: run through a real
  * Pi child's `bash` (so it inherits that child's scrubbed environment), it
  * spawns a real Explore grandchild through the production `spawnAgent` path
  * and prints one JSON line describing the grandchild's channel. Guarded by an

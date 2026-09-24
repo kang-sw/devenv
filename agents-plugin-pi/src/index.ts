@@ -930,8 +930,12 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     await applySessionStartAgentFooter(agentFooterLifecycle, bootstrapRole, ctx, agentTools.rpcRegistry, dispatchStorage);
   });
 
-  pi.on("session_shutdown", async (_event, _ctx) => {
-    channel?.close();
+  pi.on("session_shutdown", async (event, _ctx) => {
+    // Session replacement (`reload`/`new`/`resume`/`fork`) re-runs this
+    // factory in the same process, where the deleted bootstrap can never be
+    // read again; the adapter does not drive children through it, but the
+    // channel must outlive anything short of the process's own quit.
+    if ((event?.reason ?? "quit") === "quit") channel?.close();
     await claudeDelegateSession.shutdown();
     // 260905: snapshot the children BEFORE stopAll() tears down their live
     // clients, so the next start of this session can announce them rather

@@ -28,8 +28,10 @@ export function proveWebReadiness(pi: ExtensionAPI, extensionPath: string): WebR
 }
 
 export function verifyWebReadiness(payload: unknown): void {
-  const ready = payload as Partial<WebReadiness> | null | undefined;
-  if (!ready || typeof ready !== "object" || JSON.stringify(ready.tools) !== JSON.stringify(NETWORK_TOOLS)) {
+  const ready = payload as (Partial<WebReadiness> & { error?: unknown }) | null | undefined;
+  // A payload carrying `error` is the child's own proof failure, published so
+  // the parent fails at once instead of at its readiness bound.
+  if (!ready || typeof ready !== "object" || ready.error !== undefined || JSON.stringify(ready.tools) !== JSON.stringify(NETWORK_TOOLS)) {
     throw new Error("web-search-tool-unavailable: Explore web facade readiness was not proved");
   }
 }

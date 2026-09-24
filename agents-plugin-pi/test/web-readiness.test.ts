@@ -18,7 +18,7 @@ test("launch proof requires exact facade provenance and active tools; the parent
   assert.throws(() => proveWebReadiness(api(undefined, ["web_search"]), entry), /registration mismatch/);
   assert.throws(() => proveWebReadiness(api([{ name: "web_search", sourceInfo: { path: "/other/index.ts" } }]), entry), /registration mismatch/);
   assert.throws(() => proveWebReadiness(api([...names.map(name => ({ name, sourceInfo: { path: entry } })), { name: "web_search", sourceInfo: { path: entry } }]), entry), /registration mismatch/);
-  for (const payload of [undefined, null, "invalid", {}, { tools: ["web_search"] }, { tools: [...names].reverse() }]) {
+  for (const payload of [undefined, null, "invalid", {}, { tools: ["web_search"] }, { tools: [...names].reverse() }, { tools: names, error: "web-search-tool-unavailable: Explore web facade registration mismatch" }]) {
     assert.throws(() => verifyWebReadiness(payload), /web-search-tool-unavailable/, JSON.stringify(payload));
   }
 });

@@ -13,13 +13,13 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RpcClient } from "@earendil-works/pi-coding-agent";
 import { createAgentStorageContext } from "../src/agent-storage.ts";
-import { CHANNEL_CREDENTIAL_ENV, CHANNEL_PROTOCOL_VERSION, connectChannelEndpoint, defaultChannelSocketDir, type ChannelEndpoint, type ParentChannel } from "../src/agent-channel.ts";
+import { CHANNEL_CREDENTIAL_ENV, CHANNEL_PROTOCOL_VERSION, connectChannelEndpoint, type ChannelEndpoint, type ParentChannel } from "../src/agent-channel.ts";
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const cli = join(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))), "cli.js");
 const savedArgv = process.argv[1];
 process.argv[1] = cli;
-const { spawnAgent, sendToAgent, stopAgent, awaitChannelStage } = await import("../src/spawner.ts");
+const { spawnAgent, sendToAgent, stopAgent } = await import("../src/spawner.ts");
 process.argv[1] = savedArgv;
 
 const WEB_READINESS = { tools: ["web_search", "ws_web_fetch"] };
@@ -158,36 +158,41 @@ test("a forced drop is re-established by the real child, whose reconnect hello c
   } finally { await teardown(registry); }
 });
 
-test("a drop between the hello and readiness recovers through the reconnect; readiness that never arrives fails with today's error inside the bound", { timeout: LAUNCH_TIMEOUT }, async t => {
+test("a drop between the hello and readiness recovers through the reconnect, whose hello carries the readiness the drop lost", { timeout: LAUNCH_TIMEOUT }, async t => {
   const root = makeRoot(t);
   t.mock.method(RpcClient.prototype, "prompt", async () => {});
   const registry = new Map<string, any>();
   const originalStart = RpcClient.prototype.start;
+  const hellos: any[] = [];
+  let readyBeforeDrop: boolean | undefined;
   // The channel is bound before the process starts, so the first accepted
-  // connection can be cut from inside `start()` before the child reaches
-  // `session_start` and publishes anything.
+  // connection is cut from inside the hello's own accept, before the child
+  // reaches `session_start` and publishes anything. (Launch-path failures on
+  // absent or invalid readiness are agent-channel-launch.test.ts's.)
   t.mock.method(RpcClient.prototype, "start", async function (this: RpcClient) {
     const record = [...registry.values()].find(candidate => candidate.client === this);
     const channel = record?.channel as ParentChannel | undefined;
-    if (channel) { const off = channel.onConnection(conn => { off(); setTimeout(() => conn.close(), 20); }); }
+    if (channel) {
+      let ready = false;
+      void channel.readiness("web").then(() => { ready = true; }, () => {});
+      channel.onConnection((conn, hello) => {
+        hellos.push(hello);
+        if (hellos.length === 1) { readyBeforeDrop = ready; conn.close(); }
+      });
+    }
     return originalStart.call(this);
   });
   try {
     const record = await spawnExplore(registry, exploreContext(root, "lead-d"));
     const channel = record.channel as ParentChannel;
+    assert.equal(readyBeforeDrop, false, "precondition: the drop preceded the readiness message");
     assert.equal(channel.accepted, 2, "the launch completed over the child's reconnect");
+    assert.equal(hellos.length, 2);
+    assert.equal(hellos[1].reconnect, true);
+    assert.deepEqual(hellos[1].resume, { readiness: { web: WEB_READINESS } }, "the readiness published while disconnected rode the reconnect hello");
     assert.ok(channel.live);
     assert.deepEqual(await channel.readiness("web"), WEB_READINESS);
-
-    await assert.rejects(
-      awaitChannelStage(record.client, channel.readiness("fork"), 300, "fork readiness", () => new Error("ws-pi-agent: fork did not publish readiness")),
-      { message: "ws-pi-agent: fork did not publish readiness" },
-    );
-    await assert.rejects(
-      awaitChannelStage(record.client, channel.readiness("fork"), 300, "web readiness", () => new Error("web-search-tool-unavailable: Explore web facade readiness was not proved")),
-      { message: "web-search-tool-unavailable: Explore web facade readiness was not proved" },
-    );
-    assert.ok(await record.client.getState(), "a bounded wait leaves the child untouched");
+    assert.ok(await record.client.getState(), "the child is unaffected by the drop");
   } finally { await teardown(registry); }
 });
 
@@ -206,7 +211,7 @@ test("a hello the parent rejects exits the child at startup and the parent repor
     // `pushSpawnFailed` cases; here the launch outcome and the record's
     // resting shape are what a real rejected hello must produce.
     await assert.rejects(spawnExplore(registry, exploreContext(root, "lead-e")), (error: Error) => {
-      assert.match(error.message, /^ws-pi-agent: child channel hello timed out after \d+ms \(child exited before channel hello: /);
+      assert.match(error.message, /^ws-pi-agent: child exited before channel hello: /);
       return true;
     });
     assert.ok(Date.now() - startedAt < 25_000, "the exit was observed by the lifecycle probe, not the timeout");
@@ -217,10 +222,13 @@ test("a hello the parent rejects exits the child at startup and the parent repor
   } finally { await teardown(registry); }
 });
 
-test("a stale socket left in the default directory by a SIGKILLed listener is swept by the next launch", { timeout: LAUNCH_TIMEOUT, skip: process.platform === "win32" }, async t => {
+test("a stale socket left in the launch's socket directory by a SIGKILLed listener is swept by the next launch", { timeout: LAUNCH_TIMEOUT, skip: process.platform === "win32" }, async t => {
   const root = makeRoot(t);
   t.mock.method(RpcClient.prototype, "prompt", async () => {});
-  const dir = defaultChannelSocketDir();
+  // A private directory (through the bind seam) rather than the shared
+  // per-user one, which concurrent test processes sweep as well.
+  const dir = mkdtempSync(join(tmpdir(), "ws-pi-sock-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
   const stale = join(dir, `stale-${process.pid}.sock`);
   const listener = spawn(process.execPath, ["-e", `const net=require("net");net.createServer().listen(${JSON.stringify(stale)},()=>{process.stdout.write("listening\\n")});setInterval(()=>{},1000)`], { stdio: ["ignore", "pipe", "inherit"] });
   await new Promise<void>(resolve => listener.stdout.once("data", () => resolve()));
@@ -230,9 +238,12 @@ test("a stale socket left in the default directory by a SIGKILLed listener is sw
   assert.ok(existsSync(stale), "SIGKILL leaves the socket file behind");
   const registry = new Map<string, any>();
   try {
-    const record = await spawnExplore(registry, exploreContext(root, "lead-f"));
+    const record = await spawnExplore(registry, exploreContext(root, "lead-f", { channel: { bind: { socketDir: dir } } }));
     assert.equal(existsSync(stale), false, "the bind's sweep removed the stale socket");
-    assert.ok(existsSync((record.channel as ParentChannel).endpoint.kind === "pipe" ? (record.channel.endpoint as any).path : stale), "the live socket stays");
+    const live = (record.channel as ParentChannel).endpoint;
+    assert.equal(live.kind, "pipe");
+    assert.ok((live as { path: string }).path.startsWith(dir), "the launch bound under the given directory");
+    assert.ok(existsSync((live as { path: string }).path), "the live socket stays");
   } finally { await teardown(registry); }
 });
 

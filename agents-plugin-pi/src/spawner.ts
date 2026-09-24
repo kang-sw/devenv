@@ -1831,6 +1831,11 @@ function clearLiveState(record: RpcAgentRecord, registry?: RpcAgentRegistry): vo
  * Returns `true` when the agent is (still) alive, `false` when this call
  * transitioned it to exited and pushed `ws-agent-settled` `reason:"exited"`.
  */
+/** The exit `RpcClient` recorded for its process, if any: the one signal that a `getState()` rejection means "gone" rather than "slow". */
+function recordedExitError(client: RpcClient): unknown {
+  return (client as { exitError?: unknown }).exitError;
+}
+
 export async function probeAgentLiveness(
   pi: ExtensionAPI | undefined,
   registry: RpcAgentRegistry | undefined,
@@ -2180,6 +2185,7 @@ export async function awaitChannelStage<T>(
   timeoutMs: number,
   stage: string,
   timeoutError: () => Error = () => new Error(`ws-pi-agent: child channel ${stage} timed out after ${timeoutMs}ms`),
+  exitError: (reason: string) => Error = reason => new Error(`ws-pi-agent: child exited before channel ${stage}: ${reason}`),
 ): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   let probing = true;
@@ -2187,12 +2193,8 @@ export async function awaitChannelStage<T>(
   const exited = (async (): Promise<never> => {
     while (probing) {
       try { await client.getState(); } catch (error) {
-        const exitError = (client as { exitError?: unknown }).exitError;
-        if (exitError) {
-          const reason = exitError instanceof Error ? exitError.message : String(exitError ?? error);
-          const base = timeoutError().message;
-          throw new Error(`${base} (child exited before channel ${stage}: ${reason})`);
-        }
+        const recorded = recordedExitError(client);
+        if (recorded) throw exitError(recorded instanceof Error ? recorded.message : String(recorded ?? error));
       }
       if (!probing) break;
       await new Promise(resolve => { const nap = setTimeout(resolve, CHANNEL_LIVENESS_PROBE_MS); nap.unref?.(); });
@@ -2204,15 +2206,17 @@ export async function awaitChannelStage<T>(
   finally { probing = false; clearTimeout(timer); }
 }
 
-/** Stage-2 waits keep today's failure texts: a timeout reads exactly as the missing file used to. */
+/** Stage-2 waits keep today's failure texts: a timeout reads exactly as the missing file used to, and a child exit keeps that text as its prefix. */
 function awaitForkReadiness(client: RpcClient, channel: ParentChannel, opts: ChannelLaunchOptions | undefined): Promise<unknown> {
+  const text = "ws-pi-agent: fork did not publish readiness";
   return awaitChannelStage(client, channel.readiness(FORK_READINESS_KIND), opts?.readinessTimeoutMs ?? CHANNEL_READINESS_TIMEOUT_MS, "fork readiness",
-    () => new Error("ws-pi-agent: fork did not publish readiness"));
+    () => new Error(text), reason => new Error(`${text} (child exited before channel fork readiness: ${reason})`));
 }
 
 function awaitWebReadiness(client: RpcClient, channel: ParentChannel, opts: ChannelLaunchOptions | undefined): Promise<unknown> {
+  const text = "web-search-tool-unavailable: Explore web facade readiness was not proved";
   return awaitChannelStage(client, channel.readiness(WEB_READINESS_KIND), opts?.readinessTimeoutMs ?? CHANNEL_READINESS_TIMEOUT_MS, "web readiness",
-    () => new Error("web-search-tool-unavailable: Explore web facade readiness was not proved"));
+    () => new Error(text), reason => new Error(`${text} (child exited before channel web readiness: ${reason})`));
 }
 
 export function validateForkReadiness(payload: unknown, record: RpcAgentRecord, state: { sessionFile?: string; sessionId?: string }): void {
@@ -3010,21 +3014,34 @@ export async function spawnAgent(
   ownership.delegation = delegation;
   updateOwnership(ownership.home, { delegation });
   const sessionPath = ownership.sessionPath!;
-  const forkLaunch = ctx.forkFrom || ctx.spawnRole === "fork" ? prepareForkLaunch(ctx.forkContext) : undefined;
+  // The control channel is bound before the record is registered: nothing can
+  // send to or stop an agent that is not in the registry yet, so the bind's
+  // await opens no window in which the record reads as dormant. Its bootstrap
+  // rides in the child's env; a bind failure fails the spawn before any
+  // launch file or half-registered record exists.
+  const channel = await ParentChannel.bind(1, ctx.channel?.bind);
+  let forkLaunch: { contextPath: string; affinityId?: string } | undefined;
   let forkSourcePath = ctx.forkFrom;
-  if (forkLaunch && ctx.forkSourceEntries) {
-    forkSourcePath = join(dirname(forkLaunch.contextPath), "source.jsonl");
-    writeFileSync(forkSourcePath, ctx.forkSourceEntries.map(entry => JSON.stringify(entry)).join("\n") + "\n", { mode: 0o600 });
+  let promptPath = params.systemPromptPath;
+  try {
+    forkLaunch = ctx.forkFrom || ctx.spawnRole === "fork" ? prepareForkLaunch(ctx.forkContext) : undefined;
+    if (forkLaunch && ctx.forkSourceEntries) {
+      forkSourcePath = join(dirname(forkLaunch.contextPath), "source.jsonl");
+      writeFileSync(forkSourcePath, ctx.forkSourceEntries.map(entry => JSON.stringify(entry)).join("\n") + "\n", { mode: 0o600 });
+    }
+    if (promptPath && role !== "fork") {
+      promptPath = join(ownership.home, "prompt.md");
+      writeFileSync(promptPath, Buffer.concat([promptBody!, Buffer.from(WORKER_LIFECYCLE_GUIDE)]), { mode: 0o600 });
+    }
+  } catch (error) {
+    channel.close();
+    if (forkLaunch) rmSync(dirname(forkLaunch.contextPath), { recursive: true, force: true });
+    throw error;
   }
   const modelBase = resolution.model;
   const toolGroup: ToolGroup = resolveSpawnToolGroup(ctx.toolGroup);
   const tools = ctx.spawnRole === "fork" || ctx.forkFrom ? ctx.explicitTools ?? delegation.tools.join(",") : delegation.tools.join(",");
   const subtreeChannel = { path: join(ownership.home, "subtree.json"), nonce: randomUUID() };
-  let promptPath = params.systemPromptPath;
-  if (promptPath && role !== "fork") {
-    promptPath = join(ownership.home, "prompt.md");
-    writeFileSync(promptPath, Buffer.concat([promptBody!, Buffer.from(WORKER_LIFECYCLE_GUIDE)]), { mode: 0o600 });
-  }
   const record: RpcAgentRecord = {
     agentId,
     alias,
@@ -3052,10 +3069,11 @@ export async function spawnAgent(
     running: false,
     reportLog: [],
     prompt: truncatePromptForStorage(params.prompt),
+    channel,
+    launchGeneration: channel.generation,
   };
   registry.set(agentId, record);
   startOwnedSessionObserver(record);
-  record.launchGeneration = (record.launchGeneration ?? 0) + 1;
 
   // 260905: the record is registered BEFORE `start()`, so a failure anywhere
   // in the launch sequence would otherwise leave a half-registered zombie the
@@ -3064,10 +3082,6 @@ export async function spawnAgent(
   // exactly as before; the push is additive, for the M/N bookkeeping.
   let client: RpcClient | undefined;
   try {
-    // The control channel is bound before the process exists so its bootstrap
-    // rides in the child's env; a bind failure is a failed launch like any other.
-    const channel = await ParentChannel.bind(record.launchGeneration, ctx.channel?.bind);
-    record.channel = channel;
     client = new RpcClient(
       buildRpcClientOptions(
         cwdOverride ?? ctx.cwd,
@@ -3242,29 +3256,36 @@ export async function sendToAgent(
       record.forkFinish.generation = record.launchGeneration;
     }
     try {
+      // The record is claimed synchronously (`record.client`) before the bind
+      // awaits, so a concurrent send sees a live record instead of launching a
+      // second process against the same session, and a concurrent stop finds
+      // a client to clear. `RpcClient` reads its env at `start()`, so the
+      // bootstrap of the freshly bound channel is merged in afterwards.
+      const options = buildRpcClientOptions(
+        record.cwdOverride ?? ctx.cwd,
+        record.modelBase,
+        record.sessionPath,
+        record.systemPromptPath,
+        record.explicitTools ?? record.delegation?.tools.join(",") ?? resolveTools(record.toolGroup, record.wsToolNames),
+        undefined,
+        record.forkContext?.parentSessionKey,
+        record.spawnRole === "fork" ? "fork" : record.spawnRole === "explore" ? "explore" : "worker",
+        record.exploreMode,
+        forkLaunch,
+        ctx.extensionPath,
+        record.delegation,
+        record.subtreeChannel,
+      );
+      client = new RpcClient(options);
+      record.client = client;
       // Every relaunch binds a fresh endpoint and credential under the new
       // generation; the previous launch's channel was closed with its client.
       channel = await ParentChannel.bind(generation, ctx.channel?.bind);
+      // A stop (or a replacement launch) during the bind already cleared or
+      // replaced this claim: the child must not be started for it.
+      if (record.client !== client) throw new Error("ws-pi-agent: launch stopped before the child started");
       record.channel = channel;
-      client = new RpcClient(
-        buildRpcClientOptions(
-          record.cwdOverride ?? ctx.cwd,
-          record.modelBase,
-          record.sessionPath,
-          record.systemPromptPath,
-          record.explicitTools ?? record.delegation?.tools.join(",") ?? resolveTools(record.toolGroup, record.wsToolNames),
-          undefined,
-          record.forkContext?.parentSessionKey,
-          record.spawnRole === "fork" ? "fork" : record.spawnRole === "explore" ? "explore" : "worker",
-          record.exploreMode,
-          forkLaunch,
-          ctx.extensionPath,
-          record.delegation,
-          record.subtreeChannel,
-          channel,
-        ),
-      );
-      record.client = client;
+      Object.assign(options.env!, channel.bootstrapEnv());
       await client.start();
       await awaitChannelStage(client, channel.hello(), ctx.channel?.helloTimeoutMs ?? CHANNEL_HELLO_TIMEOUT_MS, "hello");
       if (forkLaunch) validateForkReadiness(await awaitForkReadiness(client, channel, ctx.channel), record, await client.getState());

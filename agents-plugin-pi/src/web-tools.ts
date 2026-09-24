@@ -5,7 +5,7 @@ import { assertPolicyTool, readDelegationPolicy } from "./delegation-policy.ts";
 import { readSpawnRole } from "./process-role.ts";
 import { boundedWebFetch, WEB_FETCH_CAPS } from "./web-fetch.ts";
 import { createWebSearch, webSearchParameters } from "./web-search.ts";
-import { WEB_HOME_ENV, WEB_READINESS_KIND, proveWebReadiness } from "./web-readiness.ts";
+import { WEB_HOME_ENV, WEB_READINESS_KIND, proveWebReadiness, type WebReadiness } from "./web-readiness.ts";
 import { registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
 import type { ChildChannel } from "./agent-channel.ts";
 
@@ -54,7 +54,12 @@ export function registerWebTools(pi: ExtensionAPI, extensionPath: string, tui: T
     },
   }, tui);
   pi.on("session_start", () => {
-    const readiness = proveWebReadiness(pi, extensionPath);
+    // A proof failure is published too, so the parent fails the launch at
+    // once instead of waiting out its readiness bound.
+    let readiness: WebReadiness | { error: string };
+    try { readiness = proveWebReadiness(pi, extensionPath); }
+    catch (error) { readiness = { error: error instanceof Error ? error.message : String(error) }; }
     channel?.publishReadiness(WEB_READINESS_KIND, readiness);
+    if ("error" in readiness) throw new Error(readiness.error);
   });
 }

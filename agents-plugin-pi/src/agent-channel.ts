@@ -23,7 +23,7 @@
  *   and the child's capped-backoff reconnect loop.
  */
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, unlinkSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, unlinkSync } from "node:fs";
 import net from "node:net";
 import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
@@ -145,6 +145,8 @@ export interface ChannelBindOptions {
   tcpHost?: string;
   /** Test seam: the Unix socket directory instead of the per-user one under `os.tmpdir()`. */
   socketDir?: string;
+  /** Test seam: the parent-side bound on an accepted socket that has not sent its hello (default 5 s). */
+  helloLineTimeoutMs?: number;
 }
 
 export interface BoundChannelEndpoint {
@@ -159,6 +161,21 @@ export interface BoundChannelEndpoint {
 export function defaultChannelSocketDir(): string {
   const owner = process.getuid?.() ?? userInfo().username;
   return join(tmpdir(), `ws-pi-${owner}`);
+}
+
+/**
+ * `mkdirSync` is a no-op on an existing directory, and under a shared `/tmp`
+ * the per-user name is predictable: another OS user who created it first
+ * would own it, could swap our socket file for theirs, and would receive the
+ * child's hello with the credential. So a directory that is not ours, or is
+ * open to others, fails the pipe bind (the TCP fallback names the reason).
+ */
+function assertPrivateSocketDir(dir: string): void {
+  const stat = lstatSync(dir);
+  if (!stat.isDirectory()) throw new Error(`socket directory ${dir} is not a directory`);
+  const uid = process.getuid?.();
+  if (uid !== undefined && stat.uid !== uid) throw new Error(`socket directory ${dir} is owned by uid ${stat.uid}, not ${uid}`);
+  if ((stat.mode & 0o077) !== 0) throw new Error(`socket directory ${dir} is accessible to other users (mode ${(stat.mode & 0o777).toString(8)})`);
 }
 
 const unixSocketsToUnlinkOnExit = new Set<string>();
@@ -229,6 +246,7 @@ async function bindPipe(opts: ChannelBindOptions): Promise<BoundChannelEndpoint>
   if (!path) {
     const dir = opts.socketDir ?? defaultChannelSocketDir();
     mkdirSync(dir, { recursive: true, mode: 0o700 });
+    assertPrivateSocketDir(dir);
     await sweepStaleChannelSockets(dir);
     path = join(dir, `${randomBytes(6).toString("hex")}.sock`);
   }
@@ -365,6 +383,9 @@ export class ParentChannel {
   private liveConnection: ChannelConnection | undefined;
   private closedFlag = false;
   private readonly bound: BoundChannelEndpoint;
+  private readonly helloLineTimeoutMs: number;
+  /** Accepted sockets that have not sent their hello yet; `close()` destroys them so none is welcomed later. */
+  private readonly preHello = new Set<net.Socket>();
   private helloWaiters: Waiter<ChannelHello>[] = [];
   private firstHello: ChannelHello | undefined;
   private readonly readinessByKind = new Map<string, unknown>();
@@ -374,14 +395,15 @@ export class ParentChannel {
   private readonly messageListeners = new Set<(msg: Record<string, unknown>) => void>();
 
   static async bind(generation: number, opts: ChannelBindOptions = {}): Promise<ParentChannel> {
-    return new ParentChannel(await bindChannelEndpoint(opts), generation);
+    return new ParentChannel(await bindChannelEndpoint(opts), generation, opts.helloLineTimeoutMs ?? HELLO_LINE_TIMEOUT_MS);
   }
 
-  private constructor(bound: BoundChannelEndpoint, generation: number) {
+  private constructor(bound: BoundChannelEndpoint, generation: number, helloLineTimeoutMs: number) {
     this.bound = bound;
     this.endpoint = bound.endpoint;
     this.fallbackFailures = bound.fallbackFailures;
     this.generation = generation;
+    this.helloLineTimeoutMs = helloLineTimeoutMs;
     bound.server.on("connection", socket => this.handleSocket(socket));
   }
 
@@ -444,6 +466,8 @@ export class ParentChannel {
     this.closedFlag = true;
     this.liveConnection?.close();
     this.liveConnection = undefined;
+    for (const socket of this.preHello) socket.destroy();
+    this.preHello.clear();
     this.bound.close();
     const closed = new Error("ws-pi-channel: channel closed");
     for (const waiter of this.helloWaiters.splice(0)) waiter.reject(closed);
@@ -462,19 +486,27 @@ export class ParentChannel {
     if (this.closedFlag) { socket.destroy(); return; }
     socket.unref();
     socket.setEncoding("utf8");
+    this.preHello.add(socket);
     let buffer = "";
     let done = false;
-    const reject = (reason: ChannelRejectReason) => {
-      if (done) return;
+    const settle = () => {
       done = true;
       clearTimeout(timer);
+      this.preHello.delete(socket);
+    };
+    const reject = (reason: ChannelRejectReason) => {
+      if (done) return;
+      settle();
       this.rejects.push(reason);
       try { socket.end(JSON.stringify({ t: "reject", reason }) + "\n"); } catch { /* peer gone */ }
       const destroy = setTimeout(() => socket.destroy(), 50);
       destroy.unref();
     };
-    const timer = setTimeout(() => reject("timeout"), HELLO_LINE_TIMEOUT_MS);
+    const timer = setTimeout(() => reject("timeout"), this.helloLineTimeoutMs);
     timer.unref();
+    // A pre-hello socket that goes away (a stale-socket probe from another
+    // parent, a peer that gave up) is not a rejected hello: no diagnostic.
+    socket.once("close", () => { if (!done) settle(); });
     const onData = (chunk: string) => {
       buffer += chunk;
       const index = buffer.indexOf("\n");
@@ -482,6 +514,8 @@ export class ParentChannel {
         if (buffer.length > 1 << 20) reject("malformed");
         return;
       }
+      // Accepted before `close()`, hello after it: a closed channel welcomes nobody.
+      if (this.closedFlag) { settle(); socket.destroy(); return; }
       clearTimeout(timer);
       socket.off("data", onData);
       const rest = buffer.slice(index + 1);
@@ -492,7 +526,7 @@ export class ParentChannel {
       if (typeof hello.cred !== "string" || !equalSecret(hello.cred, this.credential)) return reject("auth");
       if (hello.gen !== this.generation) return reject("generation");
       if (this.liveConnection) return reject("busy");
-      done = true;
+      settle();
       socket.removeAllListeners("data");
       const accepted: ChannelHello = {
         pid: typeof hello.pid === "number" ? hello.pid : undefined,
@@ -603,7 +637,9 @@ export class ChildChannel {
    */
   publishReadiness(kind: string, payload: unknown): void {
     this.readinessByKind.set(kind, payload);
-    if (this.connection) this.send({ t: "ready", kind, payload });
+    // Best effort: a socket already destroyed but not yet reported as ended
+    // throws from `send`; the stored payload rides the next reconnect hello.
+    try { if (this.connection) this.send({ t: "ready", kind, payload }); } catch { /* carried by the reconnect */ }
   }
 
   close(): void {
