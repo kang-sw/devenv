@@ -64,7 +64,7 @@ func resolveIndexCaller(ctx context.Context, root, explicitTrack string) indexCa
 	return c
 }
 
-// implBranchOf returns the branch to record as the lease's impl when the
+// implBranch returns the branch to record as the lease's impl when the
 // caller works on an impl branch.
 func (c indexCaller) implBranch() string {
 	if strings.HasPrefix(c.branch, "impl/") || strings.HasPrefix(c.branch, "implement/") {
@@ -105,7 +105,7 @@ func offlineWarning(op, stem string) string {
 }
 
 func holderText(o wsindex.Owner) string {
-	return fmt.Sprintf("%s (track %s, clone %s)", o.Email, o.Track, o.CloneID)
+	return o.String()
 }
 
 // ---- piggyback registration --------------------------------------------------
@@ -259,12 +259,17 @@ func (s *Server) handleIndexVerb(id json.RawMessage, args, meta map[string]any, 
 		return cl.LoadContext(ctx, sub, online, op == wsindex.OpAcquire)
 	}
 	res, outcome, err := cl.Submit(ctx, sub)
-	if res.Status == wsindex.WriteAbsent {
-		return indexMockResponse(id, args)
-	}
 	reports := make([]string, 0, len(res.Reports))
 	for _, r := range res.Reports {
 		reports = append(reports, indexReportLine(r))
+	}
+	if res.Status == wsindex.WriteAbsent {
+		if len(reports) > 0 {
+			// The index was deleted on origin and this call discarded the
+			// clone's offline entries: the one-time report still shows.
+			return indexVerbResponse(id, args, indexVerbResult{Status: indexMockText, Reports: reports})
+		}
+		return indexMockResponse(id, args)
 	}
 	if err != nil {
 		var refusal *wsindex.RefusalError

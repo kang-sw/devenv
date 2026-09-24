@@ -23,8 +23,7 @@ ticket path, `ready/ empty`, `every remaining ticket blocked`, or a stop reason.
    - `missing` or `ambiguous`: call `{{.McpNamespace}}/git.status()` and stop
      with its nudge line verbatim.
 3. Without `impl_ticket`, inspect `ready/` with `unleased_or_mine: true` on
-   every query, so tickets held by another owner or already closed on origin
-   are never candidates. When ticket assignee-awareness is
+   every candidate query. When ticket assignee-awareness is
    on and the run did not pass `not-assigned`, query with `assigned_to_me` so
    tickets assigned to another contributor are omitted from the candidate set;
    a `not-assigned` run passes no such filter and considers every ready ticket.

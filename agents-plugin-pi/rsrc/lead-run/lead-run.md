@@ -62,8 +62,8 @@ the turn: relay the reason.
 3. When a goal reminder is active and the branch is not yet `goal/*`, run
    `git checkout -b goal/<current branch>/<slug>` with a random
    word-word-word slug: a slug derived from the goal text collides across
-   concurrent runs. On detached `HEAD`, skip this step, spawn on the detached
-   checkout, and tell the user.
+   concurrent runs. On detached `HEAD`, skip this step and tell the user; the
+   worker spawns on the detached checkout unless step 4's acquire refuses it.
 4. `{{.McpNamespace}}/tickets.acquire(ticket_stem: "<stem>")` from the branch
    the worker will branch off, so the lease's track is the one the worker's
    impl branch merges into. A refusal or an error ends the turn: report it to

@@ -31,7 +31,7 @@ type Owner struct {
 
 // String renders the triple for reports and audit lines.
 func (o Owner) String() string {
-	return fmt.Sprintf("%s (clone %s, track %s)", o.Email, o.CloneID, o.Track)
+	return fmt.Sprintf("%s (track %s, clone %s)", o.Email, o.Track, o.CloneID)
 }
 
 // Index is one index version: the whole document stored at indexFile.

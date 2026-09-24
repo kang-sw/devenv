@@ -17,8 +17,9 @@ not evaluate. The lead applies any capacity cap; you do not.
    `impl_ticket` (HEAD is on an implementation branch), stop: that in-progress
    ticket finishes before a batch starts.
 2. List `ready/` with `{{.McpNamespace}}/tickets.query(statuses: ["ready"],
-   unleased_or_mine: true, format: "json")`, which leaves out tickets held by
-   another owner or already closed on origin, then point-resolve each candidate with
+   unleased_or_mine: true, format: "json")`; when that returns no rows, list
+   it once more without `unleased_or_mine` to tell an empty `ready/` from one
+   held by others; only the filtered rows are candidates. Point-resolve each with
    `{{.McpNamespace}}/tickets.query(ticket_stem: "<stem>", format: "json")`.
    Exclude a candidate whose body carries a `## Blocked (YYYY-MM-DD)` heading
    or whose point-resolve carries `dispatch_blocked` (absent when nothing
@@ -34,7 +35,7 @@ not evaluate. The lead applies any capacity cap; you do not.
    conflicts are resolved downstream.
 4. Step 3 always keeps at least one ticket from a non-empty set, so an empty
    batch means every candidate was excluded in step 2: return `ready/ empty`
-   when `ready/` holds no ticket at all, otherwise `every remaining ticket
+   when the unfiltered listing had no rows, otherwise `every remaining ticket
    blocked`.
 
 ## Output

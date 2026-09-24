@@ -25,7 +25,6 @@ type ownershipView struct {
 	provisional  map[string]bool
 	originClosed map[string]bool
 	worktrees    map[string]string // track -> local worktree path (this clone)
-	client       *wsindex.Client
 	overlay      *wsindex.Index
 }
 
@@ -65,7 +64,6 @@ func (s *Server) loadOwnershipView(root string, cachedOnly bool) *ownershipView 
 		provisional:  map[string]bool{},
 		originClosed: cl.OriginTicketsAt(ctx, cl.OriginTrack(ctx)).Closed,
 		worktrees:    localTrackWorktrees(ctx, root),
-		client:       cl,
 	}
 	if view.State == wsindex.ViewUnknown {
 		return v
@@ -95,29 +93,26 @@ func (s *Server) loadOwnershipView(root string, cachedOnly bool) *ownershipView 
 // its path. A worktree on the track branch itself wins over an impl branch
 // rooted there.
 func localTrackWorktrees(ctx context.Context, root string) map[string]string {
-	out, err := (wsgit.ExecRunner{}).RunGit(ctx, root, "worktree", "list", "--porcelain")
+	entries, err := listWorktrees(ctx, wsgit.ExecRunner{}, root)
 	if err != nil {
 		return nil
 	}
 	tracks := map[string]string{}
 	exact := map[string]bool{}
-	path := ""
-	for _, line := range strings.Split(string(out), "\n") {
-		switch {
-		case strings.HasPrefix(line, "worktree "):
-			path = strings.TrimPrefix(line, "worktree ")
-		case strings.HasPrefix(line, "branch refs/heads/"):
-			branch := strings.TrimPrefix(line, "branch refs/heads/")
-			track := implementMergeRootFor(branch)
-			if track == "" || exact[track] {
-				continue
-			}
-			if branch == track {
-				exact[track] = true
-				tracks[track] = path
-			} else if _, ok := tracks[track]; !ok {
-				tracks[track] = path
-			}
+	for _, w := range entries {
+		branch := strings.TrimPrefix(w.Branch, "refs/heads/")
+		if branch == "" || branch == w.Branch {
+			continue
+		}
+		track := implementMergeRootFor(branch)
+		if track == "" || exact[track] {
+			continue
+		}
+		if branch == track {
+			exact[track] = true
+			tracks[track] = w.Path
+		} else if _, ok := tracks[track]; !ok {
+			tracks[track] = w.Path
 		}
 	}
 	return tracks
@@ -284,25 +279,35 @@ func (v *ownershipView) trailer() string {
 type indexGuard struct {
 	override *wsindex.Override
 	warning  string
+	reports  []string // discard reports from the guard's own read
 }
 
 func (s *Server) guardMoveClose(root, tool, stem string, args map[string]any) (indexGuard, error) {
 	v := s.loadOwnershipView(root, false)
-	if v == nil || v.overlay == nil {
+	if v == nil {
 		return indexGuard{}, nil
+	}
+	g := indexGuard{reports: v.reports}
+	if v.overlay == nil {
+		return g, nil
 	}
 	lease := v.leases[strings.TrimSpace(stem)]
 	if lease == nil {
-		return indexGuard{}, nil
+		return g, nil
 	}
 	holder := lease.Owner()
 	if wsindex.SameOwner(holder, v.caller) {
-		return indexGuard{}, nil
+		return g, nil
 	}
 	flag := boolArgument(args["dangerously_override_lease_status"])
 	reason, _ := args["reason"].(string)
 	reason = strings.TrimSpace(reason)
-	if wsindex.NeedsOverride(tool, holder, v.caller) {
+	// A move rides the piggyback registration; its matrix row is register's.
+	op := wsindex.OpClose
+	if tool == "move" {
+		op = wsindex.OpRegister
+	}
+	if wsindex.NeedsOverride(op, holder, v.caller) {
 		if !flag {
 			return indexGuard{}, fmt.Errorf("tickets.%s refused: %s is held by %s since %s; proceeding needs dangerously_override_lease_status: true with a non-empty reason, set only on the user's explicit instruction",
 				tool, stem, holderText(holder), lease.TouchedAt.UTC().Format(time.RFC3339))
@@ -310,16 +315,22 @@ func (s *Server) guardMoveClose(root, tool, stem string, args map[string]any) (i
 		if reason == "" {
 			return indexGuard{}, fmt.Errorf("tickets.%s: dangerously_override_lease_status needs a non-empty reason", tool)
 		}
-		return indexGuard{override: &wsindex.Override{Holder: holder, Reason: reason}}, nil
+		g.override = &wsindex.Override{Holder: holder, Reason: reason}
+		return g, nil
 	}
-	return indexGuard{warning: fmt.Sprintf("ticket-index: %s is held by %s; the lease stays with its holder", stem, holderText(holder))}, nil
+	g.warning = fmt.Sprintf("ticket-index: %s is held by %s; the lease stays with its holder", stem, holderText(holder))
+	return g, nil
 }
 
 func (g indexGuard) text() string {
-	if g.warning == "" {
-		return ""
+	var b strings.Builder
+	for _, r := range g.reports {
+		b.WriteString(indexReportLine(r) + "\n")
 	}
-	return g.warning + "\n"
+	if g.warning != "" {
+		b.WriteString(g.warning + "\n")
+	}
+	return b.String()
 }
 
 // callerLeases lists the stems leased to the caller's own triple.

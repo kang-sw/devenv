@@ -82,9 +82,6 @@ func Open(ctx context.Context, root string, opts Options) (*Client, error) {
 	return c, nil
 }
 
-// Root returns the checkout the client operates in.
-func (c *Client) Root() string { return c.root }
-
 // ---- clone-shared sync state ------------------------------------------------
 
 // syncState is the clone-shared timing state behind the read TTL and the
@@ -148,8 +145,11 @@ type syncOutcome struct {
 	// discovered: discovery saw the index ref on the remote in this sync,
 	// even if the fetch that followed failed.
 	discovered bool
-	tip        string // cache tip after reconciliation; "" unless present
-	reports    []string
+	// timedOut: the remote did not answer within the timeout. A slow remote
+	// is not evidence of absence, so a never-seen clone does not cache it.
+	timedOut bool
+	tip      string // cache tip after reconciliation; "" unless present
+	reports  []string
 }
 
 // sync fetches the remote tip (or runs discovery first when the clone has
@@ -164,13 +164,13 @@ func (c *Client) sync(ctx context.Context, timeout time.Duration, seen bool) (sy
 			c.markAbsent()
 		}
 		if state != RemotePresent {
-			return syncOutcome{state: state}, err
+			return syncOutcome{state: state, timedOut: rctx.Err() != nil}, err
 		}
 	}
 	tip, state, err := c.fetchTip(ctx, rctx)
 	switch state {
 	case RemoteUnreachable:
-		return syncOutcome{state: state, discovered: !seen}, err
+		return syncOutcome{state: state, discovered: !seen, timedOut: rctx.Err() != nil}, err
 	case RemoteAbsent:
 		reports, derr := c.discontinue(ctx, true)
 		c.markAbsent()
@@ -354,9 +354,12 @@ func (c *Client) Read(ctx context.Context) (View, error) {
 		return View{State: ViewUnknown, Age: -1}, nil
 	}
 	if !seen {
-		// Never seen and unreachable: index-absent, and the negative result is
-		// cached so an offline project does not pay the timeout per call.
-		c.markAbsent()
+		// Never seen and unreachable: index-absent. A fast failure (offline,
+		// refused) is cached so an offline project does not pay it per call;
+		// a timeout is not, so a slow remote is asked again.
+		if !out.timedOut {
+			c.markAbsent()
+		}
 		return view, nil
 	}
 	age := time.Duration(-1)
@@ -474,8 +477,16 @@ func (c *Client) Write(ctx context.Context, op WriteOp) (WriteResult, error) {
 		case RemoteAbsent:
 			return WriteResult{Status: WriteAbsent, Reports: reports}, nil
 		case RemoteUnreachable:
+			if !seen && out.discovered {
+				// The remote holds the index but it could not be fetched:
+				// ownership is unknown, so the write fails loudly rather
+				// than pass as index-absent.
+				return WriteResult{Reports: reports}, fmt.Errorf("origin holds the ticket index but it could not be fetched: %w", syncErr)
+			}
 			if !seen {
-				c.markAbsent()
+				if !out.timedOut {
+					c.markAbsent()
+				}
 				return WriteResult{Status: WriteAbsent, Reports: reports}, nil
 			}
 			return WriteResult{Status: WriteUnreachable, Reports: reports}, syncErr

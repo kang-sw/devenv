@@ -99,12 +99,13 @@ type Applier struct {
 	// origin review-track tree the write evaluated. nil means none known.
 	Closed map[string]bool
 	// OpenAnywhere reports whether stem is an open ticket on any origin
-	// branch. nil disables GC for this write.
-	OpenAnywhere func(stem string) bool
+	// branch; an error means the inventory is unknown. nil disables GC for
+	// this write.
+	OpenAnywhere func(stem string) (bool, error)
 }
 
 func holderString(l *Lease) string {
-	return fmt.Sprintf("%s (track %s, clone %s)", l.Email, l.Track, l.CloneID)
+	return l.Owner().String()
 }
 
 func holderOrNone(l *Lease) string {
@@ -160,6 +161,16 @@ func (a *Applier) apply(idx *Index, e PendingEntry, replay bool) Outcome {
 		idx.Register(e.Stem, at)
 		out := Outcome{Effect: EffectRegistered}
 		if e.Override != nil {
+			lease := idx.Registrations[e.Stem].Lease
+			if replay && (lease == nil || !SameOwner(lease.Owner(), e.Override.Holder)) {
+				// The holder the offline move overrode no longer holds: a new
+				// different-email holder is a conflict, anything else is a
+				// plain registration.
+				if lease != nil && NeedsOverride(OpRegister, lease.Owner(), e.Owner) {
+					return Outcome{Refusal: a.conflict(e, lease)}
+				}
+				return out
+			}
 			// An overridden move rides its registration: the lease stays
 			// with its holder, and the commit records the actor and reason.
 			out.Audit = []string{fmt.Sprintf("move %s by %s under override of the lease held by %s, reason: %s",
@@ -324,12 +335,22 @@ func (a *Applier) Maintain(idx *Index) []string {
 		return audit
 	}
 	now := a.Now.UTC().Truncate(time.Second)
-	if idx.Meta.LastGC != nil && now.Sub(*idx.Meta.LastGC) < GCPeriod {
+	if !gcDue(idx, now) {
 		return audit
 	}
 	for _, stem := range idx.Stems() {
 		reg := idx.Registrations[stem]
-		if reg.Lease != nil || now.Sub(reg.RegisteredAt) <= GCPeriod || a.OpenAnywhere(stem) {
+		if reg.Lease != nil || now.Sub(reg.RegisteredAt) <= GCPeriod {
+			continue
+		}
+		open, err := a.OpenAnywhere(stem)
+		if err != nil {
+			// The branch inventory is unknown: prune nothing, and leave
+			// last_gc so the next write tries again. The first predicate call
+			// is the one that fails, before anything was pruned.
+			return audit
+		}
+		if open {
 			continue
 		}
 		delete(idx.Registrations, stem)
@@ -339,8 +360,8 @@ func (a *Applier) Maintain(idx *Index) []string {
 	return audit
 }
 
-// GCDue reports whether a write at now would run GC on idx.
-func GCDue(idx *Index, now time.Time) bool {
+// gcDue reports whether a write at now would run GC on idx.
+func gcDue(idx *Index, now time.Time) bool {
 	return idx.Meta.LastGC == nil || now.Sub(*idx.Meta.LastGC) >= GCPeriod
 }
 

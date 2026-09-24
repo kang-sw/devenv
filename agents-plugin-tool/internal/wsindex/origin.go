@@ -25,12 +25,6 @@ type OriginTickets struct {
 // only).
 func (c *Client) HasOrigin(ctx context.Context) bool { return c.hasOrigin(ctx) }
 
-// AbsenceCached reports whether a never-seen clone is inside the absence TTL.
-func (c *Client) AbsenceCached(ctx context.Context) bool {
-	seen, err := c.Seen(ctx)
-	return err == nil && !seen && c.absenceCached()
-}
-
 // OriginTrack resolves the review-track origin-first from local refs, with no
 // network: the review-track declaration in AGENTS.md of origin's default
 // branch (the local refs/remotes/origin/HEAD tree), then the git-default
@@ -115,25 +109,25 @@ func ticketPath(path string) (status, stem string, ok bool) {
 // OpenOnAnyBranch returns a lazy predicate for GC: on first use it refreshes
 // every origin branch's remote-tracking ref (bounded, best-effort) and
 // collects every open ticket across them. When the refresh fails the
-// predicate answers true for every stem, so GC prunes nothing on a guess.
-func (c *Client) OpenOnAnyBranch(ctx context.Context) func(stem string) bool {
+// predicate returns the error, so GC prunes nothing on a guess.
+func (c *Client) OpenOnAnyBranch(ctx context.Context) func(stem string) (bool, error) {
 	var open map[string]bool
-	failed := false
-	return func(stem string) bool {
-		if open == nil && !failed {
+	var failed error
+	return func(stem string) (bool, error) {
+		if open == nil && failed == nil {
 			open = map[string]bool{}
 			rctx, cancel := context.WithTimeout(ctx, c.opts.WriteTimeout)
 			_, err := c.remote(rctx, "fetch", "--quiet", "--no-tags", "--no-write-fetch-head",
 				"--no-auto-gc", "--no-recurse-submodules", RemoteName, "+refs/heads/*:refs/remotes/"+RemoteName+"/*")
 			cancel()
 			if err != nil {
-				failed = true
-				return true
+				failed = err
+				return false, err
 			}
 			refs, err := c.git(ctx, nil, "for-each-ref", "--format=%(refname)", "refs/remotes/"+RemoteName+"/")
 			if err != nil {
-				failed = true
-				return true
+				failed = err
+				return false, err
 			}
 			for _, ref := range strings.Split(refs, "\n") {
 				branch := strings.TrimPrefix(strings.TrimSpace(ref), "refs/remotes/"+RemoteName+"/")
@@ -145,10 +139,10 @@ func (c *Client) OpenOnAnyBranch(ctx context.Context) func(stem string) bool {
 				}
 			}
 		}
-		if failed {
-			return true
+		if failed != nil {
+			return false, failed
 		}
-		return open[stem]
+		return open[stem], nil
 	}
 }
 

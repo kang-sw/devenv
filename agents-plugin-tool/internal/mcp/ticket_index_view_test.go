@@ -335,7 +335,7 @@ func TestOwnershipFilterAndOriginHint(t *testing.T) {
 	// E4, E5: the hint follows the local tracking ref, with no network.
 	e.landOnDevelop(stemAlpha, "ready", ".done")
 	e.landOnDevelop(stemBeta, "ready", ".dropped")
-	if r := x.resolve(stemAlpha); r.Ownership == nil || r.Ownership.OriginClosed {
+	if r := x.resolve(stemAlpha); level(r) != wsdoc.OwnershipUnowned || r.Ownership.OriginClosed {
 		t.Fatalf("E4: a stale tracking ref must show unowned: %+v", r.Ownership)
 	}
 	x.git("fetch", "--quiet", "origin")
@@ -509,5 +509,79 @@ func TestGitStatusShowsOwner(t *testing.T) {
 	}
 	if status.ImplTicket == nil || status.ImplTicket.Owner == nil || status.ImplTicket.Owner.Level != wsdoc.OwnershipSelf || len(status.Leases) != 1 {
 		t.Fatalf("git.status json = %+v", status)
+	}
+}
+
+// A8: a clone whose local AGENTS.md declares another review-track still
+// resolves origin's for init, the acquire refusal, pruning, and the query hint.
+func TestLocalReviewTrackIsIgnored(t *testing.T) {
+	e := newIxEnv(t)
+	x := e.clone("x", "a@example.com")
+	mustWrite(t, x.root, "AGENTS.md", "# Project\n\n### Review Policy\n\n```text\nreview-track: main\n```\n")
+	x.git("commit", "--quiet", "-am", "local track main")
+	// develop gains a ticket main does not have.
+	e.landOnDevelop(stemGamma, "todo", "idea")
+	x.git("fetch", "--quiet", "origin")
+	if out := x.init(); !strings.Contains(out, "review_track: develop") {
+		t.Fatalf("A8 init = %s", out)
+	}
+	if _, ok := e.index().Registrations[stemGamma]; !ok {
+		t.Fatal("A8: init did not register from origin's develop")
+	}
+	x.acquire(stemBeta)
+	e.landOnDevelop(stemAlpha, "ready", ".done") // closed on develop only, never on main
+	e.landOnDevelop(stemBeta, "ready", ".done")
+	x.mustRefuse("tickets.acquire", ixArgs(stemAlpha), "already closed on origin")
+	if r := x.resolve(stemAlpha); r.Ownership == nil || !r.Ownership.OriginClosed {
+		t.Fatalf("A8 query hint = %+v", r.Ownership)
+	}
+	x.acquire(stemGamma) // the next write prunes beta, landed on develop
+	if _, ok := e.index().Registrations[stemBeta]; ok {
+		t.Fatal("A8: pruning did not follow origin's review-track")
+	}
+}
+
+// I18 at tool level: a discard found by the move guard's read or by an
+// acquire's write still reports once in that tool's output.
+func TestDiscardReportsReachToolOutput(t *testing.T) {
+	e := newIxEnv(t)
+	x := e.clone("x", "a@example.com")
+	y := e.clone("y", "b@example.com")
+	x.init()
+	x.acquire(stemAlpha)
+	y.acquire(stemBeta)
+	for _, c := range []*ixCheckout{x, y} {
+		c.offline()
+		c.acquire(stemGamma) // one pending entry each
+		c.online()
+	}
+	runGit(t, e.origin, "update-ref", "-d", wsindex.RemoteRef)
+	e.clock.Advance(2 * time.Minute)
+
+	out := x.mustCall("tickets.move", map[string]any{"stem": stemGamma, "to": "idea"})
+	if strings.Count(out, "discarded") != 1 {
+		t.Fatalf("move after a remote deletion = %s", out)
+	}
+	out = y.acquire(stemAlpha)
+	if !strings.HasPrefix(out, "status: ok\n") || strings.Count(out, "discarded") != 1 {
+		t.Fatalf("acquire after a remote deletion = %s", out)
+	}
+	if again := y.acquire(stemAlpha); again != "ok" {
+		t.Fatalf("the next acquire is not the plain mock: %q", again)
+	}
+}
+
+// A never-seen clone whose discovery sees the ref but whose fetch fails
+// refuses loudly instead of passing as index-absent, and caches no absence.
+func TestDiscoveredButUnfetchedWriteFailsLoudly(t *testing.T) {
+	e := newIxEnv(t)
+	x := e.clone("x", "a@example.com")
+	y := e.clone("y", "b@example.com")
+	x.init()
+	y.runner.failFetch.Store(true)
+	y.mustRefuse("tickets.acquire", ixArgs(stemAlpha), "could not be fetched")
+	y.runner.failFetch.Store(false)
+	if out := y.acquire(stemAlpha); !strings.Contains(out, "status: acquired") {
+		t.Fatalf("acquire after the fetch recovers = %s", out)
 	}
 }

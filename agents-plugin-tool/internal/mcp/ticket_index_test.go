@@ -28,7 +28,7 @@ const (
 	stemOld   = "260101-feat-old"
 
 	ixUnreachable = "/nonexistent/ticket-index-unreachable.git"
-	ixCacheRef    = "refs/ticket-index-larkspur-local/v1/cache"
+	ixCacheRef    = wsindex.CacheRef
 )
 
 var ixCallID atomic.Int64
@@ -62,6 +62,10 @@ func ixTicket(title string) string { return "---\ntitle: " + title + "\n---\n# "
 func newIxEnv(t *testing.T) *ixEnv {
 	t.Helper()
 	useLeadProfile(t)
+	// Isolate from the developer's global and system git config (signing,
+	// hooks, url rewrites); each repository sets its own identity.
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 	dir := t.TempDir()
@@ -402,8 +406,8 @@ func TestA12InitCheckStates(t *testing.T) {
 	if text := x.mustCall("tickets.index_init", map[string]any{"check": true}); text != "state: uninitialized\n" {
 		t.Fatalf("uninitialized check = %q", text)
 	}
-	if e.remoteTip() != "" || x.hasRef(ixCacheRef) {
-		t.Fatal("an uninitialized check left a ref")
+	if e.remoteTip() != "" || x.hasRef(ixCacheRef) || x.runner.count("push") != 0 {
+		t.Fatal("an uninitialized check left a ref or pushed")
 	}
 	x.offline()
 	if text := x.mustCall("tickets.index_init", map[string]any{"check": true, "format": "json"}); !strings.Contains(text, `"state":"unreachable"`) {
@@ -414,8 +418,12 @@ func TestA12InitCheckStates(t *testing.T) {
 	}
 	x.online()
 	x.init()
+	x.runner.reset()
 	if text := x.mustCall("tickets.index_init", map[string]any{"check": true}); text != "state: initialized\n" {
 		t.Fatalf("initialized check = %q", text)
+	}
+	if n := x.runner.count("push"); n != 0 {
+		t.Fatalf("the initialized check pushed %d times", n)
 	}
 }
 
@@ -582,6 +590,7 @@ func TestAcquireRefusesTicketClosedOnOrigin(t *testing.T) {
 	x := e.clone("x", "a@example.com")
 	z := e.clone("z", "c@example.com")
 	x.init()
+	z.acquire(stemGamma) // before the landings: z's cache keeps alpha and beta registered
 	e.landOnDevelop(stemAlpha, "ready", ".done")
 	e.landOnDevelop(stemBeta, "ready", ".dropped")
 	// x's checkout and remote-tracking ref are stale; acquire fetches.
@@ -589,8 +598,14 @@ func TestAcquireRefusesTicketClosedOnOrigin(t *testing.T) {
 	x.mustRefuse("tickets.acquire", ixArgs(stemBeta), "already closed on origin")
 
 	// I17: z saw the index, then its tracking ref learned of the landing.
-	z.acquire(stemGamma)
 	z.git("fetch", "--quiet", "origin")
+	cl, err := wsindex.Open(bgCtx(), z.root, wsindex.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view, _ := cl.ReadCached(bgCtx()); view.Index == nil || view.Index.Registrations[stemAlpha] == nil {
+		t.Fatal("I17 setup: z's cached index no longer registers alpha")
+	}
 	z.offline()
 	z.mustRefuse("tickets.acquire", ixArgs(stemAlpha), "already closed on origin")
 	z.mustRefuse("tickets.acquire", ixArgs(stemBeta), "already closed on origin")

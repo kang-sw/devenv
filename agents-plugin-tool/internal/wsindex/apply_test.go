@@ -1,6 +1,7 @@
 package wsindex
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -217,7 +218,7 @@ func TestMaintainGC(t *testing.T) {
 		idx.Registrations["260101-feat-closed-lease"].Lease = newLease(ownerA, PhaseClosed, old)
 		return idx
 	}
-	open := func(stem string) bool { return stem == "260101-feat-open-elsewhere" }
+	open := func(stem string) (bool, error) { return stem == "260101-feat-open-elsewhere", nil }
 
 	idx := build()
 	a := &Applier{Now: now, OpenAnywhere: open}
@@ -237,6 +238,12 @@ func TestMaintainGC(t *testing.T) {
 	a.Maintain(idx)
 	if len(idx.Stems()) != 5 {
 		t.Fatalf("GC ran inside its period: %v", idx.Stems())
+	}
+	// A failed branch inventory prunes nothing and leaves last_gc unset.
+	idx = build()
+	(&Applier{Now: now, OpenAnywhere: func(string) (bool, error) { return false, errors.New("fetch failed") }}).Maintain(idx)
+	if len(idx.Stems()) != 5 || idx.Meta.LastGC != nil {
+		t.Fatal("GC advanced or pruned after a failed branch inventory")
 	}
 	// No predicate (offline or unknown branches): no GC.
 	idx = build()
@@ -265,5 +272,24 @@ func TestNeedsOverride(t *testing.T) {
 		if got := NeedsOverride(tc.op, tc.holder, tc.caller); got != tc.want {
 			t.Errorf("NeedsOverride(%s, %v, %v) = %v, want %v", tc.op, tc.holder, tc.caller, got, tc.want)
 		}
+	}
+}
+
+// A replayed move override applies only against the holder it recorded.
+func TestReplayMoveOverride(t *testing.T) {
+	e := PendingEntry{Op: OpRegister, Stem: stemX, Owner: ownerA, Override: &Override{Holder: ownerB, Reason: "user asked"}}
+	idx := leased(ownerB, PhaseActive)
+	if audit, report := (&Applier{Now: t0}).Replay(idx, e); report != "" || len(audit) != 1 || !strings.Contains(audit[0], "user asked") {
+		t.Fatalf("override against the recorded holder: audit %v report %q", audit, report)
+	}
+	third := Owner{Email: "z@example.com", CloneID: "cz", Track: "develop"}
+	idx = leased(third, PhaseActive)
+	if _, report := (&Applier{Now: t0}).Replay(idx, e); !strings.Contains(report, "z@example.com") {
+		t.Fatalf("override against another holder must drop and name it: %q", report)
+	}
+	idx = NewIndex()
+	idx.Register(stemX, t0)
+	if audit, report := (&Applier{Now: t0}).Replay(idx, e); report != "" || len(audit) != 0 {
+		t.Fatalf("override of a released lease must be a plain registration: audit %v report %q", audit, report)
 	}
 }

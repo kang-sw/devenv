@@ -89,8 +89,8 @@ Mode: user request
 
 The ticket ownership index is an optional ref on `origin` that records which
 person, clone, and branch holds each open ticket, so collaborators do not pick
-up the same ticket. Call `{{.McpNamespace}}/tickets.index_init(check: true)`;
-it pushes nothing. Handle its `state:`:
+up the same ticket. Call `{{.McpNamespace}}/tickets.index_init(check: true)`
+and handle its `state:`:
 
 - `uninitialized`: explain what the index does, and that setting it up pushes
   one ref to `origin` with the user's credentials and publishes each holder's

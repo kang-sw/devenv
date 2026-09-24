@@ -1455,7 +1455,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		stem, _ := params.Arguments["stem"].(string)
 		status, _ := params.Arguments["status"].(string)
 		resolution, _ := params.Arguments["resolution"].(string)
-		guard, err := s.guardMoveClose(root, wsindex.OpClose, stem, params.Arguments)
+		guard, err := s.guardMoveClose(root, "close", stem, params.Arguments)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
