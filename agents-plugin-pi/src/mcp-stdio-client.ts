@@ -142,6 +142,15 @@ export class PendingRequestRegistry {
     this.pending.delete(id);
   }
 
+  /** Rejects one still-pending id. Returns whether it was still pending. */
+  reject(id: number, err: unknown): boolean {
+    const pending = this.pending.get(id);
+    if (!pending) return false;
+    this.pending.delete(id);
+    pending.reject(err);
+    return true;
+  }
+
   /** Settles the pending call matching `msg.id`, if any. Returns whether one matched. */
   settle(msg: JsonRpcResponse): boolean {
     if (typeof msg.id !== "number" || !this.pending.has(msg.id)) {
@@ -183,6 +192,20 @@ export function buildStdioSpawnOptions(
   return { cwd, stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, ...env } };
 }
 
+/**
+ * How long a stdin write error waits for the process `exit`/`error` event
+ * before rejecting the call with the write error itself. Exists so a write
+ * error on a still-running process cannot hang the call.
+ */
+export const WRITE_ERROR_FALLBACK_MS = 1500;
+
+/** Process factory seam; defaults to `node:child_process` `spawn` (tests supply a fake child). */
+export type SpawnStdioProcess = (
+  command: string,
+  args: string[],
+  options: ReturnType<typeof buildStdioSpawnOptions>,
+) => ChildProcessWithoutNullStreams;
+
 export class McpStdioClient {
   private readonly proc: ChildProcessWithoutNullStreams;
   private readonly registry = new PendingRequestRegistry();
@@ -192,9 +215,15 @@ export class McpStdioClient {
   constructor(
     command: string,
     args: string[],
-    options: { cwd: string; env?: Record<string, string>; onStderr?: (line: string) => void },
+    options: {
+      cwd: string;
+      env?: Record<string, string>;
+      onStderr?: (line: string) => void;
+      spawnProcess?: SpawnStdioProcess;
+    },
   ) {
-    this.proc = spawn(command, args, buildStdioSpawnOptions(options.cwd, options.env));
+    const spawnProcess = options.spawnProcess ?? spawn;
+    this.proc = spawnProcess(command, args, buildStdioSpawnOptions(options.cwd, options.env));
 
     this.lineBuffer = new JsonRpcLineBuffer(
       (msg) => this.handleMessage(msg as JsonRpcResponse),
@@ -228,8 +257,9 @@ export class McpStdioClient {
     // Writing to stdin after the child has already died (e.g. a request
     // sent in the same tick as an unrelated crash) surfaces as EPIPE on the
     // stream itself, not just as the write() callback's err argument. The
-    // 'error'/'exit' handlers already reject pending calls; this only stops
-    // that EPIPE from becoming an unhandled stream exception.
+    // 'error'/'exit' handlers own rejecting pending calls (the write error is
+    // only request()'s bounded fallback); this only stops that EPIPE from
+    // becoming an unhandled stream exception.
     this.proc.stdin.on("error", (err) => {
       console.error(`[ws-mcp] stdin write error: ${err.message}`);
     });
@@ -250,13 +280,31 @@ export class McpStdioClient {
       return Promise.reject(new Error(`ws-pi-bridge: client is closed; cannot send "${method}"`));
     }
     return new Promise<T>((resolve, reject) => {
-      const id = this.registry.register(resolve as (value: unknown) => void, reject);
+      let settled = false;
+      let fallback: ReturnType<typeof setTimeout> | undefined;
+      const onSettle = () => {
+        settled = true;
+        if (fallback !== undefined) clearTimeout(fallback);
+      };
+      const id = this.registry.register(
+        (value) => {
+          onSettle();
+          resolve(value as T);
+        },
+        (reason) => {
+          onSettle();
+          reject(reason);
+        },
+      );
       const payload = { jsonrpc: "2.0" as const, id, method, params };
       this.proc.stdin.write(`${JSON.stringify(payload)}\n`, (err) => {
-        if (err) {
-          this.registry.cancel(id);
-          reject(err);
-        }
+        // The 'exit'/'error' handler owns the rejection so a dead launcher
+        // reports its exit code, not a scheduling-dependent `write EPIPE`.
+        // The write error rejects only as a bounded fallback when neither
+        // event follows.
+        if (!err || settled) return;
+        fallback = setTimeout(() => this.registry.reject(id, err), WRITE_ERROR_FALLBACK_MS);
+        fallback.unref();
       });
     });
   }

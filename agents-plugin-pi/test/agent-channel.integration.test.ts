@@ -248,8 +248,10 @@ test("a stale socket left in the launch's socket directory by a SIGKILLed listen
   // per-user one, which concurrent test processes sweep as well.
   const dir = mkdtempSync(join(tmpdir(), "ws-pi-sock-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
-  const stale = join(dir, `stale-${process.pid}.sock`);
-  const listener = spawn(process.execPath, ["-e", `const net=require("net");net.createServer().listen(${JSON.stringify(stale)},()=>{process.stdout.write("listening\\n")});setInterval(()=>{},1000)`], { stdio: ["ignore", "pipe", "inherit"] });
+  // The sweep unlinks only a socket whose owner pid (named in the file) is
+  // dead, so the listener names the file for its own pid, as a bind would.
+  const listener = spawn(process.execPath, ["-e", `const net=require("net"),p=require("path").join(${JSON.stringify(dir)},process.pid+"-stale.sock");net.createServer().listen(p,()=>{process.stdout.write("listening\\n")});setInterval(()=>{},1000)`], { stdio: ["ignore", "pipe", "inherit"] });
+  const stale = join(dir, `${listener.pid}-stale.sock`);
   await new Promise<void>(resolve => listener.stdout.once("data", () => resolve()));
   assert.ok(existsSync(stale));
   listener.kill("SIGKILL");

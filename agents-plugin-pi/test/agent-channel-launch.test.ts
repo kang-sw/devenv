@@ -234,6 +234,42 @@ test("a send that arrives while a resume is failing waits, then relaunches on th
   } finally { rpc.restore(); }
 });
 
+for (const path of ["spawn", "resume"] as const) {
+  test(`the ${path} path attaches its event listener before the first prompt: the launch's first agent_start is observed`, async () => {
+    const rpc = installRpcHarness();
+    const proto = RpcClient.prototype as any;
+    const { onEvent, prompt } = proto;
+    const promptedWith: number[] = [];
+    Object.assign(proto, {
+      onEvent(this: { listeners?: Array<(event: unknown) => void> }, fn: (event: unknown) => void) {
+        (this.listeners ??= []).push(fn);
+        return () => {};
+      },
+      // As Pi: the turn's agent_start can be the first stdout line after the prompt is sent.
+      async prompt(this: { started?: boolean; listeners?: Array<(event: unknown) => void> }) {
+        if (!this.started) throw new Error("Client not started");
+        promptedWith.push(this.listeners?.length ?? 0);
+        for (const fn of this.listeners ?? []) fn({ type: "agent_start" });
+      },
+    });
+    const registry = new Map<string, RpcAgentRecord>();
+    const ctx = contexts(registry, {});
+    try {
+      const record = path === "resume" ? await ctx.dormant("fork") : undefined;
+      promptedWith.length = 0;
+      if (record) await sendToAgent(registry as any, ctx.resume as any, record.agentId, "again");
+      else await spawnAgent(registry as any, ctx.fork.spawn as any, ctx.fork.params as any);
+      const launched = record ?? [...registry.values()][0]!;
+      assert.equal(promptedWith.length, 1);
+      assert.ok(promptedWith[0]! >= 1, "a listener was attached when the first prompt went out");
+      assert.equal(launched.streaming, true, "the first turn's start reached the record");
+    } finally {
+      Object.assign(proto, { onEvent, prompt });
+      rpc.restore();
+    }
+  });
+}
+
 describe("descendant-usage reports over the launch's channel", () => {
   const usage = { knownUsd: 1.25, knownContributors: 2, unknownContributors: 0, descendants: 3 };
 

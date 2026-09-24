@@ -252,7 +252,11 @@ export function installSubtreePublisher(
 export function subtreeOutstanding(registry: RpcAgentRegistry): number {
   let count = 0;
   for (const record of registry.values()) {
-    if (record.waitingOnChildren || (record.terminalDelivery && record.terminalDelivery.state !== "enqueued")) count++;
+    // A held settle is a terminal still to come: counting it keeps this
+    // process from reading quiescent upstream between a child's view clearing
+    // and that child's wake turn (or held settle's release).
+    const heldSettle = record.heldSettlementGeneration !== undefined && record.heldSettlementGeneration === record.workGeneration;
+    if (record.waitingOnChildren || heldSettle || (record.terminalDelivery && record.terminalDelivery.state !== "enqueued")) count++;
   }
   return count;
 }

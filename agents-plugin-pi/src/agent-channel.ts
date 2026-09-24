@@ -206,12 +206,34 @@ function probeUnixSocket(path: string): Promise<"live" | "stale" | "unknown"> {
   });
 }
 
-/** A socket file whose connect is refused has no listener behind it (a SIGKILLed parent left it); unlink it. */
+/** The binding pid from a `<pid>-<random>.sock` name; undefined for any other name (a legacy `<hex>.sock`). */
+function socketOwnerPid(name: string): number | undefined {
+  const match = /^([1-9]\d*)-[^/]+\.sock$/.exec(name);
+  if (!match) return undefined;
+  const pid = Number(match[1]);
+  return Number.isSafeInteger(pid) ? pid : undefined;
+}
+
+/** Only ESRCH proves the pid is gone; EPERM (another user's reuse) or any other outcome counts as alive. */
+function isProcessDead(pid: number): boolean {
+  try { process.kill(pid, 0); return false; } catch (error) { return (error as NodeJS.ErrnoException).code === "ESRCH"; }
+}
+
+/**
+ * Unlink a socket only when its owner pid (from the name) is dead AND its
+ * connect is refused (a SIGKILLed parent left it). Refusal alone is not
+ * enough: a peer's socket file exists between its bind() and listen(), and
+ * every Pi process of the user shares this directory. A name without a pid is
+ * never unlinked; pid reuse can only keep a stale file. Residual: older-version
+ * processes still sweep on refusal alone.
+ */
 export async function sweepStaleChannelSockets(dir: string): Promise<string[]> {
   let entries: string[];
   try { entries = readdirSync(dir); } catch { return []; }
   const removed: string[] = [];
   await Promise.all(entries.filter(name => name.endsWith(".sock")).map(async name => {
+    const pid = socketOwnerPid(name);
+    if (pid === undefined || !isProcessDead(pid)) return;
     const path = join(dir, name);
     if ((await probeUnixSocket(path)) !== "stale") return;
     try { unlinkSync(path); removed.push(path); } catch { /* raced with its owner */ }
@@ -248,7 +270,7 @@ async function bindPipe(opts: ChannelBindOptions): Promise<BoundChannelEndpoint>
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     assertPrivateSocketDir(dir);
     await sweepStaleChannelSockets(dir);
-    path = join(dir, `${randomBytes(6).toString("hex")}.sock`);
+    path = join(dir, `${process.pid}-${randomBytes(6).toString("hex")}.sock`);
   }
   // An over-long path fails here with EINVAL; the caller falls back to TCP.
   try { await listen(server, { path }); } catch (error) { server.close(); throw error; }

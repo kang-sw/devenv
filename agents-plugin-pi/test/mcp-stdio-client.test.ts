@@ -11,12 +11,23 @@
  *     promise (live-probe-confirmed: ws-mcp does not guarantee response
  *     order matches request order).
  *
+ * McpStdioClient's write-error ownership is driven through its
+ * `spawnProcess` seam with a fake child, so exit/write-error order is
+ * chosen by the test, never raced.
+ *
  * Run with: node --test test/  (from agents-plugin-pi/).
  */
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { JsonRpcLineBuffer, PendingRequestRegistry } from "../src/mcp-stdio-client.ts";
+import { EventEmitter } from "node:events";
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import {
+  JsonRpcLineBuffer,
+  McpStdioClient,
+  PendingRequestRegistry,
+  WRITE_ERROR_FALLBACK_MS,
+} from "../src/mcp-stdio-client.ts";
 
 describe("JsonRpcLineBuffer", () => {
   test("parses a single complete line in one chunk", () => {
@@ -185,5 +196,122 @@ describe("PendingRequestRegistry", () => {
     assert.equal(rejections[0], err);
     assert.equal(rejections[1], err);
     assert.equal(registry.size, 0);
+  });
+
+  test("reject() rejects one pending id once and reports whether it was pending", () => {
+    const registry = new PendingRequestRegistry();
+    const rejections: unknown[] = [];
+    const id = registry.register(() => {}, (e) => rejections.push(e));
+    const err = new Error("write EPIPE");
+    assert.equal(registry.reject(id, err), true);
+    assert.equal(registry.reject(id, err), false);
+    assert.deepEqual(rejections, [err]);
+    assert.equal(registry.size, 0);
+  });
+});
+
+/**
+ * Fake child process for McpStdioClient's `spawnProcess` seam: the test
+ * holds each stdin write callback and decides when (and with what error) it
+ * runs, and emits `exit`/`error` itself, so event order is driven, not raced.
+ */
+function fakeChild() {
+  const writes: Array<(err?: Error | null) => void> = [];
+  const proc = new EventEmitter() as EventEmitter & {
+    stdin: EventEmitter & { write: (data: string, cb: (err?: Error | null) => void) => boolean; end: () => void };
+    stdout: EventEmitter;
+    stderr: EventEmitter;
+    kill: () => boolean;
+  };
+  proc.stdin = Object.assign(new EventEmitter(), {
+    write: (_data: string, cb: (err?: Error | null) => void) => {
+      writes.push(cb);
+      return true;
+    },
+    end: () => {},
+  });
+  proc.stdout = new EventEmitter();
+  proc.stderr = new EventEmitter();
+  proc.kill = () => true;
+  const client = new McpStdioClient("launcher", [], {
+    cwd: "/",
+    onStderr: () => {},
+    spawnProcess: () => proc as unknown as ChildProcessWithoutNullStreams,
+  });
+  return { proc, writes, client };
+}
+
+function epipe(): Error {
+  return Object.assign(new Error("write EPIPE"), { code: "EPIPE" });
+}
+
+/** Records how a promise settles without letting a rejection go unhandled. */
+function observe(promise: Promise<unknown>) {
+  const state: { settled: "pending" | "resolved" | "rejected"; value?: unknown } = { settled: "pending" };
+  promise.then(
+    (value) => Object.assign(state, { settled: "resolved", value }),
+    (value) => Object.assign(state, { settled: "rejected", value }),
+  );
+  return state;
+}
+
+const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+describe("McpStdioClient write-error ownership", () => {
+  const EXIT_MESSAGE = "ws-mcp process exited unexpectedly (code=1, signal=null)";
+
+  test("write error first, then exit: rejects with the exit-coded message", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const { proc, writes, client } = fakeChild();
+    const state = observe(client.initialize({ name: "t", version: "0" }));
+    assert.equal(writes.length, 1);
+    writes[0](epipe());
+    proc.emit("exit", 1, null);
+    // Running past the fallback bound cannot re-settle the call with the write error.
+    t.mock.timers.tick(WRITE_ERROR_FALLBACK_MS * 2);
+    await flush();
+    assert.equal(state.settled, "rejected");
+    assert.equal((state.value as Error).message, EXIT_MESSAGE);
+  });
+
+  test("exit first, then write error: same exit message, the late write error is inert", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const { proc, writes, client } = fakeChild();
+    const state = observe(client.initialize({ name: "t", version: "0" }));
+    proc.emit("exit", 1, null);
+    writes[0](epipe());
+    t.mock.timers.tick(WRITE_ERROR_FALLBACK_MS * 2);
+    await flush();
+    assert.equal(state.settled, "rejected");
+    assert.equal((state.value as Error).message, EXIT_MESSAGE);
+  });
+
+  test("write error with no exit/error rejects with the write error at the bound", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const { proc, writes, client } = fakeChild();
+    const state = observe(client.initialize({ name: "t", version: "0" }));
+    const err = epipe();
+    writes[0](err);
+    t.mock.timers.tick(WRITE_ERROR_FALLBACK_MS - 1);
+    await flush();
+    assert.equal(state.settled, "pending", "the exit/error handler still owns the rejection inside the bound");
+    t.mock.timers.tick(1);
+    await flush();
+    assert.equal(state.settled, "rejected");
+    assert.equal(state.value, err);
+    // A later exit finds nothing pending: no second settle.
+    proc.emit("exit", 1, null);
+    await flush();
+    assert.equal(state.value, err);
+  });
+
+  test("write error, then a spawn 'error' event: rejects with the failed-to-start message", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const { proc, writes, client } = fakeChild();
+    const call = client.initialize({ name: "t", version: "0" });
+    writes[0](epipe());
+    proc.emit("error", new Error("spawn python3 ENOENT"));
+    await assert.rejects(call, { message: "ws-mcp process failed to start: spawn python3 ENOENT" });
+    t.mock.timers.tick(WRITE_ERROR_FALLBACK_MS * 2);
   });
 });
