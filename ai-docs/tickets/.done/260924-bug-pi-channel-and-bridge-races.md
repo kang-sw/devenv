@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 9691c8b6a778089b
 sage-review-completeness-reviewed: 9691c8b6a778089b
+completed: 2026-09-24
 ---
 
 # Pi channel socket sweep, bridge EPIPE, and direct-settle races
