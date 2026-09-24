@@ -18,6 +18,7 @@ import { DESCENDANT_USAGE_MESSAGE, descendantUsageReporterRef } from "../src/age
 import { captureForkResume, rehydrateForkRecord, type PersistedForkResume } from "../src/ask.ts";
 import { SubtreeUpstream } from "../src/subtree-lifecycle.ts";
 import { closeFakeChildren, connectFakeChild, type FakeChildOptions } from "./fixtures/channel-child.ts";
+import { until } from "./fixtures/subtree-channels.ts";
 
 const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const EXTENSION_ENTRY = join(PACKAGE_ROOT, "src", "index.ts");
@@ -320,10 +321,6 @@ test("an older fork resume that still carries subtreeChannel relaunches with a f
     assert.equal(revived.waitingOnChildren, true, "no snapshot over the fresh channel yet reads waiting");
 
     const upstream = new SubtreeUpstream(child);
-    const until = async (done: () => boolean, what: string) => {
-      const deadline = Date.now() + 2_000;
-      while (!done()) { if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`); await new Promise(resolve => setTimeout(resolve, 5)); }
-    };
     upstream.publish({ outstanding: 0, active: 1, deliveries: 0, delegated: true, turnOwed: false, turnsStarted: 0, descendants: [{ id: "grandchild", parentId: null, depth: 0, role: "worker", live: true }] });
     await until(() => revived.subtreeRevision === 1, "the busy snapshot");
     assert.equal(revived.waitingOnChildren, true);

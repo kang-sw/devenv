@@ -19,6 +19,7 @@ import {
   subtreeOutstanding,
   subtreeWaiting,
   SubtreeUpstream,
+  type SubtreeSnapshot,
 } from "../src/subtree-lifecycle.ts";
 import {
   applyRpcEvent,
@@ -553,6 +554,45 @@ test("a snapshot owing no turn while its turn count runs ahead of stdout admits 
   assert.deepEqual(await admitted(), ["folded the grandchild result"]);
 });
 
+test("a relaunch restarts the parent's turn-start count with the new child process's own", async () => {
+  const sent: any[] = [];
+  const admitted = async (h: ReturnType<typeof pushHarness>) => { await drain(); flushHeldPushes(h.pi, true); await drain(); return sent.map(push => push.details.last_message); };
+  const first = pushHarness(sent);
+  const firstChannel = fakeParentChannel();
+  const parent = record("parent", { client: first.client, delegation: worker(), workGeneration: 0, launchGeneration: 1, channel: firstChannel.parent });
+  const registry = new Map([[parent.agentId, parent]]);
+  observeChildSubtree(registry, parent, firstChannel.parent);
+  attachEventListener(first.pi, registry, parent, first.client);
+  firstChannel.deliver(quiescentSnapshot(1));
+  first.emit({ type: "agent_start" });
+  first.emit(assistantEnd("first launch answer"));
+  first.emit({ type: "agent_settled" });
+  assert.deepEqual(await admitted(first), ["first launch answer"]);
+
+  const second = pushHarness(sent);
+  const secondChannel = fakeParentChannel();
+  parent.client = second.client;
+  parent.channel = secondChannel.parent;
+  parent.launchGeneration = 2;
+  observeChildSubtree(registry, parent, secondChannel.parent);
+  attachEventListener(second.pi, registry, parent, second.client);
+  secondChannel.deliver(quiescentSnapshot(1));
+  second.emit({ type: "agent_start" });
+  secondChannel.deliver(quiescentSnapshot(2, { outstanding: 1, turnsStarted: 1 }));
+  second.emit(assistantEnd("dispatched a grandchild"));
+  second.emit({ type: "agent_settled" });
+  assert.equal(parent.waitingOnChildren, true);
+  // The new process's wake turn is its second: counted over the socket
+  // before stdout delivers it. A count carried over from the first launch
+  // would read as caught up and release the held settle early.
+  secondChannel.deliver(quiescentSnapshot(3, { turnsStarted: 2 }));
+  assert.deepEqual(await admitted(second), ["first launch answer"]);
+  second.emit({ type: "agent_start" });
+  second.emit(assistantEnd("folded the grandchild result"));
+  second.emit({ type: "agent_settled" });
+  assert.deepEqual(await admitted(second), ["first launch answer", "folded the grandchild result"]);
+});
+
 test("a disconnect window covering an identity-only revision change: the reconnect snapshot releases the held settle", async () => {
   const sent: any[] = [];
   const h = pushHarness(sent);
@@ -593,7 +633,9 @@ test("a disconnect window covering a whole wake turn: the wake turn's terminal i
 
 /**
  * The child process's side of the wake accounting: `registerPushFlush` and
- * the same publish-after-flush handlers index.ts registers, on a fake Pi that
+ * copies of the publish-after-flush handlers `src/index.ts` registers right
+ * after it and of the `ownTurn` accessor `registerAgentTools` installs (keep
+ * both in step with those sites), on a fake Pi that
  * dispatches its lifecycle events in registration order, publishing through
  * a fake uplink. One live grandchild settles into this process.
  */
@@ -635,6 +677,12 @@ function childProcess(idle: boolean) {
   return { uplink, registry, sent, wakes, fire, grandchild, grandchildEvents: (event: unknown) => grandchildEvents?.(event), grandchildSettles };
 }
 
+/** Snapshots that differ from their predecessor only in `turnOwed` (and revision): an owed flip sent on its own. */
+function ownedFlipSends(snapshots: readonly SubtreeSnapshot[]): SubtreeSnapshot[] {
+  const rest = ({ turnOwed: _owed, revision: _revision, ...other }: SubtreeSnapshot) => JSON.stringify(other);
+  return snapshots.filter((snapshot, i) => i > 0 && rest(snapshot) === rest(snapshots[i - 1]!));
+}
+
 test("child wake accounting: an idle wake owes its turn in the delivery's own snapshot, and the turn start counts and discharges it in one snapshot", async () => {
   const child = childProcess(true);
   await child.grandchildSettles();
@@ -651,6 +699,7 @@ test("child wake accounting: an idle wake owes its turn in the delivery's own sn
   assert.equal(subtreeWaiting(started.at(-1)), false);
   assert.ok(child.uplink.snapshots().every(s => subtreeWaiting(s) || s.turnOwed || s.turnsStarted >= 1 || s.revision === 1),
     "after the grandchild was dispatched, no quiescent snapshot owed nothing before the wake turn counted");
+  assert.deepEqual(ownedFlipSends(child.uplink.snapshots()), [], "owing and discharging the turn ride sends that already happen");
 });
 
 test("child wake accounting: a turn-boundary batch owes the continuation turn in the snapshot that first reads quiescent", async () => {
@@ -671,6 +720,7 @@ test("child wake accounting: a turn-boundary batch owes the continuation turn in
   child.fire("agent_start");
   const continued = child.uplink.snapshots().at(-1)!;
   assert.deepEqual({ turnOwed: continued.turnOwed, turnsStarted: continued.turnsStarted }, { turnOwed: false, turnsStarted: 2 });
+  assert.deepEqual(ownedFlipSends(child.uplink.snapshots()), [], "owing and discharging the turn ride sends that already happen");
 });
 
 test("child wake accounting: a steer consumed inside the running loop owes no turn", async () => {

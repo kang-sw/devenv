@@ -116,7 +116,7 @@ import { CHILD_MANAGEMENT_TOOLS, DEFAULT_MAX_AGENT_DEPTH, DELEGATION_ENV, READ_T
 import { normalizeWriteScopes, type EffectiveWriteCapability, type WriteScope } from "./write-scopes.ts";
 import { createWebSearch } from "./web-search.ts";
 import { verifyWebReadiness, WEB_HOME_ENV, WEB_READINESS_KIND } from "./web-readiness.ts";
-import { beginSubtreeDispatch, installSubtreePublisher, observeSubtreeChannel, publishSubtree, type SubtreeDescendant, type SubtreeSnapshot, type SubtreeUpstream } from "./subtree-lifecycle.ts";
+import { beginSubtreeDispatch, installSubtreePublisher, observeSubtreeChannel, publishSubtree, type OwnTurnState, type SubtreeDescendant, type SubtreeSnapshot, type SubtreeUpstream } from "./subtree-lifecycle.ts";
 import { PUSH_BATCH_CUSTOM_TYPE, PUSH_BATCH_VERSION, type PushBatchItem, type PushBatchItemState } from "./push-protocol.ts";
 import { persistAgentCostCheckpoint, persistEvictedAgentCost, registerAgentCostOwner } from "./agent-footer.ts";
 
@@ -1034,7 +1034,7 @@ export const leadWakeStartPendingRef: { current: boolean } = { current: false };
  *   own.
  * - `started`: own `agent_start` events seen by this process.
  */
-export const ownTurnRef: { owed: boolean; started: number } = { owed: false, started: 0 };
+export const ownTurnRef: OwnTurnState = { owed: false, started: 0 };
 
 export interface WakeStartOptions {
   delayMs: () => number;
