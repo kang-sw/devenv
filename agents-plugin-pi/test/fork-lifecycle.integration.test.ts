@@ -268,7 +268,7 @@ for (const root of SDK_ROOTS) for (const [providerName, apiName] of [["openroute
       // count is no higher than the starts relayed to it: a count shared with
       // the lead's or a sibling's turns would hold it (status "idle").
       assert.equal(child.relayedStarts, 2, "the child's two own turns reached the parent as agent_start");
-      assert.equal(reportedChild.status, "dormant", "ordinary settlement parks the degraded fork after terminal delivery");
+      assert.equal(reportedChild.status, "dormant", "ordinary settlement parks the degraded fork after terminal delivery (\"idle\" means the settle is held: the child reported more turn starts than the two relayed, e.g. module state shared across in-process sessions)");
       assert.ok(reportedChild.last_report_at, "the intermediate progress report reaches the parent registry");
       assert.ok(childContext.registeredTools.some((tool: any) => tool.name === "ws-report-to-lead"), "the parent capture keeps the optional progress/question channel visible");
       omitCompletionReport = true;

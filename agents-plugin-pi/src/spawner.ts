@@ -532,7 +532,7 @@ export interface RpcAgentRecord {
    * launch (`observeChildSubtree`); undefined until that launch's first
    * snapshot, and for a channel-less child.
    */
-  subtreeTurn?: { owed: boolean; started: number };
+  subtreeTurn?: OwnTurnState;
   /** Persistent exploration mode; meaningful only for explore records. */
   exploreMode?: ExploreMode;
   /** `true` while an agent run is actively looping (between `agent_start` and `agent_settled`). */
@@ -1035,7 +1035,7 @@ export const leadWakeStartPendingRef: { current: boolean } = { current: false };
  * snapshot (`installSubtreePublisher`) so the parent can release a held settle
  * without guessing whether a wake turn is coming. One process is one launch
  * generation, so the counter never resets; nothing else may write it (tests
- * reset it for isolation).
+ * reset it, with the flags `owed` derives from, through `resetOwnTurn`).
  *
  * - `owed`: a delivery this process already enqueued still has a turn coming.
  *   Two sources, folded by `syncOwnTurnOwed`: an outstanding push wake
@@ -1056,6 +1056,13 @@ let boundaryTurnOwed = false;
 let pushWakeReserved = false;
 function syncOwnTurnOwed(): void {
   ownTurnRef.owed = boundaryTurnOwed || pushWakeReserved;
+}
+/** Test isolation only: one process never resets its own-turn accounting. */
+export function resetOwnTurn(): void {
+  boundaryTurnOwed = false;
+  pushWakeReserved = false;
+  ownTurnRef.started = 0;
+  syncOwnTurnOwed();
 }
 
 export interface WakeStartOptions {
@@ -2636,12 +2643,14 @@ export function observeChildSubtree(registry: RpcAgentRegistry | undefined, reco
     record.subtreeRevision = view.snapshot?.revision;
     if (view.snapshot) record.subtreeTurn = { owed: view.snapshot.turnOwed, started: view.snapshot.turnsStarted };
     record.subtreeDescendants = view.snapshot?.descendants ?? [];
-    publishSubtree(registry);
-    triggerAgentWidgetRefresh();
     // Every not-waiting view re-evaluates a held settle against the child's
     // own wake accounting; `releaseSettlementHold` decides and is a no-op
-    // when nothing is held, so a duplicate snapshot cannot admit twice.
+    // when nothing is held, so a duplicate snapshot cannot admit twice. It
+    // runs before the publish so a release's drop of the held settle from
+    // `subtreeOutstanding` rides this send, as on the direct admission path.
     if (!view.waiting && view.snapshot) record.releaseSettlementHold?.(view.snapshot);
+    publishSubtree(registry);
+    triggerAgentWidgetRefresh();
   });
 }
 

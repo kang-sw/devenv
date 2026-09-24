@@ -41,6 +41,7 @@ import {
   promptAgent,
   pushToLead,
   registerPushFlush,
+  resetOwnTurn,
   resolveTools,
   sendToAgent,
   startForkFinish,
@@ -70,8 +71,7 @@ afterEach(() => {
   leadIdleRef.current = undefined;
   leadCompactingRef.current = false;
   clearWakeStart();
-  ownTurnRef.owed = false;
-  ownTurnRef.started = 0;
+  resetOwnTurn();
   ownerNotifyRef.current = undefined;
 });
 
@@ -699,6 +699,24 @@ test("direct settle, stale owed turn: the next not-waiting snapshot owing nothin
   assert.deepEqual(await admitted(), ["the only answer"]);
   assert.equal(child.heldSettlementGeneration, undefined);
   assert.equal(subtreeOutstanding(registry), 0, "the delivered terminal leaves nothing outstanding");
+});
+
+test("a held direct settle keeps this process outstanding upstream only while its generation is current", async () => {
+  const { child, registry, channel, admitted, stdoutTurn } = await notWaitingChild();
+  const uplink = fakeUplink();
+  installSubtreePublisher(registry, new SubtreeUpstream(uplink.channel), () => heldPushQueue.length, () => ({ ...ownTurnRef }));
+  channel.deliver(quiescentSnapshot(2, { turnsStarted: 2 }));
+  stdoutTurn("waiting for the grandchild", { start: false });
+  const held = uplink.snapshots().at(-1)!;
+  assert.deepEqual({ outstanding: held.outstanding, active: held.active }, { outstanding: 1, active: 0 },
+    "upstream reads a terminal still coming, not quiescent");
+  stdoutTurn("folded the grandchild result", { settle: false });
+  assert.equal(child.heldSettlementGeneration, 1, "the superseded hold stays recorded");
+  assert.equal(subtreeOutstanding(registry), 0, "a hold of a superseded generation no longer counts");
+  assert.equal(uplink.snapshots().at(-1)!.active, 1, "the wake turn counts as active instead");
+  stdoutTurn("folded the grandchild result", { start: false });
+  assert.deepEqual(await admitted(), ["folded the grandchild result"]);
+  assert.equal(uplink.snapshots().at(-1)!.outstanding, 0);
 });
 
 test("direct settle, no snapshot for the current launch: a channel-less child admits at once, and a closed launch leaves no turn facts behind", async () => {

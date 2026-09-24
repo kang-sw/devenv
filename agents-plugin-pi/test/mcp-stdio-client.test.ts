@@ -263,13 +263,15 @@ describe("McpStdioClient write-error ownership", () => {
   test("write error first, then exit: rejects with the exit-coded message", async (t) => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
     const { proc, writes, client } = fakeChild();
-    const call = client.initialize({ name: "t", version: "0" });
+    const state = observe(client.initialize({ name: "t", version: "0" }));
     assert.equal(writes.length, 1);
     writes[0](epipe());
     proc.emit("exit", 1, null);
-    await assert.rejects(call, { message: EXIT_MESSAGE });
-    // The fallback was cleared on settle: running past the bound changes nothing.
+    // Running past the fallback bound cannot re-settle the call with the write error.
     t.mock.timers.tick(WRITE_ERROR_FALLBACK_MS * 2);
+    await flush();
+    assert.equal(state.settled, "rejected");
+    assert.equal((state.value as Error).message, EXIT_MESSAGE);
   });
 
   test("exit first, then write error: same exit message, the late write error is inert", async (t) => {
