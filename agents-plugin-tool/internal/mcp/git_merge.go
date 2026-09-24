@@ -234,8 +234,8 @@ func mergeImplBranch(ctx context.Context, root string, runner wsgit.Runner, bran
 			case underAnyPool(poolRoots, e.Path):
 				// The pointer rides in the reason as well as the resolution: a
 				// non-release refusal surfaces only the reason as its error text.
-				kind = "a ws pool worktree: a parallel lead's housekeeping checkout (worktree.acquire with sparse_paths); worktree.list shows its lease holder and dirty state"
-				resolution += " Inspect that holder with worktree.list: it reports the worktree's lease holder and its dirty state."
+				kind = "a ws pool worktree: a parallel lead's housekeeping checkout (worktree.acquire with sparse_paths); worktree.list shows its worktree lease holder and dirty state"
+				resolution += " Inspect that holder with worktree.list: it reports the worktree lease holder and the worktree's dirty state."
 			}
 			add("target_held_elsewhere", fmt.Sprintf("Target %q is checked out at %s, %s. Nothing was merged; %q is retained and HEAD is unchanged.", mergeRoot, e.Path, kind, branch), resolution)
 			return

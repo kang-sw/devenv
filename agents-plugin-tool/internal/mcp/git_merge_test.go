@@ -1020,6 +1020,23 @@ func TestImplMergeRefusesTargetHeldElsewhere(t *testing.T) {
 		assertUnmoved(t, root, branch, developBefore, headBefore)
 	})
 
+	t.Run("legacy-pool-holder", func(t *testing.T) {
+		root, branch := mergeFixture(t, "develop")
+		held := filepath.Join(root, ".ws-worktrees", "held")
+		runGit(t, root, "worktree", "add", held, "develop")
+		// Owned pool roots as the dispatch handler derives them under the
+		// default config: the out-of-tree pool plus the legacy in-tree pool.
+		poolRoots := ownedPoolRoots("", canonicalRootForTest(t, root))
+		r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "", mergeMessage(), implMergeAcknowledgement{}, poolRoots)
+		if err == nil || r.Status != "policy_blocked" {
+			t.Fatalf("held target not refused: %+v err=%v", r, err)
+		}
+		d := requireMergeDiagnostic(t, r, "target_held_elsewhere", "must_resolve")
+		if !strings.Contains(d.Reason, "ws pool worktree") || !strings.Contains(d.Resolution, "worktree.list") {
+			t.Fatalf("legacy pool holder must be classified as a pool holder with the worktree.list pointer: %+v", d)
+		}
+	})
+
 	t.Run("plain-holder", func(t *testing.T) {
 		root, branch := mergeFixture(t, "develop")
 		_, held := mkHeld(t, root)
@@ -1028,7 +1045,7 @@ func TestImplMergeRefusesTargetHeldElsewhere(t *testing.T) {
 		heldCanonical := canonicalRootForTest(t, held)
 		developBefore := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "refs/heads/develop")))
 		headBefore := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "HEAD")))
-		// poolRoot "" (unknown) -> the holder is named as a plain worktree.
+		// No pool roots (nil, unknown pool) -> the holder is named as a plain worktree.
 		r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "", mergeMessage(), implMergeAcknowledgement{}, nil)
 		if err == nil || r.Status != "policy_blocked" {
 			t.Fatalf("held target not refused: %+v err=%v", r, err)

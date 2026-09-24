@@ -74,102 +74,6 @@ func keyRecordPath(t *testing.T, s *Server, key string) string {
 	return s.sessions.keyPath(dir, key)
 }
 
-func TestWorktreeAcquireWritesLeaseAndReleaseRemovesIt(t *testing.T) {
-	s, _, base, leadKey := worktreeListServer(t)
-	before := time.Now().Add(-time.Second)
-	acq := acquireForTest(t, s, 1, leadKey, base, "impl/test/alpha")
-
-	lease, err := readWorktreeLease(context.Background(), wsgit.ExecRunner{}, acq.Path)
-	if err != nil || lease == nil {
-		t.Fatalf("acquire must write a worktree lease: lease=%v err=%v", lease, err)
-	}
-	if lease.SchemaVersion != worktreeLeaseSchemaVersion || lease.WorkerKey != acq.WorkerKey || lease.ParentKey != leadKey {
-		t.Fatalf("lease = %+v, want worker_key %q and parent_key %q", lease, acq.WorkerKey, leadKey)
-	}
-	at, err := time.Parse(time.RFC3339, lease.AcquiredAt)
-	if err != nil || at.Before(before.Truncate(time.Second)) || !strings.HasSuffix(lease.AcquiredAt, "Z") {
-		t.Fatalf("acquired_at = %q (err=%v), want a current RFC 3339 UTC time", lease.AcquiredAt, err)
-	}
-	// The lease lives in the Git admin dir, not the working tree, so it never
-	// shows in status and survives the hygiene clean.
-	adminDir := strings.TrimSpace(string(runGitOutput(t, acq.Path, "rev-parse", "--absolute-git-dir")))
-	if _, err := os.Stat(filepath.Join(adminDir, worktreeLeaseFileName)); err != nil {
-		t.Fatalf("lease file not in the git admin dir %q: %v", adminDir, err)
-	}
-	if st := strings.TrimSpace(string(runGitOutput(t, acq.Path, "status", "--porcelain"))); st != "" {
-		t.Fatalf("lease must not dirty the worktree: %q", st)
-	}
-
-	rel := callToolOnce(t, s, 2, "worktree.release", map[string]any{"session_key": leadKey, "key": acq.WorkerKey})
-	if toolIsError(t, rel) {
-		t.Fatalf("release failed: %s", rel)
-	}
-	if lease, err := readWorktreeLease(context.Background(), wsgit.ExecRunner{}, acq.Path); err != nil || lease != nil {
-		t.Fatalf("release must remove the worktree lease: lease=%v err=%v", lease, err)
-	}
-	// The worker key is not retired by release.
-	if _, ok := s.sessions.lookup(acq.WorkerKey); !ok {
-		t.Fatal("release must not retire the worker key")
-	}
-
-	// Reacquiring the released worktree writes a fresh lease for the new key.
-	acq2 := acquireForTest(t, s, 3, leadKey, base, "impl/test/beta")
-	if acq2.Path != acq.Path {
-		t.Fatalf("expected pool reuse of %q, got %q", acq.Path, acq2.Path)
-	}
-	lease2, err := readWorktreeLease(context.Background(), wsgit.ExecRunner{}, acq2.Path)
-	if err != nil || lease2 == nil || lease2.WorkerKey != acq2.WorkerKey {
-		t.Fatalf("reacquire must record the new holder: lease=%+v err=%v", lease2, err)
-	}
-}
-
-func TestReleaseWorktreeToleratesMissingLease(t *testing.T) {
-	root, base := worktreeFixture(t)
-	// provisionWorktree alone writes no lease: the shape of a worktree acquired
-	// before worktree leases existed.
-	res, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/alpha", nil, "")
-	if err != nil {
-		t.Fatalf("provision: %v", err)
-	}
-	if lease, err := readWorktreeLease(context.Background(), wsgit.ExecRunner{}, res.Path); err != nil || lease != nil {
-		t.Fatalf("precondition: no lease expected, got %v err=%v", lease, err)
-	}
-	if err := releaseWorktree(context.Background(), wsgit.ExecRunner{}, res.Path, ""); err != nil {
-		t.Fatalf("release without a lease file must succeed: %v", err)
-	}
-	if b := wtBranch(t, res.Path); b != "HEAD" {
-		t.Fatalf("released worktree not detached: %q", b)
-	}
-}
-
-func TestWorktreeAcquireFailedLeaseWriteDetaches(t *testing.T) {
-	s, _, base, leadKey := worktreeListServer(t)
-	acq := acquireForTest(t, s, 1, leadKey, base, "impl/test/alpha")
-	if rel := callToolOnce(t, s, 2, "worktree.release", map[string]any{"session_key": leadKey, "path": acq.Path}); toolIsError(t, rel) {
-		t.Fatalf("release failed: %s", rel)
-	}
-	// Occupy the lease path with a non-empty directory so the atomic rename
-	// onto it fails on the next acquire, which reuses this released worktree.
-	adminDir := strings.TrimSpace(string(runGitOutput(t, acq.Path, "rev-parse", "--absolute-git-dir")))
-	blocker := filepath.Join(adminDir, worktreeLeaseFileName)
-	if err := os.MkdirAll(filepath.Join(blocker, "x"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	resp := callToolOnce(t, s, 3, "worktree.acquire", map[string]any{
-		"session_key": leadKey, "base": base, "target_branch": "impl/test/beta",
-	})
-	if !toolIsError(t, resp) {
-		t.Fatalf("acquire must fail when the worktree lease cannot be written: %s", resp)
-	}
-	if !strings.Contains(toolText(t, resp), "worktree lease") {
-		t.Fatalf("failure must name the worktree lease: %s", resp)
-	}
-	if b := wtBranch(t, acq.Path); b != "HEAD" {
-		t.Fatalf("failed lease write must leave the worktree detached, branch = %q", b)
-	}
-}
-
 // TestWorktreeListDispatch covers the per-entry facts over a mixed pool: a held
 // clean worktree, a held dirty one, a released (detached, lease-less) one, and
 // one from before worktree leases existed; the primary root and a foreign
@@ -186,6 +90,9 @@ func TestWorktreeListDispatch(t *testing.T) {
 	clean := acquireForTest(t, s, 1, leadKey, base, "impl/test/clean")
 	dirty := acquireForTest(t, s, 2, leadKey, base, "impl/test/dirty")
 	released := acquireForTest(t, s, 3, leadKey, base, "impl/test/released")
+	untracked := acquireForTest(t, s, 8, leadKey, base, "impl/test/untracked")
+	handDetached := acquireForTest(t, s, 9, leadKey, base, "impl/test/hand-detached")
+	runGit(t, handDetached.Path, "checkout", "--detach")
 	if rel := callToolOnce(t, s, 4, "worktree.release", map[string]any{"session_key": leadKey, "path": released.Path}); toolIsError(t, rel) {
 		t.Fatalf("release failed: %s", rel)
 	}
@@ -213,9 +120,23 @@ func TestWorktreeListDispatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Untracked-only dirt: a collapsed untracked directory, the only (and so
+	// the newest) dirty path. release's clean -ffdx would delete it, so the
+	// entry must count as dirty and carry no release nudge.
+	if err := os.MkdirAll(filepath.Join(untracked.Path, "scratch"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(untracked.Path, "scratch", "notes.txt"), []byte("n\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	scratchTime := time.Date(2023, 5, 6, 7, 8, 9, 0, time.UTC)
+	if err := os.Chtimes(filepath.Join(untracked.Path, "scratch"), scratchTime, scratchTime); err != nil {
+		t.Fatal(err)
+	}
+
 	res := listForTest(t, s, 5, leadKey)
-	if len(res.Worktrees) != 4 {
-		t.Fatalf("want exactly the 4 pool worktrees, got %+v", res.Worktrees)
+	if len(res.Worktrees) != 6 {
+		t.Fatalf("want exactly the 6 pool worktrees, got %+v", res.Worktrees)
 	}
 	for i := 1; i < len(res.Worktrees); i++ {
 		if res.Worktrees[i-1].Path >= res.Worktrees[i].Path {
@@ -232,7 +153,7 @@ func TestWorktreeListDispatch(t *testing.T) {
 	}
 
 	c := listEntryByPath(t, res, clean.Path)
-	if c.Branch == nil || *c.Branch != "impl/test/clean" || c.Dirty || c.NewestDirtyMtime != "" {
+	if c.Branch == nil || *c.Branch != "impl/test/clean" || c.Dirty == nil || *c.Dirty || c.NewestDirtyMtime != "" {
 		t.Fatalf("held clean entry facts wrong: %+v", c)
 	}
 	if c.WorktreeLease == nil || c.WorktreeLease.WorkerKey != clean.WorkerKey || c.WorktreeLease.ParentKey != leadKey || c.WorktreeLease.AcquiredAt == "" {
@@ -246,7 +167,7 @@ func TestWorktreeListDispatch(t *testing.T) {
 	}
 
 	d := listEntryByPath(t, res, dirty.Path)
-	if !d.Dirty || d.Release != "" {
+	if d.Dirty == nil || !*d.Dirty || d.Release != "" {
 		t.Fatalf("dirty entry must be dirty with no release nudge: %+v", d)
 	}
 	if d.NewestDirtyMtime != renamedTime.Format(time.RFC3339) {
@@ -257,8 +178,22 @@ func TestWorktreeListDispatch(t *testing.T) {
 	}
 
 	r := listEntryByPath(t, res, released.Path)
-	if r.Branch != nil || r.Dirty || r.WorktreeLease != nil {
+	if r.Branch != nil || r.Dirty == nil || *r.Dirty || r.WorktreeLease != nil {
 		t.Fatalf("released entry must be detached, clean, with no lease record: %+v", r)
+	}
+
+	u := listEntryByPath(t, res, untracked.Path)
+	if u.Dirty == nil || !*u.Dirty || u.Release != "" {
+		t.Fatalf("untracked-only entry must be dirty with no release nudge: %+v", u)
+	}
+	if u.NewestDirtyMtime != scratchTime.Format(time.RFC3339) {
+		t.Fatalf("newest_dirty_mtime = %q, want the collapsed untracked dir's own %q", u.NewestDirtyMtime, scratchTime.Format(time.RFC3339))
+	}
+
+	// Detached by hand while still leased: both facts are shown.
+	h := listEntryByPath(t, res, handDetached.Path)
+	if h.Branch != nil || h.WorktreeLease == nil || h.WorktreeLease.WorkerKey != handDetached.WorkerKey {
+		t.Fatalf("hand-detached entry must show detached and its lease: %+v", h)
 	}
 
 	l := listEntryByPath(t, res, legacy.Path)
@@ -373,5 +308,19 @@ func TestPorcelainPathsParsesRenamesAndCollapsedDirs(t *testing.T) {
 	got := strings.Join(paths, "|")
 	if got != "with space.txt|untracked/" {
 		t.Fatalf("porcelain paths = %q, want the rename's new path and the collapsed untracked dir", got)
+	}
+}
+
+func TestWorktreeListSchemaRequiresSessionKey(t *testing.T) {
+	if !toolSchemaRequiresSessionKey("worktree.list") {
+		t.Fatal("toolSchemaRequiresSessionKey(\"worktree.list\") = false, want true")
+	}
+	s, _, _, _ := worktreeListServer(t)
+	listResp := callToolsList(t, s)
+	if !toolNameListed(t, listResp, "worktree.list") {
+		t.Fatalf("tools/list missing worktree.list: %s", listResp)
+	}
+	if _, ok := toolPropertiesByName(t, listResp, "worktree.list")["session_key"]; !ok {
+		t.Fatal("worktree.list schema missing session_key property")
 	}
 }

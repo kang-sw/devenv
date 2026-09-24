@@ -25,8 +25,9 @@ type worktreeListEntry struct {
 	Path string `json:"path"`
 	// Branch is the checked-out branch's short name; null when HEAD is detached.
 	Branch *string `json:"branch"`
-	// Dirty counts untracked files as dirty.
-	Dirty bool `json:"dirty"`
+	// Dirty counts untracked files as dirty; null when git status could not be
+	// read (the entry then carries a warning and no release nudge).
+	Dirty *bool `json:"dirty"`
 	// HeadCommitTime is HEAD's committer time (RFC 3339 UTC).
 	HeadCommitTime string `json:"head_commit_time,omitempty"`
 	// NewestDirtyMtime is the newest mtime over the paths `git status
@@ -80,9 +81,12 @@ func (r worktreeListResult) text() string {
 		} else {
 			b.WriteString("  branch: (detached)\n")
 		}
-		if e.Dirty {
+		switch {
+		case e.Dirty == nil:
+			b.WriteString("  state: unknown\n")
+		case *e.Dirty:
 			b.WriteString("  state: dirty\n")
-		} else {
+		default:
 			b.WriteString("  state: clean\n")
 		}
 		if e.HeadCommitTime != "" {
@@ -139,12 +143,11 @@ func describePoolWorktree(ctx context.Context, runner wsgit.Runner, e worktreeEn
 		out.Branch = &branch
 	}
 
-	statusKnown := false
 	if dirtyPaths, err := porcelainPaths(ctx, runner, e.Path); err != nil {
 		out.Warnings = append(out.Warnings, "cannot read git status: "+err.Error())
 	} else {
-		statusKnown = true
-		out.Dirty = len(dirtyPaths) > 0
+		dirty := len(dirtyPaths) > 0
+		out.Dirty = &dirty
 		if newest, ok := newestMtime(e.Path, dirtyPaths); ok {
 			out.NewestDirtyMtime = formatFactTime(newest)
 		}
@@ -152,7 +155,9 @@ func describePoolWorktree(ctx context.Context, runner wsgit.Runner, e worktreeEn
 
 	if secs, err := wtRun(ctx, runner, e.Path, "log", "-1", "--format=%ct", "HEAD"); err != nil {
 		out.Warnings = append(out.Warnings, "cannot read HEAD commit time: "+err.Error())
-	} else if n, perr := strconv.ParseInt(secs, 10, 64); perr == nil {
+	} else if n, perr := strconv.ParseInt(secs, 10, 64); perr != nil {
+		out.Warnings = append(out.Warnings, fmt.Sprintf("cannot parse HEAD commit time %q", secs))
+	} else {
 		out.HeadCommitTime = formatFactTime(time.Unix(n, 0))
 	}
 
@@ -176,7 +181,7 @@ func describePoolWorktree(ctx context.Context, runner wsgit.Runner, e worktreeEn
 		}
 	}
 
-	if statusKnown && !out.Dirty {
+	if out.Dirty != nil && !*out.Dirty {
 		out.Release = worktreeReleaseNudge(e.Path)
 	}
 	return out
@@ -187,10 +192,12 @@ func describePoolWorktree(ctx context.Context, runner wsgit.Runner, e worktreeEn
 // collapsed (`dir/`): -uall would reopen a full-tree walk over content such as
 // node_modules. -z keeps paths unquoted; the raw (untrimmed) output is parsed
 // because trimming would eat the first record's leading status space.
+// --no-optional-locks keeps status from taking index.lock to refresh the index,
+// so listing never makes a live worker's concurrent git add/commit fail.
 func porcelainPaths(ctx context.Context, runner wsgit.Runner, wtPath string) ([]string, error) {
-	raw, err := runner.RunGit(ctx, wtPath, "status", "--porcelain", "-z")
+	raw, err := runner.RunGit(ctx, wtPath, "--no-optional-locks", "status", "--porcelain", "-z")
 	if err != nil {
-		return nil, fmt.Errorf("%v: %s", err, strings.TrimSpace(string(raw)))
+		return nil, err
 	}
 	var paths []string
 	fields := strings.Split(string(raw), "\x00")
