@@ -475,7 +475,7 @@
         "email": "ki6080@gmail.com",
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-09-24T11:29:59Z",
         "impl": {
           "branch": "impl/develop/twirl-sleet-curvy"
