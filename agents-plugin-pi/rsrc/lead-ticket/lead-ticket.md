@@ -1,7 +1,5 @@
 ---
 kind: print
-includes:
-  - task-list
 ---
 
 # Ticket
@@ -25,6 +23,11 @@ asking, so judgment is spent here and not at run time.
   alternative, future-scope hint, or cleanup the user has not explicitly
   confirmed goes through the **Open Decision Queue** first. Never write a
   draft decision for later correction.
+- The queue's temporary `## Open Decision Queue` section is the one exception
+  to both rules above: it is non-authoritative working state, not a persisted
+  decision. Persisting means the commit and any `ready/` move; editing the
+  ticket file before them is working state. The capture and intent
+  checklists are satisfied against the text after the section is deleted.
 - Capture enough that a fresh worker recovers intent without inventing a
   product, API, or verification decision: decisions with their rejected
   alternatives, constraints, verification expectations, and the manuals that
@@ -40,18 +43,104 @@ asking, so judgment is spent here and not at run time.
 
 ## Open Decision Queue
 
-For settlement, list every unconfirmed item that could change ticket text, as a visible task
-list (the included task-list guidance applies). Ask the whole queue in one
-response, each item restated in full, your recommendation for it in the
-response body rather than in the item text. Reconcile item by item; re-ask
-what the answer did not reach as one batch; where an answer's reach is
-unclear, state your reading on its own line and leave the item open until
-the user confirms it. Proceed only when every item is confirmed, rejected, or
-explicitly deferred, and write confirmed items only.
+For settlement, queue every unconfirmed item that could change ticket text,
+one item per decision. Reconcile item by item; where an answer's reach is
+unclear, state your reading on its own line and leave the item open until the
+user confirms it. Proceed only when every item is confirmed, rejected, or
+explicitly deferred; only confirmed items are authoritative.
 
 Research entries explicitly labeled as non-authoritative Proposals or Open
 Questions may be preserved without settlement; they do not open a queue item
 unless a decision is needed.
+
+### Queue state
+
+The queue lives in a temporary `## Open Decision Queue` section of the target
+ticket, so it survives your own compaction; create the ticket with
+`{{.McpNamespace}}/tickets.create_empty` first when it does not exist yet.
+Research tickets do not use the section; their Outcome Ledger holds their
+non-authoritative entries.
+
+- Keep the heading line exactly `## Open Decision Queue`; the line under it
+  records the last ID used, so the next number survives after settled items
+  have left.
+- Each item records its ID, status tag, one-line decision, context, and
+  your recommendation, as the **Response format** block below with the tag
+  after the ID: `(1) [open] <one-line decision>`. Status tags are `[open]`,
+  `[confirmed]`, `[rejected]`, and `[deferred]`. Section text is English, like
+  the rest of the ticket.
+- IDs are `(1)`, `(2)`, `(3)`, ... and never change. A new item takes one past
+  the highest ID used so far in this conversation, across every affected
+  section and earlier rounds, so a re-created section continues the numbering
+  instead of restarting at `(1)`.
+- The one-line decision is the decision itself, self-describing, not a label.
+- An item that affects several tickets (a batch coherence issue, a gap
+  spanning members) is recorded under the same ID in the section of every
+  affected ticket, so each stays gated until it settles.
+- A settled item leaves the section: a confirmed item moves into
+  `## Decisions`; a rejected item moves into the relevant decision's
+  `Rejected:` text when it is a meaningful alternative and is otherwise
+  dropped; a deferred item moves into `## Constraints` as out of scope.
+- Delete the section only after the final confirmation is approved.
+  `ready/` promotion and design review refuse a ticket that still carries it,
+  whatever its item statuses.
+- A reviewer `missing` issue enters the section as a new item; after it
+  settles and the section is deleted, fix and re-stamp as the stamp result
+  directs.
+
+### Trace a change before writing it
+
+Before a change enters the ticket - a user correction, pushback, or change of
+direction; a proposal of your own; an item the fact populator or a reviewer
+brings in; or the initial draft - trace it: apply the change to the ticket as
+written and follow its consequences through `## Decisions`, `## Constraints`,
+the phases, the verification expectations, `## Prior Decisions`, and the rules
+of any workflow document the ticket changes. Untraced, a settlement chains
+through review rounds as each change's contradictions surface one round later.
+
+- Resolve contradictions before the change is reflected, and raise every new
+  decision the resolution needs as a new item in the same response. The trace
+  precedes recording the change anywhere in the ticket, including as a new
+  queue item.
+- While knock-on items the trace raised are open, the triggering item stays in
+  the section as `[confirmed]` rather than moving into `## Decisions`.
+- A resolution that would alter an already-confirmed decision is raised as a
+  reopened item, never applied on your own.
+
+### Response format
+
+The `# Open Decision Queue` heading and the status tags stay in English; item
+content follows the user's conversation language.
+
+Each response asks every item still awaiting an answer. An item's first
+presentation, including an item added mid-settlement, is one block:
+
+```text
+# Open Decision Queue
+
+(1) <one-line decision>
+- <context>
+- <alternative: ...>
+> <recommendation and why>
+```
+
+The recommendation lives only in the trailing `>` line of its item's block.
+
+An item already presented is re-asked as one line,
+`(n) [open] <one-line decision>`; re-print its context only when the user
+asks, or point at the ticket section. Announce the items settled this
+round in one line, such as `(1), (2) confirmed · (4) deferred`; items settled
+in earlier rounds are not repeated.
+
+### Final confirmation
+
+When every item is settled, before the section is deleted and so before
+the sage gate, the reviewers, the commit, and any `ready/` move: show the
+confirmed items in full once, the rejected and deferred items in one line,
+and end the turn. Persist only after the user approves. A correction returns its
+item to `[open]` under its existing ID, back from `## Decisions` into the
+section, and it is reconciled like any other open item. An invocation that
+queued no item (a drop, a stamp-only commit) has no final confirmation.
 
 ## Derive actionable work from research
 
@@ -95,8 +184,9 @@ research ticket; the move is barred either way). Its design review is not pinned
 to a status boundary — run it on your judgment, when the epic's cross-child
 design has drifted materially, not as a promotion step.
 
-When you judge a review is due, run **Ground: fact population** first, then call
-`{{.McpNamespace}}/tickets.sage_gate(stem, landing: "todo")` (design only;
+When you judge a review is due, run **Ground: fact population** first, settle
+any queue it opened through the final confirmation and delete the section, then
+call `{{.McpNamespace}}/tickets.sage_gate(stem, landing: "todo")` (design only;
 completeness never applies to an epic). Render and spawn the design reviewer when
 the gate requests it, passing the ticket path and populator's `relations:` table;
 record its verdict with `{{.McpNamespace}}/tickets.sage_stamp`. A block leaves the
@@ -113,7 +203,8 @@ promotion is a batch of one.
    prerequisite` or a prerequisite `parent:`. Otherwise name the blocking
    stem and stop before any move.
 2. For every actionable member, run **Ground: fact population** before any
-   reviewer reads the batch. Resolve each
+   reviewer reads the batch, then settle any queue it opened through the final
+   confirmation and delete each member's section. Resolve each
    `{{.McpNamespace}}/tickets.sage_gate(stem, landing: "ready")` while tickets
    remain at their original paths, including configured recommendations,
    freshness decisions, and existing blocks. Retain the stage selections.

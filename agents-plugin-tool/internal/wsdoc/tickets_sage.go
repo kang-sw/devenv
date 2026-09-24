@@ -43,7 +43,7 @@ type SageGateOptions struct {
 // SageGateResult is the gate decision. Action is the primary control value the
 // caller follows; the remaining fields are populated per action.
 type SageGateResult struct {
-	Action    string   // "skip" | "stop_blocked" | "stop_missing_route_facts" | "ask" | "run" | "check_review_required"
+	Action    string   // "skip" | "stop_blocked" | "stop_missing_route_facts" | "stop_open_decision_queue" | "ask" | "run" | "check_review_required"
 	AskPrompt string   // populated when Action == "ask"
 	Reviewers []string // populated when Action == "run"; subset of {"design","completeness"}
 	Mode      string   // "standalone" | "combined"; populated when Action == "run"
@@ -166,6 +166,11 @@ func SageGate(root string, opts SageGateOptions, resolvedSageReviewConfig string
 		if !designRequired {
 			return SageGateResult{Action: "skip"}, nil
 		}
+		// Epic design landing: a pending queue section is refused ahead of
+		// every posture and freshness branch, so the refusal is write-free.
+		if hasOpenDecisionQueue(ticketAbs) {
+			return SageGateResult{Action: "stop_open_decision_queue"}, nil
+		}
 		design, _ := effectiveSageReviewPostures(frontmatter(ticketAbs))
 		if design == "completed" {
 			if result, consumed, err := sageGateFreshnessResult(root, ticketRel, []string{"design"}, answer); err != nil {
@@ -189,6 +194,14 @@ func SageGate(root string, opts SageGateOptions, resolvedSageReviewConfig string
 	// structurally incomplete. Presence only — the reviewer judges the values.
 	// nonImplementationCategories are exempt here because they carry no phases
 	// and never reach an implementation run, so they have no facts to carry.
+	//
+	// A pending Open Decision Queue section is refused first: its items are
+	// unsettled, so no reviewer can judge the ticket as decided yet. Like the
+	// route-facts stop it precedes every posture write, and it also covers the
+	// retained epic-at-ready branch below.
+	if hasOpenDecisionQueue(ticketAbs) {
+		return SageGateResult{Action: "stop_open_decision_queue"}, nil
+	}
 	if missingRouteFacts(ticketAbs, stem) {
 		return SageGateResult{Action: "stop_missing_route_facts"}, nil
 	}

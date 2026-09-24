@@ -370,6 +370,43 @@ func TestServeStdioSageGateDispatch(t *testing.T) {
 	}
 }
 
+// TestServeStdioOpenDecisionQueueRefusals pins that the pending-queue refusal
+// reaches the caller through both MCP tools: sage_gate's structured stop with
+// its settle-and-delete instruction (and no posture-uncommitted note, since the
+// stop writes nothing), and tickets.move's error, with the ticket left in todo/.
+func TestServeStdioOpenDecisionQueueRefusals(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	stem := "260101-feat-odq"
+	ticketRel := filepath.Join("ai-docs", "tickets", "todo", stem+".md")
+	mustWrite(t, root, ticketRel,
+		"---\ntitle: Sage\n---\n\n## Open Decision Queue\n\n(1) [open] Pick a bound.\n\n## Route Facts\n\n| fact | value |\n|---|---|\n| scope.span | single-file |\n\nBody.\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 9711, root, nil))
+
+	gate := callToolWithKey(t, server, 9712, key, "tickets.sage_gate", map[string]any{"stem": stem, "landing": "ready"})
+	for _, want := range []string{"action: stop_open_decision_queue", "## Open Decision Queue", "delete the section"} {
+		if !strings.Contains(gate, want) {
+			t.Fatalf("sage_gate response missing %q:\n%s", want, gate)
+		}
+	}
+	if strings.Contains(gate, "left uncommitted") {
+		t.Fatalf("the queue stop writes nothing and must not carry the posture-uncommitted note:\n%s", gate)
+	}
+
+	move := callToolWithKey(t, server, 9713, key, "tickets.move", map[string]any{"stem": stem, "to": "ready"})
+	if !strings.Contains(move, "## Open Decision Queue") || !strings.Contains(move, "delete the section") {
+		t.Fatalf("tickets.move response missing the queue refusal:\n%s", move)
+	}
+	if _, err := os.Stat(filepath.Join(root, ticketRel)); err != nil {
+		t.Fatalf("refused move must leave the ticket in todo/: %v", err)
+	}
+}
+
 func TestServeStdioSageGateDetectsStaleCompletedReview(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()

@@ -2889,6 +2889,10 @@ func sageGateNextInstruction(result wsdoc.SageGateResult) string {
 		return "next_instruction: A blocked sage review must be addressed before promotion; stop and report the blocker. This gate returns stop_blocked while the posture is blocked and never names a reviewer again, so a later invocation whose edits address the blocker spawns that stage's reviewer via On: Reviewer Spawn and clears the posture with ws/tickets.sage_stamp carrying fresh verdicts; read which stage is blocked from the ticket's sage-review-* frontmatter, which this result does not carry." + sageGatePostureUncommittedNote
 	case "stop_missing_route_facts":
 		return "next_instruction: This ticket has no ## Route Facts section, and the implementation route reads its facts from there, so it cannot be routed as promoted. Render the `ticket-fact-populator` playbook on this ticket, apply what it returns, then call tickets.sage_gate again with the same stem/landing; the section's values are the completeness reviewer's subject, so no review runs until it exists." + sageGatePostureUncommittedNote
+	case "stop_open_decision_queue":
+		// No posture note: this stop precedes every posture write on both
+		// landings, so the call wrote nothing.
+		return "next_instruction: This ticket still has a ## Open Decision Queue section, whose items are unsettled working state rather than decisions, so it cannot be reviewed or promoted yet. Settle the queue with the user through the final confirmation, move each settled item into its home section, delete the section, then call tickets.sage_gate again with the same stem/landing."
 	case "ask":
 		return "next_instruction: Relay ask_prompt to the user, then call tickets.sage_gate again with the same stem/landing plus answer=yes|no." + sageGatePostureUncommittedNote
 	case "run":
@@ -4135,7 +4139,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.move",
-			"description": "Move a ticket along the idea <-> todo <-> ready axis. Non-implementation categories (epic, research, workset) are board artifacts, never execution targets, and are rejected at the ready/ landing. Ready promotion and epic todo settlement resolve sage-review posture from config; actionable todo moves are ungated. Stages atomically; does not commit. With the origin ticket ownership index, a lease held by another person (email) refuses the call unless dangerously_override_lease_status is true with a reason; a lease held by another clone or track proceeds with a warning, and the lease never moves.",
+			"description": "Move a ticket along the idea <-> todo <-> ready axis. Non-implementation categories (epic, research, workset) are board artifacts, never execution targets, and are rejected at the ready/ landing, as is a ticket that still carries a ## Open Decision Queue section outside fenced code. Ready promotion and epic todo settlement resolve sage-review posture from config; actionable todo moves are ungated. Stages atomically; does not commit. With the origin ticket ownership index, a lease held by another person (email) refuses the call unless dangerously_override_lease_status is true with a reason; a lease held by another clone or track proceeds with a warning, and the lease never moves.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -4191,7 +4195,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.sage_gate",
-			"description": "Resolve the sage-review gate for a ticket landing. The todo landing runs epic design-only review (completeness never applies to an epic), invoked on lead judgment when the epic's cross-child design has drifted materially — not a status boundary; actionable todo calls fail, and research and legacy worksets skip. Actionable design and completeness review runs at ready promotion after fact population. Owns posture resolution (legacy sage-review: migration, config.list fallback), the category×stage matrix, and standalone/combined mode selection. Returns an action (skip | stop_blocked | stop_missing_route_facts | ask | run); for run, the reviewer(s) to spawn and the mode. A ready/ landing is refused with stop_missing_route_facts when the ticket carries no ## Route Facts section. Does not spawn reviewers.",
+			"description": "Resolve the sage-review gate for a ticket landing. The todo landing runs epic design-only review (completeness never applies to an epic), invoked on lead judgment when the epic's cross-child design has drifted materially — not a status boundary; actionable todo calls fail, and research and legacy worksets skip. Actionable design and completeness review runs at ready promotion after fact population. Owns posture resolution (legacy sage-review: migration, config.list fallback), the category×stage matrix, and standalone/combined mode selection. Returns an action (skip | stop_blocked | stop_missing_route_facts | stop_open_decision_queue | ask | run); for run, the reviewer(s) to spawn and the mode. A ready/ landing is refused with stop_missing_route_facts when the ticket carries no ## Route Facts section. The ready/ landing and the epic todo landing are refused with stop_open_decision_queue, before any write, while the ticket carries a ## Open Decision Queue section outside fenced code. Does not spawn reviewers.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{

@@ -210,6 +210,12 @@ func TicketsMove(root string, runner GitRunner, opts TicketMoveOptions) (TicketM
 		if err := blockedByPromotionError(root, scope, filepath.Join(root, filepath.FromSlash(oldPath))); err != nil {
 			return TicketMutateResult{}, err
 		}
+		// A pending Open Decision Queue section holds unsettled items; a worker
+		// reading it in ready/ would take them as decisions. Refused before any
+		// write, like the checks above.
+		if hasOpenDecisionQueue(filepath.Join(root, filepath.FromSlash(oldPath))) {
+			return TicketMutateResult{}, fmt.Errorf("%s %s to ready/", openDecisionQueueRefusal, stem)
+		}
 	}
 	newPath := ticketRelPath(to, stem)
 	// Both scope pre-flights run before prepareSageReviewForUpwardMove, which
@@ -354,6 +360,26 @@ func missingRouteFacts(ticketAbsPath, stem string) bool {
 	}
 	present, _ := ticketRouteFacts(string(raw))
 	return !present
+}
+
+// openDecisionQueueRefusal is the tickets.move refusal text; the sage_gate
+// stop instruction states the same remedy.
+const openDecisionQueueRefusal = "ticket has a pending ## Open Decision Queue section; its items are unsettled working state, not decisions. Settle every queue item through the final confirmation, move each into its home section, and delete the section before promoting"
+
+// hasOpenDecisionQueue reports whether a ticket carries a pending
+// `## Open Decision Queue` section. The match is the exact level-2 line
+// (trailing whitespace allowed, no leading indentation) outside fenced code
+// blocks, so a ticket quoting the heading in an example fence is not refused.
+// The section is refused whatever its item statuses: settled items leave it,
+// so any section still present is unsettled state a worker would otherwise
+// read as decisions. An unreadable file is not "pending": the callers surface
+// their own file-level failure (see missingRouteFacts).
+func hasOpenDecisionQueue(ticketAbsPath string) bool {
+	raw, err := os.ReadFile(ticketAbsPath)
+	if err != nil {
+		return false
+	}
+	return containsOpenDecisionQueue(string(raw))
 }
 
 // routeFactsMoveTip is the soft counterpart to the SageGate refusal, attached

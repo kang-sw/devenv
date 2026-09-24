@@ -2208,47 +2208,97 @@ func TestPlaybookPrintGoldenLeadWorkflowManual(t *testing.T) {
 }
 
 // TestPlaybookPrintGoldenLeadTicket verifies lead-ticket resolves from the
-// real rsrc tree, splices its task-list include, and keeps the two boundaries
-// the collapse must not lose: the Open Decision Queue gates what gets
-// written, and the ready-promotion path runs dependency closure and the sage
-// gate before its single commit. delegates:false — no tip.
+// real rsrc tree under both harness variants and keeps the boundaries the
+// collapse must not lose: the Open Decision Queue gates what gets written, and
+// the ready-promotion path runs dependency closure and the sage gate before its
+// single commit. It also pins the ticket-held queue contract: no harness
+// task-list guidance is spliced in any more (the include was removed), the
+// queue state lives in a temporary ticket section whose settled items move to
+// their home sections, the response format (first-presentation block and the
+// one-line re-ask), the blocking final confirmation, and the trace-before-write
+// instruction. delegates:false — no tip.
 func TestPlaybookPrintGoldenLeadTicket(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
-	s := newTestServerWithHarness(t, "claude")
+	for _, harness := range []string{"claude", "codex"} {
+		t.Run(harness, func(t *testing.T) {
+			s := newTestServerWithHarness(t, harness)
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-ticket", nil, wsconfig.Options{}, "", nil)
-	if err != nil {
-		t.Fatalf("printPlaybook: %v", err)
-	}
-	for _, want := range []string{
-		"You are the lead managing the ticket inventory",
-		"## Open Decision Queue",
-		"Included Guidance: Open Decision Queue Task List",
-		"tickets.create_empty",
-		"tickets.sage_gate(stem, landing: \"ready\")",
-		"tickets.sage_stamp",
-		"Dependency closure over the whole batch first",
-		"Stamps leave files uncommitted",
-		"ticket-fact-populator",
-	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("body missing lead-ticket text %q:\n%s", want, body)
-		}
-	}
-	// The retired entry points must not be named by the surviving skill.
-	for _, forbidden := range []string{
-		"lead-write-ticket",
-		"lead-proceed",
-		"lead-implement",
-		"[design-review:",
-	} {
-		if strings.Contains(body, forbidden) {
-			t.Errorf("body still names retired surface %q:\n%s", forbidden, body)
-		}
-	}
-	// delegates:false — no tip.
-	if strings.Contains(body, "Continuity tip") {
-		t.Errorf("body %q: delegation tip must not appear for delegates:false playbook", body)
+			body, _, err := printPlaybook(s, rsrcRoot, "lead-ticket", nil, wsconfig.Options{}, "", nil)
+			if err != nil {
+				t.Fatalf("printPlaybook: %v", err)
+			}
+			for _, want := range []string{
+				"You are the lead managing the ticket inventory",
+				"## Open Decision Queue",
+				"tickets.create_empty",
+				"tickets.sage_gate(stem, landing: \"ready\")",
+				"tickets.sage_stamp",
+				"Dependency closure over the whole batch first",
+				"Stamps leave files uncommitted",
+				"ticket-fact-populator",
+				// First-presentation block template, verbatim.
+				"```text\n# Open Decision Queue\n\n(1) <one-line decision>\n- <context>\n- <alternative: ...>\n> <recommendation and why>\n```",
+			} {
+				if !strings.Contains(body, want) {
+					t.Errorf("body missing lead-ticket text %q:\n%s", want, body)
+				}
+			}
+			normalized := strings.Join(strings.Fields(body), " ")
+			for _, want := range []string{
+				// Ticket-held state and the Write exception.
+				"The queue lives in a temporary `## Open Decision Queue` section of the target ticket",
+				"it is non-authoritative working state, not a persisted decision",
+				"Persisting means the commit and any `ready/` move",
+				"the line under it records the last ID used",
+				"A new item takes one past the highest ID used so far in this conversation",
+				"recorded under the same ID in the section of every affected ticket",
+				// Settlement moves.
+				"a confirmed item moves into `## Decisions`",
+				"moves into the relevant decision's `Rejected:` text when it is a meaningful alternative and is otherwise dropped",
+				"a deferred item moves into `## Constraints` as out of scope",
+				"Delete the section only after the final confirmation is approved",
+				"A reviewer `missing` issue enters the section as a new item",
+				// Response format.
+				"The recommendation lives only in the trailing `>` line",
+				"An item already presented is re-asked as one line, `(n) [open] <one-line decision>`",
+				"Announce the items settled this round in one line",
+				"items settled in earlier rounds are not repeated",
+				"The `# Open Decision Queue` heading and the status tags stay in English; item content follows the user's conversation language",
+				// Final confirmation.
+				"show the confirmed items in full once",
+				"and end the turn. Persist only after the user approves",
+				"A correction returns its item to `[open]` under its existing ID",
+				"before the section is deleted and so before the sage gate",
+				// Trace before write.
+				"trace it: apply the change to the ticket as written and follow its consequences through `## Decisions`, `## Constraints`, the phases, the verification expectations, `## Prior Decisions`",
+				"The trace precedes recording the change anywhere in the ticket, including as a new queue item",
+				"the triggering item stays in the section as `[confirmed]` rather than moving into `## Decisions`",
+				"A resolution that would alter an already-confirmed decision is raised as a reopened item",
+			} {
+				if !strings.Contains(normalized, want) {
+					t.Errorf("body missing lead-ticket queue contract %q", want)
+				}
+			}
+			// The retired entry points and the removed task-list include must
+			// not be named by the surviving skill.
+			for _, forbidden := range []string{
+				"lead-write-ticket",
+				"lead-proceed",
+				"lead-implement",
+				"[design-review:",
+				"Included Guidance",
+				"task list",
+				"task-list",
+			} {
+				if strings.Contains(body, forbidden) {
+					t.Errorf("body still names retired surface %q:\n%s", forbidden, body)
+				}
+			}
+			// delegates:false — no tip.
+			if strings.Contains(body, "Continuity tip") {
+				t.Errorf("body %q: delegation tip must not appear for delegates:false playbook", body)
+			}
+		})
 	}
 }
 
