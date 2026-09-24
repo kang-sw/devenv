@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: ab46fc75e480a66a
 sage-review-completeness-reviewed: ab46fc75e480a66a
+completed: 2026-09-24
 ---
 
 # Pi session-start retention runs in fork children
@@ -60,3 +61,18 @@ Verification, in `agents-plugin-pi/test/session-retention.test.ts`:
 - A fork child's session start runs no prune and no checkpoint fold.
 - A lead's session start still prunes stale homes as before.
 - The existing worker and Explore skip cases still pass.
+
+### Result (f3b93840) - 2026-09-24
+
+- `applySessionStartAgentRetention` (`agents-plugin-pi/src/index.ts`) now gates on `role !== undefined`. Only the tree-root lead runs `pruneStaleAgentHomes` and its checkpoint fold at session start. Fork, worker, and Explore children skip it. Deletion eligibility and the ownership lock are unchanged (6d2118d1).
+- Tests in `agents-plugin-pi/test/session-retention.test.ts`:
+  - A new real-disk fork case: a fork child leaves another lead's stale home and writes no `checkpoint.json`, and a lead run afterwards still prunes that home.
+  - The stub-prune role test now also checks that a fork makes no prune call.
+  - The failure-report test now uses the lead role, because a fork no longer reaches prune.
+  - The TUI-owner-only reporter test's fork arm now calls `reportOwnershipDiagnostic` directly, because retention no longer reaches the reporter for a fork (f3b93840, from the review finding).
+- Verification:
+  - `npm test -- test/session-retention.test.ts test/web-retention.test.ts` gives 7 pass, 0 fail.
+  - Against the old `isLeadOrFork` gate, the new fork assertions fail as expected.
+  - The full `npm test` run gives 1622 pass and 14 fail. The same 14 web-search/Explore tests also fail on a clean base in this worktree, so they are environmental.
+- Decision: an inline `role !== undefined` check, not a new helper, keeping `scope.new_public_symbol: no`.
+- Review: single reviewer. Round 1 found one Minor issue, the vacuous fork reporter assertion. Round 2 confirmed it was fixed.

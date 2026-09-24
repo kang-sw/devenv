@@ -280,7 +280,9 @@ export function applySessionStartAgentRetention(
   recovered: PersistedOrphan[],
   prune: typeof pruneStaleAgentHomes = pruneStaleAgentHomes,
 ): PersistedOrphan[] {
-  if (!isLeadOrFork(role)) return recovered;
+  // Tree-root lead only (no spawn role): the prune scans every owner namespace
+  // on the machine, so a fork child must not repeat it from inside a tree.
+  if (role !== undefined) return recovered;
   try {
     const retention = prune(root, resolveChildRetentionTtlDays(readGoalLoopConfig(configPath)), { beforeRemove: persistOwnedTelemetryRollup });
     if (retention.deletedHomes.length === 0) return recovered;
