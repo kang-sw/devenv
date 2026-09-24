@@ -7,8 +7,8 @@ related:
   260728-research-duplicate-ticket-stem-silent-resolve: duplicate-stem behavior left unchanged here
 sage-review-design: completed
 sage-review-completeness: completed
-sage-review-design-reviewed: dc5ffd168dee017f
-sage-review-completeness-reviewed: dc5ffd168dee017f
+sage-review-design-reviewed: cd0cad61b2459476
+sage-review-completeness-reviewed: cd0cad61b2459476
 ---
 
 # Origin-backed ticket ownership index (MVP coordination overlay)
@@ -52,6 +52,47 @@ behaves exactly as it does today.
   - Local access is git plumbing only (`hash-object`, `mktree`, `commit-tree`,
     `update-ref`). There is no checkout and no worktree.
   - The local cache is a local ref, so every worktree of the clone shares it.
+- **Offline pending log.** When the clone has seen an index (its local cache
+  ref exists) and the remote is unreachable, index writes are recorded in a
+  local pending log instead of being dropped. This persists the operations the
+  CAS retry loop already re-applies to a new tip.
+  - Scope: every index write — piggyback registration, acquire (including the
+    worker impl record), release, and close's `phase: closed`.
+  - Each entry carries its recording owner triple `(email, clone_id, track)`.
+    An override entry also carries the triple of the holder it overrode in the
+    cached view, plus the reason.
+  - **Offline decisions use the overlaid view.** While offline, acquire and the
+    move/close guards evaluate the owner-conflict matrix against the cached
+    index with this clone's pending entries overlaid. Two worktrees of one
+    clone therefore conflict locally (same clone, different track) exactly as
+    they would online.
+  - The log is a local ref, shared by every worktree of the clone. Appends and
+    clears use local compare-and-swap (`update-ref` with the old value), so
+    concurrent worktrees never lose an entry and a clear never removes an entry
+    appended after the flush read the log.
+  - **Flush.** The next mutating ticket tool that reaches the remote replays
+    the pending entries in recorded order onto the fresh tip, before its own
+    operation (they may share one CAS commit). `tickets.query` never flushes;
+    it stays read-only.
+  - Replay re-evaluates each entry against the fresh tip: the owner-conflict
+    matrix, and for acquire entries only, the origin-closed check (the flush
+    fetches the review-track). **The remote wins.** A conflicting entry is
+    dropped from the log and reported loudly in the flushing tool's output,
+    naming the stem, the recording track (and, locally, its worktree path), the
+    current holder, and when it was taken. Non-conflicting entries still apply.
+    - An override entry applies only when the remote holder at replay is the
+      holder it recorded; any other holder makes it a conflict.
+    - Close, registration, and release entries for a stem that has since
+      landed under `.done/` or `.dropped/` on origin resolve silently through
+      pruning in the same commit; they are the normal lifecycle, not
+      conflicts.
+    - A release entry whose lease no longer belongs to its recording triple
+      (taken over meanwhile) is dropped with a one-line note.
+  - Every entry is idempotent on replay, so a crash between the remote push and
+    the local clear re-flushes without duplicate records or errors.
+  - The log never touches code branches or history; reconnect adds no clutter.
+  - Offline sync is impossible, so the log does not prevent duplicate work
+    while offline; it guarantees the conflict surfaces at reconnect.
 - **Remote git environment.** Every remote git command runs non-interactively
   with a hard timeout:
   - `GIT_TERMINAL_PROMPT=0`
@@ -159,7 +200,8 @@ behaves exactly as it does today.
     - Any write fetches the tip for its CAS, and so refreshes the cache as a
       side effect.
   - A stale view is caught at acquire, which always CASes against the fresh
-    remote tip once the index is known to exist. Within the absence TTL,
+    remote tip once the index is known to exist and the remote is reachable.
+    Offline, the flush's replay is the catch. Within the absence TTL,
     acquire returns the legacy mock without contacting the remote; a lease
     missed in the window after another clone's init is the same accepted
     window as A9.
@@ -167,7 +209,8 @@ behaves exactly as it does today.
     accident and is not detected.
   - No nonce and no ticket template change.
   - Piggyback failure (offline, rejected, timeout) never fails the host
-    operation.
+    operation. In index mode an offline piggyback is recorded in the pending
+    log.
 - **Ownership.**
   - Ownership exists only through explicit acquire, or through the close rule
     below. Creating a ticket confers none.
@@ -212,13 +255,19 @@ behaves exactly as it does today.
     this call.
   - Re-acquire by the same owner triple is idempotent and refreshes
     `touched_at`.
-  - **Unreachable remote.** Acquire fails loudly only when this clone has seen
-    an index (its local cache ref exists).
-    - When no index was ever cached, or absence was the last cached result,
-      acquire treats the index as absent and returns the legacy mock's plain
-      `ok`. This keeps "No ref, no change" for projects that never ran init
-      while offline.
-    - There is no offline queue in this ticket.
+  - **Unreachable remote, index seen.** When this clone's local cache ref
+    exists, acquire evaluates the owner-conflict matrix against the cached
+    index (the last seen state) with this clone's pending entries overlaid.
+    - A cached conflict refuses offline exactly as online; an override with
+      flag and reason is recorded in the pending log with its reason and the
+      overridden holder's triple.
+    - Otherwise acquire succeeds with an explicit offline warning (remote
+      unverified), records the acquire in the pending log, and shows it as a
+      provisional lease in this clone's view until the flush.
+  - **Unreachable remote, index never seen.** When no index was ever cached,
+    or absence was the last cached result, acquire treats the index as absent
+    and returns the legacy mock's plain `ok`. This keeps "No ref, no change"
+    for projects that never ran init while offline.
 - **Owner-conflict matrix.** One matrix governs `tickets.acquire`,
   `tickets.move`, and `tickets.close` when the ticket's lease is held by an
   owner other than the caller's triple:
@@ -276,6 +325,12 @@ behaves exactly as it does today.
     - remote (email and track)
   - When the index state is unknown (no cache and the fetch failed), ownership
     is shown as unknown, never as unowned.
+  - Pending offline entries are shown: a pending-count marker, and this
+    clone's pending acquires as provisional leases until the flush settles
+    them. A provisional lease is resolved by its recorded triple like any
+    lease: it renders at the matching ownership level (this worktree, or
+    another worktree of this clone) and counts as owned by that triple for the
+    view, queue, and ownership filter.
   - A server-side ownership filter parameter on `tickets.query` restricts
     results to caller-owned plus unowned tickets. It follows the
     `assigned_to_me` precedent (`260917`) and composes with it.
@@ -305,6 +360,8 @@ behaves exactly as it does today.
     are the implementer's choice.
   - `lead-run` acquires before spawning a worker.
     - On a refusal or a loud failure, `lead-run` stops and reports.
+    - An acquire that succeeds with the offline warning proceeds, and
+      `lead-run` relays the warning to the user verbatim.
     - It sets the override flag only on explicit user instruction.
     - The legacy mock's plain `ok` proceeds like any successful acquire;
       `lead-run` text needs no index-absent branch.
@@ -364,8 +421,10 @@ level (A2, A3, A4, F1, F2). Later phases re-run them at tool level.
 - A4. The remote is unreachable, and this clone already has a local cache
   ref (it has seen the index; without one, A10 applies).
   - `tickets.query` returns within the bound.
-  - Mutating tools succeed without registration within the timeout.
-  - `tickets.acquire` fails loudly.
+  - Mutating tools succeed within the timeout.
+  - Mutating tools record their registration in the pending log.
+  - `tickets.acquire` succeeds with the offline warning (covered in detail by
+    group I).
 - A5. The remote requires credentials. No interactive prompt occurs, and the
   command fails fast.
 - A6. Two clones run init concurrently. Exactly one creates the ref, and the
@@ -380,7 +439,8 @@ level (A2, A3, A4, F1, F2). Later phases re-run them at tool level.
 - A10. A project that never ran init goes offline after its absence TTL
   expires. `tickets.acquire` returns the plain `ok`, and does not fail.
 - A11. A clone that has seen an index (cache ref present) goes offline.
-  `tickets.acquire` fails loudly.
+  `tickets.acquire` does not fail: it succeeds with the offline warning and a
+  pending entry, or refuses on a cached conflict (I1, I2).
 - A12. The init check mode reports `uninitialized`, `initialized`,
   `no-origin`, and `unreachable` in the matching setups. In every state it
   pushes nothing. In the three non-initialized states it creates no local
@@ -477,7 +537,8 @@ level (A2, A3, A4, F1, F2). Later phases re-run them at tool level.
 - E9. A ticket file is deleted locally without close. Query hides it
   (intersection), and the registration persists until pruning or GC.
 - E10. A mutating tool runs offline in index mode. The folder operation
-  proceeds, registration is skipped, and the tool does not fail.
+  proceeds, the registration is recorded in the pending log, and the tool does
+  not fail.
 
 **F. Read path and cache** (Phases 1 and 3)
 
@@ -502,6 +563,58 @@ level (A2, A3, A4, F1, F2). Later phases re-run them at tool level.
   counts as owned, and origin-closed tickets are excluded.
 - G4. Indexed stems with no local file never appear (intersection).
 - G5. The ownership filter composes with `assigned_to_me`.
+
+**I. Offline pending log and reconnect** (Phases 1–3)
+
+- I1. Clone X (index seen) goes offline and acquires a ticket with no cached
+  conflict. Acquire succeeds with the offline warning and the entry is
+  pending. After reconnect, X's next mutating tool flushes: the lease appears
+  on the remote and the log is empty. View clause (Phase 3): before the flush,
+  X's view shows a provisional lease.
+- I2. Offline acquire where the cached index shows a lease held by a different
+  email. Acquire refuses offline. With the flag and a reason it records a
+  pending override carrying the overridden holder, which replays as an
+  override with its reason when that holder still holds the lease.
+- I3. X holds a pending offline acquire while clone Y (different email)
+  acquires the same ticket online. X reconnects and flushes: X's entry is
+  dropped, and the flushing tool's output names the stem, the recording track,
+  Y, and the time. View clause (Phase 3): X's view then shows Y as owner.
+- I4. While X is offline, the ticket is closed and lands under `.done/` on the
+  origin review-track. X's flush drops the pending acquire with an
+  origin-closed report.
+- I5. Two worktrees of the same clone record pending entries concurrently
+  while offline. Both entries survive and flush in recorded order.
+- I6. The process is killed after the remote push but before the local clear.
+  The next flush is idempotent: no duplicate records and no error.
+- I7. Worktree B appends an entry while worktree A is flushing. B's entry is
+  not lost and flushes on the next mutating call.
+- I8. Query with pending entries shows a pending-count marker, offline and
+  online. An online query with pending entries pushes nothing (count remote
+  push invocations).
+- I9. Offline close and an offline worker impl record both become pending and
+  reach the remote on flush (`phase: closed`, `impl.branch`).
+- I10. A flush where some entries conflict and others do not: the
+  non-conflicting entries apply and persist, and only the conflicting ones are
+  dropped and reported.
+- I11. Worktrees A (track a) and B (track b) of one clone are offline. A
+  acquires T. B's acquire of T is refused locally (same clone, different
+  track) without the flag. View clause (Phase 3): B's view shows T as held by
+  another worktree of this clone, not as B's own.
+- I12. X records an offline override against holder Y. Before X reconnects, Y
+  releases and Z acquires. X's flush drops the override as a conflict and
+  reports it; Z keeps the lease.
+- I13. An offline release becomes pending and removes the lease on flush. A
+  pending release whose lease was taken over meanwhile is dropped with a
+  one-line note and does not touch the new holder's lease.
+- I14. Offline `tickets.move` and `tickets.close` against a cached
+  different-email lease are refused by the guard; with the flag and a reason
+  they proceed and record a pending override entry for close.
+- I15. A provisional lease counts as owned by its recording triple in the
+  ownership filter and queue selection: included for the recording worktree,
+  excluded as another worktree's for a sibling worktree.
+- I16. An offline close becomes pending, and the ticket then lands under
+  `.done/` on origin before the flush. The flush prunes the registration with
+  no conflict report.
 
 **H. Scope integration** (Phase 4)
 
@@ -598,9 +711,12 @@ library. Examples:
 - `clone_id` generation and storage
 - the record model with schema version
 - the TTL read cache with stale fallback
+- the pending log: local-ref append and clear with local CAS, ordered replay
+  onto a fresh tip, idempotent entries
 
 **Verification.** Scenarios A2, A3, A4 (library level), A5, A9, B2, B3, B6,
-F1, F2, F3, F4, C9; missing ref reported as absent, not as an error.
+F1, F2, F3, F4, C9, I5, I6, I7 (library level); missing ref reported as
+absent, not as an error.
 
 ### Phase 2: Registration, ownership verbs, and init
 
@@ -615,11 +731,17 @@ F1, F2, F3, F4, C9; missing ref reported as absent, not as an error.
 - piggyback registration on the listed mutating tools
 - landed-closure pruning on every write
 - the monthly GC
+- offline acquire against the cached index (warning, provisional lease,
+  pending entry) and pending entries for every offline index write
+- flush on the next mutating tool that reaches the remote, with replay
+  re-evaluation and loud conflict reports
 
 **Verification.** Scenarios A1 (acquire/release plain `ok`; the override-param
 clause waits for Phase 3), A4 (tool level), A10, A11, A12, A6, A7, A8, B1, B4, B5, B7,
 C1, C2, C3, C4, C7, C8, D1–D5, E1 (through close), E2, E3, E4 (acquire
-refusal), E5 (acquire refusal), E6, E7, E8, E10. Every existing ticket-tool test must pass
+refusal), E5 (acquire refusal), E6, E7, E8, E10, I1, I2, I3, I4, I5–I7 (tool
+level), I9, I10, I11 (acquire refusal), I12, I13, I16; the view clauses of I1,
+I3, and I11 wait for Phase 3. Every existing ticket-tool test must pass
 unchanged with no ref present.
 
 ### Phase 3: Query view, queue filter, and move/close guards
@@ -630,13 +752,16 @@ unchanged with no ref present.
   ownership levels and the unknown state.
 - The ownership filter parameter.
 - Compact-text collapse, and stale-cache marking.
+- The pending-count marker and provisional-lease display.
 - The origin-closed hint.
 - The owner shown in `git.status`.
 - `tickets.move` and `tickets.close` guards per the matrix, with the override
-  params.
+  params, evaluated offline against the cached index with pending entries
+  overlaid.
 
 **Verification.** Scenarios C5, C6, E4 (query hint), E5 (query hint), E9, F5,
-G1–G5; tool-level re-runs of A2, A3, F1, F2. The no-ref path stays
+G1–G5, I8, I14, I15, and the view clauses of I1, I3, and I11; tool-level
+re-runs of A2, A3, F1, F2. The no-ref path stays
 byte-identical (A1 re-run, including its override-param clause for
 `tickets.move` and `tickets.close`, which Phase 2 cannot yet exercise).
 
@@ -645,7 +770,8 @@ byte-identical (A1 re-run, including its override-param clause for
 **Goal.**
 
 - Shipped playbook changes:
-  - `lead-run` acquires before worker spawn.
+  - `lead-run` acquires before worker spawn, and relays an offline acquire
+    warning to the user verbatim while proceeding.
   - The worker playbooks (`ticket-worker`, `ticket-worker-elevated`) record the
     impl through `tickets.acquire` from the impl branch.
   - `lead-scope-worktree` acquires on every scope assignment, with no
@@ -667,7 +793,8 @@ byte-identical (A1 re-run, including its override-param clause for
 
 - Scenario H1, and E1 end-to-end.
 - Playbook text covers the refusal and failure handling for `lead-run` and for
-  the worker impl-record acquire.
+  the worker impl-record acquire, and `lead-run`'s relay of the offline
+  warning.
 - `lead-bootstrap` text covers all four check states, asks before init, and
   changes nothing on decline. No other playbook mentions index setup.
 - Playbook and package tests pass, including the wsflow drift tests and

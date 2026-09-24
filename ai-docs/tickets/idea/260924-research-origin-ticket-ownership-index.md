@@ -317,8 +317,23 @@ registration and ownership on top without changing folder semantics.
   - scope assignment equals acquire
 - **Pruning.** Closure-landed pruning, plus a piggybacked monthly GC that never
   prunes leased entries.
-- **Offline (v2).** Offline handling queues transitions rather than moving
-  folders.
+- **Offline pending log (MVP).** Offline use inside a closed network is a
+  primary scenario, so a clone that has seen the index keeps working while the
+  remote is unreachable.
+  - Offline acquire evaluates the owner-conflict matrix against the cached
+    index: a cached conflict refuses; otherwise it succeeds with an offline
+    warning and records a pending entry. `lead-run` proceeds and relays the
+    warning.
+  - Every offline index write (registration, acquire and impl record, release,
+    close phase) goes to a clone-local pending log.
+  - The next mutating tool that reaches the remote flushes the log;
+    `tickets.query` never flushes and only shows a pending marker.
+  - On flush the remote wins: conflicting entries are dropped and reported
+    loudly. Offline sync is impossible, so duplicate work is surfaced at
+    reconnect, not prevented.
+  - A clone that never saw the index stays on the silent legacy mock.
+- **Offline (v2).** Offline status transitions queue rather than moving
+  folders; this belongs to the status-authority work.
 - **Terminal state (v2).** Terminal state is a file marker. Absence from the
   index is never read as closed.
 
