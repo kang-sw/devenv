@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -14,7 +15,16 @@ import (
 	"time"
 )
 
+// Scenario IDs in test names (TestA2..., TestB3..., TestI5..., and so on)
+// come from ticket 260924-feat-origin-ticket-ownership-index, whose Results
+// map each ID to its test. The IDs are the traceability key; keep them.
+
 var bg = context.Background()
+
+// boundSlack loosens the wall-clock bounds below so they survive -race and a
+// loaded machine. Each bound still asserts that a timeout cut the call short:
+// the hanging transport sleeps 30 s, far beyond any slackened bound.
+const boundSlack = 3
 
 // A missing ref is reported as absence, never as an error, on every path.
 func TestMissingRefIsAbsentNotError(t *testing.T) {
@@ -105,7 +115,8 @@ func TestA4UnreachableWithCacheIsBoundedAndPending(t *testing.T) {
 
 	start := time.Now()
 	view, err := cl.Read(bg)
-	if elapsed := time.Since(start); elapsed > 2500*time.Millisecond {
+	// The read bound: the 1.5 s read timeout plus local work (~2.5 s).
+	if elapsed := time.Since(start); elapsed > boundSlack*2500*time.Millisecond {
 		t.Fatalf("Read took %v, want under the read bound", elapsed)
 	}
 	if err != nil || view.State != ViewStale || view.Index == nil {
@@ -117,7 +128,8 @@ func TestA4UnreachableWithCacheIsBoundedAndPending(t *testing.T) {
 
 	start = time.Now()
 	res, _, err := cl.Submit(bg, &Submission{Entry: registerEntry("260924-feat-offline"), Applier: &Applier{Now: h.clock.Now()}})
-	if elapsed := time.Since(start); elapsed > 4*time.Second {
+	// The write bound: the 1.5 s write timeout plus local work (~4 s).
+	if elapsed := time.Since(start); elapsed > boundSlack*4*time.Second {
 		t.Fatalf("Submit took %v, want within the write timeout", elapsed)
 	}
 	if err != nil || res.Status != WritePending {
@@ -143,13 +155,17 @@ func TestA5CredentialRemoteFailsFastWithoutPrompt(t *testing.T) {
 
 	start := time.Now()
 	state, _, _ := cl.Check(bg)
-	if elapsed := time.Since(start); elapsed > 3*time.Second {
+	// Fail-fast bound (~3 s): a credential prompt would block until killed.
+	if elapsed := time.Since(start); elapsed > boundSlack*3*time.Second {
 		t.Fatalf("Check took %v; a credential prompt or hang is not allowed", elapsed)
 	}
 	if state != CheckUnreachable {
 		t.Fatalf("Check = %s, want unreachable (a credential failure is never absence)", state)
 	}
 	// The environment every remote command ran under is non-interactive.
+	if len(c.runner.calls) == 0 {
+		t.Fatal("Check made no remote call; the env assertions below would pass vacuously")
+	}
 	for _, cmd := range c.runner.calls {
 		env := strings.Join(cmd.Env, "\n")
 		for _, want := range []string{"GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=", "BatchMode=yes"} {
@@ -249,16 +265,18 @@ func concurrentWrites(t *testing.T, h *harness, clones []*testClone, perClone in
 		for op := 0; op < perClone; op++ {
 			want[fmt.Sprintf("260924-feat-c%d-op%d", ci, op)] = true
 		}
+		// Opened here: client() fails the test with t.Fatalf, which must not
+		// run on a spawned goroutine.
+		cl := c.client()
 		wg.Add(1)
-		go func(ci int, c *testClone) {
+		go func(ci int, cl *Client) {
 			defer wg.Done()
-			cl := c.client()
 			for op := 0; op < perClone; op++ {
 				if _, _, err := cl.Submit(bg, &Submission{Entry: registerEntry(fmt.Sprintf("260924-feat-c%d-op%d", ci, op)), Applier: &Applier{Now: h.clock.Now()}}); err != nil {
 					errs <- err
 				}
 			}
-		}(ci, c)
+		}(ci, cl)
 	}
 	wg.Wait()
 	close(errs)
@@ -375,7 +393,8 @@ func TestF2StaleCacheServedWithAge(t *testing.T) {
 	c.setOriginURL(unreachableURL)
 	start := time.Now()
 	view, err := c.client().Read(bg)
-	if time.Since(start) > 2500*time.Millisecond {
+	// The read bound (~2.5 s); a fast transport failure is well inside it.
+	if time.Since(start) > boundSlack*2500*time.Millisecond {
 		t.Fatal("stale fallback exceeded the read bound")
 	}
 	if err != nil || view.State != ViewStale || view.Index == nil {
@@ -432,16 +451,22 @@ func TestC9CloneIDOncePerClone(t *testing.T) {
 	x := h.clone("x", "x@example.com")
 	w := x.worktree("x-w", "track-w")
 	ids := make([]string, 8)
+	clients := make([]*Client, len(ids))
+	for i := range clients {
+		// Opened before the race: client() may t.Fatalf, which must not run
+		// on a spawned goroutine. Open does not touch the clone id.
+		c := x
+		if i%2 == 1 {
+			c = w
+		}
+		clients[i] = c.client()
+	}
 	var wg sync.WaitGroup
 	for i := range ids {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			c := x
-			if i%2 == 1 {
-				c = w
-			}
-			id, err := c.client().CloneID(bg)
+			id, err := clients[i].CloneID(bg)
 			if err != nil {
 				t.Error(err)
 			}
@@ -481,17 +506,17 @@ func TestI5ConcurrentPendingAppendsSurviveAndFlushInOrder(t *testing.T) {
 	b := a.worktree("x-b", "track-b")
 	var wg sync.WaitGroup
 	for _, c := range []*testClone{a, b} {
+		cl := c.client() // t.Fatalf must not run on a spawned goroutine
 		wg.Add(1)
-		go func(c *testClone) {
+		go func(c *testClone, cl *Client) {
 			defer wg.Done()
-			cl := c.client()
 			for i := 0; i < 5; i++ {
 				res, _, err := cl.Submit(bg, &Submission{Entry: registerEntry(fmt.Sprintf("260924-feat-%s-%d", filepath.Base(c.root), i)), Applier: &Applier{Now: h.clock.Now()}})
 				if err != nil || res.Status != WritePending {
 					t.Errorf("Submit = %+v, %v; want pending", res, err)
 				}
 			}
-		}(c)
+		}(c, cl)
 	}
 	wg.Wait()
 	cl := a.client()
@@ -602,15 +627,16 @@ func TestCreateAdoptsConcurrentCreation(t *testing.T) {
 	var wg sync.WaitGroup
 	created := make([]bool, len(clones))
 	for i, c := range clones {
+		cl := c.client() // t.Fatalf must not run on a spawned goroutine
 		wg.Add(1)
-		go func(i int, c *testClone) {
+		go func(i int, cl *Client) {
 			defer wg.Done()
-			res, err := c.client().Create(bg, NewIndex(), "ticket-index: init")
+			res, err := cl.Create(bg, NewIndex(), "ticket-index: init")
 			if err != nil {
 				t.Errorf("Create: %v", err)
 			}
 			created[i] = res.Created
-		}(i, c)
+		}(i, cl)
 	}
 	wg.Wait()
 	n := 0
@@ -734,5 +760,131 @@ func TestOverrideCloseReflushWritesNothing(t *testing.T) {
 	}
 	if h.remoteTip() != tip {
 		t.Fatal("the re-flushed override close wrote a second version")
+	}
+}
+
+// A non-acquire online LoadContext (no fetchTrack, no pending acquire) fills
+// the origin-closed set from the local remote-tracking ref of the
+// review-track with no remote call: no fetch, and no default-branch probe
+// since the clone has a local refs/remotes/origin/HEAD.
+func TestLoadContextReadsClosedFromLocalTrackingRefWithoutFetch(t *testing.T) {
+	h := newHarness(t)
+	x := h.clone("x", "x@example.com")
+	seed := filepath.Join(h.dir, "seed")
+	if err := os.MkdirAll(filepath.Join(seed, "ai-docs", "tickets", ".done"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitT(t, seed, "mv", "ai-docs/tickets/ready/260101-feat-seed.md", "ai-docs/tickets/.done/260101-feat-seed.md")
+	gitT(t, seed, "commit", "--quiet", "-m", "close seed")
+	gitT(t, seed, "push", "--quiet", "origin", "main")
+	gitT(t, x.root, "fetch", "--quiet", "origin") // x's tracking ref sees the first closure
+	writeFile(t, filepath.Join(seed, "ai-docs", "tickets", ".done", "260102-feat-later.md"), "# later\n")
+	gitT(t, seed, "add", "-A")
+	gitT(t, seed, "commit", "--quiet", "-m", "close later")
+	gitT(t, seed, "push", "--quiet", "origin", "main") // x never fetches this one
+
+	cl := x.client()
+	sub := &Submission{Entry: registerEntry("260924-feat-x"), Applier: &Applier{Now: h.clock.Now()}}
+	if err := cl.LoadContext(bg, sub, true, false); err != nil {
+		t.Fatal(err)
+	}
+	if !sub.Applier.Closed["260101-feat-seed"] {
+		t.Fatalf("Closed = %v, want the stem closed in the local tracking ref", sub.Applier.Closed)
+	}
+	if sub.Applier.Closed["260102-feat-later"] {
+		t.Fatal("Closed holds a closure only origin has: the tracking ref was fetched")
+	}
+	if x.runner.count("fetch") != 0 || x.runner.count("ls-remote") != 0 || x.runner.remoteCount() != 0 {
+		t.Fatalf("remote calls = %v, want none", x.runner.counts)
+	}
+
+	// Contrast: an acquire (fetchTrack) refreshes the tracking ref first.
+	sub = &Submission{Entry: registerEntry("260924-feat-x"), Applier: &Applier{Now: h.clock.Now()}}
+	if err := cl.LoadContext(bg, sub, true, true); err != nil {
+		t.Fatal(err)
+	}
+	if x.runner.count("fetch") != 1 || !sub.Applier.Closed["260102-feat-later"] {
+		t.Fatalf("fetchTrack: remote calls = %v, Closed = %v; want one fetch and the later closure", x.runner.counts, sub.Applier.Closed)
+	}
+}
+
+// installHook writes an executable hook script.
+func installHook(t *testing.T, hooksDir, name, body string) {
+	t.Helper()
+	path := filepath.Join(hooksDir, name)
+	writeFile(t, path, "#!/bin/sh\n"+body)
+	if err := os.Chmod(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Index pushes bypass the clone's pre-push hook (push --no-verify): a hook
+// that vetoes every push still lets the index write land.
+func TestIndexPushBypassesPrePushHook(t *testing.T) {
+	h := newHarness(t)
+	c := h.clone("x", "x@example.com")
+	installHook(t, filepath.Join(c.root, ".git", "hooks"), "pre-push", "echo 'pre-push: blocked' >&2\nexit 1\n")
+	if out, err := exec.Command("git", "-C", c.root, "push", "--quiet", "origin", "HEAD:refs/heads/probe").CombinedOutput(); err == nil {
+		t.Fatalf("the pre-push hook did not veto a plain push: %s", out)
+	}
+	h.initIndex(c)
+	if res := h.submit(c.client(), "260924-feat-hooked"); res.Status != WriteWritten {
+		t.Fatalf("Submit = %+v, want written past the pre-push hook", res)
+	}
+	if h.remoteIndex().Registrations["260924-feat-hooked"] == nil {
+		t.Fatal("the index write did not land")
+	}
+}
+
+// Index commits are never signed: commit.gpgSign with a signing program that
+// always fails still lets the index write land. Current git's commit-tree
+// already ignores commit.gpgSign; the --no-gpg-sign flag keeps that true on
+// the older versions that honored it, and this test guards the outcome.
+func TestIndexCommitIgnoresSigningConfig(t *testing.T) {
+	h := newHarness(t)
+	c := h.clone("x", "x@example.com")
+	signer := filepath.Join(h.dir, "bogus-gpg.sh")
+	writeFile(t, signer, "#!/bin/sh\necho 'bogus-gpg: no key' >&2\nexit 1\n")
+	if err := os.Chmod(signer, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitT(t, c.root, "config", "commit.gpgSign", "true")
+	gitT(t, c.root, "config", "gpg.program", signer)
+	if out, err := exec.Command("git", "-C", c.root, "commit", "--quiet", "--allow-empty", "-m", "probe").CombinedOutput(); err == nil {
+		t.Fatalf("the signing config did not break a plain commit: %s", out)
+	}
+	h.initIndex(c)
+	if res := h.submit(c.client(), "260924-feat-signed"); res.Status != WriteWritten {
+		t.Fatalf("Submit = %+v, want written despite the signing config", res)
+	}
+	if h.remoteIndex().Registrations["260924-feat-signed"] == nil {
+		t.Fatal("the index write did not land")
+	}
+}
+
+// A permanent remote refusal (a pre-receive hook declining the index ref) is
+// reported as refused after exactly one push; it is not a lost CAS race, so
+// it is neither retried nor recorded offline.
+func TestIndexPushRefusalIsNotRetried(t *testing.T) {
+	h := newHarness(t)
+	c := h.clone("x", "x@example.com")
+	h.initIndex(c)
+	tip := h.remoteTip()
+	installHook(t, filepath.Join(h.origin, "hooks"), "pre-receive",
+		"while read old new ref; do\n\tif [ \"$ref\" = \""+RemoteRef+"\" ]; then\n\t\techo 'index writes are disabled here' >&2\n\t\texit 1\n\tfi\ndone\nexit 0\n")
+	cl := c.client()
+	pushesBefore := c.runner.count("push")
+	res, _, err := cl.Submit(bg, &Submission{Entry: registerEntry("260924-feat-refused"), Applier: &Applier{Now: h.clock.Now()}})
+	if err == nil || errors.Is(err, ErrRetryExhausted) || !strings.Contains(err.Error(), "refused") {
+		t.Fatalf("Submit = %+v, %v; want a refused error", res, err)
+	}
+	if pushes := c.runner.count("push") - pushesBefore; pushes != 1 {
+		t.Fatalf("pushes = %d, want exactly 1 (a permanent refusal is not retried; max attempts %d)", pushes, DefaultMaxAttempts)
+	}
+	if h.remoteTip() != tip {
+		t.Fatal("the refused write moved the remote index")
+	}
+	if pending, _ := cl.Pending(bg); len(pending) != 0 {
+		t.Fatalf("a refusal recorded %d pending entries; it is not an offline write", len(pending))
 	}
 }

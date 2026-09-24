@@ -267,6 +267,11 @@ func TestNeedsOverride(t *testing.T) {
 		{OpClose, ownerA, ownerB, true},
 		{OpClose, ownerA, ownerAT, false},
 		{OpClose, ownerA, ownerA2, false},
+		// A move registers; like close, only a different email needs one.
+		{OpRegister, ownerA, ownerB, true},
+		{OpRegister, ownerA, ownerAT, false},
+		{OpRegister, ownerA, ownerA2, false},
+		{OpRegister, ownerA, ownerA, false},
 	}
 	for _, tc := range cases {
 		if got := NeedsOverride(tc.op, tc.holder, tc.caller); got != tc.want {
