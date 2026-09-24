@@ -64,6 +64,11 @@ fresh-context leaves. The Worker Protocol appended below governs; read it first.
    `policy: {branch: {merge_confirm: "skip"}}`. A verdict that reports missing
    route facts is stop (c): the lead populates them before spawning, so reaching
    one here means the ticket was handed over out of order.
+   Once the branch action has you on your impl branch, record it with
+   `{{.McpNamespace}}/tickets.acquire(ticket_stem: <stem>)`. The lead's track
+   already holds the ticket, so this call is informational: a refusal or an
+   error goes under `unresolved:` in your report and never stops the run. Never
+   set its override flag.
 2. Decompose along the natural seam, not the phase list: fix the
    interface/contract (the spine) first, then split what remains into the
    disjoint implementation leaves and test contracts the spine has made
