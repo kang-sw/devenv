@@ -472,53 +472,8 @@
     "260924-bug-pi-removal-claim-abandonment-and-generation": {
       "registered_at": "2026-09-24T12:38:53Z"
     },
-    "260924-bug-ticket-index-read-timeout-below-ssh-roundtrip": {
-      "registered_at": "2026-09-24T12:05:14Z"
-    },
-    "260924-chore-pin-ticket-index-playbook-contracts": {
-      "registered_at": "2026-09-24T13:42:47Z"
-    },
     "260924-chore-review-sweep-test-and-naming-minors": {
       "registered_at": "2026-09-24T13:42:53Z"
-    },
-    "260924-feat-open-decision-queue-response-format": {
-      "registered_at": "2026-09-24T11:29:04Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-09-24T11:29:59Z",
-        "impl": {
-          "branch": "impl/develop/twirl-sleet-curvy"
-        }
-      }
-    },
-    "260924-feat-origin-ticket-ownership-index": {
-      "registered_at": "2026-09-24T10:40:00Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-09-24T10:40:13Z",
-        "impl": {
-          "branch": "impl/develop/irate-growl-half"
-        }
-      }
-    },
-    "260924-feat-worktree-list-pool-inspection": {
-      "registered_at": "2026-09-24T11:29:12Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-09-24T11:29:55Z",
-        "impl": {
-          "branch": "impl/develop/hertz-diner-slug"
-        }
-      }
     },
     "260924-idea-ownership-dogfood-scratch-a": {
       "registered_at": "2026-09-24T10:41:27Z"
@@ -526,8 +481,8 @@
     "260924-idea-ownership-dogfood-scratch-b": {
       "registered_at": "2026-09-24T10:41:54Z"
     },
-    "260924-refactor-pi-channel-and-cost-module-boundaries": {
-      "registered_at": "2026-09-24T11:26:24Z"
+    "260925-chore-ship-preflight-misses-ci-matrix": {
+      "registered_at": "2026-09-24T23:57:18Z"
     }
   }
 }
