@@ -144,9 +144,12 @@ func (c *Client) absenceCached() bool {
 
 // syncOutcome is the result of one remote read reconciled into the cache.
 type syncOutcome struct {
-	state   RemoteState
-	tip     string // cache tip after reconciliation; "" unless present
-	reports []string
+	state RemoteState
+	// discovered: discovery saw the index ref on the remote in this sync,
+	// even if the fetch that followed failed.
+	discovered bool
+	tip        string // cache tip after reconciliation; "" unless present
+	reports    []string
 }
 
 // sync fetches the remote tip (or runs discovery first when the clone has
@@ -167,7 +170,7 @@ func (c *Client) sync(ctx context.Context, timeout time.Duration, seen bool) (sy
 	tip, state, err := c.fetchTip(ctx, rctx)
 	switch state {
 	case RemoteUnreachable:
-		return syncOutcome{state: state}, err
+		return syncOutcome{state: state, discovered: !seen}, err
 	case RemoteAbsent:
 		reports, derr := c.discontinue(ctx, true)
 		c.markAbsent()
@@ -345,6 +348,11 @@ func (c *Client) Read(ctx context.Context) (View, error) {
 		view.Reports = out.reports
 		return view, nil
 	}
+	if !seen && out.discovered {
+		// The remote showed the ref but the fetch failed and nothing is
+		// cached: ownership is unknown, never unowned.
+		return View{State: ViewUnknown, Age: -1}, nil
+	}
 	if !seen {
 		// Never seen and unreachable: index-absent, and the negative result is
 		// cached so an offline project does not pay the timeout per call.
@@ -354,6 +362,29 @@ func (c *Client) Read(ctx context.Context) (View, error) {
 	age := time.Duration(-1)
 	if st.LastSync != nil {
 		age = c.now().Sub(*st.LastSync)
+	}
+	return c.viewFromCache(ctx, ViewStale, age, nil)
+}
+
+// ReadCached serves the cached index with no remote call at all: absent when
+// the clone never saw an index, fresh within the read TTL, stale beyond it.
+// Surfaces that must never touch the network (git.status) use it.
+func (c *Client) ReadCached(ctx context.Context) (View, error) {
+	view := View{State: ViewAbsent, Age: -1}
+	if !c.hasOrigin(ctx) {
+		return view, nil
+	}
+	seen, err := c.Seen(ctx)
+	if err != nil || !seen {
+		return view, err
+	}
+	st := c.loadState()
+	if st.LastSync == nil {
+		return c.viewFromCache(ctx, ViewStale, -1, nil)
+	}
+	age := c.now().Sub(*st.LastSync)
+	if age < c.opts.ReadTTL {
+		return c.viewFromCache(ctx, ViewFresh, age, nil)
 	}
 	return c.viewFromCache(ctx, ViewStale, age, nil)
 }
@@ -489,7 +520,9 @@ func (c *Client) Write(ctx context.Context, op WriteOp) (WriteResult, error) {
 		if op.Maintain != nil {
 			audit = append(audit, op.Maintain(work)...)
 		}
-		if equalIndex(work, base) {
+		// An unchanged index with audit lines (an override that left the
+		// lease in place) still commits: the audit is the record.
+		if equalIndex(work, base) && len(audit) == 0 {
 			n, err := c.removePending(ctx, ids)
 			return WriteResult{Status: WriteNoChange, Tip: out.tip, Flushed: n, Reports: append(reports, replayReports...)}, err
 		}

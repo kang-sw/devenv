@@ -115,7 +115,7 @@ func holderText(o wsindex.Owner) string {
 // output lines. It never fails the host operation: an index failure becomes
 // one line, and an index-absent project gets "" so the host output is
 // unchanged byte for byte.
-func (s *Server) indexPiggyback(root, op, stem string) string {
+func (s *Server) indexPiggyback(root, op, stem string, override *wsindex.Override) string {
 	stem = strings.TrimSpace(stem)
 	if stem == "" {
 		return ""
@@ -127,7 +127,7 @@ func (s *Server) indexPiggyback(root, op, stem string) string {
 	ctx := context.Background()
 	caller := resolveIndexCaller(ctx, root, "")
 	sub := &wsindex.Submission{
-		Entry:   wsindex.PendingEntry{Op: op, Stem: stem, Owner: caller.owner, Worktree: root},
+		Entry:   wsindex.PendingEntry{Op: op, Stem: stem, Owner: caller.owner, Worktree: root, Override: override},
 		Applier: &wsindex.Applier{Now: s.indexNow()},
 	}
 	sub.Prepare = func(ctx context.Context, online bool) error {

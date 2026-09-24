@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -90,14 +91,68 @@ type ixCheckout struct {
 	root   string
 	server *Server
 	key    string
+	runner *ixRunner
+}
+
+// ixRunner wraps wsindex.ExecRunner: it counts remote git invocations by
+// subcommand and can fail index-ref fetches to simulate a transport failure
+// after a successful discovery.
+type ixRunner struct {
+	mu        sync.Mutex
+	counts    map[string]int
+	failFetch atomic.Bool
+}
+
+func (r *ixRunner) Run(ctx context.Context, dir string, cmd wsindex.Command) ([]byte, error) {
+	if cmd.Remote {
+		sub := ""
+		for i := 0; i < len(cmd.Args); i++ {
+			if cmd.Args[i] == "-c" {
+				i++
+				continue
+			}
+			sub = cmd.Args[i]
+			break
+		}
+		r.mu.Lock()
+		r.counts[sub]++
+		r.mu.Unlock()
+		if sub == "fetch" && r.failFetch.Load() && strings.Contains(strings.Join(cmd.Args, " "), wsindex.RemoteRef) {
+			return nil, errors.New("injected transport failure")
+		}
+	}
+	return wsindex.ExecRunner{}.Run(ctx, dir, cmd)
+}
+
+func (r *ixRunner) count(sub string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.counts[sub]
+}
+
+func (r *ixRunner) total() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for _, v := range r.counts {
+		n += v
+	}
+	return n
+}
+
+func (r *ixRunner) reset() {
+	r.mu.Lock()
+	r.counts = map[string]int{}
+	r.mu.Unlock()
 }
 
 func (e *ixEnv) login(root string) *ixCheckout {
 	e.t.Helper()
 	s := NewServer(root, "test")
-	s.indexOpts = wsindex.Options{Now: e.clock.Now, WriteTimeout: 10 * time.Second}
+	runner := &ixRunner{counts: map[string]int{}}
+	s.indexOpts = wsindex.Options{Runner: runner, Now: e.clock.Now, WriteTimeout: 10 * time.Second}
 	key, _ := parseLoginResponse(e.t, callLogin(e.t, s, int(ixCallID.Add(1)), root, nil))
-	return &ixCheckout{env: e, root: root, server: s, key: key}
+	return &ixCheckout{env: e, root: root, server: s, key: key, runner: runner}
 }
 
 // clone makes a clone on develop with its own identity.

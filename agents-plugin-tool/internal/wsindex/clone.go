@@ -52,6 +52,10 @@ func (c *Client) CloneID(ctx context.Context) (string, error) {
 	return id, nil
 }
 
+// ExistingCloneID returns this clone's id without generating one; "" when the
+// clone has never written to the index.
+func (c *Client) ExistingCloneID(ctx context.Context) string { return c.readCloneID(ctx) }
+
 func (c *Client) readCloneID(ctx context.Context) string {
 	out, err := c.git(ctx, nil, "config", "--local", "--get", CloneIDConfigKey)
 	if err != nil {

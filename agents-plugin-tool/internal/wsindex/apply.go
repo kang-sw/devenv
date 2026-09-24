@@ -107,6 +107,13 @@ func holderString(l *Lease) string {
 	return fmt.Sprintf("%s (track %s, clone %s)", l.Email, l.Track, l.CloneID)
 }
 
+func holderOrNone(l *Lease) string {
+	if l == nil {
+		return "nobody"
+	}
+	return holderString(l)
+}
+
 func stamp(t time.Time) string { return t.UTC().Format(time.RFC3339) }
 
 func (a *Applier) entryTime(e PendingEntry) time.Time {
@@ -151,7 +158,14 @@ func (a *Applier) apply(idx *Index, e PendingEntry, replay bool) Outcome {
 	switch e.Op {
 	case OpRegister:
 		idx.Register(e.Stem, at)
-		return Outcome{Effect: EffectRegistered}
+		out := Outcome{Effect: EffectRegistered}
+		if e.Override != nil {
+			// An overridden move rides its registration: the lease stays
+			// with its holder, and the commit records the actor and reason.
+			out.Audit = []string{fmt.Sprintf("move %s by %s under override of the lease held by %s, reason: %s",
+				e.Stem, e.Owner, holderOrNone(idx.Registrations[e.Stem].Lease), e.Override.Reason)}
+		}
+		return out
 	case OpAcquire:
 		return a.acquire(idx, e, at, replay)
 	case OpRelease:

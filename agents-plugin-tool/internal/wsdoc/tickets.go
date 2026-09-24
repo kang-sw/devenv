@@ -42,6 +42,10 @@ type TicketFindOptions struct {
 	// the ticket-assignee-aware flag is on and a current identity is known, so an
 	// off feature or an unidentifiable caller never narrows the queue.
 	AssignedToEmail string
+	// Exclude, when set, drops a ticket from the discovery result before
+	// pagination, so a caller-side filter (the ticket index's ownership
+	// filter) pages over the filtered set rather than thinning a page.
+	Exclude func(TicketInfo) bool
 }
 
 type TicketStatusOptions struct {
@@ -112,6 +116,43 @@ type TicketInfo struct {
 	// absent on every projection unless the feature is on, so an off feature adds
 	// nothing to any output.
 	AssigneeGate *AssigneeGate `json:"assignee_gate,omitempty"`
+	// Ownership is the ticket index's lease view for this ticket, filled by
+	// the MCP layer only when the project uses the origin ticket index; it is
+	// absent otherwise, so an index-absent project's output is unchanged.
+	Ownership *TicketOwnership `json:"ownership,omitempty"`
+}
+
+// Ownership levels of TicketOwnership.Level.
+const (
+	OwnershipSelf    = "self"    // held by the caller's own (email, clone, track)
+	OwnershipLocal   = "local"   // held by another track of the caller's clone
+	OwnershipRemote  = "remote"  // held by another clone or person
+	OwnershipUnowned = "unowned" // registered or not, no lease
+	OwnershipUnknown = "unknown" // the index exists but could not be read
+)
+
+// TicketOwnership is one ticket's lease as the caller sees it.
+type TicketOwnership struct {
+	Level string `json:"level"`
+	Email string `json:"email,omitempty"`
+	Track string `json:"track,omitempty"`
+	// Worktree is the local path of the holder's worktree, derived locally
+	// for the local level; it is never stored in the index.
+	Worktree   string `json:"worktree,omitempty"`
+	Phase      string `json:"phase,omitempty"`
+	TouchedAt  string `json:"touched_at,omitempty"`
+	ImplBranch string `json:"impl_branch,omitempty"`
+	// Provisional marks a lease that exists only as this clone's pending
+	// offline acquire, not yet verified against origin.
+	Provisional bool `json:"provisional,omitempty"`
+	// OriginClosed marks a ticket already under .done/ or .dropped/ on the
+	// origin review-track per the local remote-tracking ref: this checkout
+	// is stale.
+	OriginClosed bool `json:"origin_closed,omitempty"`
+	// IndexState is fresh, stale (origin unreachable; cache served), or
+	// unknown; CacheAgeSeconds is the stale cache's age.
+	IndexState      string `json:"index_state,omitempty"`
+	CacheAgeSeconds int    `json:"cache_age_seconds,omitempty"`
 }
 
 type TicketPhase struct {
@@ -169,6 +210,9 @@ func TicketsFind(root string, opts TicketFindOptions) ([]TicketInfo, error) {
 		// identity may not take. assign-any and self-assigned tickets pass;
 		// others'-assigned tickets never reach the caller.
 		if assignedTo != "" && !AssigneeGateFor(ticket.Assignee, assignedTo).AssignedToCurrent {
+			continue
+		}
+		if opts.Exclude != nil && opts.Exclude(ticket) {
 			continue
 		}
 		if mentions != "" && !strings.Contains(text, mentions) {
