@@ -69,6 +69,7 @@
     "git.commit": ">=0.46.17-dev <0.47.0",
     "worktree.acquire": ">=0.46.17-dev <0.47.0",
     "worktree.release": ">=0.46.17-dev <0.47.0",
+    "worktree.list": ">=0.46.17-dev <0.47.0",
     "api.list": ">=0.46.17-dev <0.47.0"
   },
   "commands": {

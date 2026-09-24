@@ -144,6 +144,31 @@ func resolvePoolRoot(configValue, gitRoot string) string {
 	return filepath.Clean(v)
 }
 
+// ownedPoolRoots returns every pool root whose worktrees ws owns: the resolved
+// worktree_pool root and, when the config is the builtin default, the legacy
+// in-tree pool too, because acquire may have fallen back to it when the
+// out-of-tree default's sibling parent was not writable at provision time — a
+// fallback decision a later call cannot see. release, list, and git.merge's
+// holder classification all share this one ownership rule, so no worktree is
+// releasable but unlisted.
+func ownedPoolRoots(poolConfigValue, mainRoot string) []string {
+	roots := []string{resolvePoolRoot(poolConfigValue, mainRoot)}
+	if isDefaultPoolConfig(poolConfigValue) {
+		roots = append(roots, resolvePoolRoot(legacyInTreePoolTemplate, mainRoot))
+	}
+	return roots
+}
+
+// underAnyPool reports whether path is at or below one of the pool roots.
+func underAnyPool(poolRoots []string, path string) bool {
+	for _, root := range poolRoots {
+		if root != "" && pathUnder(root, path) {
+			return true
+		}
+	}
+	return false
+}
+
 // pathUnder reports whether child is at or below parent, comparing cleaned
 // paths at directory boundaries so /a/bc is not treated as under /a/b.
 func pathUnder(parent, child string) bool {
@@ -367,9 +392,9 @@ func provisionWorktree(ctx context.Context, runner wsgit.Runner, root, base, tar
 	return res, nil
 }
 
-// releaseWorktree returns a worktree to the pool: clean it and detach HEAD so it
-// becomes reuse-eligible. It never deletes the worktree — the expensive
-// derivation is what the pool amortizes.
+// releaseWorktree returns a worktree to the pool: clean it, detach HEAD so it
+// becomes reuse-eligible, and remove its worktree lease. It never deletes the
+// worktree — the expensive derivation is what the pool amortizes.
 //
 // Because reset --hard/clean -ffdx are destructive, release refuses any target
 // that is not a linked worktree under the owned pool: it never touches the
@@ -399,18 +424,9 @@ func releaseWorktree(ctx context.Context, runner wsgit.Runner, wtPath, poolConfi
 	if target == filepath.Clean(mainRoot) {
 		return fmt.Errorf("worktree.release refuses to release the primary worktree %q", target)
 	}
-	poolRoot := resolvePoolRoot(poolConfigValue, mainRoot)
-	owned := pathUnder(poolRoot, target)
-	if !owned && isDefaultPoolConfig(poolConfigValue) {
-		// acquire may have fallen back to the legacy in-tree pool when the
-		// out-of-tree default's sibling parent was not writable at
-		// provision time; a worktree parked there is still release-eligible.
-		if legacyRoot := resolvePoolRoot(legacyInTreePoolTemplate, mainRoot); pathUnder(legacyRoot, target) {
-			owned = true
-		}
-	}
-	if !owned {
-		return fmt.Errorf("worktree.release refuses %q: not under the owned worktree pool %q", target, poolRoot)
+	poolRoots := ownedPoolRoots(poolConfigValue, mainRoot)
+	if !underAnyPool(poolRoots, target) {
+		return fmt.Errorf("worktree.release refuses %q: not under the owned worktree pool %q", target, poolRoots[0])
 	}
 	listed := false
 	for _, e := range entries {
@@ -430,6 +446,11 @@ func releaseWorktree(ctx context.Context, runner wsgit.Runner, wtPath, poolConfi
 	}
 	if _, err := wtRun(ctx, runner, target, "checkout", "--detach"); err != nil {
 		return err
+	}
+	// Drop the lease only once the worktree is actually back in the pool, so a
+	// failed reset/clean/detach leaves the holder still identifiable.
+	if err := removeWorktreeLease(ctx, runner, target); err != nil {
+		return fmt.Errorf("worktree.release: %q is detached, but its worktree lease could not be removed: %w", target, err)
 	}
 	return nil
 }

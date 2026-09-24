@@ -226,6 +226,25 @@ func (s *sessionStore) lookup(key string) (sessionEntry, bool) {
 	}, true
 }
 
+// recordMtime returns key's record mtime and whether the record exists and
+// parses. Unlike lookup it never touches the record: an inspection read (such
+// as worktree.list reporting a lease holder) must not fabricate activity on the
+// keys it reports.
+func (s *sessionStore) recordMtime(key string) (time.Time, bool) {
+	dir, err := s.keysDir()
+	if err != nil {
+		return time.Time{}, false
+	}
+	if _, ok := s.readRecord(dir, key); !ok {
+		return time.Time{}, false
+	}
+	info, err := os.Stat(s.keyPath(dir, key))
+	if err != nil {
+		return time.Time{}, false
+	}
+	return info.ModTime(), true
+}
+
 // children returns the descendants of parentKey from the flat keys store,
 // ordered deterministically (depth, then key). maxDepth bounds the walk:
 // maxDepth >= 1 returns that many levels; maxDepth <= 0 returns the full
