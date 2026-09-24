@@ -6,11 +6,12 @@
  * (agent-footer.ts) renders this estimate and imports from here; nothing here
  * imports the footer.
  *
- * Side effect on the registry: every entry point that reads a cost first
- * prunes against the owner's eviction records (`pruneAndRecompute`), and a
- * recorded direct child whose home is gone for good is dropped from the
+ * Side effect on the registry: every entry point whose doc says "Prunes"
+ * first syncs against the owner's eviction records (`pruneAndRecompute`), and
+ * a recorded direct child whose home is gone for good is dropped from the
  * registry there (its observer stopped). The records are read only at that
- * point, so the drop lives with them.
+ * point, so the drop lives with them. `retentionEvictionCost` and
+ * `presentation` read without syncing.
  */
 import { EVICTION_RECORD_BUCKET, durableDescendantUsage, hasEvictionRecord, isOwnedHomeGone, ownerArtifactSignal, ownerStorageOf, readEvictionRecord, readOwnerArtifacts, tryReadEvictionRecords, writeEvictionRecord, writeOwnerArtifact, type AgentOwnership, type AgentStorageContext, type OwnershipMetadata } from "./agent-storage.ts";
 import { formatCumulativeCost, mergeCumulativeCost as mergeAgentCost, parseCumulativeCost as parseCost, type AgentTelemetry, type CumulativeCost } from "./agent-telemetry.ts";
@@ -289,6 +290,9 @@ class CostEstimateState {
     this.directTotal = total;
   }
 }
+
+/** Type-only: callers name the estimate the attach/release pair hands out; only this module constructs one. */
+export type { CostEstimateState };
 
 const registryStorage = new WeakMap<RpcAgentRegistry, AgentStorageContext>();
 const registryEstimates = new WeakMap<RpcAgentRegistry, CostEstimateState>();
