@@ -193,15 +193,16 @@ A delegated, provider-free prototype ran in a separate worktree. Its code is spi
   - Each open question below is assigned to one child's verification. A child whose verification contradicts a decision in this ledger stops and escalates.
   - `260923-bug-pi-execute-approval-accepted-worker-hangs` is `blocked-by` the approval child.
 - **Evidence round before promotion.** The evidence-first boundary in `## Investigation Boundary` stands. The evidence is gathered now by a delegated, provider-free prototype in a separate worktree, not folded into a child's phase. Its results are recorded in this ledger and reconciled into `260924-feat-pi-agent-channel-transport` before that ticket is promoted to `ready/`.
+- **Evidence reconciliation (2026-09-24).** The following settle the evidence round's findings and are carried into `260924-feat-pi-agent-channel-transport`:
+  - **Connection-end obligation.** Every backend must eventually report that its connection ended. That event frees the live slot so a reconnect can be accepted. A backend without native close detection meets the obligation internally with a lease, so the protocol layer sees only the end event. This refines the transport-abstraction decision above, which said the contract must not assume stream-socket properties. The contract assumes no *immediate* close detection, but it does require eventual end reporting. Process lifecycle still decides child death.
+    - Reserved file backend: no application-level heartbeat is used, and nothing is appended to the data files. Each side refreshes the mtime of its own lease file. A graceful close unlinks that file, and an expired mtime means a crash. Each connection is numbered and writes to its own files, so a writer that was suspended and later resumes cannot reach a successor connection. Before implementing it, measure mtime resolution and Windows `stat` freshness.
+  - **Readiness boundary.** The parent treats a child as ready only after it accepts the child's hello. `RpcClient.start()` resolving does not mean the child is ready. The parent combines a hello timeout with lifecycle observation. The child fails closed: it throws from its extension factory, and Pi then exits at startup. The channel is a required foundation for subagents. If it fails, there is no alternative readiness path.
+  - **Unix socket placement and cleanup.** Sockets live in a short per-user directory under `os.tmpdir()`. Each is closed in a process `exit` hook. Before binding, a sweep of that directory probes each socket with connect and unlinks it on `ECONNREFUSED`. Windows named pipes need neither step.
+  - **Delete ordering.** The first action of the adapter's extension factory is deleting the bootstrap values from `process.env`. That happens before any process is spawned, including the ws-mcp stdio client.
 
 ### Proposals
 
 - Non-authoritative: a versioned hello handshake, with message types kept separate for transient approvals, subtree snapshots, and cumulative usage snapshots.
-- Non-authoritative, from the evidence round; to be settled before `260924-feat-pi-agent-channel-transport` is promoted:
-  - **Connection-end signal.** The policy "reconnect only after the previous connection closed" needs a signal that frees the live slot. Candidate: every backend must eventually report connection end, and a backend without native close detection meets that obligation internally, for example with a lease. Process lifecycle still decides child death.
-  - **Readiness boundary.** The parent treats a child as ready only after an accepted hello. It pairs the hello timeout with lifecycle observation, because `start()` resolution is not readiness. The child fails closed by throwing from its extension factory.
-  - **Unix socket cleanup.** Use a short per-user directory under `os.tmpdir()`. Close in an exit hook, and before binding, sweep that directory with probe-then-unlink for stale sockets. Windows pipes need neither.
-  - **Delete ordering.** Deleting the bootstrap values is the adapter extension factory's first action, before any process is spawned, including the ws-mcp stdio client.
 
 ### Open Questions
 
