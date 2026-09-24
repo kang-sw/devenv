@@ -7,12 +7,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RpcClient } from "@earendil-works/pi-coding-agent";
-import { createAgentStorageContext } from "../src/agent-storage.ts";
+import { allocateAgentHome, createAgentStorageContext, persistOwnershipTelemetry, updateOwnership } from "../src/agent-storage.ts";
 import { CHANNEL_CREDENTIAL_ENV, CHANNEL_PROTOCOL_VERSION, connectChannelEndpoint, type ChannelEndpoint, type ParentChannel } from "../src/agent-channel.ts";
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -20,6 +20,7 @@ const cli = join(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-c
 const savedArgv = process.argv[1];
 process.argv[1] = cli;
 const { spawnAgent, sendToAgent, stopAgent } = await import("../src/spawner.ts");
+const { sidecarPath, writeSidecarAt } = await import("../src/agent-sidecar.ts");
 process.argv[1] = savedArgv;
 
 const WEB_READINESS = { tools: ["web_search", "ws_web_fetch"] };
@@ -244,6 +245,53 @@ test("a stale socket left in the launch's socket directory by a SIGKILLed listen
     assert.equal(live.kind, "pipe");
     assert.ok((live as { path: string }).path.startsWith(dir), "the launch bound under the given directory");
     assert.ok(existsSync((live as { path: string }).path), "the live socket stays");
+  } finally { await teardown(registry); }
+});
+
+test("descendant usage: the real child's session_start revives its dormant child and reports the rebuilt value to the parent record", { timeout: LAUNCH_TIMEOUT }, async t => {
+  const root = makeRoot(t);
+  t.mock.method(RpcClient.prototype, "prompt", async () => {});
+  const registry = new Map<string, any>();
+  // The child's Pi session id is fixed before launch: the start hook writes
+  // the session file named by `--session`, and Pi adopts an existing file's
+  // header id. That id names the child's own owner storage, seeded here under
+  // the child's agent dir (redirected to `root`): a sidecar next to its
+  // session file listing one dormant grandchild whose ownership home carries
+  // own plus reported descendant usage.
+  const childSessionId = "usage-rollup-child";
+  const grandchildOwn = { knownUsd: .5, knownContributors: 1, unknownContributors: 0, descendants: 1 };
+  const grandchildDescendants = { knownUsd: .25, knownContributors: 1, unknownContributors: 0, descendants: 1 };
+  const seed = (sessionPath: string) => {
+    writeFileSync(sessionPath, `${JSON.stringify({ type: "session", version: 3, id: childSessionId, timestamp: new Date().toISOString(), cwd: packageRoot })}\n`);
+    const ownership = allocateAgentHome(createAgentStorageContext(childSessionId, root), "grandchild", "worker");
+    const telemetry = { version: 1 as const, origin: { sessionId: "grandchild-session", sessionPath: ownership.sessionPath!, emptyPrefix: true as const }, estimatedUsd: grandchildOwn.knownUsd, descendantUsage: grandchildDescendants };
+    writeFileSync(ownership.sessionPath!, [
+      { type: "session", version: 3, id: "grandchild-session" },
+      { type: "message", id: "a1", message: { role: "assistant", usage: { input: 10, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 10, cost: { total: grandchildOwn.knownUsd } } } },
+    ].map(entry => JSON.stringify(entry)).join("\n") + "\n");
+    persistOwnershipTelemetry(ownership.home, telemetry);
+    updateOwnership(ownership.home, { liveness: { lifecycle: "stopped", running: false } });
+    writeSidecarAt(sidecarPath(sessionPath), [{
+      agentId: "grandchild", sessionPath: ownership.sessionPath!, systemPromptPath: join(packageRoot, "explore-guide.md"),
+      wsToolNames: [], toolGroup: "full-worker", spawnRole: "worker", state: "idle", telemetry, ownership,
+    }]);
+  };
+  const originalStart = RpcClient.prototype.start;
+  t.mock.method(RpcClient.prototype, "start", async function (this: RpcClient) {
+    const options = (this as any).options as { env: Record<string, string>; args: string[] };
+    seed(options.args[options.args.indexOf("--session") + 1]);
+    options.env.PI_CODING_AGENT_DIR = root;
+    return originalStart.call(this);
+  });
+  try {
+    const record = await spawnExplore(registry, exploreContext(root, "lead-h"));
+    const deadline = Date.now() + 10_000;
+    while (!record.descendantUsage && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 50));
+    assert.equal(existsSync(sidecarPath(record.sessionPath)), false, "precondition: the child's session_start consumed its sidecar");
+    assert.deepEqual(record.descendantUsage, {
+      knownUsd: grandchildOwn.knownUsd + grandchildDescendants.knownUsd, knownContributors: 2, unknownContributors: 0, descendants: 2,
+    }, "the grandchild's own usage plus its reported descendant usage");
+    assert.deepEqual(record.descendantUsageOrder, { generation: 1, seq: 1 }, "one report, sent by the child's session_start evaluation");
   } finally { await teardown(registry); }
 });
 

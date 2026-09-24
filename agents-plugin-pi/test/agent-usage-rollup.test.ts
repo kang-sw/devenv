@@ -26,6 +26,7 @@ import {
 } from "../src/agent-usage-rollup.ts";
 import { descendantUsageValue, persistAgentCostCheckpoint, persistEvictedAgentCost, persistOwnedTelemetryRollup, registerAgentCostOwner } from "../src/agent-footer.ts";
 import { evictForCapacity, refreshAgentTelemetry, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
+import { captureOrphans, reviveOrphans } from "../src/agent-sidecar.ts";
 
 const roots = new Set<string>();
 afterEach(() => { for (const root of roots) rmSync(root, { recursive: true, force: true }); roots.clear(); });
@@ -164,6 +165,10 @@ describe("reporter over a real channel", () => {
       const changes: CumulativeCost[] = [];
       let notify: (() => void) | undefined;
       attachDescendantUsage(lead, parent, () => { changes.push(descendantUsageOf(lead)!); notify?.(); });
+      const reports: Record<string, unknown>[] = [];
+      let resent: (() => void) | undefined;
+      // Registered after attachDescendantUsage, so each report was already applied when this runs.
+      parent.onMessage(msg => { if (msg.t === DESCENDANT_USAGE_MESSAGE) { reports.push(msg); if (msg.seq === 2) resent?.(); } });
       let first = new Promise<void>(resolve => { notify = resolve; });
       reporter.evaluate();
       await first;
@@ -175,12 +180,32 @@ describe("reporter over a real channel", () => {
         resolve();
       }));
       first = new Promise<void>(resolve => { notify = resolve; });
+      const resend = new Promise<void>((resolve, reject) => {
+        resent = resolve;
+        setTimeout(() => reject(new Error("no report was resent after the reconnect")), 2_000).unref();
+      });
+      resend.catch(() => { /* awaited below; an earlier failure must not leave it unhandled */ });
       parent.live!.close();
       await dropped;
       assert.deepEqual((await resumed)[DESCENDANT_USAGE_RESUME_KEY], { seq: 2, usage: usd(2) });
       await first;
-      assert.deepEqual(changes, [usd(1), usd(2)]);
+      // The reporter resends its latest report once the reconnect completes;
+      // the parent's sequence check drops it as a duplicate of the hello's.
+      await resend;
+      assert.deepEqual(reports, [
+        { t: DESCENDANT_USAGE_MESSAGE, seq: 1, usage: usd(1), gen: parent.generation },
+        { t: DESCENDANT_USAGE_MESSAGE, seq: 2, usage: usd(2), gen: parent.generation },
+      ]);
+      assert.deepEqual(changes, [usd(1), usd(2)], "the resend is not counted as a change");
       assert.deepEqual(lead.descendantUsageOrder, { generation: parent.generation, seq: 2 });
+    } finally { child.close(); parent.close(); }
+  });
+
+  test("the channel's own readiness resume key cannot be claimed by a feature", async () => {
+    const { parent, child } = await pair();
+    try {
+      assert.throws(() => child.provideResume("readiness", () => ({})), /resume key "readiness" is reserved/);
+      assert.doesNotThrow(() => child.provideResume("another-feature", () => undefined)(), "positive control: any other key is accepted");
     } finally { child.close(); parent.close(); }
   });
 
@@ -222,6 +247,13 @@ describe("own reduction and the reported value", () => {
     refreshAgentTelemetry(child);
     assert.equal(child.telemetry, undefined);
     assert.deepEqual(descendantUsageOf(child), usd(2));
+    // The next refresh binds telemetry to the new session; the reported value
+    // must be restored into it and into the durable ownership record.
+    refreshAgentTelemetry(child);
+    assert.equal(child.telemetry?.origin.sessionId, "a-different-session", "precondition: telemetry was re-created for the new session");
+    assert.equal(child.telemetry?.estimatedUsd, 1);
+    assert.deepEqual(child.telemetry?.descendantUsage, usd(2));
+    assert.deepEqual(readOwnership(child.ownership!.home)!.telemetry?.descendantUsage, usd(2));
   });
 });
 
@@ -260,9 +292,13 @@ describe("per-hop value and the fold rule", () => {
     assert.equal(descendantUsageValue(registry)!.knownUsd, 2.75);
     stopped(evicted);
     assert.deepEqual(evictForCapacity(registry, 2), { ok: true, evictedLabel: "evicted" });
-    assert.equal(checkpoint(storage).evictedBaseline.knownUsd, 2.5, "own .5 plus stored descendant 2");
+    // Whole object: folding only the own usage still keeps knownUsd at 2.5
+    // through the monotonic merge with the reconciled entry; the contributor
+    // counts are what show it.
+    const subtree = { knownUsd: 2.5, knownContributors: 2, unknownContributors: 0, descendants: 3 };
+    assert.deepEqual(checkpoint(storage).evictedBaseline, subtree, "own .5 plus stored descendant 2");
     assert.equal(persistEvictedAgentCost(registry, evicted), true, "a retry does not fold again");
-    assert.equal(checkpoint(storage).evictedBaseline.knownUsd, 2.5);
+    assert.deepEqual(checkpoint(storage).evictedBaseline, subtree);
     assert.equal(descendantUsageValue(registry)!.knownUsd, 2.75, "eviction moves the subtree into the baseline without changing the value");
     persistAgentCostCheckpoint(registry);
 
@@ -296,5 +332,34 @@ describe("per-hop value and the fold rule", () => {
     stopped(child);
     assert.equal(persistOwnedTelemetryRollup(readOwnership(child.ownership!.home)!), true);
     assert.equal(checkpoint(storage).evictedBaseline.knownUsd, 1.5);
+  });
+
+  test("a sidecar orphan whose home retention already removed is not revived, so its folded subtree counts once; one whose home exists still is", () => {
+    const storage = createAgentStorageContext("hop", root());
+    const removed = record("removed", storage, .5), kept = record("kept", storage, .25);
+    acceptDescendantUsage(removed, 1, { seq: 1, usage: usd(1, 2) });
+    const registry: RpcAgentRegistry = new Map([[removed.agentId, removed], [kept.agentId, kept]]);
+    registerAgentCostOwner(registry, storage);
+    assert.equal(descendantUsageValue(registry)!.knownUsd, 1.75);
+    persistAgentCostCheckpoint(registry);
+    const orphans = captureOrphans(registry);
+    assert.deepEqual(orphans.map(orphan => [orphan.agentId, !!orphan.ownership]), [["removed", true], ["kept", true]], "precondition: both sidecar entries are owned");
+
+    // Retention (possibly another owner's lead): fold, then remove the home.
+    stopped(removed);
+    assert.equal(persistOwnedTelemetryRollup(readOwnership(removed.ownership!.home)!), true);
+    rmSync(removed.ownership!.home, { recursive: true, force: true });
+    const folded = { knownUsd: 1.5, knownContributors: 2, unknownContributors: 0, descendants: 3 };
+    assert.deepEqual(checkpoint(storage).evictedBaseline, folded, "own .5 plus stored descendant 1, folded once");
+
+    // Restart: the hop revives from the sidecar entries captured before the removal.
+    const restarted: RpcAgentRegistry = new Map();
+    registerAgentCostOwner(restarted, storage);
+    const revived = reviveOrphans(restarted, orphans);
+    try {
+      assert.deepEqual(revived.map(entry => entry.agentId), ["kept"], "positive control: the orphan whose home exists is revived");
+      assert.equal(restarted.has("removed"), false);
+      assert.deepEqual(descendantUsageValue(restarted), { knownUsd: 1.75, knownContributors: 3, unknownContributors: 0, descendants: 4 }, "baseline 1.5 plus kept .25; the removed subtree only through the baseline");
+    } finally { for (const entry of revived) entry.ownershipObserverStop?.(); }
   });
 });

@@ -10,6 +10,7 @@ import { allocateAgentHome, createAgentStorageContext, updateOwnership } from ".
 import {
   createAgentFooterController,
   createAgentFooterSessionLifecycle,
+  descendantUsageValue,
   formatCumulativeCost,
   persistEvictedAgentCost,
   registerAgentCostOwner,
@@ -239,6 +240,33 @@ describe("bounded direct-agent estimates", () => {
       agentWidgetRefreshRef.current = undefined;
       controller.stop();
     }
+  });
+
+  test("a footer mounted after the hop built its estimate reuses it: one estimate drives D and the reported value", () => {
+    const dir = root(), storage = createAgentStorageContext("lead", dir);
+    const old = record("old", storage, .25), child = record("child", storage, .5);
+    const registry: RpcAgentRegistry = new Map([[old.agentId, old], [child.agentId, child]]);
+    registerAgentCostOwner(registry, storage);
+    // Before any footer: an eviction folds and persists, then the reported
+    // value picks up a change the checkpoint does not have yet.
+    updateOwnership(old.ownership!.home, { liveness: { lifecycle: "stopped", running: false } });
+    assert.deepEqual(evictForCapacity(registry, 2), { ok: true, evictedLabel: "old" });
+    child.telemetry = telemetry("child-session", child.sessionPath, 1);
+    assert.equal(descendantUsageValue(registry)!.knownUsd, 1.25);
+    assert.equal(checkpoint(storage).agents[0].cost.knownUsd, .5, "precondition: the checkpoint lags the in-memory estimate");
+    // A regressing snapshot is held at the estimate's remembered maximum.
+    child.telemetry = undefined;
+
+    const ui = context(), controller = createAgentFooterController(ui.ctx, registry, storage, { truncateToWidth, visibleWidth });
+    const component = ui.mount();
+    controller.refreshAgents();
+    assert.match(component.render(100)[1], /D ~\$1\.25 \+ \?/, "the evicted baseline and the remembered 1.00, not a fresh estimate's .50 from disk");
+    assert.deepEqual(descendantUsageValue(registry), { knownUsd: 1.25, knownContributors: 2, unknownContributors: 1, descendants: 2 });
+    child.telemetry = telemetry("child-session", child.sessionPath, 1.5);
+    controller.refreshAgents();
+    assert.match(component.render(100)[1], /D ~\$1\.75(?! \+)/);
+    assert.deepEqual(descendantUsageValue(registry), { knownUsd: 1.75, knownContributors: 2, unknownContributors: 0, descendants: 2 });
+    controller.stop();
   });
 
   test("alias reuse remains identity-based", () => {
