@@ -1,6 +1,6 @@
 import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RpcClient } from "@earendil-works/pi-coding-agent";
@@ -752,7 +752,9 @@ test("direct settle, no snapshot for the current launch: a channel-less child ad
  * the `ownTurn` accessor `registerAgentTools` installs (keep all in step with
  * those sites), on a fake Pi that
  * dispatches its lifecycle events in registration order, publishing through
- * a fake uplink. One live grandchild settles into this process.
+ * a fake uplink. One live grandchild settles into this process. Being
+ * copies, these cannot catch a change to the order `src/index.ts` registers
+ * them in; `push-flush-order.integration.test.ts` loads the real entry for that.
  */
 function childProcess(idle: boolean, scheduleTimer?: (cb: () => void, ms: number) => NodeJS.Timeout) {
   const handlers = new Map<string, Array<() => void>>();
@@ -909,14 +911,6 @@ test("child wake accounting: a wake reservation that times out with no turn stop
   const flipped = child.uplink.snapshots().slice(before);
   assert.equal(flipped.length, 1, "the lapsed reservation publishes its own flip");
   assert.equal(flipped[0]!.turnOwed, false);
-});
-
-test("the push-flush registration precedes the publish handlers in index.ts: the settle's owed flip rides their publish", () => {
-  const source = readFileSync(new URL("../src/index.ts", import.meta.url), "utf8");
-  const flush = source.indexOf("registerPushFlush(pi");
-  const publish = source.indexOf('["agent_start", "agent_settled", "tool_execution_end"]');
-  assert.ok(flush >= 0 && publish >= 0, "both registration sites exist");
-  assert.ok(flush < publish);
 });
 
 test("child send volume: a turn start sends one snapshot; unchanged state, streamed deltas, and duplicate events send nothing", async () => {
