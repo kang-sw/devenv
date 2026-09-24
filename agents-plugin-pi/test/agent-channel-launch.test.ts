@@ -35,8 +35,10 @@ function installRpcHarness() {
   const saved = Object.fromEntries(names.map(name => [name, proto[name]]));
   const state = { hook: fakeChild() as StartHook };
   Object.assign(proto, {
-    async start(this: { options?: { env?: Record<string, string>; args?: string[] } }) { await state.hook.call(this); },
-    async stop() {}, async abort() {}, async prompt() {}, async setThinkingLevel() {},
+    async start(this: { options?: { env?: Record<string, string>; args?: string[] }; started?: boolean }) { await state.hook.call(this); this.started = true; },
+    async stop() {}, async abort() {}, async setThinkingLevel() {},
+    // As the real client: a request before `start()` has run throws.
+    async prompt(this: { started?: boolean }) { if (!this.started) throw new Error("Client not started"); },
     onEvent() { return () => {}; },
     async getState(this: { options?: { args?: string[] } }) {
       const args = this.options?.args ?? [];
@@ -190,7 +192,7 @@ test("a stop that lands while a dormant resume is still binding its channel wins
   } finally { rpc.restore(); }
 });
 
-test("a second send during a dormant resume's bind sees the claimed record and does not launch a second child", async () => {
+test("a second send during a dormant resume's bind waits for that launch: one child, both sends delivered", async () => {
   const rpc = installRpcHarness();
   const registry = new Map<string, RpcAgentRecord>();
   const ctx = contexts(registry, {});
@@ -200,11 +202,45 @@ test("a second send during a dormant resume's bind sees the claimed record and d
     const base = fakeChild();
     rpc.state.hook = async function () { started += 1; await base.call(this); };
     const first = sendToAgent(registry as any, ctx.resume as any, record.agentId, "first");
+    assert.ok(record.client && record.launching, "the resume claims the record and marks its launch before its first await");
     const second = sendToAgent(registry as any, ctx.resume as any, record.agentId, "second");
-    await Promise.allSettled([first, second]);
-    await first;
+    assert.deepEqual(await first, { agent_id: record.agentId });
+    assert.deepEqual(await second, { agent_id: record.agentId }, "the second send delivered to the started child instead of failing on an unstarted one");
     assert.equal(started, 1, "exactly one child process for one session");
     assert.equal(record.launchGeneration, 2);
+    assert.equal(record.launching, undefined);
     assert.ok(record.client && record.channel?.live, "the single launch is live");
+  } finally { rpc.restore(); }
+});
+
+test("a send that arrives while a resume is failing waits, then relaunches on the dormant record", async () => {
+  const rpc = installRpcHarness();
+  const registry = new Map<string, RpcAgentRecord>();
+  const ctx = contexts(registry, { helloTimeoutMs: 150 });
+  try {
+    const record = await ctx.dormant("fork");
+    const hooks: StartHook[] = [async () => {}, fakeChild()];
+    rpc.state.hook = async function () { await hooks.shift()!.call(this); };
+    const first = sendToAgent(registry as any, ctx.resume as any, record.agentId, "first");
+    const second = sendToAgent(registry as any, ctx.resume as any, record.agentId, "second");
+    await assert.rejects(first, { message: "ws-pi-agent: child channel hello timed out after 150ms" });
+    assert.deepEqual(await second, { agent_id: record.agentId }, "the waiting send found the record dormant and relaunched it");
+    assert.equal(record.launchGeneration, 3);
+    assert.ok(record.client && record.channel?.live);
+  } finally { rpc.restore(); }
+});
+
+test("concurrent spawns never share a generated alias: the guards and the registration are one synchronous step after the bind", async () => {
+  const rpc = installRpcHarness();
+  const registry = new Map<string, RpcAgentRecord>();
+  const ctx = contexts(registry, {});
+  try {
+    const spawn = { ...ctx.explore.spawn, aliasPrefix: "explore" };
+    const [a, b] = await Promise.all([
+      spawnAgent(registry as any, spawn as any, ctx.explore.params as any),
+      spawnAgent(registry as any, spawn as any, ctx.explore.params as any),
+    ]);
+    assert.deepEqual([a.alias, b.alias].sort(), ["explore-1", "explore-2"]);
+    assert.equal(registry.size, 2);
   } finally { rpc.restore(); }
 });
