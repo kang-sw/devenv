@@ -186,7 +186,9 @@ func resolveTierModelVars(harness string, configOpts wsconfig.Options) map[strin
 		}
 		vars[entry.varName] = model
 		// Empty effort means omit the host binding, not a literal default value.
-		vars[strings.TrimSuffix(entry.varName, "Model")+"ReasoningEffort"] = effort
+		// The label is substituted into line-oriented prose, so quote control
+		// characters the same way the render payload does.
+		vars[strings.TrimSuffix(entry.varName, "Model")+"ReasoningEffort"] = formatEffortForText(effort)
 	}
 	return vars
 }
