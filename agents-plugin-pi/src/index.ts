@@ -583,7 +583,15 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   // was mid-turn, each with a status line computed at release time. Factory
   // scope (like registerGoalLoop above, never inside session_start) so a
   // /reload cannot stack duplicate agent_settled handlers.
-  registerPushFlush(pi, { delayMs: () => resolveSettleDelayMs(readGoalLoopConfig(goalLoopConfigPath)) });
+  // Order is load-bearing: Pi runs one extension's handlers in registration
+  // order, so `registerPushFlush`'s `agent_start` / `agent_settled` handlers
+  // update the own-turn accounting (`ownTurnRef`) before the publish handlers
+  // below send it. Registered the other way round, the settled snapshot would
+  // still carry a stale owed turn and hold the parent's direct settle.
+  registerPushFlush(pi, {
+    delayMs: () => resolveSettleDelayMs(readGoalLoopConfig(goalLoopConfigPath)),
+    publish: () => { publishSubtree(rpcRegistryRef.current); },
+  });
   for (const event of ["agent_start", "agent_settled", "tool_execution_end"] as const) {
     pi.on(event, () => { publishSubtree(rpcRegistryRef.current); });
   }

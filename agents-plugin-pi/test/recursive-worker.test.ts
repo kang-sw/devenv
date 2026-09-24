@@ -1,6 +1,6 @@
 import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RpcClient } from "@earendil-works/pi-coding-agent";
@@ -28,6 +28,7 @@ import {
   flushHeldPushes,
   hasRunningAgents,
   heldPushQueue,
+  leadCompactingRef,
   leadIdleRef,
   leadWakeStartPendingRef,
   listAgents,
@@ -67,6 +68,7 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
   heldPushQueue.length = 0;
   leadIdleRef.current = undefined;
+  leadCompactingRef.current = false;
   clearWakeStart();
   ownTurnRef.owed = false;
   ownTurnRef.started = 0;
@@ -632,14 +634,109 @@ test("a disconnect window covering a whole wake turn: the wake turn's terminal i
 });
 
 /**
- * The child process's side of the wake accounting: `registerPushFlush` and
- * copies of the publish-after-flush handlers `src/index.ts` registers right
- * after it and of the `ownTurn` accessor `registerAgentTools` installs (keep
- * both in step with those sites), on a fake Pi that
+ * A direct child whose view already reads not waiting when it settles: its
+ * first turn's start reached stdout and its snapshot agrees. `stdoutTurn`
+ * drives the child's RPC stream (start, answer, settle).
+ */
+async function notWaitingChild() {
+  const sent: any[] = [];
+  const h = pushHarness(sent);
+  const channel = fakeParentChannel();
+  const child = record("child", { client: h.client, delegation: worker(), running: true, workGeneration: 1, channel: channel.parent });
+  const registry = new Map([[child.agentId, child]]);
+  observeChildSubtree(registry, child, channel.parent);
+  attachEventListener(h.pi, registry, child, h.client);
+  h.emit({ type: "agent_start" });
+  channel.deliver(quiescentSnapshot(1, { turnsStarted: 1 }));
+  assert.equal(child.waitingOnChildren, false);
+  const admitted = async () => { await drain(); flushHeldPushes(h.pi, true); await drain(); return sent.map(push => push.details.last_message); };
+  const stdoutTurn = (answer: string, parts: { start?: boolean; settle?: boolean } = {}) => {
+    if (parts.start !== false) h.emit({ type: "agent_start" });
+    if (parts.settle !== false) { h.emit(assistantEnd(answer)); h.emit({ type: "agent_settled" }); }
+  };
+  return { child, registry, channel, admitted, stdoutTurn };
+}
+
+test("direct settle, socket ahead by a whole wake turn: the interim turn is never admitted and the wake turn's settle admits once", async () => {
+  const { child, registry, channel, admitted, stdoutTurn } = await notWaitingChild();
+  // Over the socket the grandchild finished and the child ran its whole wake
+  // turn; stdout still has turn 1's end to deliver.
+  channel.deliver(quiescentSnapshot(2, { turnsStarted: 2 }));
+  stdoutTurn("waiting for the grandchild", { start: false });
+  assert.deepEqual(await admitted(), [], "turn 1's interim answer is not the child's final answer");
+  assert.equal(subtreeOutstanding(registry), 1, "the held settle is still outstanding work upstream");
+  stdoutTurn("folded the grandchild result");
+  assert.deepEqual(await admitted(), ["folded the grandchild result"]);
+  channel.deliver(quiescentSnapshot(2, { turnsStarted: 2 }));
+  assert.deepEqual(await admitted(), ["folded the grandchild result"], "exactly once");
+  assert.equal(child.heldSettlementGeneration, undefined);
+});
+
+test("direct settle, owed turn only: a not-waiting snapshot owing the wake turn at an unchanged count holds turn 1 until the wake turn's settle", async () => {
+  const { channel, admitted, stdoutTurn } = await notWaitingChild();
+  // The grandchild's terminal cleared the wait and reserved the child's wake;
+  // that snapshot beats stdout's turn-1 settle. A turnsStarted-only gate
+  // would admit here: the count still equals what stdout delivered.
+  channel.deliver(quiescentSnapshot(2, { turnOwed: true, turnsStarted: 1 }));
+  stdoutTurn("waiting for the grandchild", { start: false });
+  assert.deepEqual(await admitted(), []);
+  stdoutTurn("folded the grandchild result", { settle: false });
+  channel.deliver(quiescentSnapshot(3, { turnsStarted: 2 }));
+  assert.deepEqual(await admitted(), [], "the wake turn opened a new generation; the held one is never admitted");
+  stdoutTurn("folded the grandchild result", { start: false });
+  assert.deepEqual(await admitted(), ["folded the grandchild result"]);
+  channel.deliver(quiescentSnapshot(3, { turnsStarted: 2 }));
+  assert.deepEqual(await admitted(), ["folded the grandchild result"], "exactly once");
+});
+
+test("direct settle, stale owed turn: the next not-waiting snapshot owing nothing releases it with no further child turn", async () => {
+  const { child, registry, channel, admitted, stdoutTurn } = await notWaitingChild();
+  channel.deliver(quiescentSnapshot(2, { turnOwed: true, turnsStarted: 1 }));
+  stdoutTurn("the only answer", { start: false });
+  assert.deepEqual(await admitted(), []);
+  // The reservation lapsed (or the settled snapshot recomputed owed): no turn comes.
+  channel.deliver(quiescentSnapshot(3, { turnsStarted: 1 }));
+  assert.deepEqual(await admitted(), ["the only answer"]);
+  assert.equal(child.heldSettlementGeneration, undefined);
+  assert.equal(subtreeOutstanding(registry), 0, "the delivered terminal leaves nothing outstanding");
+});
+
+test("direct settle, no snapshot for the current launch: a channel-less child admits at once, and a closed launch leaves no turn facts behind", async () => {
+  const sent: any[] = [];
+  const h = pushHarness(sent);
+  const channel = fakeParentChannel();
+  const child = record("child", { client: h.client, delegation: worker(), running: true, workGeneration: 1, channel: channel.parent });
+  const registry = new Map([[child.agentId, child]]);
+  observeChildSubtree(registry, child, channel.parent);
+  channel.deliver(quiescentSnapshot(1, { turnOwed: true, turnsStarted: 4 }));
+  assert.deepEqual(child.subtreeTurn, { owed: true, started: 4 });
+  markAgentExited(h.pi, registry, child);
+  assert.equal(child.subtreeTurn, undefined, "the closed launch's turn facts do not outlive it");
+
+  heldPushQueue.length = 0;
+  const admittedSent: any[] = [];
+  const bare = pushHarness(admittedSent);
+  const channelLess = record("channel-less", { client: bare.client, delegation: worker(), running: true, workGeneration: 1 });
+  attachEventListener(bare.pi, new Map([[channelLess.agentId, channelLess]]), channelLess, bare.client);
+  bare.emit({ type: "agent_start" });
+  bare.emit(assistantEnd("channel-less answer"));
+  bare.emit({ type: "agent_settled" });
+  await drain();
+  flushHeldPushes(bare.pi, true);
+  await drain();
+  assert.deepEqual(admittedSent.map(push => push.details.last_message), ["channel-less answer"]);
+});
+
+/**
+ * The child process's side of the wake accounting: `registerPushFlush` (with
+ * the `publish` hook `src/index.ts` passes it) and copies of the
+ * publish-after-flush handlers `src/index.ts` registers right after it and of
+ * the `ownTurn` accessor `registerAgentTools` installs (keep all in step with
+ * those sites), on a fake Pi that
  * dispatches its lifecycle events in registration order, publishing through
  * a fake uplink. One live grandchild settles into this process.
  */
-function childProcess(idle: boolean) {
+function childProcess(idle: boolean, scheduleTimer?: (cb: () => void, ms: number) => NodeJS.Timeout) {
   const handlers = new Map<string, Array<() => void>>();
   const sent: unknown[] = [];
   const wakes: string[] = [];
@@ -650,9 +747,9 @@ function childProcess(idle: boolean) {
   } as never;
   let sessionIdle = idle;
   leadIdleRef.current = () => sessionIdle;
-  registerPushFlush(pi, { delayMs: () => 60_000 });
-  const uplink = fakeUplink();
   const registry: RpcAgentRegistry = new Map();
+  registerPushFlush(pi, { delayMs: () => 60_000, scheduleTimer, publish: () => { publishSubtree(registry); } });
+  const uplink = fakeUplink();
   installSubtreePublisher(registry, new SubtreeUpstream(uplink.channel), () => heldPushQueue.length, () => ({ ...ownTurnRef }));
   for (const event of ["agent_start", "agent_settled", "tool_execution_end"]) (pi as any).on(event, () => { publishSubtree(registry); });
   const fire = (event: "agent_start" | "agent_end" | "agent_settled") => {
@@ -730,6 +827,78 @@ test("child wake accounting: a steer consumed inside the running loop owes no tu
   assert.equal(child.sent.length, 1, "the steer went straight into the running turn");
   assert.equal(ownTurnRef.owed, false);
   assert.ok(child.uplink.snapshots().every(s => !s.turnOwed));
+});
+
+test("child wake accounting: a boundary continuation that never starts is owed no turn after the raw settle, and the parent admits the direct settle", async () => {
+  const child = childProcess(false);
+  child.fire("agent_start");
+  await child.grandchildSettles();
+  child.fire("agent_end");
+  assert.equal(child.uplink.snapshots().at(-1)!.turnOwed, true, "the boundary batch owes Pi's continuation");
+  // Pi abandoned the continuation (a throwing `agent.continue()`): the raw
+  // settle arrives with no second agent_start.
+  child.fire("agent_settled");
+  const settled = child.uplink.snapshots().at(-1)!;
+  assert.deepEqual({ turnOwed: settled.turnOwed, turnsStarted: settled.turnsStarted, waiting: subtreeWaiting(settled) },
+    { turnOwed: false, turnsStarted: 1, waiting: false });
+  assert.equal(ownTurnRef.owed, false);
+  assert.equal(child.wakes.length, 0);
+  const snapshots = child.uplink.snapshots();
+
+  // The parent's view of that child, every snapshot ahead of stdout's settle.
+  clearWakeStart();
+  const sent: any[] = [];
+  const h = pushHarness(sent);
+  const channel = fakeParentChannel();
+  const parent = record("child", { client: h.client, delegation: worker(), running: true, workGeneration: 1, channel: channel.parent });
+  const registry = new Map([[parent.agentId, parent]]);
+  observeChildSubtree(registry, parent, channel.parent);
+  attachEventListener(h.pi, registry, parent, h.client);
+  h.emit({ type: "agent_start" });
+  for (const snapshot of snapshots) channel.deliver(snapshot);
+  h.emit(assistantEnd("the turn's answer"));
+  h.emit({ type: "agent_settled" });
+  await drain();
+  flushHeldPushes(h.pi, true);
+  await drain();
+  assert.deepEqual(sent.map(push => push.details.last_message), ["the turn's answer"]);
+});
+
+test("child wake accounting: a raw settle that reserves a wake for still-held pushes keeps owing the wake turn", async () => {
+  const child = childProcess(false);
+  child.fire("agent_start");
+  await child.grandchildSettles();
+  // No agent_end boundary submitted the batch: the settle's own flush wakes for it.
+  child.fire("agent_settled");
+  assert.equal(child.wakes.length, 1, "the settle reserved a wake for the held delivery");
+  assert.equal(ownTurnRef.owed, true);
+  assert.equal(child.uplink.snapshots().at(-1)!.turnOwed, true);
+});
+
+test("child wake accounting: a wake reservation that times out with no turn stops owing it and publishes the flip", async () => {
+  const timers: Array<() => void> = [];
+  const child = childProcess(true, (cb) => { timers.push(cb); return setTimeout(() => {}, 0); });
+  await child.grandchildSettles();
+  assert.equal(child.wakes.length, 1);
+  assert.equal(child.uplink.snapshots().at(-1)!.turnOwed, true);
+  assert.equal(timers.length, 1);
+  // The retry exits early (the session is compacting), so no new reservation owes the turn.
+  leadCompactingRef.current = true;
+  const before = child.uplink.snapshots().length;
+  timers[0]!();
+  assert.equal(ownTurnRef.owed, false);
+  assert.equal(child.wakes.length, 1, "no retry wake");
+  const flipped = child.uplink.snapshots().slice(before);
+  assert.equal(flipped.length, 1, "the lapsed reservation publishes its own flip");
+  assert.equal(flipped[0]!.turnOwed, false);
+});
+
+test("the push-flush registration precedes the publish handlers in index.ts: the settle's owed flip rides their publish", () => {
+  const source = readFileSync(new URL("../src/index.ts", import.meta.url), "utf8");
+  const flush = source.indexOf("registerPushFlush(pi");
+  const publish = source.indexOf('["agent_start", "agent_settled", "tool_execution_end"]');
+  assert.ok(flush >= 0 && publish >= 0, "both registration sites exist");
+  assert.ok(flush < publish);
 });
 
 test("child send volume: a turn start sends one snapshot; unchanged state, streamed deltas, and duplicate events send nothing", async () => {

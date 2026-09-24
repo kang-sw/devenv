@@ -32,6 +32,7 @@ for (const root of SDK_ROOTS) for (const [providerName, apiName] of [["openroute
     const version = JSON.parse(readFileSync(join(plugin, "runtime.json"), "utf8")).plugin_version;
     writeFileSync(join(plugin, "bin/ws-mcp-launcher.py"), `import sys,json,uuid,os\nkey='own-'+str(uuid.uuid4())\nfor line in sys.stdin:\n q=json.loads(line); m=q['method']; p=q.get('params',{}); r={}\n if m=='initialize': r={'serverInfo':{'name':'offline','version':${JSON.stringify(version)}},'capabilities':{}}\n elif m=='tools/list': r={'tools':[{'name':'probe','description':'Offline routing probe','inputSchema':{'type':'object','properties':{'session_key':{'type':'string'}}}}]}\n elif m=='tools/call':\n  n=p['name']; a=p.get('arguments',{}); text=json.dumps({'session_key':key}) if n=='ferrule' else ('lead manual '+key if n=='workflow_manual' else (json.dumps(a) if n=='probe' else '{}'))\n  r={'content':[{'type':'text','text':text}],'isError':False}\n  if n=='ferrule' and os.path.exists(${JSON.stringify(join(directory, "fail-key"))}): r={'isError':True,'content':[{'type':'text','text':'offline failed ferrule'}]}\n  if n=='playbook.read' and os.path.exists(${JSON.stringify(join(directory, "fail-map"))}): r={'isError':True,'content':[{'type':'text','text':'offline failed mapping'}]}\n print(json.dumps({'jsonrpc':'2.0','id':q['id'],'result':r}),flush=True)\n`);
     const sdk = await import(join(root, "dist/index.js"));
+    const extensionLoader = await import(join(root, "dist/core/extensions/loader.js"));
     const spawner = await import(join(plugin, "src/spawner.ts"));
     const sidecar = await import(join(plugin, "src/agent-sidecar.ts"));
     const ask = await import(join(plugin, "src/ask.ts"));
@@ -62,6 +63,12 @@ for (const root of SDK_ROOTS) for (const [providerName, apiName] of [["openroute
         let api: any;
         let partialPrompt: string | undefined;
         const loader = new sdk.DefaultResourceLoader({ cwd: directory, agentDir, settingsManager: settings, noSkills: true, noThemes: true, noPromptTemplates: true, noContextFiles: true, additionalExtensionPaths: discovered ? [] : [join(plugin, "src/index.ts"), join(plugin, "src/index.ts")], systemPrompt: "Custom base\r\n", appendSystemPrompt: [append], extensionFactories: [(pi: any) => { api = pi; if (parentOnlyTool) pi.registerTool({ name: "parent-only-extension", label: "parent-only-extension", description: "A parent-only extension tool", parameters: { type: "object", properties: { query: { type: "string" } } }, async execute() { return { content: [{ type: "text", text: "parent-only" }] }; } }); pi.on("before_agent_start", (e: any) => { partialPrompt = e.systemPrompt; return env.WS_PI_SPAWN_ROLE === "fork" ? undefined : { systemPrompt: e.systemPrompt + "\nLater handler Ω  " }; }); }] });
+        // Production runs every child in its own process, so the adapter's
+        // module-scoped state (own-turn accounting, push queue) is per
+        // session. Pi caches an extension's factory per path and cwd, which
+        // would hand every in-process session one shared module instance;
+        // clearing that cache makes this load import the adapter afresh.
+        extensionLoader.clearExtensionCache();
         await loader.reload();
         assert.deepEqual(loader.getExtensions().errors, []);
         assert.equal(loader.getExtensions().extensions.filter((e: any) => e.path === join(plugin, "src/index.ts")).length, 1, "source/discovery deduplicates the adapter");
@@ -121,6 +128,15 @@ for (const root of SDK_ROOTS) for (const [providerName, apiName] of [["openroute
         const childEnv = omitCompletionReport ? { ...env, WS_PI_TEST_OMIT_FORK_REPORT: "1" } : env;
         this.harness = await makeSession(sm, childEnv, args[args.indexOf("--tools") + 1].split(","), "CHANGED CHILD APPEND");
         this.harness.parentClient = this;
+        // Pi's RPC stdout carries every child `agent_start` to the parent; the
+        // parent's settle admission counts them against the child's own
+        // reported turn count. The other events stay hand-relayed below.
+        this.harness.relayedStarts = 0;
+        this.harness.session.subscribe((event: any) => {
+          if (event.type !== "agent_start") return;
+          this.harness.relayedStarts += 1;
+          for (const listener of this.wsPiTestEventListeners ?? []) listener(event);
+        });
         const sourcePath = fork >= 0 ? args[fork + 1] : sm.getSessionFile();
         const sourceId = JSON.parse(readFileSync(sourcePath, "utf8").split("\n")[0]).id;
         const source = sessions.findLast(h => h !== this.harness && (h.sm.getSessionFile() === sourcePath || h.sm.getSessionId() === sourceId));
@@ -248,6 +264,10 @@ for (const root of SDK_ROOTS) for (const [providerName, apiName] of [["openroute
       const leadListTool = lead.session.agent.state.tools.find((tool: any) => tool.name === "ws-agent-list");
       const listedAgents = JSON.parse((await leadListTool.execute("list", {})).content[0].text);
       const reportedChild = (Array.isArray(listedAgents) ? listedAgents : listedAgents.agents).find((agent: any) => agent.agent_id === id);
+      // The parent admits this settle only when the child's reported turn
+      // count is no higher than the starts relayed to it: a count shared with
+      // the lead's or a sibling's turns would hold it (status "idle").
+      assert.equal(child.relayedStarts, 2, "the child's two own turns reached the parent as agent_start");
       assert.equal(reportedChild.status, "dormant", "ordinary settlement parks the degraded fork after terminal delivery");
       assert.ok(reportedChild.last_report_at, "the intermediate progress report reaches the parent registry");
       assert.ok(childContext.registeredTools.some((tool: any) => tool.name === "ws-report-to-lead"), "the parent capture keeps the optional progress/question channel visible");

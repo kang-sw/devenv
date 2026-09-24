@@ -514,11 +514,25 @@ export interface RpcAgentRecord {
   settlementAdmissionGeneration?: number;
   /**
    * Set by `attachEventListener` for the attached client: re-runs a settlement
-   * that was held on `waitingOnChildren` once `observeChildSubtree` applies a
-   * not-waiting snapshot whose wake accounting says no wake turn is coming.
-   * No-op when nothing is held.
+   * that was held (on `waitingOnChildren`, or on `subtreeTurn` saying a turn is
+   * still coming) once `observeChildSubtree` applies a not-waiting snapshot
+   * whose wake accounting says no wake turn is coming. No-op when nothing is
+   * held.
    */
   releaseSettlementHold?: (snapshot: SubtreeSnapshot) => void;
+  /**
+   * Work generation whose settle `attachEventListener` holds for
+   * `releaseSettlementHold`. A held settle is a terminal still to come, so it
+   * counts as outstanding (`subtreeOutstanding`). Cleared on admission and
+   * with the launch (`clearLiveState`).
+   */
+  heldSettlementGeneration?: number;
+  /**
+   * Wake accounting of the latest subtree snapshot accepted from the current
+   * launch (`observeChildSubtree`); undefined until that launch's first
+   * snapshot, and for a channel-less child.
+   */
+  subtreeTurn?: { owed: boolean; started: number };
   /** Persistent exploration mode; meaningful only for explore records. */
   exploreMode?: ExploreMode;
   /** `true` while an agent run is actively looping (between `agent_start` and `agent_settled`). */
@@ -1024,17 +1038,25 @@ export const leadWakeStartPendingRef: { current: boolean } = { current: false };
  * reset it for isolation).
  *
  * - `owed`: a delivery this process already enqueued still has a turn coming.
- *   Set by a push wake reservation (`requestPushWake`) and by an `agent_end`
- *   boundary batch that Pi continues with; cleared only by the next own
- *   `agent_start`, together with the `started` increment, before that
- *   handler's flush publishes. A steer or followUp consumed inside a running
- *   loop starts no new turn and never sets it. Each set happens before the
- *   publish that already follows it (`pushToLead`, the batch's
- *   `afterEnqueue`, the `agent_settled` publish), so it adds no send of its
- *   own.
+ *   Two sources, folded by `syncOwnTurnOwed`: an outstanding push wake
+ *   reservation (`requestPushWake`), which owes exactly as long as the
+ *   reservation lives; and an `agent_end` boundary batch that Pi continues
+ *   with, which owes until the next own `agent_start` or the raw
+ *   `agent_settled` (by then Pi has started or abandoned its continuation).
+ *   The next own `agent_start` clears both, together with the `started`
+ *   increment, before that handler's flush publishes. A steer or followUp
+ *   consumed inside a running loop starts no new turn and never sets it. Each
+ *   flip happens before a publish that already follows it (`pushToLead`, the
+ *   batch's `afterEnqueue`, the `agent_settled` publish), so it adds no send
+ *   of its own; a reservation that lapses on its timeout publishes itself.
  * - `started`: own `agent_start` events seen by this process.
  */
 export const ownTurnRef: OwnTurnState = { owed: false, started: 0 };
+let boundaryTurnOwed = false;
+let pushWakeReserved = false;
+function syncOwnTurnOwed(): void {
+  ownTurnRef.owed = boundaryTurnOwed || pushWakeReserved;
+}
 
 export interface WakeStartOptions {
   delayMs: () => number;
@@ -1044,10 +1066,15 @@ export interface WakeStartOptions {
 let wakeOptions: WakeStartOptions | undefined;
 let cancelWakeTimeout: (() => void) | undefined;
 
+/** Publishes this process's subtree snapshot; set by `registerPushFlush`, used where an `owed` flip has no publish of its own. */
+let publishOwnTurn: (() => void) | undefined;
+
 export function clearWakeStart(): void {
   cancelWakeTimeout?.();
   cancelWakeTimeout = undefined;
   leadWakeStartPendingRef.current = false;
+  pushWakeReserved = false;
+  syncOwnTurnOwed();
 }
 
 /** Reserve before prompt preflight; recovery exists even when dispatch throws. */
@@ -1062,6 +1089,9 @@ export function reserveWakeStart(options: WakeStartOptions, onTimeout: () => voi
   const handle = schedule(() => {
     cancelWakeTimeout = undefined;
     leadWakeStartPendingRef.current = false;
+    // The reservation ended without a turn starting: it no longer owes one.
+    pushWakeReserved = false;
+    syncOwnTurnOwed();
     onTimeout();
   }, options.delayMs());
   cancelWakeTimeout = () => (options.clearTimer ?? clearTimeout)(handle);
@@ -1070,8 +1100,11 @@ export function reserveWakeStart(options: WakeStartOptions, onTimeout: () => voi
 
 function requestPushWake(pi: ExtensionAPI): void {
   if (!wakeOptions || !heldPushQueue.length || !leadIdleRef.current || !isOwningAgentIdle()) return;
-  if (!reserveWakeStart(wakeOptions, () => requestPushWake(pi))) return;
-  ownTurnRef.owed = true;
+  // A lapsed reservation's retry may exit early, leaving `owed` false with no
+  // publish of its own; the parent's held settle waits on that flip.
+  if (!reserveWakeStart(wakeOptions, () => { requestPushWake(pi); publishOwnTurn?.(); })) return;
+  pushWakeReserved = true;
+  syncOwnTurnOwed();
   try {
     pi.sendUserMessage(`${heldPushQueue.length} ws messages waiting; process the incoming reports.`, { deliverAs: "followUp" });
   } catch {
@@ -1485,7 +1518,10 @@ function submitHeldPushBatch(pi: ExtensionAPI, deliverAs: "steer" | "followUp", 
     }
     // Queued at `agent_end`, the batch is picked up by Pi's post-run
     // continuation, a fresh turn; set before `afterEnqueue` publishes below.
-    if (turnBoundary) ownTurnRef.owed = true;
+    if (turnBoundary) {
+      boundaryTurnOwed = true;
+      syncOwnTurnOwed();
+    }
   }
   heldPushQueue.splice(0, snapshot.length);
   for (const { terminal, wasHeld } of terminalStates) {
@@ -1513,13 +1549,14 @@ export function flushHeldPushes(pi: ExtensionAPI | undefined, confirmedStart = f
 }
 
 /** Factory-scope wake lifecycle, also active in fork owners. Registration allocates no timers; only a reserved user wake does. Worker/explore roles never reserve wakes. */
-export function registerPushFlush(pi: ExtensionAPI, options: WakeStartOptions): void {
+export function registerPushFlush(pi: ExtensionAPI, options: WakeStartOptions & { publish?: () => void }): void {
   wakeOptions = options;
+  publishOwnTurn = options.publish;
   pi.on("agent_start", () => {
     // Before the flush below publishes: this start both counts and discharges
     // any owed turn in one snapshot (see `ownTurnRef`).
     ownTurnRef.started += 1;
-    ownTurnRef.owed = false;
+    boundaryTurnOwed = false;
     clearWakeStart();
     flushHeldPushes(pi, true);
   });
@@ -1529,13 +1566,23 @@ export function registerPushFlush(pi: ExtensionAPI, options: WakeStartOptions): 
   pi.on("agent_settled", () => {
     clearWakeStart();
     flushHeldPushes(pi);
+    // Pi emits the raw settle only after its post-run continuation started or
+    // was abandoned (a throwing `agent.continue()`), so a boundary batch still
+    // unstarted here is owed no turn: it starts with the next prompted turn.
+    // After the flush, `owed` is exactly "a wake reservation is outstanding".
+    // No send of its own: the publish handler `index.ts` registers after this
+    // one carries the flip, which is why this handler must stay first.
+    boundaryTurnOwed = false;
+    syncOwnTurnOwed();
   });
   pi.on("session_shutdown", () => {
     clearWakeStart();
     heldPushQueue.length = 0;
-    ownTurnRef.owed = false;
+    boundaryTurnOwed = false;
+    syncOwnTurnOwed();
     leadIdleRef.current = undefined;
     wakeOptions = undefined;
+    publishOwnTurn = undefined;
   });
 }
 
@@ -1908,6 +1955,8 @@ function clearLiveState(record: RpcAgentRecord, registry?: RpcAgentRegistry): vo
   record.pendingApproval = undefined;
   record.waitingOnChildren = false;
   record.subtreeRevision = undefined;
+  record.subtreeTurn = undefined;
+  record.heldSettlementGeneration = undefined;
   record.subtreeDescendants = [];
   publishSubtree(registry);
   triggerAgentWidgetRefresh();
@@ -2580,10 +2629,12 @@ export function applyRpcEvent(
  */
 export function observeChildSubtree(registry: RpcAgentRegistry | undefined, record: RpcAgentRecord, channel: ParentChannel): void {
   record.subtreeRevision = undefined;
+  record.subtreeTurn = undefined;
   observeSubtreeChannel(channel, view => {
     if (record.channel !== channel) return;
     record.waitingOnChildren = view.waiting;
     record.subtreeRevision = view.snapshot?.revision;
+    if (view.snapshot) record.subtreeTurn = { owed: view.snapshot.turnOwed, started: view.snapshot.turnsStarted };
     record.subtreeDescendants = view.snapshot?.descendants ?? [];
     publishSubtree(registry);
     triggerAgentWidgetRefresh();
@@ -2658,9 +2709,10 @@ export function attachApprovalChannel(
 /**
  * Wires the child event stream to immediate reports and per-generation
  * terminal settlement. Settlement clears execution before any async work,
- * holds while the channel-delivered subtree view reads waiting (released by
- * `releaseSettlementHold` when the wait clears with no wake turn), harvests the
- * ordinary assistant answer, admits one retryable terminal delivery, and parks
+ * holds while the channel-delivered subtree view reads waiting or the child
+ * reports a turn still coming (released by `releaseSettlementHold` once a
+ * not-waiting snapshot says no turn is coming), harvests the ordinary
+ * assistant answer, admits one retryable terminal delivery, and parks
  * only after enqueue.
  * Duplicate events join the generation latch; replacement work invalidates a
  * late harvest. Owner-held output uses the owner notification route.
@@ -2709,15 +2761,23 @@ export function attachEventListener(
       refreshing = false;
     })();
   };
-  // Terminal admission for the current work generation. A settle held on
-  // `waitingOnChildren` records its generation for `releaseSettlementHold`.
-  let heldGeneration: number | undefined;
+  // Terminal admission for the current work generation. A held settle records
+  // its generation on the record (`heldSettlementGeneration`) for
+  // `releaseSettlementHold`.
+  record.heldSettlementGeneration = undefined;
   // Child `agent_start` events this launch's RPC stream has delivered; the
   // closure is per client, so a relaunch starts again at zero, as the new
-  // child process's own count does.
+  // child process's own count does. Exact only because both launch sites
+  // attach this listener before the child's first prompt.
   let observedTurnStarts = 0;
+  // The child reports whether a turn is still coming; the parent does not
+  // infer it. A snapshot that owes a turn, or counts a turn start stdout has
+  // not delivered yet (the socket ran ahead), leaves admission to that turn:
+  // its `agent_start` opens a new work generation and its own settle admits.
+  // Admitting now would report the previous generation's answer ahead of it.
+  const turnComing = (owed: boolean, started: number) => owed || started > observedTurnStarts;
   const admitSettlement = () => {
-    heldGeneration = undefined;
+    record.heldSettlementGeneration = undefined;
     const workGeneration = record.workGeneration;
     const stillSettled = () => record.client === client && record.launchGeneration === generation && record.workGeneration === workGeneration && !record.running && !record.streaming && !record.waitingOnChildren;
     const finish = record.forkFinish;
@@ -2746,17 +2806,12 @@ export function attachEventListener(
       }
     }
   };
-  // The child reports whether a wake turn is coming; the parent does not
-  // infer it. A snapshot that owes a turn, or counts a turn start stdout has
-  // not delivered yet (the socket ran ahead), leaves the hold to that wake
-  // turn: its `agent_start` opens a new work generation and its own settle
-  // admits. Releasing either would report the previous generation's answer
-  // ahead of the wake turn.
   record.releaseSettlementHold = (snapshot) => {
     if (record.client !== client || record.launchGeneration !== generation) return;
-    if (heldGeneration === undefined || heldGeneration !== record.workGeneration) return;
+    const held = record.heldSettlementGeneration;
+    if (held === undefined || held !== record.workGeneration) return;
     if (record.running || record.streaming || record.waitingOnChildren) return;
-    if (snapshot.turnOwed || snapshot.turnsStarted > observedTurnStarts) return;
+    if (turnComing(snapshot.turnOwed, snapshot.turnsStarted)) return;
     admitSettlement();
   };
   const unsubscribeEvents = client.onEvent((evt) => {
@@ -2795,8 +2850,14 @@ export function attachEventListener(
       // fresh "running" row transition.
       triggerAgentWidgetRefresh();
     }
-    if (outcome.settled && record.waitingOnChildren) {
-      heldGeneration = record.workGeneration;
+    // Held while the view reads waiting, and also while the view is not
+    // waiting but the launch's latest snapshot says a turn is still coming
+    // (the same check `releaseSettlementHold` applies). A launch with no
+    // snapshot yet admits directly: a channel-less child never fails closed,
+    // and a channel's view reads waiting until its first snapshot anyway.
+    const turn = record.subtreeTurn;
+    if (outcome.settled && (record.waitingOnChildren || (turn !== undefined && turnComing(turn.owed, turn.started)))) {
+      record.heldSettlementGeneration = record.workGeneration;
       clearTerminalFacts(record);
       syncOwnershipProtection(record);
       publishSubtree(registry);
@@ -3322,6 +3383,9 @@ export async function spawnAgent(
     // work, before prompt() can append any attributable child turn.
     try { const snapshot = await getAgentRpcSnapshot(client); refreshAgentTelemetry(record, snapshot.state, { fresh: true, stats: snapshot.stats }); } catch { delete record.observedModel; delete record.observedEffort; if (record.telemetry) { delete record.telemetry.model; delete record.telemetry.effort; } }
     if (forkLaunch) await captureForkSelection(client, record);
+    // Invariant: attach before the first prompt. The listener's observed
+    // `agent_start` count must see every child turn; a missed one would hold
+    // every direct settle of this launch (`attachEventListener`).
     attachEventListener(ctx.pi, registry, record, client, ctx.onApprovalPending);
     attachFirstTaskForkCacheNotice(record, client, ctx.forkCacheNoticeOwner);
     await promptAgent(record, client, params.prompt);
@@ -3511,6 +3575,9 @@ export async function sendToAgent(
       }
       try { const snapshot = await getAgentRpcSnapshot(client); refreshAgentTelemetry(record, snapshot.state, { stats: snapshot.stats }); } catch { delete record.observedModel; delete record.observedEffort; if (record.telemetry) { delete record.telemetry.model; delete record.telemetry.effort; } }
       if (forkLaunch) await captureForkSelection(client, record);
+      // Invariant: attach before the first prompt (`promptAgent` below), as
+      // the fresh spawn does: the observed `agent_start` count must see every
+      // child turn of this launch.
       attachEventListener(ctx.pi, registry, record, client, ctx.onApprovalPending);
     } catch (err) {
       // Cleanup may await while a new instruction replaces this operation or
