@@ -475,6 +475,9 @@
     "260924-bug-ticket-index-read-timeout-below-ssh-roundtrip": {
       "registered_at": "2026-09-24T12:05:14Z"
     },
+    "260924-chore-pin-ticket-index-playbook-contracts": {
+      "registered_at": "2026-09-24T13:42:47Z"
+    },
     "260924-feat-open-decision-queue-response-format": {
       "registered_at": "2026-09-24T11:29:04Z",
       "lease": {
