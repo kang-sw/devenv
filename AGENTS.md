@@ -253,7 +253,8 @@ ai-docs/tickets/.dropped/
 
 - Reference tickets by stem, not path: `260429-research-host-neutral-ws-plugin`.
 - Creation-date prefixes are stable; never rename to change the date.
-- Move status with `git mv` when possible.
+- Move status with `tickets.move` / `tickets.close`; use `git mv` only when
+  those tools are unavailable or error.
 - `todo/` is accepted backlog; `ready/` is the implementation-ready status.
 - Research tickets use freeform topic sections and no phases.
 - Actionable tickets use `## Phases` and stable `### Phase N: <title>`.
