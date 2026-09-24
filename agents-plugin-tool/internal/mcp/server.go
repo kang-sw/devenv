@@ -2892,7 +2892,7 @@ func sageGateNextInstruction(result wsdoc.SageGateResult) string {
 	case "stop_open_decision_queue":
 		// No posture note: this stop precedes every posture write on both
 		// landings, so the call wrote nothing.
-		return "next_instruction: This ticket still has a ## Open Decision Queue section, whose items are unsettled working state rather than decisions, so it cannot be reviewed or promoted yet. Settle the queue with the user, move each settled item into its home section, delete the section, then call tickets.sage_gate again with the same stem/landing."
+		return "next_instruction: This ticket still has a ## Open Decision Queue section, whose items are unsettled working state rather than decisions, so it cannot be reviewed or promoted yet. Settle the queue with the user through the final confirmation, move each settled item into its home section, delete the section, then call tickets.sage_gate again with the same stem/landing."
 	case "ask":
 		return "next_instruction: Relay ask_prompt to the user, then call tickets.sage_gate again with the same stem/landing plus answer=yes|no." + sageGatePostureUncommittedNote
 	case "run":

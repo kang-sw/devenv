@@ -362,13 +362,9 @@ func missingRouteFacts(ticketAbsPath, stem string) bool {
 	return !present
 }
 
-// openDecisionQueueHeading is the temporary section the lead holds unsettled
-// queue items in while settling a ticket. Its presence gates promotion.
-const openDecisionQueueHeading = "## Open Decision Queue"
-
 // openDecisionQueueRefusal is the tickets.move refusal text; the sage_gate
 // stop instruction states the same remedy.
-const openDecisionQueueRefusal = "ticket has a pending ## Open Decision Queue section; its items are unsettled working state, not decisions. Settle every queue item, move each into its home section, and delete the section before promoting"
+const openDecisionQueueRefusal = "ticket has a pending ## Open Decision Queue section; its items are unsettled working state, not decisions. Settle every queue item through the final confirmation, move each into its home section, and delete the section before promoting"
 
 // hasOpenDecisionQueue reports whether a ticket carries a pending
 // `## Open Decision Queue` section. The match is the exact level-2 line
@@ -384,58 +380,6 @@ func hasOpenDecisionQueue(ticketAbsPath string) bool {
 		return false
 	}
 	return containsOpenDecisionQueue(string(raw))
-}
-
-func containsOpenDecisionQueue(text string) bool {
-	var fenceChar byte
-	fenceLen := 0
-	for _, line := range strings.Split(text, "\n") {
-		line = strings.TrimRight(line, " \t\r")
-		if char, n, info := markdownFence(line); n > 0 {
-			if fenceLen == 0 {
-				fenceChar, fenceLen = char, n
-				continue
-			}
-			// A closing fence repeats the opening character at least as many
-			// times and carries no info string.
-			if char == fenceChar && n >= fenceLen && info == "" {
-				fenceLen = 0
-			}
-			continue
-		}
-		if fenceLen == 0 && line == openDecisionQueueHeading {
-			return true
-		}
-	}
-	return false
-}
-
-// markdownFence reports a CommonMark code-fence line: up to three spaces of
-// indentation, then a run of at least three backticks or tildes. It returns
-// the fence character, the run length, and the trimmed info string; n is 0
-// when the line is not a fence.
-func markdownFence(line string) (char byte, n int, info string) {
-	indent := len(line) - len(strings.TrimLeft(line, " "))
-	if indent > 3 {
-		return 0, 0, ""
-	}
-	rest := line[indent:]
-	if rest == "" || (rest[0] != '`' && rest[0] != '~') {
-		return 0, 0, ""
-	}
-	char = rest[0]
-	for n < len(rest) && rest[n] == char {
-		n++
-	}
-	if n < 3 {
-		return 0, 0, ""
-	}
-	info = strings.TrimSpace(rest[n:])
-	// A backtick fence's info string may not contain a backtick.
-	if char == '`' && strings.Contains(info, "`") {
-		return 0, 0, ""
-	}
-	return char, n, info
 }
 
 // routeFactsMoveTip is the soft counterpart to the SageGate refusal, attached

@@ -31,6 +31,8 @@ func TestContainsOpenDecisionQueueHeadingRule(t *testing.T) {
 		{"shorter inner fence does not close", "````md\n```\n## Open Decision Queue\n```\n````\n", false},
 		{"other fence char does not close", "```\n~~~\n## Open Decision Queue\n```\n", false},
 		{"unclosed fence runs to end", "```\n## Open Decision Queue\n", false},
+		{"closing line with info string does not close", "```\n```text\n## Open Decision Queue\n```\n", false},
+		{"four-space indented backticks are not a fence", "    ```\n## Open Decision Queue\n", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := containsOpenDecisionQueue(tc.text); got != tc.want {
@@ -129,6 +131,10 @@ func TestSageGateRefusesOpenDecisionQueue(t *testing.T) {
 		// A skipped design posture would otherwise skip; the retained
 		// epic-at-ready branch is gated too.
 		{"epic ready before posture skip", "260101-epic-odq", "ready", "sage-review-design: skipped\n", false, "stop_open_decision_queue"},
+		// A completed design posture would otherwise reach the freshness
+		// branch on either landing; the queue stop precedes it.
+		{"epic todo before freshness", "260101-epic-odq", "todo", "sage-review-design: completed\n", false, "stop_open_decision_queue"},
+		{"actionable ready before freshness", "260101-feat-odq", "ready", "sage-review-design: completed\nsage-review-completeness: completed\n", true, "stop_open_decision_queue"},
 		{"research todo exemption", "260101-research-odq", "todo", "", false, "skip"},
 		{"workset todo exemption", "260101-workset-odq", "todo", "", false, "skip"},
 		{"idea landing", "260101-feat-odq", "idea", "", false, "skip"},
