@@ -94,6 +94,7 @@ func TestNoRefPathIsByteIdentical(t *testing.T) {
 		{"tickets.move", ixArgs(stemGamma, append([]any{"to", "todo"}, override...)...)},
 		{"tickets.close", map[string]any{"stem": stemAlpha, "status": "done"}},
 		{"tickets.close", ixArgs(stemBeta, append([]any{"status", "dropped"}, override...)...)},
+		{"tickets.sage_stamp", map[string]any{"stem": stemGamma, "stage": "design", "verdicts": []any{map[string]any{"reviewer": "design", "verdict": "pass"}}}},
 	}
 	for _, step := range steps {
 		// ixArgs keys the stem as ticket_stem; move and close take stem.
@@ -449,9 +450,20 @@ func TestMoveCloseGuard(t *testing.T) {
 	x.acquire(stemGamma)
 	xb := x.worktree("x-b", "track/b", "develop")
 
+	tip := e.remoteTip()
 	y.mustRefuse("tickets.move", map[string]any{"stem": stemAlpha, "to": "todo"}, "a@example.com", "dangerously_override_lease_status")
 	y.mustRefuse("tickets.move", map[string]any{"stem": stemAlpha, "to": "todo", "dangerously_override_lease_status": true}, "reason")
 	y.mustRefuse("tickets.close", map[string]any{"stem": stemAlpha, "status": "done"}, "a@example.com")
+	// A refused move or close leaves the file in place and writes nothing.
+	if _, err := os.Stat(filepath.Join(y.root, "ai-docs", "tickets", "ready", stemAlpha+".md")); err != nil {
+		t.Fatalf("a refused move/close moved the ticket file: %v", err)
+	}
+	if got := y.git("status", "--porcelain"); got != "" {
+		t.Fatalf("a refused move/close changed the checkout:\n%s", got)
+	}
+	if e.remoteTip() != tip {
+		t.Fatal("a refused move/close wrote to the index")
+	}
 	y.mustCall("tickets.move", map[string]any{"stem": stemAlpha, "to": "todo", "dangerously_override_lease_status": true, "reason": "user moved it"})
 	if l := e.lease(stemAlpha); l.Email != "a@example.com" || l.Track != "develop" {
 		t.Fatalf("C6: an override move transferred the lease: %+v", l)
@@ -638,5 +650,66 @@ func TestLiveCloseLeavesLeaseAcquiredAfterGuardRead(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(x.root, "ai-docs", "tickets", ".done", stemAlpha+".md")); err != nil {
 		t.Fatalf("the ticket file did not move: %v", err)
+	}
+}
+
+// The ownership filter applies before the limit: with the first-listed
+// ticket held by another person, limit 1 still returns one ticket, and
+// limit 2 returns both remaining ones.
+func TestOwnershipFilterAppliesBeforeLimit(t *testing.T) {
+	e := newIxEnv(t)
+	x := e.clone("x", "a@example.com")
+	y := e.clone("y", "b@example.com")
+	x.init()
+	var first []wsdoc.TicketInfo
+	if err := json.Unmarshal([]byte(x.query("format", "json", "limit", 1)), &first); err != nil || len(first) != 1 {
+		t.Fatalf("unfiltered limit 1 = %v (%v)", first, err)
+	}
+	held := first[0].Stem
+	y.acquire(held)
+	e.clock.Advance(2 * time.Minute) // past the read TTL: x sees y's lease
+
+	for _, limit := range []int{1, 2} {
+		got := x.queryJSON("unleased_or_mine", true, "limit", limit)
+		if _, ok := got[held]; ok || len(got) != limit {
+			t.Fatalf("filtered limit %d = %v, want %d tickets without %s", limit, keys(got), limit, held)
+		}
+	}
+}
+
+// T2: a never-seen clone discovers the index but cannot fetch it: the host
+// move still succeeds and moves the file, with exactly one ticket-index line
+// reporting the unrecorded registration.
+func TestPiggybackWriteFailureKeepsHostMove(t *testing.T) {
+	e := newIxEnv(t)
+	x := e.clone("x", "a@example.com")
+	y := e.clone("y", "b@example.com")
+	x.init()
+	y.runner.failFetch.Store(true)
+	out := y.mustCall("tickets.move", map[string]any{"stem": stemGamma, "to": "idea"})
+	if n := strings.Count(out, "ticket-index:"); n != 1 || !strings.Contains(out, "ticket-index: the register of "+stemGamma+" was not recorded in the index") {
+		t.Fatalf("move output = %s, want one ticket-index line reporting the failure", out)
+	}
+	if _, err := os.Stat(filepath.Join(y.root, "ai-docs", "tickets", "idea", stemGamma+".md")); err != nil {
+		t.Fatalf("the ticket file did not move: %v", err)
+	}
+}
+
+// T3: tickets.sage_stamp registers the stamped stem in index mode.
+func TestSageStampRegistersInIndexMode(t *testing.T) {
+	e := newIxEnv(t)
+	x := e.clone("x", "a@example.com")
+	x.init()
+	const stem = "260924-feat-stamped"
+	mustWrite(t, x.root, "ai-docs/tickets/todo/"+stem+".md", ixTicket("Stamped"))
+	if _, ok := e.index().Registrations[stem]; ok {
+		t.Fatal("setup: the local ticket is already registered")
+	}
+	out := x.mustCall("tickets.sage_stamp", map[string]any{"stem": stem, "stage": "design", "verdicts": []any{map[string]any{"reviewer": "design", "verdict": "pass"}}})
+	if strings.Contains(out, "ticket-index:") {
+		t.Fatalf("sage_stamp output = %s", out)
+	}
+	if _, ok := e.index().Registrations[stem]; !ok {
+		t.Fatal("sage_stamp did not register the stem")
 	}
 }
