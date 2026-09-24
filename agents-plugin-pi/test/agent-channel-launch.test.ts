@@ -15,7 +15,10 @@ import { createAgentStorageContext } from "../src/agent-storage.ts";
 import { CHANNEL_PROTOCOL_VERSION, connectChannelEndpoint, readAndDeleteChannelBootstrap, type ChildChannel, type ParentChannel } from "../src/agent-channel.ts";
 import { agentCostRefreshRef, sendToAgent, spawnAgent, stopAgent, type RpcAgentRecord } from "../src/spawner.ts";
 import { DESCENDANT_USAGE_MESSAGE, descendantUsageReporterRef } from "../src/agent-usage-rollup.ts";
+import { captureForkResume, rehydrateForkRecord, type PersistedForkResume } from "../src/ask.ts";
+import { SubtreeUpstream } from "../src/subtree-lifecycle.ts";
 import { closeFakeChildren, connectFakeChild, type FakeChildOptions } from "./fixtures/channel-child.ts";
+import { until } from "./fixtures/subtree-channels.ts";
 
 const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const EXTENSION_ENTRY = join(PACKAGE_ROOT, "src", "index.ts");
@@ -292,6 +295,40 @@ describe("descendant-usage reports over the launch's channel", () => {
       assert.deepEqual(calls, ["refresh", "evaluate"]);
     } finally { rpc.restore(); }
   });
+});
+
+test("an older fork resume that still carries subtreeChannel relaunches with a fresh channel and reports subtree state over it", async () => {
+  const rpc = installRpcHarness();
+  const registry = new Map<string, RpcAgentRecord>();
+  const ctx = contexts(registry, {});
+  try {
+    const dormant = await ctx.dormant("fork");
+    const delegation = { version: 1, depth: 1, maxDepth: 2, authority: "lead", tools: ["ws-agent-spawn"] };
+    const older = {
+      ...captureForkResume(dormant),
+      delegation, waitingOnChildren: true,
+      subtreeChannel: { path: join(dirname(dormant.sessionPath), "subtree.json"), nonce: "retired" },
+    } as unknown as PersistedForkResume;
+    const revived = rehydrateForkRecord(dormant.agentId, older);
+    registry.set(revived.agentId, revived);
+    let child: ChildChannel | undefined;
+    rpc.state.hook = async function () { child = await connectFakeChild(this.options?.env, this.options?.args, { subtree: null }); };
+
+    await sendToAgent(registry as any, ctx.resume as any, revived.agentId, "again");
+    assert.ok(child && revived.channel?.live, "the relaunch bound a fresh channel the child holds");
+    assert.equal(revived.channel.generation, revived.launchGeneration, "under the relaunch's own generation");
+    assert.equal("subtreeChannel" in revived, false);
+    assert.equal(revived.waitingOnChildren, true, "no snapshot over the fresh channel yet reads waiting");
+
+    const upstream = new SubtreeUpstream(child);
+    upstream.publish({ outstanding: 0, active: 1, deliveries: 0, delegated: true, turnOwed: false, turnsStarted: 0, descendants: [{ id: "grandchild", parentId: null, depth: 0, role: "worker", live: true }] });
+    await until(() => revived.subtreeRevision === 1, "the busy snapshot");
+    assert.equal(revived.waitingOnChildren, true);
+    assert.deepEqual(revived.subtreeDescendants?.map(row => row.id), ["grandchild"]);
+    upstream.publish({ outstanding: 0, active: 0, deliveries: 0, delegated: true, turnOwed: false, turnsStarted: 0, descendants: [] });
+    await until(() => revived.subtreeRevision === 2, "the quiescent snapshot");
+    assert.equal(revived.waitingOnChildren, false, "the fresh channel's state drives the record");
+  } finally { rpc.restore(); }
 });
 
 test("concurrent spawns never share a generated alias: the guards and the registration are one synchronous step after the bind", async () => {

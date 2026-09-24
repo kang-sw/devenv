@@ -21,7 +21,7 @@ import {
   type SubtreeView,
 } from "../src/subtree-lifecycle.ts";
 import type { RpcAgentRecord, RpcAgentRegistry } from "../src/spawner.ts";
-import { fakeParentChannel, fakeUplink, quiescentSnapshot, subtreeChannelPair } from "./fixtures/subtree-channels.ts";
+import { fakeParentChannel, fakeUplink, idleOwnTurn, quiescentSnapshot, subtreeChannelPair } from "./fixtures/subtree-channels.ts";
 
 const roots: string[] = [];
 const opened: Array<{ close(): void }> = [];
@@ -50,7 +50,7 @@ describe("child side: revisioned snapshots and the busy fence", () => {
     const link = fakeUplink();
     const registry: RpcAgentRegistry = new Map();
     let deliveries = 0;
-    installSubtreePublisher(registry, new SubtreeUpstream(link.channel), () => deliveries);
+    installSubtreePublisher(registry, new SubtreeUpstream(link.channel), () => deliveries, idleOwnTurn);
     assert.deepEqual(link.snapshots().map(s => s.revision), [1], "installation publishes the initial snapshot");
 
     publishSubtree(registry);
@@ -72,7 +72,7 @@ describe("child side: revisioned snapshots and the busy fence", () => {
     const sent = link.snapshots();
     assert.deepEqual(sent.map(s => s.revision), [1, 2, 3, 4, 5, 6], "every effective transition is one send; a repeat dispatch mark with no change is none");
     assert.deepEqual(sent.at(-1), {
-      outstanding: 1, active: 1, deliveries: 1, delegated: true, revision: 6,
+      outstanding: 1, active: 1, deliveries: 1, delegated: true, turnOwed: false, turnsStarted: 0, revision: 6,
       descendants: [
         { id: "child", parentId: null, depth: 0, role: "worker", live: false },
         { id: "nested", parentId: "child", depth: 1, role: "explore", live: true },
@@ -82,7 +82,7 @@ describe("child side: revisioned snapshots and the busy fence", () => {
 
   test("a publisher with no parent channel has no fence and admits synchronously", () => {
     const registry: RpcAgentRegistry = new Map();
-    installSubtreePublisher(registry, undefined, () => 0);
+    installSubtreePublisher(registry, undefined, () => 0, idleOwnTurn);
     const admission = beginSubtreeDispatch(registry);
     assert.equal(typeof admission, "function");
     assert.equal(publishSubtree(registry)?.active, 1);
@@ -93,7 +93,7 @@ describe("child side: revisioned snapshots and the busy fence", () => {
   test("no dispatch is admitted before the parent acknowledges the busy revision", async () => {
     const link = fakeUplink();
     const registry: RpcAgentRegistry = new Map();
-    installSubtreePublisher(registry, new SubtreeUpstream(link.channel), () => 0);
+    installSubtreePublisher(registry, new SubtreeUpstream(link.channel), () => 0, idleOwnTurn);
     link.ack(1);
     let admitted: (() => void) | undefined;
     const admission = beginSubtreeDispatch(registry);
@@ -117,13 +117,13 @@ describe("child side: revisioned snapshots and the busy fence", () => {
   test("a dropped acknowledgment, a disconnect during the wait, and a down channel each refuse the dispatch and undo its admission", async () => {
     const dropped = fakeUplink();
     const droppedRegistry: RpcAgentRegistry = new Map();
-    installSubtreePublisher(droppedRegistry, new SubtreeUpstream(dropped.channel, { ackTimeoutMs: 30 }), () => 0);
+    installSubtreePublisher(droppedRegistry, new SubtreeUpstream(dropped.channel, { ackTimeoutMs: 30 }), () => 0, idleOwnTurn);
     await assert.rejects(Promise.resolve(beginSubtreeDispatch(droppedRegistry)), /nested dispatch refused: the parent did not acknowledge revision 2 within 30ms/);
     assert.equal(dropped.snapshots().at(-1)!.active, 0, "the refused admission is republished as idle");
 
     const cut = fakeUplink();
     const cutRegistry: RpcAgentRegistry = new Map();
-    installSubtreePublisher(cutRegistry, new SubtreeUpstream(cut.channel), () => 0);
+    installSubtreePublisher(cutRegistry, new SubtreeUpstream(cut.channel), () => 0, idleOwnTurn);
     const waiting = Promise.resolve(beginSubtreeDispatch(cutRegistry));
     cut.disconnect();
     await assert.rejects(waiting, /nested dispatch refused: the channel to the parent disconnected/);
@@ -132,7 +132,7 @@ describe("child side: revisioned snapshots and the busy fence", () => {
     const down = fakeUplink();
     down.connected = false;
     const downRegistry: RpcAgentRegistry = new Map();
-    assert.doesNotThrow(() => installSubtreePublisher(downRegistry, new SubtreeUpstream(down.channel), () => 0), "publication while disconnected never throws");
+    assert.doesNotThrow(() => installSubtreePublisher(downRegistry, new SubtreeUpstream(down.channel), () => 0, idleOwnTurn), "publication while disconnected never throws");
     await assert.rejects(Promise.resolve(beginSubtreeDispatch(downRegistry)), /nested dispatch refused: the channel to the parent is down/);
     assert.equal(publishSubtree(downRegistry)?.active, 0);
     assert.equal(down.sent.length, 0);
@@ -143,7 +143,7 @@ describe("child side: revisioned snapshots and the busy fence", () => {
     const upstream = new SubtreeUpstream(link.channel);
     assert.deepEqual(upstream.resume(), {}, "nothing to resume before the first publication");
     const registry: RpcAgentRegistry = new Map();
-    installSubtreePublisher(registry, upstream, () => 0);
+    installSubtreePublisher(registry, upstream, () => 0, idleOwnTurn);
     link.disconnect();
     registry.set("child", record("child", { running: true }));
     publishSubtree(registry);
@@ -155,7 +155,7 @@ describe("child side: revisioned snapshots and the busy fence", () => {
   test("a change published before the reconnect completes is resent once connected", () => {
     const link = fakeUplink();
     const registry: RpcAgentRegistry = new Map();
-    installSubtreePublisher(registry, new SubtreeUpstream(link.channel), () => 0);
+    installSubtreePublisher(registry, new SubtreeUpstream(link.channel), () => 0, idleOwnTurn);
     link.disconnect();
     // The hello's resume section was already taken at revision 1; this change lands in the handshake window.
     registry.set("child", record("child", { running: true }));
@@ -203,6 +203,24 @@ describe("parent side: the revision-ordered view", () => {
     assert.equal(views.at(-1)?.waiting, false, "the resumed snapshot at the last-seen revision restores the view");
     assert.deepEqual(channel.acks, [2, 2]);
   });
+
+  test("a snapshot missing the wake accounting is rejected unacknowledged and the view keeps reading waiting", () => {
+    const channel = fakeParentChannel();
+    const views: SubtreeView[] = [];
+    observeSubtreeChannel(channel.parent, view => views.push(view));
+    const { turnOwed: _owed, ...noOwed } = snapshot(1);
+    const { turnsStarted: _started, ...noStarted } = snapshot(2);
+    channel.deliver(noOwed);
+    channel.deliver(noStarted);
+    channel.deliver({ ...snapshot(3), turnOwed: "no" });
+    channel.deliver({ ...snapshot(4), turnsStarted: -1 });
+    channel.hello({ subtree: noStarted });
+    assert.deepEqual(views, [{ waiting: true }], "no older-shape snapshot is applied, by message or by resume");
+    assert.deepEqual(channel.acks, [], "and none is acknowledged");
+    channel.deliver(snapshot(5));
+    assert.equal(views.at(-1)?.waiting, false, "a complete snapshot is applied");
+    assert.deepEqual(channel.acks, [5]);
+  });
 });
 
 for (const kind of ["pipe", "tcp"] as const) {
@@ -212,7 +230,7 @@ for (const kind of ["pipe", "tcp"] as const) {
       let view: SubtreeView | undefined;
       observeSubtreeChannel(parent, next => { view = next; });
       const registry: RpcAgentRegistry = new Map();
-      installSubtreePublisher(registry, upstream, () => 0);
+      installSubtreePublisher(registry, upstream, () => 0, idleOwnTurn);
 
       const samples: number[] = [];
       for (let i = 0; i < 200; i++) {

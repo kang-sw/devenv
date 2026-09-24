@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: c909082454839a3b
 sage-review-completeness-reviewed: c909082454839a3b
+completed: 2026-09-24
 ---
 
 # Pi parent holds a settled child's terminal after its subtree wait clears
@@ -105,3 +106,27 @@ Verification:
 - **Strict parse:** a snapshot missing the new fields is rejected and the view keeps reading waiting.
 - **Legacy relaunch:** an older `PersistedForkResume` record carrying `subtreeChannel` loads, relaunches with a fresh channel, and reports subtree state over it.
 - **Full suite:** `npm test` in `agents-plugin-pi/` passes.
+
+### Result (6f2ccffb) - 2026-09-24
+
+Landed in `6f2ccffb` (implementation) and `97cce876` (review round 1 fixes).
+
+- **Child side.** `SubtreeSnapshot` carries `turnOwed` and `turnsStarted` from a per-process `ownTurnRef` (`spawner.ts`). A push wake reservation (`requestPushWake`) and an `agent_end` boundary batch that Pi continues with set `owed`. The next own `agent_start` increments `started` and clears `owed` before its flush publishes, so one snapshot carries both. A steer or followUp consumed inside a running loop never sets `owed`. `installSubtreePublisher` takes the `ownTurn` accessor as a required fourth argument.
+- **Parent side.** `parseSubtreeSnapshot` rejects a snapshot that is missing either field, and that snapshot stays unacknowledged. The revision-based `quiescentRevision` inference in `observeChildSubtree` is gone. Every not-waiting view calls `releaseSettlementHold(snapshot)`. That keeps its existing launch, generation and running guards, and admits only when `!turnOwed && turnsStarted <= observedTurnStarts`. `observedTurnStarts` lives in the per-client `attachEventListener` closure, so it resets on relaunch.
+- **Settle publish reorder.** `attachEventListener` now publishes a settled event after `admitSettlement`. Publishing it first let a transient quiescent snapshot go out before the terminal delivery existed, which the new rule would have released early. The child-process harness caught this.
+- **Protocol.** `CHANNEL_PROTOCOL_VERSION` is not bumped:
+  - An old parent ignores the extra fields.
+  - A bump would fail the hello of any child launched after an on-disk update while an old parent is still running.
+  - A new parent with an old child (an on-disk downgrade only) rejects the snapshot and holds, which is fail-closed.
+- **Verification.**
+  - Every item on the list has a test in `test/recursive-worker.test.ts`, `test/subtree-lifecycle.test.ts` (strict parse) and `test/agent-channel-launch.test.ts` (legacy `PersistedForkResume` relaunch).
+  - A child-process harness drives the real `registerPushFlush`, `installSubtreePublisher` and `attachEventListener`.
+  - Added in review: a relaunch counter-scope test, and an assertion that an owed flip never rides a send of its own.
+  - Mutation checks, each caught by the suite: removing the owed check, removing the count check, counting after the flush, not owing at the boundary, not owing on the wake, publishing before the settle admits, and making the parent counter module-scoped or per-record.
+  - `npm test`: 1782 tests, 1780 pass, 0 fail, 2 skipped.
+- **Forward findings.**
+  - A settle that arrives while the view is already not waiting is still admitted directly. If the socket runs ahead of stdout by a whole settle, wake and start interval, the previous generation's answer can be reported before the wake turn's own. This gap predates this ticket.
+  - A settle-time hold on `turnsStarted > observedTurnStarts` was tried and reverted. It broke the in-process production fork lifecycle tests, where parent listeners never see the child's `agent_start`. It also widens fail-closed to every direct settle.
+  - A boundary continuation whose `agent.continue()` throws leaves `owed` set until the next prompted turn. A settle held meanwhile stays held. This is fail-closed, as decided.
+  - Goal-loop reminder reservations do not set `owed`, because the goal loop is lead-only.
+  - The `97cce876` AI Context says the module-scope counter mutation failed "two existing socket-ahead tests". One of the two was the reverted settle-time test; only one other existing test fails.
