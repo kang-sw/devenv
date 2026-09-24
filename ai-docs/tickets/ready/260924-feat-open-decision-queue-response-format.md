@@ -6,8 +6,8 @@ related:
   260611-chore-lead-discussion-gap-discipline: amended - its visible task-list primitive for the queue is removed
 sage-review-design: completed
 sage-review-completeness: completed
-sage-review-design-reviewed: d9cdc0c581a11810
-sage-review-completeness-reviewed: d9cdc0c581a11810
+sage-review-design-reviewed: c25fbf49ff7ac72a
+sage-review-completeness-reviewed: c25fbf49ff7ac72a
 ---
 
 # Open Decision Queue: ticket-held state, standard response format, promotion gate
@@ -173,6 +173,37 @@ file.
   section as a new item; after it settles and the section is deleted, the
   existing fix-then-re-stamp path applies.
 
+### Thought experiment before applying a change
+
+- **Trace every incoming change through the ticket before writing it.**
+  Before any content enters the ticket mid-settlement - a user correction,
+  pushback, or change of direction; a new proposal of the lead's own; an item
+  brought in by the fact populator or a reviewer - the lead runs a thought
+  experiment: apply the change to the ticket as written and trace its
+  consequences through the ticket's `## Decisions`, `## Constraints`,
+  phases, verification expectations, and `## Prior Decisions`, and through
+  the rules of the workflow document the ticket changes (for a ticket that
+  edits a playbook, that playbook's rules). Contradictions are resolved
+  before the change is reflected; every new decision the resolution needs is
+  raised in the same response as a new item, not discovered one reviewer
+  round later. The trace runs before the change is recorded anywhere in the
+  ticket, including recording a new item in the temporary section; the
+  initial draft, written before any queue exists, is covered by the same
+  instruction.
+- **Pending knock-ons hold the triggering change.** While knock-on items the
+  trace raised are open, the triggering change stays in the temporary
+  section (confirmed, not yet moved to `## Decisions`) until they settle. A
+  resolution that would alter an already-confirmed decision is raised as a
+  reopened item, never applied by the lead on its own.
+- **Behavior, not mechanism.** This is a reasoning instruction in the
+  playbook's ODQ section. Rejected: a new checklist item, tool step, or
+  gate - the observed failure (a settlement that chains through several
+  review rounds because each change's knock-on contradictions surface late)
+  is one of the lead not thinking a change through, which a mechanism does
+  not supply. Rejected: triggering only on user pushback - in the motivating
+  session about half of the late contradictions came from the lead's own
+  proposals.
+
 ### Unchanged and amended semantics
 
 - **Unchanged.** Queue membership, reconcile item by item, stating the
@@ -287,7 +318,8 @@ Verification expectations:
 - Rendered `lead-ticket` (Claude and Codex harness variants) contains no
   task-list guidance, and pins by test the first-presentation block
   template, the `(n) [open]` one-line re-ask, the ticket-section storage and
-  settlement moves, and the blocking final confirmation.
+  settlement moves, the blocking final confirmation, and the
+  thought-experiment instruction.
 
 ## Sage Review Round 1 (2026-09-24)
 
