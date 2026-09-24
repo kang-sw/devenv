@@ -486,17 +486,7 @@
       "registered_at": "2026-09-24T10:41:27Z"
     },
     "260924-idea-ownership-dogfood-scratch-b": {
-      "registered_at": "2026-09-24T10:41:54Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "active",
-        "touched_at": "2026-09-24T10:41:54Z",
-        "impl": {
-          "branch": "impl/develop/irate-growl-half"
-        }
-      }
+      "registered_at": "2026-09-24T10:41:54Z"
     }
   }
 }
