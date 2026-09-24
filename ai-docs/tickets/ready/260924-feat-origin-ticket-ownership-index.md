@@ -980,6 +980,43 @@ re-runs of A2, A3, F1, F2. The no-ref path stays
 byte-identical (A1 re-run, including its override-param clause for
 `tickets.move` and `tickets.close`, which Phase 2 cannot yet exercise).
 
+### Result (a27aba50) - 2026-09-24
+
+**Surface.**
+
+- `tickets.query`:
+  - Every projection carries `ownership {level, email, track, worktree, phase, touched_at, impl_branch, provisional, origin_closed, index_state, cache_age_seconds}`.
+  - The levels are `self` (the caller's triple), `local` (another track of this clone), `remote`, `unowned`, and `unknown`. For `local`, `worktree` is computed from `git worktree list` and never stored.
+  - Compact discovery lists own and unowned tickets in full. It collapses the rest under `held elsewhere or closed on origin (N):`. Point-resolve and JSON are never collapsed.
+  - Trailing `ticket-index:` lines carry discard reports, the stale-cache age, and the pending-count marker.
+- `unleased_or_mine` keeps self, unowned, and unknown tickets, and drops tickets closed on origin. It runs through a new generic `wsdoc.TicketFindOptions.Exclude` hook before pagination, so it composes with `assigned_to_me`.
+- `tickets.move` and `tickets.close` take `dangerously_override_lease_status` and `reason`. Their guard evaluates the overlaid view, online or offline:
+  - A different email is refused without the flag and reason.
+  - Another clone or track gets a `ticket-index: ... is held by ...` warning line.
+  - The lease never moves.
+  - An override rides the piggyback write as an audited entry.
+- `git.status` adds `ticket owner:` for the active impl ticket and `leased to this track:`. JSON gains `impl_ticket.owner` and `leases`. It reads the cache only and makes no remote call.
+
+**Library changes.**
+
+- `Client.Read` reports the unknown state when discovery saw the ref but the fetch failed with no cache (F5). A never-seen, unreachable remote stays index-absent (A10).
+- A write whose index is unchanged but carries audit lines still commits. C6 found that an override move on a leased ticket otherwise left no audit.
+
+**Verification.**
+
+- `go test ./internal/mcp/ -run 'TestNoRefPath|TestQuery|TestOwnership|TestOfflineView|TestMoveCloseGuard|TestGitStatusShowsOwner'` covers:
+  - A1 with the override params on move and close, A2 and A3 (counted remote calls)
+  - F1, F2, I8 (no push on an online query), F5, I23
+  - G1, G2, C5
+  - G3, G4, G5, E4/E5 query hint, E9
+  - the view clauses of I1, I3, and I11, plus I14 and I15
+  - C6
+  - `git.status` owner
+- The full Go suite passes with a clean HOME. `go test -race -count=2 ./internal/wsindex/` passes.
+- The `agents-plugin` unittest suite fails only on the known `test_delegate_and_sibling_exact_prose`. The `wsflow` tests pass.
+
+**Decision.** The ticket leaves the GC stale flag optional ("may"), and it is not rendered. `phase closed (pending landing)` together with `since <touched_at>` gives the reader the same signal.
+
 ### Phase 4: Playbook integration and dogfood
 
 **Goal.**
