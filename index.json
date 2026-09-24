@@ -473,7 +473,14 @@
       "registered_at": "2026-09-24T12:38:53Z"
     },
     "260924-bug-ticket-index-read-timeout-below-ssh-roundtrip": {
-      "registered_at": "2026-09-24T12:05:14Z"
+      "registered_at": "2026-09-24T12:05:14Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-09-24T13:59:52Z"
+      }
     },
     "260924-chore-pin-ticket-index-playbook-contracts": {
       "registered_at": "2026-09-24T13:42:47Z"
