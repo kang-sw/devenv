@@ -57,7 +57,7 @@ This note does not relax the baseline. A change that weakens it is a defect:
 - reconnect only after the previous connection closed, with the same credential and generation;
 - the child reads the bootstrap values and removes them from its environment before any tool runs.
 
-Other OS users on the same machine remain in scope, and the credential is what stops them. Loopback TCP is reachable by any local user, and named-pipe default access is still unverified.
+Other OS users on the same machine remain in scope, and the credential is what stops them. Loopback TCP is reachable by any local user. The evidence round measured the pipe backends' default access; see `#### Evidence round (2026-09-24)` under Verified Findings.
 
 ## Side-Channel Inventory
 
@@ -98,6 +98,69 @@ An Explore inventory of `agents-plugin-pi/src/` on 2026-09-24 found 18 mechanism
 - (verified) `pruneStaleAgentHomes` scans every owner namespace under `<agentDir>/ws-agents/`, including other Pi sessions' namespaces (`agents-plugin-pi/src/agent-storage.ts`). An intra-tree channel cannot reach this cross-session contention.
 - Incident artifacts show that the approved preflight command did not start before the worker was stopped. The saved decision file contains an unencoded `|` in its ID, while current source encodes that character, and ownership validation rejects a raw pending ID containing `|`. The loaded parent and child code versions and the actual polled path remain unconfirmed. The transcript error is separately explained by ownership validation. (`260923-bug-pi-execute-approval-accepted-worker-hangs`; `agents-plugin-pi/src/execute-gateway.ts`, `src/agent-storage.ts`.)
 
+#### Evidence round (2026-09-24)
+
+A delegated, provider-free prototype ran in a separate worktree. Its code is spike commit `339f9c20` on the local, never-merged branch `spike/pi-channel-evidence`, under `agents-plugin-pi/spike/channel-evidence/`. The README there gives the rerun command for each experiment.
+
+- **Setup.**
+  - Platforms: macOS (Node 25.9, libuv 1.52.1); Linux in a non-root `node:24-bookworm` Docker container (Node 24.21, libuv 1.52.1); native Windows 10.0.26200 on the smoke host (Node 24.15, libuv 1.51.0).
+  - Children were real Pi 0.84.4 `RpcClient` processes, direct and nested.
+  - Pi RPC mode exits when no model is configured, so the prototype registered Pi-ai's in-process faux provider. That involves no network and no LLM. The faux model also drives the real bash tool through the agent loop.
+  - No evidence contradicted a Confirmed Decision.
+- **Backend contract.**
+  - One NDJSON-over-`net.Socket` wrapper served both the pipe and TCP backends, each forced explicitly.
+  - The shared suite passed on all three platforms. It covered:
+    - both directions;
+    - embedded newline, U+2028, and non-ASCII payloads;
+    - 20k messages each way, in order and exactly once;
+    - a 512 KiB frame split across chunks;
+    - close reaching the peer;
+    - send-after-close throwing.
+- **Direct child.** A real Pi child completed the authenticated hello and ping/pong on all three platforms, with bootstrap values passed through `RpcClientOptions.env`. Measured start-to-ready time was about 0.3–0.4 s on macOS and Linux and 1.2–1.3 s on Windows.
+  - `RpcClient.start()` resolves after a fixed 100 ms wait, not at readiness (`dist/modes/rpc/rpc-client.js`). The parent must await the hello itself.
+  - Any extension-factory throw makes Pi exit with code 1 at startup (`dist/main.js`, the `Failed to load extension` path). A child whose hello fails is therefore stopped at startup.
+- **Nested hop.** A child bound its own channel and launched a grandchild. The grandchild's ready and pong messages reached the root through the child on all three platforms. The grandchild saw only the child's bootstrap values, and deleted them.
+- **Failure injection.**
+  - A failed pipe bind fell back to TCP. Tested failures were a squatted name on every platform, plus a missing directory and an over-long path on Unix. When both backends failed, the channel failed closed, and the diagnostic named each backend's error.
+  - Connection policy results:
+    - a second authenticated connection while one was live got `busy`, and the first kept working;
+    - reconnect after close with the same credential and generation succeeded;
+    - a wrong credential was rejected with `auth`, a stale generation with `generation`, and a bad version with `version`;
+    - an unauthenticated connection did not occupy the live slot;
+    - a real Pi child reconnected with its in-memory credential.
+  - After a child SIGKILL, the public `RpcClient.getState()` rejected with `Agent process exited`. That took 2–4 ms on macOS and Linux and 10 ms on Windows, where it reports `code=1` with no signal. Inside the child, the same observation of a grandchild kill took 3–10 ms.
+  - Freeing the live slot for a reconnect needed a connection-end signal. The prototype used an advisory backend `onEnd` event.
+- **Bootstrap env read-then-delete.**
+  - Source path: `RpcClient.bash`, the agent bash tool, and the adapter's `pi.exec` all build the child environment from the live `process.env` at execution time (`core/tools/bash.js`, `utils/shell.js`, `core/exec.js`). Extension factories are awaited inside runtime creation, before `runRpcMode` attaches the stdin reader (`main.js`, `rpc-mode.js`), so no RPC command or tool can run before load completes.
+  - Measured on all three platforms: the values were absent from `RpcClient.bash`, from the faux-driven bash tool, and from a Pi launched inside that bash. In a negative control with the delete disabled, the values leaked, and the parent rejected the nested Pi as `busy`. With the hello delayed by 1.5 s, `bash` and `getState` calls sent right after `start()` returned only after the hello was accepted.
+  - Two caveats:
+    - The original process environment block still shows deleted values to same-user readers: `ps -E` on macOS and `/proc/<pid>/environ` on Linux. This is outside the threat model.
+    - A process spawned before the delete inherits the values. The adapter's ws-mcp stdio client, for example, spreads `process.env` (`agents-plugin-pi/src/mcp-stdio-client.ts`).
+- **Unix domain sockets.**
+  - Node binds without silent truncation. Over-long paths fail with `EINVAL` at 110 bytes and above; 103 and 104 bytes bind. `sun_path` is 104 bytes on macOS and 108 on Linux. A missing directory reports `EACCES`, because libuv maps `ENOENT` to it.
+  - `os.tmpdir()` is a usable location. On macOS it is per-user with mode 0700, and a default path is 73 bytes. On Linux it is `/tmp`, mode 1777, and the socket is created 0755. Another user's connect fails with `EACCES` in Docker, while loopback TCP from that user connects.
+  - `server.close()` unlinks the socket. SIGKILL or `process.exit()` without close leaves the file, and then `listen` fails with `EADDRINUSE` while `connect` gets `ECONNREFUSED`. Probing with connect and unlinking on `ECONNREFUSED` restores bind. Pi's RPC shutdown ends in `process.exit`, so a child that is also a parent needs a `process.once("exit")` close hook. With that hook, the macOS run left no files.
+- **Windows named pipes.**
+  - libuv creates the pipe with a NULL security descriptor and without `PIPE_REJECT_REMOTE_CLIENTS`.
+  - Measured SDDL: `O:BA D:(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;BA)(A;;FR;;;WD)(A;;FR;;;AN)`. System and Administrators get full access; Everyone and Anonymous get read-only. The owner was elevated, so a non-elevated owner's ACE is unverified.
+  - A read-only client cannot write a hello.
+  - Connections through `\\127.0.0.1\pipe\…`, `\\<hostname>\pipe\…`, and `\\localhost\pipe\…` were all accepted. Remote clients are not rejected, so the credential is the barrier, as the threat model assumes. Pipe names are listable by any local process.
+  - Killing the listener frees the name with no stale-file cleanup. Binding a name twice fails with `EADDRINUSE`.
+- **Acknowledgment round trip** (p50/p99):
+
+  | setting | pipe | TCP |
+  |---|---|---|
+  | in-process, macOS / Linux / Windows | 8/17 · 7/20 · 33/69 µs | 22/43 · 8/16 · 42/69 µs |
+  | Pi child, macOS / Linux / Windows | 18/53 · 21/246 · 80/267 µs | 60/85 · 21/86 · 80/181 µs |
+
+  The worst single sample was 0.75 ms, about three orders of magnitude below the time to spawn a grandchild (0.3–1.3 s).
+- **Gaps.**
+  - No second real OS user was tested on macOS or Windows; those conclusions rest on the measured directory mode and SDDL.
+  - The Windows remote-client test used SMB loopback as the same user, not a separate machine.
+  - Linux ran in Docker, not on bare metal.
+  - Stop, resume, a generation bump across a real relaunch, and concurrent sibling launches were covered only at the policy level, not through the ws adapter.
+  - The readiness hello replacing the fork and web-tools readiness handshakes was not prototyped.
+
 ### Confirmed Decisions
 
 - **Scope.** The following move to the channel:
@@ -134,14 +197,17 @@ An Explore inventory of `agents-plugin-pi/src/` on 2026-09-24 found 18 mechanism
 ### Proposals
 
 - Non-authoritative: a versioned hello handshake, with message types kept separate for transient approvals, subtree snapshots, and cumulative usage snapshots.
+- Non-authoritative, from the evidence round; to be settled before `260924-feat-pi-agent-channel-transport` is promoted:
+  - **Connection-end signal.** The policy "reconnect only after the previous connection closed" needs a signal that frees the live slot. Candidate: every backend must eventually report connection end, and a backend without native close detection meets that obligation internally, for example with a lease. Process lifecycle still decides child death.
+  - **Readiness boundary.** The parent treats a child as ready only after an accepted hello. It pairs the hello timeout with lifecycle observation, because `start()` resolution is not readiness. The child fails closed by throwing from its extension factory.
+  - **Unix socket cleanup.** Use a short per-user directory under `os.tmpdir()`. Close in an exit hook, and before binding, sweep that directory with probe-then-unlink for stale sockets. Windows pipes need neither.
+  - **Delete ordering.** Deleting the bootstrap values is the adapter extension factory's first action, before any process is spawned, including the ws-mcp stdio client.
 
 ### Open Questions
 
-- Windows named pipes: what is the default access for a pipe created by Node, and are remote (SMB) clients rejected? Unix domain sockets: what path-length limit applies, where should the socket live (a short temp path rather than the child home), and how are stale socket files cleaned up after a crash?
-- Does Pi's bash tool read `process.env` at command execution time, and does extension load complete before the first tool runs? Read-then-delete depends on both.
 - How is an already-started command distinguished from an unconsumed approval across a disconnect? What form should a "started" marker take?
-- Is the extra acknowledgment round trip before grandchild dispatch acceptable in latency terms?
 - How should eviction fold a child's cumulative subtree usage into the owner checkpoint's evicted baseline without double counting?
+- Answered by the evidence round: named-pipe default access and remote clients, Unix socket path length, location, and cleanup, bash-tool env timing and extension-load ordering, and acknowledgment latency before grandchild dispatch. See `#### Evidence round (2026-09-24)`.
 
 ### Rejected Alternatives
 
