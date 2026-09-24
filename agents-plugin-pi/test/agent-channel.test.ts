@@ -160,7 +160,7 @@ for (const kind of ["pipe", "tcp"] as const) {
       parent.send(approvalDecisionMessage("call-1", { decision: "run-instead", command: "echo x" }));
       assert.deepEqual(await wait, { decision: "run-instead", command: "echo x" });
       assert.deepEqual(await ack, [{ ...approvalConsumedMessage("call-1"), gen: 6 }]);
-      assert.deepEqual(gate.resume(), {});
+      assert.deepEqual(gate.resume(), { approval: { consumed: ["call-1"] } });
 
       // The acknowledgment cannot be sent (the connection is gone by the time
       // the decision is handled): the decision is not consumed, the cmd_id
@@ -176,7 +176,7 @@ for (const kind of ["pipe", "tcp"] as const) {
       assert.equal(gate.pending, "call-2");
       const reconnected = new Promise<Record<string, unknown>>(resolve => parent.onConnection((_conn, hello) => { if (hello.reconnect) resolve(hello.resume); }));
       parent.live!.close();
-      assert.deepEqual(await reconnected, { approval: { pending: "call-2" } });
+      assert.deepEqual(await reconnected, { approval: { pending: "call-2", consumed: ["call-1"] } }, "still waiting, and not among the consumed");
       const ack2 = collect(cb => parent.onMessage(cb), 1);
       parent.send(approvalDecisionMessage("call-2", { decision: "deny", reason: "again" }));
       assert.deepEqual(await stuck, { decision: "deny", reason: "again" }, "only the decision over the new connection, acknowledged over it, is consumed");
@@ -222,13 +222,24 @@ for (const kind of ["pipe", "tcp"] as const) {
       assert.ok(Date.now() - startedAt < 2_000);
       silent.close();
 
-      const parent = await ParentChannel.bind(1, { force: kind, socketDir: socketDir(), helloLineTimeoutMs: 100 });
-      const probe = await connectChannelEndpoint(parent.endpoint);
+      // The probe runs under a bound no test run reaches, so "closed first" never
+      // races a timer under load; the parent's own close handling is observed
+      // directly (it listens before this test does), not inferred from timing.
+      const probed = await ParentChannel.bind(1, { force: kind, socketDir: socketDir(), helloLineTimeoutMs: 600_000 });
+      const internals = probed as unknown as { bound: { server: net.Server }; preHello: Set<net.Socket> };
+      const probeClosed = new Promise<void>(resolve => internals.bound.server.once("connection", socket => socket.once("close", () => resolve())));
+      const probe = await connectChannelEndpoint(probed.endpoint);
       probe.destroy();
+      await probeClosed;
+      assert.equal(internals.preHello.size, 0, "the probe that closed first is settled and its bound disarmed");
+      assert.deepEqual(probed.rejects, [], "the probe that closed before the bound is not a rejected hello");
+      probed.close();
+
+      const parent = await ParentChannel.bind(1, { force: kind, socketDir: socketDir(), helloLineTimeoutMs: 100 });
       const mute = await connectChannelEndpoint(parent.endpoint);
       const answer = new Promise<string>(resolve => mute.once("data", d => resolve(String(d))));
       assert.match(await answer, /"reason":"timeout"/);
-      assert.deepEqual(parent.rejects, ["timeout"], "the probe that closed before the bound is not a rejected hello");
+      assert.deepEqual(parent.rejects, ["timeout"], "a silent socket is rejected at the bound");
       mute.destroy();
       parent.close();
     });

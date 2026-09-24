@@ -13,15 +13,24 @@ import {
   ChildApprovalGate,
   approvalConsumedMessage,
   approvalDecisionMessage,
+  consumedApprovalsFromResume,
   parseApprovalConsumedMessage,
   parseApprovalDecisionMessage,
   pendingApprovalFromResume,
   type ApprovalChildLink,
 } from "../src/approval-protocol.ts";
 
-/** A link whose deliveries and send failures the test controls. */
-function fakeLink(): ApprovalChildLink & { deliver(msg: Record<string, unknown>): void; sent: Record<string, unknown>[]; failSend: boolean; listeners: number } {
+/** A link whose deliveries, connection ends, and send failures the test controls. */
+function fakeLink(): ApprovalChildLink & {
+  deliver(msg: Record<string, unknown>): void;
+  onDisconnect(cb: () => void): () => void;
+  disconnect(): void;
+  sent: Record<string, unknown>[];
+  failSend: boolean;
+  listeners: number;
+} {
   const listeners = new Set<(msg: Record<string, unknown>) => void>();
+  const disconnects = new Set<() => void>();
   const link = {
     sent: [] as Record<string, unknown>[],
     failSend: false,
@@ -35,6 +44,11 @@ function fakeLink(): ApprovalChildLink & { deliver(msg: Record<string, unknown>)
       return () => { listeners.delete(cb); };
     },
     deliver(msg: Record<string, unknown>) { for (const cb of [...listeners]) cb(msg); },
+    onDisconnect(cb: () => void) {
+      disconnects.add(cb);
+      return () => { disconnects.delete(cb); };
+    },
+    disconnect() { for (const cb of [...disconnects]) cb(); },
   };
   return link;
 }
@@ -81,6 +95,16 @@ describe("approval message shapes", () => {
     assert.equal(pendingApprovalFromResume({ readiness: {} }), undefined);
     assert.equal(pendingApprovalFromResume(undefined), undefined);
   });
+
+  test("the resume section's consumed list is read as positive evidence; a hello without the array reads as undefined, an empty array as none consumed", () => {
+    assert.deepEqual(consumedApprovalsFromResume({ approval: { consumed: ["call-1", "call-2"] } }), ["call-1", "call-2"]);
+    assert.deepEqual(consumedApprovalsFromResume({ approval: { pending: "call-3", consumed: [] } }), [], "an empty array is not absence");
+    assert.deepEqual(consumedApprovalsFromResume({ approval: { consumed: ["call-1", 7, "", null] } }), ["call-1"], "malformed entries are dropped");
+    assert.equal(consumedApprovalsFromResume({ approval: { pending: "call-3" } }), undefined, "an older child's section");
+    assert.equal(consumedApprovalsFromResume({ approval: { consumed: "call-1" } }), undefined);
+    assert.equal(consumedApprovalsFromResume({}), undefined);
+    assert.equal(consumedApprovalsFromResume(undefined), undefined);
+  });
 });
 
 describe("ChildApprovalGate", () => {
@@ -90,12 +114,12 @@ describe("ChildApprovalGate", () => {
     for (const decision of [{ decision: "approve" as const }, { decision: "deny" as const, reason: "no" }, { decision: "run-instead" as const, command: "echo y" }]) {
       const wait = gate.waitForDecision(link, "call-1", undefined);
       assert.equal(gate.pending, "call-1");
-      assert.deepEqual(gate.resume(), { approval: { pending: "call-1" } });
+      assert.deepEqual((gate.resume().approval as { pending?: string }).pending, "call-1");
       link.deliver({ ...approvalDecisionMessage("call-1", decision), gen: 1 });
       assert.deepEqual(await wait, decision);
       assert.deepEqual(link.sent.at(-1), approvalConsumedMessage("call-1"), "the acknowledgment names the consumed cmd_id");
       assert.equal(gate.pending, undefined);
-      assert.deepEqual(gate.resume(), {});
+      assert.equal((gate.resume().approval as { pending?: string }).pending, undefined);
     }
     assert.equal(link.listeners, 0, "every settled wait detached its listener");
   });
@@ -108,7 +132,7 @@ describe("ChildApprovalGate", () => {
     link.deliver(approvalDecisionMessage("call-2", { decision: "approve" }));
     assert.equal(await settled(wait), "pending", "an unacknowledged decision never starts the command");
     assert.equal(gate.pending, "call-2");
-    assert.deepEqual(gate.resume(), { approval: { pending: "call-2" } }, "the next hello reports the cmd_id as still waiting");
+    assert.deepEqual(gate.resume(), { approval: { pending: "call-2", consumed: [] } }, "the next hello reports the cmd_id as still waiting and not consumed");
     // Only a decision that can be acknowledged (over the new connection) is consumed.
     link.failSend = false;
     link.deliver(approvalDecisionMessage("call-2", { decision: "deny", reason: "later" }));
@@ -160,7 +184,7 @@ describe("ChildApprovalGate", () => {
     assert.equal(gate.pending, undefined);
     assert.deepEqual(await gate.waitForDecision(link, "call-8", undefined), { decision: "deny", reason: "changed" }, "the latest early decision wins");
     assert.deepEqual(link.sent, [approvalConsumedMessage("call-8")]);
-    assert.deepEqual(gate.resume(), {});
+    assert.deepEqual(gate.resume(), { approval: { consumed: ["call-8"] } });
     // Consumed once: a second wait on the same cmd_id does not see it again.
     assert.equal(await settled(gate.waitForDecision(link, "call-8", undefined)), "pending");
 
@@ -205,13 +229,60 @@ describe("ChildApprovalGate", () => {
     const link = fakeLink();
     const first = gate.waitForDecision(link, "call-6", undefined);
     const second = gate.waitForDecision(link, "call-7", undefined);
-    assert.deepEqual(gate.resume(), { approval: { pending: "call-7" } });
+    assert.deepEqual(gate.resume(), { approval: { pending: "call-7", consumed: [] } });
     link.deliver(approvalDecisionMessage("call-7", { decision: "deny", reason: "x" }));
     assert.deepEqual(await second, { decision: "deny", reason: "x" });
     assert.equal(await settled(first), "pending");
-    assert.deepEqual(gate.resume(), { approval: { pending: "call-6" } });
+    assert.deepEqual(gate.resume(), { approval: { pending: "call-6", consumed: ["call-7"] } });
     link.deliver(approvalDecisionMessage("call-6", { decision: "approve" }));
     assert.deepEqual(await first, { decision: "approve" });
-    assert.deepEqual(gate.resume(), {});
+    assert.deepEqual(gate.resume(), { approval: { consumed: ["call-7", "call-6"] } });
+  });
+
+  test("a new gate always reports the approval section with a consumed array, even when nothing was consumed", () => {
+    assert.deepEqual(new ChildApprovalGate().resume(), { approval: { consumed: [] } });
+  });
+
+  test("the consumed list records each acknowledged cmd_id, bounded like the early keep with the oldest dropped first", async () => {
+    const gate = new ChildApprovalGate();
+    const link = fakeLink();
+    for (let i = 0; i <= ChildApprovalGate.EARLY_DECISION_CAP; i++) {
+      const wait = gate.waitForDecision(link, `c-${i}`, undefined);
+      link.deliver(approvalDecisionMessage(`c-${i}`, { decision: "approve" }));
+      await wait;
+    }
+    const consumed = (gate.resume().approval as { consumed: string[] }).consumed;
+    assert.equal(consumed.length, ChildApprovalGate.EARLY_DECISION_CAP);
+    assert.equal(consumed[0], "c-1", "c-0 was the oldest and was dropped");
+    assert.equal(consumed.at(-1), `c-${ChildApprovalGate.EARLY_DECISION_CAP}`);
+  });
+
+  test("a failed acknowledgment send leaves the cmd_id pending and out of the consumed list", async () => {
+    const gate = new ChildApprovalGate();
+    const link = fakeLink();
+    const wait = gate.waitForDecision(link, "call-13", undefined);
+    link.failSend = true;
+    link.deliver(approvalDecisionMessage("call-13", { decision: "approve" }));
+    assert.equal(await settled(wait), "pending");
+    assert.deepEqual(gate.resume(), { approval: { pending: "call-13", consumed: [] } });
+    link.failSend = false;
+    link.deliver(approvalDecisionMessage("call-13", { decision: "approve" }));
+    await wait;
+    assert.deepEqual(gate.resume(), { approval: { consumed: ["call-13"] } }, "consumed only once the acknowledgment went out");
+  });
+
+  test("an early decision is bound to the connection it arrived on: its end discards it, and only a decision over the new connection is consumed", async () => {
+    const gate = new ChildApprovalGate();
+    const link = fakeLink();
+    gate.attach(link);
+    link.deliver(approvalDecisionMessage("call-14", { decision: "approve" }));
+    link.disconnect();
+    assert.deepEqual(gate.resume(), { approval: { consumed: [] } }, "the reconnect hello reports it neither pending nor consumed, so the parent re-asks");
+    const wait = gate.waitForDecision(link, "call-14", undefined);
+    assert.equal(await settled(wait), "pending", "the old connection's decision is never consumed");
+    assert.deepEqual(link.sent, [], "nothing acknowledged");
+    link.deliver(approvalDecisionMessage("call-14", { decision: "deny", reason: "fresh" }));
+    assert.deepEqual(await wait, { decision: "deny", reason: "fresh" }, "the decision sent over the new connection is the one consumed");
+    assert.deepEqual(link.sent, [approvalConsumedMessage("call-14")]);
   });
 });

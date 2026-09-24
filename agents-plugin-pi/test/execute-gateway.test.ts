@@ -537,7 +537,16 @@ describe("registered ws-approve/ws-worker-exec decision relay (260924: over the 
     const home = mkdtempSync(join(tmpdir(), "ws-pi-agent-registered-decision-test-"));
     const parent = await ParentChannel.bind(1, { socketDir: join(home, "ch") });
     const approvalGate = new ChildApprovalGate();
-    const child = await ChildChannel.connect(readAndDeleteChannelBootstrap({ ...parent.bootstrapEnv() })!, { reconnect: opts.reconnect ?? false, backoffCapMs: 50, resume: () => approvalGate.resume() });
+    /** `onResume` runs once, right after the child computes its next hello's resume section (before the hello is sent). */
+    const hooks: { onResume?: () => void } = {};
+    const resume = () => {
+      const section = approvalGate.resume();
+      const hook = hooks.onResume;
+      hooks.onResume = undefined;
+      hook?.();
+      return section;
+    };
+    const child = await ChildChannel.connect(readAndDeleteChannelBootstrap({ ...parent.bootstrapEnv() })!, { reconnect: opts.reconnect ?? false, backoffCapMs: 50, resume });
     approvalGate.attach(child);
     await parent.hello();
     const decisionsDelivered: string[] = [];
@@ -574,7 +583,7 @@ describe("registered ws-approve/ws-worker-exec decision relay (260924: over the 
       await reconnected;
     };
     const close = () => { detach(); child.close(); parent.close(); rmSync(home, { recursive: true, force: true }); };
-    return { home, parent, child, approvalGate, executions, decisionsDelivered, asked, record, approve, exec, released, until, drop, close };
+    return { home, parent, child, approvalGate, hooks, executions, decisionsDelivered, asked, record, approve, exec, released, until, drop, close };
   }
 
   test("approve, deny, and run-instead reach the gated tool over the channel, the acknowledgment releases the request, and no decision file or directory is ever created", async () => {
@@ -642,7 +651,7 @@ describe("registered ws-approve/ws-worker-exec decision relay (260924: over the 
 
       await reconnected;
       await h.until(() => h.asked.length === 1, "the re-issued request");
-      assert.deepEqual(h.record.pendingApproval, { cmdId: "call-1", command: "echo original", reissued: true }, "the reconnect hello reported the cmd_id: the lead is asked afresh");
+      assert.deepEqual(h.record.pendingApproval, { cmdId: "call-1", command: "echo original", reissued: true, issue: 1 }, "the reconnect hello reported the cmd_id: the lead is asked afresh");
       assert.deepEqual(h.decisionsDelivered, [], "the parent never sent anything on its own");
       await h.approve.execute("x", { agent_id: h.record.agentId, cmd_id: "call-1", decision: "approve" });
       assert.match((await pending).content[0].text, /exit code: 0/);
@@ -668,7 +677,7 @@ describe("registered ws-approve/ws-worker-exec decision relay (260924: over the 
 
       await h.drop();
       await h.until(() => h.asked.length === 1, "the re-issued request");
-      assert.deepEqual(h.record.pendingApproval, { cmdId: "call-1", command: "echo original", reissued: true });
+      assert.deepEqual(h.record.pendingApproval, { cmdId: "call-1", command: "echo original", reissued: true, issue: 1 });
       assert.deepEqual(h.decisionsDelivered, ["call-1"], "the discarded decision was not re-sent on the reconnect");
       await h.approve.execute("x", { agent_id: h.record.agentId, cmd_id: "call-1", decision: "run-instead", command: "echo fresh" });
       assert.match((await pending).content[0].text, /Lead substituted a different command/);
@@ -678,7 +687,7 @@ describe("registered ws-approve/ws-worker-exec decision relay (260924: over the 
     } finally { h.close(); }
   });
 
-  test("an acknowledgment lost with the connection: the child consumed and ran the command once; the reconnect hello reports nothing pending, so the parent releases the request instead of re-asking or re-sending", async () => {
+  test("an acknowledgment lost with the connection: the child consumed and ran the command once; the reconnect hello lists it as consumed, so the parent releases the request instead of re-asking or re-sending", async () => {
     let swallowNextSend = false;
     const h = await harness({ reconnect: true, link: (child) => ({ onMessage: (cb) => child.onMessage(cb), send: (msg) => { if (swallowNextSend) { swallowNextSend = false; return; } child.send(msg); } }) });
     try {
@@ -711,6 +720,67 @@ describe("registered ws-approve/ws-worker-exec decision relay (260924: over the 
       assert.match(result.content[0].text, /exit code: 0/);
       await h.released();
       assert.deepEqual(h.executions, ["echo original"]);
+    } finally { h.close(); }
+  });
+
+  test("a decision kept early, then a disconnect before the wait opens: the parent re-asks, the old decision is never consumed, and the fresh one over the new connection is", async () => {
+    const h = await harness({ reconnect: true });
+    try {
+      h.record.pendingApproval = { cmdId: "call-1", command: "echo original" };
+      await h.approve.execute("x", { agent_id: h.record.agentId, cmd_id: "call-1", decision: "approve" });
+      await h.until(() => h.decisionsDelivered.length === 1, "the decision to reach the child");
+      assert.equal(h.approvalGate.pending, undefined, "kept early: no wait yet");
+
+      await h.drop();
+      await h.until(() => h.asked.length === 1, "the re-issued request");
+      assert.deepEqual(h.record.pendingApproval, { cmdId: "call-1", command: "echo original", reissued: true, issue: 1 }, "no consumption evidence: not released");
+      // The wait opens on a fully re-established connection, where an acknowledgment could be sent.
+      await h.until(() => h.child.connected, "the child's welcome");
+      const pending = h.exec.execute("call-1", { command: "echo original", rationale: "r" }, new AbortController().signal);
+      assert.equal(await Promise.race([pending, new Promise((resolve) => setTimeout(() => resolve("waiting"), 50))]), "waiting", "the old connection's decision was discarded with it");
+      assert.deepEqual(h.executions, []);
+      await h.approve.execute("x", { agent_id: h.record.agentId, cmd_id: "call-1", decision: "run-instead", command: "echo fresh" });
+      assert.match((await pending).content[0].text, /Lead substituted a different command/);
+      await h.released();
+      assert.deepEqual(h.executions, ["echo fresh"], "exactly one execution, on the decision sent over the new connection");
+    } finally { h.close(); }
+  });
+
+  test("a wait that opens with a kept decision between the reconnect hello and its welcome does not hang: the request is re-issued", async () => {
+    const h = await harness({ reconnect: true });
+    try {
+      h.record.pendingApproval = { cmdId: "call-1", command: "echo original" };
+      await h.approve.execute("x", { agent_id: h.record.agentId, cmd_id: "call-1", decision: "approve" });
+      await h.until(() => h.decisionsDelivered.length === 1, "the decision to reach the child");
+      let pending: Promise<any> | undefined;
+      // The hello is built without the cmd_id; the wait opens right after, before the welcome.
+      h.hooks.onResume = () => queueMicrotask(() => { pending = h.exec.execute("call-1", { command: "echo original", rationale: "r" }, new AbortController().signal); });
+      await h.drop();
+      assert.ok(pending, "the wait opened inside the reconnect handshake");
+      await h.until(() => h.asked.length === 1, "the re-issued request");
+      assert.equal(h.record.pendingApproval?.decision, undefined, "re-issued, not released");
+      assert.equal(h.approvalGate.pending, "call-1");
+      await h.approve.execute("x", { agent_id: h.record.agentId, cmd_id: "call-1", decision: "approve" });
+      assert.match((await pending!).content[0].text, /exit code: 0/);
+      await h.released();
+      assert.deepEqual(h.executions, ["echo original"]);
+    } finally { h.close(); }
+  });
+
+  test("a decision lost in transit, then a reconnect before the wait opens: the request is re-issued, not released", async () => {
+    const h = await harness({ reconnect: true });
+    try {
+      // As ws-approve records it; the frame itself never reaches the child.
+      h.record.pendingApproval = { cmdId: "call-1", command: "echo original", decision: "sent" };
+      await h.drop();
+      await h.until(() => h.asked.length === 1, "the re-issued request");
+      assert.deepEqual(h.record.pendingApproval, { cmdId: "call-1", command: "echo original", reissued: true, issue: 1 });
+      const pending = h.exec.execute("call-1", { command: "echo original", rationale: "r" }, new AbortController().signal);
+      await h.approve.execute("x", { agent_id: h.record.agentId, cmd_id: "call-1", decision: "approve" });
+      assert.match((await pending).content[0].text, /exit code: 0/);
+      await h.released();
+      assert.deepEqual(h.executions, ["echo original"]);
+      assert.deepEqual(h.decisionsDelivered, ["call-1"], "only the decision sent over the new connection");
     } finally { h.close(); }
   });
 

@@ -2867,13 +2867,13 @@ describe("attachApprovalChannel (260924: parent side of the channel-delivered de
 
     host.reconnect({ resume: { approval: { pending: "call-1" } } });
 
-    assert.deepEqual(record.pendingApproval, { cmdId: "call-1", command: "rm -rf build", rationale: "clean", cwd: "/repo/sub", reissued: true }, "the discarded decision is forgotten; the request is open again");
+    assert.deepEqual(record.pendingApproval, { cmdId: "call-1", command: "rm -rf build", rationale: "clean", cwd: "/repo/sub", reissued: true, issue: 1 }, "the discarded decision is forgotten; the request is open again as issue 1");
     assert.deepEqual(asked, [record], "the lead is asked exactly once more");
     host.reconnect({ resume: { approval: { pending: "call-1" } } });
     assert.equal(asked.length, 1, "a re-issued request with no decision in flight is not re-asked again on a later reconnect");
   });
 
-  test("a reconnect hello reporting no pending cmd_id after a discard means the child consumed the decision: the request is released", (t) => {
+  test("an older child's reconnect hello (no consumed array) reporting no pending cmd_id after a discard keeps today's reading: the request is released", (t) => {
     let refreshes = 0;
     agentWidgetRefreshRef.current = () => { refreshes += 1; };
     t.after(() => { agentWidgetRefreshRef.current = undefined; });
@@ -2890,7 +2890,7 @@ describe("attachApprovalChannel (260924: parent side of the channel-delivered de
     assert.deepEqual(asked, []);
   });
 
-  test("a reconnect hello reporting a different cmd_id after a discard also releases the old request: the child moved on without it", () => {
+  test("an older child's reconnect hello (no consumed array) reporting a different cmd_id after a discard also releases the old request", () => {
     const host = fakeHost();
     const record = pendingRecord("sent");
     attachApprovalChannel(record, host, () => undefined);
@@ -2915,6 +2915,53 @@ describe("attachApprovalChannel (260924: parent side of the channel-delivered de
     host.reconnect({ reconnect: false, resume: { approval: { pending: "call-1" } } });
     assert.equal(record.pendingApproval?.decision, "discarded");
     assert.deepEqual(asked, []);
+  });
+
+  test("a reconnect hello listing the discarded cmd_id as consumed releases the request without re-asking", (t) => {
+    let refreshes = 0;
+    agentWidgetRefreshRef.current = () => { refreshes += 1; };
+    t.after(() => { agentWidgetRefreshRef.current = undefined; });
+    const host = fakeHost();
+    const record = pendingRecord("sent");
+    const asked: RpcAgentRecord[] = [];
+    attachApprovalChannel(record, host, () => (r) => asked.push(r));
+    host.drop();
+    host.reconnect({ resume: { approval: { consumed: ["call-0", "call-1"] } } });
+    assert.equal(record.pendingApproval, undefined);
+    assert.equal(refreshes, 1);
+    assert.deepEqual(asked, []);
+  });
+
+  test("a reconnect hello with a consumed array that does not list the discarded cmd_id re-issues it, whether or not it reports the cmd_id pending", () => {
+    for (const approval of [
+      { consumed: [] },
+      { consumed: ["call-OTHER"] },
+      { pending: "call-1", consumed: [] },
+      { pending: "call-2", consumed: [] },
+    ]) {
+      const host = fakeHost();
+      const record = pendingRecord("sent");
+      const asked: RpcAgentRecord[] = [];
+      attachApprovalChannel(record, host, () => (r) => asked.push(r));
+      host.drop();
+      host.reconnect({ resume: { approval } });
+      assert.deepEqual(record.pendingApproval, { cmdId: "call-1", command: "rm -rf build", rationale: "clean", cwd: "/repo/sub", reissued: true, issue: 1 }, `not released without consumption evidence: ${JSON.stringify(approval)}`);
+      assert.deepEqual(asked, [record], "the lead is asked afresh");
+    }
+  });
+
+  test("each reissue increments the request's issue number", () => {
+    const host = fakeHost();
+    const record = pendingRecord("sent");
+    attachApprovalChannel(record, host, () => undefined);
+    host.drop();
+    host.reconnect({ resume: { approval: { consumed: [] } } });
+    assert.equal(record.pendingApproval?.issue, 1);
+    record.pendingApproval = { ...record.pendingApproval!, decision: "sent" };
+    host.drop();
+    host.reconnect({ resume: { approval: { pending: "call-1", consumed: [] } } });
+    assert.equal(record.pendingApproval?.issue, 2);
+    assert.equal(record.pendingApproval?.decision, undefined);
   });
 
   test("the approval hook resolves per event, so a record armed after the attach is still re-asked; detaching stops every subscription", () => {

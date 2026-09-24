@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import { RpcClient } from "@earendil-works/pi-coding-agent";
 import { createAgentStorageContext } from "../src/agent-storage.ts";
 import { CHANNEL_PROTOCOL_VERSION, connectChannelEndpoint, readAndDeleteChannelBootstrap, type ChildChannel, type ParentChannel } from "../src/agent-channel.ts";
-import { agentCostRefreshRef, sendToAgent, spawnAgent, stopAgent, type RpcAgentRecord } from "../src/spawner.ts";
+import { agentCostRefreshRef, heldPushQueue, leadIdleRef, sendToAgent, spawnAgent, stopAgent, type RpcAgentRecord } from "../src/spawner.ts";
 import { DESCENDANT_USAGE_MESSAGE, descendantUsageReporterRef } from "../src/agent-usage-rollup.ts";
 import { captureForkResume, rehydrateForkRecord, type PersistedForkResume } from "../src/ask.ts";
 import { SubtreeUpstream } from "../src/subtree-lifecycle.ts";
@@ -102,6 +102,9 @@ function captureChannel(registry: Map<string, RpcAgentRecord>, hook: StartHook):
 
 for (const path of ["spawn", "resume"] as const) {
   describe(`readiness and hello failures on the ${path} path`, () => {
+    // A "fast" case runs under a readiness bound far beyond the test's own
+    // timeout, so judging the published payload at once is proved by the test
+    // finishing at all, not by a wall-clock margin that load can erode.
     const cases: Array<{ title: string; role: "fork" | "explore"; child: FakeChildOptions; message: string; fast?: boolean }> = [
       { title: "missing fork readiness fails with today's error", role: "fork", child: { fork: null }, message: FORK_MISSING },
       { title: "a fork readiness error is rejected at today's check", role: "fork", child: { fork: { error: "fork bootstrap did not issue a distinct current own key" } }, message: "ws-pi-agent: fork readiness rejected (fork bootstrap did not issue a distinct current own key)", fast: true },
@@ -111,10 +114,10 @@ for (const path of ["spawn", "resume"] as const) {
       { title: "a web readiness proof failure published by the child fails at once with today's error", role: "explore", child: { web: { error: "web-search-tool-unavailable: Explore web facade registration mismatch" } }, message: WEB_MISSING, fast: true },
     ];
     for (const { title, role, child, message, fast } of cases) {
-      test(title, async () => {
+      test(title, { timeout: fast ? 30_000 : undefined }, async () => {
         const rpc = installRpcHarness();
         const registry = new Map<string, RpcAgentRecord>();
-        const ctx = contexts(registry, { readinessTimeoutMs: 300 });
+        const ctx = contexts(registry, { readinessTimeoutMs: fast ? 600_000 : 300 });
         try {
           const record = path === "resume" ? await ctx.dormant(role) : undefined;
           const capture = captureChannel(registry, fakeChild(child));
@@ -123,8 +126,7 @@ for (const path of ["spawn", "resume"] as const) {
           else await assert.rejects(spawnAgent(registry as any, ctx[role].spawn as any, ctx[role].params as any), { message });
           const elapsed = Date.now() - capture.startedAt;
           assertResting(record ?? [...registry.values()][0], capture.get());
-          if (fast) assert.ok(elapsed < 250, `a published payload is judged at once, not at the readiness bound (${elapsed}ms)`);
-          else assert.ok(elapsed >= 300, `an absent payload waits out the readiness bound (${elapsed}ms)`);
+          if (!fast) assert.ok(elapsed >= 300, `an absent payload waits out the readiness bound (${elapsed}ms)`);
         } finally { rpc.restore(); }
       });
     }
@@ -189,11 +191,80 @@ test("a stop that lands while a dormant resume is still binding its channel wins
     const resume = sendToAgent(registry as any, ctx.resume as any, record.agentId, "again");
     assert.ok(record.client, "the resume claims the record before its first await");
     await stopAgent(registry as any, record.agentId, undefined, { silent: true });
-    await assert.rejects(resume, { message: "ws-pi-agent: launch stopped before the child started" });
+    await assert.rejects(resume, { message: "ws-pi-agent: launch stopped (ws-agent-stop) before the agent started" });
     assert.equal(started, 0);
     assert.equal(record.client, undefined);
     assert.equal(record.channel, undefined);
   } finally { rpc.restore(); }
+});
+
+describe("a stop during a launch is its single terminal", () => {
+  /** Holds every lead push in the shared FIFO (a busy lead) so the test reads exactly what the lead would receive. */
+  function captureLeadPushes(): { settled(): unknown[]; restore(): void } {
+    const saved = leadIdleRef.current;
+    leadIdleRef.current = () => false;
+    heldPushQueue.length = 0;
+    return {
+      settled: () => heldPushQueue.flatMap(held => held.kind === "push" && held.family === "ws-agent-settled" ? [held.payload.reason] : []),
+      restore() { heldPushQueue.length = 0; leadIdleRef.current = saved; },
+    };
+  }
+
+  test("a stop during the resume's bind window pushes only the stop's own settle, no spawn-failed", async () => {
+    const rpc = installRpcHarness();
+    const registry = new Map<string, RpcAgentRecord>();
+    const ctx = contexts(registry, {});
+    const pushes = captureLeadPushes();
+    try {
+      const record = await ctx.dormant("fork");
+      heldPushQueue.length = 0;
+      const resume = sendToAgent(registry as any, ctx.resume as any, record.agentId, "again");
+      assert.ok(record.client && record.launching, "the resume claimed the record and is binding");
+      await stopAgent(registry as any, record.agentId, ctx.resume.pi);
+      await assert.rejects(resume, { message: "ws-pi-agent: launch stopped (ws-agent-stop) before the agent started" });
+      assert.deepEqual(pushes.settled(), ["stopped"]);
+    } finally { pushes.restore(); rpc.restore(); }
+  });
+
+  test("a stop during the spawn's hello wait pushes only the stop's own settle, and the spawn call rejects as stopped", async () => {
+    const rpc = installRpcHarness();
+    const registry = new Map<string, RpcAgentRecord>();
+    const ctx = contexts(registry, { helloTimeoutMs: 600_000 });
+    const pushes = captureLeadPushes();
+    try {
+      let stopped: Promise<unknown> | undefined;
+      // The child process "starts" but never says hello; the stop lands while the parent waits for it.
+      rpc.state.hook = async function () {
+        const record = [...registry.values()].find(candidate => candidate.client === (this as unknown))!;
+        // After the start resolves, the parent's hello wait is already armed by the time this runs.
+        setImmediate(() => { stopped = stopAgent(registry as any, record.agentId, ctx.resume.pi); });
+      };
+      await assert.rejects(spawnAgent(registry as any, ctx.fork.spawn as any, ctx.fork.params as any), { message: "ws-pi-agent: launch stopped (ws-agent-stop) before the agent started" });
+      await stopped;
+      assert.deepEqual(pushes.settled(), ["stopped"]);
+      const record = [...registry.values()][0]!;
+      assert.equal(record.client, undefined);
+      assert.equal(record.channel, undefined);
+    } finally { pushes.restore(); rpc.restore(); }
+  });
+
+  for (const path of ["spawn", "resume"] as const) {
+    test(`a genuine hello failure on the ${path} path still pushes spawn-failed`, async () => {
+      const rpc = installRpcHarness();
+      const registry = new Map<string, RpcAgentRecord>();
+      const ctx = contexts(registry, { helloTimeoutMs: 100 });
+      const pushes = captureLeadPushes();
+      try {
+        const record = path === "resume" ? await ctx.dormant("fork") : undefined;
+        heldPushQueue.length = 0;
+        rpc.state.hook = async () => {};
+        const message = "ws-pi-agent: child channel hello timed out after 100ms";
+        if (record) await assert.rejects(sendToAgent(registry as any, ctx.resume as any, record.agentId, "again"), { message });
+        else await assert.rejects(spawnAgent(registry as any, ctx.fork.spawn as any, ctx.fork.params as any), { message });
+        assert.deepEqual(pushes.settled(), ["spawn-failed"]);
+      } finally { pushes.restore(); rpc.restore(); }
+    });
+  }
 });
 
 test("a second send during a dormant resume's bind waits for that launch: one child, both sends delivered", async () => {
