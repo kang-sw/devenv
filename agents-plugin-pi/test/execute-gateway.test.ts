@@ -4,13 +4,15 @@
  * `resolveExecuteModelAlias`, `validatePendingApproval` (the ticket's own
  * `cmd_id` race-binding requirement), `computeLeadActiveTools` (the §8 lead
  * `--tools` reshaping + auto-include-footgun fix), `buildApprovalPromptText`
- * (the §7 payload formatter), `approvalDecisionPath` (the parent/child
- * decision-file path both sides must agree on), `resolveApprovalContextCwd`
+ * (the §7 payload formatter), `resolveApprovalContextCwd`
  * and `validateApprovalDecisionInput` (review fix, relay #1, CORRECTNESS
- * findings #1/#2), `sliceLines` (review fix, relay #1, TEST finding #4), and
- * `waitForDecisionFile` (review fix, relay #1, TEST finding #5 — needs only a
- * real filesystem + timers, not a subprocess/model, so it does not belong in
- * the live-gate-only bucket below).
+ * findings #1/#2), and `sliceLines` (review fix, relay #1, TEST finding #4).
+ *
+ * 260924 (channel approval decisions): the decision file and its poll are
+ * gone. The registered `ws-approve`/`ws-worker-exec` pair is covered below
+ * over a real in-process `ParentChannel`/`ChildChannel` pair and the child's
+ * `ChildApprovalGate`, with `spawner.ts`'s `attachApprovalChannel` on the
+ * parent side — the same objects a live launch wires, minus the process.
  *
  * NOT covered here — genuinely live-gate only, per the plan's Verification
  * Plan split and mirroring test/spawner.test.ts's own documented pure/IO
@@ -19,7 +21,7 @@
  * `RpcClient` or broader filesystem coverage). Their pure inner logic
  * (`sliceLines`, `resolveApprovalContextCwd`, `validateApprovalDecisionInput`)
  * is extracted and covered directly instead. The registered
- * `ws-worker-exec`/`ws-approve` filesystem decision relay is covered below
+ * `ws-worker-exec`/`ws-approve` channel decision relay is covered below
  * with a minimal fake ExtensionAPI; live provider transport remains the
  * documented manual gate.
  *
@@ -48,8 +50,7 @@
 
 import { afterEach, test, describe } from "node:test";
 import assert from "node:assert/strict";
-import fs, { existsSync, mkdtempSync, realpathSync, readFileSync, writeFileSync, rmSync } from "node:fs";
-import { syncBuiltinESMExports } from "node:module";
+import { existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -58,13 +59,11 @@ import {
   validatePendingApproval,
   computeLeadActiveTools,
   buildApprovalPromptText,
-  approvalDecisionPath,
   resolveApprovalContextCwd,
   validateApprovalDecisionInput,
   sliceLines,
   capOutput,
   mergeExecOutput,
-  waitForDecisionFile,
   createApprovalRelay,
   EXECUTE_TOOL_NAME,
   APPROVE_TOOL_NAME,
@@ -76,7 +75,9 @@ import {
   type PendingApproval,
   type WorkingContext,
 } from "../src/execute-gateway.ts";
-import { leadIdleRef, registerPushFlush, GATED_EXEC_TOOL_NAME, TOOL_GROUPS, resolveTools, WS_PI_APPROVAL_DIR_ENV, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
+import { attachApprovalChannel, leadIdleRef, registerPushFlush, GATED_EXEC_TOOL_NAME, TOOL_GROUPS, resolveTools, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
+import { ChildChannel, ParentChannel, readAndDeleteChannelBootstrap } from "../src/agent-channel.ts";
+import { ChildApprovalGate } from "../src/approval-protocol.ts";
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
 import { closeFakeChildren, connectFakeChild } from "./fixtures/channel-child.ts";
 import { RpcClient } from "@earendil-works/pi-coding-agent";
@@ -232,30 +233,6 @@ describe("buildApprovalPromptText", () => {
   });
 });
 
-describe("approvalDecisionPath", () => {
-  test("joins sessionDir, the fixed \"approvals\" segment, and <cmdId>.decision.json", () => {
-    assert.equal(approvalDecisionPath("/tmp/ws-pi-agent-x", "call-1"), "/tmp/ws-pi-agent-x/approvals/call-1.decision.json");
-  });
-
-  test("different cmdIds produce different, non-colliding paths under the same sessionDir", () => {
-    const a = approvalDecisionPath("/tmp/ws-pi-agent-x", "call-1");
-    const b = approvalDecisionPath("/tmp/ws-pi-agent-x", "call-2");
-    assert.notEqual(a, b);
-  });
-
-  test("keeps portable ids readable while percent-encoding every Windows-illegal and C0/C1 character injectively", () => {
-    const sessionDir = "/tmp/ws-pi-agent-x";
-    assert.equal(approvalDecisionPath(sessionDir, "call_abc-123.fc"), `${sessionDir}/approvals/call_abc-123.fc.decision.json`);
-
-    const unsafe = "call<>:\"/\\|?*%\u0000\u001f\u007f\u009f";
-    const path = approvalDecisionPath(sessionDir, unsafe);
-    const filename = path.split("/").at(-1)!;
-    assert.equal(path, `${sessionDir}/approvals/call%3C%3E%3A%22%2F%5C%7C%3F%2A%25%00%1F%7F%9F.decision.json`);
-    assert.doesNotMatch(filename, /[<>:"/\\|?*\u0000-\u001f\u007f-\u009f]/, "the on-disk filename contains no Windows-illegal or control character");
-    assert.notEqual(approvalDecisionPath(sessionDir, "call|item"), approvalDecisionPath(sessionDir, "call%7Citem"), "a literal percent sequence cannot alias an encoded pipe");
-  });
-});
-
 describe("resolveApprovalContextCwd (review fix, relay #1, CORRECTNESS finding #1)", () => {
   test("a worker-supplied cwd override on pendingApproval takes precedence over the session's base cwd", () => {
     assert.equal(resolveApprovalContextCwd({ cwd: "/repo/subdir" }, "/repo"), "/repo/subdir");
@@ -399,81 +376,6 @@ describe("mergeExecOutput (review relay #1, Minor a)", () => {
   });
 });
 
-describe("waitForDecisionFile (review fix, relay #1, TEST finding #5)", () => {
-  async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
-    const dir = mkdtempSync(join(tmpdir(), "ws-pi-agent-decision-test-"));
-    try {
-      return await fn(dir);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  }
-
-  test("resolves with the parsed decision as soon as the file appears (short poll interval, real timers)", async () => {
-    await withTempDir(async (dir) => {
-      const path = join(dir, "call-1.decision.json");
-      const decision = { decision: "approve" as const };
-      setTimeout(() => writeFileSync(path, JSON.stringify(decision)), 20);
-      const result = await waitForDecisionFile(path, undefined, 5);
-      assert.deepEqual(result, decision);
-    });
-  });
-
-  test("a pre-aborted signal resolves immediately with \"aborted\", never touching the filesystem poll", async () => {
-    await withTempDir(async (dir) => {
-      const path = join(dir, "never-written.decision.json");
-      const controller = new AbortController();
-      controller.abort();
-      const result = await waitForDecisionFile(path, controller.signal, 5);
-      assert.equal(result, "aborted");
-    });
-  });
-
-  test("aborting mid-poll resolves with \"aborted\" and stops polling (no late resolution once the file later appears)", async () => {
-    await withTempDir(async (dir) => {
-      const path = join(dir, "call-2.decision.json");
-      const controller = new AbortController();
-      setTimeout(() => controller.abort(), 15);
-      const resultPromise = waitForDecisionFile(path, controller.signal, 5);
-      const result = await resultPromise;
-      assert.equal(result, "aborted");
-      // Writing the file after abort must not cause a second resolution (the
-      // promise already settled) — this only verifies no throw/hang occurs.
-      writeFileSync(path, JSON.stringify({ decision: "approve" }));
-    });
-  });
-
-  test("a malformed decision is retained for polling, then consumed after a valid retry", async () => {
-    await withTempDir(async (dir) => {
-      const path = join(dir, "call-3.decision.json");
-      writeFileSync(path, "{not valid json");
-      const resultPromise = waitForDecisionFile(path, undefined, 5);
-      await new Promise((resolve) => setTimeout(resolve, 20));
-      assert.ok(existsSync(path), "a parse failure must retain the rendezvous file for retry");
-      writeFileSync(path, JSON.stringify({ decision: "deny", reason: "no" }));
-      const result = await resultPromise;
-      assert.deepEqual(result, { decision: "deny", reason: "no" });
-      assert.ok(!existsSync(path), "a successfully parsed retry is transient IPC and must be removed");
-    });
-  });
-
-  test("an injected unlink failure does not block a successfully parsed decision", async (t) => {
-    await withTempDir(async (dir) => {
-      const path = join(dir, "unlink-fails.decision.json");
-      writeFileSync(path, JSON.stringify({ decision: "approve" }));
-      const unlink = t.mock.method(fs, "unlinkSync", () => { throw new Error("injected unlink failure"); });
-      syncBuiltinESMExports();
-      try {
-        assert.deepEqual(await waitForDecisionFile(path, undefined, 5), { decision: "approve" });
-        assert.ok(existsSync(path), "best-effort cleanup failure retains the file without changing the decision outcome");
-      } finally {
-        unlink.mock.restore();
-        syncBuiltinESMExports();
-      }
-    });
-  });
-});
-
 describe("createApprovalRelay (260905: unconditional ws-agent-approval push)", () => {
   function freshRecord(pending: PendingApproval): RpcAgentRecord {
     return {
@@ -608,62 +510,109 @@ describe("execute-worker registration boundary", () => {
   });
 });
 
-describe("registered ws-approve/ws-worker-exec decision relay", () => {
-  test("the actual writer and reader share encoded paths for approve, deny, and run-instead, then remove each consumed decision", async () => {
+describe("registered ws-approve/ws-worker-exec decision relay (260924: over the control channel)", () => {
+  type Tool = { execute: (...args: any[]) => Promise<any> };
+
+  /** The parent's registry record and channel, the child's gate and channel, and both registered tools — wired the way a live launch wires them. */
+  async function harness() {
     const home = mkdtempSync(join(tmpdir(), "ws-pi-agent-registered-decision-test-"));
-    const previousApprovalDir = process.env[WS_PI_APPROVAL_DIR_ENV];
+    const parent = await ParentChannel.bind(1, { socketDir: join(home, "ch") });
+    const child = await ChildChannel.connect(readAndDeleteChannelBootstrap({ ...parent.bootstrapEnv() })!, { reconnect: false });
+    await parent.hello();
+    const approvalGate = new ChildApprovalGate();
     const executions: string[] = [];
-    const registered = new Map<string, { execute: (...args: any[]) => Promise<any> }>();
-    const record = { agentId: "execute-worker-1", sessionPath: join(home, "session.jsonl"), pendingApproval: undefined as PendingApproval | undefined };
-    const registry: RpcAgentRegistry = new Map([[record.agentId, record as RpcAgentRecord]]);
+    const registered = new Map<string, Tool>();
+    const record = { agentId: "execute-worker-1", sessionPath: join(home, "session.jsonl"), channel: parent, running: true, client: {}, pendingApproval: undefined as PendingApproval | undefined } as unknown as RpcAgentRecord;
+    const registry: RpcAgentRegistry = new Map([[record.agentId, record]]);
     const pi = {
-      registerTool: (tool: { name: string; execute: (...args: any[]) => Promise<any> }) => registered.set(tool.name, tool),
+      registerTool: (tool: { name: string } & Tool) => registered.set(tool.name, tool),
       exec: async (_shell: string, args: string[]) => {
         executions.push(args[1]!);
         return { stdout: `ran ${args[1]}`, stderr: "", code: 0, killed: false };
       },
     } as unknown as ExtensionAPI;
+    registerExecuteGateway(pi, {} as never, registry, { cwd: home, executeWorkerPromptPath: "/tmp/fake-execute-worker-guide.md", channel: child, approvalGate });
+    const detach = attachApprovalChannel(record, parent, () => undefined);
+    const approve = registered.get(APPROVE_TOOL_NAME)!;
+    const exec = registered.get(GATED_EXEC_TOOL_NAME)!;
+    assert.ok(approve && exec, "registerExecuteGateway installs both ends of the relay");
+    const released = () => new Promise<void>((resolve) => { const tick = () => record.pendingApproval === undefined ? resolve() : setTimeout(tick, 5); tick(); });
+    const close = () => { detach(); child.close(); parent.close(); rmSync(home, { recursive: true, force: true }); };
+    return { home, parent, child, approvalGate, executions, record, approve, exec, released, close };
+  }
 
+  test("approve, deny, and run-instead reach the gated tool over the channel, the acknowledgment releases the request, and no decision file or directory is ever created", async () => {
+    const h = await harness();
     try {
-      registerExecuteGateway(pi, {} as never, registry, { cwd: home, executeWorkerPromptPath: "/tmp/fake-execute-worker-guide.md" });
-      const writer = registered.get(APPROVE_TOOL_NAME)!;
-      const reader = registered.get(GATED_EXEC_TOOL_NAME)!;
-      assert.ok(writer, "registerExecuteGateway installs the actual ws-approve writer");
-      assert.ok(reader, "registerExecuteGateway installs the actual ws-worker-exec reader");
-      process.env[WS_PI_APPROVAL_DIR_ENV] = join(home, "approvals");
-
-      const unsafeCmdId = "call<>:\"/\\|?*%\u0000\u001f\u007f\u009f";
       const cases = [
-        { cmdId: unsafeCmdId, decision: "approve" as const, expected: { decision: "approve" }, executed: "echo original", text: /exit code: 0/ },
-        { cmdId: "call%7C-literal", decision: "deny" as const, reason: "not approved", expected: { decision: "deny", reason: "not approved" }, executed: undefined, text: /Lead denied this command: not approved/ },
-        { cmdId: "call|run-instead", decision: "run-instead" as const, command: "echo substituted", expected: { decision: "run-instead", command: "echo substituted" }, executed: "echo substituted", text: /Lead substituted a different command/ },
+        { cmdId: "call<>:\"/\\|?*%\u0000\u001f\u007f\u009f", decision: "approve" as const, executed: "echo original", text: /exit code: 0/ },
+        { cmdId: "call%7C-literal", decision: "deny" as const, reason: "not approved", executed: undefined, text: /Lead denied this command: not approved/ },
+        { cmdId: "call|run-instead", decision: "run-instead" as const, command: "echo substituted", executed: "echo substituted", text: /Lead substituted a different command/ },
       ];
-
       for (const item of cases) {
-        record.pendingApproval = { cmdId: item.cmdId, command: "echo original" };
-        const path = approvalDecisionPath(home, item.cmdId);
-        await writer.execute("lead-tool-call", { agent_id: record.agentId, cmd_id: item.cmdId, decision: item.decision, reason: item.reason, command: item.command });
-        assert.deepEqual(JSON.parse(readFileSync(path, "utf8")), item.expected, "the registered writer must write the encoded decision path");
-        assert.doesNotMatch(path.split("/").at(-1)!, /[<>:"/\\|?*\u0000-\u001f\u007f-\u009f]/, "the registered writer's filename must be Windows-safe");
-
-        const executionsBefore = executions.length;
+        h.record.pendingApproval = { cmdId: item.cmdId, command: "echo original" };
+        const executionsBefore = h.executions.length;
         const controller = new AbortController();
-        const abortTimer = setTimeout(() => controller.abort(), 1_000);
-        const result = await reader.execute(item.cmdId, { command: "echo original", rationale: "exercise the registered reader" }, controller.signal);
+        const abortTimer = setTimeout(() => controller.abort(), 5_000);
+        const pending = h.exec.execute(item.cmdId, { command: "echo original", rationale: "exercise the registered reader" }, controller.signal);
+        assert.equal(h.approvalGate.pending, item.cmdId, "the gated tool waits on its own toolCallId");
+        const reply = await h.approve.execute("lead-tool-call", { agent_id: h.record.agentId, cmd_id: item.cmdId, decision: item.decision, reason: item.reason, command: item.command });
+        assert.deepEqual(JSON.parse(reply.content[0].text), { ok: true });
+        assert.equal(h.record.pendingApproval?.decision, "sent", "ws-approve marks the decision in flight, not consumed");
+        const result = await pending;
         clearTimeout(abortTimer);
         assert.match(result.content[0]!.text, item.text);
-        assert.ok(!existsSync(path), "the registered reader removes a successfully consumed IPC decision");
-        if (item.executed === undefined) {
-          assert.equal(executions.length, executionsBefore, "deny never runs the proposed command");
-        } else {
-          assert.equal(executions.at(-1), item.executed, "approve runs the proposal and run-instead runs the replacement");
-        }
+        await h.released();
+        assert.equal(h.approvalGate.pending, undefined);
+        if (item.executed === undefined) assert.equal(h.executions.length, executionsBefore, "deny never runs the proposed command");
+        else assert.equal(h.executions.at(-1), item.executed, "approve runs the proposal and run-instead runs the replacement");
       }
-    } finally {
-      if (previousApprovalDir === undefined) delete process.env[WS_PI_APPROVAL_DIR_ENV];
-      else process.env[WS_PI_APPROVAL_DIR_ENV] = previousApprovalDir;
-      rmSync(home, { recursive: true, force: true });
-    }
+      assert.equal(existsSync(join(h.home, "approvals")), false, "no decision directory");
+      assert.ok(!Object.keys(process.env).some((key) => key.includes("WS_PI_APPROVAL")), "no decision env");
+    } finally { h.close(); }
+  });
+
+  test("a second ws-approve while the first decision is in flight is rejected; a decision for a different cmd_id never satisfies the wait", async () => {
+    const h = await harness();
+    try {
+      h.record.pendingApproval = { cmdId: "call-1", command: "echo original" };
+      const controller = new AbortController();
+      const pending = h.exec.execute("call-1", { command: "echo original", rationale: "r" }, controller.signal);
+      await assert.rejects(h.approve.execute("x", { agent_id: h.record.agentId, cmd_id: "call-2", decision: "approve" }), /cmd_id mismatch/);
+      assert.equal(h.record.pendingApproval?.decision, undefined, "a rejected call sends nothing");
+      // A forged decision for another cmd_id over the real connection is ignored by the wait.
+      h.parent.send({ t: "approval-decision", cmd_id: "call-2", decision: "approve" });
+      await h.approve.execute("x", { agent_id: h.record.agentId, cmd_id: "call-1", decision: "deny", reason: "no" });
+      await assert.rejects(h.approve.execute("x", { agent_id: h.record.agentId, cmd_id: "call-1", decision: "approve" }), /already sent and awaiting worker consumption/);
+      assert.match((await pending).content[0].text, /Lead denied this command: no/);
+      await h.released();
+      assert.deepEqual(h.executions, [], "nothing ran: the forged approve was not for this cmd_id and the real decision was a deny");
+    } finally { h.close(); }
+  });
+
+  test("ws-approve with no live connection discards immediately with a not-delivered error, sends nothing, and the request stays open for the reconnect", async () => {
+    const h = await harness();
+    try {
+      h.record.pendingApproval = { cmdId: "call-1", command: "echo original" };
+      const controller = new AbortController();
+      const pending = h.exec.execute("call-1", { command: "echo original", rationale: "r" }, controller.signal);
+      const dropped = new Promise<void>((resolve) => h.parent.onDisconnect(resolve));
+      h.child.close();
+      await dropped;
+      await assert.rejects(h.approve.execute("x", { agent_id: h.record.agentId, cmd_id: "call-1", decision: "approve" }), /not delivered: the worker has no live connection/);
+      assert.deepEqual(h.record.pendingApproval, { cmdId: "call-1", command: "echo original" }, "nothing was sent, so nothing is in flight or discarded");
+      assert.equal(h.approvalGate.pending, "call-1", "the child still waits; its reconnect hello would report this cmd_id");
+      controller.abort();
+      assert.match((await pending).content[0].text, /Aborted/);
+      assert.deepEqual(h.executions, []);
+    } finally { h.close(); }
+  });
+
+  test("ws-worker-exec in a process with no parent channel fails loud instead of waiting forever", async () => {
+    const registered = new Map<string, Tool>();
+    const pi = { registerTool: (tool: { name: string } & Tool) => registered.set(tool.name, tool) } as unknown as ExtensionAPI;
+    registerExecuteGateway(pi, {} as never, new Map(), { cwd: "/tmp", executeWorkerPromptPath: "/tmp/guide.md" });
+    await assert.rejects(registered.get(GATED_EXEC_TOOL_NAME)!.execute("call-1", { command: "echo", rationale: "r" }), /no parent control channel/);
   });
 });
 
