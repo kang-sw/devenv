@@ -11,6 +11,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 4c8227b81e7ce758
 sage-review-completeness-reviewed: 4c8227b81e7ce758
+completed: 2026-09-24
 ---
 
 # Pi review-sweep correctness fixes (approval reconnect, reissue prompt, usage durability, removal gate, stop-during-launch)
