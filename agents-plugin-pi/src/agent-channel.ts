@@ -590,7 +590,12 @@ export class ParentChannel {
 }
 
 export interface ChildChannelOptions {
-  /** Per-feature resume state included in every reconnect hello. */
+  /**
+   * Per-feature resume state that exists at connect time, included in every
+   * hello, the first one too (the only source it carries). Features that
+   * register after `connect()` resolves use `ChildChannel.provideResume`;
+   * `composeResume` states how the two merge.
+   */
   resume?: () => Record<string, unknown>;
   /** Default true: reconnect after every connection end until `close()`. Tests' in-process stand-ins pass false. */
   reconnect?: boolean;
@@ -726,15 +731,29 @@ export class ChildChannel {
         clearTimeout(timer);
         reject(new ChannelRejected("closed-before-welcome"));
       });
-      const provided: Record<string, unknown> = {};
-      for (const [key, provider] of this.resumeProviders) {
-        let value: unknown;
-        try { value = provider(); } catch { continue; /* one feature's failure must not block the hello */ }
-        if (value !== undefined) provided[key] = value;
-      }
-      const resume = { ...(this.options.resume?.() ?? {}), ...provided, ...(reconnect && this.readinessByKind.size ? { readiness: Object.fromEntries(this.readinessByKind) } : {}) };
-      conn.send({ t: "hello", v: CHANNEL_PROTOCOL_VERSION, cred: this.bootstrap.credential, gen: this.generation, pid: process.pid, reconnect, resume });
+      conn.send({ t: "hello", v: CHANNEL_PROTOCOL_VERSION, cred: this.bootstrap.credential, gen: this.generation, pid: process.pid, reconnect, resume: this.composeResume(reconnect) });
     });
+  }
+
+  /**
+   * A hello's `resume` section, merged from the two registration entry points
+   * in this precedence, later spreads winning a shared key: the constructor's
+   * `options.resume` keys first, then `provideResume` providers' keys in
+   * registration order (a provider returning `undefined` or throwing
+   * contributes nothing; one feature's failure must not block the hello),
+   * then, on a reconnect with any readiness published, the channel's own
+   * `readiness`. A provider key equal to a constructor key overrides its value
+   * silently; only `provideResume` reserves `readiness`. Providers are called
+   * before `options.resume`.
+   */
+  private composeResume(reconnect: boolean): Record<string, unknown> {
+    const provided: Record<string, unknown> = {};
+    for (const [key, provider] of this.resumeProviders) {
+      let value: unknown;
+      try { value = provider(); } catch { continue; /* one feature's failure must not block the hello */ }
+      if (value !== undefined) provided[key] = value;
+    }
+    return { ...(this.options.resume?.() ?? {}), ...provided, ...(reconnect && this.readinessByKind.size ? { readiness: Object.fromEntries(this.readinessByKind) } : {}) };
   }
 
   private async reconnectLoop(): Promise<void> {

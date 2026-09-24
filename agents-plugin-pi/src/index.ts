@@ -217,7 +217,8 @@ import { registerAuditCommands } from "./audit.ts";
 import { registerWsSkillTool } from "./lead-skills.ts";
 import { createToolPreviewTuiRef, loadToolResultTuiModules } from "./tool-result-render.ts";
 import { createAgentStorageContext, pruneStaleAgentHomes, reportOwnershipDiagnostic, type AgentStorageContext } from "./agent-storage.ts";
-import { createAgentFooterSessionLifecycle, descendantUsageValue, retentionEvictionCost, type AgentFooterContext, type AgentFooterSessionLifecycle } from "./agent-footer.ts";
+import { createAgentFooterSessionLifecycle, type AgentFooterContext, type AgentFooterSessionLifecycle } from "./agent-footer.ts";
+import { descendantUsageValue, retentionEvictionCost } from "./agent-cost.ts";
 import { createDescendantUsageReporter, descendantUsageReporterRef, evaluateDescendantUsage } from "./agent-usage-rollup.ts";
 import { loadHostPiTui } from "./pi-tui.ts";
 import { addClaudeDelegateIfLead, registerClaudeDelegateSession } from "./claude-delegate.ts";
@@ -403,8 +404,11 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   // The gate outlives any one connection: a reconnect hello reports the
   // cmd_id `ws-worker-exec` is still waiting on so the parent can re-ask.
   const approvalGate = new ChildApprovalGate();
-  // Every reconnect hello carries the latest subtree snapshot and any open
-  // approval wait in its resume section (distinct keys per feature).
+  // Every hello, the first one too, carries the latest subtree snapshot and
+  // any open approval wait in its resume section (distinct keys per feature).
+  // The descendant-usage reporter below registers its `descendantUsage` key
+  // through `provideResume` after connect; `ChildChannel.composeResume`
+  // merges both sources.
   const channel = channelBootstrap ? await ChildChannel.connect(channelBootstrap, { resume: () => ({ ...(subtreeUpstream?.resume() ?? {}), ...approvalGate.resume() }) }) : undefined;
   subtreeUpstream = channel ? new SubtreeUpstream(channel) : undefined;
   if (channel) approvalGate.attach(channel);

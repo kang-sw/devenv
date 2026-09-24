@@ -22,7 +22,9 @@ import {
   sweepStaleChannelSockets,
   type ChannelConnection,
 } from "../src/agent-channel.ts";
-import { ChildApprovalGate, approvalConsumedMessage, approvalDecisionMessage } from "../src/approval-protocol.ts";
+import { APPROVAL_RESUME_KEY, ChildApprovalGate, approvalConsumedMessage, approvalDecisionMessage } from "../src/approval-protocol.ts";
+import { SUBTREE_RESUME_KEY } from "../src/subtree-lifecycle.ts";
+import { DESCENDANT_USAGE_RESUME_KEY } from "../src/agent-usage-rollup.ts";
 
 const win = process.platform === "win32";
 const roots: string[] = [];
@@ -143,6 +145,47 @@ for (const kind of ["pipe", "tcp"] as const) {
       child.publishReadiness("fork", { ownSessionKey: "late" });
       assert.deepEqual((await again).readiness, { web: { tools: ["a"] }, fork: { ownSessionKey: "late" } });
       assert.deepEqual(await parent.readiness("fork"), { ownSessionKey: "late" });
+      child.close();
+      parent.close();
+    });
+
+    test("hello resume merges the constructor source and provideResume: constructor keys, then provider keys in registration order, then readiness on a reconnect", async () => {
+      const parent = await ParentChannel.bind(8, { force: kind, socketDir: socketDir() });
+      const gate = new ChildApprovalGate();
+      const subtree = { children: 2 };
+      const child = await ChildChannel.connect(readAndDeleteChannelBootstrap({ ...parent.bootstrapEnv() })!, {
+        backoffCapMs: 100,
+        resume: () => ({ [SUBTREE_RESUME_KEY]: subtree, ...gate.resume(), shared: "constructor" }),
+      });
+      // The first hello precedes any provider registration: the constructor source alone, no readiness.
+      const first = await parent.hello();
+      assert.equal(first.reconnect, false);
+      assert.deepEqual(Object.keys(first.resume), [SUBTREE_RESUME_KEY, APPROVAL_RESUME_KEY, "shared"]);
+
+      child.publishReadiness("web", { tools: ["a"] });
+      await parent.readiness("web");
+      const usage = { seq: 3, usage: { knownUsd: 1.5, knownContributors: 1, unknownContributors: 0, descendants: 2 } };
+      child.provideResume(DESCENDANT_USAGE_RESUME_KEY, () => usage);
+      child.provideResume("absent", () => undefined);
+      child.provideResume("broken", () => { throw new Error("feature failure"); });
+      child.provideResume("shared", () => "provider");
+      child.provideResume("late", () => "last");
+
+      const reconnected = new Promise<Record<string, unknown>>(resolve => parent.onConnection((_conn, hello) => { if (hello.reconnect) resolve(hello.resume); }));
+      parent.live!.close();
+      const resume = await reconnected;
+      // A provider key equal to a constructor key keeps the constructor key's
+      // position and takes the provider's value; undefined and throwing
+      // providers contribute nothing.
+      assert.deepEqual(Object.keys(resume), [SUBTREE_RESUME_KEY, APPROVAL_RESUME_KEY, "shared", DESCENDANT_USAGE_RESUME_KEY, "late", "readiness"]);
+      assert.deepEqual(resume, {
+        [SUBTREE_RESUME_KEY]: { children: 2 },
+        [APPROVAL_RESUME_KEY]: { consumed: [] },
+        shared: "provider",
+        [DESCENDANT_USAGE_RESUME_KEY]: usage,
+        late: "last",
+        readiness: { web: { tools: ["a"] } },
+      });
       child.close();
       parent.close();
     });

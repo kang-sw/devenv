@@ -31,7 +31,8 @@ import {
   writeOwnership,
 } from "../src/agent-storage.ts";
 import type { CumulativeCost } from "../src/agent-telemetry.ts";
-import { createAgentFooterController, descendantUsageValue, persistAgentCostCheckpoint, registerAgentCostOwner, retentionEvictionCost } from "../src/agent-footer.ts";
+import { createAgentFooterController } from "../src/agent-footer.ts";
+import { descendantUsageValue, persistAgentCostCheckpoint, registerAgentCostOwner, retentionEvictionCost } from "../src/agent-cost.ts";
 import { evictForCapacity, sendToAgent, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
 import { captureOrphans, parseOrphans, readAndClearSidecarAt, reviveOrphans, serializeOrphans, writeSidecarAt } from "../src/agent-sidecar.ts";
 import { createThreadRegistryHandle, ensureRespondent, type ThreadRecord } from "../src/ask.ts";
@@ -74,7 +75,7 @@ function checkpoint(storage: Storage): any {
 function silenceDiagnostics(t: { mock: { method: (...args: any[]) => unknown } }): void { t.mock.method(console, "error", () => {}); }
 
 const STORAGE_URL = JSON.stringify(new URL("../src/agent-storage.ts", import.meta.url).href);
-const FOOTER_URL = JSON.stringify(new URL("../src/agent-footer.ts", import.meta.url).href);
+const COST_URL = JSON.stringify(new URL("../src/agent-cost.ts", import.meta.url).href);
 // A fixture process announces `label` and then blocks until the release file
 // exists: a barrier, not a timing guess.
 const BARRIER = `
@@ -209,7 +210,7 @@ describe("cross-process retention and the live owner", () => {
     const release = join(storage.root, "release-prunes");
     const prunes = [0, 1].map(i => nodeProcess(`
       import { pruneStaleAgentHomes } from ${STORAGE_URL};
-      import { retentionEvictionCost } from ${FOOTER_URL};
+      import { retentionEvictionCost } from ${COST_URL};
       barrier(${JSON.stringify(release)}, "ready");
       const result = pruneStaleAgentHomes(${JSON.stringify(storage.root)}, 1, { evictionCost: retentionEvictionCost });
       writeSync(1, "result " + JSON.stringify(result) + "\\n");
@@ -235,7 +236,7 @@ describe("cross-process retention and the live owner", () => {
     const release = join(storage.root, "release-held");
     const holder = nodeProcess(`
       import { pruneStaleAgentHomes } from ${STORAGE_URL};
-      import { retentionEvictionCost } from ${FOOTER_URL};
+      import { retentionEvictionCost } from ${COST_URL};
       const result = pruneStaleAgentHomes(${JSON.stringify(storage.root)}, 1, { evictionCost: metadata => {
         const cost = retentionEvictionCost(metadata);
         barrier(${JSON.stringify(release)}, "held");
@@ -269,7 +270,7 @@ describe("cross-process retention and the live owner", () => {
 
     const retention = nodeProcess(`
       import { pruneStaleAgentHomes } from ${STORAGE_URL};
-      import { retentionEvictionCost } from ${FOOTER_URL};
+      import { retentionEvictionCost } from ${COST_URL};
       writeSync(1, "result " + JSON.stringify(pruneStaleAgentHomes(${JSON.stringify(storage.root)}, 1, { evictionCost: retentionEvictionCost })) + "\\n");
     `);
     await retention.closed.finally(() => retention.kill());
@@ -299,7 +300,7 @@ describe("cross-process retention and the live owner", () => {
     const release = join(storage.root, "release-retention");
     const retention = nodeProcess(`
       import { pruneStaleAgentHomes } from ${STORAGE_URL};
-      import { retentionEvictionCost } from ${FOOTER_URL};
+      import { retentionEvictionCost } from ${COST_URL};
       barrier(${JSON.stringify(release)}, "ready");
       writeSync(1, "result " + JSON.stringify(pruneStaleAgentHomes(${JSON.stringify(storage.root)}, 1, { evictionCost: retentionEvictionCost })) + "\\n");
     `);
@@ -333,7 +334,7 @@ describe("crash window", () => {
     stale(child);
     const crash = nodeProcess(`
       import { readOwnership, removeOwnedAgentHome } from ${STORAGE_URL};
-      import { retentionEvictionCost } from ${FOOTER_URL};
+      import { retentionEvictionCost } from ${COST_URL};
       removeOwnedAgentHome(readOwnership(${JSON.stringify(child.ownership!.home)}), undefined, undefined, { evictionCost: retentionEvictionCost, beforeDetach: () => process.exit(7) });
       writeSync(1, "not reached\\n");
     `);

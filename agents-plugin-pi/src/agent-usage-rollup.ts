@@ -10,7 +10,7 @@
  * session other than its direct children's.
  *
  * A hop's descendant value is its cost estimate's direct total
- * (`descendantUsageValue` in `agent-footer.ts`): the subtree totals of its
+ * (`descendantUsageValue` in `agent-cost.ts`): the subtree totals of its
  * registry-resident direct children plus its removed children (the
  * checkpoint's legacy evicted baseline and its per-child eviction records).
  *

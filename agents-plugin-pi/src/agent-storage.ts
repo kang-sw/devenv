@@ -296,6 +296,16 @@ function ownershipLockPath(home: string): string { return join(dirname(home), `.
  * rename a detached home back (and then delete its eviction record), so an
  * absent home under a held claim is not final. A claim left by a crashed
  * remover keeps this false until a later claimant reclaims it.
+ *
+ * One of three removal predicates. Call site: the cost estimate's registry
+ * prune (`pruneRemovedAgents`, agent-cost.ts), which asks it only about an
+ * entry that already has an eviction record, to decide whether to drop that
+ * entry from the registry. Home absence is the question there:
+ * `ownedHomeRemovalState` answers "removed" for any unclaimed record, so it
+ * would drop a removal-pending entry whose home is still present, and
+ * `isRemovedAgent` reads the record alone and ignores the claim, so it would
+ * drop every recorded entry, including a removal-pending one whose home is
+ * still present and one whose removal may still roll back.
  */
 export function isOwnedHomeGone(ownership: Pick<AgentOwnership, "home">): boolean {
   const home = resolve(ownership.home);
@@ -305,10 +315,19 @@ export function isOwnedHomeGone(ownership: Pick<AgentOwnership, "home">): boolea
 }
 
 /**
- * The sidecar's removal gate for an owned entry. `"claimed"`: a removal claim
- * is held, so neither an absent home (the remover may rename it back) nor an
- * eviction record (its `finally` deletes the record when the removal fails)
- * proves removal yet; keep the entry and let a later read decide.
+ * One of three removal predicates: the sidecar's removal gate for an owned
+ * entry. Call sites: the sidecar parse and orphan revival (agent-sidecar.ts),
+ * which decide whether a persisted entry may come back at all. There both
+ * signals matter and a held claim must not settle it: `isOwnedHomeGone`
+ * ignores the eviction record, so a removal-pending entry with its home still
+ * present would revive and count its cost twice; `isRemovedAgent` ignores the
+ * claim and an absent home without a record, so it would refuse an entry
+ * whose removal may still roll back and miss a pre-record removal.
+ *
+ * `"claimed"`: a removal claim is held, so neither an absent home (the
+ * remover may rename it back) nor an eviction record (its `finally` deletes
+ * the record when the removal fails) proves removal yet; keep the entry and
+ * let a later read decide.
  * `"removed"`: with no claim held, an eviction record or an absent home.
  * `"present"`: neither.
  *

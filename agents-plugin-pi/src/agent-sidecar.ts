@@ -262,13 +262,13 @@ export function parseOrphans(raw: string): PersistedOrphan[] {
     // read still falls through; one that cannot be stat'ed at all reads as
     // removed (its session file is equally unreachable). Under a held removal
     // claim neither proves removal (`ownedHomeRemovalState`): the entry is
-    // kept, and the cost estimate's reconcile or the next parse decides.
+    // kept, and the cost estimate's prune (agent-cost.ts) or the next parse decides.
     const removal = normalizedOwnership && validDescriptor(normalizedOwnership) && normalizedOwnership.agentId === o.agentId ? ownedHomeRemovalState(normalizedOwnership) : undefined;
     if (removal === "removed") continue;
     // A home detached by a claimed remover cannot be re-validated against
     // disk; the descriptor is kept so a rolled-back removal re-links it.
     const detached = removal === "claimed" && !existsSync(normalizedOwnership!.home);
-    const ownership =normalizedOwnership && validDescriptor(normalizedOwnership) && normalizedOwnership.agentId === o.agentId && normalizedOwnership.sessionPath === o.sessionPath && (detached || (() => { const disk = readOwnership(normalizedOwnership.home); return !!disk && disk.home === normalizedOwnership.home && disk.ownerSessionId === normalizedOwnership.ownerSessionId && disk.agentId === normalizedOwnership.agentId && disk.sessionPath === normalizedOwnership.sessionPath && disk.role === normalizedOwnership.role && disk.exploreMode === normalizedOwnership.exploreMode; })()) ? normalizedOwnership : undefined;
+    const ownership = normalizedOwnership && validDescriptor(normalizedOwnership) && normalizedOwnership.agentId === o.agentId && normalizedOwnership.sessionPath === o.sessionPath && (detached || (() => { const disk = readOwnership(normalizedOwnership.home); return !!disk && disk.home === normalizedOwnership.home && disk.ownerSessionId === normalizedOwnership.ownerSessionId && disk.agentId === normalizedOwnership.agentId && disk.sessionPath === normalizedOwnership.sessionPath && disk.role === normalizedOwnership.role && disk.exploreMode === normalizedOwnership.exploreMode; })()) ? normalizedOwnership : undefined;
     out.push({
       agentId: o.agentId,
       alias: typeof o.alias === "string" ? o.alias : undefined,
@@ -395,8 +395,8 @@ export interface OrphanRoleWiring {
  * eviction record, is not revived: the record (or, before records, the
  * checkpoint's legacy baseline) already carries its subtree cost, so reviving
  * it would count that cost twice. Under a held removal claim it is revived:
- * the remover may still roll back, and the cost estimate's reconcile drops
- * the record once the removal completes.
+ * the remover may still roll back, and the cost estimate's prune
+ * (agent-cost.ts) drops the record once the removal completes.
  */
 export function reviveOrphans(registry: RpcAgentRegistry, orphans: PersistedOrphan[], wiring: OrphanRoleWiring = {}): RpcAgentRecord[] {
   const revived: RpcAgentRecord[] = [];

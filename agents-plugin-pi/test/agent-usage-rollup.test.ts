@@ -24,7 +24,7 @@ import {
   createDescendantUsageReporter,
   descendantUsageOf,
 } from "../src/agent-usage-rollup.ts";
-import { descendantUsageValue, persistAgentCostCheckpoint, persistEvictedAgentCost, registerAgentCostOwner, retentionEvictionCost } from "../src/agent-footer.ts";
+import { descendantUsageValue, persistAgentCostCheckpoint, persistEvictedAgentCost, registerAgentCostOwner, retentionEvictionCost } from "../src/agent-cost.ts";
 import { evictForCapacity, refreshAgentTelemetry, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
 import { captureOrphans, readAndClearSidecarAt, reviveOrphans, writeSidecarAt } from "../src/agent-sidecar.ts";
 import { captureForkResume, rehydrateForkRecord } from "../src/ask.ts";

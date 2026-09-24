@@ -54,7 +54,7 @@ async function runHop(): Promise<void> {
   ] = await Promise.all([
     import("../../src/agent-channel.ts"),
     import("../../src/agent-storage.ts"),
-    import("../../src/agent-footer.ts"),
+    import("../../src/agent-cost.ts"),
     import("../../src/agent-usage-rollup.ts"),
     import("../../src/spawner.ts"),
     import("../../src/agent-sidecar.ts"),

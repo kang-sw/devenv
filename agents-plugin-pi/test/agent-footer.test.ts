@@ -10,13 +10,11 @@ import { allocateAgentHome, createAgentStorageContext, readEvictionRecord, readE
 import {
   createAgentFooterController,
   createAgentFooterSessionLifecycle,
-  descendantUsageValue,
   formatCumulativeCost,
-  persistEvictedAgentCost,
-  registerAgentCostOwner,
   shouldArmAgentFooter,
   type AgentFooterComponent,
 } from "../src/agent-footer.ts";
+import { descendantUsageValue, persistEvictedAgentCost, registerAgentCostOwner } from "../src/agent-cost.ts";
 import { agentWidgetRefreshRef, evictForCapacity, stopAgent, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
 import { truncateToWidth, visibleWidth } from "../src/pi-tui.ts";
 import { applySessionShutdownAgentFooter, applySessionStartAgentFooter, registerAgentFooterGitEvents } from "../src/index.ts";
