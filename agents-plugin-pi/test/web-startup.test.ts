@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,7 +8,8 @@ import { RpcClient } from '@earendil-works/pi-coding-agent';
 import { createAgentStorageContext } from '../src/agent-storage.ts';
 
 // No LLM request is sent. RpcClient.start/stop/getState, extension loading,
-// upstream capture, nonce publication and production spawn/resume remain real.
+// the control-channel hello, readiness publication and production
+// spawn/resume remain real.
 test('real Explore extension startup and dormant restart prove fresh facade readiness without paid inference', { timeout: 60_000 }, async t => {
   const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
   const cli = join(dirname(fileURLToPath(import.meta.resolve('@earendil-works/pi-coding-agent'))), 'cli.js');
@@ -30,21 +31,27 @@ test('real Explore extension startup and dormant restart prove fresh facade read
       systemPromptPath: join(packageRoot, 'explore-guide.md'), prompt: 'not dispatched to a model',
     });
     const record = registry.get(result.agent_id);
-    const readyPath = join(record.ownership.home, 'web-tools-ready.json');
-    const first = JSON.parse(readFileSync(readyPath, 'utf8'));
-    assert.deepEqual(first.tools, ['web_search', 'ws_web_fetch']);
-    assert.equal(first.nonce, record.subtreeChannel.nonce);
+    const first = record.channel;
+    assert.ok(first, 'the launch owns a live control channel');
+    assert.deepEqual(await first.readiness('web'), { tools: ['web_search', 'ws_web_fetch'] });
+    assert.equal(first.generation, 1);
+    assert.equal(existsSync(join(record.ownership.home, 'web-tools-ready.json')), false, 'readiness no longer travels through a file');
+    assert.ok(!readdirSync(record.ownership.home).some(name => name.endsWith('ready.json')));
     record.ownershipObserverStop?.();
     await record.client.stop();
+    first.close();
     record.client = undefined;
+    record.channel = undefined;
     record.running = false;
     await sendToAgent(registry, context, record.agentId, 'resume without inference');
-    const second = JSON.parse(readFileSync(readyPath, 'utf8'));
-    assert.notEqual(second.nonce, first.nonce, 'stale readiness cannot satisfy a restarted launch');
-    assert.equal(second.nonce, record.subtreeChannel.nonce);
-    assert.deepEqual(second.tools, first.tools);
+    const second = record.channel;
+    assert.notEqual(second, first, 'a restarted launch binds its own channel');
+    assert.equal(second.generation, 2);
+    assert.notEqual(second.credential, first.credential, 'stale readiness cannot satisfy a restarted launch');
+    assert.notDeepEqual(second.endpoint, first.endpoint);
+    assert.deepEqual(await second.readiness('web'), { tools: ['web_search', 'ws_web_fetch'] });
     assert.deepEqual(prompts, ['not dispatched to a model', 'resume without inference']);
   } finally {
-    for (const record of registry.values()) { record.ownershipObserverStop?.(); await record.client?.stop(); }
+    for (const record of registry.values()) { record.ownershipObserverStop?.(); record.channel?.close(); await record.client?.stop(); }
   }
 });

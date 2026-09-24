@@ -117,8 +117,11 @@ function wrapSocket(kind: ChannelBackendKind, socket: net.Socket, initialBuffer 
       return () => { endListeners.delete(cb); };
     },
     close() {
+      // Graceful first so a welcome or reject line already written reaches the
+      // peer; the destroy timer bounds a peer that never answers the FIN.
       socket.end();
-      socket.destroy();
+      const force = setTimeout(() => socket.destroy(), 50);
+      force.unref();
     },
   };
 }
@@ -270,10 +273,16 @@ export async function bindChannelEndpoint(opts: ChannelBindOptions = {}): Promis
   throw new ChannelBindError(failures);
 }
 
+/**
+ * The returned socket is ref'd: while a child waits for its hello answer inside
+ * the extension factory nothing else keeps its event loop alive yet (Pi
+ * attaches the RPC stdin reader only after `session_start`), and an unref'd
+ * socket there lets Node exit 0 silently mid-handshake. `ChildChannel`
+ * unrefs it once the hello settles.
+ */
 export function connectChannelEndpoint(endpoint: ChannelEndpoint): Promise<net.Socket> {
   return new Promise((resolve, reject) => {
     const socket = endpoint.kind === "pipe" ? net.connect({ path: endpoint.path }) : net.connect({ host: endpoint.host, port: endpoint.port });
-    socket.unref();
     socket.once("connect", () => { socket.off("error", reject); resolve(socket); });
     socket.once("error", reject);
   });
@@ -607,7 +616,28 @@ export class ChildChannel {
     const socket = await connectChannelEndpoint(this.bootstrap.endpoint);
     const conn = wrapSocket(this.bootstrap.endpoint.kind, socket);
     const timeoutMs = this.options.helloTimeoutMs ?? DEFAULT_CHILD_HELLO_TIMEOUT_MS;
-    await new Promise<void>((resolve, reject) => {
+    // Ref'd only for the handshake (see `connectChannelEndpoint`); an
+    // established channel never keeps a process alive on its own.
+    try { await this.awaitWelcome(conn, reconnect, timeoutMs); }
+    finally { socket.unref(); }
+    this.connection = conn;
+    this.connections += 1;
+    conn.onMessage(raw => {
+      const msg = raw as Partial<ProtocolMessage> | null;
+      if (!msg || typeof msg !== "object" || msg.gen !== this.generation || typeof msg.t !== "string") return;
+      for (const listener of [...this.messageListeners]) listener(msg as Record<string, unknown>);
+    });
+    conn.onEnd(() => {
+      if (this.connection !== conn) return;
+      this.connection = undefined;
+      for (const listener of [...this.disconnectListeners]) listener();
+      if (this.options.reconnect !== false && !this.closedFlag) void this.reconnectLoop();
+    });
+    if (reconnect) for (const listener of [...this.reconnectListeners]) listener();
+  }
+
+  private awaitWelcome(conn: ChannelConnection, reconnect: boolean, timeoutMs: number): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
       let settled = false;
       const timer = setTimeout(() => { if (settled) return; settled = true; conn.close(); reject(new ChannelRejected("timeout")); }, timeoutMs);
       timer.unref();
@@ -629,20 +659,6 @@ export class ChildChannel {
       const resume = { ...(this.options.resume?.() ?? {}), ...(reconnect && this.readinessByKind.size ? { readiness: Object.fromEntries(this.readinessByKind) } : {}) };
       conn.send({ t: "hello", v: CHANNEL_PROTOCOL_VERSION, cred: this.bootstrap.credential, gen: this.generation, pid: process.pid, reconnect, resume });
     });
-    this.connection = conn;
-    this.connections += 1;
-    conn.onMessage(raw => {
-      const msg = raw as Partial<ProtocolMessage> | null;
-      if (!msg || typeof msg !== "object" || msg.gen !== this.generation || typeof msg.t !== "string") return;
-      for (const listener of [...this.messageListeners]) listener(msg as Record<string, unknown>);
-    });
-    conn.onEnd(() => {
-      if (this.connection !== conn) return;
-      this.connection = undefined;
-      for (const listener of [...this.disconnectListeners]) listener();
-      if (this.options.reconnect !== false && !this.closedFlag) void this.reconnectLoop();
-    });
-    if (reconnect) for (const listener of [...this.reconnectListeners]) listener();
   }
 
   private async reconnectLoop(): Promise<void> {
