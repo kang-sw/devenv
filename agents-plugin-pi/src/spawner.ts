@@ -58,10 +58,13 @@
  *
  * A parent's local settle is not subtree completion. Its control channel
  * carries revisioned snapshots of active descendants and queued deliveries
- * (`subtree-lifecycle.ts`). A settle that arrives while the subtree reads
- * waiting is held: the wake turn's own settle admits its terminal, or the hold
- * is released once the child reports quiescence with no turn owed and no turn
- * start the parent has not yet seen (`observeChildSubtree`).
+ * (`subtree-lifecycle.ts`), plus the child's own wake accounting. A settle is
+ * held while the subtree reads waiting, and also while it does not but the
+ * launch's latest snapshot says a turn is still coming: a turn owed, or a turn
+ * start the parent has not yet seen on the RPC stream (`attachEventListener`).
+ * The wake turn's own settle then admits its terminal, or the hold is released
+ * once the child reports quiescence with no turn owed and no unseen turn start
+ * (`observeChildSubtree`).
  *
  * `--tools` curation (`read-only`/`read-only-explore`/`full-worker`)
  * lives only in the in-memory `TOOL_GROUPS` table and Pi CLI flags.
@@ -106,8 +109,8 @@ import {
 import { PUBLIC_EXPLORE_MODE_TIERS, WS_PI_EXPLORE_MODE_ENV, WS_PI_FORK_AFFINITY_ENV, WS_PI_FORK_CONTEXT_ENV, WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV, isLeadOrFork, readSpawnRole, type ExploreMode, type PublicExploreMode, type SpawnRole } from "./process-role.ts";
 import { FORK_READINESS_KIND, captureForkContext, compareForkRegistrations, writePrivateJson, type ForkContext, type ForkReadiness } from "./fork-context.ts";
 import { CHANNEL_BOOTSTRAP_ENVS, ParentChannel, type ChannelBindOptions, type ChannelConnection, type ChannelHello } from "./agent-channel.ts";
-import { parseApprovalConsumedMessage, pendingApprovalFromResume } from "./approval-protocol.ts";
-import { allocateAgentHome, createAgentStorageContext, inspectOwnedHomeRemoval, isOwnedSessionPath, observeSessionWrite, persistOwnershipTelemetry, readOwnership, removedAgentMessage, removeOwnedAgentHome, touchOwnership, updateOwnership, writeOwnership, type AgentOwnership, type AgentStorageContext } from "./agent-storage.ts";
+import { consumedApprovalsFromResume, parseApprovalConsumedMessage, pendingApprovalFromResume } from "./approval-protocol.ts";
+import { allocateAgentHome, createAgentStorageContext, inspectOwnedHomeRemoval, isOwnedSessionPath, observeSessionWrite, persistOwnershipDescendantUsage, persistOwnershipTelemetry, readOwnership, removedAgentMessage, removeOwnedAgentHome, touchOwnership, updateOwnership, writeOwnership, type AgentOwnership, type AgentStorageContext } from "./agent-storage.ts";
 import { ownerNotifyRef } from "./owner-notify.ts";
 export { ownerNotifyRef } from "./owner-notify.ts";
 import { readSessionEntries, reduceTelemetry, type AgentTelemetry, type CumulativeCost, type TelemetryOrigin } from "./agent-telemetry.ts";
@@ -376,7 +379,10 @@ const RPC_CLI_PATH = process.argv[1];
  * consumption), and `"discarded"` when that connection ended before the
  * acknowledgment — the child's reconnect hello then decides whether the
  * command was consumed (`attachApprovalChannel`). `reissued` marks a request
- * pushed to the lead again after such a discard.
+ * pushed to the lead again after such a discard, and `issue` counts those
+ * pushes (absent reads as 0, the original request): a held
+ * `ws-agent-approval` push stays actionable only while the issue it was built
+ * for is still the current one (`heldActionState`).
  */
 export interface PendingApprovalState {
   cmdId: string;
@@ -385,6 +391,7 @@ export interface PendingApprovalState {
   cwd?: string;
   decision?: "sent" | "discarded";
   reissued?: boolean;
+  issue?: number;
 }
 
 export interface RpcAgentRecord {
@@ -487,8 +494,9 @@ export interface RpcAgentRecord {
   launchGeneration?: number;
   /**
    * The child's last accepted descendant-usage report (`agent-usage-rollup.ts`):
-   * everything below it, excluding its own usage. Mirrored into `telemetry`
-   * for durability; kept here too so a telemetry reset cannot drop it.
+   * everything below it, excluding its own usage. Persisted as the ownership
+   * record's sibling `descendantUsage` field, outside `telemetry`, so a
+   * telemetry reset cannot drop it.
    */
   descendantUsage?: CumulativeCost;
   /** Live-only ordering state for descendant-usage reports: the accepted launch generation and its highest sequence. */
@@ -728,14 +736,18 @@ export function refreshAgentTelemetry(
   // survives every reset of the own-usage telemetry below.
   const descendants = descendantUsageOf(record);
   const finish = (): boolean => {
-    if (descendants) {
-      record.descendantUsage = descendants;
-      if (record.telemetry) record.telemetry.descendantUsage = descendants;
-    }
+    if (descendants) record.descendantUsage = descendants;
+    // The legacy location is read, never written: the value lives in the
+    // record field and the ownership record's sibling field.
+    if (record.telemetry) delete record.telemetry.descendantUsage;
     const changed = before !== snapshot();
     // Compared against the persisted record, not `changed`: the snapshot covers
     // more than the durable telemetry, and a failed write must retry next refresh.
+    // The telemetry write migrates a legacy on-disk copy before dropping it.
     if (record.ownership) persistOwnershipTelemetry(record.ownership.home, record.telemetry);
+    // Retry a failed report write, but only for a value accepted live in this
+    // process: a revived record's value came from disk or an older snapshot.
+    if (record.ownership && record.descendantUsageOrder && record.descendantUsage) persistOwnershipDescendantUsage(record.ownership.home, record.descendantUsage);
     // Evaluation point 1: this hop's own reduction of a direct child ran.
     evaluateDescendantUsage();
     return changed;
@@ -1143,6 +1155,7 @@ function admitPush(pi: ExtensionAPI, held: HeldPush | HeldRawSend): void {
       if (held.terminal) held.terminal.state = "held";
       held.actionGeneration = held.record?.workGeneration;
       if (held.family === "ws-agent-question") held.questionReport = held.record?.reportLog.at(-1);
+      if (held.family === "ws-agent-approval") held.approvalIssue = held.record?.pendingApproval?.issue ?? 0;
     }
     heldPushQueue.push(held);
     requestPushWake(pi);
@@ -1260,6 +1273,8 @@ interface HeldPush {
   deliverAs: PushDeliverAs;
   /** Work generation at admission, used to reject controls superseded before the snapshot. */
   actionGeneration?: number;
+  /** For `ws-agent-approval`: the request's `issue` at admission; a reissue supersedes this push. */
+  approvalIssue?: number;
   /** Exact report-log entry created for a queued headless question. */
   questionReport?: AgentReportLogEntry;
 }
@@ -1391,8 +1406,11 @@ function heldActionState(held: HeldPush): PushBatchItemState {
     const cmdId = typeof held.payload.cmd_id === "string" ? held.payload.cmd_id : undefined;
     const pending = held.record?.pendingApproval;
     // A decision in flight or discarded supersedes the held request: the
-    // reconnect hello either releases it or re-issues it as a fresh push.
+    // reconnect hello either releases it or re-issues it as a fresh push. A
+    // reissue clears `decision` again, so the issue number keeps this push
+    // superseded next to the reissued one: one actionable prompt per cmd_id.
     return cmdId && held.record?.workGeneration === held.actionGeneration && pending?.cmdId === cmdId && pending.decision === undefined
+      && (pending.issue ?? 0) === held.approvalIssue
       ? "actionable"
       : "superseded";
   }
@@ -1970,18 +1988,36 @@ function clearLiveState(record: RpcAgentRecord, registry?: RpcAgentRegistry): vo
 }
 
 /**
+ * Launches `stopAgent` stopped while still in flight, keyed by their
+ * `RpcAgentRecord.launching` mark. Separate from `launchGeneration`, which a
+ * stop must leave unchanged: its own replacement check compares it.
+ */
+const stoppedLaunches = new WeakSet<Promise<void>>();
+
+/**
  * Marks a launch in flight on `record` (see `RpcAgentRecord.launching`) and
  * returns its release, which settles the wait whether the launch reached its
- * first prompt or failed. Idempotent, and never clears a later launch's mark.
+ * first prompt or failed (idempotent, and never clears a later launch's
+ * mark), and `stopped`, which reports whether `stopAgent` stopped this launch
+ * while it was in flight. A launch failure caused by that stop is the stop's
+ * outcome, not a `spawn-failed` one.
  */
-function claimLaunch(record: RpcAgentRecord): () => void {
+function claimLaunch(record: RpcAgentRecord): { release: () => void; stopped: () => boolean } {
   let release!: () => void;
   const launching = new Promise<void>(resolve => { release = resolve; });
   record.launching = launching;
-  return () => {
-    if (record.launching === launching) record.launching = undefined;
-    release();
+  return {
+    release: () => {
+      if (record.launching === launching) record.launching = undefined;
+      release();
+    },
+    stopped: () => stoppedLaunches.has(launching),
   };
+}
+
+/** The error a launch stopped by `stopAgent` rejects with instead of its own failure. */
+function launchStoppedError(): Error {
+  return new Error("ws-pi-agent: launch stopped (ws-agent-stop) before the agent started");
 }
 
 /** The exit `RpcClient` recorded for its process, if any: the one signal that a `getState()` rejection means "gone" rather than "slow". */
@@ -2674,14 +2710,17 @@ export interface ApprovalChannelHost {
  *   `ws-approve` records the same state when it finds no live connection).
  *   It is never re-sent: whether the child consumed it before the drop is
  *   learned only from the reconnect hello.
- * - A reconnect hello that still reports the `cmd_id` means the discarded
- *   decision was lost: the request goes back to the lead as a fresh push
- *   (`reissued`), and only a decision sent over the new connection can be
- *   consumed. A hello that reports no pending `cmd_id` while a decision had
- *   been sent means the child consumed it (its acknowledgment was lost with
- *   the connection), so the request is released. A request with no decision
- *   sent is left alone either way: the RPC event stream owns the request, and
- *   the lead already holds it.
+ * - A reconnect hello settles a discarded decision only on positive
+ *   evidence. When it lists the `cmd_id` in `consumed`, the child ran the
+ *   command (its acknowledgment was lost with the connection), so the request
+ *   is released. Otherwise the decision was lost, lost in transit, or kept
+ *   early on the old connection (which the child discards with it): the
+ *   request goes back to the lead as a fresh push (`reissued`, `issue` + 1),
+ *   and only a decision sent over the new connection can be consumed. A hello
+ *   with no `consumed` array comes from a child that predates it; there,
+ *   "not reported as pending" still counts as consumed. A request with no
+ *   decision sent is left alone either way: the RPC event stream owns the
+ *   request, and the lead already holds it.
  *
  * Returns the detach; `clearLiveState` closes the channel itself.
  */
@@ -2706,9 +2745,11 @@ export function attachApprovalChannel(
   const offConnection = channel.onConnection((_conn, hello) => {
     const pending = record.pendingApproval;
     if (!hello.reconnect || pending?.decision !== "discarded") return;
-    if (pendingApprovalFromResume(hello.resume) !== pending.cmdId) { release(); return; }
+    const consumed = consumedApprovalsFromResume(hello.resume);
+    const wasConsumed = consumed ? consumed.includes(pending.cmdId) : pendingApprovalFromResume(hello.resume) !== pending.cmdId;
+    if (wasConsumed) { release(); return; }
     const { decision: _discarded, ...request } = pending;
-    record.pendingApproval = { ...request, reissued: true };
+    record.pendingApproval = { ...request, reissued: true, issue: (pending.issue ?? 0) + 1 };
     syncOwnershipProtection(record);
     approvalHook()?.(record);
   });
@@ -3343,7 +3384,7 @@ export async function spawnAgent(
   // unchanged — the thrown error still surfaces to the `ws-agent-spawn` caller
   // exactly as before; the push is additive, for the M/N bookkeeping.
   let client: RpcClient | undefined;
-  const releaseLaunch = claimLaunch(record);
+  const launch = claimLaunch(record);
   try {
     client = new RpcClient(
       buildRpcClientOptions(
@@ -3402,10 +3443,13 @@ export async function spawnAgent(
   } catch (err) {
     clearLiveState(record, registry);
     try { await client?.stop(); } catch { /* best effort */ }
+    // A stop during the launch is the single terminal: its own settle is the
+    // lead-visible outcome, and the spawn call still fails, saying so.
+    if (launch.stopped()) throw launchStoppedError();
     pushSpawnFailed(ctx.pi, registry, record, err);
     throw err;
   } finally {
-    releaseLaunch();
+    launch.release();
     if (forkLaunch) rmSync(dirname(forkLaunch.contextPath), { recursive: true, force: true });
   }
 
@@ -3540,7 +3584,7 @@ export async function sendToAgent(
     if (ctx.finishToken !== undefined && record.forkFinish?.token === ctx.finishToken) {
       record.forkFinish.generation = record.launchGeneration;
     }
-    const releaseLaunch = claimLaunch(record);
+    const launch = claimLaunch(record);
     try {
       // The record is claimed synchronously (`record.client`) before the bind
       // awaits, so a concurrent send sees a live record instead of launching a
@@ -3596,12 +3640,15 @@ export async function sendToAgent(
       channel?.close();
       try { await client?.stop(); } catch { /* best effort */ }
       // A finish-owned failure is rethrown to the coordinator's sole terminal
-      // selector. Ordinary resumes retain spawn-failed; stale work gets neither.
-      if (ownsFailure() && record.client === undefined && !finishOwner) {
+      // selector. Ordinary resumes retain spawn-failed; stale work gets
+      // neither, and neither does a launch a stop ended (the stop's own
+      // outcome is its terminal).
+      const stopped = launch.stopped();
+      if (ownsFailure() && record.client === undefined && !finishOwner && !stopped) {
         pushSpawnFailed(ctx.pi, registry, record, err);
       }
-      releaseLaunch();
-      throw err;
+      launch.release();
+      throw stopped ? launchStoppedError() : err;
     } finally {
       if (forkLaunch) rmSync(dirname(forkLaunch.contextPath), { recursive: true, force: true });
     }
@@ -3616,7 +3663,7 @@ export async function sendToAgent(
       }
       await promptAgent(record, client!, message, { writer });
     } finally {
-      releaseLaunch();
+      launch.release();
     }
     publishSubtree(registry, true);
     return { agent_id: record.agentId };
@@ -3823,6 +3870,9 @@ export async function stopAgent(
   if (record.ownership) touchOwnership(record.ownership.home);
   if (client) {
     const generation = record.launchGeneration;
+    // A launch still in flight fails once its client is cleared below; this
+    // mark keeps that failure from pushing `spawn-failed` on top of the stop.
+    if (record.launching) stoppedLaunches.add(record.launching);
     if (record.ownership) updateOwnership(record.ownership.home, { lastActivityAt: Date.now(), liveness: { lifecycle: "stopping", running: true, observedAt: Date.now() } });
     // Review relay #1 (Important, alias/park/cap): clear live state
     // SYNCHRONOUSLY, before either await below, not after both resolve. A

@@ -20,6 +20,7 @@ import {
 import { agentWidgetRefreshRef, evictForCapacity, stopAgent, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
 import { truncateToWidth, visibleWidth } from "../src/pi-tui.ts";
 import { applySessionShutdownAgentFooter, applySessionStartAgentFooter, registerAgentFooterGitEvents } from "../src/index.ts";
+import { symlinkSkip } from "./fixtures/symlink-probe.ts";
 
 const roots = new Set<string>();
 afterEach(() => { for (const root of roots) rmSync(root, { recursive: true, force: true }); roots.clear(); });
@@ -208,7 +209,7 @@ describe("bounded direct-agent estimates", () => {
     second.stop();
   });
 
-  test("an unowned eviction whose record write fails retries without double counting", (t) => {
+  test("an unowned eviction whose record write fails retries without double counting", { skip: symlinkSkip() }, (t) => {
     const dir = root(), storage = createAgentStorageContext("lead", dir), child = record("child", storage, .4);
     child.ownership = undefined;
     const registry: RpcAgentRegistry = new Map([[child.agentId, child]]), ui = context();
@@ -288,7 +289,7 @@ describe("bounded direct-agent estimates", () => {
 });
 
 describe("incremental lead usage", () => {
-  test("failed final checkpoint is surfaced and retained across same-process reload", (t) => {
+  test("failed final checkpoint is surfaced and retained across same-process reload", { skip: symlinkSkip() }, (t) => {
     const dir = root(), storage = createAgentStorageContext("lead", dir), registry: RpcAgentRegistry = new Map(), firstUi = context();
     const first = createAgentFooterController(firstUi.ctx, registry, storage, { truncateToWidth, visibleWidth });
     first.acceptUsage({ role: "assistant", usage: { input: 10, output: 2, cost: { total: .5 } } });

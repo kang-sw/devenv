@@ -420,6 +420,37 @@ test('snapshot-time validation marks stale approval and question controls supers
   h.settle(); h.emit('session_shutdown');
 });
 
+test('a sent or discarded decision supersedes a held approval push on the same cmd_id', () => {
+  for (const decision of ['sent', 'discarded'] as const) {
+    const h = harness(); h.busy();
+    const approvalRecord: any = {agentId: 'approval-agent', workGeneration: 1, pendingApproval: {cmdId: 'cmd-1'}, reportLog: []};
+    h.registry.set(approvalRecord.agentId, approvalRecord);
+    pushToLead(h.pi, h.registry, approvalRecord, 'ws-agent-approval', {cmd_id: 'cmd-1', request: 'approve'}, 'followUp');
+    approvalRecord.pendingApproval = {cmdId: 'cmd-1', decision};
+    h.end();
+    assert.deepEqual(h.custom[0].message.details.items.map((item: any) => item.state), ['superseded'], decision);
+    h.settle(); h.emit('session_shutdown');
+    heldPushQueue.length = 0;
+  }
+});
+
+test('after a reissue only the reissued approval push is actionable: the original stays superseded though its cmd_id is open again', () => {
+  const h = harness(); h.busy();
+  const approvalRecord: any = {agentId: 'approval-agent', workGeneration: 1, pendingApproval: {cmdId: 'cmd-1'}, reportLog: []};
+  h.registry.set(approvalRecord.agentId, approvalRecord);
+  pushToLead(h.pi, h.registry, approvalRecord, 'ws-agent-approval', {cmd_id: 'cmd-1', request: 'original'}, 'followUp');
+  // ws-approve sent a decision, the connection dropped, and the reconnect hello re-issued the request.
+  approvalRecord.pendingApproval = {cmdId: 'cmd-1', reissued: true, issue: 1};
+  pushToLead(h.pi, h.registry, approvalRecord, 'ws-agent-approval', {cmd_id: 'cmd-1', request: 'reissued'}, 'followUp');
+
+  h.end();
+
+  const batch = h.custom[0].message;
+  assert.deepEqual(batch.details.items.map((item: any) => [item.details.request, item.state]), [['original', 'superseded'], ['reissued', 'actionable']]);
+  assert.equal(batch.content.match(/<action type="approval"/g)?.length, 1, 'one prompt for one cmd_id');
+  h.settle(); h.emit('session_shutdown');
+});
+
 test('one boundary batch carries every push family plus the owner summary in strict arrival order', () => {
   const h = harness(); h.busy(); leadCompactingRef.current = true;
   const approvalRecord: any = {agentId: 'approval-agent', workGeneration: 1, pendingApproval: {cmdId: 'cmd-1'}, reportLog: []};

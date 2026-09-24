@@ -24,7 +24,7 @@
  */
 import { isDeepStrictEqual } from "node:util";
 import type { ChildChannel, ParentChannel } from "./agent-channel.ts";
-import { persistOwnershipTelemetry } from "./agent-storage.ts";
+import { durableDescendantUsage, persistOwnershipDescendantUsage, readOwnership } from "./agent-storage.ts";
 import { parseCumulativeCost, type CumulativeCost } from "./agent-telemetry.ts";
 import type { RpcAgentRecord } from "./spawner.ts";
 
@@ -43,15 +43,30 @@ export function parseDescendantUsageReport(value: unknown): DescendantUsageRepor
   return typeof seq === "number" && Number.isSafeInteger(seq) && seq > 0 && usage ? { seq, usage } : undefined;
 }
 
-/** A direct child's last reported descendant value. The record field survives a telemetry reset; the telemetry copy is the durable one. */
+/**
+ * A direct child's last reported descendant value. The record field survives
+ * a telemetry reset; `telemetry.descendantUsage` is only a legacy fallback
+ * (a record or snapshot written before the sibling ownership field).
+ */
 export function descendantUsageOf(record: Pick<RpcAgentRecord, "descendantUsage" | "telemetry">): CumulativeCost | undefined {
-  return record.descendantUsage ?? record.telemetry?.descendantUsage;
+  return durableDescendantUsage(record);
+}
+
+/**
+ * Revival: loads the durable value (the ownership record's sibling field,
+ * else its legacy telemetry copy) into a dormant record. The durable value
+ * wins over a snapshot's copy, which can be older.
+ */
+export function restoreDescendantUsage(record: RpcAgentRecord, metadata = record.ownership ? readOwnership(record.ownership.home) : undefined): void {
+  const durable = durableDescendantUsage(metadata);
+  if (durable) record.descendantUsage = durable;
 }
 
 /**
  * Parent side: applies one report from `record`'s launch `generation`.
  * Returns true only when the stored value changed. The accepted value is
- * written into the child's ownership telemetry beside its own-usage fields;
+ * written into the child's ownership record as its sibling
+ * `descendantUsage` field, whether or not the child has own-usage telemetry;
  * the parent is that record's single writer.
  */
 export function acceptDescendantUsage(record: RpcAgentRecord, generation: number, value: unknown): boolean {
@@ -62,12 +77,7 @@ export function acceptDescendantUsage(record: RpcAgentRecord, generation: number
   record.descendantUsageOrder = { generation, seq: report.seq };
   const previous = descendantUsageOf(record);
   record.descendantUsage = report.usage;
-  if (record.telemetry) {
-    record.telemetry.descendantUsage = report.usage;
-    // Without telemetry there is no durable record to extend: persisting
-    // `undefined` would clear the own-usage fields instead.
-    if (record.ownership) persistOwnershipTelemetry(record.ownership.home, record.telemetry);
-  }
+  if (record.ownership) persistOwnershipDescendantUsage(record.ownership.home, report.usage);
   return !isDeepStrictEqual(previous, report.usage);
 }
 

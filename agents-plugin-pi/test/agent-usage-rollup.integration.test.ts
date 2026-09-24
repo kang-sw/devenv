@@ -21,7 +21,7 @@ import { ChildChannel, ParentChannel } from "../src/agent-channel.ts";
 import { allocateAgentHome, createAgentStorageContext, persistOwnershipTelemetry, readEvictionRecord, readOwnership } from "../src/agent-storage.ts";
 import { createAgentFooterController, registerAgentCostOwner, type AgentFooterComponent, type AgentFooterController } from "../src/agent-footer.ts";
 import type { CumulativeCost } from "../src/agent-telemetry.ts";
-import { DESCENDANT_USAGE_RESUME_KEY, attachDescendantUsage } from "../src/agent-usage-rollup.ts";
+import { DESCENDANT_USAGE_MESSAGE, DESCENDANT_USAGE_RESUME_KEY, attachDescendantUsage, restoreDescendantUsage } from "../src/agent-usage-rollup.ts";
 import { refreshAgentTelemetry, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
 import { truncateToWidth, visibleWidth } from "../src/pi-tui.ts";
 
@@ -256,7 +256,7 @@ test("three-level tree: the grandchild's and great-grandchild's usage reach the 
   assert.ok(root.changes >= 1, "the root footer changed through accepted channel reports");
   assert.ok(m.sent >= 1, "M sent its descendant value over the channel");
   assert.ok(g.sent >= 1, "G sent its descendant value over the channel");
-  assert.deepEqual(readOwnership(root.recordM.ownership!.home)!.telemetry?.descendantUsage, G_SUBTREE);
+  assert.deepEqual(readOwnership(root.recordM.ownership!.home)!.descendantUsage, G_SUBTREE);
   assert.equal(root.recordM.telemetry?.estimatedUsd, M_OWN, "M's own usage is still the root's own reduction");
 });
 
@@ -304,7 +304,7 @@ test("parent restart: a fresh root rebuilt from M's ownership telemetry keeps th
   await root.hop!.shutdown();
   const home = root.recordM.ownership!.home;
   const durable = readOwnership(home)!;
-  assert.deepEqual(durable.telemetry?.descendantUsage, G_SUBTREE, "the reported value is durable in M's ownership telemetry");
+  assert.deepEqual(durable.descendantUsage, G_SUBTREE, "the reported value is durable in M's ownership record");
 
   // Root restart: a new registry and footer on the same root storage.
   const { version, ownerSessionId, agentId, role, sessionPath } = durable;
@@ -312,6 +312,8 @@ test("parent restart: a fresh root rebuilt from M's ownership telemetry keeps th
     agentId, sessionPath: sessionPath!, ownership: { version, ownerSessionId, agentId, home, role, sessionPath }, systemPromptPath: "usage-hop.md",
     telemetry: durable.telemetry, wsToolNames: [], toolGroup: "full-worker", spawnRole: "worker", streaming: false, running: false, reportLog: [],
   } as RpcAgentRecord;
+  // Revival's durable read (`reviveOrphans` / `rehydrateForkRecord`).
+  restoreDescendantUsage(revived);
   root.mountRegistry(revived);
   assert.equal(root.footerD(), total, "the restarted root rebuilds the total from durable state");
 
@@ -358,6 +360,11 @@ test("resume: a value changed while M is disconnected arrives once through the r
   assert.equal(root.footerD(), usdText(M_OWN + G_OWN + L_OWN), "the root has not seen the change yet");
 
   const changes = root.changes;
+  // Reports M sends after the reconnect. Registered after the root's own
+  // listener (`attachDescendantUsage` at launch), so by the time this counts
+  // a report the root has already accepted or dropped it.
+  let reportsAfterReconnect = 0;
+  root.onCleanup(channel.onMessage(msg => { if (msg.t === DESCENDANT_USAGE_MESSAGE) reportsAfterReconnect += 1; }));
   const resumed = new Promise<Record<string, unknown>>(resolve => {
     const off = channel.onConnection((_conn, hello) => { if (hello.pid === mPid && hello.reconnect) { off(); resolve(hello.resume); } });
   });
@@ -366,13 +373,16 @@ test("resume: a value changed while M is disconnected arrives once through the r
   assert.ok(resume, "the reconnect hello carries the latest descendant value");
   assert.deepEqual(resume.usage, known(G_OWN + 2 * L_OWN, 2));
   await root.waitForD(usdText(M_OWN + G_OWN + 2 * L_OWN));
-  await new Promise(resolve => setTimeout(resolve, 100));
-  assert.equal(root.changes, changes + 1, "the resumed value was accepted exactly once");
-  assert.deepEqual(root.recordM.descendantUsageOrder, { generation: root.generation, seq: resume.seq });
   // The hello delivered the value; the one post-welcome resend (which covers
   // a value computed between hello and welcome) repeats the same sequence
-  // and is dropped by the parent's ordering check.
+  // and is dropped by the parent's ordering check. Wait for that resend to
+  // reach the root rather than for a fixed time, so a late resend under load
+  // is still checked instead of read before it happened.
+  await waitFor("M's post-reconnect resend to reach the root", () => reportsAfterReconnect, count => count >= 1);
+  assert.equal(root.changes, changes + 1, "the resumed value was accepted exactly once");
+  assert.deepEqual(root.recordM.descendantUsageOrder, { generation: root.generation, seq: resume.seq });
   assert.equal((await hop.command("M", "stats")).sent, sentBefore + 1, "exactly one post-reconnect resend, of the same report");
+  assert.equal(reportsAfterReconnect, 1);
   assert.equal(root.footerD(), usdText(M_OWN + G_OWN + 2 * L_OWN));
 });
 

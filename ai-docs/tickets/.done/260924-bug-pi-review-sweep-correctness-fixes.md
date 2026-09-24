@@ -11,6 +11,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 4c8227b81e7ce758
 sage-review-completeness-reviewed: 4c8227b81e7ce758
+completed: 2026-09-24
 ---
 
 # Pi review-sweep correctness fixes (approval reconnect, reissue prompt, usage durability, removal gate, stop-during-launch)
@@ -365,6 +366,58 @@ gate measures only this phase's work, and say so in the Result.
   - The stopped spawn's tool call rejects with a "stopped" error.
   - A genuine hello failure still produces a `spawn-failed` push.
 
+### Result (b00f7536) - 2026-09-24
+
+Decisions 1, 2, and 5 landed in one commit.
+
+- **Decision 1.** The approval section of the child's resume always carries a
+  `consumed` array. It is bounded by `EARLY_DECISION_CAP` with the oldest entry
+  dropped first, and is empty when nothing was consumed. `ChildApprovalGate`
+  buffers early decisions per connection and clears them on `onDisconnect`. A
+  `cmd_id` enters the consumed list only after its acknowledgment send
+  succeeds. `attachApprovalChannel` releases a discarded request only when
+  `consumedApprovalsFromResume(hello.resume)` lists its `cmd_id`, and reissues
+  it otherwise. A hello with no `consumed` array (an older child) keeps the
+  release-on-absence path.
+- **Decision 2.** `PendingApprovalState.issue` is optional; when absent it
+  reads as 0, and each reissue increments it. `HeldPush.approvalIssue` is
+  captured when the push is admitted. `heldActionState` counts a held approval
+  push only while its issue equals the request's current issue.
+- **Decision 5.** A module-level `stoppedLaunches` WeakSet is keyed by the
+  `record.launching` promise, which leaves `launchGeneration` untouched.
+  `stopAgent` marks the in-flight launch, and `claimLaunch` returns
+  `{release, stopped}`. A stopped spawn or resume skips `pushSpawnFailed` and
+  rejects with "launch stopped (ws-agent-stop) before the agent started". A
+  genuine hello failure still pushes `spawn-failed` on both paths.
+- **Version skew.** Each child loads the parent's exact physical extension
+  path (`--extension` = `fileURLToPath(import.meta.url)` of the parent's
+  `index.ts`). A versioned plugin install pins both sides to one version. An
+  in-place update of that path can mix versions: a child started after the
+  update runs newer code than its parent, and a parent reloaded after an update
+  runs newer code than an existing child. So a mixed-version tree is possible,
+  and the no-`consumed` fallback is kept as the decision requires.
+- **Timing-thin assertions fixed here.** Phase 1 tests landed in both files,
+  so these were fixed in this phase:
+  - `agent-channel-launch.test.ts`: the `elapsed < 250` bound was removed, and
+    the fast-readiness cases use a 600 s readiness bound, which no run reaches.
+  - `agent-channel.test.ts`: the probe-vs-timer race was split. The probe case
+    has a 600 s hello timer and waits for the server-side close. A separate
+    100 ms channel asserts the mute timeout.
+- **Verification.**
+  - Mutations M1-M9 covered the verification items, and each one failed at
+    least one test. They included the early decision not being cleared on
+    disconnect (M1), the older-child fallback being removed (M8), and a genuine
+    hello failure being suppressed (M9).
+  - Full `npm test`: 1847 tests, 1845 pass, 0 fail, 2 skipped (both
+    pre-existing).
+  - Load gate: a scratch script archived b00f7536 into a fresh tree. It ran
+    `sysctl -n hw.logicalcpu` = 16 logical cores with 32 `yes > /dev/null`
+    busy loops. It ran each touched file 50 times, sequentially per file and
+    the files in parallel, with
+    `env -u WS_PI_SPAWN_ROLE -u WS_PI_EXPLORE_MODE -u WS_PI_DELEGATION_POLICY node --test <file>`.
+    Every file had 0 failures in 50 runs: `approval-protocol`, `spawner`,
+    `execute-gateway`, `push-wake`, `agent-channel-launch`, `agent-channel`.
+
 ### Phase 2: Usage durability, removal gate, order test, and hygiene
 
 Implement Decisions 3, 4, 6, and 7.
@@ -395,3 +448,112 @@ Implement Decisions 3, 4, 6, and 7.
   - The symlink tests in all three named files skip cleanly when symlinks are
     unavailable.
   - The rewritten timing tests pass the load gate with zero failures.
+
+### Result (4128ae93) - 2026-09-24
+
+Decisions 3, 4, 6, and 7 landed:
+
+- 68589765, 4c5af3e0, 30ec7ea9, 97308e5b: Decisions 6 and 7, from a
+  delegated leaf.
+- 5b410a54: Decision 3.
+- 5c5ae07f: Decision 4.
+- 4128ae93: review round 1 fixes.
+
+- **Decision 3.**
+  - New field `OwnershipMetadata.descendantUsage`. `validOwnership` validates
+    it with `parseCumulativeCost`.
+  - New `persistOwnershipDescendantUsage` writes it, compare-against-disk.
+  - `acceptDescendantUsage` persists it with or without telemetry.
+  - `refreshAgentTelemetry` no longer writes `telemetry.descendantUsage` and
+    strips the field from memory.
+  - `persistOwnershipTelemetry` computes its locked update from the locked
+    record. When the sibling field is absent on disk, it copies a legacy
+    `telemetry.descendantUsage` into it in the same write that drops it. A
+    legacy value never replaces an existing sibling value.
+  - `refreshAgentTelemetry` retries a failed report write, but only for a value
+    accepted live in this process (`descendantUsageOrder` set). A revived
+    record's in-memory value can come from an older sidecar or fork snapshot,
+    and must never overwrite the durable one.
+  - Readers use `durableDescendantUsage` (sibling first, then the legacy
+    telemetry copy): `descendantUsageOf`, `retentionEvictionCost`, and a new
+    `restoreDescendantUsage`.
+  - `reviveOrphans` passes it the `readOwnership` result it already reads.
+  - `rehydrateForkRecord` (`ask.ts`) is also a revival path; it does its own
+    read after its refresh.
+  - A missing own-usage field still reads as unknown.
+- **Decision 4.**
+  - New `ownedHomeRemovalState` (`agent-storage.ts`) returns `removed`,
+    `claimed`, or `present`, reading home -> record -> claim -> record ->
+    home. The second record read (a round-1 fix) keeps a whole failed removal
+    between the first record read and the claim read from counting as
+    removal.
+  - `parseOrphans` and `reviveOrphans` drop an entry only on `removed`.
+  - Under a held claim the entry is kept: parsed and revived. Keeping it in
+    the registry meets "neither dropped nor cleared". The sidecar file is
+    deleted on read. `CostEstimateState.reconcile` already excludes a recorded
+    entry from the sum and drops it once `isOwnedHomeGone` holds. The next
+    shutdown recaptures a still-registered entry.
+  - A home detached under the claim keeps its sidecar descriptor, because it
+    cannot be re-validated against disk. Without the descriptor, a rolled-back
+    removal would revive as an unowned legacy record.
+  - The ticket sketched a claim read before the record read. That read is
+    redundant with the claim read after the record read, so it was dropped.
+- **Decision 6.**
+  - `test/push-flush-order.integration.test.ts` loads the real `index.ts`
+    through the fork-lifecycle harness pattern. It emits `agent_start` and
+    asserts that the snapshot sent for it already carries the new turn count.
+  - Swapping the `registerPushFlush` / `publishSubtree` order fails it.
+  - The source-text pin in `recursive-worker.test.ts` is removed.
+  - The swap left every other recursive-worker test passing, which confirms
+    that 928a48fa's claim was false. Its message is unchanged.
+- **Decision 7.**
+  - Both stale comments are corrected (`subtree-lifecycle.ts` `turnOwed` and
+    the `spawner.ts` header).
+  - `writeOwnerArtifact` renames through `renameWithWindowsRetry`, with an
+    optional `RenameRetryHooks` seam.
+  - `test/fixtures/symlink-probe.ts` (`symlinksAvailable`, `symlinkSkip`)
+    skips only on EPERM. It guards every `symlinkSync` test in the three named
+    files.
+  - The rollup-integration resume test waits for the post-reconnect resend
+    instead of a fixed 100 ms sleep.
+  - The other two timing-thin tests were fixed in Phase 1.
+- **Verification.**
+  - Mutation checks, one or more per verification item; each failed a test.
+    - Decision 3: legacy location still written; persist gated on telemetry;
+      migration removed; migration clearing the sibling; legacy overwriting
+      the sibling; readers ignoring the sibling or the legacy value; sidecar
+      and fork revival not restoring; retry removed or unguarded.
+    - Decision 4: `claimed` treated as removed at parse and at revive; the
+      claim read before the record read; either record or claim read removed;
+      no home re-read; detached descriptor dropped; a no-claim absent home
+      kept.
+    - Decision 6: order swapped.
+    - Decision 7: bare `renameSync` restored; the symlink probe forced
+      available under an EPERM preload; the rollup resend delayed or re-sequenced.
+  - Full `npm test` at 4128ae93: 1863 tests, 1861 pass, 0 fail, 2 skipped
+    (both pre-existing).
+  - Load gate: the same script and command as Phase 1, at 4128ae93, with 16
+    logical cores and 32 `yes > /dev/null` busy loops. Each file had 0
+    failures in 50 runs: `push-flush-order.integration`, `recursive-worker`,
+    `agent-storage`, `agent-footer`, `eviction-records`,
+    `agent-usage-rollup.integration`, `agent-usage-rollup`, `agent-sidecar`.
+- **Review.** A partitioned review (correctness, fit, test) ran in two rounds
+  and found no Critical or Important issues.
+  - Fixed after round 1:
+    - Correctness: the record re-read.
+    - Fit: one fallback reader; the shared `until` fixture.
+    - Test: the rollback test now revives the entry parsed under the claim.
+  - Left, and round 2 accepted the rationale for each:
+    - A claim abandoned on a detached home keeps the entry `claimed`. This
+      matches reconcile's `isOwnedHomeGone`, which the refactor ticket unifies.
+    - `agent-channel.test.ts` accesses private fields.
+    - `EARLY_DECISION_CAP` also caps the consumed list, as Decision 1
+      sanctions.
+  - Open window: two removal attempts can still read as removal. The first
+    rolls back between the gate's first record read and its claim read. The
+    second takes the claim and writes its record between the claim read and
+    the second record read. Closing this needs a claim-generation marker
+    (refactor ticket).
+- **Not changed.** Unguarded `symlinkSync` calls in test files outside the
+  three named files (fork-lifecycle, web-*, claude-*, skills-dir,
+  write-scopes).
