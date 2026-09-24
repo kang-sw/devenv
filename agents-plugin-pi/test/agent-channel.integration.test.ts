@@ -247,6 +247,58 @@ test("a stale socket left in the launch's socket directory by a SIGKILLed listen
   } finally { await teardown(registry); }
 });
 
+// 260924 (channel approval decisions): a shell command the real execute-worker
+// runs has no way to deliver a decision. The probe tries every path such a
+// command could take — the endpoint without a hello, a hello with the
+// parent's own credential, a guessed credential, the retired decision file —
+// and the parent's pending request must survive all of them untouched, on
+// each backend. (The child-side gate and its acknowledgment are the in-process
+// contract case in agent-channel.test.ts: a real pending `ws-worker-exec`
+// needs a model turn, which these tests never make.)
+for (const force of ["pipe", "tcp"] as const) {
+  test(`[${force}] a decision from a shell command the execute-worker runs is never consumed; only the parent's own connection carries decisions`, { timeout: LAUNCH_TIMEOUT }, async t => {
+    const root = makeRoot(t);
+    t.mock.method(RpcClient.prototype, "prompt", async () => {});
+    const registry = new Map<string, any>();
+    const context = {
+      cwd: packageRoot, storage: createAgentStorageContext(`lead-h-${force}`, root), wsToolNames: [], inheritModel: "openrouter/openai/gpt-4o",
+      extensionPath: join(packageRoot, "src", "index.ts"), toolGroup: "execute-worker", channel: { bind: { force } },
+    };
+    try {
+      const result = await spawnAgent(registry, context as any, { systemPromptPath: join(packageRoot, "execute-worker-guide.md"), prompt: "not dispatched to a model" });
+      const record = registry.get(result.agent_id)!;
+      const channel = record.channel as ParentChannel;
+      assert.equal(channel.endpoint.kind, force);
+      assert.equal(channel.accepted, 1);
+      const acks: unknown[] = [];
+      channel.onMessage(msg => { if (msg.t === "approval-consumed") acks.push(msg); });
+      // The request a real tool_execution_start would have captured; the probe targets its cmd_id.
+      record.pendingApproval = { cmdId: "call-forged", command: "echo forged", rationale: "probe" };
+      const decisionPath = join(record.ownership.home, "approvals", "call-forged.decision.json");
+
+      const probe = join(packageRoot, "test", "fixtures", "approval-forgery-probe.ts");
+      const args = [JSON.stringify(channel.endpoint), channel.credential, String(channel.generation), "call-forged", decisionPath].map(arg => JSON.stringify(arg)).join(" ");
+      const output = String((await record.client.bash(`WS_PI_FORGERY_PROBE=1 ${JSON.stringify(process.execPath)} ${JSON.stringify(probe)} ${args}`))?.output ?? "");
+      const line = output.split("\n").find(candidate => candidate.startsWith("FORGERY "));
+      assert.ok(line, `the probe reported: ${output.slice(-2000)}`);
+      const report = JSON.parse(line.slice("FORGERY ".length));
+
+      assert.deepEqual(report.envKeys, [], "the child's shell sees neither an approvals directory nor the channel bootstrap");
+      assert.match(report.rawFrames, /"reason":"malformed"/, "a decision pushed without a hello is rejected");
+      assert.match(report.helloWithCredential, /"reason":"busy"/, "the real child holds the one slot, even against the parent's own credential");
+      assert.match(report.helloWithoutCredential, /"reason":"auth"/);
+      assert.equal(report.legacyFileWritten, true);
+      assert.ok(existsSync(decisionPath), "precondition: the retired rendezvous file is really there");
+      assert.deepEqual(channel.rejects, ["malformed", "busy", "auth"]);
+      assert.equal(channel.accepted, 1, "no forged connection was ever accepted");
+      assert.ok(channel.live, "the real child stays attached throughout");
+      assert.deepEqual(acks, [], "nothing acknowledged consumption");
+      assert.deepEqual(record.pendingApproval, { cmdId: "call-forged", command: "echo forged", rationale: "probe" }, "the request is exactly as pending as before: no forged decision reached anything");
+      assert.ok(await record.client.getState(), "the child is unaffected by the probes");
+    } finally { await teardown(registry); }
+  });
+}
+
 test("nested hop: a grandchild spawned from inside the real child's scrubbed environment gets its own channel", { timeout: LAUNCH_TIMEOUT }, async t => {
   const root = makeRoot(t);
   t.mock.method(RpcClient.prototype, "prompt", async () => {});
