@@ -136,15 +136,16 @@ import { classifyRegistryRowState } from "../src/agent-widget.ts";
 import { RpcClient } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { McpStdioClient, McpToolCallResult } from "../src/mcp-stdio-client.ts";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DELEGATION_ENV, SUBTREE_ENV } from "../src/delegation-policy.ts";
+import { DELEGATION_ENV } from "../src/delegation-policy.ts";
 import { closeFakeChildren, connectFakeChild } from "./fixtures/channel-child.ts";
 import { allocateAgentHome, createAgentStorageContext, updateOwnership } from "../src/agent-storage.ts";
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
-import { installSubtreePublisher, publishSubtree } from "../src/subtree-lifecycle.ts";
+import { installSubtreePublisher, SubtreeUpstream } from "../src/subtree-lifecycle.ts";
+import { fakeUplink } from "./fixtures/subtree-channels.ts";
 const REAL_EXTENSION_ENTRY = fileURLToPath(new URL("../src/index.ts", import.meta.url));
 // Stands in for the child half of the control channel: the hello plus the
 // role's stage-2 readiness (web for Explore, fork for a fork launch).
@@ -584,6 +585,7 @@ describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses ins
     callTool: McpStdioClient["callTool"],
     catalog = [{ provider: "openai-codex", id: "gpt-5.6-high", hasAuth: true }],
     provenance?: { class: "reviewer"; authority: "delegate"; readOnly: true; requiresChildren: false },
+    subtreeUpstream?: SubtreeUpstream,
   ) {
     const tools = new Map<string, CapturedTool>();
     const sent: Array<{ message: unknown; options: unknown }> = [];
@@ -596,7 +598,7 @@ describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses ins
       client: { callTool }, wsToolNames: [], defaultSessionKeyRef: { current: "lead-key" },
       ...(provenance ? { renderRegistry: { get: () => ({ ...provenance, promptBase64: Buffer.from("Test reviewer prompt").toString("base64") }) } } : {}),
     } as never;
-    const handle = registerAgentTools(pi, bridge, { cwd: "/tmp" });
+    const handle = registerAgentTools(pi, bridge, { cwd: "/tmp", subtreeUpstream });
     const ctx = {
       sessionManager: { getSessionId: () => "test-lead" },
       agentStorageRoot: storageRoot(),
@@ -672,68 +674,48 @@ describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses ins
     assert.match(tool.parameters.properties.write_scopes!.description!, /path\.posix\.matchesGlob/);
   });
 
-  test("initial busy publication failure escapes unchanged and prevents RpcClient launch", async () => {
-    const previousSubtree = process.env[SUBTREE_ENV];
-    const root = storageRoot();
-    const channel = { path: join(root, "upstream", "subtree.json"), nonce: "hard-gate" };
-    process.env[SUBTREE_ENV] = JSON.stringify(channel);
+  test("a dropped busy acknowledgment or a down parent channel refuses the dispatch before RpcClient launch", async () => {
     const starts: Array<string | undefined> = [];
     const rpc = installRpcHarness(undefined, cwd => starts.push(cwd));
-    let registered: ReturnType<typeof harness> | undefined;
     try {
-      registered = harness(async () => jsonResult({}));
-      rmSync(channel.path, { force: true });
-      mkdirSync(channel.path);
-      let failure: NodeJS.ErrnoException | undefined;
-      await assert.rejects(
-        () => registered!.tool.execute("hard-gate", { system_prompt_path: "/tmp/p.md", prompt: "must not launch" }, undefined, undefined, registered!.ctx),
-        error => {
-          failure = error as NodeJS.ErrnoException;
-          return true;
-        },
-      );
-      assert.ok(failure);
-      assert.ok(["EISDIR", "ENOTEMPTY", "EPERM"].includes(failure.code ?? ""), `unexpected publication error: ${failure.message}`);
-      assert.ok(failure.message.includes(channel.path), "the original replacement failure reaches the tool caller");
-      assert.deepEqual(starts, [], "RpcClient.start is unreachable after the hard publication gate fails");
-      assert.equal(registered.handle.rpcRegistry.size, 0, "failed admission allocates no grandchild record");
-    } finally {
-      await registered?.handle.stopAll();
-      if (previousSubtree === undefined) delete process.env[SUBTREE_ENV]; else process.env[SUBTREE_ENV] = previousSubtree;
-      rpc.restore();
-    }
+      for (const [label, uplink, refusal] of [
+        ["dropped", fakeUplink(), /nested dispatch refused: the parent did not acknowledge revision 2 within 30ms/],
+        ["down", Object.assign(fakeUplink(), { connected: false }), /nested dispatch refused: the channel to the parent is down/],
+      ] as const) {
+        const registered = harness(async () => jsonResult({}), undefined, undefined, new SubtreeUpstream(uplink.channel, { ackTimeoutMs: 30 }));
+        await assert.rejects(
+          () => registered.tool.execute(label, { system_prompt_path: "/tmp/p.md", prompt: "must not launch" }, undefined, undefined, registered.ctx),
+          refusal,
+        );
+        assert.deepEqual(starts, [], `${label}: RpcClient.start is unreachable without the acknowledgment`);
+        assert.equal(registered.handle.rpcRegistry.size, 0, `${label}: a refused admission allocates no grandchild record`);
+        if (label === "dropped") assert.deepEqual(uplink.snapshots().map(s => s.active), [0, 1, 0], "the busy edge was published, then withdrawn");
+      }
+    } finally { rpc.restore(); }
   });
 
-  test("a nested RPC worker receives publication diagnostics through its own session channel", async () => {
-    const previousRole = process.env[WS_PI_SPAWN_ROLE_ENV];
-    const previousSubtree = process.env[SUBTREE_ENV];
-    const root = storageRoot();
-    const directory = join(root, "upstream");
-    const channel = { path: join(directory, "subtree.json"), nonce: "nested-diagnostic" };
-    process.env[WS_PI_SPAWN_ROLE_ENV] = "worker";
-    process.env[SUBTREE_ENV] = JSON.stringify(channel);
-    ownerNotifyRef.current = undefined;
+  test("a delayed busy acknowledgment holds RpcClient launch until the parent acknowledges the busy revision", async () => {
+    const starts: Array<string | undefined> = [];
+    const rpc = installRpcHarness(undefined, cwd => starts.push(cwd));
+    const uplink = fakeUplink();
     let registered: ReturnType<typeof harness> | undefined;
     try {
-      registered = harness(async () => jsonResult({}));
-      registered.handle.rpcRegistry.set("nested-diagnostic", freshRpcRecord({ agentId: "nested-diagnostic" }));
-      rmSync(directory, { recursive: true, force: true });
-      writeFileSync(directory, "publication blocked");
-
-      publishSubtree(registered.handle.rpcRegistry);
-
-      const emitted = registered.sent.at(-1);
-      const message = emitted?.message as { customType?: string; details?: { advisory?: string; detail?: string } } | undefined;
-      assert.equal(message?.customType, "ws-agent-advisory");
-      assert.deepEqual(message?.details, {
-        advisory: "subtree-publication-failed",
-        detail: "ws-pi-agent: subtree publication failed",
-      });
-      assert.deepEqual(emitted?.options, { deliverAs: "followUp", triggerTurn: true });
+      registered = harness(async () => jsonResult({}), undefined, undefined, new SubtreeUpstream(uplink.channel));
+      const spawned = registered.tool.execute("delayed", { system_prompt_path: "/tmp/p.md", prompt: "launch after ack" }, undefined, undefined, registered.ctx);
+      const deadline = Date.now() + 2_000;
+      while (!uplink.snapshots().some(s => s.active === 1) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 5));
+      const busy = uplink.snapshots().find(s => s.active === 1);
+      assert.ok(busy, "the busy edge is published before the wait");
+      await new Promise(resolve => setTimeout(resolve, 50));
+      assert.deepEqual(starts, [], "no launch before the acknowledgment");
+      assert.equal(registered.handle.rpcRegistry.size, 0, "no record before the acknowledgment");
+      uplink.ack(busy.revision);
+      const result = JSON.parse((await spawned).content[0]!.text);
+      assert.equal(starts.length, 1, "the acknowledgment admits exactly one launch");
+      assert.ok(registered.handle.rpcRegistry.has(result.agent_id));
     } finally {
       await registered?.handle.stopAll();
-      if (previousRole === undefined) delete process.env[WS_PI_SPAWN_ROLE_ENV]; else process.env[WS_PI_SPAWN_ROLE_ENV] = previousRole;
-      if (previousSubtree === undefined) delete process.env[SUBTREE_ENV]; else process.env[SUBTREE_ENV] = previousSubtree;
+      rpc.restore();
     }
   });
 
@@ -1405,14 +1387,11 @@ describe("applyRpcEvent", () => {
       client,
       running: true,
       streaming: true,
-      // Spawned records carry a subtree channel; this is the path that used
-      // to fan token deltas out to the gutter through refreshObservedSubtree.
-      subtreeChannel: { path: "/tmp/ws-pi-missing-subtree.json", nonce: "test" },
     });
     const registry = new Map([[record.agentId, record]]);
-    const upstreamChannel = { path: join(storageRoot(), "upstream-subtree.json"), nonce: "parent" };
-    installSubtreePublisher(registry, upstreamChannel, () => 0);
-    const publishedBefore = statSync(upstreamChannel.path, { bigint: true }).mtimeNs;
+    const uplink = fakeUplink();
+    installSubtreePublisher(registry, new SubtreeUpstream(uplink.channel), () => 0);
+    const sendsBefore = uplink.sent.length;
     let refreshes = 0;
     agentWidgetRefreshRef.current = () => { refreshes += 1; };
     t.after(() => { agentWidgetRefreshRef.current = undefined; });
@@ -1424,7 +1403,7 @@ describe("applyRpcEvent", () => {
     listener?.({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", delta: "considering" } });
     assert.equal(record.lastOutputAt, 1_100);
     assert.equal(refreshes, 0, "streaming writes the high-water field only; the periodic gutter clock renders it");
-    assert.equal(statSync(upstreamChannel.path, { bigint: true }).mtimeNs, publishedBefore, "token deltas do not republish the subtree for a parent watcher to refresh");
+    assert.equal(uplink.sent.length, sendsBefore, "token deltas send no subtree snapshot upstream");
   });
 });
 
@@ -2028,21 +2007,16 @@ describe("pushSpawnFailed (spawnAgent's launch-failure branch)", () => {
     assert.equal(unsubscribed, 1);
   });
 
-  test("cleanup publication failure preserves and reports the primary spawn error", () => {
+  test("cleanup publication with the upstream channel down preserves the primary spawn error", () => {
     const pi = fakePi();
     const record = liveRpcRecord({ agentId: "cleanup-failure", running: true, streaming: true });
     const registry: RpcAgentRegistry = new Map([[record.agentId, record]]);
-    const root = storageRoot();
-    const directory = join(root, "publisher");
-    const channel = { path: join(directory, "subtree.json"), nonce: "cleanup" };
-    const notices: string[] = [];
-    installSubtreePublisher(registry, channel, () => 0, (detail) => { notices.push(detail); return true; });
-    rmSync(directory, { recursive: true, force: true });
-    writeFileSync(directory, "publication blocked");
+    const uplink = fakeUplink();
+    installSubtreePublisher(registry, new SubtreeUpstream(uplink.channel), () => 0);
+    uplink.disconnect();
     const primary = new Error("primary spawn failure");
     assert.doesNotThrow(() => pushSpawnFailed(pi.api, registry, record, primary));
     assert.equal((pi.sent[0].message.details as { error?: string }).error, primary.message);
-    assert.deepEqual(notices, ["ws-pi-agent: subtree publication failed"], "secondary cleanup failures are diagnosed once");
   });
 
   test("a non-Error throw is stringified rather than dropped", () => {
@@ -2309,7 +2283,6 @@ describe("buildRpcClientOptions (WS_PI_SPAWN_ROLE_ENV / WS_PI_APPROVAL_DIR_ENV p
       WS_PI_FORK_AFFINITY: "",
       [WS_PI_PARENT_SESSION_KEY_ENV]: "",
       WS_PI_DELEGATION_POLICY: "",
-      WS_PI_SUBTREE_CHANNEL: "",
       WS_PI_WEB_HOME: "",
       WS_PI_CHANNEL_ENDPOINT: "",
       WS_PI_CHANNEL_CREDENTIAL: "",
@@ -2321,7 +2294,7 @@ describe("buildRpcClientOptions (WS_PI_SPAWN_ROLE_ENV / WS_PI_APPROVAL_DIR_ENV p
 
   test("env overrides an inherited exploration mode while preserving role and approvals markers", () => {
     const options = buildRpcClientOptions("/repo", undefined, "/tmp/ws-pi-agent-y/session.jsonl", "/tmp/system.md", "read");
-    assert.deepEqual(new Set(Object.keys(options.env ?? {})), new Set([WS_PI_SPAWN_ROLE_ENV, WS_PI_APPROVAL_DIR_ENV, "WS_PI_EXPLORE_MODE", "WS_PI_FORK_CONTEXT", "WS_PI_FORK_AFFINITY", WS_PI_PARENT_SESSION_KEY_ENV, "WS_PI_DELEGATION_POLICY", "WS_PI_SUBTREE_CHANNEL", "WS_PI_WEB_HOME", "WS_PI_CHANNEL_ENDPOINT", "WS_PI_CHANNEL_CREDENTIAL", "WS_PI_CHANNEL_GENERATION", "WS_MCP_BOOTSTRAP_BINARY", "WS_MCP_BOOTSTRAP_URL"]));
+    assert.deepEqual(new Set(Object.keys(options.env ?? {})), new Set([WS_PI_SPAWN_ROLE_ENV, WS_PI_APPROVAL_DIR_ENV, "WS_PI_EXPLORE_MODE", "WS_PI_FORK_CONTEXT", "WS_PI_FORK_AFFINITY", WS_PI_PARENT_SESSION_KEY_ENV, "WS_PI_DELEGATION_POLICY", "WS_PI_WEB_HOME", "WS_PI_CHANNEL_ENDPOINT", "WS_PI_CHANNEL_CREDENTIAL", "WS_PI_CHANNEL_GENERATION", "WS_MCP_BOOTSTRAP_BINARY", "WS_MCP_BOOTSTRAP_URL"]));
     assert.equal(options.env?.WS_PI_EXPLORE_MODE, "");
   });
 

@@ -385,7 +385,7 @@ export function buildThreadHeaderHint(thread: Pick<ThreadRecord, "threadId" | "c
  * field (see the plan's `spawner.ts#L647-706` finding) — this is a copy, not
  * a new contract.
  */
-export interface PersistedForkResume extends Pick<RpcAgentRecord, "delegation" | "subtreeChannel" | "waitingOnChildren" | "lastWriter" | "ownerSends"> {
+export interface PersistedForkResume extends Pick<RpcAgentRecord, "delegation" | "waitingOnChildren" | "lastWriter" | "ownerSends"> {
   sessionPath: string;
   systemPromptPath?: string;
   forkContext?: ForkContext;
@@ -732,7 +732,7 @@ export function captureForkResume(record: RpcAgentRecord): PersistedForkResume {
     systemPromptPath: record.systemPromptPath,
     ...(record.forkContext ? { forkContext: record.forkContext } : {}),
     explicitTools: record.explicitTools,
-    ...(record.delegation ? { delegation: record.delegation, subtreeChannel: record.subtreeChannel, waitingOnChildren: record.waitingOnChildren } : {}),
+    ...(record.delegation ? { delegation: record.delegation, waitingOnChildren: record.waitingOnChildren } : {}),
     ...(record.lastWriter ? { lastWriter: record.lastWriter } : {}),
     ...(record.ownerSends?.length ? { ownerSends: record.ownerSends.map((send) => ({ ...send })) } : {}),
     wsToolNames: [...record.wsToolNames],
@@ -775,7 +775,9 @@ export function rehydrateForkRecord(agentId: string, resume: PersistedForkResume
     wsToolNames: [...resume.wsToolNames],
     toolGroup: resume.toolGroup,
     explicitTools: resume.explicitTools,
-    ...(resume.delegation ? { delegation: parseDelegationPolicy(resume.delegation), subtreeChannel: resume.subtreeChannel, waitingOnChildren: resume.waitingOnChildren } : {}),
+    // An older record may still carry the retired `subtreeChannel`; it is
+    // ignored, and the relaunch binds a fresh control channel.
+    ...(resume.delegation ? { delegation: parseDelegationPolicy(resume.delegation), waitingOnChildren: resume.waitingOnChildren } : {}),
     ...(resume.lastWriter === "lead" || resume.lastWriter === "owner" ? { lastWriter: resume.lastWriter } : {}),
     ...(Array.isArray(resume.ownerSends) ? { ownerSends: resume.ownerSends.flatMap((send) => send && typeof send.text === "string" && typeof send.at === "number" ? [{ text: send.text, at: send.at }] : []) } : {}),
     spawnRole: "fork",

@@ -7,7 +7,6 @@ import { canDelegateWriteCapability, parseEffectiveWriteCapability, type Effecti
 
 export const DEFAULT_MAX_AGENT_DEPTH = 2;
 export const DELEGATION_ENV = "WS_PI_DELEGATION_POLICY";
-export const SUBTREE_ENV = "WS_PI_SUBTREE_CHANNEL";
 export const CHILD_MANAGEMENT_TOOLS = ["ws-agent-spawn", "ws-agent-send", "ws-agent-list", "ws-agent-stop", "ws-agent-transcript", "explore"] as const;
 export type SessionAuthority = "leaf" | "delegate" | "lead";
 export const NETWORK_TOOLS = ["web_search", "ws_web_fetch"] as const;

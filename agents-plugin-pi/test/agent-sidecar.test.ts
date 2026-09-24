@@ -782,6 +782,27 @@ describe("reviveOrphans (role wiring re-armed on revival)", () => {
     assert.equal(existsSync(ownership.home), true);
   }));
 
+  test("an older orphan's retired subtreeChannel, well-formed or malformed, is ignored while the durable waitingOnChildren mirror is restored", () => withTempDir((root) => {
+    for (const [index, retired] of [{ path: "/old/home/subtree.json", nonce: "retired" }, { path: 7 }, "not-an-object"].entries()) {
+      const ownership = allocateAgentHome(createAgentStorageContext("lead-old", root), `waiting-${index}`, "worker");
+      const raw = JSON.parse(serializeOrphans([{
+        agentId: ownership.agentId, sessionPath: ownership.sessionPath!, systemPromptPath: "/prompt", wsToolNames: [], toolGroup: "full-worker",
+        spawnRole: "worker", waitingOnChildren: true, ownership,
+      }]));
+      raw.orphans[0].subtreeChannel = retired;
+      const parsed = parseOrphans(JSON.stringify(raw));
+      assert.equal(parsed.length, 1, `retired value ${JSON.stringify(retired)} does not drop the orphan`);
+      assert.equal("subtreeChannel" in parsed[0]!, false);
+
+      const registry: RpcAgentRegistry = new Map();
+      const [revived] = reviveOrphans(registry, parsed);
+      assert.equal(revived?.waitingOnChildren, true, "the record restores the waiting state");
+      assert.equal("subtreeChannel" in revived!, false);
+      assert.equal(readOwnership(ownership.home)?.liveness.waitingOnChildren, true, "the ownership liveness mirror restores the waiting state");
+      assert.equal(evictForCapacity(registry, 1).ok, false, "a child still waiting on descendants is not cap-evictable");
+    }
+  }));
+
   test("a throwing wiring callback still leaves the record registered and does not stop the rest", () => {
     const registry: RpcAgentRegistry = new Map();
     const orphans: PersistedOrphan[] = [
