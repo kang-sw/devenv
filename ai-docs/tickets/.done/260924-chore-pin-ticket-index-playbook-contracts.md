@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: e53bb292ac699034
 sage-review-completeness-reviewed: e53bb292ac699034
+completed: 2026-09-25
 ---
 
 # Pin the ticket-index playbook contracts and fix two stale directions
