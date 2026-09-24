@@ -499,7 +499,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-09-24T11:29:12Z"
+        "touched_at": "2026-09-24T11:29:55Z",
+        "impl": {
+          "branch": "impl/develop/hertz-diner-slug"
+        }
       }
     },
     "260924-idea-ownership-dogfood-scratch-a": {
