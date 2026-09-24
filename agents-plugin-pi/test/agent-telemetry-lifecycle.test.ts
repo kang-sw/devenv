@@ -3,9 +3,9 @@
  * process, owner history, or model request is involved. */
 import assert from "node:assert/strict";
 import { afterEach, describe, test } from "node:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { RpcClient, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { agentWidgetRefreshRef, attachEventListener, refreshAgentTelemetry, registerAgentTools as registerAgentToolsBase, sendToAgent, stopAgent, type RpcAgentRecord } from "../src/spawner.ts";
 import { captureOrphans, parseOrphans, rehydrateOrphanRecord, serializeOrphans } from "../src/agent-sidecar.ts";
@@ -17,7 +17,7 @@ function registerAgentTools(pi: any, bridge: any, sessionCtx: any, ...rest: any[
 }
 import { captureForkResume, createThreadRegistryHandle, hydrateThreadRegistry, rehydrateForkRecord, saveThreadRegistryFile } from "../src/ask.ts";
 import { persistShutdownAgentSnapshots } from "../src/index.ts";
-import { allocateAgentHome, createAgentStorageContext, readOwnership } from "../src/agent-storage.ts";
+import { allocateAgentHome, createAgentStorageContext, persistOwnershipTelemetry, readOwnership } from "../src/agent-storage.ts";
 
 const roots = new Set<string>();
 afterEach(() => { for (const root of roots) rmSync(root, { recursive: true, force: true }); roots.clear(); });
@@ -117,6 +117,57 @@ describe("agent telemetry lifecycle at production boundaries", () => {
     assert.equal(record.telemetry?.estimatedUsd, undefined);
     assert.equal(record.telemetry?.partialEstimatedUsd, .2);
     assert.deepEqual(readOwnership(ownership.home)?.telemetry, record.telemetry);
+  });
+
+  test("durable telemetry is written only when it differs from the persisted record", () => {
+    const dir = root();
+    const ownership = allocateAgentHome(createAgentStorageContext("lead", dir), "owned", "worker");
+    const metadataFile = join(ownership.home, "ownership.json");
+    const lock = join(dirname(ownership.home), `.${ownership.agentId}.ownership-lock`);
+    const claim = (pid: number) => { mkdirSync(lock); writeFileSync(join(lock, "owner.json"), JSON.stringify({ pid })); };
+    const state = { sessionId: "owned", sessionFile: ownership.sessionPath! };
+    const entries = [header("owned"), assistant("first", 20, .2)];
+    write(ownership.sessionPath!, entries);
+    const record = { agentId: "owned", sessionPath: ownership.sessionPath!, ownership } as RpcAgentRecord;
+    refreshAgentTelemetry(record, state);
+    assert.equal(readOwnership(ownership.home)?.telemetry?.estimatedUsd, .2);
+
+    // A dead-pid claim is reclaimed by any lock acquisition; it survives only if no refresh tried to lock.
+    claim(2_147_483_647);
+    const persisted = readFileSync(metadataFile, "utf8");
+    refreshAgentTelemetry(record, state); refreshAgentTelemetry(record, state);
+    assert.equal(readFileSync(metadataFile, "utf8"), persisted, "unchanged telemetry is not rewritten");
+    assert.equal(existsSync(join(lock, "owner.json")), true, "unchanged telemetry takes no lock");
+    rmSync(lock, { recursive: true });
+
+    claim(process.pid);
+    write(ownership.sessionPath!, [...entries, assistant("second", 25, .3)]);
+    refreshAgentTelemetry(record, state);
+    assert.equal(record.telemetry?.estimatedUsd, .5);
+    assert.equal(readOwnership(ownership.home)?.telemetry?.estimatedUsd, .2, "the busy lock rejected the write");
+    rmSync(lock, { recursive: true });
+    assert.equal(refreshAgentTelemetry(record, state), false, "memory did not change again");
+    assert.deepEqual(readOwnership(ownership.home)?.telemetry, record.telemetry, "the comparison against disk retries the failed write");
+  });
+
+  test("telemetry change detection ignores key order and undefined keys but persists a clear", () => {
+    const dir = root();
+    const ownership = allocateAgentHome(createAgentStorageContext("lead", dir), "owned", "worker");
+    const metadataFile = join(ownership.home, "ownership.json");
+    const lock = join(dirname(ownership.home), `.${ownership.agentId}.ownership-lock`);
+    const telemetry = { version: 1, origin: { sessionId: "owned", sessionPath: ownership.sessionPath!, emptyPrefix: true }, model: "p/m", estimatedUsd: .2 } as const;
+    persistOwnershipTelemetry(ownership.home, telemetry);
+    assert.deepEqual(readOwnership(ownership.home)?.telemetry, telemetry);
+
+    mkdirSync(lock); writeFileSync(join(lock, "owner.json"), JSON.stringify({ pid: 2_147_483_647 }));
+    const persisted = readFileSync(metadataFile, "utf8");
+    persistOwnershipTelemetry(ownership.home, { estimatedUsd: .2, effort: undefined, model: "p/m", origin: { emptyPrefix: true, sessionPath: ownership.sessionPath!, sessionId: "owned" }, version: 1 });
+    assert.equal(readFileSync(metadataFile, "utf8"), persisted, "reordered keys and an undefined key are not a change");
+    assert.equal(existsSync(join(lock, "owner.json")), true);
+    rmSync(lock, { recursive: true });
+
+    persistOwnershipTelemetry(ownership.home, undefined);
+    assert.equal(readOwnership(ownership.home)?.telemetry, undefined, "clearing in-memory telemetry is persisted");
   });
 
   test("collector rejection clears current selection and notifies once while preserving usage", async () => {

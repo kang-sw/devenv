@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: b6f54edb69670b7a
 sage-review-design-reviewed: b6f54edb69670b7a
+completed: 2026-09-24
 ---
 
 # Pi adapter durable-file write hygiene (ownership rewrites, Windows rename retry, thread registry, liveness pid)
@@ -80,3 +81,28 @@ Verification:
 - An injected EPERM/EBUSY on the ownership rename is retried and then succeeds. After the retry budget is exhausted, it fails as today.
 - A crash during the thread registry write never leaves a truncated registry. Simulate the crash by failing the rename through the helper's test-hook seam, and check that the previous registry is intact.
 - Newly allocated records carry no `liveness.pid`, and records that still have the field load unchanged.
+
+### Result (9310cda9) - 2026-09-24
+
+Landed in 9310cda9 and b7e5cc9b.
+
+- New leaf module `agents-plugin-pi/src/atomic-write.ts` exports `renameWithWindowsRetry` and `RenameRetryHooks`, holding the EPERM/EBUSY retry loop and hook seam extracted from `writePrivateJson`. An optional exhaustion mapper keeps `writePrivateJson`'s bounded transport diagnostic; ownership and registry writes rethrow the original rename error. Each caller keeps its own mode, JSON formatting, and temp naming.
+- `observeSessionWrite` pre-checks unlocked and writes only on a changed signature, re-checking under the lock. `refreshAgentTelemetry` persists through a new `persistOwnershipTelemetry`, which compares against the persisted record (JSON round-trip, then deep equality) and re-checks under the lock through a private `updateOwnershipWhen`.
+- `saveThreadRegistryFile` writes temp-then-rename with the retry, keeping the default file mode. `allocateAgentHome` no longer writes `liveness.pid`.
+- Test seam: optional trailing `hooks` on `writeOwnership` and `saveThreadRegistryFile`, mirroring `writePrivateJson`.
+
+Decisions beyond the literal plan:
+
+- The observer's pending first write (ENOENT before any signature) also returns without taking the lock.
+- The observer error path no longer rewrites a record that is already `unknown`, where only timestamps would change.
+- A failed ownership rename now removes its temp file.
+
+Verification:
+
+- The targeted suites pass 284/284: agent-storage, ask, agent-telemetry*, fork-context, ownership-contention, and session-retention.
+- The new tests fail on the base source.
+- The full suite's remaining failures are pre-existing:
+  - web-search, web-startup, persistent-explore, and the spawner explore tests are environment failures, identical on the base.
+  - recursive-worker "two process hops" is a timing flake that also fails 4 of 6 runs on the base.
+- Review: correctness, fit, and test partitions. Round-1 minors were fixed in b7e5cc9b and verified in round 2.
+- Remaining observation: the locked re-checks only matter in a race between the unlocked read and taking the lock, and nothing lets a test create that race deterministically, so they stay untested.

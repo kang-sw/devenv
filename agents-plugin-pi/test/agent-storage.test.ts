@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, test } from "node:test";
@@ -207,6 +207,126 @@ describe("agent storage", () => {
       assert.equal(after.liveness.lifecycle, "unknown");
       assert.equal(after.lastActivityAt, before.lastActivityAt);
       assert.equal(after.sessionSignature, undefined);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test("observer samples with nothing new to persist write nothing and take no lock", () => {
+    const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
+    try {
+      const owned = allocateAgentHome(createAgentStorageContext("lead-1", root), "agent-quiet", "worker");
+      // A dead-pid claim is reclaimed by any lock acquisition, so its survival
+      // proves that no sample even attempted to take the lock.
+      const lock = join(dirname(owned.home), `.${owned.agentId}.ownership-lock`);
+      const plantStaleClaim = () => { mkdirSync(lock); writeFileSync(join(lock, "owner.json"), JSON.stringify({ pid: 2_147_483_647 })); };
+      const file = () => ({ content: readFileSync(ownershipPath(owned.home), "utf8"), ino: statSync(ownershipPath(owned.home)).ino });
+
+      plantStaleClaim();
+      const beforeFirstWrite = file();
+      observeSessionWrite(owned.home, owned.sessionPath!);
+      assert.deepEqual(file(), beforeFirstWrite, "a pending first write is not a change");
+      assert.equal(existsSync(join(lock, "owner.json")), true);
+      rmSync(lock, { recursive: true });
+
+      writeFileSync(owned.sessionPath!, "session write\n");
+      observeSessionWrite(owned.home, owned.sessionPath!);
+      const observed = file();
+      assert.equal(readOwnership(owned.home)!.sessionSignature?.size, 14);
+
+      plantStaleClaim();
+      observeSessionWrite(owned.home, owned.sessionPath!);
+      observeSessionWrite(owned.home, owned.sessionPath!);
+      assert.deepEqual(file(), observed, "an unchanged signature is not rewritten, not even updatedAt");
+      assert.equal(existsSync(join(lock, "owner.json")), true, "an unchanged sample never takes the lock");
+
+      writeFileSync(owned.sessionPath!, "session write\nmore\n");
+      observeSessionWrite(owned.home, owned.sessionPath!);
+      assert.equal(existsSync(lock), false, "a changed sample takes (and reclaims) the lock");
+      assert.equal(readOwnership(owned.home)!.sessionSignature?.size, 19, "a changed signature is still written");
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test("an observer write that hit a busy lock is written at the next sample with no further session change", () => {
+    const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
+    try {
+      const owned = allocateAgentHome(createAgentStorageContext("lead-1", root), "agent-busy", "worker");
+      const lock = join(dirname(owned.home), `.${owned.agentId}.ownership-lock`);
+      mkdirSync(lock);
+      writeFileSync(join(lock, "owner.json"), JSON.stringify({ pid: process.pid }));
+      writeFileSync(owned.sessionPath!, "first write");
+      observeSessionWrite(owned.home, owned.sessionPath!);
+      assert.equal(readOwnership(owned.home)!.sessionSignature, undefined, "the busy sample persisted nothing");
+      rmSync(lock, { recursive: true });
+      observeSessionWrite(owned.home, owned.sessionPath!);
+      assert.equal(readOwnership(owned.home)!.sessionSignature?.size, 11);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test("an already-unknown observation failure is not rewritten on every sample", () => {
+    const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
+    try {
+      const owned = allocateAgentHome(createAgentStorageContext("lead-1", root), "agent-unknown", "worker");
+      const broken = join(owned.home, "ownership.json", "invalid");
+      observeSessionWrite(owned.home, broken);
+      assert.equal(readOwnership(owned.home)!.liveness.lifecycle, "unknown");
+      const content = readFileSync(ownershipPath(owned.home), "utf8"), ino = statSync(ownershipPath(owned.home)).ino;
+      observeSessionWrite(owned.home, broken);
+      assert.equal(readFileSync(ownershipPath(owned.home), "utf8"), content);
+      assert.equal(statSync(ownershipPath(owned.home)).ino, ino, "no replacement rename happened");
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test("ownership rename retries Windows EPERM/EBUSY and fails as before once the budget is exhausted", () => {
+    const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
+    try {
+      const owned = allocateAgentHome(createAgentStorageContext("lead-1", root), "agent-rename", "worker");
+      const temps = () => readdirSync(owned.home).filter(name => name.endsWith(".tmp"));
+      for (const code of ["EPERM", "EBUSY"]) {
+        const metadata = { ...readOwnership(owned.home)!, lastActivityAt: code === "EPERM" ? 11 : 12 };
+        const delays: number[] = [];
+        let attempts = 0;
+        writeOwnership(metadata, {
+          platform: "win32",
+          sleep: milliseconds => delays.push(milliseconds),
+          rename: (source, destination) => {
+            if (++attempts === 1) throw Object.assign(new Error(code), { code });
+            renameSync(source, destination);
+          },
+        });
+        assert.equal(attempts, 2);
+        assert.deepEqual(delays, [10]);
+        assert.equal(readOwnership(owned.home)!.lastActivityAt, metadata.lastActivityAt);
+        assert.deepEqual(temps(), []);
+      }
+
+      const before = readFileSync(ownershipPath(owned.home), "utf8");
+      const failures = Array.from({ length: 5 }, () => Object.assign(new Error("EPERM"), { code: "EPERM" }));
+      const delays: number[] = [];
+      let attempts = 0;
+      assert.throws(() => writeOwnership({ ...readOwnership(owned.home)!, lastActivityAt: 99 }, {
+        platform: "win32",
+        sleep: milliseconds => delays.push(milliseconds),
+        rename: () => { throw failures[attempts++]; },
+      }), error => error === failures[4], "exhaustion rethrows the rename error itself");
+      assert.equal(attempts, 5);
+      assert.deepEqual(delays, [10, 20, 40, 80]);
+      assert.equal(readFileSync(ownershipPath(owned.home), "utf8"), before);
+      assert.deepEqual(temps(), []);
+      assert.equal(existsSync(join(dirname(owned.home), `.${owned.agentId}.ownership-lock`)), false, "the lock is released on failure");
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test("new records carry no liveness pid while legacy records with one load unchanged", () => {
+    const root = mkdtempSync(join(tmpdir(), "ws-pi-storage-test-"));
+    try {
+      const owned = allocateAgentHome(createAgentStorageContext("lead-1", root), "agent-pid", "worker");
+      assert.equal(readOwnership(owned.home)!.liveness.pid, undefined);
+      assert.equal("pid" in JSON.parse(readFileSync(ownershipPath(owned.home), "utf8")).liveness, false);
+
+      const legacy = { ...readOwnership(owned.home)!, liveness: { ...readOwnership(owned.home)!.liveness, pid: 4242 } };
+      writeFileSync(ownershipPath(owned.home), `${JSON.stringify(legacy, null, 2)}\n`);
+      assert.deepEqual(readOwnership(owned.home), legacy);
+      assert.equal(touchOwnership(owned.home), true);
+      assert.equal(readOwnership(owned.home)!.liveness.pid, 4242, "an update keeps the legacy field");
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 

@@ -89,7 +89,8 @@
  * otherwise untouched — this ticket is scoped to the lead-raised path only.
  */
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
@@ -127,6 +128,7 @@ import {
 } from "./conversation-view.ts";
 import { loadHostPiTui, wrapTextWithAnsi, type Component, type EditorTheme, type MarkdownTheme } from "./pi-tui.ts";
 import { captureForkContext, captureRegisteredTools, captureUnflushedForkSource, effectiveForkDescriptor, type ForkContext } from "./fork-context.ts";
+import { renameWithWindowsRetry, type RenameRetryHooks } from "./atomic-write.ts";
 import type { LeadPromptRef } from "./lead-bootstrap.ts";
 import { readOwnership, validDescriptor } from "./agent-storage.ts";
 import { parseTelemetry, type AgentTelemetry, type TelemetryOrigin } from "./agent-telemetry.ts";
@@ -884,13 +886,21 @@ export function loadThreadRegistryFile(path: string): ThreadRecord[] {
   return parseThreadRegistry(raw);
 }
 
-/** Never-throw write: a failed save degrades to a no-op (the in-memory registry stays authoritative for this process). */
-export function saveThreadRegistryFile(path: string, records: readonly ThreadRecord[]): void {
+/**
+ * Never-throw write: a failed save degrades to a no-op (the in-memory registry
+ * stays authoritative for this process). The temp-then-rename replacement means
+ * a crash mid-write leaves the previous registry intact, never a truncated one.
+ * `hooks` is a focused deterministic test seam; production callers pass two arguments.
+ */
+export function saveThreadRegistryFile(path: string, records: readonly ThreadRecord[], hooks?: RenameRetryHooks): void {
+  const temporary = `${path}.${randomUUID()}.tmp`;
   try {
-    writeFileSync(path, serializeThreadRegistry(records));
+    writeFileSync(temporary, serializeThreadRegistry(records));
+    renameWithWindowsRetry(temporary, path, hooks);
   } catch {
     // best effort — a read-only/unwritable session dir must never turn a
     // question registration into a crashed tool call.
+    try { rmSync(temporary, { force: true }); } catch { /* the save already failed */ }
   }
 }
 
