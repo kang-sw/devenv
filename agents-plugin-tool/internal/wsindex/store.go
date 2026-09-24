@@ -55,8 +55,9 @@ func (c *Client) writeSingleFileCommit(ctx context.Context, name string, data []
 	if err != nil {
 		return "", err
 	}
-	// A signing config (commit.gpgSign) would make plumbing commits prompt
-	// or fail on a missing key; index versions are never signed.
+	// Index versions are never signed. Current git's commit-tree already
+	// ignores commit.gpgSign; --no-gpg-sign states the intent explicitly so
+	// a signing config can never make a plumbing commit prompt or fail.
 	args := []string{"commit-tree", "--no-gpg-sign", tree}
 	if parent != "" {
 		args = append(args, "-p", parent)
