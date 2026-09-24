@@ -10,6 +10,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 1702acbc26b21803
 sage-review-completeness-reviewed: 1702acbc26b21803
+completed: 2026-09-24
 ---
 
 # Move Pi subtree lifecycle state onto the parent-child control channel
@@ -88,3 +89,50 @@ Verification:
 - A new Explore record is not rejected as legacy. An older `PersistedForkResume` record that still has `subtreeChannel` loads and relaunches.
 - After a restart, the durable `waitingOnChildren` mirror in the ownership and sidecar records still restores waiting-on-children.
 - The acknowledgment latency before grandchild dispatch is recorded.
+
+### Result (990a9ca) - 2026-09-24
+
+Landed in 47b274e (implementation) and 990a9ca (review round 1 fixes).
+
+What landed:
+
+- `subtree-lifecycle.ts`:
+  - `SubtreeUpstream`, the child half. It publishes `{t:"subtree"}` snapshots with deduplication, raising the revision once per effective change. It carries the latest snapshot in the hello resume section under `subtree` and resends it after every reconnect.
+  - `observeSubtreeChannel`, the parent half. It applies only non-regressing revisions, acknowledges every received snapshot with the highest applied revision, and reads a disconnect or a not-yet-connected child as waiting.
+  - `beginSubtreeDispatch`, the busy fence. It returns synchronously when no acknowledgment is owed and a Promise otherwise. The wait is bounded by `SUBTREE_ACK_TIMEOUT_MS` = 5000 ms and refuses on timeout, on disconnect, or when the channel is down. Every refusal undoes the admission.
+- `spawner.ts`:
+  - `observeChildSubtree` is bound in `spawnAgent` and in the `sendToAgent` relaunch as soon as the record holds the launch's channel. Revisions are scoped by `record.channel` identity, so a new generation restarts the order and a closed launch's late callbacks are dropped.
+  - `subtree.json`, the `fs.watch` watcher, the per-event read, and `SUBTREE_ENV` are gone.
+  - The legacy-Explore check no longer requires `subtreeChannel`.
+- `SubtreeChannel` and the publication diagnostics are retired. `PersistedForkResume` and sidecar records ignore a persisted `subtreeChannel` on read, well-formed or malformed. The durable `waitingOnChildren` mirror is unchanged.
+
+Decisions:
+
+- **Scoped release of a held settlement.** This replaces the round-0 "no replay" decision after review reproduced a permanent stall on a drop. A settle held on `waitingOnChildren` is released through `record.releaseSettlementHold` only when the wait clears at the same quiescent revision held before, or on the launch's first snapshot. A busy-to-quiescent clear is left to the wake turn's own settle, because the enqueued delivery that ended it wakes the child, and releasing it would report the previous generation early.
+- **The initial view is waiting.** Observation starts at bind time because `ParentChannel` drops feature messages that have no listener.
+- **Diagnostics removed, not ported.** A down channel already surfaces through the fence refusal and the parent's waiting view.
+- **Test stand-in publishes like the real one.** The in-process fake child publishes one quiescent snapshot after readiness, as the real extension's `session_start` does.
+
+Acknowledgment latency (in-process real sockets, 200 fences each, full-suite runs):
+
+| Transport | p50 | p95 | max |
+|---|---|---|---|
+| pipe | 0.024 ms | 0.04–0.10 ms | 0.12–0.25 ms |
+| tcp | 0.15–0.18 ms | 0.96–1.15 ms | 4.4–10.2 ms |
+
+The 5000 ms bound leaves more than 400x headroom over the worst sample.
+
+Verification:
+
+- `npm test` in agents-plugin-pi: 1715 pass, 0 fail, 2 skipped.
+- New suites and cases:
+  - `test/subtree-lifecycle.test.ts`: the fence under delayed, stale, dropped, disconnected, and down acknowledgments; deduplication; out-of-order and duplicate snapshots; disconnect and resume; the handshake-window resend; latency.
+  - `recursive-worker.test.ts`: two-hop propagation and clearing; a relaunched generation; a transport-only hold released; a busy hold not released early; exit after a drop.
+  - `spawner.test.ts`: spawn and `ws-agent-send` fences; relaunch observation; streamed deltas send nothing.
+  - `ask.test.ts` and `agent-sidecar.test.ts`: legacy `subtreeChannel` ignored, and the waiting mirror restored.
+- Mutation checks confirmed that the relaunch observer and the `sendToAgent` fence are covered.
+
+Residual (fail-closed; the view stays waiting until another turn or exit):
+
+- **A socket-vs-stdout race.** A busy-to-quiescent change that wakes nothing can lose the race to `agent_settled`.
+- **A disconnect window covering an identity-only revision change, or a whole wake turn.** A proposed tightening is to key the release on whether an `agent_start` was seen since the last busy snapshot, instead of on revision equality.

@@ -101,6 +101,7 @@ import {
   type DoneAction,
   type FocusableEditorLike,
   type LeadAskQueueOptions,
+  type PersistedForkResume,
 } from "../src/ask.ts";
 import { ConversationViewComponent, type ConversationChannel, type ConversationViewTui } from "../src/conversation-view.ts";
 import { FORK_EXCLUDED_TOOL_NAMES } from "../src/fork.ts";
@@ -676,6 +677,22 @@ describe("captureForkResume / rehydrateForkRecord (the persistence-gap resolutio
     const revived = rehydrateForkRecord("agent-owner", captureForkResume(original));
     assert.equal(revived.lastWriter, "owner");
     assert.deepEqual(revived.ownerSends, [{ text: "owner turn", at: 42 }]);
+  });
+
+  test("the durable waitingOnChildren mirror round-trips, and an older resume's retired subtreeChannel is ignored", () => {
+    const delegation = { version: 1, depth: 1, maxDepth: 2, authority: "lead", tools: ["ws-agent-spawn"] };
+    const waiting = { ...live, delegation, waitingOnChildren: true } as unknown as RpcAgentRecord;
+    const resume = captureForkResume(waiting);
+    assert.equal(resume.waitingOnChildren, true);
+    assert.equal("subtreeChannel" in resume, false, "no subtree channel is captured");
+    assert.equal(rehydrateForkRecord("agent-1", resume).waitingOnChildren, true, "the waiting state survives a lead restart");
+
+    const older = { ...resume, subtreeChannel: { path: "/tmp/old-home/subtree.json", nonce: "retired" } } as PersistedForkResume;
+    const revived = rehydrateForkRecord("agent-1", older);
+    assert.equal("subtreeChannel" in revived, false, "the retired field never reaches the record");
+    assert.equal(revived.waitingOnChildren, true);
+    assert.deepEqual(revived.delegation, rehydrateForkRecord("agent-1", resume).delegation, "the delegation policy parses as it would without the retired field");
+    assert.equal(revived.client, undefined, "the record stays dormant; the relaunch binds a fresh control channel");
   });
 
   test("rehydration reconstructs a spec-conformant dormant record with client undefined", () => {

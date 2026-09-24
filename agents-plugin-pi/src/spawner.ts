@@ -56,9 +56,10 @@
  * an intent mode selects a configured tier while the delegation envelope
  * remains authoritative for child depth and tools.
  *
- * A parent's local settle is not subtree completion. Its private channel
- * publishes active descendants and queued deliveries; a later synthesized
- * settled turn is required after the subtree becomes quiescent.
+ * A parent's local settle is not subtree completion. Its control channel
+ * carries revisioned snapshots of active descendants and queued deliveries
+ * (`subtree-lifecycle.ts`); a later settled turn is required after the
+ * subtree becomes quiescent.
  *
  * `--tools` curation (`read-only`/`read-only-explore`/`full-worker`)
  * lives only in the in-memory `TOOL_GROUPS` table and Pi CLI flags.
@@ -75,9 +76,9 @@
  * already-tracked `sessionPath` with no RPC round-trip.
  */
 
-import { mkdtempSync, readFileSync, rmSync, statSync, watch, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -107,11 +108,11 @@ import { allocateAgentHome, createAgentStorageContext, inspectOwnedHomeRemoval, 
 import { ownerNotifyRef } from "./owner-notify.ts";
 export { ownerNotifyRef } from "./owner-notify.ts";
 import { readSessionEntries, reduceTelemetry, type AgentTelemetry, type TelemetryOrigin } from "./agent-telemetry.ts";
-import { CHILD_MANAGEMENT_TOOLS, DEFAULT_MAX_AGENT_DEPTH, DELEGATION_ENV, SUBTREE_ENV, READ_TOOLS, NETWORK_TOOLS, childPolicy, readDelegationPolicy, readOnlyWsTools, type DelegationPolicy, type PlaybookProfile, type RenderProvenance } from "./delegation-policy.ts";
+import { CHILD_MANAGEMENT_TOOLS, DEFAULT_MAX_AGENT_DEPTH, DELEGATION_ENV, READ_TOOLS, NETWORK_TOOLS, childPolicy, readDelegationPolicy, readOnlyWsTools, type DelegationPolicy, type PlaybookProfile, type RenderProvenance } from "./delegation-policy.ts";
 import { normalizeWriteScopes, type EffectiveWriteCapability, type WriteScope } from "./write-scopes.ts";
 import { createWebSearch } from "./web-search.ts";
 import { verifyWebReadiness, WEB_HOME_ENV, WEB_READINESS_KIND } from "./web-readiness.ts";
-import { beginSubtreeDispatch, installSubtreePublisher, publishSubtree, readSubtreeChannel, readSubtreeSnapshot, subtreeWaiting, type SubtreeChannel, type SubtreeDescendant } from "./subtree-lifecycle.ts";
+import { beginSubtreeDispatch, installSubtreePublisher, observeSubtreeChannel, publishSubtree, subtreeWaiting, type SubtreeDescendant, type SubtreeUpstream } from "./subtree-lifecycle.ts";
 import { PUSH_BATCH_CUSTOM_TYPE, PUSH_BATCH_VERSION, type PushBatchItem, type PushBatchItemState } from "./push-protocol.ts";
 import { persistAgentCostCheckpoint, persistEvictedAgentCost, registerAgentCostOwner } from "./agent-footer.ts";
 
@@ -463,12 +464,12 @@ export interface RpcAgentRecord {
   spawnRole?: SpawnAgentRole;
   /** Persisted authority and one-edge semantic lifecycle; independent of owner holds. */
   delegation?: DelegationPolicy;
-  subtreeChannel?: SubtreeChannel;
   /**
    * Parent side of the per-launch control channel (`agent-channel.ts`), bound
    * before the child process is spawned and closed by `clearLiveState` with
    * every other live-only field. Fresh endpoint and credential per launch; the
-   * child's hello and stage-2 readiness travel over it instead of files.
+   * child's hello, stage-2 readiness, and subtree snapshots travel over it
+   * instead of files.
    */
   channel?: ParentChannel;
   /** Bumped once per process launch (spawn, dormant resume, relaunch); the channel accepts only this generation. */
@@ -481,15 +482,23 @@ export interface RpcAgentRecord {
   launching?: Promise<void>;
   /** Last advisory identity tree published by this child process. */
   subtreeDescendants?: SubtreeDescendant[];
+  /** Parent's view of this child's subtree (`observeSubtreeChannel`): true while unknown, disconnected, or busy. */
   waitingOnChildren?: boolean;
   /** Last successful writer to this child. Absence is the legacy/lead default. */
   lastWriter?: "lead" | "owner";
   /** Owner-authored sends, in delivery order, used to attribute persisted user entries. */
   ownerSends?: Array<{ text: string; at: number }>;
+  /** Last subtree revision accepted from the current launch; scoped to `launchGeneration`. */
   subtreeRevision?: number;
   workGeneration?: number;
   /** Work generation whose ordinary settlement has entered terminal admission. */
   settlementAdmissionGeneration?: number;
+  /**
+   * Set by `attachEventListener` for the attached client: re-runs a settlement
+   * that was held on `waitingOnChildren` once the wait clears without a wake
+   * turn to come (see `observeChildSubtree`). No-op when nothing is held.
+   */
+  releaseSettlementHold?: () => void;
   /** Persistent exploration mode; meaningful only for explore records. */
   exploreMode?: ExploreMode;
   /** `true` while an agent run is actively looping (between `agent_start` and `agent_settled`). */
@@ -2286,7 +2295,6 @@ export function buildRpcClientOptions(
   forkLaunch?: { contextPath: string; affinityId?: string },
   extensionPath: string,
   delegation?: DelegationPolicy,
-  subtreeChannel?: SubtreeChannel,
   channel?: ParentChannel,
 ): RpcClientOptions {
   if (!extensionPath) throw new Error("ws-pi-agent: missing loaded extension entry path for RPC child");
@@ -2304,7 +2312,6 @@ export function buildRpcClientOptions(
   env[WS_PI_FORK_AFFINITY_ENV] = forkLaunch?.affinityId ?? "";
   env[WS_PI_PARENT_SESSION_KEY_ENV] = role === "fork" ? parentSessionKey ?? "" : "";
   env[DELEGATION_ENV] = delegation ? JSON.stringify(delegation) : "";
-  env[SUBTREE_ENV] = subtreeChannel ? JSON.stringify(subtreeChannel) : "";
   env[WEB_HOME_ENV] = role === "explore" ? dirname(sessionPath) : "";
   // The control-channel bootstrap: the child reads and deletes these before it
   // spawns anything of its own. Cleared explicitly so a grandchild never sees
@@ -2495,56 +2502,56 @@ export function applyRpcEvent(
 }
 
 /**
+ * Mirrors one launch's channel-delivered subtree view onto the record and
+ * republishes it upstream. Called as soon as the launch's channel is on the
+ * record, before the child can say hello, so its first snapshot is never
+ * missed; the view reads waiting until that snapshot arrives. Only the
+ * record's current channel may write: a closed launch's late callbacks are
+ * dropped.
+ */
+export function observeChildSubtree(registry: RpcAgentRegistry | undefined, record: RpcAgentRecord, channel: ParentChannel): void {
+  record.subtreeRevision = undefined;
+  // Revision of the last quiescent snapshot with no busy snapshot applied
+  // since; `null` before this launch's first snapshot. A wait that clears at
+  // that same revision (or on the first snapshot) came from the transport
+  // alone, so a settle held meanwhile has no wake turn coming and is
+  // released here. A wait cleared by a busy-to-quiescent transition is not
+  // released: the delivery that ended it wakes the child, and that turn's
+  // own settle admits the terminal. Releasing it would report the previous
+  // generation's answer ahead of the wake turn.
+  let quiescentRevision: number | null | undefined = null;
+  observeSubtreeChannel(channel, view => {
+    if (record.channel !== channel) return;
+    const snapshotQuiescent = view.snapshot !== undefined && !subtreeWaiting(view.snapshot);
+    const release = record.waitingOnChildren === true && !view.waiting
+      && (quiescentRevision === null || quiescentRevision === view.snapshot?.revision);
+    if (view.snapshot && !snapshotQuiescent) quiescentRevision = undefined;
+    else if (!view.waiting) quiescentRevision = view.snapshot?.revision;
+    record.waitingOnChildren = view.waiting;
+    record.subtreeRevision = view.snapshot?.revision;
+    record.subtreeDescendants = view.snapshot?.descendants ?? [];
+    publishSubtree(registry);
+    triggerAgentWidgetRefresh();
+    if (release) record.releaseSettlementHold?.();
+  });
+}
+
+/**
  * Wires the child event stream to immediate reports and per-generation
  * terminal settlement. Settlement clears execution before any async work,
- * waits for the published descendant subtree, harvests the ordinary assistant
- * answer, admits one retryable terminal delivery, and parks only after enqueue.
+ * holds while the channel-delivered subtree view reads waiting (released by
+ * `releaseSettlementHold` when the wait clears with no wake turn), harvests the
+ * ordinary assistant answer, admits one retryable terminal delivery, and parks
+ * only after enqueue.
  * Duplicate events join the generation latch; replacement work invalidates a
  * late harvest. Owner-held output uses the owner notification route.
  */
-function refreshObservedSubtree(registry: RpcAgentRegistry | undefined, record: RpcAgentRecord): void {
-  if (!record.subtreeChannel) return;
-  const snapshot = readSubtreeSnapshot(record.subtreeChannel);
-  record.waitingOnChildren = subtreeWaiting(snapshot);
-  record.subtreeRevision = snapshot?.revision;
-  record.subtreeDescendants = snapshot?.descendants ?? [];
-  publishSubtree(registry);
-  triggerAgentWidgetRefresh();
-}
-
-function watchObservedSubtree(
-  registry: RpcAgentRegistry | undefined,
-  record: RpcAgentRecord,
-  client: RpcClient,
-  generation: number,
-  watchDirectory: typeof watch,
-): (() => void) | undefined {
-  const channel = record.subtreeChannel;
-  if (!channel) return undefined;
-  try {
-    const target = basename(channel.path);
-    const watcher = watchDirectory(dirname(channel.path), { persistent: false }, (_event, filename) => {
-      if (filename !== null && String(filename) !== target) return;
-      if (record.client !== client || record.launchGeneration !== generation) return;
-      refreshObservedSubtree(registry, record);
-    });
-    watcher.on("error", () => watcher.close());
-    return () => watcher.close();
-  } catch {
-    // The RPC event stream retains the conservative read path when native
-    // directory notifications are unavailable for this child home.
-    return undefined;
-  }
-}
-
 export function attachEventListener(
   pi: ExtensionAPI | undefined,
   registry: RpcAgentRegistry | undefined,
   record: RpcAgentRecord,
   client: RpcClient,
   onApprovalPending?: (record: RpcAgentRecord) => void,
-  /** Focused deterministic seam for watcher-callback tests; production uses node:fs watch. */
-  watchDirectory: typeof watch = watch,
 ): void {
   let refreshing = false;
   let dirty = false;
@@ -2583,6 +2590,45 @@ export function attachEventListener(
       refreshing = false;
     })();
   };
+  // Terminal admission for the current work generation. A settle held on
+  // `waitingOnChildren` records its generation for `releaseSettlementHold`.
+  let heldGeneration: number | undefined;
+  const admitSettlement = () => {
+    heldGeneration = undefined;
+    const workGeneration = record.workGeneration;
+    const stillSettled = () => record.client === client && record.launchGeneration === generation && record.workGeneration === workGeneration && !record.running && !record.streaming && !record.waitingOnChildren;
+    const finish = record.forkFinish;
+    if (finish) {
+      void advanceForkFinish(record, registry ?? new Map([[record.agentId, record]]), pi as ExtensionAPI, finishResumeCtx(finish), finish);
+    } else {
+      if (record.settlementAdmissionGeneration === workGeneration) {
+        record.terminalDelivery?.retry?.();
+      } else {
+        // Latch before the asynchronous transcript harvest so duplicate
+        // settle events for one generation cannot enqueue twice.
+        record.settlementAdmissionGeneration = workGeneration;
+        const terminal = createTerminalDelivery(record, registry, pi, workGeneration);
+        void (async () => {
+          const lastMessage = await harvestLastMessage(record);
+          if (!stillSettled() || record.terminalDelivery !== terminal) return;
+          const payload = { reason: "idle", last_message: lastMessage };
+          terminal.retry = () => {
+            if (terminal.state !== undefined || !stillSettled() || record.terminalDelivery !== terminal) return;
+            pushToLead(pi, registry, record, "ws-agent-settled", payload, "followUp", terminal);
+          };
+          terminal.retry();
+          await probeAgentLiveness(pi, registry, record);
+          triggerAgentWidgetRefresh();
+        })();
+      }
+    }
+  };
+  record.releaseSettlementHold = () => {
+    if (record.client !== client || record.launchGeneration !== generation) return;
+    if (heldGeneration === undefined || heldGeneration !== record.workGeneration) return;
+    if (record.running || record.streaming || record.waitingOnChildren) return;
+    admitSettlement();
+  };
   const unsubscribeEvents = client.onEvent((evt) => {
     const e = evt as { type?: string; toolName?: string; args?: unknown; toolCallId?: string; isError?: unknown; result?: unknown; message?: unknown; assistantMessageEvent?: unknown };
     if (record.client !== client || record.launchGeneration !== generation) return;
@@ -2600,7 +2646,6 @@ export function attachEventListener(
         record.lastTextGeneration = record.workGeneration;
       }
     }
-    if (!streamingDelta) refreshObservedSubtree(registry, record);
     const outcome = applyRpcEvent(record, e);
     if (!streamingDelta) publishSubtree(registry);
     if (!streamingDelta && (e.type === "agent_start" || e.type === "agent_settled" || e.type === "message_end" || e.type === "message_update" || e.type === "thinking_level_changed" || e.type === "compaction_end")) {
@@ -2616,41 +2661,14 @@ export function attachEventListener(
       triggerAgentWidgetRefresh();
     }
     if (outcome.settled && record.waitingOnChildren) {
+      heldGeneration = record.workGeneration;
       clearTerminalFacts(record);
       syncOwnershipProtection(record);
       publishSubtree(registry);
       triggerAgentWidgetRefresh();
       return;
     }
-    if (outcome.settled) {
-      const workGeneration = record.workGeneration;
-      const stillSettled = () => record.client === client && record.launchGeneration === generation && record.workGeneration === workGeneration && !record.running && !record.streaming && !record.waitingOnChildren;
-      const finish = record.forkFinish;
-      if (finish) {
-        void advanceForkFinish(record, registry ?? new Map([[record.agentId, record]]), pi as ExtensionAPI, finishResumeCtx(finish), finish);
-      } else {
-        if (record.settlementAdmissionGeneration === workGeneration) {
-          record.terminalDelivery?.retry?.();
-        } else {
-          // Latch before the asynchronous transcript harvest so duplicate
-          // settle events for one generation cannot enqueue twice.
-          record.settlementAdmissionGeneration = workGeneration;
-          const terminal = createTerminalDelivery(record, registry, pi, workGeneration);
-          void (async () => {
-            const lastMessage = await harvestLastMessage(record);
-            if (!stillSettled() || record.terminalDelivery !== terminal) return;
-            const payload = { reason: "idle", last_message: lastMessage };
-            terminal.retry = () => {
-              if (terminal.state !== undefined || !stillSettled() || record.terminalDelivery !== terminal) return;
-              pushToLead(pi, registry, record, "ws-agent-settled", payload, "followUp", terminal);
-            };
-            terminal.retry();
-            await probeAgentLiveness(pi, registry, record);
-            triggerAgentWidgetRefresh();
-          })();
-        }
-      }
-    }
+    if (outcome.settled) admitSettlement();
     if (record.forkFinish && e.type === "tool_execution_end") {
       const finish = record.forkFinish;
       void advanceForkFinish(record, registry ?? new Map([[record.agentId, record]]), pi as ExtensionAPI, finishResumeCtx(finish), finish);
@@ -2668,11 +2686,7 @@ export function attachEventListener(
       approvalHook(record);
     }
   });
-  const unsubscribeSubtree = watchObservedSubtree(registry, record, client, generation, watchDirectory);
-  record.unsubscribe = () => {
-    unsubscribeEvents();
-    unsubscribeSubtree?.();
-  };
+  record.unsubscribe = unsubscribeEvents;
 }
 
 /**
@@ -2978,7 +2992,8 @@ export async function spawnAgent(
   ctx: RpcSpawnCtx,
   params: SpawnAgentParams,
 ): Promise<{ agent_id: string; alias?: string; evicted?: string; write_scopes?: WriteScopeDiagnostic }> {
-  const finishDispatch = beginSubtreeDispatch(registry);
+  const dispatchAdmission = beginSubtreeDispatch(registry);
+  const finishDispatch = typeof dispatchAdmission === "function" ? dispatchAdmission : await dispatchAdmission;
   try {
   const cwdOverride = validateCwdOverride(params.cwdOverride);
   const admission = resolveSpawnAdmission(ctx, params.writeScopes);
@@ -3063,7 +3078,6 @@ export async function spawnAgent(
       promptPath = join(ownership.home, "prompt.md");
       writeFileSync(promptPath, Buffer.concat([promptBody!, Buffer.from(WORKER_LIFECYCLE_GUIDE)]), { mode: 0o600 });
     }
-    const subtreeChannel = { path: join(ownership.home, "subtree.json"), nonce: randomUUID() };
     const record: RpcAgentRecord = {
       agentId,
       alias,
@@ -3072,7 +3086,6 @@ export async function spawnAgent(
       ownership,
       systemPromptPath: promptPath,
       delegation,
-      subtreeChannel,
       modelBase,
       // Explicit effort wins; "default" retains the selected source's policy.
       // This is the single fold point for spawn and dormant resume, and reuses
@@ -3095,8 +3108,9 @@ export async function spawnAgent(
       launchGeneration: channel.generation,
     };
     registry.set(agentId, record);
+    observeChildSubtree(registry, record, channel);
     startOwnedSessionObserver(record);
-    return { agentId, eviction, sessionPath, forkSourcePath, subtreeChannel, record };
+    return { agentId, eviction, sessionPath, forkSourcePath, record };
   };
   let registered: ReturnType<typeof register>;
   try {
@@ -3106,7 +3120,7 @@ export async function spawnAgent(
     if (forkLaunch) rmSync(dirname(forkLaunch.contextPath), { recursive: true, force: true });
     throw error;
   }
-  const { agentId, eviction, sessionPath, forkSourcePath, subtreeChannel, record } = registered;
+  const { agentId, eviction, sessionPath, forkSourcePath, record } = registered;
 
   // 260905: the record is registered BEFORE `start()`, so a failure anywhere
   // in the launch sequence would otherwise leave a half-registered zombie the
@@ -3130,7 +3144,6 @@ export async function spawnAgent(
         forkLaunch,
         ctx.extensionPath,
         delegation,
-        subtreeChannel,
         channel,
       ),
     );
@@ -3223,7 +3236,10 @@ export async function sendToAgent(
   message: string,
   interrupt?: boolean,
 ): Promise<{ agent_id: string }> {
-  const finishDispatch = beginSubtreeDispatch(registry);
+  // Awaited only while a busy fence is owed, keeping the dormant-resume
+  // check-and-claim below in one synchronous step for a root lead.
+  const dispatchAdmission = beginSubtreeDispatch(registry);
+  const finishDispatch = typeof dispatchAdmission === "function" ? dispatchAdmission : await dispatchAdmission;
   try {
   // 260905 (alias/park/cap ticket): resolve alias-or-uuid through the one
   // shared helper first; an unresolvable input falls back to the original
@@ -3267,10 +3283,9 @@ export async function sendToAgent(
 
   if (!record.client) {
     if (record.spawnRole === "explore") {
-      if (!record.delegation?.network?.search || !record.delegation.network.fetch || !record.subtreeChannel) throw new Error("web-search-tool-unavailable: legacy Explore lacks network authority; start a new researcher");
+      if (!record.delegation?.network?.search || !record.delegation.network.fetch) throw new Error("web-search-tool-unavailable: legacy Explore lacks network authority; start a new researcher");
       await createWebSearch({ packageRoot: dirname(dirname(ctx.extensionPath)) }).probe();
     }
-    if (record.subtreeChannel) record.subtreeChannel = { ...record.subtreeChannel, nonce: randomUUID() };
     const forkLaunch = record.spawnRole === "fork" ? prepareForkLaunch(record.forkContext) : undefined;
     record.launchGeneration = (record.launchGeneration ?? 0) + 1;
     const generation = record.launchGeneration;
@@ -3315,7 +3330,6 @@ export async function sendToAgent(
         forkLaunch,
         ctx.extensionPath,
         record.delegation,
-        record.subtreeChannel,
       );
       client = new RpcClient(options);
       record.client = client;
@@ -3326,6 +3340,7 @@ export async function sendToAgent(
       // replaced this claim: the child must not be started for it.
       if (record.client !== client) throw new Error("ws-pi-agent: launch stopped before the child started");
       record.channel = channel;
+      observeChildSubtree(registry, record, channel);
       Object.assign(options.env!, channel.bootstrapEnv());
       await client.start();
       await awaitChannelStage(client, channel.hello(), ctx.channel?.helloTimeoutMs ?? CHANNEL_HELLO_TIMEOUT_MS, "hello");
@@ -3712,33 +3727,16 @@ export interface AgentToolsHandle {
  * Child management is available only within the persisted depth/capability
  * envelope. The tool-call gate enforces the same ceiling after lazy activation.
  */
-function reportSubtreePublicationDiagnostic(pi: ExtensionAPI, detail: string): boolean {
-  if (ownerNotifyRef.current) {
-    try {
-      ownerNotifyRef.current(detail, "warning");
-      return true;
-    } catch { /* Fall through to the session-owned diagnostic channel. */ }
-  }
-  const payload = { advisory: "subtree-publication-failed", detail };
-  try {
-    // Use the current Pi session directly rather than pushToLead: the latter
-    // republishes the same broken subtree and would recursively diagnose itself.
-    pi.sendMessage({
-      customType: "ws-agent-advisory",
-      content: buildPushContent("ws-agent-advisory", undefined, payload, undefined),
-      display: true,
-      details: payload,
-    }, { deliverAs: "followUp", triggerTurn: true });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export function registerAgentTools(
   pi: ExtensionAPI,
   bridge: BridgeHandle,
-  sessionCtx: { cwd: string; storage?: AgentStorageContext; extensionPath: string },
+  sessionCtx: {
+    cwd: string;
+    storage?: AgentStorageContext;
+    extensionPath: string;
+    /** This process's channel to its own parent, when it was launched by the adapter; absent for a root lead. */
+    subtreeUpstream?: SubtreeUpstream;
+  },
   /**
    * 260904 Phase 1: see `RpcSpawnCtx.onApprovalPending`'s doc comment.
    * Threaded into both `ws-agent-spawn`'s `spawnAgent` call and
@@ -3756,7 +3754,7 @@ export function registerAgentTools(
 ): AgentToolsHandle {
   const rpcRegistry: RpcAgentRegistry = new Map();
   registerAgentCostOwner(rpcRegistry, sessionCtx.storage);
-  installSubtreePublisher(rpcRegistry, readSubtreeChannel(), () => heldPushQueue.length, (detail) => reportSubtreePublicationDiagnostic(pi, detail));
+  installSubtreePublisher(rpcRegistry, sessionCtx.subtreeUpstream, () => heldPushQueue.length);
   const stopLivenessProbe = startLivenessProbe(pi, rpcRegistry);
 
   /** Cap on the head-truncated query used as a spawned explore's display title. */

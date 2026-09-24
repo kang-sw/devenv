@@ -13,7 +13,6 @@ const LEAD_ENV_KEYS = [
   "WS_PI_SPAWN_ROLE",
   "WS_PI_EXPLORE_MODE",
   "WS_PI_DELEGATION_POLICY",
-  "WS_PI_SUBTREE_CHANNEL",
   "WS_PI_PARENT_SESSION_KEY",
 ] as const;
 for (const root of SDK_ROOTS) for (const [providerName, apiName] of [["openrouter", "openai-completions"], ["openai-codex", "openai-codex-responses"], ["anthropic", "anthropic-messages"]]) {
@@ -152,7 +151,6 @@ for (const root of SDK_ROOTS) for (const [providerName, apiName] of [["openroute
         WS_PI_SPAWN_ROLE: "worker",
         WS_PI_EXPLORE_MODE: "code-search",
         WS_PI_DELEGATION_POLICY: JSON.stringify({ version: 1, depth: 1, maxDepth: 2, tools: ["read"], authority: "leaf" }),
-        WS_PI_SUBTREE_CHANNEL: "poisoned-subtree-channel",
         WS_PI_PARENT_SESSION_KEY: "poisoned-parent-key",
       });
       for (const key of LEAD_ENV_KEYS) delete process.env[key];

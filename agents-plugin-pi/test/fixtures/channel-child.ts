@@ -3,8 +3,9 @@
  * that patch `RpcClient.prototype.start` instead of spawning a real Pi child.
  * The patched `start()` calls `connectFakeChild(this.options.env,
  * this.options.args)`: it performs the authenticated hello the parent's
- * `spawnAgent`/`sendToAgent` wait for and publishes the role's stage-2
- * readiness with the same payload shape the real extension sends.
+ * `spawnAgent`/`sendToAgent` wait for, publishes the role's stage-2
+ * readiness with the same payload shape the real extension sends, and sends
+ * the quiescent subtree snapshot the real extension's `session_start` does.
  *
  * `node --test` also runs this file (default glob); it defines no tests.
  */
@@ -12,12 +13,15 @@ import { ChildChannel, readAndDeleteChannelBootstrap, type ChildChannelOptions }
 import { FORK_READINESS_KIND } from "../../src/fork-context.ts";
 import { WEB_READINESS_KIND } from "../../src/web-readiness.ts";
 import { WS_PI_SPAWN_ROLE_ENV } from "../../src/process-role.ts";
+import { SubtreeUpstream } from "../../src/subtree-lifecycle.ts";
 
 export interface FakeChildOptions extends ChildChannelOptions {
   /** Fork readiness overrides merged over the defaults; `null` publishes none. */
   fork?: Record<string, unknown> | null;
   /** Web readiness overrides merged over the defaults; `null` publishes none. */
   web?: Record<string, unknown> | null;
+  /** `null` sends no subtree snapshot, leaving the parent's view waiting. */
+  subtree?: null;
 }
 
 const open = new Set<ChildChannel>();
@@ -43,12 +47,13 @@ export const DEFAULT_WEB_READINESS = { tools: ["web_search", "ws_web_fetch"] };
 export async function connectFakeChild(env: Record<string, string | undefined> | undefined, args?: readonly string[], opts: FakeChildOptions = {}): Promise<ChildChannel | undefined> {
   const bootstrap = readAndDeleteChannelBootstrap({ ...(env ?? {}) });
   if (!bootstrap) return undefined;
-  const { fork, web, ...channelOptions } = opts;
+  const { fork, web, subtree, ...channelOptions } = opts;
   const channel = await ChildChannel.connect(bootstrap, { reconnect: false, ...channelOptions });
   open.add(channel);
   const role = env?.[WS_PI_SPAWN_ROLE_ENV];
   if (role === "fork" && fork !== null) channel.publishReadiness(FORK_READINESS_KIND, { ...defaultForkReadiness(sessionDirFromArgs(args)), ...fork });
   if (role === "explore" && web !== null) channel.publishReadiness(WEB_READINESS_KIND, { ...DEFAULT_WEB_READINESS, ...web });
+  if (subtree !== null) new SubtreeUpstream(channel).publish({ outstanding: 0, active: 0, deliveries: 0, delegated: false, descendants: [] });
   return channel;
 }
 

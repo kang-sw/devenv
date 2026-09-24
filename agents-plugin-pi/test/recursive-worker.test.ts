@@ -1,8 +1,8 @@
 import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { join } from "node:path";
 import { RpcClient } from "@earendil-works/pi-coding-agent";
 import {
   CHILD_MANAGEMENT_TOOLS,
@@ -16,9 +16,9 @@ import {
   MAX_SUBTREE_DESCENDANT_DEPTH,
   MAX_SUBTREE_DESCENDANTS,
   publishSubtree,
-  readSubtreeSnapshot,
   subtreeOutstanding,
   subtreeWaiting,
+  SubtreeUpstream,
 } from "../src/subtree-lifecycle.ts";
 import {
   applyRpcEvent,
@@ -30,6 +30,7 @@ import {
   leadWakeStartPendingRef,
   listAgents,
   markAgentExited,
+  observeChildSubtree,
   OWNER_TERMINAL_RETRY_DELAY_MS,
   ownerNotifyRef,
   probeAgentLiveness,
@@ -43,6 +44,7 @@ import {
   type RpcAgentRegistry,
 } from "../src/spawner.ts";
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
+import { fakeParentChannel, fakeUplink, quiescentSnapshot, subtreeChannelPair, until } from "./fixtures/subtree-channels.ts";
 
 const dirs: string[] = [];
 function home(): string {
@@ -50,12 +52,14 @@ function home(): string {
   dirs.push(dir);
   return dir;
 }
-function blockPublisherPath(path: string): void {
-  const directory = dirname(path);
-  rmSync(directory, { recursive: true, force: true });
-  writeFileSync(directory, "publisher directory replaced by a file");
+const opened: Array<{ close(): void }> = [];
+async function channelPair() {
+  const pair = await subtreeChannelPair(1, { socketDir: home() });
+  opened.push(pair.child, pair.parent);
+  return pair;
 }
 afterEach(() => {
+  for (const channel of opened.splice(0)) channel.close();
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
   heldPushQueue.length = 0;
   leadIdleRef.current = undefined;
@@ -134,140 +138,72 @@ test("subtree outstanding counts execution and pending delivery, not report obli
   assert.equal(rows.find((row) => row.agent_id === "delivery")?.status, "pending-delivery");
 });
 
-test("dispatch admission is published as outstanding until registration completes", () => {
+test("dispatch admission is outstanding at the parent before the fence opens and until registration completes", async () => {
+  const { parent, upstream } = await channelPair();
+  const observed = record("observed", { channel: parent });
+  const parentRegistry: RpcAgentRegistry = new Map([[observed.agentId, observed]]);
+  observeChildSubtree(parentRegistry, observed, parent);
   const registry: RpcAgentRegistry = new Map();
-  const channel = { path: join(home(), "subtree.json"), nonce: "launch" };
-  installSubtreePublisher(registry, channel, () => 0);
-  const finish = beginSubtreeDispatch(registry);
-  assert.equal(subtreeWaiting(readSubtreeSnapshot(channel)), true);
+  installSubtreePublisher(registry, upstream, () => 0);
+  await until(() => observed.subtreeRevision === 1, "the initial snapshot");
+  assert.equal(observed.waitingOnChildren, false);
+
+  const admission = beginSubtreeDispatch(registry);
+  assert.ok(admission instanceof Promise);
+  const finish = await admission;
+  assert.equal(observed.waitingOnChildren, true, "the parent applied the busy revision before the dispatch was admitted");
+  assert.equal(observed.subtreeRevision, 2);
   finish();
-  assert.equal(subtreeWaiting(readSubtreeSnapshot(channel)), false);
+  await until(() => observed.subtreeRevision === 3, "the idle revision");
+  assert.equal(observed.waitingOnChildren, false);
 });
 
-test("subtree publication skips equivalent writes but preserves every effective transport transition", () => {
+test("RPC settlement is unaffected while the upstream channel is down", async () => {
+  const sent: any[] = [];
+  const h = pushHarness(sent);
+  const child = record("upstream-down", { client: h.client, running: true, workGeneration: 1 });
+  const registry: RpcAgentRegistry = new Map([[child.agentId, child]]);
+  const uplink = fakeUplink();
+  uplink.connected = false;
+  installSubtreePublisher(registry, new SubtreeUpstream(uplink.channel), () => 0);
+  attachEventListener(h.pi, registry, child, h.client);
+
+  h.emit(assistantEnd("settled while the upstream is down"));
+  h.emit({ type: "agent_settled" });
+  await drain();
+  assert.equal(child.running, false);
+  assert.equal(child.terminalDelivery?.state, "held", "settlement admission still executes");
+  flushHeldPushes(h.pi, true);
+  await drain();
+  assert.equal(sent[0]?.details.last_message, "settled while the upstream is down");
+  assert.equal(uplink.sent.length, 0, "nothing is sent while the upstream is down");
+});
+
+test("a relaunch generation restarts the revision order and drops the previous launch's late snapshots", () => {
   const registry: RpcAgentRegistry = new Map();
-  const channel = { path: join(home(), "publisher", "subtree.json"), nonce: "dedupe-a" };
-  let deliveries = 0;
-  installSubtreePublisher(registry, channel, () => deliveries);
-  let inode = statSync(channel.path, { bigint: true }).ino;
-  const expectPhysicalWrite = (change: () => void): void => {
-    change();
-    const next = statSync(channel.path, { bigint: true }).ino;
-    assert.notEqual(next, inode);
-    inode = next;
-  };
+  const first = fakeParentChannel();
+  const child = record("relaunched", { channel: first.parent, launchGeneration: 1 });
+  registry.set(child.agentId, child);
+  observeChildSubtree(registry, child, first.parent);
+  first.deliver(quiescentSnapshot(5));
+  assert.equal(child.subtreeRevision, 5);
 
-  publishSubtree(registry);
-  assert.equal(statSync(channel.path, { bigint: true }).ino, inode, "an identical effective snapshot does not replace the file");
-
-  let finish!: () => void;
-  expectPhysicalWrite(() => { finish = beginSubtreeDispatch(registry); });
-  assert.equal(readSubtreeSnapshot(channel)?.active, 1, "dispatch admission remains observable");
-  expectPhysicalWrite(finish);
-  assert.equal(readSubtreeSnapshot(channel)?.active, 0);
-
-  const child = record("dedupe-child");
-  expectPhysicalWrite(() => { registry.set(child.agentId, child); publishSubtree(registry); });
-  assert.equal(readSubtreeSnapshot(channel)?.delegated, true);
-  assert.equal(readSubtreeSnapshot(channel)?.descendants[0]?.id, child.agentId);
-
-  expectPhysicalWrite(() => { child.running = true; publishSubtree(registry); });
-  assert.equal(readSubtreeSnapshot(channel)?.active, 1);
-  expectPhysicalWrite(() => { child.waitingOnChildren = true; publishSubtree(registry); });
-  assert.equal(readSubtreeSnapshot(channel)?.outstanding, 1);
-  expectPhysicalWrite(() => { deliveries = 1; publishSubtree(registry); });
-  assert.equal(readSubtreeSnapshot(channel)?.deliveries, 1);
-  expectPhysicalWrite(() => {
-    child.subtreeDescendants = [{ id: "nested", parentId: null, depth: 0, role: "explore", live: true }];
-    publishSubtree(registry);
-  });
-  assert.equal(readSubtreeSnapshot(channel)?.descendants.some((row) => row.id === "nested"), true);
-  expectPhysicalWrite(() => { channel.nonce = "dedupe-b"; publishSubtree(registry); });
-  assert.equal(readSubtreeSnapshot(channel)?.nonce, "dedupe-b");
-  expectPhysicalWrite(() => { publishSubtree(registry, true); });
-  assert.equal(readSubtreeSnapshot(channel)?.revision, 1);
-});
-
-test("RPC settlement survives a secondary upstream publication failure and reports equivalent successes once", async () => {
-  const notices: string[] = [];
-  const sent: any[] = [];
-  const h = pushHarness(sent);
-  const child = record("publication-success", { client: h.client, running: true, workGeneration: 1 });
-  const registry: RpcAgentRegistry = new Map([[child.agentId, child]]);
-  const channel = { path: join(home(), "publisher", "subtree.json"), nonce: "soft-event" };
-  installSubtreePublisher(registry, channel, () => 0, (detail) => { notices.push(detail); return true; });
-  attachEventListener(h.pi, registry, child, h.client);
-  blockPublisherPath(channel.path);
-
-  h.emit(assistantEnd("settled through publication failure"));
-  h.emit({ type: "agent_settled" });
-  await drain();
-  assert.equal(child.running, false);
-  assert.equal(child.terminalDelivery?.state, "held", "settlement admission still executes");
-  flushHeldPushes(h.pi, true);
-  await drain();
-  assert.equal(sent[0]?.details.last_message, "settled through publication failure");
-  assert.deepEqual(notices, ["ws-pi-agent: subtree publication failed"], "successful diagnostic delivery deduplicates equivalent failures");
-});
-
-test("RPC settlement retries a throwing diagnostic reporter after repeated publication failures", async () => {
-  let diagnosticAttempts = 0;
-  const sent: any[] = [];
-  const h = pushHarness(sent);
-  const child = record("publication-throw", { client: h.client, running: true, workGeneration: 1 });
-  const registry: RpcAgentRegistry = new Map([[child.agentId, child]]);
-  const channel = { path: join(home(), "publisher", "subtree.json"), nonce: "soft-event" };
-  installSubtreePublisher(registry, channel, () => 0, () => {
-    diagnosticAttempts++;
-    throw new Error("diagnostic delivery failed");
-  });
-  attachEventListener(h.pi, registry, child, h.client);
-  blockPublisherPath(channel.path);
-
-  publishSubtree(registry, true);
-  publishSubtree(registry, true);
-  assert.equal(diagnosticAttempts, 2, "a throwing reporter does not consume the diagnostic retry budget");
-  h.emit(assistantEnd("settled through publication failure"));
-  h.emit({ type: "agent_settled" });
-  await drain();
-  assert.equal(child.running, false);
-  assert.equal(child.terminalDelivery?.state, "held", "settlement admission still executes");
-  flushHeldPushes(h.pi, true);
-  await drain();
-  assert.equal(sent[0]?.details.last_message, "settled through publication failure");
-});
-
-test("watcher publication failure is contained when diagnostics fail and watcher cleanup remains callable", () => {
-  let diagnosticAttempts = 0;
-  const observedChannel = { path: join(home(), "observed", "subtree.json"), nonce: "observed" };
-  const nestedRegistry: RpcAgentRegistry = new Map();
-  installSubtreePublisher(nestedRegistry, observedChannel, () => 0);
-
-  let notify: ((event: string, filename: string | Buffer | null) => void) | undefined;
-  let closes = 0;
-  const fakeWatch = ((_path: string, _options: unknown, listener: typeof notify) => {
-    notify = listener;
-    return { on() { return this; }, close() { closes++; } };
-  }) as any;
-  const h = pushHarness([]);
-  const child = record("watched-child", { client: h.client, subtreeChannel: observedChannel, launchGeneration: 1 });
-  const registry: RpcAgentRegistry = new Map([[child.agentId, child]]);
-  const upstreamChannel = { path: join(home(), "upstream", "subtree.json"), nonce: "upstream" };
-  installSubtreePublisher(registry, upstreamChannel, () => 0, () => { diagnosticAttempts++; return false; });
-  attachEventListener(h.pi, registry, child, h.client, undefined, fakeWatch);
-  blockPublisherPath(upstreamChannel.path);
-
-  const nested = record("nested-live", { client: {} as never, running: true, spawnRole: "explore" });
-  nestedRegistry.set(nested.agentId, nested);
-  publishSubtree(nestedRegistry, true);
-  notify?.("rename", basename(observedChannel.path));
-  notify?.("rename", basename(observedChannel.path));
-
-  assert.equal(diagnosticAttempts, 2, "a failed diagnostic delivery is retried for each watcher publication failure");
+  const second = fakeParentChannel();
+  child.channel = second.parent;
+  child.launchGeneration = 2;
+  observeChildSubtree(registry, child, second.parent);
+  assert.equal(child.waitingOnChildren, true, "a launch whose child has not connected yet reads as waiting");
+  assert.equal(child.subtreeRevision, undefined);
+  second.deliver(quiescentSnapshot(1, { active: 1 }));
+  assert.equal(child.subtreeRevision, 1, "the new generation's first revision is accepted below the previous generation's");
   assert.equal(child.waitingOnChildren, true);
-  assert.equal(child.subtreeDescendants?.some((row) => row.id === nested.agentId), true);
-  assert.doesNotThrow(() => child.unsubscribe?.(), "publication failure cannot prevent watcher cleanup");
-  assert.equal(closes, 1, "failed diagnostics cannot block watcher cleanup");
+
+  first.deliver(quiescentSnapshot(9));
+  first.drop();
+  assert.equal(child.subtreeRevision, 1, "the previous launch's late snapshot cannot write the record");
+  assert.equal(child.waitingOnChildren, true);
+  second.deliver(quiescentSnapshot(2));
+  assert.equal(child.waitingOnChildren, false);
 });
 
 test("subtree publication merges three identity levels without changing authoritative counts", () => {
@@ -341,7 +277,7 @@ test("subtree identity depth guard retains the boundary and drops the next neste
 });
 
 test("losing a direct child clears and republishes cached descendant liveness", () => {
-  const channel = { path: join(home(), "root-subtree.json"), nonce: "root" };
+  const uplink = fakeUplink();
   const h = pushHarness([]);
   const child = record("child", {
     client: h.client,
@@ -351,54 +287,54 @@ test("losing a direct child clears and republishes cached descendant liveness", 
     subtreeDescendants: [{ id: "grandchild", parentId: null, depth: 0, role: "worker", live: true }],
   });
   const registry: RpcAgentRegistry = new Map([[child.agentId, child]]);
-  installSubtreePublisher(registry, channel, () => 0);
+  installSubtreePublisher(registry, new SubtreeUpstream(uplink.channel), () => 0);
 
   markAgentExited(h.pi, registry, child, { suppressTerminal: true });
 
   assert.equal(child.waitingOnChildren, false);
   assert.equal(child.subtreeRevision, undefined);
   assert.deepEqual(child.subtreeDescendants, []);
-  assert.deepEqual(readSubtreeSnapshot(channel)?.descendants, [
+  assert.deepEqual(uplink.snapshots().at(-1)?.descendants, [
     { id: "child", parentId: null, depth: 0, role: "worker", live: false },
   ]);
 });
 
-test("channel notifications propagate a nested parent edge through two process hops", async () => {
-  const leafChannel = { path: join(home(), "leaf-subtree.json"), nonce: "leaf" };
-  const middleChannel = { path: join(home(), "middle-subtree.json"), nonce: "middle" };
+test("channel snapshots propagate a nested parent edge through two process hops, and losing the middle child clears it", async () => {
+  const leaf = await channelPair();
+  const middle = await channelPair();
   const middleHarness = pushHarness([]);
   const rootHarness = pushHarness([]);
-  const child = record("child", { client: middleHarness.client, subtreeChannel: leafChannel });
+  const child = record("child", { client: middleHarness.client, channel: leaf.parent });
   const middleRegistry: RpcAgentRegistry = new Map([[child.agentId, child]]);
-  installSubtreePublisher(middleRegistry, middleChannel, () => 0);
-  attachEventListener(middleHarness.pi, middleRegistry, child, middleHarness.client);
+  installSubtreePublisher(middleRegistry, middle.upstream, () => 0);
+  observeChildSubtree(middleRegistry, child, leaf.parent);
 
-  const parent = record("parent", { client: rootHarness.client, subtreeChannel: middleChannel });
+  const parent = record("parent", { client: rootHarness.client, channel: middle.parent });
   const rootRegistry: RpcAgentRegistry = new Map([[parent.agentId, parent]]);
   installSubtreePublisher(rootRegistry, undefined, () => 0);
-  attachEventListener(rootHarness.pi, rootRegistry, parent, rootHarness.client);
+  observeChildSubtree(rootRegistry, parent, middle.parent);
 
-  try {
-    const grandchild = record("grandchild", { client: {} as never, running: true, spawnRole: "explore" });
-    installSubtreePublisher(new Map([[grandchild.agentId, grandchild]]), leafChannel, () => 0);
-    const deadline = Date.now() + 2_000;
-    while (!parent.subtreeDescendants?.some((row) => row.id === grandchild.agentId) && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
+  const grandchild = record("grandchild", { client: {} as never, running: true, spawnRole: "explore" });
+  installSubtreePublisher(new Map([[grandchild.agentId, grandchild]]), leaf.upstream, () => 0);
+  await until(() => parent.subtreeDescendants?.some((row) => row.id === grandchild.agentId) === true, "the grandchild's identity at the root");
 
-    assert.deepEqual(parent.subtreeDescendants, [
-      { id: "child", parentId: null, depth: 0, role: "worker", live: true },
-      { id: "grandchild", parentId: "child", depth: 1, role: "explore", live: true },
-    ]);
-    assert.deepEqual(publishSubtree(rootRegistry)?.descendants, [
-      { id: "parent", parentId: null, depth: 0, role: "worker", live: true },
-      { id: "child", parentId: "parent", depth: 1, role: "worker", live: true },
-      { id: "grandchild", parentId: "child", depth: 2, role: "explore", live: true },
-    ]);
-  } finally {
-    child.unsubscribe?.();
-    parent.unsubscribe?.();
-  }
+  assert.deepEqual(parent.subtreeDescendants, [
+    { id: "child", parentId: null, depth: 0, role: "worker", live: true },
+    { id: "grandchild", parentId: "child", depth: 1, role: "explore", live: true },
+  ]);
+  assert.equal(parent.waitingOnChildren, true, "the running grandchild keeps the root waiting through the middle hop");
+  assert.deepEqual(publishSubtree(rootRegistry)?.descendants, [
+    { id: "parent", parentId: null, depth: 0, role: "worker", live: true },
+    { id: "child", parentId: "parent", depth: 1, role: "worker", live: true },
+    { id: "grandchild", parentId: "child", depth: 2, role: "explore", live: true },
+  ]);
+
+  markAgentExited(middleHarness.pi, middleRegistry, child, { suppressTerminal: true });
+  await until(() => parent.subtreeDescendants?.length === 1, "the cleared identity at the root");
+  assert.deepEqual(parent.subtreeDescendants, [
+    { id: "child", parentId: null, depth: 0, role: "worker", live: false },
+  ]);
+  assert.equal(parent.waitingOnChildren, false);
 });
 
 test("ordinary settlement yields exactly one terminal result and clears execution before delivery", async () => {
@@ -464,13 +400,15 @@ test("a failed real settlement batch remains held and retries without duplicate 
 test("a settled parent waits for descendants without remaining globally running", async () => {
   const sent: any[] = [];
   const h = pushHarness(sent);
-  const channel = { path: join(home(), "subtree.json"), nonce: "nested" };
-  const parent = record("parent", { client: h.client, delegation: worker(), running: true, workGeneration: 1, subtreeChannel: channel });
+  const { parent: channel, upstream } = await channelPair();
+  const parent = record("parent", { client: h.client, delegation: worker(), running: true, workGeneration: 1, channel });
   const grandchild = record("grandchild", { running: true });
   const inner = new Map([[grandchild.agentId, grandchild]]);
-  installSubtreePublisher(inner, channel, () => 0);
   const registry = new Map([[parent.agentId, parent]]);
+  observeChildSubtree(registry, parent, channel);
+  installSubtreePublisher(inner, upstream, () => 0);
   attachEventListener(h.pi, registry, parent, h.client);
+  await until(() => parent.subtreeRevision === 1, "the busy snapshot");
 
   h.emit(assistantEnd("waiting answer"));
   h.emit({ type: "agent_settled" });
@@ -479,14 +417,15 @@ test("a settled parent waits for descendants without remaining globally running"
   assert.equal(parent.waitingOnChildren, true);
   assert.deepEqual(parent.subtreeDescendants, [
     { id: "grandchild", parentId: null, depth: 0, role: "worker", live: false },
-  ], "the same child snapshot read that drives waiting also retains advisory identity");
+  ], "the same snapshot that drives waiting also carries advisory identity");
   assert.equal(hasRunningAgents(registry), false);
   assert.equal(listAgents(registry)[0]?.status, "waiting-on-children");
   assert.equal(sent.length, 0);
 
   grandchild.running = false;
-  installSubtreePublisher(inner, channel, () => 0);
-  assert.equal(subtreeWaiting(readSubtreeSnapshot(channel)), false);
+  publishSubtree(inner);
+  await until(() => parent.waitingOnChildren === false, "the quiescent snapshot");
+  assert.equal(subtreeWaiting(publishSubtree(inner)), false);
   h.emit({ type: "agent_start" });
   h.emit(assistantEnd("settled answer"));
   h.emit({ type: "agent_settled" });
@@ -494,6 +433,102 @@ test("a settled parent waits for descendants without remaining globally running"
   flushHeldPushes(h.pi, true);
   assert.equal(sent.length, 1);
   assert.equal(sent[0].details.last_message, "settled answer");
+});
+
+test("a settle held only by a disconnect is released by the reconnected quiescent snapshot, with no further turn", async () => {
+  const sent: any[] = [];
+  const h = pushHarness(sent);
+  const channel = fakeParentChannel();
+  const parent = record("parent", { client: h.client, delegation: worker(), running: true, workGeneration: 1, channel: channel.parent });
+  const registry = new Map([[parent.agentId, parent]]);
+  observeChildSubtree(registry, parent, channel.parent);
+  attachEventListener(h.pi, registry, parent, h.client);
+  channel.deliver(quiescentSnapshot(3));
+  assert.equal(parent.waitingOnChildren, false);
+
+  channel.drop();
+  assert.equal(parent.waitingOnChildren, true, "a disconnected channel reads as waiting");
+  h.setLast("answer while disconnected");
+  h.emit(assistantEnd("answer while disconnected"));
+  h.emit({ type: "agent_settled" });
+  await drain();
+  flushHeldPushes(h.pi, true);
+  assert.equal(sent.length, 0, "settlement is deferred while the channel is down");
+  assert.equal(listAgents(registry)[0]?.status, "waiting-on-children");
+
+  channel.hello({});
+  await drain();
+  flushHeldPushes(h.pi, true);
+  assert.equal(sent.length, 0, "a reconnect that carries no snapshot keeps waiting");
+  channel.hello({ subtree: quiescentSnapshot(3) });
+  assert.equal(parent.waitingOnChildren, false, "the reconnected quiescent snapshot releases the wait");
+  await drain();
+  flushHeldPushes(h.pi, true);
+  await drain();
+  assert.equal(sent.length, 1, "the held settle is admitted without another child turn");
+  assert.equal(sent[0].details.last_message, "answer while disconnected");
+  channel.deliver(quiescentSnapshot(3));
+  await drain();
+  flushHeldPushes(h.pi, true);
+  assert.equal(sent.length, 1, "a duplicate snapshot does not admit twice");
+});
+
+test("a settle held on busy descendants is not released by their quiescence; the wake turn settles instead", async () => {
+  const sent: any[] = [];
+  const h = pushHarness(sent);
+  const channel = fakeParentChannel();
+  const parent = record("parent", { client: h.client, delegation: worker(), running: true, workGeneration: 1, channel: channel.parent });
+  const registry = new Map([[parent.agentId, parent]]);
+  observeChildSubtree(registry, parent, channel.parent);
+  attachEventListener(h.pi, registry, parent, h.client);
+  channel.deliver(quiescentSnapshot(1));
+  channel.deliver(quiescentSnapshot(2, { outstanding: 1 }));
+  h.emit(assistantEnd("dispatched a grandchild"));
+  h.emit({ type: "agent_settled" });
+  await drain();
+  assert.equal(parent.waitingOnChildren, true);
+
+  // The grandchild's terminal is handed into the child's session: quiescent
+  // before the wake turn it triggers has started.
+  channel.deliver(quiescentSnapshot(3));
+  assert.equal(parent.waitingOnChildren, false);
+  await drain();
+  flushHeldPushes(h.pi, true);
+  assert.equal(sent.length, 0, "the previous turn's answer is not reported ahead of the wake turn");
+
+  h.emit({ type: "agent_start" });
+  h.setLast("folded the grandchild result");
+  h.emit(assistantEnd("folded the grandchild result"));
+  h.emit({ type: "agent_settled" });
+  await drain();
+  flushHeldPushes(h.pi, true);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].details.last_message, "folded the grandchild result");
+});
+
+test("exit releases a wait left by a channel that dropped during outstanding work, and the closed launch cannot re-arm it", async () => {
+  const sent: any[] = [];
+  const h = pushHarness(sent);
+  const channel = fakeParentChannel();
+  const exiting = record("exiting", { client: h.client, running: true, workGeneration: 1, channel: channel.parent });
+  const registry = new Map([[exiting.agentId, exiting]]);
+  observeChildSubtree(registry, exiting, channel.parent);
+  attachEventListener(h.pi, registry, exiting, h.client);
+  channel.deliver(quiescentSnapshot(1, { active: 1 }));
+  h.emit(assistantEnd("last output before exit"));
+  h.emit({ type: "agent_settled" });
+  channel.drop();
+  await drain();
+  assert.equal(exiting.waitingOnChildren, true);
+  markAgentExited(h.pi, registry, exiting);
+  assert.equal(exiting.waitingOnChildren, false, "exit releases the wait");
+  assert.equal(channel.closed, true);
+  channel.drop();
+  channel.hello({ subtree: quiescentSnapshot(1, { active: 1 }) });
+  assert.equal(exiting.waitingOnChildren, false, "the closed launch's late callbacks cannot re-arm the wait");
+  flushHeldPushes(h.pi, true);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].details.reason, "exited");
 });
 
 test("settled prose is preserved without adapter adequacy parsing for every role", async () => {

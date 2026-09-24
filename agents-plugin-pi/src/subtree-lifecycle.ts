@@ -1,10 +1,23 @@
-/** Private, one-edge lifecycle transport. Pi's raw agent_settled is not vetoable. */
-import { readFileSync } from "node:fs";
+/**
+ * One-edge subtree lifecycle state, carried hop by hop on the parent-child
+ * control channel (`agent-channel.ts`). Pi's raw agent_settled is not
+ * vetoable, so a parent learns whether a direct child still has descendant
+ * work only from the snapshot that child publishes.
+ *
+ * Child side: `SubtreeUpstream` sends a full snapshot, stamped with a revision
+ * that rises on every effective change, whenever that state changes. The
+ * revision lives as long as the process (one launch generation) and survives
+ * reconnects; the latest snapshot rides every reconnect hello's resume
+ * section. `beginSubtreeDispatch` is the busy-before-dispatch fence: no
+ * grandchild starts until the parent has acknowledged the busy revision.
+ *
+ * Parent side: `observeSubtreeChannel` keeps the last revision it has seen for
+ * one launch (one `ParentChannel`), ignores lower ones, and acknowledges what
+ * it applied. A not-yet-connected or disconnected channel reads as waiting.
+ */
+import type { ChildChannel, ParentChannel } from "./agent-channel.ts";
 import type { RpcAgentRecord, RpcAgentRegistry } from "./spawner.ts";
-import { SUBTREE_ENV } from "./delegation-policy.ts";
-import { writePrivateJson } from "./fork-context.ts";
 
-export interface SubtreeChannel { path: string; nonce: string }
 export type SubtreeDescendantRole = "worker" | "execute" | "fork" | "explore";
 export interface SubtreeDescendant {
   id: string;
@@ -14,11 +27,11 @@ export interface SubtreeDescendant {
   live: boolean;
 }
 export interface SubtreeSnapshot {
-  nonce: string;
   outstanding: number;
   active: number;
   deliveries: number;
   delegated: boolean;
+  /** Rises on every effective change within one launch generation; 0 for a publisher with no parent. */
   revision: number;
   /** Advisory display identity only; never an input to wait/settle. */
   descendants: SubtreeDescendant[];
@@ -26,71 +39,193 @@ export interface SubtreeSnapshot {
 export const MAX_SUBTREE_DESCENDANTS = 128;
 export const MAX_SUBTREE_DESCENDANT_DEPTH = 8;
 const DESCENDANT_ROLES = new Set<SubtreeDescendantRole>(["worker", "execute", "fork", "explore"]);
-export function readSubtreeChannel(env: NodeJS.ProcessEnv = process.env): SubtreeChannel | undefined {
-  const raw = env[SUBTREE_ENV];
-  if (!raw) return undefined;
-  const value = JSON.parse(raw) as SubtreeChannel;
-  if (!value || typeof value.path !== "string" || typeof value.nonce !== "string" || !value.path || !value.nonce) throw new Error("ws-pi-agent: malformed subtree channel");
-  return value;
+
+/** Channel message types and the hello resume key this module owns. */
+export const SUBTREE_MESSAGE = "subtree";
+export const SUBTREE_ACK_MESSAGE = "subtree-ack";
+export const SUBTREE_RESUME_KEY = "subtree";
+/**
+ * Bound on the busy fence's acknowledgment wait. A loopback round trip takes
+ * well under a millisecond (see the latency test); the bound only has to
+ * outlast a parent whose event loop is briefly busy, and a refusal is the
+ * same fail-closed outcome a failed busy publication always had.
+ */
+export const SUBTREE_ACK_TIMEOUT_MS = 5_000;
+
+export function parseSubtreeSnapshot(raw: unknown): SubtreeSnapshot | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const value = raw as Partial<SubtreeSnapshot> & { descendants?: unknown };
+  if (![value.outstanding, value.active, value.deliveries, value.revision].every(n => Number.isSafeInteger(n) && (n as number) >= 0) || typeof value.delegated !== "boolean") return undefined;
+  const descendants = Array.isArray(value.descendants)
+    ? value.descendants.filter((row): row is SubtreeDescendant => {
+      if (!row || typeof row !== "object") return false;
+      const candidate = row as Partial<SubtreeDescendant>;
+      return typeof candidate.id === "string" && candidate.id.length > 0 &&
+        (candidate.parentId === null || (typeof candidate.parentId === "string" && candidate.parentId.length > 0)) &&
+        Number.isSafeInteger(candidate.depth) && (candidate.depth as number) >= 0 && (candidate.depth as number) <= MAX_SUBTREE_DESCENDANT_DEPTH &&
+        typeof candidate.role === "string" && DESCENDANT_ROLES.has(candidate.role as SubtreeDescendantRole) &&
+        typeof candidate.live === "boolean";
+    }).slice(0, MAX_SUBTREE_DESCENDANTS)
+    : [];
+  return {
+    outstanding: value.outstanding!, active: value.active!, deliveries: value.deliveries!,
+    delegated: value.delegated, revision: value.revision!, descendants,
+  };
 }
-export function readSubtreeSnapshot(channel: SubtreeChannel): SubtreeSnapshot | undefined {
-  try {
-    const value = JSON.parse(readFileSync(channel.path, "utf8")) as Omit<SubtreeSnapshot, "descendants"> & { descendants?: unknown };
-    if (value.nonce !== channel.nonce || ![value.outstanding, value.active, value.deliveries, value.revision].every(n => Number.isSafeInteger(n) && n >= 0) || typeof value.delegated !== "boolean") return undefined;
-    const descendants = Array.isArray(value.descendants)
-      ? value.descendants.filter((row): row is SubtreeDescendant => {
-        if (!row || typeof row !== "object") return false;
-        const candidate = row as Partial<SubtreeDescendant>;
-        return typeof candidate.id === "string" && candidate.id.length > 0 &&
-          (candidate.parentId === null || (typeof candidate.parentId === "string" && candidate.parentId.length > 0)) &&
-          Number.isSafeInteger(candidate.depth) && (candidate.depth as number) >= 0 && (candidate.depth as number) <= MAX_SUBTREE_DESCENDANT_DEPTH &&
-          typeof candidate.role === "string" && DESCENDANT_ROLES.has(candidate.role as SubtreeDescendantRole) &&
-          typeof candidate.live === "boolean";
-      }).slice(0, MAX_SUBTREE_DESCENDANTS)
-      : [];
-    return { ...value, descendants };
-  } catch { return undefined; }
-}
+
 export function subtreeWaiting(snapshot: SubtreeSnapshot | undefined): boolean {
-  // Missing/mismatched publication is unknown, never permission to stop a process.
+  // An unknown subtree is never permission to stop a process.
   return !snapshot || snapshot.outstanding > 0 || snapshot.active > 0 || snapshot.deliveries > 0;
 }
-export function writeSubtreeSnapshot(channel: SubtreeChannel, snapshot: Omit<SubtreeSnapshot, "nonce">): void {
-  writePrivateJson(channel.path, { ...snapshot, nonce: channel.nonce });
+
+type SubtreeState = Omit<SubtreeSnapshot, "revision">;
+interface AckWaiter { revision: number; resolve: () => void; reject: (error: Error) => void; timer: NodeJS.Timeout }
+
+/** The child half: one per process, shared by every publisher that process installs. */
+export class SubtreeUpstream {
+  private revisionCounter = 0;
+  private acked = 0;
+  private lastState: string | undefined;
+  private latest: SubtreeSnapshot | undefined;
+  private readonly waiters = new Set<AckWaiter>();
+  private readonly channel: ChildChannel;
+  private readonly ackTimeoutMs: number;
+
+  constructor(channel: ChildChannel, opts: { ackTimeoutMs?: number } = {}) {
+    this.channel = channel;
+    this.ackTimeoutMs = opts.ackTimeoutMs ?? SUBTREE_ACK_TIMEOUT_MS;
+    channel.onMessage(msg => {
+      if (msg.t === SUBTREE_ACK_MESSAGE && Number.isSafeInteger(msg.revision)) this.acknowledge(msg.revision as number);
+    });
+    channel.onDisconnect(() => this.refuseWaiters("the channel to the parent disconnected"));
+    // The hello's resume section is evaluated before the welcome, while
+    // `connected` is still false, so a change published in that handshake
+    // window is neither in the hello nor sent. Resending the latest snapshot
+    // once connected closes the gap; the parent reads an equal revision as a
+    // duplicate.
+    channel.onReconnect(() => this.send());
+  }
+
+  /** Hello resume section: a reconnect restores the parent's view from the latest snapshot. */
+  resume(): Record<string, unknown> {
+    return this.latest ? { [SUBTREE_RESUME_KEY]: this.latest } : {};
+  }
+
+  /** Sends only an effective change; a disconnected send is carried by the next reconnect hello. */
+  publish(state: SubtreeState): SubtreeSnapshot {
+    const key = JSON.stringify(state);
+    if (key === this.lastState && this.latest) return this.latest;
+    this.lastState = key;
+    this.latest = { ...state, revision: ++this.revisionCounter };
+    this.send();
+    return this.latest;
+  }
+
+  private send(): void {
+    try { if (this.latest && this.channel.connected) this.channel.send({ t: SUBTREE_MESSAGE, snapshot: this.latest }); }
+    catch { /* a socket destroyed but not yet reported ended; the resume section carries it */ }
+  }
+
+  /**
+   * Nothing when the parent has already acknowledged the latest revision;
+   * otherwise a wait that resolves on that acknowledgment and refuses when the
+   * channel is down, drops, or the bound passes.
+   */
+  fence(): Promise<void> | undefined {
+    const revision = this.revisionCounter;
+    if (this.acked >= revision) return undefined;
+    if (!this.channel.connected) return Promise.reject(fenceRefusal("the channel to the parent is down"));
+    return new Promise<void>((resolve, reject) => {
+      const waiter: AckWaiter = {
+        revision,
+        resolve,
+        reject,
+        timer: setTimeout(() => {
+          this.waiters.delete(waiter);
+          reject(fenceRefusal(`the parent did not acknowledge revision ${revision} within ${this.ackTimeoutMs}ms`));
+        }, this.ackTimeoutMs),
+      };
+      waiter.timer.unref?.();
+      this.waiters.add(waiter);
+    });
+  }
+
+  private acknowledge(revision: number): void {
+    this.acked = Math.max(this.acked, revision);
+    for (const waiter of [...this.waiters]) {
+      if (waiter.revision > this.acked) continue;
+      this.waiters.delete(waiter);
+      clearTimeout(waiter.timer);
+      waiter.resolve();
+    }
+  }
+
+  private refuseWaiters(reason: string): void {
+    for (const waiter of [...this.waiters]) {
+      this.waiters.delete(waiter);
+      clearTimeout(waiter.timer);
+      waiter.reject(fenceRefusal(reason));
+    }
+  }
 }
+
+function fenceRefusal(reason: string): Error {
+  return new Error(`ws-pi-agent: nested dispatch refused: ${reason}`);
+}
+
+/** What the parent currently knows about one direct child's subtree. */
+export interface SubtreeView {
+  waiting: boolean;
+  /** Last accepted snapshot of this launch; kept across a disconnect for advisory identity. */
+  snapshot?: SubtreeSnapshot;
+}
+
+/**
+ * The parent half for one launch. Reports the initial view (waiting: nothing
+ * received yet) synchronously, then every accepted snapshot and every
+ * disconnect. Each received snapshot is acknowledged with the highest
+ * revision applied, after `onView` has applied it.
+ */
+export function observeSubtreeChannel(channel: ParentChannel, onView: (view: SubtreeView) => void): () => void {
+  let lastSeen: number | undefined;
+  let latest: SubtreeSnapshot | undefined;
+  const receive = (raw: unknown) => {
+    const snapshot = parseSubtreeSnapshot(raw);
+    if (!snapshot) return;
+    // Equal is a duplicate of what was applied (or a reconnect restoring it
+    // after a disconnect marked the view waiting); only lower is stale.
+    if (lastSeen === undefined || snapshot.revision >= lastSeen) {
+      lastSeen = snapshot.revision;
+      latest = snapshot;
+      onView({ waiting: subtreeWaiting(snapshot), snapshot });
+    }
+    try { channel.send({ t: SUBTREE_ACK_MESSAGE, revision: lastSeen }); }
+    catch { /* the connection is gone; the child's fence refuses on its own disconnect */ }
+  };
+  const offMessage = channel.onMessage(msg => { if (msg.t === SUBTREE_MESSAGE) receive(msg.snapshot); });
+  const offConnection = channel.onConnection((_conn, hello) => {
+    const resumed = hello.resume[SUBTREE_RESUME_KEY];
+    if (resumed !== undefined) receive(resumed);
+  });
+  const offDisconnect = channel.onDisconnect(() => onView({ waiting: true, snapshot: latest }));
+  onView({ waiting: true });
+  return () => { offMessage(); offConnection(); offDisconnect(); };
+}
+
 interface Publisher {
-  revision: number;
   delegated: boolean;
   dispatching: number;
-  channel?: SubtreeChannel;
+  upstream?: SubtreeUpstream;
   deliveries: () => number;
-  lastPublished?: string;
-  diagnosticsReported: number;
-  lastDiagnostic?: string;
-  reportDiagnostic?: (detail: string) => boolean;
 }
 const publishers = new WeakMap<RpcAgentRegistry, Publisher>();
-const MAX_PUBLICATION_DIAGNOSTICS = 8;
-
-function publicationDiagnostic(publisher: Publisher, error: unknown): void {
-  const detail = error instanceof Error && error.message.startsWith("ws-pi-private-json:")
-    ? error.message
-    : "ws-pi-agent: subtree publication failed";
-  if (publisher.lastDiagnostic === detail || publisher.diagnosticsReported >= MAX_PUBLICATION_DIAGNOSTICS) return;
-  let reported = false;
-  try { reported = publisher.reportDiagnostic?.(detail) === true; } catch { /* Diagnostics never change lifecycle outcomes. */ }
-  if (!reported) return;
-  publisher.lastDiagnostic = detail;
-  publisher.diagnosticsReported++;
-}
 
 export function installSubtreePublisher(
   registry: RpcAgentRegistry,
-  channel: SubtreeChannel | undefined,
+  upstream: SubtreeUpstream | undefined,
   deliveries: () => number,
-  reportDiagnostic?: (detail: string) => boolean,
 ): void {
-  publishers.set(registry, { revision: 0, delegated: false, dispatching: 0, channel, deliveries, diagnosticsReported: 0, reportDiagnostic });
+  publishers.set(registry, { delegated: false, dispatching: 0, upstream, deliveries });
   publishSubtree(registry);
 }
 export function subtreeOutstanding(registry: RpcAgentRegistry): number {
@@ -127,54 +262,45 @@ function subtreeDescendants(registry: RpcAgentRegistry): SubtreeDescendant[] {
   return rows;
 }
 
-function publishSubtreeState(registry: RpcAgentRegistry | undefined, dispatched: boolean, required: boolean): SubtreeSnapshot | undefined {
+/** Recomputes this process's snapshot and sends it upstream when it changed. Never throws. */
+export function publishSubtree(registry: RpcAgentRegistry | undefined, dispatched = false): SubtreeSnapshot | undefined {
   if (!registry) return undefined;
   const p = publishers.get(registry);
   if (!p) return undefined;
-  if (dispatched) { p.revision++; p.delegated = true; }
+  if (dispatched) p.delegated = true;
   const outstanding = subtreeOutstanding(registry);
   let active = p.dispatching;
   for (const r of registry.values()) {
     if (r.running || r.streaming) active++;
   }
   p.delegated ||= registry.size > 0;
-  const snapshot = { nonce: p.channel?.nonce ?? "local", outstanding, active, deliveries: p.deliveries(), delegated: p.delegated, revision: p.revision, descendants: subtreeDescendants(registry) };
-  if (!p.channel) return snapshot;
-  const effectiveState = JSON.stringify(snapshot);
-  if (effectiveState === p.lastPublished) return snapshot;
-  try {
-    writeSubtreeSnapshot(p.channel, snapshot);
-    p.lastPublished = effectiveState;
-    p.lastDiagnostic = undefined;
-  } catch (error) {
-    if (required) throw error;
-    publicationDiagnostic(p, error);
-  }
-  return snapshot;
+  const state: SubtreeState = { outstanding, active, deliveries: p.deliveries(), delegated: p.delegated, descendants: subtreeDescendants(registry) };
+  return p.upstream ? p.upstream.publish(state) : { ...state, revision: 0 };
 }
 
-/** Best-effort after dispatch admission: authoritative in-memory lifecycle always proceeds. */
-export function publishSubtree(registry: RpcAgentRegistry | undefined, dispatched = false): SubtreeSnapshot | undefined {
-  return publishSubtreeState(registry, dispatched, false);
-}
-
-export function beginSubtreeDispatch(registry: RpcAgentRegistry): () => void {
+/**
+ * The busy-before-dispatch fence: publishes the dispatch as active and waits
+ * for the parent's acknowledgment before the caller may start a child.
+ * Returns the finish callback synchronously when no acknowledgment is owed (a
+ * process with no parent channel has no fence), so a caller's synchronous
+ * check-and-claim is not split by an await it does not need. Refusal undoes
+ * the admission.
+ */
+export function beginSubtreeDispatch(registry: RpcAgentRegistry): (() => void) | Promise<() => void> {
   const publisher = publishers.get(registry);
   if (!publisher) return () => {};
   publisher.dispatching++;
-  try {
-    // This busy edge is the one hard publication gate: no child may start if
-    // its parent cannot first observe that nested dispatch is in progress.
-    publishSubtreeState(registry, false, true);
-  } catch (error) {
-    publisher.dispatching--;
-    throw error;
-  }
   let finished = false;
-  return () => {
+  const finish = () => {
     if (finished) return;
     finished = true;
     publisher.dispatching--;
     publishSubtree(registry);
   };
+  publishSubtree(registry);
+  let fence: Promise<void> | undefined;
+  try { fence = publisher.upstream?.fence(); }
+  catch (error) { finish(); throw error; }
+  if (!fence) return finish;
+  return fence.then(() => finish, (error: unknown) => { finish(); throw error; });
 }

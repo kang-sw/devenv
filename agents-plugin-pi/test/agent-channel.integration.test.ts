@@ -136,21 +136,38 @@ test("concurrent siblings hold distinct credentials; one sibling's credential is
   } finally { await teardown(registry); }
 });
 
-test("a forced drop is re-established by the real child, whose reconnect hello carries its readiness in the resume section", { timeout: LAUNCH_TIMEOUT }, async t => {
+async function until(condition: () => boolean, what: string, timeoutMs = 10_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition()) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+}
+
+test("a forced drop is re-established by the real child, whose reconnect hello carries its readiness and subtree snapshot in the resume section", { timeout: LAUNCH_TIMEOUT }, async t => {
   const root = makeRoot(t);
   t.mock.method(RpcClient.prototype, "prompt", async () => {});
   const registry = new Map<string, any>();
   try {
     const record = await spawnExplore(registry, exploreContext(root, "lead-c"));
     const channel = record.channel as ParentChannel;
+    // The real child's session_start snapshot arrives over the channel; no file carries it.
+    await until(() => record.subtreeRevision !== undefined, "the child's first subtree snapshot");
+    assert.equal(record.waitingOnChildren, false, "an idle child with no descendants reads quiescent");
+    assert.equal(existsSync(join(record.ownership.home, "subtree.json")), false, "no subtree.json is written");
+    const revision = record.subtreeRevision;
     const reconnected = new Promise<{ hello: any; conn: any }>(resolve => { const off = channel.onConnection((conn, hello) => { off(); resolve({ hello, conn }); }); });
     const dropped = new Promise<void>(resolve => { const off = channel.onDisconnect(() => { off(); resolve(); }); });
     channel.live!.close();
     await dropped;
+    assert.equal(record.waitingOnChildren, true, "a disconnected channel reads as waiting");
     const { hello, conn } = await reconnected;
     assert.equal(hello.reconnect, true);
     assert.equal(typeof hello.pid, "number");
-    assert.deepEqual(hello.resume, { readiness: { web: WEB_READINESS } }, "the resume section restores the readiness already proved");
+    assert.deepEqual(hello.resume.readiness, { web: WEB_READINESS }, "the resume section restores the readiness already proved");
+    assert.equal(hello.resume.subtree?.revision, revision, "the resume section carries the latest subtree snapshot");
+    assert.equal(record.waitingOnChildren, false, "the reconnected quiescent snapshot restores the view");
+    assert.equal(record.subtreeRevision, revision);
     assert.equal(channel.accepted, 2);
     assert.equal(channel.live, conn);
     assert.deepEqual(await channel.readiness("web"), WEB_READINESS);
@@ -189,7 +206,7 @@ test("a drop between the hello and readiness recovers through the reconnect, who
     assert.equal(channel.accepted, 2, "the launch completed over the child's reconnect");
     assert.equal(hellos.length, 2);
     assert.equal(hellos[1].reconnect, true);
-    assert.deepEqual(hellos[1].resume, { readiness: { web: WEB_READINESS } }, "the readiness published while disconnected rode the reconnect hello");
+    assert.deepEqual(hellos[1].resume.readiness, { web: WEB_READINESS }, "the readiness published while disconnected rode the reconnect hello");
     assert.ok(channel.live);
     assert.deepEqual(await channel.readiness("web"), WEB_READINESS);
     assert.ok(await record.client.getState(), "the child is unaffected by the drop");

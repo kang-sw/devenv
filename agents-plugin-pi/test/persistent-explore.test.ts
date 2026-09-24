@@ -258,6 +258,8 @@ describe("persistent Explore intent modes", () => {
         const restored: RpcAgentRegistry = new Map();
         reviveOrphans(restored, parseOrphans(serializeOrphans(captureOrphans(h.handle.rpcRegistry))));
         const revived = restored.get(original.agentId)!;
+        // A current Explore record carries no subtree channel field; its relaunch must not read it as legacy.
+        assert.equal("subtreeChannel" in revived, false);
         await sendToAgent(restored, { cwd: PACKAGE_ROOT, extensionPath: EXTENSION_ENTRY }, revived.agentId, "after restart");
         const resumedPrompt = rpc.prompts.at(-1)!;
         assert.equal(resumedPrompt.message, "after restart");

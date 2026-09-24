@@ -223,7 +223,7 @@ import { createClaudeDesignReviewContextProvider } from "./claude-design-review.
 import { assertPolicyTool, readDelegationPolicy } from "./delegation-policy.ts";
 import { registerScopedWriteTools } from "./write-scopes.ts";
 import { registerWebTools } from "./web-tools.ts";
-import { publishSubtree } from "./subtree-lifecycle.ts";
+import { publishSubtree, SubtreeUpstream } from "./subtree-lifecycle.ts";
 
 // This is the exact physical entry module Pi loaded (whether from `-e`, an
 // installed package, or a cache). Every RPC child receives this path verbatim
@@ -394,9 +394,13 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   // connects and says hello here; a hello failure rejects the factory, which
   // Pi reports as a failed extension load and exits — the parent sees a
   // failed launch. No bootstrap (an interactive lead, or a Pi started from a
-  // worker's shell) means no channel: readiness publishing is a no-op.
+  // worker's shell) means no channel: readiness publishing is a no-op, and
+  // with no subtree upstream there is no parent to fence nested dispatch on.
   const channelBootstrap = readAndDeleteChannelBootstrap(process.env);
-  const channel = channelBootstrap ? await ChildChannel.connect(channelBootstrap) : undefined;
+  let subtreeUpstream: SubtreeUpstream | undefined;
+  // Every reconnect hello carries the latest subtree snapshot in its resume section.
+  const channel = channelBootstrap ? await ChildChannel.connect(channelBootstrap, { resume: () => subtreeUpstream?.resume() ?? {} }) : undefined;
+  subtreeUpstream = channel ? new SubtreeUpstream(channel) : undefined;
   const delegation = readDelegationPolicy();
   // Same-name wrappers preserve Pi's native schema, diff renderer, queue, and
   // result shape while the explicit policy — not tool visibility — authorizes
@@ -644,7 +648,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
         sessionEntries: ctx.sessionManager.getEntries(),
       });
       const approval = createApprovalRelay(pi, { cwd: ctx.cwd }, rpcRegistryRef);
-      const tools = registerAgentTools(pi, h, { cwd: ctx.cwd, storage: createAgentStorageContext(ctx.sessionManager.getSessionId()), extensionPath: extensionEntryPath }, approval, exploreGuidePath, toolPreviewTuiRef);
+      const tools = registerAgentTools(pi, h, { cwd: ctx.cwd, storage: createAgentStorageContext(ctx.sessionManager.getSessionId()), extensionPath: extensionEntryPath, subtreeUpstream }, approval, exploreGuidePath, toolPreviewTuiRef);
       return { handle: h, agentTools: tools, onApprovalPending: approval };
     });
     if (!sessionBootstrap) return; // notified (and, for a spawned child, already exited) inside bootstrapOrFailLoud — never fall through to a partial/toolless registration.

@@ -45,7 +45,6 @@ import { normalizeStoredExploreMode, type ExploreMode } from "./process-role.ts"
 import { readOwnership, removeOwnedAgentHome, updateOwnership, validDescriptor, type AgentOwnership } from "./agent-storage.ts";
 import { parseTelemetry, type AgentTelemetry, type TelemetryOrigin } from "./agent-telemetry.ts";
 import { parseDelegationPolicy, type DelegationPolicy } from "./delegation-policy.ts";
-import type { SubtreeChannel } from "./subtree-lifecycle.ts";
 
 /** Sidecar file version. Bumped only on a breaking shape change; a mismatch is treated as "no sidecar". */
 export const SIDECAR_VERSION = 1;
@@ -76,7 +75,6 @@ export interface PersistedOrphan {
   toolGroup: ToolGroup;
   explicitTools?: string;
   delegation?: DelegationPolicy;
-  subtreeChannel?: SubtreeChannel;
   waitingOnChildren?: boolean;
   lastWriter?: "lead" | "owner";
   ownerSends?: Array<{ text: string; at: number }>;
@@ -159,7 +157,6 @@ export function captureOrphans(registry: RpcAgentRegistry): PersistedOrphan[] {
       toolGroup: record.toolGroup,
       explicitTools: record.explicitTools,
       ...(record.delegation ? { delegation: record.delegation } : {}),
-      ...(record.subtreeChannel ? { subtreeChannel: record.subtreeChannel } : {}),
       ...(record.waitingOnChildren !== undefined ? { waitingOnChildren: record.waitingOnChildren } : {}),
       ...(record.lastWriter ? { lastWriter: record.lastWriter } : {}),
       ...(record.ownerSends?.length ? { ownerSends: record.ownerSends.map((send) => ({ ...send })) } : {}),
@@ -231,7 +228,8 @@ export function parseOrphans(raw: string): PersistedOrphan[] {
         : [])
       : undefined;
     if (o.ownerSends !== undefined && !Array.isArray(o.ownerSends)) continue;
-    if (o.subtreeChannel !== undefined && (!o.subtreeChannel || typeof o.subtreeChannel.path !== "string" || typeof o.subtreeChannel.nonce !== "string")) continue;
+    // An older sidecar may still carry the retired `subtreeChannel`; it is
+    // ignored (never validated), and the relaunch binds a fresh control channel.
     let forkContext: ForkContext | undefined;
     try { forkContext = parseForkContext(o.forkContext); } catch { continue; }
     if (!o.systemPromptPath && !forkContext) continue;
@@ -275,7 +273,6 @@ export function parseOrphans(raw: string): PersistedOrphan[] {
       toolGroup: (legacySimple ? "read-only-explore" : o.toolGroup ?? "full-worker") as ToolGroup,
       explicitTools: typeof o.explicitTools === "string" ? o.explicitTools : undefined,
       ...(delegation ? { delegation } : {}),
-      ...(o.subtreeChannel ? { subtreeChannel: o.subtreeChannel } : {}),
       ...(o.waitingOnChildren !== undefined ? { waitingOnChildren: o.waitingOnChildren } : {}),
       ...(o.lastWriter ? { lastWriter: o.lastWriter } : {}),
       ...(ownerSends?.length ? { ownerSends } : {}),
@@ -334,7 +331,6 @@ export function rehydrateOrphanRecord(orphan: PersistedOrphan): RpcAgentRecord {
     toolGroup: orphan.toolGroup,
     explicitTools: orphan.explicitTools,
     delegation: orphan.delegation,
-    subtreeChannel: orphan.subtreeChannel,
     waitingOnChildren: orphan.waitingOnChildren,
     lastWriter: orphan.lastWriter,
     ownerSends: orphan.ownerSends?.map((send) => ({ ...send })),
