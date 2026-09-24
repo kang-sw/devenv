@@ -17,7 +17,8 @@ release execution to {{.SkillNamespace}}:lead-ship.
 
 For other work, apply this gate before dispatch and when scope changes.
 
-Use lead-run when any of these is true:
+Use lead-run when any of these is true; when no ticket owns the work yet,
+capture it first through {{.SkillNamespace}}:lead-ticket:
 
 - a ready ticket owns the work;
 - the change affects public behavior, an API, protocol, schema, template,

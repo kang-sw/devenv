@@ -1612,7 +1612,8 @@ func TestServeStdioConfigAgentsTierRoundTripsArbitraryEffortLabels(t *testing.T)
 	t.Setenv("WS_MCP_NO_AGENT", "")
 	t.Setenv("WS_MCP_NAMESPACE", "")
 	rsrcRoot := buildTestRsrcTree(t, map[string]string{
-		"model-pb/model-pb.md": modelAliasPlaybookContent,
+		"model-pb/model-pb.md":   modelAliasPlaybookContent,
+		"effort-pb/effort-pb.md": "---\nkind: print\ndelegates: false\n---\n# Effort Playbook\n\nEffort: {{.MediumTierReasoningEffort}}\nEnd of effort.\n",
 	})
 	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
 
@@ -1682,6 +1683,40 @@ func TestServeStdioConfigAgentsTierRoundTripsArbitraryEffortLabels(t *testing.T)
 			}
 			if resolved.Backend != "codex" || resolved.Model != model || resolved.Effort != tc.want || resolved.ResolvedFrom != "codex" {
 				t.Fatalf("config.resolve_agent = %#v, want codex/%s/%q from codex", resolved, model, tc.want)
+			}
+
+			// The text form is line-oriented: an effort label must stay on its
+			// own "effort:" line rather than inject further fields.
+			resolvedText := callToolOnce(t, server, 6, "config.resolve_agent", map[string]any{
+				"session_key": leadKey,
+				"tier":        "medium",
+				"harness":     "codex",
+			})
+			if toolIsError(t, resolvedText) {
+				t.Fatalf("config.resolve_agent (text) failed: %s", resolvedText)
+			}
+			wantText := fmt.Sprintf("backend: codex\nmodel: %s\neffort: %s\nresolved_from: codex\n", model, formatEffortForText(tc.want))
+			if got := toolText(t, resolvedText); got != wantText {
+				t.Fatalf("config.resolve_agent text = %q, want %q", got, wantText)
+			}
+
+			// Playbook bodies substitute the tier effort vars into prose; an
+			// effort label must not break the substituted line.
+			effortRendered := callToolOnce(t, server, 7, "playbook.render", map[string]any{
+				"name":        "effort-pb",
+				"session_key": leadKey,
+			})
+			if toolIsError(t, effortRendered) {
+				t.Fatalf("playbook.render effort-pb failed: %s", effortRendered)
+			}
+			effortPath := strings.Split(strings.TrimSpace(toolText(t, effortRendered)), "\n")[0]
+			effortBody, err := os.ReadFile(effortPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantLine := "Effort: " + formatEffortForText(tc.want) + "\nEnd of effort."
+			if !strings.Contains(string(effortBody), wantLine) || strings.Contains(string(effortBody), "\nrecommended-model: forged") {
+				t.Fatalf("rendered body effort line = %q, want line %q", effortBody, wantLine)
 			}
 
 			if tc.want != "" {

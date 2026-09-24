@@ -982,7 +982,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, result, nil)
 		}
-		return toolTextResponse(req.ID, fmt.Sprintf("backend: %s\nmodel: %s\neffort: %s\nresolved_from: %s\n", backend, model, effort, resolvedFrom), nil)
+		return toolTextResponse(req.ID, fmt.Sprintf("backend: %s\nmodel: %s\neffort: %s\nresolved_from: %s\n", backend, model, formatEffortForText(effort), resolvedFrom), nil)
 
 	case "git.status":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
