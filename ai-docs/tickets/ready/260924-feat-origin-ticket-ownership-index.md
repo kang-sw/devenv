@@ -781,6 +781,94 @@ library. Examples:
 F1, F2, F3, F4, C9, I5, I6, I7 (library level); missing ref reported as
 absent, not as an error.
 
+### Result (24898ba4) - 2026-09-24
+
+**Live probe** (GitHub `origin`, SSH, git 2.50.1, from a scratch repo with
+`GIT_TERMINAL_PROMPT=0` and `ssh -o BatchMode=yes`). No design assumption
+broke.
+
+- Create with a must-not-exist lease (`--force-with-lease=<ref>:`) was
+  accepted; a second must-not-exist create was rejected client-side as
+  `[rejected] (stale info)`.
+- A plain fast-forward push was accepted; a non-fast-forward push without
+  force was rejected `[rejected] (non-fast-forward)`.
+- Racing CAS: five rounds of two concurrent `--force-with-lease=<ref>:<tip>`
+  pushes from one expected tip. Every round exactly one won; the loser got a
+  server-side `[remote rejected] (cannot lock ref '<ref>': is at <winner> but
+  expected <tip>)`, so the CAS is enforced by the server, not only by the
+  client's advertisement check.
+- `--no-verify`: with a failing `pre-push` hook (via `-c core.hooksPath`),
+  the push without `--no-verify` was blocked; with it, the push landed.
+- Delete of a custom ref (`:<ref>`) works.
+- Actions/webhooks: a throwaway branch carrying an unfiltered `on: push`
+  workflow ran once as the control (run 35974212358, `event=push`). Two pushes
+  of workflow-bearing commits to a custom ref (create `2bb9e15`, fast-forward
+  `1e597e2`) produced no run and no check suite after three minutes (`gh run
+  list`, `commits/<sha>/check-suites` total 0). The repository has no
+  webhooks configured (`repos/.../hooks` is `[]`), so delivery could not be
+  inspected; the public events feed listed only `refs/heads/*` pushes.
+- Pushed and deleted refs, all under the throwaway namespace
+  `refs/wsprobe-260924/` plus one throwaway branch:
+  - `refs/wsprobe-260924/v1/index`: create `4c82464`, fast-forward `1b8ecf0`,
+    five race winners, `--no-verify` push `c43f194`; deleted.
+  - `refs/wsprobe-260924/v1/actions`: `2bb9e15`, `1e597e2`; deleted.
+  - `refs/heads/wsprobe-260924-actions`: `7c1e4c3`; deleted.
+  - After deletion `git ls-remote origin | grep wsprobe` matched nothing.
+  - The control workflow run record remains in the Actions history; deleting
+    it was outside the push authorization.
+
+**Library** `agents-plugin-tool/internal/wsindex/`:
+
+- Namespace constant `ticket-index-larkspur`: remote ref
+  `refs/ticket-index-larkspur/v1/index`; local cache, pending log, and fetch
+  scratch refs under `refs/ticket-index-larkspur-local/v1/`, shared by every
+  worktree of the clone.
+- Discovery walks a candidate list (tier 1 only) with one `ls-remote` while
+  the clone has never seen an index; the absence result (and an unreachable
+  result on a never-seen clone) is cached for 10 minutes in a state file in
+  the git common dir. No `origin` remote means index-absent with no remote
+  call.
+- Remote commands run with `GIT_TERMINAL_PROMPT=0`, empty `GIT_ASKPASS` and
+  `SSH_ASKPASS`, `GCM_INTERACTIVE=never`, `-c credential.interactive=false`,
+  and the configured ssh command (git's precedence) plus
+  `-o BatchMode=yes -o ConnectTimeout=5` (`-batch` for plink). Hard timeouts:
+  1.5 s for the read path, 10 s per remote command for writes; timeouts kill
+  git's whole process group.
+- Index versions are plumbing-only commits of one indented `index.json`, each
+  parented on the previous tip; audit lines go in the commit message.
+- The CAS loop fetches the tip into a scratch ref, re-applies pending entries
+  then the caller's mutation, and pushes with `--force-with-lease` and
+  `--no-verify`, at most 5 attempts before a clear error. A rejection counts as
+  a lost race only for stale-info, non-fast-forward, and ref-lock failures;
+  any other refusal fails at once.
+- Cache continuity: forward moves advance the cache under local CAS; a remote
+  tip that is an ancestor of the cache is a stale read; unrelated histories or
+  a remote answer with no ref discard the pending log (one report line when
+  N > 0) and the cache ref. A failed fetch is classified through `ls-remote`,
+  so a deleted ref reads as absence and a transport failure stays unreachable.
+- Read path: within a 60 s TTL no remote call; otherwise one bounded fetch,
+  then the stale cache with its age, or `unknown` when the index exists but no
+  cache does.
+- `clone_id` is 16 hex characters in `.git/config` (`ticketindex.cloneid`),
+  first generation serialized by a lock file in the common dir.
+- Pending log: a parentless commit holding `pending.json`, replaced under
+  `update-ref --stdin` CAS; clears remove exactly the flushed entry ids.
+- `Create` (init primitive, adopts a concurrent creation) and `Check` (live
+  state without pushing) are in place for Phase 2.
+
+**Verification.** `go test -race -count=3 ./internal/wsindex/` passed
+(88 s). Scenario tests: `TestMissingRefIsAbsentNotError`, A2, A3, A4 (hanging
+ssh: read under 2.5 s stale, write pending within the timeout), A5 (HTTP 401
+remote fails in under 3 s with the non-interactive env), A9, B2, B3 (4 clones x
+4 writes, linear chain of init + 16 versions), B6, F1, F2, F3, F4, C9, I5, I6,
+I7, plus concurrent `Create` adoption.
+
+**Decisions.** A local file remote reports concurrent lock contention as
+`[remote rejected] (failed to update ref)`, so that phrase is treated as a
+lost race; the bounded retry absorbs a misclassified permanent refusal. Timing
+state lives in a common-dir JSON file rather than git config so per-read TTL
+bookkeeping never contends with config writes.
+
 ### Phase 2: Registration, ownership verbs, and init
 
 **Goal.** Add `tickets.acquire`, `tickets.release`, and the init verb:
