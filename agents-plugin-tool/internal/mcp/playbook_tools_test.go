@@ -2357,6 +2357,11 @@ func TestPlaybookPrintTicketIndexContracts(t *testing.T) {
 				if name != "lead-run" {
 					continue
 				}
+				// The warning relay direction lives in tickets.acquire's own
+				// output, not in the playbook.
+				if strings.Contains(normalized, "relay that line to the user verbatim") {
+					t.Errorf("lead-run: body restates the acquire warning relay that the tool output carries")
+				}
 				// The lease is taken before the worker exists: acquire, then
 				// render, then spawn.
 				order := []string{
