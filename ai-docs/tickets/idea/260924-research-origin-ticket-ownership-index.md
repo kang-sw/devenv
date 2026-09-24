@@ -332,6 +332,15 @@ registration and ownership on top without changing folder semantics.
     loudly. Offline sync is impossible, so duplicate work is surfaced at
     reconnect, not prevented.
   - A clone that never saw the index stays on the silent legacy mock.
+  - Offline acquire also applies the network-free origin-closed hint before
+    recording, refusing tickets already landed on the local remote-tracking
+    review-track.
+  - Index discontinuity (the remote ref gone, or its tip unrelated to the
+    local cache tip after a delete and re-init; a stale read where the remote
+    tip is an ancestor is not a discontinuity) discards the pending log and
+    cache, with one report when entries were lost. Keeping entries bound to an index identity was
+    rejected as too much machinery for an edge case; an unreachable remote
+    never discards.
 - **Offline (v2).** Offline status transitions queue rather than moving
   folders; this belongs to the status-authority work.
 - **Terminal state (v2).** Terminal state is a file marker. Absence from the

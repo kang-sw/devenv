@@ -7,8 +7,8 @@ related:
   260728-research-duplicate-ticket-stem-silent-resolve: duplicate-stem behavior left unchanged here
 sage-review-design: completed
 sage-review-completeness: completed
-sage-review-design-reviewed: cd0cad61b2459476
-sage-review-completeness-reviewed: cd0cad61b2459476
+sage-review-design-reviewed: 73073ae7da15060c
+sage-review-completeness-reviewed: 73073ae7da15060c
 ---
 
 # Origin-backed ticket ownership index (MVP coordination overlay)
@@ -90,6 +90,40 @@ behaves exactly as it does today.
       (taken over meanwhile) is dropped with a one-line note.
   - Every entry is idempotent on replay, so a crash between the remote push and
     the local clear re-flushes without duplicate records or errors.
+  - **Index discontinuity discards.** When a clone with pending entries or a
+    local cache ref reaches the remote and finds either condition below, it
+    discards the pending log and the local cache ref:
+    - a successful remote query shows no index ref, or
+    - the remote tip and the local cache tip are unrelated: neither is an
+      ancestor of the other (`merge-base --is-ancestor` both ways), as after a
+      delete and re-init.
+
+    A remote tip that is an ancestor of the cache tip is a stale read (a
+    sibling worktree's push landed in between), not a discontinuity: keep the
+    cache and discard nothing. Every index version is a CAS commit whose
+    parent is the previous tip, so only a re-init produces unrelated history.
+    This relies on the cache ref holding only commits observed on the remote:
+    it is advanced only after a push is accepted or a fetch returns, and never
+    materializes pending entries.
+    - Absence must be told apart from failure. A transport error, timeout, or
+      credential failure is unreachable, never absence; only a successful
+      remote answer with no matching ref is absence. A read-path fetch that
+      fails because the ref is missing is resolved through that distinction
+      before falling back to the stale cache.
+    - The discard uses the pending log's local CAS, keyed on the log value it
+      read; a CAS miss re-reads and discards the current log. Its report
+      counts exactly the entries removed.
+    - Report once, one line, only when N > 0 entries were discarded: "N
+      offline entries were discarded because the remote index disappeared or
+      was recreated". Discarding only a cache ref is silent. The report is
+      acceptable because this clone had used the index.
+    - Any call path that reaches the remote may perform the discard, including
+      `tickets.query`: "read-only" means no remote write and no flush, and the
+      discard is a local-only cleanup.
+
+    An unreachable remote never counts as absence; offline alone never
+    discards. After a discard the clone follows the normal rules for its new
+    state (index-absent mock, or adopting the new index).
   - The log never touches code branches or history; reconnect adds no clutter.
   - Offline sync is impossible, so the log does not prevent duplicate work
     while offline; it guarantees the conflict surfaces at reconnect.
@@ -233,8 +267,10 @@ behaves exactly as it does today.
     stem is registered. For an unregistered stem, acquire registers and leases
     in the same CAS commit.
   - Acquire fetches the origin review-track together with the index. It refuses
-    a stem that is absent from the index but already sits under `.done/` or
-    `.dropped/` on the origin review-track, and tells the caller to pull.
+    a stem that already sits under `.done/` or `.dropped/` on the origin
+    review-track, whether or not it is still registered, and tells the caller
+    to pull. Online acquire, offline acquire, and flush replay share this one
+    unqualified check.
     - This closes the stale-checkout hole: the ticket was implemented, merged,
       and pruned elsewhere, while it still looks `ready/` locally.
     - The review-track tree is the done list. Keep no done list or tombstones
@@ -261,6 +297,10 @@ behaves exactly as it does today.
     - A cached conflict refuses offline exactly as online; an override with
       flag and reason is recorded in the pending log with its reason and the
       overridden holder's triple.
+    - Before recording, offline acquire applies the network-free origin-closed
+      hint (the local `refs/remotes/origin/<review-track>` tree, as query
+      does) and refuses a stem already closed there, so an obviously landed
+      ticket is refused at acquire time rather than only at flush.
     - Otherwise acquire succeeds with an explicit offline warning (remote
       unverified), records the acquire in the pending log, and shows it as a
       provisional lease in this clone's view until the flush.
@@ -615,6 +655,29 @@ level (A2, A3, A4, F1, F2). Later phases re-run them at tool level.
 - I16. An offline close becomes pending, and the ticket then lands under
   `.done/` on origin before the flush. The flush prunes the registration with
   no conflict report.
+- I17. The local `refs/remotes/origin/<review-track>` tree already has the
+  ticket under `.done/` (and, in a variant, under `.dropped/`). An offline
+  acquire is refused with the origin-closed message and records no pending
+  entry, even when the cached index still registers the stem.
+- I18. X has pending entries, and the index ref is deleted on the remote. On
+  X's next successful discovery, the pending log and cache ref are discarded
+  with one report; ticket tools then behave as index-absent.
+- I19. X is offline with pending entries while the index is deleted and
+  re-initialized on the remote. On reconnect, the remote tip and X's cache tip
+  are unrelated: X discards its pending log with one report and adopts the new
+  index. None of X's discarded pending entries appear in it; the reconnecting
+  tool's own fresh write (for example its piggyback registration) may.
+- I21. Worktree B reads remote tip T5; worktree A's push then lands T6 and
+  advances the shared cache ref before B's continuity check. B treats T5 as a
+  stale read: nothing is discarded, no report is shown, and the cache stays at
+  T6.
+- I22. A clone with a cache ref and no pending entries sees the ref deleted on
+  the remote. The cache ref is discarded silently, with no report.
+- I23. The read path fetches a deleted ref with a cache ref present. Query
+  resolves it as absence (not a stale-cache fallback) and performs the
+  discard; a transport failure in the same setup serves the stale cache.
+- I20. An unreachable remote never triggers a discard: pending entries survive
+  repeated offline calls.
 
 **H. Scope integration** (Phase 4)
 
@@ -735,12 +798,15 @@ absent, not as an error.
   pending entry) and pending entries for every offline index write
 - flush on the next mutating tool that reaches the remote, with replay
   re-evaluation and loud conflict reports
+- the offline origin-closed hint at acquire, and the index-discontinuity
+  discard
 
 **Verification.** Scenarios A1 (acquire/release plain `ok`; the override-param
 clause waits for Phase 3), A4 (tool level), A10, A11, A12, A6, A7, A8, B1, B4, B5, B7,
 C1, C2, C3, C4, C7, C8, D1–D5, E1 (through close), E2, E3, E4 (acquire
 refusal), E5 (acquire refusal), E6, E7, E8, E10, I1, I2, I3, I4, I5–I7 (tool
-level), I9, I10, I11 (acquire refusal), I12, I13, I16; the view clauses of I1,
+level), I9, I10, I11 (acquire refusal), I12, I13, I16, I17, I18, I19, I20,
+I21, I22; the view clauses of I1,
 I3, and I11 wait for Phase 3. Every existing ticket-tool test must pass
 unchanged with no ref present.
 
@@ -760,7 +826,7 @@ unchanged with no ref present.
   overlaid.
 
 **Verification.** Scenarios C5, C6, E4 (query hint), E5 (query hint), E9, F5,
-G1–G5, I8, I14, I15, and the view clauses of I1, I3, and I11; tool-level
+G1–G5, I8, I14, I15, I23, and the view clauses of I1, I3, and I11; tool-level
 re-runs of A2, A3, F1, F2. The no-ref path stays
 byte-identical (A1 re-run, including its override-param clause for
 `tickets.move` and `tickets.close`, which Phase 2 cannot yet exercise).
