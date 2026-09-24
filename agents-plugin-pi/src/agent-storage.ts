@@ -304,6 +304,29 @@ export function isOwnedHomeGone(ownership: Pick<AgentOwnership, "home">): boolea
   return !existsSync(home);
 }
 
+/**
+ * The sidecar's removal gate for an owned entry. `"claimed"`: a removal claim
+ * is held, so neither an absent home (the remover may rename it back) nor an
+ * eviction record (its `finally` deletes the record when the removal fails)
+ * proves removal yet; keep the entry and let a later read decide.
+ * `"removed"`: with no claim held, an eviction record or an absent home.
+ * `"present"`: neither.
+ *
+ * Read order: home -> record -> claim -> home. A remover takes the claim
+ * before it writes the record, deletes a failed removal's record before it
+ * releases the claim, and renames the home back before that release, so a
+ * record counts only when the claim is absent after the record read, and an
+ * absent home only when it is still absent after the claim read.
+ */
+export function ownedHomeRemovalState(ownership: Pick<AgentOwnership, "home" | "ownerSessionId" | "agentId">): "removed" | "claimed" | "present" {
+  const home = resolve(ownership.home), claim = ownershipLockPath(home);
+  const homeFirst = existsSync(home);
+  const recorded = hasEvictionRecord(ownership);
+  if (existsSync(claim)) return "claimed";
+  if (recorded) return "removed";
+  return !homeFirst && !existsSync(home) ? "removed" : "present";
+}
+
 /** A sibling lock survives atomic home detachment, serializing writers with deletion across processes. */
 function acquireOwnershipLock(home: string): OwnershipLock {
   const canonical = canonicalHome(home);

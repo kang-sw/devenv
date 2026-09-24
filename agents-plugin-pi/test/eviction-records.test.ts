@@ -12,12 +12,13 @@ import fs from "node:fs";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { afterEach, describe, test } from "node:test";
 import {
   allocateAgentHome,
   createAgentStorageContext,
   hasEvictionRecord,
+  ownedHomeRemovalState,
   persistOwnershipTelemetry,
   pruneStaleAgentHomes,
   readEvictionRecord,
@@ -32,7 +33,7 @@ import {
 import type { CumulativeCost } from "../src/agent-telemetry.ts";
 import { createAgentFooterController, descendantUsageValue, persistAgentCostCheckpoint, registerAgentCostOwner, retentionEvictionCost } from "../src/agent-footer.ts";
 import { evictForCapacity, sendToAgent, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
-import { captureOrphans, readAndClearSidecarAt, reviveOrphans, writeSidecarAt } from "../src/agent-sidecar.ts";
+import { captureOrphans, parseOrphans, readAndClearSidecarAt, reviveOrphans, serializeOrphans, writeSidecarAt } from "../src/agent-sidecar.ts";
 import { createThreadRegistryHandle, ensureRespondent, type ThreadRecord } from "../src/ask.ts";
 import { truncateToWidth, visibleWidth } from "../src/pi-tui.ts";
 import { symlinkSkip, symlinksAvailable } from "./fixtures/symlink-probe.ts";
@@ -620,6 +621,111 @@ describe("stale-record repair", () => {
       assert.deepEqual(readdirSync(outside), [], `${variant}: nothing was written through a symlink`);
       assert.deepEqual(descendantUsageValue(registry), usd(.75, 2), variant);
     }
+  });
+});
+
+describe("the sidecar's removal gate under a held claim", () => {
+  function sidecarFixture() {
+    const storage = createAgentStorageContext("lead", root());
+    const child = record("child", storage, .5), kept = record("kept", storage, .25);
+    stale(child);
+    const serialized = serializeOrphans(captureOrphans(owner(storage, child, kept)));
+    return { storage, home: child.ownership!.home, serialized };
+  }
+  const claimOf = (home: string) => join(dirname(home), `.${basename(home)}.ownership-lock`);
+  function revive(storage: Storage, serialized: string): { ids: string[]; owned: boolean; registry: RpcAgentRegistry } {
+    const registry = owner(storage);
+    const revived = reviveOrphans(registry, parseOrphans(serialized));
+    for (const entry of revived) entry.ownershipObserverStop?.();
+    return { ids: revived.map(entry => entry.agentId).sort(), owned: !!registry.get("child")?.ownership, registry };
+  }
+
+  test("an absent home under a held claim survives a parse and a revival; once the claim is released with the home gone, the next parse drops it", t => {
+    silenceDiagnostics(t);
+    const { storage, home, serialized } = sidecarFixture();
+    let during: ReturnType<typeof parseOrphans> | undefined, revivedDuring: ReturnType<typeof revive> | undefined;
+    const result = removeOwnedAgentHome(readOwnership(home)!, staged => {
+      assert.equal(existsSync(home), false, "precondition: the home is detached");
+      assert.equal(existsSync(claimOf(home)), true, "precondition: the claim is held");
+      during = parseOrphans(serialized);
+      revivedDuring = revive(storage, serialized);
+      rmSync(staged, { recursive: true, force: true });
+    }, undefined, retentionOptions);
+    assert.equal(result.status, "deleted");
+    assert.deepEqual(during!.map(entry => entry.agentId), ["child", "kept"], "the claimed entry survives the parse");
+    assert.equal(during!.find(entry => entry.agentId === "child")!.ownership?.home, home, "its descriptor is kept for a rename-back");
+    assert.deepEqual(revivedDuring!.ids, ["child", "kept"], "and the revival");
+    assert.equal(revivedDuring!.owned, true);
+    assert.deepEqual(descendantUsageValue(revivedDuring!.registry), usd(.75, 2), "the completed removal counts once: reconcile drops the revived entry");
+    assert.equal(revivedDuring!.registry.has("child"), false);
+    assert.deepEqual(parseOrphans(serialized).map(entry => entry.agentId), ["kept"], "the next parse drops it");
+    assert.deepEqual(revive(storage, serialized).ids, ["kept"]);
+  });
+
+  test("an eviction record with the home present under a held claim survives a parse; after the removal rolls back the entry is still revivable", t => {
+    silenceDiagnostics(t);
+    const { storage, home, serialized } = sidecarFixture();
+    let during: ReturnType<typeof parseOrphans> | undefined;
+    const result = removeOwnedAgentHome(readOwnership(home)!, undefined, undefined, {
+      ...retentionOptions,
+      beforeDetach: () => {
+        assert.ok(readEvictionRecord(storage, "child"), "precondition: the record is written under the claim");
+        assert.equal(existsSync(home), true, "precondition: the home is present");
+        during = parseOrphans(serialized);
+        throw new Error("injected failure before the detach");
+      },
+    });
+    assert.equal(result.status, "failed");
+    assert.deepEqual(during!.map(entry => entry.agentId), ["child", "kept"], "the claimed entry survives the parse");
+    assert.equal(readEvictionRecord(storage, "child"), undefined, "precondition: the rollback deleted the record");
+    assert.equal(existsSync(claimOf(home)), false, "precondition: the claim is released");
+    const after = revive(storage, serialized);
+    assert.deepEqual(after.ids, ["child", "kept"], "still revivable");
+    assert.equal(after.owned, true);
+  });
+
+  test("with no claim, a legacy absent home without a record is still dropped", () => {
+    const { storage, home, serialized } = sidecarFixture();
+    rmSync(home, { recursive: true, force: true });
+    assert.equal(readEvictionRecord(storage, "child"), undefined, "precondition: no record");
+    assert.deepEqual(parseOrphans(serialized).map(entry => entry.agentId), ["kept"]);
+    assert.deepEqual(revive(storage, serialized).ids, ["kept"]);
+  });
+
+  test("a record read while a remover takes the claim is not proof of removal", t => {
+    const { storage, home } = sidecarFixture();
+    const ownership = readOwnership(home)!;
+    assert.equal(writeEvictionRecord(storage, "child", usd(.5)), true);
+    // The remover takes the claim while the gate reads the record (it wrote
+    // the record under that claim).
+    const original = fs.readFileSync;
+    t.mock.method(fs, "readFileSync", function (this: unknown, path: fs.PathOrFileDescriptor, ...rest: unknown[]) {
+      if (String(path).includes(`${join(".cost-estimate", "evicted")}`) && !existsSync(claimOf(home))) mkdirSync(claimOf(home));
+      return (original as any).call(this, path, ...rest);
+    });
+    syncBuiltinESMExports();
+    try { assert.equal(ownedHomeRemovalState(ownership), "claimed"); }
+    finally { t.mock.restoreAll(); syncBuiltinESMExports(); }
+    rmSync(claimOf(home), { recursive: true, force: true });
+    assert.equal(ownedHomeRemovalState(ownership), "removed", "positive control: the same record with no claim is removal");
+  });
+
+  test("an absent home renamed back as the claim is released reads as present", t => {
+    const { home } = sidecarFixture();
+    const ownership = readOwnership(home)!;
+    const staged = `${home}.detached`;
+    renameSync(home, staged);
+    mkdirSync(claimOf(home));
+    // The remover renames the home back and releases its claim between the
+    // gate's first home read and its claim read.
+    const original = fs.existsSync;
+    t.mock.method(fs, "existsSync", function (this: unknown, path: fs.PathLike) {
+      if (String(path) === claimOf(home) && existsSync(staged)) { renameSync(staged, home); rmSync(claimOf(home), { recursive: true, force: true }); }
+      return original.call(this, path);
+    });
+    syncBuiltinESMExports();
+    try { assert.equal(ownedHomeRemovalState(ownership), "present"); }
+    finally { t.mock.restoreAll(); syncBuiltinESMExports(); }
   });
 });
 
