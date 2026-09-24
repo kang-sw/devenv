@@ -10,6 +10,9 @@
  * reconnects; the latest snapshot rides every reconnect hello's resume
  * section. `beginSubtreeDispatch` is the busy-before-dispatch fence: no
  * grandchild starts until the parent has acknowledged the busy revision.
+ * Each snapshot also carries the child's own wake accounting (`turnOwed`,
+ * `turnsStarted`), so the parent never has to guess from revisions whether a
+ * wake turn is coming.
  *
  * Parent side: `observeSubtreeChannel` keeps the last revision it has seen for
  * one launch (one `ParentChannel`), ignores lower ones, and acknowledges what
@@ -31,6 +34,15 @@ export interface SubtreeSnapshot {
   active: number;
   deliveries: number;
   delegated: boolean;
+  /**
+   * The child owes itself a turn for deliveries it has already enqueued that
+   * have not started one yet (a pending wake, or a turn-boundary batch Pi
+   * continues with). Not part of `subtreeWaiting`: it gates only the release
+   * of a settle the parent already holds.
+   */
+  turnOwed: boolean;
+  /** Own turns (`agent_start`) this child process has started; rises monotonically within one launch generation. */
+  turnsStarted: number;
   /** Rises on every effective change within one launch generation; 0 for a publisher with no parent. */
   revision: number;
   /** Advisory display identity only; never an input to wait/settle. */
@@ -55,7 +67,11 @@ export const SUBTREE_ACK_TIMEOUT_MS = 5_000;
 export function parseSubtreeSnapshot(raw: unknown): SubtreeSnapshot | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const value = raw as Partial<SubtreeSnapshot> & { descendants?: unknown };
-  if (![value.outstanding, value.active, value.deliveries, value.revision].every(n => Number.isSafeInteger(n) && (n as number) >= 0) || typeof value.delegated !== "boolean") return undefined;
+  // Every field that feeds wait or release is required: a snapshot without the
+  // wake accounting is rejected (unacknowledged), so the view keeps its prior
+  // state, initially waiting.
+  if (![value.outstanding, value.active, value.deliveries, value.turnsStarted, value.revision].every(n => Number.isSafeInteger(n) && (n as number) >= 0)
+    || typeof value.delegated !== "boolean" || typeof value.turnOwed !== "boolean") return undefined;
   const descendants = Array.isArray(value.descendants)
     ? value.descendants.filter((row): row is SubtreeDescendant => {
       if (!row || typeof row !== "object") return false;
@@ -69,7 +85,7 @@ export function parseSubtreeSnapshot(raw: unknown): SubtreeSnapshot | undefined 
     : [];
   return {
     outstanding: value.outstanding!, active: value.active!, deliveries: value.deliveries!,
-    delegated: value.delegated, revision: value.revision!, descendants,
+    delegated: value.delegated, turnOwed: value.turnOwed, turnsStarted: value.turnsStarted!, revision: value.revision!, descendants,
   };
 }
 
@@ -212,11 +228,15 @@ export function observeSubtreeChannel(channel: ParentChannel, onView: (view: Sub
   return () => { offMessage(); offConnection(); offDisconnect(); };
 }
 
+/** This process's own-turn accounting, as `SubtreeSnapshot.turnOwed` / `turnsStarted` report it. */
+export interface OwnTurnState { owed: boolean; started: number }
+
 interface Publisher {
   delegated: boolean;
   dispatching: number;
   upstream?: SubtreeUpstream;
   deliveries: () => number;
+  ownTurn: () => OwnTurnState;
 }
 const publishers = new WeakMap<RpcAgentRegistry, Publisher>();
 
@@ -224,8 +244,9 @@ export function installSubtreePublisher(
   registry: RpcAgentRegistry,
   upstream: SubtreeUpstream | undefined,
   deliveries: () => number,
+  ownTurn: () => OwnTurnState,
 ): void {
-  publishers.set(registry, { delegated: false, dispatching: 0, upstream, deliveries });
+  publishers.set(registry, { delegated: false, dispatching: 0, upstream, deliveries, ownTurn });
   publishSubtree(registry);
 }
 export function subtreeOutstanding(registry: RpcAgentRegistry): number {
@@ -274,7 +295,11 @@ export function publishSubtree(registry: RpcAgentRegistry | undefined, dispatche
     if (r.running || r.streaming) active++;
   }
   p.delegated ||= registry.size > 0;
-  const state: SubtreeState = { outstanding, active, deliveries: p.deliveries(), delegated: p.delegated, descendants: subtreeDescendants(registry) };
+  const ownTurn = p.ownTurn();
+  const state: SubtreeState = {
+    outstanding, active, deliveries: p.deliveries(), delegated: p.delegated,
+    turnOwed: ownTurn.owed, turnsStarted: ownTurn.started, descendants: subtreeDescendants(registry),
+  };
   return p.upstream ? p.upstream.publish(state) : { ...state, revision: 0 };
 }
 

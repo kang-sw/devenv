@@ -58,8 +58,10 @@
  *
  * A parent's local settle is not subtree completion. Its control channel
  * carries revisioned snapshots of active descendants and queued deliveries
- * (`subtree-lifecycle.ts`); a later settled turn is required after the
- * subtree becomes quiescent.
+ * (`subtree-lifecycle.ts`). A settle that arrives while the subtree reads
+ * waiting is held: the wake turn's own settle admits its terminal, or the hold
+ * is released once the child reports quiescence with no turn owed and no turn
+ * start the parent has not yet seen (`observeChildSubtree`).
  *
  * `--tools` curation (`read-only`/`read-only-explore`/`full-worker`)
  * lives only in the in-memory `TOOL_GROUPS` table and Pi CLI flags.
@@ -114,7 +116,7 @@ import { CHILD_MANAGEMENT_TOOLS, DEFAULT_MAX_AGENT_DEPTH, DELEGATION_ENV, READ_T
 import { normalizeWriteScopes, type EffectiveWriteCapability, type WriteScope } from "./write-scopes.ts";
 import { createWebSearch } from "./web-search.ts";
 import { verifyWebReadiness, WEB_HOME_ENV, WEB_READINESS_KIND } from "./web-readiness.ts";
-import { beginSubtreeDispatch, installSubtreePublisher, observeSubtreeChannel, publishSubtree, subtreeWaiting, type SubtreeDescendant, type SubtreeUpstream } from "./subtree-lifecycle.ts";
+import { beginSubtreeDispatch, installSubtreePublisher, observeSubtreeChannel, publishSubtree, type SubtreeDescendant, type SubtreeSnapshot, type SubtreeUpstream } from "./subtree-lifecycle.ts";
 import { PUSH_BATCH_CUSTOM_TYPE, PUSH_BATCH_VERSION, type PushBatchItem, type PushBatchItemState } from "./push-protocol.ts";
 import { persistAgentCostCheckpoint, persistEvictedAgentCost, registerAgentCostOwner } from "./agent-footer.ts";
 
@@ -512,10 +514,11 @@ export interface RpcAgentRecord {
   settlementAdmissionGeneration?: number;
   /**
    * Set by `attachEventListener` for the attached client: re-runs a settlement
-   * that was held on `waitingOnChildren` once the wait clears without a wake
-   * turn to come (see `observeChildSubtree`). No-op when nothing is held.
+   * that was held on `waitingOnChildren` once `observeChildSubtree` applies a
+   * not-waiting snapshot whose wake accounting says no wake turn is coming.
+   * No-op when nothing is held.
    */
-  releaseSettlementHold?: () => void;
+  releaseSettlementHold?: (snapshot: SubtreeSnapshot) => void;
   /** Persistent exploration mode; meaningful only for explore records. */
   exploreMode?: ExploreMode;
   /** `true` while an agent run is actively looping (between `agent_start` and `agent_settled`). */
@@ -1013,6 +1016,26 @@ export const leadCompactingRef: { current: boolean } = { current: false };
 /** Shared reservation for a push or reminder user prompt awaiting agent_start. All pushes stay held until confirmed start, settle, or recovery timeout clears this reservation. */
 export const leadWakeStartPendingRef: { current: boolean } = { current: false };
 
+/**
+ * This process's own-turn accounting, reported upstream in every subtree
+ * snapshot (`installSubtreePublisher`) so the parent can release a held settle
+ * without guessing whether a wake turn is coming. One process is one launch
+ * generation, so the counter never resets; nothing else may write it (tests
+ * reset it for isolation).
+ *
+ * - `owed`: a delivery this process already enqueued still has a turn coming.
+ *   Set by a push wake reservation (`requestPushWake`) and by an `agent_end`
+ *   boundary batch that Pi continues with; cleared only by the next own
+ *   `agent_start`, together with the `started` increment, before that
+ *   handler's flush publishes. A steer or followUp consumed inside a running
+ *   loop starts no new turn and never sets it. Each set happens before the
+ *   publish that already follows it (`pushToLead`, the batch's
+ *   `afterEnqueue`, the `agent_settled` publish), so it adds no send of its
+ *   own.
+ * - `started`: own `agent_start` events seen by this process.
+ */
+export const ownTurnRef: { owed: boolean; started: number } = { owed: false, started: 0 };
+
 export interface WakeStartOptions {
   delayMs: () => number;
   scheduleTimer?: (cb: () => void, ms: number) => NodeJS.Timeout;
@@ -1048,6 +1071,7 @@ export function reserveWakeStart(options: WakeStartOptions, onTimeout: () => voi
 function requestPushWake(pi: ExtensionAPI): void {
   if (!wakeOptions || !heldPushQueue.length || !leadIdleRef.current || !isOwningAgentIdle()) return;
   if (!reserveWakeStart(wakeOptions, () => requestPushWake(pi))) return;
+  ownTurnRef.owed = true;
   try {
     pi.sendUserMessage(`${heldPushQueue.length} ws messages waiting; process the incoming reports.`, { deliverAs: "followUp" });
   } catch {
@@ -1436,7 +1460,7 @@ function sendPush(
  * queued until `sendMessage` returns synchronously; rejection restores every
  * terminal obligation and lets the ordinary settle/wake path retry it.
  */
-function submitHeldPushBatch(pi: ExtensionAPI, deliverAs: "steer" | "followUp"): number {
+function submitHeldPushBatch(pi: ExtensionAPI, deliverAs: "steer" | "followUp", turnBoundary = false): number {
   if (heldPushQueue.length === 0) return 0;
   const snapshot = heldPushQueue.slice();
   const terminalStates = snapshot.flatMap((held) => held.kind === "push" && held.terminal
@@ -1459,6 +1483,9 @@ function submitHeldPushBatch(pi: ExtensionAPI, deliverAs: "steer" | "followUp"):
       requestPushWake(pi);
       return 0;
     }
+    // Queued at `agent_end`, the batch is picked up by Pi's post-run
+    // continuation, a fresh turn; set before `afterEnqueue` publishes below.
+    if (turnBoundary) ownTurnRef.owed = true;
   }
   heldPushQueue.splice(0, snapshot.length);
   for (const { terminal, wasHeld } of terminalStates) {
@@ -1471,7 +1498,7 @@ function submitHeldPushBatch(pi: ExtensionAPI, deliverAs: "steer" | "followUp"):
 /** Idle release applies a control-only queue or reserves one counted wake for mixed/prose input. Confirmed starts and lead turn boundaries release one FIFO batch. */
 export function flushHeldPushes(pi: ExtensionAPI | undefined, confirmedStart = false, agentEndBoundary = false): number {
   if (!pi || !shouldPushToLead() || !leadIdleRef.current || leadCompactingRef.current || leadWakeStartPendingRef.current) return 0;
-  if (agentEndBoundary) return submitHeldPushBatch(pi, "followUp");
+  if (agentEndBoundary) return submitHeldPushBatch(pi, "followUp", true);
   if (!confirmedStart) {
     const snapshot = heldPushQueue.slice();
     if (snapshot.length > 0 && snapshot.every((held) => held.kind === "goal-replacement")) {
@@ -1489,6 +1516,10 @@ export function flushHeldPushes(pi: ExtensionAPI | undefined, confirmedStart = f
 export function registerPushFlush(pi: ExtensionAPI, options: WakeStartOptions): void {
   wakeOptions = options;
   pi.on("agent_start", () => {
+    // Before the flush below publishes: this start both counts and discharges
+    // any owed turn in one snapshot (see `ownTurnRef`).
+    ownTurnRef.started += 1;
+    ownTurnRef.owed = false;
     clearWakeStart();
     flushHeldPushes(pi, true);
   });
@@ -1502,6 +1533,7 @@ export function registerPushFlush(pi: ExtensionAPI, options: WakeStartOptions): 
   pi.on("session_shutdown", () => {
     clearWakeStart();
     heldPushQueue.length = 0;
+    ownTurnRef.owed = false;
     leadIdleRef.current = undefined;
     wakeOptions = undefined;
   });
@@ -2548,28 +2580,17 @@ export function applyRpcEvent(
  */
 export function observeChildSubtree(registry: RpcAgentRegistry | undefined, record: RpcAgentRecord, channel: ParentChannel): void {
   record.subtreeRevision = undefined;
-  // Revision of the last quiescent snapshot with no busy snapshot applied
-  // since; `null` before this launch's first snapshot. A wait that clears at
-  // that same revision (or on the first snapshot) came from the transport
-  // alone, so a settle held meanwhile has no wake turn coming and is
-  // released here. A wait cleared by a busy-to-quiescent transition is not
-  // released: the delivery that ended it wakes the child, and that turn's
-  // own settle admits the terminal. Releasing it would report the previous
-  // generation's answer ahead of the wake turn.
-  let quiescentRevision: number | null | undefined = null;
   observeSubtreeChannel(channel, view => {
     if (record.channel !== channel) return;
-    const snapshotQuiescent = view.snapshot !== undefined && !subtreeWaiting(view.snapshot);
-    const release = record.waitingOnChildren === true && !view.waiting
-      && (quiescentRevision === null || quiescentRevision === view.snapshot?.revision);
-    if (view.snapshot && !snapshotQuiescent) quiescentRevision = undefined;
-    else if (!view.waiting) quiescentRevision = view.snapshot?.revision;
     record.waitingOnChildren = view.waiting;
     record.subtreeRevision = view.snapshot?.revision;
     record.subtreeDescendants = view.snapshot?.descendants ?? [];
     publishSubtree(registry);
     triggerAgentWidgetRefresh();
-    if (release) record.releaseSettlementHold?.();
+    // Every not-waiting view re-evaluates a held settle against the child's
+    // own wake accounting; `releaseSettlementHold` decides and is a no-op
+    // when nothing is held, so a duplicate snapshot cannot admit twice.
+    if (!view.waiting && view.snapshot) record.releaseSettlementHold?.(view.snapshot);
   });
 }
 
@@ -2691,6 +2712,10 @@ export function attachEventListener(
   // Terminal admission for the current work generation. A settle held on
   // `waitingOnChildren` records its generation for `releaseSettlementHold`.
   let heldGeneration: number | undefined;
+  // Child `agent_start` events this launch's RPC stream has delivered; the
+  // closure is per client, so a relaunch starts again at zero, as the new
+  // child process's own count does.
+  let observedTurnStarts = 0;
   const admitSettlement = () => {
     heldGeneration = undefined;
     const workGeneration = record.workGeneration;
@@ -2721,15 +2746,23 @@ export function attachEventListener(
       }
     }
   };
-  record.releaseSettlementHold = () => {
+  // The child reports whether a wake turn is coming; the parent does not
+  // infer it. A snapshot that owes a turn, or counts a turn start stdout has
+  // not delivered yet (the socket ran ahead), leaves the hold to that wake
+  // turn: its `agent_start` opens a new work generation and its own settle
+  // admits. Releasing either would report the previous generation's answer
+  // ahead of the wake turn.
+  record.releaseSettlementHold = (snapshot) => {
     if (record.client !== client || record.launchGeneration !== generation) return;
     if (heldGeneration === undefined || heldGeneration !== record.workGeneration) return;
     if (record.running || record.streaming || record.waitingOnChildren) return;
+    if (snapshot.turnOwed || snapshot.turnsStarted > observedTurnStarts) return;
     admitSettlement();
   };
   const unsubscribeEvents = client.onEvent((evt) => {
     const e = evt as { type?: string; toolName?: string; args?: unknown; toolCallId?: string; isError?: unknown; result?: unknown; message?: unknown; assistantMessageEvent?: unknown };
     if (record.client !== client || record.launchGeneration !== generation) return;
+    if (e.type === "agent_start") observedTurnStarts += 1;
     if (e.type === "message_start") observeQueuedWorkBoundary(record, e.message);
     const agentOutput = isStreamedAssistantOutput(e);
     const streamingDelta = e.type === "message_update" && agentOutput;
@@ -2745,7 +2778,11 @@ export function attachEventListener(
       }
     }
     const outcome = applyRpcEvent(record, e);
-    if (!streamingDelta) publishSubtree(registry);
+    // A settle publishes only after its terminal admission below: published
+    // here, the run's end would read quiescent before the terminal delivery
+    // that keeps it outstanding exists, a snapshot owing no turn for a
+    // delivery about to wake this process.
+    if (!streamingDelta && !outcome.settled) publishSubtree(registry);
     if (!streamingDelta && (e.type === "agent_start" || e.type === "agent_settled" || e.type === "message_end" || e.type === "message_update" || e.type === "thinking_level_changed" || e.type === "compaction_end")) {
       // Context occupancy changes at completed message/compaction boundaries.
       refresh(e.type === "agent_settled" || e.type === "message_end" || e.type === "compaction_end");
@@ -2766,7 +2803,10 @@ export function attachEventListener(
       triggerAgentWidgetRefresh();
       return;
     }
-    if (outcome.settled) admitSettlement();
+    if (outcome.settled) {
+      admitSettlement();
+      publishSubtree(registry);
+    }
     if (record.forkFinish && e.type === "tool_execution_end") {
       const finish = record.forkFinish;
       void advanceForkFinish(record, registry ?? new Map([[record.agentId, record]]), pi as ExtensionAPI, finishResumeCtx(finish), finish);
@@ -3860,7 +3900,7 @@ export function registerAgentTools(
 ): AgentToolsHandle {
   const rpcRegistry: RpcAgentRegistry = new Map();
   registerAgentCostOwner(rpcRegistry, sessionCtx.storage);
-  installSubtreePublisher(rpcRegistry, sessionCtx.subtreeUpstream, () => heldPushQueue.length);
+  installSubtreePublisher(rpcRegistry, sessionCtx.subtreeUpstream, () => heldPushQueue.length, () => ({ ...ownTurnRef }));
   const stopLivenessProbe = startLivenessProbe(pi, rpcRegistry);
 
   /** Cap on the head-truncated query used as a spawned explore's display title. */

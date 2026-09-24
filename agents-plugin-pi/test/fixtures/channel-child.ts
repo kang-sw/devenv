@@ -53,7 +53,7 @@ export async function connectFakeChild(env: Record<string, string | undefined> |
   const role = env?.[WS_PI_SPAWN_ROLE_ENV];
   if (role === "fork" && fork !== null) channel.publishReadiness(FORK_READINESS_KIND, { ...defaultForkReadiness(sessionDirFromArgs(args)), ...fork });
   if (role === "explore" && web !== null) channel.publishReadiness(WEB_READINESS_KIND, { ...DEFAULT_WEB_READINESS, ...web });
-  if (subtree !== null) new SubtreeUpstream(channel).publish({ outstanding: 0, active: 0, deliveries: 0, delegated: false, descendants: [] });
+  if (subtree !== null) new SubtreeUpstream(channel).publish({ outstanding: 0, active: 0, deliveries: 0, delegated: false, turnOwed: false, turnsStarted: 0, descendants: [] });
   return channel;
 }
 

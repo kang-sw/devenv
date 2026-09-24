@@ -8,7 +8,7 @@
  * `node --test` also runs this file (default glob); it defines no tests.
  */
 import { ChildChannel, ParentChannel, readAndDeleteChannelBootstrap, type ChannelBindOptions, type ChannelHello } from "../../src/agent-channel.ts";
-import { SUBTREE_ACK_MESSAGE, SUBTREE_MESSAGE, SubtreeUpstream, type SubtreeSnapshot } from "../../src/subtree-lifecycle.ts";
+import { SUBTREE_ACK_MESSAGE, SUBTREE_MESSAGE, SubtreeUpstream, type OwnTurnState, type SubtreeSnapshot } from "../../src/subtree-lifecycle.ts";
 
 type Listener<T extends unknown[]> = (...args: T) => void;
 
@@ -60,8 +60,11 @@ export function fakeParentChannel() {
 }
 
 export function quiescentSnapshot(revision: number, counts: Partial<SubtreeSnapshot> = {}): SubtreeSnapshot {
-  return { outstanding: 0, active: 0, deliveries: 0, delegated: true, revision, descendants: [], ...counts };
+  return { outstanding: 0, active: 0, deliveries: 0, delegated: true, turnOwed: false, turnsStarted: 0, revision, descendants: [], ...counts };
 }
+
+/** Own-turn accessor for a publisher whose process never starts a turn of its own. */
+export const idleOwnTurn = (): OwnTurnState => ({ owed: false, started: 0 });
 
 export interface UntilOptions { timeoutMs?: number; intervalMs?: number }
 

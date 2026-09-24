@@ -153,7 +153,7 @@ import { approvalConsumedMessage } from "../src/approval-protocol.ts";
 import type { ChannelConnection, ChannelHello } from "../src/agent-channel.ts";
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
 import { installSubtreePublisher, SubtreeUpstream } from "../src/subtree-lifecycle.ts";
-import { fakeUplink, until } from "./fixtures/subtree-channels.ts";
+import { fakeUplink, idleOwnTurn, until } from "./fixtures/subtree-channels.ts";
 const REAL_EXTENSION_ENTRY = fileURLToPath(new URL("../src/index.ts", import.meta.url));
 // Stands in for the child half of the control channel: the hello plus the
 // role's stage-2 readiness (web for Explore, fork for a fork launch).
@@ -1455,7 +1455,7 @@ describe("applyRpcEvent", () => {
     });
     const registry = new Map([[record.agentId, record]]);
     const uplink = fakeUplink();
-    installSubtreePublisher(registry, new SubtreeUpstream(uplink.channel), () => 0);
+    installSubtreePublisher(registry, new SubtreeUpstream(uplink.channel), () => 0, idleOwnTurn);
     const sendsBefore = uplink.sent.length;
     let refreshes = 0;
     agentWidgetRefreshRef.current = () => { refreshes += 1; };
@@ -2077,7 +2077,7 @@ describe("pushSpawnFailed (spawnAgent's launch-failure branch)", () => {
     const record = liveRpcRecord({ agentId: "cleanup-failure", running: true, streaming: true });
     const registry: RpcAgentRegistry = new Map([[record.agentId, record]]);
     const uplink = fakeUplink();
-    installSubtreePublisher(registry, new SubtreeUpstream(uplink.channel), () => 0);
+    installSubtreePublisher(registry, new SubtreeUpstream(uplink.channel), () => 0, idleOwnTurn);
     uplink.disconnect();
     const primary = new Error("primary spawn failure");
     assert.doesNotThrow(() => pushSpawnFailed(pi.api, registry, record, primary));
