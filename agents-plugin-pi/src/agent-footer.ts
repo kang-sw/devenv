@@ -1,10 +1,15 @@
-/** Theme-aware replacement for Pi's built-in footer with bounded cost estimates. */
+/**
+ * Theme-aware replacement for Pi's built-in footer with bounded cost
+ * estimates. Also owns every hop's cost estimate and owner checkpoint, footer
+ * or not: the value a hop reports upward as its descendant usage
+ * (`descendantUsageValue`) and the eviction fold.
+ */
 import { homedir } from "node:os";
 import { createFooterGitCache, type GitCacheOptions } from "./footer-git-status.ts";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { readOwnerArtifacts, writeOwnerArtifact, type AgentStorageContext, type OwnershipMetadata } from "./agent-storage.ts";
 import { isLeadOrFork, type SpawnRole } from "./process-role.ts";
-import { parseCumulativeCost, type AgentTelemetry, type CumulativeCost } from "./agent-telemetry.ts";
+import { parseCumulativeCost as parseCost, type AgentTelemetry, type CumulativeCost } from "./agent-telemetry.ts";
 import { descendantUsageOf } from "./agent-usage-rollup.ts";
 import type { RpcAgentRecord, RpcAgentRegistry } from "./spawner.ts";
 
@@ -12,8 +17,6 @@ const CHECKPOINT_BUCKET = ".cost-estimate";
 const CHECKPOINT_FILE = "checkpoint.json";
 const CHECKPOINT_VERSION = 1;
 const retainedFailedCheckpoints = new Map<string, CostCheckpoint>();
-
-export type { CumulativeCost };
 
 const emptyCost = (): CumulativeCost => ({ knownUsd: 0, knownContributors: 0, unknownContributors: 0, descendants: 0 });
 function addCost(target: CumulativeCost, source: CumulativeCost): void {
@@ -88,7 +91,6 @@ function retainFailedCheckpoint(storage: AgentStorageContext, checkpoint: CostCh
 }
 const nonnegative = (value: unknown): number | undefined => typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
 function safePart(value: string): boolean { return /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(value); }
-const parseCost = parseCumulativeCost;
 function parseLeadUsage(value: unknown): LeadUsageSummary | undefined {
   const lead = value as Partial<LeadUsageSummary> | null;
   if (!lead) return undefined;
@@ -177,7 +179,7 @@ class CostEstimateState {
   }
 
   /** This hop's descendant usage: the evicted baseline plus the direct children's subtree totals. */
-  directUsage(): CumulativeCost { return cloneCost(this.directTotal); }
+  descendantUsage(): CumulativeCost { return cloneCost(this.directTotal); }
 
   acceptUsage(source: unknown): void {
     if (!source || typeof source !== "object" || this.acceptedObjects.has(source as object)) return;
@@ -230,12 +232,9 @@ class CostEstimateState {
   persist(omit: ReadonlySet<string> = new Set()): boolean {
     // `reconcile` bounds the serialized identity set to the live registry.
     this.reconcile(omit);
-    const stable = this.snapshot();
-    const written = writeCheckpoint(this.storage, this.snapshot());
-    if (!written) {
-      this.restore(stable);
-      retainFailedCheckpoint(this.storage, stable);
-    }
+    const snapshot = this.snapshot();
+    const written = writeCheckpoint(this.storage, snapshot);
+    if (!written) retainFailedCheckpoint(this.storage, snapshot);
     return written;
   }
 
@@ -292,7 +291,7 @@ export function descendantUsageValue(registry: RpcAgentRegistry): CumulativeCost
   const state = costEstimateFor(registry);
   if (!state) return undefined;
   state.reconcile();
-  return state.directUsage();
+  return state.descendantUsage();
 }
 
 /** Persists the registry's cached estimate at an explicit lifecycle boundary. */

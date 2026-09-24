@@ -29,7 +29,8 @@ export interface AgentTelemetry {
   /**
    * The child's last reported usage of everything below it, excluding its own
    * usage (which the fields above reduce from its session). Written only by
-   * the parent, from the child's channel reports; never derived from disk.
+   * the parent, from the child's channel reports; never derived from the
+   * child's session file.
    */
   descendantUsage?: CumulativeCost;
 }

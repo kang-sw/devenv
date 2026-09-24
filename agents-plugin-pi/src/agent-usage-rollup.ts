@@ -99,13 +99,20 @@ export interface DescendantUsageReporter {
  * Child side: one reporter per channel, so the sequence stays monotonic for
  * the whole launch across session replacements. The initial value is zero,
  * so a hop with nothing below it never sends. A send while disconnected is
- * not retried: the reconnect hello carries the latest report.
+ * not retried: the reconnect hello carries the latest report, and the
+ * report is sent again once the reconnect completes, because a value
+ * computed between the hello and the welcome is in neither. The parent's
+ * sequence check drops the duplicate.
  */
 export function createDescendantUsageReporter(channel: ChildChannel): DescendantUsageReporter {
   let source: (() => CumulativeCost | undefined) | undefined;
   let seq = 0;
   let latest: CumulativeCost = { knownUsd: 0, knownContributors: 0, unknownContributors: 0, descendants: 0 };
   channel.provideResume(DESCENDANT_USAGE_RESUME_KEY, () => seq > 0 ? { seq, usage: { ...latest } } : undefined);
+  channel.onReconnect(() => {
+    try { if (seq > 0) channel.send({ t: DESCENDANT_USAGE_MESSAGE, seq, usage: { ...latest } }); }
+    catch { /* the next reconnect hello carries it */ }
+  });
   return {
     setSource(next) { source = next; },
     evaluate() {
@@ -123,9 +130,10 @@ export function createDescendantUsageReporter(channel: ChildChannel): Descendant
 
 /**
  * The hop's reporter, installed by `index.ts` when this process has a parent
- * channel. `evaluateDescendantUsage` is called at the two evaluation points:
+ * channel. `evaluateDescendantUsage` is called at the two evaluation points,
  * after this hop's own reduction of a direct child (`refreshAgentTelemetry`)
- * and after a direct child's report changed its stored value.
+ * and after a direct child's report changed its stored value, and once at
+ * session start to report the value rebuilt from revived records.
  */
 export const descendantUsageReporterRef: { current: DescendantUsageReporter | undefined } = { current: undefined };
 export function evaluateDescendantUsage(): void {

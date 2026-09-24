@@ -364,7 +364,10 @@ test("resume: a value changed while M is disconnected arrives once through the r
   await new Promise(resolve => setTimeout(resolve, 100));
   assert.equal(root.changes, changes + 1, "the resumed value was accepted exactly once");
   assert.deepEqual(root.recordM.descendantUsageOrder, { generation: root.generation, seq: resume.seq });
-  assert.equal((await hop.command("M", "stats")).sent, sentBefore, "the value arrived through the hello, not a resend");
+  // The hello delivered the value; the one post-welcome resend (which covers
+  // a value computed between hello and welcome) repeats the same sequence
+  // and is dropped by the parent's ordering check.
+  assert.equal((await hop.command("M", "stats")).sent, sentBefore + 1, "exactly one post-reconnect resend, of the same report");
   assert.equal(root.footerD(), usdText(M_OWN + G_OWN + 2 * L_OWN));
 });
 

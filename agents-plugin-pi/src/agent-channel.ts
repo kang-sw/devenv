@@ -646,8 +646,10 @@ export class ChildChannel {
   /**
    * Registers one feature's resume state under `key` for every later hello.
    * A provider returning `undefined` contributes nothing to that hello.
+   * `readiness` is reserved for the channel's own sticky readiness.
    */
   provideResume(key: string, provider: () => unknown): () => void {
+    if (key === "readiness") throw new Error("ws-pi-channel: resume key \"readiness\" is reserved");
     this.resumeProviders.set(key, provider);
     return () => { if (this.resumeProviders.get(key) === provider) this.resumeProviders.delete(key); };
   }
