@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "node:test";
-import { allocateAgentHome, createAgentStorageContext, readOwnership, writeOwnership } from "../src/agent-storage.ts";
+import { allocateAgentHome, createAgentStorageContext, readOwnership, reportOwnershipDiagnostic, writeOwnership } from "../src/agent-storage.ts";
 import type { PersistedOrphan } from "../src/agent-sidecar.ts";
 import { applySessionShutdownOwnershipDiagnostics, applySessionStartAgentRetention, applySessionStartOwnershipDiagnostics } from "../src/index.ts";
 import { ownerNotifyRef } from "../src/spawner.ts";
@@ -96,7 +96,8 @@ describe("controller session-start child retention", () => {
       assert.equal(notices.length, 2, "a new adapter session gets a fresh bounded reporter");
 
       applySessionStartOwnershipDiagnostics("fork", ctx);
-      applySessionStartAgentRetention("fork", "/unused", "/unused", [], fail);
+      // A fork never reaches retention, so drive the reporter directly.
+      reportOwnershipDiagnostic("retention-start", new Error("raw /private/path"));
       assert.equal(notices.length, 2, "a spawned role never owns the Pi-native owner notification surface");
       assert.equal(diagnostics.mock.callCount(), 0);
     } finally { applySessionShutdownOwnershipDiagnostics(); }
