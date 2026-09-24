@@ -67,17 +67,23 @@ type AgentsReviewPolicy struct {
 // review ledger (marker+verdict state) — those are separate, non-overlapping
 // config homes.
 func ReadAgentsReviewPolicy(root string) AgentsReviewPolicy {
+	raw, err := os.ReadFile(filepath.Join(root, "AGENTS.md"))
+	if err != nil {
+		return ParseAgentsReviewPolicy("")
+	}
+	return ParseAgentsReviewPolicy(string(raw))
+}
+
+// ParseAgentsReviewPolicy parses AGENTS.md text with ReadAgentsReviewPolicy's
+// fail-open rules, for callers that read the file from a git tree rather than
+// the checkout.
+func ParseAgentsReviewPolicy(text string) AgentsReviewPolicy {
 	policy := AgentsReviewPolicy{
 		ReleaseBoundary:   ReleaseBoundaryAbsent,
 		RendezvousBackend: RendezvousBackendCanary,
 	}
 
-	raw, err := os.ReadFile(filepath.Join(root, "AGENTS.md"))
-	if err != nil {
-		return policy
-	}
-
-	section := reviewPolicySectionRE.FindStringSubmatch(string(raw))
+	section := reviewPolicySectionRE.FindStringSubmatch(text)
 	if section == nil {
 		return policy
 	}

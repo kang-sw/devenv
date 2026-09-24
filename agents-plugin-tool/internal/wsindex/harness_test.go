@@ -236,7 +236,7 @@ func registerEntry(stem string) PendingEntry {
 
 func (h *harness) submit(cl *Client, stem string) WriteResult {
 	h.t.Helper()
-	res, err := cl.Submit(context.Background(), registerEntry(stem), Apply(h.clock.Now()))
+	res, _, err := cl.Submit(context.Background(), &Submission{Entry: registerEntry(stem), Applier: &Applier{Now: h.clock.Now()}})
 	if err != nil {
 		h.t.Fatalf("Submit(%s): %v", stem, err)
 	}

@@ -29,7 +29,7 @@ func TestMissingRefIsAbsentNotError(t *testing.T) {
 	if err != nil || state != CheckUninitialized {
 		t.Fatalf("Check = %s, %v; want uninitialized, nil", state, err)
 	}
-	res, err := cl.Submit(bg, registerEntry("260924-feat-a"), Apply(h.clock.Now()))
+	res, _, err := cl.Submit(bg, &Submission{Entry: registerEntry("260924-feat-a"), Applier: &Applier{Now: h.clock.Now()}})
 	if err != nil || res.Status != WriteAbsent {
 		t.Fatalf("Submit = %+v, %v; want absent, nil", res, err)
 	}
@@ -66,7 +66,7 @@ func TestA3NoOriginIsSilentlyAbsent(t *testing.T) {
 	if view, err := cl.Read(bg); err != nil || view.State != ViewAbsent {
 		t.Fatalf("Read = %s, %v", view.State, err)
 	}
-	if res, err := cl.Submit(bg, registerEntry("260924-feat-a"), Apply(h.clock.Now())); err != nil || res.Status != WriteAbsent {
+	if res, _, err := cl.Submit(bg, &Submission{Entry: registerEntry("260924-feat-a"), Applier: &Applier{Now: h.clock.Now()}}); err != nil || res.Status != WriteAbsent {
 		t.Fatalf("Submit = %+v, %v", res, err)
 	}
 	if state, err := cl.Check(bg); err != nil || state != CheckNoOrigin {
@@ -113,7 +113,7 @@ func TestA4UnreachableWithCacheIsBoundedAndPending(t *testing.T) {
 	}
 
 	start = time.Now()
-	res, err := cl.Submit(bg, registerEntry("260924-feat-offline"), Apply(h.clock.Now()))
+	res, _, err := cl.Submit(bg, &Submission{Entry: registerEntry("260924-feat-offline"), Applier: &Applier{Now: h.clock.Now()}})
 	if elapsed := time.Since(start); elapsed > 4*time.Second {
 		t.Fatalf("Submit took %v, want within the write timeout", elapsed)
 	}
@@ -251,7 +251,7 @@ func concurrentWrites(t *testing.T, h *harness, clones []*testClone, perClone in
 			defer wg.Done()
 			cl := c.client()
 			for op := 0; op < perClone; op++ {
-				if _, err := cl.Submit(bg, registerEntry(fmt.Sprintf("260924-feat-c%d-op%d", ci, op)), Apply(h.clock.Now())); err != nil {
+				if _, _, err := cl.Submit(bg, &Submission{Entry: registerEntry(fmt.Sprintf("260924-feat-c%d-op%d", ci, op)), Applier: &Applier{Now: h.clock.Now()}}); err != nil {
 					errs <- err
 				}
 			}
@@ -324,7 +324,7 @@ func TestB6PersistentRejectionIsBounded(t *testing.T) {
 		competitor++
 		h.submit(bClient, fmt.Sprintf("260924-feat-b-%d", competitor))
 	})
-	_, err := a.client().Submit(bg, registerEntry("260924-feat-a"), Apply(h.clock.Now()))
+	_, _, err := a.client().Submit(bg, &Submission{Entry: registerEntry("260924-feat-a"), Applier: &Applier{Now: h.clock.Now()}})
 	if !errors.Is(err, ErrRetryExhausted) {
 		t.Fatalf("Submit error = %v, want ErrRetryExhausted", err)
 	}
@@ -480,7 +480,7 @@ func TestI5ConcurrentPendingAppendsSurviveAndFlushInOrder(t *testing.T) {
 			defer wg.Done()
 			cl := c.client()
 			for i := 0; i < 5; i++ {
-				res, err := cl.Submit(bg, registerEntry(fmt.Sprintf("260924-feat-%s-%d", filepath.Base(c.root), i)), Apply(h.clock.Now()))
+				res, _, err := cl.Submit(bg, &Submission{Entry: registerEntry(fmt.Sprintf("260924-feat-%s-%d", filepath.Base(c.root), i)), Applier: &Applier{Now: h.clock.Now()}})
 				if err != nil || res.Status != WritePending {
 					t.Errorf("Submit = %+v, %v; want pending", res, err)
 				}

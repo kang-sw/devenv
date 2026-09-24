@@ -405,8 +405,14 @@ type Replayer func(idx *Index, entry PendingEntry) (audit []string, report strin
 // re-applied to the fresh tip on every attempt.
 type WriteOp struct {
 	Subject string
-	Replay  Replayer
-	Mutate  func(idx *Index) (audit []string, err error)
+	// Prepare (optional) runs once, after the first remote read shows the
+	// index present and before any replay or mutation. An error aborts the
+	// write with nothing pushed. Callers validate here so an index-absent
+	// project never sees their validation.
+	Prepare  func(ctx context.Context) error
+	Replay   Replayer
+	Mutate   func(idx *Index) (audit []string, err error)
+	Maintain func(idx *Index) (audit []string)
 }
 
 // WriteResult reports a write.
@@ -444,6 +450,12 @@ func (c *Client) Write(ctx context.Context, op WriteOp) (WriteResult, error) {
 			return WriteResult{Status: WriteUnreachable, Reports: reports}, syncErr
 		}
 		seen = true
+		if op.Prepare != nil {
+			if err := op.Prepare(ctx); err != nil {
+				return WriteResult{Reports: reports}, err
+			}
+			op.Prepare = nil
+		}
 		// Push against the tip the remote just returned, not a stale cache
 		// tip a sibling may still be catching up on.
 		base, err := c.readIndexAt(ctx, out.tip)
@@ -473,6 +485,9 @@ func (c *Client) Write(ctx context.Context, op WriteOp) (WriteResult, error) {
 				return WriteResult{Reports: reports}, err
 			}
 			audit = append(audit, a...)
+		}
+		if op.Maintain != nil {
+			audit = append(audit, op.Maintain(work)...)
 		}
 		if equalIndex(work, base) {
 			n, err := c.removePending(ctx, ids)
@@ -521,37 +536,112 @@ func commitMessage(subject string, audit []string) string {
 	return b.String()
 }
 
+// Submission is one index operation submitted by a ticket tool.
+type Submission struct {
+	Entry   PendingEntry
+	Applier *Applier
+	// Prepare (optional) runs once the index is known to be in use, before
+	// the entry is evaluated: online after the first remote read shows the
+	// index present, offline once the clone is known to have seen an index.
+	// It may fill Entry and Applier (the owner's clone id, the origin-closed
+	// set) and returns an error to abort with nothing written or recorded.
+	Prepare func(ctx context.Context, online bool) error
+}
+
 // Submit is the index-write path every mutating tool uses: it flushes the
-// pending log through replay, applies entry, and CAS-writes. When the remote
-// is unreachable on a clone that has seen an index, entry is recorded in the
-// pending log instead; a clone that never saw one stays index-absent.
-func (c *Client) Submit(ctx context.Context, entry PendingEntry, replay Replayer) (WriteResult, error) {
-	res, err := c.Write(ctx, WriteOp{
-		Subject: fmt.Sprintf("ticket-index: %s %s", entry.Op, entry.Stem),
-		Replay:  replay,
-		Mutate: func(idx *Index) ([]string, error) {
-			audit, report := replay(idx, entry)
-			if report != "" {
-				return nil, errors.New(report)
-			}
-			return audit, nil
-		},
-	})
-	if res.Status != WriteUnreachable {
-		return res, err
+// pending log through replay, applies the entry live, runs maintenance, and
+// CAS-writes. A live refusal returns the *RefusalError and writes nothing.
+//
+// When the remote is unreachable on a clone that has seen an index, the entry
+// is evaluated against the cached index with this clone's pending entries
+// overlaid, exactly as the live path would evaluate it; a refusal returns the
+// *RefusalError and records nothing, anything else is recorded in the pending
+// log (WritePending). A clone that never saw an index stays index-absent.
+func (c *Client) Submit(ctx context.Context, sub *Submission) (WriteResult, Outcome, error) {
+	a := sub.Applier
+	if sub.Entry.RecordedAt.IsZero() {
+		sub.Entry.RecordedAt = a.Now.UTC()
 	}
-	if _, perr := c.appendPending(ctx, entry); perr != nil {
-		return res, perr
+	var outcome Outcome
+	op := WriteOp{
+		Subject:  fmt.Sprintf("ticket-index: %s %s", sub.Entry.Op, sub.Entry.Stem),
+		Replay:   a.Replay,
+		Maintain: a.Maintain,
+		Mutate: func(idx *Index) ([]string, error) {
+			outcome = a.Live(idx, sub.Entry)
+			if outcome.Refusal != nil {
+				return nil, outcome.Refusal
+			}
+			return outcome.Audit, nil
+		},
+	}
+	if sub.Prepare != nil {
+		op.Prepare = func(ctx context.Context) error { return sub.Prepare(ctx, true) }
+	}
+	res, err := c.Write(ctx, op)
+	if res.Status != WriteUnreachable {
+		return res, outcome, err
+	}
+	if sub.Prepare != nil {
+		if perr := sub.Prepare(ctx, false); perr != nil {
+			return res, Outcome{}, perr
+		}
+	}
+	overlay, oerr := c.Overlay(ctx, a)
+	if oerr != nil {
+		return res, Outcome{}, oerr
+	}
+	if sub.Entry.Override != nil {
+		// A pending override carries the holder it overrode in the overlaid
+		// view, so the replay applies it only against that same holder. An
+		// override the view does not need is recorded as a plain operation.
+		reg := overlay.Registrations[sub.Entry.Stem]
+		if reg == nil || reg.Lease == nil || !NeedsOverride(sub.Entry.Op, reg.Lease.Owner(), sub.Entry.Owner) {
+			sub.Entry.Override = nil
+		} else {
+			sub.Entry.Override.Holder = reg.Lease.Owner()
+		}
+	}
+	outcome = a.Live(overlay, sub.Entry)
+	if outcome.Refusal != nil {
+		return res, outcome, outcome.Refusal
+	}
+	if _, perr := c.appendPending(ctx, sub.Entry); perr != nil {
+		return res, outcome, perr
 	}
 	res.Status = WritePending
-	return res, nil
+	return res, outcome, nil
 }
 
 // RecordPending appends entry to the pending log without contacting the
-// remote. Offline decision paths (acquire's cached-view evaluation) use it
-// after they have decided locally.
+// remote.
 func (c *Client) RecordPending(ctx context.Context, entry PendingEntry) (PendingEntry, error) {
 	return c.appendPending(ctx, entry)
+}
+
+// Overlay returns the cached index with this clone's pending entries applied
+// in recorded order: the view offline decisions evaluate against. A pending
+// entry that would conflict is skipped, as its replay would drop it. With no
+// cache ref the overlay starts from an empty index.
+func (c *Client) Overlay(ctx context.Context, a *Applier) (*Index, error) {
+	idx := NewIndex()
+	tip, ok, err := c.refOID(ctx, CacheRef)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		if idx, err = c.readIndexAt(ctx, tip); err != nil {
+			return nil, err
+		}
+	}
+	entries, _, err := c.readPending(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, e := range entries {
+		a.Replay(idx, e)
+	}
+	return idx, nil
 }
 
 // ---- creation and state check -----------------------------------------------
@@ -579,7 +669,10 @@ func (c *Client) Create(ctx context.Context, initial *Index, subject string) (Cr
 		case RemotePresent:
 			return c.adopt(ctx)
 		}
-		commit, err := c.writeIndexCommit(ctx, initial, "", commitMessage(subject, nil))
+		// The nonce keeps every creation a distinct root commit: two inits of
+		// identical content in the same second would otherwise share an oid,
+		// and a delete-and-reinit would then read as continuous history.
+		commit, err := c.writeIndexCommit(ctx, initial, "", commitMessage(subject, []string{"init-nonce: " + randomHex(8)}))
 		if err != nil {
 			return CreateResult{}, err
 		}

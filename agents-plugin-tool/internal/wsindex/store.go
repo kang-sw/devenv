@@ -55,7 +55,9 @@ func (c *Client) writeSingleFileCommit(ctx context.Context, name string, data []
 	if err != nil {
 		return "", err
 	}
-	args := []string{"commit-tree", tree}
+	// A signing config (commit.gpgSign) would make plumbing commits prompt
+	// or fail on a missing key; index versions are never signed.
+	args := []string{"commit-tree", "--no-gpg-sign", tree}
 	if parent != "" {
 		args = append(args, "-p", parent)
 	}
