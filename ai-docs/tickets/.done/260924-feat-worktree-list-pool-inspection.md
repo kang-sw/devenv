@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 7f91f67c65e7d0f5
 sage-review-completeness-reviewed: 7f91f67c65e7d0f5
+completed: 2026-09-24
 ---
 
 # worktree.list - inspect pooled worktrees and their lease holders
@@ -228,3 +229,65 @@ Verification expectations:
   detached.
 - The `git.merge` pool-holder refusal test asserts the `worktree.list`
   pointer in the resolution text.
+
+### Result (fdee1187) - 2026-09-24
+
+Landed in ade203ac (feature) and fdee1187 (review fixes).
+
+- **Worktree lease.** `worktree.acquire` writes `ws-worktree-lease.json`
+  (`schema_version`, `worker_key`, `parent_key`, `acquired_at` RFC 3339 UTC)
+  into the worktree's Git admin dir (`rev-parse --absolute-git-dir`) after a
+  successful mint, atomically (temp + rename, so an existing lease is
+  overwritten); a failed write detaches the worktree and fails the call.
+  `worktree.release` removes the lease after the detach succeeds and tolerates
+  a missing file; it still does not retire the worker key. Lease I/O lives in
+  `agents-plugin-tool/internal/mcp/worktree_lease.go`.
+- **`worktree.list`** (`worktree_list.go`): lead-only, text default,
+  `format: "json"` opt-in. Enumerates owned pool worktrees (skipping the
+  primary root, foreign worktrees, and prunable records), ordered by path,
+  with: path; `branch` (null when detached); `dirty` (counts untracked; null
+  and `state: unknown` when status cannot be read); `head_commit_time`;
+  `newest_dirty_mtime` over `git --no-optional-locks status --porcelain -z`
+  paths (rename new path, collapsed `dir/` own mtime, deletions skipped;
+  omitted when clean); `worktree_lease` (null when absent) with each key's
+  `*_record_mtime` (null = record missing), read via a new no-touch
+  `sessionStore.recordMtime`; a `release` nudge plus discard warning on
+  known-clean entries only; per-entry `warnings` for unreadable facts.
+- **Shared ownership rule.** `ownedPoolRoots` / `underAnyPool` (configured
+  pool plus the legacy in-tree pool under the default config) now back
+  `release`, `list`, and `git.merge`'s held-target classification;
+  `mergeImplBranch` takes `poolRoots []string`.
+- **`git.merge` pointer.** A pool holder (including the legacy in-tree pool)
+  gets a `worktree.list` pointer in the resolution text.
+- **Registration.** `isLeadOnlyTool`, `toolSchemaRequiresSessionKey`, the
+  tool schema, all three `runtime.json` tool maps, and the Pi bridge tool
+  contract (61 -> 62).
+
+Decisions:
+
+- The `worktree.list` pointer also rides in the `target_held_elsewhere`
+  reason, not only the resolution: a non-release `git.merge` refusal surfaces
+  only the reason as its error text, so a resolution-only pointer would never
+  reach the lead through dispatch.
+- Clean entries all carry the release nudge per the Decisions, including
+  already-released idle worktrees; the nudge text conditions release on the
+  holder being done.
+- `dirty` is nullable so a failed status is never reported as clean.
+- Deferred (review minor): `wsgit.ExecRunner` combines stderr into stdout, so
+  a git warning could contaminate the `-z` stream; the same exposure exists
+  in the other status callers and needs a stdout-only runner.
+
+Verification:
+
+- `go test ./...` in `agents-plugin-tool` with an isolated empty `HOME`: all
+  packages ok. Under the real `HOME`, two pre-existing config tests
+  (`TestResolveAgentTierForHarnessFallsBackToDefault`,
+  `TestServeStdioConfigResolveAgentFallsBackToDefault`) fail from the user's
+  global config, independent of this change.
+- `scripts/smoke-ws-mcp.sh ..`: ok.
+- `python3 -m unittest discover -s tests` in `agents-plugin` (73) and
+  `agents-plugin-wsflow` (13): OK.
+- `node --test test/bridge.test.ts` in `agents-plugin-pi`: 75 pass.
+- Review: partitioned correctness/fit/test round 1 (1 Important terminology,
+  1 Important schema-gate test, minors), all fixed in fdee1187 and confirmed by
+  a round-2 verifier.
