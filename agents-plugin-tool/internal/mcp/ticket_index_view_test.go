@@ -618,6 +618,11 @@ func TestSeenCloneReadTimeoutIsNotRefreshed(t *testing.T) {
 		t.Fatalf("timed-out json ownership = %+v", alpha.Ownership)
 	}
 
+	// A failing local fetch is fast but not 200ms-fast everywhere: on a loaded
+	// Windows runner the git.exe redirector, git, and the upload-pack it
+	// spawns through sh can take longer, which reads as a timeout. Give the
+	// real failure room to arrive as one.
+	x.server.indexOpts.ReadTimeout = 10 * time.Second
 	x.offline()
 	if out := x.query(); !strings.Contains(out, "ticket-index: origin unreachable; ownership is from the cached index (age 2m0s)\n") {
 		t.Fatalf("unreachable query = %s", out)

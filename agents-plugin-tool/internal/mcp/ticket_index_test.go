@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -205,21 +206,79 @@ func (c *ixCheckout) offline() { c.git("remote", "set-url", "origin", ixUnreacha
 func (c *ixCheckout) online()  { c.git("remote", "set-url", "origin", c.env.origin) }
 
 // hang points origin at an ssh remote whose transport never answers, so
-// every remote command runs into its timeout. The transport reads stdin until
-// git is killed (a sleep would outlive the test on Windows, where the timeout
-// kills git but not its sh children) while the shell keeps git's read pipe
-// open (no exec), and its path is quoted with forward slashes because git
-// runs it through sh, which would eat a Windows path's backslashes and fail
-// fast instead of hanging.
+// every remote command runs into its timeout. The script's path is quoted
+// with forward slashes because git runs it through sh, which would eat a
+// Windows path's backslashes and fail fast instead of hanging.
+//
+// The transport is a copy of internal/wsindex's hangTransport, whose comment
+// explains its shape; keep the two in step. In short: it blocks on git's
+// stdin, which ends it on POSIX when the timeout kills git's process group,
+// and it also ends on a stop file the cleanup raises, because on Windows the
+// timeout can leave the real git.exe (behind Git for Windows' redirector) and
+// the transport alive inside the test tree, failing TempDir's cleanup.
 func (c *ixCheckout) hang() {
-	c.env.t.Helper()
-	script := filepath.Join(c.env.dir, "hang-ssh.sh")
-	mustWrite(c.env.t, c.env.dir, "hang-ssh.sh", "#!/bin/sh\ncat >/dev/null\n")
+	t := c.env.t
+	t.Helper()
+	dir := c.env.dir
+	live := filepath.Join(dir, "hang-live")
+	stop := filepath.Join(dir, "hang-stop")
+	if err := os.MkdirAll(live, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { stopHangTransports(t, live, stop) })
+	script := filepath.Join(dir, "hang-ssh.sh")
+	mustWrite(t, dir, "hang-ssh.sh", fmt.Sprintf(`#!/bin/sh
+live='%s'
+stop='%s'
+: >"$live/$$"
+exec 3<&0 </dev/null
+cd /
+cat <&3 >/dev/null 3<&- &
+c=$!
+exec 3<&-
+n=0
+while kill -0 "$c" 2>/dev/null; do
+	if [ -e "$stop" ] || [ "$n" -ge 120 ]; then
+		kill "$c" 2>/dev/null
+		break
+	fi
+	sleep 1
+	n=$((n + 1))
+done
+wait "$c" 2>/dev/null
+rm -f "$live/$$"
+`, filepath.ToSlash(live), filepath.ToSlash(stop)))
 	if err := os.Chmod(script, 0o755); err != nil {
-		c.env.t.Fatal(err)
+		t.Fatal(err)
 	}
 	c.git("config", "core.sshCommand", "'"+filepath.ToSlash(script)+"'")
 	c.git("remote", "set-url", "origin", "ssh://git@ticket-index.invalid/repo.git")
+}
+
+// stopHangTransports raises the stop file and, on Windows, waits for every
+// hang transport to clear its live marker. POSIX has nothing to wait for: the
+// process-group kill already ended each transport (before it could clear its
+// marker, so the markers there are stale by design).
+func stopHangTransports(t *testing.T, live, stop string) {
+	if err := os.WriteFile(stop, nil, 0o644); err != nil {
+		t.Errorf("raise the hang stop file: %v", err)
+		return
+	}
+	if runtime.GOOS != "windows" {
+		return
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		entries, err := os.ReadDir(live)
+		if err != nil || len(entries) == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Errorf("%d hanging ssh transports still running after the stop file", len(entries))
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 // call runs one tool and returns its text and whether it was an error.
