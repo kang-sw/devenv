@@ -205,15 +205,20 @@ func (c *ixCheckout) offline() { c.git("remote", "set-url", "origin", ixUnreacha
 func (c *ixCheckout) online()  { c.git("remote", "set-url", "origin", c.env.origin) }
 
 // hang points origin at an ssh remote whose transport never answers, so
-// every remote command runs into its timeout.
+// every remote command runs into its timeout. The transport reads stdin until
+// git is killed (a sleep would outlive the test on Windows, where the timeout
+// kills git but not its sh children) while the shell keeps git's read pipe
+// open (no exec), and its path is quoted with forward slashes because git
+// runs it through sh, which would eat a Windows path's backslashes and fail
+// fast instead of hanging.
 func (c *ixCheckout) hang() {
 	c.env.t.Helper()
 	script := filepath.Join(c.env.dir, "hang-ssh.sh")
-	mustWrite(c.env.t, c.env.dir, "hang-ssh.sh", "#!/bin/sh\nexec sleep 30\n")
+	mustWrite(c.env.t, c.env.dir, "hang-ssh.sh", "#!/bin/sh\ncat >/dev/null\n")
 	if err := os.Chmod(script, 0o755); err != nil {
 		c.env.t.Fatal(err)
 	}
-	c.git("config", "core.sshCommand", script)
+	c.git("config", "core.sshCommand", "'"+filepath.ToSlash(script)+"'")
 	c.git("remote", "set-url", "origin", "ssh://git@ticket-index.invalid/repo.git")
 }
 
