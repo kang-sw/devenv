@@ -55,10 +55,13 @@ func configHomeFromEnv(t *testing.T, env []string) string {
 	return envValue(t, env, "WS_CONFIG_HOME")
 }
 
+// envValue returns the last entry for key, the one os/exec hands the
+// subprocess when env repeats a key (mailboxTestEnv appends over os.Environ,
+// which already carries TestMain's WS_CONFIG_HOME).
 func envValue(t *testing.T, env []string, key string) string {
 	t.Helper()
-	for _, kv := range env {
-		if v, ok := strings.CutPrefix(kv, key+"="); ok {
+	for i := len(env) - 1; i >= 0; i-- {
+		if v, ok := strings.CutPrefix(env[i], key+"="); ok {
 			return v
 		}
 	}
