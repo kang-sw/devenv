@@ -295,7 +295,11 @@ test("child restart: M relaunched on a new generation rebuilds the same value; t
   assert.equal(root.footerD(), usdText(M_OWN + G_OWN + L_OWN), "no double count across the child restart");
 });
 
-test("parent restart: a fresh root rebuilt from M's ownership telemetry keeps the total, and M's next launch does not double count", { timeout: TEST_TIMEOUT_MS }, async t => {
+// A persistence round-trip, not a revival-path test: the test restores the
+// durable value itself with `restoreDescendantUsage`. That production revival
+// (`reviveOrphans` / `rehydrateForkRecord`) restores it is pinned by the unit
+// tests in agent-usage-rollup.test.ts.
+test("parent restart persistence round-trip: the value M's ownership record persists rebuilds the total in a fresh root, and M's next launch does not double count", { timeout: TEST_TIMEOUT_MS }, async t => {
   const root = await Root.start(t);
   await root.settle();
   const total = usdText(M_OWN + G_OWN + L_OWN);
@@ -313,7 +317,7 @@ test("parent restart: a fresh root rebuilt from M's ownership telemetry keeps th
     agentId, sessionPath: sessionPath!, ownership: { version, ownerSessionId, agentId, home, role, sessionPath }, systemPromptPath: "usage-hop.md",
     telemetry: durable.telemetry, wsToolNames: [], toolGroup: "full-worker", spawnRole: "worker", streaming: false, running: false, reportLog: [],
   } as RpcAgentRecord;
-  // Revival's durable read (`reviveOrphans` / `rehydrateForkRecord`).
+  // The durable read revival performs, called directly (see the note above the test).
   restoreDescendantUsage(revived);
   root.mountRegistry(revived);
   assert.equal(root.footerD(), total, "the restarted root rebuilds the total from durable state");

@@ -274,13 +274,17 @@ describe("own reduction and the reported value", () => {
   test("a telemetry reset on a revived record (no report accepted in this process) keeps the persisted value", () => {
     const child = record("child", createAgentStorageContext("lead", root()), .1);
     acceptDescendantUsage(child, 1, { seq: 1, usage: usd(2) });
-    const revived = { ...child } as RpcAgentRecord;
-    delete revived.descendantUsage; delete revived.descendantUsageOrder;
+    // Revived from an older snapshot: an older in-memory value, and no
+    // ordering state because no report was accepted in this process. The
+    // refresh's retry write is gated on `descendantUsageOrder`, so this older
+    // value must not overwrite the persisted one.
+    const revived = { ...child, descendantUsage: usd(1) } as RpcAgentRecord;
+    delete revived.descendantUsageOrder;
     writeSession(revived.sessionPath, "a-different-session", [assistant("x", 1)]);
     refreshAgentTelemetry(revived);
     const persisted = readOwnership(revived.ownership!.home)!;
     assert.equal(persisted.telemetry, undefined, "precondition: the reset reached disk");
-    assert.deepEqual(persisted.descendantUsage, usd(2));
+    assert.deepEqual(persisted.descendantUsage, usd(2), "a revived record's older in-memory value is not written back");
   });
 
   test("a report write lost to a busy claim is retried by the next refresh", () => {
