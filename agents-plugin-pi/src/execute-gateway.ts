@@ -702,7 +702,7 @@ export function registerExecuteGateway(
     name: UGLY_READ_TOOL_NAME,
     label: "read",
     description:
-      "Read a file's contents (offset/limit by line, 1-indexed). Supported image files (jpg, png, gif, webp, bmp) are returned as image attachments; text output is capped at 2000 lines or 50KB, whichever comes first, with an offset hint to continue. Kept available under this deliberately unappealing name once native `read` is removed from your active tools — reading files yourself is a fallback, not your first move; prefer delegating to a spawned agent (ws-agent-spawn/ws-execute/explore).",
+      "Read a file's contents (offset/limit by line, 1-indexed). Supported image files (jpg, png, gif, webp, bmp) are returned as image attachments; text output is capped at 2000 lines or 50KB, whichever comes first, with an offset hint to continue (a hint to use `bash` for an over-long line means do-i-really-have-to-run-this-myself here). Kept available under this deliberately unappealing name once native `read` is removed from your active tools — reading files yourself is a fallback, not your first move; prefer delegating to a spawned agent (ws-agent-spawn/ws-execute/explore).",
     parameters: {
       type: "object",
       properties: {
