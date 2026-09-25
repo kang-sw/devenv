@@ -25,7 +25,12 @@ func TestPushStatusClassification(t *testing.T) {
 		{"receive-pack 2.51+ create race", "[remote rejected] (reference already exists)", true},
 		{"hook", "[remote rejected] (pre-receive hook declined)", false},
 		{"hidden ref", "[remote rejected] (deny updating a hidden ref)", false},
+		// The other permanent ref_transaction_error_msg reasons: a lost race
+		// never produces them, so no casLossPhrases entry may match them.
 		{"refname conflict", "[remote rejected] (refname conflict)", false},
+		{"invalid new value", "[remote rejected] (invalid new value provided)", false},
+		{"expected symref", "[remote rejected] (expected symref but found regular ref)", false},
+		{"case conflict", "[remote rejected] (reference conflict due to case-insensitive filesystem)", false},
 	} {
 		status, ok := porcelainStatus(line(tc.status))
 		if !ok || status != tc.status {
