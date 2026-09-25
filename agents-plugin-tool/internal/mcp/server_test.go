@@ -2082,6 +2082,9 @@ func TestServeStdioDoesNotBlockToolsListBehindLongCall(t *testing.T) {
 	lineCh := make(chan string, 1)
 	go func() {
 		scanner := bufio.NewScanner(outReader)
+		// The tools/list line is ~60 KB, near the default 64 KB token cap;
+		// past it the scanner stops and the test would misreport a block.
+		scanner.Buffer(nil, 16<<20)
 		for scanner.Scan() {
 			select {
 			case lineCh <- scanner.Text():
@@ -2099,9 +2102,13 @@ func TestServeStdioDoesNotBlockToolsListBehindLongCall(t *testing.T) {
 	}
 	_ = writer.Close()
 	_ = reader.Close()
+	// ServeStdio exits only after the in-flight exec.result returns: up to
+	// its 2s timeout plus a final poll of the job record (file I/O). A loaded
+	// Windows runner overran a 3s bound here with this path unchanged, so the
+	// bound only has to tell a slow exit from one that never comes.
 	select {
 	case <-done:
-	case <-time.After(3 * time.Second):
+	case <-time.After(15 * time.Second):
 		t.Fatal("ServeStdio did not exit after input close")
 	}
 }
