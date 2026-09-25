@@ -4,6 +4,7 @@ related:
   260726-bug-open-decision-queue-ledger-illegible: adjacent ODQ change — that one fixes how queued items are conveyed, this one narrows what enters the queue
   260730-feat-odq-batch-interview: lands first; it replaces serial asking with one batch interview, which changes what a long queue costs and therefore where this ticket's boundary should fall
   260630-epic-skill-playbook-diet: same direction of travel — remove ceremony that does not earn its cost
+dropped: 2026-09-25
 ---
 
 # Documentation-organization decisions should default to agent autonomy — narrow the Open Decision Queue admission filter
@@ -90,3 +91,8 @@ persistence handoff needs the matching change.
 
 Do not start before the Open Questions are answered — the whole ticket is that
 boundary.
+
+
+## Resolution (2026-09-25)
+
+Absorbed by 260925-feat-odq-announced-defaults-and-policy-questions, which generalizes this ticket's placement-autonomy boundary into a two-class queue (announced defaults with a citable reason vs. policy questions). Documentation placement is announced-default there.
