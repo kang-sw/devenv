@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 519dff5b815c410e
 sage-review-completeness-reviewed: 519dff5b815c410e
+completed: 2026-09-25
 ---
 
 # Pi lead read hatch drops image input
