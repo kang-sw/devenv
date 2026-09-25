@@ -1227,7 +1227,9 @@ func TestB5GCRacesAcquire(t *testing.T) {
 	if l := idx.Registrations[stemAlpha].Lease; l == nil || l.Email != "b@example.com" {
 		t.Fatalf("B5: the racing acquire was lost: %+v", l)
 	}
-	// GC ran once: one GC commit, and last_gc is the race's time.
+	// The race leaves one GC commit and last_gc at the race's time. That
+	// holds even if both racers ran GC, so it does not show GC ran once;
+	// the within-period follow-up below carries the once-per-period rule.
 	if idx.Meta.LastGC == nil || !idx.Meta.LastGC.Equal(gcAt) {
 		t.Fatalf("last_gc = %v, want %v", idx.Meta.LastGC, gcAt)
 	}
