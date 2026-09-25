@@ -76,3 +76,26 @@ Non-blocking minors from the re-review of the index repair
 - **`ticketsDir` copy.** `wsindex/origin.go` keeps `ticketsDir =
   "ai-docs/tickets"` beside wsdoc's `ticketIndexPrefix`; leftover from the F1
   consolidation.
+
+## Release-gate additions (v0.46.19 fix-forward, 2d62d659..30b41a3f)
+
+- **Permanent CAS reasons unpinned.** `TestPushStatusClassification`
+  (`internal/wsindex/remote_test.go`) pins only `refname conflict` as
+  `lost: false`. Three other permanent `ref_transaction_error_msg` reasons are
+  not pinned:
+  - `invalid new value provided`
+  - `expected symref but found regular ref`
+  - `reference conflict due to case-insensitive filesystem`
+
+  A future `casLossPhrases` addition could start matching one of them with no
+  failing test. Add all three as `lost: false` rows.
+- **Hang transport copies drift in quoting.** The mcp copy
+  (`internal/mcp/ticket_index_test.go` `ixCheckout.hang`) puts the live and
+  stop paths inside `'%s'` as-is. The wsindex copy (`hangTransport`) uses
+  `shellQuote`. The two are meant to stay in step. Use `shellQuote` in both,
+  or share one helper.
+- **POSIX stop file is not waited on.** On POSIX, `stopHangTransports` raises
+  the stop file and returns at once, and the `TempDir` removal deletes it
+  right after. A transport that somehow escaped the process-group kill would
+  miss the stop file and run until the 120 s backstop. This is harmless while
+  every remote call is deadline-bound through `ExecRunner`.
