@@ -8,8 +8,6 @@ import (
 	"github.com/kang-sw/devenv/internal/wsreview"
 )
 
-const ticketsDir = "ai-docs/tickets"
-
 // OriginTickets is a review-track tree's ticket inventory.
 type OriginTickets struct {
 	Open   map[string]bool // stems under idea/, todo/, ready/
@@ -118,7 +116,7 @@ func (c *Client) OriginTicketsAt(ctx context.Context, branch string) OriginTicke
 	if branch == "" {
 		return inv
 	}
-	out, err := c.git(ctx, nil, "ls-tree", "-r", "--name-only", trackingRef(branch), "--", ticketsDir)
+	out, err := c.git(ctx, nil, "ls-tree", "-r", "--name-only", trackingRef(branch), "--", wsdoc.TicketsDir)
 	if err != nil {
 		return inv
 	}

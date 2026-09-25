@@ -38,9 +38,11 @@ type ticketScope struct {
 	bodyCache map[string]string
 }
 
-// ticketIndexPrefix bounds every index query to the ticket board; the scope
-// never enumerates the rest of the index.
-const ticketIndexPrefix = "ai-docs/tickets"
+// TicketsDir is the repository-relative ticket board root, without a trailing
+// slash. It bounds every git index query the scope makes to the board (the
+// scope never enumerates the rest of the index), and other packages that list
+// the board from git use it as their pathspec.
+const TicketsDir = "ai-docs/tickets"
 
 // newTicketScope runs the gate cheapest-first so a repository the user does not
 // have scoped spawns zero git processes. Any negative or failed probe yields
@@ -255,7 +257,7 @@ func (s *ticketScope) indexPaths() ([]string, error) {
 		return s.paths, s.pathsErr
 	}
 	s.pathsLoaded = true
-	out, err := s.run("", "ls-files", "-z", "--", ticketIndexPrefix)
+	out, err := s.run("", "ls-files", "-z", "--", TicketsDir)
 	if err != nil {
 		s.pathsErr = fmt.Errorf("list sparse-checkout ticket index: %w", err)
 		return nil, s.pathsErr
@@ -410,7 +412,7 @@ func parseCatFileBatch(out []byte, requested []string) (map[string]string, error
 // directory and stem, rejecting anything that is not
 // ai-docs/tickets/<status>/<stem>.md.
 func ticketIndexPathParts(rel string) (status, stem string, ok bool) {
-	const prefix = ticketIndexPrefix + "/"
+	const prefix = TicketsDir + "/"
 	if !strings.HasPrefix(rel, prefix) || !strings.HasSuffix(rel, ".md") {
 		return "", "", false
 	}
