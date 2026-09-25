@@ -32,6 +32,11 @@ import (
 // session store (keys/<key>.json under the cache root) never reads or writes the
 // developer's real ~/.cache during the suite. Tests that assert specific cache
 // paths still override it per-test with t.Setenv (last write wins).
+//
+// WS_CONFIG_HOME always points at an empty temp dir, so tests that assert
+// builtin defaults (agent tiers, worktree_pool) never read the developer's
+// ~/.ws/config.json. It is unconditional: an inherited WS_CONFIG_HOME is a
+// real config just the same. Tests that need a config home set their own.
 func TestMain(m *testing.M) {
 	if os.Getenv("WS_RSRC_ROOT") == "" {
 		_ = os.Setenv("WS_RSRC_ROOT", shippedRsrcRootForTest())
@@ -49,6 +54,13 @@ func runTestMain(m *testing.M) int {
 		defer os.RemoveAll(dir)
 		_ = os.Setenv("WS_CACHE_HOME", dir)
 	}
+	configHome, err := os.MkdirTemp("", "ws-mcp-test-config-")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "TestMain: create temp config home: %v\n", err)
+		return 1
+	}
+	defer os.RemoveAll(configHome)
+	_ = os.Setenv("WS_CONFIG_HOME", configHome)
 	return m.Run()
 }
 
