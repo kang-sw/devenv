@@ -1232,7 +1232,10 @@ not merely by prompt convention, the adapter reshapes the **host lead session's*
 active tool set at session start (gated on the lead/fork role, like the system
 prompt injection): it removes native `bash` and native `read`, adds `ws-execute`,
 `ws-approve`, a deliberately ugly-named direct read tool
-(`do-i-really-have-to-read-this-myself`), and a deliberately ugly-named
+(`do-i-really-have-to-read-this-myself`, which executes as Pi's native read
+(260925): supported image files return as image attachments, and text output
+is capped at 2000 lines or 50KB with an `offset` continuation hint), and a
+deliberately ugly-named
 one-liner exec hatch (`do-i-really-have-to-run-this-myself`, fixed 30s
 timeout bounding only that direct command and not a descendant it
 backgrounds, fixed 4KB output cap) — the read tool and the one-liner exec
