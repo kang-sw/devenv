@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -91,22 +92,90 @@ func TestA3NoOriginIsSilentlyAbsent(t *testing.T) {
 // answers; the ssh command is configured through core.sshCommand so the
 // BatchMode append path is exercised too.
 //
-// The transport reads its stdin until EOF instead of sleeping: git holds that
-// pipe open while it waits for the remote, so the hang lasts exactly until
-// git is killed. On Windows the timeout kills git but not its sh children; a
-// sleeping child would outlive the test and keep its directory busy. The
-// shell must not exec cat with its stdout redirected: that closes git's read
-// pipe, which git sees at once as a dead remote.
-//
 // git runs the ssh command through sh, so the path is quoted with forward
 // slashes: a raw Windows path loses its backslashes to the shell and the
 // "hang" fails fast as an unreachable origin instead of timing out.
 func hangingSSH(t *testing.T, c *testClone) {
 	t.Helper()
 	script := filepath.Join(c.h.dir, "hang-ssh.sh")
-	writeExecutable(t, script, "cat >/dev/null\n")
+	writeExecutable(t, script, hangTransport(t, c.h.dir))
 	gitT(t, c.root, "config", "core.sshCommand", shellQuote(filepath.ToSlash(script)))
 	c.setOriginURL("ssh://git@wsindex.invalid/repo.git")
+}
+
+// hangTransport returns the body of a hanging ssh transport that keeps its
+// state under dir, and registers the cleanup that ends every such transport.
+// internal/mcp's ixCheckout.hang carries a copy; keep the two in step.
+//
+// The transport blocks reading git's stdin, so on POSIX the hang lasts until
+// the timeout SIGKILLs git's process group, transport included. Windows kills
+// only the process started: when that is Git for Windows' git.exe redirector,
+// the real git.exe survives holding the pipe open, and it and the transport
+// would block forever inside the test tree, failing TempDir's cleanup ("being
+// used by another process"). So the transport also ends when the stop file
+// appears, or after a backstop well past any timeout a test uses, and the
+// cleanup raises the stop file and waits for the live markers to clear. A
+// surviving git then reads EOF and exits; TempDir's own retry covers that.
+//
+// cat runs in the background so the shell can poll; an async command's stdin
+// defaults to /dev/null, so git's pipe travels on fd 3. cat writes to
+// /dev/null and only the shell holds git's read pipe: closing that pipe early
+// (as exec with a redirected stdout does) reads as a dead remote at once. The
+// shell leaves the test tree before it blocks.
+func hangTransport(t *testing.T, dir string) string {
+	t.Helper()
+	live := filepath.Join(dir, "hang-live")
+	stop := filepath.Join(dir, "hang-stop")
+	if err := os.MkdirAll(live, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { stopHangTransports(t, live, stop) })
+	return fmt.Sprintf(`live=%s
+stop=%s
+: >"$live/$$"
+exec 3<&0 </dev/null
+cd /
+cat <&3 >/dev/null 3<&- &
+c=$!
+exec 3<&-
+n=0
+while kill -0 "$c" 2>/dev/null; do
+	if [ -e "$stop" ] || [ "$n" -ge 120 ]; then
+		kill "$c" 2>/dev/null
+		break
+	fi
+	sleep 1
+	n=$((n + 1))
+done
+wait "$c" 2>/dev/null
+rm -f "$live/$$"
+`, shellQuote(filepath.ToSlash(live)), shellQuote(filepath.ToSlash(stop)))
+}
+
+// stopHangTransports raises the stop file and, on Windows, waits for every
+// transport to clear its live marker. POSIX has nothing to wait for: the
+// process-group kill already ended each transport (before it could clear its
+// marker, so the markers there are stale by design).
+func stopHangTransports(t *testing.T, live, stop string) {
+	if err := os.WriteFile(stop, nil, 0o644); err != nil {
+		t.Errorf("raise the hang stop file: %v", err)
+		return
+	}
+	if runtime.GOOS != "windows" {
+		return
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		entries, err := os.ReadDir(live)
+		if err != nil || len(entries) == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Errorf("%d hanging ssh transports still running after the stop file", len(entries))
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 // A4 (library level): with a cache ref and a hanging remote, the read path

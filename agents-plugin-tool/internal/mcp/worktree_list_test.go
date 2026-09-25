@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -162,7 +163,9 @@ func TestWorktreeListDispatch(t *testing.T) {
 	if c.WorktreeLease.WorkerKeyRecordMtime == nil || c.WorktreeLease.ParentKeyRecordMtime == nil {
 		t.Fatalf("live key records must report an mtime: %+v", c.WorktreeLease)
 	}
-	if !strings.Contains(c.Release, "worktree.release(path: ") || !strings.Contains(c.Release, c.Path) || !strings.Contains(c.Release, "discards uncommitted changes") {
+	// The nudge quotes the path as a string literal, so a Windows path's
+	// backslashes appear escaped; match the quoted form, not the raw path.
+	if !strings.Contains(c.Release, "worktree.release(path: "+strconv.Quote(c.Path)+")") || !strings.Contains(c.Release, "discards uncommitted changes") {
 		t.Fatalf("clean entry must carry the release nudge and discard warning: %q", c.Release)
 	}
 
