@@ -78,9 +78,11 @@
  *     gated on `isLeadOrFork` — see that file's `session_start` handler.
  *   - `UGLY_READ_TOOL_NAME`
  *     (`do-i-really-have-to-read-this-myself`, the ticket's own proposed
- *     name, adopted verbatim): a plain file-read tool retained for the lead
- *     once native `read` is removed from its active list — "ugly-named read
+ *     name, adopted verbatim): a file-read tool retained for the lead once
+ *     native `read` is removed from its active list — "ugly-named read
  *     retained," not eliminated, per the ticket's lead `--tools` change.
+ *     Its `execute` delegates to Pi's public `createReadToolDefinition`
+ *     (260925), so image input and text truncation track the host.
  *   - `ONE_LINER_EXEC_TOOL_NAME`
  *     (`do-i-really-have-to-run-this-myself`, 260905): the exec sibling to
  *     `UGLY_READ_TOOL_NAME`, same soft-discouraged-by-name posture. Bounded
@@ -104,10 +106,9 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { isAbsolute, join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ReadToolInput } from "@earendil-works/pi-coding-agent";
+import { createReadToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { BridgeHandle } from "./bridge.ts";
 import { createToolPreviewTuiRef, registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
 import { buildExecuteSummary, createDispatchToolPreview } from "./tool-row-render.ts";
@@ -418,20 +419,6 @@ export function validateApprovalDecisionInput(decision: "approve" | "deny" | "ru
 }
 
 /**
- * Pure line-slicing logic for the ugly-named read tool (review fix, relay
- * #1, TEST finding #4): extracted out of that tool's `execute()` body so it
- * has direct unit coverage without a live `pi` session. 1-indexed `offset`
- * (matching the tool's own param description); `limit` caps the number of
- * lines returned. Both are optional — omitting both returns the whole file.
- */
-export function sliceLines(raw: string, offset?: number, limit?: number): string {
-  const lines = raw.split("\n");
-  const start = offset ? Math.max(0, offset - 1) : 0;
-  const end = limit !== undefined ? Math.min(start + limit, lines.length) : lines.length;
-  return lines.slice(start, end).join("\n");
-}
-
-/**
  * IO: best-effort git ground-truth scrape of `cwd`'s working context for the
  * §7 payload's `context` field — adapter-scraped, NOT worker-reported (§7).
  * Runs on the PARENT side, same machine/filesystem as the worker's `cwd`
@@ -715,7 +702,7 @@ export function registerExecuteGateway(
     name: UGLY_READ_TOOL_NAME,
     label: "read",
     description:
-      "Read a text file's contents (offset/limit by line, 1-indexed). Kept available under this deliberately unappealing name once native `read` is removed from your active tools — reading files yourself is a fallback, not your first move; prefer delegating to a spawned agent (ws-agent-spawn/ws-execute/explore).",
+      "Read a file's contents (offset/limit by line, 1-indexed). Supported image files (jpg, png, gif, webp, bmp) are returned as image attachments; text output is capped at 2000 lines or 50KB, whichever comes first, with an offset hint to continue (a hint to use `bash` for an over-long line means do-i-really-have-to-run-this-myself here). Kept available under this deliberately unappealing name once native `read` is removed from your active tools — reading files yourself is a fallback, not your first move; prefer delegating to a spawned agent (ws-agent-spawn/ws-execute/explore).",
     parameters: {
       type: "object",
       properties: {
@@ -725,11 +712,13 @@ export function registerExecuteGateway(
       },
       required: ["path"],
     } as never,
-    async execute(_toolCallId, params) {
-      const p = params as { path: string; offset?: number; limit?: number };
-      const absolutePath = isAbsolute(p.path) ? p.path : join(sessionCtx.cwd, p.path);
-      const raw = readFileSync(absolutePath, "utf8");
-      return { content: [{ type: "text", text: sliceLines(raw, p.offset, p.limit) }] };
+    // Execution is Pi's native read, unchanged (image attachments, resizing,
+    // the non-vision note via `ctx.model`, 2000-line/50KB text truncation).
+    // Only `execute` is borrowed: spreading the host definition would import
+    // its `name: "read"` and renderers, and `registerWsTool` skips its
+    // logical-line preview wrapping when a definition carries renderers.
+    async execute(toolCallId, params, signal, onUpdate, ctx) {
+      return createReadToolDefinition(sessionCtx.cwd).execute(toolCallId, params as ReadToolInput, signal, onUpdate, ctx);
     },
   }, toolPreviewTuiRef, { resultLineBudget: "logical" });
 

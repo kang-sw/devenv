@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 519dff5b815c410e
 sage-review-completeness-reviewed: 519dff5b815c410e
+completed: 2026-09-25
 ---
 
 # Pi lead read hatch drops image input
@@ -147,3 +148,28 @@ Verification:
   2000-line / 50KB text cap.
 - `npm test` in `agents-plugin-pi/` passes, including the existing
   `native-tool-registration` preview-budget tests for the hatch.
+
+### Result (4309ec667) - 2026-09-25
+
+- The hatch's `execute` in `agents-plugin-pi/src/execute-gateway.ts` now
+  returns `createReadToolDefinition(sessionCtx.cwd).execute(toolCallId,
+  params, signal, onUpdate, ctx)` (static import, no definition spread).
+  Name, label, parameters, and discouraged wording are kept; the description
+  adds image attachments, the 2000-line / 50KB cap, and (review round 1,
+  bfd2f2b8e) that the host's `bash` hint for an over-long line means
+  `do-i-really-have-to-run-this-myself`, since the lead has no native `bash`.
+- `sliceLines`, its tests, and every reference to it in test header comments
+  are gone; the now-unused `node:fs`/`node:path` imports were dropped.
+- New `describe` block in `test/execute-gateway.test.ts` tests the registered
+  hatch against real tmpdir files: a 1x1 PNG returns an `image/png` block
+  through a relative path, a non-vision `ctx.model` gets the host's
+  omission note (proves ctx passthrough), `offset`/`limit` slice with a
+  continuation hint, and a 2500-line file stops at 2000 lines with
+  `Use offset=2001 to continue`.
+- The hatch rows in `agents-plugin-pi/pi-lead-guide.md` and
+  `ai-docs/spec/pi-adapter-runtime.md` now mention image attachments and the
+  2000-line / 50KB cap.
+- Verification: `npm test` in `agents-plugin-pi/` gave 1860 pass / 0 fail /
+  2 skipped, both before and after the review fixes. `grep -rn sliceLines src
+  test` found nothing. Single review: round 1 found 2 Minor and no
+  Critical/Important; round 2 confirmed both fixed.

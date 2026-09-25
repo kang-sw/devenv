@@ -6,7 +6,7 @@
  * `--tools` reshaping + auto-include-footgun fix), `buildApprovalPromptText`
  * (the §7 payload formatter), `resolveApprovalContextCwd`
  * and `validateApprovalDecisionInput` (review fix, relay #1, CORRECTNESS
- * findings #1/#2), and `sliceLines` (review fix, relay #1, TEST finding #4).
+ * findings #1/#2).
  *
  * 260924 (channel approval decisions): the decision file and its poll are
  * gone. The registered `ws-approve`/`ws-worker-exec` pair is covered below
@@ -17,10 +17,11 @@
  * NOT covered here — genuinely live-gate only, per the plan's Verification
  * Plan split and mirroring test/spawner.test.ts's own documented pure/IO
  * split: `scrapeWorkingContext` (real `git` subprocess calls), and the
- * `ws-execute`/ugly-read tool `execute()` bodies (which need a live
- * `RpcClient` or broader filesystem coverage). Their pure inner logic
- * (`sliceLines`, `resolveApprovalContextCwd`, `validateApprovalDecisionInput`)
- * is extracted and covered directly instead. The registered
+ * `ws-execute` tool `execute()` body (which needs a live `RpcClient`). Its
+ * pure inner logic (`resolveApprovalContextCwd`,
+ * `validateApprovalDecisionInput`) is extracted and covered directly instead.
+ * The ugly-read tool's `execute()` delegates to Pi's native read and is
+ * covered below against real tmpdir files (260925). The registered
  * `ws-worker-exec`/`ws-approve` channel decision relay is covered below
  * with a minimal fake ExtensionAPI; live provider transport remains the
  * documented manual gate.
@@ -43,14 +44,14 @@
  * `installRpcHarness` monkey-patches. Reusing that technique (own local
  * copy, below) makes `ws-execute`'s `onModelResolved` forwarding
  * unit-testable without a live session, narrowing the "live-gate only" note
- * above to just the gated-exec/approve/read tool bodies.
+ * above to just the gated-exec/approve tool bodies.
  *
  * Run with: node --test test/  (from agents-plugin-pi/).
  */
 
-import { afterEach, test, describe } from "node:test";
+import { afterEach, beforeEach, test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -61,7 +62,6 @@ import {
   buildApprovalPromptText,
   resolveApprovalContextCwd,
   validateApprovalDecisionInput,
-  sliceLines,
   capOutput,
   mergeExecOutput,
   createApprovalRelay,
@@ -275,37 +275,57 @@ describe("validateApprovalDecisionInput (review fix, relay #1, CORRECTNESS findi
   });
 });
 
-describe("sliceLines (review fix, relay #1, TEST finding #4)", () => {
-  const raw = ["line1", "line2", "line3", "line4", "line5"].join("\n");
+describe("do-i-really-have-to-read-this-myself (260925: execute() delegates to Pi's native read)", () => {
+  type ReadResult = { content: Array<{ type: string; text?: string; data?: string; mimeType?: string }> };
+  type CapturedTool = { execute: (toolCallId: string, params: unknown, signal?: AbortSignal, onUpdate?: unknown, ctx?: unknown) => Promise<ReadResult> };
+  // 1x1 opaque PNG: small enough that the host's auto-resize is a pass-through.
+  const PNG_1X1 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+  let cwd: string;
 
-  test("no offset/limit returns the whole file unchanged", () => {
-    assert.equal(sliceLines(raw), raw);
+  function registerAndCapture(): CapturedTool {
+    const registered = new Map<string, CapturedTool>();
+    const pi = { registerTool: (def: { name: string } & CapturedTool) => registered.set(def.name, def) } as unknown as ExtensionAPI;
+    registerExecuteGateway(pi, {} as never, new Map(), { cwd, executeWorkerPromptPath: "/tmp/fake-execute-worker-guide.md" });
+    const tool = registered.get(UGLY_READ_TOOL_NAME);
+    assert.ok(tool, `${UGLY_READ_TOOL_NAME} must be registered by registerExecuteGateway`);
+    return tool!;
+  }
+  const textOf = (result: ReadResult) => result.content.filter((block) => block.type === "text").map((block) => block.text).join("\n");
+
+  beforeEach(() => { cwd = mkdtempSync(join(tmpdir(), "ws-pi-ugly-read-")); });
+  afterEach(() => { rmSync(cwd, { recursive: true, force: true }); });
+
+  test("an image file comes back as an image content block, resolved relative to the session cwd", async () => {
+    writeFileSync(join(cwd, "pixel.png"), PNG_1X1);
+    const result = await registerAndCapture().execute("call-1", { path: "pixel.png" }, undefined, undefined, {});
+    const image = result.content.find((block) => block.type === "image");
+    assert.ok(image, "an image content block is returned, not mojibake text");
+    assert.equal(image!.mimeType, "image/png");
+    assert.ok(image!.data && image!.data.length > 0, "the image carries base64 data");
   });
 
-  test("offset (1-indexed) starts from that line, to EOF when limit is omitted", () => {
-    assert.equal(sliceLines(raw, 3), "line3\nline4\nline5");
+  test("the tool-call ctx reaches the native read: a non-vision model gets the host's omission note", async () => {
+    writeFileSync(join(cwd, "pixel.png"), PNG_1X1);
+    const result = await registerAndCapture().execute("call-2", { path: "pixel.png" }, undefined, undefined, { model: { input: ["text"] } });
+    assert.match(textOf(result), /does not support images/);
   });
 
-  test("limit caps the number of lines returned from the start (or from offset)", () => {
-    assert.equal(sliceLines(raw, undefined, 2), "line1\nline2");
-    assert.equal(sliceLines(raw, 2, 2), "line2\nline3");
+  test("a text file honors 1-indexed offset/limit and says how to continue", async () => {
+    writeFileSync(join(cwd, "five.txt"), ["line1", "line2", "line3", "line4", "line5"].join("\n"));
+    const tool = registerAndCapture();
+    const sliced = textOf(await tool.execute("call-3", { path: join(cwd, "five.txt"), offset: 2, limit: 2 }, undefined, undefined, {}));
+    assert.ok(sliced.startsWith("line2\nline3"), sliced);
+    assert.doesNotMatch(sliced, /line1|line4/);
+    assert.match(sliced, /Use offset=4 to continue/);
+    assert.equal(textOf(await tool.execute("call-4", { path: "five.txt" }, undefined, undefined, {})), "line1\nline2\nline3\nline4\nline5");
   });
 
-  test("offset beyond EOF returns an empty string", () => {
-    assert.equal(sliceLines(raw, 100), "");
-  });
-
-  test("limit 0 returns an empty string", () => {
-    assert.equal(sliceLines(raw, 1, 0), "");
-  });
-
-  test("limit extending past EOF is clamped to the last available line, never throws", () => {
-    assert.equal(sliceLines(raw, 4, 100), "line4\nline5");
-  });
-
-  test("offset 0 or negative is treated the same as offset 1 (start of file)", () => {
-    assert.equal(sliceLines(raw, 0), raw);
-    assert.equal(sliceLines(raw, -5), raw);
+  test("a text file over 2000 lines is truncated with the host's offset-continuation hint", async () => {
+    writeFileSync(join(cwd, "long.txt"), Array.from({ length: 2500 }, (_, index) => `row-${index + 1}`).join("\n"));
+    const text = textOf(await registerAndCapture().execute("call-5", { path: "long.txt" }, undefined, undefined, {}));
+    assert.match(text, /row-2000\n/);
+    assert.doesNotMatch(text, /row-2001\b/);
+    assert.match(text, /\[Showing lines 1-2000 of 2500\. Use offset=2001 to continue\.\]/);
   });
 });
 
