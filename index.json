@@ -480,7 +480,14 @@
       "registered_at": "2026-09-24T12:38:53Z"
     },
     "260924-chore-review-sweep-test-and-naming-minors": {
-      "registered_at": "2026-09-24T13:42:53Z"
+      "registered_at": "2026-09-24T13:42:53Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-09-25T07:26:13Z"
+      }
     },
     "260924-idea-ownership-dogfood-scratch-a": {
       "registered_at": "2026-09-24T10:41:27Z"
