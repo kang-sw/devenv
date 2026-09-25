@@ -134,8 +134,13 @@ export interface ApprovalChildConnection {
  * list them as consumed and the parent will ask the lead again.
  */
 export class ChildApprovalGate {
-  /** Per-child bound on early decisions kept for a wait that has not started yet, and on the consumed `cmd_id`s a hello reports; the oldest is dropped first. */
-  static readonly EARLY_DECISION_CAP = 16;
+  /**
+   * Per-child bound applied separately to both retained collections: the
+   * early decisions kept for a wait that has not started yet (`early`), and
+   * the consumed `cmd_id`s a hello reports (`consumed`). Each drops its oldest
+   * entry first.
+   */
+  static readonly RETAINED_DECISION_CAP = 16;
   /**
    * Waiting `cmd_id`s in wait order. The parent tracks one pending request
    * per child and the hello reports one, so only the latest is reported when
@@ -171,7 +176,7 @@ export class ChildApprovalGate {
       if (!parsed || this.waiting.includes(parsed.cmdId)) return;
       this.early.delete(parsed.cmdId);
       this.early.set(parsed.cmdId, parsed.decision);
-      while (this.early.size > ChildApprovalGate.EARLY_DECISION_CAP) this.early.delete(this.early.keys().next().value!);
+      while (this.early.size > ChildApprovalGate.RETAINED_DECISION_CAP) this.early.delete(this.early.keys().next().value!);
     });
     const offDisconnect = link.onDisconnect(() => { this.early.clear(); });
     return () => { offMessage(); offDisconnect(); };
@@ -204,7 +209,7 @@ export class ChildApprovalGate {
       const consume = (decision: ApprovalDecision): boolean => {
         try { link.send(approvalConsumedMessage(cmdId)); } catch { return false; }
         this.consumed.push(cmdId);
-        while (this.consumed.length > ChildApprovalGate.EARLY_DECISION_CAP) this.consumed.shift();
+        while (this.consumed.length > ChildApprovalGate.RETAINED_DECISION_CAP) this.consumed.shift();
         finish(decision);
         return true;
       };
