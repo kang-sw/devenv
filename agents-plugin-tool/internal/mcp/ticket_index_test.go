@@ -213,16 +213,18 @@ func (c *ixCheckout) offline() { c.git("remote", "set-url", "origin", ixUnreacha
 func (c *ixCheckout) online()  { c.git("remote", "set-url", "origin", c.env.origin) }
 
 // hang points origin at an ssh remote whose transport never answers, so
-// every remote command runs into its timeout. The script's path is quoted
-// with forward slashes because git runs it through sh, which would eat a
-// Windows path's backslashes and fail fast instead of hanging.
+// every remote command runs into its timeout. The script's path, like the
+// live and stop paths inside it, is shell-quoted with forward slashes because
+// git runs it through sh, which would eat a Windows path's backslashes and
+// fail fast instead of hanging.
 //
 // The transport is a copy of internal/wsindex's hangTransport, whose comment
 // explains its shape; keep the two in step. In short: it blocks on git's
 // stdin, which ends it on POSIX when the timeout kills git's process group,
 // and it also ends on a stop file the cleanup raises, because on Windows the
 // timeout can leave the real git.exe (behind Git for Windows' redirector) and
-// the transport alive inside the test tree, failing TempDir's cleanup.
+// the transport alive inside the test tree, failing TempDir's cleanup. On
+// POSIX the stop file is not waited on (see stopHangTransports).
 func (c *ixCheckout) hang() {
 	t := c.env.t
 	t.Helper()
@@ -235,8 +237,8 @@ func (c *ixCheckout) hang() {
 	t.Cleanup(func() { stopHangTransports(t, live, stop) })
 	script := filepath.Join(dir, "hang-ssh.sh")
 	mustWrite(t, dir, "hang-ssh.sh", fmt.Sprintf(`#!/bin/sh
-live='%s'
-stop='%s'
+live=%s
+stop=%s
 : >"$live/$$"
 exec 3<&0 </dev/null
 cd /
@@ -254,11 +256,11 @@ while kill -0 "$c" 2>/dev/null; do
 done
 wait "$c" 2>/dev/null
 rm -f "$live/$$"
-`, filepath.ToSlash(live), filepath.ToSlash(stop)))
+`, shellQuote(filepath.ToSlash(live)), shellQuote(filepath.ToSlash(stop))))
 	if err := os.Chmod(script, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	c.git("config", "core.sshCommand", "'"+filepath.ToSlash(script)+"'")
+	c.git("config", "core.sshCommand", shellQuote(filepath.ToSlash(script)))
 	c.git("remote", "set-url", "origin", "ssh://git@ticket-index.invalid/repo.git")
 }
 
@@ -266,6 +268,13 @@ rm -f "$live/$$"
 // hang transport to clear its live marker. POSIX has nothing to wait for: the
 // process-group kill already ended each transport (before it could clear its
 // marker, so the markers there are stale by design).
+//
+// On POSIX the stop file is therefore not waited on, and TempDir's removal
+// deletes it right after. That is safe because every remote call is
+// deadline-bound through ExecRunner, and on timeout proc_unix.go SIGKILLs
+// git's whole process group, so no transport survives to need the stop
+// file. A transport that somehow escaped that kill would miss the stop file
+// and end only at the script's 120 s backstop; the backstop is the fallback.
 func stopHangTransports(t *testing.T, live, stop string) {
 	if err := os.WriteFile(stop, nil, 0o644); err != nil {
 		t.Errorf("raise the hang stop file: %v", err)
@@ -286,6 +295,13 @@ func stopHangTransports(t *testing.T, live, stop string) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+}
+
+// shellQuote single-quotes s for sh. It is a copy of internal/wsindex's
+// unexported shellQuote (git.go), kept local like the hang transport itself;
+// keep the two in step.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // call runs one tool and returns its text and whether it was an error.
