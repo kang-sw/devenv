@@ -23,7 +23,7 @@ var bg = context.Background()
 
 // boundSlack loosens the wall-clock bounds below so they survive -race and a
 // loaded machine. Each bound still asserts that a timeout cut the call short:
-// the hanging transport sleeps 30 s, far beyond any slackened bound.
+// the hanging transport never answers until git is killed.
 const boundSlack = 3
 
 // A missing ref is reported as absence, never as an error, on every path.
@@ -90,11 +90,22 @@ func TestA3NoOriginIsSilentlyAbsent(t *testing.T) {
 // hangingSSH makes every ssh transport hang, simulating a remote that never
 // answers; the ssh command is configured through core.sshCommand so the
 // BatchMode append path is exercised too.
+//
+// The transport reads its stdin until EOF instead of sleeping: git holds that
+// pipe open while it waits for the remote, so the hang lasts exactly until
+// git is killed. On Windows the timeout kills git but not its sh children; a
+// sleeping child would outlive the test and keep its directory busy. The
+// shell must not exec cat with its stdout redirected: that closes git's read
+// pipe, which git sees at once as a dead remote.
+//
+// git runs the ssh command through sh, so the path is quoted with forward
+// slashes: a raw Windows path loses its backslashes to the shell and the
+// "hang" fails fast as an unreachable origin instead of timing out.
 func hangingSSH(t *testing.T, c *testClone) {
 	t.Helper()
 	script := filepath.Join(c.h.dir, "hang-ssh.sh")
-	writeExecutable(t, script, "exec sleep 30\n")
-	gitT(t, c.root, "config", "core.sshCommand", script)
+	writeExecutable(t, script, "cat >/dev/null\n")
+	gitT(t, c.root, "config", "core.sshCommand", shellQuote(filepath.ToSlash(script)))
 	c.setOriginURL("ssh://git@wsindex.invalid/repo.git")
 }
 

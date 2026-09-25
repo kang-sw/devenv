@@ -34,8 +34,10 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     # The Windows smoke job in the release workflow has hung to ~46 min once
-    # (v0.37.2); the same cap turns a hang here into a fast, legible failure.
-    timeout-minutes: 25
+    # (v0.37.2); a cap turns a hang here into a fast, legible failure. Windows
+    # gets 40 min like the release workflow: its run is estimated at ~20 min
+    # (internal/mcp ~12x slower than on ubuntu), while ubuntu finishes in ~3.
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 40 || 25 }}
     defaults:
       run:
         working-directory: agents-plugin-tool
@@ -49,4 +51,7 @@ jobs:
           go-version-file: agents-plugin-tool/go.mod
 
       - name: Run tests
-        run: go test ./...
+        # internal/mcp outgrew go test's default 10 min per-package timeout on
+        # Windows (run 36072170343). The raised limit costs ubuntu nothing: a
+        # passing run is unchanged and the job cap still bounds a hang.
+        run: go test -timeout 30m ./...

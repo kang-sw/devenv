@@ -106,10 +106,11 @@ jobs:
   windows-smoke:
     name: Windows ws-mcp smoke
     runs-on: windows-latest
-    # Normal duration ~6 min. On the v0.37.2 run (30427222116) `go test ./...`
-    # hung here for 46 min and died without uploading logs; a re-run of the same
-    # commit passed in 6m21s. A cap turns that flake into a fast, legible failure.
-    timeout-minutes: 25
+    # Normal duration ~20-25 min (v0.46.17: 20 min, with internal/mcp alone at
+    # 432 s). On the v0.37.2 run (30427222116) `go test ./...` hung here for
+    # 46 min and died without uploading logs; a re-run of the same commit
+    # passed in 6m21s. A cap turns that flake into a fast, legible failure.
+    timeout-minutes: 40
     defaults:
       run:
         working-directory: agents-plugin-tool
@@ -123,7 +124,10 @@ jobs:
           go-version-file: agents-plugin-tool/go.mod
 
       - name: Run Go tests (Windows)
-        run: go test ./...
+        # internal/mcp runs ~12x slower here than on ubuntu (git-process heavy:
+        # 432 s vs 35 s at v0.46.17), and the ticket-index tests pushed it past
+        # the default 10 min per-package timeout on v0.46.18 (run 36072178336).
+        run: go test -timeout 30m ./...
 
       - name: Build Windows executable
         run: |
