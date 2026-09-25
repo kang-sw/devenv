@@ -481,6 +481,9 @@
     "260924-idea-ownership-dogfood-scratch-b": {
       "registered_at": "2026-09-24T10:41:54Z"
     },
+    "260925-bug-windows-remote-timeout-leaves-child-processes": {
+      "registered_at": "2026-09-25T02:03:47Z"
+    },
     "260925-chore-ship-preflight-misses-ci-matrix": {
       "registered_at": "2026-09-24T23:57:18Z"
     }
