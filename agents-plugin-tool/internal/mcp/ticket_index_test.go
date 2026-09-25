@@ -593,6 +593,7 @@ func TestInitRegistersOriginReviewTrackOnce(t *testing.T) {
 	scratch := filepath.Join(e.dir, "scratch")
 	runGit(t, e.dir, "clone", "--quiet", "--branch", "develop", e.origin, scratch)
 	runGit(t, scratch, "config", "user.email", "s@example.com")
+	runGit(t, scratch, "config", "user.name", "s")
 	runGit(t, scratch, "config", "commit.gpgsign", "false")
 	mustWrite(t, scratch, "ai-docs/tickets/idea/260102-feat-delta.md", ixTicket("Delta"))
 	runGit(t, scratch, "add", "-A")
