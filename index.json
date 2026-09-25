@@ -486,7 +486,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-09-25T07:26:13Z"
+        "touched_at": "2026-09-25T07:26:46Z",
+        "impl": {
+          "branch": "impl/develop/curse-issue-lair"
+        }
       }
     },
     "260924-idea-ownership-dogfood-scratch-a": {
