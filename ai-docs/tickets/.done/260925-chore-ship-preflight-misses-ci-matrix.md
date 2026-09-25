@@ -2,6 +2,7 @@
 title: Ship pushes main and the release tag before develop CI has run
 related:
   260924-bug-ticket-index-read-timeout-below-ssh-roundtrip: its storage tests were the ones that failed only on the CI matrix at v0.46.18
+completed: 2026-09-25
 ---
 
 # Ship pushes main and the release tag before develop CI has run
@@ -41,3 +42,17 @@ Failure classes the mac pre-flight cannot see:
 - Whether `lead-ship`'s generic procedure should name a "CI green on the
   promoted SHA" pre-flight hook for downstream projects that have CI. That
   would be a shipped-playbook change and needs its own decision.
+
+
+## Resolution (2026-09-25)
+
+Resolved in the project-local ship config (`ai-docs/ship/ws.md`, 9a6e169b). Publish now does the following:
+- pushes develop first;
+- waits for `ws-mcp CI` to be green on both matrix legs for the pinned SHA, dispatching a run when the path filter skipped a docs-only tip;
+- only then fast-forwards main to that SHA and pushes main and the tag.
+
+A CI failure stops with main and the tag unpushed, and the next attempt reuses the same untagged version. A single final-gate approval covers the whole sequence.
+
+Not pursued, since it would change a shipped playbook:
+- a generic "CI green on the promoted SHA" hook in `lead-ship` for downstream projects;
+- a tag-unclaimed re-check right before the tag push. A concurrent claim during the CI wait would surface as a rejected main or tag push.
