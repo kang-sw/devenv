@@ -488,7 +488,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-09-25T05:41:07Z"
+        "touched_at": "2026-09-25T05:41:35Z",
+        "impl": {
+          "branch": "impl/develop/duly-chevy-race"
+        }
       }
     },
     "260925-bug-windows-remote-timeout-leaves-child-processes": {
