@@ -101,7 +101,14 @@
       "registered_at": "2026-09-24T10:38:33Z"
     },
     "260726-feat-doc-organization-autonomy-odq-admission-filter": {
-      "registered_at": "2026-09-24T10:38:33Z"
+      "registered_at": "2026-09-24T10:38:33Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "closed",
+        "touched_at": "2026-09-25T07:00:06Z"
+      }
     },
     "260726-feat-enter-verdict-scenario-output": {
       "registered_at": "2026-09-24T10:38:33Z"
