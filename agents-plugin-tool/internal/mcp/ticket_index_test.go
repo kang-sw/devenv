@@ -107,11 +107,15 @@ type ixCheckout struct {
 // ixRunner wraps wsindex.ExecRunner: it counts remote git invocations by
 // subcommand, records each remote fetch's arguments, and can fail index-ref
 // fetches to simulate a transport failure after a successful discovery.
+// beforeRemote, when set before the call under test, runs ahead of each
+// remote command with its subcommand and arguments, so a test can change the
+// origin between two remote steps of one call.
 type ixRunner struct {
-	mu        sync.Mutex
-	counts    map[string]int
-	fetches   []string
-	failFetch atomic.Bool
+	mu           sync.Mutex
+	counts       map[string]int
+	fetches      []string
+	failFetch    atomic.Bool
+	beforeRemote func(sub string, args []string)
 }
 
 func (r *ixRunner) Run(ctx context.Context, dir string, cmd wsindex.Command) ([]byte, error) {
@@ -131,6 +135,9 @@ func (r *ixRunner) Run(ctx context.Context, dir string, cmd wsindex.Command) ([]
 			r.fetches = append(r.fetches, strings.Join(cmd.Args, " "))
 		}
 		r.mu.Unlock()
+		if r.beforeRemote != nil {
+			r.beforeRemote(sub, cmd.Args)
+		}
 		if sub == "fetch" && r.failFetch.Load() && strings.Contains(strings.Join(cmd.Args, " "), wsindex.RemoteRef) {
 			return nil, errors.New("injected transport failure")
 		}
@@ -1410,6 +1417,40 @@ func TestIndexInitReportsDiscard(t *testing.T) {
 		if x.pendingCount() != 0 {
 			t.Fatalf("%s: pending log not discarded", mode)
 		}
+	}
+}
+
+// C5, adopt error: when the index disappears between Create's ls-remote and
+// the adopt fetch, init fails and still prints the discard report of the
+// pending log that failed adopt already dropped.
+func TestIndexInitAdoptErrorPrintsDiscardReport(t *testing.T) {
+	e := newIxEnv(t)
+	x := e.clone("x", "a@example.com")
+	x.init()
+	x.offline()
+	x.acquire(stemBeta) // one pending entry
+	x.online()
+	listed, deleted := false, false
+	x.runner.beforeRemote = func(sub string, args []string) {
+		switch {
+		case sub == "ls-remote":
+			listed = true
+		case sub == "fetch" && listed && !deleted && strings.Contains(strings.Join(args, " "), wsindex.RemoteRef):
+			deleted = true
+			runGit(t, e.origin, "update-ref", "-d", wsindex.RemoteRef)
+		}
+	}
+	out := x.mustRefuse("tickets.index_init", nil, "tickets.index_init: remote index is absent")
+	x.runner.beforeRemote = nil
+	if !deleted {
+		t.Fatalf("the index ref was never deleted before an adopt fetch: %s", out)
+	}
+	const report = "\nreport: ticket-index: 1 offline entries were discarded"
+	if strings.Count(out, report) != 1 {
+		t.Fatalf("adopt error output lacks the discard report: %q", out)
+	}
+	if x.pendingCount() != 0 {
+		t.Fatal("pending log not discarded")
 	}
 }
 
