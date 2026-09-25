@@ -107,9 +107,10 @@ type ixCheckout struct {
 // ixRunner wraps wsindex.ExecRunner: it counts remote git invocations by
 // subcommand, records each remote fetch's arguments, and can fail index-ref
 // fetches to simulate a transport failure after a successful discovery.
-// beforeRemote, when set before the call under test, runs ahead of each
-// remote command with its subcommand and arguments, so a test can change the
-// origin between two remote steps of one call.
+// beforeRemote, set through setBeforeRemote (the wsindex countingRunner's
+// setBefore shape), runs ahead of each remote command with its subcommand and
+// arguments, so a test can change the origin between two remote steps of one
+// call.
 type ixRunner struct {
 	mu           sync.Mutex
 	counts       map[string]int
@@ -134,15 +135,22 @@ func (r *ixRunner) Run(ctx context.Context, dir string, cmd wsindex.Command) ([]
 		if sub == "fetch" {
 			r.fetches = append(r.fetches, strings.Join(cmd.Args, " "))
 		}
+		hook := r.beforeRemote
 		r.mu.Unlock()
-		if r.beforeRemote != nil {
-			r.beforeRemote(sub, cmd.Args)
+		if hook != nil {
+			hook(sub, cmd.Args)
 		}
 		if sub == "fetch" && r.failFetch.Load() && strings.Contains(strings.Join(cmd.Args, " "), wsindex.RemoteRef) {
 			return nil, errors.New("injected transport failure")
 		}
 	}
 	return wsindex.ExecRunner{}.Run(ctx, dir, cmd)
+}
+
+func (r *ixRunner) setBeforeRemote(fn func(sub string, args []string)) {
+	r.mu.Lock()
+	r.beforeRemote = fn
+	r.mu.Unlock()
 }
 
 func (r *ixRunner) count(sub string) int {
@@ -1449,7 +1457,7 @@ func TestIndexInitAdoptErrorPrintsDiscardReport(t *testing.T) {
 	x.acquire(stemBeta) // one pending entry
 	x.online()
 	listed, deleted := false, false
-	x.runner.beforeRemote = func(sub string, args []string) {
+	x.runner.setBeforeRemote(func(sub string, args []string) {
 		switch {
 		case sub == "ls-remote":
 			listed = true
@@ -1457,9 +1465,9 @@ func TestIndexInitAdoptErrorPrintsDiscardReport(t *testing.T) {
 			deleted = true
 			runGit(t, e.origin, "update-ref", "-d", wsindex.RemoteRef)
 		}
-	}
+	})
 	out := x.mustRefuse("tickets.index_init", nil, "tickets.index_init: remote index is absent")
-	x.runner.beforeRemote = nil
+	x.runner.setBeforeRemote(nil)
 	if !deleted {
 		t.Fatalf("the index ref was never deleted before an adopt fetch: %s", out)
 	}

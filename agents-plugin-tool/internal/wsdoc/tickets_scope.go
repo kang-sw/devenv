@@ -40,8 +40,8 @@ type ticketScope struct {
 
 // TicketsDir is the repository-relative ticket board root, without a trailing
 // slash. It bounds every git index query the scope makes to the board (the
-// scope never enumerates the rest of the index), and other packages that list
-// the board from git use it as their pathspec.
+// scope never enumerates the rest of the index), and wsindex uses it as the
+// pathspec when it lists the board from git.
 const TicketsDir = "ai-docs/tickets"
 
 // newTicketScope runs the gate cheapest-first so a repository the user does not
