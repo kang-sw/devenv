@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 18e4dc73d935af48
 sage-review-completeness-reviewed: 18e4dc73d935af48
+completed: 2026-09-26
 ---
 
 # Open Decision Queue splits announced defaults from policy questions
@@ -193,3 +194,74 @@ Verification:
   `260924-chore-review-sweep-test-and-naming-minors` has not landed yet, run
   it with an isolated `HOME`, since host `~/.ws/config.json` tier overrides
   fail unrelated config tests.
+
+### Result (dd4b01b52) - 2026-09-26
+
+Landed in dd4b01b52, with round-1 review fixes in 665cccb9c and a rewrap in
+54a70c824.
+
+- `agents-plugin/rsrc/lead-ticket/lead-ticket.md`:
+  - New `### Item classes` subsection covering:
+    - the citation-admission list, including documentation placement
+    - reversal is always a policy question
+    - the open-round consequence hold
+    - a populator gap or reviewer issue can be an announced default, but a
+      reviewer `missing` issue is always a policy question
+    - one explicit group acknowledgement, where silence does not count and
+      unacknowledged items get a one-line re-ask
+    - an objection or undercut reopens the item as a policy question under
+      its existing ID
+    - announced items raised later need their own acknowledgement
+  - `### Final confirmation` removed. The section intro now defines the
+    "settle point" (announced defaults acknowledged, every policy question
+    settled): the lead persists at that point without showing the set again
+    for approval.
+  - Queue state:
+    - carries the class tags `[announced]` / `[policy]` after the status tag
+    - an announced item records its citation in place of alternatives and a
+      recommendation
+    - an announced item that becomes a policy question returns to `[open]`,
+      back from `## Decisions` if it had moved there
+    - carries the two surviving rules: a correction returns to `[open]`, and
+      an invocation that queued no item has no settlement step
+    - the deletion rule now keys on the settle point
+  - Response format:
+    - two groups, with the bold labels `**Announced defaults**` and
+      `**Policy questions**`
+    - bold rather than `##`, so copying a response into the ticket cannot
+      end the section
+    - the per-round line is renamed "Report ... settled this round" and is
+      explicitly distinct from the announced-default group
+  - The epic review step and promotion step 2 now say "to the settle point".
+    The Stops list includes an unacknowledged announced default.
+- The MCP refusal strings (`openDecisionQueueRefusal` in
+  `internal/wsdoc/tickets_mutate.go`, and the `sage_gate`
+  `stop_open_decision_queue` instruction in `internal/mcp/server.go`) now
+  spell out the settle point in place of the final confirmation.
+- Mirrors: `agents-plugin-wsflow/rsrc/` was regenerated, and
+  `agents-plugin-pi/rsrc/` was resynced by byte copy. Manifests were
+  regenerated.
+- Tests:
+  - `TestPlaybookPrintGoldenLeadTicket` replaces the Final confirmation pins
+    with pins covering:
+    - the verbatim two-group template
+    - the citation rule and the reversal rule
+    - the single acknowledgement
+    - the settle point at every step
+    - the class tags
+  - It forbids "final confirmation" on the raw body and on the
+    whitespace-normalized body.
+  - `TestServeStdioOpenDecisionQueueRefusals` pins the new phrase and the
+    absence of "final confirmation" on both tools.
+- `lead-discuss` is unchanged: its line that persistence writes only
+  confirmed decisions still holds.
+
+Verification:
+- `cd agents-plugin-tool && HOME=<isolated> go test ./...`: all packages ok.
+- `go test -count=1 ./internal/wsrsrc`: ok, including the pi and wsflow
+  mirror guards.
+- `python3 -m unittest discover agents-plugin-wsflow/tests`: 13 OK.
+- `python3 -m unittest discover agents-plugin/tests`: 73 OK.
+- `grep -rni "final confirmation"` over the three rsrc trees and the non-test
+  Go sources finds nothing.
+- Partitioned review (correctness, fit, test) was clean after round 2.
