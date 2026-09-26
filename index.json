@@ -502,7 +502,14 @@
       }
     },
     "260926-bug-pi-children-inherit-mailbox-identity": {
-      "registered_at": "2026-09-26T03:57:54Z"
+      "registered_at": "2026-09-26T03:57:54Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-09-26T04:27:16Z"
+      }
     },
     "260926-bug-pi-execute-worker-steals-mailbox-owner": {
       "registered_at": "2026-09-26T03:49:39Z"
