@@ -372,8 +372,9 @@ func TestServeStdioSageGateDispatch(t *testing.T) {
 
 // TestServeStdioOpenDecisionQueueRefusals pins that the pending-queue refusal
 // reaches the caller through both MCP tools: sage_gate's structured stop with
-// its settle-point-and-delete instruction (and no posture-uncommitted note, since the
-// stop writes nothing), and tickets.move's error, with the ticket left in todo/.
+// its settle-point-and-delete instruction (and no posture-uncommitted note,
+// since the stop writes nothing), and tickets.move's error, with the ticket
+// left in todo/.
 func TestServeStdioOpenDecisionQueueRefusals(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()

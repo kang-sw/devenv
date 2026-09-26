@@ -111,8 +111,9 @@ non-authoritative entries.
   are `[announced]` and `[policy]`. A policy question also records its context,
   alternatives, and your recommendation as the policy block of the **Response
   format** below; an announced default records its citation in their place.
-  An announced item that becomes a policy question changes its class tag and
-  gains the policy block. Section text is English, like the rest of the
+  An announced item that becomes a policy question changes its class tag,
+  returns to `[open]` (back from `## Decisions` into the section if it had
+  moved there), and gains the policy block. Section text is English, like the rest of the
   ticket.
 - IDs are `(1)`, `(2)`, `(3)`, ... and never change. A new item takes one past
   the highest ID used so far in this conversation, across every affected
@@ -133,9 +134,9 @@ non-authoritative entries.
   review refuse a ticket that still carries it, whatever its item statuses.
   An invocation that queued no item (a drop, a stamp-only commit) has no
   settlement step.
-- A reviewer `missing` issue enters the section as a new policy question;
-  after it settles and the section is deleted, fix and re-stamp as the stamp
-  result directs.
+- A reviewer `missing` issue enters the section as a new item; after it
+  settles and the section is deleted, fix and re-stamp as the stamp result
+  directs.
 
 ### Trace a change before writing it
 

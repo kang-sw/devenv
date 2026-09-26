@@ -2261,7 +2261,8 @@ func TestPlaybookPrintGoldenLeadTicket(t *testing.T) {
 				"moves into the relevant decision's `Rejected:` text when it is a meaningful alternative and is otherwise dropped",
 				"a deferred item moves into `## Constraints` as out of scope",
 				"Delete the section only at the settle point",
-				"A reviewer `missing` issue enters the section as a new policy question",
+				"A reviewer `missing` issue enters the section as a new item",
+				"returns to `[open]` (back from `## Decisions` into the section if it had moved there)",
 				"Each item records its ID, status tag, class tag, and one-line decision",
 				"class tags are `[announced]` and `[policy]`",
 				"an announced default records its citation in their place",
@@ -2284,9 +2285,15 @@ func TestPlaybookPrintGoldenLeadTicket(t *testing.T) {
 				"At the settle point, persist without showing the confirmed set again for approval",
 				"A correction returns its item to `[open]` under its existing ID",
 				"has no settlement step",
+				// Settlement still precedes the sage gate at both review
+				// entry points, and an unacknowledged group still stops.
+				"settle any queue it opened to the settle point and delete the section, then call",
+				"then settle any queue it opened to the settle point and delete each member's section",
+				"Any Open Decision Queue item the user has not settled, including an announced default not yet acknowledged",
 				// Response format.
 				"announced defaults first, then the policy questions under their visible label",
-				"An announced default is one line and asks no per-item answer",
+				"Omit a group that has no item this round",
+				"An announced default is one line and asks no per-item answer; an unacknowledged one is re-shown as the same one line",
 				"The recommendation lives only in the trailing `>` line",
 				"A policy question already presented is re-asked as one line, `(n) [open] <one-line decision>`",
 				"Report the items settled this round in one line",
