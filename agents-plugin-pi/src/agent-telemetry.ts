@@ -105,18 +105,25 @@ export function readSessionEntries(path: string): SessionEntriesRead {
   const lines = raw.split("\n"); if (lines.at(-1) === "") lines.pop();
   const parsed: unknown[] = [];
   for (let i = 0; i < lines.length; i++) { try { parsed.push(JSON.parse(lines[i])); } catch { return i === lines.length - 1 ? { transient: true } : undefined; } }
-  const h = parsed.shift() as { type?: unknown; version?: unknown; id?: unknown; parentSession?: unknown } | undefined;
-  if (!h || h.type !== "session" || h.version !== 3 || typeof h.id !== "string" || !h.id) return undefined;
+  const h = sessionHeaderOf(parsed.shift());
+  if (!h) return undefined;
   const entries: Entry[] = [];
   const byId = new Map<string, Entry>();
-  for (const raw of parsed) {
-    if (!raw || typeof raw !== "object" || typeof (raw as Entry).id !== "string" || !(raw as Entry).id) return undefined;
-    const e = raw as Entry, prior = byId.get(e.id);
+  for (const e of parsed) {
+    if (!validEntry(e)) return undefined;
+    const prior = byId.get(e.id);
     if (prior) { if (!isDeepStrictEqual(prior, e)) return undefined; continue; }
     byId.set(e.id, e); entries.push(e);
   }
-  return { headerId: h.id, ...(typeof h.parentSession === "string" && h.parentSession ? { parentSession: h.parentSession } : {}), entries };
+  return { headerId: h.id, ...(h.parentSession ? { parentSession: h.parentSession } : {}), entries };
 }
+/** Header and entry validity shared by the full and the incremental reader, so the two cannot classify a line differently. */
+function sessionHeaderOf(value: unknown): { id: string; parentSession?: string } | undefined {
+  const h = value as { type?: unknown; version?: unknown; id?: unknown; parentSession?: unknown } | null | undefined;
+  if (!h || h.type !== "session" || h.version !== 3 || typeof h.id !== "string" || !h.id) return undefined;
+  return { id: h.id, ...(typeof h.parentSession === "string" && h.parentSession ? { parentSession: h.parentSession } : {}) };
+}
+const validEntry = (v: unknown): v is Entry => !!v && typeof v === "object" && typeof (v as Entry).id === "string" && !!(v as Entry).id;
 /**
  * The fields of an entry that `reduceTelemetry` and `refreshAgentTelemetry`
  * read, and nothing else: a retained entry must not hold a child's tool
@@ -160,7 +167,6 @@ export const nodeSessionFileIo: SessionFileIo = {
 const NEWLINE = 0x0a;
 const lineHash = (bytes: Uint8Array, withNewline = false): string => { const h = createHash("sha256").update(bytes); if (withNewline) h.update("\n"); return h.digest("base64"); };
 const parseLine = (bytes: Buffer): { value: unknown } | undefined => { try { return { value: JSON.parse(bytes.toString("utf8")) }; } catch { return undefined; } };
-const validEntry = (v: unknown): v is Entry => !!v && typeof v === "object" && typeof (v as Entry).id === "string" && !!(v as Entry).id;
 /** The first-occurrence lookup of the conflicting-duplicate fallback could not locate the entry: the file changed under the read. */
 class ReplacedUnderRead extends Error {}
 
@@ -255,14 +261,14 @@ export class IncrementalSessionReader {
     if (!parsed) { this.invalidate("unparseable"); return; }
     if (this.verdict === "invalid") return;
     if (isHeader) {
-      const header = this.headerOf(parsed.value);
+      const header = sessionHeaderOf(parsed.value);
       if (!header) { this.invalidate("invalid"); return; }
       this.headerId = header.id; this.parentSession = header.parentSession;
       return;
     }
     const admitted = this.admit(parsed.value, bytes, file);
     if (admitted === undefined) { this.invalidate("invalid"); return; }
-    if (admitted) { this.hashes.set(admitted.entry.id, admitted.hash); this.entries.push(projectEntry(admitted.entry)); }
+    if (admitted) { this.hashes.set(admitted.id, lineHash(bytes)); this.entries.push(projectEntry(admitted)); }
   }
 
   /** The last line decides `transient`, then the consumed prefix's verdict, then its own validity; nothing of it is retained. */
@@ -272,7 +278,7 @@ export class IncrementalSessionReader {
     if (!parsed) return { transient: true };
     if (this.verdict) return undefined;
     if (this.offset === 0) {
-      const header = this.headerOf(parsed.value);
+      const header = sessionHeaderOf(parsed.value);
       return header ? { headerId: header.id, ...(header.parentSession ? { parentSession: header.parentSession } : {}), entries: [] } : undefined;
     }
     const admitted = this.admit(parsed.value, bytes, file);
@@ -280,21 +286,21 @@ export class IncrementalSessionReader {
     return {
       headerId: this.headerId!,
       ...(this.parentSession ? { parentSession: this.parentSession } : {}),
-      entries: admitted ? [...this.entries, projectEntry(admitted.entry)] : [...this.entries],
+      entries: admitted ? [...this.entries, projectEntry(admitted)] : [...this.entries],
     };
   }
 
-  private headerOf(value: unknown): { id: string; parentSession?: string } | undefined {
-    const h = value as { type?: unknown; version?: unknown; id?: unknown; parentSession?: unknown } | null;
-    if (!h || h.type !== "session" || h.version !== 3 || typeof h.id !== "string" || !h.id) return undefined;
-    return { id: h.id, ...(typeof h.parentSession === "string" && h.parentSession ? { parentSession: h.parentSession } : {}) };
-  }
-
-  /** A new entry, `false` for a duplicate equal to its first occurrence, `undefined` for a contradiction. */
-  private admit(value: unknown, bytes: Buffer, file: SessionFileHandle): { entry: Entry; hash: string } | false | undefined {
+  /**
+   * A new entry, `false` for a duplicate equal to its first occurrence,
+   * `undefined` for a contradiction. A new id is not hashed here: the
+   * unconsumed last line may be a multi-megabyte payload whose hash would be
+   * discarded, so only `consume` hashes a new entry it retains.
+   */
+  private admit(value: unknown, bytes: Buffer, file: SessionFileHandle): Entry | false | undefined {
     if (!validEntry(value)) return undefined;
-    const hash = lineHash(bytes), prior = this.hashes.get(value.id);
-    if (prior === undefined) return { entry: value, hash };
+    const prior = this.hashes.get(value.id);
+    if (prior === undefined) return value;
+    const hash = lineHash(bytes);
     if (prior === hash) return false;
     const key = `${value.id}\n${hash}`;
     let equal = this.variants.get(key);

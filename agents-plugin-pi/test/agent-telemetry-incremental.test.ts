@@ -170,6 +170,18 @@ describe("incremental session reader: replay oracle", () => {
     check(reader, path, "recreated with another session", "entries");
   });
 
+  test("a missing file resets even when the recreated file keeps the header and line boundaries", () => {
+    // Same header bytes and same-length consumed lines: only the missing-file
+    // reset keeps the reader from retaining the deleted file's projections.
+    const path = sessionPath(), reader = new IncrementalSessionReader();
+    writeFileSync(path, lines([header(), assistant("a1", 10, .1), assistant("a2", 20, .2)]));
+    check(reader, path, "original", "entries");
+    unlinkSync(path);
+    check(reader, path, "deleted", "transient");
+    writeFileSync(path, lines([header(), assistant("b1", 30, .3), assistant("b2", 40, .4)]));
+    check(reader, path, "recreated with identical header and boundaries", "entries");
+  });
+
   test("a truncate-and-rewrite to a smaller size resets", () => {
     const path = sessionPath(), reader = new IncrementalSessionReader();
     writeFileSync(path, lines([header(), assistant("a", 10, .1), assistant("b", 20, .2), assistant("c", 30, .3)]));
@@ -220,6 +232,43 @@ describe("incremental session reader: replay oracle", () => {
     check(reader, a, "back to a after an append", "entries");
     check(reader, sessionPath("missing.jsonl"), "a missing third path", "transient");
     check(reader, b, "back to b", "entries");
+  });
+
+  test("a path change resets even when the new file keeps the header and line boundaries", () => {
+    // Same header bytes and same-length consumed lines: only the path reset
+    // keeps the reader from carrying the first file's projections over.
+    const a = sessionPath("a.jsonl"), b = sessionPath("b.jsonl"), reader = new IncrementalSessionReader();
+    writeFileSync(a, lines([header(), assistant("a1", 10, .1), assistant("a2", 20, .2)]));
+    writeFileSync(b, lines([header(), assistant("b1", 30, .3), assistant("b2", 40, .4)]));
+    check(reader, a, "path a", "entries");
+    check(reader, b, "path b", "entries");
+  });
+
+  test("a first-occurrence lookup that cannot find the entry reads transient and resets to byte 0", () => {
+    const path = sessionPath();
+    const first = assistant("d", 10, .1);
+    const reordered = { message: first.message, timestamp: first.timestamp, parentId: first.parentId, id: first.id, type: first.type };
+    writeFileSync(path, lines([header(), first, assistant("e", 20, .2), reordered]));
+    const size = Buffer.byteLength(lines([header(), first, assistant("e", 20, .2), reordered]));
+    let replaced = true;
+    const log = recordingIo();
+    const io: SessionFileIo = {
+      open(p) {
+        const file = log.io.open(p);
+        if (!file) return undefined;
+        // The first whole-file read is the initial tail; the second, the
+        // fallback's lookup, sees a file whose "d" line was replaced under it.
+        let wholeReads = 0;
+        return { size: file.size, read(start, length) { const buf = file.read(start, length); return replaced && start === 0 && length === file.size && ++wholeReads === 2 ? Buffer.from(buf.toString("utf8").replaceAll('"id":"d"', '"id":"z"')) : buf; }, close() { file.close(); } };
+      },
+    };
+    const reader = new IncrementalSessionReader(io);
+    assert.deepEqual(reader.read(path), { transient: true }, "an unlocatable first occurrence is transient");
+    replaced = false; log.reads.length = 0;
+    check(reader, path, "after the reset", "entries");
+    // A reset reader's first read is the whole file as its tail; a retained
+    // state would first re-check the header and the consumed boundary.
+    assert.deepEqual(log.reads[0], { start: 0, length: size }, "the read after the failure starts from byte 0");
   });
 
   test("same-id lines: identical or deep-equal is a duplicate, different content is a contradiction", () => {
