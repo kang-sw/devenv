@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -288,8 +289,8 @@ func TestServeStdioStopsMailboxPresenceTickerBeforeHandlersDrain(t *testing.T) {
 
 // TestMailboxPresenceTickerFollowsRebuiltRecord verifies the ticker follows
 // the record the process holds now, not the one it registered: after a
-// parent-less rebind rebuilds a lost record under this process's PID, ticks
-// keep that record fresh.
+// parent-less lead rebind rebuilds a lost record under this process's PID,
+// ticks keep that record fresh.
 func TestMailboxPresenceTickerFollowsRebuiltRecord(t *testing.T) {
 	setupMailboxTestEnv(t)
 	root := t.TempDir()
@@ -308,7 +309,7 @@ func TestMailboxPresenceTickerFollowsRebuiltRecord(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	s.rebindMailboxOwnerAtFerrule("owner-key", "", root)
+	s.rebindMailboxOwnerAtFerrule("owner-key", "", roleLead, root)
 	if got := loadPresence(t, path, "rebuilt").PID; got != os.Getpid() {
 		t.Fatalf("rebind did not rebuild the record under this process: PID %d", got)
 	}
@@ -318,6 +319,61 @@ func TestMailboxPresenceTickerFollowsRebuiltRecord(t *testing.T) {
 
 	if got, want := loadPresence(t, path, "rebuilt").LastSeen, later.Format(time.RFC3339); got != want {
 		t.Fatalf("ticker did not refresh the rebuilt record: got %q, want %q", got, want)
+	}
+}
+
+// TestMailboxPresenceTickerRefreshesReclaimedDeadPIDRecord verifies the
+// ticker keeps a reclaimed record fresh: a record left by a different, exited
+// process with a stale LastSeen is taken over by a parent-less lead rebind,
+// which rewrites its PID to this process, and the following tick refreshes
+// it. The ticker only writes a record carrying this process's PID, so without
+// that rewrite the reclaimed inbox would go stale while its owner sits idle.
+func TestMailboxPresenceTickerRefreshesReclaimedDeadPIDRecord(t *testing.T) {
+	setupMailboxTestEnv(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv(envMailbox, "reclaimed@worktree")
+	s := NewServer(root, "test")
+	s.ensureMailboxRegistered(root)
+
+	cmd := exec.Command(os.Args[0], "-test.run=^$")
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to run a short-lived child process: %v", err)
+	}
+	if cmd.ProcessState == nil || !cmd.ProcessState.Exited() {
+		t.Fatalf("child process did not reach an Exited state: %v", cmd.ProcessState)
+	}
+	deadPID := cmd.Process.Pid
+	if deadPID == os.Getpid() {
+		t.Fatalf("exited child reused this process's PID %d", deadPID)
+	}
+
+	path, err := wsmailbox.WorktreePath(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := mailboxNow().Add(-(mailboxLivenessThreshold + time.Minute)).Format(time.RFC3339)
+	if err := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
+		p := store.Presence["reclaimed"]
+		p.PID = deadPID
+		p.Owner = "departed-child-key"
+		p.LastSeen = stale
+		store.Presence["reclaimed"] = p
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	s.rebindMailboxOwnerAtFerrule("lead-key", "", roleLead, root)
+	if got := loadPresence(t, path, "reclaimed"); got.Owner != "lead-key" || got.PID != os.Getpid() {
+		t.Fatalf("lead rebind did not reclaim the dead-PID record: owner = %q, PID = %d; want owner %q, PID %d", got.Owner, got.PID, "lead-key", os.Getpid())
+	}
+
+	later := advanceMailboxClock(t, 5*time.Minute)
+	driveMailboxPresenceTicks(t, s, 1)
+
+	if got, want := loadPresence(t, path, "reclaimed").LastSeen, later.Format(time.RFC3339); got != want {
+		t.Fatalf("ticker did not refresh the reclaimed record: got %q, want %q", got, want)
 	}
 }
 
