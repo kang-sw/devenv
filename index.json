@@ -484,6 +484,9 @@
     "260925-feat-odq-announced-defaults-and-policy-questions": {
       "registered_at": "2026-09-25T06:59:34Z"
     },
+    "260926-bug-pi-children-inherit-mailbox-identity": {
+      "registered_at": "2026-09-26T03:57:54Z"
+    },
     "260926-bug-pi-execute-worker-steals-mailbox-owner": {
       "registered_at": "2026-09-26T03:49:39Z"
     },
