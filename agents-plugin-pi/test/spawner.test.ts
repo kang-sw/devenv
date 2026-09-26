@@ -2323,11 +2323,9 @@ describe("buildRpcClientOptions (WS_PI_SPAWN_ROLE_ENV placement)", () => {
   });
 
   test("clears the lead's mailbox identity env for every spawn role, forks and ask forks included", () => {
-    const parent = {
-      WS_MAILBOX: "lead@devenv",
-      WS_MAILBOX_AUTO: "devenv",
-      CHILD_SENTINEL: "preserved",
-    };
+    // RpcClient overlays options.env onto process.env inside the Pi library,
+    // so the explicit empty markers below are the whole contract this module
+    // owns; there is no local overlay seam to exercise.
     const cases: Array<{ label: string; options: ReturnType<typeof buildRpcClientOptions> }> = [
       { label: "worker", options: buildRpcClientOptions("/repo", undefined, "/tmp/worker.jsonl", undefined, "read") },
       { label: "execute-worker", options: buildRpcClientOptions("/repo", undefined, "/tmp/exec.jsonl", undefined, "read", undefined, undefined, "execute-worker") },
@@ -2341,10 +2339,6 @@ describe("buildRpcClientOptions (WS_PI_SPAWN_ROLE_ENV placement)", () => {
     for (const { label, options } of cases) {
       assert.equal(options.env?.WS_MAILBOX, "", `${label} clears WS_MAILBOX`);
       assert.equal(options.env?.WS_MAILBOX_AUTO, "", `${label} clears WS_MAILBOX_AUTO`);
-      const effective = { ...parent, ...options.env };
-      assert.equal(effective.WS_MAILBOX, "", `${label} effective WS_MAILBOX is blank`);
-      assert.equal(effective.WS_MAILBOX_AUTO, "", `${label} effective WS_MAILBOX_AUTO is blank`);
-      assert.equal(effective.CHILD_SENTINEL, "preserved");
     }
   });
 

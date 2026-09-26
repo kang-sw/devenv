@@ -3204,6 +3204,16 @@ export function callerDelegationPolicy(wsToolNames: readonly string[]): Delegati
     authority: "lead", tools: resolveTools("full-worker", wsToolNames).split(",") };
 }
 
+/**
+ * The parentPolicy a lead-side spawn passes: the caller's delegation policy
+ * carrying the lead's session key, read at call time. The key becomes the
+ * child's ferrule parent_session_key; a spawn site that omits it mints the
+ * child parent-less, which can steal the lead's mailbox ownership.
+ */
+export function leadParentPolicy(bridge: Pick<BridgeHandle, "wsToolNames" | "defaultSessionKeyRef">): DelegationPolicy {
+  return { ...callerDelegationPolicy(bridge.wsToolNames), sessionKey: bridge.defaultSessionKeyRef.current };
+}
+
 function requestedWriteCapability(tools: string[], writeScopes: readonly WriteScope[] | undefined): {
   tools: string[];
   write: EffectiveWriteCapability;
@@ -4167,7 +4177,7 @@ export function registerAgentTools(
           extensionPath: sessionCtx.extensionPath,
           client: bridge.client,
           provenance: bridge.renderRegistry?.get(p.system_prompt_path),
-          parentPolicy: { ...callerDelegationPolicy(bridge.wsToolNames), sessionKey: bridge.defaultSessionKeyRef.current },
+          parentPolicy: leadParentPolicy(bridge),
           onApprovalPending,
           onModelResolved: (resolved) => {
             resolvedInfo = resolved;
@@ -4359,7 +4369,7 @@ export function registerAgentTools(
           toolGroup: "read-only-explore",
           spawnRole: "explore",
           exploreMode: mode,
-          parentPolicy: { ...callerDelegationPolicy(bridge.wsToolNames), sessionKey: bridge.defaultSessionKeyRef.current },
+          parentPolicy: leadParentPolicy(bridge),
           requireTier: true,
           aliasPrefix: "explore",
           onApprovalPending,
