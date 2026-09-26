@@ -237,6 +237,12 @@ export interface SubprocessWaitOptions {
    * today's reply-id-only wait.
    */
   slug?: string;
+  /**
+   * Optional session root (absolute path), passed through as `--root` so the
+   * CLI resolves a worktree/clone-scope `--slug` against this session's store
+   * rather than the launcher process's own working directory.
+   */
+  root?: string;
   /** `--timeout` value; a finite window self-heals a wedged wait and bounds the listening marker. */
   timeoutArg?: string;
   /** Diagnostic sink for the child's stderr and spawn failures; omitted diagnostics are discarded. */
@@ -249,15 +255,42 @@ const DEFAULT_WAIT_TIMEOUT_ARG = "10m";
  * Pure argv builder for the `mailbox wait` subprocess, factored out of
  * `createSubprocessWait` so the slug-arm/no-slug shapes are unit-testable
  * without spawning a real process (mirrors `mapMailboxWaitExit`'s split on the
- * exit side). `--slug` is appended last and only when `options.slug` is a
- * non-empty string, so the no-slug invocation stays byte-identical to Phase 1.
+ * exit side). `--root` and `--slug` are appended only when their option is a
+ * non-empty string, so an invocation with neither stays byte-identical to the
+ * reply-id-only shape.
  */
 export function buildMailboxWaitArgv(options: SubprocessWaitOptions): string[] {
   const timeoutArg = options.timeoutArg ?? DEFAULT_WAIT_TIMEOUT_ARG;
   const argv = [options.launcherPath, "mailbox", "wait", "--session-key", options.sessionKey, "--timeout", timeoutArg, "--format", "json"];
+  const root = options.root?.trim();
+  if (root) argv.push("--root", root);
   const slug = options.slug?.trim();
   if (slug) argv.push("--slug", slug);
   return argv;
+}
+
+/**
+ * Builds the arm-time `SubprocessWaitOptions` for a session: the wait's
+ * `--root` is the session's own cwd, the same root the bridge's bootstrap
+ * `ferrule` binds, so a worktree/clone-scope slug resolves the store that
+ * session registered in even when Pi was launched from another directory.
+ */
+export function sessionMailboxWaitOptions(session: {
+  launcherPath: string;
+  pluginDir: string;
+  sessionKey: string;
+  slug?: string;
+  cwd: string;
+  onStderr?: (line: string) => void;
+}): SubprocessWaitOptions {
+  return {
+    launcherPath: session.launcherPath,
+    pluginDir: session.pluginDir,
+    sessionKey: session.sessionKey,
+    slug: session.slug,
+    root: session.cwd,
+    onStderr: session.onStderr,
+  };
 }
 
 /**

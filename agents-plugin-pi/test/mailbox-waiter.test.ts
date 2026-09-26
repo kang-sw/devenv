@@ -19,6 +19,7 @@ import {
   createSubprocessWait,
   mapMailboxWaitExit,
   resolveMailboxSelfSlug,
+  sessionMailboxWaitOptions,
   shouldArmMailboxWaiter,
   startMailboxWaiter,
   WS_MAILBOX_CUSTOM_TYPE,
@@ -458,5 +459,24 @@ describe("buildMailboxWaitArgv", () => {
   test("a custom timeoutArg is respected alongside a slug", () => {
     const argv = buildMailboxWaitArgv({ launcherPath: "/l", pluginDir: "/p", sessionKey: "my-key", slug: "scout@worktree", timeoutArg: "5m" });
     assert.deepEqual(argv, ["/l", "mailbox", "wait", "--session-key", "my-key", "--timeout", "5m", "--format", "json", "--slug", "scout@worktree"]);
+  });
+
+  test("a root option reaches the invocation as --root", () => {
+    const argv = buildMailboxWaitArgv({ launcherPath: "/l", pluginDir: "/p", sessionKey: "my-key", slug: "scout@worktree", root: "/work/tree" });
+    assert.deepEqual(argv, ["/l", "mailbox", "wait", "--session-key", "my-key", "--timeout", "10m", "--format", "json", "--root", "/work/tree", "--slug", "scout@worktree"]);
+  });
+
+  test("an empty/whitespace root is treated as absent", () => {
+    const argv = buildMailboxWaitArgv({ launcherPath: "/l", pluginDir: "/p", sessionKey: "my-key", root: "  " });
+    assert.deepEqual(argv, ["/l", "mailbox", "wait", "--session-key", "my-key", "--timeout", "10m", "--format", "json"]);
+  });
+});
+
+describe("sessionMailboxWaitOptions", () => {
+  test("the session cwd becomes the wait's --root, not the launcher dir", () => {
+    const onStderr = (): void => {};
+    const options = sessionMailboxWaitOptions({ launcherPath: "/plug/bin/l.py", pluginDir: "/plug", sessionKey: "k", slug: "scout@worktree", cwd: "/work/tree", onStderr });
+    assert.deepEqual(options, { launcherPath: "/plug/bin/l.py", pluginDir: "/plug", sessionKey: "k", slug: "scout@worktree", root: "/work/tree", onStderr });
+    assert.deepEqual(buildMailboxWaitArgv(options).slice(-4), ["--root", "/work/tree", "--slug", "scout@worktree"]);
   });
 });

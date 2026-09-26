@@ -199,7 +199,7 @@ import { ChildChannel, readAndDeleteChannelBootstrap } from "./agent-channel.ts"
 import { ChildApprovalGate } from "./approval-protocol.ts";
 import { isLeadOrFork, readSpawnRole, WS_PI_FORK_CONTEXT_ENV, WS_PI_PARENT_SESSION_KEY_ENV, type SpawnRole } from "./process-role.ts";
 import { createApprovalRelay, registerExecuteGateway } from "./execute-gateway.ts";
-import { buildMailboxPushMessage, createBridgeDrain, createSubprocessWait, resolveMailboxSelfSlug, shouldArmMailboxWaiter, startMailboxWaiter, type MailboxToolCall, type MailboxWaiterHandle } from "./mailbox-waiter.ts";
+import { buildMailboxPushMessage, createBridgeDrain, createSubprocessWait, resolveMailboxSelfSlug, sessionMailboxWaitOptions, shouldArmMailboxWaiter, startMailboxWaiter, type MailboxToolCall, type MailboxWaiterHandle } from "./mailbox-waiter.ts";
 import { armForkRoleWiring, registerFork } from "./fork.ts";
 import {
   buildForkQuestionLeadNotice,
@@ -730,13 +730,14 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
       // this attempt must not overwrite it.
       if (armEpoch === mailboxWaiterEpoch) {
         mailboxWaiterHandle = startMailboxWaiter({
-          runWait: createSubprocessWait({
+          runWait: createSubprocessWait(sessionMailboxWaitOptions({
             launcherPath,
             pluginDir,
             sessionKey: mailboxSessionKey,
             slug: selfSlug,
+            cwd: ctx.cwd,
             onStderr: reportMailboxWaiterDiagnostic,
-          }),
+          })),
           drainMail: createBridgeDrain(mailboxCallTool, mailboxSessionKey),
           admit: (envelope) => sendToLead(pi, buildMailboxPushMessage(envelope), "steer", "always"),
           onError: reportMailboxWaiterDiagnostic,
