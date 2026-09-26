@@ -113,7 +113,7 @@ import { consumedApprovalsFromResume, parseApprovalConsumedMessage, pendingAppro
 import { allocateAgentHome, createAgentStorageContext, inspectOwnedHomeRemoval, isOwnedSessionPath, observeSessionWrite, persistOwnershipDescendantUsage, persistOwnershipTelemetry, readOwnership, removedAgentMessage, removeOwnedAgentHome, touchOwnership, updateOwnership, writeOwnership, type AgentOwnership, type AgentStorageContext } from "./agent-storage.ts";
 import { ownerNotifyRef } from "./owner-notify.ts";
 export { ownerNotifyRef } from "./owner-notify.ts";
-import { readSessionEntries, reduceTelemetry, type AgentTelemetry, type CumulativeCost, type TelemetryOrigin } from "./agent-telemetry.ts";
+import { IncrementalSessionReader, reduceTelemetry, type AgentTelemetry, type CumulativeCost, type TelemetryOrigin } from "./agent-telemetry.ts";
 import { attachDescendantUsage, descendantUsageOf, evaluateDescendantUsage } from "./agent-usage-rollup.ts";
 import { CHILD_MANAGEMENT_TOOLS, DEFAULT_MAX_AGENT_DEPTH, DELEGATION_ENV, READ_TOOLS, NETWORK_TOOLS, childPolicy, readDelegationPolicy, readOnlyWsTools, type DelegationPolicy, type PlaybookProfile, type RenderProvenance } from "./delegation-policy.ts";
 import { normalizeWriteScopes, type EffectiveWriteCapability, type WriteScope } from "./write-scopes.ts";
@@ -438,6 +438,13 @@ export interface RpcAgentRecord {
   telemetry?: AgentTelemetry;
   /** Legacy-fork floor: permits post-launch context occupancy, never lifetime cost. */
   telemetryContextFloor?: TelemetryOrigin;
+  /**
+   * Live-only incremental reader of this child's `session.jsonl` for
+   * `refreshAgentTelemetry`, so a refresh parses only the bytes appended since
+   * the last one. Never persisted; dropped with the record when it leaves the
+   * registry so a finished child's projections are not retained.
+   */
+  telemetryReader?: IncrementalSessionReader;
   observedModel?: string;
   observedEffort?: string;
   /** Context occupancy for a legacy fork whose child-attribution boundary is unavailable. */
@@ -759,7 +766,7 @@ export function refreshAgentTelemetry(
     return changed;
   };
   const path = state?.sessionFile ?? record.sessionPath;
-  const read = readSessionEntries(path);
+  const read = (record.telemetryReader ??= new IncrementalSessionReader()).read(path);
   const sessionId = state?.sessionId ?? (read && !("transient" in read) ? read.headerId : undefined);
   const reading = contextReading(opts?.stats, path, sessionId);
   const model = state?.model?.provider && state.model.id ? `${state.model.provider}/${state.model.id}` : undefined;
@@ -3109,6 +3116,7 @@ export function evictForCapacity(
       return { ok: false, error: `ws-pi-agent: ws-agent-spawn rejected: could not preserve evicted cost telemetry for ${candidate.agentId}` };
     }
     candidate.ownershipObserverStop?.();
+    delete candidate.telemetryReader;
     registry.delete(candidate.agentId);
     evictedLabels.push(candidate.alias ?? candidate.agentId);
   }
