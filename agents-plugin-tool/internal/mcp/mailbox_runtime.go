@@ -1,8 +1,10 @@
 package mcp
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -66,6 +68,13 @@ type mailboxRuntimeState struct {
 	identityValue mailboxIdentity
 
 	registerOnce sync.Once
+
+	// registeredMu guards registeredRoot/registered, written once by the
+	// registerOnce body on a request goroutine and read by the background
+	// presence ticker goroutine.
+	registeredMu   sync.Mutex
+	registered     bool
+	registeredRoot string
 
 	secretOnce  sync.Once
 	secretValue []byte
@@ -137,10 +146,13 @@ func (identity mailboxIdentity) address() string {
 // closes the "ordinary restart" false-positive-conflict gap (a crashed
 // process's own recent heartbeat must not block its own restart from
 // reclaiming the name for up to mailboxLivenessThreshold). It intentionally
-// does NOT treat "PID still running" as sufficient for liveness on its own
-// (that would make an idle-but-alive process immune to the heartbeat
-// window, requiring a background liveness mechanism — out of scope here;
-// deferred to 260913-feat-cross-session-mailbox-wake's Decisions 6/7/9).
+// does NOT treat "PID still running" as sufficient for liveness on its own:
+// recency stays the liveness signal, and an idle-but-alive holder keeps it
+// fresh through the background presence ticker (runMailboxPresenceTicker),
+// which ServeStdio runs for the server's lifetime. That ticker is a
+// goroutine independent of the request loop, so what the threshold detects
+// is a stopped or suspended serving process, not a wedged request loop: a
+// process whose handlers hang but whose ticker still runs stays live.
 //
 // Liveness itself delegates to wsstate.ProcessAlive rather than a
 // hand-rolled probe: that helper is this repo's own established,
@@ -197,6 +209,12 @@ func (s *Server) ensureMailboxRegistered(root string) {
 		return
 	}
 	s.mailbox.registerOnce.Do(func() {
+		// Retained for the background presence ticker, which has no calling
+		// session and must heartbeat the store this identity registered in.
+		s.mailbox.registeredMu.Lock()
+		s.mailbox.registered = true
+		s.mailbox.registeredRoot = root
+		s.mailbox.registeredMu.Unlock()
 		path, err := wsmailbox.PathForScope(identity.Scope, root)
 		if err != nil {
 			appendDebugEvent("mailbox.register_error", map[string]any{"error": err.Error()})
@@ -257,6 +275,15 @@ func (s *Server) refreshMailboxPresenceHeartbeat(root string) {
 	if !identity.Active || !s.mailboxHeartbeatDue() {
 		return
 	}
+	s.writeMailboxPresenceLastSeen(identity, root)
+}
+
+// writeMailboxPresenceLastSeen stamps LastSeen on identity's presence record
+// in root's store, only while that record's PID is this process: a record
+// another process holds (PID mismatch, including a conflict this process
+// lost) or a missing record is never written, so a name is never
+// resurrected. A no-op for a worktree/clone identity with no root.
+func (s *Server) writeMailboxPresenceLastSeen(identity mailboxIdentity, root string) {
 	if identity.Scope != wsmailbox.ScopeMachine && strings.TrimSpace(root) == "" {
 		return
 	}
@@ -275,6 +302,64 @@ func (s *Server) refreshMailboxPresenceHeartbeat(root string) {
 		store.Presence[identity.Name] = p
 		return nil
 	})
+}
+
+// newMailboxPresenceTicker is the injectable tick source for the background
+// presence ticker; tests replace it with a manual channel. The interval
+// matches mailboxHeartbeatThrottle, well inside mailboxLivenessThreshold.
+var newMailboxPresenceTicker = func() (<-chan time.Time, func()) {
+	ticker := time.NewTicker(mailboxHeartbeatThrottle)
+	return ticker.C, ticker.Stop
+}
+
+// startMailboxPresenceTicker starts the background presence heartbeat for
+// this process's active mailbox identity and returns a channel closed once
+// the ticker goroutine has exited (after ctx is cancelled). A mailbox-inert
+// process starts no goroutine and gets an already-closed channel.
+func (s *Server) startMailboxPresenceTicker(ctx context.Context) <-chan struct{} {
+	done := make(chan struct{})
+	if !s.mailboxIdentityResolved().Active {
+		close(done)
+		return done
+	}
+	tick, stop := newMailboxPresenceTicker()
+	go func() {
+		defer close(done)
+		defer stop()
+		// Request goroutines recover their panics (ServeStdio); this
+		// goroutine does the same so a failed heartbeat write never takes
+		// down the serve process. The heartbeat simply ends.
+		defer func() {
+			if r := recover(); r != nil {
+				recordPanic("mailbox.presence_ticker", "", r, debug.Stack())
+			}
+		}()
+		s.runMailboxPresenceTicker(ctx, tick)
+	}()
+	return done
+}
+
+// runMailboxPresenceTicker refreshes this process's presence LastSeen on
+// every tick until ctx is cancelled, so an idle owner — one making no
+// mailbox tool calls, e.g. blocked in an armed mailbox wait — stays live to
+// lookup_peers and its name stays unreclaimable. Each tick follows whatever
+// record the process holds right now by name and PID in the store it
+// registered in; before registration (a worktree/clone identity whose owning
+// login has not arrived yet) a tick is a no-op.
+func (s *Server) runMailboxPresenceTicker(ctx context.Context, tick <-chan time.Time) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick:
+			s.mailbox.registeredMu.Lock()
+			registered, root := s.mailbox.registered, s.mailbox.registeredRoot
+			s.mailbox.registeredMu.Unlock()
+			if registered {
+				s.writeMailboxPresenceLastSeen(s.mailboxIdentityResolved(), root)
+			}
+		}
+	}
 }
 
 // mailboxSecret returns the process-cached, once-per-machine HMAC secret

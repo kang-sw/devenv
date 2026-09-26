@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 306738de11c30b09
 sage-review-completeness-reviewed: 306738de11c30b09
+completed: 2026-09-26
 ---
 
 # Idle mailbox owner's presence goes stale, and the Pi waiter omits --root
@@ -116,3 +117,45 @@ Verification:
   into a small pure helper and test that.
 - Existing suites pass: `go test ./internal/mcp/ ./cmd/ws-mcp/` in
   `agents-plugin-tool/` and `npm test` in `agents-plugin-pi/`.
+
+### Result (bcd0d7eb4) - 2026-09-26
+
+Landed in 3edd02c6b (Pi), d5f78dc41 (Go ticker), and bcd0d7eb4 (round-1 review fixes).
+
+- **Presence ticker.** `ServeStdio` starts `startMailboxPresenceTicker` for an
+  active mailbox identity. A mailbox-inert process starts no goroutine. Every
+  `mailboxHeartbeatThrottle` (1 minute) `runMailboxPresenceTicker` stamps
+  `LastSeen` through `writeMailboxPresenceLastSeen`, the PID-gated write that
+  was extracted from `refreshMailboxPresenceHeartbeat` and is now shared with
+  it. It writes against the root retained at registration (`registeredRoot`,
+  set in the `registerOnce` body), and a tick before registration is a no-op.
+  The ticker stops at EOF before in-flight handlers drain, and on every other
+  return path through the deferred stop. Its goroutine recovers panics into
+  the crash log through `recordPanic`. The `mailboxPresenceLive` comment now
+  says what the threshold detects: a stopped or suspended process, not a
+  wedged request loop.
+- **Pi `--root`.** `buildMailboxWaitArgv` emits `--root` when
+  `SubprocessWaitOptions.root` is set. The arm site in `index.ts` builds its
+  options through the new pure helper `sessionMailboxWaitOptions`, which maps
+  `ctx.cwd` to `root`.
+- **Decisions:**
+  - The ticker bypasses the `mailboxHeartbeatDue` throttle. A root-less tool
+    call claims the throttle window without writing, which could otherwise
+    starve the ticker.
+  - `--root` is passed on reply-id-only waits too. The CLI accepts it without
+    `--slug`.
+  - The reclaimed, PID-rewritten record test named in Constraints was not
+    added. `260926-bug-pi-execute-worker-steals-mailbox-owner` has not landed,
+    so that test goes to whichever ticket lands second. The ticker is tested
+    against a record that rebind rebuilt under this PID.
+- **Verification:**
+  - `go test ./internal/mcp/ ./cmd/ws-mcp/` in `agents-plugin-tool/`: ok.
+  - Targeted run with `-race`: clean.
+  - The EOF-ordering test was mutation-checked and fails without the fix.
+  - `npm test` in `agents-plugin-pi/`: 1866 tests, 1832 pass, 31 fail. The
+    failing set is identical to the pre-change baseline on this machine
+    (environment failures such as symlinked `node_modules`, sandbox, and
+    sockets). `test/mailbox-waiter.test.ts` passes 37/37.
+  - Review: partitioned correctness, fit, and test. Round 1 raised six minors
+    and no Critical or Important findings. All six are fixed in bcd0d7eb4, and
+    the round-2 verification was clean.
