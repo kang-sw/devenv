@@ -498,7 +498,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-09-26T04:27:09Z"
+        "touched_at": "2026-09-26T04:28:20Z",
+        "impl": {
+          "branch": "impl/develop/nape-ahoy-slip"
+        }
       }
     },
     "260926-bug-pi-children-inherit-mailbox-identity": {
