@@ -195,9 +195,9 @@ describe("ChildApprovalGate", () => {
     assert.equal(await settled(gate.waitForDecision(link, "call-9", undefined)), "pending", "not buffered as well as consumed");
 
     // The bound: the oldest early decision is dropped first.
-    for (let i = 0; i <= ChildApprovalGate.EARLY_DECISION_CAP; i++) link.deliver(approvalDecisionMessage(`bulk-${i}`, { decision: "approve" }));
+    for (let i = 0; i <= ChildApprovalGate.RETAINED_DECISION_CAP; i++) link.deliver(approvalDecisionMessage(`bulk-${i}`, { decision: "approve" }));
     assert.equal(await settled(gate.waitForDecision(link, "bulk-0", undefined)), "pending", "evicted");
-    assert.deepEqual(await gate.waitForDecision(link, `bulk-${ChildApprovalGate.EARLY_DECISION_CAP}`, undefined), { decision: "approve" });
+    assert.deepEqual(await gate.waitForDecision(link, `bulk-${ChildApprovalGate.RETAINED_DECISION_CAP}`, undefined), { decision: "approve" });
     detach();
     link.deliver(approvalDecisionMessage("call-10", { decision: "approve" }));
     assert.equal(await settled(gate.waitForDecision(link, "call-10", undefined)), "pending", "a detached gate keeps nothing");
@@ -246,15 +246,15 @@ describe("ChildApprovalGate", () => {
   test("the consumed list records each acknowledged cmd_id, bounded like the early keep with the oldest dropped first", async () => {
     const gate = new ChildApprovalGate();
     const link = fakeLink();
-    for (let i = 0; i <= ChildApprovalGate.EARLY_DECISION_CAP; i++) {
+    for (let i = 0; i <= ChildApprovalGate.RETAINED_DECISION_CAP; i++) {
       const wait = gate.waitForDecision(link, `c-${i}`, undefined);
       link.deliver(approvalDecisionMessage(`c-${i}`, { decision: "approve" }));
       await wait;
     }
     const consumed = (gate.resume().approval as { consumed: string[] }).consumed;
-    assert.equal(consumed.length, ChildApprovalGate.EARLY_DECISION_CAP);
+    assert.equal(consumed.length, ChildApprovalGate.RETAINED_DECISION_CAP);
     assert.equal(consumed[0], "c-1", "c-0 was the oldest and was dropped");
-    assert.equal(consumed.at(-1), `c-${ChildApprovalGate.EARLY_DECISION_CAP}`);
+    assert.equal(consumed.at(-1), `c-${ChildApprovalGate.RETAINED_DECISION_CAP}`);
   });
 
   test("a failed acknowledgment send leaves the cmd_id pending and out of the consumed list", async () => {

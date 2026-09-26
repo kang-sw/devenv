@@ -107,11 +107,16 @@ type ixCheckout struct {
 // ixRunner wraps wsindex.ExecRunner: it counts remote git invocations by
 // subcommand, records each remote fetch's arguments, and can fail index-ref
 // fetches to simulate a transport failure after a successful discovery.
+// beforeRemote, set through setBeforeRemote (the wsindex countingRunner's
+// setBefore shape), runs ahead of each remote command with its subcommand and
+// arguments, so a test can change the origin between two remote steps of one
+// call.
 type ixRunner struct {
-	mu        sync.Mutex
-	counts    map[string]int
-	fetches   []string
-	failFetch atomic.Bool
+	mu           sync.Mutex
+	counts       map[string]int
+	fetches      []string
+	failFetch    atomic.Bool
+	beforeRemote func(sub string, args []string)
 }
 
 func (r *ixRunner) Run(ctx context.Context, dir string, cmd wsindex.Command) ([]byte, error) {
@@ -130,12 +135,22 @@ func (r *ixRunner) Run(ctx context.Context, dir string, cmd wsindex.Command) ([]
 		if sub == "fetch" {
 			r.fetches = append(r.fetches, strings.Join(cmd.Args, " "))
 		}
+		hook := r.beforeRemote
 		r.mu.Unlock()
+		if hook != nil {
+			hook(sub, cmd.Args)
+		}
 		if sub == "fetch" && r.failFetch.Load() && strings.Contains(strings.Join(cmd.Args, " "), wsindex.RemoteRef) {
 			return nil, errors.New("injected transport failure")
 		}
 	}
 	return wsindex.ExecRunner{}.Run(ctx, dir, cmd)
+}
+
+func (r *ixRunner) setBeforeRemote(fn func(sub string, args []string)) {
+	r.mu.Lock()
+	r.beforeRemote = fn
+	r.mu.Unlock()
 }
 
 func (r *ixRunner) count(sub string) int {
@@ -206,16 +221,18 @@ func (c *ixCheckout) offline() { c.git("remote", "set-url", "origin", ixUnreacha
 func (c *ixCheckout) online()  { c.git("remote", "set-url", "origin", c.env.origin) }
 
 // hang points origin at an ssh remote whose transport never answers, so
-// every remote command runs into its timeout. The script's path is quoted
-// with forward slashes because git runs it through sh, which would eat a
-// Windows path's backslashes and fail fast instead of hanging.
+// every remote command runs into its timeout. The script's path, like the
+// live and stop paths inside it, is shell-quoted with forward slashes because
+// git runs it through sh, which would eat a Windows path's backslashes and
+// fail fast instead of hanging.
 //
 // The transport is a copy of internal/wsindex's hangTransport, whose comment
 // explains its shape; keep the two in step. In short: it blocks on git's
 // stdin, which ends it on POSIX when the timeout kills git's process group,
 // and it also ends on a stop file the cleanup raises, because on Windows the
 // timeout can leave the real git.exe (behind Git for Windows' redirector) and
-// the transport alive inside the test tree, failing TempDir's cleanup.
+// the transport alive inside the test tree, failing TempDir's cleanup. On
+// POSIX the stop file is not waited on (see stopHangTransports).
 func (c *ixCheckout) hang() {
 	t := c.env.t
 	t.Helper()
@@ -228,8 +245,8 @@ func (c *ixCheckout) hang() {
 	t.Cleanup(func() { stopHangTransports(t, live, stop) })
 	script := filepath.Join(dir, "hang-ssh.sh")
 	mustWrite(t, dir, "hang-ssh.sh", fmt.Sprintf(`#!/bin/sh
-live='%s'
-stop='%s'
+live=%s
+stop=%s
 : >"$live/$$"
 exec 3<&0 </dev/null
 cd /
@@ -247,11 +264,11 @@ while kill -0 "$c" 2>/dev/null; do
 done
 wait "$c" 2>/dev/null
 rm -f "$live/$$"
-`, filepath.ToSlash(live), filepath.ToSlash(stop)))
+`, shellQuote(filepath.ToSlash(live)), shellQuote(filepath.ToSlash(stop))))
 	if err := os.Chmod(script, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	c.git("config", "core.sshCommand", "'"+filepath.ToSlash(script)+"'")
+	c.git("config", "core.sshCommand", shellQuote(filepath.ToSlash(script)))
 	c.git("remote", "set-url", "origin", "ssh://git@ticket-index.invalid/repo.git")
 }
 
@@ -259,6 +276,13 @@ rm -f "$live/$$"
 // hang transport to clear its live marker. POSIX has nothing to wait for: the
 // process-group kill already ended each transport (before it could clear its
 // marker, so the markers there are stale by design).
+//
+// On POSIX the stop file is therefore not waited on, and TempDir's removal
+// deletes it right after. That is safe because every remote call is
+// deadline-bound through ExecRunner, and on timeout proc_unix.go SIGKILLs
+// git's whole process group, so no transport survives to need the stop
+// file. A transport that somehow escaped that kill would miss the stop file
+// and end only at the script's 120 s backstop; the backstop is the fallback.
 func stopHangTransports(t *testing.T, live, stop string) {
 	if err := os.WriteFile(stop, nil, 0o644); err != nil {
 		t.Errorf("raise the hang stop file: %v", err)
@@ -279,6 +303,13 @@ func stopHangTransports(t *testing.T, live, stop string) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+}
+
+// shellQuote single-quotes s for sh. It is a copy of internal/wsindex's
+// unexported shellQuote (git.go), kept local like the hang transport itself;
+// keep the two in step.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // call runs one tool and returns its text and whether it was an error.
@@ -1220,7 +1251,9 @@ func TestB5GCRacesAcquire(t *testing.T) {
 	if l := idx.Registrations[stemAlpha].Lease; l == nil || l.Email != "b@example.com" {
 		t.Fatalf("B5: the racing acquire was lost: %+v", l)
 	}
-	// GC ran once: one GC commit, and last_gc is the race's time.
+	// The race leaves one GC commit and last_gc at the race's time. That
+	// holds even if both racers ran GC, so it does not show GC ran once;
+	// the within-period follow-up below carries the once-per-period rule.
 	if idx.Meta.LastGC == nil || !idx.Meta.LastGC.Equal(gcAt) {
 		t.Fatalf("last_gc = %v, want %v", idx.Meta.LastGC, gcAt)
 	}
@@ -1410,6 +1443,40 @@ func TestIndexInitReportsDiscard(t *testing.T) {
 		if x.pendingCount() != 0 {
 			t.Fatalf("%s: pending log not discarded", mode)
 		}
+	}
+}
+
+// C5, adopt error: when the index disappears between Create's ls-remote and
+// the adopt fetch, init fails and still prints the discard report of the
+// pending log that failed adopt already dropped.
+func TestIndexInitAdoptErrorPrintsDiscardReport(t *testing.T) {
+	e := newIxEnv(t)
+	x := e.clone("x", "a@example.com")
+	x.init()
+	x.offline()
+	x.acquire(stemBeta) // one pending entry
+	x.online()
+	listed, deleted := false, false
+	x.runner.setBeforeRemote(func(sub string, args []string) {
+		switch {
+		case sub == "ls-remote":
+			listed = true
+		case sub == "fetch" && listed && !deleted && strings.Contains(strings.Join(args, " "), wsindex.RemoteRef):
+			deleted = true
+			runGit(t, e.origin, "update-ref", "-d", wsindex.RemoteRef)
+		}
+	})
+	out := x.mustRefuse("tickets.index_init", nil, "tickets.index_init: remote index is absent")
+	x.runner.setBeforeRemote(nil)
+	if !deleted {
+		t.Fatalf("the index ref was never deleted before an adopt fetch: %s", out)
+	}
+	const report = "\nreport: ticket-index: 1 offline entries were discarded"
+	if strings.Count(out, report) != 1 {
+		t.Fatalf("adopt error output lacks the discard report: %q", out)
+	}
+	if x.pendingCount() != 0 {
+		t.Fatal("pending log not discarded")
 	}
 }
 

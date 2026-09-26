@@ -22,7 +22,23 @@ func TestMain(m *testing.M) {
 	if os.Getenv("WS_RSRC_ROOT") == "" {
 		_ = os.Setenv("WS_RSRC_ROOT", filepath.Join("..", "..", "..", "agents-plugin", "rsrc"))
 	}
-	os.Exit(m.Run())
+	os.Exit(runTestMain(m))
+}
+
+// runTestMain points WS_CONFIG_HOME at an empty temp dir so CLI tests that
+// assert builtin defaults (the config view's agent tiers) never read the
+// developer's ~/.ws/config.json; spawned binaries inherit it via os.Environ.
+// It is unconditional: an inherited WS_CONFIG_HOME is a real config just the
+// same. Tests that need a config home set their own.
+func runTestMain(m *testing.M) int {
+	configHome, err := os.MkdirTemp("", "ws-mcp-cmd-test-config-")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "TestMain: create temp config home: %v\n", err)
+		return 1
+	}
+	defer os.RemoveAll(configHome)
+	_ = os.Setenv("WS_CONFIG_HOME", configHome)
+	return m.Run()
 }
 
 func TestDefaultRootUsesExplicitRoot(t *testing.T) {

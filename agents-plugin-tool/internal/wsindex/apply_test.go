@@ -365,12 +365,13 @@ func assertCloseOfClosedIsNoOp(t *testing.T, e PendingEntry) {
 }
 
 // C4: a replayed takeover from the same email on another clone reports the
-// takeover warning.
+// takeover warning, under the ticket-index: prefix the conflict reports in the
+// same slot carry.
 func TestReplayKeepsTakeoverWarning(t *testing.T) {
 	idx := leased(ownerA, PhaseActive)
 	e := acquireEntry(ownerA2)
 	audit, report := (&Applier{Now: t0}).Replay(idx, e)
-	if len(audit) != 1 || !strings.Contains(report, "replayed the offline acquire of "+stemX) || !strings.Contains(report, "another clone") {
+	if len(audit) != 1 || !strings.HasPrefix(report, "ticket-index: replayed the offline acquire of "+stemX) || !strings.Contains(report, "another clone") {
 		t.Fatalf("replayed takeover = %v, %q", audit, report)
 	}
 	if holderOf(t, idx) != ownerA2 {

@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 55132ddf9f774b4e
 sage-review-completeness-reviewed: 55132ddf9f774b4e
+completed: 2026-09-25
 ---
 
 # Review-sweep test and naming minors (Pi usage rollup, worktree.list, config isolation)
@@ -224,3 +225,52 @@ Verification:
 - Each of these newly pinned behaviors fails when the pinned code is mutated
   away: the `descendantUsageOrder` gate, `clearAbsent`, the `--no-gpg-sign`
   argument, and the permanent CAS reasons.
+
+### Result (619cb283e) - 2026-09-25
+
+Landed every item except the split-out move-guard finding, in
+340889a15..619cb283e.
+
+- **Config isolation.** `internal/mcp` `runTestMain`, a new
+  `internal/wsconfig/main_test.go` `TestMain`, and (after round-1 review)
+  `cmd/ws-mcp` `TestMain` set `WS_CONFIG_HOME` to an empty temp dir
+  unconditionally. `cmd/ws-mcp` `envValue` now returns the last env entry,
+  matching os/exec, so the mailbox seeding helpers use the subprocess's store.
+- **Pi.** The revived-record rollup test seeds an older in-memory
+  `descendantUsage`; the "parent restart" integration test is retitled as a
+  persistence round-trip; `EARLY_DECISION_CAP` is now `RETAINED_DECISION_CAP`.
+- **wsindex/wsdoc.** New `TestDiscoveryClearsAbsenceWhenFetchFails` pins
+  `clearAbsent`; `TestIndexCommitIgnoresSigningConfig` asserts the recorded
+  `commit-tree` args carry `--no-gpg-sign`; `TestPushStatusClassification`
+  gains the three permanent reasons as `lost: false`; the replayed-takeover
+  report carries `ticket-index:`; `ticketsDir` is replaced by the exported
+  `wsdoc.TicketsDir`; `stopHangTransports` documents the POSIX no-wait.
+- **mcp.** New worktree.list tests (prunable skip, empty-pool text, unreadable
+  lease warning); the effort-text test uses independent literal expectations
+  plus a 4-line check; `TestIndexInitAdoptErrorPrintsDiscardReport` drives the
+  adopt error path through an `ixRunner` `beforeRemote` hook; the
+  `TestB5GCRacesAcquire` comment no longer claims GC ran once; the hang
+  transport shell-quotes its paths and `core.sshCommand` with a local
+  `shellQuote` copy and carries the POSIX stop-file comment.
+
+Verification:
+
+- `go test ./... -count=1` in `agents-plugin-tool`: all 16 packages ok with the
+  real `HOME`, with an empty temp `HOME`, and with a temp `HOME` whose
+  `.ws/config.json` overrides `agents.tiers`, every `model_aliases` bucket
+  (codex, pi, claude, default), and `worktree_pool`.
+- `npm test` in `agents-plugin-pi`: 1862 tests, 1860 pass, 0 fail, 2 skipped.
+- Mutation-verified (each pin fails with its target removed, confirmed by
+  both the implementer and the test reviewer): the `descendantUsageOrder`
+  gate, `clearAbsent`, `--no-gpg-sign`, each permanent CAS reason, plus the new
+  worktree.list, effort-text, adopt-error, and replay-prefix pins.
+
+Decisions:
+
+- `WS_CONFIG_HOME` isolation also covers `cmd/ws-mcp`: round-1 correctness
+  review found `TestConfigCLICommandsReturnConfigView` fails under a host
+  config that overrides `agents.tiers`, which the Constraint covers.
+- The TestMain override is unconditional, unlike the `WS_CACHE_HOME` default,
+  because an inherited `WS_CONFIG_HOME` is a real config too.
+- Names: `RETAINED_DECISION_CAP` and `wsdoc.TicketsDir`; `clearAbsent` is
+  pinned at the wsindex layer.

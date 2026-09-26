@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -156,6 +157,13 @@ rm -f "$live/$$"
 // transport to clear its live marker. POSIX has nothing to wait for: the
 // process-group kill already ended each transport (before it could clear its
 // marker, so the markers there are stale by design).
+//
+// On POSIX the stop file is therefore not waited on, and TempDir's removal
+// deletes it right after. That is safe because every remote call is
+// deadline-bound through ExecRunner, and on timeout proc_unix.go SIGKILLs
+// git's whole process group, so no transport survives to need the stop
+// file. A transport that somehow escaped that kill would miss the stop file
+// and end only at the script's 120 s backstop; the backstop is the fallback.
 func stopHangTransports(t *testing.T, live, stop string) {
 	if err := os.WriteFile(stop, nil, 0o644); err != nil {
 		t.Errorf("raise the hang stop file: %v", err)
@@ -759,6 +767,50 @@ func TestNeverSeenReadTimeoutSilencesReadsNotWrites(t *testing.T) {
 	}
 }
 
+// A discovery that sees the index ref clears a cached absence even when the
+// fetch that follows fails: sync's explicit clear is the only thing that
+// drops it on that path (markSynced never runs), so without it the next read
+// would trust the stale absence and never look again within the TTL.
+func TestDiscoveryClearsAbsenceWhenFetchFails(t *testing.T) {
+	h := newHarness(t)
+	y := h.clone("y", "y@example.com")
+	h.initIndex(y)
+	x := h.clone("x", "x@example.com")
+	x.opts.ReadTimeout = time.Nanosecond // the read-path discovery times out
+	if view, err := x.client().Read(bg); err != nil || view.State != ViewAbsent {
+		t.Fatalf("Read = %s, %v; want absent", view.State, err)
+	}
+	x.opts.ReadTimeout = 0
+	cl := x.client()
+	if st := cl.loadState(); st.AbsentAt == nil || st.AbsentSource != absenceReadTimeout {
+		t.Fatalf("state after the timed-out read = %+v, want a cached read-timeout absence", st)
+	}
+
+	// The write path's own discovery sees the ref; the fetch after it fails.
+	x.runner.setBefore(func(cmd Command) {
+		if remoteSubcommand(cmd) == "fetch" {
+			x.setOriginURL(unreachableURL)
+		}
+	})
+	if res, _, err := cl.Submit(bg, &Submission{Entry: registerEntry("260924-feat-x"), Applier: &Applier{Now: h.clock.Now()}}); err == nil || !strings.Contains(err.Error(), "could not be fetched") {
+		t.Fatalf("Submit = %+v, %v; want the discovered-but-unfetched failure", res, err)
+	}
+	x.runner.setBefore(nil)
+	x.setOriginURL(h.origin)
+	if st := cl.loadState(); st.AbsentAt != nil {
+		t.Fatalf("a discovery that saw the ref left the cached absence: %+v", st)
+	}
+
+	discoveries := x.runner.count("ls-remote")
+	view, err := cl.Read(bg)
+	if err != nil || view.State != ViewFresh || view.Index == nil {
+		t.Fatalf("Read after the failed fetch = %s, %v; want fresh from a new discovery", view.State, err)
+	}
+	if n := x.runner.count("ls-remote"); n != discoveries+1 {
+		t.Fatalf("ls-remote calls by the read = %d, want one discovery", n-discoveries)
+	}
+}
+
 // A never-seen clone on a hanging origin pays at most one read-path and one
 // write-path discovery per absence TTL, however many reads and writes run.
 func TestNeverSeenTimeoutsCacheAbsencePerPath(t *testing.T) {
@@ -921,8 +973,9 @@ func TestIndexPushBypassesPrePushHook(t *testing.T) {
 
 // Index commits are never signed: commit.gpgSign with a signing program that
 // always fails still lets the index write land. Current git's commit-tree
-// already ignores commit.gpgSign; the --no-gpg-sign flag keeps that true on
-// the older versions that honored it, and this test guards the outcome.
+// already ignores commit.gpgSign, so the outcome alone passes without the
+// flag; the recorded commit-tree arguments pin --no-gpg-sign itself, which is
+// what guards against a git that honors commit.gpgSign there.
 func TestIndexCommitIgnoresSigningConfig(t *testing.T) {
 	h := newHarness(t)
 	c := h.clone("x", "x@example.com")
@@ -933,12 +986,31 @@ func TestIndexCommitIgnoresSigningConfig(t *testing.T) {
 	if out, err := exec.Command("git", "-C", c.root, "commit", "--quiet", "--allow-empty", "-m", "probe").CombinedOutput(); err == nil {
 		t.Fatalf("the signing config did not break a plain commit: %s", out)
 	}
+	var mu sync.Mutex
+	var commitTrees [][]string
+	c.runner.setBefore(func(cmd Command) {
+		if remoteSubcommand(cmd) == "commit-tree" {
+			mu.Lock()
+			commitTrees = append(commitTrees, cmd.Args)
+			mu.Unlock()
+		}
+	})
 	h.initIndex(c)
 	if res := h.submit(c.client(), "260924-feat-signed"); res.Status != WriteWritten {
 		t.Fatalf("Submit = %+v, want written despite the signing config", res)
 	}
 	if h.remoteIndex().Registrations["260924-feat-signed"] == nil {
 		t.Fatal("the index write did not land")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(commitTrees) == 0 {
+		t.Fatal("no commit-tree invocation was recorded; the argument check below would pass vacuously")
+	}
+	for _, args := range commitTrees {
+		if !slices.Contains(args, "--no-gpg-sign") {
+			t.Errorf("commit-tree ran without --no-gpg-sign: %v", args)
+		}
 	}
 }
 

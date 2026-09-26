@@ -149,7 +149,7 @@ func (a *Applier) Replay(idx *Index, e PendingEntry) ([]string, string) {
 		return nil, out.Refusal.Message
 	}
 	if out.Warning != "" {
-		return out.Audit, fmt.Sprintf("replayed the offline %s of %s recorded on %s: %s", e.Op, e.Stem, recordedOn(e), out.Warning)
+		return out.Audit, fmt.Sprintf("ticket-index: replayed the offline %s of %s recorded on %s: %s", e.Op, e.Stem, recordedOn(e), out.Warning)
 	}
 	return out.Audit, ""
 }

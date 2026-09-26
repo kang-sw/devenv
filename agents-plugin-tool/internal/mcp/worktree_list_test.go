@@ -327,3 +327,59 @@ func TestWorktreeListSchemaRequiresSessionKey(t *testing.T) {
 		t.Fatal("worktree.list schema missing session_key property")
 	}
 }
+
+// TestWorktreeListSkipsPrunableEntries pins that a pool worktree whose
+// directory was removed without `git worktree prune` is left out: its record
+// is prunable, and describing it would only produce git failures.
+func TestWorktreeListSkipsPrunableEntries(t *testing.T) {
+	s, _, base, leadKey := worktreeListServer(t)
+	live := acquireForTest(t, s, 1, leadKey, base, "impl/test/live")
+	gone := acquireForTest(t, s, 2, leadKey, base, "impl/test/gone")
+	if err := os.RemoveAll(gone.Path); err != nil {
+		t.Fatal(err)
+	}
+	res := listForTest(t, s, 3, leadKey)
+	if len(res.Worktrees) != 1 || res.Worktrees[0].Path != live.Path {
+		t.Fatalf("want only the live worktree %q, got %+v", live.Path, res.Worktrees)
+	}
+}
+
+// TestWorktreeListTextEmptyPool pins the empty-pool text form: the pools line
+// followed by "worktrees: none" and nothing else.
+func TestWorktreeListTextEmptyPool(t *testing.T) {
+	s, _, _, leadKey := worktreeListServer(t)
+	text := toolText(t, callToolOnce(t, s, 1, "worktree.list", map[string]any{"session_key": leadKey}))
+	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
+	if len(lines) != 2 || !strings.HasPrefix(lines[0], "pools: ") || lines[1] != "worktrees: none" {
+		t.Fatalf("empty pool text must be the pools line then \"worktrees: none\":\n%s", text)
+	}
+}
+
+// TestWorktreeListWarnsOnUnreadableLease pins the lease-read-failure warning:
+// a malformed lease record is reported as a warning, not as a missing lease
+// and not as a list failure.
+func TestWorktreeListWarnsOnUnreadableLease(t *testing.T) {
+	s, _, base, leadKey := worktreeListServer(t)
+	acq := acquireForTest(t, s, 1, leadKey, base, "impl/test/alpha")
+	adminDir := strings.TrimSpace(string(runGitOutput(t, acq.Path, "rev-parse", "--absolute-git-dir")))
+	if err := os.WriteFile(filepath.Join(adminDir, worktreeLeaseFileName), []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e := listEntryByPath(t, listForTest(t, s, 2, leadKey), acq.Path)
+	if e.WorktreeLease != nil {
+		t.Fatalf("an unreadable lease must not be reported as a lease: %+v", e.WorktreeLease)
+	}
+	found := false
+	for _, w := range e.Warnings {
+		if strings.HasPrefix(w, "cannot read worktree lease: parse worktree lease: ") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("entry must warn that its lease cannot be read: %+v", e.Warnings)
+	}
+	text := toolText(t, callToolOnce(t, s, 3, "worktree.list", map[string]any{"session_key": leadKey}))
+	if !strings.Contains(text, "  warning: cannot read worktree lease: parse worktree lease: ") {
+		t.Fatalf("text must carry the lease-read warning:\n%s", text)
+	}
+}
