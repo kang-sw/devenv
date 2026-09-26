@@ -113,8 +113,8 @@ non-authoritative entries.
   format** below; an announced default records its citation in their place.
   An announced item that becomes a policy question changes its class tag,
   returns to `[open]` (back from `## Decisions` into the section if it had
-  moved there), and gains the policy block. Section text is English, like the rest of the
-  ticket.
+  moved there), and gains the policy block. Section text is English, like
+  the rest of the ticket.
 - IDs are `(1)`, `(2)`, `(3)`, ... and never change. A new item takes one past
   the highest ID used so far in this conversation, across every affected
   section and earlier rounds, so a re-created section continues the numbering
