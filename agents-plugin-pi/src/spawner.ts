@@ -2317,6 +2317,13 @@ export interface RpcResumeCtx {
   finishToken?: string;
   /** See `RpcSpawnCtx.channel`. */
   channel?: ChannelLaunchOptions;
+  /**
+   * The dispatching session's current own key
+   * (`BridgeHandle.defaultSessionKeyRef.current`), read at send time. A
+   * dormant non-fork relaunch re-stamps it as the child's ferrule parent
+   * (`relaunchDelegation`). Omitted, the stored policy launches unchanged.
+   */
+  parentSessionKey?: string;
 }
 
 /**
@@ -3463,6 +3470,21 @@ export async function spawnAgent(
 }
 
 /**
+ * The delegation policy a dormant relaunch hands its child. A non-fork record
+ * whose stored policy carries no pre-minted `sessionKey` bootstraps with a
+ * fresh `ferrule`, so its `parentSessionKey` is re-stamped with the
+ * dispatching session's current key: the stored one may be missing (a child
+ * spawned without it), pruned by key retention (which fails `ferrule` as an
+ * unknown parent), or superseded by a lead re-login. A fork stays a lateral
+ * lead with no policy parent; a pre-minted key needs no parent at all.
+ */
+export function relaunchDelegation(record: Pick<RpcAgentRecord, "delegation" | "spawnRole">, currentKey: string | undefined): DelegationPolicy | undefined {
+  const stored = record.delegation;
+  if (!stored || record.spawnRole === "fork" || stored.sessionKey || !currentKey) return stored;
+  return { ...stored, parentSessionKey: currentKey };
+}
+
+/**
  * Delivers `message` to `agentId`, branching on locally-tracked streaming
  * state. `followUp()`/`steer()` only *enqueue*; the queue is drained solely
  * inside an *active* agent-loop run.
@@ -3604,7 +3626,7 @@ export async function sendToAgent(
         record.exploreMode,
         forkLaunch,
         ctx.extensionPath,
-        record.delegation,
+        relaunchDelegation(record, ctx.parentSessionKey),
       );
       client = new RpcClient(options);
       record.client = client;
@@ -4180,7 +4202,7 @@ export function registerAgentTools(
       // `RpcResumeCtx.leadSend`), unlike ask.ts's overlay channel.
       const result = await sendToAgent(
         rpcRegistry,
-        { pi, cwd: sessionCtx.cwd, extensionPath: sessionCtx.extensionPath, onApprovalPending, leadSend: true },
+        { pi, cwd: sessionCtx.cwd, extensionPath: sessionCtx.extensionPath, onApprovalPending, leadSend: true, parentSessionKey: bridge.defaultSessionKeyRef.current },
         p.agent_id,
         p.message,
         true,

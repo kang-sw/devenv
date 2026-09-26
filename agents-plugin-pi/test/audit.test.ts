@@ -24,6 +24,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
+  auditResumeCtx,
   buildAuditPickerItems,
   createAuditChannel,
   openPicker,
@@ -366,6 +367,16 @@ describe("createAuditChannel", () => {
     assert.equal(channel.liveness(), "idle-awaiting-owner");
     r.running = true;
     assert.equal(channel.liveness(), "running");
+  });
+});
+
+describe("auditResumeCtx", () => {
+  test("reads the lead's live key at send time as a relaunch's ferrule parent", () => {
+    const sessionKeyRef: { current: string | undefined } = { current: "lead-at-register" };
+    const sendCtx = { pi: {} as ExtensionAPI, cwd: "/repo", extensionPath: "ext.ts", sessionKeyRef };
+    sessionKeyRef.current = "lead-after-relogin";
+    assert.deepEqual(auditResumeCtx(sendCtx), { pi: sendCtx.pi, cwd: "/repo", extensionPath: "ext.ts", parentSessionKey: "lead-after-relogin" });
+    assert.equal(auditResumeCtx({ pi: sendCtx.pi, cwd: "/repo", extensionPath: "ext.ts" }).parentSessionKey, undefined);
   });
 });
 
