@@ -377,6 +377,51 @@ func TestMailboxPresenceTickerFollowsLatestLeadRebindRoot(t *testing.T) {
 	}
 }
 
+// TestMailboxPresenceTickerIgnoresRefusedLeadRebindRoot verifies only a
+// successful lead rebind moves the ticker: a rebind under root B refused
+// because a live different process holds the name there leaves the ticker
+// heartbeating root A's store, where this process's record still lives.
+func TestMailboxPresenceTickerIgnoresRefusedLeadRebindRoot(t *testing.T) {
+	setupMailboxTestEnv(t)
+	rootA, rootB := t.TempDir(), t.TempDir()
+	initGit(t, rootA)
+	initGit(t, rootB)
+	otherPID := os.Getppid()
+	if otherPID == os.Getpid() || otherPID <= 0 {
+		t.Skipf("cannot obtain a distinct parent PID (ppid=%d)", otherPID)
+	}
+	t.Setenv(envMailbox, "anchored@worktree")
+	s := NewServer(rootA, "test")
+	s.ensureMailboxRegistered(rootA)
+
+	pathA, err := wsmailbox.WorktreePath(rootA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pathB, err := wsmailbox.WorktreePath(rootB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	holder := wsmailbox.Presence{Name: "anchored", Scope: wsmailbox.ScopeWorktree, PID: otherPID, Owner: "other-key", LastSeen: mailboxNowString()}
+	if err := wsmailbox.WithLock(pathB, func(store *wsmailbox.StoreFile) error {
+		store.Presence["anchored"] = holder
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	s.rebindMailboxOwnerAtFerrule("lead-key", "", roleLead, rootB)
+	if got := loadPresence(t, pathB, "anchored"); got != holder {
+		t.Fatalf("rebind under root B overwrote a live holder: %#v", got)
+	}
+
+	later := advanceMailboxClock(t, 5*time.Minute)
+	driveMailboxPresenceTicks(t, s, 1)
+
+	if got, want := loadPresence(t, pathA, "anchored").LastSeen, later.Format(time.RFC3339); got != want {
+		t.Fatalf("ticker left root A after a refused rebind: A LastSeen %q, want %q", got, want)
+	}
+}
+
 // TestMailboxPresenceTickerBypassesHeartbeatThrottle verifies a tick writes
 // even when a tool call has just claimed the heartbeat throttle window: a
 // tick routed through the throttled refresh would be skipped whenever

@@ -212,7 +212,8 @@ func (s *Server) ensureMailboxRegistered(root string) {
 	}
 	s.mailbox.registerOnce.Do(func() {
 		// Retained for the background presence ticker, which has no calling
-		// session and must heartbeat the store this identity registered in.
+		// session: it heartbeats this registration root's store until a
+		// successful lead rebind moves registeredRoot to another root.
 		s.mailbox.registeredMu.Lock()
 		s.mailbox.registered = true
 		s.mailbox.registeredRoot = root
