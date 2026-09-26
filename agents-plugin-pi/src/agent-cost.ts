@@ -183,7 +183,7 @@ class CostEstimateState {
     for (const agentId of removed) {
       const record = this.registry.get(agentId);
       record?.ownershipObserverStop?.();
-      if (record) record.ownershipObserverStop = undefined;
+      if (record) { record.ownershipObserverStop = undefined; delete record.telemetryReader; }
       this.registry.delete(agentId);
     }
   }

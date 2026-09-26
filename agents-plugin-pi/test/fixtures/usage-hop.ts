@@ -42,6 +42,12 @@ async function runHop(): Promise<void> {
     if (String(path).endsWith(".jsonl")) sessionReads.add(String(path));
     return (originalRead as (...args: unknown[]) => unknown).call(this, path, ...rest);
   };
+  // The telemetry refresh reads a child session incrementally through a file descriptor.
+  const originalOpen = fs.openSync;
+  (fs as { openSync: unknown }).openSync = function (this: unknown, path: fs.PathLike, ...rest: unknown[]) {
+    if (String(path).endsWith(".jsonl")) sessionReads.add(String(path));
+    return (originalOpen as (...args: unknown[]) => unknown).call(this, path, ...rest);
+  };
   syncBuiltinESMExports();
 
   const [
