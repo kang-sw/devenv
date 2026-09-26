@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 681fb14acbe21b2b
 sage-review-completeness-reviewed: 681fb14acbe21b2b
+completed: 2026-09-26
 ---
 
 # Pi child processes inherit the lead's mailbox identity env
@@ -100,3 +101,20 @@ Verification:
   `WS_MAILBOX` and `WS_MAILBOX_AUTO` to empty even when the parent
   `process.env` carries them.
 - Existing Pi test suite passes (`npm test` in `agents-plugin-pi/`).
+
+### Result (85b1f2db6) - 2026-09-26
+
+- `buildRpcClientOptions` (`agents-plugin-pi/src/spawner.ts`) blanks
+  `WS_MAILBOX` and `WS_MAILBOX_AUTO` for every role through a new
+  `CHILD_MAILBOX_IDENTITY_ENVS` constant beside `CHILD_BOOTSTRAP_OVERRIDE_ENVS`;
+  forks and the ask discussion fork are not exempted.
+- New `spawner.test.ts` case covers worker, execute-worker, explore, session
+  fork, and context fork (ws-fork / ask), asserting both the built env and the
+  effective overlay over a parent carrying both keys; the two exact env-shape
+  tests gained the two keys.
+- Verification: `npm test` in `agents-plugin-pi/` - new test passes; 31
+  failures identical to a baseline run without the change (web-search
+  extension resolution and control-channel socket tests in this worktree
+  environment). Single independent review: clean.
+- Decision: Claude SDK delegates were left untouched because
+  `delegateEnvironment` already passes an allowlisted env without `WS_MAILBOX*`.
