@@ -2214,8 +2214,11 @@ func TestPlaybookPrintGoldenLeadWorkflowManual(t *testing.T) {
 // single commit. It also pins the ticket-held queue contract: no harness
 // task-list guidance is spliced in any more (the include was removed), the
 // queue state lives in a temporary ticket section whose settled items move to
-// their home sections, the response format (first-presentation block and the
-// one-line re-ask), the blocking final confirmation, and the trace-before-write
+// their home sections, the two item classes (announced defaults admitted only
+// on a citation, reversals always policy questions, one explicit group
+// acknowledgement with silence not counting), the two-group response format
+// with the marked policy group and the one-line re-ask, the settle point that
+// replaced the retired final confirmation, and the trace-before-write
 // instruction. delegates:false — no tip.
 func TestPlaybookPrintGoldenLeadTicket(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
@@ -2236,8 +2239,9 @@ func TestPlaybookPrintGoldenLeadTicket(t *testing.T) {
 				"Dependency closure over the whole batch first",
 				"Stamps leave files uncommitted",
 				"ticket-fact-populator",
-				// First-presentation block template, verbatim.
-				"```text\n# Open Decision Queue\n\n(1) <one-line decision>\n- <context>\n- <alternative: ...>\n> <recommendation and why>\n```",
+				// Two-group response template, verbatim: announced defaults as
+				// one line each, then the visibly labeled policy group.
+				"```text\n# Open Decision Queue\n\n**Announced defaults** - acknowledge the group once\n(1) Will <do X> - <citation>\n\n**Policy questions** - answer each\n(2) <one-line decision>\n- <context>\n- <alternative: ...>\n> <recommendation and why>\n```",
 			} {
 				if !strings.Contains(body, want) {
 					t.Errorf("body missing lead-ticket text %q:\n%s", want, body)
@@ -2256,19 +2260,46 @@ func TestPlaybookPrintGoldenLeadTicket(t *testing.T) {
 				"a confirmed item moves into `## Decisions`",
 				"moves into the relevant decision's `Rejected:` text when it is a meaningful alternative and is otherwise dropped",
 				"a deferred item moves into `## Constraints` as out of scope",
-				"Delete the section only after the final confirmation is approved",
+				"Delete the section only at the settle point",
 				"A reviewer `missing` issue enters the section as a new item",
-				// Response format.
-				"The recommendation lives only in the trailing `>` line",
-				"An item already presented is re-asked as one line, `(n) [open] <one-line decision>`",
-				"Announce the items settled this round in one line",
-				"items settled in earlier rounds are not repeated",
-				"The `# Open Decision Queue` heading and the status tags stay in English; item content follows the user's conversation language",
-				// Final confirmation.
-				"show the confirmed items in full once",
-				"and end the turn. Persist only after the user approves",
+				"returns to `[open]` (back from `## Decisions` into the section if it had moved there)",
+				"Each item records its ID, status tag, class tag, and one-line decision",
+				"class tags are `[announced]` and `[policy]`",
+				"an announced default records its citation in their place",
+				// Item classes: citation admission, reversal rule, and the
+				// open-round consequence hold.
+				"**Announced default**: the item has one answer, and you can cite the reason its alternatives lose",
+				"a language or platform constraint; a prior commit or ticket decision; an established project convention; a direct consequence of an already-confirmed decision; or a documentation-placement choice",
+				"**Policy question**: every item without such a citation",
+				"An item that reverses a prior decision is always a policy question, even when you can cite a reason for the reversal",
+				"A consequence of a policy question still open in the same round is not yet a consequence of an already-confirmed decision",
+				"A reviewer `missing` issue is always a policy question",
+				// Single explicit acknowledgement; silence is not consent.
+				"One explicit user acknowledgement confirms the whole announced group",
+				"Silence is not consent",
+				"the announced items stay `[open]` and you re-ask for the acknowledgement in one line",
+				"An announced item the user objects to becomes a policy question under its existing ID",
+				"need their own acknowledgement",
+				// Settle point replacing the retired final confirmation.
+				"The settle point is reached when the announced defaults are acknowledged and every policy question is confirmed, rejected, or explicitly deferred",
+				"At the settle point, persist without showing the confirmed set again for approval",
 				"A correction returns its item to `[open]` under its existing ID",
-				"before the section is deleted and so before the sage gate",
+				"has no settlement step",
+				// Settlement still precedes the sage gate at both review
+				// entry points, and an unacknowledged group still stops.
+				"settle any queue it opened to the settle point and delete the section, then call",
+				"then settle any queue it opened to the settle point and delete each member's section",
+				"Any Open Decision Queue item the user has not settled, including an announced default not yet acknowledged",
+				// Response format.
+				"announced defaults first, then the policy questions under their visible label",
+				"Omit a group that has no item this round",
+				"An announced default is one line and asks no per-item answer; an unacknowledged one is re-shown as the same one line",
+				"The recommendation lives only in the trailing `>` line",
+				"A policy question already presented is re-asked as one line, `(n) [open] <one-line decision>`",
+				"Report the items settled this round in one line",
+				"items settled in earlier rounds are not repeated",
+				"This per-round settlement report is not the announced-default group",
+				"The `# Open Decision Queue` heading, the two group labels, and the status tags stay in English; item content follows the user's conversation language",
 				// Trace before write.
 				"trace it: apply the change to the ticket as written and follow its consequences through `## Decisions`, `## Constraints`, the phases, the verification expectations, `## Prior Decisions`",
 				"The trace precedes recording the change anywhere in the ticket, including as a new queue item",
@@ -2289,8 +2320,12 @@ func TestPlaybookPrintGoldenLeadTicket(t *testing.T) {
 				"Included Guidance",
 				"task list",
 				"task-list",
+				// The retired blocking step; checked on the normalized body
+				// too, so a line wrap between the words cannot hide it.
+				"final confirmation",
+				"Final confirmation",
 			} {
-				if strings.Contains(body, forbidden) {
+				if strings.Contains(body, forbidden) || strings.Contains(normalized, forbidden) {
 					t.Errorf("body still names retired surface %q:\n%s", forbidden, body)
 				}
 			}

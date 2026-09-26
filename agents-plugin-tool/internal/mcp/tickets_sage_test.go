@@ -372,8 +372,9 @@ func TestServeStdioSageGateDispatch(t *testing.T) {
 
 // TestServeStdioOpenDecisionQueueRefusals pins that the pending-queue refusal
 // reaches the caller through both MCP tools: sage_gate's structured stop with
-// its settle-and-delete instruction (and no posture-uncommitted note, since the
-// stop writes nothing), and tickets.move's error, with the ticket left in todo/.
+// its settle-point-and-delete instruction (and no posture-uncommitted note,
+// since the stop writes nothing), and tickets.move's error, with the ticket
+// left in todo/.
 func TestServeStdioOpenDecisionQueueRefusals(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
@@ -389,18 +390,26 @@ func TestServeStdioOpenDecisionQueueRefusals(t *testing.T) {
 	key, _ := parseLoginResponse(t, callLogin(t, server, 9711, root, nil))
 
 	gate := callToolWithKey(t, server, 9712, key, "tickets.sage_gate", map[string]any{"stem": stem, "landing": "ready"})
-	for _, want := range []string{"action: stop_open_decision_queue", "## Open Decision Queue", "delete the section"} {
+	for _, want := range []string{"action: stop_open_decision_queue", "## Open Decision Queue", "announced defaults acknowledged, every policy question settled", "delete the section"} {
 		if !strings.Contains(gate, want) {
 			t.Fatalf("sage_gate response missing %q:\n%s", want, gate)
 		}
+	}
+	// The settle point replaced the retired final-confirmation step; naming
+	// that step would send a lead to a step lead-ticket no longer has.
+	if strings.Contains(strings.ToLower(gate), "final confirmation") {
+		t.Fatalf("sage_gate response names the retired final confirmation:\n%s", gate)
 	}
 	if strings.Contains(gate, "left uncommitted") {
 		t.Fatalf("the queue stop writes nothing and must not carry the posture-uncommitted note:\n%s", gate)
 	}
 
 	move := callToolWithKey(t, server, 9713, key, "tickets.move", map[string]any{"stem": stem, "to": "ready"})
-	if !strings.Contains(move, "## Open Decision Queue") || !strings.Contains(move, "delete the section") {
+	if !strings.Contains(move, "## Open Decision Queue") || !strings.Contains(move, "announced defaults acknowledged, every policy question settled") || !strings.Contains(move, "delete the section") {
 		t.Fatalf("tickets.move response missing the queue refusal:\n%s", move)
+	}
+	if strings.Contains(strings.ToLower(move), "final confirmation") {
+		t.Fatalf("tickets.move response names the retired final confirmation:\n%s", move)
 	}
 	if _, err := os.Stat(filepath.Join(root, ticketRel)); err != nil {
 		t.Fatalf("refused move must leave the ticket in todo/: %v", err)

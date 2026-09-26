@@ -46,12 +46,53 @@ asking, so judgment is spent here and not at run time.
 For settlement, queue every unconfirmed item that could change ticket text,
 one item per decision. Reconcile item by item; where an answer's reach is
 unclear, state your reading on its own line and leave the item open until the
-user confirms it. Proceed only when every item is confirmed, rejected, or
-explicitly deferred; only confirmed items are authoritative.
+user confirms it. The settle point is reached when the announced defaults are
+acknowledged and every policy question is confirmed, rejected, or explicitly
+deferred; only confirmed items are authoritative. At the settle point, persist
+without showing the confirmed set again for approval: the acknowledgement
+already showed every item, and the trace below and the Sage reviewers guard
+against interacting decisions.
 
 Research entries explicitly labeled as non-authoritative Proposals or Open
 Questions may be preserved without settlement; they do not open a queue item
 unless a decision is needed.
+
+### Item classes
+
+Each item is one of two classes, so the user's judgment goes only to the
+choices that are open.
+
+- **Announced default**: the item has one answer, and you can cite the reason
+  its alternatives lose. The citation is one of: a language or platform
+  constraint; a prior commit or ticket decision; an established project
+  convention; a direct consequence of an already-confirmed decision; or a
+  documentation-placement choice (parent or `related:` link, epic child or
+  standalone, absorb or rewrite, initial status, stem naming, which commit
+  carries the edit), whose line names the placement and cites the neighbouring
+  ticket or convention it follows.
+- **Policy question**: every item without such a citation.
+- An item that reverses a prior decision is always a policy question, even
+  when you can cite a reason for the reversal.
+- A consequence of a policy question still open in the same round is not yet
+  a consequence of an already-confirmed decision: hold it, and add it to the
+  next round's announced defaults once that answer lands.
+- A fact-populator decision gap or a reviewer issue is an announced default
+  when it meets the citation rule. A reviewer `missing` issue is always a
+  policy question, since it is a choice the reviewer could not derive.
+
+Announced defaults are still shown and confirmed, because items a lead treats
+as settled are sometimes materially revised once actually asked:
+
+- One explicit user acknowledgement confirms the whole announced group; it may
+  arrive in the same turn as the policy answers. Silence is not consent: when
+  the user answers the policy questions without acknowledging the group, the
+  announced items stay `[open]` and you re-ask for the acknowledgement in one
+  line.
+- An announced item the user objects to becomes a policy question under its
+  existing ID. So does an already-acknowledged announced item that a later
+  policy answer undercuts.
+- Announced items raised later in the same settlement (a trace knock-on, a new
+  fact-populator gap) need their own acknowledgement.
 
 ### Queue state
 
@@ -64,10 +105,15 @@ non-authoritative entries.
 - Keep the heading line exactly `## Open Decision Queue`; the line under it
   records the last ID used, so the next number survives after settled items
   have left.
-- Each item records its ID, status tag, one-line decision, context, and
-  your recommendation, as the **Response format** block below with the tag
-  after the ID: `(1) [open] <one-line decision>`. Status tags are `[open]`,
-  `[confirmed]`, `[rejected]`, and `[deferred]`. Section text is English, like
+- Each item records its ID, status tag, class tag, and one-line decision, with
+  the tags after the ID: `(1) [open] [policy] <one-line decision>`. Status
+  tags are `[open]`, `[confirmed]`, `[rejected]`, and `[deferred]`; class tags
+  are `[announced]` and `[policy]`. A policy question also records its context,
+  alternatives, and your recommendation as the policy block of the **Response
+  format** below; an announced default records its citation in their place.
+  An announced item that becomes a policy question changes its class tag,
+  returns to `[open]` (back from `## Decisions` into the section if it had
+  moved there), and gains the policy block. Section text is English, like
   the rest of the ticket.
 - IDs are `(1)`, `(2)`, `(3)`, ... and never change. A new item takes one past
   the highest ID used so far in this conversation, across every affected
@@ -81,9 +127,13 @@ non-authoritative entries.
   `## Decisions`; a rejected item moves into the relevant decision's
   `Rejected:` text when it is a meaningful alternative and is otherwise
   dropped; a deferred item moves into `## Constraints` as out of scope.
-- Delete the section only after the final confirmation is approved.
-  `ready/` promotion and design review refuse a ticket that still carries it,
-  whatever its item statuses.
+- A correction returns its item to `[open]` under its existing ID, back from
+  `## Decisions` into the section, and it is reconciled like any other open
+  item.
+- Delete the section only at the settle point. `ready/` promotion and design
+  review refuse a ticket that still carries it, whatever its item statuses.
+  An invocation that queued no item (a drop, a stamp-only commit) has no
+  settlement step.
 - A reviewer `missing` issue enters the section as a new item; after it
   settles and the section is deleted, fix and re-stamp as the stamp result
   directs.
@@ -109,38 +159,38 @@ through review rounds as each change's contradictions surface one round later.
 
 ### Response format
 
-The `# Open Decision Queue` heading and the status tags stay in English; item
-content follows the user's conversation language.
+The `# Open Decision Queue` heading, the two group labels, and the status
+tags stay in English; item content follows the user's conversation language.
 
-Each response asks every item still awaiting an answer. An item's first
-presentation, including an item added mid-settlement, is one block:
+Each response asks every item still awaiting an answer, in two groups:
+announced defaults first, then the policy questions under their visible
+label. Omit a group that has no item this round.
 
 ```text
 # Open Decision Queue
 
-(1) <one-line decision>
+**Announced defaults** - acknowledge the group once
+(1) Will <do X> - <citation>
+
+**Policy questions** - answer each
+(2) <one-line decision>
 - <context>
 - <alternative: ...>
 > <recommendation and why>
 ```
 
-The recommendation lives only in the trailing `>` line of its item's block.
-
-An item already presented is re-asked as one line,
-`(n) [open] <one-line decision>`; re-print its context only when the user
-asks, or point at the ticket section. Announce the items settled this
-round in one line, such as `(1), (2) confirmed · (4) deferred`; items settled
-in earlier rounds are not repeated.
-
-### Final confirmation
-
-When every item is settled, before the section is deleted and so before
-the sage gate, the reviewers, the commit, and any `ready/` move: show the
-confirmed items in full once, the rejected and deferred items in one line,
-and end the turn. Persist only after the user approves. A correction returns its
-item to `[open]` under its existing ID, back from `## Decisions` into the
-section, and it is reconciled like any other open item. An invocation that
-queued no item (a drop, a stamp-only commit) has no final confirmation.
+- An announced default is one line and asks no per-item answer; an
+  unacknowledged one is re-shown as the same one line.
+- A policy question's first presentation is the full block, including an item
+  added mid-settlement and an announced item that became a policy question.
+  The recommendation lives only in the trailing `>` line of its block.
+- A policy question already presented is re-asked as one line,
+  `(n) [open] <one-line decision>`; re-print its context only when the user
+  asks, or point at the ticket section.
+- Report the items settled this round in one line, such as
+  `(1), (2) confirmed · (4) deferred`; items settled in earlier rounds are not
+  repeated. This per-round settlement report is not the announced-default
+  group.
 
 ## Derive actionable work from research
 
@@ -185,8 +235,8 @@ to a status boundary — run it on your judgment, when the epic's cross-child
 design has drifted materially, not as a promotion step.
 
 When you judge a review is due, run **Ground: fact population** first, settle
-any queue it opened through the final confirmation and delete the section, then
-call `{{.McpNamespace}}/tickets.sage_gate(stem, landing: "todo")` (design only;
+any queue it opened to the settle point and delete the section, then call
+`{{.McpNamespace}}/tickets.sage_gate(stem, landing: "todo")` (design only;
 completeness never applies to an epic). Render and spawn the design reviewer when
 the gate requests it, passing the ticket path and populator's `relations:` table;
 record its verdict with `{{.McpNamespace}}/tickets.sage_stamp`. A block leaves the
@@ -203,8 +253,8 @@ promotion is a batch of one.
    prerequisite` or a prerequisite `parent:`. Otherwise name the blocking
    stem and stop before any move.
 2. For every actionable member, run **Ground: fact population** before any
-   reviewer reads the batch, then settle any queue it opened through the final
-   confirmation and delete each member's section. Resolve each
+   reviewer reads the batch, then settle any queue it opened to the settle
+   point and delete each member's section. Resolve each
    `{{.McpNamespace}}/tickets.sage_gate(stem, landing: "ready")` while tickets
    remain at their original paths, including configured recommendations,
    freshness decisions, and existing blocks. Retain the stage selections.
@@ -280,7 +330,8 @@ Drop: `{{.McpNamespace}}/tickets.close(stem, status: "dropped")`. Closing to
 
 - Persisting discussion output before the user has explicitly agreed to
   persist.
-- Any Open Decision Queue item the user has not settled.
+- Any Open Decision Queue item the user has not settled, including an
+  announced default not yet acknowledged.
 - A `block` verdict at a settlement boundary.
 - Dependency closure failing.
 
