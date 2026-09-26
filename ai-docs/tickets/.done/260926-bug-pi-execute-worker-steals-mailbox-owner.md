@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: a6e6f5d7796a9af9
 sage-review-completeness-reviewed: a6e6f5d7796a9af9
+completed: 2026-09-26
 ---
 
 # Pi execute-worker steals the lead's named-inbox mailbox ownership
@@ -175,3 +176,69 @@ Verification:
 - The worker's Result lists each audited `spawnAgent` caller and its outcome
   (already compliant, fixed, or fork-exempt).
 - Existing mailbox and pi test suites pass.
+
+### Result (5ceb91c16) - 2026-09-26
+
+Landed in 163552b7b (ws-mcp), 5fa2e7cb8 and 5ceb91c16 (pi).
+
+- **Decision B (ws-mcp).** `rebindMailboxOwnerAtFerrule` takes the minted
+  key's resolved `toolRole` and returns early unless the mint is parent-less
+  *and* `roleLead`; `handleLeadLogin` passes `parseCapabilityScope`'s result,
+  the `workflow_manual` fresh-bootstrap mint passes `roleLead`. After the
+  existing in-lock live-different-PID refusal, the rebind sets the record's
+  PID to this process, so a dead/stale record is reclaimed and the heartbeat
+  refresh keeps it fresh. Drifted comments updated in `server.go`,
+  `mailbox_runtime.go` (function doc and file header) and
+  `wsmailbox/store.go`.
+- **Decision A (pi).** `ws-execute` passes
+  `parentPolicy: { ...callerDelegationPolicy(bridge.wsToolNames), sessionKey: bridge.defaultSessionKeyRef.current }`.
+  Dormant relaunch goes through the new `relaunchDelegation(record, key)`:
+  a non-fork record whose stored policy has no pre-minted `sessionKey` gets
+  `parentSessionKey` re-stamped with the dispatching session's current key
+  (a copy; the stored policy is not mutated). The key reaches `sendToAgent`
+  as `RpcResumeCtx.leadSessionKey`, read at send time from `ws-agent-send`
+  and from the `/audit` owner send (via the bridge's live
+  `defaultSessionKeyRef`, threaded through `registerAuditCommands`).
+- **Spawn-path audit** (`spawnAgent` callers; `spawnAgent` and `sendToAgent`
+  are the only two `RpcClient` launch sites):
+  - `ws-agent-spawn` (`spawner.ts`) — already compliant.
+  - `explore` (`spawner.ts`) — already compliant.
+  - `ws-execute` (`execute-gateway.ts`) — fixed.
+  - `ws-fork` (`fork.ts`, `buildForkSpawnCtx`) — fork-exempt.
+  - ask discussion fork (`ask.ts`) — fork-exempt.
+  - Relaunch callers: `ws-agent-send` and `/audit` owner send re-stamp;
+    `ask.ts` thread channel and the fork-finish coordinator target forks only
+    and pass no key.
+
+Verification:
+
+- `env -u WS_MAILBOX -u WS_MAILBOX_AUTO go test ./...` (agents-plugin-tool):
+  all packages ok. New tests `TestMailboxFerruleRebindRequiresLeadCapability`
+  (leaf/delegate parent-less ferrules leave the owner; explicit and omitted
+  lead capability rebind) and `TestRebindMailboxOwnerReclaimsDeadPIDRecord`
+  (PID rewritten, heartbeat refresh updates `LastSeen`) both fail with the
+  source change reverted; `TestRebindMailboxOwnerRefusesLiveDifferentPIDHolder`
+  still passes.
+- `npm test` (agents-plugin-pi): 1867 tests, 1833 pass, 31 fail; the failing
+  set is identical to the base (all `web-search-extension-missing`: this
+  worktree has no root `node_modules/pi-web-access`). New tests: execute-worker
+  policy carries `parentSessionKey` equal to the lead key
+  (`execute-gateway.test.ts`); `relaunch-parent-key.test.ts` (unit cases for
+  `relaunchDelegation`, `ws-agent-send` relaunch of dormant worker and
+  execute-worker records re-stamps the key read at send time, a dormant fork
+  relaunch keeps a policy without `parentSessionKey`); `auditResumeCtx` reads
+  the live key (`audit.test.ts`). The execute-gateway and ws-agent-send tests
+  fail with their source change reverted.
+- Review: partitioned correctness/fit/test, round 1 clean with Minors
+  (field rename and helper rename applied in 5ceb91c16); round 2 confirmed.
+  Remaining Minors: `/audit` wiring is covered only through `auditResumeCtx`;
+  the relaunch tests live in their own file rather than `spawner.test.ts`.
+
+Decisions:
+
+- The `/audit` owner send also re-stamps, beyond the ticket's named
+  `ws-agent-send`, because it relaunches dormant non-fork children through
+  the same `sendToAgent` branch.
+- No background-ticker test: sibling
+  `260926-bug-mailbox-idle-owner-presence-goes-stale` has not landed, so this
+  ticket lands first and the sibling carries the rebase obligation.

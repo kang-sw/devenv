@@ -271,7 +271,7 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 			// rebind this process's active mailbox identity's owner pointer
 			// too, or its own ambient self-address announcement below would
 			// promise a channel this session was never actually bound to.
-			s.rebindMailboxOwnerAtFerrule(mintedKey, "", canonical)
+			s.rebindMailboxOwnerAtFerrule(mintedKey, "", roleLead, canonical)
 			body = stripModeGatedRegion(body, false)
 			body = injectSessionKeyLine(body, mintedKey)
 			body += "\n\n## Session Key\n" + mintedKey

@@ -18,7 +18,7 @@ import (
 // process-level policy (260913-feat-cross-session-mailbox-core): identity
 // resolution from WS_MAILBOX / WS_MAILBOX_AUTO (Decisions 1, 10),
 // self-registration + duplicate-live-name detection (Decision 2), owner
-// binding at a parent-less ferrule (Decision 3), the caller==owner gate,
+// binding at a parent-less lead ferrule (Decision 3), the caller==owner gate,
 // the always-on reply-id return channel (Decision 11), and envelope
 // stamping (Decision 12). mailbox_tools.go layers the three MCP handlers
 // and the central piggyback wrapper on top of this file; wsmailbox owns
@@ -448,9 +448,14 @@ func (s *Server) markMailboxReplyOpened(sessionKey string) {
 
 // rebindMailboxOwnerAtFerrule rebinds the named-inbox owner pointer to
 // newSessionKey when this process holds an active mailbox identity and the
-// ferrule call is parent-less (Decision 3: top-lead login / re-login
-// recovery, never a worker/delegate mint, which always carries a parent).
-// The address itself (identity.Name/Scope) is never re-minted here.
+// ferrule call is a parent-less lead-capability mint (Decision 3: top-lead
+// login / re-login recovery). A parent-carrying mint never binds, and neither
+// does a parent-less mint whose capability resolves to delegate or leaf: a
+// harness can launch a child without threading the lead's key through, and
+// that child's MCP server may share this process's WS_MAILBOX identity, so a
+// missing parent alone does not prove a top-lead login. An omitted capability
+// resolves to lead (parseCapabilityScope) and still binds. The address itself
+// (identity.Name/Scope) is never re-minted here.
 //
 // It refuses to bind when this process has lost (or is contesting) the
 // duplicate-live-name race: s.mailbox.conflict, set by
@@ -461,8 +466,13 @@ func (s *Server) markMailboxReplyOpened(sessionKey string) {
 // over a name another live process legitimately holds would let this
 // session hijack that process's identity (Critical: owner-rebind ignoring
 // conflict state).
-func (s *Server) rebindMailboxOwnerAtFerrule(newSessionKey, parentKey, root string) {
-	if strings.TrimSpace(parentKey) != "" {
+//
+// A record left behind by a different, no-longer-live PID is reclaimed with
+// this process's PID: refreshMailboxPresenceHeartbeat only refreshes a record
+// whose PID is this process, so keeping the stale PID would leave the
+// reclaimed inbox looking dead to every peer.
+func (s *Server) rebindMailboxOwnerAtFerrule(newSessionKey, parentKey string, scope toolRole, root string) {
+	if strings.TrimSpace(parentKey) != "" || scope != roleLead {
 		return
 	}
 	identity := s.mailboxIdentityResolved()
@@ -495,6 +505,7 @@ func (s *Server) rebindMailboxOwnerAtFerrule(newSessionKey, parentKey, root stri
 			// heartbeat refresh backfills descriptive metadata.
 			p = wsmailbox.Presence{Name: identity.Name, Scope: identity.Scope, PID: pid, StartedAt: nowStr}
 		}
+		p.PID = pid
 		p.Owner = newSessionKey
 		p.LastSeen = nowStr
 		store.Presence[identity.Name] = p

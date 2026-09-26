@@ -3,6 +3,7 @@ package mcp
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -624,7 +625,7 @@ func TestRebindMailboxOwnerRefusesLiveDifferentPIDHolder(t *testing.T) {
 	}
 
 	// Parent-less ferrule login: the only path that ever rebinds ownership.
-	s.rebindMailboxOwnerAtFerrule("intruder-session-key", "", root)
+	s.rebindMailboxOwnerAtFerrule("intruder-session-key", "", roleLead, root)
 
 	after, err := wsmailbox.Load(path)
 	if err != nil {
@@ -635,6 +636,121 @@ func TestRebindMailboxOwnerRefusesLiveDifferentPIDHolder(t *testing.T) {
 	}
 	if got := after.Presence["frank"].PID; got != otherLivePID {
 		t.Fatalf("rebind clobbered the live holder's presence record: PID = %d, want the live holder's %d", got, otherLivePID)
+	}
+}
+
+// TestMailboxFerruleRebindRequiresLeadCapability verifies that only a
+// parent-less lead-capability ferrule rebinds the named-inbox owner: a
+// parent-less mint whose capability is leaf or delegate (a child launched
+// without its lead's key, sharing the lead's WS_MAILBOX identity) mints its
+// key but leaves the owner pointer alone, while an explicit "lead" capability
+// still rebinds, as an omitted capability does (see
+// TestMailboxFerruleRebindPreservesAddressAndQueuedMail).
+func TestMailboxFerruleRebindRequiresLeadCapability(t *testing.T) {
+	setupMailboxTestEnv(t)
+	root := t.TempDir()
+	initGit(t, root)
+
+	t.Setenv(envMailbox, "grace@worktree")
+	s := NewServer(root, "test")
+	leadKey := mailboxLogin(t, s, 1, root)
+
+	path, err := wsmailbox.WorktreePath(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := func() string {
+		t.Helper()
+		store, err := wsmailbox.Load(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return store.Presence["grace"].Owner
+	}
+	if got := owner(); got != leadKey {
+		t.Fatalf("parent-less ferrule with omitted capability did not bind: owner = %q, want %q", got, leadKey)
+	}
+
+	for i, capability := range []string{"leaf", "delegate"} {
+		childKey, _ := parseLoginResponse(t, callLogin(t, s, 2+i, root, map[string]any{"capability": capability}))
+		if childKey == "" || childKey == leadKey {
+			t.Fatalf("parent-less %s ferrule did not mint its own key: %q", capability, childKey)
+		}
+		if got := owner(); got != leadKey {
+			t.Fatalf("parent-less %s ferrule rebound ownership: owner = %q, want unchanged %q", capability, got, leadKey)
+		}
+	}
+
+	reloginKey, _ := parseLoginResponse(t, callLogin(t, s, 4, root, map[string]any{"capability": "lead"}))
+	if got := owner(); got != reloginKey {
+		t.Fatalf("parent-less lead ferrule did not rebind: owner = %q, want %q", got, reloginKey)
+	}
+}
+
+// TestRebindMailboxOwnerReclaimsDeadPIDRecord verifies that a lead rebind
+// over a presence record left by a different, exited process (a child that
+// overwrote the record and then quit) takes the record's PID for this
+// process, so the ordinary heartbeat refresh — which only touches a record
+// carrying this process's PID — keeps the reclaimed inbox fresh.
+func TestRebindMailboxOwnerReclaimsDeadPIDRecord(t *testing.T) {
+	setupMailboxTestEnv(t)
+	root := t.TempDir()
+	initGit(t, root)
+
+	t.Setenv(envMailbox, "heidi@worktree")
+	s := NewServer(root, "test")
+	s.ensureMailboxRegistered(root)
+
+	cmd := exec.Command(os.Args[0], "-test.run=^$")
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to run a short-lived child process: %v", err)
+	}
+	if cmd.ProcessState == nil || !cmd.ProcessState.Exited() {
+		t.Fatalf("child process did not reach an Exited state: %v", cmd.ProcessState)
+	}
+	deadPID := cmd.Process.Pid
+	if deadPID == os.Getpid() {
+		t.Fatalf("exited child reused this process's PID %d", deadPID)
+	}
+
+	path, err := wsmailbox.WorktreePath(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := mailboxNow().Add(-(mailboxLivenessThreshold + time.Minute)).Format(time.RFC3339)
+	if err := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
+		p := store.Presence["heidi"]
+		p.PID = deadPID
+		p.Owner = "departed-child-key"
+		p.LastSeen = stale
+		store.Presence["heidi"] = p
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	s.rebindMailboxOwnerAtFerrule("lead-key", "", roleLead, root)
+
+	after, err := wsmailbox.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := after.Presence["heidi"]; got.Owner != "lead-key" || got.PID != os.Getpid() {
+		t.Fatalf("lead rebind over a dead-PID record: owner = %q, PID = %d; want owner %q, PID %d", got.Owner, got.PID, "lead-key", os.Getpid())
+	}
+
+	original := mailboxNow
+	t.Cleanup(func() { mailboxNow = original })
+	later := original().Add(mailboxHeartbeatThrottle + time.Minute)
+	mailboxNow = func() time.Time { return later }
+	s.refreshMailboxPresenceHeartbeat(root)
+
+	refreshed, err := wsmailbox.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := refreshed.Presence["heidi"].LastSeen, later.Format(time.RFC3339); got != want {
+		t.Fatalf("heartbeat refresh skipped the reclaimed record: LastSeen = %q, want %q", got, want)
 	}
 }
 

@@ -710,6 +710,22 @@ export class OwnerSteeringComponent implements Component {
 }
 
 /**
+ * Owner-send context. `sessionKeyRef` is the lead's live own-key ref, read at
+ * send time so a dormant non-fork child relaunched from the audit window gets
+ * the lead's current key as its ferrule parent, as `ws-agent-send` does.
+ */
+export interface AuditSendCtx {
+  pi: ExtensionAPI;
+  cwd: string;
+  extensionPath: string;
+  sessionKeyRef?: { current: string | undefined };
+}
+
+export function auditResumeCtx(sendCtx: AuditSendCtx) {
+  return { pi: sendCtx.pi, cwd: sendCtx.cwd, extensionPath: sendCtx.extensionPath, leadSessionKey: sendCtx.sessionKeyRef?.current };
+}
+
+/**
  * Opens the record-backed viewer for `agentId`. View-mode Esc closes unless
  * the registry still marks the child owner-held, in which case it opens the
  * shared action modal; Enter still raises the same component to interactive
@@ -719,7 +735,7 @@ export async function openViewer(
   ctx: AuditUiCtx & { ui?: { custom?: unknown } },
   rpcRegistry: RpcAgentRegistry,
   agentId: string,
-  sendCtx?: { pi: ExtensionAPI; cwd: string; extensionPath: string },
+  sendCtx?: AuditSendCtx,
 ): Promise<void> {
   if (ctx.mode !== "tui") {
     // Defensive; unreachable given `shouldRegisterAudit`'s registration
@@ -740,7 +756,7 @@ export async function openViewer(
   const token = reserveOwnerOverlay();
 
   const channel = createAuditChannel(rpcRegistry, agentId, sendCtx ? async (text) => {
-    await sendToAgent(rpcRegistry, { ...sendCtx, writer: "owner" }, agentId, text, record.streaming === true);
+    await sendToAgent(rpcRegistry, { ...auditResumeCtx(sendCtx), writer: "owner" }, agentId, text, record.streaming === true);
   } : undefined);
   const history = readSessionHistory(record.sessionPath, record.ownerSends);
   const initialItems = history.status === "available"
@@ -778,7 +794,7 @@ export async function openViewer(
       component = new OwnerSteeringComponent(tui, view, {
         done: () => done(undefined),
         finish: async () => {
-          if (sendCtx && isOwnerHeld(record)) await sendToAgent(rpcRegistry, sendCtx, agentId, OWNER_FINISH_MESSAGE, false);
+          if (sendCtx && isOwnerHeld(record)) await sendToAgent(rpcRegistry, auditResumeCtx(sendCtx), agentId, OWNER_FINISH_MESSAGE, false);
         },
         interrupt: async () => {
           const live = rpcRegistry.get(agentId);
@@ -810,7 +826,7 @@ export function registerAuditCommands(
   rpcRegistry: RpcAgentRegistry,
   role: SpawnRole | undefined,
   mode: string | undefined,
-  sessionCtx?: { cwd: string; extensionPath: string },
+  sessionCtx?: Omit<AuditSendCtx, "pi">,
 ): void {
   if (!shouldRegisterAudit(role, mode)) return;
 

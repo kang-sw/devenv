@@ -99,7 +99,8 @@
  * (5 tools + 1 injection callback) is closer in shape to spawner.ts.
  *
  * Golden rule: imports FROM spawner.ts only (`spawnAgent`,
- * `inheritModelFromToolCtx`, `GATED_EXEC_TOOL_NAME`, types) — spawner.ts
+ * `callerDelegationPolicy`, `inheritModelFromToolCtx`, `GATED_EXEC_TOOL_NAME`,
+ * types) — spawner.ts
  * never imports from this file, keeping it generic (no `pi.sendUserMessage`
  * dependency there). `agents-plugin-tool/` (ws-mcp Go) and
  * `agents-plugin/skills/` canonical text are both untouched by this ticket.
@@ -114,6 +115,7 @@ import { createToolPreviewTuiRef, registerWsTool, type ToolPreviewTuiRef } from 
 import { buildExecuteSummary, createDispatchToolPreview } from "./tool-row-render.ts";
 import { modelCatalogFromToolCtx, tierWarningNotifierFromToolCtx } from "./model-catalog.ts";
 import {
+  callerDelegationPolicy,
   GATED_EXEC_TOOL_NAME,
   inheritModelFromToolCtx,
   pushToLead,
@@ -624,6 +626,10 @@ export function registerExecuteGateway(
           extensionPath: sessionCtx.extensionPath,
           client: bridge.client,
           toolGroup: "execute-worker",
+          // The lead's key rides in the child's policy as its ferrule
+          // parent_session_key, like ws-agent-spawn and explore. Without it the
+          // worker mints a parent-less leaf key, losing its lineage.
+          parentPolicy: { ...callerDelegationPolicy(bridge.wsToolNames), sessionKey: bridge.defaultSessionKeyRef.current },
           onApprovalPending: sessionCtx.onApprovalPending,
           onModelResolved: (resolved) => {
             resolvedInfo = resolved;

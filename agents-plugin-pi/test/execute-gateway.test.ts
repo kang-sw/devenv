@@ -982,6 +982,18 @@ describe("ws-execute: onModelResolved forwarding (260906 Phase 2)", () => {
     } finally { rpc.restore(); }
   });
 
+  test("the execute-worker's delegation policy carries the lead's key as its ferrule parent", async () => {
+    const rpc = installRpcHarness();
+    try {
+      const { tool, registry, ctx } = harness(async () => ({ content: [{ type: "text", text: JSON.stringify({ resolved_from: "pi", model: "pi/small" }) }] }));
+      const raw = await tool.execute("call", { prompt: "investigate" }, undefined, undefined, ctx);
+      const record = registry.get(JSON.parse(raw.content[0]!.text).agent_id)!;
+      assert.equal(record.delegation?.parentSessionKey, "lead-key");
+      assert.equal(record.delegation?.sessionKey, undefined, "the worker mints its own key under the lead");
+      assert.equal(record.delegation?.authority, "leaf");
+    } finally { rpc.restore(); }
+  });
+
   test("an omitted complex forwards the same 'small' alias behavior as complex:false", async () => {
     const rpc = installRpcHarness();
     try {

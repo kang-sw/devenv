@@ -59,7 +59,7 @@ const schemaVersion = 1
 // Presence is one name's registered identity: the durable/discoverable
 // half of the mailbox contract. Owner is the rebindable internal pointer
 // (Decision 3/4) — the session_key currently authorized against the named
-// inbox — and is empty until the first parent-less ferrule binds it.
+// inbox — and is empty until the first parent-less lead ferrule binds it.
 // Harness/Cwd/StartedAt are descriptive metadata only (Decision 10), never
 // consulted for gating.
 type Presence struct {

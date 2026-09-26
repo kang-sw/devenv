@@ -871,7 +871,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     // marker at all), so a fork child never registers `/audit`. Neither
     // `pi.registerCommand` nor `pi.registerShortcut` is called when the gate
     // is false (see `audit.ts`'s own doc comment).
-    registerAuditCommands(pi, agentTools.rpcRegistry, readSpawnRole(process.env), ctx.mode, { cwd: ctx.cwd, extensionPath: extensionEntryPath });
+    registerAuditCommands(pi, agentTools.rpcRegistry, readSpawnRole(process.env), ctx.mode, { cwd: ctx.cwd, extensionPath: extensionEntryPath, sessionKeyRef: handle.defaultSessionKeyRef });
 
     // A task fork inherits the parent's ordered callable surface. A missing
     // parent-only extension may be represented only by a metadata-identical
