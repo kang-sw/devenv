@@ -1889,11 +1889,12 @@ func (s *Server) handleLeadLogin(id json.RawMessage, arguments map[string]any) r
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
-	// Ferrule owner binding (mailbox core Decision 3): a parent-less mint is
-	// a top-lead (re-)login, so it rebinds this process's active mailbox
-	// identity's owner pointer to the freshly minted key. A parent-carrying
-	// (worker/delegate) mint never touches it.
-	s.rebindMailboxOwnerAtFerrule(key, parentKey, canonical)
+	// Ferrule owner binding (mailbox core Decision 3): a parent-less
+	// lead-capability mint is a top-lead (re-)login, so it rebinds this
+	// process's active mailbox identity's owner pointer to the freshly minted
+	// key. A parent-carrying mint, or a parent-less delegate/leaf mint (a
+	// child launched without its lead's key), never touches it.
+	s.rebindMailboxOwnerAtFerrule(key, parentKey, scope, canonical)
 	result := map[string]any{
 		"session_key": key,
 		"root":        canonical,
