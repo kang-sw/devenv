@@ -69,9 +69,11 @@ type mailboxRuntimeState struct {
 
 	registerOnce sync.Once
 
-	// registeredMu guards registeredRoot/registered, written once by the
-	// registerOnce body on a request goroutine and read by the background
-	// presence ticker goroutine.
+	// registeredMu guards registeredRoot/registered, written by the
+	// registerOnce body and by each successful lead rebind on request
+	// goroutines, and read by the background presence ticker goroutine.
+	// registeredRoot is the root whose store holds this process's owned
+	// record: the registration root until a lead rebind binds under another.
 	registeredMu   sync.Mutex
 	registered     bool
 	registeredRoot string
@@ -221,9 +223,8 @@ func (s *Server) ensureMailboxRegistered(root string) {
 			return
 		}
 		now := mailboxNow()
-		nowStr := now.Format(time.RFC3339)
 		pid := os.Getpid()
-		harness := s.currentHarness()
+		fresh := s.ownedMailboxPresence(identity, root, now.Format(time.RFC3339))
 		werr := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
 			if existing, ok := store.Presence[identity.Name]; ok && existing.PID != pid && mailboxPresenceLive(existing, now) {
 				s.setMailboxConflict(true)
@@ -231,17 +232,25 @@ func (s *Server) ensureMailboxRegistered(root string) {
 				store.Presence[identity.Name] = existing
 				return nil
 			}
-			store.Presence[identity.Name] = wsmailbox.Presence{
-				Name: identity.Name, Scope: identity.Scope,
-				Harness: harness, Cwd: root, StartedAt: nowStr, LastSeen: nowStr,
-				PID: pid, Auto: identity.Auto,
-			}
+			store.Presence[identity.Name] = fresh
 			return nil
 		})
 		if werr != nil {
 			appendDebugEvent("mailbox.register_error", map[string]any{"error": werr.Error()})
 		}
 	})
+}
+
+// ownedMailboxPresence builds a fresh presence record for identity held by
+// this process, registered under root at nowStr: the record
+// ensureMailboxRegistered writes, and the one a lead rebind rebuilds when it
+// takes over a missing or dead-PID record.
+func (s *Server) ownedMailboxPresence(identity mailboxIdentity, root, nowStr string) wsmailbox.Presence {
+	return wsmailbox.Presence{
+		Name: identity.Name, Scope: identity.Scope,
+		Harness: s.currentHarness(), Cwd: root, StartedAt: nowStr, LastSeen: nowStr,
+		PID: os.Getpid(), Auto: identity.Auto,
+	}
 }
 
 // mailboxHeartbeatDue reports whether enough time has passed since the last
@@ -343,8 +352,9 @@ func (s *Server) startMailboxPresenceTicker(ctx context.Context) <-chan struct{}
 // every tick until ctx is cancelled, so an idle owner — one making no
 // mailbox tool calls, e.g. blocked in an armed mailbox wait — stays live to
 // lookup_peers and its name stays unreclaimable. Each tick follows whatever
-// record the process holds right now by name and PID in the store it
-// registered in; before registration (a worktree/clone identity whose owning
+// record the process holds right now by name and PID in the store of
+// registeredRoot (the registration root, or the root of the most recent
+// successful lead rebind); before registration (a worktree/clone identity whose owning
 // login has not arrived yet) a tick is a no-op.
 func (s *Server) runMailboxPresenceTicker(ctx context.Context, tick <-chan time.Time) {
 	for {
@@ -467,10 +477,13 @@ func (s *Server) markMailboxReplyOpened(sessionKey string) {
 // session hijack that process's identity (Critical: owner-rebind ignoring
 // conflict state).
 //
-// A record left behind by a different, no-longer-live PID is reclaimed with
-// this process's PID: refreshMailboxPresenceHeartbeat only refreshes a record
-// whose PID is this process, so keeping the stale PID would leave the
-// reclaimed inbox looking dead to every peer.
+// A missing record, or one left behind by a different, no-longer-live PID, is
+// rebuilt as this process's record (ownedMailboxPresence): the heartbeat
+// writers only refresh a record whose PID is this process, so keeping the
+// stale PID would leave the reclaimed inbox looking dead to every peer, and
+// the previous holder's Harness/Cwd and Conflict flag would misdescribe the
+// live owner. A successful bind also points the presence ticker at root, so
+// a lead that re-logs in under another root keeps that store's record fresh.
 func (s *Server) rebindMailboxOwnerAtFerrule(newSessionKey, parentKey string, scope toolRole, root string) {
 	if strings.TrimSpace(parentKey) != "" || scope != roleLead {
 		return
@@ -488,10 +501,11 @@ func (s *Server) rebindMailboxOwnerAtFerrule(newSessionKey, parentKey string, sc
 	if err != nil {
 		return
 	}
-	nowStr := mailboxNowString()
-	pid := os.Getpid()
 	now := mailboxNow()
-	_ = wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
+	nowStr := now.Format(time.RFC3339)
+	pid := os.Getpid()
+	bound := false
+	werr := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
 		p, ok := store.Presence[identity.Name]
 		if ok && p.PID != pid && mailboxPresenceLive(p, now) {
 			// A different, still-live process now legitimately holds this
@@ -499,18 +513,23 @@ func (s *Server) rebindMailboxOwnerAtFerrule(newSessionKey, parentKey string, sc
 			// steal its ownership pointer.
 			return nil
 		}
-		if !ok {
-			// Registration was skipped or lost (e.g. a startup conflict);
-			// rebuild a minimal record so ownership still binds. A later
-			// heartbeat refresh backfills descriptive metadata.
-			p = wsmailbox.Presence{Name: identity.Name, Scope: identity.Scope, PID: pid, StartedAt: nowStr}
+		if !ok || p.PID != pid {
+			// Registration was skipped or lost (e.g. a startup conflict), or
+			// the record belongs to a dead process: rebuild it as ours.
+			p = s.ownedMailboxPresence(identity, root, nowStr)
 		}
-		p.PID = pid
 		p.Owner = newSessionKey
 		p.LastSeen = nowStr
 		store.Presence[identity.Name] = p
+		bound = true
 		return nil
 	})
+	if werr == nil && bound {
+		s.mailbox.registeredMu.Lock()
+		s.mailbox.registered = true
+		s.mailbox.registeredRoot = root
+		s.mailbox.registeredMu.Unlock()
+	}
 }
 
 // mailboxHasConflict reports whether ensureMailboxRegistered flagged a

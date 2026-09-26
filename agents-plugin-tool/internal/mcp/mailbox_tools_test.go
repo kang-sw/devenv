@@ -3,7 +3,6 @@ package mcp
 import (
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -701,17 +700,7 @@ func TestRebindMailboxOwnerReclaimsDeadPIDRecord(t *testing.T) {
 	s := NewServer(root, "test")
 	s.ensureMailboxRegistered(root)
 
-	cmd := exec.Command(os.Args[0], "-test.run=^$")
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("failed to run a short-lived child process: %v", err)
-	}
-	if cmd.ProcessState == nil || !cmd.ProcessState.Exited() {
-		t.Fatalf("child process did not reach an Exited state: %v", cmd.ProcessState)
-	}
-	deadPID := cmd.Process.Pid
-	if deadPID == os.Getpid() {
-		t.Fatalf("exited child reused this process's PID %d", deadPID)
-	}
+	deadPID := exitedChildPID(t)
 
 	path, err := wsmailbox.WorktreePath(root)
 	if err != nil {
@@ -739,10 +728,7 @@ func TestRebindMailboxOwnerReclaimsDeadPIDRecord(t *testing.T) {
 		t.Fatalf("lead rebind over a dead-PID record: owner = %q, PID = %d; want owner %q, PID %d", got.Owner, got.PID, "lead-key", os.Getpid())
 	}
 
-	original := mailboxNow
-	t.Cleanup(func() { mailboxNow = original })
-	later := original().Add(mailboxHeartbeatThrottle + time.Minute)
-	mailboxNow = func() time.Time { return later }
+	later := advanceMailboxClock(t, mailboxHeartbeatThrottle+time.Minute)
 	s.refreshMailboxPresenceHeartbeat(root)
 
 	refreshed, err := wsmailbox.Load(path)
@@ -751,6 +737,52 @@ func TestRebindMailboxOwnerReclaimsDeadPIDRecord(t *testing.T) {
 	}
 	if got, want := refreshed.Presence["heidi"].LastSeen, later.Format(time.RFC3339); got != want {
 		t.Fatalf("heartbeat refresh skipped the reclaimed record: LastSeen = %q, want %q", got, want)
+	}
+}
+
+// TestRebindMailboxOwnerRebuildsReclaimedRecord verifies a lead rebind that
+// reclaims a dead-PID record rebuilds it as this process's record: the
+// previous holder's Conflict flag and descriptive fields would otherwise make
+// lookup_peers report a false conflict and the dead process's harness/cwd on
+// the live owner's record.
+func TestRebindMailboxOwnerRebuildsReclaimedRecord(t *testing.T) {
+	setupMailboxTestEnv(t)
+	root := t.TempDir()
+	initGit(t, root)
+
+	t.Setenv(envMailbox, "ivan@worktree")
+	s := NewServer(root, "test")
+	s.observeHarness("test", "pi")
+	s.ensureMailboxRegistered(root)
+
+	deadPID := exitedChildPID(t)
+	path, err := wsmailbox.WorktreePath(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := mailboxNow().Add(-(mailboxLivenessThreshold + time.Minute)).Format(time.RFC3339)
+	if err := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
+		store.Presence["ivan"] = wsmailbox.Presence{
+			Name: "ivan", Scope: wsmailbox.ScopeWorktree,
+			Harness: "codex", Cwd: "/elsewhere", StartedAt: stale, LastSeen: stale,
+			PID: deadPID, Owner: "departed-child-key", Auto: true, Conflict: true,
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	rebindAt := advanceMailboxClock(t, time.Minute).Format(time.RFC3339)
+	s.rebindMailboxOwnerAtFerrule("lead-key", "", roleLead, root)
+
+	got := loadPresence(t, path, "ivan")
+	want := wsmailbox.Presence{
+		Name: "ivan", Scope: wsmailbox.ScopeWorktree,
+		Harness: "pi", Cwd: root, StartedAt: rebindAt, LastSeen: rebindAt,
+		PID: os.Getpid(), Owner: "lead-key",
+	}
+	if got != want {
+		t.Fatalf("reclaimed record not rebuilt as this process's record:\ngot  %#v\nwant %#v", got, want)
 	}
 }
 

@@ -90,6 +90,25 @@ func advanceMailboxClock(t *testing.T, d time.Duration) time.Time {
 	return later
 }
 
+// exitedChildPID runs a short-lived child process to completion and returns
+// its PID, a PID wsstate.ProcessAlive reports dead: the fixture for a
+// presence record left behind by a departed holder.
+func exitedChildPID(t *testing.T) int {
+	t.Helper()
+	cmd := exec.Command(os.Args[0], "-test.run=^$")
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to run a short-lived child process: %v", err)
+	}
+	if cmd.ProcessState == nil || !cmd.ProcessState.Exited() {
+		t.Fatalf("child process did not reach an Exited state: %v", cmd.ProcessState)
+	}
+	pid := cmd.Process.Pid
+	if pid == os.Getpid() {
+		t.Fatalf("exited child reused this process's PID %d", pid)
+	}
+	return pid
+}
+
 func loadPresence(t *testing.T, path, name string) wsmailbox.Presence {
 	t.Helper()
 	store, err := wsmailbox.Load(path)
@@ -282,8 +301,13 @@ func TestServeStdioStopsMailboxPresenceTickerBeforeHandlersDrain(t *testing.T) {
 	if err := NewServer(t.TempDir(), "test").ServeStdio(context.Background(), strings.NewReader(input), &bytes.Buffer{}); err != nil {
 		t.Fatalf("ServeStdio returned error: %v", err)
 	}
-	if !<-handlerSawStop {
-		t.Fatalf("presence ticker kept running while an in-flight handler drained after EOF")
+	select {
+	case saw := <-handlerSawStop:
+		if !saw {
+			t.Fatalf("presence ticker kept running while an in-flight handler drained after EOF")
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatalf("runtime.read handler hook never ran; the test no longer observes the in-flight handler")
 	}
 }
 
@@ -322,6 +346,62 @@ func TestMailboxPresenceTickerFollowsRebuiltRecord(t *testing.T) {
 	}
 }
 
+// TestMailboxPresenceTickerFollowsLatestLeadRebindRoot verifies the ticker
+// heartbeats the store of the most recent successful lead rebind: a
+// worktree identity registered under root A whose lead re-logs in under root
+// B holds its record in B's store, and a tick must keep that record fresh
+// rather than keep refreshing A's.
+func TestMailboxPresenceTickerFollowsLatestLeadRebindRoot(t *testing.T) {
+	setupMailboxTestEnv(t)
+	rootA, rootB := t.TempDir(), t.TempDir()
+	initGit(t, rootA)
+	initGit(t, rootB)
+	t.Setenv(envMailbox, "roaming@worktree")
+	s := NewServer(rootA, "test")
+	s.ensureMailboxRegistered(rootA)
+	s.rebindMailboxOwnerAtFerrule("lead-key", "", roleLead, rootB)
+
+	pathB, err := wsmailbox.WorktreePath(rootB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := loadPresence(t, pathB, "roaming"); got.PID != os.Getpid() || got.Owner != "lead-key" {
+		t.Fatalf("rebind under root B did not bind this process: PID %d, owner %q", got.PID, got.Owner)
+	}
+
+	later := advanceMailboxClock(t, 5*time.Minute)
+	driveMailboxPresenceTicks(t, s, 1)
+
+	if got, want := loadPresence(t, pathB, "roaming").LastSeen, later.Format(time.RFC3339); got != want {
+		t.Fatalf("ticker did not refresh the record under the latest rebind root: got %q, want %q", got, want)
+	}
+}
+
+// TestMailboxPresenceTickerBypassesHeartbeatThrottle verifies a tick writes
+// even when a tool call has just claimed the heartbeat throttle window: a
+// tick routed through the throttled refresh would be skipped whenever
+// root-less tool calls keep claiming the window without writing.
+func TestMailboxPresenceTickerBypassesHeartbeatThrottle(t *testing.T) {
+	setupMailboxTestEnv(t)
+	t.Setenv(envMailbox, "busy@machine")
+	s := NewServer(t.TempDir(), "test")
+	s.ensureMailboxRegistered("")
+
+	path, err := wsmailbox.MachinePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !s.mailboxHeartbeatDue() {
+		t.Fatalf("fixture: heartbeat throttle window was already claimed")
+	}
+	later := advanceMailboxClock(t, mailboxHeartbeatThrottle/2)
+	driveMailboxPresenceTicks(t, s, 1)
+
+	if got, want := loadPresence(t, path, "busy").LastSeen, later.Format(time.RFC3339); got != want {
+		t.Fatalf("ticker honored the heartbeat throttle: LastSeen %q, want %q", got, want)
+	}
+}
+
 // TestMailboxPresenceTickerRefreshesReclaimedDeadPIDRecord verifies the
 // ticker keeps a reclaimed record fresh: a record left by a different, exited
 // process with a stale LastSeen is taken over by a parent-less lead rebind,
@@ -336,17 +416,7 @@ func TestMailboxPresenceTickerRefreshesReclaimedDeadPIDRecord(t *testing.T) {
 	s := NewServer(root, "test")
 	s.ensureMailboxRegistered(root)
 
-	cmd := exec.Command(os.Args[0], "-test.run=^$")
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("failed to run a short-lived child process: %v", err)
-	}
-	if cmd.ProcessState == nil || !cmd.ProcessState.Exited() {
-		t.Fatalf("child process did not reach an Exited state: %v", cmd.ProcessState)
-	}
-	deadPID := cmd.Process.Pid
-	if deadPID == os.Getpid() {
-		t.Fatalf("exited child reused this process's PID %d", deadPID)
-	}
+	deadPID := exitedChildPID(t)
 
 	path, err := wsmailbox.WorktreePath(root)
 	if err != nil {
