@@ -521,7 +521,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-09-26T04:27:24Z"
+        "touched_at": "2026-09-26T04:28:21Z",
+        "impl": {
+          "branch": "impl/develop/film-wow-early"
+        }
       }
     },
     "260926-bug-wsindex-hang-transport-stop-wait-fails-on-local-windows-host": {
