@@ -375,8 +375,8 @@ describe("auditResumeCtx", () => {
     const sessionKeyRef: { current: string | undefined } = { current: "lead-at-register" };
     const sendCtx = { pi: {} as ExtensionAPI, cwd: "/repo", extensionPath: "ext.ts", sessionKeyRef };
     sessionKeyRef.current = "lead-after-relogin";
-    assert.deepEqual(auditResumeCtx(sendCtx), { pi: sendCtx.pi, cwd: "/repo", extensionPath: "ext.ts", parentSessionKey: "lead-after-relogin" });
-    assert.equal(auditResumeCtx({ pi: sendCtx.pi, cwd: "/repo", extensionPath: "ext.ts" }).parentSessionKey, undefined);
+    assert.deepEqual(auditResumeCtx(sendCtx), { pi: sendCtx.pi, cwd: "/repo", extensionPath: "ext.ts", leadSessionKey: "lead-after-relogin" });
+    assert.equal(auditResumeCtx({ pi: sendCtx.pi, cwd: "/repo", extensionPath: "ext.ts" }).leadSessionKey, undefined);
   });
 });
 

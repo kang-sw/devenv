@@ -2323,7 +2323,7 @@ export interface RpcResumeCtx {
    * dormant non-fork relaunch re-stamps it as the child's ferrule parent
    * (`relaunchDelegation`). Omitted, the stored policy launches unchanged.
    */
-  parentSessionKey?: string;
+  leadSessionKey?: string;
 }
 
 /**
@@ -3626,7 +3626,7 @@ export async function sendToAgent(
         record.exploreMode,
         forkLaunch,
         ctx.extensionPath,
-        relaunchDelegation(record, ctx.parentSessionKey),
+        relaunchDelegation(record, ctx.leadSessionKey),
       );
       client = new RpcClient(options);
       record.client = client;
@@ -4202,7 +4202,7 @@ export function registerAgentTools(
       // `RpcResumeCtx.leadSend`), unlike ask.ts's overlay channel.
       const result = await sendToAgent(
         rpcRegistry,
-        { pi, cwd: sessionCtx.cwd, extensionPath: sessionCtx.extensionPath, onApprovalPending, leadSend: true, parentSessionKey: bridge.defaultSessionKeyRef.current },
+        { pi, cwd: sessionCtx.cwd, extensionPath: sessionCtx.extensionPath, onApprovalPending, leadSend: true, leadSessionKey: bridge.defaultSessionKeyRef.current },
         p.agent_id,
         p.message,
         true,

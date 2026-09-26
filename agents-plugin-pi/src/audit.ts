@@ -722,7 +722,7 @@ export interface AuditSendCtx {
 }
 
 export function auditResumeCtx(sendCtx: AuditSendCtx) {
-  return { pi: sendCtx.pi, cwd: sendCtx.cwd, extensionPath: sendCtx.extensionPath, parentSessionKey: sendCtx.sessionKeyRef?.current };
+  return { pi: sendCtx.pi, cwd: sendCtx.cwd, extensionPath: sendCtx.extensionPath, leadSessionKey: sendCtx.sessionKeyRef?.current };
 }
 
 /**

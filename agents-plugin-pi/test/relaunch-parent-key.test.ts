@@ -38,7 +38,7 @@ test("relaunchDelegation re-stamps only a non-fork policy without a pre-minted k
 });
 
 type Proto = Record<string, unknown>;
-function patchRpc(start: (this: any) => Promise<void>, extra: Proto = {}): () => void {
+function installRpcHarness(start: (this: any) => Promise<void>, extra: Proto = {}): () => void {
   const proto = RpcClient.prototype as unknown as Proto;
   const names = ["start", "stop", "abort", "onEvent", "prompt", "getState", "getSessionStats", "setThinkingLevel"];
   const saved = Object.fromEntries(names.map(name => [name, proto[name]]));
@@ -53,7 +53,7 @@ function patchRpc(start: (this: any) => Promise<void>, extra: Proto = {}): () =>
 test("ws-agent-send relaunches a dormant worker with the lead's key read at send time", async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "ws-pi-relaunch-parent-")));
   const launched: DelegationPolicy[] = [];
-  const restore = patchRpc(async function (this: { options: { env: Record<string, string>; args: string[] } }) {
+  const restore = installRpcHarness(async function (this: { options: { env: Record<string, string>; args: string[] } }) {
     launched.push(JSON.parse(this.options.env[DELEGATION_ENV]!));
     await connectFakeChild(this.options.env, this.options.args);
   });
@@ -94,7 +94,7 @@ test("a dormant fork relaunch keeps its policy without a parentSessionKey", asyn
   const registry = new Map<string, RpcAgentRecord>();
   const launched: DelegationPolicy[] = [];
   const context = { version: 1, kind: "task", effectiveSystemPrompt: "captured", activeTools: [], registeredTools: [] };
-  const restore = patchRpc(async function (this: any) {
+  const restore = installRpcHarness(async function (this: any) {
     launched.push(JSON.parse(this.options.env[DELEGATION_ENV]));
     const home = this.options.args[this.options.args.indexOf("--session-dir") + 1];
     this.sessionFile = join(home, "fork-child.jsonl");
@@ -112,7 +112,7 @@ test("a dormant fork relaunch keeps its policy without a parentSessionKey", asyn
     const record = registry.get(result.agent_id)!;
     await record.client?.stop();
     record.client = undefined;
-    await sendToAgent(registry, { cwd: root, pi, extensionPath: TEST_EXTENSION_ENTRY, parentSessionKey: "lead-now" }, result.agent_id, "resume");
+    await sendToAgent(registry, { cwd: root, pi, extensionPath: TEST_EXTENSION_ENTRY, leadSessionKey: "lead-now" }, result.agent_id, "resume");
     assert.equal(launched.length, 2);
     for (const policy of launched) {
       assert.equal(policy.authority, "lead");
