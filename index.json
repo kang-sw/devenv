@@ -492,7 +492,14 @@
       }
     },
     "260926-bug-mailbox-idle-owner-presence-goes-stale": {
-      "registered_at": "2026-09-26T03:58:00Z"
+      "registered_at": "2026-09-26T03:58:00Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-09-26T04:27:09Z"
+      }
     },
     "260926-bug-pi-children-inherit-mailbox-identity": {
       "registered_at": "2026-09-26T03:57:54Z"
