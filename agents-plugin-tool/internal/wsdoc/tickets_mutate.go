@@ -364,7 +364,7 @@ func missingRouteFacts(ticketAbsPath, stem string) bool {
 
 // openDecisionQueueRefusal is the tickets.move refusal text; the sage_gate
 // stop instruction states the same remedy.
-const openDecisionQueueRefusal = "ticket has a pending ## Open Decision Queue section; its items are unsettled working state, not decisions. Settle every queue item through the final confirmation, move each into its home section, and delete the section before promoting"
+const openDecisionQueueRefusal = "ticket has a pending ## Open Decision Queue section; its items are unsettled working state, not decisions. Settle the queue with the user (announced defaults acknowledged, every policy question settled), move each settled item into its home section, and delete the section before promoting"
 
 // hasOpenDecisionQueue reports whether a ticket carries a pending
 // `## Open Decision Queue` section. The match is the exact level-2 line
