@@ -86,8 +86,8 @@ as settled are sometimes materially revised once actually asked:
 - One explicit user acknowledgement confirms the whole announced group; it may
   arrive in the same turn as the policy answers. Silence is not consent: when
   the user answers the policy questions without acknowledging the group, the
-  announced items stay `[open]` and you re-ask for the acknowledgement in one
-  line.
+  announced items stay `[open]` and are re-shown unchanged, one line each,
+  under a single acknowledgement re-ask for the whole group.
 - An announced item the user objects to becomes a policy question under its
   existing ID. So does an already-acknowledged announced item that a later
   policy answer undercuts.
@@ -179,8 +179,7 @@ label. Omit a group that has no item this round.
 > <recommendation and why>
 ```
 
-- An announced default is one line and asks no per-item answer; an
-  unacknowledged one is re-shown as the same one line.
+- An announced default is one line and asks no per-item answer.
 - A policy question's first presentation is the full block, including an item
   added mid-settlement and an announced item that became a policy question.
   The recommendation lives only in the trailing `>` line of its block.

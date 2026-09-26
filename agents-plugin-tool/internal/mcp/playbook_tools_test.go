@@ -2277,7 +2277,7 @@ func TestPlaybookPrintGoldenLeadTicket(t *testing.T) {
 				// Single explicit acknowledgement; silence is not consent.
 				"One explicit user acknowledgement confirms the whole announced group",
 				"Silence is not consent",
-				"the announced items stay `[open]` and you re-ask for the acknowledgement in one line",
+				"the announced items stay `[open]` and are re-shown unchanged, one line each, under a single acknowledgement re-ask for the whole group",
 				"An announced item the user objects to becomes a policy question under its existing ID",
 				"need their own acknowledgement",
 				// Settle point replacing the retired final confirmation.
@@ -2293,7 +2293,7 @@ func TestPlaybookPrintGoldenLeadTicket(t *testing.T) {
 				// Response format.
 				"announced defaults first, then the policy questions under their visible label",
 				"Omit a group that has no item this round",
-				"An announced default is one line and asks no per-item answer; an unacknowledged one is re-shown as the same one line",
+				"An announced default is one line and asks no per-item answer.",
 				"The recommendation lives only in the trailing `>` line",
 				"A policy question already presented is re-asked as one line, `(n) [open] <one-line decision>`",
 				"Report the items settled this round in one line",
