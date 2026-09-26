@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -325,6 +326,14 @@ func (s *Server) startMailboxPresenceTicker(ctx context.Context) <-chan struct{}
 	go func() {
 		defer close(done)
 		defer stop()
+		// Request goroutines recover their panics (ServeStdio); this
+		// goroutine does the same so a failed heartbeat write never takes
+		// down the serve process. The heartbeat simply ends.
+		defer func() {
+			if r := recover(); r != nil {
+				recordPanic("mailbox.presence_ticker", "", r, debug.Stack())
+			}
+		}()
 		s.runMailboxPresenceTicker(ctx, tick)
 	}()
 	return done

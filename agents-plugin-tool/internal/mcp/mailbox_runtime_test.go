@@ -249,3 +249,112 @@ func TestServeStdioStopsMailboxPresenceTicker(t *testing.T) {
 		t.Fatalf("presence ticker not bounded by ServeStdio: started=%d stopped=%d, want 1/1", started, stopped)
 	}
 }
+
+// TestServeStdioStopsMailboxPresenceTickerBeforeHandlersDrain verifies the
+// ticker stops at EOF (client gone) without waiting for in-flight handlers:
+// the handler below blocks until the ticker is stopped, so ServeStdio would
+// only return via the handler's safety timeout if the stop waited on it.
+func TestServeStdioStopsMailboxPresenceTickerBeforeHandlersDrain(t *testing.T) {
+	setupMailboxTestEnv(t)
+	t.Setenv(envMailbox, "draining@machine")
+	stopped := make(chan struct{})
+	original := newMailboxPresenceTicker
+	t.Cleanup(func() { newMailboxPresenceTicker = original })
+	newMailboxPresenceTicker = func() (<-chan time.Time, func()) {
+		return make(chan time.Time), func() { close(stopped) }
+	}
+	handlerSawStop := make(chan bool, 1)
+	testPanicHook = func(name string) {
+		if name != "runtime.read" {
+			return
+		}
+		select {
+		case <-stopped:
+			handlerSawStop <- true
+		case <-time.After(10 * time.Second):
+			handlerSawStop <- false
+		}
+	}
+	t.Cleanup(func() { testPanicHook = nil })
+
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"runtime.read","arguments":{}}}` + "\n"
+	if err := NewServer(t.TempDir(), "test").ServeStdio(context.Background(), strings.NewReader(input), &bytes.Buffer{}); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	if !<-handlerSawStop {
+		t.Fatalf("presence ticker kept running while an in-flight handler drained after EOF")
+	}
+}
+
+// TestMailboxPresenceTickerFollowsRebuiltRecord verifies the ticker follows
+// the record the process holds now, not the one it registered: after a
+// parent-less rebind rebuilds a lost record under this process's PID, ticks
+// keep that record fresh.
+func TestMailboxPresenceTickerFollowsRebuiltRecord(t *testing.T) {
+	setupMailboxTestEnv(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv(envMailbox, "rebuilt@worktree")
+	s := NewServer(root, "test")
+	s.ensureMailboxRegistered(root)
+
+	path, err := wsmailbox.WorktreePath(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
+		delete(store.Presence, "rebuilt")
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	s.rebindMailboxOwnerAtFerrule("owner-key", "", root)
+	if got := loadPresence(t, path, "rebuilt").PID; got != os.Getpid() {
+		t.Fatalf("rebind did not rebuild the record under this process: PID %d", got)
+	}
+
+	later := advanceMailboxClock(t, 5*time.Minute)
+	driveMailboxPresenceTicks(t, s, 1)
+
+	if got, want := loadPresence(t, path, "rebuilt").LastSeen, later.Format(time.RFC3339); got != want {
+		t.Fatalf("ticker did not refresh the rebuilt record: got %q, want %q", got, want)
+	}
+}
+
+// TestMailboxPresenceTickerSkipsAfterRegistrationConflict drives a real
+// duplicate-live-name conflict: the losing process is registered (its
+// ticker is armed) but must never refresh the winner's record.
+func TestMailboxPresenceTickerSkipsAfterRegistrationConflict(t *testing.T) {
+	setupMailboxTestEnv(t)
+	root := t.TempDir()
+	initGit(t, root)
+	path, err := wsmailbox.WorktreePath(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherPID := os.Getppid()
+	if otherPID == os.Getpid() || otherPID <= 0 {
+		t.Skipf("cannot obtain a distinct parent PID (ppid=%d)", otherPID)
+	}
+	stamped := mailboxNowString()
+	if err := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
+		store.Presence["contested"] = wsmailbox.Presence{Name: "contested", Scope: wsmailbox.ScopeWorktree, PID: otherPID, LastSeen: stamped}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv(envMailbox, "contested@worktree")
+	s := NewServer(root, "test")
+	s.ensureMailboxRegistered(root)
+	if !s.mailboxHasConflict() {
+		t.Fatalf("fixture did not produce a registration conflict")
+	}
+
+	advanceMailboxClock(t, 5*time.Minute)
+	driveMailboxPresenceTicks(t, s, 1)
+
+	if got := loadPresence(t, path, "contested").LastSeen; got != stamped {
+		t.Fatalf("conflict loser's ticker refreshed the winner's record: LastSeen %q, want %q", got, stamped)
+	}
+}

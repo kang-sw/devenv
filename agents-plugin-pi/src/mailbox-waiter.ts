@@ -275,14 +275,9 @@ export function buildMailboxWaitArgv(options: SubprocessWaitOptions): string[] {
  * `ferrule` binds, so a worktree/clone-scope slug resolves the store that
  * session registered in even when Pi was launched from another directory.
  */
-export function sessionMailboxWaitOptions(session: {
-  launcherPath: string;
-  pluginDir: string;
-  sessionKey: string;
-  slug?: string;
-  cwd: string;
-  onStderr?: (line: string) => void;
-}): SubprocessWaitOptions {
+export function sessionMailboxWaitOptions(
+  session: Omit<SubprocessWaitOptions, "root" | "timeoutArg"> & { cwd: string },
+): SubprocessWaitOptions {
   return {
     launcherPath: session.launcherPath,
     pluginDir: session.pluginDir,

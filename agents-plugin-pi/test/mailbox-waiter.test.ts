@@ -479,4 +479,9 @@ describe("sessionMailboxWaitOptions", () => {
     assert.deepEqual(options, { launcherPath: "/plug/bin/l.py", pluginDir: "/plug", sessionKey: "k", slug: "scout@worktree", root: "/work/tree", onStderr });
     assert.deepEqual(buildMailboxWaitArgv(options).slice(-4), ["--root", "/work/tree", "--slug", "scout@worktree"]);
   });
+
+  test("a reply-id-only session wait still carries the session root", () => {
+    const options = sessionMailboxWaitOptions({ launcherPath: "/l", pluginDir: "/p", sessionKey: "k", slug: undefined, cwd: "/work/tree" });
+    assert.deepEqual(buildMailboxWaitArgv(options), ["/l", "mailbox", "wait", "--session-key", "k", "--timeout", "10m", "--format", "json", "--root", "/work/tree"]);
+  });
 });
