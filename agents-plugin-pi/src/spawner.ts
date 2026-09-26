@@ -148,6 +148,11 @@ export const GATED_EXEC_TOOL_NAME = "ws-worker-exec";
  * lead-launch policy, never child-launch policy. */
 const CHILD_BOOTSTRAP_OVERRIDE_ENVS = ["WS_MCP_BOOTSTRAP_BINARY", "WS_MCP_BOOTSTRAP_URL"] as const;
 
+/** Mailbox identity is the lead's alone. A child's own ws-mcp would otherwise
+ * resolve the same named inbox and contest the lead's presence record, or mint
+ * a phantom auto-identity peer; children answer over the reply-id channel. */
+const CHILD_MAILBOX_IDENTITY_ENVS = ["WS_MAILBOX", "WS_MAILBOX_AUTO"] as const;
+
 const READ_ONLY_BUILTINS: readonly string[] = READ_TOOLS;
 
 export const TOOL_GROUPS: Record<ToolGroup, readonly string[]> = {
@@ -2483,6 +2488,8 @@ export function buildRpcClientOptions(
   // RpcClient overlays env onto process.env, so deletion here would preserve a
   // stale parent value. Empty values neutralize forced bootstrap selection.
   for (const override of CHILD_BOOTSTRAP_OVERRIDE_ENVS) env[override] = "";
+  // Blank is inert to ws-mcp's mailbox identity resolution; forks included.
+  for (const key of CHILD_MAILBOX_IDENTITY_ENVS) env[key] = "";
   const args = forkFrom ? ["--fork", forkFrom] : ["--session", sessionPath];
   args.push("--session-dir", dirname(sessionPath));
   if (role !== "fork" && systemPromptPath) args.push("--append-system-prompt", systemPromptPath);

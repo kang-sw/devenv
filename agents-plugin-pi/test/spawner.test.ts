@@ -2322,6 +2322,32 @@ describe("buildRpcClientOptions (WS_PI_SPAWN_ROLE_ENV placement)", () => {
     }, "building RPC options never mutates the parent environment");
   });
 
+  test("clears the lead's mailbox identity env for every spawn role, forks and ask forks included", () => {
+    const parent = {
+      WS_MAILBOX: "lead@devenv",
+      WS_MAILBOX_AUTO: "devenv",
+      CHILD_SENTINEL: "preserved",
+    };
+    const cases: Array<{ label: string; options: ReturnType<typeof buildRpcClientOptions> }> = [
+      { label: "worker", options: buildRpcClientOptions("/repo", undefined, "/tmp/worker.jsonl", undefined, "read") },
+      { label: "execute-worker", options: buildRpcClientOptions("/repo", undefined, "/tmp/exec.jsonl", undefined, "read", undefined, undefined, "execute-worker") },
+      { label: "explore", options: buildRpcClientOptions("/repo", undefined, "/tmp/explore.jsonl", undefined, "read", undefined, undefined, "explore") },
+      { label: "session fork", options: buildRpcClientOptions("/repo", undefined, "/tmp/fork.jsonl", undefined, "read", "/lead.jsonl") },
+      // ws-fork and the ask discussion fork reach this builder through
+      // spawnAgent with an explicit fork role and a fork-context launch.
+      { label: "context fork (ws-fork / ask)", options: buildRpcClientOptions("/repo", undefined, "/tmp/ask.jsonl", undefined, "read", undefined, "parent-key", "fork", undefined, { contextPath: "/tmp/ctx.md" }) },
+    ];
+
+    for (const { label, options } of cases) {
+      assert.equal(options.env?.WS_MAILBOX, "", `${label} clears WS_MAILBOX`);
+      assert.equal(options.env?.WS_MAILBOX_AUTO, "", `${label} clears WS_MAILBOX_AUTO`);
+      const effective = { ...parent, ...options.env };
+      assert.equal(effective.WS_MAILBOX, "", `${label} effective WS_MAILBOX is blank`);
+      assert.equal(effective.WS_MAILBOX_AUTO, "", `${label} effective WS_MAILBOX_AUTO is blank`);
+      assert.equal(effective.CHILD_SENTINEL, "preserved");
+    }
+  });
+
   test("every persistent role disables ambient discovery and loads exactly the captured entry without changing its tools", () => {
     const cases: Array<{ role: SpawnRole; tools: string }> = [
       { role: "worker", tools: "read,bash,ws-report-to-lead" },
@@ -2353,12 +2379,14 @@ describe("buildRpcClientOptions (WS_PI_SPAWN_ROLE_ENV placement)", () => {
       WS_PI_CHANNEL_GENERATION: "",
       WS_MCP_BOOTSTRAP_BINARY: "",
       WS_MCP_BOOTSTRAP_URL: "",
+      WS_MAILBOX: "",
+      WS_MAILBOX_AUTO: "",
     });
   });
 
   test("env overrides an inherited exploration mode while preserving the role marker", () => {
     const options = buildRpcClientOptions("/repo", undefined, "/tmp/ws-pi-agent-y/session.jsonl", "/tmp/system.md", "read");
-    assert.deepEqual(new Set(Object.keys(options.env ?? {})), new Set([WS_PI_SPAWN_ROLE_ENV, "WS_PI_EXPLORE_MODE", "WS_PI_FORK_CONTEXT", "WS_PI_FORK_AFFINITY", WS_PI_PARENT_SESSION_KEY_ENV, "WS_PI_DELEGATION_POLICY", "WS_PI_WEB_HOME", "WS_PI_CHANNEL_ENDPOINT", "WS_PI_CHANNEL_CREDENTIAL", "WS_PI_CHANNEL_GENERATION", "WS_MCP_BOOTSTRAP_BINARY", "WS_MCP_BOOTSTRAP_URL"]));
+    assert.deepEqual(new Set(Object.keys(options.env ?? {})), new Set([WS_PI_SPAWN_ROLE_ENV, "WS_PI_EXPLORE_MODE", "WS_PI_FORK_CONTEXT", "WS_PI_FORK_AFFINITY", WS_PI_PARENT_SESSION_KEY_ENV, "WS_PI_DELEGATION_POLICY", "WS_PI_WEB_HOME", "WS_PI_CHANNEL_ENDPOINT", "WS_PI_CHANNEL_CREDENTIAL", "WS_PI_CHANNEL_GENERATION", "WS_MCP_BOOTSTRAP_BINARY", "WS_MCP_BOOTSTRAP_URL", "WS_MAILBOX", "WS_MAILBOX_AUTO"]));
     assert.equal(options.env?.WS_PI_EXPLORE_MODE, "");
   });
 
