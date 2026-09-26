@@ -176,6 +176,15 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 		return encoder.Encode(resp)
 	}
 
+	// The mailbox presence ticker lives exactly as long as this serve loop:
+	// every return path below cancels it and waits for its goroutine.
+	tickerCtx, stopTicker := context.WithCancel(ctx)
+	tickerDone := s.startMailboxPresenceTicker(tickerCtx)
+	defer func() {
+		stopTicker()
+		<-tickerDone
+	}()
+
 	for scanner.Scan() {
 		select {
 		case <-ctx.Done():

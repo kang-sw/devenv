@@ -1,6 +1,10 @@
 package mcp
 
 import (
+	"bytes"
+	"context"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -52,3 +56,196 @@ func TestReapStaleReplyIDsRemovesOnlyStaleEmptyEntries(t *testing.T) {
 // liveness behavior — including the exited-PID case this fix depends on —
 // is exercised directly in internal/wsstate's
 // TestProcessAliveDetectsLiveAndExitedProcess, not duplicated here.
+
+// driveMailboxPresenceTicks runs s's presence ticker loop against a manual
+// tick channel, delivers n ticks, then cancels and waits for the loop to
+// exit. An unbuffered send completes only once the loop has received the
+// tick, and the loop finishes that tick's write before it can observe the
+// cancellation, so every tick's write is visible when this returns — no
+// wall-clock waits.
+func driveMailboxPresenceTicks(t *testing.T, s *Server, n int) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	tick := make(chan time.Time)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.runMailboxPresenceTicker(ctx, tick)
+	}()
+	for i := 0; i < n; i++ {
+		tick <- time.Time{}
+	}
+	cancel()
+	<-done
+}
+
+// advanceMailboxClock moves mailboxNow forward by d for the rest of the test.
+func advanceMailboxClock(t *testing.T, d time.Duration) time.Time {
+	t.Helper()
+	original := mailboxNow
+	t.Cleanup(func() { mailboxNow = original })
+	later := original().Add(d)
+	mailboxNow = func() time.Time { return later }
+	return later
+}
+
+func loadPresence(t *testing.T, path, name string) wsmailbox.Presence {
+	t.Helper()
+	store, err := wsmailbox.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, ok := store.Presence[name]
+	if !ok {
+		t.Fatalf("no presence record for %q in %s", name, path)
+	}
+	return p
+}
+
+// TestMailboxPresenceTickerRefreshesIdleOwner verifies an identity-holding
+// server keeps its presence LastSeen fresh with no tool calls at all: the
+// idle owner of an armed mailbox wait must not read as dead to lookup_peers.
+func TestMailboxPresenceTickerRefreshesIdleOwner(t *testing.T) {
+	setupMailboxTestEnv(t)
+	t.Setenv(envMailbox, "idle@machine")
+	s := NewServer(t.TempDir(), "test")
+	s.ensureMailboxRegistered("")
+
+	path, err := wsmailbox.MachinePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	later := advanceMailboxClock(t, mailboxLivenessThreshold-time.Minute)
+	driveMailboxPresenceTicks(t, s, 1)
+
+	if got, want := loadPresence(t, path, "idle").LastSeen, later.Format(time.RFC3339); got != want {
+		t.Fatalf("ticker did not refresh an idle owner's LastSeen: got %q, want %q", got, want)
+	}
+}
+
+// TestMailboxPresenceTickerUsesRegisteredRoot verifies a worktree/clone
+// identity heartbeats the store under the root it registered with, not the
+// process-level Server.root (unreliable for plugin-managed launches).
+func TestMailboxPresenceTickerUsesRegisteredRoot(t *testing.T) {
+	for _, tc := range []struct {
+		scope string
+		path  func(string) (string, error)
+	}{
+		{"worktree", wsmailbox.WorktreePath},
+		{"clone", wsmailbox.ClonePath},
+	} {
+		t.Run(tc.scope, func(t *testing.T) {
+			setupMailboxTestEnv(t)
+			root := t.TempDir()
+			initGit(t, root)
+			t.Setenv(envMailbox, "scoped@"+tc.scope)
+			s := NewServer(t.TempDir(), "test")
+			s.ensureMailboxRegistered(root)
+
+			path, err := tc.path(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			later := advanceMailboxClock(t, 5*time.Minute)
+			driveMailboxPresenceTicks(t, s, 1)
+
+			if got, want := loadPresence(t, path, "scoped").LastSeen, later.Format(time.RFC3339); got != want {
+				t.Fatalf("ticker did not refresh LastSeen under the registered root: got %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+// TestMailboxPresenceTickerSkipsBeforeRegistration verifies a worktree
+// identity whose owning login has not registered it yet writes nothing: the
+// ticker has no root to resolve its store from.
+func TestMailboxPresenceTickerSkipsBeforeRegistration(t *testing.T) {
+	setupMailboxTestEnv(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv(envMailbox, "early@worktree")
+	s := NewServer(root, "test")
+	s.ensureMailboxRegistered("") // root-less: deferred, not registered
+
+	driveMailboxPresenceTicks(t, s, 1)
+
+	path, err := wsmailbox.WorktreePath(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("ticker touched the worktree store before registration: %s", path)
+	}
+}
+
+// TestMailboxPresenceTickerNeverRefreshesAnotherPIDsRecord verifies the
+// never-resurrect rule: once a different process holds the record (this
+// process lost the name), the ticker leaves its LastSeen alone.
+func TestMailboxPresenceTickerNeverRefreshesAnotherPIDsRecord(t *testing.T) {
+	setupMailboxTestEnv(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv(envMailbox, "taken@worktree")
+	s := NewServer(root, "test")
+	s.ensureMailboxRegistered(root)
+
+	path, err := wsmailbox.WorktreePath(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherPID := os.Getppid()
+	if otherPID == os.Getpid() || otherPID <= 0 {
+		t.Skipf("cannot obtain a distinct parent PID (ppid=%d)", otherPID)
+	}
+	stamped := mailboxNowString()
+	if err := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
+		p := store.Presence["taken"]
+		p.PID = otherPID
+		p.LastSeen = stamped
+		store.Presence["taken"] = p
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	advanceMailboxClock(t, 5*time.Minute)
+	driveMailboxPresenceTicks(t, s, 1)
+
+	if got := loadPresence(t, path, "taken").LastSeen; got != stamped {
+		t.Fatalf("ticker refreshed a record another PID holds: LastSeen %q, want untouched %q", got, stamped)
+	}
+}
+
+// TestServeStdioStopsMailboxPresenceTicker verifies the ticker's lifetime is
+// bounded by ServeStdio: the ticker is stopped, and its goroutine has
+// exited, before ServeStdio returns. A mailbox-inert server starts none.
+func TestServeStdioStopsMailboxPresenceTicker(t *testing.T) {
+	setupMailboxTestEnv(t)
+	var started, stopped int
+	original := newMailboxPresenceTicker
+	t.Cleanup(func() { newMailboxPresenceTicker = original })
+	newMailboxPresenceTicker = func() (<-chan time.Time, func()) {
+		started++
+		return make(chan time.Time), func() { stopped++ }
+	}
+
+	t.Setenv(envMailbox, "")
+	t.Setenv(envMailboxAuto, "")
+	if err := NewServer(t.TempDir(), "test").ServeStdio(context.Background(), strings.NewReader(""), &bytes.Buffer{}); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	if started != 0 {
+		t.Fatalf("mailbox-inert server started a presence ticker")
+	}
+
+	t.Setenv(envMailbox, "serving@machine")
+	input := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}` + "\n"
+	if err := NewServer(t.TempDir(), "test").ServeStdio(context.Background(), strings.NewReader(input), &bytes.Buffer{}); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	// The ticker goroutine's deferred stop runs before it signals done, and
+	// ServeStdio waits for done, so these reads need no synchronization.
+	if started != 1 || stopped != 1 {
+		t.Fatalf("presence ticker not bounded by ServeStdio: started=%d stopped=%d, want 1/1", started, stopped)
+	}
+}
