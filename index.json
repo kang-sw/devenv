@@ -484,21 +484,11 @@
     "260926-bug-parallel-workers-collide-on-shared-git-stash": {
       "registered_at": "2026-09-26T04:40:03Z"
     },
-    "260926-bug-pi-telemetry-refresh-full-session-reparse": {
-      "registered_at": "2026-09-26T09:19:04Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-09-26T09:44:15Z",
-        "impl": {
-          "branch": "impl/develop/cycle-apply-jazz"
-        }
-      }
-    },
     "260926-bug-wsindex-hang-transport-stop-wait-fails-on-local-windows-host": {
       "registered_at": "2026-09-26T02:02:01Z"
+    },
+    "260926-feat-pi-model-specific-system-prompts": {
+      "registered_at": "2026-09-26T14:25:13Z"
     }
   }
 }
