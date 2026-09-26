@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 0be785f8aec04b51
 sage-review-completeness-reviewed: 0be785f8aec04b51
+completed: 2026-09-26
 ---
 
 # Pi adapter: child telemetry refresh re-parses the whole child session.jsonl on the parent's main thread
@@ -195,3 +196,65 @@ Verification:
 - A test pins that the retained state does not hold entry content outside the
   projection (for example, a large tool-result payload is not reachable from
   it).
+
+### Result (e02126f6b) - 2026-09-26
+
+`IncrementalSessionReader` in `agents-plugin-pi/src/agent-telemetry.ts` now
+feeds `refreshAgentTelemetry`. The reader state lives on
+`RpcAgentRecord.telemetryReader`. It is created lazily, never serialized, and
+deleted at both registry removal sites: `evictForCapacity` and
+`pruneRemovedAgents`.
+
+**Reader behavior (commits f64b88dd9 and e02126f6b):**
+- Each refresh reads the header line (to compare its hash), a one-byte check
+  at the consumed boundary, and the bytes from the consumed offset onward.
+- It never consumes the file's last line. That line is parsed on every
+  refresh.
+- Retained state is limited to `projectEntry` projections, one raw-line
+  SHA-256 per id, and a cache of `(id, hash)` duplicate verdicts.
+- `SessionFileIo` is an injectable byte-range seam, used by the tests to
+  observe which byte ranges a refresh reads.
+- `readSessionEntries` stays as the oracle. It now shares only
+  `sessionHeaderOf`/`validEntry` with the reader.
+
+**Decisions:**
+- **Extra reset trigger.** Beyond the ticket's reset list, the reader also
+  resets when the byte before the consumed offset is not a newline. This
+  catches rewrites that keep the header but move line boundaries, which
+  existing lifecycle fixtures perform.
+- **Size equal to the offset resets.** In append-only state the unconsumed
+  last line always holds at least one byte, so a file that ends exactly at
+  the offset was truncated.
+- **Order of verdicts.** A consumed line that fails to parse stays invalid
+  even when the last line is torn, which matches the oracle's order.
+- **Duplicate verdicts cached both ways.** A conflicting duplicate as the last
+  line does not repeat the full-file lookup.
+- **Failed lookup.** If the full-file lookup cannot find the first occurrence,
+  the read resets and returns `transient`.
+- **Lazy hashing.** A new id's line is hashed only when it is consumed.
+- **Fixture spy.** The spy in `test/fixtures/usage-hop.ts` now also observes
+  `openSync`, so its "only its direct child's session" positive control still
+  holds.
+
+**Verification:**
+- `npm test -- test/agent-telemetry*.test.ts test/agent-usage-rollup*.test.ts test/eviction-records.test.ts`:
+  132/132 pass.
+- Full `npm test` in `agents-plugin-pi` at 70c587dc0: 1891 tests, 1889 pass,
+  0 fail.
+- `test/agent-telemetry-incremental.test.ts` compares the reader against the
+  oracle after every read. It covers:
+  - chunked appends, including seeded random tears and tears inside UTF-8
+    characters;
+  - a tear just before `"\n"`, and a torn line repaired with `"\n"`;
+  - a missing file, truncation, an in-place header rewrite, and a path change
+    (these last two also with identical header bytes and line boundaries);
+  - same-id lines that are identical, deep-equal, or conflicting;
+  - `message`, `message.usage`, and `usage` absent, null, or present.
+- It also pins:
+  - the byte ranges each refresh reads;
+  - that an invalid verdict is cached;
+  - that a ~1 MB payload is not reachable from the reader's state;
+  - the reader's lifetime on the record, including eviction and prune.
+- Reviews ran in partitions (correctness, fit, test), round 1 and round 2.
+  They left no open findings. The correctness reviewer's independent fuzz ran
+  about 25.5k reads against the oracle with 0 mismatches.
