@@ -492,6 +492,9 @@
     },
     "260927-bug-code-reviewer-spawn-requires-undocumented-write-scope": {
       "registered_at": "2026-09-27T01:49:52Z"
+    },
+    "260927-bug-pi-mailbox-waiter-bypasses-local-devenv-runtime": {
+      "registered_at": "2026-09-27T03:23:08Z"
     }
   }
 }
