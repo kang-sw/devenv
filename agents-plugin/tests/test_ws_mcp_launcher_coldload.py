@@ -323,5 +323,46 @@ class InstallTmpRuntimeReplaceRetryTest(unittest.TestCase):
                     launcher.install_tmp_runtime(tmp, binary, {"plugin_version": "0.18.1"}, temp, "installed")
 
 
+class BootstrapRuntimeTempCleanupTest(unittest.TestCase):
+    """A running Windows binary can refuse replacement on every mailbox wait."""
+
+    def test_repeated_forced_bootstrap_fallback_leaves_no_temp_executables(self):
+        launcher = load_launcher()
+        launcher.time.sleep = lambda _: None
+        with tempfile.TemporaryDirectory() as temp_dir:
+            plugin_dir = Path(temp_dir)
+            runtime_dir = plugin_dir / "runtime"
+            runtime_dir.mkdir()
+            source = plugin_dir / "source-built.exe"
+            binary = runtime_dir / "ws-mcp.exe"
+            source.write_text("source-built", encoding="utf-8")
+            binary.write_text("compatible-running", encoding="utf-8")
+
+            with mock.patch.dict(os.environ, {"WS_MCP_BOOTSTRAP_BINARY": str(source), "WS_MCP_BOOTSTRAP_URL": ""}), \
+                 mock.patch("os.replace", side_effect=PermissionError("Windows sharing violation")), \
+                 mock.patch.object(launcher, "runtime_fully_compatible", return_value=True):
+                for _ in range(3):
+                    launcher.install_runtime(plugin_dir, runtime_dir, binary, "asset", {}, "windows", "windows-amd64")
+                    self.assertEqual(list(runtime_dir.glob("*.bootstrap.*.tmp")), [])
+            self.assertEqual(binary.read_text(encoding="utf-8"), "compatible-running")
+
+    def test_failed_bootstrap_replacement_cleans_temp_before_raising(self):
+        launcher = load_launcher()
+        launcher.time.sleep = lambda _: None
+        with tempfile.TemporaryDirectory() as temp_dir:
+            plugin_dir = Path(temp_dir)
+            runtime_dir = plugin_dir / "runtime"
+            runtime_dir.mkdir()
+            source = plugin_dir / "source-built.exe"
+            binary = runtime_dir / "ws-mcp.exe"
+            source.write_text("source-built", encoding="utf-8")
+            with mock.patch.dict(os.environ, {"WS_MCP_BOOTSTRAP_BINARY": str(source), "WS_MCP_BOOTSTRAP_URL": ""}), \
+                 mock.patch("os.replace", side_effect=PermissionError("Windows sharing violation")), \
+                 mock.patch.object(launcher, "runtime_fully_compatible", return_value=False):
+                with self.assertRaises(SystemExit):
+                    launcher.install_runtime(plugin_dir, runtime_dir, binary, "asset", {}, "windows", "windows-amd64")
+            self.assertEqual(list(runtime_dir.glob("*.bootstrap.*.tmp")), [])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -255,7 +255,7 @@ describe("createSubprocessWait", () => {
     await writeFile(launcherPath, [
       "import os",
       `with open(${JSON.stringify(observedPath)}, "w") as output:`,
-      "    output.write(os.getenv('WS_MCP_BOOTSTRAP_BINARY', '<unset>'))",
+      "    output.write(os.getenv('WS_MCP_BOOTSTRAP_BINARY', '<unset>') + '|' + os.getenv('WS_MCP_BOOTSTRAP_URL', '<unset>'))",
       "raise SystemExit(3)",
       "",
     ].join("\n"));
@@ -267,12 +267,15 @@ describe("createSubprocessWait", () => {
         cwd: fixtureDir,
         env: { WS_MCP_BOOTSTRAP_BINARY: "/local/source-built/ws-mcp" },
       });
-      assert.equal(await createSubprocessWait(devOptions)(new AbortController().signal), "timeout");
-      assert.equal(await readFile(observedPath, "utf8"), "/local/source-built/ws-mcp");
+      const devWait = createSubprocessWait(devOptions);
+      assert.equal(await devWait(new AbortController().signal), "timeout");
+      assert.equal(await readFile(observedPath, "utf8"), "/local/source-built/ws-mcp|" + (process.env.WS_MCP_BOOTSTRAP_URL ?? "<unset>"));
+      assert.equal(await devWait(new AbortController().signal), "timeout");
+      assert.equal(await readFile(observedPath, "utf8"), "/local/source-built/ws-mcp|" + (process.env.WS_MCP_BOOTSTRAP_URL ?? "<unset>"), "every re-arm must retain the source-built override even if the runtime contract changes mid-session");
 
       const releaseOptions = sessionMailboxWaitOptions({ launcherPath, pluginDir: fixtureDir, sessionKey: "my-key", cwd: fixtureDir });
       assert.equal(await createSubprocessWait(releaseOptions)(new AbortController().signal), "timeout");
-      assert.equal(await readFile(observedPath, "utf8"), process.env.WS_MCP_BOOTSTRAP_BINARY ?? "<unset>");
+      assert.equal(await readFile(observedPath, "utf8"), (process.env.WS_MCP_BOOTSTRAP_BINARY ?? "<unset>") + "|" + (process.env.WS_MCP_BOOTSTRAP_URL ?? "<unset>"));
     } finally {
       await rm(fixtureDir, { recursive: true, force: true });
     }

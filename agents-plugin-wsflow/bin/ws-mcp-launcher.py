@@ -645,8 +645,13 @@ def install_runtime(plugin_dir: Path, runtime_dir: Path, binary: Path, asset: st
         if not source.is_file():
             fail(f"bootstrap binary not found: {source}")
         tmp = unique_runtime_temp_path(runtime_dir, f"{binary.name}.bootstrap")
-        copy_runtime(source, tmp)
-        install_tmp_runtime(tmp, binary, contract, runtime_dir, f"installed bootstrap binary into {binary}")
+        try:
+            copy_runtime(source, tmp)
+            install_tmp_runtime(tmp, binary, contract, runtime_dir, f"installed bootstrap binary into {binary}")
+        finally:
+            # A compatible running binary may survive a failed Windows replace;
+            # do not retain one full bootstrap copy per mailbox wait re-arm.
+            tmp.unlink(missing_ok=True)
     elif bootstrap_url:
         runtime_dir.mkdir(parents=True, exist_ok=True)
         tmp = unique_runtime_temp_path(runtime_dir, f"{binary.name}.download")
