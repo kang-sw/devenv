@@ -228,6 +228,8 @@ export interface SubprocessWaitOptions {
   launcherPath: string;
   /** Launcher cwd (the plugin dir), matching how the bridge spawns `serve --stdio`. */
   pluginDir: string;
+  /** The bridge's local source-build override, when one was used to launch its ws-mcp client. */
+  env?: Record<string, string>;
   /** This session's own session key — the required `--session-key`; gives the reply-id queue to watch. */
   sessionKey: string;
   /**
@@ -281,6 +283,7 @@ export function sessionMailboxWaitOptions(
   return {
     launcherPath: session.launcherPath,
     pluginDir: session.pluginDir,
+    env: session.env,
     sessionKey: session.sessionKey,
     slug: session.slug,
     root: session.cwd,
@@ -310,7 +313,11 @@ export function createSubprocessWait(options: SubprocessWaitOptions): (signal: A
         resolve("stopped");
         return;
       }
-      const child = spawn("python3", buildMailboxWaitArgv(options), { cwd: options.pluginDir, stdio: ["ignore", "ignore", "pipe"] });
+      const child = spawn("python3", buildMailboxWaitArgv(options), {
+        cwd: options.pluginDir,
+        stdio: ["ignore", "ignore", "pipe"],
+        ...(options.env ? { env: { ...process.env, ...options.env } } : {}),
+      });
       let settled = false;
       const finish = (outcome: MailboxWaitOutcome): void => {
         if (settled) return;

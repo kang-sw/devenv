@@ -735,6 +735,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
           runWait: createSubprocessWait(sessionMailboxWaitOptions({
             launcherPath,
             pluginDir,
+            env: handle.launcherEnv,
             sessionKey: mailboxSessionKey,
             slug: selfSlug,
             cwd: ctx.cwd,

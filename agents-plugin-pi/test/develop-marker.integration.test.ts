@@ -19,6 +19,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildLocalDevenvBootstrap, readLocalDevenvMarker } from "../src/local-devenv.ts";
 import { spawnWsMcpClient } from "../src/mcp-stdio-client.ts";
+import { createSubprocessWait, sessionMailboxWaitOptions } from "../src/mailbox-waiter.ts";
 import { cutStaticBody } from "../src/bridge.ts";
 
 const TEST_DIR = dirname(fileURLToPath(import.meta.url));
@@ -71,6 +72,28 @@ test("opt-in develop marker builds and recaptures the bundled bridge contract", 
     assert.ok(sessionKey, `ferrule must return a session key: ${ferrule}`);
     assert.equal(textResult(await client.callTool("playbook.read", { name: "lead-workflow-manual", session_key: sessionKey })), STATIC_FIXTURE);
     assert.equal(cutStaticBody(textResult(await client.callTool("workflow_manual", { session_key: sessionKey })), STATIC_FIXTURE).found, true);
+  } finally {
+    client.close();
+  }
+});
+
+test("opt-in develop marker runs mailbox wait through the bridge's source-built runtime", { skip: !VERIFY_DEVELOP_MARKER }, async () => {
+  const marker = readLocalDevenvMarker(PLUGIN_DIR);
+  assert.ok(marker, "opt-in mailbox smoke needs the source-loaded Pi marker");
+  const bootstrap = await buildLocalDevenvBootstrap(PLUGIN_DIR, RUNTIME.plugin_version, { runBuild });
+  assert.ok(bootstrap);
+  const launcherPath = join(PLUGIN_DIR, "bin", "ws-mcp-launcher.py");
+  const client = spawnWsMcpClient(launcherPath, PLUGIN_DIR, undefined, bootstrap.env);
+  try {
+    await client.initialize({ name: "ws-pi-mailbox-verify", version: "0.1.0" });
+    const ferrule = textResult(await client.callTool("ferrule", { root: marker.source_root }));
+    const sessionKey = /^session_key: (.+)$/m.exec(ferrule)?.[1];
+    assert.ok(sessionKey);
+    const wait = createSubprocessWait({
+      ...sessionMailboxWaitOptions({ launcherPath, pluginDir: PLUGIN_DIR, env: bootstrap.env, sessionKey, cwd: marker.source_root }),
+      timeoutArg: "1s",
+    });
+    assert.equal(await wait(new AbortController().signal), "timeout", "mailbox wait must use the same local runtime without downloading a release asset");
   } finally {
     client.close();
   }

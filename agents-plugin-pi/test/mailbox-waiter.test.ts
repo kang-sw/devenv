@@ -9,7 +9,7 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -248,6 +248,36 @@ describe("buildMailboxPushMessage", () => {
 });
 
 describe("createSubprocessWait", () => {
+  test("passes the bridge's local bootstrap binary without changing the no-marker environment", async () => {
+    const fixtureDir = await mkdtemp(join(tmpdir(), "ws-mailbox-bootstrap-"));
+    const launcherPath = join(fixtureDir, "inspect-env.py");
+    const observedPath = join(fixtureDir, "observed");
+    await writeFile(launcherPath, [
+      "import os",
+      `with open(${JSON.stringify(observedPath)}, "w") as output:`,
+      "    output.write(os.getenv('WS_MCP_BOOTSTRAP_BINARY', '<unset>'))",
+      "raise SystemExit(3)",
+      "",
+    ].join("\n"));
+    try {
+      const devOptions = sessionMailboxWaitOptions({
+        launcherPath,
+        pluginDir: fixtureDir,
+        sessionKey: "my-key",
+        cwd: fixtureDir,
+        env: { WS_MCP_BOOTSTRAP_BINARY: "/local/source-built/ws-mcp" },
+      });
+      assert.equal(await createSubprocessWait(devOptions)(new AbortController().signal), "timeout");
+      assert.equal(await readFile(observedPath, "utf8"), "/local/source-built/ws-mcp");
+
+      const releaseOptions = sessionMailboxWaitOptions({ launcherPath, pluginDir: fixtureDir, sessionKey: "my-key", cwd: fixtureDir });
+      assert.equal(await createSubprocessWait(releaseOptions)(new AbortController().signal), "timeout");
+      assert.equal(await readFile(observedPath, "utf8"), process.env.WS_MCP_BOOTSTRAP_BINARY ?? "<unset>");
+    } finally {
+      await rm(fixtureDir, { recursive: true, force: true });
+    }
+  });
+
   test("child stderr is silent by default and reaches an injected diagnostic sink", async (t) => {
     const consoleErrors: unknown[][] = [];
     t.mock.method(console, "error", (...args: unknown[]) => { consoleErrors.push(args); });
@@ -475,13 +505,14 @@ describe("buildMailboxWaitArgv", () => {
 describe("sessionMailboxWaitOptions", () => {
   test("the session cwd becomes the wait's --root, not the launcher dir", () => {
     const onStderr = (): void => {};
-    const options = sessionMailboxWaitOptions({ launcherPath: "/plug/bin/l.py", pluginDir: "/plug", sessionKey: "k", slug: "scout@worktree", cwd: "/work/tree", onStderr });
-    assert.deepEqual(options, { launcherPath: "/plug/bin/l.py", pluginDir: "/plug", sessionKey: "k", slug: "scout@worktree", root: "/work/tree", onStderr });
+    const options = sessionMailboxWaitOptions({ launcherPath: "/plug/bin/l.py", pluginDir: "/plug", env: { WS_MCP_BOOTSTRAP_BINARY: "/local/ws-mcp" }, sessionKey: "k", slug: "scout@worktree", cwd: "/work/tree", onStderr });
+    assert.deepEqual(options, { launcherPath: "/plug/bin/l.py", pluginDir: "/plug", env: { WS_MCP_BOOTSTRAP_BINARY: "/local/ws-mcp" }, sessionKey: "k", slug: "scout@worktree", root: "/work/tree", onStderr });
     assert.deepEqual(buildMailboxWaitArgv(options).slice(-4), ["--root", "/work/tree", "--slug", "scout@worktree"]);
   });
 
   test("a reply-id-only session wait still carries the session root", () => {
     const options = sessionMailboxWaitOptions({ launcherPath: "/l", pluginDir: "/p", sessionKey: "k", slug: undefined, cwd: "/work/tree" });
+    assert.equal(options.env, undefined, "release-backed sessions do not add a bootstrap override");
     assert.deepEqual(buildMailboxWaitArgv(options), ["/l", "mailbox", "wait", "--session-key", "k", "--timeout", "10m", "--format", "json", "--root", "/work/tree"]);
   });
 });

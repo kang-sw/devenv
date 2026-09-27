@@ -66,6 +66,8 @@ export interface BridgeHandle {
    * opening a second connection to the launcher.
    */
   client: McpStdioClient;
+  /** The local source-build override used by this bridge; reuse it for other launcher subprocesses in the session. */
+  launcherEnv?: Record<string, string>;
   /**
    * The same default-filled session_key ref used by every bridged tool's
    * fill-or-forward path (`resolveSessionKey`). A live object reference, not
@@ -967,6 +969,7 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
   return {
     shutdown,
     client,
+    launcherEnv,
     renderRegistry,
     defaultSessionKeyRef: defaultKeyRef,
     wsToolNames: tools.map((tool) => sanitizeToolName(tool.name)),
