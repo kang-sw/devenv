@@ -194,6 +194,7 @@ import { buildOrphanPush, captureOrphans, noSessionSidecarPath, readAndClearSide
 import { registerGoalLoop, readGoalLoopConfig, resolveAgentWaitAnimation, resolveChildRetentionTtlDays, resolveSettleDelayMs } from "./goal-loop.ts";
 import { registerSkillResources } from "./skills-dir.ts";
 import { computeSessionBootstrap, registerLeadBootstrap, type LeadPromptRef, type SkillsBlockCache, type WsBlockBase } from "./lead-bootstrap.ts";
+import { registerModelPrompts } from "./model-prompts.ts";
 import { applyForkAffinity, captureRegisteredTools, classifyForkRegistrations, compareForkRegistrations, effectiveForkDescriptor, formatForkRegistrationMismatch, frameForkInput, readForkLaunchContext, removeForkTransport, restoreForkContext, restoreForkKeys, FORK_READINESS_KIND, type ForkContext } from "./fork-context.ts";
 import { ChildChannel, readAndDeleteChannelBootstrap } from "./agent-channel.ts";
 import { ChildApprovalGate } from "./approval-protocol.ts";
@@ -556,6 +557,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     }),
   });
   registerLeadBootstrap(pi, wsBlockBaseRef, skillsBlockCacheRef, effectivePromptRef, inheritedForkPromptRef, sessionKeyRef);
+  registerModelPrompts(pi, inheritedForkPromptRef);
   pi.on("input", (event, ctx) => {
     if (readSpawnRole(process.env) !== "fork") return undefined;
     let error = forkContextError ?? forkRegistrationError ?? (!forkReady || !handle?.defaultSessionKeyRef.current?.trim() ? "fork bootstrap is not ready: no valid own key" : undefined);

@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 425fc61e81559555
 sage-review-completeness-reviewed: 425fc61e81559555
+completed: 2026-09-27
 ---
 
 # Configure model-specific system-prompt supplements in Pi
@@ -76,6 +77,40 @@ Some models need stable, model-specific operating guidance that should apply whe
 Implement the global persistence and `/ws-model-prompt` command surface, then compose the selected general and lead-only supplements into Pi's system prompt through the existing extension lifecycle.
 
 Verification must cover selector parsing with slash-containing IDs, provider-qualified precedence, independent general and lead-only fallback, role applicability, multiline editor cancellation and empty-input behavior, persistence without unrelated-entry loss, immediate command visibility, startup reload, model changes between runs, cross-model fork inheritance without startup replacement, and idempotent replacement after an eligible fork rebuild.
+
+### Result (8f95413) - 2026-09-27
+
+- Added `/ws-model-prompt` and a Pi-owned version-1 store at
+  `getAgentDir()/ws/model-prompts.json`. Separate provider/ID fields preserve
+  slash-containing IDs; each selector has independent general and lead-only
+  channels. Editor cancellation and whitespace-only submissions preserve data;
+  unknown catalog selectors are saved with a warning.
+- Updates re-read under a cross-process directory lock and atomically replace
+  the file through the shared Windows retry helper, retaining unrelated rules
+  and channels. Lock acquisition times out rather than stealing a possibly live
+  writer's claim; an abandoned lock requires operator inspection.
+- The model hook runs immediately after lead bootstrap's hook, composing with
+  its inherited whole-prompt return without modifying the existing bootstrap
+  interface. Ordinary runs resolve the live model from the startup/write
+  snapshot. Length-framed blocks permit idempotent replacement even when user
+  text contains marker strings.
+- Fork startup retains inherited bytes even on a different model or changed
+  global store. An explicit later model change or successful command releases
+  that inheritance. Session-owned non-conversation release metadata survives
+  reload/relaunch without letting copied parent entries release a new fork.
+- Verification: 22 targeted command/store/runtime/provider-lifecycle tests
+  passed, including parallel independent-process writes and real SDK fork
+  launches on another model across three provider serializers. Full
+  `cd agents-plugin-pi && npm test -- --test-reporter=dot` passed after the final
+  source changes; `git diff --check develop..HEAD` passed. No build script is
+  defined. Provider tests serialize offline and make no paid network calls.
+- Independent correctness, fit, and test review identified three Important
+  findings: release state across reload, shared Windows rename policy, and
+  production cross-model launch coverage. All were fixed in `538bda7`; all three
+  round-two fixes-only reviews were clean. No unresolved findings.
+- Test-environment adaptations: targeted runs use the package's role-env
+  cleanup; the fork lifecycle fixture selects its alternate model through the
+  supported tier route rather than an unsupported concrete `ws-fork` selector.
 
 ## Sage Review Round 1 (2026-09-26)
 
