@@ -21,6 +21,10 @@ Thread the session's resolved local-devenv launcher environment into the mailbox
 
 The bridge now exposes its validated local bootstrap override to the mailbox waiter; without a marker the waiter keeps its previous subprocess environment. The focused mailbox suite, opt-in live source-build mailbox smoke, full default Pi suite, and `git diff --check` passed. The user confirmed in live dogfood that the repeated `[ws-mailbox]` unpublished-release 404 warnings stopped after this hotfix. The unrelated opt-in manual recapture test failed against an existing stale workflow-manual fixture and was not changed.
 
+#### Edition (d26cfbf9) - 2026-09-27
+
+Release review found that each forced-bootstrap mailbox re-arm could leave a full temporary executable on Windows when the destination was still running. All three mirrored launchers now delete the bootstrap temp on success, compatible-binary fallback, and installation failure while preserving the override on every re-arm, including after a mid-session version bump. A new uncached Pi session-start test covers the real bridge-to-waiter handoff. Verification: 43 launcher Python tests, 39 focused Pi tests, full Pi suite (1914 pass, 3 skipped), Pi mirror guard, wsflow tests, opt-in live source-build mailbox smoke, and diff checks passed.
+
 ## Resolution (2026-09-27)
 
 Threaded the bridge's validated source-build bootstrap env into the mailbox wait subprocess without changing release-backed launches. Offline waiter tests, the opt-in live local-build mailbox smoke, the full default Pi test suite, and diff checks passed. The existing unrelated opt-in manual recapture fixture remains stale under current model tuning.
