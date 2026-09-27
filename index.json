@@ -494,7 +494,14 @@
       "registered_at": "2026-09-27T01:49:52Z"
     },
     "260927-bug-pi-mailbox-waiter-bypasses-local-devenv-runtime": {
-      "registered_at": "2026-09-27T03:23:08Z"
+      "registered_at": "2026-09-27T03:23:08Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "closed",
+        "touched_at": "2026-09-27T03:32:54Z"
+      }
     }
   }
 }
