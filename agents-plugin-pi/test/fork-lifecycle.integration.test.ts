@@ -37,6 +37,11 @@ for (const root of SDK_ROOTS) for (const [providerName, apiName] of [["openroute
     const sidecar = await import(join(plugin, "src/agent-sidecar.ts"));
     const ask = await import(join(plugin, "src/ask.ts"));
     const originalEnv = { ...process.env };
+    const promptConfigDir = join(directory, "global-pi", "ws");
+    mkdirSync(promptConfigDir, { recursive: true });
+    const promptConfigPath = join(promptConfigDir, "model-prompts.json");
+    const supplement = "Original general Ω\r\n  \n\nOriginal lead-only";
+    const supplementBlock = `\n\n<ws-model-prompts length="${supplement.length}">\n${supplement}\n</ws-model-prompts>`;
     const prototypes = [...new Set([RpcClient.prototype, sdk.RpcClient.prototype])];
     const originals = prototypes.map(proto => Object.fromEntries(["start", "stop", "abort", "onEvent", "prompt", "getState", "getLastAssistantText", "setThinkingLevel", "steer", "followUp"].map(name => [name, (proto as any)[name]])));
     const sessions: any[] = [];
@@ -164,6 +169,7 @@ for (const root of SDK_ROOTS) for (const [providerName, apiName] of [["openroute
       // assertion fails if a future cleanup drops one of them.
       Object.assign(process.env, {
         PI_OFFLINE: "1",
+        PI_CODING_AGENT_DIR: join(directory, "global-pi"),
         WS_PI_SPAWN_ROLE: "worker",
         WS_PI_EXPLORE_MODE: "code-search",
         WS_PI_DELEGATION_POLICY: JSON.stringify({ version: 1, depth: 1, maxDepth: 2, tools: ["read"], authority: "leaf" }),
@@ -172,6 +178,7 @@ for (const root of SDK_ROOTS) for (const [providerName, apiName] of [["openroute
       for (const key of LEAD_ENV_KEYS) delete process.env[key];
       for (const key of Object.keys(process.env)) if (key.startsWith("WS_PI_FORK_")) delete process.env[key];
       assert.deepEqual(LEAD_ENV_KEYS.filter((key) => key in process.env), [], "synthetic lead clears inherited role-shaping environment");
+      writeFileSync(promptConfigPath, JSON.stringify({ version: 1, rules: [{ id: model.id, general: "Original general Ω\r\n  ", leadOnly: "Original lead-only" }] }));
       const lead = await makeSession(sdk.SessionManager.create(directory, join(directory, "sessions")), {}, undefined, "Explicit append Ω\r\ntrailing  ", false, true);
       if (!lead.api.getActiveTools().includes("ws-report-to-lead")) lead.api.setActiveTools([...lead.api.getActiveTools(), "ws-report-to-lead"]);
       await prompt(lead, "Original lead history Ω");
@@ -179,6 +186,9 @@ for (const root of SDK_ROOTS) for (const [providerName, apiName] of [["openroute
       const observed = lead.requests[0];
       const capture = lead.sm.getEntries().findLast((e: any) => e.customType === "ws-pi-lead-prompt").data;
       assert.equal(capture.effectiveSystemPrompt, observed.context.systemPrompt);
+      assert.ok(observed.context.systemPrompt.includes(supplementBlock));
+      // A fork loads the new store but keeps the parent's exact inherited bytes.
+      writeFileSync(promptConfigPath, JSON.stringify({ version: 1, rules: [{ id: model.id, general: "Changed general", leadOnly: "Changed lead-only" }] }));
       assert.equal(capture.basePromptOptions.appendSystemPrompt, "Explicit append Ω\r\ntrailing  ");
       assert.ok(capture.effectiveSystemPrompt.endsWith("Later handler Ω  "));
       assert.notEqual(lead.beforePrompt, capture.effectiveSystemPrompt, "before-agent observation is partial; persisted capture is post-chain");
@@ -355,8 +365,9 @@ for (const root of SDK_ROOTS) for (const [providerName, apiName] of [["openroute
       drifted.retention = "short";
       drifted.oracleModel = { ...model, id: "explicit-model-override" };
       await withEnv(drifted.env, () => drifted.session.setModel(drifted.oracleModel));
+      drifted.oracle = { ...drifted.oracle, systemPrompt: observed.context.systemPrompt.replace(supplementBlock, "") };
       await prompt(drifted, "Continue with explicit model override");
-      assert.equal(drifted.requests.at(-1).context.systemPrompt, observed.context.systemPrompt);
+      assert.equal(drifted.requests.at(-1).context.systemPrompt, observed.context.systemPrompt.replace(supplementBlock, ""), "explicit model change drops the inherited supplement when the new model has no rule");
       assert.deepEqual(drifted.requests.at(-1).payload.tools, noMismatchTools);
       assert.equal(drifted.requests.at(-1).payload.model, "explicit-model-override");
       if (providerName === "openai-codex") assert.equal(drifted.requests.at(-1).payload.prompt_cache_key, drifted.sm.getSessionId(), "incompatible model preserves prompt/tools but receives no parent affinity");
@@ -403,6 +414,8 @@ for (const root of SDK_ROOTS) for (const [providerName, apiName] of [["openroute
       const worker = await makeSession(sdk.SessionManager.create(directory, join(directory, "sessions")), { ...legacyEnv, WS_PI_SPAWN_ROLE: "worker", WS_PI_FORK_CONTEXT: "/missing-poison-file" });
       await prompt(worker, "Worker ignores poisoned fork envelope");
       assert.equal(worker.requests.length, 1);
+      assert.match(worker.requests[0].context.systemPrompt, /Changed general/);
+      assert.doesNotMatch(worker.requests[0].context.systemPrompt, /Changed lead-only|Original lead-only/);
       assert.equal(sends, 0);
       assert.ok(payloads.length >= 8);
     } finally {
