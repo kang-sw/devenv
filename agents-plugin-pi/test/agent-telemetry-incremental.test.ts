@@ -9,7 +9,7 @@ import { appendFileSync, mkdtempSync, rmSync, truncateSync, unlinkSync, writeFil
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, test } from "node:test";
-import { IncrementalSessionReader, nodeSessionFileIo, projectEntry, readSessionEntries, type SessionEntriesRead, type SessionFileIo } from "../src/agent-telemetry.ts";
+import { IncrementalSessionReader, nodeSessionFileIo, readSessionEntries, type SessionEntriesRead, type SessionFileIo } from "../src/agent-telemetry.ts";
 import { allocateAgentHome, createAgentStorageContext, persistOwnershipTelemetry, removeOwnedAgentHome, readOwnership, updateOwnership } from "../src/agent-storage.ts";
 import { descendantUsageValue, registerAgentCostOwner, retentionEvictionCost } from "../src/agent-cost.ts";
 import { evictForCapacity, refreshAgentTelemetry, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
@@ -26,9 +26,25 @@ const line = (value: unknown): string => `${JSON.stringify(value)}\n`;
 const lines = (values: unknown[]): string => values.map(line).join("");
 
 type Kind = "entries" | "transient" | "invalid";
+type OracleProjectedEntry = { id: string; type: string; message?: { role?: unknown; usage?: unknown } | null; usage?: unknown };
 const kindOf = (read: SessionEntriesRead): Kind => read === undefined ? "invalid" : "transient" in read ? "transient" : "entries";
 
-/** Reads once through the reader and once through the oracle on the same file state; they must agree. */
+/** Test-owned projection of exactly the telemetry fields the incremental reader must retain. */
+function oracleProjectEntry(value: unknown): OracleProjectedEntry {
+  const entry = value as { id: string; type: string; message?: unknown; usage?: unknown };
+  const projected: OracleProjectedEntry = { id: entry.id, type: entry.type };
+  if (Object.hasOwn(entry, "message")) {
+    const message = entry.message;
+    projected.message = message === null ? null : typeof message !== "object" ? {} : {
+      ...(Object.hasOwn(message, "role") ? { role: (message as { role?: unknown }).role } : {}),
+      ...(Object.hasOwn(message, "usage") ? { usage: (message as { usage?: unknown }).usage } : {}),
+    };
+  }
+  if (Object.hasOwn(entry, "usage")) projected.usage = entry.usage;
+  return projected;
+}
+
+/** Reads once through the reader and once through the full-reader oracle on the same file state; they must agree. */
 function check(reader: IncrementalSessionReader, path: string, label: string, expected?: Kind): SessionEntriesRead {
   const incremental = reader.read(path);
   const oracle = readSessionEntries(path);
@@ -38,7 +54,7 @@ function check(reader: IncrementalSessionReader, path: string, label: string, ex
     assert.equal(incremental.headerId, oracle.headerId, `${label}: headerId`);
     assert.equal(incremental.parentSession, oracle.parentSession, `${label}: parentSession`);
     assert.equal(Object.hasOwn(incremental, "parentSession"), Object.hasOwn(oracle, "parentSession"), `${label}: parentSession presence`);
-    assert.deepEqual(incremental.entries, oracle.entries.map(projectEntry), `${label}: projected entries`);
+    assert.deepEqual(incremental.entries, oracle.entries.map(oracleProjectEntry), `${label}: projected entries`);
   }
   if (expected) assert.equal(kindOf(incremental), expected, `${label}: expected ${expected}`);
   return incremental;
@@ -313,6 +329,18 @@ describe("incremental session reader: replay oracle", () => {
     check(reader, path, "first occurrence and conflict appended together", "invalid");
   });
 
+  test("a same-id conflict only in discarded content is invalid like the full reader", () => {
+    const path = sessionPath(), reader = new IncrementalSessionReader();
+    const first = toolResult("outside-projection", "first payload");
+    const conflicting = toolResult("outside-projection", "different payload");
+    assert.deepEqual(oracleProjectEntry(first), oracleProjectEntry(conflicting), "precondition: only a discarded field differs");
+    writeFileSync(path, lines([header(), first]));
+    check(reader, path, "before discarded-field conflict", "entries");
+    appendFileSync(path, line(conflicting));
+    assert.equal(check(reader, path, "discarded-field conflict", "invalid"), undefined);
+    assert.equal(readSessionEntries(path), undefined, "the full reader also rejects the conflict");
+  });
+
   test("absent, null, and present message, message.usage, and usage project exactly", () => {
     const path = sessionPath(), reader = new IncrementalSessionReader();
     const variants: unknown[] = [
@@ -343,6 +371,10 @@ describe("incremental session reader: replay oracle", () => {
     assert.equal(Object.hasOwn(byId.get("no-usage")!.message!, "usage"), false);
     assert.equal(byId.get("null-usage")!.message!.usage, null);
     assert.equal(byId.get("null-top-usage")!.usage, null);
+    assert.deepEqual(byId.get("no-usage"), { id: "no-usage", type: "message", message: { role: "assistant" } });
+    assert.deepEqual(byId.get("undefined-role"), { id: "undefined-role", type: "message", message: { usage: { input: 1 } } });
+    assert.deepEqual(byId.get("top-usage"), { id: "top-usage", type: "compaction", usage: { input: 2, cost: { total: .1 } } });
+    assert.deepEqual(byId.get("both-usages"), { id: "both-usages", type: "message", message: { role: "assistant", usage: { input: 3 } }, usage: { input: 4 } });
   });
 
   test("a malformed consumed line followed by a malformed last line stays invalid", () => {
