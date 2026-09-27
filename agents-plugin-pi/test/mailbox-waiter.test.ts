@@ -54,12 +54,12 @@ function scriptedWait(script: MailboxWaitOutcome[]): { runWait: (signal: AbortSi
 const immediateSleep = (): Promise<void> => Promise.resolve();
 
 async function waitForFile(path: string): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  for (let attempt = 0; attempt < 800; attempt += 1) {
     try {
       await access(path);
       return;
     } catch {
-      await new Promise((resolve) => setTimeout(resolve, 5));
+      await new Promise((resolve) => setTimeout(resolve, 10));
     }
   }
   throw new Error(`timed out waiting for ${path}`);

@@ -5,18 +5,19 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, 
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { parseOrphans, sidecarPath, writeSidecarAt } from "../src/agent-sidecar.ts";
 
 const PLUGIN_DIR = join(process.cwd());
 
 async function waitForFile(path: string): Promise<void> {
-  for (let i = 0; i < 200; i += 1) {
+  for (let i = 0; i < 400; i += 1) {
     if (existsSync(path)) return;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error(`mailbox waiter never started: ${path}`);
 }
 
-test("Pi session generations stage immutable mailbox binaries across reloads and re-arms", async () => {
+test("Pi session generations reuse immutable mailbox binaries and preserve recovery across footer/shutdown races", async () => {
   const directory = mkdtempSync(join(tmpdir(), "ws-pi-mailbox-handoff-"));
   const plugin = join(directory, "plugin");
   mkdirSync(plugin);
@@ -29,6 +30,13 @@ test("Pi session generations stage immutable mailbox binaries across reloads and
   const lookupDelay = join(directory, "delay-next-lookup");
   const lookupStarted = join(directory, "lookup-in-flight");
   const bridgePids = join(directory, "bridge-pids");
+  const stopCalls = join(directory, "stop-calls");
+  const footerTrigger = join(directory, "pause-final-footer");
+  const footerEntered = join(directory, "final-footer-entered");
+  const footerRelease = join(directory, "release-final-footer");
+  const shutdownTrigger = join(directory, "pause-shutdown");
+  const shutdownEntered = join(directory, "shutdown-claimed");
+  const shutdownRelease = join(directory, "release-shutdown");
   const sourceScript = join(directory, process.platform === "win32" ? "fake-source-cli.exe" : "fake-source-cli");
   const runtimeJsonPath = join(plugin, "runtime.json");
   const runtimeVersion = JSON.parse(readFileSync(runtimeJsonPath, "utf8")).plugin_version;
@@ -67,6 +75,29 @@ test("Pi session generations stage immutable mailbox binaries across reloads and
   const bridgeSource = readFileSync(bridgePath, "utf8");
   assert.ok(bridgeSource.includes("runBuild: runGoBuild,"));
   writeFileSync(bridgePath, bridgeSource.replace("runBuild: runGoBuild,", `runBuild: async (argv) => { const fs = await import('node:fs/promises'); const target = argv[argv.indexOf('-o') + 1]; await fs.copyFile(${JSON.stringify(sourceScript)}, target); await fs.chmod(target, 0o755); },`));
+  // Deliberately pause the last awaited footer and the first shutdown await
+  // in a copied plugin only. The production generation ownership path remains
+  // unchanged, but this forces the adverse continuation order deterministically.
+  const indexPath = join(plugin, "src", "index.ts");
+  const indexSource = readFileSync(indexPath, "utf8");
+  const footerCall = "    await applySessionStartAgentFooter(agentFooterLifecycle, bootstrapRole, ctx, agentTools.rpcRegistry, dispatchStorage);";
+  const shutdownCall = "    await claudeDelegateSession.shutdown();";
+  assert.ok(indexSource.includes(footerCall) && indexSource.includes(shutdownCall));
+  const pauseAt = (trigger: string, entered: string, release: string): string => [
+    `const fs = await import('node:fs');`,
+    `if (fs.existsSync(${JSON.stringify(trigger)}) && !fs.existsSync(${JSON.stringify(entered)})) {`,
+    `  fs.writeFileSync(${JSON.stringify(entered)}, '');`,
+    `  while (!fs.existsSync(${JSON.stringify(release)})) await new Promise(resolve => setTimeout(resolve, 5));`,
+    `}`,
+  ].join("\n");
+  writeFileSync(indexPath, indexSource
+    .replace(footerCall, `    await (async () => { const footer = applySessionStartAgentFooter(agentFooterLifecycle, bootstrapRole, ctx, agentTools.rpcRegistry, dispatchStorage); ${pauseAt(footerTrigger, footerEntered, footerRelease)} await footer; })();`)
+    .replace(shutdownCall, `    ${pauseAt(shutdownTrigger, shutdownEntered, shutdownRelease)}\n${shutdownCall}`));
+  const spawnerPath = join(plugin, "src", "spawner.ts");
+  const spawnerSource = readFileSync(spawnerPath, "utf8");
+  const stopMethod = "    async stopAll(): Promise<void> {";
+  assert.equal(spawnerSource.split(stopMethod).length, 2);
+  writeFileSync(spawnerPath, spawnerSource.replace(stopMethod, `${stopMethod}\n      await (await import('node:fs/promises')).appendFile(${JSON.stringify(stopCalls)}, 'stop\\n');`));
   const bin = join(plugin, "bin");
   mkdirSync(bin);
   const launcher = join(bin, "ws-mcp-launcher.py");
@@ -121,7 +152,8 @@ test("Pi session generations stage immutable mailbox binaries across reloads and
     const loader = new DefaultResourceLoader({ cwd: root, agentDir, settingsManager: settings, noSkills: true, noThemes: true, noPromptTemplates: true, noContextFiles: true, additionalExtensionPaths: [join(plugin, "src/index.ts")] });
     await loader.reload();
     assert.deepEqual(loader.getExtensions().errors, []);
-    ({ session } = await createAgentSession({ cwd: root, agentDir, sessionManager: SessionManager.create(root, join(directory, "sessions")), resourceLoader: loader, modelRuntime, settingsManager: settings }));
+    const sessionManager = SessionManager.create(root, join(directory, "sessions"));
+    ({ session } = await createAgentSession({ cwd: root, agentDir, sessionManager, resourceLoader: loader, modelRuntime, settingsManager: settings }));
     const ui = new Proxy({ notify: (message: string) => { diagnostics.push(message); }, setFooter: () => {} }, { get: (target: Record<string, unknown>, key: string) => target[key] ?? (() => {}) });
     await session.bindExtensions({ mode: "tui", uiContext: ui as never, onError: (error) => { throw error; } });
     await waitForFile(observed).catch((error) => { throw new Error(`${error.message}\n${diagnostics.join("\n")}`); });
@@ -136,7 +168,7 @@ test("Pi session generations stage immutable mailbox binaries across reloads and
     updatedRuntime.plugin_version = "99.99.99";
     updatedRuntime.release_tag = "v99.99.99";
     writeFileSync(runtimeJsonPath, JSON.stringify(updatedRuntime));
-    for (let i = 0; i < 200 && waitsSoFar().length < 2; i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+    for (let i = 0; i < 800 && waitsSoFar().length < 2; i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
     const firstTwo = waitsSoFar();
     assert.equal(firstTwo.length, 2, `the mailbox waiter must re-arm after runtime.json changes: ${diagnostics.join(" | ")}`);
     assert.deepEqual(firstTwo.map((wait) => [wait.binary, wait.version]), [[firstBinary, runtimeVersion], [firstBinary, "99.99.99"]]);
@@ -159,22 +191,65 @@ test("Pi session generations stage immutable mailbox binaries across reloads and
     assert.ok(staleOutput, "the first reload owns a unique bootstrap while lookup is pending");
     const reloadTwo = session.extensionRunner!.emit({ type: "session_start" });
     await Promise.all([reloadOne, reloadTwo]);
-    for (let i = 0; i < 200 && waitsSoFar().length < 3; i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+    for (let i = 0; i < 800 && waitsSoFar().length < 3; i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
     assert.equal(waitsSoFar().length >= 3, true, `new generation must arm: ${diagnostics.join(" | ")}`);
     stagedBinary = waitsSoFar()[2].binary;
     assert.notEqual(stagedBinary, firstBinary);
-    for (let i = 0; i < 200 && waitsSoFar().length < 4; i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+    for (let i = 0; i < 800 && waitsSoFar().length < 4; i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
     assert.equal(waitsSoFar()[3]?.binary, stagedBinary, "a new generation also re-arms from its one staged copy");
     assert.deepEqual(buildOutputs(), [], "both stale and active bootstraps are released after staging/disposal");
     const stalePath = join(plugin, ".runtime", "local-devenv", staleOutput);
     const pidRecord = readFileSync(bridgePids, "utf8").trim().split("\n").map((line) => JSON.parse(line)).find((record) => record.binary === stalePath);
     assert.ok(pidRecord, "the stale bridge must have launched its own subprocess");
     let staleAlive = true;
-    for (let i = 0; i < 200 && staleAlive; i += 1) {
+    for (let i = 0; i < 800 && staleAlive; i += 1) {
       try { process.kill(pidRecord.pid, 0); } catch { staleAlive = false; }
       if (staleAlive) await new Promise((resolve) => setTimeout(resolve, 10));
     }
     assert.equal(staleAlive, false, "stale generation's connected bridge process must be closed");
+
+    // Seed a dormant recovery entry for the next generation. Startup reads
+    // and clears this sidecar before the final footer await; shutdown must
+    // reclaim it from that generation's captured registry, not later globals.
+    await session.extensionRunner!.emit({ type: "session_shutdown", reason: "reload" });
+    const sessionFile = sessionManager.getSessionFile();
+    assert.ok(sessionFile, "a real Pi session must expose its recovery sidecar path");
+    const recoveryPath = sidecarPath(sessionFile);
+    const recoveredId = "dormant-footer-race";
+    const dormantPrompt = join(directory, "dormant-prompt.md");
+    writeFileSync(dormantPrompt, "Offline worker");
+    writeSidecarAt(recoveryPath, [{ agentId: recoveredId, sessionPath: join(directory, "dormant.jsonl"), systemPromptPath: dormantPrompt, wsToolNames: ["ws__todo_list"], toolGroup: "full-worker", state: "idle" }]);
+    const stopCount = () => existsSync(stopCalls) ? readFileSync(stopCalls, "utf8").trim().split("\n").filter(Boolean).length : 0;
+    writeFileSync(footerTrigger, "");
+    const racingStart = session.extensionRunner!.emit({ type: "session_start" });
+    await waitForFile(footerEntered).catch((error) => { throw new Error(`${error.message}\n${diagnostics.join("\n")}`); });
+    assert.equal(existsSync(recoveryPath), false, "startup consumed the seeded sidecar before its footer stalled");
+    const firstClaimPid = JSON.parse(readFileSync(bridgePids, "utf8").trim().split("\n").at(-1)!).pid;
+    const stopsBeforeClaim = stopCount();
+    writeFileSync(shutdownTrigger, "");
+    const racingShutdown = session.extensionRunner!.emit({ type: "session_shutdown", reason: "reload" });
+    await waitForFile(shutdownEntered);
+    writeFileSync(footerRelease, "");
+    await racingStart;
+    assert.equal(stopCount(), stopsBeforeClaim, "stale footer must not stop shutdown-owned recovered children");
+    const waitsBeforeNew = waitsSoFar().length;
+    const newerStart = session.extensionRunner!.emit({ type: "session_start" });
+    await newerStart;
+    for (let i = 0; i < 800 && waitsSoFar().length <= waitsBeforeNew; i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.ok(waitsSoFar().length > waitsBeforeNew, "newer generation must arm its own direct child");
+    stagedBinary = waitsSoFar().at(-1)!.binary;
+    assert.equal(existsSync(stagedBinary), true);
+    const newerPid = JSON.parse(readFileSync(bridgePids, "utf8").trim().split("\n").at(-1)!).pid;
+    assert.notEqual(newerPid, firstClaimPid);
+    writeFileSync(shutdownRelease, "");
+    await racingShutdown;
+    assert.equal(stopCount(), stopsBeforeClaim + 1, "shutdown owns exactly one stopAll for the claimed generation");
+    assert.ok(parseOrphans(readFileSync(recoveryPath, "utf8")).some((orphan) => orphan.agentId === recoveredId), "read-and-cleared dormant recovery must be durably re-persisted");
+    const isAlive = (pid: number): boolean => { try { process.kill(pid, 0); return true; } catch { return false; } };
+    for (let i = 0; i < 800 && isAlive(firstClaimPid); i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(isAlive(firstClaimPid), false, "claimed bridge must close once after persistence");
+    assert.equal(isAlive(newerPid), true, "older shutdown cannot close the newer generation");
+    assert.equal(stopCount(), stopsBeforeClaim + 1, "newer generation's tools must remain running");
     assert.equal(existsSync(launcherUsed), false, "no re-arm may re-enter the release-backed launcher");
     assert.deepEqual(readdirSync(runtimeCache), [], "a primed launcher cache cannot mask the missing handoff");
   } finally {

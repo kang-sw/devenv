@@ -506,19 +506,22 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   // `session_shutdown` on this same event loop. Awaiting
   // `resolveMailboxSelfSlug` opens a window where a second `session_start`
   // (a rapid double `/reload`) or a `session_shutdown` can run while an
-  // earlier arm attempt is still resolving. Every place that resets
-  // `mailboxWaiterHandle` to `undefined` also bumps this epoch; an arm
-  // attempt captures it right after its own bump and, once its await
-  // resolves, only assigns a new waiter if the epoch is unchanged —
-  // otherwise a newer event already owns (or has cleared) the handle, and
-  // assigning here would either leak this attempt's subprocess (never
-  // reachable to `stop()`) or clobber the newer waiter and duplicate mail
-  // admission.
+  // earlier arm attempt is still resolving. A new arm or shutdown bumps
+  // this epoch; a mismatched arm disposes its own published generation
+  // unless shutdown claimed it, rather than overwriting a newer waiter.
   let mailboxWaiterEpoch = 0;
   // Unlike the waiter epoch, this starts before ANY session_start await: a
   // slow bridge bootstrap or self-slug lookup cannot install a superseded
   // bridge after a newer startup (or shutdown) has taken ownership.
   let sessionStartEpoch = 0;
+  type BridgeGeneration = {
+    handle: BridgeHandle;
+    tools: AgentToolsHandle;
+    waiter?: MailboxWaiterHandle;
+    sidecar?: string;
+    owner: "active" | "shutdown" | "stale";
+  };
+  let publishedGeneration: BridgeGeneration | undefined;
   // The footer has the same TUI lead/fork lifetime as the widget, but remains
   // a separate component: replacing the footer never touches belowEditor cards.
   const agentFooterLifecycle = createAgentFooterSessionLifecycle(async () => {
@@ -690,23 +693,36 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
       }
     });
     if (!sessionBootstrap) return; // notified (and, for a spawned child, already exited) inside bootstrapOrFailLoud — never fall through to a partial/toolless registration.
-    let generationWaiter: MailboxWaiterHandle | undefined;
+    const generation: BridgeGeneration = { handle: sessionBootstrap.handle, tools: sessionBootstrap.agentTools, owner: "active" };
     const disposeStaleBootstrap = async (): Promise<void> => {
-      generationWaiter?.stop();
+      // Claim synchronously. Shutdown may already own this published generation
+      // and its recovery sidecar; a stale footer must never stop it first.
+      if (generation.owner !== "active") return;
+      generation.owner = "stale";
+      if (publishedGeneration === generation) {
+        publishedGeneration = undefined;
+        // Reloads of the same Pi session share a sidecar PATH, so pathname
+        // equality alone cannot prove this generation still owns the global.
+        if (leadSidecarPath === generation.sidecar) leadSidecarPath = undefined;
+      }
+      if (mailboxWaiterHandle === generation.waiter) mailboxWaiterHandle = undefined;
+      if (handle === generation.handle) handle = undefined;
+      if (agentTools === generation.tools) agentTools = undefined;
+      if (rpcRegistryRef.current === generation.tools.rpcRegistry) rpcRegistryRef.current = undefined;
+      generation.waiter?.stop();
       try {
-        await generationWaiter?.done;
+        // A published generation may already have consumed a recovery sidecar.
+        // Persist before stopAll even when it was superseded without shutdown.
+        await persistShutdownAgentSnapshots(generation.tools, generation.sidecar, threadHandle);
       } finally {
-        try { await sessionBootstrap.agentTools.stopAll(); } finally {
-          // The waiter owns its staged binary until done; the bridge owns any
-          // bootstrap still present. Both belong to this generation only.
-          sessionBootstrap.handle.shutdown();
-        }
+        try { await generation.waiter?.done; } finally { generation.handle.shutdown(); }
       }
     };
     if (startEpoch !== sessionStartEpoch) {
       await disposeStaleBootstrap();
       return;
     }
+    publishedGeneration = generation;
     handle = sessionBootstrap.handle;
     sessionKeyRef.current = handle.defaultSessionKeyRef.current;
     const onApprovalPending = sessionBootstrap.onApprovalPending;
@@ -756,11 +772,6 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
       // lookup awaited. Dispose its captured bridge AND unique bootstrap;
       // clearing only the waiter pointer would orphan both.
       if (armEpoch !== mailboxWaiterEpoch || startEpoch !== sessionStartEpoch) {
-        if (handle === mailboxHandle) {
-          handle = undefined;
-          agentTools = undefined;
-          rpcRegistryRef.current = undefined;
-        }
         await disposeStaleBootstrap();
         return;
       }
@@ -786,8 +797,8 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
           admit: (envelope) => sendToLead(pi, buildMailboxPushMessage(envelope), "steer", "always"),
           onError: reportMailboxWaiterDiagnostic,
         });
-        generationWaiter = staged ? attachMailboxRuntimeCleanup(waiter, staged) : waiter;
-        mailboxWaiterHandle = generationWaiter;
+        generation.waiter = staged ? attachMailboxRuntimeCleanup(waiter, staged) : waiter;
+        mailboxWaiterHandle = generation.waiter;
       } catch (error) {
         reportMailboxWaiterDiagnostic(`could not stage local runtime: ${error instanceof Error ? error.message : String(error)}`);
       }
@@ -837,6 +848,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     leadSessionFile = dispatchSessionFile ?? undefined;
     const dispatchStorage = createAgentStorageContext(ctx.sessionManager.getSessionId());
     leadSidecarPath = dispatchSessionFile ? sidecarPath(dispatchSessionFile) : noSessionSidecarPath(dispatchStorage.root, dispatchStorage.ownerSessionId);
+    generation.sidecar = leadSidecarPath;
     let recoveredRegistry = readAndClearSidecarAt(leadSidecarPath);
     recoveredRegistry = applySessionStartAgentRetention(readSpawnRole(process.env), dispatchStorage.root, goalLoopConfigPath, recoveredRegistry);
     if (recoveredRegistry.length > 0) reviveOrphans(agentTools.rpcRegistry, recoveredRegistry, {
@@ -1018,79 +1030,70 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     // the host TUI import is asynchronous, and yielding earlier would let Pi
     // snapshot the active tool set before later question tools were registered.
     await applySessionStartAgentFooter(agentFooterLifecycle, bootstrapRole, ctx, agentTools.rpcRegistry, dispatchStorage);
-    if (startEpoch !== sessionStartEpoch) {
-      if (mailboxWaiterHandle === generationWaiter) mailboxWaiterHandle = undefined;
-      if (handle === sessionBootstrap.handle) {
-        handle = undefined;
-        agentTools = undefined;
-        rpcRegistryRef.current = undefined;
-      }
-      await disposeStaleBootstrap();
-    }
+    if (startEpoch !== sessionStartEpoch) await disposeStaleBootstrap();
   });
 
   pi.on("session_shutdown", async (event, _ctx) => {
-    sessionStartEpoch++;
+    const shutdownEpoch = ++sessionStartEpoch;
+    // Claim the published generation before ANY await. A startup resuming
+    // from its final footer await sees this claim and cannot stop the registry
+    // whose recovered sidecar shutdown must persist. A later startup may own
+    // the globals by the time shutdown resumes, so only captured refs below
+    // are used for teardown and persistence.
+    const claimed = publishedGeneration;
+    if (claimed?.owner === "active") claimed.owner = "shutdown";
+    publishedGeneration = undefined;
+    const claimedTools = claimed?.tools;
+    const claimedWaiter = claimed?.waiter;
+    const claimedSidecar = claimed?.sidecar;
+    const claimedThreads: ThreadRegistryHandle = {
+      threads: new Map([...threadHandle.threads].map(([key, thread]) => [key, { ...thread }])),
+      ctxRef: { current: threadHandle.ctxRef.current },
+      pathRef: { current: threadHandle.pathRef.current },
+    };
+    if (handle === claimed?.handle) handle = undefined;
+    if (agentTools === claimedTools) agentTools = undefined;
+    if (mailboxWaiterHandle === claimedWaiter) mailboxWaiterHandle = undefined;
+    if (rpcRegistryRef.current === claimedTools?.rpcRegistry) rpcRegistryRef.current = undefined;
+    if (leadSidecarPath === claimedSidecar) leadSidecarPath = undefined;
+    leadSessionFile = undefined;
+    mailboxWaiterEpoch++;
+    claimedWaiter?.stop();
     // Session replacement (`reload`/`new`/`resume`/`fork`) re-runs this
     // factory in the same process, where the deleted bootstrap can never be
     // read again; the adapter does not drive children through it, but the
     // channel must outlive anything short of the process's own quit.
     if ((event?.reason ?? "quit") === "quit") channel?.close();
     await claudeDelegateSession.shutdown();
-    // 260905: snapshot the children BEFORE stopAll() tears down their live
-    // clients, so the next start of this session can announce them rather
-    // than losing them silently (see agent-sidecar.ts's header). Ordering
-    // still matters for the roll-call's accuracy — `captureOrphans` now also
-    // captures already-dormant (parked) records, but only a live-at-shutdown
-    // snapshot correctly reports which ones were still `running` at that
-    // instant; after stopAll() every record reads as dormant/idle.
-    // Await graceful RPC teardown of any still-live spawned `pi` children
-    // before tearing down the bridge connection they were dispatching ws__*
-    // tool calls through (agentTools.stopAll() is itself async now that
-    // teardown is a graceful RpcClient.stop() rather than a fire-and-forget
-    // SIGTERM — see spawner.ts's AgentToolsHandle doc comment).
-    await persistShutdownAgentSnapshots(agentTools, leadSidecarPath, threadHandle);
-    descendantUsageReporterRef.current?.setSource(undefined);
-    agentTools = undefined;
-    rpcRegistryRef.current = undefined;
-    leadSessionFile = undefined;
-    leadSidecarPath = undefined;
-    // Held inputs die with the session, exactly like the Pi followUp queue
-    // they stand in for: report registries are about to be discarded and goal
-    // replacement controls are intentionally volatile. The sidecar written
-    // above carries child IDENTITIES forward; reports and controls are not
-    // persisted (see spawner.ts's heldPushQueue).
-    heldPushQueue.length = 0;
-    // Review relay #1 (Minor, 260906): reset the compaction-in-flight flag
-    // and both of goal-loop.ts's private markers beside the held-push queue
-    // they gate — otherwise a shutdown/`/reload` that lands mid-compaction
-    // leaves `leadCompactingRef` stuck `true` into the replacement session,
-    // where every `followUp` push and `injectDiscussionSummary` would hold
-    // forever with nothing left to release them.
-    goalLoopHandle.resetCompactionStateForShutdown();
-    leadIdleRef.current = undefined;
-    applySessionShutdownOwnershipDiagnostics();
-    // 260905 (live-agent widget ticket): stop the elapsed timer and clear the
-    // widget/status segment (mirrors `leadIdleRef.current = undefined` above)
-    // — the registries the controller closed over are about to be discarded.
-    agentWidgetHandle?.stop();
-    agentWidgetHandle = undefined;
-    // 260914: stop the mail waiter before the bridge/client it drains through is
-    // torn down below; `stop()` aborts any in-flight `mailbox wait` subprocess.
-    // 260917 review fix: also bump mailboxWaiterEpoch so an arm attempt still
-    // resolving its self slug (see that epoch's doc comment) sees this
-    // shutdown and does not assign a now-stale waiter afterward.
-    const waiterToStop = mailboxWaiterHandle;
-    waiterToStop?.stop();
-    mailboxWaiterHandle = undefined;
-    mailboxWaiterEpoch++;
-    // Pi awaits async shutdown callbacks. The executable is removed by this
-    // generation's done handler only after the child has closed on Windows.
-    await waiterToStop?.done;
-    applySessionShutdownAgentFooter(agentFooterLifecycle);
-    agentWidgetRefreshRef.current = undefined;
-    agentCostRefreshRef.current = undefined;
-    handle?.shutdown();
-    handle = undefined;
+    // captureOrphans snapshots pre-stop child state, including dormant
+    // records read-and-cleared from the sidecar. Persist using the claimed
+    // registry/path before stopAll can mutate it, never newer globals.
+    await persistShutdownAgentSnapshots(claimedTools, claimedSidecar, claimedThreads);
+    if (shutdownEpoch === sessionStartEpoch) {
+      descendantUsageReporterRef.current?.setSource(undefined);
+      // Held inputs die with the session, exactly like the Pi followUp queue
+      // they stand in for: report registries are about to be discarded and goal
+      // replacement controls are intentionally volatile. The sidecar written
+      // above carries child IDENTITIES forward; reports and controls are not
+      // persisted (see spawner.ts's heldPushQueue).
+      heldPushQueue.length = 0;
+      // Review relay #1 (Minor, 260906): reset the compaction-in-flight flag
+      // and both of goal-loop.ts's private markers beside the held-push queue
+      // they gate — otherwise a shutdown/`/reload` that lands mid-compaction
+      // leaves `leadCompactingRef` stuck `true` into the replacement session,
+      // where every `followUp` push and `injectDiscussionSummary` would hold
+      // forever with nothing left to release them.
+      goalLoopHandle.resetCompactionStateForShutdown();
+      leadIdleRef.current = undefined;
+      applySessionShutdownOwnershipDiagnostics();
+      agentWidgetHandle?.stop();
+      agentWidgetHandle = undefined;
+      applySessionShutdownAgentFooter(agentFooterLifecycle);
+      agentWidgetRefreshRef.current = undefined;
+      agentCostRefreshRef.current = undefined;
+    }
+    // The waiter owns its staged executable until close. Its captured bridge
+    // is torn down only after the claimed registry is durably snapshotted.
+    try { await claimedWaiter?.done; } finally { claimed?.handle.shutdown(); }
   });
 }
