@@ -41,12 +41,13 @@ export function createModelPromptRuntime() {
   let inheritedReleased = false;
   let ran = false;
   return {
-    start(snapshot: ModelPromptConfig, model: ModelIdentity | undefined) {
+    start(snapshot: ModelPromptConfig, model: ModelIdentity | undefined, released = false) {
       config = snapshot;
       startupModel = model;
-      inheritedReleased = false;
+      inheritedReleased = released;
       ran = false;
     },
+    isInheritedReleased: () => inheritedReleased,
     written(snapshot: ModelPromptConfig) {
       config = snapshot;
       inheritedReleased = true;
@@ -71,15 +72,31 @@ export function registerModelPrompts(
   store: ModelPromptStore = createModelPromptStore(),
 ): void {
   const runtime = createModelPromptRuntime();
+  const stateType = "ws-pi-model-prompt-state";
+  let sessionId: string | undefined;
+  let releaseRecorded = false;
+  const recordRelease = () => {
+    if (readSpawnRole(process.env) !== "fork" || !sessionId || releaseRecorded || !runtime.isInheritedReleased()) return;
+    // Non-conversation metadata survives /reload and dormant relaunch. Ownership
+    // excludes inherited parent entries when a new fork starts on copied history.
+    pi.appendEntry(stateType, { sessionId, released: true });
+    releaseRecorded = true;
+  };
   pi.on("session_start", async (_event, ctx) => {
-    try { runtime.start(await store.load(), ctx.model); }
+    sessionId = ctx.sessionManager.getSessionId();
+    releaseRecorded = ctx.sessionManager.getEntries().some(entry => {
+      if (entry.type !== "custom" || entry.customType !== stateType) return false;
+      const state = entry.data as { sessionId?: string; released?: boolean } | undefined;
+      return state?.sessionId === sessionId && state?.released === true;
+    });
+    try { runtime.start(await store.load(), ctx.model, releaseRecorded); }
     catch (error) {
-      runtime.start({ version: 1, rules: [] }, ctx.model);
+      runtime.start({ version: 1, rules: [] }, ctx.model, releaseRecorded);
       ctx.ui.notify(`Model prompt configuration not loaded: ${String(error)}`, "error");
     }
   });
-  registerModelPromptCommand(pi, store, config => runtime.written(config));
-  pi.on("model_select", event => { runtime.modelSelected(event.model, event.source); });
+  registerModelPromptCommand(pi, store, config => { runtime.written(config); recordRelease(); });
+  pi.on("model_select", event => { runtime.modelSelected(event.model, event.source); recordRelease(); });
   pi.on("before_agent_start", (event, ctx) => {
     const systemPrompt = runtime.apply(event.systemPrompt, ctx.model, readSpawnRole(process.env), inheritedForkPrompt.current !== undefined);
     return systemPrompt === event.systemPrompt ? undefined : { systemPrompt };

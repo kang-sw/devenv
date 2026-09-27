@@ -1,6 +1,7 @@
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { randomUUID } from "node:crypto";
-import { mkdir, open, readFile, rename, rmdir, unlink } from "node:fs/promises";
+import { mkdir, open, readFile, rmdir, unlink } from "node:fs/promises";
+import { renameWithWindowsRetry } from "./atomic-write.ts";
 import { dirname, join } from "node:path";
 import type { ModelPromptChannel, ModelPromptConfig, ModelPromptRule, ModelPromptSelector, ModelPromptStore } from "./model-prompt-types.ts";
 
@@ -78,7 +79,7 @@ async function replace(path: string, value: ModelPromptConfig): Promise<void> {
       await file.writeFile(`${JSON.stringify(value, null, 2)}\n`, "utf8");
       await file.sync();
     } finally { await file.close(); }
-    await rename(temp, path);
+    renameWithWindowsRetry(temp, path);
   } finally { await unlink(temp).catch(error => { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }); }
 }
 

@@ -30,7 +30,7 @@ for (const root of SDK_ROOTS) for (const [providerName, apiName] of [["openroute
     symlinkSync(join(process.cwd(), "node_modules"), join(plugin, "node_modules"));
     mkdirSync(join(plugin, "bin"));
     const version = JSON.parse(readFileSync(join(plugin, "runtime.json"), "utf8")).plugin_version;
-    writeFileSync(join(plugin, "bin/ws-mcp-launcher.py"), `import sys,json,uuid,os\nkey='own-'+str(uuid.uuid4())\nfor line in sys.stdin:\n q=json.loads(line); m=q['method']; p=q.get('params',{}); r={}\n if m=='initialize': r={'serverInfo':{'name':'offline','version':${JSON.stringify(version)}},'capabilities':{}}\n elif m=='tools/list': r={'tools':[{'name':'probe','description':'Offline routing probe','inputSchema':{'type':'object','properties':{'session_key':{'type':'string'}}}}]}\n elif m=='tools/call':\n  n=p['name']; a=p.get('arguments',{}); text=json.dumps({'session_key':key}) if n=='ferrule' else ('lead manual '+key if n=='workflow_manual' else (json.dumps(a) if n=='probe' else '{}'))\n  r={'content':[{'type':'text','text':text}],'isError':False}\n  if n=='ferrule' and os.path.exists(${JSON.stringify(join(directory, "fail-key"))}): r={'isError':True,'content':[{'type':'text','text':'offline failed ferrule'}]}\n  if n=='playbook.read' and os.path.exists(${JSON.stringify(join(directory, "fail-map"))}): r={'isError':True,'content':[{'type':'text','text':'offline failed mapping'}]}\n print(json.dumps({'jsonrpc':'2.0','id':q['id'],'result':r}),flush=True)\n`);
+    writeFileSync(join(plugin, "bin/ws-mcp-launcher.py"), `import sys,json,uuid,os\nkey='own-'+str(uuid.uuid4())\nfor line in sys.stdin:\n q=json.loads(line); m=q['method']; p=q.get('params',{}); r={}\n if m=='initialize': r={'serverInfo':{'name':'offline','version':${JSON.stringify(version)}},'capabilities':{}}\n elif m=='tools/list': r={'tools':[{'name':'probe','description':'Offline routing probe','inputSchema':{'type':'object','properties':{'session_key':{'type':'string'}}}}]}\n elif m=='tools/call':\n  n=p['name']; a=p.get('arguments',{}); text=json.dumps({'session_key':key}) if n=='ferrule' else ('lead manual '+key if n=='workflow_manual' else (json.dumps(a) if n=='probe' else '{}'))\n  if n=='config.resolve_agent': text=json.dumps({'model':${JSON.stringify(providerName + "/cross-model")},'resolved_from':'pi'})\n  r={'content':[{'type':'text','text':text}],'isError':False}\n  if n=='ferrule' and os.path.exists(${JSON.stringify(join(directory, "fail-key"))}): r={'isError':True,'content':[{'type':'text','text':'offline failed ferrule'}]}\n  if n=='playbook.read' and os.path.exists(${JSON.stringify(join(directory, "fail-map"))}): r={'isError':True,'content':[{'type':'text','text':'offline failed mapping'}]}\n print(json.dumps({'jsonrpc':'2.0','id':q['id'],'result':r}),flush=True)\n`);
     const sdk = await import(join(root, "dist/index.js"));
     const extensionLoader = await import(join(root, "dist/core/extensions/loader.js"));
     const spawner = await import(join(plugin, "src/spawner.ts"));
@@ -58,10 +58,11 @@ for (const root of SDK_ROOTS) for (const [providerName, apiName] of [["openroute
       Object.assign(process.env, env);
       try { return await fn(); } finally { for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key]; Object.assign(process.env, saved); }
     }
-    async function makeSession(sm: any, env: any = {}, tools?: string[], append = "Explicit append Ω\r\ntrailing  ", discovered = false, parentOnlyTool = false) {
+    async function makeSession(sm: any, env: any = {}, tools?: string[], append = "Explicit append Ω\r\ntrailing  ", discovered = false, parentOnlyTool = false, startupModel = model) {
       return withEnv(env, async () => {
         const agentDir = join(directory, `config-${sessions.length}`); mkdirSync(agentDir);
         const settings = sdk.SettingsManager.inMemory({ compaction: { enabled: false }, retry: { enabled: false }, ...(discovered ? { extensions: [join(plugin, "src/index.ts")] } : {}) });
+        writeFileSync(join(agentDir, "models.json"), JSON.stringify({ providers: { [providerName]: { baseUrl: model.baseUrl, api: apiName, models: [{ ...model, id: "cross-model" }] } } }));
         if (providerName === "openai-codex") writeFileSync(join(agentDir, "auth.json"), JSON.stringify({ "openai-codex": { type: "oauth", access: apiKey, refresh: "unused-offline", expires: Date.now() + 86400000 } }));
         const runtime = await sdk.ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json"), modelsStorePath: join(agentDir, "store.json"), allowModelNetwork: false });
         if (providerName !== "openai-codex") await runtime.setRuntimeApiKey(providerName, apiKey);
@@ -77,7 +78,7 @@ for (const root of SDK_ROOTS) for (const [providerName, apiName] of [["openroute
         await loader.reload();
         assert.deepEqual(loader.getExtensions().errors, []);
         assert.equal(loader.getExtensions().extensions.filter((e: any) => e.path === join(plugin, "src/index.ts")).length, 1, "source/discovery deduplicates the adapter");
-        const { session } = await sdk.createAgentSession({ cwd: directory, agentDir, sessionManager: sm, resourceLoader: loader, modelRuntime: runtime, model, thinkingLevel: "off", settingsManager: settings, ...(tools ? { tools } : {}) });
+        const { session } = await sdk.createAgentSession({ cwd: directory, agentDir, sessionManager: sm, resourceLoader: loader, modelRuntime: runtime, model: startupModel, thinkingLevel: "off", settingsManager: settings, ...(tools ? { tools } : {}) });
         const h: any = { session, sm, env, api, parentOnlyTool, get beforePrompt() { return partialPrompt; }, requests: [] as any[] };
         sessions.push(h);
         session.agent.streamFunction = async (m: any, context: any, options: any) => (h.rawStream = serializer.stream(m, context, { ...options, apiKey, cacheRetention: h.retention ?? "short", fetch: async () => { sends++; throw new Error("network forbidden"); }, onPayload: async (payload: any) => {
@@ -131,7 +132,12 @@ for (const root of SDK_ROOTS) for (const [providerName, apiName] of [["openroute
         assert.ok(sessionDir >= 0, "the RPC argv owns its child session directory");
         const sm = fork >= 0 ? sdk.SessionManager.forkFrom(args[fork + 1], directory, args[sessionDir + 1]) : sdk.SessionManager.open(args[args.indexOf("--session") + 1]);
         const childEnv = omitCompletionReport ? { ...env, WS_PI_TEST_OMIT_FORK_REPORT: "1" } : env;
-        this.harness = await makeSession(sm, childEnv, args[args.indexOf("--tools") + 1].split(","), "CHANGED CHILD APPEND");
+        const startupModel = this.options.model === `${providerName}/cross-model` ? { ...model, id: "cross-model" } : model;
+        this.harness = await makeSession(sm, childEnv, args[args.indexOf("--tools") + 1].split(","), "CHANGED CHILD APPEND", false, false, startupModel);
+        if (startupModel.id !== model.id) {
+          this.harness.oracleModel = startupModel;
+          this.harness.oracleSessionId = sm.getSessionId();
+        }
         this.harness.parentClient = this;
         // Pi's RPC stdout carries every child `agent_start` to the parent; the
         // parent's settle admission counts them against the child's own
@@ -156,7 +162,7 @@ for (const root of SDK_ROOTS) for (const [providerName, apiName] of [["openroute
       },
       async stop(this: any) { if (this.harness) await stop(this.harness); }, async abort() {},
       onEvent(this: any, listener: (event: unknown) => void) { (this.wsPiTestEventListeners ??= new Set()).add(listener); return () => this.wsPiTestEventListeners?.delete(listener); },
-      async getState(this: any) { return { sessionFile: this.harness.sm.getSessionFile(), sessionId: this.harness.sm.getSessionId(), model, thinkingLevel: this.harness.session.thinkingLevel }; },
+      async getState(this: any) { return { sessionFile: this.harness.sm.getSessionFile(), sessionId: this.harness.sm.getSessionId(), model: this.harness.session.model, thinkingLevel: this.harness.session.thinkingLevel }; },
       async getLastAssistantText(this: any) { return this.harness.terminalText; },
       async setThinkingLevel(this: any, level: string) { this.harness.session.setThinkingLevel(level); },
       async prompt(this: any, text: string) { await prompt(this.harness, text); },
@@ -287,6 +293,14 @@ for (const root of SDK_ROOTS) for (const [providerName, apiName] of [["openroute
       const missingCompletionChild = children.at(-1);
       assert.equal(missingCompletionChild.requests.length, 1, "a missing progress tool does not block ordinary completion");
       omitCompletionReport = false;
+      const crossResult = await forkTool.execute("cross-model", { prompt: "Inspect on another model", model_name: "small" });
+      assert.ok(JSON.parse(crossResult.content[0].text).agent_id, JSON.stringify(crossResult));
+      const crossChild = children.at(-1);
+      assert.equal(crossChild.session.model.id, "cross-model", "the production launch selects the requested different model");
+      assert.equal(crossChild.requests[0].payload.model, "cross-model");
+      assert.equal(crossChild.requests[0].context.systemPrompt, observed.context.systemPrompt, "cross-model first call preserves the parent prompt despite the changed global store");
+      await prompt(crossChild, "Stay on cross-model");
+      assert.equal(crossChild.requests[1].context.systemPrompt, observed.context.systemPrompt);
       await stop(lead); // Actual shutdown writes the task sidecar.
       let orphans = sidecar.readAndClearSidecar(lead.sm.getSessionFile()).filter((orphan: any) => orphan.agentId === id);
       assert.equal(orphans.length, 1);
