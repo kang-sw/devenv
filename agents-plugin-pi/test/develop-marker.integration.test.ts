@@ -14,12 +14,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFile, execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildLocalDevenvBootstrap, readLocalDevenvMarker } from "../src/local-devenv.ts";
 import { spawnWsMcpClient } from "../src/mcp-stdio-client.ts";
-import { createSubprocessWait, sessionMailboxWaitOptions } from "../src/mailbox-waiter.ts";
+import { createSubprocessWait, sessionMailboxWaitOptions, stageMailboxRuntime } from "../src/mailbox-waiter.ts";
 import { cutStaticBody } from "../src/bridge.ts";
 
 const TEST_DIR = dirname(fileURLToPath(import.meta.url));
@@ -74,6 +74,7 @@ test("opt-in develop marker builds and recaptures the bundled bridge contract", 
     assert.equal(cutStaticBody(textResult(await client.callTool("workflow_manual", { session_key: sessionKey })), STATIC_FIXTURE).found, true);
   } finally {
     client.close();
+    try { unlinkSync(bootstrap.context.builtPath); } catch { /* Best-effort test teardown. */ }
   }
 });
 
@@ -89,12 +90,18 @@ test("opt-in develop marker runs mailbox wait through the bridge's source-built 
     const ferrule = textResult(await client.callTool("ferrule", { root: marker.source_root }));
     const sessionKey = /^session_key: (.+)$/m.exec(ferrule)?.[1];
     assert.ok(sessionKey);
-    const wait = createSubprocessWait({
-      ...sessionMailboxWaitOptions({ launcherPath, pluginDir: PLUGIN_DIR, env: bootstrap.env, sessionKey, cwd: marker.source_root }),
-      timeoutArg: "1s",
-    });
-    assert.equal(await wait(new AbortController().signal), "timeout", "mailbox wait must use the same local runtime without downloading a release asset");
+    const staged = stageMailboxRuntime(bootstrap.context.builtPath);
+    try {
+      const wait = createSubprocessWait({
+        ...sessionMailboxWaitOptions({ launcherPath, pluginDir: PLUGIN_DIR, runtimeBinary: staged.binaryPath, sessionKey, cwd: marker.source_root }),
+        timeoutArg: "1s",
+      });
+      assert.equal(await wait(new AbortController().signal), "timeout", "mailbox wait must execute a session copy of the bridge's source-built binary without downloading a release asset");
+    } finally {
+      staged.cleanup();
+    }
   } finally {
     client.close();
+    try { unlinkSync(bootstrap.context.builtPath); } catch { /* Best-effort test teardown. */ }
   }
 });

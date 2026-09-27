@@ -28,6 +28,7 @@
 
 import { accessSync, constants as fsConstants, existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { isAbsolute, join } from "node:path";
 
 export interface LocalDevenvMarker {
@@ -139,9 +140,9 @@ export function readLocalDevenvMarker(pluginDir: string): LocalDevenvMarker | un
 /**
  * `undefined` when no marker exists (inert). Otherwise: reads `source_root`'s
  * short HEAD, composes the version/commit ldflags stamp, runs the injected
- * `deps.runBuild` to build `ws-mcp` into a pid-scoped temp path under
- * `<pluginDir>/.runtime/local-devenv/`, atomically renames it to the final
- * path on success, and returns the launcher-child env fragment plus the
+ * `deps.runBuild` to build `ws-mcp` into a unique temp path under
+ * `<pluginDir>/.runtime/local-devenv/`, atomically renames it to a unique
+ * bootstrap path on success, and returns the launcher-child env fragment plus the
  * context `bridge.ts` threads into a launch-failure rewrap.
  *
  * Fail-loud, no cache fallback: any failure (marker validation, the
@@ -170,8 +171,9 @@ export async function buildLocalDevenvBootstrap(
   const ldflags = `-X main.version=${pluginVersion} -X main.sourceCommit=${shortCommit}`;
   const runtimeDir = join(pluginDir, ".runtime", "local-devenv");
   mkdirSync(runtimeDir, { recursive: true });
-  const tmpPath = join(runtimeDir, `ws-mcp.${process.pid}.tmp`);
-  const finalPath = join(runtimeDir, "ws-mcp");
+  const generation = `${process.pid}.${randomUUID()}`;
+  const tmpPath = join(runtimeDir, `ws-mcp.${generation}.tmp`);
+  const finalPath = join(runtimeDir, `ws-mcp.${generation}${process.platform === "win32" ? ".exe" : ""}`);
 
   const notify = deps.notify ?? (() => {});
   const now = deps.now ?? Date.now;
@@ -191,7 +193,12 @@ export async function buildLocalDevenvBootstrap(
     }
     throw err;
   }
-  renameSync(tmpPath, finalPath);
+  try {
+    renameSync(tmpPath, finalPath);
+  } catch (error) {
+    try { unlinkSync(tmpPath); } catch { /* Preserve the rename failure. */ }
+    throw error;
+  }
   notify(`ws-mcp build finished in ${now() - startedAt}ms`);
 
   return {

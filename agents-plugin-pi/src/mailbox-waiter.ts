@@ -47,6 +47,8 @@
  */
 
 import { spawn } from "node:child_process";
+import { chmodSync, copyFileSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { SpawnRole } from "./process-role.ts";
 
 /**
@@ -128,8 +130,37 @@ export interface MailboxWaiterDeps {
 export interface MailboxWaiterHandle {
   /** Stop the loop and abort any in-flight wait. Idempotent. */
   stop: () => void;
-  /** Resolves once the loop has fully exited — for deterministic teardown in tests. */
+  /** Resolves once the loop has fully exited, including subprocess close. */
   readonly done: Promise<void>;
+}
+
+export interface StagedMailboxRuntime {
+  binaryPath: string;
+  /** Best-effort removal; a locked file on Windows must never break shutdown. */
+  cleanup: () => void;
+}
+
+/** Each session generation owns one copy, reused by every wait re-arm; reloads never replace it. */
+export function stageMailboxRuntime(source: string, remove: typeof rmSync = rmSync): StagedMailboxRuntime {
+  const directory = mkdtempSync(join(dirname(source), ".mailbox-"));
+  const binaryPath = join(directory, process.platform === "win32" ? "ws-mcp.exe" : "ws-mcp");
+  const cleanup = (): void => {
+    try { remove(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }); } catch { /* A Windows file lock can outlive close briefly. */ }
+  };
+  try {
+    copyFileSync(source, binaryPath);
+    if (process.platform !== "win32") chmodSync(binaryPath, statSync(source).mode & 0o777);
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
+  return { binaryPath, cleanup };
+}
+
+/** Cleanup belongs to this generation's completed wait, never to a newer session's handle. */
+export function attachMailboxRuntimeCleanup(handle: MailboxWaiterHandle, staged: StagedMailboxRuntime): MailboxWaiterHandle {
+  void handle.done.then(staged.cleanup, staged.cleanup);
+  return handle;
 }
 
 const DEFAULT_ERROR_BACKOFF_MS = 5_000;
@@ -228,8 +259,8 @@ export interface SubprocessWaitOptions {
   launcherPath: string;
   /** Launcher cwd (the plugin dir), matching how the bridge spawns `serve --stdio`. */
   pluginDir: string;
-  /** The bridge's local source-build override, when one was used to launch its ws-mcp client. */
-  env?: Record<string, string>;
+  /** Immutable session-generation copy of the connected bridge's unique bootstrap. Absent for release-backed sessions. */
+  runtimeBinary?: string;
   /** This session's own session key — the required `--session-key`; gives the reply-id queue to watch. */
   sessionKey: string;
   /**
@@ -283,7 +314,7 @@ export function sessionMailboxWaitOptions(
   return {
     launcherPath: session.launcherPath,
     pluginDir: session.pluginDir,
-    env: session.env,
+    runtimeBinary: session.runtimeBinary,
     sessionKey: session.sessionKey,
     slug: session.slug,
     root: session.cwd,
@@ -292,10 +323,11 @@ export function sessionMailboxWaitOptions(
 }
 
 /**
- * The real `runWait`: spawn `python3 <launcher> mailbox wait ...` (the launcher
- * forwards the subcommand verbatim to the resolved `ws-mcp` binary) and map its
- * exit code to an outcome. Its stdout — the peeked mail — is intentionally
- * ignored (`stdio` drops it): the drain, not the peek, is the source of truth.
+ * The real `runWait`: a source-loaded session invokes its immutable copy of
+ * the binary used to bootstrap the connected bridge, avoiding mutable staging
+ * and runtime contracts. Release-backed sessions retain the Python launcher.
+ * Stdout — the peeked mail — is intentionally ignored (`stdio` drops it): the
+ * drain, not the peek, is the source of truth.
  */
 export function createSubprocessWait(options: SubprocessWaitOptions): (signal: AbortSignal) => Promise<MailboxWaitOutcome> {
   const stderr = options.onStderr ?? (() => {});
@@ -313,10 +345,10 @@ export function createSubprocessWait(options: SubprocessWaitOptions): (signal: A
         resolve("stopped");
         return;
       }
-      const child = spawn("python3", buildMailboxWaitArgv(options), {
+      const argv = buildMailboxWaitArgv(options);
+      const child = spawn(options.runtimeBinary ?? "python3", options.runtimeBinary ? argv.slice(1) : argv, {
         cwd: options.pluginDir,
         stdio: ["ignore", "ignore", "pipe"],
-        ...(options.env ? { env: { ...process.env, ...options.env } } : {}),
       });
       let settled = false;
       const finish = (outcome: MailboxWaitOutcome): void => {
@@ -329,9 +361,8 @@ export function createSubprocessWait(options: SubprocessWaitOptions): (signal: A
         try {
           child.kill("SIGTERM");
         } catch {
-          // Best effort — the exit handler still resolves.
+          // Best effort — direct waits settle on close; release launchers on exit.
         }
-        finish("stopped");
       };
       signal.addEventListener("abort", onAbort, { once: true });
       child.stderr?.on("data", (chunk: Buffer) => {
@@ -340,9 +371,16 @@ export function createSubprocessWait(options: SubprocessWaitOptions): (signal: A
       });
       child.on("error", (err) => {
         reportStderr(`wait spawn failed: ${err.message}`);
-        finish("error");
+        // Node always emits close after an error, including a failed spawn.
       });
-      child.on("exit", (code, sig) => {
+      // A direct local executable must be closed before its copy is removed.
+      // Windows release launchers spawn ws-mcp as a grandchild whose inherited
+      // pipe can keep `close` pending after Python exits; no copy is owned by
+      // that path, so retain its original exit-based settlement.
+      if (!options.runtimeBinary) child.on("exit", (code, sig) => {
+        finish(mapMailboxWaitExit(code, sig, signal.aborted));
+      });
+      child.on("close", (code, sig) => {
         finish(mapMailboxWaitExit(code, sig, signal.aborted));
       });
     });

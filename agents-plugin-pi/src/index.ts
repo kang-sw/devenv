@@ -200,7 +200,7 @@ import { ChildChannel, readAndDeleteChannelBootstrap } from "./agent-channel.ts"
 import { ChildApprovalGate } from "./approval-protocol.ts";
 import { isLeadOrFork, readSpawnRole, WS_PI_FORK_CONTEXT_ENV, WS_PI_PARENT_SESSION_KEY_ENV, type SpawnRole } from "./process-role.ts";
 import { createApprovalRelay, registerExecuteGateway } from "./execute-gateway.ts";
-import { buildMailboxPushMessage, createBridgeDrain, createSubprocessWait, resolveMailboxSelfSlug, sessionMailboxWaitOptions, shouldArmMailboxWaiter, startMailboxWaiter, type MailboxToolCall, type MailboxWaiterHandle } from "./mailbox-waiter.ts";
+import { attachMailboxRuntimeCleanup, buildMailboxPushMessage, createBridgeDrain, createSubprocessWait, resolveMailboxSelfSlug, sessionMailboxWaitOptions, shouldArmMailboxWaiter, stageMailboxRuntime, startMailboxWaiter, type MailboxToolCall, type MailboxWaiterHandle } from "./mailbox-waiter.ts";
 import { armForkRoleWiring, registerFork } from "./fork.ts";
 import {
   buildForkQuestionLeadNotice,
@@ -731,21 +731,35 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
       // epoch, in which case that event now owns mailboxWaiterHandle and
       // this attempt must not overwrite it.
       if (armEpoch === mailboxWaiterEpoch) {
-        mailboxWaiterHandle = startMailboxWaiter({
-          runWait: createSubprocessWait(sessionMailboxWaitOptions({
-            launcherPath,
-            pluginDir,
-            env: handle.launcherEnv,
-            sessionKey: mailboxSessionKey,
-            slug: selfSlug,
-            cwd: ctx.cwd,
-            onStderr: reportMailboxWaiterDiagnostic,
-          })),
-          drainMail: createBridgeDrain(mailboxCallTool, mailboxSessionKey),
-          admit: (envelope) => sendToLead(pi, buildMailboxPushMessage(envelope), "steer", "always"),
-          onError: reportMailboxWaiterDiagnostic,
-        });
+        try {
+          // Stage once after bridge validation from this bridge's unique
+          // bootstrap; overlapping reloads can neither cross-copy outputs
+          // nor replace an executable held open by the old waiter on Windows.
+          const staged = handle.localRuntimeBinary ? stageMailboxRuntime(handle.localRuntimeBinary) : undefined;
+          // The bridge runs the launcher's installed runtime; after staging,
+          // neither process needs this unique bootstrap build output.
+          handle.releaseLocalBootstrap();
+          const waiter = startMailboxWaiter({
+            runWait: createSubprocessWait(sessionMailboxWaitOptions({
+              launcherPath,
+              pluginDir,
+              runtimeBinary: staged?.binaryPath,
+              sessionKey: mailboxSessionKey,
+              slug: selfSlug,
+              cwd: ctx.cwd,
+              onStderr: reportMailboxWaiterDiagnostic,
+            })),
+            drainMail: createBridgeDrain(mailboxCallTool, mailboxSessionKey),
+            admit: (envelope) => sendToLead(pi, buildMailboxPushMessage(envelope), "steer", "always"),
+            onError: reportMailboxWaiterDiagnostic,
+          });
+          mailboxWaiterHandle = staged ? attachMailboxRuntimeCleanup(waiter, staged) : waiter;
+        } catch (error) {
+          reportMailboxWaiterDiagnostic(`could not stage local runtime: ${error instanceof Error ? error.message : String(error)}`);
+        }
       }
+    } else {
+      handle.releaseLocalBootstrap();
     }
 
     // 260904 Phase 1 (side-thread fork): registered declaratively/globally,
@@ -1023,9 +1037,13 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     // 260917 review fix: also bump mailboxWaiterEpoch so an arm attempt still
     // resolving its self slug (see that epoch's doc comment) sees this
     // shutdown and does not assign a now-stale waiter afterward.
-    mailboxWaiterHandle?.stop();
+    const waiterToStop = mailboxWaiterHandle;
+    waiterToStop?.stop();
     mailboxWaiterHandle = undefined;
     mailboxWaiterEpoch++;
+    // Pi awaits async shutdown callbacks. The executable is removed by this
+    // generation's done handler only after the child has closed on Windows.
+    await waiterToStop?.done;
     applySessionShutdownAgentFooter(agentFooterLifecycle);
     agentWidgetRefreshRef.current = undefined;
     agentCostRefreshRef.current = undefined;

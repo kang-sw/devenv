@@ -328,7 +328,6 @@ class BootstrapRuntimeTempCleanupTest(unittest.TestCase):
 
     def test_repeated_forced_bootstrap_fallback_leaves_no_temp_executables(self):
         launcher = load_launcher()
-        launcher.time.sleep = lambda _: None
         with tempfile.TemporaryDirectory() as temp_dir:
             plugin_dir = Path(temp_dir)
             runtime_dir = plugin_dir / "runtime"
@@ -338,7 +337,8 @@ class BootstrapRuntimeTempCleanupTest(unittest.TestCase):
             source.write_text("source-built", encoding="utf-8")
             binary.write_text("compatible-running", encoding="utf-8")
 
-            with mock.patch.dict(os.environ, {"WS_MCP_BOOTSTRAP_BINARY": str(source), "WS_MCP_BOOTSTRAP_URL": ""}), \
+            with mock.patch.object(launcher.time, "sleep", return_value=None), \
+                 mock.patch.dict(os.environ, {"WS_MCP_BOOTSTRAP_BINARY": str(source), "WS_MCP_BOOTSTRAP_URL": ""}), \
                  mock.patch("os.replace", side_effect=PermissionError("Windows sharing violation")), \
                  mock.patch.object(launcher, "runtime_fully_compatible", return_value=True):
                 for _ in range(3):
@@ -348,7 +348,6 @@ class BootstrapRuntimeTempCleanupTest(unittest.TestCase):
 
     def test_failed_bootstrap_replacement_cleans_temp_before_raising(self):
         launcher = load_launcher()
-        launcher.time.sleep = lambda _: None
         with tempfile.TemporaryDirectory() as temp_dir:
             plugin_dir = Path(temp_dir)
             runtime_dir = plugin_dir / "runtime"
@@ -356,7 +355,8 @@ class BootstrapRuntimeTempCleanupTest(unittest.TestCase):
             source = plugin_dir / "source-built.exe"
             binary = runtime_dir / "ws-mcp.exe"
             source.write_text("source-built", encoding="utf-8")
-            with mock.patch.dict(os.environ, {"WS_MCP_BOOTSTRAP_BINARY": str(source), "WS_MCP_BOOTSTRAP_URL": ""}), \
+            with mock.patch.object(launcher.time, "sleep", return_value=None), \
+                 mock.patch.dict(os.environ, {"WS_MCP_BOOTSTRAP_BINARY": str(source), "WS_MCP_BOOTSTRAP_URL": ""}), \
                  mock.patch("os.replace", side_effect=PermissionError("Windows sharing violation")), \
                  mock.patch.object(launcher, "runtime_fully_compatible", return_value=False):
                 with self.assertRaises(SystemExit):

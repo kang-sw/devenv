@@ -23,6 +23,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readLocalDevenvMarker, buildLocalDevenvBootstrap, type LocalDevenvBuildDeps } from "../src/local-devenv.ts";
+import { stageMailboxRuntime } from "../src/mailbox-waiter.ts";
 import { wrapLaunchErrorWithLocalDevenvContext } from "../src/bridge.ts";
 import { buildStdioSpawnOptions, spawnWsMcpClient } from "../src/mcp-stdio-client.ts";
 import { isLeadOrFork, readSpawnRole, WS_PI_SPAWN_ROLE_ENV } from "../src/process-role.ts";
@@ -223,7 +224,7 @@ describe("buildLocalDevenvBootstrap", () => {
           // Simulate a successful `go build -o <tmpPath> ...`: write a file
           // at the declared -o path.
           const outIndex = argv.indexOf("-o");
-          writeFileSync(argv[outIndex + 1], "fake-binary");
+          writeFileSync(argv[outIndex + 1], `fake-binary-${callCount}`);
         },
         notify: (m) => notifications.push(m),
         now: (() => {
@@ -241,17 +242,31 @@ describe("buildLocalDevenvBootstrap", () => {
       assert.equal(capturedArgv![ldflagsIndex + 1], `-X main.version=0.45.2 -X main.sourceCommit=${shortCommit}`);
       assert.equal(capturedArgv![capturedArgv!.length - 1], "./cmd/ws-mcp");
 
-      const finalPath = join(dir, ".runtime", "local-devenv", "ws-mcp");
+      const finalPath = result!.context.builtPath;
+      assert.match(finalPath, /\.runtime[/\\]local-devenv[/\\]ws-mcp\.\d+\.[a-f\d-]{36}(?:\.exe)?$/);
       assert.equal(result!.env.WS_MCP_BOOTSTRAP_BINARY, finalPath);
       assert.equal(result!.context.sourceRoot, sourceRoot);
       assert.equal(result!.context.sourceCommit, shortCommit);
       assert.equal(result!.context.builtPath, finalPath);
       assert.ok(existsSync(finalPath), "expected the renamed final binary to exist");
-      assert.equal(readFileSync(finalPath, "utf8"), "fake-binary");
+      assert.equal(readFileSync(finalPath, "utf8"), "fake-binary-1");
 
-      // The declared -o path matched ws-mcp.<pid>.tmp under .runtime/local-devenv/.
+      // The build temp and final output belong to the same unique generation.
       const tmpPathUsed = capturedArgv![capturedArgv!.indexOf("-o") + 1];
-      assert.match(tmpPathUsed, new RegExp(`\\.runtime[/\\\\]local-devenv[/\\\\]ws-mcp\\.${process.pid}\\.tmp$`));
+      assert.equal(tmpPathUsed, finalPath.replace(/\.exe$/, "") + ".tmp");
+      const second = await buildLocalDevenvBootstrap(dir, "0.45.2", deps);
+      assert.ok(second);
+      assert.notEqual(second.context.builtPath, finalPath, "overlapping starts cannot replace each other's bootstrap");
+      const firstWait = stageMailboxRuntime(finalPath);
+      const secondWait = stageMailboxRuntime(second.context.builtPath);
+      try {
+        assert.equal(readFileSync(firstWait.binaryPath, "utf8"), "fake-binary-1", "the first bridge cannot cross-copy the second build");
+        assert.equal(readFileSync(secondWait.binaryPath, "utf8"), "fake-binary-2");
+        assert.notEqual(firstWait.binaryPath, secondWait.binaryPath);
+      } finally {
+        firstWait.cleanup();
+        secondWait.cleanup();
+      }
 
       assert.ok(notifications.some((m) => m.includes(`building ws-mcp from`) && m.includes(sourceRoot) && m.includes(shortCommit)));
       assert.ok(notifications.some((m) => /finished in \d+ms/.test(m)));
@@ -291,8 +306,8 @@ describe("buildLocalDevenvBootstrap", () => {
 
       assert.ok(tmpPathUsed, "expected runBuild to have been invoked with an -o temp path");
       assert.equal(existsSync(tmpPathUsed!), false, "expected the partial temp build artifact to be cleaned up on failure");
-      // No final (renamed) binary should have been produced either.
-      assert.equal(existsSync(join(dir, ".runtime", "local-devenv", "ws-mcp")), false);
+      // A failed build produced no final (renamed) binary either.
+      assert.equal(existsSync(tmpPathUsed!), false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

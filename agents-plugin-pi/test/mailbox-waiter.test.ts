@@ -1,18 +1,20 @@
 /**
  * Unit tests for mailbox-waiter.ts: the session-bound wait/drain/admit loop
- * (260914 pi native mailbox push), driven entirely through injected fakes so
- * the arrival -> push detection path is exercised without a live mailbox or a
- * real `mailbox wait` subprocess.
+ * (260914 pi native mailbox push). Injected fakes exercise arrival -> push;
+ * small subprocess fixtures verify shutdown and release-launcher ordering
+ * without a live mailbox.
  *
  * Run with: node --test test/  (from agents-plugin-pi/).
  */
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
+  attachMailboxRuntimeCleanup,
   buildMailboxPushMessage,
   buildMailboxWaitArgv,
   createBridgeDrain,
@@ -21,6 +23,7 @@ import {
   resolveMailboxSelfSlug,
   sessionMailboxWaitOptions,
   shouldArmMailboxWaiter,
+  stageMailboxRuntime,
   startMailboxWaiter,
   WS_MAILBOX_CUSTOM_TYPE,
   type MailboxEnvelope,
@@ -247,36 +250,121 @@ describe("buildMailboxPushMessage", () => {
   });
 });
 
+describe("stageMailboxRuntime", () => {
+  test("overlapping generations keep distinct executables across source replacement, including simulated Windows locks", async () => {
+    const fixtureDir = await mkdtemp(join(tmpdir(), "ws-mailbox-generation-"));
+    const sourceDir = join(fixtureDir, "runtime");
+    await mkdir(sourceDir);
+    const source = join(sourceDir, "ws-mcp");
+    await writeFile(source, "first");
+    await chmod(source, 0o751);
+    const first = stageMailboxRuntime(source);
+    const locked = stageMailboxRuntime(source, () => { throw Object.assign(new Error("sharing violation"), { code: "EPERM" }); });
+    try {
+      await writeFile(source, "second");
+      const second = stageMailboxRuntime(source);
+      try {
+        assert.notEqual(first.binaryPath, second.binaryPath);
+        assert.notEqual(locked.binaryPath, second.binaryPath);
+        assert.equal(await readFile(first.binaryPath, "utf8"), "first");
+        assert.equal(await readFile(second.binaryPath, "utf8"), "second");
+        if (process.platform !== "win32") assert.equal((await stat(second.binaryPath)).mode & 0o777, 0o751);
+        assert.doesNotThrow(locked.cleanup, "Windows locked-file cleanup must not break shutdown");
+        first.cleanup();
+        assert.equal(existsSync(first.binaryPath), false);
+        assert.equal(existsSync(second.binaryPath), true, "a delayed old-generation cleanup cannot delete the new generation");
+      } finally {
+        second.cleanup();
+      }
+    } finally {
+      first.cleanup();
+      await rm(fixtureDir, { recursive: true, force: true });
+    }
+  });
+
+  test("stop waits for actual child close before removing its staged executable", { skip: process.platform === "win32" && "POSIX signal handler fixture" }, async () => {
+    const fixtureDir = await mkdtemp(join(tmpdir(), "ws-mailbox-close-"));
+    const sourceDir = join(fixtureDir, "runtime");
+    await mkdir(sourceDir);
+    const source = join(sourceDir, "ws-mcp");
+    const ready = join(fixtureDir, "ready");
+    await writeFile(source, [
+      "#!/usr/bin/env python3",
+      "import signal,time,sys",
+      "def stop(_signal, _frame):",
+      " time.sleep(0.25)",
+      " sys.exit(130)",
+      "signal.signal(signal.SIGTERM, stop)",
+      `open(${JSON.stringify(ready)}, 'w').close()`,
+      "time.sleep(30)",
+      "",
+    ].join("\n"));
+    await chmod(source, 0o755);
+    const staged = stageMailboxRuntime(source);
+    const waiter = attachMailboxRuntimeCleanup(startMailboxWaiter({
+      runWait: createSubprocessWait({ launcherPath: "unused", pluginDir: fixtureDir, runtimeBinary: staged.binaryPath, sessionKey: "key" }),
+      drainMail: async () => [], admit: () => {},
+    }), staged);
+    try {
+      await waitForFile(ready);
+      waiter.stop();
+      assert.equal(existsSync(staged.binaryPath), true, "abort alone cannot unlink a still-running executable");
+      await waiter.done;
+      assert.equal(existsSync(staged.binaryPath), false);
+    } finally {
+      waiter.stop();
+      await waiter.done;
+      await rm(fixtureDir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("createSubprocessWait", () => {
-  test("passes the bridge's local bootstrap binary without changing the no-marker environment", async () => {
-    const fixtureDir = await mkdtemp(join(tmpdir(), "ws-mailbox-bootstrap-"));
-    const launcherPath = join(fixtureDir, "inspect-env.py");
+  test("a release-backed session retains the Python launcher invocation without an override", async () => {
+    const fixtureDir = await mkdtemp(join(tmpdir(), "ws-mailbox-release-"));
+    const launcherPath = join(fixtureDir, "inspect-argv.py");
     const observedPath = join(fixtureDir, "observed");
     await writeFile(launcherPath, [
-      "import os",
+      "import json,sys",
       `with open(${JSON.stringify(observedPath)}, "w") as output:`,
-      "    output.write(os.getenv('WS_MCP_BOOTSTRAP_BINARY', '<unset>') + '|' + os.getenv('WS_MCP_BOOTSTRAP_URL', '<unset>'))",
+      "    json.dump(sys.argv[1:], output)",
       "raise SystemExit(3)",
       "",
     ].join("\n"));
     try {
-      const devOptions = sessionMailboxWaitOptions({
-        launcherPath,
-        pluginDir: fixtureDir,
-        sessionKey: "my-key",
-        cwd: fixtureDir,
-        env: { WS_MCP_BOOTSTRAP_BINARY: "/local/source-built/ws-mcp" },
-      });
-      const devWait = createSubprocessWait(devOptions);
-      assert.equal(await devWait(new AbortController().signal), "timeout");
-      assert.equal(await readFile(observedPath, "utf8"), "/local/source-built/ws-mcp|" + (process.env.WS_MCP_BOOTSTRAP_URL ?? "<unset>"));
-      assert.equal(await devWait(new AbortController().signal), "timeout");
-      assert.equal(await readFile(observedPath, "utf8"), "/local/source-built/ws-mcp|" + (process.env.WS_MCP_BOOTSTRAP_URL ?? "<unset>"), "every re-arm must retain the source-built override even if the runtime contract changes mid-session");
-
-      const releaseOptions = sessionMailboxWaitOptions({ launcherPath, pluginDir: fixtureDir, sessionKey: "my-key", cwd: fixtureDir });
-      assert.equal(await createSubprocessWait(releaseOptions)(new AbortController().signal), "timeout");
-      assert.equal(await readFile(observedPath, "utf8"), (process.env.WS_MCP_BOOTSTRAP_BINARY ?? "<unset>") + "|" + (process.env.WS_MCP_BOOTSTRAP_URL ?? "<unset>"));
+      const options = sessionMailboxWaitOptions({ launcherPath, pluginDir: fixtureDir, sessionKey: "my-key", cwd: fixtureDir });
+      assert.equal(options.runtimeBinary, undefined);
+      assert.equal(await createSubprocessWait(options)(new AbortController().signal), "timeout");
+      assert.deepEqual(JSON.parse(await readFile(observedPath, "utf8")), buildMailboxWaitArgv(options).slice(1));
     } finally {
+      await rm(fixtureDir, { recursive: true, force: true });
+    }
+  });
+
+  test("release launcher settles on exit even if a Windows-style grandchild holds stderr open", async () => {
+    const fixtureDir = await mkdtemp(join(tmpdir(), "ws-mailbox-grandchild-"));
+    const launcherPath = join(fixtureDir, "launcher.py");
+    const pidPath = join(fixtureDir, "grandchild-pid");
+    await writeFile(launcherPath, [
+      "import subprocess,sys",
+      "child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(15)'],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=sys.stderr)",
+      `open(${JSON.stringify(pidPath)}, 'w').write(str(child.pid))`,
+      "raise SystemExit(3)",
+      "",
+    ].join("\n"));
+    try {
+      const wait = createSubprocessWait({ launcherPath, pluginDir: fixtureDir, sessionKey: "my-key" });
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("wait held by grandchild's stderr")), 5_000); });
+      try {
+        assert.equal(await Promise.race([wait(new AbortController().signal), timeout]), "timeout");
+      } finally {
+        clearTimeout(timer);
+      }
+    } finally {
+      if (existsSync(pidPath)) {
+        try { process.kill(Number(await readFile(pidPath, "utf8"))); } catch { /* The child may already have exited. */ }
+      }
       await rm(fixtureDir, { recursive: true, force: true });
     }
   });
@@ -508,14 +596,14 @@ describe("buildMailboxWaitArgv", () => {
 describe("sessionMailboxWaitOptions", () => {
   test("the session cwd becomes the wait's --root, not the launcher dir", () => {
     const onStderr = (): void => {};
-    const options = sessionMailboxWaitOptions({ launcherPath: "/plug/bin/l.py", pluginDir: "/plug", env: { WS_MCP_BOOTSTRAP_BINARY: "/local/ws-mcp" }, sessionKey: "k", slug: "scout@worktree", cwd: "/work/tree", onStderr });
-    assert.deepEqual(options, { launcherPath: "/plug/bin/l.py", pluginDir: "/plug", env: { WS_MCP_BOOTSTRAP_BINARY: "/local/ws-mcp" }, sessionKey: "k", slug: "scout@worktree", root: "/work/tree", onStderr });
+    const options = sessionMailboxWaitOptions({ launcherPath: "/plug/bin/l.py", pluginDir: "/plug", runtimeBinary: "/local/ws-mcp", sessionKey: "k", slug: "scout@worktree", cwd: "/work/tree", onStderr });
+    assert.deepEqual(options, { launcherPath: "/plug/bin/l.py", pluginDir: "/plug", runtimeBinary: "/local/ws-mcp", sessionKey: "k", slug: "scout@worktree", root: "/work/tree", onStderr });
     assert.deepEqual(buildMailboxWaitArgv(options).slice(-4), ["--root", "/work/tree", "--slug", "scout@worktree"]);
   });
 
   test("a reply-id-only session wait still carries the session root", () => {
     const options = sessionMailboxWaitOptions({ launcherPath: "/l", pluginDir: "/p", sessionKey: "k", slug: undefined, cwd: "/work/tree" });
-    assert.equal(options.env, undefined, "release-backed sessions do not add a bootstrap override");
+    assert.equal(options.runtimeBinary, undefined, "release-backed sessions use the launcher");
     assert.deepEqual(buildMailboxWaitArgv(options), ["/l", "mailbox", "wait", "--session-key", "k", "--timeout", "10m", "--format", "json", "--root", "/work/tree"]);
   });
 });

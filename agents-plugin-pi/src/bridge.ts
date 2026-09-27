@@ -26,6 +26,7 @@
  */
 
 import { execFile } from "node:child_process";
+import { unlinkSync } from "node:fs";
 import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { spawnWsMcpClient, type McpStdioClient, type McpContentItem, type McpToolCallResult } from "./mcp-stdio-client.ts";
 import { assertVersionPin, readRuntimeContract } from "./version-check.ts";
@@ -66,8 +67,10 @@ export interface BridgeHandle {
    * opening a second connection to the launcher.
    */
   client: McpStdioClient;
-  /** The local source-build override used by this bridge; reuse it for other launcher subprocesses in the session. */
-  launcherEnv?: Record<string, string>;
+  /** Unique local bootstrap that launched this connected bridge; copy it once for the mailbox before releasing it. */
+  localRuntimeBinary?: string;
+  /** Release the bootstrap after the mailbox owns its copy; also called on shutdown/failure. */
+  releaseLocalBootstrap(): void;
   /**
    * The same default-filled session_key ref used by every bridged tool's
    * fill-or-forward path (`resolveSessionKey`). A live object reference, not
@@ -720,10 +723,23 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
   );
 
   let shutdownCalled = false;
+  let bootstrapReleased = false;
+  const releaseLocalBootstrap = () => {
+    if (bootstrapReleased || !localDevenvContext) return;
+    try {
+      unlinkSync(localDevenvContext.builtPath);
+      bootstrapReleased = true;
+    } catch (error) {
+      // A transient Windows lock may clear by shutdown; retry there. Missing
+      // output is already released. Neither case may break the bridge.
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") bootstrapReleased = true;
+    }
+  };
   const shutdown = () => {
     if (shutdownCalled) return;
     shutdownCalled = true;
     client.close();
+    releaseLocalBootstrap();
   };
 
   // Declared outside the try block (not just `const` inside it) so the
@@ -969,7 +985,8 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
   return {
     shutdown,
     client,
-    launcherEnv,
+    localRuntimeBinary: localDevenvContext?.builtPath,
+    releaseLocalBootstrap,
     renderRegistry,
     defaultSessionKeyRef: defaultKeyRef,
     wsToolNames: tools.map((tool) => sanitizeToolName(tool.name)),
