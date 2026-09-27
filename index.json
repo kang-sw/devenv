@@ -494,7 +494,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-09-27T00:35:45Z"
+        "touched_at": "2026-09-27T00:36:37Z",
+        "impl": {
+          "branch": "impl/develop/shove-dizzy-marry"
+        }
       }
     }
   }
