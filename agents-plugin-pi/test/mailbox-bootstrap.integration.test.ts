@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -15,7 +16,7 @@ async function waitForFile(path: string): Promise<void> {
   throw new Error(`mailbox waiter never started: ${path}`);
 }
 
-test("Pi session_start stages one immutable mailbox binary across re-arms and runtime.json mutation", { skip: process.platform === "win32" && "the Python shebang fixture needs POSIX; Windows uses the opt-in real-Go smoke" }, async () => {
+test("Pi session generations stage immutable mailbox binaries across reloads and re-arms", async () => {
   const directory = mkdtempSync(join(tmpdir(), "ws-pi-mailbox-handoff-"));
   const plugin = join(directory, "plugin");
   mkdirSync(plugin);
@@ -25,20 +26,41 @@ test("Pi session_start stages one immutable mailbox binary across re-arms and ru
   symlinkSync(join(PLUGIN_DIR, "node_modules"), join(plugin, "node_modules"), process.platform === "win32" ? "junction" : "dir");
   const observed = join(directory, "observed-waits");
   const launcherUsed = join(directory, "unexpected-launcher-wait");
-  const sourceScript = join(directory, "fake-source-cli");
+  const lookupDelay = join(directory, "delay-next-lookup");
+  const lookupStarted = join(directory, "lookup-in-flight");
+  const bridgePids = join(directory, "bridge-pids");
+  const sourceScript = join(directory, process.platform === "win32" ? "fake-source-cli.exe" : "fake-source-cli");
   const runtimeJsonPath = join(plugin, "runtime.json");
   const runtimeVersion = JSON.parse(readFileSync(runtimeJsonPath, "utf8")).plugin_version;
-  const writeSource = (): void => writeFileSync(sourceScript, [
-    "#!/usr/bin/env python3",
-    "import json,os,sys,time",
-    `runtime=json.load(open(${JSON.stringify(runtimeJsonPath)}))`,
-    `with open(${JSON.stringify(observed)}, 'a') as output:`,
-    ` output.write(json.dumps({'binary':sys.argv[0],'version':runtime['plugin_version'],'args':sys.argv[1:]})+'\\n')`,
-    "time.sleep(0.5)",
-    "raise SystemExit(3)",
-    "",
-  ].join("\n"));
-  writeSource();
+  // Windows cannot execute a copied shebang script. Compile the same small
+  // CLI probe to a real PE executable, then let the production staging path
+  // copy/run it exactly as it does the locally built ws-mcp.
+  if (process.platform === "win32") {
+    const probe = join(directory, "mailbox-probe.go");
+    writeFileSync(probe, [
+      "package main",
+      `import ("encoding/json";"os";"time")`,
+      "func main() {",
+      ` b,_:=os.ReadFile(${JSON.stringify(runtimeJsonPath)})`,
+      " var runtime map[string]any; _=json.Unmarshal(b,&runtime)",
+      ` f,_:=os.OpenFile(${JSON.stringify(observed)},os.O_CREATE|os.O_APPEND|os.O_WRONLY,0600)`,
+      ` if f!=nil { _=json.NewEncoder(f).Encode(map[string]any{"binary":os.Args[0],"version":runtime["plugin_version"],"args":os.Args[1:]}); _=f.Close() }`,
+      " time.Sleep(500*time.Millisecond); os.Exit(3)",
+      "}",
+    ].join("\n"));
+    execFileSync(process.env.WS_PI_TEST_GO ?? "go", ["build", "-o", sourceScript, probe], { cwd: directory, timeout: 120_000 });
+  } else {
+    writeFileSync(sourceScript, [
+      "#!/usr/bin/env python3",
+      "import json,os,sys,time",
+      `runtime=json.load(open(${JSON.stringify(runtimeJsonPath)}))`,
+      `with open(${JSON.stringify(observed)}, 'a') as output:`,
+      ` output.write(json.dumps({'binary':sys.argv[0],'version':runtime['plugin_version'],'args':sys.argv[1:]})+'\\n')`,
+      "time.sleep(0.5)",
+      "raise SystemExit(3)",
+      "",
+    ].join("\n"));
+  }
   // Stub only the Go build seam; session_start, bridge and wait subprocesses
   // remain production code. A later build can overwrite the fixed source.
   const bridgePath = join(plugin, "src", "bridge.ts");
@@ -58,12 +80,17 @@ test("Pi session_start stages one immutable mailbox binary across re-arms and ru
     "if sys.argv[1:3]==['mailbox','wait']:",
     ` open(${JSON.stringify(launcherUsed)}, 'w').write(binary)`,
     " raise SystemExit('mailbox must bypass launcher')",
+    `with open(${JSON.stringify(bridgePids)}, 'a') as output: output.write(json.dumps({'binary':binary,'pid':os.getpid()})+'\\n')`,
     "for line in sys.stdin:",
     " q=json.loads(line); m=q['method']; p=q.get('params',{}); r={}",
     ` if m=='initialize': r={'serverInfo':{'version':${JSON.stringify(runtimeVersion)}},'capabilities':{}}`,
     " elif m=='tools/list': r={'tools':[]}",
     " elif m=='tools/call':",
-    "  name=p['name']; text=json.dumps({'session_key':'mailbox-test-key'}) if name=='ferrule' else ('# Manual\\n## Session Key\\nmailbox-test-key' if name=='workflow_manual' else ('# Manual' if name=='playbook.read' else '{}'))",
+    "  name=p['name']",
+    `  if name=='mailbox.lookup_peers' and os.path.exists(${JSON.stringify(lookupDelay)}) and not os.path.exists(${JSON.stringify(lookupStarted)}):`,
+    `   open(${JSON.stringify(lookupStarted)}, 'w').close()`,
+    "   time.sleep(0.8)",
+    "  text=json.dumps({'session_key':'mailbox-test-key'}) if name=='ferrule' else ('# Manual\\n## Session Key\\nmailbox-test-key' if name=='workflow_manual' else ('# Manual' if name=='playbook.read' else '{}'))",
     "  r={'content':[{'type':'text','text':text}],'isError':False}",
     " print(json.dumps({'jsonrpc':'2.0','id':q['id'],'result':r}),flush=True)",
     "",
@@ -101,10 +128,11 @@ test("Pi session_start stages one immutable mailbox binary across re-arms and ru
     const waitsSoFar = () => readFileSync(observed, "utf8").trim().split("\n").map((line) => JSON.parse(line));
     const firstBinary = waitsSoFar()[0].binary;
     stagedBinary = firstBinary;
-    assert.match(firstBinary, /[/\\]local-devenv[/\\]\.mailbox-[^/\\]+[/\\]ws-mcp$/);
+    assert.match(firstBinary, /[/\\]local-devenv[/\\]\.mailbox-[^/\\]+[/\\]ws-mcp(?:\.exe)?$/);
     assert.deepEqual(readdirSync(join(plugin, ".runtime", "local-devenv")).filter((name) => name.startsWith("ws-mcp.")), [], "the validated unique bootstrap is released after staging");
     assert.ok(existsSync(firstBinary));
-    const updatedRuntime = JSON.parse(readFileSync(runtimeJsonPath, "utf8"));
+    const originalRuntime = readFileSync(runtimeJsonPath, "utf8");
+    const updatedRuntime = JSON.parse(originalRuntime);
     updatedRuntime.plugin_version = "99.99.99";
     updatedRuntime.release_tag = "v99.99.99";
     writeFileSync(runtimeJsonPath, JSON.stringify(updatedRuntime));
@@ -112,6 +140,41 @@ test("Pi session_start stages one immutable mailbox binary across re-arms and ru
     const firstTwo = waitsSoFar();
     assert.equal(firstTwo.length, 2, `the mailbox waiter must re-arm after runtime.json changes: ${diagnostics.join(" | ")}`);
     assert.deepEqual(firstTwo.map((wait) => [wait.binary, wait.version]), [[firstBinary, runtimeVersion], [firstBinary, "99.99.99"]]);
+
+    // Restore the bridge's pinned version before a new connection; changing
+    // runtime.json was only the in-flight re-arm test, not a valid new launch.
+    writeFileSync(runtimeJsonPath, originalRuntime);
+    // Simulate a reload whose first generation stalls in self-slug lookup.
+    // The next start supersedes it; the stale bridge's subprocess and unique
+    // bootstrap must disappear rather than being lost when globals advance.
+    const stopping = session.extensionRunner!.emit({ type: "session_shutdown", reason: "reload" });
+    assert.equal(existsSync(firstBinary), true, "shutdown cannot delete the running child before it closes");
+    await stopping;
+    assert.equal(existsSync(firstBinary), false, "shutdown awaits the child and removes only its generation");
+    writeFileSync(lookupDelay, "");
+    const reloadOne = session.extensionRunner!.emit({ type: "session_start" });
+    await waitForFile(lookupStarted).catch((error) => { throw new Error(`${error.message}\n${diagnostics.join("\n")}`); });
+    const buildOutputs = () => readdirSync(join(plugin, ".runtime", "local-devenv")).filter((name) => name.startsWith("ws-mcp.") && !name.endsWith(".tmp"));
+    const staleOutput = buildOutputs()[0];
+    assert.ok(staleOutput, "the first reload owns a unique bootstrap while lookup is pending");
+    const reloadTwo = session.extensionRunner!.emit({ type: "session_start" });
+    await Promise.all([reloadOne, reloadTwo]);
+    for (let i = 0; i < 200 && waitsSoFar().length < 3; i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(waitsSoFar().length >= 3, true, `new generation must arm: ${diagnostics.join(" | ")}`);
+    stagedBinary = waitsSoFar()[2].binary;
+    assert.notEqual(stagedBinary, firstBinary);
+    for (let i = 0; i < 200 && waitsSoFar().length < 4; i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(waitsSoFar()[3]?.binary, stagedBinary, "a new generation also re-arms from its one staged copy");
+    assert.deepEqual(buildOutputs(), [], "both stale and active bootstraps are released after staging/disposal");
+    const stalePath = join(plugin, ".runtime", "local-devenv", staleOutput);
+    const pidRecord = readFileSync(bridgePids, "utf8").trim().split("\n").map((line) => JSON.parse(line)).find((record) => record.binary === stalePath);
+    assert.ok(pidRecord, "the stale bridge must have launched its own subprocess");
+    let staleAlive = true;
+    for (let i = 0; i < 200 && staleAlive; i += 1) {
+      try { process.kill(pidRecord.pid, 0); } catch { staleAlive = false; }
+      if (staleAlive) await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(staleAlive, false, "stale generation's connected bridge process must be closed");
     assert.equal(existsSync(launcherUsed), false, "no re-arm may re-enter the release-backed launcher");
     assert.deepEqual(readdirSync(runtimeCache), [], "a primed launcher cache cannot mask the missing handoff");
   } finally {

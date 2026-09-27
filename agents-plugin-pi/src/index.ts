@@ -515,6 +515,10 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   // reachable to `stop()`) or clobber the newer waiter and duplicate mail
   // admission.
   let mailboxWaiterEpoch = 0;
+  // Unlike the waiter epoch, this starts before ANY session_start await: a
+  // slow bridge bootstrap or self-slug lookup cannot install a superseded
+  // bridge after a newer startup (or shutdown) has taken ownership.
+  let sessionStartEpoch = 0;
   // The footer has the same TUI lead/fork lifetime as the widget, but remains
   // a separate component: replacing the footer never touches belowEditor cards.
   const agentFooterLifecycle = createAgentFooterSessionLifecycle(async () => {
@@ -608,6 +612,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   let pushRenderersRegistered = false;
 
   pi.on("session_start", async (_event, ctx) => {
+    const startEpoch = ++sessionStartEpoch;
     const sessionRole = readSpawnRole(process.env);
     applySessionStartOwnershipDiagnostics(sessionRole, ctx);
     if (forkContextError) { ctx.ui.notify(forkContextError, "error"); return; }
@@ -675,11 +680,33 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
         previousOwnKeys,
         sessionEntries: ctx.sessionManager.getEntries(),
       });
-      const approval = createApprovalRelay(pi, { cwd: ctx.cwd }, rpcRegistryRef);
-      const tools = registerAgentTools(pi, h, { cwd: ctx.cwd, storage: createAgentStorageContext(ctx.sessionManager.getSessionId()), extensionPath: extensionEntryPath, subtreeUpstream }, approval, exploreGuidePath, toolPreviewTuiRef);
-      return { handle: h, agentTools: tools, onApprovalPending: approval };
+      try {
+        const approval = createApprovalRelay(pi, { cwd: ctx.cwd }, rpcRegistryRef);
+        const tools = registerAgentTools(pi, h, { cwd: ctx.cwd, storage: createAgentStorageContext(ctx.sessionManager.getSessionId()), extensionPath: extensionEntryPath, subtreeUpstream }, approval, exploreGuidePath, toolPreviewTuiRef);
+        return { handle: h, agentTools: tools, onApprovalPending: approval };
+      } catch (error) {
+        h.shutdown();
+        throw error;
+      }
     });
     if (!sessionBootstrap) return; // notified (and, for a spawned child, already exited) inside bootstrapOrFailLoud — never fall through to a partial/toolless registration.
+    let generationWaiter: MailboxWaiterHandle | undefined;
+    const disposeStaleBootstrap = async (): Promise<void> => {
+      generationWaiter?.stop();
+      try {
+        await generationWaiter?.done;
+      } finally {
+        try { await sessionBootstrap.agentTools.stopAll(); } finally {
+          // The waiter owns its staged binary until done; the bridge owns any
+          // bootstrap still present. Both belong to this generation only.
+          sessionBootstrap.handle.shutdown();
+        }
+      }
+    };
+    if (startEpoch !== sessionStartEpoch) {
+      await disposeStaleBootstrap();
+      return;
+    }
     handle = sessionBootstrap.handle;
     sessionKeyRef.current = handle.defaultSessionKeyRef.current;
     const onApprovalPending = sessionBootstrap.onApprovalPending;
@@ -725,38 +752,44 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
       const mailboxHandle = handle;
       const mailboxCallTool: MailboxToolCall = (name, args) => mailboxHandle.client.callTool(name, args);
       const selfSlug = await resolveMailboxSelfSlug(mailboxCallTool, mailboxSessionKey);
-      // Re-check staleness after the await (see mailboxWaiterEpoch's doc
-      // comment): a newer session_start or a session_shutdown may have run
-      // while resolveMailboxSelfSlug was in flight and already bumped the
-      // epoch, in which case that event now owns mailboxWaiterHandle and
-      // this attempt must not overwrite it.
-      if (armEpoch === mailboxWaiterEpoch) {
-        try {
-          // Stage once after bridge validation from this bridge's unique
-          // bootstrap; overlapping reloads can neither cross-copy outputs
-          // nor replace an executable held open by the old waiter on Windows.
-          const staged = handle.localRuntimeBinary ? stageMailboxRuntime(handle.localRuntimeBinary) : undefined;
-          // The bridge runs the launcher's installed runtime; after staging,
-          // neither process needs this unique bootstrap build output.
-          handle.releaseLocalBootstrap();
-          const waiter = startMailboxWaiter({
-            runWait: createSubprocessWait(sessionMailboxWaitOptions({
-              launcherPath,
-              pluginDir,
-              runtimeBinary: staged?.binaryPath,
-              sessionKey: mailboxSessionKey,
-              slug: selfSlug,
-              cwd: ctx.cwd,
-              onStderr: reportMailboxWaiterDiagnostic,
-            })),
-            drainMail: createBridgeDrain(mailboxCallTool, mailboxSessionKey),
-            admit: (envelope) => sendToLead(pi, buildMailboxPushMessage(envelope), "steer", "always"),
-            onError: reportMailboxWaiterDiagnostic,
-          });
-          mailboxWaiterHandle = staged ? attachMailboxRuntimeCleanup(waiter, staged) : waiter;
-        } catch (error) {
-          reportMailboxWaiterDiagnostic(`could not stage local runtime: ${error instanceof Error ? error.message : String(error)}`);
+      // A newer start/shutdown may have superseded this generation while
+      // lookup awaited. Dispose its captured bridge AND unique bootstrap;
+      // clearing only the waiter pointer would orphan both.
+      if (armEpoch !== mailboxWaiterEpoch || startEpoch !== sessionStartEpoch) {
+        if (handle === mailboxHandle) {
+          handle = undefined;
+          agentTools = undefined;
+          rpcRegistryRef.current = undefined;
         }
+        await disposeStaleBootstrap();
+        return;
+      }
+      try {
+        // Stage once after bridge validation from this bridge's unique
+        // bootstrap; overlapping reloads can neither cross-copy outputs
+        // nor replace an executable held open by the old waiter on Windows.
+        const staged = handle.localRuntimeBinary ? stageMailboxRuntime(handle.localRuntimeBinary) : undefined;
+        // The bridge runs the launcher's installed runtime; after staging,
+        // neither process needs this unique bootstrap build output.
+        handle.releaseLocalBootstrap();
+        const waiter = startMailboxWaiter({
+          runWait: createSubprocessWait(sessionMailboxWaitOptions({
+            launcherPath,
+            pluginDir,
+            runtimeBinary: staged?.binaryPath,
+            sessionKey: mailboxSessionKey,
+            slug: selfSlug,
+            cwd: ctx.cwd,
+            onStderr: reportMailboxWaiterDiagnostic,
+          })),
+          drainMail: createBridgeDrain(mailboxCallTool, mailboxSessionKey),
+          admit: (envelope) => sendToLead(pi, buildMailboxPushMessage(envelope), "steer", "always"),
+          onError: reportMailboxWaiterDiagnostic,
+        });
+        generationWaiter = staged ? attachMailboxRuntimeCleanup(waiter, staged) : waiter;
+        mailboxWaiterHandle = generationWaiter;
+      } catch (error) {
+        reportMailboxWaiterDiagnostic(`could not stage local runtime: ${error instanceof Error ? error.message : String(error)}`);
       }
     } else {
       handle.releaseLocalBootstrap();
@@ -985,9 +1018,19 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     // the host TUI import is asynchronous, and yielding earlier would let Pi
     // snapshot the active tool set before later question tools were registered.
     await applySessionStartAgentFooter(agentFooterLifecycle, bootstrapRole, ctx, agentTools.rpcRegistry, dispatchStorage);
+    if (startEpoch !== sessionStartEpoch) {
+      if (mailboxWaiterHandle === generationWaiter) mailboxWaiterHandle = undefined;
+      if (handle === sessionBootstrap.handle) {
+        handle = undefined;
+        agentTools = undefined;
+        rpcRegistryRef.current = undefined;
+      }
+      await disposeStaleBootstrap();
+    }
   });
 
   pi.on("session_shutdown", async (event, _ctx) => {
+    sessionStartEpoch++;
     // Session replacement (`reload`/`new`/`resume`/`fork`) re-runs this
     // factory in the same process, where the deleted bootstrap can never be
     // read again; the adapter does not drive children through it, but the

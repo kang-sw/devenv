@@ -19,7 +19,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readLocalDevenvMarker, buildLocalDevenvBootstrap, type LocalDevenvBuildDeps } from "../src/local-devenv.ts";
@@ -202,7 +202,7 @@ describe("buildLocalDevenvBootstrap", () => {
     }
   });
 
-  test("valid marker: composes ldflags, builds into a pid-scoped temp path, renames on success", async () => {
+  test("valid marker: overlapping builds keep distinct temp/output files and copy their own generation", async () => {
     const dir = tempDir("ws-pi-local-devenv-bootstrap-ok-");
     try {
       const sourceRoot = makeSourceRoot(dir);
@@ -213,19 +213,15 @@ describe("buildLocalDevenvBootstrap", () => {
       const shortCommit = execFileSync("git", ["rev-parse", "--short", "HEAD"], { cwd: sourceRoot, encoding: "utf8" }).trim();
 
       const notifications: string[] = [];
-      let capturedArgv: string[] | undefined;
-      let capturedCwd: string | undefined;
-      let callCount = 0;
+      const inFlight: Array<{ argv: string[]; cwd: string; finish: () => void }> = [];
       const deps: LocalDevenvBuildDeps = {
-        runBuild: (argv, opts) => {
-          callCount += 1;
-          capturedArgv = argv;
-          capturedCwd = opts.cwd;
-          // Simulate a successful `go build -o <tmpPath> ...`: write a file
-          // at the declared -o path.
-          const outIndex = argv.indexOf("-o");
-          writeFileSync(argv[outIndex + 1], `fake-binary-${callCount}`);
-        },
+        runBuild: (argv, opts) => new Promise<void>((resolve) => {
+          const generation = inFlight.length + 1;
+          inFlight.push({ argv, cwd: opts.cwd, finish: () => {
+            writeFileSync(argv[argv.indexOf("-o") + 1], `fake-binary-${generation}`);
+            resolve();
+          } });
+        }),
         notify: (m) => notifications.push(m),
         now: (() => {
           let t = 1000;
@@ -233,14 +229,26 @@ describe("buildLocalDevenvBootstrap", () => {
         })(),
       };
 
-      const result = await buildLocalDevenvBootstrap(dir, "0.45.2", deps);
-      assert.ok(result, "expected a build result");
-      assert.equal(callCount, 1);
-      assert.equal(capturedCwd, toolDir);
-      assert.deepEqual(capturedArgv?.slice(0, 2), [goPath, "build"]);
-      const ldflagsIndex = capturedArgv!.indexOf("-ldflags");
-      assert.equal(capturedArgv![ldflagsIndex + 1], `-X main.version=0.45.2 -X main.sourceCommit=${shortCommit}`);
-      assert.equal(capturedArgv![capturedArgv!.length - 1], "./cmd/ws-mcp");
+      const firstStart = buildLocalDevenvBootstrap(dir, "0.45.2", deps);
+      const secondStart = buildLocalDevenvBootstrap(dir, "0.45.2", deps);
+      assert.equal(inFlight.length, 2, "both go builds must be in flight before either completes");
+      const [firstBuild, secondBuild] = inFlight;
+      const firstTmp = firstBuild.argv[firstBuild.argv.indexOf("-o") + 1];
+      const secondTmp = secondBuild.argv[secondBuild.argv.indexOf("-o") + 1];
+      assert.notEqual(firstTmp, secondTmp, "in-flight builds must not share a temp output");
+      assert.equal(firstBuild.cwd, toolDir);
+      assert.equal(secondBuild.cwd, toolDir);
+      assert.deepEqual(firstBuild.argv.slice(0, 2), [goPath, "build"]);
+      const ldflagsIndex = firstBuild.argv.indexOf("-ldflags");
+      assert.equal(firstBuild.argv[ldflagsIndex + 1], `-X main.version=0.45.2 -X main.sourceCommit=${shortCommit}`);
+      assert.equal(firstBuild.argv.at(-1), "./cmd/ws-mcp");
+      // Complete out of order while both starts overlap; neither may pick up
+      // the other's source when its mailbox generation later stages a copy.
+      secondBuild.finish();
+      const second = await secondStart;
+      firstBuild.finish();
+      const result = await firstStart;
+      assert.ok(result && second, "both independent builds must complete");
 
       const finalPath = result!.context.builtPath;
       assert.match(finalPath, /\.runtime[/\\]local-devenv[/\\]ws-mcp\.\d+\.[a-f\d-]{36}(?:\.exe)?$/);
@@ -252,10 +260,8 @@ describe("buildLocalDevenvBootstrap", () => {
       assert.equal(readFileSync(finalPath, "utf8"), "fake-binary-1");
 
       // The build temp and final output belong to the same unique generation.
-      const tmpPathUsed = capturedArgv![capturedArgv!.indexOf("-o") + 1];
-      assert.equal(tmpPathUsed, finalPath.replace(/\.exe$/, "") + ".tmp");
-      const second = await buildLocalDevenvBootstrap(dir, "0.45.2", deps);
-      assert.ok(second);
+      assert.equal(firstTmp, finalPath.replace(/\.exe$/, "") + ".tmp");
+      assert.equal(secondTmp, second.context.builtPath.replace(/\.exe$/, "") + ".tmp");
       assert.notEqual(second.context.builtPath, finalPath, "overlapping starts cannot replace each other's bootstrap");
       const firstWait = stageMailboxRuntime(finalPath);
       const secondWait = stageMailboxRuntime(second.context.builtPath);
@@ -306,8 +312,7 @@ describe("buildLocalDevenvBootstrap", () => {
 
       assert.ok(tmpPathUsed, "expected runBuild to have been invoked with an -o temp path");
       assert.equal(existsSync(tmpPathUsed!), false, "expected the partial temp build artifact to be cleaned up on failure");
-      // A failed build produced no final (renamed) binary either.
-      assert.equal(existsSync(tmpPathUsed!), false);
+      assert.deepEqual(readdirSync(join(dir, ".runtime", "local-devenv")), [], "a failed build must not leave a final binary");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -9,6 +9,7 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { access, chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -282,24 +283,34 @@ describe("stageMailboxRuntime", () => {
     }
   });
 
-  test("stop waits for actual child close before removing its staged executable", { skip: process.platform === "win32" && "POSIX signal handler fixture" }, async () => {
+  test("stop waits for actual child close before removing its staged executable", async () => {
     const fixtureDir = await mkdtemp(join(tmpdir(), "ws-mailbox-close-"));
     const sourceDir = join(fixtureDir, "runtime");
     await mkdir(sourceDir);
-    const source = join(sourceDir, "ws-mcp");
+    const source = join(sourceDir, process.platform === "win32" ? "ws-mcp.exe" : "ws-mcp");
     const ready = join(fixtureDir, "ready");
-    await writeFile(source, [
-      "#!/usr/bin/env python3",
-      "import signal,time,sys",
-      "def stop(_signal, _frame):",
-      " time.sleep(0.25)",
-      " sys.exit(130)",
-      "signal.signal(signal.SIGTERM, stop)",
-      `open(${JSON.stringify(ready)}, 'w').close()`,
-      "time.sleep(30)",
-      "",
-    ].join("\n"));
-    await chmod(source, 0o755);
+    if (process.platform === "win32") {
+      const goFile = join(fixtureDir, "wait-probe.go");
+      await writeFile(goFile, [
+        "package main",
+        `import ("os";"time")`,
+        `func main() { _=os.WriteFile(${JSON.stringify(ready)},[]byte("ready"),0600); time.Sleep(30*time.Second) }`,
+      ].join("\n"));
+      execFileSync(process.env.WS_PI_TEST_GO ?? "go", ["build", "-o", source, goFile], { cwd: fixtureDir, timeout: 120_000 });
+    } else {
+      await writeFile(source, [
+        "#!/usr/bin/env python3",
+        "import signal,time,sys",
+        "def stop(_signal, _frame):",
+        " time.sleep(0.25)",
+        " sys.exit(130)",
+        "signal.signal(signal.SIGTERM, stop)",
+        `open(${JSON.stringify(ready)}, 'w').close()`,
+        "time.sleep(30)",
+        "",
+      ].join("\n"));
+      await chmod(source, 0o755);
+    }
     const staged = stageMailboxRuntime(source);
     const waiter = attachMailboxRuntimeCleanup(startMailboxWaiter({
       runWait: createSubprocessWait({ launcherPath: "unused", pluginDir: fixtureDir, runtimeBinary: staged.binaryPath, sessionKey: "key" }),
