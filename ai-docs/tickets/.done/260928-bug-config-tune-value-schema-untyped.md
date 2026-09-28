@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: ee53cf284a62f4a7
 sage-review-design-reviewed: ee53cf284a62f4a7
+completed: 2026-09-28
 ---
 
 # config.tune value schema is untyped, so object values arrive as strings
@@ -145,3 +146,27 @@ Verification (required):
 Verification (optional, when a vLLM endpoint with a Qwen tool-call parser is
 reachable): repeat the object/scalar probe from Background against the built
 schema and record the result.
+
+### Result (d67dce5d0) - 2026-09-28
+
+- `config.tune` publishes `value` as `anyOf: [{type: string}, {type: object}]`
+  through the new `stringOrObjectProperty` helper (outer description kept,
+  bare branches); `anyProperty` is removed.
+- Keys other than `agents.tier` reject a present non-null non-string `value`
+  via `tuneStringValueRejection`: write branches report
+  `config.tune: <key> value must be a string; got <type>`; the reset branch
+  reports `config.tune: value and reset are mutually exclusive; <key> reset
+  takes no value, got <type>`. Explicit `null` is treated as absent on both.
+- `jsonValueTypeName` now names `array` and `null` so the new errors never
+  print a Go type name.
+- Tests: `agents-plugin-tool/internal/mcp/config_tune_value_type_test.go`
+  pins the exact `anyOf` schema and description, and covers object/boolean/
+  array/number rejection on scalar and `prompt.*` write and reset, `null`
+  write falling to existing empty-value errors, `null` reset succeeding,
+  unchanged string paths (including enum lowercasing), and `agents.tier`
+  object write/reset.
+- Verification: `go vet ./internal/mcp` clean; `go test ./...` in
+  `agents-plugin-tool` passes; `scripts/smoke-ws-mcp.sh ..` passes. Single
+  independent review: clean. The optional vLLM re-probe was not run (no
+  endpoint available to this worker).
+- Version strings and `runtime.json` `config.tune` ranges untouched.

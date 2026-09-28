@@ -905,8 +905,12 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 				result, err := tuneAgentsTier(params.Arguments["value"], harness, explicitScope, true)
 				return toolJSONResponse(req.ID, result, err)
 			}
-			if rawValue, hasValue := params.Arguments["value"]; hasValue {
-				if v, _ := rawValue.(string); strings.TrimSpace(v) != "" {
+			if rawValue, hasValue := params.Arguments["value"]; hasValue && rawValue != nil {
+				v, isString := rawValue.(string)
+				if !isString {
+					return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: value and reset are mutually exclusive; %s reset takes no value, got %s", key, jsonValueTypeName(rawValue)))
+				}
+				if strings.TrimSpace(v) != "" {
 					return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: value and reset are mutually exclusive"))
 				}
 			}
@@ -942,7 +946,15 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			}
 			return toolTextResponse(req.ID, fmt.Sprintf("%s: %s [scope:%s]\n", entry.Key, resolved.Value, resolved.Scope), nil)
 		}
-		// Non-reset write branch, dispatched by key family.
+		// Non-reset write branch, dispatched by key family. Every key except
+		// agents.tier reads a string value; reject any other JSON type here so it
+		// is not silently coerced to "".
+		if entry.Key != "agents.tier" {
+			rawValue, hasValue := params.Arguments["value"]
+			if err := tuneStringValueRejection(key, rawValue, hasValue); err != nil {
+				return toolTextResponse(req.ID, "", err)
+			}
+		}
 		adapter := sessionConfigAdapter{s: s.sessions}
 		switch {
 		case entry.Key == "agents.tier":
@@ -3806,7 +3818,7 @@ func tools() []map[string]any {
 				"type": "object",
 				"properties": map[string]any{
 					"key":         stringProperty("Config knob key to write, e.g. workflow.prefer_subagent, bootstrap_alarm, agents.tier, or prompt.<pointId>. See config.list for the supported set."),
-					"value":       anyProperty("New value. A string for scalar knobs (e.g. on/off), or an object {tier, backend, model, effort} for agents.tier. For agents.tier reset pass only {tier}; omit for other resets."),
+					"value":       stringOrObjectProperty("New value. A string for scalar knobs (e.g. on/off), or an object {tier, backend, model, effort} for agents.tier. For agents.tier reset pass only {tier}; omit for other resets."),
 					"scope":       enumStringProperty("Optional storage scope. When omitted the write lands in the key's declared default scope. Global-only keys reject non-global scopes; agents.tier supports project and global scopes.", wsconfig.ScopeSchemaEnum()),
 					"harness":     stringProperty("Optional harness selector. Load-bearing for prompt.* (claude, codex, pi, or * for all) and agents.tier (alias key); ignored for keys that do not vary by harness. When omitted for a harness-applicable key, defaults to the current session's detected harness."),
 					"reset":       boolProperty("When true, drop the key's override and fall back to its builtin/inherited default instead of writing an explicit value. Mutually exclusive with value except agents.tier, which requires value: {tier}; only valid for keys that support reset."),
@@ -4796,6 +4808,20 @@ func typedArrayRejection(argName string, value any, present bool) error {
 	return fmt.Errorf("%s must be an array of strings, one bullet per element; got %s", argName, jsonValueTypeName(value))
 }
 
+// tuneStringValueRejection returns a type-accurate error when config.tune's
+// value is present and non-null but not a string, for a key whose writer reads
+// a string. Absent and explicit null values return nil and fall through to the
+// key's existing empty-value handling, matching typedArrayRejection.
+func tuneStringValueRejection(key string, value any, present bool) error {
+	if !present || value == nil {
+		return nil
+	}
+	if _, ok := value.(string); ok {
+		return nil
+	}
+	return fmt.Errorf("config.tune: %s value must be a string; got %s", key, jsonValueTypeName(value))
+}
+
 // jsonValueTypeName names a decoded JSON-RPC argument's dynamic type for a
 // type-accurate rejection message. Go's encoding/json decodes into exactly
 // these dynamic types for a map[string]any argument value.
@@ -4809,6 +4835,10 @@ func jsonValueTypeName(value any) string {
 		return "number"
 	case map[string]any:
 		return "object"
+	case []any:
+		return "array"
+	case nil:
+		return "null"
 	default:
 		return fmt.Sprintf("%T", value)
 	}
@@ -5004,14 +5034,22 @@ func boolProperty(description string) map[string]string {
 	}
 }
 
-// anyProperty describes a parameter with no JSON-Schema "type" constraint (an
-// absent type means "any"), used for config.tune's polymorphic value argument
-// which is a string for scalar knobs and an object for agents.tier. objectProperty
-// hardcodes "type":"object" and stringProperty hardcodes "type":"string", so
-// neither fits a genuinely polymorphic value.
-func anyProperty(description string) map[string]any {
+// stringOrObjectProperty returns an inputSchema property accepting either a
+// string or a free-form object via "anyOf" — config.tune's polymorphic value,
+// a string for scalar knobs and prompt text and an object for agents.tier.
+// The type is spelled out rather than omitted: model-server tool-call parsers
+// fall back to emitting a JSON-encoded string for a parameter with no declared
+// "type", so an untyped value delivered agents.tier's object as a string. The
+// "anyOf" form is used over a type array because some provider schema
+// converters accept only the former. The object branch stays bare; field shape
+// is validated server-side.
+func stringOrObjectProperty(description string) map[string]any {
 	return map[string]any{
 		"description": description,
+		"anyOf": []any{
+			map[string]any{"type": "string"},
+			map[string]any{"type": "object"},
+		},
 	}
 }
 
