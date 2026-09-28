@@ -500,7 +500,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-09-28T05:29:01Z"
+        "touched_at": "2026-09-28T05:29:30Z",
+        "impl": {
+          "branch": "impl/develop/ipod-level-art"
+        }
       }
     }
   }
