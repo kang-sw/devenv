@@ -505,6 +505,9 @@
           "branch": "impl/develop/ipod-level-art"
         }
       }
+    },
+    "260928-bug-pi-exec-windows-timeout-orphans-git-bash-child": {
+      "registered_at": "2026-09-28T07:57:19Z"
     }
   }
 }
