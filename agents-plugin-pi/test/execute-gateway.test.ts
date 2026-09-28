@@ -72,6 +72,8 @@ import {
   ONE_LINER_TIMEOUT_MS,
   ONE_LINER_OUTPUT_CAP_BYTES,
   registerExecuteGateway as registerExecuteGatewayBase,
+  resolveShellInvocation,
+  type ShellResolver,
   type WorkingContext,
 } from "../src/execute-gateway.ts";
 import { attachApprovalChannel, leadIdleRef, registerPushFlush, GATED_EXEC_TOOL_NAME, TOOL_GROUPS, resolveTools, type PendingApprovalState, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
@@ -823,7 +825,7 @@ describe("do-i-really-have-to-run-this-myself (the one-liner exec hatch's execut
   // a plain stub (same fakePi() convention as the createApprovalRelay block
   // above, stubbing pi.exec instead of pi.sendMessage) is enough to unit-test
   // it directly.
-  function registerAndCapture(execFn: (command: string, args: string[], options?: { cwd?: string; timeout?: number; signal?: AbortSignal }) => Promise<FakeExecResult>): CapturedTool {
+  function registerAndCapture(execFn: (command: string, args: string[], options?: { cwd?: string; timeout?: number; signal?: AbortSignal }) => Promise<FakeExecResult>, resolveShell?: ShellResolver, toolName = ONE_LINER_EXEC_TOOL_NAME): CapturedTool {
     const registered = new Map<string, CapturedTool>();
     const pi = {
       registerTool: (def: { name: string } & CapturedTool) => {
@@ -833,9 +835,9 @@ describe("do-i-really-have-to-run-this-myself (the one-liner exec hatch's execut
     } as unknown as ExtensionAPI;
     const bridge = {} as unknown as Parameters<typeof registerExecuteGateway>[1];
     const registry: RpcAgentRegistry = new Map();
-    registerExecuteGateway(pi, bridge, registry, { cwd: "/tmp/ws-pi-agent-one-liner-test", executeWorkerPromptPath: "/tmp/fake-execute-worker-guide.md" });
-    const tool = registered.get(ONE_LINER_EXEC_TOOL_NAME);
-    assert.ok(tool, `${ONE_LINER_EXEC_TOOL_NAME} must be registered by registerExecuteGateway`);
+    registerExecuteGateway(pi, bridge, registry, { cwd: "/tmp/ws-pi-agent-one-liner-test", executeWorkerPromptPath: "/tmp/fake-execute-worker-guide.md", resolveShell });
+    const tool = registered.get(toolName);
+    assert.ok(tool, `${toolName} must be registered by registerExecuteGateway`);
     return tool!;
   }
 
@@ -898,6 +900,64 @@ describe("do-i-really-have-to-run-this-myself (the one-liner exec hatch's execut
     await tool.execute("call-5", { command: "pwd", why: "confirm cwd/timeout wiring" });
     assert.equal(capturedOptions?.cwd, "/tmp/ws-pi-agent-one-liner-test");
     assert.equal(capturedOptions?.timeout, ONE_LINER_TIMEOUT_MS);
+  });
+
+  test("runs the command through the resolved host shell, not a hardcoded sh", async () => {
+    let captured: { shell: string; args: string[] } | undefined;
+    const gitBash = "C:\\Program Files\\Git\\bin\\bash.exe";
+    const tool = registerAndCapture(async (shell, args) => {
+      captured = { shell, args };
+      return { stdout: "", stderr: "", code: 0, killed: false };
+    }, () => ({ shell: gitBash, args: ["-c"] }));
+    await tool.execute("call-6", { command: "git status && ls", why: "confirm shell resolution" });
+    assert.deepEqual(captured, { shell: gitBash, args: ["-c", "git status && ls"] });
+  });
+
+  test("a failed shell lookup returns its reason and never runs anything", async () => {
+    let ran = false;
+    const tool = registerAndCapture(async () => {
+      ran = true;
+      return { stdout: "", stderr: "", code: 1, killed: false };
+    }, () => { throw new Error("No bash shell found. Options:\n  1. Install Git for Windows"); });
+    const text = (await tool.execute("call-7", { command: "ls", why: "windows without bash" })).content[0].text;
+    assert.equal(ran, false);
+    assert.ok(text.startsWith("why: windows without bash"));
+    assert.match(text, /No bash shell found/);
+    assert.match(text, /was not run/);
+    assert.doesNotMatch(text, /exit code/, "must not read as an empty exit-1 run");
+  });
+
+  test("ws-execute fails before spawning a worker when no shell resolves for its pre-command", async () => {
+    let ran = false;
+    const tool = registerAndCapture(async () => {
+      ran = true;
+      return { stdout: "", stderr: "", code: 1, killed: false };
+    }, () => { throw new Error("No bash shell found."); }, EXECUTE_TOOL_NAME);
+    await assert.rejects(tool.execute("call-8", { command: "ls", prompt: "do the thing" }), /No bash shell found/);
+    assert.equal(ran, false);
+  });
+});
+
+describe("resolveShellInvocation (host shell lookup for the bridge shell tools)", () => {
+  test("appends the command after the host shell's own args", () => {
+    assert.deepEqual(resolveShellInvocation("echo hi", () => ({ shell: "/bin/bash", args: ["-c"] })), { ok: true, shell: "/bin/bash", args: ["-c", "echo hi"] });
+  });
+
+  test("a throwing lookup becomes an error result that names the reason and the unread shellPath setting", () => {
+    const result = resolveShellInvocation("echo hi", () => { throw new Error("No bash shell found."); });
+    assert.equal(result.ok, false);
+    assert.match(!result.ok ? result.error : "", /No bash shell found\.[\s\S]*shellPath/);
+  });
+
+  test("a stdin-transport shell (legacy WSL bash.exe) is refused: pi.exec cannot feed stdin", () => {
+    const result = resolveShellInvocation("echo hi", () => ({ shell: "C:\\Windows\\System32\\bash.exe", args: ["-s"], commandTransport: "stdin" as const }));
+    assert.equal(result.ok, false);
+    assert.match(!result.ok ? result.error : "", /stdin/);
+  });
+
+  test("defaults to the host's getShellConfig", () => {
+    const result = resolveShellInvocation("echo hi");
+    assert.ok(result.ok && result.args.at(-1) === "echo hi" && result.shell.length > 0);
   });
 });
 

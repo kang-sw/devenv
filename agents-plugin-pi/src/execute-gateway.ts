@@ -109,7 +109,7 @@
 import { execFileSync } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import type { ExtensionAPI, ReadToolInput } from "@earendil-works/pi-coding-agent";
-import { createReadToolDefinition } from "@earendil-works/pi-coding-agent";
+import { createReadToolDefinition, getShellConfig } from "@earendil-works/pi-coding-agent";
 import type { BridgeHandle } from "./bridge.ts";
 import { createToolPreviewTuiRef, registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
 import { buildExecuteSummary, createDispatchToolPreview } from "./tool-row-render.ts";
@@ -135,6 +135,42 @@ import { approvalDecisionMessage, type ApprovalChildLink, type ApprovalDecision,
 // Pure helpers. Unit-tested directly (test/execute-gateway.test.ts) with no
 // filesystem/subprocess/live `pi` session involved.
 // ---------------------------------------------------------------------------
+
+/** The host's shell config shape; the type itself is not exported by the host package. */
+export type ShellConfig = ReturnType<typeof getShellConfig>;
+
+/** Host shell lookup; the host's `getShellConfig` by default, injectable for tests. */
+export type ShellResolver = () => ShellConfig;
+
+export type ShellInvocation =
+  | { ok: true; shell: string; args: string[] }
+  | { ok: false; error: string };
+
+/**
+ * Builds the `pi.exec(shell, args)` pair for `command` through the host's own
+ * shell lookup (Git Bash / bash on PATH on Windows; /bin/bash, bash, then sh
+ * elsewhere) instead of a hardcoded `sh`. That matters on native Windows, where
+ * `sh` is normally absent and `pi.exec` reports the spawn ENOENT as a bare
+ * exit 1 with empty output. A lookup failure comes back as text so the tool
+ * says why it did not run.
+ *
+ * Pi's `shellPath` setting is not reachable from the extension API, so the
+ * lookup runs without it. A shell that needs its command on stdin (legacy WSL
+ * `bash.exe`) is refused: `pi.exec` spawns with stdin ignored.
+ */
+export function resolveShellInvocation(command: string, resolveShell: ShellResolver = () => getShellConfig()): ShellInvocation {
+  let config: ShellConfig;
+  try {
+    config = resolveShell();
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return { ok: false, error: `ws-pi-agent: no shell available to run this command; it was not run.\n${reason}\nNote: this tool does not read Pi's shellPath setting.` };
+  }
+  if (config.commandTransport === "stdin") {
+    return { ok: false, error: `ws-pi-agent: the resolved shell ${config.shell} takes its command on stdin, which this tool cannot provide; the command was not run. Install Git for Windows or put a different bash.exe first on PATH.` };
+  }
+  return { ok: true, shell: config.shell, args: [...config.args, command] };
+}
 
 /** Lead-facing verb-table tool names (pi-lead-guide.md), registered below. */
 export const EXECUTE_TOOL_NAME = "ws-execute";
@@ -468,6 +504,8 @@ export interface ExecuteGatewaySessionCtx {
    */
   channel?: ApprovalChildLink;
   approvalGate?: ChildApprovalGate;
+  /** Shell lookup for every command these tools run; defaults to the host's `getShellConfig`. */
+  resolveShell?: ShellResolver;
 }
 
 /**
@@ -547,7 +585,7 @@ export function registerExecuteGateway(
     parameters: {
       type: "object",
       properties: {
-        command: { type: "string", description: "Shell command to run (sh -c semantics: &&, redirection, pipes, etc. all work)." },
+        command: { type: "string", description: "Shell command to run with `bash -c` (POSIX `sh -c` only where bash is absent): &&, redirection, pipes, etc. all work." },
         rationale: { type: "string", description: "Why this command is needed — shown to the lead as part of the approval request." },
         cwd: { type: "string", description: "Optional working directory override for this command; defaults to the worker's own cwd." },
       },
@@ -574,7 +612,9 @@ export function registerExecuteGateway(
 
       const runInstead = outcome.decision === "run-instead" && outcome.command;
       const commandToRun = runInstead ? outcome.command! : p.command;
-      const execResult = await pi.exec("sh", ["-c", commandToRun], { cwd: p.cwd ?? sessionCtx.cwd, signal });
+      const invocation = resolveShellInvocation(commandToRun, sessionCtx.resolveShell);
+      if (!invocation.ok) return { content: [{ type: "text", text: invocation.error }] };
+      const execResult = await pi.exec(invocation.shell, invocation.args, { cwd: p.cwd ?? sessionCtx.cwd, signal });
       const note = runInstead ? "Lead substituted a different command; treat its output below as authoritative.\n\n" : "";
       return {
         content: [
@@ -608,7 +648,10 @@ export function registerExecuteGateway(
       const p = params as { command?: string; prompt: string; complex?: boolean };
       let output: string | undefined;
       if (p.command !== undefined) {
-        const execResult = await pi.exec("sh", ["-c", p.command], { cwd: sessionCtx.cwd });
+        // No shell means the worker could not run anything either: fail before spawning it.
+        const invocation = resolveShellInvocation(p.command, sessionCtx.resolveShell);
+        if (!invocation.ok) throw new Error(invocation.error);
+        const execResult = await pi.exec(invocation.shell, invocation.args, { cwd: sessionCtx.cwd });
         output = `${execResult.stdout}${execResult.stderr}`;
       }
       const initialPrompt = buildExecuteWorkerPrompt({ command: p.command, output, prompt: p.prompt });
@@ -736,14 +779,16 @@ export function registerExecuteGateway(
     parameters: {
       type: "object",
       properties: {
-        command: { type: "string", description: "Single short shell command (sh -c semantics) to run in your own cwd. No cwd/env override — always your own session's." },
+        command: { type: "string", description: "Single short shell command (run with `bash -c`, or POSIX `sh -c` where bash is absent) to run in your own cwd. No cwd/env override — always your own session's." },
         why: { type: "string", description: "One-sentence reason this needs to run directly rather than through a delegated worker; echoed first in the result." },
       },
       required: ["command", "why"],
     } as never,
     async execute(_toolCallId, params, signal) {
       const p = params as { command: string; why: string };
-      const execResult = await pi.exec("sh", ["-c", p.command], { cwd: sessionCtx.cwd, timeout: ONE_LINER_TIMEOUT_MS, signal });
+      const invocation = resolveShellInvocation(p.command, sessionCtx.resolveShell);
+      if (!invocation.ok) return { content: [{ type: "text", text: `why: ${p.why}\n${invocation.error}` }] };
+      const execResult = await pi.exec(invocation.shell, invocation.args, { cwd: sessionCtx.cwd, timeout: ONE_LINER_TIMEOUT_MS, signal });
       const merged = mergeExecOutput(execResult.stdout, execResult.stderr);
       // Review relay #1, Important: `execResult.killed` fires for BOTH the
       // 30s timeout and the caller's own AbortSignal (one shared
