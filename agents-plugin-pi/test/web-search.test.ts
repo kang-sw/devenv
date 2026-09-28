@@ -6,7 +6,7 @@ import { readFileSync, mkdtempSync, writeFileSync, rmSync, readdirSync, mkdirSyn
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createWebSearch, webSearchParameters } from '../src/web-search.ts';
+import { createWebSearch, helperPermissionFlags, webSearchParameters } from '../src/web-search.ts';
 import { captureSearch, frame, parseFrame, PROXY_KEYS, validateQuery } from '../src/web-search-helper.mjs';
 
 const packageRoot = realpathSync(join(dirname(fileURLToPath(import.meta.url)), '..'));
@@ -150,7 +150,7 @@ test('permission runtime prevents curl/proxy artifacts and reads owner auth with
     'openai-codex': { type: 'oauth', access: 'owner-codex-fixture-token', refresh: 'unused', expires: Date.now() + 3_600_000, accountId: 'fixture-account' },
   }));
   cpSync(join(packageRoot, 'test', 'web-search-permissions.fixture'), join(home, 'web-search-permissions.mjs'));
-  const result = spawnSync(process.execPath, ['--permission', '--allow-fs-read=*', '--allow-net',
+  const result = spawnSync(process.execPath, [...helperPermissionFlags(),
     join(home, 'web-search-permissions.mjs'), join(packageRoot, 'src', 'web-search-helper.mjs')], { env, encoding: 'utf8', timeout: 10_000 });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /read-only-auth-ok/);
@@ -207,6 +207,15 @@ test('frame parser rejects malformed, duplicate, trailing, oversized and invalid
   for (const bad of [Buffer.alloc(0), Buffer.from('junk'), Buffer.concat([good, good]), Buffer.concat([good, Buffer.from('x')]), Buffer.alloc(65541), Buffer.from([0, 0, 0, 1, 255])]) assert.throws(() => parseFrame(bad));
 });
 
+test('--allow-net is passed only to Node majors that accept it (>= 25)', () => {
+  for (const version of ['22.19.0', '24.21.0', 'v24.0.0']) {
+    assert.deepEqual(helperPermissionFlags(version), ['--permission', '--allow-fs-read=*'], version);
+  }
+  for (const version of ['25.0.0', '26.10.0', 'v26.0.0']) {
+    assert.deepEqual(helperPermissionFlags(version), ['--permission', '--allow-fs-read=*', '--allow-net'], version);
+  }
+});
+
 test('parent protocol rejects bad child output/nonzero exit and enforces wall deadline', async t => {
   const { home, env } = setup(t);
   const local = realpathSync(home);
@@ -216,10 +225,16 @@ test('parent protocol rejects bad child output/nonzero exit and enforces wall de
   writeFileSync(join(upstream, 'package.json'), '{"name":"pi-web-access","version":"0.29.0"}');
   writeFileSync(join(upstream, 'index.ts'), '');
   cpSync(join(packageRoot, 'test', 'web-search-protocol.fixture'), join(local, 'src', 'web-search-helper.mjs'));
-  for (const mode of ['duplicate', 'trailing', 'malformed', 'over-limit', 'stderr-limit', 'nonzero', 'timeout']) {
+  const statuses = {
+    duplicate: /Helper status: stopped by the parent/, trailing: /Helper status: stopped by the parent/,
+    malformed: /Helper status: stopped by the parent/, 'reported-failure': /Helper status: exit code 0, response rejected\./, 'over-limit': /Helper status: stopped by the parent/,
+    'stderr-limit': /Helper status: stopped by the parent/, nonzero: /Helper status: exit code 1\./, timeout: /Helper status: stopped by the parent/,
+  };
+  for (const [mode, status] of Object.entries(statuses)) {
     const start = Date.now();
     await assert.rejects(createWebSearch({ packageRoot: local, env: { ...env, WEB_SEARCH_FIXTURE_MODE: mode }, timeoutMs: 500 }).probe(), error => {
       assert.match(error.message, /web-search-tool-unavailable/);
+      assert.match(error.message, status, mode);
       assert.doesNotMatch(error.message, /secret/); return true;
     });
     assert.ok(Date.now() - start < 3000);

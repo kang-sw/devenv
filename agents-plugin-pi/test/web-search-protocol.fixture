@@ -12,6 +12,7 @@ switch (process.env.WEB_SEARCH_FIXTURE_MODE) {
   case 'malformed': process.stdout.write('raw-secret'); break;
   case 'over-limit': process.stdout.write(Buffer.alloc(65541)); break;
   case 'stderr-limit': process.stderr.write('secret'.repeat(2000)); process.stdout.write(good); break;
+  case 'reported-failure': process.stdout.write(frame({ error: 'web-search-tool-unavailable' })); break;
   case 'nonzero': process.stdout.write(good); process.exitCode = 1; break;
   case 'timeout': setInterval(() => {}, 1000); break;
   default: process.stdout.write(good);
