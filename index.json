@@ -494,7 +494,14 @@
       "registered_at": "2026-09-27T03:33:43Z"
     },
     "260928-bug-config-tune-value-schema-untyped": {
-      "registered_at": "2026-09-28T04:58:23Z"
+      "registered_at": "2026-09-28T04:58:23Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-09-28T05:29:01Z"
+      }
     }
   }
 }
