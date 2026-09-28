@@ -493,21 +493,11 @@
     "260927-bug-pi-develop-marker-static-manual-fixture-drifts": {
       "registered_at": "2026-09-27T03:33:43Z"
     },
-    "260928-bug-config-tune-value-schema-untyped": {
-      "registered_at": "2026-09-28T04:58:23Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-09-28T05:29:30Z",
-        "impl": {
-          "branch": "impl/develop/ipod-level-art"
-        }
-      }
-    },
     "260928-bug-pi-exec-windows-timeout-orphans-git-bash-child": {
       "registered_at": "2026-09-28T07:57:19Z"
+    },
+    "260928-feat-claude-effort-carrier-agents": {
+      "registered_at": "2026-09-28T13:27:10Z"
     }
   }
 }
