@@ -12,12 +12,16 @@ frontmatter, then the session `/effort`, then `CLAUDE_CODE_EFFORT_LEVEL`
 (code.claude.com/docs/en/sub-agents.md, "Effort Level"). ws therefore never
 carries tier effort into Claude spawns:
 
-- The default `claude` tier aliases in `wsconfig` (`defaultModelAliases`) set
-  model only: small=haiku, medium=sonnet, large=opus, xlarge=opus. Claude's
-  large and xlarge are identical.
+- The default `claude` tier aliases in `wsconfig` (`defaultModelAliases`)
+  already carry efforts (0e0d5926a, f50d4b4f7):
+  small=haiku+`high`, medium=sonnet+`high`, large=opus+`high`,
+  xlarge=opus+`xhigh`. Nothing on Claude consumes them yet.
 - `playbook.render` emits `recommended-reasoning-effort` when configured, but
   only the Codex overlay `native-spawn-binding.codex.md` maps it to a spawn
   field; the neutral `native-spawn-binding.md` is empty (578bce4dd).
+- Transitional symptom until this ticket lands: `ticket-reviewer-design`
+  tells reviewers to record unavailable bindings under `omitted:`, so Claude
+  design reviewers list the effort binding there.
 - The Claude terminology entry `SpawnIdiom` is
   `Agent({subagent_type: "general-purpose", ...})`, and shipped text directs
   exploration to the built-in Explore agent.
@@ -76,7 +80,17 @@ plugins/manifest-reference.md):
   value states the rule in full: a resolved effort that is one of the five
   Claude levels selects `subagent_type: "<namespace>:effort-<level>"`, the
   resolved model goes to `model`, and an empty or non-Claude effort falls back
-  to `general-purpose` with the model only. "Resolved" covers both
+  to `general-purpose` with the model only. The value stays one short
+  sentence, shaped like
+  `Agent({subagent_type: "<namespace>:effort-<resolved effort>", model: <resolved model>, ...}), or "general-purpose" when no Claude effort level resolved`,
+  because it is substituted mid-sentence at every `{{.SpawnIdiom}}` site
+  (`lead-run`, `ticket-worker`, `ticket-worker-elevated`, `explore`,
+  `delegate-sample`). Rejected: a short `SpawnIdiom` plus the rule in a shared
+  worker include (the one-sentence form reads acceptably at every site).
+  Rejected: a spawn-failure fallback clause (retry with `general-purpose` when
+  the Agent tool rejects the effort agent type) - plugin custom agents are a
+  baseline harness capability, and a failure is left to the agent's own
+  handling. "Resolved" covers both
   `playbook.render` bindings and `config.resolve_agent` output, so worker-side
   reviewer and leaf spawns get the same rule as lead spawns without reading
   the overlay. The terminology table holds static strings and
@@ -91,7 +105,9 @@ plugins/manifest-reference.md):
   `recommended-reasoning-effort` through the `{{.SpawnIdiom}}` rule, following
   the Codex overlay precedent (b2f7caad8, 578bce4dd). It restates no separate
   mapping or fallback. The neutral `native-spawn-binding.md` stays empty.
-- **Fallback labels.** No config-side label validation is added, preserving
+- **Fallback labels.** Every shipped Claude tier carries a Claude effort
+  level, so the empty-effort fallback fires only for user-configured empty or
+  non-Claude labels. No config-side label validation is added, preserving
   cbdd6d43d's unrestricted effort labels. Rejected: rejecting non-Claude
   labels in `config.tune` for the `claude` harness; mapping arbitrary labels
   to the nearest Claude level.
@@ -121,11 +137,15 @@ plugins/manifest-reference.md):
   `.claude-plugin/plugin.json` lists its five `./claude-agents/effort-*.md`
   files in `agents` (the key takes `.md` files, not a directory); the
   generator does not edit `plugin.json`.
-- **Claude tier effort defaults.** The default `claude` aliases become
-  small=haiku (no effort), medium=sonnet+`high`, large=opus+`high`,
-  xlarge=opus+`max`. Rejected: model-only defaults with tuning documentation
-  (leaves the mechanism inert); small=haiku+`low` (per-level Haiku support is
-  undocumented).
+- **Claude tier effort defaults (already landed).** small=haiku+`high`,
+  medium=sonnet+`high`, large=opus+`high`, xlarge=opus+`xhigh`, landed ahead
+  of this ticket (0e0d5926a, f50d4b4f7); this ticket makes
+  them effective. No shipped default, Claude or Codex, uses `max`. Haiku gets
+  `high` because Claude substitutes an unsupported level with the nearest
+  available one, and a shipped default should not route small-tier spawns
+  into the fallback. Rejected: model-only defaults with tuning documentation
+  (leaves the mechanism inert); small=haiku with no effort (triggers the
+  fallback by default); xlarge=opus+`max`.
 - **wsflow ships the same five agents** in its own Claude manifest; the
   overlay and terminology resolve the namespace at render time, never a
   hard-coded `ws:` prefix, because wsflow's rsrc tree is a byte-identical
@@ -145,10 +165,11 @@ plugins/manifest-reference.md):
     enumerates every non-Go shipped text tree.
   - `claude plugin validate` passes for `agents-plugin` and
     `agents-plugin-wsflow`.
-  - Go tests pin the default `claude` alias efforts; pin the Claude
-    `SpawnIdiom` text and the Claude overlay render output for both
+  - Go tests pin the Claude `SpawnIdiom` text as rendered at each
+    `{{.SpawnIdiom}}` site and the Claude overlay render output for both
     namespaces; assert that the Claude `ExploreAgent` is unchanged; and assert
-    that Codex and Pi renders do not mention the effort agents.
+    that Codex and Pi renders do not mention the effort agents. The default
+    alias efforts are already pinned by the landed default change.
 - **Live probe with stop-and-report.** Phase 1 runs a scratch headless Claude
   session that loads the working-tree plugin (for example
   `claude -p --plugin-dir <package>`), spawns `<plugin>:effort-high` and
@@ -182,9 +203,9 @@ plugins/manifest-reference.md):
 
 ### Phase 1: Claude effort agents and render-time binding
 
-Generate and ship the effort agents on both Claude manifests, carry the
-mapping rule in the Claude `SpawnIdiom` with the lead-side overlay, and seed
-Claude tier effort defaults, per `## Decisions`. Exploration spawns are
-untouched.
+Generate and ship the effort agents on both Claude manifests and carry the
+mapping rule in the Claude `SpawnIdiom` with the lead-side overlay, per
+`## Decisions`, making the already-landed Claude tier effort defaults
+effective. Exploration spawns are untouched.
 
 Verification: the Verification and Live probe decisions in `## Decisions`.
