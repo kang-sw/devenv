@@ -115,18 +115,40 @@ plugins/manifest-reference.md):
   `effort-xhigh`, `effort-max`, addressed as `<plugin>:effort-<level>`.
 - **Frontmatter is `name`, `description`, `effort` only.** No `model` (the
   call supplies it) and no `tools` restriction.
-- **Body: a short, explicit general-purpose system prompt**, identical across
-  the five levels: follow the task prompt, use tools to complete it, report
-  results and gaps. Rejected: an empty body (the documented passthrough
-  covers only `--agent` session agents, not delegated subagents); a long
-  prompt approximating the built-in general-purpose or Explore prompts.
-- **Generated from one template, committed.** A single template with the
-  level list lives in `agents-plugin-tool/` beside an env-gated regen test,
-  outside any shipped tree. The regen writes the five files into both
+- **Body: lead-authored, already written.** The frontmatter and body prose
+  are fixed in `agents-plugin-tool/internal/claudeagents/effort-agent.md.tmpl`,
+  identical across the five levels. The worker wires the generator to it and
+  may adjust template syntax, never wording; a wording problem found during
+  implementation is a stop-and-report, because worker-written prose drifts.
+  The body keeps the built-in general-purpose identity sentence verbatim
+  (user observation: agents without it tend to perform worse) and restates the rest of the
+  built-in guidance in ws wording: finish completely within scope, search
+  broad then narrow, prefer edits over new files and no unrequested docs, no
+  whole-assignment re-delegation, concise relayable report. It adds one
+  precedence paragraph: when the task directs the agent to read a file as its
+  system prompt or instructions, that file governs and wins on conflicts
+  (scope, files to write, report format); without such a file the body
+  applies. ws spawns pass rendered playbooks that way, and the body's
+  generic defaults (no new docs, concise report) would otherwise compete with
+  playbook duties (Results, commits, fixed report shapes). The wording stays
+  generic (no ws vocabulary) so ad-hoc delegate spawns without a file still
+  work. Rejected: an empty body (the documented passthrough covers only
+  `--agent` session agents, not delegated subagents); copying the built-in
+  prompt verbatim (redistributes Claude Code's commercially licensed text in
+  an MIT package); extracting the built-in prompt from the local Claude Code
+  binary at install or first run (plugin agents load at session start before
+  any ws code can write them, a plugin-cache write is lost on refresh, and
+  extraction depends on per-build minified names and per-platform install
+  shapes); specializing the body further with ws procedure (it would become a
+  second playbook and drift from the real one).
+- **Generated from one template, committed.** The template above lives
+  outside any shipped tree, and the generator plus its env-gated regen test
+  live in the same `internal/claudeagents` package. The regen writes the five
+  files into both
   `agents-plugin/claude-agents/effort-<level>.md` and
   `agents-plugin-wsflow/claude-agents/effort-<level>.md`; the output is
   committed, and a drift test fails when a committed file differs from the
-  template output. Generator package, regen env var, and test names are the
+  template output. Regen env var and test names are the
   worker's choice, following the existing `WS_REGEN_*` env-gated, `-count=1`
   test pattern in `ai-docs/manuals/wsflow-mirroring.md`. Rejected: ten
   hand-maintained files (fragile); generating at `install.sh` or release time
@@ -179,7 +201,11 @@ plugins/manifest-reference.md):
   when the effort agent matches general-purpose on every item, and its tool
   list explicitly includes the Agent tool: `lead-run` spawns workers "in a
   form that can itself spawn children", so an effort agent without it breaks
-  worker dispatch. On a gap the worker stops and records it in the Result
+  worker dispatch. A second probe spawn gives the effort agent a task that
+  says to read a scratch instructions file as its system prompt, where that
+  file demands a fixed marker line in the report and the creation of a
+  scratch `.md` file; it passes when the agent follows the file over the
+  body's defaults. On a gap the worker stops and records it in the Result
   rather than patching the body, because a body change revisits a lead
   decision. Rejected: no probe (the gap is undocumented and unit tests cannot
   observe it); letting the worker add environment instructions to the body.
