@@ -21,7 +21,7 @@ func TestTicketDesignReviewExplorationBindings(t *testing.T) {
 				"| small | gpt-6-luna | high |", "| medium | gpt-6-luna | xhigh |", "| large | gpt-6-sol | high |",
 			}},
 			{"claude", "the Explore agent", []string{
-				"| small | haiku | |", "| medium | sonnet | high |", "| large | opus | high |",
+				"| small | haiku | high |", "| medium | sonnet | high |", "| large | opus | high |",
 			}},
 			{"unknown-host", "an exploration agent", []string{
 				"| small | gpt-6-luna | high |", "| medium | gpt-6-luna | xhigh |", "| large | gpt-6-sol | high |",

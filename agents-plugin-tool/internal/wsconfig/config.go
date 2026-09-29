@@ -578,7 +578,7 @@ func defaultModelAliases(tiers map[string]AgentTier) map[string]map[string]Agent
 		"small": {
 			"default": tierOrDefault(tiers, "small", AgentTier{Backend: "codex", Model: "gpt-6-luna", Effort: "high"}),
 			"codex":   tierOrDefault(tiers, "small", AgentTier{Backend: "codex", Model: "gpt-6-luna", Effort: "high"}),
-			"claude":  {Backend: "claude", Model: "haiku"},
+			"claude":  {Backend: "claude", Model: "haiku", Effort: "high"},
 		},
 		"medium": {
 			"default": tierOrDefault(tiers, "medium", AgentTier{Backend: "codex", Model: "gpt-6-luna", Effort: "xhigh"}),
