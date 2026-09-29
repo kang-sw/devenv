@@ -1,5 +1,12 @@
 ---
 title: Claude effort-carrier subagent types for tier reasoning effort
+related:
+  260923-feat-agent-tier-arbitrary-effort-and-codex-defaults: background (unrestricted effort labels)
+  260622-feat-playbook-render-tier-label: background (render bindings and native-spawn-binding overlays)
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-completeness-reviewed: e048a6afe7ee614b
+sage-review-design-reviewed: e048a6afe7ee614b
 ---
 
 # Claude effort-carrier subagent types for tier reasoning effort
@@ -19,9 +26,10 @@ carries tier effort into Claude spawns:
 - `playbook.render` emits `recommended-reasoning-effort` when configured, but
   only the Codex overlay `native-spawn-binding.codex.md` maps it to a spawn
   field; the neutral `native-spawn-binding.md` is empty (578bce4dd).
-- Transitional symptom until this ticket lands: `ticket-reviewer-design`
-  tells reviewers to record unavailable bindings under `omitted:`, so Claude
-  design reviewers list the effort binding there.
+- `ticket-reviewer-design` tells reviewers to record unavailable bindings
+  under `omitted:`, so Claude design reviewers list the effort binding there.
+  This entry persists after this ticket for reviewer explorers, which stay on
+  the built-in Explore agent without an effort binding (see `## Decisions`).
 - The Claude terminology entry `SpawnIdiom` is
   `Agent({subagent_type: "general-purpose", ...})`, and shipped text directs
   exploration to the built-in Explore agent.
@@ -73,6 +81,9 @@ plugins/manifest-reference.md):
   a single `ExploreAgent` string would have to hard-code one effort level).
   Rejected: read-only effort-agent variants for exploration (not needed for
   this ticket's goal; a separate decision if exploration effort ever matters).
+  The split is by variable, not by playbook: every `{{.SpawnIdiom}}` spawn,
+  including those in the `explore` playbook, routes through the effort
+  agents, and every `{{.ExploreAgent}}` spawn stays on Explore.
 - **The nudge is delivered at render time on the Claude harness** — through
   terminology and `playbook.render` bindings, not through a per-call effort
   parameter (none exists).
@@ -85,7 +96,9 @@ plugins/manifest-reference.md):
   `Agent({subagent_type: "<namespace>:effort-<resolved effort>", model: <resolved model>, ...}), or "general-purpose" when no Claude effort level resolved`,
   because it is substituted mid-sentence at every `{{.SpawnIdiom}}` site
   (`lead-run`, `ticket-worker`, `ticket-worker-elevated`, `explore`,
-  `delegate-sample`). Rejected: a short `SpawnIdiom` plus the rule in a shared
+  `delegate-sample`). "One of the five Claude levels" is an exact match on
+  the lowercase level names; any other label, including case or whitespace
+  variants, takes the fallback. Rejected: a short `SpawnIdiom` plus the rule in a shared
   worker include (the one-sentence form reads acceptably at every site).
   Rejected: a spawn-failure fallback clause (retry with `general-purpose` when
   the Agent tool rejects the effort agent type) - plugin custom agents are a
@@ -105,6 +118,14 @@ plugins/manifest-reference.md):
   `recommended-reasoning-effort` through the `{{.SpawnIdiom}}` rule, following
   the Codex overlay precedent (b2f7caad8, 578bce4dd). It restates no separate
   mapping or fallback. The neutral `native-spawn-binding.md` stays empty.
+  The Claude overlay must not reuse Codex-only wording: the existing negative
+  Claude-render assertion from 578bce4dd (in `playbook_tools_test.go`) forbids
+  `## Native delegate spawn`, `spawn_agent.model`,
+  `spawn_agent.reasoning_effort`, and `fork_turns: "none"` in the Claude
+  render, and it stays as is, so the overlay uses its own heading. For the
+  overlay's `{{.SpawnIdiom}}` to render, `lead-workflow-manual` declares
+  `SpawnIdiom` in its frontmatter (a frontmatter-only change), mirrored to
+  wsflow with the rsrc manifest regen.
 - **Fallback labels.** Every shipped Claude tier carries a Claude effort
   level, so the empty-effort fallback fires only for user-configured empty or
   non-Claude labels. No config-side label validation is added, preserving
@@ -158,7 +179,9 @@ plugins/manifest-reference.md):
 - **Manifests stay curated.** Each package's
   `.claude-plugin/plugin.json` lists its five `./claude-agents/effort-*.md`
   files in `agents` (the key takes `.md` files, not a directory); the
-  generator does not edit `plugin.json`.
+  generator does not edit `plugin.json`. Neither package has an `agents/`
+  directory or an existing Claude `agents` key today, so the curated list
+  hides no agent Claude currently loads.
 - **Claude tier effort defaults (already landed).** small=haiku+`high`,
   medium=sonnet+`high`, large=opus+`high`, xlarge=opus+`xhigh`, landed ahead
   of this ticket (0e0d5926a, f50d4b4f7); this ticket makes
@@ -206,7 +229,8 @@ plugins/manifest-reference.md):
   file demands a fixed marker line in the report and the creation of a
   scratch `.md` file; it passes when the agent follows the file over the
   body's defaults. On a gap the worker stops and records it in the Result
-  rather than patching the body, because a body change revisits a lead
+  rather than patching the body, and does not close the ticket; the lead
+  decides before merge, because a body change revisits a lead
   decision. Rejected: no probe (the gap is undocumented and unit tests cannot
   observe it); letting the worker add environment instructions to the body.
 
@@ -224,6 +248,37 @@ plugins/manifest-reference.md):
 - Out of scope: Explore spawns keep inheriting the session effort.
 - Playbook bodies that use `{{.SpawnIdiom}}` or `{{.ExploreAgent}}` need no
   text change; only the variable values change.
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for agents-plugin/, agents-plugin-wsflow/, agents-plugin-tool/)
+- Convention: ai-docs/manuals/skill-authoring.md (declared for agents-plugin/rsrc/, agents-plugin/skills/, agents-plugin-wsflow/rsrc/, agents-plugin-wsflow/skills/, agents-plugin-tool/internal/wsdoc/conventions/)
+- Convention: ai-docs/manuals/wsflow-mirroring.md (declared for agents-plugin/rsrc/, agents-plugin/skills/, agents-plugin-wsflow/)
+- Convention: ai-docs/manuals/ws-mcp.md (declared for agents-plugin-tool/internal/mcp/)
+
+## Prior Decisions
+
+- 0e0d5926a (2026-09-29, commit): "Claude tier efforts are seeded ahead of 260928-feat-claude-effort-carrier-agents. They are inert on Claude until the effort agents land, since nothing consumes Claude recommended-reasoning-effort yet" — bearing: supports
+- f50d4b4f7 (2026-09-29, commit): "User decision; supersedes the 'Haiku keeps no effort' note in 0e0d5926a. ... A shipped default should not route Claude small-tier spawns into the empty-effort fallback path" — bearing: supports
+- 260923-feat-agent-tier-arbitrary-effort-and-codex-defaults (2026-09-23, Decisions): "the fixed portable effort vocabulary is replaced by any non-empty label (user-confirmed in 51d9588a)." — bearing: constrains
+- 371b1176 (2026-09-24, commit): "Empty effort still renders empty in the tier vars (formatEffortForText leaves it unchanged), preserving the 'omit the host binding' contract." — bearing: constrains
+- 260622-feat-playbook-render-tier-label (2026-07-21, Result edition 578bce4d): "Claude now receives no added native binding guidance; the empty neutral include preserves its prior..." — bearing: constrains
+- 578bce4dd (2026-07-21, commit): "Remove shared explanations of harness selection, tier portability, binding resolution, exact-fidelity policy, and continuation mechanics from the always-loaded manual. ... add a negative Claude-render assertion for Codex-only spawn guidance." — bearing: constrains
+- 260622-feat-playbook-render-tier-label (2026-06-22, Decisions): "Resolve model and effort through the existing harness-aware `wsconfig.ResolveAgentForHarnessConfig` seam shared with `RoleModel` and the fixed-tier model render variables. Do not hardcode Claude or Codex model names" — bearing: supports
+- 91378dc5 (2026-06-09, commit): "terminologyForHarness('') returns host-neutral values for any unrecognized harness. Tests assert claude != codex != '' to prevent silent collapsing." — bearing: constrains
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-tool/internal/claudeagents/, agents-plugin-tool/internal/mcp/playbook_tools.go, agents-plugin/rsrc/lead-workflow-manual/native-spawn-binding.claude.md, agents-plugin/claude-agents/, agents-plugin-wsflow/claude-agents/, both .claude-plugin/plugin.json, agents-plugin/tests/test_shipped_surfaces_downstream_neutral.py, ai-docs/manuals/wsflow-mirroring.md |
+| scope.surface | public-interface | new plugin agent types addressed as <plugin>:effort-<level> in both Claude manifests plus the claude SpawnIdiom value rendered at five playbook sites |
+| scope.new_public_symbol | yes | five plugin agents effort-low, effort-medium, effort-high, effort-xhigh, effort-max per package |
+| scope.new_type_contract | no | no exported Go type or signature; generator lives in the internal claudeagents package and the agent contract is frontmatter text |
+| scope.test_surface | new-files | new drift and manifest-parity tests; existing agents-plugin-tool/internal/mcp/playbook_tools_test.go and agents-plugin/tests/test_shipped_surfaces_downstream_neutral.py extended |
+| complexity.reuse_points | confirmed | playbookTerminologyTable and RuntimeNamespace in internal/mcp, wsrsrc loader name.harness.md overlay lookup at loader.go#L151-L161, native-spawn-binding.codex.md precedent, WS_REGEN env-gated regen pattern, existing template effort-agent.md.tmpl |
+| complexity.side_effect_risk | moderate | the claude SpawnIdiom change alters every Claude spawn instruction in lead-run, ticket-worker, ticket-worker-elevated, explore, delegate-sample and the manifest agents key replaces the default agents scan |
+| risk.correctness | moderate | the mapping rule must render the right namespace per product mode and fall back cleanly for empty or non-Claude effort labels |
+| risk.fit | moderate | two packages, byte-identical wsflow rsrc mirror, manifest regen, and mirroring-manual checklist must stay in sync |
+| risk.test | moderate | drift, manifest parity, render pins across five sites and two namespaces, plus a live headless probe of undocumented agent environment behavior |
+| risk.security_or_contract | moderate | changes the spawn contract for every Claude subagent and adds shipped plugin agents whose body must not redistribute Claude Code's built-in prompt |
 
 ## Phases
 
