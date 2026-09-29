@@ -498,6 +498,9 @@
     },
     "260928-feat-claude-effort-carrier-agents": {
       "registered_at": "2026-09-28T13:27:10Z"
+    },
+    "260929-bug-config-tune-agents-tier-lost-update": {
+      "registered_at": "2026-09-29T09:35:35Z"
     }
   }
 }
