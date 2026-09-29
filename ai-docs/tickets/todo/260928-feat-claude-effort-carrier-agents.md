@@ -25,6 +25,13 @@ carries tier effort into Claude spawns:
 Every Claude subagent thus inherits the lead session's effort regardless of
 tier.
 
+Where the binding must reach: the `native-spawn-binding` overlay is included
+only by `lead-workflow-manual`, so only the lead reads it. Most `{{.SpawnIdiom}}`
+uses are in worker bodies that never read that manual: `ticket-worker` and
+`ticket-worker-elevated` spawn reviewers from `playbook.render` output, and
+`ticket-worker-elevated` spawns leaves from `config.resolve_agent(tier)`
+output, which also returns an effort.
+
 Documented platform facts this ticket relies on
 (code.claude.com/docs/en/sub-agents.md, plugins/components.md,
 plugins/manifest-reference.md):
@@ -50,75 +57,111 @@ plugins/manifest-reference.md):
 - **Claude-only surface.** The effort agents are not placed in
   `agents-plugin/agents/`, because that default location is visible to other
   harnesses. No Codex or Pi surface references them.
-- **All native Claude spawns route through the effort agents, best effort.**
-  This includes exploration spawns that today use the built-in Explore agent.
-  Read-only enforcement is not preserved or reintroduced; the effort agents do
-  not restrict tools.
+- **General spawns route through the effort agents; exploration does not.**
+  Delegate, worker, reviewer, and leaf spawns (everything expressed through
+  `{{.SpawnIdiom}}` or render bindings) use the effort agents. Exploration
+  spawns stay on the built-in Explore agent with the model only, so its
+  read-only tool restriction keeps mechanically enforcing "subagents gather
+  evidence only" boundaries such as `lead-discuss` and the workers'
+  read-only exploration. The `claude` `ExploreAgent` terminology entry and
+  every Explore wording stay unchanged. Rejected: routing exploration through
+  the effort agents too (drops read-only enforcement to a prompt promise, and
+  a single `ExploreAgent` string would have to hard-code one effort level).
+  Rejected: read-only effort-agent variants for exploration (not needed for
+  this ticket's goal; a separate decision if exploration effort ever matters).
 - **The nudge is delivered at render time on the Claude harness** — through
-  `playbook.render` bindings and Claude-harness text, not through a
-  per-call effort parameter (none exists).
-
-- **Placement: static files listed in the Claude manifest.** The agents live
-  at `agents-plugin/claude-agents/effort-<level>.md`, each listed in
-  `agents-plugin/.claude-plugin/plugin.json` `agents` (the key takes `.md`
-  files, not a directory). Rejected: generating them at `install.sh` time,
-  because marketplace installs never run `install.sh` (Architecture Rule 4).
+  terminology and `playbook.render` bindings, not through a per-call effort
+  parameter (none exists).
+- **`SpawnIdiom` carries the mapping rule itself.** The `claude` `SpawnIdiom`
+  value states the rule in full: a resolved effort that is one of the five
+  Claude levels selects `subagent_type: "<namespace>:effort-<level>"`, the
+  resolved model goes to `model`, and an empty or non-Claude effort falls back
+  to `general-purpose` with the model only. "Resolved" covers both
+  `playbook.render` bindings and `config.resolve_agent` output, so worker-side
+  reviewer and leaf spawns get the same rule as lead spawns without reading
+  the overlay. The terminology table holds static strings and
+  `SkillNamespace` is injected separately (`resolveNamespaceVars`), so the
+  namespace inside this value is assembled from `RuntimeNamespace()` in Go,
+  not written as a `{{.SkillNamespace}}` literal. Rejected: putting the
+  mapping and fallback only in the overlay (workers never read it); naming a
+  fixed effort agent in `SpawnIdiom`.
+- **Render binding overlay is a lead-side aid.** New
+  `agents-plugin/rsrc/lead-workflow-manual/native-spawn-binding.claude.md`
+  tells the lead to apply returned `recommended-model` and
+  `recommended-reasoning-effort` through the `{{.SpawnIdiom}}` rule, following
+  the Codex overlay precedent (b2f7caad8, 578bce4dd). It restates no separate
+  mapping or fallback. The neutral `native-spawn-binding.md` stays empty.
+- **Fallback labels.** No config-side label validation is added, preserving
+  cbdd6d43d's unrestricted effort labels. Rejected: rejecting non-Claude
+  labels in `config.tune` for the `claude` harness; mapping arbitrary labels
+  to the nearest Claude level.
 - **Five agents**, `effort-low`, `effort-medium`, `effort-high`,
   `effort-xhigh`, `effort-max`, addressed as `<plugin>:effort-<level>`.
 - **Frontmatter is `name`, `description`, `effort` only.** No `model` (the
   call supplies it) and no `tools` restriction.
 - **Body: a short, explicit general-purpose system prompt**, identical across
-  the five files: follow the task prompt, use tools to complete it, report
+  the five levels: follow the task prompt, use tools to complete it, report
   results and gaps. Rejected: an empty body (the documented passthrough
   covers only `--agent` session agents, not delegated subagents); a long
   prompt approximating the built-in general-purpose or Explore prompts.
-- **Render binding via a Claude overlay.** New
-  `agents-plugin/rsrc/lead-workflow-manual/native-spawn-binding.claude.md`
-  maps `recommended-reasoning-effort` to
-  `subagent_type: {{.SkillNamespace}}:effort-<value>` and `recommended-model`
-  to `model`, following the Codex overlay precedent (b2f7caad8, 578bce4dd).
-  The neutral `native-spawn-binding.md` stays empty.
-- **Terminology.** The `claude` entries `SpawnIdiom` and `ExploreAgent` in
-  `playbookTerminologyTable` are rewritten to name the effort agents with the
-  model override.
-- **Literal Explore mentions become `{{.ExploreAgent}}`.** Shipped playbooks
-  that name "the Explore agent" literally (for example `lead-discuss` and the
-  workflow manual's scoped-exploration section) use the existing variable so
-  the Claude rewrite reaches them. Rejected: leaving the literals and adding a
-  single Claude-overlay rule to the workflow manual.
-- **Fallback.** When the resolved effort is empty or not one of the five
-  Claude labels, the Claude binding falls back to the built-in spawn
-  (`general-purpose`, or Explore for exploration) with the model only. No
-  config-side label validation is added, preserving cbdd6d43d's unrestricted
-  effort labels. Rejected: rejecting non-Claude labels in `config.tune` for
-  the `claude` harness; mapping arbitrary labels to the nearest Claude level.
+- **Generated from one template, committed.** A single template with the
+  level list lives in `agents-plugin-tool/` beside an env-gated regen test,
+  outside any shipped tree. The regen writes the five files into both
+  `agents-plugin/claude-agents/effort-<level>.md` and
+  `agents-plugin-wsflow/claude-agents/effort-<level>.md`; the output is
+  committed, and a drift test fails when a committed file differs from the
+  template output. Generator package, regen env var, and test names are the
+  worker's choice, following the existing `WS_REGEN_*` env-gated, `-count=1`
+  test pattern in `ai-docs/manuals/wsflow-mirroring.md`. Rejected: ten
+  hand-maintained files (fragile); generating at `install.sh` or release time
+  (marketplace installs take committed files only and never run `install.sh`,
+  Architecture Rule 4); keeping the template inside a plugin tree (it would
+  ship as an unlisted file).
+- **Manifests stay curated.** Each package's
+  `.claude-plugin/plugin.json` lists its five `./claude-agents/effort-*.md`
+  files in `agents` (the key takes `.md` files, not a directory); the
+  generator does not edit `plugin.json`.
 - **Claude tier effort defaults.** The default `claude` aliases become
   small=haiku (no effort), medium=sonnet+`high`, large=opus+`high`,
   xlarge=opus+`max`. Rejected: model-only defaults with tuning documentation
   (leaves the mechanism inert); small=haiku+`low` (per-level Haiku support is
   undocumented).
 - **wsflow ships the same five agents** in its own Claude manifest; the
-  overlay and terminology address agents through `{{.SkillNamespace}}`, never a
+  overlay and terminology resolve the namespace at render time, never a
   hard-coded `ws:` prefix, because wsflow's rsrc tree is a byte-identical
   mirror and its plugin name is `wsflow`. Rejected: excluding wsflow and
   branching the overlay on product mode.
-- **Verification.** A package test asserts that each package's manifest
-  `agents` list equals its `claude-agents/*.md` file set and that each file's
-  `effort` matches its filename level; `claude plugin validate` passes for
-  `agents-plugin` and `agents-plugin-wsflow`; Go render tests pin the Claude
-  overlay and terminology output and assert that Codex renders do not mention
-  the effort agents.
+- **Mirroring manual.** The after-edit checklist in
+  `ai-docs/manuals/wsflow-mirroring.md` gains the effort-agent regen step
+  beside the existing rsrc-manifest and wsflow-rsrc regen steps.
+- **Verification.**
+  - The drift test guards template-to-file consistency, including each file's
+    `effort` matching its level.
+  - A package test in each package asserts that its manifest `agents` list
+    equals its `claude-agents/*.md` file set.
+  - `agents-plugin/claude-agents` and `agents-plugin-wsflow/claude-agents` are
+    added to the tree list in
+    `agents-plugin/tests/test_shipped_surfaces_downstream_neutral.py`, which
+    enumerates every non-Go shipped text tree.
+  - `claude plugin validate` passes for `agents-plugin` and
+    `agents-plugin-wsflow`.
+  - Go tests pin the default `claude` alias efforts; pin the Claude
+    `SpawnIdiom` text and the Claude overlay render output for both
+    namespaces; assert that the Claude `ExploreAgent` is unchanged; and assert
+    that Codex and Pi renders do not mention the effort agents.
 - **Live probe with stop-and-report.** Phase 1 runs a scratch headless Claude
   session that loads the working-tree plugin (for example
   `claude -p --plugin-dir <package>`), spawns `<plugin>:effort-high` and
   `general-purpose` with the same model and the same read-only prompt, and
   asks each to report its working directory, platform, date, whether project
   instructions (CLAUDE.md/AGENTS.md) are visible, and its tool list. It passes
-  when the effort agent matches general-purpose on every item. On a gap the
-  worker stops and records it in the Result rather than patching the body,
-  because a body change revisits a lead decision. Rejected: no probe (the
-  gap is undocumented and unit tests cannot observe it); letting the worker
-  add environment instructions to the body.
+  when the effort agent matches general-purpose on every item, and its tool
+  list explicitly includes the Agent tool: `lead-run` spawns workers "in a
+  form that can itself spawn children", so an effort agent without it breaks
+  worker dispatch. On a gap the worker stops and records it in the Result
+  rather than patching the body, because a body change revisits a lead
+  decision. Rejected: no probe (the gap is undocumented and unit tests cannot
+  observe it); letting the worker add environment instructions to the body.
 
 ## Constraints
 
@@ -131,13 +174,17 @@ plugins/manifest-reference.md):
   unchanged.
 - Shipped text must not name this repository's own configuration or tiers
   (Architecture Rule 4).
+- Out of scope: Explore spawns keep inheriting the session effort.
+- Playbook bodies that use `{{.SpawnIdiom}}` or `{{.ExploreAgent}}` need no
+  text change; only the variable values change.
 
 ## Phases
 
 ### Phase 1: Claude effort agents and render-time binding
 
-Ship the effort agents on the Claude manifest, bind rendered and lead-direct
-Claude spawns to them, and seed Claude tier effort defaults, per
-`## Decisions`.
+Generate and ship the effort agents on both Claude manifests, carry the
+mapping rule in the Claude `SpawnIdiom` with the lead-side overlay, and seed
+Claude tier effort defaults, per `## Decisions`. Exploration spawns are
+untouched.
 
 Verification: the Verification and Live probe decisions in `## Decisions`.
