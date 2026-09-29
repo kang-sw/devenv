@@ -537,7 +537,7 @@ func TestWithRecommendedRenderBinding(t *testing.T) {
 			name:    "default codex model and effort",
 			harness: "codex",
 			want: "path\nrecommended-tier: medium\nrecommended-model: gpt-6-luna\n" +
-				"recommended-reasoning-effort: max",
+				"recommended-reasoning-effort: xhigh",
 		},
 		{
 			name:    "codex local override",
@@ -552,9 +552,9 @@ func TestWithRecommendedRenderBinding(t *testing.T) {
 				"recommended-reasoning-effort: xhigh",
 		},
 		{
-			name:    "claude omits effort",
+			name:    "default claude model and effort",
 			harness: "claude",
-			want:    "path\nrecommended-tier: medium\nrecommended-model: sonnet",
+			want:    "path\nrecommended-tier: medium\nrecommended-model: sonnet\nrecommended-reasoning-effort: high",
 		},
 		{
 			name:    "resolver failure preserves tier",

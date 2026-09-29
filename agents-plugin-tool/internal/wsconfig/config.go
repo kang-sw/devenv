@@ -548,9 +548,9 @@ func defaultConfig() Config {
 func applyDefaultTiers(tiers map[string]AgentTier) {
 	defaults := map[string]AgentTier{
 		"small":  {Backend: "codex", Model: "gpt-6-luna", Effort: "high"},
-		"medium": {Backend: "codex", Model: "gpt-6-luna", Effort: "max"},
+		"medium": {Backend: "codex", Model: "gpt-6-luna", Effort: "xhigh"},
 		"large":  {Backend: "codex", Model: "gpt-6-sol", Effort: "high"},
-		"xlarge": {Backend: "codex", Model: "gpt-6-sol", Effort: "max"},
+		"xlarge": {Backend: "codex", Model: "gpt-6-sol", Effort: "xhigh"},
 	}
 	for tier, mapping := range defaults {
 		if _, ok := tiers[tier]; !ok {
@@ -581,19 +581,19 @@ func defaultModelAliases(tiers map[string]AgentTier) map[string]map[string]Agent
 			"claude":  {Backend: "claude", Model: "haiku"},
 		},
 		"medium": {
-			"default": tierOrDefault(tiers, "medium", AgentTier{Backend: "codex", Model: "gpt-6-luna", Effort: "max"}),
-			"codex":   tierOrDefault(tiers, "medium", AgentTier{Backend: "codex", Model: "gpt-6-luna", Effort: "max"}),
-			"claude":  {Backend: "claude", Model: "sonnet"},
+			"default": tierOrDefault(tiers, "medium", AgentTier{Backend: "codex", Model: "gpt-6-luna", Effort: "xhigh"}),
+			"codex":   tierOrDefault(tiers, "medium", AgentTier{Backend: "codex", Model: "gpt-6-luna", Effort: "xhigh"}),
+			"claude":  {Backend: "claude", Model: "sonnet", Effort: "high"},
 		},
 		"large": {
 			"default": tierOrDefault(tiers, "large", AgentTier{Backend: "codex", Model: "gpt-6-sol", Effort: "high"}),
 			"codex":   tierOrDefault(tiers, "large", AgentTier{Backend: "codex", Model: "gpt-6-sol", Effort: "high"}),
-			"claude":  {Backend: "claude", Model: "opus"},
+			"claude":  {Backend: "claude", Model: "opus", Effort: "high"},
 		},
 		"xlarge": {
-			"default": tierOrDefault(tiers, "xlarge", AgentTier{Backend: "codex", Model: "gpt-6-sol", Effort: "max"}),
-			"codex":   tierOrDefault(tiers, "xlarge", AgentTier{Backend: "codex", Model: "gpt-6-sol", Effort: "max"}),
-			"claude":  {Backend: "claude", Model: "opus"},
+			"default": tierOrDefault(tiers, "xlarge", AgentTier{Backend: "codex", Model: "gpt-6-sol", Effort: "xhigh"}),
+			"codex":   tierOrDefault(tiers, "xlarge", AgentTier{Backend: "codex", Model: "gpt-6-sol", Effort: "xhigh"}),
+			"claude":  {Backend: "claude", Model: "opus", Effort: "xhigh"},
 		},
 	}
 }

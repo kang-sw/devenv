@@ -1323,7 +1323,7 @@ func TestServeStdioConfigResolveAgentFallsBackToDefault(t *testing.T) {
 	if err := json.Unmarshal([]byte(toolText(t, byID["2"])), &result); err != nil {
 		t.Fatalf("decode config.resolve_agent response: %v", err)
 	}
-	if result.Backend != "codex" || result.Model != "gpt-6-luna" || result.Effort != "max" {
+	if result.Backend != "codex" || result.Model != "gpt-6-luna" || result.Effort != "xhigh" {
 		t.Fatalf("result = %#v, want the seeded default medium tier", result)
 	}
 	if result.ResolvedFrom != "default" {
@@ -1352,7 +1352,7 @@ func TestServeStdioConfigResolveAgentNoDetectedHarnessFallsBackToDefault(t *test
 	if err := json.Unmarshal([]byte(toolText(t, byID["1"])), &result); err != nil {
 		t.Fatalf("decode config.resolve_agent response: %v", err)
 	}
-	if result.Backend != "codex" || result.Model != "gpt-6-luna" || result.Effort != "max" {
+	if result.Backend != "codex" || result.Model != "gpt-6-luna" || result.Effort != "xhigh" {
 		t.Fatalf("result = %#v, want the seeded default medium tier", result)
 	}
 	if result.ResolvedFrom != "default" {
@@ -1374,9 +1374,9 @@ func TestServeStdioConfigResolveAgentUsesDefaultCodexTierTable(t *testing.T) {
 		tier, model, effort string
 	}{
 		{"small", "gpt-6-luna", "high"},
-		{"medium", "gpt-6-luna", "max"},
+		{"medium", "gpt-6-luna", "xhigh"},
 		{"large", "gpt-6-sol", "high"},
-		{"xlarge", "gpt-6-sol", "max"},
+		{"xlarge", "gpt-6-sol", "xhigh"},
 	} {
 		var out bytes.Buffer
 		input := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"config.resolve_agent","arguments":{"tier":%q,"format":"json"}}}`, tc.tier)
@@ -1912,7 +1912,7 @@ func TestPlaybookRenderReturnsResolvedNativeBindings(t *testing.T) {
 	if len(lines) != 4 || !strings.HasSuffix(lines[0], "-model-pb.md") {
 		t.Fatalf("render metadata path/tier shape = %q", responseText)
 	}
-	if got, want := strings.Join(lines[1:], "\n"), "recommended-tier: medium\nrecommended-model: gpt-6-luna\nrecommended-reasoning-effort: max"; got != want {
+	if got, want := strings.Join(lines[1:], "\n"), "recommended-tier: medium\nrecommended-model: gpt-6-luna\nrecommended-reasoning-effort: xhigh"; got != want {
 		t.Fatalf("render metadata = %q, want %q", got, want)
 	}
 

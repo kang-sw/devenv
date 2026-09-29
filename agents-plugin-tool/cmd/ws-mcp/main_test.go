@@ -662,13 +662,13 @@ func TestConfigCLICommandsReturnConfigView(t *testing.T) {
 	if small := before.Config.Agents.Tiers["small"]; small.Backend != "codex" || small.Model != "gpt-6-luna" || small.Effort != "high" {
 		t.Fatalf("default small tier = %#v", small)
 	}
-	if medium := before.Config.Agents.Tiers["medium"]; medium.Backend != "codex" || medium.Model != "gpt-6-luna" || medium.Effort != "max" {
+	if medium := before.Config.Agents.Tiers["medium"]; medium.Backend != "codex" || medium.Model != "gpt-6-luna" || medium.Effort != "xhigh" {
 		t.Fatalf("default medium tier = %#v", medium)
 	}
 	if large := before.Config.Agents.Tiers["large"]; large.Backend != "codex" || large.Model != "gpt-6-sol" || large.Effort != "high" {
 		t.Fatalf("default large tier = %#v", large)
 	}
-	if xlarge := before.Config.Agents.Tiers["xlarge"]; xlarge.Backend != "codex" || xlarge.Model != "gpt-6-sol" || xlarge.Effort != "max" {
+	if xlarge := before.Config.Agents.Tiers["xlarge"]; xlarge.Backend != "codex" || xlarge.Model != "gpt-6-sol" || xlarge.Effort != "xhigh" {
 		t.Fatalf("default xlarge tier = %#v", xlarge)
 	}
 

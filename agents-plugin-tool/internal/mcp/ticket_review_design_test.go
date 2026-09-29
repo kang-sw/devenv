@@ -18,13 +18,13 @@ func TestTicketDesignReviewExplorationBindings(t *testing.T) {
 			rows              []string
 		}{
 			{"codex", "an explorer subagent", []string{
-				"| small | gpt-6-luna | high |", "| medium | gpt-6-luna | max |", "| large | gpt-6-sol | high |",
+				"| small | gpt-6-luna | high |", "| medium | gpt-6-luna | xhigh |", "| large | gpt-6-sol | high |",
 			}},
 			{"claude", "the Explore agent", []string{
-				"| small | haiku | |", "| medium | sonnet | |", "| large | opus | |",
+				"| small | haiku | |", "| medium | sonnet | high |", "| large | opus | high |",
 			}},
 			{"unknown-host", "an exploration agent", []string{
-				"| small | gpt-6-luna | high |", "| medium | gpt-6-luna | max |", "| large | gpt-6-sol | high |",
+				"| small | gpt-6-luna | high |", "| medium | gpt-6-luna | xhigh |", "| large | gpt-6-sol | high |",
 			}},
 		} {
 			for _, config := range []string{"default", "custom", "unset", "invalid"} {
