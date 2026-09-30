@@ -503,7 +503,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-09-30T00:20:32Z"
+        "touched_at": "2026-09-30T00:21:05Z",
+        "impl": {
+          "branch": "impl/develop/atom-quiet-rosy"
+        }
       }
     },
     "260929-bug-config-tune-agents-tier-lost-update": {
