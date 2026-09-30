@@ -4,9 +4,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"runtime"
+	"sort"
 	"strconv"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/gofrs/flock"
 )
 
 // --- test doubles ---
@@ -809,4 +815,441 @@ func TestCapabilityCheckAllowsWrite(t *testing.T) {
 	if projectCfg.Overrides == nil || projectCfg.Overrides["allowed.item"] != "value" {
 		t.Errorf("overrides = %v", projectCfg.Overrides)
 	}
+}
+
+// --- agents.tier writers share the config file lock ---
+
+// tierWriteScope binds one config file scope to its agents.tier writers and
+// its persisted-layer reader, so each lost-update test runs at both scopes.
+type tierWriteScope struct {
+	name   string
+	scope  Scope
+	set    func(opts Options, tier, model, harness string) (Config, error)
+	unset  func(opts Options, tier, harness string) (Config, bool, error)
+	path   func(opts Options) (string, error)
+	stored func(opts Options) (Config, error)
+}
+
+func tierWriteScopes() []tierWriteScope {
+	return []tierWriteScope{
+		{
+			name:  "project",
+			scope: ScopeProject,
+			set: func(opts Options, tier, model, harness string) (Config, error) {
+				return SetAgentsTierForHarness(opts, tier, "", model, harness)
+			},
+			unset:  UnsetAgentsTierForHarness,
+			path:   Path,
+			stored: loadProjectConfig,
+		},
+		{
+			name:  "global",
+			scope: ScopeGlobal,
+			set: func(opts Options, tier, model, harness string) (Config, error) {
+				return SetGlobalAgentsTierForHarness(opts, tier, "", model, harness)
+			},
+			unset:  UnsetGlobalAgentsTierForHarness,
+			path:   GlobalPath,
+			stored: loadGlobalConfig,
+		},
+	}
+}
+
+// tierLeaf is one agents.model_aliases.<tier>.<harness> leaf.
+type tierLeaf struct{ tier, harness string }
+
+// allTierLeaves returns every distinct tier/harness leaf a writer can target:
+// 4 tiers x 4 harness keys = 16 leaves, so N concurrent writers never collide.
+func allTierLeaves() []tierLeaf {
+	var leaves []tierLeaf
+	for _, tier := range []string{"small", "medium", "large", "xlarge"} {
+		for _, harness := range []string{"default", "codex", "claude", "pi"} {
+			leaves = append(leaves, tierLeaf{tier, harness})
+		}
+	}
+	return leaves
+}
+
+func (l tierLeaf) model() string { return "m-" + l.tier + "-" + l.harness }
+
+// concurrentRounds repeats each concurrent scenario on a fresh config home so
+// an unserialized read-modify-write loses at least one leaf reliably, while a
+// locked one never does. A start barrier maximizes overlap within a round.
+const concurrentRounds = 3
+
+// countWrittenLeaves counts the test-written leaves present in cfg.
+func countWrittenLeaves(cfg Config, leaves []tierLeaf) int {
+	n := 0
+	for _, l := range leaves {
+		if cfg.Agents.ModelAliases[l.tier][l.harness].Model == l.model() {
+			n++
+		}
+	}
+	return n
+}
+
+func runBarrier(n int, fn func(i int)) {
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			fn(i)
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+}
+
+func TestConcurrentAgentsTierSetNoLostWrites(t *testing.T) {
+	leaves := allTierLeaves()
+	for _, sc := range tierWriteScopes() {
+		t.Run(sc.name, func(t *testing.T) {
+			for round := 0; round < concurrentRounds; round++ {
+				_, opts := newTestResolver(t, nil, nil)
+				// Each response is the config committed under the lock, so on a
+				// fresh file the i-th serialized writer sees exactly i written
+				// leaves, its own among them: the counts are a permutation of 1..N.
+				counts := make([]int, len(leaves))
+				runBarrier(len(leaves), func(i int) {
+					l := leaves[i]
+					got, err := sc.set(opts, l.tier, l.model(), l.harness)
+					if err != nil {
+						t.Errorf("round %d set %s/%s: %v", round, l.tier, l.harness, err)
+						return
+					}
+					if got.Agents.ModelAliases[l.tier][l.harness].Model != l.model() {
+						t.Errorf("round %d set %s/%s response omits its own leaf", round, l.tier, l.harness)
+					}
+					counts[i] = countWrittenLeaves(got, leaves)
+				})
+				stored, err := sc.stored(opts)
+				if err != nil {
+					t.Fatalf("round %d load: %v", round, err)
+				}
+				for _, l := range leaves {
+					if got := stored.Agents.ModelAliases[l.tier][l.harness].Model; got != l.model() {
+						t.Fatalf("round %d: leaf %s/%s = %q, want %q (lost write)", round, l.tier, l.harness, got, l.model())
+					}
+				}
+				sort.Ints(counts)
+				for i, c := range counts {
+					if c != i+1 {
+						t.Fatalf("round %d: response leaf counts = %v, want 1..%d (response not the committed value)", round, counts, len(leaves))
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestConcurrentAgentsTierUnsetNoLostWrites(t *testing.T) {
+	leaves := allTierLeaves()
+	for _, sc := range tierWriteScopes() {
+		t.Run(sc.name, func(t *testing.T) {
+			for round := 0; round < concurrentRounds; round++ {
+				_, opts := newTestResolver(t, nil, nil)
+				for _, l := range leaves {
+					if _, err := sc.set(opts, l.tier, l.model(), l.harness); err != nil {
+						t.Fatalf("round %d seed %s/%s: %v", round, l.tier, l.harness, err)
+					}
+				}
+				runBarrier(len(leaves), func(i int) {
+					l := leaves[i]
+					_, removed, err := sc.unset(opts, l.tier, l.harness)
+					if err != nil {
+						t.Errorf("round %d unset %s/%s: %v", round, l.tier, l.harness, err)
+					} else if !removed {
+						t.Errorf("round %d unset %s/%s reported no removal", round, l.tier, l.harness)
+					}
+				})
+				stored, err := sc.stored(opts)
+				if err != nil {
+					t.Fatalf("round %d load: %v", round, err)
+				}
+				if len(stored.Agents.ModelAliases) != 0 {
+					t.Fatalf("round %d: leaves survived concurrent unset (lost write): %#v", round, stored.Agents.ModelAliases)
+				}
+			}
+		})
+	}
+}
+
+// TestConcurrentAgentsTierAndResolverWritesNoLostWrites guards the cross-writer
+// case: an agents.tier write rewrites the whole file, so without the shared
+// lock it can drop a concurrent resolver override write, and vice versa.
+func TestConcurrentAgentsTierAndResolverWritesNoLostWrites(t *testing.T) {
+	leaves := allTierLeaves()
+	for _, sc := range tierWriteScopes() {
+		t.Run(sc.name, func(t *testing.T) {
+			for round := 0; round < concurrentRounds; round++ {
+				r, opts := newTestResolver(t, nil, nil)
+				n := len(leaves)
+				runBarrier(2*n, func(i int) {
+					if i < n {
+						l := leaves[i]
+						if _, err := sc.set(opts, l.tier, l.model(), l.harness); err != nil {
+							t.Errorf("round %d set %s/%s: %v", round, l.tier, l.harness, err)
+						}
+						return
+					}
+					key := fmt.Sprintf("mixed.key.%d", i-n)
+					if err := r.Set(key, key, SetOptions{ExplicitScope: sc.scope}); err != nil {
+						t.Errorf("round %d resolver set %s: %v", round, key, err)
+					}
+				})
+				stored, err := sc.stored(opts)
+				if err != nil {
+					t.Fatalf("round %d load: %v", round, err)
+				}
+				for _, l := range leaves {
+					if got := stored.Agents.ModelAliases[l.tier][l.harness].Model; got != l.model() {
+						t.Fatalf("round %d: leaf %s/%s = %q, want %q (lost write)", round, l.tier, l.harness, got, l.model())
+					}
+				}
+				for i := 0; i < n; i++ {
+					key := fmt.Sprintf("mixed.key.%d", i)
+					if got := stored.Overrides[key]; got != key {
+						t.Fatalf("round %d: override %s = %q, want %q (lost write)", round, key, got, key)
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestAgentsTierWriteReturnsPersistedConfig pins the config.tune response to
+// the committed file: another writer's leaf that landed before this call must
+// appear in the returned value exactly as it does on disk.
+func TestAgentsTierWriteReturnsPersistedConfig(t *testing.T) {
+	for _, sc := range tierWriteScopes() {
+		t.Run(sc.name, func(t *testing.T) {
+			r, opts := newTestResolver(t, nil, nil)
+			if _, err := sc.set(opts, "small", "first", "pi"); err != nil {
+				t.Fatalf("first set: %v", err)
+			}
+			// Another writer lands an override and a leaf after the first call.
+			if err := r.Set("other.writer", "v", SetOptions{ExplicitScope: sc.scope}); err != nil {
+				t.Fatalf("resolver set: %v", err)
+			}
+			if _, err := sc.set(opts, "large", "other", "claude"); err != nil {
+				t.Fatalf("other set: %v", err)
+			}
+
+			assertMatchesDisk := func(label string, got Config) {
+				t.Helper()
+				stored, err := sc.stored(opts)
+				if err != nil {
+					t.Fatalf("%s load: %v", label, err)
+				}
+				want := presentationAgentConfig(effectiveAgentConfig(stored))
+				if !reflect.DeepEqual(got, want) {
+					t.Fatalf("%s returned config differs from persisted:\ngot:  %#v\nwant: %#v", label, got, want)
+				}
+				if stored.Overrides["other.writer"] != "v" {
+					t.Fatalf("%s dropped the other writer's override: %#v", label, stored.Overrides)
+				}
+			}
+
+			got, err := sc.set(opts, "medium", "second", "codex")
+			if err != nil {
+				t.Fatalf("second set: %v", err)
+			}
+			if got.Agents.ModelAliases["large"]["claude"].Model != "other" {
+				t.Fatalf("set response omits the other writer's leaf: %#v", got.Agents.ModelAliases["large"])
+			}
+			assertMatchesDisk("set", got)
+
+			got, removed, err := sc.unset(opts, "small", "pi")
+			if err != nil || !removed {
+				t.Fatalf("unset: removed=%v err=%v", removed, err)
+			}
+			assertMatchesDisk("unset", got)
+
+			got, removed, err = sc.unset(opts, "small", "pi")
+			if err != nil || removed {
+				t.Fatalf("no-op unset: removed=%v err=%v", removed, err)
+			}
+			assertMatchesDisk("no-op unset", got)
+		})
+	}
+}
+
+// TestResolverWritesPersistSchemaVersion verifies that resolver override
+// writes go through the shared stamping writer.
+func TestResolverWritesPersistSchemaVersion(t *testing.T) {
+	r, opts := newTestResolver(t, nil, nil)
+	if err := r.Set("item.project", "pv", SetOptions{ExplicitScope: ScopeProject}); err != nil {
+		t.Fatalf("project set: %v", err)
+	}
+	if err := r.Set("item.global", "gv", SetOptions{ExplicitScope: ScopeGlobal}); err != nil {
+		t.Fatalf("global set: %v", err)
+	}
+	projectPath := mustProjectPath(t, opts)
+	globalPath, err := GlobalPath(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPersistedSchemaVersion(t, projectPath, 1)
+	assertPersistedSchemaVersion(t, globalPath, 1)
+
+	// An unstamped file written by an older version gains the stamp on the next
+	// RMW and on a real delete.
+	for _, write := range []func() error{
+		func() error {
+			return setOverrideInFileRMW(projectPath, "counter", func(string) string { return "1" })
+		},
+		func() error { return r.Unset("item.project", SetOptions{ExplicitScope: ScopeProject}) },
+	} {
+		if err := os.WriteFile(projectPath, []byte(`{"agents":{},"overrides":{"item.project":"pv"}}`+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := write(); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		assertPersistedSchemaVersion(t, projectPath, 1)
+	}
+}
+
+// TestConfigNoOpWritesTouchNothing pins the no-write contracts the shared
+// writer must keep: deleting an absent override, or unsetting from an absent
+// file, creates no config file, lock file, or directory, and an absent-key
+// delete leaves an existing file's bytes and mtime untouched.
+func TestConfigNoOpWritesTouchNothing(t *testing.T) {
+	for _, sc := range tierWriteScopes() {
+		t.Run(sc.name, func(t *testing.T) {
+			base := t.TempDir()
+			opts := Options{
+				CacheHome:  filepath.Join(base, "cache"),
+				ConfigHome: filepath.Join(base, "global"),
+			}
+			r := NewResolver(opts, nil, nil, nil)
+			path, err := sc.path(opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if err := r.Unset("absent.key", SetOptions{ExplicitScope: sc.scope}); err != nil {
+				t.Fatalf("delete from missing file: %v", err)
+			}
+			if _, _, err := sc.unset(opts, "small", "pi"); err != nil {
+				t.Fatalf("unset from missing file: %v", err)
+			}
+			for _, p := range []string{path, path + ".lock", filepath.Dir(path)} {
+				if _, err := os.Stat(p); !os.IsNotExist(err) {
+					t.Fatalf("no-op on missing file created %s (stat err %v)", p, err)
+				}
+			}
+
+			if err := r.Set("present.key", "v", SetOptions{ExplicitScope: sc.scope}); err != nil {
+				t.Fatalf("seed: %v", err)
+			}
+			before, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			oldTime := time.Unix(1, 0)
+			if err := os.Chtimes(path, oldTime, oldTime); err != nil {
+				t.Fatal(err)
+			}
+			if err := r.Unset("absent.key", SetOptions{ExplicitScope: sc.scope}); err != nil {
+				t.Fatalf("delete absent key: %v", err)
+			}
+			after, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			info, err := os.Stat(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(after) != string(before) || !info.ModTime().Equal(oldTime) {
+				t.Fatalf("absent-key delete rewrote config: mtime %v, bytes changed %v", info.ModTime(), string(after) != string(before))
+			}
+		})
+	}
+}
+
+// TestAgentsTierWriteWaitsForFileLockHolder pins the cross-process contract:
+// the writer waits on the sibling <path>.lock flock, which another ws-mcp
+// process holds through its own file descriptor, not on an in-process mutex.
+func TestAgentsTierWriteWaitsForFileLockHolder(t *testing.T) {
+	for _, sc := range tierWriteScopes() {
+		t.Run(sc.name, func(t *testing.T) {
+			_, opts := newTestResolver(t, nil, nil)
+			path, err := sc.path(opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			holder := flock.New(path + ".lock")
+			if err := holder.Lock(); err != nil {
+				t.Fatalf("hold lock: %v", err)
+			}
+			done := make(chan error, 1)
+			go func() {
+				_, err := sc.set(opts, "small", "held", "pi")
+				done <- err
+			}()
+			select {
+			case err := <-done:
+				holder.Unlock() //nolint:errcheck
+				t.Fatalf("write finished while another descriptor held the lock (err %v)", err)
+			case <-time.After(200 * time.Millisecond):
+			}
+			if err := holder.Unlock(); err != nil {
+				t.Fatalf("release lock: %v", err)
+			}
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatalf("write after release: %v", err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("write did not finish after the lock was released")
+			}
+			stored, err := sc.stored(opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := stored.Agents.ModelAliases["small"]["pi"].Model; got != "held" {
+				t.Fatalf("leaf after release = %q, want held", got)
+			}
+		})
+	}
+}
+
+// TestConfigWritesKeepFileMode verifies the temp-file writer creates a new
+// config 0644 (not CreateTemp's 0600) and keeps an existing file's mode.
+func TestConfigWritesKeepFileMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission bits")
+	}
+	r, opts := newTestResolver(t, nil, nil)
+	if err := r.Set("item.project", "pv", SetOptions{ExplicitScope: ScopeProject}); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	path := mustProjectPath(t, opts)
+	assertMode := func(want os.FileMode) {
+		t.Helper()
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := info.Mode().Perm(); got != want {
+			t.Fatalf("config mode = %v, want %v", got, want)
+		}
+	}
+	assertMode(0o644)
+	if err := os.Chmod(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SetAgentsTierForHarness(opts, "small", "", "m", "pi"); err != nil {
+		t.Fatalf("agents.tier set: %v", err)
+	}
+	assertMode(0o600)
 }

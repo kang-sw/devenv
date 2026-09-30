@@ -1,14 +1,8 @@
 package wsconfig
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"time"
-
-	"github.com/gofrs/flock"
 )
 
 // lockTimeout is the maximum time to wait for a file lock before returning an error.
@@ -237,68 +231,21 @@ func (r *Resolver) Unset(itemKey string, setOpts SetOptions) error {
 	}
 }
 
-// deleteOverrideInFile performs an flock-serialized read-modify-write on the
-// config file at path, removing overrides[key]. A missing key or missing file
-// is a no-op.
+// deleteOverrideInFile removes overrides[key] from the config file at path
+// through the shared locked writer. A missing key or missing file is a no-op
+// that writes nothing; a missing file also creates no directory or lock file.
 func deleteOverrideInFile(path, itemKey string) error {
-	if _, err := os.Stat(path); os.IsNotExist(err) {
+	if !configFileExists(path) {
 		return nil
 	}
-	lockPath := path + ".lock"
-	fl := flock.New(lockPath)
-	ctx, cancel := context.WithTimeout(context.Background(), lockTimeout)
-	defer cancel()
-	locked, err := fl.TryLockContext(ctx, 50*time.Millisecond)
-	if err != nil {
-		return fmt.Errorf("acquire config lock: %w", err)
-	}
-	if !locked {
-		return fmt.Errorf("timed out waiting for config file lock: %s", lockPath)
-	}
-	defer fl.Unlock() //nolint:errcheck
-
-	var cfg Config
-	raw, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("read config for update: %w", err)
-	}
-	if err == nil {
-		if jerr := json.Unmarshal(raw, &cfg); jerr != nil {
-			return fmt.Errorf("parse config for update: %w", jerr)
+	_, err := updateConfigFile(path, func(cfg *Config) error {
+		if _, exists := cfg.Overrides[itemKey]; !exists {
+			return errConfigUnchanged
 		}
-	}
-	if _, exists := cfg.Overrides[itemKey]; !exists {
+		delete(cfg.Overrides, itemKey)
 		return nil
-	}
-	delete(cfg.Overrides, itemKey)
-
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, filepath.Base(path)+"-*.tmp")
-	if err != nil {
-		return fmt.Errorf("create temp config: %w", err)
-	}
-	tmpName := tmp.Name()
-	payload, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		tmp.Close()
-		os.Remove(tmpName)
-		return fmt.Errorf("encode config: %w", err)
-	}
-	payload = append(payload, '\n')
-	if _, werr := tmp.Write(payload); werr != nil {
-		tmp.Close()
-		os.Remove(tmpName)
-		return fmt.Errorf("write temp config: %w", werr)
-	}
-	if cerr := tmp.Close(); cerr != nil {
-		os.Remove(tmpName)
-		return fmt.Errorf("close temp config: %w", cerr)
-	}
-	if rerr := os.Rename(tmpName, path); rerr != nil {
-		os.Remove(tmpName)
-		return fmt.Errorf("atomic rename config: %w", rerr)
-	}
-	return nil
+	})
+	return err
 }
 
 // GetBool resolves the value for itemKey and interprets it as a boolean.
@@ -313,143 +260,22 @@ func (r *Resolver) GetBool(sessionKey, itemKey string) (bool, Scope, error) {
 	return rv.Value == "true", rv.Scope, nil
 }
 
-// setOverrideInFileRMW performs an flock-serialized read-modify-write on the
-// config file at path. The transform function receives the current string value
-// for itemKey (empty string when absent) and returns the new value to store.
-// This generalizes setOverrideInFile for use-cases such as integer increment
-// where the new value depends on the current value.
+// setOverrideInFileRMW sets overrides[key] to transform(current value) through
+// the shared locked writer, so the new value may depend on the current one
+// (for example an integer increment). current is "" when the key is absent.
 func setOverrideInFileRMW(path, itemKey string, transform func(current string) string) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("create config dir: %w", err)
-	}
-
-	lockPath := path + ".lock"
-	fl := flock.New(lockPath)
-	ctx, cancel := context.WithTimeout(context.Background(), lockTimeout)
-	defer cancel()
-
-	locked, err := fl.TryLockContext(ctx, 50*time.Millisecond)
-	if err != nil {
-		return fmt.Errorf("acquire config lock: %w", err)
-	}
-	if !locked {
-		return fmt.Errorf("timed out waiting for config file lock: %s", lockPath)
-	}
-	defer fl.Unlock() //nolint:errcheck
-
-	var cfg Config
-	raw, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("read config for update: %w", err)
-	}
-	if err == nil {
-		if jerr := json.Unmarshal(raw, &cfg); jerr != nil {
-			return fmt.Errorf("parse config for update: %w", jerr)
+	_, err := updateConfigFile(path, func(cfg *Config) error {
+		if cfg.Overrides == nil {
+			cfg.Overrides = map[string]string{}
 		}
-	}
-
-	if cfg.Overrides == nil {
-		cfg.Overrides = map[string]string{}
-	}
-	cfg.Overrides[itemKey] = transform(cfg.Overrides[itemKey])
-
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, filepath.Base(path)+"-*.tmp")
-	if err != nil {
-		return fmt.Errorf("create temp config: %w", err)
-	}
-	tmpName := tmp.Name()
-	payload, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		tmp.Close()
-		os.Remove(tmpName)
-		return fmt.Errorf("encode config: %w", err)
-	}
-	payload = append(payload, '\n')
-	if _, werr := tmp.Write(payload); werr != nil {
-		tmp.Close()
-		os.Remove(tmpName)
-		return fmt.Errorf("write temp config: %w", werr)
-	}
-	if cerr := tmp.Close(); cerr != nil {
-		os.Remove(tmpName)
-		return fmt.Errorf("close temp config: %w", cerr)
-	}
-	if rerr := os.Rename(tmpName, path); rerr != nil {
-		os.Remove(tmpName)
-		return fmt.Errorf("atomic rename config: %w", rerr)
-	}
-	return nil
+		cfg.Overrides[itemKey] = transform(cfg.Overrides[itemKey])
+		return nil
+	})
+	return err
 }
 
-// setOverrideInFile performs an flock-serialized read-modify-write on the
-// config file at path, setting overrides[key] = value. The file is written via
-// a temp file + atomic rename to prevent partial reads by concurrent processes.
+// setOverrideInFile sets overrides[key] = value through the shared locked
+// writer (see updateConfigFile).
 func setOverrideInFile(path, itemKey, value string) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("create config dir: %w", err)
-	}
-
-	// Lock file is a sibling .lock file so the lock file survives atomic renames
-	// of the config file itself.
-	lockPath := path + ".lock"
-	fl := flock.New(lockPath)
-	ctx, cancel := context.WithTimeout(context.Background(), lockTimeout)
-	defer cancel()
-
-	locked, err := fl.TryLockContext(ctx, 50*time.Millisecond)
-	if err != nil {
-		return fmt.Errorf("acquire config lock: %w", err)
-	}
-	if !locked {
-		return fmt.Errorf("timed out waiting for config file lock: %s", lockPath)
-	}
-	defer fl.Unlock() //nolint:errcheck
-
-	// Read the existing file or start from empty Config.
-	var cfg Config
-	raw, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("read config for update: %w", err)
-	}
-	if err == nil {
-		if jerr := json.Unmarshal(raw, &cfg); jerr != nil {
-			return fmt.Errorf("parse config for update: %w", jerr)
-		}
-	}
-
-	// Modify.
-	if cfg.Overrides == nil {
-		cfg.Overrides = map[string]string{}
-	}
-	cfg.Overrides[itemKey] = value
-
-	// Write to temp then rename.
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, filepath.Base(path)+"-*.tmp")
-	if err != nil {
-		return fmt.Errorf("create temp config: %w", err)
-	}
-	tmpName := tmp.Name()
-	payload, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		tmp.Close()
-		os.Remove(tmpName)
-		return fmt.Errorf("encode config: %w", err)
-	}
-	payload = append(payload, '\n')
-	if _, werr := tmp.Write(payload); werr != nil {
-		tmp.Close()
-		os.Remove(tmpName)
-		return fmt.Errorf("write temp config: %w", werr)
-	}
-	if cerr := tmp.Close(); cerr != nil {
-		os.Remove(tmpName)
-		return fmt.Errorf("close temp config: %w", cerr)
-	}
-	if rerr := os.Rename(tmpName, path); rerr != nil {
-		os.Remove(tmpName)
-		return fmt.Errorf("atomic rename config: %w", rerr)
-	}
-	return nil
+	return setOverrideInFileRMW(path, itemKey, func(string) string { return value })
 }

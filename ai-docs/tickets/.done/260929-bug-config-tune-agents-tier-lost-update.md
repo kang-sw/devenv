@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 32a3da0eb109ac80
 sage-review-completeness-reviewed: 32a3da0eb109ac80
+completed: 2026-09-30
 ---
 
 # config.tune agents.tier writes lose concurrent updates
@@ -149,3 +150,50 @@ Verification:
 - Resolver writes through the shared helper persist `schema_version: 1`, and
   `deleteOverrideInFile` on a missing file or key still creates no file.
 - Existing `wsconfig` and `mcp` tests pass.
+
+### Result (b66cb36cd) - 2026-09-30
+
+Landed `updateConfigFile(path, mutate func(*Config) error) (Config, error)` in
+`wsconfig/config.go`, the single writer for project and global config files. It
+holds the sibling `<path>.lock` flock (`lockTimeout`, 10s) across read, mutate,
+and write, stamps `schema_version`, and writes via `os.CreateTemp` + `os.Rename`.
+Agents.tier set/unset (both scopes) and `setOverrideInFile`,
+`setOverrideInFileRMW`, `deleteOverrideInFile` route through it; `save`,
+`saveGlobal`, and `saveConfigFile` are deleted. Review fixes landed in
+ff03cf651.
+
+Decisions:
+- The helper returns the committed `Config` (not only `error`) so the
+  `config.tune` response is the value committed under the lock; the no-change
+  signal is the `errConfigUnchanged` sentinel, which skips the write.
+- Missing-file no-ops (`deleteOverrideInFile`, agents.tier unset) check
+  `configFileExists` before the helper, so they create no directory or lock file.
+- The temp file keeps an existing file's mode and creates a new file 0644
+  (resolver-created files move from `CreateTemp`'s 0600 to 0644).
+- A corrupt config on an agents.tier write now errors as `parse config for
+  update` (the resolver wording); readers keep the scoped wording.
+
+Verification:
+- Pre-fix evidence: with the new tests applied to the pre-fix code,
+  `go test ./internal/wsconfig/ -run 'ConcurrentAgentsTier' -count=10` failed
+  all six set/unset/mixed subtests (project and global) in 10/10 runs. Failures
+  were lost leaves plus 57 torn-read `unexpected end of JSON input` parse errors
+  from the truncating write, which probably explains the reported response
+  anomalies. `TestResolverWritesPersistSchemaVersion` also failed pre-fix
+  (persisted 0).
+- Post-fix: `go test -race ./internal/wsconfig/` ok; `go test ./...` in
+  `agents-plugin-tool` ok (including `internal/mcp`, `cmd/ws-mcp`);
+  `TestUnsetAgentsTierForHarnessNoOpDoesNotSave` unchanged and passing.
+- New tests (`scope_test.go`): concurrent set/unset/mixed lost-update tests (3
+  rounds, start barrier); a response-is-committed-value permutation check;
+  `TestAgentsTierWriteReturnsPersistedConfig`;
+  `TestAgentsTierWriteWaitsForFileLockHolder` (a lock held through another
+  descriptor blocks the writer; catches an in-process-mutex swap);
+  `TestResolverWritesPersistSchemaVersion`; `TestConfigNoOpWritesTouchNothing`;
+  `TestConfigWritesKeepFileMode`.
+- Review: correctness and test partitions, two rounds, clean. The test reviewer
+  confirmed that each new check fails under its targeted mutation.
+
+Known limits: the lock-timeout path has no test seam (unchanged from the
+resolver path). With 50ms flock polling, the concurrency tests add about 15s to
+the `wsconfig` package run.
