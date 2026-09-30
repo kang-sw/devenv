@@ -290,3 +290,68 @@ mapping rule in the Claude `SpawnIdiom` with the lead-side overlay, per
 effective. Exploration spawns are untouched.
 
 Verification: the Verification and Live probe decisions in `## Decisions`.
+
+### Result (b540629dd) - 2026-09-30
+
+Landed in 47df5b3d7, f6c197d4e, 5b14e6993, b540629dd.
+
+- `internal/claudeagents` owns `Levels` and `Render` over the lead-authored
+  template (wording unchanged). An env-gated regen
+  (`WS_REGEN_CLAUDE_AGENTS=1 go test ./internal/claudeagents -count=1 -run
+  TestRegenerateClaudeAgents`) writes `claude-agents/effort-<level>.md` into
+  both packages. A drift test fails on byte differences, missing files, or
+  extra files, and pins the frontmatter keys to `name`/`description`/`effort`
+  matching each level. Both `.claude-plugin/plugin.json` files list the five
+  agents by hand, and a package test in each package asserts that the list
+  matches the files. Both `claude-agents` trees are added to the
+  downstream-neutral text-tree list. `wsflow-mirroring.md` gains the regen
+  step and the env var.
+- The Claude `SpawnIdiom` is computed in `terminologyForHarness` from
+  `RuntimeNamespace()` and `claudeagents.Levels`, and renders as
+  `Agent({subagent_type: "<ns>:effort-<resolved effort>", model: <resolved
+  model>, ...}) (subagent_type "general-purpose" when the resolved effort is
+  not exactly low, medium, high, xhigh, or max)`. New overlay
+  `native-spawn-binding.claude.md` (heading `## Claude delegate spawn`).
+  `lead-workflow-manual` declares `SpawnIdiom`. The rsrc manifest, the wsflow
+  mirror, and the pi mirror are regenerated or resynced.
+- Tests:
+  - A hardcoded `SpawnIdiom` pin at all five sites for `ws` and `wsflow`,
+    plus a completeness check that the site list equals the real
+    `{{.SpawnIdiom}}` sites.
+  - A pin of the overlay render for both namespaces, which also checks that
+    `ExploreAgent` is unchanged.
+  - Codex, Pi, and neutral renders are asserted free of effort-agent text.
+  - The 578bce4dd negative Codex assertion is untouched.
+
+Verification:
+- `go test ./... -count=1` (agents-plugin-tool): all packages ok.
+- `python3 -m unittest discover agents-plugin/tests`: 76 OK.
+- `python3 -m unittest discover agents-plugin-wsflow/tests`: 14 OK.
+- `claude plugin validate`: passed for both `agents-plugin` and
+  `agents-plugin-wsflow`.
+- Live probe (Claude Code 2.1.284, `claude -p --model sonnet --plugin-dir
+  agents-plugin` in a scratch git project whose CLAUDE.md held a marker):
+  - `ws:effort-high` and `general-purpose` with the same model and prompt
+    reported the same cwd, platform (Linux WSL2), date (2026-09-30), and
+    visible CLAUDE.md marker. They also reported the same tool list, and in
+    both lists the Agent tool is present.
+  - The second spawn told `ws:effort-high` to read a scratch instructions
+    file as its system prompt. It began its report with the file's required
+    marker line and created the scratch `.md` file the file demanded, so the
+    file won over the body's defaults.
+  - No gap found.
+
+Decisions:
+- The claude table row omits `SpawnIdiom`, and `terminologyForHarness`
+  returns a fresh copy with the computed value. `SpawnIdiom` is reserved
+  explicitly.
+- The fallback is a parenthesized clause so mid-sentence sites keep reading
+  ("... by <idiom> with the rendered path").
+- The idiom's level list is built from `claudeagents.Levels`, so the rule
+  cannot drift from the shipped agents.
+- The pi rsrc mirror (`agents-plugin-pi/rsrc`, guarded by
+  `TestPiMirrorUpToDate`) also needed a resync. The mirroring checklist does
+  not list it, and the copied overlay is inert on Pi.
+- The regen step sits beside the skills-manifest gate in the mirroring
+  manual, not inside the two-step rsrc checklist, because its trigger is a
+  template edit.
