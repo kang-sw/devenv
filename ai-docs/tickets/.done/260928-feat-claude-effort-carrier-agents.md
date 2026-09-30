@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: e048a6afe7ee614b
 sage-review-design-reviewed: e048a6afe7ee614b
+completed: 2026-09-30
 ---
 
 # Claude effort-carrier subagent types for tier reasoning effort
