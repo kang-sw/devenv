@@ -10,6 +10,10 @@
 # Windows leg splits it across parallel jobs; `rest` plus every `mcp I N` for
 # I in 0..N-1 covers the same tests as `all`. Extra arguments after the shard
 # selector are passed to `go test` (for example -list to preview a shard).
+#
+# -count=1 bypasses cached test results: CI restores GOCACHE, and a cached pass
+# would skip tests whose inputs go test cannot see (git subprocesses, the
+# runner's tools). The restored compile cache still applies.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -19,11 +23,11 @@ shift
 
 case "$mode" in
   all)
-    exec go test -timeout 30m "$@" ./...
+    exec go test -count=1 -timeout 30m "$@" ./...
     ;;
   rest)
     mapfile -t pkgs < <(go list ./... | grep -v '/internal/mcp$')
-    exec go test -timeout 30m "$@" "${pkgs[@]}"
+    exec go test -count=1 -timeout 30m "$@" "${pkgs[@]}"
     ;;
   mcp)
     index="${1:?mcp shard needs an index}"
@@ -41,7 +45,7 @@ case "$mode" in
       exit 1
     fi
     pattern="^($(IFS='|'; echo "${picked[*]}"))\$"
-    exec go test -timeout 30m -run "$pattern" "$@" ./internal/mcp
+    exec go test -count=1 -timeout 30m -run "$pattern" "$@" ./internal/mcp
     ;;
   *)
     echo "unknown shard mode: $mode" >&2
