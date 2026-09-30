@@ -521,6 +521,9 @@
           "branch": "impl/develop/skirt-sworn-stack"
         }
       }
+    },
+    "260930-bug-lead-run-parallel-merge-before-release-orphans-branch": {
+      "registered_at": "2026-09-30T01:10:57Z"
     }
   }
 }
