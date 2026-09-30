@@ -1,12 +1,12 @@
 name: ws-mcp CI
 
-# The release workflow runs the Windows test suite only on a version tag, so
-# every Windows-only test failure first shows up as a red release run (and its
-# notification email) after the fact. This workflow runs the same `go test ./...`
-# on both Linux and Windows for every develop push and pull request that touches
-# the Go tree, so a Windows-specific failure is caught at merge time instead of
-# at release. It publishes nothing; the tagged release workflow remains the sole
-# path that builds and uploads release assets.
+# Runs `go test ./...` on both Linux and Windows for every develop push and pull
+# request that touches the Go tree, so a Windows-specific failure is caught at
+# merge time instead of at release. It is also the release's only test run: the
+# tagged release workflow does not re-run the suite and instead refuses to
+# publish unless this workflow succeeded on the tagged commit. It publishes
+# nothing; the release workflow remains the sole path that builds and uploads
+# release assets.
 on:
   push:
     branches:
@@ -49,6 +49,7 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: agents-plugin-tool/go.mod
+          cache-dependency-path: agents-plugin-tool/go.sum
 
       - name: Run tests
         # internal/mcp outgrew go test's default 10 min per-package timeout on

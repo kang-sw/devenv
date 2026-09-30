@@ -23,13 +23,15 @@ on:
 
 permissions:
   contents: write
+  # The tag CI gate reads ws-mcp CI runs for the tagged commit.
+  actions: read
 
 jobs:
   build:
     name: Build ws-mcp assets
     runs-on: ubuntu-latest
-    # Normal duration ~3 min. Without a cap, a hung step burns runner time while
-    # the run still reads as in-progress (see windows-smoke below).
+    # Normal duration ~2 min. Without a cap, a hung step burns runner time while
+    # the run still reads as in-progress.
     timeout-minutes: 20
     defaults:
       run:
@@ -42,9 +44,22 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: agents-plugin-tool/go.mod
+          cache-dependency-path: agents-plugin-tool/go.sum
 
-      - name: Run tests
-        run: go test ./...
+      # The release does not re-run `go test`: ws-mcp CI already ran the full
+      # ubuntu + windows suite on this exact commit (the ship flow waits for it
+      # before tagging), and the Windows leg alone costs ~30 min. A tag whose
+      # commit has no green ws-mcp CI run publishes nothing.
+      - name: Require green ws-mcp CI on the tagged commit
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          green=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ws-mcp-ci.yml/runs?head_sha=${GITHUB_SHA}&status=success" --jq '.total_count')
+          if [ "${green:-0}" -lt 1 ]; then
+            echo "::error::No successful ws-mcp CI run for ${GITHUB_SHA}; run ws-mcp CI on this commit (gh workflow run ws-mcp-ci.yml --ref develop) before tagging."
+            exit 1
+          fi
 
       - name: Validate plugin release contract
         run: |
@@ -106,11 +121,10 @@ jobs:
   windows-smoke:
     name: Windows ws-mcp smoke
     runs-on: windows-latest
-    # Normal duration ~20-25 min (v0.46.17: 20 min, with internal/mcp alone at
-    # 432 s). On the v0.37.2 run (30427222116) `go test ./...` hung here for
-    # 46 min and died without uploading logs; a re-run of the same commit
-    # passed in 6m21s. A cap turns that flake into a fast, legible failure.
-    timeout-minutes: 40
+    # Builds and smoke-runs the native Windows executable only; the Windows
+    # `go test` suite runs in ws-mcp CI (see the build job's CI gate). Normal
+    # duration a few minutes; the cap turns a hang into a fast, legible failure.
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: agents-plugin-tool
@@ -122,12 +136,7 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: agents-plugin-tool/go.mod
-
-      - name: Run Go tests (Windows)
-        # internal/mcp runs ~12x slower here than on ubuntu (git-process heavy:
-        # 432 s vs 35 s at v0.46.17), and the ticket-index tests pushed it past
-        # the default 10 min per-package timeout on v0.46.18 (run 36072178336).
-        run: go test -timeout 30m ./...
+          cache-dependency-path: agents-plugin-tool/go.sum
 
       - name: Build Windows executable
         run: |

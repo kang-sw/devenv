@@ -93,9 +93,11 @@ freshly fetched state.
 ## Build
 
 - No local build. The tagged push drives `ws-mcp release` on GitHub Actions,
-  which runs tests, validates the plugin release contract, builds release
-  assets (`agents-plugin-tool/scripts/build-release-assets.sh`), and runs the
-  Windows smoke.
+  which requires a green `ws-mcp CI` run on the tagged commit (it does not
+  re-run `go test`; Publish's CI gate is the release's only test run),
+  validates the plugin release contract, builds release assets
+  (`agents-plugin-tool/scripts/build-release-assets.sh`), and runs the Windows
+  executable smoke.
 
 ## Tag
 
