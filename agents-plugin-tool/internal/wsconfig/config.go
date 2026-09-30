@@ -775,7 +775,7 @@ func updateConfigFile(path string, mutate func(*Config) error) (Config, error) {
 		os.Remove(tmpName)
 		return Config{}, fmt.Errorf("close temp config: %w", err)
 	}
-	if err := os.Rename(tmpName, path); err != nil {
+	if err := replaceConfigFile(tmpName, path); err != nil {
 		os.Remove(tmpName)
 		return Config{}, fmt.Errorf("atomic rename config: %w", err)
 	}
