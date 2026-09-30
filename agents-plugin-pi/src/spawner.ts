@@ -930,9 +930,9 @@ export function truncatePromptForStorage(prompt: string, capBytes: number = PROM
  *   (only the uncalled `questionReportOutcome` does); the family and its
  *   hold handling stay registered.
  * - `ws-agent-approval` — an `execute-worker` is blocked on `ws-approve`.
- * - `ws-agent-advisory` — the adapter's own statement about a child, including
- *   this module's question branch registering a fork-raised thread
- *   (`advisory: "fork-question-thread"`, `followUp`).
+ * - `ws-agent-advisory` — the adapter's own statement about a child. The
+ *   `fork-question-thread` advisory (`followUp`) is dormant: only the uncalled
+ *   `questionReportOutcome` emits it.
  * - `ws-agent-orphaned` — children that outlived their lead session and are
  *   revivable with `ws-agent-send` (shutdown sidecar, `agent-sidecar.ts`).
  */
@@ -2957,7 +2957,7 @@ export function attachEventListener(
     }
     if (e.type === "tool_execution_start" && (e.toolName === GATED_EXEC_TOOL_NAME || e.toolName === REPORT_TO_LEAD_TOOL_NAME)) {
       // 260905 (live-agent widget ticket): a gated command just went pending
-      // approval, or a report (progress/question/final) was just observed —
+      // approval, or a report (progress or finding) was just observed —
       // both are widget-relevant transitions per the ticket's own list.
       triggerAgentWidgetRefresh();
     }
@@ -3284,7 +3284,7 @@ export function spawnAdmission(ctx: RpcSpawnCtx, writeScopes?: readonly WriteSco
   return resolveSpawnAdmission(ctx, writeScopes).policy;
 }
 
-const WORKER_LIFECYCLE_GUIDE = `\n\n## Persistent delegation\nChild results return to this session, not directly to your caller. End your turn while children work; the adapter keeps the subtree outstanding and wakes you on their settled output. Continue the same child with ws-agent-send when its output is insufficient. After every descendant has settled and you have synthesized their results, end with the final-output shape required by your playbook in your ordinary assistant answer. Settlement delivers that answer; ws-report-to-lead is only for progress before settlement. Do not stop mid-run to ask a question: decide, proceed, and record the assumption among your decisions, or, when you genuinely cannot proceed, settle with the blocker stated so your caller can resume you.\n\n## Code-review artifacts\nWhen your playbook tells you to spawn a code reviewer with a generated findings path, pass that exact absolute path as the sole \`write_scopes\` file grant. Reviewer admission rejects omission, trees, globs, and multiple paths so the required report cannot silently disappear.\n`;
+export const WORKER_LIFECYCLE_GUIDE = `\n\n## Persistent delegation\nChild results return to this session, not directly to your caller. End your turn while children work; the adapter keeps the subtree outstanding and wakes you on their settled output. Continue the same child with ws-agent-send when its output is insufficient. After every descendant has settled and you have synthesized their results, end with the final-output shape required by your playbook in your ordinary assistant answer. Settlement delivers that answer; ws-report-to-lead is only for progress before settlement. Do not stop mid-run to ask a question: decide, proceed, and record the assumption among your decisions, or, when you genuinely cannot proceed, settle with the blocker stated so your caller can resume you.\n\n## Code-review artifacts\nWhen your playbook tells you to spawn a code reviewer with a generated findings path, pass that exact absolute path as the sole \`write_scopes\` file grant. Reviewer admission rejects omission, trees, globs, and multiple paths so the required report cannot silently disappear.\n`;
 
 export async function spawnAgent(
   registry: RpcAgentRegistry,

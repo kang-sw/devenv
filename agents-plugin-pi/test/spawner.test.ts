@@ -130,6 +130,7 @@ import {
   type RpcAgentRegistry,
   type TerminalDelivery,
   type ToolGroup,
+  WORKER_LIFECYCLE_GUIDE,
 } from "../src/spawner.ts";
 import { WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV, type SpawnRole } from "../src/process-role.ts";
 import { classifyRegistryRowState } from "../src/agent-widget.ts";
@@ -1469,6 +1470,15 @@ describe("applyRpcEvent", () => {
     assert.equal(record.lastOutputAt, 1_100);
     assert.equal(refreshes, 0, "streaming writes the high-water field only; the periodic gutter clock renders it");
     assert.equal(uplink.sent.length, sendsBefore, "token deltas send no subtree snapshot upstream");
+  });
+});
+
+describe("WORKER_LIFECYCLE_GUIDE: no mid-run questions", () => {
+  test("limits ws-report-to-lead to progress and directs decide-or-settle instead of asking", () => {
+    assert.match(WORKER_LIFECYCLE_GUIDE, /ws-report-to-lead is only for progress before settlement\./);
+    assert.ok(!WORKER_LIFECYCLE_GUIDE.includes("a question before settlement"), "the guide no longer offers the report tool for questions");
+    assert.match(WORKER_LIFECYCLE_GUIDE, /Do not stop mid-run to ask a question: decide, proceed, and record the assumption/);
+    assert.match(WORKER_LIFECYCLE_GUIDE, /settle with the blocker stated/);
   });
 });
 
