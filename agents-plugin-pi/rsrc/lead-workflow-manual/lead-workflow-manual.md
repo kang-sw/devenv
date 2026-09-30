@@ -5,6 +5,7 @@ includes:
 variables:
   - WorkflowLang
   - ExploreAgent
+  - SpawnIdiom
 ---
 # Workflow Manual
 

@@ -7,10 +7,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
 
+	"github.com/kang-sw/devenv/internal/claudeagents"
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsrsrc"
 )
@@ -2094,11 +2096,12 @@ func TestPlaybookPrintGoldenExploreJunkHarness(t *testing.T) {
 
 func TestTerminologyTableCoverage(t *testing.T) {
 	for _, harness := range []string{"claude", "codex", "pi", ""} {
-		tbl, ok := playbookTerminologyTable[harness]
-		if !ok {
+		if _, ok := playbookTerminologyTable[harness]; !ok {
 			t.Errorf("terminology table missing harness entry %q", harness)
 			continue
 		}
+		// The effective table: claude's SpawnIdiom is added at resolve time.
+		tbl := terminologyForHarness(harness)
 		for _, varName := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom"} {
 			v, ok := tbl[varName]
 			if !ok || v == "" {
@@ -3051,6 +3054,145 @@ title: Risk fixture
 	} {
 		if got := projection.Facts[fact]; got != want {
 			t.Errorf("projected %s = %q, want %q", fact, got, want)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Claude effort-carrier SpawnIdiom
+// ---------------------------------------------------------------------------
+
+// spawnIdiomSites are the real playbooks that substitute {{.SpawnIdiom}}.
+var spawnIdiomSites = []string{"lead-run", "ticket-worker", "ticket-worker-elevated", "explore", "delegate-sample"}
+
+// wantClaudeSpawnIdiom is the hardcoded Claude SpawnIdiom per namespace, so a
+// wrong claudeSpawnIdiom cannot agree with itself in a derived assertion.
+func wantClaudeSpawnIdiom(namespace string) string {
+	return `Agent({subagent_type: "` + namespace + `:effort-<resolved effort>", model: <resolved model>, ...})` +
+		` (subagent_type "general-purpose" when the resolved effort is not exactly low, medium, high, xhigh, or max)`
+}
+
+// TestClaudeSpawnIdiomRendersAtEverySite pins the Claude SpawnIdiom text as
+// rendered at each {{.SpawnIdiom}} site for both plugin namespaces: the value
+// carries the effort-agent mapping rule and its general-purpose fallback, and
+// the namespace comes from the runtime, never a hard-coded ws: prefix.
+func TestClaudeSpawnIdiomRendersAtEverySite(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	for _, namespace := range []string{"ws", "wsflow"} {
+		t.Run(namespace, func(t *testing.T) {
+			t.Setenv(envNamespace, namespace)
+			want := wantClaudeSpawnIdiom(namespace)
+			if got := terminologyForHarness("claude")["SpawnIdiom"]; got != want {
+				t.Fatalf("claude SpawnIdiom = %q, want %q", got, want)
+			}
+			s := newTestServerWithHarness(t, "claude")
+			for _, name := range spawnIdiomSites {
+				body, _, err := printPlaybook(s, rsrcRoot, name, nil, isolatedPlaybookConfigOptions(t), "", nil)
+				if err != nil {
+					t.Fatalf("printPlaybook(%s): %v", name, err)
+				}
+				if !strings.Contains(body, want) {
+					t.Errorf("%s: Claude render missing SpawnIdiom %q:\n%s", name, want, body)
+				}
+				if strings.Contains(body, "{{.") {
+					t.Errorf("%s: unsubstituted placeholder remains", name)
+				}
+			}
+		})
+	}
+}
+
+// TestSpawnIdiomSitesListIsComplete keeps spawnIdiomSites equal to the real
+// playbook directories that use {{.SpawnIdiom}}, so a new site cannot go
+// unpinned. lead-workflow-manual uses it only through its Claude overlay,
+// which TestLeadWorkflowManualClaudeSpawnBindingOverlay pins.
+func TestSpawnIdiomSitesListIsComplete(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	found := map[string]bool{}
+	err := filepath.WalkDir(rsrcRoot, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".md") {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(data), "{{.SpawnIdiom}}") {
+			found[filepath.Base(filepath.Dir(path))] = true
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk rsrc: %v", err)
+	}
+	delete(found, "lead-workflow-manual")
+	want := map[string]bool{}
+	for _, name := range spawnIdiomSites {
+		want[name] = true
+	}
+	if !reflect.DeepEqual(found, want) {
+		t.Errorf("{{.SpawnIdiom}} sites = %v, spawnIdiomSites = %v", found, want)
+	}
+}
+
+// TestClaudeSpawnIdiomLevelsMatchGeneratedAgents keeps the level list the rule
+// names equal to the agents the generator ships.
+func TestClaudeSpawnIdiomLevelsMatchGeneratedAgents(t *testing.T) {
+	want := []string{"low", "medium", "high", "xhigh", "max"}
+	if strings.Join(claudeagents.Levels, ",") != strings.Join(want, ",") {
+		t.Fatalf("claudeagents.Levels = %v, want %v (update the pinned SpawnIdiom with it)", claudeagents.Levels, want)
+	}
+}
+
+// TestLeadWorkflowManualClaudeSpawnBindingOverlay pins the lead-side Claude
+// overlay for both namespaces: it applies render bindings through the
+// SpawnIdiom rule, keeps ExploreAgent on the built-in Explore agent, and uses
+// its own heading rather than Codex wording.
+func TestLeadWorkflowManualClaudeSpawnBindingOverlay(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	for _, namespace := range []string{"ws", "wsflow"} {
+		t.Run(namespace, func(t *testing.T) {
+			t.Setenv(envNamespace, namespace)
+			s := newTestServerWithHarness(t, "claude")
+			body, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", nil)
+			if err != nil {
+				t.Fatalf("printPlaybook: %v", err)
+			}
+			want := "## Claude delegate spawn\n\nSpawn a rendered delegate with " + wantClaudeSpawnIdiom(namespace) +
+				", taking the resolved model and\neffort from the render's returned `recommended-model` and\n`recommended-reasoning-effort`."
+			if !strings.Contains(body, want) {
+				t.Errorf("Claude workflow manual missing overlay %q:\n%s", want, body)
+			}
+			if got := strings.Count(body, "## Claude delegate spawn"); got != 1 {
+				t.Errorf("Claude overlay rendered %d times, want 1", got)
+			}
+			if terminologyForHarness("claude")["ExploreAgent"] != "the Explore agent" {
+				t.Errorf("claude ExploreAgent changed: %q", terminologyForHarness("claude")["ExploreAgent"])
+			}
+			if !strings.Contains(body, "Use the Explore agent when bounded evidence gathering") {
+				t.Errorf("Claude workflow manual lost the built-in Explore agent wording:\n%s", body)
+			}
+		})
+	}
+}
+
+// TestNonClaudeRendersOmitEffortAgents asserts the effort agents are a
+// Claude-only surface: Codex, Pi, and host-neutral renders never mention them.
+func TestNonClaudeRendersOmitEffortAgents(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	names := append([]string{"lead-workflow-manual"}, spawnIdiomSites...)
+	for _, harness := range []string{"codex", "pi", ""} {
+		s := newTestServerWithHarness(t, harness)
+		for _, name := range names {
+			body, _, err := printPlaybook(s, rsrcRoot, name, nil, isolatedPlaybookConfigOptions(t), "", nil)
+			if err != nil {
+				t.Fatalf("printPlaybook(%s, %q): %v", name, harness, err)
+			}
+			for _, forbidden := range []string{":effort-", "effort-<resolved effort>", "## Claude delegate spawn"} {
+				if strings.Contains(body, forbidden) {
+					t.Errorf("harness %q %s render mentions Claude effort agents (%q)", harness, name, forbidden)
+				}
+			}
 		}
 	}
 }
