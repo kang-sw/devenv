@@ -499,6 +499,9 @@
     "260930-bug-lead-run-parallel-merge-before-release-orphans-branch": {
       "registered_at": "2026-09-30T01:10:57Z"
     },
+    "260930-bug-wsconfig-writer-replaces-symlinked-config": {
+      "registered_at": "2026-09-30T02:49:06Z"
+    },
     "260930-feat-git-exec-audit-log": {
       "registered_at": "2026-09-30T02:03:00Z"
     }
