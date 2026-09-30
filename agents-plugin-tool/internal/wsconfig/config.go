@@ -759,8 +759,13 @@ func updateConfigFile(path string, mutate func(*Config) error) (Config, error) {
 		os.Remove(tmpName)
 		return Config{}, fmt.Errorf(format, err)
 	}
-	// CreateTemp opens 0600; keep the 0644 the config file has always had.
-	if err := tmp.Chmod(0o644); err != nil {
+	// CreateTemp opens 0600: keep an existing file's mode, and give a new file
+	// the 0644 the config file has always been created with.
+	mode := os.FileMode(0o644)
+	if info, err := os.Stat(path); err == nil {
+		mode = info.Mode().Perm()
+	}
+	if err := tmp.Chmod(mode); err != nil {
 		return fail("chmod temp config: %w", err)
 	}
 	if _, err := tmp.Write(payload); err != nil {

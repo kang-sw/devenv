@@ -5,10 +5,14 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
+	"sort"
 	"strconv"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/gofrs/flock"
 )
 
 // --- test doubles ---
@@ -873,6 +877,17 @@ func (l tierLeaf) model() string { return "m-" + l.tier + "-" + l.harness }
 // locked one never does. A start barrier maximizes overlap within a round.
 const concurrentRounds = 3
 
+// countWrittenLeaves counts the test-written leaves present in cfg.
+func countWrittenLeaves(cfg Config, leaves []tierLeaf) int {
+	n := 0
+	for _, l := range leaves {
+		if cfg.Agents.ModelAliases[l.tier][l.harness].Model == l.model() {
+			n++
+		}
+	}
+	return n
+}
+
 func runBarrier(n int, fn func(i int)) {
 	start := make(chan struct{})
 	var wg sync.WaitGroup
@@ -894,11 +909,21 @@ func TestConcurrentAgentsTierSetNoLostWrites(t *testing.T) {
 		t.Run(sc.name, func(t *testing.T) {
 			for round := 0; round < concurrentRounds; round++ {
 				_, opts := newTestResolver(t, nil, nil)
+				// Each response is the config committed under the lock, so on a
+				// fresh file the i-th serialized writer sees exactly i written
+				// leaves, its own among them: the counts are a permutation of 1..N.
+				counts := make([]int, len(leaves))
 				runBarrier(len(leaves), func(i int) {
 					l := leaves[i]
-					if _, err := sc.set(opts, l.tier, l.model(), l.harness); err != nil {
+					got, err := sc.set(opts, l.tier, l.model(), l.harness)
+					if err != nil {
 						t.Errorf("round %d set %s/%s: %v", round, l.tier, l.harness, err)
+						return
 					}
+					if got.Agents.ModelAliases[l.tier][l.harness].Model != l.model() {
+						t.Errorf("round %d set %s/%s response omits its own leaf", round, l.tier, l.harness)
+					}
+					counts[i] = countWrittenLeaves(got, leaves)
 				})
 				stored, err := sc.stored(opts)
 				if err != nil {
@@ -907,6 +932,12 @@ func TestConcurrentAgentsTierSetNoLostWrites(t *testing.T) {
 				for _, l := range leaves {
 					if got := stored.Agents.ModelAliases[l.tier][l.harness].Model; got != l.model() {
 						t.Fatalf("round %d: leaf %s/%s = %q, want %q (lost write)", round, l.tier, l.harness, got, l.model())
+					}
+				}
+				sort.Ints(counts)
+				for i, c := range counts {
+					if c != i+1 {
+						t.Fatalf("round %d: response leaf counts = %v, want 1..%d (response not the committed value)", round, counts, len(leaves))
 					}
 				}
 			}
@@ -1139,4 +1170,86 @@ func TestConfigNoOpWritesTouchNothing(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestAgentsTierWriteWaitsForFileLockHolder pins the cross-process contract:
+// the writer waits on the sibling <path>.lock flock, which another ws-mcp
+// process holds through its own file descriptor, not on an in-process mutex.
+func TestAgentsTierWriteWaitsForFileLockHolder(t *testing.T) {
+	for _, sc := range tierWriteScopes() {
+		t.Run(sc.name, func(t *testing.T) {
+			_, opts := newTestResolver(t, nil, nil)
+			path, err := sc.path(opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			holder := flock.New(path + ".lock")
+			if err := holder.Lock(); err != nil {
+				t.Fatalf("hold lock: %v", err)
+			}
+			done := make(chan error, 1)
+			go func() {
+				_, err := sc.set(opts, "small", "held", "pi")
+				done <- err
+			}()
+			select {
+			case err := <-done:
+				holder.Unlock() //nolint:errcheck
+				t.Fatalf("write finished while another descriptor held the lock (err %v)", err)
+			case <-time.After(200 * time.Millisecond):
+			}
+			if err := holder.Unlock(); err != nil {
+				t.Fatalf("release lock: %v", err)
+			}
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatalf("write after release: %v", err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("write did not finish after the lock was released")
+			}
+			stored, err := sc.stored(opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := stored.Agents.ModelAliases["small"]["pi"].Model; got != "held" {
+				t.Fatalf("leaf after release = %q, want held", got)
+			}
+		})
+	}
+}
+
+// TestConfigWritesKeepFileMode verifies the temp-file writer creates a new
+// config 0644 (not CreateTemp's 0600) and keeps an existing file's mode.
+func TestConfigWritesKeepFileMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission bits")
+	}
+	r, opts := newTestResolver(t, nil, nil)
+	if err := r.Set("item.project", "pv", SetOptions{ExplicitScope: ScopeProject}); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	path := mustProjectPath(t, opts)
+	assertMode := func(want os.FileMode) {
+		t.Helper()
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := info.Mode().Perm(); got != want {
+			t.Fatalf("config mode = %v, want %v", got, want)
+		}
+	}
+	assertMode(0o644)
+	if err := os.Chmod(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SetAgentsTierForHarness(opts, "small", "", "m", "pi"); err != nil {
+		t.Fatalf("agents.tier set: %v", err)
+	}
+	assertMode(0o600)
 }
