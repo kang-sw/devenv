@@ -56,8 +56,11 @@ jobs:
         # Real-time scanning inspects every build-cache object and every git
         # process the tests spawn. Best effort: a runner image that refuses
         # the change still runs the tests, only slower.
+        # Runs before checkout, so it cannot use the default working
+        # directory, which does not exist yet.
         if: runner.os == 'Windows'
         shell: pwsh
+        working-directory: ${{ github.workspace }}
         continue-on-error: true
         run: Set-MpPreference -DisableRealtimeMonitoring $true
 
