@@ -25,7 +25,7 @@ const (
 )
 
 // lockTimeout bounds how long a note-store RMW waits to acquire its flock
-// before giving up, mirroring wsconfig/resolver.go's setOverrideInFileRMW.
+// before giving up, mirroring wsconfig's updateConfigFile.
 const lockTimeout = 2 * time.Second
 
 // MachinePath resolves the machine-layer note store path: the sibling
@@ -150,7 +150,7 @@ func SetVisible(path string, keys []string, visible bool) error {
 }
 
 // rmw performs the shared flock + temp-file + atomic-rename read-modify-write
-// pattern, copied from wsconfig/resolver.go's setOverrideInFileRMW. Each note
+// pattern, copied from wsconfig's updateConfigFile (config.go). Each note
 // store gets its own sibling ".lock" file — it is never shared with the
 // wsconfig config lock, even though both live under the same directory for
 // the machine layer.

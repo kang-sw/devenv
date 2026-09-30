@@ -14,8 +14,8 @@ import (
 // "schema_version": 1 on disk, matching the legacy Load path's in-memory
 // stamp (effectiveAgentConfig), rather than the zero value carried by the
 // pre-save `stored` layer (Config{} from a missing project/global file).
-// Covers both save chokepoints (project via save, global via saveGlobal)
-// since both route through the shared saveConfigFile.
+// Covers both scopes (project and global), since both route through the
+// shared updateConfigFile writer.
 func TestSaveStampsSchemaVersionOnFirstWrite(t *testing.T) {
 	opts := Options{
 		CacheHome:  filepath.Join(t.TempDir(), "cache"),
@@ -1023,12 +1023,19 @@ func TestUnsetAgentsTierForHarnessCleansEmptyTierMap(t *testing.T) {
 func TestUnsetAgentsTierForHarnessPreservesLegacyTierFallback(t *testing.T) {
 	opts := Options{CacheHome: filepath.Join(t.TempDir(), "cache")}
 	legacy := AgentTier{Backend: "claude", Model: "legacy-large", Effort: "low"}
-	if err := save(opts, Config{Agents: AgentsConfig{
-		Tiers: map[string]AgentTier{"large": legacy},
-		ModelAliases: map[string]map[string]AgentTier{
-			"large": {"pi": {Backend: "pi", Model: "explicit-pi"}},
-		},
-	}}); err != nil {
+	projectPath, err := Path(opts)
+	if err != nil {
+		t.Fatalf("Path: %v", err)
+	}
+	if _, err := updateConfigFile(projectPath, func(cfg *Config) error {
+		*cfg = Config{Agents: AgentsConfig{
+			Tiers: map[string]AgentTier{"large": legacy},
+			ModelAliases: map[string]map[string]AgentTier{
+				"large": {"pi": {Backend: "pi", Model: "explicit-pi"}},
+			},
+		}}
+		return nil
+	}); err != nil {
 		t.Fatalf("save legacy config: %v", err)
 	}
 

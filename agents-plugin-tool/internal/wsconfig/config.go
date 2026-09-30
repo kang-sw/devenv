@@ -1,12 +1,16 @@
 package wsconfig
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/gofrs/flock"
 	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
@@ -290,31 +294,30 @@ func unsetAgentsTierForHarness(opts Options, global bool, tier, harness string) 
 		return Config{}, false, err
 	}
 
-	var stored Config
-	if global {
-		stored, err = loadGlobalConfig(opts)
-	} else {
-		stored, err = loadProjectConfig(opts)
-	}
+	path, err := agentsConfigPath(opts, global)
 	if err != nil {
 		return Config{}, false, err
 	}
-	normalizeLegacyTierKeys(stored.Agents.Tiers, stored.Agents.ModelAliases)
-	byHarness := stored.Agents.ModelAliases[tier]
-	_, removed := byHarness[key]
-	if removed {
+	// An absent file has no leaf to remove; return before locking so the no-op
+	// creates no directory or lock file.
+	if !configFileExists(path) {
+		return presentationAgentConfig(effectiveAgentConfig(Config{})), false, nil
+	}
+	removed := false
+	stored, err := updateConfigFile(path, func(cfg *Config) error {
+		normalizeLegacyTierKeys(cfg.Agents.Tiers, cfg.Agents.ModelAliases)
+		byHarness := cfg.Agents.ModelAliases[tier]
+		if _, removed = byHarness[key]; !removed {
+			return errConfigUnchanged
+		}
 		delete(byHarness, key)
 		if len(byHarness) == 0 {
-			delete(stored.Agents.ModelAliases, tier)
+			delete(cfg.Agents.ModelAliases, tier)
 		}
-		if global {
-			err = saveGlobal(opts, stored)
-		} else {
-			err = save(opts, stored)
-		}
-		if err != nil {
-			return Config{}, false, err
-		}
+		return nil
+	})
+	if err != nil {
+		return Config{}, false, err
 	}
 	return presentationAgentConfig(effectiveAgentConfig(stored)), removed, nil
 }
@@ -356,59 +359,53 @@ func setAgentsTierForHarness(opts Options, global bool, tier, backend, model, ha
 		backend = InferBackend(model)
 	}
 
-	var stored Config
-	if global {
-		stored, err = loadGlobalConfig(opts)
-	} else {
-		stored, err = loadProjectConfig(opts)
-	}
-	if err != nil {
-		return Config{}, err
-	}
-	normalizeLegacyTierKeys(stored.Agents.Tiers, stored.Agents.ModelAliases)
-	effective := effectiveAgentConfig(stored)
-	if stored.Agents.Tiers == nil {
-		stored.Agents.Tiers = map[string]AgentTier{}
-	}
-	if stored.Agents.ModelAliases == nil {
-		stored.Agents.ModelAliases = map[string]map[string]AgentTier{}
-	}
-	if stored.Agents.ModelAliases[tier] == nil {
-		stored.Agents.ModelAliases[tier] = map[string]AgentTier{}
-	}
 	key, err := aliasTargetKey(harness)
 	if err != nil {
 		return Config{}, err
 	}
-	existing := effective.Agents.ModelAliases[tier][key]
-	if fallback, ok := effective.Agents.Tiers[tier]; ok {
-		if strings.TrimSpace(existing.Backend) == "" && strings.TrimSpace(existing.Model) == "" {
-			existing = fallback
+	path, err := agentsConfigPath(opts, global)
+	if err != nil {
+		return Config{}, err
+	}
+	return updateConfigFile(path, func(stored *Config) error {
+		normalizeLegacyTierKeys(stored.Agents.Tiers, stored.Agents.ModelAliases)
+		effective := effectiveAgentConfig(*stored)
+		if stored.Agents.Tiers == nil {
+			stored.Agents.Tiers = map[string]AgentTier{}
 		}
-	}
-	mapping := AgentTier{}
-	if !hasBackendInput && !hasModelInput {
-		mapping = existing
-	}
-	if backend != "" {
-		mapping.Backend = backend
-	}
-	if model != "" {
-		mapping.Model = model
-		if backend == "" {
-			mapping.Backend = InferBackend(model)
+		if stored.Agents.ModelAliases == nil {
+			stored.Agents.ModelAliases = map[string]map[string]AgentTier{}
 		}
-	}
-	if hasEffort {
-		mapping.Effort = effort
-	} else {
-		mapping.Effort = ""
-	}
-	stored.Agents.ModelAliases[tier][key] = mapping
-	if global {
-		return stored, saveGlobal(opts, stored)
-	}
-	return stored, save(opts, stored)
+		if stored.Agents.ModelAliases[tier] == nil {
+			stored.Agents.ModelAliases[tier] = map[string]AgentTier{}
+		}
+		existing := effective.Agents.ModelAliases[tier][key]
+		if fallback, ok := effective.Agents.Tiers[tier]; ok {
+			if strings.TrimSpace(existing.Backend) == "" && strings.TrimSpace(existing.Model) == "" {
+				existing = fallback
+			}
+		}
+		mapping := AgentTier{}
+		if !hasBackendInput && !hasModelInput {
+			mapping = existing
+		}
+		if backend != "" {
+			mapping.Backend = backend
+		}
+		if model != "" {
+			mapping.Model = model
+			if backend == "" {
+				mapping.Backend = InferBackend(model)
+			}
+		}
+		if hasEffort {
+			mapping.Effort = effort
+		} else {
+			mapping.Effort = ""
+		}
+		stored.Agents.ModelAliases[tier][key] = mapping
+		return nil
+	})
 }
 
 func ResolveAgent(opts Options, tier, backend, model string) (string, string, error) {
@@ -697,43 +694,102 @@ func useAliasMappingForBackend(explicitBackend string, mapping AgentTier) bool {
 	return inferredKey == explicitKey
 }
 
-func save(opts Options, cfg Config) error {
-	path, err := Path(opts)
-	if err != nil {
-		return err
-	}
-	return saveConfigFile(path, cfg)
-}
+// errConfigUnchanged is returned by an updateConfigFile mutate func to report
+// that it changed nothing: the helper then skips the write and returns the
+// config as read, with a nil error.
+var errConfigUnchanged = errors.New("ws config unchanged")
 
-func saveGlobal(opts Options, cfg Config) error {
-	path, err := GlobalPath(opts)
-	if err != nil {
-		return err
-	}
-	return saveConfigFile(path, cfg)
-}
-
-func saveConfigFile(path string, cfg Config) error {
+// updateConfigFile is the single writer for project and global config files.
+// It holds the sibling <path>.lock flock across read, mutate, and write, so
+// every writer of one file (agents.tier and resolver overrides, in this process
+// or another ws-mcp process) serializes against every other; readers stay
+// unlocked and see the old or the new file via the temp-write + rename, never a
+// torn one. It stamps schema_version on every write and returns the committed
+// Config. A missing file reads as Config{}; callers whose no-op must not create
+// the directory or lock file check for the file before calling.
+func updateConfigFile(path string, mutate func(*Config) error) (Config, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("create ws config dir: %w", err)
+		return Config{}, fmt.Errorf("create config dir: %w", err)
 	}
-	// A brand-new config's zero-value Config carries SchemaVersion 0 until now
-	// (setAgentsTierForHarness's `stored` layer starts from loadProjectConfig/
-	// loadGlobalConfig, which return Config{} for a missing file). The legacy
-	// Load path always stamped 1 in-memory via effectiveAgentConfig before any
-	// caller saw it, but that stamping never reached the persisted bytes for a
-	// first-ever config.tune write. Stamp it here, at the single save chokepoint
-	// for both project and global scope, so what lands on disk matches the
-	// established schema_version:1 contract regardless of caller. This is
-	// persistence-only: in-memory resolution (effectiveAgentConfig) already
-	// normalizes to schemaVersion unconditionally and is untouched.
-	cfg.SchemaVersion = schemaVersion
-	raw, err := json.MarshalIndent(cfg, "", "  ")
+
+	// The lock is a sibling file so it survives the atomic rename of the config.
+	lockPath := path + ".lock"
+	fl := flock.New(lockPath)
+	ctx, cancel := context.WithTimeout(context.Background(), lockTimeout)
+	defer cancel()
+	locked, err := fl.TryLockContext(ctx, 50*time.Millisecond)
 	if err != nil {
-		return fmt.Errorf("encode ws config: %w", err)
+		return Config{}, fmt.Errorf("acquire config lock: %w", err)
 	}
-	raw = append(raw, '\n')
-	return os.WriteFile(path, raw, 0o644)
+	if !locked {
+		return Config{}, fmt.Errorf("timed out waiting for config file lock: %s", lockPath)
+	}
+	defer fl.Unlock() //nolint:errcheck
+
+	var cfg Config
+	raw, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return Config{}, fmt.Errorf("read config for update: %w", err)
+	}
+	if err == nil {
+		if jerr := json.Unmarshal(raw, &cfg); jerr != nil {
+			return Config{}, fmt.Errorf("parse config for update: %w", jerr)
+		}
+	}
+	if err := mutate(&cfg); err != nil {
+		if errors.Is(err, errConfigUnchanged) {
+			return cfg, nil
+		}
+		return Config{}, err
+	}
+	cfg.SchemaVersion = schemaVersion
+
+	payload, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return Config{}, fmt.Errorf("encode config: %w", err)
+	}
+	payload = append(payload, '\n')
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+"-*.tmp")
+	if err != nil {
+		return Config{}, fmt.Errorf("create temp config: %w", err)
+	}
+	tmpName := tmp.Name()
+	fail := func(format string, err error) (Config, error) {
+		tmp.Close()
+		os.Remove(tmpName)
+		return Config{}, fmt.Errorf(format, err)
+	}
+	// CreateTemp opens 0600; keep the 0644 the config file has always had.
+	if err := tmp.Chmod(0o644); err != nil {
+		return fail("chmod temp config: %w", err)
+	}
+	if _, err := tmp.Write(payload); err != nil {
+		return fail("write temp config: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		return Config{}, fmt.Errorf("close temp config: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		os.Remove(tmpName)
+		return Config{}, fmt.Errorf("atomic rename config: %w", err)
+	}
+	return cfg, nil
+}
+
+// configFileExists reports whether path exists, for no-op callers that must not
+// create the config directory or lock file.
+func configFileExists(path string) bool {
+	_, err := os.Stat(path)
+	return !os.IsNotExist(err)
+}
+
+// agentsConfigPath returns the project or global config file path.
+func agentsConfigPath(opts Options, global bool) (string, error) {
+	if global {
+		return GlobalPath(opts)
+	}
+	return Path(opts)
 }
 
 func normalizedTier(tier string) string {
