@@ -70,6 +70,9 @@ var reservedToolVarNames = func() map[string]bool {
 			set[name] = true
 		}
 	}
+	// Explicit because the claude row computes SpawnIdiom at resolve time
+	// rather than declaring it.
+	set["SpawnIdiom"] = true
 	// Tier-derived model var reserved name.
 	set["RoleModel"] = true
 	// workflow.lang language-binding injection.
@@ -80,9 +83,12 @@ var reservedToolVarNames = func() map[string]bool {
 	return set
 }()
 
-// terminologyForHarness returns the terminology table for the given harness.
+// terminologyForHarness returns the effective terminology for the given harness.
 // If harness is not recognized ("" or any value other than "claude"/"codex"/"pi"),
-// the host-neutral ("") table is returned.
+// the host-neutral ("") table is returned. For "claude" it returns a fresh copy
+// of the table row with SpawnIdiom computed by claudeSpawnIdiom, because that
+// value depends on the runtime namespace; read terminology through this
+// function, never playbookTerminologyTable directly.
 func terminologyForHarness(harness string) map[string]string {
 	table, ok := playbookTerminologyTable[harness]
 	if !ok {
