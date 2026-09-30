@@ -127,6 +127,32 @@ func TestResolveAgentDefaultTierModels(t *testing.T) {
 	}
 }
 
+func TestResolveAgentDefaultClaudeTierModels(t *testing.T) {
+	tmp := t.TempDir()
+	opts := Options{CacheHome: filepath.Join(tmp, "cache"), ConfigHome: filepath.Join(tmp, "global")}
+	tests := []struct {
+		tier   string
+		model  string
+		effort string
+	}{
+		{tier: "small", model: "haiku", effort: "high"},
+		{tier: "medium", model: "sonnet", effort: "high"},
+		{tier: "large", model: "opus", effort: "high"},
+		{tier: "xlarge", model: "opus", effort: "xhigh"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.tier, func(t *testing.T) {
+			backend, model, effort, err := ResolveAgentForHarnessConfig(opts, tc.tier, "", "", "claude")
+			if err != nil {
+				t.Fatalf("ResolveAgentForHarnessConfig returned error: %v", err)
+			}
+			if backend != "claude" || model != tc.model || effort != tc.effort {
+				t.Fatalf("resolved backend/model/effort = %q/%q/%q, want claude/%s/%s", backend, model, effort, tc.model, tc.effort)
+			}
+		})
+	}
+}
+
 func TestDefaultCodexTierSeedsAgreeAndPreserveStoredAliases(t *testing.T) {
 	want := map[string]AgentTier{
 		"small":  {Backend: "codex", Model: "gpt-6-luna", Effort: "high"},
