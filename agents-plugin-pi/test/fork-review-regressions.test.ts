@@ -17,11 +17,12 @@ function buildRpcClientOptions(...args: any[]) {
 
 const fork = captureForkContext({ kind: "task", effectiveSystemPrompt: "original", parentSessionKey: "parent-key", parentPiSessionId: "parent-id", parentAffinityId: "parent-id", activeTools: ["read"], registeredTools: [{ name: "read", description: "Read", parameters: { type: "object" } }] });
 
-test("C1: frame preserves every byte of task/discussion input and identifies own key and all refusals", () => {
+test("C1: frame preserves every byte of task/discussion input and identifies own key and the ws-fork refusal", () => {
   for (const body of ["task Ω\r\ntrailing  ", "discussion /done\r\n"]) {
     const framed = frameForkInput(body, "current-own");
     assert.ok(framed.endsWith(body));
-    for (const text of ["current-own", "inherited parent", "historical own key", "ws-fork", "ws-queue-question", "ws-withdraw-question"]) assert.ok(framed.includes(text));
+    for (const text of ["current-own", "inherited parent", "historical own key", "ws-fork"]) assert.ok(framed.includes(text));
+    for (const text of ["ws-queue-question", "ws-withdraw-question"]) assert.ok(!framed.includes(text), "the frame names no disconnected question tool");
   }
   const unavailable = frameForkInput("task", "current-own", ["parent-only", "second-parent-only"]);
   assert.match(unavailable, /Unavailable tools in this fork: parent-only, second-parent-only/);

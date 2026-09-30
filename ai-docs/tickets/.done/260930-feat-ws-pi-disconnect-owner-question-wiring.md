@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 14f2c566db4a49b0
 sage-review-completeness-reviewed: 14f2c566db4a49b0
+completed: 2026-09-30
 ---
 
 # Disconnect the pi owner-question wiring: no mid-run questions from agents
@@ -185,3 +186,53 @@ Apply the four cut points in `## Decisions`, update the shipped text and spec
 note named there, and adjust tests per `## Constraints`. The dormant code in `src/ask.ts` and
 the fork-finish machinery stays compiled and its direct unit tests keep
 passing.
+
+### Result (b31438e11) - 2026-09-30
+
+Landed in b31438e11 (implementation) and e5ab0c990 (review round 1 fixes).
+
+- Cut 1: `computeSessionBootstrap` now removes `ws-queue-question` and
+  `ws-withdraw-question` from the top lead's active tools. A new
+  `withoutOwnerQuestionTools` filter replaces the `addAskToolsIfLead` step.
+  Dropping the append alone would not have been enough: Pi's `refreshTools`
+  auto-activates an extension tool registered after bind, and `registerAsk`
+  runs in `session_start` before the bootstrap. `registerAsk` stays.
+- Cut 2: `index.ts` passes no `onQuestion` to `registerFork`, and passes none
+  to either orphan-revival `armForkRoleWiring` site. The unused
+  `buildForkQuestionLeadNotice` and `handleForkRaisedQuestion` imports are
+  removed.
+- Cut 3: `ws-report-to-lead` no longer has a `kind` parameter.
+  `applyRpcEvent` pushes every report as `ws-agent-report` and logs none of
+  them as a question. The old question branch is now an exported, uncalled
+  `questionReportOutcome` in `spawner.ts`, so its direct unit tests still
+  exercise it.
+- Agent-facing text updated:
+  - the fork directive and the fork initial message now say to decide and
+    record under Decisions, or settle with Blockers;
+  - `WORKER_LIFECYCLE_GUIDE` gets the same instruction and is now exported for
+    its test;
+  - the `ws-fork` and `ws-agent-spawn` descriptions;
+  - `frameForkInput` now names only the `ws-fork` refusal;
+  - `pi-lead-guide.md`: the queue/withdraw rows, the `ws-agent-question` row
+    and the owner-question paragraphs are removed, and the fork and report
+    rows are reworded.
+- `ai-docs/spec/pi-adapter-runtime.md`: the owner question surface section
+  has a new note saying its entry points are disconnected.
+- Tests:
+  - updated: lead-bootstrap, fork, fork-review-regressions, spawner,
+    agent-sidecar, ownership-contention, fork-lifecycle.integration and
+    native-tool-registration;
+  - new assertions: the lead's tools exclude the two question tools, and
+    `fork-lifecycle.integration` checks this on the real `session_start`;
+  - new assertions: the `ws-report-to-lead` schema is exactly `message`;
+  - new assertions: `kind:"question"` produces `ws-agent-report`;
+  - new assertions: fresh and revived forks arm no hook;
+  - new assertions: none of the fork directive, the fork initial message or
+    the worker guide invites a question.
+
+Verification:
+- `npm test` in `agents-plugin-pi/`: 1932 tests, 1928 pass, 1 fail, 3 skipped.
+- The one failure is `test/web-package.test.ts` (packed install), which also
+  fails on the pre-change baseline.
+- An ad-hoc `tsc --noEmit --strict` over `src/index.ts` reports the same 58
+  errors before and after the change, so it adds none.

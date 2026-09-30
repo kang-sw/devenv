@@ -130,6 +130,7 @@ import {
   type RpcAgentRegistry,
   type TerminalDelivery,
   type ToolGroup,
+  WORKER_LIFECYCLE_GUIDE,
 } from "../src/spawner.ts";
 import { WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV, type SpawnRole } from "../src/process-role.ts";
 import { classifyRegistryRowState } from "../src/agent-widget.ts";
@@ -1472,11 +1473,26 @@ describe("applyRpcEvent", () => {
   });
 });
 
+describe("WORKER_LIFECYCLE_GUIDE: no mid-run questions", () => {
+  test("limits ws-report-to-lead to progress and directs decide-or-settle instead of asking", () => {
+    assert.match(WORKER_LIFECYCLE_GUIDE, /ws-report-to-lead is only for progress before settlement\./);
+    assert.ok(!WORKER_LIFECYCLE_GUIDE.includes("a question before settlement"), "the guide no longer offers the report tool for questions");
+    assert.match(WORKER_LIFECYCLE_GUIDE, /Do not stop mid-run to ask a question: decide, proceed, and record the assumption/);
+    assert.match(WORKER_LIFECYCLE_GUIDE, /settle with the blocker stated/);
+  });
+});
+
 describe("applyRpcEvent: ws-report-to-lead is intermediate only", () => {
-  test("progress and question reports push immediately; kind final has no terminal meaning", () => {
+  test("every report pushes immediately as ws-agent-report; a residual kind (question or final) has no meaning", () => {
     const r = freshRpcRecord();
     assert.equal(applyRpcEvent(r, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: "progress" } }).push?.family, "ws-agent-report");
-    assert.equal(applyRpcEvent(r, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { kind: "question", message: "question" } }).push?.family, "ws-agent-question");
+    r.onQuestionReport = () => "must not be consulted";
+    assert.deepEqual(
+      applyRpcEvent(r, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { kind: "question", message: "question" } }),
+      { push: { family: "ws-agent-report", payload: { report: "question" }, deliverAs: "followUp" } },
+      "kind:question yields a plain report, never ws-agent-question, even with a stale hook on the record",
+    );
+    assert.ok(r.reportLog.every((entry) => entry.kind === undefined), "no report is logged as a question");
     const legacy = applyRpcEvent(r, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { kind: "final", message: "legacy final" } });
     assert.equal(legacy.push?.family, "ws-agent-report");
     assert.equal(r.terminalDelivery, undefined);

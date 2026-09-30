@@ -71,6 +71,8 @@ test("actual native registrations retain schemas/executors while sharing cold an
   }
   const send = tools.get("ws-agent-send")!;
   assert.ok("agent_id" in (send.parameters!.properties ?? {}), "ws-agent-send schema is preserved");
+  const report = tools.get("ws-report-to-lead")!;
+  assert.deepEqual(Object.keys(report.parameters!.properties ?? {}), ["message"], "ws-report-to-lead is a progress/finding report with no kind parameter");
 
   ref.current = tui;
   // 260906 Phase 2: ws-agent-send now owns its own custom renderCall (target

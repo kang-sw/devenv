@@ -91,6 +91,14 @@
  * callback, and applies `addAskToolsIfLead` as a third role-differentiated
  * active-tools step.
  *
+ * `260930-feat-ws-pi-disconnect-owner-question-wiring` disconnects both entry
+ * points while keeping the code: the top lead's active tools now EXCLUDE
+ * `ws-queue-question`/`ws-withdraw-question` (`computeSessionBootstrap`), and
+ * `onForkQuestion` is no longer armed on fresh or revived forks. Spawned
+ * agents decide and record, or settle with a blocker, instead of asking.
+ * Registration, hydration, `/thread`, and `/answer` stay so a thread persisted
+ * before the cut can still be drained.
+ *
  * 260905 Phase 1 Edition (push delivery): three factory/session_start hooks
  * serve the pushed child-report channel. `registerPushFlush` (factory scope)
  * releases the pushes the spawner held while this session was mid-turn, on
@@ -203,10 +211,8 @@ import { createApprovalRelay, registerExecuteGateway } from "./execute-gateway.t
 import { attachMailboxRuntimeCleanup, buildMailboxPushMessage, createBridgeDrain, createSubprocessWait, resolveMailboxSelfSlug, sessionMailboxWaitOptions, shouldArmMailboxWaiter, stageMailboxRuntime, startMailboxWaiter, type MailboxToolCall, type MailboxWaiterHandle } from "./mailbox-waiter.ts";
 import { armForkRoleWiring, registerFork } from "./fork.ts";
 import {
-  buildForkQuestionLeadNotice,
   createThreadRegistryHandle,
   type ThreadRegistryHandle,
-  handleForkRaisedQuestion,
   captureForkResume,
   hydrateThreadRegistry,
   registerAsk,
@@ -812,31 +818,16 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     // own exclusion of it has something to exclude. Whether it is ever ACTIVE
     // is addForkToolIfLead's job, applied below via computeSessionBootstrap,
     // not this registration.
-    // 260904 Phase 2: the onQuestion callback is what makes a task fork's own
-    // ws-report-to-lead(kind:"question") land in the owner-question registry
-    // with `respondent` already set to that live fork (Entry A meets Entry B)
-    // — fork.ts stays generic and never imports ask.ts.
-    //
-    // Review relay #1 I6: its return value replaces what the LEAD sees on that
-    // report. In TUI the owner surface is the only answering channel (§1), so
-    // the lead gets a notice naming the thread and telling it to keep waiting;
-    // in headless there is no owner surface, so `undefined` keeps the Phase 1
-    // relay byte-identical (§8).
-    //
-    // Hoisted to a named callback (review relay #1, I1) because the shutdown
-    // sidecar's orphan revival below re-arms the SAME hook on a revived fork.
-    const onForkQuestion = (agentId: string, message: string): string | undefined => {
-      const thread = handleForkRaisedQuestion(threadHandle, agentTools!.rpcRegistry, agentId, message, pi);
-      return threadHandle.ctxRef.current?.mode === "tui" ? buildForkQuestionLeadNotice(agentId, thread.threadId) : undefined;
-    };
-    registerFork(pi, handle, agentTools.rpcRegistry, { cwd: ctx.cwd, effectivePromptRef, extensionPath: extensionEntryPath }, onForkQuestion, toolPreviewTuiRef);
+    // Owner-question wiring is disconnected: no onQuestion callback is passed,
+    // here or on orphan revival below, so no fork-raised owner thread is ever
+    // created. The dormant hook (`armForkRoleWiring`'s `onQuestion`,
+    // `handleForkRaisedQuestion`) stays in the tree unarmed.
+    registerFork(pi, handle, agentTools.rpcRegistry, { cwd: ctx.cwd, effectivePromptRef, extensionPath: extensionEntryPath }, undefined, toolPreviewTuiRef);
 
     // 260904 Phase 2 (owner question surface), same declarative/global
     // registration placement as registerFork above: ws-queue-question/
-    // ws-withdraw-question must
-    // exist in a fork child's own process too, so computeForkToolSurface has
-    // them present to exclude. Whether they are ever ACTIVE is
-    // addAskToolsIfLead's job, applied below via computeSessionBootstrap.
+    // ws-withdraw-question stay registered, but no role activates them:
+    // computeSessionBootstrap filters them out of the top lead's active tools.
     //
     // §5's captured-ctx staleness rule: re-capture ctx on EVERY session_start
     // (never a factory-scope ctx), and hydrate the persisted registry so
@@ -852,7 +843,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     let recoveredRegistry = readAndClearSidecarAt(leadSidecarPath);
     recoveredRegistry = applySessionStartAgentRetention(readSpawnRole(process.env), dispatchStorage.root, goalLoopConfigPath, recoveredRegistry);
     if (recoveredRegistry.length > 0) reviveOrphans(agentTools.rpcRegistry, recoveredRegistry, {
-      fork: (record) => armForkRoleWiring(pi, agentTools!.rpcRegistry, record, onForkQuestion),
+      fork: (record) => armForkRoleWiring(pi, agentTools!.rpcRegistry, record),
       executeWorker: (record) => { record.onApprovalPending = onApprovalPending; },
     });
     publishSubtree(agentTools.rpcRegistry);
@@ -879,14 +870,14 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
         const orphans = recoveredRegistry;
         if (orphans.length > 0) {
           // Role-keyed wiring re-arm (review relay #1, I1): `spawnRole` is
-          // persisted precisely so a revived FORK comes back with its question
-          // routing (§1 keeps a fork-raised question on the owner surface),
-          // rather than silently degrading to plain-worker
-          // behavior on the next ws-agent-send. A revived execute-worker gets
+          // persisted precisely so a revived FORK comes back with its fork-role
+          // wiring (which no longer arms owner-question routing) rather than
+          // silently degrading to plain-worker behavior on the next
+          // ws-agent-send. A revived execute-worker gets
           // the approval relay pinned to the record itself, so it no longer
           // depends on which call site happens to resume it.
           reviveOrphans(agentTools.rpcRegistry, orphans, {
-            fork: (record) => armForkRoleWiring(pi, agentTools!.rpcRegistry, record, onForkQuestion),
+            fork: (record) => armForkRoleWiring(pi, agentTools!.rpcRegistry, record),
             executeWorker: (record) => {
               record.onApprovalPending = onApprovalPending;
             },

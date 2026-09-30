@@ -369,7 +369,7 @@ export function rehydrateOrphanRecord(orphan: PersistedOrphan): RpcAgentRecord {
  * module stays free of both imports and directly testable.
  */
 export interface OrphanRoleWiring {
-  /** A `ws-fork`/discussion fork: re-arm owner-question routing. */
+  /** A `ws-fork`/discussion fork: re-arm fork-role wiring (owner-question routing is no longer armed). */
   fork?: (record: RpcAgentRecord) => void;
   /** A `ws-execute` worker: the approval relay's `onApprovalPending`. */
   executeWorker?: (record: RpcAgentRecord) => void;

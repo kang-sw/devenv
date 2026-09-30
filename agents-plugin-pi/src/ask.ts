@@ -607,6 +607,9 @@ export function buildVerbatimExcerpt(entryId: string, branch: readonly { id: str
  * `registerAsk`'s `execute()` is the actual enforcement — see this file's
  * header's golden-rule comment).
  */
+// Dormant: no production caller since the owner-question wiring was
+// disconnected; `lead-bootstrap.ts`'s `withoutOwnerQuestionTools` now filters
+// both tools out of the top lead's active list instead.
 export function addAskToolsIfLead(activeTools: readonly string[], role: SpawnRole | undefined): string[] {
   if (role !== undefined) return [...activeTools];
   const result = [...activeTools];
@@ -1038,8 +1041,9 @@ export function handleForkRaisedQuestion(
 }
 
 /**
- * Registers `ws-ask`/`ws-resolve` (lead-facing; reachable only after
- * `index.ts`'s role-differentiated `addAskToolsIfLead` step). Registered
+ * Registers `ws-ask`/`ws-resolve` (lead-facing; since the owner-question
+ * wiring was disconnected no role activates them — `computeSessionBootstrap`
+ * filters them out of the top lead's active tools). Registered
  * declaratively/globally like `registerFork`, so a fork child's own
  * `computeForkToolSurface` has these names present to exclude.
  *

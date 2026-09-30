@@ -675,13 +675,14 @@ describe("writeSidecar / readAndClearSidecar (filesystem)", () => {
  * READ it on revival, so a revived fork came back as a plain record — no
  * question routing (a §1 violation the moment it asks something), no
  * anti-bleed loop. These tests exercise the full round trip: capture ->
- * serialize -> parse -> revive with the real role wiring -> the revived fork's
- * question routes to the owner surface instead of being pushed at the lead.
+ * serialize -> parse -> revive with the real role wiring. Since the
+ * owner-question wiring was disconnected, the revived fork arms no question
+ * hook and any residual `kind:"question"` is a plain report.
  */
 describe("reviveOrphans (role wiring re-armed on revival)", () => {
   const pi = { sendMessage() {} } as unknown as ExtensionAPI;
 
-  test("a full sidecar round trip revives a fork whose question still routes to the owner surface", () => {
+  test("a full sidecar round trip revives a fork with no owner-question hook, so a stale kind:question is a plain report", () => {
     const source: RpcAgentRegistry = new Map([
       ["fork-1", record({ agentId: "fork-1", spawnRole: "fork", client: {} as RpcClient })],
       ["worker-1", record({ agentId: "worker-1", spawnRole: "worker", client: {} as RpcClient })],
@@ -689,29 +690,27 @@ describe("reviveOrphans (role wiring re-armed on revival)", () => {
     const parsed = parseOrphans(serializeOrphans(captureOrphans(source)));
 
     const revivedRegistry: RpcAgentRegistry = new Map();
-    const asked: Array<{ agentId: string; message: string }> = [];
+    // Mirrors index.ts's revival wiring: the owner-question callback is no
+    // longer passed, so the revived fork arms no onQuestionReport.
     reviveOrphans(revivedRegistry, parsed, {
-      fork: (rec) =>
-        armForkRoleWiring(pi, revivedRegistry, rec, (agentId, message) => {
-          asked.push({ agentId, message });
-          return "[ws] thread q1 — the owner answers this.";
-        }),
+      fork: (rec) => armForkRoleWiring(pi, revivedRegistry, rec),
     });
 
     assert.deepEqual([...revivedRegistry.keys()].sort(), ["fork-1", "worker-1"]);
     const fork = revivedRegistry.get("fork-1")!;
     assert.equal(fork.client, undefined, "revived dormant — ws-agent-send relaunches it from its own session file");
+    assert.equal(fork.onQuestionReport, undefined, "a revived fork is not armed with the owner-question hook");
 
+    // A fork revived from a pre-change session file may still send kind:"question".
     const outcome = applyRpcEvent(fork, {
       type: "tool_execution_start",
       toolName: REPORT_TO_LEAD_TOOL_NAME,
       args: { kind: "question", message: "which anchor?" },
     });
-    assert.deepEqual(asked, [{ agentId: "fork-1", message: "which anchor?" }]);
     assert.deepEqual(
       outcome,
-      { push: { family: "ws-agent-advisory", payload: { advisory: "fork-question-thread", detail: "[ws] thread q1 — the owner answers this." }, deliverAs: "followUp" } },
-      "§1: routed to the owner surface, and the lead sees the registration notice, not a ws-agent-question",
+      { push: { family: "ws-agent-report", payload: { report: "which anchor?" }, deliverAs: "followUp" } },
+      "a residual kind is ignored: the lead gets a plain report, never ws-agent-question",
     );
 
     const worker = revivedRegistry.get("worker-1")!;

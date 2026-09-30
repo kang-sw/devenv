@@ -36,7 +36,7 @@
  * once per `session_start` to produce BOTH the ws block's static base above
  * AND the reshaped lead/fork active-tools surface, threading
  * `computeLeadActiveTools` (execute-gateway.ts), `addForkToolIfLead`
- * (fork.ts), `addAskToolsIfLead` (ask.ts), and `addSkillToolIfLeadOrFork`
+ * (fork.ts), `withoutOwnerQuestionTools`, and `addSkillToolIfLeadOrFork`
  * (lead-skills.ts) in sequence — replacing what used to be three separate
  * `pi.setActiveTools()`/`pi.getActiveTools()` round-trips in `index.ts`
  * itself. This module's actual responsibility is therefore "the whole
@@ -51,7 +51,7 @@ import type { BeforeAgentStartEventResult, ExtensionAPI, SlashCommandInfo } from
 import { isLeadOrFork, readSpawnRole, type SpawnRole } from "./process-role.ts";
 import { computeLeadActiveTools } from "./execute-gateway.ts";
 import { addForkToolIfLead } from "./fork.ts";
-import { addAskToolsIfLead } from "./ask.ts";
+import { ASK_TOOL_NAME, RESOLVE_TOOL_NAME } from "./ask.ts";
 import { addSkillToolIfLeadOrFork, buildSkillsBlock, loadSkillFile, resolveSkillEntries, type LoadedSkill } from "./lead-skills.ts";
 
 /**
@@ -199,11 +199,24 @@ export interface SessionBootstrapResult {
 }
 
 /**
+ * Owner-question entry point cut: agents do not ask the owner mid-run, so the
+ * top lead never activates `ws-queue-question`/`ws-withdraw-question`. Their
+ * registration stays (`registerAsk`), and Pi activates a tool registered after
+ * bind, so this filters them out rather than merely not appending them. A fork
+ * inherits the lead's active-tool snapshot and so never holds them either.
+ */
+const OWNER_QUESTION_TOOL_NAMES: ReadonlySet<string> = new Set([ASK_TOOL_NAME, RESOLVE_TOOL_NAME]);
+
+function withoutOwnerQuestionTools(activeTools: readonly string[]): string[] {
+  return activeTools.filter((name) => !OWNER_QUESTION_TOOL_NAMES.has(name));
+}
+
+/**
  * 260906 Phase 1 testability extraction: the single pure function that
  * produces the WHOLE lead/fork session-start outcome — the ws block's static
  * base AND the reshaped tool surface — for a given role, so a test can drive
  * `index.ts`'s actual sequencing (role gate -> `computeLeadActiveTools` ->
- * `addForkToolIfLead` -> `addAskToolsIfLead` -> `addSkillToolIfLeadOrFork`)
+ * `addForkToolIfLead` -> `withoutOwnerQuestionTools` -> `addSkillToolIfLeadOrFork`)
  * without re-implementing a second copy of that order inside the test
  * itself. `index.ts` calls this once per `session_start` and applies the
  * result (`wsBlockBaseRef.current = result.wsBlockBase` only when it is not
@@ -239,7 +252,7 @@ export function computeSessionBootstrap(inputs: SessionBootstrapInputs): Session
 
   let activeTools = computeLeadActiveTools(currentActiveTools);
   activeTools = addForkToolIfLead(activeTools, role);
-  activeTools = addAskToolsIfLead(activeTools, role);
+  activeTools = withoutOwnerQuestionTools(activeTools);
   activeTools = addSkillToolIfLeadOrFork(activeTools, role);
 
   return { wsBlockBase, activeTools };

@@ -42,9 +42,10 @@ export const FORK_TOOL_NAME = "ws-fork";
  * tool-allowlist layer, the same way a `full-worker` spawn can never
  * re-reach `ws-agent-spawn`) — plus, since Phase 2, the owner-question
  * primitives `ws-queue-question`/`ws-withdraw-question` (§3, renamed by
- * `260911` from `ws-ask`/`ws-resolve`): a fork's only question path stays
- * `ws-report-to-lead(kind:"question")`, which the lead surfaces as a thread
- * of its own (`ask.ts`'s `handleForkRaisedQuestion`).
+ * `260911` from `ws-ask`/`ws-resolve`). A fork no longer has any mid-run
+ * question path: `ws-report-to-lead` lost its `kind:"question"` parameter
+ * and a fork decides-and-records or settles with a blocker instead
+ * (`260930-feat-ws-pi-disconnect-owner-question-wiring`).
  *
  * The two Phase 2 names are duplicated here as literals ON PURPOSE rather
  * than imported from `ask.ts` (which owns them as `ASK_TOOL_NAME`/
@@ -118,7 +119,7 @@ export function buildForkDirectiveText(expectsCommit = false): string {
   return [
     "Task-thread fork: this session is a clone of the lead's own session, so its existing context is already shared — work laterally alongside the lead, not as a depth-consuming worker.",
     "",
-    `Work the task in this message. If the lead's input is needed before continuing, call ${REPORT_TO_LEAD_TOOL_NAME} with kind:"question" and end the turn there. Progress updates may use the same tool without kind.`,
+    `Work the task in this message without stopping to ask. When a choice is open, decide, proceed, and record the assumption under Decisions. When you genuinely cannot proceed, settle with the blocker under Blockers; the lead can resume this same fork. Progress updates may use ${REPORT_TO_LEAD_TOOL_NAME}.`,
     "",
     "Once the task is fully done, end with an ordinary assistant answer in exactly this shape, one field per line:",
     "Outcome: <what happened>",
@@ -160,7 +161,7 @@ export function buildForkInitialMessage(leadPrompt: string, expectsCommit = fals
     leadPrompt,
     "--- end of message ---",
     "",
-    `Start working on this task directly and yourself now — do not fork again or hand it onward. Use ${REPORT_TO_LEAD_TOOL_NAME} only for a question or progress before settlement.`,
+    `Start working on this task directly and yourself now — do not fork again or hand it onward. Use ${REPORT_TO_LEAD_TOOL_NAME} only for progress before settlement.`,
   ].join("\n");
 }
 
@@ -190,6 +191,10 @@ export interface ForkSessionCtx {
  * report-handling site rather than from `wireAntiBleedLoop`'s settle handler,
  * because the push is emitted at report time — the thread must already exist
  * before the suppression decision is made.
+ *
+ * Dormant: `index.ts` no longer passes this callback to `registerFork` or to
+ * orphan revival, and `applyRpcEvent` treats every report as a plain
+ * `ws-agent-report`, so `onQuestionReport` is never set or invoked.
  */
 export type ForkQuestionCallback = (agentId: string, message: string) => string | undefined;
 
@@ -297,7 +302,7 @@ export function registerFork(
     name: FORK_TOOL_NAME,
     label: FORK_TOOL_NAME,
     description:
-      'Spawn a lateral task-thread fork that inherits your full current context (a clone of your own session) to work a sub-task alongside you — not a worker (no depth-budget consumption). It retains the lead tool surface but refuses ws-fork, ws-queue-question, and ws-withdraw-question in fork role. Questions and progress may arrive via ws-report-to-lead; the ordinary answer at agent settlement is the terminal result. expects_commit:true keeps the commit expectation visible in the prompt without adapter parsing. Returns {agent_id, warning?} immediately — end your turn afterwards; its reports and settlement arrive as pushed messages.',
+      'Spawn a lateral task-thread fork that inherits your full current context (a clone of your own session) to work a sub-task alongside you — not a worker (no depth-budget consumption). It retains the lead tool surface but refuses ws-fork in fork role. It does not ask questions mid-run: progress may arrive via ws-report-to-lead, and the ordinary answer at agent settlement is the terminal result, with open choices recorded under Decisions and anything that stopped it under Blockers. expects_commit:true keeps the commit expectation visible in the prompt without adapter parsing. Returns {agent_id, warning?} immediately — end your turn afterwards; its reports and settlement arrive as pushed messages.',
     parameters: {
       type: "object",
       properties: {
