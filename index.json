@@ -513,7 +513,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-09-30T00:20:28Z"
+        "touched_at": "2026-09-30T00:21:04Z",
+        "impl": {
+          "branch": "impl/develop/skirt-sworn-stack"
+        }
       }
     }
   }
