@@ -7,6 +7,13 @@
   },
   "repository": "https://github.com/kang-sw/devenv",
   "license": "MIT",
+  "agents": [
+    "./claude-agents/effort-low.md",
+    "./claude-agents/effort-medium.md",
+    "./claude-agents/effort-high.md",
+    "./claude-agents/effort-xhigh.md",
+    "./claude-agents/effort-max.md"
+  ],
   "mcpServers": {
     "wsflow": {
       "command": "python3",

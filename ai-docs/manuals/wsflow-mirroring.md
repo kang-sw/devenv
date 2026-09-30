@@ -192,8 +192,9 @@ curated list in `agents-plugin-tool/internal/wsrsrc/skills_mirror_test.go`.
   running the write side effect.
 - **Env var:** `WS_REGEN_WSFLOW_SKILLS`, distinct from `WS_REGEN_WSFLOW_RSRC`
   (rsrc mirror regen), `WS_REGEN_COMPOSED_SKILLS` (build-time skill
-  composition), and `WSRSRC_REGEN_SKILLS` (independent skills manifest regen) —
-  never reuse any of these names.
+  composition), `WSRSRC_REGEN_SKILLS` (independent skills manifest regen), and
+  `WS_REGEN_CLAUDE_AGENTS` (Claude effort-agent regen) — never reuse any of
+  these names.
 
 ## Build-Time Skill Composition
 
@@ -283,6 +284,14 @@ identical to canonical — including `manifest.json`.
   TestGenerateRealSkillsManifest`, guarded by `TestSkillsManifestDriftIsVisible`.
   Ticket `260825`'s Phase 3 regression hit exactly this gap (a skills-tree
   template edit landed without the skills-manifest regen).
+- **Claude effort agents are a separate gate.** Editing
+  `agents-plugin-tool/internal/claudeagents/effort-agent.md.tmpl` or its
+  generator requires `WS_REGEN_CLAUDE_AGENTS=1 go test ./internal/claudeagents
+  -count=1 -run TestRegenerateClaudeAgents`, which rewrites `effort-<level>.md`
+  in both `agents-plugin/claude-agents/` and
+  `agents-plugin-wsflow/claude-agents/`, guarded by `TestClaudeAgentsUpToDate`.
+  `-count=1` is mandatory as above. Both `.claude-plugin/plugin.json` `agents`
+  lists stay hand-curated; the regen never edits them.
 - **Runtime:** the wsflow launcher's `apply_rsrc_root_env` sets `WS_RSRC_ROOT` to
   the sibling `rsrc/` when present, so the committed copy is resolved with no
   launcher change.
