@@ -497,7 +497,14 @@
       "registered_at": "2026-09-28T07:57:19Z"
     },
     "260928-feat-claude-effort-carrier-agents": {
-      "registered_at": "2026-09-28T13:27:10Z"
+      "registered_at": "2026-09-28T13:27:10Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-09-30T00:20:32Z"
+      }
     },
     "260929-bug-config-tune-agents-tier-lost-update": {
       "registered_at": "2026-09-29T09:35:35Z",
