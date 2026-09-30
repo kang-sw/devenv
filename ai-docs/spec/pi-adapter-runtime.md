@@ -1398,6 +1398,15 @@ both published through `details` without altering the model-visible result.
 
 ## Side-thread owner question surface {#260905-pi-side-thread-owner-question-surface}
 
+> **Disconnected (`260930-feat-ws-pi-disconnect-owner-question-wiring`).**
+> Both entry points are cut: the top lead's active tools no longer include
+> `ws-queue-question`/`ws-withdraw-question`, `ws-report-to-lead` has no
+> `kind` parameter and every report is a plain `ws-agent-report`, and no fork
+> is armed with the owner-question hook. Spawned agents decide and record, or
+> settle with a blocker, instead of asking. The code below stays dormant;
+> `/answer`, `/thread`, and `.ws-threads.json` hydration remain so a thread
+> persisted before the cut can still be drained. This section is not rewritten.
+
 The lead can hand a decision to the **owner** (the human at the TUI) without
 blocking on it, and a task fork's own `kind:"question"` report is routed to the
 same owner surface. One primitive — a **thread** — has two entry points: the lead

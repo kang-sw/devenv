@@ -7,7 +7,7 @@
  * ExtensionAPI/pi.on capture needed), computeSessionBootstrap (260906 Phase
  * 1's testability extraction — the one function that drives index.ts's
  * actual role-gate -> computeLeadActiveTools -> addForkToolIfLead ->
- * addAskToolsIfLead -> addSkillToolIfLeadOrFork sequencing, so this file can
+ * withoutOwnerQuestionTools -> addSkillToolIfLeadOrFork sequencing, so this file can
  * assert the post-reshape tool surface directly rather than only the pure
  * helpers in isolation), computeSkillsBlockCached (the dogfood fix's
  * live-read-plus-cache helper), and registerLeadBootstrap itself (fake
@@ -112,7 +112,7 @@ describe("computeBeforeAgentStartResult", () => {
 /**
  * computeSessionBootstrap drives the SAME sequencing index.ts's session_start
  * actually calls (role gate -> computeLeadActiveTools -> addForkToolIfLead ->
- * addAskToolsIfLead -> addSkillToolIfLeadOrFork), so asserting against ITS
+ * withoutOwnerQuestionTools -> addSkillToolIfLeadOrFork), so asserting against ITS
  * output — rather than a test-local re-implementation of that order — is
  * what satisfies the ticket's "drives before_agent_start through the real
  * index.ts ordering, not only the pure helper" requirement. Skills are
@@ -139,9 +139,24 @@ describe("computeSessionBootstrap", () => {
     assert.ok(!result.activeTools.includes("bash"), "native bash must be removed");
     assert.ok(!result.activeTools.includes("read"), "native read must be removed");
     assert.ok(!result.activeTools.includes(GATED_EXEC_TOOL_NAME), "the gated-exec tool must stay excluded from the lead");
-    for (const name of [EXECUTE_TOOL_NAME, APPROVE_TOOL_NAME, UGLY_READ_TOOL_NAME, ONE_LINER_EXEC_TOOL_NAME, FORK_TOOL_NAME, ASK_TOOL_NAME, RESOLVE_TOOL_NAME, WS_SKILL_TOOL_NAME]) {
+    for (const name of [EXECUTE_TOOL_NAME, APPROVE_TOOL_NAME, UGLY_READ_TOOL_NAME, ONE_LINER_EXEC_TOOL_NAME, FORK_TOOL_NAME, WS_SKILL_TOOL_NAME]) {
       assert.ok(result.activeTools.includes(name), `expected ${name} on the host lead's reshaped surface`);
     }
+    for (const name of [ASK_TOOL_NAME, RESOLVE_TOOL_NAME]) {
+      assert.ok(!result.activeTools.includes(name), `${name} must not be on the host lead's surface`);
+    }
+  });
+
+  test("host lead: owner-question tools Pi auto-activated on registration are filtered out", () => {
+    const result = computeSessionBootstrap({
+      role: undefined,
+      manualSnapshot: "## Session Key\nlead-1",
+      guideText: "GUIDE-TEXT",
+      currentActiveTools: [...RAW_LEAD_TOOLS, ASK_TOOL_NAME, "ws-queue-question-lookalike", RESOLVE_TOOL_NAME],
+    });
+    assert.ok(!result.activeTools.includes(ASK_TOOL_NAME));
+    assert.ok(!result.activeTools.includes(RESOLVE_TOOL_NAME));
+    assert.ok(result.activeTools.includes("ws-queue-question-lookalike"), "only the exact names are filtered");
   });
 
   test("fork role: preserves its explicit ordered surface unchanged", () => {

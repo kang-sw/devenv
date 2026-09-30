@@ -231,7 +231,7 @@ export async function effectiveForkDescriptor(ctx: { model?: unknown; modelRegis
 }
 
 export function frameForkInput(text: string, ownKey: string, unavailableTools: readonly string[] = []): string {
-  const frame = `Current fork-owned ws session_key: ${ownKey}. Use this key, not the inherited parent or any historical own key. ws-fork, ws-queue-question, and ws-withdraw-question are refused in fork role; report to the lead instead.\n\n${text}`;
+  const frame = `Current fork-owned ws session_key: ${ownKey}. Use this key, not the inherited parent or any historical own key. ws-fork is refused in fork role.\n\n${text}`;
   if (!unavailableTools.length) return frame;
   return `${frame}\n\nUnavailable tools in this fork: ${unavailableTools.join(", ")}. Their parent extension was not loaded; calling one fails deterministically.`;
 }

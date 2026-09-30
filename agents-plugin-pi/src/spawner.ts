@@ -660,6 +660,9 @@ export interface RpcAgentRecord {
    */
   pendingApproval?: PendingApprovalState;
   /**
+   * Dormant: nothing arms this since the owner-question wiring was
+   * disconnected; only `questionReportOutcome` (itself uncalled) reads it.
+   *
    * 260904 Phase 2 (review relay #1 I6): consulted by `applyRpcEvent` the
    * instant a `kind:"question"` report is observed on this record. It may
    * return a REPLACEMENT message to enqueue for the lead in place of the
@@ -922,9 +925,10 @@ export function truncatePromptForStorage(prompt: string, capBytes: number = PROM
  *   (ordinary terminal settlement carrying `last_message`),
  *   `"stopped"` (an explicit `ws-agent-stop`), `"exited"` (its process died —
  *   see the liveness probe), or `"spawn-failed"`.
- * - `ws-agent-question` — a headless `kind:"question"` report the lead itself
- *   must answer (in TUI the owner surface consumes it, and the lead instead
- *   gets the `fork-question-thread` advisory below).
+ * - `ws-agent-question` — dormant: formerly a headless `kind:"question"`
+ *   report the lead itself had to answer. `applyRpcEvent` no longer emits it
+ *   (only the uncalled `questionReportOutcome` does); the family and its
+ *   hold handling stay registered.
  * - `ws-agent-approval` — an `execute-worker` is blocked on `ws-approve`.
  * - `ws-agent-advisory` — the adapter's own statement about a child, including
  *   this module's question branch registering a fork-raised thread
@@ -2578,9 +2582,9 @@ export interface RpcEventOutcome {
 }
 
 /**
- * Applies lifecycle and intermediate-report RPC events to a record. A
- * `kind:"question"` report uses the owner-thread hook when available; every
- * other report-tool call is an immediate informational push. No report-tool
+ * Applies lifecycle and intermediate-report RPC events to a record. Every
+ * report-tool call is an immediate informational push, whatever `kind` it
+ * carries. No report-tool
  * value is terminal. `agent_settled` clears execution synchronously, while
  * `attachEventListener` performs asynchronous terminal transcript harvest and
  * queue admission. Gated execution events additionally capture approval data.
@@ -2635,31 +2639,15 @@ export function applyRpcEvent(
     observeForkFinishEvent(record, evt);
     return { settled: true };
   } else if (evt.type === "tool_execution_start" && evt.toolName === REPORT_TO_LEAD_TOOL_NAME) {
-    const args = evt.args as { message?: unknown; kind?: unknown } | undefined;
+    // Every report is a plain progress/finding report. `kind` left the
+    // schema, but a caller can still send it (the schema is open, and a fork
+    // revived from a pre-change session file still holds the old "ask with
+    // kind:question" directive), so any residual `kind` is ignored here and
+    // never reaches the dormant `questionReportOutcome`.
+    const args = evt.args as { message?: unknown } | undefined;
     const message = args?.message;
     if (typeof message === "string") {
-      const kind = args?.kind === "question" ? args.kind : undefined;
-      recordReport(record, kind);
-
-      if (kind === "question") {
-        // A defined (string) return is the registration notice for a fork
-        // thread the hook just bound: push it to the lead as an advisory
-        // instead of the raw question. `undefined` is the headless case;
-        // a throwing hook degrades to that same baseline rather than
-        // dropping the report.
-        let notice: string | undefined;
-        if (record.onQuestionReport) {
-          try {
-            notice = record.onQuestionReport(record, message);
-          } catch {
-            notice = undefined;
-          }
-        }
-        return notice !== undefined
-          ? { push: { family: "ws-agent-advisory", payload: { advisory: "fork-question-thread", detail: notice }, deliverAs: "followUp" } }
-          : { push: { family: "ws-agent-question", payload: { question: message }, deliverAs: "steer" } };
-      }
-
+      recordReport(record, undefined);
       return { push: { family: "ws-agent-report", payload: { report: message }, deliverAs: "followUp" } };
     }
   } else if (evt.type === "tool_execution_start" && evt.toolName === GATED_EXEC_TOOL_NAME) {
@@ -2682,6 +2670,29 @@ export function applyRpcEvent(
     }
   }
   return {};
+}
+
+/**
+ * Dormant: the former `kind:"question"` branch of `applyRpcEvent`, kept with
+ * the rest of the disconnected owner-question code but no longer called. A
+ * defined (string) `onQuestionReport` return is the registration notice for a
+ * fork thread the hook just bound, pushed as an advisory instead of the raw
+ * question; `undefined` is the headless case, and a throwing hook degrades to
+ * that same baseline rather than dropping the report.
+ */
+export function questionReportOutcome(record: RpcAgentRecord, message: string): RpcEventOutcome {
+  recordReport(record, "question");
+  let notice: string | undefined;
+  if (record.onQuestionReport) {
+    try {
+      notice = record.onQuestionReport(record, message);
+    } catch {
+      notice = undefined;
+    }
+  }
+  return notice !== undefined
+    ? { push: { family: "ws-agent-advisory", payload: { advisory: "fork-question-thread", detail: notice }, deliverAs: "followUp" } }
+    : { push: { family: "ws-agent-question", payload: { question: message }, deliverAs: "steer" } };
 }
 
 /**
@@ -3273,7 +3284,7 @@ export function spawnAdmission(ctx: RpcSpawnCtx, writeScopes?: readonly WriteSco
   return resolveSpawnAdmission(ctx, writeScopes).policy;
 }
 
-const WORKER_LIFECYCLE_GUIDE = `\n\n## Persistent delegation\nChild results return to this session, not directly to your caller. End your turn while children work; the adapter keeps the subtree outstanding and wakes you on their settled output. Continue the same child with ws-agent-send when its output is insufficient. After every descendant has settled and you have synthesized their results, end with the final-output shape required by your playbook in your ordinary assistant answer. Settlement delivers that answer; ws-report-to-lead is only for progress or a question before settlement.\n\n## Code-review artifacts\nWhen your playbook tells you to spawn a code reviewer with a generated findings path, pass that exact absolute path as the sole \`write_scopes\` file grant. Reviewer admission rejects omission, trees, globs, and multiple paths so the required report cannot silently disappear.\n`;
+const WORKER_LIFECYCLE_GUIDE = `\n\n## Persistent delegation\nChild results return to this session, not directly to your caller. End your turn while children work; the adapter keeps the subtree outstanding and wakes you on their settled output. Continue the same child with ws-agent-send when its output is insufficient. After every descendant has settled and you have synthesized their results, end with the final-output shape required by your playbook in your ordinary assistant answer. Settlement delivers that answer; ws-report-to-lead is only for progress before settlement. Do not stop mid-run to ask a question: decide, proceed, and record the assumption among your decisions, or, when you genuinely cannot proceed, settle with the blocker stated so your caller can resume you.\n\n## Code-review artifacts\nWhen your playbook tells you to spawn a code reviewer with a generated findings path, pass that exact absolute path as the sole \`write_scopes\` file grant. Reviewer admission rejects omission, trees, globs, and multiple paths so the required report cannot silently disappear.\n`;
 
 export async function spawnAgent(
   registry: RpcAgentRegistry,
@@ -4106,7 +4117,7 @@ export function registerAgentTools(
     name: "ws-agent-spawn",
     label: "ws-agent-spawn",
     description:
-      "Spawn a persistent RPC-backed pi subagent from an already-rendered system-prompt file (e.g. via ws/playbook.render). Returns {agent_id, alias?, evicted?, write_scopes?} immediately after the initial prompt is sent. model_name accepts a configured tier alias or concrete Pi model ID; either is catalog/auth validated before allocation, while omission inherits the parent model. write_scopes grants bounded native edit/write authority to an otherwise restricted child; it never confines a child that already has unrestricted native edit/write. Do not wait for it: end your turn, and its reports, questions and completion arrive on their own as ws-agent-* messages carrying a running-count status line.",
+      "Spawn a persistent RPC-backed pi subagent from an already-rendered system-prompt file (e.g. via ws/playbook.render). Returns {agent_id, alias?, evicted?, write_scopes?} immediately after the initial prompt is sent. model_name accepts a configured tier alias or concrete Pi model ID; either is catalog/auth validated before allocation, while omission inherits the parent model. write_scopes grants bounded native edit/write authority to an otherwise restricted child; it never confines a child that already has unrestricted native edit/write. Do not wait for it: end your turn, and its reports and completion arrive on their own as ws-agent-* messages carrying a running-count status line.",
     parameters: {
       type: "object",
       properties: {
@@ -4315,13 +4326,7 @@ export function registerAgentTools(
     parameters: {
       type: "object",
       properties: {
-        message: { type: "string", description: "Status update or intermediate finding to surface to the lead immediately." },
-        kind: {
-          type: "string",
-          enum: ["question"],
-          description:
-            "Optional disambiguation for a question that needs the lead's input. Omit for a normal progress update; final output is the ordinary assistant answer delivered when the agent settles.",
-        },
+        message: { type: "string", description: "Status update or intermediate finding to surface to the lead immediately. Final output is the ordinary assistant answer delivered when the agent settles." },
       },
       required: ["message"],
     } as never,

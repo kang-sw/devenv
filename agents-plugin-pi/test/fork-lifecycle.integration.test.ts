@@ -96,7 +96,7 @@ for (const root of SDK_ROOTS) for (const [providerName, apiName] of [["openroute
       const before = h.requests.length;
       const keys = h.sm.getEntries().findLast((e: any) => e.customType === "ws-pi-fork-keys" && e.data.sessionId === h.sm.getSessionId());
       // Independently defined new-message fixture, never copied from child payload.
-      const framed = h.referenceHistory && !h.hasInput ? `Current fork-owned ws session_key: ${keys?.data.current}. Use this key, not the inherited parent or any historical own key. ws-fork, ws-queue-question, and ws-withdraw-question are refused in fork role; report to the lead instead.\n\n${text}${h.unavailableTools?.length ? `\n\nUnavailable tools in this fork: ${h.unavailableTools.join(", ")}. Their parent extension was not loaded; calling one fails deterministically.` : ""}` : text;
+      const framed = h.referenceHistory && !h.hasInput ? `Current fork-owned ws session_key: ${keys?.data.current}. Use this key, not the inherited parent or any historical own key. ws-fork is refused in fork role.\n\n${text}${h.unavailableTools?.length ? `\n\nUnavailable tools in this fork: ${h.unavailableTools.join(", ")}. Their parent extension was not loaded; calling one fails deterministically.` : ""}` : text;
       await withEnv(h.env, () => h.session.prompt(text));
       if (h.referenceHistory && h.requests.length > before) {
         const user = { role: "user", content: [{ type: "text", text: framed }], timestamp: 1 };
@@ -242,16 +242,14 @@ for (const root of SDK_ROOTS) for (const [providerName, apiName] of [["openroute
       const nestedFork = child.session.agent.state.tools.find((tool: any) => tool.name === "ws-fork");
       assert.ok(nestedFork, "the inherited fork tool remains active so its role handler can refuse recursive forks");
       await withEnv(child.env, () => assert.rejects(() => nestedFork.execute("refuse", {}), /unavailable in a fork/));
-      // 260911 lifts the tool-surface hide (ac998f77/a8cf1183/5f366eff): the
-      // fork's tool surface is the lead's exact active-tools snapshot
-      // (`computeForkToolSurface` adds/removes/dedupes nothing), so
-      // ws-queue-question/ws-withdraw-question stay VISIBLE with identical
-      // metadata in a fork's own tool list — refused only at the handler
-      // level, exactly like ws-fork itself just above.
+      // Owner-question wiring is disconnected: the real session_start drops
+      // ws-queue-question/ws-withdraw-question from the top lead's active
+      // tools, and the fork's surface is the lead's exact active-tools
+      // snapshot (`computeForkToolSurface` adds/removes/dedupes nothing), so
+      // neither tool reaches the lead's or the fork's provider-visible list.
       for (const name of ["ws-queue-question", "ws-withdraw-question"]) {
-        const tool = child.session.agent.state.tools.find((t: any) => t.name === name);
-        assert.ok(tool, `${name} remains visible in the inherited --tools allowlist`);
-        await withEnv(child.env, () => assert.rejects(() => tool.execute("refuse", {}), /unavailable in a fork/));
+        assert.ok(!lead.api.getActiveTools().includes(name), `${name} is not on the top lead's active tools`);
+        assert.equal(child.session.agent.state.tools.find((t: any) => t.name === name), undefined, `${name} is absent from the inherited --tools allowlist`);
       }
       assert.equal(children.length, callsBefore);
       assert.deepEqual(child.sm.getEntries(), entriesBeforeRefusals, "refusals do not mutate session state");
@@ -286,7 +284,7 @@ for (const root of SDK_ROOTS) for (const [providerName, apiName] of [["openroute
       assert.equal(child.relayedStarts, 2, "the child's two own turns reached the parent as agent_start");
       assert.equal(reportedChild.status, "dormant", "ordinary settlement parks the degraded fork after terminal delivery (\"idle\" means the settle is held: the child reported more turn starts than the two relayed, e.g. module state shared across in-process sessions)");
       assert.ok(reportedChild.last_report_at, "the intermediate progress report reaches the parent registry");
-      assert.ok(childContext.registeredTools.some((tool: any) => tool.name === "ws-report-to-lead"), "the parent capture keeps the optional progress/question channel visible");
+      assert.ok(childContext.registeredTools.some((tool: any) => tool.name === "ws-report-to-lead"), "the parent capture keeps the optional progress channel visible");
       omitCompletionReport = true;
       const missingReportResult = await forkTool.execute("missing report", { prompt: "completion still uses ordinary settlement" });
       assert.ok(JSON.parse(missingReportResult.content[0].text).agent_id);

@@ -57,7 +57,7 @@ import {
   buildForkSpawnCtx,
 } from "../src/fork.ts";
 import { registerFork as registerForkBase } from "../src/fork.ts";
-import { leadIdleRef, registerPushFlush, flushHeldPushes, applyRpcEvent, attachEventListener, REPORT_TO_LEAD_TOOL_NAME, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
+import { leadIdleRef, registerPushFlush, flushHeldPushes, applyRpcEvent, attachEventListener, questionReportOutcome, REPORT_TO_LEAD_TOOL_NAME, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
 import { closeFakeChildren, connectFakeChild } from "./fixtures/channel-child.ts";
 import type { BridgeHandle } from "../src/bridge.ts";
@@ -159,11 +159,14 @@ describe("getForkSourceSessionFile", () => {
 });
 
 describe("buildForkDirectiveText", () => {
-  test("keeps questions intermediate and the structured ordinary answer terminal without adapter parsing", () => {
+  test("invites no mid-run question and keeps the structured ordinary answer terminal without adapter parsing", () => {
     const text = buildForkDirectiveText();
     assert.ok(text.includes(REPORT_TO_LEAD_TOOL_NAME));
-    assert.ok(text.includes('kind:"question"'));
-    assert.ok(!text.includes('kind:"final"'));
+    assert.ok(!text.includes("kind:"), "the directive names no report kind");
+    assert.ok(!/\bquestion\b/i.test(text), "the directive does not invite a question");
+    assert.match(text, /without stopping to ask/);
+    assert.match(text, /record the assumption under Decisions/);
+    assert.match(text, /settle with the blocker under Blockers/);
     for (const field of ["Outcome", "Files changed", "Verification", "Blockers", "Commit", "Decisions"]) {
       assert.ok(text.includes(`${field}:`), `expected the directive to name requested field "${field}"`);
     }
@@ -197,6 +200,12 @@ describe("buildForkInitialMessage (260905 structural anti-bleed frame)", () => {
     assert.ok(msg.includes("--- Message from the lead ---"), "must fence the lead's message");
     assert.ok(msg.includes("--- end of message ---"), "must close the fence");
     assert.ok(msg.includes(REPORT_TO_LEAD_TOOL_NAME), "must keep the report contract pointer");
+  });
+
+  test("invites no mid-run question: the report tool is for progress only", () => {
+    const msg = buildForkInitialMessage(task);
+    assert.ok(!/\bquestion\b/i.test(msg), "neither the directive nor the frame invites a question");
+    assert.match(msg, new RegExp(`Use ${REPORT_TO_LEAD_TOOL_NAME} only for progress before settlement`));
   });
 
   test("stays calm — no ALL-CAPS override words (chosen over the aggressive header)", () => {
@@ -330,7 +339,21 @@ describe("armForkRoleWiring (fresh spawn and sidecar revival)", () => {
     } as unknown as RpcAgentRecord;
   }
 
-  test("arms question routing on a dormant record — a revived fork's question still reaches the owner surface", () => {
+  test("the production wiring (no callback) arms no question hook, so a stale kind:question is a plain report", () => {
+    const record = dormantForkRecord();
+    armForkRoleWiring(pi, new Map([["fork-1", record]]), record);
+    assert.equal(record.onQuestionReport, undefined);
+
+    const outcome = applyRpcEvent(record, {
+      type: "tool_execution_start",
+      toolName: REPORT_TO_LEAD_TOOL_NAME,
+      args: { kind: "question", message: "which anchor?" },
+    });
+    assert.deepEqual(outcome, { push: { family: "ws-agent-report", payload: { report: "which anchor?" }, deliverAs: "followUp" } });
+    assert.deepEqual(record.reportLog.map((entry) => entry.kind), [undefined], "the residual kind is not recorded as a question");
+  });
+
+  test("dormant: an explicit callback still arms onQuestionReport for the uncalled questionReportOutcome", () => {
     const record = dormantForkRecord();
     const asked: Array<{ agentId: string; message: string }> = [];
     armForkRoleWiring(pi, new Map([["fork-1", record]]), record, (agentId, message) => {
@@ -338,16 +361,11 @@ describe("armForkRoleWiring (fresh spawn and sidecar revival)", () => {
       return "[ws] thread q1 — the owner answers this.";
     });
 
-    const outcome = applyRpcEvent(record, {
-      type: "tool_execution_start",
-      toolName: REPORT_TO_LEAD_TOOL_NAME,
-      args: { kind: "question", message: "which anchor?" },
-    });
+    const outcome = questionReportOutcome(record, "which anchor?");
     assert.deepEqual(asked, [{ agentId: "fork-1", message: "which anchor?" }]);
     assert.deepEqual(
       outcome,
       { push: { family: "ws-agent-advisory", payload: { advisory: "fork-question-thread", detail: "[ws] thread q1 — the owner answers this." }, deliverAs: "followUp" } },
-      "§1: routed to the owner, and the lead sees the registration notice, not a ws-agent-question",
     );
   });
 
@@ -455,6 +473,7 @@ describe("ws-fork: onModelResolved forwarding (260906 Phase 2)", () => {
       const record = registry.get(parsed.agent_id)!;
       assert.equal(record.modelTier, undefined);
       assert.equal(record.modelSource, "inherit");
+      assert.equal(record.onQuestionReport, undefined, "registered as index.ts does (no onQuestion), a fresh fork arms no question hook");
     } finally { rpc.restore(); }
   });
 });

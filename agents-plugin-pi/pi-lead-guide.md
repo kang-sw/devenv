@@ -44,9 +44,7 @@ Route a task to the right primitive by what you actually need done:
 | Compact context mid-goal and keep going (non-terminal) | `goal-compact-and-continue <carry-forward>` — the documented way to compact under an armed goal; the reminder is held and re-sent once compaction finishes, race-free. Typing `/compact` yourself instead still races an in-flight reminder (accepted, not intercepted). |
 | Delegate a lead-consensus-caliber shell task, gated command-by-command | `ws-execute` (spawns an execute-worker; optional `command` runs verbatim first, then `prompt` drives the worker; `complex:true` to inherit your own model instead of the default light one). This gate exists because `ws-execute` proxies actions at your own trust level — a general `ws-agent-spawn` worker carries no such gate. |
 | Respond to a pending execute-worker command approval request | `ws-approve` (`decision`: `approve` \| `deny` with `reason` \| `run-instead` with `command`; rejected if `cmd_id` is stale or mismatched) |
-| Delegate a lead-like task thread that shares your current context (root-only; consumes one delegation edge) | `ws-fork` (`prompt`, optional `model_name` — one of the fixed tiers `small`/`medium`/`large`/`xlarge` configured for harness `pi` via `lead-tune`/`config.list`, not a free-form name — and `expects_commit`; its ordinary assistant answer is delivered when the fork settles, while `ws-report-to-lead` is only for an intermediate question or progress update) |
-| Queue a question for the owner to answer async, without blocking or interrupting them | `ws-queue-question` (`title`, `question`, optional `context` — 2-3 sentences of background, no paths or hashes). Returns `{question_id}` and spawns nothing; keep working on whatever does not depend on the answer. When the owner opens and answers it, their reply is injected into this session as a follow-up the next time you go idle — not a live back-and-forth, so a well-posed single question works best. |
-| Withdraw a question you no longer need answered | `ws-withdraw-question` (`question_id`) — clears it from the owner's pending count; nothing is injected back, since you already know the answer. If the owner already has it open when you withdraw, their in-progress answer is still delivered once they submit rather than being discarded; withdrawing an already-answered or already-withdrawn question is a no-op. |
+| Delegate a lead-like task thread that shares your current context (root-only; consumes one delegation edge) | `ws-fork` (`prompt`, optional `model_name` — one of the fixed tiers `small`/`medium`/`large`/`xlarge` configured for harness `pi` via `lead-tune`/`config.list`, not a free-form name — and `expects_commit`; its ordinary assistant answer is delivered when the fork settles, while `ws-report-to-lead` is only for an intermediate progress update. A fork does not stop to ask: it records open choices under `Decisions:` and anything that stopped it under `Blockers:`, and you resume it with `ws-agent-send`) |
 | Read one file yourself when delegating the read would be absurd | `do-i-really-have-to-read-this-myself` (`path`, optional `offset`/`limit`). Supported image files (jpg, png, gif, webp, bmp) come back as image attachments; text output is capped at 2000 lines or 50KB, with an `offset` hint to continue. Native `read` and `bash` are removed from your surface; this is the only direct read you have, and the name is the point — it is a fallback for a must-look moment, not your first move. Prefer `explore` or a worker for anything wider than one file. |
 | Run one short command yourself when you need its output inline right now | `do-i-really-have-to-run-this-myself` (`command`, `why`). Fixed 30s timeout (bounds only that direct command, not a descendant it backgrounds) and 4KB output cap (trimmed to the last complete line, with a hint if truncated) — never yours to raise. The name is the point: single short command, nothing multi-step/long-running/mutating. Anything wider goes through `ws-execute`. |
 | Load and follow a ws skill (`lead-proceed`, `lead-drain-ready-queue`, `lead-write-ticket`, ...) | `ws-skill <name>` (optional `args`, appended as `User: <args>`) — the replacement for reading a SKILL.md yourself; native `read` is not on your surface. `<available_skills>` below lists every name/description/location. |
@@ -88,11 +86,10 @@ substitute for it. Each child signal arrives on its own as a message:
 
 | Message | What it means |
 | --- | --- |
-| `ws-agent-report` | The child called `ws-report-to-lead` with an intermediate question, progress update, or finding. It is never the terminal result. |
+| `ws-agent-report` | The child called `ws-report-to-lead` with an intermediate progress update or finding. It is never the terminal result. |
 | `ws-agent-settled` | The child's run ended. For `reason: idle`, `last_message` is the ordinary terminal output for every role. Judge its adequacy yourself; if it is short, malformed, or incomplete, resume the same agent with `ws-agent-send`, which starts a new running generation. `stopped`, `exited`, and `spawn-failed` retain their ordinary meanings. |
-| `ws-agent-question` | A child needs an answer to continue. In an interactive session this is instead handled by the owner and you get a thread notice — see below. |
 | `ws-agent-approval` | An `ws-execute` worker is blocked on a shell command. It carries `cmd_id`; answer with `ws-approve`. Nothing else unblocks it. |
-| `ws-agent-advisory` | The adapter's own operational notice about a child or owner-routed question. It does not judge final prose adequacy. |
+| `ws-agent-advisory` | The adapter's own operational notice about a child. It does not judge final prose adequacy. |
 | `ws-agent-orphaned` | A previous run of this session left children behind mid-turn. They are registered as dormant: `ws-agent-send` revives one from its own session file, `ws-agent-transcript` reads what it did, `ws-agent-stop` drops it. Each one listed individually was cut off mid-turn and resumes from its last flushed turn, so re-issue that instruction when you revive it. This message appears only when something was cut off; children that were idle at shutdown are re-registered silently, and `ws-agent-list` is where you see them. |
 
 Each of these ends with a line like `1 delegated agent still running` whenever
@@ -101,7 +98,7 @@ parked/dormant. Read it as your fan-in state: the number is how many of your
 children are still executing autonomously. While it is above zero, more can
 arrive without your action — end your turn again rather than concluding early.
 At zero, inspect the settled results and any distinct pending-delivery,
-waiting-on-children, approval, question, or owner-action states as needed.
+waiting-on-children, approval, or owner-action states as needed.
 Because parking keeps a subagent's record in the registry (it does not delete
 it — the same as a manual `ws-agent-stop`), `0 delegated agents still
 running` is the normal steady state once you have ever spawned anything in
@@ -119,30 +116,11 @@ spawned yet this session, or every prior record has since been evicted by the
 registry cap — a message with no status line is telling you there is no
 fan-in to wait on.
 
-The owner side of a question is theirs, not yours, and which surface they see
-depends on how the question was raised. A `ws-queue-question` you raise is
-fork-less end to end: `/answer <id>` opens the owner's sequential prose-modal
-queue (every queued question at once, one at a time — never a discussion
-fork), and their answer is delivered straight back to you as a follow-up,
-verbatim, with nothing spawned on either side. A question raised by a
-`ws-fork` you already spawned is different, and covered next — either way,
-`/thread` lists pending, open and dormant threads across both kinds. Never
-prompt the owner to run any of this; just register the question and carry on.
-
-The same applies when a `ws-fork` you spawned raises a question of its own: in
-an interactive session you receive only a notice naming the thread id, and the
-owner answers that fork directly in an overlay chat — `/answer <id>` attaches
-to that already-live fork rather than spawning a new one. `/done` inside that
-overlay just closes the thread and the view; it carries no summary of its
-own, and the fork keeps running its task through and after the discussion.
-What was decided reaches you through the fork's later ordinary settled answer,
-not as a separate thread-summary message and not as anything tied to when
-`/done` was typed. Generic Finish begins a fresh lead-owned handoff rather than
-replaying an old owner-held result.
-Do not relay the question, do not answer it yourself, and do not ask the
-owner about it — just end your turn. While that thread is open the fork is
-excluded from your still-running count, so a message with no status line at
-all does not mean it is gone.
+Spawned agents do not ask questions mid-run. A child that meets an open
+choice decides, proceeds, and records the assumption in its settled answer; a
+child that genuinely cannot proceed settles with the blocker stated. Read those
+decisions and blockers in the settled answer and, when a correction or an
+answer is needed, resume the same agent with `ws-agent-send`.
 
 This table grows as later tickets land more primitives — treat any verb not
 listed here as not yet available, not as a naming mismatch to guess around.

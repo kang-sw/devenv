@@ -8,7 +8,7 @@ import { describe, test, type TestContext } from "node:test";
 import { allocateAgentHome, createAgentStorageContext, observeSessionWrite, pruneStaleAgentHomes, readOwnership, touchOwnership, writeOwnership } from "../src/agent-storage.ts";
 import { createThreadRegistryHandle, ensureRespondent, handleForkRaisedQuestion } from "../src/ask.ts";
 import { openViewer } from "../src/audit.ts";
-import { applyRpcEvent, getAgentTranscriptPath, ownerNotifyRef, REPORT_TO_LEAD_TOOL_NAME, syncOwnershipProtection, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
+import { getAgentTranscriptPath, ownerNotifyRef, questionReportOutcome, syncOwnershipProtection, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
 
 function captureTerminalOutput(t: TestContext) {
   const output: string[] = [];
@@ -180,7 +180,7 @@ describe("durable ownership contention at accepted operation boundaries", () => 
     });
   }
 
-  test("a failed owner bind relays the question to the lead instead of dropping or claiming an owner thread", { timeout: 15_000 }, async t => {
+  test("dormant questionReportOutcome: a failed owner bind relays the question to the lead instead of dropping or claiming an owner thread", { timeout: 15_000 }, async t => {
     const { root, ownership, record, registry, handle } = fixture();
     t.mock.method(console, "error", () => {});
     let release: (() => Promise<void>) | undefined;
@@ -190,7 +190,7 @@ describe("durable ownership contention at accepted operation boundaries", () => 
         handleForkRaisedQuestion(handle, registry, rec.agentId, message);
         return "registered owner thread";
       };
-      const outcome = applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { kind: "question", message: "Owner decision?" } } as never);
+      const outcome = questionReportOutcome(record, "Owner decision?");
       assert.equal(outcome.push?.family, "ws-agent-question");
       assert.equal(outcome.push?.payload.question, "Owner decision?");
       assert.equal(record.threadBound, undefined);

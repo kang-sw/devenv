@@ -1473,10 +1473,16 @@ describe("applyRpcEvent", () => {
 });
 
 describe("applyRpcEvent: ws-report-to-lead is intermediate only", () => {
-  test("progress and question reports push immediately; kind final has no terminal meaning", () => {
+  test("every report pushes immediately as ws-agent-report; a residual kind (question or final) has no meaning", () => {
     const r = freshRpcRecord();
     assert.equal(applyRpcEvent(r, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: "progress" } }).push?.family, "ws-agent-report");
-    assert.equal(applyRpcEvent(r, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { kind: "question", message: "question" } }).push?.family, "ws-agent-question");
+    r.onQuestionReport = () => "must not be consulted";
+    assert.deepEqual(
+      applyRpcEvent(r, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { kind: "question", message: "question" } }),
+      { push: { family: "ws-agent-report", payload: { report: "question" }, deliverAs: "followUp" } },
+      "kind:question yields a plain report, never ws-agent-question, even with a stale hook on the record",
+    );
+    assert.ok(r.reportLog.every((entry) => entry.kind === undefined), "no report is logged as a question");
     const legacy = applyRpcEvent(r, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { kind: "final", message: "legacy final" } });
     assert.equal(legacy.push?.family, "ws-agent-report");
     assert.equal(r.terminalDelivery, undefined);
