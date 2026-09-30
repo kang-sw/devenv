@@ -108,7 +108,7 @@ main is promoted. Push: yes (covered by Publish's single final-gate approval).
 ## Publish
 
 Order is deliberate: publish the synced `develop` first, let `ws-mcp CI`
-(`.github/workflows/ws-mcp-ci.yml`, ubuntu + windows matrix) pass on the exact
+(`.github/workflows/ws-mcp-ci.yml`, ubuntu + sharded windows matrix) pass on the exact
 pinned commit, and only then promote `main` and push the tag. `origin/main`
 never advances ahead of `origin/develop`, and neither `main` nor the tag is
 published before the release commit is green on Linux and Windows, which the
@@ -142,10 +142,10 @@ local Pre-flight `go test` cannot vouch for. The final gate precedes every push
      --json databaseId,headSha,status,conclusion` and confirm its `headSha`
      equals `<reviewed-through-sha>`. A different `headSha` means
      `origin/develop` moved after the push: abort as in the R4 re-assert.
-  3. `gh run watch <run-id> --exit-status` (the Windows leg takes ~30 min),
-     then `gh run view <run-id> --json jobs --jq '.jobs[] | [.name,
-     .conclusion]'`: both `go test (ubuntu-latest)` and
-     `go test (windows-latest)` must conclude `success`.
+  3. `gh run watch <run-id> --exit-status` (the Windows shards run in
+     parallel), then `gh run view <run-id> --json jobs --jq '.jobs[] |
+     [.name, .conclusion]'`: every `go test (<os>, <shard>)` job — the ubuntu
+     `all` leg and each Windows shard — must conclude `success`.
 - **CI red or cancelled** (any leg not `success`, including a timeout): stop.
   `main` and the tag stay unpushed; the pushed `develop` stays as is. Fix
   forward on `develop`, then restart Pre-flight from the top. The version's

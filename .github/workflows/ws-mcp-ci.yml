@@ -25,23 +25,42 @@ permissions:
 
 jobs:
   test:
-    name: go test (${{ matrix.os }})
+    name: go test (${{ matrix.os }}, ${{ matrix.shard }})
     strategy:
-      # Surface both platforms' results; a Linux failure must not cancel the
-      # Windows run, which is the one this workflow exists to catch early.
+      # Surface every leg's result; a Linux failure must not cancel the Windows
+      # run, which is the one this workflow exists to catch early.
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        # ubuntu runs the whole suite in ~3 min. On Windows internal/mcp alone
+        # took ~15 min serially (864 s, run 36662026067; git-process heavy), so
+        # the Windows leg splits it across parallel jobs; `rest` plus every
+        # `mcp I 4` covers exactly the tests of `all`
+        # (agents-plugin-tool/scripts/ci-test-shard.sh).
+        include:
+          - { os: ubuntu-latest, shard: all, args: "all" }
+          - { os: windows-latest, shard: rest, args: "rest" }
+          - { os: windows-latest, shard: mcp-0, args: "mcp 0 4" }
+          - { os: windows-latest, shard: mcp-1, args: "mcp 1 4" }
+          - { os: windows-latest, shard: mcp-2, args: "mcp 2 4" }
+          - { os: windows-latest, shard: mcp-3, args: "mcp 3 4" }
     runs-on: ${{ matrix.os }}
-    # The Windows smoke job in the release workflow has hung to ~46 min once
-    # (v0.37.2); a cap turns a hang here into a fast, legible failure. Windows
-    # gets 40 min like the release workflow: its run is estimated at ~20 min
-    # (internal/mcp ~12x slower than on ubuntu), while ubuntu finishes in ~3.
-    timeout-minutes: ${{ matrix.os == 'windows-latest' && 40 || 25 }}
+    # The Windows smoke job in the release workflow once hung to ~46 min
+    # (v0.37.2); a cap turns a hang here into a fast, legible failure.
+    timeout-minutes: 25
     defaults:
       run:
         working-directory: agents-plugin-tool
+        shell: bash
     steps:
+      - name: Disable Defender real-time scanning (Windows)
+        # Real-time scanning inspects every build-cache object and every git
+        # process the tests spawn. Best effort: a runner image that refuses
+        # the change still runs the tests, only slower.
+        if: runner.os == 'Windows'
+        shell: pwsh
+        continue-on-error: true
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
+
       - name: Check out repository
         uses: actions/checkout@v5
 
@@ -52,7 +71,4 @@ jobs:
           cache-dependency-path: agents-plugin-tool/go.sum
 
       - name: Run tests
-        # internal/mcp outgrew go test's default 10 min per-package timeout on
-        # Windows (run 36072170343). The raised limit costs ubuntu nothing: a
-        # passing run is unchanged and the job cap still bounds a hang.
-        run: go test -timeout 30m ./...
+        run: bash scripts/ci-test-shard.sh ${{ matrix.args }}
