@@ -9,6 +9,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/kang-sw/devenv/internal/claudeagents"
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsrsrc"
 	"github.com/kang-sw/devenv/internal/wsstate"
@@ -26,8 +27,9 @@ import (
 // resolveTierModelVars (the fixed-tier model and effort vars). Only non-model idioms belong here.
 var playbookTerminologyTable = map[string]map[string]string{
 	"claude": {
-		"ExploreAgent":  "the Explore agent",
-		"SpawnIdiom":    `Agent({subagent_type: "general-purpose", ...})`,
+		"ExploreAgent": "the Explore agent",
+		// SpawnIdiom is namespace-dependent; terminologyForHarness adds it
+		// from claudeSpawnIdiom.
 		"ContinueIdiom": "SendMessage(to: <agentId>)",
 	},
 	"codex": {
@@ -82,10 +84,37 @@ var reservedToolVarNames = func() map[string]bool {
 // If harness is not recognized ("" or any value other than "claude"/"codex"/"pi"),
 // the host-neutral ("") table is returned.
 func terminologyForHarness(harness string) map[string]string {
-	if table, ok := playbookTerminologyTable[harness]; ok {
-		return table
+	table, ok := playbookTerminologyTable[harness]
+	if !ok {
+		return playbookTerminologyTable[""]
 	}
-	return playbookTerminologyTable[""]
+	if harness == "claude" {
+		resolved := make(map[string]string, len(table))
+		for k, v := range table {
+			resolved[k] = v
+		}
+		resolved["SpawnIdiom"] = claudeSpawnIdiom(RuntimeNamespace())
+		return resolved
+	}
+	return table
+}
+
+// claudeSpawnIdiom is the Claude SpawnIdiom value. Claude's Agent tool takes a
+// per-call model but no reasoning-effort parameter; effort comes only from the
+// subagent definition, so the plugin ships one effort-carrier agent per Claude
+// level (<namespace>:effort-<level>). The value carries the whole mapping rule
+// because workers spawn from playbook.render bindings and config.resolve_agent
+// output without ever reading the lead-only native-spawn-binding overlay. It is
+// substituted mid-sentence at every {{.SpawnIdiom}} site, so it stays one
+// clause. The namespace is assembled here rather than written as a
+// {{.SkillNamespace}} literal: substituteVars never re-scans replacement
+// values. The level list is the generator's own, so it names exactly the
+// agents the packages ship.
+func claudeSpawnIdiom(namespace string) string {
+	levels := claudeagents.Levels
+	levelList := strings.Join(levels[:len(levels)-1], ", ") + ", or " + levels[len(levels)-1]
+	return `Agent({subagent_type: "` + namespace + `:effort-<resolved effort>", model: <resolved model>, ...})` +
+		` (subagent_type "general-purpose" when the resolved effort is not exactly ` + levelList + `)`
 }
 
 // resolveEffectiveTier returns tierOverride in place of frontmatterTier when
