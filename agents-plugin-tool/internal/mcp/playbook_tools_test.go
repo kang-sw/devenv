@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -3098,6 +3099,39 @@ func TestClaudeSpawnIdiomRendersAtEverySite(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestSpawnIdiomSitesListIsComplete keeps spawnIdiomSites equal to the real
+// playbook directories that use {{.SpawnIdiom}}, so a new site cannot go
+// unpinned. lead-workflow-manual uses it only through its Claude overlay,
+// which TestLeadWorkflowManualClaudeSpawnBindingOverlay pins.
+func TestSpawnIdiomSitesListIsComplete(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	found := map[string]bool{}
+	err := filepath.WalkDir(rsrcRoot, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".md") {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(data), "{{.SpawnIdiom}}") {
+			found[filepath.Base(filepath.Dir(path))] = true
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk rsrc: %v", err)
+	}
+	delete(found, "lead-workflow-manual")
+	want := map[string]bool{}
+	for _, name := range spawnIdiomSites {
+		want[name] = true
+	}
+	if !reflect.DeepEqual(found, want) {
+		t.Errorf("{{.SpawnIdiom}} sites = %v, spawnIdiomSites = %v", found, want)
 	}
 }
 
