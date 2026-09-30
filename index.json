@@ -496,34 +496,11 @@
     "260928-bug-pi-exec-windows-timeout-orphans-git-bash-child": {
       "registered_at": "2026-09-28T07:57:19Z"
     },
-    "260928-feat-claude-effort-carrier-agents": {
-      "registered_at": "2026-09-28T13:27:10Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-09-30T00:21:05Z",
-        "impl": {
-          "branch": "impl/develop/atom-quiet-rosy"
-        }
-      }
-    },
-    "260929-bug-config-tune-agents-tier-lost-update": {
-      "registered_at": "2026-09-29T09:35:35Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-09-30T00:21:04Z",
-        "impl": {
-          "branch": "impl/develop/skirt-sworn-stack"
-        }
-      }
-    },
     "260930-bug-lead-run-parallel-merge-before-release-orphans-branch": {
       "registered_at": "2026-09-30T01:10:57Z"
+    },
+    "260930-feat-git-exec-audit-log": {
+      "registered_at": "2026-09-30T02:03:00Z"
     }
   }
 }
