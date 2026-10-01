@@ -37,8 +37,8 @@ fresh-context leaves. The Worker Protocol appended below governs; read it first.
 ## Constraints
 
 - Independent review runs when the route verdict allocates it, and is never
-  yours: a reviewer is a fresh delegate that did not write the change. Review
-  is risk-keyed; the route verdict sets the allocation, `none` included.
+  yours: a reviewer is a fresh delegate that did not write the change. The
+  route verdict sets the allocation, `lite` and `none` included.
 - A behavior change with no test change is a review finding. Tests are the
   behavioral contract; there is no separate behavior document to keep in sync.
 - Claim "pass" only after reading the full output of the command you ran.
@@ -103,16 +103,20 @@ fresh-context leaves. The Worker Protocol appended below governs; read it first.
    re-review for the opposite of the saving. A ticket with no clean mechanical
    leaf runs direct; that is calibration, not a shortfall.
 5. Review, when the route allocation is not `none`: map it to structured
-   render wrappers: `single` uses `reviewer`; correctness uses
-   `code-review-correctness`, fit uses `code-review-fit`, and test uses
-   `code-review-test`. The flat `code-reviewer`
+   render wrappers: `lite` uses `code-review-lite`; `single` uses `reviewer`;
+   correctness uses `code-review-correctness`, fit uses `code-review-fit`, and
+   test uses `code-review-test`. The flat `code-reviewer`
    is an included contract, not a delegated playbook. Render each selected
    wrapper with `{{.McpNamespace}}/playbook.render` and spawn each reviewer
    by {{.SpawnIdiom}} with the rendered path,
    the ticket path, and the branch name; each reviewer reads the diff from
-   git. Fix findings by severity. Two rounds: the second verifies the fixes
-   of the first and raises nothing new; there is no third. A Critical finding
-   still open after round 2 is stop (e). When the allocation is `none`
+   git. Fix findings by severity. Under `lite`, review is one pass with no
+   re-review: fix the Critical and Important findings once; a Critical you
+   cannot fix is stop (e), and an Important you leave unfixed goes under
+   `unresolved:` with the reason. Every other allocation runs two rounds: the
+   second verifies the fixes of the first and raises nothing new; there is no
+   third. A Critical finding still open after round 2 is stop (e). When the
+   allocation is `none`
    (per-phase review is off), skip this step and state the skip in your
    Report's `omitted:` field, so the user knows to read the diff.
 6. Record: append `### Result (<short-hash>) - YYYY-MM-DD` to each phase you

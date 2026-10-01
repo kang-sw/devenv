@@ -46,12 +46,13 @@ const (
 	// review is an opt-in for users who hand most work to agents.
 	ItemSageReviewDesign = "sage_review_design"
 
-	// ItemReviewPhase gates the worker's per-phase independent code review that
-	// route.resolve_implement allocates. Values: "on" (today's risk-keyed
-	// allocation and two-round protocol) or "off" (no per-phase review; the
-	// pre-merge range review remains the integration net). An explicit
-	// policy.review.override of single/partitioned still dispatches review under
-	// "off". Builtin default: off.
+	// ItemReviewPhase selects the worker's per-phase independent code review that
+	// route.resolve_implement allocates. Values: "lite" (one fresh medium-tier
+	// reviewer covering correctness and test integrity, one pass, whatever the
+	// risk facts say), "full" (the risk-keyed allocation and two-round
+	// protocol), or "off" (no per-phase review; the pre-merge range review
+	// remains the integration net). An explicit policy.review.override of
+	// single/partitioned wins over every value. Builtin default: lite.
 	ItemReviewPhase = "review_phase"
 
 	// ItemSageReviewDesignTier is the model capability tier for the design reviewer
@@ -126,7 +127,7 @@ func init() {
 	RegisterDefaultScope(ItemSageReview, ScopeProject)
 	RegisterDefaultScope(ItemSageReviewDesign, ScopeProject)
 	// review_phase defaults to project scope like the sage_review* keys: a
-	// project-level opt-in that persists across sessions. A lead's session-scope
+	// project-level choice that persists across sessions. A lead's session-scope
 	// value reaches the workers it spawns through the session parent walk.
 	RegisterDefaultScope(ItemReviewPhase, ScopeProject)
 	RegisterDefaultScope(ItemSageReviewDesignTier, ScopeProject)

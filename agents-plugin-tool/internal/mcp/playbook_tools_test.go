@@ -1017,6 +1017,7 @@ func TestPlaybookPrintLeadTuneUsesWorkflowPreferenceCatalogKnobs(t *testing.T) {
 		"`key` set to each selected knob",
 		"`sage_review_design` for design review, `sage_review` for completeness review",
 		"workflow preference (`review_phase`)",
+		"the catalog's `off`/`lite`/`full` values",
 		"prompt.UserPreferenceSection",
 	} {
 		if !strings.Contains(body, want) {
@@ -2875,13 +2876,22 @@ func TestPlaybookRenderGoldenTicketWorker(t *testing.T) {
 						"The flat `code-reviewer` is an included contract, not a delegated playbook.",
 						"A second failure with the same root cause as an earlier one in this run is stop (f), not another attempt.",
 						"stop `a` through `f`",
-						// Per-phase review is opt-in: the review step and the
-						// (e)/two-round protocol apply only when review ran.
+						// Per-phase review runs only when allocated: the review
+						// step and stop (e) apply only when review ran.
 						"Independent review runs when the route verdict allocates it, and is never yours",
+						"The route verdict sets the allocation, `lite` and `none` included.",
 						"Review, when the route allocation is not `none`:",
 						"When the allocation is `none` (per-phase review is off), skip this step and state the skip in your Report's `omitted:` field",
 						"It applies only when the route allocated review.",
-						"When the route allocates review, it is two rounds, never more.",
+						// The lite allocation is one pass with no re-review;
+						// an unfixable Critical stays stop (e), and every other
+						// allocation keeps the two-round protocol.
+						"`lite` uses `code-review-lite`",
+						"Under `lite`, review is one pass with no re-review: fix the Critical and Important findings once; a Critical you cannot fix is stop (e), and an Important you leave unfixed goes under `unresolved:` with the reason.",
+						"Every other allocation runs two rounds:",
+						"under `lite`, a Critical you could not fix in the one pass",
+						"When the route allocates `lite`, review is one round with no re-review:",
+						"When the route allocates any other review, it is two rounds, never more.",
 					} {
 						if !strings.Contains(procedure, want) {
 							t.Errorf("rendered review procedure missing %q", want)

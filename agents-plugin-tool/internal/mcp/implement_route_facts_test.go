@@ -320,8 +320,9 @@ func TestEnterImplementResolvesSymlinkAliasedTicketPath(t *testing.T) {
 
 // TestEnterImplementReviewPhaseResolvesThroughParentSession pins the dispatch
 // path of review_phase: route.resolve_implement resolves the knob under the
-// caller's key, so a lead's session-scope opt-in reaches a worker key minted
-// under it, while an unrelated key stays at the builtin off (no review todo).
+// caller's key, so a lead's session-scope value reaches a worker key minted
+// under it, while an unrelated key stays at the builtin lite. The retired "on"
+// value is rejected at write time, so it can never be stored through the tool.
 func TestEnterImplementReviewPhaseResolvesThroughParentSession(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
@@ -331,8 +332,11 @@ func TestEnterImplementReviewPhaseResolvesThroughParentSession(t *testing.T) {
 	server := NewServer(root, "test")
 	leadKey, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
 	otherKey, _ := parseLoginResponse(t, callLogin(t, server, 2, root, nil))
-	tune := callToolWithKey(t, server, 3, leadKey, "config.tune", map[string]any{"key": "review_phase", "value": "on", "scope": "session"})
-	if !strings.Contains(tune, "review_phase: on [scope:session]") {
+	if rejected := callToolWithKey(t, server, 3, leadKey, "config.tune", map[string]any{"key": "review_phase", "value": "on", "scope": "session"}); !strings.Contains(rejected, `value must be one of off, lite, full; got "on"`) {
+		t.Fatalf("retired on value was not rejected: %s", rejected)
+	}
+	tune := callToolWithKey(t, server, 4, leadKey, "config.tune", map[string]any{"key": "review_phase", "value": "off", "scope": "session"})
+	if !strings.Contains(tune, "review_phase: off [scope:session]") {
 		t.Fatalf("session tune response = %s", tune)
 	}
 	workerKey, err := server.sessions.mint(root, roleLead, leadKey)
@@ -340,26 +344,27 @@ func TestEnterImplementReviewPhaseResolvesThroughParentSession(t *testing.T) {
 		t.Fatalf("mint worker key: %v", err)
 	}
 	for _, tc := range []struct {
-		name     string
-		key      string
-		wantNeed bool
+		name      string
+		key       string
+		wantAlloc string
 	}{
-		{name: "worker under the tuned lead", key: workerKey, wantNeed: true},
-		{name: "unrelated key at builtin off", key: otherKey, wantNeed: false},
+		{name: "worker under the tuned lead", key: workerKey, wantAlloc: "none"},
+		{name: "unrelated key at builtin lite", key: otherKey, wantAlloc: "lite"},
 	} {
 		var result implementResult
-		if err := json.Unmarshal([]byte(callToolWithKey(t, server, 4, tc.key, "route.resolve_implement", implementSkipDocsArgs("json"))), &result); err != nil {
+		if err := json.Unmarshal([]byte(callToolWithKey(t, server, 5, tc.key, "route.resolve_implement", implementSkipDocsArgs("json"))), &result); err != nil {
 			t.Fatalf("%s: json verdict did not parse: %v", tc.name, err)
 		}
-		if result.Verdict.NeedReview != tc.wantNeed {
-			t.Fatalf("%s: need_review = %v (alloc %q), want %v", tc.name, result.Verdict.NeedReview, result.Verdict.ReviewAlloc, tc.wantNeed)
+		wantNeed := tc.wantAlloc != "none"
+		if result.Verdict.ReviewAlloc != tc.wantAlloc || result.Verdict.NeedReview != wantNeed {
+			t.Fatalf("%s: review = %q need=%v, want %q need=%v", tc.name, result.Verdict.ReviewAlloc, result.Verdict.NeedReview, tc.wantAlloc, wantNeed)
 		}
 		record, ok := server.sessions.readState(tc.key)
 		if !ok {
 			t.Fatalf("%s: session record not found", tc.name)
 		}
-		if got := containsString(keysOf(record.Todos), "review"); got != tc.wantNeed {
-			t.Fatalf("%s: installed review todo = %v, want %v: %v", tc.name, got, tc.wantNeed, keysOf(record.Todos))
+		if got := containsString(keysOf(record.Todos), "review"); got != wantNeed {
+			t.Fatalf("%s: installed review todo = %v, want %v: %v", tc.name, got, wantNeed, keysOf(record.Todos))
 		}
 	}
 }

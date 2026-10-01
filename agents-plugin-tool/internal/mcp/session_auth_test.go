@@ -1305,15 +1305,15 @@ func TestGetOverrideWalksParentChain(t *testing.T) {
 	writeSessionRecordForTest(t, store, "mid-worker-00", "/work", roleLead, "grand-lead-00")
 	writeSessionRecordForTest(t, store, "leaf-review-00", "/work", roleLeaf, "mid-worker-00")
 	writeSessionRecordForTest(t, store, "lone-key-00", "/work", roleLead, "")
-	if err := store.setOverride("grand-lead-00", item, "on"); err != nil {
+	if err := store.setOverride("grand-lead-00", item, "full"); err != nil {
 		t.Fatalf("setOverride grand: %v", err)
 	}
 
 	// (i) a child with no own override resolves its parent's override, and
 	// (iii) a grandchild resolves through two links.
 	for _, key := range []string{"mid-worker-00", "leaf-review-00"} {
-		if v, ok := store.getOverride(key, item); !ok || v != "on" {
-			t.Fatalf("getOverride(%q) = (%q, %v), want inherited (\"on\", true)", key, v, ok)
+		if v, ok := store.getOverride(key, item); !ok || v != "full" {
+			t.Fatalf("getOverride(%q) = (%q, %v), want inherited (\"full\", true)", key, v, ok)
 		}
 	}
 
@@ -1327,7 +1327,7 @@ func TestGetOverrideWalksParentChain(t *testing.T) {
 			t.Fatalf("getOverride(%q) = (%q, %v), want nearest (\"off\", true)", key, v, ok)
 		}
 	}
-	if v, ok := store.getOverride("grand-lead-00", item); !ok || v != "on" {
+	if v, ok := store.getOverride("grand-lead-00", item); !ok || v != "full" {
 		t.Fatalf("ancestor's own value changed: (%q, %v)", v, ok)
 	}
 
@@ -1365,7 +1365,7 @@ func TestGetOverrideParentWalkDoesNotTouchAncestors(t *testing.T) {
 	store := newSessionStore()
 	writeSessionRecordForTest(t, store, "idle-lead-00", "/work", roleLead, "")
 	writeSessionRecordForTest(t, store, "busy-child-00", "/work", roleLead, "idle-lead-00")
-	if err := store.setOverride("idle-lead-00", "review_phase", "on"); err != nil {
+	if err := store.setOverride("idle-lead-00", "review_phase", "full"); err != nil {
 		t.Fatalf("setOverride: %v", err)
 	}
 	dir, err := store.keysDir()
@@ -1378,7 +1378,7 @@ func TestGetOverrideParentWalkDoesNotTouchAncestors(t *testing.T) {
 			t.Fatalf("chtimes %s: %v", key, err)
 		}
 	}
-	if v, ok := store.getOverride("busy-child-00", "review_phase"); !ok || v != "on" {
+	if v, ok := store.getOverride("busy-child-00", "review_phase"); !ok || v != "full" {
 		t.Fatalf("getOverride(child) = (%q, %v), want inherited", v, ok)
 	}
 	_ = store.listOverrideKeys("busy-child-00")
@@ -1414,15 +1414,15 @@ func TestResolverSessionScopeInheritsParentOverride(t *testing.T) {
 	if err := resolver.Set("review_phase", "off", wsconfig.SetOptions{ExplicitScope: wsconfig.ScopeProject}); err != nil {
 		t.Fatalf("set project: %v", err)
 	}
-	if err := resolver.Set("review_phase", "on", wsconfig.SetOptions{ExplicitScope: wsconfig.ScopeSession, SessionKey: "tuned-lead-00"}); err != nil {
+	if err := resolver.Set("review_phase", "full", wsconfig.SetOptions{ExplicitScope: wsconfig.ScopeSession, SessionKey: "tuned-lead-00"}); err != nil {
 		t.Fatalf("set session: %v", err)
 	}
 	got, err := resolver.Get("spawned-worker-00", "review_phase")
 	if err != nil {
 		t.Fatalf("Get child: %v", err)
 	}
-	if got.Value != "on" || got.Scope != wsconfig.ScopeSession {
-		t.Fatalf("child resolved %+v, want inherited session value on", got)
+	if got.Value != "full" || got.Scope != wsconfig.ScopeSession {
+		t.Fatalf("child resolved %+v, want inherited session value full", got)
 	}
 	got, err = resolver.Get("other-lead-00", "review_phase")
 	if err != nil {

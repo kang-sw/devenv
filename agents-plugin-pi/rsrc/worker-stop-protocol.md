@@ -30,8 +30,10 @@ decide.
 - **(d) An irreversible action** in the always-ask category of the Approval
   Protocol `AGENTS.md` declares. A project that declares none has no always-ask
   category and no stop here.
-- **(e) A Critical review finding still open after round 2** (see Review
-  Rounds below). It applies only when the route allocated review.
+- **(e) An unresolved Critical review finding**: under a two-round
+  allocation, a Critical still open after round 2; under `lite`, a Critical
+  you could not fix in the one pass (see Review Rounds below). It applies only
+  when the route allocated review.
 - **(f) Non-convergence.** A second failure with the same root cause as an
   earlier one in this run. Report the failing command under `verification:`;
   the lead retries the ticket at a higher tier, so another attempt at your
@@ -44,12 +46,20 @@ dropped silently and nothing costs a stop.
 
 ## Review Rounds
 
-When the route allocates review, it is two rounds, never more. Round 1: fresh
-reviewers sweep the change at the allocation the route set. Round 2: a reviewer checks only whether the
-round-1 findings were fixed; it raises nothing new, and anything new it
-notices goes into `unresolved:` as an observation. A Critical still open after
-round 2 is stop (e). A fresh sweep each round finds a fresh set of findings
-and never converges; the cap is the convergence.
+When the route allocates `lite`, review is one round with no re-review: one
+fresh reviewer sweeps correctness and test integrity, and you fix its
+Critical and Important findings in one pass. A Critical you could not fix is
+stop (e); an Important you leave unfixed goes into `unresolved:` with the
+reason. Judging that you could not fix a finding is not grading your own fix,
+so this keeps review independent.
+
+When the route allocates any other review, it is two rounds, never more.
+Round 1: fresh reviewers sweep the change at the allocation the route set.
+Round 2: a reviewer checks only whether the round-1 findings were fixed; it
+raises nothing new, and anything new it notices goes into `unresolved:` as an
+observation. A Critical still open after round 2 is stop (e). A fresh sweep
+each round finds a fresh set of findings and never converges; the cap is the
+convergence.
 
 ## Branch
 

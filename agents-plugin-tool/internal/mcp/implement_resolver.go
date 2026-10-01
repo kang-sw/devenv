@@ -19,10 +19,10 @@ type implementInput struct {
 	Facts  implementFactsInput  `json:"facts,omitempty"`
 	Policy implementPolicyInput `json:"policy,omitempty"`
 	Format string               `json:"format,omitempty"`
-	// ReviewPhase is the review_phase config value ("on" | "off") resolved
-	// under the caller's session key by the route.resolve_implement handler.
-	// It is config, not a caller argument, so it never parses from the call;
-	// anything other than "on" normalizes to "off".
+	// ReviewPhase is the review_phase config value ("off" | "lite" | "full")
+	// resolved under the caller's session key by the route.resolve_implement
+	// handler. It is config, not a caller argument, so it never parses from the
+	// call; an unset or unknown value normalizes to the builtin "lite".
 	ReviewPhase string `json:"-"`
 }
 
@@ -794,22 +794,31 @@ func validObservedBranch(branch string) bool {
 // implementReviewAllocNone is the allocation when no per-phase review runs.
 const implementReviewAllocNone = "none"
 
-// normalizeReviewPhase maps the resolved review_phase config value to "on" or
-// "off"; an unset or unknown value is "off", matching the builtin default.
+// implementReviewAllocLite is the allocation for the review_phase lite tier:
+// one fresh medium-tier reviewer covering correctness and test integrity, one
+// pass with no re-review.
+const implementReviewAllocLite = "lite"
+
+// normalizeReviewPhase maps the resolved review_phase config value to "off",
+// "lite", or "full"; an unset or unknown value (including the retired "on") is
+// "lite", matching the builtin default.
 func normalizeReviewPhase(value string) string {
-	if strings.EqualFold(strings.TrimSpace(value), "on") {
-		return "on"
+	switch v := strings.ToLower(strings.TrimSpace(value)); v {
+	case "off", "full":
+		return v
+	default:
+		return "lite"
 	}
-	return "off"
 }
 
 // deriveImplementReviewAlloc allocates per-phase independent review. An
 // explicit policy.review.override of single/partitioned always dispatches,
-// even with review_phase off. Otherwise review_phase off allocates none (the
-// pre-merge range review is the integration net), and review_phase on
-// allocates by risk. Any allocated review is a fresh reviewer: the caller
-// executes the change, so no allocation resolves to the caller reviewing its
-// own work. Only the breadth varies — one full-scope reviewer, or a risk-keyed
+// whatever review_phase says. Otherwise review_phase off allocates none (the
+// pre-merge range review is the integration net), lite allocates the single
+// lite reviewer regardless of the risk facts, and full allocates by risk. Any
+// allocated review is a fresh reviewer: the caller executes the change, so no
+// allocation resolves to the caller reviewing its own work. Only the breadth
+// varies — the lite reviewer, one full-scope reviewer, or a risk-keyed
 // partition.
 func deriveImplementReviewAlloc(n normalizedImplementFacts) string {
 	if n.ReviewOverride != "" && n.ReviewOverride != "auto" {
@@ -820,8 +829,13 @@ func deriveImplementReviewAlloc(n normalizedImplementFacts) string {
 			return n.ReviewOverride
 		}
 	}
-	if n.ReviewPhase != "on" {
+	switch n.ReviewPhase {
+	case "off":
 		return implementReviewAllocNone
+	case "full":
+		// fall out to the risk-keyed allocation below
+	default:
+		return implementReviewAllocLite
 	}
 	parts := implementReviewPartitions(n)
 	if len(parts) <= 1 {
@@ -1115,6 +1129,9 @@ func implementBranchNextInstruction(verdict implementVerdict) string {
 func implementNextAfterBranch(verdict implementVerdict) string {
 	if !verdict.NeedReview {
 		return "execute the installed Prep and Edit todos and the final action gate in order; per-phase review is off (review_phase), so no reviewer is dispatched."
+	}
+	if verdict.ReviewAlloc == implementReviewAllocLite {
+		return "execute the installed Prep and Edit todos, the one-pass lite review, and the final action gate in order."
 	}
 	return fmt.Sprintf("execute the installed Prep and Edit todos, %s review, and the final action gate in order.", verdict.ReviewAlloc)
 }

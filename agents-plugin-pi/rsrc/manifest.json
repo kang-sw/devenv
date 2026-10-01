@@ -3,6 +3,7 @@
   "files": {
     "code-review-correctness/code-review-correctness.md": "9a37a714215f7456f90c8c72440de9831e66b5369276e839b2517dd6d19ad9f3",
     "code-review-fit/code-review-fit.md": "14887cd488fdc5fc750f2507161b1698de152f35a302b7b8f253ced09ea4fe72",
+    "code-review-lite/code-review-lite.md": "94f66f6240dabdcf3b8b1bff86ef6427f498cd8eb9c8f4e2ce5caa6f11c9a2f4",
     "code-review-test/code-review-test.md": "97d1527dec453c47106297d8f4fd9516ce65f61abeb68949607a31c25dab5bce",
     "code-reviewer.md": "4e4054ea13e239cbd62ba4203129b7cf38aff6184edd17a738f6ae2784f3c028",
     "delegate-implementer/delegate-implementer.md": "57e92744241547d194840af36208377383c8607516d760e3d98be2bd89d5679f",
@@ -25,7 +26,7 @@
     "lead-scope-worktree/lead-scope-worktree.md": "89ed59baa993ddb0fb3ed37f4ffa5d990863b76beb55fece7a0829195db93ce1",
     "lead-ship/lead-ship.md": "0f4e2e5d92f40ab8603a5660a9caec840d88bbfc6d2ef8ab9dec29eb7d171dfe",
     "lead-ticket/lead-ticket.md": "df06497d591cb9f106663c930c590dfdbe6f603bfeeb14a8fb31b1c6cdae063e",
-    "lead-tune/lead-tune.md": "97ca41af15e4cc98e68b722765ba7d3095cfdf6e33962c8f213f267385cde356",
+    "lead-tune/lead-tune.md": "fc6f4c68fba646049e5ff072001cf7850ca18827a53e2e24ed7e578674276fa3",
     "lead-use-mailbox/arm-the-wait.md": "f47a20a40dc9bc072bac056d843d3deb9e2ee36ccce228e1a9994c1bc4d0a618",
     "lead-use-mailbox/arm-the-wait.pi.md": "fce77e67ab83ae06a1698df262c7f51f7f20ef662b64a90e5e1bdbe08807480a",
     "lead-use-mailbox/lead-use-mailbox.md": "bb97e5304aa54e61289e31bb5ec9797c164ffc4fdc4fb6d130005a457d8f5fb3",
@@ -46,8 +47,8 @@
     "ticket-reviewer-completeness/ticket-reviewer-completeness.md": "12efbce33b5311810a162974d99702252549639f1a064fd84331005328c60b37",
     "ticket-reviewer-design/ticket-reviewer-design.md": "c419116074ce2da1377918774fbf41f82228e4d8c392bb11f0351c63cb4705f6",
     "ticket-selector/ticket-selector.md": "e547c5031d733a6546a99fb139cd11d9db3e80744cdc39787be961187993d9fd",
-    "ticket-worker-elevated/ticket-worker-elevated.md": "daad2b2819778c6ce376bdee4ba0664a9fea67995f4f779876873b7498b34a29",
-    "ticket-worker/ticket-worker.md": "d3a4e2dba8e35832ffe17f1cf01655d47f12030bf91eb6e49ad6a079813d8c16",
-    "worker-stop-protocol.md": "598f091d828b3952ccc6597465cee5fc816e75fcca0c6d49baab91abaab9efe2"
+    "ticket-worker-elevated/ticket-worker-elevated.md": "066bbca91712d90f99a686b8f7f9ba7119203a04ee61df5a70efe1cd2f1a8866",
+    "ticket-worker/ticket-worker.md": "558322907db3f72affbcaf79668a37f4143ca4d71729c90f94f29a3f6b95fb9f",
+    "worker-stop-protocol.md": "a41c2a5d3ea2f4e310213e32821ac289ca51471139fb617ebd06fd27e55582a3"
   }
 }

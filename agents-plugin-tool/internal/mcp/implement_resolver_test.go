@@ -13,12 +13,12 @@ import (
 // collapse: the fact set that used to select the caller-edits/caller-reviews
 // fast path — single-file, internal, no new public symbol or type contract, and
 // all four risk axes genuinely low — now resolves to the one execution mode with
-// an independent reviewer allocated once per-phase review is on. With
-// review_phase on, no fact combination may drop review; review_phase off is
+// an independent reviewer allocated under review_phase full. With
+// review_phase full, no fact combination may drop review; lite and off are
 // pinned by TestResolveImplementReviewPhaseGatesAllocation.
 func TestResolveImplementSmallestSafeChangeStillGetsIndependentReview(t *testing.T) {
 	input := implementInput{
-		ReviewPhase: "on",
+		ReviewPhase: "full",
 		Target: implementTargetInput{Kind: "inline", Label: "tiny edit", ScopeLabel: "tiny edit", ScopeSlug: "tiny-edit"},
 		Facts: implementFactsInput{
 			Scope: implementScopeFactsInput{
@@ -125,7 +125,7 @@ func TestDeriveImplementReviewAllocProportionalPartitions(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			tc.facts.ReviewPhase = "on"
+			tc.facts.ReviewPhase = "full"
 			if got := deriveImplementReviewAlloc(tc.facts); got != tc.want {
 				t.Fatalf("review allocation = %q, want %q", got, tc.want)
 			}
@@ -1011,9 +1011,11 @@ func TestNormalizeImplementFactsInlineUnaffected(t *testing.T) {
 }
 
 // TestResolveImplementReviewPhaseGatesAllocation pins the review_phase knob:
-// unset or off allocates no per-phase review and installs no review todo; on
-// reproduces the risk-keyed allocation; an explicit policy.review.override of
-// single or partitioned still dispatches review under off.
+// unset, unknown, the retired "on", and lite allocate the single lite reviewer
+// whatever the risk facts say; full reproduces the risk-keyed allocation; off
+// allocates no per-phase review and installs no review todo; and an explicit
+// policy.review.override of single or partitioned wins under every value and
+// installs the two-round review todo, while auto follows the knob.
 func TestResolveImplementReviewPhaseGatesAllocation(t *testing.T) {
 	riskyFacts := func() implementFactsInput {
 		return implementFactsInput{
@@ -1031,25 +1033,60 @@ func TestResolveImplementReviewPhaseGatesAllocation(t *testing.T) {
 			},
 		}
 	}
+	// quietFacts would allocate the single full-scope reviewer under full, so
+	// lite's result over it shows the lite reviewer is not risk-derived.
+	quietFacts := func() implementFactsInput {
+		return implementFactsInput{
+			Scope: implementScopeFactsInput{
+				Span:            factString{Value: "single-file", Present: true},
+				Surface:         factString{Value: "internal", Present: true},
+				NewPublicSymbol: factString{Value: "no", Present: true},
+				NewTypeContract: factString{Value: "no", Present: true},
+				TestSurface:     factString{Value: "none", Present: true},
+			},
+			Risk: implementRiskFactsInput{
+				Correctness:        factString{Value: "low", Present: true},
+				Fit:                factString{Value: "low", Present: true},
+				Test:               factString{Value: "low", Present: true},
+				SecurityOrContract: factString{Value: "low", Present: true},
+			},
+		}
+	}
 	obs := implementBranchObservation{CurrentBranch: "feature/demo", StartCommit: "abc123"}
 	for _, tc := range []struct {
-		name        string
-		reviewPhase string
-		override    string
-		wantAlloc   string
+		name          string
+		reviewPhase   string
+		quiet         bool
+		override      string
+		wantAlloc     string
+		wantCondition string
 	}{
-		{name: "unset is off", reviewPhase: "", wantAlloc: "none"},
-		{name: "off", reviewPhase: "off", wantAlloc: "none"},
-		{name: "unknown value is off", reviewPhase: "sometimes", wantAlloc: "none"},
-		{name: "on keeps the risk-keyed allocation", reviewPhase: "on", wantAlloc: "partitioned: correctness, fit, test"},
-		{name: "explicit single dispatches under off", reviewPhase: "off", override: "single", wantAlloc: "single"},
-		{name: "explicit partitioned dispatches under off", reviewPhase: "off", override: "partitioned", wantAlloc: "partitioned: correctness, fit, test"},
-		{name: "explicit auto follows the knob", reviewPhase: "off", override: "auto", wantAlloc: "none"},
+		{name: "unset is lite", reviewPhase: "", wantAlloc: "lite", wantCondition: "review-phase=lite"},
+		{name: "unknown value is lite", reviewPhase: "sometimes", wantAlloc: "lite", wantCondition: "review-phase=lite"},
+		{name: "retired on is lite", reviewPhase: "on", wantAlloc: "lite", wantCondition: "review-phase=lite"},
+		{name: "lite ignores high risk", reviewPhase: "lite", wantAlloc: "lite", wantCondition: "review-phase=lite"},
+		{name: "lite ignores low risk", reviewPhase: "lite", quiet: true, wantAlloc: "lite", wantCondition: "review-phase=lite"},
+		{name: "full keeps the risk-keyed partition", reviewPhase: "full", wantAlloc: "partitioned: correctness, fit, test", wantCondition: "review-phase=full"},
+		{name: "full keeps the single low-risk reviewer", reviewPhase: "FULL", quiet: true, wantAlloc: "single", wantCondition: "review-phase=full"},
+		{name: "off", reviewPhase: "off", wantAlloc: "none", wantCondition: "review-phase=off"},
+		{name: "explicit single wins under off", reviewPhase: "off", override: "single", wantAlloc: "single", wantCondition: "review-phase=off"},
+		{name: "explicit partitioned wins under off", reviewPhase: "off", override: "partitioned", wantAlloc: "partitioned: correctness, fit, test", wantCondition: "review-phase=off"},
+		{name: "explicit single wins under lite", reviewPhase: "lite", override: "single", wantAlloc: "single", wantCondition: "review-phase=lite"},
+		{name: "explicit partitioned wins under lite", reviewPhase: "lite", override: "partitioned", wantAlloc: "partitioned: correctness, fit, test", wantCondition: "review-phase=lite"},
+		{name: "explicit single wins under full", reviewPhase: "full", override: "single", wantAlloc: "single", wantCondition: "review-phase=full"},
+		{name: "explicit partitioned wins under full", reviewPhase: "full", override: "partitioned", quiet: true, wantAlloc: "partitioned: correctness", wantCondition: "review-phase=full"},
+		{name: "explicit auto follows off", reviewPhase: "off", override: "auto", wantAlloc: "none", wantCondition: "review-phase=off"},
+		{name: "explicit auto follows lite", reviewPhase: "lite", override: "auto", wantAlloc: "lite", wantCondition: "review-phase=lite"},
+		{name: "explicit auto follows full", reviewPhase: "full", override: "auto", wantAlloc: "partitioned: correctness, fit, test", wantCondition: "review-phase=full"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			facts := riskyFacts()
+			if tc.quiet {
+				facts = quietFacts()
+			}
 			input := implementInput{
 				Target:      implementTargetInput{Kind: "inline", Label: "edit", ScopeLabel: "edit", ScopeSlug: "edit"},
-				Facts:       riskyFacts(),
+				Facts:       facts,
 				ReviewPhase: tc.reviewPhase,
 			}
 			if tc.override != "" {
@@ -1060,40 +1097,58 @@ func TestResolveImplementReviewPhaseGatesAllocation(t *testing.T) {
 			if result.Verdict.ReviewAlloc != tc.wantAlloc || result.Verdict.NeedReview != wantNeed || result.Agenda.NeedReview != wantNeed {
 				t.Fatalf("verdict review = %q need=%v (agenda need=%v), want %q need=%v", result.Verdict.ReviewAlloc, result.Verdict.NeedReview, result.Agenda.NeedReview, tc.wantAlloc, wantNeed)
 			}
+			if !containsString(result.Conditions, tc.wantCondition) {
+				t.Fatalf("conditions missing %s: %v", tc.wantCondition, result.Conditions)
+			}
 			todos := deriveImplementTodosFromVerdict(implementTodoVerdict{
 				BranchPlan:  result.Verdict.BranchPlan,
 				ReviewAlloc: result.Verdict.ReviewAlloc,
 				NeedReview:  result.Verdict.NeedReview,
 			})
-			hasReview := false
-			for _, item := range todos {
-				if item.Key == "review" {
-					hasReview = true
+			var review *todoItem
+			final := ""
+			for i := range todos {
+				switch todos[i].Key {
+				case "review":
+					review = &todos[i]
+				case "final-action-gate":
+					if todos[i].Instruction != nil {
+						final = *todos[i].Instruction
+					}
 				}
 			}
-			if hasReview != wantNeed {
-				t.Fatalf("installed review todo = %v, want %v: %v", hasReview, wantNeed, keysOf(todos))
+			if (review != nil) != wantNeed {
+				t.Fatalf("installed review todo = %v, want %v: %v", review != nil, wantNeed, keysOf(todos))
 			}
-			if wantNeed {
-				if strings.Contains(result.NextInstruction, "per-phase review is off") {
-					t.Fatalf("review-on next instruction claims review is off: %q", result.NextInstruction)
+			if !wantNeed {
+				if !strings.Contains(result.NextInstruction, "per-phase review is off (review_phase), so no reviewer is dispatched.") || strings.Contains(result.NextInstruction, "none review") {
+					t.Fatalf("review-off next instruction = %q", result.NextInstruction)
+				}
+				if strings.Contains(final, "Verify the review is resolved") || !strings.Contains(final, "state that skip in the report's omitted: field") {
+					t.Fatalf("review-off final action = %q", final)
 				}
 				return
 			}
-			if !strings.Contains(result.NextInstruction, "per-phase review is off (review_phase), so no reviewer is dispatched.") || strings.Contains(result.NextInstruction, "none review") {
-				t.Fatalf("review-off next instruction = %q", result.NextInstruction)
+			if strings.Contains(result.NextInstruction, "per-phase review is off") {
+				t.Fatalf("review-on next instruction claims review is off: %q", result.NextInstruction)
 			}
-			final := ""
-			for _, item := range todos {
-				if item.Key == "final-action-gate" && item.Instruction != nil {
-					final = *item.Instruction
+			instruction := ""
+			if review.Instruction != nil {
+				instruction = *review.Instruction
+			}
+			if tc.wantAlloc == "lite" {
+				if review.Title != "Review (lite)" || !strings.Contains(instruction, "Render `code-review-lite`") || strings.Contains(instruction, "two rounds") {
+					t.Fatalf("lite review todo = %q: %q", review.Title, instruction)
 				}
+				if !strings.Contains(result.NextInstruction, "the one-pass lite review") {
+					t.Fatalf("lite next instruction = %q", result.NextInstruction)
+				}
+				return
 			}
-			if strings.Contains(final, "Verify the review is resolved") || !strings.Contains(final, "state that skip in the report's omitted: field") {
-				t.Fatalf("review-off final action = %q", final)
-			}
-			if !containsString(result.Conditions, "review-phase=off") {
-				t.Fatalf("conditions missing review-phase=off: %v", result.Conditions)
+			// Every non-lite allocation, an override under knob lite included,
+			// installs the two-round protocol.
+			if review.Title == "Review (lite)" || !strings.Contains(instruction, "Review is two rounds, never more") || strings.Contains(instruction, "code-review-lite") {
+				t.Fatalf("two-round review todo = %q: %q", review.Title, instruction)
 			}
 		})
 	}

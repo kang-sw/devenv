@@ -414,6 +414,8 @@ func implementReviewTitle(reviewAlloc string) string {
 	switch strings.ToLower(strings.TrimSpace(reviewAlloc)) {
 	case "single", "single reviewer":
 		return "Review (single)"
+	case implementReviewAllocLite:
+		return "Review (lite)"
 	case "partitioned", "partitioned: correctness, fit, test", "partitioned: correctness,fit,test":
 		return "Review (partitioned)"
 	case "":
@@ -491,12 +493,24 @@ const implementReviewFixClause = "Fix the findings yourself by severity; there i
 // or a re-review.
 const implementReviewRoundsClause = "Review is two rounds, never more: round two uses a fresh reviewer render that checks only whether round one's findings were fixed, raises nothing new, and reports any new observation as unresolved rather than opening a third round. A Critical finding still open after round two is a stop — report it to the lead rather than elevating or re-reviewing it."
 
+// implementReviewLiteClause states the lite allocation's one-pass protocol,
+// mirroring the shipped ticket-worker and worker-stop-protocol text: the worker
+// fixes Critical and Important findings in one pass and dispatches no
+// re-review; a Critical it cannot fix is the review stop, so the lead's
+// elevation ladder stays reachable; an Important it leaves unfixed is reported
+// as unresolved with a reason. Judging "I could not fix it" is not grading its
+// own fix, so this reintroduces no self-review.
+const implementReviewLiteClause = "Lite review is one pass with no re-review: fix the Critical and Important findings in that pass and dispatch no second reviewer. A Critical finding you cannot fix is a stop — report it to the lead; an Important finding you leave unfixed goes under unresolved with the reason."
+
 func implementReviewInstruction(verdict implementTodoVerdict) string {
 	if isBranchStop(verdict) {
 		return fmt.Sprintf("Do not start review before implementation can run; resolve the branch blocker first: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
 	}
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(verdict.ReviewAlloc)), "partitioned:") {
 		return fmt.Sprintf("Dispatch %s reviewers: render each named structured wrapper and supply its rendered path and a generated findings path. %s %s", formatReviewPartitions(verdict.ReviewAlloc), implementReviewFixClause, implementReviewRoundsClause)
+	}
+	if strings.EqualFold(strings.TrimSpace(verdict.ReviewAlloc), implementReviewAllocLite) {
+		return fmt.Sprintf("Render `code-review-lite` and dispatch one fresh reviewer covering correctness and test integrity with the rendered path and a generated findings path. %s %s", implementReviewFixClause, implementReviewLiteClause)
 	}
 	if strings.EqualFold(strings.TrimSpace(verdict.ReviewAlloc), "single") {
 		return fmt.Sprintf("Render `reviewer` and dispatch one full-scope review with the rendered path and a generated findings path. %s %s", implementReviewFixClause, implementReviewRoundsClause)
