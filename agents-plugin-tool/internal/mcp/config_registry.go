@@ -101,6 +101,16 @@ func (e configKeyEntry) RepoScoped() bool {
 	return e.ResolverBacked && !e.GlobalOnly()
 }
 
+// RepoKey is the key a committed repo-scope file stores this knob under. A
+// prompt.* knob stores one entry per harness bucket, so its key names the
+// bucket set (claude|codex|pi|all, where all applies to every harness).
+func (e configKeyEntry) RepoKey() string {
+	if strings.HasPrefix(e.Key, "prompt.") {
+		return e.Key + ".<" + strings.Join(promptOverrideHarnessBuckets, "|") + ">"
+	}
+	return e.Key
+}
+
 // configRegistry holds the static per-key entries. The dynamic prompt.*
 // family is not represented here — it is generated per discovered override
 // point by promptKnobEntry at catalog-build time (see buildTuningCatalog).

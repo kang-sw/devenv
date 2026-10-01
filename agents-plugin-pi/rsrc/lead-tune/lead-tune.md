@@ -15,7 +15,7 @@ Scope
 - Tuning tools are lead-only and require the lead `session_key`; a delegate or leaf key cannot tune.
 
 Surface
-- Treat `config.list` as the source of supported knob ids, the `config.tune` write contract, field options, current values and scopes, what each knob's values do and cost (its description), whether the repo scope applies to it (`repo_scope`), and the repo-scope file's path and shape.
+- Treat `config.list` as the source of supported knob ids, the `config.tune` write contract, field options, current values and scopes, what each knob's values do and cost (its description), whether the repo scope applies to it (`repo_scope`) and under which key (`repo_key`), and the repo-scope file's path and shape.
 - Name values exactly as `config.list` accepts them; gloss `off`/`ask`/`auto` as skip/recommend/require.
 - Treat prompt override-point ids as valid only when they appear as `prompt.<pointId>` knobs in `config.list`.
 
@@ -45,7 +45,7 @@ Storage
 ## On: tune scalar knob
 
 1. Take the knob and the value the user chose from its catalog `value` field.
-2. Choose the scope the user named, else the knob's declared default. A repo-scope choice goes to `On: commit repo-scope setting`.
+2. Choose the scope the user named; otherwise suggest one by the scope guidance in `On: explain knobs` and confirm it. A repo-scope choice goes to `On: commit repo-scope setting`.
 3. Confirm the Tuning Proposal.
 4. Call `config.tune` with the knob's id as `key`, `session_key`, the selected scope when the catalog exposes a scope selector, and the value.
 5. Report the stored value and scope.
@@ -53,7 +53,7 @@ Storage
 ## On: commit repo-scope setting
 
 1. Confirm the knob's `repo_scope` is true; otherwise say it cannot be set team-wide and offer project or global scope.
-2. Draft the edit to the repo-scope file at the `config.list` path in its listed shape: add or change only the chosen key, keeping every existing entry; create the file when it does not exist.
+2. Draft the edit to the repo-scope file at the `config.list` path in its listed shape: add or change only the knob's `repo_key` entry, choosing one listed harness bucket when the key offers several, and keep every existing entry; create the file when it does not exist.
 3. If the knob's current value comes from session or project scope, say that value keeps winning on this machine until it is reset.
 4. Confirm the Repo-Scope Proposal.
 5. Write the file and propose an ordinary commit of it.
@@ -62,7 +62,7 @@ Storage
 
 1. Map the request to a `prompt.<pointId>` knob from the `config.list()` catalog; if no listed point matches, show prompt knobs and ask.
 2. Draft or restate the override text for user approval, proposing concise text when the user's desired wording is clear. State the model: a stored override replaces that point's seed block for the matching `(pointId, harness)`; a point shipped with an empty seed contributes new text at that point rather than replacing shipped guidance.
-3. Choose all exposed selector fields, including `harness` or `scope` when present; use `n/a` for selector fields the catalog does not expose.
+3. Choose all exposed selector fields, including `harness` or `scope` when present; use `n/a` for selector fields the catalog does not expose. A repo-scope choice goes to `On: commit repo-scope setting` with the override text as the value.
 4. Confirm `(knob, writer, harness, scope, text)` per the Tuning Proposal template.
 5. Call `config.tune` with the knob's id as `key`, `session_key`, the selected selector fields, and the override text as `value`.
 6. Report the stored knob/harness/scope; note it applies at the next playbook render, not retroactively.

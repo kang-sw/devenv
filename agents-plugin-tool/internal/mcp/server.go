@@ -551,14 +551,19 @@ func (s *Server) sessionResolver(sessionKey string, builtins map[string]string) 
 // caller's current git user.email. It is the single reader of both so
 // tickets.query and tickets.create_empty agree on when the feature is active and
 // on which identity it compares against. Flag off (the default) ⇒ aware=false
-// and an empty email, and every caller treats the feature as inert.
-func (s *Server) assigneeFeature(root, sessionKey string) (aware bool, currentEmail string) {
+// and an empty email, and every caller treats the feature as inert. A config
+// load error is returned rather than read as "off": a malformed committed file
+// must not silently drop the ownership gate.
+func (s *Server) assigneeFeature(root, sessionKey string) (aware bool, currentEmail string, err error) {
 	r := s.sessionResolver(sessionKey, builtinConfigDefaults())
 	resolved, err := r.Get(sessionKey, wsconfig.ItemTicketAssigneeAware)
-	if err != nil || strings.TrimSpace(resolved.Value) != "on" {
-		return false, ""
+	if err != nil {
+		return false, "", err
 	}
-	return true, wsgit.CurrentUserEmail(context.Background(), wsgit.ExecRunner{}, root)
+	if strings.TrimSpace(resolved.Value) != "on" {
+		return false, "", nil
+	}
+	return true, wsgit.CurrentUserEmail(context.Background(), wsgit.ExecRunner{}, root), nil
 }
 
 // applyAssigneeGate attaches the computed ownership gate to every ticket in the
@@ -960,10 +965,12 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			// The echo reads through the session-anchored resolver so a reset
 			// reports the committed repo value that now applies; the writer above
 			// stays repo-unaware because repo scope is read-only to config.tune.
+			// The reset already happened, so an echo load failure is reported
+			// beside it rather than as a failed tune.
 			echo := s.sessionResolver(sessionKey, builtinConfigDefaults())
 			resolved, err := echo.Get(sessionKey, entry.Key)
 			if err != nil {
-				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %w", err))
+				return toolTextResponse(req.ID, fmt.Sprintf("%s: reset [scope:%s]\nwarning: effective value unreadable: %v\n", entry.Key, resetEchoScope(explicitScope, entry), err), nil)
 			}
 			return toolTextResponse(req.ID, fmt.Sprintf("%s: %s [scope:%s]\n", entry.Key, resolved.Value, resolved.Scope), nil)
 		}
@@ -1025,9 +1032,8 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			echo := s.sessionResolver(sessionKey, builtinConfigDefaults())
 			effective, err := echo.Get(sessionKey, entry.Key)
 			if err != nil {
-				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %w", err))
-			}
-			if effective.Scope != resolvedScope {
+				text += fmt.Sprintf("warning: effective value unreadable: %v\n", err)
+			} else if effective.Scope != resolvedScope {
 				text += fmt.Sprintf("shadowed: effective %s: %s [scope:%s]\n", entry.Key, effective.Value, effective.Scope)
 			}
 			return toolTextResponse(req.ID, text, nil)
@@ -1418,7 +1424,10 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		// The assignee feature reads the committed ticket-assignee-aware flag and,
 		// when on, the caller's git identity. Off ⇒ inert: no gate is attached and
 		// the assigned_to_me omit-filter does nothing.
-		assigneeAware, currentEmail := s.assigneeFeature(root, sessionKey)
+		assigneeAware, currentEmail, err := s.assigneeFeature(root, sessionKey)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
 		// A pure point-resolve call - ticket_stem set, no query text, no
 		// mentions_ticket_stem filter, and no statuses override - is exactly
 		// the old tickets.status shape: reuse its logic (TicketsStatus +
@@ -1685,7 +1694,10 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		// Auto-fill the assignee at creation (the explicit ownership act). Inert
 		// unless the ticket-assignee-aware flag is on; set_assignee (default true)
 		// then chooses self / none / explicit emails.
-		assigneeAware, currentEmail := s.assigneeFeature(root, sessionKey)
+		assigneeAware, currentEmail, err := s.assigneeFeature(root, sessionKey)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
 		rawSetAssignee, setAssigneePresent := params.Arguments["set_assignee"]
 		result, err := wsdoc.TicketCreate(root, wsdoc.TicketCreateOptions{
 			Stem:         stem,
@@ -2319,6 +2331,10 @@ type tuningKnob struct {
 	// RepoScope reports whether the committed repo-scope file can set this
 	// knob (configKeyEntry.RepoScoped).
 	RepoScope bool `json:"repo_scope"`
+	// RepoKey is the key a repo-scope file entry stores this knob under, set
+	// only when RepoScope is true. It differs from ID for prompt.* knobs,
+	// whose stored keys carry a harness bucket suffix.
+	RepoKey string `json:"repo_key,omitempty"`
 }
 
 type tuningWriter struct {
@@ -2362,6 +2378,9 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 			return
 		}
 		knob.RepoScope = entry.RepoScoped()
+		if knob.RepoScope {
+			knob.RepoKey = entry.RepoKey()
+		}
 		catalog.Knobs = append(catalog.Knobs, knob)
 	}
 
@@ -2622,10 +2641,22 @@ func formatTuningCatalog(catalog tuningCatalog) string {
 		if current := formatTuningCurrent(knob.Current); current != "" {
 			fmt.Fprintf(&b, "  current: %s\n", current)
 		}
-		fmt.Fprintf(&b, "  repo_scope: %s\n", yesNo(knob.RepoScope))
+		if knob.RepoKey != "" {
+			fmt.Fprintf(&b, "  repo_scope: yes (key: %s)\n", knob.RepoKey)
+		} else {
+			fmt.Fprintf(&b, "  repo_scope: %s\n", yesNo(knob.RepoScope))
+		}
 		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+// resetEchoScope names the scope a config.tune reset removed the override from.
+func resetEchoScope(explicitScope wsconfig.Scope, entry configKeyEntry) wsconfig.Scope {
+	if explicitScope != "" {
+		return explicitScope
+	}
+	return entry.DefaultScope()
 }
 
 func yesNo(v bool) string {

@@ -342,10 +342,25 @@ func TestConfigListReportsRepoScopeFields(t *testing.T) {
 		Knobs []struct {
 			ID        string `json:"id"`
 			RepoScope bool   `json:"repo_scope"`
+			RepoKey   string `json:"repo_key"`
 		} `json:"knobs"`
 	}
 	if err := json.Unmarshal([]byte(resp), &view); err != nil {
 		t.Fatalf("config.list json response is not JSON: %v\n%s", err, resp)
+	}
+	// repo_key is the stored key a repo-scope entry uses: the knob id for a
+	// scalar knob, the harness-suffixed form the resolver reads for prompt.*,
+	// and absent where the repo scope does not apply.
+	wantRepoKey := map[string]string{
+		"sage_review_design":           "sage_review_design",
+		"prompt.UserPreferenceSection": "prompt.UserPreferenceSection.<claude|codex|pi|all>",
+		"agents.tier":                  "",
+		"bootstrap_alarm":              "",
+	}
+	for _, k := range view.Knobs {
+		if want, ok := wantRepoKey[k.ID]; ok && k.RepoKey != want {
+			t.Fatalf("%s repo_key = %q, want %q", k.ID, k.RepoKey, want)
+		}
 	}
 
 	if view.RepoScope == nil {
@@ -632,5 +647,133 @@ func TestConfigListWeightLeverDescriptionsStateValues(t *testing.T) {
 				t.Fatalf("%s description missing %q:\n%s", c.id, want, desc)
 			}
 		}
+	}
+}
+
+// TestRepoScopeWorkflowLangReachesPlaybookRead verifies a committed
+// workflow.lang value reaches a session-keyed playbook.read: the lang reader
+// moved to the session-anchored resolver with the prompt-override lookup.
+func TestRepoScopeWorkflowLangReachesPlaybookRead(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	mustWrite(t, root, ".ws-workflow/config.json",
+		`{"schema_version":1,"overrides":{"workflow.lang":"Klingon"}}`+"\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 921001, root, nil))
+
+	resp := callToolWithKey(t, server, 921002, key, "playbook.read", map[string]any{"name": "lead-workflow-manual"})
+	if !strings.Contains(resp, "Respond to the user in Klingon.") {
+		t.Fatalf("playbook.read did not apply the committed repo workflow.lang:\n%s", resp)
+	}
+}
+
+// TestRepoScopeMalformedFileFailsLoudAtPlaybookReaders extends item (vii) to
+// the playbook readers that moved to the session-anchored resolver:
+// playbook.read, playbook.render, and workflow_manual each return an error
+// naming the malformed committed file instead of rendering with the repo
+// layer silently dropped.
+func TestRepoScopeMalformedFileFailsLoudAtPlaybookReaders(t *testing.T) {
+	cases := []struct {
+		tool string
+		args map[string]any
+	}{
+		{"playbook.read", map[string]any{"name": "lead-workflow-manual"}},
+		{"playbook.render", map[string]any{"name": "delegate-implementer"}},
+		{"workflow_manual", map[string]any{}},
+	}
+	for i, tc := range cases {
+		t.Run(tc.tool, func(t *testing.T) {
+			useLeadProfile(t)
+			root := t.TempDir()
+			mustWrite(t, root, ".ws-workflow/config.json", "{ not json")
+			initGit(t, root)
+			t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+			t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+			server := NewServer(root, "test")
+			key, _ := parseLoginResponse(t, callLogin(t, server, 921100+i*10, root, nil))
+			wantPath := filepath.Join(canonicalRootForTest(t, root), ".ws-workflow", "config.json")
+
+			args := map[string]any{"session_key": key}
+			for k, v := range tc.args {
+				args[k] = v
+			}
+			resp := callToolOnce(t, server, 921101+i*10, tc.tool, args)
+			if !toolIsError(t, resp) {
+				t.Fatalf("%s must error on a malformed committed repo file, got: %s", tc.tool, resp)
+			}
+			if text := toolText(t, resp); !strings.Contains(text, wantPath) {
+				t.Fatalf("%s error does not name the file path %q: %s", tc.tool, wantPath, text)
+			}
+		})
+	}
+}
+
+// TestRepoScopeMalformedFileFailsLoudAtTicketsQuery verifies the
+// ticket-assignee-aware reader returns the load error instead of reading a
+// malformed committed file as "feature off", which would silently drop the
+// ownership gate from tickets.query.
+func TestRepoScopeMalformedFileFailsLoudAtTicketsQuery(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	mustWrite(t, root, ".ws-workflow/config.json", "{ not json")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 921201, root, nil))
+	wantPath := filepath.Join(canonicalRootForTest(t, root), ".ws-workflow", "config.json")
+
+	resp := callToolOnce(t, server, 921202, "tickets.query", map[string]any{"session_key": key, "query": "anything"})
+	if !toolIsError(t, resp) {
+		t.Fatalf("tickets.query must error on a malformed committed repo file, got: %s", resp)
+	}
+	if text := toolText(t, resp); !strings.Contains(text, wantPath) {
+		t.Fatalf("tickets.query error does not name the file path %q: %s", wantPath, text)
+	}
+}
+
+// TestConfigTuneReportsWriteWhenEchoFails verifies a config.tune write that
+// succeeded is reported as such when the effective-value echo cannot load a
+// malformed committed repo file: the writer never reads the repo scope, so
+// the outcome is a success with a warning, not a failed tune.
+func TestConfigTuneReportsWriteWhenEchoFails(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	mustWrite(t, root, ".ws-workflow/config.json", "{ not json")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 921301, root, nil))
+
+	setResp := callToolOnce(t, server, 921302, "config.tune", map[string]any{
+		// Global scope: the echo then falls through project to the repo layer;
+		// a project write would short-circuit the echo before the repo load.
+		"session_key": key, "key": "sage_review_design", "value": "ask", "scope": "global",
+	})
+	if toolIsError(t, setResp) {
+		t.Fatalf("config.tune set must succeed when only the echo fails: %s", setResp)
+	}
+	setText := toolText(t, setResp)
+	if !strings.Contains(setText, "sage_review_design: ask [scope:global]") || !strings.Contains(setText, "warning: effective value unreadable") {
+		t.Fatalf("config.tune set echo = %q, want the write plus an unreadable-effective warning", setText)
+	}
+
+	resetResp := callToolOnce(t, server, 921303, "config.tune", map[string]any{
+		"session_key": key, "key": "sage_review_design", "reset": true, "scope": "project",
+	})
+	if toolIsError(t, resetResp) {
+		t.Fatalf("config.tune reset must succeed when only the echo fails: %s", resetResp)
+	}
+	resetText := toolText(t, resetResp)
+	if !strings.Contains(resetText, "sage_review_design: reset [scope:project]") || !strings.Contains(resetText, "warning: effective value unreadable") {
+		t.Fatalf("config.tune reset echo = %q, want the reset plus an unreadable-effective warning", resetText)
 	}
 }

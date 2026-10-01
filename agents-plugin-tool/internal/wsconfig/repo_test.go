@@ -441,3 +441,33 @@ func TestRepoPath(t *testing.T) {
 		t.Fatalf("RepoPath = %q, want %q", got, want)
 	}
 }
+
+// TestResolverCheckSurfacesEachFileScope verifies Resolver.Check reports a
+// malformed project or global file too, not only the repo file.
+func TestResolverCheckSurfacesEachFileScope(t *testing.T) {
+	for _, scope := range []string{"project", "global"} {
+		t.Run(scope, func(t *testing.T) {
+			opts := Options{CacheHome: t.TempDir(), ConfigHome: t.TempDir(), RepoRoot: t.TempDir()}
+			var path string
+			var err error
+			if scope == "project" {
+				path, err = Path(opts)
+			} else {
+				path, err = GlobalPath(opts)
+			}
+			if err != nil {
+				t.Fatalf("resolve %s path: %v", scope, err)
+			}
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatalf("mkdir: %v", err)
+			}
+			if err := os.WriteFile(path, []byte("{ not json"), 0o644); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+			r := NewResolver(opts, nil, nil, nil)
+			if err := r.Check(); err == nil {
+				t.Fatalf("Check() = nil with a malformed %s file", scope)
+			}
+		})
+	}
+}
