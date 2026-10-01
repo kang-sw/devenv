@@ -194,6 +194,7 @@ import {
   registerPushFlush,
   sendToLead,
   type AgentToolsHandle,
+  type RpcAgentRecord,
   type RpcAgentRegistry,
 } from "./spawner.ts";
 import { createAgentWidgetController, shouldArmAgentWidget, type AgentWidgetController } from "./agent-widget.ts";
@@ -282,6 +283,26 @@ export function applySessionShutdownAgentFooter(lifecycle: AgentFooterSessionLif
 export function registerAgentFooterGitEvents(pi: Pick<ExtensionAPI, "on">, lifecycle: AgentFooterSessionLifecycle): void {
   pi.on("turn_end", () => { lifecycle.turnEnd(); });
   pi.on("input", () => { lifecycle.input(); });
+}
+
+/**
+ * The one session-start orphan revival wiring, shared by both `session_start`
+ * revival sites so they cannot drift. A revived fork gets `armForkRoleWiring`
+ * with no owner-question callback (owner-question wiring is disconnected, so
+ * no `onQuestionReport` is armed); a revived execute-worker gets the approval
+ * relay pinned to the record itself, so it no longer depends on which call
+ * site happens to resume it.
+ */
+export function reviveSessionOrphans(
+  pi: ExtensionAPI,
+  registry: RpcAgentRegistry,
+  orphans: PersistedOrphan[],
+  onApprovalPending: ((record: RpcAgentRecord) => void) | undefined,
+): RpcAgentRecord[] {
+  return reviveOrphans(registry, orphans, {
+    fork: (record) => armForkRoleWiring(pi, registry, record),
+    executeWorker: (record) => { record.onApprovalPending = onApprovalPending; },
+  });
 }
 
 export function applySessionStartAgentRetention(
@@ -842,10 +863,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     generation.sidecar = leadSidecarPath;
     let recoveredRegistry = readAndClearSidecarAt(leadSidecarPath);
     recoveredRegistry = applySessionStartAgentRetention(readSpawnRole(process.env), dispatchStorage.root, goalLoopConfigPath, recoveredRegistry);
-    if (recoveredRegistry.length > 0) reviveOrphans(agentTools.rpcRegistry, recoveredRegistry, {
-      fork: (record) => armForkRoleWiring(pi, agentTools!.rpcRegistry, record),
-      executeWorker: (record) => { record.onApprovalPending = onApprovalPending; },
-    });
+    if (recoveredRegistry.length > 0) reviveSessionOrphans(pi, agentTools.rpcRegistry, recoveredRegistry, onApprovalPending);
     publishSubtree(agentTools.rpcRegistry);
     // A hop with a parent reports its descendant usage. After a restart the
     // value is rebuilt here from the revived records and the checkpoint.
@@ -871,17 +889,9 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
         if (orphans.length > 0) {
           // Role-keyed wiring re-arm (review relay #1, I1): `spawnRole` is
           // persisted precisely so a revived FORK comes back with its fork-role
-          // wiring (which no longer arms owner-question routing) rather than
-          // silently degrading to plain-worker behavior on the next
-          // ws-agent-send. A revived execute-worker gets
-          // the approval relay pinned to the record itself, so it no longer
-          // depends on which call site happens to resume it.
-          reviveOrphans(agentTools.rpcRegistry, orphans, {
-            fork: (record) => armForkRoleWiring(pi, agentTools!.rpcRegistry, record),
-            executeWorker: (record) => {
-              record.onApprovalPending = onApprovalPending;
-            },
-          });
+          // wiring rather than silently degrading to plain-worker behavior on
+          // the next ws-agent-send (see reviveSessionOrphans).
+          reviveSessionOrphans(pi, agentTools.rpcRegistry, orphans, onApprovalPending);
           // Edition: EVERY entry is re-registered above (an idle reviewer
           // must stay reachable through ws-agent-send), but only a set
           // containing cut-off work is announced — see buildOrphanPush.

@@ -40,7 +40,7 @@ import {
   writeSidecar,
   type PersistedOrphan,
 } from "../src/agent-sidecar.ts";
-import { armForkRoleWiring } from "../src/fork.ts";
+import { reviveSessionOrphans } from "../src/index.ts";
 import { applyRpcEvent, evictForCapacity, listAgents, REPORT_TO_LEAD_TOOL_NAME, sendToAgent, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
 import { RpcClient, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { allocateAgentHome, createAgentStorageContext, readOwnership, updateOwnership } from "../src/agent-storage.ts";
@@ -686,17 +686,22 @@ describe("reviveOrphans (role wiring re-armed on revival)", () => {
     const source: RpcAgentRegistry = new Map([
       ["fork-1", record({ agentId: "fork-1", spawnRole: "fork", client: {} as RpcClient })],
       ["worker-1", record({ agentId: "worker-1", spawnRole: "worker", client: {} as RpcClient })],
+      ["ex-1", record({ agentId: "ex-1", spawnRole: "execute-worker", client: {} as RpcClient })],
     ]);
     const parsed = parseOrphans(serializeOrphans(captureOrphans(source)));
 
     const revivedRegistry: RpcAgentRegistry = new Map();
-    // Mirrors index.ts's revival wiring: the owner-question callback is no
-    // longer passed, so the revived fork arms no onQuestionReport.
-    reviveOrphans(revivedRegistry, parsed, {
-      fork: (rec) => armForkRoleWiring(pi, revivedRegistry, rec),
-    });
+    // index.ts's own revival wiring, the one function both session_start
+    // revival sites call: no owner-question callback is passed, so the revived
+    // fork arms no onQuestionReport.
+    const relayed: string[] = [];
+    reviveSessionOrphans(pi, revivedRegistry, parsed, (rec) => relayed.push(rec.agentId));
 
-    assert.deepEqual([...revivedRegistry.keys()].sort(), ["fork-1", "worker-1"]);
+    assert.deepEqual([...revivedRegistry.keys()].sort(), ["ex-1", "fork-1", "worker-1"]);
+    const ex = revivedRegistry.get("ex-1")!;
+    ex.onApprovalPending?.(ex);
+    assert.deepEqual(relayed, ["ex-1"], "a revived execute-worker carries the approval relay on its record");
+    assert.equal(ex.onQuestionReport, undefined);
     const fork = revivedRegistry.get("fork-1")!;
     assert.equal(fork.client, undefined, "revived dormant — ws-agent-send relaunches it from its own session file");
     assert.equal(fork.onQuestionReport, undefined, "a revived fork is not armed with the owner-question hook");
