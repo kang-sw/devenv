@@ -93,12 +93,10 @@ func (e configKeyEntry) DefaultScope() wsconfig.Scope {
 	return wsconfig.DefaultScope(e.Key)
 }
 
-// RepoScoped reports whether the committed repo scope can supply this key: a
-// resolver-backed key that is not global-only. agents.tier is not resolver-backed
-// (the repo file contributes only its overrides map), and a global-only key
-// skips the repo overlay in Resolver.Get.
+// RepoScoped reports whether the committed repo scope can supply this key.
+// Delegates to wsconfig.RepoScoped, the single implementation of the rule.
 func (e configKeyEntry) RepoScoped() bool {
-	return e.ResolverBacked && !e.GlobalOnly()
+	return wsconfig.RepoScoped(e.Key, e.ResolverBacked)
 }
 
 // RepoKey is the key a committed repo-scope file stores this knob under. A

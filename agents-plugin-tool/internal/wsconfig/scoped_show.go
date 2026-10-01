@@ -84,11 +84,12 @@ func ScopedShow(r *Resolver, opts Options, sessionKey string) (View, error) {
 			if rerr != nil {
 				return View{}, fmt.Errorf("scoped show: resolve key %q: %w", k, rerr)
 			}
+			// Every key here resolved through Resolver.Get, so it is resolver-backed.
 			view.ResolvedOverrides = append(view.ResolvedOverrides, ScopedItem{
 				Key:       k,
 				Value:     rv.Value,
 				Scope:     rv.Scope,
-				RepoScope: RepoScoped(k),
+				RepoScope: RepoScoped(k, true),
 			})
 		}
 		// Sort for deterministic output.

@@ -335,19 +335,23 @@ func TestRepoScopeFunction(t *testing.T) {
 // RepoScoped, the per-key predicate config.list's scoped view and tuning
 // catalog both call to flag whether the committed repo scope can supply a
 // key: every resolver-backed key except a global-only one (Resolver.Get skips
-// the repo overlay entirely for GlobalOnly items).
+// the repo overlay entirely for GlobalOnly items), and no key outside the
+// resolver.
 func TestRepoScopedReflectsGlobalOnlyExclusion(t *testing.T) {
-	if !RepoScoped(ItemTicketAssigneeAware) {
+	if !RepoScoped(ItemTicketAssigneeAware, true) {
 		t.Fatalf("an ordinary resolver-backed key must be repo-scoped: %q", ItemTicketAssigneeAware)
 	}
-	if !RepoScoped(ItemWorktreePool) {
+	if !RepoScoped(ItemWorktreePool, true) {
 		t.Fatalf("worktree_pool must be repo-scoped: %q", ItemWorktreePool)
 	}
-	if RepoScoped(ItemWorkflowPreferSubagent) {
+	if RepoScoped(ItemWorkflowPreferSubagent, true) {
 		t.Fatalf("a global-only key must not be repo-scoped: %q", ItemWorkflowPreferSubagent)
 	}
-	if RepoScoped(ItemBootstrapAlarm) {
+	if RepoScoped(ItemBootstrapAlarm, true) {
 		t.Fatalf("a global-only key must not be repo-scoped: %q", ItemBootstrapAlarm)
+	}
+	if RepoScoped(ItemTicketAssigneeAware, false) {
+		t.Fatalf("a key outside the resolver must not be repo-scoped: %q", ItemTicketAssigneeAware)
 	}
 }
 

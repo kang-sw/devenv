@@ -176,11 +176,15 @@ func GlobalOnly(key string) bool {
 	return ok
 }
 
-// RepoScoped reports whether a resolver-backed item key reads the committed repo
-// scope: every key except a global-only one, whose resolution skips the
-// session/project/repo overlays (see Resolver.Get).
-func RepoScoped(key string) bool {
-	return !GlobalOnly(key)
+// RepoScoped reports whether the committed repo scope can supply an item key:
+// a resolver-backed key that is not global-only. A key outside the resolver
+// (agents.tier, whose repo file contributes only its overrides map) never
+// reads the flat repo overlay, and a global-only key's resolution skips the
+// session/project/repo overlays (see Resolver.Get). This is the single
+// implementation of the repo-flag rule; config.list's scoped view and the MCP
+// tuning catalog both call it.
+func RepoScoped(key string, resolverBacked bool) bool {
+	return resolverBacked && !GlobalOnly(key)
 }
 
 // DefaultScope returns the declared default write scope for the given item key,
