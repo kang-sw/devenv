@@ -520,6 +520,9 @@
           "branch": "impl/develop/come-rut-yin"
         }
       }
+    },
+    "261001-feat-review-phase-lite-default": {
+      "registered_at": "2026-10-01T07:56:29Z"
     }
   }
 }
