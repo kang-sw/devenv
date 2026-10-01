@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 611b8a39958c3b5d
 sage-review-completeness-reviewed: 611b8a39958c3b5d
+completed: 2026-10-01
 ---
 
 # Repo-scope config that applies, and lead-tune guidance for workflow weight
@@ -234,6 +235,45 @@ posture or an empty template; (viii) after a project-scope reset of
 `auto` at scope `repo`; (ix) existing golden description tests updated.
 Full `go test ./...` for `agents-plugin-tool`.
 
+### Result (84f3b74a2) - 2026-10-01
+
+- One session-anchored constructor (`sessionConfigOptions` / `sessionResolver`
+  in `internal/mcp/server.go`) now serves every resolver-backed reader: the
+  Sage readers (`tickets.sage_gate`, `tickets.create_empty`, `tickets.move`),
+  the pool readers (`git.merge`, `worktree.acquire/release/list`), the
+  `config.tune` reset echo, `resolveReviewPhase`, `assigneeFeature`,
+  `config.list`, `buildOverrideLookup`, and the `workflow.lang` readers in
+  `playbook.read`, `playbook.render`, and `workflow_manual`.
+- Left on `wsconfig.Options{}` (no repo-capable key): `config.resolve_agent`,
+  `tuneAgentsTier`, `currentAgentTierMappings`, and the
+  `printPlaybook`/`renderPlaybook` config options (agents.tier, not
+  resolver-backed); the `bootstrap_alarm` readers in ferrule and
+  `workflow_manual` and `workflowPreferSubagentEnabled` (global-only); the
+  `config.tune` writers (repo scope is read-only); `wsnote`/mailbox
+  `MachinePath` (not a resolver).
+- Fail-loud: every repo-anchored reader returns its load error, and
+  `loadRepoConfig` errors name the file. `resolveReviewPhase` no longer falls
+  back to the builtin. `buildOverrideLookup` returns an error after a new
+  `Resolver.Check` probe, because its closure cannot carry one; this makes
+  `playbook.read`, `playbook.render`, and `workflow_manual` fail on a malformed
+  committed file too. `git.merge` fails on a config error but still degrades to
+  "unknown pool" when worktree listing fails.
+- `config.list` emits `repo_scope` {path, exists, shape} and a `repo_scope`
+  flag per catalog knob (`configKeyEntry.RepoScoped`: resolver-backed and not
+  global-only) and per scoped-view item (`wsconfig.RepoScoped`).
+  `ticket-assignee-aware` got a declared default scope so the scoped view
+  always lists it.
+- Added beyond the plan: the `config.tune` scalar set echo appends a
+  `shadowed: effective ...` line when the effective value comes from another
+  scope (for example a global write under a committed repo value).
+- The five weight-lever descriptions state each value's effect, what lowering
+  it loses, and a qualitative cost hint.
+- Verification: tests in `internal/mcp/config_repo_scope_test.go` (items i-ix,
+  4bc9705d5, tightened in 3fa024cc8) and `internal/wsconfig/repo_test.go`.
+  `go test ./...` in `agents-plugin-tool` passed on 84f3b74a2.
+  `go test ./internal/wsconfig ./internal/mcp -count=1` passed on 4bc9705d5.
+  No existing test pinned the old description wording.
+
 ### Phase 2: lead-tune explains the weight knobs
 
 - `lead-tune.md`: replace the Sage-only posture handler and the
@@ -263,3 +303,49 @@ wsflow and pi regeneration; a fresh-reader audit of the revised
 `lead-tune.md` (per `skill-authoring.md`) confirms it contains no
 complaint-specific script and no restated value semantics that duplicate
 `config.list`.
+
+### Result (c561d3328) - 2026-10-01
+
+- `agents-plugin/rsrc/lead-tune/lead-tune.md` rewritten. The Sage-only posture
+  handler and the `review_phase` routing line are replaced by `On: explain
+  knobs`, which reads `config.list` descriptions and current values, explains
+  the knobs a request bears on with their exact value words (keeping the
+  off/ask/auto gloss as skip/recommend/require), explains the session,
+  project, repo, and global scopes, and suggests one. `On: tune scalar knob`
+  uses that scope guidance and confirms the scope with the user. The new
+  `On: commit repo-scope setting` drafts the `.ws-workflow/config.json` edit
+  from `config.list`'s `repo_scope` block and per-knob `repo_key`, then
+  proposes an ordinary commit through the new `Repo-Scope Proposal` template
+  (knob/file/change/commit). `On: tune prompt override` routes a repo-scope
+  choice to that handler.
+- Invariants revised: the Scope invariant admits the repo-file commit as the
+  one non-catalog path; confirmation covers storage scope; only an explicitly
+  chosen value is written. The Surface invariant and `judge: tune-target` send
+  a multi-knob or vague weight request to the explain path instead of
+  "unsupported axis", which is now a one-line fallback. `judge:
+  proactive-propose` is unchanged. The Doctrine section was removed as
+  duplicated value semantics.
+- `agents-plugin/skills/lead-tune/SKILL.md` and the wsflow shim descriptions
+  widened to weight and review-posture requests. wsflow and pi rsrc mirrors,
+  the rsrc manifests, and the skills manifest were regenerated.
+- The idea ticket `261001-bug-config-scope-gaps-after-review-opt-in` records
+  that gap 1 moved here (Decision 11).
+- Fresh-reader audit (per `skill-authoring.md`): complaint-specific scripts,
+  duplicated value semantics, and the Doctrine section were fixed; the gloss
+  (Decision 6) and the unchanged proactive-propose judge are intentional.
+- Review round 1 (correctness + test) raised six findings, all fixed in
+  eab5d417d: `assigneeFeature` now returns resolver errors to
+  `tickets.query` and `tickets.create_empty`; `config.list` publishes
+  `repo_key` (`prompt.<point>.<claude|codex|pi|all>` for prompt knobs) and
+  lead-tune drafts from it; a `config.tune` echo failure after a successful
+  write is reported as a warning, not an error; the scalar handler suggests a
+  scope instead of defaulting to the declared one; new tests cover
+  `workflow.lang` via playbook.read, fail-loud at the playbook readers and
+  `tickets.query`, and `Resolver.Check`'s project and global branches. Round
+  2 verified all six fixed with no new findings.
+- Verification: `go test ./... -count=1` in `agents-plugin-tool`,
+  `python3 -m unittest discover agents-plugin/tests`, and
+  `python3 -m unittest discover agents-plugin-wsflow/tests` passed on
+  eab5d417d; the round-2 targeted run
+  (`-run 'RepoScope|ConfigTune|ConfigList|LeadTune|WeightLever|ResolverCheck'`)
+  passed.

@@ -29,3 +29,6 @@ teams are expected to standardize review defaults through config.
 
 Gap 1 is the likeliest to bite: a team that commits a repo-scope review
 default would see it listed but not applied.
+
+Gap 1 moved to `261001-feat-config-repo-scope-and-tune-weight-guidance`
+(its Decision 11); gaps 2 and 3 remain here.

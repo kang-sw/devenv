@@ -1,6 +1,6 @@
 ---
 name: lead-tune
-description: Use when the user wants to tune or customize how the wsflow workflow runs through catalog-backed prompt overrides or shared workflow delegation posture. Fires on standing preferences such as "make the lead delegate less", and proposes the matching tune.
+description: Use when the user wants to tune or customize how the wsflow workflow runs through catalog-backed prompt overrides, shared workflow delegation posture, or review depth, or finds it too heavy, slow, or expensive. Fires on standing preferences such as "make the lead delegate less", "the workflow is too heavy", "turn review on/off", or "more/less review", and explains the levers or proposes the matching tune.
 ---
 
 # Workflow Tuning

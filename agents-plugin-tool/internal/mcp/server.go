@@ -522,21 +522,48 @@ func builtinConfigAndPromptDefaults() map[string]string {
 	return defaults
 }
 
+// sessionConfigOptions anchors the committed repo scope at sessionKey's
+// canonical worktree root. A keyless call or an unknown key leaves RepoRoot
+// empty, so the repo scope drops out rather than erroring.
+func (s *Server) sessionConfigOptions(sessionKey string) wsconfig.Options {
+	opts := wsconfig.Options{}
+	if key := strings.TrimSpace(sessionKey); key != "" {
+		if entry, found := s.sessions.lookup(key); found {
+			opts.RepoRoot = entry.root
+		}
+	}
+	return opts
+}
+
+// sessionResolver is the single constructor for a layered-config read made on
+// behalf of sessionKey: session overrides through the session store, and the
+// repo scope anchored by sessionConfigOptions. A reader whose keys are all
+// global-only or not resolver-backed may skip it, since the repo layer never
+// applies to those.
+func (s *Server) sessionResolver(sessionKey string, builtins map[string]string) wsconfig.Resolver {
+	adapter := sessionConfigAdapter{s: s.sessions}
+	return wsconfig.NewResolver(s.sessionConfigOptions(sessionKey), builtins, adapter, adapter)
+}
+
 // assigneeFeature resolves the two inputs the ticket-assignee-awareness feature
 // depends on: the committed ticket-assignee-aware project flag (repo scope,
 // anchored at the session's worktree root) and, when that flag is on, the
 // caller's current git user.email. It is the single reader of both so
 // tickets.query and tickets.create_empty agree on when the feature is active and
 // on which identity it compares against. Flag off (the default) ⇒ aware=false
-// and an empty email, and every caller treats the feature as inert.
-func (s *Server) assigneeFeature(root, sessionKey string) (aware bool, currentEmail string) {
-	adapter := sessionConfigAdapter{s: s.sessions}
-	r := wsconfig.NewResolver(wsconfig.Options{RepoRoot: root}, builtinConfigDefaults(), adapter, adapter)
+// and an empty email, and every caller treats the feature as inert. A config
+// load error is returned rather than read as "off": a malformed committed file
+// must not silently drop the ownership gate.
+func (s *Server) assigneeFeature(root, sessionKey string) (aware bool, currentEmail string, err error) {
+	r := s.sessionResolver(sessionKey, builtinConfigDefaults())
 	resolved, err := r.Get(sessionKey, wsconfig.ItemTicketAssigneeAware)
-	if err != nil || strings.TrimSpace(resolved.Value) != "on" {
-		return false, ""
+	if err != nil {
+		return false, "", err
 	}
-	return true, wsgit.CurrentUserEmail(context.Background(), wsgit.ExecRunner{}, root)
+	if strings.TrimSpace(resolved.Value) != "on" {
+		return false, "", nil
+	}
+	return true, wsgit.CurrentUserEmail(context.Background(), wsgit.ExecRunner{}, root), nil
 }
 
 // applyAssigneeGate attaches the computed ownership gate to every ticket in the
@@ -798,23 +825,16 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		// unknown keys leave it empty, so the repo scope simply drops out — never
 		// an error. Shared across every scope-sensitive path below so repo
 		// resolution stays consistent between the show view and the tuning catalog.
-		configOpts := wsconfig.Options{}
-		if sessionKey != "" {
-			if entry, found := s.sessions.lookup(sessionKey); found {
-				configOpts.RepoRoot = entry.root
-			}
-		}
+		configOpts := s.sessionConfigOptions(sessionKey)
 		// config.show path: enumerate every known override key across all scopes.
-		showAdapter := sessionConfigAdapter{s: s.sessions}
-		showResolver := wsconfig.NewResolver(configOpts, builtinConfigDefaults(), showAdapter, showAdapter)
+		showResolver := s.sessionResolver(sessionKey, builtinConfigDefaults())
 		view, err := wsconfig.ScopedShow(&showResolver, configOpts, sessionKey)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
 		// config.tuning path: project the per-key writer schema + current values,
 		// with the no-agent full-ws-only cut applied per entry.
-		catalogAdapter := sessionConfigAdapter{s: s.sessions}
-		catalogResolver := wsconfig.NewResolver(configOpts, builtinConfigAndPromptDefaults(), catalogAdapter, catalogAdapter)
+		catalogResolver := s.sessionResolver(sessionKey, builtinConfigAndPromptDefaults())
 		catalog, err := buildTuningCatalog(rsrcRoot, &catalogResolver, sessionKey, NoAgentMode())
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -942,9 +962,15 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			if err := resolver.Unset(entry.Key, wsconfig.SetOptions{ExplicitScope: explicitScope, SessionKey: sessionKey}); err != nil {
 				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %w", err))
 			}
-			resolved, err := resolver.Get(sessionKey, entry.Key)
+			// The echo reads through the session-anchored resolver so a reset
+			// reports the committed repo value that now applies; the writer above
+			// stays repo-unaware because repo scope is read-only to config.tune.
+			// The reset already happened, so an echo load failure is reported
+			// beside it rather than as a failed tune.
+			echo := s.sessionResolver(sessionKey, builtinConfigDefaults())
+			resolved, err := echo.Get(sessionKey, entry.Key)
 			if err != nil {
-				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %w", err))
+				return toolTextResponse(req.ID, fmt.Sprintf("%s: reset [scope:%s]\nwarning: effective value unreadable: %v\n", entry.Key, resetEchoScope(explicitScope, entry), err), nil)
 			}
 			return toolTextResponse(req.ID, fmt.Sprintf("%s: %s [scope:%s]\n", entry.Key, resolved.Value, resolved.Scope), nil)
 		}
@@ -1000,7 +1026,17 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			if resolvedScope == "" {
 				resolvedScope = entry.DefaultScope()
 			}
-			return toolTextResponse(req.ID, fmt.Sprintf("%s: %s [scope:%s]\n", entry.Key, value, resolvedScope), nil)
+			text := fmt.Sprintf("%s: %s [scope:%s]\n", entry.Key, value, resolvedScope)
+			// A write below a set scope (for example a global write under a
+			// committed repo value) does not take effect; say which value does.
+			echo := s.sessionResolver(sessionKey, builtinConfigDefaults())
+			effective, err := echo.Get(sessionKey, entry.Key)
+			if err != nil {
+				text += fmt.Sprintf("warning: effective value unreadable: %v\n", err)
+			} else if effective.Scope != resolvedScope {
+				text += fmt.Sprintf("shadowed: effective %s: %s [scope:%s]\n", entry.Key, effective.Value, effective.Scope)
+			}
+			return toolTextResponse(req.ID, text, nil)
 		}
 
 	case "config.resolve_agent":
@@ -1134,16 +1170,18 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		}
 		// Resolve the worktree pool root the same way worktree.acquire does, so a
 		// held-target refusal can name a parallel lead's housekeeping checkout as
-		// such. Any failure passes no pool roots (unknown pool) rather than
-		// failing the merge.
+		// such. A worktree-listing failure passes no pool roots (unknown pool)
+		// rather than failing the merge; a config load error (a malformed
+		// committed repo file) fails loud like every other repo-anchored reader.
 		var mergePoolRoots []string
 		if mergeKey, ok := params.Arguments["session_key"].(string); ok && strings.TrimSpace(mergeKey) != "" {
-			adapter := sessionConfigAdapter{s: s.sessions}
-			resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
-			if poolRV, poolErr := resolver.Get(mergeKey, wsconfig.ItemWorktreePool); poolErr == nil {
-				if entries, lerr := listWorktrees(context.Background(), wsgit.ExecRunner{}, root); lerr == nil && len(entries) > 0 {
-					mergePoolRoots = ownedPoolRoots(poolRV.Value, entries[0].Path)
-				}
+			resolver := s.sessionResolver(mergeKey, builtinConfigDefaults())
+			poolRV, poolErr := resolver.Get(mergeKey, wsconfig.ItemWorktreePool)
+			if poolErr != nil {
+				return toolTextResponse(req.ID, "", fmt.Errorf("git.merge: %w", poolErr))
+			}
+			if entries, lerr := listWorktrees(context.Background(), wsgit.ExecRunner{}, root); lerr == nil && len(entries) > 0 {
+				mergePoolRoots = ownedPoolRoots(poolRV.Value, entries[0].Path)
 			}
 		}
 		result, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, target, wsgit.CommitOptions{
@@ -1165,9 +1203,11 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.acquire: base is required"))
 		}
 		sparsePaths := stringList(params.Arguments["sparse_paths"])
-		adapter := sessionConfigAdapter{s: s.sessions}
-		resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
-		poolRV, _ := resolver.Get(key, wsconfig.ItemWorktreePool)
+		resolver := s.sessionResolver(key, builtinConfigDefaults())
+		poolRV, err := resolver.Get(key, wsconfig.ItemWorktreePool)
+		if err != nil {
+			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.acquire: %w", err))
+		}
 		result, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, entry.root, base, targetBranch, sparsePaths, poolRV.Value)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -1220,9 +1260,11 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			}
 			path = wentry.root
 		}
-		adapter := sessionConfigAdapter{s: s.sessions}
-		resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
-		poolRV, _ := resolver.Get(key, wsconfig.ItemWorktreePool)
+		resolver := s.sessionResolver(key, builtinConfigDefaults())
+		poolRV, err := resolver.Get(key, wsconfig.ItemWorktreePool)
+		if err != nil {
+			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.release: %w", err))
+		}
 		if err := releaseWorktree(context.Background(), wsgit.ExecRunner{}, path, poolRV.Value); err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
@@ -1236,9 +1278,11 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			return toolTextResponse(req.ID, "", err)
 		}
 		entry, _ := s.sessions.lookup(key) // requireLeadSessionKey verified it exists and is lead
-		adapter := sessionConfigAdapter{s: s.sessions}
-		resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
-		poolRV, _ := resolver.Get(key, wsconfig.ItemWorktreePool)
+		resolver := s.sessionResolver(key, builtinConfigDefaults())
+		poolRV, err := resolver.Get(key, wsconfig.ItemWorktreePool)
+		if err != nil {
+			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.list: %w", err))
+		}
 		result, err := listPoolWorktrees(context.Background(), wsgit.ExecRunner{}, entry.root, poolRV.Value, s.sessions.recordMtime)
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, result, err)
@@ -1380,7 +1424,10 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		// The assignee feature reads the committed ticket-assignee-aware flag and,
 		// when on, the caller's git identity. Off ⇒ inert: no gate is attached and
 		// the assigned_to_me omit-filter does nothing.
-		assigneeAware, currentEmail := s.assigneeFeature(root, sessionKey)
+		assigneeAware, currentEmail, err := s.assigneeFeature(root, sessionKey)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
 		// A pure point-resolve call - ticket_stem set, no query text, no
 		// mentions_ticket_stem filter, and no statuses override - is exactly
 		// the old tickets.status shape: reuse its logic (TicketsStatus +
@@ -1606,9 +1653,10 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		sessionKey, _ := params.Arguments["session_key"].(string)
 		stem, _ := params.Arguments["stem"].(string)
 		to, _ := params.Arguments["to"].(string)
-		adapter := sessionConfigAdapter{s: s.sessions}
-		r := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
-		sageReview := resolveSageReviewConfig(&r, sessionKey)
+		sageReview, err := s.resolveSageReviewConfig(sessionKey)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
 		guard, err := s.guardMoveClose(root, "move", stem, params.Arguments)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -1639,13 +1687,17 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		stem, _ := params.Arguments["stem"].(string)
 		initialState, _ := params.Arguments["initial_state"].(string)
 		sessionKey, _ := params.Arguments["session_key"].(string)
-		adapter := sessionConfigAdapter{s: s.sessions}
-		r := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
-		sageReview := resolveSageReviewConfig(&r, sessionKey)
+		sageReview, err := s.resolveSageReviewConfig(sessionKey)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
 		// Auto-fill the assignee at creation (the explicit ownership act). Inert
 		// unless the ticket-assignee-aware flag is on; set_assignee (default true)
 		// then chooses self / none / explicit emails.
-		assigneeAware, currentEmail := s.assigneeFeature(root, sessionKey)
+		assigneeAware, currentEmail, err := s.assigneeFeature(root, sessionKey)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
 		rawSetAssignee, setAssigneePresent := params.Arguments["set_assignee"]
 		result, err := wsdoc.TicketCreate(root, wsdoc.TicketCreateOptions{
 			Stem:         stem,
@@ -1678,9 +1730,10 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		stem, _ := params.Arguments["stem"].(string)
 		landing, _ := params.Arguments["landing"].(string)
 		answer, _ := params.Arguments["answer"].(string)
-		adapter := sessionConfigAdapter{s: s.sessions}
-		r := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
-		sageReview := resolveSageReviewConfig(&r, sessionKey)
+		sageReview, err := s.resolveSageReviewConfig(sessionKey)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
 		result, err := wsdoc.SageGate(root, wsdoc.SageGateOptions{
 			TicketStem: stem,
 			Landing:    landing,
@@ -1774,11 +1827,16 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if name == mailboxWaitPlaybookName {
 			callerContext = s.injectMailboxWaitCommand(callerContext, keyStr)
 		}
-		printOverrideLookup := buildOverrideLookup(s, keyStr)
+		printOverrideLookup, err := buildOverrideLookup(s, keyStr)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
 		// Resolve workflow.lang for language-binding injection.
-		printLangAdapter := sessionConfigAdapter{s: s.sessions}
-		printLangResolver := wsconfig.NewResolver(wsconfig.Options{}, nil, printLangAdapter, printLangAdapter)
-		printWorkflowLangRV, _ := printLangResolver.Get(keyStr, wsconfig.ItemWorkflowLang)
+		printLangResolver := s.sessionResolver(keyStr, nil)
+		printWorkflowLangRV, err := printLangResolver.Get(keyStr, wsconfig.ItemWorkflowLang)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
 		body, recommendedTier, err := printPlaybook(s, rsrcRoot, name, callerContext, wsconfig.Options{}, printWorkflowLangRV.Value, printOverrideLookup)
 		return toolTextResponse(req.ID, withRecommendedTier(body, recommendedTier)+"\n", err)
 
@@ -1822,7 +1880,10 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if name == mailboxWaitPlaybookName {
 			callerContext = s.injectMailboxWaitCommand(callerContext, renderSessionKey)
 		}
-		renderOverrideLookup := buildOverrideLookup(s, renderSessionKey)
+		renderOverrideLookup, err := buildOverrideLookup(s, renderSessionKey)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
 		if keyStr, ok := params.Arguments["session_key"].(string); ok && strings.TrimSpace(keyStr) != "" {
 			capturedKey := strings.TrimSpace(keyStr)
 			if entry, found := s.sessions.lookup(capturedKey); found && entry.scope == roleLead {
@@ -1837,9 +1898,11 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		}
 
 		// Resolve workflow.lang for language-binding injection.
-		renderLangAdapter := sessionConfigAdapter{s: s.sessions}
-		renderLangResolver := wsconfig.NewResolver(wsconfig.Options{}, nil, renderLangAdapter, renderLangAdapter)
-		renderWorkflowLangRV, _ := renderLangResolver.Get(renderSessionKey, wsconfig.ItemWorkflowLang)
+		renderLangResolver := s.sessionResolver(renderSessionKey, nil)
+		renderWorkflowLangRV, err := renderLangResolver.Get(renderSessionKey, wsconfig.ItemWorkflowLang)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
 		path, recommendedTier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, name, callerContext, wsconfig.Options{}, mintRoot, parentKey, renderWorkflowLangRV.Value, renderOverrideLookup, tierOverride)
 		return toolTextResponse(req.ID, withRecommendedRenderBinding(path, s.currentHarness(), recommendedTier, wsconfig.Options{})+"\n", err)
 
@@ -2141,12 +2204,23 @@ func formatConfigView(view wsconfig.View) string {
 			b.WriteString("\n")
 		}
 	}
+	if view.RepoScope != nil {
+		b.WriteString("repo_scope:\n")
+		if view.RepoScope.Path == "" {
+			b.WriteString("  path: none (no session root anchors it; pass session_key)\n")
+		} else {
+			fmt.Fprintf(&b, "  path: %s\n", view.RepoScope.Path)
+			fmt.Fprintf(&b, "  exists: %t\n", view.RepoScope.Exists)
+		}
+		fmt.Fprintf(&b, "  shape: %s\n", view.RepoScope.Shape)
+	}
 	// Scope-resolved overrides are present when config.show is invoked with a
-	// session key (ScopedShow path). Print each resolved item with its source scope.
+	// session key (ScopedShow path). Print each resolved item with its source
+	// scope and whether the committed repo scope can set it.
 	if len(view.ResolvedOverrides) > 0 {
 		b.WriteString("overrides:\n")
 		for _, item := range view.ResolvedOverrides {
-			fmt.Fprintf(&b, "  %s: %s  [scope:%s]\n", item.Key, item.Value, item.Scope)
+			fmt.Fprintf(&b, "  %s: %s  [scope:%s] [repo_scope:%s]\n", item.Key, item.Value, item.Scope, yesNo(item.RepoScope))
 		}
 	}
 	return b.String()
@@ -2254,6 +2328,13 @@ type tuningKnob struct {
 	SelectorFields []tuningField `json:"selector_fields,omitempty"`
 	ValueFields    []tuningField `json:"value_fields,omitempty"`
 	Current        any           `json:"current"`
+	// RepoScope reports whether the committed repo-scope file can set this
+	// knob (configKeyEntry.RepoScoped).
+	RepoScope bool `json:"repo_scope"`
+	// RepoKey is the key a repo-scope file entry stores this knob under, set
+	// only when RepoScope is true. It differs from ID for prompt.* knobs,
+	// whose stored keys carry a harness bucket suffix.
+	RepoKey string `json:"repo_key,omitempty"`
 }
 
 type tuningWriter struct {
@@ -2296,6 +2377,10 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 		if noAgentMode && !entry.NoAgentVisible {
 			return
 		}
+		knob.RepoScope = entry.RepoScoped()
+		if knob.RepoScope {
+			knob.RepoKey = entry.RepoKey()
+		}
 		catalog.Knobs = append(catalog.Knobs, knob)
 	}
 
@@ -2323,7 +2408,7 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 	appendKnob(subagentEntry, tuningKnob{
 		ID:          "workflow.prefer_subagent",
 		Kind:        "workflow_preference",
-		Description: "Default eligible general work to lead-delegate, subject to its routing gate.",
+		Description: "Delegation posture, global-only (all of the user's projects). on adds a standing line, from the next workflow-manual load, that sends bounded investigation, diagnosis, drafting, and low-impact operational work to lead-delegate subagents, subject to its routing gate; off (builtin) leaves that work in the lead's own context. Cost: on spends one fresh subagent context per delegated task and keeps the lead's context lean over a long session; off spawns no extra agents but fills the lead's context with that work.",
 		Writer:      tuningWriter{Tool: subagentEntry.WriterTool, FixedArguments: map[string]string{"key": subagentEntry.Key}},
 		Reset: &tuningWriter{
 			Tool:           subagentEntry.ResetTool,
@@ -2351,7 +2436,7 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 	appendKnob(sageReviewEntry, tuningKnob{
 		ID:          sageReviewEntry.Key,
 		Kind:        "sage_review",
-		Description: "Set the Sage completeness-review posture at actionable ready/ promotion (builtin auto). It does not govern the design stage; see sage_review_design.",
+		Description: "Completeness review at actionable ready/ promotion (builtin auto). auto requires one completeness-reviewer pass before the ticket reaches ready/; ask asks the user whether to run it; off skips it. Cost: one medium-tier reviewer (builtin tier) per promotion. Lowering it loses the independent check that the ticket's facts, phases, and verification are complete enough for a worker to run without stopping; those gaps then surface mid-implementation. It does not govern the design stage; see sage_review_design.",
 		Writer:      tuningWriter{Tool: sageReviewEntry.WriterTool, FixedArguments: map[string]string{"key": sageReviewEntry.Key}},
 		Reset: &tuningWriter{
 			Tool:           sageReviewEntry.ResetTool,
@@ -2366,7 +2451,7 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 	appendKnob(sageReviewDesignEntry, tuningKnob{
 		ID:          sageReviewDesignEntry.Key,
 		Kind:        "sage_review",
-		Description: "Set the Sage design-review posture at actionable ready/ promotion (builtin off: design review is opt-in). Epic design review runs whenever it is invoked, regardless of this knob.",
+		Description: "Design review at actionable ready/ promotion (builtin off: design review is opt-in). auto requires one design-reviewer pass before the ticket reaches ready/; ask asks the user whether to run it; off skips it. Cost: one large-tier reviewer (builtin tier) per promotion. Lowering it loses an independent challenge of the ticket's decisions before implementation; a flawed design then surfaces in code review or after merge, where changing it costs more. Epic design review runs whenever it is invoked, regardless of this knob.",
 		Writer:      tuningWriter{Tool: sageReviewDesignEntry.WriterTool, FixedArguments: map[string]string{"key": sageReviewDesignEntry.Key}},
 		Reset: &tuningWriter{
 			Tool:           sageReviewDesignEntry.ResetTool,
@@ -2381,7 +2466,7 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 	appendKnob(reviewPhaseEntry, tuningKnob{
 		ID:          reviewPhaseEntry.Key,
 		Kind:        "workflow_preference",
-		Description: "Select the ticket worker's per-phase independent code review: lite (builtin) runs one medium-tier correctness and test-integrity reviewer for one pass; full runs the risk-keyed allocation with two rounds; off runs none, leaving the pre-merge range review as the integration net. A lead's session value reaches the workers it spawns. An explicit policy.review.override of single or partitioned wins over every value.",
+		Description: "The ticket worker's per-phase independent code review. lite (builtin) runs one medium-tier reviewer covering correctness and test integrity, one pass per phase; full runs the risk-keyed allocation (one reviewer, or one per risky correctness, fit, and test partition) with a second round that verifies the fixes; off runs none, leaving the pre-merge range review as the integration net. Lowering it moves defect discovery to that range review, where a fix costs another worker cycle; full adds fit review on risky changes and the fix-verification round that lite lacks. A lead's session value reaches the workers it spawns. An explicit policy.review.override of single or partitioned wins over every value.",
 		Writer:      tuningWriter{Tool: reviewPhaseEntry.WriterTool, FixedArguments: map[string]string{"key": reviewPhaseEntry.Key}},
 		Reset: &tuningWriter{
 			Tool:           reviewPhaseEntry.ResetTool,
@@ -2400,7 +2485,7 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 	appendKnob(agentsTierEntry, tuningKnob{
 		ID:             "agents.tier",
 		Kind:           "model_tier",
-		Description:    "Configure the backend/model mapping for a ws agent capability tier. Reset takes only value.tier and removes the selected scope's harness leaf.",
+		Description:    "Map a capability tier (small, medium, large, xlarge) to the backend/model that every delegate rendered at that tier launches with, per harness, in project or global scope. The builtin design reviewer runs at large and the lite phase reviewer and completeness reviewer at medium; the ticket worker's tier follows its route's risk. A cheaper model at a tier lowers the cost of all work at that tier and loses capability on it. Reset takes only value.tier and removes the selected scope's harness leaf.",
 		Writer:         tuningWriter{Tool: agentsTierEntry.WriterTool, FixedArguments: map[string]string{"key": "agents.tier"}},
 		Reset:          &tuningWriter{Tool: agentsTierEntry.ResetTool, FixedArguments: map[string]string{"key": "agents.tier", "reset": "true"}},
 		SelectorFields: agentsTierEntry.SelectorFields,
@@ -2479,26 +2564,34 @@ func tuneAgentsTier(value any, harness string, scope wsconfig.Scope, reset bool)
 
 // resolveReviewPhase resolves the review_phase knob under sessionKey; the
 // session parent walk lets a lead's session value reach the worker keys it
-// spawns, and root anchors the committed repo scope so a team can commit the
-// value. A read error falls back to the builtin default (lite).
-func (s *Server) resolveReviewPhase(root, sessionKey string) string {
-	adapter := sessionConfigAdapter{s: s.sessions}
-	r := wsconfig.NewResolver(wsconfig.Options{RepoRoot: root}, builtinConfigDefaults(), adapter, adapter)
+// spawns, and the session's root anchors the committed repo scope so a team
+// can commit the value. A read error is returned, never replaced by the
+// builtin: a malformed committed file must not silently pick a review tier.
+func (s *Server) resolveReviewPhase(sessionKey string) (string, error) {
+	r := s.sessionResolver(sessionKey, builtinConfigDefaults())
 	resolved, err := r.Get(sessionKey, wsconfig.ItemReviewPhase)
 	if err != nil {
-		return builtinConfigDefaults()[wsconfig.ItemReviewPhase]
+		return "", err
 	}
-	return resolved.Value
+	return resolved.Value, nil
 }
 
 // resolveSageReviewConfig resolves both Sage stage knobs under one session
 // key: the design stage from sage_review_design and the completeness stage
 // from sage_review. Each resolves independently — an old sage_review override
-// never implies design review.
-func resolveSageReviewConfig(r *wsconfig.Resolver, sessionKey string) wsdoc.SageReviewConfig {
-	design, _ := r.Get(sessionKey, wsconfig.ItemSageReviewDesign)
-	completeness, _ := r.Get(sessionKey, wsconfig.ItemSageReview)
-	return wsdoc.SageReviewConfig{Design: design.Value, Completeness: completeness.Value}
+// never implies design review. A read error is returned: an empty value maps
+// to a skipped posture, so swallowing it would silently bypass review.
+func (s *Server) resolveSageReviewConfig(sessionKey string) (wsdoc.SageReviewConfig, error) {
+	r := s.sessionResolver(sessionKey, builtinConfigDefaults())
+	design, err := r.Get(sessionKey, wsconfig.ItemSageReviewDesign)
+	if err != nil {
+		return wsdoc.SageReviewConfig{}, err
+	}
+	completeness, err := r.Get(sessionKey, wsconfig.ItemSageReview)
+	if err != nil {
+		return wsdoc.SageReviewConfig{}, err
+	}
+	return wsdoc.SageReviewConfig{Design: design.Value, Completeness: completeness.Value}, nil
 }
 
 func currentWorkflowPreference(resolver *wsconfig.Resolver, sessionKey, itemKey string) tuningScopedValue {
@@ -2548,9 +2641,29 @@ func formatTuningCatalog(catalog tuningCatalog) string {
 		if current := formatTuningCurrent(knob.Current); current != "" {
 			fmt.Fprintf(&b, "  current: %s\n", current)
 		}
+		if knob.RepoKey != "" {
+			fmt.Fprintf(&b, "  repo_scope: yes (key: %s)\n", knob.RepoKey)
+		} else {
+			fmt.Fprintf(&b, "  repo_scope: %s\n", yesNo(knob.RepoScope))
+		}
 		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+// resetEchoScope names the scope a config.tune reset removed the override from.
+func resetEchoScope(explicitScope wsconfig.Scope, entry configKeyEntry) wsconfig.Scope {
+	if explicitScope != "" {
+		return explicitScope
+	}
+	return entry.DefaultScope()
+}
+
+func yesNo(v bool) string {
+	if v {
+		return "yes"
+	}
+	return "no"
 }
 
 func tuningFieldLabels(fields []tuningField) []string {

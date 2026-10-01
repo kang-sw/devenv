@@ -941,7 +941,11 @@ func (s *Server) handleEnterImplement(id json.RawMessage, args map[string]any) r
 	if err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("%s: branch preflight failed: %w", tool, err))
 	}
-	input.ReviewPhase = s.resolveReviewPhase(record.Root, sessionKey)
+	reviewPhase, err := s.resolveReviewPhase(sessionKey)
+	if err != nil {
+		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
+	}
+	input.ReviewPhase = reviewPhase
 	result := resolveImplement(input, source, obs)
 	rawAgenda, err := json.Marshal(result.Agenda)
 	if err != nil {

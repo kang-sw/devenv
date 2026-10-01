@@ -631,31 +631,35 @@ func scanOverridePoints(rsrcRoot string) ([]overridePointDecl, error) {
 	return points, nil
 }
 
-// buildOverrideLookup returns an overrideLookupFn backed by the session-keyed
-// layered-config resolver. When sessionKey is empty, only code-owned builtin
-// prompt defaults participate; user/project/global prompt overrides still require
-// a session-keyed render. It is the single construction site shared by the
-// playbook.read and playbook.render dispatch paths, reusing the same
-// sessionConfigAdapter + resolver shape as the workflow config read paths.
+// buildOverrideLookup returns an overrideLookupFn backed by the session-anchored
+// layered-config resolver (session, project, committed repo, global, builtin).
+// When sessionKey is empty, only code-owned builtin prompt defaults
+// participate; user/project/repo/global prompt overrides still require a
+// session-keyed render. It is the single construction site shared by the
+// playbook.read, playbook.render, and workflow_manual paths.
 //
 // Override values are stored under dynamic keys `prompt.<pointId>.<harness>`; the
 // resolver returns empty (not an error) for unset keys, so an absent override
-// yields ("", false) and the override pass falls back to the inline seed.
-func buildOverrideLookup(s *Server, sessionKey string) overrideLookupFn {
+// yields ("", false) and the override pass falls back to the inline seed. The
+// closure cannot carry an error, so a config file that fails to load (a
+// malformed committed repo file) is reported here, before any render.
+func buildOverrideLookup(s *Server, sessionKey string) (overrideLookupFn, error) {
 	capturedKey := strings.TrimSpace(sessionKey)
 	if capturedKey == "" {
 		builtins := builtinPromptOverrideDefaults()
 		return func(pointId, harness string) (string, bool) {
 			v := builtins["prompt."+pointId+"."+harness]
 			return v, v != ""
-		}
+		}, nil
 	}
-	adapter := sessionConfigAdapter{s: s.sessions}
-	resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinPromptOverrideDefaults(), adapter, adapter)
+	resolver := s.sessionResolver(capturedKey, builtinPromptOverrideDefaults())
+	if err := resolver.Check(); err != nil {
+		return nil, err
+	}
 	return func(pointId, harness string) (string, bool) {
 		rv, _ := resolver.Get(capturedKey, "prompt."+pointId+"."+harness)
 		return rv.Value, rv.Value != ""
-	}
+	}, nil
 }
 
 // applyOverrideMarkers processes override-point block markers in body, resolving
