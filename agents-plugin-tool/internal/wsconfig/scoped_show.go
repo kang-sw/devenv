@@ -22,7 +22,8 @@ func ScopedShow(r *Resolver, opts Options, sessionKey string) (View, error) {
 		return View{}, fmt.Errorf("scoped show: load project config: %w", err)
 	}
 
-	view := View{Path: path, Config: cfg}
+	repoInfo := RepoScope(opts)
+	view := View{Path: path, Config: cfg, RepoScope: &repoInfo}
 
 	// Gather all known item keys across all scopes so we can report each one.
 	allKeys := map[string]struct{}{}
@@ -84,9 +85,10 @@ func ScopedShow(r *Resolver, opts Options, sessionKey string) (View, error) {
 				return View{}, fmt.Errorf("scoped show: resolve key %q: %w", k, rerr)
 			}
 			view.ResolvedOverrides = append(view.ResolvedOverrides, ScopedItem{
-				Key:   k,
-				Value: rv.Value,
-				Scope: rv.Scope,
+				Key:       k,
+				Value:     rv.Value,
+				Scope:     rv.Scope,
+				RepoScope: RepoScoped(k),
 			})
 		}
 		// Sort for deterministic output.

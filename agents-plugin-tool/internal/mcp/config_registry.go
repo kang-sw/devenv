@@ -93,6 +93,14 @@ func (e configKeyEntry) DefaultScope() wsconfig.Scope {
 	return wsconfig.DefaultScope(e.Key)
 }
 
+// RepoScoped reports whether the committed repo scope can supply this key: a
+// resolver-backed key that is not global-only. agents.tier is not resolver-backed
+// (the repo file contributes only its overrides map), and a global-only key
+// skips the repo overlay in Resolver.Get.
+func (e configKeyEntry) RepoScoped() bool {
+	return e.ResolverBacked && !e.GlobalOnly()
+}
+
 // configRegistry holds the static per-key entries. The dynamic prompt.*
 // family is not represented here — it is generated per discovered override
 // point by promptKnobEntry at catalog-build time (see buildTuningCatalog).

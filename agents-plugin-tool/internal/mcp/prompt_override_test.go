@@ -689,7 +689,7 @@ func TestConfigPromptSetEndToEnd(t *testing.T) {
 	const overrideText = "Use concise Korean status updates when reporting workflow state."
 
 	// --- Baseline: without any override, custom preference is absent ---
-	baseBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", buildOverrideLookup(s, key))
+	baseBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", mustOverrideLookup(t, s, key))
 	if err != nil {
 		t.Fatalf("printPlaybook (baseline): %v", err)
 	}
@@ -717,7 +717,7 @@ func TestConfigPromptSetEndToEnd(t *testing.T) {
 	}
 
 	// --- Render with the override active ---
-	overrideBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", buildOverrideLookup(s, key))
+	overrideBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", mustOverrideLookup(t, s, key))
 	if err != nil {
 		t.Fatalf("printPlaybook (after set): %v", err)
 	}
@@ -749,7 +749,7 @@ func TestConfigPromptSetEndToEnd(t *testing.T) {
 	}
 
 	// Render again — claude-specific override must still win.
-	precedenceBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", buildOverrideLookup(s, key))
+	precedenceBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", mustOverrideLookup(t, s, key))
 	if err != nil {
 		t.Fatalf("printPlaybook (precedence): %v", err)
 	}
@@ -800,7 +800,7 @@ func TestConfigPromptSetForPiHarness(t *testing.T) {
 		t.Fatalf("config.tune prompt-set (pi) confirmation missing: %s", setText)
 	}
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", buildOverrideLookup(s, key))
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", mustOverrideLookup(t, s, key))
 	if err != nil {
 		t.Fatalf("printPlaybook (pi override): %v", err)
 	}
@@ -855,7 +855,7 @@ func TestConfigPromptUnsetSessionScope(t *testing.T) {
 	}
 
 	// Session override wins while present.
-	beforeUnset, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", buildOverrideLookup(s, key))
+	beforeUnset, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", mustOverrideLookup(t, s, key))
 	if err != nil {
 		t.Fatalf("printPlaybook (before unset): %v", err)
 	}
@@ -881,7 +881,7 @@ func TestConfigPromptUnsetSessionScope(t *testing.T) {
 	}
 
 	// Falls back to the project-scope value, not to an empty override.
-	afterUnset, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", buildOverrideLookup(s, key))
+	afterUnset, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", mustOverrideLookup(t, s, key))
 	if err != nil {
 		t.Fatalf("printPlaybook (after unset): %v", err)
 	}

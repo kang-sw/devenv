@@ -51,6 +51,9 @@ type View struct {
 	// ResolvedOverrides carries each scoped config item's value and the scope it
 	// resolved from. Populated by ScopedShow; nil when populated by plain Show.
 	ResolvedOverrides []ScopedItem `json:"resolved_overrides,omitempty"`
+	// RepoScope describes the committed repo-scope file the view resolved
+	// against. Populated by ScopedShow; nil when populated by plain Show.
+	RepoScope *RepoScopeInfo `json:"repo_scope,omitempty"`
 }
 
 // ScopedItem pairs an item key with its resolved value and source scope for
@@ -59,6 +62,9 @@ type ScopedItem struct {
 	Key   string `json:"key"`
 	Value string `json:"value"`
 	Scope Scope  `json:"scope"`
+	// RepoScope reports whether the committed repo scope can supply this key
+	// (see RepoScoped).
+	RepoScope bool `json:"repo_scope"`
 }
 
 type AgentTier struct {

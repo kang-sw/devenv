@@ -235,12 +235,17 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 		return toolTextResponse(id, "", fmt.Errorf("workflow_manual: resolve rsrc root: %w", err))
 	}
 
-	overrideLookup := buildOverrideLookup(s, key)
+	overrideLookup, err := buildOverrideLookup(s, key)
+	if err != nil {
+		return toolTextResponse(id, "", fmt.Errorf("workflow_manual: %w", err))
+	}
 
 	// Resolve workflow.lang and workflow.skeptical_posture for rendering.
-	langAdapter := sessionConfigAdapter{s: s.sessions}
-	langResolver := wsconfig.NewResolver(wsconfig.Options{}, nil, langAdapter, langAdapter)
-	workflowLangRV, _ := langResolver.Get(key, wsconfig.ItemWorkflowLang)
+	langResolver := s.sessionResolver(key, nil)
+	workflowLangRV, err := langResolver.Get(key, wsconfig.ItemWorkflowLang)
+	if err != nil {
+		return toolTextResponse(id, "", fmt.Errorf("workflow_manual: %w", err))
+	}
 	workflowLang := workflowLangRV.Value
 	skepticalRV, _ := langResolver.Get(key, wsconfig.ItemWorkflowSkepticalPosture)
 	skepticalPosture := skepticalRV.Value != "off" // builtin default is "on"

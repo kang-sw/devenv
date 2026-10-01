@@ -970,7 +970,7 @@ func TestPlaybookPrintWsflowProductModeFiltersHiddenGuidance(t *testing.T) {
 		}
 	}
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, configOpts, "", buildOverrideLookup(s, ""))
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, configOpts, "", mustOverrideLookup(t, s, ""))
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -983,7 +983,7 @@ func TestPlaybookPrintWsflowProductModeFiltersHiddenGuidance(t *testing.T) {
 	if err := resolver.Set(wsconfig.ItemWorkflowPreferSubagent, "on", wsconfig.SetOptions{}); err != nil {
 		t.Fatalf("enable workflow.prefer_subagent: %v", err)
 	}
-	bodyOn, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, configOpts, "", buildOverrideLookup(s, ""))
+	bodyOn, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, configOpts, "", mustOverrideLookup(t, s, ""))
 	if err != nil {
 		t.Fatalf("printPlaybook on: %v", err)
 	}
@@ -1004,7 +1004,7 @@ func TestPlaybookPrintLeadTuneUsesWorkflowPreferenceCatalogKnobs(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "codex")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-tune", nil, isolatedPlaybookConfigOptions(t), "", buildOverrideLookup(s, ""))
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-tune", nil, isolatedPlaybookConfigOptions(t), "", mustOverrideLookup(t, s, ""))
 	if err != nil {
 		t.Fatalf("printPlaybook lead-tune: %v", err)
 	}
@@ -1042,7 +1042,7 @@ func TestPlaybookPrintWsflowLeadTuneOmitsFullWsOnlyCatalogKnobs(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "codex")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-tune", nil, isolatedPlaybookConfigOptions(t), "", buildOverrideLookup(s, ""))
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-tune", nil, isolatedPlaybookConfigOptions(t), "", mustOverrideLookup(t, s, ""))
 	if err != nil {
 		t.Fatalf("printPlaybook lead-tune wsflow: %v", err)
 	}
@@ -3220,4 +3220,15 @@ func TestNonClaudeRendersOmitEffortAgents(t *testing.T) {
 			}
 		}
 	}
+}
+
+// mustOverrideLookup builds the session-anchored prompt-override lookup and
+// fails the test when any config scope fails to load.
+func mustOverrideLookup(t *testing.T, s *Server, sessionKey string) overrideLookupFn {
+	t.Helper()
+	lookup, err := buildOverrideLookup(s, sessionKey)
+	if err != nil {
+		t.Fatalf("buildOverrideLookup: %v", err)
+	}
+	return lookup
 }

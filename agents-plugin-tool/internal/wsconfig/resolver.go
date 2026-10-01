@@ -127,6 +127,23 @@ func (r *Resolver) Get(sessionKey, itemKey string) (ResolvedValue, error) {
 	return ResolvedValue{Value: v, Scope: ScopeBuiltin}, nil
 }
 
+// Check loads every file scope the resolver reads (project, repo, global) and
+// returns the first load error. A caller whose reads cannot carry an error
+// (a lookup closure) runs it once up front so a malformed file fails loud there
+// instead of resolving to an empty value.
+func (r *Resolver) Check() error {
+	if _, err := Load(r.opts); err != nil {
+		return fmt.Errorf("resolver: load project config: %w", err)
+	}
+	if _, err := loadRepoConfig(r.opts); err != nil {
+		return fmt.Errorf("resolver: load repo config: %w", err)
+	}
+	if _, err := loadGlobalConfig(r.opts); err != nil {
+		return fmt.Errorf("resolver: load global config: %w", err)
+	}
+	return nil
+}
+
 func (r *Resolver) getGlobalOnly(itemKey string) (ResolvedValue, error) {
 	globalCfg, err := loadGlobalConfig(r.opts)
 	if err != nil {

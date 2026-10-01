@@ -15,6 +15,36 @@ import (
 // (~/.ws@<id>/config.json) cannot fill.
 const repoConfigDirName = ".ws-workflow"
 
+// RepoOverridesShape is the committed repo-scope file's accepted shape: only the
+// overrides map contributes (see loadRepoConfig), keyed by the item key verbatim.
+// config.list publishes it so a lead can draft the file without carrying the
+// format itself.
+const RepoOverridesShape = `{"overrides": {"<knob>": "<value>"}}`
+
+// RepoScopeInfo describes the committed repo scope a resolver reads: the file
+// path anchored at the caller's worktree root (empty when no root anchors it),
+// whether that file exists, and the accepted shape.
+type RepoScopeInfo struct {
+	Path   string `json:"path,omitempty"`
+	Exists bool   `json:"exists"`
+	Shape  string `json:"shape"`
+}
+
+// RepoScope reports the repo-scope file opts anchors. With no RepoRoot the
+// path is empty and the repo scope applies to nothing.
+func RepoScope(opts Options) RepoScopeInfo {
+	info := RepoScopeInfo{Shape: RepoOverridesShape}
+	path, ok := RepoPath(opts)
+	if !ok {
+		return info
+	}
+	info.Path = path
+	if _, err := os.Stat(path); err == nil {
+		info.Exists = true
+	}
+	return info
+}
+
 // RepoPath resolves the committed repo-scope config file path:
 // <RepoRoot>/.ws-workflow/config.json. It returns ok=false when opts.RepoRoot is
 // empty — the repo scope is simply absent (no root to anchor it), which is never
@@ -45,11 +75,11 @@ func loadRepoConfig(opts Options) (Config, error) {
 		return Config{}, nil // absent committed file — empty repo layer, not an error
 	}
 	if err != nil {
-		return Config{}, fmt.Errorf("read repo ws config: %w", err)
+		return Config{}, fmt.Errorf("read repo ws config %s: %w", path, err)
 	}
 	var cfg Config
 	if err := json.Unmarshal(raw, &cfg); err != nil {
-		return Config{}, fmt.Errorf("parse repo ws config: %w", err)
+		return Config{}, fmt.Errorf("parse repo ws config %s: %w", path, err)
 	}
 	return cfg, nil
 }

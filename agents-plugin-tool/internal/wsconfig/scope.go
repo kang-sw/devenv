@@ -138,6 +138,10 @@ func init() {
 	// choice (declared explicitly even though ScopeProject is the fallback, to
 	// keep every item's scope declaration visible in one place).
 	RegisterDefaultScope(ItemWorktreePool, ScopeProject)
+	// ticket-assignee-aware is a committed team decision with no config.tune
+	// writer; declaring it makes config.list's scoped view always list it with
+	// its repo-scope flag, so a team sees the key before it commits one.
+	RegisterDefaultScope(ItemTicketAssigneeAware, ScopeProject)
 }
 
 // ResolvedValue carries a config item value together with the scope it was
@@ -170,6 +174,13 @@ func RegisterGlobalOnly(key string) {
 func GlobalOnly(key string) bool {
 	_, ok := globalOnlyRegistry[key]
 	return ok
+}
+
+// RepoScoped reports whether a resolver-backed item key reads the committed repo
+// scope: every key except a global-only one, whose resolution skips the
+// session/project/repo overlays (see Resolver.Get).
+func RepoScoped(key string) bool {
+	return !GlobalOnly(key)
 }
 
 // DefaultScope returns the declared default write scope for the given item key,
