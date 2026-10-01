@@ -509,7 +509,14 @@
       "registered_at": "2026-10-01T07:37:37Z"
     },
     "261001-feat-config-repo-scope-and-tune-weight-guidance": {
-      "registered_at": "2026-10-01T09:54:55Z"
+      "registered_at": "2026-10-01T09:54:55Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-10-01T11:48:03Z"
+      }
     },
     "261001-feat-opt-in-design-and-phase-review": {
       "registered_at": "2026-10-01T05:07:43Z",
