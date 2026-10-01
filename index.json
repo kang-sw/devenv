@@ -528,7 +528,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-01T08:08:50Z"
+        "touched_at": "2026-10-01T08:09:23Z",
+        "impl": {
+          "branch": "impl/develop/motor-ajar-sheet"
+        }
       }
     }
   }
