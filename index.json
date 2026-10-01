@@ -505,18 +505,8 @@
     "260930-feat-git-exec-audit-log": {
       "registered_at": "2026-09-30T02:03:00Z"
     },
-    "260930-feat-ws-pi-disconnect-owner-question-wiring": {
-      "registered_at": "2026-09-30T07:54:06Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-09-30T08:09:57Z",
-        "impl": {
-          "branch": "impl/develop/error-even-tux"
-        }
-      }
+    "261001-feat-opt-in-design-and-phase-review": {
+      "registered_at": "2026-10-01T05:07:43Z"
     }
   }
 }
