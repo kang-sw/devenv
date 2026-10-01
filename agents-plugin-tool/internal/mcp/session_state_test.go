@@ -1980,6 +1980,42 @@ func TestDeriveImplementTodoInstructionsCriticalStop(t *testing.T) {
 	}
 }
 
+// TestDeriveImplementTodoInstructionsLiteReview pins the lite allocation's
+// installed review todo: its own title and wrapper, the shared fix-ownership
+// clause, the one-pass rule with no re-review, the unfixable-Critical stop, and
+// the unfixed-Important unresolved line — and none of the two-round protocol,
+// which an unknown allocation would otherwise fall into.
+func TestDeriveImplementTodoInstructionsLiteReview(t *testing.T) {
+	got := deriveImplementTodosFromVerdict(implementTodoVerdict{
+		Delegation:  "delegated",
+		BranchPlan:  implementBranchPlan{Action: "continue", CurrentBranch: "implement/demo"},
+		ReviewAlloc: "lite",
+		NeedReview:  true,
+	})
+	item := todoByKey(t, got, "review")
+	if item.Title != "Review (lite)" {
+		t.Fatalf("lite review title = %q, want %q", item.Title, "Review (lite)")
+	}
+	review := requireInstruction(t, item)
+	for _, want := range []string{
+		"Render `code-review-lite` and dispatch one fresh reviewer covering correctness and test integrity",
+		"Fix the findings yourself by severity; there is no relay delegate",
+		"Lite review is one pass with no re-review",
+		"fix the Critical and Important findings in that pass and dispatch no second reviewer",
+		"A Critical finding you cannot fix is a stop — report it to the lead",
+		"an Important finding you leave unfixed goes under unresolved with the reason",
+	} {
+		if !strings.Contains(review, want) {
+			t.Fatalf("lite review instruction missing %q: %q", want, review)
+		}
+	}
+	for _, forbidden := range append([]string{"two rounds", "round two", "Render `reviewer`", "code-review-correctness", "code-review-fit", "code-review-test"}, implementReviewRoundForbidden()...) {
+		if strings.Contains(review, forbidden) {
+			t.Fatalf("lite review instruction carries %q: %q", forbidden, review)
+		}
+	}
+}
+
 // TestEnterImplementSkippedDocsOmitsDocTodos covers the fact set that used to
 // select the caller-edits/caller-reviews fast path plus a documentation skip.
 // The documentation skip still drops the three doc todos; the fast path no
@@ -4335,12 +4371,13 @@ func TestEnterProceedReadsDeclaredBindingAnchorGate(t *testing.T) {
 	}
 }
 
-// enableReviewPhase opts key into per-phase review (review_phase=on at session
-// scope) for tests whose subject is the review allocation or the installed
-// review todo, which review_phase's builtin off would otherwise suppress.
+// enableReviewPhase opts key into the full per-phase review (review_phase=full
+// at session scope) for tests whose subject is the risk-keyed review
+// allocation or its installed two-round review todo, which review_phase's
+// builtin lite would otherwise replace with the single lite reviewer.
 func enableReviewPhase(t *testing.T, server *Server, key string) {
 	t.Helper()
-	if err := server.sessions.setOverride(key, wsconfig.ItemReviewPhase, "on"); err != nil {
+	if err := server.sessions.setOverride(key, wsconfig.ItemReviewPhase, "full"); err != nil {
 		t.Fatalf("enable review_phase: %v", err)
 	}
 }

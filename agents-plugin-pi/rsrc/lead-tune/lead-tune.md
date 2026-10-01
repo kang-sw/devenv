@@ -81,7 +81,7 @@ Examples:
 - Prompt wording or a named manual section -> prompt override for that named override point.
 - "delegate more/less" or default delegation of eligible general work -> workflow preference (`"workflow.prefer_subagent"`).
 - A default request to skip, recommend, or require Sage review at ticket boundaries -> Sage review posture (`sage_review_design`, `sage_review`).
-- A default request to run or skip the worker's per-phase code review -> workflow preference (`review_phase`), written like the subagent posture with the catalog's `on`/`off` values and scope choices.
+- A default request to run, skip, or change the depth of the worker's per-phase code review -> workflow preference (`review_phase`), written like the subagent posture with the catalog's `off`/`lite`/`full` values and scope choices.
 - A model, tier, or "cheaper/stronger model" preference -> model tier (`agents.tier`).
 - Anything else -> unsupported axis.
 

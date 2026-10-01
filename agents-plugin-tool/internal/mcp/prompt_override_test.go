@@ -1273,13 +1273,15 @@ func TestConfigTuningCatalogProjectsPromptAndSchemaKnobs(t *testing.T) {
 	}
 
 	// The per-stage split and the per-phase review gate are listed with their
-	// value domains and their opt-in (off) builtin defaults.
+	// value domains and their builtin defaults: design review is opt-in (off),
+	// per-phase review defaults to the lite tier.
 	for _, tc := range []struct {
-		key    string
-		domain []string
+		key         string
+		domain      []string
+		wantBuiltin string
 	}{
-		{key: wsconfig.ItemSageReviewDesign, domain: []string{"off", "ask", "auto"}},
-		{key: wsconfig.ItemReviewPhase, domain: []string{"on", "off"}},
+		{key: wsconfig.ItemSageReviewDesign, domain: []string{"off", "ask", "auto"}, wantBuiltin: "off"},
+		{key: wsconfig.ItemReviewPhase, domain: []string{"off", "lite", "full"}, wantBuiltin: "lite"},
 	} {
 		knob := requireTuningKnob(t, catalog, tc.key)
 		if knob.Writer.Tool != "config.tune" || knob.Writer.FixedArguments["key"] != tc.key {
@@ -1290,8 +1292,8 @@ func TestConfigTuningCatalogProjectsPromptAndSchemaKnobs(t *testing.T) {
 		}
 		assertFieldEnum(t, knob.SelectorFields, "scope", []string{"session", "project", "global"})
 		assertFieldEnum(t, knob.ValueFields, "value", tc.domain)
-		if current := mustMarshalJSON(t, knob.Current); !strings.Contains(current, `"value":"off"`) || !strings.Contains(current, `"scope":"builtin"`) {
-			t.Fatalf("%s builtin default should be cataloged as off/builtin: %s", tc.key, current)
+		if current := mustMarshalJSON(t, knob.Current); !strings.Contains(current, `"value":"`+tc.wantBuiltin+`"`) || !strings.Contains(current, `"scope":"builtin"`) {
+			t.Fatalf("%s builtin default should be cataloged as %s/builtin: %s", tc.key, tc.wantBuiltin, current)
 		}
 	}
 	if desc := requireTuningKnob(t, catalog, wsconfig.ItemSageReview).Description; !strings.Contains(desc, "completeness") || !strings.Contains(desc, "sage_review_design") {

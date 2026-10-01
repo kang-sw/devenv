@@ -446,7 +446,7 @@ func TestRenderGoldenShippedPhase4Delegates(t *testing.T) {
 	mintRoot := "/work/tree-p4"
 
 	names := []string{
-		"code-review-correctness", "code-review-fit", "code-review-test",
+		"code-review-correctness", "code-review-fit", "code-review-test", "code-review-lite",
 		"reference-discovery",
 		"ticket-reviewer-design", "ticket-reviewer-completeness",
 	}
@@ -484,7 +484,7 @@ func TestRenderGoldenShippedPhase4Delegates(t *testing.T) {
 // alongside the partition-specific scope and checklist.
 func TestRenderGoldenShippedReviewPartitionIncludesBase(t *testing.T) {
 	rsrcRoot := shippedRsrcRootForTest()
-	for _, name := range []string{"code-review-correctness", "code-review-fit", "code-review-test"} {
+	for _, name := range []string{"code-review-correctness", "code-review-fit", "code-review-test", "code-review-lite"} {
 		t.Run(name, func(t *testing.T) {
 			s := newTestServerWithHarness(t, "claude")
 			body, _, err := renderPlaybookBody(s, rsrcRoot, name, nil, wsconfig.Options{CacheHome: t.TempDir()}, "", "", "", nil, "")
@@ -506,6 +506,37 @@ func TestRenderGoldenShippedReviewPartitionIncludesBase(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestRenderGoldenShippedReviewLiteCoversCorrectnessAndTest pins the lite
+// wrapper's scope: its checklist carries both the Correctness and the Test
+// partition items and none of the Fit items, and it declares the medium tier
+// the lite allocation is priced at.
+func TestRenderGoldenShippedReviewLiteCoversCorrectnessAndTest(t *testing.T) {
+	rsrcRoot := shippedRsrcRootForTest()
+	s := newTestServerWithHarness(t, "claude")
+	body, tier, err := renderPlaybookBody(s, rsrcRoot, "code-review-lite", nil, wsconfig.Options{CacheHome: t.TempDir()}, "", "", "", nil, "")
+	if err != nil {
+		t.Fatalf("renderPlaybookBody(code-review-lite): %v", err)
+	}
+	if tier != "medium" {
+		t.Errorf("code-review-lite tier = %q, want medium", tier)
+	}
+	body = strings.Join(strings.Fields(body), " ")
+	for _, want := range []string{
+		"correctness and test integrity",
+		"Logic errors:", "Error paths:", "Contract compliance:", "Security surface:", "Edge cases:", "Unrecorded behavior change:",
+		"**Tautological assertions**", "**Unreachable assert paths**", "**Mock integrity**", "**Coverage**", "**Test isolation**",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("code-review-lite missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"Code reuse:", "Patterns: established", "Test style:"} {
+		if strings.Contains(body, forbidden) {
+			t.Errorf("code-review-lite carries Fit checklist item %q", forbidden)
+		}
 	}
 }
 

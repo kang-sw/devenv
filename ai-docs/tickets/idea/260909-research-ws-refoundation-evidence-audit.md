@@ -153,13 +153,18 @@ dependencies surface as compile and test failures.
 ## Addendum (2026-10-01): review placement and stop (f)
 
 `261001-feat-opt-in-design-and-phase-review` moves where A7's independent
-review lives without retracting A7. By default the independent reviewer now
-sits at the `lead-review` boundary over the landed diff; the worker's
-per-phase review is opt-in through the `review_phase` knob (builtin `off`),
-and an explicit `policy.review.override` of `single` or `partitioned` still
-dispatches it. Ticket-boundary design review is likewise opt-in through
-`sage_review_design` (builtin `off`), apart from epics and the `lead-run` stop
-(c) revision, which keep it. The worker's closed stop list gained (f)
-non-convergence — a second failure with the same root cause — so the lead's
-elevation ladder stays reachable when per-phase review no longer produces
-stop (e); a ticket run gets one retry in total across (e) and (f).
+review lives without retracting A7, and `261001-feat-review-phase-lite-default`
+then sets its default. The worker's per-phase review is selected by the
+`review_phase` knob (`off|lite|full`, builtin `lite`): `lite` is one fresh
+medium-tier reviewer covering correctness and test integrity for one pass with
+no re-review, leaving fit to the human reading the diff; `full` is the
+risk-keyed allocation with two rounds; `off` leaves the independent reviewer
+at the `lead-review` boundary over the landed diff. An explicit
+`policy.review.override` of `single` or `partitioned` wins over every value.
+Ticket-boundary design review is opt-in through `sage_review_design` (builtin
+`off`), apart from epics and the `lead-run` stop (c) revision, which keep it.
+The worker's closed stop list gained (f) non-convergence — a second failure
+with the same root cause — so the lead's elevation ladder stays reachable
+when per-phase review is `off` and produces no stop (e); under `lite`, a
+Critical the worker cannot fix is stop (e). A ticket run gets one retry in
+total across (e) and (f).

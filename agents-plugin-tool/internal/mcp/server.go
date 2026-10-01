@@ -507,7 +507,7 @@ func builtinConfigDefaults() map[string]string {
 		wsconfig.ItemWorkflowPreferSubagent: "off",
 		wsconfig.ItemSageReview:             "auto",
 		wsconfig.ItemSageReviewDesign:       "off",
-		wsconfig.ItemReviewPhase:            "off",
+		wsconfig.ItemReviewPhase:            "lite",
 		wsconfig.ItemBootstrapAlarm:         "on",
 		wsconfig.ItemWorktreePool:           defaultWorktreePoolTemplate,
 		wsconfig.ItemTicketAssigneeAware:    "off",
@@ -2381,7 +2381,7 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 	appendKnob(reviewPhaseEntry, tuningKnob{
 		ID:          reviewPhaseEntry.Key,
 		Kind:        "workflow_preference",
-		Description: "Select whether a ticket worker runs per-phase independent code review (builtin off: the pre-merge range review is the integration net). A lead's session value reaches the workers it spawns. An explicit policy.review.override still dispatches review when off.",
+		Description: "Select the ticket worker's per-phase independent code review: lite (builtin) runs one medium-tier correctness and test-integrity reviewer for one pass; full runs the risk-keyed allocation with two rounds; off runs none, leaving the pre-merge range review as the integration net. A lead's session value reaches the workers it spawns. An explicit policy.review.override of single or partitioned wins over every value.",
 		Writer:      tuningWriter{Tool: reviewPhaseEntry.WriterTool, FixedArguments: map[string]string{"key": reviewPhaseEntry.Key}},
 		Reset: &tuningWriter{
 			Tool:           reviewPhaseEntry.ResetTool,
@@ -2480,7 +2480,7 @@ func tuneAgentsTier(value any, harness string, scope wsconfig.Scope, reset bool)
 // resolveReviewPhase resolves the review_phase knob under sessionKey; the
 // session parent walk lets a lead's session value reach the worker keys it
 // spawns, and root anchors the committed repo scope so a team can commit the
-// opt-in. A read error falls back to the builtin floor (off).
+// value. A read error falls back to the builtin default (lite).
 func (s *Server) resolveReviewPhase(root, sessionKey string) string {
 	adapter := sessionConfigAdapter{s: s.sessions}
 	r := wsconfig.NewResolver(wsconfig.Options{RepoRoot: root}, builtinConfigDefaults(), adapter, adapter)

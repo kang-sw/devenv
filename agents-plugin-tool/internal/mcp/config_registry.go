@@ -16,6 +16,7 @@ import (
 var (
 	onOffEnum             = []string{"on", "off"}
 	sageReviewEnum        = []string{"off", "ask", "auto"}
+	reviewPhaseEnum       = []string{"off", "lite", "full"}
 	agentsTierEnum        = []string{"small", "medium", "large", "xlarge"}
 	promptHarnessEnum     = []string{"claude", "codex", "pi", "*"}
 	agentsTierHarnessEnum = []string{"claude", "codex", "pi", "default"}
@@ -167,8 +168,8 @@ var configRegistry = []configKeyEntry{
 		}},
 		ValueFields: []tuningField{{
 			Name:        "value",
-			Description: "Per-phase independent code review: on dispatches the risk-keyed review, off skips it. Omit when reset is true.",
-			Enum:        onOffEnum,
+			Description: "Per-phase independent code review: lite dispatches one medium-tier correctness and test-integrity reviewer for one pass, full dispatches the risk-keyed review with two rounds, off skips it. Omit when reset is true.",
+			Enum:        reviewPhaseEnum,
 		}},
 		NoAgentVisible: true,
 		ResolverBacked: true,

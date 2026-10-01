@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 0c8bc66eee1f37a4
 sage-review-completeness-reviewed: 0c8bc66eee1f37a4
+completed: 2026-10-01
 ---
 
 # review_phase lite tier as the default: one-round correctness and test-integrity review
@@ -176,3 +177,39 @@ Full `go test ./...` for `agents-plugin-tool` and the plugin package tests
 after wsflow and pi mirror regeneration. Doc check: the anchor's 261001
 addendum names `lite` as the builtin per-phase review and no longer says
 builtin `off`.
+
+### Result (b3aefa1ef) - 2026-10-01
+
+Landed as planned. `review_phase` is `off|lite|full` with builtin `lite`
+(`config_registry.go` `reviewPhaseEnum`, `builtinConfigDefaults`, catalog
+description, `wsconfig.ItemReviewPhase` doc). `normalizeReviewPhase` maps
+unset/unknown (including the retired `on`) to `lite`;
+`deriveImplementReviewAlloc` returns allocation `lite` before reading risk
+facts, `full` runs the unchanged risk-keyed table, and an explicit
+`single`/`partitioned` override still wins first. The installed review todo
+has a `Review (lite)` title and a `code-review-lite` instruction with the
+one-pass / unfixable-Critical stop / unfixed-Important `unresolved:` clause;
+`implementNextAfterBranch` names "the one-pass lite review". New render
+wrapper `agents-plugin/rsrc/code-review-lite/` (medium, includes
+`code-reviewer`, correctness + test checklist items copied). Worker playbooks
+(both) map `lite` and carve it out of the two-round sentence;
+`worker-stop-protocol.md` describes the lite round and both stop (e) cases;
+`lead-tune.md` names `off`/`lite`/`full`. Binding anchor 261001 addendum now
+names `lite` as builtin. wsflow and pi rsrc mirrors and manifests regenerated.
+
+Verification: `go test ./... -count=1` in `agents-plugin-tool` (all packages
+ok); `python3 -m unittest discover agents-plugin-wsflow/tests` (14 ok);
+`python3 -m unittest discover agents-plugin/tests` (76 ok);
+`npm test` in `agents-plugin-pi` (1929 pass, 0 fail). Ticket checks (i)-(iv),
+(viii): `TestResolveImplementReviewPhaseGatesAllocation`; (ii) also
+`TestDeriveImplementReviewAllocProportionalPartitions` under `full`; (v)
+`TestConfigTuningCatalogProjectsPromptAndSchemaKnobs`; (vi)
+`TestEnterImplementReviewPhaseResolvesThroughParentSession`; (vii)
+`TestDeriveImplementTodoInstructionsLiteReview`; wrapper scope
+`TestRenderGoldenShippedReviewLiteCoversCorrectnessAndTest`. Independent
+review (partitioned: correctness, test): both clean in round 1.
+
+Decisions: correctness checklist item 6's trailing pointer to the Test
+partition was dropped in the lite copy, since test integrity is in the same
+scope; `session_auth_test` parent-walk fixtures switched their sample value
+from `on` to `full` for vocabulary only.
