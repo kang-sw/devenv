@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 611b8a39958c3b5d
 sage-review-completeness-reviewed: 611b8a39958c3b5d
+completed: 2026-10-01
 ---
 
 # Repo-scope config that applies, and lead-tune guidance for workflow weight
@@ -302,3 +303,49 @@ wsflow and pi regeneration; a fresh-reader audit of the revised
 `lead-tune.md` (per `skill-authoring.md`) confirms it contains no
 complaint-specific script and no restated value semantics that duplicate
 `config.list`.
+
+### Result (c561d3328) - 2026-10-01
+
+- `agents-plugin/rsrc/lead-tune/lead-tune.md` rewritten. The Sage-only posture
+  handler and the `review_phase` routing line are replaced by `On: explain
+  knobs`, which reads `config.list` descriptions and current values, explains
+  the knobs a request bears on with their exact value words (keeping the
+  off/ask/auto gloss as skip/recommend/require), explains the session,
+  project, repo, and global scopes, and suggests one. `On: tune scalar knob`
+  uses that scope guidance and confirms the scope with the user. The new
+  `On: commit repo-scope setting` drafts the `.ws-workflow/config.json` edit
+  from `config.list`'s `repo_scope` block and per-knob `repo_key`, then
+  proposes an ordinary commit through the new `Repo-Scope Proposal` template
+  (knob/file/change/commit). `On: tune prompt override` routes a repo-scope
+  choice to that handler.
+- Invariants revised: the Scope invariant admits the repo-file commit as the
+  one non-catalog path; confirmation covers storage scope; only an explicitly
+  chosen value is written. The Surface invariant and `judge: tune-target` send
+  a multi-knob or vague weight request to the explain path instead of
+  "unsupported axis", which is now a one-line fallback. `judge:
+  proactive-propose` is unchanged. The Doctrine section was removed as
+  duplicated value semantics.
+- `agents-plugin/skills/lead-tune/SKILL.md` and the wsflow shim descriptions
+  widened to weight and review-posture requests. wsflow and pi rsrc mirrors,
+  the rsrc manifests, and the skills manifest were regenerated.
+- The idea ticket `261001-bug-config-scope-gaps-after-review-opt-in` records
+  that gap 1 moved here (Decision 11).
+- Fresh-reader audit (per `skill-authoring.md`): complaint-specific scripts,
+  duplicated value semantics, and the Doctrine section were fixed; the gloss
+  (Decision 6) and the unchanged proactive-propose judge are intentional.
+- Review round 1 (correctness + test) raised six findings, all fixed in
+  eab5d417d: `assigneeFeature` now returns resolver errors to
+  `tickets.query` and `tickets.create_empty`; `config.list` publishes
+  `repo_key` (`prompt.<point>.<claude|codex|pi|all>` for prompt knobs) and
+  lead-tune drafts from it; a `config.tune` echo failure after a successful
+  write is reported as a warning, not an error; the scalar handler suggests a
+  scope instead of defaulting to the declared one; new tests cover
+  `workflow.lang` via playbook.read, fail-loud at the playbook readers and
+  `tickets.query`, and `Resolver.Check`'s project and global branches. Round
+  2 verified all six fixed with no new findings.
+- Verification: `go test ./... -count=1` in `agents-plugin-tool`,
+  `python3 -m unittest discover agents-plugin/tests`, and
+  `python3 -m unittest discover agents-plugin-wsflow/tests` passed on
+  eab5d417d; the round-2 targeted run
+  (`-run 'RepoScope|ConfigTune|ConfigList|LeadTune|WeightLever|ResolverCheck'`)
+  passed.
