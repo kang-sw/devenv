@@ -505,6 +505,9 @@
     "260930-feat-git-exec-audit-log": {
       "registered_at": "2026-09-30T02:03:00Z"
     },
+    "261001-bug-config-scope-gaps-after-review-opt-in": {
+      "registered_at": "2026-10-01T07:37:37Z"
+    },
     "261001-feat-opt-in-design-and-phase-review": {
       "registered_at": "2026-10-01T05:07:43Z",
       "lease": {
