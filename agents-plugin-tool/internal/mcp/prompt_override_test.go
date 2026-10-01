@@ -1272,6 +1272,32 @@ func TestConfigTuningCatalogProjectsPromptAndSchemaKnobs(t *testing.T) {
 		t.Fatalf("sage_review builtin default should be cataloged as auto/builtin: %+v", sageReviewKnob.Current)
 	}
 
+	// The per-stage split and the per-phase review gate are listed with their
+	// value domains and their opt-in (off) builtin defaults.
+	for _, tc := range []struct {
+		key    string
+		domain []string
+	}{
+		{key: wsconfig.ItemSageReviewDesign, domain: []string{"off", "ask", "auto"}},
+		{key: wsconfig.ItemReviewPhase, domain: []string{"on", "off"}},
+	} {
+		knob := requireTuningKnob(t, catalog, tc.key)
+		if knob.Writer.Tool != "config.tune" || knob.Writer.FixedArguments["key"] != tc.key {
+			t.Fatalf("%s writer mismatch: %+v", tc.key, knob.Writer)
+		}
+		if knob.Reset == nil || knob.Reset.FixedArguments["key"] != tc.key || knob.Reset.FixedArguments["reset"] != "true" {
+			t.Fatalf("%s reset mismatch: %+v", tc.key, knob.Reset)
+		}
+		assertFieldEnum(t, knob.SelectorFields, "scope", []string{"session", "project", "global"})
+		assertFieldEnum(t, knob.ValueFields, "value", tc.domain)
+		if current := mustMarshalJSON(t, knob.Current); !strings.Contains(current, `"value":"off"`) || !strings.Contains(current, `"scope":"builtin"`) {
+			t.Fatalf("%s builtin default should be cataloged as off/builtin: %s", tc.key, current)
+		}
+	}
+	if desc := requireTuningKnob(t, catalog, wsconfig.ItemSageReview).Description; !strings.Contains(desc, "completeness") || !strings.Contains(desc, "sage_review_design") {
+		t.Fatalf("sage_review description must state it governs completeness only: %q", desc)
+	}
+
 	agentsKnob := requireTuningKnob(t, catalog, "agents.tier")
 	assertFieldEnum(t, agentsKnob.ValueFields, "tier", []string{"small", "medium", "large", "xlarge"})
 	assertFieldNoEnum(t, agentsKnob.ValueFields, "effort")
@@ -1374,6 +1400,8 @@ func TestConfigTuningCatalogNoAgentShape(t *testing.T) {
 
 	requireTuningKnob(t, catalog, "prompt.SeedSection")
 	requireTuningKnob(t, catalog, wsconfig.ItemSageReview)
+	requireTuningKnob(t, catalog, wsconfig.ItemSageReviewDesign)
+	requireTuningKnob(t, catalog, wsconfig.ItemReviewPhase)
 	for i, args := range []map[string]any{
 		{
 			"key":         wsconfig.ItemSageReview,

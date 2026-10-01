@@ -511,6 +511,9 @@ func implementFinalActionInstruction(verdict implementTodoVerdict) string {
 		return fmt.Sprintf("Do not ask for final action approval while branch action is stop: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
 	}
 	verification := "Apply the impl-playbook unchanged-input verification rule; after documentation-only commits run affected checks. Verify the review is resolved"
+	if !verdict.NeedReview {
+		verification = "Apply the impl-playbook unchanged-input verification rule; after documentation-only commits run affected checks. Per-phase review did not run (review_phase off); state that skip in the report's omitted: field so the reader knows to review the diff"
+	}
 	return fmt.Sprintf("%s, then report the retained branch, commit range, and merge_confirm: %s to the lead. Do not merge; the worker ends at the report.", verification, implementMergeConfirmText(verdict.BranchPlan))
 }
 
@@ -924,6 +927,7 @@ func (s *Server) handleEnterImplement(id json.RawMessage, args map[string]any) r
 	if err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("%s: branch preflight failed: %w", tool, err))
 	}
+	input.ReviewPhase = s.resolveReviewPhase(record.Root, sessionKey)
 	result := resolveImplement(input, source, obs)
 	rawAgenda, err := json.Marshal(result.Agenda)
 	if err != nil {

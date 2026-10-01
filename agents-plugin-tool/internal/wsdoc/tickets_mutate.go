@@ -27,8 +27,8 @@ type TicketCloseOptions struct {
 type TicketMoveOptions struct {
 	TicketStem string
 	To         string // "idea" | "todo" | "ready"
-	SageReview string // resolved sage_review config value ("" | "off" | "auto" | "ask")
-	Today      string // kept for symmetry; unused in the initial implementation
+	SageReview SageReviewConfig // resolved per-stage sage review config
+	Today      string           // kept for symmetry; unused in the initial implementation
 }
 
 type TicketMutateResult struct {
@@ -410,6 +410,15 @@ func isUpwardMove(from, to string) bool {
 	return tr > fr
 }
 
+// SageReviewConfig carries the resolved per-stage sage review config values
+// ("" | "off" | "ask" | "auto"). Design comes from the sage_review_design key
+// and Completeness from the sage_review key; the two stages are tuned
+// independently, so neither value implies the other.
+type SageReviewConfig struct {
+	Design       string
+	Completeness string
+}
+
 func ResolvedSageReviewPosture(sageReview string) string {
 	switch strings.ToLower(strings.TrimSpace(sageReview)) {
 	case "ask":
@@ -519,7 +528,7 @@ func blockedUpwardMoveError(postures sageReviewPostures) error {
 // tickets.sage_gate's `required` -> run result and `recommended` -> ask
 // prompt (tickets_sage.go). Kept as a single constant so the two surfaces
 // cannot drift in wording.
-const sageReviewNonWaivableAdvisory = "sage review is not waivable per ticket (see ws/config.list for the sage_review config); " +
+const sageReviewNonWaivableAdvisory = "sage review is not waivable per ticket (see ws/config.list: sage_review_design sets the design stage, sage_review the completeness stage); " +
 	"design review checks coherence, right-problem framing, and executability; completeness review checks structure, " +
 	"fields, and clarity — neither judges whether the underlying research itself is settled."
 
@@ -533,17 +542,16 @@ const sageReviewNonWaivableAdvisory = "sage review is not waivable per ticket (s
 // readySagePostureWarning, since this function no longer needs to know the
 // destination status). The only error this function can still return is a
 // genuine I/O failure from the persisted-write below.
-func prepareSageReviewForUpwardMove(ticketAbsPath, stem, sageReview string) (sageReviewPostures, error) {
+func prepareSageReviewForUpwardMove(ticketAbsPath, stem string, sageReview SageReviewConfig) (sageReviewPostures, error) {
 	designRequired, completenessRequired := sageReviewStageRequirement(stem)
 	fm := frontmatter(ticketAbsPath)
 	design, completeness := effectiveSageReviewPostures(fm)
-	resolved := ResolvedSageReviewPosture(sageReview)
 
 	if designRequired && (design == "" || design == "pending") {
-		design = resolved
+		design = ResolvedSageReviewPosture(sageReview.Design)
 	}
 	if completenessRequired && (completeness == "" || completeness == "pending") {
-		completeness = resolved
+		completeness = ResolvedSageReviewPosture(sageReview.Completeness)
 	}
 
 	// Always (re)persist the effective value for each required field in a

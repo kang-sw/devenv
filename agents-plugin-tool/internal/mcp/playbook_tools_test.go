@@ -1014,7 +1014,9 @@ func TestPlaybookPrintLeadTuneUsesWorkflowPreferenceCatalogKnobs(t *testing.T) {
 		"`config.tune` with `key` set to `\"workflow.prefer_subagent\"`",
 		"## On: tune Sage review posture",
 		"skipped to `off`, recommended to `ask`, and required to `auto`",
-		"`key` set to `sage_review`",
+		"`key` set to each selected knob",
+		"`sage_review_design` for design review, `sage_review` for completeness review",
+		"workflow preference (`review_phase`)",
 		"prompt.UserPreferenceSection",
 	} {
 		if !strings.Contains(body, want) {
@@ -2873,6 +2875,13 @@ func TestPlaybookRenderGoldenTicketWorker(t *testing.T) {
 						"The flat `code-reviewer` is an included contract, not a delegated playbook.",
 						"A second failure with the same root cause as an earlier one in this run is stop (f), not another attempt.",
 						"stop `a` through `f`",
+						// Per-phase review is opt-in: the review step and the
+						// (e)/two-round protocol apply only when review ran.
+						"Independent review runs when the route verdict allocates it, and is never yours",
+						"Review, when the route allocation is not `none`:",
+						"When the allocation is `none` (per-phase review is off), skip this step and state the skip in your Report's `omitted:` field",
+						"It applies only when the route allocated review.",
+						"When the route allocates review, it is two rounds, never more.",
 					} {
 						if !strings.Contains(procedure, want) {
 							t.Errorf("rendered review procedure missing %q", want)
@@ -2970,6 +2979,9 @@ func TestPlaybookPrintLeadRunWorkerTierPolicy(t *testing.T) {
 				"revise the unimplemented phase directly, or append an `#### Edition` when it already has a `### Result`",
 				"A `pass` commits the phase update and resumes the worker",
 				"- **(f) non-convergence** — the same retry as (e), adding the report's failing `verification:` line to the task block instead.",
+				// Decision 6: the (c) revision keeps its design review under sage_review_design=off.
+				"This design review runs whatever `sage_review_design` is set to",
+				"When the ticket's `sage-review-design` posture is `skipped`, the gate returns skip, so render and spawn `ticket-reviewer-design` directly, one tier above the worker's, instead; its verdict governs the commit and resume only and is not stamped.",
 				"A ticket run gets one retry in total across (e) and (f): after one retry for either stop, the next (e) or (f) goes to the user.",
 				// Opt-in parallel route: inert without the per-run approval, batch
 				// selection delegated to ticket-batch-selector, one worktree per

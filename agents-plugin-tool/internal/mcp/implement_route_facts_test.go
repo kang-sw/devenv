@@ -19,6 +19,7 @@ func TestEnterImplementTicketTargetRoutesFromTicketFacts(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
+	enableReviewPhase(t, server, key)
 	writeImplementReadyTicket(t, root, implementReadyFacts())
 
 	var result implementResult
@@ -180,6 +181,7 @@ func TestEnterImplementAdHocTargetReadsNoTicket(t *testing.T) {
 			t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 			server := NewServer(root, "test")
 			key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
+			enableReviewPhase(t, server, key)
 
 			args := implementSkipDocsArgs("json")
 			args["target"].(map[string]any)["kind"] = kind
@@ -313,5 +315,51 @@ func TestEnterImplementResolvesSymlinkAliasedTicketPath(t *testing.T) {
 	}
 	if result.RouteFacts != "read from the ticket" {
 		t.Fatalf("route facts = %q, want the ticket source through the aliased path", result.RouteFacts)
+	}
+}
+
+// TestEnterImplementReviewPhaseResolvesThroughParentSession pins the dispatch
+// path of review_phase: route.resolve_implement resolves the knob under the
+// caller's key, so a lead's session-scope opt-in reaches a worker key minted
+// under it, while an unrelated key stays at the builtin off (no review todo).
+func TestEnterImplementReviewPhaseResolvesThroughParentSession(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	server := NewServer(root, "test")
+	leadKey, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
+	otherKey, _ := parseLoginResponse(t, callLogin(t, server, 2, root, nil))
+	tune := callToolWithKey(t, server, 3, leadKey, "config.tune", map[string]any{"key": "review_phase", "value": "on", "scope": "session"})
+	if !strings.Contains(tune, "review_phase: on [scope:session]") {
+		t.Fatalf("session tune response = %s", tune)
+	}
+	workerKey, err := server.sessions.mint(root, roleLead, leadKey)
+	if err != nil {
+		t.Fatalf("mint worker key: %v", err)
+	}
+	for _, tc := range []struct {
+		name     string
+		key      string
+		wantNeed bool
+	}{
+		{name: "worker under the tuned lead", key: workerKey, wantNeed: true},
+		{name: "unrelated key at builtin off", key: otherKey, wantNeed: false},
+	} {
+		var result implementResult
+		if err := json.Unmarshal([]byte(callToolWithKey(t, server, 4, tc.key, "route.resolve_implement", implementSkipDocsArgs("json"))), &result); err != nil {
+			t.Fatalf("%s: json verdict did not parse: %v", tc.name, err)
+		}
+		if result.Verdict.NeedReview != tc.wantNeed {
+			t.Fatalf("%s: need_review = %v (alloc %q), want %v", tc.name, result.Verdict.NeedReview, result.Verdict.ReviewAlloc, tc.wantNeed)
+		}
+		record, ok := server.sessions.readState(tc.key)
+		if !ok {
+			t.Fatalf("%s: session record not found", tc.name)
+		}
+		if got := containsString(keysOf(record.Todos), "review"); got != tc.wantNeed {
+			t.Fatalf("%s: installed review todo = %v, want %v: %v", tc.name, got, tc.wantNeed, keysOf(record.Todos))
+		}
 	}
 }

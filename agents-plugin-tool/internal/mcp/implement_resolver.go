@@ -19,6 +19,11 @@ type implementInput struct {
 	Facts  implementFactsInput  `json:"facts,omitempty"`
 	Policy implementPolicyInput `json:"policy,omitempty"`
 	Format string               `json:"format,omitempty"`
+	// ReviewPhase is the review_phase config value ("on" | "off") resolved
+	// under the caller's session key by the route.resolve_implement handler.
+	// It is config, not a caller argument, so it never parses from the call;
+	// anything other than "on" normalizes to "off".
+	ReviewPhase string `json:"-"`
 }
 
 type implementTargetInput struct {
@@ -174,6 +179,7 @@ type normalizedImplementFacts struct {
 	TestRisk               string
 	SecurityOrContractRisk string
 	ReviewOverride         string
+	ReviewPhase            string
 	DocModePolicy          string
 	DocReason              string
 	MergeTargetPolicy      string
@@ -663,7 +669,8 @@ func observeImplementBranch(root string, targetBranch string) (implementBranchOb
 // work, so there is no second axis to derive: the previous direct-edit mode
 // existed only for a caller that edited source inline instead of delegating,
 // and the review allocation it enabled would have had that caller review its
-// own edits. Independent review is now unconditional.
+// own edits. Any review that is allocated is therefore independent; whether one
+// is allocated at all is the review_phase knob (see deriveImplementReviewAlloc).
 //
 // The value names how the caller was reached — the work was delegated to it —
 // not what the caller does with it: the caller edits source itself. Nothing
@@ -698,14 +705,14 @@ func resolveImplement(input implementInput, source implementRouteFactsSource, ob
 		Delegation:  implementDelegationMode,
 		BranchPlan:  branchPlan,
 		ReviewAlloc: reviewAlloc,
-		NeedReview:  true,
+		NeedReview:  reviewAlloc != implementReviewAllocNone,
 		DocMode:     docMode,
 	}
 	agenda := implementAgenda{
 		Delegation:  implementDelegationMode,
 		BranchPlan:  branchPlan,
 		ReviewAlloc: reviewAlloc,
-		NeedReview:  true,
+		NeedReview:  reviewAlloc != implementReviewAllocNone,
 		DocMode:     docMode,
 		DocReason:   n.DocReason,
 		NeedDoc:     docMode == "standard",
@@ -750,6 +757,7 @@ func normalizeImplementFacts(input implementInput) (normalizedImplementFacts, []
 		TestRisk:               factOr(risk.Test, "unknown"),
 		SecurityOrContractRisk: factOr(risk.SecurityOrContract, "unknown"),
 		ReviewOverride:         factOr(policy.Review.Override, "auto"),
+		ReviewPhase:            normalizeReviewPhase(input.ReviewPhase),
 		DocModePolicy:          factOr(policy.Docs.Mode, "standard"),
 		DocReason:              strings.TrimSpace(policy.Docs.Reason.Value),
 		MergeTargetPolicy:      strings.TrimSpace(policy.Branch.MergeTarget.Value),
@@ -783,10 +791,26 @@ func validObservedBranch(branch string) bool {
 	return branch != "" && branch != "(detached)"
 }
 
-// deriveImplementReviewAlloc allocates independent review. Review is always
-// dispatched: the caller executes the change, so no allocation may resolve to
-// the caller reviewing its own work. Only the breadth varies — one full-scope
-// reviewer, or a risk-keyed partition.
+// implementReviewAllocNone is the allocation when no per-phase review runs.
+const implementReviewAllocNone = "none"
+
+// normalizeReviewPhase maps the resolved review_phase config value to "on" or
+// "off"; an unset or unknown value is "off", matching the builtin default.
+func normalizeReviewPhase(value string) string {
+	if strings.EqualFold(strings.TrimSpace(value), "on") {
+		return "on"
+	}
+	return "off"
+}
+
+// deriveImplementReviewAlloc allocates per-phase independent review. An
+// explicit policy.review.override of single/partitioned always dispatches,
+// even with review_phase off. Otherwise review_phase off allocates none (the
+// pre-merge range review is the integration net), and review_phase on
+// allocates by risk. Any allocated review is a fresh reviewer: the caller
+// executes the change, so no allocation resolves to the caller reviewing its
+// own work. Only the breadth varies — one full-scope reviewer, or a risk-keyed
+// partition.
 func deriveImplementReviewAlloc(n normalizedImplementFacts) string {
 	if n.ReviewOverride != "" && n.ReviewOverride != "auto" {
 		switch n.ReviewOverride {
@@ -795,6 +819,9 @@ func deriveImplementReviewAlloc(n normalizedImplementFacts) string {
 		default:
 			return n.ReviewOverride
 		}
+	}
+	if n.ReviewPhase != "on" {
+		return implementReviewAllocNone
 	}
 	parts := implementReviewPartitions(n)
 	if len(parts) <= 1 {
@@ -1086,6 +1113,9 @@ func implementBranchNextInstruction(verdict implementVerdict) string {
 }
 
 func implementNextAfterBranch(verdict implementVerdict) string {
+	if !verdict.NeedReview {
+		return "execute the installed Prep and Edit todos and the final action gate in order; per-phase review is off (review_phase), so no reviewer is dispatched."
+	}
 	return fmt.Sprintf("execute the installed Prep and Edit todos, %s review, and the final action gate in order.", verdict.ReviewAlloc)
 }
 
@@ -1103,6 +1133,7 @@ func implementConditions(n normalizedImplementFacts, source implementRouteFactsS
 		"test-risk=" + n.TestRisk,
 		"security-or-contract-risk=" + n.SecurityOrContractRisk,
 		"review-override=" + n.ReviewOverride,
+		"review-phase=" + n.ReviewPhase,
 		"doc-mode-policy=" + n.DocModePolicy,
 	}
 	conditions = append(conditions, "route-facts="+source.Status, "merge-confirm="+n.MergeConfirmPolicy)

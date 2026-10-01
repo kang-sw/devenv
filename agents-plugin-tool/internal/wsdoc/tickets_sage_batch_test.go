@@ -29,7 +29,7 @@ func TestSageMappedBatchOutcomes(t *testing.T) {
 					fields["sage-review-design"] = "skipped"
 				}
 				path := writeSageTicket(t, root, stem, fields)
-				gate, err := SageGate(root, SageGateOptions{TicketStem: stem, Landing: "ready"}, "required")
+				gate, err := SageGate(root, SageGateOptions{TicketStem: stem, Landing: "ready"}, bothStages("required"))
 				if err != nil || gate.Action != "run" {
 					t.Fatalf("gate on todo body: %+v, %v", gate, err)
 				}
@@ -117,7 +117,7 @@ func TestSageBatchDeltaReusesCompletenessPass(t *testing.T) {
 			t.Fatalf("delta did not restore %s with current digest: %+v", stage, fm)
 		}
 	}
-	gate, err := SageGate(root, SageGateOptions{TicketStem: stem, Landing: "ready"}, "required")
+	gate, err := SageGate(root, SageGateOptions{TicketStem: stem, Landing: "ready"}, bothStages("required"))
 	if err != nil || gate.Action != "skip" {
 		t.Fatalf("settled delta did not converge: %+v, %v", gate, err)
 	}

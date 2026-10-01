@@ -32,12 +32,27 @@ const (
 	// delegation of eligible general work through lead-delegate. Builtin default: off.
 	ItemWorkflowPreferSubagent = "workflow.prefer_subagent"
 
-	// ItemSageReview is the layered config key for the sage review gate on ticket
-	// writes. Value "auto" runs reviewers unconditionally after a todo/ready commit;
-	// "ask" prompts the user first; absent/empty/"off" disables the gate entirely.
-	// Builtin default: auto (gate runs unless a project/session/global override
-	// disables it).
+	// ItemSageReview is the layered config key for the completeness stage of the
+	// sage review gate at actionable ready/ promotion. Value "auto" requires the
+	// completeness reviewer; "ask" recommends it; absent/empty/"off" skips it.
+	// The design stage has its own key (ItemSageReviewDesign); this key no longer
+	// governs it. Builtin default: auto.
 	ItemSageReview = "sage_review"
+
+	// ItemSageReviewDesign is the layered config key for the design stage of the
+	// sage review gate at actionable ready/ promotion, with the same off|ask|auto
+	// domain as ItemSageReview. Epics are exempt: an epic's explicitly invoked
+	// design review runs regardless of this key. Builtin default: off — design
+	// review is an opt-in for users who hand most work to agents.
+	ItemSageReviewDesign = "sage_review_design"
+
+	// ItemReviewPhase gates the worker's per-phase independent code review that
+	// route.resolve_implement allocates. Values: "on" (today's risk-keyed
+	// allocation and two-round protocol) or "off" (no per-phase review; the
+	// pre-merge range review remains the integration net). An explicit
+	// policy.review.override of single/partitioned still dispatches review under
+	// "off". Builtin default: off.
+	ItemReviewPhase = "review_phase"
 
 	// ItemSageReviewDesignTier is the model capability tier for the design reviewer
 	// delegate. Accepted values mirror the ws tier vocabulary (small/medium/large/xlarge).
@@ -109,6 +124,11 @@ func init() {
 	// sage_review* keys default to project scope: they are project-level opt-ins
 	// that should persist across sessions for the same project.
 	RegisterDefaultScope(ItemSageReview, ScopeProject)
+	RegisterDefaultScope(ItemSageReviewDesign, ScopeProject)
+	// review_phase defaults to project scope like the sage_review* keys: a
+	// project-level opt-in that persists across sessions. A lead's session-scope
+	// value reaches the workers it spawns through the session parent walk.
+	RegisterDefaultScope(ItemReviewPhase, ScopeProject)
 	RegisterDefaultScope(ItemSageReviewDesignTier, ScopeProject)
 	RegisterDefaultScope(ItemSageReviewCompletenessTier, ScopeProject)
 	// workflow.lang defaults to global scope: language is a cross-project user preference.

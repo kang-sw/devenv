@@ -142,7 +142,12 @@ turn; the next invocation merges once the holder has released it.
   above the worker's: revise the unimplemented phase directly, or append an
   `#### Edition`
   when it already has a `### Result`. A `pass` commits the phase update and
-  resumes the worker; a `block` goes to the user with the verdict.
+  resumes the worker; a `block` goes to the user with the verdict. This design
+  review runs whatever `sage_review_design` is set to, because the revision
+  corrects a ticket that already proved wrong. When the ticket's
+  `sage-review-design` posture is `skipped`, the gate returns skip, so render
+  and spawn `ticket-reviewer-design` directly, one tier above the worker's,
+  instead; its verdict governs the commit and resume only and is not stamped.
 - **(d) irreversible action** — ask the user; resume with the answer.
 - **(e) Critical open after the fix round** — repeat Spawn steps 5 to 7 with
   the retry cell from the table (its body and any `tier_override`), on the same

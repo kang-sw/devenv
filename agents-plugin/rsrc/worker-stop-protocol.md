@@ -31,7 +31,7 @@ decide.
   Protocol `AGENTS.md` declares. A project that declares none has no always-ask
   category and no stop here.
 - **(e) A Critical review finding still open after round 2** (see Review
-  Rounds below).
+  Rounds below). It applies only when the route allocated review.
 - **(f) Non-convergence.** A second failure with the same root cause as an
   earlier one in this run. Report the failing command under `verification:`;
   the lead retries the ticket at a higher tier, so another attempt at your
@@ -44,8 +44,8 @@ dropped silently and nothing costs a stop.
 
 ## Review Rounds
 
-Review is two rounds, never more. Round 1: fresh reviewers sweep the change at
-the allocation the route set. Round 2: a reviewer checks only whether the
+When the route allocates review, it is two rounds, never more. Round 1: fresh
+reviewers sweep the change at the allocation the route set. Round 2: a reviewer checks only whether the
 round-1 findings were fixed; it raises nothing new, and anything new it
 notices goes into `unresolved:` as an observation. A Critical still open after
 round 2 is stop (e). A fresh sweep each round finds a fresh set of findings

@@ -57,7 +57,7 @@ func TestTicketsMoveReadyRefusesOpenDecisionQueue(t *testing.T) {
 	mustWrite(t, root, rel, pending)
 	runner := &mockGitRunner{}
 
-	_, err := TicketsMove(root, runner, TicketMoveOptions{TicketStem: stem, To: "ready", SageReview: "auto"})
+	_, err := TicketsMove(root, runner, TicketMoveOptions{TicketStem: stem, To: "ready", SageReview: bothStages("auto")})
 	if err == nil {
 		t.Fatal("TicketsMove to ready with a pending Open Decision Queue section must be refused")
 	}
@@ -73,7 +73,7 @@ func TestTicketsMoveReadyRefusesOpenDecisionQueue(t *testing.T) {
 
 	settled := strings.Replace(pending, odqSection, "", 1)
 	mustWrite(t, root, rel, settled)
-	res, err := TicketsMove(root, runner, TicketMoveOptions{TicketStem: stem, To: "ready", SageReview: "auto"})
+	res, err := TicketsMove(root, runner, TicketMoveOptions{TicketStem: stem, To: "ready", SageReview: bothStages("auto")})
 	if err != nil {
 		t.Fatalf("TicketsMove after deleting the section: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestTicketsMoveReadyIgnoresFencedOpenDecisionQueue(t *testing.T) {
 	stem := "260101-feat-odqfence"
 	rel := filepath.Join("ai-docs", "tickets", "todo", stem+".md")
 	mustWrite(t, root, rel, "---\ntitle: Sample\n---\n\n# Sample\n\n```text\n## Open Decision Queue\n\n(1) <decision>\n```\n\n"+sageRouteFactsSection+"Body.\n")
-	if _, err := TicketsMove(root, &mockGitRunner{}, TicketMoveOptions{TicketStem: stem, To: "ready", SageReview: "auto"}); err != nil {
+	if _, err := TicketsMove(root, &mockGitRunner{}, TicketMoveOptions{TicketStem: stem, To: "ready", SageReview: bothStages("auto")}); err != nil {
 		t.Fatalf("fenced heading must not refuse the move: %v", err)
 	}
 }
@@ -103,7 +103,7 @@ func TestTicketsMoveTodoIgnoresOpenDecisionQueue(t *testing.T) {
 			root := t.TempDir()
 			rel := filepath.Join("ai-docs", "tickets", "idea", stem+".md")
 			mustWrite(t, root, rel, "---\ntitle: Sample\nsage-review-design: skipped\n---\n\n# Sample\n\n"+odqSection+"Body.\n")
-			if _, err := TicketsMove(root, &mockGitRunner{}, TicketMoveOptions{TicketStem: stem, To: "todo", SageReview: "auto"}); err != nil {
+			if _, err := TicketsMove(root, &mockGitRunner{}, TicketMoveOptions{TicketStem: stem, To: "todo", SageReview: bothStages("auto")}); err != nil {
 				t.Fatalf("a todo/ move must not be gated on the queue section: %v", err)
 			}
 		})
@@ -149,7 +149,7 @@ func TestSageGateRefusesOpenDecisionQueue(t *testing.T) {
 			body += "Body.\n"
 			mustWrite(t, root, rel, body)
 
-			res, err := SageGate(root, SageGateOptions{TicketStem: tc.stem, Landing: tc.landing}, "required")
+			res, err := SageGate(root, SageGateOptions{TicketStem: tc.stem, Landing: tc.landing}, bothStages("required"))
 			if err != nil {
 				t.Fatalf("SageGate: %v", err)
 			}
@@ -170,7 +170,7 @@ func TestSageGateIgnoresFencedOpenDecisionQueue(t *testing.T) {
 	stem := "260101-feat-odqfence"
 	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", stem+".md"),
 		"---\ntitle: Sample\nsage-review-design: required\nsage-review-completeness: required\n---\n\n# Sample\n\n~~~\n## Open Decision Queue\n~~~\n\n"+sageRouteFactsSection+"Body.\n")
-	res, err := SageGate(root, SageGateOptions{TicketStem: stem, Landing: "ready"}, "auto")
+	res, err := SageGate(root, SageGateOptions{TicketStem: stem, Landing: "ready"}, bothStages("auto"))
 	if err != nil {
 		t.Fatalf("SageGate: %v", err)
 	}

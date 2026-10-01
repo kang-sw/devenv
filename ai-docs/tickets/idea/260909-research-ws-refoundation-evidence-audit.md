@@ -149,3 +149,17 @@ dependencies surface as compile and test failures.
 - **Telemetry before removal.** Replaced by a qualitative git-history
   analysis manual applied before and after.
 - **Lead-surface skill rename coherence** (`run`/`delegate`/`discuss` set rename): deferred to this ticket's lead-surface work; only the description tightening shipped separately as a hotfix to stop over-triggering.
+
+## Addendum (2026-10-01): review placement and stop (f)
+
+`261001-feat-opt-in-design-and-phase-review` moves where A7's independent
+review lives without retracting A7. By default the independent reviewer now
+sits at the `lead-review` boundary over the landed diff; the worker's
+per-phase review is opt-in through the `review_phase` knob (builtin `off`),
+and an explicit `policy.review.override` of `single` or `partitioned` still
+dispatches it. Ticket-boundary design review is likewise opt-in through
+`sage_review_design` (builtin `off`), apart from epics and the `lead-run` stop
+(c) revision, which keep it. The worker's closed stop list gained (f)
+non-convergence — a second failure with the same root cause — so the lead's
+elevation ladder stays reachable when per-phase review no longer produces
+stop (e); a ticket run gets one retry in total across (e) and (f).

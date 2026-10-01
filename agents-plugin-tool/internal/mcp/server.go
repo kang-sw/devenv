@@ -506,6 +506,8 @@ func builtinConfigDefaults() map[string]string {
 	return map[string]string{
 		wsconfig.ItemWorkflowPreferSubagent: "off",
 		wsconfig.ItemSageReview:             "auto",
+		wsconfig.ItemSageReviewDesign:       "off",
+		wsconfig.ItemReviewPhase:            "off",
 		wsconfig.ItemBootstrapAlarm:         "on",
 		wsconfig.ItemWorktreePool:           defaultWorktreePoolTemplate,
 		wsconfig.ItemTicketAssigneeAware:    "off",
@@ -1606,7 +1608,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		to, _ := params.Arguments["to"].(string)
 		adapter := sessionConfigAdapter{s: s.sessions}
 		r := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
-		resolved, _ := r.Get(sessionKey, wsconfig.ItemSageReview)
+		sageReview := resolveSageReviewConfig(&r, sessionKey)
 		guard, err := s.guardMoveClose(root, "move", stem, params.Arguments)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -1614,7 +1616,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		result, err := wsdoc.TicketsMove(root, wsgit.ExecRunner{}, wsdoc.TicketMoveOptions{
 			TicketStem: stem,
 			To:         to,
-			SageReview: resolved.Value,
+			SageReview: sageReview,
 		})
 		if err != nil {
 			if result.PartialMutationNotice != "" {
@@ -1639,7 +1641,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		sessionKey, _ := params.Arguments["session_key"].(string)
 		adapter := sessionConfigAdapter{s: s.sessions}
 		r := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
-		resolved, _ := r.Get(sessionKey, wsconfig.ItemSageReview)
+		sageReview := resolveSageReviewConfig(&r, sessionKey)
 		// Auto-fill the assignee at creation (the explicit ownership act). Inert
 		// unless the ticket-assignee-aware flag is on; set_assignee (default true)
 		// then chooses self / none / explicit emails.
@@ -1648,7 +1650,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		result, err := wsdoc.TicketCreate(root, wsdoc.TicketCreateOptions{
 			Stem:         stem,
 			InitialState: initialState,
-			SageReview:   resolved.Value,
+			SageReview:   sageReview,
 			Assignee:     resolveSetAssignee(rawSetAssignee, setAssigneePresent, assigneeAware, currentEmail),
 		})
 		if err != nil {
@@ -1678,12 +1680,12 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		answer, _ := params.Arguments["answer"].(string)
 		adapter := sessionConfigAdapter{s: s.sessions}
 		r := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
-		resolved, _ := r.Get(sessionKey, wsconfig.ItemSageReview)
+		sageReview := resolveSageReviewConfig(&r, sessionKey)
 		result, err := wsdoc.SageGate(root, wsdoc.SageGateOptions{
 			TicketStem: stem,
 			Landing:    landing,
 			Answer:     answer,
-		}, resolved.Value)
+		}, sageReview)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
@@ -2349,7 +2351,7 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 	appendKnob(sageReviewEntry, tuningKnob{
 		ID:          sageReviewEntry.Key,
 		Kind:        "sage_review",
-		Description: "Set the default ticket-boundary Sage review posture.",
+		Description: "Set the Sage completeness-review posture at actionable ready/ promotion (builtin auto). It does not govern the design stage; see sage_review_design.",
 		Writer:      tuningWriter{Tool: sageReviewEntry.WriterTool, FixedArguments: map[string]string{"key": sageReviewEntry.Key}},
 		Reset: &tuningWriter{
 			Tool:           sageReviewEntry.ResetTool,
@@ -2358,6 +2360,36 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 		SelectorFields: sageReviewEntry.SelectorFields,
 		ValueFields:    sageReviewEntry.ValueFields,
 		Current:        currentWorkflowPreference(resolver, sessionKey, sageReviewEntry.Key),
+	})
+
+	sageReviewDesignEntry := registryEntryByKey(wsconfig.ItemSageReviewDesign)
+	appendKnob(sageReviewDesignEntry, tuningKnob{
+		ID:          sageReviewDesignEntry.Key,
+		Kind:        "sage_review",
+		Description: "Set the Sage design-review posture at actionable ready/ promotion (builtin off: design review is opt-in). Epic design review runs whenever it is invoked, regardless of this knob.",
+		Writer:      tuningWriter{Tool: sageReviewDesignEntry.WriterTool, FixedArguments: map[string]string{"key": sageReviewDesignEntry.Key}},
+		Reset: &tuningWriter{
+			Tool:           sageReviewDesignEntry.ResetTool,
+			FixedArguments: map[string]string{"key": sageReviewDesignEntry.Key, "reset": "true"},
+		},
+		SelectorFields: sageReviewDesignEntry.SelectorFields,
+		ValueFields:    sageReviewDesignEntry.ValueFields,
+		Current:        currentWorkflowPreference(resolver, sessionKey, sageReviewDesignEntry.Key),
+	})
+
+	reviewPhaseEntry := registryEntryByKey(wsconfig.ItemReviewPhase)
+	appendKnob(reviewPhaseEntry, tuningKnob{
+		ID:          reviewPhaseEntry.Key,
+		Kind:        "workflow_preference",
+		Description: "Select whether a ticket worker runs per-phase independent code review (builtin off: the pre-merge range review is the integration net). A lead's session value reaches the workers it spawns. An explicit policy.review.override still dispatches review when off.",
+		Writer:      tuningWriter{Tool: reviewPhaseEntry.WriterTool, FixedArguments: map[string]string{"key": reviewPhaseEntry.Key}},
+		Reset: &tuningWriter{
+			Tool:           reviewPhaseEntry.ResetTool,
+			FixedArguments: map[string]string{"key": reviewPhaseEntry.Key, "reset": "true"},
+		},
+		SelectorFields: reviewPhaseEntry.SelectorFields,
+		ValueFields:    reviewPhaseEntry.ValueFields,
+		Current:        currentWorkflowPreference(resolver, sessionKey, reviewPhaseEntry.Key),
 	})
 
 	agentTiers, err := currentAgentTierMappings()
@@ -2443,6 +2475,30 @@ func tuneAgentsTier(value any, harness string, scope wsconfig.Scope, reset bool)
 		}
 	}
 	return result, nil
+}
+
+// resolveReviewPhase resolves the review_phase knob under sessionKey; the
+// session parent walk lets a lead's session value reach the worker keys it
+// spawns, and root anchors the committed repo scope so a team can commit the
+// opt-in. A read error falls back to the builtin floor (off).
+func (s *Server) resolveReviewPhase(root, sessionKey string) string {
+	adapter := sessionConfigAdapter{s: s.sessions}
+	r := wsconfig.NewResolver(wsconfig.Options{RepoRoot: root}, builtinConfigDefaults(), adapter, adapter)
+	resolved, err := r.Get(sessionKey, wsconfig.ItemReviewPhase)
+	if err != nil {
+		return builtinConfigDefaults()[wsconfig.ItemReviewPhase]
+	}
+	return resolved.Value
+}
+
+// resolveSageReviewConfig resolves both Sage stage knobs under one session
+// key: the design stage from sage_review_design and the completeness stage
+// from sage_review. Each resolves independently — an old sage_review override
+// never implies design review.
+func resolveSageReviewConfig(r *wsconfig.Resolver, sessionKey string) wsdoc.SageReviewConfig {
+	design, _ := r.Get(sessionKey, wsconfig.ItemSageReviewDesign)
+	completeness, _ := r.Get(sessionKey, wsconfig.ItemSageReview)
+	return wsdoc.SageReviewConfig{Design: design.Value, Completeness: completeness.Value}
 }
 
 func currentWorkflowPreference(resolver *wsconfig.Resolver, sessionKey, itemKey string) tuningScopedValue {
