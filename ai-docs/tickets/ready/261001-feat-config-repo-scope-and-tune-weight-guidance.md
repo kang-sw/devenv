@@ -234,6 +234,45 @@ posture or an empty template; (viii) after a project-scope reset of
 `auto` at scope `repo`; (ix) existing golden description tests updated.
 Full `go test ./...` for `agents-plugin-tool`.
 
+### Result (84f3b74a2) - 2026-10-01
+
+- One session-anchored constructor (`sessionConfigOptions` / `sessionResolver`
+  in `internal/mcp/server.go`) now serves every resolver-backed reader: the
+  Sage readers (`tickets.sage_gate`, `tickets.create_empty`, `tickets.move`),
+  the pool readers (`git.merge`, `worktree.acquire/release/list`), the
+  `config.tune` reset echo, `resolveReviewPhase`, `assigneeFeature`,
+  `config.list`, `buildOverrideLookup`, and the `workflow.lang` readers in
+  `playbook.read`, `playbook.render`, and `workflow_manual`.
+- Left on `wsconfig.Options{}` (no repo-capable key): `config.resolve_agent`,
+  `tuneAgentsTier`, `currentAgentTierMappings`, and the
+  `printPlaybook`/`renderPlaybook` config options (agents.tier, not
+  resolver-backed); the `bootstrap_alarm` readers in ferrule and
+  `workflow_manual` and `workflowPreferSubagentEnabled` (global-only); the
+  `config.tune` writers (repo scope is read-only); `wsnote`/mailbox
+  `MachinePath` (not a resolver).
+- Fail-loud: every repo-anchored reader returns its load error, and
+  `loadRepoConfig` errors name the file. `resolveReviewPhase` no longer falls
+  back to the builtin. `buildOverrideLookup` returns an error after a new
+  `Resolver.Check` probe, because its closure cannot carry one; this makes
+  `playbook.read`, `playbook.render`, and `workflow_manual` fail on a malformed
+  committed file too. `git.merge` fails on a config error but still degrades to
+  "unknown pool" when worktree listing fails.
+- `config.list` emits `repo_scope` {path, exists, shape} and a `repo_scope`
+  flag per catalog knob (`configKeyEntry.RepoScoped`: resolver-backed and not
+  global-only) and per scoped-view item (`wsconfig.RepoScoped`).
+  `ticket-assignee-aware` got a declared default scope so the scoped view
+  always lists it.
+- Added beyond the plan: the `config.tune` scalar set echo appends a
+  `shadowed: effective ...` line when the effective value comes from another
+  scope (for example a global write under a committed repo value).
+- The five weight-lever descriptions state each value's effect, what lowering
+  it loses, and a qualitative cost hint.
+- Verification: tests in `internal/mcp/config_repo_scope_test.go` (items i-ix,
+  4bc9705d5, tightened in 3fa024cc8) and `internal/wsconfig/repo_test.go`.
+  `go test ./...` in `agents-plugin-tool` passed on 84f3b74a2.
+  `go test ./internal/wsconfig ./internal/mcp -count=1` passed on 4bc9705d5.
+  No existing test pinned the old description wording.
+
 ### Phase 2: lead-tune explains the weight knobs
 
 - `lead-tune.md`: replace the Sage-only posture handler and the
