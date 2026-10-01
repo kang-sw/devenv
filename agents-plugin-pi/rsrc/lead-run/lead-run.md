@@ -53,11 +53,11 @@ the turn: relay the reason.
    body's own frontmatter tier, or the `tier_override` the table pairs with it.
    The tier sets the worker's model; the worker's route sets review breadth.
 
-   | Tier | Worker playbook | Retry after stop (e) |
+   | Tier | Worker playbook | Retry after stop (e) or (f) |
    |---|---|---|
    | medium | `ticket-worker` | `ticket-worker-elevated` |
    | large | `ticket-worker-elevated` | `ticket-worker-elevated`, `tier_override: xlarge` |
-   | xlarge | `ticket-worker-elevated`, `tier_override: xlarge` | none: its (e) goes to the user |
+   | xlarge | `ticket-worker-elevated`, `tier_override: xlarge` | none: its (e) or (f) goes to the user |
 
 3. When a goal reminder is active and the branch is not yet `goal/*`, run
    `git checkout -b goal/<current branch>/<slug>` with a random
@@ -142,12 +142,23 @@ turn; the next invocation merges once the holder has released it.
   above the worker's: revise the unimplemented phase directly, or append an
   `#### Edition`
   when it already has a `### Result`. A `pass` commits the phase update and
-  resumes the worker; a `block` goes to the user with the verdict.
+  resumes the worker; a `block` goes to the user with the verdict. This design
+  review runs whatever `sage_review_design` is set to, because the revision
+  corrects a ticket that already proved wrong. When the ticket's
+  `sage-review-design` posture is `skipped`, the gate never selects the design
+  reviewer, so render and spawn `ticket-reviewer-design` directly, one tier
+  above the worker's, instead; its verdict governs the commit and resume only
+  and is not stamped.
 - **(d) irreversible action** — ask the user; resume with the answer.
 - **(e) Critical open after the fix round** — repeat Spawn steps 5 to 7 with
   the retry cell from the table (its body and any `tier_override`), on the same
   branch, adding the report's open Critical `unresolved:` line to the task
-  block. One retry: a second (e) goes to the user.
+  block.
+- **(f) non-convergence** — the same retry as (e), adding the report's failing
+  `verification:` line to the task block instead.
+
+A ticket run gets one retry in total across (e) and (f): after one retry for
+either stop, the next (e) or (f) goes to the user.
 
 Resume through the host's continuation mechanism. When it has none, or the
 agent is gone, re-spawn with the same task block plus one line:

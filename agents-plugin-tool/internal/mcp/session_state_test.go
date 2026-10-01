@@ -1751,6 +1751,7 @@ func TestServeStdioSessionStateFlow(t *testing.T) {
 
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 900100, root, nil))
+	enableReviewPhase(t, server, key)
 
 	args := implementSkipDocsArgs("text")
 	enter := callToolWithKey(t, server, 1, key, "route.resolve_implement", args)
@@ -1789,6 +1790,7 @@ func TestEnterImplementNewSchemaReturnsVerdictAndStoresAgenda(t *testing.T) {
 
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
+	enableReviewPhase(t, server, key)
 	writeImplementReadyTicket(t, root, implementReadyFacts())
 
 	text := callToolWithKey(t, server, 2, key, "route.resolve_implement", implementReadyArgs("text"))
@@ -1871,6 +1873,7 @@ func TestEnterImplementTicketTargetTodosCarryNoPlanningStage(t *testing.T) {
 
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
+	enableReviewPhase(t, server, key)
 	writeImplementReadyTicket(t, root, implementReadyFacts())
 	callToolWithKey(t, server, 2, key, "route.resolve_implement", implementReadyArgs("text"))
 
@@ -1900,6 +1903,7 @@ func TestEnterImplementAllocatesSingleReviewForBoundedPublicExistingTestChange(t
 
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
+	enableReviewPhase(t, server, key)
 	facts := implementReadyFacts()
 	facts["scope.new_type_contract"] = "no"
 	facts["complexity.reuse_points"] = "confirmed"
@@ -1992,6 +1996,7 @@ func TestEnterImplementSkippedDocsOmitsDocTodos(t *testing.T) {
 
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
+	enableReviewPhase(t, server, key)
 
 	jsonText := callToolWithKey(t, server, 2, key, "route.resolve_implement", implementSkipDocsArgs("json"))
 	var result implementResult
@@ -2038,6 +2043,7 @@ func TestEnterImplementUnbornRepositoryUsesStandardCreatePath(t *testing.T) {
 
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
+	enableReviewPhase(t, server, key)
 	jsonText := callToolWithKey(t, server, 2, key, "route.resolve_implement", implementSkipDocsArgs("json"))
 	var result implementResult
 	if err := json.Unmarshal([]byte(jsonText), &result); err != nil {
@@ -2087,6 +2093,7 @@ func TestEnterImplementNearMissesPreserveStandardBranchAndMergeTodos(t *testing.
 			t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 			server := NewServer(root, "test")
 			key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
+			enableReviewPhase(t, server, key)
 
 			args := implementSkipDocsArgs("json")
 			if tc.branch != "" {
@@ -2264,8 +2271,8 @@ func TestServeStdioTicketsCreateUsesResolvedSageReviewConfig(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", cacheHome)
 
 	resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, nil, nil)
-	if err := resolver.Set(wsconfig.ItemSageReview, "ask", wsconfig.SetOptions{}); err != nil {
-		t.Fatalf("set sage_review: %v", err)
+	if err := resolver.Set(wsconfig.ItemSageReviewDesign, "ask", wsconfig.SetOptions{}); err != nil {
+		t.Fatalf("set sage_review_design: %v", err)
 	}
 
 	server := NewServer(root, "test")
@@ -2296,7 +2303,7 @@ func TestServeStdioTicketsCreateUsesResolvedSageReviewConfig(t *testing.T) {
 	}
 }
 
-func TestServeStdioTicketsCreateDefaultsToRequiredSageReview(t *testing.T) {
+func TestServeStdioTicketsCreateDefaultsToSkippedDesignReview(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
 	initGit(t, root)
@@ -2311,7 +2318,7 @@ func TestServeStdioTicketsCreateDefaultsToRequiredSageReview(t *testing.T) {
 		"stem":          "epic-sage-create-default",
 		"initial_state": "todo",
 	})
-	if !strings.Contains(resp, "Created ai-docs/tickets/todo/") || !strings.Contains(resp, "required") {
+	if !strings.Contains(resp, "Created ai-docs/tickets/todo/") || !strings.Contains(resp, "skipped") {
 		t.Fatalf("tickets.create_empty response missing created path or posture: %s", resp)
 	}
 
@@ -2327,12 +2334,12 @@ func TestServeStdioTicketsCreateDefaultsToRequiredSageReview(t *testing.T) {
 		t.Fatalf("read created ticket: %v", err)
 	}
 	body := string(raw)
-	if !strings.Contains(body, "sage-review-design: required") {
-		t.Fatalf("created ticket missing required posture (builtin default should now be required):\n%s", body)
+	if !strings.Contains(body, "sage-review-design: skipped") {
+		t.Fatalf("created ticket missing skipped posture (sage_review_design builtin default is off):\n%s", body)
 	}
 }
 
-func TestServeStdioGlobalSageReviewAutoRequiresTicketBoundaryReview(t *testing.T) {
+func TestServeStdioGlobalSageReviewDesignAutoRequiresTicketBoundaryReview(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
 	initGit(t, root)
@@ -2343,12 +2350,12 @@ func TestServeStdioGlobalSageReviewAutoRequiresTicketBoundaryReview(t *testing.T
 	key, _ := parseLoginResponse(t, callLogin(t, server, 902602, root, nil))
 
 	tuneResp := callToolWithKey(t, server, 1, key, "config.tune", map[string]any{
-		"key":   wsconfig.ItemSageReview,
+		"key":   wsconfig.ItemSageReviewDesign,
 		"value": "auto",
 		"scope": "global",
 	})
-	if !strings.Contains(tuneResp, "sage_review: auto [scope:global]") {
-		t.Fatalf("global sage_review tune response = %s", tuneResp)
+	if !strings.Contains(tuneResp, "sage_review_design: auto [scope:global]") {
+		t.Fatalf("global sage_review_design tune response = %s", tuneResp)
 	}
 
 	resp := callToolWithKey(t, server, 2, key, "tickets.create_empty", map[string]any{
@@ -2356,7 +2363,7 @@ func TestServeStdioGlobalSageReviewAutoRequiresTicketBoundaryReview(t *testing.T
 		"initial_state": "todo",
 	})
 	if !strings.Contains(resp, "required") {
-		t.Fatalf("global sage_review=auto must resolve to required ticket posture: %s", resp)
+		t.Fatalf("global sage_review_design=auto must resolve to required ticket posture: %s", resp)
 	}
 }
 
@@ -2566,8 +2573,9 @@ func TestServeStdioTicketsCloseNoMergeReviewNudgeOnPlainBranch(t *testing.T) {
 }
 
 // TestServeStdioTicketsMoveToReadyUnresolvedPostureWarnsInResponse is a C5
-// dispatch-level test: a todo/ -> ready/ move at the shipped default
-// (sage_review: auto -> required, never skipped) with an unresolved posture
+// dispatch-level test: a todo/ -> ready/ move at the shipped defaults
+// (sage_review: auto -> completeness required; sage_review_design: off ->
+// design skipped, terminal) with an unresolved completeness posture
 // must succeed and carry the ready-sage-posture warning text in the actual
 // tools/call response text, not just in wsdoc.TicketMutateResult.Tip.
 func TestServeStdioTicketsMoveToReadyUnresolvedPostureWarnsInResponse(t *testing.T) {
@@ -2588,7 +2596,7 @@ func TestServeStdioTicketsMoveToReadyUnresolvedPostureWarnsInResponse(t *testing
 		"stem": stem,
 		"to":   "ready",
 	})
-	if !strings.Contains(moveResp, "sage-review-design is unreviewed") {
+	if !strings.Contains(moveResp, "sage-review-completeness is unreviewed") {
 		t.Fatalf("tickets.move to ready response missing unresolved-posture warning: %s", moveResp)
 	}
 	if !strings.Contains(moveResp, "ws/git.commit will fail on guardrail ready-sage-posture") {
@@ -2716,7 +2724,7 @@ func TestServeStdioTicketsCreateEmptyReadyUnresolvedPostureWarnsInResponse(t *te
 	if !strings.Contains(createResp, "Created ai-docs/tickets/ready/") {
 		t.Fatalf("tickets.create_empty response missing created path: %s", createResp)
 	}
-	if !strings.Contains(createResp, "sage-review-design is unreviewed") {
+	if !strings.Contains(createResp, "sage-review-completeness is unreviewed") {
 		t.Fatalf("tickets.create_empty ready response missing unresolved-posture warning: %s", createResp)
 	}
 	if !strings.Contains(createResp, "ws/git.commit will fail on guardrail ready-sage-posture") {
@@ -2734,12 +2742,12 @@ func TestServeStdioTicketsCreateEmptyReadyUnresolvedPostureWarnsInResponse(t *te
 		t.Fatalf("read created ticket: %v", err)
 	}
 	body := string(raw)
-	if !strings.Contains(body, "sage-review-design: required") || !strings.Contains(body, "sage-review-completeness: required") {
-		t.Fatalf("created ticket missing both stamped required fields (C4 parity with tickets.move):\n%s", body)
+	if !strings.Contains(body, "sage-review-design: skipped") || !strings.Contains(body, "sage-review-completeness: required") {
+		t.Fatalf("created ticket missing both per-stage stamped fields (C4 parity with tickets.move):\n%s", body)
 	}
 }
 
-func TestServeStdioTicketsMoveDefaultsToRequiredSageReview(t *testing.T) {
+func TestServeStdioTicketsMoveDefaultsToSkippedDesignReview(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
 	initGit(t, root)
@@ -2767,8 +2775,8 @@ func TestServeStdioTicketsMoveDefaultsToRequiredSageReview(t *testing.T) {
 		"stem": datedStem,
 		"to":   "todo",
 	})
-	if !strings.Contains(moveResp, "required") {
-		t.Fatalf("tickets.move response missing required posture tip (builtin default should now be required): %s", moveResp)
+	if !strings.Contains(moveResp, "skipped") {
+		t.Fatalf("tickets.move response missing skipped posture tip (sage_review_design builtin default is off): %s", moveResp)
 	}
 
 	matches, err := filepath.Glob(filepath.Join(root, "ai-docs", "tickets", "todo", "*-epic-sage-move-default.md"))
@@ -2783,8 +2791,8 @@ func TestServeStdioTicketsMoveDefaultsToRequiredSageReview(t *testing.T) {
 		t.Fatalf("read moved ticket: %v", err)
 	}
 	body := string(raw)
-	if !strings.Contains(body, "sage-review-design: required") {
-		t.Fatalf("moved ticket missing required posture (builtin default should now be required):\n%s", body)
+	if !strings.Contains(body, "sage-review-design: skipped") {
+		t.Fatalf("moved ticket missing skipped posture (sage_review_design builtin default is off):\n%s", body)
 	}
 }
 
@@ -2796,8 +2804,8 @@ func TestServeStdioTicketsMoveExplicitOverrideWinsOverBuiltinDefault(t *testing.
 	t.Setenv("WS_CACHE_HOME", cacheHome)
 
 	resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, nil, nil)
-	if err := resolver.Set(wsconfig.ItemSageReview, "ask", wsconfig.SetOptions{}); err != nil {
-		t.Fatalf("set sage_review: %v", err)
+	if err := resolver.Set(wsconfig.ItemSageReviewDesign, "ask", wsconfig.SetOptions{}); err != nil {
+		t.Fatalf("set sage_review_design: %v", err)
 	}
 
 	server := NewServer(root, "test")
@@ -4324,5 +4332,15 @@ func TestEnterProceedReadsDeclaredBindingAnchorGate(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// enableReviewPhase opts key into per-phase review (review_phase=on at session
+// scope) for tests whose subject is the review allocation or the installed
+// review todo, which review_phase's builtin off would otherwise suppress.
+func enableReviewPhase(t *testing.T, server *Server, key string) {
+	t.Helper()
+	if err := server.sessions.setOverride(key, wsconfig.ItemReviewPhase, "on"); err != nil {
+		t.Fatalf("enable review_phase: %v", err)
 	}
 }

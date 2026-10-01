@@ -10,6 +10,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: ef2ce3905c376e94
 sage-review-completeness-reviewed: ef2ce3905c376e94
+completed: 2026-10-01
 ---
 
 # Opt-in design review and per-phase code review, with a non-convergence elevation stop
@@ -228,6 +229,27 @@ terminates. Full `go test ./...` for `agents-plugin-tool`, plus the plugin
 package tests (runtime-contract and skill-shim drift) after the wsflow
 regeneration.
 
+### Result (63011151d) - 2026-10-01
+
+- Stop (f) landed in `worker-stop-protocol.md` (Stop List, `stop:` enum,
+  valid-pair rule `a` through `f`); both worker playbooks name (f) for the
+  same-root-cause rule; `lead-run.md` retry table covers (e) and (f), the (f)
+  handler reuses the (e) retry with the failing `verification:` line, and one
+  retry is shared across (e) and (f).
+- Session parent-walk lives in `sessionStore.getOverride`
+  (`internal/mcp/session_auth.go`) rather than `wsconfig`: it refreshes only
+  the read key's record, follows `Parent` with a seen-set cycle guard, stops
+  at the first unreadable link, and never touches ancestors;
+  `listOverrideKeys` unions the lineage's keys. Writes stay on the given key.
+- No Go code validates stop letters; nothing to extend.
+- Verification: `TestGetOverrideWalksParentChain` (child inherits, own
+  override wins, grandchild through two links, no-Parent unchanged, cycle
+  terminates), `TestGetOverrideParentWalkDoesNotTouchAncestors`,
+  `TestResolverSessionScopeInheritsParentOverride`; lead-run and
+  ticket-worker playbook goldens updated. `go test ./... -count=1` pass;
+  `python3 -m unittest discover agents-plugin-wsflow/tests` 14 OK after
+  wsflow and pi mirror regeneration.
+
 ### Phase 2: Opt-in knobs and defaults
 
 Depends on Phase 1: the default flip is safe only once (f) keeps the
@@ -277,6 +299,48 @@ builtin defaults an epic created directly in `todo/` and one moved
 idea->todo both get `run` from the `landing: "todo"` gate, while a `blocked`
 epic still gets `stop_blocked`. Full
 `go test ./...` and plugin package tests after wsflow regeneration.
+
+### Result (2585c658d) - 2026-10-01
+
+- `sage_review_design` (`off|ask|auto`, builtin `off`) and `review_phase`
+  (`on|off`, builtin `off`) registered in `wsconfig` (project default scope),
+  the builtin defaults, and the `config.tune` registry/catalog with
+  wsflow visibility; `sage_review` descriptions and the per-ticket advisory
+  now state each knob governs one stage.
+- `wsdoc.SageReviewConfig{Design, Completeness}` replaces the single string in
+  `TicketCreateOptions`, `TicketMoveOptions`, and `SageGate`; each stage
+  resolves from its own knob. `resolveEpicDesignPosture` revives an epic's
+  missing/`pending`/`skipped` design posture to `required` at the
+  `landing: "todo"` gate and persists it; at the retained epic-at-ready branch
+  missing/`pending` run and `skipped` stays terminal. Epic create/move tips
+  note the todo-gate revival.
+- `route.resolve_implement` resolves `review_phase` under the caller's key
+  (repo root included, parent-walk applies): off yields allocation `none`,
+  `NeedReview: false`, and no review todo; an explicit
+  `policy.review.override` of `single`/`partitioned` still dispatches. The
+  next-after-branch and final-action instructions have review-off branches;
+  verdict conditions carry `review-phase=<on|off>`.
+- Prose: worker playbooks skip the review step on `none` and state it under
+  `omitted:`; the stop protocol scopes (e) and the two-round rule to runs
+  where review was allocated; `lead-ticket.md` maps stages to their knobs;
+  `lead-run.md` (c) dispatches `ticket-reviewer-design` directly, unstamped,
+  when the design posture is `skipped`; `lead-tune.md` maps design review to
+  `sage_review_design` and per-phase review to `review_phase`. The binding
+  anchor `260909-research-ws-refoundation-evidence-audit` gained a dated
+  addendum.
+- Verification: (i)-(iii) `TestResolveImplementReviewPhaseGatesAllocation`
+  plus `TestEnterImplementReviewPhaseResolvesThroughParentSession`; (iv)-(v)
+  `TestSageGateReadyStagesResolveFromTheirOwnKnobs`; (vi) catalog assertions
+  in `TestConfigTuningCatalogProjectsPromptAndSchemaKnobs` and the no-agent
+  shape test; (vii) `TestSageGateEpicTodoLandingIgnoresDesignKnob` and
+  `TestSageGateEpicReadyLandingDesignPostures`; playbook goldens for the new
+  prose. `go test ./... -count=1` pass (all 17 packages); wsflow unittest 14
+  OK after rsrc manifest, wsflow, and pi mirror regeneration.
+- Decisions: existing allocation tests opt in via `enableReviewPhase`; sage
+  dispatch tests that pinned the old design default now tune
+  `sage_review_design` or expect `skipped`. Review (partitioned: correctness,
+  test) round 1 raised one Important test gap and minors, fixed in 430ca5d31;
+  round 2 clean.
 
 ## Sage Review Round 1 (2026-10-01)
 

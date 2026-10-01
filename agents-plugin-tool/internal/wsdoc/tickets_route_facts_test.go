@@ -137,7 +137,7 @@ func TestSageGateReadyRefusesMissingRouteFacts(t *testing.T) {
 			}
 			body += "Body text.\n"
 			mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", tc.stem+".md"), body)
-			res, err := SageGate(root, SageGateOptions{TicketStem: tc.stem, Landing: "ready"}, "auto")
+			res, err := SageGate(root, SageGateOptions{TicketStem: tc.stem, Landing: "ready"}, bothStages("auto"))
 			if err != nil {
 				t.Fatalf("SageGate: %v", err)
 			}
@@ -155,7 +155,7 @@ func TestSageGateTodoLandingIgnoresRouteFacts(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", "260101-epic-sample.md"),
 		"---\ntitle: Sample\nsage-review-design: required\n---\n\n# Sample\n\nBody text.\n")
-	res, err := SageGate(root, SageGateOptions{TicketStem: "260101-epic-sample", Landing: "todo"}, "auto")
+	res, err := SageGate(root, SageGateOptions{TicketStem: "260101-epic-sample", Landing: "todo"}, bothStages("auto"))
 	if err != nil {
 		t.Fatalf("SageGate: %v", err)
 	}

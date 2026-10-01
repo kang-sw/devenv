@@ -133,8 +133,42 @@ var configRegistry = []configKeyEntry{
 		}},
 		ValueFields: []tuningField{{
 			Name:        "value",
-			Description: "Review posture: off skips review, ask recommends it, auto requires it. Omit when reset is true.",
+			Description: "Completeness-stage review posture: off skips it, ask recommends it, auto requires it. Omit when reset is true.",
 			Enum:        sageReviewEnum,
+		}},
+		NoAgentVisible: true,
+		ResolverBacked: true,
+	},
+	{
+		Key:        wsconfig.ItemSageReviewDesign,
+		WriterTool: "config.tune",
+		ResetTool:  "config.tune",
+		SelectorFields: []tuningField{{
+			Name:        "scope",
+			Description: "Storage scope. When omitted the write lands in the item's declared default scope (project).",
+			Enum:        wsconfig.ScopeSchemaEnum(),
+		}},
+		ValueFields: []tuningField{{
+			Name:        "value",
+			Description: "Design-stage review posture: off skips it, ask recommends it, auto requires it. Omit when reset is true.",
+			Enum:        sageReviewEnum,
+		}},
+		NoAgentVisible: true,
+		ResolverBacked: true,
+	},
+	{
+		Key:        wsconfig.ItemReviewPhase,
+		WriterTool: "config.tune",
+		ResetTool:  "config.tune",
+		SelectorFields: []tuningField{{
+			Name:        "scope",
+			Description: "Storage scope. When omitted the write lands in the item's declared default scope (project).",
+			Enum:        wsconfig.ScopeSchemaEnum(),
+		}},
+		ValueFields: []tuningField{{
+			Name:        "value",
+			Description: "Per-phase independent code review: on dispatches the risk-keyed review, off skips it. Omit when reset is true.",
+			Enum:        onOffEnum,
 		}},
 		NoAgentVisible: true,
 		ResolverBacked: true,

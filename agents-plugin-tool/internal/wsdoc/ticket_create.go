@@ -30,8 +30,8 @@ func splitDatePrefix(stem string) (embedded, rest string, ok bool) {
 type TicketCreateOptions struct {
 	Stem         string // semantic stem (no date prefix)
 	InitialState string // "idea" | "todo" | "ready"
-	SageReview   string // sage_review config value ("" | "off" | "auto" | "ask")
-	Today        string // YYMMDD; if empty, use time.Now().Format("060102")
+	SageReview   SageReviewConfig // resolved per-stage sage review config
+	Today        string           // YYMMDD; if empty, use time.Now().Format("060102")
 	// Assignee, when non-empty, stamps an `assignee:` YAML sequence into the
 	// created stub's frontmatter — the explicit ownership act at creation. The
 	// MCP layer resolves it from set_assignee (and only when the
@@ -119,7 +119,8 @@ func TicketCreate(root string, opts TicketCreateOptions) (TicketCreateResult, er
 	}
 
 	designRequired, completenessRequired := sageReviewStageRequirement(fullStem)
-	resolved := ResolvedSageReviewPosture(opts.SageReview)
+	design := ResolvedSageReviewPosture(opts.SageReview.Design)
+	completeness := ResolvedSageReviewPosture(opts.SageReview.Completeness)
 
 	// Never-skippable design-review invariant: a ticket created directly at
 	// ready has no "from" state that could have already run a design-review
@@ -127,7 +128,7 @@ func TicketCreate(root string, opts TicketCreateOptions) (TicketCreateResult, er
 	// sole HARD enforcement point (single chokepoint); tickets.create_empty
 	// no longer blocks on a non-terminal resolved posture, it warns instead
 	// (readyWarning below, carried on TicketCreateResult.Tip). TicketCreate
-	// never has a blocked case here: resolved only ever comes from
+	// never has a blocked case here: each posture only ever comes from
 	// ResolvedSageReviewPosture, whose outputs are recommended/required/
 	// skipped, never blocked — a brand-new ticket has no prior posture to be
 	// blocked from. Built from readyPostureProblems over *both* required
@@ -137,7 +138,7 @@ func TicketCreate(root string, opts TicketCreateOptions) (TicketCreateResult, er
 	// disagreeing about a category that also requires completeness.
 	var readyWarning string
 	if state == "ready" {
-		readyWarning = readySagePostureWarning(readyPostureProblems(designRequired, resolved, completenessRequired, resolved))
+		readyWarning = readySagePostureWarning(readyPostureProblems(designRequired, design, completenessRequired, completeness))
 	}
 
 	if err := os.MkdirAll(filepath.Dir(destAbs), 0o755); err != nil {
@@ -146,10 +147,10 @@ func TicketCreate(root string, opts TicketCreateOptions) (TicketCreateResult, er
 
 	stub := "---\ntitle: \"\"\n"
 	if (state == "ready" || (state == "todo" && !completenessRequired)) && designRequired {
-		stub += "sage-review-design: " + resolved + "\n"
+		stub += "sage-review-design: " + design + "\n"
 	}
 	if state == "ready" && completenessRequired {
-		stub += "sage-review-completeness: " + resolved + "\n"
+		stub += "sage-review-completeness: " + completeness + "\n"
 	}
 	if assigneeBlock := assigneeFrontmatter(opts.Assignee); assigneeBlock != "" {
 		stub += assigneeBlock
@@ -165,15 +166,15 @@ func TicketCreate(root string, opts TicketCreateOptions) (TicketCreateResult, er
 	case !designRequired:
 		tip = "sage review is exempt for this ticket category."
 	case completenessRequired && state != "ready":
-		tip = "Populate facts and run design and completeness review at ready promotion; todo authoring is ungated."
+		tip = "Populate facts and run the configured Sage review stages (design: sage_review_design, completeness: sage_review) at ready promotion; todo authoring is ungated."
 	case state == "idea":
 		tip = "Explicit epic settlement at todo promotion populates facts and runs design review."
 	case readyWarning != "":
 		tip = readyWarning
 	case state == "ready" && completenessRequired:
-		tip = sageReviewPostureTip(sageReviewPostures{Design: resolved, Completeness: resolved})
+		tip = sageReviewPostureTip(sageReviewPostures{Design: design, Completeness: completeness})
 	default:
-		tip = "sage review posture: design " + resolved + "."
+		tip = "sage review posture: design " + design + "." + epicSkippedDesignNote(designRequired, completenessRequired, design)
 	}
 
 	return TicketCreateResult{Path: relPath, Tip: tip}, nil

@@ -667,7 +667,7 @@ func TestScopedShowOmitsRetiredSageCompletenessSetting(t *testing.T) {
 	if keys["sage_review_completeness"] {
 		t.Fatal("config list advertises the retired completeness setting")
 	}
-	for _, key := range []string{ItemSageReview, ItemSageReviewDesignTier, ItemSageReviewCompletenessTier} {
+	for _, key := range []string{ItemSageReview, ItemSageReviewDesign, ItemReviewPhase, ItemSageReviewDesignTier, ItemSageReviewCompletenessTier} {
 		if !keys[key] {
 			t.Errorf("config list missing active Sage setting %q", key)
 		}

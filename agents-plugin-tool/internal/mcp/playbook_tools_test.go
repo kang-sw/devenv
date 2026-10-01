@@ -1014,7 +1014,9 @@ func TestPlaybookPrintLeadTuneUsesWorkflowPreferenceCatalogKnobs(t *testing.T) {
 		"`config.tune` with `key` set to `\"workflow.prefer_subagent\"`",
 		"## On: tune Sage review posture",
 		"skipped to `off`, recommended to `ask`, and required to `auto`",
-		"`key` set to `sage_review`",
+		"`key` set to each selected knob",
+		"`sage_review_design` for design review, `sage_review` for completeness review",
+		"workflow preference (`review_phase`)",
 		"prompt.UserPreferenceSection",
 	} {
 		if !strings.Contains(body, want) {
@@ -2859,7 +2861,7 @@ func TestPlaybookRenderGoldenTicketWorker(t *testing.T) {
 						t.Errorf("recommended tier = %q, want %q", tier, tc.tier)
 					}
 					// The shared protocol include must arrive with the playbook body.
-					for _, want := range []string{"# Worker Protocol", "## Stop List", "branch-identity safety stop", "as (b); only the lead may judge", "Do not self-vouch", "status: [ok] | [escalate-to-lead]", "completion: phase | ticket | ad_hoc | none", "Valid terminal pairs are `[ok]` with `stop: none`", "The lead owns merging after your report; do not merge.", "merge_confirm: skip | ask"} {
+					for _, want := range []string{"# Worker Protocol", "## Stop List", "branch-identity safety stop", "as (b); only the lead may judge", "Do not self-vouch", "status: [ok] | [escalate-to-lead]", "completion: phase | ticket | ad_hoc | none", "Valid terminal pairs are `[ok]` with `stop: none`", "The lead owns merging after your report; do not merge.", "merge_confirm: skip | ask", "stop: none | a | b | c | d | e | f", "**(f) Non-convergence.**"} {
 						if !strings.Contains(body, want) {
 							t.Errorf("rendered body missing protocol text %q", want)
 						}
@@ -2871,6 +2873,15 @@ func TestPlaybookRenderGoldenTicketWorker(t *testing.T) {
 						"fit uses `code-review-fit`",
 						"test uses `code-review-test`",
 						"The flat `code-reviewer` is an included contract, not a delegated playbook.",
+						"A second failure with the same root cause as an earlier one in this run is stop (f), not another attempt.",
+						"stop `a` through `f`",
+						// Per-phase review is opt-in: the review step and the
+						// (e)/two-round protocol apply only when review ran.
+						"Independent review runs when the route verdict allocates it, and is never yours",
+						"Review, when the route allocation is not `none`:",
+						"When the allocation is `none` (per-phase review is off), skip this step and state the skip in your Report's `omitted:` field",
+						"It applies only when the route allocated review.",
+						"When the route allocates review, it is two rounds, never more.",
 					} {
 						if !strings.Contains(procedure, want) {
 							t.Errorf("rendered review procedure missing %q", want)
@@ -2933,7 +2944,7 @@ func TestPlaybookPrintLeadRunWorkerTierPolicy(t *testing.T) {
 				"The tier sets the worker's model; the worker's route sets review breadth.",
 				"| medium | `ticket-worker` | `ticket-worker-elevated` |",
 				"| large | `ticket-worker-elevated` | `ticket-worker-elevated`, `tier_override: xlarge` |",
-				"| xlarge | `ticket-worker-elevated`, `tier_override: xlarge` | none: its (e) goes to the user |",
+				"| xlarge | `ticket-worker-elevated`, `tier_override: xlarge` | none: its (e) or (f) goes to the user |",
 				// xlarge reuses the elevated body via a render-time tier override
 				// (the escalated body is retired), so the render step must pass
 				// tier_override for the elevated body — whose frontmatter tier is
@@ -2967,7 +2978,11 @@ func TestPlaybookPrintLeadRunWorkerTierPolicy(t *testing.T) {
 				"If the unmerged work belongs to the target ticket, re-invoke its route with a vouch matching the observed branch and target ticket",
 				"revise the unimplemented phase directly, or append an `#### Edition` when it already has a `### Result`",
 				"A `pass` commits the phase update and resumes the worker",
-				"One retry: a second (e) goes to the user.",
+				"- **(f) non-convergence** — the same retry as (e), adding the report's failing `verification:` line to the task block instead.",
+				// Decision 6: the (c) revision keeps its design review under sage_review_design=off.
+				"This design review runs whatever `sage_review_design` is set to",
+				"When the ticket's `sage-review-design` posture is `skipped`, the gate never selects the design reviewer, so render and spawn `ticket-reviewer-design` directly, one tier above the worker's, instead; its verdict governs the commit and resume only and is not stamped.",
+				"A ticket run gets one retry in total across (e) and (f): after one retry for either stop, the next (e) or (f) goes to the user.",
 				// Opt-in parallel route: inert without the per-run approval, batch
 				// selection delegated to ticket-batch-selector, one worktree per
 				// ticket bound through root_override, merges serial, every acquired

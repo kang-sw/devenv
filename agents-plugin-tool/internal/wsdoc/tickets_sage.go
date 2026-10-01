@@ -121,10 +121,12 @@ type stageOutcome struct {
 }
 
 // SageGate resolves the sage-review gate for a landing, porting the
-// ticket-skill gate + per-stage posture prose. resolvedSageReviewConfig is
-// the config.list sage_review value resolved by the caller (used only for the
-// missing/pending config-fallback branch).
-func SageGate(root string, opts SageGateOptions, resolvedSageReviewConfig string) (SageGateResult, error) {
+// ticket-skill gate + per-stage posture prose. cfg carries the per-stage
+// config values resolved by the caller (sage_review_design for the design
+// stage, sage_review for the completeness stage), used only for the
+// missing/pending config-fallback branch. An epic's design stage ignores cfg:
+// see resolveEpicDesignPosture.
+func SageGate(root string, opts SageGateOptions, cfg SageReviewConfig) (SageGateResult, error) {
 	stem := strings.TrimSpace(opts.TicketStem)
 	if !ticketStemRE.MatchString(stem) {
 		return SageGateResult{}, fmt.Errorf("stem must be a ticket stem")
@@ -182,7 +184,10 @@ func SageGate(root string, opts SageGateOptions, resolvedSageReviewConfig string
 				answer = ""
 			}
 		}
-		return sageGateStandalone(ticketAbs, "design", "sage-review-design", design, resolvedSageReviewConfig, answer)
+		if design, err = resolveEpicDesignPosture(ticketAbs, design); err != nil {
+			return SageGateResult{}, err
+		}
+		return sageGateStandalone(ticketAbs, "design", "sage-review-design", design, "", answer)
 	}
 
 	// landing == "ready" (including a requested todo/ -> ready/ promotion).
@@ -231,7 +236,10 @@ func SageGate(root string, opts SageGateOptions, resolvedSageReviewConfig string
 			}
 			return SageGateResult{Action: "skip"}, nil
 		}
-		return sageGateStandalone(ticketAbs, "design", "sage-review-design", design, resolvedSageReviewConfig, answer)
+		if design, err = resolveEpicDesignPosture(ticketAbs, design); err != nil {
+			return SageGateResult{}, err
+		}
+		return sageGateStandalone(ticketAbs, "design", "sage-review-design", design, "", answer)
 	}
 
 	// Both stages required.
@@ -258,12 +266,32 @@ func SageGate(root string, opts SageGateOptions, resolvedSageReviewConfig string
 				answer = ""
 			}
 		}
-		return sageGateStandalone(ticketAbs, "completeness", "sage-review-completeness", completeness, resolvedSageReviewConfig, answer)
+		return sageGateStandalone(ticketAbs, "completeness", "sage-review-completeness", completeness, cfg.Completeness, answer)
 	}
-	// Design not yet terminal: the never-skippable design invariant fires for a
-	// ticket entering its actionable ready-promotion boundary. Run design +
-	// completeness in combined mode.
-	return sageGateCombined(ticketAbs, design, completeness, resolvedSageReviewConfig, answer)
+	// Design not yet terminal: resolve it from sage_review_design (a `skipped`
+	// resolution is terminal and leaves completeness standing alone), and run
+	// design + completeness in combined mode when design still runs.
+	return sageGateCombined(ticketAbs, design, completeness, cfg, answer)
+}
+
+// resolveEpicDesignPosture exempts an epic's design stage from the
+// sage_review_design knob: epic design review is lead-judged and explicitly
+// invoked, so a missing, pending, or skipped posture (whatever a stamping site
+// wrote under the knob) resolves to required and is persisted, rather than
+// silently returning skip — `skipped` is terminal and could never be revived.
+// blocked and completed keep their own handling (stop_blocked, and the
+// freshness check the caller already ran). The epic-at-ready branch reaches
+// this only with a non-terminal posture, so there `skipped` stays a skip.
+func resolveEpicDesignPosture(ticketAbs, posture string) (string, error) {
+	switch strings.TrimSpace(posture) {
+	case "", "pending", "skipped":
+		if err := writeFrontmatterField(ticketAbs, map[string]string{"sage-review-design": "required"}); err != nil {
+			return "", err
+		}
+		return "required", nil
+	default:
+		return posture, nil
+	}
 }
 
 // resolveConcretePosture returns the effective posture for a stage, applying the
@@ -358,8 +386,9 @@ func gateResultFromStageReviewers(out stageOutcome, reviewers []string, mode str
 // prose; this resolution keeps each stage's decision independent (the deleted
 // prose asked each stage separately) so a design answer never silently resolves
 // the completeness stage.
-func sageGateCombined(ticketAbs, design, completeness, resolvedConfig, answer string) (SageGateResult, error) {
-	dp, err := resolveConcretePosture(ticketAbs, "sage-review-design", design, resolvedConfig)
+func sageGateCombined(ticketAbs, design, completeness string, cfg SageReviewConfig, answer string) (SageGateResult, error) {
+	resolvedConfig := cfg.Completeness
+	dp, err := resolveConcretePosture(ticketAbs, "sage-review-design", design, cfg.Design)
 	if err != nil {
 		return SageGateResult{}, err
 	}

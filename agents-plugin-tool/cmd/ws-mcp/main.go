@@ -615,11 +615,12 @@ func ticketsMove(args []string) {
 	}
 
 	resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, nil, nil)
-	resolved, _ := resolver.Get("", "sage_review")
+	design, _ := resolver.Get("", wsconfig.ItemSageReviewDesign)
+	completeness, _ := resolver.Get("", wsconfig.ItemSageReview)
 	result, err := wsdoc.TicketsMove(defaultRoot(*root), wsgit.ExecRunner{}, wsdoc.TicketMoveOptions{
 		TicketStem: *stem,
 		To:         *to,
-		SageReview: resolved.Value,
+		SageReview: wsdoc.SageReviewConfig{Design: design.Value, Completeness: completeness.Value},
 	})
 	printTextOrFatal("tickets move", mcp.FormatTicketMutate("moved", result), withPartialMutationNotice(err, result.PartialMutationNotice))
 }

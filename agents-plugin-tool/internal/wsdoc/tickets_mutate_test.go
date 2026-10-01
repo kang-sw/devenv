@@ -280,7 +280,7 @@ func TestTicketsMoveUpwardNonReadyBlockedRejectsMove(t *testing.T) {
 	_, err := TicketsMove(root, runner, TicketMoveOptions{
 		TicketStem: stem,
 		To:         "todo",
-		SageReview: "auto",
+		SageReview: bothStages("auto"),
 	})
 	if err == nil {
 		t.Fatal("TicketsMove idea->todo with blocked design posture: expected rejection, got nil error")
@@ -318,7 +318,7 @@ func TestTicketsMoveUpwardNonReadyBlockedReturnsPartialMutationNotice(t *testing
 	result, err := TicketsMove(root, runner, TicketMoveOptions{
 		TicketStem: stem,
 		To:         "todo",
-		SageReview: "auto",
+		SageReview: bothStages("auto"),
 	})
 	if err == nil {
 		t.Fatal("TicketsMove idea->todo promoted a blocked legacy sage-review state")
@@ -370,7 +370,7 @@ func TestTicketsMoveActionableTodoIsUngated(t *testing.T) {
 			stem := "260101-" + category + "-backlog"
 			before := "---\ntitle: Backlog\n" + posture + "---\n\nBody.\n"
 			mustWrite(t, root, filepath.Join("ai-docs", "tickets", "idea", stem+".md"), before)
-			result, err := TicketsMove(root, &mockGitRunner{}, TicketMoveOptions{TicketStem: stem, To: "todo", SageReview: "auto"})
+			result, err := TicketsMove(root, &mockGitRunner{}, TicketMoveOptions{TicketStem: stem, To: "todo", SageReview: bothStages("auto")})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -394,7 +394,7 @@ func TestTicketsMoveUpwardToTodoEpicStampsDesignOnly(t *testing.T) {
 	result, err := TicketsMove(root, runner, TicketMoveOptions{
 		TicketStem: stem,
 		To:         "todo",
-		SageReview: "auto",
+		SageReview: bothStages("auto"),
 	})
 	if err != nil {
 		t.Fatalf("TicketsMove idea->todo: %v", err)
@@ -423,7 +423,7 @@ func TestTicketsMoveUpwardToTodoExemptCategoriesStampNoSageReviewField(t *testin
 			result, err := TicketsMove(root, runner, TicketMoveOptions{
 				TicketStem: stem,
 				To:         "todo",
-				SageReview: "auto",
+				SageReview: bothStages("auto"),
 			})
 			if err != nil {
 				t.Fatalf("TicketsMove idea->todo: %v", err)
@@ -460,7 +460,7 @@ func TestTicketsMoveUpwardNonReadyExemptCategoryBlockedFieldIgnored(t *testing.T
 			result, err := TicketsMove(root, runner, TicketMoveOptions{
 				TicketStem: stem,
 				To:         "todo",
-				SageReview: "auto",
+				SageReview: bothStages("auto"),
 			})
 			if err != nil {
 				t.Fatalf("exempt category with stray blocked field must still move: %v", err)
@@ -587,7 +587,7 @@ func TestTicketsMoveUpwardToReadyWarnsOnUnresolvedSageReviewPosture(t *testing.T
 			result, err := TicketsMove(root, runner, TicketMoveOptions{
 				TicketStem: stem,
 				To:         "ready",
-				SageReview: tc.config,
+				SageReview: bothStages(tc.config),
 			})
 			if err != nil {
 				t.Fatalf("TicketsMove: %v", err)
@@ -635,7 +635,7 @@ func TestTicketsMoveUpwardToReadyFromIdeaWarnsOnUnresolvedSageReviewPosture(t *t
 	result, err := TicketsMove(root, runner, TicketMoveOptions{
 		TicketStem: stem,
 		To:         "ready",
-		SageReview: "auto",
+		SageReview: bothStages("auto"),
 	})
 	if err != nil {
 		t.Fatalf("TicketsMove idea->ready: %v", err)
@@ -673,7 +673,7 @@ func TestTicketsMoveToReadyBarsNonImplementationCategories(t *testing.T) {
 			_, err := TicketsMove(root, runner, TicketMoveOptions{
 				TicketStem: stem,
 				To:         "ready",
-				SageReview: "auto",
+				SageReview: bothStages("auto"),
 			})
 			if err == nil {
 				t.Fatalf("TicketsMove %s -> ready must be rejected, got nil error", category)
@@ -701,7 +701,7 @@ func TestTicketsMoveUpwardToReadyLegacyCompletedMigratesToBothFieldsTerminal(t *
 	result, err := TicketsMove(root, runner, TicketMoveOptions{
 		TicketStem: stem,
 		To:         "ready",
-		SageReview: "auto",
+		SageReview: bothStages("auto"),
 	})
 	if err != nil {
 		t.Fatalf("TicketsMove legacy completed: %v", err)
@@ -730,7 +730,7 @@ func TestTicketsMoveUpwardToReadyLegacyBlockedWarnsDistinctly(t *testing.T) {
 	result, err := TicketsMove(root, runner, TicketMoveOptions{
 		TicketStem: stem,
 		To:         "ready",
-		SageReview: "auto",
+		SageReview: bothStages("auto"),
 	})
 	if err != nil {
 		t.Fatalf("TicketsMove legacy-blocked promotion: %v", err)
@@ -770,7 +770,7 @@ func TestTicketsMoveToReadyNoSpecAddressingWarning(t *testing.T) {
 	result, err := TicketsMove(root, runner, TicketMoveOptions{
 		TicketStem: stem,
 		To:         "ready",
-		SageReview: "off",
+		SageReview: bothStages("off"),
 	})
 	if err != nil {
 		t.Fatalf("TicketsMove: %v", err)
@@ -795,7 +795,7 @@ func TestTicketsMoveToReadyCombinesSageTipAndRouteFactsTip(t *testing.T) {
 	result, err := TicketsMove(root, runner, TicketMoveOptions{
 		TicketStem: stem,
 		To:         "ready",
-		SageReview: "off",
+		SageReview: bothStages("off"),
 	})
 	if err != nil {
 		t.Fatalf("TicketsMove: %v", err)
@@ -820,7 +820,7 @@ func TestTicketsMoveUpwardToReadyAllowsResolvedSageReviewPosture(t *testing.T) {
 			result, err := TicketsMove(root, runner, TicketMoveOptions{
 				TicketStem: stem,
 				To:         "ready",
-				SageReview: "auto",
+				SageReview: bothStages("auto"),
 			})
 			if err != nil {
 				t.Fatalf("TicketsMove blocked %s sage-review: %v", posture, err)

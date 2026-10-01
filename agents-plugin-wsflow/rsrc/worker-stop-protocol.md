@@ -31,7 +31,11 @@ decide.
   Protocol `AGENTS.md` declares. A project that declares none has no always-ask
   category and no stop here.
 - **(e) A Critical review finding still open after round 2** (see Review
-  Rounds below).
+  Rounds below). It applies only when the route allocated review.
+- **(f) Non-convergence.** A second failure with the same root cause as an
+  earlier one in this run. Report the failing command under `verification:`;
+  the lead retries the ticket at a higher tier, so another attempt at your
+  tier is not yours to make.
 
 A decision not on this list is recorded, not escalated: one line in the
 commit's `## AI Context`, and in the ticket's `### Result` when it changes what
@@ -40,8 +44,8 @@ dropped silently and nothing costs a stop.
 
 ## Review Rounds
 
-Review is two rounds, never more. Round 1: fresh reviewers sweep the change at
-the allocation the route set. Round 2: a reviewer checks only whether the
+When the route allocates review, it is two rounds, never more. Round 1: fresh
+reviewers sweep the change at the allocation the route set. Round 2: a reviewer checks only whether the
 round-1 findings were fixed; it raises nothing new, and anything new it
 notices goes into `unresolved:` as an observation. A Critical still open after
 round 2 is stop (e). A fresh sweep each round finds a fresh set of findings
@@ -97,7 +101,7 @@ escalation outcome. `decisions:` and `proposed_resolution:` take `none` and
 
 ```
 status: [ok] | [escalate-to-lead]
-stop: none | a | b | c | d | e
+stop: none | a | b | c | d | e | f
 completion: phase | ticket | ad_hoc | none
 ticket: <path> | ad hoc
 branch: <branch>
@@ -119,6 +123,6 @@ omitted: <what you did not do and why> | none
 - `none`: no phase, ticket, or ad-hoc work unit completed.
 
 Valid terminal pairs are `[ok]` with `stop: none` and `completion: phase`,
-`ticket`, or `ad_hoc`; and `[escalate-to-lead]` with stop `a` through `e` and
+`ticket`, or `ad_hoc`; and `[escalate-to-lead]` with stop `a` through `f` and
 `completion: none`. Any other pair is a protocol mismatch for the lead to
 fail closed.

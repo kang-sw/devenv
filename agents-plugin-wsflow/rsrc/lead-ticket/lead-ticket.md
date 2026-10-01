@@ -231,7 +231,8 @@ An epic is a living board: it accretes child and follow-up tickets over time and
 is never itself an execution target, so it never enters `ready/` (nor does a
 research ticket; the move is barred either way). Its design review is not pinned
 to a status boundary — run it on your judgment, when the epic's cross-child
-design has drifted materially, not as a promotion step.
+design has drifted materially, not as a promotion step. It runs whatever
+`sage_review_design` is set to.
 
 When you judge a review is due, run **Ground: fact population** first, settle
 any queue it opened to the settle point and delete the section, then call
@@ -256,7 +257,10 @@ promotion is a batch of one.
    point and delete each member's section. Resolve each
    `{{.McpNamespace}}/tickets.sage_gate(stem, landing: "ready")` while tickets
    remain at their original paths, including configured recommendations,
-   freshness decisions, and existing blocks. Retain the stage selections.
+   freshness decisions, and existing blocks. Retain the stage selections. The
+   design stage follows the `sage_review_design` knob and the completeness
+   stage the `sage_review` knob, so a stage the gate resolves `skipped` gets no
+   reviewer.
 3. A single-ticket promotion uses the existing single-ticket reviewer path:
    render the selected reviewers, pass its path and `relations:` table, and
    record their verdicts. For multiple actionable tickets, use **Batch design

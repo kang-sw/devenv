@@ -123,7 +123,7 @@ func TestTicketCreateEpicTodoStampsResolvedSageReviewDesignPosture(t *testing.T)
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
-			res, err := TicketCreate(root, TicketCreateOptions{Stem: "epic-foo", InitialState: "todo", SageReview: tc.config, Today: "260101"})
+			res, err := TicketCreate(root, TicketCreateOptions{Stem: "epic-foo", InitialState: "todo", SageReview: bothStages(tc.config), Today: "260101"})
 			if err != nil {
 				t.Fatalf("TicketCreate todo: %v", err)
 			}
@@ -161,7 +161,7 @@ func TestTicketCreateReadyStampsResolvedSageReviewDesignPostureWhenTerminal(t *t
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
-			res, err := TicketCreate(root, TicketCreateOptions{Stem: "feat-foo", InitialState: "ready", SageReview: tc.config, Today: "260101"})
+			res, err := TicketCreate(root, TicketCreateOptions{Stem: "feat-foo", InitialState: "ready", SageReview: bothStages(tc.config), Today: "260101"})
 			if err != nil {
 				t.Fatalf("TicketCreate ready: %v", err)
 			}
@@ -200,7 +200,7 @@ func TestTicketCreateReadyWarnsOnUnresolvedSageReviewDesignPosture(t *testing.T)
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
-			res, err := TicketCreate(root, TicketCreateOptions{Stem: "feat-foo", InitialState: "ready", SageReview: tc.config, Today: "260101"})
+			res, err := TicketCreate(root, TicketCreateOptions{Stem: "feat-foo", InitialState: "ready", SageReview: bothStages(tc.config), Today: "260101"})
 			if err != nil {
 				t.Fatalf("TicketCreate ready: unexpected error for unresolved design posture: %v", err)
 			}
@@ -234,7 +234,7 @@ func TestTicketCreateExemptCategoryStampsNoSageReviewField(t *testing.T) {
 	for _, category := range []string{"research"} {
 		t.Run(category, func(t *testing.T) {
 			root := t.TempDir()
-			res, err := TicketCreate(root, TicketCreateOptions{Stem: category + "-foo", InitialState: "todo", SageReview: "auto", Today: "260101"})
+			res, err := TicketCreate(root, TicketCreateOptions{Stem: category + "-foo", InitialState: "todo", SageReview: bothStages("auto"), Today: "260101"})
 			if err != nil {
 				t.Fatalf("TicketCreate todo: %v", err)
 			}
@@ -250,7 +250,7 @@ func TestTicketCreateBoardCategoryAtReadyRejectsWithoutWrites(t *testing.T) {
 	for _, category := range []string{"epic", "research", "workset"} {
 		t.Run(category, func(t *testing.T) {
 			root := t.TempDir()
-			opts := TicketCreateOptions{Stem: category + "-foo", InitialState: "ready", SageReview: "auto", Today: "260101"}
+			opts := TicketCreateOptions{Stem: category + "-foo", InitialState: "ready", SageReview: bothStages("auto"), Today: "260101"}
 			res, err := TicketCreate(root, opts)
 			if err == nil || res != (TicketCreateResult{}) {
 				t.Fatalf("TicketCreate ready = %+v, %v; want rejection", res, err)
@@ -362,7 +362,7 @@ func TestTicketCreateDatePrefixDedup(t *testing.T) {
 func TestTicketCreateActionableTodoHasNoReviewPosture(t *testing.T) {
 	for _, category := range []string{"feat", "bug", "refactor", "chore"} {
 		root := t.TempDir()
-		res, err := TicketCreate(root, TicketCreateOptions{Stem: category + "-backlog", InitialState: "todo", SageReview: "auto", Today: "260101"})
+		res, err := TicketCreate(root, TicketCreateOptions{Stem: category + "-backlog", InitialState: "todo", SageReview: bothStages("auto"), Today: "260101"})
 		if err != nil {
 			t.Fatal(err)
 		}

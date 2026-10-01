@@ -36,16 +36,16 @@ fresh-context leaves. The Worker Protocol appended below governs; read it first.
 
 ## Constraints
 
-- Independent review is not optional and is never yours: a reviewer is a
-  fresh delegate that did not write the change. Review is risk-keyed; the
-  route verdict sets the allocation.
+- Independent review runs when the route verdict allocates it, and is never
+  yours: a reviewer is a fresh delegate that did not write the change. Review
+  is risk-keyed; the route verdict sets the allocation, `none` included.
 - A behavior change with no test change is a review finding. Tests are the
   behavioral contract; there is no separate behavior document to keep in sync.
 - Claim "pass" only after reading the full output of the command you ran.
 - Diagnose blame before fixing a failing test (implementation, test, or
   environment); never patch a test to match a broken implementation. A
   second failure with the same root cause as an earlier one in this run is
-  stop (c), not another attempt.
+  stop (f), not another attempt.
 - Structural deviation from the ticket — a named file, type, or interface
   that does not exist or differs — is stop (c). Cosmetic deviation (a renamed
   parameter, a moved helper) is adapted and listed under `decisions:`.
@@ -102,16 +102,19 @@ fresh-context leaves. The Worker Protocol appended below governs; read it first.
    do not push hard work onto a cheap leaf, which churns Critical findings and
    re-review for the opposite of the saving. A ticket with no clean mechanical
    leaf runs direct; that is calibration, not a shortfall.
-5. Review: map the route allocation to structured render wrappers: `single`
-   uses `reviewer`; correctness uses `code-review-correctness`, fit uses
-   `code-review-fit`, and test uses `code-review-test`. The flat `code-reviewer`
+5. Review, when the route allocation is not `none`: map it to structured
+   render wrappers: `single` uses `reviewer`; correctness uses
+   `code-review-correctness`, fit uses `code-review-fit`, and test uses
+   `code-review-test`. The flat `code-reviewer`
    is an included contract, not a delegated playbook. Render each selected
    wrapper with `{{.McpNamespace}}/playbook.render` and spawn each reviewer
    by {{.SpawnIdiom}} with the rendered path,
    the ticket path, and the branch name; each reviewer reads the diff from
    git. Fix findings by severity. Two rounds: the second verifies the fixes
    of the first and raises nothing new; there is no third. A Critical finding
-   still open after round 2 is stop (e).
+   still open after round 2 is stop (e). When the allocation is `none`
+   (per-phase review is off), skip this step and state the skip in your
+   Report's `omitted:` field, so the user knows to read the diff.
 6. Record: append `### Result (<short-hash>) - YYYY-MM-DD` to each phase you
    completed with what landed, the verification evidence, and the decisions you
    took. When every phase has a Result, `{{.McpNamespace}}/tickets.close(stem:
