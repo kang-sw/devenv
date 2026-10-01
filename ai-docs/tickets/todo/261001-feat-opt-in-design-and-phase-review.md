@@ -6,6 +6,8 @@ related:
   260824-epic-review-watermark-model: review-altitude epic whose sweep/gate is the integration net this ticket leans on
   260831-research-ai-phase-over-granularity-review-load: review load = per-unit weight x unit count; this ticket removes the per-phase unit by default
   260915-research-lead-run-tier-selection-qualitative: sibling cost lever (worker tier over-elevation); deliberately not addressed here
+sage-review-design: blocked
+sage-review-completeness: blocked
 ---
 
 # Opt-in design review and per-phase code review, with a non-convergence elevation stop
@@ -78,22 +80,30 @@ Evidence that shaped the decisions:
 2. **Defaults are opt-out.** Both new knobs default to `off` at builtin
    scope; heavy users opt in with `config.tune` at session, project, or
    global scope. This is a deliberate downstream-visible behavior change.
+   This reverses `260703-chore-sage-review-builtin-default-on` for the
+   design stage: its evidence was one dogfood hit under agent-heavy use,
+   while the cost now falls on low-quota users; a heavy user restores that
+   behavior with one `config.tune` of `sage_review_design=auto`.
+   *Rejected: keep `sage_review_design` builtin `auto` and default only
+   `review_phase` to `off`.*
 3. **Fact population stays mandatory** at `ready/` promotion, unchanged.
 4. **New stop (f): non-convergence.** "A second failure with the same root
    cause as an earlier one in this run" moves from stop (c) to a new stop (f)
    in the closed stop list. Stop (c) keeps only "a ticket decision
    contradicted by code reality". `lead-run` handles (f) with the same retry
    ladder as (e) (medium -> `ticket-worker-elevated` large; large -> xlarge;
-   xlarge -> user). The retry budget is shared: one retry across (e) and (f)
-   combined, after which the next (e) or (f) goes to the user.
+   xlarge -> user). The ladder itself is unchanged: one retry is one step up
+   from the worker's current tier. What changes is the count: a ticket run
+   gets one retry in total across (e) and (f), so after one retry for either
+   stop, the next (e) or (f) goes to the user.
    *Rejected: fold non-convergence into (e)* - (e) is a review outcome and
    is unreachable when per-phase review is off.
    *Rejected: leave it in (c)* - (c)'s ticket-revision handler does not fix
    a capability shortfall.
    *Rejected: separate budgets for (e) and (f)* - allows two elevations in
    the worst case.
-5. **Session overrides walk the parent chain.** For every session-scope
-   knob, a key with no own override resolves through its `Parent` chain
+5. **Session overrides walk the parent chain.** For every resolver-backed
+   session-scope knob, a key with no own override resolves through its `Parent` chain
    before falling to project scope; a key's own override always wins. This
    is a general config rule, not specific to `review_phase`, so a value the
    lead tunes for its session applies to the workers it spawns.
@@ -102,6 +112,12 @@ Evidence that shaped the decisions:
 6. **Stop (c)'s design-review gate is independent of `sage_review_design`.**
    A mid-run contract revision is small and corrects a ticket that already
    proved wrong, so it keeps its design review when the knob is `off`.
+   Because a ticket promoted under `off` carries `sage-review-design:
+   skipped` and the gate returns `skip` for it, the `lead-run` (c) handler
+   dispatches `ticket-reviewer-design` directly (one tier above the worker)
+   when the ticket's design posture is `skipped`; that verdict governs
+   commit and resume only and is not stamped. When the posture is not
+   `skipped`, the existing gate path is unchanged.
 
 7. **No seeding from the old `sage_review` value.** An existing
    `sage_review=auto|ask` override does not imply design review after the
@@ -117,6 +133,16 @@ Evidence that shaped the decisions:
    the `config.list` knob descriptions and the merge commit body; the ship
    flow publishes an auto-generated GitHub release and this ticket does not
    add a release-notes surface.
+10. **Epics are exempt from `sage_review_design`.** The knob governs only
+    actionable `ready/` promotion. An epic's design stage resolves as
+    `required` whenever the lead invokes the gate, independent of both
+    `sage_review_design` and `sage_review`, and the epic idea->todo move
+    does not persist `skipped` from either, so the lead-judged "Review epic
+    design" call always runs.
+    *Rejected: the knob gates epics too* - epic review is already opt-in by
+    lead judgment and rare; an explicitly invoked review that silently
+    returns `skip` (and cannot be revived, since `skipped` is terminal) is
+    the surprise Decision 6 avoids for stop (c).
 
 ## Constraints
 
@@ -136,6 +162,36 @@ Evidence that shaped the decisions:
 - Out of scope: worker tier over-elevation (`260915`); the declared but
   unwired `ItemSageReviewDesignTier` / `ItemSageReviewCompletenessTier`
   constants; token telemetry.
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for agents-plugin/, agents-plugin-wsflow/, agents-plugin-tool/)
+- Convention: ai-docs/manuals/skill-authoring.md (declared for agents-plugin/rsrc/, agents-plugin/skills/, agents-plugin-wsflow/rsrc/, agents-plugin-wsflow/skills/, agents-plugin-tool/internal/wsdoc/conventions/)
+- Convention: ai-docs/manuals/wsflow-mirroring.md (declared for agents-plugin/rsrc/, agents-plugin/skills/, agents-plugin-wsflow/)
+- Convention: ai-docs/manuals/ws-mcp.md (declared for agents-plugin-tool/internal/mcp/)
+
+## Prior Decisions
+
+- 260703-chore-sage-review-builtin-default-on (2026-07-03, commit ce68a74a): "Dogfooding this session showed the sage-review reviewer pair catching a real critical design gap a human+lead discussion missed, motivating a default-on builtin posture." — bearing: reversed for the design stage by Decision 2
+- 260909-epic-ws-worker-interpreter-refoundation (2026-09-19, commit 9ed95844): "Open questions (render model-override feasibility, lead-run escalation-ladder edit, reference sweep, current phase-handling reconciliation) left in the Outcome Ledger" — bearing: supports
+- 260831-refactor-severity-graded-per-slice-review-relay (2026-08-31, Decisions): "Ceiling = elevate, not halt. The user chose restoring the original unconditional-elevate behavior over defining a narrow 'cannot-proceed' halt class." — bearing: supports
+- 260828-refactor-per-slice-review-relay (2026-08-28, Decisions): "Review #2 is scoped to the Critical findings and their fixes. If it remains Critical, stop rather than opening another relay; report and ticketize or otherwise explicitly escalate" — bearing: supports
+- 260622-feat-sage-review-ticket-gate (2026-06-22, Decisions): "Opt-in via config: sage_review: auto | ask | off (default: off). Resolves through session > proj > user config layers." — bearing: supports
+- 260707-research-sage-review-staged-design-completeness-split (2026-07-07, Decisions): "Frontmatter splits per stage, since a ticket can now be in 'design done, completeness not yet run' as a distinct, meaningful state under the two-gate (non-looping) model" — bearing: supports
+- 260707-research-sage-review-staged-design-completeness-split (2026-07-07, Decisions): "completeness review must refuse to run, or must trigger design review first, if `sage-review-design:` has never completed. No entry path is allowed to produce a `ready` ticket whose design was never reviewed." — bearing: preserved as implemented: the code reads it as "design must be terminal" and `skipped` is terminal, so the new default's common path (design `skipped`, completeness reviewed) satisfies it
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin/rsrc/worker-stop-protocol.md, ticket-worker/ticket-worker.md, ticket-worker-elevated/ticket-worker-elevated.md, lead-run/lead-run.md, lead-ticket/lead-ticket.md; agents-plugin-tool/internal/wsconfig/scope.go, resolver.go; agents-plugin-tool/internal/mcp/session_auth.go, implement_resolver.go, config_registry.go, server.go; agents-plugin-tool/internal/wsdoc/ticket_create.go, tickets_mutate.go, tickets_sage.go; agents-plugin-wsflow/rsrc/ (regenerated mirror) |
+| scope.surface | public-interface | new config.tune/config.list knobs sage_review_design, review_phase (agents-plugin-tool/internal/mcp/config_registry.go#L124-136); route.resolve_implement's need_review field (implement_resolver.go#L115,135,701,708) moves from unconditional true to config-derived |
+| scope.new_public_symbol | yes | new wsconfig.Item* constants for sage_review_design and review_phase, mirroring ItemSageReview (agents-plugin-tool/internal/wsconfig/scope.go#L40) |
+| scope.new_type_contract | yes | wsdoc.SageGate(root, opts, resolvedSageReviewConfig string) (agents-plugin-tool/internal/wsdoc/tickets_sage.go#L127) and TicketCreateOptions.SageReview / TicketMoveOptions.SageReview (ticket_create.go#L33, tickets_mutate.go#L30) each carry one shared posture value today and must split into design/completeness |
+| scope.test_surface | existing | agents-plugin-tool/internal/wsconfig/scope_test.go, agents-plugin-tool/internal/mcp/session_auth_test.go, agents-plugin-tool/internal/wsdoc/tickets_sage_test.go, agents-plugin-tool/internal/mcp/implement_resolver_test.go |
+| complexity.reuse_points | confirmed | lead-run.md's existing stop-(e) retry table (lead-run.md#L56-60,147-150) reused for (f) per this ticket's own Phase 1 text; wsconfig.RegisterDefaultScope pattern (scope.go#L111-113) reused for the new knobs |
+| complexity.side_effect_risk | moderate | flips a default consumed on every tickets.create / tickets.move / sage gate call and every route.resolve_implement review dispatch |
+| risk.correctness | moderate | the parent-chain walk needs a cycle/missing-record guard (Phase 1), and the SageGate / TicketCreateOptions / TicketMoveOptions signature split touches several call sites |
+| risk.fit | low | extends the existing sage_review knob shape, closed stop list, and retry-table patterns rather than introducing a new mechanism |
+| risk.test | moderate | new coverage spans the wsconfig, mcp, and wsdoc packages plus wsflow regeneration, and golden-string tests (playbook_tools_test.go) pin exact worker-stop-protocol/lead-run prose that this ticket edits |
+| risk.security_or_contract | moderate | Decision 2 states the opt-out default is "a deliberate downstream-visible behavior change" to the MCP-visible review-allocation contract |
 
 ## Phases
 
@@ -153,8 +209,10 @@ No default behavior changes in this phase.
   verification line to the task block; one retry shared across (e) and (f).
 - Config resolver: session-scope lookup walks `Parent` when the key has no
   own override (Decision 5). Guard the walk against a cycle or a missing
-  record by stopping at the first unreadable link. Writes stay on the key
-  that was given.
+  record by stopping at the first unreadable link. Read ancestor records
+  without touching them: `getOverride` refreshes the read key's record, and
+  refreshing every ancestor on each child read would distort session
+  liveness. Writes stay on the key that was given.
 - Check whether any Go code validates stop letters and extend it if so.
 
 Verification: Go tests in the config/session packages showing (i) a child
@@ -175,7 +233,10 @@ elevation ladder reachable without review.
   visibility as `sage_review`. The Sage gate resolves the design stage's
   posture from `sage_review_design` and the completeness stage's from
   `sage_review`; the `ready-sage-posture` guardrail is unchanged (`skipped`
-  is terminal). Update the per-ticket advisory text and the
+  is terminal). An epic's design stage resolves as `required` at the
+  lead-invoked `landing: "todo"` gate and is never stamped `skipped` from
+  config at idea->todo (Decision 10). Update
+  the per-ticket advisory text and the
   `config.list` descriptions so both knobs state what they govern.
 - `review_phase`: register with `off|on`, builtin `off`, scopes
   session/project/global, wsflow-visible. `route.resolve_implement`
@@ -183,7 +244,11 @@ elevation ladder reachable without review.
   `NeedReview: false`, review allocation `none`, and the installed todo
   carries no review step; an explicit `policy.review.override` of `single`
   or `partitioned` still dispatches review. When `on`: today's behavior.
-  Rewrite the "always dispatched" invariant comments to match.
+  Rewrite the "always dispatched" invariant comments to match, and give the
+  other installed instruction strings that assume review ran a review-off
+  branch (the next-after-branch instruction that names the review
+  allocation, and the final-action "Verify the review is resolved" line),
+  with their golden tests.
 - `ticket-worker.md`, `ticket-worker-elevated.md`, `worker-stop-protocol.md`:
   independent review runs when the route verdict requires it; when it does
   not, the worker skips step 4 and states the skip in its Report
@@ -204,3 +269,21 @@ allocation table, (iii) explicit `policy.review.override` dispatches under
 defaults, (v) `sage_review_design=auto` with `sage_review=off` runs design
 only, (vi) `config.list` lists both new knobs with their domains. Full
 `go test ./...` and plugin package tests after wsflow regeneration.
+
+## Blocked (2026-10-01)
+
+### Design Reviewer — block
+
+| # | Title | Severity | Resolution |
+|---|-------|----------|------------|
+| 1 | Epic design review under sage_review_design=off is undecided and goes dead by default | important | missing |
+| 2 | Stop (c) design review needs a mechanism that bypasses sage_gate | minor | autonomous |
+| 3 | Prior Decisions misses 260707's design-before-completeness invariant | minor | autonomous |
+| 4 | Review-off leaves review references in other installed todo text | minor | autonomous |
+| 5 | Parent walk side effects on parent records | minor | autonomous |
+
+### Completeness Reviewer — pass
+
+| # | Title | Severity |
+|---|-------|----------|
+| 1 | Shared (e)/(f) retry-budget wording is dense | minor |
