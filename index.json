@@ -506,7 +506,14 @@
       "registered_at": "2026-09-30T02:03:00Z"
     },
     "261001-feat-opt-in-design-and-phase-review": {
-      "registered_at": "2026-10-01T05:07:43Z"
+      "registered_at": "2026-10-01T05:07:43Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-10-01T06:03:45Z"
+      }
     }
   }
 }
