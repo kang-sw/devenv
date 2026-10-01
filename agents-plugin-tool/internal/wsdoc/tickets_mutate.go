@@ -288,7 +288,7 @@ func TicketsMove(root string, runner GitRunner, opts TicketMoveOptions) (TicketM
 	if settlesReview {
 		postures := currentSageReviewPostures(filepath.Join(root, filepath.FromSlash(newPath)), stem)
 		if tip := sageReviewPostureTip(postures); tip != "" {
-			result.Tip = appendTip(result.Tip, tip)
+			result.Tip = appendTip(result.Tip, tip+epicSkippedDesignNote(designRequired, completenessRequired, postures.Design))
 		}
 	}
 	if to == "ready" {
@@ -686,6 +686,17 @@ func currentSageReviewPostures(ticketAbsPath, stem string) sageReviewPostures {
 		completeness = ""
 	}
 	return sageReviewPostures{Design: design, Completeness: completeness}
+}
+
+// epicSkippedDesignNote qualifies a "design skipped" tip on an epic: the
+// sage_review_design knob stamps skipped, but the epic's landing: "todo" gate
+// revives it to required (see resolveEpicDesignPosture), so the bare tip would
+// misstate what the next gate call does.
+func epicSkippedDesignNote(designRequired, completenessRequired bool, design string) string {
+	if designRequired && !completenessRequired && design == "skipped" {
+		return " An epic's tickets.sage_gate(landing: \"todo\") still resolves a skipped design posture to required."
+	}
+	return ""
 }
 
 func sageReviewPostureTip(postures sageReviewPostures) string {

@@ -125,7 +125,7 @@ type stageOutcome struct {
 // config values resolved by the caller (sage_review_design for the design
 // stage, sage_review for the completeness stage), used only for the
 // missing/pending config-fallback branch. An epic's design stage ignores cfg:
-// see epicDesignLandingPosture.
+// see resolveEpicDesignPosture.
 func SageGate(root string, opts SageGateOptions, cfg SageReviewConfig) (SageGateResult, error) {
 	stem := strings.TrimSpace(opts.TicketStem)
 	if !ticketStemRE.MatchString(stem) {

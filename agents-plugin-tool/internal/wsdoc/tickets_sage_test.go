@@ -1659,14 +1659,21 @@ func TestSageGateEpicTodoLandingIgnoresDesignKnob(t *testing.T) {
 		if body := readFileString(t, filepath.Join(root, filepath.FromSlash(created.Path))); !strings.Contains(body, "sage-review-design: skipped") {
 			t.Fatalf("create stamp = %s, want design skipped under the knob", body)
 		}
+		if !strings.Contains(created.Tip, "still resolves a skipped design posture to required") {
+			t.Fatalf("create tip = %q, want the epic revival note", created.Tip)
+		}
 		assertEpicTodoGateRuns(t, root, stem, filepath.Join(root, filepath.FromSlash(created.Path)))
 	})
 	t.Run("moved-idea-to-todo", func(t *testing.T) {
 		root := t.TempDir()
 		stem := "260101-epic-moved"
 		mustWrite(t, root, filepath.Join("ai-docs", "tickets", "idea", stem+".md"), "---\ntitle: Moved\n---\n\nBody.\n")
-		if _, err := TicketsMove(root, &mockGitRunner{}, TicketMoveOptions{TicketStem: stem, To: "todo", SageReview: builtinSageDefaults}); err != nil {
+		moved, err := TicketsMove(root, &mockGitRunner{}, TicketMoveOptions{TicketStem: stem, To: "todo", SageReview: builtinSageDefaults})
+		if err != nil {
 			t.Fatalf("TicketsMove: %v", err)
+		}
+		if !strings.Contains(moved.Tip, "still resolves a skipped design posture to required") {
+			t.Fatalf("move tip = %q, want the epic revival note", moved.Tip)
 		}
 		rel, _, _, err := findTicketPath(root, nil, stem)
 		if err != nil {
@@ -1690,6 +1697,45 @@ func TestSageGateEpicTodoLandingIgnoresDesignKnob(t *testing.T) {
 			t.Fatalf("blocked epic gate = %+v, want stop_blocked", res)
 		}
 	})
+}
+
+// TestSageGateEpicReadyLandingDesignPostures pins the retained epic-at-ready
+// branch under the builtin defaults: a missing or pending design posture runs
+// design as required whatever sage_review_design says (Decision 10), while a
+// skipped posture stays terminal there — only the todo landing revives it.
+func TestSageGateEpicReadyLandingDesignPostures(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		fields     map[string]string
+		wantAction string
+	}{
+		{name: "missing runs", fields: nil, wantAction: "run"},
+		{name: "pending runs", fields: map[string]string{"sage-review-design": "pending"}, wantAction: "run"},
+		{name: "skipped stays terminal", fields: map[string]string{"sage-review-design": "skipped"}, wantAction: "skip"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			stem := "260101-epic-ready-board"
+			path := writeSageTicket(t, root, stem, tc.fields)
+			res, err := SageGate(root, SageGateOptions{TicketStem: stem, Landing: "ready"}, builtinSageDefaults)
+			if err != nil {
+				t.Fatalf("SageGate: %v", err)
+			}
+			if res.Action != tc.wantAction {
+				t.Fatalf("epic ready gate = %+v, want %s", res, tc.wantAction)
+			}
+			body := readFileString(t, path)
+			if tc.wantAction == "run" {
+				if len(res.Reviewers) != 1 || res.Reviewers[0] != "design" || !strings.Contains(body, "sage-review-design: required") {
+					t.Fatalf("epic ready gate = %+v, want design-only required:\n%s", res, body)
+				}
+				return
+			}
+			if !strings.Contains(body, "sage-review-design: skipped") || strings.Contains(body, "sage-review-design: required") {
+				t.Fatalf("skipped epic posture was rewritten at ready:\n%s", body)
+			}
+		})
+	}
 }
 
 func assertEpicTodoGateRuns(t *testing.T, root, stem, path string) {
