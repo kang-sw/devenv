@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -288,6 +289,141 @@ func TestGlobalOnlyItemBypassesRepoScope(t *testing.T) {
 	}
 	if rv.Value == "repo-value" {
 		t.Fatalf("global-only item picked up repo value %q; repo overlay must not apply", rv.Value)
+	}
+}
+
+// TestRepoScopeFunction is a 261001-feat-config-repo-scope-and-tune-weight-
+// guidance Phase 1 unit test for RepoScope, the function config.list reads to
+// publish the repo-scope file path/existence/shape (wsconfig.View.RepoScope).
+// It covers the three observable states: no anchor (empty Options), an
+// anchor with no committed file yet, and an anchor with the file present.
+func TestRepoScopeFunction(t *testing.T) {
+	// No RepoRoot: nothing anchors the repo scope, so Path stays empty, but the
+	// shape is still reported (a lead can draft a file without a session root).
+	empty := RepoScope(Options{})
+	if empty.Path != "" || empty.Exists {
+		t.Fatalf("RepoScope(empty opts) = %+v, want Path=\"\" Exists=false", empty)
+	}
+	if empty.Shape != RepoOverridesShape {
+		t.Fatalf("RepoScope(empty opts).Shape = %q, want %q", empty.Shape, RepoOverridesShape)
+	}
+
+	// RepoRoot anchored, no committed file written yet: the path resolves, but
+	// Exists is false.
+	root := t.TempDir()
+	wantPath := filepath.Join(root, ".ws-workflow", "config.json")
+	absent := RepoScope(Options{RepoRoot: root})
+	if absent.Path != wantPath {
+		t.Fatalf("RepoScope(anchored, absent file).Path = %q, want %q", absent.Path, wantPath)
+	}
+	if absent.Exists {
+		t.Fatalf("RepoScope reported Exists=true before any file was written")
+	}
+
+	// Committed file now present: Exists flips true; the path is unchanged.
+	writeRepoConfig(t, root, map[string]string{"ticket-assignee-aware": "on"})
+	present := RepoScope(Options{RepoRoot: root})
+	if present.Path != wantPath {
+		t.Fatalf("RepoScope(anchored, present file).Path = %q, want %q", present.Path, wantPath)
+	}
+	if !present.Exists {
+		t.Fatalf("RepoScope reported Exists=false for a file that was just written")
+	}
+}
+
+// TestRepoScopedReflectsGlobalOnlyExclusion is a Phase 1 unit test for
+// RepoScoped, the per-key predicate config.list's scoped view and tuning
+// catalog both call to flag whether the committed repo scope can supply a
+// key: every resolver-backed key except a global-only one (Resolver.Get skips
+// the repo overlay entirely for GlobalOnly items).
+func TestRepoScopedReflectsGlobalOnlyExclusion(t *testing.T) {
+	if !RepoScoped(ItemTicketAssigneeAware) {
+		t.Fatalf("an ordinary resolver-backed key must be repo-scoped: %q", ItemTicketAssigneeAware)
+	}
+	if !RepoScoped(ItemWorktreePool) {
+		t.Fatalf("worktree_pool must be repo-scoped: %q", ItemWorktreePool)
+	}
+	if RepoScoped(ItemWorkflowPreferSubagent) {
+		t.Fatalf("a global-only key must not be repo-scoped: %q", ItemWorkflowPreferSubagent)
+	}
+	if RepoScoped(ItemBootstrapAlarm) {
+		t.Fatalf("a global-only key must not be repo-scoped: %q", ItemBootstrapAlarm)
+	}
+}
+
+// TestResolverCheckSurfacesMalformedRepoFile is a Phase 1 unit test for
+// Resolver.Check, the probe a caller whose reads cannot carry an error (a
+// lookup closure, see buildOverrideLookup) runs once up front so a malformed
+// committed repo file fails loud instead of silently resolving every key to
+// "". The error must name the file path, matching loadRepoConfig's own
+// path-naming (repo.go).
+func TestResolverCheckSurfacesMalformedRepoFile(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, ".ws-workflow")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	wantPath := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(wantPath, []byte("{ not json"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	r := NewResolver(Options{
+		CacheHome:  t.TempDir(),
+		ConfigHome: t.TempDir(),
+		RepoRoot:   root,
+	}, nil, nil, nil)
+
+	err := r.Check()
+	if err == nil {
+		t.Fatalf("Check() did not surface the malformed committed repo file")
+	}
+	if !strings.Contains(err.Error(), wantPath) {
+		t.Fatalf("Check() error does not name the file path %q: %v", wantPath, err)
+	}
+}
+
+// TestResolverCheckPassesForWellFormedScopes verifies Check's complement: with
+// every scope well-formed (including an absent repo file and a present one),
+// it returns nil rather than a false positive that would block every reader
+// that calls it up front.
+func TestResolverCheckPassesForWellFormedScopes(t *testing.T) {
+	r, opts := newRepoTestResolver(t, nil)
+	if err := r.Check(); err != nil {
+		t.Fatalf("Check() with no committed file returned an error: %v", err)
+	}
+	writeRepoConfig(t, opts.RepoRoot, map[string]string{"ticket-assignee-aware": "on"})
+	if err := r.Check(); err != nil {
+		t.Fatalf("Check() with a well-formed committed file returned an error: %v", err)
+	}
+}
+
+// TestLoadRepoConfigErrorNamesPath is a Phase 1 unit test pinning the
+// repo.go change that gave loadRepoConfig's parse-error wrap the file path
+// (previously "parse repo ws config: %w", now "parse repo ws config %s: %w"),
+// so a lead or a test reading the error text can act on the path without
+// re-deriving it.
+func TestLoadRepoConfigErrorNamesPath(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, ".ws-workflow")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	wantPath := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(wantPath, []byte("{ not json"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	r := NewResolver(Options{
+		CacheHome:  t.TempDir(),
+		ConfigHome: t.TempDir(),
+		RepoRoot:   root,
+	}, nil, nil, nil)
+
+	_, err := r.Get("", "any.key")
+	if err == nil {
+		t.Fatalf("expected a parse error for the malformed repo config")
+	}
+	if !strings.Contains(err.Error(), wantPath) {
+		t.Fatalf("Get() error does not name the file path %q: %v", wantPath, err)
 	}
 }
 
