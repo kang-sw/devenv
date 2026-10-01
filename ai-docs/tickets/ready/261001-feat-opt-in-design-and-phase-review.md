@@ -6,8 +6,10 @@ related:
   260824-epic-review-watermark-model: review-altitude epic whose sweep/gate is the integration net this ticket leans on
   260831-research-ai-phase-over-granularity-review-load: review load = per-unit weight x unit count; this ticket removes the per-phase unit by default
   260915-research-lead-run-tier-selection-qualitative: sibling cost lever (worker tier over-elevation); deliberately not addressed here
-sage-review-design: blocked
-sage-review-completeness: blocked
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: ef2ce3905c376e94
+sage-review-completeness-reviewed: ef2ce3905c376e94
 ---
 
 # Opt-in design review and per-phase code review, with a non-convergence elevation stop
@@ -134,11 +136,14 @@ Evidence that shaped the decisions:
    flow publishes an auto-generated GitHub release and this ticket does not
    add a release-notes surface.
 10. **Epics are exempt from `sage_review_design`.** The knob governs only
-    actionable `ready/` promotion. An epic's design stage resolves as
-    `required` whenever the lead invokes the gate, independent of both
-    `sage_review_design` and `sage_review`, and the epic idea->todo move
-    does not persist `skipped` from either, so the lead-judged "Review epic
-    design" call always runs.
+    actionable `ready/` promotion. The enforcement point is the gate: at the
+    lead-invoked `landing: "todo"` call, an epic whose design posture is
+    missing, `pending`, or `skipped` resolves to `required`, independent of
+    both `sage_review_design` and `sage_review`, so the lead-judged "Review
+    epic design" call always runs whatever a stamping site (the idea->todo
+    move, `tickets.create_empty` in `todo/`) wrote. An epic's `blocked`
+    (stop_blocked) and `completed` (freshness check) keep their existing
+    handling.
     *Rejected: the knob gates epics too* - epic review is already opt-in by
     lead judgment and rare; an explicitly invoked review that silently
     returns `skip` (and cannot be revived, since `skipped` is terminal) is
@@ -233,9 +238,9 @@ elevation ladder reachable without review.
   visibility as `sage_review`. The Sage gate resolves the design stage's
   posture from `sage_review_design` and the completeness stage's from
   `sage_review`; the `ready-sage-posture` guardrail is unchanged (`skipped`
-  is terminal). An epic's design stage resolves as `required` at the
-  lead-invoked `landing: "todo"` gate and is never stamped `skipped` from
-  config at idea->todo (Decision 10). Update
+  is terminal). At the `landing: "todo"` gate an epic's missing, `pending`,
+  or `skipped` design posture resolves to `required`; `blocked` and
+  `completed` keep their handling (Decision 10). Update
   the per-ticket advisory text and the
   `config.list` descriptions so both knobs state what they govern.
 - `review_phase`: register with `off|on`, builtin `off`, scopes
@@ -267,10 +272,13 @@ Verification: Go tests for (i) `review_phase` unset/`off` yields
 allocation table, (iii) explicit `policy.review.override` dispatches under
 `off`, (iv) the Sage gate skips design and runs completeness at builtin
 defaults, (v) `sage_review_design=auto` with `sage_review=off` runs design
-only, (vi) `config.list` lists both new knobs with their domains. Full
+only, (vi) `config.list` lists both new knobs with their domains, (vii) at
+builtin defaults an epic created directly in `todo/` and one moved
+idea->todo both get `run` from the `landing: "todo"` gate, while a `blocked`
+epic still gets `stop_blocked`. Full
 `go test ./...` and plugin package tests after wsflow regeneration.
 
-## Blocked (2026-10-01)
+## Sage Review Round 1 (2026-10-01)
 
 ### Design Reviewer — block
 
