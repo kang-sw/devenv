@@ -167,7 +167,9 @@ func TestRepoScopeAppliesAtTicketMutatorsAndWorktreePool(t *testing.T) {
 			"stem":          "epic-repo-scope-create",
 			"initial_state": "todo",
 		})
-		if !strings.Contains(resp, "required") {
+		// The exact posture fragment: a bare "required" also appears in the
+		// skipped-posture tip an epic gets without the repo value.
+		if !strings.Contains(resp, "sage review posture: design required.") || strings.Contains(resp, "design skipped") {
 			t.Fatalf("tickets.create_empty did not apply the committed repo sage_review_design=auto: %s", resp)
 		}
 	})
@@ -204,7 +206,7 @@ func TestRepoScopeAppliesAtTicketMutatorsAndWorktreePool(t *testing.T) {
 			"stem": datedStem,
 			"to":   "todo",
 		})
-		if !strings.Contains(moveResp, "required") {
+		if !strings.Contains(moveResp, "sage review posture: design required.") || strings.Contains(moveResp, "design skipped") {
 			t.Fatalf("tickets.move did not apply the committed repo sage_review_design=auto: %s", moveResp)
 		}
 	})
