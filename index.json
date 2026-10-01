@@ -515,7 +515,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-01T11:48:03Z"
+        "touched_at": "2026-10-01T11:48:40Z",
+        "impl": {
+          "branch": "impl/develop/crate-curse-cage"
+        }
       }
     },
     "261001-feat-opt-in-design-and-phase-review": {
