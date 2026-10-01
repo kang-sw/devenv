@@ -231,8 +231,8 @@ An epic is a living board: it accretes child and follow-up tickets over time and
 is never itself an execution target, so it never enters `ready/` (nor does a
 research ticket; the move is barred either way). Its design review is not pinned
 to a status boundary — run it on your judgment, when the epic's cross-child
-design has drifted materially, not as a promotion step. It runs whatever
-`sage_review_design` is set to.
+design has drifted materially, not as a promotion step. It runs regardless of
+`sage_review_design`.
 
 When you judge a review is due, run **Ground: fact population** first, settle
 any queue it opened to the settle point and delete the section, then call

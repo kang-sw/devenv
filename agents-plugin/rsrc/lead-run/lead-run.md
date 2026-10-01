@@ -143,7 +143,7 @@ turn; the next invocation merges once the holder has released it.
   `#### Edition`
   when it already has a `### Result`. A `pass` commits the phase update and
   resumes the worker; a `block` goes to the user with the verdict. This design
-  review runs whatever `sage_review_design` is set to, because the revision
+  review runs regardless of `sage_review_design`, because the revision
   corrects a ticket that already proved wrong. When the ticket's
   `sage-review-design` posture is `skipped`, the gate never selects the design
   reviewer, so render and spawn `ticket-reviewer-design` directly, one tier
