@@ -9,27 +9,54 @@ Topic: tune how the {{.SkillNamespace}} workflow runs to the user's stated prefe
 ## Invariants
 
 Scope
-- Tune only through catalog writer tools; never edit shipped rsrc playbook text to change behavior.
-- Confirm the exact change — knob, writer, selector fields, and new value/text — with the user before any write.
+- Tune only through catalog writer tools, or, for a team-wide setting, through an ordinary commit of the repo-scope file `config.list` names; never edit shipped rsrc playbook text to change behavior.
+- Confirm the exact change — knob, writer, selector fields, storage scope, and new value/text — with the user before any write.
+- Write only a value the user chose explicitly. A request that names no value gets the knob explanation instead of an inferred change.
 - Tuning tools are lead-only and require the lead `session_key`; a delegate or leaf key cannot tune.
 
 Surface
-- Treat `config.list` as the source of supported knob ids, the `config.tune` write contract, field options, and current values.
+- Treat `config.list` as the source of supported knob ids, the `config.tune` write contract, field options, current values and scopes, what each knob's values do and cost (its description), whether the repo scope applies to it (`repo_scope`), and the repo-scope file's path and shape.
+- Name values exactly as `config.list` accepts them; gloss `off`/`ask`/`auto` as skip/recommend/require.
 - Treat prompt override-point ids as valid only when they appear as `prompt.<pointId>` knobs in `config.list`.
-- State that any tuning request that does not map to one of this playbook's handlers is not yet supported.
 
 Storage
 - For prompt overrides, choose the catalog option that applies across all harnesses unless the user names one harness.
 - For global-only workflow preferences, use the writer's lead `session_key` only as authority.
-- Confirm storage scope before any project or global write.
 
 ## On: invoke
 
-1. Call `{{.McpNamespace}}/config.list(session_key: <lead key>)` to load supported knobs, the `config.tune` write contract, field options, and current values.
+1. Call `{{.McpNamespace}}/config.list(session_key: <lead key>)` to load supported knobs, the `config.tune` write contract, field options, current values, and repo-scope information.
 2. If the user states a standing workflow preference but does not explicitly ask to tune, apply `judge: proactive-propose` before selecting a handler.
-3. Apply `judge: tune-target` to route the request to one catalog knob.
-4. Follow that knob's handler using only catalog-provided writer and field metadata, including required drafting and confirmation before writing.
-5. If the target is unclear, show the catalog knob ids with descriptions, ask which to tune, and resume the selected handler after the user answers.
+3. Apply `judge: tune-target` to route the request.
+4. Follow the selected handler using only catalog-provided writer and field metadata.
+
+## On: explain knobs
+
+1. Identify the catalog knobs the request bears on.
+2. For each, explain in the user's language what it controls, each accepted value and what it does, what lowering it loses, and its cost hint, translated from its `config.list` description; then its current value and the scope that value comes from.
+3. Explain the scopes the user can choose:
+   - session: this work stream only; gone when it ends.
+   - project: this project on this machine; persists.
+   - repo: the whole team, through the committed repo-scope file; only for a knob whose `repo_scope` is true.
+   - global: all of the user's projects. A global-only knob takes only this scope; say so.
+   When the user names no scope, suggest session for a one-off request and project for a stated standing preference.
+4. Ask which values to set. Run the matching handler for each value the user chooses.
+
+## On: tune scalar knob
+
+1. Take the knob and the value the user chose from its catalog `value` field.
+2. Choose the scope the user named, else the knob's declared default. A repo-scope choice goes to `On: commit repo-scope setting`.
+3. Confirm the Tuning Proposal.
+4. Call `config.tune` with the knob's id as `key`, `session_key`, the selected scope when the catalog exposes a scope selector, and the value.
+5. Report the stored value and scope.
+
+## On: commit repo-scope setting
+
+1. Confirm the knob's `repo_scope` is true; otherwise say it cannot be set team-wide and offer project or global scope.
+2. Draft the edit to the repo-scope file at the `config.list` path in its listed shape: add or change only the chosen key, keeping every existing entry; create the file when it does not exist.
+3. If the knob's current value comes from session or project scope, say that value keeps winning on this machine until it is reset.
+4. Confirm the Repo-Scope Proposal.
+5. Write the file and propose an ordinary commit of it.
 
 ## On: tune prompt override
 
@@ -39,26 +66,6 @@ Storage
 4. Confirm `(knob, writer, harness, scope, text)` per the Tuning Proposal template.
 5. Call `config.tune` with the knob's id as `key`, `session_key`, the selected selector fields, and the override text as `value`.
 6. Report the stored knob/harness/scope; note it applies at the next playbook render, not retroactively.
-
-Examples:
-- Standing communication preferences: map to `prompt.UserPreferenceSection`, draft preference text, confirm the Tuning Proposal, write through the catalog writer, then report the knob and scope changed.
-
-## On: tune subagent posture
-
-1. Map the request to the `"workflow.prefer_subagent"` catalog knob.
-2. Choose the new state from the catalog value field.
-3. Confirm the Tuning Proposal with the selected value.
-4. Call `config.tune` with `key` set to `"workflow.prefer_subagent"`, `session_key`, and the selected value.
-5. Report the global state and that it applies to the next workflow-manual load.
-
-## On: tune Sage review posture
-
-1. Map a request to skip, recommend, or require Sage review to its stage's catalog knob: `sage_review_design` for design review, `sage_review` for completeness review, both when the request names neither stage.
-2. Obtain each knob's writer, `off`/`ask`/`auto` value choices, and scope choices from `config.list`; map skipped to `off`, recommended to `ask`, and required to `auto`.
-3. Choose the catalog-provided scope, using its declared default unless the user selects session, project, or global scope.
-4. Confirm the Tuning Proposal with the selected posture value and scope.
-5. Call the catalog writer with `key` set to each selected knob, `session_key`, the selected scope, and the mapped value.
-6. Report the stored posture and scope; it applies to subsequent ticket boundaries.
 
 ## On: tune model tier
 
@@ -70,20 +77,17 @@ Examples:
 
 ## On: unsupported axis
 
-1. State that the request is not a supported tuning knob today. Per-role tier
-   tuning (a `(role) -> tier` override) is one such unsupported axis.
-2. Do not fabricate a tool for an unsupported knob.
+1. State that the request is not a supported tuning knob today.
 
 ## Judgments
 
 ### judge: tune-target
 - User standing preferences, communication style, language, terminology, or wording conventions -> prompt override (`UserPreferenceSection`).
 - Prompt wording or a named manual section -> prompt override for that named override point.
-- "delegate more/less" or default delegation of eligible general work -> workflow preference (`"workflow.prefer_subagent"`).
-- A default request to skip, recommend, or require Sage review at ticket boundaries -> Sage review posture (`sage_review_design`, `sage_review`).
-- A default request to run, skip, or change the depth of the worker's per-phase code review -> workflow preference (`review_phase`), written like the subagent posture with the catalog's `off`/`lite`/`full` values and scope choices.
-- A model, tier, or "cheaper/stronger model" preference -> model tier (`agents.tier`).
-- Anything else -> unsupported axis.
+- A named value for a named scalar knob (for example `"workflow.prefer_subagent"`, a Sage review stage, `review_phase`, or `bootstrap_alarm`) -> scalar knob; for the repo scope -> commit repo-scope setting.
+- A named tier with a named model or backend -> model tier (`agents.tier`).
+- How heavy, slow, costly, or thorough the workflow is, a request spanning several knobs, or one with no clear knob or value -> explain knobs.
+- A request no catalog knob bears on -> unsupported axis.
 
 ### judge: proactive-propose
 Propose a tune without being asked when the user states a standing preference about how the workflow runs (for example "you delegate too much"), as opposed to a one-off instruction for the current task. Name the knob and the concrete change, then write only after confirmation; if declined, make no change and report that tuning was not updated.
@@ -102,10 +106,11 @@ scope:     <selected catalog storage scope, or n/a>
 change:    <new prompt text or catalog value>
 ```
 
-## Doctrine
+### Repo-Scope Proposal
 
-This skill optimizes for the lead's context window: workflow-tuning guidance
-lives in this on-demand entry point, not the always-on `lead-workflow-manual`, so
-routing attention for general tasks stays cheap. The user owns their workflow —
-confirm the concrete change before writing it. When ambiguous, list the knobs and
-ask.
+```text
+knob:   <catalog knob id>
+file:   <repo-scope path from config.list>
+change: <key>: <old value or absent> -> <new value>
+commit: <proposed commit subject>
+```

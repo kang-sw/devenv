@@ -1011,14 +1011,16 @@ func TestPlaybookPrintLeadTuneUsesWorkflowPreferenceCatalogKnobs(t *testing.T) {
 	for _, want := range []string{
 		`ws/config.list(session_key: <lead key>)`,
 		`"workflow.prefer_subagent"`,
-		"`config.tune` with `key` set to `\"workflow.prefer_subagent\"`",
-		"## On: tune Sage review posture",
-		"skipped to `off`, recommended to `ask`, and required to `auto`",
-		"`key` set to each selected knob",
-		"`sage_review_design` for design review, `sage_review` for completeness review",
-		"workflow preference (`review_phase`)",
-		"the catalog's `off`/`lite`/`full` values",
-		"prompt.UserPreferenceSection",
+		"(for example `\"workflow.prefer_subagent\"`",
+		"## On: explain knobs",
+		"## On: tune scalar knob",
+		"## On: commit repo-scope setting",
+		"### Repo-Scope Proposal",
+		"gloss `off`/`ask`/`auto` as skip/recommend/require",
+		"Write only a value the user chose explicitly.",
+		"`review_phase`",
+		"-> explain knobs",
+		"prompt override (`UserPreferenceSection`)",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("lead-tune render missing %q:\n%s", want, body)
@@ -1029,6 +1031,8 @@ func TestPlaybookPrintLeadTuneUsesWorkflowPreferenceCatalogKnobs(t *testing.T) {
 		"prompt.DelegationSection",
 		"DelegationSection",
 		"session-scoped",
+		"## On: tune Sage review posture",
+		"Anything else -> unsupported axis",
 	} {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("lead-tune render contains stale guidance %q:\n%s", forbidden, body)
@@ -1050,11 +1054,12 @@ func TestPlaybookPrintWsflowLeadTuneOmitsFullWsOnlyCatalogKnobs(t *testing.T) {
 		`wsflow/config.list(session_key: <lead key>)`,
 		"wsflow workflow",
 		`"workflow.prefer_subagent"`,
-		"`config.tune` with `key` set to `\"workflow.prefer_subagent\"`",
-		"prompt.UserPreferenceSection",
+		"(for example `\"workflow.prefer_subagent\"`",
+		"prompt override (`UserPreferenceSection`)",
 		"## On: tune model tier",
-		"## On: tune Sage review posture",
-		"skipped to `off`, recommended to `ask`, and required to `auto`",
+		"## On: explain knobs",
+		"## On: commit repo-scope setting",
+		"gloss `off`/`ask`/`auto` as skip/recommend/require",
 		"Map the request to the `agents.tier` catalog knob",
 		"model tier (`agents.tier`)",
 	} {

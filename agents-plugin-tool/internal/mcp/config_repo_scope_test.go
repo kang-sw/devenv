@@ -620,7 +620,7 @@ func TestConfigListWeightLeverDescriptionsStateValues(t *testing.T) {
 		{"sage_review", []string{"auto requires one completeness-reviewer pass", "ask asks the user whether to run it", "off skips it"}},
 		{"review_phase", []string{"lite (builtin) runs", "full runs the risk-keyed allocation", "off runs none"}},
 		{"agents.tier", []string{"small, medium, large, xlarge"}},
-		{"workflow.prefer_subagent", []string{"on adds a standing workflow-manual line", "off (builtin) leaves"}},
+		{"workflow.prefer_subagent", []string{"on adds a standing line", "off (builtin) leaves"}},
 	}
 	for _, c := range cases {
 		desc, ok := descriptions[c.id]

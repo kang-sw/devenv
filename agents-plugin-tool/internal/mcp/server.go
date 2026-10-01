@@ -2389,7 +2389,7 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 	appendKnob(subagentEntry, tuningKnob{
 		ID:          "workflow.prefer_subagent",
 		Kind:        "workflow_preference",
-		Description: "Delegation posture, global-only (all of the user's projects). on adds a standing workflow-manual line that sends bounded investigation, diagnosis, drafting, and low-impact operational work to lead-delegate subagents, subject to its routing gate; off (builtin) leaves that work in the lead's own context. Cost: on spends one fresh subagent context per delegated task and keeps the lead's context lean over a long session; off spawns no extra agents but fills the lead's context with that work.",
+		Description: "Delegation posture, global-only (all of the user's projects). on adds a standing line, from the next workflow-manual load, that sends bounded investigation, diagnosis, drafting, and low-impact operational work to lead-delegate subagents, subject to its routing gate; off (builtin) leaves that work in the lead's own context. Cost: on spends one fresh subagent context per delegated task and keeps the lead's context lean over a long session; off spawns no extra agents but fills the lead's context with that work.",
 		Writer:      tuningWriter{Tool: subagentEntry.WriterTool, FixedArguments: map[string]string{"key": subagentEntry.Key}},
 		Reset: &tuningWriter{
 			Tool:           subagentEntry.ResetTool,
