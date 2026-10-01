@@ -1615,19 +1615,21 @@ var builtinSageDefaults = SageReviewConfig{Design: "off", Completeness: "auto"}
 
 // TestSageGateReadyStagesResolveFromTheirOwnKnobs pins the per-stage split:
 // at builtin defaults the design stage resolves skipped (terminal) and only
-// completeness runs; with design on and completeness off only design runs.
+// completeness runs; with design on and completeness off only design runs;
+// with both off neither runs and both stages persist skipped.
 func TestSageGateReadyStagesResolveFromTheirOwnKnobs(t *testing.T) {
 	stem := "260101-feat-split"
 	cases := []struct {
 		name             string
 		cfg              SageReviewConfig
-		wantReviewers    []string
+		wantReviewers    []string // nil: the gate skips
 		wantDesign       string
 		wantCompleteness string
 	}{
 		{name: "builtin-defaults", cfg: builtinSageDefaults, wantReviewers: []string{"completeness"}, wantDesign: "skipped", wantCompleteness: "required"},
 		{name: "design-only", cfg: SageReviewConfig{Design: "auto", Completeness: "off"}, wantReviewers: []string{"design"}, wantDesign: "required", wantCompleteness: "skipped"},
 		{name: "both-on", cfg: SageReviewConfig{Design: "auto", Completeness: "auto"}, wantReviewers: []string{"design", "completeness"}, wantDesign: "required", wantCompleteness: "required"},
+		{name: "both-off", cfg: SageReviewConfig{Design: "off", Completeness: "off"}, wantDesign: "skipped", wantCompleteness: "skipped"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1637,8 +1639,12 @@ func TestSageGateReadyStagesResolveFromTheirOwnKnobs(t *testing.T) {
 			if err != nil {
 				t.Fatalf("SageGate: %v", err)
 			}
-			if res.Action != "run" || strings.Join(res.Reviewers, ",") != strings.Join(tc.wantReviewers, ",") {
-				t.Fatalf("gate = %+v, want run %v", res, tc.wantReviewers)
+			wantAction := "run"
+			if tc.wantReviewers == nil {
+				wantAction = "skip"
+			}
+			if res.Action != wantAction || strings.Join(res.Reviewers, ",") != strings.Join(tc.wantReviewers, ",") {
+				t.Fatalf("gate = %+v, want %s %v", res, wantAction, tc.wantReviewers)
 			}
 			body := readFileString(t, path)
 			for field, want := range map[string]string{"sage-review-design": tc.wantDesign, "sage-review-completeness": tc.wantCompleteness} {
