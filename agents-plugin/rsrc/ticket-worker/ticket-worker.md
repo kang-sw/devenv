@@ -42,7 +42,7 @@ this file. The Worker Protocol appended below governs; read it first.
 - Diagnose blame before fixing a failing test (implementation, test, or
   environment); never patch a test to match a broken implementation. A
   second failure with the same root cause as an earlier one in this run is
-  stop (c), not another attempt.
+  stop (f), not another attempt.
 - Structural deviation from the ticket — a named file, type, or interface
   that does not exist or differs — is stop (c). Cosmetic deviation (a renamed
   parameter, a moved helper) is adapted and listed under `decisions:`.

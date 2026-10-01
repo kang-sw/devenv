@@ -53,11 +53,11 @@ the turn: relay the reason.
    body's own frontmatter tier, or the `tier_override` the table pairs with it.
    The tier sets the worker's model; the worker's route sets review breadth.
 
-   | Tier | Worker playbook | Retry after stop (e) |
+   | Tier | Worker playbook | Retry after stop (e) or (f) |
    |---|---|---|
    | medium | `ticket-worker` | `ticket-worker-elevated` |
    | large | `ticket-worker-elevated` | `ticket-worker-elevated`, `tier_override: xlarge` |
-   | xlarge | `ticket-worker-elevated`, `tier_override: xlarge` | none: its (e) goes to the user |
+   | xlarge | `ticket-worker-elevated`, `tier_override: xlarge` | none: its (e) or (f) goes to the user |
 
 3. When a goal reminder is active and the branch is not yet `goal/*`, run
    `git checkout -b goal/<current branch>/<slug>` with a random
@@ -147,7 +147,12 @@ turn; the next invocation merges once the holder has released it.
 - **(e) Critical open after the fix round** — repeat Spawn steps 5 to 7 with
   the retry cell from the table (its body and any `tier_override`), on the same
   branch, adding the report's open Critical `unresolved:` line to the task
-  block. One retry: a second (e) goes to the user.
+  block.
+- **(f) non-convergence** — the same retry as (e), adding the report's failing
+  `verification:` line to the task block instead.
+
+A ticket run gets one retry in total across (e) and (f): after one retry for
+either stop, the next (e) or (f) goes to the user.
 
 Resume through the host's continuation mechanism. When it has none, or the
 agent is gone, re-spawn with the same task block plus one line:

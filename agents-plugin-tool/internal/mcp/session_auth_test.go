@@ -11,6 +11,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/kang-sw/devenv/internal/wsconfig"
 )
 
 // sessionKeyPattern validates the word-chain session key format: 3 lowercase words.
@@ -1287,5 +1290,145 @@ func TestSessionNoteSurvivesFreshServerInstance(t *testing.T) {
 	}
 	if len(children) != 1 || children[0].note != "persisted note" {
 		t.Fatalf("fresh-instance children = %#v, want single child with note %q", children, "persisted note")
+	}
+}
+
+// TestGetOverrideWalksParentChain pins the session parent-walk rule: a key with
+// no own override resolves the nearest ancestor's session override, a key's own
+// override always wins, a parentless key behaves as before, and a corrupt
+// parent cycle or a missing ancestor terminates the walk.
+func TestGetOverrideWalksParentChain(t *testing.T) {
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	store := newSessionStore()
+	const item = "review_phase"
+	writeSessionRecordForTest(t, store, "grand-lead-00", "/work", roleLead, "")
+	writeSessionRecordForTest(t, store, "mid-worker-00", "/work", roleLead, "grand-lead-00")
+	writeSessionRecordForTest(t, store, "leaf-review-00", "/work", roleLeaf, "mid-worker-00")
+	writeSessionRecordForTest(t, store, "lone-key-00", "/work", roleLead, "")
+	if err := store.setOverride("grand-lead-00", item, "on"); err != nil {
+		t.Fatalf("setOverride grand: %v", err)
+	}
+
+	// (i) a child with no own override resolves its parent's override, and
+	// (iii) a grandchild resolves through two links.
+	for _, key := range []string{"mid-worker-00", "leaf-review-00"} {
+		if v, ok := store.getOverride(key, item); !ok || v != "on" {
+			t.Fatalf("getOverride(%q) = (%q, %v), want inherited (\"on\", true)", key, v, ok)
+		}
+	}
+
+	// (ii) a child's own override beats the parent's, and the nearest ancestor
+	// wins for its own descendants.
+	if err := store.setOverride("mid-worker-00", item, "off"); err != nil {
+		t.Fatalf("setOverride mid: %v", err)
+	}
+	for _, key := range []string{"mid-worker-00", "leaf-review-00"} {
+		if v, ok := store.getOverride(key, item); !ok || v != "off" {
+			t.Fatalf("getOverride(%q) = (%q, %v), want nearest (\"off\", true)", key, v, ok)
+		}
+	}
+	if v, ok := store.getOverride("grand-lead-00", item); !ok || v != "on" {
+		t.Fatalf("ancestor's own value changed: (%q, %v)", v, ok)
+	}
+
+	// (iv) a key without Parent behaves as before: absent stays absent.
+	if v, ok := store.getOverride("lone-key-00", item); ok {
+		t.Fatalf("parentless key resolved %q, want absent", v)
+	}
+
+	// (v) a parent cycle terminates without a value.
+	writeSessionRecordForTest(t, store, "cycle-one-00", "/work", roleLead, "cycle-two-00")
+	writeSessionRecordForTest(t, store, "cycle-two-00", "/work", roleLead, "cycle-one-00")
+	if v, ok := store.getOverride("cycle-one-00", item); ok {
+		t.Fatalf("cycle resolved %q, want absent", v)
+	}
+	if keys := store.listOverrideKeys("cycle-one-00"); keys != nil {
+		t.Fatalf("cycle listOverrideKeys = %v, want nil", keys)
+	}
+
+	// A missing (pruned) ancestor stops the walk at the first unreadable link.
+	writeSessionRecordForTest(t, store, "orphan-key-00", "/work", roleLead, "pruned-key-00")
+	if v, ok := store.getOverride("orphan-key-00", item); ok {
+		t.Fatalf("orphan resolved %q, want absent", v)
+	}
+
+	// listOverrideKeys enumerates the same lineage getOverride resolves.
+	if keys := store.listOverrideKeys("leaf-review-00"); len(keys) != 1 || keys[0] != item {
+		t.Fatalf("listOverrideKeys(leaf) = %v, want [%s]", keys, item)
+	}
+}
+
+// TestGetOverrideParentWalkDoesNotTouchAncestors guards session liveness: a
+// child read refreshes only the child's own record, never an ancestor's.
+func TestGetOverrideParentWalkDoesNotTouchAncestors(t *testing.T) {
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	store := newSessionStore()
+	writeSessionRecordForTest(t, store, "idle-lead-00", "/work", roleLead, "")
+	writeSessionRecordForTest(t, store, "busy-child-00", "/work", roleLead, "idle-lead-00")
+	if err := store.setOverride("idle-lead-00", "review_phase", "on"); err != nil {
+		t.Fatalf("setOverride: %v", err)
+	}
+	dir, err := store.keysDir()
+	if err != nil {
+		t.Fatalf("keysDir: %v", err)
+	}
+	old := time.Now().Add(-2 * touchGuardWindow).Truncate(time.Second)
+	for _, key := range []string{"idle-lead-00", "busy-child-00"} {
+		if err := os.Chtimes(store.keyPath(dir, key), old, old); err != nil {
+			t.Fatalf("chtimes %s: %v", key, err)
+		}
+	}
+	if v, ok := store.getOverride("busy-child-00", "review_phase"); !ok || v != "on" {
+		t.Fatalf("getOverride(child) = (%q, %v), want inherited", v, ok)
+	}
+	_ = store.listOverrideKeys("busy-child-00")
+	parentInfo, err := os.Stat(store.keyPath(dir, "idle-lead-00"))
+	if err != nil {
+		t.Fatalf("stat parent: %v", err)
+	}
+	if !parentInfo.ModTime().Equal(old) {
+		t.Fatalf("ancestor mtime moved to %v, want untouched %v", parentInfo.ModTime(), old)
+	}
+	childInfo, err := os.Stat(store.keyPath(dir, "busy-child-00"))
+	if err != nil {
+		t.Fatalf("stat child: %v", err)
+	}
+	if childInfo.ModTime().Equal(old) {
+		t.Fatalf("child record was not touched by its own read")
+	}
+}
+
+// TestResolverSessionScopeInheritsParentOverride pins the parent walk at the
+// resolver boundary: an inherited session value outranks project scope and
+// reports ScopeSession, while a parentless key falls through to project.
+func TestResolverSessionScopeInheritsParentOverride(t *testing.T) {
+	cache := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cache)
+	store := newSessionStore()
+	writeSessionRecordForTest(t, store, "tuned-lead-00", "/work", roleLead, "")
+	writeSessionRecordForTest(t, store, "spawned-worker-00", "/work", roleLead, "tuned-lead-00")
+	writeSessionRecordForTest(t, store, "other-lead-00", "/work", roleLead, "")
+	adapter := sessionConfigAdapter{s: store}
+	opts := wsconfig.Options{CacheHome: cache, ConfigHome: t.TempDir()}
+	resolver := wsconfig.NewResolver(opts, map[string]string{"review_phase": "off"}, adapter, adapter)
+	if err := resolver.Set("review_phase", "off", wsconfig.SetOptions{ExplicitScope: wsconfig.ScopeProject}); err != nil {
+		t.Fatalf("set project: %v", err)
+	}
+	if err := resolver.Set("review_phase", "on", wsconfig.SetOptions{ExplicitScope: wsconfig.ScopeSession, SessionKey: "tuned-lead-00"}); err != nil {
+		t.Fatalf("set session: %v", err)
+	}
+	got, err := resolver.Get("spawned-worker-00", "review_phase")
+	if err != nil {
+		t.Fatalf("Get child: %v", err)
+	}
+	if got.Value != "on" || got.Scope != wsconfig.ScopeSession {
+		t.Fatalf("child resolved %+v, want inherited session value on", got)
+	}
+	got, err = resolver.Get("other-lead-00", "review_phase")
+	if err != nil {
+		t.Fatalf("Get other: %v", err)
+	}
+	if got.Value != "off" || got.Scope != wsconfig.ScopeProject {
+		t.Fatalf("parentless key resolved %+v, want project off", got)
 	}
 }

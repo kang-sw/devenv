@@ -363,8 +363,18 @@ func (s *sessionStore) setReviewTrackNudgeShown(targetKey string) error {
 }
 
 // getOverride returns the Overrides entry for the given item key in the session
-// record identified by sessionKey. Returns ("", false) when the session is not
-// found, the key is path-unsafe, or the item is absent.
+// record identified by sessionKey. When that record holds no entry for the item,
+// the lookup walks the record's Parent chain and returns the nearest ancestor's
+// entry, so a value a lead tunes for its session reaches the workers and
+// delegates it spawns; a key's own entry always wins. Returns ("", false) when
+// the session is not found, the key is path-unsafe, or no record on the chain
+// holds the item.
+//
+// Only sessionKey's own record is touched: ancestors are read without
+// refreshing their mtime, because touching every ancestor on each child read
+// would keep an idle lead record looking live to the pruner. The walk stops at
+// the first unreadable link (pruned, malformed, or path-unsafe parent) and at a
+// revisited key, so a corrupt parent cycle terminates.
 //
 // s.mu is held for the duration of the read to match the mutex discipline of
 // setOverride, preventing a data race when another goroutine is concurrently
@@ -381,16 +391,45 @@ func (s *sessionStore) getOverride(sessionKey, itemKey string) (string, bool) {
 		return "", false
 	}
 	s.touch(dir, sessionKey)
-	if record.Overrides == nil {
-		return "", false
+	var value string
+	found := false
+	s.walkLineage(dir, sessionKey, record, func(r sessionRecord) bool {
+		value, found = r.Overrides[itemKey]
+		return found
+	})
+	return value, found
+}
+
+// walkLineage visits record (the already-read record of key) and then each
+// readable ancestor along its Parent chain, nearest first, until visit returns
+// true, a link is unreadable, or a key repeats. It never touches a record. The
+// caller holds s.mu.
+func (s *sessionStore) walkLineage(dir, key string, record sessionRecord, visit func(sessionRecord) bool) {
+	seen := map[string]struct{}{key: {}}
+	for {
+		if visit(record) {
+			return
+		}
+		parent := record.Parent
+		if parent == "" {
+			return
+		}
+		if _, dup := seen[parent]; dup {
+			return
+		}
+		seen[parent] = struct{}{}
+		next, ok := s.readRecord(dir, parent)
+		if !ok {
+			return
+		}
+		record = next
 	}
-	v, ok := record.Overrides[itemKey]
-	return v, ok
 }
 
 // listOverrideKeys returns all item keys present in the Overrides map of the
-// session record identified by sessionKey. Returns nil when the session is not
-// found or the Overrides map is empty.
+// session record identified by sessionKey or of any readable ancestor on its
+// Parent chain (the same lineage getOverride resolves through). Returns nil
+// when the session is not found or no record on the chain holds an override.
 func (s *sessionStore) listOverrideKeys(sessionKey string) []string {
 	dir, err := s.keysDir()
 	if err != nil {
@@ -403,11 +442,18 @@ func (s *sessionStore) listOverrideKeys(sessionKey string) []string {
 		return nil
 	}
 	s.touch(dir, sessionKey)
-	if len(record.Overrides) == 0 {
+	set := map[string]struct{}{}
+	s.walkLineage(dir, sessionKey, record, func(r sessionRecord) bool {
+		for k := range r.Overrides {
+			set[k] = struct{}{}
+		}
+		return false
+	})
+	if len(set) == 0 {
 		return nil
 	}
-	keys := make([]string, 0, len(record.Overrides))
-	for k := range record.Overrides {
+	keys := make([]string, 0, len(set))
+	for k := range set {
 		keys = append(keys, k)
 	}
 	return keys

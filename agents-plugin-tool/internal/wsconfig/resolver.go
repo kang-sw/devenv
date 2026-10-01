@@ -27,6 +27,9 @@ type SetOptions struct {
 type SessionReader interface {
 	// GetOverride returns (value, true) when the session record for the given key
 	// contains an Overrides entry for the given item key, or ("", false) otherwise.
+	// A key with no own entry resolves through its parent-session chain (nearest
+	// ancestor wins) before Get falls through to project scope; a key's own entry
+	// always wins. Writes never walk the chain.
 	GetOverride(sessionKey, itemKey string) (string, bool)
 }
 
