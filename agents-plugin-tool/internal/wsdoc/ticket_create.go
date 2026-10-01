@@ -119,7 +119,7 @@ func TicketCreate(root string, opts TicketCreateOptions) (TicketCreateResult, er
 	}
 
 	designRequired, completenessRequired := sageReviewStageRequirement(fullStem)
-	design := ResolvedSageReviewPosture(opts.SageReview.Design)
+	design := resolvedDesignStamp(designRequired, completenessRequired, opts.SageReview.Design)
 	completeness := ResolvedSageReviewPosture(opts.SageReview.Completeness)
 
 	// Never-skippable design-review invariant: a ticket created directly at
@@ -174,7 +174,7 @@ func TicketCreate(root string, opts TicketCreateOptions) (TicketCreateResult, er
 	case state == "ready" && completenessRequired:
 		tip = sageReviewPostureTip(sageReviewPostures{Design: design, Completeness: completeness})
 	default:
-		tip = "sage review posture: design " + design + "." + epicSkippedDesignNote(designRequired, completenessRequired, design)
+		tip = "sage review posture: design " + design + "."
 	}
 
 	return TicketCreateResult{Path: relPath, Tip: tip}, nil

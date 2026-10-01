@@ -430,6 +430,19 @@ func ResolvedSageReviewPosture(sageReview string) string {
 	}
 }
 
+// resolvedDesignStamp is the design-stage posture a stamping site writes. An
+// epic (design-only stage set) is stamped required whatever sage_review_design
+// says: its design review is lead-judged and explicitly invoked, so the knob
+// never governs it. Stamping the knob's recommended posture instead turned the
+// epic todo gate into an ask whose `no` persisted skipped, which the next gate
+// then silently revived to required (see resolveEpicDesignPosture).
+func resolvedDesignStamp(designRequired, completenessRequired bool, designKnob string) string {
+	if designRequired && !completenessRequired {
+		return "required"
+	}
+	return ResolvedSageReviewPosture(designKnob)
+}
+
 // sageReviewStageRequirement reports whether a ticket category requires the
 // design and/or completeness sage-review stage. The per-stage rule is stated
 // here in full and owned here, so that changing any other category-keyed check
@@ -548,7 +561,7 @@ func prepareSageReviewForUpwardMove(ticketAbsPath, stem string, sageReview SageR
 	design, completeness := effectiveSageReviewPostures(fm)
 
 	if designRequired && (design == "" || design == "pending") {
-		design = ResolvedSageReviewPosture(sageReview.Design)
+		design = resolvedDesignStamp(designRequired, completenessRequired, sageReview.Design)
 	}
 	if completenessRequired && (completeness == "" || completeness == "pending") {
 		completeness = ResolvedSageReviewPosture(sageReview.Completeness)
@@ -688,10 +701,11 @@ func currentSageReviewPostures(ticketAbsPath, stem string) sageReviewPostures {
 	return sageReviewPostures{Design: design, Completeness: completeness}
 }
 
-// epicSkippedDesignNote qualifies a "design skipped" tip on an epic: the
-// sage_review_design knob stamps skipped, but the epic's landing: "todo" gate
-// revives it to required (see resolveEpicDesignPosture), so the bare tip would
-// misstate what the next gate call does.
+// epicSkippedDesignNote qualifies a "design skipped" tip on an epic: stamping
+// sites now write required for an epic (resolvedDesignStamp), but an epic can
+// still carry a skipped posture stamped before that, and the epic's
+// landing: "todo" gate revives it to required (see resolveEpicDesignPosture),
+// so the bare tip would misstate what the next gate call does.
 func epicSkippedDesignNote(designRequired, completenessRequired bool, design string) string {
 	if designRequired && !completenessRequired && design == "skipped" {
 		return " An epic's tickets.sage_gate(landing: \"todo\") still resolves a skipped design posture to required."

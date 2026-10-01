@@ -276,15 +276,19 @@ func SageGate(root string, opts SageGateOptions, cfg SageReviewConfig) (SageGate
 
 // resolveEpicDesignPosture exempts an epic's design stage from the
 // sage_review_design knob: epic design review is lead-judged and explicitly
-// invoked, so a missing, pending, or skipped posture (whatever a stamping site
-// wrote under the knob) resolves to required and is persisted, rather than
-// silently returning skip — `skipped` is terminal and could never be revived.
-// blocked and completed keep their own handling (stop_blocked, and the
-// freshness check the caller already ran). The epic-at-ready branch reaches
-// this only with a non-terminal posture, so there `skipped` stays a skip.
+// invoked, so a missing, pending, recommended, or skipped posture resolves to
+// required and is persisted. Stamping sites write required for an epic
+// (resolvedDesignStamp); recommended and skipped arrive only from stamps
+// written under the knob before that. Passing recommended through would ask,
+// and a `no` would persist skipped for the next gate to revive, so an epic
+// never reaches the ask; returning skip for skipped would leave it terminal
+// and never revivable. blocked and completed keep their own handling
+// (stop_blocked, and the freshness check the caller already ran). The
+// epic-at-ready branch reaches this only with a non-terminal posture, so there
+// `skipped` stays a skip.
 func resolveEpicDesignPosture(ticketAbs, posture string) (string, error) {
 	switch strings.TrimSpace(posture) {
-	case "", "pending", "skipped":
+	case "", "pending", "recommended", "skipped":
 		if err := writeFrontmatterField(ticketAbs, map[string]string{"sage-review-design": "required"}); err != nil {
 			return "", err
 		}

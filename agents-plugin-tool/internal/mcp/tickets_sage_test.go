@@ -462,9 +462,9 @@ func TestServeStdioSageGateDetectsStaleCompletedReview(t *testing.T) {
 func TestServeStdioSageGateDeclineDoesNotAutoCommit(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
-	ticketRel := filepath.Join("ai-docs", "tickets", "todo", "260101-epic-decline.md")
+	ticketRel := filepath.Join("ai-docs", "tickets", "todo", "260101-feat-decline.md")
 	mustWrite(t, root, ticketRel,
-		"---\ntitle: Sage\nsage-review-design: recommended\n---\n\n## Route Facts\n\n| fact | value |\n|---|---|\n| scope.span | single-file |\n\nBody.\n")
+		"---\ntitle: Sage\nsage-review-design: skipped\nsage-review-completeness: recommended\n---\n\n## Route Facts\n\n| fact | value |\n|---|---|\n| scope.span | single-file |\n\nBody.\n")
 	initGit(t, root)
 	runGit(t, root, "add", ticketRel)
 	runGit(t, root, "commit", "-m", "initial ticket")
@@ -476,8 +476,8 @@ func TestServeStdioSageGateDeclineDoesNotAutoCommit(t *testing.T) {
 	key, _ := parseLoginResponse(t, callLogin(t, server, 9705, root, nil))
 
 	resp := callToolWithKey(t, server, 9706, key, "tickets.sage_gate", map[string]any{
-		"stem":    "260101-epic-decline",
-		"landing": "todo",
+		"stem":    "260101-feat-decline",
+		"landing": "ready",
 		"answer":  "no",
 	})
 	if !strings.Contains(resp, "action: skip") {
@@ -504,7 +504,7 @@ func TestServeStdioSageGateDeclineDoesNotAutoCommit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read ticket: %v", err)
 	}
-	if !strings.Contains(string(body), "sage-review-design: skipped") {
+	if !strings.Contains(string(body), "sage-review-completeness: skipped") {
 		t.Fatalf("sage_gate decline must still write the skipped posture:\n%s", body)
 	}
 	status := strings.TrimRight(string(runGitOutput(t, root, "status", "--porcelain", ticketRel)), "\n")

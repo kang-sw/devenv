@@ -110,15 +110,18 @@ func TestTicketsFindAssigneeOmitFilter(t *testing.T) {
 	}
 }
 
-func TestTicketCreateEpicTodoStampsResolvedSageReviewDesignPosture(t *testing.T) {
+// TestTicketCreateEpicTodoStampsRequiredDesignPosture pins the epic
+// exemption from sage_review_design at create: every knob value stamps
+// required, never the knob's skipped or recommended posture.
+func TestTicketCreateEpicTodoStampsRequiredDesignPosture(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		config     string
 		wantReview string
 	}{
-		{"empty", "", "skipped"},
-		{"off", "off", "skipped"},
-		{"ask", "ask", "recommended"},
+		{"empty", "", "required"},
+		{"off", "off", "required"},
+		{"ask", "ask", "required"},
 		{"auto", "auto", "required"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
