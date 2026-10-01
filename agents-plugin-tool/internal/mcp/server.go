@@ -2641,10 +2641,9 @@ func formatTuningCatalog(catalog tuningCatalog) string {
 		if current := formatTuningCurrent(knob.Current); current != "" {
 			fmt.Fprintf(&b, "  current: %s\n", current)
 		}
+		fmt.Fprintf(&b, "  repo_scope: %s\n", yesNo(knob.RepoScope))
 		if knob.RepoKey != "" {
-			fmt.Fprintf(&b, "  repo_scope: yes (key: %s)\n", knob.RepoKey)
-		} else {
-			fmt.Fprintf(&b, "  repo_scope: %s\n", yesNo(knob.RepoScope))
+			fmt.Fprintf(&b, "  repo_key: %s\n", knob.RepoKey)
 		}
 		b.WriteString("\n")
 	}

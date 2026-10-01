@@ -407,6 +407,39 @@ func TestConfigListReportsRepoScopeFields(t *testing.T) {
 	}
 }
 
+// TestConfigListTextNamesRepoKey pins the text config.list output to the same
+// field name as the JSON response and the lead-tune playbook: a repo-capable
+// knob prints `repo_key: <key>`, and a knob outside the repo scope prints none.
+func TestConfigListTextNamesRepoKey(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 920511, root, nil))
+	text := callToolWithKey(t, server, 920512, key, "config.list", map[string]any{})
+
+	knobBlock := func(id string) string {
+		start := strings.Index(text, "\n"+id+" (")
+		if start < 0 {
+			t.Fatalf("config.list text has no %s knob:\n%s", id, text)
+		}
+		block := text[start+1:]
+		if end := strings.Index(block, "\n\n"); end >= 0 {
+			block = block[:end]
+		}
+		return block
+	}
+	if block := knobBlock("sage_review_design"); !strings.Contains(block, "\n  repo_scope: yes\n  repo_key: sage_review_design") {
+		t.Fatalf("sage_review_design text block lacks repo_key:\n%s", block)
+	}
+	if block := knobBlock("bootstrap_alarm"); !strings.Contains(block, "\n  repo_scope: no") || strings.Contains(block, "repo_key") {
+		t.Fatalf("bootstrap_alarm text block = %s, want repo_scope: no and no repo_key", block)
+	}
+}
+
 // TestRepoScopePromptOverridePlaybookRender is Phase 1 Verification item
 // (vi): a committed prompt.<pointId>.<harness> override in the temp repo
 // appears in a playbook rendered under a session rooted there.
