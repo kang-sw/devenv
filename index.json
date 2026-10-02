@@ -515,7 +515,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-02T12:59:31Z"
+        "touched_at": "2026-10-02T13:00:01Z",
+        "impl": {
+          "branch": "impl/develop/chemo-yen-omit"
+        }
       }
     },
     "261002-feat-ws-config-adapter-schema-extension": {
