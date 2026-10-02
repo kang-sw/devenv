@@ -82,7 +82,14 @@ test("workflow_manual family: keyed by resolved session key, full text across te
   const first = [call("one", "ws__workflow_manual", {}), multi("one")];
   const second = dedupeRead(first, "two", "workflow_manual", key, fresh, resolve);
   assert.equal(second.deduped, true, "an omitted prior session_key resolves to the current key");
+  const [prose] = second.text.split("\n");
+  // workflow_manual is mutable session state: the pointer asks for a refresh
+  // after mutation instead of forbidding a re-read.
+  assert.equal(prose, "The result is unchanged. Continue using the full result already present 1 tool call ago as your current session state; call workflow_manual again after you change agenda, todos, or notes. (headings: ## Session Key; ## Session State; ### Todos)");
+  assert.doesNotMatch(second.text, /Do not read it again/);
   assert.match(second.text, /"family":"workflow_manual"/);
+  const far = dedupeRead([...first, call("x", "read", {}), call("two", "ws__workflow_manual", {})], "two", "workflow_manual", key, fresh, resolve);
+  assert.match(far.text, /^The result is unchanged\. Continue using the full result already present 2 tool calls ago as your current session state;/);
   // A first-text-only comparison would wrongly match when only the advisory differs.
   assert.equal(dedupeRead(first, "two", "workflow_manual", key, state, resolve).deduped, false);
   // Pointer provenance for the new family validates; the next repeat is full.

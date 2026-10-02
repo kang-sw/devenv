@@ -67,7 +67,13 @@ interface Provenance { originalToolCallId: string; family: ReadFamily; key: stri
 
 function pointerText(originalToolCallId: string, family: ReadFamily, key: string, body: string, distance: number): string {
   const provenance: Provenance = { originalToolCallId, family, key };
-  return `${POINTER_PROSE_PREFIX}${distance} tool call${distance === 1 ? "" : "s"} ago. Do not read it again (headings: ${headings(body)}).\n${PROVENANCE_PREFIX}${JSON.stringify(provenance)}${PROVENANCE_SUFFIX}`;
+  const ago = `${distance} tool call${distance === 1 ? "" : "s"} ago`;
+  // workflow_manual returns mutable session state, so its pointer must not
+  // tell the model to stop re-reading; it asks for a refresh after mutation.
+  const guidance = family === "workflow_manual"
+    ? `${ago} as your current session state; call workflow_manual again after you change agenda, todos, or notes. (headings: ${headings(body)})`
+    : `${ago}. Do not read it again (headings: ${headings(body)}).`;
+  return `${POINTER_PROSE_PREFIX}${guidance}\n${PROVENANCE_PREFIX}${JSON.stringify(provenance)}${PROVENANCE_SUFFIX}`;
 }
 
 function parsePointer(text: string): Provenance | undefined {

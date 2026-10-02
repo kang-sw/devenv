@@ -224,7 +224,7 @@ for line in sys.stdin:
     const visibleTwo = [call("two"), result("two", two.content)];
     const three = await manual.execute("three", {}, undefined, undefined, ctx([...visibleTwo, call("three")]));
     assert.equal(three.content.length, 1);
-    assert.match(three.content[0].text, /^The result is unchanged\. Continue using the full result already present 1 tool call ago\./);
+    assert.match(three.content[0].text, /^The result is unchanged\. Continue using the full result already present 1 tool call ago as your current session state; call workflow_manual again after you change agenda, todos, or notes\. \(headings: /);
     assert.match(three.content[0].text, /"family":"workflow_manual"/);
 
     // The same result under an explicit, different session key does not count.
@@ -240,6 +240,63 @@ for line in sys.stdin:
     // Prior result gone from the active context (e.g. compacted): full text.
     const six = await manual.execute("six", {}, undefined, undefined, ctx([call("six")]));
     assert.equal(text(six.content), text(five.content));
+    handle.shutdown();
+  } finally {
+    if (oldRole === undefined) delete process.env.WS_PI_SPAWN_ROLE; else process.env.WS_PI_SPAWN_ROLE = oldRole;
+  }
+});
+
+test("production bridge registration dedupes a repeat workflow_manual on the verbatim dispatch path", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "ws-pi-dedupe-manual-verbatim-"));
+  const launcher = join(directory, "launcher.py");
+  const stateFile = join(directory, "state.txt");
+  writeFileSync(stateFile, "### Todos\n(no todos)");
+  writeFileSync(launcher, `import json,sys
+state_file=${JSON.stringify(stateFile)}
+for line in sys.stdin:
+ q=json.loads(line); m=q['method']
+ if m=='initialize': r={'serverInfo':{'version':${JSON.stringify(BUNDLED_RUNTIME.plugin_version)}},'capabilities':{}}
+ elif m=='tools/list': r={'tools':[{'name':n,'description':n,'inputSchema':{'type':'object','properties':{'session_key':{'type':'string'}},'required':['session_key']}} for n in ['ferrule','workflow_manual','config.resolve_agent']]}
+ elif m=='tools/call':
+  n=q['params']['name']
+  if n=='ferrule': t=json.dumps({'session_key':'worker-key'})
+  elif n=='config.resolve_agent': t=json.dumps({'resolved_from':'default'})
+  else: t='# Workflow Manual\\nfull body\\n\\n## Session Key\\nworker-key\\n\\n## Session State\\n'+open(state_file).read()
+  r={'isError':False,'content':[{'type':'text','text':t}]}
+ print(json.dumps({'jsonrpc':'2.0','id':q['id'],'result':r}),flush=True)
+`);
+  const tools = new Map<string, any>();
+  const pi = { registerTool: (definition: any) => tools.set(definition.name, definition), on() {} } as unknown as ExtensionAPI;
+  const oldRole = process.env.WS_PI_SPAWN_ROLE;
+  // A worker role never maps workflow_manual, so every call takes the
+  // verbatim callTool dispatch and its one-line dedupe.
+  process.env.WS_PI_SPAWN_ROLE = "worker";
+  const call = (id: string) => ({ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id, name: "ws__workflow_manual", arguments: {} }] } });
+  const result = (id: string, content: unknown[]) => ({ type: "message", message: { role: "toolResult", toolCallId: id, content, isError: false } });
+  const text = (content: any[]) => content.filter((item) => item.type === "text").map((item) => item.text).join("\n");
+  try {
+    const handle = await startBridge(pi, { launcherPath: launcher, pluginDir: directory, runtimeJsonPath: join(dirname(fileURLToPath(import.meta.url)), "../runtime.json"), cwd: directory, toolPreviewTuiRef: { current: undefined } });
+    const manual = tools.get("ws__workflow_manual");
+    const ctx = (entries: unknown[]) => ({ sessionManager: { buildContextEntries: () => entries } });
+
+    // The first result carries the one-shot advisory; the second, with the
+    // advisory suppressed, differs from it and is full verbatim text.
+    const one = await manual.execute("one", {}, undefined, undefined, ctx([call("one")]));
+    assert.match(text(one.content), /^# Workflow Manual\nfull body\n/, "verbatim dispatch returns the unmapped manual text");
+    const two = await manual.execute("two", {}, undefined, undefined, ctx([call("one"), result("one", one.content), call("two")]));
+    assert.match(text(two.content), /^# Workflow Manual\nfull body\n/);
+
+    // Identical response with the second result visible: pointer.
+    const visibleTwo = [call("two"), result("two", two.content)];
+    const three = await manual.execute("three", {}, undefined, undefined, ctx([...visibleTwo, call("three")]));
+    assert.equal(three.content.length, 1);
+    assert.match(three.content[0].text, /^The result is unchanged\. Continue using the full result already present 1 tool call ago as your current session state;/);
+    assert.match(three.content[0].text, /"family":"workflow_manual"/);
+
+    // Changed response with the same prior result visible: full text.
+    writeFileSync(stateFile, "### Todos\n- [ ] {a} A");
+    const four = await manual.execute("four", {}, undefined, undefined, ctx([...visibleTwo, call("four")]));
+    assert.match(text(four.content), /^# Workflow Manual\nfull body\n[\s\S]*- \[ \] \{a\} A$/);
     handle.shutdown();
   } finally {
     if (oldRole === undefined) delete process.env.WS_PI_SPAWN_ROLE; else process.env.WS_PI_SPAWN_ROLE = oldRole;
