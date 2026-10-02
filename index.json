@@ -520,6 +520,9 @@
           "branch": "impl/develop/oak-badge-map"
         }
       }
+    },
+    "261002-feat-pi-lead-ws-owned-compaction": {
+      "registered_at": "2026-10-02T08:04:30Z"
     }
   }
 }
