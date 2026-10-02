@@ -5,7 +5,7 @@
  *
  * SKILL.md prose is written as the literal `ws/playbook.read(...)` /
  * `ws/workflow_manual(...)` call syntax (see
- * ai-docs/spec/mcp-tools.md's McpNamespace template and
+ * the archived ai-docs/.old/spec/260910/mcp-tools.md McpNamespace template and
  * agents-plugin/skills/*), but that prose form is not itself a legal
  * provider tool name: OpenAI-compatible tool-calling APIs (confirmed live
  * against this repo's only reachable provider, openrouter) reject any

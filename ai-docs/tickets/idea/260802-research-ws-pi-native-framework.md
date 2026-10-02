@@ -746,8 +746,10 @@ openrouter). Session spikes ran two sequential `--session <path>` turns.
   names** (`ws__<tool>`; `/`→`__`, `.`→`_`) and relies on the model's prose→tool
   mapping (the same mechanism Claude Code's `mcp__…__…` names already use). The
   "prose works unmodified" consequence holds; the "register the name verbatim"
-  mechanism does not. See spec `pi-adapter-runtime`
-  `{#260903-pi-bridge-tool-registration}`.
+  mechanism does not. See the archived spec
+  `ai-docs/.old/spec/261002/pi-adapter-runtime.md`
+  `{#260903-pi-bridge-tool-registration}`; the current contract is
+  `agents-plugin-pi/src/bridge.ts` and its tests.
 - **`--session` + `-p` resume appends turns (was Q8).** Two sequential
   `pi --mode json -p --session <path>` calls against the same file
   accumulated turns: after turn 1 the file had 5 lines (session header +

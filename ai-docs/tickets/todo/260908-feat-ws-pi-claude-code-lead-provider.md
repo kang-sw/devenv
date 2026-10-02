@@ -147,14 +147,16 @@ lets Anthropic's cache absorb it. Log every resync with its reason.
 
 ## Spec Impact
 
-Add a section to `ai-docs/spec/pi-adapter-runtime.md` (sibling of the
-model-resolution sections under the delegation spawner) describing the
-`claude-code` provider: registration and model ids, the one-process-per-
-session/parked-handler contract, the resync rule and its lossy replay, the
+The spec layer is retired: `pi-adapter-runtime` was archived verbatim at
+`ai-docs/.old/spec/261002/pi-adapter-runtime.md` and takes no new sections.
+Pin the `claude-code` provider's contract in the module's tests, with a site
+comment for any non-derivable trap: registration and model ids, the
+one-process-per-session/parked-handler contract, the resync rule and its lossy replay, the
 lifecycle (shutdown/abort/error) rules, usage mapping, and the explicit
 non-goals (no Claude Code built-in tools, settings, or connector MCPs; no
-adapter special-casing outside the module). Cross-reference
-`260903-pi-spawner-model-tier-inherit` for how a tier selects it.
+adapter special-casing outside the module). The archived
+`260903-pi-spawner-model-tier-inherit` anchor records how a tier selected a
+model when the spec was retired; the spawner code is the current contract.
 
 ## Phases
 
