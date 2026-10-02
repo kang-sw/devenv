@@ -522,7 +522,14 @@
       }
     },
     "261002-feat-pi-model-output-tps-display": {
-      "registered_at": "2026-10-02T02:13:03Z"
+      "registered_at": "2026-10-02T02:13:03Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-10-02T03:05:44Z"
+      }
     }
   }
 }
