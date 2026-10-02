@@ -515,7 +515,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-02T00:44:08Z"
+        "touched_at": "2026-10-02T00:44:28Z",
+        "impl": {
+          "branch": "impl/develop/emote-guru-robe"
+        }
       }
     }
   }
