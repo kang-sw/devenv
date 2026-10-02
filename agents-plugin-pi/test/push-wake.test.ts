@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { heldPushQueue, leadIdleRef, leadCompactingRef, leadWakeStartPendingRef, pushToLead, registerPushFlush, sendToLead } from '../src/spawner.ts';
 import { PUSH_BATCH_CUSTOM_TYPE } from '../src/push-protocol.ts';
 import { buildMailboxPushMessage } from '../src/mailbox-waiter.ts';
+import { renderLeadProse } from '../src/lead-compaction.ts';
 
 function harness(withGoal = false, steeringMode: 'one-at-a-time' | 'all' = 'one-at-a-time') {
   const handlers = new Map<string, Function[]>();
@@ -573,7 +574,7 @@ test('carry survives push wake and deferred compaction release after start', asy
   const h = harness(true);
   await h.commands.get('goal').handler('ship', h.ctx);
   const carry = '  Ω\t\r\n한글 🦦\n ';
-  await h.tools.get('goal-compact-and-continue').execute('x', {carry_forward: carry}, undefined, undefined, h.ctx);
+  await h.tools.get('ws-compact').execute('x', {current_work: carry}, undefined, undefined, h.ctx);
   h.push('followUp'); h.start();
   assert.equal(leadCompactingRef.current, true);
   assert.equal(h.custom.length, 0);
@@ -584,14 +585,14 @@ test('carry survives push wake and deferred compaction release after start', asy
   assert.equal(h.users.length, 2, 'only counted push wake, no reminder');
   assert.ok(!h.users[1].content.includes(carry));
   h.start(); h.settle(); h.tick();
-  assert.ok(h.users[2].content.endsWith(carry));
+  assert.ok(h.users[2].content.endsWith(renderLeadProse({current_work: carry})));
   h.goal!.resetCompactionStateForShutdown(); h.emit('session_shutdown');
 });
 
 test('idle compaction release cannot cancel held-push timeout', async () => {
   const h = harness(true);
   await h.commands.get('goal').handler('ship', h.ctx);
-  await h.tools.get('goal-compact-and-continue').execute('x', {carry_forward: ''}, undefined, undefined, h.ctx);
+  await h.tools.get('ws-compact').execute('x', {current_work: ''}, undefined, undefined, h.ctx);
   h.push('followUp'); h.emit('session_compact'); await new Promise(resolve => setImmediate(resolve));
   assert.equal(h.timers.size, 2, 'independent settle and wake recovery ownership');
   h.tick(); assert.equal(h.users.length, 3, 'push retry survives settle arming');

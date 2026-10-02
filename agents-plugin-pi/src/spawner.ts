@@ -1137,6 +1137,16 @@ export function reserveWakeStart(options: WakeStartOptions, onTimeout: () => voi
   return true;
 }
 
+/** The idle push-wake user line. Lead compaction (lead-compaction.ts) recognizes it as adapter traffic, so both sides share this builder. */
+export function buildPushWakeLine(count: number): string {
+  return `${count} ws messages waiting; process the incoming reports.`;
+}
+
+/** True for exactly the text `buildPushWakeLine` produces. */
+export function isPushWakeLine(text: string): boolean {
+  return /^\d+ ws messages waiting; process the incoming reports\.$/.test(text);
+}
+
 function requestPushWake(pi: ExtensionAPI): void {
   if (!wakeOptions || !heldPushQueue.length || !leadIdleRef.current || !isOwningAgentIdle()) return;
   // A lapsed reservation's retry may exit early, leaving `owed` false with no
@@ -1145,7 +1155,7 @@ function requestPushWake(pi: ExtensionAPI): void {
   pushWakeReserved = true;
   syncOwnTurnOwed();
   try {
-    pi.sendUserMessage(`${heldPushQueue.length} ws messages waiting; process the incoming reports.`, { deliverAs: "followUp" });
+    pi.sendUserMessage(buildPushWakeLine(heldPushQueue.length), { deliverAs: "followUp" });
   } catch {
     // Keep the queue and timeout: handled input and rejected preflight need the same retry.
   }

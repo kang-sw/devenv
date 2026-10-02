@@ -20,7 +20,7 @@ for (const root of SDK_ROOTS) for (const [providerName, apiName] of [["openroute
     const directory = mkdtempSync(join(tmpdir(), "ws-pi-lifecycle-"));
     const plugin = join(directory, "plugin");
     mkdirSync(plugin);
-    for (const name of ["src", "runtime.json", "goal-loop-config.json", "pi-lead-guide.md", "execute-worker-guide.md", "explore-guide.md"]) cpSync(join(process.cwd(), name), join(plugin, name), { recursive: true });
+    for (const name of ["src", "runtime.json", "goal-loop-config.json", "pi-lead-guide.md", "lead-compact-guide.md", "execute-worker-guide.md", "explore-guide.md"]) cpSync(join(process.cwd(), name), join(plugin, name), { recursive: true });
     const childIndexPath = join(plugin, "src/index.ts");
     const childIndexSource = readFileSync(childIndexPath, "utf8");
     writeFileSync(childIndexPath, childIndexSource.replace(

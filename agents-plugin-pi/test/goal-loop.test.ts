@@ -6,10 +6,9 @@
  * from the `agent_settled` handler's inline `process.env` check so the
  * lead-session-only guard has automated positive/negative coverage instead
  * of relying solely on a manual spot-check). No `pi.*` IO is exercised here
- * — `registerGoalLoop`'s IO glue (including the new `goal-compact-and-continue`
- * tool and `session_before_compact` listener) is covered by the live
- * `pi --mode json` gate (see the 260903 Phase 1/2 plans' Verification Plans),
- * not by this unit suite. The companion env-marker-placement coverage
+ * — `registerGoalLoop`'s IO glue is driven through fake `pi`/`ctx` seams in
+ * the suites below; the summary builders themselves are covered by
+ * `test/lead-compaction.test.ts`. The companion env-marker-placement coverage
  * (`buildRpcClientOptions`) lives in
  * `test/spawner.test.ts`.
  *
@@ -57,6 +56,31 @@ import {
 import { WS_PI_SPAWN_ROLE_ENV } from "../src/process-role.ts";
 import { flushHeldPushes, leadIdleRef, clearWakeStart, leadCompactingRef, leadWakeStartPendingRef, heldPushQueue, isOwningAgentIdle, type RpcAgentRegistry } from "../src/spawner.ts";
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
+import { renderLeadProse } from "../src/lead-compaction.ts";
+
+/** The lever's rendered prose for a single `current_work` field — the carry the old lever passed raw. */
+const prose = (text: string): string => renderLeadProse({ current_work: text });
+
+/** A `session_before_compact` event with Pi's preparation fields the lead handler reads. */
+function compactionEvent(reason: "manual" | "threshold" | "overflow", branchEntries: unknown[] = [], extra: Record<string, unknown> = {}): never {
+  return {
+    type: "session_before_compact",
+    reason,
+    branchEntries,
+    willRetry: false,
+    signal: new AbortController().signal,
+    preparation: {
+      firstKeptEntryId: "kept-entry",
+      tokensBefore: 1234,
+      messagesToSummarize: [],
+      turnPrefixMessages: [],
+      isSplitTurn: false,
+      fileOps: { read: new Set(["/tmp/read.ts"]), written: new Set(), edited: new Set(["/tmp/edit.ts"]) },
+      settings: { enabled: true, reserveTokens: 16384, keepRecentTokens: 20000 },
+    },
+    ...extra,
+  } as never;
+}
 
 const tmpDir = mkdtempSync(join(tmpdir(), "ws-goal-loop-test-"));
 after(() => {
@@ -298,22 +322,23 @@ describe("buildGoalAnnouncement", () => {
 });
 
 describe("buildCompactionLeverResult", () => {
-  test("names the requested compaction and carries the carry-forward argument verbatim", () => {
-    const text = buildCompactionLeverResult("phase 1 done, phase 2 next");
-    assert.ok(text.startsWith("Compaction requested"));
-    assert.ok(text.includes("phase 1 done, phase 2 next"));
+  test("names the requested compaction without echoing the prose the summary already carries", () => {
+    const text = buildCompactionLeverResult();
+    assert.ok(text.startsWith("Compaction requested; the conversation will resume from a summary carrying"));
+    assert.match(text, /fixed headings/);
   });
 });
 
 describe("buildGoalReminder", () => {
   const info = { percent: 42, advisoryPercent: 50 };
 
-  test("names the goal and all three lever tool names (two terminal, one compact-and-continue)", () => {
+  test("names the goal and all three lever tool names (two terminal, one compaction lever)", () => {
     const reminder = buildGoalReminder("ship the widget", info);
     assert.match(reminder, /ship the widget/);
     assert.match(reminder, /goal-achieved/);
     assert.match(reminder, /goal-blocked/);
-    assert.match(reminder, /goal-compact-and-continue/);
+    assert.match(reminder, /ws-compact/);
+    assert.doesNotMatch(reminder, /goal-compact-and-continue/);
   });
 
   test("mentions the runaway force-stop caveat", () => {
@@ -329,13 +354,13 @@ describe("buildGoalReminder", () => {
 
   test("percent below the advisory point explicitly tells the model not to compact", () => {
     const reminder = buildGoalReminder("a goal", { percent: 42, advisoryPercent: 50 });
-    assert.match(reminder, /Context usage: 42% of window — below the compaction advisory point \(50%\); do not call goal-compact-and-continue\.$/m);
+    assert.match(reminder, /Context usage: 42% of window — below the compaction advisory point \(50%\); do not call ws-compact\.$/m);
   });
 
   test("percent at the advisory point prioritizes compact-and-continue for weakly related next work", () => {
     const reminder = buildGoalReminder("a goal", { percent: 50, advisoryPercent: 50 });
     assert.match(reminder, /Context usage: 50% of window — at or above the advisory point/);
-    assert.match(reminder, /prioritize goal-compact-and-continue when the next work is weakly related to the current context/);
+    assert.match(reminder, /prioritize ws-compact when the next work is weakly related to the current context/);
   });
 
   test("percent above the advisory point renders the stronger nudge phrase", () => {
@@ -358,9 +383,9 @@ describe("buildCompactionObservation", () => {
     }
   });
 
-  test("is explicitly advisory-only, never a veto/override", () => {
+  test("is a plain observation line", () => {
     const observation = buildCompactionObservation("a goal", "threshold");
-    assert.match(observation, /does not cancel or override/);
+    assert.equal(observation, 'Compaction observed while goal-loop is active (goal: "a goal", reason: threshold).');
   });
 });
 
@@ -971,7 +996,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       await pi.commands.get("goal")!("old", ctx);
       let compactCall!: Parameters<ExtensionContext["compact"]>[0];
       ctx.compact = (opts) => { compactCall = opts; };
-      await pi.tools.get("goal-compact-and-continue")!.execute("carry", { carry_forward: "old carry" }, undefined, undefined, ctx);
+      await pi.tools.get("ws-compact")!.execute("carry", { current_work: "old carry" }, undefined, undefined, ctx);
       assert.equal(leadCompactingRef.current, true);
 
       await pi.commands.get("goal")!("stop", ctx);
@@ -1008,41 +1033,38 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     });
   });
 
-  test("compact-and-continue rejects an inactive goal before any compaction state changes", async () => {
+  test("ws-compact compacts with no active goal without touching goal-loop state (reverses 260913's rejection)", async () => {
     const clock = fakeClock();
     const pi = fakePi();
     registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
     const { ctx, notifications, statusCalls } = fakeCtx();
+    let compactCall: Parameters<ExtensionContext["compact"]>[0] | undefined;
     let compactCalls = 0;
-    ctx.compact = () => { compactCalls += 1; };
+    ctx.compact = (opts) => { compactCalls += 1; compactCall = opts; };
 
-    await assert.rejects(
-      pi.tools.get("goal-compact-and-continue")!.execute(
-        "carry",
-        { carry_forward: "must not persist" },
-        undefined,
-        undefined,
-        ctx,
-      ),
-      /requires an active goal; compaction was not requested/i,
-    );
-
-    assert.equal(compactCalls, 0, "inactive rejection does not schedule host compaction");
-    assert.equal(leadCompactingRef.current, false, "inactive rejection does not enter the compaction hold");
-    assert.equal(clock.pendingCount(), 0, "inactive rejection does not schedule re-injection");
-    assert.deepEqual(notifications, [], "inactive rejection emits no compaction lifecycle notification");
-    assert.deepEqual(statusCalls, [], "inactive rejection does not mutate goal-loop status");
+    const result = await pi.tools.get("ws-compact")!.execute("carry", { current_work: "no goal here" }, undefined, undefined, ctx);
+    assert.match((result as { content: Array<{ text: string }> }).content[0]!.text, /^Compaction requested/);
+    assert.equal(compactCalls, 1, "the lever compacts without an active goal");
+    assert.equal(leadCompactingRef.current, true, "the shared push hold still covers the compaction");
+    const hookResult = pi.handlers.get("session_before_compact")!(compactionEvent("manual"), ctx) as unknown as { compaction: { summary: string } };
+    assert.ok(hookResult?.compaction, "the lever's manual compaction is answered with the adapter's summary");
+    assert.match(hookResult.compaction.summary, /no goal here/);
 
     pi.handlers.get("agent_settled")!({}, ctx);
-    assert.equal(clock.pendingCount(), 0, "a later settle cannot re-arm an inactive rejected call");
-    assert.deepEqual(pi.sentUserMessages, [], "the rejected carry-forward is never delivered");
+    compactCall!.onComplete!({} as never);
+    pi.handlers.get("session_compact")!({ reason: "manual", fromExtension: true, compactionEntry: { details: { kind: "ws-pi-lead-compaction", version: 1, source: "lever" } } }, ctx);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(leadCompactingRef.current, false, "the hold is released");
+    assert.equal(clock.pendingCount(), 0, "no goal reminder is scheduled");
+    assert.deepEqual(statusCalls, [], "goal-loop status is untouched");
+    assert.deepEqual(notifications.map((n) => n.message), ["Compaction completed"]);
+    assert.deepEqual(pi.sentUserMessages, [], "nothing is injected");
 
     await pi.commands.get("goal")!("ship", ctx);
     pi.handlers.get("agent_settled")!({}, ctx);
     clock.fire();
     assert.equal(pi.sentUserMessages.length, 2, "a later active goal still follows the ordinary reminder path");
-    assert.ok(!(pi.sentUserMessages[1]!.content as string).includes(carryHeading), "rejected carry-forward does not leak into the next active goal");
-    assert.doesNotMatch(pi.sentUserMessages[1]!.content as string, /must not persist/);
+    assert.ok(!(pi.sentUserMessages[1]!.content as string).includes(carryHeading), "the goal-less prose never becomes a goal carry");
   });
 
   for (const completion of ["event", "callback", "both", "error", "failed-event"] as const) {
@@ -1054,9 +1076,9 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       await pi.commands.get("goal")!("ship", ctx);
       let compactCall!: Parameters<ExtensionContext["compact"]>[0];
       ctx.compact = (opts) => { compactCall = opts; };
-      const result = await pi.tools.get("goal-compact-and-continue")!.execute("carry", { carry_forward: exactCarry }, undefined, undefined, ctx);
+      const result = await pi.tools.get("ws-compact")!.execute("carry", { current_work: exactCarry }, undefined, undefined, ctx);
       assert.equal((result as { terminate?: boolean }).terminate, undefined, "lever stays non-terminal");
-      assert.equal(compactCall!.customInstructions, exactCarry, "summary instructions remain unchanged");
+      assert.equal(compactCall!.customInstructions, prose(exactCarry), "native-summarizer steering is the rendered prose");
       pi.handlers.get("agent_settled")!({}, ctx);
       if (completion === "callback" || completion === "both") compactCall!.onComplete!({} as never);
       if (completion === "error") compactCall!.onError!(new Error("boom"));
@@ -1067,7 +1089,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       assert.equal(pi.sentUserMessages.length, 1, "release only arms the settle timer");
       clock.fire();
       assert.equal(pi.sentUserMessages.length, 2);
-      assertCarry(pi.sentUserMessages[1]!.content, exactCarry);
+      assertCarry(pi.sentUserMessages[1]!.content, prose(exactCarry));
       assert.deepEqual(pi.sentUserMessages[1]!.options, { deliverAs: "followUp" });
       if (completion === "error" || completion === "failed-event") {
         assert.match(pi.sentUserMessages[1]!.content as string, /^Compaction failed: boom Do not retry/);
@@ -1088,12 +1110,12 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     const { ctx } = fakeCtx();
     await pi.commands.get("goal")!("ship", ctx);
     ctx.compact = (opts) => {
-      assert.equal(opts!.customInstructions, "");
+      assert.equal(opts!.customInstructions, prose(""));
       opts!.onComplete!({} as never);
       clock.fire(); // Probe capture ordering before ctx.compact returns.
-      assertCarry(pi.sentUserMessages[1]!.content, "");
+      assertCarry(pi.sentUserMessages[1]!.content, prose(""));
     };
-    await pi.tools.get("goal-compact-and-continue")!.execute("carry", { carry_forward: "" }, undefined, undefined, ctx);
+    await pi.tools.get("ws-compact")!.execute("carry", { current_work: "" }, undefined, undefined, ctx);
   });
 
   for (const interruption of ["busy-release", "start-before-release", "idle-yield", "child-yield"] as const) {
@@ -1105,7 +1127,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       let idle = true;
       const { ctx } = fakeCtx(() => idle);
       await pi.commands.get("goal")!("ship", ctx);
-      await pi.tools.get("goal-compact-and-continue")!.execute("carry", { carry_forward: exactCarry }, undefined, undefined, ctx);
+      await pi.tools.get("ws-compact")!.execute("carry", { current_work: exactCarry }, undefined, undefined, ctx);
       if (interruption === "start-before-release") {
         idle = false;
         pi.handlers.get("agent_start")!({}, ctx);
@@ -1128,7 +1150,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       registry.get("child")!.running = false;
       pi.handlers.get("agent_settled")!({}, ctx);
       clock.fire();
-      assertCarry(pi.sentUserMessages[1]!.content, exactCarry);
+      assertCarry(pi.sentUserMessages[1]!.content, prose(exactCarry));
     });
   }
 
@@ -1139,7 +1161,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       const handle = registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
       const { ctx } = fakeCtx();
       await pi.commands.get("goal")!("old", ctx);
-      await pi.tools.get("goal-compact-and-continue")!.execute("carry", { carry_forward: exactCarry }, undefined, undefined, ctx);
+      await pi.tools.get("ws-compact")!.execute("carry", { current_work: exactCarry }, undefined, undefined, ctx);
       if (cleanup === "shutdown") handle.resetCompactionStateForShutdown();
       else if (cleanup === "new-goal") await pi.commands.get("goal")!("new", ctx);
       else await pi.tools.get(cleanup)!.execute("stop", { summary: "done", reason: "blocked" });
@@ -1165,7 +1187,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
     const { ctx, notifications } = fakeCtx();
     await pi.commands.get("goal")!("ship", ctx);
-    await pi.tools.get("goal-compact-and-continue")!.execute("carry", { carry_forward: exactCarry }, undefined, undefined, ctx);
+    await pi.tools.get("ws-compact")!.execute("carry", { current_work: exactCarry }, undefined, undefined, ctx);
     pi.handlers.get("session_compact")!({}, ctx);
     await new Promise((resolve) => setImmediate(resolve));
     const send = pi.api.sendUserMessage;
@@ -1176,7 +1198,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     pi.api.sendUserMessage = send;
     pi.handlers.get("agent_settled")!({}, ctx);
     clock.fire();
-    assertCarry(pi.sentUserMessages[1]!.content, exactCarry);
+    assertCarry(pi.sentUserMessages[1]!.content, prose(exactCarry));
   });
 
   test("reducer preserves pending carry through waits and tool calls but discards it on force-stop", () => {
@@ -1216,7 +1238,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     (ctx as unknown as { compact: (opts: unknown) => void }).compact = (opts: unknown) => {
       compactCall = opts as never;
     };
-    await pi.tools.get("goal-compact-and-continue")!.execute("call-1", { carry_forward: "phase 1 done" }, undefined, undefined, ctx);
+    await pi.tools.get("ws-compact")!.execute("call-1", { current_work: "phase 1 done" }, undefined, undefined, ctx);
     // Proves the lever's own tool-call handler sets the flag as one of its
     // synchronous effects (alongside calling the fake's no-op `ctx.compact`)
     // — not a claim about ordering relative to the real `ctx.compact`, which
@@ -1244,7 +1266,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
 
     await pi.commands.get("goal")!("ship the widget", ctx);
     (ctx as unknown as { compact: (opts: unknown) => void }).compact = () => {};
-    await pi.tools.get("goal-compact-and-continue")!.execute("call-1", { carry_forward: "x" }, undefined, undefined, ctx);
+    await pi.tools.get("ws-compact")!.execute("call-1", { current_work: "x" }, undefined, undefined, ctx);
     assert.equal(pi.sentUserMessages.length, 1, "only the armed announcement so far");
 
     pi.handlers.get("session_compact")!({ reason: "manual" }, ctx);
@@ -1271,7 +1293,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     (ctx as unknown as { compact: (opts: unknown) => void }).compact = (opts: unknown) => {
       compactCall = opts as never;
     };
-    await pi.tools.get("goal-compact-and-continue")!.execute("call-1", { carry_forward: "x" }, undefined, undefined, ctx);
+    await pi.tools.get("ws-compact")!.execute("call-1", { current_work: "x" }, undefined, undefined, ctx);
 
     compactCall!.onError!(new Error("boom"));
     assert.equal(leadCompactingRef.current, false);
@@ -1281,7 +1303,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     assert.equal(pi.sentUserMessages.length, 2);
     const reminder = pi.sentUserMessages[1]!.content as string;
     assert.match(reminder, /Compaction failed: boom/);
-    assert.match(reminder, /Do not retry goal-compact-and-continue/);
+    assert.match(reminder, /Do not retry ws-compact/);
   });
 
   test("agent_start preserves the compaction flag and held queue", () => {
@@ -1346,7 +1368,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     (ctx as unknown as { compact: (opts: unknown) => void }).compact = (opts: unknown) => {
       compactCall = opts;
     };
-    await pi.tools.get("goal-compact-and-continue")!.execute("call-1", { carry_forward: "x" }, undefined, undefined, ctx);
+    await pi.tools.get("ws-compact")!.execute("call-1", { current_work: "x" }, undefined, undefined, ctx);
     assert.ok(compactCall, "ctx.compact was called");
     assert.equal(leadCompactingRef.current, true);
 
@@ -1411,7 +1433,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     (ctx as unknown as { compact: (opts: unknown) => void }).compact = (opts: unknown) => {
       compactCall = opts as never;
     };
-    await pi.tools.get("goal-compact-and-continue")!.execute("call-1", { carry_forward: "x" }, undefined, undefined, ctx);
+    await pi.tools.get("ws-compact")!.execute("call-1", { current_work: "x" }, undefined, undefined, ctx);
     assert.equal(leadCompactingRef.current, true);
 
     const order: string[] = [];
@@ -1437,7 +1459,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     clock.fire();
     assert.deepEqual(order, ["flush", "reminder"], "held pushes flush before the pending reminder is sent");
     assert.equal(pi.sentUserMessages.length, 2, "the armed announcement, then the re-armed reminder");
-    assertCarry(pi.sentUserMessages[1]!.content, "x");
+    assertCarry(pi.sentUserMessages[1]!.content, prose("x"));
   });
 
   test("260906 review relay #1 (Critical): a threshold auto-compaction's swallowed settle is replayed by the deferred release — exactly one ordinary reminder, streak advanced", async () => {
@@ -1503,7 +1525,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     (ctx as unknown as { compact: (opts: unknown) => void }).compact = (opts: unknown) => {
       compactCall = opts as never;
     };
-    await pi.tools.get("goal-compact-and-continue")!.execute("call-1", { carry_forward: "x" }, undefined, undefined, ctx);
+    await pi.tools.get("ws-compact")!.execute("call-1", { current_work: "x" }, undefined, undefined, ctx);
     assert.equal(leadCompactingRef.current, true);
 
     pi.handlers.get("agent_settled")!({}, fakeCtx().ctx);
@@ -1610,7 +1632,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     (ctx as unknown as { compact: (opts: unknown) => void }).compact = (opts: unknown) => {
       compactCall = opts;
     };
-    await pi.tools.get("goal-compact-and-continue")!.execute("call-1", { carry_forward: "x" }, undefined, undefined, ctx);
+    await pi.tools.get("ws-compact")!.execute("call-1", { current_work: "x" }, undefined, undefined, ctx);
     assert.ok(compactCall, "ctx.compact was called");
     assert.equal(leadCompactingRef.current, true, "pendingRearm is now true");
 
@@ -1648,7 +1670,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
 
     await pi.commands.get("goal")!("ship the widget", ctx); // 1 message (armed)
     (ctx as unknown as { compact: (opts: unknown) => void }).compact = () => {};
-    await pi.tools.get("goal-compact-and-continue")!.execute("call-1", { carry_forward: "x" }, undefined, undefined, ctx);
+    await pi.tools.get("ws-compact")!.execute("call-1", { current_work: "x" }, undefined, undefined, ctx);
     assert.equal(leadCompactingRef.current, true, "pendingRearm is now true");
 
     // agent_start's own backstop fires before session_compact ever does —
@@ -1678,7 +1700,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
 
     await pi.commands.get("goal")!("ship the widget", ctx); // 1 message (armed)
     (ctx as unknown as { compact: (opts: unknown) => void }).compact = () => {};
-    await pi.tools.get("goal-compact-and-continue")!.execute("call-1", { carry_forward: "x" }, undefined, undefined, ctx);
+    await pi.tools.get("ws-compact")!.execute("call-1", { current_work: "x" }, undefined, undefined, ctx);
     assert.equal(leadCompactingRef.current, true);
 
     assert.equal(isOwningAgentIdle(), false, "isOwningAgentIdle() is forced false while pendingRearm's compaction is in flight");
@@ -1981,6 +2003,280 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       pi.handlers.get("agent_settled")!({}, ctx);
       clock.fire();
       assert.equal(pi.sentUserMessages.length, 3, "two ordinary reinjects — no force-stop yet, since the yields never advanced the streak");
+    });
+  });
+
+  describe("lead compaction ownership (261002 Phase 1)", () => {
+    function leverRun(sessionKey = "lead-key") {
+      const clock = fakeClock();
+      const pi = fakePi();
+      const registry = new Map([
+        ["w-1", { agentId: "w-1", alias: "w1", spawnRole: "worker", running: true, streaming: false, reportLog: [] }],
+      ]) as unknown as RpcAgentRegistry;
+      registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock, rpcRegistryRef: { current: registry }, sessionKeyRef: { current: sessionKey } });
+      const { ctx, notifications } = fakeCtx();
+      return { clock, pi, ctx, notifications };
+    }
+    const branch = [
+      { type: "message", id: "u1", parentId: null, timestamp: "2026-10-02T10:00:00.000Z", message: { role: "user", content: "the human request", timestamp: 0 } },
+      { type: "custom_message", id: "c1", parentId: "u1", timestamp: "2026-10-02T10:01:00.000Z", customType: PUSH_BATCH_CUSTOM_TYPE, content: "PUSH BATCH BODY", display: true },
+    ];
+
+    test("the lever's compaction returns the adapter summary with Pi's cut point and token count unchanged", async () => {
+      const { pi, ctx } = leverRun();
+      await pi.tools.get("ws-compact")!.execute("c", { current_work: "PROSE", next_step: '"do the thing"' }, undefined, undefined, ctx);
+      const result = pi.handlers.get("session_before_compact")!(compactionEvent("manual", branch), ctx) as unknown as { compaction: { summary: string; firstKeptEntryId: string; tokensBefore: number; details: unknown } };
+      assert.equal(result.compaction.firstKeptEntryId, "kept-entry");
+      assert.equal(result.compaction.tokensBefore, 1234);
+      assert.deepEqual(result.compaction.details, { kind: "ws-pi-lead-compaction", version: 1, source: "lever" });
+      const summary = result.compaction.summary;
+      assert.match(summary, /ws session key: `lead-key`/);
+      assert.match(summary, /- w1 \(w-1\) \[worker\]: ticket none named; running/);
+      assert.match(summary, /the human request/);
+      assert.match(summary, /### Current work\nPROSE/);
+      assert.match(summary, /### Immediate next step\n"do the thing"/);
+      assert.doesNotMatch(summary, /PUSH BATCH BODY/, "push-batch traffic is not a human message");
+      assert.doesNotMatch(summary, /\/tmp\/(read|edit)\.ts|read-files|modified-files/, "no file lists");
+    });
+
+    test("the lever's prose is consumed once; a later manual compaction is not answered with it", async () => {
+      const { pi, ctx } = leverRun();
+      let compactCall: Parameters<ExtensionContext["compact"]>[0] | undefined;
+      ctx.compact = (opts) => { compactCall = opts; };
+      await pi.tools.get("ws-compact")!.execute("c", { current_work: "PROSE" }, undefined, undefined, ctx);
+      assert.ok(pi.handlers.get("session_before_compact")!(compactionEvent("manual", branch), ctx));
+      compactCall!.onComplete!({} as never);
+      pi.handlers.get("session_compact")!({ reason: "manual", compactionEntry: { details: { kind: "ws-pi-lead-compaction", version: 1, source: "lever" } } }, ctx);
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(pi.handlers.get("session_before_compact")!(compactionEvent("threshold", branch), ctx), undefined, "with no session model a threshold compaction stays native");
+    });
+
+    test("worker sessions keep Pi's native compaction and cannot call the lever", async () => {
+      const oldRole = process.env[WS_PI_SPAWN_ROLE_ENV];
+      process.env[WS_PI_SPAWN_ROLE_ENV] = "worker";
+      try {
+        const { pi, ctx } = leverRun();
+        await assert.rejects(() => pi.tools.get("ws-compact")!.execute("c", { current_work: "x" }, undefined, undefined, ctx), /lead/);
+        for (const reason of ["manual", "threshold", "overflow"] as const) {
+          assert.equal(pi.handlers.get("session_before_compact")!(compactionEvent(reason, branch), ctx), undefined, reason);
+        }
+      } finally {
+        if (oldRole === undefined) delete process.env[WS_PI_SPAWN_ROLE_ENV]; else process.env[WS_PI_SPAWN_ROLE_ENV] = oldRole;
+      }
+    });
+
+    test("a summary-build failure degrades to native compaction with a warning", async () => {
+      const { pi, ctx, notifications } = leverRun();
+      await pi.tools.get("ws-compact")!.execute("c", { current_work: "x" }, undefined, undefined, ctx);
+      const broken = { reason: "manual", branchEntries: branch, preparation: undefined } as never;
+      assert.equal(pi.handlers.get("session_before_compact")!(broken, ctx), undefined);
+      assert.match(notifications.at(-1)!.message, /could not build its summary/);
+    });
+  });
+
+  describe("lead compaction triggers and backstops (261002 Phase 2)", () => {
+    const guidePath = join(tmpDir, "lead-compact-guide-261002.md");
+    writeFileSync(guidePath, "GUIDE BODY 261002");
+
+    function triggerRun(configOverride?: GoalLoopConfig) {
+      const clock = fakeClock();
+      const pi = fakePi();
+      const goalLoopConfigPath = configOverride ? join(tmpDir, `trigger-config-${Math.random().toString(36).slice(2)}.json`) : configPath;
+      if (configOverride) writeFileSync(goalLoopConfigPath, JSON.stringify(configOverride));
+      registerGoalLoop(pi.api, { goalLoopConfigPath, ...clock, leadCompactGuidePath: guidePath, sessionKeyRef: { current: "lead-key" } });
+      const { ctx, notifications } = fakeCtx();
+      const usage = { percent: 10 as number | null };
+      (ctx as unknown as { getContextUsage: () => unknown }).getContextUsage = () => ({ tokens: null, contextWindow: 1000, percent: usage.percent });
+      const preparations = () => pi.sentMessages.filter((m) => (m.content as { customType?: string }).customType === "ws-lead-compact");
+      const stored = (details: unknown) => ({ reason: "manual", fromExtension: true, compactionEntry: { details } });
+      return { clock, pi, ctx, notifications, usage, preparations, stored };
+    }
+    const ourDetails = { kind: "ws-pi-lead-compaction", version: 1, source: "lever" };
+
+    test("the advisory nudge fires once per crossing at the run's end, carries the guide, and re-arms after compaction", async () => {
+      const { pi, ctx, usage, preparations, stored } = triggerRun();
+      usage.percent = 49;
+      pi.handlers.get("agent_end")!({}, ctx);
+      assert.equal(preparations().length, 0, "below the advisory point");
+
+      usage.percent = 55;
+      pi.handlers.get("turn_end")!({}, ctx);
+      assert.equal(preparations().length, 0, "the advisory nudge never fires mid-run");
+      pi.handlers.get("agent_end")!({}, ctx);
+      assert.equal(preparations().length, 1);
+      const nudge = preparations()[0]!;
+      assert.deepEqual(nudge.options, { deliverAs: "followUp", triggerTurn: true });
+      assert.match((nudge.content as { content: string }).content, /^Context usage is 55% .*advisory point \(50%\)[\s\S]*\n\nGUIDE BODY 261002$/);
+
+      pi.handlers.get("agent_end")!({}, ctx);
+      usage.percent = 60;
+      pi.handlers.get("agent_end")!({}, ctx);
+      assert.equal(preparations().length, 1, "an ignored nudge does not repeat within the same crossing");
+
+      pi.handlers.get("session_compact")!(stored(ourDetails), ctx);
+      await new Promise((resolve) => setImmediate(resolve));
+      pi.handlers.get("agent_end")!({}, ctx);
+      assert.equal(preparations().length, 2, "a compaction re-arms the nudge");
+
+      pi.handlers.get("agent_end")!({}, ctx);
+      usage.percent = 30;
+      pi.handlers.get("agent_end")!({}, ctx);
+      usage.percent = 52;
+      pi.handlers.get("agent_end")!({}, ctx);
+      assert.equal(preparations().length, 3, "dropping below and crossing again is a new crossing");
+    });
+
+    test("the hard cut is a steer at the next turn end, fires once, and suppresses the advisory nudge", () => {
+      const { pi, ctx, usage, preparations } = triggerRun({ compaction_advisory_percent: 40, compaction_hard_percent: 70 });
+      usage.percent = 71;
+      pi.handlers.get("turn_end")!({}, ctx);
+      assert.equal(preparations().length, 1);
+      const steer = preparations()[0]!;
+      assert.deepEqual(steer.options, { deliverAs: "steer", triggerTurn: true });
+      assert.match((steer.content as { content: string }).content, /^Context usage is 71% .*hard compaction point \(70%\)\. Stop the current work now[\s\S]*GUIDE BODY 261002$/);
+      assert.equal((steer.content as { display: boolean }).display, true);
+
+      pi.handlers.get("turn_end")!({}, ctx);
+      pi.handlers.get("agent_end")!({}, ctx);
+      usage.percent = 75;
+      pi.handlers.get("turn_end")!({}, ctx);
+      pi.handlers.get("agent_end")!({}, ctx);
+      assert.equal(preparations().length, 1, "no re-nudge after the hard cut, and no advisory nudge on top of it");
+    });
+
+    test("neither trigger fires while a preparation turn or a compaction is in progress", () => {
+      const { pi, ctx, usage, preparations } = triggerRun();
+      usage.percent = 60;
+      pi.handlers.get("agent_end")!({}, ctx);
+      assert.equal(preparations().length, 1);
+      usage.percent = 95;
+      pi.handlers.get("turn_end")!({}, ctx);
+      pi.handlers.get("turn_end")!({}, ctx);
+      assert.equal(preparations().length, 1, "the preparation turn is running");
+      pi.handlers.get("agent_end")!({}, ctx);
+      assert.equal(preparations().length, 2, "an ignored preparation turn has ended; the hard crossing still fires");
+
+      pi.handlers.get("session_before_compact")!(compactionEvent("threshold"), ctx);
+      pi.handlers.get("agent_end")!({}, ctx);
+      pi.handlers.get("turn_end")!({}, ctx);
+      assert.equal(leadCompactingRef.current, true);
+      assert.equal(preparations().length, 2, "a compaction in progress blocks both triggers");
+    });
+
+    test("a preparation message dropped before it ran (an abort clears Pi's queues) does not disable the triggers", () => {
+      const { pi, ctx, usage, preparations } = triggerRun();
+      usage.percent = 85;
+      pi.handlers.get("turn_end")!({}, ctx);
+      assert.equal(preparations().length, 1, "hard steer queued");
+      pi.handlers.get("agent_end")!({}, ctx);
+      usage.percent = 40;
+      pi.handlers.get("agent_end")!({}, ctx);
+      usage.percent = 90;
+      pi.handlers.get("turn_end")!({}, ctx);
+      assert.equal(preparations().length, 2, "the next crossing fires again");
+    });
+
+    test("spawned sessions never receive a preparation trigger", () => {
+      const oldRole = process.env[WS_PI_SPAWN_ROLE_ENV];
+      process.env[WS_PI_SPAWN_ROLE_ENV] = "worker";
+      try {
+        const { pi, ctx, usage, preparations } = triggerRun();
+        usage.percent = 99;
+        pi.handlers.get("turn_end")!({}, ctx);
+        pi.handlers.get("agent_end")!({}, ctx);
+        assert.equal(preparations().length, 0);
+      } finally {
+        if (oldRole === undefined) delete process.env[WS_PI_SPAWN_ROLE_ENV]; else process.env[WS_PI_SPAWN_ROLE_ENV] = oldRole;
+      }
+    });
+
+    test("a user /compact is cancelled and rerouted into a preparation turn carrying its focus text", async () => {
+      const { pi, ctx, notifications, preparations } = triggerRun();
+      const result = pi.handlers.get("session_before_compact")!(compactionEvent("manual", [], { customInstructions: "keep the API notes" }), ctx);
+      assert.deepEqual(result, { cancel: true });
+      assert.equal(leadCompactingRef.current, true, "the hold still covers the cancelled compaction");
+      assert.equal(preparations().length, 0, "nothing is sent from inside the compaction event");
+
+      pi.handlers.get("session_compact_failed")!({ reason: "manual", aborted: true, errorMessage: undefined, willRetry: false, fromExtension: false }, ctx);
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(leadCompactingRef.current, false, "the cancel releases the hold");
+      assert.equal(preparations().length, 1);
+      const reroute = preparations()[0]!;
+      assert.deepEqual(reroute.options, { deliverAs: "followUp", triggerTurn: true });
+      assert.match((reroute.content as { content: string }).content, /^The user ran \/compact[\s\S]*focus text, to honor in your prose:\nkeep the API notes\n\nGUIDE BODY 261002$/);
+      assert.deepEqual(notifications, [], "no failure is reported for the reroute");
+
+      let compactCall: Parameters<ExtensionContext["compact"]>[0] | undefined;
+      ctx.compact = (opts) => { compactCall = opts; };
+      await pi.tools.get("ws-compact")!.execute("c", { current_work: "prepared" }, undefined, undefined, ctx);
+      const own = pi.handlers.get("session_before_compact")!(compactionEvent("manual"), ctx) as unknown as { compaction?: { summary: string } };
+      assert.match(own.compaction!.summary, /prepared/, "the lever's own manual compaction is not rerouted");
+      assert.ok(compactCall);
+    });
+
+    test("a threshold or overflow compaction without preparation gets the fallback summary from the session model", async () => {
+      for (const reason of ["threshold", "overflow"] as const) {
+        const { pi, ctx } = triggerRun();
+        const calls: Array<{ model: unknown; context: { systemPrompt?: string; messages: Array<{ role: string; content: Array<{ text: string }> }> }; options: Record<string, unknown> }> = [];
+        const model = { id: "session-model", maxTokens: 4096 };
+        Object.assign(ctx, {
+          model,
+          modelRegistry: {
+            complete: async (m: unknown, context: never, options: never) => {
+              calls.push({ model: m, context, options });
+              return { role: "assistant", stopReason: "stop", usage: { input: 1, output: 2 }, content: [{ type: "text", text: "### Current work\nFALLBACK PROSE" }] };
+            },
+          },
+        });
+        const branch = [{ type: "message", id: "u1", parentId: null, timestamp: "2026-10-02T10:00:00.000Z", message: { role: "user", content: "HUMAN ASK", timestamp: 0 } }];
+        const event = compactionEvent(reason, branch);
+        (event as { preparation: { messagesToSummarize: unknown[]; previousSummary?: string } }).preparation.messagesToSummarize = [{ role: "user", content: "summarize me", timestamp: 0 }];
+        const result = await (pi.handlers.get("session_before_compact")!(event, ctx) as unknown as Promise<{ compaction: { summary: string; firstKeptEntryId: string; details: unknown; usage: unknown } }>);
+        assert.equal(calls.length, 1, reason);
+        assert.equal(calls[0]!.model, model, "the session model");
+        assert.match(calls[0]!.context.systemPrompt!, /context summarization assistant/);
+        assert.match(calls[0]!.context.messages[0]!.content[0]!.text, /<conversation>\n\[User\]: summarize me\n<\/conversation>/);
+        assert.equal(calls[0]!.options.maxTokens, 4096, "capped by the model's own output limit");
+        assert.equal((calls[0]!.options as { signal?: unknown }).signal !== undefined, true);
+        assert.equal(result.compaction.firstKeptEntryId, "kept-entry");
+        assert.deepEqual(result.compaction.details, { kind: "ws-pi-lead-compaction", version: 1, source: "fallback" });
+        assert.deepEqual(result.compaction.usage, { input: 1, output: 2 });
+        const summary = result.compaction.summary;
+        assert.match(summary, /ws session key: `lead-key`/);
+        assert.match(summary, /HUMAN ASK/);
+        assert.match(summary, /## Carried forward by the lead\n### Current work\nFALLBACK PROSE/);
+        assert.doesNotMatch(summary, /\/tmp\/(read|edit)\.ts/);
+      }
+    });
+
+    test("a failed fallback call degrades to native compaction with a warning", async () => {
+      const { pi, ctx, notifications } = triggerRun();
+      Object.assign(ctx, {
+        model: { id: "m", maxTokens: 0 },
+        modelRegistry: { complete: async () => ({ role: "assistant", stopReason: "error", errorMessage: "provider down", content: [] }) },
+      });
+      const result = await (pi.handlers.get("session_before_compact")!(compactionEvent("threshold"), ctx) as unknown as Promise<unknown>);
+      assert.equal(result, undefined);
+      assert.match(notifications.at(-1)!.message, /fallback summary failed \(provider down\)/);
+    });
+
+    test("the competing-extension notice fires once per session when the stored entry is not ours", async () => {
+      const { pi, ctx, notifications, stored } = triggerRun();
+      const competing = () => notifications.filter((n) => /Another extension's compaction replaced/.test(n.message));
+      pi.handlers.get("session_compact")!({ reason: "threshold", fromExtension: false, compactionEntry: { details: { readFiles: [] } } }, ctx);
+      assert.equal(competing().length, 0, "Pi's native summary after our fallback declined is not a competitor");
+
+      await pi.tools.get("ws-compact")!.execute("c", { current_work: "x" }, undefined, undefined, ctx);
+      pi.handlers.get("session_before_compact")!(compactionEvent("manual"), ctx);
+      pi.handlers.get("session_compact")!({ reason: "manual", fromExtension: false, compactionEntry: { details: undefined } }, ctx);
+      assert.equal(competing().length, 1, "our result was overridden by another extension's empty result");
+      assert.equal(competing()[0]!.level, "warning");
+
+      pi.handlers.get("session_compact")!(stored({ other: "extension" }), ctx);
+      assert.equal(competing().length, 1, "once per session");
+      pi.handlers.get("session_compact")!(stored(ourDetails), ctx);
+      assert.equal(competing().length, 1);
+      await new Promise((resolve) => setImmediate(resolve));
     });
   });
 });

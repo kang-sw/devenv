@@ -7,6 +7,7 @@ related:
 sage-review-design: skipped
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 45f2cfb52f96daa6
+completed: 2026-10-02
 ---
 
 # ws-owned lead compaction for the Pi adapter
@@ -263,6 +264,30 @@ keep native compaction, the lever compacts with no active goal without
 touching goal-loop state, and the hold/release
 behavior is unchanged.
 
+### Result (94cdf8bd2) - 2026-10-02
+
+- `ws-compact` replaces `goal-compact-and-continue`: lead-only, one required
+  string parameter per fixed prose heading, usable with or without a goal;
+  goal effects (re-arm, carry) apply only while a goal is active.
+- `src/lead-compaction.ts` builds the summary from `branchEntries` and the
+  spawner registry: session key, active ticket and phase (newest
+  ticket-naming lead tool call), playbook pointer (`ws-skill`,
+  `ws__playbook_read`, or a `/skill:` expansion; `lead-revive` excluded),
+  children in flight (owner-thread agents excluded) and finished since the
+  previous compaction entry, human-typed user messages (push batches, wake
+  lines, goal reminders excluded; skill expansions collapsed to the typed
+  command; newest-first under the budget, shown chronologically, per-message
+  cap with a truncation marker), the lead prose, and a closing `lead-revive`
+  instruction. No file lists; Pi's `firstKeptEntryId` and `tokensBefore`
+  pass through unchanged; details are stamped `ws-pi-lead-compaction`.
+- Budgets are tunable via `compaction_user_messages_budget_tokens` and
+  `compaction_user_message_cap_tokens` in `goal-loop-config.json`.
+- The guide ships as `agents-plugin-pi/lead-compact-guide.md` (package
+  `files`); `pi-lead-guide.md` points at `ws-compact`.
+- Verification: `npm test` in `agents-plugin-pi`: 1975 pass, 0 fail,
+  3 skipped (new `test/lead-compaction.test.ts`; goal-loop and push-wake
+  suites migrated to the new lever).
+
 ### Phase 2: Triggers and backstops
 
 Depends on Phase 1.
@@ -285,3 +310,27 @@ nudge firing once per crossing and re-arming after compaction, the hard cut
 delivered as a steer at a tool-call boundary, neither firing during
 preparation or compaction, the `/compact` cancel-and-reroute with focus
 text, the fallback summary shape, and the competing-extension notice.
+
+### Result (f065de0da) - 2026-10-02
+
+- Advisory nudge at `agent_end` (followUp with `triggerTurn`) and hard-cut
+  steer at `turn_end` (`compaction_hard_percent`, default 80, added to
+  `goal-loop-config.json` beside `compaction_advisory_percent: 50`). Each
+  fires once per crossing, re-arms after a compaction or when usage is seen
+  below the threshold, and is silent while a compaction or a preparation run
+  is in progress. The preparation block clears at every `agent_end`, since
+  Pi drains its queues before that event (review fix a5ff0b278).
+- A manual compaction not started by the lever returns `{ cancel: true }`;
+  after `session_compact_failed` releases the hold, the preparation turn is
+  queued with the `/compact` focus text.
+- Threshold and overflow compactions without lever prose get an in-hook
+  fallback: `ctx.modelRegistry.complete` on the session model with
+  `convertToLlm`/`serializeConversation`, the fixed-heading template, and
+  the deterministic sections; a failure degrades to native compaction with
+  a warning.
+- The competing-extension notice fires once per session when the stored
+  entry is not the adapter's.
+- Review (lite): 1 Important (stuck preparation block) fixed in a5ff0b278;
+  Minor cap clamp fixed; two Minors kept as design choices.
+- Verification: `npm test` in `agents-plugin-pi`: 1984 pass, 0 fail,
+  3 skipped.

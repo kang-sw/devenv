@@ -17,6 +17,7 @@
     "runtime.json",
     "goal-loop-config.json",
     "pi-lead-guide.md",
+    "lead-compact-guide.md",
     "execute-worker-guide.md",
     "explore-guide.md"
   ],
