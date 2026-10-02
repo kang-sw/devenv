@@ -786,6 +786,21 @@ describe("output TPS gutter segment", () => {
     }
   });
 
+  test("with a protected inspection hint, TPS is still dropped first within the width left after the hint", () => {
+    const row = { ...compact, outputTps: 42, inspectionHint: "/audit x" };
+    // The hint " — /audit x" reserves 11 columns, shifting the unhinted 66/65/58/57 boundaries.
+    for (const [width, tps, group] of [[77, true, true], [76, false, true], [69, false, true], [68, false, false]] as const) {
+      for (const theme of [undefined, { fg: (_color: string, text: string) => `\u001b[38;5;1m${text}\u001b[39m` }]) {
+        const line = buildWidgetLines([row], 0, width, false, theme)![0];
+        const plainLine = line.replace(/\u001b\[[0-9;]*m/g, "");
+        assert.ok(plainLine.endsWith(" — /audit x"), `hint kept at width=${width}`);
+        assert.equal(plainLine.includes("42t/s"), tps, `TPS at width=${width}`);
+        assert.equal(plainLine.includes("p (l)") && plainLine.includes("132.4k") && plainLine.includes("$0.123"), group, `group at width=${width}`);
+        assert.ok(visibleWidth(line) <= width, `bounded at width=${width}`);
+      }
+    }
+  });
+
   test("RPC-backed rows read the record's rate; liveness-only and synthetic thread rows carry none", () => {
     const measured = record({ running: true, outputRate: { observe() {}, rate: () => 42 } });
     const unmeasured = record({ agentId: "22222222-2222-3333-4444-555555555555", running: true, outputRate: { observe() {}, rate: () => undefined } });

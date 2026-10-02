@@ -1473,6 +1473,45 @@ describe("applyRpcEvent", () => {
   });
 });
 
+describe("attachEventListener: output-rate wiring", () => {
+  test("each attach gets a fresh tracker, toolcall blocks count, and the widget refreshes only when the rate changes", (t) => {
+    let now = 0;
+    t.mock.method(Date, "now", () => now);
+    let listener: ((event: unknown) => void) | undefined;
+    const client = {
+      onEvent(callback: (event: unknown) => void) { listener = callback; return () => {}; },
+      getState: async () => ({}),
+    } as unknown as RpcClient;
+    const record = freshRpcRecord({ client, running: true, streaming: true });
+    const registry = new Map([[record.agentId, record]]);
+    let refreshes = 0;
+    agentWidgetRefreshRef.current = () => { refreshes += 1; };
+    t.after(() => { agentWidgetRefreshRef.current = undefined; });
+    const toolCallMessage = (output: number) => {
+      const message = { role: "assistant", provider: "p", model: "m", stopReason: "toolUse", usage: { output } };
+      now = 0; listener?.({ type: "message_start", message });
+      listener?.({ type: "message_update", message, assistantMessageEvent: { type: "toolcall_start", contentIndex: 0 } });
+      now = 1_000; listener?.({ type: "message_update", message, assistantMessageEvent: { type: "toolcall_end", contentIndex: 0 } });
+      const before = refreshes;
+      listener?.({ type: "message_end", message });
+      return refreshes - before; // synchronous only: the telemetry refresh awaits getState
+    };
+
+    attachEventListener(undefined, registry, record, client);
+    const first = record.outputRate;
+    assert.equal(first?.rate(), undefined);
+    assert.equal(toolCallMessage(100), 1, "a toolcall-only message yields a rate and one widget refresh");
+    assert.equal(record.outputRate?.rate(), 100);
+    assert.equal(toolCallMessage(100), 0, "an unchanged rate does not refresh");
+    assert.equal(toolCallMessage(1), 0, "an ineligible message leaves the rate unchanged and does not refresh");
+    assert.equal(toolCallMessage(300), 1, "a changed rate refreshes again");
+
+    attachEventListener(undefined, registry, record, client);
+    assert.notEqual(record.outputRate, first, "a new attach replaces the tracker");
+    assert.equal(record.outputRate?.rate(), undefined, "the new tracker carries no prior launch's window");
+  });
+});
+
 describe("WORKER_LIFECYCLE_GUIDE: no mid-run questions", () => {
   test("limits ws-report-to-lead to progress and directs decide-or-settle instead of asking", () => {
     assert.match(WORKER_LIFECYCLE_GUIDE, /ws-report-to-lead is only for progress before settlement\./);

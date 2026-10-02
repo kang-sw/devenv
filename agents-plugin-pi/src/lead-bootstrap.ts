@@ -50,6 +50,7 @@
 
 import type { BeforeAgentStartEventResult, ExtensionAPI, SlashCommandInfo } from "@earendil-works/pi-coding-agent";
 import { isLeadOrFork, readSpawnRole, type SpawnRole } from "./process-role.ts";
+import { SESSION_KEY_END_ANCHOR } from "./bridge.ts";
 import { computeLeadActiveTools } from "./execute-gateway.ts";
 import { addForkToolIfLead } from "./fork.ts";
 import { ASK_TOOL_NAME, RESOLVE_TOOL_NAME } from "./ask.ts";
@@ -75,7 +76,7 @@ export const SESSION_STATE_POINTER_LINE =
  */
 export function staticManualPart(manualSnapshot: string): string {
   const lines = manualSnapshot.split("\n");
-  const end = lines.indexOf("## Session Key");
+  const end = lines.indexOf(SESSION_KEY_END_ANCHOR);
   return (end === -1 ? manualSnapshot : lines.slice(0, end).join("\n")).trimEnd();
 }
 

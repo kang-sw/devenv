@@ -282,6 +282,13 @@ export function prependWorkflowStateLine(text: string): string {
 }
 
 /**
+ * The whole-line heading ws-mcp places after the manual body (Session Key,
+ * then session state and notes). Shared end anchor for `cutStaticBody` here
+ * and `staticManualPart` in lead-bootstrap.ts, so the two cuts stay aligned.
+ */
+export const SESSION_KEY_END_ANCHOR = "## Session Key";
+
+/**
  * The reasons `cutStaticBody` can fail to produce a cut. `"no-body"` is not
  * a fallback trigger — it means ws-mcp rendered no manual body at all (its
  * no-restorable-state notice), so the caller forwards the response
@@ -329,7 +336,7 @@ export function cutStaticBody(response: string, staticBodySnapshot: string): { t
     if (startOffset === -1 && startLine !== undefined && line === startLine) {
       startOffset = offset;
     }
-    if (endOffset === -1 && line === "## Session Key") {
+    if (endOffset === -1 && line === SESSION_KEY_END_ANCHOR) {
       endOffset = offset;
     }
     offset += line.length + 1; // +1 for the "\n" split away by String.split.
@@ -473,15 +480,15 @@ export async function dispatchMappedWorkflowManual(
 /**
  * The session key a bridged call actually dispatches with, given its raw
  * arguments: an omitted, empty, or fresh-bootstrap-sentinel key is filled
- * with the bridge's own key (mirrors `normalizeSessionKey` +
+ * with the bridge's own key (composes `normalizeSessionKey` +
  * `resolveSessionKey`); an explicit key passes through. Used to key prior
  * `ws__workflow_manual` calls in the active context the same way as the
  * current, already-resolved call.
  */
 export function resolvedSessionKeyArg(args: Record<string, unknown>, ownKey: string | undefined): unknown {
-  const provided = args.session_key;
-  if (provided === undefined || provided === null || provided === "" || provided === FRESH_BOOTSTRAP_SENTINEL) return ownKey ?? provided;
-  return provided;
+  // No parent/previous keys: keying a prior call must never throw a fork refusal.
+  const normalized = normalizeSessionKey(args, { ownKey, sentinel: FRESH_BOOTSTRAP_SENTINEL });
+  return resolveSessionKey(normalized, { current: ownKey }).session_key;
 }
 
 /**

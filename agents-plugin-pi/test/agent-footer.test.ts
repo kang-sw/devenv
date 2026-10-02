@@ -17,7 +17,7 @@ import {
 import { descendantUsageValue, persistEvictedAgentCost, registerAgentCostOwner } from "../src/agent-cost.ts";
 import { agentWidgetRefreshRef, evictForCapacity, stopAgent, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
 import { truncateToWidth, visibleWidth } from "../src/pi-tui.ts";
-import { applySessionShutdownAgentFooter, applySessionStartAgentFooter, registerAgentFooterGitEvents } from "../src/index.ts";
+import { applySessionShutdownAgentFooter, applySessionStartAgentFooter, registerAgentFooterGitEvents, registerAgentFooterOutputEvents } from "../src/index.ts";
 import { symlinkSkip } from "./fixtures/symlink-probe.ts";
 
 const roots = new Set<string>();
@@ -341,6 +341,22 @@ describe("custom footer render and lifecycle", () => {
     controller.stop();
   });
 
+  test("a measured rate renders without a ↓ part while lead output usage is zero (pinned: rate and usage are independent signals)", () => {
+    const dir = root(), storage = createAgentStorageContext("lead", dir), ui = context();
+    const controller = createAgentFooterController(ui.ctx, new Map(), storage, { truncateToWidth, visibleWidth });
+    const component = ui.mount();
+    const message = { role: "assistant", provider: "p", model: "m", stopReason: "stop", usage: { input: 0, output: 12_300, cacheRead: 0, cacheWrite: 0 } };
+    controller.observeOutput({ type: "message_start", message }, 0);
+    controller.observeOutput({ type: "message_update", message, assistantMessageEvent: { type: "text_start", contentIndex: 0 } }, 1_000);
+    controller.observeOutput({ type: "message_update", message, assistantMessageEvent: { type: "text_end", contentIndex: 0 } }, 293_857);
+    controller.observeOutput({ type: "message_end", message }, 300_000);
+    // No acceptUsage: the lead usage presentation stays at zero output.
+    const stats = plain(component.render(140)[1]);
+    assert.doesNotMatch(stats, /↓/);
+    assert.match(stats, /^~42t\/s /);
+    controller.stop();
+  });
+
   test("render uses cached telemetry in O(1), performs no history or registry traversal, preserves widths, and labels estimates", () => {
     const dir = root(), storage = createAgentStorageContext("lead", dir), registry: RpcAgentRegistry = new Map();
     for (let index = 0; index < 256; index++) registry.set(`agent-${index}`, record(`agent-${index}`, storage, .01));
@@ -444,6 +460,24 @@ test("production turn/input hooks route each event without awaiting Git; reload 
   lifecycle.stop(); assert.equal(flights[2].signal.aborted, true);
   for (const flight of flights) flight.resolve(undefined);
   t.mock.timers.tick(600_000); handlers.get("turn_end")!(); assert.equal(requests, 3);
+});
+
+test("production message hooks feed the output-rate tracker, observing message_end before acceptUsage", () => {
+  const calls: string[] = [];
+  const lifecycle = {
+    observeOutput(event: { type: string }) { calls.push(`observe:${event.type}`); },
+    acceptUsage(source: unknown) { calls.push(`accept:${(source as { id: string }).id}`); },
+  } as never;
+  const handlers = new Map<string, (event: unknown) => unknown>();
+  registerAgentFooterOutputEvents({ on(event: string, handler: (event: unknown) => unknown) { handlers.set(event, handler); } } as never, lifecycle);
+  assert.deepEqual([...handlers.keys()], ["message_start", "message_update", "message_end"]);
+  const message = { id: "m1" };
+  handlers.get("message_start")!({ type: "message_start", message });
+  handlers.get("message_update")!({ type: "message_update", message });
+  assert.deepEqual(calls, ["observe:message_start", "observe:message_update"], "start/update only feed the tracker");
+  calls.length = 0;
+  handlers.get("message_end")!({ type: "message_end", message });
+  assert.deepEqual(calls, ["observe:message_end", "accept:m1"], "the rate is finalized before acceptUsage requests the repaint");
 });
 
 test("footer arming is limited to TUI lead/fork sessions", () => {

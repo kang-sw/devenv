@@ -287,6 +287,14 @@ export function registerAgentFooterGitEvents(pi: Pick<ExtensionAPI, "on">, lifec
   pi.on("input", () => { lifecycle.input(); });
 }
 
+/** The lead's own message stream feeds the footer's output-rate tracker and usage. */
+export function registerAgentFooterOutputEvents(pi: Pick<ExtensionAPI, "on">, lifecycle: AgentFooterSessionLifecycle): void {
+  pi.on("message_start", (event) => { lifecycle.observeOutput(event); });
+  pi.on("message_update", (event) => { lifecycle.observeOutput(event); });
+  // The rate is finalized before acceptUsage requests the repaint.
+  pi.on("message_end", (event) => { lifecycle.observeOutput(event); lifecycle.acceptUsage(event.message); });
+}
+
 /**
  * The one session-start orphan revival wiring, shared by both `session_start`
  * revival sites so they cannot drift. A revived fork gets `armForkRoleWiring`
@@ -558,10 +566,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     return { truncateToWidth: hostTui.truncateToWidth, visibleWidth: hostTui.visibleWidth };
   });
   registerAgentFooterGitEvents(pi, agentFooterLifecycle);
-  pi.on("message_start", (event) => { agentFooterLifecycle.observeOutput(event); });
-  pi.on("message_update", (event) => { agentFooterLifecycle.observeOutput(event); });
-  // The rate is finalized before acceptUsage requests the repaint.
-  pi.on("message_end", (event) => { agentFooterLifecycle.observeOutput(event); agentFooterLifecycle.acceptUsage(event.message); });
+  registerAgentFooterOutputEvents(pi, agentFooterLifecycle);
   pi.on("session_compact", (event) => { agentFooterLifecycle.acceptUsage(event.compactionEntry); agentFooterLifecycle.checkpoint(); });
   pi.on("session_tree", (event) => { if (event.summaryEntry) agentFooterLifecycle.acceptUsage(event.summaryEntry); });
   for (const event of ["model_select", "thinking_level_select", "session_info_changed"] as const) {
