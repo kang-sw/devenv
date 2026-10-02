@@ -518,7 +518,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-02T15:06:55Z"
+        "touched_at": "2026-10-02T15:07:21Z",
+        "impl": {
+          "branch": "impl/develop/curve-fresh-gents"
+        }
       }
     },
     "261002-feat-pi-lead-ws-owned-compaction": {
