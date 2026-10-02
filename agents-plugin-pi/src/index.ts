@@ -558,7 +558,10 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     return { truncateToWidth: hostTui.truncateToWidth, visibleWidth: hostTui.visibleWidth };
   });
   registerAgentFooterGitEvents(pi, agentFooterLifecycle);
-  pi.on("message_end", (event) => { agentFooterLifecycle.acceptUsage(event.message); });
+  pi.on("message_start", (event) => { agentFooterLifecycle.observeOutput(event); });
+  pi.on("message_update", (event) => { agentFooterLifecycle.observeOutput(event); });
+  // The rate is finalized before acceptUsage requests the repaint.
+  pi.on("message_end", (event) => { agentFooterLifecycle.observeOutput(event); agentFooterLifecycle.acceptUsage(event.message); });
   pi.on("session_compact", (event) => { agentFooterLifecycle.acceptUsage(event.compactionEntry); agentFooterLifecycle.checkpoint(); });
   pi.on("session_tree", (event) => { if (event.summaryEntry) agentFooterLifecycle.acceptUsage(event.summaryEntry); });
   for (const event of ["model_select", "thinking_level_select", "session_info_changed"] as const) {

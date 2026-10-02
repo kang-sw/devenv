@@ -756,3 +756,42 @@ describe("shouldArmAgentWidget (review relay #1 Important #5: the wiring gate in
     assert.equal(shouldArmAgentWidget("fork", "rpc"), false);
   });
 });
+
+describe("output TPS gutter segment", () => {
+  const compact = { name: "a", role: "worker" as const, state: "running" as const, elapsedMs: 0, lastActivityMs: 0, model: "p", effort: "l", contextTokens: 132_400, estimatedUsd: .123456789 };
+
+  test("sits right after model (effort) as an integer with no tilde", () => {
+    const line = buildWidgetLines([{ ...compact, outputTps: 41.6 }], 0, 120)![0];
+    assert.match(line, / · p \(l\) · 42t\/s · 132\.4k · \$0\.123$/);
+    assert.ok(!line.includes("~"));
+  });
+
+  test("is absent before the first eligible message", () => {
+    const line = buildWidgetLines([compact], 0, 120)![0];
+    assert.ok(!line.includes("t/s"));
+    assert.match(line, / · p \(l\) · 132\.4k · \$0\.123$/);
+  });
+
+  test("is dropped first when narrow; the rest of the group then follows the all-or-nothing rule", () => {
+    const row = { ...compact, outputTps: 42 };
+    // 58 columns fit the group without TPS (see the telemetry boundary test); " · 42t/s" adds 8.
+    for (const [width, tps, group] of [[66, true, true], [65, false, true], [58, false, true], [57, false, false]] as const) {
+      for (const theme of [undefined, { fg: (_color: string, text: string) => `\u001b[38;5;1m${text}\u001b[39m` }]) {
+        const line = buildWidgetLines([row], 0, width, false, theme)![0];
+        const plainLine = line.replace(/\u001b\[[0-9;]*m/g, "");
+        assert.equal(plainLine.includes("42t/s"), tps, `TPS at width=${width}`);
+        assert.equal(plainLine.includes("p (l)") && plainLine.includes("132.4k") && plainLine.includes("$0.123"), group, `group at width=${width}`);
+        assert.ok(visibleWidth(line) <= width, `bounded at width=${width}`);
+      }
+    }
+  });
+
+  test("RPC-backed rows read the record's rate; liveness-only and synthetic thread rows carry none", () => {
+    const measured = record({ running: true, outputRate: { observe() {}, rate: () => 42 } });
+    const unmeasured = record({ agentId: "22222222-2222-3333-4444-555555555555", running: true, outputRate: { observe() {}, rate: () => undefined } });
+    const rows = buildAgentRows(registryOf(measured, unmeasured), [thread()], NOW);
+    assert.equal(rows.find((row) => row.name === measured.agentId.slice(0, 8))?.outputTps, 42);
+    assert.ok(!("outputTps" in rows.find((row) => row.name === unmeasured.agentId.slice(0, 8))!));
+    assert.ok(!("outputTps" in rows.find((row) => row.role === "thread")!));
+  });
+});

@@ -40,6 +40,7 @@ import { isOwnerHeld, lastActivityAt, type RpcAgentRecord, type RpcAgentRegistry
 import type { SubtreeDescendantRole } from "./subtree-lifecycle.ts";
 import { visibleWidth } from "./text-width.ts";
 import { isLeadOrFork, type SpawnRole } from "./process-role.ts";
+import { formatOutputRate } from "./output-rate.ts";
 
 /** `ctx.ui.setWidget` key for the live-agent panel (`belowEditor`, not a footer/header replacement). */
 export const AGENT_WIDGET_KEY = "ws-agents";
@@ -85,6 +86,8 @@ export interface AgentRow {
   effort?: string;
   contextTokens?: number;
   estimatedUsd?: number;
+  /** Visible-output tokens per second for an RPC-backed row; absent until its first eligible message. */
+  outputTps?: number;
   /** Propagated descendants alone carry depth; locally-owned and synthetic thread rows remain at depth zero without changing their established data shape. */
   depth?: number;
   /** Cross-process descendants expose process liveness only, so rendering must not invent clocks, telemetry, or local affordances for them. */
@@ -354,6 +357,7 @@ export function buildAgentRows(records: RpcAgentRegistry, threads: readonly Thre
     // Bound-thread rows retain their distinct owner-thread clock. Every other
     // row shows one run, ending at settlement while lingering for delivery.
     const runEndsAt = record.settledAt ?? now;
+    const outputTps = record.outputRate?.rate();
     const elapsedMs = isAwaitingOwnerWithThread
       ? clampElapsed(now - Date.parse(boundThread!.touchedAt))
       : clampElapsed(runEndsAt - (record.runStartedAt ?? runEndsAt));
@@ -369,6 +373,7 @@ export function buildAgentRows(records: RpcAgentRegistry, threads: readonly Thre
       ...(record.telemetry?.effort ?? record.observedEffort ? { effort: record.telemetry?.effort ?? record.observedEffort } : {}),
       ...((record.telemetry?.contextTokens ?? record.observedContextTokens) !== undefined ? { contextTokens: record.telemetry?.contextTokens ?? record.observedContextTokens } : {}),
       ...(record.telemetry?.estimatedUsd !== undefined ? { estimatedUsd: record.telemetry.estimatedUsd } : {}),
+      ...(outputTps !== undefined ? { outputTps } : {}),
     });
   }
 
@@ -523,21 +528,29 @@ function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, ownerActio
   // `/audit` retains its labeled `formatContextTokens` presentation.
   const contextTokens = formatLiveContextTokens(row.contextTokens);
   const estimate = `$${formatEstimatedUsd(row.estimatedUsd)}`;
-  const telemetry = ` · ${model} (${effort}) · ${contextTokens} · ${estimate}`;
+  const tps = row.outputTps !== undefined ? formatOutputRate(row.outputTps) : undefined;
+  const telemetryWithoutTps = ` · ${model} (${effort}) · ${contextTokens} · ${estimate}`;
+  const telemetryWithTps = tps === undefined ? telemetryWithoutTps : ` · ${model} (${effort}) · ${tps} · ${contextTokens} · ${estimate}`;
+  // The TPS segment is dropped first; only then does the all-or-nothing rule
+  // for the remaining telemetry group apply.
+  const pickTelemetry = (available: number) => visibleWidth(base + telemetryWithTps) <= available ? telemetryWithTps : telemetryWithoutTps;
   const protectedHint = row.inspectionHint;
   const hint = protectedHint ? ` — ${protectedHint}` : "";
   // A supplied inspection affordance remains the only protected tail. The
   // valid owner-answer command is protected inside the leading primary cue.
   let line: string;
+  let telemetry: string;
   let appendedHint = false;
   let appendedTelemetry = false;
   if (protectedHint && visibleWidth(hint) <= bodyWidth) {
     const available = bodyWidth - visibleWidth(hint);
+    telemetry = pickTelemetry(available);
     const withTelemetry = base + telemetry;
     appendedTelemetry = visibleWidth(withTelemetry) <= available;
     line = appendedTelemetry ? withTelemetry + hint : (row.answerHint ? truncateWithProtectedPrimary(primary, base, available) : truncateToWidth(base, available)) + hint;
     appendedHint = true;
   } else {
+    telemetry = pickTelemetry(bodyWidth);
     appendedTelemetry = visibleWidth(base + telemetry) <= bodyWidth;
     line = appendedTelemetry ? base + telemetry : row.answerHint ? truncateWithProtectedPrimary(primary, base, bodyWidth) : truncateToWidth(base, bodyWidth);
   }
@@ -550,6 +563,7 @@ function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, ownerActio
       theme.fg("dim", " · ") +
       theme.fg("accent", model) +
       theme.fg("dim", ` (${effort})`) +
+      (telemetry === telemetryWithTps && tps !== undefined ? theme.fg("dim", " · ") + theme.fg("syntaxNumber", tps) : "") +
       theme.fg("dim", " · ") +
       theme.fg("syntaxNumber", contextTokens) +
       theme.fg("dim", " · ") +
