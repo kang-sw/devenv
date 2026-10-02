@@ -118,24 +118,21 @@ in ws tooling and the summary carries only what compaction alone can carry.
   Pi offers no role choice for injected messages, Anthropic has no
   mid-conversation system role, and raising untrusted subagent output above
   user authority would open a prompt-injection channel.
-- **The preparation sequence is a shared playbook.** `lead-compact` lives
-  in `agents-plugin/rsrc` and is read through `playbook.read`, so a
-  `prompt.*` override can tune it; the advisory nudge, the hard-cut steer,
-  and the `/compact` reroute all point to it. Its final step is an include
-  whose Pi overlay (`<include>.pi.md`, as `lead-use-mailbox/arm-the-wait.pi.md`
-  does) calls the adapter's compaction lever. Rejected: instruction text
-  inside the adapter only (not tunable, not reviewable as a playbook); a
-  Pi-only skill (breaks the 1:1 mirror between Pi skills and the shared ws
-  skills).
-- **No non-Pi entry point.** Only the Pi adapter owns a lead-callable
-  lever. On Claude Code or Codex compaction is user-run, so a lead-side
-  preparation would go stale as soon as work continued before the user
-  compacted. No skill, nudge, or other shipped text points a non-Pi lead at
-  `lead-compact`, and the include's base (non-Pi) text only tells a lead
-  that reached it to stop without tidying, because its harness cannot
-  compact on its own. Rejected: a shared `lead-compact` skill; a base
-  final step that tidies and suggests the user run the harness's compaction
-  command.
+- **The preparation sequence is an adapter-owned guide.** Its text lives
+  in `agents-plugin-pi/lead-compact-guide.md`, beside the adapter's other
+  guides (`pi-lead-guide.md`, `execute-worker-guide.md`), and the advisory
+  nudge, the hard-cut steer, and the `/compact` reroute carry its body
+  directly in their message, ending with the call to the adapter's
+  compaction lever. Only the Pi adapter owns a lead-callable lever: on
+  Claude Code or Codex compaction is user-run, so a lead-side preparation
+  would go stale before the user compacted, and nothing outside the Pi
+  adapter points a lead at this sequence. Rejected: a shared `lead-compact`
+  playbook in `agents-plugin/rsrc` with a Pi overlay for the final step
+  (ships a body no other harness uses into every package and its mirrors,
+  leaves a base file that only says to stop, and makes the hard cut spend
+  an extra `playbook.read` round trip at high context; its one remaining
+  benefit, `prompt.*` override of the text, is rarely needed); a Pi-only
+  skill (breaks the 1:1 mirror between Pi skills and the shared ws skills).
 - **Knob location.** `compaction_advisory_percent` and the new
   `compaction_hard_percent` (and any budget this ticket introduces) live in
   `goal-loop-config.json` for now;
@@ -159,18 +156,12 @@ in ws tooling and the summary carries only what compaction alone can carry.
 - Out of scope: microcompact-style clearing of old tool results before
   compaction (Pi `context` event); the Pi lead already exposes execution
   tools that keep large outputs out of context, so the need is small.
-- Shipped text stays downstream-neutral
-  (`ai-docs/manuals/shipped-surface-boundary.md`, AGENTS.md Architecture
-  Rule 4).
-- Matching manuals from AGENTS.md `### Implementation Conventions` (for the
-  `agents-plugin/rsrc/` playbook; `agents-plugin-pi/` has no declared row):
-  `ai-docs/manuals/shipped-surface-boundary.md`,
-  `ai-docs/manuals/skill-authoring.md`,
-  `ai-docs/manuals/wsflow-mirroring.md`.
+- Matching manuals from AGENTS.md `### Implementation Conventions`: none
+  (`agents-plugin-pi/` has no declared row).
 
 ## Phases
 
-### Phase 1: Lever, summary, and the lead-compact playbook
+### Phase 1: Lever, summary, and the preparation guide
 
 - In `agents-plugin-pi`, replace `goal-compact-and-continue` with one
   compaction lever tool carrying the lead's prose. On a lever-initiated
@@ -181,20 +172,16 @@ in ws tooling and the summary carries only what compaction alone can carry.
   playbook pointer), the lead's prose, no file lists, and
   `preparation.firstKeptEntryId`. Spawned worker and explore sessions are
   untouched. `leadCompactingRef` and goal-loop's hold/release keep working.
-- Add the `lead-compact` playbook to `agents-plugin/rsrc`: tidy durable
-  state into ws tooling, write the prose sections, then the final-step
-  include — base text stops without tidying, the `.pi.md` overlay calls the
-  lever. Mirror per `wsflow-mirroring.md` and into the Pi rsrc copy;
-  regenerate manifests.
+- Add `agents-plugin-pi/lead-compact-guide.md`: tidy durable state into
+  ws tooling, write the prose sections, then call the lever. Ship it in the
+  package's published files.
 
 Done when the `agents-plugin-pi` suite passes with tests showing the lever
 path produces the summary shape above (no file lists, adapter-injected
 traffic such as `ws-push-batch` reports, wake lines, goal reminders, and
 skill expansions excluded from the user-message section, the budget
 honored), worker sessions keep native compaction, and the hold/release
-behavior is unchanged; and the `agents-plugin-tool` `go test ./internal/wsrsrc
-./internal/mcp`, `agents-plugin/tests`, and `agents-plugin-wsflow/tests`
-suites pass with the new playbook and overlay.
+behavior is unchanged.
 
 ### Phase 2: Triggers and backstops
 
@@ -202,10 +189,10 @@ Depends on Phase 1.
 
 - Advisory nudge and hard-cut steer per the Triggers decision, with
   `compaction_hard_percent` (default 80) added to `goal-loop-config.json`;
-  both point to `lead-compact`.
+  both carry the preparation guide's body.
 - `/compact` reroute: a manual compaction not started by the lever returns
-  `{ cancel: true }` and queues the preparation turn carrying the `/compact`
-  focus text.
+  `{ cancel: true }` and queues the preparation turn carrying the guide's body and
+  the `/compact` focus text.
 - Fallback for threshold and overflow compactions that arrive without
   preparation: an in-hook summary with the session model through Pi's
   exported summary helpers, the same template, and the deterministic
