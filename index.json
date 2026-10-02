@@ -515,7 +515,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-02T07:17:19Z"
+        "touched_at": "2026-10-02T07:17:41Z",
+        "impl": {
+          "branch": "impl/develop/oak-badge-map"
+        }
       }
     }
   }
