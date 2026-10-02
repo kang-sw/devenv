@@ -38,7 +38,7 @@ import { WS_PI_PARENT_SESSION_KEY_ENV, isLeadOrFork, readSpawnRole, type SpawnRo
 import { resolveModelForAliasViaWsMcp, inheritModelFromToolCtx } from "./spawner.ts";
 import { modelCatalogFromToolCtx, formatTierWarning, type ModelCatalogEntry, type TierRejection } from "./model-catalog.ts";
 import { registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
-import { dedupeRead, playbookReadKey } from "./playbook-read-dedupe.ts";
+import { dedupeRead, playbookReadKey, workflowManualKey, workflowManualResultText } from "./playbook-read-dedupe.ts";
 
 import type { ForkContext } from "./fork-context.ts";
 import { RenderRegistry, assertPolicyTool, assertSessionAuthority, childPolicy, playbookProfile, readDelegationPolicy, readOnlyWsTools, READ_TOOLS, CHILD_MANAGEMENT_TOOLS, type PlaybookProfile } from "./delegation-policy.ts";
@@ -471,6 +471,44 @@ export async function dispatchMappedWorkflowManual(
 }
 
 /**
+ * The session key a bridged call actually dispatches with, given its raw
+ * arguments: an omitted, empty, or fresh-bootstrap-sentinel key is filled
+ * with the bridge's own key (mirrors `normalizeSessionKey` +
+ * `resolveSessionKey`); an explicit key passes through. Used to key prior
+ * `ws__workflow_manual` calls in the active context the same way as the
+ * current, already-resolved call.
+ */
+export function resolvedSessionKeyArg(args: Record<string, unknown>, ownKey: string | undefined): unknown {
+  const provided = args.session_key;
+  if (provided === undefined || provided === null || provided === "" || provided === FRESH_BOOTSTRAP_SENTINEL) return ownKey ?? provided;
+  return provided;
+}
+
+/**
+ * Active-context dedupe for a `workflow_manual` result (the stateless
+ * `dedupeRead` contract shared with playbook and skill reads): when the full
+ * text this call returns — mapping line and advisories included — is
+ * byte-identical to a prior `workflow_manual` result for the same resolved
+ * session key that is still visible in Pi's active context, the content is
+ * replaced by a single pointer item. Any byte difference, or no visible prior
+ * result (a fresh session, or after compaction), keeps the full content.
+ * There is no comparison against the system prompt: it carries only the
+ * static manual part (see `lead-bootstrap.ts`).
+ */
+export function dedupeWorkflowManualContent(
+  content: McpContentItem[],
+  visibleEntries: readonly unknown[],
+  toolCallId: string,
+  sessionKey: unknown,
+  resolvePriorSessionKey: (args: Record<string, unknown>) => unknown,
+): McpContentItem[] {
+  const text = workflowManualResultText(content);
+  if (text === undefined) return content;
+  const decision = dedupeRead(visibleEntries, toolCallId, "workflow_manual", workflowManualKey(sessionKey), text, { workflowManualSessionKey: resolvePriorSessionKey });
+  return decision.deduped ? [{ type: "text", text: decision.text }] : content;
+}
+
+/**
  * Provider-legal registered name for a ws-mcp raw tool name: `ws__` prefix
  * (namespace separator, stands in for the `/` in the `ws/<rawName>` prose
  * form) plus the raw name's `.` separators flattened to `_`. Registration
@@ -847,8 +885,16 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
           // (both are the "degraded bootstrap" escape hatch — worker/explore
           // roles and a failed/skipped snapshot fetch both forward
           // workflow_manual verbatim, exactly as today).
+          const dedupeManual = (content: McpContentItem[]): McpContentItem[] =>
+            dedupeWorkflowManualContent(
+              content,
+              toolCtx?.sessionManager?.buildContextEntries?.() ?? [],
+              toolCallId,
+              args.session_key,
+              (priorArgs) => resolvedSessionKeyArg(priorArgs, defaultKeyRef.current),
+            );
           if (shouldMapWorkflowManual(rawName, Boolean(staticBodySnapshotRef.current), readSpawnRole(process.env))) {
-            return await dispatchMappedWorkflowManual(args, {
+            const mapped = await dispatchMappedWorkflowManual(args, {
               callTool: (name, callArgs) => client.callTool(name, callArgs),
               catalog,
               inheritModel,
@@ -874,6 +920,7 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
                 }
               },
             });
+            return { ...mapped, content: dedupeManual(mapped.content) };
           }
 
           const result = await client.callTool(rawName, args);
@@ -897,7 +944,8 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
           // call pays for an unrelated MCP round-trip — see
           // computeRawDispatchPiAliasTableReport's doc comment.
           const piAliasTableReport = await computeRawDispatchPiAliasTableReport(rawName, (name, callArgs) => client.callTool(name, callArgs), catalog);
-          const content = maybeAppendModelCatalogAdvisory(rawName, result.content, piAliasTableReport, inheritModel, catalog.length === 0, advisoryKeyHolder);
+          let content = maybeAppendModelCatalogAdvisory(rawName, result.content, piAliasTableReport, inheritModel, catalog.length === 0, advisoryKeyHolder);
+          if (rawName === "workflow_manual") content = dedupeManual(content);
           if (rawName === "playbook.read") {
             const body = firstText({ ...result, content });
             if (body !== undefined) {

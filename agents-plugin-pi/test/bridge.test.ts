@@ -35,6 +35,8 @@ import {
   dispatchMappedWorkflowManual,
   buildAdvisoryKey,
   startBridge,
+  dedupeWorkflowManualContent,
+  resolvedSessionKeyArg,
   type AdvisoryKeyHolder,
 } from "../src/bridge.ts";
 import type { McpToolCallResult } from "../src/mcp-stdio-client.ts";
@@ -168,6 +170,108 @@ test("production bridge registration returns the pointer on a repeat playbook.re
   } finally {
     if (oldRole === undefined) delete process.env.WS_PI_SPAWN_ROLE; else process.env.WS_PI_SPAWN_ROLE = oldRole;
   }
+});
+
+test("production bridge registration dedupes a repeat lead workflow_manual against the visible prior result only", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "ws-pi-dedupe-manual-"));
+  const launcher = join(directory, "launcher.py");
+  const stateFile = join(directory, "state.txt");
+  writeFileSync(stateFile, "### Todos\n(no todos)");
+  // Every tier resolves away from pi, so the bridge's model-catalog advisory
+  // rides the first workflow_manual result and its per-session holder
+  // suppresses it afterwards: the ticket's accepted "advisory varies" case.
+  writeFileSync(launcher, `import json,sys
+state_file=${JSON.stringify(stateFile)}
+for line in sys.stdin:
+ q=json.loads(line); m=q['method']
+ if m=='initialize': r={'serverInfo':{'version':${JSON.stringify(BUNDLED_RUNTIME.plugin_version)}},'capabilities':{}}
+ elif m=='tools/list': r={'tools':[{'name':n,'description':n,'inputSchema':{'type':'object','properties':{'session_key':{'type':'string'}},'required':['session_key']}} for n in ['ferrule','workflow_manual','playbook.read','config.resolve_agent']]}
+ elif m=='tools/call':
+  n=q['params']['name']
+  if n=='ferrule': t=json.dumps({'session_key':'lead-key'})
+  elif n=='playbook.read': t='# Workflow Manual\\nstatic body'
+  elif n=='config.resolve_agent': t=json.dumps({'resolved_from':'default'})
+  else: t='# Workflow Manual\\nstatic body\\n\\n## Session Key\\nlead-key\\n\\n## Session State\\n'+open(state_file).read()
+  r={'isError':False,'content':[{'type':'text','text':t}]}
+ print(json.dumps({'jsonrpc':'2.0','id':q['id'],'result':r}),flush=True)
+`);
+  const tools = new Map<string, any>();
+  const pi = { registerTool: (definition: any) => tools.set(definition.name, definition), on() {} } as unknown as ExtensionAPI;
+  const oldRole = process.env.WS_PI_SPAWN_ROLE;
+  delete process.env.WS_PI_SPAWN_ROLE;
+  const call = (id: string, args: Record<string, unknown> = {}) => ({ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id, name: "ws__workflow_manual", arguments: args }] } });
+  const result = (id: string, content: unknown[]) => ({ type: "message", message: { role: "toolResult", toolCallId: id, content, isError: false } });
+  const text = (content: any[]) => content.filter((item) => item.type === "text").map((item) => item.text).join("\n");
+  try {
+    const handle = await startBridge(pi, { launcherPath: launcher, pluginDir: directory, runtimeJsonPath: join(dirname(fileURLToPath(import.meta.url)), "../runtime.json"), cwd: directory, toolPreviewTuiRef: { current: undefined } });
+    const manual = tools.get("ws__workflow_manual");
+    const ctx = (entries: unknown[]) => ({ sessionManager: { buildContextEntries: () => entries } });
+
+    // Fresh session: nothing visible, full mapped text (advisory included).
+    const one = await manual.execute("one", {}, undefined, undefined, ctx([call("one")]));
+    assert.match(text(one.content), /^Workflow manual is in your system prompt; this is your current session state\.\n\n## Session Key\nlead-key\n\n## Session State\n### Todos/);
+    assert.equal(one.content.length, 2, "the first result carries the model-catalog advisory item");
+
+    // The advisory is now suppressed, so the second text differs from the
+    // visible first result: full text, never a pointer.
+    const visibleOne = [call("one"), result("one", one.content)];
+    const two = await manual.execute("two", {}, undefined, undefined, ctx([...visibleOne, call("two")]));
+    assert.equal(two.content.length, 1);
+    assert.match(text(two.content), /^Workflow manual is in your system prompt/);
+
+    // Unchanged backend response while the second result is visible: pointer.
+    // The prior call omitted session_key; it resolves to the bridge's own key.
+    const visibleTwo = [call("two"), result("two", two.content)];
+    const three = await manual.execute("three", {}, undefined, undefined, ctx([...visibleTwo, call("three")]));
+    assert.equal(three.content.length, 1);
+    assert.match(three.content[0].text, /^The result is unchanged\. Continue using the full result already present 1 tool call ago\./);
+    assert.match(three.content[0].text, /"family":"workflow_manual"/);
+
+    // The same result under an explicit, different session key does not count.
+    const foreign = [call("two", { session_key: "other-key" }), result("two", two.content)];
+    const four = await manual.execute("four", {}, undefined, undefined, ctx([...foreign, call("four")]));
+    assert.equal(text(four.content), text(two.content), "a result for another session key is not a dedupe source");
+
+    // Changed backend response: full text, even with the prior result visible.
+    writeFileSync(stateFile, "### Todos\n- [ ] {a} A");
+    const five = await manual.execute("five", {}, undefined, undefined, ctx([...visibleTwo, call("five")]));
+    assert.match(text(five.content), /- \[ \] \{a\} A$/);
+
+    // Prior result gone from the active context (e.g. compacted): full text.
+    const six = await manual.execute("six", {}, undefined, undefined, ctx([call("six")]));
+    assert.equal(text(six.content), text(five.content));
+    handle.shutdown();
+  } finally {
+    if (oldRole === undefined) delete process.env.WS_PI_SPAWN_ROLE; else process.env.WS_PI_SPAWN_ROLE = oldRole;
+  }
+});
+
+describe("dedupeWorkflowManualContent", () => {
+  const body = "Workflow manual is in your system prompt; this is your current session state.\n\n## Session Key\nk\n\n## Session State\n### Todos\n(no todos)";
+  const advisory = "> [!note]\n> advisory";
+  const call = (id: string, args: Record<string, unknown> = {}) => ({ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id, name: "ws__workflow_manual", arguments: args }] } });
+  const result = (id: string, content: unknown[]) => ({ type: "message", message: { role: "toolResult", toolCallId: id, content, isError: false } });
+  const resolve = (args: Record<string, unknown>) => resolvedSessionKeyArg(args, "k");
+
+  test("compares the full text including advisory items, byte for byte", () => {
+    const withAdvisory = [{ type: "text" as const, text: body }, { type: "text" as const, text: advisory }];
+    const visible = [call("one"), result("one", withAdvisory)];
+    const same = dedupeWorkflowManualContent(withAdvisory, [...visible, call("two")], "two", "k", resolve);
+    assert.equal(same.length, 1);
+    assert.match(same[0]!.text!, /^The result is unchanged\./);
+    const withoutAdvisory = [{ type: "text" as const, text: body }];
+    assert.deepEqual(dedupeWorkflowManualContent(withoutAdvisory, [...visible, call("two")], "two", "k", resolve), withoutAdvisory, "a differing advisory returns the full text");
+    const oneByte = [{ type: "text" as const, text: body + " " }, { type: "text" as const, text: advisory }];
+    assert.deepEqual(dedupeWorkflowManualContent(oneByte, [...visible, call("two")], "two", "k", resolve), oneByte);
+  });
+
+  test("resolvedSessionKeyArg fills omitted, empty, and sentinel keys and forwards explicit ones", () => {
+    assert.equal(resolvedSessionKeyArg({}, "k"), "k");
+    assert.equal(resolvedSessionKeyArg({ session_key: "" }, "k"), "k");
+    assert.equal(resolvedSessionKeyArg({ session_key: "obsidian-latch" }, "k"), "k");
+    assert.equal(resolvedSessionKeyArg({ session_key: "child" }, "k"), "child");
+    assert.equal(resolvedSessionKeyArg({}, undefined), undefined);
+  });
 });
 
 describe("filterOutMercenaryTools", () => {
