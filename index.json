@@ -508,31 +508,8 @@
     "261001-bug-config-scope-gaps-after-review-opt-in": {
       "registered_at": "2026-10-01T07:37:37Z"
     },
-    "261002-feat-agenda-size-nudge-and-pi-manual-state-dedupe": {
-      "registered_at": "2026-10-02T00:11:56Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-02T00:44:28Z",
-        "impl": {
-          "branch": "impl/develop/emote-guru-robe"
-        }
-      }
-    },
-    "261002-feat-pi-model-output-tps-display": {
-      "registered_at": "2026-10-02T02:13:03Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-02T03:06:04Z",
-        "impl": {
-          "branch": "impl/develop/say-mummy-haiku"
-        }
-      }
+    "261002-feat-commit-anchored-review-followups": {
+      "registered_at": "2026-10-02T06:42:44Z"
     }
   }
 }
