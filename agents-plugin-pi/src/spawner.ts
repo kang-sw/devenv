@@ -1098,7 +1098,8 @@ export function resetOwnTurn(): void {
 }
 
 export interface WakeStartOptions {
-  delayMs: () => number;
+  /** Recovery delay, read at each reservation; may resolve asynchronously (an adapter setting read through ws-mcp). */
+  delayMs: () => number | Promise<number>;
   scheduleTimer?: (cb: () => void, ms: number) => NodeJS.Timeout;
   clearTimer?: (handle: NodeJS.Timeout) => void;
 }
@@ -1125,15 +1126,30 @@ export function reserveWakeStart(options: WakeStartOptions, onTimeout: () => voi
     timer.unref?.();
     return timer;
   });
-  const handle = schedule(() => {
-    cancelWakeTimeout = undefined;
-    leadWakeStartPendingRef.current = false;
-    // The reservation ended without a turn starting: it no longer owes one.
-    pushWakeReserved = false;
-    syncOwnTurnOwed();
-    onTimeout();
-  }, options.delayMs());
-  cancelWakeTimeout = () => (options.clearTimer ?? clearTimeout)(handle);
+  // The reservation is taken synchronously; only the recovery timer waits on
+  // the delay. A cancel that lands while an asynchronous delay is still
+  // being read prevents the timer from ever being scheduled.
+  let cancelled = false;
+  let handle: NodeJS.Timeout | undefined;
+  const arm = (ms: number): void => {
+    if (cancelled) return;
+    handle = schedule(() => {
+      cancelWakeTimeout = undefined;
+      leadWakeStartPendingRef.current = false;
+      // The reservation ended without a turn starting: it no longer owes one.
+      pushWakeReserved = false;
+      syncOwnTurnOwed();
+      onTimeout();
+    }, ms);
+  };
+  cancelWakeTimeout = () => {
+    cancelled = true;
+    if (handle !== undefined) (options.clearTimer ?? clearTimeout)(handle);
+  };
+  const delay = options.delayMs();
+  // A rejected delay read recovers at once rather than leaving the reservation unrecoverable.
+  if (delay instanceof Promise) delay.then(arm, () => arm(0));
+  else arm(delay);
   return true;
 }
 

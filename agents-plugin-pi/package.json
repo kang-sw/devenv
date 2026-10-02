@@ -15,7 +15,7 @@
     "rsrc/",
     "skills/",
     "runtime.json",
-    "goal-loop-config.json",
+    "config-manifest.json",
     "pi-lead-guide.md",
     "lead-compact-guide.md",
     "execute-worker-guide.md",

@@ -27,10 +27,12 @@
 
 import { execFile } from "node:child_process";
 import { unlinkSync } from "node:fs";
+import { join } from "node:path";
 import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { spawnWsMcpClient, type McpStdioClient, type McpContentItem, type McpToolCallResult } from "./mcp-stdio-client.ts";
 import { assertVersionPin, readRuntimeContract } from "./version-check.ts";
 import { buildLocalDevenvBootstrap, type LocalDevenvContext } from "./local-devenv.ts";
+import { ADAPTER_CONFIG_MANIFEST_FILE, WS_MCP_CONFIG_MANIFESTS_ENV } from "./adapter-config.ts";
 import { WS_PI_PARENT_SESSION_KEY_ENV, isLeadOrFork, readSpawnRole, type SpawnRole } from "./process-role.ts";
 // Value import from spawner.ts is safe: spawner.ts only imports `type
 // BridgeHandle` from this file (type-only, erased at build/runtime), so no
@@ -757,6 +759,10 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
       localDevenvContext = bootstrap.context;
     }
   }
+
+  // Every role's ws-mcp loads this package's adapter-setting manifest, so a
+  // child reads (through `config.get`) the `pi.*` values its lead tuned.
+  launcherEnv = { ...launcherEnv, [WS_MCP_CONFIG_MANIFESTS_ENV]: join(opts.pluginDir, ADAPTER_CONFIG_MANIFEST_FILE) };
 
   const client = spawnWsMcpClient(
     opts.launcherPath,

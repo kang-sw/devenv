@@ -34,11 +34,12 @@
  * Runaway backstop: N consecutive re-fires with no intervening tool call
  * force-stop the loop (disarm goal mode) — Pi has no session-kill primitive
  * that fits here (`ctx.shutdown()` exits the whole process). The threshold
- * is adapter-owned data-file config (`goal-loop-config.json`), a built-in
- * constant default overridden by a file read fresh on every use — the same
- * never-hard-fail/no-caching convention this module's own
- * `readGoalLoopConfig` codifies below. Never lives in ws-mcp (Go core) — the
- * goal-loop is entirely adapter-local (golden rule).
+ * is an adapter-declared ws setting (`pi.runaway_threshold`, see
+ * adapter-config.ts), read through ws-mcp's `config.get` at each use and
+ * defaulted when absent or unreachable. This reverses the earlier rule that
+ * goal-loop knobs never live in ws-mcp config: ws-mcp now stores and
+ * validates them from the adapter's own manifest, while the goal-loop
+ * behavior itself stays entirely adapter-local.
  *
  * Settled cross-ticket fact: the goal-loop runs on the lead session only.
  * The `agent_settled` handler no-ops when the running process is itself a
@@ -76,12 +77,11 @@
  * summary from the session model. The reinject
  * reminder still surfaces `ctx.getContextUsage().percent` against the
  * compaction-advisory percent; that knob, the context-window override, and
- * the new compaction knobs live on the same `goal-loop-config.json` file as
- * Phase 1's `runaway_threshold`.
+ * the new compaction knobs are adapter-declared ws settings alongside
+ * `runaway_threshold`.
  */
 
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { convertToLlm, serializeConversation, type CompactionResult, type ContextUsage, type ExtensionAPI, type ExtensionContext, type SessionBeforeCompactEvent } from "@earendil-works/pi-coding-agent";
 import {
   buildFallbackSummaryPrompt,
@@ -105,12 +105,14 @@ import {
   type UserMessageBudgets,
 } from "./lead-compaction.ts";
 import { readSpawnRole } from "./process-role.ts";
+import { staticConfigReader, thenOrNow, type GoalLoopConfigKey, type GoalLoopConfigReader } from "./adapter-config.ts";
 import { createToolPreviewTuiRef, registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
 import { clearWakeStart, enqueueHeldGoalReplacement, reserveWakeStart, heldPushQueue, flushHeldPushes, hasRunningAgents, leadCompactingRef, leadWakeStartPendingRef, type HeldGoalReplacementResult, type RpcAgentRegistry } from "./spawner.ts";
 
 // ---------------------------------------------------------------------------
-// Config: adapter-owned runaway-threshold data file. Never-hard-fail,
-// read-fresh-per-call shape — no module-level caching.
+// Config: adapter-declared ws settings (adapter-config.ts). Every knob is
+// optional; each resolver below maps an absent or malformed value to its
+// default and never hard-fails.
 // ---------------------------------------------------------------------------
 
 export interface GoalLoopConfig {
@@ -131,8 +133,8 @@ export interface GoalLoopConfig {
    * arm, mirroring `runaway_threshold`'s never-hard-fail shape.
    */
   settle_delay_ms?: number;
-  /** Age-based child-home retention in days. A finite positive number may be fractional; literal false disables age pruning. */
-  child_retention_ttl_days?: number | false;
+  /** Age-based child-home retention in days; 0 disables age pruning. */
+  child_retention_ttl_days?: number;
   /** Token budget for the lead compaction summary's human-typed user-message section (261002). */
   compaction_user_messages_budget_tokens?: number;
   /** Token cap for one message inside that section (261002). */
@@ -144,7 +146,7 @@ export function resolveAgentWaitAnimation(config: GoalLoopConfig | undefined): b
   return config?.agent_wait_animation !== false;
 }
 
-/** Default number of consecutive no-tool-call re-fires before the loop force-stops, absent (or overridden by) a config file. */
+/** Default number of consecutive no-tool-call re-fires before the loop force-stops, absent a tuned value. */
 export const DEFAULT_RUNAWAY_THRESHOLD = 10;
 
 /** Default advisory context-usage percent (adapter-chosen, no ticket-pinned value; config-tunable) surfaced in the reinject reminder. */
@@ -153,34 +155,14 @@ export const DEFAULT_COMPACTION_ADVISORY_PERCENT = 50;
 /** Default hard compaction percent (261002): a forcing point below Pi's own automatic compaction. */
 export const DEFAULT_COMPACTION_HARD_PERCENT = 80;
 
-/** Default settle-timer delay in milliseconds, absent (or overridden by) a config file (260906 Phase 1). */
+/** Default settle-timer delay in milliseconds, absent a tuned value (260906 Phase 1). */
 export const DEFAULT_SETTLE_DELAY_MS = 5000;
 
 /** Default age since last real child activity before an owned home becomes prune-eligible. */
 export const DEFAULT_CHILD_RETENTION_TTL_DAYS = 30;
 
 /**
- * Reads and parses the goal-loop config data file. Returns `undefined` —
- * never throws — when the file is missing, unreadable, or not valid JSON, so
- * "unset" (fall back to `DEFAULT_RUNAWAY_THRESHOLD`) is the expected default
- * state. Read fresh on every call by design (no module-level caching).
- */
-export function readGoalLoopConfig(path: string): GoalLoopConfig | undefined {
-  let raw: string;
-  try {
-    raw = readFileSync(path, "utf8");
-  } catch {
-    return undefined;
-  }
-  try {
-    return JSON.parse(raw) as GoalLoopConfig;
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * Resolves the effective runaway threshold: the config file's
+ * Resolves the effective runaway threshold: the tuned
  * `runaway_threshold` when it is a positive finite number, else
  * `DEFAULT_RUNAWAY_THRESHOLD`. Never hard-fails on a malformed value
  * (non-numeric, zero, negative, `NaN`/`Infinity`) — falls back to the
@@ -192,7 +174,7 @@ export function resolveRunawayThreshold(config: GoalLoopConfig | undefined): num
 }
 
 /**
- * Resolves the effective compaction-advisory percent: the config file's
+ * Resolves the effective compaction-advisory percent: the tuned
  * `compaction_advisory_percent` when it is a finite number in `(0, 100]`,
  * else `DEFAULT_COMPACTION_ADVISORY_PERCENT`. Never hard-fails on a
  * malformed value — falls back to the default instead. Mirrors
@@ -210,7 +192,7 @@ export function resolveCompactionHardPercent(config: GoalLoopConfig | undefined)
 }
 
 /**
- * Resolves an optional context-window override: the config file's
+ * Resolves an optional context-window override: the tuned
  * `context_window_override` when it is a finite positive number, else
  * `undefined` (no override — the model's own `getContextUsage().contextWindow`
  * is used as-is). Never hard-fails on a malformed value.
@@ -221,7 +203,7 @@ export function resolveContextWindowOverride(config: GoalLoopConfig | undefined)
 }
 
 /**
- * Resolves the effective settle-timer delay: the config file's
+ * Resolves the effective settle-timer delay: the tuned
  * `settle_delay_ms` when it is a positive finite number, else
  * `DEFAULT_SETTLE_DELAY_MS`. Never hard-fails on a malformed value — falls
  * back to the default instead. Mirrors `resolveRunawayThreshold`'s exact
@@ -244,12 +226,21 @@ export function resolveUserMessageBudgets(config: GoalLoopConfig | undefined): U
   };
 }
 
-/** Resolves the adapter-local child retention policy without ever hard-failing startup. */
+/** Resolves the child retention policy: `0` disables age pruning (`false`); anything but a positive finite number keeps the default. */
 export function resolveChildRetentionTtlDays(config: GoalLoopConfig | undefined): number | false {
   const value = config?.child_retention_ttl_days;
-  if (value === false) return false;
+  if (value === 0) return false;
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : DEFAULT_CHILD_RETENTION_TTL_DAYS;
 }
+
+/** Knobs one settle cycle reads at arm time: the delay, then (at fire) the runaway threshold, the reminder's percent, and the wake-recovery delay. */
+export const SETTLE_CONFIG_KEYS: readonly GoalLoopConfigKey[] = ["settle_delay_ms", "runaway_threshold", "compaction_advisory_percent", "context_window_override"];
+
+/** Knobs one compaction-trigger check reads. */
+export const COMPACTION_TRIGGER_CONFIG_KEYS: readonly GoalLoopConfigKey[] = ["compaction_advisory_percent", "compaction_hard_percent", "context_window_override"];
+
+/** Knobs the lead compaction summary reads. */
+export const COMPACTION_BUDGET_CONFIG_KEYS: readonly GoalLoopConfigKey[] = ["compaction_user_messages_budget_tokens", "compaction_user_message_cap_tokens"];
 
 // ---------------------------------------------------------------------------
 // Pure message builders.
@@ -415,7 +406,7 @@ export type SettleDecision =
  *
  * The `"reinject"` decision carries only the bare `goal` string, not a
  * precomputed reminder: this reducer has no access to `ctx.getContextUsage()`
- * or the goal-loop config file (both IO-context-only), so `buildGoalReminder`
+ * or the adapter config (both IO-context-only), so `buildGoalReminder`
  * is called by `registerGoalLoop`'s IO glue instead, right where that context
  * is already available (Phase 2, 260903).
  */
@@ -487,12 +478,18 @@ export function buildLeadCompactionResult(
 // IO glue: command + tool + event registration.
 // ---------------------------------------------------------------------------
 
+type OwnCompactionResult = { compaction: CompactionResult<LeadCompactionDetails> } | undefined;
+
 /** Phase 2 (260905) goal-loop yield status key: cleared unconditionally on the next `agent_start`. */
 const GOAL_LOOP_YIELD_STATUS_KEY = "ws-goal-loop-yield";
 
 export interface RegisterGoalLoopOptions {
-  /** Path to the adapter-owned goal-loop config data file, read fresh per settle. */
-  goalLoopConfigPath: string;
+  /**
+   * Reads adapter settings at each use (adapter-config.ts). Production passes
+   * the ws-mcp reader; omitted means every knob at its default. A
+   * synchronous reader keeps every listener synchronous (the test seam).
+   */
+  readConfig?: GoalLoopConfigReader;
   /**
    * Phase 2 (260905): the shared RPC registry ref, filled by `index.ts` inside
    * `session_start` (mirrors `execute-gateway.ts`'s `createApprovalRelay`
@@ -672,6 +669,7 @@ export function registerGoalLoop(
       return handle;
     });
   const clearTimer = opts.clearTimer ?? ((handle: NodeJS.Timeout) => clearTimeout(handle));
+  const readConfig = opts.readConfig ?? staticConfigReader();
 
   /**
    * The single settle timer (260906 Phase 1, settle-timer reminder race
@@ -765,20 +763,29 @@ export function registerGoalLoop(
    * Sets the `Goal loop: settling` footer unconditionally — every caller
    * (the live `agent_settled` listener and `releaseAfterCompaction`'s idle
    * branch alike) wants this status the instant a re-evaluation is pending.
+   *
+   * The cycle's adapter settings are read here, once per arm, and carried to
+   * the fire. The timer id is claimed before the read, so an asynchronous
+   * read that resolves after `cancelSettleTimer` (an `agent_start`, a re-arm,
+   * a disarm) schedules nothing. Callers never wait on the read: a failure
+   * past it is reported through `runTimerCallback`, never thrown.
    */
   function armSettleTimer(ctx: ExtensionContext, generation = goalGeneration): void {
     if (!isCurrentArmedGeneration(generation)) return;
     cancelSettleTimer();
     // Settle evaluation must not cancel recovery for a held-push wake.
-    const config = readGoalLoopConfig(opts.goalLoopConfigPath);
-    const delayMs = resolveSettleDelayMs(config);
     const timerId = ++settleTimerSequence;
     activeSettleTimerId = timerId;
-    settleTimer = scheduleTimer(
-      () => runTimerCallback(ctx, "settle timer", () => onSettleTimerFire(ctx, generation, timerId)),
-      delayMs,
-    );
     ctx.ui.setStatus(GOAL_LOOP_YIELD_STATUS_KEY, "Goal loop: settling");
+    thenOrNow(readConfig(SETTLE_CONFIG_KEYS), (config) => {
+      runTimerCallback(ctx, "settle timer arm", () => {
+        if (activeSettleTimerId !== timerId || !isCurrentArmedGeneration(generation)) return;
+        settleTimer = scheduleTimer(
+          () => runTimerCallback(ctx, "settle timer", () => onSettleTimerFire(ctx, generation, timerId, config)),
+          resolveSettleDelayMs(config),
+        );
+      });
+    });
   }
 
   /**
@@ -902,7 +909,7 @@ export function registerGoalLoop(
    * `decideOnSettle`/`dispatchSettleDecision` path since both need nothing
    * more than the pure reducer against the current `state`.
    */
-  function onSettleTimerFire(ctx: ExtensionContext, generation: number, timerId: number): void {
+  function onSettleTimerFire(ctx: ExtensionContext, generation: number, timerId: number, config: GoalLoopConfig): void {
     if (activeSettleTimerId !== timerId) return;
     settleTimer = undefined;
     activeSettleTimerId = undefined;
@@ -936,8 +943,6 @@ export function registerGoalLoop(
       ctx.ui.setStatus(GOAL_LOOP_YIELD_STATUS_KEY, "Goal loop: awaiting reminder handoff");
       return;
     }
-
-    const config = readGoalLoopConfig(opts.goalLoopConfigPath);
 
     if (pendingRearm && pendingRearmGeneration === generation) {
       pendingRearm = false;
@@ -1151,9 +1156,16 @@ export function registerGoalLoop(
     );
   }
 
-  function checkCompactionTriggers(ctx: ExtensionContext, boundary: "turn" | "run"): void {
+  function checkCompactionTriggers(ctx: ExtensionContext, boundary: "turn" | "run"): void | Promise<void> {
     if (isChildProcess(process.env) || leadCompactingRef.current || preparation) return;
-    const config = readGoalLoopConfig(opts.goalLoopConfigPath);
+    return thenOrNow(readConfig(COMPACTION_TRIGGER_CONFIG_KEYS), (config) => {
+      // Re-checked: an asynchronous read leaves a gap a compaction or another preparation can enter.
+      if (leadCompactingRef.current || preparation) return;
+      fireCompactionTriggers(ctx, boundary, config);
+    });
+  }
+
+  function fireCompactionTriggers(ctx: ExtensionContext, boundary: "turn" | "run", config: GoalLoopConfig): void {
     const percent = computeContextPercent(ctx.getContextUsage(), resolveContextWindowOverride(config));
     if (percent === null) return;
     const advisory = resolveCompactionAdvisoryPercent(config);
@@ -1172,9 +1184,7 @@ export function registerGoalLoop(
     }
   }
 
-  pi.on("turn_end", (_event, ctx) => {
-    checkCompactionTriggers(ctx, "turn");
-  });
+  pi.on("turn_end", (_event, ctx) => checkCompactionTriggers(ctx, "turn"));
 
   pi.on("agent_end", (_event, ctx) => {
     // Any preparation message queued before this run ended has run or was
@@ -1182,7 +1192,7 @@ export function registerGoalLoop(
     // nudge again. A message queued below, at this boundary, blocks the
     // triggers until the continuation run carrying it ends.
     preparation = false;
-    checkCompactionTriggers(ctx, "run");
+    return checkCompactionTriggers(ctx, "run");
   });
 
   pi.on("agent_start", (_event, ctx) => {
@@ -1270,7 +1280,7 @@ export function registerGoalLoop(
         .join("\n")
         .trim();
       if (!prose) throw new Error("the summary model returned no text");
-      const result = ownCompaction(event, ctx, prose, "fallback");
+      const result = await ownCompaction(event, ctx, prose, "fallback");
       if (result) result.compaction.usage = response.usage;
       return result;
     } catch (error) {
@@ -1292,22 +1302,24 @@ export function registerGoalLoop(
     ctx: ExtensionContext,
     prose: string,
     source: LeadCompactionDetails["source"],
-  ): { compaction: CompactionResult<LeadCompactionDetails> } | undefined {
-    try {
-      const compaction = buildLeadCompactionResult(event, {
-        sessionKey: opts.sessionKeyRef?.current,
-        registry: opts.rpcRegistryRef?.current,
-        prose,
-        budgets: resolveUserMessageBudgets(readGoalLoopConfig(opts.goalLoopConfigPath)),
-        source,
-      });
-      expectOwnCompaction = true;
-      return { compaction };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      ctx.ui.notify(`ws lead compaction could not build its summary (${message}); Pi's native compaction runs instead.`, "warning");
-      return undefined;
-    }
+  ): OwnCompactionResult | Promise<OwnCompactionResult> {
+    return thenOrNow(readConfig(COMPACTION_BUDGET_CONFIG_KEYS), (config): OwnCompactionResult => {
+      try {
+        const compaction = buildLeadCompactionResult(event, {
+          sessionKey: opts.sessionKeyRef?.current,
+          registry: opts.rpcRegistryRef?.current,
+          prose,
+          budgets: resolveUserMessageBudgets(config),
+          source,
+        });
+        expectOwnCompaction = true;
+        return { compaction };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        ctx.ui.notify(`ws lead compaction could not build its summary (${message}); Pi's native compaction runs instead.`, "warning");
+        return undefined;
+      }
+    });
   }
 
   // 260906 (compaction push-hold ticket, Phase 1): deferred via `setImmediate`

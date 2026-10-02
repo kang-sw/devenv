@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
@@ -38,8 +38,7 @@ test('real capacity eviction removes fetched spills from a confirmed-stopped Exp
 test('controller stale pruning owns abandoned spills while retaining interrupted/uncertain sessions', async t => {
   const root = mkdtempSync(join(tmpdir(), 'web-stale-retention-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  const config = join(root, 'goal-loop-config.json');
-  writeFileSync(config, JSON.stringify({ child_retention_ttl_days: 1 }));
+  const config = { child_retention_ttl_days: 1 };
   const homes = ['abandoned', 'interrupted'].map(id => allocateAgentHome(createAgentStorageContext('previous-lead', root), id, 'explore', 'web-search'));
   const spills = [];
   for (const ownership of homes) {

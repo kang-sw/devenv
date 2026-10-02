@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "node:test";
@@ -13,16 +13,15 @@ function orphan(agentId: string, sessionPath: string, ownership?: PersistedOrpha
 }
 
 describe("controller session-start child retention", () => {
-  test("reads the adapter config, prunes another lead's stale home, and filters only that owned sidecar entry", (t) => {
+  test("applies the tuned TTL, prunes another lead's stale home, and filters only that owned sidecar entry", (t) => {
     const root = mkdtempSync(join(tmpdir(), "ws-pi-session-retention-"));
-    const config = join(root, "goal-loop-config.json");
     const now = Date.parse("2026-10-10T00:00:00.000Z");
     t.mock.method(Date, "now", () => now);
     try {
-      writeFileSync(config, JSON.stringify({ child_retention_ttl_days: 0.5 }));
+      const config = { child_retention_ttl_days: 1 };
       const stale = allocateAgentHome(createAgentStorageContext("other-lead", root), "stale-child", "worker");
       const recent = allocateAgentHome(createAgentStorageContext("other-lead", root), "recent-child", "worker");
-      for (const [owned, lastActivityAt, cost] of [[stale, now - 86_400_000, .4], [recent, now - 1_000, .2]] as const) {
+      for (const [owned, lastActivityAt, cost] of [[stale, now - 2 * 86_400_000, .4], [recent, now - 1_000, .2]] as const) {
         const metadata = readOwnership(owned.home)!;
         writeOwnership({ ...metadata, lastActivityAt, telemetry: { version: 1, origin: { sessionId: `${owned.agentId}-session`, sessionPath: owned.sessionPath!, emptyPrefix: true }, estimatedUsd: cost }, liveness: { ...metadata.liveness, lifecycle: "stopped", running: false } });
       }
@@ -42,14 +41,13 @@ describe("controller session-start child retention", () => {
 
   test("a fork child's session start neither prunes another lead's stale home nor folds its checkpoint", (t) => {
     const root = mkdtempSync(join(tmpdir(), "ws-pi-session-retention-"));
-    const config = join(root, "goal-loop-config.json");
     const now = Date.parse("2026-10-10T00:00:00.000Z");
     t.mock.method(Date, "now", () => now);
     try {
-      writeFileSync(config, JSON.stringify({ child_retention_ttl_days: 0.5 }));
+      const config = { child_retention_ttl_days: 1 };
       const stale = allocateAgentHome(createAgentStorageContext("other-lead", root), "stale-child", "worker");
       const metadata = readOwnership(stale.home)!;
-      writeOwnership({ ...metadata, lastActivityAt: now - 86_400_000, telemetry: { version: 1, origin: { sessionId: `${stale.agentId}-session`, sessionPath: stale.sessionPath!, emptyPrefix: true }, estimatedUsd: .4 }, liveness: { ...metadata.liveness, lifecycle: "stopped", running: false } });
+      writeOwnership({ ...metadata, lastActivityAt: now - 2 * 86_400_000, telemetry: { version: 1, origin: { sessionId: `${stale.agentId}-session`, sessionPath: stale.sessionPath!, emptyPrefix: true }, estimatedUsd: .4 }, liveness: { ...metadata.liveness, lifecycle: "stopped", running: false } });
       const recovered = [orphan(stale.agentId, stale.sessionPath!, stale)];
 
       assert.strictEqual(applySessionStartAgentRetention("fork", root, config, recovered), recovered);
@@ -61,11 +59,10 @@ describe("controller session-start child retention", () => {
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
-  test("literal false disables pruning and worker/explore/fork session starts never run global maintenance", () => {
+  test("0 disables pruning and worker/explore/fork session starts never run global maintenance", () => {
     const root = mkdtempSync(join(tmpdir(), "ws-pi-session-retention-"));
-    const config = join(root, "goal-loop-config.json");
     try {
-      writeFileSync(config, JSON.stringify({ child_retention_ttl_days: false }));
+      const config = { child_retention_ttl_days: 0 };
       const recovered = [orphan("legacy", join(root, "legacy-session.jsonl"))];
       let calls = 0;
       let resolvedTtl: number | false | undefined;

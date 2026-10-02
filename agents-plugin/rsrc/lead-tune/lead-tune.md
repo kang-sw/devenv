@@ -18,6 +18,7 @@ Surface
 - Treat `config.list` as the source of supported knob ids, the `config.tune` write contract, field options, current values and scopes, what each knob's values do and cost (its description), whether the repo scope applies to it (`repo_scope`) and under which key (`repo_key`), and the repo-scope file's path and shape.
 - Name values exactly as `config.list` accepts them; gloss `off`/`ask`/`auto` as skip/recommend/require.
 - Treat prompt override-point ids as valid only when they appear as `prompt.<pointId>` knobs in `config.list`.
+- Tune an `adapter_setting` knob (a setting the harness adapter running this session declares) as a scalar knob. Such knobs are listed only in sessions of the adapter that declares them; a request for another harness's adapter setting is tuned from a lead on that harness, so say so instead of writing it.
 
 Storage
 - For prompt overrides, choose the catalog option that applies across all harnesses unless the user names one harness.
@@ -84,7 +85,7 @@ Storage
 ### judge: tune-target
 - User standing preferences, communication style, language, terminology, or wording conventions -> prompt override (`UserPreferenceSection`).
 - Prompt wording or a named manual section -> prompt override for that named override point.
-- A named value for a named scalar knob (for example `"workflow.prefer_subagent"`, a Sage review stage, `review_phase`, or `bootstrap_alarm`) -> scalar knob; for the repo scope -> commit repo-scope setting.
+- A named value for a named scalar knob (for example `"workflow.prefer_subagent"`, a Sage review stage, `review_phase`, `bootstrap_alarm`, or an `adapter_setting` knob) -> scalar knob; for the repo scope -> commit repo-scope setting.
 - A named tier with a named model or backend -> model tier (`agents.tier`).
 - How heavy, slow, costly, or thorough the workflow is, a request spanning several knobs, or one with no clear knob or value -> explain knobs.
 - A request no catalog knob bears on -> unsupported axis.

@@ -21,7 +21,7 @@ test("Pi session generations reuse immutable mailbox binaries and preserve recov
   const directory = mkdtempSync(join(tmpdir(), "ws-pi-mailbox-handoff-"));
   const plugin = join(directory, "plugin");
   mkdirSync(plugin);
-  for (const name of ["src", "runtime.json", "goal-loop-config.json", "pi-lead-guide.md", "lead-compact-guide.md", "execute-worker-guide.md", "explore-guide.md"]) {
+  for (const name of ["src", "runtime.json", "config-manifest.json", "pi-lead-guide.md", "lead-compact-guide.md", "execute-worker-guide.md", "explore-guide.md"]) {
     cpSync(join(PLUGIN_DIR, name), join(plugin, name), { recursive: true });
   }
   symlinkSync(join(PLUGIN_DIR, "node_modules"), join(plugin, "node_modules"), process.platform === "win32" ? "junction" : "dir");

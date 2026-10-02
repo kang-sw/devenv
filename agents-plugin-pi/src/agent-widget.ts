@@ -728,8 +728,12 @@ export interface AgentWidgetController {
 export interface AgentWidgetControllerOptions {
   /** Only the host lead owns the attention timer; forks retain the ordinary panel. */
   ownerLead?: boolean;
-  /** Read the adapter-local config afresh at each refresh. */
-  animationEnabled?: () => boolean;
+  /**
+   * Read the animation setting afresh at each `refresh()`. An asynchronous
+   * answer repaints when it lands; the ticks between refreshes reuse the
+   * last answer rather than re-reading at every frame. Absent means enabled.
+   */
+  animationEnabled?: () => boolean | Promise<boolean>;
 }
 
 /**
@@ -749,6 +753,8 @@ export function createAgentWidgetController(ctx: AgentWidgetUiCtx, registry: Rpc
   let timer: ReturnType<typeof setInterval> | undefined;
   let attentionTimer: ReturnType<typeof setInterval> | undefined;
   let attentionPhase = 0;
+  let animationEnabled = true;
+  let stopped = false;
 
   function clearAttentionTimer(): void {
     if (attentionTimer) {
@@ -763,7 +769,6 @@ export function createAgentWidgetController(ctx: AgentWidgetUiCtx, registry: Rpc
     const pendingCount = threadList.filter((thread) => thread.status === "pending").length;
     const visible = rows.length > 0 || pendingCount > 0;
     const qualifying = rows.some((row) => isAttentionState(row.state));
-    const animationEnabled = options.animationEnabled?.() !== false;
     const animate = options.ownerLead === true && animationEnabled && qualifying;
     const ownerActionColor = qualifying && (!animationEnabled || animate)
       ? (animationEnabled ? OWNER_ACTION_COLORS[attentionPhase] : "error")
@@ -814,9 +819,30 @@ export function createAgentWidgetController(ctx: AgentWidgetUiCtx, registry: Rpc
     }
   }
 
+  function refresh(): void {
+    let read: boolean | Promise<boolean> | undefined;
+    try {
+      read = options.animationEnabled?.();
+    } catch {
+      read = undefined;
+    }
+    if (read instanceof Promise) {
+      // Paint now with the last answer; repaint only if the fresh one differs.
+      read.then((enabled) => {
+        if (stopped || enabled === animationEnabled) return;
+        animationEnabled = enabled;
+        paint();
+      }, () => {});
+    } else {
+      animationEnabled = read !== false;
+    }
+    paint();
+  }
+
   return {
-    refresh: paint,
+    refresh,
     stop() {
+      stopped = true;
       if (timer) {
         clearInterval(timer);
         timer = undefined;

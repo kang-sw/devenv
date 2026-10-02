@@ -359,3 +359,18 @@ func TestConfigGetTypesAndFallbacks(t *testing.T) {
 		t.Fatalf("unset text = %q", text)
 	}
 }
+
+// TestShippedAdapterManifestsLoad guards each adapter package's shipped
+// manifest against drifting out of the loader's accepted format: a rejected
+// manifest would only log at startup and silently leave every adapter knob
+// untunable.
+func TestShippedAdapterManifestsLoad(t *testing.T) {
+	path := filepath.Join("..", "..", "..", "agents-plugin-pi", "config-manifest.json")
+	declared := loadDeclaredConfig(path)
+	if len(declared.rejected) != 0 {
+		t.Fatalf("shipped manifest rejected: %v", declared.rejected)
+	}
+	if len(declared.keys) == 0 {
+		t.Fatalf("shipped manifest %s declares no keys", path)
+	}
+}
