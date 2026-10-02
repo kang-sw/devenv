@@ -97,8 +97,9 @@ approved for this run.
 The worker ends with a fixed block that defines its own valid `stop:` and
 `completion:` pairs; `completion: ad_hoc` is invalid in this ticket-only run.
 Missing, unknown, or incompatible values are a protocol mismatch: surface the
-raw report and end the invocation. Carry the report's lines to the user
-verbatim.
+raw report and end the invocation. Otherwise digest the report for the user
+in the user's language rather than pasting the block: status, what landed,
+the decisions that matter, unresolved items, and the verification outcome.
 
 The worker's checkout is shared and outlives its turn, so before a
 HEAD-relative write of your own (a ticket edit, a follow-up dispatch) call
