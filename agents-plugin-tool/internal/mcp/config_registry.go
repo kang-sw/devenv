@@ -70,6 +70,10 @@ type configKeyEntry struct {
 	// resolver-bypass finding: folding it in would be a resolver capability
 	// extension, not a pure internal refactor).
 	ResolverBacked bool
+	// Declared is set for a key an adapter manifest declares (see
+	// config_manifest.go); its type validates config.tune writes and its
+	// DefaultScope replaces the wsconfig scope registry lookup.
+	Declared *declaredConfigKey
 }
 
 // GlobalOnly reports whether this key's writes are constrained to
@@ -87,6 +91,9 @@ func (e configKeyEntry) GlobalOnly() bool {
 // wsconfig.DefaultScope for resolver-backed keys; agents.tier defaults to its
 // project-scope compound writer.
 func (e configKeyEntry) DefaultScope() wsconfig.Scope {
+	if e.Declared != nil {
+		return e.Declared.DefaultScope
+	}
 	if !e.ResolverBacked {
 		return wsconfig.ScopeProject
 	}
@@ -303,7 +310,7 @@ func configKeyEntryForTool(toolName string) (configKeyEntry, bool) {
 	// Every other config.* tool name was removed with the ten, so this
 	// function now returns false for every live config.* tool; it is kept
 	// because the gating tables still call it for arbitrary tool names.
-	if toolName == "config.list" || toolName == "config.tune" || toolName == "config.resolve_agent" {
+	if toolName == "config.list" || toolName == "config.tune" || toolName == "config.resolve_agent" || toolName == "config.get" {
 		return configKeyEntry{}, false
 	}
 	for _, entry := range configRegistry {

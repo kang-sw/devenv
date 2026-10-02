@@ -46,7 +46,7 @@ export const READ_TOOLS = ["read", "grep", "find", "ls"];
 // Positive inventory: newly shipped mutators must never become read authority by default.
 const READ_WS = new Set([
   "runtime_read", "runtime_debug_events", "session_children", "agenda_list", "todo_list", "todo_read",
-  "api_list", "config_list", "config_resolve_agent", "git_status", "git_diff", "git_log", "git_merge_base", "git_followups",
+  "api_list", "config_list", "config_get", "config_resolve_agent", "git_status", "git_diff", "git_log", "git_merge_base", "git_followups",
   "project_tree", "infra_read", "convention_read", "note_query", "tickets_query", "tickets_template",
   "tickets_checklist", "tickets_verify", "playbook_read", "playbook_render",
 ]);

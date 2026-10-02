@@ -202,3 +202,14 @@ func DefaultScope(key string) Scope {
 func ScopeSchemaEnum() []string {
 	return []string{"session", "project", "global"}
 }
+
+// RegisteredItemKeys returns every item key that declares a default scope or
+// global-only status. Callers that must keep their own keys disjoint from the
+// registered items (an adapter key manifest's namespace check) read it.
+func RegisteredItemKeys() []string {
+	keys := make([]string, 0, len(scopeRegistry))
+	for key := range scopeRegistry {
+		keys = append(keys, key)
+	}
+	return keys
+}
