@@ -2,7 +2,11 @@
 title: ws-owned lead compaction for the Pi adapter
 related:
   260903-feat-ws-pi-goal-loop-compaction-hook: predecessor; its observe-only session_before_compact stance and goal-compact-and-continue lever are superseded for the lead session
+  260913-bug-ws-pi-inactive-goal-compact-and-continue-aborts: reversed; its inactive-goal rejection no longer applies to the lever
   261002-feat-ws-config-adapter-schema-extension: dependent; migrates this ticket's knobs from goal-loop-config.json into ws-mcp config
+sage-review-design: skipped
+sage-review-completeness: completed
+sage-review-completeness-reviewed: 45f2cfb52f96daa6
 ---
 
 # ws-owned lead compaction for the Pi adapter
@@ -110,6 +114,16 @@ in ws tooling and the summary carries only what compaction alone can carry.
   one tool and one summary shape, with `carry_forward` becoming the lead's
   prose; goal-loop keeps only its compaction hold/release and reminder
   logic. Rejected: a separate goal-only tool calling the new path.
+- **The lever works without an active goal.** This reverses
+  260913-bug-ws-pi-inactive-goal-compact-and-continue-aborts's inactive-goal
+  rejection for the lever: lead compaction is not goal-specific, and
+  trigger (b) lets the lead call it at any time. The goal-specific effects
+  (goal re-injection after compaction and any goal-loop state the lever
+  touches) apply only while a goal is active, so with no goal active the
+  lever touches no goal-loop state, keeping 260913's no-side-effect
+  property for those parts. Rejected: keeping the rejection (the lead could
+  never compact through the lever outside a goal, contradicting triggers
+  (a)-(c)).
 - **Triggers.**
   - (a) Two thresholds. At the advisory threshold
     (`compaction_advisory_percent`, default 50) the adapter nudges the lead
@@ -186,9 +200,44 @@ in ws tooling and the summary carries only what compaction alone can carry.
 - Matching manuals from AGENTS.md `### Implementation Conventions`: none
   (`agents-plugin-pi/` has no declared row).
 
+## Prior Decisions
+
+- 260903-feat-ws-pi-goal-loop-compaction-hook (2026-09-04, Result): "`goal-compact-and-continue(carry_forward)` — a non-terminal `pi.registerTool` lever that calls `ctx.compact({ customInstructions: carry_forward })` once and returns without `disarmGoal()`." — bearing: constrains
+- 260903-feat-ws-pi-goal-loop-compaction-hook (2026-09-04, commit ea11442e): "session_before_compact is observe-only because the installed Pi build offers no partial-inject hook on the auto/threshold path." — bearing: supports
+- 260906-bug-ws-pi-goal-loop-reinject-races-manual-compaction (2026-09-06, Result): "`leadCompactingRef` sits beside `leadIdleRef` in `spawner.ts`; it is set by the lever before `ctx.compact` and by `session_before_compact` for every compaction" — bearing: constrains
+- 260906-bug-ws-pi-goal-loop-reinject-races-manual-compaction (2026-09-06, commit 81463a7d): "`registerPushFlush`'s `agent_settled` flush is gated on `leadCompactingRef` because `ctx.compact()`'s internal `abort()` fires an `agent_settled` ... BEFORE Pi's own compaction flag is set" — bearing: constrains
+- 260906-bug-ws-pi-goal-loop-reinject-races-manual-compaction (2026-09-06, Result bfcf850b): "summary custom instructions are steering, not a verbatim delivery guarantee; preserve the raw string independently for model-visible reminder delivery." — bearing: constrains
+- 260913-bug-ws-pi-inactive-goal-compact-and-continue-aborts (2026-09-13, Decisions): "Keep the guard in the authoritative lever path so tool calls and any equivalent adapter entry point cannot diverge." — bearing: contradiction-candidate
+- 260909-feat-ws-pi-goal-stop-controls (2026-09-13, commit c6a87734): "Keep shared wake and compaction ownership independent: stopping goal scheduling does not release child-report reservations or prematurely clear in-flight compaction." — bearing: constrains
+- 260905-chore-ws-pi-goal-announcement-wording (2026-09-05, Decisions): "Compaction lever result names the in-flight compaction ... `Compaction requested; the conversation will resume from a summary carrying: <carry_forward>`" — bearing: constrains
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-pi/src/goal-loop.ts, agents-plugin-pi/src/spawner.ts, agents-plugin-pi/lead-compact-guide.md (new), agents-plugin-pi/goal-loop-config.json, agents-plugin-pi/package.json files list |
+| scope.surface | cross-module | lever tool replaces goal-compact-and-continue; session_before_compact handler (goal-loop.ts#L1056-L1062) interacts with leadCompactingRef in spawner.ts#L1060 |
+| scope.new_public_symbol | yes | new compaction lever tool replacing goal-compact-and-continue; new config key compaction_hard_percent |
+| scope.new_type_contract | yes | new CompactionResult summary shape and GoalLoopConfig field in goal-loop.ts#L90-L100 |
+| scope.test_surface | existing | agents-plugin-pi/test/goal-loop.test.ts exists; new test files likely for summary builders |
+| complexity.reuse_points | confirmed | leadCompactingRef hold/release, resolveCompactionAdvisoryPercent, spawner child registry, Pi preparation.firstKeptEntryId |
+| complexity.side_effect_risk | high | session_before_compact result replaces Pi compaction and a /compact cancel path; races with push-hold and goal re-arm are a known defect class |
+| risk.correctness | high | summary assembly from branchEntries, budgets, trigger races, last-non-empty-result-wins across extensions |
+| risk.fit | moderate | follows adapter-owned guide pattern (pi-lead-guide.md, execute-worker-guide.md) but folds an existing lever |
+| risk.test | high | live Pi compaction path unverified in prior tickets; needs fake-pi harness for hooks and steer timing |
+| risk.security_or_contract | moderate | ws messages stay user-role; filtering adapter-injected traffic from the user-message section must not leak or drop human text |
+
 ## Phases
 
 ### Phase 1: Lever, summary, and the preparation guide
+
+Left to the implementer: the lever's tool name and parameter shape (one
+prose field or one per fixed heading; the result wording pinned by
+260905-chore-ws-pi-goal-announcement-wording is updated to match), where the
+adapter reads the active ticket, phase, and playbook step, and, in Phase 2,
+how context usage is measured (reuse `resolveCompactionAdvisoryPercent`'s
+inputs) and how a lever-initiated manual compaction is told apart from a
+user `/compact`.
 
 - In `agents-plugin-pi`, replace `goal-compact-and-continue` with one
   compaction lever tool carrying the lead's prose. On a lever-initiated
@@ -210,7 +259,8 @@ traffic such as `ws-push-batch` reports, wake lines, goal reminders, and
 skill expansions excluded from the user-message section, the budget
 and per-message caps honored, finished children listed once, the sections
 recomputed rather than inherited across two compactions), worker sessions
-keep native compaction, and the hold/release
+keep native compaction, the lever compacts with no active goal without
+touching goal-loop state, and the hold/release
 behavior is unchanged.
 
 ### Phase 2: Triggers and backstops
