@@ -59,23 +59,50 @@ in ws tooling and the summary carries only what compaction alone can carry.
   saw the work).
 - **Summary = adapter-filled deterministic sections + the lead's prose.**
   Deterministic sections: the ws session key; the active ticket and phase;
-  where the agenda and todos live; in-flight child agents from the spawner
-  registry; human-typed user messages (the analogue of Claude Code's "All
-  user messages" section), excluding adapter-injected traffic such as
-  `ws-push-batch` reports, wake lines, goal reminders, and skill expansions;
-  and the active playbook. The summary carries no file lists. Hook results
-  are stored with `fromHook=true`, which also ends Pi's file-list
-  inheritance chain.
+  in-flight child agents from the spawner registry; child agents finished
+  since the previous compaction, one line each (name, ticket, terminal
+  status, commit) from the same registry, since their reports are excluded
+  from the user-message section; human-typed user messages (the analogue of
+  Claude Code's "All user messages" section), excluding adapter-injected
+  traffic such as `ws-push-batch` reports, wake lines, goal reminders, and
+  skill expansions; and the active playbook. The summary carries no file
+  lists. Hook results are stored with `fromHook=true`, which also ends Pi's
+  file-list inheritance chain. The summary closes by telling the lead to
+  invoke `lead-revive` with the session key, which restores agenda, todos,
+  and notes through `workflow_manual`. Rejected: inlining agenda and todo
+  contents (duplicates what revive already restores, and goes stale in the
+  summary).
 - **Deterministic-section budgets and shape.** The human-typed
-  user-message section keeps messages newest-first within about 8k tokens;
-  older messages beyond the budget drop out of the section, and the lead's
-  prose and earlier summaries carry their gist. Rejected: keeping every human
-  message (grows without bound like Pi's file lists); no deterministic
-  section, leaving it to the prose. The active playbook is carried as a
-  pointer — its name and current step, to be re-read with `playbook.read` —
-  not as a re-attached body. Rejected: re-attaching the body within a budget
-  as Claude Code does for skills (costs tokens on every compaction, and
-  `playbook.read` is cheap and always current for the session's overrides).
+  user-message section keeps messages newest-first within about 8k tokens,
+  and caps any single message at about 1.5k tokens with a truncation marker
+  so one pasted log cannot take the whole budget; older messages beyond the
+  budget drop out of the section, and the lead's prose carries their gist.
+  Every compaction recomputes the deterministic sections from the full
+  session history (`branchEntries`), not from the previous summary, so they
+  neither compound nor drift. Rejected: keeping every human message (grows
+  without bound like Pi's file lists); no deterministic section, leaving it
+  to the prose. The active playbook is carried as a pointer — its name and
+  current step, to be re-read with `playbook.read` — not as a re-attached
+  body. Rejected: re-attaching the body within a budget as Claude Code does
+  for skills (costs tokens on every compaction, and `playbook.read` is cheap
+  and always current for the session's overrides). Nothing else is
+  re-attached after compaction: the Pi lead's system prompt already carries
+  the root instructions, the Pi lead guide, and the workflow-manual
+  snapshot.
+- **The lead's prose has fixed headings and is rewritten each time.**
+  Headings: user preferences and style; agreed working practices; decisions
+  made in the session that no durable record holds yet; current work; the
+  immediate next step, quoting the user's latest request verbatim; mood and
+  rapport; residual details. Each compaction rewrites the prose from
+  scratch, carrying forward what in the previous summary is still live and
+  dropping what is resolved. The writing rule is: for content already
+  persisted (tickets, commits, notes, agenda, todos), give its path or
+  pointer; for content that lives only in the conversation, summarize it as
+  precisely as possible. A soft length target of about 2-4k tokens guides
+  the prose; there is no hard cap. Rejected: appending to the previous
+  summary (Pi's "PRESERVE all existing information" is what made its
+  summaries grow monotonically); free-form prose (sections silently go
+  missing between compactions); a blacklist of what not to write.
 - **Kept raw tail.** The compaction result uses
   `preparation.firstKeptEntryId` unchanged; Pi computes valid cut points and
   its `compaction.keepRecentTokens` setting tunes the size.
@@ -167,20 +194,23 @@ in ws tooling and the summary carries only what compaction alone can carry.
   compaction lever tool carrying the lead's prose. On a lever-initiated
   compaction the lead session's `session_before_compact` handler returns
   `{ compaction }` with the adapter-filled deterministic sections (session
-  key, active ticket and phase, agenda/todo location, in-flight children,
-  human-typed user messages newest-first within about 8k tokens, active
-  playbook pointer), the lead's prose, no file lists, and
-  `preparation.firstKeptEntryId`. Spawned worker and explore sessions are
+  key, active ticket and phase, in-flight and recently finished children,
+  human-typed user messages within the budgets above, active playbook
+  pointer, closing `lead-revive` instruction), the lead's prose under the
+  fixed headings, no file lists, and `preparation.firstKeptEntryId`. Spawned worker and explore sessions are
   untouched. `leadCompactingRef` and goal-loop's hold/release keep working.
 - Add `agents-plugin-pi/lead-compact-guide.md`: tidy durable state into
-  ws tooling, write the prose sections, then call the lever. Ship it in the
+  ws tooling, rewrite the prose under the fixed headings with the
+  persisted-pointer / conversation-precise rule, then call the lever. Ship it in the
   package's published files.
 
 Done when the `agents-plugin-pi` suite passes with tests showing the lever
 path produces the summary shape above (no file lists, adapter-injected
 traffic such as `ws-push-batch` reports, wake lines, goal reminders, and
 skill expansions excluded from the user-message section, the budget
-honored), worker sessions keep native compaction, and the hold/release
+and per-message caps honored, finished children listed once, the sections
+recomputed rather than inherited across two compactions), worker sessions
+keep native compaction, and the hold/release
 behavior is unchanged.
 
 ### Phase 2: Triggers and backstops
