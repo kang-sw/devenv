@@ -637,13 +637,24 @@ func (s *sessionStore) readState(sessionKey string) (sessionRecord, bool) {
 
 // setAgenda upserts an agenda blob under key.
 func (s *sessionStore) setAgenda(sessionKey, key string, value json.RawMessage) error {
-	return s.mutateRecord(sessionKey, func(r *sessionRecord) error {
+	_, err := s.setAgendaNote(sessionKey, key, value)
+	return err
+}
+
+// setAgendaNote upserts an agenda blob under key and returns the agenda size
+// note (see agendaSizeNote) computed from the agenda as stored by this same
+// write, so a concurrent mutation cannot skew the reported total.
+func (s *sessionStore) setAgendaNote(sessionKey, key string, value json.RawMessage) (string, error) {
+	var note string
+	err := s.mutateRecord(sessionKey, func(r *sessionRecord) error {
 		if r.Agenda == nil {
 			r.Agenda = map[string]json.RawMessage{}
 		}
 		r.Agenda[key] = value
+		note = agendaSizeNote(r.Agenda)
 		return nil
 	})
+	return note, err
 }
 
 // clearAgenda removes the agenda blob for key. A missing key is a no-op.
@@ -799,10 +810,15 @@ func (s *Server) handleAgendaSet(id json.RawMessage, args map[string]any) respon
 	if err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("%s: value is not JSON-encodable: %w", tool, err))
 	}
-	if err := s.sessions.setAgenda(sessionKey, key, raw); err != nil {
+	note, err := s.sessions.setAgendaNote(sessionKey, key, raw)
+	if err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 	}
-	return toolTextResponse(id, fmt.Sprintf("agenda set: %s\n", key), nil)
+	text := fmt.Sprintf("agenda set: %s\n", key)
+	if note != "" {
+		text += note + "\n"
+	}
+	return toolTextResponse(id, text, nil)
 }
 
 func (s *Server) handleAgendaClear(id json.RawMessage, args map[string]any) response {

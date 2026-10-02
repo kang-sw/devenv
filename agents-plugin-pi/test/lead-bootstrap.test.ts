@@ -27,7 +27,7 @@
 
 import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI, SlashCommandInfo, SourceInfo } from "@earendil-works/pi-coding-agent";
@@ -37,7 +37,8 @@ import {
   computeSessionBootstrap,
   computeSkillsBlockCached,
   registerLeadBootstrap,
-  SESSION_START_SNAPSHOT_MARKER,
+  SESSION_STATE_POINTER_LINE,
+  staticManualPart,
   type SkillsBlockCache,
   type WsBlockBase,
 } from "../src/lead-bootstrap.ts";
@@ -56,9 +57,36 @@ function skillCommand(name: string, description: string, path: string): SlashCom
 }
 
 describe("buildWsBlock", () => {
-  test("prefixes the manual snapshot with the fixed marker line", () => {
-    const result = buildWsBlock("## Session Key\nlead-1", "guide text", "");
-    assert.ok(result.startsWith(SESSION_START_SNAPSHOT_MARKER), "must start with the fixed marker line");
+  test("prefixes the static manual part with the session-state pointer line", () => {
+    const result = buildWsBlock("# Workflow Manual\nbody\n\n## Session Key\nlead-1", "guide text", "");
+    assert.ok(result.startsWith(SESSION_STATE_POINTER_LINE), "must start with the fixed pointer line");
+    assert.equal(
+      SESSION_STATE_POINTER_LINE,
+      "Your session state (agenda, todos, notes) is not in this prompt. When no `workflow_manual` result is visible in your context — a fresh session, or after compaction — call `workflow_manual` before acting.",
+    );
+  });
+
+  test("a real session-start workflow_manual response keeps its static body and drops session key, state, and notes", () => {
+    const response = readFileSync(join(import.meta.dirname, "fixtures", "workflow-manual-response.txt"), "utf8");
+    const result = buildWsBlock(response, "GUIDE-TEXT", "");
+    // Static manual body, and what ws-mcp prepends ahead of it, stay.
+    assert.ok(result.includes("# Workflow Manual"), "static manual heading must stay");
+    assert.ok(result.includes("### API documentation"), "static manual body must stay through its last section");
+    assert.ok(result.includes(response.slice(0, response.indexOf("## Session Key")).trimEnd()), "everything before ## Session Key must stay verbatim");
+    // The dynamic tail is gone: Session Key heading, Session State, and Notes.
+    for (const dropped of ["## Session Key", "## Session State", "### Todos", "\n# Notes\n", "Post-it reminders", "planner-overvalue-mangle\n"]) {
+      assert.ok(!result.includes(dropped), `system-prompt ws block must not carry ${JSON.stringify(dropped)}`);
+    }
+    // The old session-start snapshot header is retired.
+    assert.ok(!result.includes("Session-start snapshot of your ws workflow manual"), "old snapshot header must be gone");
+    assert.ok(!result.includes("not refreshed mid-session"), "old snapshot header must be gone");
+    assert.ok(result.includes("GUIDE-TEXT"), "guide text must still follow");
+  });
+
+  test("staticManualPart cuts at the first whole ## Session Key line only", () => {
+    assert.equal(staticManualPart("# M\nbody\n\n## Session Key\nk\n\n## Session State\nx"), "# M\nbody");
+    assert.equal(staticManualPart("# M\nmentions ## Session Key inline\n"), "# M\nmentions ## Session Key inline", "an inline mention is not the anchor");
+    assert.equal(staticManualPart("# M\nbody\n"), "# M\nbody", "no anchor keeps the whole snapshot");
   });
 
   test("orders manual snapshot, guide text, then the skills block", () => {

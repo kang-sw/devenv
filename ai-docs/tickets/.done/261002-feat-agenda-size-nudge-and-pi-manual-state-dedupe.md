@@ -7,6 +7,7 @@ related:
 sage-review-design: skipped
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 43e24c47ebd03846
+completed: 2026-10-02
 ---
 
 # Agenda size nudge, and Pi session state only through deduped live workflow_manual calls
@@ -170,3 +171,39 @@ Verification:
   returns the full text; a first result no longer in the active context (e.g.
   after compaction) yields the full text.
 - Existing Go and Pi suites pass.
+
+### Result (fd7978470) - 2026-10-02
+
+- D1 (5ffaea726): `agendaSizeNote` in `workflow_manual.go` sums stored blob
+  value bytes (keys excluded) and, at or above 4096, emits the ticket's literal
+  note after the agenda blobs and before `### Todos` in `renderSessionState`
+  (so `workflow_manual`, `workflow_state`, and lead-revive carry it).
+  `agenda.set` computes the note inside the same locked write
+  (`setAgendaNote`; `setAgenda` stays as a thin wrapper) and returns it as a
+  second line. Stateless: repeats every render/set while over the threshold.
+- D2 (1362fbf3e): `buildWsBlock` now uses `staticManualPart`, which cuts the
+  snapshot at its first whole `## Session Key` line (same end anchor as
+  `cutStaticBody`). `SESSION_START_SNAPSHOT_MARKER` is replaced by
+  `SESSION_STATE_POINTER_LINE` carrying the ticket's nudge text verbatim.
+  `cutStaticBody` and `WORKFLOW_STATE_MAPPING_LINE` are unchanged.
+- D3 (fd7978470): new `"workflow_manual"` `ReadFamily` in
+  `playbook-read-dedupe.ts`, keyed by `workflowManualKey(resolved session
+  key)`. The compared text joins every text item (`workflowManualResultText`)
+  on both sides, so advisory items count. Prior calls' raw arguments resolve
+  through `resolvedSessionKeyArg` (omitted, empty, or sentinel goes to the
+  bridge's own key), which is passed to `dedupeRead` as an option.
+  `dedupeWorkflowManualContent` applies on both the mapped and the verbatim
+  dispatch paths. The full -> pointer -> full cadence of `dedupeRead` is
+  inherited.
+- Verification: `go test ./...` (agents-plugin-tool) all pass, with new
+  threshold-boundary, repeat-render, resolver-blob, and `agenda.set` handler
+  tests. `npm test` (agents-plugin-pi) gave 1934 pass and 2 fail. The
+  `web-package` packed-install test fails identically on the base commit
+  (environment). The `claude-lifecycle` TERM/KILL test is load-flaky and passed
+  3/3 when run alone. New Pi tests cover the system-prompt block against the
+  real manual fixture, a production-bridge pointer/changed/foreign-key/compacted
+  sequence, and `SessionManager` compaction for the new family.
+- Review (lite): no Critical or Important findings. Two minor findings were
+  left open: the inherited pointer prose "Do not read it again" reads oddly for
+  a state check, and the raw-dispatch dedupe wiring has no direct integration
+  test.

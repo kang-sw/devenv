@@ -3493,6 +3493,126 @@ func TestServeStdioAgendaListHandler(t *testing.T) {
 	}
 }
 
+// sizedBlob returns a stored JSON string blob of exactly n bytes (n >= 2).
+func sizedBlob(n int) json.RawMessage {
+	return json.RawMessage(`"` + strings.Repeat("x", n-2) + `"`)
+}
+
+const agendaNotePrefix = "note: agenda totals "
+
+func TestRenderSessionStateAgendaSizeNoteThreshold(t *testing.T) {
+	below := renderSessionState(sessionRecord{Agenda: map[string]json.RawMessage{
+		"a": sizedBlob(2000),
+		"b": sizedBlob(2095),
+	}})
+	if strings.Contains(below, agendaNotePrefix) {
+		t.Fatalf("agenda total 4095 must not carry the size note:\n%s", below)
+	}
+
+	at := sessionRecord{Agenda: map[string]json.RawMessage{
+		"a": sizedBlob(2000),
+		"b": sizedBlob(2096),
+	}}
+	want := "note: agenda totals 4096 bytes (threshold 4096); clear stale blobs with agenda.clear (key, or all: true)."
+	first := renderSessionState(at)
+	if !strings.Contains(first, "\n"+want+"\n") {
+		t.Fatalf("agenda total 4096 must carry the exact size note:\n%s", first)
+	}
+	// Placement: after the last agenda blob, before the todo summary.
+	noteIdx := strings.Index(first, want)
+	if lastBlob := strings.Index(first, "### agenda: b"); lastBlob < 0 || lastBlob > noteIdx {
+		t.Fatalf("size note must follow the agenda blobs:\n%s", first)
+	}
+	if todos := strings.Index(first, "### Todos"); todos < noteIdx {
+		t.Fatalf("size note must precede ### Todos:\n%s", first)
+	}
+	// Stateless: every render over the threshold repeats the note.
+	if second := renderSessionState(at); second != first {
+		t.Fatalf("consecutive renders over the threshold must be identical, note included:\n%s\n---\n%s", first, second)
+	}
+
+	// Key names are excluded from the measure: long keys do not push a
+	// sub-threshold total over.
+	longKeys := renderSessionState(sessionRecord{Agenda: map[string]json.RawMessage{
+		strings.Repeat("k", 500): sizedBlob(4095),
+	}})
+	if strings.Contains(longKeys, agendaNotePrefix) {
+		t.Fatalf("key names must not count toward the agenda total:\n%s", longKeys)
+	}
+}
+
+func TestRenderSessionStateAgendaSizeNoteCountsResolverBlobs(t *testing.T) {
+	implement := sizedBlob(1582)
+	proceed := sizedBlob(976)
+	other := sizedBlob(4096 - 1582 - 976)
+	without := renderSessionState(sessionRecord{Agenda: map[string]json.RawMessage{"scratch": other}})
+	if strings.Contains(without, agendaNotePrefix) {
+		t.Fatalf("the scratch blob alone is under the threshold:\n%s", without)
+	}
+	with := renderSessionState(sessionRecord{Agenda: map[string]json.RawMessage{
+		"implement": implement,
+		"proceed":   proceed,
+		"scratch":   other,
+	}})
+	if !strings.Contains(with, "note: agenda totals 4096 bytes (threshold 4096)") {
+		t.Fatalf("typed resolver blobs must count toward the agenda total:\n%s", with)
+	}
+}
+
+func TestServeStdioAgendaSetSizeNote(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 904000, root, nil))
+
+	// A string value of m runes is stored as m+2 bytes (its JSON quotes).
+	if got := callToolWithKey(t, server, 4000, key, "agenda.set", map[string]any{
+		"key":   "a",
+		"value": strings.Repeat("x", 2000-2),
+	}); got != "agenda set: a\n" {
+		t.Fatalf("agenda.set below the threshold must carry no note, got: %q", got)
+	}
+	if got := callToolWithKey(t, server, 4001, key, "agenda.set", map[string]any{
+		"key":   "b",
+		"value": strings.Repeat("x", 2095-2),
+	}); got != "agenda set: b\n" {
+		t.Fatalf("agenda.set at total 4095 must carry no note, got: %q", got)
+	}
+	// Overwriting b grows the total to exactly 4096: the total is computed
+	// after the new blob is stored, not from the prior value.
+	want := "agenda set: b\nnote: agenda totals 4096 bytes (threshold 4096); clear stale blobs with agenda.clear (key, or all: true).\n"
+	if got := callToolWithKey(t, server, 4002, key, "agenda.set", map[string]any{
+		"key":   "b",
+		"value": strings.Repeat("x", 2096-2),
+	}); got != want {
+		t.Fatalf("agenda.set at total 4096 unexpected:\n got: %q\nwant: %q", got, want)
+	}
+	// Repeats on every set while over the threshold.
+	if got := callToolWithKey(t, server, 4003, key, "agenda.set", map[string]any{
+		"key":   "c",
+		"value": "y",
+	}); !strings.Contains(got, "note: agenda totals 4099 bytes (threshold 4096)") {
+		t.Fatalf("agenda.set over the threshold must repeat the note, got: %q", got)
+	}
+	// Session-state renders carry it on every call while over the threshold.
+	for i := 0; i < 2; i++ {
+		if got := callToolWithKey(t, server, 4004+i, key, "workflow_state", nil); !strings.Contains(got, "note: agenda totals 4099 bytes (threshold 4096)") {
+			t.Fatalf("workflow_state render %d over the threshold must carry the note: %s", i, got)
+		}
+	}
+	if got := callToolWithKey(t, server, 4006, key, "workflow_manual", nil); !strings.Contains(got, "note: agenda totals 4099 bytes (threshold 4096)") {
+		t.Fatalf("workflow_manual over the threshold must carry the note: %s", got)
+	}
+	// Clearing drops the note.
+	callToolWithKey(t, server, 4007, key, "agenda.clear", map[string]any{"key": "a"})
+	if got := callToolWithKey(t, server, 4008, key, "workflow_state", nil); strings.Contains(got, agendaNotePrefix) {
+		t.Fatalf("workflow_state under the threshold must not carry the note: %s", got)
+	}
+}
+
 func TestServeStdioTodoListRequiresSessionKey(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()

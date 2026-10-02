@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { Agent } from "../node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-agent-core/dist/index.js";
 import { createAssistantMessageEventStream } from "../node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-ai/dist/utils/event-stream.js";
-import { dedupeRead, playbookReadKey, wsSkillKey } from "../src/playbook-read-dedupe.ts";
+import { dedupeRead, playbookReadKey, workflowManualKey, workflowManualResultText, wsSkillKey } from "../src/playbook-read-dedupe.ts";
 
 const body = "# Title\n\n## Detail\n\n### Leaf\ntext";
 const call = (id: string, name: string, arguments_: Record<string, unknown>) => ({ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id, name, arguments: arguments_ }] } });
@@ -68,6 +68,47 @@ test("current call and omitted contexts do not count", () => {
   const current = [call("now", "ws__playbook_read", { name: "lead" }), result("now", body)];
   assert.equal(dedupeRead(current, "now", "playbook.read", key, body).deduped, false);
   assert.equal(dedupeRead([], "next", "playbook.read", key, body).deduped, false);
+});
+
+test("workflow_manual family: keyed by resolved session key, full text across text items, full then pointer then full", () => {
+  const state = "Mapping line.\n\n## Session Key\nk\n\n## Session State\n### Todos\n(no todos)";
+  const advisory = "> [!note]\n> advisory";
+  const key = workflowManualKey("k");
+  const resolve = { workflowManualSessionKey: (args: Record<string, unknown>) => args.session_key ?? "k" };
+  const multi = (id: string) => ({ type: "message", message: { role: "toolResult", toolCallId: id, content: [{ type: "text", text: state }, { type: "text", text: advisory }], isError: false } });
+  const fresh = workflowManualResultText([{ type: "text", text: state }, { type: "text", text: advisory }])!;
+  assert.equal(fresh, `${state}\n${advisory}`);
+
+  const first = [call("one", "ws__workflow_manual", {}), multi("one")];
+  const second = dedupeRead(first, "two", "workflow_manual", key, fresh, resolve);
+  assert.equal(second.deduped, true, "an omitted prior session_key resolves to the current key");
+  assert.match(second.text, /"family":"workflow_manual"/);
+  // A first-text-only comparison would wrongly match when only the advisory differs.
+  assert.equal(dedupeRead(first, "two", "workflow_manual", key, state, resolve).deduped, false);
+  // Pointer provenance for the new family validates; the next repeat is full.
+  const third = dedupeRead([...first, call("two", "ws__workflow_manual", {}), result("two", second.text)], "three", "workflow_manual", key, fresh, resolve);
+  assert.deepEqual(third, { text: fresh, deduped: false });
+  // Other session keys, and other families with the same text, do not count.
+  assert.equal(dedupeRead([call("one", "ws__workflow_manual", { session_key: "other" }), multi("one")], "two", "workflow_manual", key, fresh, resolve).deduped, false);
+  assert.equal(dedupeRead([call("one", "ws__playbook_read", { name: "lead" }), multi("one")], "two", "workflow_manual", key, fresh, resolve).deduped, false);
+  assert.equal(dedupeRead(first, "two", "playbook.read", playbookReadKey({ name: "lead" }), fresh).deduped, false);
+});
+
+test("workflow_manual family: a compacted-away first result yields the full text", () => {
+  const directory = mkdtempSync(join(tmpdir(), "ws-pi-dedupe-manual-compact-"));
+  const text = "Mapping line.\n\n## Session State\n### Todos\n(no todos)";
+  const key = workflowManualKey("k");
+  const resolve = { workflowManualSessionKey: () => "k" };
+  const manager = SessionManager.inMemory(directory);
+  manager.appendMessage({ role: "assistant", api: "openai-completions", provider: "test", model: "offline", providerThinkingLevel: "off", stopReason: "toolUse", timestamp: 1, content: [{ type: "toolCall", id: "old", name: "ws__workflow_manual", arguments: {} }] });
+  manager.appendMessage({ role: "toolResult", toolCallId: "old", toolName: "ws__workflow_manual", content: [{ type: "text", text }], isError: false, timestamp: 2 });
+  manager.appendMessage({ role: "assistant", api: "openai-completions", provider: "test", model: "offline", providerThinkingLevel: "off", stopReason: "toolUse", timestamp: 3, content: [{ type: "toolCall", id: "visible", name: "ws__workflow_manual", arguments: {} }] });
+  assert.equal(dedupeRead(manager.buildContextEntries(), "visible", "workflow_manual", key, text, resolve).deduped, true, "the visible prior result is a dedupe source");
+  manager.appendMessage({ role: "toolResult", toolCallId: "visible", toolName: "ws__workflow_manual", content: [{ type: "text", text }], isError: false, timestamp: 4 });
+  const kept = manager.appendMessage({ role: "user", content: "post-compact", timestamp: 5 });
+  manager.appendCompaction("summary", kept, 100);
+  manager.appendMessage({ role: "assistant", api: "openai-completions", provider: "test", model: "offline", providerThinkingLevel: "off", stopReason: "toolUse", timestamp: 6, content: [{ type: "toolCall", id: "after", name: "ws__workflow_manual", arguments: {} }] });
+  assert.deepEqual(dedupeRead(manager.buildContextEntries(), "after", "workflow_manual", key, text, resolve), { text, deduped: false });
 });
 
 test("installed SessionManager exposes the finalized assistant call during execute-time scanning, while branch and fork windows remain Pi-owned", () => {

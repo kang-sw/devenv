@@ -42,8 +42,10 @@
  *
  * The 260904 ticket's Phase 1 adds the system-prompt bootstrap
  * (src/lead-bootstrap.ts, `registerLeadBootstrap`): a `before_agent_start`
- * handler appends a fixed ws block (the session-start `workflow_manual`
- * snapshot plus `pi-lead-guide.md`) to the system prompt on every turn, for
+ * handler appends a fixed ws block (the static part of the session-start
+ * `workflow_manual` snapshot — session state and notes are cut, reaching the
+ * model only through live `workflow_manual` calls — plus `pi-lead-guide.md`)
+ * to the system prompt on every turn, for
  * the host lead and a future `fork` child only (never `worker`/`explore`).
  * `registerLeadBootstrap` itself is declarative (factory top level, no
  * subprocess); the actual snapshot fetch happens inside `startBridge`
