@@ -1,4 +1,6 @@
 {
   "agent_wait_animation": true,
-  "child_retention_ttl_days": 30
+  "child_retention_ttl_days": 30,
+  "compaction_advisory_percent": 50,
+  "compaction_hard_percent": 80
 }

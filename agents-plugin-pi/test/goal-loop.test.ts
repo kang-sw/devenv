@@ -1052,7 +1052,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
 
     pi.handlers.get("agent_settled")!({}, ctx);
     compactCall!.onComplete!({} as never);
-    pi.handlers.get("session_compact")!({ reason: "manual" }, ctx);
+    pi.handlers.get("session_compact")!({ reason: "manual", fromExtension: true, compactionEntry: { details: { kind: "ws-pi-lead-compaction", version: 1, source: "lever" } } }, ctx);
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(leadCompactingRef.current, false, "the hold is released");
     assert.equal(clock.pendingCount(), 0, "no goal reminder is scheduled");
@@ -2048,7 +2048,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       compactCall!.onComplete!({} as never);
       pi.handlers.get("session_compact")!({ reason: "manual", compactionEntry: { details: { kind: "ws-pi-lead-compaction", version: 1, source: "lever" } } }, ctx);
       await new Promise((resolve) => setImmediate(resolve));
-      assert.equal(pi.handlers.get("session_before_compact")!(compactionEvent("threshold", branch), ctx), undefined, "Phase 1 leaves threshold compaction native");
+      assert.equal(pi.handlers.get("session_before_compact")!(compactionEvent("threshold", branch), ctx), undefined, "with no session model a threshold compaction stays native");
     });
 
     test("worker sessions keep Pi's native compaction and cannot call the lever", async () => {
@@ -2071,6 +2071,204 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       const broken = { reason: "manual", branchEntries: branch, preparation: undefined } as never;
       assert.equal(pi.handlers.get("session_before_compact")!(broken, ctx), undefined);
       assert.match(notifications.at(-1)!.message, /could not build its summary/);
+    });
+  });
+
+  describe("lead compaction triggers and backstops (261002 Phase 2)", () => {
+    const guidePath = join(tmpDir, "lead-compact-guide-261002.md");
+    writeFileSync(guidePath, "GUIDE BODY 261002");
+
+    function triggerRun(configOverride?: GoalLoopConfig) {
+      const clock = fakeClock();
+      const pi = fakePi();
+      const goalLoopConfigPath = configOverride ? join(tmpDir, `trigger-config-${Math.random().toString(36).slice(2)}.json`) : configPath;
+      if (configOverride) writeFileSync(goalLoopConfigPath, JSON.stringify(configOverride));
+      registerGoalLoop(pi.api, { goalLoopConfigPath, ...clock, leadCompactGuidePath: guidePath, sessionKeyRef: { current: "lead-key" } });
+      const { ctx, notifications } = fakeCtx();
+      const usage = { percent: 10 as number | null };
+      (ctx as unknown as { getContextUsage: () => unknown }).getContextUsage = () => ({ tokens: null, contextWindow: 1000, percent: usage.percent });
+      const preparations = () => pi.sentMessages.filter((m) => (m.content as { customType?: string }).customType === "ws-lead-compact");
+      const startPreparation = () => pi.handlers.get("message_start")!({ message: { role: "custom", customType: "ws-lead-compact", content: "" } }, ctx);
+      const stored = (details: unknown) => ({ reason: "manual", fromExtension: true, compactionEntry: { details } });
+      return { clock, pi, ctx, notifications, usage, preparations, startPreparation, stored };
+    }
+    const ourDetails = { kind: "ws-pi-lead-compaction", version: 1, source: "lever" };
+
+    test("the advisory nudge fires once per crossing at the run's end, carries the guide, and re-arms after compaction", async () => {
+      const { pi, ctx, usage, preparations, startPreparation, stored } = triggerRun();
+      usage.percent = 49;
+      pi.handlers.get("agent_end")!({}, ctx);
+      assert.equal(preparations().length, 0, "below the advisory point");
+
+      usage.percent = 55;
+      pi.handlers.get("turn_end")!({}, ctx);
+      assert.equal(preparations().length, 0, "the advisory nudge never fires mid-run");
+      pi.handlers.get("agent_end")!({}, ctx);
+      assert.equal(preparations().length, 1);
+      const nudge = preparations()[0]!;
+      assert.deepEqual(nudge.options, { deliverAs: "followUp", triggerTurn: true });
+      assert.match((nudge.content as { content: string }).content, /^Context usage is 55% .*advisory point \(50%\)[\s\S]*\n\nGUIDE BODY 261002$/);
+
+      startPreparation();
+      pi.handlers.get("agent_end")!({}, ctx);
+      usage.percent = 60;
+      pi.handlers.get("agent_end")!({}, ctx);
+      assert.equal(preparations().length, 1, "an ignored nudge does not repeat within the same crossing");
+
+      pi.handlers.get("session_compact")!(stored(ourDetails), ctx);
+      await new Promise((resolve) => setImmediate(resolve));
+      pi.handlers.get("agent_end")!({}, ctx);
+      assert.equal(preparations().length, 2, "a compaction re-arms the nudge");
+
+      startPreparation();
+      pi.handlers.get("agent_end")!({}, ctx);
+      usage.percent = 30;
+      pi.handlers.get("agent_end")!({}, ctx);
+      usage.percent = 52;
+      pi.handlers.get("agent_end")!({}, ctx);
+      assert.equal(preparations().length, 3, "dropping below and crossing again is a new crossing");
+    });
+
+    test("the hard cut is a steer at the next turn end, fires once, and suppresses the advisory nudge", () => {
+      const { pi, ctx, usage, preparations, startPreparation } = triggerRun({ compaction_advisory_percent: 40, compaction_hard_percent: 70 });
+      usage.percent = 71;
+      pi.handlers.get("turn_end")!({}, ctx);
+      assert.equal(preparations().length, 1);
+      const steer = preparations()[0]!;
+      assert.deepEqual(steer.options, { deliverAs: "steer", triggerTurn: true });
+      assert.match((steer.content as { content: string }).content, /^Context usage is 71% .*hard compaction point \(70%\)\. Stop the current work now[\s\S]*GUIDE BODY 261002$/);
+      assert.equal((steer.content as { display: boolean }).display, true);
+
+      startPreparation();
+      pi.handlers.get("turn_end")!({}, ctx);
+      pi.handlers.get("agent_end")!({}, ctx);
+      usage.percent = 75;
+      pi.handlers.get("turn_end")!({}, ctx);
+      pi.handlers.get("agent_end")!({}, ctx);
+      assert.equal(preparations().length, 1, "no re-nudge after the hard cut, and no advisory nudge on top of it");
+    });
+
+    test("neither trigger fires while a preparation turn or a compaction is in progress", () => {
+      const { pi, ctx, usage, preparations, startPreparation } = triggerRun();
+      usage.percent = 60;
+      pi.handlers.get("agent_end")!({}, ctx);
+      assert.equal(preparations().length, 1);
+      usage.percent = 95;
+      pi.handlers.get("turn_end")!({}, ctx);
+      pi.handlers.get("agent_end")!({}, ctx);
+      assert.equal(preparations().length, 1, "the queued preparation has not started yet");
+      startPreparation();
+      pi.handlers.get("turn_end")!({}, ctx);
+      assert.equal(preparations().length, 1, "the preparation turn is running");
+
+      pi.handlers.get("session_before_compact")!(compactionEvent("threshold"), ctx);
+      pi.handlers.get("agent_end")!({}, ctx);
+      pi.handlers.get("turn_end")!({}, ctx);
+      assert.equal(leadCompactingRef.current, true);
+      assert.equal(preparations().length, 1, "a compaction in progress blocks both triggers");
+    });
+
+    test("spawned sessions never receive a preparation trigger", () => {
+      const oldRole = process.env[WS_PI_SPAWN_ROLE_ENV];
+      process.env[WS_PI_SPAWN_ROLE_ENV] = "worker";
+      try {
+        const { pi, ctx, usage, preparations } = triggerRun();
+        usage.percent = 99;
+        pi.handlers.get("turn_end")!({}, ctx);
+        pi.handlers.get("agent_end")!({}, ctx);
+        assert.equal(preparations().length, 0);
+      } finally {
+        if (oldRole === undefined) delete process.env[WS_PI_SPAWN_ROLE_ENV]; else process.env[WS_PI_SPAWN_ROLE_ENV] = oldRole;
+      }
+    });
+
+    test("a user /compact is cancelled and rerouted into a preparation turn carrying its focus text", async () => {
+      const { pi, ctx, notifications, preparations } = triggerRun();
+      const result = pi.handlers.get("session_before_compact")!(compactionEvent("manual", [], { customInstructions: "keep the API notes" }), ctx);
+      assert.deepEqual(result, { cancel: true });
+      assert.equal(leadCompactingRef.current, true, "the hold still covers the cancelled compaction");
+      assert.equal(preparations().length, 0, "nothing is sent from inside the compaction event");
+
+      pi.handlers.get("session_compact_failed")!({ reason: "manual", aborted: true, errorMessage: undefined, willRetry: false, fromExtension: false }, ctx);
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(leadCompactingRef.current, false, "the cancel releases the hold");
+      assert.equal(preparations().length, 1);
+      const reroute = preparations()[0]!;
+      assert.deepEqual(reroute.options, { deliverAs: "followUp", triggerTurn: true });
+      assert.match((reroute.content as { content: string }).content, /^The user ran \/compact[\s\S]*focus text, to honor in your prose:\nkeep the API notes\n\nGUIDE BODY 261002$/);
+      assert.deepEqual(notifications, [], "no failure is reported for the reroute");
+
+      let compactCall: Parameters<ExtensionContext["compact"]>[0] | undefined;
+      ctx.compact = (opts) => { compactCall = opts; };
+      await pi.tools.get("ws-compact")!.execute("c", { current_work: "prepared" }, undefined, undefined, ctx);
+      const own = pi.handlers.get("session_before_compact")!(compactionEvent("manual"), ctx) as unknown as { compaction?: { summary: string } };
+      assert.match(own.compaction!.summary, /prepared/, "the lever's own manual compaction is not rerouted");
+      assert.ok(compactCall);
+    });
+
+    test("a threshold or overflow compaction without preparation gets the fallback summary from the session model", async () => {
+      for (const reason of ["threshold", "overflow"] as const) {
+        const { pi, ctx } = triggerRun();
+        const calls: Array<{ model: unknown; context: { systemPrompt?: string; messages: Array<{ role: string; content: Array<{ text: string }> }> }; options: Record<string, unknown> }> = [];
+        const model = { id: "session-model", maxTokens: 4096 };
+        Object.assign(ctx, {
+          model,
+          modelRegistry: {
+            complete: async (m: unknown, context: never, options: never) => {
+              calls.push({ model: m, context, options });
+              return { role: "assistant", stopReason: "stop", usage: { input: 1, output: 2 }, content: [{ type: "text", text: "### Current work\nFALLBACK PROSE" }] };
+            },
+          },
+        });
+        const branch = [{ type: "message", id: "u1", parentId: null, timestamp: "2026-10-02T10:00:00.000Z", message: { role: "user", content: "HUMAN ASK", timestamp: 0 } }];
+        const event = compactionEvent(reason, branch);
+        (event as { preparation: { messagesToSummarize: unknown[]; previousSummary?: string } }).preparation.messagesToSummarize = [{ role: "user", content: "summarize me", timestamp: 0 }];
+        const result = await (pi.handlers.get("session_before_compact")!(event, ctx) as unknown as Promise<{ compaction: { summary: string; firstKeptEntryId: string; details: unknown; usage: unknown } }>);
+        assert.equal(calls.length, 1, reason);
+        assert.equal(calls[0]!.model, model, "the session model");
+        assert.match(calls[0]!.context.systemPrompt!, /context summarization assistant/);
+        assert.match(calls[0]!.context.messages[0]!.content[0]!.text, /<conversation>\n\[User\]: summarize me\n<\/conversation>/);
+        assert.equal(calls[0]!.options.maxTokens, 4096, "capped by the model's own output limit");
+        assert.equal((calls[0]!.options as { signal?: unknown }).signal !== undefined, true);
+        assert.equal(result.compaction.firstKeptEntryId, "kept-entry");
+        assert.deepEqual(result.compaction.details, { kind: "ws-pi-lead-compaction", version: 1, source: "fallback" });
+        assert.deepEqual(result.compaction.usage, { input: 1, output: 2 });
+        const summary = result.compaction.summary;
+        assert.match(summary, /ws session key: `lead-key`/);
+        assert.match(summary, /HUMAN ASK/);
+        assert.match(summary, /## Carried forward by the lead\n### Current work\nFALLBACK PROSE/);
+        assert.doesNotMatch(summary, /\/tmp\/(read|edit)\.ts/);
+      }
+    });
+
+    test("a failed fallback call degrades to native compaction with a warning", async () => {
+      const { pi, ctx, notifications } = triggerRun();
+      Object.assign(ctx, {
+        model: { id: "m", maxTokens: 0 },
+        modelRegistry: { complete: async () => ({ role: "assistant", stopReason: "error", errorMessage: "provider down", content: [] }) },
+      });
+      const result = await (pi.handlers.get("session_before_compact")!(compactionEvent("threshold"), ctx) as unknown as Promise<unknown>);
+      assert.equal(result, undefined);
+      assert.match(notifications.at(-1)!.message, /fallback summary failed \(provider down\)/);
+    });
+
+    test("the competing-extension notice fires once per session when the stored entry is not ours", async () => {
+      const { pi, ctx, notifications, stored } = triggerRun();
+      const competing = () => notifications.filter((n) => /Another extension's compaction replaced/.test(n.message));
+      pi.handlers.get("session_compact")!({ reason: "threshold", fromExtension: false, compactionEntry: { details: { readFiles: [] } } }, ctx);
+      assert.equal(competing().length, 0, "Pi's native summary after our fallback declined is not a competitor");
+
+      await pi.tools.get("ws-compact")!.execute("c", { current_work: "x" }, undefined, undefined, ctx);
+      pi.handlers.get("session_before_compact")!(compactionEvent("manual"), ctx);
+      pi.handlers.get("session_compact")!({ reason: "manual", fromExtension: false, compactionEntry: { details: undefined } }, ctx);
+      assert.equal(competing().length, 1, "our result was overridden by another extension's empty result");
+      assert.equal(competing()[0]!.level, "warning");
+
+      pi.handlers.get("session_compact")!(stored({ other: "extension" }), ctx);
+      assert.equal(competing().length, 1, "once per session");
+      pi.handlers.get("session_compact")!(stored(ourDetails), ctx);
+      assert.equal(competing().length, 1);
+      await new Promise((resolve) => setImmediate(resolve));
     });
   });
 });

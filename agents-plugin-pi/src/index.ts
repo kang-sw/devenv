@@ -249,6 +249,7 @@ const launcherPath = join(pluginDir, "bin", "ws-mcp-launcher.py");
 const runtimeJsonPath = join(pluginDir, "runtime.json");
 const goalLoopConfigPath = join(pluginDir, "goal-loop-config.json");
 const piLeadGuidePath = join(pluginDir, "pi-lead-guide.md");
+const leadCompactGuidePath = join(pluginDir, "lead-compact-guide.md");
 const executeWorkerGuidePath = join(pluginDir, "execute-worker-guide.md");
 const exploreGuidePath = join(pluginDir, "explore-guide.md");
 
@@ -595,6 +596,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   const goalLoopHandle = registerGoalLoop(pi, {
     goalLoopConfigPath,
     rpcRegistryRef,
+    leadCompactGuidePath,
     sessionKeyRef: { get current() { return handle?.defaultSessionKeyRef.current ?? sessionKeyRef.current; } },
   }, toolPreviewTuiRef);
   // Declare once; the controller is replaced and disposed at session boundaries.

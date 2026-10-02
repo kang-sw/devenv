@@ -68,27 +68,40 @@
  * sections plus that prose, replacing Pi's native summarizer for the lead.
  * The lever works with or without an active goal; only while a goal is active
  * does it re-arm the goal loop (it never calls `disarmGoal()`). Spawned
- * worker/explore/fork sessions keep Pi's native compaction. The reinject
+ * worker/explore/fork sessions keep Pi's native compaction. The lead is led
+ * to the lever by a preparation message carrying `lead-compact-guide.md`: an
+ * advisory nudge at `agent_end`, a hard-cut steer at `turn_end`, or a user
+ * `/compact`, which is cancelled and rerouted. A threshold or overflow
+ * compaction that arrives without lever prose gets an in-hook fallback
+ * summary from the session model. The reinject
  * reminder still surfaces `ctx.getContextUsage().percent` against the
  * compaction-advisory percent; that knob, the context-window override, and
  * the new compaction knobs live on the same `goal-loop-config.json` file as
  * Phase 1's `runaway_threshold`.
  */
 
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
-import type { CompactionResult, ContextUsage, ExtensionAPI, ExtensionContext, SessionBeforeCompactEvent } from "@earendil-works/pi-coding-agent";
+import { convertToLlm, serializeConversation, type CompactionResult, type ContextUsage, type ExtensionAPI, type ExtensionContext, type SessionBeforeCompactEvent } from "@earendil-works/pi-coding-agent";
 import {
+  buildFallbackSummaryPrompt,
   buildLeadCompactionSummary,
+  buildPreparationMessage,
   DEFAULT_USER_MESSAGE_CAP_TOKENS,
   DEFAULT_USER_MESSAGES_BUDGET_TOKENS,
+  extractLeadProse,
+  FALLBACK_SYSTEM_PROMPT,
   GOAL_REMINDER_MARKER_PREFIX,
   isLeadCompactionDetails,
+  LEAD_COMPACT_CUSTOM_TYPE,
   LEAD_COMPACT_TOOL_NAME,
   LEAD_COMPACTION_DETAILS_KIND,
   leadProseParameterSchema,
+  readLeadCompactGuide,
   renderLeadProse,
   type LeadCompactionDetails,
   type LeadProse,
+  type PreparationTrigger,
   type UserMessageBudgets,
 } from "./lead-compaction.ts";
 import { readSpawnRole } from "./process-role.ts";
@@ -104,8 +117,10 @@ export interface GoalLoopConfig {
   /** Whether an owner lead animates actionable child waits in the live-agent widget. Only literal false disables the 330ms cue. */
   agent_wait_animation?: boolean;
   runaway_threshold?: number;
-  /** Advisory context-usage percent (0, 100] surfaced in the reinject reminder as a nudge point — not a gate. */
+  /** Advisory context-usage percent (0, 100]: surfaced in the reinject reminder, and (261002) the point where the lead is nudged once to prepare for compaction. */
   compaction_advisory_percent?: number;
+  /** Hard context-usage percent (0, 100] where the lead is steered into compaction preparation at the next tool-call boundary (261002). */
+  compaction_hard_percent?: number;
   /** Optional context-window token override for `computeContextPercent`, used when the model's own `getContextUsage().contextWindow` should be superseded. */
   context_window_override?: number;
   /**
@@ -134,6 +149,9 @@ export const DEFAULT_RUNAWAY_THRESHOLD = 10;
 
 /** Default advisory context-usage percent (adapter-chosen, no ticket-pinned value; config-tunable) surfaced in the reinject reminder. */
 export const DEFAULT_COMPACTION_ADVISORY_PERCENT = 50;
+
+/** Default hard compaction percent (261002): a forcing point below Pi's own automatic compaction. */
+export const DEFAULT_COMPACTION_HARD_PERCENT = 80;
 
 /** Default settle-timer delay in milliseconds, absent (or overridden by) a config file (260906 Phase 1). */
 export const DEFAULT_SETTLE_DELAY_MS = 5000;
@@ -183,6 +201,12 @@ export function resolveRunawayThreshold(config: GoalLoopConfig | undefined): num
 export function resolveCompactionAdvisoryPercent(config: GoalLoopConfig | undefined): number {
   const value = config?.compaction_advisory_percent;
   return typeof value === "number" && Number.isFinite(value) && value > 0 && value <= 100 ? value : DEFAULT_COMPACTION_ADVISORY_PERCENT;
+}
+
+/** Resolves `compaction_hard_percent` with `resolveCompactionAdvisoryPercent`'s never-hard-fail shape. */
+export function resolveCompactionHardPercent(config: GoalLoopConfig | undefined): number {
+  const value = config?.compaction_hard_percent;
+  return typeof value === "number" && Number.isFinite(value) && value > 0 && value <= 100 ? value : DEFAULT_COMPACTION_HARD_PERCENT;
 }
 
 /**
@@ -492,6 +516,8 @@ export interface RegisterGoalLoopOptions {
   clearTimer?: (handle: NodeJS.Timeout) => void;
   /** The lead's own ws session key, filled by `index.ts` at `session_start`; carried verbatim into the compaction summary. */
   sessionKeyRef?: { current: string | undefined };
+  /** Path to `lead-compact-guide.md`, read fresh into every preparation message (261002); absent means a one-line fallback guide. */
+  leadCompactGuidePath?: string;
 }
 
 /**
@@ -617,6 +643,24 @@ export function registerGoalLoop(
    * consumption or by the lever's own completion/failure callback.
    */
   let pendingLever: { prose: string; operationId: number } | undefined;
+
+  /**
+   * 261002 Phase 2 trigger state (lead only). `advisoryFired`/`hardFired`
+   * make each nudge fire once per threshold crossing; a compaction (or usage
+   * observed back below the threshold) re-arms them. `preparation` is set
+   * when a preparation message is sent and blocks both triggers until the
+   * turn carrying it ends (`started` flips on its `message_start`).
+   * `pendingReroute` carries a cancelled `/compact`'s focus text to the
+   * failure event that follows the cancel. `expectOwnCompaction` marks that
+   * this adapter answered the current compaction, so a stored entry that is
+   * not ours means another extension's result won.
+   */
+  let advisoryFired = false;
+  let hardFired = false;
+  let preparation: { started: boolean } | undefined;
+  let pendingReroute: { focus?: string } | undefined;
+  let expectOwnCompaction = false;
+  let competingNoticeShown = false;
 
   const scheduleTimer =
     opts.scheduleTimer ??
@@ -1078,6 +1122,11 @@ export function registerGoalLoop(
   // terminal lever or force-stop does, both of which run inside a turn whose
   // own `agent_start` already cleared the key on entry.
   pi.on("message_start", (event) => {
+    const started = event.message as { role: string; customType?: string };
+    if (started.role === "custom" && started.customType === LEAD_COMPACT_CUSTOM_TYPE) {
+      if (preparation) preparation.started = true;
+      return;
+    }
     if (event.message.role !== "user" || !outstandingReminderHandoff) return;
     const content = event.message.content;
     const text = typeof content === "string"
@@ -1085,6 +1134,56 @@ export function registerGoalLoop(
       : content.filter((part) => part.type === "text").map((part) => part.text).join("");
     const marker = `${GOAL_REMINDER_MARKER_PREFIX}${outstandingReminderHandoff.id} -->`;
     if (text.includes(marker)) outstandingReminderHandoff = undefined;
+  });
+
+  // 261002 Phase 2: context-usage triggers (lead only). The hard cut is
+  // checked at every turn end and sent as a steer, so it lands at the next
+  // tool-call boundary instead of waiting for the run to settle; the
+  // advisory nudge waits for the run to end. Neither fires while a
+  // preparation turn or a compaction is in progress.
+  function sendPreparation(trigger: PreparationTrigger, deliverAs: "steer" | "followUp"): void {
+    preparation = { started: false };
+    pi.sendMessage(
+      {
+        customType: LEAD_COMPACT_CUSTOM_TYPE,
+        content: buildPreparationMessage(trigger, readLeadCompactGuide(opts.leadCompactGuidePath)),
+        display: true,
+        details: { trigger: trigger.kind },
+      },
+      { deliverAs, triggerTurn: true },
+    );
+  }
+
+  function checkCompactionTriggers(ctx: ExtensionContext, boundary: "turn" | "run"): void {
+    if (isChildProcess(process.env) || leadCompactingRef.current || preparation) return;
+    const config = readGoalLoopConfig(opts.goalLoopConfigPath);
+    const percent = computeContextPercent(ctx.getContextUsage(), resolveContextWindowOverride(config));
+    if (percent === null) return;
+    const advisory = resolveCompactionAdvisoryPercent(config);
+    const hard = resolveCompactionHardPercent(config);
+    if (percent < advisory) advisoryFired = false;
+    if (percent < hard) hardFired = false;
+    if (percent >= hard && !hardFired) {
+      hardFired = true;
+      advisoryFired = true;
+      sendPreparation({ kind: "hard", percent, threshold: hard }, boundary === "turn" ? "steer" : "followUp");
+      return;
+    }
+    if (boundary === "run" && percent >= advisory && !advisoryFired) {
+      advisoryFired = true;
+      sendPreparation({ kind: "advisory", percent, threshold: advisory }, "followUp");
+    }
+  }
+
+  pi.on("turn_end", (_event, ctx) => {
+    checkCompactionTriggers(ctx, "turn");
+  });
+
+  pi.on("agent_end", (_event, ctx) => {
+    // The run that carried a preparation message is over: whether the lead
+    // compacted or not, later crossings may nudge again.
+    if (preparation?.started) preparation = undefined;
+    checkCompactionTriggers(ctx, "run");
   });
 
   pi.on("agent_start", (_event, ctx) => {
@@ -1119,14 +1218,69 @@ export function registerGoalLoop(
     if (!activeCompaction) beginCompaction(state.active ? goalGeneration : undefined);
     else leadCompactingRef.current = true;
     if (isChildProcess(process.env)) return undefined;
-    if (state.active && state.goal) ctx.ui.notify(buildCompactionObservation(state.goal, event.reason), "info");
+    expectOwnCompaction = false;
     const lever = pendingLever;
-    if (event.reason === "manual" && lever) {
+    if (event.reason === "manual" && !lever) {
+      // A user /compact (or any manual compaction not started by the lever)
+      // is cancelled; the failure event Pi emits for the cancel releases the
+      // hold and then queues the preparation turn with the focus text.
+      pendingReroute = { focus: event.customInstructions };
+      return { cancel: true };
+    }
+    if (state.active && state.goal) ctx.ui.notify(buildCompactionObservation(state.goal, event.reason), "info");
+    if (lever) {
       pendingLever = undefined;
       return ownCompaction(event, ctx, lever.prose, "lever");
     }
-    return undefined;
+    // Threshold or overflow compaction with no lever prose: summarize in-hook.
+    // No session model means Pi's own summarizer cannot run either; leave it
+    // to report that.
+    if (!ctx.model) return undefined;
+    return fallbackCompaction(event, ctx);
   });
+
+  /**
+   * The in-hook fallback (261002 Phase 2): one tool-less call to the session
+   * model writes the lead prose under the fixed headings from the
+   * conversation being summarized, and the deterministic sections are added
+   * as for the lever. Any failure (a provider error, an empty answer, an
+   * abort) is reported and answered with nothing, so Pi's native summarizer
+   * still compacts.
+   */
+  async function fallbackCompaction(
+    event: SessionBeforeCompactEvent,
+    ctx: ExtensionContext,
+  ): Promise<{ compaction: CompactionResult<LeadCompactionDetails> } | undefined> {
+    try {
+      const model = ctx.model!;
+      const { messagesToSummarize, turnPrefixMessages, previousSummary, settings } = event.preparation;
+      const conversationText = serializeConversation(convertToLlm([...messagesToSummarize, ...turnPrefixMessages]));
+      const prompt = buildFallbackSummaryPrompt(conversationText, previousSummary ? extractLeadProse(previousSummary) : undefined);
+      const reserve = Math.floor(0.8 * settings.reserveTokens);
+      const response = await ctx.modelRegistry.complete(
+        model,
+        { systemPrompt: FALLBACK_SYSTEM_PROMPT, messages: [{ role: "user", content: [{ type: "text", text: prompt }], timestamp: Date.now() }] },
+        { maxTokens: model.maxTokens > 0 ? Math.min(reserve, model.maxTokens) : reserve, signal: event.signal, cacheRetention: "none", sessionId: randomUUID() },
+      );
+      if (response.stopReason === "error" || response.stopReason === "aborted") {
+        throw new Error(response.errorMessage ?? `summary request ${response.stopReason}`);
+      }
+      const prose = response.content
+        .filter((part): part is { type: "text"; text: string } => part.type === "text")
+        .map((part) => part.text)
+        .join("\n")
+        .trim();
+      if (!prose) throw new Error("the summary model returned no text");
+      const result = ownCompaction(event, ctx, prose, "fallback");
+      if (result) result.compaction.usage = response.usage;
+      return result;
+    } catch (error) {
+      if (event.signal.aborted) return undefined;
+      const message = error instanceof Error ? error.message : String(error);
+      ctx.ui.notify(`ws lead compaction fallback summary failed (${message}); Pi's native compaction runs instead.`, "warning");
+      return undefined;
+    }
+  }
 
   /**
    * Assembles the adapter's compaction result. A build failure (a malformed
@@ -1148,6 +1302,7 @@ export function registerGoalLoop(
         budgets: resolveUserMessageBudgets(readGoalLoopConfig(opts.goalLoopConfigPath)),
         source,
       });
+      expectOwnCompaction = true;
       return { compaction };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1163,11 +1318,28 @@ export function registerGoalLoop(
   // after), so anything synchronous here would race that same internal
   // state Pi has not finished unwinding yet.
   pi.on("session_compact", (event, ctx) => {
-    if (!isChildProcess(process.env) && isLeadCompactionDetails(event?.compactionEntry?.details)) {
-      // 261002: the stored summary is this adapter's and carries the lever
-      // prose verbatim, so the next goal reminder need not repeat it. When
-      // another summary landed instead, the carry stays for the reminder.
-      state.pendingCarryForward = undefined;
+    if (!isChildProcess(process.env)) {
+      const ours = isLeadCompactionDetails(event?.compactionEntry?.details);
+      if (ours) {
+        // 261002: the stored summary is this adapter's and carries the lever
+        // prose verbatim, so the next goal reminder need not repeat it. When
+        // another summary landed instead, the carry stays for the reminder.
+        state.pendingCarryForward = undefined;
+      } else if ((expectOwnCompaction || event?.fromExtension) && !competingNoticeShown) {
+        // Pi keeps the last non-empty session_before_compact result, so a
+        // later extension's result silently replaced this adapter's.
+        competingNoticeShown = true;
+        ctx.ui.notify(
+          "Another extension's compaction replaced the ws lead summary, so the session key, child agents, and carried-forward prose were lost. Disable the competing compaction extension for ws lead sessions.",
+          "warning",
+        );
+      }
+      // A compaction re-arms both triggers and ends any preparation.
+      expectOwnCompaction = false;
+      advisoryFired = false;
+      hardFired = false;
+      preparation = undefined;
+      pendingReroute = undefined;
     }
     // Defer beyond Pi's own compaction flag; start alone never clears our hold.
     const operation = activeCompaction;
@@ -1179,7 +1351,15 @@ export function registerGoalLoop(
     // overflow recovery failed: …"`, so `releaseAfterCompaction` must not
     // add its own prefix on top (Review relay #1, Minor).
     const operation = activeCompaction;
-    setImmediate(() => releaseAfterCompaction(ctx, event.errorMessage, operation));
+    expectOwnCompaction = false;
+    const reroute = pendingReroute;
+    pendingReroute = undefined;
+    setImmediate(() => {
+      releaseAfterCompaction(ctx, event.errorMessage, operation);
+      // 261002: the cancelled /compact becomes the preparation turn, queued
+      // after the release flushed any held pushes.
+      if (reroute && !shuttingDown) sendPreparation({ kind: "reroute", focus: reroute.focus }, "followUp");
+    });
   });
 
   registerWsTool(pi, {
@@ -1289,6 +1469,12 @@ export function registerGoalLoop(
       outstandingReminderHandoff = undefined;
       activeCompaction = undefined;
       pendingLever = undefined;
+      advisoryFired = false;
+      hardFired = false;
+      preparation = undefined;
+      pendingReroute = undefined;
+      expectOwnCompaction = false;
+      competingNoticeShown = false;
       leadCompactingRef.current = false;
       // 260906 Phase 1 (settle-timer reminder race ticket): cancel point
       // "session shutdown" — a replacement session must not inherit a

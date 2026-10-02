@@ -35,7 +35,7 @@ test("the real extension entry registers the push flush before the subtree publi
   try {
     const plugin = join(directory, "plugin");
     mkdirSync(plugin);
-    for (const name of ["src", "runtime.json", "goal-loop-config.json", "pi-lead-guide.md", "execute-worker-guide.md", "explore-guide.md"]) cpSync(join(process.cwd(), name), join(plugin, name), { recursive: true });
+    for (const name of ["src", "runtime.json", "goal-loop-config.json", "pi-lead-guide.md", "lead-compact-guide.md", "execute-worker-guide.md", "explore-guide.md"]) cpSync(join(process.cwd(), name), join(plugin, name), { recursive: true });
     // A junction needs no symlink privilege on Windows; the type is ignored elsewhere.
     symlinkSync(join(process.cwd(), "node_modules"), join(plugin, "node_modules"), "junction");
     mkdirSync(join(plugin, "bin"));

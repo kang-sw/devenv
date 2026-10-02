@@ -443,7 +443,7 @@ export type PreparationTrigger =
 export function buildPreparationMessage(trigger: PreparationTrigger, guide: string): string {
   let head: string;
   if (trigger.kind === "advisory") {
-    head = `Context usage is ${Math.round(trigger.percent)}% of the window, past the compaction advisory point (${trigger.threshold}%). Finish the step in hand if it is nearly done, then prepare for compaction with the guide below.`;
+    head = `Context usage is ${Math.round(trigger.percent)}% of the window, past the compaction advisory point (${trigger.threshold}%). The run has ended, so prepare for compaction now with the guide below before taking up new work.`;
   } else if (trigger.kind === "hard") {
     head = `Context usage is ${Math.round(trigger.percent)}% of the window, past the hard compaction point (${trigger.threshold}%). Stop the current work now and prepare for compaction with the guide below before anything else.`;
   } else {
