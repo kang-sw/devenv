@@ -63,7 +63,10 @@ Applies when the project's `AGENTS.md` `### Review Policy` declares
 3. Publish per the config. When a publish step promotes one branch into
    another, pin the head the gate cleared and re-check the source branch tip
    immediately before the merge; if it moved, abort and re-run the gate over
-   the delta. A gate that did not apply leaves nothing to re-check.
+   the delta. The cleared head is the tip after the gate's own lead-review
+   returns, its ledger commit included; pinning before that commit would
+   re-run the gate forever. A gate that did not apply leaves nothing to
+   re-check.
 4. Push the tag when the config's `Tag` section asks for it; the step-2
    confirmation covers that push. Run post-ship steps.
 

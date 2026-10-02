@@ -2492,6 +2492,9 @@ func TestPlaybookPrintGoldenLeadShip(t *testing.T) {
 		"release-boundary: present",
 		"review.marker(format: json)",
 		"This gate never calls `review.stamp`",
+		// lead-review commits its ledger; the pin must include that commit
+		// or the tip re-check never settles.
+		"The cleared head is the tip after the gate's own lead-review\n   returns, its ledger commit included",
 		"### Ship Config Format",
 		"## Version Strategy",
 	} {
