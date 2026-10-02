@@ -441,7 +441,7 @@ export function readLeadCompactGuide(path: string | undefined): string {
 }
 
 export type PreparationTrigger =
-  | { kind: "advisory"; percent: number; threshold: number }
+  | { kind: "advisory"; percent: number; threshold: number; hardPercent: number }
   | { kind: "hard"; percent: number; threshold: number }
   | { kind: "reroute"; focus?: string };
 
@@ -449,7 +449,21 @@ export type PreparationTrigger =
 export function buildPreparationMessage(trigger: PreparationTrigger, guide: string): string {
   let head: string;
   if (trigger.kind === "advisory") {
-    head = `Context usage is ${Math.round(trigger.percent)}% of the window, past the compaction advisory point (${trigger.threshold}%). The run has ended, so prepare for compaction now with the guide below before taking up new work.`;
+    head = [
+      `Context usage is ${Math.round(trigger.percent)}% of the window (advisory point: ${trigger.threshold}%). This is a light`,
+      "nudge, not an instruction to stop.",
+      "",
+      "Consider compacting now if this is a quiet point \u2014 for example, you are only",
+      "waiting on background agents, or a piece of work just landed and what comes",
+      "next is weakly related to what you are holding. If you are mid-task or holding",
+      "context that would be costly to rebuild (an unsettled discussion, a",
+      "half-applied change, a diagnosis in progress), keep going and compact at the",
+      "next quiet point instead. You will not be nudged again before the hard point",
+      `(${trigger.hardPercent}%), where compaction is no longer optional.`,
+      "",
+      "If you decide not to compact now, end this turn without replying. If you do,",
+      "follow the guide below.",
+    ].join("\n");
   } else if (trigger.kind === "hard") {
     head = `Context usage is ${Math.round(trigger.percent)}% of the window, past the hard compaction point (${trigger.threshold}%). Stop the current work now and prepare for compaction with the guide below before anything else.`;
   } else {

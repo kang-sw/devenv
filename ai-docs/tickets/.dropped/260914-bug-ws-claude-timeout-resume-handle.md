@@ -1,5 +1,6 @@
 ---
 title: "Make ws-claude timeout resume handles internally consistent"
+dropped: 2026-10-03
 ---
 
 # Make ws-claude timeout resume handles internally consistent
@@ -19,3 +20,8 @@ Observed sequence:
 ### Phase 1: Reconcile timeout handle creation and resume behavior
 
 Reproduce the timeout path and trace where request identifiers become resumable handles. Make the returned shape and continuation behavior internally consistent without weakening isolation between sessions. Cover successful continuation, timeout, unknown-handle, and non-resumable error cases in tests. Verification must show that callers can determine from the first response whether retrying through `resume` is supported.
+
+
+## Resolution (2026-10-03)
+
+The ws-claude tool is retired (261002-chore-ws-pi-retire-ws-claude-and-soften-compaction-advisory).

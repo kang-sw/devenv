@@ -2089,7 +2089,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       assert.equal(preparations().length, 1);
       const nudge = preparations()[0]!;
       assert.deepEqual(nudge.options, { deliverAs: "followUp", triggerTurn: true });
-      assert.match((nudge.content as { content: string }).content, /^Context usage is 55% .*advisory point \(50%\)[\s\S]*\n\nGUIDE BODY 261002$/);
+      assert.match((nudge.content as { content: string }).content, /^Context usage is 55% of the window \(advisory point: 50%\)\. This is a light\nnudge[\s\S]*hard point\n\(80%\), where compaction is no longer optional\.[\s\S]*\n\nGUIDE BODY 261002$/);
 
       pi.handlers.get("agent_end")!({}, ctx);
       usage.percent = 60;

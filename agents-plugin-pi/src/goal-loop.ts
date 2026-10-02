@@ -1180,7 +1180,7 @@ export function registerGoalLoop(
     }
     if (boundary === "run" && percent >= advisory && !advisoryFired) {
       advisoryFired = true;
-      sendPreparation({ kind: "advisory", percent, threshold: advisory }, "followUp");
+      sendPreparation({ kind: "advisory", percent, threshold: advisory, hardPercent: hard }, "followUp");
     }
   }
 

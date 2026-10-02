@@ -232,8 +232,6 @@ import { createAgentFooterSessionLifecycle, type AgentFooterContext, type AgentF
 import { descendantUsageValue, retentionEvictionCost } from "./agent-cost.ts";
 import { createDescendantUsageReporter, descendantUsageReporterRef, evaluateDescendantUsage } from "./agent-usage-rollup.ts";
 import { loadHostPiTui } from "./pi-tui.ts";
-import { addClaudeDelegateIfLead, registerClaudeDelegateSession } from "./claude-delegate.ts";
-import { createClaudeDesignReviewContextProvider } from "./claude-design-review.ts";
 import { assertPolicyTool, readDelegationPolicy } from "./delegation-policy.ts";
 import { registerScopedWriteTools } from "./write-scopes.ts";
 import { registerWebTools } from "./web-tools.ts";
@@ -602,15 +600,6 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     leadCompactGuidePath,
     sessionKeyRef: { get current() { return handle?.defaultSessionKeyRef.current ?? sessionKeyRef.current; } },
   }, toolPreviewTuiRef);
-  // Declare once; the controller is replaced and disposed at session boundaries.
-  const claudeDelegateSession = registerClaudeDelegateSession(pi, toolPreviewTuiRef, {
-    designReviewContext: createClaudeDesignReviewContextProvider({
-      async callTool(name, args) {
-        if (!handle) throw new Error("ws-claude design-review requires an active parent bridge");
-        return await handle.client.callTool(name, resolveSessionKey(args, handle.defaultSessionKeyRef));
-      },
-    }),
-  });
   registerLeadBootstrap(pi, wsBlockBaseRef, skillsBlockCacheRef, effectivePromptRef, inheritedForkPromptRef, sessionKeyRef);
   registerModelPrompts(pi, inheritedForkPromptRef);
   pi.on("input", (event, ctx) => {
@@ -709,7 +698,6 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     // `pi-tui.ts`'s `loadHostPiTui()` now (see that file's Addendum doc
     // comment).
     toolPreviewTuiRef.current = await loadToolResultTuiModules();
-    await claudeDelegateSession.start(ctx.cwd);
 
     // 260907 Phase 1: guard the seam so a `startBridge`/`registerAgentTools`
     // failure never falls through into a partial/toolless registration — see
@@ -1028,7 +1016,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     // `_rebuildSystemPrompt` for a role that previously never took that
     // path at all.
     if (isLeadOrFork(bootstrapRole)) {
-      pi.setActiveTools(addClaudeDelegateIfLead(bootstrap.activeTools, bootstrapRole));
+      pi.setActiveTools(bootstrap.activeTools);
     } else if (delegation) {
       pi.setActiveTools(delegation.tools.filter(name => pi.getAllTools().some(tool => tool.name === name)));
     }
@@ -1095,7 +1083,6 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     // read again; the adapter does not drive children through it, but the
     // channel must outlive anything short of the process's own quit.
     if ((event?.reason ?? "quit") === "quit") channel?.close();
-    await claudeDelegateSession.shutdown();
     // captureOrphans snapshots pre-stop child state, including dormant
     // records read-and-cleared from the sidecar. Persist using the claimed
     // registry/path before stopAll can mutate it, never newer globals.

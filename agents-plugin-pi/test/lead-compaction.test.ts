@@ -222,7 +222,26 @@ describe("buildLeadCompactionSummary", () => {
 describe("preparation and fallback text", () => {
   test("each trigger leads the guide body; the reroute carries the /compact focus text", () => {
     const guide = "GUIDE BODY";
-    assert.match(buildPreparationMessage({ kind: "advisory", percent: 51.4, threshold: 50 }, guide), /^Context usage is 51% .*advisory point \(50%\)[\s\S]*\n\nGUIDE BODY$/);
+    assert.equal(
+      buildPreparationMessage({ kind: "advisory", percent: 51.4, threshold: 50, hardPercent: 80 }, guide),
+      [
+        "Context usage is 51% of the window (advisory point: 50%). This is a light",
+        "nudge, not an instruction to stop.",
+        "",
+        "Consider compacting now if this is a quiet point \u2014 for example, you are only",
+        "waiting on background agents, or a piece of work just landed and what comes",
+        "next is weakly related to what you are holding. If you are mid-task or holding",
+        "context that would be costly to rebuild (an unsettled discussion, a",
+        "half-applied change, a diagnosis in progress), keep going and compact at the",
+        "next quiet point instead. You will not be nudged again before the hard point",
+        "(80%), where compaction is no longer optional.",
+        "",
+        "If you decide not to compact now, end this turn without replying. If you do,",
+        "follow the guide below.",
+        "",
+        "GUIDE BODY",
+      ].join("\n"),
+    );
     assert.match(buildPreparationMessage({ kind: "hard", percent: 80, threshold: 80 }, guide), /^Context usage is 80% .*hard compaction point \(80%\)\. Stop the current work now[\s\S]*GUIDE BODY$/);
     const reroute = buildPreparationMessage({ kind: "reroute", focus: "  keep the API notes  " }, guide);
     assert.match(reroute, /^The user ran \/compact/);
