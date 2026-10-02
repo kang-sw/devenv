@@ -509,7 +509,14 @@
       "registered_at": "2026-10-01T07:37:37Z"
     },
     "261002-feat-agenda-size-nudge-and-pi-manual-state-dedupe": {
-      "registered_at": "2026-10-02T00:11:56Z"
+      "registered_at": "2026-10-02T00:11:56Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-10-02T00:44:08Z"
+      }
     }
   }
 }
