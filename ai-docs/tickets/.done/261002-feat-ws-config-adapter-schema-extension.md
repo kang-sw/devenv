@@ -9,6 +9,7 @@ related:
 sage-review-design: skipped
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 0c5360b97988e306
+completed: 2026-10-02
 ---
 
 # ws-mcp config schema extension for adapter-declared keys
@@ -193,6 +194,14 @@ keys, the invalid-stored-value fallback with its warning, and the unset
 result for an unknown key, and when the wsflow runtime-contract tests and the
 `agents-plugin-pi` suite pass with `config.get` registered.
 
+### Result (1ff2e25ad) - 2026-10-02
+
+- Manifest format: JSON `{schema_version: 1, namespace: "<seg>.", keys: [{key, type (integer|boolean|string|enum), minimum, maximum, enum, default, default_scope (session|project|global, default project), description}]}`; keys carry the full namespaced name; unknown fields reject. Loader in `agents-plugin-tool/internal/mcp/config_manifest.go`.
+- Env var `WS_MCP_CONFIG_MANIFESTS`, an OS path list. A rejected manifest is rejected whole, logged to ws-mcp stderr, and listed by `config.list` (text trailer, JSON `manifest_errors`); the earlier-listed manifest keeps a contested namespace.
+- `config.get(key, session_key?)` returns `{key, value, scope, warnings?}`: typed for declared keys, string otherwise, `scope: "unset"` with null value for an unknown unset key, and for an invalid stored value the declared default at scope `builtin` plus a warning. Callable by delegate and leaf keys so children read the lead's session-scope values.
+- Declared keys stay off the wsconfig global scope registry; `config.tune` applies the manifest default scope as the explicit scope.
+- Verification: `go test ./...` passes; wsflow package tests (14) pass; the `agents-plugin-pi` suite passes once its runtime cache holds a ws-mcp build carrying `config.get` (the published v0.46.26 release asset lacks it, so real-child integration tests time out against it until the next release, as for any runtime.json tool addition).
+
 ### Phase 2: Pi adapter migration
 
 Depends on Phase 1.
@@ -212,3 +221,13 @@ Done when the `agents-plugin-pi` suite passes with tests showing a tuned
 value changes goal-loop and compaction behavior and that the defaults apply
 when ws-mcp is unreachable, and the playbook render, surface, wsflow-mirror,
 and downstream-neutrality suites pass.
+
+### Result (1949b0e50) - 2026-10-02
+
+- `agents-plugin-pi/config-manifest.json` declares nine `pi.*` knobs: the six `goal-loop-config.json` knobs plus `compaction_hard_percent`, `compaction_user_messages_budget_tokens`, `compaction_user_message_cap_tokens`. All are integers except the boolean animation knob. `agent_wait_animation` and `child_retention_ttl_days` default to global scope.
+- The bridge sets `WS_MCP_CONFIG_MANIFESTS` for every role's ws-mcp. `src/adapter-config.ts` reads knobs with one `config.get` per knob per use (2s timeout); an absent, failed, or slow read resolves to the built-in default, which a test pins equal to the manifest default.
+- The file, `readGoalLoopConfig`, and their package/test references are removed. `child_retention_ttl_days: 0` disables pruning.
+- Read granularity: one settle cycle reads at arm and carries the values to its fire; the agent widget reads per `refresh()` and its animation ticks reuse that answer. The goal-loop settle arm, the compaction triggers, and the wake-recovery timer guard the async gap (cancel or compaction during the read schedules nothing).
+- `pi-lead-guide.md` routes adapter tuning to `ws__config_tune`; `lead-tune` handles `adapter_setting` knobs; rsrc manifest plus the wsflow and Pi rsrc mirrors are regenerated.
+- Review (lite) fixes in f16371bfa: deferred-reader tests for the async guards, quoted-integer manifest default rejected.
+- Verification: `agents-plugin-pi` `npm test` 1997 tests, 0 fail (runtime cache primed with a local build, see Phase 1); `go test ./...` passes including the shipped-manifest load test, rsrc mirror and manifest drift tests.
