@@ -259,10 +259,13 @@ func manifestDefaultString(key declaredConfigKey, raw json.RawMessage) (string, 
 	}
 	switch key.Type {
 	case declaredTypeInteger:
+		// json.Number also accepts a quoted numeric string; require a bare
+		// JSON number whose text is an integer.
 		var n json.Number
-		decoder := json.NewDecoder(bytes.NewReader(raw))
-		decoder.UseNumber()
-		if err := decoder.Decode(&n); err != nil {
+		if bytes.HasPrefix(bytes.TrimSpace(raw), []byte(`"`)) || json.Unmarshal(raw, &n) != nil {
+			return "", fmt.Errorf("must be a JSON integer")
+		}
+		if _, err := strconv.ParseInt(n.String(), 10, 64); err != nil {
 			return "", fmt.Errorf("must be a JSON integer")
 		}
 		return n.String(), nil

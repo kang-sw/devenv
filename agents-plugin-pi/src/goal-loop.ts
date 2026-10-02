@@ -233,7 +233,7 @@ export function resolveChildRetentionTtlDays(config: GoalLoopConfig | undefined)
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : DEFAULT_CHILD_RETENTION_TTL_DAYS;
 }
 
-/** Knobs one settle cycle reads at arm time: the delay, then (at fire) the runaway threshold, the reminder's percent, and the wake-recovery delay. */
+/** Knobs one settle cycle reads at arm time: the delay, then (at fire) the runaway threshold and the reminder's context percent. The reminder's wake-recovery timer reuses this cycle's `settle_delay_ms`. */
 export const SETTLE_CONFIG_KEYS: readonly GoalLoopConfigKey[] = ["settle_delay_ms", "runaway_threshold", "compaction_advisory_percent", "context_window_override"];
 
 /** Knobs one compaction-trigger check reads. */

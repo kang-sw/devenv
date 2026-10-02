@@ -72,6 +72,7 @@ func TestLoadDeclaredConfigRejectsInvalidManifests(t *testing.T) {
 		{"bad_type", `{"schema_version":1,"namespace":"acme.","keys":[{"key":"acme.a","type":"float","default":1,"description":"d"}]}`, "type must be"},
 		{"default_out_of_range", `{"schema_version":1,"namespace":"acme.","keys":[{"key":"acme.a","type":"integer","minimum":1,"maximum":5,"default":9,"description":"d"}]}`, "from 1 to 5"},
 		{"default_fraction", `{"schema_version":1,"namespace":"acme.","keys":[{"key":"acme.a","type":"integer","default":1.5,"description":"d"}]}`, "integer"},
+		{"default_quoted_integer", `{"schema_version":1,"namespace":"acme.","keys":[{"key":"acme.a","type":"integer","default":"5","description":"d"}]}`, "JSON integer"},
 		{"default_wrong_json_type", `{"schema_version":1,"namespace":"acme.","keys":[{"key":"acme.a","type":"boolean","default":"true","description":"d"}]}`, "JSON boolean"},
 		{"default_missing", `{"schema_version":1,"namespace":"acme.","keys":[{"key":"acme.a","type":"string","description":"d"}]}`, "default is required"},
 		{"enum_default_not_member", `{"schema_version":1,"namespace":"acme.","keys":[{"key":"acme.a","type":"enum","enum":["x","y"],"default":"z","description":"d"}]}`, "one of x, y"},

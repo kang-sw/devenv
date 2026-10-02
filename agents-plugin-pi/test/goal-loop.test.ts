@@ -2329,6 +2329,41 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       assert.match((steers[0]!.content as { content: string }).content, /hard compaction point \(60%\)/);
     });
 
+    /** A reader whose answers wait until the test releases them. */
+    function deferredReader(config: GoalLoopConfig = {}) {
+      const waiting: Array<() => void> = [];
+      const reader: GoalLoopConfigReader = (keys) => new Promise((resolve) => { waiting.push(() => resolve(staticConfigReader(config)(keys) as GoalLoopConfig)); });
+      return { reader, release: () => { for (const go of waiting.splice(0)) go(); } };
+    }
+
+    test("a compaction that starts during the trigger read suppresses the steer", async () => {
+      const deferred = deferredReader();
+      const pi = fakePi();
+      registerGoalLoop(pi.api, { readConfig: deferred.reader, ...fakeClock() });
+      const { ctx } = fakeCtx();
+      (ctx as unknown as { getContextUsage: () => unknown }).getContextUsage = () => ({ tokens: null, contextWindow: 1000, percent: 90 });
+      const pending = pi.handlers.get("turn_end")!({}, ctx);
+      leadCompactingRef.current = true;
+      deferred.release();
+      await pending;
+      assert.equal(pi.sentMessages.filter((m) => (m.content as { customType?: string }).customType === "ws-lead-compact").length, 0);
+    });
+
+    test("the lever's compaction result waits on the budget read", async () => {
+      const deferred = deferredReader({ compaction_user_messages_budget_tokens: 100 });
+      const pi = fakePi();
+      registerGoalLoop(pi.api, { readConfig: deferred.reader, ...fakeClock(), sessionKeyRef: { current: "lead-key" } });
+      const { ctx } = fakeCtx();
+      await pi.tools.get("ws-compact")!.execute("c", { current_work: "x" }, undefined, undefined, ctx);
+      const pending = pi.handlers.get("session_before_compact")!(compactionEvent("manual"), ctx) as unknown as Promise<{ compaction: { details: { source: string } } } | undefined>;
+      assert.ok(pending instanceof Promise, "an asynchronous reader makes the hook asynchronous");
+      deferred.release();
+      const result = await pending;
+      assert.equal(result?.compaction.details.source, "lever");
+      pi.handlers.get("session_compact")!({ reason: "manual", fromExtension: true, compactionEntry: { details: result!.compaction.details } }, ctx);
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+
     test("unreachable ws-mcp leaves every knob at its default", async () => {
       for (const reader of [
         fakeWsStore({ "pi.settle_delay_ms": 1500 }, false).reader,
