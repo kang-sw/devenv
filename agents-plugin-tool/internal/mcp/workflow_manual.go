@@ -68,6 +68,36 @@ func stripModeGatedRegion(body string, keepContent bool) string {
 	return strings.Join(result, "\n")
 }
 
+// agendaSizeNudgeThreshold is the total stored agenda size, in bytes, at or
+// above which session-state renders and agenda.set responses carry a cleanup
+// note. It is calibrated on stored blob bytes: sessions holding only the typed
+// resolver blobs (implement, proceed) sit around 2.1-2.5 KB, so a lower
+// threshold would fire on sessions with nothing stale.
+const agendaSizeNudgeThreshold = 4096
+
+// agendaTotalBytes sums the stored byte length of every agenda blob value.
+// Key names are excluded, and the measure is the stored (compact) JSON, not
+// the pretty-printed render, so the threshold does not drift with indentation.
+func agendaTotalBytes(agenda map[string]json.RawMessage) int {
+	total := 0
+	for _, blob := range agenda {
+		total += len(blob)
+	}
+	return total
+}
+
+// agendaSizeNote returns the cleanup note when the agenda total is at or above
+// agendaSizeNudgeThreshold, and "" otherwise. It is stateless on purpose: the
+// note repeats on every render or set while the total stays over the
+// threshold, because a model that ignores a single nudge is the failure mode.
+func agendaSizeNote(agenda map[string]json.RawMessage) string {
+	total := agendaTotalBytes(agenda)
+	if total < agendaSizeNudgeThreshold {
+		return ""
+	}
+	return fmt.Sprintf("note: agenda totals %d bytes (threshold %d); clear stale blobs with agenda.clear (key, or all: true).", total, agendaSizeNudgeThreshold)
+}
+
 // renderSessionState builds the ## Session State section from a session record.
 // It renders agenda blobs (keyed alphabetically) followed by the todo summary.
 // Only scaffolding strings are handler-owned here; no manual prose.
@@ -101,6 +131,9 @@ func renderSessionState(rec sessionRecord) string {
 			}
 			sb.WriteString(pretty.String())
 			sb.WriteString("\n")
+		}
+		if note := agendaSizeNote(rec.Agenda); note != "" {
+			sb.WriteString("\n" + note + "\n")
 		}
 	}
 
