@@ -512,7 +512,14 @@
       "registered_at": "2026-10-02T13:27:17Z"
     },
     "261002-chore-ws-pi-retire-ws-claude-and-soften-compaction-advisory": {
-      "registered_at": "2026-10-02T14:48:57Z"
+      "registered_at": "2026-10-02T14:48:57Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-10-02T15:06:55Z"
+      }
     },
     "261002-feat-pi-lead-ws-owned-compaction": {
       "registered_at": "2026-10-02T08:04:30Z",
