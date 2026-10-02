@@ -523,6 +523,9 @@
     },
     "261002-feat-pi-lead-ws-owned-compaction": {
       "registered_at": "2026-10-02T08:04:30Z"
+    },
+    "261002-feat-ws-config-adapter-schema-extension": {
+      "registered_at": "2026-10-02T08:04:33Z"
     }
   }
 }
