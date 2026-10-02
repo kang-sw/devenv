@@ -2492,6 +2492,9 @@ func TestPlaybookPrintGoldenLeadShip(t *testing.T) {
 		"release-boundary: present",
 		"review.marker(format: json)",
 		"This gate never calls `review.stamp`",
+		// lead-review commits its ledger; the pin must include that commit
+		// or the tip re-check never settles.
+		"The cleared head is the tip after the gate's own lead-review\n   returns, its ledger commit included",
 		"### Ship Config Format",
 		"## Version Strategy",
 	} {
@@ -2505,6 +2508,17 @@ func TestPlaybookPrintGoldenLeadShip(t *testing.T) {
 	// delegates:false — continuity tip must NOT appear.
 	if strings.Contains(body, "Continuity tip") {
 		t.Errorf("body %q: delegation tip must not appear for delegates:false playbook", body)
+	}
+	// The release gate surfaces open review follow-ups before its own
+	// lead-review step, so follow-ups that review accepts are first shown at
+	// the next gate rather than queried after being recorded.
+	query := strings.Index(body, `ws/git.followups(category: "review", min_level: "minor",`)
+	review := strings.Index(body, "ws:lead-review")
+	if query < 0 || review < 0 || query > review {
+		t.Errorf("release gate must query git.followups (at %d) ahead of its lead-review step (at %d):\n%s", query, review, body)
+	}
+	if !strings.Contains(body, "`resolves`") || !strings.Contains(body, "`chore(review)` commit") {
+		t.Errorf("release gate must carry follow-up resolutions on a ship commit:\n%s", body)
 	}
 }
 
@@ -2618,6 +2632,11 @@ func TestPlaybookPrintGoldenLeadReview(t *testing.T) {
 		"### Review Config Template",
 		"## Landing Lens",
 		"ws:lead-run",
+		// The ledger commit after the stamp carries accepted findings as
+		// follow-ups.
+		"commit the stamped ledger with\n   `ws/git.commit`",
+		"accepted Minor at level `minor`, an overridden Important at level\n   `important`",
+		"ends at the step-7 commit",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing lead-review text %q:\n%s", want, body)

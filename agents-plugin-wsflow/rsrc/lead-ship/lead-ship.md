@@ -24,19 +24,32 @@ config.
 Applies when the project's `AGENTS.md` `### Review Policy` declares
 `release-boundary: present`; otherwise skip to **Execute**.
 
-1. `{{.McpNamespace}}/review.marker(format: json)`. Read its `found` field
+1. Open review follow-ups, before any review below:
+   `{{.McpNamespace}}/git.followups(category: "review", min_level: "minor",
+   range: <start>..HEAD)`. Judge `<start>` from the project's release history:
+   no later than just before the previous release's own release gate, so the
+   follow-ups that gate accepted are inside the range; earlier costs only
+   query time. With no identifiable previous release, omit `range`. Show the
+   result to the user; it never blocks. Re-check each `important` and
+   `critical` item against HEAD: one still valid stays open; one already
+   fixed, or whose target is gone, is resolved by passing its id in
+   `resolves` on the commit this ship makes before publishing (hand the ids
+   to the Execute delegate), or, when the ship makes none, on a dedicated
+   `chore(review)` commit made now so the review below covers it. `minor`
+   items are listed only and left to age out of later ranges.
+2. `{{.McpNamespace}}/review.marker(format: json)`. Read its `found` field
    first; never infer emptiness from a rev-list count, because an empty head
    in `git rev-list --count <head>..HEAD` resolves to `HEAD` and reports `0`.
-2. `found: false`: all prior history is unreviewed. Stop for the user's
+3. `found: false`: all prior history is unreviewed. Stop for the user's
    choice: **bootstrap** (`review.marker(bootstrap: true)` accepts history as
    unreviewed and proceeds), or **review** (ask for an explicit base, then
    `{{.SkillNamespace}}:lead-review` over `range: <base>..HEAD`). Declining
    both stops here.
-3. `found: true`: `git rev-list --count <frontier-head>..HEAD`. `0` proceeds.
+4. `found: true`: `git rev-list --count <frontier-head>..HEAD`. `0` proceeds.
    Otherwise `{{.SkillNamespace}}:lead-review` over `range:
    <frontier-head>..HEAD`; a clearing verdict proceeds, anything else stops
    for the user's explicit override with a recommendation against it.
-4. This gate never calls `review.stamp`; apart from the step-2 bootstrap the
+5. This gate never calls `review.stamp`; apart from the step-3 bootstrap the
    marker advances only through the review skill. An override leaves it where
    it was.
 
@@ -50,7 +63,10 @@ Applies when the project's `AGENTS.md` `### Review Policy` declares
 3. Publish per the config. When a publish step promotes one branch into
    another, pin the head the gate cleared and re-check the source branch tip
    immediately before the merge; if it moved, abort and re-run the gate over
-   the delta. A gate that did not apply leaves nothing to re-check.
+   the delta. The cleared head is the tip after the gate's own lead-review
+   returns, its ledger commit included; pinning before that commit would
+   re-run the gate forever. A gate that did not apply leaves nothing to
+   re-check.
 4. Push the tag when the config's `Tag` section asks for it; the step-2
    confirmation covers that push. Run post-ship steps.
 

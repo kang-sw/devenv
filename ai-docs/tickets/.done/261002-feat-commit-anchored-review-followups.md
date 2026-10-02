@@ -5,6 +5,7 @@ related:
 sage-review-design: skipped
 sage-review-completeness: completed
 sage-review-completeness-reviewed: a87d300ecfbba638
+completed: 2026-10-02
 ---
 
 # Commit-anchored follow-ups for accepted review findings
@@ -228,6 +229,36 @@ minting and return; open filtering after a resolve; `category` and
 resolve warning; and an id still matching after the follow-up and its
 resolve sit in rewritten (different-SHA) commits.
 
+### Result (d9a7cc55d) - 2026-10-02
+
+- `git.commit` accepts `followups` (validated against the closed level and
+  category sets and the single-line rule, ids minted with `wskey.Generate`,
+  returned in input order) and `resolves`; both are written by `CommitMessage`
+  as `## Follow-ups` / `## Resolves` after `## Ticket Updates`. Types, enums,
+  and the bullet writer live in `wsgit/followups.go`; parsing and the
+  open/resolved computation live in `wsrationale/followups.go` over the shared
+  `collectSections`/`splitRecords` (wsrationale imports wsgit, not the
+  reverse). `commitSections` is unchanged, so follow-ups never surface as
+  rationale.
+- The root-lead gate (`scope lead`, empty parent) and the resolve warnings run
+  in the `internal/mcp` `git.commit` case before anything is staged. The gate
+  keys on `followups` being present and non-null, so an empty array from a
+  worker is refused too. Resolve warnings read the full history from HEAD
+  before the commit and are reported under `warnings:` (JSON `warnings`).
+- New read-only `git.followups(range?, category?, min_level?)`, compact text
+  by default, `format: json` for structured rows. Resolves are gathered from
+  the same walk as follow-ups, so openness is as of the range end and the range
+  stays a cost bound; a cherry-picked follow-up is listed once at its newest
+  carrying commit.
+- Registered in the three `runtime.json` contracts, the Pi read-only tool set
+  (`delegation-policy.ts`), and the Pi live-tool contract (63 tools).
+- Verification: `go test ./...` in `agents-plugin-tool` passes; wsflow and
+  agents-plugin Python suites pass; Pi `npm test` passes except
+  `packed install/update ...`, which fails identically on the untouched
+  baseline. The Pi real-child integration tests need a runtime that carries
+  `git.followups`; they pass with a local build stamped `0.46.26` in the
+  gitignored `.runtime` cache (a `-dev` stamp makes the child exit).
+
 ### Phase 2: lead-review and lead-ship integration
 
 Depends on Phase 1. Wire the playbooks to the tool per `## Decisions`:
@@ -250,6 +281,27 @@ downstream-neutrality test suites pass with the changed playbooks, and a
 playbook test asserts lead-review names the follow-up step and lead-ship
 names the `git.followups` release-gate query ahead of the gate's
 lead-review step.
+
+### Result (d7ce74dd6) - 2026-10-02
+
+- lead-review: new range-scenario step 7 commits the stamped ledger through
+  `git.commit`, carrying accepted Minors (`minor`) and overridden Importants
+  (`important`) as `review` follow-ups with `<path>:<line> <summary>` content.
+- lead-ship: the release gate's new step 1 runs `git.followups(category:
+  "review", min_level: "minor", range: <start>..HEAD)` before any gate review,
+  shows it without blocking, re-checks `important`+ items against HEAD, and
+  carries resolutions on the ship's pre-publish commit (ids handed to the
+  Execute delegate) or a dedicated `chore(review)` commit made during the gate
+  so the gate's review covers it. Later gate steps renumbered.
+- Lite-review Important fixed in dcaaad225: the ledger commit moved the tip
+  past the gate-cleared head, so Execute step 3 now defines the cleared head as
+  the tip after the gate's own lead-review returns, its ledger commit included.
+- Mirrored byte-for-byte to the wsflow and Pi rsrc trees with regenerated
+  manifests; golden playbook tests pin the lead-review step, the query-before-
+  lead-review order, the resolution carrier, and the pin wording.
+- Verification: `go test ./internal/mcp ./internal/wsrsrc -count=1` and the
+  full Go suite pass; wsflow and agents-plugin Python suites pass; Pi
+  `npm test` shows only the baseline `packed install/update` failure.
 
 ## Sage Review Round 1 (2026-10-02)
 
