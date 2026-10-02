@@ -508,6 +508,9 @@
     "261001-bug-config-scope-gaps-after-review-opt-in": {
       "registered_at": "2026-10-01T07:37:37Z"
     },
+    "261002-bug-lead-run-effort-agent-type-missing-fallback": {
+      "registered_at": "2026-10-02T13:27:17Z"
+    },
     "261002-feat-pi-lead-ws-owned-compaction": {
       "registered_at": "2026-10-02T08:04:30Z",
       "lease": {
