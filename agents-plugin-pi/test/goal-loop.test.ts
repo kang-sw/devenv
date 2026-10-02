@@ -2088,14 +2088,13 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       const usage = { percent: 10 as number | null };
       (ctx as unknown as { getContextUsage: () => unknown }).getContextUsage = () => ({ tokens: null, contextWindow: 1000, percent: usage.percent });
       const preparations = () => pi.sentMessages.filter((m) => (m.content as { customType?: string }).customType === "ws-lead-compact");
-      const startPreparation = () => pi.handlers.get("message_start")!({ message: { role: "custom", customType: "ws-lead-compact", content: "" } }, ctx);
       const stored = (details: unknown) => ({ reason: "manual", fromExtension: true, compactionEntry: { details } });
-      return { clock, pi, ctx, notifications, usage, preparations, startPreparation, stored };
+      return { clock, pi, ctx, notifications, usage, preparations, stored };
     }
     const ourDetails = { kind: "ws-pi-lead-compaction", version: 1, source: "lever" };
 
     test("the advisory nudge fires once per crossing at the run's end, carries the guide, and re-arms after compaction", async () => {
-      const { pi, ctx, usage, preparations, startPreparation, stored } = triggerRun();
+      const { pi, ctx, usage, preparations, stored } = triggerRun();
       usage.percent = 49;
       pi.handlers.get("agent_end")!({}, ctx);
       assert.equal(preparations().length, 0, "below the advisory point");
@@ -2109,7 +2108,6 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       assert.deepEqual(nudge.options, { deliverAs: "followUp", triggerTurn: true });
       assert.match((nudge.content as { content: string }).content, /^Context usage is 55% .*advisory point \(50%\)[\s\S]*\n\nGUIDE BODY 261002$/);
 
-      startPreparation();
       pi.handlers.get("agent_end")!({}, ctx);
       usage.percent = 60;
       pi.handlers.get("agent_end")!({}, ctx);
@@ -2120,7 +2118,6 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       pi.handlers.get("agent_end")!({}, ctx);
       assert.equal(preparations().length, 2, "a compaction re-arms the nudge");
 
-      startPreparation();
       pi.handlers.get("agent_end")!({}, ctx);
       usage.percent = 30;
       pi.handlers.get("agent_end")!({}, ctx);
@@ -2130,7 +2127,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     });
 
     test("the hard cut is a steer at the next turn end, fires once, and suppresses the advisory nudge", () => {
-      const { pi, ctx, usage, preparations, startPreparation } = triggerRun({ compaction_advisory_percent: 40, compaction_hard_percent: 70 });
+      const { pi, ctx, usage, preparations } = triggerRun({ compaction_advisory_percent: 40, compaction_hard_percent: 70 });
       usage.percent = 71;
       pi.handlers.get("turn_end")!({}, ctx);
       assert.equal(preparations().length, 1);
@@ -2139,7 +2136,6 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       assert.match((steer.content as { content: string }).content, /^Context usage is 71% .*hard compaction point \(70%\)\. Stop the current work now[\s\S]*GUIDE BODY 261002$/);
       assert.equal((steer.content as { display: boolean }).display, true);
 
-      startPreparation();
       pi.handlers.get("turn_end")!({}, ctx);
       pi.handlers.get("agent_end")!({}, ctx);
       usage.percent = 75;
@@ -2149,23 +2145,35 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     });
 
     test("neither trigger fires while a preparation turn or a compaction is in progress", () => {
-      const { pi, ctx, usage, preparations, startPreparation } = triggerRun();
+      const { pi, ctx, usage, preparations } = triggerRun();
       usage.percent = 60;
       pi.handlers.get("agent_end")!({}, ctx);
       assert.equal(preparations().length, 1);
       usage.percent = 95;
       pi.handlers.get("turn_end")!({}, ctx);
-      pi.handlers.get("agent_end")!({}, ctx);
-      assert.equal(preparations().length, 1, "the queued preparation has not started yet");
-      startPreparation();
       pi.handlers.get("turn_end")!({}, ctx);
       assert.equal(preparations().length, 1, "the preparation turn is running");
+      pi.handlers.get("agent_end")!({}, ctx);
+      assert.equal(preparations().length, 2, "an ignored preparation turn has ended; the hard crossing still fires");
 
       pi.handlers.get("session_before_compact")!(compactionEvent("threshold"), ctx);
       pi.handlers.get("agent_end")!({}, ctx);
       pi.handlers.get("turn_end")!({}, ctx);
       assert.equal(leadCompactingRef.current, true);
-      assert.equal(preparations().length, 1, "a compaction in progress blocks both triggers");
+      assert.equal(preparations().length, 2, "a compaction in progress blocks both triggers");
+    });
+
+    test("a preparation message dropped before it ran (an abort clears Pi's queues) does not disable the triggers", () => {
+      const { pi, ctx, usage, preparations } = triggerRun();
+      usage.percent = 85;
+      pi.handlers.get("turn_end")!({}, ctx);
+      assert.equal(preparations().length, 1, "hard steer queued");
+      pi.handlers.get("agent_end")!({}, ctx);
+      usage.percent = 40;
+      pi.handlers.get("agent_end")!({}, ctx);
+      usage.percent = 90;
+      pi.handlers.get("turn_end")!({}, ctx);
+      assert.equal(preparations().length, 2, "the next crossing fires again");
     });
 
     test("spawned sessions never receive a preparation trigger", () => {

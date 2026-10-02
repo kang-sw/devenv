@@ -200,9 +200,15 @@ export interface SelectedHumanMessages {
  * pasted log cannot take the whole budget. Selection stops at the first
  * message that no longer fits: the section is always a contiguous newest run.
  */
+/** Room kept for the `[... truncated: N more characters]` marker when the cap is clamped to the section budget. */
+const TRUNCATION_MARKER_RESERVE_CHARS = 64;
+
 export function selectHumanMessages(messages: readonly HumanMessage[], budgets: UserMessageBudgets): SelectedHumanMessages {
   const totalChars = budgets.totalTokens * CHARS_PER_TOKEN;
-  const capChars = budgets.perMessageTokens * CHARS_PER_TOKEN;
+  // A cap above the section budget would let the newest message alone
+  // overflow it and leave the section empty; the clamp leaves room for the
+  // truncation marker.
+  const capChars = Math.min(budgets.perMessageTokens * CHARS_PER_TOKEN, Math.max(0, totalChars - TRUNCATION_MARKER_RESERVE_CHARS));
   const kept: HumanMessage[] = [];
   let used = 0;
   for (let i = messages.length - 1; i >= 0; i--) {

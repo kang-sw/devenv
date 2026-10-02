@@ -87,16 +87,20 @@ describe("human-typed user messages", () => {
   test("each message is capped with a truncation marker and the section budget keeps a contiguous newest run", () => {
     const capChars = 10 * 4;
     const messages = [
-      { timestamp: at(0), text: "oldest" },
+      { timestamp: at(0), text: "o".repeat(40) },
       { timestamp: at(1), text: "x".repeat(100) },
       { timestamp: at(2), text: "newest" },
     ];
-    const tight = selectHumanMessages(messages, { totalTokens: 21, perMessageTokens: 10 });
+    const tight = selectHumanMessages(messages, { totalTokens: 30, perMessageTokens: 10 });
     assert.equal(tight.kept.length, 2);
     assert.equal(tight.kept[1]!.text, "newest");
     assert.ok(tight.kept[0]!.text.startsWith("x".repeat(capChars)));
     assert.match(tight.kept[0]!.text, /\n\[\.\.\. truncated: 60 more characters\]$/);
     assert.equal(tight.omitted, 1, "the oldest message drops out once the budget is spent");
+
+    const capAboveBudget = selectHumanMessages([{ timestamp: at(0), text: "y".repeat(500) }], { totalTokens: 50, perMessageTokens: 1000 });
+    assert.equal(capAboveBudget.kept.length, 1, "a cap above the budget is clamped, so the newest message still fits");
+    assert.ok(capAboveBudget.kept[0]!.text.startsWith("y".repeat(136) + "\n[... truncated: 364 more characters]"));
 
     const roomy = selectHumanMessages(messages, { totalTokens: 1000, perMessageTokens: 1000 });
     assert.deepEqual(roomy.kept.map((message) => message.text), messages.map((message) => message.text), "kept oldest-first for reading");

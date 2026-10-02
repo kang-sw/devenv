@@ -649,7 +649,9 @@ export function registerGoalLoop(
    * make each nudge fire once per threshold crossing; a compaction (or usage
    * observed back below the threshold) re-arms them. `preparation` is set
    * when a preparation message is sent and blocks both triggers until the
-   * turn carrying it ends (`started` flips on its `message_start`).
+   * next `agent_end`: Pi drains its steer and follow-up queues before that
+   * event, so by then the message has either run or been dropped (an abort
+   * clears the queues), and a dropped one must not disable the triggers.
    * `pendingReroute` carries a cancelled `/compact`'s focus text to the
    * failure event that follows the cancel. `expectOwnCompaction` marks that
    * this adapter answered the current compaction, so a stored entry that is
@@ -657,7 +659,7 @@ export function registerGoalLoop(
    */
   let advisoryFired = false;
   let hardFired = false;
-  let preparation: { started: boolean } | undefined;
+  let preparation = false;
   let pendingReroute: { focus?: string } | undefined;
   let expectOwnCompaction = false;
   let competingNoticeShown = false;
@@ -1122,11 +1124,6 @@ export function registerGoalLoop(
   // terminal lever or force-stop does, both of which run inside a turn whose
   // own `agent_start` already cleared the key on entry.
   pi.on("message_start", (event) => {
-    const started = event.message as { role: string; customType?: string };
-    if (started.role === "custom" && started.customType === LEAD_COMPACT_CUSTOM_TYPE) {
-      if (preparation) preparation.started = true;
-      return;
-    }
     if (event.message.role !== "user" || !outstandingReminderHandoff) return;
     const content = event.message.content;
     const text = typeof content === "string"
@@ -1142,7 +1139,7 @@ export function registerGoalLoop(
   // advisory nudge waits for the run to end. Neither fires while a
   // preparation turn or a compaction is in progress.
   function sendPreparation(trigger: PreparationTrigger, deliverAs: "steer" | "followUp"): void {
-    preparation = { started: false };
+    preparation = true;
     pi.sendMessage(
       {
         customType: LEAD_COMPACT_CUSTOM_TYPE,
@@ -1180,9 +1177,11 @@ export function registerGoalLoop(
   });
 
   pi.on("agent_end", (_event, ctx) => {
-    // The run that carried a preparation message is over: whether the lead
-    // compacted or not, later crossings may nudge again.
-    if (preparation?.started) preparation = undefined;
+    // Any preparation message queued before this run ended has run or was
+    // dropped by now; whether the lead compacted or not, later crossings may
+    // nudge again. A message queued below, at this boundary, blocks the
+    // triggers until the continuation run carrying it ends.
+    preparation = false;
     checkCompactionTriggers(ctx, "run");
   });
 
@@ -1338,7 +1337,7 @@ export function registerGoalLoop(
       expectOwnCompaction = false;
       advisoryFired = false;
       hardFired = false;
-      preparation = undefined;
+      preparation = false;
       pendingReroute = undefined;
     }
     // Defer beyond Pi's own compaction flag; start alone never clears our hold.
@@ -1471,7 +1470,7 @@ export function registerGoalLoop(
       pendingLever = undefined;
       advisoryFired = false;
       hardFired = false;
-      preparation = undefined;
+      preparation = false;
       pendingReroute = undefined;
       expectOwnCompaction = false;
       competingNoticeShown = false;
