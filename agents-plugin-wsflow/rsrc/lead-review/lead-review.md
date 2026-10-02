@@ -45,6 +45,14 @@ you resolve the target, adjudicate their findings, and carry the decisions.
    `concern`; `ref` is the routed ticket stem, required on `block`). Never
    pass the marker entry's base: it drifts to the bootstrap commit. This step
    is the ledger's only writer.
+7. Range scenario only: commit the stamped ledger with
+   `{{.McpNamespace}}/git.commit`, recording every finding the verdict
+   accepts without a fix as a `followups` entry of category `review`: an
+   accepted Minor at level `minor`, an overridden Important at level
+   `important`, content `<path>:<line> <one-line summary>`. Otherwise an
+   accepted finding survives only in the untracked review cache;
+   `{{.McpNamespace}}/git.followups` reads these back at the next release
+   gate.
 
 ## Verdict
 
@@ -52,7 +60,7 @@ you resolve the target, adjudicate their findings, and carry the decisions.
   reviewed and nothing is stamped.
 - **LGTM**: branch scenario merges per the config's Merge Approval Method,
   else asks "Merge?" and merges on confirmation, then notifies per the
-  config's Notification Method; a range scenario ends at the step-6 stamp.
+  config's Notification Method; a range scenario ends at the step-7 commit.
 - **NEEDS FIX**: write the findings to
   `{{.McpNamespace}}/path.generate(kind: "review")` and ask: fix locally, or
   post to the contributor. Locally →
