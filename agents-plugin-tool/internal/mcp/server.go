@@ -40,6 +40,9 @@ type Server struct {
 	// indexOpts configures the ticket ownership index client; zero values
 	// take the library defaults. Tests inject clocks and timeouts here.
 	indexOpts wsindex.Options
+	// declared holds the adapter-declared config keys loaded from the
+	// envConfigManifests manifests at construction.
+	declared declaredConfig
 }
 
 // gitStatusResult keeps the generic git observation intact while allowing the
@@ -160,7 +163,11 @@ func NewServer(root, version string, sourceCommit ...string) *Server {
 		commit = sourceCommit[0]
 	}
 	cleanRoot := filepath.Clean(root)
-	return &Server{root: cleanRoot, version: version, sourceCommit: commit, sessions: newSessionStore()}
+	declared := loadDeclaredConfig(os.Getenv(envConfigManifests))
+	for _, rejected := range declared.rejected {
+		fmt.Fprintf(os.Stderr, "ws-mcp: config manifest rejected: %s\n", rejected)
+	}
+	return &Server{root: cleanRoot, version: version, sourceCommit: commit, sessions: newSessionStore(), declared: declared}
 }
 
 func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) error {
@@ -834,15 +841,16 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		}
 		// config.tuning path: project the per-key writer schema + current values,
 		// with the no-agent full-ws-only cut applied per entry.
-		catalogResolver := s.sessionResolver(sessionKey, builtinConfigAndPromptDefaults())
+		catalogResolver := s.sessionResolver(sessionKey, s.declared.withDefaults(builtinConfigAndPromptDefaults()))
 		catalog, err := buildTuningCatalog(rsrcRoot, &catalogResolver, sessionKey, NoAgentMode())
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
+		catalog.Knobs = append(catalog.Knobs, s.declared.knobs(&catalogResolver, sessionKey)...)
 		if wantsJSON(params.Arguments) {
-			return toolJSONResponse(req.ID, configListView{View: view, Knobs: catalog.Knobs}, nil)
+			return toolJSONResponse(req.ID, configListView{View: view, Knobs: catalog.Knobs, ManifestErrors: s.declared.rejected}, nil)
 		}
-		return toolTextResponse(req.ID, formatConfigView(view)+formatTuningCatalog(catalog), nil)
+		return toolTextResponse(req.ID, formatConfigView(view)+formatTuningCatalog(catalog)+formatManifestErrors(s.declared.rejected), nil)
 
 	case "config.tune":
 		// Generic per-key config writer (260814 Phase 2): subsumes the eight
@@ -857,7 +865,11 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		}
 		entry, ok := resolveConfigEntryForKey(key)
 		if !ok {
-			return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: unknown config key %q; call config.list for supported keys", key))
+			declared, isDeclared := s.declared.lookup(key)
+			if !isDeclared {
+				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: unknown config key %q; call config.list for supported keys", key))
+			}
+			entry = declared.entry()
 		}
 		// prompt.* keys fold the point id into the generic key; a bare "prompt."
 		// leaves an empty point id. The removed config.prompt.set/unset guarded
@@ -915,6 +927,11 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if strings.TrimSpace(scopeArg) != "" {
 			explicitScope = wsconfig.Scope(strings.TrimSpace(scopeArg))
 		}
+		// A declared key's default scope lives on its manifest, not in the
+		// wsconfig scope registry Resolver.Set/Unset consult, so resolve it here.
+		if explicitScope == "" && entry.Declared != nil {
+			explicitScope = entry.Declared.DefaultScope
+		}
 		if entry.Key == "agents.tier" && explicitScope != "" && explicitScope != wsconfig.ScopeProject && explicitScope != wsconfig.ScopeGlobal {
 			return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: agents.tier only supports project or global scope; got %q", explicitScope))
 		}
@@ -967,7 +984,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			// stays repo-unaware because repo scope is read-only to config.tune.
 			// The reset already happened, so an echo load failure is reported
 			// beside it rather than as a failed tune.
-			echo := s.sessionResolver(sessionKey, builtinConfigDefaults())
+			echo := s.sessionResolver(sessionKey, s.declared.withDefaults(builtinConfigDefaults()))
 			resolved, err := echo.Get(sessionKey, entry.Key)
 			if err != nil {
 				return toolTextResponse(req.ID, fmt.Sprintf("%s: reset [scope:%s]\nwarning: effective value unreadable: %v\n", entry.Key, resetEchoScope(explicitScope, entry), err), nil)
@@ -1013,10 +1030,21 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		default:
 			// scalar resolver-backed knob (subagent / bootstrap_alarm).
 			// Resolver.Set enforces global-only + session-key.
-			value, _ := params.Arguments["value"].(string)
-			value = strings.ToLower(strings.TrimSpace(value))
-			if err := validateEnumValue("config.tune", entry.ValueFields, "value", value); err != nil {
-				return toolTextResponse(req.ID, "", err)
+			value, hasValue := params.Arguments["value"].(string)
+			if entry.Declared != nil {
+				if !hasValue {
+					return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %s value is required unless reset is true", key))
+				}
+				normalized, err := entry.Declared.normalize(value)
+				if err != nil {
+					return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %s value %w", key, err))
+				}
+				value = normalized
+			} else {
+				value = strings.ToLower(strings.TrimSpace(value))
+				if err := validateEnumValue("config.tune", entry.ValueFields, "value", value); err != nil {
+					return toolTextResponse(req.ID, "", err)
+				}
 			}
 			resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
 			if err := resolver.Set(entry.Key, value, wsconfig.SetOptions{ExplicitScope: explicitScope, SessionKey: sessionKey}); err != nil {
@@ -1029,7 +1057,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			text := fmt.Sprintf("%s: %s [scope:%s]\n", entry.Key, value, resolvedScope)
 			// A write below a set scope (for example a global write under a
 			// committed repo value) does not take effect; say which value does.
-			echo := s.sessionResolver(sessionKey, builtinConfigDefaults())
+			echo := s.sessionResolver(sessionKey, s.declared.withDefaults(builtinConfigDefaults()))
 			effective, err := echo.Get(sessionKey, entry.Key)
 			if err != nil {
 				text += fmt.Sprintf("warning: effective value unreadable: %v\n", err)
@@ -1038,6 +1066,27 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			}
 			return toolTextResponse(req.ID, text, nil)
 		}
+
+	case "config.get":
+		// Read-only single-key read for adapters: resolves one key through the
+		// session-anchored resolver (session parent chain, project, repo,
+		// global, builtin) without config.list's playbook scan. Callable by
+		// delegate and leaf keys (roleAllowsTool) so a spawned child reads the
+		// value its lead tuned at session scope.
+		key, _ := params.Arguments["key"].(string)
+		key = strings.TrimSpace(key)
+		if key == "" {
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.get: key is required"))
+		}
+		sessionKey, _ := params.Arguments["session_key"].(string)
+		result, err := s.resolveConfigGet(strings.TrimSpace(sessionKey), key)
+		if err != nil {
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.get: %w", err))
+		}
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, result, nil)
+		}
+		return toolTextResponse(req.ID, formatConfigGet(result), nil)
 
 	case "config.resolve_agent":
 		// Read-only tier resolution for adapters (260905 Phase 3): resolves a
@@ -2281,6 +2330,8 @@ func formatConfigView(view wsconfig.View) string {
 type configListView struct {
 	wsconfig.View
 	Knobs []tuningKnob `json:"knobs"`
+	// ManifestErrors names each adapter key manifest rejected at startup.
+	ManifestErrors []string `json:"manifest_errors,omitempty"`
 }
 
 // resolveAgentTierResult is the config.resolve_agent JSON payload (260905
@@ -2375,6 +2426,9 @@ type tuningKnob struct {
 	SelectorFields []tuningField `json:"selector_fields,omitempty"`
 	ValueFields    []tuningField `json:"value_fields,omitempty"`
 	Current        any           `json:"current"`
+	// Default is the declared default of an adapter-declared knob; built-in
+	// knobs state theirs in Description.
+	Default *string `json:"default,omitempty"`
 	// RepoScope reports whether the committed repo-scope file can set this
 	// knob (configKeyEntry.RepoScoped).
 	RepoScope bool `json:"repo_scope"`
@@ -2688,11 +2742,25 @@ func formatTuningCatalog(catalog tuningCatalog) string {
 		if current := formatTuningCurrent(knob.Current); current != "" {
 			fmt.Fprintf(&b, "  current: %s\n", current)
 		}
+		if knob.Default != nil {
+			fmt.Fprintf(&b, "  default: %s\n", *knob.Default)
+		}
 		fmt.Fprintf(&b, "  repo_scope: %s\n", yesNo(knob.RepoScope))
 		if knob.RepoKey != "" {
 			fmt.Fprintf(&b, "  repo_key: %s\n", knob.RepoKey)
 		}
 		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// formatManifestErrors renders the rejected adapter key manifests after the
+// tuning catalog, so a lead reading config.list sees why declared keys are
+// missing.
+func formatManifestErrors(rejected []string) string {
+	var b strings.Builder
+	for _, msg := range rejected {
+		fmt.Fprintf(&b, "config manifest rejected: %s\n", msg)
 	}
 	return b.String()
 }
@@ -4044,12 +4112,25 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"key":         stringProperty("Config knob key to write, e.g. workflow.prefer_subagent, bootstrap_alarm, agents.tier, or prompt.<pointId>. See config.list for the supported set."),
+					"key":         stringProperty("Config knob key to write, e.g. workflow.prefer_subagent, bootstrap_alarm, agents.tier, prompt.<pointId>, or an adapter-declared key. See config.list for the supported set."),
 					"value":       stringOrObjectProperty("New value. A string for scalar knobs (e.g. on/off), or an object {tier, backend, model, effort} for agents.tier. For agents.tier reset pass only {tier}; omit for other resets."),
 					"scope":       enumStringProperty("Optional storage scope. When omitted the write lands in the key's declared default scope. Global-only keys reject non-global scopes; agents.tier supports project and global scopes.", wsconfig.ScopeSchemaEnum()),
 					"harness":     stringProperty("Optional harness selector. Load-bearing for prompt.* (claude, codex, pi, or * for all) and agents.tier (alias key); ignored for keys that do not vary by harness. When omitted for a harness-applicable key, defaults to the current session's detected harness."),
 					"reset":       boolProperty("When true, drop the key's override and fall back to its builtin/inherited default instead of writing an explicit value. Mutually exclusive with value except agents.tier, which requires value: {tier}; only valid for keys that support reset."),
 					"session_key": stringProperty("Caller's lead ws session key. Required at dispatch for lead-authority keys (global-only workflow preferences and alarms) and for prompt.* keys; also the target session for a session-scope write."),
+				},
+				"required": []string{"key"},
+			},
+		},
+		{
+			"name":        "config.get",
+			"description": "Read-only: resolve one config key and report the scope that supplied it (session, including the session's parent chain, then project, repo, global, builtin). A key declared by an adapter key manifest returns a value of its declared type (number, boolean, or string), and a stored value that fails that type returns the declared default with a warning; every other key returns its stored string, or scope unset when nothing holds or declares it. Defaults to compact text; use format=json for structured output.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"key":         stringProperty("Config key to read, e.g. review_phase or an adapter-declared key listed by config.list."),
+					"session_key": stringProperty("Optional ws session key. When supplied, session-scope values (including those inherited from the session's parent chain) and the session's committed repo scope take part in resolution."),
+					"format":      stringProperty(`Optional output format. Use "json" for structured output.`),
 				},
 				"required": []string{"key"},
 			},
@@ -4775,8 +4856,13 @@ func roleAllowsTool(role toolRole, name string) bool {
 		if strings.HasPrefix(name, "session.") {
 			return false
 		}
-		return !strings.HasPrefix(name, "config.")
+		// config.get is a read-only single-key read; a child must reach it to
+		// inherit its lead's session-scope values.
+		return name == "config.get" || !strings.HasPrefix(name, "config.")
 	case roleLeaf:
+		if name == "config.get" {
+			return true
+		}
 		return !strings.HasPrefix(name, "config.") && !strings.HasPrefix(name, "session.") && name != "git.commit"
 	default:
 		return false

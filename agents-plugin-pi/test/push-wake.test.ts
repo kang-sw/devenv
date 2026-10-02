@@ -72,7 +72,6 @@ function harness(withGoal = false, steeringMode: 'one-at-a-time' | 'all' = 'one-
   leadIdleRef.current = () => idle;
   const registry = new Map();
   const goal = withGoal ? registerGoalLoop(pi, {
-    goalLoopConfigPath: '/nonexistent/push-wake.json',
     rpcRegistryRef: {current: registry},
     ...clock,
   }) : undefined;

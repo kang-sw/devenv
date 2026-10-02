@@ -608,6 +608,24 @@ describe("createAgentWidgetController", () => {
     controller.stop();
   });
 
+  test("an asynchronously read animation setting applies when it lands", async (t) => {
+    const waiting = record({ agentId: "aaaaaaaa-0000-0000-0000-000000000000", threadBound: true });
+    const threads = new Map([["q1", thread({ respondentAgentId: waiting.agentId, title: "owner needs this" })]]);
+    const live = new Map<number, number>();
+    let next = 1;
+    t.mock.method(global, "setInterval", ((_callback: () => void, ms: number) => { const id = next++; live.set(id, ms); return { id, unref() {} } as never; }) as typeof setInterval);
+    t.mock.method(global, "clearInterval", ((timer: { id: number }) => { live.delete(timer.id); }) as typeof clearInterval);
+    const controller = createAgentWidgetController({ ui: { setWidget() {}, setStatus() {} } }, registryOf(waiting), threads, {
+      ownerLead: true,
+      animationEnabled: async () => false,
+    });
+    controller.refresh();
+    assert.ok([...live.values()].includes(AGENT_WIDGET_ATTENTION_TICK_MS), "paints at once with the enabled default while the read is pending");
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.ok(![...live.values()].includes(AGENT_WIDGET_ATTENTION_TICK_MS), "the landed false stops the animation");
+    controller.stop();
+  });
+
   test("an approval-only lead widget remains visible without creating an attention timer", (t) => {
     const approval = record({ pendingApproval: { cmdId: "a", command: "x" } });
     const intervals: number[] = [];

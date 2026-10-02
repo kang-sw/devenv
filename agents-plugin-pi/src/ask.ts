@@ -458,8 +458,8 @@ export function serializeThreadRegistry(records: readonly ThreadRecord[]): strin
 
 /**
  * Tolerant parse: anything that is not a well-formed `{threads:[...]}`
- * document degrades to `[]` rather than throwing — same never-throw contract
- * `readGoalLoopConfig` already uses for adapter-owned data files. Individual
+ * document degrades to `[]` rather than throwing — the never-throw contract
+ * for adapter-owned data files. Individual
  * entries missing a `threadId`/`status` are dropped rather than poisoning
  * the whole registry.
  */
@@ -883,7 +883,7 @@ export function createThreadRegistryHandle(): ThreadRegistryHandle {
   return { threads: new Map(), ctxRef: { current: undefined }, pathRef: { current: undefined } };
 }
 
-/** Never-throw read (`readGoalLoopConfig`'s contract): a missing/corrupt file degrades to an empty registry. */
+/** Never-throw read: a missing/corrupt file degrades to an empty registry. */
 export function loadThreadRegistryFile(path: string): ThreadRecord[] {
   let raw: string;
   try {

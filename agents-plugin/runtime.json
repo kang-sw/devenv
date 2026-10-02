@@ -34,6 +34,7 @@
     "config.list": ">=0.46.26-dev <0.47.0",
     "config.tune": ">=0.46.26-dev <0.47.0",
     "config.resolve_agent": ">=0.46.26-dev <0.47.0",
+    "config.get": ">=0.46.26-dev <0.47.0",
     "project_tree": ">=0.46.26-dev <0.47.0",
     "infra.read": ">=0.46.26-dev <0.47.0",
     "convention.read": ">=0.46.26-dev <0.47.0",

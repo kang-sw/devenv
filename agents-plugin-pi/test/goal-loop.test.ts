@@ -1,5 +1,5 @@
 /**
- * Unit tests for goal-loop.ts's pure exports (config reader, threshold/
+ * Unit tests for goal-loop.ts's pure exports (threshold/
  * advisory-percent/context-window-override resolvers, message builders, the
  * `computeContextPercent` context-usage helper, the state machine, and the
  * spawned-child `isChildProcess` predicate — review fix, cycle 1: extracted
@@ -15,7 +15,7 @@
  * Phase 2 (260903) note: `decideOnSettle`'s `"reinject"` decision now carries
  * only the bare `goal` string, not a precomputed reminder — see that
  * function's own doc comment in goal-loop.ts for why (`ctx.getContextUsage()`/
- * the config file are IO-context-only). The old embedded-reminder assertions
+ * the adapter config are IO-context-only). The old embedded-reminder assertions
  * below were updated to the new `{ action: "reinject", goal }` shape.
  *
  * Run with: node --test test/  (from agents-plugin-pi/).
@@ -23,12 +23,11 @@
 
 import { test, describe, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
-  readGoalLoopConfig,
   resolveAgentWaitAnimation,
   resolveRunawayThreshold,
   resolveCompactionAdvisoryPercent,
@@ -54,6 +53,7 @@ import {
   type GoalLoopConfig,
 } from "../src/goal-loop.ts";
 import { WS_PI_SPAWN_ROLE_ENV } from "../src/process-role.ts";
+import { createWsConfigReader, staticConfigReader, type GoalLoopConfigReader } from "../src/adapter-config.ts";
 import { flushHeldPushes, leadIdleRef, clearWakeStart, leadCompactingRef, leadWakeStartPendingRef, heldPushQueue, isOwningAgentIdle, type RpcAgentRegistry } from "../src/spawner.ts";
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
 import { renderLeadProse } from "../src/lead-compaction.ts";
@@ -93,30 +93,23 @@ function writeConfig(name: string, contents: string): string {
   return path;
 }
 
-describe("readGoalLoopConfig", () => {
-  test("missing file returns undefined (never throws)", () => {
-    const path = join(tmpDir, "does-not-exist.json");
-    assert.doesNotThrow(() => readGoalLoopConfig(path));
-    assert.equal(readGoalLoopConfig(path), undefined);
-  });
-
-  test("empty {} file parses to an empty object", () => {
-    const path = writeConfig("empty.json", "{}");
-    assert.deepEqual(readGoalLoopConfig(path), {});
-  });
-
-  test("populated file parses runaway_threshold", () => {
-    const config: GoalLoopConfig = { runaway_threshold: 3 };
-    const path = writeConfig("populated.json", JSON.stringify(config));
-    assert.deepEqual(readGoalLoopConfig(path), config);
-  });
-
-  test("malformed JSON returns undefined (never throws)", () => {
-    const path = writeConfig("malformed.json", "{not valid json");
-    assert.doesNotThrow(() => readGoalLoopConfig(path));
-    assert.equal(readGoalLoopConfig(path), undefined);
-  });
-});
+/**
+ * A synchronous reader over a JSON file, re-read at each use: the test
+ * stand-in for ws-mcp's store, so rewriting the file mid-test is a "tuned
+ * value" the next read sees. A missing or malformed file reads as nothing
+ * tuned, as an unreachable ws-mcp does.
+ */
+function fileReader(path: string): GoalLoopConfigReader {
+  return (keys) => {
+    let config: GoalLoopConfig = {};
+    try {
+      config = JSON.parse(readFileSync(path, "utf8")) as GoalLoopConfig;
+    } catch {
+      // nothing tuned
+    }
+    return staticConfigReader(config)(keys);
+  };
+}
 
 describe("resolveAgentWaitAnimation", () => {
   test("defaults to enabled and only literal false disables the owner-wait cue", () => {
@@ -125,13 +118,6 @@ describe("resolveAgentWaitAnimation", () => {
     assert.equal(resolveAgentWaitAnimation({ agent_wait_animation: true }), true);
     assert.equal(resolveAgentWaitAnimation({ agent_wait_animation: false }), false);
     assert.equal(resolveAgentWaitAnimation({ agent_wait_animation: "false" as unknown as boolean }), true);
-  });
-
-  test("reads a changed config fresh rather than caching the prior value", () => {
-    const path = writeConfig("agent-wait-animation.json", '{"agent_wait_animation":false}');
-    assert.equal(resolveAgentWaitAnimation(readGoalLoopConfig(path)), false);
-    writeFileSync(path, '{"agent_wait_animation":true}', "utf8");
-    assert.equal(resolveAgentWaitAnimation(readGoalLoopConfig(path)), true);
   });
 });
 
@@ -170,15 +156,14 @@ describe("resolveChildRetentionTtlDays", () => {
   test("defaults invalid or missing values to 30 days", () => {
     assert.equal(resolveChildRetentionTtlDays(undefined), DEFAULT_CHILD_RETENTION_TTL_DAYS);
     assert.equal(resolveChildRetentionTtlDays({}), DEFAULT_CHILD_RETENTION_TTL_DAYS);
-    for (const value of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, "30", true, null]) {
+    for (const value of [-1, Number.NaN, Number.POSITIVE_INFINITY, "30", true, false, null]) {
       assert.equal(resolveChildRetentionTtlDays({ child_retention_ttl_days: value as never }), DEFAULT_CHILD_RETENTION_TTL_DAYS);
     }
   });
 
-  test("accepts finite positive fractional days and only literal false disables pruning", () => {
-    assert.equal(resolveChildRetentionTtlDays({ child_retention_ttl_days: 0.25 }), 0.25);
+  test("accepts positive days and 0 disables pruning", () => {
     assert.equal(resolveChildRetentionTtlDays({ child_retention_ttl_days: 45 }), 45);
-    assert.equal(resolveChildRetentionTtlDays({ child_retention_ttl_days: false }), false);
+    assert.equal(resolveChildRetentionTtlDays({ child_retention_ttl_days: 0 }), false);
   });
 });
 
@@ -773,7 +758,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
   describe("explicit /goal stop controls (260909)", () => {
     test("help and completion reserve only stop, clear, and reset while ordinary goal text still arms", async () => {
       const pi = fakePi();
-      registerGoalLoop(pi.api, { goalLoopConfigPath: configPath });
+      registerGoalLoop(pi.api, { readConfig: fileReader(configPath) });
       const { ctx, notifications } = fakeCtx();
       const def = pi.commandDefs.get("goal")!;
 
@@ -798,7 +783,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     test("active-turn replacements queue, apply in FIFO order, and only the resulting goal is reminded", async () => {
       const clock = fakeClock();
       const pi = fakePi();
-      registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+      registerGoalLoop(pi.api, { readConfig: fileReader(configPath), ...clock });
       let idle = true;
       const { ctx, notifications } = fakeCtx(() => idle);
       await pi.commands.get("goal")!("original", ctx);
@@ -835,7 +820,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     test("terminal control invalidates a queued replacement without rearming the terminated goal", async () => {
       const clock = fakeClock();
       const pi = fakePi();
-      registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+      registerGoalLoop(pi.api, { readConfig: fileReader(configPath), ...clock });
       let idle = true;
       const { ctx, notifications } = fakeCtx(() => idle);
       await pi.commands.get("goal")!("original", ctx);
@@ -859,7 +844,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     test("terminal control invalidates older queued replacements while a later replacement uses the new generation", async () => {
       const clock = fakeClock();
       const pi = fakePi();
-      registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+      registerGoalLoop(pi.api, { readConfig: fileReader(configPath), ...clock });
       let idle = true;
       const { ctx, notifications } = fakeCtx(() => idle);
       await pi.commands.get("goal")!("original", ctx);
@@ -889,7 +874,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       test(`${alias} disarms while busy without interrupting work and repeated use is harmless`, async () => {
         const clock = fakeClock();
         const pi = fakePi();
-        registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+        registerGoalLoop(pi.api, { readConfig: fileReader(configPath), ...clock });
         let idle = true;
         const { ctx, notifications, statusCalls } = fakeCtx(() => idle);
         await pi.commands.get("goal")!("ship", ctx);
@@ -912,7 +897,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     test("a cancelled timer callback cannot submit after stop or replace a newly armed goal", async () => {
       const clock = fakeClock();
       const pi = fakePi();
-      registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+      registerGoalLoop(pi.api, { readConfig: fileReader(configPath), ...clock });
       const { ctx } = fakeCtx();
       await pi.commands.get("goal")!("old", ctx);
       pi.handlers.get("agent_settled")!({}, ctx);
@@ -932,7 +917,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     test("one reminder handoff remains outstanding until its matching public user message_start", async () => {
       const clock = fakeClock();
       const pi = fakePi();
-      registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+      registerGoalLoop(pi.api, { readConfig: fileReader(configPath), ...clock });
       const { ctx } = fakeCtx();
       await pi.commands.get("goal")!("ship", ctx);
       pi.handlers.get("agent_settled")!({}, ctx);
@@ -956,7 +941,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     test("wake timeout does not resubmit an unconfirmed reminder handoff", async () => {
       const clock = fakeClock();
       const pi = fakePi();
-      registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+      registerGoalLoop(pi.api, { readConfig: fileReader(configPath), ...clock });
       const { ctx, statusCalls } = fakeCtx();
       await pi.commands.get("goal")!("ship", ctx);
       pi.handlers.get("agent_settled")!({}, ctx);
@@ -972,7 +957,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     test("stop preserves one already-handed reminder but prevents its settle from rearming", async () => {
       const clock = fakeClock();
       const pi = fakePi();
-      registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+      registerGoalLoop(pi.api, { readConfig: fileReader(configPath), ...clock });
       const { ctx } = fakeCtx();
       await pi.commands.get("goal")!("ship", ctx);
       pi.handlers.get("agent_settled")!({}, ctx);
@@ -991,7 +976,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     test("stale compaction completion releases the shared hold but cannot revive old rearm or carry state", async () => {
       const clock = fakeClock();
       const pi = fakePi();
-      registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+      registerGoalLoop(pi.api, { readConfig: fileReader(configPath), ...clock });
       const { ctx } = fakeCtx();
       await pi.commands.get("goal")!("old", ctx);
       let compactCall!: Parameters<ExtensionContext["compact"]>[0];
@@ -1014,7 +999,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     test("shutdown invalidates stale callbacks and a recovered session starts disarmed", async () => {
       const clock = fakeClock();
       const pi = fakePi();
-      const handle = registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+      const handle = registerGoalLoop(pi.api, { readConfig: fileReader(configPath), ...clock });
       const { ctx } = fakeCtx();
       await pi.commands.get("goal")!("ship", ctx);
       pi.handlers.get("agent_settled")!({}, ctx);
@@ -1025,7 +1010,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
 
       const recoveredClock = fakeClock();
       const recoveredPi = fakePi();
-      registerGoalLoop(recoveredPi.api, { goalLoopConfigPath: configPath, ...recoveredClock });
+      registerGoalLoop(recoveredPi.api, { readConfig: fileReader(configPath), ...recoveredClock });
       const { ctx: recoveredCtx } = fakeCtx();
       recoveredPi.handlers.get("agent_settled")!({}, recoveredCtx);
       assert.equal(recoveredClock.pendingCount(), 0, "session recovery does not restore the stopped goal or its timer");
@@ -1036,7 +1021,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
   test("ws-compact compacts with no active goal without touching goal-loop state (reverses 260913's rejection)", async () => {
     const clock = fakeClock();
     const pi = fakePi();
-    registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+    registerGoalLoop(pi.api, { readConfig: fileReader(configPath), ...clock });
     const { ctx, notifications, statusCalls } = fakeCtx();
     let compactCall: Parameters<ExtensionContext["compact"]>[0] | undefined;
     let compactCalls = 0;
@@ -1071,7 +1056,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     test(`verbatim carry is sent once after ${completion} release`, async () => {
       const clock = fakeClock();
       const pi = fakePi();
-      registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+      registerGoalLoop(pi.api, { readConfig: fileReader(configPath), ...clock });
       const { ctx } = fakeCtx();
       await pi.commands.get("goal")!("ship", ctx);
       let compactCall!: Parameters<ExtensionContext["compact"]>[0];
@@ -1106,7 +1091,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
   test("empty carry is present, captured before compact can synchronously complete and dispatch", async () => {
     const clock = fakeClock();
     const pi = fakePi();
-    registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+    registerGoalLoop(pi.api, { readConfig: fileReader(configPath), ...clock });
     const { ctx } = fakeCtx();
     await pi.commands.get("goal")!("ship", ctx);
     ctx.compact = (opts) => {
@@ -1123,7 +1108,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       const clock = fakeClock();
       const pi = fakePi();
       const registry = new Map([["child", { threadBound: false, running: false }]]) as unknown as RpcAgentRegistry;
-      registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock, rpcRegistryRef: { current: registry } });
+      registerGoalLoop(pi.api, { readConfig: fileReader(configPath), ...clock, rpcRegistryRef: { current: registry } });
       let idle = true;
       const { ctx } = fakeCtx(() => idle);
       await pi.commands.get("goal")!("ship", ctx);
@@ -1158,7 +1143,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     test(`${cleanup} discards unsent carry`, async () => {
       const clock = fakeClock();
       const pi = fakePi();
-      const handle = registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+      const handle = registerGoalLoop(pi.api, { readConfig: fileReader(configPath), ...clock });
       const { ctx } = fakeCtx();
       await pi.commands.get("goal")!("old", ctx);
       await pi.tools.get("ws-compact")!.execute("carry", { current_work: exactCarry }, undefined, undefined, ctx);
@@ -1184,7 +1169,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
   test("synchronous send failure does not consume carry", async () => {
     const clock = fakeClock();
     const pi = fakePi();
-    registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+    registerGoalLoop(pi.api, { readConfig: fileReader(configPath), ...clock });
     const { ctx, notifications } = fakeCtx();
     await pi.commands.get("goal")!("ship", ctx);
     await pi.tools.get("ws-compact")!.execute("carry", { current_work: exactCarry }, undefined, undefined, ctx);
@@ -1216,7 +1201,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
   test("ordinary reminder without a lever has no carry heading", async () => {
     const clock = fakeClock();
     const pi = fakePi();
-    registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock });
+    registerGoalLoop(pi.api, { readConfig: fileReader(configPath), ...clock });
     const { ctx } = fakeCtx();
     await pi.commands.get("goal")!("ship", ctx);
     pi.handlers.get("agent_settled")!({}, ctx);
@@ -1228,7 +1213,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
   test("release runs once when both the lever's onComplete and session_compact arrive", async () => {
     const clock = fakeClock();
     const pi = fakePi();
-    registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
+    registerGoalLoop(pi.api, { readConfig: fileReader(configPath), scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
     const { ctx } = fakeCtx();
 
     await pi.commands.get("goal")!("ship the widget", ctx);
@@ -1261,7 +1246,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
   test("release triggered by session_compact is deferred — nothing sent synchronously inside that handler", async () => {
     const clock = fakeClock();
     const pi = fakePi();
-    registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
+    registerGoalLoop(pi.api, { readConfig: fileReader(configPath), scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
     const { ctx } = fakeCtx();
 
     await pi.commands.get("goal")!("ship the widget", ctx);
@@ -1285,7 +1270,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
   test("onError alone releases with the failure reason folded into the reminder", async () => {
     const clock = fakeClock();
     const pi = fakePi();
-    registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
+    registerGoalLoop(pi.api, { readConfig: fileReader(configPath), scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
     const { ctx } = fakeCtx();
 
     await pi.commands.get("goal")!("ship the widget", ctx);
@@ -1308,7 +1293,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
 
   test("agent_start preserves the compaction flag and held queue", () => {
     const pi = fakePi();
-    registerGoalLoop(pi.api, { goalLoopConfigPath: configPath });
+    registerGoalLoop(pi.api, { readConfig: fileReader(configPath) });
     const { ctx } = fakeCtx();
 
     // A defensively-set flag (e.g. an owner-typed /compact) with the goal
@@ -1331,7 +1316,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
 
   test("a non-lever session_compact holds pushes until confirmed start and sends no reminder", async () => {
     const pi = fakePi();
-    registerGoalLoop(pi.api, { goalLoopConfigPath: configPath });
+    registerGoalLoop(pi.api, { readConfig: fileReader(configPath) });
     const { ctx } = fakeCtx();
 
     await pi.commands.get("goal")!("ship the widget", ctx); // state active; 1 message so far (armed)
@@ -1360,7 +1345,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
   test("release while the agent is not idle sends nothing; a subsequent settle re-arms the loop normally", async () => {
     const clock = fakeClock();
     const pi = fakePi();
-    registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
+    registerGoalLoop(pi.api, { readConfig: fileReader(configPath), scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
     const { ctx } = fakeCtx(() => true);
 
     await pi.commands.get("goal")!("ship the widget", ctx); // 1 message (armed)
@@ -1402,7 +1387,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
 
   test("260906 review relay #1 (Tests): a settle that fires mid-compaction sets the waiting-for-compaction footer", async () => {
     const pi = fakePi();
-    registerGoalLoop(pi.api, { goalLoopConfigPath: configPath });
+    registerGoalLoop(pi.api, { readConfig: fileReader(configPath) });
     const { ctx } = fakeCtx();
 
     await pi.commands.get("goal")!("ship the widget", ctx); // 1 message (armed)
@@ -1425,7 +1410,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
   test("confirmed-start flush precedes the lever reminder without consuming carry", async () => {
     const clock = fakeClock();
     const pi = fakePi();
-    registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
+    registerGoalLoop(pi.api, { readConfig: fileReader(configPath), scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
     const { ctx } = fakeCtx();
 
     await pi.commands.get("goal")!("ship the widget", ctx); // 1 message (armed)
@@ -1465,7 +1450,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
   test("260906 review relay #1 (Critical): a threshold auto-compaction's swallowed settle is replayed by the deferred release — exactly one ordinary reminder, streak advanced", async () => {
     const clock = fakeClock();
     const pi = fakePi();
-    registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
+    registerGoalLoop(pi.api, { readConfig: fileReader(configPath), scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
     const { ctx } = fakeCtx();
 
     await pi.commands.get("goal")!("ship the widget", ctx); // 1 message (armed), streak 0
@@ -1511,7 +1496,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
   test("260906 review relay #1 (Critical): the lever's own pendingRearm wins over a same-settle swallow marker — exactly one reminder, both markers consumed", async () => {
     const clock = fakeClock();
     const pi = fakePi();
-    registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
+    registerGoalLoop(pi.api, { readConfig: fileReader(configPath), scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
     const { ctx } = fakeCtx();
 
     await pi.commands.get("goal")!("ship the widget", ctx); // 1 message (armed)
@@ -1560,7 +1545,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     const clock = fakeClock();
     const threshold2Path = writeConfig("relay2-threshold-2.json", JSON.stringify({ runaway_threshold: 2 }));
     const pi = fakePi();
-    registerGoalLoop(pi.api, { goalLoopConfigPath: threshold2Path, scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
+    registerGoalLoop(pi.api, { readConfig: fileReader(threshold2Path), scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
     const { ctx } = fakeCtx();
 
     await pi.commands.get("goal")!("ship the widget", ctx); // 1 message (armed), streak 0
@@ -1624,7 +1609,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
   test("260906 review relay #2 (Test Important): the not-idle branch's marker clearing is observable across a later, unrelated compaction", async () => {
     const clock = fakeClock();
     const pi = fakePi();
-    registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
+    registerGoalLoop(pi.api, { readConfig: fileReader(configPath), scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
     const { ctx } = fakeCtx();
 
     await pi.commands.get("goal")!("ship the widget", ctx); // 1 message (armed)
@@ -1665,7 +1650,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
   test("start before release preserves the hold; subsequent busy release clears origins before unrelated compaction", async () => {
     const clock = fakeClock();
     const pi = fakePi();
-    registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
+    registerGoalLoop(pi.api, { readConfig: fileReader(configPath), scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
     const { ctx } = fakeCtx();
 
     await pi.commands.get("goal")!("ship the widget", ctx); // 1 message (armed)
@@ -1695,7 +1680,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
   test("260906 review relay #2 (Test Minor): GoalLoopShutdownHandle resets the flag and both markers, and a following push is not held", async () => {
     const clock = fakeClock();
     const pi = fakePi();
-    const handle = registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
+    const handle = registerGoalLoop(pi.api, { readConfig: fileReader(configPath), scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
     const { ctx } = fakeCtx();
 
     await pi.commands.get("goal")!("ship the widget", ctx); // 1 message (armed)
@@ -1741,7 +1726,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       const pi = fakePi();
       const registry = new Map([["child-1", { threadBound: false, running: true }]]) as unknown as RpcAgentRegistry;
       const rpcRegistryRef = { current: registry };
-      registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer, rpcRegistryRef });
+      registerGoalLoop(pi.api, { readConfig: fileReader(configPath), scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer, rpcRegistryRef });
       const { ctx } = fakeCtx();
       pi.commands.get("goal")!("ship the widget", ctx);
 
@@ -1765,7 +1750,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       const settleDelayPath = writeConfig("settle-delay-1500.json", JSON.stringify({ settle_delay_ms: 1500 }));
       const clock = fakeClock();
       const pi = fakePi();
-      registerGoalLoop(pi.api, { goalLoopConfigPath: settleDelayPath, scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
+      registerGoalLoop(pi.api, { readConfig: fileReader(settleDelayPath), scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
       const { ctx } = fakeCtx();
       pi.commands.get("goal")!("ship the widget", ctx);
 
@@ -1797,7 +1782,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       test(`${label} cancels a pending settle timer`, async () => {
         const clock = fakeClock();
         const pi = fakePi();
-        registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
+        registerGoalLoop(pi.api, { readConfig: fileReader(configPath), scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
         const { ctx } = fakeCtx();
         await pi.commands.get("goal")!("ship the widget", ctx);
 
@@ -1814,7 +1799,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     test("/goal re-arm cancels a pending settle timer", async () => {
       const clock = fakeClock();
       const pi = fakePi();
-      registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
+      registerGoalLoop(pi.api, { readConfig: fileReader(configPath), scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
       const { ctx } = fakeCtx();
       await pi.commands.get("goal")!("ship the widget", ctx);
 
@@ -1829,7 +1814,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       const threshold1Path = writeConfig("force-stop-threshold-1.json", JSON.stringify({ runaway_threshold: 1 }));
       const clock = fakeClock();
       const pi = fakePi();
-      registerGoalLoop(pi.api, { goalLoopConfigPath: threshold1Path, scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
+      registerGoalLoop(pi.api, { readConfig: fileReader(threshold1Path), scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
       const { ctx } = fakeCtx();
       pi.commands.get("goal")!("ship the widget", ctx);
 
@@ -1847,7 +1832,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     test("resetCompactionStateForShutdown cancels a pending settle timer", () => {
       const clock = fakeClock();
       const pi = fakePi();
-      const handle = registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
+      const handle = registerGoalLoop(pi.api, { readConfig: fileReader(configPath), scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
       const { ctx } = fakeCtx();
       pi.commands.get("goal")!("ship the widget", ctx);
 
@@ -1861,7 +1846,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     test("leadCompactingRef true AT FIRE TIME yields — status/streak untouched, no send", () => {
       const clock = fakeClock();
       const pi = fakePi();
-      registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
+      registerGoalLoop(pi.api, { readConfig: fileReader(configPath), scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
       const { ctx, statusCalls } = fakeCtx();
       pi.commands.get("goal")!("ship the widget", ctx);
 
@@ -1880,7 +1865,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     test("260906 Phase 1 review relay #1 (Important #1): a compaction starting during the settle delay no longer stalls the loop dead", async () => {
       const clock = fakeClock();
       const pi = fakePi();
-      registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
+      registerGoalLoop(pi.api, { readConfig: fileReader(configPath), scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
       const { ctx, statusCalls } = fakeCtx();
       pi.commands.get("goal")!("ship the widget", ctx); // 1 message (armed)
 
@@ -1930,7 +1915,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     test("the shared wake guard clears on start/settle while an unconfirmed reminder suppresses timeout retry", () => {
       const clock = fakeClock();
       const pi = fakePi();
-      registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
+      registerGoalLoop(pi.api, { readConfig: fileReader(configPath), scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer });
       const { ctx, statusCalls } = fakeCtx();
       pi.commands.get("goal")!("ship the widget", ctx);
 
@@ -1979,7 +1964,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       const pi = fakePi();
       const registry = new Map([["child-1", { threadBound: false, running: true }]]) as unknown as RpcAgentRegistry;
       const rpcRegistryRef = { current: registry };
-      registerGoalLoop(pi.api, { goalLoopConfigPath: threshold3Path, scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer, rpcRegistryRef });
+      registerGoalLoop(pi.api, { readConfig: fileReader(threshold3Path), scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer, rpcRegistryRef });
       const { ctx } = fakeCtx();
       pi.commands.get("goal")!("ship the widget", ctx);
 
@@ -2013,7 +1998,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       const registry = new Map([
         ["w-1", { agentId: "w-1", alias: "w1", spawnRole: "worker", running: true, streaming: false, reportLog: [] }],
       ]) as unknown as RpcAgentRegistry;
-      registerGoalLoop(pi.api, { goalLoopConfigPath: configPath, ...clock, rpcRegistryRef: { current: registry }, sessionKeyRef: { current: sessionKey } });
+      registerGoalLoop(pi.api, { readConfig: fileReader(configPath), ...clock, rpcRegistryRef: { current: registry }, sessionKeyRef: { current: sessionKey } });
       const { ctx, notifications } = fakeCtx();
       return { clock, pi, ctx, notifications };
     }
@@ -2081,9 +2066,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     function triggerRun(configOverride?: GoalLoopConfig) {
       const clock = fakeClock();
       const pi = fakePi();
-      const goalLoopConfigPath = configOverride ? join(tmpDir, `trigger-config-${Math.random().toString(36).slice(2)}.json`) : configPath;
-      if (configOverride) writeFileSync(goalLoopConfigPath, JSON.stringify(configOverride));
-      registerGoalLoop(pi.api, { goalLoopConfigPath, ...clock, leadCompactGuidePath: guidePath, sessionKeyRef: { current: "lead-key" } });
+      registerGoalLoop(pi.api, { readConfig: configOverride ? staticConfigReader(configOverride) : fileReader(configPath), ...clock, leadCompactGuidePath: guidePath, sessionKeyRef: { current: "lead-key" } });
       const { ctx, notifications } = fakeCtx();
       const usage = { percent: 10 as number | null };
       (ctx as unknown as { getContextUsage: () => unknown }).getContextUsage = () => ({ tokens: null, contextWindow: 1000, percent: usage.percent });
@@ -2277,6 +2260,128 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       pi.handlers.get("session_compact")!(stored(ourDetails), ctx);
       assert.equal(competing().length, 1);
       await new Promise((resolve) => setImmediate(resolve));
+    });
+  });
+
+  describe("adapter settings read through ws-mcp config.get", () => {
+    /**
+     * A fake bridge client answering `config.get` as ws-mcp does: a tuned
+     * `pi.*` key returns its typed value, an untuned one the manifest
+     * default, which the reader then sees as present. `reachable: false`
+     * rejects every call, as a dead launcher does.
+     */
+    function fakeWsStore(tuned: Record<string, unknown>, reachable = true) {
+      const calls: Array<Record<string, unknown>> = [];
+      const client = {
+        async callTool(name: string, args: Record<string, unknown>) {
+          calls.push({ name, ...args });
+          if (!reachable) throw new Error("ws-mcp exited");
+          const key = String(args.key);
+          const value = key in tuned ? tuned[key] : null;
+          return { content: [{ type: "text" as const, text: JSON.stringify({ key, value, scope: key in tuned ? "session" : "unset" }) }] };
+        },
+      };
+      return { calls, reader: createWsConfigReader(() => ({ client, sessionKey: "lead-key" }), 50) };
+    }
+    const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+    test("a tuned settle delay and runaway threshold drive the goal loop", async () => {
+      const store = fakeWsStore({ "pi.settle_delay_ms": 1500, "pi.runaway_threshold": 1 });
+      const clock = fakeClock();
+      const pi = fakePi();
+      registerGoalLoop(pi.api, { readConfig: store.reader, ...clock });
+      const { ctx } = fakeCtx();
+      await pi.commands.get("goal")!("ship the widget", ctx);
+
+      pi.handlers.get("agent_settled")!({}, ctx);
+      assert.equal(clock.pendingCount(), 0, "the timer waits for the read");
+      await settle();
+      assert.deepEqual(clock.scheduledDelays, [1500], "the tuned delay, not the default");
+      assert.ok(store.calls.every((call) => call.name === "config.get" && call.session_key === "lead-key" && String(call.key).startsWith("pi.")));
+
+      clock.fire();
+      assert.equal(pi.sentUserMessages.length, 1, "a tuned threshold of 1 force-stops on the first tool-less settle; only the goal announcement was sent");
+      assert.equal(clock.pendingCount(), 0);
+    });
+
+    test("an agent_start during the settle read schedules nothing", async () => {
+      const store = fakeWsStore({});
+      const clock = fakeClock();
+      const pi = fakePi();
+      registerGoalLoop(pi.api, { readConfig: store.reader, ...clock });
+      const { ctx } = fakeCtx();
+      await pi.commands.get("goal")!("ship the widget", ctx);
+      pi.handlers.get("agent_settled")!({}, ctx);
+      pi.handlers.get("agent_start")!({}, ctx);
+      await settle();
+      assert.equal(clock.pendingCount(), 0);
+    });
+
+    test("a tuned hard percent moves the compaction steer", async () => {
+      const store = fakeWsStore({ "pi.compaction_hard_percent": 60 });
+      const pi = fakePi();
+      registerGoalLoop(pi.api, { readConfig: store.reader, ...fakeClock() });
+      const { ctx } = fakeCtx();
+      (ctx as unknown as { getContextUsage: () => unknown }).getContextUsage = () => ({ tokens: null, contextWindow: 1000, percent: 65 });
+      await pi.handlers.get("turn_end")!({}, ctx);
+      const steers = pi.sentMessages.filter((m) => (m.content as { customType?: string }).customType === "ws-lead-compact");
+      assert.equal(steers.length, 1, "65% crosses the tuned 60% hard point (the default is 80%)");
+      assert.match((steers[0]!.content as { content: string }).content, /hard compaction point \(60%\)/);
+    });
+
+    /** A reader whose answers wait until the test releases them. */
+    function deferredReader(config: GoalLoopConfig = {}) {
+      const waiting: Array<() => void> = [];
+      const reader: GoalLoopConfigReader = (keys) => new Promise((resolve) => { waiting.push(() => resolve(staticConfigReader(config)(keys) as GoalLoopConfig)); });
+      return { reader, release: () => { for (const go of waiting.splice(0)) go(); } };
+    }
+
+    test("a compaction that starts during the trigger read suppresses the steer", async () => {
+      const deferred = deferredReader();
+      const pi = fakePi();
+      registerGoalLoop(pi.api, { readConfig: deferred.reader, ...fakeClock() });
+      const { ctx } = fakeCtx();
+      (ctx as unknown as { getContextUsage: () => unknown }).getContextUsage = () => ({ tokens: null, contextWindow: 1000, percent: 90 });
+      const pending = pi.handlers.get("turn_end")!({}, ctx);
+      leadCompactingRef.current = true;
+      deferred.release();
+      await pending;
+      assert.equal(pi.sentMessages.filter((m) => (m.content as { customType?: string }).customType === "ws-lead-compact").length, 0);
+    });
+
+    test("the lever's compaction result waits on the budget read", async () => {
+      const deferred = deferredReader({ compaction_user_messages_budget_tokens: 100 });
+      const pi = fakePi();
+      registerGoalLoop(pi.api, { readConfig: deferred.reader, ...fakeClock(), sessionKeyRef: { current: "lead-key" } });
+      const { ctx } = fakeCtx();
+      await pi.tools.get("ws-compact")!.execute("c", { current_work: "x" }, undefined, undefined, ctx);
+      const pending = pi.handlers.get("session_before_compact")!(compactionEvent("manual"), ctx) as unknown as Promise<{ compaction: { details: { source: string } } } | undefined>;
+      assert.ok(pending instanceof Promise, "an asynchronous reader makes the hook asynchronous");
+      deferred.release();
+      const result = await pending;
+      assert.equal(result?.compaction.details.source, "lever");
+      pi.handlers.get("session_compact")!({ reason: "manual", fromExtension: true, compactionEntry: { details: result!.compaction.details } }, ctx);
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+
+    test("unreachable ws-mcp leaves every knob at its default", async () => {
+      for (const reader of [
+        fakeWsStore({ "pi.settle_delay_ms": 1500 }, false).reader,
+        createWsConfigReader(() => undefined),
+        createWsConfigReader(() => ({ client: { callTool: () => new Promise<never>(() => {}) } }), 5),
+      ]) {
+        const clock = fakeClock();
+        const pi = fakePi();
+        registerGoalLoop(pi.api, { readConfig: reader, ...clock });
+        const { ctx } = fakeCtx();
+        (ctx as unknown as { getContextUsage: () => unknown }).getContextUsage = () => ({ tokens: null, contextWindow: 1000, percent: 65 });
+        await pi.commands.get("goal")!("ship the widget", ctx);
+        pi.handlers.get("agent_settled")!({}, ctx);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        assert.deepEqual(clock.scheduledDelays, [DEFAULT_SETTLE_DELAY_MS]);
+        await pi.handlers.get("turn_end")!({}, ctx);
+        assert.equal(pi.sentMessages.filter((m) => (m.content as { customType?: string }).customType === "ws-lead-compact").length, 0, "65% is under the default hard point");
+      }
     });
   });
 });

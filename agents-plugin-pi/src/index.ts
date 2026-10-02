@@ -202,7 +202,8 @@ import {
 import { createAgentWidgetController, shouldArmAgentWidget, type AgentWidgetController } from "./agent-widget.ts";
 import { registerPushMessageRenderers } from "./push-render.ts";
 import { buildOrphanPush, captureOrphans, noSessionSidecarPath, readAndClearSidecarAt, reviveOrphans, sidecarPath, writeSidecarAt, type PersistedOrphan } from "./agent-sidecar.ts";
-import { registerGoalLoop, readGoalLoopConfig, resolveAgentWaitAnimation, resolveChildRetentionTtlDays, resolveSettleDelayMs } from "./goal-loop.ts";
+import { registerGoalLoop, resolveAgentWaitAnimation, resolveChildRetentionTtlDays, resolveSettleDelayMs, type GoalLoopConfig } from "./goal-loop.ts";
+import { createWsConfigReader, thenOrNow } from "./adapter-config.ts";
 import { registerSkillResources } from "./skills-dir.ts";
 import { computeSessionBootstrap, registerLeadBootstrap, type LeadPromptRef, type SkillsBlockCache, type WsBlockBase } from "./lead-bootstrap.ts";
 import { registerModelPrompts } from "./model-prompts.ts";
@@ -247,7 +248,6 @@ const pluginDir = dirname(srcDir); // agents-plugin-pi/
 const repoRoot = dirname(pluginDir);
 const launcherPath = join(pluginDir, "bin", "ws-mcp-launcher.py");
 const runtimeJsonPath = join(pluginDir, "runtime.json");
-const goalLoopConfigPath = join(pluginDir, "goal-loop-config.json");
 const piLeadGuidePath = join(pluginDir, "pi-lead-guide.md");
 const leadCompactGuidePath = join(pluginDir, "lead-compact-guide.md");
 const executeWorkerGuidePath = join(pluginDir, "execute-worker-guide.md");
@@ -319,7 +319,7 @@ export function reviveSessionOrphans(
 export function applySessionStartAgentRetention(
   role: SpawnRole | undefined,
   root: string,
-  configPath: string,
+  config: GoalLoopConfig,
   recovered: PersistedOrphan[],
   prune: typeof pruneStaleAgentHomes = pruneStaleAgentHomes,
 ): PersistedOrphan[] {
@@ -327,7 +327,7 @@ export function applySessionStartAgentRetention(
   // on the machine, so a fork child must not repeat it from inside a tree.
   if (role !== undefined) return recovered;
   try {
-    const retention = prune(root, resolveChildRetentionTtlDays(readGoalLoopConfig(configPath)), { evictionCost: retentionEvictionCost });
+    const retention = prune(root, resolveChildRetentionTtlDays(config), { evictionCost: retentionEvictionCost });
     if (retention.deletedHomes.length === 0) return recovered;
     const deletedHomes = new Set(retention.deletedHomes);
     return recovered.filter(orphan => !orphan.ownership || !deletedHomes.has(orphan.ownership.home));
@@ -478,6 +478,9 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   const toolPreviewTuiRef = createToolPreviewTuiRef();
   registerWebTools(pi, extensionEntryPath, toolPreviewTuiRef, process.env, channel);
   let handle: BridgeHandle | undefined;
+  // Adapter settings (`pi.*`, adapter-config.ts) read through the live bridge
+  // at each use; no bridge means every knob at its default.
+  const readAdapterConfig = createWsConfigReader(() => handle ? { client: handle.client, sessionKey: handle.defaultSessionKeyRef.current } : undefined);
   let agentTools: AgentToolsHandle | undefined;
   // The manual-snapshot + guide-text half of the ws block, filled once per
   // `session_start`. The `<available_skills>` half is deliberately NOT held
@@ -594,7 +597,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   // The live bridge key wins over the session_start snapshot: a later key
   // adoption on the bridge must reach the next compaction summary.
   const goalLoopHandle = registerGoalLoop(pi, {
-    goalLoopConfigPath,
+    readConfig: readAdapterConfig,
     rpcRegistryRef,
     leadCompactGuidePath,
     sessionKeyRef: { get current() { return handle?.defaultSessionKeyRef.current ?? sessionKeyRef.current; } },
@@ -647,7 +650,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   // below send it. Registered the other way round, the settled snapshot would
   // still carry a stale owed turn and hold the parent's direct settle.
   registerPushFlush(pi, {
-    delayMs: () => resolveSettleDelayMs(readGoalLoopConfig(goalLoopConfigPath)),
+    delayMs: () => thenOrNow(readAdapterConfig(["settle_delay_ms"]), resolveSettleDelayMs),
     publish: () => { publishSubtree(rpcRegistryRef.current); },
   });
   for (const event of ["agent_start", "agent_settled", "tool_execution_end"] as const) {
@@ -799,6 +802,15 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     // `resolveMailboxSelfSlug` never throws — so a lookup failure just leaves
     // `selfSlug` undefined and arming falls back to reply-id-only exactly as
     // before.
+    // Retention runs further below; its TTL is read now, through the bridge
+    // just published, under the same superseded-start guard as the mailbox
+    // lookup. Only the tree-root lead prunes, so only it reads.
+    const retentionConfig = readSpawnRole(process.env) === undefined ? await readAdapterConfig(["child_retention_ttl_days"]) : {};
+    if (startEpoch !== sessionStartEpoch) {
+      await disposeStaleBootstrap();
+      return;
+    }
+
     mailboxWaiterHandle?.stop();
     mailboxWaiterHandle = undefined;
     const armEpoch = ++mailboxWaiterEpoch;
@@ -880,7 +892,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     leadSidecarPath = dispatchSessionFile ? sidecarPath(dispatchSessionFile) : noSessionSidecarPath(dispatchStorage.root, dispatchStorage.ownerSessionId);
     generation.sidecar = leadSidecarPath;
     let recoveredRegistry = readAndClearSidecarAt(leadSidecarPath);
-    recoveredRegistry = applySessionStartAgentRetention(readSpawnRole(process.env), dispatchStorage.root, goalLoopConfigPath, recoveredRegistry);
+    recoveredRegistry = applySessionStartAgentRetention(readSpawnRole(process.env), dispatchStorage.root, retentionConfig, recoveredRegistry);
     if (recoveredRegistry.length > 0) reviveSessionOrphans(pi, agentTools.rpcRegistry, recoveredRegistry, onApprovalPending);
     publishSubtree(agentTools.rpcRegistry);
     // A hop with a parent reports its descendant usage. After a restart the
@@ -938,7 +950,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
         agentWidgetHandle?.stop();
         agentWidgetHandle = createAgentWidgetController(ctx, agentTools.rpcRegistry, threadHandle.threads, {
           ownerLead: spawnRole === undefined,
-          animationEnabled: () => resolveAgentWaitAnimation(readGoalLoopConfig(goalLoopConfigPath)),
+          animationEnabled: () => thenOrNow(readAdapterConfig(["agent_wait_animation"]), resolveAgentWaitAnimation),
         });
         agentWidgetRefreshRef.current = () => { agentWidgetHandle?.refresh(); };
         agentCostRefreshRef.current = () => { agentFooterLifecycle.refreshAgents(); };

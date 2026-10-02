@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "namespace": "pi.",
+  "keys": [
+    {
+      "key": "pi.agent_wait_animation",
+      "type": "boolean",
+      "default": true,
+      "default_scope": "global",
+      "description": "Animate the live-agent widget while a child waits on the lead; false shows a steady highlight instead."
+    },
+    {
+      "key": "pi.runaway_threshold",
+      "type": "integer",
+      "minimum": 1,
+      "default": 10,
+      "description": "Consecutive goal-loop reminders with no tool call before the loop force-stops."
+    },
+    {
+      "key": "pi.settle_delay_ms",
+      "type": "integer",
+      "minimum": 1,
+      "default": 5000,
+      "description": "Milliseconds the goal loop waits after the lead settles before it re-evaluates and sends the next reminder; also the wait before an unstarted wake is retried."
+    },
+    {
+      "key": "pi.compaction_advisory_percent",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100,
+      "default": 50,
+      "description": "Context-usage percent at which the lead is nudged once to prepare for compaction, and the reference shown in goal reminders."
+    },
+    {
+      "key": "pi.compaction_hard_percent",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100,
+      "default": 80,
+      "description": "Context-usage percent at which the lead is steered into compaction preparation at the next tool-call boundary."
+    },
+    {
+      "key": "pi.context_window_override",
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "Context-window size in tokens used for the context-usage percent; 0 uses the model's own window."
+    },
+    {
+      "key": "pi.compaction_user_messages_budget_tokens",
+      "type": "integer",
+      "minimum": 1,
+      "default": 8000,
+      "description": "Token budget for the user-message section of the lead compaction summary."
+    },
+    {
+      "key": "pi.compaction_user_message_cap_tokens",
+      "type": "integer",
+      "minimum": 1,
+      "default": 1500,
+      "description": "Token cap for one message inside the user-message section of the lead compaction summary."
+    },
+    {
+      "key": "pi.child_retention_ttl_days",
+      "type": "integer",
+      "minimum": 0,
+      "default": 30,
+      "default_scope": "global",
+      "description": "Days since a spawned child's last activity before its stored home is pruned at lead startup; 0 disables age pruning."
+    }
+  ]
+}
