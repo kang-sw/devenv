@@ -508,44 +508,8 @@
     "261001-bug-config-scope-gaps-after-review-opt-in": {
       "registered_at": "2026-10-01T07:37:37Z"
     },
-    "261001-feat-config-repo-scope-and-tune-weight-guidance": {
-      "registered_at": "2026-10-01T09:54:55Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-01T11:48:40Z",
-        "impl": {
-          "branch": "impl/develop/crate-curse-cage"
-        }
-      }
-    },
-    "261001-feat-opt-in-design-and-phase-review": {
-      "registered_at": "2026-10-01T05:07:43Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-01T06:04:50Z",
-        "impl": {
-          "branch": "impl/develop/come-rut-yin"
-        }
-      }
-    },
-    "261001-feat-review-phase-lite-default": {
-      "registered_at": "2026-10-01T07:56:29Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-01T08:09:23Z",
-        "impl": {
-          "branch": "impl/develop/motor-ajar-sheet"
-        }
-      }
+    "261002-feat-agenda-size-nudge-and-pi-manual-state-dedupe": {
+      "registered_at": "2026-10-02T00:11:56Z"
     }
   }
 }
