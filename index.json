@@ -525,7 +525,14 @@
       }
     },
     "261002-feat-ws-config-adapter-schema-extension": {
-      "registered_at": "2026-10-02T08:04:33Z"
+      "registered_at": "2026-10-02T08:04:33Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-10-02T13:27:46Z"
+      }
     }
   }
 }
