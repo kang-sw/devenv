@@ -60,24 +60,37 @@
  * IO glue because its command, tools, and lifecycle listeners are closer in
  * shape to spawner.ts.
  *
- * Phase 2 (260903) adds a third, non-terminal lever: `goal-compact-and-continue`
- * compacts context with model-supplied carry-forward prose via `ctx.compact()`
- * and re-enters the loop (it does not call `disarmGoal()`). Compaction stays
- * model-driven, not extension-gated: the reinject reminder surfaces
- * `ctx.getContextUsage().percent` plus a static compression-safety heuristic
- * (phase-boundary/merge-gate stops are generally safe to compact, non-phase
- * stops are not) as advisory prose only — the model decides, the extension
- * never autonomously compacts. A `session_before_compact` listener is
- * observe-only (never `cancel`s, never overrides `compaction`): it notifies
- * when a compaction fires while goal mode is active, leaving Pi's own
- * `reason: "threshold"` overflow auto-compaction as the untouched last-resort
- * backstop. Both the compaction-advisory percent and an optional
- * context-window override are additional knobs on the same
- * `goal-loop-config.json` file as Phase 1's `runaway_threshold`.
+ * 261002 (ws-owned lead compaction) folds 260903's `goal-compact-and-continue`
+ * into one lead compaction lever, `ws-compact` (`LEAD_COMPACT_TOOL_NAME`): the
+ * lead fills its prose under fixed headings (lead-compaction.ts), the lever
+ * calls `ctx.compact()`, and the lead session's `session_before_compact`
+ * handler returns `{ compaction }` built from adapter-filled deterministic
+ * sections plus that prose, replacing Pi's native summarizer for the lead.
+ * The lever works with or without an active goal; only while a goal is active
+ * does it re-arm the goal loop (it never calls `disarmGoal()`). Spawned
+ * worker/explore/fork sessions keep Pi's native compaction. The reinject
+ * reminder still surfaces `ctx.getContextUsage().percent` against the
+ * compaction-advisory percent; that knob, the context-window override, and
+ * the new compaction knobs live on the same `goal-loop-config.json` file as
+ * Phase 1's `runaway_threshold`.
  */
 
 import { readFileSync } from "node:fs";
-import type { ContextUsage, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { CompactionResult, ContextUsage, ExtensionAPI, ExtensionContext, SessionBeforeCompactEvent } from "@earendil-works/pi-coding-agent";
+import {
+  buildLeadCompactionSummary,
+  DEFAULT_USER_MESSAGE_CAP_TOKENS,
+  DEFAULT_USER_MESSAGES_BUDGET_TOKENS,
+  GOAL_REMINDER_MARKER_PREFIX,
+  isLeadCompactionDetails,
+  LEAD_COMPACT_TOOL_NAME,
+  LEAD_COMPACTION_DETAILS_KIND,
+  leadProseParameterSchema,
+  renderLeadProse,
+  type LeadCompactionDetails,
+  type LeadProse,
+  type UserMessageBudgets,
+} from "./lead-compaction.ts";
 import { readSpawnRole } from "./process-role.ts";
 import { createToolPreviewTuiRef, registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
 import { clearWakeStart, enqueueHeldGoalReplacement, reserveWakeStart, heldPushQueue, flushHeldPushes, hasRunningAgents, leadCompactingRef, leadWakeStartPendingRef, type HeldGoalReplacementResult, type RpcAgentRegistry } from "./spawner.ts";
@@ -105,6 +118,10 @@ export interface GoalLoopConfig {
   settle_delay_ms?: number;
   /** Age-based child-home retention in days. A finite positive number may be fractional; literal false disables age pruning. */
   child_retention_ttl_days?: number | false;
+  /** Token budget for the lead compaction summary's human-typed user-message section (261002). */
+  compaction_user_messages_budget_tokens?: number;
+  /** Token cap for one message inside that section (261002). */
+  compaction_user_message_cap_tokens?: number;
 }
 
 /** Literal `false` opts out of animation. Malformed, missing, and every other value retain the enabled default. */
@@ -191,6 +208,18 @@ export function resolveSettleDelayMs(config: GoalLoopConfig | undefined): number
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : DEFAULT_SETTLE_DELAY_MS;
 }
 
+function positiveOr(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+/** Resolves the user-message section budgets for the lead compaction summary; malformed values fall back to the defaults. */
+export function resolveUserMessageBudgets(config: GoalLoopConfig | undefined): UserMessageBudgets {
+  return {
+    totalTokens: positiveOr(config?.compaction_user_messages_budget_tokens, DEFAULT_USER_MESSAGES_BUDGET_TOKENS),
+    perMessageTokens: positiveOr(config?.compaction_user_message_cap_tokens, DEFAULT_USER_MESSAGE_CAP_TOKENS),
+  };
+}
+
 /** Resolves the adapter-local child retention policy without ever hard-failing startup. */
 export function resolveChildRetentionTtlDays(config: GoalLoopConfig | undefined): number | false {
   const value = config?.child_retention_ttl_days;
@@ -208,13 +237,12 @@ export function buildGoalAnnouncement(goal: string): string {
 }
 
 /**
- * The `goal-compact-and-continue` lever's returned tool text. Extracted as a
- * pure helper so the wording is unit-testable without stubbing `ctx.compact`
- * (this file's `registerGoalLoop` IO glue is otherwise covered by the live
- * `pi --mode json` gate, not this unit suite).
+ * The `ws-compact` lever's returned tool text (260905 pinned the opening
+ * clause naming the in-flight compaction). The prose itself is not echoed:
+ * it already sits in the lever call's own arguments and in the summary.
  */
-export function buildCompactionLeverResult(carryForward: string): string {
-  return `Compaction requested; the conversation will resume from a summary carrying: ${carryForward}`;
+export function buildCompactionLeverResult(): string {
+  return "Compaction requested; the conversation will resume from a summary carrying the session state and your prose under the fixed headings.";
 }
 
 /**
@@ -261,11 +289,11 @@ export function buildGoalReminder(goal: string, info: { percent: number | null; 
     percent === null
       ? "Context usage: unknown."
       : percent >= advisoryPercent
-        ? `Context usage: ${Math.round(percent)}% of window — at or above the advisory point (${advisoryPercent}%); prioritize goal-compact-and-continue when the next work is weakly related to the current context and you are at a safe compaction point.`
-        : `Context usage: ${Math.round(percent)}% of window — below the compaction advisory point (${advisoryPercent}%); do not call goal-compact-and-continue.`;
+        ? `Context usage: ${Math.round(percent)}% of window — at or above the advisory point (${advisoryPercent}%); prioritize ${LEAD_COMPACT_TOOL_NAME} when the next work is weakly related to the current context and you are at a safe compaction point.`
+        : `Context usage: ${Math.round(percent)}% of window — below the compaction advisory point (${advisoryPercent}%); do not call ${LEAD_COMPACT_TOOL_NAME}.`;
   return (
     `Goal yet running: "${goal}". Call goal-achieved <summary> or goal-blocked <reason> for a state ` +
-    "transition, or goal-compact-and-continue <carry-forward> to compact context and keep pursuing the " +
+    `transition, or ${LEAD_COMPACT_TOOL_NAME} to compact context and keep pursuing the ` +
     "same goal. Silence keeps re-injecting this reminder; enough consecutive re-fires with no tool call " +
     "force-stops the goal loop.\n" +
     `${usageLine}\n` +
@@ -396,14 +424,39 @@ export function decideOnSettle(
 }
 
 /**
- * Pure builder for the observational `ctx.ui.notify` message emitted by the
- * `session_before_compact` listener while goal mode is active. Never a veto,
- * never a `compaction` override — purely informational, matching the
- * ticket's resolved "not an extension gate" design. Extracted for unit
- * coverage while keeping the listener itself thin IO glue.
+ * Pure builder for the informational `ctx.ui.notify` message emitted by the
+ * `session_before_compact` listener while goal mode is active. The goal loop
+ * itself never vetoes a compaction; lead compaction ownership (261002) is a
+ * separate concern of the same listener.
  */
 export function buildCompactionObservation(goal: string, reason: "manual" | "threshold" | "overflow"): string {
-  return `Compaction observed while goal-loop is active (goal: "${goal}", reason: ${reason}). Advisory-only observation — the goal loop does not cancel or override this compaction.`;
+  return `Compaction observed while goal-loop is active (goal: "${goal}", reason: ${reason}).`;
+}
+
+/**
+ * Builds the `CompactionResult` the lead's `session_before_compact` handler
+ * returns: the summary from lead-compaction.ts, Pi's own
+ * `preparation.firstKeptEntryId` unchanged (Pi computes valid cut points and
+ * `compaction.keepRecentTokens` tunes the kept tail), and details stamped as
+ * this adapter's so `session_compact` can recognize the stored entry.
+ */
+export function buildLeadCompactionResult(
+  event: Pick<SessionBeforeCompactEvent, "preparation" | "branchEntries">,
+  input: { sessionKey: string | undefined; registry: RpcAgentRegistry | undefined; prose: string; budgets: UserMessageBudgets; source: LeadCompactionDetails["source"] },
+): CompactionResult<LeadCompactionDetails> {
+  const summary = buildLeadCompactionSummary({
+    sessionKey: input.sessionKey,
+    branchEntries: event.branchEntries,
+    registry: input.registry,
+    prose: input.prose,
+    budgets: input.budgets,
+  });
+  return {
+    summary,
+    firstKeptEntryId: event.preparation.firstKeptEntryId,
+    tokensBefore: event.preparation.tokensBefore,
+    details: { kind: LEAD_COMPACTION_DETAILS_KIND, version: 1, source: input.source },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -437,6 +490,8 @@ export interface RegisterGoalLoopOptions {
    */
   scheduleTimer?: (cb: () => void, ms: number) => NodeJS.Timeout;
   clearTimer?: (handle: NodeJS.Timeout) => void;
+  /** The lead's own ws session key, filled by `index.ts` at `session_start`; carried verbatim into the compaction summary. */
+  sessionKeyRef?: { current: string | undefined };
 }
 
 /**
@@ -465,7 +520,7 @@ export interface GoalLoopShutdownHandle {
 
 /**
  * Registers the `/goal` command, the `goal-achieved`/`goal-blocked`/
- * `goal-compact-and-continue` tools, and the
+ * `ws-compact` tools, and the
  * `tool_call`/`agent_settled`/`session_before_compact` listeners that drive
  * the goal-loop state machine above. Called at extension factory top level
  * (not inside `session_start`) — command/tool registration is declarative
@@ -501,7 +556,7 @@ export function registerGoalLoop(
   let outstandingReminderHandoff: { id: string; generation: number } | undefined;
 
   // 260906 (compaction push-hold ticket, Phase 1): true only between the
-  // `goal-compact-and-continue` lever setting `leadCompactingRef` and the
+  // `ws-compact` lever (under an active goal) setting `leadCompactingRef` and the
   // settle timer's fire callback consuming it — marks a compaction as
   // LEVER-ORIGINATED, the only kind that should ever synthesize the lever's
   // own re-armed reminder text (with a failure reason folded in when
@@ -553,6 +608,15 @@ export function registerGoalLoop(
   /** One host compaction operation; its id prevents a late duplicate callback from releasing a newer hold. */
   let compactionSequence = 0;
   let activeCompaction: { id: number; generation: number | undefined } | undefined;
+
+  /**
+   * 261002: the lead's rendered prose, set by the `ws-compact` lever right
+   * before `ctx.compact()` and consumed by the next `reason: "manual"`
+   * `session_before_compact`. Its presence is what tells a lever-initiated
+   * manual compaction apart from any other manual one. Cleared by that
+   * consumption or by the lever's own completion/failure callback.
+   */
+  let pendingLever: { prose: string; operationId: number } | undefined;
 
   const scheduleTimer =
     opts.scheduleTimer ??
@@ -713,7 +777,7 @@ export function registerGoalLoop(
 
     const handoff = { id: `${generation}-${++reminderHandoffSequence}`, generation };
     outstandingReminderHandoff = handoff;
-    reminder += `\n\n<!-- ws-pi-goal-reminder:${handoff.id} -->`;
+    reminder += `\n\n${GOAL_REMINDER_MARKER_PREFIX}${handoff.id} -->`;
     if (state.pendingCarryForward !== undefined) {
       reminder += `\n\nCarried forward verbatim from before compaction:\n${state.pendingCarryForward}`;
     }
@@ -847,7 +911,7 @@ export function registerGoalLoop(
         // `errorMessage` already reads `"Compaction failed: …"` /
         // `"Auto-compaction failed: …"`, so this must not add a second
         // prefix on top of it.
-        reminder = `${failureReason} Do not retry goal-compact-and-continue — call goal-achieved or goal-blocked instead.\n${reminder}`;
+        reminder = `${failureReason} Do not retry ${LEAD_COMPACT_TOOL_NAME} — call goal-achieved or goal-blocked instead.\n${reminder}`;
       }
       fireReminder(ctx, config, reminder, generation);
       return;
@@ -1019,7 +1083,7 @@ export function registerGoalLoop(
     const text = typeof content === "string"
       ? content
       : content.filter((part) => part.type === "text").map((part) => part.text).join("");
-    const marker = `<!-- ws-pi-goal-reminder:${outstandingReminderHandoff.id} -->`;
+    const marker = `${GOAL_REMINDER_MARKER_PREFIX}${outstandingReminderHandoff.id} -->`;
     if (text.includes(marker)) outstandingReminderHandoff = undefined;
   });
 
@@ -1040,26 +1104,57 @@ export function registerGoalLoop(
     ctx.ui.setStatus(GOAL_LOOP_YIELD_STATUS_KEY, undefined);
   });
 
-  // Observe-only: never `cancel`s, never supplies a `compaction` override.
-  // Fires for both our own `/goal-compact-and-continue`-triggered manual
-  // compaction (reason: "manual") and Pi's own overflow/threshold
-  // auto-compaction backstop — matching the ticket's resolved "not an
-  // extension gate" design (see this file's top-of-file doc comment).
-  //
   // 260906 (compaction push-hold ticket, Phase 1): sets `leadCompactingRef`
-  // unconditionally, as the very first line, for ANY compaction reason (the
-  // lever already set it before calling `ctx.compact()`, so this is
-  // defensive coverage for an owner-typed `/compact` and Pi's own
-  // threshold/overflow auto-compaction, neither of which goes through the
-  // lever). The advisory `ctx.ui.notify` stays gated on goal mode being
-  // active, unchanged.
+  // unconditionally, as the very first line, for ANY compaction reason and
+  // ANY process role (the lever already set it before calling
+  // `ctx.compact()`, so this is defensive coverage for an owner-typed
+  // `/compact` and Pi's own threshold/overflow auto-compaction, neither of
+  // which goes through the lever).
+  //
+  // 261002: in the lead session only, a lever-initiated manual compaction is
+  // answered with `{ compaction }` (deterministic sections + the lead's
+  // prose). Spawned worker/explore/fork sessions return nothing and keep
+  // Pi's native compaction.
   pi.on("session_before_compact", (event, ctx) => {
     if (!activeCompaction) beginCompaction(state.active ? goalGeneration : undefined);
     else leadCompactingRef.current = true;
-    if (isChildProcess(process.env)) return;
-    if (!state.active || !state.goal) return;
-    ctx.ui.notify(buildCompactionObservation(state.goal, event.reason), "info");
+    if (isChildProcess(process.env)) return undefined;
+    if (state.active && state.goal) ctx.ui.notify(buildCompactionObservation(state.goal, event.reason), "info");
+    const lever = pendingLever;
+    if (event.reason === "manual" && lever) {
+      pendingLever = undefined;
+      return ownCompaction(event, ctx, lever.prose, "lever");
+    }
+    return undefined;
   });
+
+  /**
+   * Assembles the adapter's compaction result. A build failure (a malformed
+   * event, an unexpected registry shape) is reported and answered with
+   * nothing, so Pi's native summarizer still compacts rather than the whole
+   * compaction failing.
+   */
+  function ownCompaction(
+    event: SessionBeforeCompactEvent,
+    ctx: ExtensionContext,
+    prose: string,
+    source: LeadCompactionDetails["source"],
+  ): { compaction: CompactionResult<LeadCompactionDetails> } | undefined {
+    try {
+      const compaction = buildLeadCompactionResult(event, {
+        sessionKey: opts.sessionKeyRef?.current,
+        registry: opts.rpcRegistryRef?.current,
+        prose,
+        budgets: resolveUserMessageBudgets(readGoalLoopConfig(opts.goalLoopConfigPath)),
+        source,
+      });
+      return { compaction };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      ctx.ui.notify(`ws lead compaction could not build its summary (${message}); Pi's native compaction runs instead.`, "warning");
+      return undefined;
+    }
+  }
 
   // 260906 (compaction push-hold ticket, Phase 1): deferred via `setImmediate`
   // so neither handler ever sends a prompt from inside a `session_*compact*`
@@ -1067,7 +1162,13 @@ export function registerGoalLoop(
   // `_compactionAbortController` is still non-`undefined` (cleared right
   // after), so anything synchronous here would race that same internal
   // state Pi has not finished unwinding yet.
-  pi.on("session_compact", (_event, ctx) => {
+  pi.on("session_compact", (event, ctx) => {
+    if (!isChildProcess(process.env) && isLeadCompactionDetails(event?.compactionEntry?.details)) {
+      // 261002: the stored summary is this adapter's and carries the lever
+      // prose verbatim, so the next goal reminder need not repeat it. When
+      // another summary landed instead, the carry stays for the reminder.
+      state.pendingCarryForward = undefined;
+    }
     // Defer beyond Pi's own compaction flag; start alone never clears our hold.
     const operation = activeCompaction;
     setImmediate(() => releaseAfterCompaction(ctx, undefined, operation));
@@ -1118,51 +1219,54 @@ export function registerGoalLoop(
   }, toolPreviewTuiRef);
 
   registerWsTool(pi, {
-    name: "goal-compact-and-continue",
-    label: "goal-compact-and-continue",
+    name: LEAD_COMPACT_TOOL_NAME,
+    label: LEAD_COMPACT_TOOL_NAME,
     description:
-      "Non-terminal lever: compact context now, using <carry_forward> prose to steer the summary and delivering it verbatim once in the next eligible goal reminder, then continue pursuing the same active goal. Call this at a safe compaction point (phase boundary / merge gate) instead of manually summarizing progress in prose.",
-    parameters: {
-      type: "object",
-      properties: {
-        carry_forward: { type: "string", description: "Prose passed unchanged as compaction custom instructions and carried verbatim into the next eligible goal reminder." },
-      },
-      required: ["carry_forward"],
-    } as never,
+      "Compact the lead's context now. Fill every heading with your carry-forward prose (empty when there is nothing): for content already persisted (tickets, commits, notes, agenda, todos) give its path or pointer; for content that lives only in the conversation, summarize it as precisely as possible. The adapter adds the session key, active ticket and playbook, child agents, and human-typed user messages itself. Under an active goal the goal loop continues after compaction.",
+    parameters: leadProseParameterSchema() as never,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx: ExtensionContext) {
-      if (!state.active) {
-        throw new Error("goal-compact-and-continue requires an active goal; compaction was not requested.");
+      if (isChildProcess(process.env)) {
+        throw new Error(`${LEAD_COMPACT_TOOL_NAME} is lead-only; spawned sessions keep Pi's native compaction.`);
       }
-      const p = params as { carry_forward: string };
-      // Does NOT call disarmGoal() — non-terminal. ctx.compact() aborts the
-      // in-flight turn (the one that invoked this very tool call) and, once
-      // compaction completes, `releaseAfterCompaction` arms the settle timer
-      // for a fresh reminder — no separate manual "continue" call is
-      // needed here beyond returning this tool's own result and triggering
-      // the compaction (see this file's top-of-file doc comment's
-      // risk-signal note). 260906 review relay #1 (Critical): the invoking
-      // turn's own abort-produced settle is judged `waiting` and swallowed
-      // (see `settleSwallowedWhileCompacting`) — `pendingRearm` below is what
-      // actually re-arms the loop, not that settle's own reinject path.
+      const prose = renderLeadProse(params as LeadProse);
+      // ctx.compact() aborts the in-flight turn (the one that invoked this
+      // very tool call). Everything it may synchronously trigger — the abort's
+      // own settle, the hook below, even completion — must already see the
+      // hold, the lever payload, and (under a goal) the rearm marker, so all
+      // three are set before the call.
       //
-      // 260906 (compaction push-hold ticket, Phase 1): marks this compaction
-      // as LEVER-ORIGINATED (`pendingRearm`) before calling `ctx.compact`, so
-      // `releaseAfterCompaction` knows to synthesize a re-armed reminder once
-      // it finishes — set BEFORE the call since `ctx.compact()`'s own internal
-      // abort can settle the invoking turn synchronously within this call.
-      const operation = beginCompaction(state.active ? goalGeneration : undefined);
-      pendingRearm = true;
-      pendingRearmGeneration = operation.generation;
-      // Goal-scoped, not rearm-marker-scoped: busy release and agent_start
-      // may clear those markers before an ordinary reminder can carry this.
-      state.pendingCarryForward = p.carry_forward;
+      // 261002: goal-loop state is touched only while a goal is active. With
+      // no goal the lever still compacts through the shared compaction hold
+      // (pushes stay held until release) but arms no reminder and stores no
+      // carry, keeping 260913's no-side-effect property for goal state.
+      const goalActive = state.active;
+      const operation = beginCompaction(goalActive ? goalGeneration : undefined);
+      if (goalActive) {
+        // Under a goal, `pendingRearm` makes `releaseAfterCompaction`
+        // synthesize the re-armed reminder; the invoking turn's own
+        // abort-produced settle is swallowed (`settleSwallowedWhileCompacting`).
+        pendingRearm = true;
+        pendingRearmGeneration = operation.generation;
+        // Goal-scoped, not rearm-marker-scoped: busy release and agent_start
+        // may clear those markers before an ordinary reminder can carry this.
+        // Cleared again once the stored entry proves the summary carried it.
+        state.pendingCarryForward = prose;
+      }
+      pendingLever = { prose, operationId: operation.id };
+      const clearLever = (): void => {
+        if (pendingLever?.operationId === operation.id) pendingLever = undefined;
+      };
       ctx.compact({
-        customInstructions: p.carry_forward,
+        // Steers Pi's native summarizer only if this adapter's own result does
+        // not land (a build failure, or another extension's result winning).
+        customInstructions: prose,
         onComplete: () => {
+          clearLever();
           ctx.ui.notify("Compaction completed", "info");
           releaseAfterCompaction(ctx, undefined, operation);
         },
         onError: (error) => {
+          clearLever();
           // Review relay #1 (Minor): the "Compaction failed: " prefix is
           // applied HERE, at the lever's own call site — `error.message` is a
           // raw, unprefixed string, unlike `SessionCompactFailedEvent.errorMessage`
@@ -1174,7 +1278,7 @@ export function registerGoalLoop(
           releaseAfterCompaction(ctx, failureReason, operation);
         },
       });
-      return { content: [{ type: "text", text: buildCompactionLeverResult(p.carry_forward) }] };
+      return { content: [{ type: "text", text: buildCompactionLeverResult() }] };
     },
   }, toolPreviewTuiRef);
 
@@ -1184,6 +1288,7 @@ export function registerGoalLoop(
       invalidateGoal();
       outstandingReminderHandoff = undefined;
       activeCompaction = undefined;
+      pendingLever = undefined;
       leadCompactingRef.current = false;
       // 260906 Phase 1 (settle-timer reminder race ticket): cancel point
       // "session shutdown" — a replacement session must not inherit a

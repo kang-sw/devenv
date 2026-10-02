@@ -590,7 +590,13 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     },
   });
 
-  const goalLoopHandle = registerGoalLoop(pi, { goalLoopConfigPath, rpcRegistryRef }, toolPreviewTuiRef);
+  // The live bridge key wins over the session_start snapshot: a later key
+  // adoption on the bridge must reach the next compaction summary.
+  const goalLoopHandle = registerGoalLoop(pi, {
+    goalLoopConfigPath,
+    rpcRegistryRef,
+    sessionKeyRef: { get current() { return handle?.defaultSessionKeyRef.current ?? sessionKeyRef.current; } },
+  }, toolPreviewTuiRef);
   // Declare once; the controller is replaced and disposed at session boundaries.
   const claudeDelegateSession = registerClaudeDelegateSession(pi, toolPreviewTuiRef, {
     designReviewContext: createClaudeDesignReviewContextProvider({
