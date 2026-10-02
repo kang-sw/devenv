@@ -122,6 +122,7 @@ import { verifyWebReadiness, WEB_HOME_ENV, WEB_READINESS_KIND } from "./web-read
 import { beginSubtreeDispatch, installSubtreePublisher, observeSubtreeChannel, publishSubtree, type OwnTurnState, type SubtreeDescendant, type SubtreeSnapshot, type SubtreeUpstream } from "./subtree-lifecycle.ts";
 import { PUSH_BATCH_CUSTOM_TYPE, PUSH_BATCH_VERSION, type PushBatchItem, type PushBatchItemState } from "./push-protocol.ts";
 import { capacityEvictionCost, isRemovedAgent, persistAgentCostCheckpoint, persistEvictedAgentCost, registerAgentCostOwner } from "./agent-cost.ts";
+import { createOutputRateTracker, type OutputRateTracker } from "./output-rate.ts";
 
 // ---------------------------------------------------------------------------
 // Pure helpers shared by persistent RPC-backed child paths.
@@ -580,6 +581,8 @@ export interface RpcAgentRecord {
    * this through `lastActivityAt`; lead/owner inputs never advance it.
    */
   lastOutputAt?: number;
+  /** In-memory visible-output decode rate for this launch; replaced on every (re)start, never persisted. */
+  outputRate?: OutputRateTracker;
   /** Epoch-ms stamp of the last lead-issued prompt, retained for attribution, not activity display. */
   lastLeadPromptAt?: number;
   /**
@@ -2815,6 +2818,9 @@ export function attachEventListener(
   record.launchGeneration ??= 0;
   record.workGeneration ??= 0;
   const generation = record.launchGeneration;
+  // Spans exist only as receipt times of this launch's live deltas.
+  const outputRate = createOutputRateTracker();
+  record.outputRate = outputRate;
   const refresh = (includeStats = false) => {
     dirty = true;
     statsDirty ||= includeStats;
@@ -2908,6 +2914,12 @@ export function attachEventListener(
     // subtree/telemetry refreshes wait for message_end or the periodic gutter
     // cadence, preventing a per-token render fan-out.
     if (agentOutput) markAgentOutput(record);
+    // Block-boundary receipt times only (O(1)); the rate changes at message_end.
+    if (e.type === "message_update" || e.type === "message_start" || e.type === "message_end") {
+      const before = e.type === "message_end" ? outputRate.rate() : undefined;
+      outputRate.observe(e);
+      if (e.type === "message_end" && outputRate.rate() !== before) triggerAgentWidgetRefresh();
+    }
     if (e.type === "message_end") {
       const text = assistantMessageText(e.message);
       if (text !== undefined) {

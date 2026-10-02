@@ -325,6 +325,22 @@ describe("incremental lead usage", () => {
 });
 
 describe("custom footer render and lifecycle", () => {
+  test("appends the lead output rate right after the output token part, omitted until the first eligible message", () => {
+    const dir = root(), storage = createAgentStorageContext("lead", dir), ui = context();
+    const controller = createAgentFooterController(ui.ctx, new Map(), storage, { truncateToWidth, visibleWidth });
+    const component = ui.mount();
+    const message = { role: "assistant", provider: "p", model: "m", stopReason: "stop", usage: { input: 10, output: 12_300, cacheRead: 0, cacheWrite: 0, cost: { total: .5 } } };
+    controller.observeOutput({ type: "message_start", message }, 0);
+    controller.observeOutput({ type: "message_update", message, assistantMessageEvent: { type: "text_start", contentIndex: 0 } }, 1_000);
+    controller.observeOutput({ type: "message_update", message, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "x" } }, 2_000);
+    controller.observeOutput({ type: "message_update", message, assistantMessageEvent: { type: "text_end", contentIndex: 0 } }, 293_857);
+    assert.doesNotMatch(plain(component.render(140).join("\n")), /t\/s/, "no rate before the first eligible message_end");
+    controller.observeOutput({ type: "message_end", message }, 300_000);
+    controller.acceptUsage(message);
+    assert.match(plain(component.render(140)[1]), /↑10 ↓12k ~42t\/s /);
+    controller.stop();
+  });
+
   test("render uses cached telemetry in O(1), performs no history or registry traversal, preserves widths, and labels estimates", () => {
     const dir = root(), storage = createAgentStorageContext("lead", dir), registry: RpcAgentRegistry = new Map();
     for (let index = 0; index < 256; index++) registry.set(`agent-${index}`, record(`agent-${index}`, storage, .01));

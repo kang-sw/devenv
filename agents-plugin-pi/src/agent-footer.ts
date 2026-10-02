@@ -11,6 +11,7 @@ import type { AgentStorageContext } from "./agent-storage.ts";
 import { isLeadOrFork, type SpawnRole } from "./process-role.ts";
 import { attachFooterCostEstimate, releaseFooterCostEstimate } from "./agent-cost.ts";
 import type { RpcAgentRegistry } from "./spawner.ts";
+import { createOutputRateTracker, formatOutputRate } from "./output-rate.ts";
 
 export { formatCumulativeCost } from "./agent-telemetry.ts";
 
@@ -42,6 +43,8 @@ export interface AgentFooterController {
   refresh(): void;
   refreshAgents(): void;
   acceptUsage(source: unknown): void;
+  /** Feeds the lead's own message_start/update/end events to its output-rate tracker. */
+  observeOutput(event: unknown, now?: number): void;
   checkpoint(): boolean;
   stop(): void;
 }
@@ -52,6 +55,7 @@ export interface AgentFooterSessionLifecycle {
   refresh(): void;
   refreshAgents(): void;
   acceptUsage(source: unknown): void;
+  observeOutput(event: unknown): void;
   checkpoint(): void;
   stop(): void;
 }
@@ -77,6 +81,7 @@ export function createAgentFooterSessionLifecycle(
     refresh() { current?.refresh(); },
     refreshAgents() { current?.refreshAgents(); },
     acceptUsage(source) { current?.acceptUsage(source); },
+    observeOutput(event) { current?.observeOutput(event); },
     checkpoint() { current?.checkpoint(); },
     stop() { generation += 1; current?.stop(); current = undefined; },
   };
@@ -130,6 +135,8 @@ export function createAgentFooterController(
   // report can precede the footer mount); a second one would diverge.
   const state = attachFooterCostEstimate(registry, storage, () => ctx.sessionManager.getEntries().length > 0);
   let presentation = state.presentation();
+  // In memory only: spans are receipt times of live deltas, absent from stored entries.
+  const outputRate = createOutputRateTracker();
   let renderRequest: (() => void) | undefined;
   let componentDispose: (() => void) | undefined;
   let stopped = false;
@@ -157,10 +164,12 @@ export function createAgentFooterController(
       render(width: number): string[] {
         if (width <= 0) return [""];
         const usage = presentation.lead;
+        const rate = outputRate.rate();
         const leadCost = presentation.leadCost, directCost = presentation.directCost;
         const tokenParts = [
           usage.input ? `↑${formatTokens(usage.input)}` : undefined,
           usage.output ? `↓${formatTokens(usage.output)}` : undefined,
+          rate !== undefined ? `~${formatOutputRate(rate)}` : undefined,
           usage.cacheRead ? `R${formatTokens(usage.cacheRead)}` : undefined,
           usage.cacheWrite ? `W${formatTokens(usage.cacheWrite)}` : undefined,
           (usage.cacheRead || usage.cacheWrite) && usage.latestCacheHitRate !== undefined ? `CH${usage.latestCacheHitRate.toFixed(1)}%` : undefined,
@@ -209,6 +218,8 @@ export function createAgentFooterController(
     // Prunes removed children from `registry` before recomputing (agent-cost.ts).
     refreshAgents() { if (stopped) return; state.pruneAndRecompute(); updatePresentation(); },
     acceptUsage(source) { if (stopped) return; state.acceptUsage(source); updatePresentation(); },
+    // Per-delta path: O(1) tracker update, no render request; message_end's acceptUsage repaints.
+    observeOutput(event, now) { if (!stopped) outputRate.observe(event, now); },
     checkpoint() { return stopped ? true : state.persist(); },
     stop() {
       if (stopped) return;

@@ -3,6 +3,7 @@ title: "Pi model output TPS in the lead footer and subagent gutter"
 sage-review-design: skipped
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 1c0ea303f9bf65a1
+completed: 2026-10-02
 ---
 
 # Pi model output TPS in the lead footer and subagent gutter
@@ -174,3 +175,33 @@ Implement D1-D6 in `agents-plugin-pi`: a pure aggregator fed by the lead's
 own `message_update`/`message_end` events and by each direct child's RPC
 events, surfaced in the footer presentation and in `AgentRow`/`formatRow`.
 Done when the `## Verification` tests pass.
+
+### Result (9d6266dd5) - 2026-10-02
+
+Landed D1-D6 in `agents-plugin-pi`:
+
+- New pure tracker `src/output-rate.ts` (`createOutputRateTracker`,
+  `formatOutputRate`): block spans keyed by `contentIndex`, reasoning
+  subtraction branch, error/abort skip, open-counted-block skip, 250 ms / 8
+  token guards, 8-message token-weighted window reset on `provider/model`
+  change. Deltas are ignored, so the per-delta path is O(1).
+- Lead: `index.ts` feeds `message_start`/`message_update`/`message_end` to a
+  new footer lifecycle `observeOutput`; the tracker lives in the footer
+  controller and renders `~Nt/s` right after the `↓output` part.
+- Children: `attachEventListener` (`spawner.ts`) creates a fresh tracker per
+  launch on `RpcAgentRecord.outputRate` and feeds every message event, so
+  `toolcall_*` now counts; a widget refresh fires at `message_end` only when
+  the rate changed. `AgentRow.outputTps` feeds `formatRow`'s `Nt/s` segment
+  after `model (effort)`, dropped first before the all-or-nothing rule and
+  styled `syntaxNumber` after truncation.
+
+Decisions: `deferred` stop reasons stay eligible (only `error`/`aborted` are
+skipped per D2); `lastOutputAt` semantics unchanged (toolcall deltas still do
+not stamp activity).
+
+Verification: `npm test` in `agents-plugin-pi` - 1955 tests, 1951 pass, 1
+fail (`web-package.test.ts` packed install: npm `ENOTCACHED`, offline
+environment, unrelated). New `test/output-rate.test.ts` and the TPS cases in
+`agent-widget.test.ts` / `agent-footer.test.ts` pass. Lite review: clean; two
+minors left (no direct test of the `spawner.ts`/`index.ts` event wiring; the
+footer `~Nt/s` part could appear without a `↓` part when lead output is 0).
