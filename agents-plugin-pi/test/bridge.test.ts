@@ -81,7 +81,7 @@ const LIVE_TOOL_NAMES = [
   "tickets.create_empty", "tickets.template", "tickets.checklist", "tickets.sage_gate",
   "tickets.sage_stamp", "tickets.verify", "tickets.acquire", "tickets.release",
   "tickets.index_init", "path.generate", "workflow_manual",
-  "workflow_state", "playbook.read", "playbook.render", "rationale.query",
+  "workflow_state", "playbook.read", "playbook.render", "rationale.query", "git.followups",
   "worktree.acquire", "worktree.release", "worktree.list",
 ];
 const RETIRED_TOOL_NAMES = [
@@ -111,9 +111,9 @@ describe("sanitizeToolName", () => {
     assert.equal(sanitizeToolName("ferrule"), "ws__ferrule");
   });
 
-  test("captured tool set exactly matches the bundled 62-tool contract", () => {
+  test("captured tool set exactly matches the bundled 63-tool contract", () => {
     const bundledToolNames = Object.keys(BUNDLED_RUNTIME.tools).sort();
-    assert.equal(bundledToolNames.length, 62);
+    assert.equal(bundledToolNames.length, 63);
     assert.deepEqual([...LIVE_TOOL_NAMES].sort(), bundledToolNames);
     assert.ok(bundledToolNames.includes("git.merge"));
     for (const retiredName of RETIRED_TOOL_NAMES) {

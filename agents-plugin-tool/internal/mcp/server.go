@@ -1113,6 +1113,20 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			return toolJSONResponse(req.ID, result, err)
 		}
 		return toolTextResponse(req.ID, formatGitLog(result), err)
+	case "git.followups":
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		result, err := wsrationale.OpenFollowups(context.Background(), wsgit.ExecRunner{}, root, wsrationale.FollowupOptions{
+			Range:    optString(params.Arguments["range"]),
+			Category: optString(params.Arguments["category"]),
+			MinLevel: optString(params.Arguments["min_level"]),
+		})
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, result, err)
+		}
+		return toolTextResponse(req.ID, wsrationale.FormatFollowups(result), err)
 	case "rationale.query":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -1351,15 +1365,48 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		// enumeration), matching #260810's guardrail that the unscoped path
 		// (the common case) pays no extra cost.
 		expectedBranch, _ := params.Arguments["expected_branch"].(string)
+		// followups is an argument-level gate (the tool is shared with workers
+		// and delegates): checked before Commit stages anything, so a refused
+		// call mutates nothing. resolves is open to every caller because the
+		// fixing commit is usually not the root lead's.
+		followups, followupsPresent, err := followupsArgument(params.Arguments)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		if followupsPresent {
+			if err := s.requireRootLeadForFollowups(params.Arguments); err != nil {
+				return toolTextResponse(req.ID, "", err)
+			}
+		}
+		resolvesRaw, resolvesPresent := params.Arguments["resolves"]
+		if err := typedArrayRejection("resolves", resolvesRaw, resolvesPresent); err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		resolves := stringList(resolvesRaw)
+		// Resolve warnings read the history before this commit lands; they
+		// never block it.
+		var resolveWarnings []string
+		if len(resolves) > 0 {
+			warnings, werr := wsrationale.ResolveWarnings(context.Background(), wsgit.ExecRunner{}, root, resolves)
+			if werr != nil {
+				warnings = []string{fmt.Sprintf("resolves: could not check ids against history: %v", werr)}
+			}
+			resolveWarnings = warnings
+		}
 		result, err := wsgit.Client{Runner: wsgit.ExecRunner{}, Verifier: verifyAdapter}.Commit(context.Background(), root, wsgit.CommitOptions{
 			Paths:             stringList(params.Arguments["paths"]),
 			Title:             title,
 			Description:       description,
 			AIContext:         aiContext,
 			UpdatedTickets:    stringList(params.Arguments["updated_tickets"]),
+			Followups:         followups,
+			Resolves:          resolves,
 			ExpectedBranch:    expectedBranch,
 			SparseScopeActive: wsdoc.SparseCheckoutActive(root),
 		})
+		if err == nil {
+			result.Warnings = append(result.Warnings, resolveWarnings...)
+		}
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, result, err)
 		}
@@ -2883,6 +2930,18 @@ func formatGitCommit(result wsgit.CommitResult) string {
 			b.WriteString("\n")
 		}
 	}
+	if len(result.Followups) > 0 {
+		b.WriteString("followups:\n")
+		for _, f := range result.Followups {
+			fmt.Fprintf(&b, "  - %s %s/%s: %s\n", f.ID, f.Level, f.Category, f.Content)
+		}
+	}
+	if len(result.Warnings) > 0 {
+		b.WriteString("warnings:\n")
+		for _, warning := range result.Warnings {
+			fmt.Fprintf(&b, "  - %s\n", warning)
+		}
+	}
 	if len(result.Advisories) > 0 {
 		b.WriteString("advisories:\n")
 		for i, advisory := range result.Advisories {
@@ -4045,6 +4104,19 @@ func tools() []map[string]any {
 			},
 		},
 		{
+			"name":        "git.followups",
+			"description": "Read-only. List open (unresolved) commit-anchored follow-ups: ## Follow-ups entries no commit in the same walk resolves under ## Resolves. Walks commit bodies over range, or the full history from HEAD when range is omitted; openness is evaluated as of the range's end. Each row carries id, level, category, content, and the carrying commit's SHA and date. Defaults to compact text; use format=json for structured output.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"range":     stringProperty("Optional revision range (e.g. <start>..HEAD). Omitted: full history from HEAD."),
+					"category":  enumStringProperty("Optional category filter. Omitted: every category.", wsgit.FollowupCategories),
+					"min_level": enumStringProperty("Optional lowest level to include (minor < important < critical). Omitted: every level.", wsgit.FollowupLevels),
+					"format":    stringProperty(`Optional output format. Use "json" for structured output.`),
+				},
+			},
+		},
+		{
 			"name":        "rationale.query",
 			"description": "Search recorded rationale: commit ## AI Context and ## Ticket Updates bullets and ticket decision sections. Address by path globs, a code site (git log -L), a pickaxe string (git log -S), or a text query. Returns pointers with quoted records grouped by ticket thread, newest first. Defaults to compact text; use format=json for structured output.",
 			"inputSchema": map[string]any{
@@ -4110,6 +4182,20 @@ func tools() []map[string]any {
 					"description":     stringProperty("Optional commit message body before AI Context."),
 					"ai_context":      stringArrayProperty("Required AI Context bullets for the commit message."),
 					"updated_tickets": stringArrayProperty("Optional ticket update summaries. If omitted, staged ticket moves and Result/Edition headings are detected."),
+					"followups": map[string]any{
+						"type":        "array",
+						"description": "Optional. Root lead session only (any other caller, or no session key, rejects the commit). Forward-looking, ownerless work to track on this commit, written under ## Follow-ups; each gets a minted id returned in the result, in input order. Work a ticket owns belongs in that ticket instead, and past-facing rationale in ai_context.",
+						"items": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"level":    enumStringProperty("Ordered level: minor < important < critical.", wsgit.FollowupLevels),
+								"category": enumStringProperty("Closed category.", wsgit.FollowupCategories),
+								"content":  stringProperty("Single line, e.g. <path>:<line> and a one-line summary."),
+							},
+							"required": []string{"level", "category", "content"},
+						},
+					},
+					"resolves":        stringArrayProperty("Optional follow-up ids this commit resolves, written under ## Resolves. Any caller may resolve. An unknown or already-resolved id is a warning; the commit still lands."),
 					"expected_branch": stringProperty("The branch you currently remember being on — the one you believe this commit should land on. Fill it from what you already know, not by reading HEAD now: if you cannot recall it, stop and confirm whether you should be committing here at all rather than reflexively resolving the current branch to satisfy the field. This is a safety guard: the commit is refused, with nothing staged or committed, when your believed branch differs from the actual checkout (for example a parallel session switched this shared worktree) or when HEAD is detached."),
 					"format":          stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
@@ -4594,7 +4680,7 @@ func toolSchemaRequiresSessionKey(name string) bool {
 	case "api.list",
 		"exec.spawn", "exec.shell", "exec.status", "exec.result", "exec.abort", "exec.raw.tail", "exec.raw.read", "exec.raw.grep",
 		"git.status", "git.diff", "git.log", "git.merge_base", "git.commit", "git.merge",
-		"rationale.query",
+		"rationale.query", "git.followups",
 		"project_tree",
 		"review.marker", "review.stamp",
 		"worktree.acquire", "worktree.release", "worktree.list",

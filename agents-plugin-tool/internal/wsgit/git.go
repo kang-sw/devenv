@@ -53,6 +53,9 @@ type Verifier func(root string, paths []string) ([]string, error)
 type Client struct {
 	Runner   Runner
 	Verifier Verifier
+	// MintID mints a follow-up id; nil uses wskey.Generate. Tests inject a
+	// deterministic generator.
+	MintID func() (string, error)
 }
 
 func NewClient() Client { return Client{Runner: ExecRunner{}} }
@@ -450,6 +453,11 @@ type CommitOptions struct {
 	Description    string   `json:"description,omitempty"`
 	AIContext      []string `json:"ai_context"`
 	UpdatedTickets []string `json:"updated_tickets,omitempty"`
+	// Followups are written under "## Follow-ups", one minted id each. The
+	// root-lead authorization gate is the caller's (internal/mcp owns sessions).
+	Followups []Followup `json:"followups,omitempty"`
+	// Resolves are follow-up ids written under "## Resolves".
+	Resolves []string `json:"resolves,omitempty"`
 	// ExpectedBranch is the branch the caller believes it is checked out on.
 	// Commit resolves the actual current branch and refuses (no mutation) when
 	// they disagree or when HEAD is detached — the guard against a parallel
@@ -475,6 +483,12 @@ type CommitResult struct {
 	Paths         []string       `json:"paths"`
 	Title         string         `json:"title"`
 	TicketChanges []TicketChange `json:"ticket_changes,omitempty"`
+	// Followups echoes the recorded follow-ups with their minted ids, in the
+	// input order of CommitOptions.Followups.
+	Followups []Followup `json:"followups,omitempty"`
+	// Warnings carries non-blocking caller-attached notices (for example a
+	// resolve of an unknown or already-resolved follow-up id).
+	Warnings []string `json:"warnings,omitempty"`
 	// Advisories carries non-blocking verifier text lines. Text-mode only;
 	// see {#260626-git-commit-todo-reinjection} precedent — never serialized
 	// to JSON.
@@ -567,6 +581,9 @@ func (c Client) Commit(ctx context.Context, root string, opts CommitOptions) (Co
 	if len(opts.UpdatedTickets) == 0 {
 		opts.UpdatedTickets = ticketChangeSummaries(ticketChanges)
 	}
+	if err := mintFollowupIDs(opts.Followups, c.MintID); err != nil {
+		return CommitResult{}, err
+	}
 	message := CommitMessage(opts)
 	if _, err := runner.RunGit(ctx, root, "commit", "-m", message); err != nil {
 		return CommitResult{}, err
@@ -575,7 +592,7 @@ func (c Client) Commit(ctx context.Context, root string, opts CommitOptions) (Co
 	if err != nil {
 		return CommitResult{}, err
 	}
-	return CommitResult{Hash: strings.TrimSpace(string(hashOut)), Paths: opts.Paths, Title: opts.Title, TicketChanges: ticketChanges, Advisories: advisories}, nil
+	return CommitResult{Hash: strings.TrimSpace(string(hashOut)), Paths: opts.Paths, Title: opts.Title, TicketChanges: ticketChanges, Followups: opts.Followups, Advisories: advisories}, nil
 }
 
 // currentBranch resolves the short name of the branch HEAD points at, mirroring
@@ -616,6 +633,16 @@ func normalizeCommitOptions(opts CommitOptions) (CommitOptions, error) {
 	opts.AIContext = trimStrings(opts.AIContext)
 	opts.UpdatedTickets = trimStrings(opts.UpdatedTickets)
 	opts.ExpectedBranch = strings.TrimSpace(opts.ExpectedBranch)
+	followups, err := normalizeFollowups(opts.Followups)
+	if err != nil {
+		return CommitOptions{}, err
+	}
+	opts.Followups = followups
+	resolves, err := normalizeResolves(opts.Resolves)
+	if err != nil {
+		return CommitOptions{}, err
+	}
+	opts.Resolves = resolves
 	if opts.Title == "" {
 		return CommitOptions{}, fmt.Errorf("title is required")
 	}
@@ -856,6 +883,12 @@ func CommitMessage(opts CommitOptions) string {
 		fmt.Fprintf(&b, "- %s\n", item)
 	}
 	writeCommitSection(&b, "## Ticket Updates", opts.UpdatedTickets)
+	followupLines := make([]string, 0, len(opts.Followups))
+	for _, f := range opts.Followups {
+		followupLines = append(followupLines, FollowupLine(f))
+	}
+	writeCommitSection(&b, FollowupsHeading, followupLines)
+	writeCommitSection(&b, ResolvesHeading, opts.Resolves)
 	return strings.TrimRight(b.String(), "\n")
 }
 
