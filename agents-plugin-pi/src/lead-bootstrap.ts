@@ -1,7 +1,8 @@
 /**
  * Lead/fork session-start bootstrap (260904 Phase 1, §1/§4/§5; scope grew in
- * 260906 Phase 1 — see below): appends a fixed ws block — the session-start
- * `workflow_manual` snapshot, the Pi lead guide (`pi-lead-guide.md`), and an
+ * 260906 Phase 1 — see below): appends a fixed ws block — the static part of
+ * the session-start `workflow_manual` snapshot (session state and notes are
+ * cut; see `staticManualPart`), the Pi lead guide (`pi-lead-guide.md`), and an
  * `<available_skills>` block — to every `before_agent_start` system prompt,
  * for the host lead and a `fork` child (worker/explore never see it).
  *
@@ -55,17 +56,32 @@ import { ASK_TOOL_NAME, RESOLVE_TOOL_NAME } from "./ask.ts";
 import { addSkillToolIfLeadOrFork, buildSkillsBlock, loadSkillFile, resolveSkillEntries, type LoadedSkill } from "./lead-skills.ts";
 
 /**
- * Fixed marker line prefixed onto the manual snapshot inside the ws block —
- * tells the model the manual body below is a one-time, session-start
- * capture (not refreshed mid-session), matching the workflow_manual mapping's
- * (bridge.ts) parallel "current session state" framing for per-call reads.
+ * Fixed line prefixed onto the static manual part inside the ws block. The
+ * system prompt is never compacted and the session-start state goes stale on
+ * the first mutation, so session state (agenda, todos, notes) reaches the
+ * model only through live `workflow_manual` calls; this line tells the model
+ * when such a call is needed without reading as a per-turn instruction.
  */
-export const SESSION_START_SNAPSHOT_MARKER =
-  "Session-start snapshot of your ws workflow manual (fetched once; not refreshed mid-session — call ws__workflow_manual for your live current session state):";
+export const SESSION_STATE_POINTER_LINE =
+  "Your session state (agenda, todos, notes) is not in this prompt. When no `workflow_manual` result is visible in your context — a fresh session, or after compaction — call `workflow_manual` before acting.";
 
 /**
- * Builds the full ws system-prompt block: the manual snapshot (prefixed by
- * the fixed marker line) first, the Pi lead guide second, the
+ * The static part of a session-start `workflow_manual` response: everything
+ * before the first whole `## Session Key` line (ws-mcp appends Session Key,
+ * Session State, and Notes from that line onward — the same end anchor
+ * `cutStaticBody` in bridge.ts uses). Everything ws-mcp prepends ahead of the
+ * manual body stays. A snapshot with no such line is returned whole, trailing
+ * whitespace trimmed.
+ */
+export function staticManualPart(manualSnapshot: string): string {
+  const lines = manualSnapshot.split("\n");
+  const end = lines.indexOf("## Session Key");
+  return (end === -1 ? manualSnapshot : lines.slice(0, end).join("\n")).trimEnd();
+}
+
+/**
+ * Builds the full ws system-prompt block: the session-state pointer line and
+ * the static manual part first, the Pi lead guide second, the
  * `<available_skills>` block (260906 Phase 1, see lead-skills.ts) third —
  * order per §1/§4/260906. Pure string composition, no IO. `skillsBlock` may
  * be `""` (no visible skills) — joined in unconditionally, tolerating a
@@ -74,7 +90,7 @@ export const SESSION_START_SNAPSHOT_MARKER =
  * for an empty skills set.
  */
 export function buildWsBlock(manualSnapshot: string, guideText: string, skillsBlock: string): string {
-  return `${SESSION_START_SNAPSHOT_MARKER}\n\n${manualSnapshot}\n\n${guideText}\n\n${skillsBlock}`;
+  return `${SESSION_STATE_POINTER_LINE}\n\n${staticManualPart(manualSnapshot)}\n\n${guideText}\n\n${skillsBlock}`;
 }
 
 /** The once-per-`session_start` portion of the ws block (manual snapshot + guide text) — everything EXCEPT the live `<available_skills>` piece. See `computeSkillsBlockCached` for why skills are excluded from this static base. */
