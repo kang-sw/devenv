@@ -1748,7 +1748,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       assert.equal(pi.sentUserMessages.length, 2, "fires normally once nothing is running at fire time");
     });
 
-    test("settle alone fires exactly once at the delay, reading settle_delay_ms fresh from the config file", () => {
+    test("settle alone fires exactly once at the delay, reading settle_delay_ms fresh through the config reader (ws-mcp config.get)", () => {
       const settleDelayPath = writeConfig("settle-delay-1500.json", JSON.stringify({ settle_delay_ms: 1500 }));
       const clock = fakeClock();
       const pi = fakePi();
