@@ -39,6 +39,7 @@ import {
   resolvedSessionKeyArg,
   type AdvisoryKeyHolder,
 } from "../src/bridge.ts";
+import { ADAPTER_CONFIG_MANIFEST_FILE, WS_MCP_CONFIG_MANIFESTS_ENV } from "../src/adapter-config.ts";
 import type { McpToolCallResult } from "../src/mcp-stdio-client.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
@@ -168,6 +169,25 @@ test("production bridge registration returns the pointer on a repeat playbook.re
     assert.doesNotMatch(prose!, /one/, "the toolCallId is carried only by the provenance envelope");
     handle.shutdown();
   } finally {
+    if (oldRole === undefined) delete process.env.WS_PI_SPAWN_ROLE; else process.env.WS_PI_SPAWN_ROLE = oldRole;
+  }
+});
+
+test("production bridge launches ws-mcp with the adapter config manifest injected into its env", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "ws-pi-manifest-env-"));
+  const launcher = join(directory, "launcher.py");
+  const envFile = join(directory, "env.json");
+  writeFileSync(launcher, `import json,sys,os\njson.dump(dict(os.environ),open(${JSON.stringify(envFile)},'w'))\nfor line in sys.stdin:\n q=json.loads(line); m=q['method'];\n if m=='initialize': r={'serverInfo':{'version':${JSON.stringify(BUNDLED_RUNTIME.plugin_version)}},'capabilities':{}}\n elif m=='tools/list': r={'tools':[]}\n else: r={'isError':False,'content':[]}\n print(json.dumps({'jsonrpc':'2.0','id':q['id'],'result':r}),flush=True)\n`);
+  const pi = { registerTool() {}, on() {} } as unknown as ExtensionAPI;
+  const oldRole = process.env.WS_PI_SPAWN_ROLE;
+  process.env.WS_PI_SPAWN_ROLE = "worker";
+  let handle: Awaited<ReturnType<typeof startBridge>> | undefined;
+  try {
+    handle = await startBridge(pi, { launcherPath: launcher, pluginDir: directory, runtimeJsonPath: join(dirname(fileURLToPath(import.meta.url)), "../runtime.json"), cwd: directory, toolPreviewTuiRef: { current: undefined } });
+    const env = JSON.parse(readFileSync(envFile, "utf8"));
+    assert.equal(env[WS_MCP_CONFIG_MANIFESTS_ENV], join(directory, ADAPTER_CONFIG_MANIFEST_FILE));
+  } finally {
+    handle?.shutdown();
     if (oldRole === undefined) delete process.env.WS_PI_SPAWN_ROLE; else process.env.WS_PI_SPAWN_ROLE = oldRole;
   }
 });
