@@ -313,18 +313,22 @@ export function elideMiddle(text: string, thresholdBytes: number, keepBytes: num
   return `${bytes.subarray(0, headEnd).toString("utf8")}${join}[... ${skipped} bytes skipped ...]${join}${bytes.subarray(tailStart).toString("utf8")}`;
 }
 
-/** One item as the `## Dialog` section renders it, elision applied. */
+function escapeDialogAttribute(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/** One item as the `## Dialog` section renders it, elision applied. Tags delimit reading, not strict XML: payloads stay verbatim. */
 export function renderDialogItem(item: DialogItem): string {
   switch (item.kind) {
     case "user":
     case "assistant":
-      return `--- ${item.kind} (${item.timestamp}) ---\n${elideMiddle(item.text, LONG_MESSAGE_THRESHOLD_BYTES, LONG_MESSAGE_KEEP_BYTES, "\n")}`;
+      return `<message role="${item.kind}" timestamp="${escapeDialogAttribute(item.timestamp)}">\n${elideMiddle(item.text, LONG_MESSAGE_THRESHOLD_BYTES, LONG_MESSAGE_KEEP_BYTES, "\n")}\n</message>`;
     case "branch_summary":
-      return `--- branch summary (${item.timestamp}) ---\n${item.text}`;
+      return `<branch-summary timestamp="${escapeDialogAttribute(item.timestamp)}">\n${item.text}\n</branch-summary>`;
     case "tool":
-      return `→ ${item.name} ${elideMiddle(item.args, TOOL_ARGS_THRESHOLD_BYTES, TOOL_ARGS_KEEP_BYTES, " ")}${item.failed ? " ✗failed" : ""}`;
+      return `<tool-call name="${escapeDialogAttribute(item.name)}">\n→ ${item.name} ${elideMiddle(item.args, TOOL_ARGS_THRESHOLD_BYTES, TOOL_ARGS_KEEP_BYTES, " ")}${item.failed ? " ✗failed" : ""}\n</tool-call>`;
     case "fold":
-      return `→ (+${item.total} more: ${item.counts.map((entry) => `${entry.name}×${entry.count}`).join(", ")})`;
+      return `<tool-fold>\n→ (+${item.total} more: ${item.counts.map((entry) => `${entry.name}×${entry.count}`).join(", ")})\n</tool-fold>`;
   }
 }
 
@@ -367,7 +371,7 @@ export function buildDialogSection(entries: readonly SessionEntry[], budgetBytes
   const search = sessionFile
     ? `Full tool output and every earlier message remain in the session file \`${sessionFile}\`; search it (for example with grep) when you need them.`
     : "This session has no session file, so tool output from before this compaction cannot be searched.";
-  return [DIALOG_SECTION_HEADING, header, search, ...selected.lines].join("\n");
+  return [DIALOG_SECTION_HEADING, header, search, "<dialog>", ...selected.lines, "</dialog>"].join("\n");
 }
 
 // ---------------------------------------------------------------------------

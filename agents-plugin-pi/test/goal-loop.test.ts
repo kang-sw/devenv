@@ -2020,7 +2020,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       const summary = result.compaction.summary;
       assert.match(summary, /ws session key: `lead-key`/);
       assert.match(summary, /- w1 \(w-1\) \[worker\]: ticket none named; running/);
-      assert.match(summary, /## Dialog\nAll 1 dialog items of this session\.\n.*`\/sessions\/lead\.jsonl`.*\n--- user \(.+\) ---\nthe human request/);
+      assert.match(summary, /## Dialog\nAll 1 dialog items of this session\.\n.*`\/sessions\/lead\.jsonl`.*\n<dialog>\n<message role="user" timestamp=".+">\nthe human request\n<\/message>\n<\/dialog>/);
       assert.match(summary, /### Current work\nPROSE/);
       assert.match(summary, /### Immediate next step\n"do the thing"/);
       assert.doesNotMatch(summary, /PUSH BATCH BODY/, "push-batch traffic is not a human message");
@@ -2085,7 +2085,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
         { sessionKey: "k", registry: undefined, prose: prose("PROSE"), dialogBudgetBytes: DEFAULT_DIALOG_BUDGET_BYTES, sessionFile: sm.getSessionFile(), source: "lever" },
       );
       assert.ok(!ids.includes(result.firstKeptEntryId), "the kept-tail id names no session entry");
-      assert.match(result.summary, /--- user \(.+\) ---\nHUMAN ASK\n--- assistant \(.+\) ---\nLEAD REPLY\n\u2192 Bash \{"command":"ls"\}\n--- assistant \(.+\) ---\nLATEST REPLY/);
+      assert.match(result.summary, /<dialog>\n<message role="user" timestamp=".+">\nHUMAN ASK\n<\/message>\n<message role="assistant" timestamp=".+">\nLEAD REPLY\n<\/message>\n<tool-call name="Bash">\n\u2192 Bash \{"command":"ls"\}\n<\/tool-call>\n<message role="assistant" timestamp=".+">\nLATEST REPLY\n<\/message>\n<\/dialog>/);
       assert.doesNotMatch(result.summary, /RAW TOOL OUTPUT/);
       assert.ok(result.summary.includes(`\`${sm.getSessionFile()}\``), "the summary names the session file to search");
 

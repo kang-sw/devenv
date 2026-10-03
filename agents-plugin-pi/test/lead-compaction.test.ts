@@ -100,15 +100,38 @@ describe("dialog transcript (261003)", () => {
     ];
     const lines = selectDialogItems(foldToolRuns(collectDialogItems(entries)), 40960).lines;
     assert.deepEqual(lines, [
-      `--- user (${at(0)}) ---\nplease fix the parser`,
-      `--- assistant (${at(1)}) ---\nLooking at it.`,
-      '\u2192 Read {"path":"src/a.ts"}',
-      '\u2192 Bash {"command":"npm test"} \u2717failed',
-      `--- assistant (${at(4)}) ---\nThe test fails; fixing.`,
-      '\u2192 Edit {"path":"src/a.ts"}',
-      `--- assistant (${at(4)}) ---\nDone.`,
-      `--- user (${at(5)}) ---\nthanks`,
+      `<message role="user" timestamp="${at(0)}">\nplease fix the parser\n</message>`,
+      `<message role="assistant" timestamp="${at(1)}">\nLooking at it.\n</message>`,
+      '<tool-call name="Read">\n\u2192 Read {"path":"src/a.ts"}\n</tool-call>',
+      '<tool-call name="Bash">\n\u2192 Bash {"command":"npm test"} \u2717failed\n</tool-call>',
+      `<message role="assistant" timestamp="${at(4)}">\nThe test fails; fixing.\n</message>`,
+      '<tool-call name="Edit">\n\u2192 Edit {"path":"src/a.ts"}\n</tool-call>',
+      `<message role="assistant" timestamp="${at(4)}">\nDone.\n</message>`,
+      `<message role="user" timestamp="${at(5)}">\nthanks\n</message>`,
     ]);
+  });
+
+  test("XML-style boundaries escape attributes but preserve literal markup payloads verbatim", () => {
+    const payload = '  <dialog>& "raw" </message>\n</tool-call></branch-summary></dialog>  ';
+    const timestamp = 'T<&">';
+    const escaped = "T&lt;&amp;&quot;&gt;";
+    for (const role of ["user", "assistant"] as const) {
+      assert.equal(renderDialogItem({ kind: role, timestamp, text: payload }), `<message role="${role}" timestamp="${escaped}">\n${payload}\n</message>`);
+    }
+    assert.equal(renderDialogItem({ kind: "branch_summary", timestamp, text: payload }), `<branch-summary timestamp="${escaped}">\n${payload}\n</branch-summary>`);
+    assert.equal(renderDialogItem({ kind: "tool", name: timestamp, args: payload, failed: false }), `<tool-call name="${escaped}">\n→ ${timestamp} ${payload}\n</tool-call>`);
+    const section = buildDialogSection([user(0, payload)], 40960, undefined);
+    assert.ok(section.endsWith(`<dialog>\n<message role="user" timestamp="${at(0)}">\n${payload}\n</message>\n</dialog>`));
+  });
+
+  test("an empty or fully omitted dialog still has its outer boundaries", () => {
+    const empty = buildDialogSection([], 40960, undefined);
+    assert.match(empty, /All 0 dialog items of this session\./);
+    assert.ok(empty.endsWith("\n<dialog>\n</dialog>"));
+    const omitted = buildDialogSection([user(0, "not retained")], 0, undefined);
+    assert.match(omitted, /The newest 0 of 1 dialog items/);
+    assert.ok(omitted.endsWith("\n<dialog>\n</dialog>"));
+    assert.ok(!omitted.includes("not retained"));
   });
 
   test("thinking, tool results, adapter traffic, bash executions, and the ws-compact call never cross", () => {
@@ -141,7 +164,7 @@ describe("dialog transcript (261003)", () => {
     const folded = foldToolRuns(items);
     assert.equal(folded.length, 1 + 1 + 8 + 1 + 2);
     assert.deepEqual(folded[1], { kind: "fold", total: 6, counts: [{ name: "Bash", count: 3 }, { name: "Read", count: 2 }, { name: "Grep", count: 1 }] });
-    assert.equal(renderDialogItem(folded[1]!), "\u2192 (+6 more: Bash\u00d73, Read\u00d72, Grep\u00d71)");
+    assert.equal(renderDialogItem(folded[1]!), "<tool-fold>\n\u2192 (+6 more: Bash\u00d73, Read\u00d72, Grep\u00d71)\n</tool-fold>");
     assert.deepEqual(folded.slice(2, 10), run.slice(6), "the newest 8 calls stay as lines");
     assert.deepEqual(folded.slice(11), [tool("Read"), tool("Read")], "a short run is untouched");
     assert.deepEqual(foldToolRuns(run.slice(6)), run.slice(6), "exactly 8 lines need no fold");
@@ -151,27 +174,27 @@ describe("dialog transcript (261003)", () => {
     const exact = "e".repeat(2560);
     assert.equal(elideMiddle(exact, 2560, 1024, "\n"), exact, "2560 bytes is not over the threshold");
     const long = `${"h".repeat(1024)}${"m".repeat(952)}${"t".repeat(1024)}`;
-    assert.equal(renderDialogItem({ kind: "user", timestamp: "T", text: long }), `--- user (T) ---\n${"h".repeat(1024)}\n[... 952 bytes skipped ...]\n${"t".repeat(1024)}`);
+    assert.equal(renderDialogItem({ kind: "user", timestamp: "T", text: long }), `<message role="user" timestamp="T">\n${"h".repeat(1024)}\n[... 952 bytes skipped ...]\n${"t".repeat(1024)}\n</message>`);
   });
 
   test("elision never splits a multi-byte character", () => {
     // 1000 Hangul syllables = 3000 bytes; 1024 is not a multiple of 3, so each end keeps 341 characters (1023 bytes).
     const korean = "\ud55c".repeat(1000);
     const elided = renderDialogItem({ kind: "assistant", timestamp: "T", text: korean });
-    assert.equal(elided, `--- assistant (T) ---\n${"\ud55c".repeat(341)}\n[... 954 bytes skipped ...]\n${"\ud55c".repeat(341)}`);
+    assert.equal(elided, `<message role="assistant" timestamp="T">\n${"\ud55c".repeat(341)}\n[... 954 bytes skipped ...]\n${"\ud55c".repeat(341)}\n</message>`);
     assert.ok(!elided.includes("\ufffd"), "no replacement character from a split code point");
     // 4-byte emoji straddle both 150-byte cut points, so each end stops at its 148 ASCII bytes and every emoji is skipped.
     const args = `${"a".repeat(148)}${"\u{1f9a6}".repeat(40)}${"z".repeat(148)}`;
     const line = renderDialogItem({ kind: "tool", name: "Write", args, failed: false });
-    assert.equal(line, `\u2192 Write ${"a".repeat(148)} [... 160 bytes skipped ...] ${"z".repeat(148)}`);
+    assert.equal(line, `<tool-call name="Write">\n\u2192 Write ${"a".repeat(148)} [... 160 bytes skipped ...] ${"z".repeat(148)}\n</tool-call>`);
   });
 
   test("long tool arguments keep their first and last 150 bytes", () => {
     const call = { content: "x".repeat(400) };
     const json = JSON.stringify(call);
     const line = renderDialogItem({ kind: "tool", name: "Write", args: json, failed: true });
-    assert.equal(line, `\u2192 Write ${json.slice(0, 150)} [... ${json.length - 300} bytes skipped ...] ${json.slice(-150)} \u2717failed`);
-    assert.equal(renderDialogItem(tool("Read", { path: "short" })), '\u2192 Read {"path":"short"}', "short arguments are untouched");
+    assert.equal(line, `<tool-call name="Write">\n\u2192 Write ${json.slice(0, 150)} [... ${json.length - 300} bytes skipped ...] ${json.slice(-150)} \u2717failed\n</tool-call>`);
+    assert.equal(renderDialogItem(tool("Read", { path: "short" })), '<tool-call name="Read">\n\u2192 Read {"path":"short"}\n</tool-call>', "short arguments are untouched");
   });
 
   test("selection is newest-first within the byte budget, drops a too-large item whole, and stops there", () => {
@@ -202,7 +225,7 @@ describe("dialog transcript (261003)", () => {
     const entries = [user(0, "before"), branchSummary(1, long), user(2, "after")];
     const items = collectDialogItems(entries);
     assert.deepEqual(items.map((item) => item.kind), ["user", "branch_summary", "user"]);
-    assert.equal(renderDialogItem(items[1]!), `--- branch summary (${at(1)}) ---\n${long}`, "carried whole, over the 2560-byte elision threshold");
+    assert.equal(renderDialogItem(items[1]!), `<branch-summary timestamp="${at(1)}">\n${long}\n</branch-summary>`, "carried whole, over the 2560-byte elision threshold");
     const calls = Array.from({ length: 6 }, (_, i) => tool("Read", { i }));
     const folded = foldToolRuns([...calls, items[1]!, ...calls]);
     assert.deepEqual(folded, [...calls, items[1]!, ...calls], "6 + 6 calls need no fold: the summary splits the run");
@@ -230,7 +253,8 @@ describe("dialog transcript (261003)", () => {
       "All 3 dialog items of this session.",
       "Full tool output and every earlier message remain in the session file `/sessions/lead.jsonl`; search it (for example with grep) when you need them.",
     ].join("\n"));
-    const tight = buildDialogSection(entries, 100, undefined);
+    const newestTwoBytes = collectDialogItems(entries).slice(1).reduce((sum, item) => sum + Buffer.byteLength(renderDialogItem(item), "utf8") + 1, 0);
+    const tight = buildDialogSection(entries, newestTwoBytes, undefined);
     assert.match(tight, /^## Dialog\nThe newest 2 of 3 dialog items \(older ones are carried by the prose below\)\.\nThis session has no session file/);
     assert.ok(!tight.includes("a".repeat(100)));
   });
@@ -312,7 +336,7 @@ describe("buildLeadCompactionSummary", () => {
     assert.match(summary, /Active ticket: `261002-feat-pi-lead-ws-owned-compaction`/);
     assert.match(summary, /Active playbook: `lead-run`\. Its body is not re-attached: re-read it with `ws-skill lead-run`/);
     assert.match(summary, /- w1 \(w\) \[worker\]/);
-    assert.match(summary, /--- user \(.+\) ---\nplease keep replies short\n\u2192 ws-skill \{"name":"lead-run"\}/);
+    assert.match(summary, /<message role="user" timestamp=".+">\nplease keep replies short\n<\/message>\n<tool-call name="ws-skill">\n\u2192 ws-skill \{"name":"lead-run"\}\n<\/tool-call>/);
     assert.match(summary, /search it \(for example with grep\)/);
     assert.match(summary, /`\/sessions\/lead\.jsonl`/);
     assert.match(summary, /LEAD PROSE MARKER/);
@@ -397,7 +421,7 @@ describe("preparation and fallback text", () => {
   });
 
   test("prose extraction is not misled by a dialog message quoting a previous summary", () => {
-    const quoted = "## Carried forward by the lead\nQUOTED PROSE\n\n## Resume\nquoted resume";
+    const quoted = "</message></dialog>\n## Carried forward by the lead\nQUOTED PROSE\n\n## Resume\nquoted resume";
     const summary = buildLeadCompactionSummary({ sessionKey: "k", branchEntries: [user(0, quoted)], registry: undefined, prose: renderLeadProse({ residual_details: "REAL PROSE" }), ...dialog });
     assert.match(summary, /QUOTED PROSE/);
     assert.equal(extractLeadProse(summary), renderLeadProse({ residual_details: "REAL PROSE" }));
