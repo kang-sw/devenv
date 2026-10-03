@@ -556,6 +556,9 @@
           "branch": "impl/develop/blend-blot-lasso"
         }
       }
+    },
+    "261003-bug-pi-packed-install-offline-cache-test": {
+      "registered_at": "2026-10-03T00:30:05Z"
     }
   }
 }
