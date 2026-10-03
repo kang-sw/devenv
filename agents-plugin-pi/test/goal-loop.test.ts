@@ -2329,7 +2329,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     function resumeRun() {
       const clock = fakeClock();
       const pi = fakePi();
-      registerGoalLoop(pi.api, { readConfig: staticConfigReader({ compaction_advisory_percent: 50, compaction_hard_percent: 80 }), ...clock, leadCompactGuidePath: guidePath, sessionKeyRef: { current: "lead-key" } });
+      const handle = registerGoalLoop(pi.api, { readConfig: staticConfigReader({ compaction_advisory_percent: 50, compaction_hard_percent: 80 }), ...clock, leadCompactGuidePath: guidePath, sessionKeyRef: { current: "lead-key" } });
       const idle = { current: true };
       const { ctx } = fakeCtx(() => idle.current);
       const usage = { percent: 10 as number | null };
@@ -2351,7 +2351,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
         compactCall!.onComplete!({} as never);
         await new Promise((resolve) => setImmediate(resolve));
       };
-      return { clock, pi, ctx, idle, usage, preparations, resumes, lever, complete, compactCall: () => compactCall!, ours };
+      return { clock, pi, handle, ctx, idle, usage, preparations, resumes, lever, complete, compactCall: () => compactCall!, ours };
     }
 
     test("buildCompactionResumeMessage names lead-revive with the key and bounds the continuation", () => {
@@ -2377,16 +2377,39 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       assert.equal(clock.pendingCount(), 0, "no goal reminder is scheduled");
     });
 
-    for (const completion of ["event", "callback", "both"] as const) {
+    for (const completion of ["callback", "both"] as const) {
       test(`an autonomous lever compaction resumes exactly once after ${completion} release`, async () => {
         const { pi, ctx, resumes, lever, compactCall, ours } = resumeRun();
         await lever();
-        if (completion === "callback" || completion === "both") compactCall().onComplete!({} as never);
-        if (completion === "event" || completion === "both") pi.handlers.get("session_compact")!(ours, ctx);
-        if (completion === "both") compactCall().onComplete!({} as never);
+        compactCall().onComplete!({} as never);
+        if (completion === "both") {
+          pi.handlers.get("session_compact")!(ours, ctx);
+          compactCall().onComplete!({} as never);
+        }
         await new Promise((resolve) => setImmediate(resolve));
         assert.equal(resumes().length, 1);
         assert.equal(pi.sentUserMessages.length, 1);
+      });
+    }
+
+    for (const busyAtCallback of [false, true]) {
+      test(`a session_compact release that runs before onComplete defers the resume to onComplete${busyAtCallback ? " (busy by then)" : ""}`, async () => {
+        // Another extension's async session_compact handler lets ws's deferred
+        // release run while Pi's prompt() would still throw; the resume waits
+        // for the lever's onComplete, which Pi calls after compact() returned.
+        const { pi, ctx, idle, resumes, lever, compactCall, ours } = resumeRun();
+        await lever();
+        pi.handlers.get("session_compact")!(ours, ctx);
+        await new Promise((resolve) => setImmediate(resolve));
+        assert.equal(leadCompactingRef.current, false, "the session_compact release ran first");
+        assert.deepEqual(pi.sentUserMessages, [], "no resume from the session_compact release");
+        // A run started by a flushed push only queues the followUp behind it.
+        if (busyAtCallback) idle.current = false;
+        compactCall().onComplete!({} as never);
+        assert.equal(resumes().length, 1);
+        assert.deepEqual(resumes()[0]!.options, { deliverAs: "followUp" });
+        compactCall().onComplete!({} as never);
+        assert.equal(pi.sentUserMessages.length, 1, "exactly one resume per operation");
       });
     }
 
@@ -2422,6 +2445,22 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       await complete();
       assert.equal(resumes().length, 1);
     });
+
+    for (const point of ["before release", "after the session_compact release"] as const) {
+      test(`a session shutdown ${point} sends no resume`, async () => {
+        const { pi, ctx, handle, lever, compactCall, ours } = resumeRun();
+        await lever();
+        if (point === "after the session_compact release") {
+          pi.handlers.get("session_compact")!(ours, ctx);
+          await new Promise((resolve) => setImmediate(resolve));
+        }
+        handle.resetCompactionStateForShutdown();
+        pi.handlers.get("session_compact")!(ours, ctx);
+        compactCall().onComplete!({} as never);
+        await new Promise((resolve) => setImmediate(resolve));
+        assert.deepEqual(pi.sentUserMessages, []);
+      });
+    }
 
     test("a non-idle session at release sends nothing", async () => {
       const { pi, idle, lever, complete } = resumeRun();

@@ -70,7 +70,8 @@
  * The lever works with or without an active goal; only while a goal is active
  * does it re-arm the goal loop (it never calls `disarmGoal()`). With no goal,
  * a lever call that cut work short (autonomous, or after the hard cut) is
- * followed by one resume message at release (261003). Spawned
+ * followed by one resume message from the lever's completion callback, once
+ * an idle release has flushed held pushes (261003). Spawned
  * worker/explore/fork sessions keep Pi's native compaction. The lead is led
  * to the lever by a preparation message carrying `lead-compact-guide.md`: an
  * advisory nudge at `agent_end`, a hard-cut steer at `turn_end`, or a user
@@ -259,9 +260,16 @@ export function buildCompactionLeverResult(): string {
 /**
  * One host compaction operation. `route` is set only by the `ws-compact`
  * lever (261003): the preparation trigger that led to the call, or
- * `"autonomous"` when no preparation was pending.
+ * `"autonomous"` when no preparation was pending. `resumeOwed` is set by an
+ * idle, successful release of a goal-less operation whose route resumes, and
+ * consumed by the lever's `onComplete`, the only place the resume is sent.
  */
-type CompactionOperation = { id: number; generation: number | undefined; route?: PreparationTrigger["kind"] | "autonomous" };
+type CompactionOperation = {
+  id: number;
+  generation: number | undefined;
+  route?: PreparationTrigger["kind"] | "autonomous";
+  resumeOwed?: boolean;
+};
 
 /**
  * Whether a goal-less lever compaction reached by `route` resumes the lead
@@ -1023,6 +1031,23 @@ export function registerGoalLoop(
   }
 
   /**
+   * 261003: sends the goal-less resume owed by `operation`, at most once.
+   * Called only from the lever's `onComplete`, after its own release attempt:
+   * Pi's `prompt()` throws while its `_compactionAbortController` is set, and
+   * Pi clears that only after awaiting every `session_compact` handler, so
+   * the `session_compact` release's `setImmediate` can run first when another
+   * extension's handler is async, while `onComplete` always runs after
+   * `compact()` returned. The followUp queues behind any run a flushed push
+   * started.
+   */
+  function sendOwedResume(operation: CompactionOperation): void {
+    if (!operation.resumeOwed) return;
+    operation.resumeOwed = false;
+    if (shuttingDown || state.active) return;
+    pi.sendUserMessage(buildCompactionResumeMessage(opts.sessionKeyRef?.current), { deliverAs: "followUp" });
+  }
+
+  /**
    * Deferred completion/failure owns release of the independent compaction hold.
    * Idle release requests a push wake without draining, then arms pending goal
    * evaluation. Busy release leaves pushes to the run's settle and clears only
@@ -1057,9 +1082,10 @@ export function registerGoalLoop(
       return;
     }
     const flushed = flushHeldPushes(pi);
-    // 261003: queued behind any run the flush's push wake started.
-    if (!failed && !shuttingDown && generation === undefined && !state.active && resumesAfterCompaction(operation?.route)) {
-      pi.sendUserMessage(buildCompactionResumeMessage(opts.sessionKeyRef?.current), { deliverAs: "followUp" });
+    // 261003: only marks the resume owed; `sendOwedResume` sends it from the
+    // lever's onComplete (see there for why never from here).
+    if (operation && !failed && !shuttingDown && generation === undefined && !state.active && resumesAfterCompaction(operation.route)) {
+      operation.resumeOwed = true;
     }
     const rearmIsCurrent = generation !== undefined && isCurrentArmedGeneration(generation);
     if (!rearmIsCurrent) {
@@ -1517,6 +1543,7 @@ export function registerGoalLoop(
           clearLever();
           ctx.ui.notify("Compaction completed", "info");
           releaseAfterCompaction(ctx, undefined, operation);
+          sendOwedResume(operation);
         },
         onError: (error) => {
           clearLever();
