@@ -511,6 +511,9 @@
     "261003-bug-pi-packed-install-offline-cache-test": {
       "registered_at": "2026-10-03T00:30:05Z"
     },
+    "261003-feat-pi-execute-readonly-auto-approval": {
+      "registered_at": "2026-10-03T04:05:29Z"
+    },
     "261003-feat-pi-execute-worker-git-read-tools": {
       "registered_at": "2026-10-03T03:57:44Z"
     },
