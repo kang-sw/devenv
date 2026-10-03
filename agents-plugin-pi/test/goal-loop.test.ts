@@ -37,6 +37,8 @@ import {
   computeContextPercent,
   buildGoalAnnouncement,
   buildCompactionLeverResult,
+  buildCompactionResumeMessage,
+  resumesAfterCompaction,
   buildGoalReminder,
   buildCompactionObservation,
   initialGoalLoopState,
@@ -56,7 +58,7 @@ import {
 } from "../src/goal-loop.ts";
 import { WS_PI_SPAWN_ROLE_ENV } from "../src/process-role.ts";
 import { createWsConfigReader, staticConfigReader, type GoalLoopConfigReader } from "../src/adapter-config.ts";
-import { flushHeldPushes, leadIdleRef, clearWakeStart, leadCompactingRef, leadWakeStartPendingRef, heldPushQueue, isOwningAgentIdle, type RpcAgentRegistry } from "../src/spawner.ts";
+import { flushHeldPushes, leadIdleRef, clearWakeStart, leadCompactingRef, leadWakeStartPendingRef, heldPushQueue, isOwningAgentIdle, registerPushFlush, buildPushWakeLine, type RpcAgentRegistry } from "../src/spawner.ts";
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
 import { DEFAULT_DIALOG_BUDGET_BYTES, NO_KEPT_ENTRY_ID, renderLeadProse } from "../src/lead-compaction.ts";
 
@@ -1020,7 +1022,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     });
   });
 
-  test("ws-compact compacts with no active goal without touching goal-loop state (reverses 260913's rejection)", async () => {
+  test("ws-compact compacts with no active goal without touching goal-loop state (reverses 260913's rejection) and resumes the lead once (261003)", async () => {
     const clock = fakeClock();
     const pi = fakePi();
     registerGoalLoop(pi.api, { readConfig: fileReader(configPath), ...clock });
@@ -1045,13 +1047,13 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     assert.equal(clock.pendingCount(), 0, "no goal reminder is scheduled");
     assert.deepEqual(statusCalls, [], "goal-loop status is untouched");
     assert.deepEqual(notifications.map((n) => n.message), ["Compaction completed"]);
-    assert.deepEqual(pi.sentUserMessages, [], "nothing is injected");
+    assert.deepEqual(pi.sentUserMessages, [{ content: buildCompactionResumeMessage(undefined), options: { deliverAs: "followUp" } }], "an autonomous lever call is followed by exactly one resume message, never a goal reminder");
 
     await pi.commands.get("goal")!("ship", ctx);
     pi.handlers.get("agent_settled")!({}, ctx);
     clock.fire();
-    assert.equal(pi.sentUserMessages.length, 2, "a later active goal still follows the ordinary reminder path");
-    assert.ok(!(pi.sentUserMessages[1]!.content as string).includes(carryHeading), "the goal-less prose never becomes a goal carry");
+    assert.equal(pi.sentUserMessages.length, 3, "a later active goal still follows the ordinary reminder path");
+    assert.ok(!(pi.sentUserMessages[2]!.content as string).includes(carryHeading), "the goal-less prose never becomes a goal carry");
   });
 
   for (const completion of ["event", "callback", "both", "error", "failed-event"] as const) {
@@ -2316,6 +2318,177 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       pi.handlers.get("session_compact")!(stored(ourDetails), ctx);
       assert.equal(competing().length, 1);
       await new Promise((resolve) => setImmediate(resolve));
+    });
+  });
+
+  describe("goal-less resume after a lever compaction (261003)", () => {
+    const guidePath = join(tmpDir, "lead-compact-guide-261003.md");
+    writeFileSync(guidePath, "GUIDE BODY 261003");
+    const resumeText = buildCompactionResumeMessage("lead-key");
+
+    function resumeRun() {
+      const clock = fakeClock();
+      const pi = fakePi();
+      registerGoalLoop(pi.api, { readConfig: staticConfigReader({ compaction_advisory_percent: 50, compaction_hard_percent: 80 }), ...clock, leadCompactGuidePath: guidePath, sessionKeyRef: { current: "lead-key" } });
+      const idle = { current: true };
+      const { ctx } = fakeCtx(() => idle.current);
+      const usage = { percent: 10 as number | null };
+      (ctx as unknown as { getContextUsage: () => unknown }).getContextUsage = () => ({ tokens: null, contextWindow: 1000, percent: usage.percent });
+      let compactCall: Parameters<ExtensionContext["compact"]>[0] | undefined;
+      ctx.compact = (opts) => { compactCall = opts; };
+      const preparations = () => pi.sentMessages.filter((m) => (m.content as { customType?: string }).customType === "ws-lead-compact");
+      const resumes = () => pi.sentUserMessages.filter((m) => m.content === resumeText);
+      /** The lever call, then the abort's own agent_end, as Pi's compact() produces them. */
+      const lever = async () => {
+        await pi.tools.get("ws-compact")!.execute("c", { current_work: "mid-task" }, undefined, undefined, ctx);
+        pi.handlers.get("agent_end")!({}, ctx);
+        pi.handlers.get("session_before_compact")!(compactionEvent("manual"), ctx);
+      };
+      const ours = { reason: "manual", fromExtension: true, compactionEntry: { details: { kind: "ws-pi-lead-compaction", version: 1, source: "lever" } } };
+      /** Success through both completion paths for one operation. */
+      const complete = async () => {
+        pi.handlers.get("session_compact")!(ours, ctx);
+        compactCall!.onComplete!({} as never);
+        await new Promise((resolve) => setImmediate(resolve));
+      };
+      return { clock, pi, ctx, idle, usage, preparations, resumes, lever, complete, compactCall: () => compactCall!, ours };
+    }
+
+    test("buildCompactionResumeMessage names lead-revive with the key and bounds the continuation", () => {
+      assert.equal(
+        resumeText,
+        "Compaction complete. Invoke `lead-revive` (`ws-skill lead-revive`) with session key `lead-key`, then continue the immediate next step; if it awaits the user, end your turn.",
+      );
+      assert.match(buildCompactionResumeMessage(undefined), /with session key \(recover it first\),/);
+      assert.deepEqual(["hard", "autonomous", "advisory", "reroute", undefined].map((route) => resumesAfterCompaction(route as never)), [true, true, false, false, false]);
+    });
+
+    test("a lever compaction after a hard preparation sends exactly one resume followUp after release", async () => {
+      const { pi, ctx, usage, preparations, resumes, lever, complete, clock } = resumeRun();
+      usage.percent = 85;
+      pi.handlers.get("turn_end")!({}, ctx);
+      assert.equal(preparations().length, 1, "hard steer sent");
+      await lever();
+      assert.equal(resumes().length, 0, "nothing is sent before release");
+      await complete();
+      assert.equal(resumes().length, 1);
+      assert.deepEqual(resumes()[0]!.options, { deliverAs: "followUp" });
+      assert.equal(pi.sentUserMessages.length, 1, "the resume is the only user message");
+      assert.equal(clock.pendingCount(), 0, "no goal reminder is scheduled");
+    });
+
+    for (const completion of ["event", "callback", "both"] as const) {
+      test(`an autonomous lever compaction resumes exactly once after ${completion} release`, async () => {
+        const { pi, ctx, resumes, lever, compactCall, ours } = resumeRun();
+        await lever();
+        if (completion === "callback" || completion === "both") compactCall().onComplete!({} as never);
+        if (completion === "event" || completion === "both") pi.handlers.get("session_compact")!(ours, ctx);
+        if (completion === "both") compactCall().onComplete!({} as never);
+        await new Promise((resolve) => setImmediate(resolve));
+        assert.equal(resumes().length, 1);
+        assert.equal(pi.sentUserMessages.length, 1);
+      });
+    }
+
+    test("a lever compaction after an advisory preparation sends nothing", async () => {
+      const { pi, ctx, usage, preparations, lever, complete } = resumeRun();
+      usage.percent = 60;
+      pi.handlers.get("agent_end")!({}, ctx);
+      assert.equal(preparations().length, 1, "advisory nudge queued");
+      await lever(); // inside the nudge's own run
+      await complete();
+      assert.deepEqual(pi.sentUserMessages, []);
+    });
+
+    test("a lever compaction after a reroute preparation sends nothing", async () => {
+      const { pi, ctx, preparations, lever, complete } = resumeRun();
+      assert.deepEqual(pi.handlers.get("session_before_compact")!(compactionEvent("manual"), ctx), { cancel: true });
+      pi.handlers.get("session_compact_failed")!({ reason: "manual", aborted: true, errorMessage: undefined, willRetry: false, fromExtension: false }, ctx);
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(preparations().length, 1, "reroute preparation queued");
+      assert.deepEqual(pi.sentUserMessages, [], "the cancelled /compact itself resumes nothing");
+      await lever();
+      await complete();
+      assert.deepEqual(pi.sentUserMessages, []);
+    });
+
+    test("a preparation whose run ended before the lever call counts as autonomous and resumes", async () => {
+      const { pi, ctx, usage, preparations, resumes, lever, complete } = resumeRun();
+      usage.percent = 60;
+      pi.handlers.get("agent_end")!({}, ctx);
+      assert.equal(preparations().length, 1, "advisory nudge queued");
+      pi.handlers.get("agent_end")!({}, ctx); // the nudge's run ended without the lever
+      await lever();
+      await complete();
+      assert.equal(resumes().length, 1);
+    });
+
+    test("a non-idle session at release sends nothing", async () => {
+      const { pi, idle, lever, complete } = resumeRun();
+      await lever();
+      idle.current = false; // owner input queued during compaction already started a run
+      await complete();
+      assert.deepEqual(pi.sentUserMessages, []);
+      assert.equal(leadCompactingRef.current, false, "the hold is still released");
+    });
+
+    for (const failure of ["callback", "event"] as const) {
+      test(`a failed compaction (${failure}) sends no resume`, async () => {
+        const { pi, ctx, lever, compactCall } = resumeRun();
+        await lever();
+        if (failure === "callback") compactCall().onError!(new Error("boom"));
+        else pi.handlers.get("session_compact_failed")!({ reason: "manual", aborted: true, errorMessage: undefined, willRetry: false, fromExtension: false }, ctx);
+        await new Promise((resolve) => setImmediate(resolve));
+        if (failure === "event") compactCall().onError!(new Error("boom"));
+        assert.equal(leadCompactingRef.current, false);
+        assert.deepEqual(pi.sentUserMessages, []);
+      });
+    }
+
+    test("the resume is sent after the held-push flush within the same release", async () => {
+      const wakePi = { on: (event: string, fn: () => void) => { if (event === "session_shutdown") shutdown = fn; } } as unknown as ExtensionAPI;
+      let shutdown: (() => void) | undefined;
+      registerPushFlush(wakePi, { delayMs: () => 10, scheduleTimer: () => 0 as unknown as NodeJS.Timeout, clearTimer: () => {} });
+      try {
+        const { pi, resumes, lever, complete } = resumeRun();
+        await lever();
+        heldPushQueue.push({
+          kind: "raw",
+          deliverAs: "followUp",
+          message: { customType: "ws-agent-advisory", content: "held fixture", display: true, details: { advisory: "held-fixture" } },
+        });
+        await complete();
+        assert.deepEqual(pi.sentUserMessages.map((m) => m.content), [buildPushWakeLine(1), resumeText], "push wake first, then the resume");
+        assert.equal(resumes().length, 1);
+      } finally {
+        shutdown?.();
+      }
+    });
+
+    test("with a goal active only the goal reminder is sent, for a hard route too", async () => {
+      const { pi, ctx, usage, preparations, lever, complete, clock } = resumeRun();
+      await pi.commands.get("goal")!("ship", ctx);
+      usage.percent = 85;
+      pi.handlers.get("turn_end")!({}, ctx);
+      assert.equal(preparations().length, 1, "hard steer sent");
+      await lever();
+      await complete();
+      clock.fire();
+      assert.equal(pi.sentUserMessages.length, 2);
+      assert.equal(pi.sentUserMessages[0]!.content, "Goal armed: ship");
+      assert.match(pi.sentUserMessages[1]!.content as string, /Goal yet running: "ship"/);
+      assert.ok(!pi.sentUserMessages.some((m) => m.content === resumeText), "no resume beside the goal reminder");
+    });
+
+    test("the ws-compact description and the guide no longer limit resumption to an active goal", () => {
+      const { pi } = resumeRun();
+      const description = (pi.tools.get("ws-compact") as unknown as { description: string }).description;
+      assert.ok(description.endsWith(
+        "After compaction, an active goal keeps running. With no goal, a resume message follows when you called this on your own or after the hard-threshold notice; after the advisory nudge or a user /compact, the next move is the user's.",
+      ));
+      assert.doesNotMatch(description, /Under an active goal the goal loop continues/);
+      const guide = readFileSync(new URL("../lead-compact-guide.md", import.meta.url), "utf8");
+      assert.match(guide, /With no goal, a resume message follows\s+when you compacted on your own or at the hard point/);
     });
   });
 
