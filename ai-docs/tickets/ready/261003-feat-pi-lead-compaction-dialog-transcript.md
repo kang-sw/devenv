@@ -3,6 +3,9 @@ title: Carry the raw lead dialog across Pi lead compaction instead of tool noise
 related:
   261002-feat-pi-lead-ws-owned-compaction: amended; its user-message section and kept-tail pass-through are replaced
   261002-feat-ws-config-adapter-schema-extension: adjacent; the budget keys it declared for Pi are renamed in the Pi manifest
+sage-review-design: skipped
+sage-review-completeness: completed
+sage-review-completeness-reviewed: 7ad632e428210a1c
 ---
 
 # Carry the raw lead dialog across Pi lead compaction instead of tool noise
@@ -56,6 +59,28 @@ JSONL is append-only and still holds every pre-compaction entry.
 - **Selection is newest-first within the byte budget.** The section is
   always a contiguous newest run, as today. Its header states how many older
   items were omitted and that the prose carries them.
+  - The budget counts every byte the section renders for an item: its label
+    line, its text after elision, markers, and fold lines. The section header
+    is not counted.
+  - An item that does not fit whole is dropped whole, and selection stops
+    there, as today.
+  - Tool-run folding happens before selection, so a fold line is one item.
+- **Rendering.** The section heading is `## Dialog`, and items render as:
+
+  ```text
+  --- user (<timestamp>) ---
+  <text>
+  --- assistant (<timestamp>) ---
+  <text>
+  → <tool name> <arguments JSON>
+  → <tool name> <arguments JSON> ✗failed
+  → (+23 more: Bash×15, Read×8)
+  ```
+
+  The section header reads, for example, "The newest 42 of 57 dialog items
+  (older ones are carried by the prose below)."; when nothing is omitted, it
+  reads "All 57 dialog items of this session.". Fold-line counts are ordered
+  by count, highest first.
 - **A long message keeps its head and tail.** A user or assistant message
   over 2560 bytes keeps its first 1024 bytes and its last 1024 bytes, with
   `[... N bytes skipped ...]` between them, where N is the elided byte count.
@@ -105,6 +130,33 @@ JSONL is append-only and still holds every pre-compaction entry.
 - Matching manuals from AGENTS.md `### Implementation Conventions`: none
   (`agents-plugin-pi/` has no declared row).
 
+## Prior Decisions
+
+- 261002-feat-pi-lead-ws-owned-compaction (2026-10-02, Decisions): "Kept raw tail. The compaction result uses `preparation.firstKeptEntryId` unchanged; Pi computes valid cut points and its `compaction.keepRecentTokens` setting tunes the size." — bearing: contradiction-candidate
+- 261002-feat-pi-lead-ws-owned-compaction (2026-10-02, Decisions): "The human-typed user-message section keeps messages newest-first within about 8k tokens, and caps any single message at about 1.5k tokens with a truncation marker" — bearing: contradiction-candidate
+- 261002-feat-pi-lead-ws-owned-compaction (2026-10-02, Decisions): "No system- or developer-role injection. ws messages stay user-role." — bearing: constrains
+- 261002-feat-pi-lead-ws-owned-compaction (94cdf8bd, commit): "Human messages are selected newest-first under the budget and displayed chronologically; "Goal armed:" stays as human text because it carries the user's goal." — bearing: constrains
+- 261002-feat-pi-lead-ws-owned-compaction (94cdf8bd, commit): "The prose is also passed as customInstructions so a degraded native compaction (summary-build failure) is still steered by it." — bearing: constrains
+- 261002-feat-ws-config-adapter-schema-extension (2026-10-02, Result): "config-manifest.json declares nine pi.* knobs: ... compaction_hard_percent, compaction_user_messages_budget_tokens, compaction_user_message_cap_tokens." — bearing: constrains
+- 261002-feat-ws-config-adapter-schema-extension (1949b0e5, commit): "A test pins every manifest default to resolve identically to an absent knob, so the manifest and code cannot drift" — bearing: constrains
+- 505cd037 (2026-10-03, commit): "Fixed elision constants (1 KiB head and 1 KiB tail over 2560 bytes; tool args 150+150 over 300 bytes) per the user's call that they need not be settings" — bearing: supports
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-pi/src/lead-compaction.ts, agents-plugin-pi/src/goal-loop.ts, agents-plugin-pi/config-manifest.json, agents-plugin-pi/lead-compact-guide.md |
+| scope.surface | cross-module | config key rename in manifest, goal-loop config resolution and ws-compact tool description change the adapter's caller-visible contract |
+| scope.new_public_symbol | yes | pi.compaction_dialog_budget_bytes config key (exported helper names in lead-compaction.ts not fixed by the ticket) |
+| scope.new_type_contract | yes | UserMessageBudgets in goal-loop.ts#L138-L141 replaced by a single byte-budget field; buildLeadCompactionResult input changes |
+| scope.test_surface | existing | agents-plugin-pi/test/lead-compaction.test.ts, test/goal-loop.test.ts |
+| complexity.reuse_points | confirmed | humanTextOf and messageText in lead-compaction.ts, existing selection/summary builder and getSessionFile use in src/ask.ts |
+| complexity.side_effect_risk | moderate | firstKeptEntryId change alters what Pi reloads after compaction; whether Pi can express an empty kept tail is unverified |
+| risk.correctness | high | UTF-8 boundary slicing, newest-first byte budgeting, tool-run folding, and empty kept tail against Pi session-manager reload |
+| risk.fit | moderate | amends the done 261002 contract; consistent with its pass-through hooks but reverses two of its recorded decisions explicitly |
+| risk.test | moderate | many new pinned behaviors but a test file and node --test harness already exist |
+| risk.security_or_contract | moderate | config key rename and tool description contract; lead dialog text and tool arguments now cross into the summary |
+
 ## Phases
 
 ### Phase 1: Dialog transcript section and no kept tail
@@ -114,10 +166,11 @@ JSONL is append-only and still holds every pre-compaction entry.
   Decisions.
 - Replace the two budget keys with `pi.compaction_dialog_budget_bytes`
   everywhere they are declared, resolved, and tested.
-- Change `buildLeadCompactionResult` so no raw entry is kept. Verify against
-  Pi's compaction code that the chosen `firstKeptEntryId` keeps nothing and
-  that the session reloads cleanly afterwards. If Pi cannot express an empty
-  kept tail, stop and report rather than keeping tool results.
+- Change `buildLeadCompactionResult` so no raw entry is kept. Pick the
+  `firstKeptEntryId` value from Pi's compaction and session-manager code.
+  Verify that it keeps nothing and that the session reloads cleanly
+  afterwards. If Pi cannot express an empty kept tail, stop and report rather
+  than keeping tool results.
 - Add the session-file search line to the summary.
 
 Done when:
@@ -132,4 +185,8 @@ Done when:
   - exclusion of thinking parts, tool results, adapter traffic, and the
     `ws-compact` call;
   - `✗failed` marking;
-  - a compaction result whose kept tail holds no raw pre-compaction entry.
+  - a compaction result whose kept tail holds no raw pre-compaction entry;
+  - a reload check: after appending that compaction through Pi's own
+    session manager, the rebuilt context (Pi's context-building path, such
+    as `buildContextEntries`) holds the summary and no raw entry from before
+    it.
