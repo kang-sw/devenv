@@ -2256,14 +2256,18 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
             },
           },
         });
-        const branch = [{ type: "message", id: "u1", parentId: null, timestamp: "2026-10-02T10:00:00.000Z", message: { role: "user", content: "HUMAN ASK", timestamp: 0 } }];
+        const branch = [
+          { type: "message", id: "u1", parentId: null, timestamp: "2026-10-02T10:00:00.000Z", message: { role: "user", content: "HUMAN ASK", timestamp: 0 } },
+          { type: "message", id: "kept-entry", parentId: "u1", timestamp: "2026-10-02T10:01:00.000Z", message: { role: "assistant", content: [{ type: "text", text: "TAIL WORK" }], timestamp: 0 } },
+          { type: "message", id: "r1", parentId: "kept-entry", timestamp: "2026-10-02T10:02:00.000Z", message: { role: "toolResult", toolCallId: "c", toolName: "Bash", content: [{ type: "text", text: "TAIL TOOL OUTPUT" }], isError: false, timestamp: 0 } },
+        ];
         const event = compactionEvent(reason, branch);
         (event as { preparation: { messagesToSummarize: unknown[]; previousSummary?: string } }).preparation.messagesToSummarize = [{ role: "user", content: "summarize me", timestamp: 0 }];
         const result = await (pi.handlers.get("session_before_compact")!(event, ctx) as unknown as Promise<{ compaction: { summary: string; firstKeptEntryId: string; details: unknown; usage: unknown } }>);
         assert.equal(calls.length, 1, reason);
         assert.equal(calls[0]!.model, model, "the session model");
         assert.match(calls[0]!.context.systemPrompt!, /context summarization assistant/);
-        assert.match(calls[0]!.context.messages[0]!.content[0]!.text, /<conversation>\n\[User\]: summarize me\n<\/conversation>/);
+        assert.match(calls[0]!.context.messages[0]!.content[0]!.text, /<conversation>\n\[User\]: summarize me\n[\s\S]*TAIL WORK[\s\S]*TAIL TOOL OUTPUT[\s\S]*<\/conversation>/, "Pi's would-be kept tail is summarized, since no raw tail is kept");
         assert.equal(calls[0]!.options.maxTokens, 4096, "capped by the model's own output limit");
         assert.equal((calls[0]!.options as { signal?: unknown }).signal !== undefined, true);
         assert.equal(result.compaction.firstKeptEntryId, NO_KEPT_ENTRY_ID, "the fallback keeps no raw tail either");

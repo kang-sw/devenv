@@ -550,13 +550,18 @@ export function buildLeadCompactionSummary(input: LeadCompactionSummaryInput): s
   return sections.join("\n\n");
 }
 
-/** The lead's prose out of a previous ws summary, or the whole text when it is not one (another summarizer wrote it). */
+/**
+ * The lead's prose out of a previous ws summary, or the whole text when it is
+ * not one (another summarizer wrote it). Searched from the end: the prose and
+ * `## Resume` are the summary's last sections, and the `## Dialog` section
+ * before them may quote either heading verbatim.
+ */
 export function extractLeadProse(summary: string): string {
-  const start = summary.indexOf(`${LEAD_PROSE_SECTION_HEADING}\n`);
+  const resume = summary.lastIndexOf(`\n\n${RESUME_SECTION_HEADING}\n`);
+  const end = resume < 0 ? summary.length : resume;
+  const start = summary.lastIndexOf(`${LEAD_PROSE_SECTION_HEADING}\n`, end);
   if (start < 0) return summary;
-  const body = summary.slice(start + LEAD_PROSE_SECTION_HEADING.length + 1);
-  const end = body.indexOf(`\n\n${RESUME_SECTION_HEADING}\n`);
-  return end < 0 ? body : body.slice(0, end);
+  return summary.slice(start + LEAD_PROSE_SECTION_HEADING.length + 1, end);
 }
 
 // ---------------------------------------------------------------------------

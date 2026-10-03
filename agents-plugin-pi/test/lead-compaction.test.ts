@@ -369,4 +369,11 @@ describe("preparation and fallback text", () => {
     for (const section of LEAD_PROSE_SECTIONS) assert.ok(prompt.includes(`### ${section.heading}`));
     assert.doesNotMatch(buildFallbackSummaryPrompt("x", undefined), /previous-prose/);
   });
+
+  test("prose extraction is not misled by a dialog message quoting a previous summary", () => {
+    const quoted = "## Carried forward by the lead\nQUOTED PROSE\n\n## Resume\nquoted resume";
+    const summary = buildLeadCompactionSummary({ sessionKey: "k", branchEntries: [user(0, quoted)], registry: undefined, prose: renderLeadProse({ residual_details: "REAL PROSE" }), ...dialog });
+    assert.match(summary, /QUOTED PROSE/);
+    assert.equal(extractLeadProse(summary), renderLeadProse({ residual_details: "REAL PROSE" }));
+  });
 });

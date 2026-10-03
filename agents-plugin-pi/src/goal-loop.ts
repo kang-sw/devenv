@@ -82,7 +82,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { convertToLlm, serializeConversation, type CompactionResult, type ContextUsage, type ExtensionAPI, type ExtensionContext, type SessionBeforeCompactEvent } from "@earendil-works/pi-coding-agent";
+import { convertToLlm, serializeConversation, sessionEntryToContextMessages, type CompactionResult, type ContextUsage, type ExtensionAPI, type ExtensionContext, type SessionBeforeCompactEvent } from "@earendil-works/pi-coding-agent";
 import {
   buildFallbackSummaryPrompt,
   buildLeadCompactionSummary,
@@ -440,6 +440,18 @@ export function decideOnSettle(
  */
 export function buildCompactionObservation(goal: string, reason: "manual" | "threshold" | "overflow"): string {
   return `Compaction observed while goal-loop is active (goal: "${goal}", reason: ${reason}).`;
+}
+
+/**
+ * The messages from Pi's kept-tail cut point (`preparation.firstKeptEntryId`)
+ * to the end of the branch. Pi excludes them from `messagesToSummarize`
+ * because it would keep them raw; this adapter keeps no raw tail (261003), so
+ * the fallback summary must read them too or the newest work is lost.
+ */
+export function keptTailMessages(event: Pick<SessionBeforeCompactEvent, "preparation" | "branchEntries">): ReturnType<typeof sessionEntryToContextMessages> {
+  const start = event.branchEntries.findIndex((entry) => entry.id === event.preparation.firstKeptEntryId);
+  if (start < 0) return [];
+  return event.branchEntries.slice(start).filter((entry) => entry.type !== "compaction").flatMap(sessionEntryToContextMessages);
 }
 
 /**
@@ -1266,7 +1278,7 @@ export function registerGoalLoop(
     try {
       const model = ctx.model!;
       const { messagesToSummarize, turnPrefixMessages, previousSummary, settings } = event.preparation;
-      const conversationText = serializeConversation(convertToLlm([...messagesToSummarize, ...turnPrefixMessages]));
+      const conversationText = serializeConversation(convertToLlm([...messagesToSummarize, ...turnPrefixMessages, ...keptTailMessages(event)]));
       const prompt = buildFallbackSummaryPrompt(conversationText, previousSummary ? extractLeadProse(previousSummary) : undefined);
       const reserve = Math.floor(0.8 * settings.reserveTokens);
       const response = await ctx.modelRegistry.complete(
