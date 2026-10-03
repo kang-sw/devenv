@@ -521,7 +521,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-03T04:57:50Z"
+        "touched_at": "2026-10-03T04:58:20Z",
+        "impl": {
+          "branch": "impl/develop/tweed-ion-strut"
+        }
       }
     },
     "261003-research-typed-decision-model-new-domains": {
