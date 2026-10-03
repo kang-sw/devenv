@@ -7,6 +7,7 @@ related:
 sage-review-design: skipped
 sage-review-completeness: completed
 sage-review-completeness-reviewed: d8d1bd191976accb
+completed: 2026-10-03
 ---
 
 # Give the Pi execute-worker structured git read tools so routine inspection stops elevating
@@ -123,3 +124,23 @@ child sessions). The execute-worker group simply never received them.
 **Rejected alternatives:**
 - A decision-model auto-approval classifier in this ticket. It is split out to `261003-feat-pi-execute-readonly-auto-approval`.
 - A command-string allowlist (`260904` §5).
+
+### Result (fc1fae96b) - 2026-10-03
+
+Landed: `resolveTools("execute-worker", wsToolNames)` appends `ws__git_status`,
+`ws__git_diff`, `ws__git_log`, `ws__git_merge_base` from the bridge list,
+filtered through `readOnlyWsTools`; spawn admission and resume both derive from
+it. Guide "Your tools" lists them. `ws-worker-exec` unchanged.
+
+Verification: `npm test` in `agents-plugin-pi`: 1949 pass, 1 fail
+(`web-package.test.ts` packed install, fails identically without this change).
+New tests: exact-four-tool grant, admission ceiling, resume rebuild.
+
+Decisions:
+- Session-key probe was resolved by code reading, not an executable test: the
+  child bridge mints a leaf-capability key via ferrule rooted at the child cwd
+  (`bridge.ts` bootstrap), and ws-mcp `roleAllowsTool` for leaf excludes only
+  `git.commit`, `config.*` (except `config.get`) and `session.*`. No injection
+  fix was needed. A live-child probe remains unrun.
+- Lite review: clean, with two Minor notes (no executable root probe; resume
+  test compares `resolveTools` with itself).
