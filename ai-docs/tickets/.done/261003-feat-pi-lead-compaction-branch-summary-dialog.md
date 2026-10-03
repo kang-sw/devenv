@@ -6,6 +6,7 @@ related:
 sage-review-design: skipped
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 1dbe4ccd02d5739f
+completed: 2026-10-03
 ---
 
 # Carry Pi branch summaries in the lead compaction dialog
