@@ -8,6 +8,12 @@ agents in flight and finished, and the recent dialog (user messages, your
 replies, branch summaries, and one line per tool call; tool output is left in the session file).
 You write the rest as prose under fixed headings.
 
+Do not read files, run searches, or load any other context while preparing,
+beyond the ws tool calls step 1 needs. The context is near its limit, and every
+token loaded here is spent on a summary that discards it. Work only from what
+this conversation already holds; if something is unknown, say so in the prose
+rather than looking it up.
+
 Do these in order, without starting new work in between:
 
 1. **Tidy durable state.** Bring the agenda and todos up to date with the

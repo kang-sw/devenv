@@ -386,7 +386,7 @@ describe("buildLeadCompactionSummary", () => {
     assert.match(summary, /LEAD PROSE MARKER/);
     assert.doesNotMatch(summary, /WORKER REPORT BODY/);
     assert.doesNotMatch(summary, /read-files|modified-files/);
-    assert.ok(summary.trimEnd().endsWith("it restores agenda, todos, and notes through `workflow_manual`."));
+    assert.ok(summary.trimEnd().endsWith("it restores agenda, todos, and notes through `workflow_manual`. After `lead-revive`, resume from this summary and the immediate next step; re-read a file only when that step needs it, not to rebuild the earlier context."));
     assert.match(summary, /invoke `lead-revive` \(`ws-skill lead-revive`\) with session key `engaged-key`/);
     assert.equal(extractLeadProse(summary), prose);
   });

@@ -576,7 +576,7 @@ export function buildLeadCompactionSummary(input: LeadCompactionSummaryInput): s
     ["## Child agents finished since the previous compaction", ...(finished.length ? finished : ["(none)"])].join("\n"),
     buildDialogSection(branchEntries, dialogBudgetBytes, sessionFile),
     `${LEAD_PROSE_SECTION_HEADING}\n${prose}`,
-    `${RESUME_SECTION_HEADING}\nBefore any other workflow action, invoke \`lead-revive\` (\`ws-skill lead-revive\`) with session key ${sessionKey?.trim() ? `\`${sessionKey}\`` : "(recover it first)"}; it restores agenda, todos, and notes through \`workflow_manual\`.`,
+    `${RESUME_SECTION_HEADING}\nBefore any other workflow action, invoke \`lead-revive\` (\`ws-skill lead-revive\`) with session key ${sessionKey?.trim() ? `\`${sessionKey}\`` : "(recover it first)"}; it restores agenda, todos, and notes through \`workflow_manual\`. After \`lead-revive\`, resume from this summary and the immediate next step; re-read a file only when that step needs it, not to rebuild the earlier context.`,
   ];
   return sections.join("\n\n");
 }
