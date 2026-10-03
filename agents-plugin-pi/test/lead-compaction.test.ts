@@ -276,6 +276,18 @@ describe("dialog transcript (261003)", () => {
     assert.equal(foldToolRuns([...calls, ...calls]).some((item) => item.kind === "fold"), true);
   });
 
+  test("a whitespace-only or non-string branch summary yields no item or block", () => {
+    const entries = [
+      user(0, "before"),
+      branchSummary(1, " \n\t "),
+      branchSummary(2, 42 as never),
+      branchSummary(3, undefined as never),
+      user(4, "after"),
+    ];
+    assert.deepEqual(collectDialogItems(entries).map((item) => item.kind), ["user", "user"]);
+    assert.doesNotMatch(buildDialogSection(entries, dialog.dialogBudgetBytes, dialog.sessionFile), /<branch-summary/);
+  });
+
   test("a branch summary counts against the budget and is dropped whole, ending selection", () => {
     const items: DialogItem[] = [
       { kind: "user", timestamp: "T", text: "old" },
