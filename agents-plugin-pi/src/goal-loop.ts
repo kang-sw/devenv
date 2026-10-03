@@ -68,7 +68,9 @@
  * handler returns `{ compaction }` built from adapter-filled deterministic
  * sections plus that prose, replacing Pi's native summarizer for the lead.
  * The lever works with or without an active goal; only while a goal is active
- * does it re-arm the goal loop (it never calls `disarmGoal()`). Spawned
+ * does it re-arm the goal loop (it never calls `disarmGoal()`). With no goal,
+ * a lever call that cut work short (autonomous, or after the hard cut) is
+ * followed by one resume message at release (261003). Spawned
  * worker/explore/fork sessions keep Pi's native compaction. The lead is led
  * to the lever by a preparation message carrying `lead-compact-guide.md`: an
  * advisory nudge at `agent_end`, a hard-cut steer at `turn_end`, or a user
@@ -252,6 +254,32 @@ export function buildGoalAnnouncement(goal: string): string {
  */
 export function buildCompactionLeverResult(): string {
   return "Compaction requested; the conversation will resume from a summary carrying the session state and your prose under the fixed headings.";
+}
+
+/**
+ * One host compaction operation. `route` is set only by the `ws-compact`
+ * lever (261003): the preparation trigger that led to the call, or
+ * `"autonomous"` when no preparation was pending.
+ */
+type CompactionOperation = { id: number; generation: number | undefined; route?: PreparationTrigger["kind"] | "autonomous" };
+
+/**
+ * Whether a goal-less lever compaction reached by `route` resumes the lead
+ * (261003). Only the routes whose run was mid-work when the abort landed do;
+ * after the advisory nudge or a user `/compact` the next move is the user's.
+ */
+export function resumesAfterCompaction(route: CompactionOperation["route"]): boolean {
+  return route === "hard" || route === "autonomous";
+}
+
+/**
+ * The goal-less resume message (261003): Pi's `compact()` aborts the run that
+ * called the lever and never continues it, so after a compaction that cut
+ * work short this user-role `followUp` starts the next turn.
+ */
+export function buildCompactionResumeMessage(sessionKey: string | undefined): string {
+  const key = sessionKey?.trim() ? `\`${sessionKey}\`` : "(recover it first)";
+  return `Compaction complete. Invoke \`lead-revive\` (\`ws-skill lead-revive\`) with session key ${key}, then continue the immediate next step; if it awaits the user, end your turn.`;
 }
 
 /**
@@ -645,7 +673,7 @@ export function registerGoalLoop(
 
   /** One host compaction operation; its id prevents a late duplicate callback from releasing a newer hold. */
   let compactionSequence = 0;
-  let activeCompaction: { id: number; generation: number | undefined } | undefined;
+  let activeCompaction: CompactionOperation | undefined;
 
   /**
    * 261002: the lead's rendered prose, set by the `ws-compact` lever right
@@ -672,6 +700,8 @@ export function registerGoalLoop(
   let advisoryFired = false;
   let hardFired = false;
   let preparation = false;
+  /** 261003: the trigger kind of the pending preparation; set and cleared with `preparation`. */
+  let preparationKind: PreparationTrigger["kind"] | undefined;
   let pendingReroute: { focus?: string } | undefined;
   let expectOwnCompaction = false;
   let competingNoticeShown = false;
@@ -741,8 +771,8 @@ export function registerGoalLoop(
     return { outcome: "applied", message: `Goal update applied: ${goal}` };
   }
 
-  function beginCompaction(generation: number | undefined): { id: number; generation: number | undefined } {
-    const operation = { id: ++compactionSequence, generation };
+  function beginCompaction(generation: number | undefined): CompactionOperation {
+    const operation: CompactionOperation = { id: ++compactionSequence, generation };
     activeCompaction = operation;
     leadCompactingRef.current = true;
     return operation;
@@ -1001,7 +1031,8 @@ export function registerGoalLoop(
   function releaseAfterCompaction(
     ctx: ExtensionContext,
     failureReason?: string,
-    operation: { id: number; generation: number | undefined } | undefined = activeCompaction,
+    operation: CompactionOperation | undefined = activeCompaction,
+    failed = false,
   ): void {
     if (!leadCompactingRef.current) return; // idempotent: already released
     if (activeCompaction && operation?.id !== activeCompaction.id) return; // stale callback for an older operation
@@ -1026,6 +1057,10 @@ export function registerGoalLoop(
       return;
     }
     const flushed = flushHeldPushes(pi);
+    // 261003: queued behind any run the flush's push wake started.
+    if (!failed && !shuttingDown && generation === undefined && !state.active && resumesAfterCompaction(operation?.route)) {
+      pi.sendUserMessage(buildCompactionResumeMessage(opts.sessionKeyRef?.current), { deliverAs: "followUp" });
+    }
     const rearmIsCurrent = generation !== undefined && isCurrentArmedGeneration(generation);
     if (!rearmIsCurrent) {
       if (pendingBelongsToOperation) {
@@ -1160,6 +1195,7 @@ export function registerGoalLoop(
   // preparation turn or a compaction is in progress.
   function sendPreparation(trigger: PreparationTrigger, deliverAs: "steer" | "followUp"): void {
     preparation = true;
+    preparationKind = trigger.kind;
     pi.sendMessage(
       {
         customType: LEAD_COMPACT_CUSTOM_TYPE,
@@ -1207,6 +1243,7 @@ export function registerGoalLoop(
     // nudge again. A message queued below, at this boundary, blocks the
     // triggers until the continuation run carrying it ends.
     preparation = false;
+    preparationKind = undefined;
     return checkCompactionTriggers(ctx, "run");
   });
 
@@ -1369,6 +1406,7 @@ export function registerGoalLoop(
       advisoryFired = false;
       hardFired = false;
       preparation = false;
+      preparationKind = undefined;
       pendingReroute = undefined;
     }
     // Defer beyond Pi's own compaction flag; start alone never clears our hold.
@@ -1385,7 +1423,7 @@ export function registerGoalLoop(
     const reroute = pendingReroute;
     pendingReroute = undefined;
     setImmediate(() => {
-      releaseAfterCompaction(ctx, event.errorMessage, operation);
+      releaseAfterCompaction(ctx, event.errorMessage, operation, true);
       // 261002: the cancelled /compact becomes the preparation turn, queued
       // after the release flushed any held pushes.
       if (reroute && !shuttingDown) sendPreparation({ kind: "reroute", focus: reroute.focus }, "followUp");
@@ -1432,7 +1470,7 @@ export function registerGoalLoop(
     name: LEAD_COMPACT_TOOL_NAME,
     label: LEAD_COMPACT_TOOL_NAME,
     description:
-      "Compact the lead's context now. Fill every heading with your carry-forward prose (empty when there is nothing): for content already persisted (tickets, commits, notes, agenda, todos) give its path or pointer; for content that lives only in the conversation, summarize it as precisely as possible. The adapter adds the session key, active ticket and playbook, child agents, and the recent dialog (user messages, your replies, branch summaries, one line per tool call) itself. Under an active goal the goal loop continues after compaction.",
+      "Compact the lead's context now. Fill every heading with your carry-forward prose (empty when there is nothing): for content already persisted (tickets, commits, notes, agenda, todos) give its path or pointer; for content that lives only in the conversation, summarize it as precisely as possible. The adapter adds the session key, active ticket and playbook, child agents, and the recent dialog (user messages, your replies, branch summaries, one line per tool call) itself. After compaction, an active goal keeps running. With no goal, a resume message follows when you called this on your own or after the hard-threshold notice; after the advisory nudge or a user /compact, the next move is the user's.",
     parameters: leadProseParameterSchema() as never,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx: ExtensionContext) {
       if (isChildProcess(process.env)) {
@@ -1451,6 +1489,11 @@ export function registerGoalLoop(
       // carry, keeping 260913's no-side-effect property for goal state.
       const goalActive = state.active;
       const operation = beginCompaction(goalActive ? goalGeneration : undefined);
+      // 261003: the route is copied before ctx.compact() aborts the run, since
+      // that abort's agent_end and the session_compact handler clear the
+      // preparation state. A preparation already cleared (its run ended) is
+      // an autonomous call.
+      operation.route = preparation ? preparationKind : "autonomous";
       if (goalActive) {
         // Under a goal, `pendingRearm` makes `releaseAfterCompaction`
         // synthesize the re-armed reminder; the invoking turn's own
@@ -1485,7 +1528,7 @@ export function registerGoalLoop(
           // own or a non-lever failure would double it.
           const failureReason = `Compaction failed: ${error.message}`;
           ctx.ui.notify(failureReason, "error");
-          releaseAfterCompaction(ctx, failureReason, operation);
+          releaseAfterCompaction(ctx, failureReason, operation, true);
         },
       });
       return { content: [{ type: "text", text: buildCompactionLeverResult() }] };
@@ -1502,6 +1545,7 @@ export function registerGoalLoop(
       advisoryFired = false;
       hardFired = false;
       preparation = false;
+      preparationKind = undefined;
       pendingReroute = undefined;
       expectOwnCompaction = false;
       competingNoticeShown = false;
