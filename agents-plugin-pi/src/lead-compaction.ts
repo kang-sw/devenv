@@ -202,6 +202,8 @@ export type DialogItem =
   | { kind: "user" | "assistant"; timestamp: string; text: string }
   /** `args` is the call's arguments as JSON, before elision. */
   | { kind: "tool"; name: string; args: string; failed: boolean }
+  /** A Pi `/tree` branch summary on the current path; carried whole, never elided. */
+  | { kind: "branch_summary"; timestamp: string; text: string }
   /** Earlier calls of an over-long tool run, counted by tool name, highest count first. */
   | { kind: "fold"; total: number; counts: Array<{ name: string; count: number }> };
 
@@ -220,6 +222,10 @@ export function collectDialogItems(entries: readonly SessionEntry[]): DialogItem
   }
   const items: DialogItem[] = [];
   for (const entry of entries) {
+    if (entry.type === "branch_summary") {
+      if (typeof entry.summary === "string" && entry.summary.trim() !== "") items.push({ kind: "branch_summary", timestamp: entry.timestamp, text: entry.summary });
+      continue;
+    }
     const message = entryMessage(entry);
     if (message?.role === "user") {
       const text = humanTextOf(messageText(message.content));
@@ -313,6 +319,8 @@ export function renderDialogItem(item: DialogItem): string {
     case "user":
     case "assistant":
       return `--- ${item.kind} (${item.timestamp}) ---\n${elideMiddle(item.text, LONG_MESSAGE_THRESHOLD_BYTES, LONG_MESSAGE_KEEP_BYTES, "\n")}`;
+    case "branch_summary":
+      return `--- branch summary (${item.timestamp}) ---\n${item.text}`;
     case "tool":
       return `→ ${item.name} ${elideMiddle(item.args, TOOL_ARGS_THRESHOLD_BYTES, TOOL_ARGS_KEEP_BYTES, " ")}${item.failed ? " ✗failed" : ""}`;
     case "fold":

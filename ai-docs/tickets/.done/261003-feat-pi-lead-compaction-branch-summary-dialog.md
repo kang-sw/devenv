@@ -6,6 +6,7 @@ related:
 sage-review-design: skipped
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 1dbe4ccd02d5739f
+completed: 2026-10-03
 ---
 
 # Carry Pi branch summaries in the lead compaction dialog
@@ -111,3 +112,10 @@ Done when:
 - `lead-compact-guide.md` and the `ws-compact` tool description were
   checked; the phase Result states whether either enumerates `## Dialog`
   item kinds and, if so, that it was updated.
+
+### Result (e07c61759) - 2026-10-03
+
+- Added a `branch_summary` `DialogItem` in `agents-plugin-pi/src/lead-compaction.ts`: collected in chronological order, rendered as `--- branch summary (<timestamp>) ---` plus the summary unelided, same byte budget and whole-drop selection, ends a tool run.
+- Tests added in `agents-plugin-pi/test/lead-compaction.test.ts` for each bullet. `npm test` in `agents-plugin-pi`: 1952 pass, 0 fail, 3 skipped.
+- `lead-compact-guide.md` and the `ws-compact` description (`src/goal-loop.ts`) both enumerated the dialog contents; both now list branch summaries.
+- Lite review: clean.
