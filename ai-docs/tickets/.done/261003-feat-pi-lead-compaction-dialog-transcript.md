@@ -6,6 +6,7 @@ related:
 sage-review-design: skipped
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 7ad632e428210a1c
+completed: 2026-10-03
 ---
 
 # Carry the raw lead dialog across Pi lead compaction instead of tool noise
