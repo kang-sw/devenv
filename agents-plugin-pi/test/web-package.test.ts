@@ -60,9 +60,13 @@ test('packed install/update carries the pinned search license and resolves host 
   mkdirSync(cloneRoot);
   const rootDependencies = JSON.parse(readFileSync(join(packageRoot, '..', 'package.json'), 'utf8')).dependencies;
   writeFileSync(join(cloneRoot, 'package.json'), JSON.stringify({ private: true, dependencies: rootDependencies }));
-  // Same offline invariant as the packed install above: the local npm cache
-  // already has these exact pinned versions from agents-plugin-pi's own install.
-  run('npm', ['install', '--offline', '--ignore-scripts', '--legacy-peer-deps', '--no-audit', '--no-fund', '--package-lock=false'], cloneRoot);
+  // A real `pi install git:...` clone carries the repo-root package-lock.json,
+  // so versions (including transitive ones like undici) come from that lockfile,
+  // which the local npm cache satisfies. Re-resolving ranges instead would drift
+  // with the cached packument and hit ENOTCACHED for uncached newer tarballs.
+  cpSync(join(packageRoot, '..', 'package-lock.json'), join(cloneRoot, 'package-lock.json'));
+  run('npm', ['install', '--offline', '--ignore-scripts', '--legacy-peer-deps', '--no-audit', '--no-fund'], cloneRoot);
+  assert.equal(JSON.parse(readFileSync(join(cloneRoot, 'node_modules', 'undici', 'package.json'), 'utf8')).version, JSON.parse(readFileSync(join(packageRoot, '..', 'package-lock.json'), 'utf8')).packages['node_modules/undici'].version, 'clone install honors the root lockfile');
   const extDir = join(cloneRoot, 'agents-plugin-pi');
   mkdirSync(join(extDir, 'src'), { recursive: true });
   cpSync(join(packageRoot, 'src', 'web-search-helper.mjs'), join(extDir, 'src', 'web-search-helper.mjs'));
