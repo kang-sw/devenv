@@ -2267,7 +2267,14 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
         assert.equal(calls.length, 1, reason);
         assert.equal(calls[0]!.model, model, "the session model");
         assert.match(calls[0]!.context.systemPrompt!, /context summarization assistant/);
-        assert.match(calls[0]!.context.messages[0]!.content[0]!.text, /<conversation>\n\[User\]: summarize me\n[\s\S]*TAIL WORK[\s\S]*TAIL TOOL OUTPUT[\s\S]*<\/conversation>/, "Pi's would-be kept tail is summarized, since no raw tail is kept");
+        const conversation = calls[0]!.context.messages[0]!.content[0]!.text;
+        if (reason === "overflow") {
+          // The context already exceeds the window; adding the kept tail to the summary input would overflow the summarizer too.
+          assert.match(conversation, /<conversation>\n\[User\]: summarize me\n[\s\S]*<\/conversation>/);
+          assert.doesNotMatch(conversation, /TAIL WORK|TAIL TOOL OUTPUT/, "an overflow compaction leaves Pi's would-be kept tail out of the summary input");
+        } else {
+          assert.match(conversation, /<conversation>\n\[User\]: summarize me\n[\s\S]*TAIL WORK[\s\S]*TAIL TOOL OUTPUT[\s\S]*<\/conversation>/, "Pi's would-be kept tail is summarized, since no raw tail is kept");
+        }
         assert.equal(calls[0]!.options.maxTokens, 4096, "capped by the model's own output limit");
         assert.equal((calls[0]!.options as { signal?: unknown }).signal !== undefined, true);
         assert.equal(result.compaction.firstKeptEntryId, NO_KEPT_ENTRY_ID, "the fallback keeps no raw tail either");

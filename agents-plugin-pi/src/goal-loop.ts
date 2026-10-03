@@ -1278,7 +1278,10 @@ export function registerGoalLoop(
     try {
       const model = ctx.model!;
       const { messagesToSummarize, turnPrefixMessages, previousSummary, settings } = event.preparation;
-      const conversationText = serializeConversation(convertToLlm([...messagesToSummarize, ...turnPrefixMessages, ...keptTailMessages(event)]));
+      // No raw tail is kept, so Pi's would-be kept tail is summarized too -- except on overflow, where the
+      // context already exceeds the window and feeding the tail to the summarizer would overflow it as well.
+      const tail = event.reason === "overflow" ? [] : keptTailMessages(event);
+      const conversationText = serializeConversation(convertToLlm([...messagesToSummarize, ...turnPrefixMessages, ...tail]));
       const prompt = buildFallbackSummaryPrompt(conversationText, previousSummary ? extractLeadProse(previousSummary) : undefined);
       const reserve = Math.floor(0.8 * settings.reserveTokens);
       const response = await ctx.modelRegistry.complete(
