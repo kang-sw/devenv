@@ -46,6 +46,7 @@ const toolResult = (minute: number, toolCallId: string, text: string, isError = 
 } as never);
 const custom = (minute: number, customType: string, content: string): SessionEntry => ({ type: "custom_message", id: `c${++seq}`, parentId: null, timestamp: at(minute), customType, content, display: true } as never);
 const compaction = (minute: number, summary: string): SessionEntry => ({ type: "compaction", id: `k${++seq}`, parentId: null, timestamp: at(minute), summary, firstKeptEntryId: "x", tokensBefore: 1 } as never);
+const branchSummary = (minute: number, summary: string): SessionEntry => ({ type: "branch_summary", id: `b${++seq}`, parentId: null, timestamp: at(minute), fromId: "x", summary } as never);
 const dialog = { dialogBudgetBytes: 40960, sessionFile: "/sessions/lead.jsonl" };
 const tool = (name: string, args: Record<string, unknown> = {}): DialogItem => ({ kind: "tool", name, args: JSON.stringify(args), failed: false });
 const skillExpansion = (name: string, args?: string): string =>
@@ -194,6 +195,31 @@ describe("dialog transcript (261003)", () => {
     const korean: DialogItem = { kind: "user", timestamp: "T", text: "\ud55c".repeat(10) };
     assert.equal(selectDialogItems([korean], cost(korean)).lines.length, 1);
     assert.equal(selectDialogItems([korean], cost(korean) - 1).lines.length, 0, "the budget counts UTF-8 bytes, not characters");
+  });
+
+  test("a branch summary is a labeled, unelided item in chronological order that ends a tool run", () => {
+    const long = "S".repeat(5000);
+    const entries = [user(0, "before"), branchSummary(1, long), user(2, "after")];
+    const items = collectDialogItems(entries);
+    assert.deepEqual(items.map((item) => item.kind), ["user", "branch_summary", "user"]);
+    assert.equal(renderDialogItem(items[1]!), `--- branch summary (${at(1)}) ---\n${long}`, "carried whole, over the 2560-byte elision threshold");
+    const calls = Array.from({ length: 6 }, (_, i) => tool("Read", { i }));
+    const folded = foldToolRuns([...calls, items[1]!, ...calls]);
+    assert.deepEqual(folded, [...calls, items[1]!, ...calls], "6 + 6 calls need no fold: the summary splits the run");
+    assert.equal(foldToolRuns([...calls, ...calls]).some((item) => item.kind === "fold"), true);
+  });
+
+  test("a branch summary counts against the budget and is dropped whole, ending selection", () => {
+    const items: DialogItem[] = [
+      { kind: "user", timestamp: "T", text: "old" },
+      { kind: "branch_summary", timestamp: "T", text: "S".repeat(3000) },
+      { kind: "user", timestamp: "T", text: "newest" },
+    ];
+    const cost = (item: DialogItem): number => Buffer.byteLength(renderDialogItem(item), "utf8") + 1;
+    const fits = selectDialogItems(items, cost(items[0]!) + cost(items[1]!) + cost(items[2]!));
+    assert.equal(fits.lines.length, 3);
+    const tight = selectDialogItems(items, cost(items[1]!) - 1 + cost(items[2]!));
+    assert.deepEqual(tight.lines, [renderDialogItem(items[2]!)], "the summary does not fit, so the older item is not reached");
   });
 
   test("the section header states the omitted count and the session file is named for search", () => {

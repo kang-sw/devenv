@@ -5,7 +5,7 @@ ws tooling, where it survives every compaction; the summary carries pointers to
 it plus what only this conversation holds. The adapter writes the summary's
 fixed parts itself: the session key, the active ticket and playbook, child
 agents in flight and finished, and the recent dialog (user messages, your
-replies, and one line per tool call; tool output is left in the session file).
+replies, branch summaries, and one line per tool call; tool output is left in the session file).
 You write the rest as prose under fixed headings.
 
 Do these in order, without starting new work in between:
