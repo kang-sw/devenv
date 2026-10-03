@@ -163,9 +163,18 @@ export const TOOL_GROUPS: Record<ToolGroup, readonly string[]> = {
   "execute-worker": [...READ_ONLY_BUILTINS, GATED_EXEC_TOOL_NAME, REPORT_TO_LEAD_TOOL_NAME, "explore"],
 };
 
+/**
+ * The execute-worker's structured git read tools (tool-shape allowlist per the
+ * approval-gateway design: no command-string matching). Always intersected with
+ * `readOnlyWsTools`, so a name here that is not read authority is never granted.
+ */
+const EXECUTE_WORKER_WS_TOOLS: ReadonlySet<string> = new Set(["ws__git_status", "ws__git_diff", "ws__git_log", "ws__git_merge_base"]);
+
 export function resolveTools(group: ToolGroup, wsToolNames: readonly string[] = []): string {
   const builtins = TOOL_GROUPS[group];
-  const extra = group === "full-worker" ? wsToolNames : [];
+  const extra = group === "full-worker" ? wsToolNames
+    : group === "execute-worker" ? readOnlyWsTools(wsToolNames).filter(name => EXECUTE_WORKER_WS_TOOLS.has(name))
+    : [];
   return [...builtins, ...extra].join(",");
 }
 

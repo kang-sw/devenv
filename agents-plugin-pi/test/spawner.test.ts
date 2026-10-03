@@ -78,6 +78,7 @@ import { test, describe, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import {
   resolveTools,
+  spawnAdmission,
   TOOL_GROUPS,
   resolveModelForAliasViaWsMcp,
   effectiveModelEffort,
@@ -221,8 +222,26 @@ describe("TOOL_GROUPS / resolveTools", () => {
     assert.equal(resolveTools("execute-worker"), `read,grep,find,ls,${GATED_EXEC_TOOL_NAME},${REPORT_TO_LEAD_TOOL_NAME},explore`);
   });
 
-  test("execute-worker never appends ws__* bridge tool names (unlike full-worker) — a caller-passed wsToolNames is ignored", () => {
-    assert.equal(resolveTools("execute-worker", ["ws__playbook_render"]), `read,grep,find,ls,${GATED_EXEC_TOOL_NAME},${REPORT_TO_LEAD_TOOL_NAME},explore`);
+  test("execute-worker appends exactly the four ws__ git read tools from the bridge list and no other ws__ tool", () => {
+    const base = `read,grep,find,ls,${GATED_EXEC_TOOL_NAME},${REPORT_TO_LEAD_TOOL_NAME},explore`;
+    const bridge = ["ws__playbook_render", "ws__git_commit", "ws__git_merge", "ws__git_log", "ws__git_status", "ws__project_tree", "ws__git_diff", "ws__git_merge_base", "ws__git_followups", "ws__ferrule"];
+    assert.equal(resolveTools("execute-worker", bridge), `${base},ws__git_log,ws__git_status,ws__git_diff,ws__git_merge_base`);
+    assert.equal(resolveTools("execute-worker", ["ws__playbook_render"]), base, "no git tools offered by the bridge, none granted");
+  });
+
+  test("execute-worker spawn admission ceiling includes exactly the four ws__ git read tools and no ws__ mutator", () => {
+    const bridge = ["ws__git_status", "ws__git_diff", "ws__git_log", "ws__git_merge_base", "ws__git_commit", "ws__git_merge", "ws__tickets_move", "ws__project_tree"];
+    const parentPolicy = { version: 1 as const, depth: 0, maxDepth: 2, authority: "lead" as const, tools: resolveTools("full-worker", bridge).split(","), network: { search: true, fetch: true } };
+    const policy = spawnAdmission({ parentPolicy, wsToolNames: bridge, toolGroup: "execute-worker", spawnRole: "execute-worker" } as never);
+    assert.deepEqual(policy.tools.filter(name => name.startsWith("ws__")).sort(), ["ws__git_diff", "ws__git_log", "ws__git_merge_base", "ws__git_status"]);
+    assert.equal(policy.authority, "leaf");
+  });
+
+  test("a resumed execute-worker rebuilds the same four ws__ git tools from toolGroup + wsToolNames", () => {
+    const bridge = ["ws__git_status", "ws__git_diff", "ws__git_log", "ws__git_merge_base", "ws__git_commit"];
+    const record = freshRpcRecord({ toolGroup: "execute-worker" as ToolGroup, wsToolNames: bridge });
+    assert.deepEqual(resolveTools(record.toolGroup, record.wsToolNames), resolveTools("execute-worker", bridge));
+    assert.ok(!resolveTools(record.toolGroup, record.wsToolNames).includes("ws__git_commit"));
   });
 
   test("execute-worker never includes bash/edit/write — those would let the worker bypass the approval gate", () => {
