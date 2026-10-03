@@ -26,7 +26,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { SessionManager, type ExtensionAPI, type ExtensionContext, type SessionEntry } from "@earendil-works/pi-coding-agent";
 import {
   resolveAgentWaitAnimation,
   resolveRunawayThreshold,
@@ -46,6 +46,8 @@ import {
   decideOnSettle,
   isChildProcess,
   registerGoalLoop,
+  buildLeadCompactionResult,
+  resolveDialogBudgetBytes,
   DEFAULT_RUNAWAY_THRESHOLD,
   DEFAULT_COMPACTION_ADVISORY_PERCENT,
   DEFAULT_SETTLE_DELAY_MS,
@@ -56,7 +58,7 @@ import { WS_PI_SPAWN_ROLE_ENV } from "../src/process-role.ts";
 import { createWsConfigReader, staticConfigReader, type GoalLoopConfigReader } from "../src/adapter-config.ts";
 import { flushHeldPushes, leadIdleRef, clearWakeStart, leadCompactingRef, leadWakeStartPendingRef, heldPushQueue, isOwningAgentIdle, type RpcAgentRegistry } from "../src/spawner.ts";
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
-import { renderLeadProse } from "../src/lead-compaction.ts";
+import { DEFAULT_DIALOG_BUDGET_BYTES, NO_KEPT_ENTRY_ID, renderLeadProse } from "../src/lead-compaction.ts";
 
 /** The lever's rendered prose for a single `current_work` field — the carry the old lever passed raw. */
 const prose = (text: string): string => renderLeadProse({ current_work: text });
@@ -2007,17 +2009,18 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       { type: "custom_message", id: "c1", parentId: "u1", timestamp: "2026-10-02T10:01:00.000Z", customType: PUSH_BATCH_CUSTOM_TYPE, content: "PUSH BATCH BODY", display: true },
     ];
 
-    test("the lever's compaction returns the adapter summary with Pi's cut point and token count unchanged", async () => {
+    test("the lever's compaction returns the adapter summary, keeps no raw tail, and passes Pi's token count through", async () => {
       const { pi, ctx } = leverRun();
+      (ctx as unknown as { sessionManager: unknown }).sessionManager = { getSessionFile: () => "/sessions/lead.jsonl" };
       await pi.tools.get("ws-compact")!.execute("c", { current_work: "PROSE", next_step: '"do the thing"' }, undefined, undefined, ctx);
       const result = pi.handlers.get("session_before_compact")!(compactionEvent("manual", branch), ctx) as unknown as { compaction: { summary: string; firstKeptEntryId: string; tokensBefore: number; details: unknown } };
-      assert.equal(result.compaction.firstKeptEntryId, "kept-entry");
+      assert.equal(result.compaction.firstKeptEntryId, NO_KEPT_ENTRY_ID, "Pi's kept-tail cut point is not used");
       assert.equal(result.compaction.tokensBefore, 1234);
       assert.deepEqual(result.compaction.details, { kind: "ws-pi-lead-compaction", version: 1, source: "lever" });
       const summary = result.compaction.summary;
       assert.match(summary, /ws session key: `lead-key`/);
       assert.match(summary, /- w1 \(w-1\) \[worker\]: ticket none named; running/);
-      assert.match(summary, /the human request/);
+      assert.match(summary, /## Dialog\nAll 1 dialog items of this session\.\n.*`\/sessions\/lead\.jsonl`.*\n--- user \(.+\) ---\nthe human request/);
       assert.match(summary, /### Current work\nPROSE/);
       assert.match(summary, /### Immediate next step\n"do the thing"/);
       assert.doesNotMatch(summary, /PUSH BATCH BODY/, "push-batch traffic is not a human message");
@@ -2056,6 +2059,48 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       const broken = { reason: "manual", branchEntries: branch, preparation: undefined } as never;
       assert.equal(pi.handlers.get("session_before_compact")!(broken, ctx), undefined);
       assert.match(notifications.at(-1)!.message, /could not build its summary/);
+    });
+  });
+
+  describe("no raw kept tail (261003)", () => {
+    test("the dialog budget resolves from its byte knob and falls back to 40 KiB", () => {
+      assert.equal(resolveDialogBudgetBytes(undefined), DEFAULT_DIALOG_BUDGET_BYTES);
+      assert.equal(DEFAULT_DIALOG_BUDGET_BYTES, 40960);
+      assert.equal(resolveDialogBudgetBytes({ compaction_dialog_budget_bytes: 512 }), 512);
+      for (const bad of [0, -1, Number.NaN, "512"]) assert.equal(resolveDialogBudgetBytes({ compaction_dialog_budget_bytes: bad as never }), DEFAULT_DIALOG_BUDGET_BYTES, String(bad));
+    });
+
+    test("appended through Pi's own session manager, the compaction keeps no raw pre-compaction entry and reloads cleanly", () => {
+      const dir = mkdtempSync(join(tmpDir, "sessions-"));
+      const sm = SessionManager.create(tmpDir, dir);
+      const ids = [
+        sm.appendMessage({ role: "user", content: "HUMAN ASK", timestamp: 1 } as never),
+        sm.appendMessage({ role: "assistant", content: [{ type: "text", text: "LEAD REPLY" }, { type: "toolCall", id: "call-1", name: "Bash", arguments: { command: "ls" } }], timestamp: 2 } as never),
+        sm.appendMessage({ role: "toolResult", toolCallId: "call-1", toolName: "Bash", content: [{ type: "text", text: "RAW TOOL OUTPUT" }], isError: false, timestamp: 3 } as never),
+        sm.appendMessage({ role: "assistant", content: [{ type: "text", text: "LATEST REPLY" }], timestamp: 4 } as never),
+      ];
+      const branchEntries = sm.getBranch() as SessionEntry[];
+      const result = buildLeadCompactionResult(
+        { branchEntries, preparation: { firstKeptEntryId: ids[2]!, tokensBefore: 99 } as never },
+        { sessionKey: "k", registry: undefined, prose: prose("PROSE"), dialogBudgetBytes: DEFAULT_DIALOG_BUDGET_BYTES, sessionFile: sm.getSessionFile(), source: "lever" },
+      );
+      assert.ok(!ids.includes(result.firstKeptEntryId), "the kept-tail id names no session entry");
+      assert.match(result.summary, /--- user \(.+\) ---\nHUMAN ASK\n--- assistant \(.+\) ---\nLEAD REPLY\n\u2192 Bash \{"command":"ls"\}\n--- assistant \(.+\) ---\nLATEST REPLY/);
+      assert.doesNotMatch(result.summary, /RAW TOOL OUTPUT/);
+      assert.ok(result.summary.includes(`\`${sm.getSessionFile()}\``), "the summary names the session file to search");
+
+      sm.appendCompaction(result.summary, result.firstKeptEntryId, result.tokensBefore, result.details, true);
+      sm.appendMessage({ role: "user", content: "AFTER COMPACTION", timestamp: 5 } as never);
+      const live = sm.buildContextEntries();
+      assert.deepEqual(live.map((entry) => entry.type), ["compaction", "message"]);
+      assert.ok(!live.some((entry) => ids.includes(entry.id)), "no raw entry from before the compaction");
+
+      const reloaded = SessionManager.open(sm.getSessionFile()!, dir);
+      assert.deepEqual(reloaded.buildContextEntries().map((entry) => entry.id), live.map((entry) => entry.id), "a reload rebuilds the same context");
+      const messages = reloaded.buildSessionContext().messages as Array<{ role: string; summary?: string }>;
+      assert.deepEqual(messages.map((message) => message.role), ["compactionSummary", "user"]);
+      assert.equal(messages[0]!.summary, result.summary);
+      assert.ok(readFileSync(sm.getSessionFile()!, "utf8").includes("RAW TOOL OUTPUT"), "the session file still holds the tool output");
     });
   });
 
@@ -2211,17 +2256,21 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
             },
           },
         });
-        const branch = [{ type: "message", id: "u1", parentId: null, timestamp: "2026-10-02T10:00:00.000Z", message: { role: "user", content: "HUMAN ASK", timestamp: 0 } }];
+        const branch = [
+          { type: "message", id: "u1", parentId: null, timestamp: "2026-10-02T10:00:00.000Z", message: { role: "user", content: "HUMAN ASK", timestamp: 0 } },
+          { type: "message", id: "kept-entry", parentId: "u1", timestamp: "2026-10-02T10:01:00.000Z", message: { role: "assistant", content: [{ type: "text", text: "TAIL WORK" }], timestamp: 0 } },
+          { type: "message", id: "r1", parentId: "kept-entry", timestamp: "2026-10-02T10:02:00.000Z", message: { role: "toolResult", toolCallId: "c", toolName: "Bash", content: [{ type: "text", text: "TAIL TOOL OUTPUT" }], isError: false, timestamp: 0 } },
+        ];
         const event = compactionEvent(reason, branch);
         (event as { preparation: { messagesToSummarize: unknown[]; previousSummary?: string } }).preparation.messagesToSummarize = [{ role: "user", content: "summarize me", timestamp: 0 }];
         const result = await (pi.handlers.get("session_before_compact")!(event, ctx) as unknown as Promise<{ compaction: { summary: string; firstKeptEntryId: string; details: unknown; usage: unknown } }>);
         assert.equal(calls.length, 1, reason);
         assert.equal(calls[0]!.model, model, "the session model");
         assert.match(calls[0]!.context.systemPrompt!, /context summarization assistant/);
-        assert.match(calls[0]!.context.messages[0]!.content[0]!.text, /<conversation>\n\[User\]: summarize me\n<\/conversation>/);
+        assert.match(calls[0]!.context.messages[0]!.content[0]!.text, /<conversation>\n\[User\]: summarize me\n[\s\S]*TAIL WORK[\s\S]*TAIL TOOL OUTPUT[\s\S]*<\/conversation>/, "Pi's would-be kept tail is summarized, since no raw tail is kept");
         assert.equal(calls[0]!.options.maxTokens, 4096, "capped by the model's own output limit");
         assert.equal((calls[0]!.options as { signal?: unknown }).signal !== undefined, true);
-        assert.equal(result.compaction.firstKeptEntryId, "kept-entry");
+        assert.equal(result.compaction.firstKeptEntryId, NO_KEPT_ENTRY_ID, "the fallback keeps no raw tail either");
         assert.deepEqual(result.compaction.details, { kind: "ws-pi-lead-compaction", version: 1, source: "fallback" });
         assert.deepEqual(result.compaction.usage, { input: 1, output: 2 });
         const summary = result.compaction.summary;
@@ -2350,7 +2399,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     });
 
     test("the lever's compaction result waits on the budget read", async () => {
-      const deferred = deferredReader({ compaction_user_messages_budget_tokens: 100 });
+      const deferred = deferredReader({ compaction_dialog_budget_bytes: 100 });
       const pi = fakePi();
       registerGoalLoop(pi.api, { readConfig: deferred.reader, ...fakeClock(), sessionKeyRef: { current: "lead-key" } });
       const { ctx } = fakeCtx();

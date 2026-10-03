@@ -6,6 +6,7 @@ related:
 sage-review-design: skipped
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 7ad632e428210a1c
+completed: 2026-10-03
 ---
 
 # Carry the raw lead dialog across Pi lead compaction instead of tool noise
@@ -190,3 +191,41 @@ Done when:
     session manager, the rebuilt context (Pi's context-building path, such
     as `buildContextEntries`) holds the summary and no raw entry from before
     it.
+
+### Result (4e7e8ad5e) - 2026-10-03
+
+- `## User messages` is replaced by `## Dialog` (`buildDialogSection` in
+  `agents-plugin-pi/src/lead-compaction.ts`). `collectDialogItems` gathers
+  human-typed user text, assistant text, and one item per tool call;
+  `foldToolRuns` keeps the last 8 lines of a run; `selectDialogItems` selects
+  newest-first under the byte budget; `renderDialogItem` and `elideMiddle`
+  do head/tail elision on UTF-8 code-point boundaries. The session-file
+  search line sits inside `## Dialog`, so the other deterministic sections
+  are unchanged.
+- `pi.compaction_dialog_budget_bytes` (default 40960) replaces the two token
+  keys in `config-manifest.json`, `GoalLoopConfig`, the
+  `resolveDialogBudgetBytes` resolver, and the manifest-drift test.
+- No raw kept tail: `buildLeadCompactionResult` sets `firstKeptEntryId` to
+  `NO_KEPT_ENTRY_ID`, a sentinel that no Pi id can match. Pi's
+  `buildContextEntries` keeps pre-compaction entries only from a matching id.
+  On a missing id, `prepareCompaction` falls back to the entry after the
+  compaction.
+- Review fix (lite, Important): the fallback summary now also reads Pi's
+  would-be kept tail (`keptTailMessages`), because that tail is no longer
+  kept raw. Also fixed: `extractLeadProse` now searches from the end, so a
+  dialog message that quotes a previous summary is not taken for the prose.
+- Wording updated in the `ws-compact` tool description,
+  `lead-compact-guide.md`, and the manifest key description.
+- Verification:
+  - `node --test test/lead-compaction.test.ts test/goal-loop.test.ts test/adapter-config.test.ts`: 182 pass, 0 fail.
+  - `npm test`: 1946 pass, 1 fail. The failure is
+    `test/web-package.test.ts` (offline npm `ENOTCACHED`). It was the same
+    failure in the baseline run before any change, see 14f9c25b1.
+  - Reload check: the test appends the result through a file-backed
+    `SessionManager`. `buildContextEntries` then yields only
+    `[compaction, <post message>]`. `SessionManager.open` rebuilds the same
+    context with the summary as `compactionSummary`, and the JSONL still holds
+    the tool output.
+- Not pinned by a test: the claim that the second compaction's
+  `prepareCompaction` falls back past an unmatched id. Pi does not export
+  `prepareCompaction`, so this was verified by reading its source only.

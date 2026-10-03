@@ -8,21 +8,26 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import {
+  buildDialogSection,
   buildFallbackSummaryPrompt,
   buildLeadCompactionSummary,
   buildPreparationMessage,
-  collectHumanMessages,
+  collectDialogItems,
   describeFinishedChildren,
   describeInFlightChildren,
+  elideMiddle,
   extractLeadProse,
   findActivePlaybook,
+  foldToolRuns,
   findActiveTicket,
   humanTextOf,
   LEAD_PROSE_SECTIONS,
   leadProseParameterSchema,
   readLeadCompactGuide,
+  renderDialogItem,
   renderLeadProse,
-  selectHumanMessages,
+  selectDialogItems,
+  type DialogItem,
 } from "../src/lead-compaction.ts";
 import { buildPushWakeLine, type RpcAgentRegistry } from "../src/spawner.ts";
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
@@ -34,9 +39,15 @@ const assistantCall = (minute: number, name: string, args: Record<string, unknow
   type: "message", id: `a${++seq}`, parentId: null, timestamp: at(minute),
   message: { role: "assistant", content: [{ type: "toolCall", id: `t${seq}`, name, arguments: args }] },
 } as never);
+const assistant = (minute: number, content: unknown[]): SessionEntry => ({ type: "message", id: `a${++seq}`, parentId: null, timestamp: at(minute), message: { role: "assistant", content } } as never);
+const toolResult = (minute: number, toolCallId: string, text: string, isError = false): SessionEntry => ({
+  type: "message", id: `r${++seq}`, parentId: null, timestamp: at(minute),
+  message: { role: "toolResult", toolCallId, toolName: "x", content: [{ type: "text", text }], isError, timestamp: 0 },
+} as never);
 const custom = (minute: number, customType: string, content: string): SessionEntry => ({ type: "custom_message", id: `c${++seq}`, parentId: null, timestamp: at(minute), customType, content, display: true } as never);
 const compaction = (minute: number, summary: string): SessionEntry => ({ type: "compaction", id: `k${++seq}`, parentId: null, timestamp: at(minute), summary, firstKeptEntryId: "x", tokensBefore: 1 } as never);
-const budgets = { totalTokens: 8000, perMessageTokens: 1500 };
+const dialog = { dialogBudgetBytes: 40960, sessionFile: "/sessions/lead.jsonl" };
+const tool = (name: string, args: Record<string, unknown> = {}): DialogItem => ({ kind: "tool", name, args: JSON.stringify(args), failed: false });
 const skillExpansion = (name: string, args?: string): string =>
   `<skill name="${name}" location="/skills/${name}/SKILL.md">\nReferences are relative to /skills/${name}.\n\nSKILL BODY LINE\n</skill>${args ? `\n\n${args}` : ""}`;
 
@@ -60,7 +71,7 @@ describe("lead prose", () => {
   });
 });
 
-describe("human-typed user messages", () => {
+describe("human-typed user text", () => {
   test("adapter traffic is excluded and a /skill: expansion collapses to what the human typed", () => {
     assert.equal(humanTextOf(buildPushWakeLine(3)), undefined, "push wake line");
     assert.equal(humanTextOf("Goal yet running: \"x\".\n\n<!-- ws-pi-goal-reminder:1-1 -->"), undefined, "goal reminder");
@@ -69,8 +80,37 @@ describe("human-typed user messages", () => {
     assert.equal(humanTextOf("Goal armed: ship"), "Goal armed: ship", "the /goal announcement carries the human's goal");
     assert.equal(humanTextOf("ordinary request"), "ordinary request");
   });
+});
 
-  test("only user-role message entries qualify; push batches, mailbox, and preparation messages never do", () => {
+describe("dialog transcript (261003)", () => {
+  test("user text, assistant text, and tool lines interleave chronologically", () => {
+    const entries = [
+      user(0, "please fix the parser"),
+      assistant(1, [
+        { type: "thinking", thinking: "SECRET THINKING" },
+        { type: "text", text: "Looking at it." },
+        { type: "toolCall", id: "call-read", name: "Read", arguments: { path: "src/a.ts" } },
+        { type: "toolCall", id: "call-bash", name: "Bash", arguments: { command: "npm test" } },
+      ]),
+      toolResult(2, "call-read", "READ RESULT BODY"),
+      toolResult(3, "call-bash", "BASH FAILURE OUTPUT", true),
+      assistant(4, [{ type: "text", text: "The test fails; fixing." }, { type: "toolCall", id: "call-edit", name: "Edit", arguments: { path: "src/a.ts" } }, { type: "text", text: "Done." }]),
+      user(5, "thanks"),
+    ];
+    const lines = selectDialogItems(foldToolRuns(collectDialogItems(entries)), 40960).lines;
+    assert.deepEqual(lines, [
+      `--- user (${at(0)}) ---\nplease fix the parser`,
+      `--- assistant (${at(1)}) ---\nLooking at it.`,
+      '\u2192 Read {"path":"src/a.ts"}',
+      '\u2192 Bash {"command":"npm test"} \u2717failed',
+      `--- assistant (${at(4)}) ---\nThe test fails; fixing.`,
+      '\u2192 Edit {"path":"src/a.ts"}',
+      `--- assistant (${at(4)}) ---\nDone.`,
+      `--- user (${at(5)}) ---\nthanks`,
+    ]);
+  });
+
+  test("thinking, tool results, adapter traffic, bash executions, and the ws-compact call never cross", () => {
     const entries = [
       user(0, "first human message"),
       custom(1, PUSH_BATCH_CUSTOM_TYPE, "<ws-push-batch>WORKER REPORT</ws-push-batch>"),
@@ -78,33 +118,95 @@ describe("human-typed user messages", () => {
       user(3, buildPushWakeLine(1)),
       user(4, [{ type: "text", text: "with" }, { type: "image", data: "", mimeType: "image/png" }]),
       { type: "message", id: "b", parentId: null, timestamp: at(5), message: { role: "bashExecution", command: "ls", output: "BASH OUTPUT" } } as never,
-      assistantCall(6, "ws-skill", { name: "lead-run" }),
+      assistant(6, [{ type: "thinking", thinking: "SECRET THINKING" }]),
+      assistantCall(7, "ws-compact", { current_work: "LEVER PROSE" }),
+      toolResult(8, "t1", "TOOL RESULT BODY"),
+      user(9, "Goal yet running.\n\n<!-- ws-pi-goal-reminder:1-1 -->"),
     ];
-    const texts = collectHumanMessages(entries).map((message) => message.text);
-    assert.deepEqual(texts, ["first human message", "with\n[image]"]);
+    const items = collectDialogItems(entries);
+    assert.deepEqual(items, [
+      { kind: "user", timestamp: at(0), text: "first human message" },
+      { kind: "user", timestamp: at(4), text: "with\n[image]" },
+    ]);
+    const section = buildDialogSection(entries, 40960, undefined);
+    for (const absent of ["WORKER REPORT", "PREPARATION GUIDE", "BASH OUTPUT", "SECRET THINKING", "LEVER PROSE", "ws-compact", "TOOL RESULT BODY", "ws-pi-goal-reminder"]) {
+      assert.ok(!section.includes(absent), absent);
+    }
   });
 
-  test("each message is capped with a truncation marker and the section budget keeps a contiguous newest run", () => {
-    const capChars = 10 * 4;
-    const messages = [
-      { timestamp: at(0), text: "o".repeat(40) },
-      { timestamp: at(1), text: "x".repeat(100) },
-      { timestamp: at(2), text: "newest" },
+  test("a run of more than 8 tool lines keeps its last 8 and folds the rest, counted highest first", () => {
+    const run = [tool("Read"), tool("Bash"), tool("Bash"), tool("Grep"), tool("Read"), tool("Bash"), ...Array.from({ length: 8 }, (_, i) => tool("Edit", { n: i }))];
+    const items: DialogItem[] = [{ kind: "user", timestamp: at(0), text: "go" }, ...run, { kind: "assistant", timestamp: at(1), text: "done" }, tool("Read"), tool("Read")];
+    const folded = foldToolRuns(items);
+    assert.equal(folded.length, 1 + 1 + 8 + 1 + 2);
+    assert.deepEqual(folded[1], { kind: "fold", total: 6, counts: [{ name: "Bash", count: 3 }, { name: "Read", count: 2 }, { name: "Grep", count: 1 }] });
+    assert.equal(renderDialogItem(folded[1]!), "\u2192 (+6 more: Bash\u00d73, Read\u00d72, Grep\u00d71)");
+    assert.deepEqual(folded.slice(2, 10), run.slice(6), "the newest 8 calls stay as lines");
+    assert.deepEqual(folded.slice(11), [tool("Read"), tool("Read")], "a short run is untouched");
+    assert.deepEqual(foldToolRuns(run.slice(6)), run.slice(6), "exactly 8 lines need no fold");
+  });
+
+  test("a long message keeps its first and last 1024 bytes around the skipped-byte marker", () => {
+    const exact = "e".repeat(2560);
+    assert.equal(elideMiddle(exact, 2560, 1024, "\n"), exact, "2560 bytes is not over the threshold");
+    const long = `${"h".repeat(1024)}${"m".repeat(952)}${"t".repeat(1024)}`;
+    assert.equal(renderDialogItem({ kind: "user", timestamp: "T", text: long }), `--- user (T) ---\n${"h".repeat(1024)}\n[... 952 bytes skipped ...]\n${"t".repeat(1024)}`);
+  });
+
+  test("elision never splits a multi-byte character", () => {
+    // 1000 Hangul syllables = 3000 bytes; 1024 is not a multiple of 3, so each end keeps 341 characters (1023 bytes).
+    const korean = "\ud55c".repeat(1000);
+    const elided = renderDialogItem({ kind: "assistant", timestamp: "T", text: korean });
+    assert.equal(elided, `--- assistant (T) ---\n${"\ud55c".repeat(341)}\n[... 954 bytes skipped ...]\n${"\ud55c".repeat(341)}`);
+    assert.ok(!elided.includes("\ufffd"), "no replacement character from a split code point");
+    // 4-byte emoji straddle both 150-byte cut points, so each end stops at its 148 ASCII bytes and every emoji is skipped.
+    const args = `${"a".repeat(148)}${"\u{1f9a6}".repeat(40)}${"z".repeat(148)}`;
+    const line = renderDialogItem({ kind: "tool", name: "Write", args, failed: false });
+    assert.equal(line, `\u2192 Write ${"a".repeat(148)} [... 160 bytes skipped ...] ${"z".repeat(148)}`);
+  });
+
+  test("long tool arguments keep their first and last 150 bytes", () => {
+    const call = { content: "x".repeat(400) };
+    const json = JSON.stringify(call);
+    const line = renderDialogItem({ kind: "tool", name: "Write", args: json, failed: true });
+    assert.equal(line, `\u2192 Write ${json.slice(0, 150)} [... ${json.length - 300} bytes skipped ...] ${json.slice(-150)} \u2717failed`);
+    assert.equal(renderDialogItem(tool("Read", { path: "short" })), '\u2192 Read {"path":"short"}', "short arguments are untouched");
+  });
+
+  test("selection is newest-first within the byte budget, drops a too-large item whole, and stops there", () => {
+    const items: DialogItem[] = [
+      { kind: "user", timestamp: "T", text: "old" },
+      { kind: "assistant", timestamp: "T", text: "B".repeat(200) },
+      tool("Read", { p: 1 }),
+      { kind: "user", timestamp: "T", text: "newest" },
     ];
-    const tight = selectHumanMessages(messages, { totalTokens: 30, perMessageTokens: 10 });
-    assert.equal(tight.kept.length, 2);
-    assert.equal(tight.kept[1]!.text, "newest");
-    assert.ok(tight.kept[0]!.text.startsWith("x".repeat(capChars)));
-    assert.match(tight.kept[0]!.text, /\n\[\.\.\. truncated: 60 more characters\]$/);
-    assert.equal(tight.omitted, 1, "the oldest message drops out once the budget is spent");
+    const cost = (item: DialogItem): number => Buffer.byteLength(renderDialogItem(item), "utf8") + 1;
+    const newestTwo = cost(items[2]!) + cost(items[3]!);
+    const tight = selectDialogItems(items, newestTwo + cost(items[0]!));
+    assert.deepEqual(tight.lines, [renderDialogItem(items[2]!), renderDialogItem(items[3]!)], "the old item fits the remainder but is not taken past the dropped one");
+    assert.equal(tight.omitted, 2);
+    assert.equal(tight.total, 4);
+    assert.equal(selectDialogItems(items, newestTwo - 1).lines.length, 1, "one byte short drops the second-newest whole");
+    const all = selectDialogItems(items, 40960);
+    assert.equal(all.omitted, 0);
+    assert.deepEqual(all.lines, items.map(renderDialogItem), "kept oldest-first for reading");
 
-    const capAboveBudget = selectHumanMessages([{ timestamp: at(0), text: "y".repeat(500) }], { totalTokens: 50, perMessageTokens: 1000 });
-    assert.equal(capAboveBudget.kept.length, 1, "a cap above the budget is clamped, so the newest message still fits");
-    assert.ok(capAboveBudget.kept[0]!.text.startsWith("y".repeat(136) + "\n[... truncated: 364 more characters]"));
+    const korean: DialogItem = { kind: "user", timestamp: "T", text: "\ud55c".repeat(10) };
+    assert.equal(selectDialogItems([korean], cost(korean)).lines.length, 1);
+    assert.equal(selectDialogItems([korean], cost(korean) - 1).lines.length, 0, "the budget counts UTF-8 bytes, not characters");
+  });
 
-    const roomy = selectHumanMessages(messages, { totalTokens: 1000, perMessageTokens: 1000 });
-    assert.deepEqual(roomy.kept.map((message) => message.text), messages.map((message) => message.text), "kept oldest-first for reading");
-    assert.equal(roomy.omitted, 0);
+  test("the section header states the omitted count and the session file is named for search", () => {
+    const entries = [user(0, "a".repeat(100)), user(1, "b"), user(2, "c")];
+    const roomy = buildDialogSection(entries, 40960, "/sessions/lead.jsonl");
+    assert.equal(roomy.split("\n").slice(0, 3).join("\n"), [
+      "## Dialog",
+      "All 3 dialog items of this session.",
+      "Full tool output and every earlier message remain in the session file `/sessions/lead.jsonl`; search it (for example with grep) when you need them.",
+    ].join("\n"));
+    const tight = buildDialogSection(entries, 100, undefined);
+    assert.match(tight, /^## Dialog\nThe newest 2 of 3 dialog items \(older ones are carried by the prose below\)\.\nThis session has no session file/);
+    assert.ok(!tight.includes("a".repeat(100)));
   });
 });
 
@@ -175,16 +277,18 @@ describe("buildLeadCompactionSummary", () => {
       branchEntries: entries,
       registry: registry([{ agentId: "w", alias: "w1", running: true, spawnRole: "worker" }]),
       prose,
-      budgets,
+      ...dialog,
     });
-    for (const heading of ["## Session", "## Child agents in flight", "## Child agents finished since the previous compaction", "## User messages", "## Carried forward by the lead", "## Resume"]) {
+    for (const heading of ["## Session", "## Child agents in flight", "## Child agents finished since the previous compaction", "## Dialog", "## Carried forward by the lead", "## Resume"]) {
       assert.ok(summary.includes(`\n${heading}\n`), heading);
     }
     assert.match(summary, /ws session key: `engaged-key` \(preserve verbatim\)/);
     assert.match(summary, /Active ticket: `261002-feat-pi-lead-ws-owned-compaction`/);
     assert.match(summary, /Active playbook: `lead-run`\. Its body is not re-attached: re-read it with `ws-skill lead-run`/);
     assert.match(summary, /- w1 \(w\) \[worker\]/);
-    assert.match(summary, /please keep replies short/);
+    assert.match(summary, /--- user \(.+\) ---\nplease keep replies short\n\u2192 ws-skill \{"name":"lead-run"\}/);
+    assert.match(summary, /search it \(for example with grep\)/);
+    assert.match(summary, /`\/sessions\/lead\.jsonl`/);
     assert.match(summary, /LEAD PROSE MARKER/);
     assert.doesNotMatch(summary, /WORKER REPORT BODY/);
     assert.doesNotMatch(summary, /read-files|modified-files/);
@@ -196,23 +300,23 @@ describe("buildLeadCompactionSummary", () => {
   test("sections are recomputed from the full history across two compactions, not inherited from the previous summary", () => {
     const reg = registry([{ agentId: "a", alias: "first", settledAt: Date.parse(at(5)), lastText: "status: [ok]" }]);
     const before = [user(0, "message before the first compaction")];
-    const first = buildLeadCompactionSummary({ sessionKey: "k", branchEntries: before, registry: reg, prose, budgets });
+    const first = buildLeadCompactionSummary({ sessionKey: "k", branchEntries: before, registry: reg, prose, ...dialog });
     assert.match(first, /- first \(a\)/);
 
     reg.set("b", { agentId: "b", alias: "second", running: false, streaming: false, reportLog: [], settledAt: Date.parse(at(30)), lastText: "status: [ok]" } as never);
     const after = [...before, compaction(10, first), user(20, "message after the first compaction")];
-    const second = buildLeadCompactionSummary({ sessionKey: "k", branchEntries: after, registry: reg, prose: renderLeadProse({ current_work: "NEW PROSE" }), budgets });
+    const second = buildLeadCompactionSummary({ sessionKey: "k", branchEntries: after, registry: reg, prose: renderLeadProse({ current_work: "NEW PROSE" }), ...dialog });
     assert.doesNotMatch(second, /- first \(a\)/, "a child finished before the previous compaction is not listed again");
     assert.match(second, /- second \(b\)/);
     assert.match(second, /message before the first compaction/, "older human messages come from branch history, not the old summary");
     assert.match(second, /message after the first compaction/);
     assert.equal(second.split("message before the first compaction").length, 2, "the earlier message appears once");
     assert.doesNotMatch(second, /LEAD PROSE MARKER/, "the previous prose is not inherited");
-    assert.match(second, /All 2 human-typed messages/);
+    assert.match(second, /All 2 dialog items of this session\./);
   });
 
   test("a missing session key is named as unknown rather than left blank", () => {
-    const summary = buildLeadCompactionSummary({ sessionKey: undefined, branchEntries: [], registry: undefined, prose, budgets });
+    const summary = buildLeadCompactionSummary({ sessionKey: undefined, branchEntries: [], registry: undefined, prose, ...dialog });
     assert.match(summary, /ws session key: unknown/);
     assert.match(summary, /Active ticket: none/);
     assert.match(summary, /## Child agents in flight\n\(none\)/);
@@ -257,12 +361,19 @@ describe("preparation and fallback text", () => {
   });
 
   test("the fallback prompt asks for the fixed headings and passes only the previous prose", () => {
-    const previous = buildLeadCompactionSummary({ sessionKey: "k", branchEntries: [user(0, "HUMAN TEXT")], registry: undefined, prose: renderLeadProse({ residual_details: "OLD PROSE" }), budgets });
+    const previous = buildLeadCompactionSummary({ sessionKey: "k", branchEntries: [user(0, "HUMAN TEXT")], registry: undefined, prose: renderLeadProse({ residual_details: "OLD PROSE" }), ...dialog });
     const prompt = buildFallbackSummaryPrompt("[User]: hi", extractLeadProse(previous));
     assert.match(prompt, /^<conversation>\n\[User\]: hi\n<\/conversation>/);
     assert.match(prompt, /<previous-prose>[\s\S]*OLD PROSE[\s\S]*<\/previous-prose>/);
     assert.doesNotMatch(prompt, /HUMAN TEXT/);
     for (const section of LEAD_PROSE_SECTIONS) assert.ok(prompt.includes(`### ${section.heading}`));
     assert.doesNotMatch(buildFallbackSummaryPrompt("x", undefined), /previous-prose/);
+  });
+
+  test("prose extraction is not misled by a dialog message quoting a previous summary", () => {
+    const quoted = "## Carried forward by the lead\nQUOTED PROSE\n\n## Resume\nquoted resume";
+    const summary = buildLeadCompactionSummary({ sessionKey: "k", branchEntries: [user(0, quoted)], registry: undefined, prose: renderLeadProse({ residual_details: "REAL PROSE" }), ...dialog });
+    assert.match(summary, /QUOTED PROSE/);
+    assert.equal(extractLeadProse(summary), renderLeadProse({ residual_details: "REAL PROSE" }));
   });
 });

@@ -82,13 +82,12 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { convertToLlm, serializeConversation, type CompactionResult, type ContextUsage, type ExtensionAPI, type ExtensionContext, type SessionBeforeCompactEvent } from "@earendil-works/pi-coding-agent";
+import { convertToLlm, serializeConversation, sessionEntryToContextMessages, type CompactionResult, type ContextUsage, type ExtensionAPI, type ExtensionContext, type SessionBeforeCompactEvent } from "@earendil-works/pi-coding-agent";
 import {
   buildFallbackSummaryPrompt,
   buildLeadCompactionSummary,
   buildPreparationMessage,
-  DEFAULT_USER_MESSAGE_CAP_TOKENS,
-  DEFAULT_USER_MESSAGES_BUDGET_TOKENS,
+  DEFAULT_DIALOG_BUDGET_BYTES,
   extractLeadProse,
   FALLBACK_SYSTEM_PROMPT,
   GOAL_REMINDER_MARKER_PREFIX,
@@ -97,12 +96,12 @@ import {
   LEAD_COMPACT_TOOL_NAME,
   LEAD_COMPACTION_DETAILS_KIND,
   leadProseParameterSchema,
+  NO_KEPT_ENTRY_ID,
   readLeadCompactGuide,
   renderLeadProse,
   type LeadCompactionDetails,
   type LeadProse,
   type PreparationTrigger,
-  type UserMessageBudgets,
 } from "./lead-compaction.ts";
 import { readSpawnRole } from "./process-role.ts";
 import { staticConfigReader, thenOrNow, type GoalLoopConfigKey, type GoalLoopConfigReader } from "./adapter-config.ts";
@@ -135,10 +134,8 @@ export interface GoalLoopConfig {
   settle_delay_ms?: number;
   /** Age-based child-home retention in days; 0 disables age pruning. */
   child_retention_ttl_days?: number;
-  /** Token budget for the lead compaction summary's human-typed user-message section (261002). */
-  compaction_user_messages_budget_tokens?: number;
-  /** Token cap for one message inside that section (261002). */
-  compaction_user_message_cap_tokens?: number;
+  /** UTF-8 byte budget for the lead compaction summary's `## Dialog` section (261003). */
+  compaction_dialog_budget_bytes?: number;
 }
 
 /** Literal `false` opts out of animation. Malformed, missing, and every other value retain the enabled default. */
@@ -218,12 +215,9 @@ function positiveOr(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
-/** Resolves the user-message section budgets for the lead compaction summary; malformed values fall back to the defaults. */
-export function resolveUserMessageBudgets(config: GoalLoopConfig | undefined): UserMessageBudgets {
-  return {
-    totalTokens: positiveOr(config?.compaction_user_messages_budget_tokens, DEFAULT_USER_MESSAGES_BUDGET_TOKENS),
-    perMessageTokens: positiveOr(config?.compaction_user_message_cap_tokens, DEFAULT_USER_MESSAGE_CAP_TOKENS),
-  };
+/** Resolves the `## Dialog` section's byte budget for the lead compaction summary; a malformed value falls back to the default. */
+export function resolveDialogBudgetBytes(config: GoalLoopConfig | undefined): number {
+  return positiveOr(config?.compaction_dialog_budget_bytes, DEFAULT_DIALOG_BUDGET_BYTES);
 }
 
 /** Resolves the child retention policy: `0` disables age pruning (`false`); anything but a positive finite number keeps the default. */
@@ -240,7 +234,7 @@ export const SETTLE_CONFIG_KEYS: readonly GoalLoopConfigKey[] = ["settle_delay_m
 export const COMPACTION_TRIGGER_CONFIG_KEYS: readonly GoalLoopConfigKey[] = ["compaction_advisory_percent", "compaction_hard_percent", "context_window_override"];
 
 /** Knobs the lead compaction summary reads. */
-export const COMPACTION_BUDGET_CONFIG_KEYS: readonly GoalLoopConfigKey[] = ["compaction_user_messages_budget_tokens", "compaction_user_message_cap_tokens"];
+export const COMPACTION_BUDGET_CONFIG_KEYS: readonly GoalLoopConfigKey[] = ["compaction_dialog_budget_bytes"];
 
 // ---------------------------------------------------------------------------
 // Pure message builders.
@@ -449,26 +443,47 @@ export function buildCompactionObservation(goal: string, reason: "manual" | "thr
 }
 
 /**
+ * The messages from Pi's kept-tail cut point (`preparation.firstKeptEntryId`)
+ * to the end of the branch. Pi excludes them from `messagesToSummarize`
+ * because it would keep them raw; this adapter keeps no raw tail (261003), so
+ * the fallback summary must read them too or the newest work is lost.
+ */
+export function keptTailMessages(event: Pick<SessionBeforeCompactEvent, "preparation" | "branchEntries">): ReturnType<typeof sessionEntryToContextMessages> {
+  const start = event.branchEntries.findIndex((entry) => entry.id === event.preparation.firstKeptEntryId);
+  if (start < 0) return [];
+  return event.branchEntries.slice(start).filter((entry) => entry.type !== "compaction").flatMap(sessionEntryToContextMessages);
+}
+
+/**
  * Builds the `CompactionResult` the lead's `session_before_compact` handler
- * returns: the summary from lead-compaction.ts, Pi's own
- * `preparation.firstKeptEntryId` unchanged (Pi computes valid cut points and
- * `compaction.keepRecentTokens` tunes the kept tail), and details stamped as
- * this adapter's so `session_compact` can recognize the stored entry.
+ * returns: the summary from lead-compaction.ts, `NO_KEPT_ENTRY_ID` so no raw
+ * pre-compaction entry (and so no tool output) is kept after the summary
+ * (261003; the `## Dialog` section carries the discussion instead), and
+ * details stamped as this adapter's so `session_compact` can recognize the
+ * stored entry.
  */
 export function buildLeadCompactionResult(
   event: Pick<SessionBeforeCompactEvent, "preparation" | "branchEntries">,
-  input: { sessionKey: string | undefined; registry: RpcAgentRegistry | undefined; prose: string; budgets: UserMessageBudgets; source: LeadCompactionDetails["source"] },
+  input: {
+    sessionKey: string | undefined;
+    registry: RpcAgentRegistry | undefined;
+    prose: string;
+    dialogBudgetBytes: number;
+    sessionFile: string | undefined;
+    source: LeadCompactionDetails["source"];
+  },
 ): CompactionResult<LeadCompactionDetails> {
   const summary = buildLeadCompactionSummary({
     sessionKey: input.sessionKey,
     branchEntries: event.branchEntries,
     registry: input.registry,
     prose: input.prose,
-    budgets: input.budgets,
+    dialogBudgetBytes: input.dialogBudgetBytes,
+    sessionFile: input.sessionFile,
   });
   return {
     summary,
-    firstKeptEntryId: event.preparation.firstKeptEntryId,
+    firstKeptEntryId: NO_KEPT_ENTRY_ID,
     tokensBefore: event.preparation.tokensBefore,
     details: { kind: LEAD_COMPACTION_DETAILS_KIND, version: 1, source: input.source },
   };
@@ -1263,7 +1278,7 @@ export function registerGoalLoop(
     try {
       const model = ctx.model!;
       const { messagesToSummarize, turnPrefixMessages, previousSummary, settings } = event.preparation;
-      const conversationText = serializeConversation(convertToLlm([...messagesToSummarize, ...turnPrefixMessages]));
+      const conversationText = serializeConversation(convertToLlm([...messagesToSummarize, ...turnPrefixMessages, ...keptTailMessages(event)]));
       const prompt = buildFallbackSummaryPrompt(conversationText, previousSummary ? extractLeadProse(previousSummary) : undefined);
       const reserve = Math.floor(0.8 * settings.reserveTokens);
       const response = await ctx.modelRegistry.complete(
@@ -1309,7 +1324,8 @@ export function registerGoalLoop(
           sessionKey: opts.sessionKeyRef?.current,
           registry: opts.rpcRegistryRef?.current,
           prose,
-          budgets: resolveUserMessageBudgets(config),
+          dialogBudgetBytes: resolveDialogBudgetBytes(config),
+          sessionFile: ctx.sessionManager?.getSessionFile?.(),
           source,
         });
         expectOwnCompaction = true;
@@ -1413,7 +1429,7 @@ export function registerGoalLoop(
     name: LEAD_COMPACT_TOOL_NAME,
     label: LEAD_COMPACT_TOOL_NAME,
     description:
-      "Compact the lead's context now. Fill every heading with your carry-forward prose (empty when there is nothing): for content already persisted (tickets, commits, notes, agenda, todos) give its path or pointer; for content that lives only in the conversation, summarize it as precisely as possible. The adapter adds the session key, active ticket and playbook, child agents, and human-typed user messages itself. Under an active goal the goal loop continues after compaction.",
+      "Compact the lead's context now. Fill every heading with your carry-forward prose (empty when there is nothing): for content already persisted (tickets, commits, notes, agenda, todos) give its path or pointer; for content that lives only in the conversation, summarize it as precisely as possible. The adapter adds the session key, active ticket and playbook, child agents, and the recent dialog (user messages, your replies, one line per tool call) itself. Under an active goal the goal loop continues after compaction.",
     parameters: leadProseParameterSchema() as never,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx: ExtensionContext) {
       if (isChildProcess(process.env)) {

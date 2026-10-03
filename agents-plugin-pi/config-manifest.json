@@ -47,18 +47,11 @@
       "description": "Context-window size in tokens used for the context-usage percent; 0 uses the model's own window."
     },
     {
-      "key": "pi.compaction_user_messages_budget_tokens",
+      "key": "pi.compaction_dialog_budget_bytes",
       "type": "integer",
       "minimum": 1,
-      "default": 8000,
-      "description": "Token budget for the user-message section of the lead compaction summary."
-    },
-    {
-      "key": "pi.compaction_user_message_cap_tokens",
-      "type": "integer",
-      "minimum": 1,
-      "default": 1500,
-      "description": "Token cap for one message inside the user-message section of the lead compaction summary."
+      "default": 40960,
+      "description": "UTF-8 byte budget for the dialog section of the lead compaction summary: user messages, the lead's replies, and one line per tool call, newest first."
     },
     {
       "key": "pi.child_retention_ttl_days",
