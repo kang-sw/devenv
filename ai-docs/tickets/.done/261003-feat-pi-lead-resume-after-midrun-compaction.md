@@ -173,3 +173,15 @@ Done when:
   - The existing no-goal test now expects exactly one resume.
   - Mutation checks fail the expected tests: resuming on every route fails the advisory and reroute cases, and dropping `failed` from `session_compact_failed` fails the failed-event case.
 - **Review:** one lite pass came back clean.
+
+#### Edition (f81df410d) - 2026-10-03
+
+- The resume is no longer sent from `releaseAfterCompaction`. An idle,
+  successful release only marks `CompactionOperation.resumeOwed` (same gates
+  as above), and `sendOwedResume` sends it from the `ws-compact` lever's
+  `onComplete`, once per operation, re-checking shutdown and active goal.
+- Why: Pi's `prompt()` (behind `sendUserMessage`) throws while its compaction
+  controller is set, and Pi clears that only after awaiting every
+  `session_compact` handler. Another extension's async handler can let the
+  `setImmediate` release run first, losing the resume; `onComplete` always runs
+  after `compact()` returned. Ws-only ordering is unchanged.
