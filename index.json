@@ -547,7 +547,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-03T08:37:07Z"
+        "touched_at": "2026-10-03T08:37:31Z",
+        "impl": {
+          "branch": "impl/develop/stray-mute-slam"
+        }
       }
     },
     "261003-research-typed-decision-model-new-domains": {
