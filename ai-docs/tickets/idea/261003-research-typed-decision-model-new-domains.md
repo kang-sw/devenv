@@ -139,6 +139,49 @@ Discussed and explicitly **not pursued now**. Recorded so a later ticket does no
 - **Shadow log:** every decision is logged to wsstate (state hash, questions, answers, eventual outcome). This builds the labeled data that the calibration caveat requires.
 - **Consumers:** Pi would reach it through its existing ws-mcp bridge (`startBridge`) with `pi.*` adapter config switches, so it needs no HTTP client of its own.
 
+## Follow-up discussion: ws-execute auto-approval tier
+
+**Proposal.** Put a decision model in front of `ws-worker-exec`. It would
+auto-approve clearly safe execute-worker commands; everything else still goes
+to the lead. The data looked supportive: local Pi sessions hold 335 labeled
+`ws-approve` decisions (288 approve, 26 run-instead, 21 deny).
+
+**Why it was rejected.**
+- `260904-feat-ws-pi-execute-approval-gateway` binds against it:
+  - §2: the per-mutation gate exists because `ws-execute` proxies consensus-caliber actions.
+  - §3: an upfront `risky` flag was rejected.
+  - §5: command-string allowlists were rejected as a smuggling arms race. A semantic classifier is the same kind of target, reachable through injection in the command or rationale.
+- The deny samples show the lead using approval as a **review checkpoint**, e.g. denying a `git commit` over a correctness flaw. A safety classifier would approve such a call.
+- The 327 historical approval requests contain about 35% non-mutating inspection, 76 of them git-only. The main waste comes from a missing tool, not a missing classifier: the execute-worker never received the structured read-only git tools that §5's design implies.
+
+**Outcome.**
+- The structural fix was taken first, as `261003-feat-pi-execute-worker-git-read-tools`; it uses no decision model.
+- On reconsideration, the user confirmed a narrowed classifier for the residual: auto-approve only commands judged read-only. `risky_edit`, `irreversible` and secrets act as vetoes, and every mutation still goes to the lead.
+- This keeps the letter of §2: non-mutations were never what the gate protects. It partially reverses §5, accepting semantic classification with layered vetoes, because the worker is cooperative and the residual risk is model error or injection.
+- It is carried as `261003-feat-pi-execute-readonly-auto-approval`, with the git-read-tools ticket as its prerequisite.
+
+## Follow-up discussion: per-tool-call guard on every subagent
+
+**Proposal.** Run a decision model on every mutation-capable tool call of
+every subagent, with the input context. When a call looks like an accident or
+like scope drift from the assignment, block it and escalate an "is this
+right?" approval to the lead over the existing socket channel.
+
+**Feasibility evidence.**
+- Every Pi child already runs a `pi.on("tool_call")` hook that can return `{block: true, reason}` (`agents-plugin-pi/src/index.ts:467`, today enforcing the delegation-policy tool ceiling).
+- `agent-channel` and `ChildApprovalGate` (`approval-protocol.ts`) carry approval round-trips. The lead-side pending-approval handling is execute-worker-specific and would need generalizing.
+- Volume across 751 local child sessions was 5,342 mutation-capable calls: `bash` 3,047, `edit` 1,730 and `write` 565, about 7 per session. Classifying all bash calls would cost well under a dollar, and the added latency is seconds per session.
+
+**Value concerns.**
+- **Base rate.** A regex sweep found essentially no genuinely destructive worker commands: no `reset --hard`, `clean -f`, `branch -D` or force push; the matches were false positives.
+- **Past incidents were systemic, not per-command.** Examples: shared-worktree HEAD detach orphaning commits (`260904-bug-subagent-worktree-head-detach-orphans-commits`), stale `index.lock` (`260930-feat-git-exec-audit-log`), a mailbox-owner steal. A per-command classifier would not have caught them.
+- **False positives cost lead turns.** With a near-zero true-positive rate, almost every escalation is a false positive, and each one spends a lead turn, which anchor A3 names as scarce.
+- **Downstream framing.** AGENTS.md says this repo's posture does not constrain shipped behavior, so an opt-in downstream safety feature (the Claude Code auto-mode pattern) keeps some value.
+- **Distinctive capability: scope drift.** Deterministic rules cannot judge "worker assigned X is doing Y". A decision model can, as a `Noul` over (assignment, action).
+- **User doubt about judgment limits.** The user questioned whether a decision model can catch what large models themselves misjudge. The motivating case, curbing over-engineering ("is this test even needed?"), needs code reading and value judgment. That is System 2 work, not a typed decision over a bounded state.
+
+**Outcome.** Kept research-only.
+
 ## Constraints any follow-up must respect
 
 - **ws-mcp has no outbound network today.**
@@ -148,7 +191,7 @@ Discussed and explicitly **not pursued now**. Recorded so a later ticket does no
 - **The Pi extension already has outbound paths.**
   - Raw `node:https` in `web-fetch.ts`.
   - Provider auth via `ctx.modelRegistry` / `getProviderAuth`.
-  - Whether an OpenRouter key is reachable through Pi provider auth is unverified.
+  - OpenRouter is a configured Pi provider, so its key is reachable through provider auth.
 - **Architecture Rules 3–5.**
   - Shipped behavior must be host-neutral and downstream-first.
   - A proprietary hosted API is opt-in and never a hard dependency.
@@ -167,10 +210,16 @@ Discussed and explicitly **not pursued now**. Recorded so a later ticket does no
 - **No network in ws-mcp:** ws-mcp makes no outbound network calls and handles no secrets.
 - **Pi compaction is percent-only:** Pi compaction triggers use only the context percent (50% advisory, 80% hard; `goal-loop.ts:150,153,1183`).
 - **Pi runaway guard is a counter:** it is a 10-strike re-fire counter (`goal-loop.ts:147,407`).
+- **Approval history:** local Pi sessions hold 327 approval requests (~35% non-mutating inspection, 76 git-only) and 335 `ws-approve` decisions (288 approve / 26 run-instead / 21 deny). These are rough regex splits.
+- **Subagent mutation volume:** 5,342 mutation-capable calls across 751 child sessions, with no genuinely destructive command found by regex. Past worker incidents were systemic, not per-command.
+- **Pi can reach an OpenRouter key:** OpenRouter is a configured Pi provider, reachable through `ctx.modelRegistry.getProviderAuth("openrouter")`.
+- **A blocking seam exists:** Pi children can block any tool call via the `tool_call` hook (`agents-plugin-pi/src/index.ts:467`).
 
 ### Confirmed Decisions
 
-- **Research only for now.** No actionable ticket is authored from this survey yet.
+- **Research only for now.** Apart from the narrowed ws-execute read-only classifier below, no actionable decision-model ticket is authored from this survey.
+- **ws-execute auto-approval is read-only only.** A decision-model classifier may auto-approve only commands it judges read-only; `risky_edit`, `irreversible` and secrets are vetoes, and every mutation still elevates to the lead, keeping the `260904` §2 invariant. It is a separate ticket (`261003-feat-pi-execute-readonly-auto-approval`) that follows the structural git-read-tools fix.
+- **The per-tool-call subagent guard stays research-only.**
 - **No in-place grafts onto lead judgment.** Grafting a decision model onto existing lead-judgment paths (tier selection, route facts, compaction trigger, runaway guard) is deprioritized; the user judged those paths already heavily optimized and a graft inelegant. Further exploration targets new domains.
 - **The interface sketch stays deferred.** The `decision.ask` common interface is recorded as a deferred sketch, not adopted.
 
@@ -183,12 +232,13 @@ Discussed and explicitly **not pursued now**. Recorded so a later ticket does no
 
 - **Which candidate is best?** Which has the best value-to-egress ratio? Offline or batch candidates (1, 6) avoid the hot path entirely and may be the safest first experiment.
 - **Is `llm-http` good enough?** Does a light LLM with logprob-derived distributions discriminate well enough on ws decision types, or does the substitute-model failure generalize?
-- **Can Pi reach an OpenRouter key?** Is it reachable through Pi provider auth (`getProviderAuth`)?
 - **What would the eval set be?** Where does labeled data come from? Candidates: shadow logs, the review ledger's follow-ups, ticket history.
+- **What would a guard actually flag?** For the per-tool-call guard, what fraction of historical bash calls would a scope-drift `Noul` flag when replayed offline with each worker's assignment, and are the flagged calls worth a lead turn? The user leans toward judgment-heavy checks (e.g. over-engineering) not being decision-model work.
 - **Do lab entrants change the plan?** Do major-lab decision models, if released, change the backend choice or the case for a vendor-neutral interface?
 
 ### Rejected Alternatives
 
+- **Decision-model auto-approval of non-risky mutations for `ws-worker-exec`.** It reverses `260904` §2, and it would wave through calls the lead uses as review checkpoints (e.g. a `git commit` denied over a correctness flaw). Routine mutation belongs on an ungated general worker instead.
 - **Jev as ws-mcp's model router.** ws-mcp has no request content to route on, and a hosted proprietary dependency in the shipped Go binary conflicts with Rules 3–4.
 
 ## Sources
