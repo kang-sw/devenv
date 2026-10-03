@@ -364,16 +364,6 @@
     "260914-bug-pi-execute-worker-resume-session-home-unavailable": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
-    "260914-bug-ws-claude-timeout-resume-handle": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-02T15:09:18Z"
-      }
-    },
     "260915-bug-pi-bridge-bundled-tool-count": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
@@ -518,60 +508,11 @@
     "261002-bug-lead-run-effort-agent-type-missing-fallback": {
       "registered_at": "2026-10-02T13:27:17Z"
     },
-    "261002-chore-ws-pi-retire-ws-claude-and-soften-compaction-advisory": {
-      "registered_at": "2026-10-02T14:48:57Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-02T15:07:21Z",
-        "impl": {
-          "branch": "impl/develop/curve-fresh-gents"
-        }
-      }
-    },
-    "261002-feat-pi-lead-ws-owned-compaction": {
-      "registered_at": "2026-10-02T08:04:30Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-02T13:00:01Z",
-        "impl": {
-          "branch": "impl/develop/chemo-yen-omit"
-        }
-      }
-    },
-    "261002-feat-ws-config-adapter-schema-extension": {
-      "registered_at": "2026-10-02T08:04:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-02T13:28:18Z",
-        "impl": {
-          "branch": "impl/develop/blend-blot-lasso"
-        }
-      }
-    },
     "261003-bug-pi-packed-install-offline-cache-test": {
       "registered_at": "2026-10-03T00:30:05Z"
     },
-    "261003-feat-pi-lead-compaction-dialog-transcript": {
-      "registered_at": "2026-10-03T01:11:06Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-03T01:20:56Z",
-        "impl": {
-          "branch": "impl/develop/jinx-clear-morse"
-        }
-      }
+    "261003-research-typed-decision-model-new-domains": {
+      "registered_at": "2026-10-03T03:19:31Z"
     }
   }
 }
