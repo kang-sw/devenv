@@ -326,14 +326,22 @@ export function renderDialogItem(item: DialogItem): string {
     case "branch_summary":
       return `<branch-summary timestamp="${escapeDialogAttribute(item.timestamp)}">\n${item.text}\n</branch-summary>`;
     case "tool":
-      return `<tool-call name="${escapeDialogAttribute(item.name)}">\n→ ${item.name} ${elideMiddle(item.args, TOOL_ARGS_THRESHOLD_BYTES, TOOL_ARGS_KEEP_BYTES, " ")}${item.failed ? " ✗failed" : ""}\n</tool-call>`;
+      return `→ ${item.name} ${elideMiddle(item.args, TOOL_ARGS_THRESHOLD_BYTES, TOOL_ARGS_KEEP_BYTES, " ")}${item.failed ? " ✗failed" : ""}`;
     case "fold":
-      return `<tool-fold>\n→ (+${item.total} more: ${item.counts.map((entry) => `${entry.name}×${entry.count}`).join(", ")})\n</tool-fold>`;
+      return `→ (+${item.total} more: ${item.counts.map((entry) => `${entry.name}×${entry.count}`).join(", ")})`;
   }
 }
 
+const TOOL_GROUP_OPEN = "<tool-calls>";
+const TOOL_GROUP_CLOSE = "</tool-calls>";
+const TOOL_GROUP_BYTES = Buffer.byteLength(`${TOOL_GROUP_OPEN}\n${TOOL_GROUP_CLOSE}\n`, "utf8");
+
+function isToolFamily(item: DialogItem | undefined): boolean {
+  return item?.kind === "tool" || item?.kind === "fold";
+}
+
 export interface SelectedDialog {
-  /** Rendered kept items, oldest first. */
+  /** Rendered kept items, oldest first, before tool-run wrappers. */
   lines: string[];
   /** Every item, kept or not. */
   total: number;
@@ -343,7 +351,8 @@ export interface SelectedDialog {
 
 /**
  * Selects rendered items newest-first within `budgetBytes`, each costing its
- * rendered UTF-8 bytes plus its line break. An item that does not fit whole is
+ * rendered UTF-8 bytes plus its line break, with one wrapper charged per kept
+ * tool-family run. An item that does not fit whole is
  * dropped whole and selection stops there: the section is always a contiguous
  * newest run.
  */
@@ -352,7 +361,8 @@ export function selectDialogItems(items: readonly DialogItem[], budgetBytes: num
   let used = 0;
   for (let i = items.length - 1; i >= 0; i--) {
     const line = renderDialogItem(items[i]!);
-    const cost = Buffer.byteLength(line, "utf8") + 1;
+    const groupCost = isToolFamily(items[i]) && (lines.length === 0 || !isToolFamily(items[i + 1])) ? TOOL_GROUP_BYTES : 0;
+    const cost = Buffer.byteLength(line, "utf8") + 1 + groupCost;
     if (used + cost > budgetBytes) break;
     used += cost;
     lines.unshift(line);
@@ -364,14 +374,23 @@ export const DIALOG_SECTION_HEADING = "## Dialog";
 
 /** The whole `## Dialog` section: header, the session-file search pointer, then the kept items. */
 export function buildDialogSection(entries: readonly SessionEntry[], budgetBytes: number, sessionFile: string | undefined): string {
-  const selected = selectDialogItems(foldToolRuns(collectDialogItems(entries)), budgetBytes);
+  const items = foldToolRuns(collectDialogItems(entries));
+  const selected = selectDialogItems(items, budgetBytes);
+  const kept = items.slice(selected.omitted);
+  const lines: string[] = [];
+  for (let i = 0; i < kept.length; i++) {
+    const toolFamily = isToolFamily(kept[i]);
+    if (toolFamily && !isToolFamily(kept[i - 1])) lines.push(TOOL_GROUP_OPEN);
+    lines.push(selected.lines[i]!);
+    if (toolFamily && !isToolFamily(kept[i + 1])) lines.push(TOOL_GROUP_CLOSE);
+  }
   const header = selected.omitted > 0
     ? `The newest ${selected.lines.length} of ${selected.total} dialog items (older ones are carried by the prose below).`
     : `All ${selected.total} dialog items of this session.`;
   const search = sessionFile
     ? `Full tool output and every earlier message remain in the session file \`${sessionFile}\`; search it (for example with grep) when you need them.`
     : "This session has no session file, so tool output from before this compaction cannot be searched.";
-  return [DIALOG_SECTION_HEADING, header, search, "<dialog>", ...selected.lines, "</dialog>"].join("\n");
+  return [DIALOG_SECTION_HEADING, header, search, "<dialog>", ...lines, "</dialog>"].join("\n");
 }
 
 // ---------------------------------------------------------------------------

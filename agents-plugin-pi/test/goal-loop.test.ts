@@ -2085,7 +2085,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
         { sessionKey: "k", registry: undefined, prose: prose("PROSE"), dialogBudgetBytes: DEFAULT_DIALOG_BUDGET_BYTES, sessionFile: sm.getSessionFile(), source: "lever" },
       );
       assert.ok(!ids.includes(result.firstKeptEntryId), "the kept-tail id names no session entry");
-      assert.match(result.summary, /<dialog>\n<message role="user" timestamp=".+">\nHUMAN ASK\n<\/message>\n<message role="assistant" timestamp=".+">\nLEAD REPLY\n<\/message>\n<tool-call name="Bash">\n\u2192 Bash \{"command":"ls"\}\n<\/tool-call>\n<message role="assistant" timestamp=".+">\nLATEST REPLY\n<\/message>\n<\/dialog>/);
+      assert.match(result.summary, /<dialog>\n<message role="user" timestamp=".+">\nHUMAN ASK\n<\/message>\n<message role="assistant" timestamp=".+">\nLEAD REPLY\n<\/message>\n<tool-calls>\n\u2192 Bash \{"command":"ls"\}\n<\/tool-calls>\n<message role="assistant" timestamp=".+">\nLATEST REPLY\n<\/message>\n<\/dialog>/);
       assert.doesNotMatch(result.summary, /RAW TOOL OUTPUT/);
       assert.ok(result.summary.includes(`\`${sm.getSessionFile()}\``), "the summary names the session file to search");
 

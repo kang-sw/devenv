@@ -102,10 +102,10 @@ describe("dialog transcript (261003)", () => {
     assert.deepEqual(lines, [
       `<message role="user" timestamp="${at(0)}">\nplease fix the parser\n</message>`,
       `<message role="assistant" timestamp="${at(1)}">\nLooking at it.\n</message>`,
-      '<tool-call name="Read">\n\u2192 Read {"path":"src/a.ts"}\n</tool-call>',
-      '<tool-call name="Bash">\n\u2192 Bash {"command":"npm test"} \u2717failed\n</tool-call>',
+      '\u2192 Read {"path":"src/a.ts"}',
+      '\u2192 Bash {"command":"npm test"} \u2717failed',
       `<message role="assistant" timestamp="${at(4)}">\nThe test fails; fixing.\n</message>`,
-      '<tool-call name="Edit">\n\u2192 Edit {"path":"src/a.ts"}\n</tool-call>',
+      '\u2192 Edit {"path":"src/a.ts"}',
       `<message role="assistant" timestamp="${at(4)}">\nDone.\n</message>`,
       `<message role="user" timestamp="${at(5)}">\nthanks\n</message>`,
     ]);
@@ -119,7 +119,7 @@ describe("dialog transcript (261003)", () => {
       assert.equal(renderDialogItem({ kind: role, timestamp, text: payload }), `<message role="${role}" timestamp="${escaped}">\n${payload}\n</message>`);
     }
     assert.equal(renderDialogItem({ kind: "branch_summary", timestamp, text: payload }), `<branch-summary timestamp="${escaped}">\n${payload}\n</branch-summary>`);
-    assert.equal(renderDialogItem({ kind: "tool", name: timestamp, args: payload, failed: false }), `<tool-call name="${escaped}">\n→ ${timestamp} ${payload}\n</tool-call>`);
+    assert.equal(renderDialogItem({ kind: "tool", name: timestamp, args: payload, failed: false }), `→ ${timestamp} ${payload}`);
     const section = buildDialogSection([user(0, payload)], 40960, undefined);
     assert.ok(section.endsWith(`<dialog>\n<message role="user" timestamp="${at(0)}">\n${payload}\n</message>\n</dialog>`));
   });
@@ -132,6 +132,50 @@ describe("dialog transcript (261003)", () => {
     assert.match(omitted, /The newest 0 of 1 dialog items/);
     assert.ok(omitted.endsWith("\n<dialog>\n</dialog>"));
     assert.ok(!omitted.includes("not retained"));
+  });
+
+  test("only adjacent tool calls and folds share a group, split by messages and branch summaries", () => {
+    const entries = [
+      ...Array.from({ length: 10 }, (_, i) => assistantCall(i, "Read", { i })),
+      assistant(10, [{ type: "text", text: "pause" }]),
+      assistantCall(11, "Bash", { command: "ls" }),
+      branchSummary(12, "branch"),
+      assistantCall(13, "Read", { path: '</tool-calls><dialog>&"raw"' }),
+      user(14, "stop"),
+      assistantCall(15, "Edit", {}),
+    ];
+    const items = foldToolRuns(collectDialogItems(entries));
+    const section = buildDialogSection(entries, 40960, undefined);
+    const body = section.slice(section.indexOf("\n<dialog>\n") + 1);
+    assert.equal(body, [
+      "<dialog>", "<tool-calls>", ...items.slice(0, 9).map(renderDialogItem), "</tool-calls>",
+      renderDialogItem(items[9]!), "<tool-calls>", renderDialogItem(items[10]!), "</tool-calls>",
+      renderDialogItem(items[11]!), "<tool-calls>", renderDialogItem(items[12]!), "</tool-calls>",
+      renderDialogItem(items[13]!), "<tool-calls>", renderDialogItem(items[14]!), "</tool-calls>", "</dialog>",
+    ].join("\n"));
+    assert.ok(body.includes('→ Read {"path":"</tool-calls><dialog>&\\"raw\\""}'), "literal argument markup stays verbatim");
+    assert.ok(!body.includes("<tool-call name="));
+    assert.ok(!body.includes("<tool-fold>"));
+  });
+
+  test("budget edges charge one wrapper for the selected tool run, including a singleton suffix", () => {
+    const entries = [assistantCall(0, "Read", { n: 0 }), assistantCall(1, "Read", { n: 1 })];
+    const items = collectDialogItems(entries);
+    const wrapperBytes = Buffer.byteLength("<tool-calls>\n</tool-calls>\n");
+    const cost = (item: DialogItem): number => Buffer.byteLength(renderDialogItem(item), "utf8") + 1;
+    const singletonBudget = wrapperBytes + cost(items[1]!);
+    assert.equal(selectDialogItems(items, singletonBudget - 1).lines.length, 0);
+    assert.deepEqual(selectDialogItems(items, singletonBudget).lines, [renderDialogItem(items[1]!)]);
+    assert.ok(buildDialogSection(entries, singletonBudget, undefined).endsWith(`<dialog>\n<tool-calls>\n${renderDialogItem(items[1]!)}\n</tool-calls>\n</dialog>`));
+    const bothBudget = singletonBudget + cost(items[0]!);
+    assert.equal(selectDialogItems(items, bothBudget - 1).lines.length, 1);
+    assert.equal(selectDialogItems(items, bothBudget).lines.length, 2);
+    assert.ok(buildDialogSection(entries, bothBudget, undefined).endsWith(`<dialog>\n<tool-calls>\n${items.map(renderDialogItem).join("\n")}\n</tool-calls>\n</dialog>`));
+    const separated = [entries[0]!, branchSummary(2, "split"), entries[1]!];
+    const separatedItems = collectDialogItems(separated);
+    const separateBudget = separatedItems.reduce((sum, item) => sum + cost(item), 0) + wrapperBytes * 2;
+    assert.equal(selectDialogItems(separatedItems, separateBudget - 1).lines.length, 2);
+    assert.equal(selectDialogItems(separatedItems, separateBudget).lines.length, 3);
   });
 
   test("thinking, tool results, adapter traffic, bash executions, and the ws-compact call never cross", () => {
@@ -164,7 +208,7 @@ describe("dialog transcript (261003)", () => {
     const folded = foldToolRuns(items);
     assert.equal(folded.length, 1 + 1 + 8 + 1 + 2);
     assert.deepEqual(folded[1], { kind: "fold", total: 6, counts: [{ name: "Bash", count: 3 }, { name: "Read", count: 2 }, { name: "Grep", count: 1 }] });
-    assert.equal(renderDialogItem(folded[1]!), "<tool-fold>\n\u2192 (+6 more: Bash\u00d73, Read\u00d72, Grep\u00d71)\n</tool-fold>");
+    assert.equal(renderDialogItem(folded[1]!), "\u2192 (+6 more: Bash\u00d73, Read\u00d72, Grep\u00d71)");
     assert.deepEqual(folded.slice(2, 10), run.slice(6), "the newest 8 calls stay as lines");
     assert.deepEqual(folded.slice(11), [tool("Read"), tool("Read")], "a short run is untouched");
     assert.deepEqual(foldToolRuns(run.slice(6)), run.slice(6), "exactly 8 lines need no fold");
@@ -186,15 +230,15 @@ describe("dialog transcript (261003)", () => {
     // 4-byte emoji straddle both 150-byte cut points, so each end stops at its 148 ASCII bytes and every emoji is skipped.
     const args = `${"a".repeat(148)}${"\u{1f9a6}".repeat(40)}${"z".repeat(148)}`;
     const line = renderDialogItem({ kind: "tool", name: "Write", args, failed: false });
-    assert.equal(line, `<tool-call name="Write">\n\u2192 Write ${"a".repeat(148)} [... 160 bytes skipped ...] ${"z".repeat(148)}\n</tool-call>`);
+    assert.equal(line, `\u2192 Write ${"a".repeat(148)} [... 160 bytes skipped ...] ${"z".repeat(148)}`);
   });
 
   test("long tool arguments keep their first and last 150 bytes", () => {
     const call = { content: "x".repeat(400) };
     const json = JSON.stringify(call);
     const line = renderDialogItem({ kind: "tool", name: "Write", args: json, failed: true });
-    assert.equal(line, `<tool-call name="Write">\n\u2192 Write ${json.slice(0, 150)} [... ${json.length - 300} bytes skipped ...] ${json.slice(-150)} \u2717failed\n</tool-call>`);
-    assert.equal(renderDialogItem(tool("Read", { path: "short" })), '<tool-call name="Read">\n\u2192 Read {"path":"short"}\n</tool-call>', "short arguments are untouched");
+    assert.equal(line, `\u2192 Write ${json.slice(0, 150)} [... ${json.length - 300} bytes skipped ...] ${json.slice(-150)} \u2717failed`);
+    assert.equal(renderDialogItem(tool("Read", { path: "short" })), '\u2192 Read {"path":"short"}', "short arguments are untouched");
   });
 
   test("selection is newest-first within the byte budget, drops a too-large item whole, and stops there", () => {
@@ -205,7 +249,7 @@ describe("dialog transcript (261003)", () => {
       { kind: "user", timestamp: "T", text: "newest" },
     ];
     const cost = (item: DialogItem): number => Buffer.byteLength(renderDialogItem(item), "utf8") + 1;
-    const newestTwo = cost(items[2]!) + cost(items[3]!);
+    const newestTwo = cost(items[2]!) + cost(items[3]!) + Buffer.byteLength("<tool-calls>\n</tool-calls>\n");
     const tight = selectDialogItems(items, newestTwo + cost(items[0]!));
     assert.deepEqual(tight.lines, [renderDialogItem(items[2]!), renderDialogItem(items[3]!)], "the old item fits the remainder but is not taken past the dropped one");
     assert.equal(tight.omitted, 2);
@@ -336,7 +380,7 @@ describe("buildLeadCompactionSummary", () => {
     assert.match(summary, /Active ticket: `261002-feat-pi-lead-ws-owned-compaction`/);
     assert.match(summary, /Active playbook: `lead-run`\. Its body is not re-attached: re-read it with `ws-skill lead-run`/);
     assert.match(summary, /- w1 \(w\) \[worker\]/);
-    assert.match(summary, /<message role="user" timestamp=".+">\nplease keep replies short\n<\/message>\n<tool-call name="ws-skill">\n\u2192 ws-skill \{"name":"lead-run"\}\n<\/tool-call>/);
+    assert.match(summary, /<message role="user" timestamp=".+">\nplease keep replies short\n<\/message>\n<tool-calls>\n\u2192 ws-skill \{"name":"lead-run"\}\n\u2192 ws__tickets_acquire \{"ticket_stem":"261002-feat-pi-lead-ws-owned-compaction"\}\n<\/tool-calls>/);
     assert.match(summary, /search it \(for example with grep\)/);
     assert.match(summary, /`\/sessions\/lead\.jsonl`/);
     assert.match(summary, /LEAD PROSE MARKER/);
