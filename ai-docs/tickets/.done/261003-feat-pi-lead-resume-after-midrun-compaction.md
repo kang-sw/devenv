@@ -6,6 +6,7 @@ related:
 sage-review-design: skipped
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 01e6d69083f2dc7a
+completed: 2026-10-03
 ---
 
 # Resume the Pi lead's turn after a compaction that aborted its run mid-work
@@ -152,3 +153,23 @@ Done when:
   `hard` route too.
 - The existing no-goal test at `test/goal-loop.test.ts` ~1023-1055 is
   updated to the new contract rather than deleted.
+
+### Result (ea1fd0795) - 2026-10-03
+
+- `agents-plugin-pi/src/goal-loop.ts`:
+  - **Route record.** `sendPreparation` stores `preparationKind` beside `preparation`. It is cleared at `agent_end`, in `session_compact`, and at shutdown.
+  - **Lever copy.** The `ws-compact` lever copies the kind onto the compaction operation before `ctx.compact()`. The field is `CompactionOperation.route`, and it is `"autonomous"` when no preparation is pending.
+  - **Resume send.** `releaseAfterCompaction` sends one user-role `followUp` from `buildCompactionResumeMessage(sessionKey)`. The send comes after the idle check and the held-push flush, and only when all of these hold:
+    - the compaction did not fail;
+    - the session is not shutting down;
+    - no goal was active at lever time or at release;
+    - `resumesAfterCompaction(route)` is true, which means the route is `hard` or `autonomous`.
+- **Updated text.** The `ws-compact` description and `lead-compact-guide.md` step 3 now state the route-dependent goal-less resume.
+- **Decision:** `releaseAfterCompaction` takes an explicit `failed` flag, passed by the lever's `onError` and by `session_compact_failed`. Failure is not inferred from `failureReason`, because an aborted compaction's `session_compact_failed` carries `errorMessage: undefined`, which would otherwise read as success.
+- **Decision:** the resume uses a plain `sendUserMessage` with `deliverAs: "followUp"`, not `fireReminder`'s wake reservation and correlation. It is independent of the goal, and the ticket asks only for the idle-gated, once-per-operation release.
+- **Verification:**
+  - `npm test` in `agents-plugin-pi`: 1973 tests, 1970 pass, 0 fail, 3 skipped.
+  - The new `goal-loop.test.ts` suite "goal-less resume after a lever compaction (261003)" pins every Done-when case, plus the goal-active hard route and the description and guide text.
+  - The existing no-goal test now expects exactly one resume.
+  - Mutation checks fail the expected tests: resuming on every route fails the advisory and reroute cases, and dropping `failed` from `session_compact_failed` fails the failed-event case.
+- **Review:** one lite pass came back clean.
