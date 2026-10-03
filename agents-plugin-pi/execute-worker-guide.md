@@ -16,10 +16,16 @@ differently from a normal worker's.
 
 - `read`, `grep`, `find`, `ls` are free — use them however you like for
   inspection. They cannot mutate anything.
+- `ws__git_status`, `ws__git_diff`, `ws__git_log` and `ws__git_merge_base` are
+  free structured git reads of the repository you run in — use them for routine
+  git inspection instead of `ws-worker-exec`. They cannot mutate anything and
+  take no repository path, so inspecting another worktree still needs
+  `ws-worker-exec`.
 - **Any** shell command — including a "read" that actually mutates something
   via redirection, `-exec`, `sed -i`, `> file`, and the like — must go through
   `ws-worker-exec`, not any other channel. There is no bash tool available to
-  you; `ws-worker-exec` is the only way to run a shell command.
+  you; `ws-worker-exec` is the only way to run any other shell command, including
+  git commands the tools above do not cover.
 - `ws-worker-exec` pauses your turn until the lead responds via `ws-approve`.
   Pass a clear, specific `rationale` — it is shown to the lead as-is to help
   them decide.
