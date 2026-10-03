@@ -60,13 +60,16 @@ test('packed install/update carries the pinned search license and resolves host 
   mkdirSync(cloneRoot);
   const rootDependencies = JSON.parse(readFileSync(join(packageRoot, '..', 'package.json'), 'utf8')).dependencies;
   writeFileSync(join(cloneRoot, 'package.json'), JSON.stringify({ private: true, dependencies: rootDependencies }));
-  // A real `pi install git:...` clone carries the repo-root package-lock.json,
-  // so versions (including transitive ones like undici) come from that lockfile,
-  // which the local npm cache satisfies. Re-resolving ranges instead would drift
-  // with the cached packument and hit ENOTCACHED for uncached newer tarballs.
-  cpSync(join(packageRoot, '..', 'package-lock.json'), join(cloneRoot, 'package-lock.json'));
+  // Pin versions from the tracked agents-plugin-pi/package-lock.json, whose
+  // runtime dependencies the root manifest mirrors (bump-ws-version.sh). The
+  // repo-root package-lock.json is gitignored, so a real clone has none; the
+  // pin is for offline determinism: re-resolving ranges against the cached
+  // packument would drift to newer transitive versions (e.g. undici) whose
+  // tarballs are not cached and fail with ENOTCACHED.
+  const trackedLock = join(packageRoot, 'package-lock.json');
+  cpSync(trackedLock, join(cloneRoot, 'package-lock.json'));
   run('npm', ['install', '--offline', '--ignore-scripts', '--legacy-peer-deps', '--no-audit', '--no-fund'], cloneRoot);
-  assert.equal(JSON.parse(readFileSync(join(cloneRoot, 'node_modules', 'undici', 'package.json'), 'utf8')).version, JSON.parse(readFileSync(join(packageRoot, '..', 'package-lock.json'), 'utf8')).packages['node_modules/undici'].version, 'clone install honors the root lockfile');
+  assert.equal(JSON.parse(readFileSync(join(cloneRoot, 'node_modules', 'undici', 'package.json'), 'utf8')).version, JSON.parse(readFileSync(trackedLock, 'utf8')).packages['node_modules/undici'].version, 'clone install honors the tracked lockfile');
   const extDir = join(cloneRoot, 'agents-plugin-pi');
   mkdirSync(join(extDir, 'src'), { recursive: true });
   cpSync(join(packageRoot, 'src', 'web-search-helper.mjs'), join(extDir, 'src', 'web-search-helper.mjs'));
