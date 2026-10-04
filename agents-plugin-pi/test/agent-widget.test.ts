@@ -159,7 +159,7 @@ describe("detailed propagated rows", () => {
     const row = buildAgentRows(registryOf(remote(detail())), [], NOW)[0];
     const full = buildWidgetLines([row], 0, 200)![0];
     assert.match(full, /42t\/s/);
-    const withoutTps = full.replace(" · 42t/s", "");
+    const withoutTps = full.replace(", 42t/s", "");
     assert.equal(buildWidgetLines([row], 0, visibleWidth(withoutTps))![0], withoutTps);
     for (let width = 0; width <= visibleWidth(full); width++) {
       const line = buildWidgetLines([row], 0, width)![0];
@@ -386,9 +386,9 @@ describe("buildWidgetLines", () => {
       ],
     });
     const lines = buildWidgetLines(buildAgentRows(registryOf(parent), [], NOW), 0, 120)!;
-    assert.match(lines[0], /^· parent00 · worker · running/);
-    assert.equal(lines[1], "│ · child000 · explore · running");
-    assert.equal(lines[2], "│ │ · grand000 · worker · running");
+    assert.match(lines[0], /^· parent00 · running/);
+    assert.equal(lines[1], "│ · child000 · running");
+    assert.equal(lines[2], "│ │ · grand000 · running");
     assert.ok(lines.every((line) => !line.includes("dormant")));
     assert.ok(lines.slice(1).every((line) => !line.includes("0s") && !line.includes("$—")), "propagated rows expose liveness only, not fabricated clocks or telemetry");
     for (const width of [0, 1, 2, 3, 4, 8, 20]) {
@@ -441,12 +441,12 @@ describe("buildWidgetLines", () => {
     const semanticCalls: Array<[string, string]> = [];
     const theme = { fg(color: "error" | "warning" | "accent" | "dim" | "syntaxNumber", text: string) { semanticCalls.push([color, text]); return text; } };
     const animated = buildWidgetLines([question, approval], 1, 180, true, theme)!;
-    assert.equal(animated[0], "● [1m⚠ OWNER ACTION · /answer q7[22m · fork · awaiting owner · 3s (3s) · test-model (high) · 0.0k · $0.1");
-    assert.equal(animated[1], "▲ awaiting approval audit · execute · awaiting approval · 3s (3s) · test-model (high) · 0.0k · $0.1");
+    assert.equal(animated[0], "● [1m⚠ OWNER ACTION · /answer q7[22m · awaiting owner · 3s (3s) · test-model (high) · 0.0k · $0.1");
+    assert.equal(animated[1], "▲ awaiting approval audit · awaiting approval · 3s (3s) · test-model (high) · 0.0k · $0.1");
     assert.ok(semanticCalls.some(([color, text]) => color === "error" && text === "● "), "the owner-held bullet participates in the current attention-cycle color, same as the cue text");
     assert.ok(semanticCalls.some(([color, text]) => color === "error" && text === "⚠ OWNER ACTION · /answer q7"), "the owner cue text uses the identical color");
     assert.ok(semanticCalls.some(([color, text]) => color === "error" && text === "▲ "), "the approval bullet is colored too, but statically (STATE_BULLET_COLOR), never bold, never joining the attention cycle");
-    assert.ok(!animated[0].slice(animated[0].indexOf(" · fork")).includes("[1m"), "role, elapsed, telemetry, and separators stay plain");
+    assert.ok(!animated[0].slice(animated[0].indexOf(" · awaiting owner")).includes("[1m"), "state, elapsed, telemetry, and separators stay plain");
     assert.ok(!animated[1].includes("[1m"), "approval remains entirely ordinary even beside an animated question");
   });
 
@@ -461,7 +461,7 @@ describe("buildWidgetLines", () => {
   test("an owner-held row without qN receives an honest labeled inspection presentation", () => {
     const row = { name: "parked reviewer", role: "fork" as const, state: "idle-awaiting-owner" as const, elapsedMs: 3_000, lastActivityMs: 3_000, inspectionHint: "/audit reviewer" };
     const line = buildWidgetLines([row], 0, 120, true)![0];
-    assert.equal(line, "● [1m⚠ OWNER ACTION · parked reviewer[22m · fork · idle awaiting owner · 3s (3s) · — (—) · ? · $— — /audit reviewer");
+    assert.equal(line, "● [1m⚠ OWNER ACTION · parked reviewer[22m · idle awaiting owner · 3s (3s) · — (—) · ? · $— — /audit reviewer");
     assert.ok(!line.includes("/answer"), "presentation never fabricates an answer target for an owner-held idle row");
   });
 
@@ -499,7 +499,7 @@ describe("buildWidgetLines", () => {
     assert.match(compactLine, /0s \(0s\).*p \(l\).*132\.4k.*\$0.123/);
     assert.ok(!compactLine.includes("ctx "), "a populated contextTokens keeps its value but not its prefix on the row");
 
-    for (const [width, includesTelemetry] of [[58, true], [57, false]] as const) {
+    for (const [width, includesTelemetry] of [[49, true], [48, false]] as const) {
       const boundaryPlain = buildWidgetLines([compact], 0, width)![0];
       assert.equal(boundaryPlain.includes("132.4k"), includesTelemetry, `plain telemetry is all-or-nothing at width=${width}`);
       assert.ok(!boundaryPlain.includes("ctx "), `plain boundary output has no ctx prefix at width=${width}`);
@@ -535,7 +535,7 @@ describe("buildWidgetLines", () => {
     const row = { name: "gutter-probe", role: "worker" as const, state: "running" as const,
       elapsedMs: 60_000, lastActivityMs: 25_000, model: "gpt-5.6-luna", effort: "high",
       contextTokens: 17_000, estimatedUsd: .33 };
-    const expected = "· gutter-probe · worker · running · 1m (25s) · gpt-5.6-luna (high) · 17.0k · $0.33";
+    const expected = "· gutter-probe · running · 1m (25s) · gpt-5.6-luna (high) · 17.0k · $0.33";
     assert.equal(buildWidgetLines([row], 0, 180)![0], expected);
     const spans: Array<[string, string]> = [];
     const theme = { fg(color: string, text: string) {
@@ -598,7 +598,7 @@ describe("buildWidgetLines", () => {
     const delivery = { name: "delivery", role: "worker" as const, state: "pending-delivery" as const, elapsedMs: 4_000, lastActivityMs: 4_000 };
     const lines = buildWidgetLines([parent, child, delivery, runningRow(3, "r3"), runningRow(2, "r2"), runningRow(1, "r1")], 0, 80)!;
     assert.match(lines[0], /parent/);
-    assert.match(lines[1], /^│ · child · worker · running$/, "the visible child stays immediately below its parent");
+    assert.match(lines[1], /^│ · child · running$/, "the visible child stays immediately below its parent");
     assert.match(lines[2], /delivery/);
     assert.equal(lines.at(-1), "+1 more");
   });
@@ -868,25 +868,65 @@ describe("shouldArmAgentWidget (review relay #1 Important #5: the wiring gate in
   });
 });
 
-describe("output TPS gutter segment", () => {
+describe("output TPS duration field", () => {
   const compact = { name: "a", role: "worker" as const, state: "running" as const, elapsedMs: 0, lastActivityMs: 0, model: "p", effort: "l", contextTokens: 132_400, estimatedUsd: .123456789 };
 
-  test("sits right after model (effort) as an integer with no tilde", () => {
-    const line = buildWidgetLines([{ ...compact, outputTps: 41.6 }], 0, 120)![0];
-    assert.match(line, / · p \(l\) · 42t\/s · 132\.4k · \$0\.123$/);
+  test("sits beside activity inside duration parentheses as an integer with no tilde", () => {
+    const line = buildWidgetLines([{ ...compact, elapsedMs: 20_000, outputTps: 60.6 }], 0, 120)![0];
+    assert.equal(line, "· a · running · 20s (0s, 61t/s) · p (l) · 132.4k · $0.123");
+    assert.equal(line.match(/61t\/s/g)?.length, 1);
     assert.ok(!line.includes("~"));
+  });
+
+  test("all internal roles render identically across states and local, detailed, and liveness-only rows", () => {
+    for (const state of Object.keys(AGENT_STATE_BULLET) as AgentRowState[]) {
+      for (const depth of [undefined, 1, 2]) {
+        for (const livenessOnly of [undefined, true] as const) {
+          const row = { ...compact, state, depth, livenessOnly, outputTps: 42 };
+          const expected = buildWidgetLines([row], 0, 200)![0];
+          for (const role of ["worker", "execute", "fork", "explore", "thread"] as const) {
+            assert.equal(buildWidgetLines([{ ...row, role }], 0, 200)![0], expected);
+          }
+          assert.doesNotMatch(expected, / · (worker|execute|fork|explore|thread) · /);
+        }
+      }
+    }
+  });
+
+  test("TPS styling and narrow degradation preserve the plain row and protected cues", () => {
+    const spans: Array<[string, string]> = [];
+    const theme = { fg(color: string, text: string) {
+      spans.push([color, text]);
+      return `\u001b[36m${text}\u001b[39m`;
+    } };
+    for (const row of [
+      { ...compact, outputTps: 42, depth: 2 },
+      { ...compact, outputTps: 42, inspectionHint: "/audit x" },
+      { ...compact, outputTps: 42, state: "awaiting-owner" as const, answerHint: "/answer q7" },
+    ]) {
+      const full = buildWidgetLines([row], 0, 200)![0];
+      for (let width = 0; width <= visibleWidth(full); width++) {
+        const plain = buildWidgetLines([row], 0, width)![0];
+        const styled = buildWidgetLines([row], 0, width, false, theme)![0];
+        assert.equal(styled.replace(/\u001b\[[0-9;]*m/g, ""), plain);
+        assert.ok(visibleWidth(styled) <= width);
+        assert.doesNotMatch(plain, /\(\d+s, \)/);
+      }
+    }
+    assert.ok(spans.some(([color, text]) => color === "syntaxNumber" && text === "42t/s"));
   });
 
   test("is absent before the first eligible message", () => {
     const line = buildWidgetLines([compact], 0, 120)![0];
     assert.ok(!line.includes("t/s"));
+    assert.match(line, /0s \(0s\)/);
     assert.match(line, / · p \(l\) · 132\.4k · \$0\.123$/);
   });
 
   test("is dropped first when narrow; the rest of the group then follows the all-or-nothing rule", () => {
     const row = { ...compact, outputTps: 42 };
-    // 58 columns fit the group without TPS (see the telemetry boundary test); " · 42t/s" adds 8.
-    for (const [width, tps, group] of [[66, true, true], [65, false, true], [58, false, true], [57, false, false]] as const) {
+    // 49 columns fit the group without TPS; ", 42t/s" adds 7.
+    for (const [width, tps, group] of [[56, true, true], [55, false, true], [49, false, true], [48, false, false]] as const) {
       for (const theme of [undefined, { fg: (_color: string, text: string) => `\u001b[38;5;1m${text}\u001b[39m` }]) {
         const line = buildWidgetLines([row], 0, width, false, theme)![0];
         const plainLine = line.replace(/\u001b\[[0-9;]*m/g, "");
@@ -899,8 +939,8 @@ describe("output TPS gutter segment", () => {
 
   test("with a protected inspection hint, TPS is still dropped first within the width left after the hint", () => {
     const row = { ...compact, outputTps: 42, inspectionHint: "/audit x" };
-    // The hint " — /audit x" reserves 11 columns, shifting the unhinted 66/65/58/57 boundaries.
-    for (const [width, tps, group] of [[77, true, true], [76, false, true], [69, false, true], [68, false, false]] as const) {
+    // The hint " — /audit x" reserves 11 columns, shifting the unhinted boundaries.
+    for (const [width, tps, group] of [[67, true, true], [66, false, true], [60, false, true], [59, false, false]] as const) {
       for (const theme of [undefined, { fg: (_color: string, text: string) => `\u001b[38;5;1m${text}\u001b[39m` }]) {
         const line = buildWidgetLines([row], 0, width, false, theme)![0];
         const plainLine = line.replace(/\u001b\[[0-9;]*m/g, "");

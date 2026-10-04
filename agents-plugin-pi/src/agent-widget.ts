@@ -289,8 +289,8 @@ function clampElapsed(deltaMs: number): number {
  * record's `/answer <id>` hint and `touchedAt`-based elapsed follow the
  * `awaiting-owner` STATE and apply whenever a matching live thread is found,
  * regardless of `origin` — a fork-raised (Entry A) respondent owes the owner
- * an answer exactly as much as a lead-ask (Entry B) one does. Only the ROLE
- * LABEL stays origin-dependent: `"thread"` renders only for a `lead-ask`
+ * an answer exactly as much as a lead-ask (Entry B) one does. Only the internal ROLE
+ * stays origin-dependent: `"thread"` applies only for a `lead-ask`
  * match (the ticket's Entry-B-only role override); a fork-raised match keeps
  * the record's own `spawnRole` label (typically `"fork"`).
  *
@@ -422,7 +422,7 @@ export function formatCompactDuration(elapsedMs: number): string {
   return `${hours}h${String(minutes).padStart(2, "0")}m`;
 }
 
-/** Formats role/state/elapsed rows; answer-capable owner rows lead with their valid `/answer qN` cue. */
+/** Answer-capable owner rows lead with their valid `/answer qN` cue. */
 function isAttentionState(state: AgentRowState): boolean {
   // Approval waits remain actionable lead-agent work through `ws-approve`, not
   // owner work. Only owner-held `/answer` paths receive the loud cue.
@@ -510,11 +510,11 @@ function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, ownerActio
       : row.name;
   const stateLabel = AGENT_STATE_LABEL[row.state];
   if (row.livenessOnly) {
-    return gutter.text + bullet.text + truncateToWidth(`${primary} · ${row.role} · ${stateLabel}`, bodyWidth);
+    return gutter.text + bullet.text + truncateToWidth(`${primary} · ${stateLabel}`, bodyWidth);
   }
-  const durationPrefix = `${primary} · ${row.role} · ${stateLabel} · ${formatCompactDuration(row.elapsedMs)} (`;
+  const durationPrefix = `${primary} · ${stateLabel} · ${formatCompactDuration(row.elapsedMs)} (`;
   const activity = formatCompactDuration(row.lastActivityMs);
-  const base = `${durationPrefix}${activity})`;
+  const baseWithoutTps = `${durationPrefix}${activity})`;
   const model = row.model ?? "—";
   const effort = row.effort ?? "—";
   // Keep the compact occupancy value in its established telemetry slot while
@@ -522,28 +522,28 @@ function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, ownerActio
   const contextTokens = formatLiveContextTokens(row.contextTokens);
   const estimate = `$${formatEstimatedUsd(row.estimatedUsd)}`;
   const tps = row.outputTps !== undefined ? formatOutputRate(row.outputTps) : undefined;
-  const telemetryWithoutTps = ` · ${model} (${effort}) · ${contextTokens} · ${estimate}`;
-  const telemetryWithTps = tps === undefined ? telemetryWithoutTps : ` · ${model} (${effort}) · ${tps} · ${contextTokens} · ${estimate}`;
-  // The TPS segment is dropped first; only then does the all-or-nothing rule
+  const baseWithTps = tps === undefined ? baseWithoutTps : `${durationPrefix}${activity}, ${tps})`;
+  const telemetry = ` · ${model} (${effort}) · ${contextTokens} · ${estimate}`;
+  // Drop TPS from the duration first; only then does the all-or-nothing rule
   // for the remaining telemetry group apply.
-  const pickTelemetry = (available: number) => visibleWidth(base + telemetryWithTps) <= available ? telemetryWithTps : telemetryWithoutTps;
+  const pickBase = (available: number) => visibleWidth(baseWithTps + telemetry) <= available ? baseWithTps : baseWithoutTps;
   const protectedHint = row.inspectionHint;
   const hint = protectedHint ? ` — ${protectedHint}` : "";
   // A supplied inspection affordance remains the only protected tail. The
   // valid owner-answer command is protected inside the leading primary cue.
   let line: string;
-  let telemetry: string;
+  let base: string;
   let appendedHint = false;
   let appendedTelemetry = false;
   if (protectedHint && visibleWidth(hint) <= bodyWidth) {
     const available = bodyWidth - visibleWidth(hint);
-    telemetry = pickTelemetry(available);
+    base = pickBase(available);
     const withTelemetry = base + telemetry;
     appendedTelemetry = visibleWidth(withTelemetry) <= available;
     line = appendedTelemetry ? withTelemetry + hint : (row.answerHint ? truncateWithProtectedPrimary(primary, base, available) : truncateToWidth(base, available)) + hint;
     appendedHint = true;
   } else {
-    telemetry = pickTelemetry(bodyWidth);
+    base = pickBase(bodyWidth);
     appendedTelemetry = visibleWidth(base + telemetry) <= bodyWidth;
     line = appendedTelemetry ? base + telemetry : row.answerHint ? truncateWithProtectedPrimary(primary, base, bodyWidth) : truncateToWidth(base, bodyWidth);
   }
@@ -556,12 +556,15 @@ function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, ownerActio
       theme.fg("dim", " · ") +
       theme.fg("accent", model) +
       theme.fg("dim", ` (${effort})`) +
-      (telemetry === telemetryWithTps && tps !== undefined ? theme.fg("dim", " · ") + theme.fg("syntaxNumber", tps) : "") +
       theme.fg("dim", " · ") +
       theme.fg("syntaxNumber", contextTokens) +
       theme.fg("dim", " · ") +
       theme.fg("warning", estimate);
     content = base + styledTelemetry;
+  }
+  if (theme && base === baseWithTps && tps !== undefined && appendedTelemetry) {
+    const rateStart = durationPrefix.length + activity.length + 2;
+    content = content.slice(0, rateStart) + theme.fg("syntaxNumber", tps) + content.slice(rateStart + tps.length);
   }
   // Style only the surviving activity value, after plain-text truncation.
   // It now belongs to the duration field even when telemetry does not fit.
@@ -573,7 +576,7 @@ function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, ownerActio
   }
   if (ownerActionColor && ownerAction && content.length > 0) {
     // The owner-action identity/cue is the first structured field. It stays
-    // bold in every color phase; role, state, separators, and telemetry retain
+    // bold in every color phase; state, separators, and telemetry retain
     // their existing semantic styling. Styling after truncation avoids partial
     // escape sequences at narrow widths.
     const cueEnd = Math.min(content.length, primary.length);
