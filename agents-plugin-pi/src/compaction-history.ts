@@ -55,9 +55,9 @@ export function registerCompactionHistory(pi: ExtensionAPI): void {
     const container = new Container();
     container.addChild(new Text(`${theme.fg("muted", "Previous conversation · display-only")}\n${theme.fg("dim", "────────────────────")}`, 0, 1));
     const markdownTheme = getMarkdownTheme();
-    for (const message of data.messages) {
+    for (const [index, message] of data.messages.entries()) {
       const isUser = message.role === "user";
-      container.addChild(new Text(theme.fg("accent", isUser ? "User" : "Assistant"), 0, 0));
+      if (!isUser) container.addChild(new Text(theme.fg("accent", "Assistant"), 0, 0));
       // Match native user Markdown padding/styles, but never its OSC navigation
       // markers. Strip terminal controls only at display time; storage stays raw.
       container.addChild(new Markdown(stripTerminalSequences(message.text), 1, 1, markdownTheme,
@@ -66,6 +66,11 @@ export function registerCompactionHistory(pi: ExtensionAPI): void {
           bgColor: (text) => theme.bg("userMessageBg", text),
         } : undefined,
         isUser ? { preserveOrderedListMarkers: true, preserveBackslashEscapes: true } : undefined));
+      // Header/footer and assistant Markdown already supply outside padding.
+      // Between messages, one plain row after a user also pads the next user.
+      if (isUser && index < data.messages.length - 1) {
+        container.addChild({ render: () => [""], invalidate() {} });
+      }
     }
     container.addChild(new Text(theme.fg("dim", "──────────────────── End previous conversation"), 0, 1));
     return container;

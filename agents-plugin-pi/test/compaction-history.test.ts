@@ -204,6 +204,53 @@ test("installed manual compaction with identical summaries reports an old id but
   }
 });
 
+test("renderer gives user blocks exactly one colored inner and plain outer row at every boundary", async () => {
+  const themeModule = await import(new URL("./modes/interactive/theme/theme.js", import.meta.resolve("@earendil-works/pi-coding-agent")).href);
+  themeModule.initTheme();
+  const bg = "\u001b[48;5;123m";
+  const theme = {
+    fg: (_color: string, text: string) => text,
+    bg: (color: string, text: string) => { assert.equal(color, "userMessageBg"); return `${bg}${text}\u001b[49m`; },
+  } as never;
+  for (const roles of [["user"], ["user", "user"], ["user", "assistant"], ["assistant", "user"], ["assistant", "user", "assistant"], ["user", "assistant", "user"]]) {
+    const f = fixture();
+    await f.handlers.get("session_start")!({}, f.ctx);
+    for (const role of roles) {
+      if (role === "user") user(f.sm, "first user line wraps across narrow columns\n\nlast user line also wraps");
+      else assistant(f.sm, [{ type: "text", text: "assistant body" }]);
+    }
+    f.compact();
+    for (const width of [12, 80]) {
+      const component = f.renderer()(f.blocks()[0], { expanded: false }, theme)!;
+      const lines = component.render(width);
+      const plain = lines.map((line) => stripTerminalSequences(line).trim());
+      const colored = lines.map((line) => line.includes(bg));
+      assert.ok(!plain.includes("User"));
+      assert.equal(plain.filter((line) => line === "Assistant").length, roles.filter((role) => role === "assistant").length);
+      const starts = colored.flatMap((color, i) => color && !colored[i - 1] ? [i] : []);
+      assert.equal(starts.length, roles.filter((role) => role === "user").length);
+      for (const start of starts) {
+        let end = start;
+        while (colored[end + 1]) end++;
+        const block = lines.slice(start, end + 1);
+        assert.ok(block.every((line) => visibleWidth(line) === width), "full-width background on wrapped/multiline bodies and padding");
+        assert.equal(plain[start], "", "colored top row");
+        assert.notEqual(plain[start + 1], "", "exactly one colored top row");
+        assert.equal(plain[end], "", "colored bottom row");
+        assert.notEqual(plain[end - 1], "", "exactly one colored bottom row");
+        for (const outside of [start - 1, end + 1]) {
+          assert.equal(plain[outside], "", "plain outside row");
+          assert.equal(colored[outside], false, "outside row is not user background");
+        }
+        assert.ok(colored[start - 2] || plain[start - 2] !== "", "no duplicated outside top row");
+        assert.ok(colored[end + 2] || plain[end + 2] !== "", "no duplicated outside bottom row");
+      }
+      component.invalidate();
+      assert.deepEqual(component.render(width), lines);
+    }
+  }
+});
+
 test("renderer uses native Markdown, user styling and preservation without navigation controls", async () => {
   const themeModule = await import(new URL("./modes/interactive/theme/theme.js", import.meta.resolve("@earendil-works/pi-coding-agent")).href);
   themeModule.initTheme();
@@ -235,9 +282,12 @@ test("renderer uses native Markdown, user styling and preservation without navig
       assert.match(text, /assistant code/);
       assert.match(text, /reply colored/);
       assert.match(text, /End previous conversation/);
-      const userStart = lines.findIndex((line) => stripTerminalSequences(line).trim() === "User");
+      assert.doesNotMatch(text, /^User$/m, "user has no label");
+      const userStart = lines.findIndex((line) => line.includes("\u001b[48;5;123m"));
       const assistantStart = lines.findIndex((line) => stripTerminalSequences(line).trim() === "Assistant");
-      const userLines = lines.slice(userStart + 1, assistantStart);
+      const userLines = lines.slice(userStart, assistantStart - 1);
+      assert.equal(stripTerminalSequences(lines[assistantStart - 1]!).trim(), "", "outside bottom spacer");
+      assert.ok(!lines[assistantStart - 1]!.includes("\u001b[48;5;123m"));
       assert.ok(userLines.every((line) => line.includes("\u001b[48;5;123m")), "user background covers body and padding");
       assert.ok(userLines.every((line) => visibleWidth(line) === width), "user block fills terminal width");
       assert.ok(lines.slice(assistantStart).every((line) => !line.includes("\u001b[48;5;123m")), "assistant has no user background");
