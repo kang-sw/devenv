@@ -524,7 +524,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-04T12:54:37Z"
+        "touched_at": "2026-10-04T12:55:37Z",
+        "impl": {
+          "branch": "impl/develop/cleft-finer-yarn"
+        }
       }
     },
     "261004-feat-pi-explicit-post-compaction-continuation": {
