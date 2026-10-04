@@ -430,38 +430,41 @@ describe("buildLeadCompactionSummary", () => {
 });
 
 describe("preparation and fallback text", () => {
-  test("each trigger leads the guide body; the reroute carries the /compact focus text", () => {
+  test("the advisory is informational and excludes active discussion and awaited human input", () => {
+    const message = buildPreparationMessage({ kind: "advisory", percent: 51.4, threshold: 50, hardPercent: 80 }, "GUIDE BODY");
+    assert.match(message, /^Context usage is 51% of the window \(advisory point: 50%\)/);
+    assert.match(message, /informational nudge, not a task or an instruction to compact\./);
+    assert.match(message, /Do not compact autonomously in response to this advisory during active\s+discussion with the human or while awaiting a human answer or clarification\./);
+    assert.match(message, /A natural pause after asking the human a question is not permission to compact\./);
+    assert.match(message, /Continue the interactive exchange instead of treating this nudge as the next task\./);
+  });
+
+  test("quiet advisory examples require both human-interaction conditions to be absent", () => {
+    const message = buildPreparationMessage({ kind: "advisory", percent: 55, threshold: 40, hardPercent: 70 }, "GUIDE BODY");
+    assert.match(message, /Only when neither condition is present, consider compacting at a quiet point\s+such as waiting only on background agents, or when work just landed and the\s+next work is weakly related to the current context\./);
+    assert.match(message, /If you are mid-task or\s+holding context that would be costly to rebuild/);
+    assert.match(message, /hard point \(70%\), where compaction is no longer optional\./);
+    assert.match(message, /end this advisory turn without replying\./);
+    assert.match(message, /The guide below applies only after you decide to compact at a safe boundary\.\n\nGUIDE BODY$/);
+  });
+
+  test("hard and manual triggers keep their imperative heads and verbatim guide", () => {
     const guide = "GUIDE BODY";
-    assert.equal(
-      buildPreparationMessage({ kind: "advisory", percent: 51.4, threshold: 50, hardPercent: 80 }, guide),
-      [
-        "Context usage is 51% of the window (advisory point: 50%). This is a light",
-        "nudge, not an instruction to stop.",
-        "",
-        "Consider compacting now if this is a quiet point \u2014 for example, you are only",
-        "waiting on background agents, or a piece of work just landed and what comes",
-        "next is weakly related to what you are holding. If you are mid-task or holding",
-        "context that would be costly to rebuild (an unsettled discussion, a",
-        "half-applied change, a diagnosis in progress), keep going and compact at the",
-        "next quiet point instead. You will not be nudged again before the hard point",
-        "(80%), where compaction is no longer optional.",
-        "",
-        "If you decide not to compact now, end this turn without replying. If you do,",
-        "follow the guide below.",
-        "",
-        "GUIDE BODY",
-      ].join("\n"),
-    );
-    assert.match(buildPreparationMessage({ kind: "hard", percent: 80, threshold: 80 }, guide), /^Context usage is 80% .*hard compaction point \(80%\)\. Stop the current work now[\s\S]*GUIDE BODY$/);
-    const reroute = buildPreparationMessage({ kind: "reroute", focus: "  keep the API notes  " }, guide);
-    assert.match(reroute, /^The user ran \/compact/);
-    assert.match(reroute, /focus text, to honor in your prose:\nkeep the API notes\n\nGUIDE BODY$/);
-    assert.doesNotMatch(buildPreparationMessage({ kind: "reroute" }, guide), /focus text/);
+    assert.equal(buildPreparationMessage({ kind: "hard", percent: 80, threshold: 80 }, guide), "Context usage is 80% of the window, past the hard compaction point (80%). Stop the current work now and prepare for compaction with the guide below before anything else.\n\nGUIDE BODY");
+    const manualHead = "The user ran /compact; the adapter cancelled Pi's native compaction so you can prepare it. Prepare for compaction now with the guide below.";
+    assert.equal(buildPreparationMessage({ kind: "reroute", focus: "  keep the API notes  " }, guide), `${manualHead}\nThe user's /compact focus text, to honor in your prose:\nkeep the API notes\n\nGUIDE BODY`);
+    assert.equal(buildPreparationMessage({ kind: "reroute" }, guide), `${manualHead}\n\nGUIDE BODY`);
   });
 
   test("the packaged guide is read fresh and ends with the lever call; a missing file falls back", () => {
     const guide = readLeadCompactGuide(new URL("../lead-compact-guide.md", import.meta.url).pathname);
     assert.match(guide, /^# Preparing for compaction/);
+    assert.match(guide, /preparation below applies only after a decision to compact: at the hard\s+point, for the user's `\/compact`, or at a safe advisory boundary\./);
+    assert.match(guide, /An advisory\s+is informational, not a task or an instruction to compact\./);
+    assert.match(guide, /both no active discussion with the human and no\s+human answer or clarification being awaited/);
+    assert.match(guide, /a pause after asking a question\s+is not permission/);
+    assert.match(guide, /continue the interactive exchange rather than\s+start preparation/);
+    assert.match(guide, /Do these in order, without starting new work in between:/);
     assert.match(guide, /Call `ws-compact`/);
     assert.match(readLeadCompactGuide("/nonexistent/guide.md"), /ws-compact/);
   });
