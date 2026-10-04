@@ -141,8 +141,7 @@ func TestDeriveLengthBound(t *testing.T) {
 	}
 }
 
-// TestDeriveShortSubPoolCount pins the collision-space claim: exactly 1476 of
-// the 7772 embedded words are <=5 characters.
+// TestDeriveFull pins full-pool selection while preserving short-pool output.
 func TestDeriveFull(t *testing.T) {
 	const want = "headless-routine-remodeler-passage"
 	for i := 0; i < 2; i++ {
@@ -175,6 +174,8 @@ func TestDeriveFull(t *testing.T) {
 	}
 }
 
+// TestDeriveShortSubPoolCount pins the collision-space claim: exactly 1476 of
+// the 7772 embedded words are <=5 characters.
 func TestDeriveShortSubPoolCount(t *testing.T) {
 	var count int
 	for _, w := range Words() {
