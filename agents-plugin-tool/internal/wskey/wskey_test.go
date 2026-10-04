@@ -2,6 +2,7 @@ package wskey
 
 import (
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -142,6 +143,38 @@ func TestDeriveLengthBound(t *testing.T) {
 
 // TestDeriveShortSubPoolCount pins the collision-space claim: exactly 1476 of
 // the 7772 embedded words are <=5 characters.
+func TestDeriveFull(t *testing.T) {
+	const want = "headless-routine-remodeler-passage"
+	for i := 0; i < 2; i++ {
+		if got := DeriveFull("amber-tide-fox", 4); got != want {
+			t.Fatalf("DeriveFull() = %q, want %q", got, want)
+		}
+	}
+	pool := make(map[string]bool)
+	for _, word := range Words() {
+		pool[word] = true
+		if len(word) > 9 {
+			t.Fatalf("word %q exceeds reply-ID word length bound", word)
+		}
+	}
+	for _, seed := range []string{"amber-tide-fox", "other-session-key", "260900-feat-x"} {
+		key := DeriveFull(seed, 4)
+		words := strings.Split(key, "-")
+		if len(words) != 4 || len(strings.Join(words, "")) > 36 {
+			t.Fatalf("DeriveFull(%q) = %q violates four-word/36-letter bound", seed, key)
+		}
+		for _, word := range words {
+			if !pool[word] {
+				t.Fatalf("derived word %q is not in full pool", word)
+			}
+		}
+	}
+	// The pinned vector includes >5-letter words; using the short pool cannot pass.
+	if got := Derive("amber-tide-fox", 3); got != "bash-blunt-tamer" {
+		t.Fatalf("existing Derive output changed: %q", got)
+	}
+}
+
 func TestDeriveShortSubPoolCount(t *testing.T) {
 	var count int
 	for _, w := range Words() {

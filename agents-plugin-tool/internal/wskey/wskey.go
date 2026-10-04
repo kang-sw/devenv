@@ -76,11 +76,22 @@ func Generate() (string, error) {
 // not randomized and draws only from the short sub-pool to bound output
 // length. The key format is opaque to callers; do not parse it.
 func Derive(seed string, words int) string {
+	return deriveFromPool(seed, words, shortWordPool)
+}
+
+// DeriveFull uses the same deterministic selection as Derive, but draws from
+// the full embedded word pool. The result is a hyphen-separated word chain;
+// callers own formatting and collision policy.
+func DeriveFull(seed string, words int) string {
+	return deriveFromPool(seed, words, wordPool)
+}
+
+func deriveFromPool(seed string, words int, pool []string) string {
 	picks := make([]string, words)
 	for i := range picks {
 		digest := sha256.Sum256([]byte(fmt.Sprintf("%s#%d", seed, i)))
-		idx := binary.BigEndian.Uint64(digest[:8]) % uint64(len(shortWordPool))
-		picks[i] = shortWordPool[idx]
+		idx := binary.BigEndian.Uint64(digest[:8]) % uint64(len(pool))
+		picks[i] = pool[idx]
 	}
 	return strings.Join(picks, "-")
 }
