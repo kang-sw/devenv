@@ -60,11 +60,17 @@ export function registerCompactionHistory(pi: ExtensionAPI): void {
   });
   pi.on("session_compact", (event, ctx) => {
     if (isChildProcess(process.env)) return;
-    const compactionId = event.compactionEntry.id;
+    const reported = event.compactionEntry;
     const branch = ctx.sessionManager.getBranch();
-    const boundary = branch.findIndex((entry) => entry.type === "compaction" && entry.id === compactionId);
-    // A delayed event for an abandoned branch must never append on the new one.
-    if (boundary < 0) return;
+    // Manual compaction in Pi 0.84.4 reports the first stored entry with a
+    // matching summary, not necessarily the entry just appended. Resolve the
+    // latest successful boundary from the supported active branch instead.
+    // Require the reported entry on that branch to reject abandoned events.
+    if (!branch.some((entry) => entry.type === "compaction" && entry.id === reported.id)) return;
+    const boundary = branch.findLastIndex((entry) => entry.type === "compaction");
+    const latest = branch[boundary];
+    if (latest?.type !== "compaction" || latest.summary !== reported.summary) return;
+    const compactionId = latest.id;
     if (branch.some((entry) => entry.type === "custom" && entry.customType === COMPACTION_HISTORY_TYPE &&
       (entry as CustomEntry<CompactionHistory>).data?.compactionId === compactionId)) return;
     const messages = selectCompactionHistory(branch.slice(0, boundary));

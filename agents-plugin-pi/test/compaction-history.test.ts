@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SessionManager, type ExtensionAPI, type ExtensionContext, type EntryRenderer } from "@earendil-works/pi-coding-agent";
+import { createAgentSession, DefaultResourceLoader, ModelRuntime, SettingsManager, SessionManager, type ExtensionAPI, type ExtensionContext, type EntryRenderer } from "@earendil-works/pi-coding-agent";
 import { COMPACTION_HISTORY_TYPE, registerCompactionHistory, selectCompactionHistory } from "../src/compaction-history.ts";
 import { NO_KEPT_ENTRY_ID, GOAL_REMINDER_MARKER_PREFIX, collectDialogItems } from "../src/lead-compaction.ts";
 import { buildCompactionResumeMessage } from "../src/goal-loop.ts";
@@ -153,6 +153,54 @@ test("failure/cancellation and empty history append nothing; child native compac
     }
   } finally {
     if (oldRole === undefined) delete process.env[WS_PI_SPAWN_ROLE_ENV]; else process.env[WS_PI_SPAWN_ROLE_ENV] = oldRole;
+  }
+});
+
+test("installed manual compaction with identical summaries reports an old id but refreshes latest history", async () => {
+  const root = mkdtempSync(join(dir, "sdk-"));
+  const settingsManager = SettingsManager.inMemory({ compaction: { enabled: false, keepRecentTokens: 1 }, retry: { enabled: false } });
+  const modelRuntime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: join(root, "models.json"), modelsStorePath: join(root, "store.json"), allowModelNetwork: false });
+  await modelRuntime.setRuntimeApiKey("anthropic", "offline-test-key");
+  const sm = SessionManager.create(root, root);
+  user(sm, "first human");
+  assistant(sm, [{ type: "text", text: "first reply" }]);
+  const reported: string[] = [];
+  const loader = new DefaultResourceLoader({
+    cwd: root, agentDir: root, settingsManager,
+    noExtensions: true, noSkills: true, noThemes: true, noPromptTemplates: true, noContextFiles: true,
+    extensionFactories: [(pi) => {
+      registerCompactionHistory(pi);
+      pi.on("session_before_compact", (event) => ({ compaction: { summary: "IDENTICAL SUMMARY", firstKeptEntryId: NO_KEPT_ENTRY_ID, tokensBefore: event.preparation.tokensBefore } }));
+      pi.on("session_compact", (event) => { reported.push(event.compactionEntry.id); });
+    }],
+  });
+  await loader.reload();
+  assert.deepEqual(loader.getExtensions().errors, []);
+  const model = { provider: "anthropic", api: "anthropic-messages", id: "offline-model", name: "offline", reasoning: false, input: ["text"], contextWindow: 128000, maxTokens: 8192, baseUrl: "https://offline.invalid/v1", cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
+  const { session } = await createAgentSession({ cwd: root, agentDir: root, sessionManager: sm, resourceLoader: loader, modelRuntime, model: model as never, thinkingLevel: "off", settingsManager });
+  const errors: unknown[] = [];
+  const agentStarts: unknown[] = [];
+  session.subscribe((event) => { if (event.type === "agent_start") agentStarts.push(event); });
+  try {
+    await session.bindExtensions({ mode: "rpc", onError: (error) => errors.push(error) });
+    await session.compact();
+    user(sm, "new human");
+    assistant(sm, [{ type: "text", text: "new reply" }]);
+    await session.compact();
+    const compactions = sm.getBranch().filter((entry) => entry.type === "compaction");
+    assert.equal(compactions.length, 2);
+    assert.deepEqual(reported, [compactions[0]!.id, compactions[0]!.id], "regression reproduces installed host's first-summary match");
+    const block = sm.buildContextEntries().find((entry) => entry.type === "custom" && entry.customType === COMPACTION_HISTORY_TYPE) as any;
+    assert.ok(block, "refreshed block survives latest retain-none boundary");
+    assert.equal(block.data.compactionId, compactions[1]!.id);
+    assert.deepEqual(block.data.messages.map((m: any) => m.text), ["first human", "first reply", "new human", "new reply"]);
+    assert.deepEqual(sm.buildSessionContext().messages.map((message) => message.role), ["compactionSummary"]);
+    const reloaded = SessionManager.open(sm.getSessionFile()!, root);
+    assert.deepEqual(reloaded.buildContextEntries(), JSON.parse(JSON.stringify(sm.buildContextEntries())), "reload preserves serialized entry data (undefined optional fields are not JSON)");
+    assert.deepEqual(agentStarts, [], "neither history nor manual compaction starts inference");
+    assert.deepEqual(errors, []);
+  } finally {
+    session.dispose();
   }
 });
 
