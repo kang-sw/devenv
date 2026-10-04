@@ -517,6 +517,9 @@
     "261004-bug-pi-identical-summary-compaction-event": {
       "registered_at": "2026-10-04T10:35:29Z"
     },
+    "261004-feat-pi-compaction-history-native-rendering": {
+      "registered_at": "2026-10-04T12:44:58Z"
+    },
     "261004-feat-pi-explicit-post-compaction-continuation": {
       "registered_at": "2026-10-04T12:08:05Z",
       "lease": {
