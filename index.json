@@ -527,6 +527,9 @@
     "261003-research-typed-decision-model-new-domains": {
       "registered_at": "2026-10-03T03:19:31Z"
     },
+    "261004-bug-pi-identical-summary-compaction-event": {
+      "registered_at": "2026-10-04T10:35:29Z"
+    },
     "261004-feat-pi-compaction-interactive-ux": {
       "registered_at": "2026-10-04T09:26:14Z",
       "lease": {
