@@ -69,6 +69,11 @@ describe("lead prose", () => {
     const schema = leadProseParameterSchema();
     assert.deepEqual(schema.required, LEAD_PROSE_SECTIONS.map((section) => section.key));
     for (const key of schema.required) assert.equal(schema.properties[key]!.type, "string");
+    assert.deepEqual(Object.keys(schema.properties), schema.required, "prose-only: the lever composes continue_after_compact on top");
+  });
+
+  test("the fallback summary prompt never mentions the lever's continuation flag", () => {
+    assert.doesNotMatch(buildFallbackSummaryPrompt("conversation", "previous prose"), /continue_after_compact/);
   });
 });
 

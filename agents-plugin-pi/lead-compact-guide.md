@@ -43,4 +43,7 @@ Do these in order, without starting new work in between:
    nothing), then end your turn. The conversation resumes from the summary,
    and an active goal keeps running. With no goal, a resume message follows
    when you compacted on your own or at the hard point; after the advisory
-   nudge or a user `/compact`, the next move is the user's.
+   nudge or a user `/compact`, the next move is the user's. Set
+   `continue_after_compact: true` when you hold known remaining work that does
+   not await the user, so a resume message follows in any case; leave it unset
+   when the next move needs a user answer.

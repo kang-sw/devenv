@@ -38,6 +38,7 @@ import {
   buildGoalAnnouncement,
   buildCompactionLeverResult,
   buildCompactionResumeMessage,
+  leadCompactParameterSchema,
   resumesAfterCompaction,
   buildGoalReminder,
   buildCompactionObservation,
@@ -60,7 +61,7 @@ import { WS_PI_SPAWN_ROLE_ENV } from "../src/process-role.ts";
 import { createWsConfigReader, staticConfigReader, type GoalLoopConfigReader } from "../src/adapter-config.ts";
 import { flushHeldPushes, leadIdleRef, clearWakeStart, leadCompactingRef, leadWakeStartPendingRef, heldPushQueue, isOwningAgentIdle, registerPushFlush, buildPushWakeLine, type RpcAgentRegistry } from "../src/spawner.ts";
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
-import { DEFAULT_DIALOG_BUDGET_BYTES, NO_KEPT_ENTRY_ID, renderLeadProse } from "../src/lead-compaction.ts";
+import { DEFAULT_DIALOG_BUDGET_BYTES, LEAD_PROSE_SECTIONS, leadProseParameterSchema, NO_KEPT_ENTRY_ID, renderLeadProse } from "../src/lead-compaction.ts";
 
 /** The lever's rendered prose for a single `current_work` field — the carry the old lever passed raw. */
 const prose = (text: string): string => renderLeadProse({ current_work: text });
@@ -2339,8 +2340,8 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       const preparations = () => pi.sentMessages.filter((m) => (m.content as { customType?: string }).customType === "ws-lead-compact");
       const resumes = () => pi.sentUserMessages.filter((m) => m.content === resumeText);
       /** The lever call, then the abort's own agent_end, as Pi's compact() produces them. */
-      const lever = async () => {
-        await pi.tools.get("ws-compact")!.execute("c", { current_work: "mid-task" }, undefined, undefined, ctx);
+      const lever = async (args: Record<string, unknown> = {}) => {
+        await pi.tools.get("ws-compact")!.execute("c", { current_work: "mid-task", ...args }, undefined, undefined, ctx);
         pi.handlers.get("agent_end")!({}, ctx);
         pi.handlers.get("session_before_compact")!(compactionEvent("manual"), ctx);
       };
@@ -2523,11 +2524,138 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       const { pi } = resumeRun();
       const description = (pi.tools.get("ws-compact") as unknown as { description: string }).description;
       assert.ok(description.endsWith(
-        "After compaction, an active goal keeps running. With no goal, a resume message follows when you called this on your own or after the hard-threshold notice; after the advisory nudge or a user /compact, the next move is the user's.",
+        "After compaction, an active goal keeps running. With no goal, a resume message follows when you called this on your own or after the hard-threshold notice; after the advisory nudge or a user /compact, the next move is the user's unless you set continue_after_compact to true because you hold known remaining work that does not await the user.",
       ));
       assert.doesNotMatch(description, /Under an active goal the goal loop continues/);
       const guide = readFileSync(new URL("../lead-compact-guide.md", import.meta.url), "utf8");
       assert.match(guide, /With no goal, a resume message follows\s+when you compacted on your own or at the hard point/);
+      assert.match(guide, /`continue_after_compact: true` when you hold known remaining work that does\s+not await the user/);
+    });
+
+    describe("explicit continue_after_compact (261004)", () => {
+      test("the lever schema adds an optional boolean on top of the required prose fields", () => {
+        const { pi } = resumeRun();
+        const schema = (pi.tools.get("ws-compact") as unknown as { parameters: ReturnType<typeof leadCompactParameterSchema> }).parameters;
+        const prose = leadProseParameterSchema();
+        assert.deepEqual(schema.required, prose.required, "the flag is not required");
+        assert.deepEqual(schema.required, LEAD_PROSE_SECTIONS.map((section) => section.key));
+        for (const key of prose.required) assert.deepEqual(schema.properties[key], prose.properties[key]);
+        assert.equal(schema.properties.continue_after_compact.type, "boolean");
+        assert.deepEqual(Object.keys(schema.properties), [...Object.keys(prose.properties), "continue_after_compact"]);
+      });
+
+      for (const route of ["advisory", "reroute"] as const) {
+        test(`a ${route} lever call with true resumes exactly once after idle release`, async () => {
+          const { pi, ctx, usage, preparations, resumes, lever, complete } = resumeRun();
+          if (route === "advisory") {
+            usage.percent = 60;
+            pi.handlers.get("agent_end")!({}, ctx);
+          } else {
+            assert.deepEqual(pi.handlers.get("session_before_compact")!(compactionEvent("manual"), ctx), { cancel: true });
+            pi.handlers.get("session_compact_failed")!({ reason: "manual", aborted: true, errorMessage: undefined, willRetry: false, fromExtension: false }, ctx);
+            await new Promise((resolve) => setImmediate(resolve));
+          }
+          assert.equal(preparations().length, 1, `${route} preparation queued`);
+          await lever({ continue_after_compact: true }); // the abort's agent_end and compact hook have already cleared the preparation
+          assert.equal(resumes().length, 0, "nothing is sent before release");
+          await complete();
+          assert.equal(resumes().length, 1);
+          assert.deepEqual(resumes()[0]!.options, { deliverAs: "followUp" });
+          assert.equal(pi.sentUserMessages.length, 1, "the resume is the only user message");
+        });
+
+        test(`a ${route} lever call with false or omitted keeps the non-resume default`, async () => {
+          for (const args of [{ continue_after_compact: false }, {}, { continue_after_compact: "true" }, { continue_after_compact: 1 }]) {
+            const { pi, ctx, usage, lever, complete } = resumeRun();
+            if (route === "advisory") {
+              usage.percent = 60;
+              pi.handlers.get("agent_end")!({}, ctx);
+            } else {
+              pi.handlers.get("session_before_compact")!(compactionEvent("manual"), ctx);
+              pi.handlers.get("session_compact_failed")!({ reason: "manual", aborted: true, errorMessage: undefined, willRetry: false, fromExtension: false }, ctx);
+              await new Promise((resolve) => setImmediate(resolve));
+            }
+            await lever(args);
+            await complete();
+            assert.deepEqual(pi.sentUserMessages.filter((m) => m.content === resumeText), [], JSON.stringify(args));
+          }
+        });
+      }
+
+      test("false does not disable the resume of a hard or autonomous route", async () => {
+        const hard = resumeRun();
+        hard.usage.percent = 85;
+        hard.pi.handlers.get("turn_end")!({}, hard.ctx);
+        assert.equal(hard.preparations().length, 1, "hard steer sent");
+        await hard.lever({ continue_after_compact: false });
+        await hard.complete();
+        assert.equal(hard.resumes().length, 1);
+        const auto = resumeRun();
+        await auto.lever({ continue_after_compact: false });
+        await auto.complete();
+        assert.equal(auto.resumes().length, 1);
+      });
+
+      test("true on a resuming route still sends exactly one resume", async () => {
+        const { resumes, lever, complete } = resumeRun();
+        await lever({ continue_after_compact: true });
+        await complete();
+        assert.equal(resumes().length, 1);
+      });
+
+      test("an active goal keeps its reminder path with no flag-driven resume", async () => {
+        const { pi, ctx, lever, complete, clock } = resumeRun();
+        await pi.commands.get("goal")!("ship", ctx);
+        await lever({ continue_after_compact: true });
+        await complete();
+        clock.fire();
+        assert.ok(!pi.sentUserMessages.some((m) => m.content === resumeText), "no resume beside the goal reminder");
+        assert.match(pi.sentUserMessages[pi.sentUserMessages.length - 1]!.content as string, /Goal yet running: "ship"/);
+      });
+
+      test("failure, shutdown and a non-idle release suppress the flag-driven resume", async () => {
+        const failed = resumeRun();
+        await failed.lever({ continue_after_compact: true });
+        failed.compactCall().onError!(new Error("boom"));
+        await new Promise((resolve) => setImmediate(resolve));
+        assert.deepEqual(failed.pi.sentUserMessages, []);
+
+        const down = resumeRun();
+        await down.lever({ continue_after_compact: true });
+        down.handle.resetCompactionStateForShutdown();
+        down.pi.handlers.get("session_compact")!(down.ours, down.ctx);
+        down.compactCall().onComplete!({} as never);
+        await new Promise((resolve) => setImmediate(resolve));
+        assert.deepEqual(down.pi.sentUserMessages, []);
+
+        const busy = resumeRun();
+        await busy.lever({ continue_after_compact: true });
+        busy.idle.current = false;
+        await busy.complete();
+        assert.deepEqual(busy.pi.sentUserMessages, []);
+      });
+
+      test("the flag belongs to its own operation: a later unflagged advisory call does not resume", async () => {
+        const { pi, ctx, usage, preparations, resumes, lever, complete } = resumeRun();
+        usage.percent = 60;
+        pi.handlers.get("agent_end")!({}, ctx);
+        await lever({ continue_after_compact: true });
+        await complete();
+        assert.equal(resumes().length, 1);
+        // A second, unflagged advisory operation in the same session.
+        pi.handlers.get("agent_start")!({}, ctx);
+        pi.handlers.get("agent_end")!({}, ctx);
+        pi.handlers.get("agent_end")!({}, ctx);
+        usage.percent = 10;
+        pi.handlers.get("agent_end")!({}, ctx);
+        usage.percent = 60;
+        pi.handlers.get("agent_start")!({}, ctx);
+        pi.handlers.get("agent_end")!({}, ctx);
+        assert.ok(preparations().length >= 2, "second advisory preparation queued");
+        await lever();
+        await complete();
+        assert.equal(resumes().length, 1, "still only the first operation's resume");
+      });
     });
   });
 
