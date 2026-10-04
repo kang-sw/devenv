@@ -204,13 +204,20 @@ test("installed manual compaction with identical summaries reports an old id but
   }
 });
 
-test("renderer labels historical boundary and roles, renders text literally at narrow/wide widths", async () => {
+test("renderer uses native Markdown, user styling and preservation without navigation controls", async () => {
+  const themeModule = await import(new URL("./modes/interactive/theme/theme.js", import.meta.resolve("@earendil-works/pi-coding-agent")).href);
+  themeModule.initTheme();
   const f = fixture();
   await f.handlers.get("session_start")!({}, f.ctx);
-  user(f.sm, "한글 🦦 *literal markdown*\nsecond line");
-  assistant(f.sm, [{ type: "text", text: "reply\u001b[31m colored\u001b[0m" }]);
+  const userBody = "# 한글 🦦 heading\n\n**strong** and *emphasis*\n\n7. preserved\n9. numbering\n\n\\*escaped\\*\n\n```text\nuser code\n```\n\u001b]133;A\u0007safe";
+  user(f.sm, userBody);
+  assistant(f.sm, [{ type: "text", text: "# Reply\n\n**bold reply**\n\n```text\nassistant code\n```\nreply\u001b[31m colored\u001b[0m\u001b]133;B\u0007" }]);
   f.compact();
-  const theme = { fg: (_color: string, text: string) => text } as never;
+  const fgCalls: string[] = [];
+  const theme = {
+    fg: (color: string, text: string) => { fgCalls.push(color); return color === "userMessageText" ? `\u001b[38;5;123m${text}\u001b[39m` : text; },
+    bg: (color: string, text: string) => { assert.equal(color, "userMessageBg"); return `\u001b[48;5;123m${text}\u001b[49m`; },
+  } as never;
   for (const width of [12, 80]) {
     const component = f.renderer()(f.blocks()[0], { expanded: false }, theme)!;
     const lines = component.render(width);
@@ -218,12 +225,33 @@ test("renderer labels historical boundary and roles, renders text literally at n
     const text = lines.map((line) => stripTerminalSequences(line).trimEnd()).join("\n");
     if (width === 80) {
       assert.match(text, /Previous conversation · display-only\n.*─/);
-      assert.match(text, /User\n한글 🦦 \*literal markdown\*\nsecond line/);
-      assert.match(text, /Assistant\nreply colored/);
+      assert.match(text, /한글 🦦 heading/);
+      assert.match(text, /strong and emphasis/);
+      assert.doesNotMatch(text, /\*\*strong\*\*|# Reply/);
+      assert.match(text, /7\. preserved/);
+      assert.match(text, /9\. numbering/);
+      assert.ok(text.includes("\\*escaped\\*"), "native user backslash preservation");
+      assert.match(text, /user code/);
+      assert.match(text, /assistant code/);
+      assert.match(text, /reply colored/);
       assert.match(text, /End previous conversation/);
+      const userStart = lines.findIndex((line) => stripTerminalSequences(line).trim() === "User");
+      const assistantStart = lines.findIndex((line) => stripTerminalSequences(line).trim() === "Assistant");
+      const userLines = lines.slice(userStart + 1, assistantStart);
+      assert.ok(userLines.every((line) => line.includes("\u001b[48;5;123m")), "user background covers body and padding");
+      assert.ok(userLines.every((line) => visibleWidth(line) === width), "user block fills terminal width");
+      assert.ok(lines.slice(assistantStart).every((line) => !line.includes("\u001b[48;5;123m")), "assistant has no user background");
+      assert.ok(userLines.some((line) => stripTerminalSequences(line).startsWith(" 한글")), "horizontal padding");
     }
+    assert.ok(lines.every((line) => !line.includes("\u001b]133;")), "no native prompt-navigation sequences");
     component.invalidate();
     assert.deepEqual(component.render(width), lines);
   }
+  assert.ok(fgCalls.includes("userMessageText"));
+  assert.equal(f.blocks()[0].data.messages[0].text, userBody, "storage remains original");
   assert.match(f.blocks()[0].data.messages[1].text, /\u001b\[31m/, "renderer sanitization does not alter storage");
+  const transparent = { fg: (_color: string, text: string) => text, bg: (_color: string, text: string) => text } as never;
+  const transparentLines = f.renderer()(f.blocks()[0], { expanded: false }, transparent)!.render(80);
+  assert.ok(transparentLines.every((line) => !line.includes("\u001b[48;")), "transparent theme never gains a forced background");
+  assert.match(transparentLines.map(stripTerminalSequences).join("\n"), /bold reply/);
 });

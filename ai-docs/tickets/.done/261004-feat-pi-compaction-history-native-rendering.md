@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 60b2557b6b9a2863
 sage-review-completeness-reviewed: 60b2557b6b9a2863
+completed: 2026-10-04
 ---
 
 # Native-style Markdown rendering for previous conversation history
@@ -100,3 +101,26 @@ history persistence, model exclusion, no-wake, latest-twenty, branch and
 repeat-compaction coverage. Run targeted tests, the full Pi suite and diff
 checks. Report live terminal appearance/reload as unverified unless actually
 observed; do not compact or reload the lead session to manufacture acceptance.
+
+### Result (9b64d5e0d) - 2026-10-04
+
+- Replaced aggregate literal Text with host-resolved Container and per-message
+  Markdown. User bodies use native foreground/background, full-width padding and
+  ordered-list/backslash preservation; assistant bodies have no user background.
+  Header, separator and role labels remain explicit. No native navigation markers
+  or lifecycle/storage changes were introduced.
+- Verification: `npm test -- test/compaction-history.test.ts` passed all eight
+  tests; `npm test -- --test-reporter=dot` passed the full Pi suite (both from
+  `agents-plugin-pi/`). `git diff --check` passed. Renderer coverage includes
+  headings/emphasis/code, user/assistant backgrounds, transparent theme,
+  narrow/wide wrapping, display sanitization and unchanged raw storage.
+- Independent lite review of `461f262c7..9b64d5e0d` returned clean with no
+  findings. Live terminal appearance and reload placement remain unverified;
+  the lead session was not compacted or reloaded for acceptance.
+- Test setup corrections: the direct Node invocation inherited the worker role;
+  the standard package test command clears it. Native Markdown retains code
+  fence borders, so the original fence-elision assertion was corrected. A
+  redundant ANSI-bold assertion was removed because non-TTY chalk disables
+  styling; formatting and themed background assertions remain executable.
+- Locked dependency installation reported existing audit vulnerabilities
+  (one moderate, two high); dependency updates were left outside this scope.
