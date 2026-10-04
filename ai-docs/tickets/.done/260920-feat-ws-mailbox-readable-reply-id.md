@@ -5,6 +5,7 @@ sage-review: required
 sage-review-completeness: completed
 sage-review-design-reviewed: 15d7d6f7cfb25733
 sage-review-completeness-reviewed: 15d7d6f7cfb25733
+completed: 2026-10-04
 ---
 
 # Readable word-key mailbox reply-id
@@ -153,3 +154,27 @@ including relevant Pi waiter integration. Verify different test sessions have
 separate expected IDs without asserting collision-free uniqueness. Run the
 relevant Go and Pi suites as applicable; if secret machinery is removed, ensure
 no remaining caller, test, or shipped string references its retired contract.
+
+### Result (5ccf618840) - 2026-10-04
+
+- Added `wskey.DeriveFull` with shared pool-parameterized selection; existing
+  short-pool `Derive` and random generation remain unchanged. Mailbox reply IDs
+  concatenate four full-pool words directly from the caller session key.
+- Aligned MCP publication, send/recv, self lookup, piggyback, and native wait
+  with the readable queue key. Parsing accepts 1–36 lowercase letters without
+  word-boundary validation and rejects legacy hex addresses and invalid forms.
+- Removed reply-only secret persistence and the MCP secret cache after verifying
+  no other consumers. No alias, reservation, migration, or new persistence was
+  added; registry layout, named inbox authorization, and nonempty-queue cleanup
+  remain unchanged. Pi consumers already forward handles verbatim, so only the
+  readable-envelope fixture changed there.
+- Verification: `go test ./internal/wskey` and full `go test ./...` passed;
+  `scripts/smoke-ws-mcp.sh ..` passed. Relevant Pi waiter/bootstrap suites passed
+  all 42 tests after `npm ci` repaired missing worktree dependencies. Exact
+  full-pool vectors, parser bounds, text/JSON anonymous round trip against the
+  registry identity, restart stability, wait recomputation, and existing branch
+  identity tests cover the contract. Registry round-trip coverage was retained
+  in `9dbc87b47` and the full Go suite passed again afterward.
+- Independent one-pass lite review of `b49929e05..9dbc87b47` was clean with no
+  remaining findings. No separate Pi build exists; unrelated Pi suites and
+  release/installed-cache verification were outside this runtime cutover.
