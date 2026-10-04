@@ -524,7 +524,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-04T12:40:40Z"
+        "touched_at": "2026-10-04T12:41:18Z",
+        "impl": {
+          "branch": "impl/develop/salsa-snuff-barge"
+        }
       }
     },
     "261004-research-pi-post-bump-publish-worker-startup": {
