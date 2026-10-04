@@ -315,6 +315,31 @@ func TestMailboxSelfAddressSurface(t *testing.T) {
 	if !strings.Contains(lookupResp, "self: ") || !strings.Contains(lookupResp, "reply-id only") {
 		t.Fatalf("env-less caller's lookup_peers self entry is not its own reply-id: %s", lookupResp)
 	}
+	wantReplyID := wsmailbox.ReplyID(keyB)
+	if !strings.Contains(lookupResp, "id:"+wantReplyID) {
+		t.Fatalf("lookup_peers self reply-id differs from the session derivation: resp=%s want=id:%s", lookupResp, wantReplyID)
+	}
+	jsonLookup := callToolWithKey(t, serverB, 3, keyB, "mailbox.lookup_peers", map[string]any{"scope": "worktree", "format": "json"})
+	var parsed struct {
+		Self map[string]any `json:"self"`
+	}
+	if err := json.Unmarshal([]byte(jsonLookup), &parsed); err != nil {
+		t.Fatalf("json lookup_peers response did not parse: %v\nresp=%s", err, jsonLookup)
+	}
+	if got, _ := parsed.Self["reply_id"].(string); got != "id:"+wantReplyID {
+		t.Fatalf("json self.reply_id differs from the session derivation: got=%q want=id:%s", got, wantReplyID)
+	}
+	replyPath, err := wsmailbox.ReplyRegistryPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := wsmailbox.LoadReplyStore(replyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := registry.Entries[wantReplyID]; !ok {
+		t.Fatalf("lookup_peers did not publish the self reply-id to the registry: %s", wantReplyID)
+	}
 }
 
 // TestMailboxOwnerGate verifies Decision 3: only the caller_session_key ==
