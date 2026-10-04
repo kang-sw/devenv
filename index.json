@@ -518,7 +518,14 @@
       "registered_at": "2026-10-03T03:19:31Z"
     },
     "261004-feat-pi-descendant-gutter-detail-parity": {
-      "registered_at": "2026-10-04T00:26:43Z"
+      "registered_at": "2026-10-04T00:26:43Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-10-04T00:55:55Z"
+      }
     }
   }
 }
