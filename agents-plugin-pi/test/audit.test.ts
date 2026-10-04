@@ -491,6 +491,28 @@ describe("registerAuditCommands", () => {
     assert.equal(await result, sibling.agentId);
   });
 
+  test("detailed remote approval and owner rows remain non-openable picker context", async () => {
+    const now = Date.now();
+    const display = { name: "remote owner", state: "idle-awaiting-owner" as const, runStartedAt: now - 5_000, lastOutputAt: now };
+    const parent = record({ agentId: "parent", alias: "parent", running: true, client: {} as never,
+      subtreeDescendants: [
+        { id: "owner000", parentId: null, depth: 0, role: "worker", live: true, display },
+        { id: "approval", parentId: "owner000", depth: 1, role: "execute", live: true, display: { ...display, state: "awaiting-approval" } },
+      ],
+    });
+    const sibling = record({ agentId: "sibling", alias: "sibling", running: true });
+    const opened = fakePickerCtx();
+    const result = openPicker(opened.ctx as never, registryOf(parent, sibling));
+    const component = await opened.componentReady;
+    const initial = component.render(150).join("\n");
+    assert.match(initial, /owner000 · worker · idle awaiting owner/);
+    assert.match(initial, /approval · execute · awaiting approval/);
+    component.handleInput?.("\x1b[B");
+    assert.match(component.render(150).join("\n"), /→ sibling/);
+    component.handleInput?.("\r");
+    assert.equal(await result, sibling.agentId);
+  });
+
   test("a locally openable picker choice still reaches the conversation viewer", async () => {
     const registry = registryOf(record({ agentId: "a1", alias: "scout", client: { onEvent: () => () => {} } as never, running: true }));
     const { pi, commands } = fakePi();

@@ -18,6 +18,7 @@
  * one launch (one `ParentChannel`), ignores lower ones, and acknowledges what
  * it applied. A not-yet-connected or disconnected channel reads as waiting.
  */
+import { agentDisplayDetail, parseAgentDisplayDetail, type AgentDisplayDetail } from "./agent-display.ts";
 import type { ChildChannel, ParentChannel } from "./agent-channel.ts";
 import type { RpcAgentRecord, RpcAgentRegistry } from "./spawner.ts";
 
@@ -28,6 +29,8 @@ export interface SubtreeDescendant {
   depth: number;
   role: SubtreeDescendantRole;
   live: boolean;
+  /** Optional advisory row projection from this agent's owning process. */
+  display?: AgentDisplayDetail;
 }
 export interface SubtreeSnapshot {
   outstanding: number;
@@ -82,7 +85,10 @@ export function parseSubtreeSnapshot(raw: unknown): SubtreeSnapshot | undefined 
         Number.isSafeInteger(candidate.depth) && (candidate.depth as number) >= 0 && (candidate.depth as number) <= MAX_SUBTREE_DESCENDANT_DEPTH &&
         typeof candidate.role === "string" && DESCENDANT_ROLES.has(candidate.role as SubtreeDescendantRole) &&
         typeof candidate.live === "boolean";
-    }).slice(0, MAX_SUBTREE_DESCENDANTS)
+    }).slice(0, MAX_SUBTREE_DESCENDANTS).map(row => {
+      const display = parseAgentDisplayDetail(row.display);
+      return { id: row.id, parentId: row.parentId, depth: row.depth, role: row.role, live: row.live, ...(display ? { display } : {}) };
+    })
     : [];
   return {
     outstanding: value.outstanding!, active: value.active!, deliveries: value.deliveries!,
@@ -195,6 +201,8 @@ export interface SubtreeView {
   waiting: boolean;
   /** Last accepted snapshot of this launch; kept across a disconnect for advisory identity. */
   snapshot?: SubtreeSnapshot;
+  /** Cached identity/detail is not fresh process liveness while the channel is down. */
+  disconnected?: true;
 }
 
 /**
@@ -224,7 +232,7 @@ export function observeSubtreeChannel(channel: ParentChannel, onView: (view: Sub
     const resumed = hello.resume[SUBTREE_RESUME_KEY];
     if (resumed !== undefined) receive(resumed);
   });
-  const offDisconnect = channel.onDisconnect(() => onView({ waiting: true, snapshot: latest }));
+  const offDisconnect = channel.onDisconnect(() => onView({ waiting: true, snapshot: latest, disconnected: true }));
   onView({ waiting: true });
   return () => { offMessage(); offConnection(); offDisconnect(); };
 }
@@ -238,7 +246,15 @@ interface Publisher {
   upstream?: SubtreeUpstream;
   deliveries: () => number;
   ownTurn: () => OwnTurnState;
+  lastPublished?: SubtreeSnapshot;
+  lastSampledAt?: number;
+  ownRows?: Map<string, SubtreeDescendant>;
+  ownRowsKey?: string;
+  promptKey?: string;
+  telemetryTimer?: ReturnType<typeof setTimeout>;
 }
+/** Only dirty event-driven samples arm a timer; no idle whole-tree polling. */
+export const SUBTREE_TELEMETRY_INTERVAL_MS = 1_000;
 const publishers = new WeakMap<RpcAgentRegistry, Publisher>();
 
 export function installSubtreePublisher(
@@ -247,6 +263,8 @@ export function installSubtreePublisher(
   deliveries: () => number,
   ownTurn: () => OwnTurnState,
 ): void {
+  const previous = publishers.get(registry);
+  if (previous?.telemetryTimer) clearTimeout(previous.telemetryTimer);
   publishers.set(registry, { delegated: false, dispatching: 0, upstream, deliveries, ownTurn });
   publishSubtree(registry);
 }
@@ -274,7 +292,8 @@ function subtreeDescendants(registry: RpcAgentRegistry): SubtreeDescendant[] {
   const included = new Set<string>();
   for (const record of registry.values()) {
     if (rows.length >= MAX_SUBTREE_DESCENDANTS || included.has(record.agentId)) continue;
-    rows.push({ id: record.agentId, parentId: null, depth: 0, role: descendantRole(record), live: record.client !== undefined });
+    const display = agentDisplayDetail(record);
+    rows.push({ id: record.agentId, parentId: null, depth: 0, role: descendantRole(record), live: record.client !== undefined, ...(display ? { display } : {}) });
     included.add(record.agentId);
     for (const nested of record.subtreeDescendants ?? []) {
       if (rows.length >= MAX_SUBTREE_DESCENDANTS) break;
@@ -288,7 +307,27 @@ function subtreeDescendants(registry: RpcAgentRegistry): SubtreeDescendant[] {
   return rows;
 }
 
-/** Recomputes this process's snapshot and sends it upstream when it changed. Never throws. */
+/** O(1) dirty notification, including streaming output. The timer samples current records once. */
+export function scheduleSubtreeTelemetry(registry: RpcAgentRegistry | undefined): void {
+  if (!registry) return;
+  const p = publishers.get(registry);
+  if (!p?.upstream || p.telemetryTimer) return;
+  const delay = Math.max(0, (p.lastSampledAt ?? Date.now()) + SUBTREE_TELEMETRY_INTERVAL_MS - Date.now());
+  p.telemetryTimer = setTimeout(() => {
+    p.telemetryTimer = undefined;
+    if (publishers.get(registry) === p) publishSubtree(registry);
+  }, delay);
+  p.telemetryTimer.unref?.();
+}
+
+/** Lifecycle/identity edges cannot wait behind display telemetry, especially a dispatch fence. */
+function promptPublicationKey(state: SubtreeState): string {
+  return JSON.stringify({ ...state, descendants: state.descendants.map(({ display, ...identity }) => ({
+    ...identity, ...(display ? { name: display.name, state: display.state, runStartedAt: display.runStartedAt, settledAt: display.settledAt } : {}),
+  })) });
+}
+
+/** Samples owned telemetry at most once per second; already-sampled descendant data forwards promptly. */
 export function publishSubtree(registry: RpcAgentRegistry | undefined, dispatched = false): SubtreeSnapshot | undefined {
   if (!registry) return undefined;
   const p = publishers.get(registry);
@@ -305,7 +344,27 @@ export function publishSubtree(registry: RpcAgentRegistry | undefined, dispatche
     outstanding, active, deliveries: p.deliveries(), delegated: p.delegated,
     turnOwed: ownTurn.owed, turnsStarted: ownTurn.started, descendants: subtreeDescendants(registry),
   };
-  return p.upstream ? p.upstream.publish(state) : { ...state, revision: 0 };
+  if (!p.upstream) return { ...state, revision: 0 };
+  const promptKey = promptPublicationKey(state);
+  const ownRows = state.descendants.filter(row => row.parentId === null);
+  const ownRowsKey = JSON.stringify(ownRows);
+  const prompt = promptKey !== p.promptKey;
+  const ownChanged = ownRowsKey !== p.ownRowsKey;
+  if (!prompt && ownChanged && Date.now() - (p.lastSampledAt ?? 0) < SUBTREE_TELEMETRY_INTERVAL_MS) {
+    scheduleSubtreeTelemetry(registry);
+    // A forwarded update has already paid its owner's coalescing window.
+    // Never add a fresh window at every ancestor, nor let that forwarding
+    // unthrottle unrelated owned clocks/usage by piggybacking fresh samples.
+    state.descendants = state.descendants.map(row => row.parentId === null ? p.ownRows?.get(row.id) ?? row : row);
+  } else if (prompt || ownChanged) {
+    if (p.telemetryTimer) { clearTimeout(p.telemetryTimer); p.telemetryTimer = undefined; }
+    p.lastSampledAt = Date.now();
+    p.ownRowsKey = ownRowsKey;
+    p.ownRows = new Map(ownRows.map(row => [row.id, row]));
+  }
+  p.promptKey = promptKey;
+  p.lastPublished = p.upstream.publish(state);
+  return p.lastPublished;
 }
 
 /**

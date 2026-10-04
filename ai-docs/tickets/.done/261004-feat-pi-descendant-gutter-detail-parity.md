@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: d508e329bc284188
 sage-review-completeness-reviewed: d508e329bc284188
+completed: 2026-10-04
 ---
 
 # Show detailed telemetry for descendants in the Pi agent gutter
@@ -178,3 +179,43 @@ Verification boundary:
   behavior remain green without weakening their assertions.
 - An interactive nested-agent smoke confirms the detailed row in the actual
   Pi gutter, in addition to automated propagation and formatter coverage.
+
+### Result (2973edb18) - 2026-10-04
+
+- Added the optional bounded `AgentDisplayDetail` projection to the existing
+  revisioned descendant identities. The shared classifier supplies advisory
+  state; names, run/output clock anchors, model/effort, context, own cost, and
+  the direct parent's existing output-rate value come from the owning record.
+  Incomplete base detail retains the legacy identity-only fallback; unknown
+  telemetry remains absent. No new persistent store or lifecycle authority.
+- Detailed remote rows reuse the local formatter and remain grouped by parent
+  with depth gutters, local clock advancement, settled-duration freezing,
+  TPS-first width degradation, and the existing row cap. They acquire no
+  command hint or openable `/audit` conversation. Disconnect suppresses cached
+  descendant liveness; reconnect, launch replacement, and teardown preserve
+  the existing ordering and invalidation boundaries.
+- Telemetry sampling is event-driven and bounded to one sample per second at
+  its owning process, with the latest trailing sample. Already-coalesced
+  descendants forward promptly rather than paying another throttle window at
+  each hop; forwarding retains pending local telemetry's previous sample.
+  State/identity and busy-fence edges remain immediate. Stream deltas only arm
+  an O(1) dirty notification, and no recurring idle whole-tree poll is added.
+- Verification: core projection/channel/recursive tests passed 64/64 before
+  review; renderer/audit/rate tests passed 126/126. After the review fix,
+  channel/recursive tests passed 61/61, including the staggered two-hop
+  one-second deadline and local-throttle isolation regression. Final full
+  `npm test -- --test-reporter=dot --test-reporter-destination=stdout
+  --test-reporter=junit --test-reporter-destination=/tmp/descendant-final-suite.xml`
+  reported 1994 cases, zero failures/errors, and three existing opt-in skips
+  (two source-runtime develop-marker tests and the live web-Explore test).
+  `git diff --check` passed. TypeScript is host-loaded through jiti; this
+  package declares no separate build step.
+- Interactive verification used a deterministic registry fixture across two
+  real channel hops in an actual Pi TUI, not billable model sessions. Repeated
+  after the review fix at 180 and 85 columns: the nested row showed its own
+  name, classified state, clocks, model/effort, 42t/s, updated 14.0k context and
+  $0.3 cost while its ancestors had no output; narrow width preserved the
+  tree and removed telemetry. A state edge and frozen duration were confirmed.
+- Independent one-pass lite review found one Critical accumulated-hop latency
+  defect, resolved in `2973edb18` with the deterministic regression above.
+  No Critical/Important finding remains; no re-review was allocated under lite.

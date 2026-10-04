@@ -15,6 +15,7 @@ import {
   installSubtreePublisher,
   observeSubtreeChannel,
   publishSubtree,
+  scheduleSubtreeTelemetry,
   SUBTREE_ACK_TIMEOUT_MS,
   SubtreeUpstream,
   type SubtreeSnapshot,
@@ -163,6 +164,59 @@ describe("child side: revisioned snapshots and the busy fence", () => {
     assert.equal(link.snapshots().length, 1);
     link.reconnect();
     assert.deepEqual(link.snapshots().map(s => ({ revision: s.revision, active: s.active })), [{ revision: 1, active: 0 }, { revision: 2, active: 1 }]);
+  });
+});
+
+describe("display publication", () => {
+  test("telemetry has a trailing latest sample within a second, state and busy fences bypass it", t => {
+    t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 10_000 });
+    const link = fakeUplink();
+    const child = record("child", { client: {} as never, running: true, runStartedAt: 9_000, lastOutputAt: 9_500, observedModel: "model" });
+    const registry = new Map([[child.agentId, child]]);
+    installSubtreePublisher(registry, new SubtreeUpstream(link.channel), () => 0, idleOwnTurn);
+    child.observedContextTokens = 100;
+    publishSubtree(registry);
+    child.observedContextTokens = 200;
+    publishSubtree(registry);
+    assert.equal(link.snapshots().length, 1);
+    t.mock.timers.tick(999);
+    child.lastOutputAt = Date.now();
+    scheduleSubtreeTelemetry(registry);
+    assert.equal(link.snapshots().length, 1);
+    t.mock.timers.tick(1);
+    assert.equal(link.snapshots().length, 2);
+    assert.equal(link.snapshots().at(-1)?.descendants[0].display?.contextTokens, 200);
+    assert.equal(link.snapshots().at(-1)?.descendants[0].display?.lastOutputAt, 10_999);
+    child.observedContextTokens = 300; publishSubtree(registry);
+    child.running = false; child.waitingOnChildren = true; publishSubtree(registry);
+    assert.equal(link.snapshots().length, 3, "classified state changes promptly");
+    assert.equal(link.snapshots().at(-1)?.descendants[0].display?.state, "waiting-on-children");
+    child.observedContextTokens = 400; publishSubtree(registry);
+    link.ack(link.snapshots().at(-1)!.revision);
+    const admission = beginSubtreeDispatch(registry);
+    assert.ok(admission instanceof Promise);
+    assert.equal(link.snapshots().at(-1)?.active, 1, "busy snapshot is never throttled");
+    link.ack(link.snapshots().at(-1)!.revision);
+    return admission.then(finish => { finish(); });
+  });
+
+  test("stream samples are event-driven, coalesced, and never poll an idle tree", t => {
+    t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 10_000 });
+    const link = fakeUplink();
+    const child = record("child", { client: {} as never, running: true, runStartedAt: 9_000, lastOutputAt: 9_500 });
+    const registry = new Map([[child.agentId, child]]);
+    installSubtreePublisher(registry, new SubtreeUpstream(link.channel), () => 0, idleOwnTurn);
+    for (let i = 0; i < 100; i++) { child.lastOutputAt = 10_000 + i; scheduleSubtreeTelemetry(registry); }
+    assert.equal(link.snapshots().length, 1);
+    t.mock.timers.tick(1000);
+    assert.equal(link.snapshots().length, 2);
+    assert.equal(link.snapshots().at(-1)?.descendants[0].display?.lastOutputAt, 10_099);
+    t.mock.timers.tick(10_000);
+    assert.equal(link.snapshots().length, 2, "no recurring poll after the trailing sample");
+    child.lastOutputAt = 21_000; scheduleSubtreeTelemetry(registry);
+    registry.clear(); publishSubtree(registry);
+    t.mock.timers.tick(1000);
+    assert.deepEqual(link.snapshots().at(-1)?.descendants, [], "a pending sample cannot restore a torn-down record");
   });
 });
 

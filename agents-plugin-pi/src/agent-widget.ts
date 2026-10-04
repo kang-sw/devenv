@@ -38,6 +38,8 @@
 import type { ThreadRecord } from "./ask.ts";
 import { isOwnerHeld, lastActivityAt, type RpcAgentRecord, type RpcAgentRegistry, type SpawnAgentRole } from "./spawner.ts";
 import type { SubtreeDescendantRole } from "./subtree-lifecycle.ts";
+import { classifyRegistryRowState, rowName, parseAgentDisplayDetail, type AgentDisplayDetail, type AgentRowState } from "./agent-display.ts";
+export { classifyRegistryRowState, rowName, type AgentRowState } from "./agent-display.ts";
 import { visibleWidth } from "./text-width.ts";
 import { isLeadOrFork, type SpawnRole } from "./process-role.ts";
 import { formatOutputRate } from "./output-rate.ts";
@@ -64,10 +66,6 @@ export const DEFAULT_AGENT_WIDGET_WIDTH = 80;
 export type AgentTreeRole = SubtreeDescendantRole;
 export type AgentRowRole = AgentTreeRole | "thread";
 
-/** One live-agent row's state, in display precedence order. Execution,
- * descendant waits, delivery, and owner action remain distinct. */
-export type AgentRowState = "awaiting-owner" | "idle-awaiting-owner" | "awaiting-approval" | "waiting-on-children" | "pending-delivery" | "running";
-
 /** One rendered row of the live-agent widget. Pure data — no `RpcAgentRecord`/`ThreadRecord` reference — so `buildWidgetLines` needs no registry access of its own. */
 export interface AgentRow {
   /** `alias > title > shortened uuid` (mirrors `ask.ts:351`'s short-uuid convention). */
@@ -90,7 +88,7 @@ export interface AgentRow {
   outputTps?: number;
   /** Propagated descendants alone carry depth; locally-owned and synthetic thread rows remain at depth zero without changing their established data shape. */
   depth?: number;
-  /** Cross-process descendants expose process liveness only, so rendering must not invent clocks, telemetry, or local affordances for them. */
+  /** Legacy or incomplete cross-process detail exposes liveness only, without invented clocks or telemetry. */
   livenessOnly?: true;
 }
 
@@ -166,47 +164,26 @@ function roleFromSpawnRole(spawnRole: SpawnAgentRole | undefined): AgentTreeRole
   return "worker";
 }
 
-/** `alias > title > shortened uuid` — the ticket's name-precedence rule, mirroring `ask.ts:351`'s `agentId.slice(0, 8)` convention. Exported (260908 audit-window ticket) so the audit picker reuses the identical naming rule verbatim. */
-export function rowName(record: RpcAgentRecord): string {
-  return record.alias ?? record.title ?? record.agentId.slice(0, 8);
-}
-
-/**
- * 260908 (subagent audit window ticket): the row-inclusion/state
- * classification half of `buildAgentRows`'s per-record loop below, pulled
- * out as its own pure predicate so the audit picker reuses identical
- * inclusion and precedence. Execution, descendant waiting, pending terminal
- * delivery, approval, and owner action are distinct states. `undefined`
- * means the record is resting with no visible action or delivery pending.
- */
-export function classifyRegistryRowState(record: RpcAgentRecord): AgentRowState | undefined {
-  if (record.threadBound === true) return "awaiting-owner";
-  if (record.pendingApproval !== undefined) return "awaiting-approval";
-  if (isOwnerHeld(record) && !record.running && !record.streaming) return "idle-awaiting-owner";
-  if (record.running || record.streaming) return "running";
-  if (record.waitingOnChildren) return "waiting-on-children";
-  if (record.terminalDelivery && record.terminalDelivery.state !== "enqueued") return "pending-delivery";
-  return undefined;
-}
-
 /** Shared local-plus-propagated tree contract used by the live gutter now and the audit picker in Phase 3. */
 export interface AgentTreeNode {
   id: string;
   parentId: string | null;
   depth: number;
   role: AgentTreeRole;
-  /** `undefined` is the dormant tier. Propagated nodes can only be `running` or dormant because the cross-process contract carries liveness alone. */
+  /** `undefined` is the dormant tier. Remote detailed states are advisory and gated by process liveness. */
   state: AgentRowState | undefined;
   live: boolean;
   /** Only records owned by this process have a locally reachable conversation stream. */
   openable: boolean;
+  /** Sanitized owner projection, present only on detailed remote nodes. */
+  display?: AgentDisplayDetail;
 }
 
 /**
  * Builds one parent-before-child tree from this process's registry and every
  * direct child's propagated identity snapshot. Local records remain the
- * authoritative source for their rich state; cross-process descendants are
- * deliberately reduced to `running` versus dormant from `live` alone.
+ * authoritative source for their rich state; cross-process detail is advisory
+ * and falls back to `running` versus dormant when absent or incomplete.
  */
 export function buildAgentTree(records: RpcAgentRegistry): AgentTreeNode[] {
   const nodes = new Map<string, AgentTreeNode>();
@@ -245,14 +222,16 @@ export function buildAgentTree(records: RpcAgentRegistry): AgentTreeNode[] {
       const parentId = descendant.parentId ?? record.agentId;
       const parent = nodes.get(parentId);
       if (!parent || !branchIds.has(parentId) || localIds.has(descendant.id)) continue;
+      const display = parseAgentDisplayDetail(descendant.display);
       const node: AgentTreeNode = {
         id: descendant.id,
         parentId,
         depth: parent.depth + 1,
         role: descendant.role,
-        state: descendant.live ? "running" : undefined,
+        state: descendant.live ? (display ? display.state ?? undefined : "running") : undefined,
         live: descendant.live,
         openable: false,
+        ...(display ? { display } : {}),
       };
       if (add(node)) branchIds.add(node.id);
     }
@@ -310,8 +289,8 @@ function clampElapsed(deltaMs: number): number {
  * record's `/answer <id>` hint and `touchedAt`-based elapsed follow the
  * `awaiting-owner` STATE and apply whenever a matching live thread is found,
  * regardless of `origin` — a fork-raised (Entry A) respondent owes the owner
- * an answer exactly as much as a lead-ask (Entry B) one does. Only the ROLE
- * LABEL stays origin-dependent: `"thread"` renders only for a `lead-ask`
+ * an answer exactly as much as a lead-ask (Entry B) one does. Only the internal ROLE
+ * stays origin-dependent: `"thread"` applies only for a `lead-ask`
  * match (the ticket's Entry-B-only role override); a fork-raised match keeps
  * the record's own `spawnRole` label (typically `"fork"`).
  *
@@ -330,9 +309,23 @@ export function buildAgentRows(records: RpcAgentRegistry, threads: readonly Thre
 
   for (const node of tree) {
     if (!node.openable) {
-      // Dormant propagated identities remain available to the shared tree for
-      // Phase 3's picker, but the live gutter admits only real process liveness.
-      if (node.state !== "running") continue;
+      // Cached detail cannot restore liveness or grant local command access.
+      if (!node.live || node.state === undefined) continue;
+      if (node.display) {
+        const { name, runStartedAt, settledAt, lastOutputAt, model, effort, contextTokens, estimatedUsd, outputTps } = node.display;
+        rowById.set(node.id, {
+          name, role: node.role, state: node.state,
+          elapsedMs: clampElapsed((settledAt ?? now) - runStartedAt),
+          lastActivityMs: clampElapsed(now - lastOutputAt),
+          depth: node.depth,
+          ...(model !== undefined ? { model } : {}),
+          ...(effort !== undefined ? { effort } : {}),
+          ...(contextTokens !== undefined ? { contextTokens } : {}),
+          ...(estimatedUsd !== undefined ? { estimatedUsd } : {}),
+          ...(outputTps !== undefined ? { outputTps } : {}),
+        });
+        continue;
+      }
       rowById.set(node.id, {
         name: node.id.slice(0, 8),
         role: node.role,
@@ -429,7 +422,7 @@ export function formatCompactDuration(elapsedMs: number): string {
   return `${hours}h${String(minutes).padStart(2, "0")}m`;
 }
 
-/** Formats role/state/elapsed rows; answer-capable owner rows lead with their valid `/answer qN` cue. */
+/** Answer-capable owner rows lead with their valid `/answer qN` cue. */
 function isAttentionState(state: AgentRowState): boolean {
   // Approval waits remain actionable lead-agent work through `ws-approve`, not
   // owner work. Only owner-held `/answer` paths receive the loud cue.
@@ -517,11 +510,11 @@ function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, ownerActio
       : row.name;
   const stateLabel = AGENT_STATE_LABEL[row.state];
   if (row.livenessOnly) {
-    return gutter.text + bullet.text + truncateToWidth(`${primary} · ${row.role} · ${stateLabel}`, bodyWidth);
+    return gutter.text + bullet.text + truncateToWidth(`${primary} · ${stateLabel}`, bodyWidth);
   }
-  const durationPrefix = `${primary} · ${row.role} · ${stateLabel} · ${formatCompactDuration(row.elapsedMs)} (`;
+  const durationPrefix = `${primary} · ${stateLabel} · ${formatCompactDuration(row.elapsedMs)} (`;
   const activity = formatCompactDuration(row.lastActivityMs);
-  const base = `${durationPrefix}${activity})`;
+  const baseWithoutTps = `${durationPrefix}${activity})`;
   const model = row.model ?? "—";
   const effort = row.effort ?? "—";
   // Keep the compact occupancy value in its established telemetry slot while
@@ -529,28 +522,28 @@ function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, ownerActio
   const contextTokens = formatLiveContextTokens(row.contextTokens);
   const estimate = `$${formatEstimatedUsd(row.estimatedUsd)}`;
   const tps = row.outputTps !== undefined ? formatOutputRate(row.outputTps) : undefined;
-  const telemetryWithoutTps = ` · ${model} (${effort}) · ${contextTokens} · ${estimate}`;
-  const telemetryWithTps = tps === undefined ? telemetryWithoutTps : ` · ${model} (${effort}) · ${tps} · ${contextTokens} · ${estimate}`;
-  // The TPS segment is dropped first; only then does the all-or-nothing rule
+  const baseWithTps = tps === undefined ? baseWithoutTps : `${durationPrefix}${activity}, ${tps})`;
+  const telemetry = ` · ${model} (${effort}) · ${contextTokens} · ${estimate}`;
+  // Drop TPS from the duration first; only then does the all-or-nothing rule
   // for the remaining telemetry group apply.
-  const pickTelemetry = (available: number) => visibleWidth(base + telemetryWithTps) <= available ? telemetryWithTps : telemetryWithoutTps;
+  const pickBase = (available: number) => visibleWidth(baseWithTps + telemetry) <= available ? baseWithTps : baseWithoutTps;
   const protectedHint = row.inspectionHint;
   const hint = protectedHint ? ` — ${protectedHint}` : "";
   // A supplied inspection affordance remains the only protected tail. The
   // valid owner-answer command is protected inside the leading primary cue.
   let line: string;
-  let telemetry: string;
+  let base: string;
   let appendedHint = false;
   let appendedTelemetry = false;
   if (protectedHint && visibleWidth(hint) <= bodyWidth) {
     const available = bodyWidth - visibleWidth(hint);
-    telemetry = pickTelemetry(available);
+    base = pickBase(available);
     const withTelemetry = base + telemetry;
     appendedTelemetry = visibleWidth(withTelemetry) <= available;
     line = appendedTelemetry ? withTelemetry + hint : (row.answerHint ? truncateWithProtectedPrimary(primary, base, available) : truncateToWidth(base, available)) + hint;
     appendedHint = true;
   } else {
-    telemetry = pickTelemetry(bodyWidth);
+    base = pickBase(bodyWidth);
     appendedTelemetry = visibleWidth(base + telemetry) <= bodyWidth;
     line = appendedTelemetry ? base + telemetry : row.answerHint ? truncateWithProtectedPrimary(primary, base, bodyWidth) : truncateToWidth(base, bodyWidth);
   }
@@ -563,12 +556,15 @@ function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, ownerActio
       theme.fg("dim", " · ") +
       theme.fg("accent", model) +
       theme.fg("dim", ` (${effort})`) +
-      (telemetry === telemetryWithTps && tps !== undefined ? theme.fg("dim", " · ") + theme.fg("syntaxNumber", tps) : "") +
       theme.fg("dim", " · ") +
       theme.fg("syntaxNumber", contextTokens) +
       theme.fg("dim", " · ") +
       theme.fg("warning", estimate);
     content = base + styledTelemetry;
+  }
+  if (theme && base === baseWithTps && tps !== undefined && appendedTelemetry) {
+    const rateStart = durationPrefix.length + activity.length + 2;
+    content = content.slice(0, rateStart) + theme.fg("syntaxNumber", tps) + content.slice(rateStart + tps.length);
   }
   // Style only the surviving activity value, after plain-text truncation.
   // It now belongs to the duration field even when telemetry does not fit.
@@ -580,7 +576,7 @@ function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, ownerActio
   }
   if (ownerActionColor && ownerAction && content.length > 0) {
     // The owner-action identity/cue is the first structured field. It stays
-    // bold in every color phase; role, state, separators, and telemetry retain
+    // bold in every color phase; state, separators, and telemetry retain
     // their existing semantic styling. Styling after truncation avoids partial
     // escape sequences at narrow widths.
     const cueEnd = Math.min(content.length, primary.length);

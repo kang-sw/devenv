@@ -50,6 +50,8 @@ import {
   type RpcAgentRegistry,
 } from "../src/spawner.ts";
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
+import { buildAgentRows, buildWidgetLines } from "../src/agent-widget.ts";
+import { createOutputRateTracker } from "../src/output-rate.ts";
 import { fakeParentChannel, fakeUplink, idleOwnTurn, quiescentSnapshot, subtreeChannelPair, until } from "./fixtures/subtree-channels.ts";
 
 const dirs: string[] = [];
@@ -343,6 +345,125 @@ test("channel snapshots propagate a nested parent edge through two process hops,
     { id: "child", parentId: null, depth: 0, role: "worker", live: false },
   ]);
   assert.equal(parent.waitingOnChildren, false);
+});
+
+test("owner telemetry reaches an idle root over two channel hops, independently of ancestor totals", async () => {
+  const leaf = await channelPair(), middle = await channelPair();
+  const middleHarness = pushHarness([]), rootHarness = pushHarness([]);
+  const child = record("child", { client: middleHarness.client, channel: leaf.parent, runStartedAt: Date.now() - 90_000 });
+  const middleRegistry = new Map([[child.agentId, child]]);
+  installSubtreePublisher(middleRegistry, middle.upstream, () => 0, idleOwnTurn);
+  observeChildSubtree(middleRegistry, child, leaf.parent);
+  const parent = record("parent", { client: rootHarness.client, channel: middle.parent, running: false, runStartedAt: Date.now() - 120_000,
+    telemetry: { estimatedUsd: 99 } as never, descendantUsage: { estimatedUsd: 999 } });
+  const rootRegistry = new Map([[parent.agentId, parent]]);
+  installSubtreePublisher(rootRegistry, undefined, () => 0, idleOwnTurn);
+  observeChildSubtree(rootRegistry, parent, middle.parent);
+  const outputRate = createOutputRateTracker();
+  const grandchild = record("grandchild", { alias: "own-name", client: {} as never, running: true, runStartedAt: Date.now() - 20_000,
+    lastOutputAt: Date.now() - 2_000, observedModel: "own-model", observedEffort: "high", outputRate,
+    telemetry: { contextTokens: 12_000, estimatedUsd: 0.25 } as never, descendantUsage: { estimatedUsd: 888 } });
+  const ownerRegistry = new Map([[grandchild.agentId, grandchild]]);
+  installSubtreePublisher(ownerRegistry, leaf.upstream, () => 0, idleOwnTurn);
+  await until(() => parent.subtreeDescendants?.find(row => row.id === "grandchild")?.display?.name === "own-name", "detailed grandchild at the root");
+  const initial = parent.subtreeDescendants!.find(row => row.id === "grandchild")!.display!;
+  assert.equal(initial.estimatedUsd, 0.25); assert.equal(initial.outputTps, undefined);
+  const now = Date.now();
+  const local = buildAgentRows(ownerRegistry, [], now)[0];
+  const remote = buildAgentRows(rootRegistry, [], now).find(row => row.name === "own-name")!;
+  assert.deepEqual(remote, { ...local, depth: 2 });
+  assert.match(buildWidgetLines([remote], 0, 200)![0], /own-name.*own-model \(high\).*12\.0k.*\$0\.25/);
+
+  // A completed eligible message changes only owner telemetry. Neither ancestor emits RPC output.
+  outputRate.observe({ type: "message_update", assistantMessageEvent: { type: "text_start", contentIndex: 0 } }, 1000);
+  outputRate.observe({ type: "message_update", assistantMessageEvent: { type: "text_end", contentIndex: 0 } }, 2000);
+  outputRate.observe({ type: "message_end", message: { role: "assistant", provider: "p", model: "own-model", stopReason: "stop", usage: { output: 42 } } }, 2000);
+  grandchild.telemetry!.contextTokens = 14_000; grandchild.telemetry!.estimatedUsd = 0.3;
+  publishSubtree(ownerRegistry);
+  await until(() => parent.subtreeDescendants?.find(row => row.id === "grandchild")?.display?.outputTps === 42, "owner telemetry without ancestor activity", { timeoutMs: 3_000 });
+  assert.equal(parent.running, false); assert.equal(child.running, false);
+  assert.equal(parent.subtreeDescendants!.find(row => row.id === "grandchild")!.display!.contextTokens, 14_000);
+  assert.equal(parent.waitingOnChildren, true, "display updates do not alter accounting");
+  markAgentExited(middleHarness.pi, middleRegistry, child, { suppressTerminal: true });
+  await until(() => !parent.subtreeDescendants?.some(row => row.id === "grandchild"), "teardown clears detailed rows");
+  assert.ok(!buildAgentRows(rootRegistry, [], Date.now()).some(row => row.name === "own-name"));
+});
+
+test("staggered forwarding never adds a new telemetry window or unthrottles local telemetry", t => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 10_000 });
+  const sourceLink = fakeUplink(), middleLink = fakeUplink();
+  const sourceChannel = fakeParentChannel(), middleChannel = fakeParentChannel();
+  const forward = (link: ReturnType<typeof fakeUplink>, channel: ReturnType<typeof fakeParentChannel>) => {
+    const send = link.send;
+    link.send = msg => { send(msg); if (msg.t === "subtree") channel.deliver(msg.snapshot); };
+  };
+  forward(sourceLink, sourceChannel); forward(middleLink, middleChannel);
+  const child = record("child", { channel: sourceChannel.parent, client: {} as never, runStartedAt: 9_000, observedContextTokens: 100 });
+  const middleRegistry = new Map([[child.agentId, child]]);
+  installSubtreePublisher(middleRegistry, new SubtreeUpstream(middleLink.channel), () => 0, idleOwnTurn);
+  observeChildSubtree(middleRegistry, child, sourceChannel.parent);
+  const parent = record("parent", { channel: middleChannel.parent });
+  const rootRegistry = new Map([[parent.agentId, parent]]);
+  observeChildSubtree(rootRegistry, parent, middleChannel.parent);
+  const grandchild = record("grandchild", { client: {} as never, running: true, runStartedAt: 9_000, observedContextTokens: 200 });
+  const ownerRegistry = new Map([[grandchild.agentId, grandchild]]);
+  installSubtreePublisher(ownerRegistry, new SubtreeUpstream(sourceLink.channel), () => 0, idleOwnTurn);
+  const remote = (id: string) => parent.subtreeDescendants!.find(row => row.id === id)!.display!;
+  t.mock.timers.tick(1); grandchild.observedContextTokens = 300; publishSubtree(ownerRegistry);
+  t.mock.timers.tick(899); child.alias = "middle-state-edge"; publishSubtree(middleRegistry);
+  t.mock.timers.tick(1); child.observedContextTokens = 400; publishSubtree(middleRegistry);
+  assert.equal(remote("grandchild").contextTokens, 200);
+  t.mock.timers.tick(99);
+  assert.equal(remote("grandchild").contextTokens, 300, "source's t=1000 trailing sample reaches the root immediately despite the middle's t=900 publication");
+  assert.equal(remote("child").contextTokens, 100, "a forwarded snapshot cannot bypass the middle's own display throttle");
+  t.mock.timers.tick(899);
+  assert.equal(remote("child").contextTokens, 100);
+  t.mock.timers.tick(1);
+  assert.equal(remote("child").contextTokens, 400, "local telemetry still samples at its own one-second deadline");
+  assert.equal(remote("grandchild").contextTokens, 300);
+});
+
+test("detailed cache loses live authority on disconnect, resumes, and cannot cross a relaunch", () => {
+  const first = fakeParentChannel();
+  const parent = record("parent", { channel: first.parent, launchGeneration: 1 });
+  const registry = new Map([[parent.agentId, parent]]);
+  observeChildSubtree(registry, parent, first.parent);
+  const descendants = [{ id: "grandchild", parentId: null, depth: 0, role: "worker" as const, live: true,
+    display: { name: "old-launch", state: "running" as const, runStartedAt: 100, lastOutputAt: 150, outputTps: 42 } }];
+  first.deliver(quiescentSnapshot(5, { descendants }));
+  assert.equal(buildAgentRows(registry, [], 200)[0].name, "old-launch");
+  first.drop();
+  assert.equal(parent.subtreeDescendants![0].display?.name, "old-launch", "detail cache remains available");
+  assert.equal(parent.subtreeDescendants![0].live, false);
+  assert.ok(!buildAgentRows(registry, [], 200).some(row => row.name === "old-launch"));
+  first.hello({ subtree: quiescentSnapshot(5, { descendants }) });
+  assert.ok(buildAgentRows(registry, [], 200).some(row => row.name === "old-launch"));
+  first.deliver(quiescentSnapshot(4, { descendants: [{ ...descendants[0], display: { ...descendants[0].display, name: "stale" } }] }));
+  assert.equal(parent.subtreeDescendants![0].display?.name, "old-launch");
+  const second = fakeParentChannel(); parent.channel = second.parent; parent.launchGeneration = 2;
+  observeChildSubtree(registry, parent, second.parent);
+  assert.deepEqual(parent.subtreeDescendants, []);
+  second.deliver(quiescentSnapshot(1, { descendants: [{ ...descendants[0], display: { ...descendants[0].display, name: "new-launch", outputTps: undefined } }] }));
+  first.deliver(quiescentSnapshot(99, { descendants })); first.drop();
+  assert.equal(parent.subtreeDescendants![0].display?.name, "new-launch");
+  assert.equal(parent.subtreeDescendants![0].display?.outputTps, undefined);
+  assert.equal(parent.subtreeDescendants![0].live, true);
+});
+
+test("RPC deltas only arm one trailing owner-clock sample instead of per-token publication", async t => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 10_000 });
+  const h = pushHarness([]), link = fakeUplink();
+  const child = record("child", { client: h.client, running: true, runStartedAt: 9000, lastOutputAt: 9500 });
+  const registry = new Map([[child.agentId, child]]);
+  installSubtreePublisher(registry, new SubtreeUpstream(link.channel), () => 0, idleOwnTurn);
+  attachEventListener(h.pi, registry, child, h.client);
+  for (let i = 0; i < 100; i++) h.emit({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "x" } });
+  assert.equal(link.snapshots().length, 1);
+  t.mock.timers.tick(1000);
+  assert.equal(link.snapshots().length, 2);
+  assert.equal(link.snapshots().at(-1)?.descendants[0].display?.lastOutputAt, 10_000);
+  t.mock.timers.tick(5000);
+  assert.equal(link.snapshots().length, 2, "no idle polling");
 });
 
 test("ordinary settlement yields exactly one terminal result and clears execution before delivery", async () => {

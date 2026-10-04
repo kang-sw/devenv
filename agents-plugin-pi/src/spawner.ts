@@ -119,7 +119,7 @@ import { CHILD_MANAGEMENT_TOOLS, DEFAULT_MAX_AGENT_DEPTH, DELEGATION_ENV, READ_T
 import { normalizeWriteScopes, type EffectiveWriteCapability, type WriteScope } from "./write-scopes.ts";
 import { createWebSearch } from "./web-search.ts";
 import { verifyWebReadiness, WEB_HOME_ENV, WEB_READINESS_KIND } from "./web-readiness.ts";
-import { beginSubtreeDispatch, installSubtreePublisher, observeSubtreeChannel, publishSubtree, type OwnTurnState, type SubtreeDescendant, type SubtreeSnapshot, type SubtreeUpstream } from "./subtree-lifecycle.ts";
+import { beginSubtreeDispatch, installSubtreePublisher, observeSubtreeChannel, publishSubtree, scheduleSubtreeTelemetry, type OwnTurnState, type SubtreeDescendant, type SubtreeSnapshot, type SubtreeUpstream } from "./subtree-lifecycle.ts";
 import { PUSH_BATCH_CUSTOM_TYPE, PUSH_BATCH_VERSION, type PushBatchItem, type PushBatchItemState } from "./push-protocol.ts";
 import { capacityEvictionCost, isRemovedAgent, persistAgentCostCheckpoint, persistEvictedAgentCost, registerAgentCostOwner } from "./agent-cost.ts";
 import { createOutputRateTracker, type OutputRateTracker } from "./output-rate.ts";
@@ -2749,7 +2749,7 @@ export function observeChildSubtree(registry: RpcAgentRegistry | undefined, reco
     record.waitingOnChildren = view.waiting;
     record.subtreeRevision = view.snapshot?.revision;
     if (view.snapshot) record.subtreeTurn = { owed: view.snapshot.turnOwed, started: view.snapshot.turnsStarted };
-    record.subtreeDescendants = view.snapshot?.descendants ?? [];
+    record.subtreeDescendants = (view.snapshot?.descendants ?? []).map(row => view.disconnected ? { ...row, live: false } : row);
     // Every not-waiting view re-evaluates a held settle against the child's
     // own wake accounting; `releaseSettlementHold` decides and is a no-op
     // when nothing is held, so a duplicate snapshot cannot admit twice. It
@@ -2799,10 +2799,12 @@ export function attachApprovalChannel(
   record: RpcAgentRecord,
   channel: ApprovalChannelHost,
   approvalHook: () => ((record: RpcAgentRecord) => void) | undefined,
+  registry?: RpcAgentRegistry,
 ): () => void {
   const release = () => {
     record.pendingApproval = undefined;
     syncOwnershipProtection(record);
+    publishSubtree(registry);
     triggerAgentWidgetRefresh();
   };
   const offMessage = channel.onMessage((msg) => {
@@ -2878,7 +2880,7 @@ export function attachEventListener(
             const changed = record.observedModel !== undefined || record.observedEffort !== undefined || record.telemetry?.model !== undefined || record.telemetry?.effort !== undefined;
             delete record.observedModel; delete record.observedEffort;
             if (record.telemetry) { delete record.telemetry.model; delete record.telemetry.effort; }
-            if (changed) triggerAgentWidgetRefresh();
+            if (changed) { publishSubtree(registry); triggerAgentWidgetRefresh(); }
           }
         }
       } while (dirty && record.client === client && record.launchGeneration === generation);
@@ -2948,7 +2950,12 @@ export function attachEventListener(
     // Token deltas update only the O(1) high-water field. Their timing and
     // subtree/telemetry refreshes wait for message_end or the periodic gutter
     // cadence, preventing a per-token render fan-out.
-    if (agentOutput) markAgentOutput(record);
+    if (agentOutput) {
+      markAgentOutput(record);
+      // Dirty notification only: one trailing sampler reads the newest output
+      // clock without rebuilding or forwarding a tree for every token.
+      if (streamingDelta) scheduleSubtreeTelemetry(registry);
+    }
     // Block-boundary receipt times only (O(1)); the rate changes at message_end.
     if (e.type === "message_update" || e.type === "message_start" || e.type === "message_end") {
       const before = e.type === "message_end" ? outputRate.rate() : undefined;
@@ -3017,7 +3024,7 @@ export function attachEventListener(
   });
   // The decision hand-off rides the launch's channel; the hook resolves per
   // call because `record.onApprovalPending` may be armed after this attach.
-  const unsubscribeApproval = record.channel ? attachApprovalChannel(record, record.channel, () => onApprovalPending ?? record.onApprovalPending) : undefined;
+  const unsubscribeApproval = record.channel ? attachApprovalChannel(record, record.channel, () => onApprovalPending ?? record.onApprovalPending, registry) : undefined;
   record.unsubscribe = () => {
     unsubscribeEvents();
     unsubscribeApproval?.();
