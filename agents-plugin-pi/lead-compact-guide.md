@@ -1,5 +1,13 @@
 # Preparing for compaction
 
+The preparation below applies only after a decision to compact: at the hard
+point, for the user's `/compact`, or at a safe advisory boundary. An advisory
+is informational, not a task or an instruction to compact. For that advisory,
+a safe boundary requires both no active discussion with the human and no
+human answer or clarification being awaited; a pause after asking a question
+is not permission. Until then, continue the interactive exchange rather than
+start preparation.
+
 Compaction replaces this conversation with a summary. Durable state belongs in
 ws tooling, where it survives every compaction; the summary carries pointers to
 it plus what only this conversation holds. The adapter writes the summary's

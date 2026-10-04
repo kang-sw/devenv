@@ -623,19 +623,23 @@ export function buildPreparationMessage(trigger: PreparationTrigger, guide: stri
   let head: string;
   if (trigger.kind === "advisory") {
     head = [
-      `Context usage is ${Math.round(trigger.percent)}% of the window (advisory point: ${trigger.threshold}%). This is a light`,
-      "nudge, not an instruction to stop.",
+      `Context usage is ${Math.round(trigger.percent)}% of the window (advisory point: ${trigger.threshold}%). This is an`,
+      "informational nudge, not a task or an instruction to compact.",
       "",
-      "Consider compacting now if this is a quiet point \u2014 for example, you are only",
-      "waiting on background agents, or a piece of work just landed and what comes",
-      "next is weakly related to what you are holding. If you are mid-task or holding",
-      "context that would be costly to rebuild (an unsettled discussion, a",
-      "half-applied change, a diagnosis in progress), keep going and compact at the",
-      "next quiet point instead. You will not be nudged again before the hard point",
-      `(${trigger.hardPercent}%), where compaction is no longer optional.`,
+      "Do not compact autonomously in response to this advisory during active",
+      "discussion with the human or while awaiting a human answer or clarification.",
+      "A natural pause after asking the human a question is not permission to compact.",
+      "Continue the interactive exchange instead of treating this nudge as the next task.",
       "",
-      "If you decide not to compact now, end this turn without replying. If you do,",
-      "follow the guide below.",
+      "Only when neither condition is present, consider compacting at a quiet point",
+      "such as waiting only on background agents, or when work just landed and the",
+      "next work is weakly related to the current context. If you are mid-task or",
+      "holding context that would be costly to rebuild (a half-applied change or a",
+      "diagnosis in progress), keep going until a safe quiet point. You will not be",
+      `nudged again before the hard point (${trigger.hardPercent}%), where compaction is no longer optional.`,
+      "",
+      "If you decide not to compact now, end this advisory turn without replying.",
+      "The guide below applies only after you decide to compact at a safe boundary.",
     ].join("\n");
   } else if (trigger.kind === "hard") {
     head = `Context usage is ${Math.round(trigger.percent)}% of the window, past the hard compaction point (${trigger.threshold}%). Stop the current work now and prepare for compaction with the guide below before anything else.`;
