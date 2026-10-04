@@ -10,6 +10,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 0d1aea13bade20ee
 sage-review-completeness-reviewed: 0d1aea13bade20ee
+completed: 2026-10-04
 ---
 
 # Pi compaction UX for active conversations and display-only history
@@ -175,3 +176,40 @@ separator and user/assistant text presentation. Run relevant Pi suites and
 perform a live lead UI acceptance check of successful compaction and reload;
 record any unverified live check rather than claiming source analysis proves
 pixels, copy/selection behavior or model compliance.
+
+### Result (ea16d2818) - 2026-10-04
+
+- Added an independent lead-only `session_compact` observer and supported plain
+  custom-entry renderer in `agents-plugin-pi/src/compaction-history.ts`, wired
+  from `src/index.ts`. Latest twenty combined original user/assistant text
+  bodies are selected from the active branch and persisted with the successful
+  compaction ID. Mixed assistant text blocks count once; tools, thinking,
+  control traffic, summaries and previous snapshots contribute no messages.
+- Preserved retain-none context, existing summary/dialog assembly and all
+  compaction trigger/resume control. Literal display bodies use host-resolved
+  TUI primitives with a previous-conversation header, role labels and explicit
+  separators; terminal controls are stripped only for rendering.
+- Advisory and guide gating changed in `1cd1cd0de`: informational, not a task,
+  with no autonomous advisory compaction during active human discussion or
+  while awaiting an answer/clarification. Hard/manual instructions and delivery
+  semantics remain unchanged.
+- Decisions: omit empty-history blocks; preserve original text bodies including
+  human-invoked skill expansions instead of substituting dialog-normalized
+  text; accept supported differing live/reload placement rather than forcing
+  private UI ordering.
+- Verification: targeted suites passed 215/215 before the review fix. Initial
+  full `npm test` passed 2004 tests with three existing opt-in skips. After the
+  fix, eight history tests and `npm test -- --test-reporter=dot` passed;
+  `git diff --check` passed. SessionManager fixtures prove persistence, raw
+  record survival, branch isolation, deduplication and zero extra context.
+  Real SDK manual compaction verifies identical-summary event behavior,
+  refreshed history/reload and zero agent-start events without inference.
+- Independent lite review: no Critical findings; one Important finding fixed
+  in `5a63a682d`. Pi manual compaction reports the first matching summary's
+  entry ID, so the observer now resolves the newest matching successful
+  boundary on the active branch while checking reported branch membership.
+  Host follow-up captured as `261004-bug-pi-identical-summary-compaction-event`.
+  No re-review under the allocated one-pass lite policy.
+- Unverified: live user-terminal lead compaction and reload, rendered pixels,
+  selection/copy behavior and model compliance. Automated storage/render/SDK
+  checks do not establish those outcomes; no live acceptance is claimed.
