@@ -1,7 +1,8 @@
 import type { CustomEntry, ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
+import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import { humanTextOf } from "./lead-compaction.ts";
 import { isChildProcess } from "./goal-loop.ts";
-import { loadHostPiTui, Text, stripTerminalSequences } from "./pi-tui.ts";
+import { loadHostPiTui, Container, Markdown, Text, stripTerminalSequences } from "./pi-tui.ts";
 
 export const COMPACTION_HISTORY_TYPE = "ws-lead-compaction-history";
 
@@ -43,20 +44,31 @@ export function selectCompactionHistory(entries: readonly SessionEntry[]): Histo
 
 /** Supported plain entries persist for humans but produce no model-context messages. */
 export function registerCompactionHistory(pi: ExtensionAPI): void {
-  let primitives = { Text, stripTerminalSequences };
+  let primitives = { Container, Markdown, Text, stripTerminalSequences };
   pi.on("session_start", async () => {
     primitives = await loadHostPiTui();
   });
   pi.registerEntryRenderer<CompactionHistory>(COMPACTION_HISTORY_TYPE, (entry, _options, theme) => {
-    const { Text, stripTerminalSequences } = primitives;
+    const { Container, Markdown, Text, stripTerminalSequences } = primitives;
     const data = entry.data;
     if (!data || data.version !== 1 || !Array.isArray(data.messages)) return undefined;
-    // Render bodies literally, without Markdown reinterpretation or elision.
-    // Terminal controls are stripped only at display time; storage stays raw.
-    const body = data.messages.map((message) =>
-      `${theme.fg("accent", message.role === "user" ? "User" : "Assistant")}\n${stripTerminalSequences(message.text)}`,
-    ).join("\n\n");
-    return new Text(`${theme.fg("muted", "Previous conversation · display-only")}\n${theme.fg("dim", "────────────────────")}\n${body}\n${theme.fg("dim", "──────────────────── End previous conversation")}`, 0, 1);
+    const container = new Container();
+    container.addChild(new Text(`${theme.fg("muted", "Previous conversation · display-only")}\n${theme.fg("dim", "────────────────────")}`, 0, 1));
+    const markdownTheme = getMarkdownTheme();
+    for (const message of data.messages) {
+      const isUser = message.role === "user";
+      container.addChild(new Text(theme.fg("accent", isUser ? "User" : "Assistant"), 0, 0));
+      // Match native user Markdown padding/styles, but never its OSC navigation
+      // markers. Strip terminal controls only at display time; storage stays raw.
+      container.addChild(new Markdown(stripTerminalSequences(message.text), 1, 1, markdownTheme,
+        isUser ? {
+          color: (text) => theme.fg("userMessageText", text),
+          bgColor: (text) => theme.bg("userMessageBg", text),
+        } : undefined,
+        isUser ? { preserveOrderedListMarkers: true, preserveBackslashEscapes: true } : undefined));
+    }
+    container.addChild(new Text(theme.fg("dim", "──────────────────── End previous conversation"), 0, 1));
+    return container;
   });
   pi.on("session_compact", (event, ctx) => {
     if (isChildProcess(process.env)) return;

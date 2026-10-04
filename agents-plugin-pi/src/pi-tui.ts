@@ -74,6 +74,7 @@ export type PiTuiModule = typeof piTuiStatic;
 // an owner-run live identity check should ever be run against.
 export const {
   Box,
+  Container,
   Editor,
   Markdown,
   ScrollView,
