@@ -38,6 +38,8 @@
 import type { ThreadRecord } from "./ask.ts";
 import { isOwnerHeld, lastActivityAt, type RpcAgentRecord, type RpcAgentRegistry, type SpawnAgentRole } from "./spawner.ts";
 import type { SubtreeDescendantRole } from "./subtree-lifecycle.ts";
+import { classifyRegistryRowState, rowName, parseAgentDisplayDetail, type AgentDisplayDetail, type AgentRowState } from "./agent-display.ts";
+export { classifyRegistryRowState, rowName, type AgentRowState } from "./agent-display.ts";
 import { visibleWidth } from "./text-width.ts";
 import { isLeadOrFork, type SpawnRole } from "./process-role.ts";
 import { formatOutputRate } from "./output-rate.ts";
@@ -64,10 +66,6 @@ export const DEFAULT_AGENT_WIDGET_WIDTH = 80;
 export type AgentTreeRole = SubtreeDescendantRole;
 export type AgentRowRole = AgentTreeRole | "thread";
 
-/** One live-agent row's state, in display precedence order. Execution,
- * descendant waits, delivery, and owner action remain distinct. */
-export type AgentRowState = "awaiting-owner" | "idle-awaiting-owner" | "awaiting-approval" | "waiting-on-children" | "pending-delivery" | "running";
-
 /** One rendered row of the live-agent widget. Pure data — no `RpcAgentRecord`/`ThreadRecord` reference — so `buildWidgetLines` needs no registry access of its own. */
 export interface AgentRow {
   /** `alias > title > shortened uuid` (mirrors `ask.ts:351`'s short-uuid convention). */
@@ -90,7 +88,7 @@ export interface AgentRow {
   outputTps?: number;
   /** Propagated descendants alone carry depth; locally-owned and synthetic thread rows remain at depth zero without changing their established data shape. */
   depth?: number;
-  /** Cross-process descendants expose process liveness only, so rendering must not invent clocks, telemetry, or local affordances for them. */
+  /** Legacy or incomplete cross-process detail exposes liveness only, without invented clocks or telemetry. */
   livenessOnly?: true;
 }
 
@@ -166,47 +164,26 @@ function roleFromSpawnRole(spawnRole: SpawnAgentRole | undefined): AgentTreeRole
   return "worker";
 }
 
-/** `alias > title > shortened uuid` — the ticket's name-precedence rule, mirroring `ask.ts:351`'s `agentId.slice(0, 8)` convention. Exported (260908 audit-window ticket) so the audit picker reuses the identical naming rule verbatim. */
-export function rowName(record: RpcAgentRecord): string {
-  return record.alias ?? record.title ?? record.agentId.slice(0, 8);
-}
-
-/**
- * 260908 (subagent audit window ticket): the row-inclusion/state
- * classification half of `buildAgentRows`'s per-record loop below, pulled
- * out as its own pure predicate so the audit picker reuses identical
- * inclusion and precedence. Execution, descendant waiting, pending terminal
- * delivery, approval, and owner action are distinct states. `undefined`
- * means the record is resting with no visible action or delivery pending.
- */
-export function classifyRegistryRowState(record: RpcAgentRecord): AgentRowState | undefined {
-  if (record.threadBound === true) return "awaiting-owner";
-  if (record.pendingApproval !== undefined) return "awaiting-approval";
-  if (isOwnerHeld(record) && !record.running && !record.streaming) return "idle-awaiting-owner";
-  if (record.running || record.streaming) return "running";
-  if (record.waitingOnChildren) return "waiting-on-children";
-  if (record.terminalDelivery && record.terminalDelivery.state !== "enqueued") return "pending-delivery";
-  return undefined;
-}
-
 /** Shared local-plus-propagated tree contract used by the live gutter now and the audit picker in Phase 3. */
 export interface AgentTreeNode {
   id: string;
   parentId: string | null;
   depth: number;
   role: AgentTreeRole;
-  /** `undefined` is the dormant tier. Propagated nodes can only be `running` or dormant because the cross-process contract carries liveness alone. */
+  /** `undefined` is the dormant tier. Remote detailed states are advisory and gated by process liveness. */
   state: AgentRowState | undefined;
   live: boolean;
   /** Only records owned by this process have a locally reachable conversation stream. */
   openable: boolean;
+  /** Sanitized owner projection, present only on detailed remote nodes. */
+  display?: AgentDisplayDetail;
 }
 
 /**
  * Builds one parent-before-child tree from this process's registry and every
  * direct child's propagated identity snapshot. Local records remain the
- * authoritative source for their rich state; cross-process descendants are
- * deliberately reduced to `running` versus dormant from `live` alone.
+ * authoritative source for their rich state; cross-process detail is advisory
+ * and falls back to `running` versus dormant when absent or incomplete.
  */
 export function buildAgentTree(records: RpcAgentRegistry): AgentTreeNode[] {
   const nodes = new Map<string, AgentTreeNode>();
@@ -245,14 +222,16 @@ export function buildAgentTree(records: RpcAgentRegistry): AgentTreeNode[] {
       const parentId = descendant.parentId ?? record.agentId;
       const parent = nodes.get(parentId);
       if (!parent || !branchIds.has(parentId) || localIds.has(descendant.id)) continue;
+      const display = parseAgentDisplayDetail(descendant.display);
       const node: AgentTreeNode = {
         id: descendant.id,
         parentId,
         depth: parent.depth + 1,
         role: descendant.role,
-        state: descendant.live ? "running" : undefined,
+        state: descendant.live ? (display ? display.state ?? undefined : "running") : undefined,
         live: descendant.live,
         openable: false,
+        ...(display ? { display } : {}),
       };
       if (add(node)) branchIds.add(node.id);
     }
@@ -330,9 +309,23 @@ export function buildAgentRows(records: RpcAgentRegistry, threads: readonly Thre
 
   for (const node of tree) {
     if (!node.openable) {
-      // Dormant propagated identities remain available to the shared tree for
-      // Phase 3's picker, but the live gutter admits only real process liveness.
-      if (node.state !== "running") continue;
+      // Cached detail cannot restore liveness or grant local command access.
+      if (!node.live || node.state === undefined) continue;
+      if (node.display) {
+        const { name, runStartedAt, settledAt, lastOutputAt, model, effort, contextTokens, estimatedUsd, outputTps } = node.display;
+        rowById.set(node.id, {
+          name, role: node.role, state: node.state,
+          elapsedMs: clampElapsed((settledAt ?? now) - runStartedAt),
+          lastActivityMs: clampElapsed(now - lastOutputAt),
+          depth: node.depth,
+          ...(model !== undefined ? { model } : {}),
+          ...(effort !== undefined ? { effort } : {}),
+          ...(contextTokens !== undefined ? { contextTokens } : {}),
+          ...(estimatedUsd !== undefined ? { estimatedUsd } : {}),
+          ...(outputTps !== undefined ? { outputTps } : {}),
+        });
+        continue;
+      }
       rowById.set(node.id, {
         name: node.id.slice(0, 8),
         role: node.role,

@@ -14,6 +14,7 @@ import { buildAgentRows, buildAgentTree, buildWidgetLines, createAgentWidgetCont
 import type { RpcAgentRecord, RpcAgentRegistry } from "../src/spawner.ts";
 import type { ThreadRecord } from "../src/ask.ts";
 import { visibleWidth } from "../src/text-width.ts";
+import { agentDisplayDetail, type AgentDisplayDetail } from "../src/agent-display.ts";
 
 const NOW = Date.parse("2026-09-05T10:05:00.000Z");
 
@@ -73,6 +74,98 @@ describe("buildAgentTree", () => {
       { id: "grand-grand-0000-000000000000", parentId: "child-child-0000-000000000000", depth: 2, role: "worker", state: undefined, live: false, openable: false },
       { id: sibling.agentId, parentId: null, depth: 0, role: "fork", state: undefined, live: false, openable: true },
     ]);
+  });
+});
+
+describe("detailed propagated rows", () => {
+  const detail = (overrides: Partial<AgentDisplayDetail> = {}): AgentDisplayDetail => ({
+    name: "nested", state: "running", runStartedAt: NOW - 20_000,
+    lastOutputAt: NOW - 3_000, model: "own-model", effort: "high",
+    contextTokens: 12_000, estimatedUsd: 0.123, outputTps: 42, ...overrides,
+  });
+  const remote = (display: unknown, live = true): RpcAgentRecord => record({
+    subtreeDescendants: [{ id: "remote00", parentId: null, depth: 0, role: "worker", live, display: display as AgentDisplayDetail }],
+  });
+
+  test("grandchild and deeper detail matches local own-record presentation, not ancestor totals", () => {
+    const own = record({ alias: "nested", running: true, runStartedAt: NOW - 20_000, lastOutputAt: NOW - 3_000,
+      telemetry: { model: "own-model", effort: "high", contextTokens: 12_000, estimatedUsd: 0.123 } as never,
+      outputRate: { rate: () => 42 } as never });
+    const display = agentDisplayDetail(own)!;
+    const parent = remote(display);
+    parent.running = true;
+    parent.runStartedAt = NOW - 100_000;
+    parent.telemetry = { estimatedUsd: 99 } as never;
+    parent.subtreeDescendants!.push({ id: "deeper00", parentId: "remote00", depth: 1, role: "worker", live: true, display });
+    const rows = buildAgentRows(registryOf(parent), [], NOW);
+    const local = buildAgentRows(registryOf(own), [], NOW)[0];
+    assert.deepEqual(rows.slice(1), [{ ...local, depth: 1 }, { ...local, depth: 2 }]);
+    const localLine = buildWidgetLines([local], 0, 200)![0];
+    assert.deepEqual(buildWidgetLines(rows, 0, 200)!.slice(1), [`│ ${localLine}`, `│ │ ${localLine}`]);
+    assert.ok(buildAgentTree(registryOf(parent)).slice(1).every(node => !node.openable));
+  });
+
+  test("owner clocks advance locally and settlement freezes run duration only", () => {
+    const parent = remote(detail());
+    const first = buildAgentRows(registryOf(parent), [], NOW)[0];
+    const later = buildAgentRows(registryOf(parent), [], NOW + 10_000)[0];
+    assert.equal(later.elapsedMs, first.elapsedMs + 10_000);
+    assert.equal(later.lastActivityMs, first.lastActivityMs + 10_000);
+    parent.subtreeDescendants![0].display!.settledAt = NOW - 5_000;
+    assert.equal(buildAgentRows(registryOf(parent), [], NOW + 10_000)[0].elapsedMs, 15_000);
+    assert.equal(buildAgentRows(registryOf(parent), [], NOW + 10_000)[0].lastActivityMs, 13_000);
+  });
+
+  test("forwarded states keep ranks and never acquire local command affordances", () => {
+    const states: AgentRowState[] = ["running", "pending-delivery", "waiting-on-children", "awaiting-approval", "idle-awaiting-owner", "awaiting-owner"];
+    const parents = states.map((state, index) => ({ ...remote(detail({ state, name: state })), agentId: `parent-${index}` }));
+    parents.forEach((parent, index) => { parent.subtreeDescendants![0].id = `remote-${index}`; });
+    const ranked = buildAgentRows(registryOf(...parents), [], NOW);
+    assert.deepEqual(ranked.map(row => row.state), ["idle-awaiting-owner", "awaiting-owner", "awaiting-approval", "waiting-on-children", "pending-delivery", "running"]);
+    assert.ok(ranked.every(row => row.answerHint === undefined && row.inspectionHint === undefined));
+    const lines = buildWidgetLines(ranked, 0, 200, true)!.join("\n");
+    assert.match(lines, /awaiting approval/);
+    assert.match(lines, /OWNER ACTION/);
+    assert.doesNotMatch(lines, /\/answer|\/audit|ws-approve/);
+  });
+
+  test("settled idle detail and disconnected cached running detail are omitted", () => {
+    assert.deepEqual(buildAgentRows(registryOf(remote(detail({ state: null }))), [], NOW), []);
+    const parent = remote(detail(), false);
+    assert.deepEqual(buildAgentRows(registryOf(parent), [], NOW), []);
+    assert.equal(buildAgentTree(registryOf(parent))[1].state, undefined);
+    assert.equal(buildAgentTree(registryOf(parent))[1].openable, false);
+  });
+
+  test("boundary sanitizes detail, omits unknown telemetry, and falls back for malformed base blocks", () => {
+    for (const malformed of [undefined, {}, { ...detail(), state: "bogus" }, { ...detail(), runStartedAt: NaN }, { ...detail(), lastOutputAt: -1 }, { ...detail(), name: "\x1b\n" }]) {
+      const parent = remote(malformed);
+      assert.equal(buildAgentTree(registryOf(parent))[1].display, undefined);
+      assert.deepEqual(buildAgentRows(registryOf(parent), [], NOW)[0], {
+        name: "remote00", role: "worker", state: "running", elapsedMs: 0, lastActivityMs: 0, depth: 1, livenessOnly: true,
+      });
+    }
+    const parent = remote({ ...detail(), name: "\x1bnested\n", model: "\x1bmodel", effort: undefined,
+      contextTokens: NaN, estimatedUsd: -1, outputTps: Infinity });
+    const row = buildAgentRows(registryOf(parent), [], NOW)[0];
+    assert.equal(row.name, "nested");
+    assert.equal(row.model, "model");
+    for (const key of ["effort", "contextTokens", "estimatedUsd", "outputTps"] as const) assert.equal(row[key], undefined);
+    assert.match(buildWidgetLines([row], 0, 200)![0], /model \(—\) · \? · \$—/);
+    assert.equal(buildAgentTree(registryOf(remote(detail({ name: "x".repeat(400) }))))[1].display!.name.length, 256);
+  });
+
+  test("nested width degradation drops TPS first and retains bounded gutters at every width", () => {
+    const row = buildAgentRows(registryOf(remote(detail())), [], NOW)[0];
+    const full = buildWidgetLines([row], 0, 200)![0];
+    assert.match(full, /42t\/s/);
+    const withoutTps = full.replace(" · 42t/s", "");
+    assert.equal(buildWidgetLines([row], 0, visibleWidth(withoutTps))![0], withoutTps);
+    for (let width = 0; width <= visibleWidth(full); width++) {
+      const line = buildWidgetLines([row], 0, width)![0];
+      assert.ok(visibleWidth(line) <= width);
+      assert.doesNotMatch(line, /\/answer|\/audit/);
+    }
   });
 });
 
