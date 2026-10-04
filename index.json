@@ -524,7 +524,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-04T00:55:55Z"
+        "touched_at": "2026-10-04T00:57:18Z",
+        "impl": {
+          "branch": "impl/develop/unwed-chunk-dingy"
+        }
       }
     }
   }
