@@ -233,9 +233,9 @@ describe("buildMailboxPushMessage", () => {
   });
 
   test("a reply-id-only sender falls back to its reply_to handle", () => {
-    const message = buildMailboxPushMessage({ reply_to: "id:deadbeef", content: "ack" });
-    assert.equal(message.content, "mail from id:deadbeef:\nack");
-    assert.deepEqual(message.details, { reply_to: "id:deadbeef", content: "ack" });
+    const message = buildMailboxPushMessage({ reply_to: "id:headlessroutineremodelerpassage", content: "ack" });
+    assert.equal(message.content, "mail from id:headlessroutineremodelerpassage:\nack");
+    assert.deepEqual(message.details, { reply_to: "id:headlessroutineremodelerpassage", content: "ack" });
   });
 
   test("a handle-less envelope degrades to a placeholder rather than an empty head", () => {

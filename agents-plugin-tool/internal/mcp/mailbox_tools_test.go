@@ -36,8 +36,7 @@ func mailboxLogin(t *testing.T, s *Server, id int, root string) string {
 // TestMailboxInertByDefault verifies Decision 1's inert-by-default contract:
 // with neither WS_MAILBOX nor WS_MAILBOX_AUTO set, and the session having
 // neither sent nor self-looked-up, ordinary tool traffic gets no piggyback
-// badge and touches no mailbox storage at all (no presence file, no
-// machine secret).
+// badge and touches no mailbox storage at all (no presence or reply registry).
 func TestMailboxInertByDefault(t *testing.T) {
 	setupMailboxTestEnv(t)
 	root := t.TempDir()
@@ -64,18 +63,18 @@ func TestMailboxInertByDefault(t *testing.T) {
 	if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
 		t.Fatalf("worktree mailbox store was created for a fully inert session: %s", worktreePath)
 	}
-	secretPath, err := wsmailbox.MachineSecretPath()
+	replyPath, err := wsmailbox.ReplyRegistryPath()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(secretPath); !os.IsNotExist(err) {
-		t.Fatalf("machine secret was minted for a fully inert session: %s", secretPath)
+	if _, err := os.Stat(replyPath); !os.IsNotExist(err) {
+		t.Fatalf("reply registry was created for a fully inert session: %s", replyPath)
 	}
 }
 
 // TestMailboxUniversalSendEnvLessReturnPathAndPiggyback verifies universal
 // send (Decision 11) from an env-less session, that the reply-id it
-// publishes is the HMAC of its session_key (never the raw key), that the
+// publishes is derived from its session_key (never the raw key), that the
 // named-inbox owner can recv and reply to that reply-id, and that the
 // env-less sender can then recv its own reply and gets a piggyback badge for
 // it beforehand — even though it holds no owner pointer at all.
@@ -102,13 +101,21 @@ func TestMailboxUniversalSendEnvLessReturnPathAndPiggyback(t *testing.T) {
 		t.Fatalf("send response missing your_reply_id handle: %s", sendResp)
 	}
 
-	secret, err := wsmailbox.EnsureMachineSecret()
+	wantReplyID := wsmailbox.ReplyID(keyB)
+	if !strings.Contains(sendResp, wantReplyID) {
+		t.Fatalf("published reply-id does not match session derivation: resp=%s want=%s", sendResp, wantReplyID)
+	}
+
+	replyPath, err := wsmailbox.ReplyRegistryPath()
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantReplyID := wsmailbox.ReplyID(secret, keyB)
-	if !strings.Contains(sendResp, wantReplyID) {
-		t.Fatalf("published reply-id does not match HMAC(machine_secret, session_key): resp=%s want=%s", sendResp, wantReplyID)
+	registry, err := wsmailbox.LoadReplyStore(replyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := registry.Entries[wantReplyID]; !ok {
+		t.Fatalf("missing sender registry identity: %s", wantReplyID)
 	}
 
 	recvResp := callToolWithKey(t, serverA, 3, keyA, "mailbox.recv", nil)
@@ -116,8 +123,29 @@ func TestMailboxUniversalSendEnvLessReturnPathAndPiggyback(t *testing.T) {
 		t.Fatalf("owner recv did not surface the message with the sender's reply-id handle: %s", recvResp)
 	}
 
+	jsonSend := callToolWithKey(t, serverB, 30, keyB, "mailbox.send", map[string]any{
+		"to": "alice@worktree", "content": "JSON anonymous mail", "format": "json",
+	})
+	var sent struct {
+		ReplyID    string `json:"your_reply_id"`
+		StampValue string `json:"stamp_value"`
+	}
+	if err := json.Unmarshal([]byte(jsonSend), &sent); err != nil {
+		t.Fatal(err)
+	}
+	if sent.ReplyID != "id:"+wantReplyID || sent.StampValue != sent.ReplyID {
+		t.Fatalf("JSON send identity differs from text/registry: %#v", sent)
+	}
+	jsonRecv := callToolWithKey(t, serverA, 31, keyA, "mailbox.recv", map[string]any{"format": "json"})
+	var envelopes []wsmailbox.Envelope
+	if err := json.Unmarshal([]byte(jsonRecv), &envelopes); err != nil {
+		t.Fatalf("JSON recv: %v: %s", err, jsonRecv)
+	}
+	if len(envelopes) != 1 || envelopes[0].From != "" || envelopes[0].ReplyTo != "id:"+wantReplyID {
+		t.Fatalf("anonymous JSON sender differs from text/registry: %#v", envelopes)
+	}
 	callToolWithKey(t, serverA, 4, keyA, "mailbox.send", map[string]any{
-		"to": "id:" + wantReplyID, "content": "welcome back",
+		"to": envelopes[0].ReplyTo, "content": "welcome back",
 	})
 
 	badgeResp := callToolWithKey(t, serverB, 5, keyB, "runtime.read", nil)
@@ -138,7 +166,7 @@ func TestMailboxUniversalSendEnvLessReturnPathAndPiggyback(t *testing.T) {
 
 // TestMailboxReplyIDStableAcrossRestartAndDiesAtNewFerrule verifies Decision
 // 11/13's restart-stability contract: the reply-id is a pure function of
-// (machine_secret, session_key), so it survives a simulated MCP-process
+// session_key, so it survives a simulated MCP-process
 // restart (a brand new Server instance) while the session_key stays live,
 // but a parent-less ferrule's freshly minted session_key computes a
 // different reply-id, orphaning the old one.
@@ -150,37 +178,28 @@ func TestMailboxReplyIDStableAcrossRestartAndDiesAtNewFerrule(t *testing.T) {
 	server1 := NewServer(root, "test")
 	key1 := mailboxLogin(t, server1, 1, root)
 
-	replyID1, err := server1.mailboxReplyID(key1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	replyID1 := server1.mailboxReplyID(key1)
 	if !wsmailbox.IsValidReplyID(replyID1) {
-		t.Fatalf("reply-id %q does not match the expected HMAC digest shape", replyID1)
+		t.Fatalf("reply-id %q does not match the expected readable handle shape", replyID1)
 	}
 
 	// Simulated restart: a brand new process-lifetime Server, same storage
 	// roots (same WS_CACHE_HOME), same still-live session_key.
 	server2 := NewServer(root, "test")
-	replyID2, err := server2.mailboxReplyID(key1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	replyID2 := server2.mailboxReplyID(key1)
 	if replyID1 != replyID2 {
 		t.Fatalf("reply-id not stable across a simulated MCP-process restart: %s vs %s", replyID1, replyID2)
 	}
 
 	// A parent-less ferrule mints a brand new session_key (revive/re-login);
-	// the reply-id computed from it must differ from the old one.
+	// These sampled sessions route separately; this is not a uniqueness guarantee.
 	key2 := mailboxLogin(t, server2, 2, root)
-	replyID3, err := server2.mailboxReplyID(key2)
-	if err != nil {
-		t.Fatal(err)
-	}
+	replyID3 := server2.mailboxReplyID(key2)
 	if replyID3 == replyID1 {
 		t.Fatalf("a new parent-less ferrule's session_key produced the same reply-id as the old one")
 	}
 
-	// Prove delivery, not just digest inequality: mail addressed to the OLD
+	// Prove delivery, not just handle inequality: mail addressed to the OLD
 	// reply-id must land in the old reply-id's own queue and be drainable
 	// only by the OLD session_key (key1) — never by the new one (key2),
 	// which computes and drains a different queue entirely.

@@ -485,11 +485,7 @@ func seedReplyMail(t *testing.T, env []string, sessionKey, content string) {
 	t.Helper()
 	t.Setenv("WS_CACHE_HOME", cacheHomeFromEnv(t, env))
 
-	secret, err := wsmailbox.EnsureMachineSecret()
-	if err != nil {
-		t.Fatalf("EnsureMachineSecret: %v", err)
-	}
-	replyID := wsmailbox.ReplyID(secret, sessionKey)
+	replyID := wsmailbox.ReplyID(sessionKey)
 	path, err := wsmailbox.ReplyRegistryPath()
 	if err != nil {
 		t.Fatalf("ReplyRegistryPath: %v", err)

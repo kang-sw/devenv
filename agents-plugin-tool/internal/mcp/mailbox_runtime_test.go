@@ -12,6 +12,19 @@ import (
 	"github.com/kang-sw/devenv/internal/wsmailbox"
 )
 
+func TestMailboxReplyIDFixedSessionsAcrossRestart(t *testing.T) {
+	for key, want := range map[string]string{
+		"amber-tide-fox":    "headlessroutineremodelerpassage",
+		"other-session-key": "staunchmarriedungluetrapezoid",
+	} {
+		for i := 0; i < 2; i++ {
+			if got := NewServer(t.TempDir(), "test").mailboxReplyID(key); got != want {
+				t.Fatalf("mailboxReplyID(%q) = %q, want %q", key, got, want)
+			}
+		}
+	}
+}
+
 // TestReapStaleReplyIDsRemovesOnlyStaleEmptyEntries verifies Decision 11's
 // lazy-expiry reaping: an entry past mailboxReplyIDRetention with an empty
 // queue is removed; a stale entry with a NON-empty queue is kept

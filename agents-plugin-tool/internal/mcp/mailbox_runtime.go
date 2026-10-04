@@ -78,10 +78,6 @@ type mailboxRuntimeState struct {
 	registered     bool
 	registeredRoot string
 
-	secretOnce  sync.Once
-	secretValue []byte
-	secretErr   error
-
 	heartbeatMu sync.Mutex
 	heartbeatAt time.Time
 
@@ -373,22 +369,9 @@ func (s *Server) runMailboxPresenceTicker(ctx context.Context, tick <-chan time.
 	}
 }
 
-// mailboxSecret returns the process-cached, once-per-machine HMAC secret
-// (Decision 11).
-func (s *Server) mailboxSecret() ([]byte, error) {
-	s.mailbox.secretOnce.Do(func() {
-		s.mailbox.secretValue, s.mailbox.secretErr = wsmailbox.EnsureMachineSecret()
-	})
-	return s.mailbox.secretValue, s.mailbox.secretErr
-}
-
 // mailboxReplyID computes callerSessionKey's deterministic reply-id.
-func (s *Server) mailboxReplyID(callerSessionKey string) (string, error) {
-	secret, err := s.mailboxSecret()
-	if err != nil {
-		return "", err
-	}
-	return wsmailbox.ReplyID(secret, callerSessionKey), nil
+func (s *Server) mailboxReplyID(callerSessionKey string) string {
+	return wsmailbox.ReplyID(callerSessionKey)
 }
 
 // mailboxReplyIDRetention bounds how long an idle, empty-queue reply-id
@@ -422,10 +405,7 @@ func reapStaleReplyIDs(store *wsmailbox.ReplyStore, now time.Time) {
 // the machine-tier registry (the channel-open act of Decision 11 send, and
 // Decision 5's env-less self-lookup) and returns the reply-id.
 func (s *Server) publishReplyID(callerSessionKey string) (string, error) {
-	replyID, err := s.mailboxReplyID(callerSessionKey)
-	if err != nil {
-		return "", err
-	}
+	replyID := s.mailboxReplyID(callerSessionKey)
 	path, err := wsmailbox.ReplyRegistryPath()
 	if err != nil {
 		return "", err
