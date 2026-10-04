@@ -31,11 +31,7 @@ func TestWaitReturnsImmediatelyOnReplyIDUnread(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 
 	const sessionKey = "amber-tide-fox"
-	secret, err := EnsureMachineSecret()
-	if err != nil {
-		t.Fatalf("EnsureMachineSecret: %v", err)
-	}
-	replyID := ReplyID(secret, sessionKey)
+	replyID := ReplyID(sessionKey)
 	replyPath, err := ReplyRegistryPath()
 	if err != nil {
 		t.Fatalf("ReplyRegistryPath: %v", err)
@@ -123,11 +119,7 @@ func TestWaitBlocksThenReturnsOnArrivalDuringSleep(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 
 	const sessionKey = "amber-tide-fox"
-	secret, err := EnsureMachineSecret()
-	if err != nil {
-		t.Fatalf("EnsureMachineSecret: %v", err)
-	}
-	replyID := ReplyID(secret, sessionKey)
+	replyID := ReplyID(sessionKey)
 	replyPath, err := ReplyRegistryPath()
 	if err != nil {
 		t.Fatalf("ReplyRegistryPath: %v", err)
@@ -276,11 +268,7 @@ func TestWaitEnvLessTargetsOwnReplyIDOnly(t *testing.T) {
 	}
 
 	const sessionKey = "amber-tide-fox"
-	secret, err := EnsureMachineSecret()
-	if err != nil {
-		t.Fatalf("EnsureMachineSecret: %v", err)
-	}
-	replyID := ReplyID(secret, sessionKey)
+	replyID := ReplyID(sessionKey)
 	replyPath, err := ReplyRegistryPath()
 	if err != nil {
 		t.Fatalf("ReplyRegistryPath: %v", err)

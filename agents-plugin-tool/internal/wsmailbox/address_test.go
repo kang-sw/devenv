@@ -1,6 +1,9 @@
 package wsmailbox
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseAddressSlug(t *testing.T) {
 	addr, err := ParseAddress("amber-tide-fox@machine")
@@ -13,7 +16,7 @@ func TestParseAddressSlug(t *testing.T) {
 }
 
 func TestParseAddressReplyID(t *testing.T) {
-	replyID := ReplyID([]byte("0123456789abcdef0123456789abcdef"), "some-session-key")
+	replyID := ReplyID("some-session-key")
 	addr, err := ParseAddress("id:" + replyID)
 	if err != nil {
 		t.Fatalf("ParseAddress: %v", err)
@@ -30,8 +33,16 @@ func TestParseAddressRejectsBadShapes(t *testing.T) {
 		"name@badscope",
 		"@machine",
 		"BadName@machine",
-		"id:tooshort",
-		"id:" + "zz" + repeatHex(62),
+		"id:",
+		"id:" + strings.Repeat("a", 64),
+		"id:" + strings.Repeat("0", 64),
+		"id:" + strings.Repeat("a", 37),
+		"id:amber-tide-fox-river",
+		"id:amber tide",
+		"id:Amber",
+		"id:abc1",
+		"id:abc/def",
+		"id:abc_def",
 	}
 	for _, raw := range cases {
 		if _, err := ParseAddress(raw); err == nil {
@@ -66,10 +77,10 @@ func TestIsValidNameLengthBoundary(t *testing.T) {
 	}
 }
 
-func repeatHex(n int) string {
-	out := make([]byte, n)
-	for i := range out {
-		out[i] = 'a'
+func TestReplyIDBodyBoundsWithoutWordValidation(t *testing.T) {
+	for _, body := range []string{"a", "notaword", strings.Repeat("z", 36)} {
+		if _, err := ParseAddress("id:" + body); err != nil {
+			t.Fatalf("ParseAddress(%q): %v", body, err)
+		}
 	}
-	return string(out)
 }

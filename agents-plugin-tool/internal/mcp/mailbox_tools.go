@@ -168,9 +168,8 @@ func (s *Server) handleMailboxRecv(id json.RawMessage, args map[string]any) resp
 	// Own reply-id queue: always drained, authorized intrinsically by the
 	// caller's own session_key (Decision 3's carve-out), independent of
 	// owner status. Same drain-after-confirmed-write discipline as above.
-	if replyID, rerr := s.mailboxReplyID(sessionKey); rerr != nil {
-		readErrs = append(readErrs, fmt.Errorf("reply-id: %w", rerr))
-	} else if path, perr := wsmailbox.ReplyRegistryPath(); perr != nil {
+	replyID := s.mailboxReplyID(sessionKey)
+	if path, perr := wsmailbox.ReplyRegistryPath(); perr != nil {
 		readErrs = append(readErrs, fmt.Errorf("reply-id registry path: %w", perr))
 	} else {
 		var replyDrained []wsmailbox.Envelope
@@ -450,13 +449,12 @@ func (s *Server) mailboxPiggybackBadge(sessionKey string) string {
 	}
 
 	if checkReply {
-		if replyID, rerr := s.mailboxReplyID(sessionKey); rerr == nil {
-			if path, perr := wsmailbox.ReplyRegistryPath(); perr == nil {
-				if store, lerr := wsmailbox.LoadReplyStore(path); lerr == nil {
-					if queue := store.Queues[replyID]; len(queue) > 0 {
-						unread += len(queue)
-						senders = append(senders, mailboxSenderLabels(queue)...)
-					}
+		replyID := s.mailboxReplyID(sessionKey)
+		if path, perr := wsmailbox.ReplyRegistryPath(); perr == nil {
+			if store, lerr := wsmailbox.LoadReplyStore(path); lerr == nil {
+				if queue := store.Queues[replyID]; len(queue) > 0 {
+					unread += len(queue)
+					senders = append(senders, mailboxSenderLabels(queue)...)
 				}
 			}
 		}

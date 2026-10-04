@@ -166,11 +166,7 @@ func resolveWaitTarget(target WaitTarget) (resolvedWaitTarget, error) {
 		r.namedPath = path
 	}
 
-	secret, err := EnsureMachineSecret()
-	if err != nil {
-		return resolvedWaitTarget{}, err
-	}
-	r.replyID = ReplyID(secret, target.SessionKey)
+	r.replyID = ReplyID(target.SessionKey)
 	replyPath, err := ReplyRegistryPath()
 	if err != nil {
 		return resolvedWaitTarget{}, err

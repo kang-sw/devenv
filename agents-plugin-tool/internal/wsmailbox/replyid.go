@@ -2,131 +2,28 @@ package wsmailbox
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gofrs/flock"
 
+	"github.com/kang-sw/devenv/internal/wskey"
 	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
-// This file implements Decision 11's always-on reply-id return channel: a
-// machine-wide secret plus a deterministic HMAC of the caller's own
-// session_key, and the machine-tier registry (presence-less; entries carry
-// only a last-seen stamp) + per-reply-id queue that "id:<reply-id>"
-// addressing (Decision 12) delivers into.
-//
-// Both live at the machine-global session-key cache root
-// (wsstate.CacheRoot, sibling to keys/), NOT under the wsnote "machine"
-// layer root (~/.ws): the reply-id channel is anchored to caller_session_key
-// (Decision 13), the same machine-global identity space keys/ already
-// owns, and Route Facts for this ticket name that cache root explicitly as
-// the machine_secret's home.
+// The always-on reply channel uses a deterministic session-derived handle.
+// Its flat registry and queues live at the machine-global session-key cache
+// root (wsstate.CacheRoot, sibling to keys/), independently of named scopes.
+const replyRegistryName = "mailbox-replyids.json"
 
-const (
-	secretFileName    = "mailbox-secret"
-	replyRegistryName = "mailbox-replyids.json"
-	secretByteLen     = 32
-)
-
-// MachineSecretPath resolves the once-per-machine mailbox HMAC secret file
-// path.
-func MachineSecretPath() (string, error) {
-	root, err := wsstate.CacheRoot(wsstate.Options{})
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(root, secretFileName), nil
-}
-
-// EnsureMachineSecret reads the persisted machine secret, minting it on
-// first use. Minting (and recovery from a truncated/corrupt file) is
-// serialized with the same flock convention WithLock/WithReplyLock use: an
-// O_EXCL create can only ever claim a MISSING file, so a second process
-// racing against a truncated/corrupt existing file would fall through to
-// the "file already exists" branch and re-read + return the very same bad
-// bytes, unvalidated. flock covers both cases uniformly, and the actual
-// write is a temp-file + atomic rename, matching the package's own
-// StoreFile/ReplyStore write discipline instead of a bare in-place write.
-func EnsureMachineSecret() ([]byte, error) {
-	path, err := MachineSecretPath()
-	if err != nil {
-		return nil, err
-	}
-	if raw, err := readValidSecret(path); raw != nil || err != nil {
-		return raw, err
-	}
-
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return nil, fmt.Errorf("create mailbox secret dir: %w", err)
-	}
-	lockPath := path + ".lock"
-	fl := flock.New(lockPath)
-	ctx, cancel := context.WithTimeout(context.Background(), LockTimeout)
-	defer cancel()
-	locked, err := fl.TryLockContext(ctx, 50*time.Millisecond)
-	if err != nil {
-		return nil, fmt.Errorf("acquire mailbox secret lock: %w", err)
-	}
-	if !locked {
-		return nil, fmt.Errorf("timed out waiting for mailbox secret lock: %s", lockPath)
-	}
-	defer fl.Unlock() //nolint:errcheck
-
-	// Re-check under the lock: another process may have minted or repaired
-	// it while we were waiting to acquire the lock.
-	if raw, err := readValidSecret(path); raw != nil || err != nil {
-		return raw, err
-	}
-
-	secret := make([]byte, secretByteLen)
-	if _, err := rand.Read(secret); err != nil {
-		return nil, fmt.Errorf("generate mailbox secret: %w", err)
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, secret, 0o600); err != nil {
-		return nil, fmt.Errorf("write mailbox secret temp file: %w", err)
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		return nil, fmt.Errorf("commit mailbox secret file: %w", err)
-	}
-	return secret, nil
-}
-
-// readValidSecret reads path and returns its contents when present and
-// exactly secretByteLen long. A missing file or a wrong-length (truncated/
-// corrupt) file both return (nil, nil) — "not valid yet, mint/repair it" —
-// distinct from a genuine read error.
-func readValidSecret(path string) ([]byte, error) {
-	raw, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("read mailbox secret: %w", err)
-	}
-	if len(raw) != secretByteLen {
-		return nil, nil
-	}
-	return raw, nil
-}
-
-// ReplyID computes the deterministic, unguessable reply-id for
-// callerSessionKey: hex(HMAC-SHA256(secret, callerSessionKey)). Same secret
-// + same session_key always yields the same reply-id (Decision 11's
-// restart-stability: no reply-id itself is ever persisted), and the raw
-// session_key — the owner-gate secret — never appears in the output.
-func ReplyID(secret []byte, callerSessionKey string) string {
-	mac := hmac.New(sha256.New, secret)
-	mac.Write([]byte(callerSessionKey))
-	return hex.EncodeToString(mac.Sum(nil))
+// ReplyID concatenates four deterministic full-pool words. Handles are local
+// routable identifiers, not collision-free or cryptographic capabilities.
+func ReplyID(callerSessionKey string) string {
+	return strings.ReplaceAll(wskey.DeriveFull(callerSessionKey, 4), "-", "")
 }
 
 // ReplyEntry is one reply-id's registry record: presence-equivalent, but
@@ -139,7 +36,7 @@ type ReplyEntry struct {
 }
 
 // ReplyStore is the machine-tier reply-id registry: one entry + one queue
-// per reply-id, keyed by the hex ReplyID string.
+// per reply-id, keyed by the readable ReplyID string.
 type ReplyStore struct {
 	SchemaVersion int                   `json:"schema_version"`
 	Entries       map[string]ReplyEntry `json:"entries,omitempty"`

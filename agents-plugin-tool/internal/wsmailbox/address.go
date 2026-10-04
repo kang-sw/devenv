@@ -20,15 +20,14 @@ func IsValidName(raw string) bool {
 }
 
 // ReplyIDPrefix is the polymorphic "to:" address form that addresses a
-// reply-id capability directly (Decision 12), e.g. "id:7f3a...".
+// reply-id channel directly (Decision 12), e.g. "id:ambertidefoxriver".
 const ReplyIDPrefix = "id:"
 
-// replyIDPattern bounds the hex digest ReplyID produces (64 lowercase hex
-// chars for SHA-256), the same conservative "reject anything unexpected"
-// posture as namePattern.
-var replyIDPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+// replyIDPattern bounds four concatenated full-pool words (at most nine
+// letters each). Word boundaries are intentionally not validated.
+var replyIDPattern = regexp.MustCompile(`^[a-z]{1,36}$`)
 
-// IsValidReplyID reports whether raw looks like a ReplyID-produced digest.
+// IsValidReplyID reports whether raw is an acceptable reply-id body.
 func IsValidReplyID(raw string) bool {
 	return replyIDPattern.MatchString(raw)
 }
