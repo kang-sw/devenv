@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 3b34f4730d75fd6b
 sage-review-design-reviewed: 3b34f4730d75fd6b
+completed: 2026-10-04
 ---
 
 # Explicit post-compaction continuation flag for the Pi lead
@@ -163,3 +164,15 @@ abort's preparation-state reset and remains isolated to its own operation.
 Run relevant Pi tests and the full Pi suite before landing; report any live
 acceptance limits rather than asserting model compliance or incident repair
 from these tests.
+
+### Result (d9e87af7c) - 2026-10-04
+
+Landed `continue_after_compact?: boolean` on the Pi lead's ws-compact lever.
+
+- `leadCompactParameterSchema()` in goal-loop.ts composes the optional boolean on top of `leadProseParameterSchema()`; the prose schema and the fallback summary prompt stay prose-only. The lever registers the composed schema.
+- The lever snapshots strict `continue_after_compact === true` onto `CompactionOperation.continueAfterCompact` before `ctx.compact()` aborts the run; `releaseAfterCompaction` ORs it with `resumesAfterCompaction(route)` and keeps every gate. `sendOwedResume` stays the only sender.
+- The tool description, guide step 3 and the goal-loop.ts comments (file header, `CompactionOperation`, `resumesAfterCompaction`) name the flag as the explicit opt-in under D1's condition.
+
+Verification: `node --test test/goal-loop.test.ts test/lead-compaction.test.ts` passes (211 tests, 0 fail), including the new cases (schema shape, advisory/reroute true resumes once, false/omitted/"true"/1 no resume, false keeps hard/autonomous resume, goal-active, failure, shutdown, non-idle, per-operation isolation). The full Pi suite shows 31 failures identically with and without the change (spawn/web-readiness environment failures in this worktree), so they are pre-existing. Lite review: clean.
+
+Live acceptance limit: these tests do not verify model compliance with the flag, Pi's own argument coercion, or repair of the reported incident.
