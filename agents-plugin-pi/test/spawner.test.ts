@@ -95,6 +95,7 @@ import {
   ownerNotifyRef,
   leadWakeStartPendingRef,
   markAgentExited,
+  observeChildSubtree,
   probeAgentLiveness,
   promptAgent,
   pushSpawnFailed,
@@ -155,7 +156,7 @@ import { approvalConsumedMessage } from "../src/approval-protocol.ts";
 import type { ChannelConnection, ChannelHello } from "../src/agent-channel.ts";
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
 import { installSubtreePublisher, SubtreeUpstream } from "../src/subtree-lifecycle.ts";
-import { fakeUplink, idleOwnTurn, until } from "./fixtures/subtree-channels.ts";
+import { fakeParentChannel, fakeUplink, idleOwnTurn, until } from "./fixtures/subtree-channels.ts";
 const REAL_EXTENSION_ENTRY = fileURLToPath(new URL("../src/index.ts", import.meta.url));
 // Stands in for the child half of the control channel: the hello plus the
 // role's stage-2 readiness (web for Explore, fork for a fork launch).
@@ -2938,6 +2939,54 @@ describe("attachApprovalChannel (260924: parent side of the channel-delivered de
     host.deliver({ ...approvalConsumedMessage("call-1"), gen: 4 });
     assert.equal(record.pendingApproval, undefined, "the acknowledged cmd_id is no longer pending");
     assert.equal(refreshes, 1);
+  });
+
+  for (const consumption of ["acknowledgment", "reconnect hello"] as const) test(`attachEventListener publishes approval consumption from ${consumption} immediately despite pending telemetry`, t => {
+    t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 10_000 });
+    const host = fakeHost(), uplink = fakeUplink(), ancestorChannel = fakeParentChannel();
+    const send = uplink.send;
+    uplink.send = msg => { send(msg); if (msg.t === "subtree") ancestorChannel.deliver(msg.snapshot); };
+    const ancestor = liveRpcRecord({ agentId: "ancestor", channel: ancestorChannel.parent, running: false });
+    observeChildSubtree(undefined, ancestor, ancestorChannel.parent);
+    let listener!: (event: unknown) => void, stateReads = 0, approvalPushes = 0;
+    const client = {
+      onEvent: (fn: typeof listener) => (listener = fn, () => {}),
+      getState: async () => { stateReads++; return {}; },
+    } as unknown as RpcClient;
+    const record = liveRpcRecord({ client, channel: host as unknown as RpcAgentRecord["channel"], running: true, runStartedAt: 9_000, observedContextTokens: 100 });
+    const registry = new Map([[record.agentId, record]]);
+    installSubtreePublisher(registry, new SubtreeUpstream(uplink.channel), () => 0, idleOwnTurn);
+    attachEventListener(undefined, registry, record, client, () => { approvalPushes++; });
+    t.after(() => record.unsubscribe?.());
+    const remote = () => ancestor.subtreeDescendants!.find(row => row.id === record.agentId)!.display!;
+
+    listener({ type: "tool_execution_start", toolName: GATED_EXEC_TOOL_NAME, toolCallId: "call-1", args: { command: "rm -rf build" } });
+    record.pendingApproval = { ...record.pendingApproval!, decision: "sent" };
+    assert.equal(remote().state, "awaiting-approval", "the RPC request reaches the ancestor through the publisher and observer");
+    assert.equal(approvalPushes, 1);
+    t.mock.timers.tick(1);
+    record.observedContextTokens = 200;
+    listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "x" } });
+    assert.equal(remote().contextTokens, 100, "numeric telemetry is still waiting for its trailing sample");
+    assert.equal(remote().lastOutputAt, 10_000);
+    const sendsBefore = uplink.snapshots().length;
+
+    // Only the approval channel speaks from here on: no RPC completion or manual publication.
+    if (consumption === "acknowledgment") host.deliver(approvalConsumedMessage("call-1"));
+    else {
+      host.drop();
+      assert.equal(record.pendingApproval?.decision, "discarded");
+      host.reconnect({ resume: { approval: { consumed: ["call-1"] } } });
+    }
+    assert.equal(record.pendingApproval, undefined);
+    assert.equal(uplink.snapshots().length, sendsBefore + 1, "consumption publishes before the numeric telemetry deadline");
+    assert.equal(remote().state, "running", "an idle ancestor immediately replaces awaiting approval with the owner's classified state");
+    assert.equal(remote().contextTokens, 200, "the state edge also flushes the latest pending numeric sample");
+    assert.equal(remote().lastOutputAt, 10_001);
+    assert.equal(stateReads, 0, "no RPC refresh or later output can serve as the publication oracle");
+    assert.equal(approvalPushes, 1, "a consumed reconnect decision is not reissued");
+    t.mock.timers.tick(1_000);
+    assert.equal(uplink.snapshots().length, sendsBefore + 1, "the flushed trailing sample does not publish again");
   });
 
   test("a disconnect discards a sent-but-unacknowledged decision and leaves an unanswered request untouched", () => {

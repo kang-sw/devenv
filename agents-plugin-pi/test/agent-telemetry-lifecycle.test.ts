@@ -19,6 +19,8 @@ import { captureForkResume, createThreadRegistryHandle, hydrateThreadRegistry, r
 import { persistShutdownAgentSnapshots } from "../src/index.ts";
 import { allocateAgentHome, createAgentStorageContext, persistOwnershipTelemetry, readOwnership } from "../src/agent-storage.ts";
 import { closeFakeChildren, connectFakeChild } from "./fixtures/channel-child.ts";
+import { installSubtreePublisher, observeSubtreeChannel, SUBTREE_TELEMETRY_INTERVAL_MS, SubtreeUpstream, type SubtreeView } from "../src/subtree-lifecycle.ts";
+import { fakeParentChannel, fakeUplink, idleOwnTurn } from "./fixtures/subtree-channels.ts";
 
 const roots = new Set<string>();
 afterEach(() => { for (const root of roots) rmSync(root, { recursive: true, force: true }); roots.clear(); });
@@ -171,22 +173,39 @@ describe("agent telemetry lifecycle at production boundaries", () => {
     assert.equal(readOwnership(ownership.home)?.telemetry, undefined, "clearing in-memory telemetry is persisted");
   });
 
-  test("collector rejection clears current selection and notifies once while preserving usage", async () => {
+  test("collector rejection clears current selection upstream within the telemetry deadline and notifies once while preserving usage", async t => {
+    t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 10_000 });
     const session = join(root(), "child.jsonl"); write(session, [header("s"), assistant("child", 20, .2)]);
     let listener!: (event: unknown) => void, notifications = 0;
     const client = { onEvent: (fn: typeof listener) => (listener = fn, () => {}), getState: async () => { throw new Error("state unavailable"); } } as unknown as RpcClient;
-    const record = { agentId: "a", client, launchGeneration: 1, sessionPath: session, wsToolNames: [], reportLog: [] } as unknown as RpcAgentRecord;
+    const record = { agentId: "a", client, launchGeneration: 1, sessionPath: session, wsToolNames: [], reportLog: [], runStartedAt: 9_000 } as unknown as RpcAgentRecord;
     refreshAgentTelemetry(record, { sessionId: "s", model: { provider: "p", id: "m" }, thinkingLevel: "low" });
+    const registry = new Map([[record.agentId, record]]), uplink = fakeUplink(), ancestorChannel = fakeParentChannel();
+    const send = uplink.send;
+    uplink.send = msg => { send(msg); if (msg.t === "subtree") ancestorChannel.deliver(msg.snapshot); };
+    let ancestorView!: SubtreeView;
+    const detachObserver = observeSubtreeChannel(ancestorChannel.parent, view => { ancestorView = view; });
+    installSubtreePublisher(registry, new SubtreeUpstream(uplink.channel), () => 0, idleOwnTurn);
+    const remote = () => ancestorView.snapshot!.descendants.find(row => row.id === record.agentId)!.display!;
+    assert.equal(remote().model, "p/m"); assert.equal(remote().effort, "low");
     const origin = { ...record.telemetry!.origin }, previous = agentWidgetRefreshRef.current;
     agentWidgetRefreshRef.current = () => { notifications++; };
     try {
-      attachEventListener(undefined, undefined, record, client);
+      attachEventListener(undefined, registry, record, client);
       listener({ type: "thinking_level_changed", thinkingLevel: "high" }); await ticks();
       assert.equal(record.observedModel, undefined); assert.equal(record.observedEffort, undefined);
       assert.deepEqual(record.telemetry, { version: 1, origin, contextTokens: 20, estimatedUsd: .2 });
       assert.equal(notifications, 1);
+      t.mock.timers.tick(SUBTREE_TELEMETRY_INTERVAL_MS - 1);
+      assert.equal(remote().model, "p/m", "the numeric-only clear may coalesce until the telemetry deadline");
+      assert.equal(remote().effort, "low");
+      t.mock.timers.tick(1);
+      assert.equal(remote().model, undefined, "collector failure alone removes the previously known model upstream by the deadline");
+      assert.equal(remote().effort, undefined, "collector failure alone removes the previously known effort upstream by the deadline");
+      assert.equal(remote().contextTokens, 20); assert.equal(remote().estimatedUsd, .2);
+      assert.equal(uplink.snapshots().length, 2, "no further RPC event or manual publication supplies the cleared selection");
       listener({ type: "thinking_level_changed" }); await ticks(); assert.equal(notifications, 1, "unchanged unknown selection does not notify again");
-    } finally { agentWidgetRefreshRef.current = previous; }
+    } finally { record.unsubscribe?.(); detachObserver(); agentWidgetRefreshRef.current = previous; }
   });
 
   for (const replacement of ["client", "generation"] as const) test(`old collector rejection cannot clear selection after ${replacement} replacement`, async () => {
