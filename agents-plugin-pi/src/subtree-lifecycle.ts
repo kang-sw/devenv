@@ -247,7 +247,9 @@ interface Publisher {
   deliveries: () => number;
   ownTurn: () => OwnTurnState;
   lastPublished?: SubtreeSnapshot;
-  lastPublishedAt?: number;
+  lastSampledAt?: number;
+  ownRows?: Map<string, SubtreeDescendant>;
+  ownRowsKey?: string;
   promptKey?: string;
   telemetryTimer?: ReturnType<typeof setTimeout>;
 }
@@ -310,7 +312,7 @@ export function scheduleSubtreeTelemetry(registry: RpcAgentRegistry | undefined)
   if (!registry) return;
   const p = publishers.get(registry);
   if (!p?.upstream || p.telemetryTimer) return;
-  const delay = Math.max(0, (p.lastPublishedAt ?? Date.now()) + SUBTREE_TELEMETRY_INTERVAL_MS - Date.now());
+  const delay = Math.max(0, (p.lastSampledAt ?? Date.now()) + SUBTREE_TELEMETRY_INTERVAL_MS - Date.now());
   p.telemetryTimer = setTimeout(() => {
     p.telemetryTimer = undefined;
     if (publishers.get(registry) === p) publishSubtree(registry);
@@ -325,7 +327,7 @@ function promptPublicationKey(state: SubtreeState): string {
   })) });
 }
 
-/** Recomputes this process's snapshot; telemetry-only changes coalesce to a trailing latest sample. */
+/** Samples owned telemetry at most once per second; already-sampled descendant data forwards promptly. */
 export function publishSubtree(registry: RpcAgentRegistry | undefined, dispatched = false): SubtreeSnapshot | undefined {
   if (!registry) return undefined;
   const p = publishers.get(registry);
@@ -344,15 +346,23 @@ export function publishSubtree(registry: RpcAgentRegistry | undefined, dispatche
   };
   if (!p.upstream) return { ...state, revision: 0 };
   const promptKey = promptPublicationKey(state);
-  const { revision: _revision, ...previous } = p.lastPublished ?? { revision: 0 };
-  if (p.lastPublished && JSON.stringify(state) === JSON.stringify(previous)) return p.lastPublished;
-  if (promptKey === p.promptKey && Date.now() - (p.lastPublishedAt ?? 0) < SUBTREE_TELEMETRY_INTERVAL_MS) {
+  const ownRows = state.descendants.filter(row => row.parentId === null);
+  const ownRowsKey = JSON.stringify(ownRows);
+  const prompt = promptKey !== p.promptKey;
+  const ownChanged = ownRowsKey !== p.ownRowsKey;
+  if (!prompt && ownChanged && Date.now() - (p.lastSampledAt ?? 0) < SUBTREE_TELEMETRY_INTERVAL_MS) {
     scheduleSubtreeTelemetry(registry);
-    return p.lastPublished;
+    // A forwarded update has already paid its owner's coalescing window.
+    // Never add a fresh window at every ancestor, nor let that forwarding
+    // unthrottle unrelated owned clocks/usage by piggybacking fresh samples.
+    state.descendants = state.descendants.map(row => row.parentId === null ? p.ownRows?.get(row.id) ?? row : row);
+  } else if (prompt || ownChanged) {
+    if (p.telemetryTimer) { clearTimeout(p.telemetryTimer); p.telemetryTimer = undefined; }
+    p.lastSampledAt = Date.now();
+    p.ownRowsKey = ownRowsKey;
+    p.ownRows = new Map(ownRows.map(row => [row.id, row]));
   }
-  if (p.telemetryTimer) { clearTimeout(p.telemetryTimer); p.telemetryTimer = undefined; }
   p.promptKey = promptKey;
-  p.lastPublishedAt = Date.now();
   p.lastPublished = p.upstream.publish(state);
   return p.lastPublished;
 }

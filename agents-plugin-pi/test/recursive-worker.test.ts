@@ -389,6 +389,40 @@ test("owner telemetry reaches an idle root over two channel hops, independently 
   assert.ok(!buildAgentRows(rootRegistry, [], Date.now()).some(row => row.name === "own-name"));
 });
 
+test("staggered forwarding never adds a new telemetry window or unthrottles local telemetry", t => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 10_000 });
+  const sourceLink = fakeUplink(), middleLink = fakeUplink();
+  const sourceChannel = fakeParentChannel(), middleChannel = fakeParentChannel();
+  const forward = (link: ReturnType<typeof fakeUplink>, channel: ReturnType<typeof fakeParentChannel>) => {
+    const send = link.send;
+    link.send = msg => { send(msg); if (msg.t === "subtree") channel.deliver(msg.snapshot); };
+  };
+  forward(sourceLink, sourceChannel); forward(middleLink, middleChannel);
+  const child = record("child", { channel: sourceChannel.parent, client: {} as never, runStartedAt: 9_000, observedContextTokens: 100 });
+  const middleRegistry = new Map([[child.agentId, child]]);
+  installSubtreePublisher(middleRegistry, new SubtreeUpstream(middleLink.channel), () => 0, idleOwnTurn);
+  observeChildSubtree(middleRegistry, child, sourceChannel.parent);
+  const parent = record("parent", { channel: middleChannel.parent });
+  const rootRegistry = new Map([[parent.agentId, parent]]);
+  observeChildSubtree(rootRegistry, parent, middleChannel.parent);
+  const grandchild = record("grandchild", { client: {} as never, running: true, runStartedAt: 9_000, observedContextTokens: 200 });
+  const ownerRegistry = new Map([[grandchild.agentId, grandchild]]);
+  installSubtreePublisher(ownerRegistry, new SubtreeUpstream(sourceLink.channel), () => 0, idleOwnTurn);
+  const remote = (id: string) => parent.subtreeDescendants!.find(row => row.id === id)!.display!;
+  t.mock.timers.tick(1); grandchild.observedContextTokens = 300; publishSubtree(ownerRegistry);
+  t.mock.timers.tick(899); child.alias = "middle-state-edge"; publishSubtree(middleRegistry);
+  t.mock.timers.tick(1); child.observedContextTokens = 400; publishSubtree(middleRegistry);
+  assert.equal(remote("grandchild").contextTokens, 200);
+  t.mock.timers.tick(99);
+  assert.equal(remote("grandchild").contextTokens, 300, "source's t=1000 trailing sample reaches the root immediately despite the middle's t=900 publication");
+  assert.equal(remote("child").contextTokens, 100, "a forwarded snapshot cannot bypass the middle's own display throttle");
+  t.mock.timers.tick(899);
+  assert.equal(remote("child").contextTokens, 100);
+  t.mock.timers.tick(1);
+  assert.equal(remote("child").contextTokens, 400, "local telemetry still samples at its own one-second deadline");
+  assert.equal(remote("grandchild").contextTokens, 300);
+});
+
 test("detailed cache loses live authority on disconnect, resumes, and cannot cross a relaunch", () => {
   const first = fakeParentChannel();
   const parent = record("parent", { channel: first.parent, launchGeneration: 1 });
