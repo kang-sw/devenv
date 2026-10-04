@@ -71,7 +71,9 @@
  * does it re-arm the goal loop (it never calls `disarmGoal()`). With no goal,
  * a lever call that cut work short (autonomous, or after the hard cut) is
  * followed by one resume message from the lever's completion callback, once
- * an idle release has flushed held pushes (261003). Spawned
+ * an idle release has flushed held pushes (261003); the lead can also request
+ * that resume explicitly with `continue_after_compact: true` (261004), which
+ * ORs with the route-based eligibility. Spawned
  * worker/explore/fork sessions keep Pi's native compaction. The lead is led
  * to the lever by a preparation message carrying `lead-compact-guide.md`: an
  * advisory nudge at `agent_end`, a hard-cut steer at `turn_end`, or a user
@@ -258,23 +260,50 @@ export function buildCompactionLeverResult(): string {
 }
 
 /**
+ * The `ws-compact` lever's parameter schema (261004): the prose-only
+ * `leadProseParameterSchema` plus the optional `continue_after_compact`
+ * boolean. Composed here, not in lead-compaction.ts, because
+ * `LEAD_PROSE_SECTIONS` also drives the fallback summary prompt, which must
+ * not gain the flag.
+ */
+export function leadCompactParameterSchema() {
+  const prose = leadProseParameterSchema();
+  return {
+    ...prose,
+    properties: {
+      ...prose.properties,
+      continue_after_compact: {
+        type: "boolean",
+        description: "Set true only when you hold known remaining work that does not await the user: a resume message then follows compaction even after the advisory nudge or a user /compact. Omit or false otherwise, and when the next move needs a user answer.",
+      },
+    },
+  };
+}
+
+/**
  * One host compaction operation. `route` is set only by the `ws-compact`
  * lever (261003): the preparation trigger that led to the call, or
- * `"autonomous"` when no preparation was pending. `resumeOwed` is set by an
- * idle, successful release of a goal-less operation whose route resumes, and
- * consumed by the lever's `onComplete`, the only place the resume is sent.
+ * `"autonomous"` when no preparation was pending. `continueAfterCompact`
+ * (261004) is the lead's explicit "I have work after compaction" request,
+ * snapshotted from the lever's strict-`true` argument. `resumeOwed` is set by
+ * an idle, successful release of a goal-less operation whose route resumes or
+ * that requested continuation, and consumed by the lever's `onComplete`, the
+ * only place the resume is sent.
  */
 type CompactionOperation = {
   id: number;
   generation: number | undefined;
   route?: PreparationTrigger["kind"] | "autonomous";
+  continueAfterCompact?: boolean;
   resumeOwed?: boolean;
 };
 
 /**
  * Whether a goal-less lever compaction reached by `route` resumes the lead
  * (261003). Only the routes whose run was mid-work when the abort landed do;
- * after the advisory nudge or a user `/compact` the next move is the user's.
+ * after the advisory nudge or a user `/compact` the next move is the user's
+ * unless the lead set `continue_after_compact` (261004), the other
+ * eligibility term, which the release check ORs with this predicate.
  */
 export function resumesAfterCompaction(route: CompactionOperation["route"]): boolean {
   return route === "hard" || route === "autonomous";
@@ -1084,7 +1113,7 @@ export function registerGoalLoop(
     const flushed = flushHeldPushes(pi);
     // 261003: only marks the resume owed; `sendOwedResume` sends it from the
     // lever's onComplete (see there for why never from here).
-    if (operation && !failed && !shuttingDown && generation === undefined && !state.active && resumesAfterCompaction(operation.route)) {
+    if (operation && !failed && !shuttingDown && generation === undefined && !state.active && (resumesAfterCompaction(operation.route) || operation.continueAfterCompact === true)) {
       operation.resumeOwed = true;
     }
     const rearmIsCurrent = generation !== undefined && isCurrentArmedGeneration(generation);
@@ -1496,8 +1525,8 @@ export function registerGoalLoop(
     name: LEAD_COMPACT_TOOL_NAME,
     label: LEAD_COMPACT_TOOL_NAME,
     description:
-      "Compact the lead's context now. Fill every heading with your carry-forward prose (empty when there is nothing): for content already persisted (tickets, commits, notes, agenda, todos) give its path or pointer; for content that lives only in the conversation, summarize it as precisely as possible. The adapter adds the session key, active ticket and playbook, child agents, and the recent dialog (user messages, your replies, branch summaries, one line per tool call) itself. After compaction, an active goal keeps running. With no goal, a resume message follows when you called this on your own or after the hard-threshold notice; after the advisory nudge or a user /compact, the next move is the user's.",
-    parameters: leadProseParameterSchema() as never,
+      "Compact the lead's context now. Fill every heading with your carry-forward prose (empty when there is nothing): for content already persisted (tickets, commits, notes, agenda, todos) give its path or pointer; for content that lives only in the conversation, summarize it as precisely as possible. The adapter adds the session key, active ticket and playbook, child agents, and the recent dialog (user messages, your replies, branch summaries, one line per tool call) itself. After compaction, an active goal keeps running. With no goal, a resume message follows when you called this on your own or after the hard-threshold notice; after the advisory nudge or a user /compact, the next move is the user's unless you set continue_after_compact to true because you hold known remaining work that does not await the user.",
+    parameters: leadCompactParameterSchema() as never,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx: ExtensionContext) {
       if (isChildProcess(process.env)) {
         throw new Error(`${LEAD_COMPACT_TOOL_NAME} is lead-only; spawned sessions keep Pi's native compaction.`);
@@ -1520,6 +1549,9 @@ export function registerGoalLoop(
       // preparation state. A preparation already cleared (its run ended) is
       // an autonomous call.
       operation.route = preparation ? preparationKind : "autonomous";
+      // 261004: strict `true` only; Pi's argument validation has already
+      // coerced "true"/1, so there is no adapter-side coercion.
+      operation.continueAfterCompact = (params as { continue_after_compact?: unknown }).continue_after_compact === true;
       if (goalActive) {
         // Under a goal, `pendingRearm` makes `releaseAfterCompaction`
         // synthesize the re-armed reminder; the invoking turn's own
