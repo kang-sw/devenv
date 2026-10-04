@@ -425,7 +425,14 @@
       "registered_at": "2026-09-24T10:38:33Z"
     },
     "260920-feat-ws-mailbox-readable-reply-id": {
-      "registered_at": "2026-09-24T10:38:33Z"
+      "registered_at": "2026-09-24T10:38:33Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-10-04T10:21:08Z"
+      }
     },
     "260921-bug-pi-child-bootstrap-error-loses-diagnostic": {
       "registered_at": "2026-09-24T10:38:33Z"
