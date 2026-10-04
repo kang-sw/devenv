@@ -424,9 +424,6 @@
     "260920-bug-pi-tool-call-timeout-and-process-cleanup": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
-    "260920-feat-ws-mailbox-readable-reply-id": {
-      "registered_at": "2026-09-24T10:38:33Z"
-    },
     "260921-bug-pi-child-bootstrap-error-loses-diagnostic": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
@@ -520,8 +517,8 @@
     "261004-bug-pi-identical-summary-compaction-event": {
       "registered_at": "2026-10-04T10:35:29Z"
     },
-    "261004-feat-pi-compaction-interactive-ux": {
-      "registered_at": "2026-10-04T09:26:14Z"
+    "261004-feat-pi-explicit-post-compaction-continuation": {
+      "registered_at": "2026-10-04T12:08:05Z"
     },
     "261004-research-pi-post-bump-publish-worker-startup": {
       "registered_at": "2026-10-04T04:20:22Z"
