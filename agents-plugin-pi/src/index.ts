@@ -204,6 +204,7 @@ import { registerPushMessageRenderers } from "./push-render.ts";
 import { buildOrphanPush, captureOrphans, noSessionSidecarPath, readAndClearSidecarAt, reviveOrphans, sidecarPath, writeSidecarAt, type PersistedOrphan } from "./agent-sidecar.ts";
 import { registerGoalLoop, resolveAgentWaitAnimation, resolveChildRetentionTtlDays, resolveSettleDelayMs, type GoalLoopConfig } from "./goal-loop.ts";
 import { registerCompactionHistory } from "./compaction-history.ts";
+import { registerLeadMemoryLog } from "./lead-memory-log.ts";
 import { createWsConfigReader, thenOrNow } from "./adapter-config.ts";
 import { registerSkillResources } from "./skills-dir.ts";
 import { computeSessionBootstrap, registerLeadBootstrap, type LeadPromptRef, type SkillsBlockCache, type WsBlockBase } from "./lead-bootstrap.ts";
@@ -596,6 +597,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   // The live bridge key wins over the session_start snapshot: a later key
   // adoption on the bridge must reach the next compaction summary.
   registerCompactionHistory(pi);
+  registerLeadMemoryLog(pi);
   const goalLoopHandle = registerGoalLoop(pi, {
     readConfig: readAdapterConfig,
     rpcRegistryRef,

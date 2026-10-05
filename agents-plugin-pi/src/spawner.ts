@@ -88,6 +88,7 @@ import { randomUUID } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { RpcClient, type RpcClientOptions } from "@earendil-works/pi-coding-agent";
+import { capRpcClientStderr } from "./rpc-stderr-cap.ts";
 import { attachFirstTaskForkCacheNotice, type ForkCacheNoticeOwner } from "./fork-cache-notice.ts";
 import type { McpStdioClient, McpToolCallResult } from "./mcp-stdio-client.ts";
 import type { BridgeHandle } from "./bridge.ts";
@@ -3503,6 +3504,7 @@ export async function spawnAgent(
     );
     record.client = client;
     await client.start();
+    capRpcClientStderr(client);
     await awaitChannelStage(client, channel.hello(), ctx.channel?.helloTimeoutMs ?? CHANNEL_HELLO_TIMEOUT_MS, "hello");
 
     if (ctx.forkFrom) {
@@ -3731,6 +3733,7 @@ export async function sendToAgent(
       attachDescendantUsage(record, channel, onDescendantUsageChanged);
       Object.assign(options.env!, channel.bootstrapEnv());
       await client.start();
+      capRpcClientStderr(client);
       await awaitChannelStage(client, channel.hello(), ctx.channel?.helloTimeoutMs ?? CHANNEL_HELLO_TIMEOUT_MS, "hello");
       if (forkLaunch) validateForkReadiness(await awaitForkReadiness(client, channel, ctx.channel), record, await client.getState());
       if (record.spawnRole === "explore") {
