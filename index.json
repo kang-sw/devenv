@@ -517,22 +517,6 @@
     "261004-bug-pi-identical-summary-compaction-event": {
       "registered_at": "2026-10-04T10:35:29Z"
     },
-    "261004-feat-pi-compaction-history-native-rendering": {
-      "registered_at": "2026-10-04T12:44:58Z"
-    },
-    "261004-feat-pi-explicit-post-compaction-continuation": {
-      "registered_at": "2026-10-04T12:08:05Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-04T12:41:18Z",
-        "impl": {
-          "branch": "impl/develop/salsa-snuff-barge"
-        }
-      }
-    },
     "261004-research-pi-post-bump-publish-worker-startup": {
       "registered_at": "2026-10-04T04:20:22Z"
     },
