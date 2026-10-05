@@ -25,6 +25,9 @@ export function registerLeadMemoryLog(pi: ExtensionAPI, file?: string): void {
   const stop = () => { if (timer) clearInterval(timer); timer = undefined; };
   pi.on("session_start", async () => {
     if (isChildProcess(process.env) || timer) return;
+    // `node --test` sets NODE_TEST_CONTEXT in test processes; suites that load the
+    // whole extension must not append to the real agent dir's log.
+    if (file === undefined && process.env.NODE_TEST_CONTEXT) return;
     const target = file ?? join(getAgentDir(), LEAD_MEMORY_LOG_FILE);
     writeMemorySample(target);
     timer = setInterval(() => writeMemorySample(target), INTERVAL_MS);

@@ -39,3 +39,19 @@ test("child roles do not log", async () => {
   }
   assert.equal(existsSync(file), false);
 });
+
+test("under the node test runner the default agent-dir log is not written", async () => {
+  const agentDir = join(dir, "agent");
+  const prev = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  try {
+    assert.ok(process.env.NODE_TEST_CONTEXT);
+    const handlers = new Map<string, () => Promise<void>>();
+    registerLeadMemoryLog({ on: (e: string, h: () => Promise<void>) => handlers.set(e, h) } as unknown as ExtensionAPI);
+    await handlers.get("session_start")!();
+    await handlers.get("session_shutdown")!();
+  } finally {
+    if (prev === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = prev;
+  }
+  assert.equal(existsSync(join(agentDir, "ws-lead-memory.jsonl")), false);
+});
