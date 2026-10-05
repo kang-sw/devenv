@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { registerLeadMemoryLog } from "../src/lead-memory-log.ts";
+import { LEAD_MEMORY_LOG_ENV, LEAD_MEMORY_LOG_FILE, registerLeadMemoryLog } from "../src/lead-memory-log.ts";
 import { WS_PI_SPAWN_ROLE_ENV } from "../src/process-role.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "ws-memlog-test-"));
@@ -40,18 +40,27 @@ test("child roles do not log", async () => {
   assert.equal(existsSync(file), false);
 });
 
-test("under the node test runner the default agent-dir log is not written", async () => {
-  const agentDir = join(dir, "agent");
-  const prev = process.env.PI_CODING_AGENT_DIR;
+async function startWithDefaultFile(agentDir: string, flag: string | undefined): Promise<void> {
+  const prevDir = process.env.PI_CODING_AGENT_DIR;
+  const prevFlag = process.env[LEAD_MEMORY_LOG_ENV];
   process.env.PI_CODING_AGENT_DIR = agentDir;
+  if (flag === undefined) delete process.env[LEAD_MEMORY_LOG_ENV]; else process.env[LEAD_MEMORY_LOG_ENV] = flag;
   try {
-    assert.ok(process.env.NODE_TEST_CONTEXT);
     const handlers = new Map<string, () => Promise<void>>();
     registerLeadMemoryLog({ on: (e: string, h: () => Promise<void>) => handlers.set(e, h) } as unknown as ExtensionAPI);
     await handlers.get("session_start")!();
     await handlers.get("session_shutdown")!();
   } finally {
-    if (prev === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = prev;
+    if (prevDir === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = prevDir;
+    if (prevFlag === undefined) delete process.env[LEAD_MEMORY_LOG_ENV]; else process.env[LEAD_MEMORY_LOG_ENV] = prevFlag;
   }
-  assert.equal(existsSync(join(agentDir, "ws-lead-memory.jsonl")), false);
+}
+
+test("the default agent-dir log is off unless WS_PI_LEAD_MEMORY_LOG=1", async () => {
+  const off = join(dir, "agent-off");
+  await startWithDefaultFile(off, undefined);
+  assert.equal(existsSync(join(off, LEAD_MEMORY_LOG_FILE)), false);
+  const on = join(dir, "agent-on");
+  await startWithDefaultFile(on, "1");
+  assert.equal(readFileSync(join(on, LEAD_MEMORY_LOG_FILE), "utf8").trim().split("\n").length, 1);
 });
