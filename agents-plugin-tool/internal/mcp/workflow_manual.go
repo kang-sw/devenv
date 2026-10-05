@@ -72,8 +72,10 @@ func stripModeGatedRegion(body string, keepContent bool) string {
 // above which session-state renders and agenda.set responses carry a cleanup
 // note. It is calibrated on stored blob bytes: sessions holding only the typed
 // resolver blobs (implement, proceed) sit around 2.1-2.5 KB, so a lower
-// threshold would fire on sessions with nothing stale.
-const agendaSizeNudgeThreshold = 4096
+// threshold would fire on sessions with nothing stale. 8 KB leaves roughly
+// 5.7 KB (~1.5K tokens) for working blobs before the nudge fires; only the
+// session-state render carries the blobs themselves, agenda.set returns one line.
+const agendaSizeNudgeThreshold = 8192
 
 // agendaTotalBytes sums the stored byte length of every agenda blob value.
 // Key names are excluded, and the measure is the stored (compact) JSON, not
