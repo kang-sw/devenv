@@ -1163,6 +1163,16 @@ export function reserveWakeStart(options: WakeStartOptions, onTimeout: () => voi
   return true;
 }
 
+/**
+ * Reserve the shared start for an adapter-issued idle user prompt other than a
+ * push wake, so pushes and the goal reminder stay held until it starts. The
+ * recovery clock is the push lifecycle's; with no push lifecycle registered
+ * there are no pushes to hold and nothing is reserved.
+ */
+export function reserveAdapterPromptStart(onTimeout: () => void): boolean {
+  return wakeOptions !== undefined && reserveWakeStart(wakeOptions, onTimeout);
+}
+
 /** The idle push-wake user line. Lead compaction (lead-compaction.ts) recognizes it as adapter traffic, so both sides share this builder. */
 export function buildPushWakeLine(count: number): string {
   return `${count} ws messages waiting; process the incoming reports.`;
@@ -1173,13 +1183,74 @@ export function isPushWakeLine(text: string): boolean {
   return /^\d+ ws messages waiting; process the incoming reports\.$/.test(text);
 }
 
+/** First retry delay after a failed push wake; doubles per consecutive failure up to the cap. */
+export const PUSH_WAKE_BACKOFF_BASE_MS = 1_000;
+export const PUSH_WAKE_BACKOFF_CAP_MS = 30_000;
+
+/**
+ * Failed-wake breaker. A wake whose prompt reaches `agent_settled` without an
+ * intervening `agent_start` failed: the host reported idle but rejected the
+ * prompt (e.g. an inner run it still considers active). Its settle must not
+ * wake again at once, or settle -> wake -> rejected prompt -> settle recurses
+ * without ever yielding to the event loop. Consecutive failures back off
+ * exponentially; any own `agent_start` resets the breaker. The held queue is
+ * never touched here, so delivery resumes at the next real run.
+ */
+let pushWakeAwaitingStart = false;
+let failedPushWakes = 0;
+let settleWakeHandle: NodeJS.Timeout | undefined;
+let cancelSettleWake: (() => void) | undefined;
+
+function resetPushWakeBreaker(): void {
+  cancelSettleWake?.();
+  cancelSettleWake = undefined;
+  settleWakeHandle = undefined;
+  pushWakeAwaitingStart = false;
+  failedPushWakes = 0;
+}
+
+/** Wake retries after a failed wake wait for the backoff timer; every other path stays immediate. */
+function pushWakeBackingOff(): boolean {
+  return failedPushWakes > 0 && settleWakeHandle !== undefined;
+}
+
+/**
+ * Runs the settle-time flush on a macrotask, never inside Pi's settle
+ * emission: a wake sent from there is awaited by that emission, so a prompt
+ * that settles again without starting would re-enter this handler in the
+ * same microtask chain. The deferred flush re-reads every guard when it fires.
+ */
+function scheduleSettleWake(pi: ExtensionAPI, delayMs: number): void {
+  const options = wakeOptions;
+  if (!options) return;
+  cancelSettleWake?.();
+  const schedule = options.scheduleTimer ?? ((cb, ms) => {
+    const timer = setTimeout(cb, ms);
+    timer.unref?.();
+    return timer;
+  });
+  const handle = schedule(() => {
+    if (settleWakeHandle !== handle) return;
+    settleWakeHandle = undefined;
+    cancelSettleWake = undefined;
+    if (wakeOptions !== options) return;
+    flushHeldPushes(pi);
+    // The flush may reserve a wake (`owed` flips) or apply a control-only
+    // queue; neither has a publish of its own here.
+    publishOwnTurn?.();
+  }, delayMs);
+  settleWakeHandle = handle;
+  cancelSettleWake = () => (options.clearTimer ?? clearTimeout)(handle);
+}
+
 function requestPushWake(pi: ExtensionAPI): void {
-  if (!wakeOptions || !heldPushQueue.length || !leadIdleRef.current || !isOwningAgentIdle()) return;
+  if (!wakeOptions || !heldPushQueue.length || !leadIdleRef.current || !isOwningAgentIdle() || pushWakeBackingOff()) return;
   // A lapsed reservation's retry may exit early, leaving `owed` false with no
   // publish of its own; the parent's held settle waits on that flip.
   if (!reserveWakeStart(wakeOptions, () => { requestPushWake(pi); publishOwnTurn?.(); })) return;
   pushWakeReserved = true;
   syncOwnTurnOwed();
+  pushWakeAwaitingStart = true;
   try {
     pi.sendUserMessage(buildPushWakeLine(heldPushQueue.length), { deliverAs: "followUp" });
   } catch {
@@ -1631,6 +1702,7 @@ export function flushHeldPushes(pi: ExtensionAPI | undefined, confirmedStart = f
 
 /** Factory-scope wake lifecycle, also active in fork owners. Registration allocates no timers; only a reserved user wake does. Worker/explore roles never reserve wakes. */
 export function registerPushFlush(pi: ExtensionAPI, options: WakeStartOptions & { publish?: () => void }): void {
+  resetPushWakeBreaker();
   wakeOptions = options;
   publishOwnTurn = options.publish;
   pi.on("agent_start", () => {
@@ -1638,6 +1710,7 @@ export function registerPushFlush(pi: ExtensionAPI, options: WakeStartOptions & 
     // any owed turn in one snapshot (see `ownTurnRef`).
     ownTurnRef.started += 1;
     boundaryTurnOwed = false;
+    resetPushWakeBreaker();
     clearWakeStart();
     flushHeldPushes(pi, true);
   });
@@ -1646,17 +1719,27 @@ export function registerPushFlush(pi: ExtensionAPI, options: WakeStartOptions & 
   });
   pi.on("agent_settled", () => {
     clearWakeStart();
-    flushHeldPushes(pi);
+    if (pushWakeAwaitingStart) {
+      pushWakeAwaitingStart = false;
+      failedPushWakes += 1;
+      scheduleSettleWake(pi, Math.min(PUSH_WAKE_BACKOFF_BASE_MS * 2 ** (failedPushWakes - 1), PUSH_WAKE_BACKOFF_CAP_MS));
+    } else if (!pushWakeBackingOff()) {
+      // Another settle (not this breaker's failed wake) keeps a pending backoff.
+      scheduleSettleWake(pi, 0);
+    }
     // Pi emits the raw settle only after its post-run continuation started or
     // was abandoned (a throwing `agent.continue()`), so a boundary batch still
     // unstarted here is owed no turn: it starts with the next prompted turn.
-    // After the flush, `owed` is exactly "a wake reservation is outstanding".
+    // With the flush deferred, `owed` here is false; a still-held queue keeps
+    // the parent waiting through `deliveries` until the deferred flush
+    // publishes its own reservation flip.
     // No send of its own: the publish handler `index.ts` registers after this
     // one carries the flip, which is why this handler must stay first.
     boundaryTurnOwed = false;
     syncOwnTurnOwed();
   });
   pi.on("session_shutdown", () => {
+    resetPushWakeBreaker();
     clearWakeStart();
     heldPushQueue.length = 0;
     boundaryTurnOwed = false;

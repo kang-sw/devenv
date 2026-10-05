@@ -111,7 +111,7 @@ import {
 import { readSpawnRole } from "./process-role.ts";
 import { staticConfigReader, thenOrNow, type GoalLoopConfigKey, type GoalLoopConfigReader } from "./adapter-config.ts";
 import { createToolPreviewTuiRef, registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
-import { clearWakeStart, enqueueHeldGoalReplacement, reserveWakeStart, heldPushQueue, flushHeldPushes, hasRunningAgents, leadCompactingRef, leadWakeStartPendingRef, type HeldGoalReplacementResult, type RpcAgentRegistry } from "./spawner.ts";
+import { clearWakeStart, enqueueHeldGoalReplacement, reserveWakeStart, heldPushQueue, flushHeldPushes, hasRunningAgents, isOwningAgentIdle, leadCompactingRef, reserveAdapterPromptStart, leadWakeStartPendingRef, type HeldGoalReplacementResult, type RpcAgentRegistry } from "./spawner.ts";
 
 // ---------------------------------------------------------------------------
 // Config: adapter-declared ws settings (adapter-config.ts). Every knob is
@@ -1060,20 +1060,51 @@ export function registerGoalLoop(
   }
 
   /**
+   * Adapter prompts raised while another adapter prompt is still awaiting its
+   * `agent_start`; delivered as followUps by the next `agent_start`.
+   */
+  const promptsAwaitingStart: Array<{ text: string; wanted: () => boolean }> = [];
+
+  /**
+   * One adapter-issued idle prompt in flight at a time. Pi's `prompt()` marks
+   * the session streaming only after several awaits, so a second idle
+   * `sendUserMessage` issued before the first one's `agent_start` also passes
+   * the idle check (`deliverAs` is ignored when not streaming); its inner
+   * prompt then throws "already processing" and its settle clears the host's
+   * run flag while the first run continues, leaving the session reading idle
+   * mid-run. So an idle prompt holds the shared wake reservation until
+   * `agent_start` (holding pushes and the goal reminder meanwhile), and a
+   * prompt raised while any reservation is pending waits for that start and
+   * then queues as a followUp behind the streaming turn. A busy session
+   * queues a followUp itself and needs neither.
+   */
+  function sendAdapterPrompt(text: string, wanted: () => boolean, options?: { deliverAs: "followUp" }): void {
+    if (leadWakeStartPendingRef.current) {
+      promptsAwaitingStart.push({ text, wanted });
+      return;
+    }
+    // Recovery mirrors the reminder's: a lapsed reservation releases held
+    // pushes; the accepted prompt itself is never resubmitted.
+    if (isOwningAgentIdle()) reserveAdapterPromptStart(() => { if (heldPushQueue.length) flushHeldPushes(pi); });
+    pi.sendUserMessage(text, options);
+  }
+
+  /**
    * 261003: sends the goal-less resume owed by `operation`, at most once.
    * Called only from the lever's `onComplete`, after its own release attempt:
    * Pi's `prompt()` throws while its `_compactionAbortController` is set, and
    * Pi clears that only after awaiting every `session_compact` handler, so
    * the `session_compact` release's `setImmediate` can run first when another
    * extension's handler is async, while `onComplete` always runs after
-   * `compact()` returned. The followUp queues behind any run a flushed push
-   * started.
+   * `compact()` returned. A push wake that release just issued has not
+   * started yet, so the resume cannot queue behind it: `sendAdapterPrompt`
+   * holds it until that wake's `agent_start`.
    */
   function sendOwedResume(operation: CompactionOperation): void {
     if (!operation.resumeOwed) return;
     operation.resumeOwed = false;
     if (shuttingDown || state.active) return;
-    pi.sendUserMessage(buildCompactionResumeMessage(opts.sessionKeyRef?.current), { deliverAs: "followUp" });
+    sendAdapterPrompt(buildCompactionResumeMessage(opts.sessionKeyRef?.current), () => !shuttingDown && !state.active, { deliverAs: "followUp" });
   }
 
   /**
@@ -1167,7 +1198,8 @@ export function registerGoalLoop(
       }
       invalidateGoal();
       state = armGoal(goal);
-      pi.sendUserMessage(buildGoalAnnouncement(goal));
+      const generation = goalGeneration;
+      sendAdapterPrompt(buildGoalAnnouncement(goal), () => isCurrentArmedGeneration(generation));
     },
   });
 
@@ -1310,6 +1342,15 @@ export function registerGoalLoop(
     // anything left to guard against.
     cancelSettleTimer();
     clearWakeStart();
+    // The run is streaming now, so a held adapter prompt queues behind it.
+    for (const held of promptsAwaitingStart.splice(0)) {
+      if (!held.wanted()) continue;
+      try {
+        pi.sendUserMessage(held.text, { deliverAs: "followUp" });
+      } catch {
+        // A rejected followUp must not break this run's start handling.
+      }
+    }
 
     // A run can start before deferred compaction release. Start is not
     // proof that this independent hold reason has finished.
@@ -1599,6 +1640,7 @@ export function registerGoalLoop(
       shuttingDown = true;
       invalidateGoal();
       outstandingReminderHandoff = undefined;
+      promptsAwaitingStart.length = 0;
       activeCompaction = undefined;
       pendingLever = undefined;
       advisoryFired = false;

@@ -1009,11 +1009,16 @@ test("child wake accounting: a raw settle that reserves a wake for still-held pu
   const child = childProcess(false);
   child.fire("agent_start");
   await child.grandchildSettles();
-  // No agent_end boundary submitted the batch: the settle's own flush wakes for it.
+  // No agent_end boundary submitted the batch: the settle's own flush wakes
+  // for it, on a macrotask after the settle emission.
   child.fire("agent_settled");
-  assert.equal(child.wakes.length, 1, "the settle reserved a wake for the held delivery");
+  assert.equal(child.wakes.length, 0, "no wake inside the settle emission");
+  const atSettle = child.uplink.snapshots().at(-1)!;
+  assert.equal(atSettle.deliveries > 0, true, "the still-held delivery keeps the parent waiting until the deferred wake owes its turn");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(child.wakes.length, 1, "the deferred flush reserved a wake for the held delivery");
   assert.equal(ownTurnRef.owed, true);
-  assert.equal(child.uplink.snapshots().at(-1)!.turnOwed, true);
+  assert.equal(child.uplink.snapshots().at(-1)!.turnOwed, true, "the deferred flush publishes its own owed flip");
 });
 
 test("child wake accounting: a wake reservation that times out with no turn stops owing it and publishes the flip", async () => {

@@ -2485,12 +2485,12 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       });
     }
 
-    test("the resume is sent after the held-push flush within the same release", async () => {
+    test("the resume waits for the held-push wake's agent_start instead of issuing a second idle prompt", async () => {
       const wakePi = { on: (event: string, fn: () => void) => { if (event === "session_shutdown") shutdown = fn; } } as unknown as ExtensionAPI;
       let shutdown: (() => void) | undefined;
       registerPushFlush(wakePi, { delayMs: () => 10, scheduleTimer: () => 0 as unknown as NodeJS.Timeout, clearTimer: () => {} });
       try {
-        const { pi, resumes, lever, complete } = resumeRun();
+        const { pi, ctx, resumes, lever, complete } = resumeRun();
         await lever();
         heldPushQueue.push({
           kind: "raw",
@@ -2498,8 +2498,18 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
           message: { customType: "ws-agent-advisory", content: "held fixture", display: true, details: { advisory: "held-fixture" } },
         });
         await complete();
-        assert.deepEqual(pi.sentUserMessages.map((m) => m.content), [buildPushWakeLine(1), resumeText], "push wake first, then the resume");
+        // Pi marks a prompt streaming only after async preflight, so a second
+        // idle prompt here would also pass its idle check and be rejected as
+        // "already processing", desyncing the host's run flag.
+        assert.deepEqual(pi.sentUserMessages.map((m) => m.content), [buildPushWakeLine(1)], "exactly one adapter prompt in flight before its start");
+        assert.equal(leadWakeStartPendingRef.current, true);
+        pi.streaming.current = true;
+        pi.handlers.get("agent_start")!({}, ctx);
+        assert.deepEqual(pi.sentUserMessages.map((m) => m.content), [buildPushWakeLine(1), resumeText], "the resume follows the wake's run");
+        assert.deepEqual(pi.sentUserMessages[1]!.options, { deliverAs: "followUp" });
         assert.equal(resumes().length, 1);
+        pi.handlers.get("agent_start")!({}, ctx);
+        assert.equal(resumes().length, 1, "delivered once");
       } finally {
         shutdown?.();
       }

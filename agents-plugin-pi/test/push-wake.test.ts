@@ -5,7 +5,7 @@ import { registerLeadBootstrap } from '../src/lead-bootstrap.ts';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { heldPushQueue, leadIdleRef, leadCompactingRef, leadWakeStartPendingRef, pushToLead, registerPushFlush, sendToLead } from '../src/spawner.ts';
+import { heldPushQueue, leadIdleRef, leadCompactingRef, leadWakeStartPendingRef, pushToLead, registerPushFlush, sendToLead, PUSH_WAKE_BACKOFF_BASE_MS, PUSH_WAKE_BACKOFF_CAP_MS } from '../src/spawner.ts';
 import { PUSH_BATCH_CUSTOM_TYPE } from '../src/push-protocol.ts';
 import { buildMailboxPushMessage } from '../src/mailbox-waiter.ts';
 import { renderLeadProse } from '../src/lead-compaction.ts';
@@ -13,6 +13,7 @@ import { renderLeadProse } from '../src/lead-compaction.ts';
 function harness(withGoal = false, steeringMode: 'one-at-a-time' | 'all' = 'one-at-a-time') {
   const handlers = new Map<string, Function[]>();
   const timers = new Map<number, Function>();
+  const delays = new Map<number, number>();
   let id = 0;
   let idle = true;
   let throws = false;
@@ -26,7 +27,7 @@ function harness(withGoal = false, steeringMode: 'one-at-a-time' | 'all' = 'one-
   const notices: string[] = [];
   const ctx: any = { isIdle: () => idle, getContextUsage: () => undefined, compact() {}, ui: {notify(text: string) {notices.push(text);}, setStatus() {}} };
   const clock = {
-    scheduleTimer(cb: Function) { timers.set(++id, cb); return id as any; },
+    scheduleTimer(cb: Function, ms: number) { timers.set(++id, cb); delays.set(id, ms); return id as any; },
     clearTimer(handle: any) { timers.delete(handle); },
   };
   const pi: any = {
@@ -87,7 +88,12 @@ function harness(withGoal = false, steeringMode: 'one-at-a-time' | 'all' = 'one-
       drainPi();
     },
     end() { emit('agent_end'); drainPi(); },
-    settle() { idle = true; emit('agent_settled'); },
+    // The settle-time flush runs on a zero-delay macrotask, ahead of every
+    // positive-delay timer; settle() lets that one turn pass.
+    settle() {
+      idle = true; emit('agent_settled');
+      for (const [key, cb] of [...timers]) if (delays.get(key) === 0) { timers.delete(key); cb(); }
+    },
     busy() { idle = false; }, fail() { throws = true; }, failCustom() { customThrows = true; }, allowCustom() { customThrows = false; }, handleInput() { handledInput = true; },
     tick() { const [key, cb] = [...timers][0]!; timers.delete(key); cb(); },
     push(mode: 'steer'|'followUp', report = mode) { pushToLead(pi, undefined, undefined, 'ws-agent-report', {report}, mode); },
@@ -222,7 +228,7 @@ test('/goal stop leaves a running child untouched and preserves its eventual rep
   assert.equal(h.custom.length, 1);
   assert.equal((h.custom[0].message as any).details.items[0].details.report, 'child finished');
   assert.equal(heldPushQueue.length, 0);
-  assert.equal(h.users.length, 2, 'only the goal announcement and child-report wake were submitted');
+  assert.equal(h.users.length, 1, 'the report rides the announcement\'s run: no second idle prompt while the announcement awaits its start');
   h.settle();
   assert.equal(h.timers.size, 0, 'stopped goal does not schedule a reminder after child delivery');
   h.goal!.resetCompactionStateForShutdown(); h.emit('session_shutdown');
@@ -591,7 +597,9 @@ test('carry survives push wake and deferred compaction release after start', asy
 test('idle compaction release cannot cancel held-push timeout', async () => {
   const h = harness(true);
   await h.commands.get('goal').handler('ship', h.ctx);
+  h.start(); // the announcement's run, in which the model calls the lever
   await h.tools.get('ws-compact').execute('x', {current_work: ''}, undefined, undefined, h.ctx);
+  h.settle(); // the compaction abort ends that run while compacting
   h.push('followUp'); h.emit('session_compact'); await new Promise(resolve => setImmediate(resolve));
   assert.equal(h.timers.size, 2, 'independent settle and wake recovery ownership');
   h.tick(); assert.equal(h.users.length, 3, 'push retry survives settle arming');
@@ -652,4 +660,105 @@ test('push user preflight runs actual bootstrap with live skill paths; override 
     assert.ok(modelCalls.every(prompt => prompt!.includes(skill)));
     h.emit('session_shutdown');
   } finally { rmSync(dir, {recursive: true, force: true}); }
+});
+
+/**
+ * Pi after a host idle desync: the session reads idle while its inner agent
+ * still holds a run, so a woken prompt is rejected ("Agent is already
+ * processing a prompt") and its finally re-emits agent_settled with no
+ * agent_start. This fake re-enters the settle synchronously from the wake
+ * send, the worst case of the host's awaited deferred-action chain.
+ */
+function desyncedHost() {
+  const handlers = new Map<string, Function[]>();
+  const timers = new Map<number, {cb: Function; ms: number}>();
+  let id = 0;
+  let desynced = true;
+  let depth = 0;
+  const wakes: string[] = [];
+  const custom: any[] = [];
+  const emit = (event: string) => { for (const fn of handlers.get(event) ?? []) fn({}, {}); };
+  const pi: any = {
+    on(event: string, fn: Function) { handlers.set(event, [...(handlers.get(event) ?? []), fn]); },
+    sendUserMessage(content: string) {
+      wakes.push(content);
+      if (!desynced) { emit('agent_start'); return; }
+      if (++depth > 20) throw Error('settle -> wake recursion');
+      try { emit('agent_settled'); } finally { depth -= 1; }
+    },
+    sendMessage(message: unknown, options: unknown) { custom.push({message, options}); },
+  };
+  leadIdleRef.current = () => true;
+  registerPushFlush(pi, {
+    delayMs: () => 60_000,
+    scheduleTimer(cb: Function, ms: number) { timers.set(++id, {cb, ms}); return id as any; },
+    clearTimer(handle: any) { timers.delete(handle); },
+  });
+  /** Fire the one pending settle-wake timer (any delay other than the 60 s reservation recovery). */
+  const fireSettleWake = () => {
+    const entries = [...timers].filter(([, t]) => t.ms !== 60_000);
+    assert.equal(entries.length, 1, 'exactly one settle-wake timer pending');
+    const [key, t] = entries[0]!;
+    timers.delete(key);
+    t.cb();
+    return t.ms;
+  };
+  const pendingSettleWakeDelays = () => [...timers.values()].filter((t) => t.ms !== 60_000).map((t) => t.ms);
+  return {pi, wakes, custom, emit, fireSettleWake, pendingSettleWakeDelays, heal() { desynced = false; },
+    push(report: string) { pushToLead(pi, undefined, undefined, 'ws-agent-report', {report}, 'followUp'); }};
+}
+
+test('a settle never wakes inside its own emission, and failed wakes back off instead of recursing', () => {
+  const h = desyncedHost();
+  heldPushQueue.push({kind: 'push', registry: undefined, record: undefined, family: 'ws-agent-report', payload: {report: 'held'}, deliverAs: 'followUp'});
+  h.emit('agent_settled');
+  assert.equal(h.wakes.length, 0, 'no wake inside the settle emission');
+  assert.deepEqual(h.pendingSettleWakeDelays(), [0]);
+
+  // Each fire issues one wake; its rejected prompt settles without a start,
+  // which schedules the next attempt rather than re-entering the wake.
+  const delays: number[] = [];
+  for (let attempt = 0; attempt < 8; attempt++) {
+    delays.push(h.fireSettleWake());
+    assert.equal(h.wakes.length, attempt + 1, 'one wake per macrotask, never a same-tick chain');
+  }
+  assert.deepEqual(delays, [0, 1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 30_000]);
+  assert.equal(PUSH_WAKE_BACKOFF_BASE_MS, 1_000);
+  assert.equal(PUSH_WAKE_BACKOFF_CAP_MS, 30_000);
+
+  // A push arriving during backoff stays queued without its own wake.
+  h.push('during backoff');
+  assert.equal(h.wakes.length, 8);
+  assert.equal(heldPushQueue.length, 2, 'the held queue is intact');
+  assert.equal(h.custom.length, 0);
+  // A settle that is not a failed wake keeps the pending backoff.
+  h.emit('agent_settled');
+  assert.deepEqual(h.pendingSettleWakeDelays(), [30_000]);
+
+  // Once the host starts a real run, the queue is delivered and the breaker resets.
+  h.heal();
+  h.fireSettleWake();
+  assert.equal(h.wakes.length, 9);
+  assert.equal(h.custom.length, 1);
+  assert.equal(h.custom[0].message.customType, PUSH_BATCH_CUSTOM_TYPE);
+  assert.deepEqual(h.custom[0].message.details.items.map((item: any) => item.details.report), ['held', 'during backoff']);
+  assert.equal(heldPushQueue.length, 0);
+  h.emit('agent_settled');
+  assert.deepEqual(h.pendingSettleWakeDelays(), [0], 'after a real start the next settle is back to an immediate retry');
+  h.emit('session_shutdown');
+  assert.deepEqual(h.pendingSettleWakeDelays(), []);
+});
+
+test('an adapter prompt awaiting its start holds a later push without a second idle prompt', async () => {
+  const h = harness(true);
+  await h.commands.get('goal').handler('ship', h.ctx);
+  assert.equal(leadWakeStartPendingRef.current, true, 'the announcement holds the shared start reservation');
+  h.push('followUp', 'arrived during preflight');
+  assert.equal(h.users.length, 1, 'no push wake while the announcement has not started');
+  assert.equal(heldPushQueue.length, 1);
+  h.start();
+  assert.equal(h.custom.length, 1);
+  assert.deepEqual(h.custom[0].message.details.items.map((item: any) => item.details.report), ['arrived during preflight']);
+  assert.equal(h.users.length, 1);
+  h.goal!.resetCompactionStateForShutdown(); h.emit('session_shutdown');
 });

@@ -157,6 +157,8 @@ import type { ChannelConnection, ChannelHello } from "../src/agent-channel.ts";
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
 import { installSubtreePublisher, SubtreeUpstream } from "../src/subtree-lifecycle.ts";
 import { fakeParentChannel, fakeUplink, idleOwnTurn, until } from "./fixtures/subtree-channels.ts";
+/** One event-loop turn: lets the zero-delay settle-time wake timer run. */
+const macrotask = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 const REAL_EXTENSION_ENTRY = fileURLToPath(new URL("../src/index.ts", import.meta.url));
 // Stands in for the child half of the control channel: the hello plus the
 // role's stage-2 readiness (web for Explore, fork for a fork launch).
@@ -2015,7 +2017,7 @@ describe("pushToLead: holding a mid-turn push until the lead's turn settles", ()
     assert.equal(pi.sent[0]!.options?.deliverAs, "steer", "confirmed-start release upgrades held followUp to steering");
   });
 
-  test("260906 (Phase 1): registerPushFlush's agent_settled handler does not flush while compacting", () => {
+  test("260906 (Phase 1): registerPushFlush's agent_settled handler does not flush while compacting", async () => {
     leadCompactingRef.current = true;
     const sent: string[] = [];
     let settled: (() => void) | undefined;
@@ -2029,11 +2031,13 @@ describe("pushToLead: holding a mid-turn push until the lead's turn settles", ()
 
     heldPushQueue.push({ kind: "push", registry: undefined, record: undefined, family: "ws-agent-report", payload: { report: "held" }, deliverAs: "followUp" });
     settled?.();
+    await macrotask();
     assert.deepEqual(sent, [], "the abort inside ctx.compact() settles the doomed turn before Pi's own compaction flag is set — this gate is what stops a premature flush into it");
     assert.equal(heldPushQueue.length, 1, "left for releaseAfterCompaction to flush once the compaction actually finishes");
 
     leadCompactingRef.current = false;
     settled?.();
+    await macrotask();
     assert.deepEqual(sent, [PUSH_BATCH_CUSTOM_TYPE], "an ordinary settle once compaction is over flushes one batch normally");
   });
 
@@ -2099,7 +2103,7 @@ describe("pushToLead: holding a mid-turn push until the lead's turn settles", ()
     assert.equal(heldPushQueue.length, 1, "the re-entrant push waits for the next settle rather than joining this drain");
   });
 
-  test("registerPushFlush requests a wake on settle and releases at confirmed start", () => {
+  test("registerPushFlush requests a wake on settle and releases at confirmed start", async () => {
     idle = false;
     const sent: string[] = [];
     let settled: (() => void) | undefined;
@@ -2116,6 +2120,8 @@ describe("pushToLead: holding a mid-turn push until the lead's turn settles", ()
 
     idle = true;
     settled?.();
+    assert.deepEqual(sent, [], "the settle-time wake waits for a macrotask, never inside the settle emission");
+    await macrotask();
     assert.deepEqual(sent, [PUSH_BATCH_CUSTOM_TYPE]);
   });
 });
