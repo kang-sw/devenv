@@ -6,6 +6,7 @@ related:
 sage-review-design: skipped
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 836d923c4c879194
+completed: 2026-10-06
 ---
 
 # Pi lead compaction advisory as a standing intent, with interim context milestones
@@ -253,6 +254,54 @@ back while the advisory is undelivered within one run, the multi-threshold
 priority, the `session_tree` and `session_start` baselines, a pending
 milestone dropped at compaction, no hard re-steer, and unchanged
 hold/release behavior.
+
+### Result (7c680e40c) - 2026-10-06
+
+Landed in 7c680e40c, 708ae162c, b8fddbb1e.
+
+- `src/lead-compaction.ts`: the advisory head is the pinned prose verbatim.
+  New `LEAD_CONTEXT_MILESTONE_CUSTOM_TYPE` (`ws-lead-context-milestone`) and
+  `buildContextMilestoneMessage(percent, hardPercent)` produce the pinned
+  milestone line. The hard and reroute heads are unchanged.
+  `lead-compact-guide.md` opens with the pinned paragraph.
+- `src/goal-loop.ts`: `advisoryFired`/`hardFired` are replaced by
+  `triggerLatch`, the value of the highest threshold already delivered
+  (`NO_TRIGGER_LATCH` = -Infinity when none). It is computed over
+  `compactionThresholds(advisory, hard)` with exact fractional milestones.
+  `fireCompactionTriggers` picks hard > advisory > milestone. Each kind is
+  delivered at its own boundary: the advisory at `agent_end` only;
+  milestones only at a `turn_end` with tool results, as
+  `{ deliverAs: "steer" }` without the preparation flag; the hard point
+  unchanged. Delivery latches to the highest threshold at or below the
+  usage. An undeliverable pick leaves the latch unchanged, so the crossing
+  stays pending. `session_start` and `session_tree` baseline the latch from
+  `ctx.getContextUsage()`; unknown usage leaves it unlatched. Compaction and
+  shutdown reset it.
+- Tests: the lead-compaction prose tests pin the advisory head, the guide
+  opening and the milestone line verbatim, replacing the 1cd1cd0de
+  per-clause tests. A new goal-loop describe block (261006) covers:
+  thresholds at 50/85 (61.67 and 73.33), tool-turn delivery, deferral from
+  a final turn, a milestone held behind an undelivered advisory, priority,
+  no hard re-steer (including the steer's delivery at a tool-less
+  `turn_end`), the session_tree and session_start baselines, a pending
+  milestone dropped at compaction, gating while a preparation or a
+  compaction is running, and no milestones for spawned sessions.
+- Verification: `node --test test/goal-loop.test.ts
+  test/lead-compaction.test.ts test/compaction-history.test.ts
+  test/adapter-config.test.ts` passed 239/239. `npm test` in
+  agents-plugin-pi passed 2035, with 0 fail and 3 skipped.
+- Decisions:
+  - An advisory at or above the hard point keeps the pre-261006 behavior:
+    it never fires, and no milestones are emitted.
+  - The baseline is not awaited by Pi's `session_start` (b8fddbb1e).
+    Awaiting its bridge-backed config read stalled reload generations; the
+    full suite caught this in mailbox-bootstrap.integration.
+  - A milestone carries `details: { milestone: <threshold> }`.
+- Lite review: two minors. One fixed in 708ae162c (the hard steer's
+  `deliverAs` at a tool-less `turn_end`). The other, `getContextUsage`
+  returning undefined at `session_start` before a model is set, is a
+  non-issue: Pi emits `session_start` from `bindExtensions`, after
+  construction restored the model and messages.
 
 ## Sage Review Round 1 (2026-10-06)
 

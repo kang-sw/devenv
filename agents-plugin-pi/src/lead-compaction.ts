@@ -618,28 +618,30 @@ export type PreparationTrigger =
   | { kind: "hard"; percent: number; threshold: number }
   | { kind: "reroute"; focus?: string };
 
+/**
+ * `customType` of the interim context milestones between the advisory and the
+ * hard point (261006). Not a preparation message: it carries no guide and
+ * never opens a preparation turn.
+ */
+export const LEAD_CONTEXT_MILESTONE_CUSTOM_TYPE = "ws-lead-context-milestone";
+
+/** The interim milestone line (261006): current usage against the forced point, no guide body. */
+export function buildContextMilestoneMessage(percent: number, hardPercent: number): string {
+  return `Current context window: ${Math.round(percent)}% / ${hardPercent}% (forced compaction point). Keep watching for a safe boundary to compact, as the advisory said; do not stop the current task for it.`;
+}
+
 /** The preparation message body: one trigger line, then the guide verbatim. */
 export function buildPreparationMessage(trigger: PreparationTrigger, guide: string): string {
   let head: string;
   if (trigger.kind === "advisory") {
     head = [
-      `Context usage is ${Math.round(trigger.percent)}% of the window (advisory point: ${trigger.threshold}%). This is an`,
-      "informational nudge, not a task or an instruction to compact.",
+      `Context usage is ${Math.round(trigger.percent)}% of the window (advisory point: ${trigger.threshold}%). Compaction becomes forced at ${trigger.hardPercent}%.`,
       "",
-      "Do not compact autonomously in response to this advisory during active",
-      "discussion with the human or while awaiting a human answer or clarification.",
-      "A natural pause after asking the human a question is not permission to compact.",
-      "Continue the interactive exchange instead of treating this nudge as the next task.",
+      "This is not an instruction to compact right now. If you are in active discussion with the human, awaiting their answer or clarification, or holding working context that would be costly to rebuild (a half-applied change or a diagnosis in progress), carry on for now. A pause after asking the human a question is not a boundary.",
       "",
-      "Only when neither condition is present, consider compacting at a quiet point",
-      "such as waiting only on background agents, or when work just landed and the",
-      "next work is weakly related to the current context. If you are mid-task or",
-      "holding context that would be costly to rebuild (a half-applied change or a",
-      "diagnosis in progress), keep going until a safe quiet point. You will not be",
-      `nudged again before the hard point (${trigger.hardPercent}%), where compaction is no longer optional.`,
+      `From here on, look for a good moment to compact before ${trigger.hardPercent}%. A good moment is a natural boundary where most of what this context holds is no longer needed for the work ahead, and what is still needed can be restored cheaply after compaction from durable records (tickets, commits, notes, agenda) and the summary. Typical cases: work just landed, you are waiting only on background agents, or the next work is weakly related to the current context. When such a moment comes, run the preparation below. Compacting on your own terms keeps the summary in your hands; at ${trigger.hardPercent}% it is forced, mid-work if need be. Brief context readings will follow on the way there.`,
       "",
-      "If you decide not to compact now, end this advisory turn without replying.",
-      "The guide below applies only after you decide to compact at a safe boundary.",
+      "If now is not such a moment, end this turn without replying and keep looking for one as you work.",
     ].join("\n");
   } else if (trigger.kind === "hard") {
     head = `Context usage is ${Math.round(trigger.percent)}% of the window, past the hard compaction point (${trigger.threshold}%). Stop the current work now and prepare for compaction with the guide below before anything else.`;
