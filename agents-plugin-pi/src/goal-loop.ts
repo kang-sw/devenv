@@ -1385,15 +1385,17 @@ export function registerGoalLoop(
    * `session_start` (restart/resume) and `session_tree` (rewind), so a resumed
    * session past the advisory point gets no duplicate advisory and a rewind
    * below it re-arms the advisory. Unknown usage (only a compaction since the
-   * last response) means the context is post-compaction: unlatched.
+   * last response) means the context is post-compaction: unlatched. The hard
+   * point is never baselined: a session resumed or rewound past it gets the
+   * hard steer once more, since Pi's own auto compaction sits far above it.
    */
   function baselineTriggerLatch(ctx: ExtensionContext): void | Promise<void> {
     if (isChildProcess(process.env)) return;
     return thenOrNow(readConfig(COMPACTION_TRIGGER_CONFIG_KEYS), (config) => {
       const percent = computeContextPercent(ctx.getContextUsage(), resolveContextWindowOverride(config));
-      triggerLatch = percent === null
-        ? NO_TRIGGER_LATCH
-        : highestThresholdAtOrBelow(compactionThresholds(resolveCompactionAdvisoryPercent(config), resolveCompactionHardPercent(config)), percent);
+      const softThresholds = compactionThresholds(resolveCompactionAdvisoryPercent(config), resolveCompactionHardPercent(config))
+        .filter((t) => t.kind !== "hard");
+      triggerLatch = percent === null ? NO_TRIGGER_LATCH : highestThresholdAtOrBelow(softThresholds, percent);
     });
   }
 

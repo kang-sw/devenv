@@ -2455,8 +2455,8 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       assert.equal(other.preparations().length + other.milestones().length, 1, "the hard delivery covers the advisory and both milestones");
     });
 
-    test("an ignored or aborted hard steer is not re-sent, even when usage keeps climbing or a rewind lands past the hard point", () => {
-      const { pi, ctx, at, toolTurn, finalTurn, runEnd, preparations, milestones } = milestoneRun();
+    test("an ignored or aborted hard steer is not re-sent while usage keeps climbing", () => {
+      const { at, toolTurn, finalTurn, runEnd, preparations, milestones } = milestoneRun();
       at(82);
       finalTurn();
       assert.equal(preparations().length, 1, "the hard steer goes out at any turn_end");
@@ -2468,11 +2468,29 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       at(95);
       toolTurn();
       runEnd();
-      pi.handlers.get("session_tree")!({ newLeafId: "x", oldLeafId: "y" }, ctx);
-      toolTurn();
-      runEnd();
       assert.equal(preparations().length, 1);
       assert.equal(milestones().length, 0);
+    });
+
+    test("a resume or rewind past the hard point gets the hard steer once more, and only once", () => {
+      for (const event of ["session_start", "session_tree"] as const) {
+        const { pi, ctx, at, toolTurn, runEnd, preparations, milestones, kindOf } = milestoneRun();
+        at(82);
+        toolTurn();
+        runEnd();
+        assert.equal(preparations().length, 1, event);
+        at(90);
+        pi.handlers.get(event)!({}, ctx);
+        toolTurn();
+        assert.equal(preparations().length, 2, `${event}: the baseline stops below the hard point`);
+        assert.equal(kindOf(preparations()[1]!), "hard");
+        assert.equal(milestones().length, 0, `${event}: the baseline still covers the milestones`);
+        runEnd();
+        at(93);
+        toolTurn();
+        runEnd();
+        assert.equal(preparations().length, 2, `${event}: delivery latches the hard point again`);
+      }
     });
 
     test("session_tree re-baselines the latch from the rewound branch's usage", () => {
