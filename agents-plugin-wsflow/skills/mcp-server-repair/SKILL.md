@@ -1,6 +1,6 @@
 ---
 name: mcp-server-repair
-description: The wsflow MCP server is not running, failed to start, is disconnected, or its wsflow/* tools are missing from the tool list. When you are about to report that wsflow MCP is unavailable, invoke this instead.
+description: The wsflow MCP server is disconnected, failed to start, or not running, or its tools (however your harness prefixes them) are missing or fail to connect. Invoke this first, as soon as the harness reports the server down or a tool call fails to connect — before retrying the call, working around it natively, or reporting wsflow MCP unavailable.
 ---
 
 # MCP Server Repair
