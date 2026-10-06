@@ -277,6 +277,10 @@ fi
 # possible: the cache ends with an OK sentinel and anything without it is
 # treated as a miss. Parsing is done with builtins — the grep -c and the
 # awk over `git diff --numstat` were two more processes.
+# Both calls must stay lock-free: git normally refreshes the index opportunistically,
+# and a render killed mid-write (common on Windows) leaves a stale index.lock that
+# breaks the user's real git commands. GIT_OPTIONAL_LOCKS=0 covers status; diff
+# ignores it, so it takes -c diff.autoRefreshIndex=false instead.
 BRANCH_NAME=""
 GIT_AHEAD=0
 GIT_BEHIND=0
@@ -308,6 +312,7 @@ if [[ -r $_cache_file ]]; then
 fi
 
 if ((_cache_hit == 0)); then
+  export GIT_OPTIONAL_LOCKS=0
   _git_status=$(git status --porcelain -b 2>/dev/null) && {
     # Header: ## branch...origin/branch [ahead N, behind M]
     _git_header="${_git_status%%$'\n'*}"
@@ -328,7 +333,7 @@ if ((_cache_hit == 0)); then
       [[ $_a == '-' ]] && _a=0
       [[ $_d == '-' ]] && _d=0
       ((GIT_ADDED += _a, GIT_DELETED += _d, GIT_MODIFIED++))
-    done <<<"$(git diff --numstat 2>/dev/null)"
+    done <<<"$(git -c diff.autoRefreshIndex=false diff --numstat 2>/dev/null)"
     printf '%s\n' "$NOW" "$BRANCH_NAME" "$GIT_AHEAD" "$GIT_BEHIND" \
       "$GIT_ADDED" "$GIT_DELETED" "$GIT_MODIFIED" "$GIT_UNTRACKED" OK \
       >"$_cache_file" 2>/dev/null
