@@ -776,6 +776,8 @@ export function registerGoalLoop(
    * not ours means another extension's result won.
    */
   let triggerLatch = NO_TRIGGER_LATCH;
+  /** Bumped by every trigger delivery and latch reset, so a background baseline can tell it was overtaken. */
+  let latchEpoch = 0;
   let preparation = false;
   /** 261003: the trigger kind of the pending preparation; set and cleared with `preparation`. */
   let preparationKind: PreparationTrigger["kind"] | undefined;
@@ -1378,6 +1380,7 @@ export function registerGoalLoop(
     }
     // Delivering covers every skipped lower threshold.
     triggerLatch = highestThresholdAtOrBelow(thresholds, percent);
+    latchEpoch++;
   }
 
   /**
@@ -1388,11 +1391,18 @@ export function registerGoalLoop(
    * last response) means the context is post-compaction: unlatched. The hard
    * point is never baselined: a session resumed or rewound past it gets the
    * hard steer once more, since Pi's own auto compaction sits far above it.
+   * Usage is read at the event, not when the config read resolves: a late
+   * baseline computed from later usage would latch a crossing still pending
+   * delivery. A delivery or reset since the event already set the latch, so
+   * the baseline then yields.
    */
   function baselineTriggerLatch(ctx: ExtensionContext): void | Promise<void> {
     if (isChildProcess(process.env)) return;
+    const usage = ctx.getContextUsage();
+    const epoch = latchEpoch;
     return thenOrNow(readConfig(COMPACTION_TRIGGER_CONFIG_KEYS), (config) => {
-      const percent = computeContextPercent(ctx.getContextUsage(), resolveContextWindowOverride(config));
+      if (latchEpoch !== epoch) return;
+      const percent = computeContextPercent(usage, resolveContextWindowOverride(config));
       const softThresholds = compactionThresholds(resolveCompactionAdvisoryPercent(config), resolveCompactionHardPercent(config))
         .filter((t) => t.kind !== "hard");
       triggerLatch = percent === null ? NO_TRIGGER_LATCH : highestThresholdAtOrBelow(softThresholds, percent);
@@ -1585,6 +1595,7 @@ export function registerGoalLoop(
       // A compaction re-arms every trigger, drops a pending milestone, and ends any preparation.
       expectOwnCompaction = false;
       triggerLatch = NO_TRIGGER_LATCH;
+      latchEpoch++;
       preparation = false;
       preparationKind = undefined;
       pendingReroute = undefined;
@@ -1728,6 +1739,7 @@ export function registerGoalLoop(
       activeCompaction = undefined;
       pendingLever = undefined;
       triggerLatch = NO_TRIGGER_LATCH;
+      latchEpoch++;
       preparation = false;
       preparationKind = undefined;
       pendingReroute = undefined;

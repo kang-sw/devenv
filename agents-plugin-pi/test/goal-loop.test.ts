@@ -2493,6 +2493,76 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       }
     });
 
+    test("a hard crossing first seen at agent_end goes out as a follow-up that triggers a turn", () => {
+      const { at, runEnd, preparations, kindOf } = milestoneRun();
+      at(49);
+      runEnd();
+      at(85);
+      runEnd();
+      assert.equal(preparations().length, 1);
+      assert.equal(kindOf(preparations()[0]!), "hard");
+      assert.deepEqual(preparations()[0]!.options, { deliverAs: "followUp", triggerTurn: true });
+    });
+
+    describe("with an asynchronous config read (the production bridge reader)", () => {
+      const config: GoalLoopConfig = { compaction_advisory_percent: 50, compaction_hard_percent: 80 };
+      function deferredRun() {
+        const reads: Array<{ resolve: () => void; reject: () => void }> = [];
+        const pi = fakePi();
+        registerGoalLoop(pi.api, {
+          readConfig: () => new Promise<GoalLoopConfig>((resolve, reject) => { reads.push({ resolve: () => resolve(config), reject: () => reject(new Error("bridge gone")) }); }),
+          ...fakeClock(),
+          leadCompactGuidePath: guidePath,
+          sessionKeyRef: { current: "lead-key" },
+        });
+        const { ctx } = fakeCtx();
+        const usage = { percent: 10 };
+        (ctx as unknown as { getContextUsage: () => unknown }).getContextUsage = () => ({ tokens: null, contextWindow: 1000, percent: usage.percent });
+        const preparations = () => pi.sentMessages.filter((m) => (m.content as { customType?: string }).customType === "ws-lead-compact");
+        const flush = () => new Promise((resolve) => setImmediate(resolve));
+        return { pi, ctx, reads, preparations, flush, at: (percent: number) => { usage.percent = percent; } };
+      }
+
+      test("the baseline is not awaited, and a rejected read is swallowed", async () => {
+        const { pi, ctx, reads, flush } = deferredRun();
+        assert.equal(pi.handlers.get("session_start")!({ reason: "resume" }, ctx), undefined, "session_start hands Pi nothing to await");
+        assert.equal(pi.handlers.get("session_tree")!({ newLeafId: "a", oldLeafId: "b" }, ctx), undefined);
+        for (const read of reads) read.reject();
+        await flush();
+      });
+
+      test("a late baseline uses the usage at its event, so it cannot latch a crossing still pending delivery", async () => {
+        const { pi, ctx, reads, preparations, flush, at } = deferredRun();
+        at(49);
+        pi.handlers.get("session_start")!({ reason: "resume" }, ctx);
+        at(52);
+        void pi.handlers.get("turn_end")!({ toolResults: [{ role: "toolResult" }] }, ctx);
+        for (const read of reads.splice(0)) read.resolve();
+        await flush();
+        void pi.handlers.get("agent_end")!({}, ctx);
+        for (const read of reads.splice(0)) read.resolve();
+        await flush();
+        assert.equal(preparations().length, 1, "the advisory crossed after the resume still goes out");
+      });
+
+      test("a late baseline yields to a delivery made after its event", async () => {
+        const { pi, ctx, reads, preparations, flush, at } = deferredRun();
+        at(81);
+        pi.handlers.get("session_start")!({ reason: "resume" }, ctx);
+        const baselineRead = reads.shift()!;
+        void pi.handlers.get("turn_end")!({ toolResults: [{ role: "toolResult" }] }, ctx);
+        for (const read of reads.splice(0)) read.resolve();
+        await flush();
+        assert.equal(preparations().length, 1, "the hard steer went out before the baseline resolved");
+        baselineRead.resolve();
+        await flush();
+        void pi.handlers.get("agent_end")!({}, ctx);
+        for (const read of reads.splice(0)) read.resolve();
+        await flush();
+        assert.equal(preparations().length, 1, "the baseline did not lower the latch below the delivered hard point");
+      });
+    });
+
     test("session_tree re-baselines the latch from the rewound branch's usage", () => {
       const { pi, ctx, at, toolTurn, runEnd, preparations, milestones } = milestoneRun();
       at(65);
