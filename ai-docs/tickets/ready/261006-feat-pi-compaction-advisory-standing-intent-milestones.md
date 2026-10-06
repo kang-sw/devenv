@@ -3,6 +3,9 @@ title: Pi lead compaction advisory as a standing intent, with interim context mi
 related:
   261002-feat-pi-lead-ws-owned-compaction: predecessor; supersedes its "nothing re-nudges between the two" trigger rule
   261004-feat-pi-compaction-interactive-ux: predecessor; revises its D1 advisory wording, keeps its D2 delivery and wake semantics
+sage-review-design: skipped
+sage-review-completeness: completed
+sage-review-completeness-reviewed: 836d923c4c879194
 ---
 
 # Pi lead compaction advisory as a standing intent, with interim context milestones
@@ -75,11 +78,27 @@ Three mechanisms combine:
   final turn stays pending and is delivered at the first tool-result
   `turn_end` of a later run. Rejected: steering immediately even on the final
   turn (adds an empty model turn).
+- **Delivery boundaries per threshold.** Advisory: `agent_end` only
+  (`followUp`, `triggerTurn: true`). Milestones: a `turn_end` with non-empty
+  `toolResults` only (`steer`). Hard: unchanged from today's
+  `fireCompactionTriggers` - any `turn_end` as a `steer`, or `agent_end` as a
+  `followUp`.
 - **One message per observation, by priority hard > advisory > milestone.**
   When one observation crosses several thresholds, only the highest-priority
   deliverable one is sent; the advisory and hard messages already state the
   current percent. Example: 49% -> 63% sends the advisory, not the 60%
   milestone.
+- **A milestone waits for the advisory.** A milestone is not deliverable
+  while a lower advisory crossing is still undelivered: it stays pending,
+  and when the advisory is delivered at `agent_end` it latches to the highest
+  threshold at or below the current usage, which covers the skipped
+  milestone. Example: one run going 45% -> 52% -> 62% across tool-result
+  `turn_end`s sends no milestone; its `agent_end` sends the advisory and
+  latches to 60. The advisory carries the standing intent and the
+  preparation guide, and the milestone text presupposes it. Rejected:
+  delivering the milestone while keeping the latch below the advisory (the
+  lead reads a milestone referring to an advisory it has not seen);
+  accepting the lost advisory.
 - **The trigger latch records the highest threshold already delivered.** The
   `advisoryFired`/`hardFired` booleans are replaced by one latch over the
   ordered thresholds (advisory, first milestone, second milestone, hard). An
@@ -178,8 +197,40 @@ Current context window: {n}% / {hard}% (forced compaction point). Keep watching 
 - The adapter's compaction push-hold (`leadCompactingRef`), goal-loop
   hold/release, and the existing gates (no trigger while a preparation turn or
   a compaction is in progress) keep working.
+- Threshold crossings compare the observed usage against the exact,
+  possibly fractional thresholds (for example 61.67 at advisory 50, hard 85),
+  as `fireCompactionTriggers` compares unrounded values today; only the
+  message text rounds. The milestone `customType` name is the implementer's,
+  `ws-`-prefixed like `ws-lead-compact`.
 - Matching manuals from AGENTS.md `### Implementation Conventions`: none
   (`agents-plugin-pi/` has no declared row).
+
+## Prior Decisions
+
+- 261004-feat-pi-compaction-interactive-ux (2026-10-04, Decisions D1): "Informational advisory with a narrow safe boundary. Explicitly label the advisory nudge as information, not a task or an instruction to compact." — bearing: constrains
+- 261004-feat-pi-compaction-interactive-ux (2026-10-04, Decisions D2): "Keep existing advisory thresholds, once-per-crossing/rearming behavior, delivery and model wake semantics. Do not add a deterministic conversational-state gate or change hard-threshold ..." — bearing: constrains
+- 1cd1cd0de (2026-10-04, commit): "The guide gates its imperative preparation on an authorized compaction decision so appending it to an informational advisory does not turn the nudge into a task. Hard/manual heads ... remain unchanged." — bearing: supports
+- 261002-feat-pi-lead-ws-owned-compaction (2026-10-02, Result f065de0da): "Advisory nudge at agent_end (followUp with triggerTurn) and hard-cut steer at turn_end ... Each fires once per crossing, re-arms after a compaction or when usage is seen below the th[reshold]" — bearing: supports
+- 0cda382d (2026-10-02, commit): "User confirmed dual thresholds (advisory nudge once, hard cut ~80 at a tool-call boundary), autonomous compaction, and /compact cancel-and-reroute" — bearing: supports
+- 261002-chore-ws-pi-retire-ws-claude-and-soften-compaction-advisory (2026-10-03, Result dbd56bd7c): "Advisory head replaced with the ticket text; the advisory PreparationTrigger now carries hardPercent. Full head pinned in test/lead-compaction.test.ts" — bearing: supports
+- facc7b0b (2026-10-05, commit): "Serialization reuses the existing shared reservation (reserveWakeStart / leadWakeStartPendingRef) instead of a new gate: pushes and the goal reminder already wait on it" — bearing: constrains
+- d12237cbe (2026-10-06, commit): "Milestones are steered only at tool-result turn_end because pi-agent-core's agent loop polls the steer queue after every turn_end" — bearing: supports
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-pi/src/goal-loop.ts, agents-plugin-pi/src/lead-compaction.ts, agents-plugin-pi/lead-compact-guide.md, agents-plugin-pi/test/goal-loop.test.ts, agents-plugin-pi/test/lead-compaction.test.ts |
+| scope.surface | internal | goal-loop trigger state is closure-local; buildPreparationMessage text changes but its signature need not; lead-facing prompt text changes |
+| scope.new_public_symbol | no | milestone customType constant may be added but no ticket-required exported API |
+| scope.new_type_contract | unknown | PreparationTrigger may or may not gain a milestone kind; ticket leaves the milestone message builder shape open |
+| scope.test_surface | existing | agents-plugin-pi/test/goal-loop.test.ts, agents-plugin-pi/test/lead-compaction.test.ts |
+| complexity.reuse_points | confirmed | sendPreparation, fireCompactionTriggers, resolveCompactionAdvisoryPercent and resolveCompactionHardPercent in src/goal-loop.ts read |
+| complexity.side_effect_risk | moderate | new steer messages and latch reset sites interact with turn_end, agent_end, session_tree, session_start and compaction re-arm paths |
+| risk.correctness | moderate | ordered-threshold latch with pending deferral, priority, and re-baseline has several edge transitions |
+| risk.fit | low | extends the existing trigger function and message builder in place with no new config key |
+| risk.test | moderate | many specified behaviors including verbatim prose, deferral across runs, and session_tree/session_start baselines need new goal-loop cases |
+| risk.security_or_contract | moderate | lead-facing prompt contract and hold/release gating must stay intact |
 
 ## Phases
 
@@ -197,7 +248,18 @@ Done when the `agents-plugin-pi` suite passes with tests covering the
 settled behavior above, including the pinned advisory, guide, and milestone
 text verbatim (updating the advisory-clause tests added in 1cd1cd0de), milestone
 thresholds at non-default knob values, milestone delivery only at a
-tool-result `turn_end` with deferral from a final turn, the multi-threshold
+tool-result `turn_end` with deferral from a final turn, a milestone held
+back while the advisory is undelivered within one run, the multi-threshold
 priority, the `session_tree` and `session_start` baselines, a pending
 milestone dropped at compaction, no hard re-steer, and unchanged
 hold/release behavior.
+
+## Sage Review Round 1 (2026-10-06)
+
+### Completeness Reviewer — block
+
+| # | Title | Severity |
+|---|-------|----------|
+| 1 | Milestone can be delivered before an undelivered advisory, losing the advisory | important |
+| 2 | Hard steer delivery boundary not restated | minor |
+| 3 | Milestone customType name and fractional threshold comparison unspecified | minor |
