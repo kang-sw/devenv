@@ -1398,8 +1398,14 @@ export function registerGoalLoop(
   }
 
   pi.on("turn_end", (event, ctx) => checkCompactionTriggers(ctx, event?.toolResults?.length ? "tool-turn" : "final-turn"));
-  pi.on("session_start", (_event, ctx) => baselineTriggerLatch(ctx));
-  pi.on("session_tree", (_event, ctx) => baselineTriggerLatch(ctx));
+  // Not awaited: the production config read goes through the ws-mcp bridge,
+  // which another session_start handler is still (re)starting, so awaiting it
+  // here would stall session startup on a stale client's read timeout.
+  const baselineInBackground = (ctx: ExtensionContext): void => {
+    void Promise.resolve(baselineTriggerLatch(ctx)).catch(() => undefined);
+  };
+  pi.on("session_start", (_event, ctx) => baselineInBackground(ctx));
+  pi.on("session_tree", (_event, ctx) => baselineInBackground(ctx));
 
   pi.on("agent_end", (_event, ctx) => {
     // Any preparation message queued before this run ended has run or was
