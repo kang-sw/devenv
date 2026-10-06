@@ -1225,6 +1225,29 @@ func TestMailboxWaitCommandRenderVariable(t *testing.T) {
 		}
 	})
 
+	// Scenario 5: WS_MCP_CLI_NAME, when declared, replaces os.Args[0] as the
+	// command name; empty or unset keeps os.Args[0].
+	t.Run("cli_name_env_prefers_shim", func(t *testing.T) {
+		setupMailboxTestEnv(t)
+		root := t.TempDir()
+		initGit(t, root)
+		t.Setenv(envMailbox, "")
+		t.Setenv(envMailboxAuto, "")
+		s := NewServer(root, "test")
+		key := mailboxLogin(t, s, 1, root)
+
+		t.Setenv(envCLIName, "ws-cli")
+		if got, want := mailboxWaitCommandVar(s, key), "ws-cli mailbox wait --session-key "+key; got != want {
+			t.Fatalf("declared CLI name: got %q, want %q", got, want)
+		}
+		for _, unset := range []string{"", "   "} {
+			t.Setenv(envCLIName, unset)
+			if got, want := mailboxWaitCommandVar(s, key), os.Args[0]+" mailbox wait --session-key "+key; got != want {
+				t.Fatalf("CLI name %q: got %q, want os.Args[0] form %q", unset, got, want)
+			}
+		}
+	})
+
 	// The injected value overrides any caller-supplied context value, so a
 	// concrete command cannot be spoofed through render context.
 	t.Run("caller_context_cannot_spoof", func(t *testing.T) {

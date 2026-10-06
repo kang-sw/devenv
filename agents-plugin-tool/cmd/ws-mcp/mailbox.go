@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/mcp"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
 )
 
@@ -120,14 +121,14 @@ func mailboxWait(args []string) {
 		done <- outcome{result, err}
 	}()
 
-	// Reprint this invocation's own resolved binary plus the wait-scoping
-	// flags it received, so every return path can hand the caller a runnable
-	// re-arm command: the arming guidance is read once, but the wait fires much
-	// later, so the "re-arm to keep listening" reminder has to arrive at fire
-	// time, not only at read time. os.Args[0] is naturally
-	// host-neutral — whatever argv[0] the harness/launcher invoked — so this
-	// needs no package-internal launcher path (shipped-surface-boundary.md).
-	rearmCmd := buildMailboxWaitRearmCommand(os.Args[0], *sessionKey, target.Slug, *timeout)
+	// Reprint this invocation's own command name plus the wait-scoping flags
+	// it received, so every return path can hand the caller a runnable re-arm
+	// command: the arming guidance is read once, but the wait fires much later,
+	// so the "re-arm to keep listening" reminder has to arrive at fire time,
+	// not only at read time. mcp.CLICommandName() prefers the declared shim
+	// name (a wait launched through the shim re-arms through it) and falls back
+	// to os.Args[0].
+	rearmCmd := buildMailboxWaitRearmCommand(mcp.CLICommandName(), *sessionKey, target.Slug, *timeout)
 
 	select {
 	case out := <-done:
@@ -203,12 +204,11 @@ func emitMailboxWaitResult(result wsmailbox.WaitResult, format, rearmCmd string)
 // moments can be far apart.
 const mailboxRearmNudge = "one mailbox wait covers a single wake; re-run the re-arm command to keep listening."
 
-// buildMailboxWaitRearmCommand reprints the resolved binary (bin, i.e.
-// os.Args[0]) plus the wait-scoping flags this invocation received, producing a
-// command that re-arms an identical wait. It emits only the resolved flags —
-// --session-key (always required), and --slug / --timeout when set — so the
-// command stays host-neutral (no package-internal launcher path is written
-// into it; the binary is whatever argv[0] the harness launched).
+// buildMailboxWaitRearmCommand reprints the command name (bin, from
+// mcp.CLICommandName) plus the wait-scoping flags this invocation received,
+// producing a command that re-arms an identical wait. It emits only the
+// resolved flags — --session-key (always required), and --slug / --timeout
+// when set.
 func buildMailboxWaitRearmCommand(bin, sessionKey, slug string, timeout time.Duration) string {
 	parts := []string{bin, "mailbox", "wait", "--session-key", sessionKey}
 	if slug != "" {

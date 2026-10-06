@@ -2,5 +2,6 @@
 # ws-cli: MCP-independent CLI fallback for the ws plugin.
 # Delegates to the plugin's launcher, forwarding all arguments unchanged.
 set -e
+export WS_MCP_CLI_NAME=ws-cli
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 exec python3 "$script_dir/ws-mcp-launcher.py" "$@"

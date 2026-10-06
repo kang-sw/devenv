@@ -386,6 +386,31 @@ func TestMailboxWaitRearmReminderOnTimeoutExit(t *testing.T) {
 	}
 }
 
+// TestMailboxWaitRearmCommandName asserts the re-arm command starts with
+// WS_MCP_CLI_NAME when the shim declares it, so a wait launched through the
+// shim re-arms through it, and with the invoked binary path otherwise.
+func TestMailboxWaitRearmCommandName(t *testing.T) {
+	bin := buildWsMCPMailboxTestBin(t)
+	for _, tc := range []struct {
+		cliName string
+		want    string
+	}{
+		{"ws-cli", "re-arm: ws-cli mailbox wait --session-key "},
+		{"", "re-arm: " + bin + " mailbox wait --session-key "},
+	} {
+		env := append(mailboxTestEnv(t), "WS_MCP_CLI_NAME="+tc.cliName)
+		cmd := exec.Command(bin, "mailbox", "wait", "--session-key", "amber-tide-fox", "--timeout", "1s")
+		cmd.Env = env
+		out, err := cmd.CombinedOutput()
+		if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != mailboxWaitExitTimeout {
+			t.Fatalf("mailbox wait did not time out as expected: err=%v out=%s", err, out)
+		}
+		if !strings.Contains(string(out), tc.want) {
+			t.Fatalf("WS_MCP_CLI_NAME=%q: output = %q, want %q", tc.cliName, out, tc.want)
+		}
+	}
+}
+
 // TestMailboxWaitJSONCarriesRearmField asserts the --format json path gains the
 // additive `rearm` object (command + nudge) without disturbing the existing
 // fields, so machine callers see one new field rather than a changed shape.

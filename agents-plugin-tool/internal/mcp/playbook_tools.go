@@ -254,13 +254,30 @@ func resolveNamespaceVars() map[string]string {
 // the shape rather than being handed a broken command.
 const mailboxWaitCommandGeneric = "ws-mcp mailbox wait --session-key <your key> [--slug <your address>] [--timeout <duration>]"
 
+// envCLIName names the command a printed CLI invocation should start with.
+// The package declares it where its CLI shim is on the agent's shell PATH (the
+// Claude manifests, and the shims themselves); elsewhere — Codex puts no plugin
+// bin/ on PATH — it stays unset and the resolved binary path is used.
+const envCLIName = "WS_MCP_CLI_NAME"
+
+// CLICommandName returns the command name that printed, agent-runnable CLI
+// invocations start with: WS_MCP_CLI_NAME when declared, else os.Args[0]. The
+// declared shim name is short, version-stable, and allowlistable; os.Args[0]
+// is the versioned runtime binary path. Neither writes a package-internal
+// launcher path into shipped text (shipped-surface-boundary.md). The server
+// cannot discover the shim itself: its own PATH does not carry plugin bin/.
+func CLICommandName() string {
+	if name := strings.TrimSpace(os.Getenv(envCLIName)); name != "" {
+		return name
+	}
+	return strings.TrimSpace(os.Args[0])
+}
+
 // mailboxWaitCommandVar resolves {{.MailboxWaitCommand}} to a concrete,
 // runnable `mailbox wait` invocation for the caller's own session, or the
-// generic fallback when one cannot be produced. It runs inside the MCP server
-// process, so os.Args[0] is the same resolved binary the harness/launcher
-// invoked — naturally host-neutral, with no package-internal launcher path
-// written into shipped text (shipped-surface-boundary.md), mirroring the
-// re-arm command the `mailbox wait` CLI itself prints on return.
+// generic fallback when one cannot be produced. The command starts with
+// CLICommandName(), the same name the re-arm command the `mailbox wait` CLI
+// prints on return uses.
 //
 // The --slug is the caller's REGISTERED self address (owner-gated, the same
 // source mailbox.lookup_peers' self.address and the workflow_manual ambient
@@ -278,7 +295,7 @@ func mailboxWaitCommandVar(s *Server, sessionKey string) string {
 	if !found {
 		return mailboxWaitCommandGeneric
 	}
-	bin := strings.TrimSpace(os.Args[0])
+	bin := CLICommandName()
 	if bin == "" {
 		return mailboxWaitCommandGeneric
 	}
