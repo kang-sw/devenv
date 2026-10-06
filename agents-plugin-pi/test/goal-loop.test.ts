@@ -50,6 +50,9 @@ import {
   isChildProcess,
   registerGoalLoop,
   buildLeadCompactionResult,
+  compactionThresholds,
+  highestThresholdAtOrBelow,
+  NO_TRIGGER_LATCH,
   resolveDialogBudgetBytes,
   DEFAULT_RUNAWAY_THRESHOLD,
   DEFAULT_COMPACTION_ADVISORY_PERCENT,
@@ -61,7 +64,7 @@ import { WS_PI_SPAWN_ROLE_ENV } from "../src/process-role.ts";
 import { createWsConfigReader, staticConfigReader, type GoalLoopConfigReader } from "../src/adapter-config.ts";
 import { flushHeldPushes, leadIdleRef, clearWakeStart, leadCompactingRef, leadWakeStartPendingRef, heldPushQueue, isOwningAgentIdle, registerPushFlush, buildPushWakeLine, type RpcAgentRegistry } from "../src/spawner.ts";
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
-import { DEFAULT_DIALOG_BUDGET_BYTES, LEAD_PROSE_SECTIONS, leadProseParameterSchema, NO_KEPT_ENTRY_ID, renderLeadProse } from "../src/lead-compaction.ts";
+import { DEFAULT_DIALOG_BUDGET_BYTES, LEAD_CONTEXT_MILESTONE_CUSTOM_TYPE, LEAD_PROSE_SECTIONS, leadProseParameterSchema, NO_KEPT_ENTRY_ID, renderLeadProse } from "../src/lead-compaction.ts";
 
 /** The lever's rendered prose for a single `current_work` field — the carry the old lever passed raw. */
 const prose = (text: string): string => renderLeadProse({ current_work: text });
@@ -2137,7 +2140,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       assert.equal(preparations().length, 1);
       const nudge = preparations()[0]!;
       assert.deepEqual(nudge.options, { deliverAs: "followUp", triggerTurn: true });
-      assert.match((nudge.content as { content: string }).content, /^Context usage is 55% of the window \(advisory point: 50%\)\. This is an\ninformational nudge, not a task or an instruction to compact\.[\s\S]*hard point \(80%\), where compaction is no longer optional\.[\s\S]*\n\nGUIDE BODY 261002$/);
+      assert.match((nudge.content as { content: string }).content, /^Context usage is 55% of the window \(advisory point: 50%\)\. Compaction becomes forced at 80%\.\n[\s\S]*keep looking for one as you work\.\n\nGUIDE BODY 261002$/);
 
       pi.handlers.get("agent_end")!({}, ctx);
       usage.percent = 60;
@@ -2212,10 +2215,15 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       process.env[WS_PI_SPAWN_ROLE_ENV] = "worker";
       try {
         const { pi, ctx, usage, preparations } = triggerRun();
+        pi.handlers.get("session_start")!({ reason: "startup" }, ctx);
+        usage.percent = 62;
+        pi.handlers.get("turn_end")!({ toolResults: [{}] }, ctx);
         usage.percent = 99;
         pi.handlers.get("turn_end")!({}, ctx);
+        pi.handlers.get("turn_end")!({ toolResults: [{}] }, ctx);
         pi.handlers.get("agent_end")!({}, ctx);
         assert.equal(preparations().length, 0);
+        assert.equal(pi.sentMessages.length, 0, "no milestone either");
       } finally {
         if (oldRole === undefined) delete process.env[WS_PI_SPAWN_ROLE_ENV]; else process.env[WS_PI_SPAWN_ROLE_ENV] = oldRole;
       }
@@ -2319,6 +2327,223 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       pi.handlers.get("session_compact")!(stored(ourDetails), ctx);
       assert.equal(competing().length, 1);
       await new Promise((resolve) => setImmediate(resolve));
+    });
+  });
+
+  describe("standing-intent advisory, interim milestones, and latch baselines (261006)", () => {
+    const guidePath = join(tmpDir, "lead-compact-guide-261006.md");
+    writeFileSync(guidePath, "GUIDE BODY 261006");
+
+    function milestoneRun(config: GoalLoopConfig = { compaction_advisory_percent: 50, compaction_hard_percent: 80 }) {
+      const pi = fakePi();
+      registerGoalLoop(pi.api, { readConfig: staticConfigReader(config), ...fakeClock(), leadCompactGuidePath: guidePath, sessionKeyRef: { current: "lead-key" } });
+      const { ctx } = fakeCtx();
+      const usage = { percent: 10 as number | null };
+      (ctx as unknown as { getContextUsage: () => unknown }).getContextUsage = () => ({ tokens: null, contextWindow: 1000, percent: usage.percent });
+      const byType = (type: string) => pi.sentMessages.filter((m) => (m.content as { customType?: string }).customType === type);
+      const preparations = () => byType("ws-lead-compact");
+      const milestones = () => byType(LEAD_CONTEXT_MILESTONE_CUSTOM_TYPE);
+      const at = (percent: number | null) => { usage.percent = percent; };
+      const toolTurn = () => pi.handlers.get("turn_end")!({ toolResults: [{ role: "toolResult" }] }, ctx);
+      const finalTurn = () => pi.handlers.get("turn_end")!({ toolResults: [] }, ctx);
+      const runEnd = () => pi.handlers.get("agent_end")!({}, ctx);
+      const kindOf = (m: { content: unknown }) => (m.content as { details?: { trigger?: string } }).details?.trigger;
+      return { pi, ctx, usage, preparations, milestones, at, toolTurn, finalTurn, runEnd, kindOf };
+    }
+    const ourDetails = { kind: "ws-pi-lead-compaction", version: 1, source: "lever" };
+
+    test("thresholds sit one and two thirds of the way from the advisory to the hard point, exact and unrounded", () => {
+      assert.deepEqual(compactionThresholds(50, 80).map((t) => [t.kind, t.percent]), [["advisory", 50], ["milestone", 60], ["milestone", 70], ["hard", 80]]);
+      const tuned = compactionThresholds(50, 85).map((t) => t.percent);
+      assert.equal(tuned[1], 50 + 35 / 3);
+      assert.equal(tuned[2], 50 + 70 / 3);
+      assert.deepEqual(compactionThresholds(90, 80), [{ kind: "hard", percent: 80 }], "an advisory at or above the hard point never fires, so it carries no milestones");
+      assert.equal(highestThresholdAtOrBelow(compactionThresholds(50, 80), 49.9), NO_TRIGGER_LATCH);
+      assert.equal(highestThresholdAtOrBelow(compactionThresholds(50, 80), 69.9), 60);
+    });
+
+    test("a milestone is a guide-less steer at a tool-result turn_end, using the tuned knobs and fractional thresholds", () => {
+      const { at, toolTurn, runEnd, preparations, milestones } = milestoneRun({ compaction_advisory_percent: 50, compaction_hard_percent: 85 });
+      at(55);
+      runEnd();
+      assert.equal(preparations().length, 1, "advisory sent");
+      runEnd();
+      at(61.6);
+      toolTurn();
+      assert.equal(milestones().length, 0, "61.6 is below the exact 61.67 milestone");
+      at(61.7);
+      toolTurn();
+      assert.equal(milestones().length, 1);
+      const milestone = milestones()[0]!;
+      assert.deepEqual(milestone.options, { deliverAs: "steer" });
+      assert.equal((milestone.content as { display: boolean }).display, true);
+      assert.equal((milestone.content as { content: string }).content, "Current context window: 62% / 85% (forced compaction point). Keep watching for a safe boundary to compact, as the advisory said; do not stop the current task for it.");
+      assert.equal(preparations().length, 1, "a milestone is not a preparation message");
+
+      at(70);
+      toolTurn();
+      assert.equal(milestones().length, 1, "the same crossing does not repeat");
+      at(73.4);
+      toolTurn();
+      assert.equal(milestones().length, 2, "the second milestone at the exact 73.33");
+      assert.match((milestones()[1]!.content as { content: string }).content, /^Current context window: 73% \/ 85% /);
+      runEnd();
+      at(80);
+      toolTurn();
+      assert.equal(milestones().length, 2, "a milestone sets no preparation flag, so later turns are still checked, and nothing new is crossed");
+    });
+
+    test("a milestone crossed at a run's final turn stays pending and goes out at the first tool-result turn_end of a later run", () => {
+      const { at, toolTurn, finalTurn, runEnd, preparations, milestones } = milestoneRun();
+      at(55);
+      runEnd();
+      runEnd();
+      at(62);
+      finalTurn();
+      runEnd();
+      assert.equal(milestones().length, 0, "neither the final turn nor agent_end delivers a milestone");
+      assert.equal(preparations().length, 1);
+      toolTurn();
+      assert.equal(milestones().length, 1, "delivered at the next tool-result turn_end");
+      assert.match((milestones()[0]!.content as { content: string }).content, /^Current context window: 62% \/ 80% /);
+    });
+
+    test("a milestone waits while the advisory is undelivered within one run; the advisory then latches past it", () => {
+      const { at, toolTurn, runEnd, preparations, milestones, kindOf } = milestoneRun();
+      at(45);
+      toolTurn();
+      at(52);
+      toolTurn();
+      at(62);
+      toolTurn();
+      assert.equal(milestones().length, 0);
+      assert.equal(preparations().length, 0);
+      runEnd();
+      assert.equal(preparations().length, 1);
+      assert.equal(kindOf(preparations()[0]!), "advisory");
+      runEnd();
+      toolTurn();
+      assert.equal(milestones().length, 0, "the advisory latched to 60, covering the skipped milestone");
+      at(70);
+      toolTurn();
+      assert.equal(milestones().length, 1, "the next milestone still fires");
+    });
+
+    test("one message per observation by priority hard > advisory > milestone", () => {
+      const { at, runEnd, preparations, milestones, kindOf } = milestoneRun();
+      at(49);
+      runEnd();
+      at(63);
+      runEnd();
+      assert.equal(preparations().length, 1);
+      assert.equal(kindOf(preparations()[0]!), "advisory");
+      assert.match((preparations()[0]!.content as { content: string }).content, /^Context usage is 63% of the window/);
+      assert.equal(milestones().length, 0);
+      runEnd();
+
+      const other = milestoneRun();
+      other.at(49);
+      other.runEnd();
+      other.at(85);
+      other.toolTurn();
+      assert.equal(other.preparations().length, 1);
+      assert.equal(other.kindOf(other.preparations()[0]!), "hard");
+      assert.deepEqual(other.preparations()[0]!.options, { deliverAs: "steer", triggerTurn: true });
+      assert.equal(other.milestones().length, 0);
+      other.runEnd();
+      other.toolTurn();
+      assert.equal(other.preparations().length + other.milestones().length, 1, "the hard delivery covers the advisory and both milestones");
+    });
+
+    test("an ignored or aborted hard steer is not re-sent, even when usage keeps climbing or a rewind lands past the hard point", () => {
+      const { pi, ctx, at, toolTurn, finalTurn, runEnd, preparations, milestones } = milestoneRun();
+      at(82);
+      finalTurn();
+      assert.equal(preparations().length, 1, "the hard steer goes out at any turn_end");
+      runEnd();
+      at(88);
+      toolTurn();
+      runEnd();
+      at(95);
+      toolTurn();
+      runEnd();
+      pi.handlers.get("session_tree")!({ newLeafId: "x", oldLeafId: "y" }, ctx);
+      toolTurn();
+      runEnd();
+      assert.equal(preparations().length, 1);
+      assert.equal(milestones().length, 0);
+    });
+
+    test("session_tree re-baselines the latch from the rewound branch's usage", () => {
+      const { pi, ctx, at, toolTurn, runEnd, preparations, milestones } = milestoneRun();
+      at(65);
+      runEnd();
+      assert.equal(preparations().length, 1, "advisory sent, latched to 60");
+      runEnd();
+      at(30);
+      pi.handlers.get("session_tree")!({ newLeafId: "a", oldLeafId: "b" }, ctx);
+      at(55);
+      runEnd();
+      assert.equal(preparations().length, 2, "a rewind below the advisory point re-arms the advisory");
+      runEnd();
+
+      at(72);
+      pi.handlers.get("session_tree")!({ newLeafId: "c", oldLeafId: "a" }, ctx);
+      toolTurn();
+      runEnd();
+      assert.equal(milestones().length, 0, "a rewind to 72% latches to the second milestone");
+      assert.equal(preparations().length, 2);
+    });
+
+    test("session_start baselines the latch from the current branch, unlatched when usage is unknown", () => {
+      const resumed = milestoneRun();
+      resumed.at(65);
+      resumed.pi.handlers.get("session_start")!({ reason: "resume" }, resumed.ctx);
+      resumed.runEnd();
+      assert.equal(resumed.preparations().length, 0, "no duplicate advisory for a resumed session past the advisory point");
+      resumed.toolTurn();
+      assert.equal(resumed.milestones().length, 0);
+      resumed.at(71);
+      resumed.toolTurn();
+      assert.equal(resumed.milestones().length, 1, "the next milestone still fires");
+
+      const fresh = milestoneRun();
+      fresh.at(null);
+      fresh.pi.handlers.get("session_start")!({ reason: "resume" }, fresh.ctx);
+      fresh.at(55);
+      fresh.runEnd();
+      assert.equal(fresh.preparations().length, 1, "unknown usage (only a compaction since the last response) starts unlatched");
+    });
+
+    test("a compaction drops a pending milestone", async () => {
+      const { pi, ctx, at, toolTurn, finalTurn, runEnd, preparations, milestones } = milestoneRun();
+      at(55);
+      runEnd();
+      runEnd();
+      at(62);
+      finalTurn();
+      runEnd();
+      pi.handlers.get("session_compact")!({ reason: "manual", fromExtension: true, compactionEntry: { details: ourDetails } }, ctx);
+      await new Promise((resolve) => setImmediate(resolve));
+      toolTurn();
+      assert.equal(milestones().length, 0, "the latch was reset; the milestone now waits behind an undelivered advisory");
+      runEnd();
+      assert.equal(preparations().length, 2, "the advisory is re-armed instead");
+    });
+
+    test("no milestone is sent while a preparation turn or a compaction is in progress", () => {
+      const { pi, ctx, at, toolTurn, runEnd, preparations, milestones } = milestoneRun();
+      at(55);
+      runEnd();
+      assert.equal(preparations().length, 1, "advisory queued; its run has not ended");
+      at(62);
+      toolTurn();
+      assert.equal(milestones().length, 0, "the preparation turn is running");
+      runEnd();
+      pi.handlers.get("session_before_compact")!(compactionEvent("threshold"), ctx);
+      assert.equal(leadCompactingRef.current, true);
+      toolTurn();
+      assert.equal(milestones().length, 0, "a compaction in progress blocks the milestone");
     });
   });
 

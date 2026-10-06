@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import {
   buildDialogSection,
+  buildContextMilestoneMessage,
   buildFallbackSummaryPrompt,
   buildLeadCompactionSummary,
   buildPreparationMessage,
@@ -21,6 +22,7 @@ import {
   foldToolRuns,
   findActiveTicket,
   humanTextOf,
+  LEAD_CONTEXT_MILESTONE_CUSTOM_TYPE,
   LEAD_PROSE_SECTIONS,
   leadProseParameterSchema,
   readLeadCompactGuide,
@@ -435,22 +437,30 @@ describe("buildLeadCompactionSummary", () => {
 });
 
 describe("preparation and fallback text", () => {
-  test("the advisory is informational and excludes active discussion and awaited human input", () => {
+  // 261006: the advisory head, the guide's opening paragraph, and the
+  // milestone line are pinned verbatim from the ticket's agreed prose.
+  test("the advisory head is the pinned standing-intent text, then the guide", () => {
     const message = buildPreparationMessage({ kind: "advisory", percent: 51.4, threshold: 50, hardPercent: 80 }, "GUIDE BODY");
-    assert.match(message, /^Context usage is 51% of the window \(advisory point: 50%\)/);
-    assert.match(message, /informational nudge, not a task or an instruction to compact\./);
-    assert.match(message, /Do not compact autonomously in response to this advisory during active\s+discussion with the human or while awaiting a human answer or clarification\./);
-    assert.match(message, /A natural pause after asking the human a question is not permission to compact\./);
-    assert.match(message, /Continue the interactive exchange instead of treating this nudge as the next task\./);
+    assert.equal(
+      message,
+      "Context usage is 51% of the window (advisory point: 50%). Compaction becomes forced at 80%.\n\nThis is not an instruction to compact right now. If you are in active discussion with the human, awaiting their answer or clarification, or holding working context that would be costly to rebuild (a half-applied change or a diagnosis in progress), carry on for now. A pause after asking the human a question is not a boundary.\n\nFrom here on, look for a good moment to compact before 80%. A good moment is a natural boundary where most of what this context holds is no longer needed for the work ahead, and what is still needed can be restored cheaply after compaction from durable records (tickets, commits, notes, agenda) and the summary. Typical cases: work just landed, you are waiting only on background agents, or the next work is weakly related to the current context. When such a moment comes, run the preparation below. Compacting on your own terms keeps the summary in your hands; at 80% it is forced, mid-work if need be. Brief context readings will follow on the way there.\n\nIf now is not such a moment, end this turn without replying and keep looking for one as you work.\n\nGUIDE BODY",
+    );
   });
 
-  test("quiet advisory examples require both human-interaction conditions to be absent", () => {
-    const message = buildPreparationMessage({ kind: "advisory", percent: 55, threshold: 40, hardPercent: 70 }, "GUIDE BODY");
-    assert.match(message, /Only when neither condition is present, consider compacting at a quiet point\s+such as waiting only on background agents, or when work just landed and the\s+next work is weakly related to the current context\./);
-    assert.match(message, /If you are mid-task or\s+holding context that would be costly to rebuild/);
-    assert.match(message, /hard point \(70%\), where compaction is no longer optional\./);
-    assert.match(message, /end this advisory turn without replying\./);
-    assert.match(message, /The guide below applies only after you decide to compact at a safe boundary\.\n\nGUIDE BODY$/);
+  test("the advisory head interpolates non-default thresholds", () => {
+    const message = buildPreparationMessage({ kind: "advisory", percent: 41.6, threshold: 40, hardPercent: 70 }, "GUIDE BODY");
+    assert.match(message, /^Context usage is 42% of the window \(advisory point: 40%\)\. Compaction becomes forced at 70%\.\n/);
+    assert.match(message, /look for a good moment to compact before 70%\./);
+    assert.match(message, /at 70% it is forced, mid-work if need be\./);
+  });
+
+  test("the milestone line is the pinned text with the rounded usage and the hard point", () => {
+    assert.equal(
+      buildContextMilestoneMessage(62.6, 85),
+      "Current context window: 63% / 85% (forced compaction point). Keep watching for a safe boundary to compact, as the advisory said; do not stop the current task for it.",
+    );
+    assert.equal(LEAD_CONTEXT_MILESTONE_CUSTOM_TYPE.startsWith("ws-"), true);
+    assert.notEqual(LEAD_CONTEXT_MILESTONE_CUSTOM_TYPE, "ws-lead-compact", "milestones are not preparation messages");
   });
 
   test("hard and manual triggers keep their imperative heads and verbatim guide", () => {
@@ -464,11 +474,10 @@ describe("preparation and fallback text", () => {
   test("the packaged guide is read fresh and ends with the lever call; a missing file falls back", () => {
     const guide = readLeadCompactGuide(new URL("../lead-compact-guide.md", import.meta.url).pathname);
     assert.match(guide, /^# Preparing for compaction/);
-    assert.match(guide, /preparation below applies only after a decision to compact: at the hard\s+point, for the user's `\/compact`, or at a safe advisory boundary\./);
-    assert.match(guide, /An advisory\s+is informational, not a task or an instruction to compact\./);
-    assert.match(guide, /both no active discussion with the human and no\s+human answer or clarification being awaited/);
-    assert.match(guide, /a pause after asking a question\s+is not permission/);
-    assert.match(guide, /continue the interactive exchange rather than\s+start preparation/);
+    assert.ok(
+      guide.startsWith("# Preparing for compaction\n\nThe preparation below runs once compaction is decided: at the hard point, for\nthe user's `/compact`, or at a safe boundary you pick after the advisory. After\nthe advisory, compaction is a standing intent rather than an immediate task. A\nsafe boundary needs both no active discussion with the human and no human\nanswer or clarification being awaited; a pause after asking a question is not\none. Until such a boundary comes, continue the current work or exchange, and\ntake the boundary when it does.\n\nCompaction replaces this conversation"),
+      "the guide opens with the pinned standing-intent paragraph",
+    );
     assert.match(guide, /Do these in order, without starting new work in between:/);
     assert.match(guide, /Call `ws-compact`/);
     assert.match(readLeadCompactGuide("/nonexistent/guide.md"), /ws-compact/);

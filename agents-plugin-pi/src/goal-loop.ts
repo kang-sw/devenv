@@ -91,6 +91,7 @@ import { convertToLlm, serializeConversation, sessionEntryToContextMessages, typ
 import {
   buildFallbackSummaryPrompt,
   buildLeadCompactionSummary,
+  buildContextMilestoneMessage,
   buildPreparationMessage,
   DEFAULT_DIALOG_BUDGET_BYTES,
   extractLeadProse,
@@ -100,6 +101,7 @@ import {
   LEAD_COMPACT_CUSTOM_TYPE,
   LEAD_COMPACT_TOOL_NAME,
   LEAD_COMPACTION_DETAILS_KIND,
+  LEAD_CONTEXT_MILESTONE_CUSTOM_TYPE,
   leadProseParameterSchema,
   NO_KEPT_ENTRY_ID,
   readLeadCompactGuide,
@@ -191,6 +193,43 @@ export function resolveCompactionAdvisoryPercent(config: GoalLoopConfig | undefi
 export function resolveCompactionHardPercent(config: GoalLoopConfig | undefined): number {
   const value = config?.compaction_hard_percent;
   return typeof value === "number" && Number.isFinite(value) && value > 0 && value <= 100 ? value : DEFAULT_COMPACTION_HARD_PERCENT;
+}
+
+/** A compaction-trigger boundary: a `turn_end` that continues the run (tool results), a run's final `turn_end`, or `agent_end`. */
+export type TriggerBoundary = "tool-turn" | "final-turn" | "run";
+
+/** One compaction trigger threshold (261006): the advisory, an interim milestone, or the hard point. */
+export interface CompactionThreshold {
+  kind: "advisory" | "milestone" | "hard";
+  percent: number;
+}
+
+/** The trigger latch value before any threshold has been delivered. */
+export const NO_TRIGGER_LATCH = Number.NEGATIVE_INFINITY;
+
+/**
+ * The ordered trigger thresholds (261006): the advisory, milestones one and
+ * two thirds of the way from it to the hard point, and the hard point. Exact
+ * and possibly fractional; only message text rounds. An advisory at or above
+ * the hard point never fires (as before 261006), so it and the milestones
+ * are omitted.
+ */
+export function compactionThresholds(advisoryPercent: number, hardPercent: number): CompactionThreshold[] {
+  if (advisoryPercent >= hardPercent) return [{ kind: "hard", percent: hardPercent }];
+  const step = (hardPercent - advisoryPercent) / 3;
+  return [
+    { kind: "advisory", percent: advisoryPercent },
+    { kind: "milestone", percent: advisoryPercent + step },
+    { kind: "milestone", percent: advisoryPercent + 2 * step },
+    { kind: "hard", percent: hardPercent },
+  ];
+}
+
+/** The highest threshold at or below `percent`, or `NO_TRIGGER_LATCH` when none is. */
+export function highestThresholdAtOrBelow(thresholds: CompactionThreshold[], percent: number): number {
+  let latch = NO_TRIGGER_LATCH;
+  for (const t of thresholds) if (t.percent <= percent && t.percent > latch) latch = t.percent;
+  return latch;
 }
 
 /**
@@ -722,9 +761,11 @@ export function registerGoalLoop(
   let pendingLever: { prose: string; operationId: number } | undefined;
 
   /**
-   * 261002 Phase 2 trigger state (lead only). `advisoryFired`/`hardFired`
-   * make each nudge fire once per threshold crossing; a compaction (or usage
-   * observed back below the threshold) re-arms them. `preparation` is set
+   * 261002 Phase 2 trigger state (lead only). `triggerLatch` (261006) is the
+   * highest compaction threshold already delivered (`NO_TRIGGER_LATCH` when
+   * none): each threshold fires once per crossing, a compaction resets the
+   * latch, and usage observed below it lowers it (see `fireCompactionTriggers`).
+   * `preparation` is set
    * when a preparation message is sent and blocks both triggers until the
    * next `agent_end`: Pi drains its steer and follow-up queues before that
    * event, so by then the message has either run or been dropped (an abort
@@ -734,8 +775,7 @@ export function registerGoalLoop(
    * this adapter answered the current compaction, so a stored entry that is
    * not ours means another extension's result won.
    */
-  let advisoryFired = false;
-  let hardFired = false;
+  let triggerLatch = NO_TRIGGER_LATCH;
   let preparation = false;
   /** 261003: the trigger kind of the pending preparation; set and cleared with `preparation`. */
   let preparationKind: PreparationTrigger["kind"] | undefined;
@@ -1278,8 +1318,9 @@ export function registerGoalLoop(
   // 261002 Phase 2: context-usage triggers (lead only). The hard cut is
   // checked at every turn end and sent as a steer, so it lands at the next
   // tool-call boundary instead of waiting for the run to settle; the
-  // advisory nudge waits for the run to end. Neither fires while a
-  // preparation turn or a compaction is in progress.
+  // advisory nudge waits for the run to end. 261006: interim milestones
+  // between the two are a guide-less steer at a turn_end that continues the
+  // run. None fires while a preparation turn or a compaction is in progress.
   function sendPreparation(trigger: PreparationTrigger, deliverAs: "steer" | "followUp"): void {
     preparation = true;
     preparationKind = trigger.kind;
@@ -1294,7 +1335,7 @@ export function registerGoalLoop(
     );
   }
 
-  function checkCompactionTriggers(ctx: ExtensionContext, boundary: "turn" | "run"): void | Promise<void> {
+  function checkCompactionTriggers(ctx: ExtensionContext, boundary: TriggerBoundary): void | Promise<void> {
     if (isChildProcess(process.env) || leadCompactingRef.current || preparation) return;
     return thenOrNow(readConfig(COMPACTION_TRIGGER_CONFIG_KEYS), (config) => {
       // Re-checked: an asynchronous read leaves a gap a compaction or another preparation can enter.
@@ -1303,26 +1344,62 @@ export function registerGoalLoop(
     });
   }
 
-  function fireCompactionTriggers(ctx: ExtensionContext, boundary: "turn" | "run", config: GoalLoopConfig): void {
+  function fireCompactionTriggers(ctx: ExtensionContext, boundary: TriggerBoundary, config: GoalLoopConfig): void {
     const percent = computeContextPercent(ctx.getContextUsage(), resolveContextWindowOverride(config));
     if (percent === null) return;
-    const advisory = resolveCompactionAdvisoryPercent(config);
     const hard = resolveCompactionHardPercent(config);
-    if (percent < advisory) advisoryFired = false;
-    if (percent < hard) hardFired = false;
-    if (percent >= hard && !hardFired) {
-      hardFired = true;
-      advisoryFired = true;
-      sendPreparation({ kind: "hard", percent, threshold: hard }, boundary === "turn" ? "steer" : "followUp");
-      return;
+    const thresholds = compactionThresholds(resolveCompactionAdvisoryPercent(config), hard);
+    if (percent < triggerLatch) triggerLatch = highestThresholdAtOrBelow(thresholds, percent);
+    const crossed = thresholds.filter((t) => t.percent > triggerLatch && t.percent <= percent);
+    // One message per observation, hard > advisory > milestone. A crossing
+    // whose boundary does not allow delivery leaves the latch unchanged so it
+    // stays pending; a milestone also waits while the advisory is pending.
+    const pick = crossed.find((t) => t.kind === "hard") ?? crossed.find((t) => t.kind === "advisory") ?? crossed.find((t) => t.kind === "milestone");
+    if (!pick) return;
+    if (pick.kind === "hard") {
+      sendPreparation({ kind: "hard", percent, threshold: hard }, boundary === "run" ? "followUp" : "steer");
+    } else if (pick.kind === "advisory") {
+      if (boundary !== "run") return;
+      sendPreparation({ kind: "advisory", percent, threshold: pick.percent, hardPercent: hard }, "followUp");
+    } else {
+      // Only a turn that continues the run: Pi polls the steer queue after
+      // every turn_end, so a steer at a run's final turn would add a model
+      // turn right after the lead answered the user.
+      if (boundary !== "tool-turn") return;
+      pi.sendMessage(
+        {
+          customType: LEAD_CONTEXT_MILESTONE_CUSTOM_TYPE,
+          content: buildContextMilestoneMessage(percent, hard),
+          display: true,
+          details: { milestone: pick.percent },
+        },
+        { deliverAs: "steer" },
+      );
     }
-    if (boundary === "run" && percent >= advisory && !advisoryFired) {
-      advisoryFired = true;
-      sendPreparation({ kind: "advisory", percent, threshold: advisory, hardPercent: hard }, "followUp");
-    }
+    // Delivering covers every skipped lower threshold.
+    triggerLatch = highestThresholdAtOrBelow(thresholds, percent);
   }
 
-  pi.on("turn_end", (_event, ctx) => checkCompactionTriggers(ctx, "turn"));
+  /**
+   * 261006: re-baselines the latch from the current branch's usage at
+   * `session_start` (restart/resume) and `session_tree` (rewind), so a resumed
+   * session past the advisory point gets no duplicate advisory and a rewind
+   * below it re-arms the advisory. Unknown usage (only a compaction since the
+   * last response) means the context is post-compaction: unlatched.
+   */
+  function baselineTriggerLatch(ctx: ExtensionContext): void | Promise<void> {
+    if (isChildProcess(process.env)) return;
+    return thenOrNow(readConfig(COMPACTION_TRIGGER_CONFIG_KEYS), (config) => {
+      const percent = computeContextPercent(ctx.getContextUsage(), resolveContextWindowOverride(config));
+      triggerLatch = percent === null
+        ? NO_TRIGGER_LATCH
+        : highestThresholdAtOrBelow(compactionThresholds(resolveCompactionAdvisoryPercent(config), resolveCompactionHardPercent(config)), percent);
+    });
+  }
+
+  pi.on("turn_end", (event, ctx) => checkCompactionTriggers(ctx, event?.toolResults?.length ? "tool-turn" : "final-turn"));
+  pi.on("session_start", (_event, ctx) => baselineTriggerLatch(ctx));
+  pi.on("session_tree", (_event, ctx) => baselineTriggerLatch(ctx));
 
   pi.on("agent_end", (_event, ctx) => {
     // Any preparation message queued before this run ended has run or was
@@ -1497,10 +1574,9 @@ export function registerGoalLoop(
           "warning",
         );
       }
-      // A compaction re-arms both triggers and ends any preparation.
+      // A compaction re-arms every trigger, drops a pending milestone, and ends any preparation.
       expectOwnCompaction = false;
-      advisoryFired = false;
-      hardFired = false;
+      triggerLatch = NO_TRIGGER_LATCH;
       preparation = false;
       preparationKind = undefined;
       pendingReroute = undefined;
@@ -1643,8 +1719,7 @@ export function registerGoalLoop(
       promptsAwaitingStart.length = 0;
       activeCompaction = undefined;
       pendingLever = undefined;
-      advisoryFired = false;
-      hardFired = false;
+      triggerLatch = NO_TRIGGER_LATCH;
       preparation = false;
       preparationKind = undefined;
       pendingReroute = undefined;
