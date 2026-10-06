@@ -530,7 +530,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-06T04:49:49Z"
+        "touched_at": "2026-10-06T04:50:12Z",
+        "impl": {
+          "branch": "impl/develop/haiku-drown-omega"
+        }
       }
     }
   }
