@@ -2460,6 +2460,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       at(82);
       finalTurn();
       assert.equal(preparations().length, 1, "the hard steer goes out at any turn_end");
+      assert.deepEqual(preparations()[0]!.options, { deliverAs: "steer", triggerTurn: true }, "a steer even at a run's final, tool-less turn_end");
       runEnd();
       at(88);
       toolTurn();
