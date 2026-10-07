@@ -306,3 +306,33 @@ listed to read first as written), a whole-file entry, a `(not found)`
 entry, a fence longer than a backtick run inside an inlined file, and each section omitted when empty; the
 budget config key and its default; the fallback summary carrying none of
 the sections; and the guide and Resume text verbatim.
+
+### Result (62b54fe38) - 2026-10-07
+
+Landed as specified. Milestones are now an `agent_end` `followUp` wake turn
+(`triggerTurn: true`) that sets `preparation` with `preparationKind:
+"milestone"`; a `ws-compact` call from that turn takes the `milestone` route,
+which `resumesAfterCompaction` treats like `advisory`. Both milestone texts,
+the advisory closing sentence, guide steps 2-3, the Resume sentence, and the
+tool/parameter descriptions follow the pinned prose. `ws-compact` gains
+`required_rereads` / `references` (in `leadCompactParameterSchema` only);
+`buildFileListSections` in `lead-compaction.ts` inlines must-reads smallest
+first within the new `compaction_reread_budget_bytes` budget (default 40960,
+in `config-manifest.json`), lists the rest to read first, and lists
+references; paths resolve against `ctx.cwd`.
+
+Verification: `npm test` in `agents-plugin-pi`: 2055 tests, 2052 pass, 0 fail,
+3 skipped. Lite review: clean, one Minor left open (each required re-read is
+read whole and synchronously, even for a small `lines` range or a file far
+over the budget; a pre-read size check would bound it).
+
+Decisions:
+- Milestone text and `details.milestone` both use the highest milestone at
+  or below usage (the one delivery latches to); `details.milestone`
+  previously carried the lowest crossed one.
+- The advisory trigger carries `milestonePercents` explicitly, so
+  `compactionThresholds` stays the only source of the milestone points.
+- A blank `lines` is treated as omitted (whole file); lever entries without
+  a string `path` are dropped.
+- The budget counts only the taken content's UTF-8 bytes, not headings or
+  fences.
