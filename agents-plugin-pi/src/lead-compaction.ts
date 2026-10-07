@@ -828,7 +828,7 @@ export function buildPreparationMessage(trigger: PreparationTrigger, guide: stri
     head = `Context usage is ${Math.round(trigger.percent)}% of the window, past the hard compaction point (${trigger.threshold}%). Stop the current work now and prepare for compaction with the guide below before anything else.`;
   } else {
     const focus = trigger.focus?.trim();
-    head = `The user ran /compact; the adapter cancelled Pi's native compaction so you can prepare it. Prepare for compaction now with the guide below.${focus ? `\nThe user's /compact focus text, to honor in your prose:\n${focus}` : ""}`;
+    head = `The user ran /compact. Prepare for compaction now with the guide below.${focus ? `\nThe user's /compact focus text, to honor in your prose:\n${focus}` : ""}`;
   }
   return `${ADAPTER_MESSAGE_LABEL}\n${head}\n\n${guide}`;
 }

@@ -502,7 +502,7 @@ describe("preparation and fallback text", () => {
   test("hard and manual triggers keep their imperative heads and verbatim guide", () => {
     const guide = "GUIDE BODY";
     assert.equal(buildPreparationMessage({ kind: "hard", percent: 80, threshold: 80 }, guide), "[system message from ws-pi-plugin]\nContext usage is 80% of the window, past the hard compaction point (80%). Stop the current work now and prepare for compaction with the guide below before anything else.\n\nGUIDE BODY");
-    const manualHead = "[system message from ws-pi-plugin]\nThe user ran /compact; the adapter cancelled Pi's native compaction so you can prepare it. Prepare for compaction now with the guide below.";
+    const manualHead = "[system message from ws-pi-plugin]\nThe user ran /compact. Prepare for compaction now with the guide below.";
     assert.equal(buildPreparationMessage({ kind: "reroute", focus: "  keep the API notes  " }, guide), `${manualHead}\nThe user's /compact focus text, to honor in your prose:\nkeep the API notes\n\nGUIDE BODY`);
     assert.equal(buildPreparationMessage({ kind: "reroute" }, guide), `${manualHead}\n\nGUIDE BODY`);
   });
