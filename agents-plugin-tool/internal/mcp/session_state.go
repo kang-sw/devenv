@@ -873,7 +873,16 @@ func (s *Server) handleAgendaSet(id json.RawMessage, args map[string]any) respon
 	if !ok {
 		return toolTextResponse(id, "", fmt.Errorf("%s: value is required", tool))
 	}
-	merge, _ := args["merge"].(bool)
+	merge := false
+	if rawMerge, present := args["merge"]; present && rawMerge != nil {
+		b, isBool := rawMerge.(bool)
+		if !isBool {
+			// A non-bool merge must not fall back to replace: the caller meant
+			// value as a patch, and replacing would drop the rest of the blob.
+			return toolTextResponse(id, "", fmt.Errorf("%s: merge must be a boolean", tool))
+		}
+		merge = b
+	}
 	if _, isObject := value.(map[string]any); merge && !isObject {
 		// RFC 7396 would let a non-object patch replace the blob whole and a
 		// null patch store a null blob; merge mode accepts only an object.

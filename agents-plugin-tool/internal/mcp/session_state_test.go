@@ -3617,6 +3617,12 @@ func TestServeStdioAgendaSetMerge(t *testing.T) {
 			t.Fatalf("rejected merge changed the stored blob: %s", got)
 		}
 	}
+	if got := set("w", map[string]any{"merge": "true", "value": map[string]any{"x": 1}}); !strings.Contains(got, "merge must be a boolean") {
+		t.Fatalf("non-bool merge not rejected: %s", got)
+	}
+	if got := stored("w"); got != `{"other":2}` {
+		t.Fatalf("non-bool merge changed the stored blob: %s", got)
+	}
 	if got := set("never", map[string]any{"merge": true, "value": nil}); !strings.Contains(got, "must be a JSON object") {
 		t.Fatalf("null merge on missing key not rejected: %s", got)
 	}
