@@ -2,6 +2,7 @@
 title: "Pi RPC child bootstrap failures lose the actionable error diagnostic"
 related:
   260921-feat-ws-impl-branch-identity-resolver: dogfood discovery during independent review dispatch
+dropped: 2026-10-07
 ---
 
 # Pi RPC child bootstrap failures lose the actionable error diagnostic
@@ -19,3 +20,8 @@ The actual error was a version mismatch: the rebuilt local runtime reported `0.4
 ### Phase 1: Preserve child bootstrap diagnostics
 
 Ensure a failed child bootstrap returns an actionable message to ws-agent-spawn, including failures reported through UI notifications rather than stderr. Add a regression exercising immediate child exit after bootstrap failure; preserve fail-closed behavior without leaving a tool-less child running.
+
+
+## Resolution (2026-10-07)
+
+Absorbed into Phase 2 of 261007-bug-pi-child-start-fails-after-version-bump: the child's error notify is flushed before exit and captured by the parent over the RPC event channel, not stderr (which RpcClient forwards into the parent TUI).

@@ -1,5 +1,6 @@
 ---
 title: Prime the exact Pi runtime before pre-release delegation
+dropped: 2026-10-07
 ---
 
 # Prime the exact Pi runtime before pre-release delegation
@@ -50,3 +51,8 @@ The release was unblocked by manually building an exactly versioned local runtim
 Add a release-safe pre-flight step that builds the current `ws-mcp` source with the bumped version, installs it into the exact cache location selected by `agents-plugin-pi/runtime.json`, and validates it through the same compatibility checks used by child startup. Place the step after the bump commit and before tests and the R4 reviewed-through pin.
 
 Cover the chicken-and-egg boundary with tests that prove a child launched before the release tag exists reuses the exact primed runtime rather than downloading the pending asset. Verify that an absent or invalid source-build configuration fails clearly, that no worker-local build policy is broadened, and that priming leaves the Git worktree and reviewed-through SHA unchanged.
+
+
+## Resolution (2026-10-07)
+
+Absorbed into 261007-bug-pi-child-start-fails-after-version-bump. The user chose a lead-side re-bootstrap on contract drift before child launch over ship pre-flight priming, because pre-flight covers only the worktree running ship; exact version validation and the no-worker-build policy are preserved.

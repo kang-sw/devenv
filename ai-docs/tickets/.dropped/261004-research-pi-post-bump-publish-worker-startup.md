@@ -1,5 +1,6 @@
 ---
 title: "Investigate Pi publish-worker startup after an unclaimed version bump"
+dropped: 2026-10-07
 ---
 
 # Investigate Pi publish-worker startup after an unclaimed version bump
@@ -49,3 +50,8 @@ None selected.
 
 No release pin changes, forced pushes, premature release tags, or compatibility
 bypasses were used to work around startup.
+
+
+## Resolution (2026-10-07)
+
+Absorbed into 261007-bug-pi-child-start-fails-after-version-bump, which carries the traced mechanism and the settled fix. The downstream shipping-executor open question closed as not applicable: downstream installs consume only published releases.
