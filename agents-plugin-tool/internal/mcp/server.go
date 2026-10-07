@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -2066,6 +2067,9 @@ func (s *Server) handleLeadLogin(id json.RawMessage, arguments map[string]any) r
 	scope := parseCapabilityScope(arguments["capability"])
 	parentKey, _ := arguments["parent_session_key"].(string)
 	parentKey = strings.TrimSpace(parentKey)
+	if relogin, _ := arguments["relogin_session_key"].(string); strings.TrimSpace(relogin) != "" {
+		return s.handleLeadRelogin(id, arguments, strings.TrimSpace(relogin), canonical, scope, parentKey)
+	}
 	if parentKey != "" {
 		if _, ok := s.sessions.lookup(parentKey); !ok {
 			return toolTextResponse(id, "", fmt.Errorf("session bootstrap: parent_session_key %q is not a known session key", parentKey))
@@ -2081,6 +2085,58 @@ func (s *Server) handleLeadLogin(id json.RawMessage, arguments map[string]any) r
 	// key. A parent-carrying mint, or a parent-less delegate/leaf mint (a
 	// child launched without its lead's key), never touches it.
 	s.rebindMailboxOwnerAtFerrule(key, parentKey, scope, canonical)
+	return s.leadLoginResponse(id, arguments, key, canonical)
+}
+
+// handleLeadRelogin is the bootstrap tool's hidden re-login: `relogin_session_key`
+// names an existing key, and the call mints nothing. The argument is
+// deliberately absent from the advertised tools/list schema: an agent that
+// forgets its key mints a new one by convention, and an advertised re-login
+// would invite re-logging in with another session's key to take its mailbox.
+// The only intended caller is a harness adapter that persisted the lead key
+// with its own session file and re-enters the same session (restart, reload,
+// or revive with the key the human supplied). It is not named `session_key`
+// because an adapter that default-fills `session_key` into every bridged call
+// would turn every agent bootstrap into a re-login with the default key.
+//
+// Only a parent-less lead-capability key bound to this call's canonical root
+// is accepted; it then takes the mailbox owner pointer under the ordinary
+// rebind rules (rebindMailboxOwnerAtFerrule), including never stealing a name
+// another live process holds. That rule is what keeps a copied session file
+// (an import keeps the original's session id, so the copy re-logs in with the
+// original's key) from becoming a mailbox takeover while the original process
+// is alive. Any other key - unknown, parent-carrying, delegate or leaf, or
+// bound to another root - is refused without a mint or an owner change, as is
+// a re-login that also carries a parent or a non-lead capability, since those
+// describe a key the re-login could never return.
+func (s *Server) handleLeadRelogin(id json.RawMessage, arguments map[string]any, key, canonical string, scope toolRole, parentKey string) response {
+	if parentKey != "" {
+		return toolTextResponse(id, "", errors.New("session bootstrap: relogin_session_key cannot be combined with parent_session_key"))
+	}
+	if scope != roleLead {
+		return toolTextResponse(id, "", errors.New("session bootstrap: relogin_session_key requires lead capability"))
+	}
+	entry, ok := s.sessions.lookup(key)
+	if !ok {
+		return toolTextResponse(id, "", fmt.Errorf("session bootstrap: relogin_session_key %q is not a known session key", key))
+	}
+	if entry.parent != "" {
+		return toolTextResponse(id, "", fmt.Errorf("session bootstrap: relogin_session_key %q carries a parent; only a parent-less lead key can re-log in", key))
+	}
+	if entry.scope != roleLead {
+		return toolTextResponse(id, "", fmt.Errorf("session bootstrap: relogin_session_key %q is a %s key; only a lead key can re-log in", key, entry.scope))
+	}
+	if entry.root != canonical {
+		return toolTextResponse(id, "", fmt.Errorf("session bootstrap: relogin_session_key %q is bound to another root", key))
+	}
+	s.rebindMailboxOwnerAtFerrule(key, "", roleLead, canonical)
+	return s.leadLoginResponse(id, arguments, key, canonical)
+}
+
+// leadLoginResponse renders the bootstrap tool's result for key bound to
+// canonical, shared by a fresh mint and a re-login so both carry the same
+// fields and the same bootstrap staleness warning.
+func (s *Server) leadLoginResponse(id json.RawMessage, arguments map[string]any, key, canonical string) response {
 	result := map[string]any{
 		"session_key": key,
 		"root":        canonical,

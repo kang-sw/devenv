@@ -1299,3 +1299,125 @@ func TestMailboxWaitCommandRenderVariable(t *testing.T) {
 		}
 	})
 }
+
+// TestMailboxReloginRebindsOwnerToExistingKey verifies the hidden ferrule
+// re-login moves the named-inbox owner pointer back to the re-logged-in key
+// without re-minting, and that a refused re-login (an unknown key, a
+// delegate key) leaves the owner where it was.
+func TestMailboxReloginRebindsOwnerToExistingKey(t *testing.T) {
+	setupMailboxTestEnv(t)
+	root := t.TempDir()
+	initGit(t, root)
+
+	t.Setenv(envMailbox, "judy@worktree")
+	s := NewServer(root, "test")
+	original := mailboxLogin(t, s, 1, root)
+	fresh := mailboxLogin(t, s, 2, root)
+	if original == fresh {
+		t.Fatalf("expected two distinct keys from two mints")
+	}
+
+	path, err := wsmailbox.WorktreePath(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := func() string {
+		t.Helper()
+		store, err := wsmailbox.Load(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return store.Presence["judy"].Owner
+	}
+	if got := owner(); got != fresh {
+		t.Fatalf("second mint did not take the owner pointer: owner = %q, want %q", got, fresh)
+	}
+
+	resp := callLogin(t, s, 3, root, map[string]any{"relogin_session_key": original})
+	if toolIsError(t, resp) {
+		t.Fatalf("re-login returned isError: %s", resp)
+	}
+	if key, _ := parseLoginResponse(t, resp); key != original {
+		t.Fatalf("re-login returned %q, want %q", key, original)
+	}
+	if got := owner(); got != original {
+		t.Fatalf("re-login did not rebind the owner pointer: owner = %q, want %q", got, original)
+	}
+
+	delegateKey, _ := parseLoginResponse(t, callLogin(t, s, 4, root, map[string]any{"capability": "delegate"}))
+	childKey, _ := parseLoginResponse(t, callLogin(t, s, 5, root, map[string]any{"parent_session_key": original}))
+	otherRoot := t.TempDir()
+	initGit(t, otherRoot)
+	otherRootKey, _ := parseLoginResponse(t, callLogin(t, s, 6, otherRoot, nil))
+	if got := owner(); got != original {
+		t.Fatalf("minting the refusal fixtures moved the owner pointer: owner = %q, want %q", got, original)
+	}
+	for i, foreign := range []string{"never-minted-key", delegateKey, childKey, otherRootKey, fresh + "-not-a-key"} {
+		if resp := callLogin(t, s, 10+i, root, map[string]any{"relogin_session_key": foreign}); !toolIsError(t, resp) {
+			t.Fatalf("re-login with %q should be refused: %s", foreign, resp)
+		}
+		if got := owner(); got != original {
+			t.Fatalf("refused re-login with %q moved the owner pointer: owner = %q, want %q", foreign, got, original)
+		}
+	}
+
+	if isOwner, _, err := s.mailboxOwnerCheck(original, root); err != nil || !isOwner {
+		t.Fatalf("re-logged-in key is not the named-inbox owner: isOwner=%v err=%v", isOwner, err)
+	}
+	if isOwner, _, _ := s.mailboxOwnerCheck(fresh, root); isOwner {
+		t.Fatalf("the key minted before the re-login still owns the named inbox")
+	}
+}
+
+// TestMailboxReloginRefusesLiveDifferentPIDHolder verifies the re-login
+// keeps the ordinary rebind rule against a live holder: when another live
+// process legitimately holds the name (the copied-session-file case, where
+// an import re-logs in with the original's key while the original runs), the
+// re-login still returns the key but never takes the owner pointer or the
+// presence record.
+func TestMailboxReloginRefusesLiveDifferentPIDHolder(t *testing.T) {
+	setupMailboxTestEnv(t)
+	root := t.TempDir()
+	initGit(t, root)
+
+	t.Setenv(envMailbox, "kim@worktree")
+	s := NewServer(root, "test")
+	key := mailboxLogin(t, s, 1, root)
+
+	path, err := wsmailbox.WorktreePath(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherLivePID := os.Getppid()
+	if otherLivePID == os.Getpid() || otherLivePID <= 0 {
+		t.Skipf("cannot obtain a distinct live parent PID (ppid=%d)", otherLivePID)
+	}
+	if err := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
+		p := store.Presence["kim"]
+		p.PID = otherLivePID
+		p.Owner = "original-process-key"
+		p.LastSeen = mailboxNowString()
+		store.Presence["kim"] = p
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := callLogin(t, s, 2, root, map[string]any{"relogin_session_key": key})
+	if toolIsError(t, resp) {
+		t.Fatalf("re-login returned isError: %s", resp)
+	}
+	if got, _ := parseLoginResponse(t, resp); got != key {
+		t.Fatalf("re-login returned %q, want %q", got, key)
+	}
+	after, err := wsmailbox.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := after.Presence["kim"].Owner; got != "original-process-key" {
+		t.Fatalf("re-login hijacked a name held by a live different PID: Owner = %q, want unchanged", got)
+	}
+	if got := after.Presence["kim"].PID; got != otherLivePID {
+		t.Fatalf("re-login clobbered the live holder's presence record: PID = %d, want %d", got, otherLivePID)
+	}
+}

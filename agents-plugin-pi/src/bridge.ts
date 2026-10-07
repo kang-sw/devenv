@@ -38,6 +38,9 @@ import { WS_PI_PARENT_SESSION_KEY_ENV, isLeadOrFork, readSpawnRole, type SpawnRo
 // BridgeHandle` from this file (type-only, erased at build/runtime), so no
 // runtime circular import is created in either direction.
 import { resolveModelForAliasViaWsMcp, inheritModelFromToolCtx } from "./spawner.ts";
+// lead-compaction.ts reaches spawner.ts, whose only import of this file is
+// the type-only `BridgeHandle` above, so this value import adds no cycle.
+import { ADAPTER_MESSAGE_LABEL } from "./lead-compaction.ts";
 import { modelCatalogFromToolCtx, formatTierWarning, type ModelCatalogEntry, type TierRejection } from "./model-catalog.ts";
 import { registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
 import { dedupeRead, playbookReadKey, workflowManualKey, workflowManualResultText } from "./playbook-read-dedupe.ts";
@@ -47,6 +50,13 @@ import { RenderRegistry, assertPolicyTool, assertSessionAuthority, childPolicy, 
 
 export interface BridgeOptions {
   sessionEntries?: readonly unknown[];
+  /**
+   * The Pi session id (`sessionManager.getSessionId()`) the lead key entry is
+   * scoped by: a reopened or reloaded session file keeps its id and reuses its
+   * key, while a fork or `new` session mints its own. Absent, no lead key is
+   * recorded or reused.
+   */
+  sessionId?: string;
   forkContext?: ForkContext;
   previousOwnKeys?: readonly string[];
   launcherPath: string;
@@ -706,6 +716,77 @@ export function normalizeSessionKey(
 }
 
 /**
+ * Custom session entry recording the lead's ws session key together with the
+ * Pi session id it was settled in (named after the fork path's
+ * `ws-pi-fork-keys`). The session file is the resume unit: `pi -c`, `pi -r`,
+ * `pi --session`, and `/reload` all re-run the bootstrap with the same session
+ * id, so the newest entry for that id is the key to re-log in with. A fork
+ * (`/fork`, `pi --fork`) and `new` inherit the file's entries under the
+ * previous session id and so never match: they mint their own key.
+ */
+export const LEAD_KEY_ENTRY = "ws-pi-lead-key";
+
+export interface LeadKeyEntryData {
+  sessionId: string;
+  key: string;
+}
+
+/** The newest `ws-pi-lead-key` entry recorded under `sessionId`, or undefined when none. */
+export function restoreLeadKey(entries: readonly unknown[], sessionId: string | undefined): string | undefined {
+  if (!sessionId) return undefined;
+  for (const entry of [...entries].reverse()) {
+    const e = entry as { type?: unknown; customType?: unknown; data?: { sessionId?: unknown; key?: unknown } } | null;
+    if (e?.type !== "custom" || e.customType !== LEAD_KEY_ENTRY || e.data?.sessionId !== sessionId) continue;
+    const key = e.data.key;
+    return typeof key === "string" && key.trim() ? key : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * The key a lead-role `workflow_manual` call revives with, when it should be
+ * adopted as the default key: an explicit, non-sentinel key that differs from
+ * the current default. The sentinel is the fresh-bootstrap request, not a
+ * revive, and the default key itself is already adopted.
+ */
+export function revivedKeyToAdopt(rawSessionKey: unknown, ownKey: string | undefined, sentinel: string): string | undefined {
+  if (typeof rawSessionKey !== "string") return undefined;
+  const key = rawSessionKey.trim();
+  if (!key || key === sentinel || key === ownKey) return undefined;
+  return key;
+}
+
+/** The one-line notice appended to a `workflow_manual` result whose revive changed the default key. */
+export function buildDefaultKeyChangedLine(previous: string | undefined, current: string): string {
+  return `${ADAPTER_MESSAGE_LABEL} Default session key changed: ${previous ?? "(unset)"} -> ${current}. Calls that omit session_key and compaction summaries now use ${current}.`;
+}
+
+/**
+ * Re-logs in with an existing lead key through ferrule's hidden
+ * `relogin_session_key` argument (absent from its advertised schema; ws-mcp
+ * accepts only a parent-less lead key bound to `root`, and rebinds the mailbox
+ * owner to it without stealing from a live process). Resolves `ok` only when
+ * ws-mcp returned that same key; a refusal carries ws-mcp's reason.
+ */
+export async function reloginLeadKey(
+  callTool: (name: string, args: Record<string, unknown>) => Promise<McpToolCallResult>,
+  root: string,
+  key: string,
+): Promise<{ ok: true; result: McpToolCallResult } | { ok: false; reason: string }> {
+  let result: McpToolCallResult;
+  try {
+    result = await callTool("ferrule", { root, format: "json", relogin_session_key: key });
+  } catch (err) {
+    return { ok: false, reason: (err as Error).message };
+  }
+  if (result.isError) return { ok: false, reason: firstText(result) ?? "ferrule re-login failed with no error text" };
+  let returned: unknown;
+  try { returned = (JSON.parse(firstText(result) ?? "{}") as { session_key?: unknown }).session_key; } catch { returned = undefined; }
+  if (returned !== key) return { ok: false, reason: `ferrule re-login returned ${typeof returned === "string" ? returned : "no key"} instead of ${key}` };
+  return { ok: true, result };
+}
+
+/**
  * session_key fill-or-forward: if the caller omitted session_key (undefined,
  * null, or empty string), splice in the bridge's default-filled key; an
  * explicit session_key passes through completely unchanged. This is what
@@ -812,6 +893,46 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
   // second `pi.on` registration; this holder itself is still fresh per call.
   const advisoryKeyHolder: AdvisoryKeyHolder = { current: undefined };
   activeAdvisoryKeyHolder = advisoryKeyHolder;
+
+  // Lead key persistence: only the lead's own bootstrap (no spawn policy, no
+  // role marker) records, reuses, and adopts a key. Every spawned child,
+  // forks included, carries a policy and keeps its policy key or mints its
+  // own. `recordedLeadKey` mirrors the newest entry for this session id so a
+  // key already recorded is not appended again.
+  const ownsLeadKey = !policy && readSpawnRole(process.env) === undefined && Boolean(opts.sessionId);
+  let recordedLeadKey = ownsLeadKey ? restoreLeadKey(opts.sessionEntries ?? [], opts.sessionId) : undefined;
+  const recordLeadKey = (key: string): void => {
+    if (!ownsLeadKey || !opts.sessionId || recordedLeadKey === key) return;
+    const data: LeadKeyEntryData = { sessionId: opts.sessionId, key };
+    pi.appendEntry(LEAD_KEY_ENTRY, data);
+    recordedLeadKey = key;
+  };
+  // Re-login with the session's recorded key at bootstrap; a refusal (the
+  // key was pruned, or belongs to another root) falls back to a fresh mint
+  // with a UI warning only.
+  const reuseRecordedLeadKey = async (): Promise<McpToolCallResult | undefined> => {
+    if (!recordedLeadKey) return undefined;
+    const relogin = await reloginLeadKey((name, callArgs) => client.callTool(name, callArgs), opts.cwd, recordedLeadKey);
+    if (relogin.ok) return relogin.result;
+    notify(opts.ui, `ws-pi-bridge: the session's recorded ws key ${recordedLeadKey} was refused (${relogin.reason}); minting a fresh key`, "warning");
+    return undefined;
+  };
+  // Adopt the key a lead revives with: after a successful lead-role
+  // workflow_manual carrying an explicit key other than the default, re-log
+  // in with it; on success it is the default key from here on, is recorded
+  // for later resumes, and the result gains one pinned line saying so. A
+  // refused re-login adopts nothing.
+  const adoptRevivedKey = async (rawSessionKey: unknown, content: McpContentItem[]): Promise<McpContentItem[]> => {
+    const revived = ownsLeadKey ? revivedKeyToAdopt(rawSessionKey, defaultKeyRef.current, FRESH_BOOTSTRAP_SENTINEL) : undefined;
+    if (!revived) return content;
+    const relogin = await reloginLeadKey((name, callArgs) => client.callTool(name, callArgs), opts.cwd, revived);
+    if (!relogin.ok) return content;
+    const previous = defaultKeyRef.current;
+    defaultKeyRef.current = revived;
+    knownKeys.add(revived);
+    recordLeadKey(revived);
+    return [...content, { type: "text", text: buildDefaultKeyChangedLine(previous, revived) }];
+  };
   if (!compactionListenerRegistered) {
     compactionListenerRegistered = true;
     pi.on("session_compact", () => {
@@ -933,7 +1054,7 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
                 }
               },
             });
-            return { ...mapped, content: dedupeManual(mapped.content) };
+            return { ...mapped, content: await adoptRevivedKey(rawParams?.session_key, dedupeManual(mapped.content)) };
           }
 
           const result = await client.callTool(rawName, args);
@@ -958,7 +1079,7 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
           // computeRawDispatchPiAliasTableReport's doc comment.
           const piAliasTableReport = await computeRawDispatchPiAliasTableReport(rawName, (name, callArgs) => client.callTool(name, callArgs), catalog);
           let content = maybeAppendModelCatalogAdvisory(rawName, result.content, piAliasTableReport, inheritModel, catalog.length === 0, advisoryKeyHolder);
-          if (rawName === "workflow_manual") content = dedupeManual(content);
+          if (rawName === "workflow_manual") content = await adoptRevivedKey(rawParams?.session_key, dedupeManual(content));
           if (rawName === "playbook.read") {
             const body = firstText({ ...result, content });
             if (body !== undefined) {
@@ -980,7 +1101,8 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
     try {
       const ferruleResult = policy?.sessionKey
         ? { content: [{ type: "text", text: JSON.stringify({ session_key: policy.sessionKey }) }] }
-        : await client.callTool("ferrule", { root: opts.cwd, format: "json", ...(policy ? { capability: policy.authority, ...(policy.parentSessionKey ? { parent_session_key: policy.parentSessionKey } : {}) } : {}) });
+        : (await reuseRecordedLeadKey())
+          ?? await client.callTool("ferrule", { root: opts.cwd, format: "json", ...(policy ? { capability: policy.authority, ...(policy.parentSessionKey ? { parent_session_key: policy.parentSessionKey } : {}) } : {}) });
       if (ferruleResult.isError) {
         notify(opts.ui, `ws-pi-bridge: ferrule bootstrap failed: ${firstText(ferruleResult)}`, "warning");
       } else {
@@ -990,6 +1112,7 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
           if (parsed.session_key) {
             defaultKeyRef.current = parsed.session_key;
             knownKeys.add(parsed.session_key);
+            recordLeadKey(parsed.session_key);
           } else {
             notify(opts.ui, "ws-pi-bridge: ferrule response carried no session_key", "warning");
           }

@@ -722,6 +722,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
         forkContext: durableForkContextRef.current,
         previousOwnKeys,
         sessionEntries: ctx.sessionManager.getEntries(),
+        sessionId: ctx.sessionManager.getSessionId(),
       });
       try {
         const approval = createApprovalRelay(pi, { cwd: ctx.cwd }, rpcRegistryRef);
