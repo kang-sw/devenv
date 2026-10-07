@@ -31,7 +31,7 @@ import { join } from "node:path";
 import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { spawnWsMcpClient, type McpStdioClient, type McpContentItem, type McpToolCallResult } from "./mcp-stdio-client.ts";
 import { assertVersionPin, readRuntimeContract } from "./version-check.ts";
-import { buildLocalDevenvBootstrap, createChildRuntimeEnsurer, runtimeContractHash, type LocalDevenvContext } from "./local-devenv.ts";
+import { buildLocalDevenvBootstrap, createChildRuntimeEnsurer, runtimeContractHash, type LocalDevenvBuildDeps, type LocalDevenvContext } from "./local-devenv.ts";
 import { ADAPTER_CONFIG_MANIFEST_FILE, WS_MCP_CONFIG_MANIFESTS_ENV } from "./adapter-config.ts";
 import { WS_PI_PARENT_SESSION_KEY_ENV, isLeadOrFork, readSpawnRole, type SpawnRole } from "./process-role.ts";
 // Value import from spawner.ts is safe: spawner.ts only imports `type
@@ -65,6 +65,13 @@ export interface BridgeOptions {
   /** Filled independently before MCP startup; native fallback remains available when absent. */
   toolPreviewTuiRef: ToolPreviewTuiRef;
   ui?: ExtensionUIContext;
+  /**
+   * The local-devenv `go build` seam, used by both the startup build and the
+   * child-runtime ensurer. Defaults to `runGoBuild`; production callers leave
+   * it unset, and tests pass a stand-in so the shipped wiring runs with no
+   * `go` toolchain.
+   */
+  runBuild?: LocalDevenvBuildDeps["runBuild"];
 }
 
 export interface BridgeHandle {
@@ -858,9 +865,10 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
   // into spawnWsMcpClient below.
   let localDevenvContext: LocalDevenvContext | undefined;
   let launcherEnv: Record<string, string> | undefined;
+  const runBuild = opts.runBuild ?? runGoBuild;
   if (isLeadOrFork(readSpawnRole(process.env))) {
     const bootstrap = await buildLocalDevenvBootstrap(opts.pluginDir, runtime.plugin_version, {
-      runBuild: runGoBuild,
+      runBuild,
       notify: (m) => notify(opts.ui, `ws-pi-bridge: ${m}`),
     });
     if (bootstrap) {
@@ -876,7 +884,7 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
         pluginDir: opts.pluginDir,
         runtimeJsonPath: opts.runtimeJsonPath,
         baselineHash: baselineContractHash,
-        runBuild: runGoBuild,
+        runBuild,
         runLauncher: (args, env) => runLauncherOnce(opts.launcherPath, opts.pluginDir, args, env),
         notify: (m) => notify(opts.ui, `ws-pi-bridge: ${m}`),
       })

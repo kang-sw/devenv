@@ -73,8 +73,10 @@ test("Pi session generations reuse immutable mailbox binaries and preserve recov
   // remain production code. A later build can overwrite the fixed source.
   const bridgePath = join(plugin, "src", "bridge.ts");
   const bridgeSource = readFileSync(bridgePath, "utf8");
-  assert.ok(bridgeSource.includes("runBuild: runGoBuild,"));
-  writeFileSync(bridgePath, bridgeSource.replace("runBuild: runGoBuild,", `runBuild: async (argv) => { const fs = await import('node:fs/promises'); const target = argv[argv.indexOf('-o') + 1]; await fs.copyFile(${JSON.stringify(sourceScript)}, target); await fs.chmod(target, 0o755); },`));
+  // Session start goes through index.ts, which leaves BridgeOptions.runBuild
+  // unset, so the default in the copied bridge is replaced instead.
+  assert.ok(bridgeSource.includes("opts.runBuild ?? runGoBuild;"));
+  writeFileSync(bridgePath, bridgeSource.replace("opts.runBuild ?? runGoBuild;", `opts.runBuild ?? (async (argv: string[]) => { const fs = await import('node:fs/promises'); const target = argv[argv.indexOf('-o') + 1]; await fs.copyFile(${JSON.stringify(sourceScript)}, target); await fs.chmod(target, 0o755); });`));
   // Deliberately pause the last awaited footer and the first shutdown await
   // in a copied plugin only. The production generation ownership path remains
   // unchanged, but this forces the adverse continuation order deterministically.

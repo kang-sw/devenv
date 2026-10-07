@@ -9,6 +9,7 @@
 import { afterEach, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import type { ChildProcess } from "node:child_process";
+import { PassThrough } from "node:stream";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -24,7 +25,15 @@ const FAIL_CHILD = join(PACKAGE_ROOT, "test", "fixtures", "bootstrap-fail-child.
 const FORK_CONTEXT = { version: 1, kind: "task", effectiveSystemPrompt: "captured", activeTools: [], registeredTools: [] };
 const EXITED = "Agent process exited (code=1 signal=null). Stderr: ";
 
-type Self = { options?: { env?: Record<string, string>; args?: string[] }; started?: boolean; listeners?: Array<(event: unknown) => void> };
+type Self = {
+  options?: { env?: Record<string, string>; args?: string[] };
+  started?: boolean;
+  listeners?: Array<(event: unknown) => void>;
+  // RpcClient's private fields the launch catches read: the process handle, its exit, and the stdout reader stop() detaches.
+  process?: { stdout: PassThrough } | null;
+  exitError?: Error | null;
+  stopReadingStdout?: (() => void) | null;
+};
 type Hook = (this: Self) => Promise<void>;
 
 const roots: string[] = [];
@@ -38,6 +47,31 @@ function notifyEvent(message: string, notifyType: string) {
   return { type: "extension_ui_request", id: `n-${message}`, method: "notify", message, notifyType };
 }
 
+/**
+ * The adverse order a real exit can take: the child's `exit` is recorded (and
+ * fails the pending request) while its last stdout line, the bootstrap-failure
+ * notify, is still queued. The line and the stream end arrive one macrotask
+ * later, after the launch catch has started, through the same line reader
+ * `stop()` detaches. Returns the exit error to throw.
+ */
+function exitBeforeStdoutEnds(self: Self, message: string): Error {
+  const stdout = new PassThrough();
+  let buffer = "";
+  const onData = (chunk: Buffer) => {
+    buffer += chunk.toString("utf8");
+    for (let index = buffer.indexOf("\n"); index >= 0; index = buffer.indexOf("\n")) {
+      emit(self, JSON.parse(buffer.slice(0, index)));
+      buffer = buffer.slice(index + 1);
+    }
+  };
+  stdout.on("data", onData);
+  self.stopReadingStdout = () => { stdout.off("data", onData); };
+  self.process = { stdout };
+  self.exitError = new Error(EXITED);
+  setImmediate(() => { stdout.end(`${JSON.stringify(notifyEvent(message, "error"))}\n`); });
+  return self.exitError;
+}
+
 /** RpcClient stand-in recording each start's env; `onEvent` listeners are kept so a hook can emit child events. */
 function installRpcHarness() {
   const proto = RpcClient.prototype as any;
@@ -46,13 +80,15 @@ function installRpcHarness() {
   const state = {
     hook: (async function (this: Self) { await connectFakeChild(this.options?.env, this.options?.args); }) as Hook,
     starts: [] as Array<Record<string, string>>,
-    prompt: async () => {},
+    prompt: (async function (this: Self) {}) as Hook,
   };
   Object.assign(proto, {
     async start(this: Self) { state.starts.push({ ...(this.options?.env ?? {}) }); await state.hook.call(this); this.started = true; },
-    async stop() {}, async abort() {},
+    // Like the real stop(), detach the stdout reader before anything else.
+    async stop(this: Self) { this.stopReadingStdout?.(); this.stopReadingStdout = null; },
+    async abort() {},
     async setThinkingLevel() {},
-    async prompt(this: Self) { if (!this.started) throw new Error("Client not started"); await state.prompt(); },
+    async prompt(this: Self) { if (!this.started) throw new Error("Client not started"); await state.prompt.call(this); },
     onEvent(this: Self, listener: (event: unknown) => void) {
       (this.listeners ??= []).push(listener);
       return () => { this.listeners = this.listeners!.filter(l => l !== listener); };
@@ -179,6 +215,55 @@ describe("child bootstrap failure reaches the parent's launch error", () => {
       } finally { rpc.restore(); }
     });
   }
+
+  for (const path of ["spawn", "resume"] as const) {
+    for (const stage of ["start", "first prompt"] as const) {
+      test(`${path}: an exit recorded at ${stage} before the child's last stdout line still carries that notify`, async () => {
+        const rpc = installRpcHarness();
+        const ctx = contexts();
+        try {
+          const record = path === "resume" ? await ctx.dormant() : undefined;
+          const late = "ws-pi-agent: session bootstrap failed (stdout after exit)";
+          if (stage === "start") {
+            rpc.state.hook = async function () { throw exitBeforeStdoutEnds(this, late); };
+          } else {
+            rpc.state.prompt = async function () { throw exitBeforeStdoutEnds(this, late); };
+          }
+          const message = `${EXITED}\nChild reported: ${late}`;
+          if (record) await assert.rejects(ctx.resume(record.agentId), { message });
+          else await assert.rejects(ctx.spawn(), { message });
+        } finally { rpc.restore(); }
+      });
+    }
+  }
+
+  test("an exit with no process handle stops at once and keeps the undecorated error", async () => {
+    const rpc = installRpcHarness();
+    const ctx = contexts();
+    try {
+      rpc.state.hook = async function () {
+        this.exitError = new Error(EXITED);
+        // Arrives one macrotask later: only a catch that waited would see it.
+        setImmediate(() => emit(this, notifyEvent("ws-pi-agent: too late", "error")));
+        throw this.exitError;
+      };
+      await assert.rejects(ctx.spawn(), { message: EXITED });
+    } finally { rpc.restore(); }
+  });
+
+  test("a failure while the child is still alive stops at once, without waiting on its stdout", async () => {
+    const rpc = installRpcHarness();
+    const ctx = contexts();
+    try {
+      const failure = "ws-pi-agent: child channel hello timed out after 1ms";
+      rpc.state.hook = async function () {
+        exitBeforeStdoutEnds(this, "ws-pi-agent: too late");
+        this.exitError = null;
+        throw new Error(failure);
+      };
+      await assert.rejects(ctx.spawn(), { message: failure });
+    } finally { rpc.restore(); }
+  });
 
   test("a launch failure with no error-level notify keeps its original error", async () => {
     const rpc = installRpcHarness();

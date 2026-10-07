@@ -86,6 +86,7 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
+import type { Readable } from "node:stream";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { RpcClient, type RpcClientOptions } from "@earendil-works/pi-coding-agent";
 import { capRpcClientStderr } from "./rpc-stderr-cap.ts";
@@ -2206,6 +2207,42 @@ function recordedExitError(client: RpcClient): unknown {
   return (client as { exitError?: unknown }).exitError;
 }
 
+/** The child's stdout through `RpcClient`'s private process handle; `undefined` when upstream no longer exposes it. */
+function childStdout(client: RpcClient): Readable | undefined {
+  const stdout = (client as { process?: { stdout?: unknown } | null }).process?.stdout;
+  return stdout && typeof (stdout as Readable).once === "function" ? stdout as Readable : undefined;
+}
+
+/** Bound on `awaitExitedChildStdout`: a pipe the exited child left behind ends within one poll turn. */
+const EXITED_CHILD_STDOUT_WAIT_MS = 500;
+
+/**
+ * Before a launch failure is decorated (and before `client.stop()`, which
+ * detaches the stdout reader first thing): when the child process already
+ * exited, wait, bounded, for its stdout to end so a queued last line (the
+ * bootstrap-failure notify) is parsed. The child's `exit` can be delivered
+ * before the last stdout chunk in the same poll batch, and the exit rejects
+ * the pending request that lands the launch in its catch. A live child (a
+ * stop, a handshake timeout) or a missing process handle returns at once.
+ */
+async function awaitExitedChildStdout(client: RpcClient | undefined): Promise<void> {
+  if (!client || !recordedExitError(client)) return;
+  const stdout = childStdout(client);
+  if (!stdout || stdout.readableEnded || stdout.destroyed) return;
+  await new Promise<void>(resolve => {
+    const done = () => {
+      clearTimeout(timer);
+      stdout.off("end", done);
+      stdout.off("close", done);
+      resolve();
+    };
+    const timer = setTimeout(done, EXITED_CHILD_STDOUT_WAIT_MS);
+    timer.unref?.();
+    stdout.once("end", done);
+    stdout.once("close", done);
+  });
+}
+
 /**
  * 260905 liveness probe. `RpcClient` exposes no public exit event, but its
  * `send()` throws synchronously once the child process has exited (the
@@ -3673,11 +3710,13 @@ export async function spawnAgent(
     publishSubtree(registry, true);
   } catch (err) {
     clearLiveState(record, registry);
+    // stop() detaches the stdout reader before anything else, so an exited
+    // child's queued last notify is read first (`awaitExitedChildStdout`).
+    if (!launch.stopped()) await awaitExitedChildStdout(client);
     try { await client?.stop(); } catch { /* best effort */ }
     // A stop during the launch is the single terminal: its own settle is the
     // lead-visible outcome, and the spawn call still fails, saying so.
     if (launch.stopped()) throw launchStoppedError();
-    // Read after stop(): the child's last notify has been drained by then.
     const reported = bootstrapFailure?.decorate(err) ?? err;
     pushSpawnFailed(ctx.pi, registry, record, reported);
     throw reported;
@@ -3893,6 +3932,7 @@ export async function sendToAgent(
       // client and close our own channel (a replacement launch owns its own).
       if (ownsFailure() && record.client === client) clearLiveState(record, registry);
       channel?.close();
+      if (!launch.stopped()) await awaitExitedChildStdout(client);
       try { await client?.stop(); } catch { /* best effort */ }
       // A finish-owned failure is rethrown to the coordinator's sole terminal
       // selector. Ordinary resumes retain spawn-failed; stale work gets
@@ -3922,6 +3962,7 @@ export async function sendToAgent(
     } catch (err) {
       // The first prompt is still part of the launch: a child whose
       // bootstrap failed after hello surfaces its exit here.
+      if (!launch.stopped()) await awaitExitedChildStdout(client);
       throw bootstrapFailure?.decorate(err) ?? err;
     } finally {
       bootstrapFailure?.dispose();

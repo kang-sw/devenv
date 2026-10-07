@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 48984ac7fc6fc7ea
 sage-review-completeness-reviewed: 48984ac7fc6fc7ea
+completed: 2026-10-07
 ---
 
 # Pi child-runtime ensurer wiring is untested and the child failure diagnostic can race stop()
@@ -183,3 +184,56 @@ without a version bump is caught too". Every drift test in
     call in `registerAgentTools` is removed.
   - The race test fails when the stdout-end wait is removed.
   - Record both checks in the Result.
+
+### Result (2d1ca1770) - 2026-10-07
+
+- `BridgeOptions.runBuild` (optional, default `runGoBuild`) feeds both the
+  startup local-devenv build and the child-runtime ensurer.
+- New `agents-plugin-pi/test/child-runtime-wiring.integration.test.ts` drives
+  production `startBridge` and `registerAgentTools`, with only the build seam
+  stubbed. The fake launcher sits under `plugin/bin/` so a cwd regression is
+  observable. The test covers:
+  - with the marker, no build or install before the first spawn;
+  - after a `plugin_version` bump, a rebuild plus one real `runLauncherOnce`
+    run (argv `[launcher, "version"]`, cwd = plugin dir) before the child
+    starts, and nothing on the next spawn;
+  - without the marker, nothing before either spawn.
+- `spawner.ts` gains `awaitExitedChildStdout`, called at three sites:
+  - Before `client.stop()` in the `spawnAgent` launch catch and in the
+    `sendToAgent` dormant-resume catch.
+  - Before decoration in the `sendToAgent` first-prompt catch.
+  - It waits, bounded at 500 ms, for the child's stdout `end`/`close`. It
+    applies only when the client recorded an exit (`recordedExitError`) and
+    the launch was not stopped.
+  - It returns at once when the private process handle is missing.
+  - The wrong "drained by then" comment is gone.
+- New race tests in `child-launch-guard.test.ts`:
+  - spawn and resume, each at start and at the first prompt: the exit is
+    recorded before the last stdout line, and the harness `stop()` detaches
+    the reader first, as upstream does;
+  - an exit with no process handle stops at once and keeps the undecorated
+    error;
+  - a failure with the child still alive stops at once.
+  - No wall-clock assertions.
+- New tools-only drift case in `local-devenv.test.ts`.
+- Verification:
+  - `npm test` in `agents-plugin-pi`: 2113 tests, 2110 pass, 0 fail,
+    3 skipped.
+  - Removing the `registerChildLaunchPreflight` call in `registerAgentTools`
+    makes the wiring test fail ("the drift rebuilt and installed before the
+    child started").
+  - These mutations also fail it:
+    - `ensureChildRuntime` dropped from the handle;
+    - an inverted gate;
+    - a baseline hashed from trimmed text instead of the bytes;
+    - an extra launcher argv;
+    - launcher-dir cwd.
+  - Making `awaitExitedChildStdout` a no-op fails all four new race tests;
+    the other cases still pass.
+- Decisions:
+  - `mailbox-bootstrap.integration.test.ts` boots through `index.ts`, which
+    does not set the seam. Its source-rewrite anchor moved from
+    `runBuild: runGoBuild,` to `opts.runBuild ?? runGoBuild;`.
+  - A gate that is always on with no marker is not observable: the ensurer
+    is a no-op without a marker. The no-marker test therefore guards the
+    observable contract (no build, no install).
