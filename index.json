@@ -530,7 +530,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-07T02:12:51Z"
+        "touched_at": "2026-10-07T02:13:08Z",
+        "impl": {
+          "branch": "impl/develop/wife-fancy-hull"
+        }
       }
     }
   }
