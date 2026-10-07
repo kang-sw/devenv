@@ -523,6 +523,9 @@
     "261004-research-pi-reviewer-report-scope-discovery": {
       "registered_at": "2026-10-04T03:10:48Z"
     },
+    "261007-bug-pi-child-start-fails-after-version-bump": {
+      "registered_at": "2026-10-07T12:27:27Z"
+    },
     "261007-bug-pi-fork-lineage-keeps-bootstrap-key-after-adoption": {
       "registered_at": "2026-10-07T08:41:34Z"
     },
