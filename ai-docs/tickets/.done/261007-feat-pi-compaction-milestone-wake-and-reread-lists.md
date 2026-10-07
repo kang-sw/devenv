@@ -6,6 +6,7 @@ related:
 sage-review-design: skipped
 sage-review-completeness: completed
 sage-review-completeness-reviewed: b8e9759a42e8850a
+completed: 2026-10-07
 ---
 
 # Pi lead compaction milestones as wake turns, and structured re-read lists in ws-compact
