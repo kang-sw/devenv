@@ -77,15 +77,36 @@ export function createWsConfigReader(
     if (!current) return {};
     const out: Record<string, unknown> = {};
     await Promise.all(keys.map(async (key) => {
-      const value = await readOne(current, key, timeoutMs);
+      const value = await readOne(current, `${ADAPTER_CONFIG_NAMESPACE}${key}`, timeoutMs);
       if (value !== undefined) out[key] = value;
     }));
     return out as GoalLoopConfig;
   };
 }
 
-async function readOne(target: ConfigGetTarget, key: GoalLoopConfigKey, timeoutMs: number): Promise<unknown> {
-  const args: Record<string, unknown> = { key: `${ADAPTER_CONFIG_NAMESPACE}${key}`, format: "json" };
+/**
+ * The same per-use `config.get` read for full key names, prefixed or not
+ * (the display summarizer reads `workflow.lang` beside its `pi.*` keys). The
+ * result is keyed by the full name; an absent key means unset or unreadable.
+ */
+export function createWsConfigKeyReader(
+  target: () => ConfigGetTarget | undefined,
+  timeoutMs: number = CONFIG_READ_TIMEOUT_MS,
+): (keys: readonly string[]) => Promise<Record<string, unknown>> {
+  return async (keys) => {
+    const current = target();
+    if (!current) return {};
+    const out: Record<string, unknown> = {};
+    await Promise.all(keys.map(async (key) => {
+      const value = await readOne(current, key, timeoutMs);
+      if (value !== undefined) out[key] = value;
+    }));
+    return out;
+  };
+}
+
+async function readOne(target: ConfigGetTarget, key: string, timeoutMs: number): Promise<unknown> {
+  const args: Record<string, unknown> = { key, format: "json" };
   if (target.sessionKey) args.session_key = target.sessionKey;
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {

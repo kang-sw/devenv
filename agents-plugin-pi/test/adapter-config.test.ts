@@ -14,6 +14,7 @@ import { join } from "node:path";
 import {
   ADAPTER_CONFIG_MANIFEST_FILE,
   ADAPTER_CONFIG_NAMESPACE,
+  createWsConfigKeyReader,
   createWsConfigReader,
   staticConfigReader,
   thenOrNow,
@@ -112,6 +113,18 @@ describe("createWsConfigReader", () => {
 
   test("no bridge reads nothing", async () => {
     assert.deepEqual(await createWsConfigReader(() => undefined)(["settle_delay_ms"]), {});
+  });
+
+  test("the full-key reader reads unprefixed keys as named and drops unset ones", async () => {
+    const answers: Record<string, unknown> = {
+      "workflow.lang": json({ key: "workflow.lang", value: "Korean", scope: "global" }),
+      "pi.display_summary_model": json({ key: "pi.display_summary_model", value: null, scope: "unset" }),
+    };
+    const { calls, client } = fakeClient((args) => answers[String(args.key)]);
+    const read = createWsConfigKeyReader(() => ({ client, sessionKey: "lead-key" }));
+    assert.deepEqual(await read(["workflow.lang", "pi.display_summary_model"]), { "workflow.lang": "Korean" });
+    assert.deepEqual(calls.map((c) => c.args.key).sort(), ["pi.display_summary_model", "workflow.lang"]);
+    assert.deepEqual(await createWsConfigKeyReader(() => undefined)(["workflow.lang"]), {});
   });
 
   test("a static reader answers synchronously with only the requested knobs", () => {
