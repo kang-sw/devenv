@@ -67,6 +67,29 @@
       "default": 30,
       "default_scope": "global",
       "description": "Days since a spawned child's last activity before its stored home is pruned at lead startup; 0 disables age pruning."
+    },
+    {
+      "key": "pi.display_summary_model",
+      "type": "string",
+      "default": "",
+      "default_scope": "global",
+      "description": "Model that writes short summaries of collapsed tool and message rows in the lead's terminal view, as provider/model-id (split at the first /, for example openai/gpt-5-mini); empty turns summaries off. It signs in through the provider's existing authentication. Enabling it sends the lead conversation and tool and message content to that provider. Summaries use the workflow.lang language, or the language the user writes in when that is unset."
+    },
+    {
+      "key": "pi.display_summary_effort",
+      "type": "enum",
+      "enum": [
+        "off",
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "default": "medium",
+      "default_scope": "global",
+      "description": "Thinking level for the display-summary model, clamped to the levels the model supports. off (or a level the model clamps to off) sends no thinking setting: most providers then disable thinking, and some (for example openai-codex) use their server default."
     }
   ]
 }
