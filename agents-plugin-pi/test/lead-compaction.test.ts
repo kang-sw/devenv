@@ -449,13 +449,13 @@ describe("preparation and fallback text", () => {
     const message = buildPreparationMessage({ kind: "advisory", percent: 51.4, threshold: 50, hardPercent: 80, milestonePercents: [60, 70] }, "GUIDE BODY");
     assert.equal(
       message,
-      "Context usage is 51% of the window (advisory point: 50%). Compaction becomes forced at 80%.\n\nThis is not an instruction to compact right now. If you are in active discussion with the human, awaiting their answer or clarification, or holding working context that would be costly to rebuild (a half-applied change or a diagnosis in progress), carry on for now. A pause after asking the human a question is not a boundary.\n\nFrom here on, look for a good moment to compact before 80%. A good moment is a natural boundary where most of what this context holds is no longer needed for the work ahead, and what is still needed can be restored cheaply after compaction from durable records (tickets, commits, notes, agenda) and the summary. Typical cases: work just landed, you are waiting only on background agents, or the next work is weakly related to the current context. When such a moment comes, run the preparation below. Compacting on your own terms keeps the summary in your hands; at 80% it is forced, mid-work if need be. Reminders follow at 60% and 70%.\n\nIf now is not such a moment, end this turn without replying and keep looking for one as you work.\n\nGUIDE BODY",
+      "[system message from ws-pi-plugin]\nContext usage is 51% of the window (advisory point: 50%). Compaction becomes forced at 80%.\n\nThis is not an instruction to compact right now. If you are in active discussion with the human, awaiting their answer or clarification, or holding working context that would be costly to rebuild (a half-applied change or a diagnosis in progress), carry on for now. A pause after asking the human a question is not a boundary.\n\nFrom here on, look for a good moment to compact before 80%. A good moment is a natural boundary where most of what this context holds is no longer needed for the work ahead, and what is still needed can be restored cheaply after compaction from durable records (tickets, commits, notes, agenda) and the summary. Typical cases: work just landed, you are waiting only on background agents, or the next work is weakly related to the current context. When such a moment comes, run the preparation below. Compacting on your own terms keeps the summary in your hands; at 80% it is forced, mid-work if need be. Reminders follow at 60% and 70%.\n\nIf now is not such a moment, end this turn without replying and keep looking for one as you work.\n\nGUIDE BODY",
     );
   });
 
   test("the advisory head interpolates non-default thresholds", () => {
     const message = buildPreparationMessage({ kind: "advisory", percent: 41.6, threshold: 40, hardPercent: 75, milestonePercents: [40 + 35 / 3, 40 + 70 / 3] }, "GUIDE BODY");
-    assert.match(message, /^Context usage is 42% of the window \(advisory point: 40%\)\. Compaction becomes forced at 75%\.\n/);
+    assert.match(message, /^\[system message from ws-pi-plugin\]\nContext usage is 42% of the window \(advisory point: 40%\)\. Compaction becomes forced at 75%\.\n/);
     assert.match(message, /look for a good moment to compact before 75%\./);
     assert.match(message, /at 75% it is forced, mid-work if need be\. Reminders follow at 52% and 63%\.\n/);
   });
@@ -464,19 +464,19 @@ describe("preparation and fallback text", () => {
   test("each milestone is its pinned text with the rounded usage and the hard point", () => {
     assert.equal(
       buildContextMilestoneMessage(1, 62.6, 85),
-      "Context window: 63% / 85% (forced compaction point). Past 85%, compaction is forced, mid-work if need be. From here on, a good boundary is worth taking; if this is one, run the preparation from the advisory. Otherwise end this turn without replying.",
+      "[system message from ws-pi-plugin]\nContext window: 63% / 85% (forced compaction point). Past 85%, compaction is forced, mid-work if need be. From here on, a good boundary is worth taking; if this is one, run the preparation from the advisory. Otherwise end this turn without replying.",
     );
     assert.equal(
       buildContextMilestoneMessage(2, 70.2, 80),
-      "Context window: 70% / 80% (forced compaction point). This is the last reading before compaction is forced. Compacting at a boundary you choose keeps the summary in your hands; take this one if it fits, and run the preparation from the advisory. Otherwise end this turn without replying, and take the next good boundary.",
+      "[system message from ws-pi-plugin]\nContext window: 70% / 80% (forced compaction point). This is the last reading before compaction is forced. Compacting at a boundary you choose keeps the summary in your hands; take this one if it fits, and run the preparation from the advisory. Otherwise end this turn without replying, and take the next good boundary.",
     );
     assert.equal(LEAD_CONTEXT_MILESTONE_CUSTOM_TYPE, "ws-lead-context-milestone");
   });
 
   test("hard and manual triggers keep their imperative heads and verbatim guide", () => {
     const guide = "GUIDE BODY";
-    assert.equal(buildPreparationMessage({ kind: "hard", percent: 80, threshold: 80 }, guide), "Context usage is 80% of the window, past the hard compaction point (80%). Stop the current work now and prepare for compaction with the guide below before anything else.\n\nGUIDE BODY");
-    const manualHead = "The user ran /compact; the adapter cancelled Pi's native compaction so you can prepare it. Prepare for compaction now with the guide below.";
+    assert.equal(buildPreparationMessage({ kind: "hard", percent: 80, threshold: 80 }, guide), "[system message from ws-pi-plugin]\nContext usage is 80% of the window, past the hard compaction point (80%). Stop the current work now and prepare for compaction with the guide below before anything else.\n\nGUIDE BODY");
+    const manualHead = "[system message from ws-pi-plugin]\nThe user ran /compact; the adapter cancelled Pi's native compaction so you can prepare it. Prepare for compaction now with the guide below.";
     assert.equal(buildPreparationMessage({ kind: "reroute", focus: "  keep the API notes  " }, guide), `${manualHead}\nThe user's /compact focus text, to honor in your prose:\nkeep the API notes\n\nGUIDE BODY`);
     assert.equal(buildPreparationMessage({ kind: "reroute" }, guide), `${manualHead}\n\nGUIDE BODY`);
   });

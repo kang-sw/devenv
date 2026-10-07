@@ -2165,7 +2165,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       assert.equal(preparations().length, 1);
       const nudge = preparations()[0]!;
       assert.deepEqual(nudge.options, { deliverAs: "followUp", triggerTurn: true });
-      assert.match((nudge.content as { content: string }).content, /^Context usage is 55% of the window \(advisory point: 50%\)\. Compaction becomes forced at 80%\.\n[\s\S]*keep looking for one as you work\.\n\nGUIDE BODY 261002$/);
+      assert.match((nudge.content as { content: string }).content, /^\[system message from ws-pi-plugin\]\nContext usage is 55% of the window \(advisory point: 50%\)\. Compaction becomes forced at 80%\.\n[\s\S]*keep looking for one as you work\.\n\nGUIDE BODY 261002$/);
 
       pi.handlers.get("agent_end")!({}, ctx);
       usage.percent = 60;
@@ -2192,7 +2192,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       assert.equal(preparations().length, 1);
       const steer = preparations()[0]!;
       assert.deepEqual(steer.options, { deliverAs: "steer", triggerTurn: true });
-      assert.match((steer.content as { content: string }).content, /^Context usage is 71% .*hard compaction point \(70%\)\. Stop the current work now[\s\S]*GUIDE BODY 261002$/);
+      assert.match((steer.content as { content: string }).content, /^\[system message from ws-pi-plugin\]\nContext usage is 71% .*hard compaction point \(70%\)\. Stop the current work now[\s\S]*GUIDE BODY 261002$/);
       assert.equal((steer.content as { display: boolean }).display, true);
 
       pi.handlers.get("turn_end")!({}, ctx);
@@ -2267,7 +2267,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       assert.equal(preparations().length, 1);
       const reroute = preparations()[0]!;
       assert.deepEqual(reroute.options, { deliverAs: "followUp", triggerTurn: true });
-      assert.match((reroute.content as { content: string }).content, /^The user ran \/compact[\s\S]*focus text, to honor in your prose:\nkeep the API notes\n\nGUIDE BODY 261002$/);
+      assert.match((reroute.content as { content: string }).content, /^\[system message from ws-pi-plugin\]\nThe user ran \/compact[\s\S]*focus text, to honor in your prose:\nkeep the API notes\n\nGUIDE BODY 261002$/);
       assert.deepEqual(notifications, [], "no failure is reported for the reroute");
 
       let compactCall: Parameters<ExtensionContext["compact"]>[0] | undefined;
@@ -2407,7 +2407,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       const milestone = milestones()[0]!;
       assert.deepEqual(milestone.options, { deliverAs: "followUp", triggerTurn: true });
       assert.equal((milestone.content as { display: boolean }).display, true);
-      assert.equal((milestone.content as { content: string }).content, "Context window: 62% / 85% (forced compaction point). Past 85%, compaction is forced, mid-work if need be. From here on, a good boundary is worth taking; if this is one, run the preparation from the advisory. Otherwise end this turn without replying.");
+      assert.equal((milestone.content as { content: string }).content, "[system message from ws-pi-plugin]\nContext window: 62% / 85% (forced compaction point). Past 85%, compaction is forced, mid-work if need be. From here on, a good boundary is worth taking; if this is one, run the preparation from the advisory. Otherwise end this turn without replying.");
       assert.deepEqual((milestone.content as { details: unknown }).details, { milestone: 50 + 35 / 3 });
       assert.equal(preparations().length, 1, "a milestone carries no guide and is not a preparation message");
 
@@ -2417,7 +2417,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       assert.equal(milestones().length, 1, "turn_ends inside the milestone turn deliver nothing");
       runEnd();
       assert.equal(milestones().length, 2, "the second milestone at the exact 73.33, at the milestone turn's own agent_end");
-      assert.equal((milestones()[1]!.content as { content: string }).content, "Context window: 74% / 85% (forced compaction point). This is the last reading before compaction is forced. Compacting at a boundary you choose keeps the summary in your hands; take this one if it fits, and run the preparation from the advisory. Otherwise end this turn without replying, and take the next good boundary.");
+      assert.equal((milestones()[1]!.content as { content: string }).content, "[system message from ws-pi-plugin]\nContext window: 74% / 85% (forced compaction point). This is the last reading before compaction is forced. Compacting at a boundary you choose keeps the summary in your hands; take this one if it fits, and run the preparation from the advisory. Otherwise end this turn without replying, and take the next good boundary.");
       runEnd();
       at(80);
       runEnd();
@@ -2435,7 +2435,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       assert.equal(milestones().length, 0, "crossed mid-run, pending until agent_end");
       runEnd();
       assert.equal(milestones().length, 1);
-      assert.equal((milestones()[0]!.content as { content: string }).content, "Context window: 72% / 80% (forced compaction point). This is the last reading before compaction is forced. Compacting at a boundary you choose keeps the summary in your hands; take this one if it fits, and run the preparation from the advisory. Otherwise end this turn without replying, and take the next good boundary.");
+      assert.equal((milestones()[0]!.content as { content: string }).content, "[system message from ws-pi-plugin]\nContext window: 72% / 80% (forced compaction point). This is the last reading before compaction is forced. Compacting at a boundary you choose keeps the summary in your hands; take this one if it fits, and run the preparation from the advisory. Otherwise end this turn without replying, and take the next good boundary.");
       assert.deepEqual((milestones()[0]!.content as { details: unknown }).details, { milestone: 70 });
       runEnd();
       at(75);
@@ -2490,7 +2490,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       runEnd();
       assert.equal(preparations().length, 1);
       assert.equal(kindOf(preparations()[0]!), "advisory");
-      assert.match((preparations()[0]!.content as { content: string }).content, /^Context usage is 63% of the window/);
+      assert.match((preparations()[0]!.content as { content: string }).content, /^\[system message from ws-pi-plugin\]\nContext usage is 63% of the window/);
       assert.equal(milestones().length, 0);
       runEnd();
 

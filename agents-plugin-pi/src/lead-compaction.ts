@@ -790,8 +790,17 @@ export type PreparationTrigger =
 export const LEAD_CONTEXT_MILESTONE_CUSTOM_TYPE = "ws-lead-context-milestone";
 
 /** The milestone wake text (261007): `milestone` 1 or 2, current usage against the forced point, no guide body. */
+/**
+ * First line of every compaction message the adapter injects (advisory,
+ * milestone, hard cut, `/compact` reroute). Pi hands a custom message to the
+ * model as plain user-role text, so without it the model reads the adapter's
+ * notice as the human's request (a downstream summary quoted the milestone
+ * as the user's latest request).
+ */
+export const ADAPTER_MESSAGE_LABEL = "[system message from ws-pi-plugin]";
+
 export function buildContextMilestoneMessage(milestone: 1 | 2, percent: number, hardPercent: number): string {
-  const head = `Context window: ${Math.round(percent)}% / ${hardPercent}% (forced compaction point).`;
+  const head = `${ADAPTER_MESSAGE_LABEL}\nContext window: ${Math.round(percent)}% / ${hardPercent}% (forced compaction point).`;
   return milestone === 1
     ? `${head} Past ${hardPercent}%, compaction is forced, mid-work if need be. From here on, a good boundary is worth taking; if this is one, run the preparation from the advisory. Otherwise end this turn without replying.`
     : `${head} This is the last reading before compaction is forced. Compacting at a boundary you choose keeps the summary in your hands; take this one if it fits, and run the preparation from the advisory. Otherwise end this turn without replying, and take the next good boundary.`;
@@ -816,7 +825,7 @@ export function buildPreparationMessage(trigger: PreparationTrigger, guide: stri
     const focus = trigger.focus?.trim();
     head = `The user ran /compact; the adapter cancelled Pi's native compaction so you can prepare it. Prepare for compaction now with the guide below.${focus ? `\nThe user's /compact focus text, to honor in your prose:\n${focus}` : ""}`;
   }
-  return `${head}\n\n${guide}`;
+  return `${ADAPTER_MESSAGE_LABEL}\n${head}\n\n${guide}`;
 }
 
 // ---------------------------------------------------------------------------
