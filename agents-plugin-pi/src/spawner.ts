@@ -123,6 +123,7 @@ import { verifyWebReadiness, WEB_HOME_ENV, WEB_READINESS_KIND } from "./web-read
 import { beginSubtreeDispatch, installSubtreePublisher, observeSubtreeChannel, publishSubtree, scheduleSubtreeTelemetry, type OwnTurnState, type SubtreeDescendant, type SubtreeSnapshot, type SubtreeUpstream } from "./subtree-lifecycle.ts";
 import { PUSH_BATCH_CUSTOM_TYPE, PUSH_BATCH_VERSION, type PushBatchItem, type PushBatchItemState } from "./push-protocol.ts";
 import { labelAdapterContent, labelAdapterText } from "./adapter-label.ts";
+import { withItemSummaryIds, withSummaryId } from "./summary-id.ts";
 import { capacityEvictionCost, isRemovedAgent, persistAgentCostCheckpoint, persistEvictedAgentCost, registerAgentCostOwner } from "./agent-cost.ts";
 import { createOutputRateTracker, type OutputRateTracker } from "./output-rate.ts";
 
@@ -1261,9 +1262,13 @@ function requestPushWake(pi: ExtensionAPI): void {
 
 export type RawPushBatchMode = "when-held" | "always";
 
-/** A raw summary as sent on its own: the label opens its content. Held raw sends keep the unlabeled message, since a batch carries the label once. */
+/**
+ * A raw summary as sent on its own: the label opens its content and a fresh
+ * display-summary row id joins its details. Held raw sends keep the unlabeled
+ * message, since a batch carries the label once and stamps each item itself.
+ */
 function labelRawSend(message: Parameters<ExtensionAPI["sendMessage"]>[0]): Parameters<ExtensionAPI["sendMessage"]>[0] {
-  return { ...message, content: labelAdapterContent(message.content) };
+  return { ...message, content: labelAdapterContent(message.content), details: withSummaryId(message.details) as never };
 }
 
 /** Admit raw summaries through the very same FIFO as family-shaped reports. */
@@ -1631,7 +1636,7 @@ function sendPush(
         customType: family,
         content: labelAdapterText(buildPushContent(family, displayId, payload, status)),
         display: true,
-        details: details as never,
+        details: withSummaryId(details) as never,
       },
       { deliverAs, triggerTurn: true },
     );
@@ -1657,7 +1662,9 @@ function submitHeldPushBatch(pi: ExtensionAPI, deliverAs: "steer" | "followUp", 
   const terminalStates = snapshot.flatMap((held) => held.kind === "push" && held.terminal
     ? [{ terminal: held.terminal, wasHeld: held.terminal.state === "held" }]
     : []);
-  const items = snapshot.map(materializeHeldInput);
+  // Each item card is summarized on its own, so each gets its own row id;
+  // the model content below reads only item content and identity.
+  const items = withItemSummaryIds(snapshot.map(materializeHeldInput));
   const modelItems = items.filter((_item, index) => snapshot[index]!.kind !== "goal-replacement");
   if (modelItems.length > 0) {
     try {

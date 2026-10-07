@@ -1,5 +1,6 @@
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { stripSummaryId } from './fixtures/summary-id.ts';
 import { registerGoalLoop } from '../src/goal-loop.ts';
 import { registerLeadBootstrap } from '../src/lead-bootstrap.ts';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
@@ -190,6 +191,26 @@ test('260914: mail joins an older held family push in one FIFO batch instead of 
   h.settle(); h.emit('session_shutdown');
 });
 
+test('261007: every ws-push-batch item, folded mail and thread summaries included, carries its own display-summary id outside the model content', () => {
+  const h = harness();
+  h.busy();
+  h.push('followUp', 'progress first');
+  sendToLead(h.pi, {customType: 'ws-thread-summary', content: 'thread closed', display: true, details: {threadId: 'q1'}}, 'followUp');
+  sendToLead(h.pi, buildMailboxPushMessage({ reply_to: 'id:abc', content: 'incoming instruction' }), 'steer', 'always');
+  h.end();
+  assert.equal(h.custom.length, 1);
+  const {content, details} = h.custom[0].message;
+  assert.deepEqual(details.items.map((item: any) => item.customType), ['ws-agent-report', 'ws-thread-summary', 'ws-mailbox']);
+  const ids = details.items.map((item: any) => item.details.ws_summary_id);
+  assert.ok(ids.every((id: unknown) => typeof id === 'string' && id.length > 0), 'every item is stamped');
+  assert.equal(new Set(ids).size, ids.length, 'item ids are unique');
+  assert.equal(details.ws_summary_id, undefined, 'the batch itself is summarized per item, not as one row');
+  assert.doesNotMatch(content, /ws_summary_id/);
+  for (const id of ids) assert.ok(!content.includes(id), 'the model-facing batch content never carries a row id');
+  assert.deepEqual(stripSummaryId(details.items[1].details), {threadId: 'q1'});
+  h.settle(); h.emit('session_shutdown');
+});
+
 test('an independent user start clears the pending wake reservation and releases steering', () => {
   const h = harness();
   h.push('followUp');
@@ -272,7 +293,8 @@ test('a raw summary sent on its own opens with the adapter label, for string and
   assert.deepEqual(h.custom.map((entry) => entry.message.customType), ['ws-thread-summary', 'ws-thread-summary']);
   assert.equal(h.custom[0].message.content, `${LABEL}\nsummary text`);
   assert.deepEqual(h.custom[1].message.content, [{type: 'text', text: `${LABEL}\npart text`}]);
-  assert.deepEqual(h.custom[0].message.details, {threadId: 'q1'});
+  assert.deepEqual(stripSummaryId(h.custom[0].message.details), {threadId: 'q1'});
+  assert.notEqual(h.custom[0].message.details.ws_summary_id, h.custom[1].message.details.ws_summary_id, 'each direct send gets its own row id');
   h.settle(); h.emit('session_shutdown');
 });
 
