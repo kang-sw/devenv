@@ -541,6 +541,9 @@
     },
     "261007-bug-sage-gate-keeps-stale-skipped-design-posture": {
       "registered_at": "2026-10-07T05:20:30Z"
+    },
+    "261007-bug-session-record-cross-process-write-race": {
+      "registered_at": "2026-10-07T05:35:57Z"
     }
   }
 }
