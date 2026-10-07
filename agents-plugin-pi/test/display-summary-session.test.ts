@@ -15,8 +15,12 @@ type Handler = (event: any, ctx: any) => unknown;
 
 function fakePi() {
   const handlers = new Map<string, Handler[]>();
+  const injected: unknown[] = [];
   return {
     handlers,
+    injected,
+    sendMessage(message: unknown) { injected.push(message); },
+    sendUserMessage(message: unknown) { injected.push(message); },
     on(name: string, handler: Handler) { handlers.set(name, [...(handlers.get(name) ?? []), handler]); },
     getActiveTools: () => ["edit", "write", "ws__tickets_query"],
     emit(name: string, event: unknown = {}, ctx: unknown = {}) {
@@ -98,6 +102,25 @@ describe("display summary session", () => {
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(h.store.get("c1")?.toolResult, "r");
   });
+
+  for (const [name, completion] of [
+    ["a thrown request", () => Promise.reject(new Error("provider down"))],
+    ["a provider error", () => Promise.resolve({ role: "assistant", content: [], stopReason: "error", errorMessage: "rate limited", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } } as unknown as AssistantMessage)],
+    ["a provider-reported overflow", () => Promise.resolve({ role: "assistant", content: [], stopReason: "error", errorMessage: "prompt is too long: context length exceeded", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } } as unknown as AssistantMessage)],
+  ] as const) {
+    test(`${name} leaves the row raw and never injects a lead turn`, async () => {
+      const h = setup({}, completion);
+      h.pi.emit("session_start", {}, { mode: "tui", cwd: "/w", modelRegistry: registry });
+      runTool(h.pi, "c1");
+      assert.deepEqual(h.pi.emit("turn_end"), [undefined]);
+      await new Promise((resolve) => setImmediate(resolve));
+      await Promise.all(h.pi.emit("agent_end"));
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(h.calls(), 1);
+      assert.equal(h.store.get("c1"), undefined, "the row stays raw");
+      assert.deepEqual(h.pi.injected, [], "no message or user turn reaches the lead");
+    });
+  }
 
   test("agent_end flushes; compaction resets the log; shutdown stops the summarizer", async () => {
     const h = setup();

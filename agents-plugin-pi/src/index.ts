@@ -206,7 +206,7 @@ import { registerGoalLoop, resolveAgentWaitAnimation, resolveChildRetentionTtlDa
 import { COMPACTION_HISTORY_TYPE, registerCompactionHistory } from "./compaction-history.ts";
 import { registerLeadMemoryLog } from "./lead-memory-log.ts";
 import { createWsConfigKeyReader, createWsConfigReader, thenOrNow } from "./adapter-config.ts";
-import { createDisplaySummaryStore, DISPLAY_SUMMARY_CONFIG_KEYS, displaySummaryConfigFrom } from "./display-summary.ts";
+import { createDisplaySummaryStore, DISPLAY_SUMMARY_CONFIG_KEYS, displaySummaryConfigFrom, type DisplaySummaryStore } from "./display-summary.ts";
 import { registerDisplaySummarySession } from "./display-summary-session.ts";
 import { registerAdapterMessageRenderers, registerSummarizedBuiltinTools } from "./display-summary-render.ts";
 import { registerSkillResources } from "./skills-dir.ts";
@@ -268,6 +268,15 @@ export function applySessionStartOwnershipDiagnostics(
 
 export function applySessionShutdownOwnershipDiagnostics(): void {
   ownerNotifyRef.current = undefined;
+}
+
+/**
+ * Display-summary message rows have no invalidate handle: a summary landing
+ * repaints through the footer controller's captured TUI handle. Never a
+ * second `setFooter`, which would replace the agent footer.
+ */
+export function bindDisplaySummaryRender(store: Pick<DisplaySummaryStore, "requestRender">, lifecycle: Pick<AgentFooterSessionLifecycle, "refresh">): void {
+  store.requestRender = () => { lifecycle.refresh(); };
 }
 
 /** Controller-session retention seam: child workers never run global disk maintenance. */
@@ -578,9 +587,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     const hostTui = await loadHostPiTui();
     return { truncateToWidth: hostTui.truncateToWidth, visibleWidth: hostTui.visibleWidth };
   });
-  // Message renderers have no invalidate handle: a summary landing repaints
-  // through the footer's captured TUI (never a second setFooter).
-  displaySummaryStore.requestRender = () => { agentFooterLifecycle.refresh(); };
+  bindDisplaySummaryRender(displaySummaryStore, agentFooterLifecycle);
   registerAgentFooterGitEvents(pi, agentFooterLifecycle);
   registerAgentFooterOutputEvents(pi, agentFooterLifecycle);
   pi.on("session_compact", (event) => { agentFooterLifecycle.acceptUsage(event.compactionEntry); agentFooterLifecycle.checkpoint(); });
