@@ -918,7 +918,7 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
   // Adopt the key a lead revives with: after a successful lead-role
   // workflow_manual carrying an explicit key other than the default, re-log
   // in with it; on success it is the default key from here on, is recorded
-  // for later resumes, and the result gains one pinned line saying so. A
+  // for later resumes, and the result gains one labeled notice saying so. A
   // refused re-login adopts nothing.
   const adoptRevivedKey = async (rawSessionKey: unknown, content: McpContentItem[]): Promise<McpContentItem[]> => {
     const revived = ownsLeadKey ? revivedKeyToAdopt(rawSessionKey, defaultKeyRef.current, FRESH_BOOTSTRAP_SENTINEL) : undefined;
