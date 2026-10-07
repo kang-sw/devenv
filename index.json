@@ -533,7 +533,14 @@
       "registered_at": "2026-10-07T07:45:49Z"
     },
     "261007-feat-pi-display-summary": {
-      "registered_at": "2026-10-07T07:00:22Z"
+      "registered_at": "2026-10-07T07:00:22Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-10-07T07:48:48Z"
+      }
     },
     "261007-feat-stale-agenda-pruning-nudge": {
       "registered_at": "2026-10-07T05:36:00Z"
