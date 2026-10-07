@@ -26,11 +26,9 @@ Covers:
 """
 
 import json
-import os
 import shutil
 import subprocess
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 
@@ -113,26 +111,24 @@ class ClaudeHooksManifestTest(unittest.TestCase):
             f"no SessionStart(compact) hook runs compact-revive-nudge.py: {commands}",
         )
 
-    def _run_nudge(self, payload, cache_home):
+    def _run_nudge(self, payload):
         script = PLUGIN_ROOT / "hooks" / "compact-revive-nudge.py"
         return subprocess.run(
             [sys.executable, str(script)],
             input=json.dumps(payload),
             capture_output=True,
             text=True,
-            env={**os.environ, "WS_CACHE_HOME": cache_home},
         )
 
     def test_revive_nudge_prints_only_on_compact(self):
-        with tempfile.TemporaryDirectory() as cache_home:
-            compact = self._run_nudge({"source": "compact"}, cache_home)
-            self.assertEqual(compact.returncode, 0, compact.stderr)
-            self.assertIn("ws:lead-revive", compact.stdout)
-            self.assertIn("not a spawned worker or subagent", compact.stdout)
+        compact = self._run_nudge({"source": "compact"})
+        self.assertEqual(compact.returncode, 0, compact.stderr)
+        self.assertIn("ws:lead-revive", compact.stdout)
+        self.assertIn("not a spawned worker or subagent", compact.stdout)
 
-            startup = self._run_nudge({"source": "startup"}, cache_home)
-            self.assertEqual(startup.returncode, 0, startup.stderr)
-            self.assertEqual(startup.stdout, "")
+        startup = self._run_nudge({"source": "startup"})
+        self.assertEqual(startup.returncode, 0, startup.stderr)
+        self.assertEqual(startup.stdout, "")
 
 
 if __name__ == "__main__":
