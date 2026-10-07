@@ -541,22 +541,22 @@ describe("curated file lists (261007)", () => {
       { path: "a4.txt", why: "first tie" },
       { path: "c2.txt", why: "small" },
     ], [], 10);
-    assert.equal(inlined, "## Required re-reads (inlined)\n### `b4.txt` - second tie\n```\nbbbb\n```\n### `a4.txt` - first tie\n```\naaaa\n```\n### `c2.txt` - small\n```\ncc\n```");
+    assert.equal(inlined, "## Required re-reads (inlined)\n<file path=\"b4.txt\" why=\"second tie\">\nbbbb\n</file>\n<file path=\"a4.txt\" why=\"first tie\">\naaaa\n</file>\n<file path=\"c2.txt\" why=\"small\">\ncc\n</file>");
     assert.equal(toReadFirst, "## Required re-reads (to read first)\n- `d8.txt` - big");
 
     const [tieInlined, tieFirst] = sections([{ path: "b4.txt", why: "b" }, { path: "a4.txt", why: "a" }], [], 4);
-    assert.match(tieInlined!, /`b4\.txt`/, "an equal-size tie goes to the lead's earlier entry");
+    assert.match(tieInlined!, /path="b4\.txt"/, "an equal-size tie goes to the lead's earlier entry");
     assert.equal(tieFirst, "## Required re-reads (to read first)\n- `a4.txt` - a", "the entry that does not fit is listed whole, never cut");
   });
 
   test("a lines range is cut 1-based and inclusive, clamped at the file's end, and the heading shows the range taken", () => {
     const [inlined] = sections([{ path: "ten.txt", lines: "2-3", why: "head" }, { path: "ten.txt", lines: "9-40", why: "tail" }]);
-    assert.equal(inlined, "## Required re-reads (inlined)\n### `ten.txt` lines 2-3 - head\n```\nline 2\nline 3\n```\n### `ten.txt` lines 9-10 - tail\n```\nline 9\nline 10\n```");
+    assert.equal(inlined, "## Required re-reads (inlined)\n<file path=\"ten.txt\" lines=\"2-3\" why=\"head\">\nline 2\nline 3\n</file>\n<file path=\"ten.txt\" lines=\"9-10\" why=\"tail\">\nline 9\nline 10\n</file>");
   });
 
   test("a whole-file entry inlines the file and drops the lines part", () => {
     const [inlined] = sections([{ path: "ten.txt", why: "all of it" }]);
-    assert.equal(inlined, `## Required re-reads (inlined)\n### \`ten.txt\` - all of it\n\`\`\`\n${tenLines}\`\`\``);
+    assert.equal(inlined, `## Required re-reads (inlined)\n<file path="ten.txt" why="all of it">\n${tenLines}</file>`);
   });
 
   test("an unparsable range and one starting past the last line are listed to read first as written; a missing path is marked", () => {
@@ -582,22 +582,22 @@ describe("curated file lists (261007)", () => {
       { path: "pixel.png", why: "an image" },
       { path: "c2.txt", why: "small" },
     ]), [
-      "## Required re-reads (inlined)\n### `c2.txt` - small\n```\ncc\n```",
+      "## Required re-reads (inlined)\n<file path=\"c2.txt\" why=\"small\">\ncc\n</file>",
       "## Required re-reads (to read first)\n- `nul.bin` - has a NUL\n- `latin1.txt` lines 1-1 - invalid UTF-8\n- `pixel.png` - an image",
     ]);
   });
 
   test("a whole file over the budget is listed to read first while a lines range of it still inlines", () => {
     assert.deepEqual(sections([{ path: "ten.txt", why: "all of it" }, { path: "ten.txt", lines: "1-1", why: "first line" }], [], 10), [
-      "## Required re-reads (inlined)\n### `ten.txt` lines 1-1 - first line\n```\nline 1\n```",
+      "## Required re-reads (inlined)\n<file path=\"ten.txt\" lines=\"1-1\" why=\"first line\">\nline 1\n</file>",
       "## Required re-reads (to read first)\n- `ten.txt` - all of it",
     ]);
   });
 
-  test("an inlined file sits in a fence longer than any backtick run in it", () => {
-    write("fenced.md", "before\n````ts\ncode\n````\nafter");
-    const [inlined] = sections([{ path: "fenced.md", why: "has fences" }]);
-    assert.equal(inlined, "## Required re-reads (inlined)\n### `fenced.md` - has fences\n`````\nbefore\n````ts\ncode\n````\nafter\n`````");
+  test("an inlined file sits in a file tag with escaped attributes and a verbatim body", () => {
+    write("fenced.md", "before\n```ts\ncode & <b>\n```\nafter");
+    const [inlined] = sections([{ path: "fenced.md", why: "has \"fences\" & <tags>" }]);
+    assert.equal(inlined, '## Required re-reads (inlined)\n<file path="fenced.md" why="has &quot;fences&quot; &amp; &lt;tags&gt;">\nbefore\n```ts\ncode & <b>\n```\nafter\n</file>');
   });
 
   test("references are listed in order and never read; each section is omitted when empty", () => {
@@ -629,7 +629,7 @@ describe("curated file lists (261007)", () => {
       cwd: dir,
       rereadBudgetBytes: 40960,
     });
-    assert.ok(summary.includes("</dialog>\n\n## Required re-reads (inlined)\n### `c2.txt` - small\n```\ncc\n```\n\n## On-demand references\n- `ten.txt` - later\n\n## Carried forward by the lead\n"));
+    assert.ok(summary.includes("</dialog>\n\n## Required re-reads (inlined)\n<file path=\"c2.txt\" why=\"small\">\ncc\n</file>\n\n## On-demand references\n- `ten.txt` - later\n\n## Carried forward by the lead\n"));
     assert.equal(extractLeadProse(summary), prose);
   });
 });

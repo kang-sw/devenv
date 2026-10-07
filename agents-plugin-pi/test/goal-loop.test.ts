@@ -2047,7 +2047,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       }, undefined, undefined, ctx);
       const result = pi.handlers.get("session_before_compact")!(compactionEvent("manual", branch), ctx) as unknown as { compaction: { summary: string } };
       const summary = result.compaction.summary;
-      assert.ok(summary.includes("## Required re-reads (inlined)\n### `next.ts` - the step edits it\n```\nexport const next = 1;\n```\n\n## Required re-reads (to read first)\n- `gone.ts` lines 1-2 - was here (not found)\n\n## On-demand references\n- `later.md` - maybe later\n\n## Carried forward by the lead\n"));
+      assert.ok(summary.includes("## Required re-reads (inlined)\n<file path=\"next.ts\" why=\"the step edits it\">\nexport const next = 1;\n</file>\n\n## Required re-reads (to read first)\n- `gone.ts` lines 1-2 - was here (not found)\n\n## On-demand references\n- `later.md` - maybe later\n\n## Carried forward by the lead\n"));
       assert.equal(extractLeadProse(summary), renderLeadProse({ current_work: "PROSE" }));
     });
 

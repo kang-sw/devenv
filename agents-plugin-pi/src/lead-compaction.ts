@@ -586,13 +586,6 @@ function splitLines(text: string): string[] {
   return lines;
 }
 
-/** A backtick fence longer than any backtick run in `content` (at least three). */
-function fenceFor(content: string): string {
-  let longest = 0;
-  for (const run of content.match(/`+/g) ?? []) longest = Math.max(longest, run.length);
-  return "`".repeat(Math.max(3, longest + 1));
-}
-
 type RereadResolution =
   | { kind: "content"; content: string; bytes: number; range?: { start: number; end: number } }
   | { kind: "not-found" }
@@ -648,7 +641,9 @@ export const REFERENCES_HEADING = "## On-demand references";
  * inlined whole, and one that does not fit is never cut but listed to read
  * first, as are a missing path, a file that is not strict UTF-8 text, and a
  * `lines` value that does not parse or starts past the file's end. Each
- * section renders in the lead's order.
+ * section renders in the lead's order; an inlined file sits in a `<file>`
+ * tag whose attributes are escaped and whose body stays verbatim, like the
+ * dialog's tags.
  */
 export function buildFileListSections(lists: LeadFileLists | undefined, cwd: string, budgetBytes: number): string[] {
   const rereads = lists?.requiredRereads ?? [];
@@ -671,10 +666,9 @@ export function buildFileListSections(lists: LeadFileLists | undefined, cwd: str
   rereads.forEach((entry, index) => {
     const resolution = resolved[index]!;
     if (resolution.kind === "content" && taken.has(index)) {
-      const range = resolution.range ? ` lines ${resolution.range.start}-${resolution.range.end}` : "";
-      const fence = fenceFor(resolution.content);
+      const range = resolution.range ? ` lines="${resolution.range.start}-${resolution.range.end}"` : "";
       const body = resolution.content.endsWith("\n") ? resolution.content : `${resolution.content}\n`;
-      inlined.push(`### \`${entry.path}\`${range} - ${entry.why}\n${fence}\n${body}${fence}`);
+      inlined.push(`<file path="${escapeDialogAttribute(entry.path)}"${range} why="${escapeDialogAttribute(entry.why)}">\n${body}</file>`);
     } else {
       toReadFirst.push(fileListLine(entry, resolution.kind === "not-found" ? " (not found)" : ""));
     }
