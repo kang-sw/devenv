@@ -1345,8 +1345,15 @@ func TestMailboxReloginRebindsOwnerToExistingKey(t *testing.T) {
 	}
 
 	delegateKey, _ := parseLoginResponse(t, callLogin(t, s, 4, root, map[string]any{"capability": "delegate"}))
-	for i, foreign := range []string{"never-minted-key", delegateKey, fresh + "-not-a-key"} {
-		if resp := callLogin(t, s, 5+i, root, map[string]any{"relogin_session_key": foreign}); !toolIsError(t, resp) {
+	childKey, _ := parseLoginResponse(t, callLogin(t, s, 5, root, map[string]any{"parent_session_key": original}))
+	otherRoot := t.TempDir()
+	initGit(t, otherRoot)
+	otherRootKey, _ := parseLoginResponse(t, callLogin(t, s, 6, otherRoot, nil))
+	if got := owner(); got != original {
+		t.Fatalf("minting the refusal fixtures moved the owner pointer: owner = %q, want %q", got, original)
+	}
+	for i, foreign := range []string{"never-minted-key", delegateKey, childKey, otherRootKey, fresh + "-not-a-key"} {
+		if resp := callLogin(t, s, 10+i, root, map[string]any{"relogin_session_key": foreign}); !toolIsError(t, resp) {
 			t.Fatalf("re-login with %q should be refused: %s", foreign, resp)
 		}
 		if got := owner(); got != original {

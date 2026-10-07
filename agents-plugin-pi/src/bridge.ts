@@ -716,16 +716,6 @@ export function normalizeSessionKey(
 }
 
 /**
- * session_key fill-or-forward: if the caller omitted session_key (undefined,
- * null, or empty string), splice in the bridge's default-filled key; an
- * explicit session_key passes through completely unchanged. This is what
- * keeps subagent lineage / lead multi-track orchestration viable later even
- * though building that machinery is out of scope for this phase.
- *
- * Never mutates the tool's registered `parameters` schema — only the
- * per-call arguments object.
- */
-/**
  * Custom session entry recording the lead's ws session key together with the
  * Pi session id it was settled in (named after the fork path's
  * `ws-pi-fork-keys`). The session file is the resume unit: `pi -c`, `pi -r`,
@@ -796,6 +786,16 @@ export async function reloginLeadKey(
   return { ok: true, result };
 }
 
+/**
+ * session_key fill-or-forward: if the caller omitted session_key (undefined,
+ * null, or empty string), splice in the bridge's default-filled key; an
+ * explicit session_key passes through completely unchanged. This is what
+ * keeps subagent lineage / lead multi-track orchestration viable later even
+ * though building that machinery is out of scope for this phase.
+ *
+ * Never mutates the tool's registered `parameters` schema — only the
+ * per-call arguments object.
+ */
 export function resolveSessionKey(
   params: Record<string, unknown> | undefined,
   defaultKeyRef: { current: string | undefined },
