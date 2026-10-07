@@ -29,7 +29,7 @@
       "minimum": 1,
       "maximum": 100,
       "default": 50,
-      "description": "Context-usage percent at which the lead is advised to compact at its next safe boundary, and the reference shown in goal reminders. Interim context readings are steered one and two thirds of the way from here to compaction_hard_percent; at or above compaction_hard_percent, neither the advisory nor the readings fire."
+      "description": "Context-usage percent at which the lead is advised to compact at its next safe boundary, and the reference shown in goal reminders. Interim context reminders are sent at a run boundary one and two thirds of the way from here to compaction_hard_percent; at or above compaction_hard_percent, neither the advisory nor the reminders fire."
     },
     {
       "key": "pi.compaction_hard_percent",
@@ -52,6 +52,13 @@
       "minimum": 1,
       "default": 40960,
       "description": "UTF-8 byte budget for the dialog section of the lead compaction summary: user messages, the lead's replies, and one line per tool call, newest first."
+    },
+    {
+      "key": "pi.compaction_reread_budget_bytes",
+      "type": "integer",
+      "minimum": 1,
+      "default": 40960,
+      "description": "UTF-8 byte budget for the required re-reads the lead compaction summary inlines, taken smallest first; entries that do not fit are listed for the revived lead to read first."
     },
     {
       "key": "pi.child_retention_ttl_days",

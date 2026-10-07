@@ -7,8 +7,11 @@
  * fixed headings. Every deterministic section is recomputed from the full
  * session history (`branchEntries`) and the live child registry on every
  * compaction — never parsed back out of the previous summary — so the sections
- * neither compound nor drift. The summary carries no file lists; the stored
- * entry is `fromHook`, which also ends Pi's file-list inheritance chain.
+ * neither compound nor drift. The summary carries no lists of files that
+ * were read or modified; the stored entry is `fromHook`, which also ends Pi's
+ * file-list inheritance chain. The only files it names are the lead's curated
+ * `ws-compact` lists (261007): must-reads inlined within a byte budget, the
+ * overflow to read first, and on-demand references.
  *
  * The `## Dialog` section (261003) carries the user/lead discussion near-raw:
  * human-typed user text, the lead's assistant text, and one line per tool
@@ -26,6 +29,7 @@
  */
 
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { isPushWakeLine, type RpcAgentRecord, type RpcAgentRegistry } from "./spawner.ts";
 
@@ -58,6 +62,8 @@ export function isLeadCompactionDetails(details: unknown): details is LeadCompac
  * Korean character, so one byte budget lands near 10k tokens either way.
  */
 export const DEFAULT_DIALOG_BUDGET_BYTES = 40960;
+/** Default UTF-8 byte budget for the inlined required re-reads (261007), the same as the dialog budget. */
+export const DEFAULT_REREAD_BUDGET_BYTES = 40960;
 /** A user or assistant message over this many bytes keeps only its head and tail. Fixed, not a setting. */
 export const LONG_MESSAGE_THRESHOLD_BYTES = 2560;
 /** Bytes kept at each end of an elided message. */
@@ -531,6 +537,138 @@ export function findActivePlaybook(entries: readonly SessionEntry[]): ActivePlay
 // Summary assembly.
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// The lead's curated file lists (261007).
+// ---------------------------------------------------------------------------
+
+/** One `ws-compact` file-list entry: `lines` is `"start-end"`, 1-based and inclusive; omitted means the whole file. */
+export interface FileListEntry {
+  path: string;
+  lines?: string;
+  why: string;
+}
+
+export interface LeadFileLists {
+  /** Must-reads: inlined within the budget, smallest first; the rest go to the to-read-first list. */
+  requiredRereads: FileListEntry[];
+  /** Opened on demand; never inlined. */
+  references: FileListEntry[];
+}
+
+/** The lever's file-list argument as entries; anything without a string `path` is dropped, a missing `why` is empty. */
+export function normalizeFileList(value: unknown): FileListEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item): FileListEntry[] => {
+    if (typeof item !== "object" || item === null) return [];
+    const { path, lines, why } = item as { path?: unknown; lines?: unknown; why?: unknown };
+    if (typeof path !== "string" || path.trim() === "") return [];
+    // A blank `lines` is treated as omitted (the whole file).
+    const range = typeof lines === "string" && lines.trim() !== "" ? lines : undefined;
+    return [{ path, ...(range === undefined ? {} : { lines: range }), why: typeof why === "string" ? why : "" }];
+  });
+}
+
+const LINE_RANGE_RE = /^\s*(\d+)\s*-\s*(\d+)\s*$/;
+
+/** `"start-end"` as numbers, or `undefined` when it does not parse or is not 1-based and ascending. */
+function parseLineRange(lines: string): { start: number; end: number } | undefined {
+  const match = LINE_RANGE_RE.exec(lines);
+  if (!match) return undefined;
+  const start = Number(match[1]);
+  const end = Number(match[2]);
+  return start >= 1 && end >= start ? { start, end } : undefined;
+}
+
+/** The file's lines; a trailing newline does not start an extra line. */
+function splitLines(text: string): string[] {
+  const lines = text.split("\n");
+  if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
+  return lines;
+}
+
+/** A backtick fence longer than any backtick run in `content` (at least three). */
+function fenceFor(content: string): string {
+  let longest = 0;
+  for (const run of content.match(/`+/g) ?? []) longest = Math.max(longest, run.length);
+  return "`".repeat(Math.max(3, longest + 1));
+}
+
+type RereadResolution =
+  | { kind: "content"; content: string; bytes: number; range?: { start: number; end: number } }
+  | { kind: "not-found" }
+  /** `lines` does not parse, or starts past the file's last line: listed to read first, as written. */
+  | { kind: "unreadable-range" };
+
+function resolveReread(entry: FileListEntry, cwd: string): RereadResolution {
+  let text: string;
+  try {
+    text = readFileSync(resolve(cwd, entry.path), "utf8");
+  } catch {
+    return { kind: "not-found" };
+  }
+  if (entry.lines === undefined) return { kind: "content", content: text, bytes: Buffer.byteLength(text, "utf8") };
+  const range = parseLineRange(entry.lines);
+  if (!range) return { kind: "unreadable-range" };
+  const lines = splitLines(text);
+  if (range.start > lines.length) return { kind: "unreadable-range" };
+  const end = Math.min(range.end, lines.length);
+  const content = lines.slice(range.start - 1, end).join("\n");
+  return { kind: "content", content, bytes: Buffer.byteLength(content, "utf8"), range: { start: range.start, end } };
+}
+
+function fileListLine(entry: FileListEntry, suffix = ""): string {
+  return `- \`${entry.path}\`${entry.lines === undefined ? "" : ` lines ${entry.lines}`} - ${entry.why}${suffix}`;
+}
+
+export const REREADS_INLINED_HEADING = "## Required re-reads (inlined)";
+export const REREADS_TO_READ_FIRST_HEADING = "## Required re-reads (to read first)";
+export const REFERENCES_HEADING = "## On-demand references";
+
+/**
+ * The file-list sections (261007), each omitted when empty. Required re-reads
+ * are read relative to `cwd` and taken smallest first (ties in the lead's
+ * order) while their UTF-8 total stays within `budgetBytes`; a taken entry is
+ * inlined whole, and one that does not fit is never cut but listed to read
+ * first, as are a missing path and a `lines` value that does not parse or
+ * starts past the file's end. Each section renders in the lead's order.
+ */
+export function buildFileListSections(lists: LeadFileLists | undefined, cwd: string, budgetBytes: number): string[] {
+  const rereads = lists?.requiredRereads ?? [];
+  const references = lists?.references ?? [];
+  const resolved = rereads.map((entry) => resolveReread(entry, cwd));
+  const candidates = resolved
+    .map((resolution, index) => ({ resolution, index }))
+    .filter((c): c is { resolution: Extract<RereadResolution, { kind: "content" }>; index: number } => c.resolution.kind === "content")
+    .sort((a, b) => a.resolution.bytes - b.resolution.bytes || a.index - b.index);
+  const taken = new Set<number>();
+  let used = 0;
+  for (const candidate of candidates) {
+    if (used + candidate.resolution.bytes > budgetBytes) break;
+    used += candidate.resolution.bytes;
+    taken.add(candidate.index);
+  }
+
+  const inlined: string[] = [];
+  const toReadFirst: string[] = [];
+  rereads.forEach((entry, index) => {
+    const resolution = resolved[index]!;
+    if (resolution.kind === "content" && taken.has(index)) {
+      const range = resolution.range ? ` lines ${resolution.range.start}-${resolution.range.end}` : "";
+      const fence = fenceFor(resolution.content);
+      const body = resolution.content.endsWith("\n") ? resolution.content : `${resolution.content}\n`;
+      inlined.push(`### \`${entry.path}\`${range} - ${entry.why}\n${fence}\n${body}${fence}`);
+    } else {
+      toReadFirst.push(fileListLine(entry, resolution.kind === "not-found" ? " (not found)" : ""));
+    }
+  });
+
+  const sections: string[] = [];
+  if (inlined.length) sections.push([REREADS_INLINED_HEADING, ...inlined].join("\n"));
+  if (toReadFirst.length) sections.push([REREADS_TO_READ_FIRST_HEADING, ...toReadFirst].join("\n"));
+  if (references.length) sections.push([REFERENCES_HEADING, ...references.map((entry) => fileListLine(entry))].join("\n"));
+  return sections;
+}
+
 export const LEAD_PROSE_SECTION_HEADING = "## Carried forward by the lead";
 const RESUME_SECTION_HEADING = "## Resume";
 
@@ -544,6 +682,12 @@ export interface LeadCompactionSummaryInput {
   dialogBudgetBytes: number;
   /** The session JSONL path (`sessionManager.getSessionFile()`), `undefined` for an unpersisted session. */
   sessionFile: string | undefined;
+  /** The lead's `ws-compact` file lists (261007); absent for the fallback summary. */
+  fileLists?: LeadFileLists;
+  /** Directory the file-list paths resolve against (the session's working directory). */
+  cwd?: string;
+  /** UTF-8 byte budget of the inlined required re-reads. */
+  rereadBudgetBytes?: number;
 }
 
 function rereadInstruction(playbook: ActivePlaybook): string {
@@ -552,7 +696,11 @@ function rereadInstruction(playbook: ActivePlaybook): string {
     : `re-read it with \`ws-skill ${playbook.name}\``;
 }
 
-/** Builds the whole summary text: deterministic sections, the lead's prose, and the closing `lead-revive` instruction. No file lists. */
+/**
+ * Builds the whole summary text: deterministic sections, the lead's curated
+ * file lists, the lead's prose, and the closing `lead-revive` instruction. No
+ * list of files read or modified.
+ */
 export function buildLeadCompactionSummary(input: LeadCompactionSummaryInput): string {
   const { sessionKey, branchEntries, registry, prose, dialogBudgetBytes, sessionFile } = input;
   const keyText = sessionKey?.trim() ? `\`${sessionKey}\` (preserve verbatim)` : "unknown (recover it with `ws__workflow_manual`)";
@@ -575,8 +723,10 @@ export function buildLeadCompactionSummary(input: LeadCompactionSummaryInput): s
     ["## Child agents in flight", ...(inFlight.length ? inFlight : ["(none)"])].join("\n"),
     ["## Child agents finished since the previous compaction", ...(finished.length ? finished : ["(none)"])].join("\n"),
     buildDialogSection(branchEntries, dialogBudgetBytes, sessionFile),
+    // Before the prose heading, so `extractLeadProse` never carries them.
+    ...buildFileListSections(input.fileLists, input.cwd ?? process.cwd(), input.rereadBudgetBytes ?? DEFAULT_REREAD_BUDGET_BYTES),
     `${LEAD_PROSE_SECTION_HEADING}\n${prose}`,
-    `${RESUME_SECTION_HEADING}\nBefore any other workflow action, invoke \`lead-revive\` (\`ws-skill lead-revive\`) with session key ${sessionKey?.trim() ? `\`${sessionKey}\`` : "(recover it first)"}; it restores agenda, todos, and notes through \`workflow_manual\`. After \`lead-revive\`, resume from this summary and the immediate next step; re-read a file only when that step needs it, not to rebuild the earlier context.`,
+    `${RESUME_SECTION_HEADING}\nBefore any other workflow action, invoke \`lead-revive\` (\`ws-skill lead-revive\`) with session key ${sessionKey?.trim() ? `\`${sessionKey}\`` : "(recover it first)"}; it restores agenda, todos, and notes through \`workflow_manual\`. After \`lead-revive\`, read the files under Required re-reads (to read first), then resume from this summary, the inlined files, and the immediate next step; open a reference or any other file only when a step needs it, not to rebuild the earlier context.`,
   ];
   return sections.join("\n\n");
 }
@@ -614,20 +764,25 @@ export function readLeadCompactGuide(path: string | undefined): string {
 }
 
 export type PreparationTrigger =
-  | { kind: "advisory"; percent: number; threshold: number; hardPercent: number }
+  /** `milestonePercents`: the two interim milestone thresholds, exact; the closing sentence rounds them. */
+  | { kind: "advisory"; percent: number; threshold: number; hardPercent: number; milestonePercents: readonly [number, number] }
   | { kind: "hard"; percent: number; threshold: number }
   | { kind: "reroute"; focus?: string };
 
 /**
  * `customType` of the interim context milestones between the advisory and the
- * hard point (261006). Not a preparation message: it carries no guide and
- * never opens a preparation turn.
+ * hard point (261006). It carries no guide; since 261007 it is a wake turn at
+ * `agent_end` that opens a preparation boundary, pointing at the advisory for
+ * the preparation itself.
  */
 export const LEAD_CONTEXT_MILESTONE_CUSTOM_TYPE = "ws-lead-context-milestone";
 
-/** The interim milestone line (261006): current usage against the forced point, no guide body. */
-export function buildContextMilestoneMessage(percent: number, hardPercent: number): string {
-  return `Current context window: ${Math.round(percent)}% / ${hardPercent}% (forced compaction point). Keep watching for a safe boundary to compact, as the advisory said; do not stop the current task for it.`;
+/** The milestone wake text (261007): `milestone` 1 or 2, current usage against the forced point, no guide body. */
+export function buildContextMilestoneMessage(milestone: 1 | 2, percent: number, hardPercent: number): string {
+  const head = `Context window: ${Math.round(percent)}% / ${hardPercent}% (forced compaction point).`;
+  return milestone === 1
+    ? `${head} Past ${hardPercent}%, compaction is forced, mid-work if need be. From here on, a good boundary is worth taking; if this is one, run the preparation from the advisory. Otherwise end this turn without replying.`
+    : `${head} This is the last reading before compaction is forced. Compacting at a boundary you choose keeps the summary in your hands; take this one if it fits, and run the preparation from the advisory. Otherwise end this turn without replying, and take the next good boundary.`;
 }
 
 /** The preparation message body: one trigger line, then the guide verbatim. */
@@ -639,7 +794,7 @@ export function buildPreparationMessage(trigger: PreparationTrigger, guide: stri
       "",
       "This is not an instruction to compact right now. If you are in active discussion with the human, awaiting their answer or clarification, or holding working context that would be costly to rebuild (a half-applied change or a diagnosis in progress), carry on for now. A pause after asking the human a question is not a boundary.",
       "",
-      `From here on, look for a good moment to compact before ${trigger.hardPercent}%. A good moment is a natural boundary where most of what this context holds is no longer needed for the work ahead, and what is still needed can be restored cheaply after compaction from durable records (tickets, commits, notes, agenda) and the summary. Typical cases: work just landed, you are waiting only on background agents, or the next work is weakly related to the current context. When such a moment comes, run the preparation below. Compacting on your own terms keeps the summary in your hands; at ${trigger.hardPercent}% it is forced, mid-work if need be. Brief context readings will follow on the way there.`,
+      `From here on, look for a good moment to compact before ${trigger.hardPercent}%. A good moment is a natural boundary where most of what this context holds is no longer needed for the work ahead, and what is still needed can be restored cheaply after compaction from durable records (tickets, commits, notes, agenda) and the summary. Typical cases: work just landed, you are waiting only on background agents, or the next work is weakly related to the current context. When such a moment comes, run the preparation below. Compacting on your own terms keeps the summary in your hands; at ${trigger.hardPercent}% it is forced, mid-work if need be. Reminders follow at ${Math.round(trigger.milestonePercents[0])}% and ${Math.round(trigger.milestonePercents[1])}%.`,
       "",
       "If now is not such a moment, end this turn without replying and keep looking for one as you work.",
     ].join("\n");

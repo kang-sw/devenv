@@ -7,8 +7,12 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   buildDialogSection,
+  buildFileListSections,
   buildContextMilestoneMessage,
   buildFallbackSummaryPrompt,
   buildLeadCompactionSummary,
@@ -25,6 +29,7 @@ import {
   LEAD_CONTEXT_MILESTONE_CUSTOM_TYPE,
   LEAD_PROSE_SECTIONS,
   leadProseParameterSchema,
+  normalizeFileList,
   readLeadCompactGuide,
   renderDialogItem,
   renderLeadProse,
@@ -405,7 +410,8 @@ describe("buildLeadCompactionSummary", () => {
     assert.match(summary, /LEAD PROSE MARKER/);
     assert.doesNotMatch(summary, /WORKER REPORT BODY/);
     assert.doesNotMatch(summary, /read-files|modified-files/);
-    assert.ok(summary.trimEnd().endsWith("it restores agenda, todos, and notes through `workflow_manual`. After `lead-revive`, resume from this summary and the immediate next step; re-read a file only when that step needs it, not to rebuild the earlier context."));
+    assert.ok(summary.trimEnd().endsWith("it restores agenda, todos, and notes through `workflow_manual`. After `lead-revive`, read the files under Required re-reads (to read first), then resume from this summary, the inlined files, and the immediate next step; open a reference or any other file only when a step needs it, not to rebuild the earlier context."));
+    assert.doesNotMatch(summary, /## Required re-reads|## On-demand references/, "each file-list section is omitted when empty");
     assert.match(summary, /invoke `lead-revive` \(`ws-skill lead-revive`\) with session key `engaged-key`/);
     assert.equal(extractLeadProse(summary), prose);
   });
@@ -440,27 +446,31 @@ describe("preparation and fallback text", () => {
   // 261006: the advisory head, the guide's opening paragraph, and the
   // milestone line are pinned verbatim from the ticket's agreed prose.
   test("the advisory head is the pinned standing-intent text, then the guide", () => {
-    const message = buildPreparationMessage({ kind: "advisory", percent: 51.4, threshold: 50, hardPercent: 80 }, "GUIDE BODY");
+    const message = buildPreparationMessage({ kind: "advisory", percent: 51.4, threshold: 50, hardPercent: 80, milestonePercents: [60, 70] }, "GUIDE BODY");
     assert.equal(
       message,
-      "Context usage is 51% of the window (advisory point: 50%). Compaction becomes forced at 80%.\n\nThis is not an instruction to compact right now. If you are in active discussion with the human, awaiting their answer or clarification, or holding working context that would be costly to rebuild (a half-applied change or a diagnosis in progress), carry on for now. A pause after asking the human a question is not a boundary.\n\nFrom here on, look for a good moment to compact before 80%. A good moment is a natural boundary where most of what this context holds is no longer needed for the work ahead, and what is still needed can be restored cheaply after compaction from durable records (tickets, commits, notes, agenda) and the summary. Typical cases: work just landed, you are waiting only on background agents, or the next work is weakly related to the current context. When such a moment comes, run the preparation below. Compacting on your own terms keeps the summary in your hands; at 80% it is forced, mid-work if need be. Brief context readings will follow on the way there.\n\nIf now is not such a moment, end this turn without replying and keep looking for one as you work.\n\nGUIDE BODY",
+      "Context usage is 51% of the window (advisory point: 50%). Compaction becomes forced at 80%.\n\nThis is not an instruction to compact right now. If you are in active discussion with the human, awaiting their answer or clarification, or holding working context that would be costly to rebuild (a half-applied change or a diagnosis in progress), carry on for now. A pause after asking the human a question is not a boundary.\n\nFrom here on, look for a good moment to compact before 80%. A good moment is a natural boundary where most of what this context holds is no longer needed for the work ahead, and what is still needed can be restored cheaply after compaction from durable records (tickets, commits, notes, agenda) and the summary. Typical cases: work just landed, you are waiting only on background agents, or the next work is weakly related to the current context. When such a moment comes, run the preparation below. Compacting on your own terms keeps the summary in your hands; at 80% it is forced, mid-work if need be. Reminders follow at 60% and 70%.\n\nIf now is not such a moment, end this turn without replying and keep looking for one as you work.\n\nGUIDE BODY",
     );
   });
 
   test("the advisory head interpolates non-default thresholds", () => {
-    const message = buildPreparationMessage({ kind: "advisory", percent: 41.6, threshold: 40, hardPercent: 70 }, "GUIDE BODY");
-    assert.match(message, /^Context usage is 42% of the window \(advisory point: 40%\)\. Compaction becomes forced at 70%\.\n/);
-    assert.match(message, /look for a good moment to compact before 70%\./);
-    assert.match(message, /at 70% it is forced, mid-work if need be\./);
+    const message = buildPreparationMessage({ kind: "advisory", percent: 41.6, threshold: 40, hardPercent: 75, milestonePercents: [40 + 35 / 3, 40 + 70 / 3] }, "GUIDE BODY");
+    assert.match(message, /^Context usage is 42% of the window \(advisory point: 40%\)\. Compaction becomes forced at 75%\.\n/);
+    assert.match(message, /look for a good moment to compact before 75%\./);
+    assert.match(message, /at 75% it is forced, mid-work if need be\. Reminders follow at 52% and 63%\.\n/);
   });
 
-  test("the milestone line is the pinned text with the rounded usage and the hard point", () => {
+  // 261007: the two milestone texts are pinned verbatim, strengthening per milestone.
+  test("each milestone is its pinned text with the rounded usage and the hard point", () => {
     assert.equal(
-      buildContextMilestoneMessage(62.6, 85),
-      "Current context window: 63% / 85% (forced compaction point). Keep watching for a safe boundary to compact, as the advisory said; do not stop the current task for it.",
+      buildContextMilestoneMessage(1, 62.6, 85),
+      "Context window: 63% / 85% (forced compaction point). Past 85%, compaction is forced, mid-work if need be. From here on, a good boundary is worth taking; if this is one, run the preparation from the advisory. Otherwise end this turn without replying.",
     );
-    assert.equal(LEAD_CONTEXT_MILESTONE_CUSTOM_TYPE.startsWith("ws-"), true);
-    assert.notEqual(LEAD_CONTEXT_MILESTONE_CUSTOM_TYPE, "ws-lead-compact", "milestones are not preparation messages");
+    assert.equal(
+      buildContextMilestoneMessage(2, 70.2, 80),
+      "Context window: 70% / 80% (forced compaction point). This is the last reading before compaction is forced. Compacting at a boundary you choose keeps the summary in your hands; take this one if it fits, and run the preparation from the advisory. Otherwise end this turn without replying, and take the next good boundary.",
+    );
+    assert.equal(LEAD_CONTEXT_MILESTONE_CUSTOM_TYPE, "ws-lead-context-milestone");
   });
 
   test("hard and manual triggers keep their imperative heads and verbatim guide", () => {
@@ -479,6 +489,11 @@ describe("preparation and fallback text", () => {
       "the guide opens with the pinned standing-intent paragraph",
     );
     assert.match(guide, /Do these in order, without starting new work in between:/);
+    assert.ok(guide.includes("adds and what `lead-revive` restores (agenda, todos, notes contents), and\n   keep file names out of the prose; the lever's file lists below are where\n   files go. Aim for"), "step 2 narrows the no-files rule");
+    assert.ok(guide.includes(
+      "   - **File lists.** `required_rereads` holds only the files the immediate\n     next step needs, each with `lines` when only part is needed, and why.\n     Every entry lands in the next context: the adapter inlines as many as\n     fit its budget and lists the rest for the revived lead to read first,\n     so list only what that step needs. Take line numbers from your earlier\n     reads and put the symbol or heading in `why`. `references` holds files\n     a later step may need, opened only then.\n3. **Call `ws-compact`**",
+    ), "the file-list sub-bullet is the last one under step 2");
+    assert.doesNotMatch(guide, /list no files/);
     assert.match(guide, /Call `ws-compact`/);
     assert.match(readLeadCompactGuide("/nonexistent/guide.md"), /ws-compact/);
   });
@@ -491,6 +506,8 @@ describe("preparation and fallback text", () => {
     assert.doesNotMatch(prompt, /HUMAN TEXT/);
     for (const section of LEAD_PROSE_SECTIONS) assert.ok(prompt.includes(`### ${section.heading}`));
     assert.doesNotMatch(buildFallbackSummaryPrompt("x", undefined), /previous-prose/);
+    assert.match(prompt, /Do not list files that were read or modified\.$/);
+    assert.doesNotMatch(prompt, /required_rereads|Required re-reads|On-demand references/, "the fallback summary produces no file lists");
   });
 
   test("prose extraction is not misled by a dialog message quoting a previous summary", () => {
@@ -498,5 +515,99 @@ describe("preparation and fallback text", () => {
     const summary = buildLeadCompactionSummary({ sessionKey: "k", branchEntries: [user(0, quoted)], registry: undefined, prose: renderLeadProse({ residual_details: "REAL PROSE" }), ...dialog });
     assert.match(summary, /QUOTED PROSE/);
     assert.equal(extractLeadProse(summary), renderLeadProse({ residual_details: "REAL PROSE" }));
+  });
+});
+
+describe("curated file lists (261007)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "lead-compaction-rereads-"));
+  const write = (name: string, text: string): string => {
+    writeFileSync(join(dir, name), text);
+    return name;
+  };
+  const tenLines = Array.from({ length: 10 }, (_, i) => `line ${i + 1}`).join("\n") + "\n";
+  write("ten.txt", tenLines);
+  write("a4.txt", "aaaa");
+  write("b4.txt", "bbbb");
+  write("c2.txt", "cc");
+  write("d8.txt", "dddddddd");
+  const sections = (requiredRereads: unknown[], references: unknown[] = [], budget = 40960) =>
+    buildFileListSections({ requiredRereads: normalizeFileList(requiredRereads), references: normalizeFileList(references) }, dir, budget);
+
+  test("required re-reads are taken smallest first within the budget, ties in the lead's order, and render in the lead's order", () => {
+    // Budget 10: c2 (2) + a4 (4) + b4 (4, tie after a4) = 10; d8 does not fit and goes whole to read first.
+    const [inlined, toReadFirst] = sections([
+      { path: "d8.txt", why: "big" },
+      { path: "b4.txt", why: "second tie" },
+      { path: "a4.txt", why: "first tie" },
+      { path: "c2.txt", why: "small" },
+    ], [], 10);
+    assert.equal(inlined, "## Required re-reads (inlined)\n### `b4.txt` - second tie\n```\nbbbb\n```\n### `a4.txt` - first tie\n```\naaaa\n```\n### `c2.txt` - small\n```\ncc\n```");
+    assert.equal(toReadFirst, "## Required re-reads (to read first)\n- `d8.txt` - big");
+
+    const [tieInlined, tieFirst] = sections([{ path: "b4.txt", why: "b" }, { path: "a4.txt", why: "a" }], [], 4);
+    assert.match(tieInlined!, /`b4\.txt`/, "an equal-size tie goes to the lead's earlier entry");
+    assert.equal(tieFirst, "## Required re-reads (to read first)\n- `a4.txt` - a", "the entry that does not fit is listed whole, never cut");
+  });
+
+  test("a lines range is cut 1-based and inclusive, clamped at the file's end, and the heading shows the range taken", () => {
+    const [inlined] = sections([{ path: "ten.txt", lines: "2-3", why: "head" }, { path: "ten.txt", lines: "9-40", why: "tail" }]);
+    assert.equal(inlined, "## Required re-reads (inlined)\n### `ten.txt` lines 2-3 - head\n```\nline 2\nline 3\n```\n### `ten.txt` lines 9-10 - tail\n```\nline 9\nline 10\n```");
+  });
+
+  test("a whole-file entry inlines the file and drops the lines part", () => {
+    const [inlined] = sections([{ path: "ten.txt", why: "all of it" }]);
+    assert.equal(inlined, `## Required re-reads (inlined)\n### \`ten.txt\` - all of it\n\`\`\`\n${tenLines}\`\`\``);
+  });
+
+  test("an unparsable range and one starting past the last line are listed to read first as written; a missing path is marked", () => {
+    const rendered = sections([
+      { path: "ten.txt", lines: "the parser", why: "unparsable" },
+      { path: "ten.txt", lines: "11-12", why: "past the end" },
+      { path: "ten.txt", lines: "0-2", why: "not 1-based" },
+      { path: "missing.ts", why: "gone" },
+      { path: "missing.ts", lines: "1-2", why: "gone too" },
+    ]);
+    assert.deepEqual(rendered, [
+      "## Required re-reads (to read first)\n- `ten.txt` lines the parser - unparsable\n- `ten.txt` lines 11-12 - past the end\n- `ten.txt` lines 0-2 - not 1-based\n- `missing.ts` - gone (not found)\n- `missing.ts` lines 1-2 - gone too (not found)",
+    ], "no inlined section when nothing is inlined");
+  });
+
+  test("an inlined file sits in a fence longer than any backtick run in it", () => {
+    write("fenced.md", "before\n````ts\ncode\n````\nafter");
+    const [inlined] = sections([{ path: "fenced.md", why: "has fences" }]);
+    assert.equal(inlined, "## Required re-reads (inlined)\n### `fenced.md` - has fences\n`````\nbefore\n````ts\ncode\n````\nafter\n`````");
+  });
+
+  test("references are listed in order and never read; each section is omitted when empty", () => {
+    assert.deepEqual(sections([], [{ path: "missing.ts", lines: "3-4", why: "later" }, { path: "ten.txt", why: "maybe" }]), [
+      "## On-demand references\n- `missing.ts` lines 3-4 - later\n- `ten.txt` - maybe",
+    ]);
+    assert.deepEqual(sections([], []), []);
+    assert.deepEqual(buildFileListSections(undefined, dir, 40960), []);
+  });
+
+  test("lever entries without a string path are dropped; a blank lines value means the whole file", () => {
+    assert.deepEqual(normalizeFileList([{ path: "a", why: "w" }, { why: "no path" }, "x", null, { path: "b", lines: " ", why: "blank" }, { path: "c", lines: "1-2" }]), [
+      { path: "a", why: "w" },
+      { path: "b", why: "blank" },
+      { path: "c", lines: "1-2", why: "" },
+    ]);
+    assert.deepEqual(normalizeFileList(undefined), []);
+  });
+
+  test("the summary places the sections right before the lead's prose, which extraction keeps clean", () => {
+    const prose = renderLeadProse({ current_work: "PROSE" });
+    const summary = buildLeadCompactionSummary({
+      sessionKey: "k",
+      branchEntries: [],
+      registry: undefined,
+      prose,
+      ...dialog,
+      fileLists: { requiredRereads: [{ path: "c2.txt", why: "small" }], references: [{ path: "ten.txt", why: "later" }] },
+      cwd: dir,
+      rereadBudgetBytes: 40960,
+    });
+    assert.ok(summary.includes("</dialog>\n\n## Required re-reads (inlined)\n### `c2.txt` - small\n```\ncc\n```\n\n## On-demand references\n- `ten.txt` - later\n\n## Carried forward by the lead\n"));
+    assert.equal(extractLeadProse(summary), prose);
   });
 });

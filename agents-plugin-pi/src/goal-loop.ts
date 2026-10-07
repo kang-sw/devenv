@@ -77,7 +77,8 @@
  * worker/explore/fork sessions keep Pi's native compaction. The lead is led
  * to the lever by a preparation message carrying `lead-compact-guide.md`: an
  * advisory nudge at `agent_end`, a hard-cut steer at `turn_end`, or a user
- * `/compact`, which is cancelled and rerouted. A threshold or overflow
+ * `/compact`, which is cancelled and rerouted; two guide-less milestone wake
+ * turns at `agent_end` (261007) sit between the advisory and the hard cut. A threshold or overflow
  * compaction that arrives without lever prose gets an in-hook fallback
  * summary from the session model. The reinject
  * reminder still surfaces `ctx.getContextUsage().percent` against the
@@ -94,6 +95,7 @@ import {
   buildContextMilestoneMessage,
   buildPreparationMessage,
   DEFAULT_DIALOG_BUDGET_BYTES,
+  DEFAULT_REREAD_BUDGET_BYTES,
   extractLeadProse,
   FALLBACK_SYSTEM_PROMPT,
   GOAL_REMINDER_MARKER_PREFIX,
@@ -104,9 +106,11 @@ import {
   LEAD_CONTEXT_MILESTONE_CUSTOM_TYPE,
   leadProseParameterSchema,
   NO_KEPT_ENTRY_ID,
+  normalizeFileList,
   readLeadCompactGuide,
   renderLeadProse,
   type LeadCompactionDetails,
+  type LeadFileLists,
   type LeadProse,
   type PreparationTrigger,
 } from "./lead-compaction.ts";
@@ -143,6 +147,8 @@ export interface GoalLoopConfig {
   child_retention_ttl_days?: number;
   /** UTF-8 byte budget for the lead compaction summary's `## Dialog` section (261003). */
   compaction_dialog_budget_bytes?: number;
+  /** UTF-8 byte budget for the lead compaction summary's inlined required re-reads (261007). */
+  compaction_reread_budget_bytes?: number;
 }
 
 /** Literal `false` opts out of animation. Malformed, missing, and every other value retain the enabled default. */
@@ -264,6 +270,11 @@ export function resolveDialogBudgetBytes(config: GoalLoopConfig | undefined): nu
   return positiveOr(config?.compaction_dialog_budget_bytes, DEFAULT_DIALOG_BUDGET_BYTES);
 }
 
+/** Resolves the inlined required re-reads' byte budget for the lead compaction summary; a malformed value falls back to the default. */
+export function resolveRereadBudgetBytes(config: GoalLoopConfig | undefined): number {
+  return positiveOr(config?.compaction_reread_budget_bytes, DEFAULT_REREAD_BUDGET_BYTES);
+}
+
 /** Resolves the child retention policy: `0` disables age pruning (`false`); anything but a positive finite number keeps the default. */
 export function resolveChildRetentionTtlDays(config: GoalLoopConfig | undefined): number | false {
   const value = config?.child_retention_ttl_days;
@@ -278,7 +289,7 @@ export const SETTLE_CONFIG_KEYS: readonly GoalLoopConfigKey[] = ["settle_delay_m
 export const COMPACTION_TRIGGER_CONFIG_KEYS: readonly GoalLoopConfigKey[] = ["compaction_advisory_percent", "compaction_hard_percent", "context_window_override"];
 
 /** Knobs the lead compaction summary reads. */
-export const COMPACTION_BUDGET_CONFIG_KEYS: readonly GoalLoopConfigKey[] = ["compaction_dialog_budget_bytes"];
+export const COMPACTION_BUDGET_CONFIG_KEYS: readonly GoalLoopConfigKey[] = ["compaction_dialog_budget_bytes", "compaction_reread_budget_bytes"];
 
 // ---------------------------------------------------------------------------
 // Pure message builders.
@@ -298,12 +309,30 @@ export function buildCompactionLeverResult(): string {
   return "Compaction requested; the conversation will resume from a summary carrying the session state and your prose under the fixed headings.";
 }
 
+/** One `ws-compact` file-list entry's JSON schema (261007). */
+function fileListSchema(description: string) {
+  return {
+    type: "array",
+    description,
+    items: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Path relative to the working directory, or absolute." },
+        lines: { type: "string", description: "\"start-end\", 1-based and inclusive; omit for the whole file." },
+        why: { type: "string", description: "Why the step needs it; the symbol or heading goes here." },
+      },
+      required: ["path", "why"],
+    },
+  };
+}
+
 /**
  * The `ws-compact` lever's parameter schema (261004): the prose-only
  * `leadProseParameterSchema` plus the optional `continue_after_compact`
- * boolean. Composed here, not in lead-compaction.ts, because
+ * boolean and (261007) the optional `required_rereads` and `references` file
+ * lists. Composed here, not in lead-compaction.ts, because
  * `LEAD_PROSE_SECTIONS` also drives the fallback summary prompt, which must
- * not gain the flag.
+ * not gain them.
  */
 export function leadCompactParameterSchema() {
   const prose = leadProseParameterSchema();
@@ -313,11 +342,26 @@ export function leadCompactParameterSchema() {
       ...prose.properties,
       continue_after_compact: {
         type: "boolean",
-        description: "Set true only when you hold known remaining work that does not await the user: a resume message then follows compaction even after the advisory nudge or a user /compact. Omit or false otherwise, and when the next move needs a user answer.",
+        description: "Set true only when you hold known remaining work that does not await the user: a resume message then follows compaction even after the advisory nudge, a milestone, or a user /compact. Omit or false otherwise, and when the next move needs a user answer.",
       },
+      required_rereads: fileListSchema(
+        "Files the immediate next step needs, each with `lines` (\"start-end\", 1-based) when only part is needed, and why. Every entry lands in the next context: the adapter inlines as many as fit its budget, smallest first, and lists the rest to be read first, so list only what that step needs. Take line numbers from your earlier reads; put the symbol or heading in `why`.",
+      ),
+      references: fileListSchema(
+        "Files the work ahead may need later, opened only when a step calls for them. Same entry shape as required_rereads; never inlined.",
+      ),
     },
   };
 }
+
+/** The lever's file lists out of its arguments (261007). */
+export function leadFileListsFrom(params: unknown): LeadFileLists {
+  const p = (typeof params === "object" && params !== null ? params : {}) as { required_rereads?: unknown; references?: unknown };
+  return { requiredRereads: normalizeFileList(p.required_rereads), references: normalizeFileList(p.references) };
+}
+
+/** What opened the pending preparation boundary: a preparation message's trigger, or a milestone wake turn (261007). */
+type PreparationKind = PreparationTrigger["kind"] | "milestone";
 
 /**
  * One host compaction operation. `route` is set only by the `ws-compact`
@@ -332,7 +376,7 @@ export function leadCompactParameterSchema() {
 type CompactionOperation = {
   id: number;
   generation: number | undefined;
-  route?: PreparationTrigger["kind"] | "autonomous";
+  route?: PreparationKind | "autonomous";
   continueAfterCompact?: boolean;
   resumeOwed?: boolean;
 };
@@ -340,7 +384,8 @@ type CompactionOperation = {
 /**
  * Whether a goal-less lever compaction reached by `route` resumes the lead
  * (261003). Only the routes whose run was mid-work when the abort landed do;
- * after the advisory nudge or a user `/compact` the next move is the user's
+ * after the advisory nudge, a milestone wake turn (261007), or a user
+ * `/compact` the next move is the user's
  * unless the lead set `continue_after_compact` (261004), the other
  * eligibility term, which the release check ORs with this predicate.
  */
@@ -575,6 +620,10 @@ export function buildLeadCompactionResult(
     dialogBudgetBytes: number;
     sessionFile: string | undefined;
     source: LeadCompactionDetails["source"];
+    /** 261007: the lever's file lists; the fallback summary has none. */
+    fileLists?: LeadFileLists;
+    cwd?: string;
+    rereadBudgetBytes?: number;
   },
 ): CompactionResult<LeadCompactionDetails> {
   const summary = buildLeadCompactionSummary({
@@ -584,6 +633,9 @@ export function buildLeadCompactionResult(
     prose: input.prose,
     dialogBudgetBytes: input.dialogBudgetBytes,
     sessionFile: input.sessionFile,
+    fileLists: input.fileLists,
+    cwd: input.cwd,
+    rereadBudgetBytes: input.rereadBudgetBytes,
   });
   return {
     summary,
@@ -758,7 +810,7 @@ export function registerGoalLoop(
    * manual compaction apart from any other manual one. Cleared by that
    * consumption or by the lever's own completion/failure callback.
    */
-  let pendingLever: { prose: string; operationId: number } | undefined;
+  let pendingLever: { prose: string; fileLists: LeadFileLists; operationId: number } | undefined;
 
   /**
    * 261002 Phase 2 trigger state (lead only). `triggerLatch` (261006) is the
@@ -766,7 +818,8 @@ export function registerGoalLoop(
    * none): each threshold fires once per crossing, a compaction resets the
    * latch, and usage observed below it lowers it (see `fireCompactionTriggers`).
    * `preparation` is set
-   * when a preparation message is sent and blocks both triggers until the
+   * when a preparation message or (261007) a milestone wake turn is sent and
+   * blocks every trigger until the
    * next `agent_end`: Pi drains its steer and follow-up queues before that
    * event, so by then the message has either run or been dropped (an abort
    * clears the queues), and a dropped one must not disable the triggers.
@@ -780,7 +833,7 @@ export function registerGoalLoop(
   let latchEpoch = 0;
   let preparation = false;
   /** 261003: the trigger kind of the pending preparation; set and cleared with `preparation`. */
-  let preparationKind: PreparationTrigger["kind"] | undefined;
+  let preparationKind: PreparationKind | undefined;
   let pendingReroute: { focus?: string } | undefined;
   let expectOwnCompaction = false;
   let competingNoticeShown = false;
@@ -1320,9 +1373,10 @@ export function registerGoalLoop(
   // 261002 Phase 2: context-usage triggers (lead only). The hard cut is
   // checked at every turn end and sent as a steer, so it lands at the next
   // tool-call boundary instead of waiting for the run to settle; the
-  // advisory nudge waits for the run to end. 261006: interim milestones
-  // between the two are a guide-less steer at a turn_end that continues the
-  // run. None fires while a preparation turn or a compaction is in progress.
+  // advisory nudge waits for the run to end. 261007: interim milestones
+  // between the two are guide-less wake turns at agent_end, like the
+  // advisory, and open a preparation boundary of their own. None fires while
+  // a preparation turn or a compaction is in progress.
   function sendPreparation(trigger: PreparationTrigger, deliverAs: "steer" | "followUp"): void {
     preparation = true;
     preparationKind = trigger.kind;
@@ -1362,20 +1416,25 @@ export function registerGoalLoop(
       sendPreparation({ kind: "hard", percent, threshold: hard }, boundary === "run" ? "followUp" : "steer");
     } else if (pick.kind === "advisory") {
       if (boundary !== "run") return;
-      sendPreparation({ kind: "advisory", percent, threshold: pick.percent, hardPercent: hard }, "followUp");
+      const [first, second] = thresholds.filter((t) => t.kind === "milestone").map((t) => t.percent);
+      sendPreparation({ kind: "advisory", percent, threshold: pick.percent, hardPercent: hard, milestonePercents: [first!, second!] }, "followUp");
     } else {
-      // Only a turn that continues the run: Pi polls the steer queue after
-      // every turn_end, so a steer at a run's final turn would add a model
-      // turn right after the lead answered the user.
-      if (boundary !== "tool-turn") return;
+      // 261007: a dedicated wake turn at a run boundary, like the advisory; a
+      // steer mid-run was always (rightly) read past. The text is that of the
+      // highest milestone at or below usage, the one delivery latches to.
+      if (boundary !== "run") return;
+      const milestones = thresholds.filter((t) => t.kind === "milestone");
+      const delivered = milestones.filter((t) => t.percent <= percent).length as 1 | 2;
+      preparation = true;
+      preparationKind = "milestone";
       pi.sendMessage(
         {
           customType: LEAD_CONTEXT_MILESTONE_CUSTOM_TYPE,
-          content: buildContextMilestoneMessage(percent, hard),
+          content: buildContextMilestoneMessage(delivered, percent, hard),
           display: true,
-          details: { milestone: pick.percent },
+          details: { milestone: milestones[delivered - 1]!.percent },
         },
-        { deliverAs: "steer" },
+        { deliverAs: "followUp", triggerTurn: true },
       );
     }
     // Delivering covers every skipped lower threshold.
@@ -1482,7 +1541,7 @@ export function registerGoalLoop(
     if (state.active && state.goal) ctx.ui.notify(buildCompactionObservation(state.goal, event.reason), "info");
     if (lever) {
       pendingLever = undefined;
-      return ownCompaction(event, ctx, lever.prose, "lever");
+      return ownCompaction(event, ctx, lever.prose, "lever", lever.fileLists);
     }
     // Threshold or overflow compaction with no lever prose: summarize in-hook.
     // No session model means Pi's own summarizer cannot run either; leave it
@@ -1548,6 +1607,7 @@ export function registerGoalLoop(
     ctx: ExtensionContext,
     prose: string,
     source: LeadCompactionDetails["source"],
+    fileLists?: LeadFileLists,
   ): OwnCompactionResult | Promise<OwnCompactionResult> {
     return thenOrNow(readConfig(COMPACTION_BUDGET_CONFIG_KEYS), (config): OwnCompactionResult => {
       try {
@@ -1558,6 +1618,9 @@ export function registerGoalLoop(
           dialogBudgetBytes: resolveDialogBudgetBytes(config),
           sessionFile: ctx.sessionManager?.getSessionFile?.(),
           source,
+          fileLists,
+          cwd: ctx.cwd,
+          rereadBudgetBytes: resolveRereadBudgetBytes(config),
         });
         expectOwnCompaction = true;
         return { compaction };
@@ -1661,7 +1724,7 @@ export function registerGoalLoop(
     name: LEAD_COMPACT_TOOL_NAME,
     label: LEAD_COMPACT_TOOL_NAME,
     description:
-      "Compact the lead's context now. Fill every heading with your carry-forward prose (empty when there is nothing): for content already persisted (tickets, commits, notes, agenda, todos) give its path or pointer; for content that lives only in the conversation, summarize it as precisely as possible. The adapter adds the session key, active ticket and playbook, child agents, and the recent dialog (user messages, your replies, branch summaries, one line per tool call) itself. After compaction, an active goal keeps running. With no goal, a resume message follows when you called this on your own or after the hard-threshold notice; after the advisory nudge or a user /compact, the next move is the user's unless you set continue_after_compact to true because you hold known remaining work that does not await the user.",
+      "Compact the lead's context now. Fill every heading with your carry-forward prose (empty when there is nothing): for content already persisted (tickets, commits, notes, agenda, todos) give its path or pointer; for content that lives only in the conversation, summarize it as precisely as possible. The adapter adds the session key, active ticket and playbook, child agents, and the recent dialog (user messages, your replies, branch summaries, one line per tool call) itself. After compaction, an active goal keeps running. With no goal, a resume message follows when you called this on your own or after the hard-threshold notice; after the advisory nudge, a milestone, or a user /compact, the next move is the user's unless you set continue_after_compact to true because you hold known remaining work that does not await the user.",
     parameters: leadCompactParameterSchema() as never,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx: ExtensionContext) {
       if (isChildProcess(process.env)) {
@@ -1699,7 +1762,7 @@ export function registerGoalLoop(
         // Cleared again once the stored entry proves the summary carried it.
         state.pendingCarryForward = prose;
       }
-      pendingLever = { prose, operationId: operation.id };
+      pendingLever = { prose, fileLists: leadFileListsFrom(params), operationId: operation.id };
       const clearLever = (): void => {
         if (pendingLever?.operationId === operation.id) pendingLever = undefined;
       };

@@ -31,6 +31,7 @@ import {
   resolveRunawayThreshold,
   resolveSettleDelayMs,
   resolveDialogBudgetBytes,
+  resolveRereadBudgetBytes,
   type GoalLoopConfig,
 } from "../src/goal-loop.ts";
 import { clearWakeStart, leadWakeStartPendingRef, reserveWakeStart } from "../src/spawner.ts";
@@ -47,6 +48,7 @@ const resolvers: Record<GoalLoopConfigKey, (config: GoalLoopConfig | undefined) 
   compaction_hard_percent: resolveCompactionHardPercent,
   context_window_override: resolveContextWindowOverride,
   compaction_dialog_budget_bytes: resolveDialogBudgetBytes,
+  compaction_reread_budget_bytes: resolveRereadBudgetBytes,
   child_retention_ttl_days: resolveChildRetentionTtlDays,
 };
 

@@ -54,6 +54,7 @@ import {
   highestThresholdAtOrBelow,
   NO_TRIGGER_LATCH,
   resolveDialogBudgetBytes,
+  resolveRereadBudgetBytes,
   DEFAULT_RUNAWAY_THRESHOLD,
   DEFAULT_COMPACTION_ADVISORY_PERCENT,
   DEFAULT_SETTLE_DELAY_MS,
@@ -64,7 +65,7 @@ import { WS_PI_SPAWN_ROLE_ENV } from "../src/process-role.ts";
 import { createWsConfigReader, staticConfigReader, type GoalLoopConfigReader } from "../src/adapter-config.ts";
 import { flushHeldPushes, leadIdleRef, clearWakeStart, leadCompactingRef, leadWakeStartPendingRef, heldPushQueue, isOwningAgentIdle, registerPushFlush, buildPushWakeLine, type RpcAgentRegistry } from "../src/spawner.ts";
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
-import { DEFAULT_DIALOG_BUDGET_BYTES, LEAD_CONTEXT_MILESTONE_CUSTOM_TYPE, LEAD_PROSE_SECTIONS, leadProseParameterSchema, NO_KEPT_ENTRY_ID, renderLeadProse } from "../src/lead-compaction.ts";
+import { DEFAULT_DIALOG_BUDGET_BYTES, DEFAULT_REREAD_BUDGET_BYTES, extractLeadProse, LEAD_CONTEXT_MILESTONE_CUSTOM_TYPE, LEAD_PROSE_SECTIONS, leadProseParameterSchema, NO_KEPT_ENTRY_ID, renderLeadProse } from "../src/lead-compaction.ts";
 
 /** The lever's rendered prose for a single `current_work` field — the carry the old lever passed raw. */
 const prose = (text: string): string => renderLeadProse({ current_work: text });
@@ -2031,6 +2032,23 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       assert.match(summary, /### Immediate next step\n"do the thing"/);
       assert.doesNotMatch(summary, /PUSH BATCH BODY/, "push-batch traffic is not a human message");
       assert.doesNotMatch(summary, /\/tmp\/(read|edit)\.ts|read-files|modified-files/, "no file lists");
+      assert.doesNotMatch(summary, /## Required re-reads|## On-demand references/, "no curated list was given");
+    });
+
+    test("the lever's file lists reach the summary, read relative to the session's working directory (261007)", async () => {
+      const { pi, ctx } = leverRun();
+      const cwd = mkdtempSync(join(tmpDir, "reread-cwd-"));
+      writeFileSync(join(cwd, "next.ts"), "export const next = 1;\n");
+      (ctx as unknown as { cwd: string }).cwd = cwd;
+      await pi.tools.get("ws-compact")!.execute("c", {
+        current_work: "PROSE",
+        required_rereads: [{ path: "next.ts", why: "the step edits it" }, { path: "gone.ts", lines: "1-2", why: "was here" }],
+        references: [{ path: "later.md", why: "maybe later" }],
+      }, undefined, undefined, ctx);
+      const result = pi.handlers.get("session_before_compact")!(compactionEvent("manual", branch), ctx) as unknown as { compaction: { summary: string } };
+      const summary = result.compaction.summary;
+      assert.ok(summary.includes("## Required re-reads (inlined)\n### `next.ts` - the step edits it\n```\nexport const next = 1;\n```\n\n## Required re-reads (to read first)\n- `gone.ts` lines 1-2 - was here (not found)\n\n## On-demand references\n- `later.md` - maybe later\n\n## Carried forward by the lead\n"));
+      assert.equal(extractLeadProse(summary), renderLeadProse({ current_work: "PROSE" }));
     });
 
     test("the lever's prose is consumed once; a later manual compaction is not answered with it", async () => {
@@ -2074,6 +2092,13 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       assert.equal(DEFAULT_DIALOG_BUDGET_BYTES, 40960);
       assert.equal(resolveDialogBudgetBytes({ compaction_dialog_budget_bytes: 512 }), 512);
       for (const bad of [0, -1, Number.NaN, "512"]) assert.equal(resolveDialogBudgetBytes({ compaction_dialog_budget_bytes: bad as never }), DEFAULT_DIALOG_BUDGET_BYTES, String(bad));
+    });
+
+    test("the required re-read budget resolves from its byte knob and falls back to 40 KiB (261007)", () => {
+      assert.equal(resolveRereadBudgetBytes(undefined), DEFAULT_REREAD_BUDGET_BYTES);
+      assert.equal(DEFAULT_REREAD_BUDGET_BYTES, 40960);
+      assert.equal(resolveRereadBudgetBytes({ compaction_reread_budget_bytes: 512 }), 512);
+      for (const bad of [0, -1, Number.NaN, "512"]) assert.equal(resolveRereadBudgetBytes({ compaction_reread_budget_bytes: bad as never }), DEFAULT_REREAD_BUDGET_BYTES, String(bad));
     });
 
     test("appended through Pi's own session manager, the compaction keeps no raw pre-compaction entry and reloads cleanly", () => {
@@ -2296,6 +2321,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
         assert.match(summary, /HUMAN ASK/);
         assert.match(summary, /## Carried forward by the lead\n### Current work\nFALLBACK PROSE/);
         assert.doesNotMatch(summary, /\/tmp\/(read|edit)\.ts/);
+        assert.doesNotMatch(summary, /## Required re-reads|## On-demand references/, "the fallback summary carries no file lists");
       }
     });
 
@@ -2362,50 +2388,77 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       assert.equal(highestThresholdAtOrBelow(compactionThresholds(50, 80), 69.9), 60);
     });
 
-    test("a milestone is a guide-less steer at a tool-result turn_end, using the tuned knobs and fractional thresholds", () => {
-      const { at, toolTurn, runEnd, preparations, milestones } = milestoneRun({ compaction_advisory_percent: 50, compaction_hard_percent: 85 });
+    test("a milestone is a guide-less wake turn at agent_end only, using the tuned knobs and fractional thresholds", () => {
+      const { at, toolTurn, finalTurn, runEnd, preparations, milestones } = milestoneRun({ compaction_advisory_percent: 50, compaction_hard_percent: 85 });
       at(55);
       runEnd();
       assert.equal(preparations().length, 1, "advisory sent");
+      assert.match((preparations()[0]!.content as { content: string }).content, / Reminders follow at 62% and 73%\.\n/, "the advisory names the rounded milestone points");
       runEnd();
       at(61.6);
-      toolTurn();
+      runEnd();
       assert.equal(milestones().length, 0, "61.6 is below the exact 61.67 milestone");
       at(61.7);
       toolTurn();
+      finalTurn();
+      assert.equal(milestones().length, 0, "no turn_end delivers a milestone");
+      runEnd();
       assert.equal(milestones().length, 1);
       const milestone = milestones()[0]!;
-      assert.deepEqual(milestone.options, { deliverAs: "steer" });
+      assert.deepEqual(milestone.options, { deliverAs: "followUp", triggerTurn: true });
       assert.equal((milestone.content as { display: boolean }).display, true);
-      assert.equal((milestone.content as { content: string }).content, "Current context window: 62% / 85% (forced compaction point). Keep watching for a safe boundary to compact, as the advisory said; do not stop the current task for it.");
-      assert.equal(preparations().length, 1, "a milestone is not a preparation message");
+      assert.equal((milestone.content as { content: string }).content, "Context window: 62% / 85% (forced compaction point). Past 85%, compaction is forced, mid-work if need be. From here on, a good boundary is worth taking; if this is one, run the preparation from the advisory. Otherwise end this turn without replying.");
+      assert.deepEqual((milestone.content as { details: unknown }).details, { milestone: 50 + 35 / 3 });
+      assert.equal(preparations().length, 1, "a milestone carries no guide and is not a preparation message");
 
-      at(70);
+      at(74);
       toolTurn();
-      assert.equal(milestones().length, 1, "the same crossing does not repeat");
-      at(73.4);
-      toolTurn();
-      assert.equal(milestones().length, 2, "the second milestone at the exact 73.33");
-      assert.match((milestones()[1]!.content as { content: string }).content, /^Current context window: 73% \/ 85% /);
+      finalTurn();
+      assert.equal(milestones().length, 1, "turn_ends inside the milestone turn deliver nothing");
+      runEnd();
+      assert.equal(milestones().length, 2, "the second milestone at the exact 73.33, at the milestone turn's own agent_end");
+      assert.equal((milestones()[1]!.content as { content: string }).content, "Context window: 74% / 85% (forced compaction point). This is the last reading before compaction is forced. Compacting at a boundary you choose keeps the summary in your hands; take this one if it fits, and run the preparation from the advisory. Otherwise end this turn without replying, and take the next good boundary.");
       runEnd();
       at(80);
-      toolTurn();
-      assert.equal(milestones().length, 2, "a milestone sets no preparation flag, so later turns are still checked, and nothing new is crossed");
+      runEnd();
+      assert.equal(milestones().length, 2, "nothing new is crossed");
     });
 
-    test("a milestone crossed at a run's final turn stays pending and goes out at the first tool-result turn_end of a later run", () => {
-      const { at, toolTurn, finalTurn, runEnd, preparations, milestones } = milestoneRun();
+    test("two milestones crossed at once send only the second milestone's text and latch past the first", () => {
+      const { at, toolTurn, finalTurn, runEnd, milestones } = milestoneRun();
+      at(55);
+      runEnd();
+      runEnd();
+      at(72);
+      toolTurn();
+      finalTurn();
+      assert.equal(milestones().length, 0, "crossed mid-run, pending until agent_end");
+      runEnd();
+      assert.equal(milestones().length, 1);
+      assert.equal((milestones()[0]!.content as { content: string }).content, "Context window: 72% / 80% (forced compaction point). This is the last reading before compaction is forced. Compacting at a boundary you choose keeps the summary in your hands; take this one if it fits, and run the preparation from the advisory. Otherwise end this turn without replying, and take the next good boundary.");
+      assert.deepEqual((milestones()[0]!.content as { details: unknown }).details, { milestone: 70 });
+      runEnd();
+      at(75);
+      runEnd();
+      assert.equal(milestones().length, 1, "the first milestone is covered");
+    });
+
+    test("the milestone wake turn holds the preparation flag until its agent_end", () => {
+      const { at, toolTurn, finalTurn, runEnd, preparations, milestones, kindOf } = milestoneRun();
       at(55);
       runEnd();
       runEnd();
       at(62);
-      finalTurn();
       runEnd();
-      assert.equal(milestones().length, 0, "neither the final turn nor agent_end delivers a milestone");
-      assert.equal(preparations().length, 1);
+      assert.equal(milestones().length, 1);
+      at(85);
       toolTurn();
-      assert.equal(milestones().length, 1, "delivered at the next tool-result turn_end");
-      assert.match((milestones()[0]!.content as { content: string }).content, /^Current context window: 62% \/ 80% /);
+      finalTurn();
+      assert.equal(preparations().length, 1, "no hard steer inside the milestone turn");
+      runEnd();
+      assert.equal(preparations().length, 2, "the milestone turn's agent_end clears the flag and checks again");
+      assert.equal(kindOf(preparations()[1]!), "hard");
+      assert.deepEqual(preparations()[1]!.options, { deliverAs: "followUp", triggerTurn: true });
     });
 
     test("a milestone waits while the advisory is undelivered within one run; the advisory then latches past it", () => {
@@ -2421,11 +2474,11 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       runEnd();
       assert.equal(preparations().length, 1);
       assert.equal(kindOf(preparations()[0]!), "advisory");
+      assert.equal(milestones().length, 0, "the advisory goes first");
       runEnd();
-      toolTurn();
       assert.equal(milestones().length, 0, "the advisory latched to 60, covering the skipped milestone");
       at(70);
-      toolTurn();
+      runEnd();
       assert.equal(milestones().length, 1, "the next milestone still fires");
     });
 
@@ -2451,7 +2504,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       assert.deepEqual(other.preparations()[0]!.options, { deliverAs: "steer", triggerTurn: true });
       assert.equal(other.milestones().length, 0);
       other.runEnd();
-      other.toolTurn();
+      other.runEnd();
       assert.equal(other.preparations().length + other.milestones().length, 1, "the hard delivery covers the advisory and both milestones");
     });
 
@@ -2590,10 +2643,10 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       resumed.pi.handlers.get("session_start")!({ reason: "resume" }, resumed.ctx);
       resumed.runEnd();
       assert.equal(resumed.preparations().length, 0, "no duplicate advisory for a resumed session past the advisory point");
-      resumed.toolTurn();
+      resumed.runEnd();
       assert.equal(resumed.milestones().length, 0);
       resumed.at(71);
-      resumed.toolTurn();
+      resumed.runEnd();
       assert.equal(resumed.milestones().length, 1, "the next milestone still fires");
 
       const fresh = milestoneRun();
@@ -2610,28 +2663,28 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       runEnd();
       runEnd();
       at(62);
+      toolTurn();
       finalTurn();
-      runEnd();
+      assert.equal(milestones().length, 0, "crossed mid-run, pending until agent_end");
       pi.handlers.get("session_compact")!({ reason: "manual", fromExtension: true, compactionEntry: { details: ourDetails } }, ctx);
       await new Promise((resolve) => setImmediate(resolve));
-      toolTurn();
-      assert.equal(milestones().length, 0, "the latch was reset; the milestone now waits behind an undelivered advisory");
       runEnd();
+      assert.equal(milestones().length, 0, "the latch was reset; the re-armed advisory goes first and latches past the milestone");
       assert.equal(preparations().length, 2, "the advisory is re-armed instead");
     });
 
     test("no milestone is sent while a preparation turn or a compaction is in progress", () => {
-      const { pi, ctx, at, toolTurn, runEnd, preparations, milestones } = milestoneRun();
+      const { pi, ctx, at, toolTurn, finalTurn, runEnd, preparations, milestones } = milestoneRun();
       at(55);
       runEnd();
       assert.equal(preparations().length, 1, "advisory queued; its run has not ended");
       at(62);
       toolTurn();
+      finalTurn();
       assert.equal(milestones().length, 0, "the preparation turn is running");
-      runEnd();
       pi.handlers.get("session_before_compact")!(compactionEvent("threshold"), ctx);
       assert.equal(leadCompactingRef.current, true);
-      toolTurn();
+      runEnd();
       assert.equal(milestones().length, 0, "a compaction in progress blocks the milestone");
     });
   });
@@ -2675,7 +2728,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
         "Compaction complete. Invoke `lead-revive` (`ws-skill lead-revive`) with session key `lead-key`, then continue the immediate next step; if it awaits the user, end your turn.",
       );
       assert.match(buildCompactionResumeMessage(undefined), /with session key \(recover it first\),/);
-      assert.deepEqual(["hard", "autonomous", "advisory", "reroute", undefined].map((route) => resumesAfterCompaction(route as never)), [true, true, false, false, false]);
+      assert.deepEqual(["hard", "autonomous", "advisory", "milestone", "reroute", undefined].map((route) => resumesAfterCompaction(route as never)), [true, true, false, false, false, false]);
     });
 
     test("a lever compaction after a hard preparation sends exactly one resume followUp after release", async () => {
@@ -2736,6 +2789,23 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       await lever(); // inside the nudge's own run
       await complete();
       assert.deepEqual(pi.sentUserMessages, []);
+    });
+
+    test("a lever compaction from a milestone wake turn takes the milestone route: no resume unless continue_after_compact is set", async () => {
+      for (const [args, expected] of [[{}, 0], [{ continue_after_compact: true }, 1]] as const) {
+        const { pi, ctx, usage, preparations, resumes, lever, complete } = resumeRun();
+        usage.percent = 55;
+        pi.handlers.get("agent_end")!({}, ctx);
+        pi.handlers.get("agent_end")!({}, ctx);
+        usage.percent = 62;
+        pi.handlers.get("agent_end")!({}, ctx);
+        assert.equal(preparations().length, 1, "only the advisory is a preparation message");
+        assert.equal(pi.sentMessages.filter((m) => (m.content as { customType?: string }).customType === LEAD_CONTEXT_MILESTONE_CUSTOM_TYPE).length, 1, "milestone wake turn queued");
+        await lever(args); // inside the milestone's own run
+        await complete();
+        assert.equal(resumes().length, expected, JSON.stringify(args));
+        assert.equal(pi.sentUserMessages.length, expected);
+      }
     });
 
     test("a lever compaction after a reroute preparation sends nothing", async () => {
@@ -2848,12 +2918,13 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       const { pi } = resumeRun();
       const description = (pi.tools.get("ws-compact") as unknown as { description: string }).description;
       assert.ok(description.endsWith(
-        "After compaction, an active goal keeps running. With no goal, a resume message follows when you called this on your own or after the hard-threshold notice; after the advisory nudge or a user /compact, the next move is the user's unless you set continue_after_compact to true because you hold known remaining work that does not await the user.",
+        "After compaction, an active goal keeps running. With no goal, a resume message follows when you called this on your own or after the hard-threshold notice; after the advisory nudge, a milestone, or a user /compact, the next move is the user's unless you set continue_after_compact to true because you hold known remaining work that does not await the user.",
       ));
       assert.doesNotMatch(description, /Under an active goal the goal loop continues/);
       const guide = readFileSync(new URL("../lead-compact-guide.md", import.meta.url), "utf8");
       assert.match(guide, /With no goal, a resume message follows\s+when you compacted on your own or at the hard point/);
       assert.match(guide, /`continue_after_compact: true` when you hold known remaining work that does\s+not await the user/);
+      assert.match(guide, /after the advisory\s+nudge, a milestone, or a user `\/compact`, the next move is the user's\./);
     });
 
     describe("explicit continue_after_compact (261004)", () => {
@@ -2865,7 +2936,8 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
         assert.deepEqual(schema.required, LEAD_PROSE_SECTIONS.map((section) => section.key));
         for (const key of prose.required) assert.deepEqual(schema.properties[key], prose.properties[key]);
         assert.equal(schema.properties.continue_after_compact.type, "boolean");
-        assert.deepEqual(Object.keys(schema.properties), [...Object.keys(prose.properties), "continue_after_compact"]);
+        assert.deepEqual(Object.keys(schema.properties), [...Object.keys(prose.properties), "continue_after_compact", "required_rereads", "references"]);
+        assert.match(schema.properties.continue_after_compact.description, /even after the advisory nudge, a milestone, or a user \/compact\./);
       });
 
       for (const route of ["advisory", "reroute"] as const) {
