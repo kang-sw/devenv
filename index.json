@@ -543,7 +543,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-07T05:39:48Z"
+        "touched_at": "2026-10-07T05:40:21Z",
+        "impl": {
+          "branch": "impl/develop/skirt-shell-aware"
+        }
       }
     },
     "261007-bug-sage-gate-keeps-stale-skipped-design-posture": {
