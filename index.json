@@ -529,6 +529,9 @@
     "261007-bug-session-record-cross-process-write-race": {
       "registered_at": "2026-10-07T05:35:57Z"
     },
+    "261007-feat-odq-technical-decision-class": {
+      "registered_at": "2026-10-07T07:45:49Z"
+    },
     "261007-feat-pi-display-summary": {
       "registered_at": "2026-10-07T07:00:22Z"
     },
