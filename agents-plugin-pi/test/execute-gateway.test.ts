@@ -420,8 +420,11 @@ describe("createApprovalRelay (260905: unconditional ws-agent-approval push)", (
   function fakePi(): {
     api: ExtensionAPI;
     sent: Array<{ message: { customType?: string; content?: string; details?: Record<string, unknown> }; options?: { deliverAs?: string; triggerTurn?: boolean } }>;
+    /** Model-visible content of every sent push batch. */
+    batches: string[];
   } {
     const sent: Array<{ message: { customType?: string; content?: string; details?: Record<string, unknown> }; options?: { deliverAs?: string; triggerTurn?: boolean } }> = [];
+    const batches: string[] = [];
     // Phase 2 requires a live accessor and confirmed streaming start before
     // custom delivery. Keep every approval payload/fan-in assertion below.
     let idle = true;
@@ -431,15 +434,16 @@ describe("createApprovalRelay (260905: unconditional ws-agent-approval push)", (
       on: (event: string, handler: () => void) => handlers.set(event, handler),
       sendMessage: (message: unknown, options?: unknown) => {
         assert.equal(idle, false, "approval custom message cannot start an idle run");
-        const batch = message as { customType?: string; details?: { items?: unknown[] } };
+        const batch = message as { customType?: string; content?: string; details?: { items?: unknown[] } };
         if (batch.customType === PUSH_BATCH_CUSTOM_TYPE && Array.isArray(batch.details?.items)) {
+          batches.push(String(batch.content));
           for (const item of batch.details.items) sent.push({ message: item as never, options: options as never });
         } else {
           sent.push({ message: message as never, options: options as never });
         }
       },
       sendUserMessage: (content: unknown, options: unknown) => {
-        assert.match(String(content), /^\d+ ws messages waiting;[^\n]+$/);
+        assert.match(String(content), /^\[system message from ws-pi-plugin\]\n\d+ ws messages waiting;[^\n]+$/);
         assert.deepEqual(options, { deliverAs: "followUp" });
         idle = false;
         handlers.get("agent_start")?.();
@@ -447,7 +451,7 @@ describe("createApprovalRelay (260905: unconditional ws-agent-approval push)", (
       },
     } as unknown as ExtensionAPI;
     registerPushFlush(api, { delayMs: () => 10 });
-    return { api, sent };
+    return { api, sent, batches };
   }
 
   function withTempCwd<T>(fn: (cwd: string) => T): T {
@@ -480,6 +484,8 @@ describe("createApprovalRelay (260905: unconditional ws-agent-approval push)", (
       assert.equal(message.details?.agent_id, "rpc-agent-1");
       assert.ok(String(message.details?.request).includes("rm -rf build"), "the request text must carry the pending command");
       assert.ok(String(message.details?.request).includes("call-2"), "the request text must carry the pending cmd_id");
+      assert.equal(pi.batches.length, 1);
+      assert.match(pi.batches[0]!, /^\[system message from ws-pi-plugin\]\n<ws-push-batch version="1">\n  <message type="ws-agent-approval"/, "the model reads the approval prompt under the adapter label");
     });
   });
 

@@ -39,6 +39,16 @@ describe("buildPushRenderLines", () => {
     });
   });
 
+  test("261007: the adapter label line a sent push opens with is not the head", () => {
+    const status = "1 delegated agent still running";
+    const content = `[system message from ws-pi-plugin]\n${buildPushContent("ws-agent-report", "w1", { report: "Outcome: done" }, status)}`;
+    assert.deepEqual(buildPushRenderLines({ content, details: { status } }), {
+      head: "[ws-agent-report] agent w1",
+      body: ["report: Outcome: done"],
+      status,
+    });
+  });
+
   test("a message with no status line keeps its last payload line as payload", () => {
     const content = buildPushContent("ws-agent-orphaned", undefined, { count: 2 }, undefined);
     assert.deepEqual(buildPushRenderLines({ content, details: { count: 2 } }), {

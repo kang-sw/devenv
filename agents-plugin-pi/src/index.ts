@@ -201,7 +201,7 @@ import {
 } from "./spawner.ts";
 import { createAgentWidgetController, shouldArmAgentWidget, type AgentWidgetController } from "./agent-widget.ts";
 import { registerPushMessageRenderers } from "./push-render.ts";
-import { buildOrphanPush, captureOrphans, noSessionSidecarPath, readAndClearSidecarAt, reviveOrphans, sidecarPath, writeSidecarAt, type PersistedOrphan } from "./agent-sidecar.ts";
+import { buildOrphanNoticeMessage, buildOrphanPush, captureOrphans, noSessionSidecarPath, readAndClearSidecarAt, reviveOrphans, sidecarPath, writeSidecarAt, type PersistedOrphan } from "./agent-sidecar.ts";
 import { registerGoalLoop, resolveAgentWaitAnimation, resolveChildRetentionTtlDays, resolveSettleDelayMs, type GoalLoopConfig } from "./goal-loop.ts";
 import { registerCompactionHistory } from "./compaction-history.ts";
 import { registerLeadMemoryLog } from "./lead-memory-log.ts";
@@ -894,7 +894,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     evaluateDescendantUsage();
     if (readSpawnRole(process.env) === "worker" || readSpawnRole(process.env) === "explore") {
       const orphanPush = buildOrphanPush(recoveredRegistry);
-      if (orphanPush) pi.sendMessage({ customType: "ws-agent-orphaned", content: JSON.stringify(orphanPush), display: true, details: orphanPush }, { deliverAs: "nextTurn" });
+      if (orphanPush) pi.sendMessage(buildOrphanNoticeMessage(orphanPush), { deliverAs: "nextTurn" });
     }
     if (isLeadOrFork(readSpawnRole(process.env))) {
       const sessionFile = dispatchSessionFile;
@@ -922,7 +922,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
             if (readSpawnRole(process.env) === "fork") {
               // Startup custom messages bypass input; queue without triggering a
               // model turn so restored work first passes the own-key guard.
-              pi.sendMessage({ customType: "ws-agent-orphaned", content: orphanPush, display: true, details: orphanPush as never }, { deliverAs: "nextTurn" });
+              pi.sendMessage(buildOrphanNoticeMessage(orphanPush), { deliverAs: "nextTurn" });
             } else pushToLead(pi, agentTools.rpcRegistry, undefined, "ws-agent-orphaned", orphanPush, "followUp");
           }
         }

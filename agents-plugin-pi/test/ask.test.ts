@@ -1129,12 +1129,17 @@ describe("withdrawQueuedQuestion (260911 ws-withdraw-question's concurrency cont
 describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
   function setup(origin: "lead-ask" | "fork-raised" = "lead-ask") {
     const sent: Array<{ message: unknown; options: unknown }> = [];
+    /** Each message exactly as sent, before batch items are unpacked into `sent`. */
+    const raw: unknown[] = [];
     leadIdleRef.current = () => true;
     const handlers = new Map<string, () => void>();
     const pi = {
       on: (event: string, fn: () => void) => handlers.set(event, fn),
       sendUserMessage: () => handlers.get("agent_start")?.(),
-      sendMessage: (message: unknown, options: unknown) => capturePush(sent, message, options),
+      sendMessage: (message: unknown, options: unknown) => {
+        raw.push(message);
+        capturePush(sent, message, options);
+      },
     } as unknown as ExtensionAPI;
     registerPushFlush(pi, { delayMs: () => 10 });
     const handle = createThreadRegistryHandle();
@@ -1143,7 +1148,7 @@ describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
     hydrateThreadRegistry(handle, path);
     const record = thread({ threadId: "q1", question: "Which anchor?", context: "background", origin });
     handle.threads.set(record.threadId, record);
-    return { pi, sent, handle, path, record };
+    return { pi, sent, raw, handle, path, record };
   }
 
   /** A live respondent on the shared registry, with a stop-observing fake client. */
@@ -1170,12 +1175,15 @@ describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
   }
 
   test("§6: one custom message, admitted as followUp then released as steering, carrying the thread id", () => {
-    const { pi, sent, handle, record } = setup();
+    const { pi, sent, raw, handle, record } = setup();
     injectDiscussionSummary(pi, handle, new Map(), record, "we take the second anchor");
 
     assert.equal(sent.length, 1);
     const msg = sent[0].message as { customType: string; content: string; display: boolean; details: { threadId: string; title: string } };
     assert.equal(msg.customType, "ws-thread-summary");
+    const envelope = raw[0] as { content: string };
+    assert.match(envelope.content, /^\[system message from ws-pi-plugin\]\n<ws-push-batch /, "the model reads the summary under the adapter label");
+    assert.ok(!msg.content.includes("[system message from ws-pi-plugin]"), "the batch carries the label, not its inner summary");
     assert.equal(msg.display, true);
     assert.equal(msg.details.threadId, "q1");
     assert.equal(msg.details.title, record.title);
@@ -1474,8 +1482,9 @@ describe("deliverQueuedAnswer (260911 D1: the fork-less lead-ask send path — n
     assert.equal(heldPushQueue.length, 1, "the modal submission admits one raw follow-up, not one per answer");
     handlers.get("agent_end")?.();
     assert.equal(rawSent.length, 1, "one lead turn boundary receives one batch envelope");
-    const envelope = rawSent[0].message as { customType: string; details: { items: Array<{ content: string; details: { threadIds: string[] } }> } };
+    const envelope = rawSent[0].message as { customType: string; content: string; details: { items: Array<{ content: string; details: { threadIds: string[] } }> } };
     assert.equal(envelope.customType, PUSH_BATCH_CUSTOM_TYPE);
+    assert.match(envelope.content, /^\[system message from ws-pi-plugin\]\n<ws-push-batch /);
     assert.equal(envelope.details.items.length, 1, "the envelope contains one aggregated queued-answer item");
     const item = envelope.details.items[0];
     assert.deepEqual(item.details.threadIds, ["q1", "q2"]);

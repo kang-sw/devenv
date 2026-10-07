@@ -39,6 +39,7 @@
 
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { labelAdapterText } from "./adapter-label.ts";
 import { TOOL_GROUPS, isOwnerHeld, refreshAgentTelemetry, startOwnedSessionObserver, type RpcAgentRecord, type RpcAgentRegistry, type SpawnAgentRole, type ToolGroup } from "./spawner.ts";
 import { parseForkContext, type ForkContext } from "./fork-context.ts";
 import { normalizeStoredExploreMode, type ExploreMode } from "./process-role.ts";
@@ -522,6 +523,15 @@ export function buildOrphanPush(orphans: PersistedOrphan[]): Record<string, unkn
     agents: buildOrphanSummary(orphans),
     ...(idle.length > 0 ? { idle_agent_ids: idle.map((o) => o.agentId) } : {}),
   };
+}
+
+/**
+ * The `ws-agent-orphaned` custom message a session sends itself directly
+ * (worker/explore children, fork leads), outside the push FIFO: the payload
+ * as JSON text under the adapter label, with the payload itself as details.
+ */
+export function buildOrphanNoticeMessage(push: Record<string, unknown>): { customType: "ws-agent-orphaned"; content: string; display: true; details: Record<string, unknown> } {
+  return { customType: "ws-agent-orphaned", content: labelAdapterText(JSON.stringify(push)), display: true, details: push };
 }
 
 /** Best-effort sidecar write; a failure here must never break session shutdown. */

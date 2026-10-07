@@ -67,6 +67,11 @@ import { flushHeldPushes, leadIdleRef, clearWakeStart, leadCompactingRef, leadWa
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
 import { DEFAULT_DIALOG_BUDGET_BYTES, DEFAULT_REREAD_BUDGET_BYTES, extractLeadProse, LEAD_CONTEXT_MILESTONE_CUSTOM_TYPE, LEAD_PROSE_SECTIONS, leadProseParameterSchema, NO_KEPT_ENTRY_ID, renderLeadProse } from "../src/lead-compaction.ts";
 
+/** First line of every adapter-injected user message (261007). */
+const LABEL = "[system message from ws-pi-plugin]";
+/** `text` as the adapter sends it: under the label line. */
+const labeled = (text: string): string => `${LABEL}\n${text}`;
+
 /** The lever's rendered prose for a single `current_work` field — the carry the old lever passed raw. */
 const prose = (text: string): string => renderLeadProse({ current_work: text });
 
@@ -785,7 +790,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
 
       for (const text of ["stopping", "reset plan", "STOP"]) {
         await pi.commands.get("goal")!(text, ctx);
-        assert.equal(pi.sentUserMessages.at(-1)!.content, `Goal armed: ${text}`);
+        assert.equal(pi.sentUserMessages.at(-1)!.content, labeled(`Goal armed: ${text}`));
       }
     });
 
@@ -915,11 +920,11 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       await pi.commands.get("goal")!("stop", ctx);
       await pi.commands.get("goal")!("new", ctx);
       stale();
-      assert.deepEqual(pi.sentUserMessages.map((message) => message.content), ["Goal armed: old", "Goal armed: new"]);
+      assert.deepEqual(pi.sentUserMessages.map((message) => message.content), [labeled("Goal armed: old"), labeled("Goal armed: new")]);
 
       pi.handlers.get("agent_settled")!({}, ctx);
       clock.fire();
-      assert.match(pi.sentUserMessages.at(-1)!.content as string, /Goal yet running: "new"/);
+      assert.match(pi.sentUserMessages.at(-1)!.content as string, /^\[system message from ws-pi-plugin\]\nGoal yet running: "new"/, "the goal reminder opens with the adapter label");
       assert.doesNotMatch(pi.sentUserMessages.at(-1)!.content as string, /Goal yet running: "old"/);
     });
 
@@ -1015,7 +1020,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       const stale = clock.scheduledCallbacks.at(-1)!;
       handle.resetCompactionStateForShutdown();
       stale();
-      assert.deepEqual(pi.sentUserMessages.map((message) => message.content), ["Goal armed: ship"]);
+      assert.deepEqual(pi.sentUserMessages.map((message) => message.content), [labeled("Goal armed: ship")]);
 
       const recoveredClock = fakeClock();
       const recoveredPi = fakePi();
@@ -1052,7 +1057,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     assert.equal(clock.pendingCount(), 0, "no goal reminder is scheduled");
     assert.deepEqual(statusCalls, [], "goal-loop status is untouched");
     assert.deepEqual(notifications.map((n) => n.message), ["Compaction completed"]);
-    assert.deepEqual(pi.sentUserMessages, [{ content: buildCompactionResumeMessage(undefined), options: { deliverAs: "followUp" } }], "an autonomous lever call is followed by exactly one resume message, never a goal reminder");
+    assert.deepEqual(pi.sentUserMessages, [{ content: labeled(buildCompactionResumeMessage(undefined)), options: { deliverAs: "followUp" } }], "an autonomous lever call is followed by exactly one resume message, never a goal reminder");
 
     await pi.commands.get("goal")!("ship", ctx);
     pi.handlers.get("agent_settled")!({}, ctx);
@@ -1086,7 +1091,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       assertCarry(pi.sentUserMessages[1]!.content, prose(exactCarry));
       assert.deepEqual(pi.sentUserMessages[1]!.options, { deliverAs: "followUp" });
       if (completion === "error" || completion === "failed-event") {
-        assert.match(pi.sentUserMessages[1]!.content as string, /^Compaction failed: boom Do not retry/);
+        assert.match(pi.sentUserMessages[1]!.content as string, /^\[system message from ws-pi-plugin\]\nCompaction failed: boom Do not retry/);
       }
       pi.handlers.get("agent_start")!({}, ctx);
       acknowledgeLatestReminder(pi, ctx);
@@ -2693,6 +2698,8 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     const guidePath = join(tmpDir, "lead-compact-guide-261003.md");
     writeFileSync(guidePath, "GUIDE BODY 261003");
     const resumeText = buildCompactionResumeMessage("lead-key");
+    /** The resume exactly as sent. */
+    const sentResume = labeled(resumeText);
 
     function resumeRun() {
       const clock = fakeClock();
@@ -2705,7 +2712,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       let compactCall: Parameters<ExtensionContext["compact"]>[0] | undefined;
       ctx.compact = (opts) => { compactCall = opts; };
       const preparations = () => pi.sentMessages.filter((m) => (m.content as { customType?: string }).customType === "ws-lead-compact");
-      const resumes = () => pi.sentUserMessages.filter((m) => m.content === resumeText);
+      const resumes = () => pi.sentUserMessages.filter((m) => m.content === sentResume);
       /** The lever call, then the abort's own agent_end, as Pi's compact() produces them. */
       const lever = async (args: Record<string, unknown> = {}) => {
         await pi.tools.get("ws-compact")!.execute("c", { current_work: "mid-task", ...args }, undefined, undefined, ctx);
@@ -2885,11 +2892,11 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
         // Pi marks a prompt streaming only after async preflight, so a second
         // idle prompt here would also pass its idle check and be rejected as
         // "already processing", desyncing the host's run flag.
-        assert.deepEqual(pi.sentUserMessages.map((m) => m.content), [buildPushWakeLine(1)], "exactly one adapter prompt in flight before its start");
+        assert.deepEqual(pi.sentUserMessages.map((m) => m.content), [labeled(buildPushWakeLine(1))], "exactly one adapter prompt in flight before its start");
         assert.equal(leadWakeStartPendingRef.current, true);
         pi.streaming.current = true;
         pi.handlers.get("agent_start")!({}, ctx);
-        assert.deepEqual(pi.sentUserMessages.map((m) => m.content), [buildPushWakeLine(1), resumeText], "the resume follows the wake's run");
+        assert.deepEqual(pi.sentUserMessages.map((m) => m.content), [labeled(buildPushWakeLine(1)), sentResume], "the resume follows the wake's run");
         assert.deepEqual(pi.sentUserMessages[1]!.options, { deliverAs: "followUp" });
         assert.equal(resumes().length, 1);
         pi.handlers.get("agent_start")!({}, ctx);
@@ -2909,9 +2916,9 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       await complete();
       clock.fire();
       assert.equal(pi.sentUserMessages.length, 2);
-      assert.equal(pi.sentUserMessages[0]!.content, "Goal armed: ship");
+      assert.equal(pi.sentUserMessages[0]!.content, labeled("Goal armed: ship"));
       assert.match(pi.sentUserMessages[1]!.content as string, /Goal yet running: "ship"/);
-      assert.ok(!pi.sentUserMessages.some((m) => m.content === resumeText), "no resume beside the goal reminder");
+      assert.ok(!pi.sentUserMessages.some((m) => m.content === sentResume), "no resume beside the goal reminder");
     });
 
     test("the ws-compact description and the guide no longer limit resumption to an active goal", () => {
@@ -2973,7 +2980,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
             }
             await lever(args);
             await complete();
-            assert.deepEqual(pi.sentUserMessages.filter((m) => m.content === resumeText), [], JSON.stringify(args));
+            assert.deepEqual(pi.sentUserMessages.filter((m) => m.content === sentResume), [], JSON.stringify(args));
           }
         });
       }
@@ -3005,7 +3012,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
         await lever({ continue_after_compact: true });
         await complete();
         clock.fire();
-        assert.ok(!pi.sentUserMessages.some((m) => m.content === resumeText), "no resume beside the goal reminder");
+        assert.ok(!pi.sentUserMessages.some((m) => m.content === sentResume), "no resume beside the goal reminder");
         assert.match(pi.sentUserMessages[pi.sentUserMessages.length - 1]!.content as string, /Goal yet running: "ship"/);
       });
 

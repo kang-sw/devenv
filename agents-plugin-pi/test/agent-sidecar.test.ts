@@ -27,6 +27,7 @@ import { join } from "node:path";
 import {
   SIDECAR_VERSION,
   noSessionSidecarPath,
+  buildOrphanNoticeMessage,
   buildOrphanPush,
   buildOrphanSummary,
   captureOrphans,
@@ -603,6 +604,16 @@ describe("buildOrphanPush (announce only what was cut off)", () => {
     assert.equal(push.count, 2);
     assert.equal("idle_agent_ids" in push, false);
     assert.equal(String(push.agents).split("\n").length, 9, "one header plus four concise recovery lines per interrupted agent");
+  });
+
+  test("261007: the directly sent orphan notice carries the payload as JSON under the adapter label", () => {
+    const push = buildOrphanPush([orphan({ agentId: "a1", state: "running" })])!;
+    assert.deepEqual(buildOrphanNoticeMessage(push), {
+      customType: "ws-agent-orphaned",
+      content: `[system message from ws-pi-plugin]\n${JSON.stringify(push)}`,
+      display: true,
+      details: push,
+    });
   });
 });
 

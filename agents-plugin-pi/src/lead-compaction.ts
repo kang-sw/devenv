@@ -22,8 +22,10 @@
  * Human-typed user messages are separated from adapter traffic here. Custom
  * messages (`ws-push-batch`, mailbox, preparation messages) are
  * `custom_message` entries and never qualify; the adapter's user-role
- * injections — the push wake line, goal reminders, and Pi's `/skill:` body
- * expansions — are recognized by their exact shape below. Anything else
+ * injections (the push wake line, goal reminders, the goal announcement, the
+ * post-compaction resume prompt) open with the adapter label and are
+ * recognized by it, and Pi's `/skill:` body expansions by their exact shape
+ * below. Anything else
  * user-role is treated as human text: dropping human text is the worse
  * failure, so an unrecognized shape stays in.
  */
@@ -32,6 +34,7 @@ import { readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { isPushWakeLine, type RpcAgentRecord, type RpcAgentRegistry } from "./spawner.ts";
+import { ADAPTER_MESSAGE_LABEL, adapterLabeledBody } from "./adapter-label.ts";
 
 /** The lead-callable compaction lever (replaces 260903's `goal-compact-and-continue`). */
 export const LEAD_COMPACT_TOOL_NAME = "ws-compact";
@@ -44,6 +47,9 @@ export const LEAD_COMPACTION_DETAILS_KIND = "ws-pi-lead-compaction";
 
 /** Prefix of the goal reminder's correlation marker (goal-loop.ts appends `<id> -->`). */
 export const GOAL_REMINDER_MARKER_PREFIX = "<!-- ws-pi-goal-reminder:";
+
+/** Opening of the `/goal <goal>` announcement (goal-loop.ts `buildGoalAnnouncement`); the dialog collapses it back to `/goal <goal>`. */
+export const GOAL_ANNOUNCEMENT_PREFIX = "Goal armed: ";
 
 export interface LeadCompactionDetails {
   kind: typeof LEAD_COMPACTION_DETAILS_KIND;
@@ -185,10 +191,18 @@ const SKILL_EXPANSION_RE = /^<skill name="([^"]*)" location="[^"]*">[\s\S]*?\n<\
 
 /**
  * The human-typed part of one user-role message, or `undefined` when the
- * whole message is adapter traffic. A Pi `/skill:` expansion collapses back to
- * the `/skill:<name> <args>` the human typed.
+ * whole message is adapter traffic. A message opening with the adapter label
+ * is adapter traffic, except the labeled goal announcement, which collapses
+ * back to the `/goal <goal>` the human typed; a Pi `/skill:` expansion
+ * likewise collapses to `/skill:<name> <args>`. The goal-reminder marker and
+ * push-wake shape checks recognize unlabeled entries recorded before the
+ * label existed.
  */
 export function humanTextOf(text: string): string | undefined {
+  const labeled = adapterLabeledBody(text);
+  if (labeled !== undefined) {
+    return labeled.startsWith(GOAL_ANNOUNCEMENT_PREFIX) ? `/goal ${labeled.slice(GOAL_ANNOUNCEMENT_PREFIX.length)}` : undefined;
+  }
   if (text.includes(GOAL_REMINDER_MARKER_PREFIX)) return undefined;
   if (isPushWakeLine(text.trim())) return undefined;
   const skill = SKILL_EXPANSION_RE.exec(text);
@@ -790,15 +804,6 @@ export type PreparationTrigger =
 export const LEAD_CONTEXT_MILESTONE_CUSTOM_TYPE = "ws-lead-context-milestone";
 
 /** The milestone wake text (261007): `milestone` 1 or 2, current usage against the forced point, no guide body. */
-/**
- * First line of every compaction message the adapter injects (advisory,
- * milestone, hard cut, `/compact` reroute). Pi hands a custom message to the
- * model as plain user-role text, so without it the model reads the adapter's
- * notice as the human's request (a downstream summary quoted the milestone
- * as the user's latest request).
- */
-export const ADAPTER_MESSAGE_LABEL = "[system message from ws-pi-plugin]";
-
 export function buildContextMilestoneMessage(milestone: 1 | 2, percent: number, hardPercent: number): string {
   const head = `${ADAPTER_MESSAGE_LABEL}\nContext window: ${Math.round(percent)}% / ${hardPercent}% (forced compaction point).`;
   return milestone === 1

@@ -10,6 +10,9 @@ import { PUSH_BATCH_CUSTOM_TYPE } from '../src/push-protocol.ts';
 import { buildMailboxPushMessage } from '../src/mailbox-waiter.ts';
 import { renderLeadProse } from '../src/lead-compaction.ts';
 
+const LABEL = '[system message from ws-pi-plugin]';
+const labelCount = (text: string) => text.split(LABEL).length - 1;
+
 function harness(withGoal = false, steeringMode: 'one-at-a-time' | 'all' = 'one-at-a-time') {
   const handlers = new Map<string, Function[]>();
   const timers = new Map<number, Function>();
@@ -103,10 +106,12 @@ afterEach(() => { heldPushQueue.length = 0; leadIdleRef.current = undefined; lea
 for (const modes of [['followUp','steer'], ['steer','followUp']] as const) {
   test(`idle ${modes.join('/')} coalesces until confirmed start`, () => {
     const h = harness(); h.push(modes[0]); h.push(modes[1]);
-    assert.equal(h.users.length, 1); assert.match(h.users[0].content, /1.*waiting/);
+    assert.equal(h.users.length, 1);
+    assert.equal(h.users[0].content, `${LABEL}\n1 ws messages waiting; process the incoming reports.`, 'the wake line opens with the adapter label');
     assert.equal(h.custom.length, 0); assert.equal(heldPushQueue.length, 2);
     h.start(); assert.equal(h.custom.length, 1);
     assert.equal(h.custom[0].message.customType, PUSH_BATCH_CUSTOM_TYPE);
+    assert.ok(h.custom[0].message.content.startsWith(`${LABEL}\n<${PUSH_BATCH_CUSTOM_TYPE} `), 'the batch opens with the adapter label');
     assert.deepEqual(h.custom[0].message.details.items.map((item: any) => item.details.report), [...modes]);
     assert.deepEqual(h.custom.map(x => x.options), [{deliverAs: 'steer', triggerTurn: true}]);
     assert.deepEqual(h.modelTimeline, [`steer:batch:${modes.join(',')}`, 'model-response'], 'one batch yields one response even in one-at-a-time steering mode');
@@ -148,6 +153,8 @@ test('260914: an arriving mail admitted while dormant takes the idle-wake path a
   assert.deepEqual(h.custom[0].message.details.items.map((item: any) => item.customType), ['ws-mailbox']);
   assert.deepEqual(h.custom[0].message.details.items.map((item: any) => item.state), ['informational']);
   assert.match(h.custom[0].message.content, /run the ready ticket/);
+  assert.ok(h.custom[0].message.content.startsWith(`${LABEL}\n<${PUSH_BATCH_CUSTOM_TYPE} `), 'mail reaches the model under the adapter label');
+  assert.equal(labelCount(h.custom[0].message.content), 1);
   assert.deepEqual(h.custom[0].options, { deliverAs: 'steer', triggerTurn: true });
   h.emit('session_shutdown');
 });
@@ -252,8 +259,20 @@ test('ordinary busy steer with no older hold stays an immediate individual custo
   assert.equal(h.custom.length, 1);
   assert.equal(h.custom[0].message.customType, 'ws-agent-report');
   assert.notEqual(h.custom[0].message.customType, PUSH_BATCH_CUSTOM_TYPE);
+  assert.equal(h.custom[0].message.content, `${LABEL}\n[ws-agent-report]\nreport: steer`, 'an individual push opens with the adapter label');
   assert.deepEqual(h.custom[0].options, {deliverAs: 'steer', triggerTurn: true});
   assert.equal(heldPushQueue.length, 0);
+  h.settle(); h.emit('session_shutdown');
+});
+
+test('a raw summary sent on its own opens with the adapter label, for string and text-part content', () => {
+  const h = harness(); h.busy();
+  sendToLead(h.pi, {customType: 'ws-thread-summary', content: 'summary text', display: true, details: {threadId: 'q1'}}, 'steer');
+  sendToLead(h.pi, {customType: 'ws-thread-summary', content: [{type: 'text', text: 'part text'}], display: true, details: {threadId: 'q2'}}, 'steer');
+  assert.deepEqual(h.custom.map((entry) => entry.message.customType), ['ws-thread-summary', 'ws-thread-summary']);
+  assert.equal(h.custom[0].message.content, `${LABEL}\nsummary text`);
+  assert.deepEqual(h.custom[1].message.content, [{type: 'text', text: `${LABEL}\npart text`}]);
+  assert.deepEqual(h.custom[0].message.details, {threadId: 'q1'});
   h.settle(); h.emit('session_shutdown');
 });
 
@@ -267,6 +286,7 @@ test('approval and question steer with no older hold keep their individual custo
   pushToLead(h.pi, h.registry, questionRecord, 'ws-agent-question', {question: 'continue?'}, 'steer');
   assert.deepEqual(h.custom.map((entry) => entry.message.customType), ['ws-agent-approval', 'ws-agent-question']);
   assert.ok(h.custom.every((entry) => entry.message.customType !== PUSH_BATCH_CUSTOM_TYPE));
+  assert.ok(h.custom.every((entry) => entry.message.content.startsWith(`${LABEL}\n[`)), 'individual approval and question pushes open with the adapter label');
   assert.equal(heldPushQueue.length, 0);
   h.settle(); h.emit('session_shutdown');
 });
@@ -481,6 +501,10 @@ test('one boundary batch carries every push family plus the owner summary in str
     'ws-agent-report', 'ws-agent-settled', 'ws-agent-orphaned', 'ws-thread-summary',
   ]);
   assert.equal(h.custom.length, 1);
+  const content = h.custom[0].message.content as string;
+  assert.ok(content.startsWith(`${LABEL}\n<${PUSH_BATCH_CUSTOM_TYPE} `));
+  assert.equal(labelCount(content), 1, 'the batch carries the label once, never per inner message');
+  assert.equal(h.custom[0].message.details.items.at(-1).content, 'owner summary', 'a held raw summary keeps its unlabeled content inside the batch');
   h.settle(); h.emit('session_shutdown');
 });
 

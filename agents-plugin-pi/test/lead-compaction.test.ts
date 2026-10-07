@@ -93,6 +93,32 @@ describe("human-typed user text", () => {
     assert.equal(humanTextOf("Goal armed: ship"), "Goal armed: ship", "the /goal announcement carries the human's goal");
     assert.equal(humanTextOf("ordinary request"), "ordinary request");
   });
+
+  test("261007: a labeled message is adapter traffic, except the goal announcement, which collapses to /goal <goal>", () => {
+    const label = "[system message from ws-pi-plugin]";
+    assert.equal(humanTextOf(`${label}\n${buildPushWakeLine(3)}`), undefined, "labeled push wake line");
+    assert.equal(humanTextOf(`${label}\nGoal yet running: "x".\n\n<!-- ws-pi-goal-reminder:1-1 -->`), undefined, "labeled goal reminder");
+    assert.equal(humanTextOf(`${label}\nCompaction complete. Invoke \`lead-revive\` (\`ws-skill lead-revive\`) with session key \`k\`, then continue.`), undefined, "labeled resume prompt");
+    assert.equal(humanTextOf(`${label}\nany future adapter notice`), undefined, "the label alone recognizes adapter traffic, whatever follows it");
+    assert.equal(humanTextOf(label), undefined, "a bare label line");
+    assert.equal(humanTextOf(`${label}\nGoal armed: ship the widget`), "/goal ship the widget", "the labeled goal announcement keeps the human's goal");
+    assert.equal(humanTextOf(`${label}\nGoal armed: line one\nline two`), "/goal line one\nline two");
+    assert.equal(humanTextOf(`please read ${label} literally`), "please read [system message from ws-pi-plugin] literally", "the label counts only as the first line");
+    assert.equal(humanTextOf(`${label} inline`), `${label} inline`, "the label is a whole first line, not a prefix");
+  });
+
+  test("261007: the dialog keeps human text, drops labeled traffic, and shows the goal as /goal", () => {
+    const label = "[system message from ws-pi-plugin]";
+    const items = collectDialogItems([
+      user(0, "please fix the parser"),
+      user(1, `${label}\n${buildPushWakeLine(1)}`),
+      user(2, `${label}\nGoal armed: fix the parser`),
+      user(3, `${label}\nGoal yet running: "fix the parser".\n\n<!-- ws-pi-goal-reminder:1-1 -->`),
+      user(4, buildPushWakeLine(2)),
+      user(5, "and the lexer too"),
+    ] as never);
+    assert.deepEqual(items.map((item) => (item as { text?: string }).text), ["please fix the parser", "/goal fix the parser", "and the lexer too"]);
+  });
 });
 
 describe("dialog transcript (261003)", () => {
