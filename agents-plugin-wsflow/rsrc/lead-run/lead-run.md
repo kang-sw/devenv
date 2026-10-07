@@ -183,12 +183,16 @@ approved batch is the concurrency cap. Differences from the serial route:
   `root_override: <that worktree path>` and put the acquired branch on the
   task block's Branch line. When a batch worker's route verdict is not
   `continue`, follow that verdict as reported rather than re-provisioning.
-- Collect every terminal report before any merge, then handle each by
-  **Handle the report**. Merge serially through
-  `{{.McpNamespace}}/git.merge`; a conflict it cannot resolve is a merge stop:
-  surface it and leave the unmerged branches retained. Release every acquired
-  worktree with `{{.McpNamespace}}/worktree.release(key: <its worker_key>)`,
-  including a stopped worker's.
+- Handle each terminal report by **Handle the report** as it arrives: the
+  batch is independent, so no merge waits on another worker's report.
+  Release that worker's worktree with
+  `{{.McpNamespace}}/worktree.release(key: <its worker_key>)` before its
+  merge, because `{{.McpNamespace}}/git.merge` deletes the merged impl branch
+  and Git refuses to delete a branch a worktree still has checked out; a
+  stopped worker's worktree is released the same way and its branch stays
+  retained. Merges run one at a time through `{{.McpNamespace}}/git.merge`; a
+  conflict it cannot resolve is a merge stop: surface it and leave that
+  branch retained.
 
 ## Terminal: `ready/` empty on a goal branch
 

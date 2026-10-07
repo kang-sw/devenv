@@ -3019,8 +3019,8 @@ func TestPlaybookPrintLeadRunWorkerTierPolicy(t *testing.T) {
 				"A ticket run gets one retry in total across (e) and (f): after one retry for either stop, the next (e) or (f) goes to the user.",
 				// Opt-in parallel route: inert without the per-run approval, batch
 				// selection delegated to ticket-batch-selector, one worktree per
-				// ticket bound through root_override, merges serial, every acquired
-				// worktree released.
+				// ticket bound through root_override, each report merged on
+				// arrival, its worktree released before its merge, merges serial.
 				"One worker in flight per invocation, unless the opt-in parallel route below is approved for this run.",
 				"Serial is the default.",
 				`One per-run user approval, "may this run provision worktrees and execute ready tickets in parallel", opens this route`,
@@ -3029,10 +3029,11 @@ func TestPlaybookPrintLeadRunWorkerTierPolicy(t *testing.T) {
 				"For each approved ticket, resolve its canonical branch with `" + product + "/git.resolve_impl_branch` against your exact base branch, then pass that returned branch verbatim as `target_branch` to `" + product + "/worktree.acquire`. Keep the `worker_key` it returns",
 				"it is the sole branch owner, so skip Spawn step 3",
 				"Render each worker with `root_override: <that worktree path>`",
-				"Collect every terminal report before any merge",
-				"Merge serially through `" + product + "/git.merge`",
-				"a conflict it cannot resolve is a merge stop: surface it and leave the unmerged branches retained",
-				"Release every acquired worktree with `" + product + "/worktree.release(key: <its worker_key>)`, including a stopped worker's.",
+				"Handle each terminal report by **Handle the report** as it arrives: the batch is independent, so no merge waits on another worker's report.",
+				"Release that worker's worktree with `" + product + "/worktree.release(key: <its worker_key>)` before its merge, because `" + product + "/git.merge` deletes the merged impl branch and Git refuses to delete a branch a worktree still has checked out",
+				"a stopped worker's worktree is released the same way and its branch stays retained.",
+				"Merges run one at a time through `" + product + "/git.merge`",
+				"a conflict it cannot resolve is a merge stop: surface it and leave that branch retained.",
 				// Goal-branch terminal.
 				"on approval call `" + product + "/git.merge` with the goal branch and explicit PARENT target",
 				// The four End-the-turn lines the re-invoke driver reads verbatim.

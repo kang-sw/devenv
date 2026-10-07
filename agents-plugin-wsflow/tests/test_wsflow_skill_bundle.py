@@ -396,8 +396,9 @@ class WsflowSkillBundleTest(unittest.TestCase):
         self.assertIn("Branch-explicit calls need no check.", run)
         # Opt-in parallel route: the byte-mirror must carry the gated
         # provisioning approval, the delegated batch selection, the
-        # worktree.acquire/release lifecycle, and the serial git.merge with an
-        # unresolvable conflict as a merge stop into the wsflow package.
+        # worktree.acquire/release lifecycle (release before each merge), and the
+        # on-arrival serial git.merge with an unresolvable conflict as a merge
+        # stop into the wsflow package.
         self.assertIn("## Parallel route (opt-in)", run)
         self.assertIn("unless the opt-in parallel route below is approved for this run", run)
         self.assertIn("Serial is the default.", run)
@@ -417,13 +418,21 @@ class WsflowSkillBundleTest(unittest.TestCase):
         )
         self.assertIn("it is the sole branch owner, so skip Spawn step 3", run)
         self.assertIn("Render each worker with `root_override: <that worktree path>`", run)
-        self.assertIn("Collect every terminal report before any merge", run)
-        self.assertIn("Merge serially through `{{.McpNamespace}}/git.merge`", run)
         self.assertIn(
-            "cannot resolve is a merge stop: surface it and leave the unmerged branches retained",
+            "Handle each terminal report by **Handle the report** as it arrives: the"
+            " batch is independent, so no merge waits on another worker's report.",
             run,
         )
-        self.assertIn("{{.McpNamespace}}/worktree.release(key: <its worker_key>)", run)
+        self.assertIn(
+            "Release that worker's worktree with"
+            " `{{.McpNamespace}}/worktree.release(key: <its worker_key>)` before its merge",
+            run,
+        )
+        self.assertIn("Merges run one at a time through `{{.McpNamespace}}/git.merge`", run)
+        self.assertIn(
+            "cannot resolve is a merge stop: surface it and leave that branch retained",
+            run,
+        )
         # The parallel-safety predicate moved out of lead-run into its own
         # delegate playbook; the mirror must carry that playbook too.
         batch = " ".join(
