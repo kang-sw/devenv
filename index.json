@@ -557,6 +557,9 @@
     "261007-bug-pi-fork-lineage-keeps-bootstrap-key-after-adoption": {
       "registered_at": "2026-10-07T08:41:34Z"
     },
+    "261007-bug-ready-gate-accepts-invalid-route-fact-values": {
+      "registered_at": "2026-10-07T13:02:01Z"
+    },
     "261007-bug-sage-gate-keeps-stale-skipped-design-posture": {
       "registered_at": "2026-10-07T05:20:30Z"
     },
