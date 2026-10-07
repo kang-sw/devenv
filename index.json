@@ -529,7 +529,7 @@
         "email": "ki6080@gmail.com",
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-10-07T02:13:08Z",
         "impl": {
           "branch": "impl/develop/wife-fancy-hull"
