@@ -553,6 +553,18 @@ describe("createChildRuntimeEnsurer: lead reinstalls ws-mcp on runtime.json drif
     } finally { f.cleanup(); }
   });
 
+  test("a tools-only change with the same plugin_version is drift too: the contract key is the runtime.json bytes, not the version", async () => {
+    const f = fixture();
+    try {
+      const ensure = createChildRuntimeEnsurer(f.deps)!;
+      f.bump(JSON.stringify({ plugin: "ws", plugin_version: "0.46.32", tools: { "tickets.query": {} } }));
+      await ensure();
+      assert.equal(f.builds.length, 1, "a new tool inventory without a version bump still rebuilds");
+      assert.match(f.builds[0][f.builds[0].indexOf("-ldflags") + 1], /^-X main\.version=0\.46\.32 /);
+      assert.equal(f.launches.length, 1);
+    } finally { f.cleanup(); }
+  });
+
   test("concurrent launches after one drift share a single rebuild", async () => {
     const f = fixture();
     try {
