@@ -385,6 +385,23 @@ describe("summarizer", () => {
     assert.equal(h.calls.length, 2, "reset lifts the stop");
   });
 
+  test("an overflow from a request that started before compaction does not stop the fresh log", async () => {
+    const h = harness();
+    let release!: (value: AssistantMessage) => void;
+    h.responses.push(new Promise<AssistantMessage>((resolve) => { release = resolve; }));
+    toolRow(h, "c1");
+    const first = h.summarizer.flush();
+    await new Promise((resolve) => setImmediate(resolve));
+    h.summarizer.reset();
+    release(answer([], { stopReason: "error", errorMessage: "prompt is too long: 300000 tokens > 200000 maximum" }));
+    await first;
+    toolRow(h, "c2");
+    h.responses.push(answer([{ id: "t1", toolIntention: "i2", toolResult: "r2" }]));
+    await h.summarizer.flush();
+    assert.equal(h.calls.length, 2, "the compaction already lifted the stop");
+    assert.equal(h.store.get("c2")?.toolResult, "r2");
+  });
+
   test("standalone rows list their full content", async () => {
     const h = harness();
     h.summarizer.enqueueStandalone("entry-1", "ws-lead-compaction-history", "User: please fix the build\nAssistant: fixed");

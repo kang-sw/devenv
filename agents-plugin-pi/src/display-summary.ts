@@ -497,8 +497,9 @@ export function createDisplaySummarizer(deps: DisplaySummarizerDeps): DisplaySum
     }
     if (disposed) return;
     // A provider-reported overflow (an error, or a silently truncated input)
-    // stops summaries until the next lead compaction resets the log.
-    if (isContextOverflow(response, model.contextWindow)) overflowed = true;
+    // stops summaries until the next lead compaction resets the log. A request
+    // that started before a reset overflowed the old log, not the new one.
+    if (generation === logGeneration && isContextOverflow(response, model.contextWindow)) overflowed = true;
     if (response.stopReason === "error" || response.stopReason === "aborted") {
       if (!overflowed && generation === logGeneration) carry = conversation;
       return;
