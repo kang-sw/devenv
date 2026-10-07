@@ -518,7 +518,14 @@
       "registered_at": "2026-10-04T10:35:29Z"
     },
     "261004-research-pi-post-bump-publish-worker-startup": {
-      "registered_at": "2026-10-04T04:20:22Z"
+      "registered_at": "2026-10-04T04:20:22Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "closed",
+        "touched_at": "2026-10-07T12:39:35Z"
+      }
     },
     "261004-research-pi-reviewer-report-scope-discovery": {
       "registered_at": "2026-10-04T03:10:48Z"
