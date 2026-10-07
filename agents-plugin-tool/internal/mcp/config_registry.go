@@ -198,6 +198,26 @@ var configRegistry = []configKeyEntry{
 		ResolverBacked: true,
 	},
 	{
+		// workflow.lang is the one free-form scalar knob: its value field
+		// declares no Enum, which is what exempts it from config.tune's
+		// lowercase-and-enum-check normalization (a language name such as
+		// "Korean" is stored as written).
+		Key:        wsconfig.ItemWorkflowLang,
+		WriterTool: "config.tune",
+		ResetTool:  "config.tune",
+		SelectorFields: []tuningField{{
+			Name:        "scope",
+			Description: "Storage scope. When omitted the write lands in the item's declared default scope (global).",
+			Enum:        wsconfig.ScopeSchemaEnum(),
+		}},
+		ValueFields: []tuningField{{
+			Name:        "value",
+			Description: "Language name, free-form (for example Korean). Omit when reset is true.",
+		}},
+		NoAgentVisible: true,
+		ResolverBacked: true,
+	},
+	{
 		// agents.tier has no wsconfig item key — it bypasses the resolver
 		// entirely (see ResolverBacked doc above), so Key here is the
 		// catalog knob id rather than a wsconfig.Item* constant.
