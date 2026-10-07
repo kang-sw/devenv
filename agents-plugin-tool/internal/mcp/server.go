@@ -3916,13 +3916,14 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "agenda.set",
-			"description": "Upsert a session-level agenda blob under a key. Agenda blobs hold mode context ('what are we doing and why') and are reminded at workflow-manual load. Freeform fallback for cases not covered by a typed enter.* tool.",
+			"description": "Upsert a session-level agenda blob under a key. Agenda blobs hold mode context ('what are we doing and why') and are reminded at workflow-manual load. Freeform fallback for cases not covered by a typed enter.* tool. Pass merge: true to patch the stored blob (RFC 7396 JSON Merge Patch) instead of replacing it, so a small change does not re-send the whole blob.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
 					"key":         stringProperty("Agenda blob name to upsert."),
-					"value":       objectProperty("Arbitrary JSON object stored under key."),
+					"value":       objectProperty("Arbitrary JSON object stored under key, or the patch when merge is true."),
+					"merge":       boolProperty("When true, apply value to the stored blob as an RFC 7396 JSON Merge Patch: a field set to null is removed, an object field merges recursively, and any other value (array, string, number, boolean) replaces the field whole. A missing key or a non-object stored blob is patched as {}. value must be an object. A field cannot be set to a literal null this way; use agenda.clear to remove the whole key. Absent or false replaces the blob."),
 				},
 				"required": []string{"session_key", "key", "value"},
 			},

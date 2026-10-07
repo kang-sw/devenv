@@ -657,6 +657,73 @@ func (s *sessionStore) setAgendaNote(sessionKey, key string, value json.RawMessa
 	return note, err
 }
 
+// mergeAgendaNote applies patch to the agenda blob under key as an RFC 7396
+// JSON Merge Patch inside the same mutateRecord write, and returns the agenda
+// size note like setAgendaNote. A missing key or a stored non-object blob is
+// patched as {}.
+func (s *sessionStore) mergeAgendaNote(sessionKey, key string, patch json.RawMessage) (string, error) {
+	var note string
+	err := s.mutateRecord(sessionKey, func(r *sessionRecord) error {
+		var target any
+		if stored, ok := r.Agenda[key]; ok {
+			decoded, err := decodeJSONNumber(stored)
+			if err != nil {
+				return fmt.Errorf("stored agenda blob %q is not valid JSON: %w", key, err)
+			}
+			target = decoded
+		}
+		decodedPatch, err := decodeJSONNumber(patch)
+		if err != nil {
+			return fmt.Errorf("merge patch is not valid JSON: %w", err)
+		}
+		merged, err := json.Marshal(jsonMergePatch(target, decodedPatch))
+		if err != nil {
+			return fmt.Errorf("merged agenda blob is not JSON-encodable: %w", err)
+		}
+		if r.Agenda == nil {
+			r.Agenda = map[string]json.RawMessage{}
+		}
+		r.Agenda[key] = merged
+		note = agendaSizeNote(r.Agenda)
+		return nil
+	})
+	return note, err
+}
+
+// decodeJSONNumber decodes raw keeping numbers as json.Number, so a merge
+// re-encodes untouched numeric fields without float64 rounding.
+func decodeJSONNumber(raw json.RawMessage) (any, error) {
+	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+
+// jsonMergePatch implements RFC 7396 MergePatch(target, patch): an object
+// patch merges field by field into target (a non-object target counts as {}),
+// a null field removes that field, and any non-object patch replaces target.
+func jsonMergePatch(target, patch any) any {
+	patchObj, ok := patch.(map[string]any)
+	if !ok {
+		return patch
+	}
+	targetObj, ok := target.(map[string]any)
+	if !ok {
+		targetObj = map[string]any{}
+	}
+	for name, value := range patchObj {
+		if value == nil {
+			delete(targetObj, name)
+			continue
+		}
+		targetObj[name] = jsonMergePatch(targetObj[name], value)
+	}
+	return targetObj
+}
+
 // clearAgenda removes the agenda blob for key. A missing key is a no-op.
 func (s *sessionStore) clearAgenda(sessionKey, key string) error {
 	return s.mutateRecord(sessionKey, func(r *sessionRecord) error {
@@ -806,11 +873,31 @@ func (s *Server) handleAgendaSet(id json.RawMessage, args map[string]any) respon
 	if !ok {
 		return toolTextResponse(id, "", fmt.Errorf("%s: value is required", tool))
 	}
+	merge := false
+	if rawMerge, present := args["merge"]; present && rawMerge != nil {
+		b, isBool := rawMerge.(bool)
+		if !isBool {
+			// A non-bool merge must not fall back to replace: the caller meant
+			// value as a patch, and replacing would drop the rest of the blob.
+			return toolTextResponse(id, "", fmt.Errorf("%s: merge must be a boolean", tool))
+		}
+		merge = b
+	}
+	if _, isObject := value.(map[string]any); merge && !isObject {
+		// RFC 7396 would let a non-object patch replace the blob whole and a
+		// null patch store a null blob; merge mode accepts only an object.
+		return toolTextResponse(id, "", fmt.Errorf("%s: value must be a JSON object when merge is true", tool))
+	}
 	raw, err := json.Marshal(value)
 	if err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("%s: value is not JSON-encodable: %w", tool, err))
 	}
-	note, err := s.sessions.setAgendaNote(sessionKey, key, raw)
+	var note string
+	if merge {
+		note, err = s.sessions.mergeAgendaNote(sessionKey, key, raw)
+	} else {
+		note, err = s.sessions.setAgendaNote(sessionKey, key, raw)
+	}
 	if err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 	}

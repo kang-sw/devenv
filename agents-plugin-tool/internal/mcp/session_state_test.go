@@ -811,6 +811,20 @@ func TestStoreAgendaRoundTrip(t *testing.T) {
 	}
 }
 
+func TestStoreMergeAgendaKeepsUntouchedNumbers(t *testing.T) {
+	store, key := newSandboxStore(t)
+	if err := store.setAgenda(key, "w", json.RawMessage(`{"big":12345678901234567,"f":1.10}`)); err != nil {
+		t.Fatalf("setAgenda: %v", err)
+	}
+	if _, err := store.mergeAgendaNote(key, "w", json.RawMessage(`{"x":1}`)); err != nil {
+		t.Fatalf("mergeAgendaNote: %v", err)
+	}
+	record, _ := store.readState(key)
+	if got := string(record.Agenda["w"]); got != `{"big":12345678901234567,"f":1.10,"x":1}` {
+		t.Fatalf("merge rewrote untouched numbers: %s", got)
+	}
+}
+
 func TestStoreClearAllAgenda(t *testing.T) {
 	store, key := newSandboxStore(t)
 	if err := store.setAgenda(key, "implement", json.RawMessage(`{"a":1}`)); err != nil {
@@ -3473,6 +3487,19 @@ func TestServeStdioAgendaListHandler(t *testing.T) {
 		t.Fatalf("agenda.list missing per-blob summaries: %s", got)
 	}
 
+	// merge: the merged blob's top-level keys show through agenda.list.
+	if got := callToolWithKey(t, server, 3007, key, "agenda.set", map[string]any{
+		"key":   "sprint",
+		"merge": true,
+		"value": map[string]any{"episode": nil, "phase": "review"},
+	}); !strings.Contains(got, "agenda set: sprint") {
+		t.Fatalf("agenda.set merge unexpected: %s", got)
+	}
+	got = callToolWithKey(t, server, 3008, key, "agenda.list", map[string]any{})
+	if !strings.Contains(got, "phase") || strings.Contains(got, "episode") {
+		t.Fatalf("agenda.list does not show the merged blob: %s", got)
+	}
+
 	// unknown session key -> compact error, not a silent empty list.
 	if got := callToolWithKey(t, server, 3004, "not-a-real-key", "agenda.list", map[string]any{}); !strings.Contains(got, "session key not found") {
 		t.Fatalf("agenda.list with bad key expected session-not-found error, got: %s", got)
@@ -3490,6 +3517,117 @@ func TestServeStdioAgendaListHandler(t *testing.T) {
 	}
 	if got := callToolWithKey(t, server, 3006, key, "agenda.list", map[string]any{}); !strings.Contains(got, "no agenda blobs") {
 		t.Fatalf("agenda.list after clear(all) unexpected: %s", got)
+	}
+}
+
+func TestServeStdioAgendaSetMerge(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 904000, root, nil))
+
+	id := 4000
+	set := func(blobKey string, args map[string]any) string {
+		t.Helper()
+		id++
+		args["key"] = blobKey
+		return callToolWithKey(t, server, id, key, "agenda.set", args)
+	}
+	stored := func(blobKey string) string {
+		t.Helper()
+		rec, ok := server.sessions.readState(key)
+		if !ok {
+			t.Fatalf("session record missing")
+		}
+		raw, ok := rec.Agenda[blobKey]
+		if !ok {
+			return "<absent>"
+		}
+		return string(raw)
+	}
+
+	base := map[string]any{
+		"keep":  "k",
+		"drop":  "d",
+		"nest":  map[string]any{"a": 1, "b": 2},
+		"list":  []any{1, 2, 3},
+		"count": 7,
+		"flag":  true,
+	}
+	if got := set("w", map[string]any{"value": base}); !strings.Contains(got, "agenda set: w") {
+		t.Fatalf("seed agenda.set unexpected: %s", got)
+	}
+
+	// field set, null removal, recursive merge keeping siblings, and whole
+	// replacement of array and scalar fields.
+	if got := set("w", map[string]any{"merge": true, "value": map[string]any{
+		"added": "new",
+		"drop":  nil,
+		"nest":  map[string]any{"b": nil, "c": 3},
+		"list":  []any{9},
+		"flag":  "now-a-string",
+	}}); !strings.Contains(got, "agenda set: w") {
+		t.Fatalf("merge agenda.set unexpected: %s", got)
+	}
+	want := `{"added":"new","count":7,"flag":"now-a-string","keep":"k","list":[9],"nest":{"a":1,"c":3}}`
+	if got := stored("w"); got != want {
+		t.Fatalf("merged blob mismatch\n got: %s\nwant: %s", got, want)
+	}
+
+	// an object patch onto a stored scalar field replaces it with the patch
+	// applied to {}.
+	set("w", map[string]any{"merge": true, "value": map[string]any{"keep": map[string]any{"x": 1, "y": nil}}})
+	if got := stored("w"); !strings.Contains(got, `"keep":{"x":1}`) {
+		t.Fatalf("object patch over scalar field not applied to {}: %s", got)
+	}
+
+	// missing key: created from the patch with null fields dropped.
+	set("fresh", map[string]any{"merge": true, "value": map[string]any{"a": 1, "gone": nil, "o": map[string]any{"z": nil}}})
+	if got := stored("fresh"); got != `{"a":1,"o":{}}` {
+		t.Fatalf("missing key not created from patch: %s", got)
+	}
+
+	// a stored non-object blob is treated as {} and replaced by the result.
+	set("scalar", map[string]any{"value": []any{"x"}})
+	set("scalar", map[string]any{"merge": true, "value": map[string]any{"a": "b"}})
+	if got := stored("scalar"); got != `{"a":"b"}` {
+		t.Fatalf("non-object stored blob not replaced: %s", got)
+	}
+
+	// merge absent or false keeps replace behavior.
+	set("w", map[string]any{"value": map[string]any{"only": 1}})
+	if got := stored("w"); got != `{"only":1}` {
+		t.Fatalf("plain set did not replace: %s", got)
+	}
+	set("w", map[string]any{"merge": false, "value": map[string]any{"other": 2}})
+	if got := stored("w"); got != `{"other":2}` {
+		t.Fatalf("merge:false did not replace: %s", got)
+	}
+
+	// merge with a non-object or null value is rejected and stores nothing.
+	for _, bad := range []any{nil, []any{1}, "s", 3, true} {
+		got := set("w", map[string]any{"merge": true, "value": bad})
+		if !strings.Contains(got, "value must be a JSON object when merge is true") {
+			t.Fatalf("merge with %#v not rejected: %s", bad, got)
+		}
+		if got := stored("w"); got != `{"other":2}` {
+			t.Fatalf("rejected merge changed the stored blob: %s", got)
+		}
+	}
+	if got := set("w", map[string]any{"merge": "true", "value": map[string]any{"x": 1}}); !strings.Contains(got, "merge must be a boolean") {
+		t.Fatalf("non-bool merge not rejected: %s", got)
+	}
+	if got := stored("w"); got != `{"other":2}` {
+		t.Fatalf("non-bool merge changed the stored blob: %s", got)
+	}
+	if got := set("never", map[string]any{"merge": true, "value": nil}); !strings.Contains(got, "must be a JSON object") {
+		t.Fatalf("null merge on missing key not rejected: %s", got)
+	}
+	if got := stored("never"); got != "<absent>" {
+		t.Fatalf("rejected merge created a blob: %s", got)
 	}
 }
 
