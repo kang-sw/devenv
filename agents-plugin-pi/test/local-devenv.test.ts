@@ -22,7 +22,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readLocalDevenvMarker, buildLocalDevenvBootstrap, type LocalDevenvBuildDeps } from "../src/local-devenv.ts";
+import { readLocalDevenvMarker, buildLocalDevenvBootstrap, createChildRuntimeEnsurer, runtimeContractHash, type ChildRuntimeEnsureDeps, type LocalDevenvBuildDeps } from "../src/local-devenv.ts";
 import { stageMailboxRuntime } from "../src/mailbox-waiter.ts";
 import { wrapLaunchErrorWithLocalDevenvContext } from "../src/bridge.ts";
 import { buildStdioSpawnOptions, spawnWsMcpClient } from "../src/mcp-stdio-client.ts";
@@ -473,5 +473,203 @@ describe("local-devenv gate: worker/explore never trigger buildLocalDevenvBootst
 
   test("fork role -> gate is true", () => {
     assert.equal(isLeadOrFork(readSpawnRole({ [WS_PI_SPAWN_ROLE_ENV]: "fork" })), true);
+  });
+});
+
+describe("createChildRuntimeEnsurer: lead reinstalls ws-mcp on runtime.json drift before a child launch", () => {
+  const BASE_CONTRACT = JSON.stringify({ plugin: "ws", plugin_version: "0.46.32", tools: {} });
+  const BUMPED_CONTRACT = JSON.stringify({ plugin: "ws", plugin_version: "0.46.33", tools: {} });
+
+  /** A marker-bearing plugin dir whose runtime.json starts at BASE_CONTRACT, with recording fake build and launcher. */
+  function fixture(opts: { marker?: boolean; role?: ChildRuntimeEnsureDeps["role"] } = {}) {
+    const dir = tempDir("ws-pi-child-runtime-ensure-");
+    if (opts.marker !== false) {
+      writeMarker(dir, { schema_version: 1, source_root: makeSourceRoot(dir), tool_dir: makeToolDir(dir), go: makeExecutableStub(dir) });
+    }
+    const runtimeJsonPath = join(dir, "runtime.json");
+    writeFileSync(runtimeJsonPath, BASE_CONTRACT);
+    const builds: string[][] = [];
+    const launches: Array<{ args: string[]; env: Record<string, string>; builtExisted: boolean }> = [];
+    const state = {
+      buildError: undefined as Error | undefined,
+      buildGate: undefined as Promise<void> | undefined,
+      reportedVersion: undefined as string | undefined,
+    };
+    const deps: ChildRuntimeEnsureDeps = {
+      role: opts.role,
+      pluginDir: dir,
+      runtimeJsonPath,
+      baselineHash: runtimeContractHash(BASE_CONTRACT),
+      runBuild: async (argv) => {
+        builds.push(argv);
+        if (state.buildGate) await state.buildGate;
+        if (state.buildError) throw state.buildError;
+        writeFileSync(argv[argv.indexOf("-o") + 1], "fake-ws-mcp", { mode: 0o755 });
+      },
+      runLauncher: async (args, env) => {
+        launches.push({ args, env, builtExisted: existsSync(env.WS_MCP_BOOTSTRAP_BINARY) });
+        const stamped = builds.at(-1)![builds.at(-1)!.indexOf("-ldflags") + 1].match(/main\.version=(\S+)/)![1];
+        return `${state.reportedVersion ?? stamped}\n`;
+      },
+    };
+    return {
+      dir,
+      deps,
+      builds,
+      launches,
+      state,
+      bump: (text = BUMPED_CONTRACT) => writeFileSync(runtimeJsonPath, text),
+      localBuilds: () => (existsSync(join(dir, ".runtime", "local-devenv")) ? readdirSync(join(dir, ".runtime", "local-devenv")) : []),
+      cleanup: () => rmSync(dir, { recursive: true, force: true }),
+    };
+  }
+
+  test("no drift: no build and no launcher run", async () => {
+    const f = fixture();
+    try {
+      await createChildRuntimeEnsurer(f.deps)!();
+      assert.equal(f.builds.length, 0);
+      assert.equal(f.launches.length, 0);
+    } finally { f.cleanup(); }
+  });
+
+  test("drift: one rebuild stamped with the current plugin_version, installed through one `version` launcher run, then the artifact is removed", async () => {
+    const f = fixture();
+    try {
+      const ensure = createChildRuntimeEnsurer(f.deps)!;
+      f.bump();
+      await ensure();
+      assert.equal(f.builds.length, 1);
+      assert.match(f.builds[0][f.builds[0].indexOf("-ldflags") + 1], /^-X main\.version=0\.46\.33 /, "the rebuild reads plugin_version fresh, not the startup contract");
+      assert.equal(f.launches.length, 1);
+      assert.deepEqual(f.launches[0].args, ["version"], "a subcommand that exits, never the blocking stdio server");
+      assert.match(f.launches[0].env.WS_MCP_BOOTSTRAP_BINARY, /\.runtime[/\\]local-devenv[/\\]ws-mcp\./);
+      assert.equal(f.launches[0].builtExisted, true, "the launcher sees the fresh build");
+      assert.deepEqual(f.localBuilds(), [], "the build artifact is removed once the launcher copied it");
+
+      await ensure();
+      assert.equal(f.builds.length, 1, "a later launch under the settled contract does nothing");
+      assert.equal(f.launches.length, 1);
+    } finally { f.cleanup(); }
+  });
+
+  test("concurrent launches after one drift share a single rebuild", async () => {
+    const f = fixture();
+    try {
+      const ensure = createChildRuntimeEnsurer(f.deps)!;
+      f.bump();
+      let release!: () => void;
+      f.state.buildGate = new Promise<void>((resolve) => { release = resolve; });
+      const pending = [ensure(), ensure(), ensure()];
+      await new Promise((resolve) => setImmediate(resolve));
+      release();
+      await Promise.all(pending);
+      assert.equal(f.builds.length, 1);
+      assert.equal(f.launches.length, 1);
+      await ensure();
+      assert.equal(f.builds.length, 1);
+    } finally { f.cleanup(); }
+  });
+
+  test("a failed rebuild fails the launch with its error, is not memoized, and the next launch retries", async () => {
+    const f = fixture();
+    try {
+      const ensure = createChildRuntimeEnsurer(f.deps)!;
+      f.bump();
+      f.state.buildError = new Error("go build: simulated failure");
+      await assert.rejects(ensure(), /runtime\.json changed since session start.*child not launched: go build: simulated failure/);
+      assert.equal(f.launches.length, 0, "no install after a failed build");
+      f.state.buildError = undefined;
+      await ensure();
+      assert.equal(f.builds.length, 2, "the failure was not memoized");
+      assert.equal(f.launches.length, 1);
+    } finally { f.cleanup(); }
+  });
+
+  test("an installed runtime reporting another version fails the launch (the bridge pin is exact)", async () => {
+    const f = fixture();
+    try {
+      const ensure = createChildRuntimeEnsurer(f.deps)!;
+      f.bump();
+      f.state.reportedVersion = "0.46.33-dev";
+      await assert.rejects(ensure(), /reported version "0\.46\.33-dev", expected "0\.46\.33"/);
+      assert.deepEqual(f.localBuilds(), [], "the artifact is removed on failure too");
+    } finally { f.cleanup(); }
+  });
+
+  test("no marker: drift triggers no build and no launcher run", async () => {
+    const f = fixture({ marker: false });
+    try {
+      const ensure = createChildRuntimeEnsurer(f.deps)!;
+      f.bump();
+      await ensure();
+      assert.equal(f.builds.length, 0);
+      assert.equal(f.launches.length, 0);
+    } finally { f.cleanup(); }
+  });
+
+  test("a worker or explore role gets no ensurer; a lead or fork does", () => {
+    for (const role of ["worker", "explore"] as const) {
+      const f = fixture({ role, marker: false });
+      try { assert.equal(createChildRuntimeEnsurer(f.deps), undefined, role); } finally { f.cleanup(); }
+    }
+    for (const role of [undefined, "fork"] as const) {
+      const f = fixture({ role, marker: false });
+      try { assert.equal(typeof createChildRuntimeEnsurer(f.deps), "function", String(role)); } finally { f.cleanup(); }
+    }
+  });
+
+  test("real launcher: the one-shot run installs the rebuild at the new contract path, and a child-style launch then reuses it", async () => {
+    const dir = tempDir("ws-pi-child-runtime-launcher-");
+    try {
+      const pluginDir = join(dir, "plugin");
+      const runtimeDir = join(dir, "runtime");
+      mkdirSync(join(pluginDir, "bin"), { recursive: true });
+      mkdirSync(join(pluginDir, "rsrc"), { recursive: true });
+      writeFileSync(join(pluginDir, "rsrc", "manifest.json"), "{}");
+      const launcherPath = join(pluginDir, "bin", "ws-mcp-launcher.py");
+      writeFileSync(launcherPath, readFileSync(join(process.cwd(), "bin", "ws-mcp-launcher.py"), "utf8"));
+      writeMarker(pluginDir, { schema_version: 1, source_root: makeSourceRoot(dir), tool_dir: makeToolDir(dir), go: makeExecutableStub(dir) });
+      const runtimeJsonPath = join(pluginDir, "runtime.json");
+      const baseText = readFileSync(join(process.cwd(), "runtime.json"), "utf8");
+      writeFileSync(runtimeJsonPath, baseText);
+      const base = JSON.parse(baseText) as { plugin_version: string };
+      const bumpedVersion = base.plugin_version.replace(/\d+$/, (patch) => String(Number(patch) + 1));
+      const bumpedText = baseText.replace(`"plugin_version": "${base.plugin_version}"`, `"plugin_version": "${bumpedVersion}"`);
+      assert.notEqual(bumpedText, baseText);
+
+      const launcherEnv = { PATH: process.env.PATH ?? "", WS_MCP_RUNTIME_DIR: runtimeDir };
+      const ensure = createChildRuntimeEnsurer({
+        role: undefined,
+        pluginDir,
+        runtimeJsonPath,
+        baselineHash: runtimeContractHash(baseText),
+        // A fake ws-mcp stamped like `go build -X main.version=...`.
+        runBuild: (argv) => {
+          const version = argv[argv.indexOf("-ldflags") + 1].match(/main\.version=(\S+)/)![1];
+          writeFileSync(
+            argv[argv.indexOf("-o") + 1],
+            `#!/usr/bin/env python3\nimport json, sys\ncontract = json.load(open(${JSON.stringify(runtimeJsonPath)}))\nif sys.argv[1:] == ['runtime', 'capabilities']:\n print(json.dumps({'version': ${JSON.stringify(version)}, 'mcp_protocol': contract['mcp_protocol'], 'tools': sorted(contract['tools']), 'commands': sorted(contract['commands'])}))\nelse:\n print(${JSON.stringify(version)})\n`,
+            { mode: 0o755 },
+          );
+        },
+        runLauncher: async (args, env) =>
+          execFileSync("python3", [launcherPath, ...args], { cwd: pluginDir, env: { ...launcherEnv, ...env }, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }),
+      })!;
+
+      writeFileSync(runtimeJsonPath, bumpedText);
+      await ensure();
+      const installed = join(runtimeDir, `ws-mcp-${bumpedVersion}-${createHash("sha256").update(bumpedText).digest("hex").slice(0, 12)}`);
+      assert.ok(existsSync(installed), `the launcher installed the rebuild at the new contract path ${installed}`);
+      assert.deepEqual(readdirSync(join(pluginDir, ".runtime", "local-devenv")), []);
+
+      // A child launch blanks the bootstrap overrides; with the contract path
+      // populated its launcher reuses that runtime instead of downloading.
+      const childEnv = { ...launcherEnv, WS_MCP_BOOTSTRAP_BINARY: "", WS_MCP_BOOTSTRAP_URL: "" };
+      const output = execFileSync("python3", [launcherPath, "version"], { cwd: pluginDir, env: childEnv, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+      assert.equal(output.trim(), bumpedVersion);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

@@ -158,6 +158,42 @@ const CHILD_MAILBOX_IDENTITY_ENVS = ["WS_MAILBOX", "WS_MAILBOX_AUTO"] as const;
 
 const READ_ONLY_BUILTINS: readonly string[] = READ_TOOLS;
 
+/**
+ * Per-registry child-launch preflight (the bridge's `ensureChildRuntime`),
+ * keyed like `registerAgentCostOwner` so every launch kind that shares a
+ * registry (spawn, ask, execute, explore, fork, and their dormant resumes)
+ * passes the one guard without each call site threading it.
+ */
+const childLaunchPreflights = new WeakMap<RpcAgentRegistry, () => Promise<void>>();
+
+export function registerChildLaunchPreflight(registry: RpcAgentRegistry, preflight: (() => Promise<void>) | undefined): void {
+  if (preflight) childLaunchPreflights.set(registry, preflight);
+  else childLaunchPreflights.delete(registry);
+}
+
+/**
+ * Keeps the most recent error-level `ui.notify` a child sends over its RPC
+ * stdout. A child whose session bootstrap fails reports through exactly that
+ * notify and exits with blank stderr (stderr would corrupt the parent TUI),
+ * so the launch error the parent reports would otherwise say only
+ * "Agent process exited". Subscribe before `client.start()`.
+ */
+export function captureChildBootstrapFailure(client: Pick<RpcClient, "onEvent">): { decorate(err: unknown): unknown; dispose(): void } {
+  let last: string | undefined;
+  const dispose = client.onEvent((event) => {
+    const e = event as { type?: unknown; method?: unknown; notifyType?: unknown; message?: unknown };
+    if (e.type === "extension_ui_request" && e.method === "notify" && e.notifyType === "error" && typeof e.message === "string") last = e.message;
+  });
+  return {
+    decorate(err) {
+      if (last === undefined) return err;
+      const original = err instanceof Error ? err : new Error(String(err));
+      return new Error(`${original.message}\nChild reported: ${last}`, { cause: original });
+    },
+    dispose,
+  };
+}
+
 export const TOOL_GROUPS: Record<ToolGroup, readonly string[]> = {
   "read-only": [...READ_ONLY_BUILTINS, REPORT_TO_LEAD_TOOL_NAME],
   "read-only-explore": [...READ_ONLY_BUILTINS, REPORT_TO_LEAD_TOOL_NAME, ...CHILD_MANAGEMENT_TOOLS],
@@ -3496,6 +3532,10 @@ export async function spawnAgent(
   // await opens no window in which the record reads as dormant. Its bootstrap
   // rides in the child's env; a bind failure fails the spawn before any
   // launch file or half-registered record exists.
+  // Before anything is registered or bound: a stop has no record to reach
+  // during a long rebuild, and a failure leaves nothing to clean up.
+  const preflight = childLaunchPreflights.get(registry);
+  if (preflight) await preflight();
   const channel = await ParentChannel.bind(1, ctx.channel?.bind);
   // `register` runs without an await: the alias and capacity guards and the
   // registration they protect are one atomic step, so two concurrent spawns
@@ -3572,6 +3612,7 @@ export async function spawnAgent(
   // unchanged — the thrown error still surfaces to the `ws-agent-spawn` caller
   // exactly as before; the push is additive, for the M/N bookkeeping.
   let client: RpcClient | undefined;
+  let bootstrapFailure: ReturnType<typeof captureChildBootstrapFailure> | undefined;
   const launch = claimLaunch(record);
   try {
     client = new RpcClient(
@@ -3592,6 +3633,7 @@ export async function spawnAgent(
       ),
     );
     record.client = client;
+    bootstrapFailure = captureChildBootstrapFailure(client);
     await client.start();
     capRpcClientStderr(client);
     await awaitChannelStage(client, channel.hello(), ctx.channel?.helloTimeoutMs ?? CHANNEL_HELLO_TIMEOUT_MS, "hello");
@@ -3635,9 +3677,12 @@ export async function spawnAgent(
     // A stop during the launch is the single terminal: its own settle is the
     // lead-visible outcome, and the spawn call still fails, saying so.
     if (launch.stopped()) throw launchStoppedError();
-    pushSpawnFailed(ctx.pi, registry, record, err);
-    throw err;
+    // Read after stop(): the child's last notify has been drained by then.
+    const reported = bootstrapFailure?.decorate(err) ?? err;
+    pushSpawnFailed(ctx.pi, registry, record, reported);
+    throw reported;
   } finally {
+    bootstrapFailure?.dispose();
     launch.release();
     if (forkLaunch) rmSync(dirname(forkLaunch.contextPath), { recursive: true, force: true });
   }
@@ -3776,6 +3821,7 @@ export async function sendToAgent(
     // cache-and-reuse contract as `systemPromptPath`/`modelBase`.
     let client: RpcClient | undefined;
     let channel: ParentChannel | undefined;
+    let bootstrapFailure: ReturnType<typeof captureChildBootstrapFailure> | undefined;
     const finishOwner = ctx.finishToken !== undefined && record.forkFinish?.token === ctx.finishToken
       ? record.forkFinish : undefined;
     const ownsFailure = () => record.launchGeneration === generation
@@ -3814,13 +3860,17 @@ export async function sendToAgent(
       // Every relaunch binds a fresh endpoint and credential under the new
       // generation; the previous launch's channel was closed with its client.
       channel = await ParentChannel.bind(generation, ctx.channel?.bind);
-      // A stop (or a replacement launch) during the bind already cleared or
-      // replaced this claim: the child must not be started for it.
+      const preflight = childLaunchPreflights.get(registry);
+      if (preflight) await preflight();
+      // A stop (or a replacement launch) during the bind or the preflight
+      // already cleared or replaced this claim: the child must not be started
+      // for it.
       if (record.client !== client) throw new Error("ws-pi-agent: launch stopped before the child started");
       record.channel = channel;
       observeChildSubtree(registry, record, channel);
       attachDescendantUsage(record, channel, onDescendantUsageChanged);
       Object.assign(options.env!, channel.bootstrapEnv());
+      bootstrapFailure = captureChildBootstrapFailure(client);
       await client.start();
       capRpcClientStderr(client);
       await awaitChannelStage(client, channel.hello(), ctx.channel?.helloTimeoutMs ?? CHANNEL_HELLO_TIMEOUT_MS, "hello");
@@ -3849,11 +3899,13 @@ export async function sendToAgent(
       // neither, and neither does a launch a stop ended (the stop's own
       // outcome is its terminal).
       const stopped = launch.stopped();
+      const reported = bootstrapFailure?.decorate(err) ?? err;
       if (ownsFailure() && record.client === undefined && !finishOwner && !stopped) {
-        pushSpawnFailed(ctx.pi, registry, record, err);
+        pushSpawnFailed(ctx.pi, registry, record, reported);
       }
       launch.release();
-      throw stopped ? launchStoppedError() : err;
+      bootstrapFailure?.dispose();
+      throw stopped ? launchStoppedError() : reported;
     } finally {
       if (forkLaunch) rmSync(dirname(forkLaunch.contextPath), { recursive: true, force: true });
     }
@@ -3867,7 +3919,12 @@ export async function sendToAgent(
         // ignored — see above.
       }
       await promptAgent(record, client!, message, { writer });
+    } catch (err) {
+      // The first prompt is still part of the launch: a child whose
+      // bootstrap failed after hello surfaces its exit here.
+      throw bootstrapFailure?.decorate(err) ?? err;
     } finally {
+      bootstrapFailure?.dispose();
       launch.release();
     }
     publishSubtree(registry, true);
@@ -4243,6 +4300,7 @@ export function registerAgentTools(
 ): AgentToolsHandle {
   const rpcRegistry: RpcAgentRegistry = new Map();
   registerAgentCostOwner(rpcRegistry, sessionCtx.storage);
+  registerChildLaunchPreflight(rpcRegistry, bridge.ensureChildRuntime);
   installSubtreePublisher(rpcRegistry, sessionCtx.subtreeUpstream, () => heldPushQueue.length, () => ({ ...ownTurnRef }));
   const stopLivenessProbe = startLivenessProbe(pi, rpcRegistry);
 

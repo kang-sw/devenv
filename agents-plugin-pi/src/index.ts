@@ -389,14 +389,62 @@ export async function bootstrapOrFailLoud<T>(
   role: SpawnRole | undefined,
   bootstrap: () => Promise<T>,
   exitProcess: (code: number) => never = (code) => process.exit(code),
+  drainBeforeExit: () => Promise<void> = () => drainStdoutBeforeExit(process.stdout),
 ): Promise<T | undefined> {
   try {
     return await bootstrap();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     ui.notify(`ws-pi-agent: session bootstrap failed — this session has no ws-mcp bridge or custom tools (${message})`, "error");
-    if (role !== undefined) exitProcess(1);
+    if (role !== undefined) {
+      // The notify is the child's only report to its parent (an RPC
+      // `extension_ui_request` on stdout; stderr would corrupt the parent
+      // TUI). Let it reach the pipe before exiting.
+      await drainBeforeExit();
+      exitProcess(1);
+    }
     return undefined;
+  }
+}
+
+/** Bound on how long a failing child waits for its final RPC output before exiting anyway. */
+export const STDOUT_DRAIN_TIMEOUT_MS = 2_000;
+const STDOUT_DRAIN_POLL_MS = 10;
+
+export interface DrainableStream {
+  readonly writableLength: number;
+  once(event: "drain", listener: () => void): unknown;
+  removeListener(event: "drain", listener: () => void): unknown;
+}
+
+/**
+ * Waits, at most `timeoutMs`, until `stream` holds no buffered output. Pi
+ * exposes no public flush: in RPC mode its output guard reroutes
+ * `process.stdout.write` to stderr and queues RPC lines on a promise tail
+ * that writes through the original stdout, so a write callback on
+ * `process.stdout.write` waits on the wrong stream. Pipe writes are
+ * asynchronous on macOS, so `process.exit` right after the notify can drop
+ * it. The yield lets the queued line reach the stream; `writableLength` (or
+ * `'drain'`, polled because small writes never emit it) then covers the
+ * pipe write itself.
+ */
+export async function drainStdoutBeforeExit(stream: DrainableStream, timeoutMs = STDOUT_DRAIN_TIMEOUT_MS): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  const yieldTurn = () => new Promise<void>((resolve) => setImmediate(resolve));
+  await yieldTurn();
+  while (stream.writableLength > 0) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return;
+    await new Promise<void>((resolve) => {
+      const finish = () => {
+        clearTimeout(timer);
+        stream.removeListener("drain", finish);
+        resolve();
+      };
+      const timer = setTimeout(finish, Math.min(STDOUT_DRAIN_POLL_MS, remaining));
+      stream.once("drain", finish);
+    });
+    await yieldTurn();
   }
 }
 

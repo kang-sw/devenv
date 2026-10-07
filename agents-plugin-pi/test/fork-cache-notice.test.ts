@@ -110,7 +110,8 @@ test("production initial spawn attaches before prompt; live/dormant sends never 
   const saved = Object.fromEntries(names.map(n => [n, proto[n]]));
   Object.assign(proto, {
     async start() {
-      this.listeners = [];
+      // As the real client: listeners subscribed before start() stay attached.
+      this.listeners ??= [];
       assert.ok(readForkLaunchContext(this.options.env)?.context, "every fork launch carries the captured context");
       const home = this.options.args[this.options.args.indexOf("--session-dir") + 1];
       this.sessionFile = join(home, "notice-child.jsonl");
@@ -124,7 +125,7 @@ test("production initial spawn attaches before prompt; live/dormant sends never 
       await connectFakeChild(this.options.env, this.options.args, { fork: { sessionId: "child-id", sessionPath: this.sessionFile, ownSessionKey: "notice-child-key" } });
     },
     async stop() {}, async setThinkingLevel() {},
-    onEvent(fn: (e: unknown) => void) { this.listeners.push(fn); return () => {}; },
+    onEvent(fn: (e: unknown) => void) { (this.listeners ??= []).push(fn); return () => {}; },
     async getState() { return { sessionId: "child-id", sessionFile: this.sessionFile, model: { provider: "offline", id: "test" }, thinkingLevel: "off" }; },
     async prompt() { for (const fn of this.listeners) fn(event()); },
   });
