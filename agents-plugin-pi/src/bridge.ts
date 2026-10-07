@@ -38,9 +38,7 @@ import { WS_PI_PARENT_SESSION_KEY_ENV, isLeadOrFork, readSpawnRole, type SpawnRo
 // BridgeHandle` from this file (type-only, erased at build/runtime), so no
 // runtime circular import is created in either direction.
 import { resolveModelForAliasViaWsMcp, inheritModelFromToolCtx } from "./spawner.ts";
-// lead-compaction.ts reaches spawner.ts, whose only import of this file is
-// the type-only `BridgeHandle` above, so this value import adds no cycle.
-import { ADAPTER_MESSAGE_LABEL } from "./adapter-label.ts";
+import { labelAdapterText } from "./adapter-label.ts";
 import { modelCatalogFromToolCtx, formatTierWarning, type ModelCatalogEntry, type TierRejection } from "./model-catalog.ts";
 import { registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
 import { dedupeRead, playbookReadKey, workflowManualKey, workflowManualResultText } from "./playbook-read-dedupe.ts";
@@ -756,9 +754,9 @@ export function revivedKeyToAdopt(rawSessionKey: unknown, ownKey: string | undef
   return key;
 }
 
-/** The one-line notice appended to a `workflow_manual` result whose revive changed the default key. */
+/** The notice (label line plus one sentence) appended to a `workflow_manual` result whose revive changed the default key. */
 export function buildDefaultKeyChangedLine(previous: string | undefined, current: string): string {
-  return `${ADAPTER_MESSAGE_LABEL} Default session key changed: ${previous ?? "(unset)"} -> ${current}. Calls that omit session_key and compaction summaries now use ${current}.`;
+  return labelAdapterText(`Default session key changed: ${previous ?? "(unset)"} -> ${current}. Calls that omit session_key and compaction summaries now use ${current}.`);
 }
 
 /**

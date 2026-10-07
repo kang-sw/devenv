@@ -185,10 +185,9 @@ describe("revivedKeyToAdopt", () => {
 });
 
 describe("buildDefaultKeyChangedLine", () => {
-  test("is one line opening with the shared adapter label and naming both keys", () => {
+  test("opens with the shared adapter label line and names both keys", () => {
     const line = buildDefaultKeyChangedLine("old-key", "new-key");
-    assert.equal(line, `${ADAPTER_MESSAGE_LABEL} Default session key changed: old-key -> new-key. Calls that omit session_key and compaction summaries now use new-key.`);
-    assert.ok(!line.includes("\n"));
+    assert.equal(line, `${ADAPTER_MESSAGE_LABEL}\nDefault session key changed: old-key -> new-key. Calls that omit session_key and compaction summaries now use new-key.`);
     assert.match(buildDefaultKeyChangedLine(undefined, "new-key"), /changed: \(unset\) -> new-key\./);
   });
 });
