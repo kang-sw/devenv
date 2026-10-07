@@ -523,26 +523,13 @@
     "261004-research-pi-reviewer-report-scope-discovery": {
       "registered_at": "2026-10-04T03:10:48Z"
     },
-    "261007-bug-pi-adapter-messages-read-as-user-text": {
-      "registered_at": "2026-10-07T04:24:37Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-07T05:27:20Z",
-        "impl": {
-          "branch": "impl/develop/clay-lance-duh"
-        }
-      }
-    },
     "261007-bug-pi-session-key-reissued-on-resume": {
       "registered_at": "2026-10-07T04:24:41Z",
       "lease": {
         "email": "ki6080@gmail.com",
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-10-07T05:40:21Z",
         "impl": {
           "branch": "impl/develop/skirt-shell-aware"
