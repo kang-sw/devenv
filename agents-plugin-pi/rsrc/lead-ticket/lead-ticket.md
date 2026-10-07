@@ -185,10 +185,10 @@ reply. Omit a group that has no item this round.
 ```text
 # Open Decision Queue
 
-**Announced defaults** - acknowledged together with the technical decisions
+**Announced defaults** - acknowledge once, together with the technical decisions
 (1) Will <do X> - <citation>
 
-**Technical decisions** - acknowledged together with the defaults; worth reviewing if you hold the technical picture
+**Technical decisions** - acknowledge once, together with the defaults; worth reviewing if you hold the technical picture
 (2) Will <X> over <Y> - <technical reason>
 
 **Policy questions** - answer each
@@ -202,7 +202,8 @@ reply. Omit a group that has no item this round.
   per-item answer. A technical decision's line names the losing alternative
   and why it lost, so a reviewer can check the call without asking.
 - A policy question's first presentation is the full block, including an item
-  added mid-settlement and an announced item that became a policy question.
+  added mid-settlement and an announced or technical item that became a policy
+  question.
   The recommendation lives only in the trailing `>` line of its block.
 - A policy question already presented is re-asked as one line,
   `(n) [open] <one-line decision>`; re-print its context only when the user

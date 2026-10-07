@@ -2257,7 +2257,7 @@ func TestPlaybookPrintGoldenLeadTicket(t *testing.T) {
 				// announced defaults, then technical decisions with the reader
 				// hint and their one-line format, then the visibly labeled
 				// policy group closest to the reply.
-				"```text\n# Open Decision Queue\n\n**Announced defaults** - acknowledged together with the technical decisions\n(1) Will <do X> - <citation>\n\n**Technical decisions** - acknowledged together with the defaults; worth reviewing if you hold the technical picture\n(2) Will <X> over <Y> - <technical reason>\n\n**Policy questions** - answer each\n(3) <one-line decision>\n- <context>\n- <alternative: ...>\n> <recommendation and why>\n```",
+				"```text\n# Open Decision Queue\n\n**Announced defaults** - acknowledge once, together with the technical decisions\n(1) Will <do X> - <citation>\n\n**Technical decisions** - acknowledge once, together with the defaults; worth reviewing if you hold the technical picture\n(2) Will <X> over <Y> - <technical reason>\n\n**Policy questions** - answer each\n(3) <one-line decision>\n- <context>\n- <alternative: ...>\n> <recommendation and why>\n```",
 			} {
 				if !strings.Contains(body, want) {
 					t.Errorf("body missing lead-ticket text %q:\n%s", want, body)
