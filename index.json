@@ -551,7 +551,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-07T13:00:25Z"
+        "touched_at": "2026-10-07T13:02:45Z",
+        "impl": {
+          "branch": "impl/develop/hasty-grew-hula"
+        }
       }
     },
     "261007-bug-pi-fork-lineage-keeps-bootstrap-key-after-adoption": {
