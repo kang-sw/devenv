@@ -98,6 +98,7 @@ import {
   DEFAULT_REREAD_BUDGET_BYTES,
   extractLeadProse,
   FALLBACK_SYSTEM_PROMPT,
+  GOAL_ANNOUNCEMENT_PREFIX,
   GOAL_REMINDER_MARKER_PREFIX,
   isLeadCompactionDetails,
   LEAD_COMPACT_CUSTOM_TYPE,
@@ -114,6 +115,7 @@ import {
   type LeadProse,
   type PreparationTrigger,
 } from "./lead-compaction.ts";
+import { labelAdapterText } from "./adapter-label.ts";
 import { readSpawnRole } from "./process-role.ts";
 import { staticConfigReader, thenOrNow, type GoalLoopConfigKey, type GoalLoopConfigReader } from "./adapter-config.ts";
 import { createToolPreviewTuiRef, registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
@@ -295,9 +297,9 @@ export const COMPACTION_BUDGET_CONFIG_KEYS: readonly GoalLoopConfigKey[] = ["com
 // Pure message builders.
 // ---------------------------------------------------------------------------
 
-/** The goal-entry announcement injected by `/goal <goal>`. Wording pinned verbatim by the ticket. */
+/** The goal-entry announcement injected by `/goal <goal>`. Wording pinned verbatim by the ticket; the adapter label is added at the send. */
 export function buildGoalAnnouncement(goal: string): string {
-  return `Goal armed: ${goal}`;
+  return `${GOAL_ANNOUNCEMENT_PREFIX}${goal}`;
 }
 
 /**
@@ -1012,7 +1014,7 @@ export function registerGoalLoop(
       reminder += `\n\nCarried forward verbatim from before compaction:\n${state.pendingCarryForward}`;
     }
     try {
-      pi.sendUserMessage(reminder, { deliverAs: "followUp" });
+      pi.sendUserMessage(labelAdapterText(reminder), { deliverAs: "followUp" });
     } catch (error) {
       if (outstandingReminderHandoff?.id === handoff.id) outstandingReminderHandoff = undefined;
       throw error;
@@ -1173,7 +1175,9 @@ export function registerGoalLoop(
    * then queues as a followUp behind the streaming turn. A busy session
    * queues a followUp itself and needs neither.
    */
-  function sendAdapterPrompt(text: string, wanted: () => boolean, options?: { deliverAs: "followUp" }): void {
+  function sendAdapterPrompt(prompt: string, wanted: () => boolean, options?: { deliverAs: "followUp" }): void {
+    // Labeled once here, so a prompt held for the next start carries it too.
+    const text = labelAdapterText(prompt);
     if (leadWakeStartPendingRef.current) {
       promptsAwaitingStart.push({ text, wanted });
       return;

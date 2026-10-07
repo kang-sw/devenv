@@ -1,6 +1,7 @@
 import type { CustomEntry, ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
-import { humanTextOf } from "./lead-compaction.ts";
+import { adapterLabeledBody } from "./adapter-label.ts";
+import { GOAL_ANNOUNCEMENT_PREFIX, humanTextOf } from "./lead-compaction.ts";
 import { isChildProcess } from "./goal-loop.ts";
 import { loadHostPiTui, Container, Markdown, Text, stripTerminalSequences } from "./pi-tui.ts";
 
@@ -32,9 +33,12 @@ export function selectCompactionHistory(entries: readonly SessionEntry[]): Histo
     if (!text.trim()) continue;
     if (role === "user") {
       if (humanTextOf(text) === undefined) continue;
-      // These are the other user-role injections owned by goal-loop.ts. The
-      // body remains original (including skill expansions), not dialog prose.
-      if (text.startsWith("Goal armed: ")) continue;
+      // Labeled adapter traffic stays out even where the dialog keeps it
+      // (the goal announcement collapses to `/goal <goal>` there). The body
+      // remains original (including skill expansions), not dialog prose.
+      if (adapterLabeledBody(text) !== undefined) continue;
+      // Unlabeled goal-loop injections recorded before the label existed.
+      if (text.startsWith(GOAL_ANNOUNCEMENT_PREFIX)) continue;
       if (/^Compaction complete\. Invoke `lead-revive` \(`ws-skill lead-revive`\) with session key /.test(text)) continue;
     }
     messages.push({ entryId: entry.id, role, text });

@@ -122,6 +122,7 @@ import { createWebSearch } from "./web-search.ts";
 import { verifyWebReadiness, WEB_HOME_ENV, WEB_READINESS_KIND } from "./web-readiness.ts";
 import { beginSubtreeDispatch, installSubtreePublisher, observeSubtreeChannel, publishSubtree, scheduleSubtreeTelemetry, type OwnTurnState, type SubtreeDescendant, type SubtreeSnapshot, type SubtreeUpstream } from "./subtree-lifecycle.ts";
 import { PUSH_BATCH_CUSTOM_TYPE, PUSH_BATCH_VERSION, type PushBatchItem, type PushBatchItemState } from "./push-protocol.ts";
+import { labelAdapterContent, labelAdapterText } from "./adapter-label.ts";
 import { capacityEvictionCost, isRemovedAgent, persistAgentCostCheckpoint, persistEvictedAgentCost, registerAgentCostOwner } from "./agent-cost.ts";
 import { createOutputRateTracker, type OutputRateTracker } from "./output-rate.ts";
 
@@ -1173,12 +1174,12 @@ export function reserveAdapterPromptStart(onTimeout: () => void): boolean {
   return wakeOptions !== undefined && reserveWakeStart(wakeOptions, onTimeout);
 }
 
-/** The idle push-wake user line. Lead compaction (lead-compaction.ts) recognizes it as adapter traffic, so both sides share this builder. */
+/** The idle push-wake user line, sent under the adapter label. Lead compaction (lead-compaction.ts) recognizes the label; `isPushWakeLine` stays for unlabeled entries recorded before it. */
 export function buildPushWakeLine(count: number): string {
   return `${count} ws messages waiting; process the incoming reports.`;
 }
 
-/** True for exactly the text `buildPushWakeLine` produces. */
+/** True for exactly the text `buildPushWakeLine` produces, without the label. */
 export function isPushWakeLine(text: string): boolean {
   return /^\d+ ws messages waiting; process the incoming reports\.$/.test(text);
 }
@@ -1252,13 +1253,18 @@ function requestPushWake(pi: ExtensionAPI): void {
   syncOwnTurnOwed();
   pushWakeAwaitingStart = true;
   try {
-    pi.sendUserMessage(buildPushWakeLine(heldPushQueue.length), { deliverAs: "followUp" });
+    pi.sendUserMessage(labelAdapterText(buildPushWakeLine(heldPushQueue.length)), { deliverAs: "followUp" });
   } catch {
     // Keep the queue and timeout: handled input and rejected preflight need the same retry.
   }
 }
 
 export type RawPushBatchMode = "when-held" | "always";
+
+/** A raw summary as sent on its own: the label opens its content. Held raw sends keep the unlabeled message, since a batch carries the label once. */
+function labelRawSend(message: Parameters<ExtensionAPI["sendMessage"]>[0]): Parameters<ExtensionAPI["sendMessage"]>[0] {
+  return { ...message, content: labelAdapterContent(message.content) };
+}
 
 /** Admit raw summaries through the very same FIFO as family-shaped reports. */
 export function sendToLead(
@@ -1293,7 +1299,7 @@ function admitPush(pi: ExtensionAPI, held: HeldPush | HeldRawSend): void {
       heldPushQueue.push(held);
       submitHeldPushBatch(pi, held.deliverAs === "steer" ? "steer" : "followUp");
     } else {
-      pi.sendMessage(held.message, { deliverAs: held.deliverAs, triggerTurn: true });
+      pi.sendMessage(labelRawSend(held.message), { deliverAs: held.deliverAs, triggerTurn: true });
     }
   } else {
     sendPush(pi, held.registry, held.record, held.family, held.payload, held.deliverAs, held.terminal);
@@ -1623,7 +1629,7 @@ function sendPush(
     pi.sendMessage(
       {
         customType: family,
-        content: buildPushContent(family, displayId, payload, status),
+        content: labelAdapterText(buildPushContent(family, displayId, payload, status)),
         display: true,
         details: details as never,
       },
@@ -1658,7 +1664,7 @@ function submitHeldPushBatch(pi: ExtensionAPI, deliverAs: "steer" | "followUp", 
       pi.sendMessage(
         {
           customType: PUSH_BATCH_CUSTOM_TYPE,
-          content: buildPushBatchContent(modelItems),
+          content: labelAdapterText(buildPushBatchContent(modelItems)),
           display: true,
           details: { version: PUSH_BATCH_VERSION, items } as never,
         },

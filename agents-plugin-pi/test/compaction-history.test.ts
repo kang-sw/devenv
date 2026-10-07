@@ -66,6 +66,11 @@ test("fewer than twenty, empty and excluded message/entry types", () => {
   user(sm, `Goal yet running <!-- ${GOAL_REMINDER_MARKER_PREFIX}1 -->`);
   user(sm, "Goal armed: injected goal");
   user(sm, buildCompactionResumeMessage("key"));
+  // 261007: the same injections as sent today, under the adapter label.
+  user(sm, `[system message from ws-pi-plugin]\n${buildPushWakeLine(2)}`);
+  user(sm, `[system message from ws-pi-plugin]\nGoal yet running <!-- ${GOAL_REMINDER_MARKER_PREFIX}2 -->`);
+  user(sm, "[system message from ws-pi-plugin]\nGoal armed: labeled goal");
+  user(sm, `[system message from ws-pi-plugin]\n${buildCompactionResumeMessage("key")}`);
   assistant(sm, [{ type: "thinking", thinking: "think only" }, { type: "toolCall", id: "call", name: "ws-compact", arguments: { current_work: "PROSE" } }]);
   sm.appendMessage({ role: "toolResult", toolCallId: "call", toolName: "ws-compact", content: [{ type: "text", text: "TOOL RESULT" }], isError: false, timestamp: 3 });
   sm.appendCustomMessageEntry("control", "CUSTOM MESSAGE", true);

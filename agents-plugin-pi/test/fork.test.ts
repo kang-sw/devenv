@@ -80,7 +80,7 @@ function initializePushLifecycle(pi: ExtensionAPI): void {
   const handlers = new Map<string, () => void>();
   pi.on = ((event: string, handler: () => void) => handlers.set(event, handler)) as ExtensionAPI["on"];
   pi.sendUserMessage = (content, options) => {
-    assert.match(String(content), /^\d+ ws messages waiting;[^\n]+$/);
+    assert.match(String(content), /^\[system message from ws-pi-plugin\]\n\d+ ws messages waiting;[^\n]+$/);
     assert.deepEqual(options, { deliverAs: "followUp" });
     idle = false;
     handlers.get("agent_start")?.();

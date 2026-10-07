@@ -47,6 +47,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadHostPiTui } from "./pi-tui.ts";
 import { PUSH_FAMILIES } from "./spawner.ts";
 import { PUSH_BATCH_CUSTOM_TYPE, type PushBatchItem } from "./push-protocol.ts";
+import { adapterLabeledBody } from "./adapter-label.ts";
 import { createBoundedText, updateText, type NativeBox, type NativeText } from "./tool-result-render.ts";
 
 /** The three visual bands of a pushed message, split out of its plain-text content. */
@@ -83,10 +84,12 @@ function extractText(content: unknown): string {
  * legitimately carries no status line — nothing delegated — keeps its last
  * payload line as a payload line. Returns `undefined` for anything this
  * module cannot recognize (empty content, a foreign message shape), which the
- * caller turns into Pi's default rendering rather than an empty box.
+ * caller turns into Pi's default rendering rather than an empty box. The
+ * adapter label line a sent push opens with is not part of the head.
  */
 export function buildPushRenderLines(message: { content?: unknown; details?: unknown }): PushRenderLines | undefined {
-  const lines = extractText(message.content).split("\n");
+  const text = extractText(message.content);
+  const lines = (adapterLabeledBody(text) ?? text).split("\n");
   if (lines.length === 0 || lines[0].trim() === "") return undefined;
 
   const head = lines[0];
