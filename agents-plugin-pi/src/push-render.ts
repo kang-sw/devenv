@@ -49,6 +49,9 @@ import { PUSH_FAMILIES } from "./spawner.ts";
 import { PUSH_BATCH_CUSTOM_TYPE, type PushBatchItem } from "./push-protocol.ts";
 import { adapterLabeledBody } from "./adapter-label.ts";
 import { createBoundedText, updateText, type NativeBox, type NativeText } from "./tool-result-render.ts";
+import { buildSummaryCard, paintBold, summarizedRow, summaryKindLabel } from "./display-summary-render.ts";
+import type { DisplaySummaryStore } from "./display-summary.ts";
+import { summaryIdOf } from "./summary-id.ts";
 
 /** The three visual bands of a pushed message, split out of its plain-text content. */
 export interface PushRenderLines {
@@ -191,6 +194,11 @@ export async function loadPushTuiModules(): Promise<PushTuiModules> {
  * here, unlike the tool renderCall/renderResult hooks) — the `BoundedText`
  * body's own internal width-keyed cache is what pays for itself across
  * ordinary same-content redraws within one call's returned component.
+ *
+ * With a display-summary store and a summary id in `details`, a collapsed
+ * card is a render-time switch: the same box shows the summary once the
+ * store has one (the head stays the human head, bold); absent either, or
+ * expanded, the card is returned exactly as before.
  */
 export function buildPushComponent(
   tui: PushTuiModules,
@@ -198,6 +206,7 @@ export function buildPushComponent(
   theme: PushRenderTheme | undefined,
   expanded = false,
   family?: string,
+  summaries?: DisplaySummaryStore,
 ): unknown {
   const parts = buildPushRenderLines(message);
   if (!parts) return undefined;
@@ -235,15 +244,21 @@ export function buildPushComponent(
     box.addChild(new tui.Text(paint("dim", "state: superseded"), 0, 0));
   }
   if (parts.status) box.addChild(new tui.Text(paint("dim", parts.status), 0, 0));
-  return box;
+  const summaryHead = paint(isAgentReport ? "customMessageLabel" : "muted", paintBold(theme, displayHead));
+  return summarizedRow(box, summaries, summaryIdOf(message.details), expanded, (summary) => buildSummaryCard(tui, summaryHead, summary, theme));
 }
 
-/** Render a batch as the same independent cards its structured items had before batching. */
+/**
+ * Render a batch as the same independent cards its structured items had
+ * before batching. With a display-summary store, each item card switches to
+ * its own summary by its own `details` id.
+ */
 export function buildPushBatchComponent(
   tui: PushTuiModules,
   message: { details?: unknown },
   theme: PushRenderTheme | undefined,
   expanded = false,
+  summaries?: DisplaySummaryStore,
 ): unknown {
   const rawItems = (message.details as { items?: unknown } | undefined)?.items;
   if (!Array.isArray(rawItems) || rawItems.length === 0) return undefined;
@@ -254,7 +269,7 @@ export function buildPushBatchComponent(
     if (!item || typeof item.customType !== "string") continue;
     let component: unknown;
     if ((PUSH_FAMILIES as readonly string[]).includes(item.customType)) {
-      component = buildPushComponent(tui, item, theme, expanded, item.customType);
+      component = buildPushComponent(tui, item, theme, expanded, item.customType, summaries);
     } else {
       const paint = (color: string, text: string): string => {
         try { return theme?.fg?.(color, text) ?? text; } catch { return text; }
@@ -277,7 +292,8 @@ export function buildPushBatchComponent(
         }, theme);
         box.addChild(body);
       }
-      component = box;
+      const summaryHead = paint("customMessageLabel", paintBold(theme, summaryKindLabel(item.customType)));
+      component = summarizedRow(box, summaries, summaryIdOf(item.details), expanded, (summary) => buildSummaryCard(tui, summaryHead, summary, theme));
     }
     if (component) {
       container.addChild(component);
@@ -297,15 +313,15 @@ export function buildPushBatchComponent(
  * failure mode: a rejection from e.g. `assertActive()` during teardown) keeps
  * its existing `.then((registered) => ...)` wiring unchanged.
  */
-export async function registerPushMessageRenderers(pi: ExtensionAPI, tuiModules?: PushTuiModules): Promise<boolean> {
+export async function registerPushMessageRenderers(pi: ExtensionAPI, tuiModules?: PushTuiModules, summaries?: DisplaySummaryStore): Promise<boolean> {
   const tui = tuiModules ?? (await loadPushTuiModules());
   for (const family of PUSH_FAMILIES) {
     pi.registerMessageRenderer(family, (message, options, theme) =>
-      buildPushComponent(tui, message as { content?: unknown; details?: unknown }, theme as unknown as PushRenderTheme, (options as { expanded?: boolean } | undefined)?.expanded, family) as never,
+      buildPushComponent(tui, message as { content?: unknown; details?: unknown }, theme as unknown as PushRenderTheme, (options as { expanded?: boolean } | undefined)?.expanded, family, summaries) as never,
     );
   }
   pi.registerMessageRenderer(PUSH_BATCH_CUSTOM_TYPE, (message, options, theme) =>
-    buildPushBatchComponent(tui, message as { details?: unknown }, theme as unknown as PushRenderTheme, (options as { expanded?: boolean } | undefined)?.expanded) as never,
+    buildPushBatchComponent(tui, message as { details?: unknown }, theme as unknown as PushRenderTheme, (options as { expanded?: boolean } | undefined)?.expanded, summaries) as never,
   );
   return true;
 }
