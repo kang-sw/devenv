@@ -530,7 +530,14 @@
       "registered_at": "2026-10-07T05:35:57Z"
     },
     "261007-feat-odq-technical-decision-class": {
-      "registered_at": "2026-10-07T07:45:49Z"
+      "registered_at": "2026-10-07T07:45:49Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-10-07T07:52:51Z"
+      }
     },
     "261007-feat-pi-display-summary": {
       "registered_at": "2026-10-07T07:00:22Z",
