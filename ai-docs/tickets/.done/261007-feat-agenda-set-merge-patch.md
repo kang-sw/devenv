@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 2498861d01ecf26b
 sage-review-completeness-reviewed: 2498861d01ecf26b
+completed: 2026-10-07
 ---
 
 # agenda.set merge option applies a JSON Merge Patch to the stored blob
@@ -104,3 +105,30 @@ fields dropped, a stored non-object blob replaced, `merge` absent or `false`
 keeping replace behavior, a non-object or `null` `value` with
 `merge: true` rejected with the stored blob unchanged, and the merged result
 visible through `agenda.list` (extend `TestServeStdioAgendaListHandler`).
+
+### Result (0bfcc4549) - 2026-10-07
+
+- `agenda.set` takes an optional boolean `merge`. With `merge: true` the
+  handler calls the new `sessionStore.mergeAgendaNote`, which applies `value`
+  to the stored blob as an RFC 7396 merge patch inside `mutateRecord` and
+  returns the size note from the same write. A missing key or non-object
+  stored blob is patched as `{}`. Replace (`merge` absent or `false`) is
+  unchanged. Commits: a71eaff02, 0bfcc4549.
+- A non-object or `null` `value` with `merge: true` is rejected and nothing
+  is stored. A `merge` that is present but not a boolean is also rejected
+  (fixed after review), so a mistyped flag never falls back to replace.
+- The tool description and the `merge` property description state the rules,
+  `null` removal, whole array replacement, and the literal-`null` limit.
+  No `runtime.json` edit.
+- Decision: stored and patch blobs decode with `UseNumber`, so untouched
+  numbers re-encode exactly as stored (pinned by
+  `TestStoreMergeAgendaKeepsUntouchedNumbers`). The merged output has sorted
+  keys, the same as the replace path.
+- Tests: `TestServeStdioAgendaSetMerge` covers every case the phase lists,
+  `TestServeStdioAgendaListHandler` now shows a merged blob through
+  `agenda.list`, and `TestStoreMergeAgendaKeepsUntouchedNumbers` was added.
+  `go build ./...`, `go vet ./...` and `go test ./... -count=1` in
+  `agents-plugin-tool` all pass.
+- Review (lite): clean, with 2 minor findings. The non-bool `merge` finding
+  was fixed. Left open: no test asserts the size note on the merge path. The
+  note is computed the same way as on the replace path.
