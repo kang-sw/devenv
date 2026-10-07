@@ -26,12 +26,12 @@
  */
 
 import { execFile } from "node:child_process";
-import { unlinkSync } from "node:fs";
+import { readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { spawnWsMcpClient, type McpStdioClient, type McpContentItem, type McpToolCallResult } from "./mcp-stdio-client.ts";
 import { assertVersionPin, readRuntimeContract } from "./version-check.ts";
-import { buildLocalDevenvBootstrap, type LocalDevenvContext } from "./local-devenv.ts";
+import { buildLocalDevenvBootstrap, createChildRuntimeEnsurer, runtimeContractHash, type LocalDevenvContext } from "./local-devenv.ts";
 import { ADAPTER_CONFIG_MANIFEST_FILE, WS_MCP_CONFIG_MANIFESTS_ENV } from "./adapter-config.ts";
 import { WS_PI_PARENT_SESSION_KEY_ENV, isLeadOrFork, readSpawnRole, type SpawnRole } from "./process-role.ts";
 // Value import from spawner.ts is safe: spawner.ts only imports `type
@@ -81,6 +81,13 @@ export interface BridgeHandle {
   localRuntimeBinary?: string;
   /** Release the bootstrap after the mailbox owns its copy; also called on shutdown/failure. */
   releaseLocalBootstrap(): void;
+  /**
+   * Awaited before every child launch (spawn or dormant resume). Present only
+   * for a lead/fork whose session started under the local-devenv marker; it
+   * reinstalls ws-mcp when `runtime.json` changed mid-session (see
+   * `createChildRuntimeEnsurer`) and rejects when that fails.
+   */
+  ensureChildRuntime?: () => Promise<void>;
   /**
    * The same default-filled session_key ref used by every bridged tool's
    * fill-or-forward path (`resolveSessionKey`). A live object reference, not
@@ -602,6 +609,26 @@ function runGoBuild(argv: string[], opts: { cwd: string }): Promise<void> {
   });
 }
 
+/** Bound for the one-shot launcher install; it never downloads (a bootstrap binary is set). */
+const LAUNCHER_ONE_SHOT_TIMEOUT_MS = 120_000;
+
+/**
+ * Real `ChildRuntimeEnsureDeps.runLauncher`: the same `python3 <launcher>`
+ * shape and cwd as `spawnWsMcpClient`, with piped stdio (Pi's TUI owns the
+ * terminal) folded into the rejection on failure.
+ */
+function runLauncherOnce(launcherPath: string, pluginDir: string, args: string[], env: Record<string, string>): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile("python3", [launcherPath, ...args], { cwd: pluginDir, env: { ...process.env, ...env }, encoding: "utf8", timeout: LAUNCHER_ONE_SHOT_TIMEOUT_MS }, (err, stdout, stderr) => {
+      if (err) {
+        reject(new Error(`ws-mcp launcher install run failed (${err.message})\n--- stderr ---\n${stderr ?? ""}`));
+        return;
+      }
+      resolve(stdout);
+    });
+  });
+}
+
 const MERCENARY_RAW_PREFIX = "mercenary.";
 
 /**
@@ -811,6 +838,9 @@ export function resolveSessionKey(
 }
 
 export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promise<BridgeHandle> {
+  // The contract this session's launcher installs under; a later change is
+  // drift `ensureChildRuntime` must cover before any child launch.
+  const baselineContractHash = runtimeContractHash(readFileSync(opts.runtimeJsonPath));
   const runtime = readRuntimeContract(opts.runtimeJsonPath);
   const policy = readDelegationPolicy();
   const knownKeys = new Set<string>();
@@ -838,6 +868,19 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
       localDevenvContext = bootstrap.context;
     }
   }
+  // Only a session that built at startup has a marker to rebuild from; with
+  // no marker every child launch stays exactly as before.
+  const ensureChildRuntime = localDevenvContext
+    ? createChildRuntimeEnsurer({
+        role: readSpawnRole(process.env),
+        pluginDir: opts.pluginDir,
+        runtimeJsonPath: opts.runtimeJsonPath,
+        baselineHash: baselineContractHash,
+        runBuild: runGoBuild,
+        runLauncher: (args, env) => runLauncherOnce(opts.launcherPath, opts.pluginDir, args, env),
+        notify: (m) => notify(opts.ui, `ws-pi-bridge: ${m}`),
+      })
+    : undefined;
 
   // Every role's ws-mcp loads this package's adapter-setting manifest, so a
   // child reads (through `config.get`) the `pi.*` values its lead tuned.
@@ -1169,6 +1212,7 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
     client,
     localRuntimeBinary: localDevenvContext?.builtPath,
     releaseLocalBootstrap,
+    ensureChildRuntime,
     renderRegistry,
     defaultSessionKeyRef: defaultKeyRef,
     wsToolNames: tools.map((tool) => sanitizeToolName(tool.name)),

@@ -20,7 +20,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mock, test } from "node:test";
 import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
-import { bootstrapOrFailLoud } from "../src/index.ts";
+import { EventEmitter } from "node:events";
+import { bootstrapOrFailLoud, drainStdoutBeforeExit } from "../src/index.ts";
 import { startBridge } from "../src/bridge.ts";
 import { registerAgentTools } from "../src/spawner.ts";
 import { WS_PI_EXPLORE_MODE_ENV, WS_PI_SPAWN_ROLE_ENV } from "../src/process-role.ts";
@@ -223,4 +224,68 @@ test("healthy synthesis researcher through the guard has the same persistent Exp
 
   await result!.agentTools.stopAll();
   result!.handle.shutdown();
+});
+
+/** A stdout stand-in: `writableLength` is set by the fake notify and cleared (with `'drain'`) by the test. */
+class FakeStdout extends EventEmitter {
+  writableLength = 0;
+}
+
+/** Runs `fn` while recording every `process.stderr.write`, which no bootstrap-failure path may use. */
+async function withStderrSpy<T>(fn: () => Promise<T>): Promise<{ result: T; stderrWrites: number }> {
+  const original = process.stderr.write;
+  let stderrWrites = 0;
+  process.stderr.write = ((..._args: unknown[]) => { stderrWrites += 1; return true; }) as typeof process.stderr.write;
+  try {
+    return { result: await fn(), stderrWrites };
+  } finally {
+    process.stderr.write = original;
+  }
+}
+
+test("spawned child: exit waits for the deferred notify write to drain before exitProcess(1)", async () => {
+  const stdout = new FakeStdout();
+  const events: string[] = [];
+  // Pi's RPC output guard issues the line on a later microtask/turn.
+  const ui = { notify: () => { queueMicrotask(() => { stdout.writableLength = 4096; events.push("notify-buffered"); }); } };
+  setTimeout(() => { stdout.writableLength = 0; events.push("drained"); stdout.emit("drain"); }, 40);
+  const exitSpy = mock.fn((_code: number) => { events.push("exit"); return undefined as never; });
+
+  const { stderrWrites } = await withStderrSpy(() =>
+    bootstrapOrFailLoud(ui, "worker", async () => { throw new Error("boom"); }, exitSpy, () => drainStdoutBeforeExit(stdout, 5_000)),
+  );
+
+  assert.deepEqual(events, ["notify-buffered", "drained", "exit"]);
+  assert.equal(exitSpy.mock.calls[0].arguments[0], 1);
+  assert.equal(stderrWrites, 0, "the failure is reported only through the RPC notify, never stderr");
+});
+
+test("spawned child: a write that never drains still exits after the bound", async () => {
+  const stdout = new FakeStdout();
+  const ui = { notify: () => { stdout.writableLength = 4096; } };
+  const exitSpy = mock.fn((_code: number) => undefined as never);
+  const startedAt = Date.now();
+
+  await bootstrapOrFailLoud(ui, "explore", async () => { throw new Error("boom"); }, exitSpy, () => drainStdoutBeforeExit(stdout, 80));
+
+  const elapsed = Date.now() - startedAt;
+  assert.equal(exitSpy.mock.calls.length, 1, "fail-closed even when output is stuck");
+  assert.ok(elapsed >= 70 && elapsed < 2_000, `exited at the bound (${elapsed}ms)`);
+});
+
+test("host lead: notify and return, with no drain, no exit, and nothing on stderr", async () => {
+  const { ui, notify } = fakeUi();
+  const exitSpy = mock.fn((_code: number) => undefined as never);
+  const drainSpy = mock.fn(async () => {});
+
+  const { result, stderrWrites } = await withStderrSpy(() =>
+    bootstrapOrFailLoud(ui, undefined, async () => { throw new Error("boom"); }, exitSpy, drainSpy),
+  );
+
+  assert.equal(result, undefined);
+  assert.equal(notify.mock.calls.length, 1);
+  assert.equal(notify.mock.calls[0].arguments[1], "error");
+  assert.equal(drainSpy.mock.calls.length, 0);
+  assert.equal(exitSpy.mock.calls.length, 0);
+  assert.equal(stderrWrites, 0);
 });

@@ -28,8 +28,9 @@
 
 import { accessSync, constants as fsConstants, existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { isAbsolute, join } from "node:path";
+import { isLeadOrFork, type SpawnRole } from "./process-role.ts";
 
 export interface LocalDevenvMarker {
   source_root: string;
@@ -204,5 +205,95 @@ export async function buildLocalDevenvBootstrap(
   return {
     env: { WS_MCP_BOOTSTRAP_BINARY: finalPath },
     context: { sourceRoot: marker.source_root, sourceCommit: shortCommit, builtPath: finalPath },
+  };
+}
+
+/** The launcher's own contract identity: its binary name embeds sha256 of these exact `runtime.json` bytes. */
+export function runtimeContractHash(bytes: Buffer | string): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+export interface ChildRuntimeEnsureDeps {
+  /** Calling process's spawn role; only a lead or fork ever rebuilds. */
+  role: SpawnRole | undefined;
+  pluginDir: string;
+  runtimeJsonPath: string;
+  /** `runtimeContractHash` of the `runtime.json` the bridge's own launcher started under. */
+  baselineHash: string;
+  runBuild: LocalDevenvBuildDeps["runBuild"];
+  /**
+   * One-shot launcher run: `args` forwarded to the installed binary, `env`
+   * overlaid on the caller's environment. Resolves with its stdout; rejects
+   * on a non-zero exit.
+   */
+  runLauncher: (args: string[], env: Record<string, string>) => Promise<string>;
+  notify?: (message: string) => void;
+}
+
+/**
+ * The lead-side child-launch guard for a mid-session `runtime.json` change
+ * (a ws version bump committed by the running lead). Children never build
+ * and never receive a bootstrap override; they reuse whatever runtime the
+ * launcher installed for the contract they read. A bump moves that contract
+ * to a binary path nothing has installed yet, so a child's launcher would
+ * fall through to a release download that does not exist until CI publishes.
+ *
+ * The returned function, awaited before every child launch, compares the
+ * current `runtime.json` hash with the contracts already settled (the
+ * bridge's startup contract included). On drift it rebuilds from source,
+ * stamped with the CURRENT `plugin_version`, and runs the unchanged launcher
+ * once with `WS_MCP_BOOTSTRAP_BINARY` so its own install/verify/stamp path
+ * places the binary at the new contract path. `version` is forwarded because
+ * a bare launcher run execs the stdio server and blocks on stdin.
+ *
+ * Concurrent launches after one drift share the single in-flight rebuild; a
+ * settled contract is memoized so later launches do nothing; a failure is
+ * not memoized, so the next launch retries. With no marker the rebuild is a
+ * no-op (nothing to install, nothing to fall back to). `undefined` for a
+ * worker/explore role: grandchildren stay on the release path (260907
+ * "Lead-only").
+ */
+export function createChildRuntimeEnsurer(deps: ChildRuntimeEnsureDeps): (() => Promise<void>) | undefined {
+  if (!isLeadOrFork(deps.role)) return undefined;
+  const settled = new Set([deps.baselineHash]);
+  const inflight = new Map<string, Promise<void>>();
+
+  const rebootstrap = async (bytes: Buffer, hash: string): Promise<void> => {
+    const contract = JSON.parse(bytes.toString("utf8")) as { plugin_version?: unknown };
+    const pluginVersion = contract.plugin_version;
+    if (typeof pluginVersion !== "string" || pluginVersion.length === 0) {
+      throw new Error(`${deps.runtimeJsonPath} has no string "plugin_version"`);
+    }
+    deps.notify?.(`runtime.json changed since session start (contract ${hash.slice(0, 12)}); reinstalling ws-mcp ${pluginVersion} for child launches`);
+    const bootstrap = await buildLocalDevenvBootstrap(deps.pluginDir, pluginVersion, { runBuild: deps.runBuild, notify: deps.notify });
+    if (!bootstrap) return;
+    try {
+      const reported = (await deps.runLauncher(["version"], bootstrap.env)).trim();
+      if (reported !== pluginVersion) {
+        throw new Error(`installed ws-mcp reported version "${reported}", expected "${pluginVersion}"`);
+      }
+    } finally {
+      // The launcher copied the build into the contract path (or failed);
+      // either way this unique artifact has no further reader.
+      try { unlinkSync(bootstrap.context.builtPath); } catch { /* best effort */ }
+    }
+  };
+
+  return async () => {
+    const bytes = readFileSync(deps.runtimeJsonPath);
+    const hash = runtimeContractHash(bytes);
+    if (settled.has(hash)) return;
+    let pending = inflight.get(hash);
+    if (!pending) {
+      pending = rebootstrap(bytes, hash).then(
+        () => { settled.add(hash); },
+        (error: unknown) => {
+          const message = error instanceof Error ? error.message : String(error);
+          throw new Error(`ws-pi-bridge: runtime.json changed since session start; local-devenv reinstall for contract ${hash.slice(0, 12)} failed, child not launched: ${message}`);
+        },
+      ).finally(() => { inflight.delete(hash); });
+      inflight.set(hash, pending);
+    }
+    await pending;
   };
 }
