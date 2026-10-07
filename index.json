@@ -538,7 +538,7 @@
         "email": "ki6080@gmail.com",
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-10-07T08:22:38Z",
         "impl": {
           "branch": "impl/develop/train-pond-heap"
