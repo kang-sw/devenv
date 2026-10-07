@@ -6,6 +6,7 @@ sage-review-completeness: completed
 sage-review-completeness-reviewed: 334afb51b553243a
 sage-review-design: completed
 sage-review-design-reviewed: e93543b47318b9f6
+completed: 2026-10-07
 ---
 
 # Pi lead default session key is reissued on resume and ignores the revived key
@@ -176,6 +177,30 @@ parent-carrying, delegate or leaf, or other-root key is refused without a
 mint or owner change; a live other process's presence is not stolen; the
 argument is absent from `tools/list`.
 
+### Result (e08398238) - 2026-10-07
+
+Landed in `agents-plugin-tool/internal/mcp/server.go`: `handleLeadLogin`
+branches to `handleLeadRelogin` when `relogin_session_key` is set. The key
+must be known, parent-less, lead-scope, and bound to the call's canonical
+root; it is then passed to `rebindMailboxOwnerAtFerrule` and returned through
+the shared `leadLoginResponse` tail (same text/JSON shape and bootstrap alarm
+as a mint). The handler comment records why the argument is hidden and the
+`/import` copied-file case. The `tools/list` schema is untouched.
+
+Decisions: a re-login that also carries `parent_session_key` or a non-lead
+`capability` is refused rather than ignored (those arguments describe a key
+the re-login could never return). A re-login whose owner rebind is refused
+by the live-holder rule still returns the key; the refusal is the rebind's,
+not the call's.
+
+Verification: `go test ./...` in `agents-plugin-tool`: all packages ok (mcp
+279s). New tests: `TestFerruleReloginReturnsSameKeyWithoutMint`,
+`TestFerruleReloginRefusesForeignKeys` (unknown, parent-carrying, delegate,
+leaf, other-root, combined parent, combined capability; no mint),
+`TestFerruleSchemaOmitsReloginArgument`,
+`TestMailboxReloginRebindsOwnerToExistingKey` (owner moves; refused keys
+leave it), `TestMailboxReloginRefusesLiveDifferentPIDHolder`.
+
 ### Phase 2: Persist, reuse, and adopt the lead key (Pi)
 
 Builds on Phase 1. The bootstrap in `startBridge` (`src/bridge.ts`) gains
@@ -192,6 +217,46 @@ next compaction summary's key line); no adoption on a refused re-login, a
 failed call, the sentinel, or another tool's explicit key; no line when the
 key is unchanged; the legacy session converging on its first revive; and the
 child policy path unchanged.
+
+### Result (dc698ea04) - 2026-10-07
+
+Landed in `agents-plugin-pi/src/bridge.ts` and `src/index.ts`:
+`BridgeOptions.sessionId` (passed from `ctx.sessionManager.getSessionId()`),
+`LEAD_KEY_ENTRY = "ws-pi-lead-key"`, `restoreLeadKey`, `revivedKeyToAdopt`,
+`buildDefaultKeyChangedLine`, and `reloginLeadKey`. The bootstrap re-logs in
+with the newest entry for the session id before minting; a refusal notifies
+a warning and mints. The settled key is recorded unless the newest entry
+already holds it. A lead-role `workflow_manual` (mapped and verbatim paths)
+that succeeds with an explicit non-sentinel key other than the default
+re-logs in with it; on success the default key, `knownKeys`, and the session
+entry follow, and one line prefixed with the imported `ADAPTER_MESSAGE_LABEL`
+is appended after the dedupe so a pointer result still carries it. The
+compaction summary reads the live default key ref, so it names the adopted
+key without further change.
+
+Decisions: the ownership gate is `!policy && readSpawnRole() === undefined &&
+sessionId` (every spawned child, forks included, carries a delegation
+policy, and a fork's readiness check treats its previous own key as stale).
+A degraded bootstrap (no default key) still adopts a revived key, with
+`(unset)` as the previous key. `reloginLeadKey` treats a returned key other
+than the requested one as a refusal. Tests live in a new
+`test/lead-key-resume.test.ts` that drives the production `startBridge`
+against a journaling fake ws-mcp, rather than growing `bridge.test.ts`.
+
+Verification: `npm test` in `agents-plugin-pi`: 2073 tests, 2070 pass, 0
+fail, 3 skipped. The new file covers reuse with no mint across the three
+start reasons (the trigger is the entry, which none of them changes), the
+newest entry winning, minting for a new session and for a fork carrying the
+lead's entry, the refused-key fallback with its warning, no session id, the
+child policy paths, revive adoption (default key, entry, pinned line, filled
+omitted key, compaction summary line) on both dispatch paths, no adoption on
+a refused re-login, a failed call, the sentinel, or another tool's explicit
+key, no line when unchanged, and the legacy session converging on its first
+revive and reusing that key on the next restart.
+
+Review (lite, one pass): no Critical or Important findings; two Minor
+findings (owner-unchanged coverage for parent-carrying and other-root
+refusals; a JSDoc displaced by the insertion) fixed in the follow-up commit.
 
 ## Sage Review Round 1 (2026-10-07)
 
