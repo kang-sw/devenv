@@ -10,6 +10,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: af7a63b4229eea5d
 sage-review-completeness-reviewed: af7a63b4229eea5d
+completed: 2026-10-07
 ---
 
 # Pi children fail to start after a ws version bump in a pre-bump lead
@@ -192,6 +193,46 @@ Verification:
   blanks `WS_MCP_BOOTSTRAP_BINARY`/`WS_MCP_BOOTSTRAP_URL`.
 - Existing `agents-plugin-pi` test suite passes.
 
+### Result (91acbaca7) - 2026-10-07
+
+- `local-devenv.ts`: `runtimeContractHash` (sha256 of the `runtime.json`
+  bytes, the launcher's key) and `createChildRuntimeEnsurer`, which returns
+  `undefined` for a worker/explore role. On drift from the settled contracts
+  (startup contract included) it rebuilds with the current `plugin_version`
+  read fresh from `runtime.json`. It then runs the unchanged launcher once
+  with `version` and `WS_MCP_BOOTSTRAP_BINARY`, requires the reported version
+  to equal `plugin_version` exactly, and removes the build artifact. One
+  in-flight rebuild is shared per hash. Only success is memoized. Failures
+  reject with a "child not launched" error.
+- `bridge.ts`: computes the baseline hash at startup and creates the ensurer
+  only when the startup local-devenv build ran (marker present, lead/fork).
+  Exposes it as `BridgeHandle.ensureChildRuntime`, with `runLauncherOnce`
+  (`python3 <launcher> version`, piped, 120s bound) as the real launcher run.
+- `spawner.ts`: `registerChildLaunchPreflight` keys the ensurer by
+  `RpcAgentRegistry` (WeakMap, like `registerAgentCostOwner`), and
+  `registerAgentTools` registers it. Every launch kind that shares the
+  registry therefore passes it. `spawnAgent` awaits it before the channel
+  bind and record registration. This deviates from "immediately before
+  `client.start()`": `stopAgent` ignores a record that has no client, so a
+  stop during a long rebuild would have been lost. Failing before
+  registration also leaves nothing to clean up. The dormant resume in
+  `sendToAgent` awaits it after its synchronous claim and channel bind, and
+  the existing `record.client !== client` check catches a stop during the
+  rebuild.
+- Verification: `test/local-devenv.test.ts` has new ensurer cases: no drift,
+  drift with a stamped version and a `version` launcher run and artifact
+  removal, concurrent sharing, a failure that is not memoized and is retried,
+  a version mismatch, no marker, and the role gate. It also has a
+  real-launcher case: the copied production launcher installs the rebuild at
+  the new contract path, and a child-style launch with blanked bootstrap env
+  reuses it instead of downloading. `test/child-launch-guard.test.ts` covers
+  spawn and resume: the preflight runs once before start, the child env still
+  blanks `WS_MCP_BOOTSTRAP_BINARY`/`URL`, a failing preflight fails the launch
+  without starting a child, and nothing runs when no preflight is
+  registered. `npm test` (agents-plugin-pi): 2101 pass, 0 fail, 3 skipped.
+  The skips are pre-existing opt-in develop-marker tests, which require the
+  `develop` branch checkout.
+
 ### Phase 2: Carry Pi child bootstrap failures to the parent
 
 Implement the last decision in `bootstrapOrFailLoud` (child side) and the
@@ -225,3 +266,37 @@ Verification:
 - Unit test: the no-role (host lead) path keeps its current notify-and-return
   behavior; nothing is written to stderr on either path.
 - Existing `agents-plugin-pi` test suite passes.
+
+### Result (91acbaca7) - 2026-10-07
+
+- `index.ts`: on a child role, `bootstrapOrFailLoud` now awaits
+  `drainStdoutBeforeExit(process.stdout)` before `exitProcess(1)`. The drain
+  yields first, then waits on `writableLength`, polled every 10ms because
+  small pipe writes never emit `'drain'`, and gives up after 2s. The drain is
+  an injectable fifth parameter. The host-lead path is unchanged: it notifies
+  and returns. Nothing writes to stderr.
+- `spawner.ts`: `captureChildBootstrapFailure` subscribes with
+  `client.onEvent` before `client.start()` and keeps the last error-level
+  `extension_ui_request` notify. It appends `\nChild reported: <message>` to
+  whatever error the spawn or resume launch path rethrows or pushes through
+  `pushSpawnFailed`. The resume's first prompt is covered too, because it
+  sits outside the launch try. The read happens after `client.stop()`.
+- `test/fork-cache-notice.test.ts`: its RpcClient harness reset `listeners`
+  inside `start()`. That breaks a subscription made before start, which the
+  real client keeps, so the harness now matches the real client.
+- Verification: `test/session-bootstrap-guard.test.ts` covers the exit
+  waiting for a deferred notify write to drain, the exit happening at the
+  bound when the write never drains, and the host lead skipping the drain
+  and the exit. No stderr writes occur on either path.
+  `test/child-launch-guard.test.ts` covers spawn and resume with the exit
+  surfacing at start and at the first prompt, using the most recent
+  error-level notify, and keeps the original error when there is no error
+  notify. It also has a real-process regression in which a child runs the
+  real `bootstrapOrFailLoud` with a 256KB notify. That child exits with code
+  1, and the parent's launch error ends with its notify. With the drain
+  disabled, the same test fails, which was checked by hand. Full suite as in
+  Phase 1.
+- Lite review: no correctness findings. Two minor notes. The production
+  wiring in `bridge.ts` and `registerAgentTools` is exercised only through
+  injected seams. A stale error notify from a still-live child could decorate
+  an unrelated launch error, which the ticket's wording accepts.
