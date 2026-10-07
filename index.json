@@ -530,7 +530,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-07T05:26:55Z"
+        "touched_at": "2026-10-07T05:27:20Z",
+        "impl": {
+          "branch": "impl/develop/clay-lance-duh"
+        }
       }
     },
     "261007-bug-pi-session-key-reissued-on-resume": {
