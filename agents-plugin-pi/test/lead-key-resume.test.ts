@@ -29,7 +29,8 @@ import {
   startBridge,
   type BridgeOptions,
 } from "../src/bridge.ts";
-import { ADAPTER_MESSAGE_LABEL, buildLeadCompactionSummary, renderLeadProse } from "../src/lead-compaction.ts";
+import { ADAPTER_MESSAGE_LABEL } from "../src/adapter-label.ts";
+import { buildLeadCompactionSummary, renderLeadProse } from "../src/lead-compaction.ts";
 import { DELEGATION_ENV } from "../src/delegation-policy.ts";
 import type { McpToolCallResult } from "../src/mcp-stdio-client.ts";
 

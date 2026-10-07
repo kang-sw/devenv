@@ -40,7 +40,7 @@ import { WS_PI_PARENT_SESSION_KEY_ENV, isLeadOrFork, readSpawnRole, type SpawnRo
 import { resolveModelForAliasViaWsMcp, inheritModelFromToolCtx } from "./spawner.ts";
 // lead-compaction.ts reaches spawner.ts, whose only import of this file is
 // the type-only `BridgeHandle` above, so this value import adds no cycle.
-import { ADAPTER_MESSAGE_LABEL } from "./lead-compaction.ts";
+import { ADAPTER_MESSAGE_LABEL } from "./adapter-label.ts";
 import { modelCatalogFromToolCtx, formatTierWarning, type ModelCatalogEntry, type TierRejection } from "./model-catalog.ts";
 import { registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
 import { dedupeRead, playbookReadKey, workflowManualKey, workflowManualResultText } from "./playbook-read-dedupe.ts";
