@@ -8,8 +8,8 @@ related:
   260907-bug-ws-pi-children-inherit-stale-bootstrap-binary-env: origin of the child bootstrap-env blanking policy
 sage-review-design: completed
 sage-review-completeness: completed
-sage-review-design-reviewed: 6987f2d8f3f671db
-sage-review-completeness-reviewed: 6987f2d8f3f671db
+sage-review-design-reviewed: af7a63b4229eea5d
+sage-review-completeness-reviewed: af7a63b4229eea5d
 ---
 
 # Pi children fail to start after a ws version bump in a pre-bump lead
@@ -136,10 +136,10 @@ Mechanism, traced from source on 2026-10-07:
 |---|---|---|
 | scope.span | multi-file | agents-plugin-pi/src/bridge.ts, spawner.ts, local-devenv.ts, index.ts plus tests |
 | scope.surface | internal | Pi adapter internals only; launcher and version-check.ts are not edited |
-| scope.new_public_symbol | internal | a shared async ensure helper awaited before `client.start()` (Phase 1); names are the implementer's |
-| scope.new_type_contract | internal | injectable build/launcher/flush dependencies for tests; no exported contract change |
+| scope.new_public_symbol | no | a shared async ensure helper awaited before `client.start()` (Phase 1); names are the implementer's |
+| scope.new_type_contract | no | injectable build/launcher/flush dependencies for tests; no exported contract change |
 | scope.test_surface | existing | agents-plugin-pi/test/local-devenv.test.ts, spawner.test.ts, session-bootstrap-guard.test.ts |
-| complexity.reuse_points | existing | buildLocalDevenvBootstrap and runGoBuild for the build; the launcher's existing WS_MCP_BOOTSTRAP_BINARY install path via a one-shot run (Decisions, Install mechanism); client.onEvent for the parent-side notify capture |
+| complexity.reuse_points | confirmed | buildLocalDevenvBootstrap and runGoBuild for the build; the launcher's existing WS_MCP_BOOTSTRAP_BINARY install path via a one-shot run (Decisions, Install mechanism); client.onEvent for the parent-side notify capture |
 | complexity.side_effect_risk | moderate | adds a build and runtime install to the child spawn/resume path, with concurrent-launch dedupe |
 | risk.correctness | moderate | drift detection plus shared single rebuild across concurrently launched children |
 | risk.fit | moderate | introduces lead-side mutable state across spawn and resume against the 260907 Lead-only and no-cache decisions |
