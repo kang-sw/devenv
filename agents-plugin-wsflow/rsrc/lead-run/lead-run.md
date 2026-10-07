@@ -85,9 +85,9 @@ the turn: relay the reason.
    ```
 
 7. Wait for the host's completion notification. Do not poll, and do not edit
-   the ticket or move `HEAD` meanwhile; housekeeping that cannot wait uses
-   the sparse worktree the workflow manual's `### Git` section describes,
-   released before **Handle the report** merges.
+   the worker's ticket or move `HEAD` in its checkout meanwhile; housekeeping
+   that cannot wait uses the sparse worktree the workflow manual's `### Git`
+   section describes, released before **Handle the report** merges.
 
 One worker in flight per invocation, unless the opt-in parallel route below is
 approved for this run.
