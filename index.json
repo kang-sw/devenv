@@ -544,6 +544,9 @@
     },
     "261007-bug-session-record-cross-process-write-race": {
       "registered_at": "2026-10-07T05:35:57Z"
+    },
+    "261007-feat-stale-agenda-pruning-nudge": {
+      "registered_at": "2026-10-07T05:36:00Z"
     }
   }
 }
