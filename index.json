@@ -551,7 +551,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-07T13:55:20Z"
+        "touched_at": "2026-10-07T13:55:50Z",
+        "impl": {
+          "branch": "impl/develop/avoid-stoic-grape"
+        }
       }
     },
     "261007-bug-pi-child-start-fails-after-version-bump": {
