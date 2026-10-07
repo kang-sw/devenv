@@ -6,6 +6,7 @@ sage-review-completeness: completed
 sage-review-completeness-reviewed: 539d05f67005aea5
 sage-review-design: completed
 sage-review-design-reviewed: c1d51878ca941f7e
+completed: 2026-10-07
 ---
 
 # Pi adapter messages reach the model as unlabeled user text
@@ -122,3 +123,52 @@ with no such test today (for example the orphaned-agent notice, the ask
 thread summary, or the execute-gateway approval push) gets a new
 assertion, and a push batch carries the label exactly once. Also test the label filter, the shape fallback for pre-change unlabeled
 entries, the goal collapse, and that ordinary human text stays in.
+
+### Result (030f07d50) - 2026-10-07
+
+Landed. `ADAPTER_MESSAGE_LABEL` moved to the leaf module
+`agents-plugin-pi/src/adapter-label.ts` (with `labelAdapterText`,
+`labelAdapterContent`, `adapterLabeledBody`), so spawner.ts and
+lead-compaction.ts both import it with no cycle. The label is applied once at
+each send: the push wake (`requestPushWake`), individual pushes (`sendPush`,
+which covers the execute-gateway approval), the push batch (covers mailbox and
+held thread summaries; inner items stay unlabeled), raw summaries sent on their
+own (`labelRawSend`), both orphaned-agent notices (`buildOrphanNoticeMessage`
+in agent-sidecar.ts), the goal reminder, and `sendAdapterPrompt` (goal
+announcement, post-compaction resume, including prompts held for the next
+start). `humanTextOf` recognizes labeled messages as adapter traffic and
+collapses a labeled announcement to `/goal <goal>`. The reminder-marker and
+push-wake shape checks stay as the fallback for unlabeled pre-change entries.
+`compaction-history.ts` drops every labeled user message. `push-render.ts`
+skips the label line when it parses a single push's head.
+
+Verification: `npm test` in agents-plugin-pi ran 2065 tests: 2030 pass and 31
+fail. The failing set is identical to the pre-change baseline (2057 tests,
+31 fail). All 31 are environmental failures in agent-channel-launch,
+agent-channel.integration, persistent-explore, two spawner Explore tests,
+web-search, and web-startup, because pi-web-access is missing in the worktree.
+The new or tightened assertions cover:
+- adapter-label.test.ts
+- push-wake: the wake line, batch label once, mailbox, individual pushes, and
+  raw string/part sends
+- ask: the thread summary and queued answers
+- execute-gateway: the approval batch
+- agent-sidecar: the orphan notice
+- goal-loop: the announcement, reminder, and resume
+- lead-compaction: the label filter, legacy fallback, `/goal` collapse, and
+  human text kept
+- compaction-history
+- push-render
+
+Decisions:
+- The fork-lead orphan notice used to send the payload object as content. It
+  now sends the same JSON text as the worker site, because a label cannot
+  prefix an object.
+- `deliverQueuedAnswers` also rides `ws-thread-summary`, so it is labeled
+  with its batch.
+- Unlabeled legacy "Goal armed:" entries keep their old dialog rendering.
+
+Lite review: no Critical or Important findings. One minor observation: a fork's
+first input is framed by `frameForkInput`, so a labeled adapter prompt arriving
+as that first input would lose its first-line label. This is unlikely in
+practice.
