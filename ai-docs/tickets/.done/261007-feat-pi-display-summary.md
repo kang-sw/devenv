@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: caae1a0db4777619
 sage-review-design-reviewed: caae1a0db4777619
+completed: 2026-10-07
 ---
 
 # Pi lead TUI display summary: a cheap model replaces collapsed tool and push rows with user-language summaries; workflow.lang becomes tunable
