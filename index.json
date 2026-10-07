@@ -425,7 +425,14 @@
       "registered_at": "2026-09-24T10:38:33Z"
     },
     "260921-bug-pi-child-bootstrap-error-loses-diagnostic": {
-      "registered_at": "2026-09-24T10:38:33Z"
+      "registered_at": "2026-09-24T10:38:33Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "closed",
+        "touched_at": "2026-10-07T12:54:28Z"
+      }
     },
     "260921-bug-pi-parallel-worktree-workers-inherit-lead-cwd": {
       "registered_at": "2026-09-24T10:38:33Z"
