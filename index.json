@@ -523,24 +523,14 @@
     "261004-research-pi-reviewer-report-scope-discovery": {
       "registered_at": "2026-10-04T03:10:48Z"
     },
+    "261007-bug-pi-fork-lineage-keeps-bootstrap-key-after-adoption": {
+      "registered_at": "2026-10-07T08:41:34Z"
+    },
     "261007-bug-sage-gate-keeps-stale-skipped-design-posture": {
       "registered_at": "2026-10-07T05:20:30Z"
     },
     "261007-bug-session-record-cross-process-write-race": {
       "registered_at": "2026-10-07T05:35:57Z"
-    },
-    "261007-feat-odq-technical-decision-class": {
-      "registered_at": "2026-10-07T07:45:49Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-07T07:53:14Z",
-        "impl": {
-          "branch": "impl/develop/thank-false-curse"
-        }
-      }
     },
     "261007-feat-pi-display-summary": {
       "registered_at": "2026-10-07T07:00:22Z",
