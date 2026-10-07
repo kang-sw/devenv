@@ -1432,3 +1432,120 @@ func TestResolverSessionScopeInheritsParentOverride(t *testing.T) {
 		t.Fatalf("parentless key resolved %+v, want project off", got)
 	}
 }
+
+// --- ferrule hidden re-login (relogin_session_key) ---
+
+// TestFerruleReloginReturnsSameKeyWithoutMint verifies that a re-login with
+// an existing parent-less lead key returns that same key bound to the same
+// root, mints nothing, and renders both the text and JSON shapes a fresh
+// mint renders.
+func TestFerruleReloginReturnsSameKeyWithoutMint(t *testing.T) {
+	useLeadProfile(t)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	root := t.TempDir()
+	initGit(t, root)
+	canonical := canonicalRootForTest(t, root)
+	server := NewServer(root, "test")
+
+	key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
+	before := sessionKeyFileCount(t, server)
+
+	resp := callLogin(t, server, 2, root, map[string]any{"relogin_session_key": key})
+	if toolIsError(t, resp) {
+		t.Fatalf("re-login with an own parent-less lead key returned isError: %s", resp)
+	}
+	gotKey, gotRoot := parseLoginResponse(t, resp)
+	if gotKey != key {
+		t.Fatalf("re-login returned key %q, want the same key %q", gotKey, key)
+	}
+	if gotRoot != canonical {
+		t.Fatalf("re-login root = %q, want canonical %q", gotRoot, canonical)
+	}
+	if after := sessionKeyFileCount(t, server); after != before {
+		t.Fatalf("re-login minted a key: before=%d after=%d", before, after)
+	}
+
+	respJSON := callLogin(t, server, 3, root, map[string]any{"relogin_session_key": " " + key + " ", "format": "json"})
+	if toolIsError(t, respJSON) {
+		t.Fatalf("json re-login returned isError: %s", respJSON)
+	}
+	var parsed struct {
+		SessionKey string `json:"session_key"`
+		Root       string `json:"root"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(toolText(t, respJSON))), &parsed); err != nil {
+		t.Fatalf("could not parse json re-login response: %v", err)
+	}
+	if parsed.SessionKey != key || parsed.Root != canonical {
+		t.Fatalf("json re-login = %+v, want key %q root %q", parsed, key, canonical)
+	}
+	if after := sessionKeyFileCount(t, server); after != before {
+		t.Fatalf("json re-login minted a key: before=%d after=%d", before, after)
+	}
+}
+
+// TestFerruleReloginRefusesForeignKeys verifies every refusal of the hidden
+// re-login: an unknown key, a parent-carrying key, a delegate or leaf key, a
+// key bound to another root, and a re-login combined with a parent or a
+// non-lead capability. Each is a tool error and mints nothing.
+func TestFerruleReloginRefusesForeignKeys(t *testing.T) {
+	useLeadProfile(t)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	root := t.TempDir()
+	otherRoot := t.TempDir()
+	initGit(t, root)
+	initGit(t, otherRoot)
+	server := NewServer(root, "test")
+
+	leadKey, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
+	childKey, _ := parseLoginResponse(t, callLogin(t, server, 2, root, map[string]any{"parent_session_key": leadKey}))
+	delegateKey, _ := parseLoginResponse(t, callLogin(t, server, 3, root, map[string]any{"capability": "delegate"}))
+	leafKey, _ := parseLoginResponse(t, callLogin(t, server, 4, root, map[string]any{"capability": "leaf"}))
+	otherRootKey, _ := parseLoginResponse(t, callLogin(t, server, 5, otherRoot, nil))
+	before := sessionKeyFileCount(t, server)
+
+	cases := []struct {
+		name string
+		args map[string]any
+		want string
+	}{
+		{"unknown", map[string]any{"relogin_session_key": "never-minted-key"}, `relogin_session_key "never-minted-key" is not a known session key`},
+		{"parent-carrying", map[string]any{"relogin_session_key": childKey}, "carries a parent"},
+		{"delegate", map[string]any{"relogin_session_key": delegateKey}, "is a delegate key"},
+		{"leaf", map[string]any{"relogin_session_key": leafKey}, "is a leaf key"},
+		{"other-root", map[string]any{"relogin_session_key": otherRootKey}, "is bound to another root"},
+		{"with-parent", map[string]any{"relogin_session_key": leadKey, "parent_session_key": leadKey}, "cannot be combined with parent_session_key"},
+		{"with-delegate-capability", map[string]any{"relogin_session_key": leadKey, "capability": "delegate"}, "requires lead capability"},
+	}
+	for i, tc := range cases {
+		resp := callLogin(t, server, 10+i, root, tc.args)
+		if !toolIsError(t, resp) {
+			t.Fatalf("%s: re-login should be refused, got: %s", tc.name, resp)
+		}
+		if text := toolText(t, resp); !strings.Contains(text, tc.want) {
+			t.Fatalf("%s: refusal text = %q, want it to contain %q", tc.name, text, tc.want)
+		}
+		if after := sessionKeyFileCount(t, server); after != before {
+			t.Fatalf("%s: refused re-login minted a key: before=%d after=%d", tc.name, before, after)
+		}
+	}
+}
+
+// TestFerruleSchemaOmitsReloginArgument pins that the re-login argument is
+// absent from the advertised ferrule schema: the agent-visible surface is
+// unchanged, and only an adapter that knows the argument can re-log in.
+func TestFerruleSchemaOmitsReloginArgument(t *testing.T) {
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	server := NewServer(root, "test")
+
+	listResp := callToolsList(t, server)
+	props := toolPropertiesByName(t, listResp, bootstrapToolName)
+	if _, ok := props["relogin_session_key"]; ok {
+		t.Fatalf("ferrule schema advertises relogin_session_key: %v", props)
+	}
+	if entry := toolEntryTextByName(t, listResp, bootstrapToolName); strings.Contains(entry, "relogin") {
+		t.Fatalf("ferrule tools/list entry mentions the re-login: %s", entry)
+	}
+}
