@@ -522,19 +522,6 @@
     },
     "261004-research-pi-reviewer-report-scope-discovery": {
       "registered_at": "2026-10-04T03:10:48Z"
-    },
-    "261007-feat-pi-compaction-milestone-wake-and-reread-lists": {
-      "registered_at": "2026-10-07T01:47:16Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-07T02:13:08Z",
-        "impl": {
-          "branch": "impl/develop/wife-fancy-hull"
-        }
-      }
     }
   }
 }
