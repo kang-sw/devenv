@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 50404b9851b12949
 sage-review-completeness-reviewed: 50404b9851b12949
+completed: 2026-10-07
 ---
 
 # Add a technical-decision class to the Open Decision Queue
@@ -157,3 +158,48 @@ regenerated too, and `TestValidateRealTree` fails on a stale canonical digest
 A rendered `ws/playbook.read(name: "lead-ticket")` shows three classes
 in the order announced, technical, policy, with no remaining "every item
 without such a citation" definition of the policy class.
+
+### Result (e05c7b23f) - 2026-10-07
+
+Landed in `e05c7b23f` with review fix `807710796`.
+
+- `agents-plugin/rsrc/lead-ticket/lead-ticket.md`: there are now three item
+  classes. *Technical decision* is new. *Policy question* is defined by what
+  its answer depends on: the user's preferences, priorities, or product
+  direction. Lead uncertainty alone does not make an item a policy question.
+  One acknowledgement covers the announced and technical groups. Every rule
+  that applied to announced items (silence, objection, undercut, items raised
+  later) now applies to technical items too. Other changes:
+  - the `[technical]` class tag and its `Will <X> over <Y> - <technical reason>`
+    section line
+  - a settled technical decision moves `<Y>` into `Rejected:`
+  - the three-group response template, ordered announced, technical, policy
+  - "three group labels" in the language rule
+  - the settle-point sentence and the `## Stops` line.
+- The `tickets.move` refusal (`internal/wsdoc/tickets_mutate.go`) and the
+  `sage_gate` next_instruction (`internal/mcp/server.go`) now read "announced
+  defaults and technical decisions acknowledged, every policy question
+  settled".
+- Pins in `playbook_tools_test.go` and `tickets_sage_test.go` are updated.
+  New pins cover the technical class definition, the uncertainty rule, the
+  positive policy definition, the one-line format, the shared acknowledgement,
+  the label hint, the group order (the whole template is pinned verbatim), and
+  the `Rejected:` carry. The retired phrase "every item without such a
+  citation" is added to the forbidden list.
+- The manifest was regenerated (`WSRSRC_REGEN`), then the wsflow mirror
+  (`WS_REGEN_WSFLOW_RSRC`). The pi rsrc was updated by byte copy, and
+  `diff -r` against canonical is clean for both mirrors.
+
+Verification:
+- `cd agents-plugin-tool && go test ./...` passed in every package.
+- `python3 -m unittest discover -s agents-plugin-wsflow/tests`: 14 tests OK.
+- After the review fix, the wsrsrc, wsdoc, golden lead-ticket and ODQ-refusal
+  tests were re-run and passed, and the wsflow unittest passed again.
+
+Decisions:
+- Both group labels say "acknowledge once, together with ...". Neither asks
+  for a separate acknowledgement per group, and either label read alone still
+  asks for the action. This came from the lite review, which found that
+  passive labels give no cue under silence-is-not-consent.
+- The populator/reviewer bullet now says these items are "classed by the same
+  rules as any other item", replacing the announced-only wording.
