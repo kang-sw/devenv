@@ -28,7 +28,7 @@
  * failure, so an unrecognized shape stays in.
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { isPushWakeLine, type RpcAgentRecord, type RpcAgentRegistry } from "./spawner.ts";
@@ -597,14 +597,31 @@ type RereadResolution =
   | { kind: "content"; content: string; bytes: number; range?: { start: number; end: number } }
   | { kind: "not-found" }
   /** `lines` does not parse, or starts past the file's last line: listed to read first, as written. */
-  | { kind: "unreadable-range" };
+  | { kind: "unreadable-range" }
+  /**
+   * Listed to read first, unmarked: not strict UTF-8 text (an image, any
+   * binary), which the string summary cannot carry but the read tool can
+   * open, or a whole file already over the budget, left unread.
+   */
+  | { kind: "not-inlinable" };
 
-function resolveReread(entry: FileListEntry, cwd: string): RereadResolution {
-  let text: string;
+const strictUtf8 = new TextDecoder("utf-8", { fatal: true });
+
+function resolveReread(entry: FileListEntry, cwd: string, budgetBytes: number): RereadResolution {
+  const path = resolve(cwd, entry.path);
+  let raw: Buffer;
   try {
-    text = readFileSync(resolve(cwd, entry.path), "utf8");
+    if (entry.lines === undefined && statSync(path).size > budgetBytes) return { kind: "not-inlinable" };
+    raw = readFileSync(path);
   } catch {
     return { kind: "not-found" };
+  }
+  if (raw.includes(0)) return { kind: "not-inlinable" };
+  let text: string;
+  try {
+    text = strictUtf8.decode(raw);
+  } catch {
+    return { kind: "not-inlinable" };
   }
   if (entry.lines === undefined) return { kind: "content", content: text, bytes: Buffer.byteLength(text, "utf8") };
   const range = parseLineRange(entry.lines);
@@ -629,13 +646,14 @@ export const REFERENCES_HEADING = "## On-demand references";
  * are read relative to `cwd` and taken smallest first (ties in the lead's
  * order) while their UTF-8 total stays within `budgetBytes`; a taken entry is
  * inlined whole, and one that does not fit is never cut but listed to read
- * first, as are a missing path and a `lines` value that does not parse or
- * starts past the file's end. Each section renders in the lead's order.
+ * first, as are a missing path, a file that is not strict UTF-8 text, and a
+ * `lines` value that does not parse or starts past the file's end. Each
+ * section renders in the lead's order.
  */
 export function buildFileListSections(lists: LeadFileLists | undefined, cwd: string, budgetBytes: number): string[] {
   const rereads = lists?.requiredRereads ?? [];
   const references = lists?.references ?? [];
-  const resolved = rereads.map((entry) => resolveReread(entry, cwd));
+  const resolved = rereads.map((entry) => resolveReread(entry, cwd, budgetBytes));
   const candidates = resolved
     .map((resolution, index) => ({ resolution, index }))
     .filter((c): c is { resolution: Extract<RereadResolution, { kind: "content" }>; index: number } => c.resolution.kind === "content")

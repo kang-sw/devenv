@@ -572,6 +572,28 @@ describe("curated file lists (261007)", () => {
     ], "no inlined section when nothing is inlined");
   });
 
+  test("a file that is not strict UTF-8 text is listed to read first unmarked, never inlined", () => {
+    writeFileSync(join(dir, "nul.bin"), Buffer.from([0x61, 0x00, 0x62]));
+    writeFileSync(join(dir, "latin1.txt"), Buffer.from([0x63, 0x61, 0x66, 0xe9]));
+    writeFileSync(join(dir, "pixel.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00]));
+    assert.deepEqual(sections([
+      { path: "nul.bin", why: "has a NUL" },
+      { path: "latin1.txt", lines: "1-1", why: "invalid UTF-8" },
+      { path: "pixel.png", why: "an image" },
+      { path: "c2.txt", why: "small" },
+    ]), [
+      "## Required re-reads (inlined)\n### `c2.txt` - small\n```\ncc\n```",
+      "## Required re-reads (to read first)\n- `nul.bin` - has a NUL\n- `latin1.txt` lines 1-1 - invalid UTF-8\n- `pixel.png` - an image",
+    ]);
+  });
+
+  test("a whole file over the budget is listed to read first while a lines range of it still inlines", () => {
+    assert.deepEqual(sections([{ path: "ten.txt", why: "all of it" }, { path: "ten.txt", lines: "1-1", why: "first line" }], [], 10), [
+      "## Required re-reads (inlined)\n### `ten.txt` lines 1-1 - first line\n```\nline 1\n```",
+      "## Required re-reads (to read first)\n- `ten.txt` - all of it",
+    ]);
+  });
+
   test("an inlined file sits in a fence longer than any backtick run in it", () => {
     write("fenced.md", "before\n````ts\ncode\n````\nafter");
     const [inlined] = sections([{ path: "fenced.md", why: "has fences" }]);
