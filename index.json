@@ -443,7 +443,14 @@
       "registered_at": "2026-09-24T10:38:33Z"
     },
     "260922-bug-ws-ship-prime-pre-release-pi-runtime": {
-      "registered_at": "2026-09-24T10:38:33Z"
+      "registered_at": "2026-09-24T10:38:33Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "closed",
+        "touched_at": "2026-10-07T12:54:22Z"
+      }
     },
     "260923-bug-pi-execute-approval-accepted-worker-hangs": {
       "registered_at": "2026-09-24T10:38:33Z"
