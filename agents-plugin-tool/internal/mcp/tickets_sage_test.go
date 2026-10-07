@@ -390,7 +390,7 @@ func TestServeStdioOpenDecisionQueueRefusals(t *testing.T) {
 	key, _ := parseLoginResponse(t, callLogin(t, server, 9711, root, nil))
 
 	gate := callToolWithKey(t, server, 9712, key, "tickets.sage_gate", map[string]any{"stem": stem, "landing": "ready"})
-	for _, want := range []string{"action: stop_open_decision_queue", "## Open Decision Queue", "announced defaults acknowledged, every policy question settled", "delete the section"} {
+	for _, want := range []string{"action: stop_open_decision_queue", "## Open Decision Queue", "announced defaults and technical decisions acknowledged, every policy question settled", "delete the section"} {
 		if !strings.Contains(gate, want) {
 			t.Fatalf("sage_gate response missing %q:\n%s", want, gate)
 		}
@@ -405,7 +405,7 @@ func TestServeStdioOpenDecisionQueueRefusals(t *testing.T) {
 	}
 
 	move := callToolWithKey(t, server, 9713, key, "tickets.move", map[string]any{"stem": stem, "to": "ready"})
-	if !strings.Contains(move, "## Open Decision Queue") || !strings.Contains(move, "announced defaults acknowledged, every policy question settled") || !strings.Contains(move, "delete the section") {
+	if !strings.Contains(move, "## Open Decision Queue") || !strings.Contains(move, "announced defaults and technical decisions acknowledged, every policy question settled") || !strings.Contains(move, "delete the section") {
 		t.Fatalf("tickets.move response missing the queue refusal:\n%s", move)
 	}
 	if strings.Contains(strings.ToLower(move), "final confirmation") {

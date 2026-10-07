@@ -46,9 +46,9 @@ asking, so judgment is spent here and not at run time.
 For settlement, queue every unconfirmed item that could change ticket text,
 one item per decision. Reconcile item by item; where an answer's reach is
 unclear, state your reading on its own line and leave the item open until the
-user confirms it. The settle point is reached when the announced defaults are
-acknowledged and every policy question is confirmed, rejected, or explicitly
-deferred; only confirmed items are authoritative. At the settle point, persist
+user confirms it. The settle point is reached when the announced defaults and
+technical decisions are acknowledged and every policy question is confirmed,
+rejected, or explicitly deferred; only confirmed items are authoritative. At the settle point, persist
 without showing the confirmed set again for approval: the acknowledgement
 already showed every item, and the trace below and the Sage reviewers guard
 against interacting decisions.
@@ -59,8 +59,8 @@ unless a decision is needed.
 
 ### Item classes
 
-Each item is one of two classes, so the user's judgment goes only to the
-choices that are open.
+Each item is one of three classes, so the user answers only the choices that
+depend on their preferences and can review the rest at the depth they choose.
 
 - **Announced default**: the item has one answer, and you can cite the reason
   its alternatives lose. The citation is one of: a language or platform
@@ -70,29 +70,40 @@ choices that are open.
   standalone, absorb or rewrite, initial status, stem naming, which commit
   carries the edit), whose line names the placement and cites the neighbouring
   ticket or convention it follows.
-- **Policy question**: every item without such a citation.
+- **Technical decision**: the item has no such citation, and its answer does
+  not hinge on the user's values: you pick it on technical reasoning (simpler,
+  fewer moving parts, a clearer failure mode) and state that reasoning. Your
+  own uncertainty about a technical call does not make it a policy question;
+  it stays a technical decision with its reasoning stated, or the policy group
+  fills with calls the user cannot judge.
+- **Policy question**: the answer depends on the user's preferences,
+  priorities, or product direction, such as the audience or scale a default
+  assumes, scope in or out, cost or risk tolerance, or a trade-off in
+  downstream-observable behavior.
 - An item that reverses a prior decision is always a policy question, even
   when you can cite a reason for the reversal.
 - A consequence of a policy question still open in the same round is not yet
   a consequence of an already-confirmed decision: hold it, and add it to the
   next round's announced defaults once that answer lands.
-- A fact-populator decision gap or a reviewer issue is an announced default
-  when it meets the citation rule. A reviewer `missing` issue is always a
-  policy question, since it is a choice the reviewer could not derive.
+- A fact-populator decision gap or a reviewer issue is classed by the same
+  rules as any other item. A reviewer `missing` issue is always a policy
+  question, since it is a choice the reviewer could not derive.
 
-Announced defaults are still shown and confirmed, because items a lead treats
-as settled are sometimes materially revised once actually asked:
+Announced defaults and technical decisions are still shown and confirmed,
+because items a lead treats as settled are sometimes materially revised once
+actually asked:
 
-- One explicit user acknowledgement confirms the whole announced group; it may
-  arrive in the same turn as the policy answers. Silence is not consent: when
-  the user answers the policy questions without acknowledging the group, the
-  announced items stay `[open]` and are re-shown unchanged, one line each,
-  under a single acknowledgement re-ask for the whole group.
-- An announced item the user objects to becomes a policy question under its
-  existing ID. So does an already-acknowledged announced item that a later
-  policy answer undercuts.
-- Announced items raised later in the same settlement (a trace knock-on, a new
-  fact-populator gap) need their own acknowledgement.
+- One explicit user acknowledgement confirms the announced and technical
+  groups together; it may arrive in the same turn as the policy answers.
+  Silence is not consent: when the user answers the policy questions without
+  that acknowledgement, the announced and technical items stay `[open]` and
+  are re-shown unchanged, one line each, under a single acknowledgement re-ask
+  for both groups.
+- An announced or technical item the user objects to becomes a policy question
+  under its existing ID. So does an already-acknowledged announced or
+  technical item that a later policy answer undercuts.
+- Announced or technical items raised later in the same settlement (a trace
+  knock-on, a new fact-populator gap) need their own acknowledgement.
 
 ### Queue state
 
@@ -108,10 +119,13 @@ non-authoritative entries.
 - Each item records its ID, status tag, class tag, and one-line decision, with
   the tags after the ID: `(1) [open] [policy] <one-line decision>`. Status
   tags are `[open]`, `[confirmed]`, `[rejected]`, and `[deferred]`; class tags
-  are `[announced]` and `[policy]`. A policy question also records its context,
-  alternatives, and your recommendation as the policy block of the **Response
-  format** below; an announced default records its citation in their place.
-  An announced item that becomes a policy question changes its class tag,
+  are `[announced]`, `[technical]`, and `[policy]`. A policy question also
+  records its context, alternatives, and your recommendation as the policy
+  block of the **Response format** below; an announced default records its
+  citation in their place, and a technical decision records its one line
+  `Will <X> over <Y> - <technical reason>`, the reason standing where the
+  citation stands. An announced or technical item that becomes a policy
+  question changes its class tag,
   returns to `[open]` (back from `## Decisions` into the section if it had
   moved there), and gains the policy block. Section text is English, like
   the rest of the ticket.
@@ -124,7 +138,8 @@ non-authoritative entries.
   spanning members) is recorded under the same ID in the section of every
   affected ticket, so each stays gated until it settles.
 - A settled item leaves the section: a confirmed item moves into
-  `## Decisions`; a rejected item moves into the relevant decision's
+  `## Decisions`, a technical decision carrying its `<Y>` into that
+  decision's `Rejected:` text; a rejected item moves into the relevant decision's
   `Rejected:` text when it is a meaningful alternative and is otherwise
   dropped; a deferred item moves into `## Constraints` as out of scope.
 - A correction returns its item to `[open]` under its existing ID, back from
@@ -159,27 +174,33 @@ through review rounds as each change's contradictions surface one round later.
 
 ### Response format
 
-The `# Open Decision Queue` heading, the two group labels, and the status
+The `# Open Decision Queue` heading, the three group labels, and the status
 tags stay in English; item content follows the user's conversation language.
 
-Each response asks every item still awaiting an answer, in two groups:
-announced defaults first, then the policy questions under their visible
-label. Omit a group that has no item this round.
+Each response asks every item still awaiting an answer, in three groups:
+announced defaults, then technical decisions, then the policy questions under
+their visible label, so the items that need an answer sit closest to the
+reply. Omit a group that has no item this round.
 
 ```text
 # Open Decision Queue
 
-**Announced defaults** - acknowledge the group once
+**Announced defaults** - acknowledged together with the technical decisions
 (1) Will <do X> - <citation>
 
+**Technical decisions** - acknowledged together with the defaults; worth reviewing if you hold the technical picture
+(2) Will <X> over <Y> - <technical reason>
+
 **Policy questions** - answer each
-(2) <one-line decision>
+(3) <one-line decision>
 - <context>
 - <alternative: ...>
 > <recommendation and why>
 ```
 
-- An announced default is one line and asks no per-item answer.
+- An announced default or a technical decision is one line and asks no
+  per-item answer. A technical decision's line names the losing alternative
+  and why it lost, so a reviewer can check the call without asking.
 - A policy question's first presentation is the full block, including an item
   added mid-settlement and an announced item that became a policy question.
   The recommendation lives only in the trailing `>` line of its block.
@@ -188,8 +209,8 @@ label. Omit a group that has no item this round.
   asks, or point at the ticket section.
 - Report the items settled this round in one line, such as
   `(1), (2) confirmed · (4) deferred`; items settled in earlier rounds are not
-  repeated. This per-round settlement report is not the announced-default
-  group.
+  repeated. This per-round settlement report is not the announced or
+  technical group.
 
 ## Derive actionable work from research
 
@@ -334,7 +355,7 @@ Drop: `{{.McpNamespace}}/tickets.close(stem, status: "dropped")`. Closing to
 - Persisting discussion output before the user has explicitly agreed to
   persist.
 - Any Open Decision Queue item the user has not settled, including an
-  announced default not yet acknowledged.
+  announced default or technical decision not yet acknowledged.
 - A `block` verdict at a settlement boundary.
 - Dependency closure failing.
 
