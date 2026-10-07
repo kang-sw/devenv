@@ -542,6 +542,9 @@
         }
       }
     },
+    "261007-feat-pi-display-summary": {
+      "registered_at": "2026-10-07T07:00:22Z"
+    },
     "261007-feat-stale-agenda-pruning-nudge": {
       "registered_at": "2026-10-07T05:36:00Z"
     }
