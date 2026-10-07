@@ -528,6 +528,9 @@
     },
     "261007-bug-pi-session-key-reissued-on-resume": {
       "registered_at": "2026-10-07T04:24:41Z"
+    },
+    "261007-bug-sage-gate-keeps-stale-skipped-design-posture": {
+      "registered_at": "2026-10-07T05:20:30Z"
     }
   }
 }
