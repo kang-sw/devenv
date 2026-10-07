@@ -544,6 +544,9 @@
     "261004-research-pi-reviewer-report-scope-discovery": {
       "registered_at": "2026-10-04T03:10:48Z"
     },
+    "261007-bug-mailbox-tests-leak-ambient-ws-mailbox-env": {
+      "registered_at": "2026-10-07T14:15:57Z"
+    },
     "261007-bug-pi-child-runtime-wiring-untested": {
       "registered_at": "2026-10-07T13:47:36Z",
       "lease": {
