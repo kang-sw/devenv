@@ -35,15 +35,23 @@ Do these in order, without starting new work in between:
    its path or pointer. For content that lives only in the conversation,
    summarize it as precisely as possible. Leave out what the adapter already
    adds and what `lead-revive` restores (agenda, todos, notes contents), and
-   list no files. Aim for about 2-4k tokens in total.
+   keep file names out of the prose; the lever's file lists below are where
+   files go. Aim for about 2-4k tokens in total.
    - **Current work** names the active playbook's current step, if one is
      running.
    - **Immediate next step** quotes the user's latest request verbatim.
+   - **File lists.** `required_rereads` holds only the files the immediate
+     next step needs, each with `lines` when only part is needed, and why.
+     Every entry lands in the next context: the adapter inlines as many as
+     fit its budget and lists the rest for the revived lead to read first,
+     so list only what that step needs. Take line numbers from your earlier
+     reads and put the symbol or heading in `why`. `references` holds files
+     a later step may need, opened only then.
 3. **Call `ws-compact`** with every heading filled (empty when there is
    nothing), then end your turn. The conversation resumes from the summary,
    and an active goal keeps running. With no goal, a resume message follows
    when you compacted on your own or at the hard point; after the advisory
-   nudge or a user `/compact`, the next move is the user's. Set
+   nudge, a milestone, or a user `/compact`, the next move is the user's. Set
    `continue_after_compact: true` when you hold known remaining work that does
    not await the user, so a resume message follows in any case; leave it unset
    when the next move needs a user answer.
