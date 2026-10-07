@@ -530,7 +530,14 @@
       "registered_at": "2026-10-07T05:35:57Z"
     },
     "261007-feat-agenda-set-merge-patch": {
-      "registered_at": "2026-10-07T06:36:02Z"
+      "registered_at": "2026-10-07T06:36:02Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-10-07T06:39:38Z"
+      }
     },
     "261007-feat-stale-agenda-pruning-nudge": {
       "registered_at": "2026-10-07T05:36:00Z"
