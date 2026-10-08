@@ -208,3 +208,18 @@ execution/schema/tool exposure and child scoped-write enforcement. Keep malforme
 or unsupported state raw, and distinguish existing downstream failures from
 new adapter failures. Do not run a destructive live crash test in the user's
 session; isolated/offline fault injection provides the failure evidence.
+
+## Blocked (2026-10-08)
+
+Implementation paused at worker stop (f) on retained branch
+`impl/develop/catty-hertz-trout`. The installed-Pi-1.0.4 verifier failed at
+`scripts/verify-display-summary-host.mjs:27`: CommonJS
+`requireHost.resolve('@earendil-works/pi-ai/compat')` cannot resolve the
+import-only export. A diagnostic reproduced the same discovery failure; this
+is not evidence of a summary-source defect. User authorization to correct the
+verifier's module discovery and resume required verification is pending.
+
+Test commit `cc986da44` is retained; the test leaf reported 158/158 focused
+passes. Seven production files and the new verifier remain uncommitted and
+preserved. Full package verification, actual-host acceptance, independent
+review, closure and live reload/resume acceptance have not passed.
