@@ -3,6 +3,10 @@ title: Restore existing display summary rows after Pi reload or resume
 related:
   261007-feat-pi-display-summary: original summary feature
   261008-feat-pi-display-summary-sidecar-persistence: existing persistence contract
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 75fd86b831a8fcfa
+sage-review-completeness-reviewed: 75fd86b831a8fcfa
 ---
 
 # Restore existing display summary rows after Pi reload or resume
