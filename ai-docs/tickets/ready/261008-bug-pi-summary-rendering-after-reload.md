@@ -209,17 +209,18 @@ or unsupported state raw, and distinguish existing downstream failures from
 new adapter failures. Do not run a destructive live crash test in the user's
 session; isolated/offline fault injection provides the failure evidence.
 
-## Blocked (2026-10-08)
+## Execution continuation (2026-10-08)
 
-Implementation paused at worker stop (f) on retained branch
-`impl/develop/catty-hertz-trout`. The installed-Pi-1.0.4 verifier failed at
-`scripts/verify-display-summary-host.mjs:27`: CommonJS
-`requireHost.resolve('@earendil-works/pi-ai/compat')` cannot resolve the
-import-only export. A diagnostic reproduced the same discovery failure; this
-is not evidence of a summary-source defect. User authorization to correct the
-verifier's module discovery and resume required verification is pending.
+The user authorized correction and continuation after the verifier discovery
+stop recorded in `7d6b7fafb`. ESM package discovery now resolves the installed
+host's import-only pi-ai entry without dependency changes. The preserved repair
+continues on `impl/develop/catty-hertz-trout`; `cc986da44` retains its unit tests.
 
-Test commit `cc986da44` is retained; the test leaf reported 158/158 focused
-passes. Seven production files and the new verifier remain uncommitted and
-preserved. Full package verification, actual-host acceptance, independent
-review, closure and live reload/resume acceptance have not passed.
+The separate installed-Pi-1.0.4 verifier passes actual production-factory
+registration, reload, replacement and cold-continuation checks, including
+baseline-comparative summary construction, delayed-render and invalidation
+faults. It exposed an invalidation guard that forgot a failed summary when Pi
+rebuilt tool slots; per-row state now fences that failed value until a newer
+summary arrives. Full package verification reports 2,234 passes, zero failures
+and three existing explicit skips. Live reload/resume acceptance remains
+user-pending, independently of these offline results.

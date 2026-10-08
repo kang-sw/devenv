@@ -208,7 +208,7 @@ import { registerLeadMemoryLog } from "./lead-memory-log.ts";
 import { createWsConfigKeyReader, createWsConfigReader, thenOrNow } from "./adapter-config.ts";
 import { createDisplaySummaryStore, DISPLAY_SUMMARY_CONFIG_KEYS, displaySummaryConfigFrom, type DisplaySummaryStore } from "./display-summary.ts";
 import { registerDisplaySummarySession } from "./display-summary-session.ts";
-import { registerAdapterMessageRenderers, registerSummarizedBuiltinTools } from "./display-summary-render.ts";
+import { confirmSummarizedBuiltinTools, registerAdapterMessageRenderers, registerDisplaySummaryToolResolver, type SummaryToolResolver } from "./display-summary-render.ts";
 import { registerSkillResources } from "./skills-dir.ts";
 import { computeSessionBootstrap, registerLeadBootstrap, type LeadPromptRef, type SkillsBlockCache, type WsBlockBase } from "./lead-bootstrap.ts";
 import { registerModelPrompts } from "./model-prompts.ts";
@@ -540,7 +540,20 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   // first registerWsTool so every ws tool row is summary-aware. Empty, and
   // therefore inert, outside the lead TUI session.
   const displaySummaryStore = createDisplaySummaryStore();
+  displaySummaryStore.enabled = false;
   toolPreviewTuiRef.summaries = displaySummaryStore;
+  // Pi rebuilds reload/resume rows before session_start. Await presentation
+  // dependencies in the async factory; no execution definitions are replaced.
+  // Only values are lead-gated later, so incoming rows can capture repaint links now.
+  let presentationTui: Awaited<ReturnType<typeof loadHostPiTui>> | undefined;
+  try { presentationTui = await loadHostPiTui({ fallback: false }); } catch { /* Keep host raw presentation. */ }
+  if (readSpawnRole(process.env) === undefined) {
+    registerDisplaySummaryToolResolver(pi as unknown as { registerToolRenderer?: (resolver: SummaryToolResolver) => void }, displaySummaryStore, presentationTui);
+    if (presentationTui) await registerAdapterMessageRenderers(pi, displaySummaryStore, presentationTui).catch(() => false);
+  }
+  if (presentationTui && isLeadOrFork(readSpawnRole(process.env))) {
+    await registerPushMessageRenderers(pi, presentationTui, displaySummaryStore).catch(() => false);
+  }
   registerWebTools(pi, extensionEntryPath, toolPreviewTuiRef, process.env, channel);
   let handle: BridgeHandle | undefined;
   // Adapter settings (`pi.*`, adapter-config.ts) read through the live bridge
@@ -666,8 +679,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   registerDisplaySummarySession(pi, {
     store: displaySummaryStore,
     readConfig: async () => displaySummaryConfigFrom(await readConfigKeys(DISPLAY_SUMMARY_CONFIG_KEYS)),
-    registerBuiltinWrappers: (cwd, active) => { registerSummarizedBuiltinTools(pi, cwd, displaySummaryStore, active); },
-    registerMessageRenderers: () => { void registerAdapterMessageRenderers(pi, displaySummaryStore).catch(() => {}); },
+    confirmBuiltinTools: (active) => { confirmSummarizedBuiltinTools(displaySummaryStore, active); },
   });
   registerCompactionHistory(pi);
   registerLeadMemoryLog(pi);
@@ -722,12 +734,6 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   for (const event of ["agent_start", "agent_settled", "tool_execution_end"] as const) {
     pi.on(event, () => { publishSubtree(rpcRegistryRef.current); });
   }
-  // Whether the compact push renderers have been registered in THIS process.
-  // Registration is per-process and idempotent (Pi keys renderers by
-  // customType), but it costs a dynamic import, so a second session_start
-  // does not repeat it.
-  let pushRenderersRegistered = false;
-
   pi.on("session_start", async (_event, ctx) => {
     const startEpoch = ++sessionStartEpoch;
     const sessionRole = readSpawnRole(process.env);
@@ -749,27 +755,6 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     // followUp push raised while this session is mid-turn is held until its
     // turn settles instead of going out with an already-stale status line.
     leadIdleRef.current = () => ctx.isIdle();
-    // TUI only: replace Pi's default custom-message rendering for the six
-    // push families, whose own content already opens with the family label
-    // the default would print again. `registerPushMessageRenderers` now
-    // always resolves `pi-tui` through `pi-tui.ts`'s `loadHostPiTui()` (see
-    // that file's Addendum doc comment) rather than degrading to a no-op —
-    // the `.catch()` below still guards a genuinely different failure mode
-    // (a runtime rejection during teardown), not import-unavailability.
-    if (!pushRenderersRegistered && ctx.mode === "tui" && isLeadOrFork(readSpawnRole(process.env))) {
-      pushRenderersRegistered = true;
-      void registerPushMessageRenderers(pi, undefined, displaySummaryStore)
-        .then((registered) => {
-          pushRenderersRegistered = registered;
-        })
-        .catch(() => {
-          // A rejection (e.g. Pi's assertActive() during teardown) must not
-          // surface as an unhandled rejection nor pin the flag at `true`,
-          // which would permanently skip the retry on the next session_start.
-          pushRenderersRegistered = false;
-        });
-    }
-
     // Do not make native presentation depend on a connected MCP bridge.
     // `loadToolResultTuiModules` always resolves `pi-tui` through
     // `pi-tui.ts`'s `loadHostPiTui()` now (see that file's Addendum doc

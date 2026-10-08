@@ -109,10 +109,11 @@ export interface TuiMouseEventResult {
  * package's own static copy anyway (no live host to differ from), so this
  * function never actually needs the fallback in either environment today.
  */
-export async function loadHostPiTui(): Promise<PiTuiModule> {
+export async function loadHostPiTui(options: { fallback?: boolean } = {}): Promise<PiTuiModule> {
   try {
     return (await import("@earendil-works/pi-tui")) as unknown as PiTuiModule;
-  } catch {
+  } catch (error) {
+    if (options.fallback === false) throw error;
     return piTuiStatic;
   }
 }

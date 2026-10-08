@@ -672,7 +672,6 @@ export function registerWsTool(
   tuiRef: ToolPreviewTuiRef,
   overrides?: ToolPreviewOverrides,
 ): void {
-  tuiRef.summaries?.toolNames.add(definition.name);
   const summaries = () => tuiRef.summaries;
   const existing = definition as ToolDefinition & { renderCall?: ToolCallRenderer; renderResult?: ToolResultRenderer };
   if (existing.renderCall || existing.renderResult) {
@@ -682,6 +681,7 @@ export function registerWsTool(
     }
     const wrapped = wrapToolRenderersWithSummary(definition.name, existing.renderCall, existing.renderResult, summaries, tuiRef);
     pi.registerTool({ ...definition, ...wrapped } as ToolDefinition);
+    tuiRef.summaries?.confirmTool(definition.name);
     return;
   }
 
@@ -704,6 +704,7 @@ export function registerWsTool(
     tuiRef,
   );
   pi.registerTool({ ...definition, ...wrapped } as ToolDefinition);
+  tuiRef.summaries?.confirmTool(definition.name);
 }
 
 /**
