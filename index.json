@@ -551,7 +551,14 @@
       "registered_at": "2026-10-08T04:40:47Z"
     },
     "261008-feat-pi-display-summary-prompt-knob": {
-      "registered_at": "2026-10-08T08:44:35Z"
+      "registered_at": "2026-10-08T08:44:35Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-10-08T13:16:55Z"
+      }
     }
   }
 }
