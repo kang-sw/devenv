@@ -547,6 +547,9 @@
     "261008-bug-pi-windows-python3-store-stub-blocks-release-ws": {
       "registered_at": "2026-10-08T13:23:41Z"
     },
+    "261008-bug-servestdio-eof-exit-unbounded": {
+      "registered_at": "2026-10-08T14:15:28Z"
+    },
     "261008-bug-windows-mailbox-wait-outlives-pi-host": {
       "registered_at": "2026-10-08T08:39:26Z"
     },
