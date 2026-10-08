@@ -247,7 +247,7 @@ func WithLock(path string, fn func(*StoreFile) error) error {
 		os.Remove(tmpName)
 		return fmt.Errorf("close temp mailbox store: %w", cerr)
 	}
-	if rerr := os.Rename(tmpName, path); rerr != nil {
+	if rerr := replaceFile(tmpName, path); rerr != nil {
 		os.Remove(tmpName)
 		return fmt.Errorf("atomic rename mailbox store: %w", rerr)
 	}
