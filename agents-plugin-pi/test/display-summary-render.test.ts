@@ -21,6 +21,7 @@ import {
   isSummaryComponent,
   registerAdapterMessageRenderers,
   registerSummarizedBuiltinTools,
+  summaryHeaderLine,
   wrapToolRenderersWithSummary,
   type AdapterMessageTuiModules,
 } from "../src/display-summary-render.ts";
@@ -124,7 +125,8 @@ const theme = {
   bold: (text: string) => `<b>${text}</b>`,
 };
 
-const summary: DisplaySummary = { optionalContext: "after the auth check", toolIntention: "searched for the token", toolResult: "found two call sites" };
+const summary: DisplaySummary = { title: "auth in src/", optionalContext: "after the auth check", toolIntention: "searched for the token", toolResult: "found two call sites" };
+/** No title: the shape of a sidecar record written before titles existed. */
 const lean: DisplaySummary = { toolIntention: "read the plan", toolResult: "three phases" };
 
 function toolContext(toolCallId: string, overrides: Record<string, unknown> = {}) {
@@ -174,6 +176,15 @@ describe("shared summary layout", () => {
     const expected = ["title", "", "    <text>read the plan</text>", "", "<muted>three phases</muted>"];
     assert.deepEqual(buildSummaryBlock(modules, "title", lean, theme).render(80), expected);
     assert.deepEqual(buildSummaryCard(modules, "title", lean, theme).render(80), expected.map((line) => `{customMessageBg}${line}`));
+  });
+
+  test("the header carries the summary title on the same line in the accent token; only its first line", () => {
+    assert.equal(summaryHeaderLine("<b>edit</b>", { ...lean, title: " src/a.ts, src/b.ts " }, theme), "<b>edit</b> <accent>src/a.ts, src/b.ts</accent>");
+    assert.equal(summaryHeaderLine("<b>bash</b>", { ...lean, title: "npm test\nnode --test" }, theme), "<b>bash</b> <accent>npm test</accent>");
+    assert.equal(summaryHeaderLine("<b>edit</b>", lean, theme), "<b>edit</b>", "a legacy summary without a title keeps the bare header");
+    assert.equal(summaryHeaderLine("<b>edit</b>", { ...lean, title: "  " }, theme), "<b>edit</b>");
+    assert.equal(buildSummaryBlock(modules, "head", summary, theme).render(80)[0], "head <accent>auth in src/</accent>");
+    assert.equal(buildSummaryCard(modules, "head", summary, theme).render(80)[0], "{customMessageBg}head <accent>auth in src/</accent>");
   });
 
   test("real Text wraps every intention line at four spaces and leaves muted result lines unindented", () => {
@@ -250,7 +261,7 @@ describe("registerWsTool tool rows", () => {
 
     const call = tool.renderCall({ query: "auth" }, theme, { ...context, lastComponent: rawCall });
     const fields = tool.renderResult(result, { expanded: false, isPartial: false }, theme, { ...context, lastComponent: rawResult });
-    assert.equal(text(call), "<toolTitle><b>ws__tickets_query</b></toolTitle>", "the call slot is the bold tool-name header only");
+    assert.equal(text(call), "<toolTitle><b>ws__tickets_query</b></toolTitle> <accent>auth in src/</accent>", "the call slot is the bold tool-name header plus the title");
     assert.doesNotMatch(text(call), /query: auth/, "the raw argument preview is hidden once summarized");
     assert.deepEqual((fields as FakeComponent).render(80), [
       "",
@@ -455,7 +466,7 @@ describe("push message rows", () => {
 
     store.set(details[SUMMARY_ID_KEY] as string, summary);
     const lines = component.render(80);
-    assert.equal(lines[0], "{customMessageBg}<customMessageLabel><b>scout · report</b></customMessageLabel>", "bold human head on the push card background");
+    assert.equal(lines[0], "{customMessageBg}<customMessageLabel><b>scout · report</b></customMessageLabel> <accent>auth in src/</accent>", "bold human head plus title on the push card background");
     assert.deepEqual(lines.slice(1), [
       "{customMessageBg}",
       "{customMessageBg}  <dim>after the auth check</dim>",
@@ -527,6 +538,9 @@ describe("adapter message renderers", () => {
       const lines = component.render(80);
       assert.match(lines[0]!, /^\{customMessageBg\}<customMessageLabel><b>[A-Z][a-z]+ [a-z]+<\/b><\/customMessageLabel>$/, "a short readable kind header");
       assert.deepEqual(lines.slice(1), ["{customMessageBg}", "{customMessageBg}    <text>read the plan</text>", "{customMessageBg}", "{customMessageBg}<muted>three phases</muted>"]);
+
+      store.set(details[SUMMARY_ID_KEY] as string, { ...lean, title: "lead · context 80%" });
+      assert.match(component.render(80)[0]!, /<\/customMessageLabel> <accent>lead · context 80%<\/accent>$/, "the kind header carries the title");
 
       const expanded = renderers.get(customType)!({ ...message, content: "raw text" }, { expanded: true }, theme) as FakeComponent;
       assert.match(text(expanded), /raw text/, "expanded is raw");

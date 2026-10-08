@@ -51,7 +51,7 @@ function setup(env: NodeJS.ProcessEnv = {}, completion?: () => Promise<Assistant
     sidecarIO,
     registerBuiltinWrappers: (cwd, active) => { wrapped.push({ cwd, active }); },
     registerMessageRenderers: () => { renderers += 1; },
-    createCompletion: () => async () => { calls += 1; return completion ? completion() : ({ role: "assistant", content: [{ type: "toolCall", id: "x", name: DISPLAY_SUMMARY_OUTPUT_TOOL, arguments: { items: [{ id: "t1", toolIntention: "i", toolResult: "r" }] } }], stopReason: "toolUse", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } } as unknown as AssistantMessage); },
+    createCompletion: () => async () => { calls += 1; return completion ? completion() : ({ role: "assistant", content: [{ type: "toolCall", id: "x", name: DISPLAY_SUMMARY_OUTPUT_TOOL, arguments: { items: [{ id: "t1", title: "src/a.ts", toolIntention: "i", toolResult: "r" }] } }], stopReason: "toolUse", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } } as unknown as AssistantMessage); },
     env,
   });
   return { pi, store, session, wrapped, renderers: () => renderers, calls: () => calls };
@@ -104,7 +104,7 @@ describe("display summary session", () => {
     assert.deepEqual(results, [undefined], "the handler returns immediately");
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(h.calls(), 1);
-    release({ role: "assistant", content: [{ type: "toolCall", id: "x", name: DISPLAY_SUMMARY_OUTPUT_TOOL, arguments: { items: [{ id: "t1", toolIntention: "i", toolResult: "r" }] } }], stopReason: "toolUse", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } } as unknown as AssistantMessage);
+    release({ role: "assistant", content: [{ type: "toolCall", id: "x", name: DISPLAY_SUMMARY_OUTPUT_TOOL, arguments: { items: [{ id: "t1", title: "src/a.ts", toolIntention: "i", toolResult: "r" }] } }], stopReason: "toolUse", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } } as unknown as AssistantMessage);
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(h.store.get("c1")?.toolResult, "r");
   });
@@ -171,7 +171,7 @@ function barrier<T = void>() {
   const promise = new Promise<T>((done) => { resolve = done; });
   return { promise, resolve };
 }
-const acceptedAnswer = (result = "accepted"): AssistantMessage => ({ role: "assistant", content: [{ type: "toolCall", id: "output", name: DISPLAY_SUMMARY_OUTPUT_TOOL, arguments: { items: [{ id: "t1", toolIntention: "inspect", toolResult: result }] } }], stopReason: "toolUse" } as AssistantMessage);
+const acceptedAnswer = (result = "accepted"): AssistantMessage => ({ role: "assistant", content: [{ type: "toolCall", id: "output", name: DISPLAY_SUMMARY_OUTPUT_TOOL, arguments: { items: [{ id: "t1", title: "src/a.ts", toolIntention: "inspect", toolResult: result }] } }], stopReason: "toolUse" } as AssistantMessage);
 
 async function savedSession(t: { after(fn: () => Promise<void>): void }) {
   const directory = await fs.mkdtemp(join(tmpdir(), "ws-summary-session-"));

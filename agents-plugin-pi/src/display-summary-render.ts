@@ -3,12 +3,13 @@
  * shows once `display-summary.ts`'s summarizer has filled the store, and the
  * seams that put them in front of the raw renderers.
  *
- * Display contract: a summarized row is a bold header (the tool name, or the
- * message kind), a blank line, and the fields. `optionalContext` stays dim
- * and indented; `toolIntention` is normal text indented four spaces, then a
- * blank line separates the unindented muted `toolResult`. Collapsed rows show
- * the raw rendering until a summary exists; expanded rows (Pi's Ctrl+O) are
- * always raw.
+ * Display contract: a summarized row is a one-line header (the bold tool
+ * name, or the message kind, then the summary's `title` in the accent color
+ * Pi uses for tool-call paths), a blank line, and the fields.
+ * `optionalContext` stays dim and indented; `toolIntention` is normal text
+ * indented four spaces, then a blank line separates the unindented muted
+ * `toolResult`. Collapsed rows show the raw rendering until a summary exists;
+ * expanded rows (Pi's Ctrl+O) are always raw.
  *
  * Re-render paths differ by row kind:
  * - Tool rows re-run their renderers on `ToolRenderContext.invalidate()`, so
@@ -148,15 +149,25 @@ export function buildSummaryFields(tui: SummaryTextModules, summary: DisplaySumm
   return fields;
 }
 
-/** A painted header line over the fields, with no frame of its own. */
+/**
+ * `header` (already painted) followed by the summary's title on the same
+ * line. The title is cut to its first line so the header stays one line; a
+ * legacy summary without a title keeps the bare header.
+ */
+export function summaryHeaderLine(header: string, summary: DisplaySummary, theme: unknown): string {
+  const title = summary.title?.trim().split(/\r?\n/, 1)[0]?.trim();
+  return title ? `${header} ${paintFg(theme, "accent", title)}` : header;
+}
+
+/** A painted header line (plus the title) over the fields, with no frame of its own. */
 export function buildSummaryBlock(tui: SummaryTextModules, header: string, summary: DisplaySummary, theme: unknown): SummaryComponent {
-  return stack([new tui.Text(header, 0, 0), ...buildSummaryFields(tui, summary, theme)]);
+  return stack([new tui.Text(summaryHeaderLine(header, summary, theme), 0, 0), ...buildSummaryFields(tui, summary, theme)]);
 }
 
 /** A message summary on the custom-message card: the shared `customMessageBg` box, header, fields. */
 export function buildSummaryCard(tui: SummaryCardModules, header: string, summary: DisplaySummary, theme: unknown): SummaryComponent {
   const box = new tui.Box(1, 1, (text) => paintBg(theme, "customMessageBg", text));
-  box.addChild(new tui.Text(header, 0, 0));
+  box.addChild(new tui.Text(summaryHeaderLine(header, summary, theme), 0, 0));
   for (const field of buildSummaryFields(tui, summary, theme)) box.addChild(field);
   return box;
 }
@@ -303,7 +314,10 @@ export function wrapToolRenderersWithSummary(
     renderCall(args, theme, context) {
       const ctx = asContext(context);
       const hit = summaryFor(ctx, ctx?.expanded);
-      if (hit) return summaryFrame([new hit.tui.Text(paintFg(theme, "toolTitle", paintBold(theme, toolName)), padX, 0)], hit.tui, theme, ctx);
+      if (hit) {
+        const header = summaryHeaderLine(paintFg(theme, "toolTitle", paintBold(theme, toolName)), hit.summary, theme);
+        return summaryFrame([new hit.tui.Text(header, padX, 0)], hit.tui, theme, ctx);
+      }
       if (!renderCall) throw new UseNativeResultFallback();
       return renderCall(args, theme, rawContext(context));
     },
