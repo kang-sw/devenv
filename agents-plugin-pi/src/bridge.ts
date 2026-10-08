@@ -102,6 +102,15 @@ export interface BridgeHandle {
    * resolves after a caller has already captured this handle.
    */
   defaultSessionKeyRef: { current: string | undefined };
+  /**
+   * Observe a lead's revive adoption: `listener` runs (synchronously, after
+   * `defaultSessionKeyRef` already holds `current`) each time a successful
+   * re-login switches the default key. Never fires for a refused re-login or
+   * an unchanged key. A consumer keyed to the default key, such as the
+   * mailbox waiter whose named inbox the re-login moved, re-binds here.
+   * Returns the unsubscribe function.
+   */
+  onDefaultKeyAdopted(listener: (current: string, previous: string | undefined) => void): () => void;
   /** Sanitized `ws__*` registered tool names (see `sanitizeToolName`), for the spawner's `full-worker` tool group. */
   wsToolNames: readonly string[];
   /**
@@ -971,6 +980,7 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
   // in with it; on success it is the default key from here on, is recorded
   // for later resumes, and the result gains one labeled notice saying so. A
   // refused re-login adopts nothing.
+  const keyAdoptedListeners = new Set<(current: string, previous: string | undefined) => void>();
   const adoptRevivedKey = async (rawSessionKey: unknown, content: McpContentItem[]): Promise<McpContentItem[]> => {
     const revived = ownsLeadKey ? revivedKeyToAdopt(rawSessionKey, defaultKeyRef.current, FRESH_BOOTSTRAP_SENTINEL) : undefined;
     if (!revived) return content;
@@ -980,6 +990,9 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
     defaultKeyRef.current = revived;
     knownKeys.add(revived);
     recordLeadKey(revived);
+    for (const listener of [...keyAdoptedListeners]) {
+      try { listener(revived, previous); } catch { /* An observer must never fail the adopting tool call. */ }
+    }
     return [...content, { type: "text", text: buildDefaultKeyChangedLine(previous, revived) }];
   };
   if (!compactionListenerRegistered) {
@@ -1223,6 +1236,10 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
     ensureChildRuntime,
     renderRegistry,
     defaultSessionKeyRef: defaultKeyRef,
+    onDefaultKeyAdopted: (listener) => {
+      keyAdoptedListeners.add(listener);
+      return () => { keyAdoptedListeners.delete(listener); };
+    },
     wsToolNames: tools.map((tool) => sanitizeToolName(tool.name)),
     manualSnapshotRef,
     staticBodySnapshotRef,

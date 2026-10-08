@@ -231,6 +231,86 @@ export function startMailboxWaiter(deps: MailboxWaiterDeps): MailboxWaiterHandle
   return { stop: () => controller.abort(), done };
 }
 
+export interface MailboxWaiterSlotDeps {
+  /** Resolve the owned named-inbox slug for `sessionKey` (`resolveMailboxSelfSlug`); must not throw. */
+  resolveSlug: (sessionKey: string) => Promise<string | undefined>;
+  /** Start one waiter for `sessionKey`, armed with the slug just resolved for it. */
+  start: (sessionKey: string, slug: string | undefined) => MailboxWaiterHandle;
+}
+
+/**
+ * One bridge generation's mailbox waiter, re-armable for a new session key.
+ * `stop()` and `done` make the slot itself the generation's waiter handle, so
+ * every disposal path that stops and awaits a waiter covers it unchanged.
+ */
+export interface MailboxWaiterSlot extends MailboxWaiterHandle {
+  /**
+   * Resolve the slug for `sessionKey`, then replace the live waiter with one
+   * armed for that key and slug, stopping the previous waiter only once its
+   * successor runs. Resolves `true` when this call started a waiter, `false`
+   * when a later `arm` or `stop()` superseded it while the slug was resolving.
+   */
+  arm: (sessionKey: string) => Promise<boolean>;
+}
+
+/**
+ * The live waiter is re-armed whenever the default lead key changes: ws-mcp
+ * moves the named-inbox owner to the new key, and a waiter still holding the
+ * old `--session-key` falls back to a reply-id-only wait on the old queue,
+ * so mail no longer wakes the session. The slug lookup is async, so two
+ * guards keep at most one live waiter: a sequence number lets only the
+ * newest `arm` start one, and `stop()` (generation disposal) refuses every
+ * `arm` still resolving. `done` resolves only after `stop()` and once every
+ * waiter this slot ever started has exited, so a staged runtime copy shared
+ * by all of them is removed after the last one closes.
+ */
+export function createMailboxWaiterSlot(deps: MailboxWaiterSlotDeps): MailboxWaiterSlot {
+  let latestArm = 0;
+  let stopped = false;
+  let live: MailboxWaiterHandle | undefined;
+  const started: MailboxWaiterHandle[] = [];
+  let markStopped: () => void = () => {};
+  const stoppedSignal = new Promise<void>((resolve) => { markStopped = resolve; });
+  const done = stoppedSignal.then(() => Promise.all(started.map((waiter) => waiter.done))).then(() => {});
+  return {
+    arm: async (sessionKey) => {
+      if (stopped) return false;
+      const armId = ++latestArm;
+      const slug = await deps.resolveSlug(sessionKey);
+      if (stopped || armId !== latestArm) return false;
+      const next = deps.start(sessionKey, slug);
+      started.push(next);
+      const previous = live;
+      live = next;
+      previous?.stop();
+      return true;
+    },
+    stop: () => {
+      if (stopped) return;
+      stopped = true;
+      live?.stop();
+      markStopped();
+    },
+    done,
+  };
+}
+
+/**
+ * Wrap a diagnostic sink so each distinct line reaches it at most once. A
+ * waiter re-spawns `mailbox wait` on every timeout and every mail, and a
+ * persistent condition prints the same stderr line each time; one wrapper
+ * per armed waiter shows it once, and a re-arm (a new waiter) may show it
+ * again.
+ */
+export function reportDistinctLinesOnce(sink: (line: string) => void): (line: string) => void {
+  const seen = new Set<string>();
+  return (line) => {
+    if (seen.has(line)) return;
+    seen.add(line);
+    sink(line);
+  };
+}
+
 /** The CLI exit code `ws-mcp mailbox wait` uses to signal a deadline with no unread mail. */
 const MAILBOX_WAIT_EXIT_TIMEOUT = 3;
 
@@ -264,8 +344,8 @@ export interface SubprocessWaitOptions {
   /** This session's own session key — the required `--session-key`; gives the reply-id queue to watch. */
   sessionKey: string;
   /**
-   * Optional owned named-inbox address (`"name@scope"`), resolved once at arm
-   * time via `resolveMailboxSelfSlug`. When set, passed through as `--slug` so
+   * Optional owned named-inbox address (`"name@scope"`), resolved for this
+   * waiter's session key at arm time via `resolveMailboxSelfSlug`. When set, passed through as `--slug` so
    * the wait also covers the named inbox; omit (or leave `undefined`) for
    * today's reply-id-only wait.
    */

@@ -217,7 +217,7 @@ import { ChildChannel, readAndDeleteChannelBootstrap } from "./agent-channel.ts"
 import { ChildApprovalGate } from "./approval-protocol.ts";
 import { isLeadOrFork, readSpawnRole, WS_PI_FORK_CONTEXT_ENV, WS_PI_PARENT_SESSION_KEY_ENV, type SpawnRole } from "./process-role.ts";
 import { createApprovalRelay, registerExecuteGateway } from "./execute-gateway.ts";
-import { attachMailboxRuntimeCleanup, buildMailboxPushMessage, createBridgeDrain, createSubprocessWait, resolveMailboxSelfSlug, sessionMailboxWaitOptions, shouldArmMailboxWaiter, stageMailboxRuntime, startMailboxWaiter, type MailboxToolCall, type MailboxWaiterHandle } from "./mailbox-waiter.ts";
+import { attachMailboxRuntimeCleanup, buildMailboxPushMessage, createBridgeDrain, createMailboxWaiterSlot, createSubprocessWait, reportDistinctLinesOnce, resolveMailboxSelfSlug, sessionMailboxWaitOptions, shouldArmMailboxWaiter, stageMailboxRuntime, startMailboxWaiter, type MailboxToolCall, type MailboxWaiterHandle, type StagedMailboxRuntime } from "./mailbox-waiter.ts";
 import { armForkRoleWiring, registerFork } from "./fork.ts";
 import {
   createThreadRegistryHandle,
@@ -850,9 +850,9 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     // named-inbox address (if any) via `mailbox.lookup_peers` through the same
     // bridge client `drainMail` uses, and pass it as `--slug` so the wait also
     // covers the owned named inbox, not just the reply-id queue. Best-effort —
-    // `resolveMailboxSelfSlug` never throws — so a lookup failure just leaves
-    // `selfSlug` undefined and arming falls back to reply-id-only exactly as
-    // before.
+    // `resolveMailboxSelfSlug` never throws — so a lookup failure just arms
+    // reply-id-only exactly as before. The waiter slot repeats the lookup for
+    // every key it arms, including a key adopted later by a revive.
     // Retention runs further below; its TTL is read now, through the bridge
     // just published, under the same superseded-start guard as the mailbox
     // lookup. Only the tree-root lead prunes, so only it reads.
@@ -871,44 +871,75 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     const reportMailboxWaiterDiagnostic = (message: string): void => {
       ctx.ui.notify(`[ws-mailbox] ${message}`, "warning");
     };
-    const mailboxSessionKey = handle.defaultSessionKeyRef.current;
-    if (shouldArmMailboxWaiter(readSpawnRole(process.env), mailboxSessionKey)) {
+    const mailboxRole = readSpawnRole(process.env);
+    // The owner lead gets a re-armable slot even when bootstrap left it
+    // keyless: a later revive adoption can still give it a key to arm with.
+    if (mailboxRole === undefined) {
       const mailboxHandle = handle;
       const mailboxCallTool: MailboxToolCall = (name, args) => mailboxHandle.client.callTool(name, args);
-      const selfSlug = await resolveMailboxSelfSlug(mailboxCallTool, mailboxSessionKey);
+      let staged: StagedMailboxRuntime | undefined;
+      let runtimeReady = false;
+      const slot = createMailboxWaiterSlot({
+        resolveSlug: (key) => resolveMailboxSelfSlug(mailboxCallTool, key),
+        start: (key, slug) => {
+          if (!runtimeReady) {
+            // Stage once, on the first arm that survives its lookup, from this
+            // bridge's unique bootstrap; every later re-arm reuses the copy,
+            // so overlapping reloads can neither cross-copy outputs nor
+            // replace an executable held open by an old waiter on Windows.
+            // The copy outlives every waiter the slot starts (`slot.done`).
+            if (mailboxHandle.localRuntimeBinary) {
+              staged = stageMailboxRuntime(mailboxHandle.localRuntimeBinary);
+              attachMailboxRuntimeCleanup(slot, staged);
+            }
+            runtimeReady = true;
+            // The bridge runs the launcher's installed runtime; after staging,
+            // neither process needs this unique bootstrap build output.
+            mailboxHandle.releaseLocalBootstrap();
+          }
+          return startMailboxWaiter({
+            runWait: createSubprocessWait(sessionMailboxWaitOptions({
+              launcherPath,
+              pluginDir,
+              runtimeBinary: staged?.binaryPath,
+              sessionKey: key,
+              slug,
+              cwd: ctx.cwd,
+              // Every re-spawned wait repeats a persistent warning; show each
+              // line once per armed waiter.
+              onStderr: reportDistinctLinesOnce(reportMailboxWaiterDiagnostic),
+            })),
+            drainMail: createBridgeDrain(mailboxCallTool, key),
+            admit: (envelope) => sendToLead(pi, buildMailboxPushMessage(envelope), "steer", "always"),
+            onError: reportMailboxWaiterDiagnostic,
+          });
+        },
+      });
+      // Published before the first arm's lookup await: a newer start or a
+      // shutdown that lands meanwhile stops this slot, which refuses every
+      // pending arm, so no waiter of this generation outlives its bridge.
+      generation.waiter = slot;
+      mailboxWaiterHandle = slot;
+      const armMailbox = async (key: string): Promise<void> => {
+        try {
+          await slot.arm(key);
+        } catch (error) {
+          reportMailboxWaiterDiagnostic(`could not stage local runtime: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      };
+      // A revive adoption re-logs in with another key, which moves the named
+      // inbox to it; re-arm on that key so mail keeps waking this session.
+      handle.onDefaultKeyAdopted((key) => {
+        if (shouldArmMailboxWaiter(readSpawnRole(process.env), key)) void armMailbox(key);
+      });
+      const mailboxSessionKey = handle.defaultSessionKeyRef.current;
+      if (shouldArmMailboxWaiter(mailboxRole, mailboxSessionKey)) await armMailbox(mailboxSessionKey);
       // A newer start/shutdown may have superseded this generation while
       // lookup awaited. Dispose its captured bridge AND unique bootstrap;
       // clearing only the waiter pointer would orphan both.
       if (armEpoch !== mailboxWaiterEpoch || startEpoch !== sessionStartEpoch) {
         await disposeStaleBootstrap();
         return;
-      }
-      try {
-        // Stage once after bridge validation from this bridge's unique
-        // bootstrap; overlapping reloads can neither cross-copy outputs
-        // nor replace an executable held open by the old waiter on Windows.
-        const staged = handle.localRuntimeBinary ? stageMailboxRuntime(handle.localRuntimeBinary) : undefined;
-        // The bridge runs the launcher's installed runtime; after staging,
-        // neither process needs this unique bootstrap build output.
-        handle.releaseLocalBootstrap();
-        const waiter = startMailboxWaiter({
-          runWait: createSubprocessWait(sessionMailboxWaitOptions({
-            launcherPath,
-            pluginDir,
-            runtimeBinary: staged?.binaryPath,
-            sessionKey: mailboxSessionKey,
-            slug: selfSlug,
-            cwd: ctx.cwd,
-            onStderr: reportMailboxWaiterDiagnostic,
-          })),
-          drainMail: createBridgeDrain(mailboxCallTool, mailboxSessionKey),
-          admit: (envelope) => sendToLead(pi, buildMailboxPushMessage(envelope), "steer", "always"),
-          onError: reportMailboxWaiterDiagnostic,
-        });
-        generation.waiter = staged ? attachMailboxRuntimeCleanup(waiter, staged) : waiter;
-        mailboxWaiterHandle = generation.waiter;
-      } catch (error) {
-        reportMailboxWaiterDiagnostic(`could not stage local runtime: ${error instanceof Error ? error.message : String(error)}`);
       }
     } else {
       handle.releaseLocalBootstrap();
