@@ -1,7 +1,7 @@
 /**
  * 260906 Phase 1 (`260906-bug-ws-pi-lead-cannot-see-or-load-skills`): the
  * lead/fork skill surface — an `<available_skills>` block in the ws
- * system-prompt block, and a `ws-skill(name, args?)` tool to load one.
+ * system-prompt block, and a `ws-skill(name)` tool to load one.
  *
  * Root cause this phase fixes: `computeLeadActiveTools` (execute-gateway.ts)
  * removes native `read`/`bash` from the lead's (and a fork's) active-tools
@@ -196,19 +196,18 @@ export function buildSkillsBlock(entries: readonly SkillEntry[], loadFile: (path
 }
 
 /**
- * Pure `ws-skill(name, args?)` body. Looks `name` up against ALL `entries`
+ * Pure `ws-skill(name)` body. Looks `name` up against ALL `entries`
  * (not just the visible/block-listed subset — a `disable-model-invocation:
  * true` skill must still be loadable by exact name, same as Pi's own
  * `/skill:<name>` expansion). Frontmatter is stripped from the returned
- * body (via `loadFile`); `args`, when given, is appended as a trailing
- * `User: <args>` line.
+ * body (via `loadFile`) and returned as-is.
  */
-export function computeWsSkillResult(name: string, args: string | undefined, entries: readonly SkillEntry[], loadFile: (path: string) => LoadedSkill): string {
-  return computeWsSkillReadResult(name, args, entries, loadFile).text;
+export function computeWsSkillResult(name: string, entries: readonly SkillEntry[], loadFile: (path: string) => LoadedSkill): string {
+  return computeWsSkillReadResult(name, entries, loadFile).text;
 }
 
 /** Same public text contract as computeWsSkillResult, with a success bit for read-only optimizations. */
-export function computeWsSkillReadResult(name: string, args: string | undefined, entries: readonly SkillEntry[], loadFile: (path: string) => LoadedSkill): WsSkillReadResult {
+export function computeWsSkillReadResult(name: string, entries: readonly SkillEntry[], loadFile: (path: string) => LoadedSkill): WsSkillReadResult {
   const entry = entries.find((e) => e.name === name);
   if (!entry) {
     const names = entries.map((e) => e.name).sort();
@@ -218,7 +217,7 @@ export function computeWsSkillReadResult(name: string, args: string | undefined,
   if (!loaded.ok) {
     return { text: `Error loading skill "${name}": ${loaded.error}`, success: false };
   }
-  return { text: args ? `${loaded.body}\n\nUser: ${args}` : loaded.body, success: true };
+  return { text: loaded.body, success: true };
 }
 
 /**
@@ -256,14 +255,13 @@ export function registerWsSkillTool(pi: ExtensionAPI, toolPreviewTuiRef: ToolPre
       type: "object",
       properties: {
         name: { type: "string", description: "Skill name, exactly as listed in <available_skills> (no `skill:` prefix)." },
-        args: { type: "string", description: "Optional free-text arguments to pass the skill — appended to the loaded body as a trailing `User: <args>` line." },
       },
       required: ["name"],
     } as never,
     async execute(toolCallId, params, _signal, _onUpdate, toolCtx) {
-      const p = params as { name: string; args?: string };
+      const p = params as { name: string };
       const entries = resolveSkillEntries(pi.getCommands());
-      const read = computeWsSkillReadResult(p.name, p.args, entries, (path) => loadSkillFile(path));
+      const read = computeWsSkillReadResult(p.name, entries, (path) => loadSkillFile(path));
       if (!read.success) return { content: [{ type: "text", text: read.text }] };
       const visibleEntries = toolCtx?.sessionManager?.buildContextEntries?.() ?? [];
       const decision = dedupeRead(visibleEntries, toolCallId, "ws-skill", wsSkillKey(p), read.text);

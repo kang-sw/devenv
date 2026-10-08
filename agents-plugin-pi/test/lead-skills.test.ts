@@ -184,29 +184,25 @@ describe("computeWsSkillResult", () => {
   });
 
   test("returns the stripped body for a known skill", () => {
-    assert.equal(computeWsSkillResult("lead-proceed", undefined, entries, loader), "Proceed body.");
-  });
-
-  test("appends args as a trailing 'User: <args>' line", () => {
-    assert.equal(computeWsSkillResult("lead-proceed", "drain the queue", entries, loader), "Proceed body.\n\nUser: drain the queue");
+    assert.equal(computeWsSkillResult("lead-proceed", entries, loader), "Proceed body.");
   });
 
   test("a disable-model-invocation:true skill is still loadable by exact name", () => {
-    assert.equal(computeWsSkillResult("hidden-skill", undefined, entries, loader), "Hidden body.");
+    assert.equal(computeWsSkillResult("hidden-skill", entries, loader), "Hidden body.");
   });
 
   test("unknown name lists every available name, sorted", () => {
-    const result = computeWsSkillResult("does-not-exist", undefined, entries, loader);
+    const result = computeWsSkillResult("does-not-exist", entries, loader);
     assert.equal(result, 'Unknown skill "does-not-exist". Available skills: hidden-skill, lead-proceed');
   });
 
   test("unknown name with no entries at all reports '(none)'", () => {
-    assert.equal(computeWsSkillResult("anything", undefined, [], loader), 'Unknown skill "anything". Available skills: (none)');
+    assert.equal(computeWsSkillResult("anything", [], loader), 'Unknown skill "anything". Available skills: (none)');
   });
 
   test("a load failure for a known entry is reported without throwing", () => {
     const failing: SkillEntry[] = [{ name: "broken", description: "d", path: "/skills/broken/SKILL.md" }];
-    const result = computeWsSkillResult("broken", undefined, failing, fakeLoader({ "/skills/broken/SKILL.md": { ok: false, error: 'could not read "/skills/broken/SKILL.md": ENOENT' } }));
+    const result = computeWsSkillResult("broken", failing, fakeLoader({ "/skills/broken/SKILL.md": { ok: false, error: 'could not read "/skills/broken/SKILL.md": ENOENT' } }));
     assert.equal(result, 'Error loading skill "broken": could not read "/skills/broken/SKILL.md": ENOENT');
   });
 
@@ -218,7 +214,7 @@ describe("computeWsSkillResult", () => {
     const broken: SkillEntry[] = [{ name: "broken-yaml", description: "d", path: "/skills/broken-yaml/SKILL.md" }];
     let result = "";
     assert.doesNotThrow(() => {
-      result = computeWsSkillResult("broken-yaml", undefined, broken, (path) => loadSkillFile(path, () => "---\nfoo: [\nbar\n---\nBody."));
+      result = computeWsSkillResult("broken-yaml", broken, (path) => loadSkillFile(path, () => "---\nfoo: [\nbar\n---\nBody."));
     });
     assert.match(result, /^Error loading skill "broken-yaml": could not parse frontmatter in "\/skills\/broken-yaml\/SKILL\.md"/);
   });
@@ -271,6 +267,21 @@ describe("registerWsSkillTool (fake pi)", () => {
     assert.ok(tool, `${WS_SKILL_TOOL_NAME} must be registered`);
     const result = await tool!.execute("call-1", { name: "does-not-exist" });
     assert.match(result.content[0].text, /Unknown skill "does-not-exist"/);
+  });
+
+  test("schema has no args parameter, and a stray args value still returns the plain body", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "ws-pi-skill-no-args-"));
+    const path = join(directory, "SKILL.md");
+    writeFileSync(path, "---\nname: plain\n---\nPlain body.");
+    const tools = new Map<string, FakeTool>();
+    const pi = fakePi(tools, () => [skillCommand("plain", "fixture", path)]);
+    registerWsSkillTool(pi);
+    const tool = tools.get(WS_SKILL_TOOL_NAME)!;
+    const schema = (tool as unknown as { parameters: { properties: Record<string, unknown>; required: string[] } }).parameters;
+    assert.deepEqual(Object.keys(schema.properties), ["name"]);
+    assert.deepEqual(schema.required, ["name"]);
+    const result = await tool.execute("call-1", { name: "plain", args: "User approves autonomously" }, undefined, undefined, { sessionManager: { buildContextEntries: () => [] } });
+    assert.equal(result.content[0].text, "Plain body.");
   });
 
   // Dogfood bug this fixes: Pi runs session_start BEFORE merging an

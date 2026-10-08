@@ -39,7 +39,10 @@ export function playbookReadKey(params: Record<string, unknown>): string {
 }
 
 export function wsSkillKey(params: Record<string, unknown>): string {
-  return stable({ name: params.name, args: params.args });
+  // Name only: `args` was removed from ws-skill, but older session entries may
+  // still carry it in their call arguments; ignoring it keeps those re-reads
+  // deduped against the same skill body.
+  return stable({ name: params.name });
 }
 
 /** workflow_manual reads are keyed only by the resolved session key. */
