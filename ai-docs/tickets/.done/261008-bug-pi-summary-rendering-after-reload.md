@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 75fd86b831a8fcfa
 sage-review-completeness-reviewed: 75fd86b831a8fcfa
+completed: 2026-10-08
 ---
 
 # Restore existing display summary rows after Pi reload or resume
@@ -209,6 +210,47 @@ or unsupported state raw, and distinguish existing downstream failures from
 new adapter failures. Do not run a destructive live crash test in the user's
 session; isolated/offline fault injection provides the failure evidence.
 
+### Result (692cebd24) - 2026-10-08
+
+- Installed awaited tool/custom-message presentation before reconstruction via
+  Pi's public resolver, without replacing native execution definitions. Actual
+  owned-tool confirmation controls eligibility, not resolver availability.
+- Split value reset from generation retirement: incoming mounted repaint links
+  survive startup; outgoing rows and replay callbacks are fenced at shutdown.
+  Validated sidecar candidates replay on later ownership without rereading
+  summaries, preserve newer accepted values, and respect originating-session
+  and authoritative empty/partial child-cache boundaries.
+- Guarded summary construction, delayed rendering and invalidation with raw
+  fallback, preserving native component reuse, expansion and status/layout.
+  A failed summary value stays fenced in its row state across host slot rebuilds
+  until a newer value arrives. Malformed state stays raw; pre-existing downstream
+  raw-renderer faults remain outside the adapter's containment promise.
+- Package verification: isolated `npm test -- --test-concurrency=4
+  --test-reporter=spec --test-reporter-destination=/tmp/ws-summary-package-check.log`
+  completed in 144.8 seconds with 2,234 passed, zero failed/cancelled, and three
+  existing explicit skips (two opt-in develop-marker checks and one isolated
+  direct/nested Explore check). The test leaf read all 2,910 output lines; only
+  expected fault-injection diagnostics occurred. Worker-only fork/mailbox
+  environment markers were unset; the prior 120-second tool budget was too short.
+- Host discovery: `npm root -g` returned
+  `/home/linuxbrew/.linuxbrew/lib/node_modules`; the discovered installed package
+  declares Pi **1.0.4**. Separate required command:
+  `cd agents-plugin-pi && WS_PI_HOST_ROOT="$(npm root -g)/@earendil-works/pi-coding-agent" node scripts/verify-display-summary-host.mjs`
+  passed without skips, dependency changes, provider calls or live terminal
+  probes. It loads the actual production factory and immutable baseline,
+  exercises actual reload/replacement plus cold continuation, and distinguishes
+  old/fresh native, bridge, one-liner, adapter, push/batch and pre-expanded rows.
+  Its failure matrix covers summary faults, resolver composition/delegation,
+  absent/delayed/incompatible dependencies and metadata, raw reuse and scoped
+  child-write denial. Width tests preserve the host's existing minimum-frame
+  behavior instead of claiming to repair it.
+- Independent one-pass lite review of `a8ac507da..692cebd24`: **clean**, no
+  correctness/test-integrity findings. No re-review was allocated.
+- **User live reload/resume acceptance remains pending after approved
+  integration.** Verify existing collapsed cached rows after reload and resume/
+  cold continuation, plus fresh summaries and raw expanded rows. Offline success
+  does not establish the live TUI result; closure is permitted by decision (7).
+
 ## Execution continuation (2026-10-08)
 
 The user authorized correction and continuation after the verifier discovery
@@ -224,3 +266,8 @@ rebuilt tool slots; per-row state now fences that failed value until a newer
 summary arrives. Full package verification reports 2,234 passes, zero failures
 and three existing explicit skips. Live reload/resume acceptance remains
 user-pending, independently of these offline results.
+
+
+## Resolution (2026-10-08)
+
+Implemented and verified the existing-row reload/resume repair in 692cebd24 with unit contracts in cc986da44. Installed Pi1.0.4 offline lifecycle/failure acceptance passed; full package verification had 2,234 passes, zero failures and three pre-existing explicit skips. Independent one-pass lite review was clean. User live TUI reload/resume acceptance remains explicitly pending after normal approved integration; no merge was performed.
