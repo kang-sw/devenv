@@ -3,10 +3,10 @@
  * shows once `display-summary.ts`'s summarizer has filled the store, and the
  * seams that put them in front of the raw renderers.
  *
- * Display contract (ticket 261007-feat-pi-display-summary, "Display summary:
- * display"): a summarized row is a bold header (the tool name, or the message
- * kind) followed by the indented fields; `optionalContext` paints dim,
- * `toolIntention` and `toolResult` keep the default color. Collapsed rows show
+ * Display contract: a summarized row is a bold header (the tool name, or the
+ * message kind), a blank line, and the fields. `optionalContext` stays dim
+ * and indented; `toolIntention` is normal text indented four spaces, then a
+ * blank line separates the unindented muted `toolResult`. Collapsed rows show
  * the raw rendering until a summary exists; expanded rows (Pi's Ctrl+O) are
  * always raw.
  *
@@ -109,7 +109,7 @@ export function paintBold(theme: unknown, text: string): string {
 // Summary components
 // ---------------------------------------------------------------------------
 
-/** Indent of the fields under a summary header. */
+/** Preserved indent of optional context under a summary header. */
 export const SUMMARY_FIELD_INDENT = 2;
 
 const summaryComponentBrand = Symbol("ws-display-summary-component");
@@ -131,12 +131,18 @@ function stack(children: readonly SummaryComponent[]): SummaryComponent {
   } as SummaryComponent;
 }
 
-/** The indented field rows: dim context first, then intention and result in the default color. */
-export function buildSummaryFields(tui: SummaryTextModules, summary: DisplaySummary, theme: unknown, indent = SUMMARY_FIELD_INDENT): SummaryComponent[] {
-  const fields: SummaryComponent[] = [];
-  if (summary.optionalContext) fields.push(new tui.Text(paintFg(theme, "dim", summary.optionalContext), indent, 0));
-  fields.push(new tui.Text(summary.toolIntention, indent, 0));
-  fields.push(new tui.Text(summary.toolResult, indent, 0));
+/** A real blank row: Text with an empty string renders no lines. */
+function summarySpacer(): SummaryComponent {
+  return { render: () => [""], invalidate: () => {} };
+}
+
+/** Shared field layout relative to the header; padX is the row's frame margin. */
+export function buildSummaryFields(tui: SummaryTextModules, summary: DisplaySummary, theme: unknown, padX = 0): SummaryComponent[] {
+  const fields: SummaryComponent[] = [summarySpacer()];
+  if (summary.optionalContext) fields.push(new tui.Text(paintFg(theme, "dim", summary.optionalContext), padX + SUMMARY_FIELD_INDENT, 0));
+  fields.push(new tui.Text(paintFg(theme, "text", summary.toolIntention), padX + 4, 0));
+  fields.push(summarySpacer());
+  fields.push(new tui.Text(paintFg(theme, "muted", summary.toolResult), padX, 0));
   return fields;
 }
 
@@ -288,7 +294,7 @@ export function wrapToolRenderersWithSummary(
     renderResult(result, renderOptions, theme, context) {
       const ctx = asContext(context);
       const hit = summaryFor(ctx, (renderOptions as { expanded?: unknown } | undefined)?.expanded);
-      if (hit) return stack(buildSummaryFields(hit.tui, hit.summary, theme, padX + SUMMARY_FIELD_INDENT));
+      if (hit) return stack(buildSummaryFields(hit.tui, hit.summary, theme, padX));
       if (!renderResult) throw new UseNativeResultFallback();
       return renderResult(result, renderOptions, theme, rawContext(context));
     },

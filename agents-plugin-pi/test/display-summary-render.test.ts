@@ -10,10 +10,13 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import { Text, visibleWidth } from "@earendil-works/pi-tui";
 import { SessionManager, createEditToolDefinition, createGrepToolDefinition, createLsToolDefinition, type EntryRenderer, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createDisplaySummaryStore, type DisplaySummary } from "../src/display-summary.ts";
 import {
   ADAPTER_SUMMARIZED_MESSAGE_TYPES,
+  buildSummaryBlock,
+  buildSummaryCard,
   isSummaryComponent,
   registerAdapterMessageRenderers,
   registerSummarizedBuiltinTools,
@@ -162,6 +165,59 @@ function capturePi() {
 }
 
 // ---------------------------------------------------------------------------
+// Shared summary layout
+// ---------------------------------------------------------------------------
+
+describe("shared summary layout", () => {
+  test("blocks and cards use exactly one blank row after the title and before the result", () => {
+    const expected = ["title", "", "    <text>read the plan</text>", "", "<muted>three phases</muted>"];
+    assert.deepEqual(buildSummaryBlock(modules, "title", lean, theme).render(80), expected);
+    assert.deepEqual(buildSummaryCard(modules, "title", lean, theme).render(80), expected.map((line) => `{customMessageBg}${line}`));
+  });
+
+  test("real Text wraps every intention line at four spaces and leaves muted result lines unindented", () => {
+    const long: DisplaySummary = {
+      toolIntention: "Inspect several long inputs 한글 😀 for the summary\nThen verify wrapping",
+      toolResult: "Found several long outputs 한글 😀 in the summary\nAll checks complete",
+    };
+    for (const width of [12, 20, 40]) {
+      const tokens: string[] = [];
+      const ansiTheme = { fg: (token: string, value: string) => {
+        tokens.push(token);
+        return `${token === "text" ? "\x1b[97m" : "\x1b[90m"}${value}\x1b[0m`;
+      } };
+      const lines = buildSummaryBlock({ Text }, "title", long, ansiTheme).render(width);
+      const plain = lines.map((line) => stripTerminalSequences(line).trimEnd());
+      assert.deepEqual(tokens, ["text", "muted"], "foreground and result use separate semantic tokens");
+      assert.equal(plain[1], "", "one blank line after the title");
+      // Text may emit whitespace-only wrapped lines at narrow widths;
+      // distinguish those styled lines from the shared unstyled spacer.
+      const separator = lines.indexOf("", 2);
+      assert.ok(separator > 2);
+      const intention = lines.slice(2, separator);
+      const result = lines.slice(separator + 1);
+      assert.ok(intention.length > 1 && result.length > 1, "both fields wrapped");
+      for (const line of intention) {
+        assert.match(stripTerminalSequences(line), /^ {4}/);
+        assert.ok(line.includes("\x1b[97m"), "wrapped intention retains normal foreground");
+      }
+      for (const line of result) {
+        if (stripTerminalSequences(line).trim()) assert.match(stripTerminalSequences(line), /^\S/);
+        assert.ok(line.includes("\x1b[90m"), "wrapped result retains muted foreground");
+      }
+      for (const line of lines) assert.ok(visibleWidth(line) <= width, `fits ${width} columns`);
+      assert.equal(lines.filter((line) => line === "").length, 2, "no extra blank margins");
+    }
+    // Text reduces its margins when four spaces cannot fit, rather than
+    // violating the terminal width contract on very narrow viewports.
+    for (let width = 1; width <= 9; width++) {
+      const lines = buildSummaryBlock({ Text }, "title", lean, undefined).render(width);
+      for (const line of lines) assert.ok(visibleWidth(line) <= width, `fits narrow ${width} columns`);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Tool rows
 // ---------------------------------------------------------------------------
 
@@ -196,10 +252,12 @@ describe("registerWsTool tool rows", () => {
     assert.equal(text(call), "<toolTitle><b>ws__tickets_query</b></toolTitle>", "the call slot is the bold tool-name header only");
     assert.doesNotMatch(text(call), /query: auth/, "the raw argument preview is hidden once summarized");
     assert.deepEqual((fields as FakeComponent).render(80), [
+      "",
       "  <dim>after the auth check</dim>",
-      "  searched for the token",
-      "  found two call sites",
-    ], "context is dim; intention and result keep the default color; all indented");
+      "    <text>searched for the token</text>",
+      "",
+      "<muted>found two call sites</muted>",
+    ], "blank rows separate the header and fields; context stays dim, intention is indented normal text, result is unindented muted");
   });
 
   test("expanded rows are always raw", () => {
@@ -214,7 +272,7 @@ describe("registerWsTool tool rows", () => {
     const { store, tool } = registered();
     store.set("call-3", lean);
     const { context } = toolContext("call-3");
-    assert.deepEqual((tool.renderResult(result, { expanded: false, isPartial: false }, theme, context) as FakeComponent).render(80), ["  read the plan", "  three phases"]);
+    assert.deepEqual((tool.renderResult(result, { expanded: false, isPartial: false }, theme, context) as FakeComponent).render(80), ["", "    <text>read the plan</text>", "", "<muted>three phases</muted>"]);
   });
 
   test("a tool with its own renderers is wrapped too, and an absent slot keeps Pi's native fallback", () => {
@@ -332,7 +390,7 @@ describe("registerSummarizedBuiltinTools", () => {
     store.set("e", lean);
     const { context } = toolContext("e");
     assert.equal(text(tools[0]!.renderCall({}, theme, context)), " <toolTitle><b>edit</b></toolTitle>");
-    assert.deepEqual((tools[0]!.renderResult({ content: [] }, { expanded: false, isPartial: false }, theme, context) as FakeComponent).render(80), ["   read the plan", "   three phases"]);
+    assert.deepEqual((tools[0]!.renderResult({ content: [] }, { expanded: false, isPartial: false }, theme, context) as FakeComponent).render(80), ["", "     <text>read the plan</text>", "", " <muted>three phases</muted>"]);
   });
 });
 
@@ -354,9 +412,11 @@ describe("push message rows", () => {
     const lines = component.render(80);
     assert.equal(lines[0], "{customMessageBg}<customMessageLabel><b>scout · report</b></customMessageLabel>", "bold human head on the push card background");
     assert.deepEqual(lines.slice(1), [
+      "{customMessageBg}",
       "{customMessageBg}  <dim>after the auth check</dim>",
-      "{customMessageBg}  searched for the token",
-      "{customMessageBg}  found two call sites",
+      "{customMessageBg}    <text>searched for the token</text>",
+      "{customMessageBg}",
+      "{customMessageBg}<muted>found two call sites</muted>",
     ]);
     assert.doesNotMatch(lines.join("\n"), /Outcome: done/);
 
@@ -421,7 +481,7 @@ describe("adapter message renderers", () => {
       store.set(details[SUMMARY_ID_KEY] as string, lean);
       const lines = component.render(80);
       assert.match(lines[0]!, /^\{customMessageBg\}<customMessageLabel><b>[A-Z][a-z]+ [a-z]+<\/b><\/customMessageLabel>$/, "a short readable kind header");
-      assert.deepEqual(lines.slice(1), ["{customMessageBg}  read the plan", "{customMessageBg}  three phases"]);
+      assert.deepEqual(lines.slice(1), ["{customMessageBg}", "{customMessageBg}    <text>read the plan</text>", "{customMessageBg}", "{customMessageBg}<muted>three phases</muted>"]);
 
       const expanded = renderers.get(customType)!({ ...message, content: "raw text" }, { expanded: true }, theme) as FakeComponent;
       assert.match(text(expanded), /raw text/, "expanded is raw");
@@ -466,9 +526,11 @@ describe("compaction-history entry", () => {
     store.set(entry.id, summary);
     assert.deepEqual(component.render(80).map((line) => line.trimEnd()), [
       "<b>Previous conversation</b>",
+      "",
       "  after the auth check",
-      "  searched for the token",
-      "  found two call sites",
+      "    searched for the token",
+      "",
+      "found two call sites",
     ], "summary block on the same component, read at render time");
 
     const expanded = renderer!(entry as never, { expanded: true }, plainTheme as never)!;
