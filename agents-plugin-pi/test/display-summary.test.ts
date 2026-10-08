@@ -472,6 +472,69 @@ describe("summarizer", () => {
   });
 });
 
+function acceptanceBarrier<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
+test("onAccepted synchronously hands off each parsed nonempty batch before repaint", async () => {
+  const store = createDisplaySummaryStore();
+  store.toolNames.add("read");
+  const batches: Array<ReadonlyMap<string, unknown>> = [];
+  const order: string[] = [];
+  store.requestRender = () => { order.push("render"); assert.equal(batches.length, 1); };
+  const responses = [answer([{ id: "t1", toolIntention: "i", toolResult: "r" }, { id: "unknown", toolIntention: "bad", toolResult: "bad" }]), answer([]), answer(undefined)];
+  const s = createDisplaySummarizer({ store, sessionId: "provider-cache", readConfig: async () => ({ model: "acme/mini" }), resolveModel: () => model(), complete: async () => responses.shift()!,
+    onAccepted(batch) { order.push("accept"); assert.deepEqual(store.get("row-0"), batch.get("row-0")); batches.push(new Map(batch)); } });
+  for (let i = 0; i < 3; i += 1) {
+    s.observeToolEnd(`row-${i}`, "read");
+    await s.flush();
+  }
+  assert.deepEqual(order, ["accept", "render"]);
+  assert.deepEqual([...batches[0]!], [["row-0", { toolIntention: "i", toolResult: "r" }]]);
+});
+
+for (const stage of ["configuration", "provider"] as const) {
+  for (const lifecycle of ["dispose", "reset"] as const) {
+    test(`${lifecycle} while ${stage} is paused preserves acceptance ownership and resets only the log`, async () => {
+      const entered = acceptanceBarrier();
+      const release = acceptanceBarrier();
+      const store = createDisplaySummaryStore();
+      store.toolNames.add("read");
+      const batches: Array<ReadonlyMap<string, unknown>> = [];
+      let calls = 0;
+      const s = createDisplaySummarizer({ store, sessionId: "cache", resolveModel: () => model(),
+        readConfig: async () => { if (stage === "configuration") { entered.resolve(); await release.promise; } return { model: "acme/mini" }; },
+        complete: async () => { calls += 1; if (stage === "provider") { entered.resolve(); await release.promise; } return answer([{ id: "t1", toolIntention: "i", toolResult: "r" }]); },
+        onAccepted: (batch) => { batches.push(new Map(batch)); },
+      });
+      store.set("already", { toolIntention: "old", toolResult: "accepted" });
+      s.observeToolEnd("row", "read");
+      const pending = s.flush();
+      await entered.promise;
+      if (lifecycle === "dispose") s.dispose(); else s.reset();
+      release.resolve();
+      await pending;
+      assert.equal(store.get("already")?.toolResult, "accepted");
+      if (lifecycle === "dispose") {
+        assert.equal(batches.length, 0);
+        assert.equal(store.get("row"), undefined);
+        assert.equal(calls, stage === "provider" ? 1 : 0);
+        assert.equal(s.log.length, 0);
+      } else {
+        assert.deepEqual([...batches[0]!.keys()], ["row"]);
+        assert.equal(store.get("row")?.toolResult, "r");
+        if (stage === "provider") assert.equal(s.log.length, 0, "old-generation completion must not restore precompaction log");
+        s.observeToolEnd("fresh", "read");
+        await s.flush();
+        assert.equal(store.get("fresh")?.toolResult, "r");
+        assert.equal(s.log.length, stage === "provider" ? 3 : 6, "a request started after reset belongs to the fresh log, even if its config lookup began earlier");
+      }
+    });
+  }
+}
+
 describe("parseSummaryResponse", () => {
   test("drops items missing a required field", () => {
     const labels = new Map([["t1", "a"], ["t2", "b"]]);

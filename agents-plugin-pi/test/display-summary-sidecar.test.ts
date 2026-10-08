@@ -4,7 +4,7 @@ import * as fs from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
-import { createSummarySidecar, DISPLAY_SUMMARY_SIDECAR_SUFFIX } from "../src/display-summary-sidecar.ts";
+import { cleanOrphanSummarySidecars, createSummarySidecar, seedNativeSummarySidecar, type SidecarIO, DISPLAY_SUMMARY_SIDECAR_SUFFIX } from "../src/display-summary-sidecar.ts";
 
 const summary = { toolIntention: "inspect", toolResult: "found" };
 const toolNames = new Set(["read"]);
@@ -62,4 +62,259 @@ test("first save backfills accepted memory; observed deletion never recreates th
   await cache.drain();
   await assert.rejects(fs.lstat(f.sidecarFile), { code: "ENOENT" });
   assert.deepEqual(cache.snapshot().get("b"), summary);
+});
+
+function deferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+const row = (id: unknown, value: unknown = summary, sessionId = "lead", version = 1) => JSON.stringify({ version, sessionId, id, summary: value });
+function openCache(f: Awaited<ReturnType<typeof fixture>>, extra: Partial<Parameters<typeof createSummarySidecar>[0]> = {}) {
+  return createSummarySidecar({ conversation: { sessionId: "lead", sessionFile: f.sessionFile, entries: () => f.entries }, toolNames, restore: () => {}, ...extra });
+}
+async function records(path: string) {
+  return (await fs.readFile(path, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+}
+
+test("last valid eligible value wins; invalid records never replace it", async (t) => {
+  const f = await fixture(t);
+  const latest = { ...summary, toolResult: "latest", optionalContext: "context" };
+  await fs.writeFile(f.sidecarFile, [row("a"), row("b"), row("a", latest),
+    row("a", { toolIntention: "", toolResult: "bad" }), row("a", { ...summary, optionalContext: 4 }),
+    row("a", summary, "other"), row("a", summary, "lead", 2), row("entry-a"), row("missing"), row(" "), row(12), row("a", []), row("a", { ...summary, toolResult: null }), "garbage"].join("\n") + "\n");
+  let replay = new Map();
+  const cache = openCache(f, { restore: (batch) => { replay = new Map(batch); } });
+  await cache.ready;
+  assert.deepEqual([...replay], [["a", latest], ["b", summary]]);
+  assert.deepEqual(cache.snapshot(), replay);
+  cache.accept(new Map([["missing", summary], ["b", latest]]));
+  await cache.drain();
+  assert.ok((await fs.readFile(f.sidecarFile, "utf8")).endsWith(row("b", latest) + "\n"));
+});
+
+for (const foreign of [row("a", summary, "foreign"), row("a", summary, "lead", 2)]) {
+  test(`wholly foreign file is immutable: ${foreign}`, async (t) => {
+    const f = await fixture(t);
+    await fs.writeFile(f.sidecarFile, foreign);
+    const cache = openCache(f);
+    await cache.ready;
+    assert.equal(cache.snapshot().size, 0);
+    cache.accept(new Map([["a", summary]]));
+    await cache.drain();
+    assert.deepEqual(cache.snapshot().get("a"), summary);
+    assert.equal(await fs.readFile(f.sidecarFile, "utf8"), foreign);
+  });
+}
+
+for (const tail of ["{broken", row("b"), row("a", { toolIntention: 7 })]) {
+  test(`recognized file preserves bytes and repairs unterminated boundary: ${tail}`, async (t) => {
+    const f = await fixture(t);
+    const before = row("a") + "\n" + tail;
+    await fs.writeFile(f.sidecarFile, before);
+    const cache = openCache(f);
+    await cache.ready;
+    assert.deepEqual(cache.snapshot().get("a"), summary);
+    assert.equal(cache.snapshot().has("b"), tail === row("b"));
+    const next = { ...summary, toolResult: "new" };
+    cache.accept(new Map([["b", next]]));
+    await cache.drain();
+    assert.equal(await fs.readFile(f.sidecarFile, "utf8"), before + "\n" + row("b", next) + "\n");
+    const reopened = openCache(f);
+    await reopened.ready;
+    assert.deepEqual(reopened.snapshot().get("b"), next);
+  });
+}
+
+test("recognized ownership with an invalid value still permits append", async (t) => {
+  const f = await fixture(t);
+  const before = row("a", { toolResult: "missing intention" }) + "\n";
+  await fs.writeFile(f.sidecarFile, before);
+  const cache = openCache(f);
+  await cache.ready;
+  assert.equal(cache.snapshot().size, 0);
+  cache.accept(new Map([["a", summary]]));
+  await cache.drain();
+  assert.equal(await fs.readFile(f.sidecarFile, "utf8"), before + row("a") + "\n");
+});
+
+for (const failure of ["read", "write"] as const) {
+  test(`${failure} failure keeps live values and raw fallback without rejecting drain`, async (t) => {
+    const f = await fixture(t);
+    if (failure === "read") await fs.writeFile(f.sidecarFile, row("b") + "\n");
+    const io: SidecarIO = { ...fs, open: async (...args: Parameters<typeof fs.open>) => {
+      if (args[0] === f.sidecarFile) throw new Error(`injected ${failure} failure`);
+      return fs.open(...args);
+    } };
+    const cache = openCache(f, { io });
+    await cache.ready;
+    cache.accept(new Map([["a", summary]]));
+    await cache.drain();
+    assert.deepEqual(cache.snapshot().get("a"), summary);
+    assert.equal(cache.snapshot().get("b"), undefined);
+    if (failure === "read") assert.equal(await fs.readFile(f.sidecarFile, "utf8"), row("b") + "\n");
+    else await assert.rejects(fs.lstat(f.sidecarFile), { code: "ENOENT" });
+  });
+}
+
+test("batches serialize while append is held; drain waits; live acceptance beats delayed replay", async (t) => {
+  const f = await fixture(t);
+  await fs.writeFile(f.sidecarFile, row("a") + "\n");
+  const entered = deferred();
+  const release = deferred();
+  let held = false;
+  const io: SidecarIO = { ...fs, open: async (...args: Parameters<typeof fs.open>) => {
+    if (args[0] === f.sidecarFile && !held) { held = true; entered.resolve(); await release.promise; }
+    return fs.open(...args);
+  } };
+  let replay = new Map();
+  const cache = openCache(f, { io, restore: (batch) => { replay = new Map(batch); } });
+  await entered.promise;
+  const newer = { ...summary, toolResult: "live" };
+  cache.accept(new Map([["a", newer]]));
+  cache.accept(new Map([["b", summary]]));
+  let drained = false;
+  const drain = cache.drain().then(() => { drained = true; });
+  assert.equal(drained, false);
+  release.resolve();
+  await drain;
+  assert.equal(replay.has("a"), false);
+  assert.deepEqual(cache.snapshot().get("a"), newer);
+  assert.deepEqual((await records(f.sidecarFile)).map((r) => [r.id, r.summary.toolResult]), [["a", "found"], ["a", "live"], ["b", "found"]]);
+});
+
+test("no-file conversations remain memory-only", async () => {
+  const cache = createSummarySidecar({ conversation: { sessionId: "unsaved", entries: () => [entry("a")] }, toolNames,
+    restore: () => assert.fail("no disk replay"), io: { ...fs, lstat: async () => { assert.fail("no filesystem work"); } } });
+  await cache.ready;
+  cache.accept(new Map([["a", summary]]));
+  cache.sync();
+  await cache.drain();
+  assert.deepEqual(cache.snapshot().get("a"), summary);
+});
+
+test("cleanup is direct-directory, supported consistent ownership only", async (t) => {
+  const f = await fixture(t);
+  const suffix = DISPLAY_SUMMARY_SIDECAR_SUFFIX;
+  const files = new Map([
+    ["orphan.jsonl", row("a") + "\n"], ["foreign.jsonl", row("a", summary, "lead", 2)],
+    ["mixed.jsonl", row("a") + "\n" + row("b", summary, "other")], ["empty.jsonl", ""],
+    ["malformed.jsonl", row("a") + "\n{broken"], ["lead.jsonl", row("a")],
+    ["linked-conversation.jsonl", row("a")],
+  ]);
+  for (const [name, data] of files) await fs.writeFile(join(f.sessionFile, "..", name + suffix), data);
+  await fs.symlink(f.sessionFile, join(f.sessionFile, "..", "linked-conversation.jsonl"));
+  await fs.symlink(f.sidecarFile, join(f.sessionFile, "..", "linked-sidecar.jsonl" + suffix));
+  const nested = join(f.sessionFile, "..", "nested");
+  await fs.mkdir(nested);
+  await fs.writeFile(join(nested, "orphan.jsonl" + suffix), row("a"));
+  await cleanOrphanSummarySidecars(f.sessionFile);
+  await assert.rejects(fs.lstat(join(f.sessionFile, "..", "orphan.jsonl" + suffix)), { code: "ENOENT" });
+  for (const [name, data] of files) if (name !== "orphan.jsonl") assert.equal(await fs.readFile(join(f.sessionFile, "..", name + suffix), "utf8"), data);
+  assert.ok((await fs.lstat(join(f.sessionFile, "..", "linked-sidecar.jsonl" + suffix))).isSymbolicLink());
+  assert.equal(await fs.readFile(join(nested, "orphan.jsonl" + suffix), "utf8"), row("a"));
+});
+
+async function nativeChild(f: Awaited<ReturnType<typeof fixture>>, id = "child", parent: string | undefined = f.sessionFile) {
+  const path = join(f.sessionFile, "..", "child.jsonl");
+  const entries = [entry("a"), entry("child-only")];
+  await fs.writeFile(path, [JSON.stringify({ type: "session", id, ...(parent ? { parentSession: parent } : {}) }), ...entries.map((e) => JSON.stringify(e))].join("\n") + "\n");
+  return { path, entries, sidecar: path + DISPLAY_SUMMARY_SIDECAR_SUFFIX, cache: (extra: Partial<Parameters<typeof createSummarySidecar>[0]> = {}) => createSummarySidecar({ conversation: { sessionId: id, sessionFile: path, entries: () => entries }, toolNames, restore: () => {}, ...extra }) };
+}
+
+test("native initial open inherits copied-only rows, then writes independently even with equal IDs", async (t) => {
+  const f = await fixture(t);
+  await fs.writeFile(f.sidecarFile, row("a") + "\n" + row("b") + "\n" + row("child-only") + "\n");
+  const c = await nativeChild(f, "lead");
+  const child = c.cache();
+  await child.ready;
+  assert.deepEqual([...child.snapshot()], [["a", summary]]);
+  const parentBefore = await fs.readFile(f.sidecarFile, "utf8");
+  child.accept(new Map([["a", { ...summary, toolResult: "child" }]]));
+  await child.drain();
+  assert.equal(await fs.readFile(f.sidecarFile, "utf8"), parentBefore);
+  const childBefore = await fs.readFile(c.sidecar, "utf8");
+  const parent = openCache(f);
+  await parent.ready;
+  parent.accept(new Map([["a", { ...summary, toolResult: "parent" }]]));
+  await parent.drain();
+  assert.equal(await fs.readFile(c.sidecar, "utf8"), childBefore);
+  assert.ok((await records(c.sidecar)).every((r) => r.sessionId === "lead"));
+});
+
+for (const data of ["", row("child-only", summary, "child") + "\n{broken"]) {
+  test(`existing usable native child is authoritative: ${JSON.stringify(data)}`, async (t) => {
+    const f = await fixture(t);
+    await fs.writeFile(f.sidecarFile, row("a") + "\n");
+    const c = await nativeChild(f);
+    await fs.writeFile(c.sidecar, data);
+    const child = c.cache();
+    await child.ready;
+    assert.equal(child.snapshot().has("a"), false);
+    assert.equal(child.snapshot().has("child-only"), Boolean(data));
+    assert.equal(await fs.readFile(c.sidecar, "utf8"), data);
+  });
+}
+
+for (const provenance of ["missing", "unavailable"] as const) {
+  test(`native inheritance requires provenance and available source: ${provenance}`, async (t) => {
+    const f = await fixture(t);
+    await fs.writeFile(f.sidecarFile, row("a") + "\n");
+    const c = await nativeChild(f, "lead", provenance === "missing" ? undefined : f.sessionFile);
+    // nativeChild's default parameter supplies provenance; explicitly remove it.
+    if (provenance === "missing") await fs.writeFile(c.path, [JSON.stringify({ type: "session", id: "lead" }), ...c.entries.map((e) => JSON.stringify(e))].join("\n") + "\n");
+    else await fs.unlink(f.sessionFile);
+    const child = c.cache({ nativeSource: { sessionFile: f.sessionFile, summaries: new Map([["a", summary]]) } });
+    await child.ready;
+    assert.equal(child.snapshot().size, 0);
+    await assert.rejects(fs.lstat(c.sidecar), { code: "ENOENT" });
+  });
+}
+
+test("native cutover seeds accepted-but-unwritten values without needing a source sidecar", async (t) => {
+  const f = await fixture(t);
+  const c = await nativeChild(f);
+  await seedNativeSummarySidecar(c.path, { sessionFile: f.sessionFile, summaries: new Map([["a", summary], ["b", summary]]) }, toolNames);
+  assert.deepEqual((await records(c.sidecar)).map((r) => [r.sessionId, r.id]), [["child", "a"]]);
+});
+
+for (const linked of ["conversation", "sidecar", "source", "source-sidecar", "child", "child-sidecar"] as const) {
+  test(`symlink ${linked} is excluded from mutation and inheritance`, async (t) => {
+    const f = await fixture(t);
+    await fs.writeFile(f.sidecarFile, row("a") + "\n");
+    const c = await nativeChild(f);
+    if (linked === "child-sidecar") await fs.writeFile(c.sidecar, row("a", summary, "child") + "\n");
+    const path = linked === "conversation" || linked === "source" ? f.sessionFile : linked === "sidecar" || linked === "source-sidecar" ? f.sidecarFile : linked === "child-sidecar" ? c.sidecar : c.path;
+    const target = path + ".target";
+    await fs.rename(path, target);
+    await fs.symlink(target, path);
+    const before = await fs.readFile(target, "utf8");
+    if (linked === "conversation" || linked === "sidecar") {
+      const cache = openCache(f);
+      await cache.ready;
+      cache.accept(new Map([["b", summary]]));
+      await cache.drain();
+      assert.deepEqual(cache.snapshot().get("b"), summary);
+    } else {
+      await seedNativeSummarySidecar(c.path, { sessionFile: f.sessionFile, summaries: new Map([["a", summary]]) }, toolNames);
+      if (linked !== "child-sidecar") await assert.rejects(fs.lstat(c.sidecar), { code: "ENOENT" });
+    }
+    assert.equal(await fs.readFile(target, "utf8"), before);
+    assert.ok((await fs.lstat(path)).isSymbolicLink());
+  });
+}
+
+test("all retained history is eligible, including abandoned and precompact rows; Previous conversation is not", async (t) => {
+  const f = await fixture(t);
+  f.entries.push({ type: "compaction", id: "compact", parentId: "entry-b", timestamp: "now", summary: "earlier", firstKeptEntryId: "entry-b", tokensBefore: 12 } as SessionEntry);
+  f.entries.push({ ...entry("abandoned"), parentId: "entry-a" });
+  f.entries.push({ type: "custom", id: "history", parentId: null, timestamp: "now", customType: "ws-lead-compaction-history", data: {} });
+  await f.save();
+  await fs.writeFile(f.sidecarFile, ["a", "b", "abandoned", "history", "compact"].map((id) => row(id)).join("\n") + "\n");
+  const cache = openCache(f);
+  await cache.ready;
+  assert.deepEqual([...cache.snapshot().keys()], ["a", "b", "abandoned"]);
+  cache.accept(new Map([["history", summary], ["abandoned", { ...summary, toolResult: "retained" }]]));
+  await cache.drain();
+  assert.deepEqual((await records(f.sidecarFile)).slice(5).map((r) => r.id), ["abandoned"]);
 });
