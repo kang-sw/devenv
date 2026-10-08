@@ -10,6 +10,7 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import { Text, visibleWidth } from "@earendil-works/pi-tui";
 import { SessionManager, createEditToolDefinition, createGrepToolDefinition, createLsToolDefinition, type EntryRenderer, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createDisplaySummaryStore, type DisplaySummary } from "../src/display-summary.ts";
@@ -383,15 +384,59 @@ describe("registerSummarizedBuiltinTools", () => {
     assert.match(render(expandedResult), /needle/, "expanded: native result row");
   });
 
-  test("a self-framed built-in (edit) indents its summary one column", () => {
+  test("a self-framed built-in (edit) keeps its frame margin and success background", () => {
     const store = createDisplaySummaryStore();
     const { pi, tools } = capturePi();
     registerSummarizedBuiltinTools(pi as never, cwd, store, ["edit"], toolTui);
     store.set("e", lean);
     const { context } = toolContext("e");
-    assert.equal(text(tools[0]!.renderCall({}, theme, context)), " <toolTitle><b>edit</b></toolTitle>");
-    assert.deepEqual((tools[0]!.renderResult({ content: [] }, { expanded: false, isPartial: false }, theme, context) as FakeComponent).render(80), ["", "     <text>read the plan</text>", "", " <muted>three phases</muted>"]);
+    assert.equal(text(tools[0]!.renderCall({}, theme, context)), "{toolSuccessBg} <toolTitle><b>edit</b></toolTitle>");
+    assert.deepEqual((tools[0]!.renderResult({ content: [] }, { expanded: false, isPartial: false }, theme, context) as FakeComponent).render(80), ["{toolSuccessBg}", "{toolSuccessBg}     <text>read the plan</text>", "{toolSuccessBg}", "{toolSuccessBg} <muted>three phases</muted>"]);
   });
+});
+
+describe("self-framed summary backgrounds", () => {
+  for (const [status, isPartial, isError, color] of [
+    ["pending", true, false, "toolPendingBg"],
+    ["success", false, false, "toolSuccessBg"],
+    ["error", false, true, "toolErrorBg"],
+  ] as const) {
+    test(`native edit retains ${status} background through actual tool-execution summary repaint`, async () => {
+      const sdk = import.meta.resolve("@earendil-works/pi-coding-agent");
+      const themeModule = await import(new URL("./modes/interactive/theme/theme.js", sdk).href);
+      const { ToolExecutionComponent } = await import(new URL("./modes/interactive/components/tool-execution.js", sdk).href);
+      const hostTui = await import(createRequire(sdk).resolve("@earendil-works/pi-tui"));
+      themeModule.initTheme("dark");
+      const store = createDisplaySummaryStore();
+      const { pi, tools } = capturePi();
+      registerSummarizedBuiltinTools(pi as never, process.cwd(), store, ["edit"], hostTui);
+      // No valid edits means no asynchronous preview/filesystem access.
+      const row = new ToolExecutionComponent("edit", "background-row", { path: "synthetic" }, { showImages: false }, tools[0], { requestRender() {} }, process.cwd());
+      const result = { content: [{ type: "text", text: "native result" }], isError, details: !isPartial && !isError ? { diff: "+1 synthetic", firstChangedLine: 1 } : undefined };
+      row.updateResult(result, isPartial);
+      const bg = themeModule.theme.bg(color, "marker").split("marker")[0];
+      const raw = row.render(32);
+      assert.ok(raw.some((line: string) => line.includes(bg) && stripTerminalSequences(line).includes("edit")), "native edit has the expected background before summarizing");
+      store.set("background-row", { optionalContext: "context", toolIntention: "Inspect several long inputs and preserve the frame", toolResult: "Found several long outputs and retained the background" });
+      store.notify(["background-row"]);
+      for (const width of [16, 32, 60]) {
+        const lines = row.render(width);
+        assert.equal(stripTerminalSequences(lines[0]).trim(), "", "outer inter-tool spacer stays native");
+        for (const line of lines.slice(1)) {
+          assert.ok(line.includes(bg), "header, fields, wrapping and blank rows retain the status background");
+          assert.equal(hostTui.visibleWidth(line), width, "background fills the row without overflowing");
+        }
+        const plain = lines.map((line: string) => stripTerminalSequences(line).trimEnd());
+        assert.equal(plain[1], " edit");
+        assert.equal(plain[2], "");
+        assert.equal(plain[3], "   context", "optional context margin stays intact");
+        assert.match(plain[4], /^ {5}\S/, "four spaces beyond the native frame margin");
+        assert.ok(plain.some((line: string) => /^ Found/.test(line)), "result stays aligned with the header");
+      }
+      row.setExpanded(true);
+      assert.deepEqual(row.render(32), raw, "expansion restores the unchanged native rendering");
+    });
+  }
 });
 
 // ---------------------------------------------------------------------------

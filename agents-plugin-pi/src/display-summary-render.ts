@@ -51,6 +51,8 @@ export interface SummaryComponent {
 /** The pi-tui slice a tool-row summary needs. */
 export interface SummaryTextModules {
   Text: new (text?: string, paddingX?: number, paddingY?: number) => SummaryComponent;
+  /** Self-framed native tools own their backgrounds; the host supplies Box. */
+  Box?: new (paddingX?: number, paddingY?: number, bgFn?: (text: string) => string) => SummaryComponent & { addChild(child: SummaryComponent): void };
 }
 
 /** The pi-tui slice a message summary card needs. */
@@ -228,6 +230,8 @@ interface SummaryRenderContext {
   invalidate?: unknown;
   lastComponent?: unknown;
   expanded?: unknown;
+  isPartial?: unknown;
+  isError?: unknown;
 }
 
 export type DisplaySummaryStoreSource = DisplaySummaryStore | (() => DisplaySummaryStore | undefined) | undefined;
@@ -256,7 +260,8 @@ function asContext(context: unknown): SummaryRenderContext | undefined {
  * Inner renderers may reuse `context.lastComponent` blindly (Pi's built-ins
  * call `setText` on it), so a summary component is never handed back to them.
  * `padX` indents the summary for tools that draw their own frame
- * (`renderShell: "self"`).
+ * (`renderShell: "self"`); `selfFramed` retains their themed status background
+ * because Pi does not supply an outer Box for those tools.
  */
 export function wrapToolRenderersWithSummary(
   toolName: string,
@@ -264,7 +269,7 @@ export function wrapToolRenderersWithSummary(
   renderResult: ToolResultRenderer | undefined,
   store: DisplaySummaryStoreSource,
   tui: SummaryTuiSource,
-  options: { padX?: number } = {},
+  options: { padX?: number; selfFramed?: boolean } = {},
 ): { renderCall: ToolCallRenderer; renderResult: ToolResultRenderer } {
   const padX = options.padX ?? 0;
 
@@ -278,6 +283,17 @@ export function wrapToolRenderersWithSummary(
     return summary && modules ? { summary, tui: modules } : undefined;
   }
 
+  function summaryFrame(children: SummaryComponent[], modules: SummaryTextModules, theme: unknown, context: SummaryRenderContext | undefined): SummaryComponent {
+    const component = stack(children);
+    // Pi's default shell already paints its Box. A self shell is a bare
+    // Container, so replacing the native renderer must retain its background.
+    if (!options.selfFramed || !modules.Box) return component;
+    const color = context?.isPartial ? "toolPendingBg" : context?.isError ? "toolErrorBg" : "toolSuccessBg";
+    const box = new modules.Box(0, 0, (line) => paintBg(theme, color, line));
+    box.addChild(component);
+    return stack([box]);
+  }
+
   function rawContext(context: unknown): unknown {
     const ctx = asContext(context);
     return ctx && isSummaryComponent(ctx.lastComponent) ? { ...ctx, lastComponent: undefined } : context;
@@ -287,14 +303,14 @@ export function wrapToolRenderersWithSummary(
     renderCall(args, theme, context) {
       const ctx = asContext(context);
       const hit = summaryFor(ctx, ctx?.expanded);
-      if (hit) return stack([new hit.tui.Text(paintFg(theme, "toolTitle", paintBold(theme, toolName)), padX, 0)]);
+      if (hit) return summaryFrame([new hit.tui.Text(paintFg(theme, "toolTitle", paintBold(theme, toolName)), padX, 0)], hit.tui, theme, ctx);
       if (!renderCall) throw new UseNativeResultFallback();
       return renderCall(args, theme, rawContext(context));
     },
     renderResult(result, renderOptions, theme, context) {
       const ctx = asContext(context);
       const hit = summaryFor(ctx, (renderOptions as { expanded?: unknown } | undefined)?.expanded);
-      if (hit) return stack(buildSummaryFields(hit.tui, hit.summary, theme, padX));
+      if (hit) return summaryFrame(buildSummaryFields(hit.tui, hit.summary, theme, padX), hit.tui, theme, ctx);
       if (!renderResult) throw new UseNativeResultFallback();
       return renderResult(result, renderOptions, theme, rawContext(context));
     },
@@ -342,6 +358,7 @@ export function registerSummarizedBuiltinTools(
     const native = create(cwd) as ToolDefinition & { renderCall?: ToolCallRenderer; renderResult?: ToolResultRenderer; renderShell?: string };
     const wrapped = wrapToolRenderersWithSummary(name, native.renderCall, native.renderResult, store, tuiRef, {
       padX: native.renderShell === "self" ? 1 : 0,
+      selfFramed: native.renderShell === "self",
     });
     pi.registerTool({ ...native, renderCall: wrapped.renderCall, renderResult: wrapped.renderResult } as ToolDefinition);
     store.toolNames.add(name);
