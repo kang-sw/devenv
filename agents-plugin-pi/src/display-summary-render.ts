@@ -597,7 +597,12 @@ export function buildAdapterMessageComponent(
 
 /**
  * Registers the summary-aware renderer for `ADAPTER_SUMMARIZED_MESSAGE_TYPES`.
- * Lead TUI only: elsewhere these messages keep Pi's own default renderer.
+ * `index.ts` calls it once at extension-factory time in the lead process (no
+ * spawn role), whatever the mode, so reloaded rows already have it; spawned
+ * processes keep Pi's own default renderer. Rows switch to a summary only
+ * while the store is enabled, which happens in the lead TUI session alone.
+ * Resolves `false` when the host pi-tui lacks a needed class and nothing was
+ * registered; callers may ignore it.
  */
 export async function registerAdapterMessageRenderers(
   pi: Pick<ExtensionAPI, "registerMessageRenderer">,
