@@ -18,6 +18,9 @@ import {
   ADAPTER_SUMMARIZED_MESSAGE_TYPES,
   buildSummaryBlock,
   buildSummaryCard,
+  contentBytes,
+  formatContextSize,
+  toolRowBytes,
   isSummaryComponent,
   registerAdapterMessageRenderers,
   registerDisplaySummaryToolResolver,
@@ -243,6 +246,31 @@ describe("shared summary layout", () => {
   });
 });
 
+describe("context size", () => {
+  test("formats bytes / 1024 at one decimal with an uppercase unit, floored at 0.1 KB", () => {
+    assert.equal(formatContextSize(0), "[0.1 KB]");
+    assert.equal(formatContextSize(50), "[0.1 KB]", "below 0.1 KB shows the floor");
+    assert.equal(formatContextSize(1024), "[1.0 KB]");
+    assert.equal(formatContextSize(1075), "[1.0 KB]", "1.0498 rounds down");
+    assert.equal(formatContextSize(1076), "[1.1 KB]", "1.0508 rounds up");
+    assert.equal(formatContextSize(4813), "[4.7 KB]");
+    assert.equal(formatContextSize(12697), "[12.4 KB]");
+  });
+
+  test("counts UTF-8 bytes, not characters", () => {
+    assert.equal(contentBytes("한글"), 6, "two Korean syllables are six bytes");
+    assert.equal(contentBytes([{ type: "text", text: "ab" }, { type: "text", text: "한" }]), 5);
+    assert.equal(contentBytes([{ type: "image", data: "QUJD", mimeType: "image/png" }]), 4, "images count their base64 payload");
+    assert.equal(contentBytes(undefined), 0);
+    assert.equal(toolRowBytes("ls", { path: "한" }, { content: [{ type: "text", text: "ok" }] }), 2 + Buffer.byteLength('{"path":"한"}') + 2, "name + JSON args + result");
+  });
+
+  test("the dim size token opens the result text, one space before it; omitted without bytes", () => {
+    assert.deepEqual(buildSummaryCard(modules, "title", lean, theme, undefined, 4813).render(80).at(-1), "{customMessageBg}<dim>[4.7 KB]</dim> <muted>three phases</muted>");
+    assert.equal(buildSummaryBlock(modules, "title", lean, theme).render(80).at(-1), "<muted>three phases</muted>");
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Tool rows
 // ---------------------------------------------------------------------------
@@ -285,7 +313,7 @@ describe("registerWsTool tool rows", () => {
       "  <dim>after the auth check</dim>",
       "    <text>searched for the token</text>",
       "",
-      "<muted>found two call sites</muted>",
+      "<dim>[0.1 KB]</dim> <muted>found two call sites</muted>",
     ], "blank rows separate the header and fields; context stays dim, intention is indented normal text, result is unindented muted");
   });
 
@@ -301,7 +329,21 @@ describe("registerWsTool tool rows", () => {
     const { store, tool } = registered();
     store.set("call-3", lean);
     const { context } = toolContext("call-3");
-    assert.deepEqual((tool.renderResult(result, { expanded: false, isPartial: false }, theme, context) as FakeComponent).render(80), ["", "    <text>read the plan</text>", "", "<muted>three phases</muted>"]);
+    assert.deepEqual((tool.renderResult(result, { expanded: false, isPartial: false }, theme, context) as FakeComponent).render(80), ["", "    <text>read the plan</text>", "", "<dim>[0.1 KB]</dim> <muted>three phases</muted>"]);
+  });
+
+  test("the result line carries the call plus result size, measured in UTF-8 bytes", () => {
+    const { store, tool } = registered();
+    store.set("call-size", lean);
+    const args = { query: "한".repeat(500) };
+    const big = { content: [{ type: "text", text: "가".repeat(1200) }] };
+    const { context } = toolContext("call-size", { args });
+    const bytes = Buffer.byteLength("ws__tickets_query") + Buffer.byteLength(JSON.stringify(args)) + 3600;
+    const lines = (tool.renderResult(big, { expanded: false, isPartial: false }, theme, context) as FakeComponent).render(80);
+    assert.equal(formatContextSize(bytes), "[5.0 KB]");
+    assert.equal(lines.at(-1), "<dim>[5.0 KB]</dim> <muted>three phases</muted>");
+    const expanded = tool.renderResult(big, { expanded: true, isPartial: false }, theme, { ...context, expanded: true });
+    assert.doesNotMatch(text(expanded), /KB\]/, "expanded rows stay raw");
   });
 
   test("a tool with its own renderers is wrapped too, and an absent slot keeps Pi's native fallback", () => {
@@ -371,7 +413,7 @@ describe("early presentation and late ownership", () => {
     store.notify(["late"]);
     assert.deepEqual(invalidations, ["late"], "unknown incoming row was linked before ownership");
     assert.equal(text(early.renderCall!({}, theme, context)), `<toolTitle><b>${name}</b></toolTitle>`);
-    assert.deepEqual((early.renderResult!({}, {}, theme, context) as FakeComponent).render(80), ["", "    <text>read the plan</text>", "", "<muted>three phases</muted>"]);
+    assert.deepEqual((early.renderResult!({}, {}, theme, context) as FakeComponent).render(80), ["", "    <text>read the plan</text>", "", "<dim>[0.1 KB]</dim> <muted>three phases</muted>"]);
     assert.equal(text(early.renderCall!({}, theme, { ...context, expanded: true })), "RAW");
     const failed = { ...definition, name: "failed-registration" };
     assert.throws(() => registerWsTool({ registerTool() { throw new Error("registration failed"); } } as never, failed as never, ref), /registration failed/);
@@ -476,7 +518,7 @@ describe("native presentation resolver", () => {
     store.set("e", lean);
     const { context } = toolContext("e");
     assert.equal(text(tools[0]!.renderCall({}, theme, context)), "{toolSuccessBg} <toolTitle><b>edit</b></toolTitle>");
-    assert.deepEqual((tools[0]!.renderResult({ content: [] }, { expanded: false, isPartial: false }, theme, context) as FakeComponent).render(80), ["{toolSuccessBg}", "{toolSuccessBg}     <text>read the plan</text>", "{toolSuccessBg}", "{toolSuccessBg} <muted>three phases</muted>"]);
+    assert.deepEqual((tools[0]!.renderResult({ content: [] }, { expanded: false, isPartial: false }, theme, context) as FakeComponent).render(80), ["{toolSuccessBg}", "{toolSuccessBg}     <text>read the plan</text>", "{toolSuccessBg}", "{toolSuccessBg} <dim>[0.1 KB]</dim> <muted>three phases</muted>"]);
   });
 });
 
@@ -520,7 +562,7 @@ describe("self-framed summary backgrounds", () => {
         assert.equal(plain[2], "");
         assert.equal(plain[3], "   context", "optional context margin stays intact");
         assert.match(plain[4], /^ {5}\S/, "four spaces beyond the native frame margin");
-        assert.ok(plain.some((line: string) => /^ Found/.test(line)), "result stays aligned with the header");
+        assert.ok(plain.some((line: string) => /^ \[\d+\.\d KB\] Found/.test(line)), "result stays aligned with the header");
       }
       row.setExpanded(true);
       assert.deepEqual(row.render(32), raw, "expansion restores the unchanged native rendering");
@@ -550,12 +592,25 @@ describe("push message rows", () => {
       "{customMessageBg}  <dim>after the auth check</dim>",
       "{customMessageBg}    <text>searched for the token</text>",
       "{customMessageBg}",
-      "{customMessageBg}<muted>found two call sites</muted>",
+      "{customMessageBg}<dim>[0.1 KB]</dim> <muted>found two call sites</muted>",
     ]);
     assert.doesNotMatch(lines.join("\n"), /Outcome: done/);
 
     const expanded = renderers.get("ws-agent-report")!(message, { expanded: true }, theme) as FakeComponent;
     assert.match(text(expanded), /report: Outcome: done/, "expanded is raw");
+  });
+
+  test("a summarized push card ends with the size of the content the agent received", async () => {
+    const store = createDisplaySummaryStore();
+    const { pi, renderers } = capturePi();
+    await registerPushMessageRenderers(pi as never, pushTui, store);
+    const details = withSummaryId({ agent_id: "a1" });
+    const content = buildPushContent("ws-agent-report", "scout (a1)", { report: "결과 ".repeat(600) }, undefined);
+    const component = renderers.get("ws-agent-report")!({ content, details }, { expanded: false }, theme) as FakeComponent;
+    store.set(details[SUMMARY_ID_KEY] as string, lean);
+    const size = formatContextSize(contentBytes(content));
+    assert.ok(contentBytes(content) > 4200, "Korean text counts three bytes per syllable");
+    assert.equal(component.render(80).at(-1), `{customMessageBg}<dim>${size}</dim> <muted>three phases</muted>`);
   });
 
   test("without a store the push card is today's card", async () => {
@@ -615,7 +670,7 @@ describe("adapter message renderers", () => {
       store.set(details[SUMMARY_ID_KEY] as string, lean);
       const lines = component.render(80);
       assert.match(lines[0]!, /^\{customMessageBg\}<customMessageLabel><b>[A-Z][a-z]+ [a-z]+<\/b><\/customMessageLabel>$/, "a short readable kind header");
-      assert.deepEqual(lines.slice(1), ["{customMessageBg}", "{customMessageBg}    <text>read the plan</text>", "{customMessageBg}", "{customMessageBg}<muted>three phases</muted>"]);
+      assert.deepEqual(lines.slice(1), ["{customMessageBg}", "{customMessageBg}    <text>read the plan</text>", "{customMessageBg}", "{customMessageBg}<dim>[0.1 KB]</dim> <muted>three phases</muted>"]);
 
       store.set(details[SUMMARY_ID_KEY] as string, { ...lean, subtitle: "lead · context 80%" });
       assert.match(component.render(80)[0]!, /<\/customMessageLabel> <accent>lead · context 80%<\/accent>$/, "the kind header carries the subtitle");
