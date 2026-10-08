@@ -11,6 +11,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 3a872773e87e9c99
 sage-review-completeness-reviewed: 3a872773e87e9c99
+completed: 2026-10-08
 ---
 
 # Windows mailbox-wait ws-mcp processes outlive the Pi host
