@@ -246,8 +246,9 @@ export function buildSummaryFields(tui: SummaryTextModules, summary: DisplaySumm
  * header already shows it, yet the model sometimes repeats it ("write —
  * /tmp/x.txt") or, for a call without arguments, answers with it alone.
  * An exact match (case-insensitive) yields nothing; a leading copy is
- * stripped with any separators after it. Compares against the raw name, never
- * the painted header.
+ * stripped when a separator follows it: whitespace, `:`, or a dash with
+ * whitespace on both sides (`write - x`, `write — x`). Compares against the
+ * raw name, never the painted header.
  */
 export function dedupeSubtitle(subtitle: string, name: string | undefined): string {
   const trimmed = subtitle.trim();
@@ -256,9 +257,13 @@ export function dedupeSubtitle(subtitle: string, name: string | undefined): stri
   if (trimmed.toLowerCase() === bare) return "";
   if (!trimmed.toLowerCase().startsWith(bare)) return trimmed;
   const rest = trimmed.slice(bare.length);
-  const stripped = rest.replace(/^[\s—–\-:]+/, "");
-  // A longer identifier that merely starts with the name ("write_file") is not a repeat.
-  return stripped.length < rest.length ? stripped.trim() : trimmed;
+  // A longer identifier that merely starts with the name ("write_file",
+  // "write-scopes.ts") is not a repeat, so an unspaced hyphen is no separator.
+  // A flag-like dash after the space ("find -name x") reads as a command line,
+  // not as the name repeated before a separator, so the subtitle stays whole.
+  if (!/^(?:\s|:)/.test(rest) || /^[\s:]*[—–-]\S/.test(rest)) return trimmed;
+  // Leading whitespace/colons, then any spaced dashes, each followed by more separators.
+  return rest.replace(/^[\s:]*(?:[—–-](?!\S)[\s:]*)*/, "").trim();
 }
 
 /**

@@ -204,6 +204,17 @@ describe("shared summary layout", () => {
     assert.equal(buildSummaryCard(modules, "head", summary, theme).render(80)[0], "{customMessageBg}head <accent>auth in src/</accent>");
   });
 
+  test("a bare hyphen after the name is part of an identifier or flag, never a separator", () => {
+    assert.equal(dedupeSubtitle("write-scopes.ts", "write"), "write-scopes.ts");
+    assert.equal(dedupeSubtitle("edit-utils.ts", "edit"), "edit-utils.ts");
+    assert.equal(dedupeSubtitle("find -name x", "find"), "find -name x");
+    assert.equal(dedupeSubtitle("write - /tmp/x", "write"), "/tmp/x", "a spaced hyphen still separates");
+    assert.equal(dedupeSubtitle("write — /tmp/x", "write"), "/tmp/x");
+    assert.equal(dedupeSubtitle("Write: /tmp/x", "write"), "/tmp/x");
+    assert.equal(dedupeSubtitle("write /tmp/x", "write"), "/tmp/x");
+    assert.equal(dedupeSubtitle("write_file", "write"), "write_file");
+  });
+
   test("real Text wraps every intention line at four spaces and leaves muted result lines unindented", () => {
     const long: DisplaySummary = {
       toolIntention: "Inspect several long inputs 한글 😀 for the summary\nThen verify wrapping",
