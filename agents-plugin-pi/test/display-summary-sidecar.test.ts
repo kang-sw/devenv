@@ -6,7 +6,7 @@ import { join } from "node:path";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { cleanOrphanSummarySidecars, createSummarySidecar, seedNativeSummarySidecar, type SidecarIO, DISPLAY_SUMMARY_SIDECAR_SUFFIX } from "../src/display-summary-sidecar.ts";
 
-const summary = { toolIntention: "inspect", toolResult: "found" };
+const summary = { title: "src/a.ts", toolIntention: "inspect", toolResult: "found" };
 
 test("validated late-tool candidates replay once on ownership confirmation, without rereading the sidecar", async (t) => {
   const f = await fixture(t);
@@ -150,6 +150,21 @@ for (const tail of ["{broken", row("b"), row("a", { toolIntention: 7 })]) {
     assert.deepEqual(reopened.snapshot().get("b"), next);
   });
 }
+
+test("a record written before titles existed loads without a title; a blank title is dropped, not the record", async (t) => {
+  const f = await fixture(t);
+  const legacy = { toolIntention: "inspect", toolResult: "legacy" };
+  await fs.writeFile(f.sidecarFile, [row("a", legacy), row("b", { ...legacy, title: " " })].join("\n") + "\n");
+  let replay = new Map();
+  const cache = openCache(f, { restore: (batch) => { replay = new Map(batch); } });
+  await cache.ready;
+  assert.deepEqual([...replay], [["a", legacy], ["b", legacy]]);
+  cache.accept(new Map([["a", summary]]));
+  await cache.drain();
+  const reopened = openCache(f);
+  await reopened.ready;
+  assert.deepEqual(reopened.snapshot().get("a"), summary, "a titled value round-trips");
+});
 
 test("recognized ownership with an invalid value still permits append", async (t) => {
   const f = await fixture(t);

@@ -36,7 +36,9 @@ function record(value: unknown): SidecarRecord | undefined {
   if (raw?.version !== 1 || !text(raw.sessionId) || !text(raw.id) || !summary ||
     !text(summary.toolIntention) || !text(summary.toolResult) ||
     (summary.optionalContext !== undefined && typeof summary.optionalContext !== "string")) return undefined;
+  // A record written before titles existed has none; it still loads.
   return { version: 1, sessionId: raw.sessionId, id: raw.id, summary: {
+    ...(text(summary.title) ? { title: summary.title } : {}),
     toolIntention: summary.toolIntention, toolResult: summary.toolResult,
     ...(summary.optionalContext === undefined ? {} : { optionalContext: summary.optionalContext as string }),
   } };

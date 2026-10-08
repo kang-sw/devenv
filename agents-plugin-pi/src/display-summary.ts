@@ -39,6 +39,12 @@ import { summaryIdOf } from "./summary-id.ts";
 
 /** One row's summary, every field already in the user's language. */
 export interface DisplaySummary {
+  /**
+   * One-line label naming the call's concrete target. Every new summary has
+   * one; it is absent only on a sidecar record written before titles existed,
+   * which still loads and renders a header without it.
+   */
+  title?: string;
   optionalContext?: string;
   toolIntention: string;
   toolResult: string;
@@ -214,11 +220,12 @@ const OUTPUT_TOOL: Tool = {
           type: "object",
           properties: {
             id: { type: "string", description: "The row label exactly as listed (t1, t2, ...)." },
+            title: { type: "string", description: "One-line label naming the call's concrete target, copied verbatim from its arguments; for a message, the sender and topic." },
             optionalContext: { type: "string", description: "Context a reader cannot recover from neighbouring rows; omit when there is none." },
             toolIntention: { type: "string", description: "What the call tried to do; for a message, who reported what." },
             toolResult: { type: "string", description: "What came back; for a message, its key content." },
           },
-          required: ["id", "toolIntention", "toolResult"],
+          required: ["id", "title", "toolIntention", "toolResult"],
         },
       },
     },
@@ -231,6 +238,7 @@ export const DISPLAY_SUMMARY_SYSTEM_PROMPT = [
   "Each request carries the agent's conversation since the previous request and a list of rows: tool calls the agent made, or messages delivered to it. Rows are labelled t1, t2, ...",
   `For every listed row, call ${DISPLAY_SUMMARY_OUTPUT_TOOL} exactly once in total, with one item per row, using the row's label as its id. Do not answer in text.`,
   "Fields:",
+  "- title: one short line naming the call's concrete target, copied verbatim from its arguments: the file path(s) edited, written, or read; the first line of a shell command; the search pattern and its scope; a ticket stem; a URL; or the key argument of any other tool. For a message row: the sender and the topic. Start with the identifier and never translate it; no prose verbs, no sentence.",
   "- toolIntention: what the call tried to do, read from its arguments. For a message row: who reported what.",
   "- toolResult: what came back, read from its output. For a message row: the key content.",
   "- optionalContext: only context the reader cannot recover from neighbouring rows (for example that this call follows up an earlier check); omit it when there is none.",
@@ -302,11 +310,12 @@ export function parseSummaryResponse(message: AssistantMessage, labels: Readonly
       const item = raw as Record<string, unknown>;
       const label = nonEmpty(item.id);
       const id = label ? labels.get(label) : undefined;
+      const title = nonEmpty(item.title);
       const toolIntention = nonEmpty(item.toolIntention);
       const toolResult = nonEmpty(item.toolResult);
-      if (!id || !toolIntention || !toolResult) continue;
+      if (!id || !title || !toolIntention || !toolResult) continue;
       const optionalContext = nonEmpty(item.optionalContext);
-      out.set(id, optionalContext ? { optionalContext, toolIntention, toolResult } : { toolIntention, toolResult });
+      out.set(id, optionalContext ? { title, optionalContext, toolIntention, toolResult } : { title, toolIntention, toolResult });
     }
   }
   return out;

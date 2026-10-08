@@ -230,7 +230,7 @@ describe("provider-neutral call path", () => {
       getProvider: () => { assert.fail("direct provider dispatch must not run"); },
       streamSimple: (m: Model<Api>, context: Context, options?: SimpleStreamOptions) => {
         calls.push({ model: m, context, options: options! });
-        return { result: async () => answer([{ id: "t1", toolIntention: "i", toolResult: "r" }]) };
+        return { result: async () => answer([{ id: "t1", title: "src/a.ts", toolIntention: "i", toolResult: "r" }]) };
       },
     };
     const store = createDisplaySummaryStore();
@@ -247,6 +247,8 @@ describe("provider-neutral call path", () => {
     assert.equal(calls[0]!.context.tools?.length, 1);
     assert.equal(calls[0]!.context.tools![0]!.name, DISPLAY_SUMMARY_OUTPUT_TOOL);
     assert.equal(calls[0]!.context.tools![0]!.parameters.type, "object");
+    const itemSchema = (calls[0]!.context.tools![0]!.parameters as unknown as { properties: { items: { items: { required: string[] } } } }).properties.items.items;
+    assert.deepEqual(itemSchema.required, ["id", "title", "toolIntention", "toolResult"]);
     assert.equal(calls[0]!.context.messages.length, 1);
     assert.match(requestText(calls[0]!), /Rows:/);
     assert.equal(calls[0]!.options.reasoning, "low");
@@ -294,13 +296,13 @@ describe("summarizer", () => {
     toolRow(h, "c2", "edit", { path: "a.ts" });
     toolRow(h, "c3");
     h.responses.push(answer([
-      { id: "t2", toolIntention: "edit a.ts", toolResult: "applied", optionalContext: "follows the query" },
-      { id: "t1", toolIntention: "query tickets", toolResult: "3 found" },
-      { id: "t9", toolIntention: "x", toolResult: "y" },
+      { id: "t2", title: "src/a.ts", toolIntention: "edit a.ts", toolResult: "applied", optionalContext: "follows the query" },
+      { id: "t1", title: "src/a.ts", toolIntention: "query tickets", toolResult: "3 found" },
+      { id: "t9", title: "src/a.ts", toolIntention: "x", toolResult: "y" },
     ]));
     await h.summarizer.flush();
-    assert.deepEqual(h.store.get("c1"), { toolIntention: "query tickets", toolResult: "3 found" });
-    assert.deepEqual(h.store.get("c2"), { optionalContext: "follows the query", toolIntention: "edit a.ts", toolResult: "applied" });
+    assert.deepEqual(h.store.get("c1"), { title: "src/a.ts", toolIntention: "query tickets", toolResult: "3 found" });
+    assert.deepEqual(h.store.get("c2"), { title: "src/a.ts", optionalContext: "follows the query", toolIntention: "edit a.ts", toolResult: "applied" });
     assert.equal(h.store.get("c3"), undefined);
     const text = requestText(h.calls[0]!);
     assert.match(text, /- t1: tool call `ws__tickets_query`/);
@@ -315,7 +317,7 @@ describe("summarizer", () => {
     toolRow(h, "c1");
     const details = withSummaryId({ agent_id: "a" });
     h.summarizer.observeMessage({ role: "custom", customType: "ws-agent-report", content: "[ws-agent-report] agent a\nreport: ok", display: true, details, timestamp: 0 });
-    h.responses.push(answer([{ id: "t1", toolIntention: "i", toolResult: "r" }, { id: "t2", toolIntention: "agent a reported", toolResult: "ok" }]));
+    h.responses.push(answer([{ id: "t1", title: "src/a.ts", toolIntention: "i", toolResult: "r" }, { id: "t2", title: "src/a.ts", toolIntention: "agent a reported", toolResult: "ok" }]));
     await h.summarizer.flush();
     assert.equal(invalidated, 1);
     assert.equal(h.renders(), 1);
@@ -341,10 +343,10 @@ describe("summarizer", () => {
     toolRow(h, "c2");
     await h.summarizer.flush();
     assert.equal(h.calls.length, 1, "no second request while one is in flight");
-    release(answer([{ id: "t1", toolIntention: "i1", toolResult: "r1" }]));
+    release(answer([{ id: "t1", title: "src/a.ts", toolIntention: "i1", toolResult: "r1" }]));
     await first;
     assert.equal(h.store.get("c2"), undefined);
-    h.responses.push(answer([{ id: "t1", toolIntention: "i2", toolResult: "r2" }]));
+    h.responses.push(answer([{ id: "t1", title: "src/a.ts", toolIntention: "i2", toolResult: "r2" }]));
     await h.summarizer.flush();
     assert.equal(h.calls.length, 2);
     assert.match(requestText(h.calls[1]!), /- t1: tool call `ws__tickets_query` with arguments \{"query":"c2"\}/);
@@ -354,7 +356,7 @@ describe("summarizer", () => {
   test("append-only log: each request extends the previous one, stable session id and cache retention", async () => {
     const h = harness();
     toolRow(h, "c1");
-    h.responses.push(answer([{ id: "t1", toolIntention: "i", toolResult: "r" }]));
+    h.responses.push(answer([{ id: "t1", title: "src/a.ts", toolIntention: "i", toolResult: "r" }]));
     await h.summarizer.flush();
     toolRow(h, "c2");
     await h.summarizer.flush();
@@ -470,7 +472,7 @@ describe("summarizer", () => {
     release(answer([], { stopReason: "error", errorMessage: "prompt is too long: 300000 tokens > 200000 maximum" }));
     await first;
     toolRow(h, "c2");
-    h.responses.push(answer([{ id: "t1", toolIntention: "i2", toolResult: "r2" }]));
+    h.responses.push(answer([{ id: "t1", title: "src/a.ts", toolIntention: "i2", toolResult: "r2" }]));
     await h.summarizer.flush();
     assert.equal(h.calls.length, 2, "the compaction already lifted the stop");
     assert.equal(h.store.get("c2")?.toolResult, "r2");
@@ -484,7 +486,7 @@ describe("summarizer", () => {
     assert.equal(h.calls.length, 0);
     assert.equal(h.summarizer.log.length, 0);
     toolRow(h, "other-row");
-    h.responses.push(answer([{ id: "t1", toolIntention: "i", toolResult: "r" }]));
+    h.responses.push(answer([{ id: "t1", title: "src/a.ts", toolIntention: "i", toolResult: "r" }]));
     await h.summarizer.flush();
     assert.equal(h.calls.length, 1);
     assert.doesNotMatch(requestText(h.calls[0]!), /ws-lead-compaction-history|EXCLUDED ORIGINAL CONVERSATION/);
@@ -495,7 +497,7 @@ describe("summarizer", () => {
   test("standalone rows list their full content", async () => {
     const h = harness();
     h.summarizer.enqueueStandalone("entry-1", "ws-custom-entry", "User: please fix the build\nAssistant: fixed");
-    h.responses.push(answer([{ id: "t1", toolIntention: "earlier conversation", toolResult: "the build was fixed" }]));
+    h.responses.push(answer([{ id: "t1", title: "src/a.ts", toolIntention: "earlier conversation", toolResult: "the build was fixed" }]));
     await h.summarizer.flush();
     assert.match(requestText(h.calls[0]!), /- t1: message `ws-custom-entry` \(not in the conversation above; its full content follows\): User: please fix the build\nAssistant: fixed/);
     assert.equal(h.store.get("entry-1")?.toolResult, "the build was fixed");
@@ -522,7 +524,7 @@ test("onAccepted synchronously hands off each parsed nonempty batch before repai
   const batches: Array<ReadonlyMap<string, unknown>> = [];
   const order: string[] = [];
   store.requestRender = () => { order.push("render"); assert.equal(batches.length, 1); };
-  const responses = [answer([{ id: "t1", toolIntention: "i", toolResult: "r" }, { id: "unknown", toolIntention: "bad", toolResult: "bad" }]), answer([]), answer(undefined)];
+  const responses = [answer([{ id: "t1", title: "src/a.ts", toolIntention: "i", toolResult: "r" }, { id: "unknown", title: "src/a.ts", toolIntention: "bad", toolResult: "bad" }]), answer([]), answer(undefined)];
   const s = createDisplaySummarizer({ store, sessionId: "provider-cache", readConfig: async () => ({ model: "acme/mini" }), resolveModel: () => model(), complete: async () => responses.shift()!,
     onAccepted(batch) { order.push("accept"); assert.deepEqual(store.get("row-0"), batch.get("row-0")); batches.push(new Map(batch)); } });
   for (let i = 0; i < 3; i += 1) {
@@ -530,7 +532,7 @@ test("onAccepted synchronously hands off each parsed nonempty batch before repai
     await s.flush();
   }
   assert.deepEqual(order, ["accept", "render"]);
-  assert.deepEqual([...batches[0]!], [["row-0", { toolIntention: "i", toolResult: "r" }]]);
+  assert.deepEqual([...batches[0]!], [["row-0", { title: "src/a.ts", toolIntention: "i", toolResult: "r" }]]);
 });
 
 for (const stage of ["configuration", "provider"] as const) {
@@ -544,7 +546,7 @@ for (const stage of ["configuration", "provider"] as const) {
       let calls = 0;
       const s = createDisplaySummarizer({ store, sessionId: "cache", resolveModel: () => model(),
         readConfig: async () => { if (stage === "configuration") { entered.resolve(); await release.promise; } return { model: "acme/mini" }; },
-        complete: async () => { calls += 1; if (stage === "provider") { entered.resolve(); await release.promise; } return answer([{ id: "t1", toolIntention: "i", toolResult: "r" }]); },
+        complete: async () => { calls += 1; if (stage === "provider") { entered.resolve(); await release.promise; } return answer([{ id: "t1", title: "src/a.ts", toolIntention: "i", toolResult: "r" }]); },
         onAccepted: (batch) => { batches.push(new Map(batch)); },
       });
       store.set("already", { toolIntention: "old", toolResult: "accepted" });
@@ -576,8 +578,23 @@ for (const stage of ["configuration", "provider"] as const) {
 describe("parseSummaryResponse", () => {
   test("drops items missing a required field", () => {
     const labels = new Map([["t1", "a"], ["t2", "b"]]);
-    const parsed = parseSummaryResponse(answer([{ id: "t1", toolIntention: "x" }, { id: "t2", toolIntention: " y ", toolResult: " z ", optionalContext: " " }]), labels);
-    assert.deepEqual([...parsed.entries()], [["b", { toolIntention: "y", toolResult: "z" }]]);
+    const parsed = parseSummaryResponse(answer([{ id: "t1", title: "src/a.ts", toolIntention: "x" }, { id: "t2", title: " src/b.ts ", toolIntention: " y ", toolResult: " z ", optionalContext: " " }]), labels);
+    assert.deepEqual([...parsed.entries()], [["b", { title: "src/b.ts", toolIntention: "y", toolResult: "z" }]]);
     assert.equal(SUMMARY_ID_KEY, "ws_summary_id");
+  });
+
+  test("drops an item whose title is missing or blank", () => {
+    const labels = new Map([["t1", "a"], ["t2", "b"], ["t3", "c"]]);
+    const parsed = parseSummaryResponse(answer([
+      { id: "t1", toolIntention: "i", toolResult: "r" },
+      { id: "t2", title: "  ", toolIntention: "i", toolResult: "r" },
+      { id: "t3", title: "git status", toolIntention: "i", toolResult: "r" },
+    ]), labels);
+    assert.deepEqual([...parsed.entries()], [["c", { title: "git status", toolIntention: "i", toolResult: "r" }]]);
+  });
+
+  test("the prompt asks for a title naming the call's concrete target", () => {
+    assert.match(DISPLAY_SUMMARY_SYSTEM_PROMPT, /- title: one short line naming the call's concrete target, copied verbatim from its arguments/);
+    assert.match(DISPLAY_SUMMARY_SYSTEM_PROMPT, /For a message row: the sender and the topic\./);
   });
 });
