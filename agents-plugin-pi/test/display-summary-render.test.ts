@@ -539,20 +539,19 @@ describe("adapter message renderers", () => {
 // ---------------------------------------------------------------------------
 
 describe("compaction-history entry", () => {
-  test("the appended entry reports its id and text, and its row switches to the summary by entry id", async () => {
+  test("the original history row ignores cached summaries before and after session initialization", async () => {
     const themeModule = await import(new URL("./modes/interactive/theme/theme.js", import.meta.resolve("@earendil-works/pi-coding-agent")).href);
     themeModule.initTheme();
     const store = createDisplaySummaryStore();
     const sm = SessionManager.inMemory();
     const handlers = new Map<string, (event: any, ctx: ExtensionContext) => unknown>();
     let renderer: EntryRenderer<any> | undefined;
-    const appended: Array<{ id: string; text: string }> = [];
     const pi = {
       on: (event: string, handler: any) => handlers.set(event, handler),
       registerEntryRenderer: (_type: string, render: EntryRenderer<any>) => { renderer = render; },
       appendEntry: (type: string, data: unknown) => { sm.appendCustomEntry(type, data); },
     } as unknown as ExtensionAPI;
-    registerCompactionHistory(pi, { summaries: store, onAppended: (id, text) => appended.push({ id, text }) });
+    registerCompactionHistory(pi);
     const ctx = { sessionManager: sm } as unknown as ExtensionContext;
     sm.appendMessage({ role: "user", content: "fix the auth bug", timestamp: 1 });
     sm.appendMessage({ role: "assistant", content: [{ type: "text", text: "Fixed it." }], timestamp: 2 } as never);
@@ -560,7 +559,7 @@ describe("compaction-history entry", () => {
     handlers.get("session_compact")!({ compactionEntry: sm.getEntry(compactionId), reason: "manual", fromExtension: true }, ctx);
 
     const entry = sm.getBranch().find((e) => e.type === "custom" && e.customType === COMPACTION_HISTORY_TYPE)!;
-    assert.deepEqual(appended, [{ id: entry.id, text: "User: fix the auth bug\nAssistant: Fixed it." }]);
+    assert.equal((entry as any).data.messages.length, 2, "the block itself remains present");
 
     const plainTheme = { fg: (_c: string, t: string) => t, bg: (_c: string, t: string) => t, bold: (t: string) => `<b>${t}</b>` };
     const component = renderer!(entry as never, { expanded: false }, plainTheme as never)!;
@@ -568,17 +567,18 @@ describe("compaction-history entry", () => {
     assert.match(raw, /Previous conversation · display-only/);
     assert.match(raw, /fix the auth bug/);
 
+    assert.match(raw, /Fixed it\./);
+    assert.match(raw, /End previous conversation/);
     store.set(entry.id, summary);
-    assert.deepEqual(component.render(80).map((line) => line.trimEnd()), [
-      "<b>Previous conversation</b>",
-      "",
-      "  after the auth check",
-      "    searched for the token",
-      "",
-      "found two call sites",
-    ], "summary block on the same component, read at render time");
+    store.notify([entry.id]);
+    component.invalidate();
+    assert.equal(component.render(80).map((line) => stripTerminalSequences(line).trimEnd()).join("\n"), raw, "an existing component ignores a newly cached summary");
 
-    const expanded = renderer!(entry as never, { expanded: true }, plainTheme as never)!;
-    assert.match(expanded.render(80).map((line) => stripTerminalSequences(line)).join("\n"), /fix the auth bug/, "expanded is raw");
+    await handlers.get("session_start")!({}, ctx);
+    for (const expanded of [false, true]) {
+      const rebuilt = renderer!(entry as never, { expanded }, plainTheme as never)!;
+      assert.equal(rebuilt.render(80).map((line) => stripTerminalSequences(line).trimEnd()).join("\n"), raw, "a rebuilt component also ignores the cached summary");
+    }
+    assert.deepEqual(store.get(entry.id), summary, "cached data need not be deleted");
   });
 });

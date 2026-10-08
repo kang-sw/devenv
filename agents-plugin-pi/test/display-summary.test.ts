@@ -438,12 +438,28 @@ describe("summarizer", () => {
     assert.equal(h.store.get("c2")?.toolResult, "r2");
   });
 
+  test("excluded history is never queued or included alongside another row", async () => {
+    const h = harness();
+    h.store.set("history", { toolIntention: "cached history", toolResult: "cached summary" });
+    h.summarizer.enqueueStandalone("history", "ws-lead-compaction-history", "EXCLUDED ORIGINAL CONVERSATION");
+    await h.summarizer.flush();
+    assert.equal(h.calls.length, 0);
+    assert.equal(h.summarizer.log.length, 0);
+    toolRow(h, "other-row");
+    h.responses.push(answer([{ id: "t1", toolIntention: "i", toolResult: "r" }]));
+    await h.summarizer.flush();
+    assert.equal(h.calls.length, 1);
+    assert.doesNotMatch(requestText(h.calls[0]!), /ws-lead-compaction-history|EXCLUDED ORIGINAL CONVERSATION/);
+    assert.equal(h.store.get("other-row")?.toolResult, "r");
+    assert.equal(h.store.get("history")?.toolResult, "cached summary", "no need to delete old cache entries");
+  });
+
   test("standalone rows list their full content", async () => {
     const h = harness();
-    h.summarizer.enqueueStandalone("entry-1", "ws-lead-compaction-history", "User: please fix the build\nAssistant: fixed");
+    h.summarizer.enqueueStandalone("entry-1", "ws-custom-entry", "User: please fix the build\nAssistant: fixed");
     h.responses.push(answer([{ id: "t1", toolIntention: "earlier conversation", toolResult: "the build was fixed" }]));
     await h.summarizer.flush();
-    assert.match(requestText(h.calls[0]!), /- t1: message `ws-lead-compaction-history` \(not in the conversation above; its full content follows\): User: please fix the build\nAssistant: fixed/);
+    assert.match(requestText(h.calls[0]!), /- t1: message `ws-custom-entry` \(not in the conversation above; its full content follows\): User: please fix the build\nAssistant: fixed/);
     assert.equal(h.store.get("entry-1")?.toolResult, "the build was fixed");
   });
 

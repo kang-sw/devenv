@@ -10,6 +10,8 @@ import { buildCompactionResumeMessage } from "../src/goal-loop.ts";
 import { buildPushWakeLine } from "../src/spawner.ts";
 import { stripTerminalSequences, visibleWidth } from "../src/pi-tui.ts";
 import { WS_PI_SPAWN_ROLE_ENV } from "../src/process-role.ts";
+import { createDisplaySummaryStore } from "../src/display-summary.ts";
+import { registerDisplaySummarySession } from "../src/display-summary-session.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "ws-history-test-"));
 after(() => rmSync(dir, { recursive: true, force: true }));
@@ -104,6 +106,71 @@ test("success persists a plain custom entry, retains raw records and reloads wit
   assert.equal(reloadFixture.appends(), 0, "duplicate success after reload cannot duplicate the block");
   assert.deepEqual(reloaded.buildSessionContext(), f.sm.buildSessionContext());
   assert.deepEqual(reloadFixture.blocks(), f.blocks());
+});
+
+test("history append and disk reload remain raw and make no display-summary requests", async () => {
+  const themeModule = await import(new URL("./modes/interactive/theme/theme.js", import.meta.resolve("@earendil-works/pi-coding-agent")).href);
+  themeModule.initTheme("dark");
+  let sm = SessionManager.create(dir, dir);
+  user(sm, "original human body");
+  assistant(sm, [{ type: "text", text: "original assistant body" }]);
+  let requests = 0;
+  const setup = () => {
+    const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>();
+    const store = createDisplaySummaryStore();
+    let renderer: EntryRenderer<any>;
+    const pi = {
+      on: (name: string, handler: any) => handlers.set(name, [...(handlers.get(name) ?? []), handler]),
+      getActiveTools: () => [],
+      appendEntry: (type: string, data: unknown) => sm.appendCustomEntry(type, data),
+      registerEntryRenderer: (_type: string, render: EntryRenderer<any>) => { renderer = render; },
+    };
+    const ctx = { mode: "tui", cwd: dir, sessionManager: sm, modelRegistry: { find: () => ({ provider: "offline", id: "mini", contextWindow: 100_000 }) } };
+    const session = registerDisplaySummarySession(pi as never, {
+      store, readConfig: async () => ({ model: "offline/mini" }), env: {},
+      registerBuiltinWrappers() {}, registerMessageRenderers() {},
+      createCompletion: () => async () => { requests++; throw new Error("history must not call the provider"); },
+    });
+    registerCompactionHistory(pi as never);
+    const emit = async (name: string, event: unknown = {}) => {
+      for (const handler of handlers.get(name) ?? []) await handler(event, ctx);
+    };
+    const verify = async () => {
+      const entry = sm.buildContextEntries().find((entry) => entry.type === "custom" && entry.customType === COMPACTION_HISTORY_TYPE)!;
+      assert.ok(entry, "history block remains in the transcript");
+      store.set(entry.id, { toolIntention: "CACHED HISTORY", toolResult: "CACHED RESULT" });
+      for (const expanded of [false, true]) {
+        const component = renderer!(entry as never, { expanded }, themeModule.theme)!;
+        const rendered = component.render(80).map(stripTerminalSequences).join("\n");
+        assert.match(rendered, /Previous conversation · display-only/);
+        assert.match(rendered, /original human body/);
+        assert.match(rendered, /original assistant body/);
+        assert.match(rendered, /End previous conversation/);
+        assert.doesNotMatch(rendered, /CACHED HISTORY|CACHED RESULT/);
+      }
+      await emit("turn_end");
+      await emit("agent_end");
+      await session.current()!.flush();
+      assert.equal(requests, 0);
+      assert.equal(session.current()!.log.length, 0);
+      assert.deepEqual(sm.buildSessionContext().messages.map((message) => message.role), ["compactionSummary"]);
+    };
+    return { emit, verify };
+  };
+  let h = setup();
+  await h.emit("session_start");
+  for (const summary of ["first native summary", "second native summary"]) {
+    const id = sm.appendCompaction(summary, NO_KEPT_ENTRY_ID, 99);
+    await h.emit("session_compact", { compactionEntry: sm.getEntry(id) });
+    await h.verify();
+    assert.equal((sm.buildSessionContext().messages[0] as any).summary, summary, "separate native compaction summary stays unchanged");
+  }
+  await h.emit("session_shutdown");
+  sm = SessionManager.open(sm.getSessionFile()!, dir);
+  h = setup();
+  await h.emit("session_start");
+  await h.verify();
+  await h.emit("session_shutdown");
 });
 
 test("repeat compaction refreshes from original branch messages, never snapshots or summary prose", () => {

@@ -4,8 +4,6 @@ import { adapterLabeledBody } from "./adapter-label.ts";
 import { GOAL_ANNOUNCEMENT_PREFIX, humanTextOf } from "./lead-compaction.ts";
 import { isChildProcess } from "./goal-loop.ts";
 import { loadHostPiTui, Container, Markdown, Text, stripTerminalSequences } from "./pi-tui.ts";
-import { buildSummaryBlock, paintBold, paintFg, summarizedRow, summaryKindLabel } from "./display-summary-render.ts";
-import type { DisplaySummaryStore } from "./display-summary.ts";
 
 export const COMPACTION_HISTORY_TYPE = "ws-lead-compaction-history";
 
@@ -48,25 +46,13 @@ export function selectCompactionHistory(entries: readonly SessionEntry[]): Histo
   return messages.slice(-20);
 }
 
-/** The history as plain `User: ...` / `Assistant: ...` lines, the display summarizer's view of the entry. */
-export function compactionHistoryText(messages: readonly Pick<HistoryMessage, "role" | "text">[]): string {
-  return messages.map((message) => `${message.role === "user" ? "User" : "Assistant"}: ${message.text}`).join("\n");
-}
-
-export interface CompactionHistoryOptions {
-  /** Lead TUI display summaries: a collapsed entry switches to its summary, keyed by the entry id. */
-  summaries?: DisplaySummaryStore;
-  /** Called with the appended entry's id and its text so the lead TUI can queue it for a summary. */
-  onAppended?: (entryId: string, text: string) => void;
-}
-
-/** Supported plain entries persist for humans but produce no model-context messages. */
-export function registerCompactionHistory(pi: ExtensionAPI, opts: CompactionHistoryOptions = {}): void {
+/** Supported plain entries persist for humans but produce no model-context messages or display-summary requests. */
+export function registerCompactionHistory(pi: ExtensionAPI): void {
   let primitives = { Container, Markdown, Text, stripTerminalSequences };
   pi.on("session_start", async () => {
     primitives = await loadHostPiTui();
   });
-  pi.registerEntryRenderer<CompactionHistory>(COMPACTION_HISTORY_TYPE, (entry, options, theme) => {
+  pi.registerEntryRenderer<CompactionHistory>(COMPACTION_HISTORY_TYPE, (entry, _options, theme) => {
     const { Container, Markdown, Text, stripTerminalSequences } = primitives;
     const data = entry.data;
     if (!data || data.version !== 1 || !Array.isArray(data.messages)) return undefined;
@@ -91,8 +77,9 @@ export function registerCompactionHistory(pi: ExtensionAPI, opts: CompactionHist
       }
     }
     container.addChild(new Text(theme.fg("dim", "──────────────────── End previous conversation"), 0, 1));
-    const header = paintFg(theme, "muted", paintBold(theme, summaryKindLabel(COMPACTION_HISTORY_TYPE)));
-    return summarizedRow(container, opts.summaries, entry.id, options?.expanded, (summary) => buildSummaryBlock({ Text }, header, summary, theme));
+    // Original conversation bodies stay readable even when an older display
+    // summary for this entry remains cached. Expansion does not replace them.
+    return container;
   });
   pi.on("session_compact", (event, ctx) => {
     if (isChildProcess(process.env)) return;
@@ -115,10 +102,5 @@ export function registerCompactionHistory(pi: ExtensionAPI, opts: CompactionHist
     // host places this before the summary live and after it on reload; neither
     // ordering changes model context. No sendMessage or continuation is needed.
     pi.appendEntry<CompactionHistory>(COMPACTION_HISTORY_TYPE, { version: 1, compactionId, messages });
-    if (opts.onAppended) {
-      // appendEntry returns nothing; the entry just appended is the leaf.
-      const entryId = ctx.sessionManager.getLeafId();
-      if (entryId) opts.onAppended(entryId, compactionHistoryText(messages));
-    }
   });
 }

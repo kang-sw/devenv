@@ -122,6 +122,25 @@ describe("display summary session", () => {
     });
   }
 
+  test("history never requests summaries at initialization, reload or compaction; other rows still do", async () => {
+    const h = setup();
+    const ctx = { mode: "tui", cwd: "/w", modelRegistry: registry };
+    for (const lifecycle of ["session_start", "session_start", "session_compact"]) {
+      h.pi.emit(lifecycle, {}, ctx);
+      h.store.set("history", { toolIntention: "cached intention", toolResult: "cached result" });
+      h.session.enqueueStandalone("history", "ws-lead-compaction-history", "User: original conversation");
+      await h.session.current()!.flush();
+      await Promise.all(h.pi.emit("turn_end"));
+      await Promise.all(h.pi.emit("agent_end"));
+      assert.equal(h.calls(), 0, lifecycle);
+      assert.equal(h.session.current()!.log.length, 0, "history never enters the summary transcript");
+    }
+    runTool(h.pi, "other-row");
+    await h.session.current()!.flush();
+    assert.equal(h.calls(), 1, "ordinary tools still summarize after compaction");
+    assert.equal(h.store.get("other-row")?.toolResult, "r");
+  });
+
   test("agent_end flushes; compaction resets the log; shutdown stops the summarizer", async () => {
     const h = setup();
     h.pi.emit("session_start", {}, { mode: "tui", cwd: "/w", modelRegistry: registry });
@@ -132,7 +151,7 @@ describe("display summary session", () => {
     assert.ok(h.session.current()!.log.length > 0);
     h.pi.emit("session_compact");
     assert.equal(h.session.current()!.log.length, 0);
-    h.session.enqueueStandalone("entry-1", "ws-lead-compaction-history", "User: hi");
+    h.session.enqueueStandalone("entry-1", "ws-custom-entry", "User: hi");
     await Promise.all(h.pi.emit("turn_end"));
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(h.calls(), 2);

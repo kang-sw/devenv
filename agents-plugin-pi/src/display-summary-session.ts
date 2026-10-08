@@ -45,7 +45,7 @@ export interface DisplaySummarySessionDeps {
 }
 
 export interface DisplaySummarySession {
-  /** Queues a row whose content is not in the lead conversation (the compaction-history entry). */
+  /** Queues a custom row outside the lead conversation, except display-only compaction history. */
   enqueueStandalone(id: string, label: string, text: string): void;
   /** The live summarizer, `undefined` outside the lead TUI. */
   current(): DisplaySummarizer | undefined;

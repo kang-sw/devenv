@@ -203,7 +203,7 @@ import { createAgentWidgetController, shouldArmAgentWidget, type AgentWidgetCont
 import { registerPushMessageRenderers } from "./push-render.ts";
 import { buildOrphanNoticeMessage, buildOrphanPush, captureOrphans, noSessionSidecarPath, readAndClearSidecarAt, reviveOrphans, sidecarPath, writeSidecarAt, type PersistedOrphan } from "./agent-sidecar.ts";
 import { registerGoalLoop, resolveAgentWaitAnimation, resolveChildRetentionTtlDays, resolveSettleDelayMs, type GoalLoopConfig } from "./goal-loop.ts";
-import { COMPACTION_HISTORY_TYPE, registerCompactionHistory } from "./compaction-history.ts";
+import { registerCompactionHistory } from "./compaction-history.ts";
 import { registerLeadMemoryLog } from "./lead-memory-log.ts";
 import { createWsConfigKeyReader, createWsConfigReader, thenOrNow } from "./adapter-config.ts";
 import { createDisplaySummaryStore, DISPLAY_SUMMARY_CONFIG_KEYS, displaySummaryConfigFrom, type DisplaySummaryStore } from "./display-summary.ts";
@@ -663,16 +663,13 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
 
   // The live bridge key wins over the session_start snapshot: a later key
   // adoption on the bridge must reach the next compaction summary.
-  const displaySummarySession = registerDisplaySummarySession(pi, {
+  registerDisplaySummarySession(pi, {
     store: displaySummaryStore,
     readConfig: async () => displaySummaryConfigFrom(await readConfigKeys(DISPLAY_SUMMARY_CONFIG_KEYS)),
     registerBuiltinWrappers: (cwd, active) => { registerSummarizedBuiltinTools(pi, cwd, displaySummaryStore, active); },
     registerMessageRenderers: () => { void registerAdapterMessageRenderers(pi, displaySummaryStore).catch(() => {}); },
   });
-  registerCompactionHistory(pi, {
-    summaries: displaySummaryStore,
-    onAppended: (entryId, text) => { displaySummarySession.enqueueStandalone(entryId, COMPACTION_HISTORY_TYPE, text); },
-  });
+  registerCompactionHistory(pi);
   registerLeadMemoryLog(pi);
   const goalLoopHandle = registerGoalLoop(pi, {
     readConfig: readAdapterConfig,

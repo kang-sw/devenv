@@ -515,7 +515,9 @@ export function createDisplaySummarizer(deps: DisplaySummarizerDeps): DisplaySum
       toolArgs.delete(toolCallId);
     },
     enqueueStandalone(id, label, text) {
-      if (disposed) return;
+      // The display-only history preserves original conversation bodies,
+      // including when a caller replays an older standalone-row source.
+      if (disposed || label === "ws-lead-compaction-history") return;
       queue.push({ kind: "message", id, label, text, inConversation: false });
     },
     async flush() {
