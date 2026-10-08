@@ -570,6 +570,9 @@
         }
       }
     },
+    "261008-bug-ws-git-merge-switches-worker-occupied-root": {
+      "registered_at": "2026-10-08T04:40:47Z"
+    },
     "261008-feat-pi-display-summary-sidecar-persistence": {
       "registered_at": "2026-10-08T01:37:46Z",
       "lease": {
