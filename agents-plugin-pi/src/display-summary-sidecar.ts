@@ -244,8 +244,17 @@ export function createSummarySidecar(deps: SummarySidecarDeps): SummarySidecar {
       try { if (!(await io.lstat(sourceSidecar)).isFile()) return new Map(); } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") return new Map();
       }
-      const cached = await loadSidecar(sourceSidecar, source.sessionId, sourceIds, io);
-      const inherited = cached.summaries;
+      let inherited = new Map<string, DisplaySummary>();
+      try {
+        inherited = (await loadSidecar(sourceSidecar, source.sessionId, sourceIds, io)).summaries;
+      } catch {
+        // Disk is optional at native cutover: a verified live snapshot may
+        // contain accepted values whose append just failed. Still reject a
+        // sidecar replaced by a symlink/non-file while the read was pending.
+        try { if (!(await io.lstat(sourceSidecar)).isFile()) return new Map(); } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") return new Map();
+        }
+      }
       if (deps.nativeSource && resolve(deps.nativeSource.sessionFile) === sourcePath) {
         for (const [id, summary] of deps.nativeSource.summaries) if (sourceIds.has(id)) inherited.set(id, summary);
       }

@@ -278,6 +278,42 @@ test("native cutover seeds accepted-but-unwritten values without needing a sourc
   assert.deepEqual((await records(c.sidecar)).map((r) => [r.sessionId, r.id]), [["child", "a"]]);
 });
 
+test("native cutover keeps accepted live values when an existing regular parent sidecar cannot be read", async (t) => {
+  const f = await fixture(t);
+  const c = await nativeChild(f);
+  const before = row("a") + "\n";
+  await fs.writeFile(f.sidecarFile, before);
+  const live = { ...summary, toolResult: "accepted but append failed" };
+  const io: SidecarIO = { ...fs, open: async (...args: Parameters<typeof fs.open>) => {
+    if (args[0] === f.sidecarFile) throw new Error("existing parent cache read failed");
+    return fs.open(...args);
+  } };
+  await seedNativeSummarySidecar(c.path, { sessionFile: f.sessionFile, summaries: new Map([["a", live], ["b", live]]) }, toolNames, io);
+  assert.deepEqual((await records(c.sidecar)).map((r) => [r.sessionId, r.id, r.summary]), [["child", "a", live]]);
+  assert.equal(await fs.readFile(f.sidecarFile, "utf8"), before);
+});
+
+test("parent-sidecar read failure caused by symlink replacement still excludes native inheritance", async (t) => {
+  const f = await fixture(t);
+  const c = await nativeChild(f);
+  await fs.writeFile(f.sidecarFile, row("a") + "\n");
+  const target = f.sidecarFile + ".target";
+  let replaced = false;
+  const io: SidecarIO = { ...fs, open: async (...args: Parameters<typeof fs.open>) => {
+    if (args[0] === f.sidecarFile && !replaced) {
+      replaced = true;
+      await fs.rename(f.sidecarFile, target);
+      await fs.symlink(target, f.sidecarFile);
+      throw new Error("sidecar replaced during read");
+    }
+    return fs.open(...args);
+  } };
+  await seedNativeSummarySidecar(c.path, { sessionFile: f.sessionFile, summaries: new Map([["a", summary]]) }, toolNames, io);
+  assert.equal(replaced, true);
+  await assert.rejects(fs.lstat(c.sidecar), { code: "ENOENT" });
+  assert.equal(await fs.readFile(target, "utf8"), row("a") + "\n");
+});
+
 for (const linked of ["conversation", "sidecar", "source", "source-sidecar", "child", "child-sidecar"] as const) {
   test(`symlink ${linked} is excluded from mutation and inheritance`, async (t) => {
     const f = await fixture(t);
