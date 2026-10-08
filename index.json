@@ -558,7 +558,14 @@
       "registered_at": "2026-10-08T02:01:01Z"
     },
     "261008-bug-pi-summary-rendering-after-reload": {
-      "registered_at": "2026-10-08T02:56:32Z"
+      "registered_at": "2026-10-08T02:56:32Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-10-08T04:33:26Z"
+      }
     },
     "261008-feat-pi-display-summary-sidecar-persistence": {
       "registered_at": "2026-10-08T01:37:46Z",
