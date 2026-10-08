@@ -461,6 +461,28 @@ describe("wrapToolRenderersWithSummary", () => {
     wrapped.renderCall({}, theme, context);
     assert.equal(received, context);
   });
+
+  test("terminal sequences in every summary field are stripped before they reach the terminal", () => {
+    const store = createDisplaySummaryStore();
+    const osc52 = "\x1b]52;c;ZXZpbA==\x07";
+    const hostile: DisplaySummary = {
+      subtitle: `\x1b[31msrc/a.ts\x1b[0m${osc52}`,
+      optionalContext: `ctx\x1b[2A${osc52}`,
+      toolIntention: `intent\x1b[1;1H\x1b]0;title\x1b\\`,
+      toolResult: `result${osc52}\x1b[K\x07`,
+    };
+    store.set("esc", hostile);
+    const wrapped = wrapToolRenderersWithSummary("grep", () => new FakeText("RAW"), () => new FakeText("RAW"), store, toolTui);
+    const { context } = toolContext("esc");
+    const rendered = [
+      text(wrapped.renderCall({}, theme, context)),
+      text(wrapped.renderResult({ content: [] }, { expanded: false }, theme, context)),
+      buildSummaryCard(modules, "head", hostile, theme).render(80).join("\n"),
+    ].join("\n");
+    assert.doesNotMatch(rendered, /[\x00-\x08\x0b-\x1f\x7f]/, "no ESC, BEL or other control reaches the output");
+    assert.doesNotMatch(rendered, /52;c/, "the OSC 52 payload is dropped whole");
+    for (const plain of ["src/a.ts", "ctx", "intent", "result"]) assert.match(rendered, new RegExp(plain));
+  });
 });
 
 function resolveBuiltins(store: ReturnType<typeof createDisplaySummaryStore>, active: string[], tui = toolTui) {

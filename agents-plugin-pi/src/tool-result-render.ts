@@ -1,9 +1,12 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { stringify as stringifyYaml } from "yaml";
 import { loadHostPiTui } from "./pi-tui.ts";
+import { sanitizePreviewText } from "./text-width.ts";
 import { UseNativeResultFallback } from "./native-fallback.ts";
 import { wrapToolRenderersWithSummary, type ToolCallRenderer, type ToolResultRenderer } from "./display-summary-render.ts";
 import type { DisplaySummaryStore } from "./display-summary.ts";
+
+export { sanitizePreviewText };
 
 /** The tiny host surface required for YAML previews. */
 export interface ToolResultTuiModules {
@@ -308,14 +311,6 @@ function isSingleTextContent(content: unknown): content is Array<{ type: string;
 export function approximateCodePointWidth(codePoint: string): number {
   const value = codePoint.codePointAt(0) ?? 0;
   return value >= 0x20 && value <= 0x7e ? 1 : 2;
-}
-
-/** Normalize unsafe controls before width accounting; tabs become stable four-column spaces. */
-export function sanitizePreviewText(text: string): string {
-  return text
-    .replace(/\r\n?/g, "\n")
-    .replace(/\t/g, "    ")
-    .replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "?");
 }
 
 export function createBoundedText(tui: ToolResultTuiModules): BoundedText {

@@ -26,14 +26,21 @@
  * duck-typed stand-in under test); see `pi-tui.ts` for why a static runtime
  * import would be the wrong copy. This module must not import
  * `tool-result-render.ts` at runtime: that module imports this one.
+ *
+ * Summary text is model output that may echo terminal sequences from a tool
+ * result (OSC 52 clipboard writes, cursor moves), and the sidecar replays it on
+ * every reload; `summaryText` strips it at this render boundary as raw rows do.
+ * The static pure-string `stripTerminalSequences`, like `truncateToWidth`
+ * above, carries no class identity, so the dual-package hazard does not apply.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import type { DisplaySummary, DisplaySummaryStore } from "./display-summary.ts";
 import { UseNativeResultFallback } from "./native-fallback.ts";
-import { loadHostPiTui, truncateToWidth } from "./pi-tui.ts";
+import { loadHostPiTui, stripTerminalSequences, truncateToWidth } from "./pi-tui.ts";
 import { summaryIdOf } from "./summary-id.ts";
+import { sanitizePreviewText } from "./text-width.ts";
 
 // ---------------------------------------------------------------------------
 // Host surface
@@ -225,16 +232,22 @@ export function formatContextSize(bytes: number): string {
   return `[${kb.toFixed(1)} KB]`;
 }
 
+/** A summary field made terminal-safe: escape sequences stripped, remaining controls neutralized. */
+function summaryText(text: string): string {
+  return sanitizePreviewText(stripTerminalSequences(text));
+}
+
 /**
  * Shared field layout relative to the header; padX is the row's frame margin.
  * `bytes`, when given, prefixes the result text with the dim context-size token.
  */
 export function buildSummaryFields(tui: SummaryTextModules, summary: DisplaySummary, theme: unknown, padX = 0, bytes?: number): SummaryComponent[] {
   const fields: SummaryComponent[] = [summarySpacer()];
-  if (summary.optionalContext) fields.push(new tui.Text(paintFg(theme, "dim", summary.optionalContext), padX + SUMMARY_FIELD_INDENT, 0));
-  fields.push(new tui.Text(paintFg(theme, "text", summary.toolIntention), padX + 4, 0));
+  const context = summary.optionalContext ? summaryText(summary.optionalContext) : "";
+  if (context) fields.push(new tui.Text(paintFg(theme, "dim", context), padX + SUMMARY_FIELD_INDENT, 0));
+  fields.push(new tui.Text(paintFg(theme, "text", summaryText(summary.toolIntention)), padX + 4, 0));
   fields.push(summarySpacer());
-  const result = paintFg(theme, "muted", summary.toolResult);
+  const result = paintFg(theme, "muted", summaryText(summary.toolResult));
   const size = bytes === undefined ? undefined : paintFg(theme, "dim", formatContextSize(bytes));
   // The size token's position within the result text is this one join.
   fields.push(new tui.Text(size ? `${size} ${result}` : result, padX, 0));
@@ -274,7 +287,7 @@ export function dedupeSubtitle(subtitle: string, name: string | undefined): stri
  * the dedupe) keeps the bare header.
  */
 export function summaryHeaderLine(header: string, summary: DisplaySummary, theme: unknown, name?: string): string {
-  const firstLine = summary.subtitle?.trim().split(/\r?\n/, 1)[0] ?? "";
+  const firstLine = summaryText(summary.subtitle ?? "").trim().split("\n", 1)[0] ?? "";
   const subtitle = dedupeSubtitle(firstLine, name);
   return subtitle ? `${header} ${paintFg(theme, "accent", subtitle)}` : header;
 }
