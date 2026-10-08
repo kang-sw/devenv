@@ -563,7 +563,7 @@
         "email": "ki6080@gmail.com",
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-10-08T02:14:22Z",
         "impl": {
           "branch": "impl/develop/wipe-exert-prior"
