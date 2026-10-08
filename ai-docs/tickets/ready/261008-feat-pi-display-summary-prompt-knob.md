@@ -178,3 +178,18 @@ The prompt has three layers:
     (`DISPLAY_SUMMARY_CONFIG_KEYS`).
 - Done when every listed test passes alongside the existing
   `agents-plugin-pi` suite.
+
+### Result (02a2f674d) - 2026-10-08
+
+Landed the `pi.display_summary_style` knob.
+
+- `display-summary.ts`: the prompt splits into `DISPLAY_SUMMARY_PROMPT_HEAD`, the style, and `DISPLAY_SUMMARY_PROMPT_TAIL`, joined by `composeDisplaySummaryPrompt(style)`. `DISPLAY_SUMMARY_SYSTEM_PROMPT` is removed. `readManifestDefaultStyle` reads the manifest default, with a comment on why this key departs from the adapter-config mirror convention.
+- The summarizer reads the manifest default once, lazily, through an injected `readDefaultStyle`. `index.ts` wires it from `pluginDir`.
+- A changed resolved style starts a new log through the model-change path. The context-fill estimate counts the composed prompt.
+- `config-manifest.json` declares the key, with the old style line as its `default`.
+
+Verification: `display-summary`, `adapter-config`, `display-summary-session`, `display-summary-render` and `compaction-history` tests pass (124 tests, 0 failures). The full `npm test` in `agents-plugin-pi` reports 2268 tests with 31 failures. The same 31 fail on the baseline, all in web-search, agent-channel, persistent-explore, spawner and web-startup, so they are environmental (the worktree's `node_modules` are symlinks). One lite review pass found nothing.
+
+Decisions:
+- When only the style read is absent after a successful read, the last read style is reused. This avoids restarting the log twice, and the ticket explicitly allows it.
+- The pre-knob prompt is frozen in `test/fixtures/display-summary-default-prompt.txt` to pin byte-equality of the composed default.
