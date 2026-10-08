@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 8f82976c4dbf9d33
 sage-review-completeness-reviewed: 8f82976c4dbf9d33
+completed: 2026-10-08
 ---
 
 # Make the Pi display-summary style a tunable knob
