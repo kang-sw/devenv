@@ -49,7 +49,7 @@ import { PUSH_FAMILIES } from "./spawner.ts";
 import { PUSH_BATCH_CUSTOM_TYPE, type PushBatchItem } from "./push-protocol.ts";
 import { adapterLabeledBody } from "./adapter-label.ts";
 import { createBoundedText, updateText, type NativeBox, type NativeText } from "./tool-result-render.ts";
-import { buildSummaryCard, paintBold, summarizedRow, summaryKindLabel } from "./display-summary-render.ts";
+import { buildSummaryCard, contentBytes, paintBold, summarizedRow, summaryKindLabel } from "./display-summary-render.ts";
 import type { DisplaySummaryStore } from "./display-summary.ts";
 import { summaryIdOf } from "./summary-id.ts";
 
@@ -245,7 +245,7 @@ export function buildPushComponent(
   }
   if (parts.status) box.addChild(new tui.Text(paint("dim", parts.status), 0, 0));
   const summaryHead = paint(isAgentReport ? "customMessageLabel" : "muted", paintBold(theme, displayHead));
-  return summarizedRow(box, summaries, summaryIdOf(message.details), expanded, (summary) => buildSummaryCard(tui, summaryHead, summary, theme, displayHead));
+  return summarizedRow(box, summaries, summaryIdOf(message.details), expanded, (summary) => buildSummaryCard(tui, summaryHead, summary, theme, displayHead, contentBytes(message.content)));
 }
 
 /**
@@ -294,7 +294,7 @@ export function buildPushBatchComponent(
       }
       const kind = summaryKindLabel(item.customType);
       const summaryHead = paint("customMessageLabel", paintBold(theme, kind));
-      component = summarizedRow(box, summaries, summaryIdOf(item.details), expanded, (summary) => buildSummaryCard(tui, summaryHead, summary, theme, kind));
+      component = summarizedRow(box, summaries, summaryIdOf(item.details), expanded, (summary) => buildSummaryCard(tui, summaryHead, summary, theme, kind, contentBytes(item.content)));
     }
     if (component) {
       container.addChild(component);

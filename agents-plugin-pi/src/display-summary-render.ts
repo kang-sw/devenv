@@ -8,8 +8,11 @@
  * Pi uses for tool-call paths), a blank line, and the fields.
  * `optionalContext` stays dim and indented; `toolIntention` is normal text
  * indented four spaces, then a blank line separates the unindented muted
- * `toolResult`. Collapsed rows show the raw rendering until a summary exists;
- * expanded rows (Pi's Ctrl+O) are always raw.
+ * `toolResult`, which opens with a dim inline `[N.N KB]` token: the context
+ * size the row occupies (`formatContextSize`), measured here from the row's
+ * own args/result/content at render time, never by the summarizer.
+ * Collapsed rows show the raw rendering until a summary exists; expanded rows
+ * (Pi's Ctrl+O) are always raw.
  *
  * Re-render paths differ by row kind:
  * - Tool rows re-run their renderers on `ToolRenderContext.invalidate()`, so
@@ -183,13 +186,58 @@ function summarySpacer(): SummaryComponent {
   return { render: () => [""], invalidate: () => {} };
 }
 
-/** Shared field layout relative to the header; padX is the row's frame margin. */
-export function buildSummaryFields(tui: SummaryTextModules, summary: DisplaySummary, theme: unknown, padX = 0): SummaryComponent[] {
+// ---------------------------------------------------------------------------
+// Context size
+// ---------------------------------------------------------------------------
+
+/**
+ * UTF-8 bytes of message or tool-result content as the agent received it:
+ * text blocks by their text; image blocks by their base64 `data` string (the
+ * encoded payload the provider is sent, not the decoded image); any other
+ * block by its JSON serialization. A string content is measured directly.
+ */
+export function contentBytes(content: unknown): number {
+  if (typeof content === "string") return Buffer.byteLength(content, "utf8");
+  if (!Array.isArray(content)) return 0;
+  let bytes = 0;
+  for (const block of content) {
+    const part = block as { type?: unknown; text?: unknown; data?: unknown } | undefined;
+    if (part?.type === "text" && typeof part.text === "string") bytes += Buffer.byteLength(part.text, "utf8");
+    else if (part?.type === "image" && typeof part.data === "string") bytes += Buffer.byteLength(part.data, "utf8");
+    else {
+      try { bytes += Buffer.byteLength(JSON.stringify(block) ?? "", "utf8"); } catch { /* unserializable block counts as nothing */ }
+    }
+  }
+  return bytes;
+}
+
+/** A tool row's context: the call (tool name plus JSON arguments) and the result content. */
+export function toolRowBytes(toolName: string, args: unknown, result: unknown): number {
+  let argsJson = "";
+  try { argsJson = JSON.stringify(args) ?? ""; } catch { /* unserializable args count as nothing */ }
+  const content = typeof result === "object" && result !== null ? (result as { content?: unknown }).content : result;
+  return Buffer.byteLength(toolName, "utf8") + Buffer.byteLength(argsJson, "utf8") + contentBytes(content);
+}
+
+/** `[N.N KB]`: bytes / 1024 at one decimal, floored at `[0.1 KB]` so a row never reads as empty. */
+export function formatContextSize(bytes: number): string {
+  const kb = Math.max(0.1, (Number.isFinite(bytes) ? bytes : 0) / 1024);
+  return `[${kb.toFixed(1)} KB]`;
+}
+
+/**
+ * Shared field layout relative to the header; padX is the row's frame margin.
+ * `bytes`, when given, prefixes the result text with the dim context-size token.
+ */
+export function buildSummaryFields(tui: SummaryTextModules, summary: DisplaySummary, theme: unknown, padX = 0, bytes?: number): SummaryComponent[] {
   const fields: SummaryComponent[] = [summarySpacer()];
   if (summary.optionalContext) fields.push(new tui.Text(paintFg(theme, "dim", summary.optionalContext), padX + SUMMARY_FIELD_INDENT, 0));
   fields.push(new tui.Text(paintFg(theme, "text", summary.toolIntention), padX + 4, 0));
   fields.push(summarySpacer());
-  fields.push(new tui.Text(paintFg(theme, "muted", summary.toolResult), padX, 0));
+  const result = paintFg(theme, "muted", summary.toolResult);
+  const size = bytes === undefined ? undefined : paintFg(theme, "dim", formatContextSize(bytes));
+  // The size token's position within the result text is this one join.
+  fields.push(new tui.Text(size ? `${size} ${result}` : result, padX, 0));
   return fields;
 }
 
@@ -231,11 +279,11 @@ export function buildSummaryBlock(tui: SummaryTextModules, header: string, summa
   return stack([new tui.Text(summaryHeaderLine(header, summary, theme, name), 0, 0), ...buildSummaryFields(tui, summary, theme)]);
 }
 
-/** A message summary on the custom-message card: the shared `customMessageBg` box, header, fields. */
-export function buildSummaryCard(tui: SummaryCardModules, header: string, summary: DisplaySummary, theme: unknown, name?: string): SummaryComponent {
+/** A message summary on the custom-message card: the shared `customMessageBg` box, header, fields (with the size token when `bytes` is given). */
+export function buildSummaryCard(tui: SummaryCardModules, header: string, summary: DisplaySummary, theme: unknown, name?: string, bytes?: number): SummaryComponent {
   const box = new tui.Box(1, 1, (text) => paintBg(theme, "customMessageBg", text));
   box.addChild(new tui.Text(summaryHeaderLine(header, summary, theme, name), 0, 0));
-  for (const field of buildSummaryFields(tui, summary, theme)) box.addChild(field);
+  for (const field of buildSummaryFields(tui, summary, theme, 0, bytes)) box.addChild(field);
   return box;
 }
 
@@ -310,6 +358,8 @@ export type ToolResultRenderer = (result: unknown, options: unknown, theme: unkn
 
 interface SummaryRenderContext {
   toolCallId?: unknown;
+  /** The call's arguments, shared across the call and result slots. */
+  args?: unknown;
   invalidate?: unknown;
   lastComponent?: unknown;
   expanded?: unknown;
@@ -406,7 +456,7 @@ export function wrapToolRenderersWithSummary(
       const raw = () => { if (!renderResult) throw new UseNativeResultFallback(); return renderResult(result, renderOptions, theme, rawContext(context)); };
       try {
         const hit = summaryFor(ctx, (renderOptions as { expanded?: unknown } | undefined)?.expanded);
-        if (hit) return guardedSummary(() => summaryFrame(buildSummaryFields(hit.tui, hit.summary, theme, padX), hit.tui, theme, ctx), raw, rawText((result as { content?: unknown })?.content ?? result), (rawContext(context) as SummaryRenderContext)?.lastComponent, () => { if (ctx) failedSummaries.set(identityOf(ctx), hit.summary); });
+        if (hit) return guardedSummary(() => summaryFrame(buildSummaryFields(hit.tui, hit.summary, theme, padX, toolRowBytes(toolName, ctx?.args, result)), hit.tui, theme, ctx), raw, rawText((result as { content?: unknown })?.content ?? result), (rawContext(context) as SummaryRenderContext)?.lastComponent, () => { if (ctx) failedSummaries.set(identityOf(ctx), hit.summary); });
       } catch { /* Our readiness/construction path must fall through to raw. */ }
       return raw();
     },
@@ -524,7 +574,7 @@ export function buildAdapterMessageComponent(
   const customType = typeof message.customType === "string" ? message.customType : "";
   const kind = summaryKindLabel(customType);
   const header = paintFg(theme, "customMessageLabel", paintBold(theme, kind));
-  return summarizedRow(raw, summaries, summaryIdOf(message.details), expanded, (summary) => buildSummaryCard(tui, header, summary, theme, kind));
+  return summarizedRow(raw, summaries, summaryIdOf(message.details), expanded, (summary) => buildSummaryCard(tui, header, summary, theme, kind, contentBytes(message.content)));
 }
 
 /**
