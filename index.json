@@ -557,6 +557,9 @@
     "261008-bug-pi-native-summary-background": {
       "registered_at": "2026-10-08T02:01:01Z"
     },
+    "261008-bug-pi-summary-rendering-after-reload": {
+      "registered_at": "2026-10-08T02:56:32Z"
+    },
     "261008-feat-pi-display-summary-sidecar-persistence": {
       "registered_at": "2026-10-08T01:37:46Z",
       "lease": {
