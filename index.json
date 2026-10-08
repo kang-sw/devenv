@@ -553,6 +553,9 @@
     },
     "261008-bug-pi-display-summary-silent-dogfood": {
       "registered_at": "2026-10-08T00:33:33Z"
+    },
+    "261008-feat-pi-display-summary-sidecar-persistence": {
+      "registered_at": "2026-10-08T01:37:46Z"
     }
   }
 }
