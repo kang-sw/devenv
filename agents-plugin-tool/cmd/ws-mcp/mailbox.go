@@ -106,10 +106,31 @@ func mailboxWait(args []string) {
 	// emitMailboxWaitResult): os.Exit never runs deferred functions, so the
 	// marker clear cannot live behind `defer` here — each branch clears it
 	// explicitly before its own terminal exit.
-	clearMarker := func() { _ = wsmailbox.ClearListeningMarker(*sessionKey) }
+	// Owner-checked: a replacement wait on the same session_key may already
+	// have rewritten the marker, and this exit must not delete it.
+	clearMarker := func() { _ = wsmailbox.ClearListeningMarker(*sessionKey, marker.PID) }
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// Parent death joins the signal path rather than exiting on its own, so
+	// the one interrupted branch below clears the marker and sets the exit
+	// code for both. On Windows a host that stops this wait terminates only
+	// its direct parent (the launcher), not this process; the watch is
+	// Windows-only (a no-op on POSIX, where the launcher execs). It arms for
+	// every Windows wait, whoever started it, so any wait — including one a
+	// shell started in the background — now ends when its direct parent
+	// exits. A parent that dies before the watch opens it leaves the watch
+	// disarmed, and --timeout remains the backstop.
+	ctx, cancelOnParentExit := context.WithCancel(ctx)
+	defer cancelOnParentExit()
+	startParentDeathWatch(func(ppid int) {
+		mcp.RecordLifecycleEvent("process.parent_exited", map[string]any{
+			"ppid":    ppid,
+			"command": "mailbox wait",
+			"action":  "cancel_wait",
+		})
+		cancelOnParentExit()
+	})
 
 	type outcome struct {
 		result wsmailbox.WaitResult

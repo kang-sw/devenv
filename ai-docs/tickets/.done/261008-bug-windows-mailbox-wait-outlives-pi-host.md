@@ -11,6 +11,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 3a872773e87e9c99
 sage-review-completeness-reviewed: 3a872773e87e9c99
+completed: 2026-10-08
 ---
 
 # Windows mailbox-wait ws-mcp processes outlive the Pi host
@@ -196,3 +197,42 @@ on the lead machine (cache artifact, not tracked).
   the lifecycle log records the wait's parent-exit event.
 - Done when the tests pass, the existing `agents-plugin-tool` suite passes,
   `GOOS=windows go vet ./...` is clean, and the native scenarios above pass.
+
+### Result (2186143ab) - 2026-10-08
+
+- Landed: `startParentDeathWatch(onExit func(ppid int))` (Windows arms the
+  existing `watchProcessExit`; POSIX stub matches and never calls). `serve`
+  passes its unchanged record-and-`os.Exit(0)` callback. `mailbox wait`
+  derives a cancelable context from its `signal.NotifyContext` and passes a
+  callback that records `process.parent_exited` (`action: cancel_wait`,
+  `command: "mailbox wait"`) and cancels it, so the existing interrupted
+  branch clears the marker and exits 130.
+- `ClearListeningMarker(sessionKey, ownerPID)` takes the owner PID
+  explicitly; the wait passes its marker's PID. A foreign-PID marker is kept
+  (success); a missing marker is a no-op; an unparseable marker is kept and
+  its parse error returned.
+- Tests: `TestListeningMarkerWriteReadClear` rewritten for the owner arg;
+  new `TestClearListeningMarkerLeavesAnotherOwnersMarker`,
+  `TestClearListeningMarkerLeavesUnparseableMarker`; Windows
+  `TestMailboxWait_EndsWhenParentExits` re-executes the test binary as a
+  helper parent, kills it, and asserts the real wait exits 130 within 5 s,
+  clears its marker, and logs `cancel_wait`.
+- Verification: macOS `go test ./...` all ok; `GOOS=windows go vet ./...`
+  clean. On the smoke host (go1.26.2): `go test -run
+  'TestWatchProcessExit|TestMailboxWait' ./cmd/ws-mcp/` and
+  `./internal/wsmailbox/` pass; with the callback's cancel removed the new
+  test fails ("still running 5s after its parent exited"). Live Pi 1.0.4
+  with the fix build (via `WS_MCP_RUNTIME_DIR` scratch dir +
+  `WS_MCP_BOOTSTRAP_BINARY`, hash-matched): `/reload` - old wait gone,
+  `cancel_wait` logged, replacement marker kept; `/quit` - no node/python/
+  ws-mcp left after 4 s, marker cleared, `cancel_wait` logged; node-only
+  `taskkill /PID /F` - all gone within 3 s, marker cleared, `cancel_wait`
+  logged. Scratch `wsprobe\mbxfix` removed; host left with no node/python/
+  ws-mcp processes and no markers.
+- Review (lite): clean. Minor, accepted: an unparseable marker now persists
+  until the next arm overwrites it; a transient Windows sharing violation on
+  the clear's read would likewise leave the marker until the next arm.
+- Not reached: `/resume`, child Pi agents, the staged-direct local-source
+  path, and the `/reload` overlap case where the replacement writes before
+  the old wait clears (covered by the unit owner-check test; live, the old
+  wait cleared first).
