@@ -13,6 +13,7 @@ import type { Api, AssistantMessage, Context, Model, SimpleStreamOptions } from 
 import {
   DISPLAY_SUMMARY_CONFIG_KEYS,
   DISPLAY_SUMMARY_OUTPUT_TOOL,
+  DISPLAY_SUMMARY_SYSTEM_PROMPT,
   createDisplaySummarizer,
   createDisplaySummaryStore,
   createModelResolver,
@@ -166,25 +167,60 @@ describe("configuration and effort", () => {
 });
 
 describe("provider-neutral call path", () => {
-  test("applies resolved auth like prepareRequest and awaits the stream result", async () => {
-    const seen: Array<{ model: Model<Api>; options?: SimpleStreamOptions }> = [];
+  test("passes model, Context and options unchanged to public streamSimple", async () => {
     const response = answer([]);
+    const m = model();
+    const context: Context = { systemPrompt: "summary", messages: [], tools: [] };
+    const options: SimpleStreamOptions = { reasoning: "low", sessionId: "s", cacheRetention: "short", signal: new AbortController().signal };
     const complete = createProviderCompletion({
       find: () => undefined,
-      getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "k", headers: { h: "1" }, baseUrl: "https://proxy.invalid", env: { E: "1" } }),
-      getProvider: (id) => id === "acme" ? { streamSimple: (m, _c, options) => { seen.push({ model: m, options }); return { result: async () => response }; } } : undefined,
+      streamSimple: (actualModel, actualContext, actualOptions) => {
+        assert.equal(actualModel, m);
+        assert.equal(actualContext, context);
+        assert.equal(actualOptions, options);
+        return { result: async () => response };
+      },
     });
-    const result = await complete(model(), { messages: [] }, { reasoning: "low", sessionId: "s", cacheRetention: "short" });
-    assert.equal(result, response);
-    assert.equal(seen[0]!.model.baseUrl, "https://proxy.invalid");
-    assert.deepEqual(seen[0]!.options, { reasoning: "low", sessionId: "s", cacheRetention: "short", apiKey: "k", headers: { h: "1" }, env: { E: "1" } });
+    assert.equal(await complete(m, context, options), response);
   });
 
-  test("missing auth or provider rejects", async () => {
-    const noAuth = createProviderCompletion({ find: () => undefined, getApiKeyAndHeaders: async () => ({ ok: false, error: "not configured" }), getProvider: () => undefined });
-    await assert.rejects(noAuth(model(), { messages: [] }, {}), /not configured/);
-    const noProvider = createProviderCompletion({ find: () => undefined, getApiKeyAndHeaders: async () => ({ ok: true }), getProvider: () => undefined });
-    await assert.rejects(noProvider(model(), { messages: [] }, {}), /unknown provider/);
+  test("summary flush reaches public completion with prompt, output tool and reasoning, never direct provider dispatch", async () => {
+    const calls: Call[] = [];
+    const registry = {
+      find: () => model(),
+      getApiKeyAndHeaders: () => { assert.fail("manual auth must not run"); },
+      getProvider: () => { assert.fail("direct provider dispatch must not run"); },
+      streamSimple: (m: Model<Api>, context: Context, options?: SimpleStreamOptions) => {
+        calls.push({ model: m, context, options: options! });
+        return { result: async () => answer([{ id: "t1", toolIntention: "i", toolResult: "r" }]) };
+      },
+    };
+    const store = createDisplaySummaryStore();
+    store.toolNames.add("read");
+    const summarizer = createDisplaySummarizer({
+      store, sessionId: "public-summary", readConfig: async () => ({ model: "acme/mini", effort: "low" }),
+      resolveModel: createModelResolver(registry), complete: createProviderCompletion(registry),
+    });
+    summarizer.observeToolStart("row", "read", {});
+    summarizer.observeToolEnd("row", "read");
+    await summarizer.flush();
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0]!.context.systemPrompt, DISPLAY_SUMMARY_SYSTEM_PROMPT);
+    assert.equal(calls[0]!.context.tools?.length, 1);
+    assert.equal(calls[0]!.context.tools![0]!.name, DISPLAY_SUMMARY_OUTPUT_TOOL);
+    assert.equal(calls[0]!.context.tools![0]!.parameters.type, "object");
+    assert.equal(calls[0]!.context.messages.length, 1);
+    assert.match(requestText(calls[0]!), /Rows:/);
+    assert.equal(calls[0]!.options.reasoning, "low");
+    assert.equal(calls[0]!.options.sessionId, "public-summary");
+    assert.equal(calls[0]!.options.cacheRetention, "short");
+    assert.equal(calls[0]!.options.signal?.aborted, false);
+    assert.ok(store.get("row"));
+  });
+
+  test("public completion rejections propagate to the summarizer's failure boundary", async () => {
+    const complete = createProviderCompletion({ find: () => undefined, streamSimple: () => ({ result: async () => { throw new Error("not configured"); } }) });
+    await assert.rejects(complete(model(), { messages: [] }, {}), /not configured/);
   });
 });
 

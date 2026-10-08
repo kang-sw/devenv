@@ -17,9 +17,9 @@
  *   per flush one user message (the lead conversation since the previous
  *   flush plus the labelled rows), the model's answer, and a short tool result
  *   for each output-tool call. It resets on lead compaction.
- * - Requests go through Pi's provider-neutral `streamSimple` adapter with the
- *   lead's own provider auth (`createProviderCompletion`), so the effort level
- *   maps to `reasoning` without a per-API table here.
+ * - Requests go through Pi's public registry `streamSimple` adapter with
+ *   the lead's own provider auth (`createProviderCompletion`), so the effort
+ *   level maps to `reasoning` without a per-API table here.
  *
  * Summaries live in a `DisplaySummaryStore` keyed by row id (tool call id,
  * the `summary-id.ts` stamp of a custom message, or a custom entry's id); the
@@ -149,29 +149,17 @@ export type DisplaySummaryCompletion = (model: Model<Api>, context: Context, opt
 /** The public `ctx.modelRegistry` calls the provider-neutral path needs. */
 export interface DisplaySummaryRegistry {
   find(provider: string, modelId: string): Model<Api> | undefined;
-  getApiKeyAndHeaders(model: Model<Api>): Promise<{ ok: true; apiKey?: string; headers?: Record<string, string>; baseUrl?: string; env?: Record<string, string> } | { ok: false; error: string }>;
-  getProvider(provider: string): { streamSimple(model: Model<Api>, context: Context, options?: SimpleStreamOptions): { result(): Promise<AssistantMessage> } } | undefined;
+  streamSimple(model: Model<Api>, context: Context, options?: SimpleStreamOptions): { result(): Promise<AssistantMessage> };
 }
 
 /**
- * Pi's provider-neutral `streamSimple`, reached through public registry calls:
- * auth from `getApiKeyAndHeaders` (the same resolution, OAuth refresh
- * included, the lead's own requests use), applied as Pi's
- * `ModelRuntime.prepareRequest` applies it — `baseUrl` onto the model, the
- * rest into the options. Pi's header-transform hooks are not applied here.
+ * Keep the full Context at Pi's public completion boundary: the registry owns
+ * request auth and context normalization. Calling a provider directly can
+ * bypass the normalization that carries the system prompt and output tool.
  */
 export function createProviderCompletion(registry: DisplaySummaryRegistry): DisplaySummaryCompletion {
   return async (model, context, options) => {
-    const auth = await registry.getApiKeyAndHeaders(model);
-    if (!auth.ok) throw new Error(auth.error);
-    const provider = registry.getProvider(model.provider);
-    if (!provider) throw new Error(`unknown provider: ${model.provider}`);
-    const target = auth.baseUrl ? { ...model, baseUrl: auth.baseUrl } : model;
-    const merged: SimpleStreamOptions = { ...options };
-    if (auth.apiKey !== undefined) merged.apiKey = auth.apiKey;
-    if (auth.headers !== undefined) merged.headers = auth.headers;
-    if (auth.env !== undefined) merged.env = auth.env;
-    return provider.streamSimple(target, context, merged).result();
+    return registry.streamSimple(model, context, options).result();
   };
 }
 
