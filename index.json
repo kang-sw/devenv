@@ -544,6 +544,9 @@
     "261008-bug-pi-native-summary-background": {
       "registered_at": "2026-10-08T02:01:01Z"
     },
+    "261008-bug-pi-windows-python3-store-stub-blocks-release-ws": {
+      "registered_at": "2026-10-08T13:23:41Z"
+    },
     "261008-bug-windows-mailbox-wait-outlives-pi-host": {
       "registered_at": "2026-10-08T08:39:26Z"
     },
