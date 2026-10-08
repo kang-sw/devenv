@@ -2652,6 +2652,17 @@ func aiContextDebugEvents(t *testing.T, server *Server, root string) []map[strin
 	return events
 }
 
+// debugEventKey identifies a debug event by its full content (ts included),
+// so two snapshots of the ring buffer can be diffed after eviction.
+func debugEventKey(t *testing.T, event map[string]any) string {
+	t.Helper()
+	raw, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("encode debug event: %v", err)
+	}
+	return string(raw)
+}
+
 func TestServeStdioGitCommitAIContextConditionsAndDebugEvent(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
@@ -2727,11 +2738,25 @@ func TestServeStdioGitCommitAIContextConditionsAndDebugEvent(t *testing.T) {
 		t.Fatalf("git.commit with a large valid ai_context array = %s", largeArrayResultText)
 	}
 
+	// The ring buffer is full once the package has run enough tests, so these
+	// calls' other debug events can evict older ai_context events between the
+	// two snapshots: diff by content instead of by count or position.
 	after := aiContextDebugEvents(t, server, root)
-	if len(after) != len(before)+5 {
-		t.Fatalf("expected 5 new git.commit.ai_context_received events, got %d before and %d after", len(before), len(after))
+	seen := map[string]int{}
+	for _, event := range before {
+		seen[debugEventKey(t, event)]++
 	}
-	newEvents := after[len(before):]
+	var newEvents []map[string]any
+	for _, event := range after {
+		if key := debugEventKey(t, event); seen[key] > 0 {
+			seen[key]--
+			continue
+		}
+		newEvents = append(newEvents, event)
+	}
+	if len(newEvents) != 5 {
+		t.Fatalf("expected 5 new git.commit.ai_context_received events, got %d (%d before, %d after)", len(newEvents), len(before), len(after))
+	}
 
 	// The five git.commit calls above run as concurrent goroutines (see
 	// ServeStdio's per-line `go func` in server.go), so their completion
