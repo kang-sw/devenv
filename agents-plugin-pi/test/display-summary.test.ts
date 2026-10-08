@@ -7,7 +7,9 @@
  * Run with: node --test test/  (from agents-plugin-pi/).
  */
 
-import { test, describe } from "node:test";
+import { test, describe, type TestContext } from "node:test";
+import fs from "node:fs";
+import { join } from "node:path";
 import assert from "node:assert/strict";
 import type { Api, AssistantMessage, Context, Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import {
@@ -99,6 +101,100 @@ function requestText(call: Call): string {
   const content = last.content as Array<{ type: string; text?: string }>;
   return content.map((part) => part.text ?? "").join("");
 }
+
+// Track only this test's private probe directories; no live provider calls.
+function probeDirectories(t: TestContext): string[] {
+  const directories: string[] = [];
+  const original = fs.mkdtempSync;
+  t.mock.method(fs, "mkdtempSync", (prefix: string) => {
+    const directory = original(prefix);
+    directories.push(directory);
+    return directory;
+  });
+  t.after(() => { for (const directory of directories) fs.rmSync(directory, { recursive: true, force: true }); });
+  return directories;
+}
+
+describe("temporary cache usage probe", () => {
+  test("completion metadata only, private exclusive file, eight consecutive samples across reset", async (t) => {
+    const directories = probeDirectories(t);
+    const h = harness();
+    t.after(() => h.summarizer.dispose());
+    assert.equal(directories.length, 0, "lazy until completion");
+    const originalOpen = fs.openSync;
+    t.mock.method(fs, "openSync", (path: string, flags: string, mode: number) => {
+      assert.equal(flags, "wx");
+      assert.equal(mode, 0o600);
+      return originalOpen(path, flags, mode);
+    });
+    for (let i = 0; i < 10; i++) {
+      if (i === 4) h.summarizer.reset();
+      h.responses.push(answer([{ id: "t1", toolIntention: "SECRET-intention", toolResult: "SECRET-result" }], {
+        stopReason: i === 1 ? "error" : i === 2 ? "aborted" : i === 3 ? "length" : "toolUse",
+        errorMessage: "SECRET-error", responseId: "SECRET-response-id",
+        usage: { input: 100 + i, cacheRead: 80, cacheWrite: 20, output: 5, totalTokens: 205,
+          cost: { input: 1, cacheRead: 2, cacheWrite: 3, output: 4, total: 10 } },
+      }));
+      toolRow(h, `SECRET-row-${i}`, "edit", { path: "SECRET-path" });
+      await h.summarizer.flush();
+    }
+    assert.equal(h.calls.length, 10, "probe bound must not stop completions");
+    assert.equal(directories.length, 1);
+    const path = join(directories[0]!, "usage.jsonl");
+    assert.equal(fs.statSync(directories[0]!).mode & 0o777, 0o700);
+    assert.equal(fs.statSync(path).mode & 0o777, 0o600);
+    const text = fs.readFileSync(path, "utf8");
+    assert.ok(!text.includes("SECRET"));
+    const records = text.trim().split("\n").map((line) => JSON.parse(line));
+    assert.equal(records.length, 8);
+    for (const [i, record] of records.entries()) {
+      assert.deepEqual(Object.keys(record).sort(), ["cacheRead", "cacheWrite", "input", "model", "output", "provider", "stopReason", "time"]);
+      assert.equal(record.input, 100 + i);
+      assert.equal(record.cacheRead, 80);
+      assert.equal(record.cacheWrite, 20);
+      assert.equal(record.output, 5);
+      assert.equal(record.provider, "acme");
+      assert.equal(record.model, "mini");
+      assert.ok(Number.isFinite(record.time));
+    }
+    assert.deepEqual(records.slice(0, 4).map((r) => r.stopReason), ["toolUse", "error", "aborted", "length"]);
+    assert.equal(h.store.get("SECRET-row-9")?.toolResult, "SECRET-result");
+  });
+
+  test("rejection has unknown counts, malformed response still recorded before parsing, dispose stops probe", async (t) => {
+    const directories = probeDirectories(t);
+    const h = harness();
+    h.responses.push(new Error("SECRET-error"), answer(undefined));
+    for (let i = 0; i < 2; i++) { toolRow(h, `row-${i}`); await h.summarizer.flush(); }
+    h.summarizer.dispose();
+    const records = fs.readFileSync(join(directories[0]!, "usage.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    assert.deepEqual(records[0], { time: records[0].time, provider: "acme", model: "mini", stopReason: "rejected",
+      input: null, cacheRead: null, cacheWrite: null, output: null });
+    assert.equal(records[1].stopReason, "stop");
+    assert.equal(h.store.get("row-1"), undefined);
+    toolRow(h, "after-dispose");
+    await h.summarizer.flush();
+    assert.equal(h.calls.length, 2);
+  });
+
+  for (const operation of ["mkdtempSync", "openSync", "writeFileSync"] as const) {
+    test(`${operation} failure disables probe without changing accepted summaries`, async (t) => {
+      probeDirectories(t);
+      const h = harness();
+      t.after(() => h.summarizer.dispose());
+      const failed = t.mock.method(fs, operation, () => { throw new Error("SECRET-disk-error"); });
+      for (let i = 0; i < 2; i++) {
+        h.responses.push(answer([{ id: "t1", toolIntention: "intent", toolResult: "result" }]));
+        toolRow(h, `row-${i}`);
+        await h.summarizer.flush();
+        assert.equal(h.store.get(`row-${i}`)?.toolResult, "result");
+      }
+      assert.equal(failed.mock.callCount(), 1, "no retries after I/O failure");
+      assert.equal(h.renders(), 2);
+      assert.equal(h.summarizer.log.length, 6);
+    });
+  }
+});
 
 describe("summary store lifetimes", () => {
   test("clear preserves mounted links and generation; retire detaches outgoing rows", () => {
