@@ -20,7 +20,9 @@ import {
   buildSummaryCard,
   isSummaryComponent,
   registerAdapterMessageRenderers,
-  registerSummarizedBuiltinTools,
+  registerDisplaySummaryToolResolver,
+  confirmSummarizedBuiltinTools,
+  type SummaryToolResolver,
   wrapToolRenderersWithSummary,
   type AdapterMessageTuiModules,
 } from "../src/display-summary-render.ts";
@@ -303,6 +305,55 @@ describe("registerWsTool tool rows", () => {
   });
 });
 
+describe("early presentation and late ownership", () => {
+  test("foreign and unconfigured native tools stay raw despite cached values", () => {
+    const store = createDisplaySummaryStore();
+    let resolver!: SummaryToolResolver;
+    registerDisplaySummaryToolResolver({ registerToolRenderer: (value) => { resolver = value; } }, store, toolTui);
+    confirmSummarizedBuiltinTools(store, ["edit", "read", "bash"]);
+    for (const name of ["foreign_mcp", "grep", "read", "bash"]) {
+      const raw = { renderCall: () => new FakeText("RAW CALL"), renderResult: () => new FakeText("RAW RESULT") };
+      const presentation = resolver(name, () => raw)!;
+      store.set(name, lean);
+      const { context } = toolContext(name);
+      assert.equal(text(presentation.renderCall!({}, theme, context)), "RAW CALL");
+      assert.equal(text(presentation.renderResult!({}, {}, theme, context)), "RAW RESULT");
+      assert.equal(store.toolNames.has(name), false);
+    }
+  });
+
+  test("a mounted early resolver adopts a late definition without double wrapping or changing execution", () => {
+    const store = createDisplaySummaryStore();
+    let resolver!: SummaryToolResolver;
+    registerDisplaySummaryToolResolver({ registerToolRenderer: (value) => { resolver = value; } }, store, toolTui);
+    let registered: Record<string, any> | undefined;
+    const name = "do-i-really-have-to-read-this-myself";
+    const early = resolver(name, () => registered)!;
+    assert.equal(store.toolNames.size, 0);
+    const { context, invalidations } = toolContext("late");
+    assert.throws(() => early.renderCall!({}, theme, context), UseNativeResultFallback);
+    const ref = { current: toolTui, summaries: store };
+    const definition = { name, label: "read", description: "read", parameters: { type: "object" }, execute: async () => ({ content: [] }), renderCall: () => new FakeText("RAW") };
+    let notifications = 0;
+    store.onToolRegistered(() => { notifications++; assert.ok(registered); });
+    registerWsTool({ registerTool: (value) => { registered = value; } } as never, definition as never, ref);
+    assert.equal(notifications, 1, "ownership notifies only after successful registration");
+    assert.equal(registered!.parameters, definition.parameters);
+    assert.equal(registered!.execute, definition.execute);
+    assert.equal(resolver(name, () => registered), registered, "already wrapped definition is passed through");
+    store.set("late", lean);
+    store.notify(["late"]);
+    assert.deepEqual(invalidations, ["late"], "unknown incoming row was linked before ownership");
+    assert.equal(text(early.renderCall!({}, theme, context)), `<toolTitle><b>${name}</b></toolTitle>`);
+    assert.deepEqual((early.renderResult!({}, {}, theme, context) as FakeComponent).render(80), ["", "    <text>read the plan</text>", "", "<muted>three phases</muted>"]);
+    assert.equal(text(early.renderCall!({}, theme, { ...context, expanded: true })), "RAW");
+    const failed = { ...definition, name: "failed-registration" };
+    assert.throws(() => registerWsTool({ registerTool() { throw new Error("registration failed"); } } as never, failed as never, ref), /registration failed/);
+    assert.equal(store.toolNames.has(failed.name), false);
+    assert.equal(notifications, 1);
+  });
+});
+
 describe("wrapToolRenderersWithSummary", () => {
   test("switching back to raw never hands a summary component to the inner renderer as lastComponent", () => {
     const store = createDisplaySummaryStore();
@@ -333,23 +384,33 @@ describe("wrapToolRenderersWithSummary", () => {
   });
 });
 
-describe("registerSummarizedBuiltinTools", () => {
+function resolveBuiltins(store: ReturnType<typeof createDisplaySummaryStore>, active: string[], tui = toolTui) {
+  let resolver!: SummaryToolResolver;
+  registerDisplaySummaryToolResolver({ registerToolRenderer: (value) => { resolver = value; } }, store, tui);
+  confirmSummarizedBuiltinTools(store, active);
+  const natives = [createEditToolDefinition(process.cwd()), createGrepToolDefinition(process.cwd()), createLsToolDefinition(process.cwd())];
+  return natives.filter((native) => active.includes(native.name)).map((native) => resolver(native.name, () => native as never)!);
+}
+
+describe("native presentation resolver", () => {
   const cwd = process.cwd();
 
-  test("registers only the active summarized built-ins, unchanged in name, description and parameters", () => {
+  test("confirms only configured native tools and installs presentation without replacing execution", () => {
     const store = createDisplaySummaryStore();
     const { pi, tools } = capturePi();
-    const names = registerSummarizedBuiltinTools(pi as never, cwd, store, ["read", "bash", "edit", "grep", "ls"], toolTui);
-    assert.deepEqual(names, ["edit", "grep", "ls"]);
-    assert.deepEqual(tools.map((tool) => tool.name), ["edit", "grep", "ls"]);
-    assert.deepEqual([...store.toolNames].sort(), ["edit", "grep", "ls"]);
+    let resolver!: SummaryToolResolver;
+    registerDisplaySummaryToolResolver({ ...pi, registerToolRenderer: (value) => { resolver = value; } }, store, toolTui);
     const natives = [createEditToolDefinition(cwd), createGrepToolDefinition(cwd), createLsToolDefinition(cwd)];
+    const identities = natives.map((native) => ({ parameters: native.parameters, execute: native.execute }));
+    for (const native of natives) resolver(native.name, () => native as never);
+    assert.deepEqual([...store.toolNames], [], "resolution alone grants no ownership");
+    confirmSummarizedBuiltinTools(store, ["read", "bash", "edit", "grep", "ls"]);
+    assert.deepEqual([...store.toolNames].sort(), ["edit", "grep", "ls"]);
+    assert.deepEqual(tools, [], "resolver never registers execution definitions");
     for (const [index, native] of natives.entries()) {
-      assert.equal(tools[index]!.name, native.name);
-      assert.equal(tools[index]!.description, native.description);
-      assert.deepEqual(tools[index]!.parameters, native.parameters);
-      assert.equal(tools[index]!.renderShell, (native as { renderShell?: unknown }).renderShell);
-      assert.equal(typeof tools[index]!.execute, "function");
+      assert.equal(native.parameters, identities[index]!.parameters);
+      assert.equal(native.execute, identities[index]!.execute);
+      assert.equal(resolver(native.name, () => native as never)!.renderShell, (native as { renderShell?: unknown }).renderShell);
     }
   });
 
@@ -358,8 +419,7 @@ describe("registerSummarizedBuiltinTools", () => {
     themeModule.initTheme();
     const plainTheme = { fg: (_c: string, t: string) => t, bg: (_c: string, t: string) => t, bold: (t: string) => t };
     const store = createDisplaySummaryStore();
-    const { pi, tools } = capturePi();
-    registerSummarizedBuiltinTools(pi as never, cwd, store, ["grep"], toolTui);
+    const tools = resolveBuiltins(store, ["grep"]);
     const native = createGrepToolDefinition(cwd);
     const args = { pattern: "needle", path: "src" };
     const grepResult = { content: [{ type: "text", text: "src/a.ts:1: needle" }] };
@@ -386,8 +446,7 @@ describe("registerSummarizedBuiltinTools", () => {
 
   test("a self-framed built-in (edit) keeps its frame margin and success background", () => {
     const store = createDisplaySummaryStore();
-    const { pi, tools } = capturePi();
-    registerSummarizedBuiltinTools(pi as never, cwd, store, ["edit"], toolTui);
+    const tools = resolveBuiltins(store, ["edit"]);
     store.set("e", lean);
     const { context } = toolContext("e");
     assert.equal(text(tools[0]!.renderCall({}, theme, context)), "{toolSuccessBg} <toolTitle><b>edit</b></toolTitle>");
@@ -408,8 +467,10 @@ describe("self-framed summary backgrounds", () => {
       const hostTui = await import(createRequire(sdk).resolve("@earendil-works/pi-tui"));
       themeModule.initTheme("dark");
       const store = createDisplaySummaryStore();
-      const { pi, tools } = capturePi();
-      registerSummarizedBuiltinTools(pi as never, process.cwd(), store, ["edit"], hostTui);
+      let resolver!: SummaryToolResolver;
+      registerDisplaySummaryToolResolver({ registerToolRenderer: (value) => { resolver = value; } }, store, hostTui);
+      const native = createEditToolDefinition(process.cwd());
+      const tools = [resolver("edit", () => native as never)!];
       // No valid edits means no asynchronous preview/filesystem access.
       const row = new ToolExecutionComponent("edit", "background-row", { path: "synthetic" }, { showImages: false }, tools[0], { requestRender() {} }, process.cwd());
       const result = { content: [{ type: "text", text: "native result" }], isError, details: !isPartial && !isError ? { diff: "+1 synthetic", firstChangedLine: 1 } : undefined };
@@ -417,6 +478,8 @@ describe("self-framed summary backgrounds", () => {
       const bg = themeModule.theme.bg(color, "marker").split("marker")[0];
       const raw = row.render(32);
       assert.ok(raw.some((line: string) => line.includes(bg) && stripTerminalSequences(line).includes("edit")), "native edit has the expected background before summarizing");
+      assert.equal(store.toolNames.size, 0, "the row mounted before session_start confirmed native ownership");
+      confirmSummarizedBuiltinTools(store, ["edit"]);
       store.set("background-row", { optionalContext: "context", toolIntention: "Inspect several long inputs and preserve the frame", toolResult: "Found several long outputs and retained the background" });
       store.notify(["background-row"]);
       for (const width of [16, 32, 60]) {

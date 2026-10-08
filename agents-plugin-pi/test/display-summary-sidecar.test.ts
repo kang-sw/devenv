@@ -7,6 +7,31 @@ import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { cleanOrphanSummarySidecars, createSummarySidecar, seedNativeSummarySidecar, type SidecarIO, DISPLAY_SUMMARY_SIDECAR_SUFFIX } from "../src/display-summary-sidecar.ts";
 
 const summary = { toolIntention: "inspect", toolResult: "found" };
+
+test("validated late-tool candidates replay once on ownership confirmation, without rereading the sidecar", async (t) => {
+  const f = await fixture(t);
+  await fs.writeFile(f.sidecarFile, row("a") + "\n" + row("b") + "\n" + row("missing") + "\n");
+  const names = new Set<string>();
+  const replay: string[] = [];
+  let reads = 0;
+  const cache = openCache(f, { toolNames: names, restore: (batch) => { replay.push(...batch.keys()); }, io: {
+    ...fs, open: async (...args: Parameters<typeof fs.open>) => {
+      if (args[0] === f.sidecarFile) reads += 1;
+      return fs.open(...args);
+    },
+  } });
+  await cache.ready;
+  assert.deepEqual(replay, []);
+  assert.equal(cache.snapshot().size, 0);
+  names.add("read");
+  cache.sync();
+  await cache.drain();
+  assert.deepEqual(replay, ["a", "b"]);
+  assert.deepEqual(cache.snapshot().get("a"), summary);
+  await cache.drain();
+  assert.deepEqual(replay, ["a", "b"]);
+  assert.equal(reads, 1, "eligibility changes use originating validated candidates, not disk replay");
+});
 const toolNames = new Set(["read"]);
 const entry = (id: string): SessionEntry => ({ type: "message", id: `entry-${id}`, parentId: null, timestamp: "now", message: {
   role: "toolResult", toolCallId: id, toolName: "read", content: [], isError: false, timestamp: 0,
@@ -182,6 +207,76 @@ test("batches serialize while append is held; drain waits; live acceptance beats
   assert.deepEqual(cache.snapshot().get("a"), newer);
   assert.deepEqual((await records(f.sidecarFile)).map((r) => [r.id, r.summary.toolResult]), [["a", "found"], ["a", "live"], ["b", "found"]]);
 });
+
+test("newer live acceptance beats a validated candidate when ownership arrives later", async (t) => {
+  const f = await fixture(t);
+  await fs.writeFile(f.sidecarFile, row("a") + "\n" + row("b") + "\n");
+  const names = new Set<string>();
+  const restored: string[] = [];
+  const cache = openCache(f, { toolNames: names, restore: (batch) => { restored.push(...batch.keys()); } });
+  await cache.ready;
+  const live = { ...summary, toolResult: "newer live" };
+  cache.accept(new Map([["a", live]]));
+  names.add("read");
+  cache.sync();
+  await cache.drain();
+  assert.deepEqual(restored, ["b"]);
+  assert.deepEqual(cache.snapshot().get("a"), live);
+  assert.deepEqual((await records(f.sidecarFile)).at(-1).summary, live);
+});
+
+test("live acceptance inside native replay supersedes inherited writes", async (t) => {
+  const f = await fixture(t);
+  await fs.writeFile(f.sidecarFile, row("a") + "\n");
+  const c = await nativeChild(f);
+  const names = new Set<string>();
+  const live = { ...summary, toolResult: "accepted during restore" };
+  let restores = 0;
+  const child = c.cache({ toolNames: names, restore: (batch) => {
+    restores++;
+    assert.deepEqual([...batch], [["a", summary]]);
+    child.accept(new Map([["a", live]]));
+  } });
+  await child.ready;
+  assert.equal(restores, 0);
+  names.add("read");
+  child.sync();
+  await child.drain();
+  assert.equal(restores, 1);
+  assert.deepEqual(child.snapshot().get("a"), live);
+  assert.deepEqual((await records(c.sidecar)).map((record) => record.summary), [live], "no stale inheritance appended after live acceptance");
+  assert.equal(await fs.readFile(f.sidecarFile, "utf8"), row("a") + "\n");
+});
+
+for (const data of ["", row("child-only", { ...summary, toolResult: "child own" }, "child") + "\n"]) {
+  test(`late ownership retries only authoritative child's own candidates: ${JSON.stringify(data)}`, async (t) => {
+    const f = await fixture(t);
+    await fs.writeFile(f.sidecarFile, row("a") + "\n");
+    const c = await nativeChild(f);
+    await fs.writeFile(c.sidecar, data);
+    const names = new Set<string>();
+    const replay: string[] = [];
+    let parentReads = 0;
+    const child = c.cache({ toolNames: names, restore: (batch) => { replay.push(...batch.keys()); }, io: {
+      ...fs, open: async (...args: Parameters<typeof fs.open>) => {
+        if (args[0] === f.sidecarFile) parentReads++;
+        return fs.open(...args);
+      },
+    } });
+    await child.ready;
+    assert.deepEqual([...child.snapshot()], []);
+    names.add("read");
+    child.sync();
+    await child.drain();
+    child.sync();
+    await child.drain();
+    assert.deepEqual(replay, data ? ["child-only"] : []);
+    assert.equal(child.snapshot().has("a"), false, "parent never fills the child's cache holes");
+    assert.equal(child.snapshot().get("child-only")?.toolResult, data ? "child own" : undefined);
+    assert.equal(parentReads, 0);
+    assert.equal(await fs.readFile(c.sidecar, "utf8"), data);
+  });
+}
 
 test("no-file conversations remain memory-only", async () => {
   const cache = createSummarySidecar({ conversation: { sessionId: "unsaved", entries: () => [entry("a")] }, toolNames,
