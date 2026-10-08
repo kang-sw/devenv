@@ -553,7 +553,7 @@ describe("registerPushMessageRenderers", () => {
     };
     const tui = fakeTui();
 
-    assert.equal(await registerPushMessageRenderers(pi as never, tui.modules), true);
+    await registerPushMessageRenderers(pi as never, tui.modules);
     assert.deepEqual([...registered.keys()], [...PUSH_FAMILIES, PUSH_BATCH_CUSTOM_TYPE]);
 
     const rendered = registered.get("ws-agent-settled")!(

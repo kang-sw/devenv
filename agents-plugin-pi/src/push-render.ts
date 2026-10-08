@@ -305,16 +305,13 @@ export function buildPushBatchComponent(
 }
 
 /**
- * Registers the compact renderer for every push family and the batch envelope. Call only from a TUI
- * process (`ctx.mode === "tui"`) — there is no component to draw anywhere
- * else. The `Promise<boolean>` return is no longer an "unavailable" signal
- * (`loadPushTuiModules` always resolves — see `pi-tui.ts`'s Addendum doc
- * comment); it stays `Promise<boolean>` only so `index.ts`'s
- * `pushRenderersRegistered` retry-on-teardown guard (a genuine, still-live
- * failure mode: a rejection from e.g. `assertActive()` during teardown) keeps
- * its existing `.then((registered) => ...)` wiring unchanged.
+ * Registers the compact renderer for every push family and the batch envelope.
+ * `index.ts` calls it once, at extension-factory time, in lead and fork
+ * processes when the host pi-tui resolved, so rows Pi rebuilds on reload or
+ * resume (before `session_start`) already have it. Registration is
+ * unconditional on TUI mode: outside a TUI the renderers are never invoked.
  */
-export async function registerPushMessageRenderers(pi: ExtensionAPI, tuiModules?: PushTuiModules, summaries?: DisplaySummaryStore): Promise<boolean> {
+export async function registerPushMessageRenderers(pi: ExtensionAPI, tuiModules?: PushTuiModules, summaries?: DisplaySummaryStore): Promise<void> {
   const tui = tuiModules ?? (await loadPushTuiModules());
   for (const family of PUSH_FAMILIES) {
     pi.registerMessageRenderer(family, (message, options, theme) =>
@@ -324,5 +321,4 @@ export async function registerPushMessageRenderers(pi: ExtensionAPI, tuiModules?
   pi.registerMessageRenderer(PUSH_BATCH_CUSTOM_TYPE, (message, options, theme) =>
     buildPushBatchComponent(tui, message as { details?: unknown }, theme as unknown as PushRenderTheme, (options as { expanded?: boolean } | undefined)?.expanded, summaries) as never,
   );
-  return true;
 }

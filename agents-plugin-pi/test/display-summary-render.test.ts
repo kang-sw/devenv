@@ -204,6 +204,17 @@ describe("shared summary layout", () => {
     assert.equal(buildSummaryCard(modules, "head", summary, theme).render(80)[0], "{customMessageBg}head <accent>auth in src/</accent>");
   });
 
+  test("a bare hyphen after the name is part of an identifier or flag, never a separator", () => {
+    assert.equal(dedupeSubtitle("write-scopes.ts", "write"), "write-scopes.ts");
+    assert.equal(dedupeSubtitle("edit-utils.ts", "edit"), "edit-utils.ts");
+    assert.equal(dedupeSubtitle("find -name x", "find"), "find -name x");
+    assert.equal(dedupeSubtitle("write - /tmp/x", "write"), "/tmp/x", "a spaced hyphen still separates");
+    assert.equal(dedupeSubtitle("write — /tmp/x", "write"), "/tmp/x");
+    assert.equal(dedupeSubtitle("Write: /tmp/x", "write"), "/tmp/x");
+    assert.equal(dedupeSubtitle("write /tmp/x", "write"), "/tmp/x");
+    assert.equal(dedupeSubtitle("write_file", "write"), "write_file");
+  });
+
   test("real Text wraps every intention line at four spaces and leaves muted result lines unindented", () => {
     const long: DisplaySummary = {
       toolIntention: "Inspect several long inputs 한글 😀 for the summary\nThen verify wrapping",
@@ -450,6 +461,59 @@ describe("wrapToolRenderersWithSummary", () => {
     wrapped.renderCall({}, theme, context);
     assert.equal(received, context);
   });
+
+  test("terminal sequences in every summary field are stripped before they reach the terminal", () => {
+    const store = createDisplaySummaryStore();
+    const osc52 = "\x1b]52;c;ZXZpbA==\x07";
+    const hostile: DisplaySummary = {
+      subtitle: `\x1b[31msrc/a.ts\x1b[0m${osc52}`,
+      optionalContext: `ctx\x1b[2A${osc52}`,
+      toolIntention: `intent\x1b[1;1H\x1b]0;title\x1b\\`,
+      toolResult: `result${osc52}\x1b[K\x07`,
+    };
+    store.set("esc", hostile);
+    const wrapped = wrapToolRenderersWithSummary("grep", () => new FakeText("RAW"), () => new FakeText("RAW"), store, toolTui);
+    const { context } = toolContext("esc");
+    const rendered = [
+      text(wrapped.renderCall({}, theme, context)),
+      text(wrapped.renderResult({ content: [] }, { expanded: false }, theme, context)),
+      buildSummaryCard(modules, "head", hostile, theme).render(80).join("\n"),
+    ].join("\n");
+    assert.doesNotMatch(rendered, /[\x00-\x08\x0b-\x1f\x7f]/, "no ESC, BEL or other control reaches the output");
+    assert.doesNotMatch(rendered, /52;c/, "the OSC 52 payload is dropped whole");
+    for (const plain of ["src/a.ts", "ctx", "intent", "result"]) assert.match(rendered, new RegExp(plain));
+  });
+
+  for (const [fault, BrokenText] of [
+    ["construction", class { constructor() { throw new Error("construction fault"); } }],
+    ["render", class extends FakeText { override render(): string[] { throw new Error("render fault"); } }],
+  ] as const) {
+    test(`a summary whose ${fault} throws falls back to raw and stays raw until a new summary is stored`, () => {
+      const store = createDisplaySummaryStore();
+      const brokenTui = { ...modules, Text: BrokenText } as unknown as ToolResultTuiModules;
+      const wrapped = wrapToolRenderersWithSummary("grep", () => new FakeText("RAW CALL"), () => new FakeText("RAW RESULT"), store, brokenTui);
+      store.set("f", lean);
+      const state = {};
+      const first = toolContext("f", { state }).context;
+      const call = wrapped.renderCall({}, theme, first);
+      const result = wrapped.renderResult({ content: [] }, { expanded: false }, theme, first);
+      assert.ok(isSummaryComponent(call), "the summary is attempted first");
+      assert.equal(text(call), "RAW CALL", "a faulting summary renders the raw call");
+      assert.equal(text(result), "RAW RESULT", "a faulting summary renders the raw result");
+
+      // Pi re-runs the renderers with a fresh context object; the row's `state` is what persists.
+      const again = toolContext("f", { state }).context;
+      const rawCall = wrapped.renderCall({}, theme, again);
+      const rawResult = wrapped.renderResult({ content: [] }, { expanded: false }, theme, again);
+      assert.equal(isSummaryComponent(rawCall), false, "the failed summary is not retried for this row");
+      assert.equal(isSummaryComponent(rawResult), false);
+      assert.equal(text(rawCall), "RAW CALL");
+      assert.equal(text(rawResult), "RAW RESULT");
+
+      store.set("f", { ...lean });
+      assert.ok(isSummaryComponent(wrapped.renderCall({}, theme, toolContext("f", { state }).context)), "a new summary value is tried again");
+    });
+  }
 });
 
 function resolveBuiltins(store: ReturnType<typeof createDisplaySummaryStore>, active: string[], tui = toolTui) {
