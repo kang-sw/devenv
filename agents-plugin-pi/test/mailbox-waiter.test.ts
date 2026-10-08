@@ -19,8 +19,10 @@ import {
   buildMailboxPushMessage,
   buildMailboxWaitArgv,
   createBridgeDrain,
+  createMailboxWaiterSlot,
   createSubprocessWait,
   mapMailboxWaitExit,
+  reportDistinctLinesOnce,
   resolveMailboxSelfSlug,
   sessionMailboxWaitOptions,
   shouldArmMailboxWaiter,
@@ -29,6 +31,7 @@ import {
   WS_MAILBOX_CUSTOM_TYPE,
   type MailboxEnvelope,
   type MailboxWaitOutcome,
+  type MailboxWaiterHandle,
 } from "../src/mailbox-waiter.ts";
 
 /**
@@ -616,5 +619,174 @@ describe("sessionMailboxWaitOptions", () => {
     const options = sessionMailboxWaitOptions({ launcherPath: "/l", pluginDir: "/p", sessionKey: "k", slug: undefined, cwd: "/work/tree" });
     assert.equal(options.runtimeBinary, undefined, "release-backed sessions use the launcher");
     assert.deepEqual(buildMailboxWaitArgv(options), ["/l", "mailbox", "wait", "--session-key", "k", "--timeout", "10m", "--format", "json", "--root", "/work/tree"]);
+  });
+});
+
+/** A controllable stand-in for one started waiter: `stop()` is observable and `done` settles on `close()`. */
+function fakeWaiter(sessionKey: string, slug: string | undefined): MailboxWaiterHandle & { sessionKey: string; slug: string | undefined; stopped: boolean; close: () => void } {
+  let close: () => void = () => {};
+  const done = new Promise<void>((resolve) => { close = resolve; });
+  const waiter = { sessionKey, slug, stopped: false, done, close: () => close(), stop: () => { waiter.stopped = true; } };
+  return waiter;
+}
+
+/** A slug resolver whose lookups stay pending until the test releases them, in any order. */
+function deferredSlugs(): { resolveSlug: (key: string) => Promise<string | undefined>; release: (key: string, slug?: string) => void; pending: () => string[] } {
+  const waiting = new Map<string, (slug: string | undefined) => void>();
+  return {
+    resolveSlug: (key) => new Promise((resolve) => { waiting.set(key, resolve); }),
+    release: (key, slug) => { const resolve = waiting.get(key); assert.ok(resolve, `no lookup pending for ${key}`); waiting.delete(key); resolve(slug); },
+    pending: () => [...waiting.keys()],
+  };
+}
+
+describe("createMailboxWaiterSlot", () => {
+  test("re-arming with a new key starts a waiter on that key and its newly resolved slug, then stops the old one", async () => {
+    const started: ReturnType<typeof fakeWaiter>[] = [];
+    const lookups: string[] = [];
+    const slot = createMailboxWaiterSlot({
+      resolveSlug: async (key) => { lookups.push(key); return `exec-${key}@worktree`; },
+      start: (key, slug) => { const waiter = fakeWaiter(key, slug); started.push(waiter); return waiter; },
+    });
+    assert.equal(await slot.arm("old-key"), true);
+    assert.equal(await slot.arm("new-key"), true);
+    assert.deepEqual(lookups, ["old-key", "new-key"], "the slug is re-resolved for the new key");
+    assert.deepEqual(started.map((waiter) => [waiter.sessionKey, waiter.slug]), [["old-key", "exec-old-key@worktree"], ["new-key", "exec-new-key@worktree"]]);
+    assert.equal(started[0]!.stopped, true, "the old key's waiter is stopped");
+    assert.equal(started[1]!.stopped, false, "the new key's waiter stays live");
+    slot.stop();
+    assert.equal(started[1]!.stopped, true);
+    for (const waiter of started) waiter.close();
+    await slot.done;
+  });
+
+  test("the old waiter keeps running until its successor starts", async () => {
+    const slugs = deferredSlugs();
+    const started: ReturnType<typeof fakeWaiter>[] = [];
+    const slot = createMailboxWaiterSlot({ resolveSlug: slugs.resolveSlug, start: (key, slug) => { const waiter = fakeWaiter(key, slug); started.push(waiter); return waiter; } });
+    const first = slot.arm("old-key");
+    slugs.release("old-key");
+    await first;
+    const second = slot.arm("new-key");
+    assert.equal(started[0]!.stopped, false, "no gap while the new key's slug resolves");
+    slugs.release("new-key", "exec@worktree");
+    await second;
+    assert.equal(started[0]!.stopped, true);
+    slot.stop();
+  });
+
+  test("an arm superseded by a newer arm while its lookup is pending starts nothing, in either completion order", async () => {
+    const slugs = deferredSlugs();
+    const started: ReturnType<typeof fakeWaiter>[] = [];
+    const slot = createMailboxWaiterSlot({ resolveSlug: slugs.resolveSlug, start: (key, slug) => { const waiter = fakeWaiter(key, slug); started.push(waiter); return waiter; } });
+    const stale = slot.arm("key-a");
+    const fresh = slot.arm("key-b");
+    slugs.release("key-b");
+    assert.equal(await fresh, true);
+    slugs.release("key-a");
+    assert.equal(await stale, false);
+    assert.deepEqual(started.map((waiter) => waiter.sessionKey), ["key-b"]);
+
+    const slugs2 = deferredSlugs();
+    const started2: ReturnType<typeof fakeWaiter>[] = [];
+    const slot2 = createMailboxWaiterSlot({ resolveSlug: slugs2.resolveSlug, start: (key, slug) => { const waiter = fakeWaiter(key, slug); started2.push(waiter); return waiter; } });
+    const stale2 = slot2.arm("key-a");
+    const fresh2 = slot2.arm("key-b");
+    slugs2.release("key-a");
+    assert.equal(await stale2, false);
+    slugs2.release("key-b");
+    assert.equal(await fresh2, true);
+    assert.deepEqual(started2.map((waiter) => waiter.sessionKey), ["key-b"]);
+    slot.stop();
+    slot2.stop();
+  });
+
+  test("an arm superseded by stop() (a newer session_start or a shutdown) leaves no live waiter from the stale generation", async () => {
+    const slugs = deferredSlugs();
+    const started: ReturnType<typeof fakeWaiter>[] = [];
+    const slot = createMailboxWaiterSlot({ resolveSlug: slugs.resolveSlug, start: (key, slug) => { const waiter = fakeWaiter(key, slug); started.push(waiter); return waiter; } });
+    const first = slot.arm("old-key");
+    slugs.release("old-key");
+    await first;
+    const rearm = slot.arm("new-key");
+    slot.stop();
+    assert.equal(started[0]!.stopped, true, "disposal stops the live waiter");
+    slugs.release("new-key", "exec@worktree");
+    assert.equal(await rearm, false);
+    assert.equal(await slot.arm("later-key"), false, "a stopped slot refuses every later arm");
+    assert.deepEqual(started.map((waiter) => waiter.sessionKey), ["old-key"], "the pending re-arm never started a waiter");
+  });
+
+  test("done resolves only after stop() and after every waiter the slot started has exited", async () => {
+    const started: ReturnType<typeof fakeWaiter>[] = [];
+    const slot = createMailboxWaiterSlot({ resolveSlug: async () => undefined, start: (key, slug) => { const waiter = fakeWaiter(key, slug); started.push(waiter); return waiter; } });
+    await slot.arm("old-key");
+    await slot.arm("new-key");
+    let settled = false;
+    void slot.done.then(() => { settled = true; });
+    started[0]!.close();
+    started[1]!.close();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(settled, false, "a live slot is not done even when its waiters have closed");
+    slot.stop();
+    await slot.done;
+    assert.equal(settled, true);
+
+    const replaced: ReturnType<typeof fakeWaiter>[] = [];
+    const lingering = createMailboxWaiterSlot({ resolveSlug: async () => undefined, start: (key, slug) => { const waiter = fakeWaiter(key, slug); replaced.push(waiter); return waiter; } });
+    await lingering.arm("old-key");
+    await lingering.arm("new-key");
+    lingering.stop();
+    replaced[1]!.close();
+    let lingeringDone = false;
+    void lingering.done.then(() => { lingeringDone = true; });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(lingeringDone, false, "a replaced waiter still closing keeps the slot (and its staged runtime) alive");
+    replaced[0]!.close();
+    await lingering.done;
+  });
+
+  test("a slot that never armed is done once stopped, so a staged runtime is still cleaned up", async () => {
+    const slot = createMailboxWaiterSlot({ resolveSlug: async () => undefined, start: () => { throw new Error("must not start"); } });
+    let cleaned = 0;
+    attachMailboxRuntimeCleanup(slot, { binaryPath: "unused", cleanup: () => { cleaned += 1; } });
+    slot.stop();
+    await slot.done;
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(cleaned, 1);
+  });
+
+  test("real waiters: a re-arm stops the old loop and the new loop admits mail for the new key", async () => {
+    const drains: string[] = [];
+    const admitted: MailboxEnvelope[] = [];
+    const slot = createMailboxWaiterSlot({
+      resolveSlug: async () => undefined,
+      start: (key) => startMailboxWaiter({
+        runWait: scriptedWait(key === "new-key" ? ["mail"] : []).runWait,
+        drainMail: async () => { drains.push(key); return [{ reply_to: key, content: `for ${key}` }]; },
+        admit: (envelope) => admitted.push(envelope),
+        sleep: immediateSleep,
+      }),
+    });
+    await slot.arm("old-key");
+    await slot.arm("new-key");
+    for (let i = 0; i < 20 && admitted.length === 0; i += 1) await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(drains, ["new-key"]);
+    assert.deepEqual(admitted.map((envelope) => envelope.content), ["for new-key"]);
+    slot.stop();
+    await slot.done;
+  });
+});
+
+describe("reportDistinctLinesOnce", () => {
+  test("repeated identical lines reach the sink once; distinct lines each reach it once", () => {
+    const seen: string[] = [];
+    const report = reportDistinctLinesOnce((line) => seen.push(line));
+    const warning = "warning: named inbox exec@worktree is not currently owned by this --session-key; falling back to a reply-id-only wait";
+    report(warning);
+    report(warning);
+    report("other diagnostic");
+    report(warning);
+    assert.deepEqual(seen, [warning, "other diagnostic"]);
   });
 });

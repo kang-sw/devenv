@@ -369,6 +369,34 @@ describe("adopting the key a lead revives with", () => {
     } finally { h.handle.shutdown(); h.restore(); }
   });
 
+  test("an adoption notifies key observers once with the new and previous key; a refused re-login or an unchanged key notifies nothing", async () => {
+    const h = await boot({ accept: ["revived-key"] }, { entries: [], sessionId: "sess-1" });
+    try {
+      const adopted: Array<[string, string | undefined]> = [];
+      const unsubscribe = h.handle.onDefaultKeyAdopted((current, previous) => {
+        assert.equal(h.handle.defaultSessionKeyRef.current, current, "the default key is already switched when observers run");
+        adopted.push([current, previous]);
+      });
+      h.handle.onDefaultKeyAdopted(() => { throw new Error("a failing observer"); });
+      const manual = h.tools.get("ws__workflow_manual");
+
+      await manual.execute("refused", { session_key: "foreign-key" }, undefined, undefined, ctx);
+      assert.deepEqual(adopted, [], "a refused re-login adopts nothing");
+
+      const revived = await manual.execute("one", { session_key: "revived-key" }, undefined, undefined, ctx);
+      assert.equal(texts(revived.content).at(-1), buildDefaultKeyChangedLine("minted-1", "revived-key"), "a throwing observer cannot fail the adopting call");
+      assert.deepEqual(adopted, [["revived-key", "minted-1"]]);
+
+      await manual.execute("two", { session_key: "revived-key" }, undefined, undefined, ctx);
+      assert.deepEqual(adopted, [["revived-key", "minted-1"]], "an unchanged key notifies nothing");
+
+      unsubscribe();
+      h.handle.defaultSessionKeyRef.current = "minted-1";
+      await manual.execute("three", { session_key: "revived-key" }, undefined, undefined, ctx);
+      assert.equal(adopted.length, 1, "an unsubscribed observer is not notified");
+    } finally { h.handle.shutdown(); h.restore(); }
+  });
+
   test("a legacy session with no key entry mints on resume, then converges on the first revive with its original key", async () => {
     // Legacy file: compaction summaries and fork entries, but no lead key entry.
     const legacyEntries = [{ type: "custom", customType: "ws-pi-fork-keys", data: { sessionId: "other", current: "fork-key", previous: [] } }];
