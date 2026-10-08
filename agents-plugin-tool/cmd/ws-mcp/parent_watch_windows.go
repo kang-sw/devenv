@@ -6,29 +6,24 @@ import (
 	"os"
 
 	"golang.org/x/sys/windows"
-
-	"github.com/kang-sw/devenv/internal/mcp"
 )
 
-// startParentDeathWatch arms a Windows-only goroutine that self-terminates this
-// serve process if its parent (the resident launcher) dies. On Windows the
-// launcher blocks in subprocess.call as the parent of ws-mcp; a launcher
-// force-kill would otherwise orphan this process and leave a stale state.sqlite
-// lock that breaks the next connection (ticket 260724 hypothesis A). If the
-// parent PID is unknown or its handle cannot be opened (already gone), the watch
-// is simply not armed — never a spurious exit.
-func startParentDeathWatch() {
+// startParentDeathWatch arms a Windows-only goroutine that calls onExit with
+// the parent PID when this process's direct parent dies. On Windows the
+// launcher blocks in subprocess.call as the parent of ws-mcp, and a host that
+// stops its child terminates only that launcher, so without the watch this
+// process is orphaned: serve would keep a stale state.sqlite lock (ticket
+// 260724 hypothesis A) and mailbox wait would linger until its --timeout. The
+// caller decides the response (serve self-terminates; mailbox wait cancels and
+// clears its marker). If the parent PID is unknown or its handle cannot be
+// opened (already gone), the watch is simply not armed — never a spurious
+// onExit.
+func startParentDeathWatch(onExit func(ppid int)) {
 	ppid := os.Getppid()
 	if ppid <= 0 {
 		return
 	}
-	go watchProcessExit(ppid, func() {
-		mcp.RecordLifecycleEvent("process.parent_exited", map[string]any{
-			"ppid":   ppid,
-			"action": "self_terminate",
-		})
-		os.Exit(0)
-	})
+	go watchProcessExit(ppid, func() { onExit(ppid) })
 }
 
 // watchProcessExit blocks until the process identified by pid exits, then calls

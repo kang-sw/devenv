@@ -99,13 +99,30 @@ func WriteListeningMarker(marker ListeningMarker) error {
 	return nil
 }
 
-// ClearListeningMarker removes sessionKey's marker file. A missing file is
-// not an error: clearing an already-clear (or never-armed) marker is a valid
-// no-op, matching the caller's unconditional-defer usage.
-func ClearListeningMarker(sessionKey string) error {
+// ClearListeningMarker removes sessionKey's marker file only when it belongs
+// to ownerPID (the marker's recorded PID equals ownerPID). Two waits can share
+// one session_key — a host reload arms a replacement while the old wait is
+// still exiting — and the later write wins the file, so an exiting wait that
+// cleared unconditionally would delete the live replacement's marker. A
+// marker owned by another PID is left in place and reported as success. A
+// missing file is not an error: clearing an already-clear (or never-armed)
+// marker is a valid no-op. An unparseable marker is left in place and its
+// parse error returned, since ownership cannot be established.
+//
+// The read-compare-remove sequence is not atomic: a replacement written
+// between the read and the remove is still deleted. That window is accepted;
+// the overlap it guards against lasts minutes, the window microseconds.
+func ClearListeningMarker(sessionKey string, ownerPID int) error {
 	path, err := ListeningMarkerPath(sessionKey)
 	if err != nil {
 		return err
+	}
+	marker, ok, err := ReadListeningMarker(sessionKey)
+	if err != nil {
+		return err
+	}
+	if !ok || marker.PID != ownerPID {
+		return nil
 	}
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("clear mailbox listening marker: %w", err)

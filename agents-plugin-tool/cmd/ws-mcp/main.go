@@ -89,7 +89,15 @@ func serve(args []string) {
 	}
 
 	server := mcp.NewServer(defaultRoot(*root), version, sourceCommit)
-	startParentDeathWatch()
+	// An orphaned serve self-terminates: it holds no state that needs a
+	// graceful unwind, and lingering would keep the state.sqlite lock.
+	startParentDeathWatch(func(ppid int) {
+		mcp.RecordLifecycleEvent("process.parent_exited", map[string]any{
+			"ppid":   ppid,
+			"action": "self_terminate",
+		})
+		os.Exit(0)
+	})
 	if err := server.ServeStdio(context.Background(), os.Stdin, os.Stdout); err != nil {
 		fmt.Fprintf(os.Stderr, "ws-mcp serve: %v\n", err)
 		os.Exit(1)
