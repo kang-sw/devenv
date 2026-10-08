@@ -483,6 +483,37 @@ describe("wrapToolRenderersWithSummary", () => {
     assert.doesNotMatch(rendered, /52;c/, "the OSC 52 payload is dropped whole");
     for (const plain of ["src/a.ts", "ctx", "intent", "result"]) assert.match(rendered, new RegExp(plain));
   });
+
+  for (const [fault, BrokenText] of [
+    ["construction", class { constructor() { throw new Error("construction fault"); } }],
+    ["render", class extends FakeText { override render(): string[] { throw new Error("render fault"); } }],
+  ] as const) {
+    test(`a summary whose ${fault} throws falls back to raw and stays raw until a new summary is stored`, () => {
+      const store = createDisplaySummaryStore();
+      const brokenTui = { ...modules, Text: BrokenText } as unknown as ToolResultTuiModules;
+      const wrapped = wrapToolRenderersWithSummary("grep", () => new FakeText("RAW CALL"), () => new FakeText("RAW RESULT"), store, brokenTui);
+      store.set("f", lean);
+      const state = {};
+      const first = toolContext("f", { state }).context;
+      const call = wrapped.renderCall({}, theme, first);
+      const result = wrapped.renderResult({ content: [] }, { expanded: false }, theme, first);
+      assert.ok(isSummaryComponent(call), "the summary is attempted first");
+      assert.equal(text(call), "RAW CALL", "a faulting summary renders the raw call");
+      assert.equal(text(result), "RAW RESULT", "a faulting summary renders the raw result");
+
+      // Pi re-runs the renderers with a fresh context object; the row's `state` is what persists.
+      const again = toolContext("f", { state }).context;
+      const rawCall = wrapped.renderCall({}, theme, again);
+      const rawResult = wrapped.renderResult({ content: [] }, { expanded: false }, theme, again);
+      assert.equal(isSummaryComponent(rawCall), false, "the failed summary is not retried for this row");
+      assert.equal(isSummaryComponent(rawResult), false);
+      assert.equal(text(rawCall), "RAW CALL");
+      assert.equal(text(rawResult), "RAW RESULT");
+
+      store.set("f", { ...lean });
+      assert.ok(isSummaryComponent(wrapped.renderCall({}, theme, toolContext("f", { state }).context)), "a new summary value is tried again");
+    });
+  }
 });
 
 function resolveBuiltins(store: ReturnType<typeof createDisplaySummaryStore>, active: string[], tui = toolTui) {
