@@ -132,7 +132,7 @@ func WithReplyLock(path string, fn func(*ReplyStore) error) error {
 		os.Remove(tmpName)
 		return fmt.Errorf("close temp mailbox reply registry: %w", cerr)
 	}
-	if rerr := os.Rename(tmpName, path); rerr != nil {
+	if rerr := replaceFile(tmpName, path); rerr != nil {
 		os.Remove(tmpName)
 		return fmt.Errorf("atomic rename mailbox reply registry: %w", rerr)
 	}

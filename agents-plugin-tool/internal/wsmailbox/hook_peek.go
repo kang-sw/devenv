@@ -197,7 +197,7 @@ func writeHookNotifyState(path string, state hookNotifyState) error {
 		os.Remove(tmpName)
 		return fmt.Errorf("close temp mailbox codex-stop-hook watermark: %w", cerr)
 	}
-	if rerr := os.Rename(tmpName, path); rerr != nil {
+	if rerr := replaceFile(tmpName, path); rerr != nil {
 		os.Remove(tmpName)
 		return fmt.Errorf("atomic rename mailbox codex-stop-hook watermark: %w", rerr)
 	}
