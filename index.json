@@ -564,7 +564,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-08T02:13:15Z"
+        "touched_at": "2026-10-08T02:14:22Z",
+        "impl": {
+          "branch": "impl/develop/wipe-exert-prior"
+        }
       }
     }
   }
