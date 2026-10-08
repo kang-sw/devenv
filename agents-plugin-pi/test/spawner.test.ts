@@ -76,6 +76,7 @@
 
 import { test, describe, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { stripSummaryId } from "./fixtures/summary-id.ts";
 import {
   resolveTools,
   spawnAdmission,
@@ -1763,14 +1764,14 @@ describe("pushToLead", () => {
     const [{ message, options }] = pi.sent;
     assert.equal(message.customType, "ws-agent-report");
     assert.equal(message.display, true);
-    assert.deepEqual(message.details, { agent_id: "a", report: "halfway", status: "1 delegated agent still running" });
+    assert.deepEqual(stripSummaryId(message.details), { agent_id: "a", report: "halfway", status: "1 delegated agent still running" });
     assert.deepEqual(options, { deliverAs: "steer", triggerTurn: true }, "confirmed start steers the held idle report before its first response");
   });
 
   test("an absent record still pushes (the orphan roll-call), and with nothing delegated it carries NO status field", () => {
     const pi = fakePi();
     pushToLead(pi.api, new Map(), undefined, "ws-agent-orphaned", { count: 2 }, "followUp");
-    assert.deepEqual(pi.sent[0].message.details, { count: 2 }, "Edition: a zero line with nothing delegated told the lead nothing");
+    assert.deepEqual(stripSummaryId(pi.sent[0].message.details), { count: 2 }, "Edition: a zero line with nothing delegated told the lead nothing");
     assert.equal(pi.sent[0].message.content, ["[ws-agent-orphaned]", "count: 2"].join("\n"));
   });
 
@@ -1818,7 +1819,7 @@ describe("pushToLead", () => {
     pushToLead(pi.api, registry, record, "ws-agent-report", { report: "halfway" }, "followUp");
 
     assert.equal(pi.sent[0].message.content?.split("\n")[0], "[ws-agent-report] agent scout (a1)");
-    assert.deepEqual(pi.sent[0].message.details, { agent_id: "a1", report: "halfway", status: "1 delegated agent still running" });
+    assert.deepEqual(stripSummaryId(pi.sent[0].message.details), { agent_id: "a1", report: "halfway", status: "1 delegated agent still running" });
   });
 
   test("260905 (alias/park/cap): with no alias, the head is unchanged (bare uuid)", () => {
@@ -2144,7 +2145,7 @@ describe("pushSpawnFailed (spawnAgent's launch-failure branch)", () => {
     assert.equal(pi.sent.length, 1);
     assert.equal(pi.sent[0].message.customType, "ws-agent-settled");
     assert.deepEqual(
-      pi.sent[0].message.details,
+      stripSummaryId(pi.sent[0].message.details),
       { agent_id: "a", reason: "spawn-failed", error: "spawn ENOENT", status: "0 delegated agents still running" },
       "260905 (alias/park/cap): the failed record stays registered (dormant), so presence — keyed on registry membership, not a live client — keeps the status line at zero",
     );

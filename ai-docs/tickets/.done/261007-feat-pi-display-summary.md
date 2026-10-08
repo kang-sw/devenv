@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: caae1a0db4777619
 sage-review-design-reviewed: caae1a0db4777619
+completed: 2026-10-07
 ---
 
 # Pi lead TUI display summary: a cheap model replaces collapsed tool and push rows with user-language summaries; workflow.lang becomes tunable
@@ -299,6 +300,24 @@ is absent from the `config.list` tuning catalog, so `config.tune` rejects it and
   pass; a test pins that the `lead-tune` routing line sends a response-language
   preference to `workflow.lang`.
 
+### Result (c44b61644) - 2026-10-07
+
+- `workflow.lang` registered in `configRegistry` and the `config.list` tuning
+  catalog (`agents-plugin-tool/internal/mcp/config_registry.go`, `server.go`):
+  free-form value, scope selector with global default, reset through
+  `config.tune`, visible in the no-agent (wsflow) catalog.
+- `config.tune` keeps the case of a free-form knob (value field with no Enum);
+  a blank value is rejected, reset is the one unset path.
+- `lead-tune` `judge: tune-target` sends a response-language preference to
+  `workflow.lang`; style, terminology and wording stay on the
+  ``prompt override (`UserPreferenceSection`)`` line. Mirrors in wsflow and Pi
+  rsrc are byte-identical; the three `manifest.json` hashes regenerated.
+- Verification: `go test ./internal/mcp/... ./internal/wsconfig/...` ok
+  (includes `config_workflow_lang_test.go`: tune Korean, get/list, reset,
+  blank rejection, no-agent catalog, routing line pin);
+  `go test ./internal/wsrsrc/...` ok; wsflow package unittests (14) and
+  shipped-surface/dispatch-contract unittests (24) ok.
+
 ### Phase 2: Pi display summary
 
 Implements every `Display summary` decision above in `agents-plugin-pi`.
@@ -328,3 +347,41 @@ Implements every `Display summary` decision above in `agents-plugin-pi`.
   by the user dogfooding after merge; no live-model TUI smoke is required.
   Rejected: a worker-run live smoke in an isolated tmux TUI, which adds provider
   auth and a TUI harness to the run for little gating value on cosmetic output.
+
+### Result (0ba80243d) - 2026-10-07
+
+- Summarizer core `agents-plugin-pi/src/display-summary.ts`: id-keyed store,
+  batched append-only log flushed at `turn_end`/`agent_end` with one request in
+  flight, `t1..` label mapping, provider-neutral `streamSimple` call with
+  `getApiKeyAndHeaders` auth, effort clamp (`off`/clamp-to-`off` sends no
+  `reasoning`, default `medium`), stable `sessionId` and `cacheRetention:
+  "short"`, explicit tool results after each logged answer, reset on
+  compaction, estimate and provider overflow stops, 90 s fixed timeout on its
+  own `AbortController`.
+- Session wiring `src/display-summary-session.ts`: lead-TUI gate
+  (`mode === "tui"`, no spawn role) at `session_start`, where the built-in
+  wrappers (edit/write/grep/find/ls/powershell when active) and the
+  `ws-lead-compact`/`ws-lead-context-milestone`/`ws-thread-summary` renderers
+  register once; handlers never await a request.
+- Rendering `src/display-summary-render.ts` plus `tool-result-render.ts`
+  (`registerWsTool`), `push-render.ts` (each `ws-push-batch` item card on its
+  own id) and `compaction-history.ts` (entry id from `getLeafId()` after
+  `appendEntry`). Message rows repaint through
+  `AgentFooterController.refresh()` (`bindDisplaySummaryRender` in
+  `index.ts`). Row ids: `src/summary-id.ts` stamps a fresh `ws_summary_id` in
+  `details` at every summarized send site.
+- Config keys `pi.display_summary_model` / `pi.display_summary_effort` in
+  `config-manifest.json`; `workflow.lang` read unprefixed through the new
+  full-key `createWsConfigKeyReader`.
+- Decisions: `UseNativeResultFallback` moved to a leaf (`native-fallback.ts`)
+  to avoid an import cycle; a failed request carries its conversation text to
+  the next request so the log never skips context; language goes in each
+  request rather than the system prompt so a retune keeps the cached prefix;
+  a provider overflow from a request that started before a compaction does
+  not re-stop the fresh log (review fix).
+- Verification: `npm test` in `agents-plugin-pi` 2134 pass / 0 fail / 3
+  skipped; the TestShippedAdapterManifestsLoad Go test loads the new keys.
+  Lite review: no Critical or Important; one Minor fixed (0ba80243d), one
+  Minor left (rows queued while a request is in flight wait for the next
+  `turn_end`/`agent_end`; per the ticket's flush wording, and re-flushing on
+  completion could summarize a tool row before its result is observed).

@@ -1041,6 +1041,13 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 					return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %s value %w", key, err))
 				}
 				value = normalized
+			} else if len(fieldEnum(entry.ValueFields, "value")) == 0 {
+				// Free-form knob (workflow.lang): keep the caller's case. An empty
+				// value would store a blank override; reset is the unset path.
+				value = strings.TrimSpace(value)
+				if value == "" {
+					return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %s value is required unless reset is true", key))
+				}
 			} else {
 				value = strings.ToLower(strings.TrimSpace(value))
 				if err := validateEnumValue("config.tune", entry.ValueFields, "value", value); err != nil {
@@ -2632,6 +2639,21 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 		SelectorFields: reviewPhaseEntry.SelectorFields,
 		ValueFields:    reviewPhaseEntry.ValueFields,
 		Current:        currentWorkflowPreference(resolver, sessionKey, reviewPhaseEntry.Key),
+	})
+
+	langEntry := registryEntryByKey(wsconfig.ItemWorkflowLang)
+	appendKnob(langEntry, tuningKnob{
+		ID:          langEntry.Key,
+		Kind:        "workflow_preference",
+		Description: "The user's conversation language, as a language name (for example Korean). It sets the language of lead responses and of user-facing summaries an adapter produces. Unset (builtin) binds no language: the lead answers in the language the user writes in. Defaults to global scope, since language is a cross-project preference.",
+		Writer:      tuningWriter{Tool: langEntry.WriterTool, FixedArguments: map[string]string{"key": langEntry.Key}},
+		Reset: &tuningWriter{
+			Tool:           langEntry.ResetTool,
+			FixedArguments: map[string]string{"key": langEntry.Key, "reset": "true"},
+		},
+		SelectorFields: langEntry.SelectorFields,
+		ValueFields:    langEntry.ValueFields,
+		Current:        currentWorkflowPreference(resolver, sessionKey, langEntry.Key),
 	})
 
 	agentTiers, err := currentAgentTierMappings()

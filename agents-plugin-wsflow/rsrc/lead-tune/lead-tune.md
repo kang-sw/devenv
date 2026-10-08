@@ -83,7 +83,8 @@ Storage
 ## Judgments
 
 ### judge: tune-target
-- User standing preferences, communication style, language, terminology, or wording conventions -> prompt override (`UserPreferenceSection`).
+- The language the user wants responses in (for example "answer me in Korean") -> scalar knob `workflow.lang`, with the language name as the value.
+- User standing preferences, communication style, terminology, or wording conventions -> prompt override (`UserPreferenceSection`).
 - Prompt wording or a named manual section -> prompt override for that named override point.
 - A named value for a named scalar knob (for example `"workflow.prefer_subagent"`, a Sage review stage, `review_phase`, `bootstrap_alarm`, or an `adapter_setting` knob) -> scalar knob; for the repo scope -> commit repo-scope setting.
 - A named tier with a named model or backend -> model tier (`agents.tier`).

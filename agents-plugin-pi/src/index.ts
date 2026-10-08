@@ -203,9 +203,12 @@ import { createAgentWidgetController, shouldArmAgentWidget, type AgentWidgetCont
 import { registerPushMessageRenderers } from "./push-render.ts";
 import { buildOrphanNoticeMessage, buildOrphanPush, captureOrphans, noSessionSidecarPath, readAndClearSidecarAt, reviveOrphans, sidecarPath, writeSidecarAt, type PersistedOrphan } from "./agent-sidecar.ts";
 import { registerGoalLoop, resolveAgentWaitAnimation, resolveChildRetentionTtlDays, resolveSettleDelayMs, type GoalLoopConfig } from "./goal-loop.ts";
-import { registerCompactionHistory } from "./compaction-history.ts";
+import { COMPACTION_HISTORY_TYPE, registerCompactionHistory } from "./compaction-history.ts";
 import { registerLeadMemoryLog } from "./lead-memory-log.ts";
-import { createWsConfigReader, thenOrNow } from "./adapter-config.ts";
+import { createWsConfigKeyReader, createWsConfigReader, thenOrNow } from "./adapter-config.ts";
+import { createDisplaySummaryStore, DISPLAY_SUMMARY_CONFIG_KEYS, displaySummaryConfigFrom, type DisplaySummaryStore } from "./display-summary.ts";
+import { registerDisplaySummarySession } from "./display-summary-session.ts";
+import { registerAdapterMessageRenderers, registerSummarizedBuiltinTools } from "./display-summary-render.ts";
 import { registerSkillResources } from "./skills-dir.ts";
 import { computeSessionBootstrap, registerLeadBootstrap, type LeadPromptRef, type SkillsBlockCache, type WsBlockBase } from "./lead-bootstrap.ts";
 import { registerModelPrompts } from "./model-prompts.ts";
@@ -265,6 +268,15 @@ export function applySessionStartOwnershipDiagnostics(
 
 export function applySessionShutdownOwnershipDiagnostics(): void {
   ownerNotifyRef.current = undefined;
+}
+
+/**
+ * Display-summary message rows have no invalidate handle: a summary landing
+ * repaints through the footer controller's captured TUI handle. Never a
+ * second `setFooter`, which would replace the agent footer.
+ */
+export function bindDisplaySummaryRender(store: Pick<DisplaySummaryStore, "requestRender">, lifecycle: Pick<AgentFooterSessionLifecycle, "refresh">): void {
+  store.requestRender = () => { lifecycle.refresh(); };
 }
 
 /** Controller-session retention seam: child workers never run global disk maintenance. */
@@ -524,11 +536,17 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   // Filled before the bridge starts so native tool renderers are available
   // independently of async MCP startup; absent helpers retain Pi fallback.
   const toolPreviewTuiRef = createToolPreviewTuiRef();
+  // Lead TUI display summaries (display-summary.ts): attached before the
+  // first registerWsTool so every ws tool row is summary-aware. Empty, and
+  // therefore inert, outside the lead TUI session.
+  const displaySummaryStore = createDisplaySummaryStore();
+  toolPreviewTuiRef.summaries = displaySummaryStore;
   registerWebTools(pi, extensionEntryPath, toolPreviewTuiRef, process.env, channel);
   let handle: BridgeHandle | undefined;
   // Adapter settings (`pi.*`, adapter-config.ts) read through the live bridge
   // at each use; no bridge means every knob at its default.
   const readAdapterConfig = createWsConfigReader(() => handle ? { client: handle.client, sessionKey: handle.defaultSessionKeyRef.current } : undefined);
+  const readConfigKeys = createWsConfigKeyReader(() => handle ? { client: handle.client, sessionKey: handle.defaultSessionKeyRef.current } : undefined);
   let agentTools: AgentToolsHandle | undefined;
   // The manual-snapshot + guide-text half of the ws block, filled once per
   // `session_start`. The `<available_skills>` half is deliberately NOT held
@@ -617,6 +635,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     const hostTui = await loadHostPiTui();
     return { truncateToWidth: hostTui.truncateToWidth, visibleWidth: hostTui.visibleWidth };
   });
+  bindDisplaySummaryRender(displaySummaryStore, agentFooterLifecycle);
   registerAgentFooterGitEvents(pi, agentFooterLifecycle);
   registerAgentFooterOutputEvents(pi, agentFooterLifecycle);
   pi.on("session_compact", (event) => { agentFooterLifecycle.acceptUsage(event.compactionEntry); agentFooterLifecycle.checkpoint(); });
@@ -644,7 +663,16 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
 
   // The live bridge key wins over the session_start snapshot: a later key
   // adoption on the bridge must reach the next compaction summary.
-  registerCompactionHistory(pi);
+  const displaySummarySession = registerDisplaySummarySession(pi, {
+    store: displaySummaryStore,
+    readConfig: async () => displaySummaryConfigFrom(await readConfigKeys(DISPLAY_SUMMARY_CONFIG_KEYS)),
+    registerBuiltinWrappers: (cwd, active) => { registerSummarizedBuiltinTools(pi, cwd, displaySummaryStore, active); },
+    registerMessageRenderers: () => { void registerAdapterMessageRenderers(pi, displaySummaryStore).catch(() => {}); },
+  });
+  registerCompactionHistory(pi, {
+    summaries: displaySummaryStore,
+    onAppended: (entryId, text) => { displaySummarySession.enqueueStandalone(entryId, COMPACTION_HISTORY_TYPE, text); },
+  });
   registerLeadMemoryLog(pi);
   const goalLoopHandle = registerGoalLoop(pi, {
     readConfig: readAdapterConfig,
@@ -733,7 +761,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     // (a runtime rejection during teardown), not import-unavailability.
     if (!pushRenderersRegistered && ctx.mode === "tui" && isLeadOrFork(readSpawnRole(process.env))) {
       pushRenderersRegistered = true;
-      void registerPushMessageRenderers(pi)
+      void registerPushMessageRenderers(pi, undefined, displaySummaryStore)
         .then((registered) => {
           pushRenderersRegistered = registered;
         })

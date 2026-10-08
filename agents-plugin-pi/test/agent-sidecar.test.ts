@@ -21,6 +21,7 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import { stripSummaryId } from "./fixtures/summary-id.ts";
 import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -608,12 +609,14 @@ describe("buildOrphanPush (announce only what was cut off)", () => {
 
   test("261007: the directly sent orphan notice carries the payload as JSON under the adapter label", () => {
     const push = buildOrphanPush([orphan({ agentId: "a1", state: "running" })])!;
-    assert.deepEqual(buildOrphanNoticeMessage(push), {
+    const message = buildOrphanNoticeMessage(push);
+    assert.deepEqual({ ...message, details: stripSummaryId(message.details) }, {
       customType: "ws-agent-orphaned",
       content: `[system message from ws-pi-plugin]\n${JSON.stringify(push)}`,
       display: true,
       details: push,
     });
+    assert.notEqual(buildOrphanNoticeMessage(push).details.ws_summary_id, message.details.ws_summary_id, "each send gets a fresh row id");
   });
 });
 

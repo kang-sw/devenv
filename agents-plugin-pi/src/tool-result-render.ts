@@ -1,6 +1,9 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { stringify as stringifyYaml } from "yaml";
 import { loadHostPiTui } from "./pi-tui.ts";
+import { UseNativeResultFallback } from "./native-fallback.ts";
+import { wrapToolRenderersWithSummary, type ToolCallRenderer, type ToolResultRenderer } from "./display-summary-render.ts";
+import type { DisplaySummaryStore } from "./display-summary.ts";
 
 /** The tiny host surface required for YAML previews. */
 export interface ToolResultTuiModules {
@@ -28,6 +31,12 @@ export interface NativePreviewComponent {
 /** A late-filled TUI reference lets native tools register before MCP startup. */
 export interface ToolPreviewTuiRef {
   current: ToolResultTuiModules | undefined;
+  /**
+   * The lead TUI's display-summary store, attached to the shared ref before
+   * tools register. `registerWsTool` adds each tool to its `toolNames` and
+   * reads it again at render time; absent, rendering is unchanged.
+   */
+  summaries?: DisplaySummaryStore;
 }
 
 export function createToolPreviewTuiRef(): ToolPreviewTuiRef {
@@ -235,11 +244,7 @@ export function physicalPreview(
   return physicalPreviewLayout(text, width, format).rows;
 }
 
-/**
- * Pi catches renderer errors and uses its standard text/image fallback for
- * that slot. This marker intentionally keeps unsupported output on that path.
- */
-export class UseNativeResultFallback extends Error {}
+export { UseNativeResultFallback };
 
 function isObjectLike(value: unknown): value is object {
   return typeof value === "object" && value !== null;
@@ -654,6 +659,12 @@ type ToolDefinition = Parameters<ExtensionAPI["registerTool"]>[0];
  * Register a ws-owned tool through the one presentation seam. Existing custom
  * renderers are deliberately left untouched; unavailable helpers throw into
  * Pi's documented per-slot native fallback.
+ *
+ * Both branches go through `wrapToolRenderersWithSummary`, which shows a
+ * collapsed row's display summary when `tuiRef.summaries` holds one and
+ * otherwise delegates unchanged. A tool that brings its own renderers is
+ * wrapped only when a store is attached at registration (the same moment its
+ * name joins `toolNames`), so without one its renderers are registered as-is.
  */
 export function registerWsTool(
   pi: Pick<ExtensionAPI, "registerTool">,
@@ -661,9 +672,16 @@ export function registerWsTool(
   tuiRef: ToolPreviewTuiRef,
   overrides?: ToolPreviewOverrides,
 ): void {
-  const existing = definition as ToolDefinition & { renderCall?: unknown; renderResult?: unknown };
+  tuiRef.summaries?.toolNames.add(definition.name);
+  const summaries = () => tuiRef.summaries;
+  const existing = definition as ToolDefinition & { renderCall?: ToolCallRenderer; renderResult?: ToolResultRenderer };
   if (existing.renderCall || existing.renderResult) {
-    pi.registerTool(definition);
+    if (!tuiRef.summaries) {
+      pi.registerTool(definition);
+      return;
+    }
+    const wrapped = wrapToolRenderersWithSummary(definition.name, existing.renderCall, existing.renderResult, summaries, tuiRef);
+    pi.registerTool({ ...definition, ...wrapped } as ToolDefinition);
     return;
   }
 
@@ -678,11 +696,14 @@ export function registerWsTool(
     }
     return cachedRenderers;
   };
-  pi.registerTool({
-    ...definition,
-    renderCall: (...args: Parameters<ReturnType<typeof createToolPreviewRenderers>["renderCall"]>) => renderers().renderCall(...args),
-    renderResult: (...args: Parameters<ReturnType<typeof createToolPreviewRenderers>["renderResult"]>) => renderers().renderResult(...args),
-  } as ToolDefinition);
+  const wrapped = wrapToolRenderersWithSummary(
+    definition.name,
+    (...args) => renderers().renderCall(...(args as Parameters<ReturnType<typeof createToolPreviewRenderers>["renderCall"]>)),
+    (...args) => renderers().renderResult(...(args as Parameters<ReturnType<typeof createToolPreviewRenderers>["renderResult"]>)),
+    summaries,
+    tuiRef,
+  );
+  pi.registerTool({ ...definition, ...wrapped } as ToolDefinition);
 }
 
 /**

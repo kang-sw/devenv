@@ -23,6 +23,7 @@
 
 import { test, describe, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { stripSummaryId } from "./fixtures/summary-id.ts";
 import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -2413,7 +2414,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       assert.deepEqual(milestone.options, { deliverAs: "followUp", triggerTurn: true });
       assert.equal((milestone.content as { display: boolean }).display, true);
       assert.equal((milestone.content as { content: string }).content, "[system message from ws-pi-plugin]\nContext window: 62% / 85% (forced compaction point). Past 85%, compaction is forced, mid-work if need be. From here on, a good boundary is worth taking; if this is one, run the preparation from the advisory. Otherwise end this turn without replying.");
-      assert.deepEqual((milestone.content as { details: unknown }).details, { milestone: 50 + 35 / 3 });
+      assert.deepEqual(stripSummaryId((milestone.content as { details: unknown }).details), { milestone: 50 + 35 / 3 });
       assert.equal(preparations().length, 1, "a milestone carries no guide and is not a preparation message");
 
       at(74);
@@ -2422,6 +2423,9 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       assert.equal(milestones().length, 1, "turn_ends inside the milestone turn deliver nothing");
       runEnd();
       assert.equal(milestones().length, 2, "the second milestone at the exact 73.33, at the milestone turn's own agent_end");
+      // 261007: each summarized send carries its own display-summary row id.
+      const rowIds = [preparations()[0]!, ...milestones()].map((sent) => stripSummaryId((sent.content as { details: unknown }).details) && (sent.content as { details: { ws_summary_id: string } }).details.ws_summary_id);
+      assert.equal(new Set(rowIds).size, 3, "the advisory and both milestones carry distinct row ids");
       assert.equal((milestones()[1]!.content as { content: string }).content, "[system message from ws-pi-plugin]\nContext window: 74% / 85% (forced compaction point). This is the last reading before compaction is forced. Compacting at a boundary you choose keeps the summary in your hands; take this one if it fits, and run the preparation from the advisory. Otherwise end this turn without replying, and take the next good boundary.");
       runEnd();
       at(80);
@@ -2441,7 +2445,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       runEnd();
       assert.equal(milestones().length, 1);
       assert.equal((milestones()[0]!.content as { content: string }).content, "[system message from ws-pi-plugin]\nContext window: 72% / 80% (forced compaction point). This is the last reading before compaction is forced. Compacting at a boundary you choose keeps the summary in your hands; take this one if it fits, and run the preparation from the advisory. Otherwise end this turn without replying, and take the next good boundary.");
-      assert.deepEqual((milestones()[0]!.content as { details: unknown }).details, { milestone: 70 });
+      assert.deepEqual(stripSummaryId((milestones()[0]!.content as { details: unknown }).details), { milestone: 70 });
       runEnd();
       at(75);
       runEnd();

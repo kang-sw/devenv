@@ -14,6 +14,7 @@ import { join } from "node:path";
 import {
   ADAPTER_CONFIG_MANIFEST_FILE,
   ADAPTER_CONFIG_NAMESPACE,
+  createWsConfigKeyReader,
   createWsConfigReader,
   staticConfigReader,
   thenOrNow,
@@ -35,6 +36,14 @@ import {
   type GoalLoopConfig,
 } from "../src/goal-loop.ts";
 import { clearWakeStart, leadWakeStartPendingRef, reserveWakeStart } from "../src/spawner.ts";
+import {
+  DEFAULT_DISPLAY_SUMMARY_EFFORT,
+  DISPLAY_SUMMARY_CONFIG_KEYS,
+  DISPLAY_SUMMARY_EFFORT_KEY,
+  DISPLAY_SUMMARY_EFFORT_LEVELS,
+  DISPLAY_SUMMARY_MODEL_KEY,
+  displaySummaryConfigFrom,
+} from "../src/display-summary.ts";
 
 interface ManifestKey { key: string; type: string; default: unknown }
 const manifest = JSON.parse(readFileSync(join(process.cwd(), ADAPTER_CONFIG_MANIFEST_FILE), "utf8")) as { namespace: string; keys: ManifestKey[] };
@@ -52,19 +61,34 @@ const resolvers: Record<GoalLoopConfigKey, (config: GoalLoopConfig | undefined) 
   child_retention_ttl_days: resolveChildRetentionTtlDays,
 };
 
+/** The display summarizer's adapter keys (display-summary.ts), read by full name. */
+const displaySummaryKeys = DISPLAY_SUMMARY_CONFIG_KEYS.filter((key) => key.startsWith(ADAPTER_CONFIG_NAMESPACE));
+
 describe("shipped adapter manifest", () => {
   test("declares exactly the knobs the adapter reads, under its namespace", () => {
     assert.equal(manifest.namespace, ADAPTER_CONFIG_NAMESPACE);
     const declared = manifest.keys.map((k) => k.key).sort();
-    assert.deepEqual(declared, Object.keys(resolvers).map((k) => `${ADAPTER_CONFIG_NAMESPACE}${k}`).sort());
+    assert.deepEqual(declared, [...Object.keys(resolvers).map((k) => `${ADAPTER_CONFIG_NAMESPACE}${k}`), ...displaySummaryKeys].sort());
     const read = new Set<GoalLoopConfigKey>([...SETTLE_CONFIG_KEYS, ...COMPACTION_TRIGGER_CONFIG_KEYS, ...COMPACTION_BUDGET_CONFIG_KEYS, "agent_wait_animation", "child_retention_ttl_days"]);
     assert.deepEqual([...read].sort(), Object.keys(resolvers).sort());
+  });
+
+  test("display-summary defaults: an empty model is off, effort defaults to medium over the thinking levels", () => {
+    const byKey = new Map(manifest.keys.map((k) => [k.key, k as ManifestKey & { enum?: string[] }]));
+    const model = byKey.get(DISPLAY_SUMMARY_MODEL_KEY)!;
+    assert.equal(model.type, "string");
+    assert.deepEqual(displaySummaryConfigFrom({ [DISPLAY_SUMMARY_MODEL_KEY]: model.default }), displaySummaryConfigFrom({}));
+    const effort = byKey.get(DISPLAY_SUMMARY_EFFORT_KEY)!;
+    assert.equal(effort.type, "enum");
+    assert.equal(effort.default, DEFAULT_DISPLAY_SUMMARY_EFFORT);
+    assert.deepEqual(effort.enum, [...DISPLAY_SUMMARY_EFFORT_LEVELS]);
+    assert.ok(DISPLAY_SUMMARY_CONFIG_KEYS.includes("workflow.lang"), "the summary language is the unprefixed ws key");
   });
 
   test("each manifest default resolves exactly like an untuned knob", () => {
     // ws-mcp answers an untuned key with the manifest default, while an
     // unreachable ws-mcp leaves the knob absent; both must behave the same.
-    for (const { key, default: value } of manifest.keys) {
+    for (const { key, default: value } of manifest.keys.filter((k) => !displaySummaryKeys.includes(k.key as never))) {
       const knob = key.slice(ADAPTER_CONFIG_NAMESPACE.length) as GoalLoopConfigKey;
       const resolve = resolvers[knob];
       assert.deepEqual(resolve({ [knob]: value } as GoalLoopConfig), resolve(undefined), key);
@@ -112,6 +136,18 @@ describe("createWsConfigReader", () => {
 
   test("no bridge reads nothing", async () => {
     assert.deepEqual(await createWsConfigReader(() => undefined)(["settle_delay_ms"]), {});
+  });
+
+  test("the full-key reader reads unprefixed keys as named and drops unset ones", async () => {
+    const answers: Record<string, unknown> = {
+      "workflow.lang": json({ key: "workflow.lang", value: "Korean", scope: "global" }),
+      "pi.display_summary_model": json({ key: "pi.display_summary_model", value: null, scope: "unset" }),
+    };
+    const { calls, client } = fakeClient((args) => answers[String(args.key)]);
+    const read = createWsConfigKeyReader(() => ({ client, sessionKey: "lead-key" }));
+    assert.deepEqual(await read(["workflow.lang", "pi.display_summary_model"]), { "workflow.lang": "Korean" });
+    assert.deepEqual(calls.map((c) => c.args.key).sort(), ["pi.display_summary_model", "workflow.lang"]);
+    assert.deepEqual(await createWsConfigKeyReader(() => undefined)(["workflow.lang"]), {});
   });
 
   test("a static reader answers synchronously with only the requested knobs", () => {

@@ -116,6 +116,7 @@ import {
   type PreparationTrigger,
 } from "./lead-compaction.ts";
 import { labelAdapterText } from "./adapter-label.ts";
+import { withSummaryId } from "./summary-id.ts";
 import { readSpawnRole } from "./process-role.ts";
 import { staticConfigReader, thenOrNow, type GoalLoopConfigKey, type GoalLoopConfigReader } from "./adapter-config.ts";
 import { createToolPreviewTuiRef, registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
@@ -1389,7 +1390,7 @@ export function registerGoalLoop(
         customType: LEAD_COMPACT_CUSTOM_TYPE,
         content: buildPreparationMessage(trigger, readLeadCompactGuide(opts.leadCompactGuidePath)),
         display: true,
-        details: { trigger: trigger.kind },
+        details: withSummaryId({ trigger: trigger.kind }),
       },
       { deliverAs, triggerTurn: true },
     );
@@ -1436,7 +1437,7 @@ export function registerGoalLoop(
           customType: LEAD_CONTEXT_MILESTONE_CUSTOM_TYPE,
           content: buildContextMilestoneMessage(delivered, percent, hard),
           display: true,
-          details: { milestone: milestones[delivered - 1]!.percent },
+          details: withSummaryId({ milestone: milestones[delivered - 1]!.percent }),
         },
         { deliverAs: "followUp", triggerTurn: true },
       );

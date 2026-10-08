@@ -17,7 +17,8 @@ import {
 import { descendantUsageValue, persistEvictedAgentCost, registerAgentCostOwner } from "../src/agent-cost.ts";
 import { agentWidgetRefreshRef, evictForCapacity, stopAgent, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
 import { truncateToWidth, visibleWidth } from "../src/pi-tui.ts";
-import { applySessionShutdownAgentFooter, applySessionStartAgentFooter, registerAgentFooterGitEvents, registerAgentFooterOutputEvents } from "../src/index.ts";
+import { applySessionShutdownAgentFooter, applySessionStartAgentFooter, bindDisplaySummaryRender, registerAgentFooterGitEvents, registerAgentFooterOutputEvents } from "../src/index.ts";
+import { createDisplaySummaryStore } from "../src/display-summary.ts";
 import { symlinkSkip } from "./fixtures/symlink-probe.ts";
 
 const roots = new Set<string>();
@@ -415,6 +416,28 @@ describe("custom footer render and lifecycle", () => {
     lifecycle.stop(); release({ truncateToWidth, visibleWidth }); await start;
     assert.deepEqual(calls, []);
   });
+});
+
+test("261007: a display summary landing repaints message rows through the footer controller's refresh, never a second setFooter", async () => {
+  const storage = createAgentStorageContext("lead", root()), registry: RpcAgentRegistry = new Map();
+  let factory: any, setFooters = 0, renders = 0;
+  const ctx = {
+    mode: "tui", cwd: "/", sessionManager: { getEntries: () => [], getSessionName: () => undefined, getCwd: () => "/" }, getContextUsage: () => ({ percent: 0, contextWindow: 1000 }),
+    ui: { setFooter(next: any) { setFooters++; factory = next; } },
+  };
+  const lifecycle = createAgentFooterSessionLifecycle(async () => ({ truncateToWidth, visibleWidth }),
+    (ctx, registry, storage, primitives) => createAgentFooterController(ctx, registry, storage, primitives, async () => undefined));
+  const store = createDisplaySummaryStore();
+  bindDisplaySummaryRender(store, lifecycle);
+  store.notify(["row-1"]);
+  assert.equal(renders, 0, "no footer yet: the repaint is a no-op, not a throw");
+  await applySessionStartAgentFooter(lifecycle, undefined, ctx, registry, storage);
+  factory({ requestRender() { renders++; } }, { fg: (_c: string, text: string) => text }, { getGitBranch: () => null, getExtensionStatuses: () => new Map(), onBranchChange: () => () => {} });
+  const before = renders;
+  store.notify(["row-1", "row-2"]);
+  assert.equal(renders - before, 1, "one TUI render per landed batch, through the footer's captured handle");
+  assert.equal(setFooters, 1, "the footer is mounted once and never replaced");
+  lifecycle.stop();
 });
 
 test("index session seams mount the re-enabled footer beside an existing widget and restore it on reload/shutdown", async () => {
