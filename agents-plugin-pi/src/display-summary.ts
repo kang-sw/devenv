@@ -27,9 +27,6 @@
  * separately from the provider request log.
  */
 
-import fs from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { convertToLlm, serializeConversation } from "@earendil-works/pi-coding-agent";
 import { clampThinkingLevel, isContextOverflow } from "@earendil-works/pi-ai";
 import type { Api, AssistantMessage, Context, Message, Model, ModelThinkingLevel, SimpleStreamOptions, ThinkingLevel, Tool, ToolCall, ToolResultMessage } from "@earendil-works/pi-ai";
@@ -437,52 +434,7 @@ export interface DisplaySummarizer {
   readonly log: readonly Message[];
 }
 
-/** Temporary metadata-only cache probe; remove after measurement. No I/O until completion. */
-function createCacheUsageProbe() {
-  let remaining = 8;
-  let fd: number | undefined;
-  const close = (): void => {
-    remaining = 0;
-    const outgoing = fd;
-    fd = undefined;
-    if (outgoing !== undefined) {
-      try { fs.closeSync(outgoing); } catch { /* Diagnostic only. */ }
-    }
-  };
-  return {
-    close,
-    record(model: Model<Api>, response?: AssistantMessage, aborted = false): void {
-      if (remaining === 0) return;
-      remaining -= 1;
-      try {
-        if (fd === undefined) {
-          const directory = fs.mkdtempSync(join(tmpdir(), "ws-summary-cache-probe-"));
-          fs.chmodSync(directory, 0o700);
-          fd = fs.openSync(join(directory, "usage.jsonl"), "wx", 0o600);
-          fs.fchmodSync(fd, 0o600);
-        }
-        const count = (value: unknown): number | null =>
-          typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
-        const reason = response?.stopReason;
-        const stopReason = response === undefined ? (aborted ? "rejected-aborted" : "rejected")
-          : ["pending", "stop", "length", "toolUse", "error", "aborted", "deferred"].includes(reason ?? "") ? reason : "unknown";
-        // Explicit allowlist: never serialize response, context, options, errors or IDs.
-        fs.writeFileSync(fd, JSON.stringify({
-          time: Date.now(), provider: model.provider, model: model.id, stopReason,
-          input: count(response?.usage?.input), cacheRead: count(response?.usage?.cacheRead),
-          cacheWrite: count(response?.usage?.cacheWrite), output: count(response?.usage?.output),
-        }) + "\n");
-        if (remaining === 0) close();
-      } catch {
-        // Disable on the first filesystem failure; never affect the summary path.
-        close();
-      }
-    },
-  };
-}
-
 export function createDisplaySummarizer(deps: DisplaySummarizerDeps): DisplaySummarizer {
-  const cacheUsageProbe = createCacheUsageProbe();
   const timeoutMs = deps.timeoutMs ?? DISPLAY_SUMMARY_TIMEOUT_MS;
   let log: Message[] = [];
   let logGeneration = 0;
@@ -563,9 +515,7 @@ export function createDisplaySummarizer(deps: DisplaySummarizerDeps): DisplaySum
     let response: AssistantMessage;
     try {
       response = await deps.complete(model, { systemPrompt: DISPLAY_SUMMARY_SYSTEM_PROMPT, messages, tools: [OUTPUT_TOOL] }, options);
-      cacheUsageProbe.record(model, response);
     } catch {
-      cacheUsageProbe.record(model, undefined, controller.signal.aborted);
       if (generation === logGeneration) carry = conversation;
       return;
     } finally {
@@ -629,7 +579,6 @@ export function createDisplaySummarizer(deps: DisplaySummarizerDeps): DisplaySum
     },
     dispose() {
       disposed = true;
-      cacheUsageProbe.close();
       active?.abort();
       dropPending();
       toolArgs.clear();
