@@ -557,7 +557,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-08T14:18:05Z"
+        "touched_at": "2026-10-08T14:18:45Z",
+        "impl": {
+          "branch": "impl/develop/blitz-stump-stool"
+        }
       }
     },
     "261008-bug-ws-git-merge-switches-worker-occupied-root": {
