@@ -26,6 +26,11 @@ import {
   type DisplaySummaryRegistry,
   type DisplaySummaryStore,
 } from "./display-summary.ts";
+import {
+  cleanOrphanSummarySidecars, createSummarySidecar, seedNativeSummarySidecar,
+  type SidecarIO, type SummaryConversation, type SummarySidecar,
+} from "./display-summary-sidecar.ts";
+import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 
 /** The display summarizer runs only in the interactive lead session. */
 export function shouldRunDisplaySummary(mode: string | undefined, role: SpawnRole | undefined): boolean {
@@ -42,6 +47,8 @@ export interface DisplaySummarySessionDeps {
   /** Test seam: the model call bound to the session's registry. */
   createCompletion?(registry: DisplaySummaryRegistry): DisplaySummaryCompletion;
   env?: NodeJS.ProcessEnv;
+  /** Filesystem seam for deterministic persistence/lifecycle tests. */
+  sidecarIO?: SidecarIO;
 }
 
 export interface DisplaySummarySession {
@@ -51,7 +58,16 @@ export interface DisplaySummarySession {
   current(): DisplaySummarizer | undefined;
 }
 
-type SessionCtx = { mode?: string; cwd: string; modelRegistry: unknown };
+type SessionCtx = {
+  mode?: string;
+  cwd: string;
+  modelRegistry: unknown;
+  sessionManager?: {
+    getSessionFile(): string | undefined;
+    getSessionId(): string;
+    getEntries(): SessionEntry[];
+  };
+};
 
 export function registerDisplaySummarySession(
   pi: Pick<ExtensionAPI, "on" | "getActiveTools">,
@@ -60,13 +76,23 @@ export function registerDisplaySummarySession(
   let summarizer: DisplaySummarizer | undefined;
   let registered = false;
 
-  const stop = (): void => {
+  let sidecar: SummarySidecar | undefined;
+  let conversation: SummaryConversation | undefined;
+  let live: { active: boolean } | undefined;
+
+  const stop = (): Promise<void> => {
+    // Reject config/provider work before awaiting disk. Only already accepted
+    // batches drain; unfinished model requests must never delay replacement.
     summarizer?.dispose();
     summarizer = undefined;
+    if (live) live.active = false;
+    const outgoing = sidecar;
+    sidecar = undefined;
+    return outgoing?.drain() ?? Promise.resolve();
   };
 
   pi.on("session_start", (_event, ctx) => {
-    stop();
+    const draining = stop();
     deps.store.clear();
     const session = ctx as unknown as SessionCtx;
     if (!shouldRunDisplaySummary(session.mode, readSpawnRole(deps.env ?? process.env))) return;
@@ -76,22 +102,63 @@ export function registerDisplaySummarySession(
       deps.registerMessageRenderers();
     }
     const registry = session.modelRegistry as DisplaySummaryRegistry;
+    const token = live = { active: true };
+    const manager = session.sessionManager;
+    const sessionId = manager?.getSessionId() ?? randomUUID();
+    const sessionFile = manager?.getSessionFile();
+    let entries = manager?.getEntries() ?? [];
+    conversation = {
+      sessionId, sessionFile,
+      entries() {
+        // Older Pi/fakes can mutate the same manager on replacement. A queued
+        // append still owns its original path, ID and last retained history.
+        if (manager?.getSessionId() === sessionId && manager.getSessionFile() === sessionFile) entries = manager.getEntries();
+        return entries;
+      },
+    };
+    const cache = sidecar = createSummarySidecar({
+      conversation, toolNames: deps.store.toolNames, io: deps.sidecarIO,
+      startAfter: draining.then(async () => {
+        if (sessionFile) await cleanOrphanSummarySidecars(sessionFile, deps.sidecarIO);
+      }),
+      restore(batch) {
+        if (!token.active || !batch.size) return;
+        for (const [id, summary] of batch) deps.store.set(id, summary);
+        deps.store.notify([...batch.keys()]);
+      },
+    });
     summarizer = createDisplaySummarizer({
       store: deps.store,
       readConfig: deps.readConfig,
       resolveModel: createModelResolver(registry),
       complete: (deps.createCompletion ?? createProviderCompletion)(registry),
+      // Provider-cache UUID is intentionally unrelated to durable Pi ownership.
       sessionId: randomUUID(),
+      onAccepted: (batch) => { cache.accept(batch); },
     });
+    return cache.ready;
   });
-  pi.on("message_end", (event) => { summarizer?.observeMessage(event.message); });
+  pi.on("message_end", (event) => { summarizer?.observeMessage(event.message); sidecar?.sync(); });
   pi.on("tool_execution_start", (event) => { summarizer?.observeToolStart(event.toolCallId, event.toolName, event.args); });
   pi.on("tool_execution_end", (event) => { summarizer?.observeToolEnd(event.toolCallId, event.toolName); });
   // Flush points: each lead turn, and idle entry for pushes that arrive while idle.
-  pi.on("turn_end", () => { void summarizer?.flush(); });
-  pi.on("agent_end", () => { void summarizer?.flush(); });
-  pi.on("session_compact", () => { summarizer?.reset(); });
-  pi.on("session_shutdown", () => { stop(); });
+  pi.on("turn_end", () => { sidecar?.sync(); void summarizer?.flush(); });
+  pi.on("agent_end", () => { sidecar?.sync(); void summarizer?.flush(); });
+  pi.on("session_compact", () => { summarizer?.reset(); sidecar?.sync(); });
+  pi.on("session_shutdown", (event) => {
+    const outgoing = sidecar;
+    const sourceFile = conversation?.sessionFile;
+    // Pi creates the native fork/copy before shutdown, and recreates the
+    // extension afterward. Seed here so accepted-but-unwritten values survive
+    // even an outgoing append failure, without a process-global handoff cache.
+    const transition = event as { reason?: string; targetSessionFile?: string };
+    const draining = stop();
+    return draining.then(async () => {
+      if (transition.reason === "fork" && transition.targetSessionFile && sourceFile && outgoing) {
+        await seedNativeSummarySidecar(transition.targetSessionFile, { sessionFile: sourceFile, summaries: outgoing.snapshot() }, deps.store.toolNames, deps.sidecarIO);
+      }
+    });
+  });
 
   return {
     enqueueStandalone(id, label, text) { summarizer?.enqueueStandalone(id, label, text); },
