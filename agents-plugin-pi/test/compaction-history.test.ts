@@ -128,7 +128,7 @@ test("history append and disk reload remain raw and make no display-summary requ
     const ctx = { mode: "tui", cwd: dir, sessionManager: sm, modelRegistry: { find: () => ({ provider: "offline", id: "mini", contextWindow: 100_000 }) } };
     const session = registerDisplaySummarySession(pi as never, {
       store, readConfig: async () => ({ model: "offline/mini" }), env: {},
-      registerBuiltinWrappers() {}, registerMessageRenderers() {},
+      confirmBuiltinTools() {},
       createCompletion: () => async () => { requests++; throw new Error("history must not call the provider"); },
     });
     registerCompactionHistory(pi as never);

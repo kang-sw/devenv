@@ -100,6 +100,44 @@ function requestText(call: Call): string {
   return content.map((part) => part.text ?? "").join("");
 }
 
+describe("summary store lifetimes", () => {
+  test("clear preserves mounted links and generation; retire detaches outgoing rows", () => {
+    const store = createDisplaySummaryStore();
+    assert.equal(store.enabled, true, "direct renderer tests start enabled");
+    let old = 0;
+    let incoming = 0;
+    store.trackInvalidate("old", () => { old++; });
+    store.set("old", { toolIntention: "i", toolResult: "r" });
+    const generation = store.generation;
+    store.clear();
+    assert.equal(store.get("old"), undefined);
+    assert.equal(store.generation, generation);
+    store.notify(["old"]);
+    assert.equal(old, 1);
+    store.retire();
+    assert.equal(store.generation, generation + 1);
+    assert.equal(store.enabled, false);
+    store.trackInvalidate("incoming", () => { incoming++; });
+    store.clear();
+    store.notify(["old", "incoming"]);
+    assert.equal(old, 1);
+    assert.equal(incoming, 1);
+  });
+
+  test("confirmed ownership notifies once and unsubscribe removes its listener", () => {
+    const store = createDisplaySummaryStore();
+    let calls = 0;
+    const unsubscribe = store.onToolRegistered(() => { calls++; });
+    store.confirmTool("ws__late");
+    store.confirmTool("ws__late");
+    assert.equal(calls, 1);
+    unsubscribe();
+    store.confirmTool("edit");
+    assert.equal(calls, 1);
+    assert.deepEqual([...store.toolNames], ["ws__late", "edit"]);
+  });
+});
+
 describe("summary ids", () => {
   test("each stamp is a fresh id, and batch items get their own", () => {
     const a = withSummaryId({ agent_id: "x" });

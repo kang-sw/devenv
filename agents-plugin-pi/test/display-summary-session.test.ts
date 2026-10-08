@@ -15,6 +15,8 @@ import { DISPLAY_SUMMARY_SIDECAR_SUFFIX, type SidecarIO } from "../src/display-s
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { createDisplaySummaryStore, DISPLAY_SUMMARY_OUTPUT_TOOL } from "../src/display-summary.ts";
 import { registerDisplaySummarySession, shouldRunDisplaySummary } from "../src/display-summary-session.ts";
+import { createSummarySwitch, registerDisplaySummaryToolResolver, type SummaryToolResolver } from "../src/display-summary-render.ts";
+import { SUMMARY_ID_KEY } from "../src/summary-id.ts";
 
 type Handler = (event: any, ctx: any) => unknown;
 
@@ -24,6 +26,7 @@ function fakePi() {
   return {
     handlers,
     injected,
+    store: createDisplaySummaryStore(),
     sendMessage(message: unknown) { injected.push(message); },
     sendUserMessage(message: unknown) { injected.push(message); },
     on(name: string, handler: Handler) { handlers.set(name, [...(handlers.get(name) ?? []), handler]); },
@@ -40,24 +43,22 @@ const registry = {
 
 function setup(env: NodeJS.ProcessEnv = {}, completion?: () => Promise<AssistantMessage>, sidecarIO?: SidecarIO, readConfig = async () => ({ model: "acme/mini" })) {
   const pi = fakePi();
-  const store = createDisplaySummaryStore();
-  store.toolNames.add("ws__tickets_query");
-  const wrapped: Array<{ cwd: string; active: readonly string[] }> = [];
-  let renderers = 0;
+  const store = pi.store;
+  const confirmed: Array<readonly string[]> = [];
   let calls = 0;
   const session = registerDisplaySummarySession(pi as never, {
     store,
     readConfig,
     sidecarIO,
-    registerBuiltinWrappers: (cwd, active) => { wrapped.push({ cwd, active }); },
-    registerMessageRenderers: () => { renderers += 1; },
+    confirmBuiltinTools: (active) => { confirmed.push(active); },
     createCompletion: () => async () => { calls += 1; return completion ? completion() : ({ role: "assistant", content: [{ type: "toolCall", id: "x", name: DISPLAY_SUMMARY_OUTPUT_TOOL, arguments: { items: [{ id: "t1", toolIntention: "i", toolResult: "r" }] } }], stopReason: "toolUse", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } } as unknown as AssistantMessage); },
     env,
   });
-  return { pi, store, session, wrapped, renderers: () => renderers, calls: () => calls };
+  return { pi, store, session, confirmed, calls: () => calls };
 }
 
 function runTool(pi: ReturnType<typeof fakePi>, id: string) {
+  pi.store.confirmTool("ws__tickets_query");
   pi.emit("tool_execution_start", { toolCallId: id, toolName: "ws__tickets_query", args: { q: 1 } });
   pi.emit("message_end", { message: { role: "toolResult", toolCallId: id, toolName: "ws__tickets_query", content: [{ type: "text", text: "ok" }], isError: false, timestamp: 0 } });
   pi.emit("tool_execution_end", { toolCallId: id, toolName: "ws__tickets_query", result: {}, isError: false });
@@ -73,14 +74,13 @@ describe("display summary session", () => {
   });
 
   for (const role of ["fork", "worker", "explore"]) {
-    test(`inactive in a ${role} session: no wrappers, no renderers, no requests`, async () => {
+    test(`inactive in a ${role} session: no confirmations or requests`, async () => {
       const h = setup({ WS_PI_SPAWN_ROLE: role });
       h.pi.emit("session_start", {}, { mode: "tui", cwd: "/w", modelRegistry: registry });
       assert.equal(h.session.current(), undefined);
       runTool(h.pi, "c1");
       await Promise.all(h.pi.emit("turn_end"));
-      assert.deepEqual(h.wrapped, []);
-      assert.equal(h.renderers(), 0);
+      assert.deepEqual(h.confirmed, []);
       assert.equal(h.calls(), 0);
     });
   }
@@ -89,16 +89,15 @@ describe("display summary session", () => {
     const h = setup();
     h.pi.emit("session_start", {}, { mode: "print", cwd: "/w", modelRegistry: registry });
     assert.equal(h.session.current(), undefined);
-    assert.deepEqual(h.wrapped, []);
+    assert.deepEqual(h.confirmed, []);
   });
 
-  test("lead TUI: wrappers and renderers registered once; turn_end flushes without being awaited", async () => {
+  test("lead TUI: confirms each session's loadout; turn_end flushes without being awaited", async () => {
     let release!: (message: AssistantMessage) => void;
     const h = setup({}, () => new Promise<AssistantMessage>((resolve) => { release = resolve; }));
     h.pi.emit("session_start", {}, { mode: "tui", cwd: "/w", modelRegistry: registry });
     h.pi.emit("session_start", {}, { mode: "tui", cwd: "/w", modelRegistry: registry });
-    assert.deepEqual(h.wrapped, [{ cwd: "/w", active: ["edit", "write", "ws__tickets_query"] }]);
-    assert.equal(h.renderers(), 1);
+    assert.deepEqual(h.confirmed, [["edit", "write", "ws__tickets_query"], ["edit", "write", "ws__tickets_query"]]);
     runTool(h.pi, "c1");
     const results = h.pi.emit("turn_end");
     assert.deepEqual(results, [undefined], "the handler returns immediately");
@@ -184,6 +183,58 @@ async function savedSession(t: { after(fn: () => Promise<void>): void }) {
   }
   return { directory, conversation };
 }
+for (const name of ["ws__tickets_query", "do-i-really-have-to-read-this-myself"]) {
+  test(`incoming mounted ${name} and message rows survive startup replay; shutdown retires outgoing rows`, { timeout: 5000 }, async (t) => {
+  const f = await savedSession(t);
+  const old = await f.conversation("old", ["same"]);
+  const incoming = await f.conversation("incoming", ["same"]);
+  (incoming.entries[0] as any).message.toolName = name;
+  incoming.entries.push({ type: "custom_message", id: "message-entry", parentId: null, timestamp: "now", customType: "ws-thread-summary", content: "RAW MESSAGE", display: true, details: { [SUMMARY_ID_KEY]: "message-row" } } as SessionEntry);
+  await fs.writeFile(incoming.path, [JSON.stringify({ type: "session", id: "incoming" }), ...incoming.entries.map((entry) => JSON.stringify(entry))].join("\n") + "\n");
+  const cached = { toolIntention: "saved intention", toolResult: "saved result" };
+  await fs.writeFile(incoming.path + DISPLAY_SUMMARY_SIDECAR_SUFFIX, ["same", "message-row", "message-entry"].map((id) => JSON.stringify({ version: 1, sessionId: "incoming", id, summary: cached })).join("\n") + "\n");
+  const h = setup();
+  assert.equal(h.store.toolNames.size, 0, "fixture does not pre-own tool names");
+  let resolver!: SummaryToolResolver;
+  const Raw = class {
+    value: string;
+    constructor(value = "") { this.value = value; }
+    render() { return [this.value]; }
+    invalidate() {}
+  };
+  registerDisplaySummaryToolResolver({ registerToolRenderer: (value) => { resolver = value; } }, h.store, { Text: Raw });
+  await Promise.all(h.pi.emit("session_start", {}, old.ctx));
+  let outgoing = 0;
+  h.store.trackInvalidate("same", () => { outgoing++; });
+  const staleMessage = createSummarySwitch(h.store, "message-row", new Raw("OLD MESSAGE"), (value) => new Raw(value.toolResult));
+  await Promise.all(h.pi.emit("session_shutdown"));
+  const generation = h.store.generation;
+  let invalidated = 0;
+  const presentation = resolver(name, () => ({ renderCall: () => new Raw("RAW TOOL") }))!;
+  const context = { toolCallId: "same", state: {}, invalidate: () => { invalidated++; } };
+  assert.deepEqual((presentation.renderCall!({}, {}, context) as InstanceType<typeof Raw>).render(), ["RAW TOOL"]);
+  const mountedMessage = createSummarySwitch(h.store, "message-row", new Raw("RAW MESSAGE"), (value) => new Raw(value.toolResult));
+  await Promise.all(h.pi.emit("session_start", {}, incoming.ctx));
+  assert.equal(h.store.generation, generation, "startup does not retire incoming links");
+  assert.equal(h.store.get("same"), undefined, "early resolver alone does not own the saved tool");
+  assert.deepEqual(mountedMessage.render(80), ["saved result"], "saved custom-message summary uses details ID, not entry ID");
+  assert.equal(h.store.get("message-entry"), undefined);
+  assert.deepEqual(staleMessage.render(80), ["OLD MESSAGE"], "retired message cannot read the replacement store");
+  const repainted = barrier();
+  h.store.requestRender = () => { repainted.resolve(); };
+  h.store.confirmTool(name);
+  await repainted.promise;
+  assert.equal(invalidated, 1, "late ownership replays and notifies the already mounted row");
+  assert.equal(outgoing, 0);
+  assert.equal(h.store.get("same")?.toolResult, "saved result");
+  assert.deepEqual((presentation.renderCall!({}, {}, context) as InstanceType<typeof Raw>).render(), [name]);
+  assert.equal(h.calls(), 0, "restoration never regenerates summaries");
+  await Promise.all(h.pi.emit("session_shutdown"));
+  h.store.notify(["same"]);
+  assert.equal(invalidated, 1, "shutdown retires repaint linkage");
+  });
+}
+
 async function diskRows(path: string) {
   return (await fs.readFile(path + DISPLAY_SUMMARY_SIDECAR_SUFFIX, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
 }
@@ -265,6 +316,7 @@ for (const fail of [false, true]) {
     await request;
     assert.equal(h.store.get("b"), undefined);
     const reopened = setup();
+    reopened.store.confirmTool("ws__tickets_query");
     await Promise.all(reopened.pi.emit("session_start", {}, child.ctx));
     assert.equal(reopened.store.get("a")?.toolResult, "accepted");
     await Promise.all(reopened.pi.emit("session_shutdown"));

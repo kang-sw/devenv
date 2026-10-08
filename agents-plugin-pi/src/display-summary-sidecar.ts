@@ -65,6 +65,15 @@ export function retainedSummaryIds(entries: readonly SessionEntry[], toolNames: 
   return ids;
 }
 
+/** Candidate validation admits retained IDs only; ownership still gates their replay/write. */
+function retainedCandidateIds(entries: readonly SessionEntry[]): Set<string> {
+  const names = new Set<string>();
+  for (const entry of entries) {
+    if (entry.type === "message" && entry.message.role === "toolResult") names.add(entry.message.toolName);
+  }
+  return retainedSummaryIds(entries, names);
+}
+
 async function regular(path: string, io: SidecarIO): Promise<boolean> {
   try { return (await io.lstat(path)).isFile(); } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
@@ -198,6 +207,11 @@ export function createSummarySidecar(deps: SummarySidecarDeps): SummarySidecar {
   let sidecar = path ? path + DISPLAY_SUMMARY_SIDECAR_SUFFIX : undefined;
   const values = new Map<string, DisplaySummary>();
   const live = new Set<string>();
+  let candidates = new Map<string, DisplaySummary>();
+  const replayed = new Set<string>();
+  // Inherited candidates are persisted only when confirmed eligible. An existing
+  // child's own empty/partial cache remains authoritative on every reopen.
+  const inheritedWrites = new Map<string, DisplaySummary>();
   let pending: Map<string, DisplaySummary>[] = [];
   let initialized = false;
   let observedSaved = false;
@@ -238,8 +252,8 @@ export function createSummarySidecar(deps: SummarySidecarDeps): SummarySidecar {
         const original = sourceEntries.get(entry.id);
         return original?.type === entry.type;
       });
-      const copiedIds = retainedSummaryIds(copied, deps.toolNames);
-      const sourceIds = retainedSummaryIds(source.entries, deps.toolNames);
+      const copiedIds = retainedCandidateIds(copied);
+      const sourceIds = retainedCandidateIds(source.entries);
       const sourceSidecar = sourcePath + DISPLAY_SUMMARY_SIDECAR_SUFFIX;
       try { if (!(await io.lstat(sourceSidecar)).isFile()) return new Map(); } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") return new Map();
@@ -281,27 +295,37 @@ export function createSummarySidecar(deps: SummarySidecarDeps): SummarySidecar {
   }
 
   async function sync(): Promise<void> {
-    if (!await available()) return;
-    const ids = retainedSummaryIds(conversation.entries(), deps.toolNames);
+    if (disabled) return;
     if (!initialized) {
-      const loaded = await loadSidecar(sidecar!, conversation.sessionId, ids, io);
+      if (!await available()) return;
+      const candidateIds = retainedCandidateIds(conversation.entries());
+      const loaded = await loadSidecar(sidecar!, conversation.sessionId, candidateIds, io);
       if (!loaded.usable) { disabled = true; return; }
-      const restored = loaded.exists ? loaded.summaries : await inherit(ids);
-      const replay = new Map<string, DisplaySummary>();
-      for (const [id, summary] of restored) if (!live.has(id)) {
-        values.set(id, summary);
-        replay.set(id, summary);
-      }
+      candidates = loaded.exists ? loaded.summaries : await inherit(candidateIds);
+      if (!loaded.exists) for (const [id, summary] of candidates) inheritedWrites.set(id, summary);
       initialized = true;
-      deps.restore(replay);
-      if (!loaded.exists && restored.size) {
-        // Any newer acceptance is appended afterward, never overwritten by replay.
-        await append(restored);
-      }
+    }
+    const ids = retainedSummaryIds(conversation.entries(), deps.toolNames);
+    const replay = new Map<string, DisplaySummary>();
+    const seed = new Map<string, DisplaySummary>();
+    for (const [id, summary] of candidates) {
+      if (!ids.has(id) || live.has(id) || replayed.has(id)) continue;
+      replayed.add(id);
+      values.set(id, summary);
+      replay.set(id, summary);
+      if (inheritedWrites.has(id)) seed.set(id, summary);
+    }
+    if (replay.size) deps.restore(replay);
+    if (seed.size) {
+      // Live acceptance during restore wins; never append stale inheritance afterward.
+      for (const id of seed.keys()) if (live.has(id)) seed.delete(id);
+      await append(seed);
+      for (const id of seed.keys()) inheritedWrites.delete(id);
     }
     // One append per accepted batch; an unsaved conversation retains the batches
     // until its first real file exists. Failed I/O never clears live summaries.
     while (pending.length && !disabled) {
+      if (!await available()) return;
       const batch = pending[0]!;
       await append(batch);
       if (disabled) return;

@@ -2,11 +2,9 @@
  * Session wiring for the lead TUI display summarizer (display-summary.ts).
  *
  * Active only in the interactive lead session — `ctx.mode === "tui"` and no
- * spawn role — which is known only at `session_start`. Workers, explores and
- * forks keep today's rendering: no summarizer runs there, and the built-in
- * tool wrappers and new message renderers are registered only behind this
- * gate (a child's scoped `edit`/`write` overrides from write-scopes.ts are
- * therefore never shadowed).
+ * spawn role — which is known only at `session_start`. Presentation is installed
+ * earlier without replacing execution definitions. Workers, explores and forks
+ * keep raw rendering; only the live lead gate enables summary reads/replay.
  *
  * Event handlers never await a summary request: Pi awaits extension handlers,
  * and a slow summary must never hold the lead's agent loop. The summarizer
@@ -40,10 +38,8 @@ export function shouldRunDisplaySummary(mode: string | undefined, role: SpawnRol
 export interface DisplaySummarySessionDeps {
   store: DisplaySummaryStore;
   readConfig: DisplaySummaryConfigReader;
-  /** Same-name wrappers over the active Pi built-in tools; called once, lead TUI only. */
-  registerBuiltinWrappers(cwd: string, activeToolNames: readonly string[]): void;
-  /** Renderers for adapter messages that have none today; called once, lead TUI only. */
-  registerMessageRenderers(): void;
+  /** Confirm the live native loadout; does not register or replace execution tools. */
+  confirmBuiltinTools(activeToolNames: readonly string[]): void;
   /** Test seam: the model call bound to the session's registry. */
   createCompletion?(registry: DisplaySummaryRegistry): DisplaySummaryCompletion;
   env?: NodeJS.ProcessEnv;
@@ -74,7 +70,8 @@ export function registerDisplaySummarySession(
   deps: DisplaySummarySessionDeps,
 ): DisplaySummarySession {
   let summarizer: DisplaySummarizer | undefined;
-  let registered = false;
+  deps.store.enabled = false;
+  let unsubscribeOwnership: (() => void) | undefined;
 
   let sidecar: SummarySidecar | undefined;
   let conversation: SummaryConversation | undefined;
@@ -86,6 +83,9 @@ export function registerDisplaySummarySession(
     summarizer?.dispose();
     summarizer = undefined;
     if (live) live.active = false;
+    unsubscribeOwnership?.();
+    unsubscribeOwnership = undefined;
+    deps.store.enabled = false;
     const outgoing = sidecar;
     sidecar = undefined;
     return outgoing?.drain() ?? Promise.resolve();
@@ -96,11 +96,8 @@ export function registerDisplaySummarySession(
     deps.store.clear();
     const session = ctx as unknown as SessionCtx;
     if (!shouldRunDisplaySummary(session.mode, readSpawnRole(deps.env ?? process.env))) return;
-    if (!registered) {
-      registered = true;
-      deps.registerBuiltinWrappers(session.cwd, pi.getActiveTools());
-      deps.registerMessageRenderers();
-    }
+    deps.store.enabled = true;
+    deps.confirmBuiltinTools(pi.getActiveTools());
     const registry = session.modelRegistry as DisplaySummaryRegistry;
     const token = live = { active: true };
     const manager = session.sessionManager;
@@ -131,6 +128,7 @@ export function registerDisplaySummarySession(
         deps.store.notify([...batch.keys()]);
       },
     });
+    unsubscribeOwnership = deps.store.onToolRegistered(() => { cache.sync(); });
     summarizer = createDisplaySummarizer({
       store: deps.store,
       readConfig: deps.readConfig,
@@ -157,6 +155,9 @@ export function registerDisplaySummarySession(
     // even an outgoing append failure, without a process-global handoff cache.
     const transition = event as { reason?: string; targetSessionFile?: string };
     const draining = stop();
+    // Pi shuts down the old runtime before rebuilding incoming components.
+    // session_start resets values only: those components already own new links.
+    deps.store.retire();
     return draining.then(async () => {
       if (transition.reason === "fork" && transition.targetSessionFile && sourceFile && outgoing) {
         await seedNativeSummarySidecar(transition.targetSessionFile, { sessionFile: sourceFile, summaries: outgoing.snapshot() }, deps.store.toolNames, deps.sidecarIO);

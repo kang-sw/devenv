@@ -46,15 +46,23 @@ export interface DisplaySummary {
 
 /**
  * The adapter-owned summary map plus the re-render handles the renderers
- * register. Process-wide: renderers are registered once per process, while
- * the summarizer is recreated per lead session (`clear()` on session start).
+ * register. Presentation is registered before reconstruction; value reset at
+ * startup preserves incoming rows, while shutdown retires outgoing links.
  */
 export interface DisplaySummaryStore {
   get(id: string): DisplaySummary | undefined;
   set(id: string, summary: DisplaySummary): void;
+  /** Reset values without discarding already mounted incoming rows. */
   clear(): void;
-  /** Tool names whose rows render through a summary-aware renderer; only these are queued. */
+  /** Retire outgoing rows before the host reconstructs the next session. */
+  retire(): void;
+  readonly generation: number;
+  /** Summary reads are enabled only for the live lead TUI. Tracking may begin earlier. */
+  enabled: boolean;
+  /** Tool names confirmed by registration/active native loadout, never by presentation resolution. */
   readonly toolNames: Set<string>;
+  confirmTool(name: string): void;
+  onToolRegistered(listener: () => void): () => void;
   /** A tool row's `ToolRenderContext.invalidate`, recorded by its renderer. */
   trackInvalidate(id: string, invalidate: () => void): void;
   /** Re-render the rows for `ids`: invalidate tracked tool rows, then request one TUI render. */
@@ -66,11 +74,27 @@ export interface DisplaySummaryStore {
 export function createDisplaySummaryStore(): DisplaySummaryStore {
   const summaries = new Map<string, DisplaySummary>();
   const invalidators = new Map<string, () => void>();
+  const ownershipListeners = new Set<() => void>();
+  let generation = 0;
   const store: DisplaySummaryStore = {
     get: (id) => summaries.get(id),
     set: (id, summary) => { summaries.set(id, summary); },
-    clear: () => { summaries.clear(); invalidators.clear(); },
+    clear: () => { summaries.clear(); },
+    retire: () => { generation += 1; summaries.clear(); invalidators.clear(); store.enabled = false; },
+    get generation() { return generation; },
+    enabled: true,
     toolNames: new Set<string>(),
+    confirmTool(name) {
+      if (store.toolNames.has(name)) return;
+      store.toolNames.add(name);
+      for (const listener of ownershipListeners) {
+        try { listener(); } catch { /* Cosmetic replay notifications only. */ }
+      }
+    },
+    onToolRegistered(listener) {
+      ownershipListeners.add(listener);
+      return () => { ownershipListeners.delete(listener); };
+    },
     trackInvalidate: (id, invalidate) => { invalidators.set(id, invalidate); },
     notify(ids) {
       for (const id of ids) {

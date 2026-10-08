@@ -25,18 +25,10 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import {
-  createEditToolDefinition,
-  createFindToolDefinition,
-  createGrepToolDefinition,
-  createLsToolDefinition,
-  createPowerShellToolDefinition,
-  createWriteToolDefinition,
-  getMarkdownTheme,
-} from "@earendil-works/pi-coding-agent";
+import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import type { DisplaySummary, DisplaySummaryStore } from "./display-summary.ts";
 import { UseNativeResultFallback } from "./native-fallback.ts";
-import { loadHostPiTui } from "./pi-tui.ts";
+import { loadHostPiTui, truncateToWidth } from "./pi-tui.ts";
 import { summaryIdOf } from "./summary-id.ts";
 
 // ---------------------------------------------------------------------------
@@ -115,6 +107,58 @@ export function paintBold(theme: unknown, text: string): string {
 export const SUMMARY_FIELD_INDENT = 2;
 
 const summaryComponentBrand = Symbol("ws-display-summary-component");
+const rawComponents = new WeakMap<object, unknown>();
+const rawRenderers = new WeakMap<Function, Function | undefined>();
+
+function validSummary(value: DisplaySummary | undefined): value is DisplaySummary {
+  return !!value && typeof value.toolIntention === "string" && !!value.toolIntention.trim() &&
+    typeof value.toolResult === "string" && !!value.toolResult.trim() &&
+    (value.optionalContext === undefined || typeof value.optionalContext === "string");
+}
+
+function component(value: unknown): value is SummaryComponent {
+  return !!value && typeof (value as SummaryComponent).render === "function" && typeof (value as SummaryComponent).invalidate === "function";
+}
+
+/** Last-resort raw text when a delayed summary fault cannot reach a raw slot. */
+function rawText(value: unknown): SummaryComponent {
+  let text = "";
+  try { text = typeof value === "string" ? value : JSON.stringify(value) ?? ""; } catch { /* malformed raw metadata */ }
+  return { render: (width) => text.split("\n").map((line) => truncateToWidth(line, Math.max(0, width))), invalidate() {} };
+}
+
+/** Host catches renderer construction, not a returned component's later faults. */
+function guardedSummary(build: () => SummaryComponent, raw: () => unknown, fallback: SummaryComponent, previousRaw?: unknown, onFailure: () => void = () => {}): SummaryComponent {
+  let summary: SummaryComponent | undefined;
+  let failed = false;
+  const fail = () => { failed = true; try { onFailure(); } catch { /* Stale row metadata. */ } };
+  const guard = {
+    [summaryComponentBrand]: true,
+    render(width: number): string[] {
+      if (!failed) {
+        try {
+          summary ??= build();
+          if (!component(summary)) throw new Error("Invalid summary component");
+          const lines = summary.render(width);
+          if (!Array.isArray(lines) || lines.some((line) => typeof line !== "string")) throw new Error("Invalid summary lines");
+          return lines;
+        } catch { fail(); }
+      }
+      try {
+        let original = rawComponents.get(guard);
+        if (!component(original)) { original = raw(); rawComponents.set(guard, original); }
+        if (component(original)) return original.render(width);
+      } catch { /* Raw fallback may itself be unavailable; never return an invalid component. */ }
+      return fallback.render(width);
+    },
+    invalidate() {
+      try { summary?.invalidate(); } catch { fail(); }
+      try { const original = rawComponents.get(guard); if (component(original)) original.invalidate(); } catch { /* torn-down raw component */ }
+    },
+  };
+  if (component(previousRaw)) rawComponents.set(guard, previousRaw);
+  return guard;
+}
 
 /** True for a component this module built in place of a raw rendering. */
 export function isSummaryComponent(value: unknown): boolean {
@@ -172,16 +216,21 @@ export function createSummarySwitch(
   raw: SummaryComponent,
   buildSummary: (summary: DisplaySummary) => SummaryComponent,
 ): SummaryComponent {
+  const generation = store.generation;
   let cached: { summary: DisplaySummary; component: SummaryComponent } | undefined;
   return {
     render(width: number): string[] {
-      const summary = store.get(id);
-      if (!summary) return raw.render(width);
-      if (cached?.summary !== summary) cached = { summary, component: buildSummary(summary) };
-      return cached.component.render(width);
+      try {
+        const summary = store.enabled && store.generation === generation ? store.get(id) : undefined;
+        if (validSummary(summary)) {
+          if (cached?.summary !== summary) cached = { summary, component: guardedSummary(() => buildSummary(summary), () => raw, raw) };
+          return cached.component.render(width);
+        }
+      } catch { /* Summary lookup/readiness is cosmetic. */ }
+      return raw.render(width);
     },
     invalidate(): void {
-      raw.invalidate();
+      try { raw.invalidate(); } catch { /* A stale message card. */ }
       cached?.component.invalidate();
     },
   };
@@ -232,6 +281,7 @@ interface SummaryRenderContext {
   expanded?: unknown;
   isPartial?: unknown;
   isError?: unknown;
+  state?: unknown;
 }
 
 export type DisplaySummaryStoreSource = DisplaySummaryStore | (() => DisplaySummaryStore | undefined) | undefined;
@@ -269,18 +319,26 @@ export function wrapToolRenderersWithSummary(
   renderResult: ToolResultRenderer | undefined,
   store: DisplaySummaryStoreSource,
   tui: SummaryTuiSource,
-  options: { padX?: number; selfFramed?: boolean } = {},
+  options: { padX?: number; selfFramed?: boolean; eligible?: () => boolean } = {},
 ): { renderCall: ToolCallRenderer; renderResult: ToolResultRenderer } {
   const padX = options.padX ?? 0;
+  const generations = new WeakMap<object, number>();
+  const failedSummaries = new WeakMap<object, DisplaySummary>();
+  const identityOf = (context: SummaryRenderContext): object => context.state && typeof context.state === "object" ? context.state : context;
 
   function summaryFor(context: SummaryRenderContext | undefined, expanded: unknown): { summary: DisplaySummary; tui: SummaryTextModules } | undefined {
     const current = resolveStore(store);
-    if (!current || !context || typeof context.toolCallId !== "string") return undefined;
+    if (!current || !context || typeof context.toolCallId !== "string" || !context.toolCallId.trim()) return undefined;
+    const identity = identityOf(context);
+    if (!generations.has(identity)) generations.set(identity, current.generation);
+    if (generations.get(identity) !== current.generation) return undefined;
     if (typeof context.invalidate === "function") current.trackInvalidate(context.toolCallId, context.invalidate as () => void);
-    if (expanded) return undefined;
+    if (!current.enabled || expanded || (options.eligible && !options.eligible())) return undefined;
     const summary = current.get(context.toolCallId);
+    if (summary && failedSummaries.get(identity) === summary) return undefined;
     const modules = summary ? resolveTui(tui) : undefined;
-    return summary && modules ? { summary, tui: modules } : undefined;
+    return validSummary(summary) &&
+      typeof modules?.Text === "function" && (!options.selfFramed || typeof modules.Box === "function") ? { summary, tui: modules } : undefined;
   }
 
   function summaryFrame(children: SummaryComponent[], modules: SummaryTextModules, theme: unknown, context: SummaryRenderContext | undefined): SummaryComponent {
@@ -296,75 +354,89 @@ export function wrapToolRenderersWithSummary(
 
   function rawContext(context: unknown): unknown {
     const ctx = asContext(context);
-    return ctx && isSummaryComponent(ctx.lastComponent) ? { ...ctx, lastComponent: undefined } : context;
+    return ctx && isSummaryComponent(ctx.lastComponent) ? { ...ctx, lastComponent: rawComponents.get(ctx.lastComponent as object) } : context;
   }
 
-  return {
-    renderCall(args, theme, context) {
+  const wrapped = {
+    renderCall(args: unknown, theme: unknown, context: unknown) {
       const ctx = asContext(context);
-      const hit = summaryFor(ctx, ctx?.expanded);
-      if (hit) return summaryFrame([new hit.tui.Text(paintFg(theme, "toolTitle", paintBold(theme, toolName)), padX, 0)], hit.tui, theme, ctx);
-      if (!renderCall) throw new UseNativeResultFallback();
-      return renderCall(args, theme, rawContext(context));
+      const raw = () => { if (!renderCall) throw new UseNativeResultFallback(); return renderCall(args, theme, rawContext(context)); };
+      try {
+        const hit = summaryFor(ctx, ctx?.expanded);
+        if (hit) return guardedSummary(() => summaryFrame([new hit.tui.Text(paintFg(theme, "toolTitle", paintBold(theme, toolName)), padX, 0)], hit.tui, theme, ctx), raw, rawText(`${toolName}\n${JSON.stringify(args)}`), (rawContext(context) as SummaryRenderContext)?.lastComponent, () => { if (ctx) failedSummaries.set(identityOf(ctx), hit.summary); });
+      } catch { /* Our readiness/construction path must fall through to raw. */ }
+      return raw();
     },
-    renderResult(result, renderOptions, theme, context) {
+    renderResult(result: unknown, renderOptions: unknown, theme: unknown, context: unknown) {
       const ctx = asContext(context);
-      const hit = summaryFor(ctx, (renderOptions as { expanded?: unknown } | undefined)?.expanded);
-      if (hit) return summaryFrame(buildSummaryFields(hit.tui, hit.summary, theme, padX), hit.tui, theme, ctx);
-      if (!renderResult) throw new UseNativeResultFallback();
-      return renderResult(result, renderOptions, theme, rawContext(context));
+      const raw = () => { if (!renderResult) throw new UseNativeResultFallback(); return renderResult(result, renderOptions, theme, rawContext(context)); };
+      try {
+        const hit = summaryFor(ctx, (renderOptions as { expanded?: unknown } | undefined)?.expanded);
+        if (hit) return guardedSummary(() => summaryFrame(buildSummaryFields(hit.tui, hit.summary, theme, padX), hit.tui, theme, ctx), raw, rawText((result as { content?: unknown })?.content ?? result), (rawContext(context) as SummaryRenderContext)?.lastComponent, () => { if (ctx) failedSummaries.set(identityOf(ctx), hit.summary); });
+      } catch { /* Our readiness/construction path must fall through to raw. */ }
+      return raw();
     },
   };
+  rawRenderers.set(wrapped.renderCall, renderCall);
+  rawRenderers.set(wrapped.renderResult, renderResult);
+  return wrapped;
 }
 
-type ToolDefinition = Parameters<ExtensionAPI["registerTool"]>[0];
+/** Native eligibility is confirmed from the actual active loadout at session_start. */
+export const SUMMARIZED_BUILTIN_TOOL_NAMES = ["edit", "write", "grep", "find", "ls", "powershell"] as const;
 
-/** Pi built-ins whose lead rows are summarized when the session activates them. */
-const SUMMARIZED_BUILTIN_FACTORIES: Record<string, (cwd: string) => unknown> = {
-  edit: createEditToolDefinition,
-  write: createWriteToolDefinition,
-  grep: createGrepToolDefinition,
-  find: createFindToolDefinition,
-  ls: createLsToolDefinition,
-  powershell: createPowerShellToolDefinition,
-};
-
-export const SUMMARIZED_BUILTIN_TOOL_NAMES: readonly string[] = Object.keys(SUMMARIZED_BUILTIN_FACTORIES);
-
-/**
- * Registers a same-name wrapper for each active summarized built-in: the
- * native definition spread as-is (name, description, parameters and execute
- * unchanged, which fork registration comparison relies on) with only its
- * renderers wrapped. Lead TUI only, at `session_start`; returns the wrapped
- * names, which are also added to `store.toolNames`.
- */
-export function registerSummarizedBuiltinTools(
-  pi: Pick<ExtensionAPI, "registerTool">,
-  cwd: string,
-  store: DisplaySummaryStore,
-  activeToolNames: Iterable<string>,
-  tuiModules?: SummaryTextModules,
-): string[] {
+export function confirmSummarizedBuiltinTools(store: DisplaySummaryStore, activeToolNames: Iterable<string>): void {
   const active = new Set(activeToolNames);
-  const tuiRef: { current: SummaryTextModules | undefined } = { current: tuiModules };
-  if (!tuiModules) {
-    // Summaries arrive after a model round trip; until the host copy loads,
-    // rows simply stay raw.
-    void loadHostPiTui().then((modules) => { tuiRef.current ??= modules as unknown as SummaryTextModules; }, () => {});
+  for (const name of SUMMARIZED_BUILTIN_TOOL_NAMES) {
+    store.toolNames.delete(name);
+    if (active.has(name)) store.confirmTool(name);
   }
-  const registered: string[] = [];
-  for (const [name, create] of Object.entries(SUMMARIZED_BUILTIN_FACTORIES)) {
-    if (!active.has(name)) continue;
-    const native = create(cwd) as ToolDefinition & { renderCall?: ToolCallRenderer; renderResult?: ToolResultRenderer; renderShell?: string };
-    const wrapped = wrapToolRenderersWithSummary(name, native.renderCall, native.renderResult, store, tuiRef, {
-      padX: native.renderShell === "self" ? 1 : 0,
-      selfFramed: native.renderShell === "self",
+}
+
+/** Compatibility slice: the installed 1.0.4 API is newer than our dev declarations. */
+export interface SummaryToolRenderers {
+  renderShell?: "default" | "self";
+  renderCall?: ToolCallRenderer;
+  renderResult?: ToolResultRenderer;
+}
+export type SummaryToolResolver = (name: string, next: () => SummaryToolRenderers | undefined) => SummaryToolRenderers | undefined;
+
+/** Presentation only, registered at factory time, before Pi constructs retained rows. */
+export function registerDisplaySummaryToolResolver(
+  pi: { registerToolRenderer?: (resolver: SummaryToolResolver) => void },
+  store: DisplaySummaryStore,
+  tui: SummaryTuiSource,
+): boolean {
+  if (typeof pi.registerToolRenderer !== "function") return false;
+  pi.registerToolRenderer((name, next) => {
+    let initial: SummaryToolRenderers | undefined;
+    try { initial = next(); } catch { return undefined; }
+    try {
+    // A registration-time wrapper already has exactly this presentation layer.
+    if (initial?.renderCall && rawRenderers.has(initial.renderCall) && initial.renderResult && rawRenderers.has(initial.renderResult)) return initial;
+    const shell = initial?.renderShell;
+    const resolveRaw = () => next(); // Late tools resolve through the same public chain, not a name registry.
+    const call: ToolCallRenderer = (args, theme, context) => {
+      const renderer = resolveRaw()?.renderCall;
+      const raw = renderer && rawRenderers.has(renderer) ? rawRenderers.get(renderer) as ToolCallRenderer | undefined : renderer;
+      if (!raw) throw new UseNativeResultFallback();
+      return raw(args, theme, context);
+    };
+    const result: ToolResultRenderer = (value, options, theme, context) => {
+      const renderer = resolveRaw()?.renderResult;
+      const raw = renderer && rawRenderers.has(renderer) ? rawRenderers.get(renderer) as ToolResultRenderer | undefined : renderer;
+      if (!raw) throw new UseNativeResultFallback();
+      return raw(value, options, theme, context);
+    };
+    // Track even unknown incoming rows; eligibility gates values, not repaint linkage.
+    const wrapped = wrapToolRenderersWithSummary(name, call, result, store, tui, {
+      selfFramed: shell === "self", padX: shell === "self" ? 1 : 0,
+      eligible: () => store.toolNames.has(name),
     });
-    pi.registerTool({ ...native, renderCall: wrapped.renderCall, renderResult: wrapped.renderResult } as ToolDefinition);
-    store.toolNames.add(name);
-    registered.push(name);
-  }
-  return registered;
+    return { renderShell: shell, ...wrapped };
+    } catch { return undefined; } // Malformed presentation metadata cannot escape our resolver.
+  });
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -429,11 +501,17 @@ export async function registerAdapterMessageRenderers(
   summaries: DisplaySummaryStore | undefined,
   tuiModules?: AdapterMessageTuiModules,
 ): Promise<boolean> {
-  const tui = tuiModules ?? ((await loadHostPiTui()) as unknown as AdapterMessageTuiModules);
+  let tui: AdapterMessageTuiModules;
+  try {
+    tui = tuiModules ?? ((await loadHostPiTui({ fallback: false })) as unknown as AdapterMessageTuiModules);
+    if (![tui?.Text, tui?.Box, tui?.Spacer, tui?.Markdown].every((value) => typeof value === "function")) return false;
+  } catch { return false; }
   for (const customType of ADAPTER_SUMMARIZED_MESSAGE_TYPES) {
-    pi.registerMessageRenderer(customType, (message, options, theme) =>
-      buildAdapterMessageComponent(tui, message as { customType?: unknown; content?: unknown; details?: unknown }, theme, (options as { expanded?: boolean } | undefined)?.expanded, summaries) as never,
-    );
+    pi.registerMessageRenderer(customType, (message, options, theme) => {
+      try {
+        return buildAdapterMessageComponent(tui, message as { customType?: unknown; content?: unknown; details?: unknown }, theme, (options as { expanded?: boolean } | undefined)?.expanded, summaries) as never;
+      } catch { return undefined; } // Pi's default raw message, never an invalid component.
+    });
   }
   return true;
 }
