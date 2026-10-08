@@ -24,6 +24,7 @@ import {
   confirmSummarizedBuiltinTools,
   type SummaryToolResolver,
   summaryHeaderLine,
+  dedupeSubtitle,
   wrapToolRenderersWithSummary,
   type AdapterMessageTuiModules,
 } from "../src/display-summary-render.ts";
@@ -127,8 +128,8 @@ const theme = {
   bold: (text: string) => `<b>${text}</b>`,
 };
 
-const summary: DisplaySummary = { title: "auth in src/", optionalContext: "after the auth check", toolIntention: "searched for the token", toolResult: "found two call sites" };
-/** No title: the shape of a sidecar record written before titles existed. */
+const summary: DisplaySummary = { subtitle: "auth in src/", optionalContext: "after the auth check", toolIntention: "searched for the token", toolResult: "found two call sites" };
+/** No subtitle: the shape of a sidecar record written before titles existed. */
 const lean: DisplaySummary = { toolIntention: "read the plan", toolResult: "three phases" };
 
 function toolContext(toolCallId: string, overrides: Record<string, unknown> = {}) {
@@ -180,11 +181,22 @@ describe("shared summary layout", () => {
     assert.deepEqual(buildSummaryCard(modules, "title", lean, theme).render(80), expected.map((line) => `{customMessageBg}${line}`));
   });
 
-  test("the header carries the summary title on the same line in the accent token; only its first line", () => {
-    assert.equal(summaryHeaderLine("<b>edit</b>", { ...lean, title: " src/a.ts, src/b.ts " }, theme), "<b>edit</b> <accent>src/a.ts, src/b.ts</accent>");
-    assert.equal(summaryHeaderLine("<b>bash</b>", { ...lean, title: "npm test\nnode --test" }, theme), "<b>bash</b> <accent>npm test</accent>");
-    assert.equal(summaryHeaderLine("<b>edit</b>", lean, theme), "<b>edit</b>", "a legacy summary without a title keeps the bare header");
-    assert.equal(summaryHeaderLine("<b>edit</b>", { ...lean, title: "  " }, theme), "<b>edit</b>");
+  test("the header carries the summary subtitle on the same line in the accent token; only its first line", () => {
+    assert.equal(summaryHeaderLine("<b>edit</b>", { ...lean, subtitle: " src/a.ts, src/b.ts " }, theme), "<b>edit</b> <accent>src/a.ts, src/b.ts</accent>");
+    assert.equal(summaryHeaderLine("<b>bash</b>", { ...lean, subtitle: "npm test\nnode --test" }, theme), "<b>bash</b> <accent>npm test</accent>");
+    assert.equal(summaryHeaderLine("<b>edit</b>", lean, theme), "<b>edit</b>", "a legacy summary without a subtitle keeps the bare header");
+    assert.equal(summaryHeaderLine("<b>edit</b>", { ...lean, subtitle: "  " }, theme), "<b>edit</b>");
+  });
+
+  test("the subtitle never repeats the raw tool name or message kind the header already shows", () => {
+    assert.equal(summaryHeaderLine("<b>write</b>", { ...lean, subtitle: "write — /tmp/x" }, theme, "write"), "<b>write</b> <accent>/tmp/x</accent>");
+    assert.equal(summaryHeaderLine("<b>ws__api_list</b>", { ...lean, subtitle: "ws__api_list" }, theme, "ws__api_list"), "<b>ws__api_list</b>", "a bare repeat leaves the bare header");
+    assert.equal(summaryHeaderLine("<b>bash</b>", { ...lean, subtitle: " BASH: npm test " }, theme, "bash"), "<b>bash</b> <accent>npm test</accent>", "case-insensitive, separators stripped");
+    assert.equal(summaryHeaderLine("<b>write</b>", { ...lean, subtitle: "write -" }, theme, "write"), "<b>write</b>", "nothing left after the prefix");
+    assert.equal(summaryHeaderLine("<b>write</b>", { ...lean, subtitle: "write_file.ts" }, theme, "write"), "<b>write</b> <accent>write_file.ts</accent>", "an identifier that merely starts with the name stays");
+    assert.equal(summaryHeaderLine("<b>edit</b>", { ...lean, subtitle: "edit" }, theme), "<b>edit</b> <accent>edit</accent>", "no raw name, no dedupe");
+    assert.equal(dedupeSubtitle("ws__runtime_read", "ws__runtime_read"), "");
+    assert.equal(dedupeSubtitle("report – scout", "report"), "scout");
     assert.equal(buildSummaryBlock(modules, "head", summary, theme).render(80)[0], "head <accent>auth in src/</accent>");
     assert.equal(buildSummaryCard(modules, "head", summary, theme).render(80)[0], "{customMessageBg}head <accent>auth in src/</accent>");
   });
@@ -263,8 +275,11 @@ describe("registerWsTool tool rows", () => {
 
     const call = tool.renderCall({ query: "auth" }, theme, { ...context, lastComponent: rawCall });
     const fields = tool.renderResult(result, { expanded: false, isPartial: false }, theme, { ...context, lastComponent: rawResult });
-    assert.equal(text(call), "<toolTitle><b>ws__tickets_query</b></toolTitle> <accent>auth in src/</accent>", "the call slot is the bold tool-name header plus the title");
+    assert.equal(text(call), "<toolTitle><b>ws__tickets_query</b></toolTitle> <accent>auth in src/</accent>", "the call slot is the bold tool-name header plus the subtitle");
     assert.doesNotMatch(text(call), /query: auth/, "the raw argument preview is hidden once summarized");
+    store.set("call-1", { ...summary, subtitle: "ws__tickets_query: auth in src/" });
+    assert.equal(text(tool.renderCall({ query: "auth" }, theme, { ...context, lastComponent: rawCall })), "<toolTitle><b>ws__tickets_query</b></toolTitle> <accent>auth in src/</accent>", "a repeated tool name is stripped against the raw name");
+    store.set("call-1", summary);
     assert.deepEqual((fields as FakeComponent).render(80), [
       "",
       "  <dim>after the auth check</dim>",
@@ -602,8 +617,11 @@ describe("adapter message renderers", () => {
       assert.match(lines[0]!, /^\{customMessageBg\}<customMessageLabel><b>[A-Z][a-z]+ [a-z]+<\/b><\/customMessageLabel>$/, "a short readable kind header");
       assert.deepEqual(lines.slice(1), ["{customMessageBg}", "{customMessageBg}    <text>read the plan</text>", "{customMessageBg}", "{customMessageBg}<muted>three phases</muted>"]);
 
-      store.set(details[SUMMARY_ID_KEY] as string, { ...lean, title: "lead · context 80%" });
-      assert.match(component.render(80)[0]!, /<\/customMessageLabel> <accent>lead · context 80%<\/accent>$/, "the kind header carries the title");
+      store.set(details[SUMMARY_ID_KEY] as string, { ...lean, subtitle: "lead · context 80%" });
+      assert.match(component.render(80)[0]!, /<\/customMessageLabel> <accent>lead · context 80%<\/accent>$/, "the kind header carries the subtitle");
+      const kind = lines[0]!.match(/<b>(.+)<\/b>/)![1]!;
+      store.set(details[SUMMARY_ID_KEY] as string, { ...lean, subtitle: kind.toLowerCase() });
+      assert.equal(component.render(80)[0], lines[0], "a subtitle repeating the kind leaves the bare kind header");
 
       const expanded = renderers.get(customType)!({ ...message, content: "raw text" }, { expanded: true }, theme) as FakeComponent;
       assert.match(text(expanded), /raw text/, "expanded is raw");

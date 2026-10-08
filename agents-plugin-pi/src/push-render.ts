@@ -245,7 +245,7 @@ export function buildPushComponent(
   }
   if (parts.status) box.addChild(new tui.Text(paint("dim", parts.status), 0, 0));
   const summaryHead = paint(isAgentReport ? "customMessageLabel" : "muted", paintBold(theme, displayHead));
-  return summarizedRow(box, summaries, summaryIdOf(message.details), expanded, (summary) => buildSummaryCard(tui, summaryHead, summary, theme));
+  return summarizedRow(box, summaries, summaryIdOf(message.details), expanded, (summary) => buildSummaryCard(tui, summaryHead, summary, theme, displayHead));
 }
 
 /**
@@ -292,8 +292,9 @@ export function buildPushBatchComponent(
         }, theme);
         box.addChild(body);
       }
-      const summaryHead = paint("customMessageLabel", paintBold(theme, summaryKindLabel(item.customType)));
-      component = summarizedRow(box, summaries, summaryIdOf(item.details), expanded, (summary) => buildSummaryCard(tui, summaryHead, summary, theme));
+      const kind = summaryKindLabel(item.customType);
+      const summaryHead = paint("customMessageLabel", paintBold(theme, kind));
+      component = summarizedRow(box, summaries, summaryIdOf(item.details), expanded, (summary) => buildSummaryCard(tui, summaryHead, summary, theme, kind));
     }
     if (component) {
       container.addChild(component);

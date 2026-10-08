@@ -4,7 +4,7 @@
  * seams that put them in front of the raw renderers.
  *
  * Display contract: a summarized row is a one-line header (the bold tool
- * name, or the message kind, then the summary's `title` in the accent color
+ * name, or the message kind, then the summary's `subtitle` in the accent color
  * Pi uses for tool-call paths), a blank line, and the fields.
  * `optionalContext` stays dim and indented; `toolIntention` is normal text
  * indented four spaces, then a blank line separates the unindented muted
@@ -194,24 +194,47 @@ export function buildSummaryFields(tui: SummaryTextModules, summary: DisplaySumm
 }
 
 /**
- * `header` (already painted) followed by the summary's title on the same
- * line. The title is cut to its first line so the header stays one line; a
- * legacy summary without a title keeps the bare header.
+ * `subtitle` with the raw tool name (or message kind) `name` removed: the
+ * header already shows it, yet the model sometimes repeats it ("write —
+ * /tmp/x.txt") or, for a call without arguments, answers with it alone.
+ * An exact match (case-insensitive) yields nothing; a leading copy is
+ * stripped with any separators after it. Compares against the raw name, never
+ * the painted header.
  */
-export function summaryHeaderLine(header: string, summary: DisplaySummary, theme: unknown): string {
-  const title = summary.title?.trim().split(/\r?\n/, 1)[0]?.trim();
-  return title ? `${header} ${paintFg(theme, "accent", title)}` : header;
+export function dedupeSubtitle(subtitle: string, name: string | undefined): string {
+  const trimmed = subtitle.trim();
+  const bare = name?.trim().toLowerCase();
+  if (!bare) return trimmed;
+  if (trimmed.toLowerCase() === bare) return "";
+  if (!trimmed.toLowerCase().startsWith(bare)) return trimmed;
+  const rest = trimmed.slice(bare.length);
+  const stripped = rest.replace(/^[\s—–\-:]+/, "");
+  // A longer identifier that merely starts with the name ("write_file") is not a repeat.
+  return stripped.length < rest.length ? stripped.trim() : trimmed;
 }
 
-/** A painted header line (plus the title) over the fields, with no frame of its own. */
-export function buildSummaryBlock(tui: SummaryTextModules, header: string, summary: DisplaySummary, theme: unknown): SummaryComponent {
-  return stack([new tui.Text(summaryHeaderLine(header, summary, theme), 0, 0), ...buildSummaryFields(tui, summary, theme)]);
+/**
+ * `header` (already painted) followed by the summary's subtitle on the same
+ * line. `name` is the raw tool name or message kind the header shows; the
+ * subtitle is deduped against it and cut to its first line so the header stays
+ * one line. A summary without a subtitle (none given, or nothing left after
+ * the dedupe) keeps the bare header.
+ */
+export function summaryHeaderLine(header: string, summary: DisplaySummary, theme: unknown, name?: string): string {
+  const firstLine = summary.subtitle?.trim().split(/\r?\n/, 1)[0] ?? "";
+  const subtitle = dedupeSubtitle(firstLine, name);
+  return subtitle ? `${header} ${paintFg(theme, "accent", subtitle)}` : header;
+}
+
+/** A painted header line (plus the subtitle) over the fields, with no frame of its own. */
+export function buildSummaryBlock(tui: SummaryTextModules, header: string, summary: DisplaySummary, theme: unknown, name?: string): SummaryComponent {
+  return stack([new tui.Text(summaryHeaderLine(header, summary, theme, name), 0, 0), ...buildSummaryFields(tui, summary, theme)]);
 }
 
 /** A message summary on the custom-message card: the shared `customMessageBg` box, header, fields. */
-export function buildSummaryCard(tui: SummaryCardModules, header: string, summary: DisplaySummary, theme: unknown): SummaryComponent {
+export function buildSummaryCard(tui: SummaryCardModules, header: string, summary: DisplaySummary, theme: unknown, name?: string): SummaryComponent {
   const box = new tui.Box(1, 1, (text) => paintBg(theme, "customMessageBg", text));
-  box.addChild(new tui.Text(summaryHeaderLine(header, summary, theme), 0, 0));
+  box.addChild(new tui.Text(summaryHeaderLine(header, summary, theme, name), 0, 0));
   for (const field of buildSummaryFields(tui, summary, theme)) box.addChild(field);
   return box;
 }
@@ -374,7 +397,7 @@ export function wrapToolRenderersWithSummary(
       const raw = () => { if (!renderCall) throw new UseNativeResultFallback(); return renderCall(args, theme, rawContext(context)); };
       try {
         const hit = summaryFor(ctx, ctx?.expanded);
-        if (hit) return guardedSummary(() => summaryFrame([new hit.tui.Text(summaryHeaderLine(paintFg(theme, "toolTitle", paintBold(theme, toolName)), hit.summary, theme), padX, 0)], hit.tui, theme, ctx), raw, rawText(`${toolName}\n${JSON.stringify(args)}`), (rawContext(context) as SummaryRenderContext)?.lastComponent, () => { if (ctx) failedSummaries.set(identityOf(ctx), hit.summary); });
+        if (hit) return guardedSummary(() => summaryFrame([new hit.tui.Text(summaryHeaderLine(paintFg(theme, "toolTitle", paintBold(theme, toolName)), hit.summary, theme, toolName), padX, 0)], hit.tui, theme, ctx), raw, rawText(`${toolName}\n${JSON.stringify(args)}`), (rawContext(context) as SummaryRenderContext)?.lastComponent, () => { if (ctx) failedSummaries.set(identityOf(ctx), hit.summary); });
       } catch { /* Our readiness/construction path must fall through to raw. */ }
       return raw();
     },
@@ -499,8 +522,9 @@ export function buildAdapterMessageComponent(
 ): SummaryComponent {
   const raw = buildDefaultCustomMessageComponent(tui, message, theme);
   const customType = typeof message.customType === "string" ? message.customType : "";
-  const header = paintFg(theme, "customMessageLabel", paintBold(theme, summaryKindLabel(customType)));
-  return summarizedRow(raw, summaries, summaryIdOf(message.details), expanded, (summary) => buildSummaryCard(tui, header, summary, theme));
+  const kind = summaryKindLabel(customType);
+  const header = paintFg(theme, "customMessageLabel", paintBold(theme, kind));
+  return summarizedRow(raw, summaries, summaryIdOf(message.details), expanded, (summary) => buildSummaryCard(tui, header, summary, theme, kind));
 }
 
 /**
