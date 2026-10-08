@@ -424,16 +424,6 @@
     "260920-bug-pi-tool-call-timeout-and-process-cleanup": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
-    "260921-bug-pi-child-bootstrap-error-loses-diagnostic": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-07T12:54:28Z"
-      }
-    },
     "260921-bug-pi-parallel-worktree-workers-inherit-lead-cwd": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
@@ -448,16 +438,6 @@
     },
     "260921-refactor-pi-shared-atomic-write-util": {
       "registered_at": "2026-09-24T10:38:33Z"
-    },
-    "260922-bug-ws-ship-prime-pre-release-pi-runtime": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-07T12:54:22Z"
-      }
     },
     "260923-bug-pi-execute-approval-accepted-worker-hangs": {
       "registered_at": "2026-09-24T10:38:33Z"
@@ -531,47 +511,11 @@
     "261004-bug-pi-identical-summary-compaction-event": {
       "registered_at": "2026-10-04T10:35:29Z"
     },
-    "261004-research-pi-post-bump-publish-worker-startup": {
-      "registered_at": "2026-10-04T04:20:22Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-07T12:39:35Z"
-      }
-    },
     "261004-research-pi-reviewer-report-scope-discovery": {
       "registered_at": "2026-10-04T03:10:48Z"
     },
     "261007-bug-mailbox-tests-leak-ambient-ws-mailbox-env": {
       "registered_at": "2026-10-07T14:15:57Z"
-    },
-    "261007-bug-pi-child-runtime-wiring-untested": {
-      "registered_at": "2026-10-07T13:47:36Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-07T13:55:50Z",
-        "impl": {
-          "branch": "impl/develop/avoid-stoic-grape"
-        }
-      }
-    },
-    "261007-bug-pi-child-start-fails-after-version-bump": {
-      "registered_at": "2026-10-07T12:27:27Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-07T13:02:45Z",
-        "impl": {
-          "branch": "impl/develop/hasty-grew-hula"
-        }
-      }
     },
     "261007-bug-pi-fork-lineage-keeps-bootstrap-key-after-adoption": {
       "registered_at": "2026-10-07T08:41:34Z"
@@ -606,6 +550,9 @@
     },
     "261007-research-prose-pin-test-policy": {
       "registered_at": "2026-10-07T08:41:37Z"
+    },
+    "261008-bug-pi-display-summary-silent-dogfood": {
+      "registered_at": "2026-10-08T00:33:33Z"
     }
   }
 }
