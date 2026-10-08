@@ -2652,15 +2652,32 @@ func aiContextDebugEvents(t *testing.T, server *Server, root string) []map[strin
 	return events
 }
 
-// debugEventKey identifies a debug event by its full content (ts included),
-// so two snapshots of the ring buffer can be diffed after eviction.
-func debugEventKey(t *testing.T, event map[string]any) string {
+// newDebugEvents returns the events in after that are not in before. The ring
+// buffer is full once the package has run enough tests, so the calls between
+// the two snapshots can evict older events: diff by full content (ts
+// included) instead of by count or position.
+func newDebugEvents(t *testing.T, before, after []map[string]any) []map[string]any {
 	t.Helper()
-	raw, err := json.Marshal(event)
-	if err != nil {
-		t.Fatalf("encode debug event: %v", err)
+	key := func(event map[string]any) string {
+		raw, err := json.Marshal(event)
+		if err != nil {
+			t.Fatalf("encode debug event: %v", err)
+		}
+		return string(raw)
 	}
-	return string(raw)
+	seen := map[string]int{}
+	for _, event := range before {
+		seen[key(event)]++
+	}
+	var fresh []map[string]any
+	for _, event := range after {
+		if k := key(event); seen[k] > 0 {
+			seen[k]--
+			continue
+		}
+		fresh = append(fresh, event)
+	}
+	return fresh
 }
 
 func TestServeStdioGitCommitAIContextConditionsAndDebugEvent(t *testing.T) {
@@ -2738,22 +2755,8 @@ func TestServeStdioGitCommitAIContextConditionsAndDebugEvent(t *testing.T) {
 		t.Fatalf("git.commit with a large valid ai_context array = %s", largeArrayResultText)
 	}
 
-	// The ring buffer is full once the package has run enough tests, so these
-	// calls' other debug events can evict older ai_context events between the
-	// two snapshots: diff by content instead of by count or position.
 	after := aiContextDebugEvents(t, server, root)
-	seen := map[string]int{}
-	for _, event := range before {
-		seen[debugEventKey(t, event)]++
-	}
-	var newEvents []map[string]any
-	for _, event := range after {
-		if key := debugEventKey(t, event); seen[key] > 0 {
-			seen[key]--
-			continue
-		}
-		newEvents = append(newEvents, event)
-	}
+	newEvents := newDebugEvents(t, before, after)
 	if len(newEvents) != 5 {
 		t.Fatalf("expected 5 new git.commit.ai_context_received events, got %d (%d before, %d after)", len(newEvents), len(before), len(after))
 	}
@@ -2852,10 +2855,11 @@ func TestServeStdioGitCommitRejectsNonArrayAIContext(t *testing.T) {
 	// arrival shape, so a wrong-type call must still record one (marked
 	// type_mismatch) rather than short-circuiting before it is ever logged.
 	after := aiContextDebugEvents(t, server, root)
-	if len(after) != len(before)+1 {
-		t.Fatalf("expected 1 new git.commit.ai_context_received event, got %d before and %d after", len(before), len(after))
+	newEvents := newDebugEvents(t, before, after)
+	if len(newEvents) != 1 {
+		t.Fatalf("expected 1 new git.commit.ai_context_received event, got %d (%d before, %d after)", len(newEvents), len(before), len(after))
 	}
-	newEvent := after[len(before)]
+	newEvent := newEvents[0]
 	if newEvent["type_mismatch"] != true || newEvent["present"] != true {
 		t.Fatalf("type-mismatch debug event = %#v", newEvent)
 	}
