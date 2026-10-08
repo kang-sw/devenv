@@ -532,19 +532,6 @@
     "261007-bug-session-record-cross-process-write-race": {
       "registered_at": "2026-10-07T05:35:57Z"
     },
-    "261007-feat-pi-display-summary": {
-      "registered_at": "2026-10-07T07:00:22Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-07T08:22:38Z",
-        "impl": {
-          "branch": "impl/develop/train-pond-heap"
-        }
-      }
-    },
     "261007-feat-stale-agenda-pruning-nudge": {
       "registered_at": "2026-10-07T05:36:00Z"
     },
@@ -557,34 +544,11 @@
     "261008-bug-pi-native-summary-background": {
       "registered_at": "2026-10-08T02:01:01Z"
     },
-    "261008-bug-pi-summary-rendering-after-reload": {
-      "registered_at": "2026-10-08T02:56:32Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-08T04:39:55Z",
-        "impl": {
-          "branch": "impl/develop/catty-hertz-trout"
-        }
-      }
+    "261008-bug-windows-mailbox-wait-outlives-pi-host": {
+      "registered_at": "2026-10-08T08:39:26Z"
     },
     "261008-bug-ws-git-merge-switches-worker-occupied-root": {
       "registered_at": "2026-10-08T04:40:47Z"
-    },
-    "261008-feat-pi-display-summary-sidecar-persistence": {
-      "registered_at": "2026-10-08T01:37:46Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-08T02:14:22Z",
-        "impl": {
-          "branch": "impl/develop/wipe-exert-prior"
-        }
-      }
     }
   }
 }
