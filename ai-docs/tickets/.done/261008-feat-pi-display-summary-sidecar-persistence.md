@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: f9fc153241649568
 sage-review-completeness-reviewed: f9fc153241649568
+completed: 2026-10-08
 ---
 
 # Persist Pi display summaries in a lead-conversation sidecar with lifecycle handling
@@ -166,3 +167,35 @@ paused configuration and late provider responses, retained-history eligibility,
 and exclusion of the Previous conversation block. Preserve the completed
 feature's delayed-flush behavior. Configured promotion reviews remain required
 before this idea becomes an execution target.
+
+### Result (565c24c4e) - 2026-10-08
+
+- Added `display-summary-sidecar.ts` for version 1 append-only batches, validated
+  last-valid replay, nondestructive tail boundary repair, first-save backfill,
+  retained-history row eligibility, scoped orphan cleanup, and independent
+  native fork/copy inheritance. Provider history and render invalidators remain
+  memory-only; the Previous conversation block remains excluded.
+- Session wiring captures the originating Pi header ID and binds its file path
+  once, including an initially undefined path assigned by the first save.
+  Restoration yields to newer live acceptance. Shutdown/reload/replacement
+  dispose unfinished configuration/provider work immediately and drain accepted
+  appends; Pi 1.0.4 native targets are seeded before runtime recreation.
+- Kept unrecognizable, empty, malformed-tail, or mixed-ownership orphan files
+  when deletion cannot establish consistent supported ownership. Foreign cache
+  files and symlinks remain untouched; observed conversation deletion disables
+  further writes for that controller.
+- Independent test leaf `2a9f78eca` exposed the first-save path-assignment defect,
+  fixed in `565c24c4e`. The one-pass lite review found one Critical: an existing
+  unreadable parent cache discarded the accepted live fork snapshot. Fixed in
+  `cb0e3efe5`, with regressions for cache-read failure and symlink replacement.
+  No review findings remain; no re-review was allocated.
+- Verification after the review fix: four focused display-summary suites passed
+  **107/107**; `cd agents-plugin-pi && npm test -- --test-reporter=dot` passed the
+  full package suite; an offline installed-Pi-1.0.4 SessionManager smoke passed
+  first save, native fork provenance/row IDs, child header binding, reopen,
+  compaction retention and parent-file independence; `git diff --check` passed.
+  The initial direct test command inherited the worker role and suppressed a
+  lead-only history fixture; using the package's documented environment
+  exclusions resolved that environment failure without changing the test.
+- Omitted: live provider/TUI dogfood (offline verification only); separate build
+  command (the package declares none); independent re-review (lite allocation).

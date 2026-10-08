@@ -23,7 +23,8 @@
  *
  * Summaries live in a `DisplaySummaryStore` keyed by row id (tool call id,
  * the `summary-id.ts` stamp of a custom message, or a custom entry's id); the
- * renderers read it at render time. Nothing is persisted.
+ * renderers read it at render time. Session wiring persists accepted batches
+ * separately from the provider request log.
  */
 
 import { convertToLlm, serializeConversation } from "@earendil-works/pi-coding-agent";
@@ -376,6 +377,8 @@ export interface DisplaySummarizerDeps {
   /** Stable per lead session; sent as the provider cache/session id. */
   sessionId: string;
   timeoutMs?: number;
+  /** Accepted values only; synchronous handoff to the originating session's sidecar. */
+  onAccepted?(summaries: ReadonlyMap<string, DisplaySummary>): void;
 }
 
 export interface DisplaySummarizer {
@@ -496,6 +499,7 @@ export function createDisplaySummarizer(deps: DisplaySummarizerDeps): DisplaySum
     const summaries = parseSummaryResponse(response, labels);
     if (summaries.size === 0) return;
     for (const [id, summary] of summaries) deps.store.set(id, summary);
+    deps.onAccepted?.(summaries);
     deps.store.notify([...summaries.keys()]);
   }
 
