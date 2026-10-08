@@ -105,16 +105,20 @@ export function registerDisplaySummarySession(
     const token = live = { active: true };
     const manager = session.sessionManager;
     const sessionId = manager?.getSessionId() ?? randomUUID();
-    const sessionFile = manager?.getSessionFile();
+    let sessionFile = manager?.getSessionFile();
     let entries = manager?.getEntries() ?? [];
+    const refresh = (): void => {
+      // A first save may assign a previously absent path. Bind it once, only
+      // while the originating manager still has the captured Pi header ID.
+      if (manager?.getSessionId() !== sessionId) return;
+      sessionFile ??= manager?.getSessionFile();
+      // Once bound, equal IDs at another path still cannot redirect old work.
+      if (manager?.getSessionFile() === sessionFile) entries = manager?.getEntries() ?? entries;
+    };
     conversation = {
-      sessionId, sessionFile,
-      entries() {
-        // Older Pi/fakes can mutate the same manager on replacement. A queued
-        // append still owns its original path, ID and last retained history.
-        if (manager?.getSessionId() === sessionId && manager.getSessionFile() === sessionFile) entries = manager.getEntries();
-        return entries;
-      },
+      sessionId,
+      get sessionFile() { refresh(); return sessionFile; },
+      entries() { refresh(); return entries; },
     };
     const cache = sidecar = createSummarySidecar({
       conversation, toolNames: deps.store.toolNames, io: deps.sidecarIO,

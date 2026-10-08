@@ -194,8 +194,8 @@ export async function seedNativeSummarySidecar(
 export function createSummarySidecar(deps: SummarySidecarDeps): SummarySidecar {
   const io = deps.io ?? fs;
   const { conversation } = deps;
-  const path = conversation.sessionFile ? resolve(conversation.sessionFile) : undefined;
-  const sidecar = path ? path + DISPLAY_SUMMARY_SIDECAR_SUFFIX : undefined;
+  let path = conversation.sessionFile ? resolve(conversation.sessionFile) : undefined;
+  let sidecar = path ? path + DISPLAY_SUMMARY_SIDECAR_SUFFIX : undefined;
   const values = new Map<string, DisplaySummary>();
   const live = new Set<string>();
   let pending: Map<string, DisplaySummary>[] = [];
@@ -205,6 +205,10 @@ export function createSummarySidecar(deps: SummarySidecarDeps): SummarySidecar {
   let queue = deps.startAfter ?? Promise.resolve();
 
   async function available(): Promise<boolean> {
+    if (!path && conversation.sessionFile) {
+      path = resolve(conversation.sessionFile);
+      sidecar = path + DISPLAY_SUMMARY_SIDECAR_SUFFIX;
+    }
     if (!path || disabled) return false;
     const stat = await io.lstat(path).catch((error: NodeJS.ErrnoException) => {
       if (error.code === "ENOENT") return undefined;
