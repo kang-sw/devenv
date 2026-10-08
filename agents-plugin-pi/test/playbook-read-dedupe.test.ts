@@ -55,9 +55,10 @@ test("malformed, stale, and ambiguous pointer provenance fail closed to the fres
   assert.deepEqual(dedupeRead([...first, call("two", "ws__playbook_read", { name: "lead" }), result("two", missingEnvelope)], "three", "playbook.read", key, body), { text: body, deduped: false });
 });
 
-test("ws-skill is isolated from playbook reads and includes args in its key", () => {
-  const key = wsSkillKey({ name: "implementer", args: "a" });
-  assert.notEqual(key, wsSkillKey({ name: "implementer", args: "b" }));
+test("ws-skill is isolated from playbook reads and keys by name only, ignoring legacy args", () => {
+  const key = wsSkillKey({ name: "implementer", args: "b" });
+  assert.equal(key, wsSkillKey({ name: "implementer", args: "a" }));
+  assert.equal(key, wsSkillKey({ name: "implementer" }));
   const entries = [call("one", "ws__playbook_read", { name: "implementer" }), result("one", body), call("two", "ws-skill", { name: "implementer", args: "a" }), result("two", body)];
   assert.equal(dedupeRead(entries, "three", "ws-skill", key, body).deduped, true);
   assert.equal(dedupeRead(entries, "three", "playbook.read", playbookReadKey({ name: "implementer" }), body).deduped, true);

@@ -134,7 +134,7 @@
  * adapter-owned, mirroring the workflow-manual/tool-reshape split already in
  * this file: a dedicated `<available_skills>` block (pointing at `ws-skill`,
  * never `read`) is appended as the third ordered item of the ws
- * system-prompt block, and `ws-skill(name, args?)` is registered globally
+ * system-prompt block, and `ws-skill(name)` is registered globally
  * and added to the active-tools surface for lead AND fork alike
  * (`isLeadOrFork`, not the narrower lead-only gate
  * `addForkToolIfLead`/`addAskToolsIfLead` use). This ticket also collapses
