@@ -205,8 +205,8 @@ import { buildOrphanNoticeMessage, buildOrphanPush, captureOrphans, noSessionSid
 import { registerGoalLoop, resolveAgentWaitAnimation, resolveChildRetentionTtlDays, resolveSettleDelayMs, type GoalLoopConfig } from "./goal-loop.ts";
 import { registerCompactionHistory } from "./compaction-history.ts";
 import { registerLeadMemoryLog } from "./lead-memory-log.ts";
-import { createWsConfigKeyReader, createWsConfigReader, thenOrNow } from "./adapter-config.ts";
-import { createDisplaySummaryStore, DISPLAY_SUMMARY_CONFIG_KEYS, displaySummaryConfigFrom, type DisplaySummaryStore } from "./display-summary.ts";
+import { ADAPTER_CONFIG_MANIFEST_FILE, createWsConfigKeyReader, createWsConfigReader, thenOrNow } from "./adapter-config.ts";
+import { createDisplaySummaryStore, DISPLAY_SUMMARY_CONFIG_KEYS, displaySummaryConfigFrom, readManifestDefaultStyle, type DisplaySummaryStore } from "./display-summary.ts";
 import { registerDisplaySummarySession } from "./display-summary-session.ts";
 import { confirmSummarizedBuiltinTools, registerAdapterMessageRenderers, registerDisplaySummaryToolResolver, type SummaryToolResolver } from "./display-summary-render.ts";
 import { registerSkillResources } from "./skills-dir.ts";
@@ -679,6 +679,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   registerDisplaySummarySession(pi, {
     store: displaySummaryStore,
     readConfig: async () => displaySummaryConfigFrom(await readConfigKeys(DISPLAY_SUMMARY_CONFIG_KEYS)),
+    readDefaultStyle: () => readManifestDefaultStyle(join(pluginDir, ADAPTER_CONFIG_MANIFEST_FILE)),
     confirmBuiltinTools: (active) => { confirmSummarizedBuiltinTools(displaySummaryStore, active); },
   });
   registerCompactionHistory(pi);

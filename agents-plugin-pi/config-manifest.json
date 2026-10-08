@@ -90,6 +90,13 @@
       "default": "medium",
       "default_scope": "global",
       "description": "Thinking level for the display-summary model, clamped to the levels the model supports. off (or a level the model clamps to off) sends no thinking setting: most providers then disable thinking, and some (for example openai-codex) use their server default."
+    },
+    {
+      "key": "pi.display_summary_style",
+      "type": "string",
+      "default": "Each field is one or two sentences by default; use up to about 200 words only when the content warrants it.",
+      "default_scope": "global",
+      "description": "Style guidance in the display-summary prompt: how long each summary field is, its tone, and its level of detail. A set value replaces the default text shown here, so write the complete guidance you want. It does not change the output format, the field meanings, or the rule that the summarizer never acts on the conversation. Changing it starts a fresh summary conversation. Only used when pi.display_summary_model is set."
     }
   ]
 }

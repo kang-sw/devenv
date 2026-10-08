@@ -38,6 +38,8 @@ export function shouldRunDisplaySummary(mode: string | undefined, role: SpawnRol
 export interface DisplaySummarySessionDeps {
   store: DisplaySummaryStore;
   readConfig: DisplaySummaryConfigReader;
+  /** The manifest default style; forwarded to the summarizer. */
+  readDefaultStyle?(): string | undefined;
   /** Confirm the live native loadout; does not register or replace execution tools. */
   confirmBuiltinTools(activeToolNames: readonly string[]): void;
   /** Test seam: the model call bound to the session's registry. */
@@ -132,6 +134,7 @@ export function registerDisplaySummarySession(
     summarizer = createDisplaySummarizer({
       store: deps.store,
       readConfig: deps.readConfig,
+      readDefaultStyle: deps.readDefaultStyle,
       resolveModel: createModelResolver(registry),
       complete: (deps.createCompletion ?? createProviderCompletion)(registry),
       // Provider-cache UUID is intentionally unrelated to durable Pi ownership.
