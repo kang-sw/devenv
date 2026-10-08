@@ -9,11 +9,16 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import type { Api, AssistantMessage, Context, Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import {
   DISPLAY_SUMMARY_CONFIG_KEYS,
   DISPLAY_SUMMARY_OUTPUT_TOOL,
-  DISPLAY_SUMMARY_SYSTEM_PROMPT,
+  DISPLAY_SUMMARY_PROMPT_HEAD,
+  DISPLAY_SUMMARY_PROMPT_TAIL,
+  DISPLAY_SUMMARY_STYLE_KEY,
+  composeDisplaySummaryPrompt,
+  readManifestDefaultStyle,
   createDisplaySummarizer,
   createDisplaySummaryStore,
   createModelResolver,
@@ -63,7 +68,12 @@ function answer(items: unknown[] | undefined, extra: Partial<AssistantMessage> =
 
 interface Call { model: Model<Api>; context: Context; options: SimpleStreamOptions }
 
-function harness(config: DisplaySummaryConfig = { model: "acme/mini" }, modelOverrides: Partial<Model<Api>> = {}) {
+const MANIFEST_PATH = new URL("../config-manifest.json", import.meta.url).pathname;
+/** The prompt text sent before the style knob existed; the composed default must equal it byte for byte. */
+const DEFAULT_PROMPT = readFileSync(new URL("./fixtures/display-summary-default-prompt.txt", import.meta.url), "utf8");
+const DEFAULT_STYLE = readManifestDefaultStyle(MANIFEST_PATH);
+
+function harness(config: DisplaySummaryConfig = { model: "acme/mini" }, modelOverrides: Partial<Model<Api>> = {}, defaultStyle?: string) {
   const store = createDisplaySummaryStore();
   store.toolNames.add("ws__tickets_query");
   store.toolNames.add("edit");
@@ -75,6 +85,7 @@ function harness(config: DisplaySummaryConfig = { model: "acme/mini" }, modelOve
   const summarizer = createDisplaySummarizer({
     store,
     readConfig: async () => state.config,
+    readDefaultStyle: defaultStyle === undefined ? undefined : () => defaultStyle,
     resolveModel: (spec) => spec === "acme/mini" ? model(modelOverrides) : undefined,
     complete: async (m, context, options) => {
       calls.push({ model: m, context: structuredClone({ ...context, tools: context.tools }), options });
@@ -177,9 +188,9 @@ describe("summary ids", () => {
 
 describe("configuration and effort", () => {
   test("reads model, effort and the unprefixed workflow.lang", () => {
-    assert.deepEqual([...DISPLAY_SUMMARY_CONFIG_KEYS], ["pi.display_summary_model", "pi.display_summary_effort", "workflow.lang"]);
-    assert.deepEqual(displaySummaryConfigFrom({ "pi.display_summary_model": " acme/mini ", "pi.display_summary_effort": "low", "workflow.lang": "Korean" }), { model: "acme/mini", effort: "low", lang: "Korean" });
-    assert.deepEqual(displaySummaryConfigFrom({ "pi.display_summary_model": "", "workflow.lang": "" }), { model: undefined, effort: undefined, lang: undefined });
+    assert.deepEqual([...DISPLAY_SUMMARY_CONFIG_KEYS], ["pi.display_summary_model", "pi.display_summary_effort", "workflow.lang", "pi.display_summary_style"]);
+    assert.deepEqual(displaySummaryConfigFrom({ "pi.display_summary_model": " acme/mini ", "pi.display_summary_effort": "low", "workflow.lang": "Korean", "pi.display_summary_style": " Be terse. " }), { model: "acme/mini", effort: "low", lang: "Korean", style: "Be terse." });
+    assert.deepEqual(displaySummaryConfigFrom({ "pi.display_summary_model": "", "workflow.lang": "" }), { model: undefined, effort: undefined, lang: undefined, style: undefined });
   });
 
   test("off sends no reasoning; others clamp; unknown or absent defaults to medium", () => {
@@ -243,7 +254,7 @@ describe("provider-neutral call path", () => {
     summarizer.observeToolEnd("row", "read");
     await summarizer.flush();
     assert.equal(calls.length, 1);
-    assert.equal(calls[0]!.context.systemPrompt, DISPLAY_SUMMARY_SYSTEM_PROMPT);
+    assert.equal(calls[0]!.context.systemPrompt, composeDisplaySummaryPrompt(undefined), "no default reader and no style read: no style line");
     assert.equal(calls[0]!.context.tools?.length, 1);
     assert.equal(calls[0]!.context.tools![0]!.name, DISPLAY_SUMMARY_OUTPUT_TOOL);
     assert.equal(calls[0]!.context.tools![0]!.parameters.type, "object");
@@ -602,9 +613,104 @@ describe("parseSummaryResponse", () => {
   });
 
   test("the prompt asks for a subtitle naming only the concrete target, never the tool name, empty when there is none", () => {
-    assert.match(DISPLAY_SUMMARY_SYSTEM_PROMPT, /- subtitle: the header already shows the tool name \(or the message kind\), so never repeat the tool name\./);
-    assert.match(DISPLAY_SUMMARY_SYSTEM_PROMPT, /Give only the call's concrete target, copied verbatim from its arguments/);
-    assert.match(DISPLAY_SUMMARY_SYSTEM_PROMPT, /For a message row: the sender and the topic\./);
-    assert.match(DISPLAY_SUMMARY_SYSTEM_PROMPT, /When the call has no identifying argument, the subtitle is the empty string ""\./);
+    const prompt = composeDisplaySummaryPrompt(DEFAULT_STYLE);
+    assert.match(prompt, /- subtitle: the header already shows the tool name \(or the message kind\), so never repeat the tool name\./);
+    assert.match(prompt, /Give only the call's concrete target, copied verbatim from its arguments/);
+    assert.match(prompt, /For a message row: the sender and the topic\./);
+    assert.match(prompt, /When the call has no identifying argument, the subtitle is the empty string ""\./);
+  });
+});
+
+describe("style knob", () => {
+  const CUSTOM = "Write one terse clause per field, plain tone, no detail.";
+
+  function systemPrompts(h: ReturnType<typeof harness>): string[] {
+    return h.calls.map((call) => call.context.systemPrompt ?? "");
+  }
+
+  test("the composed default prompt equals the prompt sent before the knob existed", () => {
+    assert.ok(DEFAULT_STYLE, "the manifest carries a default style");
+    assert.equal(composeDisplaySummaryPrompt(DEFAULT_STYLE), DEFAULT_PROMPT);
+    const style = JSON.parse(readFileSync(MANIFEST_PATH, "utf8")).keys.find((k: { key: string }) => k.key === DISPLAY_SUMMARY_STYLE_KEY);
+    assert.equal(style.type, "string");
+    assert.equal(style.default_scope, "global");
+    assert.equal(style.default, DEFAULT_STYLE);
+    assert.ok(DEFAULT_PROMPT.split("\n").includes(style.default), "the manifest default is one line of the default prompt");
+  });
+
+  test("an absent style read falls back to the manifest default", async () => {
+    const h = harness({ model: "acme/mini" }, {}, DEFAULT_STYLE);
+    toolRow(h, "c1");
+    await h.summarizer.flush();
+    assert.equal(h.calls[0]!.context.systemPrompt, DEFAULT_PROMPT);
+  });
+
+  test("a set value replaces the default style line; contract, field semantics and anti-steering stay", async () => {
+    const h = harness({ model: "acme/mini", style: CUSTOM }, {}, DEFAULT_STYLE);
+    toolRow(h, "c1");
+    await h.summarizer.flush();
+    const prompt = h.calls[0]!.context.systemPrompt!;
+    assert.ok(prompt.includes(CUSTOM));
+    assert.ok(!prompt.includes(DEFAULT_STYLE!), "the default style line is absent");
+    for (const line of DISPLAY_SUMMARY_PROMPT_HEAD) assert.ok(prompt.includes(line), line.slice(0, 40));
+    assert.ok(prompt.endsWith(DISPLAY_SUMMARY_PROMPT_TAIL));
+    const lines = prompt.split("\n");
+    assert.equal(lines.indexOf(CUSTOM), DISPLAY_SUMMARY_PROMPT_HEAD.length, "style sits between field semantics and the anti-steering line");
+    assert.equal(lines.at(-1), DISPLAY_SUMMARY_PROMPT_TAIL);
+  });
+
+  test("an unreadable or key-less manifest yields a prompt without a style line", async () => {
+    assert.equal(readManifestDefaultStyle("/nonexistent/config-manifest.json"), undefined);
+    const keyless = new URL("./fixtures/display-summary-default-prompt.txt", import.meta.url).pathname;
+    assert.equal(readManifestDefaultStyle(keyless), undefined, "not JSON");
+    const h = harness({ model: "acme/mini" });
+    toolRow(h, "c1");
+    await h.summarizer.flush();
+    const prompt = h.calls[0]!.context.systemPrompt!;
+    assert.equal(prompt, composeDisplaySummaryPrompt(undefined));
+    assert.ok(!prompt.includes("Each field is one or two sentences"));
+    for (const line of DISPLAY_SUMMARY_PROMPT_HEAD) assert.ok(prompt.includes(line));
+    assert.ok(prompt.endsWith(DISPLAY_SUMMARY_PROMPT_TAIL));
+  });
+
+  test("a style change between flushes starts a new log; an unchanged style keeps appending", async () => {
+    const h = harness({ model: "acme/mini", style: "Style A." });
+    h.responses.push(answer([{ id: "t1", subtitle: "", toolIntention: "i", toolResult: "r" }]));
+    toolRow(h, "c1");
+    await h.summarizer.flush();
+    h.responses.push(answer([{ id: "t1", subtitle: "", toolIntention: "i", toolResult: "r" }]));
+    toolRow(h, "c2");
+    await h.summarizer.flush();
+    assert.ok(h.calls[1]!.context.messages.length > 1, "same style appends to the log");
+    h.state.config = { model: "acme/mini", style: "Style B." };
+    toolRow(h, "c3");
+    await h.summarizer.flush();
+    assert.equal(h.calls[2]!.context.messages.length, 1, "a changed style starts a fresh log");
+    assert.ok(systemPrompts(h)[2]!.includes("Style B.") && !systemPrompts(h)[2]!.includes("Style A."));
+    assert.equal(systemPrompts(h)[0], systemPrompts(h)[1], "one log, one system prompt");
+  });
+
+  test("a transient style read failure reuses the last read style and keeps the log", async () => {
+    const h = harness({ model: "acme/mini", style: "Style A." }, {}, DEFAULT_STYLE);
+    h.responses.push(answer([{ id: "t1", subtitle: "", toolIntention: "i", toolResult: "r" }]));
+    toolRow(h, "c1");
+    await h.summarizer.flush();
+    h.state.config = { model: "acme/mini" };
+    toolRow(h, "c2");
+    await h.summarizer.flush();
+    assert.equal(systemPrompts(h)[1], systemPrompts(h)[0]);
+    assert.ok(h.calls[1]!.context.messages.length > 1);
+  });
+
+  test("the context-fill check counts the composed prompt", async () => {
+    // contextWindow 1500 admits the default prompt (see the overflow test above) but not a long style.
+    const fits = harness({ model: "acme/mini", style: "short" }, { contextWindow: 1500 });
+    toolRow(fits, "c1", "ws__tickets_query", {});
+    await fits.summarizer.flush();
+    assert.equal(fits.calls.length, 1);
+    const long = harness({ model: "acme/mini", style: "x".repeat(6000) }, { contextWindow: 1500 });
+    toolRow(long, "c1", "ws__tickets_query", {});
+    await long.summarizer.flush();
+    assert.equal(long.calls.length, 0, "the style text alone pushes the request over the fill limit");
   });
 });
