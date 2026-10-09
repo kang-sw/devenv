@@ -22,7 +22,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { buildPushBatchComponent, buildPushComponent, buildPushRenderLines, registerPushMessageRenderers, type PushTuiModules } from "../src/push-render.ts";
-import { buildPushContent, heldPushQueue, leadIdleRef, PUSH_FAMILIES, sendToLead } from "../src/spawner.ts";
+import { buildPushContent, heldPushQueue, leadIdleRef, PUSH_FAMILIES, sendBatchToLead, sendToLead } from "../src/spawner.ts";
 import { approximateCodePointWidth } from "../src/tool-result-render.ts";
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
 import { buildMailboxPushMessage } from "../src/mailbox-waiter.ts";
@@ -502,6 +502,44 @@ describe("buildPushBatchComponent", () => {
         "[ws-mailbox]", "mail from scout@worktree (2026-09-15T12:00:00Z):", "run the ready ticket",
       ]);
       assert.equal(tui.boxes.length, 1, "mail renders as one compact batch card, not a direct custom message");
+    } finally {
+      heldPushQueue.length = 0;
+      leadIdleRef.current = undefined;
+    }
+  });
+
+  test("a busy/no-held multi-mail drain is one steer batch carrying every envelope in order", () => {
+    const sent: Array<{ message: any; options: any }> = [];
+    const pi = {
+      sendMessage(message: unknown, options: unknown) {
+        sent.push({ message, options });
+      },
+    };
+    leadIdleRef.current = () => false;
+    try {
+      sendBatchToLead(pi as never, ["one", "two", "three"].map((content) => buildMailboxPushMessage({ from: "scout@worktree", content })), "steer");
+
+      assert.equal(sent.length, 1, "one steer, so Pi's one-at-a-time steering queue cannot spread the drain across model calls");
+      assert.equal(sent[0]!.message.customType, PUSH_BATCH_CUSTOM_TYPE);
+      assert.deepEqual(sent[0]!.message.details.items.map((item: any) => item.details.content), ["one", "two", "three"]);
+      assert.deepEqual(sent[0]!.options, { deliverAs: "steer", triggerTurn: true });
+      assert.equal(heldPushQueue.length, 0);
+    } finally {
+      heldPushQueue.length = 0;
+      leadIdleRef.current = undefined;
+    }
+  });
+
+  test("a multi-mail drain behind a held prefix is queued whole, in order", () => {
+    const sent: unknown[] = [];
+    const pi = { sendMessage: (message: unknown) => sent.push(message), sendUserMessage: () => {} };
+    leadIdleRef.current = () => false;
+    heldPushQueue.push({ kind: "raw", deliverAs: "followUp", message: { customType: "x", content: "prefix", display: true }, batchMode: "when-held" } as never);
+    try {
+      sendBatchToLead(pi as never, ["one", "two"].map((content) => buildMailboxPushMessage({ from: "scout@worktree", content })), "steer");
+
+      assert.equal(sent.length, 0, "a held prefix keeps the drain held for the next boundary");
+      assert.deepEqual(heldPushQueue.slice(1).map((held: any) => held.message.details.content), ["one", "two"]);
     } finally {
       heldPushQueue.length = 0;
       leadIdleRef.current = undefined;

@@ -1319,7 +1319,23 @@ export function sendToLead(
   admitPush(pi, { kind: "raw", deliverAs, message, batchMode });
 }
 
-function admitPush(pi: ExtensionAPI, held: HeldPush | HeldRawSend): void {
+/**
+ * Admit several raw messages as one FIFO unit: held or submitted together, so
+ * a busy lead receives them as one `ws-push-batch` steer. One steer each would
+ * land one per model call under Pi's default `one-at-a-time` steering queue.
+ */
+export function sendBatchToLead(
+  pi: ExtensionAPI,
+  messages: readonly Parameters<ExtensionAPI["sendMessage"]>[0][],
+  deliverAs: PushDeliverAs,
+): void {
+  if (messages.length === 0 || !shouldPushToLead() || !leadIdleRef.current) return;
+  const [head, ...tail] = messages.map((message): HeldRawSend => ({ kind: "raw", deliverAs, message, batchMode: "always" }));
+  admitPush(pi, head!, tail);
+}
+
+/** `batchTail` rides behind an always-batch raw head as one unit; every other caller admits a single item. */
+function admitPush(pi: ExtensionAPI, held: HeldPush | HeldRawSend, batchTail: readonly HeldRawSend[] = []): void {
   try {
     leadIdleRef.current?.();
   } catch {
@@ -1332,13 +1348,13 @@ function admitPush(pi: ExtensionAPI, held: HeldPush | HeldRawSend): void {
       if (held.family === "ws-agent-question") held.questionReport = held.record?.reportLog.at(-1);
       if (held.family === "ws-agent-approval") held.approvalIssue = held.record?.pendingApproval?.issue ?? 0;
     }
-    heldPushQueue.push(held);
+    heldPushQueue.push(held, ...batchTail);
     requestPushWake(pi);
   } else if (held.kind === "raw") {
     if (held.batchMode === "always") {
       // Queue-then-submit preserves shared batch materialization for callers
       // that require it without changing direct delivery for other raw families.
-      heldPushQueue.push(held);
+      heldPushQueue.push(held, ...batchTail);
       submitHeldPushBatch(pi, held.deliverAs === "steer" ? "steer" : "followUp");
     } else {
       pi.sendMessage(labelRawSend(held.message), { deliverAs: held.deliverAs, triggerTurn: true });

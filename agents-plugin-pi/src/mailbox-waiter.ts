@@ -12,10 +12,12 @@
  * DRAINS. This waiter therefore uses `mailbox wait` purely as the
  * block-until-mail SIGNAL: the only thing it reads is the CLI exit code (0 =
  * mail present, 3 = timed out, 130 = interrupted, other = error). The recv tool
- * is the authoritative source: on a wake the waiter drains, then admits each
- * drained envelope through the shared push FIFO (spawner's `sendToLead`) as a
- * single informational `ws-mailbox` custom message so it rides the existing
- * `ws-push-batch` alongside every other system message. Draining via recv,
+ * is the authoritative source: on a wake the waiter drains, then admits the
+ * whole drain through the shared push FIFO (spawner's `sendBatchToLead`) as one
+ * unit of informational `ws-mailbox` items, so it rides one `ws-push-batch`
+ * alongside every other system message. One unit matters while the lead is
+ * busy: per-envelope steers would reach Pi's default `one-at-a-time` steering
+ * queue as separate messages and land one per model call. Draining via recv,
  * rather than replaying `mailbox wait`'s own peeked payload, is what stops the
  * peek from re-delivering the same mail on the next re-arm (which would be a hot
  * loop) and guarantees pi pushes exactly what recv removed — nothing is
@@ -117,8 +119,8 @@ export interface MailboxWaiterDeps {
   runWait: (signal: AbortSignal) => Promise<MailboxWaitOutcome>;
   /** Authoritatively drain (dequeue) the session's mailbox; resolve with what was removed. */
   drainMail: () => Promise<MailboxEnvelope[]>;
-  /** Admit one arriving envelope into the live conversation (through the push FIFO). */
-  admit: (envelope: MailboxEnvelope) => void;
+  /** Admit one non-empty drain into the live conversation as one unit (through the push FIFO). */
+  admit: (envelopes: MailboxEnvelope[]) => void;
   /** Delay after an error or a failed drain before re-arming, ms. */
   errorBackoffMs?: number;
   /** Injected sleep, so tests need no real timers. */
@@ -207,10 +209,9 @@ export function startMailboxWaiter(deps: MailboxWaiterDeps): MailboxWaiterHandle
         let drainFailed = false;
         try {
           const envelopes = await deps.drainMail();
-          for (const envelope of envelopes) {
-            if (controller.signal.aborted) break;
+          if (envelopes.length > 0 && !controller.signal.aborted) {
             try {
-              deps.admit(envelope);
+              deps.admit(envelopes);
             } catch (error) {
               report(`admit failed: ${error instanceof Error ? error.message : String(error)}`);
             }

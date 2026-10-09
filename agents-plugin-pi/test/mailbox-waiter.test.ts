@@ -69,22 +69,22 @@ async function waitForFile(path: string): Promise<void> {
 }
 
 describe("startMailboxWaiter", () => {
-  test("a mail wake drains and admits every drained envelope in order", async () => {
+  test("a mail wake drains and admits the whole drain as one unit, in order", async () => {
     const envelopes: MailboxEnvelope[] = [
       { from: "alice@machine", content: "first", sent_at: "2026-09-15T10:00:00Z" },
       { reply_to: "id:abc", content: "second", sent_at: "2026-09-15T10:00:01Z" },
     ];
-    const admitted: MailboxEnvelope[] = [];
+    const admitted: MailboxEnvelope[][] = [];
     let drainCalls = 0;
     const waiter = startMailboxWaiter({
       ...scriptedWait(["mail", "stopped"]),
       drainMail: () => { drainCalls += 1; return Promise.resolve(envelopes); },
-      admit: (envelope) => admitted.push(envelope),
+      admit: (drained) => admitted.push(drained),
       sleep: immediateSleep,
     });
     await waiter.done;
     assert.equal(drainCalls, 1, "one wake drains exactly once");
-    assert.deepEqual(admitted, envelopes, "each drained envelope is admitted in arrival order");
+    assert.deepEqual(admitted, [envelopes], "one drain is one admit, so a busy lead gets one batch rather than one steer per envelope");
   });
 
   test("a timeout re-arms without draining or admitting", async () => {
@@ -94,7 +94,7 @@ describe("startMailboxWaiter", () => {
     const waiter = startMailboxWaiter({
       ...script,
       drainMail: () => { drainCalls += 1; return Promise.resolve([]); },
-      admit: (envelope) => admitted.push(envelope),
+      admit: (drained) => admitted.push(...drained),
       sleep: immediateSleep,
     });
     await waiter.done;
@@ -108,7 +108,7 @@ describe("startMailboxWaiter", () => {
     const waiter = startMailboxWaiter({
       ...scriptedWait([]), // immediately exhausted -> blocks until abort
       drainMail: () => Promise.resolve([]),
-      admit: (envelope) => admitted.push(envelope),
+      admit: (drained) => admitted.push(...drained),
       sleep: immediateSleep,
     });
     waiter.stop();
@@ -194,7 +194,7 @@ describe("startMailboxWaiter", () => {
     const waiter = startMailboxWaiter({
       ...script,
       drainMail: () => Promise.resolve([]), // recv drained nothing (already emptied elsewhere)
-      admit: (envelope) => admitted.push(envelope),
+      admit: (drained) => admitted.push(...drained),
       sleep: (ms) => { sleeps.push(ms); return Promise.resolve(); },
     });
     await waiter.done;
@@ -203,26 +203,21 @@ describe("startMailboxWaiter", () => {
     assert.equal(script.calls(), 2, "the loop re-armed immediately after the empty drain");
   });
 
-  test("one throwing admit is isolated — the rest of the batch still lands", async () => {
+  test("a throwing admit is reported and the loop re-arms without backoff", async () => {
     const errors: string[] = [];
-    const admitted: string[] = [];
-    const envelopes: MailboxEnvelope[] = [
-      { from: "a", content: "boom" },
-      { from: "b", content: "ok" },
-    ];
+    const sleeps: number[] = [];
+    const script = scriptedWait(["mail", "stopped"]);
     const waiter = startMailboxWaiter({
-      ...scriptedWait(["mail", "stopped"]),
-      drainMail: () => Promise.resolve(envelopes),
-      admit: (envelope) => {
-        if (envelope.content === "boom") throw new Error("send rejected");
-        admitted.push(envelope.content);
-      },
-      sleep: immediateSleep,
+      ...script,
+      drainMail: () => Promise.resolve([{ from: "a", content: "boom" }]),
+      admit: () => { throw new Error("send rejected"); },
+      sleep: (ms) => { sleeps.push(ms); return Promise.resolve(); },
       onError: (message) => errors.push(message),
     });
     await waiter.done;
-    assert.deepEqual(admitted, ["ok"], "a later envelope is admitted even after an earlier one throws");
     assert.ok(errors.some((message) => message.includes("admit failed")));
+    assert.equal(sleeps.length, 0, "the mail was drained, so a re-arm cannot hot-spin on it");
+    assert.equal(script.calls(), 2);
   });
 });
 
@@ -764,7 +759,7 @@ describe("createMailboxWaiterSlot", () => {
       start: (key) => startMailboxWaiter({
         runWait: scriptedWait(key === "new-key" ? ["mail"] : []).runWait,
         drainMail: async () => { drains.push(key); return [{ reply_to: key, content: `for ${key}` }]; },
-        admit: (envelope) => admitted.push(envelope),
+        admit: (drained) => admitted.push(...drained),
         sleep: immediateSleep,
       }),
     });

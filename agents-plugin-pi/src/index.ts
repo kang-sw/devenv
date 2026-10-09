@@ -194,7 +194,7 @@ import {
   pushToLead,
   registerAgentTools,
   registerPushFlush,
-  sendToLead,
+  sendBatchToLead,
   type AgentToolsHandle,
   type RpcAgentRecord,
   type RpcAgentRegistry,
@@ -843,8 +843,8 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     // bridge/client it drains through. Owner-lead only — a fork/worker/explore
     // child has no cross-session inbox worth an extra background subprocess.
     // The waiter uses `mailbox wait` purely as a block-until-mail signal and
-    // drains through the bridge's connected client, admitting each envelope via
-    // the shared push FIFO (`sendToLead` -> held-batch / idle-wake) exactly like
+    // drains through the bridge's connected client, admitting each drain as one
+    // unit via the shared push FIFO (`sendBatchToLead` -> held-batch / idle-wake) like
     // every other pushed system message — see mailbox-waiter.ts.
     //
     // 260917 Phase 1: before arming, resolve this session's own registered
@@ -911,7 +911,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
               onStderr: reportDistinctLinesOnce(reportMailboxWaiterDiagnostic),
             })),
             drainMail: createBridgeDrain(mailboxCallTool, key),
-            admit: (envelope) => sendToLead(pi, buildMailboxPushMessage(envelope), "steer", "always"),
+            admit: (envelopes) => sendBatchToLead(pi, envelopes.map(buildMailboxPushMessage), "steer"),
             onError: reportMailboxWaiterDiagnostic,
           });
         },
