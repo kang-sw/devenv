@@ -18,6 +18,7 @@ import {
   buildLeadCompactionSummary,
   buildPreparationMessage,
   collectDialogItems,
+  collectLeverBoundarySteers,
   describeFinishedChildren,
   describeInFlightChildren,
   elideMiddle,
@@ -26,6 +27,7 @@ import {
   foldToolRuns,
   findActiveTicket,
   humanTextOf,
+  LEAD_COMPACT_CUSTOM_TYPE,
   LEAD_CONTEXT_MILESTONE_CUSTOM_TYPE,
   LEAD_PROSE_SECTIONS,
   leadProseParameterSchema,
@@ -657,5 +659,61 @@ describe("curated file lists (261007)", () => {
     });
     assert.ok(summary.includes("</dialog>\n\n## Required re-reads (inlined)\n<file path=\"c2.txt\" why=\"small\">\ncc\n</file>\n\n## On-demand references\n- `ten.txt` - later\n\n## Carried forward by the lead\n"));
     assert.equal(extractLeadProse(summary), prose);
+  });
+});
+
+describe("lever boundary steers (261015)", () => {
+  const LABEL = "[system message from ws-pi-plugin]";
+  let id = 0;
+  const entry = (fields: Record<string, unknown>): SessionEntry => ({ id: `e${++id}`, parentId: null, timestamp: "2026-10-15T00:00:00.000Z", ...fields }) as unknown as SessionEntry;
+  const leverCall = entry({ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "t1", name: "ws-compact", arguments: {} }] } });
+  const leverResult = entry({ type: "message", message: { role: "toolResult", toolCallId: "t1", toolName: "ws-compact", content: [{ type: "text", text: "ok" }], isError: false } });
+  const aborted = entry({ type: "message", message: { role: "assistant", content: [], stopReason: "aborted" } });
+  const custom = (customType: string, content: unknown, details?: unknown): SessionEntry => entry({ type: "custom_message", customType, content, display: true, details });
+
+  test("a single family steer after the lever result is recovered unlabeled, with its family's state", () => {
+    const approval = custom("ws-agent-approval", `${LABEL}\nApproval needed`, { agent_id: "a1", cmd_id: "c1" });
+    const question = custom("ws-agent-question", [{ type: "text", text: `${LABEL}\nWhich one?` }], { agent_id: "a2" });
+    const report = custom("ws-agent-report", `${LABEL}\nprogress`, { agent_id: "a3" });
+    const items = collectLeverBoundarySteers([leverCall, leverResult, approval, question, report, aborted]);
+    assert.deepEqual(items, [
+      { customType: "ws-agent-approval", content: "Approval needed", display: true, details: { agent_id: "a1", cmd_id: "c1" }, state: "actionable" },
+      { customType: "ws-agent-question", content: [{ type: "text", text: "Which one?" }], display: true, details: { agent_id: "a2" }, state: "actionable" },
+      { customType: "ws-agent-report", content: "progress", display: true, details: { agent_id: "a3" }, state: "informational" },
+    ]);
+  });
+
+  test("a batch steer is unpacked into its items with their states; goal controls are dropped", () => {
+    const batch = custom(PUSH_BATCH_CUSTOM_TYPE, `${LABEL}\n<ws-push-batch/>`, {
+      version: "1",
+      items: [
+        { customType: "ws-mailbox", content: "mail 1", display: true, details: { from: "x" }, state: "informational" },
+        { customType: "ws-agent-approval", content: "old approval", display: true, details: { agent_id: "a1", cmd_id: "c0" }, state: "superseded" },
+        { customType: "ws-goal-control", content: "Goal update applied: g", display: true, details: {}, state: "informational" },
+        { customType: "ws-agent-question", content: "q?", display: true, details: { agent_id: "a2" }, state: "actionable" },
+      ],
+    });
+    const items = collectLeverBoundarySteers([leverResult, batch]);
+    assert.deepEqual(items.map((item) => [item.customType, item.content, item.state]), [
+      ["ws-mailbox", "mail 1", "informational"],
+      ["ws-agent-approval", "old approval", "superseded"],
+      ["ws-agent-question", "q?", "actionable"],
+    ]);
+  });
+
+  test("only push-path custom messages after the latest lever result count", () => {
+    const before = custom("ws-agent-report", "before the lever");
+    const prep = custom(LEAD_COMPACT_CUSTOM_TYPE, "prepare");
+    const milestone = custom(LEAD_CONTEXT_MILESTONE_CUSTOM_TYPE, "70%");
+    const other = custom("some-extension", "not ours");
+    const after = custom("ws-agent-settled", "done");
+    const items = collectLeverBoundarySteers([before, leverCall, leverResult, prep, milestone, other, after]);
+    assert.deepEqual(items.map((item) => item.content), ["done"]);
+  });
+
+  test("no lever result, or a compaction entry before reaching one, recovers nothing", () => {
+    const steer = custom("ws-agent-report", "x");
+    assert.deepEqual(collectLeverBoundarySteers([steer]), []);
+    assert.deepEqual(collectLeverBoundarySteers([leverResult, entry({ type: "compaction", summary: "s", firstKeptEntryId: "k", tokensBefore: 1 }), steer]), []);
   });
 });
