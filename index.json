@@ -550,34 +550,11 @@
     "261008-bug-servestdio-eof-exit-unbounded": {
       "registered_at": "2026-10-08T14:15:28Z"
     },
-    "261008-bug-windows-mailbox-wait-outlives-pi-host": {
-      "registered_at": "2026-10-08T08:39:26Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-08T14:18:45Z",
-        "impl": {
-          "branch": "impl/develop/blitz-stump-stool"
-        }
-      }
-    },
     "261008-bug-ws-git-merge-switches-worker-occupied-root": {
       "registered_at": "2026-10-08T04:40:47Z"
     },
-    "261008-feat-pi-display-summary-prompt-knob": {
-      "registered_at": "2026-10-08T08:44:35Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-08T13:17:54Z",
-        "impl": {
-          "branch": "impl/develop/haste-marry-amaze"
-        }
-      }
+    "261015-bug-pi-compact-lever-drops-boundary-steers": {
+      "registered_at": "2026-10-15T08:09:40Z"
     }
   }
 }
