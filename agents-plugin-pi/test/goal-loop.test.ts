@@ -2159,27 +2159,36 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       assert.equal(afterEnqueueCalls, 0, "afterEnqueue does not run for the re-delivery");
     });
 
-    test("a mailbox batch steer is unpacked into its items, in order, with no nested batch", async () => {
-      const { pi, ctx, idle, compact } = setup();
-      sendBatchToLead(pi.api, [
-        { customType: "ws-mailbox", content: "mail one", display: true, details: { n: 1 } },
-        { customType: "ws-mailbox", content: "mail two", display: true, details: { n: 2 } },
-      ], "steer");
-      assert.equal(pi.sentMessages.length, 1);
-      const steered = pi.sentMessages[0]!;
+    test("a mailbox batch steer is unpacked into its items, in order, with no nested batch, and the release wakes the lead for it", async () => {
+      const wakePi = { on: (event: string, fn: () => void) => { if (event === "session_shutdown") shutdown = fn; } } as unknown as ExtensionAPI;
+      let shutdown: (() => void) | undefined;
+      registerPushFlush(wakePi, { delayMs: () => 10, scheduleTimer: () => 0 as unknown as NodeJS.Timeout, clearTimer: () => {} });
+      try {
+        const { pi, ctx, idle, compact } = setup();
+        sendBatchToLead(pi.api, [
+          { customType: "ws-mailbox", content: "mail one", display: true, details: { n: 1 } },
+          { customType: "ws-mailbox", content: "mail two", display: true, details: { n: 2 } },
+        ], "steer");
+        assert.equal(pi.sentMessages.length, 1);
+        const steered = pi.sentMessages[0]!;
 
-      await pi.tools.get("ws-compact")!.execute("t1", { current_work: "PROSE" }, undefined, undefined, ctx);
-      pi.handlers.get("session_before_compact")!(compactionEvent("manual", leverBranch([steered])), ctx);
-      pi.handlers.get("session_compact")!({ reason: "manual", fromExtension: true, compactionEntry: { details: leadDetails } }, ctx);
-      idle.current = true;
-      compact().onComplete!({} as never);
-      await new Promise((resolve) => setImmediate(resolve));
-      assert.equal(flushHeldPushes(pi.api, true), 2, "both mailbox items are back in the held queue");
-      assert.equal(pi.sentMessages.length, 2, "re-delivered as a new batch");
+        await pi.tools.get("ws-compact")!.execute("t1", { current_work: "PROSE" }, undefined, undefined, ctx);
+        pi.handlers.get("session_before_compact")!(compactionEvent("manual", leverBranch([steered])), ctx);
+        pi.handlers.get("session_compact")!({ reason: "manual", fromExtension: true, compactionEntry: { details: leadDetails } }, ctx);
+        idle.current = true;
+        compact().onComplete!({} as never);
+        await new Promise((resolve) => setImmediate(resolve));
+        assert.deepEqual(pi.sentUserMessages.map((sent) => sent.content)[0], labeled(buildPushWakeLine(2)), "the release wakes the lead for a queue holding only recovered items");
+        clearWakeStart();
+        assert.equal(flushHeldPushes(pi.api, true), 2, "both mailbox items are back in the held queue");
+        assert.equal(pi.sentMessages.length, 2, "re-delivered as a new batch");
 
-      const batch = lastBatch(pi);
-      assert.deepEqual(batch.details.items.map((item) => [item.customType, item.content, item.state]), [["ws-mailbox", "mail one", "informational"], ["ws-mailbox", "mail two", "informational"]]);
-      assert.doesNotMatch(batch.content, /type="ws-push-batch"/, "no nested batch");
+        const batch = lastBatch(pi);
+        assert.deepEqual(batch.details.items.map((item) => [item.customType, item.content, item.state]), [["ws-mailbox", "mail one", "informational"], ["ws-mailbox", "mail two", "informational"]]);
+        assert.doesNotMatch(batch.content, /type="ws-push-batch"/, "no nested batch");
+      } finally {
+        shutdown?.();
+      }
     });
 
     for (const outcome of ["failed", "native summary"] as const) {
