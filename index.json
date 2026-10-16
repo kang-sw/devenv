@@ -554,7 +554,14 @@
       "registered_at": "2026-10-08T04:40:47Z"
     },
     "261016-feat-pi-lead-exec-hatch-background-mode": {
-      "registered_at": "2026-10-16T01:20:41Z"
+      "registered_at": "2026-10-16T01:20:41Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-10-16T03:04:16Z"
+      }
     }
   }
 }
