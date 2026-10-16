@@ -324,6 +324,26 @@ describe("process-tree kill", posixOnly, () => {
   }
 });
 
+describe("timer and session-end edges", posixOnly, () => {
+  test("a timeout_s beyond Node's 2^31-1 ms timer limit does not fire at once", async () => {
+    const results: BackgroundTaskResult[] = [];
+    const task = startBackgroundTask({ shell: "/bin/sh", args: ["-c", "sleep 30"], cwd: tmpdir(), command: "sleep 30", why: "w", timeoutS: 3_000_000, capBytes: 64, onComplete: (result) => results.push(result) });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.equal(results.length, 0, "not killed by an overflowed timer");
+    assert.deepEqual(listBackgroundTasks().map((info) => info.id), [task.id]);
+  });
+
+  test("a task whose exit lands in a session end's drain window is not reported", async () => {
+    const results: BackgroundTaskResult[] = [];
+    // The backgrounded `sleep` holds stdout open, so the drain runs its full grace after the exit claim.
+    startBackgroundTask({ shell: "/bin/bash", args: ["-c", "sleep 1 & exit 0"], cwd: tmpdir(), command: "sleep 1 & exit 0", why: "w", capBytes: 64, onComplete: (result) => results.push(result) });
+    await waitFor(() => listBackgroundTasks().length === 0);
+    assert.equal(killAllBackgroundTasks(), 0, "the exit already claimed it");
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.equal(results.length, 0);
+  });
+});
+
 describe("bounded capture", posixOnly, () => {
   test("keeps at most capBytes + 1 bytes of a large output", async () => {
     const results: BackgroundTaskResult[] = [];

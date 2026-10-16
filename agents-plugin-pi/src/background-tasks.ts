@@ -39,6 +39,16 @@ import { generateWordChainId } from "./word-chain-id.ts";
 /** How long, after the task's own exit, output may still drain before the streams are cut. */
 const EXIT_STDIO_GRACE_MS = 100;
 
+/**
+ * Node's largest timer delay (2^31-1 ms, about 24.8 days). A longer delay is
+ * not an error to Node: it warns and fires after 1 ms, which would kill a task
+ * with a very large `timeout_s` at once. Longer timeouts re-arm in steps.
+ */
+const MAX_TIMER_DELAY_MS = 2 ** 31 - 1;
+
+/** Bumped by every session-end kill; a completion from an earlier session is dropped, never pushed into the next one. */
+let sessionEpoch = 0;
+
 export interface BackgroundTaskInfo {
   id: string;
   why: string;
@@ -115,6 +125,7 @@ export function startBackgroundTask(options: StartBackgroundTaskOptions): Backgr
   child.stderr?.on("data", capture);
 
   const task: LiveTask = { info, child, timedOut: false, done: undefined as never };
+  const startEpoch = sessionEpoch;
   // Registered before `waitForExit`'s own listeners, so the claim is taken
   // synchronously at exit, ahead of the drain.
   child.once("exit", () => claim(task, "exit"));
@@ -125,20 +136,29 @@ export function startBackgroundTask(options: StartBackgroundTaskOptions): Backgr
     signal: ended.signal,
     output: Buffer.concat(chunks).toString("utf8"),
     ending: task.claim === "abort" ? "aborted" : task.timedOut ? "timed-out" : "exited",
-    ...(ended.error !== undefined ? { spawnError: ended.error } : {}),
+    // An `error` after a successful spawn (a failed kill) is not a failed start.
+    ...(ended.error !== undefined && child.pid === undefined ? { spawnError: ended.error } : {}),
   }));
   void task.done.then((result) => {
-    if (task.claim === "exit") options.onComplete(result);
+    // A task that exited during a session end's drain window reports nowhere,
+    // like the tasks that session end killed.
+    if (task.claim === "exit" && startEpoch === sessionEpoch) options.onComplete(result);
   });
 
   const timeoutMs = options.timeoutMs ?? (options.timeoutS !== undefined ? options.timeoutS * 1000 : undefined);
   if (timeoutMs !== undefined) {
-    task.timer = setTimeout(() => {
-      if (task.claim) return;
-      task.timedOut = true;
-      killProcessTree(child);
-    }, timeoutMs);
-    task.timer.unref?.();
+    const deadline = Date.now() + timeoutMs;
+    const arm = (delay: number) => {
+      task.timer = setTimeout(() => {
+        if (task.claim) return;
+        const remaining = deadline - Date.now();
+        if (remaining > 0) return arm(Math.min(remaining, MAX_TIMER_DELAY_MS));
+        task.timedOut = true;
+        killProcessTree(child);
+      }, delay);
+      task.timer.unref?.();
+    };
+    arm(Math.min(timeoutMs, MAX_TIMER_DELAY_MS));
   }
   liveTasks.set(id, task);
   return info;
@@ -168,11 +188,14 @@ export function abortBackgroundTask(id: string): Promise<BackgroundTaskResult> |
 
 /** Kills every running task with no report; the session-end backstop. Returns how many were killed. */
 export function killAllBackgroundTasks(): number {
-  const tasks = [...liveTasks.values()];
-  for (const task of tasks) {
-    if (claim(task, "shutdown")) killProcessTree(task.child);
+  sessionEpoch += 1;
+  let killed = 0;
+  for (const task of [...liveTasks.values()]) {
+    if (!claim(task, "shutdown")) continue;
+    killProcessTree(task.child);
+    killed += 1;
   }
-  return tasks.length;
+  return killed;
 }
 
 /** Running tasks, oldest first. */
