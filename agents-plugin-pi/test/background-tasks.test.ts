@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   abortBackgroundTask,
+  awaitAbortedTask,
   countBackgroundTasks,
   formatElapsed,
   hasRunningTimedBackgroundTask,
@@ -341,6 +342,52 @@ describe("timer and session-end edges", posixOnly, () => {
     assert.equal(killAllBackgroundTasks(), 0, "the exit already claimed it");
     await new Promise((resolve) => setTimeout(resolve, 300));
     assert.equal(results.length, 0);
+  });
+});
+
+describe("bounded post-exit drain and abort wait", () => {
+  test("a descendant that keeps writing to the inherited stdout cannot hold back the completion", posixOnly, async () => {
+    const marker = `ws-bg-chatty-${process.pid}`;
+    const results: BackgroundTaskResult[] = [];
+    // The backgrounded loop shares the task's process group and writes every 20ms, faster than the 100ms idle grace.
+    const command = `(while :; do echo ${marker}; sleep 0.02; done) & sleep 0.2; exit 0`;
+    const task = startBackgroundTask({ shell: "/bin/bash", args: ["-c", command], cwd: tmpdir(), command, why: "w", capBytes: 64, onComplete: (result) => results.push(result) });
+    try {
+      await waitFor(() => listBackgroundTasks().length === 0);
+      const exitedAt = Date.now();
+      await waitFor(() => results.length === 1, 3000);
+      assert.ok(Date.now() - exitedAt < 2000, "reported within the hard drain deadline");
+      assert.equal(results[0].id, task.id);
+      assert.equal(results[0].ending, "exited");
+      assert.equal(results[0].code, 0);
+    } finally {
+      // The loop's subshell carries the marker in its argv; the task's own shell has already exited.
+      try { execFileSync("pkill", ["-f", marker], { stdio: "ignore" }); } catch { /* already gone */ }
+      await waitFor(() => !processAlive(marker));
+    }
+  });
+
+  test("the abort wait gives up after its bound with no result", async () => {
+    const never = new Promise<BackgroundTaskResult>(() => {});
+    const startedAt = Date.now();
+    assert.equal(await awaitAbortedTask(never, 50), undefined);
+    assert.ok(Date.now() - startedAt < 1000);
+  });
+
+  test("the abort wait gives up when the tool call's signal fires", async () => {
+    const never = new Promise<BackgroundTaskResult>(() => {});
+    const controller = new AbortController();
+    const waiting = awaitAbortedTask(never, 60_000, controller.signal);
+    controller.abort();
+    assert.equal(await waiting, undefined);
+    const preAborted = new AbortController();
+    preAborted.abort();
+    assert.equal(await awaitAbortedTask(never, 60_000, preAborted.signal), undefined);
+  });
+
+  test("the abort wait returns the result when it arrives in time", async () => {
+    const result = { id: "a-b-c", why: "w", command: "c", startedAt: 0, code: 0, signal: null, output: "", ending: "aborted" } satisfies BackgroundTaskResult;
+    assert.equal(await awaitAbortedTask(Promise.resolve(result), 60_000), result);
   });
 });
 

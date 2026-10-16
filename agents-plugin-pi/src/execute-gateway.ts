@@ -136,7 +136,7 @@ import {
   type RpcAgentRegistry,
 } from "./spawner.ts";
 import { touchOwnership } from "./agent-storage.ts";
-import { abortBackgroundTask, formatBackgroundTaskLine, listBackgroundTasks, startBackgroundTask, type BackgroundTaskResult } from "./background-tasks.ts";
+import { abortBackgroundTask, awaitAbortedTask, formatBackgroundTaskLine, listBackgroundTasks, startBackgroundTask, type BackgroundTaskResult } from "./background-tasks.ts";
 import { readSpawnRole } from "./process-role.ts";
 import { approvalDecisionMessage, type ApprovalChildLink, type ApprovalDecision, type ChildApprovalGate } from "./approval-protocol.ts";
 
@@ -224,6 +224,14 @@ export const ONE_LINER_OUTPUT_CAP_BYTES = 4096;
  * command yourself, not to stopping one.
  */
 export const BACKGROUND_ABORT_TOOL_NAME = "ws-background-abort";
+
+/**
+ * How long `ws-background-abort` waits for the killed task to exit before
+ * answering that the kill was sent but exit is unconfirmed. A group SIGKILL
+ * lands in milliseconds and the post-exit drain is capped at 1s, so 5s only
+ * runs out when the kill itself did not take.
+ */
+export const BACKGROUND_ABORT_WAIT_MS = 5_000;
 
 /** Push family a background task's completion arrives under (spawner.ts's `PUSH_FAMILIES`). */
 export const BACKGROUND_TASK_PUSH_FAMILY = "ws-background-task";
@@ -909,14 +917,17 @@ export function registerExecuteGateway(
         task_id: { type: "string", description: "Id of the running background task to abort; omit to list running tasks." },
       },
     } as never,
-    async execute(_toolCallId, params) {
+    async execute(_toolCallId, params, signal) {
       const p = params as { task_id?: string };
       if (p.task_id === undefined || p.task_id === "") {
         return { content: [{ type: "text", text: formatBackgroundTaskList(listBackgroundTasks()) }] };
       }
       const aborted = abortBackgroundTask(p.task_id);
       if (!aborted) throw new Error(`ws-pi-agent: ${BACKGROUND_ABORT_TOOL_NAME}: no running background task "${p.task_id}" (unknown, or it already finished and its result was pushed to you).`);
-      const result = await aborted;
+      const result = await awaitAbortedTask(aborted, BACKGROUND_ABORT_WAIT_MS, signal);
+      if (!result) {
+        return { content: [{ type: "text", text: `task_id: ${p.task_id}\nkill sent; exit not confirmed${signal?.aborted ? " (wait interrupted)" : ` within ${BACKGROUND_ABORT_WAIT_MS / 1000}s`}. The task is no longer tracked and no pushed completion follows for it.` }] };
+      }
       const text = Object.entries(backgroundTaskReportFields(result)).map(([key, value]) => `${key}: ${value}`).join("\n");
       return { content: [{ type: "text", text }] };
     },

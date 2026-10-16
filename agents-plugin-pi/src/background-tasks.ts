@@ -27,7 +27,8 @@
  *   task is no longer listed, counted, or abortable.
  * - Exit is detected on the child's own `exit`, not on stream close: a
  *   descendant the command deliberately detached may hold stdout open. After
- *   exit the streams get a short grace to drain, then are destroyed; such a
+ *   exit the streams get a short idle grace to drain (re-armed by output, but
+ *   never past a hard deadline fixed at exit), then are destroyed; such a
  *   detached descendant is left running, as the foreground hatch leaves it.
  */
 
@@ -38,6 +39,16 @@ import { generateWordChainId } from "./word-chain-id.ts";
 
 /** How long, after the task's own exit, output may still drain before the streams are cut. */
 const EXIT_STDIO_GRACE_MS = 100;
+
+/**
+ * Hard ceiling on the post-exit drain, fixed at exit. Each output chunk
+ * re-arms the idle grace above, so a descendant that inherited stdout and
+ * keeps writing would otherwise hold the streams open forever, and the task
+ * (already claimed and unlisted at exit) would never report. One second is
+ * ten idle graces: room for a real tail of buffered output, short enough that
+ * a completion push is never noticeably late.
+ */
+const EXIT_STDIO_MAX_DRAIN_MS = 1000;
 
 /**
  * Node's largest timer delay (2^31-1 ms, about 24.8 days). A longer delay is
@@ -186,6 +197,29 @@ export function abortBackgroundTask(id: string): Promise<BackgroundTaskResult> |
   return task.done;
 }
 
+/**
+ * Waits for an aborted task's result, but no longer than `waitMs` and no
+ * longer than `signal` stays unaborted; `undefined` when neither the result
+ * arrived in time nor the wait was allowed to continue. The abort already
+ * holds the task's single report claim, so giving up here loses nothing but
+ * the exit confirmation: a kill that did not take (a failed `taskkill` on
+ * Windows, say) must not hang the caller.
+ */
+export function awaitAbortedTask(done: Promise<BackgroundTaskResult>, waitMs: number, signal?: AbortSignal): Promise<BackgroundTaskResult | undefined> {
+  if (signal?.aborted) return Promise.resolve(undefined);
+  return new Promise((resolve) => {
+    const finish = (result: BackgroundTaskResult | undefined) => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      resolve(result);
+    };
+    const onAbort = () => finish(undefined);
+    const timer = setTimeout(() => finish(undefined), waitMs);
+    signal?.addEventListener("abort", onAbort, { once: true });
+    void done.then(finish);
+  });
+}
+
 /** Kills every running task with no report; the session-end backstop. Returns how many were killed. */
 export function killAllBackgroundTasks(): number {
   sessionEpoch += 1;
@@ -280,10 +314,12 @@ function waitForExit(child: ChildProcess): Promise<{ code: number | null; signal
     let stdoutEnded = !child.stdout;
     let stderrEnded = !child.stderr;
     let grace: ReturnType<typeof setTimeout> | undefined;
+    let drainDeadline: ReturnType<typeof setTimeout> | undefined;
     const finalize = (error?: string) => {
       if (settled) return;
       settled = true;
       if (grace) clearTimeout(grace);
+      if (drainDeadline) clearTimeout(drainDeadline);
       child.stdout?.destroy();
       child.stderr?.destroy();
       resolve({ code, signal, ...(error !== undefined ? { error } : {}) });
@@ -305,6 +341,7 @@ function waitForExit(child: ChildProcess): Promise<{ code: number | null; signal
       code = exitCode;
       signal = exitSignal;
       maybeFinalize();
+      if (!settled) drainDeadline = setTimeout(() => finalize(), EXIT_STDIO_MAX_DRAIN_MS);
       armGrace();
     });
     child.once("error", (error) => finalize(error.message));
