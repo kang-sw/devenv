@@ -129,6 +129,15 @@ owner, per `rebindMailboxOwnerAtFerrule`):
   the stream is returned, the dispatch aborts, or the module unloads.
 - The mod API is documented as early access that moves between releases; the
   declaration file per build is the authority.
+- The Claude `Stop` hook adapter (`ws-mcp mailbox claude-stop-hook`) exits
+  at once unless the Claude process environment sets `WS_MAILBOX`
+  (`mailboxClaudeStopHook`, the empty-slug branch), and it runs only at a turn
+  end, so it never wakes an idle session; it has not been observed firing in
+  dogfooding. The background shell-wait fallback does not depend on it.
+- `ws-mcp mailbox wait` writes one listening marker per session key holding
+  its PID; a replacement wait on the same key overwrites it, and each wait
+  clears only a marker carrying its own PID
+  (`agents-plugin-tool/internal/wsmailbox/listening.go`).
 - `ws-mcp mailbox wait --timeout 0` blocks until mail
   (`agents-plugin-tool/cmd/ws-mcp/mailbox.go`, `timeout` flag); pi uses a
   finite timeout so a stuck or orphaned wait clears itself.
@@ -155,6 +164,16 @@ owner, per `rebindMailboxOwnerAtFerrule`):
   replaces the binding (covers a new `ferrule`) without detecting either event;
   `session.end` with reason `clear` stops it; compaction keeps it.
 - Pi is unchanged: its adapter keeps auto-arming and draining.
+- Installing both `ws` and `wsflow` in one Claude Code is a user error and
+  out of scope; there is no double-binding guard.
+- The same actionable child that ships the mod retires the Claude `Stop` hook
+  adapter: the `Stop` entry in `agents-plugin/hooks/hooks.json`, the
+  `ws-mcp mailbox claude-stop-hook` subcommand and its tests, and the hooks
+  file description's Stop sentence. `SessionStart(compact)`,
+  `codex-stop-hook`, and the shared `wsmailbox.ShouldNotifyNamedInboxUnread`
+  watermark stay. Lost by this: the turn-end notice for a mod-less Claude
+  session launched with `WS_MAILBOX`, which still receives mail through the
+  background-wait fallback.
 - Fallback when the mod tool is absent (mod not loaded, API broken, surface
   without `$.process`): the existing shell `mailbox wait` armed through the
   harness background task. The `arm-the-wait` wording becomes "if the mailbox
@@ -189,11 +208,6 @@ owner, per `rebindMailboxOwnerAtFerrule`):
   fallback guard)?
 - Do the classic `hooks` and `modules` both run at runtime from one
   `agents-plugin/hooks/hooks.json`?
-- With both `ws` and `wsflow` installed in Claude, how are two mods prevented
-  from double-binding (marker or lock)?
-- How does the mod interact with the existing Claude `Stop` hook adapter, which
-  nudges recv for a `WS_MAILBOX` named inbox the mod's recv also drains: keep,
-  narrow, or retire it while the mod is bound?
 - Does `$.process` work in the desktop app's local Code tab and IDE-hosted
   sessions?
 
@@ -217,5 +231,14 @@ owner, per `rebindMailboxOwnerAtFerrule`):
 - **Gating the push on detecting auto mode.** A prompt depends on the mode
   and the allow/deny rules together, and the mode changes mid-session, so a
   mode read at bind time goes stale; `$.mcp.call` removes the prompt instead.
+- **A double-binding guard for `ws` plus `wsflow`** (for example the mod
+  skipping its bind when another process's listening marker holds the key).
+  Both installed is a user error; the guard would add a race and couple the
+  mod to the ws cache layout.
+- **Keeping or narrowing the Claude `Stop` hook while the mod is bound.**
+  Narrowing needs the command hook to know the mod's binding state; the hook
+  practically never fires, and the mod covers both idle and mid-turn mail.
+- **Retiring the `Stop` hook as a separate chore ahead of the mod.** The user
+  chose one child so the removal lands with its replacement.
 - **Emitting one push per envelope.** One batch per drain, as pi settled after
   `261009-bug-pi-mailbox-busy-drain-splits-into-per-envelope-steers`.

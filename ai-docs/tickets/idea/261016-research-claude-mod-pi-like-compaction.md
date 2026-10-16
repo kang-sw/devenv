@@ -91,9 +91,11 @@ Read from the engine's own declaration file for Claude Code 2.1.293
 
 - Research only for now; no actionable child until the Claude mailbox mod
   (`261016-research-claude-mod-mailbox-active-push`) has
-  validated the mod path in `ws`/`wsflow`. Compaction is tracked separately
+  validated the mod path. Compaction is tracked separately
   from the mailbox mod because a compaction hook mutates the conversation, so
   a mod-API break has a larger blast radius than a lost mailbox push.
+- The compaction mod ships in `ws` only, not in `wsflow` (unlike the
+  mailbox mod, which ships in both).
 - First-step scope mirrors pi's timing, not pi's summary ownership:
   - Advisory (50%) and milestone nudges are `$.prompt.submit`ted at
     `turn.complete`, driven from `$.session.usage()`.
