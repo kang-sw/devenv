@@ -64,7 +64,7 @@ import {
 } from "../src/goal-loop.ts";
 import { WS_PI_SPAWN_ROLE_ENV } from "../src/process-role.ts";
 import { createWsConfigReader, staticConfigReader, type GoalLoopConfigReader } from "../src/adapter-config.ts";
-import { flushHeldPushes, leadIdleRef, clearWakeStart, leadCompactingRef, leadWakeStartPendingRef, heldPushQueue, isOwningAgentIdle, registerPushFlush, buildPushWakeLine, type RpcAgentRegistry } from "../src/spawner.ts";
+import { flushHeldPushes, leadIdleRef, clearWakeStart, leadCompactingRef, leadWakeStartPendingRef, heldPushQueue, isOwningAgentIdle, registerPushFlush, buildPushWakeLine, pushToLead, sendBatchToLead, type RpcAgentRegistry, type TerminalDelivery } from "../src/spawner.ts";
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
 import { DEFAULT_DIALOG_BUDGET_BYTES, DEFAULT_REREAD_BUDGET_BYTES, extractLeadProse, LEAD_CONTEXT_MILESTONE_CUSTOM_TYPE, LEAD_PROSE_SECTIONS, leadProseParameterSchema, NO_KEPT_ENTRY_ID, renderLeadProse } from "../src/lead-compaction.ts";
 
@@ -2089,6 +2089,137 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       const broken = { reason: "manual", branchEntries: branch, preparation: undefined } as never;
       assert.equal(pi.handlers.get("session_before_compact")!(broken, ctx), undefined);
       assert.match(notifications.at(-1)!.message, /could not build its summary/);
+    });
+  });
+
+  describe("pushes steered into the lever turn survive the lever compaction (261015)", () => {
+    const leadDetails = { kind: "ws-pi-lead-compaction", version: 1, source: "lever" };
+
+    function setup() {
+      const pi = fakePi();
+      const record = { agentId: "w-1", alias: "w1", spawnRole: "worker", running: true, streaming: false, reportLog: [] };
+      const registry = new Map([["w-1", record]]) as unknown as RpcAgentRegistry;
+      registerGoalLoop(pi.api, { readConfig: fileReader(configPath), rpcRegistryRef: { current: registry }, sessionKeyRef: { current: "lead-key" } });
+      const idle = { current: false }; // the lever turn is streaming
+      const { ctx } = fakeCtx(() => idle.current);
+      let compactCall: Parameters<ExtensionContext["compact"]>[0] | undefined;
+      ctx.compact = (opts) => { compactCall = opts; };
+      return { pi, ctx, idle, registry, record: record as never, compact: () => compactCall! };
+    }
+
+    /** Pi records a drained custom steer as a `custom_message` entry after the lever's tool result (agent-session.js message_end). */
+    function leverBranch(steers: Array<{ content: unknown }>): unknown[] {
+      const recorded = steers.map((sent, index) => {
+        const message = sent.content as { customType: string; content: unknown; display: boolean; details: unknown };
+        return { type: "custom_message", id: `s${index}`, parentId: null, timestamp: "2026-10-15T00:00:01.000Z", customType: message.customType, content: message.content, display: message.display, details: message.details };
+      });
+      return [
+        { type: "message", id: "u1", parentId: null, timestamp: "2026-10-15T00:00:00.000Z", message: { role: "user", content: "go", timestamp: 0 } },
+        { type: "message", id: "a1", parentId: "u1", timestamp: "2026-10-15T00:00:00.000Z", message: { role: "assistant", content: [{ type: "toolCall", id: "t1", name: "ws-compact", arguments: {} }] } },
+        { type: "message", id: "r1", parentId: "a1", timestamp: "2026-10-15T00:00:00.000Z", message: { role: "toolResult", toolCallId: "t1", toolName: "ws-compact", content: [{ type: "text", text: "ok" }], isError: false } },
+        ...recorded,
+        { type: "message", id: "a2", parentId: null, timestamp: "2026-10-15T00:00:02.000Z", message: { role: "assistant", content: [], stopReason: "aborted" } },
+      ];
+    }
+
+    function lastBatch(pi: ReturnType<typeof fakePi>): { content: string; details: { items: Array<{ customType: string; content: unknown; state: string }> } } {
+      const sent = pi.sentMessages.at(-1)!.content as { customType: string; content: string; details: { items: Array<{ customType: string; content: unknown; state: string }> } };
+      assert.equal(sent.customType, PUSH_BATCH_CUSTOM_TYPE);
+      return sent;
+    }
+
+    test("a direct approval steer is re-delivered first, actionable and labeled once, ahead of pushes held during compaction; its terminal delivery is untouched", async () => {
+      const { pi, ctx, idle, registry, record, compact } = setup();
+      let afterEnqueueCalls = 0;
+      const terminal = { afterEnqueue: () => { afterEnqueueCalls += 1; } } as TerminalDelivery;
+      pushToLead(pi.api, registry, record, "ws-agent-approval", { cmd_id: "cmd-1", command: "rm -rf build" }, "steer", terminal);
+      assert.equal(pi.sentMessages.length, 1, "the busy lead takes the approval as a direct steer");
+      assert.equal(terminal.state, "enqueued");
+      const steered = pi.sentMessages[0]!;
+
+      await pi.tools.get("ws-compact")!.execute("t1", { current_work: "PROSE" }, undefined, undefined, ctx);
+      pushToLead(pi.api, registry, record, "ws-agent-report", { report: "held during compaction" }, "steer");
+      assert.equal(heldPushQueue.length, 1, "a push during compaction is held");
+
+      assert.ok(pi.handlers.get("session_before_compact")!(compactionEvent("manual", leverBranch([steered])), ctx));
+      pi.handlers.get("session_compact")!({ reason: "manual", fromExtension: true, compactionEntry: { details: leadDetails } }, ctx);
+      assert.equal(heldPushQueue.length, 2, "the lost steer is back in the held queue");
+      idle.current = true;
+      compact().onComplete!({} as never);
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(leadCompactingRef.current, false);
+      assert.equal(flushHeldPushes(pi.api, true), 2, "the post-compaction start releases both");
+
+      const batch = lastBatch(pi);
+      assert.deepEqual(batch.details.items.map((item) => [item.customType, item.state]), [["ws-agent-approval", "actionable"], ["ws-agent-report", "informational"]]);
+      assert.equal(batch.content.split(LABEL).length - 1, 1, "the batch carries the label once; the recovered item is not labeled again");
+      assert.ok(!String(batch.details.items[0]!.content).includes(LABEL));
+      assert.match(batch.content, /<action type="approval" agent-id="w-1" command-id="cmd-1">/);
+      assert.equal(terminal.state, "enqueued", "not reset to held");
+      assert.equal(afterEnqueueCalls, 0, "afterEnqueue does not run for the re-delivery");
+    });
+
+    test("a mailbox batch steer is unpacked into its items, in order, with no nested batch, and the release wakes the lead for it", async () => {
+      const wakePi = { on: (event: string, fn: () => void) => { if (event === "session_shutdown") shutdown = fn; } } as unknown as ExtensionAPI;
+      let shutdown: (() => void) | undefined;
+      registerPushFlush(wakePi, { delayMs: () => 10, scheduleTimer: () => 0 as unknown as NodeJS.Timeout, clearTimer: () => {} });
+      try {
+        const { pi, ctx, idle, compact } = setup();
+        sendBatchToLead(pi.api, [
+          { customType: "ws-mailbox", content: "mail one", display: true, details: { n: 1 } },
+          { customType: "ws-mailbox", content: "mail two", display: true, details: { n: 2 } },
+        ], "steer");
+        assert.equal(pi.sentMessages.length, 1);
+        const steered = pi.sentMessages[0]!;
+
+        await pi.tools.get("ws-compact")!.execute("t1", { current_work: "PROSE" }, undefined, undefined, ctx);
+        pi.handlers.get("session_before_compact")!(compactionEvent("manual", leverBranch([steered])), ctx);
+        pi.handlers.get("session_compact")!({ reason: "manual", fromExtension: true, compactionEntry: { details: leadDetails } }, ctx);
+        idle.current = true;
+        compact().onComplete!({} as never);
+        await new Promise((resolve) => setImmediate(resolve));
+        assert.deepEqual(pi.sentUserMessages.map((sent) => sent.content)[0], labeled(buildPushWakeLine(2)), "the release wakes the lead for a queue holding only recovered items");
+        clearWakeStart();
+        assert.equal(flushHeldPushes(pi.api, true), 2, "both mailbox items are back in the held queue");
+        assert.equal(pi.sentMessages.length, 2, "re-delivered as a new batch");
+
+        const batch = lastBatch(pi);
+        assert.deepEqual(batch.details.items.map((item) => [item.customType, item.content, item.state]), [["ws-mailbox", "mail one", "informational"], ["ws-mailbox", "mail two", "informational"]]);
+        assert.doesNotMatch(batch.content, /type="ws-push-batch"/, "no nested batch");
+      } finally {
+        shutdown?.();
+      }
+    });
+
+    for (const outcome of ["failed", "native summary"] as const) {
+      test(`a ${outcome} lever compaction recovers nothing`, async () => {
+        const { pi, ctx, idle, registry, record, compact } = setup();
+        pushToLead(pi.api, registry, record, "ws-agent-approval", { cmd_id: "cmd-1" }, "steer");
+        const steered = pi.sentMessages[0]!;
+        await pi.tools.get("ws-compact")!.execute("t1", { current_work: "PROSE" }, undefined, undefined, ctx);
+        pi.handlers.get("session_before_compact")!(compactionEvent("manual", leverBranch([steered])), ctx);
+        idle.current = true;
+        if (outcome === "failed") {
+          pi.handlers.get("session_compact_failed")!({ reason: "manual", errorMessage: "Compaction failed: boom" }, ctx);
+          compact().onError!(new Error("boom"));
+        } else {
+          pi.handlers.get("session_compact")!({ reason: "manual", fromExtension: false, compactionEntry: { details: undefined } }, ctx);
+          compact().onComplete!({} as never);
+        }
+        await new Promise((resolve) => setImmediate(resolve));
+        assert.equal(heldPushQueue.length, 0, "the steer is still in context, so nothing is re-delivered");
+      });
+    }
+
+    test("a non-lever compaction recovers nothing, even with a lever result in the branch", async () => {
+      const { pi, ctx, idle, registry, record } = setup();
+      pushToLead(pi.api, registry, record, "ws-agent-approval", { cmd_id: "cmd-1" }, "steer");
+      const steered = pi.sentMessages[0]!;
+      pi.handlers.get("session_before_compact")!(compactionEvent("threshold", leverBranch([steered])), ctx);
+      idle.current = true;
+      pi.handlers.get("session_compact")!({ reason: "threshold", fromExtension: true, compactionEntry: { details: { ...leadDetails, source: "fallback" } } }, ctx);
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(heldPushQueue.length, 0);
     });
   });
 

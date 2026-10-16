@@ -122,7 +122,7 @@ import { normalizeWriteScopes, type EffectiveWriteCapability, type WriteScope } 
 import { createWebSearch } from "./web-search.ts";
 import { verifyWebReadiness, WEB_HOME_ENV, WEB_READINESS_KIND } from "./web-readiness.ts";
 import { beginSubtreeDispatch, installSubtreePublisher, observeSubtreeChannel, publishSubtree, scheduleSubtreeTelemetry, type OwnTurnState, type SubtreeDescendant, type SubtreeSnapshot, type SubtreeUpstream } from "./subtree-lifecycle.ts";
-import { PUSH_BATCH_CUSTOM_TYPE, PUSH_BATCH_VERSION, type PushBatchItem, type PushBatchItemState } from "./push-protocol.ts";
+import { GOAL_CONTROL_CUSTOM_TYPE, PUSH_BATCH_CUSTOM_TYPE, PUSH_BATCH_VERSION, type PushBatchItem, type PushBatchItemState } from "./push-protocol.ts";
 import { labelAdapterContent, labelAdapterText } from "./adapter-label.ts";
 import { withItemSummaryIds, withSummaryId } from "./summary-id.ts";
 import { capacityEvictionCost, isRemovedAgent, persistAgentCostCheckpoint, persistEvictedAgentCost, registerAgentCostOwner } from "./agent-cost.ts";
@@ -1477,6 +1477,8 @@ interface HeldRawSend {
   message: Parameters<ExtensionAPI["sendMessage"]>[0];
   /** Whether a no-prefix active delivery must still use ws-push-batch materialization. */
   batchMode: RawPushBatchMode;
+  /** Batch item state; absent is `informational`. Set only by `prependRecoveredPushes`, whose items keep their send-time state. */
+  state?: PushBatchItemState;
 }
 
 /** Delivery-time outcome for a queued `/goal <goal>` replacement. */
@@ -1530,6 +1532,26 @@ export type HeldInput = HeldPush | HeldRawSend | HeldGoalReplacement;
  * out of model content, and retain their result across a rejected prose batch.
  */
 export const heldPushQueue: HeldInput[] = [];
+
+/**
+ * 261015: put push items back at the FRONT of the held queue, in the given
+ * order. Lead compaction calls this for steers Pi drained into the aborted
+ * `ws-compact` lever run, which its no-raw-tail summary would otherwise drop.
+ * Front, because `admitPush` steers directly only into an empty queue, so
+ * every item held now was admitted after them. Each item replays its
+ * send-time content and `state` as a raw entry with no terminal reference:
+ * the lost steer already advanced its terminal delivery to `enqueued` and ran
+ * `afterEnqueue`, and re-delivery must do neither again.
+ */
+export function prependRecoveredPushes(items: readonly PushBatchItem[]): void {
+  heldPushQueue.unshift(...items.map((item): HeldRawSend => ({
+    kind: "raw",
+    deliverAs: "steer",
+    batchMode: "always",
+    state: item.state,
+    message: { customType: item.customType, content: item.content as never, display: item.display, details: item.details },
+  })));
+}
 
 /** Admit a validated goal replacement without creating a parallel control queue. */
 export function enqueueHeldGoalReplacement(entry: HeldGoalReplacement): void {
@@ -1637,13 +1659,13 @@ function materializeHeldInput(held: HeldInput): PushBatchItem {
       content: held.message.content as string | unknown[],
       display: held.message.display,
       details: held.message.details,
-      state: "informational",
+      state: held.state ?? "informational",
     };
   }
   if (held.kind === "goal-replacement") {
     const result = resolveHeldGoalReplacement(held);
     return {
-      customType: "ws-goal-control",
+      customType: GOAL_CONTROL_CUSTOM_TYPE,
       content: result.message,
       display: true,
       details: { goal: held.goal, generation: held.generation, outcome: result.outcome },

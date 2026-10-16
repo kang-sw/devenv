@@ -94,6 +94,7 @@ import {
   buildLeadCompactionSummary,
   buildContextMilestoneMessage,
   buildPreparationMessage,
+  collectLeverBoundarySteers,
   DEFAULT_DIALOG_BUDGET_BYTES,
   DEFAULT_REREAD_BUDGET_BYTES,
   extractLeadProse,
@@ -120,7 +121,8 @@ import { withSummaryId } from "./summary-id.ts";
 import { readSpawnRole } from "./process-role.ts";
 import { staticConfigReader, thenOrNow, type GoalLoopConfigKey, type GoalLoopConfigReader } from "./adapter-config.ts";
 import { createToolPreviewTuiRef, registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
-import { clearWakeStart, enqueueHeldGoalReplacement, reserveWakeStart, heldPushQueue, flushHeldPushes, hasRunningAgents, isOwningAgentIdle, leadCompactingRef, reserveAdapterPromptStart, leadWakeStartPendingRef, type HeldGoalReplacementResult, type RpcAgentRegistry } from "./spawner.ts";
+import { clearWakeStart, enqueueHeldGoalReplacement, reserveWakeStart, heldPushQueue, flushHeldPushes, hasRunningAgents, isOwningAgentIdle, leadCompactingRef, prependRecoveredPushes, reserveAdapterPromptStart, leadWakeStartPendingRef, type HeldGoalReplacementResult, type RpcAgentRegistry } from "./spawner.ts";
+import type { PushBatchItem } from "./push-protocol.ts";
 
 // ---------------------------------------------------------------------------
 // Config: adapter-declared ws settings (adapter-config.ts). Every knob is
@@ -814,6 +816,18 @@ export function registerGoalLoop(
    * consumption or by the lever's own completion/failure callback.
    */
   let pendingLever: { prose: string; fileLists: LeadFileLists; operationId: number } | undefined;
+
+  /**
+   * 261015: push items Pi drained into the aborted lever run, staged by the
+   * lever's `session_before_compact` and committed to the front of the held
+   * queue by `session_compact` only when the stored summary is this
+   * adapter's (`collectLeverBoundarySteers`). Pi emits `session_compact`
+   * before the lever's `onComplete` and before the deferred release, so the
+   * commit always precedes the post-compaction flush. A failed or cancelled
+   * compaction discards them: the steer is still in context. So does a
+   * native or competing summary, whose raw tail likely still holds it.
+   */
+  let stagedRecovery: { operationId: number; items: PushBatchItem[] } | undefined;
 
   /**
    * 261002 Phase 2 trigger state (lead only). `triggerLatch` (261006) is the
@@ -1535,6 +1549,7 @@ export function registerGoalLoop(
     else leadCompactingRef.current = true;
     if (isChildProcess(process.env)) return undefined;
     expectOwnCompaction = false;
+    stagedRecovery = undefined;
     const lever = pendingLever;
     if (event.reason === "manual" && !lever) {
       // A user /compact (or any manual compaction not started by the lever)
@@ -1546,6 +1561,7 @@ export function registerGoalLoop(
     if (state.active && state.goal) ctx.ui.notify(buildCompactionObservation(state.goal, event.reason), "info");
     if (lever) {
       pendingLever = undefined;
+      stagedRecovery = { operationId: lever.operationId, items: collectLeverBoundarySteers(event.branchEntries ?? []) };
       return ownCompaction(event, ctx, lever.prose, "lever", lever.fileLists);
     }
     // Threshold or overflow compaction with no lever prose: summarize in-hook.
@@ -1644,8 +1660,11 @@ export function registerGoalLoop(
   // after), so anything synchronous here would race that same internal
   // state Pi has not finished unwinding yet.
   pi.on("session_compact", (event, ctx) => {
+    const staged = stagedRecovery;
+    stagedRecovery = undefined;
     if (!isChildProcess(process.env)) {
       const ours = isLeadCompactionDetails(event?.compactionEntry?.details);
+      if (ours && staged && staged.operationId === activeCompaction?.id && staged.items.length > 0) prependRecoveredPushes(staged.items);
       if (ours) {
         // 261002: the stored summary is this adapter's and carries the lever
         // prose verbatim, so the next goal reminder need not repeat it. When
@@ -1679,6 +1698,7 @@ export function registerGoalLoop(
     // add its own prefix on top (Review relay #1, Minor).
     const operation = activeCompaction;
     expectOwnCompaction = false;
+    stagedRecovery = undefined;
     const reroute = pendingReroute;
     pendingReroute = undefined;
     setImmediate(() => {
@@ -1783,6 +1803,7 @@ export function registerGoalLoop(
         },
         onError: (error) => {
           clearLever();
+          if (stagedRecovery?.operationId === operation.id) stagedRecovery = undefined;
           // Review relay #1 (Minor): the "Compaction failed: " prefix is
           // applied HERE, at the lever's own call site — `error.message` is a
           // raw, unprefixed string, unlike `SessionCompactFailedEvent.errorMessage`
@@ -1806,6 +1827,7 @@ export function registerGoalLoop(
       promptsAwaitingStart.length = 0;
       activeCompaction = undefined;
       pendingLever = undefined;
+      stagedRecovery = undefined;
       triggerLatch = NO_TRIGGER_LATCH;
       latchEpoch++;
       preparation = false;

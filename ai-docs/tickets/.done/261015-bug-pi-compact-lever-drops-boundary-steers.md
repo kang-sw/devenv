@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 75fd6d125a618f73
 sage-review-completeness-reviewed: 75fd6d125a618f73
+completed: 2026-10-15
 ---
 
 # Pi lead: pushes steered into the ws-compact lever turn are lost by compaction
@@ -188,3 +189,53 @@ Verification:
   session entry is pinned by a test or a host-source check recorded in the
   Result.
 - Existing `agents-plugin-pi` test suites pass.
+
+### Result (1e5fb107d) - 2026-10-15
+
+Landed in `1e5fb107d` (implementation) and `0b436c621` (review test fix).
+
+- `lead-compaction.ts`: `collectLeverBoundarySteers(entries)` walks back from
+  the branch end to the latest `ws-compact` toolResult (a `compaction` entry
+  or the branch start reached first recovers nothing) and collects
+  `custom_message` entries whose `customType` is `ws-push-batch` or a
+  `PUSH_FAMILIES` member. Batches unpack into `details.items` with their
+  stored `state` (`ws-goal-control` items dropped: applied at their own
+  boundary, never model content); single steers are unlabeled through
+  `adapterLabeledBody` and take `actionable` for approval/question,
+  otherwise `informational`.
+- `spawner.ts`: `HeldRawSend` gains an optional `state` read by
+  `materializeHeldInput` (default `informational`, so existing raw senders
+  are unchanged); `prependRecoveredPushes(items)` unshifts them as raw held
+  entries with no terminal reference, so terminal deliveries stay
+  `enqueued` and `afterEnqueue` never re-runs.
+  `GOAL_CONTROL_CUSTOM_TYPE` moved to `push-protocol.ts`.
+- `goal-loop.ts`: the lever branch of `session_before_compact` stages the
+  items; `session_compact` commits them only when the stored entry is the
+  adapter's and the staged operation is the active one; staging is cleared
+  at every `session_before_compact`, `session_compact_failed`, the lever's
+  `onError`, and shutdown.
+
+Premise (host-source check, Pi 0.84.4): `agent-session.js` `message_end`
+for `role === "custom"` calls `sessionManager.appendCustomMessageEntry`,
+which writes a `type: "custom_message"` entry (`session-manager.js`);
+`pi-agent-core` `agent-loop.js` polls `getSteeringMessages()` after
+`turn_end` and records the drained steer before the aborted assistant turn;
+`compact()` starts with `await this.abort()`, which does not clear the
+steering queue, then reads `getBranch()` for `session_before_compact`; and
+`session_compact` is emitted before the lever's `onComplete`.
+
+Verification: `npm test` in `agents-plugin-pi`: 2279 tests, 2276 pass, 0
+fail, 3 skipped. New tests: `test/lead-compaction.test.ts` "lever boundary
+steers (261015)" (4) and `test/goal-loop.test.ts` "pushes steered into the
+lever turn survive the lever compaction (261015)" (5), covering front
+insertion and order ahead of compaction-held pushes, actionable approval
+replay with a single label and action summary, batch unpacking with no
+nested batch, the release's push wake for a recovered-only queue, and
+no recovery on failed, native-summary, or non-lever compaction. Mutation
+checks: removing the commit fails both positive tests; dropping the
+ws-summary gate fails the native-summary test.
+
+Lite review: 0 Critical, 0 Important. One Minor was fixed (the release
+wake was not asserted). Two Minors were left as they are: the
+stale-operation guard is untested, and the terminal assertions hold by
+construction.

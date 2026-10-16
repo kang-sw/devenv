@@ -33,7 +33,8 @@
 import { readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
-import { isPushWakeLine, type RpcAgentRecord, type RpcAgentRegistry } from "./spawner.ts";
+import { isPushWakeLine, PUSH_FAMILIES, type RpcAgentRecord, type RpcAgentRegistry } from "./spawner.ts";
+import { GOAL_CONTROL_CUSTOM_TYPE, PUSH_BATCH_CUSTOM_TYPE, type PushBatchItem, type PushBatchItemState } from "./push-protocol.ts";
 import { ADAPTER_MESSAGE_LABEL, adapterLabeledBody } from "./adapter-label.ts";
 
 /** The lead-callable compaction lever (replaces 260903's `goal-compact-and-continue`). */
@@ -411,6 +412,82 @@ export function buildDialogSection(entries: readonly SessionEntry[], budgetBytes
     ? `Full tool output and every earlier message remain in the session file \`${sessionFile}\`; search it (for example with grep) when you need them.`
     : "This session has no session file, so tool output from before this compaction cannot be searched.";
   return [DIALOG_SECTION_HEADING, header, search, "<dialog>", ...lines, "</dialog>"].join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Push steers lost at the lever boundary (261015).
+// ---------------------------------------------------------------------------
+
+/**
+ * The custom types the push path (`admitPush`) can send into a running turn
+ * as a steer: one family push, or one `ws-push-batch` (mailbox drains
+ * included). Preparation and milestone messages are compaction scaffolding.
+ */
+const PUSH_STEER_TYPES: ReadonlySet<string> = new Set<string>([PUSH_BATCH_CUSTOM_TYPE, ...PUSH_FAMILIES]);
+const ITEM_STATES: ReadonlySet<string> = new Set<PushBatchItemState>(["informational", "actionable", "superseded"]);
+
+/** `content` without the adapter label a single send put on its first line; a batch item carries none. */
+function unlabeledContent(content: unknown): unknown {
+  if (typeof content === "string") return adapterLabeledBody(content) ?? content;
+  if (!Array.isArray(content)) return content;
+  const [first, ...rest] = content as ContentPart[];
+  const body = first?.type === "text" && typeof first.text === "string" ? adapterLabeledBody(first.text) : undefined;
+  if (body === undefined) return content;
+  return body === "" ? rest : [{ ...first, text: body }, ...rest];
+}
+
+function recoveredItems(entry: Extract<SessionEntry, { type: "custom_message" }>): PushBatchItem[] {
+  if (entry.customType === PUSH_BATCH_CUSTOM_TYPE) {
+    const items = (entry.details as { items?: unknown } | undefined)?.items;
+    if (!Array.isArray(items)) return [];
+    return items.flatMap((raw): PushBatchItem[] => {
+      const item = raw as Partial<PushBatchItem> | null;
+      // A goal control was applied at its own boundary and never reached the model.
+      if (typeof item?.customType !== "string" || item.customType === GOAL_CONTROL_CUSTOM_TYPE) return [];
+      return [{
+        customType: item.customType,
+        content: item.content,
+        display: item.display !== false,
+        details: item.details,
+        state: typeof item.state === "string" && ITEM_STATES.has(item.state) ? item.state : "informational",
+      }];
+    });
+  }
+  // A single family push is sent directly only for a current request, so an
+  // approval or question was actionable by construction; its entry stores no state.
+  const actionable = entry.customType === "ws-agent-approval" || entry.customType === "ws-agent-question";
+  return [{
+    customType: entry.customType,
+    content: unlabeledContent(entry.content),
+    display: entry.display,
+    details: entry.details,
+    state: actionable ? "actionable" : "informational",
+  }];
+}
+
+/**
+ * Push items Pi drained into the aborted `ws-compact` lever run, oldest
+ * first. A push steered while the lever turn streamed sits in Pi's steering
+ * queue; `ctx.compact()` aborts the run without clearing it, so Pi's loop
+ * injects it after the tool batch and records it as a `custom_message` entry
+ * after the lever's tool result. The no-kept-tail summary leaves custom
+ * messages out of `## Dialog`, so after compaction the model never sees it.
+ * Scans back to the latest `ws-compact` tool result; a compaction entry or the
+ * start of the branch reached first means no lever bound, so nothing is
+ * recovered. Batches are unpacked into their items.
+ */
+export function collectLeverBoundarySteers(entries: readonly SessionEntry[]): PushBatchItem[] {
+  const steers: Array<Extract<SessionEntry, { type: "custom_message" }>> = [];
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i]!;
+    if (entry?.type === "compaction") return [];
+    const message = entryMessage(entry) as { role?: unknown; toolName?: unknown } | undefined;
+    if (message?.role === "toolResult" && message.toolName === LEAD_COMPACT_TOOL_NAME) {
+      return steers.reverse().flatMap(recoveredItems);
+    }
+    if (entry?.type === "custom_message" && PUSH_STEER_TYPES.has(entry.customType)) steers.push(entry);
+  }
+  return [];
 }
 
 // ---------------------------------------------------------------------------
