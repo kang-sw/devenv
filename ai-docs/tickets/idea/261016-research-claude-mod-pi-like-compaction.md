@@ -68,10 +68,24 @@ Read from the engine's own declaration file for Claude Code 2.1.293
   "Claude mod compaction surface" (source: that build's declaration file and
   `reference.md`).
 - `$.session.compact()` rejects while a turn runs (declaration doc comment).
+- `$.session.compact()` takes only `instructions`; it starts a compaction that
+  the engine's summarizer writes. The only declared path for supplying the
+  compacted content ourselves is a `session.compact` hook returning its own
+  `{ messages }` without `next`, which is untested.
 - The mod API is documented as early access that "moves between releases";
   the declaration file, not the reference note, is the authority per build.
 - The only current ws Claude compaction integration is the observe-only
   `SessionStart(compact)` revive nudge in `agents-plugin/hooks/hooks.json`.
+- Pi's advisory and milestone nudges already cost a turn each: they open a
+  boundary at `agent_end` and tell the lead to end the turn without replying
+  when the boundary does not fit (`agents-plugin-pi/src/lead-compaction.ts`,
+  the milestone message text). A `$.prompt.submit` nudge on Claude therefore
+  matches pi's cost.
+- The boundary-steer loss of
+  `261015-bug-pi-compact-lever-drops-boundary-steers` comes from Pi's
+  `AgentSession.compact()` calling `abort()` first without clearing the
+  steering queue. Claude's `$.session.compact()` rejects during a turn instead
+  of aborting it, so that loss path does not carry over by construction.
 
 ### Confirmed Decisions
 
@@ -80,35 +94,58 @@ Read from the engine's own declaration file for Claude Code 2.1.293
   validated the mod path in `ws`/`wsflow`. Compaction is tracked separately
   from the mailbox mod because a compaction hook mutates the conversation, so
   a mod-API break has a larger blast radius than a lost mailbox push.
+- First-step scope mirrors pi's timing, not pi's summary ownership:
+  - Advisory (50%) and milestone nudges are `$.prompt.submit`ted at
+    `turn.complete`, driven from `$.session.usage()`.
+  - A mod-registered lever tool records a compaction request and a one-line
+    continuation (for example "continue Phase 2 implementation"). After the
+    turn ends the mod runs `$.session.compact()`, then submits the
+    continuation, since an idle session after compaction has nothing else to
+    resume it.
+  - The compacted content is left to the engine's summarizer. The lead
+    prepares no summary content, because `compact()` starts a summarization of
+    its own and a prepared body would be summarized a second time. No fixed
+    custom instructions are injected in the first step either.
+  - Pi's hard cut maps to Claude's native auto compaction; the mod does not
+    veto `auto`.
 
 ### Proposals
 
-- An agent-called lever tool registered by the mod records a compaction
-  request; the mod runs `$.session.compact` at the next `turn.complete`/idle
-  and then `$.prompt.submit`s the declared continuation.
-- A `session.compact` hook vetoes `auto` compaction below a hard ceiling so
-  compaction happens at agent-chosen boundaries, mirroring pi's
-  advisory-then-hard thresholds; an advisory nudge is driven from
-  `$.session.usage()` at turn end.
 - Instructions injection on every trigger, so automatic compaction also
   receives ws-specific summary guidance (pi's auto compaction never received
   custom instructions; see `261002-feat-pi-lead-ws-owned-compaction`).
+  Deferred past the first step; revisit only on evidence that the plain
+  engine summary loses ws state.
+- A fully custom summary through a `session.compact` hook returning its own
+  `{ messages }`, which would avoid double summarization of prepared content.
+  Revisit only if the engine summary proves insufficient.
 
 ### Open Questions
 
+- Ordering against the mailbox mod (to measure live): when a compaction is
+  scheduled for idle and a mailbox `$.prompt.submit` is already queued, which
+  runs first? If the submit wins, `compact()` rejects and retries at the next
+  `turn.complete`; under steady mail, check that compaction is not starved
+  until native auto fires. Check for lost prompts as well.
 - Does a `session.compact` hook that returns its own `{ messages }` without
-  `next` produce a valid compaction, and is a fully custom summary worth it
-  over instructions rewriting?
-- Does vetoing `auto` hold when the engine compacts on "prompt too long"
-  (also trigger `auto`)? A veto there may fail the request instead of
-  deferring compaction; the hard-ceiling fallback must not deadlock.
+  `next` produce a valid compaction? Relevant only to the deferred custom
+  summary proposal.
 - How does the existing `SessionStart(compact)` revive nudge interact with a
   mod-injected continuation (double revive prompts)?
 - What is the failure mode when the mod API breaks on a Claude Code update:
   does Claude's native auto-compaction resume untouched, and how is the
   degradation detected (for example gating on `$.session.version()`)?
-- Can the mod and the existing command hooks share one
-  `agents-plugin/hooks/hooks.json` (`hooks` plus `modules`)? Shared with the
-  mailbox mod probe.
+- Do the mod and the existing command hooks both run at runtime from one
+  `agents-plugin/hooks/hooks.json` (`hooks` plus `modules`)? The mailbox mod
+  probe showed `claude plugin validate` accepts the combined file; runtime is
+  unexercised there too.
 
 ### Rejected Alternatives
+
+- **Vetoing `auto` compaction below a hard ceiling.** Preempting at an
+  agent-chosen boundary needs no veto, and leaving native auto untouched as
+  the hard cut avoids the "prompt too long" deadlock risk (also trigger
+  `auto`) and degrades to stock Claude behavior if the mod breaks.
+- **Lead-prepared summary content passed through `compact()`.** `compact()`
+  starts its own summarization, so the prepared body would be summarized
+  again: double cost and an extra lossy pass.

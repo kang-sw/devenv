@@ -106,9 +106,18 @@ owner, per `rebindMailboxOwnerAtFerrule`):
   absent on the main loop and set for a subagent or teammate.
 - `$.tool.call` reaches MCP server tools through the same path as a model call,
   including "the permission check and its dialog"; live, no dialog appeared
-  under `defaultMode: auto`. `$.mcp.call(server, tool, args)` is declared as
-  the no-permission-prompt alternative; its exact server/tool spelling for ws
-  is unverified.
+  under `defaultMode: auto`, the only mode probed. `$.mcp.call(server, tool,
+  args)` is declared as the no-permission-prompt alternative; its exact
+  server/tool spelling for ws is unverified.
+- The permission exposure is not new with the mod: today's fallback (the
+  model calls `mailbox_recv` after the background wait returns) passes the
+  same permission check, so an away user under a prompting mode already
+  stalls there. Whether a call prompts depends on the permission mode and the
+  allow/deny rules together, and the mode can change mid-session.
+- `agents-plugin-wsflow/` has no `hooks/` directory, so a wsflow mod adds the
+  first Claude hooks surface to that package; `install.sh` deletes the
+  `wsflow@kang-sw-devenv` Claude install record, so wsflow reaches Claude only
+  through a manual marketplace install.
 - `$` cannot be stored or passed around (`claude plugin validate` refuses it);
   every engine call is spelled `$.noun.method(...)` inline inside a hook, so
   side-effect edges are closures created inside `session.start`.
@@ -135,6 +144,12 @@ owner, per `rebindMailboxOwnerAtFerrule`):
   session key; the binding is not inferred from other ws tool calls.
 - The mod drains through the ws MCP recv tool itself and submits the whole
   drain as one prompt, mirroring pi.
+- The drain calls recv through `$.mcp.call` first, so a mod-initiated drain
+  never raises a permission prompt in an idle session: it is the ws mod
+  reading its own session-bound inbox on the ws server. Only if `$.mcp.call`
+  proves unusable (it prompts anyway, or ws cannot be addressed through it)
+  does the design fall back to deciding in advance whether a `$.tool.call`
+  would prompt.
 - Binding lifecycle: one binding per Claude session, last call wins. The same
   key again is a no-op (covers revive with the preserved key); a different key
   replaces the binding (covers a new `ferrule`) without detecting either event;
@@ -150,7 +165,8 @@ owner, per `rebindMailboxOwnerAtFerrule`):
 
 - Persist the bound key in `$.state` (session-scoped) so a mod reload re-binds
   without an agent call.
-- Use a finite wait timeout (pi's value) instead of `--timeout 0`, so an
+- Use a finite wait timeout (pi's `DEFAULT_WAIT_TIMEOUT_ARG`, `10m`, in
+  `agents-plugin-pi/src/mailbox-waiter.ts`) instead of `--timeout 0`, so an
   orphaned wait cannot outlive its session.
 - Resolve the launcher from the plugin's own root at runtime instead of the
   probe's hardcoded installed path.
@@ -161,6 +177,9 @@ owner, per `rebindMailboxOwnerAtFerrule`):
 
 ### Open Questions
 
+- Does `$.mcp.call` reach the ws server's `mailbox_recv` without a
+  permission prompt under a prompting mode (for example `default`), and what is
+  its server/tool spelling for `ws` and for `wsflow`? This is the next probe.
 - Does a different-key rebind actually kill the previous blocked `wait` child
   (`stream.return()` on a silent child)?
 - Does `/clear` stop the loop and leave no `wait` child in a live session?
@@ -195,5 +214,8 @@ owner, per `rebindMailboxOwnerAtFerrule`):
 - **Expiring a binding by detecting re-`ferrule` or revive.** A second
   `ferrule` in one worktree is an independent track, so a new key does not mean
   the old one died; last-call-wins handles both cases without detection.
+- **Gating the push on detecting auto mode.** A prompt depends on the mode
+  and the allow/deny rules together, and the mode changes mid-session, so a
+  mode read at bind time goes stale; `$.mcp.call` removes the prompt instead.
 - **Emitting one push per envelope.** One batch per drain, as pi settled after
   `261009-bug-pi-mailbox-busy-drain-splits-into-per-envelope-steers`.
