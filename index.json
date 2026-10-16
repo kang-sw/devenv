@@ -553,18 +553,8 @@
     "261008-bug-ws-git-merge-switches-worker-occupied-root": {
       "registered_at": "2026-10-08T04:40:47Z"
     },
-    "261015-bug-pi-compact-lever-drops-boundary-steers": {
-      "registered_at": "2026-10-15T08:09:40Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-15T09:54:33Z",
-        "impl": {
-          "branch": "impl/develop/rug-glare-false"
-        }
-      }
+    "261016-feat-pi-lead-exec-hatch-background-mode": {
+      "registered_at": "2026-10-16T01:20:41Z"
     }
   }
 }
