@@ -554,7 +554,14 @@
       "registered_at": "2026-10-08T04:40:47Z"
     },
     "261016-feat-pi-compaction-token-thresholds": {
-      "registered_at": "2026-10-16T14:39:30Z"
+      "registered_at": "2026-10-16T14:39:30Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-10-16T14:48:43Z"
+      }
     },
     "261016-research-claude-mod-mailbox-active-push": {
       "registered_at": "2026-10-16T08:54:20Z"
