@@ -1,0 +1,7 @@
+**Succeeded.** I called `mcp__plugin_ws_ws__mailbox_recv` once with `session_key: "baggy-disparity-external"` and `format: "json"`. The call was not denied and returned no error. The verbatim result was:
+
+```
+null
+```
+
+That likely means there was no mail waiting. I didn't call any other tool, including ToolSearch, even though this tool is listed as deferred.

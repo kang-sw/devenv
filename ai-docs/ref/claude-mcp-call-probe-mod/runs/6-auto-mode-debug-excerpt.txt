@@ -1,0 +1,4 @@
+2026-10-16T23:18:08.918Z [DEBUG] Skipping auto mode classifier for mcp__plugin_ws_ws__mailbox_recv: called by plugin mcp-call-probe
+2026-10-16T23:18:08.982Z [DEBUG] Skipping auto mode classifier for mcp__plugin_ws_ws__mailbox_recv: called by plugin mcp-call-probe
+2026-10-16T23:18:09.041Z [DEBUG] Skipping auto mode classifier for mcp__plugin_ws_ws__mailbox_recv: called by plugin mcp-call-probe
+2026-10-16T23:18:09.102Z [DEBUG] Skipping auto mode classifier for mcp__plugin_ws_ws__mailbox_recv: called by plugin mcp-call-probe

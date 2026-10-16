@@ -34,10 +34,26 @@ export const register: Register = (on) => {
   on('tool.check', { tool: CONTROL_TOOL }, async ($, e, next) => {
     const origin = next.origin
     const own = OWN_PLUGINS.includes(origin.plugin) && e.agentId === undefined
-    lines.push(`${new Date().toISOString()} tool.check hook: origin=${show(origin)} tool_use_id=${e.tool_use_id ?? '-'} own=${own}`)
-    if (GRANT_OWN_CALLS && own) return { decision: 'allow', reason: 'ws mod drains its own bound inbox' }
-    return next(e)
+    lines.push(`${new Date().toISOString()} tool.check hook: origin=${show(origin)} tool_use_id=${e.tool_use_id ?? '-'} agentId=${e.agentId ?? '-'} input=${show(e.input)} own=${own}`)
+    if (GRANT_OWN_CALLS && own) {
+      await $.fs.write(LOG, lines.join('\n') + '\n')
+      return { decision: 'allow', reason: 'ws mod drains its own bound inbox' }
+    }
+    const beneath = await next(e)
+    lines.push(`${new Date().toISOString()} tool.check hook: verdict beneath=${show(beneath)}`)
+    await $.fs.write(LOG, lines.join('\n') + '\n')
+    return beneath
   }).catch(() => ({ decision: 'deny' }))
+
+  // Observer: does a tool.call hook see the model's own call of the recv tool?
+  on('tool.call', { tool: CONTROL_TOOL }, async ($, e, next) => {
+    lines.push(`${new Date().toISOString()} tool.call hook: origin=${show(next.origin)} agentId=${e.agentId ?? '-'} session_key=${show(e.session_key)} format=${show(e.format)} tool_use_id=${show((e as { tool_use_id?: string }).tool_use_id)}`)
+    await $.fs.write(LOG, lines.join('\n') + '\n')
+    const res = await next(e)
+    lines.push(`${new Date().toISOString()} tool.call hook: result=${show(res).slice(0, 300)}`)
+    await $.fs.write(LOG, lines.join('\n') + '\n')
+    return res
+  }).catch(($, e, next) => (next.called ? next(e) : next(e)))
 
   on('prompt.submit', async ($, e, next) => {
     if (done) return next(e)
@@ -56,6 +72,15 @@ export const register: Register = (on) => {
       await log(`tool.list mailbox tools=${show(tools)}`)
     } catch (err) {
       await log(`tool.list error ${errText(err)}`)
+    }
+    // Design sequence: pre-check with $.tool.check, then drain with $.mcp.call.
+    try {
+      const pre = await $.tool.check({ tool: CONTROL_TOOL, input: { session_key: PROBE_KEY, format: 'json' } } as never)
+      await log(`precheck tool.check(${CONTROL_TOOL}) -> ${show(pre)}`)
+      const res = await $.mcp.call('plugin:ws:ws', RECV, { session_key: PROBE_KEY, format: 'json' })
+      await log(`precheck-then mcp.call(plugin:ws:ws, ${RECV}) OK -> ${show(res)}`)
+    } catch (err) {
+      await log(`precheck sequence threw ${errText(err)}`)
     }
     const servers = [...SERVER_SPELLINGS]
     for (const server of ['ws', 'wsflow']) {

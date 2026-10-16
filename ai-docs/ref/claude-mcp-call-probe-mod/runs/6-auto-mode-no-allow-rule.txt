@@ -1,0 +1,34 @@
+2026-10-16T23:18:08.876Z version={"version":"2.1.300","base":"2.1.300","builtAt":"2026-10-14T12:54:55Z"}
+2026-10-16T23:18:08.878Z tool.list mailbox tools=["mcp__plugin_ws_ws__mailbox_lookup_peers","mcp__plugin_ws_ws__mailbox_recv","mcp__plugin_ws_ws__mailbox_send"]
+2026-10-16T23:18:08.879Z tool.check hook: origin={"plugin":"mcp-call-probe","tier":"user"} tool_use_id=- agentId=- input={"session_key":"baggy-disparity-external","format":"json"} own=true
+2026-10-16T23:18:08.880Z tool.check hook: verdict beneath={"decision":"ask","reason":"Claude requested permissions to use mcp__plugin_ws_ws__mailbox_recv, but you haven't granted it yet."}
+2026-10-16T23:18:08.881Z precheck tool.check(mcp__plugin_ws_ws__mailbox_recv) -> {"decision":"ask","reason":"Claude requested permissions to use mcp__plugin_ws_ws__mailbox_recv, but you haven't granted it yet."}
+2026-10-16T23:18:08.882Z tool.call hook: origin={"plugin":"mcp-call-probe","tier":"user"} agentId=- session_key="baggy-disparity-external" format="json" tool_use_id="toolu_plugin_1a138ba238c64e688527b8e8c7373a60"
+2026-10-16T23:18:08.916Z tool.check hook: origin={"plugin":"mcp-call-probe","tier":"user"} tool_use_id=toolu_plugin_1a138ba238c64e688527b8e8c7373a60 agentId=- input={"session_key":"baggy-disparity-external","format":"json"} own=true
+2026-10-16T23:18:08.917Z tool.check hook: verdict beneath={"decision":"ask","reason":"Claude requested permissions to use mcp__plugin_ws_ws__mailbox_recv, but you haven't granted it yet."}
+2026-10-16T23:18:08.951Z tool.call hook: result={"ref":1,"result":[{"type":"text","text":"[{\"reply_to\":\"id:complypanamapantsrecount\",\"content\":\"probe mail #5 for auto-mode run\",\"sent_at\":\"2026-10-16T23:18:01Z\"}]\n"}],"text":"[{\"reply_to\":\"id:complypanamapantsrecount\",\"content\":\"probe mail #5 for auto-mode run\",\"sent_at\":\"20
+2026-10-16T23:18:08.952Z precheck-then mcp.call(plugin:ws:ws, mailbox_recv) OK -> {"content":[{"type":"text","text":"[{\"reply_to\":\"id:complypanamapantsrecount\",\"content\":\"probe mail #5 for auto-mode run\",\"sent_at\":\"2026-10-16T23:18:01Z\"}]\n"}],"isError":false}
+2026-10-16T23:18:08.952Z mcp.connect(ws) -> {"isConnected":false,"reason":"unlisted","message":"This plugin's manifest lists no MCP server named \"ws\"."}
+2026-10-16T23:18:08.953Z mcp.connect(wsflow) -> {"isConnected":false,"reason":"unlisted","message":"This plugin's manifest lists no MCP server named \"wsflow\"."}
+2026-10-16T23:18:08.954Z tool.call hook: origin={"plugin":"mcp-call-probe","tier":"user"} agentId=- session_key="baggy-disparity-external" format="json" tool_use_id="toolu_plugin_4c42b5de448043049924f9df282a95f1"
+2026-10-16T23:18:08.981Z tool.check hook: origin={"plugin":"mcp-call-probe","tier":"user"} tool_use_id=toolu_plugin_4c42b5de448043049924f9df282a95f1 agentId=- input={"session_key":"baggy-disparity-external","format":"json"} own=true
+2026-10-16T23:18:08.982Z tool.check hook: verdict beneath={"decision":"ask","reason":"Claude requested permissions to use mcp__plugin_ws_ws__mailbox_recv, but you haven't granted it yet."}
+2026-10-16T23:18:09.011Z tool.call hook: result={"ref":1,"result":[{"type":"text","text":"null\n"}],"text":"null\n"}
+2026-10-16T23:18:09.011Z mcp.call(plugin:ws:ws, mailbox_recv) OK -> {"content":[{"type":"text","text":"null\n"}],"isError":false}
+2026-10-16T23:18:09.012Z tool.call hook: origin={"plugin":"mcp-call-probe","tier":"user"} agentId=- session_key="baggy-disparity-external" format="json" tool_use_id="toolu_plugin_f12153406ea6471fb32c7dea00d4c2f2"
+2026-10-16T23:18:09.040Z tool.check hook: origin={"plugin":"mcp-call-probe","tier":"user"} tool_use_id=toolu_plugin_f12153406ea6471fb32c7dea00d4c2f2 agentId=- input={"session_key":"baggy-disparity-external","format":"json"} own=true
+2026-10-16T23:18:09.041Z tool.check hook: verdict beneath={"decision":"ask","reason":"Claude requested permissions to use mcp__plugin_ws_ws__mailbox_recv, but you haven't granted it yet."}
+2026-10-16T23:18:09.069Z tool.call hook: result={"ref":1,"result":[{"type":"text","text":"null\n"}],"text":"null\n"}
+2026-10-16T23:18:09.070Z mcp.call(plugin_ws_ws, mailbox_recv) OK -> {"content":[{"type":"text","text":"null\n"}],"isError":false}
+2026-10-16T23:18:09.071Z mcp.call(ws, mailbox_recv) threw HooksError: mcp-call-probe: $.mcp.call: no connected MCP tool "mailbox_recv" on a server named "ws"
+2026-10-16T23:18:09.071Z mcp.call(plugin:wsflow:wsflow, mailbox_recv) threw HooksError: mcp-call-probe: $.mcp.call: no connected MCP tool "mailbox_recv" on a server named "plugin:wsflow:wsflow"
+2026-10-16T23:18:09.071Z mcp.call(plugin_wsflow_wsflow, mailbox_recv) threw HooksError: mcp-call-probe: $.mcp.call: no connected MCP tool "mailbox_recv" on a server named "plugin_wsflow_wsflow"
+2026-10-16T23:18:09.072Z tool.check hook: origin={"plugin":"mcp-call-probe","tier":"user"} tool_use_id=- agentId=- input={"session_key":"baggy-disparity-external","format":"json"} own=true
+2026-10-16T23:18:09.072Z tool.check hook: verdict beneath={"decision":"ask","reason":"Claude requested permissions to use mcp__plugin_ws_ws__mailbox_recv, but you haven't granted it yet."}
+2026-10-16T23:18:09.073Z tool.check(mcp__plugin_ws_ws__mailbox_recv) -> {"decision":"ask","reason":"Claude requested permissions to use mcp__plugin_ws_ws__mailbox_recv, but you haven't granted it yet."}
+2026-10-16T23:18:09.073Z tool.call hook: origin={"plugin":"mcp-call-probe","tier":"user"} agentId=- session_key="baggy-disparity-external" format="json" tool_use_id="toolu_plugin_23b1bfff7b2646d88ecc4a8ba969b005"
+2026-10-16T23:18:09.101Z tool.check hook: origin={"plugin":"mcp-call-probe","tier":"user"} tool_use_id=toolu_plugin_23b1bfff7b2646d88ecc4a8ba969b005 agentId=- input={"session_key":"baggy-disparity-external","format":"json"} own=true
+2026-10-16T23:18:09.102Z tool.check hook: verdict beneath={"decision":"ask","reason":"Claude requested permissions to use mcp__plugin_ws_ws__mailbox_recv, but you haven't granted it yet."}
+2026-10-16T23:18:09.132Z tool.call hook: result={"ref":1,"result":[{"type":"text","text":"null\n"}],"text":"null\n"}
+2026-10-16T23:18:09.132Z tool.call(mcp__plugin_ws_ws__mailbox_recv) -> {"result":[{"type":"text","text":"null\n"}],"text":"null\n"}
+2026-10-16T23:18:09.132Z done
