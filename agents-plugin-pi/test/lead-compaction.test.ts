@@ -14,6 +14,8 @@ import {
   buildDialogSection,
   buildFileListSections,
   buildContextMilestoneMessage,
+  formatThreshold,
+  formatTokenCount,
   buildFallbackSummaryPrompt,
   buildLeadCompactionSummary,
   buildPreparationMessage,
@@ -530,6 +532,23 @@ describe("preparation and fallback text", () => {
       "[system message from ws-pi-plugin]\nContext window: 70% / 80% (forced compaction point). This is the last reading before compaction is forced. Compacting at a boundary you choose keeps the summary in your hands; take this one if it fits, and run the preparation from the advisory. Otherwise end this turn without replying, and take the next good boundary.",
     );
     assert.equal(LEAD_CONTEXT_MILESTONE_CUSTOM_TYPE, "ws-lead-context-milestone");
+  });
+
+  test("with a known window every threshold is shown in percent and tokens", () => {
+    const advisory = buildPreparationMessage({ kind: "advisory", percent: 16.2, threshold: 15, hardPercent: 40, milestonePercents: [15 + 25 / 3, 15 + 50 / 3], contextWindow: 1_000_000 }, "GUIDE BODY");
+    assert.match(advisory, /^\[system message from ws-pi-plugin\]\nContext usage is 16% of the window \(advisory point: 15% \/ 150k tokens\)\. Compaction becomes forced at 40% \/ 400k tokens\.\n/);
+    assert.match(advisory, /at 40% it is forced, mid-work if need be\. Reminders follow at 23% \/ 233.3k tokens and 32% \/ 316.7k tokens\.\n/);
+    assert.match(buildPreparationMessage({ kind: "hard", percent: 41, threshold: 40, contextWindow: 1_000_000 }, "G"), /past the hard compaction point \(40% \/ 400k tokens\)\./);
+    assert.match(buildContextMilestoneMessage(1, 25, 40, 1_000_000), /^\[system message from ws-pi-plugin\]\nContext window: 25% \/ 40% \(forced compaction point, 400k tokens\)\. Past 40%,/);
+  });
+
+  test("token counts use the threshold grammar's units", () => {
+    assert.equal(formatTokenCount(950), "950");
+    assert.equal(formatTokenCount(150_000), "150k");
+    assert.equal(formatTokenCount(366_666.7), "366.7k");
+    assert.equal(formatTokenCount(1_500_000), "1.5m");
+    assert.equal(formatThreshold(15, 1_000_000), "15% / 150k tokens");
+    assert.equal(formatThreshold(14.6, undefined), "15%");
   });
 
   test("hard and manual triggers keep their imperative heads and verbatim guide", () => {

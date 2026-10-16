@@ -877,11 +877,29 @@ export function readLeadCompactGuide(path: string | undefined): string {
   }
 }
 
+/**
+ * Percents are of `contextWindow`, the window the thresholds were resolved
+ * against; with it known, every threshold is also shown in tokens.
+ */
 export type PreparationTrigger =
   /** `milestonePercents`: the two interim milestone thresholds, exact; the closing sentence rounds them. */
-  | { kind: "advisory"; percent: number; threshold: number; hardPercent: number; milestonePercents: readonly [number, number] }
-  | { kind: "hard"; percent: number; threshold: number }
+  | { kind: "advisory"; percent: number; threshold: number; hardPercent: number; milestonePercents: readonly [number, number]; contextWindow?: number }
+  | { kind: "hard"; percent: number; threshold: number; contextWindow?: number }
   | { kind: "reroute"; focus?: string };
+
+/** A token count in the threshold grammar's units: `950`, `150k`, `1.5m`. */
+export function formatTokenCount(tokens: number): string {
+  const n = Math.round(tokens);
+  if (n >= 1_000_000) return `${Number((n / 1_000_000).toFixed(2))}m`;
+  if (n >= 1_000) return `${Number((n / 1_000).toFixed(1))}k`;
+  return String(n);
+}
+
+/** A threshold in percent and, when the window is known, tokens: `50% / 500k tokens`. */
+export function formatThreshold(percent: number, contextWindow: number | undefined): string {
+  const pct = `${Math.round(percent)}%`;
+  return contextWindow === undefined ? pct : `${pct} / ${formatTokenCount((percent / 100) * contextWindow)} tokens`;
+}
 
 /**
  * `customType` of the interim context milestones between the advisory and the
@@ -892,10 +910,11 @@ export type PreparationTrigger =
 export const LEAD_CONTEXT_MILESTONE_CUSTOM_TYPE = "ws-lead-context-milestone";
 
 /** The milestone wake text (261007): `milestone` 1 or 2, current usage against the forced point, no guide body. */
-export function buildContextMilestoneMessage(milestone: 1 | 2, percent: number, hardPercent: number): string {
-  const head = `${ADAPTER_MESSAGE_LABEL}\nContext window: ${Math.round(percent)}% / ${hardPercent}% (forced compaction point).`;
+export function buildContextMilestoneMessage(milestone: 1 | 2, percent: number, hardPercent: number, contextWindow?: number): string {
+  const hardTokens = contextWindow === undefined ? "" : `, ${formatTokenCount((hardPercent / 100) * contextWindow)} tokens`;
+  const head = `${ADAPTER_MESSAGE_LABEL}\nContext window: ${Math.round(percent)}% / ${Math.round(hardPercent)}% (forced compaction point${hardTokens}).`;
   return milestone === 1
-    ? `${head} Past ${hardPercent}%, compaction is forced, mid-work if need be. From here on, a good boundary is worth taking; if this is one, run the preparation from the advisory. Otherwise end this turn without replying.`
+    ? `${head} Past ${Math.round(hardPercent)}%, compaction is forced, mid-work if need be. From here on, a good boundary is worth taking; if this is one, run the preparation from the advisory. Otherwise end this turn without replying.`
     : `${head} This is the last reading before compaction is forced. Compacting at a boundary you choose keeps the summary in your hands; take this one if it fits, and run the preparation from the advisory. Otherwise end this turn without replying, and take the next good boundary.`;
 }
 
@@ -903,17 +922,19 @@ export function buildContextMilestoneMessage(milestone: 1 | 2, percent: number, 
 export function buildPreparationMessage(trigger: PreparationTrigger, guide: string): string {
   let head: string;
   if (trigger.kind === "advisory") {
+    const hard = `${Math.round(trigger.hardPercent)}%`;
+    const [first, second] = trigger.milestonePercents.map((p) => formatThreshold(p, trigger.contextWindow));
     head = [
-      `Context usage is ${Math.round(trigger.percent)}% of the window (advisory point: ${trigger.threshold}%). Compaction becomes forced at ${trigger.hardPercent}%.`,
+      `Context usage is ${Math.round(trigger.percent)}% of the window (advisory point: ${formatThreshold(trigger.threshold, trigger.contextWindow)}). Compaction becomes forced at ${formatThreshold(trigger.hardPercent, trigger.contextWindow)}.`,
       "",
       "This is not an instruction to compact right now. If you are in active discussion with the human, awaiting their answer or clarification, or holding working context that would be costly to rebuild (a half-applied change or a diagnosis in progress), carry on for now. A pause after asking the human a question is not a boundary.",
       "",
-      `From here on, look for a good moment to compact before ${trigger.hardPercent}%. A good moment is a natural boundary where most of what this context holds is no longer needed for the work ahead, and what is still needed can be restored cheaply after compaction from durable records (tickets, commits, notes, agenda) and the summary. Typical cases: work just landed, you are waiting only on background agents, or the next work is weakly related to the current context. When such a moment comes, run the preparation below. Compacting on your own terms keeps the summary in your hands; at ${trigger.hardPercent}% it is forced, mid-work if need be. Reminders follow at ${Math.round(trigger.milestonePercents[0])}% and ${Math.round(trigger.milestonePercents[1])}%.`,
+      `From here on, look for a good moment to compact before ${hard}. A good moment is a natural boundary where most of what this context holds is no longer needed for the work ahead, and what is still needed can be restored cheaply after compaction from durable records (tickets, commits, notes, agenda) and the summary. Typical cases: work just landed, you are waiting only on background agents, or the next work is weakly related to the current context. When such a moment comes, run the preparation below. Compacting on your own terms keeps the summary in your hands; at ${hard} it is forced, mid-work if need be. Reminders follow at ${first} and ${second}.`,
       "",
       "If now is not such a moment, end this turn without replying and keep looking for one as you work.",
     ].join("\n");
   } else if (trigger.kind === "hard") {
-    head = `Context usage is ${Math.round(trigger.percent)}% of the window, past the hard compaction point (${trigger.threshold}%). Stop the current work now and prepare for compaction with the guide below before anything else.`;
+    head = `Context usage is ${Math.round(trigger.percent)}% of the window, past the hard compaction point (${formatThreshold(trigger.threshold, trigger.contextWindow)}). Stop the current work now and prepare for compaction with the guide below before anything else.`;
   } else {
     const focus = trigger.focus?.trim();
     head = `The user ran /compact. Prepare for compaction now with the guide below.${focus ? `\nThe user's /compact focus text, to honor in your prose:\n${focus}` : ""}`;

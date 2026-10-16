@@ -47,6 +47,9 @@ var (
 //	  {"key": "example.limit", "type": "integer", "minimum": 0, "maximum": 10,
 //	   "default": 3, "default_scope": "project", "description": "..."}]}
 //
+// A string key may declare "pattern", a Go regexp (RE2) the whole value must
+// match whether or not the pattern is anchored.
+//
 // Unknown fields are rejected so a misspelled constraint never loads silently.
 type configManifestFile struct {
 	SchemaVersion int                 `json:"schema_version"`
@@ -60,6 +63,7 @@ type configManifestKey struct {
 	Minimum      *int64          `json:"minimum,omitempty"`
 	Maximum      *int64          `json:"maximum,omitempty"`
 	Enum         []string        `json:"enum,omitempty"`
+	Pattern      string          `json:"pattern,omitempty"`
 	Default      json.RawMessage `json:"default"`
 	DefaultScope string          `json:"default_scope,omitempty"`
 	Description  string          `json:"description"`
@@ -72,6 +76,8 @@ type declaredConfigKey struct {
 	Minimum      *int64
 	Maximum      *int64
 	Enum         []string
+	Pattern      string         // a string key's declared RE2 pattern
+	patternRE    *regexp.Regexp // Pattern anchored to the whole value
 	Description  string
 	DefaultScope wsconfig.Scope
 	// Default is the canonical stored-string form of the declared default;
@@ -200,6 +206,9 @@ func validateManifestKey(raw configManifestKey, namespace string) (declaredConfi
 	if key.Description == "" {
 		return declaredConfigKey{}, fmt.Errorf("key %q: description is required", raw.Key)
 	}
+	if raw.Pattern != "" && raw.Type != declaredTypeString {
+		return declaredConfigKey{}, fmt.Errorf("key %q: pattern applies only to type string", raw.Key)
+	}
 	switch raw.Type {
 	case declaredTypeInteger:
 		if len(raw.Enum) > 0 {
@@ -227,6 +236,13 @@ func validateManifestKey(raw configManifestKey, namespace string) (declaredConfi
 	case declaredTypeBoolean, declaredTypeString:
 		if raw.Minimum != nil || raw.Maximum != nil || len(raw.Enum) > 0 {
 			return declaredConfigKey{}, fmt.Errorf("key %q: type %s takes no minimum, maximum, or enum", raw.Key, raw.Type)
+		}
+		if raw.Pattern != "" {
+			re, err := regexp.Compile(`^(?:` + raw.Pattern + `)$`)
+			if err != nil {
+				return declaredConfigKey{}, fmt.Errorf("key %q: pattern %q does not compile: %v", raw.Key, raw.Pattern, err)
+			}
+			key.Pattern, key.patternRE = raw.Pattern, re
 		}
 	default:
 		return declaredConfigKey{}, fmt.Errorf("key %q: type must be integer, boolean, string, or enum; got %q", raw.Key, raw.Type)
@@ -312,6 +328,9 @@ func (k declaredConfigKey) parse(stored string) (any, error) {
 		}
 		return value, nil
 	default:
+		if k.patternRE != nil && !k.patternRE.MatchString(stored) {
+			return nil, fmt.Errorf("must be %s; got %q", k.domain(), stored)
+		}
 		return stored, nil
 	}
 }
@@ -351,6 +370,9 @@ func (k declaredConfigKey) domain() string {
 	case declaredTypeEnum:
 		return "one of " + strings.Join(k.Enum, ", ")
 	default:
+		if k.Pattern != "" {
+			return fmt.Sprintf("a string matching the pattern %s", k.Pattern)
+		}
 		return "any string"
 	}
 }
