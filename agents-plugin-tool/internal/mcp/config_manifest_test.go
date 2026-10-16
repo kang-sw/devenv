@@ -16,7 +16,8 @@ const testManifest = `{
     {"key": "acme.retention_days", "type": "integer", "minimum": 0, "default": 30, "default_scope": "global", "description": "Retention in days; 0 disables."},
     {"key": "acme.animate", "type": "boolean", "default": true, "description": "Animate waits."},
     {"key": "acme.mode", "type": "enum", "enum": ["fast", "safe"], "default": "safe", "description": "Run mode."},
-    {"key": "acme.label", "type": "string", "default": "Hello", "description": "Free label."}
+    {"key": "acme.label", "type": "string", "default": "Hello", "description": "Free label."},
+    {"key": "acme.code", "type": "string", "pattern": "[a-z]+", "default": "abc", "description": "Lowercase code."}
   ]
 }`
 
@@ -79,6 +80,11 @@ func TestLoadDeclaredConfigRejectsInvalidManifests(t *testing.T) {
 		{"enum_empty", `{"schema_version":1,"namespace":"acme.","keys":[{"key":"acme.a","type":"enum","default":"z","description":"d"}]}`, "non-empty enum"},
 		{"min_above_max", `{"schema_version":1,"namespace":"acme.","keys":[{"key":"acme.a","type":"integer","minimum":5,"maximum":1,"default":3,"description":"d"}]}`, "exceeds maximum"},
 		{"bad_default_scope", `{"schema_version":1,"namespace":"acme.","keys":[{"key":"acme.a","type":"string","default":"x","default_scope":"repo","description":"d"}]}`, "default_scope"},
+		{"pattern_on_integer", `{"schema_version":1,"namespace":"acme.","keys":[{"key":"acme.a","type":"integer","pattern":"[0-9]+","default":1,"description":"d"}]}`, "pattern applies only to type string"},
+		{"pattern_on_enum", `{"schema_version":1,"namespace":"acme.","keys":[{"key":"acme.a","type":"enum","enum":["x"],"pattern":"x","default":"x","description":"d"}]}`, "pattern applies only to type string"},
+		{"pattern_does_not_compile", `{"schema_version":1,"namespace":"acme.","keys":[{"key":"acme.a","type":"string","pattern":"(","default":"x","description":"d"}]}`, "does not compile"},
+		{"pattern_lookahead_not_re2", `{"schema_version":1,"namespace":"acme.","keys":[{"key":"acme.a","type":"string","pattern":"(?=x)x","default":"x","description":"d"}]}`, "does not compile"},
+		{"default_fails_pattern", `{"schema_version":1,"namespace":"acme.","keys":[{"key":"acme.a","type":"string","pattern":"[a-z]+","default":"x1","description":"d"}]}`, "matching the pattern [a-z]+"},
 		{"missing_description", `{"schema_version":1,"namespace":"acme.","keys":[{"key":"acme.a","type":"string","default":"x"}]}`, "description is required"},
 	}
 	for _, tc := range cases {
@@ -177,6 +183,10 @@ func TestConfigTuneValidatesDeclaredKeys(t *testing.T) {
 		{map[string]any{"key": "acme.limit"}, "value is required"},
 		{map[string]any{"key": "acme.animate", "value": "yes"}, "true or false"},
 		{map[string]any{"key": "acme.mode", "value": "slow"}, "one of fast, safe"},
+		// The unanchored pattern still matches the whole value.
+		{map[string]any{"key": "acme.code", "value": "abc1"}, "config.tune: acme.code value must be a string matching the pattern [a-z]+"},
+		{map[string]any{"key": "acme.code", "value": "1abc"}, "matching the pattern [a-z]+"},
+		{map[string]any{"key": "acme.code", "value": ""}, "matching the pattern [a-z]+"},
 		{map[string]any{"key": "acme.undeclared", "value": "x"}, "unknown config key"},
 		{map[string]any{"key": "acme.limit", "value": "4", "scope": "repo"}, "unsupported write scope"},
 	}
@@ -198,6 +208,9 @@ func TestConfigTuneValidatesDeclaredKeys(t *testing.T) {
 	}
 	if resp := tune(930203, map[string]any{"key": "acme.label", "value": "Mixed Case"}); !strings.Contains(toolText(t, resp), "acme.label: Mixed Case [scope:project]") {
 		t.Fatalf("string write must keep its case: %s", resp)
+	}
+	if resp := tune(930207, map[string]any{"key": "acme.code", "value": "xyz"}); !strings.Contains(toolText(t, resp), "acme.code: xyz [scope:project]") {
+		t.Fatalf("patterned string write echo: %s", resp)
 	}
 	if resp := tune(930204, map[string]any{"key": "acme.retention_days", "value": "0"}); !strings.Contains(toolText(t, resp), "acme.retention_days: 0 [scope:global]") {
 		t.Fatalf("declared default scope not applied: %s", resp)
@@ -223,10 +236,13 @@ func TestConfigListCatalogsDeclaredKeys(t *testing.T) {
 	if err := json.Unmarshal([]byte(toolText(t, resp)), &view); err != nil {
 		t.Fatalf("config.list json: %v", err)
 	}
-	var limit *tuningKnob
+	var limit, code *tuningKnob
 	for i := range view.Knobs {
-		if view.Knobs[i].ID == "acme.limit" {
+		switch view.Knobs[i].ID {
+		case "acme.limit":
 			limit = &view.Knobs[i]
+		case "acme.code":
+			code = &view.Knobs[i]
 		}
 	}
 	if limit == nil {
@@ -240,6 +256,9 @@ func TestConfigListCatalogsDeclaredKeys(t *testing.T) {
 	}
 	if len(limit.ValueFields) != 1 || !strings.Contains(limit.ValueFields[0].Description, "from 1 to 10") {
 		t.Fatalf("acme.limit value field = %+v", limit.ValueFields)
+	}
+	if code == nil || len(code.ValueFields) != 1 || !strings.Contains(code.ValueFields[0].Description, "a string matching the pattern [a-z]+") {
+		t.Fatalf("a patterned key's value field must name its pattern: %+v", code)
 	}
 	current, _ := json.Marshal(limit.Current)
 	if string(current) != `{"scope":"project","value":"5"}` {
@@ -373,5 +392,33 @@ func TestShippedAdapterManifestsLoad(t *testing.T) {
 	}
 	if len(declared.keys) == 0 {
 		t.Fatalf("shipped manifest %s declares no keys", path)
+	}
+}
+
+// TestShippedPiCompactionThresholdPattern runs the Pi compaction-threshold
+// grammar corpus through the Go (RE2) loader; the Pi package's
+// adapter-config test runs the same corpus against its own parser, so
+// config.tune never accepts a value Pi would silently replace with the
+// default.
+func TestShippedPiCompactionThresholdPattern(t *testing.T) {
+	declared := loadDeclaredConfig(filepath.Join("..", "..", "..", "agents-plugin-pi", "config-manifest.json"))
+	accepted := []string{"50", "50%", "1", "1%", "100", "100%", "150k", "1.5m", "0.5k", "1.0004k", "007k", "50%|150k", "150k|50%", "100|1m"}
+	rejected := []string{"0", "0%", "101", "101%", "050", "50.5", "-5", "", "0k", "0.0m", "00.00k", "150K", "1.5M", "15ok", "k", ".5k", "5.k",
+		"50%%", "50%|60%", "150k|1m", "50%|150k|1m", "50% | 150k", " 50", "50 ", "|50%", "50%|", "1e3k"}
+	for _, name := range []string{"pi.compaction_advisory_percent", "pi.compaction_hard_percent"} {
+		key, ok := declared.lookup(name)
+		if !ok || key.Type != declaredTypeString || key.Pattern == "" {
+			t.Fatalf("%s = %+v, want a patterned string key", name, key)
+		}
+		for _, value := range accepted {
+			if _, err := key.normalize(value); err != nil {
+				t.Errorf("%s rejects %q: %v", name, value, err)
+			}
+		}
+		for _, value := range rejected {
+			if _, err := key.normalize(value); err == nil {
+				t.Errorf("%s accepts %q", name, value)
+			}
+		}
 	}
 }

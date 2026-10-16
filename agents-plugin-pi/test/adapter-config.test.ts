@@ -26,8 +26,9 @@ import {
   SETTLE_CONFIG_KEYS,
   resolveAgentWaitAnimation,
   resolveChildRetentionTtlDays,
-  resolveCompactionAdvisoryPercent,
-  resolveCompactionHardPercent,
+  parseCompactionThreshold,
+  resolveCompactionAdvisoryThreshold,
+  resolveCompactionHardThreshold,
   resolveContextWindowOverride,
   resolveRunawayThreshold,
   resolveSettleDelayMs,
@@ -45,7 +46,7 @@ import {
   displaySummaryConfigFrom,
 } from "../src/display-summary.ts";
 
-interface ManifestKey { key: string; type: string; default: unknown }
+interface ManifestKey { key: string; type: string; default: unknown; pattern?: string }
 const manifest = JSON.parse(readFileSync(join(process.cwd(), ADAPTER_CONFIG_MANIFEST_FILE), "utf8")) as { namespace: string; keys: ManifestKey[] };
 
 /** Every knob the adapter reads, with the resolver that turns it into behavior. */
@@ -53,8 +54,8 @@ const resolvers: Record<GoalLoopConfigKey, (config: GoalLoopConfig | undefined) 
   agent_wait_animation: resolveAgentWaitAnimation,
   runaway_threshold: resolveRunawayThreshold,
   settle_delay_ms: resolveSettleDelayMs,
-  compaction_advisory_percent: resolveCompactionAdvisoryPercent,
-  compaction_hard_percent: resolveCompactionHardPercent,
+  compaction_advisory_percent: resolveCompactionAdvisoryThreshold,
+  compaction_hard_percent: resolveCompactionHardThreshold,
   context_window_override: resolveContextWindowOverride,
   compaction_dialog_budget_bytes: resolveDialogBudgetBytes,
   compaction_reread_budget_bytes: resolveRereadBudgetBytes,
@@ -94,6 +95,30 @@ describe("shipped adapter manifest", () => {
       assert.deepEqual(resolve({ [knob]: value } as GoalLoopConfig), resolve(undefined), key);
     }
   });
+});
+
+describe("compaction threshold manifest pattern", () => {
+  // ws-mcp matches the pattern against the whole value (Go RE2); the pattern
+  // uses only syntax RE2 and JavaScript read alike, so anchoring it here
+  // reproduces config.tune's accept set. agents-plugin-tool's manifest test
+  // runs the same corpus through the Go loader.
+  const corpus = [
+    "50", "50%", "1", "1%", "100", "100%", "150k", "1.5m", "0.5k", "1.0004k", "007k", "50%|150k", "150k|50%", "100|1m",
+    "0", "0%", "101", "101%", "050", "50.5", "-5", "", "0k", "0.0m", "00.00k", "150K", "1.5M", "15ok", "k", ".5k", "5.k",
+    "50%%", "50%|60%", "150k|1m", "50%|150k|1m", "50% | 150k", " 50", "50 ", "|50%", "50%|", "1e3k",
+  ];
+  for (const name of ["pi.compaction_advisory_percent", "pi.compaction_hard_percent"]) {
+    test(`${name} accepts exactly what the pi parser accepts`, () => {
+      const key = manifest.keys.find((k) => k.key === name)!;
+      assert.equal(key.type, "string");
+      assert.ok(key.pattern, `${name} declares a pattern`);
+      const whole = new RegExp(`^(?:${key.pattern})$`);
+      for (const value of corpus) {
+        assert.equal(whole.test(value), parseCompactionThreshold(value) !== undefined, JSON.stringify(value));
+      }
+      assert.ok(whole.test(String(key.default)), "the default matches its own pattern");
+    });
+  }
 });
 
 describe("createWsConfigReader", () => {

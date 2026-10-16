@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 26db5169a520f8ac
 sage-review-completeness-reviewed: 26db5169a520f8ac
+completed: 2026-10-17
 ---
 
 # Pi compaction thresholds accept absolute token counts
@@ -166,3 +167,51 @@ Verification:
 - Existing stored bare-number values keep their percent behavior (a test
   that feeds `"50"` and `"80"` through the resolver).
 - Full `agents-plugin-pi` and `agents-plugin-tool` suites pass.
+
+### Result (2128d74a0) - 2026-10-17
+
+Landed in 2128d74a0 (implementation) and 129b5ecf4 (baseline test from review).
+
+- ws-mcp: `configManifestKey`/`declaredConfigKey` gain `pattern` (string keys
+  only, RE2, compiled as `^(?:pattern)$` at load; a non-compiling pattern, a
+  pattern on a non-string key, or a default that fails it rejects the
+  manifest). A patterned key's tune errors and `config.list` value description
+  read "a string matching the pattern ...".
+- Pi manifest: both compaction keys are `string` with the grammar pattern,
+  defaults `"50%"` / `"80%"`, descriptions state the percent, token, and
+  combined forms.
+- Pi: `parseCompactionThreshold` (string grammar, plus a finite number in
+  (0, 100] as a percent); `resolveCompactionAdvisoryThreshold` /
+  `resolveCompactionHardThreshold` return a `{percent?, tokens?}` spec with
+  the never-hard-fail default fallback; `resolveContextWindow` (override,
+  else the model window) and `resolveThresholdPercent` resolve each threshold
+  at every check. The trigger check, the latch baseline, and the goal
+  reminder (`goalReminderUsage`) all resolve against the same window. The
+  advisory, hard, and milestone texts and the reminder show thresholds as
+  `N% / Xk tokens` when the window is known.
+
+Verification: `cd agents-plugin-pi && npm test` - 2335 tests, 0 fail (before
+the review test; `node --test test/goal-loop.test.ts` after it - 219 pass, 0
+fail). `cd agents-plugin-tool && go test ./...` - all packages ok. Manifest
+pattern / parser parity is pinned by one corpus in
+`config_manifest_test.go` (Go RE2 loader) and `adapter-config.test.ts` (JS
+RegExp of the same pattern vs `parseCompactionThreshold`).
+
+Decisions:
+- Comparison is in percent space: each threshold resolves to
+  min(percent, tokens / window * 100) against the same window as the usage
+  percent. This is the window-linear equivalent of comparing token counts
+  (milestones between resolved token counts land at the same points), keeps
+  percent-only configs exact, and leaves the existing latch untouched.
+- A token term with no known window resolves to +Infinity (never fires).
+- The resolvers are renamed `resolveCompaction*Threshold` because they no
+  longer return a bare percent.
+
+Open (lite review Minors, not fixed):
+- The latch is stored in percent, so a mid-session window shrink can re-fire
+  a token advisory for the same token crossing (one extra nudge, no hard or
+  data impact); a token-stored latch would instead move percent thresholds.
+- `0.0001k` passes both the pattern and the parser and rounds to 0 tokens
+  (fires on any reading); excluding it from a regex is awkward.
+- With an unknown window a token-only threshold renders as `Infinity%`
+  (practically unreachable: Pi always reports `contextWindow`).

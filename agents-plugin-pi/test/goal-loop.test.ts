@@ -32,7 +32,12 @@ import { SessionManager, type ExtensionAPI, type ExtensionContext, type SessionE
 import {
   resolveAgentWaitAnimation,
   resolveRunawayThreshold,
-  resolveCompactionAdvisoryPercent,
+  parseCompactionThreshold,
+  resolveCompactionAdvisoryThreshold,
+  resolveCompactionHardThreshold,
+  resolveContextWindow,
+  resolveThresholdPercent,
+  goalReminderUsage,
   resolveContextWindowOverride,
   resolveSettleDelayMs,
   resolveChildRetentionTtlDays,
@@ -59,6 +64,7 @@ import {
   resolveRereadBudgetBytes,
   DEFAULT_RUNAWAY_THRESHOLD,
   DEFAULT_COMPACTION_ADVISORY_PERCENT,
+  DEFAULT_COMPACTION_HARD_PERCENT,
   DEFAULT_SETTLE_DELAY_MS,
   DEFAULT_CHILD_RETENTION_TTL_DAYS,
   type GoalLoopConfig,
@@ -183,45 +189,95 @@ describe("resolveChildRetentionTtlDays", () => {
   });
 });
 
-describe("resolveCompactionAdvisoryPercent", () => {
-  test("undefined config falls back to the default", () => {
-    assert.equal(resolveCompactionAdvisoryPercent(undefined), DEFAULT_COMPACTION_ADVISORY_PERCENT);
+describe("parseCompactionThreshold", () => {
+  test("parses each form of the grammar", () => {
+    assert.deepEqual(parseCompactionThreshold("50"), { percent: 50 });
+    assert.deepEqual(parseCompactionThreshold("50%"), { percent: 50 });
+    assert.deepEqual(parseCompactionThreshold("150k"), { tokens: 150_000 });
+    assert.deepEqual(parseCompactionThreshold("1.5m"), { tokens: 1_500_000 });
+    assert.deepEqual(parseCompactionThreshold("50%|150k"), { percent: 50, tokens: 150_000 });
+    assert.deepEqual(parseCompactionThreshold("150k|50%"), { percent: 50, tokens: 150_000 });
+    assert.deepEqual(parseCompactionThreshold("0.5k"), { tokens: 500 });
+    assert.deepEqual(parseCompactionThreshold("1.0004k"), { tokens: 1_000 }, "rounded to the nearest whole token");
+    assert.deepEqual(parseCompactionThreshold("1.0006k"), { tokens: 1_001 });
   });
 
-  test("empty config falls back to the default", () => {
-    assert.equal(resolveCompactionAdvisoryPercent({}), DEFAULT_COMPACTION_ADVISORY_PERCENT);
+  test("keeps the old 1-100 integer range for percent terms", () => {
+    assert.deepEqual(parseCompactionThreshold("1"), { percent: 1 });
+    assert.deepEqual(parseCompactionThreshold("100"), { percent: 100 });
+    for (const value of ["0", "0%", "101", "101%", "50.5", "050", "-5"]) assert.equal(parseCompactionThreshold(value), undefined, value);
   });
 
-  test("a valid override in (0, 100] is used", () => {
-    assert.equal(resolveCompactionAdvisoryPercent({ compaction_advisory_percent: 55 }), 55);
-    assert.equal(resolveCompactionAdvisoryPercent({ compaction_advisory_percent: 100 }), 100);
+  test("rejects anything outside the grammar", () => {
+    for (const value of ["", "0k", "0.0m", "150K", "1.5M", "150", "50%|60%", "150k|1m", "50%|150k|1m", "50% | 150k", " 50", "50 ", "15ok", "k", ".5k", "5.k", "50%%", "|50%", "50%|"]) {
+      assert.equal(parseCompactionThreshold(value), undefined, JSON.stringify(value));
+    }
   });
 
-  test("zero falls back to the default (never hard-fail)", () => {
-    assert.equal(resolveCompactionAdvisoryPercent({ compaction_advisory_percent: 0 }), DEFAULT_COMPACTION_ADVISORY_PERCENT);
+  test("a finite number in (0, 100] is a percent; other values are rejected", () => {
+    assert.deepEqual(parseCompactionThreshold(55), { percent: 55 });
+    assert.deepEqual(parseCompactionThreshold(100), { percent: 100 });
+    for (const value of [0, -5, 101, Number.NaN, Number.POSITIVE_INFINITY, undefined, null, true, {}]) assert.equal(parseCompactionThreshold(value), undefined, String(value));
+  });
+});
+
+describe("resolveCompactionAdvisoryThreshold / resolveCompactionHardThreshold", () => {
+  test("an absent value falls back to the default percent", () => {
+    assert.deepEqual(resolveCompactionAdvisoryThreshold(undefined), { percent: DEFAULT_COMPACTION_ADVISORY_PERCENT });
+    assert.deepEqual(resolveCompactionAdvisoryThreshold({}), { percent: DEFAULT_COMPACTION_ADVISORY_PERCENT });
+    assert.deepEqual(resolveCompactionHardThreshold({}), { percent: DEFAULT_COMPACTION_HARD_PERCENT });
   });
 
-  test("a negative value falls back to the default", () => {
-    assert.equal(resolveCompactionAdvisoryPercent({ compaction_advisory_percent: -5 }), DEFAULT_COMPACTION_ADVISORY_PERCENT);
+  test("stored bare numbers keep their percent meaning", () => {
+    assert.deepEqual(resolveCompactionAdvisoryThreshold({ compaction_advisory_percent: "50" }), { percent: 50 });
+    assert.deepEqual(resolveCompactionHardThreshold({ compaction_hard_percent: "80" }), { percent: 80 });
+    assert.deepEqual(resolveCompactionAdvisoryThreshold({ compaction_advisory_percent: 55 }), { percent: 55 });
   });
 
-  test("a value above 100 falls back to the default", () => {
-    assert.equal(resolveCompactionAdvisoryPercent({ compaction_advisory_percent: 101 }), DEFAULT_COMPACTION_ADVISORY_PERCENT);
+  test("token and combined forms resolve", () => {
+    assert.deepEqual(resolveCompactionAdvisoryThreshold({ compaction_advisory_percent: "150k" }), { tokens: 150_000 });
+    assert.deepEqual(resolveCompactionHardThreshold({ compaction_hard_percent: "80%|400k" }), { percent: 80, tokens: 400_000 });
   });
 
-  test("a non-numeric value falls back to the default", () => {
-    assert.equal(
-      resolveCompactionAdvisoryPercent({ compaction_advisory_percent: "50" as unknown as number }),
-      DEFAULT_COMPACTION_ADVISORY_PERCENT,
-    );
+  test("a malformed value falls back to the default (never hard-fail)", () => {
+    for (const value of ["15ok", "0", "101", "50%|60%", 0, -5, 101, Number.NaN]) {
+      assert.deepEqual(resolveCompactionAdvisoryThreshold({ compaction_advisory_percent: value }), { percent: DEFAULT_COMPACTION_ADVISORY_PERCENT }, String(value));
+      assert.deepEqual(resolveCompactionHardThreshold({ compaction_hard_percent: value }), { percent: DEFAULT_COMPACTION_HARD_PERCENT }, String(value));
+    }
+  });
+});
+
+describe("resolveThresholdPercent", () => {
+  test("a percent term is used as-is; a token term is tokens / window", () => {
+    assert.equal(resolveThresholdPercent({ percent: 50 }, 1_000_000), 50);
+    assert.equal(resolveThresholdPercent({ tokens: 150_000 }, 1_000_000), 15);
+    assert.equal(resolveThresholdPercent({ tokens: 150_000 }, 200_000), 75);
   });
 
-  test("NaN/Infinity fall back to the default", () => {
-    assert.equal(resolveCompactionAdvisoryPercent({ compaction_advisory_percent: Number.NaN }), DEFAULT_COMPACTION_ADVISORY_PERCENT);
-    assert.equal(
-      resolveCompactionAdvisoryPercent({ compaction_advisory_percent: Number.POSITIVE_INFINITY }),
-      DEFAULT_COMPACTION_ADVISORY_PERCENT,
-    );
+  test("the combined form takes whichever side is reached first", () => {
+    const spec = { percent: 50, tokens: 150_000 };
+    assert.equal(resolveThresholdPercent(spec, 1_000_000), 15, "on a large window the token side wins");
+    assert.equal(resolveThresholdPercent(spec, 200_000), 50, "on a small window the percent side wins");
+  });
+
+  test("a token threshold beyond the window is not clamped", () => {
+    assert.equal(resolveThresholdPercent({ tokens: 300_000 }, 200_000), 150);
+    assert.equal(resolveThresholdPercent({ percent: 80, tokens: 300_000 }, 200_000), 80);
+  });
+
+  test("with no known window a token term never fires", () => {
+    assert.equal(resolveThresholdPercent({ tokens: 150_000 }, undefined), Number.POSITIVE_INFINITY);
+    assert.equal(resolveThresholdPercent({ percent: 50, tokens: 150_000 }, undefined), 50);
+  });
+});
+
+describe("resolveContextWindow", () => {
+  test("the override wins over the model window; an invalid window is undefined", () => {
+    const usage = { tokens: 10, contextWindow: 1_000_000, percent: 0.001 };
+    assert.equal(resolveContextWindow(usage, {}), 1_000_000);
+    assert.equal(resolveContextWindow(usage, { context_window_override: 200_000 }), 200_000);
+    assert.equal(resolveContextWindow(undefined, {}), undefined);
+    assert.equal(resolveContextWindow({ tokens: null, contextWindow: 0, percent: null }, {}), undefined);
   });
 });
 
@@ -372,6 +428,24 @@ describe("buildGoalReminder", () => {
   test("null percent renders as unknown, not a crash", () => {
     const reminder = buildGoalReminder("a goal", { percent: null, advisoryPercent: 50 });
     assert.match(reminder, /Context usage: unknown\./);
+  });
+
+  test("with a known window the advisory point is shown in percent and tokens", () => {
+    const reminder = buildGoalReminder("a goal", { percent: 12, advisoryPercent: 15, contextWindow: 1_000_000 });
+    assert.match(reminder, /Context usage: 12% of window — below the compaction advisory point \(15% \/ 150k tokens\); do not call ws-compact\.$/m);
+  });
+});
+
+describe("goalReminderUsage", () => {
+  test("resolves the advisory threshold against the same window as the usage", () => {
+    const usage = { tokens: 200_000, contextWindow: 1_000_000, percent: 20 };
+    assert.deepEqual(goalReminderUsage(usage, { compaction_advisory_percent: "150k" }), { percent: 20, advisoryPercent: 15, contextWindow: 1_000_000 });
+    assert.deepEqual(goalReminderUsage(usage, { compaction_advisory_percent: "150k", context_window_override: 400_000 }), { percent: 50, advisoryPercent: 37.5, contextWindow: 400_000 });
+    assert.match(buildGoalReminder("g", goalReminderUsage(usage, { compaction_advisory_percent: "50%|150k" })), /at or above the advisory point \(15% \/ 150k tokens\)/);
+  });
+
+  test("defaults to the 50% advisory and reports unknown usage as null", () => {
+    assert.deepEqual(goalReminderUsage({ tokens: null, contextWindow: 1000, percent: null }, {}), { percent: null, advisoryPercent: 50, contextWindow: 1000 });
   });
 });
 
@@ -2313,6 +2387,111 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     }
     const ourDetails = { kind: "ws-pi-lead-compaction", version: 1, source: "lever" };
 
+    /** A trigger run whose usage is set in tokens against a mutable model window. */
+    function tokenRun(config: GoalLoopConfig) {
+      const run = triggerRun(config);
+      const usage = { tokens: 0, contextWindow: 1_000_000 };
+      (run.ctx as unknown as { getContextUsage: () => unknown }).getContextUsage = () => ({ ...usage, percent: (usage.tokens / usage.contextWindow) * 100 });
+      const text = (i: number) => (run.preparations()[i]!.content as { content: string }).content;
+      const milestones = () => run.pi.sentMessages.filter((m) => (m.content as { customType?: string }).customType === "ws-lead-context-milestone");
+      return { ...run, usage, text, milestones, runEnd: () => run.pi.handlers.get("agent_end")!({}, run.ctx), toolTurn: () => run.pi.handlers.get("turn_end")!({ toolResults: [{}] }, run.ctx) };
+    }
+
+    test("token thresholds resolve against the window; milestones sit between the resolved token counts", () => {
+      const { usage, preparations, text, milestones, runEnd, toolTurn } = tokenRun({ compaction_advisory_percent: "300k", compaction_hard_percent: "50%|600k" });
+      usage.tokens = 299_000;
+      runEnd();
+      assert.equal(preparations().length, 0, "below the 300k advisory on a 1M window");
+      usage.tokens = 310_000;
+      runEnd();
+      assert.equal(preparations().length, 1);
+      assert.match(text(0), /Context usage is 31% of the window \(advisory point: 30% \/ 300k tokens\)\. Compaction becomes forced at 50% \/ 500k tokens\./, "the combined hard threshold takes its smaller, percent side");
+      assert.match(text(0), / Reminders follow at 37% \/ 366.7k tokens and 43% \/ 433.3k tokens\.\n/);
+      runEnd();
+      usage.tokens = 370_000;
+      runEnd();
+      assert.equal(milestones().length, 1, "the first milestone sits a third of the way from 300k to 500k");
+      assert.match((milestones()[0]!.content as { content: string }).content, /Context window: 37% \/ 50% \(forced compaction point, 500k tokens\)\./);
+      runEnd();
+      usage.tokens = 500_000;
+      toolTurn();
+      assert.equal(preparations().length, 2);
+      assert.match(text(1), /past the hard compaction point \(50% \/ 500k tokens\)/);
+    });
+
+    test("the combined form takes whichever side the window reaches first", () => {
+      const small = tokenRun({ compaction_advisory_percent: "50%|150k" });
+      small.usage.contextWindow = 200_000;
+      small.usage.tokens = 99_000;
+      small.runEnd();
+      assert.equal(small.preparations().length, 0, "on a 200k window the 50% side (100k) wins");
+      small.usage.tokens = 101_000;
+      small.runEnd();
+      assert.match(small.text(0), /advisory point: 50% \/ 100k tokens/);
+
+      const large = tokenRun({ compaction_advisory_percent: "50%|150k" });
+      large.usage.tokens = 151_000;
+      large.runEnd();
+      assert.match(large.text(0), /advisory point: 15% \/ 150k tokens/, "on a 1M window the 150k side wins");
+    });
+
+    test("thresholds resolve against the context-window override when set", () => {
+      const { usage, preparations, text, runEnd } = tokenRun({ compaction_advisory_percent: "50%|300k", context_window_override: 400_000 });
+      usage.tokens = 199_000;
+      runEnd();
+      assert.equal(preparations().length, 0, "50% of the 400k override is 200k, below the 300k token side");
+      usage.tokens = 201_000;
+      runEnd();
+      assert.match(text(0), /Context usage is 50% of the window \(advisory point: 50% \/ 200k tokens\)/);
+    });
+
+    test("a token threshold beyond the window never fires", () => {
+      const { usage, preparations, milestones, runEnd, toolTurn } = tokenRun({ compaction_advisory_percent: "300k", compaction_hard_percent: "400k" });
+      usage.contextWindow = 200_000;
+      usage.tokens = 199_000;
+      toolTurn();
+      runEnd();
+      assert.equal(preparations().length + milestones().length, 0, "no clamp: Pi's own compaction takes over");
+    });
+
+    test("an advisory at or above the resolved hard point fires neither the advisory nor the milestones", () => {
+      const { usage, preparations, milestones, text, runEnd } = tokenRun({ compaction_advisory_percent: "60%", compaction_hard_percent: "100k" });
+      usage.contextWindow = 200_000;
+      usage.tokens = 110_000;
+      runEnd();
+      assert.equal(preparations().length, 1);
+      assert.equal(milestones().length, 0);
+      assert.match(text(0), /past the hard compaction point \(50% \/ 100k tokens\)/);
+    });
+
+    test("a resume past a token advisory point is baselined against the window, and a rewind below re-arms it", () => {
+      const { pi, ctx, usage, preparations, runEnd } = tokenRun({ compaction_advisory_percent: "50%|150k" });
+      usage.tokens = 160_000;
+      pi.handlers.get("session_start")!({}, ctx);
+      runEnd();
+      assert.equal(preparations().length, 0, "the 150k side is already past at resume: no duplicate advisory");
+      usage.tokens = 100_000;
+      pi.handlers.get("session_tree")!({}, ctx);
+      usage.tokens = 160_000;
+      runEnd();
+      assert.equal(preparations().length, 1, "a rewind below the token threshold re-arms it");
+    });
+
+    test("a token threshold fires once per crossing and re-arms below it", () => {
+      const { usage, preparations, runEnd } = tokenRun({ compaction_advisory_percent: "150k" });
+      usage.tokens = 160_000;
+      runEnd();
+      runEnd();
+      usage.tokens = 170_000;
+      runEnd();
+      assert.equal(preparations().length, 1, "staying above the threshold does not repeat the advisory");
+      usage.tokens = 100_000;
+      runEnd();
+      usage.tokens = 155_000;
+      runEnd();
+      assert.equal(preparations().length, 2, "dropping below and crossing again is a new crossing");
+    });
+
     test("the advisory nudge fires once per crossing at the run's end, carries the guide, and re-arms after compaction", async () => {
       const { pi, ctx, usage, preparations, stored } = triggerRun();
       usage.percent = 49;
@@ -2326,7 +2505,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       assert.equal(preparations().length, 1);
       const nudge = preparations()[0]!;
       assert.deepEqual(nudge.options, { deliverAs: "followUp", triggerTurn: true });
-      assert.match((nudge.content as { content: string }).content, /^\[system message from ws-pi-plugin\]\nContext usage is 55% of the window \(advisory point: 50%\)\. Compaction becomes forced at 80%\.\n[\s\S]*keep looking for one as you work\.\n\nGUIDE BODY 261002$/);
+      assert.match((nudge.content as { content: string }).content, /^\[system message from ws-pi-plugin\]\nContext usage is 55% of the window \(advisory point: 50% \/ 500 tokens\)\. Compaction becomes forced at 80% \/ 800 tokens\.\n[\s\S]*keep looking for one as you work\.\n\nGUIDE BODY 261002$/);
 
       pi.handlers.get("agent_end")!({}, ctx);
       usage.percent = 60;
@@ -2353,7 +2532,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       assert.equal(preparations().length, 1);
       const steer = preparations()[0]!;
       assert.deepEqual(steer.options, { deliverAs: "steer", triggerTurn: true });
-      assert.match((steer.content as { content: string }).content, /^\[system message from ws-pi-plugin\]\nContext usage is 71% .*hard compaction point \(70%\)\. Stop the current work now[\s\S]*GUIDE BODY 261002$/);
+      assert.match((steer.content as { content: string }).content, /^\[system message from ws-pi-plugin\]\nContext usage is 71% .*hard compaction point \(70% \/ 700 tokens\)\. Stop the current work now[\s\S]*GUIDE BODY 261002$/);
       assert.equal((steer.content as { display: boolean }).display, true);
 
       pi.handlers.get("turn_end")!({}, ctx);
@@ -2554,7 +2733,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       at(55);
       runEnd();
       assert.equal(preparations().length, 1, "advisory sent");
-      assert.match((preparations()[0]!.content as { content: string }).content, / Reminders follow at 62% and 73%\.\n/, "the advisory names the rounded milestone points");
+      assert.match((preparations()[0]!.content as { content: string }).content, / Reminders follow at 62% \/ 617 tokens and 73% \/ 733 tokens\.\n/, "the advisory names the rounded milestone points");
       runEnd();
       at(61.6);
       runEnd();
@@ -2568,7 +2747,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       const milestone = milestones()[0]!;
       assert.deepEqual(milestone.options, { deliverAs: "followUp", triggerTurn: true });
       assert.equal((milestone.content as { display: boolean }).display, true);
-      assert.equal((milestone.content as { content: string }).content, "[system message from ws-pi-plugin]\nContext window: 62% / 85% (forced compaction point). Past 85%, compaction is forced, mid-work if need be. From here on, a good boundary is worth taking; if this is one, run the preparation from the advisory. Otherwise end this turn without replying.");
+      assert.equal((milestone.content as { content: string }).content, "[system message from ws-pi-plugin]\nContext window: 62% / 85% (forced compaction point, 850 tokens). Past 85%, compaction is forced, mid-work if need be. From here on, a good boundary is worth taking; if this is one, run the preparation from the advisory. Otherwise end this turn without replying.");
       assert.deepEqual(stripSummaryId((milestone.content as { details: unknown }).details), { milestone: 50 + 35 / 3 });
       assert.equal(preparations().length, 1, "a milestone carries no guide and is not a preparation message");
 
@@ -2581,7 +2760,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       // 261007: each summarized send carries its own display-summary row id.
       const rowIds = [preparations()[0]!, ...milestones()].map((sent) => stripSummaryId((sent.content as { details: unknown }).details) && (sent.content as { details: { ws_summary_id: string } }).details.ws_summary_id);
       assert.equal(new Set(rowIds).size, 3, "the advisory and both milestones carry distinct row ids");
-      assert.equal((milestones()[1]!.content as { content: string }).content, "[system message from ws-pi-plugin]\nContext window: 74% / 85% (forced compaction point). This is the last reading before compaction is forced. Compacting at a boundary you choose keeps the summary in your hands; take this one if it fits, and run the preparation from the advisory. Otherwise end this turn without replying, and take the next good boundary.");
+      assert.equal((milestones()[1]!.content as { content: string }).content, "[system message from ws-pi-plugin]\nContext window: 74% / 85% (forced compaction point, 850 tokens). This is the last reading before compaction is forced. Compacting at a boundary you choose keeps the summary in your hands; take this one if it fits, and run the preparation from the advisory. Otherwise end this turn without replying, and take the next good boundary.");
       runEnd();
       at(80);
       runEnd();
@@ -2599,7 +2778,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       assert.equal(milestones().length, 0, "crossed mid-run, pending until agent_end");
       runEnd();
       assert.equal(milestones().length, 1);
-      assert.equal((milestones()[0]!.content as { content: string }).content, "[system message from ws-pi-plugin]\nContext window: 72% / 80% (forced compaction point). This is the last reading before compaction is forced. Compacting at a boundary you choose keeps the summary in your hands; take this one if it fits, and run the preparation from the advisory. Otherwise end this turn without replying, and take the next good boundary.");
+      assert.equal((milestones()[0]!.content as { content: string }).content, "[system message from ws-pi-plugin]\nContext window: 72% / 80% (forced compaction point, 800 tokens). This is the last reading before compaction is forced. Compacting at a boundary you choose keeps the summary in your hands; take this one if it fits, and run the preparation from the advisory. Otherwise end this turn without replying, and take the next good boundary.");
       assert.deepEqual(stripSummaryId((milestones()[0]!.content as { details: unknown }).details), { milestone: 70 });
       runEnd();
       at(75);
@@ -3284,7 +3463,7 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       await pi.handlers.get("turn_end")!({}, ctx);
       const steers = pi.sentMessages.filter((m) => (m.content as { customType?: string }).customType === "ws-lead-compact");
       assert.equal(steers.length, 1, "65% crosses the tuned 60% hard point (the default is 80%)");
-      assert.match((steers[0]!.content as { content: string }).content, /hard compaction point \(60%\)/);
+      assert.match((steers[0]!.content as { content: string }).content, /hard compaction point \(60% \/ 600 tokens\)/);
     });
 
     /** A reader whose answers wait until the test releases them. */

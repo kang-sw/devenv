@@ -82,7 +82,7 @@
  * compaction that arrives without lever prose gets an in-hook fallback
  * summary from the session model. The reinject
  * reminder still surfaces `ctx.getContextUsage().percent` against the
- * compaction-advisory percent; that knob, the context-window override, and
+ * compaction-advisory threshold; that knob, the context-window override, and
  * the new compaction knobs are adapter-declared ws settings alongside
  * `runaway_threshold`.
  */
@@ -99,6 +99,7 @@ import {
   DEFAULT_REREAD_BUDGET_BYTES,
   extractLeadProse,
   FALLBACK_SYSTEM_PROMPT,
+  formatThreshold,
   GOAL_ANNOUNCEMENT_PREFIX,
   GOAL_REMINDER_MARKER_PREFIX,
   isLeadCompactionDetails,
@@ -135,10 +136,10 @@ export interface GoalLoopConfig {
   /** Whether an owner lead animates actionable child waits in the live-agent widget. Only literal false disables the 330ms cue. */
   agent_wait_animation?: boolean;
   runaway_threshold?: number;
-  /** Advisory context-usage percent (0, 100]: surfaced in the reinject reminder, and (261002) the point where the lead is nudged once to prepare for compaction. */
-  compaction_advisory_percent?: number;
-  /** Hard context-usage percent (0, 100] where the lead is steered into compaction preparation at the next tool-call boundary (261002). */
-  compaction_hard_percent?: number;
+  /** Advisory context-usage threshold (`parseCompactionThreshold` grammar): surfaced in the reinject reminder, and (261002) the point where the lead is nudged once to prepare for compaction. */
+  compaction_advisory_percent?: number | string;
+  /** Hard context-usage threshold (`parseCompactionThreshold` grammar) where the lead is steered into compaction preparation at the next tool-call boundary (261002). */
+  compaction_hard_percent?: number | string;
   /** Optional context-window token override for `computeContextPercent`, used when the model's own `getContextUsage().contextWindow` should be superseded. */
   context_window_override?: number;
   /**
@@ -190,21 +191,80 @@ export function resolveRunawayThreshold(config: GoalLoopConfig | undefined): num
 }
 
 /**
- * Resolves the effective compaction-advisory percent: the tuned
- * `compaction_advisory_percent` when it is a finite number in `(0, 100]`,
- * else `DEFAULT_COMPACTION_ADVISORY_PERCENT`. Never hard-fails on a
- * malformed value — falls back to the default instead. Mirrors
- * `resolveRunawayThreshold`'s exact never-hard-fail shape.
+ * A compaction threshold before it is resolved against a context window: a
+ * percent of the window, an absolute token count, or both (whichever is
+ * reached first). At least one term is set.
  */
-export function resolveCompactionAdvisoryPercent(config: GoalLoopConfig | undefined): number {
-  const value = config?.compaction_advisory_percent;
-  return typeof value === "number" && Number.isFinite(value) && value > 0 && value <= 100 ? value : DEFAULT_COMPACTION_ADVISORY_PERCENT;
+export interface CompactionThresholdSpec {
+  percent?: number;
+  tokens?: number;
 }
 
-/** Resolves `compaction_hard_percent` with `resolveCompactionAdvisoryPercent`'s never-hard-fail shape. */
-export function resolveCompactionHardPercent(config: GoalLoopConfig | undefined): number {
-  const value = config?.compaction_hard_percent;
-  return typeof value === "number" && Number.isFinite(value) && value > 0 && value <= 100 ? value : DEFAULT_COMPACTION_HARD_PERCENT;
+// One term each of the threshold grammar. The manifest `pattern` on both
+// compaction keys must accept exactly the strings parseCompactionThreshold
+// accepts; adapter-config.test.ts checks the two against one corpus.
+const PERCENT_TERM = /^(100|[1-9][0-9]?)%?$/;
+const TOKEN_TERM = /^([0-9]*[1-9][0-9]*(?:\.[0-9]+)?|0+\.[0-9]*[1-9][0-9]*)([km])$/;
+
+/**
+ * Parses a compaction threshold: `50` or `50%` (an integer percent, 1-100),
+ * `150k` or `1.5m` (tokens, k = 1,000 and m = 1,000,000, rounded to a whole
+ * token), or one percent term and one token term joined by `|` in either
+ * order (`50%|150k`). A finite number in `(0, 100]` is a percent, so a numeric
+ * value from an older reader still resolves. Anything else is `undefined`.
+ */
+export function parseCompactionThreshold(value: unknown): CompactionThresholdSpec | undefined {
+  if (typeof value === "number") return Number.isFinite(value) && value > 0 && value <= 100 ? { percent: value } : undefined;
+  if (typeof value !== "string") return undefined;
+  const terms = value.split("|");
+  if (terms.length > 2) return undefined;
+  const spec: CompactionThresholdSpec = {};
+  for (const term of terms) {
+    const percent = PERCENT_TERM.exec(term);
+    const tokens = percent ? null : TOKEN_TERM.exec(term);
+    if (percent && spec.percent === undefined) spec.percent = Number(percent[1]);
+    else if (tokens && spec.tokens === undefined) spec.tokens = Math.round(Number(tokens[1]) * (tokens[2] === "k" ? 1_000 : 1_000_000));
+    else return undefined;
+  }
+  return spec;
+}
+
+/**
+ * Resolves the compaction-advisory threshold: the tuned
+ * `compaction_advisory_percent` when `parseCompactionThreshold` accepts it,
+ * else `DEFAULT_COMPACTION_ADVISORY_PERCENT`. Never hard-fails on a
+ * malformed value (one written outside `config.tune`) — falls back to the
+ * default instead, like `resolveRunawayThreshold`.
+ */
+export function resolveCompactionAdvisoryThreshold(config: GoalLoopConfig | undefined): CompactionThresholdSpec {
+  return parseCompactionThreshold(config?.compaction_advisory_percent) ?? { percent: DEFAULT_COMPACTION_ADVISORY_PERCENT };
+}
+
+/** Resolves `compaction_hard_percent` with `resolveCompactionAdvisoryThreshold`'s never-hard-fail shape. */
+export function resolveCompactionHardThreshold(config: GoalLoopConfig | undefined): CompactionThresholdSpec {
+  return parseCompactionThreshold(config?.compaction_hard_percent) ?? { percent: DEFAULT_COMPACTION_HARD_PERCENT };
+}
+
+/**
+ * The context window thresholds resolve against: the context-window override
+ * when set, else the model's `usage.contextWindow`; `undefined` when neither
+ * is a positive finite number.
+ */
+export function resolveContextWindow(usage: ContextUsage | undefined, config: GoalLoopConfig | undefined): number | undefined {
+  const window = resolveContextWindowOverride(config) ?? usage?.contextWindow;
+  return typeof window === "number" && Number.isFinite(window) && window > 0 ? window : undefined;
+}
+
+/**
+ * A threshold resolved against `window`, as a percent of it so it compares
+ * with `computeContextPercent` in one unit: the percent term as-is, the token
+ * term as `tokens / window`, and the smaller of the two for the combined
+ * form. A token term is not clamped to the window: beyond it, the threshold
+ * never fires. With no known window a token term never fires either.
+ */
+export function resolveThresholdPercent(spec: CompactionThresholdSpec, window: number | undefined): number {
+  const fromTokens = spec.tokens !== undefined && window !== undefined ? (spec.tokens / window) * 100 : Number.POSITIVE_INFINITY;
+  return Math.min(spec.percent ?? Number.POSITIVE_INFINITY, fromTokens);
 }
 
 /** A compaction-trigger boundary: a `turn_end` that continues the run (tool results), a run's final `turn_end`, or `agent_end`. */
@@ -221,7 +281,9 @@ export const NO_TRIGGER_LATCH = Number.NEGATIVE_INFINITY;
 
 /**
  * The ordered trigger thresholds (261006): the advisory, milestones one and
- * two thirds of the way from it to the hard point, and the hard point. Exact
+ * two thirds of the way from it to the hard point, and the hard point, taking
+ * both points already resolved against one window (`resolveThresholdPercent`),
+ * so milestones sit between the resolved token counts. Exact
  * and possibly fractional; only message text rounds. An advisory at or above
  * the hard point never fires (as before 261006), so it and the milestones
  * are omitted.
@@ -436,6 +498,23 @@ export function computeContextPercent(usage: ContextUsage | undefined, contextWi
   return null;
 }
 
+/** The context reading a goal reminder reports: usage and the advisory threshold, both as percents of `contextWindow`. */
+export interface GoalReminderUsage {
+  percent: number | null;
+  advisoryPercent: number;
+  contextWindow?: number;
+}
+
+/** Reads the goal reminder's context line inputs, resolving the advisory threshold against the same window as the usage. */
+export function goalReminderUsage(usage: ContextUsage | undefined, config: GoalLoopConfig | undefined): GoalReminderUsage {
+  const contextWindow = resolveContextWindow(usage, config);
+  return {
+    percent: computeContextPercent(usage, resolveContextWindowOverride(config)),
+    advisoryPercent: resolveThresholdPercent(resolveCompactionAdvisoryThreshold(config), contextWindow),
+    contextWindow,
+  };
+}
+
 /**
  * The re-injected reminder on each armed `agent_settled` re-fire. Names the
  * goal and all three lever tool names (two terminal, one non-terminal
@@ -447,14 +526,15 @@ export function computeContextPercent(usage: ContextUsage | undefined, contextWi
  * enforces. Exact wording is a presentation detail beyond the ticket's
  * pinned framing of "the model decides."
  */
-export function buildGoalReminder(goal: string, info: { percent: number | null; advisoryPercent: number }): string {
-  const { percent, advisoryPercent } = info;
+export function buildGoalReminder(goal: string, info: GoalReminderUsage): string {
+  const { percent, advisoryPercent, contextWindow } = info;
+  const advisory = formatThreshold(advisoryPercent, contextWindow);
   const usageLine =
     percent === null
       ? "Context usage: unknown."
       : percent >= advisoryPercent
-        ? `Context usage: ${Math.round(percent)}% of window — at or above the advisory point (${advisoryPercent}%); prioritize ${LEAD_COMPACT_TOOL_NAME} when the next work is weakly related to the current context and you are at a safe compaction point.`
-        : `Context usage: ${Math.round(percent)}% of window — below the compaction advisory point (${advisoryPercent}%); do not call ${LEAD_COMPACT_TOOL_NAME}.`;
+        ? `Context usage: ${Math.round(percent)}% of window — at or above the advisory point (${advisory}); prioritize ${LEAD_COMPACT_TOOL_NAME} when the next work is weakly related to the current context and you are at a safe compaction point.`
+        : `Context usage: ${Math.round(percent)}% of window — below the compaction advisory point (${advisory}); do not call ${LEAD_COMPACT_TOOL_NAME}.`;
   return (
     `Goal yet running: "${goal}". Call goal-achieved <summary> or goal-blocked <reason> for a state ` +
     `transition, or ${LEAD_COMPACT_TOOL_NAME} to compact context and keep pursuing the ` +
@@ -1071,10 +1151,7 @@ export function registerGoalLoop(
       ctx.ui.setStatus(GOAL_LOOP_YIELD_STATUS_KEY, undefined);
       return;
     }
-    const advisoryPercent = resolveCompactionAdvisoryPercent(config);
-    const contextWindowOverride = resolveContextWindowOverride(config);
-    const percent = computeContextPercent(ctx.getContextUsage(), contextWindowOverride);
-    const reminder = buildGoalReminder(decision.goal, { percent, advisoryPercent });
+    const reminder = buildGoalReminder(decision.goal, goalReminderUsage(ctx.getContextUsage(), config));
     fireReminder(ctx, config, reminder, goalGeneration);
   }
 
@@ -1151,10 +1228,7 @@ export function registerGoalLoop(
       const failureReason = pendingRearmFailureReason;
       pendingRearmFailureReason = undefined;
       if (!state.active || !state.goal) return; // nothing lever-originated to say
-      const advisoryPercent = resolveCompactionAdvisoryPercent(config);
-      const contextWindowOverride = resolveContextWindowOverride(config);
-      const percent = computeContextPercent(ctx.getContextUsage(), contextWindowOverride);
-      let reminder = buildGoalReminder(state.goal, { percent, advisoryPercent });
+      let reminder = buildGoalReminder(state.goal, goalReminderUsage(ctx.getContextUsage(), config));
       if (failureReason) {
         // `failureReason` is caller-formatted (see the lever's `onError` and
         // the `session_compact_failed` listener below) — Pi's own
@@ -1425,10 +1499,14 @@ export function registerGoalLoop(
   }
 
   function fireCompactionTriggers(ctx: ExtensionContext, boundary: TriggerBoundary, config: GoalLoopConfig): void {
-    const percent = computeContextPercent(ctx.getContextUsage(), resolveContextWindowOverride(config));
+    const usage = ctx.getContextUsage();
+    const percent = computeContextPercent(usage, resolveContextWindowOverride(config));
     if (percent === null) return;
-    const hard = resolveCompactionHardPercent(config);
-    const thresholds = compactionThresholds(resolveCompactionAdvisoryPercent(config), hard);
+    // Thresholds resolve against this check's window, so a token threshold
+    // and usage stay in one unit even when the window changes between checks.
+    const contextWindow = resolveContextWindow(usage, config);
+    const hard = resolveThresholdPercent(resolveCompactionHardThreshold(config), contextWindow);
+    const thresholds = compactionThresholds(resolveThresholdPercent(resolveCompactionAdvisoryThreshold(config), contextWindow), hard);
     if (percent < triggerLatch) triggerLatch = highestThresholdAtOrBelow(thresholds, percent);
     const crossed = thresholds.filter((t) => t.percent > triggerLatch && t.percent <= percent);
     // One message per observation, hard > advisory > milestone. A crossing
@@ -1437,11 +1515,11 @@ export function registerGoalLoop(
     const pick = crossed.find((t) => t.kind === "hard") ?? crossed.find((t) => t.kind === "advisory") ?? crossed.find((t) => t.kind === "milestone");
     if (!pick) return;
     if (pick.kind === "hard") {
-      sendPreparation({ kind: "hard", percent, threshold: hard }, boundary === "run" ? "followUp" : "steer");
+      sendPreparation({ kind: "hard", percent, threshold: hard, contextWindow }, boundary === "run" ? "followUp" : "steer");
     } else if (pick.kind === "advisory") {
       if (boundary !== "run") return;
       const [first, second] = thresholds.filter((t) => t.kind === "milestone").map((t) => t.percent);
-      sendPreparation({ kind: "advisory", percent, threshold: pick.percent, hardPercent: hard, milestonePercents: [first!, second!] }, "followUp");
+      sendPreparation({ kind: "advisory", percent, threshold: pick.percent, hardPercent: hard, milestonePercents: [first!, second!], contextWindow }, "followUp");
     } else {
       // 261007: a dedicated wake turn at a run boundary, like the advisory; a
       // steer mid-run was always (rightly) read past. The text is that of the
@@ -1454,7 +1532,7 @@ export function registerGoalLoop(
       pi.sendMessage(
         {
           customType: LEAD_CONTEXT_MILESTONE_CUSTOM_TYPE,
-          content: buildContextMilestoneMessage(delivered, percent, hard),
+          content: buildContextMilestoneMessage(delivered, percent, hard, contextWindow),
           display: true,
           details: withSummaryId({ milestone: milestones[delivered - 1]!.percent }),
         },
@@ -1486,8 +1564,11 @@ export function registerGoalLoop(
     return thenOrNow(readConfig(COMPACTION_TRIGGER_CONFIG_KEYS), (config) => {
       if (latchEpoch !== epoch) return;
       const percent = computeContextPercent(usage, resolveContextWindowOverride(config));
-      const softThresholds = compactionThresholds(resolveCompactionAdvisoryPercent(config), resolveCompactionHardPercent(config))
-        .filter((t) => t.kind !== "hard");
+      const contextWindow = resolveContextWindow(usage, config);
+      const softThresholds = compactionThresholds(
+        resolveThresholdPercent(resolveCompactionAdvisoryThreshold(config), contextWindow),
+        resolveThresholdPercent(resolveCompactionHardThreshold(config), contextWindow),
+      ).filter((t) => t.kind !== "hard");
       triggerLatch = percent === null ? NO_TRIGGER_LATCH : highestThresholdAtOrBelow(softThresholds, percent);
     });
   }
