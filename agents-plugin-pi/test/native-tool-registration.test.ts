@@ -62,6 +62,7 @@ test("actual native registrations retain schemas/executors while sharing cold an
     "ws-fork",
     "do-i-really-have-to-read-this-myself",
     "do-i-really-have-to-run-this-myself",
+    "ws-background-abort",
   ]) {
     const tool = tools.get(name);
     assert.ok(tool?.execute, `${name} remains an executable production registration`);

@@ -33,6 +33,7 @@
 import { readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
+import { formatBackgroundTaskLine, listBackgroundTasks, type BackgroundTaskInfo } from "./background-tasks.ts";
 import { isPushWakeLine, PUSH_FAMILIES, type RpcAgentRecord, type RpcAgentRegistry } from "./spawner.ts";
 import { GOAL_CONTROL_CUSTOM_TYPE, PUSH_BATCH_CUSTOM_TYPE, type PushBatchItem, type PushBatchItemState } from "./push-protocol.ts";
 import { ADAPTER_MESSAGE_LABEL, adapterLabeledBody } from "./adapter-label.ts";
@@ -773,6 +774,8 @@ export function buildFileListSections(lists: LeadFileLists | undefined, cwd: str
 }
 
 export const LEAD_PROSE_SECTION_HEADING = "## Carried forward by the lead";
+/** Running exec-hatch background tasks (timed and monitors); `ws-background-abort` takes their ids. */
+export const BACKGROUND_TASKS_SECTION_HEADING = "## Background tasks running";
 const RESUME_SECTION_HEADING = "## Resume";
 
 export interface LeadCompactionSummaryInput {
@@ -791,6 +794,10 @@ export interface LeadCompactionSummaryInput {
   cwd?: string;
   /** UTF-8 byte budget of the inlined required re-reads. */
   rereadBudgetBytes?: number;
+  /** Running background tasks of the exec hatch; defaults to the live registry. */
+  backgroundTasks?: readonly BackgroundTaskInfo[];
+  /** Clock for the tasks' elapsed time; defaults to `Date.now()`. */
+  now?: number;
 }
 
 function rereadInstruction(playbook: ActivePlaybook): string {
@@ -812,6 +819,7 @@ export function buildLeadCompactionSummary(input: LeadCompactionSummaryInput): s
   const since = previousCompactionAt(branchEntries);
   const inFlight = describeInFlightChildren(registry);
   const finished = describeFinishedChildren(registry, since);
+  const backgroundTasks = input.backgroundTasks ?? listBackgroundTasks();
 
   const ticketLine = ticket
     ? `- Active ticket: \`${ticket.ref}\` (from the latest \`${ticket.tool}\` call); phase: ${ticket.phase ?? "the ticket's first phase without a `### Result`"}.`
@@ -825,6 +833,9 @@ export function buildLeadCompactionSummary(input: LeadCompactionSummaryInput): s
     ["## Session", `- ws session key: ${keyText}`, ticketLine, playbookLine].join("\n"),
     ["## Child agents in flight", ...(inFlight.length ? inFlight : ["(none)"])].join("\n"),
     ["## Child agents finished since the previous compaction", ...(finished.length ? finished : ["(none)"])].join("\n"),
+    // Only when some run: a lead that lost a task id across compaction can
+    // still abort it; sessions that never background anything see no change.
+    ...(backgroundTasks.length ? [[BACKGROUND_TASKS_SECTION_HEADING, ...backgroundTasks.map((task) => formatBackgroundTaskLine(task, input.now))].join("\n")] : []),
     buildDialogSection(branchEntries, dialogBudgetBytes, sessionFile),
     // Before the prose heading, so `extractLeadProse` never carries them.
     ...buildFileListSections(input.fileLists, input.cwd ?? process.cwd(), input.rereadBudgetBytes ?? DEFAULT_REREAD_BUDGET_BYTES),

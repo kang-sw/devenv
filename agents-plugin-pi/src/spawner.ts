@@ -21,7 +21,7 @@
  * (`pendingReports`/`idlePending`/`RpcAgentRecord.waiters`). Every child
  * signal is instead PUSHED into the owning session the instant it happens, as
  * a Pi custom message (`pi.sendMessage(..., {deliverAs, triggerTurn:true})`)
- * in one of six families — `ws-agent-report`, `ws-agent-settled`,
+ * in one of six child families — `ws-agent-report`, `ws-agent-settled`,
  * `ws-agent-question`, `ws-agent-approval`, `ws-agent-advisory`,
  * `ws-agent-orphaned` — each carrying `details.agent_id`, its own payload, and
  * a fan-in status line (`computeRunningStatusLine`) counting only children
@@ -108,6 +108,7 @@ import {
   type TierFailure,
   type TierRejection,
 } from "./model-catalog.ts";
+import { countBackgroundTasks } from "./background-tasks.ts";
 import { PUBLIC_EXPLORE_MODE_TIERS, WS_PI_EXPLORE_MODE_ENV, WS_PI_FORK_AFFINITY_ENV, WS_PI_FORK_CONTEXT_ENV, WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV, isLeadOrFork, readSpawnRole, type ExploreMode, type PublicExploreMode, type SpawnRole } from "./process-role.ts";
 import { FORK_READINESS_KIND, captureForkContext, compareForkRegistrations, writePrivateJson, type ForkContext, type ForkReadiness } from "./fork-context.ts";
 import { CHANNEL_BOOTSTRAP_ENVS, ParentChannel, type ChannelBindOptions, type ChannelConnection, type ChannelHello } from "./agent-channel.ts";
@@ -968,7 +969,7 @@ export function truncatePromptForStorage(prompt: string, capBytes: number = PROM
 }
 
 /**
- * 260905: the six push families. Each is a Pi custom-message `customType`
+ * 260905: the push families. Each is a Pi custom-message `customType`
  * delivered by `pushToLead` into whichever session owns the child:
  *
  * - `ws-agent-report` — a `ws-report-to-lead` progress update or intermediate
@@ -987,6 +988,10 @@ export function truncatePromptForStorage(prompt: string, capBytes: number = PROM
  *   `questionReportOutcome` emits it.
  * - `ws-agent-orphaned` — children that outlived their lead session and are
  *   revivable with `ws-agent-send` (shutdown sidecar, `agent-sidecar.ts`).
+ * - `ws-background-task` (261016) — a background run of the lead's one-liner
+ *   exec hatch finished on its own (exit or timeout); carries no agent.
+ *   Being a family is what lets the ws-compact lever recovery and the push
+ *   renderers cover it.
  */
 export const PUSH_FAMILIES = [
   "ws-agent-report",
@@ -995,6 +1000,7 @@ export const PUSH_FAMILIES = [
   "ws-agent-approval",
   "ws-agent-advisory",
   "ws-agent-orphaned",
+  "ws-background-task",
 ] as const;
 
 export type PushFamily = (typeof PUSH_FAMILIES)[number];
@@ -1060,11 +1066,26 @@ function computeFanIn(registry: RpcAgentRegistry | undefined): { present: boolea
  * no line at all (`undefined`), so a push that has nothing to do with
  * delegation fan-in — a `ws-agent-orphaned` roll-call at session start, a
  * `spawn-failed` for the only child — never ends with a contentless zero line.
+ *
+ * 261016: the lead's running background tasks (`background-tasks.ts`) extend
+ * the line as `N delegated agents, M background tasks, L monitors still
+ * running`. M counts timed tasks, L monitors (no timeout); each segment
+ * appears only when nonzero, while the delegated-agents segment keeps the
+ * presence rule above, and the line starts at the first present segment.
+ * Sessions that never run a background task see the line unchanged.
  */
-export function computeRunningStatusLine(registry: RpcAgentRegistry | undefined): string | undefined {
+export function computeRunningStatusLine(
+  registry: RpcAgentRegistry | undefined,
+  background: { timed: number; monitors: number } = countBackgroundTasks(),
+): string | undefined {
   const { present, running } = computeFanIn(registry);
-  if (!present) return undefined;
-  return `${running} delegated agent${running === 1 ? "" : "s"} still running`;
+  const segments = [
+    ...(present ? [`${running} delegated agent${running === 1 ? "" : "s"}`] : []),
+    ...(background.timed > 0 ? [`${background.timed} background task${background.timed === 1 ? "" : "s"}`] : []),
+    ...(background.monitors > 0 ? [`${background.monitors} monitor${background.monitors === 1 ? "" : "s"}`] : []),
+  ];
+  if (segments.length === 0) return undefined;
+  return `${segments.join(", ")} still running`;
 }
 
 /**

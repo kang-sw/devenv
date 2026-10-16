@@ -23,6 +23,9 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { buildPushBatchComponent, buildPushComponent, buildPushRenderLines, registerPushMessageRenderers, type PushTuiModules } from "../src/push-render.ts";
 import { buildPushContent, heldPushQueue, leadIdleRef, PUSH_FAMILIES, sendBatchToLead, sendToLead } from "../src/spawner.ts";
+
+/** The child-report families; `ws-background-task` carries a task, not an agent, and has its own tests. */
+const AGENT_PUSH_FAMILIES = PUSH_FAMILIES.filter((family) => family.startsWith("ws-agent-"));
 import { approximateCodePointWidth } from "../src/tool-result-render.ts";
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
 import { buildMailboxPushMessage } from "../src/mailbox-waiter.ts";
@@ -297,6 +300,7 @@ describe("buildPushComponent", () => {
       "ws-agent-approval": "approval",
       "ws-agent-advisory": "advisory",
       "ws-agent-orphaned": "orphaned",
+      "ws-background-task": "background task",
     };
 
     for (const family of PUSH_FAMILIES) {
@@ -318,8 +322,18 @@ describe("buildPushComponent", () => {
     }
   });
 
+  test("261016: a background-task push heads with its task id and keeps its status line", () => {
+    const status = "0 delegated agents, 1 monitor still running";
+    const payload = { task_id: "amber-tide-fox", why: "wait", exit_code: "0", output: "done" };
+    const content = buildPushContent("ws-background-task", undefined, payload, status);
+    const component = buildPushComponent(fakeTui().modules, { content, details: { ...payload, status } }, undefined, false, "ws-background-task") as FakeComponent;
+    const lines = component.render(80);
+    assert.equal(lines[0], "amber-tide-fox · background task");
+    assert.equal(buildPushRenderLines({ content })?.status, status, "recognized by shape when details carry no status");
+  });
+
   test("aggregate and no-agent pushes use a concise unambiguous head", () => {
-    for (const family of PUSH_FAMILIES) {
+    for (const family of AGENT_PUSH_FAMILIES) {
       const component = buildPushComponent(
         fakeTui().modules,
         { content: buildPushContent(family, undefined, { count: 2 }, undefined) },
@@ -635,7 +649,7 @@ describe("registerPushMessageRenderers", () => {
     const tui = fakeTui();
     await registerPushMessageRenderers(pi as never, tui.modules);
 
-    for (const family of PUSH_FAMILIES) {
+    for (const family of AGENT_PUSH_FAMILIES) {
       const theme = fakeTheme();
       const status = family === "ws-agent-report" ? "1 delegated agent still running" : undefined;
       const component = registered.get(family)!(

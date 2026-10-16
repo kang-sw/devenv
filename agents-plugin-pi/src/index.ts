@@ -107,7 +107,7 @@
  * this session's own `agent_settled`; `session_start` fills
  * `spawner.ts`'s `leadIdleRef` with this session's `ctx.isIdle` (the seam that
  * decides hold vs send) and, in TUI only, registers the compact
- * `push-render.ts` renderers for the six families; `session_shutdown` drops
+ * `push-render.ts` renderers for the push families; `session_shutdown` drops
  * the held queue with the session it belonged to.
  *
  * The `260905-feat-ws-pi-live-agent-widget` ticket's Phase 1 adds the
@@ -217,6 +217,7 @@ import { ChildChannel, readAndDeleteChannelBootstrap } from "./agent-channel.ts"
 import { ChildApprovalGate } from "./approval-protocol.ts";
 import { isLeadOrFork, readSpawnRole, WS_PI_FORK_CONTEXT_ENV, WS_PI_PARENT_SESSION_KEY_ENV, type SpawnRole } from "./process-role.ts";
 import { createApprovalRelay, registerExecuteGateway } from "./execute-gateway.ts";
+import { registerBackgroundTaskShutdown } from "./background-tasks.ts";
 import { attachMailboxRuntimeCleanup, buildMailboxPushMessage, createBridgeDrain, createMailboxWaiterSlot, createSubprocessWait, reportDistinctLinesOnce, resolveMailboxSelfSlug, sessionMailboxWaitOptions, shouldArmMailboxWaiter, stageMailboxRuntime, startMailboxWaiter, type MailboxToolCall, type MailboxWaiterHandle, type StagedMailboxRuntime } from "./mailbox-waiter.ts";
 import { armForkRoleWiring, registerFork } from "./fork.ts";
 import {
@@ -735,6 +736,10 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   for (const event of ["agent_start", "agent_settled", "tool_execution_end"] as const) {
     pi.on(event, () => { publishSubtree(rpcRegistryRef.current); });
   }
+  // 261016: session end (quit and every session switch, `/reload` included)
+  // kills the exec hatch's remaining background tasks. Factory scope, like the
+  // handlers above, so a `/reload` cannot stack duplicates.
+  registerBackgroundTaskShutdown(pi);
   pi.on("session_start", async (_event, ctx) => {
     const startEpoch = ++sessionStartEpoch;
     const sessionRole = readSpawnRole(process.env);

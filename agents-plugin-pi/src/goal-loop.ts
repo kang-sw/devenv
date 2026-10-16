@@ -121,6 +121,7 @@ import { withSummaryId } from "./summary-id.ts";
 import { readSpawnRole } from "./process-role.ts";
 import { staticConfigReader, thenOrNow, type GoalLoopConfigKey, type GoalLoopConfigReader } from "./adapter-config.ts";
 import { createToolPreviewTuiRef, registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
+import { hasRunningTimedBackgroundTask } from "./background-tasks.ts";
 import { clearWakeStart, enqueueHeldGoalReplacement, reserveWakeStart, heldPushQueue, flushHeldPushes, hasRunningAgents, isOwningAgentIdle, leadCompactingRef, prependRecoveredPushes, reserveAdapterPromptStart, leadWakeStartPendingRef, type HeldGoalReplacementResult, type RpcAgentRegistry } from "./spawner.ts";
 import type { PushBatchItem } from "./push-protocol.ts";
 
@@ -1126,7 +1127,11 @@ export function registerGoalLoop(
     }
 
     const notIdle = !ctx.isIdle();
-    const yielding = hasRunningAgents(opts.rpcRegistryRef?.current);
+    // 261016: a timed background task is outstanding work the lead is
+    // legitimately waiting on; a monitor (no timeout) never blocks re-firing,
+    // or an unbounded one would starve the loop. Its completion push wakes the
+    // lead, whose turn end re-arms this timer through `agent_settled`.
+    const yielding = hasRunningAgents(opts.rpcRegistryRef?.current) || hasRunningTimedBackgroundTask();
     if (notIdle || yielding || leadWakeStartPendingRef.current) return;
     // Pushes own the next wake; do not consume origins, carry, or streak.
     if (heldPushQueue.length) {

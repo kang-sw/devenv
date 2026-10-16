@@ -40,6 +40,7 @@ import {
 } from "../src/lead-compaction.ts";
 import { buildPushWakeLine, type RpcAgentRegistry } from "../src/spawner.ts";
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
+import { killAllBackgroundTasks, startBackgroundTask } from "../src/background-tasks.ts";
 
 let seq = 0;
 const at = (minute: number): string => new Date(Date.UTC(2026, 9, 2, 10, minute)).toISOString();
@@ -467,6 +468,36 @@ describe("buildLeadCompactionSummary", () => {
     assert.match(summary, /ws session key: unknown/);
     assert.match(summary, /Active ticket: none/);
     assert.match(summary, /## Child agents in flight\n\(none\)/);
+  });
+
+  test("261016: the deterministic section lists running background tasks so their ids survive compaction", () => {
+    const startedAt = 1_000_000;
+    const summary = buildLeadCompactionSummary({
+      sessionKey: "k", branchEntries: [], registry: undefined, prose, ...dialog,
+      backgroundTasks: [
+        { id: "amber-tide-fox", why: "wait for the deploy", command: "sleep 600", timeoutS: 900, startedAt },
+        { id: "calm-oak-reef", why: "watch the error log", command: "tail -f x | grep -m1 ERROR", startedAt },
+      ],
+      now: startedAt + 125_000,
+    });
+    assert.match(summary, /## Background tasks running\n- amber-tide-fox \[timed, timeout_s 900\] running 2m05s; why: wait for the deploy\n- calm-oak-reef \[monitor\] running 2m05s; why: watch the error log/);
+    assert.ok(summary.indexOf("## Background tasks running") < summary.indexOf("## Dialog"), "deterministic, before the dialog and the prose");
+    assert.ok(summary.indexOf("## Child agents in flight") < summary.indexOf("## Background tasks running"));
+  });
+
+  test("261016: no background-task section when none run", () => {
+    const summary = buildLeadCompactionSummary({ sessionKey: "k", branchEntries: [], registry: undefined, prose, ...dialog, backgroundTasks: [] });
+    assert.doesNotMatch(summary, /## Background tasks running/);
+  });
+
+  test("261016: the section defaults to the live background-task registry", { skip: process.platform === "win32" ? "POSIX shell" : false }, () => {
+    const task = startBackgroundTask({ shell: "/bin/sh", args: ["-c", "sleep 30"], cwd: tmpdir(), command: "sleep 30", why: "live watch", capBytes: 64, onComplete: () => {} });
+    try {
+      const summary = buildLeadCompactionSummary({ sessionKey: "k", branchEntries: [], registry: undefined, prose, ...dialog });
+      assert.match(summary, new RegExp(`## Background tasks running\\n- ${task.id} \\[monitor\\] running \\d+s; why: live watch`));
+    } finally {
+      killAllBackgroundTasks();
+    }
   });
 });
 

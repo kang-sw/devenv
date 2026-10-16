@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 14583fa0d4a87ba4
 sage-review-design-reviewed: 14583fa0d4a87ba4
+completed: 2026-10-16
 ---
 
 # Pi lead exec hatch background mode with ws-background-abort
@@ -272,3 +273,57 @@ Verification expectations:
   for the lead and lateral forks and absent from workers, execute-workers,
   and explore leaves.
 - The package's existing test suite passes.
+
+### Result (92790af25) - 2026-10-16
+
+Landed in c5b6d5c79 (implementation) and 92790af25 (lite-review fixes).
+
+- New `agents-plugin-pi/src/background-tasks.ts`: the process-wide task
+  registry. It spawns tasks directly in their own process group, keeps a
+  bounded `capBytes + 1` capture (stdout and stderr interleaved in arrival
+  order), and gives each task a single report claim: exit, abort, or
+  session-end kill. Abort, timeout, and shutdown kill the whole tree with a
+  group SIGKILL (`taskkill /T` on Windows). It also owns
+  `registerBackgroundTaskShutdown` (factory scope in `index.ts`), counts,
+  listing, and `formatBackgroundTaskLine`. Timers longer than Node's
+  2^31-1 ms limit re-arm in steps.
+- New `src/word-chain-id.ts` with a byte-identical copy of
+  `eff_large_wordlist.txt`; a test pins it against the Go copy.
+- `execute-gateway.ts`:
+  - `validateOneLinerMode` rejects foreground `timeout_s`, non-positive or
+    non-integer values, and fork background.
+  - The hatch's background branch pushes `ws-background-task` as a steer via
+    `pushToLead`.
+  - New `ws-background-abort` (`BACKGROUND_ABORT_TOOL_NAME`) is added to
+    `computeLeadActiveTools`; forks inherit it.
+  - `backgroundTaskReportFields` is shared by the push payload and the
+    inline abort result.
+- `spawner.ts`: `ws-background-task` is added to `PUSH_FAMILIES`.
+  `computeRunningStatusLine` gains the background and monitor segments.
+  `push-render.ts`'s `STATUS_LINE_PATTERN` recognizes every form, and a
+  `<task_id> · background task` head was added.
+- `goal-loop.ts`: `hasRunningTimedBackgroundTask()` is ORed into the yield
+  at `onSettleTimerFire`.
+- `lead-compaction.ts`: a `## Background tasks running` section, present
+  only while tasks run.
+- `pi-lead-guide.md`: hatch background row, `ws-background-abort` row, the
+  `ws-background-task` push row, and the extended status-line paragraph
+  (synthesis cue, monitor exemption, `/reload` asymmetry).
+
+Verification: `npm test` in `agents-plugin-pi`: 2313 tests, 2310 pass,
+0 fail, 3 opt-in skips. New `test/background-tasks.test.ts` (28 tests)
+plus additions to execute-gateway, goal-loop, lead-compaction, push-render,
+native-tool-registration, and lead-bootstrap tests. Lite review: 0
+Critical. The 1 Important (timer overflow) and 3 Minor findings were fixed
+in 92790af25.
+
+Decisions:
+
+- Completion is delivered as `steer`, matching "batches into the current
+  turn when busy".
+- Capture interleaves stdout and stderr; the cap semantics are unchanged.
+- Kill is an immediate SIGKILL with no SIGTERM grace, mirroring the host's
+  `killProcessTree`.
+- The compaction section is omitted when no task runs, so it has no
+  `(none)` line.
+- A completion that lands in a session end's drain window is dropped.
