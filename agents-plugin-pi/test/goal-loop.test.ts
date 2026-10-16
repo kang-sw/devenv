@@ -2464,6 +2464,19 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       assert.match(text(0), /past the hard compaction point \(50% \/ 100k tokens\)/);
     });
 
+    test("a resume past a token advisory point is baselined against the window, and a rewind below re-arms it", () => {
+      const { pi, ctx, usage, preparations, runEnd } = tokenRun({ compaction_advisory_percent: "50%|150k" });
+      usage.tokens = 160_000;
+      pi.handlers.get("session_start")!({}, ctx);
+      runEnd();
+      assert.equal(preparations().length, 0, "the 150k side is already past at resume: no duplicate advisory");
+      usage.tokens = 100_000;
+      pi.handlers.get("session_tree")!({}, ctx);
+      usage.tokens = 160_000;
+      runEnd();
+      assert.equal(preparations().length, 1, "a rewind below the token threshold re-arms it");
+    });
+
     test("a token threshold fires once per crossing and re-arms below it", () => {
       const { usage, preparations, runEnd } = tokenRun({ compaction_advisory_percent: "150k" });
       usage.tokens = 160_000;
