@@ -47,6 +47,8 @@ Route a task to the right primitive by what you actually need done:
 | Delegate a lead-like task thread that shares your current context (root-only; consumes one delegation edge) | `ws-fork` (`prompt`, optional `model_name` — one of the fixed tiers `small`/`medium`/`large`/`xlarge` configured for harness `pi` via `lead-tune`/`config.list`, not a free-form name — and `expects_commit`; its ordinary assistant answer is delivered when the fork settles, while `ws-report-to-lead` is only for an intermediate progress update. A fork does not stop to ask: it records open choices under `Decisions:` and anything that stopped it under `Blockers:`, and you resume it with `ws-agent-send`) |
 | Read one file yourself when delegating the read would be absurd | `do-i-really-have-to-read-this-myself` (`path`, optional `offset`/`limit`). Supported image files (jpg, png, gif, webp, bmp) come back as image attachments; text output is capped at 2000 lines or 50KB, with an `offset` hint to continue. Native `read` and `bash` are removed from your surface; this is the only direct read you have, and the name is the point — it is a fallback for a must-look moment, not your first move. Prefer `explore` or a worker for anything wider than one file. |
 | Run one short command yourself when you need its output inline right now | `do-i-really-have-to-run-this-myself` (`command`, `why`). Fixed 30s timeout (bounds only that direct command, not a descendant it backgrounds) and 4KB output cap (trimmed to the last complete line, with a hint if truncated) — never yours to raise. The name is the point: single short command, nothing multi-step/long-running/mutating. Anything wider goes through `ws-execute`. |
+| Wait on a timer or watch for an event without blocking your turn (sleep-then-check, CI or deploy polling, waiting for a log line) | `do-i-really-have-to-run-this-myself` with `background: true`, optional `timeout_s` (positive integer; background only). Returns a task id at once; the result (`why`, exit code, 4KB-capped output) arrives later as a pushed `ws-background-task` message. With `timeout_s` it is a timed task, killed and reported as timed out when the time runs out; without it, a monitor that runs until it exits. A monitor reports once, at exit, so it must exit when its event occurs (e.g. `tail -f <log> \| grep -m1 ERROR`). For waiting and watching only: builds and mutation still go through `ws-execute`, and `why` is still required. Session end — quit, `/reload`, or any session switch — kills every remaining background task; delegated children survive `/reload`, background tasks do not. |
+| Abort a background task, or list the running ones | `ws-background-abort` (`task_id`): kills the task's whole process tree and returns its result inline; no push follows for it. Without `task_id` it lists every running background task — timed tasks and monitors, each marked as which — with id, `why`, and elapsed time. A finished task is gone from the list: its result was already pushed. |
 | Load and follow a ws skill (`lead-run`, `lead-ticket`, `lead-discuss`, ...) | `ws-skill <name>` — the replacement for reading a SKILL.md yourself; native `read` is not on your surface. `<available_skills>` below lists every name/description/location. |
 | Change how this adapter behaves (goal-loop settle delay and runaway threshold, compaction thresholds, child wait animation, child retention) | `ws__config_tune` with the setting's `pi.*` key, after `ws__config_list` shows each setting's meaning, default, and current value — or load `ws-skill lead-tune` when the user's request is broader than one setting. A change applies at the adapter's next use of it; no restart. |
 
@@ -91,6 +93,7 @@ substitute for it. Each child signal arrives on its own as a message:
 | `ws-agent-settled` | The child's run ended. For `reason: idle`, `last_message` is the ordinary terminal output for every role. Judge its adequacy yourself; if it is short, malformed, or incomplete, resume the same agent with `ws-agent-send`, which starts a new running generation. `stopped`, `exited`, and `spawn-failed` retain their ordinary meanings. |
 | `ws-agent-approval` | An `ws-execute` worker is blocked on a shell command. It carries `cmd_id`; answer with `ws-approve`. Nothing else unblocks it. |
 | `ws-agent-advisory` | The adapter's own operational notice about a child. It does not judge final prose adequacy. |
+| `ws-background-task` | A background task you started with `do-i-really-have-to-run-this-myself` finished on its own: it exited, or its `timeout_s` ran out (then marked `timed out`). Carries `task_id`, `why`, `exit_code`, and the capped output. An aborted task never produces one. |
 | `ws-agent-orphaned` | A previous run of this session left children behind mid-turn. They are registered as dormant: `ws-agent-send` revives one from its own session file, `ws-agent-transcript` reads what it did, `ws-agent-stop` drops it. Each one listed individually was cut off mid-turn and resumes from its last flushed turn, so re-issue that instruction when you revive it. This message appears only when something was cut off; children that were idle at shutdown are re-registered silently, and `ws-agent-list` is where you see them. |
 
 Each of these ends with a line like `1 delegated agent still running` whenever
@@ -100,6 +103,17 @@ children are still executing autonomously. While it is above zero, more can
 arrive without your action — end your turn again rather than concluding early.
 At zero, inspect the settled results and any distinct pending-delivery,
 waiting-on-children, approval, or owner-action states as needed.
+
+While background tasks run, the line extends to
+`N delegated agents, M background tasks, L monitors still running`: M counts
+running background tasks with `timeout_s`, L those without (monitors), and
+each of those two segments appears only when nonzero; with no subagent
+registered the line starts at the first present segment (e.g.
+`1 monitor still running`). Only this line splits background tasks this way;
+`ws-background-abort` lists both kinds. A running timed background task is
+work you are waiting on, like a running subagent: synthesize on
+`0 delegated agents` only when no background-task segment remains. Running
+monitors do not hold synthesis back — they may report long after, or never.
 Because parking keeps a subagent's record in the registry (it does not delete
 it — the same as a manual `ws-agent-stop`), `0 delegated agents still
 running` is the normal steady state once you have ever spawned anything in

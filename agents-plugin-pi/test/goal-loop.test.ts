@@ -24,6 +24,7 @@
 import { test, describe, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { stripSummaryId } from "./fixtures/summary-id.ts";
+import { abortBackgroundTask, killAllBackgroundTasks, startBackgroundTask } from "../src/background-tasks.ts";
 import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -1736,6 +1737,29 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
    * reminders invariant.
    */
   describe("settle timer mechanics (260906 Phase 1)", () => {
+    test("261016: a running timed background task yields; a running monitor alone does not", { skip: process.platform === "win32" ? "POSIX shell" : false }, () => {
+      const clock = fakeClock();
+      const pi = fakePi();
+      registerGoalLoop(pi.api, { readConfig: fileReader(configPath), scheduleTimer: clock.scheduleTimer, clearTimer: clock.clearTimer, rpcRegistryRef: { current: new Map() as unknown as RpcAgentRegistry } });
+      const { ctx } = fakeCtx();
+      pi.commands.get("goal")!("ship the widget", ctx);
+      const start = (timeoutS?: number) => startBackgroundTask({ shell: "/bin/sh", args: ["-c", "sleep 30"], cwd: tmpdir(), command: "sleep 30", why: "w", timeoutS, capBytes: 64, onComplete: () => {} });
+      try {
+        const timed = start(600);
+        start();
+        pi.handlers.get("agent_settled")!({}, ctx);
+        clock.fire();
+        assert.equal(pi.sentUserMessages.length, 1, "yields while a timed task runs, even beside a monitor");
+
+        abortBackgroundTask(timed.id);
+        pi.handlers.get("agent_settled")!({}, ctx);
+        clock.fire();
+        assert.equal(pi.sentUserMessages.length, 2, "a running monitor alone never blocks re-firing");
+      } finally {
+        killAllBackgroundTasks();
+      }
+    });
+
     test("a running child at fire time yields — no send, and a later settle with nothing running re-arms and fires normally", () => {
       const clock = fakeClock();
       const pi = fakePi();

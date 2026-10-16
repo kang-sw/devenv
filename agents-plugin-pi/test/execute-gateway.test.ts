@@ -69,6 +69,7 @@ import {
   APPROVE_TOOL_NAME,
   UGLY_READ_TOOL_NAME,
   ONE_LINER_EXEC_TOOL_NAME,
+  BACKGROUND_ABORT_TOOL_NAME,
   ONE_LINER_TIMEOUT_MS,
   ONE_LINER_OUTPUT_CAP_BYTES,
   registerExecuteGateway as registerExecuteGatewayBase,
@@ -182,16 +183,23 @@ describe("computeLeadActiveTools", () => {
     assert.equal(result.filter((name) => name === ONE_LINER_EXEC_TOOL_NAME).length, 1);
   });
 
-  test("an empty current list still ends up with exactly the 4 added tools", () => {
+  test("an empty current list still ends up with exactly the 5 added tools", () => {
     assert.deepEqual(
       [...computeLeadActiveTools([])].sort(),
-      [APPROVE_TOOL_NAME, EXECUTE_TOOL_NAME, UGLY_READ_TOOL_NAME, ONE_LINER_EXEC_TOOL_NAME].sort(),
+      [APPROVE_TOOL_NAME, EXECUTE_TOOL_NAME, UGLY_READ_TOOL_NAME, ONE_LINER_EXEC_TOOL_NAME, BACKGROUND_ABORT_TOOL_NAME].sort(),
     );
   });
 
   test("the one-liner exec hatch never appears in any spawned child's tool group (TOOL_GROUPS is the actual enforcement mechanism, not computeLeadActiveTools)", () => {
     for (const [groupName, tools] of Object.entries(TOOL_GROUPS)) {
       assert.ok(!tools.includes(ONE_LINER_EXEC_TOOL_NAME), `TOOL_GROUPS["${groupName}"] must not include ${ONE_LINER_EXEC_TOOL_NAME}`);
+    }
+  });
+
+  test("ws-background-abort joins the lead/fork surface and no spawned child's tool group", () => {
+    assert.ok(computeLeadActiveTools(["bash", "read"]).includes(BACKGROUND_ABORT_TOOL_NAME), "lead (and a fork, which inherits the lead's surface) gets the abort tool");
+    for (const [groupName, tools] of Object.entries(TOOL_GROUPS)) {
+      assert.ok(!tools.includes(BACKGROUND_ABORT_TOOL_NAME), `TOOL_GROUPS["${groupName}"] must not include ${BACKGROUND_ABORT_TOOL_NAME}`);
     }
   });
 });

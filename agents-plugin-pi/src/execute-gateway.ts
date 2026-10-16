@@ -92,6 +92,13 @@
  *     caller-supplied — and ungated for the same reason `ws-worker-exec` is
  *     excluded from the lead's own active set (nothing observes the lead's
  *     own tool calls, so a gated lead tool would hang forever).
+ *     261016: `background: true` (lead only; a fork is refused) is the one
+ *     exception to that bound — the command runs as a background task
+ *     (`background-tasks.ts`) with an optional caller `timeout_s` and no
+ *     fixed ceiling, for waiting and watching; its completion is pushed as a
+ *     `ws-background-task` message, and `BACKGROUND_ABORT_TOOL_NAME` aborts
+ *     or lists tasks. The foreground call keeps its fixed bounds and rejects
+ *     `timeout_s`.
  *
  * Following spawner.ts's convention, this file mixes pure, unit-tested helpers
  * (test/execute-gateway.test.ts) with the
@@ -129,6 +136,8 @@ import {
   type RpcAgentRegistry,
 } from "./spawner.ts";
 import { touchOwnership } from "./agent-storage.ts";
+import { abortBackgroundTask, formatBackgroundTaskLine, listBackgroundTasks, startBackgroundTask, type BackgroundTaskResult } from "./background-tasks.ts";
+import { readSpawnRole } from "./process-role.ts";
 import { approvalDecisionMessage, type ApprovalChildLink, type ApprovalDecision, type ChildApprovalGate } from "./approval-protocol.ts";
 
 // ---------------------------------------------------------------------------
@@ -208,6 +217,66 @@ export const ONE_LINER_TIMEOUT_MS = 30_000;
  * stdout+stderr — a module constant, never wired to a tool parameter.
  */
 export const ONE_LINER_OUTPUT_CAP_BYTES = 4096;
+
+/**
+ * 261016: aborts or lists the hatch's background tasks. Not part of the
+ * hatch's deliberately ugly name family: the deterrent belongs to running a
+ * command yourself, not to stopping one.
+ */
+export const BACKGROUND_ABORT_TOOL_NAME = "ws-background-abort";
+
+/** Push family a background task's completion arrives under (spawner.ts's `PUSH_FAMILIES`). */
+export const BACKGROUND_TASK_PUSH_FAMILY = "ws-background-task";
+
+export type ValidateOneLinerModeResult = { ok: true; background: boolean; timeoutS?: number } | { ok: false; error: string };
+
+/**
+ * Pure validation of the hatch's mode fields. `timeout_s` belongs to
+ * background mode only (the foreground 30s timeout is a constant no caller
+ * changes) and must be a positive integer: zero or a negative value would
+ * otherwise read as "no timeout" and silently turn a timed task into a
+ * monitor. Background mode is the lead's only: a lateral fork is refused.
+ */
+export function validateOneLinerMode(params: { background?: unknown; timeout_s?: unknown }, isFork: boolean): ValidateOneLinerModeResult {
+  const background = params.background === true;
+  if (params.timeout_s !== undefined) {
+    if (!background) return { ok: false, error: "timeout_s applies only with background: true; the foreground timeout is fixed at 30s." };
+    if (typeof params.timeout_s !== "number" || !Number.isInteger(params.timeout_s) || params.timeout_s <= 0) {
+      return { ok: false, error: "timeout_s must be a positive integer number of seconds; omit it for a monitor that runs until it exits." };
+    }
+  }
+  if (background && isFork) return { ok: false, error: "background: true is available to the lead only, not to a fork." };
+  return { ok: true, background, ...(background && params.timeout_s !== undefined ? { timeoutS: params.timeout_s as number } : {}) };
+}
+
+/**
+ * Pure result fields for a finished or aborted background task, in reading
+ * order: the `why`, the exit code (annotated when the task was killed), a
+ * note for a timeout, an abort, or a failed start, and the output under the
+ * foreground's 4KB cap. The completion push carries them as its payload; the
+ * abort tool prints them as `key: value` lines.
+ */
+export function backgroundTaskReportFields(result: BackgroundTaskResult, capBytes: number = ONE_LINER_OUTPUT_CAP_BYTES): Record<string, string> {
+  const code = result.code ?? (result.signal ? `none (signal ${result.signal})` : "none");
+  const clean = result.ending === "exited" && result.signal === null && result.spawnError === undefined;
+  const note = result.spawnError !== undefined ? `could not start: ${result.spawnError}`
+    : result.ending === "timed-out" ? `timed out after ${result.timeoutS}s`
+    : result.ending === "aborted" ? `aborted with ${BACKGROUND_ABORT_TOOL_NAME}`
+    : undefined;
+  return {
+    task_id: result.id,
+    why: result.why,
+    exit_code: clean ? String(code) : `${code} (killed — not a clean exit)`,
+    ...(note !== undefined ? { note } : {}),
+    output: capOutput(result.output, capBytes),
+  };
+}
+
+/** Pure `ws-background-abort` listing text (no task id given). */
+export function formatBackgroundTaskList(tasks: ReturnType<typeof listBackgroundTasks>, now: number = Date.now()): string {
+  if (tasks.length === 0) return "No background tasks are running.";
+  return [`${tasks.length} background task${tasks.length === 1 ? "" : "s"} running (timed and monitors):`, ...tasks.map((task) => formatBackgroundTaskLine(task, now))].join("\n");
+}
 
 /**
  * Hint line `capOutput` appends whenever it truncates, pointing at
@@ -334,7 +403,7 @@ export function validatePendingApproval(pending: PendingApprovalState | undefine
 }
 
 const LEAD_REMOVED_TOOL_NAMES: ReadonlySet<string> = new Set(["bash", "read", GATED_EXEC_TOOL_NAME]);
-const LEAD_ADDED_TOOL_NAMES: readonly string[] = [EXECUTE_TOOL_NAME, APPROVE_TOOL_NAME, UGLY_READ_TOOL_NAME, ONE_LINER_EXEC_TOOL_NAME];
+const LEAD_ADDED_TOOL_NAMES: readonly string[] = [EXECUTE_TOOL_NAME, APPROVE_TOOL_NAME, UGLY_READ_TOOL_NAME, ONE_LINER_EXEC_TOOL_NAME, BACKGROUND_ABORT_TOOL_NAME];
 
 /**
  * Pure §8 lead `--tools` reshaping: removes native `bash`/`read` and (the
@@ -506,6 +575,8 @@ export interface ExecuteGatewaySessionCtx {
   approvalGate?: ChildApprovalGate;
   /** Shell lookup for every command these tools run; defaults to the host's `getShellConfig`. */
   resolveShell?: ShellResolver;
+  /** Whether this process is a lateral fork (refused background mode); defaults to reading the spawn-role env. */
+  isFork?: () => boolean;
 }
 
 /**
@@ -775,19 +846,39 @@ export function registerExecuteGateway(
     name: ONE_LINER_EXEC_TOOL_NAME,
     label: "exec",
     description:
-      "Run a single short shell command yourself, right now, when you need its output inline and it changes nothing that would need review — anything multi-step, long-running, or mutating goes through ws-execute instead. Fixed 30s timeout (bounds only this direct command, not a descendant it backgrounds) and 4KB output cap (trimmed to the last complete line); exceeding either is not an error, you get what fit plus a hint. The name is the point: this is a fallback for a quick look, not your first move.",
+      "Run a single short shell command yourself, right now, when you need its output inline and it changes nothing that would need review — anything multi-step, long-running, or mutating goes through ws-execute instead. Fixed 30s timeout (bounds only this direct command, not a descendant it backgrounds) and 4KB output cap (trimmed to the last complete line); exceeding either is not an error, you get what fit plus a hint. The name is the point: this is a fallback for a quick look, not your first move. background:true is for waiting and watching (sleep-then-check, polling, waiting for a log line), not for builds or mutation: it returns a task id at once and the result (why, exit code, 4KB-capped output) arrives later as a pushed ws-background-task message; abort or list running tasks with ws-background-abort. A background task reports once, when its process exits, so a wake-me-on-event monitor must exit when the event occurs (e.g. `tail -f <log> | grep -m1 ERROR`).",
     parameters: {
       type: "object",
       properties: {
         command: { type: "string", description: "Single short shell command (run with `bash -c`, or POSIX `sh -c` where bash is absent) to run in your own cwd. No cwd/env override — always your own session's." },
         why: { type: "string", description: "One-sentence reason this needs to run directly rather than through a delegated worker; echoed first in the result." },
+        background: { type: "boolean", description: "true runs the command in the background: returns a task id immediately; the result arrives as a pushed message when it exits. Session end (quit, /reload, any session switch) kills it." },
+        timeout_s: { type: "integer", description: "Only with background:true: kill the task after this many seconds (positive integer); omitted, it runs until it exits or is aborted. A background task with no timeout is treated as a monitor and does not block goal-loop re-firing." },
       },
       required: ["command", "why"],
     } as never,
     async execute(_toolCallId, params, signal) {
-      const p = params as { command: string; why: string };
+      const p = params as { command: string; why: string; background?: boolean; timeout_s?: number };
+      const mode = validateOneLinerMode(p, (sessionCtx.isFork ?? (() => readSpawnRole(process.env) === "fork"))());
+      if (!mode.ok) throw new Error(`ws-pi-agent: ${ONE_LINER_EXEC_TOOL_NAME} rejected: ${mode.error}`);
       const invocation = resolveShellInvocation(p.command, sessionCtx.resolveShell);
       if (!invocation.ok) return { content: [{ type: "text", text: `why: ${p.why}\n${invocation.error}` }] };
+      if (mode.background) {
+        const task = startBackgroundTask({
+          shell: invocation.shell,
+          args: invocation.args,
+          cwd: sessionCtx.cwd,
+          command: p.command,
+          why: p.why,
+          timeoutS: mode.timeoutS,
+          capBytes: ONE_LINER_OUTPUT_CAP_BYTES,
+          onComplete: (result) => {
+            pushToLead(pi, rpcRegistry, undefined, BACKGROUND_TASK_PUSH_FAMILY, backgroundTaskReportFields(result), "steer");
+          },
+        });
+        const kind = mode.timeoutS !== undefined ? `timed (timeout_s ${mode.timeoutS})` : "monitor (no timeout)";
+        return { content: [{ type: "text", text: `why: ${p.why}\nbackground task started: ${task.id} — ${kind}. Its result arrives as a pushed ${BACKGROUND_TASK_PUSH_FAMILY} message when it exits; ${BACKGROUND_ABORT_TOOL_NAME} with task_id "${task.id}" aborts it.` }] };
+      }
       const execResult = await pi.exec(invocation.shell, invocation.args, { cwd: sessionCtx.cwd, timeout: ONE_LINER_TIMEOUT_MS, signal });
       const merged = mergeExecOutput(execResult.stdout, execResult.stderr);
       // Review relay #1, Important: `execResult.killed` fires for BOTH the
@@ -804,6 +895,30 @@ export function registerExecuteGateway(
         lines.push(signal?.aborted ? "(interrupted before completion)" : `(timed out after ${ONE_LINER_TIMEOUT_MS / 1000}s)`);
       }
       return { content: [{ type: "text", text: lines.join("\n") }] };
+    },
+  }, toolPreviewTuiRef, { resultLineBudget: "logical" });
+
+  registerWsTool(pi, {
+    name: BACKGROUND_ABORT_TOOL_NAME,
+    label: BACKGROUND_ABORT_TOOL_NAME,
+    description:
+      `Abort a background task started with ${ONE_LINER_EXEC_TOOL_NAME} background:true: kills its whole process tree and returns its exit line and 4KB-capped output here; no pushed completion follows for it. Without task_id, lists the running background tasks — timed tasks and monitors alike, each marked as which — with id, why, and elapsed time. A task that already finished is no longer listed or abortable: its result was pushed to you.`,
+    parameters: {
+      type: "object",
+      properties: {
+        task_id: { type: "string", description: "Id of the running background task to abort; omit to list running tasks." },
+      },
+    } as never,
+    async execute(_toolCallId, params) {
+      const p = params as { task_id?: string };
+      if (p.task_id === undefined || p.task_id === "") {
+        return { content: [{ type: "text", text: formatBackgroundTaskList(listBackgroundTasks()) }] };
+      }
+      const aborted = abortBackgroundTask(p.task_id);
+      if (!aborted) throw new Error(`ws-pi-agent: ${BACKGROUND_ABORT_TOOL_NAME}: no running background task "${p.task_id}" (unknown, or it already finished and its result was pushed to you).`);
+      const result = await aborted;
+      const text = Object.entries(backgroundTaskReportFields(result)).map(([key, value]) => `${key}: ${value}`).join("\n");
+      return { content: [{ type: "text", text }] };
     },
   }, toolPreviewTuiRef, { resultLineBudget: "logical" });
 }

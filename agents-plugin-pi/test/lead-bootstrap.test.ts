@@ -45,7 +45,7 @@ import {
 import { WS_SKILL_TOOL_NAME, type LoadedSkill } from "../src/lead-skills.ts";
 import { FORK_TOOL_NAME } from "../src/fork.ts";
 import { ASK_TOOL_NAME, RESOLVE_TOOL_NAME } from "../src/ask.ts";
-import { APPROVE_TOOL_NAME, EXECUTE_TOOL_NAME, ONE_LINER_EXEC_TOOL_NAME, UGLY_READ_TOOL_NAME } from "../src/execute-gateway.ts";
+import { APPROVE_TOOL_NAME, BACKGROUND_ABORT_TOOL_NAME, EXECUTE_TOOL_NAME, ONE_LINER_EXEC_TOOL_NAME, UGLY_READ_TOOL_NAME } from "../src/execute-gateway.ts";
 import { GATED_EXEC_TOOL_NAME } from "../src/spawner.ts";
 
 function sourceInfo(path: string): SourceInfo {
@@ -167,7 +167,7 @@ describe("computeSessionBootstrap", () => {
     assert.ok(!result.activeTools.includes("bash"), "native bash must be removed");
     assert.ok(!result.activeTools.includes("read"), "native read must be removed");
     assert.ok(!result.activeTools.includes(GATED_EXEC_TOOL_NAME), "the gated-exec tool must stay excluded from the lead");
-    for (const name of [EXECUTE_TOOL_NAME, APPROVE_TOOL_NAME, UGLY_READ_TOOL_NAME, ONE_LINER_EXEC_TOOL_NAME, FORK_TOOL_NAME, WS_SKILL_TOOL_NAME]) {
+    for (const name of [EXECUTE_TOOL_NAME, APPROVE_TOOL_NAME, UGLY_READ_TOOL_NAME, ONE_LINER_EXEC_TOOL_NAME, BACKGROUND_ABORT_TOOL_NAME, FORK_TOOL_NAME, WS_SKILL_TOOL_NAME]) {
       assert.ok(result.activeTools.includes(name), `expected ${name} on the host lead's reshaped surface`);
     }
     for (const name of [ASK_TOOL_NAME, RESOLVE_TOOL_NAME]) {

@@ -392,6 +392,7 @@ export const SUMMARIZED_MESSAGE_TYPES: ReadonlySet<string> = new Set([
   "ws-agent-approval",
   "ws-agent-advisory",
   "ws-agent-orphaned",
+  "ws-background-task",
   "ws-lead-compact",
   "ws-lead-context-milestone",
   "ws-thread-summary",

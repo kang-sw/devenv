@@ -1,5 +1,6 @@
 /**
- * TUI rendering for the six pushed child-report families and the versioned
+ * TUI rendering for the pushed families (child reports and finished
+ * background tasks) and the versioned
  * held-queue batch envelope (`spawner.ts`'s `PUSH_FAMILIES`/
  * `PUSH_BATCH_CUSTOM_TYPE`).
  *
@@ -63,8 +64,12 @@ export interface PushRenderLines {
   status: string | undefined;
 }
 
-/** The status line's own shape (`computeRunningStatusLine`), used to recognize it positionally. */
-const STATUS_LINE_PATTERN = /^\d+ delegated agents? still running$/;
+/**
+ * The status line's own shape (`computeRunningStatusLine`), used to recognize
+ * it positionally: the delegated-agents, background-tasks, and monitors
+ * segments in that order, each optional, at least one present.
+ */
+export const STATUS_LINE_PATTERN = /^(?:\d+ delegated agents?(?:, \d+ background tasks?)?(?:, \d+ monitors?)?|\d+ background tasks?(?:, \d+ monitors?)?|\d+ monitors?) still running$/;
 
 /** Pulls the plain text out of a custom message's `content` (string or text parts). */
 function extractText(content: unknown): string {
@@ -139,6 +144,7 @@ const PUSH_FAMILY_SUFFIXES: Record<string, string> = {
   "ws-agent-approval": "approval",
   "ws-agent-advisory": "advisory",
   "ws-agent-orphaned": "orphaned",
+  "ws-background-task": "background task",
 };
 
 const UUID_PATTERN = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
@@ -161,10 +167,12 @@ function humanAgentIdentity(label: string | undefined, details: unknown): string
 
 /** Human-facing push head; content and details retain the full model-facing provenance. */
 function humanPushHead(head: string, details: unknown, registeredFamily: string | undefined): string {
-  const match = /^\[(ws-agent-[^\]]+)\](?: agent (.*))?$/.exec(head);
+  const match = /^\[((?:ws-agent|ws-background)-[^\]]+)\](?: agent (.*))?$/.exec(head);
   const family = registeredFamily && PUSH_FAMILY_SUFFIXES[registeredFamily] ? registeredFamily : match?.[1];
   const suffix = family ? PUSH_FAMILY_SUFFIXES[family] : undefined;
   if (!suffix) return head;
+  const taskId = (details as { task_id?: unknown } | undefined)?.task_id;
+  if (family === "ws-background-task" && typeof taskId === "string" && taskId) return `${taskId} · ${suffix}`;
   return `${humanAgentIdentity(match?.[2], details) ?? "Agents"} · ${suffix}`;
 }
 
