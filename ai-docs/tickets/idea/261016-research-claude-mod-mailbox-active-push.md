@@ -106,9 +106,28 @@ owner, per `rebindMailboxOwnerAtFerrule`):
   absent on the main loop and set for a subagent or teammate.
 - `$.tool.call` reaches MCP server tools through the same path as a model call,
   including "the permission check and its dialog"; live, no dialog appeared
-  under `defaultMode: auto`, the only mode probed. `$.mcp.call(server, tool,
-  args)` is declared as the no-permission-prompt alternative; its exact
-  server/tool spelling for ws is unverified.
+  under `defaultMode: auto`, the only mode probed.
+- `$.mcp.call` is permission-gated at runtime, contrary to its declaration.
+  The 2.1.300 declaration says "No permission prompt: the plugin's call, seen
+  by the hooks above it, is the grant" (`claude-code.d.ts`:2752), but a
+  headless `claude -p --permission-mode default` run with no allow rule
+  refused `$.mcp.call("plugin:ws:ws", "mailbox_recv", ...)` exactly like
+  `$.tool.call`, whether the mod sat in the ws plugin or in a separate one;
+  the debug log shows `$.mcp.call` routed through the ordinary `tool.call`
+  path with its permission check (probe 2026-10-17, Claude Code 2.1.300,
+  probe mod and run logs in
+  `ai-docs/ref/claude-mcp-call-probe-mod/runs/`).
+- Under the same mode `$.tool.check` on `mcp__plugin_ws_ws__mailbox_recv`
+  answers `{decision: "ask"}` (same probe).
+- A mod `tool.check` hook returning `{decision: "allow"}` when
+  `next.origin.plugin` is its own plugin let the mod's drain succeed with no
+  prompt while the model's own call of the same tool stayed denied; a foreign
+  plugin's hook could grant ws's tool the same way (same probe).
+- Spellings: the ws server is `plugin:ws:ws` (tool `mailbox_recv`, permission
+  name `mcp__plugin_ws_ws__mailbox_recv`); wsflow's is `plugin:wsflow:wsflow`
+  (`mcp__plugin_wsflow_wsflow__mailbox_recv`). Inside the ws plugin,
+  `$.mcp.connect("ws")` returns `{isConnected: true, server: "plugin:ws:ws"}`,
+  so shipped code need not hardcode the server name (same probe).
 - The permission exposure is not new with the mod: today's fallback (the
   model calls `mailbox_recv` after the background wait returns) passes the
   same permission check, so an away user under a prompting mode already
@@ -151,14 +170,18 @@ owner, per `rebindMailboxOwnerAtFerrule`):
   existing one-shot `mailbox wait` as a peek-only signal.
 - The agent actively binds by calling a mod-registered tool with its own
   session key; the binding is not inferred from other ws tool calls.
-- The mod drains through the ws MCP recv tool itself and submits the whole
-  drain as one prompt, mirroring pi.
-- The drain calls recv through `$.mcp.call` first, so a mod-initiated drain
-  never raises a permission prompt in an idle session: it is the ws mod
-  reading its own session-bound inbox on the ws server. Only if `$.mcp.call`
-  proves unusable (it prompts anyway, or ws cannot be addressed through it)
-  does the design fall back to deciding in advance whether a `$.tool.call`
-  would prompt.
+- The mod never raises a permission prompt and never overrides the user's
+  permission policy. Before each drain it asks `$.tool.check` for the recv
+  tool's verdict:
+  - `allow` (auto mode, or an allow rule): the mod drains through recv itself
+    (`$.mcp.call`, server name from `$.mcp.connect`) and submits the whole
+    drain as one prompt, mirroring pi.
+  - otherwise: the mod submits a notice prompt telling the model to call recv
+    with its session key, so the model drains through the ordinary
+    permission flow. The mod then suspends its wait loop and re-arms only
+    after its `tool.call` hook observes the model's `mailbox_recv` call for
+    the bound key, so one arrival yields one notice. (A peek-only wait
+    re-armed over still-queued mail would exit at once and loop.)
 - Binding lifecycle: one binding per Claude session, last call wins. The same
   key again is a no-op (covers revive with the preserved key); a different key
   replaces the binding (covers a new `ferrule`) without detecting either event;
@@ -196,9 +219,9 @@ owner, per `rebindMailboxOwnerAtFerrule`):
 
 ### Open Questions
 
-- Does `$.mcp.call` reach the ws server's `mailbox_recv` without a
-  permission prompt under a prompting mode (for example `default`), and what is
-  its server/tool spelling for `ws` and for `wsflow`? This is the next probe.
+- What does `$.tool.check` answer under auto mode, where the classifier
+  decides at call time? An `ask` there only routes auto users to the notice
+  path (one extra model tool call), not a failure.
 - Does a different-key rebind actually kill the previous blocked `wait` child
   (`stream.return()` on a silent child)?
 - Does `/clear` stop the loop and leave no `wait` child in a live session?
@@ -230,7 +253,18 @@ owner, per `rebindMailboxOwnerAtFerrule`):
   the old one died; last-call-wins handles both cases without detection.
 - **Gating the push on detecting auto mode.** A prompt depends on the mode
   and the allow/deny rules together, and the mode changes mid-session, so a
-  mode read at bind time goes stale; `$.mcp.call` removes the prompt instead.
+  mode read at bind time goes stale; `$.tool.check` asks the engine for the
+  actual verdict instead.
+- **A self-granting `tool.check` hook** (allow the mod's own recv by origin).
+  Verified to work, but it overrides the user's permission policy for ws's
+  tool and leans on engine looseness (any plugin can grant another's tool)
+  that a later release may close. A user who does not run auto mode already
+  confirms tool calls routinely, so the notice path costs little.
+- **Calling recv from the mod with no pre-check.** Least code, but a
+  prompting user would face a mod-raised dialog in an idle session whose
+  interactive behavior is unverified (headless only shows ask -> deny).
+- **Re-arming at the next `turn.complete` after a notice.** Simpler, but a
+  user who declines the recv dialog would get a fresh notice every turn.
 - **A double-binding guard for `ws` plus `wsflow`** (for example the mod
   skipping its bind when another process's listening marker holds the key).
   Both installed is a user error; the guard would add a race and couple the
