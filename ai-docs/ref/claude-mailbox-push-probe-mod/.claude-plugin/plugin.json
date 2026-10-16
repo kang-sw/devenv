@@ -1,0 +1,5 @@
+{
+  "name": "ws-mailbox-push-probe",
+  "version": "0.1.0",
+  "description": "Probe: pi-style active push of the ws cross-session mailbox into an idle Claude Code session (mailbox wait signal -> mailbox.recv drain -> one prompt)."
+}

@@ -1,7 +1,7 @@
 ---
 title: Pi-extension-like lead compaction on Claude Code via a plugin mod
 related:
-  260913-feat-cross-session-mailbox-wake: Claude mailbox mod is the first mod-path validation this research waits on
+  261016-research-claude-mod-mailbox-active-push: Claude mailbox mod is the first mod-path validation this research waits on
   261002-feat-pi-lead-ws-owned-compaction: pi ws-owned compaction being considered for porting
   261006-feat-pi-compaction-advisory-standing-intent-milestones: pi compaction timing rules being considered for porting
   261004-feat-pi-explicit-post-compaction-continuation: pi post-compaction continuation being considered for porting
@@ -76,7 +76,7 @@ Read from the engine's own declaration file for Claude Code 2.1.293
 ### Confirmed Decisions
 
 - Research only for now; no actionable child until the Claude mailbox mod
-  (the push-wake follow-up to `260913-feat-cross-session-mailbox-wake`) has
+  (`261016-research-claude-mod-mailbox-active-push`) has
   validated the mod path in `ws`/`wsflow`. Compaction is tracked separately
   from the mailbox mod because a compaction hook mutates the conversation, so
   a mod-API break has a larger blast radius than a lost mailbox push.
