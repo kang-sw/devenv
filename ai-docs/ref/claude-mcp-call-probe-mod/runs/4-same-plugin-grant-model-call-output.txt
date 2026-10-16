@@ -1,0 +1,7 @@
+`mcp__plugin_ws_ws__mailbox_recv`(`session_key: baggy-disparity-external`, `format: json`)를 한 번 호출했고, 호출은 **거부되었습니다**. 반환된 메시지 원문은 다음과 같습니다.
+
+```
+Claude requested permissions to use mcp__plugin_ws_ws__mailbox_recv, but you haven't granted it yet.
+```
+
+권한이 승인되지 않아 도구가 실행되지 않았으므로, mailbox 내용은 받지 못했습니다. 지시하신 대로 다른 도구는 호출하지 않았습니다. 그래서 이 도구의 스키마도 미리 불러오지 않고 바로 호출했습니다.

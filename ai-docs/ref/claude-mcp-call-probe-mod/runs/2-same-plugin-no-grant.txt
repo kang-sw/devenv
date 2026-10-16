@@ -1,0 +1,12 @@
+2026-10-16T15:25:26.204Z version={"version":"2.1.300","base":"2.1.300","builtAt":"2026-10-14T12:54:55Z"}
+2026-10-16T15:25:26.206Z tool.list mailbox tools=[]
+2026-10-16T15:25:26.815Z mcp.connect(ws) -> {"isConnected":true,"server":"plugin:ws:ws"}
+2026-10-16T15:25:26.816Z mcp.connect(wsflow) -> {"isConnected":false,"reason":"unlisted","message":"This plugin's manifest lists no MCP server named \"wsflow\"."}
+2026-10-16T15:25:26.890Z mcp.call(plugin:ws:ws, mailbox_recv) threw HooksError: ws: $.mcp.call(plugin:ws:ws, mailbox_recv) refused: Claude requested permissions to use mcp__plugin_ws_ws__mailbox_recv, but you haven't granted it yet.
+2026-10-16T15:25:26.960Z mcp.call(plugin_ws_ws, mailbox_recv) threw HooksError: ws: $.mcp.call(plugin_ws_ws, mailbox_recv) refused: Claude requested permissions to use mcp__plugin_ws_ws__mailbox_recv, but you haven't granted it yet.
+2026-10-16T15:25:26.961Z mcp.call(ws, mailbox_recv) threw HooksError: ws: $.mcp.call: no connected MCP tool "mailbox_recv" on a server named "ws"
+2026-10-16T15:25:26.961Z mcp.call(plugin:wsflow:wsflow, mailbox_recv) threw HooksError: ws: $.mcp.call: no connected MCP tool "mailbox_recv" on a server named "plugin:wsflow:wsflow"
+2026-10-16T15:25:26.962Z mcp.call(plugin_wsflow_wsflow, mailbox_recv) threw HooksError: ws: $.mcp.call: no connected MCP tool "mailbox_recv" on a server named "plugin_wsflow_wsflow"
+2026-10-16T15:25:26.963Z tool.check(mcp__plugin_ws_ws__mailbox_recv) -> {"decision":"ask","reason":"Claude requested permissions to use mcp__plugin_ws_ws__mailbox_recv, but you haven't granted it yet."}
+2026-10-16T15:25:27.036Z tool.call(mcp__plugin_ws_ws__mailbox_recv) -> {"deny":"Claude requested permissions to use mcp__plugin_ws_ws__mailbox_recv, but you haven't granted it yet."}
+2026-10-16T15:25:27.037Z done

@@ -1,0 +1,16 @@
+2026-10-16T15:27:29.894Z version={"version":"2.1.300","base":"2.1.300","builtAt":"2026-10-14T12:54:55Z"}
+2026-10-16T15:27:29.896Z tool.list mailbox tools=["mcp__plugin_ws_ws__mailbox_lookup_peers","mcp__plugin_ws_ws__mailbox_recv","mcp__plugin_ws_ws__mailbox_send"]
+2026-10-16T15:27:29.897Z mcp.connect(ws) -> {"isConnected":true,"server":"plugin:ws:ws"}
+2026-10-16T15:27:29.898Z mcp.connect(wsflow) -> {"isConnected":false,"reason":"unlisted","message":"This plugin's manifest lists no MCP server named \"wsflow\"."}
+2026-10-16T15:27:29.934Z tool.check hook: origin={"plugin":"ws","tier":"user"} tool_use_id=toolu_plugin_b9f00d1eded84c99b3a090b3161a7908 own=true
+2026-10-16T15:27:29.973Z mcp.call(plugin:ws:ws, mailbox_recv) OK -> {"content":[{"type":"text","text":"[{\"reply_to\":\"id:complypanamapantsrecount\",\"content\":\"probe mail #3 for same-plugin grant run\",\"sent_at\":\"2026-10-16T15:27:23Z\"}]\n"}],"isError":false}
+2026-10-16T15:27:30.007Z tool.check hook: origin={"plugin":"ws","tier":"user"} tool_use_id=toolu_plugin_6a56238ef11d465098aa5c3264d35a37 own=true
+2026-10-16T15:27:30.043Z mcp.call(plugin_ws_ws, mailbox_recv) OK -> {"content":[{"type":"text","text":"null\n"}],"isError":false}
+2026-10-16T15:27:30.044Z mcp.call(ws, mailbox_recv) threw HooksError: ws: $.mcp.call: no connected MCP tool "mailbox_recv" on a server named "ws"
+2026-10-16T15:27:30.045Z mcp.call(plugin:wsflow:wsflow, mailbox_recv) threw HooksError: ws: $.mcp.call: no connected MCP tool "mailbox_recv" on a server named "plugin:wsflow:wsflow"
+2026-10-16T15:27:30.045Z mcp.call(plugin_wsflow_wsflow, mailbox_recv) threw HooksError: ws: $.mcp.call: no connected MCP tool "mailbox_recv" on a server named "plugin_wsflow_wsflow"
+2026-10-16T15:27:30.046Z tool.check hook: origin={"plugin":"ws","tier":"user"} tool_use_id=- own=true
+2026-10-16T15:27:30.046Z tool.check(mcp__plugin_ws_ws__mailbox_recv) -> {"decision":"allow","reason":"ws mod drains its own bound inbox"}
+2026-10-16T15:27:30.084Z tool.check hook: origin={"plugin":"ws","tier":"user"} tool_use_id=toolu_plugin_c333ba4e6aea4f36a80561b8771ec211 own=true
+2026-10-16T15:27:30.121Z tool.call(mcp__plugin_ws_ws__mailbox_recv) -> {"result":[{"type":"text","text":"null\n"}],"text":"null\n"}
+2026-10-16T15:27:30.121Z done

@@ -1,0 +1,16 @@
+2026-10-16T15:27:11.529Z version={"version":"2.1.300","base":"2.1.300","builtAt":"2026-10-14T12:54:55Z"}
+2026-10-16T15:27:11.531Z tool.list mailbox tools=["mcp__plugin_ws_ws__mailbox_lookup_peers","mcp__plugin_ws_ws__mailbox_recv","mcp__plugin_ws_ws__mailbox_send"]
+2026-10-16T15:27:11.532Z mcp.connect(ws) -> {"isConnected":false,"reason":"unlisted","message":"This plugin's manifest lists no MCP server named \"ws\"."}
+2026-10-16T15:27:11.533Z mcp.connect(wsflow) -> {"isConnected":false,"reason":"unlisted","message":"This plugin's manifest lists no MCP server named \"wsflow\"."}
+2026-10-16T15:27:11.570Z tool.check hook: origin={"plugin":"mcp-call-probe","tier":"user"} tool_use_id=toolu_plugin_3c9c4d55eced4fb6a171c6b9a5f0ec98 own=true
+2026-10-16T15:27:11.609Z mcp.call(plugin:ws:ws, mailbox_recv) OK -> {"content":[{"type":"text","text":"[{\"reply_to\":\"id:complypanamapantsrecount\",\"content\":\"probe mail #1 for mcp.call\",\"sent_at\":\"2026-10-16T15:24:28Z\"},{\"reply_to\":\"id:complypanamapantsrecount\",\"content\":\"probe mail #2 for same-plugin mcp.call\",\"sent_at\":\"2026-10-16T15:25:18Z\"}]\n"}],"isError":false}
+2026-10-16T15:27:11.643Z tool.check hook: origin={"plugin":"mcp-call-probe","tier":"user"} tool_use_id=toolu_plugin_85281190c75548be900a6a0cc21a7d30 own=true
+2026-10-16T15:27:11.679Z mcp.call(plugin_ws_ws, mailbox_recv) OK -> {"content":[{"type":"text","text":"null\n"}],"isError":false}
+2026-10-16T15:27:11.680Z mcp.call(ws, mailbox_recv) threw HooksError: mcp-call-probe: $.mcp.call: no connected MCP tool "mailbox_recv" on a server named "ws"
+2026-10-16T15:27:11.680Z mcp.call(plugin:wsflow:wsflow, mailbox_recv) threw HooksError: mcp-call-probe: $.mcp.call: no connected MCP tool "mailbox_recv" on a server named "plugin:wsflow:wsflow"
+2026-10-16T15:27:11.681Z mcp.call(plugin_wsflow_wsflow, mailbox_recv) threw HooksError: mcp-call-probe: $.mcp.call: no connected MCP tool "mailbox_recv" on a server named "plugin_wsflow_wsflow"
+2026-10-16T15:27:11.681Z tool.check hook: origin={"plugin":"mcp-call-probe","tier":"user"} tool_use_id=- own=true
+2026-10-16T15:27:11.682Z tool.check(mcp__plugin_ws_ws__mailbox_recv) -> {"decision":"allow","reason":"ws mod drains its own bound inbox"}
+2026-10-16T15:27:11.719Z tool.check hook: origin={"plugin":"mcp-call-probe","tier":"user"} tool_use_id=toolu_plugin_938f28df4c81441ebc2e4dce8b147fc2 own=true
+2026-10-16T15:27:11.754Z tool.call(mcp__plugin_ws_ws__mailbox_recv) -> {"result":[{"type":"text","text":"null\n"}],"text":"null\n"}
+2026-10-16T15:27:11.754Z done

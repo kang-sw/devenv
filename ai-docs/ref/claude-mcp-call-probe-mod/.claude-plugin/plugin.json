@@ -1,0 +1,1 @@
+{ "name": "mcp-call-probe", "version": "0.1.0", "description": "Probe: does $.mcp.call reach ws mailbox_recv without a permission prompt; $.tool.call control." }
