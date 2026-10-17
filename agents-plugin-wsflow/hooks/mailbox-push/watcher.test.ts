@@ -31,6 +31,7 @@ function harness(mode: DrainMode) {
   const submitted: string[] = []
   const submitFailures: Error[] = []
   const sleeps: { ms: number; d: Deferred<void> }[] = []
+  const notices: string[] = []
   const edges: WatcherEdges = {
     mode,
     label: 'pkg mailbox',
@@ -56,10 +57,10 @@ function harness(mode: DrainMode) {
       sleeps.push({ ms, d })
       return d.promise
     },
-    status: () => {},
+    notice: (text) => notices.push(text),
     log: () => {},
   }
-  return { edges, waits, drains, drainQueue, submitted, submitFailures, sleeps }
+  return { edges, waits, drains, drainQueue, submitted, submitFailures, sleeps, notices }
 }
 
 describe('direct mode', () => {
@@ -212,6 +213,23 @@ describe('lifecycle', () => {
     expect(h.waits[1]!.signal.aborted).toBe(true)
     expect(h.waits.length).toBe(2)
     expect(w.current()).toBe(undefined)
+  })
+
+  test('notices fire on state changes only: armed once per bind, one per failure streak', async () => {
+    const h = harness('direct')
+    const w = createWatcher(h.edges)
+    w.bind('k1')
+    await tick()
+    h.waits[0]!.d.resolve('timeout')
+    await tick()
+    h.waits[1]!.d.resolve('error')
+    await tick()
+    h.sleeps[0]!.d.resolve()
+    await tick()
+    h.waits[2]!.d.resolve('error')
+    await tick()
+    expect(h.sleeps.length).toBe(2)
+    expect(h.notices).toEqual(['pkg mailbox: armed k1', 'pkg mailbox: wait error, retrying with backoff'])
   })
 })
 

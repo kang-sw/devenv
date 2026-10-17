@@ -40,7 +40,7 @@ export type DrainResult =
 
 export interface WatcherEdges {
   mode: DrainMode
-  /** Prefix for status and prompt lines (`<plugin> mailbox`). */
+  /** Prefix for notice and prompt lines (`<plugin> mailbox`). */
   label: string
   /** Run one `mailbox wait` for `key`; must resolve `stopped` soon after `signal` aborts. */
   wait: (key: string, signal: AbortSignal) => Promise<WaitOutcome>
@@ -52,7 +52,8 @@ export interface WatcherEdges {
   recvTool: () => string
   /** Resolve after `ms`, or early (resolve, not reject) when `signal` aborts. */
   sleep: (ms: number, signal: AbortSignal) => Promise<void>
-  status: (text: string | undefined) => void
+  /** Show the user (never the model) one line, once: only state changes reach it, never every re-arm. */
+  notice: (text: string) => void
   log: (text: string) => void
 }
 
@@ -147,8 +148,9 @@ export function createWatcher(edges: WatcherEdges): Watcher {
     let backoff = 0
     let emptyStreak = 0
     const backOff = async (what: string, detail: string) => {
+      // Once per failure streak: a persistent fault retries every 60s and would flood the transcript.
+      if (backoff === 0) edges.notice(`${edges.label}: ${what}, retrying with backoff`)
       backoff = nextBackoff(backoff)
-      edges.status(`${edges.label}: ${what}, retry in ${backoff / 1000}s`)
       edges.log(`${edges.label}: ${what} for ${myKey}: ${detail}; backing off ${backoff}ms`)
       await edges.sleep(backoff, signal)
     }
@@ -163,13 +165,12 @@ export function createWatcher(edges: WatcherEdges): Watcher {
         await backOff('notice submit failed', String(err))
         return false
       }
-      edges.status(`${edges.label}: mail waiting for ${myKey}`)
       await resumed
       return true
     }
 
+    edges.notice(`${edges.label}: armed ${myKey}`)
     while (!signal.aborted) {
-      edges.status(`${edges.label}: armed ${myKey}`)
       let outcome: WaitOutcome
       try {
         outcome = await edges.wait(myKey, signal)
@@ -244,7 +245,6 @@ export function createWatcher(edges: WatcherEdges): Watcher {
       ctrl.abort()
       ctrl = undefined
       key = undefined
-      edges.status(undefined)
       edges.log(`${edges.label}: stopped (${reason})`)
     },
     current: () => key,

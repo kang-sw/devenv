@@ -181,7 +181,7 @@ export const register: Register = (on) => {
           const timer = $.clock.after(ms, () => resolve())
           signal.addEventListener('abort', () => (timer.cancel(), resolve()), { once: true })
         }),
-      status: (text) => $.ui.status(text),
+      notice: (text) => $.ui.log(text),
       log: (text) => $.ui.log(text, { to: 'debug' }),
     })
     watcher = created
@@ -199,7 +199,6 @@ export const register: Register = (on) => {
       isDeferred: false,
     })
     toolName = registered.tool
-    $.ui.status(`${label}: unbound`)
     // Restore a binding a hot reload dropped, without delaying the first prompt.
     const restoreFrom = STORE_PREFIX + (await $.session.id())
     void (async () => {

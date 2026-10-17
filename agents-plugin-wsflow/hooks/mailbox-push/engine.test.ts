@@ -34,7 +34,6 @@ function world(on: On, opts: { store?: Record<string, unknown>; processOk?: bool
   on('store.get', ($, e) => ({ value: w.store.get(e.key) }))
   on('store.set', ($, e) => (w.store.set(e.key, e.value), { value: undefined }))
   on('store.delete', ($, e) => (w.store.delete(e.key), { value: undefined }))
-  on('ui.status', () => ({ value: undefined }))
   on('ui.log', () => ({ value: undefined }))
   on('session.id', () => ({ value: 'sess-1' }))
   on('session.start', ($, e) => ({ cwd: e.cwd }))
