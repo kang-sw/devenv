@@ -573,7 +573,14 @@
       "registered_at": "2026-10-16T08:30:06Z"
     },
     "261017-feat-claude-mailbox-active-push-mod": {
-      "registered_at": "2026-10-17T07:48:11Z"
+      "registered_at": "2026-10-17T07:48:11Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-10-17T09:03:39Z"
+      }
     }
   }
 }
