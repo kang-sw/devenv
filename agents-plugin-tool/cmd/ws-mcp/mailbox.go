@@ -365,9 +365,9 @@ func mailboxCodexStopHook(args []string) {
 }
 
 // defaultStopHookReason is the instruction handed back to the model through
-// a Stop hook's decision:block response. It must stay host-neutral (no this-repository
-// ticket/path references, per shipped-surface-boundary.md): downstream
-// projects install this same plugin text verbatim.
+// a Stop hook's decision:block response. It must stay host-neutral (no
+// this-repository ticket/path references, per shipped-surface-boundary.md):
+// downstream projects install this same plugin text verbatim.
 const defaultStopHookReason = "Unread mail is waiting in your mailbox. Call the mailbox recv tool now, then act on what it returns."
 
 // codexStopHookPayload is the subset of Codex's Stop hook stdin payload

@@ -154,7 +154,7 @@ proceed fact normalizes to `n/a`.
 |---|---|
 | `agents-plugin/`, `agents-plugin-wsflow/`, `agents-plugin-tool/` | `ai-docs/manuals/shipped-surface-boundary.md` |
 | `agents-plugin/rsrc/`, `agents-plugin/skills/`, `agents-plugin-wsflow/rsrc/`, `agents-plugin-wsflow/skills/`, `agents-plugin-tool/internal/wsdoc/conventions/` | `ai-docs/manuals/skill-authoring.md` |
-| `agents-plugin/rsrc/`, `agents-plugin/skills/`, `agents-plugin-wsflow/` | `ai-docs/manuals/wsflow-mirroring.md` |
+| `agents-plugin/rsrc/`, `agents-plugin/skills/`, `agents-plugin/hooks/`, `agents-plugin-wsflow/` | `ai-docs/manuals/wsflow-mirroring.md` |
 | `agents-plugin-tool/internal/mcp/` | `ai-docs/manuals/ws-mcp.md` |
 
 Each row's manual is read before editing a file its `paths` cover. This is a
