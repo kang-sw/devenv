@@ -29,12 +29,22 @@ function world(on: On, opts: { store?: Record<string, unknown>; processOk?: bool
     killed: [] as number[],
     recvCalls: [] as { key: unknown; origin: string }[],
     recvAnswers: [] as Recv[],
+    /** Delays (ms on the mock clock) for the next recv answers, in call order. */
+    recvDelays: [] as number[],
+    recvThrows: false,
+    lookupCalls: [] as { key: unknown; origin: string }[],
+    /** lookup_peers answers by session key; a key not listed has no named inbox. */
+    lookupAnswers: {} as Record<string, Recv>,
+    lookupDelays: [] as number[],
+    connectDelays: [] as number[],
+    dropSubmits: 0,
     prompts: [] as string[],
+    logs: [] as { text: string; to: string }[],
   }
   on('store.get', ($, e) => ({ value: w.store.get(e.key) }))
   on('store.set', ($, e) => (w.store.set(e.key, e.value), { value: undefined }))
   on('store.delete', ($, e) => (w.store.delete(e.key), { value: undefined }))
-  on('ui.log', () => ({ value: undefined }))
+  on('ui.log', ($, e) => (w.logs.push({ text: e.text, to: e.to }), { value: undefined }))
   on('session.id', () => ({ value: 'sess-1' }))
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.end', ($, e) => ({ sessionId: e.sessionId }))
@@ -48,7 +58,11 @@ function world(on: On, opts: { store?: Record<string, unknown>; processOk?: bool
     w.registered.push(e.name)
     return { value: { tool: `mcp__${w.plugin}__${e.name}` } }
   })
-  on('mcp.connect', ($, e) => ({ value: { isConnected: true, server: `plugin:${e.server}:${e.server}` } }))
+  on('mcp.connect', async ($, e) => {
+    const delay = w.connectDelays.shift()
+    if (delay) await clock.sleep(delay)
+    return { value: { isConnected: true, server: `plugin:${e.server}:${e.server}` } }
+  })
   on('process.spawn', async function* ($, e, next) {
     const index = w.spawns.length
     w.spawns.push([...e.argv])
@@ -57,16 +71,36 @@ function world(on: On, opts: { store?: Record<string, unknown>; processOk?: bool
     yield* []
     return { value: { code, signal: null } }
   })
-  on('tool.call', { tool: /__mailbox_recv$/ }, ($, e, next) => {
+  on('tool.call', { tool: /__mailbox_recv$/ }, async ($, e, next) => {
     w.recvCalls.push({ key: (e as { session_key?: unknown }).session_key, origin: next.origin.plugin })
-    return (w.recvAnswers.shift() ?? empty()) as never
+    if (w.recvThrows) throw new Error('recv transport failed')
+    const answer = w.recvAnswers.shift() ?? empty()
+    const delay = w.recvDelays.shift()
+    if (delay) await clock.sleep(delay)
+    return answer as never
+  })
+  on('tool.call', { tool: /__mailbox_lookup_peers$/ }, async ($, e, next) => {
+    const key = (e as { session_key?: unknown }).session_key
+    w.lookupCalls.push({ key, origin: next.origin.plugin })
+    const delay = w.lookupDelays.shift()
+    if (delay) await clock.sleep(delay)
+    return (w.lookupAnswers[String(key)] ?? { result: undefined, text: '{"self":{"reply_id":"id:r"},"peers":[]}' }) as never
   })
   on('prompt.submit', ($, e) => {
+    if (w.dropSubmits > 0) {
+      w.dropSubmits -= 1
+      return { drop: 'a Stop stands' }
+    }
     w.prompts.push(e.text)
     return { text: e.text }
   })
   return w
 }
+
+const peers = (address: string): Recv => ({ result: undefined, text: JSON.stringify({ self: { address, auto: true }, peers: [] }) })
+const waitTail = (key: string, slug?: string) => ['mailbox', 'wait', '--session-key', key, ...(slug ? ['--slug', slug] : []), '--timeout', '10m', '--format', 'json']
+/** The transcript (user-visible) lines the mod logged. */
+const transcript = (w: { logs: { text: string; to: string }[] }) => w.logs.filter((l) => l.to === 'transcript').map((l) => l.text)
 
 const recvName = (plugin: string) => `mcp__plugin_${plugin}_${plugin}__mailbox_recv`
 const watchName = (plugin: string) => `mcp__${plugin}__mailbox_watch`
@@ -246,6 +280,7 @@ test('wsflow submits one notice per arrival and never calls recv itself', async 
   w.exits[0]!(0)
   await w.clock.settle()
   expect(w.recvCalls.length).toBe(0)
+  expect(w.lookupCalls.length).toBe(0)
   expect(w.prompts.length).toBe(1)
   expect(w.prompts[0]).toContain(`Call ${recvName(w.plugin)} with session_key k1`)
   expect(w.spawns.length).toBe(1)
@@ -285,4 +320,137 @@ test('the package identity comes from the engine, so each mirrored copy runs its
   // Mode-specific tests above return early for the other package; this pins
   // that each package actually exercised one of them.
   expect(['ws', 'wsflow']).toContain(w.plugin)
+})
+
+test('state notices reach the user transcript, not only the debug log', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  await bind($, w, 'k1')
+  expect(transcript(w)).toEqual([`${w.plugin} mailbox: armed k1`])
+  w.exits[0]!(1)
+  await w.clock.settle()
+  expect(transcript(w)).toEqual([`${w.plugin} mailbox: armed k1`, `${w.plugin} mailbox: wait error, retrying with backoff`])
+})
+
+test('ws wakes on the named inbox lookup_peers reports, re-resolved on every rebind', async ($, on) => {
+  const w = world(on, { env: { WS_MAILBOX: 'env@machine' } })
+  w.lookupAnswers = { k1: peers('lead-ab12@worktree'), k2: peers('other-cd34@worktree') }
+  await start($, w)
+  if (w.plugin !== 'ws') return
+  await bind($, w, 'k1')
+  await bind($, w, 'k2')
+  expect(w.lookupCalls).toEqual([
+    { key: 'k1', origin: 'ws' },
+    { key: 'k2', origin: 'ws' },
+  ])
+  expect(w.spawns.map((a) => a.slice(2))).toEqual([waitTail('k1', 'lead-ab12@worktree'), waitTail('k2', 'other-cd34@worktree')])
+})
+
+test('ws falls back to WS_MAILBOX when lookup_peers is refused or names no inbox', async ($, on) => {
+  const w = world(on, { env: { WS_MAILBOX: 'env@machine' } })
+  w.lookupAnswers = { k1: { deny: 'the user declined' } }
+  await start($, w)
+  if (w.plugin !== 'ws') return
+  await bind($, w, 'k1')
+  await bind($, w, 'k2')
+  expect(w.lookupCalls.map((c) => c.key)).toEqual(['k1', 'k2'])
+  expect(w.spawns.map((a) => a.slice(2))).toEqual([waitTail('k1', 'env@machine'), waitTail('k2', 'env@machine')])
+})
+
+test('overlapping binds resolve latest-wins while a slug lookup is in flight', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  if (w.plugin !== 'ws') return
+  w.lookupDelays.push(100)
+  const first = $.tool.call({ tool: watchName(w.plugin), session_key: 'k1' } as never)
+  await w.clock.settle()
+  await bind($, w, 'k2')
+  await w.clock.advance(100)
+  expect(String((await first).result)).toContain('not changed')
+  expect(w.spawns.map((a) => a[5])).toEqual(['k2'])
+  expect(w.store.get('mailbox-watch:sess-1')).toEqual({ sessionKey: 'k2' })
+})
+
+test('a reload restore yields to a bind made while it connects', async ($, on) => {
+  const w = world(on, { store: { 'mailbox-watch:sess-1': { sessionKey: 'k9' } } })
+  w.connectDelays.push(100)
+  await start($, w)
+  expect(w.spawns.length).toBe(0)
+  await bind($, w, 'k1')
+  await w.clock.advance(100)
+  expect(w.spawns.map((a) => a[5])).toEqual(['k1'])
+})
+
+test('a reload restore yields to a bind made while it resolves its slug', async ($, on) => {
+  const w = world(on, { store: { 'mailbox-watch:sess-1': { sessionKey: 'k9' } } })
+  w.lookupDelays.push(100)
+  await start($, w)
+  if (w.plugin !== 'ws') return
+  expect(w.lookupCalls.map((c) => c.key)).toEqual(['k9'])
+  await bind($, w, 'k1')
+  await w.clock.advance(100)
+  expect(w.spawns.map((a) => a[5])).toEqual(['k1'])
+})
+
+test('ws records a drained batch in the transcript when its prompt is dropped', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  if (w.plugin !== 'ws') return
+  await bind($, w, 'k1')
+  w.dropSubmits = 1
+  w.recvAnswers.push(batch())
+  w.exits[0]!(0)
+  await w.clock.settle()
+  expect(w.prompts).toEqual([])
+  const record = transcript(w).find((t) => t.includes('drained mail was not submitted'))
+  expect(record).toContain('(prompt submit failed: Error: prompt dropped: a Stop stands)')
+  expect(record).toContain('2 message(s) arrived for session_key k1')
+  expect(record).toContain('mail from id:peer (t1):\nhello from peer')
+  expect(w.logs.some((l) => l.to === 'debug' && l.text === record)).toBe(true)
+  expect(w.spawns.length).toBe(2)
+})
+
+test('ws records, not submits, a drain in flight when session.end stops the loop', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  if (w.plugin !== 'ws') return
+  await bind($, w, 'k1')
+  w.recvAnswers.push(batch())
+  w.recvDelays.push(100)
+  w.exits[0]!(0)
+  await w.clock.settle()
+  expect(w.recvCalls.length).toBe(1)
+  await $.session.end({ reason: 'clear', sessionId: 'sess-1', resume: undefined as never })
+  await w.clock.advance(100)
+  expect(w.prompts).toEqual([])
+  const record = transcript(w).find((t) => t.includes('drained mail was not submitted'))
+  expect(record).toContain('(the push loop stopped: session.end clear)')
+  expect(record).toContain('mail from x@machine (t2):\nsecond')
+  expect(w.spawns.length).toBe(1)
+})
+
+test('ws still submits a drain in flight across a rebind', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  if (w.plugin !== 'ws') return
+  await bind($, w, 'k1')
+  w.recvAnswers.push(batch())
+  w.recvDelays.push(100)
+  w.exits[0]!(0)
+  await w.clock.settle()
+  await bind($, w, 'k2')
+  await w.clock.advance(100)
+  expect(w.prompts.length).toBe(1)
+  expect(w.prompts[0]).toContain('2 message(s) arrived for session_key k1')
+  expect(transcript(w).some((t) => t.includes('not submitted'))).toBe(false)
+})
+
+test('a failing recv beneath the observer is never run a second time', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  w.recvThrows = true
+  const res = await $.tool.call({ tool: recvName(w.plugin), session_key: 'k1' } as never)
+  await w.clock.settle()
+  expect(w.recvCalls.length).toBe(1)
+  expect(res).toEqual({ isError: true, result: undefined, text: 'mailbox recv failed' })
 })
