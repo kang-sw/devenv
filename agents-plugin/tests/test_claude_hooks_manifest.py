@@ -95,7 +95,7 @@ class ClaudeHooksManifestTest(unittest.TestCase):
     def test_modules_name_existing_mod_sources(self):
         doc = json.loads(HOOKS_PATH.read_text(encoding="utf-8"))
         modules = doc.get("modules")
-        self.assertEqual(modules, ["./mailbox-push/register.ts"])
+        self.assertEqual(modules, ["./claude-mod/register.ts"])
         for module in modules:
             self.assertTrue(
                 (HOOKS_PATH.parent / module).is_file(),

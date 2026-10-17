@@ -1,6 +1,7 @@
-// Pure core of the lead compaction timing mod: threshold points, the
-// one-latch delivery rule, the lever's input check, and the pinned prose.
-// register.ts wires these to the engine; nothing here touches `$`.
+// Pure core of the Claude mod's lead compaction timing feature: threshold
+// points, the one-latch delivery rule, the lever's input check, and the
+// pinned prose. compaction.ts drives these and register.ts binds them to the
+// engine; nothing here touches `$`.
 
 export const TOOL_NAME = 'request_compaction'
 /** Opens every prompt the mod submits, so it never reads as the human's own words. */

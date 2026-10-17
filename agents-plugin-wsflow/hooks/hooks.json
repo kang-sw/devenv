@@ -1,1 +1,1 @@
-{ "modules": ["./mailbox-push/register.ts"] }
+{ "modules": ["./claude-mod/register.ts"] }
