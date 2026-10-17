@@ -12,6 +12,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 0dea3a7c6e3c4df2
 sage-review-completeness-reviewed: 2d7c55d401b76e10
+completed: 2026-10-18
 ---
 
 # Claude lead compaction timing through a ws plugin mod
@@ -337,6 +338,78 @@ dogfood checks the advisory wake turn, a milestone wake
 turn, a lever compaction followed by exactly one
 continuation turn carrying the revive nudge, and lever retry while a mailbox
 push holds the session.
+
+### Result (2a4cfcf57) - 2026-10-18
+
+Landed in 869003e09..2a4cfcf57 (implementation 42ab09388, review fix
+2a4cfcf57):
+
+- One mod `agents-plugin/hooks/claude-mod/`: `register.ts` (the single entry;
+  `session.start` and `session.end` registered once, the mailbox and
+  compaction setups independent and awaited together, per-feature `try`
+  blocks at `session.end`), the moved mailbox `watcher.ts`, and the
+  compaction feature in `compaction.ts` (state machine over bound engine
+  edges, `compactionEnabledFor`) and `timing.ts` (thresholds, latch, lever
+  check, pinned prose, moved from the 52d7f6d0f draft). The draft directory
+  `agents-plugin/hooks/lead-compaction/` is deleted.
+- Both `hooks.json` name `./claude-mod/register.ts`; the wsflow
+  `claude-mod/` copy is byte-identical. Stale texts reworded: the ws
+  `hooks.json` description, the entry header comment, the wsflow manifest
+  test docstring, the Go mirror test comments and rsync hint, and the
+  `wsflow-mirroring.md` Claude Mod Mirror section (now naming the ws-only
+  compaction gate).
+- Tests: `compaction.test.ts` (pure core, every pinned text verbatim,
+  thresholds, baseline, re-arm, skipped thresholds, delivery blocked while a
+  request is pending, lever refusal and errors, repeat call, rejection retry
+  at the next turn end, veto note, another compaction dropping the compact
+  step, subagent/precompute/veto ignored, session end, generation guard,
+  dropped continuation recorded) and `compaction-engine.test.ts`
+  (registration and pinned description, setups independent in both
+  directions, advisory from `session.measure` with one summary breakdown
+  read, lever after a main-thread turn end with subagent and aborted turn
+  ends skipped, rejection retry, veto, manual compaction first, the lever's
+  own landing resetting the latch, session end; under wsflow no
+  `request_compaction`, no usage read, no prompt, no compaction, and
+  compactions pass through untouched). The two mailbox engine tests that
+  pinned the registered-tool list now assert the mailbox tools only.
+
+Verification:
+
+- `claude plugin validate agents-plugin`: passed;
+  `claude plugin validate agents-plugin-wsflow`: passed (the validator notes
+  the accepted managed-install `session.compact` limitation).
+- `claude plugin test agents-plugin`: 103 pass, 0 fail;
+  `claude plugin test agents-plugin-wsflow`: 103 pass, 0 fail.
+- `python3 -m unittest discover agents-plugin/tests`: OK (78);
+  `python3 -m unittest discover agents-plugin-wsflow/tests`: OK (15).
+- `go test -race -count=1 ./internal/wsrsrc/ -run TestWsflowHooksMirrorUpToDate`
+  (under `agents-plugin-tool/`): ok.
+- Live dogfood (advisory and milestone wake turns, a lever compaction followed
+  by one continuation turn with the revive nudge, lever retry while a mailbox
+  push holds the session): not run by the worker; it needs an attended
+  session that reaches the advisory point and is left to the lead.
+
+Decisions:
+
+- The validator forbids storing or passing `$`, so `compaction.ts` takes
+  engine edges (submit, compact, after, log) bound as closures in
+  `session.start`, and a usage-reader closure per measure.
+- The summary breakdown is read lazily at the first measure after each
+  invalidation (session start or end, a landed compaction, a changed model
+  window) and cached by window; a generation counter drops a reading that
+  awaited the read across an invalidation.
+- The engine routes a plugin's `$.session.compact` past that plugin's own
+  `session.compact` hook (an engine test confirmed it), so the lever step
+  applies the landing reset itself; the hook ignores a landing while the
+  lever's compaction runs, so an engine that does route it neither drops the
+  lever's own step nor resets twice.
+- A repeat lever call replaces the continuation and keeps the compact-step
+  state; a lost continuation submit is recorded to the transcript (the only
+  holder of that text), a lost threshold submit only to the debug log.
+- The `session.compact` observer never vetoes: its `.catch` replays what
+  settled beneath.
+- Engine tests branch on the engine-reported package name, so the mirrored
+  file runs ws behavior in ws and the inert path in wsflow.
 
 ## Sage Review Round 1 (2026-10-17)
 
