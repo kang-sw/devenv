@@ -566,7 +566,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-17T14:53:09Z"
+        "touched_at": "2026-10-17T14:53:38Z",
+        "impl": {
+          "branch": "impl/develop/polio-vegan-fling"
+        }
       }
     }
   }
