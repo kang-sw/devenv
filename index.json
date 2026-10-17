@@ -571,6 +571,9 @@
     },
     "261016-research-claude-mod-pi-like-compaction": {
       "registered_at": "2026-10-16T08:30:06Z"
+    },
+    "261017-feat-claude-mailbox-active-push-mod": {
+      "registered_at": "2026-10-17T07:48:11Z"
     }
   }
 }
