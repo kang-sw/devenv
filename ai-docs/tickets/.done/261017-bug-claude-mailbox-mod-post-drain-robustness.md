@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 01cc3f86052ef986
 sage-review-completeness-reviewed: 01cc3f86052ef986
+completed: 2026-10-17
 ---
 
 # Claude mailbox push mod loses drained mail and leaks loop state on edge paths
@@ -184,3 +185,53 @@ Verification:
   TestMailboxRecvConcurrentCallsNeverDoubleDeliver` pass under
   `agents-plugin-tool/`; a forced recv error in that test is reported once on
   the test goroutine, without spurious lost-envelope errors.
+
+### Result (548f1c0cc) - 2026-10-17
+
+Landed in 1acad2bba (Go test), 6f2527cb7 (mod), 548f1c0cc (review fix);
+the wsflow copy is resynced byte-identically.
+
+- Unparseable recv text and non-envelope array elements come back as
+  `{ raw }` items (`DrainedMail`) and are submitted inside the batch
+  framing as `unparsed mailbox recv output:`; only blank, `null`, or an
+  empty array is an empty drain.
+- A failed submit, and a drain that lands after any stop (including a stop
+  that follows a rebind that superseded the draining loop), write one
+  transcript `$.ui.log` entry through a new `record` edge, naming the
+  reason and carrying the formatted batch, plus the same text in the debug
+  log. A rebind with no stop still delivers.
+- ws resolves the wake slug from `lookup_peers` `self.address` through the
+  resolved MCP tool (`selfAddress`), falling back to `WS_MAILBOX`; the slug
+  is carried per binding (`bind(key, slug)`, `wait(key, slug, signal)`)
+  and re-resolved on every bind. One arm sequence counter gives latest-wins
+  binds, cancels a bind still resolving on a stop, and makes the restore
+  yield to any bind since it started, after its connect and slug awaits.
+- `consumeWait` and `abortableSleep` remove their abort listeners when they
+  settle.
+- `register.ts` header fixed (M-f); the Go concurrency test's goroutines use
+  a non-fatal recv call and report failure once (M-i).
+
+Decisions taken:
+- A `drop` result from `$.prompt.submit` counts as a failed submit (the
+  engine reports a refused prompt as a result, not a rejection); this also
+  makes a dropped notice back off instead of suspending.
+- `bind` returns `unchanged` only when both key and slug are equal.
+- `observeRecv`, `consumeWait`, `abortableSleep`, and `selfAddress` are
+  exported as test seams.
+
+Verification:
+- `claude plugin test agents-plugin`: 57 pass, 0 fail;
+  `claude plugin test agents-plugin-wsflow`: 57 pass, 0 fail; both
+  `claude plugin validate` pass.
+- `go test -race ./internal/wsrsrc/ -run TestWsflowHooksMirrorUpToDate`
+  and `go test -race ./internal/mcp/ -run
+  TestMailboxRecvConcurrentCallsNeverDoubleDeliver`: ok. A temporary forced
+  unknown session key in the receivers failed with one unknown_session
+  error and no lost-envelope lines (not committed).
+- Mutation checks: disabling each fix (stop record, restore yield, drop as
+  failure, arm sequence, double-drain guard, own-suspension resume,
+  listener removal) failed its pinning test.
+
+Residual: `$.ui.log` caps a transcript line at 2000 drawn characters and
+the debug log at 10000, so a very large recorded batch is truncated in
+both places.
