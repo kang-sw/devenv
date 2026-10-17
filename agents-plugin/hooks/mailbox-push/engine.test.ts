@@ -154,6 +154,20 @@ test('a WS_MAILBOX address in the environment adds its named inbox to the wait',
   expect(w.spawns[0]!.slice(2)).toEqual(['mailbox', 'wait', '--session-key', 'k1', '--slug', 'lead@machine', '--timeout', '10m', '--format', 'json'])
 })
 
+test('session.end resume also stops the loop, so old-key mail is not drained into the resumed conversation', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  await bind($, w, 'k1')
+  await $.session.end({ reason: 'resume', sessionId: 'sess-1', resume: undefined as never })
+  await w.clock.settle()
+  expect(w.killed).toEqual([0])
+  w.exits[0]!(0)
+  await w.clock.settle()
+  expect(w.recvCalls.length).toBe(0)
+  expect(w.prompts.length).toBe(0)
+  expect(w.spawns.length).toBe(1)
+})
+
 test('a reload re-binds from the stored key without an agent call', async ($, on) => {
   const w = world(on, { store: { 'mailbox-watch:sess-1': { sessionKey: 'k9' } } })
   await start($, w)

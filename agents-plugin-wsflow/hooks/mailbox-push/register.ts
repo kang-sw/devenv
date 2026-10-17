@@ -233,15 +233,25 @@ export const register: Register = (on) => {
   // passes here too, with this plugin as origin, and is ignored.
   on('tool.call', { tool: /__mailbox_recv$/ }, async ($, e, next) => {
     const res = await next(e)
-    const boundKey = watcher?.current()
-    if (isModelRecvCompletion({ tool: e.tool, originPlugin: next.origin.plugin, sessionKey: (e as { session_key?: unknown }).session_key }, res, recvTool, boundKey)) {
-      watcher?.recvCompleted(boundKey as string)
+    try {
+      const boundKey = watcher?.current()
+      const call = { tool: e.tool, originPlugin: next.origin.plugin, sessionKey: (e as { session_key?: unknown }).session_key }
+      if (isModelRecvCompletion(call, res, recvTool, boundKey)) watcher?.recvCompleted(boundKey as string)
+    } catch (err) {
+      $.ui.log(`${$.plugin.name} mailbox: recv observer failed: ${String(err)}`, { to: 'debug' })
     }
     return res
-  }).catch(($, e, next) => next(e))
+  }).catch(($, e, next) =>
+    // Never run recv a second time: a second call would drain (and drop) more mail.
+    next.called ? { isError: true, result: undefined, text: 'mailbox recv failed' } : next(e),
+  )
 
+  // Every end reason stops the loop: after `clear` or `resume` the process
+  // goes on under another session id, and a loop still bound to the old key
+  // would drain its mail into an unrelated conversation. Compaction is not a
+  // session end, so it keeps the binding.
   on('session.end', async ($, e, next) => {
-    if (e.reason === 'clear') watcher?.stop('session cleared')
+    watcher?.stop(`session.end ${e.reason}`)
     try {
       await $.store.delete(STORE_PREFIX + e.sessionId)
     } catch {

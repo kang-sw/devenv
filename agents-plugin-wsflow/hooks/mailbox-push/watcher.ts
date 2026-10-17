@@ -127,17 +127,20 @@ export function createWatcher(edges: WatcherEdges): Watcher {
   let ctrl: AbortController | undefined
   let suspended: { key: string; resume: () => void } | undefined
 
-  /** Resolves when the model's recv for `myKey` completes, or when `signal` aborts. */
-  function suspend(myKey: string, signal: AbortSignal): Promise<void> {
-    return new Promise<void>((resolve) => {
+  /** `resumed` resolves when the model's recv for `myKey` completes, when `signal` aborts, or on `resume`. */
+  function suspend(myKey: string, signal: AbortSignal): { resumed: Promise<void>; resume: () => void } {
+    let resume!: () => void
+    const resumed = new Promise<void>((resolve) => {
       const done = () => {
         if (suspended?.resume === done) suspended = undefined
         signal.removeEventListener('abort', done)
         resolve()
       }
+      resume = done
       suspended = { key: myKey, resume: done }
       signal.addEventListener('abort', done, { once: true })
     })
+    return { resumed, resume }
   }
 
   async function loop(myKey: string, signal: AbortSignal): Promise<void> {
@@ -151,11 +154,11 @@ export function createWatcher(edges: WatcherEdges): Watcher {
     }
     /** Submit one notice and wait for the model's recv; false when the notice could not be submitted. */
     const notify = async (): Promise<boolean> => {
-      const resumed = suspend(myKey, signal)
+      const { resumed, resume } = suspend(myKey, signal)
       try {
         await edges.submit(formatNotice(edges.label, edges.recvTool(), myKey))
       } catch (err) {
-        suspended?.resume()
+        resume() // this loop's own suspension, never a rebound loop's
         await resumed
         await backOff('notice submit failed', String(err))
         return false
