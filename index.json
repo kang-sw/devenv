@@ -553,53 +553,21 @@
     "261008-bug-ws-git-merge-switches-worker-occupied-root": {
       "registered_at": "2026-10-08T04:40:47Z"
     },
-    "261016-feat-pi-compaction-token-thresholds": {
-      "registered_at": "2026-10-16T14:39:30Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-16T14:49:19Z",
-        "impl": {
-          "branch": "impl/develop/case-aloft-power"
-        }
-      }
-    },
     "261016-research-claude-mod-mailbox-active-push": {
       "registered_at": "2026-10-16T08:54:20Z"
     },
     "261016-research-claude-mod-pi-like-compaction": {
       "registered_at": "2026-10-16T08:30:06Z"
     },
-    "261017-bug-claude-mailbox-mod-post-drain-robustness": {
-      "registered_at": "2026-10-17T12:11:28Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-17T13:03:00Z",
-        "impl": {
-          "branch": "impl/develop/cusp-ditzy-broom"
-        }
-      }
-    },
-    "261017-feat-claude-mailbox-active-push-mod": {
-      "registered_at": "2026-10-17T07:48:11Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-17T09:04:30Z",
-        "impl": {
-          "branch": "impl/develop/pupil-stack-croak"
-        }
-      }
-    },
     "261017-feat-claude-mod-lead-compaction-timing": {
-      "registered_at": "2026-10-17T12:53:11Z"
+      "registered_at": "2026-10-17T12:53:11Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-10-17T14:53:09Z"
+      }
     }
   }
 }
