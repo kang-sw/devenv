@@ -193,25 +193,22 @@ owner, per `rebindMailboxOwnerAtFerrule`):
   existing one-shot `mailbox wait` as a peek-only signal.
 - The agent actively binds by calling a mod-registered tool with its own
   session key; the binding is not inferred from other ws tool calls.
-- The mod never raises a permission prompt and never overrides the user's
-  permission policy. Before each drain it asks `$.tool.check` for the recv
-  tool's verdict:
-  - `allow` (an allow rule; auto mode alone answers `ask`, see Verified
-    Findings): the mod drains through recv itself
-    (`$.mcp.call`, server name from `$.mcp.connect`) and submits the whole
-    drain as one prompt, mirroring pi.
-  - otherwise: the mod submits a notice prompt telling the model to call recv
-    with its session key, so the model drains through the ordinary
-    permission flow. The mod then suspends its wait loop and re-arms only
-    after its `tool.call` hook observes the model's `mailbox_recv` call for
-    the bound key, so one arrival yields one notice. (A peek-only wait
-    re-armed over still-queued mail would exit at once and loop.)
-  - This pre-checked routing is the default. A ws config knob, set through
-    `config.tune`, opts into direct drain: the mod skips the pre-check, drains
-    through `$.mcp.call`, and takes the notice path only when the call is
-    refused. It serves auto-mode users, whose `ask` verdict would otherwise
-    cost one extra model tool call per arrival; an allow rule on the recv tool
-    reaches the same result under the default.
+- Drain mode per package (2026-10-17, reverses the earlier pre-checked
+  routing and its direct-drain knob): `ws` is opinionated, `wsflow`
+  conservative.
+  - `ws` always drains through recv itself (`$.mcp.call`, server name from
+    `$.mcp.connect`) with no pre-check and submits the whole drain as one
+    prompt, mirroring pi; a refused call takes the notice path. A
+    prompting-mode user may see a mod-raised recv dialog in an idle session;
+    accepted.
+  - `wsflow` never drains itself and takes the notice path on every arrival;
+    it never raises a permission prompt.
+  - Notice path: the mod submits a notice prompt telling the model to call
+    recv with its session key, so the model drains through the ordinary
+    permission flow. The mod suspends its wait loop and re-arms only after its
+    `tool.call` hook sees the model's recv for the bound key complete
+    non-denied, so one arrival yields one notice. (A peek-only wait re-armed
+    over still-queued mail would exit at once and loop.)
 - Binding lifecycle: one binding per Claude session, last call wins. The same
   key again is a no-op (covers revive with the preserved key); a different key
   replaces the binding (covers a new `ferrule`) without detecting either event;
@@ -246,20 +243,12 @@ owner, per `rebindMailboxOwnerAtFerrule`):
   the shell wait outside it.
 - Refer to the mod tool in shipped playbook text by role, not by its full
   `mcp__<plugin>__<name>` spelling, which differs between `ws` and `wsflow`.
-- Declare the direct-drain knob the way pi declares its adapter knobs: a
-  plugin-local `config-manifest.json` (for example a boolean
-  `claude.mailbox_direct_drain`, default `false`) that the plugin's MCP
-  launcher passes through `WS_MCP_CONFIG_MANIFESTS`
-  (`agents-plugin-pi/src/adapter-config.ts`). The mod reads it at each drain
-  through `$.mcp.call` of `config_get`; a refused or failed read resolves to
-  the default, which is the pre-checked routing.
-
 ### Open Questions
 
 - In an interactive session under a prompting mode with no allow rule, does a
   mod's `$.mcp.call` raise a permission dialog or refuse at once? Only the
-  headless ask -> refuse is observed. A refusal with no dialog would make
-  direct drain harmless for every mode and could make the knob unnecessary.
+  headless ask -> refuse is observed. This decides what a prompting-mode `ws`
+  user sees.
 - Does a different-key rebind actually kill the previous blocked `wait` child
   (`stream.return()` on a silent child)?
 - Does `/clear` stop the loop and leave no `wait` child in a live session?
@@ -291,8 +280,7 @@ owner, per `rebindMailboxOwnerAtFerrule`):
   the old one died; last-call-wins handles both cases without detection.
 - **Gating the push on detecting auto mode.** A prompt depends on the mode
   and the allow/deny rules together, and the mode changes mid-session, so a
-  mode read at bind time goes stale; `$.tool.check` asks the engine for the
-  actual verdict instead.
+  mode read at bind time goes stale.
 - **A self-granting `tool.check` hook** (allow the mod's own recv by origin).
   Verified to work, but it overrides the user's permission policy for ws's
   tool and leans on engine looseness (any plugin can grant another's tool)
@@ -301,13 +289,21 @@ owner, per `rebindMailboxOwnerAtFerrule`):
 - **Calling recv from the mod with no pre-check, as the default.** Least
   code, but a prompting user would face a mod-raised dialog in an idle session
   whose interactive behavior is unverified (headless only shows ask -> deny).
-  Kept as the opt-in direct-drain knob instead (see Confirmed Decisions).
+  Later adopted for `ws` only (see Confirmed Decisions).
+- **Pre-checking each drain with `$.tool.check`, draining only on `allow`.**
+  Under auto mode it answers `ask` although the plugin call succeeds, so auto
+  users would pay one extra model tool call per arrival. Replaced by the
+  per-package drain mode.
+- **A `config.tune` direct-drain knob** (`claude.mailbox_direct_drain`). Read
+  through `$.mcp.call` of `config_get`, the read is itself permission-gated:
+  unchecked it could prompt, pre-checked it reads `false` for auto users.
+  Dropped for the per-package split rather than moving the read to a
+  `$.process` CLI call.
 - **Detecting auto mode through `prompt.attachment` `auto_mode` /
   `auto_mode_exit`.** The attachment fires only when the next model request
   carries it, so a user who leaves auto mode while idle stays latched as auto
   until the next turn, and the mod would then drain into a dialog in exactly
-  the idle window it acts in. Too hacky for the gain; the user chose the
-  config knob.
+  the idle window it acts in. Too hacky for the gain.
 - **Re-arming at the next `turn.complete` after a notice.** Simpler, but a
   user who declines the recv dialog would get a fresh notice every turn.
 - **A double-binding guard for `ws` plus `wsflow`** (for example the mod
