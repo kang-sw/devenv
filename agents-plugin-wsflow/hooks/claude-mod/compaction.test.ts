@@ -42,6 +42,8 @@ function harness(opts: { window?: Partial<CompactionWindow> | null } = {}) {
     window: opts.window === null ? null : ({ ...WINDOW, ...opts.window } as CompactionWindow),
   }
   const c = createCompaction()
+  /** Whether the fake engine routes the lever's own compaction through the feature's hook (the engine does not). */
+  let ownHook = false
   const edges: CompactionEdges = {
     submit: async (text) => {
       if (h.dropSubmits > 0) {
@@ -55,7 +57,7 @@ function harness(opts: { window?: Partial<CompactionWindow> | null } = {}) {
       h.compacts += 1
       const answer = h.compactAnswers.shift() ?? {}
       if (answer instanceof Error) throw answer
-      if (answer.skip === undefined) c.compacted('plugin', undefined, { messages: [] })
+      if (ownHook && answer.skip === undefined) c.compacted('plugin', undefined, { messages: [] })
       return answer.skip === undefined ? { messages: [] } : { skip: answer.skip }
     },
     after: (fn) => void h.scheduled.push(fn),
@@ -80,7 +82,8 @@ function harness(opts: { window?: Partial<CompactionWindow> | null } = {}) {
     await runScheduled()
   }
   const transcript = () => h.logs.filter((l) => l.to === 'transcript').map((l) => l.text)
-  return { h, c, measure, turnEnd, runScheduled, transcript }
+  const routeOwnCompaction = () => void (ownHook = true)
+  return { h, c, measure, turnEnd, runScheduled, transcript, routeOwnCompaction }
 }
 
 describe('pure core', () => {
@@ -403,7 +406,7 @@ describe('lever', () => {
     expect(h.submits).toEqual([continuationText('go on')])
   })
 
-  test("the lever's own landing resets the latch without dropping its own step", async () => {
+  test("the lever's own landing resets the latch and the breakdown", async () => {
     const { h, c, measure, turnEnd, transcript } = harness()
     await measure(50_000)
     await measure(104_000)
@@ -413,6 +416,33 @@ describe('lever', () => {
     expect(transcript()).toEqual([])
     await measure(101_000)
     expect(h.submits).toEqual([advisoryText(T, 104_000), continuationText('go on'), advisoryText(T, 101_000)])
+    expect(h.breakdownReads).toBe(2)
+  })
+
+  test("should the feature's hook see the lever's own landing, it is neither another's nor counted twice", async () => {
+    const { h, c, measure, turnEnd, transcript, routeOwnCompaction } = harness()
+    routeOwnCompaction()
+    await measure(50_000)
+    await measure(104_000)
+    c.lever(undefined, 'go on')
+    await turnEnd()
+    expect(h.compacts).toBe(1)
+    expect(transcript()).toEqual([])
+    await measure(101_000)
+    expect(h.submits).toEqual([advisoryText(T, 104_000), continuationText('go on'), advisoryText(T, 101_000)])
+    expect(h.breakdownReads).toBe(2)
+  })
+
+  test("a vetoed lever compaction keeps the latch", async () => {
+    const { h, c, measure, turnEnd } = harness()
+    await measure(50_000)
+    await measure(104_000)
+    c.lever(undefined, 'go on')
+    h.compactAnswers.push({ skip: 'no' })
+    await turnEnd()
+    await measure(105_000)
+    expect(h.submits).toEqual([advisoryText(T, 104_000), skippedContinuationText('no', 'go on')])
+    expect(h.breakdownReads).toBe(1)
   })
 
   test('session end drops a pending request', async () => {

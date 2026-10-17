@@ -91,7 +91,12 @@ export function createCompaction(): Compaction {
   /** The level last delivered; undefined until the first usage observed since a session start or end. */
   let latch: Level | undefined
   let request: Request | undefined
-  /** True while the lever's own compaction runs, so its landing is not read as another's. */
+  /**
+   * True while the lever's own compaction runs. The engine routes a
+   * `$.session.compact` past the calling plugin's own session.compact hook,
+   * so runLever settles the landing itself; should the hook see it anyway,
+   * this keeps it from being read as another's landing or counted twice.
+   */
   let leverCompacting = false
   /**
    * Bumped at every session start or end and every landed main-conversation
@@ -127,6 +132,13 @@ export function createCompaction(): Compaction {
     )
   }
 
+  /** A landed main-conversation compaction: the latch and the breakdown start over. */
+  const landed = () => {
+    generation += 1
+    cached = undefined
+    latch = 0
+  }
+
   /** Settle `r` with its continuation prompt. */
   const finish = (r: Request, text: string) => {
     if (request === r) request = undefined
@@ -152,6 +164,7 @@ export function createCompaction(): Compaction {
     } finally {
       leverCompacting = false
     }
+    if (res.skip === undefined) landed()
     if (request !== r) return
     if (res.skip !== undefined) {
       notice(`the requested compaction did not run (${res.skip}); the continuation follows with a note`)
@@ -226,15 +239,12 @@ export function createCompaction(): Compaction {
     // `precompute` installs nothing, a veto leaves the conversation as it
     // was, and a subagent's or fork's own compaction is not the main
     // conversation's. A landed one resets the latch and the breakdown, and
-    // drops a pending compact step unless it was the lever's own.
+    // drops a pending compact step. Compactions run one at a time, so one
+    // landing while the lever's own runs is that one, which runLever settles.
     compacted: (trigger, agentId, res) => {
-      if (agentId !== undefined || trigger === 'precompute' || res.skip !== undefined) return
-      generation += 1
-      cached = undefined
-      latch = 0
-      // Compactions run one at a time, so one landing while the lever's own
-      // runs is that one (its trigger is `plugin`).
-      if (!leverCompacting && request?.compact) {
+      if (agentId !== undefined || trigger === 'precompute' || res.skip !== undefined || leverCompacting) return
+      landed()
+      if (request?.compact) {
         request.compact = false
         notice(`a ${trigger} compaction landed first, so the requested compaction is dropped; its continuation follows at the next turn end`)
       }

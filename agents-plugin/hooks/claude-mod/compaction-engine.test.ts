@@ -19,7 +19,7 @@ type CompactAnswer = { skip: string } | 'lands' | 'rejects'
 /** A compaction leaves at least one message: the summary. */
 const SUMMARY = [{ role: 'user', text: 'summary', toolUses: [] }]
 
-function world(on: On, opts: { processOk?: boolean } = {}) {
+function world(on: On, opts: { processOk?: boolean; refuseRegister?: string } = {}) {
   const clock = mock.clock(on)
   mock.env(on, {})
   const w = {
@@ -49,6 +49,7 @@ function world(on: On, opts: { processOk?: boolean } = {}) {
   )
   on('tool.register', ($, e, next) => {
     w.plugin = next.origin.plugin
+    if (e.name === opts.refuseRegister) return { deny: 'refused by the test' }
     w.registered.push({ name: e.name, description: e.description, isDeferred: e.isDeferred })
     return { value: { tool: `mcp__${w.plugin}__${e.name}` } }
   })
@@ -99,6 +100,9 @@ async function lever($: Engine, w: World, continuation: unknown, agentId?: strin
 
 const isWs = (w: World) => w.plugin === 'ws'
 
+/** The transcript (user-visible) lines the mod logged. */
+const transcript = (w: World) => w.logs.filter((l) => l.to === 'transcript').map((l) => l.text)
+
 test('ws registers the compaction request tool with its pinned description; another package registers none', async ($, on) => {
   const w = world(on)
   await start($, w)
@@ -117,6 +121,12 @@ test('compaction setup does not depend on the mailbox setup', async ($, on) => {
   const names = w.registered.map((r) => r.name)
   expect(names.filter((n) => n.startsWith('mailbox_'))).toEqual([])
   if (w.plugin === 'ws') expect(names).toEqual(['request_compaction'])
+})
+
+test('mailbox setup does not depend on the compaction setup', async ($, on) => {
+  const w = world(on, { refuseRegister: 'request_compaction' })
+  await start($, w)
+  expect(w.registered.map((r) => r.name)).toEqual(['mailbox_watch'])
 })
 
 test('ws: a crossing that session.measure reports submits the advisory, reading the summary breakdown once', async ($, on) => {
@@ -145,6 +155,22 @@ test('ws: a lever call compacts after the main-thread turn end, then submits its
   await turnEnd($, w)
   expect(w.compactCalls.length).toBe(1)
   expect(w.prompts.length).toBe(1)
+})
+
+test("ws: the lever's own landing resets the latch, though the engine routes it past the feature's own hook", async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  if (!isWs(w)) return
+  await measure($, w, 50_000)
+  await measure($, w, 104_000)
+  await lever($, w, 'go on')
+  await turnEnd($, w)
+  expect(w.compactCalls).toEqual([{ origin: 'ws', instructions: undefined }])
+  // Usage still past the advisory after the landing: a reset latch delivers it again, from a fresh breakdown.
+  await measure($, w, 104_000)
+  expect(w.prompts).toEqual([advisoryText(T, 104_000), continuationText('go on'), advisoryText(T, 104_000)])
+  expect(w.usageCalls.length).toBe(2)
+  expect(transcript(w)).toEqual([])
 })
 
 test('ws: a subagent lever call is refused and an invalid continuation is a tool error', async ($, on) => {
