@@ -22,7 +22,9 @@ Covers:
   2. That file parses as JSON and matches Claude's hooks schema shape:
      {"hooks": {"<Event>": [{"hooks": [{"type": "command", "command": ...}]}]}}.
   3. Every POSIX "command" string is syntactically valid shell (via `sh -n`).
-  4. The Stop event is present (the mailbox wake adapter's own event).
+  4. No Stop event: the Claude mailbox wake is the mailbox push mod, not a
+     turn-end hook.
+  5. Every "modules" entry names a mod source file that exists.
 """
 
 import json
@@ -48,7 +50,7 @@ class ClaudeHooksManifestTest(unittest.TestCase):
         self.assertIn("hooks", doc)
         events = doc["hooks"]
         self.assertIsInstance(events, dict)
-        self.assertIn("Stop", events, "the mailbox wake adapter is wired on the Stop event")
+        self.assertNotIn("Stop", events, "the Claude mailbox wake is the push mod, not a Stop hook")
         for event_name, entries in events.items():
             self.assertIsInstance(entries, list, f"hooks.{event_name} must be a list")
             for matcher_entry in entries:
@@ -90,17 +92,15 @@ class ClaudeHooksManifestTest(unittest.TestCase):
                         f"hooks.{event_name} command failed sh -n syntax check: {result.stderr}\ncommand: {command}",
                     )
 
-    def test_stop_command_invokes_the_claude_stop_hook_subcommand(self):
+    def test_modules_name_existing_mod_sources(self):
         doc = json.loads(HOOKS_PATH.read_text(encoding="utf-8"))
-        commands = [
-            entry["command"]
-            for matcher_entry in doc["hooks"]["Stop"]
-            for entry in matcher_entry.get("hooks", [])
-        ]
-        self.assertTrue(
-            any("mailbox claude-stop-hook" in c for c in commands),
-            f"no Stop hook command invokes the claude-stop-hook subcommand: {commands}",
-        )
+        modules = doc.get("modules")
+        self.assertEqual(modules, ["./mailbox-push/register.ts"])
+        for module in modules:
+            self.assertTrue(
+                (HOOKS_PATH.parent / module).is_file(),
+                f"hooks.json module {module} does not exist next to hooks.json",
+            )
 
     def test_session_start_compact_runs_the_revive_nudge(self):
         doc = json.loads(HOOKS_PATH.read_text(encoding="utf-8"))

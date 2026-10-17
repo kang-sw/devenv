@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: d783802a963d35a7
 sage-review-completeness-reviewed: d783802a963d35a7
+completed: 2026-10-17
 ---
 
 # Claude mailbox active push through a plugin mod
@@ -240,6 +241,58 @@ the worker cannot drive one, and headless `claude -p` ends after one turn):
 - A declined recv dialog after a notice leaves the loop suspended, with no
   repeated notice.
 - `$.process` in the desktop app's local Code tab and IDE-hosted sessions.
+
+### Result (79c1d0a80) - 2026-10-17
+
+Landed in 0acdd4a55..79c1d0a80:
+
+- Mod `agents-plugin/hooks/mailbox-push/` (`register.ts`, `watcher.ts`,
+  `engine.test.ts`, `watcher.test.ts`), with a byte-identical copy in
+  `agents-plugin-wsflow/hooks/mailbox-push/` pinned by
+  `TestWsflowHooksMirrorUpToDate`. ws `hooks.json` drops `Stop` and lists the
+  module; wsflow `hooks.json` lists only `modules` (99f22d9d3, 79c1d0a80).
+- `ws-mcp mailbox claude-stop-hook` and its tests removed; `hook_peek.go`
+  comments are Codex-only (3027fddc7, test deletion in 5fac273bd).
+- `TestMailboxRecvConcurrentCallsNeverDoubleDeliver` passes with no recv fix:
+  drains are flock-serialized (5fac273bd).
+- `lead-use-mailbox/arm-the-wait.claude.md` variant; rsrc manifest plus the
+  wsflow and pi rsrc mirrors regenerated; composition test extended
+  (726155235). `wsflow-mirroring.md` records the hooks carve-out (b44aea530).
+
+Verification: `claude plugin validate` passes for both packages;
+`claude plugin test` gives 30 pass, 0 fail for each; `tsc` against the
+2.1.302 types is clean; `go test ./internal/wsrsrc/... -count=1`,
+`./cmd/ws-mcp/... ./internal/wsmailbox/...` pass; the concurrent recv test
+passes under `-race -count=20`; `go test ./internal/mcp -count=1` passes;
+`python3 -m unittest discover` passes for `agents-plugin/tests` and
+`agents-plugin-wsflow/tests`.
+
+Decisions taken at implementation:
+
+- The bound key is persisted in `$.store` under `mailbox-watch:<session id>`
+  instead of `$.state`: a `$.state` ref must spell its owning plugin as a
+  literal, which a source shared by ws and wsflow cannot (`claude plugin
+  validate` refused the dual-literal form). The entry is deleted at every
+  `session.end`.
+- The ws drain calls `$.tool.call` on the recv tool resolved from
+  `$.mcp.connect` instead of `$.mcp.call`: a refusal comes back as a
+  structured `{deny}` (the notice path), while `$.mcp.call` rejects with an
+  unstructured message. Research runs 2, 6, and 7 show the same permission
+  behavior for both.
+- The wait passes `--slug` from `WS_MAILBOX`, which the retired Stop hook
+  read, so a session with a named inbox is woken by mail to it. The wait
+  owner-checks the slug and falls back to reply-id-only.
+- `$.process` availability is probed with `python3 --version` at
+  `session.start`; the tool is not registered when the probe fails.
+- `session.end` stops the loop for every reason, not only `clear`. On
+  `resume` the process continues under another session id, and a loop still
+  bound would drain old-key mail into the new conversation. Compaction fires
+  no `session.end`, so it keeps the binding (lite review fix).
+
+Residual: a `WS_MAILBOX_AUTO` address is not known to the mod, so its named
+inbox does not wake the loop; recv still drains it. A `prompt.submit`
+failure after a successful ws drain leaves that mail logged only to the
+debug log.
 
 ## Sage Review Round 1 (2026-10-17)
 

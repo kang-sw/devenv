@@ -14,7 +14,9 @@ import (
 // host-neutral base losing the harness-specific nuance a non-pi render must
 // still carry (Codex's registered-address-conditional wake, Claude's
 // background-task-completion wake) or the {{.MailboxWaitCommand}}
-// placeholder that render-time injection substitutes.
+// placeholder that render-time injection substitutes. The Claude overlay
+// must lead with the mailbox watch tool and keep the shell-wait fallback,
+// without the base's Codex nuance.
 func TestLeadUseMailboxArmTheWaitHarnessComposition(t *testing.T) {
 	root := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 
@@ -26,14 +28,17 @@ func TestLeadUseMailboxArmTheWaitHarnessComposition(t *testing.T) {
 		claudeExample      = "Claude's own background-task notification"
 		piOverlayMarker    = "already arms a background mailbox waiter"
 		piNoLaunchSentence = "you never launch anything from"
+		claudeWatchTool    = "If the mailbox watch tool is available, call it with your session key"
+		claudeFallback     = "Your harness re-invokes you when that background task"
 	)
 
 	cases := []struct {
-		harness string
-		isPi    bool
+		harness  string
+		isPi     bool
+		isClaude bool
 	}{
 		{harness: ""},
-		{harness: "claude"},
+		{harness: "claude", isClaude: true},
 		{harness: "codex"},
 		{harness: "pi", isPi: true},
 	}
@@ -67,6 +72,18 @@ func TestLeadUseMailboxArmTheWaitHarnessComposition(t *testing.T) {
 				}
 				if strings.Contains(section, codexNuance) || strings.Contains(section, claudeExample) {
 					t.Errorf("harness=%q: base harness examples leaked alongside the pi overlay", tc.harness)
+				}
+				return
+			}
+
+			if tc.isClaude {
+				for _, want := range []string{claudeWatchTool, claudeFallback, waitCommandVar, baseImperative} {
+					if !strings.Contains(section, want) {
+						t.Errorf("harness=%q: Claude overlay missing %q", tc.harness, want)
+					}
+				}
+				if strings.Contains(section, codexNuance) || strings.Contains(section, piOverlayMarker) {
+					t.Errorf("harness=%q: base or pi content leaked alongside the Claude overlay", tc.harness)
 				}
 				return
 			}

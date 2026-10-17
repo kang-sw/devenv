@@ -306,6 +306,23 @@ drift guard — not curation — is what keeps the copy honest. A wsflow-only pr
 variant, if ever needed, is added as a SEPARATE rsrc file that only wsflow
 renders, never as a divergent body of a shared stem.
 
+## Claude Mod Mirror
+
+The Claude mailbox push mod is a second generated-sameness carve-out:
+`agents-plugin/hooks/mailbox-push/` is the one source and
+`agents-plugin-wsflow/hooks/mailbox-push/` a byte-identical copy. The mod
+reads its package identity (plugin name, root, MCP server) from the engine at
+runtime, so nothing in it varies per package; its drain mode is chosen from
+the engine-reported plugin name. Each package's `hooks/hooks.json` is curated
+(wsflow lists only `modules`).
+
+- **Drift guard:** `TestWsflowHooksMirrorUpToDate` (in `internal/wsrsrc`).
+- **Resync:** `rsync -a --delete agents-plugin/hooks/mailbox-push/
+  agents-plugin-wsflow/hooks/mailbox-push/` after any edit to the source.
+- **Verify:** `claude plugin validate` and `claude plugin test` on both
+  packages; the engine tests branch on the package name, so each copy runs
+  its own drain mode.
+
 ## Bootstrap Template Rules
 
 - Treat `lead-bootstrap` as a mirrored skill: behavior changes require checking
