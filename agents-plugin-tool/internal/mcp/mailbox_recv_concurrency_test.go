@@ -1,8 +1,11 @@
 package mcp
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 
@@ -52,7 +55,11 @@ func TestMailboxRecvConcurrentCallsNeverDoubleDeliver(t *testing.T) {
 				finished = true
 			default:
 			}
-			raw := callToolWithKey(t, receiver, base+call, receiverKey, "mailbox.recv", map[string]any{"format": "json"})
+			raw, err := recvJSONNoFatal(receiver, base+call, receiverKey)
+			if err != nil {
+				res.err = err
+				return res
+			}
 			var envs []wsmailbox.Envelope
 			if err := json.Unmarshal([]byte(raw), &envs); err != nil {
 				res.err = fmt.Errorf("recv JSON: %w: %s", err, raw)
@@ -96,11 +103,15 @@ func TestMailboxRecvConcurrentCallsNeverDoubleDeliver(t *testing.T) {
 	close(sendDone)
 	wg.Wait()
 
+	// A receiver that failed stopped draining, so its share of the seeded
+	// envelopes would read as lost: report the failure alone, once.
 	got := map[string]int{}
 	for _, res := range results {
 		if res.err != nil {
 			t.Fatal(res.err)
 		}
+	}
+	for _, res := range results {
 		for _, c := range res.contents {
 			got[c]++
 		}
@@ -118,4 +129,56 @@ func TestMailboxRecvConcurrentCallsNeverDoubleDeliver(t *testing.T) {
 			t.Errorf("envelope %q was lost", c)
 		}
 	}
+}
+
+// recvJSONNoFatal is one mailbox.recv call (format json) that reports failure
+// as an error instead of failing the test, so receiver goroutines can run it:
+// t.Fatal is only valid on the test goroutine.
+func recvJSONNoFatal(server *Server, id int, key string) (string, error) {
+	payload, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      "mailbox.recv",
+			"arguments": map[string]any{"session_key": key, "format": "json"},
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	var out bytes.Buffer
+	if err := server.ServeStdio(context.Background(), strings.NewReader(string(payload)+"\n"), &out); err != nil {
+		return "", fmt.Errorf("recv %d: ServeStdio: %w", id, err)
+	}
+	var resp struct {
+		Result struct {
+			IsError bool `json:"isError"`
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"result"`
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	var line string
+	for _, l := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+		var probe struct {
+			ID json.RawMessage `json:"id"`
+		}
+		if json.Unmarshal([]byte(l), &probe) == nil && string(probe.ID) == fmt.Sprint(id) {
+			line = l
+		}
+	}
+	if err := json.Unmarshal([]byte(line), &resp); err != nil {
+		return "", fmt.Errorf("recv %d: response: %w: %q", id, err, out.String())
+	}
+	if resp.Error != nil {
+		return "", fmt.Errorf("recv %d: %s", id, resp.Error.Message)
+	}
+	if resp.Result.IsError || len(resp.Result.Content) != 1 {
+		return "", fmt.Errorf("recv %d: unexpected result: %s", id, line)
+	}
+	return resp.Result.Content[0].Text, nil
 }
