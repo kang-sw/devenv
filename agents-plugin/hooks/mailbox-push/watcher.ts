@@ -142,22 +142,16 @@ export interface Watcher {
   recvCompleted: (key: string) => void
 }
 
-/**
- * Why a loop's signal aborted: a stop ends delivery, a rebind does not. Both
- * end the loop, but recv may already have removed mail the loop now holds.
- */
-type AbortCause = { kind: 'stop'; reason: string } | { kind: 'rebind' }
-
-function stopCause(signal: AbortSignal): string | undefined {
-  const cause = signal.reason as AbortCause | undefined
-  return cause?.kind === 'stop' ? cause.reason : undefined
-}
-
 export function createWatcher(edges: WatcherEdges): Watcher {
   let key: string | undefined
   let slug: string | undefined
   let ctrl: AbortController | undefined
   let suspended: { key: string; resume: () => void } | undefined
+  // A stop ends delivery and a rebind does not, but both only abort a loop:
+  // a loop compares this count with the one it started under to learn
+  // whether a stop came since, even when a rebind had already superseded it.
+  let stops = 0
+  let lastStop = ''
 
   /** `resumed` resolves when the model's recv for `myKey` completes, when `signal` aborts, or on `resume`. */
   function suspend(myKey: string, signal: AbortSignal): { resumed: Promise<void>; resume: () => void } {
@@ -178,6 +172,7 @@ export function createWatcher(edges: WatcherEdges): Watcher {
   async function loop(myKey: string, mySlug: string | undefined, signal: AbortSignal): Promise<void> {
     let backoff = 0
     let emptyStreak = 0
+    const stopsAtStart = stops
     const backOff = async (what: string, detail: string) => {
       // Once per failure streak: a persistent fault retries every 60s and would flood the transcript.
       if (backoff === 0) edges.notice(`${edges.label}: ${what}, retrying with backoff`)
@@ -261,9 +256,8 @@ export function createWatcher(edges: WatcherEdges): Watcher {
       const batch = formatBatch(edges.label, edges.recvTool(), myKey, mail)
       // A stop means the conversation this mail was for is gone; a rebind
       // within it still delivers, since recv already removed this mail.
-      const stopped = stopCause(signal)
-      if (stopped !== undefined) {
-        keep(`the push loop stopped: ${stopped}`, batch)
+      if (stops !== stopsAtStart) {
+        keep(`the push loop stopped: ${lastStop}`, batch)
         return
       }
       edges.log(`${edges.label}: drained ${mail.length} message(s) for ${myKey}; submitting one prompt`)
@@ -279,7 +273,7 @@ export function createWatcher(edges: WatcherEdges): Watcher {
     bind(next, nextSlug) {
       if (next === key && nextSlug === slug && ctrl && !ctrl.signal.aborted) return 'unchanged'
       const had = key !== undefined
-      ctrl?.abort({ kind: 'rebind' } satisfies AbortCause)
+      ctrl?.abort()
       key = next
       slug = nextSlug
       const mine = new AbortController()
@@ -289,7 +283,9 @@ export function createWatcher(edges: WatcherEdges): Watcher {
     },
     stop(reason) {
       if (!ctrl) return
-      ctrl.abort({ kind: 'stop', reason } satisfies AbortCause)
+      stops += 1
+      lastStop = reason
+      ctrl.abort()
       ctrl = undefined
       key = undefined
       slug = undefined

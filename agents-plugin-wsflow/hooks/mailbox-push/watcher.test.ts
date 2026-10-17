@@ -234,6 +234,27 @@ describe('direct mode', () => {
     expect(h.waits.map((x) => x.key)).toEqual(['k1', 'k2'])
   })
 
+  test('a drain superseded by a rebind and then stopped is recorded, not submitted', async () => {
+    const h = harness('direct')
+    const w = createWatcher(h.edges)
+    w.bind('k1')
+    await tick()
+    const held = deferred<DrainResult>()
+    h.heldDrains.push(held)
+    h.waits[0]!.d.resolve('mail')
+    await tick()
+    w.bind('k2')
+    await tick()
+    w.stop('session.end resume')
+    const mail = [{ reply_to: 'id:a', content: 'late' }]
+    held.resolve({ kind: 'mail', mail })
+    await tick()
+    expect(h.submitted).toEqual([])
+    expect(h.records.length).toBe(1)
+    expect(h.records[0]).toContain('(the push loop stopped: session.end resume)')
+    expect(h.records[0]).toContain(formatBatch('pkg mailbox', 'mcp__plugin_pkg_pkg__mailbox_recv', 'k1', mail))
+  })
+
   test('unparseable recv output is submitted raw inside the batch framing', async () => {
     const h = harness('direct')
     const w = createWatcher(h.edges)
