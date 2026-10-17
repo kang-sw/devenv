@@ -81,13 +81,15 @@ Mod API facts used below are from the Claude Code 2.1.302 declaration file
   advisory before milestone; a milestone waits for the advisory; usage
   observed below the latch re-arms it; any landed compaction resets it; and
   session start or resume baselines it from current usage.
-- **The lever.** A mod-registered tool taking `{ continuation: string }`
+- **The lever.** A mod-registered tool named `request_compaction` (in prose,
+  "the compaction request tool") taking `{ continuation: string }`
   (non-empty, one line) records a compaction request and returns at once; a
   call carrying `agentId` is refused (main session only, as the mailbox mod's
   `checkWatchCall`). At the next main-thread `turn.complete` the mod calls
   `$.session.compact()` with no instructions and, on success,
   `$.prompt.submit`s the continuation. Rejected: compacting inside the tool
-  call (`compact()` rejects while a turn runs).
+  call (`compact()` rejects while a turn runs); naming the tool `compact`
+  (invites expecting the context to be gone when the tool returns).
 - **A compaction landing elsewhere clears the pending compact step.** The
   mod's own `session.compact` hook, when `next(e)` resolves without `skip` for
   a `manual` or `auto` trigger or a `plugin` call not made by this lever,
@@ -117,6 +119,62 @@ Mod API facts used below are from the Claude Code 2.1.302 declaration file
   tool description and result text, the veto note, the continuation framing)
   and asserted verbatim by tests, placeholders interpolated (261006
   precedent).
+
+## Pinned Prose
+
+Asserted verbatim by tests. `{percent}` and `{n}` are rounded current usage,
+`{hard}` the rounded native auto-compact point, `{continuation}` the lever
+argument, `{reason}` the vetoing hook's skip reason. Adapted from pi 261006's
+pinned prose: the hard point is Claude's automatic compaction, and pi's
+lead-written summary preparation becomes "update durable records, then call
+the tool" because the engine writes the summary.
+
+Advisory:
+
+```text
+Context usage is {percent}% of the window (advisory point: 50%). Claude Code compacts automatically at about {hard}%.
+
+This is not an instruction to compact right now. If you are in active discussion with the human, awaiting their answer or clarification, or holding working context that would be costly to rebuild (a half-applied change or a diagnosis in progress), carry on for now. A pause after asking the human a question is not a boundary.
+
+From here on, look for a good moment to compact before {hard}%. A good moment is a natural boundary where most of what this context holds is no longer needed for the work ahead, and what is still needed can be restored cheaply after compaction from durable records (tickets, commits, notes, agenda) and the summary. Typical cases: work just landed, you are waiting only on background agents, or the next work is weakly related to the current context. When such a moment comes, first bring durable records up to date with anything still needed that only this context holds, then call the compaction request tool with a one-line continuation and end your turn. Compacting at a moment you choose keeps the work coherent; at {hard}% it happens automatically, mid-work if need be. Brief context readings will follow on the way there.
+
+If now is not such a moment, end this turn without replying and keep looking for one as you work.
+```
+
+Milestone line, appended to a tool result:
+
+```text
+Current context window: {n}% / {hard}% (automatic compaction point). Keep watching for a safe boundary to compact, as the advisory said; do not stop the current task for it.
+```
+
+Lever tool description:
+
+```text
+Request compaction of this conversation when the current turn ends. Before calling, bring durable records (tickets, notes, agenda) up to date with anything still needed that only this context holds. `continuation` is one line naming what to do next (for example "continue Phase 2 implementation"); it is sent as your next prompt after compaction. Main session only.
+```
+
+Lever tool result:
+
+```text
+Compaction requested. End your turn now without further tool calls; compaction runs when the turn ends, and your continuation resumes the work.
+```
+
+Continuation prompt, used whenever a compaction landed (the lever's own or
+another that landed first):
+
+```text
+Continue after compaction: {continuation}
+```
+
+Continuation prompt after a `{ skip }` veto:
+
+```text
+Compaction did not run ({reason}); your context is unchanged.
+Continue: {continuation}
+```
+
+The prefixes tell the lead the prompt is its own note, not a new user
+instruction.
 
 ## Constraints
 
