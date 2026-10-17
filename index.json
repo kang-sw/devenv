@@ -579,7 +579,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-17T13:02:35Z"
+        "touched_at": "2026-10-17T13:03:00Z",
+        "impl": {
+          "branch": "impl/develop/cusp-ditzy-broom"
+        }
       }
     },
     "261017-feat-claude-mailbox-active-push-mod": {
