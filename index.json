@@ -579,7 +579,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-17T09:03:39Z"
+        "touched_at": "2026-10-17T09:04:30Z",
+        "impl": {
+          "branch": "impl/develop/pupil-stack-croak"
+        }
       }
     }
   }
