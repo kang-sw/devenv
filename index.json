@@ -587,6 +587,9 @@
           "branch": "impl/develop/pupil-stack-croak"
         }
       }
+    },
+    "261017-feat-claude-mod-lead-compaction-timing": {
+      "registered_at": "2026-10-17T12:53:11Z"
     }
   }
 }
