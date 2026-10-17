@@ -10,7 +10,7 @@ related:
   261002-feat-pi-lead-ws-owned-compaction: pi lever and hard point this ticket maps onto Claude
 sage-review-design: completed
 sage-review-completeness: completed
-sage-review-design-reviewed: 2d7c55d401b76e10
+sage-review-design-reviewed: 0dea3a7c6e3c4df2
 sage-review-completeness-reviewed: 2d7c55d401b76e10
 ---
 
@@ -27,8 +27,8 @@ pi feature with the largest observed effect.
 Claude Code only has native auto compaction and the user's `/compact`; ws
 merely observes compaction through the `SessionStart(compact)` revive nudge.
 The research `261016-research-claude-mod-pi-like-compaction` settled that a
-`ws`-only plugin mod reproduces pi's timing, not pi's summary ownership. The
-mailbox push mod (`261017-feat-claude-mailbox-active-push-mod`) has since
+plugin mod, with compaction running in `ws` only, reproduces pi's timing, not
+pi's summary ownership. The mailbox push mod (`261017-feat-claude-mailbox-active-push-mod`) has since
 validated the mod path live (2026-10-17 dogfood: hooks and modules in one
 `hooks.json` both load, `$.prompt.submit` starts a turn in an idle session,
 the binding survives `/reload-plugins` through `$.store`, the push loop stops
@@ -59,13 +59,43 @@ Mod API facts used below are from the Claude Code 2.1.302 declaration file
 
 ## Decisions
 
-- **Ships in `ws` only** as a second module in `agents-plugin/hooks/hooks.json`,
-  in its own directory `agents-plugin/hooks/lead-compaction/` (entry
-  `./lead-compaction/register.ts`, named after pi's `src/lead-compaction.ts`),
-  with no wsflow copy.
-  `wsflow-mirroring.md`'s Claude Mod Mirror section gains one line naming it
-  ws-only; `TestWsflowHooksMirrorUpToDate` is unchanged (it covers
-  `mailbox-push/` only).
+- **One Claude mod source for both packages; compaction runs in `ws` only.**
+  Claude Code 2.1.302 accepts one hooks module per plugin (`claude plugin
+  validate`: "names one hooks module per plugin; a second entry is refused")
+  and refuses an event registered twice without a matcher across the files
+  one entry loads. So the mailbox push mod's directory becomes the single
+  Claude mod `agents-plugin/hooks/claude-mod/`, holding the mailbox feature
+  (moved from `mailbox-push/`, behavior unchanged) and the compaction feature
+  (from pi's `src/lead-compaction.ts`), under one entry `register.ts` that
+  registers each lifecycle event (`session.start`, `session.end`) once and
+  starts each feature from it. Both packages' `hooks.json` name
+  `./claude-mod/register.ts`, and `agents-plugin-wsflow/hooks/claude-mod/` is
+  a byte-identical copy of the whole directory. The compaction feature is on
+  only when `$.plugin.name === 'ws'` (the mailbox feature's `drainModeFor`
+  precedent): in wsflow it registers no `request_compaction` tool, submits
+  nothing, and never compacts, and any compaction hook it still registers
+  passes through `next(e)` untouched. `register(on, options)` carries no
+  plugin identity, so the gate is read inside each hook; it is a pure
+  `compactionEnabledFor(name)` unit-tested the way `drainModeFor` is.
+  Features are isolated on every shared hook: the two features' setups at
+  `session.start` run independently (neither awaits the other, and the
+  mailbox feature's early return when python is unavailable does not skip
+  compaction setup), a throw in one is logged and leaves the other running,
+  and at `session.end` a throw in the compaction reset never skips the
+  mailbox feature's stop and `$.store` delete.
+  This supersedes the research Confirmed Decision "The compaction mod ships
+  in `ws` only, not in `wsflow`" (261016, 1f59a3a43): the compaction source now
+  ships inert in wsflow inside the single Claude mod because Claude Code
+  accepts one hooks module per plugin; compaction behavior stays `ws`-only
+  through the gate (user decision, 2026-10-18).
+  `TestWsflowHooksMirrorUpToDate` covers the whole `claude-mod/` directory, and
+  `wsflow-mirroring.md`'s Claude Mod Mirror section names the directory and
+  the `ws`-only compaction gate. Rejected: a second `modules` entry (refused);
+  a ws-only entry file composing both mods with always-matching matchers on
+  the duplicated lifecycle events (a validator workaround); a ws-only
+  composer that records each mod's registrations and chains duplicates
+  (machinery that only exists to keep two mods apart); a ws-only compaction
+  module beside the mirrored mailbox module (needs one of the former).
 - **Thresholds are measured against the compaction window.** The advisory is
   a fixed 50% of the breakdown's `rawMaxTokens` in this first step, with no
   config key (a config read would need an MCP tool call the mod otherwise
@@ -234,11 +264,21 @@ new user instruction.
   call the lever.
 - The research's deferred Proposals (instructions injection on every trigger,
   a fully custom summary) are out of scope.
-- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for agents-plugin/)
-- Convention: ai-docs/manuals/wsflow-mirroring.md (declared for agents-plugin/hooks/)
+- The 261017 mailbox mod Decisions stay in force for the moved mailbox
+  feature; in particular wsflow never drains or calls tools itself.
+- Known limitation, accepted: in an organization-managed Claude Code, a
+  person-installed plugin's `session.compact` hooks do not run (2.1.302
+  `claude plugin validate` note). There the mod cannot see a compaction it did
+  not start, so a pending request can compact again right after a native auto
+  compaction, and the latch re-arms only when usage drops. No fallback is
+  added. Rejected: inferring a landed compaction from a usage drop (indirect,
+  and the cost is one redundant compaction, not lost data).
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for agents-plugin/, agents-plugin-wsflow/, agents-plugin-tool/)
+- Convention: ai-docs/manuals/wsflow-mirroring.md (declared for agents-plugin/hooks/, agents-plugin-wsflow/)
 
 ## Prior Decisions
 
+- 261016-research-claude-mod-pi-like-compaction (2026-10-17, Confirmed Decisions): "The compaction mod ships in `ws` only, not in `wsflow` (unlike the mailbox mod, which ships in both)." — bearing: constrains (superseded by the first Decision: the source ships inert in wsflow; behavior stays ws-only)
 - 261016-research-claude-mod-pi-like-compaction (2026-10-16, Confirmed Decisions): "First-step scope mirrors pi's timing, not pi's summary ownership: - Advisory (50%) and milestone nudges are `$.prompt.submit`ted at `turn.complete`, driven from `$.session.usage()`." — bearing: constrains
 - 261007-feat-pi-compaction-milestone-wake-and-reread-lists (2026-10-07, Decisions): "Move milestone delivery in `fireCompactionTriggers` from the tool-turn `steer` to `agent_end` (`followUp`, `triggerTurn: true`)" (the tool-turn steer was observed in dogfooding to never trigger compaction) — bearing: supports
 - 261006-feat-pi-compaction-advisory-standing-intent-milestones (2026-10-06, Decisions): "A milestone is not deliverable while a lower advisory crossing is still undelivered: it stays pending" — bearing: supports
@@ -252,11 +292,11 @@ new user instruction.
 
 | fact | value | evidence |
 |---|---|---|
-| scope.span | multi-file | agents-plugin/hooks/hooks.json, new agents-plugin/hooks/lead-compaction/, agents-plugin/tests/test_claude_hooks_manifest.py, ai-docs/manuals/wsflow-mirroring.md |
-| scope.surface | public-interface | new model-callable request_compaction tool plus pinned model-facing prose; hooks.json modules list gains a second entry |
+| scope.span | multi-file | agents-plugin/hooks/{hooks.json,claude-mod/ (from mailbox-push/)}, agents-plugin-wsflow/hooks/{hooks.json,claude-mod/}, agents-plugin/tests/test_claude_hooks_manifest.py, agents-plugin-wsflow/tests/test_wsflow_claude_hooks_manifest.py, agents-plugin-tool/internal/wsrsrc/wsflow_hooks_mirror_test.go, ai-docs/manuals/wsflow-mirroring.md |
+| scope.surface | public-interface | new model-callable request_compaction tool plus pinned model-facing prose; both packages' single hooks module moves to ./claude-mod/register.ts |
 | scope.new_public_symbol | yes | request_compaction (mod-registered tool) |
 | scope.new_type_contract | yes | request_compaction input { continuation: string } non-empty one line |
-| scope.test_surface | new-files | engine-backed mod tests modeled on agents-plugin/hooks/mailbox-push/engine.test.ts; agents-plugin/tests/test_claude_hooks_manifest.py test_modules_name_existing_mod_sources pins the modules list and gains the second entry |
+| scope.test_surface | new-files | engine-backed compaction tests beside the moved mailbox tests (agents-plugin/hooks/mailbox-push/engine.test.ts, watcher.test.ts); test_modules_name_existing_mod_sources in both packages' manifest tests and TestWsflowHooksMirrorUpToDate change to the claude-mod path |
 | complexity.reuse_points | confirmed | agents-plugin/hooks/mailbox-push/register.ts#L63-L66 checkWatchCall main-session-only refusal, $.store usage, and engine test harness |
 | complexity.side_effect_risk | high | mod submits prompts and compacts live sessions |
 | risk.correctness | high | stateful latch, pending-request retry across rejected compact(), and races with native auto compaction and mailbox-push turns |
@@ -268,13 +308,32 @@ new user instruction.
 
 ### Phase 1: Advisory, milestones, lever, and continuation
 
-Implement the Decisions in one landing in `agents-plugin/hooks/`.
+Implement the Decisions in one landing: move `mailbox-push/` into
+`agents-plugin/hooks/claude-mod/` with the single entry, fold the draft
+`agents-plugin/hooks/lead-compaction/` (52d7f6d0f) into it as the compaction
+feature and delete the draft directory, and resync the wsflow copy
+byte-identically. Reword text that names `mailbox-push/` or the single
+package-name compare in the same landing: the `description` in
+`agents-plugin/hooks/hooks.json`, the entry's header comment (two `'ws'`
+compares now), the `test_wsflow_claude_hooks_manifest.py` docstring, the
+`wsflow_hooks_mirror_test.go` comments and rsync hint, and the rsync command
+in `wsflow-mirroring.md`.
 
-Verification: `claude plugin test agents-plugin` passes with engine and unit
-tests for each threshold, latch, lever, and retry behavior and with the pinned
-prose asserted verbatim; `python3 -m unittest discover agents-plugin/tests`
-passes with `test_modules_name_existing_mod_sources` updated for the second
-module; then a live dogfood checks the advisory wake turn, a milestone wake
+Verification: `claude plugin validate` and `claude plugin test` pass for both
+`agents-plugin` and `agents-plugin-wsflow`, with engine and unit tests for each
+threshold, latch, lever, and retry behavior, the pinned prose asserted
+verbatim, the existing mailbox tests passing in both packages (the two that
+pin the exact registered-tool list narrowed to the mailbox tool, and their
+test world answering every engine call the compaction setup makes), and
+tests that under a non-`ws` plugin name no `request_compaction` tool is
+registered and no prompt is submitted or compaction started (these run in
+`claude plugin test agents-plugin-wsflow`, since the testing kit has no
+plugin-name override; ws-behavior tests branch on the package identity); `python3 -m unittest discover
+agents-plugin/tests` and `agents-plugin-wsflow/tests` pass with
+`test_modules_name_existing_mod_sources` pinning `./claude-mod/register.ts`;
+`go test -race ./internal/wsrsrc/ -run TestWsflowHooksMirrorUpToDate` passes
+under `agents-plugin-tool/` over the whole `claude-mod/` directory; then a live
+dogfood checks the advisory wake turn, a milestone wake
 turn, a lever compaction followed by exactly one
 continuation turn carrying the revive nudge, and lever retry while a mailbox
 push holds the session.
