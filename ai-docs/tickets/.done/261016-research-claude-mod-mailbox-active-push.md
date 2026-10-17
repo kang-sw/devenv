@@ -5,6 +5,7 @@ related:
   260919-feat-mailbox-arm-wait-harness-include: arm-the-wait include whose wording an actionable child would change
   260914-feat-ws-pi-mailbox-native-steer-push: pi active push this mirrors on Claude
   261016-research-claude-mod-pi-like-compaction: sequenced after this research validates the mod path
+completed: 2026-10-18
 ---
 
 # Claude Code mailbox active push through a plugin mod
@@ -317,3 +318,8 @@ owner, per `rebindMailboxOwnerAtFerrule`):
   chose one child so the removal lands with its replacement.
 - **Emitting one push per envelope.** One batch per drain, as pi settled after
   `261009-bug-pi-mailbox-busy-drain-splits-into-per-envelope-steers`.
+
+
+## Resolution (2026-10-18)
+
+Implemented by 261017-feat-claude-mailbox-active-push-mod (merged 2d15886c0), hardened by the post-drain robustness bug ticket, and folded into the single Claude mod by 261017-feat-claude-mod-lead-compaction-timing (merged 2f4046cb9). Live dogfood on Claude Code 2.1.302 / macOS answered these Open Questions: classic hooks and modules both run from one hooks.json; an idle drain starts a turn; mail arriving mid-turn is submitted as its own turn after the running one; the binding survives /reload-plugins; /clear does not drain old-key mail. Left unanswered at close: the prompting-mode permission dialog for `$.mcp.call` was explicitly skipped by the user (2026-10-18), and whether `$.process` works in the desktop app or IDE-hosted sessions was not probed.
