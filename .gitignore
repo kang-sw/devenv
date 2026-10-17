@@ -32,3 +32,5 @@ ai-docs/presentation/package-lock.json
 ai-docs/presentation/*.pptx
 ai-docs/presentation/*.pdf
 ai-docs/presentation/slides/
+agents-plugin/.claude-plugin/types/
+agents-plugin-wsflow/.claude-plugin/types/

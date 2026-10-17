@@ -1,17 +1,6 @@
 {
-  "description": "Turn-boundary Stop hook for the cross-session mailbox wake (asks the model to drain unread mail when this session's own WS_MAILBOX inbox has any queued), and a SessionStart(compact) hook that nudges a compacted lead to run lead-revive before anything else. Claude Code auto-discovers this file by its hooks/hooks.json path; there is no plugin.json pointer to it (contrast the Codex adapter, whose manifest names its hooks file explicitly).",
+  "description": "A SessionStart(compact) hook that nudges a compacted lead to run lead-revive before anything else, and the mailbox push mod (mailbox-push/register.ts): once the agent binds its session key through the mod's mailbox watch tool, arriving cross-session mail starts a turn even in an idle session. Claude Code auto-discovers this file by its hooks/hooks.json path; there is no plugin.json pointer to it (contrast the Codex adapter, whose manifest names its hooks file explicitly).",
   "hooks": {
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/bin/ws-mcp-launcher.py\" mailbox claude-stop-hook || true",
-            "timeout": 30
-          }
-        ]
-      }
-    ],
     "SessionStart": [
       {
         "matcher": "compact",
@@ -24,5 +13,6 @@
         ]
       }
     ]
-  }
+  },
+  "modules": ["./mailbox-push/register.ts"]
 }

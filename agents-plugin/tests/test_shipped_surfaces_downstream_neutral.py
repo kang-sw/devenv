@@ -54,6 +54,7 @@ TEXT_TREES = (
     "agents-plugin/.codex-plugin/hooks.json",
     "agents-plugin/hooks",
     "agents-plugin/claude-agents",
+    "agents-plugin-wsflow/hooks",
     "agents-plugin-wsflow/rsrc",
     "agents-plugin-wsflow/skills",
     "agents-plugin-wsflow/claude-agents",
