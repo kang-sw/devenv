@@ -1,5 +1,5 @@
 {
-  "description": "A SessionStart(compact) hook that nudges a compacted lead to run lead-revive before anything else, and the mailbox push mod (mailbox-push/register.ts): once the agent binds its session key through the mod's mailbox watch tool, arriving cross-session mail starts a turn even in an idle session. Claude Code auto-discovers this file by its hooks/hooks.json path; there is no plugin.json pointer to it (contrast the Codex adapter, whose manifest names its hooks file explicitly).",
+  "description": "A SessionStart(compact) hook that nudges a compacted lead to run lead-revive before anything else, and the Claude mod (claude-mod/register.ts), the one hooks module Claude Code accepts per plugin. Its mailbox push feature: once the agent binds its session key through the mod's mailbox watch tool, arriving cross-session mail starts a turn even in an idle session. Its lead compaction timing feature (ws only): advisory and milestone wake turns before native auto compaction, and a compaction request tool the lead calls at a boundary of its choosing. Claude Code auto-discovers this file by its hooks/hooks.json path; there is no plugin.json pointer to it (contrast the Codex adapter, whose manifest names its hooks file explicitly).",
   "hooks": {
     "SessionStart": [
       {
@@ -14,5 +14,5 @@
       }
     ]
   },
-  "modules": ["./mailbox-push/register.ts"]
+  "modules": ["./claude-mod/register.ts"]
 }

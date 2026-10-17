@@ -1,4 +1,6 @@
-"""wsflow's Claude hooks/hooks.json carries only the mailbox push mod: no
+"""wsflow's Claude hooks/hooks.json carries only the Claude mod, shared
+byte-identically with the flagship package (its mailbox push feature runs
+here; its lead compaction timing feature is ws-only and stays inert): no
 command hooks (the flagship package's SessionStart(compact) revive nudge is
 not shipped here), and every listed module exists next to the file.
 """
@@ -15,7 +17,7 @@ class WsflowClaudeHooksManifestTest(unittest.TestCase):
     def test_hooks_json_lists_only_existing_modules(self):
         doc = json.loads(HOOKS_PATH.read_text(encoding="utf-8"))
         self.assertEqual(set(doc), {"modules"})
-        self.assertEqual(doc["modules"], ["./mailbox-push/register.ts"])
+        self.assertEqual(doc["modules"], ["./claude-mod/register.ts"])
         for module in doc["modules"]:
             self.assertTrue(
                 (HOOKS_PATH.parent / module).is_file(),

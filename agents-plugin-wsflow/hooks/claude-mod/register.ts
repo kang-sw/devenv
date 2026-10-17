@@ -1,5 +1,7 @@
 import type { HookStream, ProcessSpawnChunk, ProcessSpawnResult, Register, ToolCallResult } from 'claude-code'
 
+import { compactionEnabledFor, createCompaction } from './compaction'
+import { LEVER_DESCRIPTION, TOOL_NAME as LEVER_TOOL } from './timing'
 import {
   createWatcher,
   mapWaitExit,
@@ -11,16 +13,28 @@ import {
   type WaitOutcome,
 } from './watcher'
 
-// Claude Code mod giving the cross-session mailbox an active push: the agent
-// binds its session key through the mod-registered mailbox watch tool, the
-// mod loops the one-shot `mailbox wait` as a peek-only signal, and arriving
-// mail starts a turn through $.prompt.submit (see watcher.ts for the loop).
+// The Claude Code mod: the one hooks module a package's hooks.json names,
+// carrying two features.
+//
+// - Mailbox push: the agent binds its session key through the mod-registered
+//   mailbox watch tool, the mod loops the one-shot `mailbox wait` as a
+//   peek-only signal, and arriving mail starts a turn through
+//   $.prompt.submit (see watcher.ts for the loop).
+// - Lead compaction timing: advisory and milestone wake turns before native
+//   auto compaction, and the compaction request tool (see compaction.ts).
+//
+// Claude Code accepts one hooks module per plugin and one unmatched hook per
+// event in it, so the lifecycle events (session.start, session.end) are
+// registered once here and start each feature in isolation: neither setup
+// awaits the other, and a throw in one is logged and leaves the other running.
 //
 // One source serves every package that ships it (this directory is mirrored
 // byte-identically), so package identity is read from the engine at runtime:
-// $.plugin.name picks the drain mode, $.plugin.root locates the launcher, and
-// $.mcp.connect(<plugin name>) resolves the MCP server. The one package name
-// spelled here is the one drainModeFor compares against; no server name is.
+// $.plugin.name picks the drain mode and gates the compaction feature,
+// $.plugin.root locates the launcher, and $.mcp.connect(<plugin name>)
+// resolves the MCP server. The one package name the mod spells is the one
+// drainModeFor (here) and compactionEnabledFor (compaction.ts) compare
+// against; no server name is spelled.
 
 export const TOOL_NAME = 'mailbox_watch'
 /** A finite window, as the pi adapter uses, so an orphaned wait cannot outlive its session. */
@@ -246,91 +260,122 @@ export const register: Register = (on) => {
     return target.bind(key, slug)
   }
 
+  // Compaction feature state; its tool name is set at session.start, and only
+  // under the package compactionEnabledFor admits.
+  const compaction = createCompaction()
+  let leverTool: string | undefined
+
   on('session.start', async ($, e, next) => {
-    stopWatcher('session.start again')
-    watcher = undefined
     const label = `${$.plugin.name} mailbox`
-    // $.process is CLI only: without it there is no wait to run, so the tool
-    // stays unregistered and the agent falls back to its shell wait.
-    try {
-      const probe = await $.process.run(['python3', '--version'], { timeoutMs: 10_000 })
-      if (probe.exitCode !== 0) throw new Error(`python3 --version exited ${probe.exitCode}`)
-    } catch (err) {
-      $.ui.log(`${label}: push unavailable here (${String(err)}); ${TOOL_NAME} not registered`, { to: 'debug' })
-      return next(e)
-    }
-    const launcher = launcherPath($.plugin.root)
-    const mode = drainModeFor($.plugin.name)
-    // WS_MAILBOX is the fallback slug: a re-derived auto-minted address would
-    // not match the server's, so the direct mode asks the server for the
-    // key's own address (lookup_peers self.address) through the same tool
-    // path its drain uses. The notice mode makes no tool calls of its own.
-    const envSlug = (await $.env.get('WS_MAILBOX'))?.trim() || undefined
-    resolveSlug = async (key) => {
-      if (mode !== 'direct' || !lookupTool) return envSlug
+    const mailboxSetup = (async () => {
+      stopWatcher('session.start again')
+      watcher = undefined
+      // $.process is CLI only: without it there is no wait to run, so the tool
+      // stays unregistered and the agent falls back to its shell wait.
       try {
-        const res = await $.tool.call({
-          tool: lookupTool as `mcp__${string}__${string}`,
-          session_key: key,
-          scope: 'worktree',
-          format: 'json',
-        })
-        return selfAddress(res) ?? envSlug
+        const probe = await $.process.run(['python3', '--version'], { timeoutMs: 10_000 })
+        if (probe.exitCode !== 0) throw new Error(`python3 --version exited ${probe.exitCode}`)
       } catch (err) {
-        $.ui.log(`${label}: slug lookup failed: ${String(err)}`, { to: 'debug' })
-        return envSlug
+        $.ui.log(`${label}: push unavailable here (${String(err)}); ${TOOL_NAME} not registered`, { to: 'debug' })
+        return
       }
-    }
-    const created = createWatcher({
-      mode,
-      label,
-      wait: async (key, slug, signal) => {
-        if (signal.aborted) return 'stopped'
-        const stream = $.process.spawn({ argv: waitArgv(launcher, key, slug) })
-        return consumeWait(stream, signal, (text) => $.ui.log(`${label}: ${text}`, { to: 'debug' }))
-      },
-      drain: async (key) => {
-        if (!recvTool) return { kind: 'failed', reason: 'MCP server not resolved' }
-        return classifyRecv(await $.tool.call({ tool: recvTool as `mcp__${string}__${string}`, session_key: key, format: 'json' }))
-      },
-      submit: async (text) => {
-        const res = await $.prompt.submit({ text })
-        if (res.drop !== undefined) throw new Error(`prompt dropped: ${res.drop}`)
-      },
-      recvTool: () => recvTool ?? 'mailbox recv',
-      sleep: (ms, signal) => abortableSleep((d, fn) => $.clock.after(d, fn), ms, signal),
-      notice: (text) => $.ui.log(text),
-      record: (text) => $.ui.log(text),
-      log: (text) => $.ui.log(text, { to: 'debug' }),
-    })
-    watcher = created
-    // A bind from here on is newer than the restore below, which yields to it.
-    const restoreSeq = armSeq
-    const registered = await $.tool.register({
-      name: TOOL_NAME,
-      description:
-        `Bind ${$.plugin.name} cross-session mailbox push to this session: pass your own session_key. ` +
-        'While bound, arriving mail starts a new turn even when the session is idle, so no background mailbox wait is needed. ' +
-        'The same key again is a no-op; a different key rebinds. Main session only.',
-      inputSchema: {
-        type: 'object',
-        properties: { session_key: { type: 'string', description: 'Your own session key.' } },
-        required: ['session_key'],
-      },
-      isDeferred: false,
-    })
-    toolName = registered.tool
-    // Restore a binding a hot reload dropped, without delaying the first prompt.
-    const restoreFrom = STORE_PREFIX + (await $.session.id())
-    const current = () => watcher === created && armSeq === restoreSeq
-    void (async () => {
-      const key = storedKey(await $.store.get(restoreFrom))
-      if (!key || !current()) return
-      const conn = await $.mcp.connect($.plugin.name)
-      if (!conn.isConnected || !current()) return
-      useServer(conn.server)
-      $.ui.log(`${label}: ${await arm(created, key)} ${key} (restored)`, { to: 'debug' })
-    })().catch((err) => $.ui.log(`${label}: restore failed: ${String(err)}`, { to: 'debug' }))
+      const launcher = launcherPath($.plugin.root)
+      const mode = drainModeFor($.plugin.name)
+      // WS_MAILBOX is the fallback slug: a re-derived auto-minted address would
+      // not match the server's, so the direct mode asks the server for the
+      // key's own address (lookup_peers self.address) through the same tool
+      // path its drain uses. The notice mode makes no tool calls of its own.
+      const envSlug = (await $.env.get('WS_MAILBOX'))?.trim() || undefined
+      resolveSlug = async (key) => {
+        if (mode !== 'direct' || !lookupTool) return envSlug
+        try {
+          const res = await $.tool.call({
+            tool: lookupTool as `mcp__${string}__${string}`,
+            session_key: key,
+            scope: 'worktree',
+            format: 'json',
+          })
+          return selfAddress(res) ?? envSlug
+        } catch (err) {
+          $.ui.log(`${label}: slug lookup failed: ${String(err)}`, { to: 'debug' })
+          return envSlug
+        }
+      }
+      const created = createWatcher({
+        mode,
+        label,
+        wait: async (key, slug, signal) => {
+          if (signal.aborted) return 'stopped'
+          const stream = $.process.spawn({ argv: waitArgv(launcher, key, slug) })
+          return consumeWait(stream, signal, (text) => $.ui.log(`${label}: ${text}`, { to: 'debug' }))
+        },
+        drain: async (key) => {
+          if (!recvTool) return { kind: 'failed', reason: 'MCP server not resolved' }
+          return classifyRecv(await $.tool.call({ tool: recvTool as `mcp__${string}__${string}`, session_key: key, format: 'json' }))
+        },
+        submit: async (text) => {
+          const res = await $.prompt.submit({ text })
+          if (res.drop !== undefined) throw new Error(`prompt dropped: ${res.drop}`)
+        },
+        recvTool: () => recvTool ?? 'mailbox recv',
+        sleep: (ms, signal) => abortableSleep((d, fn) => $.clock.after(d, fn), ms, signal),
+        notice: (text) => $.ui.log(text),
+        record: (text) => $.ui.log(text),
+        log: (text) => $.ui.log(text, { to: 'debug' }),
+      })
+      watcher = created
+      // A bind from here on is newer than the restore below, which yields to it.
+      const restoreSeq = armSeq
+      const registered = await $.tool.register({
+        name: TOOL_NAME,
+        description:
+          `Bind ${$.plugin.name} cross-session mailbox push to this session: pass your own session_key. ` +
+          'While bound, arriving mail starts a new turn even when the session is idle, so no background mailbox wait is needed. ' +
+          'The same key again is a no-op; a different key rebinds. Main session only.',
+        inputSchema: {
+          type: 'object',
+          properties: { session_key: { type: 'string', description: 'Your own session key.' } },
+          required: ['session_key'],
+        },
+        isDeferred: false,
+      })
+      toolName = registered.tool
+      // Restore a binding a hot reload dropped, without delaying the first prompt.
+      const restoreFrom = STORE_PREFIX + (await $.session.id())
+      const current = () => watcher === created && armSeq === restoreSeq
+      void (async () => {
+        const key = storedKey(await $.store.get(restoreFrom))
+        if (!key || !current()) return
+        const conn = await $.mcp.connect($.plugin.name)
+        if (!conn.isConnected || !current()) return
+        useServer(conn.server)
+        $.ui.log(`${label}: ${await arm(created, key)} ${key} (restored)`, { to: 'debug' })
+      })().catch((err) => $.ui.log(`${label}: restore failed: ${String(err)}`, { to: 'debug' }))
+    })().catch((err) => $.ui.log(`${label}: setup failed: ${String(err)}`, { to: 'debug' }))
+
+    const compactionSetup = (async () => {
+      if (!compactionEnabledFor($.plugin.name)) return
+      compaction.start({
+        submit: (text) => $.prompt.submit({ text }),
+        compact: () => $.session.compact(),
+        after: (fn) => void $.clock.after(0, fn),
+        log: (text, to) => $.ui.log(text, { to }),
+      })
+      const registered = await $.tool.register({
+        name: LEVER_TOOL,
+        description: LEVER_DESCRIPTION,
+        inputSchema: {
+          type: 'object',
+          properties: { continuation: { type: 'string' } },
+          required: ['continuation'],
+        },
+        isDeferred: false,
+      })
+      leverTool = registered.tool
+    })().catch((err) => $.ui.log(`ws compaction: setup failed (${String(err)}); ${LEVER_TOOL} not registered`, { to: 'debug' }))
+
+    // Both registrations are awaited, so each tool is listed by turn one.
+    await Promise.all([mailboxSetup, compactionSetup])
     return next(e)
   })
 
@@ -371,16 +416,73 @@ export const register: Register = (on) => {
     next.called ? { isError: true, result: undefined, text: 'mailbox recv failed' } : next(e),
   )
 
-  // Every end reason stops the loop: after `clear` or `resume` the process
-  // goes on under another session id, and a loop still bound to the old key
-  // would drain its mail into an unrelated conversation. Compaction is not a
-  // session end, so it keeps the binding.
+  on('tool.call', { tool: /__request_compaction$/ }, async ($, e, next) => {
+    if (!compactionEnabledFor($.plugin.name) || e.tool !== leverTool) return next(e)
+    return compaction.lever(e.agentId, (e as { continuation?: unknown }).continuation)
+  }).catch(($, e, next) => (next.called ? next(e) : { deny: `${LEVER_TOOL}: the compaction request hook failed; see the debug log.` }))
+
+  // Pushed after each main-thread turn (and on rate-limit moves); the plain
+  // figures cost nothing, and the breakdown is read only when the feature's
+  // cache is empty (session start or end, a landed compaction) or the window
+  // changed.
+  on('session.measure', async ($, e, next) => {
+    if (!compactionEnabledFor($.plugin.name)) return next(e)
+    const res = await next(e)
+    try {
+      await compaction.measure(e.context, () => $.session.usage({ breakdown: 'summary' }))
+    } catch (err) {
+      $.ui.log(`ws compaction: usage observation failed: ${String(err)}`, { to: 'debug' })
+    }
+    return res
+  })
+
+  on('turn.complete', async ($, e, next) => {
+    if (!compactionEnabledFor($.plugin.name)) return next(e)
+    const res = await next(e)
+    try {
+      compaction.turnComplete(e.agentId, e.reason)
+    } catch (err) {
+      $.ui.log(`ws compaction: turn end handling failed: ${String(err)}`, { to: 'debug' })
+    }
+    return res
+  })
+
+  // Observes every compaction without changing it; an observer never vetoes,
+  // so a failure replays what settled beneath, or lets it run.
+  on('session.compact', async ($, e, next) => {
+    if (!compactionEnabledFor($.plugin.name)) return next(e)
+    const res = await next(e)
+    try {
+      compaction.compacted(e.trigger, e.agentId, res)
+    } catch (err) {
+      $.ui.log(`ws compaction: compaction observation failed: ${String(err)}`, { to: 'debug' })
+    }
+    return res
+  }).catch(($, e, next) => next(e))
+
+  // Each feature ends in isolation, so a throw in the compaction reset never
+  // skips the mailbox stop and its $.store delete.
   on('session.end', async ($, e, next) => {
-    stopWatcher(`session.end ${e.reason}`)
+    // Mailbox: every end reason stops the loop: after `clear` or `resume` the
+    // process goes on under another session id, and a loop still bound to the
+    // old key would drain its mail into an unrelated conversation. Compaction
+    // is not a session end, so it keeps the binding.
+    try {
+      stopWatcher(`session.end ${e.reason}`)
+    } catch (err) {
+      $.ui.log(`${$.plugin.name} mailbox: stop failed: ${String(err)}`, { to: 'debug' })
+    }
     try {
       await $.store.delete(STORE_PREFIX + e.sessionId)
     } catch {
       // A leftover entry only re-binds a reload of that ended session.
+    }
+    // Compaction: every end reason starts the conversation's state over; the
+    // next conversation baselines the latch from its first usage.
+    try {
+      if (compactionEnabledFor($.plugin.name)) compaction.end(e.reason)
+    } catch (err) {
+      $.ui.log(`ws compaction: reset failed: ${String(err)}`, { to: 'debug' })
     }
     return next(e)
   })

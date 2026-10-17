@@ -102,6 +102,9 @@ const waitTail = (key: string, slug?: string) => ['mailbox', 'wait', '--session-
 /** The transcript (user-visible) lines the mod logged. */
 const transcript = (w: { logs: { text: string; to: string }[] }) => w.logs.filter((l) => l.to === 'transcript').map((l) => l.text)
 
+/** The mailbox tools among every registration (the compaction feature registers its own in ws). */
+const mailboxTools = (w: { registered: string[] }) => w.registered.filter((name) => name.startsWith('mailbox_'))
+
 const recvName = (plugin: string) => `mcp__plugin_${plugin}_${plugin}__mailbox_recv`
 const watchName = (plugin: string) => `mcp__${plugin}__mailbox_watch`
 
@@ -127,7 +130,7 @@ async function modelRecv($: Engine, w: ReturnType<typeof world>, key: string, an
 test('bind spawns one finite wait from the plugin root; the same key is a no-op', async ($, on) => {
   const w = world(on)
   await start($, w)
-  expect(w.registered).toEqual(['mailbox_watch'])
+  expect(mailboxTools(w)).toEqual(['mailbox_watch'])
   const bound = await bind($, w, 'k1')
   expect(String(bound.result)).toContain('bound')
   expect(w.spawns.length).toBe(1)
@@ -211,7 +214,7 @@ test('a reload re-binds from the stored key without an agent call', async ($, on
 test('no tool is registered where host commands are unavailable', async ($, on) => {
   const w = world(on, { processOk: false })
   await start($, w)
-  expect(w.registered).toEqual([])
+  expect(mailboxTools(w)).toEqual([])
 })
 
 test('an error exit backs off instead of respawning at once', async ($, on) => {
