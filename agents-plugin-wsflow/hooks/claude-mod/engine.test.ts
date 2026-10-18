@@ -704,7 +704,7 @@ test('ws records mail still queued for the turn when the session ends', async ($
   expect(record).toContain('(the push loop stopped: session.end clear)')
 })
 
-test('mail queued during a tool call the person interrupts stays queued and is submitted at the turn end', { plugins: [interrupter] }, async ($, on) => {
+test('mail queued during a tool call the person interrupts is appended at that boundary; the turn end submits nothing for it', { plugins: [interrupter] }, async ($, on) => {
   const w = world(on)
   await start($, w)
   await bind($, w, 'k1')
@@ -712,19 +712,21 @@ test('mail queued during a tool call the person interrupts stays queued and is s
   await arrive(w)
   await $.tool.call({ tool: 'Bash', command: INTERRUPT } as never)
   await w.clock.advance(100)
-  expect(w.appended).toEqual([])
+  // The row rides the person's next prompt: the host starts no plugin turn after a stop.
+  expect(w.appended.length).toBe(1)
+  expect(w.appended[0]).toContain(delivered(w))
   await turnEnd($, w, { reason: 'aborted' })
-  expect(w.appended).toEqual([])
-  expect(w.prompts.length).toBe(1)
-  expect(w.prompts[0]).toContain(delivered(w))
+  expect(w.appended.length).toBe(1)
+  expect(w.prompts).toEqual([])
 })
 
-test('a turn-end submit the host drops after an interrupt is appended as a row, not recorded as lost', async ($, on) => {
+test('mail queued after the last tool boundary: a turn-end submit the host drops after an interrupt is appended as a row, not recorded as lost', async ($, on) => {
   const w = world(on)
   await start($, w)
   await bind($, w, 'k1')
   await turnStart($)
   await arrive(w)
+  // No tool boundary follows the arrival, so the mail is still queued at the turn end.
   w.dropSubmits = 1
   await turnEnd($, w, { reason: 'aborted' })
   expect(w.prompts).toEqual([])
