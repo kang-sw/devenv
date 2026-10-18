@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 6b98cd8a9a9dbc83
 sage-review-completeness-reviewed: 6b98cd8a9a9dbc83
+completed: 2026-10-18
 ---
 
 # Revive key adoption and mailbox auto-bind in the Claude mod
