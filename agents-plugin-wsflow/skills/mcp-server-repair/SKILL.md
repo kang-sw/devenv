@@ -7,11 +7,16 @@ description: The wsflow MCP server is disconnected, failed to start, or not runn
 
 ## Invariants
 
-- This skill makes no MCP call; it must run with the MCP server down, so every step here uses `wsflow-cli`, never a tool call.
+- This skill makes no call to the dropped server's tools; it must run with that server down, so every step here uses `wsflow-cli` or the reconnect request tool, which the plugin serves apart from that server.
 - Keep executing the interrupted workflow through `wsflow-cli`; do not abandon the task because the tools vanished from the list.
-- The agent cannot re-enable the MCP server itself; relay the reconnect steps to the user and keep working meanwhile.
+- Without the reconnect request tool, or after it reported failure, the agent cannot re-enable the MCP server itself; relay the reconnect steps to the user and keep working meanwhile.
 - Map every `wsflow/x.y(a: b)` call to `wsflow-cli call x.y '{"a": "b"}'`: same tool name, arguments collapsed into one JSON object.
 - A stale runtime can make the first `wsflow-cli` call slow because repair runs on cold start; treat that delay as expected, not a failure.
+
+## On: the reconnect request tool listed
+
+- When the harness lists the `request_mcp_reconnect` tool, call it before anything below, with a one-line `continuation` naming the interrupted step; the reconnect outcome arrives with that continuation.
+- After a failure continuation for this drop, go straight to the CLI fallback and the Reconnect Steps below without calling the tool again: a reconnect that just failed fails the same way.
 
 ## On: tools missing or a call failing to connect
 
@@ -27,7 +32,7 @@ description: The wsflow MCP server is disconnected, failed to start, or not runn
 
 ## On: relaying reconnect steps to the user
 
-- Hand the user the Reconnect Steps template verbatim; keep making progress through `wsflow-cli` until they confirm the server is back.
+- When the reconnect request tool is absent or reported failure, hand the user the Reconnect Steps template verbatim; keep making progress through `wsflow-cli` until they confirm the server is back.
 
 ## Templates
 

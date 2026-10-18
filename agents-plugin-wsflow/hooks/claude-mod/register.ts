@@ -1,6 +1,7 @@
 import type { HookStream, ProcessSpawnChunk, ProcessSpawnResult, Register, ToolCallResult } from 'claude-code'
 
 import { compactionEnabledFor, createCompaction } from './compaction'
+import { createReconnect, reconnectDescription, TOOL_NAME as RECONNECT_TOOL } from './reconnect'
 import { LEVER_DESCRIPTION, TOOL_NAME as LEVER_TOOL } from './timing'
 import {
   createWatcher,
@@ -14,7 +15,7 @@ import {
 } from './watcher'
 
 // The Claude Code mod: the one hooks module a package's hooks.json names,
-// carrying two features.
+// carrying three features.
 //
 // - Mailbox push: the agent binds its session key through the mod-registered
 //   mailbox watch tool, the mod loops the one-shot `mailbox wait` as a
@@ -22,17 +23,22 @@ import {
 //   $.prompt.submit (see watcher.ts for the loop).
 // - Lead compaction timing: advisory and milestone wake turns before native
 //   auto compaction, and the compaction request tool (see compaction.ts).
+// - MCP reconnect lever: a tool the model calls when the plugin's MCP server
+//   has gone, and `/mcp reconnect` at the next main-thread turn end (see
+//   reconnect.ts).
 //
 // Claude Code accepts one hooks module per plugin and one unmatched hook per
-// event in it, so the lifecycle events (session.start, session.end) are
-// registered once here and start each feature in isolation: neither setup
-// awaits the other, and a throw in one is logged and leaves the other running.
+// event in it, so the lifecycle events (session.start, session.end,
+// turn.complete) are registered once here and drive each feature in
+// isolation: no setup awaits another, and a throw in one is logged and leaves
+// the others running.
 //
 // One source serves every package that ships it (this directory is mirrored
 // byte-identically), so package identity is read from the engine at runtime:
 // $.plugin.name picks the drain mode and gates the compaction feature,
 // $.plugin.root locates the launcher, and $.mcp.connect(<plugin name>)
-// resolves the MCP server. The one package name the mod spells is the one
+// resolves the MCP server, at session.start for every feature (a dead server
+// cannot be resolved later). The one package name the mod spells is the one
 // drainModeFor (here) and compactionEnabledFor (compaction.ts) compare
 // against; no server name is spelled.
 
@@ -247,9 +253,14 @@ export const register: Register = (on) => {
     watcher?.stop(reason)
   }
 
-  const useServer = (server: string) => {
-    recvTool = mcpToolName(server, 'mailbox_recv')
-    lookupTool = mcpToolName(server, 'mailbox_lookup_peers')
+  // The plugin's MCP server name, shared by every feature: resolved at
+  // session.start, again by a bind and after a reconnect, and kept while the
+  // server is down, when $.mcp.connect can no longer resolve it.
+  let server: string | undefined
+  const useServer = (resolved: string) => {
+    server = resolved
+    recvTool = mcpToolName(resolved, 'mailbox_recv')
+    lookupTool = mcpToolName(resolved, 'mailbox_lookup_peers')
   }
 
   /** Resolve `key`'s slug, then bind it unless a newer bind or a stop came in meanwhile. */
@@ -265,8 +276,22 @@ export const register: Register = (on) => {
   const compaction = createCompaction()
   let leverTool: string | undefined
 
+  // Reconnect feature state; its tool name is set at session.start.
+  const reconnect = createReconnect()
+  let reconnectTool: string | undefined
+
   on('session.start', async ($, e, next) => {
     const label = `${$.plugin.name} mailbox`
+    const resolveServer = async () => {
+      const conn = await $.mcp.connect($.plugin.name)
+      if (conn.isConnected) useServer(conn.server)
+      return conn
+    }
+    // Not awaited, so a slow server start never delays the first prompt.
+    const resolved = resolveServer().catch((err) => {
+      $.ui.log(`${$.plugin.name} mod: MCP server not resolved at start: ${String(err)}`, { to: 'debug' })
+      return undefined
+    })
     const mailboxSetup = (async () => {
       stopWatcher('session.start again')
       watcher = undefined
@@ -346,9 +371,8 @@ export const register: Register = (on) => {
       void (async () => {
         const key = storedKey(await $.store.get(restoreFrom))
         if (!key || !current()) return
-        const conn = await $.mcp.connect($.plugin.name)
-        if (!conn.isConnected || !current()) return
-        useServer(conn.server)
+        const conn = await resolved
+        if (!conn?.isConnected || !current()) return
         $.ui.log(`${label}: ${await arm(created, key)} ${key} (restored)`, { to: 'debug' })
       })().catch((err) => $.ui.log(`${label}: restore failed: ${String(err)}`, { to: 'debug' }))
     })().catch((err) => $.ui.log(`${label}: setup failed: ${String(err)}`, { to: 'debug' }))
@@ -374,8 +398,38 @@ export const register: Register = (on) => {
       leverTool = registered.tool
     })().catch((err) => $.ui.log(`ws compaction: setup failed (${String(err)}); ${LEVER_TOOL} not registered`, { to: 'debug' }))
 
-    // Both registrations are awaited, so each tool is listed by turn one.
-    await Promise.all([mailboxSetup, compactionSetup])
+    const reconnectSetup = (async () => {
+      reconnect.start({
+        plugin: $.plugin.name,
+        server: () => server,
+        reconnect: (name) => $.command.run({ command: 'mcp', args: `reconnect ${name}` }),
+        toolsListed: async (name) => {
+          const prefix = mcpToolName(name, '')
+          return (await $.tool.list()).some((t) => t.name.startsWith(prefix))
+        },
+        resolve: async () => void (await resolveServer()),
+        submit: (text) => $.prompt.submit({ text }),
+        after: (fn) => void $.clock.after(0, fn),
+        sleep: (ms) => new Promise<void>((resolve) => void $.clock.after(ms, resolve)),
+        log: (text, to) => $.ui.log(text, { to }),
+      })
+      const registered = await $.tool.register({
+        name: RECONNECT_TOOL,
+        description: reconnectDescription($.plugin.name),
+        inputSchema: {
+          type: 'object',
+          properties: { continuation: { type: 'string' } },
+          required: ['continuation'],
+        },
+        isDeferred: false,
+      })
+      reconnectTool = registered.tool
+    })().catch((err) =>
+      $.ui.log(`${$.plugin.name} mcp reconnect: setup failed (${String(err)}); ${RECONNECT_TOOL} not registered`, { to: 'debug' }),
+    )
+
+    // Every registration is awaited, so each tool is listed by turn one.
+    await Promise.all([mailboxSetup, compactionSetup, reconnectSetup])
     return next(e)
   })
 
@@ -421,6 +475,13 @@ export const register: Register = (on) => {
     return compaction.lever(e.agentId, (e as { continuation?: unknown }).continuation)
   }).catch(($, e, next) => (next.called ? next(e) : { deny: `${LEVER_TOOL}: the compaction request hook failed; see the debug log.` }))
 
+  // Served by the mod, not by the MCP server, so it stays callable after the
+  // server has gone.
+  on('tool.call', { tool: /__request_mcp_reconnect$/ }, async ($, e, next) => {
+    if (e.tool !== reconnectTool) return next(e)
+    return reconnect.lever(e.agentId, (e as { continuation?: unknown }).continuation)
+  }).catch(($, e, next) => (next.called ? next(e) : { deny: `${RECONNECT_TOOL}: the reconnect request hook failed; see the debug log.` }))
+
   // Pushed after each main-thread turn (and on rate-limit moves); the plain
   // figures cost nothing, and the breakdown is read only when the feature's
   // cache is empty (session start or end, a landed compaction) or the window
@@ -436,13 +497,19 @@ export const register: Register = (on) => {
     return res
   })
 
+  // Each feature's turn end in isolation; both only schedule work that runs
+  // after this hook has returned.
   on('turn.complete', async ($, e, next) => {
-    if (!compactionEnabledFor($.plugin.name)) return next(e)
     const res = await next(e)
     try {
-      compaction.turnComplete(e.agentId, e.reason)
+      if (compactionEnabledFor($.plugin.name)) compaction.turnComplete(e.agentId, e.reason)
     } catch (err) {
       $.ui.log(`ws compaction: turn end handling failed: ${String(err)}`, { to: 'debug' })
+    }
+    try {
+      reconnect.turnComplete(e.agentId, e.reason)
+    } catch (err) {
+      $.ui.log(`${$.plugin.name} mcp reconnect: turn end handling failed: ${String(err)}`, { to: 'debug' })
     }
     return res
   })
@@ -463,7 +530,7 @@ export const register: Register = (on) => {
   // Each step ends in isolation, so a throw in one never skips another. The
   // synchronous steps run before the one awaited: should the hook's time
   // bound cut the $.store delete short, the loop is already stopped and the
-  // compaction state already reset.
+  // compaction and reconnect state already reset.
   on('session.end', async ($, e, next) => {
     // Mailbox: every end reason stops the loop: after `clear` or `resume` the
     // process goes on under another session id, and a loop still bound to the
@@ -480,6 +547,13 @@ export const register: Register = (on) => {
       if (compactionEnabledFor($.plugin.name)) compaction.end(e.reason)
     } catch (err) {
       $.ui.log(`ws compaction: reset failed: ${String(err)}`, { to: 'debug' })
+    }
+    // Reconnect: every end reason drops a pending request, so it never acts
+    // in the next conversation after `clear` or `resume`.
+    try {
+      reconnect.end(e.reason)
+    } catch (err) {
+      $.ui.log(`${$.plugin.name} mcp reconnect: reset failed: ${String(err)}`, { to: 'debug' })
     }
     try {
       await $.store.delete(STORE_PREFIX + e.sessionId)
