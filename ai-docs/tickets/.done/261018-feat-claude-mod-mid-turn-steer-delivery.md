@@ -189,3 +189,21 @@ Landed in 7fe04e8e6 with review fixes in 720b51e37. The wsflow copy is byte-iden
   queued at turn end starts its follow-up turn: that submit runs inline in
   `turn.complete`, and the test kit does not model the host's turn-hold
   check there.
+
+#### Edition (846c811df) - 2026-10-18
+
+- Live dogfood found a gap. Mail was queued during a main-thread tool call,
+  and the person interrupted that call with Esc. The flush still appended the
+  mail at the call's boundary, and no model request followed in that turn.
+  So the queue was empty at `turn.complete` (reason `aborted`). The model
+  read the mail only with the next typed prompt.
+- `register.ts`: the tool-boundary flush now also requires
+  `!next.signal.aborted`. Mail queued during an interrupted call stays
+  queued, and the turn end submits it as a follow-up turn.
+- Engine test: the kit has no interrupt for a test's tool call. A
+  prepend-tier plugin that settles the call first aborts the mod's
+  `next.signal`, so the test uses it to stand in for Esc. The test fails
+  without the guard.
+- Verification: `claude plugin test agents-plugin` and
+  `claude plugin test agents-plugin-wsflow` each passed 259 tests with 0
+  failures. The wsflow mirror is byte-identical.
