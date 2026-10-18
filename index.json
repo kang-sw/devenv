@@ -614,6 +614,9 @@
         }
       }
     },
+    "261018-feat-claude-mod-mid-turn-steer-delivery": {
+      "registered_at": "2026-10-18T06:42:11Z"
+    },
     "261018-feat-claude-mod-ws-manual-injection": {
       "registered_at": "2026-10-18T01:22:57Z",
       "lease": {
