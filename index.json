@@ -591,7 +591,7 @@
         "email": "ki6080@gmail.com",
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-10-18T04:48:30Z",
         "impl": {
           "branch": "impl/develop/flock-boat-shiny"
