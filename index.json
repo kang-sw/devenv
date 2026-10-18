@@ -586,7 +586,14 @@
       "registered_at": "2026-10-17T23:46:26Z"
     },
     "261018-feat-claude-mod-lead-key-adoption-mailbox-auto-bind": {
-      "registered_at": "2026-10-18T04:25:01Z"
+      "registered_at": "2026-10-18T04:25:01Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-10-18T04:47:57Z"
+      }
     },
     "261018-feat-claude-mod-mcp-reconnect-lever": {
       "registered_at": "2026-10-18T01:22:52Z",
