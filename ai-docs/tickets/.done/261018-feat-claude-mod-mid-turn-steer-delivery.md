@@ -233,3 +233,26 @@ Landed in 7fe04e8e6 with review fixes in 720b51e37. The wsflow copy is byte-iden
   `claude plugin test agents-plugin-wsflow` each passed 264 tests with 0
   failures. `claude plugin validate` passed for both packages. `go test
   -count=1 ./internal/wsrsrc -run TestWsflowHooksMirrorUpToDate` passed.
+
+#### Edition (a5d8a4b3e) - 2026-10-18
+
+- The user decided to reverse 846c811df and keep 05ae99992.
+- 846c811df's `!next.signal.aborted` guard on the tool-boundary flush is
+  removed. Mail queued during a call the person interrupts is appended at
+  that call's boundary again, and it reaches the model with their next
+  prompt.
+- Why: an interrupt needs no new turn. The person is present, and the host
+  forbids plugin-started turns after a stop anyway. Before the guard, the
+  row appended at the aborted boundary already reached the model with the
+  next prompt (live, ping-3 run).
+- The 05ae99992 fallback (submit, then append) stays. It closes the real
+  gap: idle mail or turn-end leftovers that the host drops after a stop.
+  The live recheck (ping-6) confirmed that the appended row reached the
+  model prepended to the next prompt.
+- Tests: the interrupt engine test now asserts that the boundary appends the
+  mail and the turn end submits nothing for it. The dropped turn-end submit
+  test queues its mail after the last tool boundary, so it does not depend
+  on the guard.
+- Verification: `claude plugin test` passed 264 tests with 0 failures for
+  each package. `claude plugin validate` passed for both packages. The Go
+  mirror guard passed.
