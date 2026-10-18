@@ -374,6 +374,33 @@ test('overlapping binds resolve latest-wins while a slug lookup is in flight', a
   expect(w.store.get('mailbox-watch:sess-1')).toEqual({ sessionKey: 'k2' })
 })
 
+test('a session end cancels a bind whose slug lookup is still in flight', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  if (w.plugin !== 'ws') return
+  w.lookupDelays.push(100)
+  const pending = $.tool.call({ tool: watchName(w.plugin), session_key: 'k1' } as never)
+  await w.clock.settle()
+  expect(w.lookupCalls.map((c) => c.key)).toEqual(['k1'])
+  await $.session.end({ reason: 'clear', sessionId: 'sess-1', resume: undefined as never })
+  await w.clock.advance(100)
+  expect(String((await pending).result)).toContain('not changed')
+  expect(w.spawns).toEqual([])
+  expect(w.store.has('mailbox-watch:sess-1')).toBe(false)
+})
+
+test('a session end cancels a reload restore whose slug lookup is still in flight', async ($, on) => {
+  const w = world(on, { store: { 'mailbox-watch:sess-1': { sessionKey: 'k9' } } })
+  w.lookupDelays.push(100)
+  await start($, w)
+  if (w.plugin !== 'ws') return
+  expect(w.lookupCalls.map((c) => c.key)).toEqual(['k9'])
+  await $.session.end({ reason: 'clear', sessionId: 'sess-1', resume: undefined as never })
+  await w.clock.advance(100)
+  expect(w.spawns).toEqual([])
+  expect(w.store.has('mailbox-watch:sess-1')).toBe(false)
+})
+
 test('a reload restore yields to a bind made while it connects', async ($, on) => {
   const w = world(on, { store: { 'mailbox-watch:sess-1': { sessionKey: 'k9' } } })
   w.connectDelays.push(100)
