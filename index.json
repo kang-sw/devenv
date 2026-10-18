@@ -634,7 +634,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-18T09:10:21Z"
+        "touched_at": "2026-10-18T09:10:46Z",
+        "impl": {
+          "branch": "impl/develop/haven-shrug-good"
+        }
       }
     },
     "261018-feat-claude-mod-ws-manual-injection": {
