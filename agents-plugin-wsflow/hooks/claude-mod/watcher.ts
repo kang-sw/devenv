@@ -26,9 +26,15 @@
  * everything queued by the next tool boundary (`toolCompleted`) is appended
  * as ONE row, which the turn's next model request reads, and anything still
  * queued when the turn ends (`turnCompleted`) is submitted as ONE prompt. A
- * queued batch still holds drained mail, so a refused row, a failed turn-end
- * submit, or a stop records it as above; a lost notice is retried as a
+ * queued batch still holds drained mail, so a refused row, a turn-end
+ * prompt neither submitted nor appended, or a stop records it as above; a lost notice is retried as a
  * failed notice submit is.
+ *
+ * Every submit (an idle batch or notice, the turn-end leftovers) that the
+ * host rejects or drops falls back to appending the same text as a row: the
+ * host drops a plugin's submit after the person stops a turn until they send
+ * input, and a row appended while idle reaches the model with their next
+ * prompt. Only when that append fails too does the text count as lost.
  *
  * Every side effect is an injected edge so the loop is testable without a
  * live mailbox or engine.
@@ -69,7 +75,11 @@ export interface WatcherEdges {
    * that turn's next tool boundary or its end rather than submitted.
    */
   turnRunning: () => boolean
-  /** Append one user row to the running main-thread turn, read by its next model request; rejects when refused. */
+  /**
+   * Append one user row: a running main-thread turn's next model request
+   * reads it, and while idle it rides the person's next prompt. Rejects when
+   * refused.
+   */
   append: (text: string) => Promise<void>
   /** The recv tool's name as the model calls it, for prompt text. */
   recvTool: () => string
@@ -163,7 +173,7 @@ export interface Watcher {
    * result reads it. Never rejects.
    */
   toolCompleted: () => Promise<void>
-  /** The main-thread turn ended: submit whatever is still queued as one prompt. Never throws. */
+  /** The main-thread turn ended: submit whatever is still queued as one prompt, else append it. Never throws. */
   turnCompleted: () => void
 }
 
@@ -203,6 +213,28 @@ export function createWatcher(edges: WatcherEdges): Watcher {
     const items = queued
     queued = []
     return { items, text: items.map((q) => q.text).join('\n\n') }
+  }
+
+  /**
+   * Submit `text`, falling back to appending it as a row when the submit is
+   * rejected or dropped. Never rejects: answers why neither reached the
+   * conversation, or undefined when one did.
+   */
+  async function deliver(text: string): Promise<string | undefined> {
+    let submitErr: unknown
+    try {
+      await edges.submit(text)
+      return undefined
+    } catch (err) {
+      submitErr = err
+    }
+    edges.log(`${edges.label}: prompt submit failed (${String(submitErr)}); appending it as a row instead`)
+    try {
+      await edges.append(text)
+      return undefined
+    } catch (err) {
+      return `prompt submit failed: ${String(submitErr)}; row append failed: ${String(err)}`
+    }
   }
 
   function lose(items: readonly Queued[], why: string): void {
@@ -254,11 +286,8 @@ export function createWatcher(edges: WatcherEdges): Watcher {
       if (steer(notice, fail, myKey)) {
         edges.log(`${edges.label}: notice for ${myKey} queued for the running turn`)
       } else {
-        try {
-          await edges.submit(notice)
-        } catch (err) {
-          fail(String(err))
-        }
+        const why = await deliver(notice)
+        if (why !== undefined) fail(why)
       }
       await resumed
       if (failure === undefined) return true
@@ -336,11 +365,8 @@ export function createWatcher(edges: WatcherEdges): Watcher {
         continue
       }
       edges.log(`${edges.label}: drained ${mail.length} message(s) for ${myKey}; submitting one prompt`)
-      try {
-        await edges.submit(batch)
-      } catch (err) {
-        keep(`prompt submit failed: ${String(err)}`, batch)
-      }
+      const why = await deliver(batch)
+      if (why !== undefined) keep(why, batch)
     }
   }
 
@@ -389,7 +415,9 @@ export function createWatcher(edges: WatcherEdges): Watcher {
       const taken = takeQueued()
       if (!taken) return
       edges.log(`${edges.label}: submitting ${taken.items.length} prompt(s) still queued at the turn end as one prompt`)
-      ;(async () => edges.submit(taken.text))().catch((err) => lose(taken.items, `prompt submit failed: ${String(err)}`))
+      void deliver(taken.text).then((why) => {
+        if (why !== undefined) lose(taken.items, why)
+      })
     },
   }
 }

@@ -225,7 +225,26 @@ ${formatBatch('pkg mailbox', RECV, 'k1', mailA)}`,
     expect(h.submitted).toEqual([])
   })
 
-  test('a failed turn-end submit records the queued batches for the user', async () => {
+  test('a dropped turn-end submit appends the queued batches as one row instead, losing nothing', async () => {
+    const h = harness('direct')
+    const w = createWatcher(h.edges)
+    w.bind('k1')
+    await tick()
+    h.turn.running = true
+    await arrive(h, { kind: 'mail', mail: mailA })
+    await arrive(h, { kind: 'mail', mail: mailB })
+    h.turn.running = false
+    h.submitFailures.push(new Error('prompt dropped: a Stop stands'))
+    w.turnCompleted()
+    await tick()
+    expect(h.submitted).toEqual([])
+    expect(h.appended).toEqual([
+      `${formatBatch('pkg mailbox', RECV, 'k1', mailA)}\n\n${formatBatch('pkg mailbox', RECV, 'k1', mailB)}`,
+    ])
+    expect(h.records).toEqual([])
+  })
+
+  test('a turn-end prompt neither submitted nor appended records the queued batches for the user', async () => {
     const h = harness('direct')
     const w = createWatcher(h.edges)
     w.bind('k1')
@@ -234,11 +253,13 @@ ${formatBatch('pkg mailbox', RECV, 'k1', mailA)}`,
     await arrive(h, { kind: 'mail', mail: mailA })
     h.turn.running = false
     h.submitFailures.push(new Error('prompt dropped: a Stop stands'))
+    h.appendFailures.push(new Error('row refused: policy'))
     w.turnCompleted()
     await tick()
     expect(h.submitted).toEqual([])
+    expect(h.appended).toEqual([])
     expect(h.records).toEqual([
-      `pkg mailbox: drained mail was not submitted (prompt submit failed: Error: prompt dropped: a Stop stands); recorded here instead:
+      `pkg mailbox: drained mail was not submitted (prompt submit failed: Error: prompt dropped: a Stop stands; row append failed: Error: row refused: policy); recorded here instead:
 
 ${formatBatch('pkg mailbox', RECV, 'k1', mailA)}`,
     ])
@@ -391,7 +412,20 @@ describe('direct mode', () => {
     expect(h.waits.length).toBe(2)
   })
 
-  test('a failed submit after a drain records the batch for the user instead of dropping it', async () => {
+  test('a rejected submit after a drain appends the batch as a row instead', async () => {
+    const h = harness('direct')
+    const w = createWatcher(h.edges)
+    w.bind('k1')
+    await tick()
+    h.submitFailures.push(new Error('prompt dropped: a Stop stands'))
+    await arrive(h, { kind: 'mail', mail: mailA })
+    expect(h.submitted).toEqual([])
+    expect(h.appended).toEqual([formatBatch('pkg mailbox', RECV, 'k1', mailA)])
+    expect(h.records).toEqual([])
+    expect(h.waits.length).toBe(2)
+  })
+
+  test('a drained batch neither submitted nor appended is recorded for the user instead of dropped', async () => {
     const h = harness('direct')
     const w = createWatcher(h.edges)
     w.bind('k1')
@@ -399,12 +433,14 @@ describe('direct mode', () => {
     const mail = [{ from: 'p@machine', content: 'hello' }]
     h.drainQueue.push({ kind: 'mail', mail })
     h.submitFailures.push(new Error('prompt dropped: a Stop stands'))
+    h.appendFailures.push(new Error('row refused: policy'))
     h.waits[0]!.d.resolve('mail')
     await tick()
     const batch = formatBatch('pkg mailbox', 'mcp__plugin_pkg_pkg__mailbox_recv', 'k1', mail)
     expect(h.submitted).toEqual([])
+    expect(h.appended).toEqual([])
     expect(h.records).toEqual([
-      `pkg mailbox: drained mail was not submitted (prompt submit failed: Error: prompt dropped: a Stop stands); recorded here instead:\n\n${batch}`,
+      `pkg mailbox: drained mail was not submitted (prompt submit failed: Error: prompt dropped: a Stop stands; row append failed: Error: row refused: policy); recorded here instead:\n\n${batch}`,
     ])
     expect(h.logs).toContain(h.records[0]!)
     expect(h.waits.length).toBe(2)
@@ -508,12 +544,30 @@ describe('notice mode', () => {
     expect(h.submitted.length).toBe(2)
   })
 
-  test('a notice that cannot be submitted backs off and re-arms instead of suspending', async () => {
+  test('a dropped notice submit is appended as a row, and the loop suspends until the model receives', async () => {
+    const h = harness('notice')
+    const w = createWatcher(h.edges)
+    w.bind('k1')
+    await tick()
+    h.submitFailures.push(new Error('prompt dropped: a Stop stands'))
+    h.waits[0]!.d.resolve('mail')
+    await tick()
+    expect(h.submitted).toEqual([])
+    expect(h.appended).toEqual([formatNotice('pkg mailbox', RECV, 'k1')])
+    expect(w.isSuspended()).toBe(true)
+    expect(h.sleeps).toEqual([])
+    w.recvCompleted('k1')
+    await tick()
+    expect(h.waits.length).toBe(2)
+  })
+
+  test('a notice neither submitted nor appended backs off and re-arms instead of suspending', async () => {
     const h = harness('notice')
     const w = createWatcher(h.edges)
     w.bind('k1')
     await tick()
     h.submitFailures.push(new Error('no session'))
+    h.appendFailures.push(new Error('no session'))
     h.waits[0]!.d.resolve('mail')
     await tick()
     expect(w.isSuspended()).toBe(false)
@@ -556,6 +610,7 @@ describe('notice mode', () => {
     await tick()
     expect(w.isSuspended()).toBe(true)
     // The k1 loop's notice now fails: it resumes only its own suspension.
+    h.appendFailures.push(new Error('no session'))
     h.heldSubmits[0]!.d.resolve(new Error('no session'))
     await tick()
     expect(w.isSuspended()).toBe(true)
@@ -572,6 +627,7 @@ describe('notice mode', () => {
     w.bind('k1')
     await tick()
     h.submitFailures.push(new Error('no session'), new Error('no session'))
+    h.appendFailures.push(new Error('no session'), new Error('no session'))
     h.waits[0]!.d.resolve('mail')
     await tick()
     h.sleeps[0]!.d.resolve()

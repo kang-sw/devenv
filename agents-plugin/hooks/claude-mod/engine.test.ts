@@ -498,18 +498,34 @@ test('a reload restore yields to a bind made while it resolves its slug', async 
   expect(w.spawns.map((a) => a[5])).toEqual(['k1'])
 })
 
-test('ws records a drained batch in the transcript when its prompt is dropped', async ($, on) => {
+test('ws appends a drained batch as a row when its idle prompt is dropped, recording nothing', async ($, on) => {
   const w = world(on)
   await start($, w)
   if (w.plugin !== 'ws') return
   await bind($, w, 'k1')
   w.dropSubmits = 1
+  await arrive(w)
+  expect(w.prompts).toEqual([])
+  expect(w.appended.length).toBe(1)
+  expect(w.appended[0]).toContain(delivered(w))
+  expect(transcript(w).some((t) => t.includes('drained mail was not submitted'))).toBe(false)
+  expect(w.spawns.length).toBe(2)
+})
+
+test('ws records a drained batch in the transcript when its prompt is dropped and its row refused', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  if (w.plugin !== 'ws') return
+  await bind($, w, 'k1')
+  w.dropSubmits = 1
+  w.refuseAppends = 1
   w.recvAnswers.push(batch())
   w.exits[0]!(0)
   await w.clock.settle()
   expect(w.prompts).toEqual([])
+  expect(w.appended).toEqual([])
   const record = transcript(w).find((t) => t.includes('drained mail was not submitted'))
-  expect(record).toContain('(prompt submit failed: Error: prompt dropped: a Stop stands)')
+  expect(record).toContain('(prompt submit failed: Error: prompt dropped: a Stop stands; row append failed: Error: row refused: policy)')
   expect(record).toContain('2 message(s) arrived for session_key k1')
   expect(record).toContain('mail from id:peer (t1):\nhello from peer')
   expect(w.logs.some((l) => l.to === 'debug' && l.text === record)).toBe(true)
@@ -701,4 +717,18 @@ test('mail queued during a tool call the person interrupts stays queued and is s
   expect(w.appended).toEqual([])
   expect(w.prompts.length).toBe(1)
   expect(w.prompts[0]).toContain(delivered(w))
+})
+
+test('a turn-end submit the host drops after an interrupt is appended as a row, not recorded as lost', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  await bind($, w, 'k1')
+  await turnStart($)
+  await arrive(w)
+  w.dropSubmits = 1
+  await turnEnd($, w, { reason: 'aborted' })
+  expect(w.prompts).toEqual([])
+  expect(w.appended.length).toBe(1)
+  expect(w.appended[0]).toContain(delivered(w))
+  expect(transcript(w).some((t) => t.includes('was not submitted'))).toBe(false)
 })
