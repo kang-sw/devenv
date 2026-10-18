@@ -51,6 +51,10 @@ function harness(mode: DrainMode) {
   /** When set, the next submit waits on it; rejecting it fails that submit. */
   const heldSubmits: { d: Deferred<Error | undefined>; text: string }[] = []
   let holdSubmits = 0
+  /** Whether a main-thread turn runs, as the turn hooks would report it. */
+  const turn = { running: false }
+  const appended: string[] = []
+  const appendFailures: Error[] = []
   const edges: WatcherEdges = {
     mode,
     label: 'pkg mailbox',
@@ -80,6 +84,12 @@ function harness(mode: DrainMode) {
       if (failure) throw failure
       submitted.push(text)
     },
+    turnRunning: () => turn.running,
+    append: async (text) => {
+      const failure = appendFailures.shift()
+      if (failure) throw failure
+      appended.push(text)
+    },
     recvTool: () => 'mcp__plugin_pkg_pkg__mailbox_recv',
     sleep: (ms, signal) => {
       const d = deferred<void>()
@@ -105,8 +115,198 @@ function harness(mode: DrainMode) {
     notices,
     records,
     logs,
+    turn,
+    appended,
+    appendFailures,
   }
 }
+
+const RECV = 'mcp__plugin_pkg_pkg__mailbox_recv'
+const mailA = [{ reply_to: 'id:a', content: 'first', sent_at: 't1' }]
+const mailB = [{ from: 'p@machine', content: 'second' }]
+
+/** Resolve the latest wait with mail, with `drained` as the drain's answer (direct mode). */
+async function arrive(h: ReturnType<typeof harness>, drained?: DrainResult) {
+  if (drained) h.drainQueue.push(drained)
+  h.waits[h.waits.length - 1]!.d.resolve('mail')
+  await tick()
+}
+
+describe('mid-turn steer', () => {
+  test('mail drained while a turn runs is queued, then appended as one row at the next tool boundary', async () => {
+    const h = harness('direct')
+    const w = createWatcher(h.edges)
+    w.bind('k1')
+    await tick()
+    h.turn.running = true
+    await arrive(h, { kind: 'mail', mail: mailA })
+    expect(h.submitted).toEqual([])
+    expect(h.appended).toEqual([])
+    expect(h.waits.length).toBe(2) // the loop re-arms at once; it does not wait for the boundary
+    await w.toolCompleted()
+    expect(h.appended).toEqual([formatBatch('pkg mailbox', RECV, 'k1', mailA)])
+    await w.toolCompleted()
+    expect(h.appended.length).toBe(1)
+    w.turnCompleted()
+    await tick()
+    expect(h.submitted).toEqual([])
+  })
+
+  test('several batches before one boundary join into a single row, never one per batch', async () => {
+    const h = harness('direct')
+    const w = createWatcher(h.edges)
+    w.bind('k1')
+    await tick()
+    h.turn.running = true
+    await arrive(h, { kind: 'mail', mail: mailA })
+    await arrive(h, { kind: 'mail', mail: mailB })
+    expect(h.waits.length).toBe(3)
+    await w.toolCompleted()
+    expect(h.appended).toEqual([
+      `${formatBatch('pkg mailbox', RECV, 'k1', mailA)}
+
+${formatBatch('pkg mailbox', RECV, 'k1', mailB)}`,
+    ])
+  })
+
+  test('mail still queued at the turn end is submitted as one prompt', async () => {
+    const h = harness('direct')
+    const w = createWatcher(h.edges)
+    w.bind('k1')
+    await tick()
+    h.turn.running = true
+    await arrive(h, { kind: 'mail', mail: mailA })
+    await arrive(h, { kind: 'mail', mail: mailB })
+    h.turn.running = false
+    w.turnCompleted()
+    await tick()
+    expect(h.appended).toEqual([])
+    expect(h.submitted).toEqual([
+      `${formatBatch('pkg mailbox', RECV, 'k1', mailA)}
+
+${formatBatch('pkg mailbox', RECV, 'k1', mailB)}`,
+    ])
+    w.turnCompleted()
+    await tick()
+    expect(h.submitted.length).toBe(1)
+  })
+
+  test('mail drained while idle is submitted as before, with nothing queued', async () => {
+    const h = harness('direct')
+    const w = createWatcher(h.edges)
+    w.bind('k1')
+    await tick()
+    await arrive(h, { kind: 'mail', mail: mailA })
+    expect(h.submitted).toEqual([formatBatch('pkg mailbox', RECV, 'k1', mailA)])
+    await w.toolCompleted()
+    w.turnCompleted()
+    await tick()
+    expect(h.appended).toEqual([])
+    expect(h.submitted.length).toBe(1)
+  })
+
+  test('a refused row records each queued batch for the user', async () => {
+    const h = harness('direct')
+    const w = createWatcher(h.edges)
+    w.bind('k1')
+    await tick()
+    h.turn.running = true
+    await arrive(h, { kind: 'mail', mail: mailA })
+    h.appendFailures.push(new Error('row refused: policy'))
+    await w.toolCompleted()
+    expect(h.appended).toEqual([])
+    expect(h.records).toEqual([
+      `pkg mailbox: drained mail was not submitted (row append failed: Error: row refused: policy); recorded here instead:
+
+${formatBatch('pkg mailbox', RECV, 'k1', mailA)}`,
+    ])
+    w.turnCompleted()
+    await tick()
+    expect(h.submitted).toEqual([])
+  })
+
+  test('a failed turn-end submit records the queued batches for the user', async () => {
+    const h = harness('direct')
+    const w = createWatcher(h.edges)
+    w.bind('k1')
+    await tick()
+    h.turn.running = true
+    await arrive(h, { kind: 'mail', mail: mailA })
+    h.turn.running = false
+    h.submitFailures.push(new Error('prompt dropped: a Stop stands'))
+    w.turnCompleted()
+    await tick()
+    expect(h.submitted).toEqual([])
+    expect(h.records).toEqual([
+      `pkg mailbox: drained mail was not submitted (prompt submit failed: Error: prompt dropped: a Stop stands); recorded here instead:
+
+${formatBatch('pkg mailbox', RECV, 'k1', mailA)}`,
+    ])
+  })
+
+  test('a stop records what is still queued; a rebind keeps it for delivery', async () => {
+    const h = harness('direct')
+    const w = createWatcher(h.edges)
+    w.bind('k1')
+    await tick()
+    h.turn.running = true
+    await arrive(h, { kind: 'mail', mail: mailA })
+    w.bind('k2')
+    await tick()
+    expect(h.records).toEqual([])
+    await arrive(h, { kind: 'mail', mail: mailB })
+    w.stop('session.end clear')
+    expect(h.records).toEqual([
+      `pkg mailbox: drained mail was not submitted (the push loop stopped: session.end clear); recorded here instead:
+
+${formatBatch('pkg mailbox', RECV, 'k1', mailA)}`,
+      `pkg mailbox: drained mail was not submitted (the push loop stopped: session.end clear); recorded here instead:
+
+${formatBatch('pkg mailbox', RECV, 'k2', mailB)}`,
+    ])
+    await w.toolCompleted()
+    w.turnCompleted()
+    await tick()
+    expect(h.appended).toEqual([])
+    expect(h.submitted).toEqual([])
+  })
+
+  test('a notice found mid-turn is queued and appended; the loop stays suspended until the model receives', async () => {
+    const h = harness('notice')
+    const w = createWatcher(h.edges)
+    w.bind('k1')
+    await tick()
+    h.turn.running = true
+    await arrive(h)
+    expect(h.submitted).toEqual([])
+    expect(w.isSuspended()).toBe(true)
+    await w.toolCompleted()
+    expect(h.appended).toEqual([formatNotice('pkg mailbox', RECV, 'k1')])
+    expect(w.isSuspended()).toBe(true)
+    w.recvCompleted('k1')
+    await tick()
+    expect(h.waits.length).toBe(2)
+  })
+
+  test('a queued notice that is never delivered backs off and re-arms, as a failed notice submit does', async () => {
+    const h = harness('notice')
+    const w = createWatcher(h.edges)
+    w.bind('k1')
+    await tick()
+    h.turn.running = true
+    await arrive(h)
+    h.appendFailures.push(new Error('row refused: policy'))
+    await w.toolCompleted()
+    await tick()
+    expect(w.isSuspended()).toBe(false)
+    expect(h.records).toEqual([])
+    expect(h.notices).toContain('pkg mailbox: notice submit failed, retrying with backoff')
+    expect(h.sleeps.map((s) => s.ms)).toEqual([1_000])
+    h.sleeps[0]!.d.resolve()
+    await tick()
+    expect(h.waits.length).toBe(2)
+  })
+})
 
 describe('direct mode', () => {
   test('wait exit 0 -> one drain -> exactly one prompt with the whole batch -> re-arm', async () => {

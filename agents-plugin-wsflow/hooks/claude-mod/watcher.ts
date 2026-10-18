@@ -20,6 +20,16 @@
  *   yields one notice, and a declined recv leaves the loop suspended rather
  *   than re-noticing.
  *
+ * Either mode's prompt (the batch or the notice) goes by the turn state when
+ * it is ready. While the session is idle it is submitted and starts a turn.
+ * While a main-thread turn runs it is queued instead and joins that turn:
+ * everything queued by the next tool boundary (`toolCompleted`) is appended
+ * as ONE row, which the turn's next model request reads, and anything still
+ * queued when the turn ends (`turnCompleted`) is submitted as ONE prompt. A
+ * queued batch still holds drained mail, so a refused row, a failed turn-end
+ * submit, or a stop records it as above; a lost notice is retried as a
+ * failed notice submit is.
+ *
  * Every side effect is an injected edge so the loop is testable without a
  * live mailbox or engine.
  */
@@ -54,6 +64,13 @@ export interface WatcherEdges {
   drain: (key: string) => Promise<DrainResult>
   /** Submit one prompt that starts a turn once the session is idle. */
   submit: (text: string) => Promise<void>
+  /**
+   * Whether a main-thread turn runs now: a prompt ready then is queued for
+   * that turn's next tool boundary or its end rather than submitted.
+   */
+  turnRunning: () => boolean
+  /** Append one user row to the running main-thread turn, read by its next model request; rejects when refused. */
+  append: (text: string) => Promise<void>
   /** The recv tool's name as the model calls it, for prompt text. */
   recvTool: () => string
   /** Resolve after `ms`, or early (resolve, not reject) when `signal` aborts. */
@@ -140,7 +157,18 @@ export interface Watcher {
   isSuspended: () => boolean
   /** The model's own recv for `key` completed successfully: resume a loop suspended on that key. */
   recvCompleted: (key: string) => void
+  /**
+   * A model-issued main-thread tool call completed: append everything queued
+   * as one row before its result returns, so the request that follows the
+   * result reads it. Never rejects.
+   */
+  toolCompleted: () => Promise<void>
+  /** The main-thread turn ended: submit whatever is still queued as one prompt. Never throws. */
+  turnCompleted: () => void
 }
+
+/** A prompt queued for the running turn, and what to do should it never reach the model. */
+type Queued = { text: string; lost: (why: string) => void }
 
 export function createWatcher(edges: WatcherEdges): Watcher {
   let key: string | undefined
@@ -152,6 +180,36 @@ export function createWatcher(edges: WatcherEdges): Watcher {
   // whether a stop came since, even when a rebind had already superseded it.
   let stops = 0
   let lastStop = ''
+  /**
+   * Prompts waiting for the running turn's next tool boundary or its end.
+   * Session-wide, not per loop: a rebind keeps them, a stop gives them up.
+   */
+  let queued: Queued[] = []
+
+  /** Queue `text` for the running main-thread turn; false when none runs, and the caller submits it. */
+  function steer(text: string, lost: (why: string) => void): boolean {
+    if (!edges.turnRunning()) return false
+    queued.push({ text, lost })
+    return true
+  }
+
+  /** Take everything queued, joined into one text; undefined when nothing is. */
+  function takeQueued(): { items: Queued[]; text: string } | undefined {
+    if (queued.length === 0) return undefined
+    const items = queued
+    queued = []
+    return { items, text: items.map((q) => q.text).join('\n\n') }
+  }
+
+  function lose(items: readonly Queued[], why: string): void {
+    for (const q of items) {
+      try {
+        q.lost(why)
+      } catch (err) {
+        edges.log(`${edges.label}: recording a lost prompt failed: ${String(err)}`)
+      }
+    }
+  }
 
   /** `resumed` resolves when the model's recv for `myKey` completes, when `signal` aborts, or on `resume`. */
   function suspend(myKey: string, signal: AbortSignal): { resumed: Promise<void>; resume: () => void } {
@@ -180,20 +238,29 @@ export function createWatcher(edges: WatcherEdges): Watcher {
       edges.log(`${edges.label}: ${what} for ${myKey}: ${detail}; backing off ${backoff}ms`)
       await edges.sleep(backoff, signal)
     }
-    /** Submit one notice and wait for the model's recv; false when the notice could not be submitted. */
+    /** Deliver one notice and wait for the model's recv; false when the notice could not be delivered. */
     const notify = async (): Promise<boolean> => {
       const { resumed, resume } = suspend(myKey, signal)
-      try {
-        await edges.submit(formatNotice(edges.label, edges.recvTool(), myKey))
-      } catch (err) {
+      let failure: string | undefined
+      const fail = (why: string) => {
+        failure ??= why
         resume() // this loop's own suspension, never a rebound loop's
-        await resumed
-        if (signal.aborted) return false
-        await backOff('notice submit failed', String(err))
-        return false
+      }
+      const notice = formatNotice(edges.label, edges.recvTool(), myKey)
+      if (steer(notice, fail)) {
+        edges.log(`${edges.label}: notice for ${myKey} queued for the running turn`)
+      } else {
+        try {
+          await edges.submit(notice)
+        } catch (err) {
+          fail(String(err))
+        }
       }
       await resumed
-      return true
+      if (failure === undefined) return true
+      if (signal.aborted) return false
+      await backOff('notice submit failed', failure)
+      return false
     }
     /** Write drained mail that will not be submitted where the user can see it, and to the debug log. */
     const keep = (why: string, batch: string) => {
@@ -260,6 +327,10 @@ export function createWatcher(edges: WatcherEdges): Watcher {
         keep(`the push loop stopped: ${lastStop}`, batch)
         return
       }
+      if (steer(batch, (why) => keep(why, batch))) {
+        edges.log(`${edges.label}: drained ${mail.length} message(s) for ${myKey}; queued for the running turn`)
+        continue
+      }
       edges.log(`${edges.label}: drained ${mail.length} message(s) for ${myKey}; submitting one prompt`)
       try {
         await edges.submit(batch)
@@ -282,6 +353,8 @@ export function createWatcher(edges: WatcherEdges): Watcher {
       return had ? 'rebound' : 'bound'
     },
     stop(reason) {
+      const left = takeQueued()
+      if (left) lose(left.items, `the push loop stopped: ${reason}`)
       if (!ctrl) return
       stops += 1
       lastStop = reason
@@ -295,6 +368,22 @@ export function createWatcher(edges: WatcherEdges): Watcher {
     isSuspended: () => suspended !== undefined && suspended.key === key,
     recvCompleted(doneKey) {
       if (suspended && suspended.key === doneKey && doneKey === key) suspended.resume()
+    },
+    async toolCompleted() {
+      const taken = takeQueued()
+      if (!taken) return
+      edges.log(`${edges.label}: appending ${taken.items.length} queued prompt(s) to the running turn as one row`)
+      try {
+        await edges.append(taken.text)
+      } catch (err) {
+        lose(taken.items, `row append failed: ${String(err)}`)
+      }
+    },
+    turnCompleted() {
+      const taken = takeQueued()
+      if (!taken) return
+      edges.log(`${edges.label}: submitting ${taken.items.length} prompt(s) still queued at the turn end as one prompt`)
+      ;(async () => edges.submit(taken.text))().catch((err) => lose(taken.items, `prompt submit failed: ${String(err)}`))
     },
   }
 }

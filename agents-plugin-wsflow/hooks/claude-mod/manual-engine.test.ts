@@ -1,5 +1,6 @@
 import { expect, mock, test, type TestBody } from 'claude-code/testing'
 
+import { CONTINUATION_WINDOW_MS } from './compaction'
 import { adoptionNotice, KEY_STORE_PREFIX, MAILBOX_LINE, pointerText, SECTION_ID } from './manual'
 import { continuationText } from './timing'
 
@@ -345,6 +346,7 @@ test("ws: the lever's own landing sets the flag, though the engine routes it pas
   await w.clock.settle()
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer' } as never)
   await w.clock.settle()
+  await w.clock.advance(CONTINUATION_WINDOW_MS)
   expect(w.prompts).toEqual([continuationText('go on')])
   await compose($, w)
   expect(seen(await read($, w, 'workflow_manual', { session_key: 'kept-key' }))).toMatch(/^Workflow manual is in your system prompt;/)
