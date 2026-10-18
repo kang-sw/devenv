@@ -585,6 +585,9 @@
     "261018-feat-claude-mod-mcp-reconnect-lever": {
       "registered_at": "2026-10-18T01:22:52Z"
     },
+    "261018-feat-claude-mod-ws-manual-injection": {
+      "registered_at": "2026-10-18T01:22:57Z"
+    },
     "261018-research-claude-mod-ws-manual-injection": {
       "registered_at": "2026-10-18T01:03:43Z"
     },
