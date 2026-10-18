@@ -6,6 +6,7 @@ import {
   REASON_NO_SERVER,
   REASON_TOOLS_ABSENT,
   RECONNECT_RESULT,
+  RECONNECT_RESULT_NO_CONTINUATION,
   reconnectDescription,
   successText,
   TOOLS_WAIT_MS,
@@ -27,7 +28,7 @@ function world(on: On, opts: { processOk?: boolean; refuseRegister?: string; con
   const w = {
     clock,
     plugin: '',
-    registered: [] as { name: string; description: string; isDeferred?: boolean }[],
+    registered: [] as { name: string; description: string; isDeferred?: boolean; inputSchema?: unknown }[],
     /** Whether the plugin's MCP server is up: its tools are listed while it is. */
     serverUp: true,
     commands: [] as { command: string; args: string }[],
@@ -61,7 +62,7 @@ function world(on: On, opts: { processOk?: boolean; refuseRegister?: string; con
   on('tool.register', ($, e, next) => {
     w.plugin = next.origin.plugin
     if (e.name === opts.refuseRegister) return { deny: 'refused by the test' }
-    w.registered.push({ name: e.name, description: e.description, isDeferred: e.isDeferred })
+    w.registered.push({ name: e.name, description: e.description, isDeferred: e.isDeferred, inputSchema: e.inputSchema })
     return { value: { tool: `mcp__${w.plugin}__${e.name}` } }
   })
   on('mcp.connect', ($, e) => {
@@ -124,11 +125,15 @@ test('every package registers the reconnect tool with its pinned description', a
   const w = world(on)
   await start($, w)
   expect(['ws', 'wsflow']).toContain(w.plugin)
-  expect(w.registered.find((r) => r.name === 'request_mcp_reconnect')).toEqual({
+  const tool = w.registered.find((r) => r.name === 'request_mcp_reconnect')
+  expect(tool).toEqual({
     name: 'request_mcp_reconnect',
     description: reconnectDescription(w.plugin),
     isDeferred: false,
+    inputSchema: tool?.inputSchema,
   })
+  // The continuation is optional: the schema lists it, and does not require it.
+  expect(tool?.inputSchema).toEqual({ type: 'object', properties: { continuation: { type: 'string' } } })
 })
 
 test('reconnect setup does not depend on the mailbox or compaction setups', async ($, on) => {
@@ -146,12 +151,11 @@ test('the mailbox and compaction setups do not depend on the reconnect setup', a
   expect(names).not.toContain('request_mcp_reconnect')
 })
 
-test('a subagent call is refused and an empty or multi-line continuation is a tool error', async ($, on) => {
+test('a subagent call is refused and a multi-line continuation is a tool error', async ($, on) => {
   const w = world(on)
   await start($, w)
   const fromSub = await request($, w, 'go on', 'sub-1')
   expect(fromSub.deny).toBe('request_mcp_reconnect serves the main session only; called from subagent sub-1.')
-  expect((await request($, w, '')).isError).toBe(true)
   expect((await request($, w, 'one\ntwo')).isError).toBe(true)
   await turnEnd($, w)
   expect(w.commands).toEqual([])
@@ -175,6 +179,21 @@ test('after the server died, the reconnect runs at the next main-thread turn end
   await turnEnd($, w)
   expect(w.commands.length).toBe(1)
   expect(w.prompts.length).toBe(1)
+})
+
+test('an omitted or whitespace-only continuation is accepted: a success submits nothing, a failure still reports', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  w.serverUp = false
+  expect((await request($, w, undefined)).result).toBe(RECONNECT_RESULT_NO_CONTINUATION)
+  await turnEnd($, w)
+  expect(w.commands).toEqual([reconnectArgs(w)])
+  expect(w.prompts).toEqual([])
+  const headless = "Reconnect, enable, and disable aren't available in this session."
+  w.commandAnswers.push({ text: headless })
+  expect((await request($, w, '   ')).result).toBe(RECONNECT_RESULT_NO_CONTINUATION)
+  await turnEnd($, w)
+  expect(w.prompts).toEqual([failureText(w.plugin, reasonCommandAnswered(headless), undefined)])
 })
 
 test('a repeat call replaces the continuation', async ($, on) => {

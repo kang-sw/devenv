@@ -79,7 +79,7 @@ export function advisoryText(t: Thresholds, tokens: number): string {
     '\n' +
     'This is not an instruction to compact right now. If you are in active discussion with the human, awaiting their answer or clarification, or holding working context that would be costly to rebuild (a half-applied change or a diagnosis in progress), carry on for now. A pause after asking the human a question is not a boundary.\n' +
     '\n' +
-    `From here on, look for a good moment to compact before ${hard}%. A good moment is a natural boundary where most of what this context holds is no longer needed for the work ahead, and what is still needed can be restored cheaply after compaction from durable records (tickets, commits, notes, agenda) and the summary. Typical cases: work just landed, you are waiting only on background agents, or the next work is weakly related to the current context. When such a moment comes, first bring durable records up to date with anything still needed that only this context holds, then call the compaction request tool with a one-line continuation and end your turn. Compacting at a moment you choose keeps the work coherent; at ${hard}% it happens automatically, mid-work if need be. Reminders follow at ${percentOf(t.m1, t.raw)}% and ${percentOf(t.m2, t.raw)}%.\n` +
+    `From here on, look for a good moment to compact before ${hard}%. A good moment is a natural boundary where most of what this context holds is no longer needed for the work ahead, and what is still needed can be restored cheaply after compaction from durable records (tickets, commits, notes, agenda) and the summary. Typical cases: work just landed, you are waiting only on background agents, or the next work is weakly related to the current context. When such a moment comes, first bring durable records up to date with anything still needed that only this context holds, then call the compaction request tool and end your turn. Pass a one-line continuation only when work must resume by itself after compaction; omit it when the next turn will come from the human or from a background agent's notification. Compacting at a moment you choose keeps the work coherent; at ${hard}% it happens automatically, mid-work if need be. Reminders follow at ${percentOf(t.m1, t.raw)}% and ${percentOf(t.m2, t.raw)}%.\n` +
     '\n' +
     'If now is not such a moment, end this turn without replying and keep looking for one as you work.'
   )
@@ -91,9 +91,9 @@ export function milestoneText(which: 1 | 2, t: Thresholds, tokens: number): stri
   const head = `${LABEL}Context window: ${n}% / ${hard}% (automatic compaction point). `
   return which === 1
     ? head +
-        `Past ${hard}%, Claude Code compacts automatically, mid-work if need be. From here on, a good boundary is worth taking; if this is one, update durable records and call the compaction request tool, as the advisory describes. Otherwise end this turn without replying.`
+        `Past ${hard}%, Claude Code compacts automatically, mid-work if need be. From here on, a good boundary is worth taking; if this is one, update durable records and call the compaction request tool, as the advisory describes (a continuation only when work must resume by itself). Otherwise end this turn without replying.`
     : head +
-        'This is the last reading before automatic compaction. Compacting at a boundary you choose keeps the work coherent; take this one if it fits, update durable records and call the compaction request tool, as the advisory describes. Otherwise end this turn without replying, and take the next good boundary.'
+        'This is the last reading before automatic compaction. Compacting at a boundary you choose keeps the work coherent; take this one if it fits, update durable records and call the compaction request tool, as the advisory describes (a continuation only when work must resume by itself). Otherwise end this turn without replying, and take the next good boundary.'
 }
 
 export function deliveryText(d: Delivery, t: Thresholds, tokens: number): string {
@@ -101,10 +101,19 @@ export function deliveryText(d: Delivery, t: Thresholds, tokens: number): string
 }
 
 export const LEVER_DESCRIPTION =
-  'Request compaction of this conversation when the current turn ends. Before calling, bring durable records (tickets, notes, agenda) up to date with anything still needed that only this context holds. `continuation` is one line naming what to do next (for example "continue Phase 2 implementation"); it is sent as your next prompt after compaction. Main session only.'
+  'Request compaction of this conversation when the current turn ends. Before calling, bring durable records (tickets, notes, agenda) up to date with anything still needed that only this context holds. `continuation` is optional: pass it only when work must resume by itself after compaction, as one line naming what to do next (for example "continue Phase 2 implementation"); it is sent as your next prompt after compaction. Omit it when the next turn will come from the human or from a background agent\'s notification. Main session only.'
 
 export const LEVER_RESULT =
   'Compaction requested. End your turn now without further tool calls; compaction runs when the turn ends, and your continuation resumes the work.'
+
+/** The lever's result for a call without a continuation: nothing is submitted after the compaction. */
+export const LEVER_RESULT_NO_CONTINUATION =
+  'Compaction requested. End your turn now without further tool calls; compaction runs when the turn ends, and no prompt follows it: the next turn comes from the human or from a background agent\'s notification.'
+
+/** What the lever's result says for a call with or without a continuation. */
+export function leverResult(continuation: string | undefined): string {
+  return continuation === undefined ? LEVER_RESULT_NO_CONTINUATION : LEVER_RESULT
+}
 
 /** The continuation after a compaction landed: the lever's own, or another that landed first. */
 export function continuationText(continuation: string): string {
@@ -116,16 +125,20 @@ export function skippedContinuationText(reason: string, continuation: string): s
   return `${LABEL}Compaction did not run (${reason}); your context is unchanged.\nContinue: ${continuation}`
 }
 
-/** Main-loop-only guard and input check for the lever: a refusal, a tool error, or the trimmed continuation. */
+/**
+ * Main-loop-only guard and input check for the lever: a refusal, a tool
+ * error, or the trimmed continuation (undefined when omitted: absent,
+ * non-string, or whitespace-only).
+ */
 export function checkLeverCall(
   agentId: string | undefined,
   continuation: unknown,
-): { continuation: string } | { deny: string } | { error: string } {
+): { continuation: string | undefined } | { deny: string } | { error: string } {
   if (agentId !== undefined) {
     return { deny: `${TOOL_NAME} compacts the main session only; called from subagent ${agentId}.` }
   }
   const text = typeof continuation === 'string' ? continuation.trim() : ''
-  if (!text) return { error: `${TOOL_NAME}: continuation (a non-empty, one-line string) is required.` }
+  if (!text) return { continuation: undefined }
   if (/[\r\n]/.test(text)) return { error: `${TOOL_NAME}: continuation must be one line.` }
   return { continuation: text }
 }

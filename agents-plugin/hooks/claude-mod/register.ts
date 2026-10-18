@@ -26,8 +26,9 @@ import {
 //   project) the mod binds every key the conversation gets itself; elsewhere
 //   the agent binds its key through the mod-registered mailbox watch tool.
 // - Lead compaction timing: advisory and milestone wake turns before native
-//   auto compaction, and the compaction request tool, whose continuation a
-//   prompt typed during the compaction carries (see compaction.ts).
+//   auto compaction, and the compaction request tool, whose optional
+//   continuation a prompt typed during the compaction carries (see
+//   compaction.ts).
 // - MCP reconnect lever: a tool the model calls when the plugin's MCP server
 //   has gone, and `/mcp reconnect` at the next main-thread turn end (see
 //   reconnect.ts).
@@ -493,7 +494,6 @@ export const register: Register = (on) => {
         inputSchema: {
           type: 'object',
           properties: { continuation: { type: 'string' } },
-          required: ['continuation'],
         },
         isDeferred: false,
       })
@@ -521,7 +521,6 @@ export const register: Register = (on) => {
         inputSchema: {
           type: 'object',
           properties: { continuation: { type: 'string' } },
-          required: ['continuation'],
         },
         isDeferred: false,
       })

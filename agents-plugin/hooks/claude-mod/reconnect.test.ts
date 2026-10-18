@@ -10,6 +10,7 @@ import {
   REASON_NO_SERVER,
   REASON_TOOLS_ABSENT,
   RECONNECT_RESULT,
+  RECONNECT_RESULT_NO_CONTINUATION,
   reconnectDescription,
   successText,
   TOOLS_POLL_MS,
@@ -98,11 +99,11 @@ describe('pure core', () => {
   test('the tool accepts one trimmed line from the main session only', () => {
     expect(checkReconnectCall(undefined, '  resume the review  ')).toEqual({ continuation: 'resume the review' })
     expect(checkReconnectCall('sub-1', 'x')).toEqual({ deny: 'request_mcp_reconnect serves the main session only; called from subagent sub-1.' })
-    const required = { error: 'request_mcp_reconnect: continuation (a non-empty, one-line string) is required.' }
-    expect(checkReconnectCall(undefined, '')).toEqual(required)
-    expect(checkReconnectCall(undefined, '   ')).toEqual(required)
-    expect(checkReconnectCall(undefined, undefined)).toEqual(required)
-    expect(checkReconnectCall(undefined, 42)).toEqual(required)
+    const omitted = { continuation: undefined }
+    expect(checkReconnectCall(undefined, '')).toEqual(omitted)
+    expect(checkReconnectCall(undefined, '   ')).toEqual(omitted)
+    expect(checkReconnectCall(undefined, undefined)).toEqual(omitted)
+    expect(checkReconnectCall(undefined, 42)).toEqual(omitted)
     expect(checkReconnectCall(undefined, 'one\ntwo')).toEqual({ error: 'request_mcp_reconnect: continuation must be one line.' })
     expect(checkReconnectCall(undefined, 'one\rtwo')).toEqual({ error: 'request_mcp_reconnect: continuation must be one line.' })
   })
@@ -122,16 +123,22 @@ describe('pure core', () => {
 describe('pinned prose', () => {
   test('tool description and result', () => {
     expect(reconnectDescription('ws')).toBe(
-      "Reconnect the ws MCP server when the current turn ends. Use it when that server's tools have left your tool list or a call reports the server not connected. `continuation` is one line naming what to do next; it is sent as your next prompt after the reconnect attempt, with the outcome. Main session only.",
+      "Reconnect the ws MCP server when the current turn ends. Use it when that server's tools have left your tool list or a call reports the server not connected. `continuation` is optional: pass it only when work must resume by itself after the reconnect attempt, as one line naming what to do next; it is sent as your next prompt with the outcome. Omit it when the next turn will come from the human or from a background agent's notification; a failed reconnect is still reported to you. Main session only.",
     )
     expect(RECONNECT_RESULT).toBe(
       'Reconnect requested. End your turn now without further tool calls; the reconnect runs when the turn ends, and your continuation resumes the work.',
+    )
+    expect(RECONNECT_RESULT_NO_CONTINUATION).toBe(
+      "Reconnect requested. End your turn now without further tool calls; the reconnect runs when the turn ends. A successful reconnect submits no prompt: the next turn comes from the human or from a background agent's notification. A failed reconnect is reported to you in a prompt.",
     )
   })
 
   test('continuations', () => {
     expect(successText('wsflow', 'resume the review')).toBe(
       '[wsflow mcp] The wsflow MCP server reconnected; its tools are available again.\nContinue: resume the review',
+    )
+    expect(failureText('wsflow', 'its tools were not back within 10 s', undefined)).toBe(
+      '[wsflow mcp] The wsflow MCP server did not come back (its tools were not back within 10 s). Follow the wsflow:mcp-server-repair skill: keep working through its CLI fallback and relay its reconnect steps to the user.',
     )
     expect(failureText('wsflow', 'its tools were not back within 10 s', 'resume the review')).toBe(
       '[wsflow mcp] The wsflow MCP server did not come back (its tools were not back within 10 s). Follow the wsflow:mcp-server-repair skill: keep working through its CLI fallback and relay its reconnect steps to the user.\nContinue: resume the review',
@@ -147,7 +154,7 @@ describe('pinned prose', () => {
 })
 
 describe('lever', () => {
-  test('a subagent call is refused and an invalid continuation is a tool error; neither requests', async () => {
+  test('a subagent call is refused and a multi-line continuation is a tool error; neither requests', async () => {
     const { h, r, turnEnd } = harness()
     expect(r.lever('sub-1', 'go on')).toEqual({ deny: 'request_mcp_reconnect serves the main session only; called from subagent sub-1.' })
     expect(r.lever(undefined, 'one\ntwo')).toEqual({
@@ -158,6 +165,57 @@ describe('lever', () => {
     await turnEnd()
     expect(h.reconnects).toEqual([])
     expect(h.submits).toEqual([])
+  })
+
+  test('an omitted, whitespace-only, or non-string continuation is accepted with the no-continuation result', () => {
+    for (const value of [undefined, '', '  \t ', 42]) {
+      const { r } = harness()
+      expect(r.lever(undefined, value)).toEqual({ result: RECONNECT_RESULT_NO_CONTINUATION })
+    }
+    expect(harness().r.lever('sub-1', undefined)).toEqual({ deny: 'request_mcp_reconnect serves the main session only; called from subagent sub-1.' })
+  })
+
+  test('without a continuation a successful reconnect still runs and submits nothing', async () => {
+    const { h, r, turnEnd, transcript } = harness()
+    r.lever(undefined, undefined)
+    await turnEnd()
+    expect(h.reconnects).toEqual([SERVER])
+    expect(h.resolves).toBe(1)
+    expect(h.submits).toEqual([])
+    expect(transcript()).toEqual([])
+    await turnEnd()
+    expect(h.reconnects.length).toBe(1)
+  })
+
+  test('without a continuation a failed reconnect submits its failure notice, with no Continue line', async () => {
+    const a = harness()
+    a.h.listed.push(...Array.from({ length: 100 }, () => false))
+    a.r.lever(undefined, '  ')
+    await a.turnEnd()
+    await tick(1000)
+    expect(a.h.submits).toEqual([failureText('ws', REASON_TOOLS_ABSENT, undefined)])
+    expect(a.h.submits[0]).not.toContain('Continue:')
+
+    const b = harness({ server: null })
+    b.r.lever(undefined, undefined)
+    await b.turnEnd()
+    expect(b.h.submits).toEqual([failureText('ws', REASON_NO_SERVER, undefined)])
+  })
+
+  test('a repeat call in both orders: an omitted one clears an earlier continuation, a supplied one sets it', async () => {
+    const a = harness()
+    a.r.lever(undefined, 'first')
+    a.r.lever(undefined, undefined)
+    await a.turnEnd()
+    expect(a.h.reconnects.length).toBe(1)
+    expect(a.h.submits).toEqual([])
+
+    const b = harness()
+    b.r.lever(undefined, undefined)
+    b.r.lever(undefined, 'second')
+    await b.turnEnd()
+    expect(b.h.reconnects.length).toBe(1)
+    expect(b.h.submits).toEqual([successText('ws', 'second')])
   })
 
   test('the reconnect waits for a non-aborted main-thread turn end, then runs after the hook returned', async () => {
