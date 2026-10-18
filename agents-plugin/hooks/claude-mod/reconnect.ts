@@ -10,7 +10,8 @@ import type { PromptSubmitResult } from 'claude-code'
  *
  * The step always runs `/mcp reconnect <server>` (a listed-but-failing server
  * is one a skip would miss), judges the outcome from the tool list, and submits
- * the continuation with the outcome. The engine calls arrive as edges bound in
+ * the continuation with the outcome. A call without a continuation submits
+ * nothing on success and only the failure notice on failure. The engine calls arrive as edges bound in
  * register.ts, so the state machine here is driven and tested without an
  * engine.
  */
@@ -25,7 +26,8 @@ export function reconnectDescription(plugin: string): string {
   return (
     `Reconnect the ${plugin} MCP server when the current turn ends. ` +
     "Use it when that server's tools have left your tool list or a call reports the server not connected. " +
-    '`continuation` is one line naming what to do next; it is sent as your next prompt after the reconnect attempt, with the outcome. ' +
+    '`continuation` is optional: pass it only when work must resume by itself after the reconnect attempt, as one line naming what to do next; it is sent as your next prompt with the outcome. ' +
+    "Omit it when the next turn will come from the human or from a background agent's notification; a failed reconnect is still reported to you. " +
     'Main session only.'
   )
 }
@@ -33,16 +35,24 @@ export function reconnectDescription(plugin: string): string {
 export const RECONNECT_RESULT =
   'Reconnect requested. End your turn now without further tool calls; the reconnect runs when the turn ends, and your continuation resumes the work.'
 
+/** The lever's result for a call without a continuation: a successful reconnect submits nothing. */
+export const RECONNECT_RESULT_NO_CONTINUATION =
+  "Reconnect requested. End your turn now without further tool calls; the reconnect runs when the turn ends. A successful reconnect submits no prompt: the next turn comes from the human or from a background agent's notification. A failed reconnect is reported to you in a prompt."
+
+/** What the tool's result says for a call with or without a continuation. */
+export function reconnectResult(continuation: string | undefined): string {
+  return continuation === undefined ? RECONNECT_RESULT_NO_CONTINUATION : RECONNECT_RESULT
+}
+
 export function successText(plugin: string, continuation: string): string {
   return `[${plugin} mcp] The ${plugin} MCP server reconnected; its tools are available again.\nContinue: ${continuation}`
 }
 
-export function failureText(plugin: string, reason: string, continuation: string): string {
-  return (
+export function failureText(plugin: string, reason: string, continuation: string | undefined): string {
+  const head =
     `[${plugin} mcp] The ${plugin} MCP server did not come back (${reason}). ` +
-    `Follow the ${plugin}:mcp-server-repair skill: keep working through its CLI fallback and relay its reconnect steps to the user.\n` +
-    `Continue: ${continuation}`
-  )
+    `Follow the ${plugin}:mcp-server-repair skill: keep working through its CLI fallback and relay its reconnect steps to the user.`
+  return continuation === undefined ? head : `${head}\nContinue: ${continuation}`
 }
 
 /** The failure reasons the step words; the command's own words fill the last two. */
@@ -55,16 +65,20 @@ export function reasonCommandAnswered(text: string): string {
   return `the reconnect command answered: ${text}`
 }
 
-/** Main-loop-only guard and input check for the tool: a refusal, a tool error, or the trimmed continuation. */
+/**
+ * Main-loop-only guard and input check for the tool: a refusal, a tool error,
+ * or the trimmed continuation (undefined when omitted: absent, non-string, or
+ * whitespace-only).
+ */
 export function checkReconnectCall(
   agentId: string | undefined,
   continuation: unknown,
-): { continuation: string } | { deny: string } | { error: string } {
+): { continuation: string | undefined } | { deny: string } | { error: string } {
   if (agentId !== undefined) {
     return { deny: `${TOOL_NAME} serves the main session only; called from subagent ${agentId}.` }
   }
   const text = typeof continuation === 'string' ? continuation.trim() : ''
-  if (!text) return { error: `${TOOL_NAME}: continuation (a non-empty, one-line string) is required.` }
+  if (!text) return { continuation: undefined }
   if (/[\r\n]/.test(text)) return { error: `${TOOL_NAME}: continuation must be one line.` }
   return { continuation: text }
 }
@@ -117,8 +131,8 @@ export type Reconnect = {
 
 /** A tool call waiting for its turn to end. */
 type Request = {
-  /** The latest call's continuation. */
-  continuation: string
+  /** The latest call's continuation; undefined when that call omitted it. */
+  continuation: string | undefined
   /** The token of its queued step, from the turn end that queued it until the step starts. */
   scheduled: number | undefined
 }
@@ -188,7 +202,10 @@ export function createReconnect(): Reconnect {
       return
     }
     debug(outcome.ok ? 'reconnected' : `not reconnected (${outcome.reason})`)
-    const text = outcome.ok ? successText(e.plugin, r.continuation) : failureText(e.plugin, outcome.reason, r.continuation)
+    // Without a continuation a success owes the model nothing, but a failure
+    // still does: it must learn its tools are gone.
+    if (outcome.ok && r.continuation === undefined) return
+    const text = outcome.ok ? successText(e.plugin, r.continuation as string) : failureText(e.plugin, outcome.reason, r.continuation)
     const failed = (why: string) => notice(`a prompt was not submitted (${why}):\n${text}`)
     e.submit(text).then(
       (res) => {
@@ -213,11 +230,12 @@ export function createReconnect(): Reconnect {
       const checked = checkReconnectCall(agentId, continuation)
       if ('deny' in checked) return { deny: checked.deny }
       if ('error' in checked) return { isError: true, result: checked.error, text: checked.error }
-      // A repeat call while one is pending states the current next step.
+      // A repeat call while one is pending states the current next step; an
+      // omitted continuation clears an earlier one.
       if (request) request.continuation = checked.continuation
       else request = { continuation: checked.continuation, scheduled: undefined }
-      debug(`reconnect requested; continuation: ${checked.continuation}`)
-      return { result: RECONNECT_RESULT }
+      debug(`reconnect requested; continuation: ${checked.continuation ?? '(none)'}`)
+      return { result: reconnectResult(checked.continuation) }
     },
 
     // The step runs after the turn.complete hook has returned: the host refuses

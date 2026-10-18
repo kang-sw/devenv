@@ -1,7 +1,15 @@
 import { expect, mock, test, type TestBody } from 'claude-code/testing'
 
 import { CONTINUATION_WINDOW_MS } from './compaction'
-import { advisoryText, continuationText, LEVER_DESCRIPTION, LEVER_RESULT, skippedContinuationText, thresholdsFor } from './timing'
+import {
+  advisoryText,
+  continuationText,
+  LEVER_DESCRIPTION,
+  LEVER_RESULT,
+  LEVER_RESULT_NO_CONTINUATION,
+  skippedContinuationText,
+  thresholdsFor,
+} from './timing'
 
 type Engine = Parameters<TestBody>[0]
 type On = Parameters<TestBody>[1]
@@ -26,7 +34,7 @@ function world(on: On, opts: { processOk?: boolean; refuseRegister?: string } = 
   const w = {
     clock,
     plugin: '',
-    registered: [] as { name: string; description: string; isDeferred?: boolean }[],
+    registered: [] as { name: string; description: string; isDeferred?: boolean; inputSchema?: unknown }[],
     usageCalls: [] as unknown[],
     /** Who compacted, and with what instructions (the kit leaves a plugin call's trigger unset; the engine sets `plugin`). */
     compactCalls: [] as { origin: string; instructions: unknown }[],
@@ -63,7 +71,7 @@ function world(on: On, opts: { processOk?: boolean; refuseRegister?: string } = 
   on('tool.register', ($, e, next) => {
     w.plugin = next.origin.plugin
     if (e.name === opts.refuseRegister) return { deny: 'refused by the test' }
-    w.registered.push({ name: e.name, description: e.description, isDeferred: e.isDeferred })
+    w.registered.push({ name: e.name, description: e.description, isDeferred: e.isDeferred, inputSchema: e.inputSchema })
     return { value: { tool: `mcp__${w.plugin}__${e.name}` } }
   })
   on('session.usage', ($, e) => {
@@ -140,7 +148,9 @@ test('ws registers the compaction request tool with its pinned description; anot
   await start($, w)
   const tool = w.registered.find((r) => r.name === 'request_compaction')
   if (isWs(w)) {
-    expect(tool).toEqual({ name: 'request_compaction', description: LEVER_DESCRIPTION, isDeferred: false })
+    expect(tool).toEqual({ name: 'request_compaction', description: LEVER_DESCRIPTION, isDeferred: false, inputSchema: tool?.inputSchema })
+    // The continuation is optional: the schema lists it, and does not require it.
+    expect(tool?.inputSchema).toEqual({ type: 'object', properties: { continuation: { type: 'string' } } })
   } else {
     expect(['wsflow']).toContain(w.plugin)
     expect(tool).toBeUndefined()
@@ -193,6 +203,20 @@ test('ws: a lever call compacts after the main-thread turn end, then submits its
   expect(w.prompts.length).toBe(1)
 })
 
+test('ws: a lever call without a continuation compacts at the turn end and submits nothing, with no window', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  if (!isWs(w)) return
+  const res = await lever($, w, undefined)
+  expect(res.result).toBe(LEVER_RESULT_NO_CONTINUATION)
+  await turnEnd($, w)
+  expect(w.compactCalls).toEqual([{ origin: 'ws', instructions: undefined }])
+  await w.clock.advance(CONTINUATION_WINDOW_MS)
+  expect(w.prompts).toEqual([])
+  await turnEnd($, w)
+  expect(w.compactCalls.length).toBe(1)
+})
+
 test("ws: the lever's own landing resets the latch, though the engine routes it past the feature's own hook", async ($, on) => {
   const w = world(on)
   await start($, w)
@@ -210,7 +234,7 @@ test("ws: the lever's own landing resets the latch, though the engine routes it 
   expect(transcript(w)).toEqual([])
 })
 
-test('ws: a subagent lever call is refused and an invalid continuation is a tool error', async ($, on) => {
+test('ws: a subagent lever call is refused and a multi-line continuation is a tool error', async ($, on) => {
   const w = world(on)
   await start($, w)
   if (!isWs(w)) return

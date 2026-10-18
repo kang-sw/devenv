@@ -10,7 +10,7 @@ import {
   checkLeverCall,
   continuationText,
   deliveryText,
-  LEVER_RESULT,
+  leverResult,
   levelAt,
   observe,
   percentOf,
@@ -27,9 +27,13 @@ import {
  * still writes the summary, and its auto compaction stays the hard point: the
  * feature never vetoes or preempts a compaction.
  *
- * The continuation after the lever's own compaction (landed or vetoed) is
- * held for CONTINUATION_WINDOW_MS rather than submitted at once: a prompt the
- * person typed during the compaction is released right after it, ahead of
+ * The continuation is optional: a lever call that omits it (work does not
+ * need to resume by itself) submits nothing after the step and opens no
+ * window, and a veto is told to the person through a transcript notice only.
+ *
+ * A supplied continuation after the lever's own compaction (landed or vetoed)
+ * is held for CONTINUATION_WINDOW_MS rather than submitted at once: a prompt
+ * the person typed during the compaction is released right after it, ahead of
  * any prompt the mod submits, so it would run first and push the
  * continuation into a follow-up turn. A composer prompt entering within the
  * window takes the continuation as context instead (`claim`); the window's
@@ -95,9 +99,9 @@ export type Compaction = {
 
 /** A lever call waiting for its turn to end. */
 type Request = {
-  /** The latest call's continuation. */
-  continuation: string
-  /** False once a compaction landed elsewhere first: the continuation is still owed, the compact step is not. */
+  /** The latest call's continuation; undefined when that call omitted it, which leaves nothing to submit. */
+  continuation: string | undefined
+  /** False once a compaction landed elsewhere first: the continuation (if any) is still owed, the compact step is not. */
   compact: boolean
   /**
    * The token of its queued compact step, from the turn end that queued it
@@ -176,10 +180,10 @@ export function createCompaction(): Compaction {
     latch = 0
   }
 
-  /** Settle `r` with its continuation prompt. */
-  const finish = (r: Request, text: string) => {
+  /** Settle `r` with its continuation prompt; an omitted continuation submits nothing. */
+  const finish = (r: Request) => {
     if (request === r) request = undefined
-    submit(text, true)
+    if (r.continuation !== undefined) submit(continuationText(r.continuation), true)
   }
 
   /**
@@ -212,7 +216,7 @@ export function createCompaction(): Compaction {
    */
   const runLever = async (r: Request) => {
     if (!edges || request !== r) return
-    if (!r.compact) return finish(r, continuationText(r.continuation))
+    if (!r.compact) return finish(r)
     let res: SessionCompactResult
     leverCompacting = true
     try {
@@ -235,7 +239,12 @@ export function createCompaction(): Compaction {
       }
     }
     if (request !== r) return
-    if (res.skip !== undefined) {
+    if (r.continuation === undefined) {
+      // No turn follows, so a veto is told to the person here: the model is
+      // not started to hear it and no consume window opens.
+      request = undefined
+      if (res.skip !== undefined) notice(`the requested compaction did not run (${res.skip}); no continuation was requested, so no turn follows`)
+    } else if (res.skip !== undefined) {
       notice(`the requested compaction did not run (${res.skip}); the continuation follows with a note`)
       hold(r, skippedContinuationText(res.skip, r.continuation))
     } else {
@@ -260,11 +269,12 @@ export function createCompaction(): Compaction {
       if ('deny' in checked) return { deny: checked.deny }
       if ('error' in checked) return { isError: true, result: checked.error, text: checked.error }
       // A repeat call while one is pending states the current next step: it
-      // replaces the continuation and keeps the request's compact-step state.
+      // replaces the continuation (an omitted one clears an earlier one) and
+      // keeps the request's compact-step state.
       if (request) request.continuation = checked.continuation
       else request = { continuation: checked.continuation, compact: true, scheduled: undefined, rejectionNoted: false }
-      debug(`compaction requested; continuation: ${checked.continuation}`)
-      return { result: LEVER_RESULT }
+      debug(`compaction requested; continuation: ${checked.continuation ?? '(none)'}`)
+      return { result: leverResult(checked.continuation) }
     },
 
     measure: async (context, readBreakdown) => {
@@ -300,7 +310,7 @@ export function createCompaction(): Compaction {
     turnComplete: (agentId, reason) => {
       const r = request
       if (agentId !== undefined || reason === 'aborted' || !r || leverCompacting || !edges) return
-      if (!r.compact) return finish(r, continuationText(r.continuation))
+      if (!r.compact) return finish(r)
       if (r.scheduled !== undefined) debug('the scheduled compaction step did not run; scheduling it again')
       const token = (dispatches += 1)
       r.scheduled = token
@@ -326,7 +336,10 @@ export function createCompaction(): Compaction {
       landed()
       if (request?.compact) {
         request.compact = false
-        notice(`a ${trigger} compaction landed first, so the requested compaction is dropped; its continuation follows at the next turn end`)
+        notice(
+          `a ${trigger} compaction landed first, so the requested compaction is dropped; ` +
+            (request.continuation === undefined ? 'no continuation was requested, so no prompt follows' : 'its continuation follows at the next turn end'),
+        )
       }
     },
 

@@ -8,6 +8,7 @@ import {
   levelAt,
   LEVER_DESCRIPTION,
   LEVER_RESULT,
+  LEVER_RESULT_NO_CONTINUATION,
   milestoneText,
   observe,
   skippedContinuationText,
@@ -170,11 +171,11 @@ describe('pure core', () => {
   test('the lever accepts one trimmed line from the main session only', () => {
     expect(checkLeverCall(undefined, '  continue Phase 2  ')).toEqual({ continuation: 'continue Phase 2' })
     expect(checkLeverCall('sub-1', 'x')).toEqual({ deny: 'request_compaction compacts the main session only; called from subagent sub-1.' })
-    const required = { error: 'request_compaction: continuation (a non-empty, one-line string) is required.' }
-    expect(checkLeverCall(undefined, '')).toEqual(required)
-    expect(checkLeverCall(undefined, '   ')).toEqual(required)
-    expect(checkLeverCall(undefined, undefined)).toEqual(required)
-    expect(checkLeverCall(undefined, 42)).toEqual(required)
+    const omitted = { continuation: undefined }
+    expect(checkLeverCall(undefined, '')).toEqual(omitted)
+    expect(checkLeverCall(undefined, '   ')).toEqual(omitted)
+    expect(checkLeverCall(undefined, undefined)).toEqual(omitted)
+    expect(checkLeverCall(undefined, 42)).toEqual(omitted)
     expect(checkLeverCall(undefined, 'one\ntwo')).toEqual({ error: 'request_compaction: continuation must be one line.' })
     expect(checkLeverCall(undefined, 'one\rtwo')).toEqual({ error: 'request_compaction: continuation must be one line.' })
   })
@@ -187,7 +188,7 @@ describe('pinned prose', () => {
 
 This is not an instruction to compact right now. If you are in active discussion with the human, awaiting their answer or clarification, or holding working context that would be costly to rebuild (a half-applied change or a diagnosis in progress), carry on for now. A pause after asking the human a question is not a boundary.
 
-From here on, look for a good moment to compact before 85%. A good moment is a natural boundary where most of what this context holds is no longer needed for the work ahead, and what is still needed can be restored cheaply after compaction from durable records (tickets, commits, notes, agenda) and the summary. Typical cases: work just landed, you are waiting only on background agents, or the next work is weakly related to the current context. When such a moment comes, first bring durable records up to date with anything still needed that only this context holds, then call the compaction request tool with a one-line continuation and end your turn. Compacting at a moment you choose keeps the work coherent; at 85% it happens automatically, mid-work if need be. Reminders follow at 62% and 73%.
+From here on, look for a good moment to compact before 85%. A good moment is a natural boundary where most of what this context holds is no longer needed for the work ahead, and what is still needed can be restored cheaply after compaction from durable records (tickets, commits, notes, agenda) and the summary. Typical cases: work just landed, you are waiting only on background agents, or the next work is weakly related to the current context. When such a moment comes, first bring durable records up to date with anything still needed that only this context holds, then call the compaction request tool and end your turn. Pass a one-line continuation only when work must resume by itself after compaction; omit it when the next turn will come from the human or from a background agent's notification. Compacting at a moment you choose keeps the work coherent; at 85% it happens automatically, mid-work if need be. Reminders follow at 62% and 73%.
 
 If now is not such a moment, end this turn without replying and keep looking for one as you work.`,
     )
@@ -195,19 +196,22 @@ If now is not such a moment, end this turn without replying and keep looking for
 
   test('milestones', () => {
     expect(milestoneText(1, T, 125_000)).toBe(
-      '[ws compaction] Context window: 63% / 85% (automatic compaction point). Past 85%, Claude Code compacts automatically, mid-work if need be. From here on, a good boundary is worth taking; if this is one, update durable records and call the compaction request tool, as the advisory describes. Otherwise end this turn without replying.',
+      '[ws compaction] Context window: 63% / 85% (automatic compaction point). Past 85%, Claude Code compacts automatically, mid-work if need be. From here on, a good boundary is worth taking; if this is one, update durable records and call the compaction request tool, as the advisory describes (a continuation only when work must resume by itself). Otherwise end this turn without replying.',
     )
     expect(milestoneText(2, T, 150_000)).toBe(
-      '[ws compaction] Context window: 75% / 85% (automatic compaction point). This is the last reading before automatic compaction. Compacting at a boundary you choose keeps the work coherent; take this one if it fits, update durable records and call the compaction request tool, as the advisory describes. Otherwise end this turn without replying, and take the next good boundary.',
+      '[ws compaction] Context window: 75% / 85% (automatic compaction point). This is the last reading before automatic compaction. Compacting at a boundary you choose keeps the work coherent; take this one if it fits, update durable records and call the compaction request tool, as the advisory describes (a continuation only when work must resume by itself). Otherwise end this turn without replying, and take the next good boundary.',
     )
   })
 
   test('lever description and result', () => {
     expect(LEVER_DESCRIPTION).toBe(
-      'Request compaction of this conversation when the current turn ends. Before calling, bring durable records (tickets, notes, agenda) up to date with anything still needed that only this context holds. `continuation` is one line naming what to do next (for example "continue Phase 2 implementation"); it is sent as your next prompt after compaction. Main session only.',
+      'Request compaction of this conversation when the current turn ends. Before calling, bring durable records (tickets, notes, agenda) up to date with anything still needed that only this context holds. `continuation` is optional: pass it only when work must resume by itself after compaction, as one line naming what to do next (for example "continue Phase 2 implementation"); it is sent as your next prompt after compaction. Omit it when the next turn will come from the human or from a background agent\'s notification. Main session only.',
     )
     expect(LEVER_RESULT).toBe(
       'Compaction requested. End your turn now without further tool calls; compaction runs when the turn ends, and your continuation resumes the work.',
+    )
+    expect(LEVER_RESULT_NO_CONTINUATION).toBe(
+      'Compaction requested. End your turn now without further tool calls; compaction runs when the turn ends, and no prompt follows it: the next turn comes from the human or from a background agent\'s notification.',
     )
   })
 
@@ -627,6 +631,133 @@ describe('lever', () => {
     expect(h.submits).toEqual([])
     expect(transcript()).toEqual([])
     expect(debugLog()).toContain('ws compaction: a prompt was not submitted (Error: submit failed)')
+  })
+})
+
+describe('omitted continuation', () => {
+  const omissions: [string, unknown][] = [
+    ['absent', undefined],
+    ['empty', ''],
+    ['whitespace-only', '  \t '],
+    ['non-string', 42],
+  ]
+
+  test('an omitted, whitespace-only, or non-string continuation is accepted with the no-continuation result', () => {
+    for (const [, value] of omissions) {
+      const { c } = harness()
+      expect(c.lever(undefined, value)).toEqual({ result: LEVER_RESULT_NO_CONTINUATION })
+    }
+  })
+
+  test('a subagent call is still refused and a multi-line continuation is still an error', () => {
+    const { c } = harness()
+    expect(c.lever('sub-1', undefined)).toEqual({ deny: 'request_compaction compacts the main session only; called from subagent sub-1.' })
+    expect(c.lever(undefined, 'one\ntwo')).toEqual({
+      isError: true,
+      result: 'request_compaction: continuation must be one line.',
+      text: 'request_compaction: continuation must be one line.',
+    })
+  })
+
+  test('its own landed compaction submits nothing and opens no window; a prompt typed meanwhile is not claimed', async () => {
+    const { h, c, turnEnd, closeWindow, transcript } = harness()
+    c.lever(undefined, undefined)
+    await turnEnd()
+    expect(h.compacts).toBe(1)
+    expect(h.leverLandings).toBe(1)
+    expect(h.delayed).toEqual([])
+    expect(c.claim()).toBeUndefined()
+    await closeWindow()
+    expect(h.submits).toEqual([])
+    expect(transcript()).toEqual([])
+    // The request is settled: a later turn end compacts nothing.
+    await turnEnd()
+    expect(h.compacts).toBe(1)
+  })
+
+  test('a landing through the hook also submits nothing', async () => {
+    const { h, c, turnEnd, closeWindow, routeOwnCompaction } = harness()
+    routeOwnCompaction()
+    c.lever(undefined, '   ')
+    await turnEnd()
+    await closeWindow()
+    expect(h.compacts).toBe(1)
+    expect(h.submits).toEqual([])
+  })
+
+  test('a compaction landing elsewhere first drops the compact step and submits nothing', async () => {
+    const { h, c, turnEnd, closeWindow, transcript } = harness()
+    c.lever(undefined, undefined)
+    c.compacted('auto', undefined, { messages: [] })
+    expect(transcript()).toEqual([
+      'ws compaction: a auto compaction landed first, so the requested compaction is dropped; no continuation was requested, so no prompt follows',
+    ])
+    await turnEnd()
+    await closeWindow()
+    expect(h.compacts).toBe(0)
+    expect(h.submits).toEqual([])
+    // Settled: a later compaction lever call compacts again.
+    c.lever(undefined, undefined)
+    await turnEnd()
+    expect(h.compacts).toBe(1)
+  })
+
+  test('a veto submits nothing, opens no window, and is told to the person in the transcript', async () => {
+    const { h, c, turnEnd, closeWindow, transcript, debugLog } = harness()
+    c.lever(undefined, undefined)
+    h.compactAnswers.push({ skip: 'blocked by policy' })
+    await turnEnd()
+    await closeWindow()
+    expect(h.submits).toEqual([])
+    expect(h.delayed).toEqual([])
+    expect(c.claim()).toBeUndefined()
+    expect(h.leverLandings).toBe(0)
+    expect(transcript()).toEqual([
+      'ws compaction: the requested compaction did not run (blocked by policy); no continuation was requested, so no turn follows',
+    ])
+    expect(debugLog().some((l) => l.includes('blocked by policy'))).toBe(false)
+  })
+
+  test('a rejected compaction keeps the request and retries at the next turn end, then submits nothing', async () => {
+    const { h, c, turnEnd, closeWindow, transcript } = harness()
+    c.lever(undefined, undefined)
+    h.compactAnswers.push(new Error('a turn started'))
+    await turnEnd()
+    expect(h.compacts).toBe(1)
+    expect(h.submits).toEqual([])
+    expect(transcript()).toEqual(['ws compaction: the requested compaction was rejected (Error: a turn started); retrying at the next turn end'])
+    await turnEnd()
+    await closeWindow()
+    expect(h.compacts).toBe(2)
+    expect(h.leverLandings).toBe(1)
+    expect(h.submits).toEqual([])
+  })
+
+  test('a repeat call in both orders: an omitted one clears an earlier continuation, a supplied one sets it', async () => {
+    const a = harness()
+    a.c.lever(undefined, 'first')
+    a.c.lever(undefined, undefined)
+    await a.turnEnd()
+    await a.closeWindow()
+    expect(a.h.compacts).toBe(1)
+    expect(a.h.submits).toEqual([])
+
+    const b = harness()
+    b.c.lever(undefined, undefined)
+    b.c.lever(undefined, 'second')
+    await b.turnEnd()
+    await b.closeWindow()
+    expect(b.h.compacts).toBe(1)
+    expect(b.h.submits).toEqual([continuationText('second')])
+  })
+
+  test('a supplied continuation still opens the window and is submitted at its end', async () => {
+    const { h, c, turnEnd, closeWindow } = harness()
+    c.lever(undefined, 'go on')
+    await turnEnd()
+    expect(h.delayed.map((t) => t.ms)).toEqual([CONTINUATION_WINDOW_MS])
+    await closeWindow()
+    expect(h.submits).toEqual([continuationText('go on')])
   })
 })
 
