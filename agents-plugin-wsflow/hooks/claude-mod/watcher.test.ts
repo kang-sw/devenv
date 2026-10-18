@@ -288,6 +288,23 @@ ${formatBatch('pkg mailbox', RECV, 'k2', mailB)}`,
     expect(h.waits.length).toBe(2)
   })
 
+  test('a queued notice is withdrawn when the model receives that key\'s mail before the boundary', async () => {
+    const h = harness('notice')
+    const w = createWatcher(h.edges)
+    w.bind('k1')
+    await tick()
+    h.turn.running = true
+    await arrive(h)
+    w.recvCompleted('k1')
+    await tick()
+    await w.toolCompleted()
+    w.turnCompleted()
+    await tick()
+    expect(h.appended).toEqual([])
+    expect(h.submitted).toEqual([])
+    expect(h.waits.length).toBe(2)
+  })
+
   test('a queued notice that is never delivered backs off and re-arms, as a failed notice submit does', async () => {
     const h = harness('notice')
     const w = createWatcher(h.edges)

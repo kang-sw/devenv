@@ -167,8 +167,12 @@ export interface Watcher {
   turnCompleted: () => void
 }
 
-/** A prompt queued for the running turn, and what to do should it never reach the model. */
-type Queued = { text: string; lost: (why: string) => void }
+/**
+ * A prompt queued for the running turn, and what to do should it never reach
+ * the model; `noticeFor` marks a notice, withdrawn once the model has
+ * received that key's mail on its own.
+ */
+type Queued = { text: string; lost: (why: string) => void; noticeFor?: string }
 
 export function createWatcher(edges: WatcherEdges): Watcher {
   let key: string | undefined
@@ -187,9 +191,9 @@ export function createWatcher(edges: WatcherEdges): Watcher {
   let queued: Queued[] = []
 
   /** Queue `text` for the running main-thread turn; false when none runs, and the caller submits it. */
-  function steer(text: string, lost: (why: string) => void): boolean {
+  function steer(text: string, lost: (why: string) => void, noticeFor?: string): boolean {
     if (!edges.turnRunning()) return false
-    queued.push({ text, lost })
+    queued.push({ text, lost, noticeFor })
     return true
   }
 
@@ -247,7 +251,7 @@ export function createWatcher(edges: WatcherEdges): Watcher {
         resume() // this loop's own suspension, never a rebound loop's
       }
       const notice = formatNotice(edges.label, edges.recvTool(), myKey)
-      if (steer(notice, fail)) {
+      if (steer(notice, fail, myKey)) {
         edges.log(`${edges.label}: notice for ${myKey} queued for the running turn`)
       } else {
         try {
@@ -367,6 +371,8 @@ export function createWatcher(edges: WatcherEdges): Watcher {
     current: () => key,
     isSuspended: () => suspended !== undefined && suspended.key === key,
     recvCompleted(doneKey) {
+      // A notice still queued for that key would only ask for mail already received.
+      queued = queued.filter((q) => q.noticeFor !== doneKey)
       if (suspended && suspended.key === doneKey && doneKey === key) suspended.resume()
     },
     async toolCompleted() {

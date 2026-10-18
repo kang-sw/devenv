@@ -733,13 +733,19 @@ export const register: Register = (on) => {
 
   // Each feature's turn end in isolation; none waits on what it starts.
   on('turn.complete', async ($, e, next) => {
-    const res = await next(e)
-    if (e.agentId === undefined) {
-      mainTurn = false
-      try {
-        watcher?.turnCompleted()
-      } catch (err) {
-        $.ui.log(`${$.plugin.name} mailbox: turn end handling failed: ${String(err)}`, { to: 'debug' })
+    // The mailbox's turn end runs even when a hook beneath rejects: a turn
+    // flag left set would queue mail with no boundary or end to flush it.
+    let res: Awaited<ReturnType<typeof next>>
+    try {
+      res = await next(e)
+    } finally {
+      if (e.agentId === undefined) {
+        mainTurn = false
+        try {
+          watcher?.turnCompleted()
+        } catch (err) {
+          $.ui.log(`${$.plugin.name} mailbox: turn end handling failed: ${String(err)}`, { to: 'debug' })
+        }
       }
     }
     try {

@@ -36,6 +36,8 @@ function world(on: On, opts: { processOk?: boolean; refuseRegister?: string } = 
     typed: [] as { text: string; context: readonly string[] | undefined }[],
     /** The next typed prompts refused beneath the mod. */
     dropTyped: 0,
+    /** The next typed prompts whose hook beneath throws. */
+    throwTyped: 0,
     logs: [] as { text: string; to: string }[],
     /** Delays (ms on the mock clock) for the next store deletes, in call order. */
     deleteDelays: [] as number[],
@@ -79,6 +81,10 @@ function world(on: On, opts: { processOk?: boolean; refuseRegister?: string } = 
     if (w.dropTyped > 0) {
       w.dropTyped -= 1
       return { drop: 'blocked beneath' }
+    }
+    if (w.throwTyped > 0) {
+      w.throwTyped -= 1
+      throw new Error('failed beneath')
     }
     w.typed.push({ text: e.text, context: e.context })
     return { text: e.text, context: e.context }
@@ -378,4 +384,18 @@ test('another package attaches nothing to a typed prompt', async ($, on) => {
   if (isWs(w)) return
   await type($, w, 'hello')
   expect(w.typed).toEqual([{ text: 'hello', context: undefined }])
+})
+
+test('ws: when the prompt that took the continuation fails beneath, the continuation is submitted once', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  if (!isWs(w)) return
+  await lever($, w, 'go on')
+  await turnEnd($, w)
+  w.throwTyped = 1
+  await $.prompt.submit({ text: 'failing prompt', origin: { kind: 'composer' } } as never).catch(() => undefined)
+  await w.clock.settle()
+  expect(w.prompts).toEqual([continuationText('go on')])
+  await w.clock.advance(CONTINUATION_WINDOW_MS)
+  expect(w.prompts).toEqual([continuationText('go on')])
 })
