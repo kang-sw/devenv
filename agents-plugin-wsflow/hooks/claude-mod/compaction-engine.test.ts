@@ -32,10 +32,16 @@ function world(on: On, opts: { processOk?: boolean; refuseRegister?: string } = 
     compactAnswers: [] as CompactAnswer[],
     prompts: [] as string[],
     logs: [] as { text: string; to: string }[],
+    /** Delays (ms on the mock clock) for the next store deletes, in call order. */
+    deleteDelays: [] as number[],
   }
   on('store.get', () => ({ value: undefined }))
   on('store.set', () => ({ value: undefined }))
-  on('store.delete', () => ({ value: undefined }))
+  on('store.delete', async () => {
+    const delay = w.deleteDelays.shift()
+    if (delay) await clock.sleep(delay)
+    return { value: undefined }
+  })
   on('ui.log', ($, e) => (w.logs.push({ text: e.text, to: e.to }), { value: undefined }))
   on('session.id', () => ({ value: 'sess-1' }))
   on('session.start', ($, e) => ({ cwd: e.cwd }))
@@ -235,6 +241,22 @@ test('ws: session.end drops a pending request and starts the latch over', async 
   await measure($, w, 120_000)
   expect(w.compactCalls).toEqual([])
   expect(w.prompts).toEqual([])
+})
+
+test('ws: session.end resets the compaction state before awaiting the store delete', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  if (!isWs(w)) return
+  await lever($, w, 'go on')
+  // A delete still pending stands for one the hook's time bound cuts short.
+  w.deleteDelays.push(100)
+  const ended = $.session.end({ reason: 'clear', sessionId: 'sess-1', resume: undefined as never })
+  await w.clock.settle()
+  await turnEnd($, w)
+  expect(w.compactCalls).toEqual([])
+  expect(w.prompts).toEqual([])
+  await w.clock.advance(100)
+  await ended
 })
 
 test('another package stays inert: no usage read, no prompt, no compaction, and compactions pass through untouched', async ($, on) => {

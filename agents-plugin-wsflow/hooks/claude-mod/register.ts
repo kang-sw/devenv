@@ -460,8 +460,10 @@ export const register: Register = (on) => {
     return res
   }).catch(($, e, next) => next(e))
 
-  // Each feature ends in isolation, so a throw in the compaction reset never
-  // skips the mailbox stop and its $.store delete.
+  // Each step ends in isolation, so a throw in one never skips another. The
+  // synchronous steps run before the one awaited: should the hook's time
+  // bound cut the $.store delete short, the loop is already stopped and the
+  // compaction state already reset.
   on('session.end', async ($, e, next) => {
     // Mailbox: every end reason stops the loop: after `clear` or `resume` the
     // process goes on under another session id, and a loop still bound to the
@@ -472,17 +474,17 @@ export const register: Register = (on) => {
     } catch (err) {
       $.ui.log(`${$.plugin.name} mailbox: stop failed: ${String(err)}`, { to: 'debug' })
     }
-    try {
-      await $.store.delete(STORE_PREFIX + e.sessionId)
-    } catch {
-      // A leftover entry only re-binds a reload of that ended session.
-    }
     // Compaction: every end reason starts the conversation's state over; the
     // next conversation baselines the latch from its first usage.
     try {
       if (compactionEnabledFor($.plugin.name)) compaction.end(e.reason)
     } catch (err) {
       $.ui.log(`ws compaction: reset failed: ${String(err)}`, { to: 'debug' })
+    }
+    try {
+      await $.store.delete(STORE_PREFIX + e.sessionId)
+    } catch {
+      // A leftover entry only re-binds a reload of that ended session.
     }
     return next(e)
   })
