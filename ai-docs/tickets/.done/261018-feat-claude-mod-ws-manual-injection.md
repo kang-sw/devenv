@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 18ee2e9c52e05bbd
 sage-review-completeness-reviewed: 18ee2e9c52e05bbd
+completed: 2026-10-18
 ---
 
 # Inject the ws workflow manual and dedupe playbook re-reads from the Claude mod
@@ -288,3 +289,56 @@ Verification:
   Result the time one `$.session.messages({ as: "api" })` read takes in a
   large conversation (about 200K tokens or more), and whether ws-mcp
   garbage-collects minted session records.
+
+### Result (8d7382f) - 2026-10-18
+
+Implemented in `agents-plugin/hooks/claude-mod/manual.ts` (state machine
+behind injected edges), wired in `register.ts` (`prompt.compose`, the
+`workflow_manual` / `playbook_read` `tool.call` hooks, `session.start`,
+`session.compact`, `session.end`); `compaction.ts` gained an optional
+`leverLanded` edge because the lever's own landing bypasses the mod's
+`session.compact` hook. Mirrored byte-identically to wsflow, inert there.
+Tests: `manual.test.ts` (pure helpers, pinned prose, state machine) and
+`manual-engine.test.ts` (engine wiring per package), plus `compaction.test.ts`
+assertions for the new edge; 197 tests pass in each package.
+
+Choices within the decisions:
+- Minting uses `ferrule` (`format: "json"`); re-login passes the stored key as
+  `relogin_session_key`. The key binds to `$.session.root()` (ws-mcp
+  canonicalizes to the worktree toplevel), not `$.session.repo().root`, which
+  names the main working tree for a linked worktree; the gate reads `repo()`.
+- A refused re-login mints a new key but still counts as reused (the snapshot
+  is the replayed one), so the flag stays false.
+- `/context` composes (`analysis` trait) never wait and do not take the first
+  compose; a compose before any `session.start` skips only that
+  conversation's first-compose decision.
+- Stored entries carry `at`; other sessions' entries older than 30 days (the
+  ws-mcp key retention) or without `at` are pruned at `session.start`.
+
+Live dogfood (opus, this repository, scratch plugin copy via `--plugin-dir`,
+logging proxy on `ANTHROPIC_BASE_URL`):
+- The first request's system prompt carried the section with the minted key;
+  the first compose waited about 230 ms for the setup. The lead used that key.
+- `workflow_manual` returned the state behind the pinned line; a repeated
+  `playbook_read` collapsed to the pointer; after `/compact` the same read
+  returned in full and `workflow_manual` was still state-only; a repeat
+  `workflow_manual` whose earlier result survived compaction got its pointer.
+- `/compact` refreshes the snapshot (the next request carried a new compose
+  answer). Native auto compaction composes nothing: across six auto
+  compactions the requests kept the snapshot's answer, and after one the
+  requests carried the latest non-measuring compose answer already given. So
+  auto landings leave the flag unchanged, as implemented.
+- `--resume --fork-session` replays the recorded snapshot (no section in the
+  first resumed request) while the fork's new session id reads as fresh, so
+  the mod mints a key and sets the flag. Harmless: the span guard binds the cut
+  to the minted key, which only the injected section reveals. Noted at the
+  site; same for a resume of a session that never stored a key.
+- One `$.session.messages({ as: "api" })` read in a resumed conversation of
+  about 170K tokens (142 API messages, 763K JSON characters) took 5 ms; small
+  conversations took 1 ms.
+- ws-mcp does garbage-collect minted session records: the bootstrap
+  (`ferrule`) path runs a prune at most once per 24 h that deletes key records
+  idle 30 days (mtime; touched on use, guarded to once per hour).
+- Found while dogfooding: a wrapped line in the lead-run playbook starts with
+  `### ` and shows up in the pointer's heading list; captured as
+  `261018-bug-lead-run-wrapped-line-reads-as-heading`.

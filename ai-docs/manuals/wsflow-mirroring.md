@@ -312,15 +312,17 @@ The Claude mod is a second generated-sameness carve-out:
 `agents-plugin/hooks/claude-mod/` is the one source and
 `agents-plugin-wsflow/hooks/claude-mod/` a byte-identical copy. Claude Code
 accepts one hooks module per plugin, so the mod is one entry (`register.ts`)
-carrying every Claude mod feature: mailbox push, lead compaction timing, and
-the MCP reconnect lever.
+carrying every Claude mod feature: mailbox push, lead compaction timing, the
+MCP reconnect lever, and workflow manual injection.
 The mod reads its package identity (plugin name, root, MCP server) from the
 engine at runtime, so nothing in it varies per package; per-package behavior
 is chosen inside the shared source from the engine-reported plugin name. The
 mailbox drain mode comes from `drainModeFor`, and the compaction feature runs
 only where `compactionEnabledFor` holds (ws): in wsflow it registers no tool,
-submits no prompt, and starts no compaction. The reconnect lever runs in
-both packages. Each package's
+submits no prompt, and starts no compaction. Workflow manual injection is
+gated the same way (and on `ai-docs/WORKFLOW.md` at the repository root): in
+wsflow it mints no key, adds no system-prompt section, and rewrites no tool
+result. The reconnect lever runs in both packages. Each package's
 `hooks/hooks.json` is curated (wsflow lists only `modules`).
 
 - **Drift guard:** `TestWsflowHooksMirrorUpToDate` (in `internal/wsrsrc`).
@@ -328,7 +330,7 @@ both packages. Each package's
   agents-plugin-wsflow/hooks/claude-mod/` after any edit to the source.
 - **Verify:** `claude plugin validate` and `claude plugin test` on both
   packages; the engine tests branch on the package name, so each copy runs
-  its own drain mode and its own compaction gate.
+  its own drain mode and its own compaction and manual gates.
 
 ## Bootstrap Template Rules
 

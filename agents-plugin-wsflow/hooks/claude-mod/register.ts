@@ -1,6 +1,7 @@
 import type { HookStream, ProcessSpawnChunk, ProcessSpawnResult, Register, ToolCallResult } from 'claude-code'
 
 import { compactionEnabledFor, createCompaction } from './compaction'
+import { createManual, SECTION_ID, type ReadFamily } from './manual'
 import { createReconnect, reconnectDescription, TOOL_NAME as RECONNECT_TOOL } from './reconnect'
 import { LEVER_DESCRIPTION, TOOL_NAME as LEVER_TOOL } from './timing'
 import {
@@ -15,7 +16,7 @@ import {
 } from './watcher'
 
 // The Claude Code mod: the one hooks module a package's hooks.json names,
-// carrying three features.
+// carrying four features.
 //
 // - Mailbox push: the agent binds its session key through the mod-registered
 //   mailbox watch tool, the mod loops the one-shot `mailbox wait` as a
@@ -26,16 +27,22 @@ import {
 // - MCP reconnect lever: a tool the model calls when the plugin's MCP server
 //   has gone, and `/mcp reconnect` at the next main-thread turn end (see
 //   reconnect.ts).
+// - Workflow manual injection (ws only, in a ws project): a lead session key
+//   minted per conversation and the keyed workflow manual in the system
+//   prompt, `workflow_manual` answered with the session state alone while
+//   the prompt carries the manual, and repeat ws reads collapsed to a pointer
+//   (see manual.ts).
 //
 // Claude Code accepts one hooks module per plugin and one unmatched hook per
 // event in it, so the lifecycle events (session.start, session.end,
-// turn.complete) are registered once here and drive each feature in
-// isolation: no setup awaits another, and a throw in one is logged and leaves
-// the others running.
+// turn.complete, session.compact) are registered once here and drive each
+// feature in isolation: no setup awaits another, and a throw in one is logged
+// and leaves the others running.
 //
 // One source serves every package that ships it (this directory is mirrored
 // byte-identically), so package identity is read from the engine at runtime:
-// $.plugin.name picks the drain mode and gates the compaction feature,
+// $.plugin.name picks the drain mode and gates the compaction and manual
+// features,
 // $.plugin.root locates the launcher, and $.mcp.connect(<plugin name>)
 // resolves the MCP server, at session.start for every feature (a dead server
 // cannot be resolved later). The one package name the mod spells is the one
@@ -166,6 +173,17 @@ function storedKey(value: unknown): string | undefined {
   return typeof key === 'string' && key.trim() ? key.trim() : undefined
 }
 
+/** A tool result's text as the model reads it: core's `text`, else its text blocks joined. */
+export function resultText(res: ToolCallResult): string | undefined {
+  if (typeof res.text === 'string') return res.text
+  const r = res.result as unknown
+  if (typeof r === 'string') return r
+  const blocks = Array.isArray(r) ? r : (r as { content?: unknown } | undefined)?.content
+  if (!Array.isArray(blocks)) return undefined
+  const texts = blocks.flatMap((b) => (b?.type === 'text' && typeof b.text === 'string' ? [b.text as string] : []))
+  return texts.length > 0 ? texts.join('\n') : undefined
+}
+
 /**
  * Consume one spawned `mailbox wait` stream; abort ends it (returning the
  * stream kills the child). Every abort listener it adds is removed when it
@@ -257,6 +275,8 @@ export const register: Register = (on) => {
   // session.start, again by a bind and after a reconnect, and kept while the
   // server is down, when $.mcp.connect can no longer resolve it.
   let server: string | undefined
+  /** The latest session.start's resolution, settled; a feature that needs the name at start awaits it. */
+  let serverResolved: Promise<unknown> = Promise.resolve()
   const useServer = (resolved: string) => {
     server = resolved
     recvTool = mcpToolName(resolved, 'mailbox_recv')
@@ -280,6 +300,10 @@ export const register: Register = (on) => {
   const reconnect = createReconnect()
   let reconnectTool: string | undefined
 
+  // Manual feature state; started at session.start, and only under the
+  // package compactionEnabledFor admits.
+  const manual = createManual()
+
   on('session.start', async ($, e, next) => {
     const label = `${$.plugin.name} mailbox`
     const resolveServer = async () => {
@@ -292,6 +316,7 @@ export const register: Register = (on) => {
       $.ui.log(`${$.plugin.name} mod: MCP server not resolved at start: ${String(err)}`, { to: 'debug' })
       return undefined
     })
+    serverResolved = resolved
     const mailboxSetup = (async () => {
       stopWatcher('session.start again')
       watcher = undefined
@@ -384,6 +409,7 @@ export const register: Register = (on) => {
         compact: () => $.session.compact(),
         after: (fn) => void $.clock.after(0, fn),
         log: (text, to) => $.ui.log(text, { to }),
+        leverLanded: () => manual.landed('plugin'),
       })
       const registered = await $.tool.register({
         name: LEVER_TOOL,
@@ -428,10 +454,93 @@ export const register: Register = (on) => {
       $.ui.log(`${$.plugin.name} mcp reconnect: setup failed (${String(err)}); ${RECONNECT_TOOL} not registered`, { to: 'debug' }),
     )
 
+    // Registers no tool: its setup runs on in the background, and the first
+    // compose waits for it.
+    try {
+      if (compactionEnabledFor($.plugin.name)) {
+        manual.start({
+          isWsProject: async () => {
+            const repoRoot = await $.session.repo().then(
+              (repo) => repo?.root,
+              () => undefined,
+            )
+            if (repoRoot) return $.fs.exists(`${repoRoot.replace(/[\\/]+$/, '')}/ai-docs/WORKFLOW.md`)
+            return (await $.fs.ancestors({ names: ['ai-docs/WORKFLOW.md'] })).length > 0
+          },
+          server: async () => {
+            await serverResolved
+            return server
+          },
+          call: async (name, tool, args) => {
+            const res = await $.mcp.call(name, tool, args)
+            const text = res.content.flatMap((b) => (b.type === 'text' && typeof b.text === 'string' ? [b.text] : [])).join('\n')
+            if (res.isError) throw new Error(text || `${tool} reported an error`)
+            return text
+          },
+          root: () => $.session.root(),
+          sessionId: () => $.session.id(),
+          store: {
+            get: (key) => $.store.get(key),
+            set: (key, value) => $.store.set(key, value),
+            delete: (key) => $.store.delete(key),
+            keys: () => $.store.keys(),
+          },
+          now: () => $.clock.now(),
+          timer: (ms, fn) => $.clock.after(ms, fn),
+          messages: () => $.session.messages({ as: 'api' }),
+          log: (text, to) => $.ui.log(text, { to }),
+        })
+      }
+    } catch (err) {
+      $.ui.log(`ws manual: setup failed: ${String(err)}`, { to: 'debug' })
+    }
+
     // Every registration is awaited, so each tool is listed by turn one.
     await Promise.all([mailboxSetup, compactionSetup, reconnectSetup])
     return next(e)
   })
+
+  // The manual section, appended last. Only the first compose after a reset
+  // reaches the API, so only that one waits (bounded below the hook budget);
+  // the rest append what is cached. A failure appends nothing.
+  on('prompt.compose', async ($, e, next) => {
+    const res = await next(e)
+    if (!compactionEnabledFor($.plugin.name)) return res
+    const text = await manual.compose(e.traits)
+    if (text === undefined || res.sections.some((s) => s.id === SECTION_ID)) return res
+    return { sections: [...res.sections, { id: SECTION_ID, text, scope: 'session' as const }] }
+  }).catch(($, e, next) => next(e))
+
+  /**
+   * A main-thread ws read's result as the model should see it: the state-only
+   * `workflow_manual` and the repeat-read pointer. A subagent's call, another
+   * server's tool, a refusal, and an error result pass through as they are.
+   */
+  const rewriteRead = async (
+    family: ReadFamily,
+    call: { tool: string; agentId?: string },
+    res: ToolCallResult,
+  ): Promise<ToolCallResult> => {
+    if (call.agentId !== undefined || !server || call.tool !== mcpToolName(server, family)) return res
+    if (res.deny !== undefined || res.isError) return res
+    const text = resultText(res)
+    if (text === undefined) return res
+    const out = await manual.read(family, call.tool, call as unknown as Record<string, unknown>, text)
+    return out === undefined ? res : { result: out }
+  }
+
+  // A failure keeps the result the tool gave: next(e) replays what it settled to.
+  on('tool.call', { tool: /__workflow_manual$/ }, async ($, e, next) => {
+    const res = await next(e)
+    if (!compactionEnabledFor($.plugin.name)) return res
+    return rewriteRead('workflow_manual', e, res)
+  }).catch(($, e, next) => next(e))
+
+  on('tool.call', { tool: /__playbook_read$/ }, async ($, e, next) => {
+    const res = await next(e)
+    if (!compactionEnabledFor($.plugin.name)) return res
+    return rewriteRead('playbook_read', e, res)
+  }).catch(($, e, next) => next(e))
 
   on('tool.call', { tool: /__mailbox_watch$/ }, async ($, e, next) => {
     if (e.tool !== toolName) return next(e)
@@ -515,7 +624,9 @@ export const register: Register = (on) => {
   })
 
   // Observes every compaction without changing it; an observer never vetoes,
-  // so a failure replays what settled beneath, or lets it run.
+  // so a failure replays what settled beneath, or lets it run. The lever's
+  // own compaction does not pass here; the compaction feature tells the
+  // manual feature of that landing itself (leverLanded).
   on('session.compact', async ($, e, next) => {
     if (!compactionEnabledFor($.plugin.name)) return next(e)
     const res = await next(e)
@@ -524,13 +635,18 @@ export const register: Register = (on) => {
     } catch (err) {
       $.ui.log(`ws compaction: compaction observation failed: ${String(err)}`, { to: 'debug' })
     }
+    try {
+      manual.compacted(e.trigger, e.agentId, res)
+    } catch (err) {
+      $.ui.log(`ws manual: compaction observation failed: ${String(err)}`, { to: 'debug' })
+    }
     return res
   }).catch(($, e, next) => next(e))
 
   // Each step ends in isolation, so a throw in one never skips another. The
   // synchronous steps run before the one awaited: should the hook's time
   // bound cut the $.store delete short, the loop is already stopped and the
-  // compaction and reconnect state already reset.
+  // compaction, reconnect, and manual state already reset.
   on('session.end', async ($, e, next) => {
     // Mailbox: every end reason stops the loop: after `clear` or `resume` the
     // process goes on under another session id, and a loop still bound to the
@@ -554,6 +670,15 @@ export const register: Register = (on) => {
       reconnect.end(e.reason)
     } catch (err) {
       $.ui.log(`${$.plugin.name} mcp reconnect: reset failed: ${String(err)}`, { to: 'debug' })
+    }
+    // Manual: every end reason drops the cached manual and the snapshot flag,
+    // so the next conversation (no session.start follows `clear`) sets up
+    // again with its own key and picks up an updated manual. Its stored key
+    // stays, for a later resume of the ended session.
+    try {
+      if (compactionEnabledFor($.plugin.name)) manual.end(e.reason)
+    } catch (err) {
+      $.ui.log(`ws manual: reset failed: ${String(err)}`, { to: 'debug' })
     }
     try {
       await $.store.delete(STORE_PREFIX + e.sessionId)

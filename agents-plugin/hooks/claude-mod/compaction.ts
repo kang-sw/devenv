@@ -46,6 +46,12 @@ export type CompactionEdges = {
   /** Run `fn` once, after the calling hook has returned. */
   after: (fn: () => void) => void
   log: (text: string, to: 'transcript' | 'debug') => void
+  /**
+   * Told when the lever's own compaction landed. The engine routes it past
+   * the mod's session.compact hook, so another feature that resets on a
+   * landing hears of this one only here.
+   */
+  leverLanded?: () => void
 }
 
 /** The lever tool's answer: a refusal, a tool error, or its result text. */
@@ -174,7 +180,14 @@ export function createCompaction(): Compaction {
     } finally {
       leverCompacting = false
     }
-    if (res.skip === undefined) landed()
+    if (res.skip === undefined) {
+      landed()
+      try {
+        edges?.leverLanded?.()
+      } catch (err) {
+        debug(`landing notification failed: ${String(err)}`)
+      }
+    }
     if (request !== r) return
     if (res.skip !== undefined) {
       notice(`the requested compaction did not run (${res.skip}); the continuation follows with a note`)

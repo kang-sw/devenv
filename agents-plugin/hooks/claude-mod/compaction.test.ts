@@ -43,6 +43,10 @@ function harness(opts: { window?: Partial<CompactionWindow> | null } = {}) {
     rejectSubmits: 0,
     /** The next after() calls that throw. */
     afterThrows: 0,
+    /** How many times the lever's own landing was reported. */
+    leverLandings: 0,
+    /** Whether that report throws. */
+    leverLandedThrows: false,
     window: opts.window === null ? null : ({ ...WINDOW, ...opts.window } as CompactionWindow),
   }
   const c = createCompaction()
@@ -76,6 +80,10 @@ function harness(opts: { window?: Partial<CompactionWindow> | null } = {}) {
       h.scheduled.push(fn)
     },
     log: (text, to) => void h.logs.push({ text, to }),
+    leverLanded: () => {
+      h.leverLandings += 1
+      if (h.leverLandedThrows) throw new Error('listener failed')
+    },
   }
   c.start(edges)
   const readBreakdown = async () => {
@@ -499,6 +507,7 @@ describe('lever', () => {
     await measure(101_000)
     expect(h.submits).toEqual([advisoryText(T, 104_000), continuationText('go on'), advisoryText(T, 101_000)])
     expect(h.breakdownReads).toBe(2)
+    expect(h.leverLandings).toBe(1)
   })
 
   test("should the feature's hook see the lever's own landing, it is neither another's nor counted twice", async () => {
@@ -525,6 +534,23 @@ describe('lever', () => {
     await measure(105_000)
     expect(h.submits).toEqual([advisoryText(T, 104_000), skippedContinuationText('no', 'go on')])
     expect(h.breakdownReads).toBe(1)
+    expect(h.leverLandings).toBe(0)
+  })
+
+  test("only the lever's own landing is reported as the lever's; a throwing listener changes nothing", async () => {
+    const { h, c, turnEnd, debugLog } = harness()
+    c.compacted('manual', undefined, { messages: [] })
+    expect(h.leverLandings).toBe(0)
+    c.lever(undefined, 'go on')
+    h.compactAnswers.push(new Error('a turn is running'))
+    await turnEnd()
+    expect(h.leverLandings).toBe(0)
+    expect(debugLog().some((l) => l.includes('landing notification failed'))).toBe(false)
+    h.leverLandedThrows = true
+    await turnEnd()
+    expect(h.leverLandings).toBe(1)
+    expect(h.submits).toEqual([continuationText('go on')])
+    expect(debugLog().some((l) => l.includes('landing notification failed'))).toBe(true)
   })
 
   test('session end drops a pending request', async () => {
