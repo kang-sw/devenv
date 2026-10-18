@@ -207,3 +207,29 @@ Landed in 7fe04e8e6 with review fixes in 720b51e37. The wsflow copy is byte-iden
 - Verification: `claude plugin test agents-plugin` and
   `claude plugin test agents-plugin-wsflow` each passed 259 tests with 0
   failures. The wsflow mirror is byte-identical.
+
+#### Edition (05ae99992) - 2026-10-18
+
+- Live dogfood after 846c811df: the interrupted-call guard kept the mail
+  queued. The host then dropped the turn-end submit, because a plugin
+  `$.prompt.submit` is dropped after the person stops a turn until they send
+  input. So the mail went to the loss record, which the model never reads.
+- `watcher.ts`: one `deliver()` helper now backs every mailbox submit: the
+  idle drained batch, the idle notice, and the turn-end leftovers. When the
+  submit is rejected or dropped, it appends the same text as a row. A row
+  appended while idle rides the person's next prompt. The text is recorded
+  as lost only when the append fails too, and the loss reason names both
+  failures. A notice delivered by the append suspends the loop as a
+  submitted one does. The compaction and reconnect continuation submits are
+  unchanged.
+- Tests cover these cases:
+  - An idle submit that is dropped is appended (unit and engine).
+  - A turn-end submit dropped after an interrupt is appended and not
+    recorded (engine, both packages).
+  - A dropped notice is appended and the loop suspends (unit).
+  - When both the submit and the append fail, the text is recorded as lost
+    (unit and engine).
+- Verification: `claude plugin test agents-plugin` and
+  `claude plugin test agents-plugin-wsflow` each passed 264 tests with 0
+  failures. `claude plugin validate` passed for both packages. `go test
+  -count=1 ./internal/wsrsrc -run TestWsflowHooksMirrorUpToDate` passed.
