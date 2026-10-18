@@ -579,6 +579,9 @@
         }
       }
     },
+    "261018-bug-claude-mod-stale-mailbox-watch-after-hot-reload": {
+      "registered_at": "2026-10-18T05:36:08Z"
+    },
     "261018-bug-lead-run-wrapped-line-reads-as-heading": {
       "registered_at": "2026-10-18T04:08:20Z"
     },
