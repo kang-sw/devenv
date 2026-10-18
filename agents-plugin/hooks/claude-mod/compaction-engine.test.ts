@@ -126,13 +126,15 @@ test('compaction setup does not depend on the mailbox setup', async ($, on) => {
   await start($, w)
   const names = w.registered.map((r) => r.name)
   expect(names.filter((n) => n.startsWith('mailbox_'))).toEqual([])
-  if (w.plugin === 'ws') expect(names).toEqual(['request_compaction'])
+  if (w.plugin === 'ws') expect(names.filter((n) => n === 'request_compaction')).toEqual(['request_compaction'])
 })
 
 test('mailbox setup does not depend on the compaction setup', async ($, on) => {
   const w = world(on, { refuseRegister: 'request_compaction' })
   await start($, w)
-  expect(w.registered.map((r) => r.name)).toEqual(['mailbox_watch'])
+  const names = w.registered.map((r) => r.name)
+  expect(names.filter((n) => n.startsWith('mailbox_'))).toEqual(['mailbox_watch'])
+  expect(names.filter((n) => n === 'request_compaction')).toEqual([])
 })
 
 test('ws: a crossing that session.measure reports submits the advisory, reading the summary breakdown once', async ($, on) => {

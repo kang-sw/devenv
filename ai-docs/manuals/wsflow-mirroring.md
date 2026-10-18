@@ -312,13 +312,15 @@ The Claude mod is a second generated-sameness carve-out:
 `agents-plugin/hooks/claude-mod/` is the one source and
 `agents-plugin-wsflow/hooks/claude-mod/` a byte-identical copy. Claude Code
 accepts one hooks module per plugin, so the mod is one entry (`register.ts`)
-carrying every Claude mod feature: mailbox push and lead compaction timing.
+carrying every Claude mod feature: mailbox push, lead compaction timing, and
+the MCP reconnect lever.
 The mod reads its package identity (plugin name, root, MCP server) from the
 engine at runtime, so nothing in it varies per package; per-package behavior
 is chosen inside the shared source from the engine-reported plugin name. The
 mailbox drain mode comes from `drainModeFor`, and the compaction feature runs
 only where `compactionEnabledFor` holds (ws): in wsflow it registers no tool,
-submits no prompt, and starts no compaction. Each package's
+submits no prompt, and starts no compaction. The reconnect lever runs in
+both packages. Each package's
 `hooks/hooks.json` is curated (wsflow lists only `modules`).
 
 - **Drift guard:** `TestWsflowHooksMirrorUpToDate` (in `internal/wsrsrc`).
