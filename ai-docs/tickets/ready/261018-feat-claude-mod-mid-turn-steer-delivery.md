@@ -147,3 +147,44 @@ calls not flushing. The phase is complete when these pass. Live dogfood
 (mid-turn mail from a peer during a long tool call; a prompt typed during a
 lever compaction) is the lead's, after merge review, and is outside the
 worker's boundary.
+
+### Result (7fe04e8e6) - 2026-10-18
+
+Landed in 7fe04e8e6 with review fixes in 720b51e37. The wsflow copy is byte-identical.
+
+- `watcher.ts`: `WatcherEdges` gains `turnRunning` and `append`, and
+  `Watcher` gains `toolCompleted` and `turnCompleted`. A batch or notice
+  that becomes ready while a main-thread turn runs goes into a session-wide
+  queue. The queue survives a rebind; a stop gives it up. At the next
+  boundary the queue is appended as one row, and anything left at turn end
+  is submitted as one prompt. A refused row, a failed turn-end submit, or a
+  stop records each queued batch through the existing `keep` path. A lost
+  queued notice backs off and re-notices. A queued notice is withdrawn once
+  the model's own recv for that key completes.
+- `register.ts`: `mainTurn` is set by `turn.start` and cleared at
+  `turn.complete` (main thread only). The clear and the leftover flush run
+  in a `finally`. A catch-all `tool.call` hook is registered first, so it
+  wraps the mod-served tools. It awaits the flush before returning the
+  result, and only for `next.origin.plugin === 'engine'` calls with no
+  `agentId`. A new `prompt.submit` hook attaches the held continuation as
+  `context` to a composer prompt that has no `command`. When that prompt is
+  dropped or rejected, the hook releases the continuation.
+- `compaction.ts`: `CONTINUATION_WINDOW_MS = 1500`. The new `delay` edge and
+  `claim()` hold the continuation after the lever's own compaction, whether
+  it landed or was vetoed. A release submits through the `after` edge,
+  because the host refuses `$.prompt.submit` inside a `prompt.submit` hook
+  (kit probe). A session end inside the window records the continuation to
+  the transcript. The path where another compaction landed first keeps its
+  immediate submit. Decision taken: threshold messages also wait while a
+  continuation is held, since one sent then would run ahead of the
+  continuation.
+- Verification: `claude plugin test agents-plugin` and
+  `claude plugin test agents-plugin-wsflow` each passed 258 tests with 0
+  failures. `claude plugin validate` passed for both packages. `go test
+  ./internal/wsrsrc -run TestWsflowHooksMirrorUpToDate` passed, and the
+  hooks manifest and neutrality unittests passed. The engine tests cover
+  every case named in the phase verification.
+- Live dogfood is the lead's. It should include checking that mail still
+  queued at turn end starts its follow-up turn: that submit runs inline in
+  `turn.complete`, and the test kit does not model the host's turn-hold
+  check there.
