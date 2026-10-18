@@ -19,7 +19,7 @@ type On = Parameters<TestBody>[1]
 // that ships the mod and the feature runs in each, so the tests read the
 // package identity from the registrations and spell no package.
 
-type CommandAnswer = { text?: string } | 'brings-back' | 'rejects'
+type CommandAnswer = { text?: string } | 'brings-back'
 
 function world(on: On, opts: { processOk?: boolean; refuseRegister?: string; connect?: boolean } = {}) {
   const clock = mock.clock(on)
@@ -81,7 +81,6 @@ function world(on: On, opts: { processOk?: boolean; refuseRegister?: string; con
     w.commands.push({ command: e.command, args: e.args })
     w.order.push('command')
     const answer = w.commandAnswers.shift() ?? 'brings-back'
-    if (answer === 'rejects') throw new Error('past a Stop')
     if (answer === 'brings-back') {
       w.serverUp = true
       return {}
