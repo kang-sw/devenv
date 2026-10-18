@@ -589,7 +589,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-18T02:03:54Z"
+        "touched_at": "2026-10-18T02:04:31Z",
+        "impl": {
+          "branch": "impl/develop/creme-fiber-groin"
+        }
       }
     },
     "261018-feat-claude-mod-ws-manual-injection": {
