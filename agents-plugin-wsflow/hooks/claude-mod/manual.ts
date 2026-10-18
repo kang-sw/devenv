@@ -217,10 +217,11 @@ export function ferruleKey(text: string): string | undefined {
 /**
  * Whether a landed compaction of this trigger refreshes the snapshot. Manual
  * `/compact` and a plugin's compaction do (the first request after them
- * carries a fresh compose answer); native auto compaction is not assumed to,
- * so its landing leaves the flag as it was, which is safe either way: a set
- * flag means the cache was there for every compose since, a clear one only
- * costs full results.
+ * carries a fresh compose answer). Native auto compaction composes nothing:
+ * the requests after it carry the latest non-measuring compose answer given
+ * (observed on Claude Code 2.1.302), so its landing leaves the flag as it
+ * was, which is safe either way: a set flag means the cache was there for
+ * every compose since, a clear one only costs full results.
  */
 export function landingRefreshes(trigger: SessionCompactTrigger): boolean {
   return trigger === 'manual' || trigger === 'plugin'
@@ -283,7 +284,10 @@ type Cache = {
    * Whether $.store held a key for this session id: a resumed or reloaded
    * conversation, whose snapshot this start does not refresh (session.start
    * carries no resume marker; the stored entry is the signal). True as well
-   * when that key's re-login was refused and a new one minted.
+   * when that key's re-login was refused and a new one minted. A forked
+   * resume, or a resume of a session that never stored a key, also replays
+   * its snapshot yet reads as fresh here; the span guard in stateOnly is what
+   * keeps that harmless.
    */
   reused: boolean
 }
@@ -385,7 +389,14 @@ export function createManual(): Manual {
       })
     })
 
-  /** The text after the state-only cut, or `text` itself; never throws. */
+  /**
+   * The text after the state-only cut, or `text` itself; never throws. The
+   * span guard is load-bearing, not only a drift check: the injected span
+   * carries this conversation's key line, so only a call with the key the
+   * injected section named is cut. Where the snapshot was replayed without
+   * that section (a forked resume reads as fresh), the model never saw the
+   * key, so its calls pass through whole.
+   */
   const stateOnly = async (args: Record<string, unknown>, text: string): Promise<string> => {
     const c = cache
     if (!snapshot || !c) return text
