@@ -485,13 +485,20 @@ describe('setup and compose', () => {
     expect(m.snapshot()).toBe(true)
   })
 
-  test('a compose before any start leaves the flag clear for that conversation', async () => {
-    const { m, edges } = harness()
+  test('a compose before any start leaves the flag clear for that conversation only', async () => {
+    const { h, m, edges } = harness()
     expect(await m.compose([])).toBeUndefined()
     m.start(edges)
     await tick()
     expect(await m.compose([])).toContain('`minted-1`')
     expect(m.snapshot()).toBe(false)
+    // The next conversation's first compose decides the flag again.
+    m.end('clear')
+    h.sessionId = 'sess-2'
+    m.start(edges)
+    await tick()
+    expect(await m.compose([])).toContain('`minted-2`')
+    expect(m.snapshot()).toBe(true)
   })
 
   test('start prunes key entries past retention, keeping the current and the fresh ones', async () => {

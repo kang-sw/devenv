@@ -437,7 +437,11 @@ export function createManual(): Manual {
     start: (bound) => {
       edges = bound
       reset()
-      if (composedEarly) awaiting = undefined
+      if (composedEarly) {
+        // Only this conversation's first compose is past; a later start's is not.
+        awaiting = undefined
+        composedEarly = false
+      }
       begin()
       prune(bound).catch((err) => debug(`key entry prune failed: ${String(err)}`))
     },
