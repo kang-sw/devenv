@@ -602,7 +602,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-18T03:28:12Z"
+        "touched_at": "2026-10-18T03:28:48Z",
+        "impl": {
+          "branch": "impl/develop/sake-old-spoon"
+        }
       }
     },
     "261018-research-claude-mod-ws-manual-injection": {
