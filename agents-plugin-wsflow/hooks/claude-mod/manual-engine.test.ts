@@ -52,6 +52,8 @@ function world(
     /** Host commands run (the mailbox push's probe passes), after `probeDelayMs` on the mock clock. */
     processOk?: boolean
     probeDelayMs?: number
+    /** The mailbox_lookup_peers a slug resolution makes answers this late on the mock clock. */
+    lookupDelayMs?: number
   } = {},
 ) {
   const clock = mock.clock(on, { now: 1_800_000_000_000 })
@@ -147,8 +149,9 @@ function world(
     return { value: w.messages as never }
   })
   // Core for the model's ws reads: the server's own text.
-  on('tool.call', ($, e) => {
+  on('tool.call', async ($, e) => {
     const args = e as unknown as Record<string, unknown>
+    if (opts.lookupDelayMs && e.tool.endsWith('__mailbox_lookup_peers')) await clock.sleep(opts.lookupDelayMs)
     if (w.coreError !== undefined && e.tool.endsWith('__workflow_manual')) return { isError: true, result: undefined, text: w.coreError } as never
     const text = e.tool.endsWith('__workflow_manual')
       ? (w.coreManual ?? keyedResponse(args.session_key as string, w.state))
@@ -558,4 +561,28 @@ test('another package keeps the lever in a ws project and binds nothing itself',
   expect(watchTool(w)).toBe(true)
   expect(w.spawns).toEqual([])
   expect(w.existsChecks).toEqual([])
+})
+
+test('ws: a session end before the watcher exists drops the recorded key, so the new watcher binds nothing', LIVE_CHILD, async ($, on) => {
+  const w = world(on, { processOk: true, probeDelayMs: 1_000 })
+  const started = $.session.start({ cwd: '/repo/sub', surface: 'terminal', isInteractive: true })
+  await w.clock.settle()
+  const minted = w.mcpCalls.some((c) => c.tool === 'ferrule')
+  await $.session.end({ reason: 'clear', sessionId: 'sess-1', resume: undefined as never })
+  await w.clock.advance(1_000)
+  await started
+  await w.clock.settle()
+  if (!isWs(w)) return
+  expect(minted).toBe(true)
+  expect(w.spawns).toEqual([])
+})
+
+test('ws: a session end cancels an automatic bind whose slug lookup is still in flight', LIVE_CHILD, async ($, on) => {
+  const w = world(on, { processOk: true, lookupDelayMs: 1_000 })
+  await start($, w)
+  if (!isWs(w)) return
+  expect(w.spawns).toEqual([])
+  await $.session.end({ reason: 'clear', sessionId: 'sess-1', resume: undefined as never })
+  await w.clock.advance(1_000)
+  expect(w.spawns).toEqual([])
 })

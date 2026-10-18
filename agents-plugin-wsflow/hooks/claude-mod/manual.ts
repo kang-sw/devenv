@@ -394,7 +394,13 @@ export function createManual(): Manual {
     return false
   }
 
-  const setup = async (gen: number) => {
+  /**
+   * Re-log in with the stored key (or `adopted`, an adoption's rebuild) or mint
+   * one, write the key entry, tell the listener, and fill the cache. An
+   * adoption's rebuild never mints: a refused re-login there fails the setup,
+   * so the push stays on the key the lead just adopted.
+   */
+  const setup = async (gen: number, adopted?: string) => {
     const e = edges
     if (!e) return
     if (gate === undefined) {
@@ -408,15 +414,17 @@ export function createManual(): Manual {
     if (!server) throw new Error('the MCP server was not resolved')
     const [sessionId, root] = await Promise.all([e.sessionId(), e.root()])
     const entry = KEY_STORE_PREFIX + sessionId
-    const stored = storedKey(await e.store.get(entry))
+    const stored = adopted ?? storedKey(await e.store.get(entry))
     let key = stored !== undefined && (await relogin(e, server, root, stored)) ? stored : undefined
     if (key === undefined) {
+      if (adopted !== undefined) throw new Error(`the rebuild's re-login with ${adopted} was refused`)
       key = ferruleKey(await e.call(server, 'ferrule', { root, format: 'json' }))
       if (key === undefined) throw new Error('ferrule answered no session key')
     }
     // An adoption meanwhile owns the entry and the push: write and tell nothing.
+    const at = await e.now()
     if (gen !== generation) return
-    await e.store.set(entry, { sessionKey: key, at: await e.now() })
+    await e.store.set(entry, { sessionKey: key, at })
     if (gen !== generation) return
     switchKey(e, key)
     const [response, staticBody, push] = await Promise.all([
@@ -433,9 +441,11 @@ export function createManual(): Manual {
     debug(`${key === stored ? 're-logged in with' : 'minted'} ${key}`)
   }
 
-  const begin = () => {
+  /** Start a setup as `pending`; an adoption's runs after `before` (its key entry rewrite). */
+  const begin = (adopted?: string, before?: Promise<void>) => {
     const gen = generation
-    const run: Promise<void> = setup(gen)
+    const run: Promise<void> = (before ?? Promise.resolve())
+      .then(() => setup(gen, adopted))
       .catch((err) => debug(`setup failed: ${String(err)}`))
       .finally(() => {
         if (pending === run) pending = undefined
@@ -528,17 +538,20 @@ export function createManual(): Manual {
       const mine = generation
       const previous = current
       cache = undefined
-      pending = undefined
       snapshot = false
       switchKey(e, revived)
       debug(`adopted ${revived} (was ${previous ?? 'none'})`)
-      try {
-        await e.store.set(KEY_STORE_PREFIX + (await e.sessionId()), { sessionKey: revived, at: await e.now() })
-        // The rebuild re-logs in from the rewritten entry, so it reads as reused.
-        if (mine === generation) begin()
-      } catch (err) {
-        debug(`key entry rewrite failed: ${String(err)}`)
-      }
+      const rewrite = (async () => {
+        const [entry, at] = await Promise.all([e.sessionId().then((id) => KEY_STORE_PREFIX + id), e.now()])
+        if (mine === generation) await e.store.set(entry, { sessionKey: revived, at })
+      })().catch((err) => debug(`key entry rewrite failed: ${String(err)}`))
+      // The rebuild is pending from here on, so a first compose meanwhile waits
+      // on it instead of starting a setup from the entry not yet rewritten. It
+      // re-logs in with the adopted key itself, so a failed rewrite still
+      // rebuilds with it (the setup writes the entry again), and it reads as
+      // reused: the flag stays false until a landing.
+      begin(revived, rewrite)
+      await rewrite
       return adoptionNotice(previous, revived)
     } catch (err) {
       debug(`adoption of ${revived} failed: ${String(err)}`)

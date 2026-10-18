@@ -99,6 +99,10 @@ function harness(opts: { store?: Record<string, unknown>; wsProject?: boolean | 
     pushHold: undefined as Promise<void> | undefined,
     /** While set, a ferrule call whose args it answers with a promise waits on that promise. */
     ferruleHold: undefined as ((args: Record<string, unknown>) => Promise<void> | undefined) | undefined,
+    /** While set, every store write rejects. */
+    storeFails: false,
+    /** While set, a store write whose value it answers with a promise waits on that promise. */
+    storeHold: undefined as ((value: unknown) => Promise<void> | undefined) | undefined,
     /** Every key listener call, as [current, previous]. */
     keys: [] as [string, string | undefined][],
     timers: [] as { ms: number; fn: () => void; cancelled: boolean }[],
@@ -146,7 +150,12 @@ function harness(opts: { store?: Record<string, unknown>; wsProject?: boolean | 
     sessionId: async () => h.sessionId,
     store: {
       get: async (k) => h.store.get(k),
-      set: async (k, v) => void h.store.set(k, v),
+      set: async (k, v) => {
+        if (h.storeFails) throw new Error('store write failed')
+        const held = h.storeHold?.(v)
+        if (held) await held
+        h.store.set(k, v)
+      },
       delete: async (k) => void h.store.delete(k),
       keys: async () => [...h.store.keys()],
     },
@@ -883,6 +892,60 @@ describe('revive key adoption', () => {
     expect(await pending).toBeUndefined()
     expect(h.keys).toEqual([['minted-1', undefined]])
     expect(h.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'minted-1', at: NOW })
+  })
+
+  test('a failed key entry rewrite still rebuilds with the adopted key, never reverting to the stored one', async () => {
+    const { h, m } = await ready()
+    h.storeFails = true
+    expect(await revive(m)).toContain(adoptionNotice('minted-1', 'revived'))
+    // Transient: the rebuild's own write lands, from the adopted key, not the stale entry.
+    expect(h.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'minted-1', at: NOW })
+    h.storeFails = false
+    await tick()
+    expect(h.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'revived', at: NOW })
+    expect(h.calls.filter((c) => c.tool === 'ferrule').map((c) => c.args.relogin_session_key)).toEqual([undefined, 'revived', 'revived'])
+    expect(h.keys.at(-1)).toEqual(['revived', 'minted-1'])
+    m.compacted('manual', undefined, { messages: [] })
+    expect(await m.compose([])).toContain('`revived`')
+    expect(h.keys.length).toBe(2)
+  })
+
+  test('a first compose while the entry rewrite runs waits on the rebuild instead of starting from the old entry', async () => {
+    const { h, m } = await ready()
+    m.compacted('manual', undefined, { messages: [] })
+    let release!: () => void
+    const held = new Promise<void>((resolve) => (release = resolve))
+    h.storeHold = (v) => ((v as { sessionKey?: string }).sessionKey === 'revived' ? held : undefined)
+    const adopting = revive(m)
+    await tick()
+    expect(h.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'minted-1', at: NOW })
+    const composed = m.compose([])
+    await tick()
+    h.storeHold = undefined
+    release()
+    await adopting
+    expect(await composed).toContain('`revived`')
+    expect(h.keys).toEqual([
+      ['minted-1', undefined],
+      ['revived', 'minted-1'],
+    ])
+    expect(h.minted).toBe(1)
+  })
+
+  test("the rebuild never mints: a refused re-login there fails it and leaves the push on the adopted key", async () => {
+    const { h, m } = await ready()
+    let relogins = 0
+    let release!: () => void
+    const held = new Promise<void>((resolve) => (release = resolve))
+    h.ferruleHold = (args) => (args.relogin_session_key === 'revived' && ++relogins === 2 ? held : undefined)
+    await revive(m)
+    await tick()
+    h.known.delete('revived')
+    release()
+    await tick()
+    expect(h.minted).toBe(1)
+    expect(h.keys.at(-1)).toEqual(['revived', 'minted-1'])
+    expect(h.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'revived', at: NOW })
   })
 
   test('a failed rebuild recovers at the next first compose', async () => {
