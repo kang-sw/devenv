@@ -262,6 +262,45 @@ Verification:
   `/compact` or compaction request the section names the new key; `--resume` of that session
   re-logs in with the adopted key.
 
+### Result (6cfcd48f3) - 2026-10-18
+
+Landed in 88187affe (feature) and 6cfcd48f3 (lite-review fixes).
+
+- `manual.ts`: `revivedKeyToAdopt`, `adoptionNotice`, `MAILBOX_LINE`,
+  `sectionText(key, manual, push)`; adoption after the state-only/dedupe
+  rewrite (re-login, conversation key switch, key listener, entry rewrite,
+  flag false, rebuild); the generation counter now also bumps at adoption and
+  the setup re-checks it before its entry write and before the listener.
+  The adoption's rebuild is pending before the entry rewrite and re-logs in
+  with the adopted key itself, never minting.
+- `ManualEdges` gains `keyChanged(current, previous)` (synchronous) and
+  `pushAvailable()`; the ticket's "key listener on the Manual interface" is
+  an edge bound at start (cosmetic).
+- `register.ts`: one `wsGate` promise per module instance shared by both
+  features (a rejected check reads as closed); `mailboxSetup` awaits it after
+  creating the watcher and registers no `mailbox_watch`, no store entry and
+  no restore when it is open; `autoKey` records the latest key and binds
+  through `arm` once a watcher exists; `session.end` clears it.
+- `arm-the-wait.claude.md` gains the pinned first branch (last branch
+  reworded); rsrc manifest, wsflow rsrc and pi rsrc mirrors regenerated; the
+  Go arm-wait composition test pins the new branch and its order. Header
+  comment, ws `hooks.json`, and the `wsflow-mirroring.md` Claude Mod paragraph
+  updated; wsflow `claude-mod/` resynced byte-identically.
+
+Verification: `claude plugin validate` passes for both packages;
+`claude plugin test` 226 pass / 0 fail in `agents-plugin` and
+`agents-plugin-wsflow`; `python3 -m unittest discover` OK in
+`agents-plugin/tests` (78) and `agents-plugin-wsflow/tests` (15);
+`go test -race -count=1 ./internal/wsrsrc/` ok. A mutation removing the
+`session.end` `autoKey` clear fails the new engine test.
+
+Decisions: the existing "gate asked again by the first compose" unit test now
+pins "closed for good" (ticket decision); two manual-engine tests that passed
+another known key through now use a key ws-mcp refuses; engine tests holding
+a live wait child carry a 20 s timeout (about a second of real time per
+settle in the kit). Not done: the live dogfood (interactive opus session) is
+left to the lead/user.
+
 ## Sage Review Round 1 (2026-10-18)
 
 ### Design Reviewer — block
