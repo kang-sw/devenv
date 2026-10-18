@@ -585,6 +585,9 @@
     "261018-feat-claude-mod-compaction-threshold-knob": {
       "registered_at": "2026-10-17T23:46:26Z"
     },
+    "261018-feat-claude-mod-lead-key-adoption-mailbox-auto-bind": {
+      "registered_at": "2026-10-18T04:25:01Z"
+    },
     "261018-feat-claude-mod-mcp-reconnect-lever": {
       "registered_at": "2026-10-18T01:22:52Z",
       "lease": {
