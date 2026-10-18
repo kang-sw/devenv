@@ -104,6 +104,7 @@ subdirectory.
 - Scope: manual prefix injection gated on `ai-docs/WORKFLOW.md`,
   state-only `workflow_manual`, playbook re-read dedupe until compaction;
   session-key omission dropped (user, 2026-10-18).
+- Derive the actionable feature `261018-feat-claude-mod-ws-manual-injection`; the user approved this ledger's Proposals there, with refinements recorded in its Decisions (user, 2026-10-18).
 
 ### Proposals
 

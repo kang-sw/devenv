@@ -96,6 +96,7 @@ would no longer hold on Claude.
 ### Confirmed Decisions
 
 - Capture the probe as research (user, 2026-10-18).
+- Derive the actionable feature `261018-feat-claude-mod-mcp-reconnect-lever`; the user approved this ledger's Proposals there, with refinements recorded in its Decisions (user, 2026-10-18).
 
 ### Proposals
 
