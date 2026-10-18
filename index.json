@@ -582,6 +582,9 @@
     "261018-feat-claude-mod-compaction-threshold-knob": {
       "registered_at": "2026-10-17T23:46:26Z"
     },
+    "261018-research-claude-mod-ws-manual-injection": {
+      "registered_at": "2026-10-18T01:03:43Z"
+    },
     "261018-research-claude-mod-ws-mcp-reconnect": {
       "registered_at": "2026-10-17T15:30:06Z"
     }
