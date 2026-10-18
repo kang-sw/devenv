@@ -7,7 +7,9 @@ import type { SessionCompactResult, SessionCompactTrigger } from 'claude-code'
  * `workflow_manual` call with the session state alone while the system prompt
  * carries the manual, and collapses a repeat `playbook_read` or
  * `workflow_manual` result to a pointer while the earlier identical result is
- * still in the conversation.
+ * still in the conversation. A main-thread `workflow_manual` call with another
+ * lead key (a revive) is adopted as the conversation's key, and every key the
+ * conversation gets is handed to the mailbox push through the key listener.
  *
  * The engine snapshots the main thread's system prompt once per conversation:
  * only the first `prompt.compose` answer after a session start, a landed
@@ -54,9 +56,36 @@ export function keyLine(key: string): string {
   )
 }
 
-/** The system prompt section: the state pointer, the key line, then the manual. */
-export function sectionText(key: string, manual: string): string {
-  return `${STATE_POINTER_LINE}\n\n${keyLine(key)}\n\n${manual}`
+export const MAILBOX_LINE =
+  'Mailbox push is bound to this key automatically: arriving mail starts your next turn even when you are idle, so launch no mailbox wait. If a revive switches your key, the push follows it.'
+
+/** The system prompt section: the state pointer, the key line, the mailbox line when the push runs here, then the manual. */
+export function sectionText(key: string, manual: string, push = false): string {
+  const keyed = push ? `${keyLine(key)}\n\n${MAILBOX_LINE}` : keyLine(key)
+  return `${STATE_POINTER_LINE}\n\n${keyed}\n\n${manual}`
+}
+
+/** ws-mcp's fresh-bootstrap sentinel: a `workflow_manual` call with it mints a separate key, so it is never a revive. */
+export const FRESH_BOOTSTRAP_SENTINEL = 'obsidian-latch'
+
+/**
+ * The key a main-thread `workflow_manual` call revives with, when it is to be
+ * adopted: an explicit key, not the sentinel, other than the conversation's
+ * current one.
+ */
+export function revivedKeyToAdopt(raw: unknown, current: string | undefined): string | undefined {
+  if (typeof raw !== 'string') return undefined
+  const key = raw.trim()
+  if (!key || key === FRESH_BOOTSTRAP_SENTINEL || key === current) return undefined
+  return key
+}
+
+/** Appended to the adopting `workflow_manual` result after a blank line. */
+export function adoptionNotice(previous: string | undefined, current: string): string {
+  return (
+    `[ws] Lead session key changed: ${previous ?? '(none)'} -> ${current}. ` +
+    `Keep passing ${current} as session_key; this conversation resumes with it, and the system prompt names it after the next /compact or compaction request.`
+  )
 }
 
 export const STATE_ONLY_LINE = 'Workflow manual is in your system prompt; this is your current session state.'
@@ -228,8 +257,19 @@ export function landingRefreshes(trigger: SessionCompactTrigger): boolean {
 }
 
 export type ManualEdges = {
-  /** Whether the session runs in a ws project (`ai-docs/WORKFLOW.md` at the repository root); rejects when it cannot tell. */
+  /**
+   * Whether the session runs in a ws project (`ai-docs/WORKFLOW.md` at the
+   * repository root). The mailbox feature reads the same answer to decide its
+   * bind tool, so register.ts evaluates it once; a rejection reads as closed.
+   */
   isWsProject: () => Promise<boolean>
+  /** Whether the mailbox push runs here (its host-command probe passed); resolves once the probe settled. */
+  pushAvailable: () => Promise<boolean>
+  /**
+   * Synchronous: called once per change of the conversation's key, with the
+   * key it had (undefined when none). The mailbox push binds to `current`.
+   */
+  keyChanged: (current: string, previous: string | undefined) => void
   /** The ws MCP server's name from the mod's shared resolution, once the start's resolution settled; undefined while unresolved. */
   server: () => Promise<string | undefined>
   /** Call a ws MCP tool: its text blocks joined; rejects on a failed call or an error result. */
@@ -265,11 +305,14 @@ export type Manual = {
   /**
    * A main-thread ws read result: the text the model should read in place of
    * `text`, or undefined to keep the result as it is. `tool` is its
-   * model-facing name. Never throws.
+   * model-facing name. A `workflow_manual` result reaching here (not refused,
+   * not an error) may adopt its key. Never throws.
    */
   read: (family: ReadFamily, tool: string, args: Record<string, unknown>, text: string) => Promise<string | undefined>
   /** Whether the conversation's snapshot carries the section (for tests and logs). */
   snapshot: () => boolean
+  /** The conversation's key, or undefined (for tests and logs). */
+  key: () => string | undefined
 }
 
 /** The key and the manual for this conversation. */
@@ -303,8 +346,17 @@ export function createManual(): Manual {
   let snapshot = false
   /** A compose ran before any session.start, so the conversation's first compose is already past. */
   let composedEarly = false
-  /** Bumped at every session start or end: a setup that ran across one fills no cache. */
+  /**
+   * Bumped at every session start or end and at every adoption: a setup that
+   * ran across one fills no cache, writes no key entry, and tells the key
+   * listener nothing.
+   */
   let generation = 0
+  /**
+   * The conversation's key, as the key listener was last told; apart from
+   * the cache's key, since an adoption switches it before the rebuild lands.
+   */
+  let current: string | undefined
   /** (family, key) -> hash of the text last read: only tells when to read the conversation. */
   const hints = new Map<string, string>()
 
@@ -316,15 +368,28 @@ export function createManual(): Manual {
     pending = undefined
     snapshot = false
     awaiting = 'start'
+    current = undefined
+  }
+
+  /** Make `key` the conversation's key, telling the listener when it changed. */
+  const switchKey = (e: ManualEdges, key: string) => {
+    if (key === current) return
+    const previous = current
+    current = key
+    try {
+      e.keyChanged(key, previous)
+    } catch (err) {
+      debug(`key listener failed: ${String(err)}`)
+    }
   }
 
   const relogin = async (e: ManualEdges, server: string, root: string, key: string): Promise<boolean> => {
     try {
       const text = await e.call(server, 'ferrule', { root, format: 'json', relogin_session_key: key })
       if (ferruleKey(text) === key) return true
-      debug(`re-login answered another key; minting a new one`)
+      debug(`re-login with ${key} answered another key`)
     } catch (err) {
-      debug(`re-login with the stored key failed (${String(err)}); minting a new one`)
+      debug(`re-login with ${key} failed (${String(err)})`)
     }
     return false
   }
@@ -332,7 +397,12 @@ export function createManual(): Manual {
   const setup = async (gen: number) => {
     const e = edges
     if (!e) return
-    if (gate === undefined) gate = await e.isWsProject()
+    if (gate === undefined) {
+      gate = await e.isWsProject().catch((err) => {
+        debug(`project check failed (${String(err)}); reading as no ws project`)
+        return false
+      })
+    }
     if (!gate) return
     const server = await e.server()
     if (!server) throw new Error('the MCP server was not resolved')
@@ -344,17 +414,22 @@ export function createManual(): Manual {
       key = ferruleKey(await e.call(server, 'ferrule', { root, format: 'json' }))
       if (key === undefined) throw new Error('ferrule answered no session key')
     }
+    // An adoption meanwhile owns the entry and the push: write and tell nothing.
+    if (gen !== generation) return
     await e.store.set(entry, { sessionKey: key, at: await e.now() })
-    const [response, staticBody] = await Promise.all([
+    if (gen !== generation) return
+    switchKey(e, key)
+    const [response, staticBody, push] = await Promise.all([
       e.call(server, 'workflow_manual', { session_key: key }),
       e.call(server, 'playbook_read', { name: 'lead-workflow-manual', session_key: key }),
+      e.pushAvailable(),
     ])
     const manual = manualPart(response)
     if (manual === undefined) throw new Error('the keyed workflow_manual response carried no manual')
     if (!staticBody.trim()) throw new Error('the static manual body was empty')
     if (gen !== generation) return
     const cut = cutStaticBody(response, staticBody)
-    cache = { key, section: sectionText(key, manual), staticBody, span: cut.found ? cut.span : undefined, reused: stored !== undefined }
+    cache = { key, section: sectionText(key, manual, push), staticBody, span: cut.found ? cut.span : undefined, reused: stored !== undefined }
     debug(`${key === stored ? 're-logged in with' : 'minted'} ${key}`)
   }
 
@@ -429,6 +504,48 @@ export function createManual(): Manual {
     }
   }
 
+  /**
+   * Adopt the key a main-thread `workflow_manual` call revived with, as pi
+   * does: re-log in with it, make it the conversation's key (the push
+   * follows through the listener), rewrite the key entry so a later resume
+   * re-logs in with it, and rebuild the cache with it. The snapshot still
+   * carries the previous key's section, so the flag goes false until the next
+   * refreshing reset. The adoption notice, or undefined; never throws.
+   */
+  const adopt = async (args: Record<string, unknown>): Promise<string | undefined> => {
+    const e = edges
+    if (!e) return undefined
+    const revived = revivedKeyToAdopt(args.session_key, current)
+    if (revived === undefined) return undefined
+    try {
+      const gen = generation
+      const server = await e.server()
+      if (!server) return undefined
+      if (!(await relogin(e, server, await e.root(), revived))) return undefined
+      // A session start or end, or another adoption, came in meanwhile.
+      if (gen !== generation) return undefined
+      generation += 1
+      const mine = generation
+      const previous = current
+      cache = undefined
+      pending = undefined
+      snapshot = false
+      switchKey(e, revived)
+      debug(`adopted ${revived} (was ${previous ?? 'none'})`)
+      try {
+        await e.store.set(KEY_STORE_PREFIX + (await e.sessionId()), { sessionKey: revived, at: await e.now() })
+        // The rebuild re-logs in from the rewritten entry, so it reads as reused.
+        if (mine === generation) begin()
+      } catch (err) {
+        debug(`key entry rewrite failed: ${String(err)}`)
+      }
+      return adoptionNotice(previous, revived)
+    } catch (err) {
+      debug(`adoption of ${revived} failed: ${String(err)}`)
+      return undefined
+    }
+  }
+
   const landed = (trigger: SessionCompactTrigger) => {
     if (landingRefreshes(trigger)) awaiting = 'landing'
   }
@@ -487,7 +604,9 @@ export function createManual(): Manual {
         if (gate !== true) return undefined
         const seen = family === 'workflow_manual' ? await stateOnly(args, text) : text
         const out = await dedupe(family, tool, args, seen)
-        return out === text ? undefined : out
+        const notice = family === 'workflow_manual' ? await adopt(args) : undefined
+        const final = notice === undefined ? out : `${out}\n\n${notice}`
+        return final === text ? undefined : final
       } catch (err) {
         debug(`${family} rewrite failed: ${String(err)}`)
         return undefined
@@ -495,5 +614,6 @@ export function createManual(): Manual {
     },
 
     snapshot: () => snapshot,
+    key: () => current,
   }
 }

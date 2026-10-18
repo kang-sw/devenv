@@ -1,6 +1,6 @@
 import { expect, mock, test, type TestBody } from 'claude-code/testing'
 
-import { KEY_STORE_PREFIX, pointerText, SECTION_ID } from './manual'
+import { adoptionNotice, KEY_STORE_PREFIX, MAILBOX_LINE, pointerText, SECTION_ID } from './manual'
 import { continuationText } from './timing'
 
 type Engine = Parameters<TestBody>[0]
@@ -24,6 +24,12 @@ const INJECTED = (key: string) =>
   `Your lead session key for this conversation is \`${key}\`; pass it as \`session_key\`. Continuing another track (for example \`ws:lead-revive\` with a preserved key) is still allowed.\n\n` +
   keyedResponse(key, '').split('\n## Session Key')[0].trimEnd()
 
+/** The section where the mailbox push runs: the mailbox line follows the key line. */
+const INJECTED_PUSH = (key: string) => {
+  const [pointer, keyed, ...rest] = INJECTED(key).split('\n\n')
+  return [pointer, keyed, MAILBOX_LINE, ...rest].join('\n\n')
+}
+
 const ENGINE_SECTIONS = [
   { id: 'intro', text: 'You are Claude Code.', scope: 'shared' as const },
   { id: 'env', text: 'Platform: darwin', scope: 'session' as const },
@@ -33,7 +39,20 @@ type World = ReturnType<typeof world>
 
 function world(
   on: On,
-  opts: { store?: Record<string, unknown>; workflowFile?: boolean; repo?: 'none'; holdManualMs?: number; failMint?: boolean } = {},
+  opts: {
+    store?: Record<string, unknown>
+    workflowFile?: boolean
+    repo?: 'none'
+    /** fs.ancestors rejects: with repo 'none', the project check cannot tell. */
+    ancestorsThrow?: boolean
+    holdManualMs?: number
+    /** A minting ferrule (not a re-login) waits this long on the mock clock. */
+    holdMintMs?: number
+    failMint?: boolean
+    /** Host commands run (the mailbox push's probe passes), after `probeDelayMs` on the mock clock. */
+    processOk?: boolean
+    probeDelayMs?: number
+  } = {},
 ) {
   const clock = mock.clock(on, { now: 1_800_000_000_000 })
   mock.env(on, {})
@@ -55,6 +74,12 @@ function world(
     existsChecks: [] as string[],
     prompts: [] as string[],
     logs: [] as { text: string; to: string }[],
+    registered: [] as string[],
+    /** Spawned `mailbox wait` argvs; the session key is at index 5. */
+    spawns: [] as string[][],
+    killed: [] as number[],
+    /** While set, core answers the model's workflow_manual with this error. */
+    coreError: undefined as string | undefined,
   }
   on('store.get', ($, e) => ({ value: w.store.get(e.key) }))
   on('store.set', ($, e) => (w.store.set(e.key, e.value), { value: undefined }))
@@ -65,15 +90,30 @@ function world(
   on('session.root', () => ({ value: '/repo/sub' }))
   on('session.repo', () => ({ value: opts.repo === 'none' ? null : { root: '/repo', remote: null, internal: false, name: null } }))
   on('fs.exists', ($, e) => (w.existsChecks.push(e.path), { value: opts.workflowFile !== false && e.path === '/repo/ai-docs/WORKFLOW.md' }))
-  on('fs.ancestors', () => ({
-    value: opts.workflowFile === false ? [] : [{ dir: '/repo', name: 'ai-docs/WORKFLOW.md', content: '# Workflow', parts: [] }],
-  }))
+  on('fs.ancestors', () => {
+    if (opts.ancestorsThrow) throw new Error('cannot walk here')
+    return { value: opts.workflowFile === false ? [] : [{ dir: '/repo', name: 'ai-docs/WORKFLOW.md', content: '# Workflow', parts: [] }] }
+  })
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.end', ($, e) => ({ sessionId: e.sessionId }))
   on('turn.complete', ($, e) => ({ text: e.answer }))
-  on('process.run', () => ({ deny: 'no host commands on this surface' }))
+  on('process.run', async () => {
+    if (!opts.processOk) return { deny: 'no host commands on this surface' }
+    if (opts.probeDelayMs) await clock.sleep(opts.probeDelayMs)
+    return { value: { exitCode: 0, stdout: 'Python 3.12.0\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  on('process.spawn', async function* ($, e, next) {
+    const index = w.spawns.length
+    w.spawns.push([...e.argv])
+    next.signal.addEventListener('abort', () => w.killed.push(index), { once: true })
+    // The child never exits on its own here: these tests watch binds, not wakes.
+    await new Promise<void>(() => {})
+    yield* []
+    return { value: { code: 0, signal: null } }
+  })
   on('tool.register', ($, e, next) => {
     w.plugin = next.origin.plugin
+    w.registered.push(e.name)
     return { value: { tool: `mcp__${w.plugin}__${e.name}` } }
   })
   on('mcp.connect', ($, e) => ({ value: { isConnected: true, server: `plugin:${e.server}:${e.server}` } }))
@@ -88,6 +128,7 @@ function world(
           : { value: { content: [{ type: 'text', text: 'not a known session key' }], isError: true } }
       }
       if (opts.failMint) return { value: { content: [{ type: 'text', text: 'ws-mcp is unhealthy' }], isError: true } }
+      if (opts.holdMintMs) await clock.sleep(opts.holdMintMs)
       w.minted += 1
       const key = `minted-${w.minted}`
       w.known.add(key)
@@ -108,6 +149,7 @@ function world(
   // Core for the model's ws reads: the server's own text.
   on('tool.call', ($, e) => {
     const args = e as unknown as Record<string, unknown>
+    if (w.coreError !== undefined && e.tool.endsWith('__workflow_manual')) return { isError: true, result: undefined, text: w.coreError } as never
     const text = e.tool.endsWith('__workflow_manual')
       ? (w.coreManual ?? keyedResponse(args.session_key as string, w.state))
       : e.tool.endsWith('__playbook_read')
@@ -268,7 +310,8 @@ test('ws: a workflow_manual whose anchors moved reads as workflow_state with the
   const calls = w.mcpCalls.length
   w.coreManual = '## Session State\n(no restorable state for session key "gone")\n'
   expect(seen(await read($, w, 'workflow_manual', { session_key: 'gone' }))).toBe(w.coreManual)
-  expect(w.mcpCalls.length).toBe(calls)
+  // Only the refused adoption's re-login: no workflow_state fallback.
+  expect(w.mcpCalls.slice(calls).map((c) => c.tool)).toEqual(['ferrule'])
 })
 
 test('ws: with the snapshot carrying the manual, a main-thread workflow_manual reads as state only; a subagent call is untouched', async ($, on) => {
@@ -283,8 +326,8 @@ test('ws: with the snapshot carrying the manual, a main-thread workflow_manual r
   )
   const fromSub = await read($, w, 'workflow_manual', { session_key: 'minted-1' }, 'sub-1')
   expect(seen(fromSub)).toBe(keyedResponse('minted-1', '- [ ] {a} do it'))
-  // Another key's manual differs in its static span (its key line): passed through.
-  w.known.add('other-key')
+  // Another key's manual differs in its static span (its key line): passed
+  // through. ws-mcp refuses to re-log in with it, so it is not adopted either.
   expect(seen(await read($, w, 'workflow_manual', { session_key: 'other-key' }))).toBe(keyedResponse('other-key', '- [ ] {a} do it'))
 })
 
@@ -371,4 +414,148 @@ test('another package stays inert: no key, no section, no rewrite', async ($, on
   expect(seen(await read($, w, 'playbook_read', { name: 'x' }))).toBe('# x\n## Steps\nwork')
   expect(w.messageReads).toBe(0)
   expect([...w.store.keys()]).toEqual([])
+})
+
+/** A live wait child makes each settle cost about a second of real time; these tests settle several times with one. */
+const LIVE_CHILD = { timeoutMs: 20_000 }
+
+const watchTool = (w: World) => w.registered.includes('mailbox_watch')
+const boundKeys = (w: World) => w.spawns.map((argv) => argv[5])
+
+test('ws in a ws project: no mailbox_watch tool; the minted key is bound automatically and the section says so', LIVE_CHILD, async ($, on) => {
+  const w = world(on, { processOk: true })
+  await start($, w)
+  if (!isWs(w)) return
+  expect(watchTool(w)).toBe(false)
+  expect(boundKeys(w)).toEqual(['minted-1'])
+  expect(manualSection(await compose($, w))?.text).toBe(INJECTED_PUSH('minted-1'))
+  // The automatic bind leaves no lever binding behind.
+  expect([...w.store.keys()].some((k) => k.startsWith('mailbox-watch:'))).toBe(false)
+})
+
+test('ws without host commands: no tool, no bind, and no mailbox line', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  if (!isWs(w)) return
+  expect(watchTool(w)).toBe(false)
+  expect(w.spawns).toEqual([])
+  expect(manualSection(await compose($, w))?.text).toBe(INJECTED('minted-1'))
+})
+
+for (const variant of ['subagent', 'errored'] as const) {
+  test(`ws: ${variant === 'subagent' ? 'a subagent' : 'an errored'} workflow_manual call adopts nothing`, LIVE_CHILD, async ($, on) => {
+    const w = world(on, { processOk: true })
+    await start($, w)
+    if (!isWs(w)) return
+    await compose($, w)
+    w.known.add('revived')
+    const calls = w.mcpCalls.length
+    if (variant === 'subagent') {
+      expect(seen(await read($, w, 'workflow_manual', { session_key: 'revived' }, 'sub-1'))).toBe(keyedResponse('revived', '(no todos)'))
+    } else {
+      w.coreError = 'workflow_manual failed'
+      expect((await read($, w, 'workflow_manual', { session_key: 'revived' })).isError).toBe(true)
+    }
+    expect(w.mcpCalls.length).toBe(calls)
+    expect(boundKeys(w)).toEqual(['minted-1'])
+    expect(w.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'minted-1', at: 1_800_000_000_000 })
+  })
+}
+
+test('ws adopts a main-thread revive: re-login, entry rewritten, notice verbatim, push re-bound, and the section follows at the next landing', LIVE_CHILD, async ($, on) => {
+  const w = world(on, { processOk: true })
+  await start($, w)
+  if (!isWs(w)) return
+  await compose($, w)
+  w.known.add('revived')
+  const calls = w.mcpCalls.length
+  const res = await read($, w, 'workflow_manual', { session_key: 'revived' })
+  expect(seen(res)).toBe(
+    `${keyedResponse('revived', '(no todos)')}\n\n[ws] Lead session key changed: minted-1 -> revived. Keep passing revived as session_key; this conversation resumes with it, and the system prompt names it after the next /compact or compaction request.`,
+  )
+  expect(w.mcpCalls[calls]).toEqual({ server: 'plugin:ws:ws', tool: 'ferrule', args: { root: '/repo/sub', format: 'json', relogin_session_key: 'revived' } })
+  expect(w.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'revived', at: 1_800_000_000_000 })
+  expect(boundKeys(w)).toEqual(['minted-1', 'revived'])
+  expect(w.killed).toEqual([0])
+  // The snapshot still names minted-1 until a refreshing reset.
+  expect(seen(await read($, w, 'workflow_manual', { session_key: 'revived' }))).toBe(keyedResponse('revived', '(no todos)'))
+  await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'summary', toolUses: [] }] } as never)
+  await w.clock.settle()
+  expect(manualSection(await compose($, w))?.text).toBe(INJECTED_PUSH('revived'))
+  expect(seen(await read($, w, 'workflow_manual', { session_key: 'revived' }))).toMatch(/^Workflow manual is in your system prompt;/)
+  expect(boundKeys(w)).toEqual(['minted-1', 'revived'])
+})
+
+test('ws binds automatically at a re-login on resume or hot reload, and at the lazy mint after /clear', LIVE_CHILD, async ($, on) => {
+  const w = world(on, { processOk: true, store: { [`${KEY_STORE_PREFIX}sess-1`]: { sessionKey: 'kept-key', at: 1_800_000_000_000 } } })
+  w.known.add('kept-key')
+  await start($, w)
+  if (!isWs(w)) return
+  expect(boundKeys(w)).toEqual(['kept-key'])
+  await compose($, w)
+  await $.session.end({ reason: 'clear', sessionId: 'sess-1', resume: undefined as never })
+  await w.clock.settle()
+  expect(w.killed).toEqual([0])
+  w.sessionId = 'sess-2'
+  expect(manualSection(await compose($, w))?.text).toBe(INJECTED_PUSH('minted-1'))
+  expect(boundKeys(w)).toEqual(['kept-key', 'minted-1'])
+  // A hot reload runs session.start again: the re-login binds the same key anew.
+  await start($, w)
+  expect(w.mcpCalls.filter((c) => c.tool === 'ferrule').at(-1)?.args).toEqual({ root: '/repo/sub', format: 'json', relogin_session_key: 'minted-1' })
+  expect(boundKeys(w)).toEqual(['kept-key', 'minted-1', 'minted-1'])
+})
+
+test('ws: a key produced before the watcher exists is bound once it does', LIVE_CHILD, async ($, on) => {
+  const w = world(on, { processOk: true, probeDelayMs: 1_000 })
+  const started = $.session.start({ cwd: '/repo/sub', surface: 'terminal', isInteractive: true })
+  await w.clock.settle()
+  const mintedEarly = w.mcpCalls.some((c) => c.tool === 'ferrule')
+  const spawnedEarly = w.spawns.length
+  await w.clock.advance(1_000)
+  await started
+  await w.clock.settle()
+  if (!isWs(w)) return
+  expect(mintedEarly).toBe(true)
+  expect(spawnedEarly).toBe(0)
+  expect(boundKeys(w)).toEqual(['minted-1'])
+})
+
+test('ws: a session end that lands while the mint runs binds nothing', async ($, on) => {
+  const w = world(on, { processOk: true, holdMintMs: 1_000 })
+  await start($, w)
+  if (!isWs(w)) return
+  await $.session.end({ reason: 'clear', sessionId: 'sess-1', resume: undefined as never })
+  await w.clock.advance(1_000)
+  expect(w.spawns).toEqual([])
+  expect(w.store.has(`${KEY_STORE_PREFIX}sess-1`)).toBe(false)
+})
+
+test('ws: a project check that cannot tell reads as closed for both features: the lever registers and nothing is minted', async ($, on) => {
+  const w = world(on, { processOk: true, repo: 'none', ancestorsThrow: true })
+  await start($, w)
+  if (!isWs(w)) return
+  expect(watchTool(w)).toBe(true)
+  expect(w.mcpCalls).toEqual([])
+  expect(manualSection(await compose($, w))).toBeUndefined()
+})
+
+test('without ai-docs/WORKFLOW.md the lever registers and binds as before', LIVE_CHILD, async ($, on) => {
+  const w = world(on, { processOk: true, workflowFile: false })
+  await start($, w)
+  expect(watchTool(w)).toBe(true)
+  expect(w.spawns).toEqual([])
+  const res = await $.tool.call({ tool: `mcp__${w.plugin}__mailbox_watch`, session_key: 'k1' } as never)
+  await w.clock.settle()
+  expect(String(res.result)).toContain('bound')
+  expect(boundKeys(w)).toEqual(['k1'])
+  expect(w.mcpCalls).toEqual([])
+})
+
+test('another package keeps the lever in a ws project and binds nothing itself', async ($, on) => {
+  const w = world(on, { processOk: true })
+  await start($, w)
+  if (isWs(w)) return
+  expect(watchTool(w)).toBe(true)
+  expect(w.spawns).toEqual([])
+  expect(w.existsChecks).toEqual([])
 })

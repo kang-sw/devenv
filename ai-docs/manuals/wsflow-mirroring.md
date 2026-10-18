@@ -322,7 +322,11 @@ only where `compactionEnabledFor` holds (ws): in wsflow it registers no tool,
 submits no prompt, and starts no compaction. Workflow manual injection is
 gated the same way (and on `ai-docs/WORKFLOW.md` at the repository root): in
 wsflow it mints no key, adds no system-prompt section, and rewrites no tool
-result. The reconnect lever runs in both packages. Each package's
+result. Where it runs, it also adopts a revive's key as the conversation's
+and binds the mailbox push to every key the conversation gets, so the
+`mailbox_watch` lever is not registered there; in wsflow (and in a project
+without `ai-docs/WORKFLOW.md`) the lever registers and binds as before. The
+reconnect lever runs in both packages. Each package's
 `hooks/hooks.json` is curated (wsflow lists only `modules`).
 
 - **Drift guard:** `TestWsflowHooksMirrorUpToDate` (in `internal/wsrsrc`).
