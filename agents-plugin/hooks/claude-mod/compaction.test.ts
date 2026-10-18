@@ -39,6 +39,10 @@ function harness(opts: { window?: Partial<CompactionWindow> | null } = {}) {
     logs: [] as { text: string; to: string }[],
     breakdownReads: 0,
     dropSubmits: 0,
+    /** The next submits that reject. */
+    rejectSubmits: 0,
+    /** The next after() calls that throw. */
+    afterThrows: 0,
     window: opts.window === null ? null : ({ ...WINDOW, ...opts.window } as CompactionWindow),
   }
   const c = createCompaction()
@@ -46,6 +50,10 @@ function harness(opts: { window?: Partial<CompactionWindow> | null } = {}) {
   let ownHook = false
   const edges: CompactionEdges = {
     submit: async (text) => {
+      if (h.rejectSubmits > 0) {
+        h.rejectSubmits -= 1
+        throw new Error('submit failed')
+      }
       if (h.dropSubmits > 0) {
         h.dropSubmits -= 1
         return { drop: 'a Stop stands' } as never
@@ -60,7 +68,13 @@ function harness(opts: { window?: Partial<CompactionWindow> | null } = {}) {
       if (ownHook && answer.skip === undefined) c.compacted('plugin', undefined, { messages: [] })
       return answer.skip === undefined ? { messages: [] } : { skip: answer.skip }
     },
-    after: (fn) => void h.scheduled.push(fn),
+    after: (fn) => {
+      if (h.afterThrows > 0) {
+        h.afterThrows -= 1
+        throw new Error('clock refused')
+      }
+      h.scheduled.push(fn)
+    },
     log: (text, to) => void h.logs.push({ text, to }),
   }
   c.start(edges)
@@ -82,8 +96,9 @@ function harness(opts: { window?: Partial<CompactionWindow> | null } = {}) {
     await runScheduled()
   }
   const transcript = () => h.logs.filter((l) => l.to === 'transcript').map((l) => l.text)
+  const debugLog = () => h.logs.filter((l) => l.to === 'debug').map((l) => l.text)
   const routeOwnCompaction = () => void (ownHook = true)
-  return { h, c, measure, turnEnd, runScheduled, transcript, routeOwnCompaction }
+  return { h, c, measure, turnEnd, runScheduled, transcript, debugLog, routeOwnCompaction }
 }
 
 describe('pure core', () => {
@@ -344,6 +359,54 @@ describe('lever', () => {
     expect(h.submits).toEqual([continuationText('second')])
   })
 
+  test('a repeat call after another compaction landed keeps the compact step dropped', async () => {
+    const { h, c, turnEnd } = harness()
+    c.lever(undefined, 'first')
+    c.compacted('manual', undefined, { messages: [] })
+    c.lever(undefined, 'second')
+    await turnEnd()
+    expect(h.compacts).toBe(0)
+    expect(h.submits).toEqual([continuationText('second')])
+  })
+
+  test('a repeat call while the compact step is scheduled keeps it, and the step carries the new continuation', async () => {
+    const { h, c, runScheduled } = harness()
+    c.lever(undefined, 'first')
+    c.turnComplete(undefined, 'answer')
+    expect(h.scheduled.length).toBe(1)
+    c.lever(undefined, 'second')
+    await runScheduled()
+    expect(h.compacts).toBe(1)
+    expect(h.submits).toEqual([continuationText('second')])
+  })
+
+  test('a compact step that could not be scheduled is scheduled again at the next turn end', async () => {
+    const { h, c, turnEnd, debugLog } = harness()
+    c.lever(undefined, 'go on')
+    h.afterThrows = 1
+    await turnEnd()
+    expect(h.compacts).toBe(0)
+    expect(debugLog()).toContain('ws compaction: the compaction step was not scheduled (Error: clock refused); retrying at the next turn end')
+    await turnEnd()
+    expect(h.compacts).toBe(1)
+    expect(h.submits).toEqual([continuationText('go on')])
+  })
+
+  test('a compact step whose dispatch never ran is scheduled again at the next turn end, and the stale one stays inert', async () => {
+    const { h, c, turnEnd } = harness()
+    c.lever(undefined, 'go on')
+    c.turnComplete(undefined, 'answer')
+    const refused = h.scheduled.splice(0)
+    expect(refused.length).toBe(1)
+    await turnEnd()
+    expect(h.compacts).toBe(1)
+    expect(h.submits).toEqual([continuationText('go on')])
+    refused[0]!()
+    await turnEnd()
+    expect(h.compacts).toBe(1)
+    expect(h.submits.length).toBe(1)
+  })
+
   test('a rejected compaction keeps the request for the next turn end, with no timer retry', async () => {
     const { h, c, turnEnd, runScheduled } = harness()
     c.lever(undefined, 'go on')
@@ -356,6 +419,25 @@ describe('lever', () => {
     await turnEnd()
     expect(h.compacts).toBe(2)
     expect(h.submits).toEqual([continuationText('go on')])
+  })
+
+  test('a rejected compaction is noted in the transcript once per request', async () => {
+    const { h, c, turnEnd, transcript, debugLog } = harness()
+    const rejected = 'ws compaction: the requested compaction was rejected (Error: a turn is running); retrying at the next turn end'
+    c.lever(undefined, 'go on')
+    h.compactAnswers.push(new Error('a turn is running'), new Error('a turn is running'))
+    await turnEnd()
+    expect(transcript()).toEqual([rejected])
+    await turnEnd()
+    expect(h.compacts).toBe(2)
+    expect(transcript()).toEqual([rejected])
+    expect(debugLog()).toContain(rejected)
+    await turnEnd()
+    expect(h.submits).toEqual([continuationText('go on')])
+    c.lever(undefined, 'again')
+    h.compactAnswers.push(new Error('a turn is running'))
+    await turnEnd()
+    expect(transcript()).toEqual([rejected, rejected])
   })
 
   test('a veto still submits the continuation, with the note, and says why in the transcript', async () => {
@@ -461,5 +543,24 @@ describe('lever', () => {
     await turnEnd()
     expect(h.submits).toEqual([])
     expect(transcript()).toEqual([`ws compaction: a prompt was not submitted (dropped: a Stop stands):\n${continuationText('go on')}`])
+  })
+
+  test('a continuation whose submit rejects is recorded in the transcript', async () => {
+    const { h, c, turnEnd, transcript } = harness()
+    c.lever(undefined, 'go on')
+    h.rejectSubmits = 1
+    await turnEnd()
+    expect(h.submits).toEqual([])
+    expect(transcript()).toEqual([`ws compaction: a prompt was not submitted (Error: submit failed):\n${continuationText('go on')}`])
+  })
+
+  test('a threshold message whose submit rejects is logged to debug only', async () => {
+    const { h, measure, transcript, debugLog } = harness()
+    await measure(50_000)
+    h.rejectSubmits = 1
+    await measure(104_000)
+    expect(h.submits).toEqual([])
+    expect(transcript()).toEqual([])
+    expect(debugLog()).toContain('ws compaction: a prompt was not submitted (Error: submit failed)')
   })
 })

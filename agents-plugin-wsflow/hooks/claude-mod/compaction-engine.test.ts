@@ -200,6 +200,9 @@ test('ws: a rejected compaction retries at the next main-thread turn end', async
   await turnEnd($, w)
   expect(w.compactCalls.length).toBe(1)
   expect(w.prompts).toEqual([])
+  // The rejection's own text is the engine's; the notice carries it whole.
+  expect(transcript(w).length).toBe(1)
+  expect(transcript(w)[0]).toMatch(/^ws compaction: the requested compaction was rejected \(.+\); retrying at the next turn end$/)
   await w.clock.advance(60_000)
   expect(w.compactCalls.length).toBe(1)
   await turnEnd($, w)

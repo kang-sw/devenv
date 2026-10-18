@@ -72,8 +72,13 @@ type Request = {
   continuation: string
   /** False once a compaction landed elsewhere first: the continuation is still owed, the compact step is not. */
   compact: boolean
-  /** True while a compaction is scheduled or running for it. */
-  scheduled: boolean
+  /**
+   * The token of its queued compact step, from the turn end that queued it
+   * until that step starts; undefined while none is queued.
+   */
+  scheduled: number | undefined
+  /** Whether a rejection of its compaction was already noted in the transcript. */
+  rejectionNoted: boolean
 }
 
 /** The breakdown's figures, keyed by the model window they were read under. */
@@ -98,6 +103,8 @@ export function createCompaction(): Compaction {
    * this keeps it from being read as another's landing or counted twice.
    */
   let leverCompacting = false
+  /** The last compact-step token handed out; see Request.scheduled. */
+  let dispatches = 0
   /**
    * Bumped at every session start or end and every landed main-conversation
    * compaction: an observation that awaited the breakdown across one of them
@@ -146,8 +153,9 @@ export function createCompaction(): Compaction {
   }
 
   /**
-   * The scheduled compact step. A rejection (a turn started first) keeps the
-   * request for the next main-thread turn end; a veto still submits the
+   * The scheduled compact step. A rejection (most often a turn started
+   * first) keeps the request for the next main-thread turn end and is noted
+   * in the transcript once per request; a veto still submits the
    * continuation, with the note that nothing was compacted.
    */
   const runLever = async (r: Request) => {
@@ -158,8 +166,10 @@ export function createCompaction(): Compaction {
     try {
       res = await edges.compact()
     } catch (err) {
-      r.scheduled = false
-      debug(`compaction rejected (${String(err)}); retrying at the next turn end`)
+      const text = `the requested compaction was rejected (${String(err)}); retrying at the next turn end`
+      if (r.rejectionNoted) debug(text)
+      else notice(text)
+      r.rejectionNoted = true
       return
     } finally {
       leverCompacting = false
@@ -192,7 +202,7 @@ export function createCompaction(): Compaction {
       // A repeat call while one is pending states the current next step: it
       // replaces the continuation and keeps the request's compact-step state.
       if (request) request.continuation = checked.continuation
-      else request = { continuation: checked.continuation, compact: true, scheduled: false }
+      else request = { continuation: checked.continuation, compact: true, scheduled: undefined, rejectionNoted: false }
       debug(`compaction requested; continuation: ${checked.continuation}`)
       return { result: LEVER_RESULT }
     },
@@ -222,18 +232,27 @@ export function createCompaction(): Compaction {
     // The compact step runs after the turn.complete hook has returned:
     // compact() rejects while a turn runs, and the declarations do not say the
     // turn has stopped running inside its own turn.complete. An interrupted
-    // turn leaves the request pending: the human is taking over.
+    // turn leaves the request pending: the human is taking over. A step still
+    // queued at a later turn end never started (the engine runs no `after`
+    // callback whose dispatch a hook refused), so it is queued again; the
+    // token keeps the stale one inert should it run after all.
     turnComplete: (agentId, reason) => {
       const r = request
-      if (agentId !== undefined || reason === 'aborted' || !r || r.scheduled || !edges) return
+      if (agentId !== undefined || reason === 'aborted' || !r || leverCompacting || !edges) return
       if (!r.compact) return finish(r, continuationText(r.continuation))
-      r.scheduled = true
-      edges.after(() => {
-        runLever(r).catch((err) => {
-          r.scheduled = false
-          debug(`compaction step failed: ${String(err)}`)
+      if (r.scheduled !== undefined) debug('the scheduled compaction step did not run; scheduling it again')
+      const token = (dispatches += 1)
+      r.scheduled = token
+      try {
+        edges.after(() => {
+          if (r.scheduled !== token) return
+          r.scheduled = undefined
+          runLever(r).catch((err) => debug(`compaction step failed: ${String(err)}`))
         })
-      })
+      } catch (err) {
+        if (r.scheduled === token) r.scheduled = undefined
+        debug(`the compaction step was not scheduled (${String(err)}); retrying at the next turn end`)
+      }
     },
 
     // `precompute` installs nothing, a veto leaves the conversation as it
