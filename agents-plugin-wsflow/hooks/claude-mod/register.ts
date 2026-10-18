@@ -632,6 +632,9 @@ export const register: Register = (on) => {
   // result is always followed by a model request in the same turn. Only the
   // model's own main-thread calls count: the mod's own drain and slug lookup
   // pass here too, with this plugin as origin, and no request follows them.
+  // Nor does one follow a call the person interrupted (next.signal aborted):
+  // a row appended there reached the model only with the next typed prompt
+  // (live), so the mail stays queued for the turn end's submit instead.
   // Registered first among the tool.call hooks, so it wraps the tools the mod
   // serves itself. It has no .catch: it fails only when the call beneath
   // does, and a skipped hook keeps what its next settled to, where a .catch
@@ -639,7 +642,7 @@ export const register: Register = (on) => {
   // rejection.
   on('tool.call', async ($, e, next) => {
     const res = await next(e)
-    if (e.agentId === undefined && next.origin.plugin === 'engine') {
+    if (e.agentId === undefined && next.origin.plugin === 'engine' && !next.signal.aborted) {
       try {
         await watcher?.toolCompleted()
       } catch (err) {

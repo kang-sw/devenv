@@ -1,4 +1,4 @@
-import { expect, mock, test, type TestBody } from 'claude-code/testing'
+import { expect, mock, test, type Plugin, type TestBody } from 'claude-code/testing'
 
 type Engine = Parameters<TestBody>[0]
 type On = Parameters<TestBody>[1]
@@ -62,7 +62,11 @@ function world(on: On, opts: { store?: Record<string, unknown>; processOk?: bool
     w.appended.push(e.message.content.map((b) => (b.type === 'text' ? b.text : '')).join(''))
     return next(e)
   })
-  on('tool.call', { tool: /^Bash$/ }, () => ({ result: 'ok' }) as never)
+  on('tool.call', { tool: /^Bash$/ }, async ($, e) => {
+    // A long call, for the interrupter below to abandon midway.
+    if ((e as { command?: unknown }).command === INTERRUPT) await clock.sleep(100)
+    return { result: 'ok' } as never
+  })
   on('process.run', () =>
     opts.processOk === false
       ? { deny: 'no host commands on this surface' }
@@ -152,6 +156,27 @@ async function turnEnd($: Engine, w: ReturnType<typeof world>, opts: { reason?: 
     ...(opts.agentId ? { agentId: opts.agentId } : {}),
   } as never)
   await w.clock.settle()
+}
+
+const INTERRUPT = 'sleep 60 # interrupted'
+
+/**
+ * Stands for the person's Esc during a tool call: a plugin above the mod that
+ * settles the call first, which aborts the mod's next.signal as an interrupt
+ * does (the kit has no interrupt of its own for a test's tool call).
+ */
+const interrupter: Plugin = {
+  name: 'interrupter',
+  tier: 'prepend',
+  register: (on) => {
+    on('tool.call', { tool: /^Bash$/ }, async ($, e, next) => {
+      // A literal: the plugin runs in its own environment, outside this module.
+      if ((e as { command?: unknown }).command !== 'sleep 60 # interrupted') return next(e)
+      void next(e).catch(() => {})
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      return { result: '[Request interrupted by user for tool use]' } as never
+    })
+  },
 }
 
 /** A tool call the model made (the test's $ raises it with the engine as origin). */
@@ -661,4 +686,19 @@ test('ws records mail still queued for the turn when the session ends', async ($
   expect(w.prompts).toEqual([])
   const record = transcript(w).find((t) => t.includes('drained mail was not submitted'))
   expect(record).toContain('(the push loop stopped: session.end clear)')
+})
+
+test('mail queued during a tool call the person interrupts stays queued and is submitted at the turn end', { plugins: [interrupter] }, async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  await bind($, w, 'k1')
+  await turnStart($)
+  await arrive(w)
+  await $.tool.call({ tool: 'Bash', command: INTERRUPT } as never)
+  await w.clock.advance(100)
+  expect(w.appended).toEqual([])
+  await turnEnd($, w, { reason: 'aborted' })
+  expect(w.appended).toEqual([])
+  expect(w.prompts.length).toBe(1)
+  expect(w.prompts[0]).toContain(delivered(w))
 })
