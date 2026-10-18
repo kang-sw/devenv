@@ -18,10 +18,12 @@ import {
 // The Claude Code mod: the one hooks module a package's hooks.json names,
 // carrying four features.
 //
-// - Mailbox push: the agent binds its session key through the mod-registered
-//   mailbox watch tool, the mod loops the one-shot `mailbox wait` as a
-//   peek-only signal, and arriving mail starts a turn through
-//   $.prompt.submit (see watcher.ts for the loop).
+// - Mailbox push: the mod loops the one-shot `mailbox wait` as a peek-only
+//   signal for one bound session key, and arriving mail starts a turn through
+//   $.prompt.submit (see watcher.ts for the loop). Where the manual feature
+//   owns the conversation's key (ws, in a ws project) the mod binds every key
+//   the conversation gets itself; elsewhere the agent binds its key through
+//   the mod-registered mailbox watch tool.
 // - Lead compaction timing: advisory and milestone wake turns before native
 //   auto compaction, and the compaction request tool (see compaction.ts).
 // - MCP reconnect lever: a tool the model calls when the plugin's MCP server
@@ -30,14 +32,16 @@ import {
 // - Workflow manual injection (ws only, in a ws project): a lead session key
 //   minted per conversation and the keyed workflow manual in the system
 //   prompt, `workflow_manual` answered with the session state alone while
-//   the prompt carries the manual, and repeat ws reads collapsed to a pointer
-//   (see manual.ts).
+//   the prompt carries the manual, repeat ws reads collapsed to a pointer, and
+//   a revive's key adopted as the conversation's (see manual.ts).
 //
 // Claude Code accepts one hooks module per plugin and one unmatched hook per
 // event in it, so the lifecycle events (session.start, session.end,
 // turn.complete, session.compact) are registered once here and drive each
-// feature in isolation: no setup awaits another, and a throw in one is logged
-// and leaves the others running.
+// feature in isolation: a throw in one is logged and leaves the others
+// running. The one cross-feature wait is the shared ws-project gate: the
+// mailbox setup awaits it to decide whether its bind tool registers, and the
+// manual setup awaits the mailbox's host-command probe for its mailbox line.
 //
 // One source serves every package that ships it (this directory is mirrored
 // byte-identically), so package identity is read from the engine at runtime:
@@ -265,6 +269,22 @@ export const register: Register = (on) => {
   // a bind applies only while it is still the newest: overlapping binds
   // resolve latest-wins, and a stop cancels a bind still resolving.
   let armSeq = 0
+  /**
+   * The conversation's latest key from the manual feature, not yet bound:
+   * recorded by the synchronous key listener and bound once a watcher
+   * exists. Cleared at session.end, so a key never bound there stays unbound.
+   */
+  let autoKey: string | undefined
+  /** Whether the latest session.start's mailbox probe passed; the manual's section says the push is bound only then. */
+  let pushAvailable: Promise<boolean> = Promise.resolve(false)
+  /**
+   * Whether the session runs in a ws project under a package whose manual
+   * feature runs: evaluated once per module instance and shared by the manual
+   * feature (it mints keys only then) and the mailbox feature (its bind tool
+   * registers only otherwise), so a session never holds both the lever and
+   * the automatic bind. A failed check reads as closed for both.
+   */
+  let wsGate: Promise<boolean> | undefined
 
   const stopWatcher = (reason: string) => {
     armSeq += 1
@@ -289,6 +309,17 @@ export const register: Register = (on) => {
     const slug = await resolveSlug(key)
     if (seq !== armSeq || watcher !== target) return 'superseded'
     return target.bind(key, slug)
+  }
+
+  /** Bind the recorded key through `arm`, whose sequence makes the latest key win. */
+  const bindAuto = (target: Watcher, log: (text: string) => void) => {
+    const key = autoKey
+    if (key === undefined) return
+    autoKey = undefined
+    void arm(target, key).then(
+      (outcome) => log(`${outcome} ${key} (automatic)`),
+      (err) => log(`automatic bind of ${key} failed: ${String(err)}`),
+    )
   }
 
   // Compaction feature state; its tool name is set at session.start, and only
@@ -317,6 +348,23 @@ export const register: Register = (on) => {
       return undefined
     })
     serverResolved = resolved
+    const mailboxLog = (text: string) => $.ui.log(`${label}: ${text}`, { to: 'debug' })
+    wsGate ??= compactionEnabledFor($.plugin.name)
+      ? (async () => {
+          const repoRoot = await $.session.repo().then(
+            (repo) => repo?.root,
+            () => undefined,
+          )
+          if (repoRoot) return $.fs.exists(`${repoRoot.replace(/[\\/]+$/, '')}/ai-docs/WORKFLOW.md`)
+          return (await $.fs.ancestors({ names: ['ai-docs/WORKFLOW.md'] })).length > 0
+        })().catch((err) => {
+          $.ui.log(`${$.plugin.name} mod: ws project check failed (${String(err)}); reading as no ws project`, { to: 'debug' })
+          return false
+        })
+      : Promise.resolve(false)
+    const gate = wsGate
+    let settlePush!: (available: boolean) => void
+    pushAvailable = new Promise<boolean>((resolve) => (settlePush = resolve))
     const mailboxSetup = (async () => {
       stopWatcher('session.start again')
       watcher = undefined
@@ -326,9 +374,11 @@ export const register: Register = (on) => {
         const probe = await $.process.run(['python3', '--version'], { timeoutMs: 10_000 })
         if (probe.exitCode !== 0) throw new Error(`python3 --version exited ${probe.exitCode}`)
       } catch (err) {
+        settlePush(false)
         $.ui.log(`${label}: push unavailable here (${String(err)}); ${TOOL_NAME} not registered`, { to: 'debug' })
         return
       }
+      settlePush(true)
       const launcher = launcherPath($.plugin.root)
       const mode = drainModeFor($.plugin.name)
       // WS_MAILBOX is the fallback slug: a re-derived auto-minted address would
@@ -374,6 +424,15 @@ export const register: Register = (on) => {
         log: (text) => $.ui.log(text, { to: 'debug' }),
       })
       watcher = created
+      // A key the manual feature produced before the watcher existed.
+      bindAuto(created, mailboxLog)
+      // Where the manual feature owns the key, the mod binds it (bindAuto) and
+      // the lever stays unregistered: no tool, no store entry, no restore (a
+      // hot reload re-binds through the manual feature's re-login).
+      if (await gate) {
+        mailboxLog(`push binds the conversation's key automatically; ${TOOL_NAME} not registered`)
+        return
+      }
       // A bind from here on is newer than the restore below, which yields to it.
       const restoreSeq = armSeq
       const registered = await $.tool.register({
@@ -400,7 +459,10 @@ export const register: Register = (on) => {
         if (!conn?.isConnected || !current()) return
         $.ui.log(`${label}: ${await arm(created, key)} ${key} (restored)`, { to: 'debug' })
       })().catch((err) => $.ui.log(`${label}: restore failed: ${String(err)}`, { to: 'debug' }))
-    })().catch((err) => $.ui.log(`${label}: setup failed: ${String(err)}`, { to: 'debug' }))
+    })().catch((err) => {
+      settlePush(false)
+      $.ui.log(`${label}: setup failed: ${String(err)}`, { to: 'debug' })
+    })
 
     const compactionSetup = (async () => {
       if (!compactionEnabledFor($.plugin.name)) return
@@ -459,13 +521,16 @@ export const register: Register = (on) => {
     try {
       if (compactionEnabledFor($.plugin.name)) {
         manual.start({
-          isWsProject: async () => {
-            const repoRoot = await $.session.repo().then(
-              (repo) => repo?.root,
-              () => undefined,
-            )
-            if (repoRoot) return $.fs.exists(`${repoRoot.replace(/[\\/]+$/, '')}/ai-docs/WORKFLOW.md`)
-            return (await $.fs.ancestors({ names: ['ai-docs/WORKFLOW.md'] })).length > 0
+          isWsProject: () => gate,
+          pushAvailable: () => pushAvailable,
+          // Only records the key; the bind runs through arm once a watcher
+          // exists. A key change after session.end binds nothing: the manual
+          // generation drops it, and stopWatcher's armSeq bump cancels a bind
+          // still resolving.
+          keyChanged: (key) => {
+            autoKey = key
+            const target = watcher
+            if (target) bindAuto(target, mailboxLog)
           },
           server: async () => {
             await serverResolved
@@ -653,6 +718,7 @@ export const register: Register = (on) => {
     // old key would drain its mail into an unrelated conversation. Compaction
     // is not a session end, so it keeps the binding.
     try {
+      autoKey = undefined
       stopWatcher(`session.end ${e.reason}`)
     } catch (err) {
       $.ui.log(`${$.plugin.name} mailbox: stop failed: ${String(err)}`, { to: 'debug' })

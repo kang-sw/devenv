@@ -15,8 +15,9 @@ import (
 // still carry (Codex's registered-address-conditional wake, Claude's
 // background-task-completion wake) or the {{.MailboxWaitCommand}}
 // placeholder that render-time injection substitutes. The Claude overlay
-// must lead with the mailbox watch tool and keep the shell-wait fallback,
-// without the base's Codex nuance.
+// must lead with the automatic-push branch (a system prompt that says the push
+// is bound launches nothing), then the mailbox watch tool, and keep the
+// shell-wait fallback, without the base's Codex nuance.
 func TestLeadUseMailboxArmTheWaitHarnessComposition(t *testing.T) {
 	root := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 
@@ -28,7 +29,8 @@ func TestLeadUseMailboxArmTheWaitHarnessComposition(t *testing.T) {
 		claudeExample      = "Claude's own background-task notification"
 		piOverlayMarker    = "already arms a background mailbox waiter"
 		piNoLaunchSentence = "you never launch anything from"
-		claudeWatchTool    = "If the mailbox watch tool is available, call it with your session key"
+		claudeAutoPush     = "If your system prompt says mailbox push is bound to your session key"
+		claudeWatchTool    = "if the mailbox watch tool is available, call it with your"
 		claudeFallback     = "Your harness re-invokes you when that background task"
 	)
 
@@ -77,10 +79,13 @@ func TestLeadUseMailboxArmTheWaitHarnessComposition(t *testing.T) {
 			}
 
 			if tc.isClaude {
-				for _, want := range []string{claudeWatchTool, claudeFallback, waitCommandVar, baseImperative} {
+				for _, want := range []string{claudeAutoPush, claudeWatchTool, claudeFallback, waitCommandVar, baseImperative} {
 					if !strings.Contains(section, want) {
 						t.Errorf("harness=%q: Claude overlay missing %q", tc.harness, want)
 					}
+				}
+				if auto, watch := strings.Index(section, claudeAutoPush), strings.Index(section, claudeWatchTool); auto > watch {
+					t.Errorf("harness=%q: the automatic-push branch must come before the watch tool branch", tc.harness)
 				}
 				if strings.Contains(section, codexNuance) || strings.Contains(section, piOverlayMarker) {
 					t.Errorf("harness=%q: base or pi content leaked alongside the Claude overlay", tc.harness)
