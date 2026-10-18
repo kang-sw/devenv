@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 49eac49c0340ffa9
 sage-review-completeness-reviewed: 49eac49c0340ffa9
+completed: 2026-10-18
 ---
 
 # Make the Claude mod levers' continuation optional
@@ -148,3 +149,36 @@ Verification:
   decision.
 - Live dogfood (calling the compaction lever with no continuation and seeing
   the session stay idle afterwards) is the lead's after merge.
+
+### Result (f87c093cc) - 2026-10-18
+
+Landed on `impl/develop/haven-shrug-good`: `continuation` is optional on
+`request_compaction` and `request_mcp_reconnect` (schemas no longer require it;
+absent, non-string, or whitespace-only counts as omitted; multi-line is still a
+tool error; subagent refusal kept).
+
+- Compaction, omitted: nothing is submitted after the lever's own landing, after
+  another compaction landed first, or after a rejection retry; no `hold` window
+  opens, so `claim()` returns undefined and a typed prompt passes untouched. A
+  `{ skip }` veto is reported only through a transcript (`$.ui.log`) notice.
+- Reconnect, omitted: success submits nothing; failure submits the failure
+  notice without the `Continue:` line.
+- A repeat call replaces the continuation in both orders (omitted clears,
+  supplied sets).
+- Texts: lever descriptions and results (new `LEVER_RESULT_NO_CONTINUATION`,
+  `RECONNECT_RESULT_NO_CONTINUATION`), advisory and milestone texts, the two
+  `compaction.ts` transcript notices, module/header comments, and
+  `hooks/hooks.json` description updated. `mcp-server-repair/SKILL.md` untouched.
+- wsflow `claude-mod/` resynced byte-identical.
+
+Verification: `claude plugin validate` and `claude plugin test` pass for
+`agents-plugin` and `agents-plugin-wsflow` (279 pass, 0 fail each);
+`go test ./internal/wsrsrc/` (mirror drift guard) ok; hooks-manifest and
+shipped-surface python tests ok. Lite review: clean (Minor: the typed-prompt
+pass-through is covered at unit level only).
+
+Decisions: a compaction landed elsewhere first with an omitted continuation keeps
+the request until the next turn end (existing shape) and then submits nothing.
+
+Open: live idle-session dogfood (lever with no continuation, session stays idle)
+is the lead's after merge.
