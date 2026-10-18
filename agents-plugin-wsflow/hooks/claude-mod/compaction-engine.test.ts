@@ -1,5 +1,6 @@
 import { expect, mock, test, type TestBody } from 'claude-code/testing'
 
+import { CONTINUATION_WINDOW_MS } from './compaction'
 import { advisoryText, continuationText, LEVER_DESCRIPTION, LEVER_RESULT, skippedContinuationText, thresholdsFor } from './timing'
 
 type Engine = Parameters<TestBody>[0]
@@ -31,6 +32,12 @@ function world(on: On, opts: { processOk?: boolean; refuseRegister?: string } = 
     compactCalls: [] as { origin: string; instructions: unknown }[],
     compactAnswers: [] as CompactAnswer[],
     prompts: [] as string[],
+    /** Prompts the person typed, with the context they entered with. */
+    typed: [] as { text: string; context: readonly string[] | undefined }[],
+    /** The next typed prompts refused beneath the mod. */
+    dropTyped: 0,
+    /** The next typed prompts whose hook beneath throws. */
+    throwTyped: 0,
     logs: [] as { text: string; to: string }[],
     /** Delays (ms on the mock clock) for the next store deletes, in call order. */
     deleteDelays: [] as number[],
@@ -69,7 +76,19 @@ function world(on: On, opts: { processOk?: boolean; refuseRegister?: string } = 
     if (answer === 'rejects') throw new Error('a turn is running')
     return answer === 'lands' ? { messages: SUMMARY } : answer
   })
-  on('prompt.submit', ($, e) => (w.prompts.push(e.text), { text: e.text }))
+  on('prompt.submit', ($, e) => {
+    if (e.origin?.kind !== 'composer') return (w.prompts.push(e.text), { text: e.text })
+    if (w.dropTyped > 0) {
+      w.dropTyped -= 1
+      return { drop: 'blocked beneath' }
+    }
+    if (w.throwTyped > 0) {
+      w.throwTyped -= 1
+      throw new Error('failed beneath')
+    }
+    w.typed.push({ text: e.text, context: e.context })
+    return { text: e.text, context: e.context }
+  })
   return w
 }
 
@@ -100,6 +119,13 @@ async function turnEnd($: Engine, w: World, opts: { reason?: string; agentId?: s
 
 async function lever($: Engine, w: World, continuation: unknown, agentId?: string) {
   const res = await $.tool.call({ tool: `mcp__${w.plugin}__request_compaction`, continuation, ...(agentId ? { agentId } : {}) } as never)
+  await w.clock.settle()
+  return res
+}
+
+/** A prompt the person typed (origin composer), or a slash command's line with `command`. */
+async function type($: Engine, w: World, text: string, opts: { command?: { name: string; args: string }; kind?: string } = {}) {
+  const res = await $.prompt.submit({ text, origin: { kind: opts.kind ?? 'composer' }, ...(opts.command ? { command: opts.command } : {}) } as never)
   await w.clock.settle()
   return res
 }
@@ -159,6 +185,8 @@ test('ws: a lever call compacts after the main-thread turn end, then submits its
   expect(w.compactCalls).toEqual([])
   await turnEnd($, w)
   expect(w.compactCalls).toEqual([{ origin: 'ws', instructions: undefined }])
+  expect(w.prompts).toEqual([])
+  await w.clock.advance(CONTINUATION_WINDOW_MS)
   expect(w.prompts).toEqual([continuationText('continue Phase 2')])
   await turnEnd($, w)
   expect(w.compactCalls.length).toBe(1)
@@ -174,6 +202,7 @@ test("ws: the lever's own landing resets the latch, though the engine routes it 
   await lever($, w, 'go on')
   await turnEnd($, w)
   expect(w.compactCalls).toEqual([{ origin: 'ws', instructions: undefined }])
+  await w.clock.advance(CONTINUATION_WINDOW_MS)
   // Usage still past the advisory after the landing: a reset latch delivers it again, from a fresh breakdown.
   await measure($, w, 104_000)
   expect(w.prompts).toEqual([advisoryText(T, 104_000), continuationText('go on'), advisoryText(T, 104_000)])
@@ -209,6 +238,7 @@ test('ws: a rejected compaction retries at the next main-thread turn end', async
   expect(w.compactCalls.length).toBe(1)
   await turnEnd($, w)
   expect(w.compactCalls.length).toBe(2)
+  await w.clock.advance(CONTINUATION_WINDOW_MS)
   expect(w.prompts).toEqual([continuationText('go on')])
 })
 
@@ -219,6 +249,7 @@ test('ws: a vetoed compaction still submits the continuation with the note', asy
   await lever($, w, 'go on')
   w.compactAnswers.push({ skip: 'blocked by policy' })
   await turnEnd($, w)
+  await w.clock.advance(CONTINUATION_WINDOW_MS)
   expect(w.prompts).toEqual([skippedContinuationText('blocked by policy', 'go on')])
 })
 
@@ -277,4 +308,94 @@ test('another package stays inert: no usage read, no prompt, no compaction, and 
   expect(w.usageCalls).toEqual([])
   expect(w.prompts).toEqual([])
   expect(w.compactCalls).toEqual([{ origin: 'engine', instructions: undefined }])
+})
+
+test('ws: a prompt typed within the window after the lever compaction carries the continuation, which starts no turn of its own', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  if (!isWs(w)) return
+  await lever($, w, 'go on')
+  await turnEnd($, w)
+  await w.clock.advance(CONTINUATION_WINDOW_MS - 1)
+  await type($, w, 'what I typed meanwhile')
+  expect(w.typed).toEqual([{ text: 'what I typed meanwhile', context: [continuationText('go on')] }])
+  await w.clock.advance(CONTINUATION_WINDOW_MS)
+  expect(w.prompts).toEqual([])
+  await type($, w, 'a later prompt')
+  expect(w.typed[1]).toEqual({ text: 'a later prompt', context: undefined })
+})
+
+test('ws: a slash command, or a prompt not typed at the composer, leaves the continuation to the window end', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  if (!isWs(w)) return
+  await lever($, w, 'go on')
+  await turnEnd($, w)
+  await type($, w, '/cost', { command: { name: 'cost', args: '' } })
+  await type($, w, 'from a phone', { kind: 'bridge' })
+  expect(w.typed[0]).toEqual({ text: '/cost', context: undefined })
+  expect(w.prompts).toEqual(['from a phone'])
+  await w.clock.advance(CONTINUATION_WINDOW_MS)
+  expect(w.prompts).toEqual(['from a phone', continuationText('go on')])
+})
+
+test('ws: a prompt typed after the window finds the continuation already submitted', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  if (!isWs(w)) return
+  await lever($, w, 'go on')
+  await turnEnd($, w)
+  await w.clock.advance(CONTINUATION_WINDOW_MS)
+  await type($, w, 'too late')
+  expect(w.prompts).toEqual([continuationText('go on')])
+  expect(w.typed).toEqual([{ text: 'too late', context: undefined }])
+})
+
+test('ws: when the prompt that took the continuation is dropped, the continuation is submitted at once and once only', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  if (!isWs(w)) return
+  await lever($, w, 'go on')
+  await turnEnd($, w)
+  w.dropTyped = 1
+  const res = await type($, w, 'refused prompt')
+  expect(res.drop).toBe('blocked beneath')
+  expect(w.prompts).toEqual([continuationText('go on')])
+  await w.clock.advance(CONTINUATION_WINDOW_MS)
+  expect(w.prompts).toEqual([continuationText('go on')])
+})
+
+test('ws: a session end inside the window records the held continuation in the transcript', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  if (!isWs(w)) return
+  await lever($, w, 'go on')
+  await turnEnd($, w)
+  await $.session.end({ reason: 'clear', sessionId: 'sess-1', resume: undefined as never })
+  await w.clock.settle()
+  await w.clock.advance(CONTINUATION_WINDOW_MS)
+  expect(w.prompts).toEqual([])
+  expect(transcript(w)).toEqual([`ws compaction: a prompt was not submitted (session.end clear):\n${continuationText('go on')}`])
+})
+
+test('another package attaches nothing to a typed prompt', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  if (isWs(w)) return
+  await type($, w, 'hello')
+  expect(w.typed).toEqual([{ text: 'hello', context: undefined }])
+})
+
+test('ws: when the prompt that took the continuation fails beneath, the continuation is submitted once', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  if (!isWs(w)) return
+  await lever($, w, 'go on')
+  await turnEnd($, w)
+  w.throwTyped = 1
+  await $.prompt.submit({ text: 'failing prompt', origin: { kind: 'composer' } } as never).catch(() => undefined)
+  await w.clock.settle()
+  expect(w.prompts).toEqual([continuationText('go on')])
+  await w.clock.advance(CONTINUATION_WINDOW_MS)
+  expect(w.prompts).toEqual([continuationText('go on')])
 })

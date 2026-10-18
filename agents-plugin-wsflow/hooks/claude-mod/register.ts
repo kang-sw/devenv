@@ -1,4 +1,4 @@
-import type { HookStream, ProcessSpawnChunk, ProcessSpawnResult, Register, ToolCallResult } from 'claude-code'
+import type { HookStream, ProcessSpawnChunk, ProcessSpawnResult, PromptSubmitResult, Register, ToolCallResult } from 'claude-code'
 
 import { compactionEnabledFor, createCompaction } from './compaction'
 import { createManual, SECTION_ID, type ReadFamily } from './manual'
@@ -20,12 +20,14 @@ import {
 //
 // - Mailbox push: the mod loops the one-shot `mailbox wait` as a peek-only
 //   signal for one bound session key, and arriving mail starts a turn through
-//   $.prompt.submit (see watcher.ts for the loop). Where the manual feature
-//   owns the conversation's key (ws, in a ws project) the mod binds every key
-//   the conversation gets itself; elsewhere the agent binds its key through
-//   the mod-registered mailbox watch tool.
+//   $.prompt.submit, or, while a main-thread turn runs, joins it through
+//   $.session.append at its next tool boundary (see watcher.ts for the loop).
+//   Where the manual feature owns the conversation's key (ws, in a ws
+//   project) the mod binds every key the conversation gets itself; elsewhere
+//   the agent binds its key through the mod-registered mailbox watch tool.
 // - Lead compaction timing: advisory and milestone wake turns before native
-//   auto compaction, and the compaction request tool (see compaction.ts).
+//   auto compaction, and the compaction request tool, whose continuation a
+//   prompt typed during the compaction carries (see compaction.ts).
 // - MCP reconnect lever: a tool the model calls when the plugin's MCP server
 //   has gone, and `/mcp reconnect` at the next main-thread turn end (see
 //   reconnect.ts).
@@ -37,9 +39,9 @@ import {
 //
 // Claude Code accepts one hooks module per plugin and one unmatched hook per
 // event in it, so the lifecycle events (session.start, session.end,
-// turn.complete, session.compact) are registered once here and drive each
-// feature in isolation: a throw in one is logged and leaves the others
-// running. The one cross-feature wait is the shared ws-project gate: the
+// turn.start, turn.complete, session.compact) are registered once here and
+// drive each feature in isolation: a throw in one is logged and leaves the
+// others running. The one cross-feature wait is the shared ws-project gate: the
 // mailbox setup awaits it to decide whether its bind tool registers, and the
 // manual setup awaits the mailbox's host-command probe for its mailbox line.
 //
@@ -275,6 +277,12 @@ export const register: Register = (on) => {
    * exists. Cleared at session.end, so a key never bound there stays unbound.
    */
   let autoKey: string | undefined
+  /**
+   * Whether a main-thread turn runs, from turn.start to turn.complete: mail
+   * ready then joins that turn instead of starting one. A hot reload starts
+   * it over as false, so mail during that turn is submitted as when idle.
+   */
+  let mainTurn = false
   /** Whether the latest session.start's mailbox probe passed; the manual's section says the push is bound only then. */
   let pushAvailable: Promise<boolean> = Promise.resolve(false)
   /**
@@ -417,6 +425,11 @@ export const register: Register = (on) => {
           const res = await $.prompt.submit({ text })
           if (res.drop !== undefined) throw new Error(`prompt dropped: ${res.drop}`)
         },
+        turnRunning: () => mainTurn,
+        append: async (text) => {
+          const res = await $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] } })
+          if (res.deny !== undefined) throw new Error(`row refused: ${res.deny}`)
+        },
         recvTool: () => recvTool ?? 'mailbox recv',
         sleep: (ms, signal) => abortableSleep((d, fn) => $.clock.after(d, fn), ms, signal),
         notice: (text) => $.ui.log(text),
@@ -470,6 +483,7 @@ export const register: Register = (on) => {
         submit: (text) => $.prompt.submit({ text }),
         compact: () => $.session.compact(),
         after: (fn) => void $.clock.after(0, fn),
+        delay: (ms, fn) => void $.clock.after(ms, fn),
         log: (text, to) => $.ui.log(text, { to }),
         leverLanded: () => manual.landed('plugin'),
       })
@@ -594,6 +608,49 @@ export const register: Register = (on) => {
     return out === undefined ? res : { result: out }
   }
 
+  // A prompt the person typed during the lever's compaction carries its held
+  // continuation as context, so the continuation starts no turn of its own.
+  // A slash command does not take it (it may never reach the model), and a
+  // prompt that did not enter gives it back.
+  on('prompt.submit', async ($, e, next) => {
+    if (!compactionEnabledFor($.plugin.name) || e.origin?.kind !== 'composer' || e.command) return next(e)
+    const claimed = compaction.claim()
+    if (!claimed) return next(e)
+    let res: PromptSubmitResult
+    try {
+      res = await next({ ...e, context: [...(e.context ?? []), claimed.text] })
+    } catch (err) {
+      claimed.release(String(err))
+      throw err
+    }
+    if (res.drop !== undefined) claimed.release(`dropped: ${res.drop}`)
+    return res
+  })
+
+  // Mailbox steer: mail queued while a main-thread turn runs is appended at
+  // the turn's next tool boundary, before the result returns, since a tool
+  // result is always followed by a model request in the same turn. Only the
+  // model's own main-thread calls count: the mod's own drain and slug lookup
+  // pass here too, with this plugin as origin, and no request follows them.
+  // A row appended at a call the person interrupted reaches the model with
+  // their next prompt instead.
+  // Registered first among the tool.call hooks, so it wraps the tools the mod
+  // serves itself. It has no .catch: it fails only when the call beneath
+  // does, and a skipped hook keeps what its next settled to, where a .catch
+  // replaying next(e) would turn an answer a hook beneath gave into that
+  // rejection.
+  on('tool.call', async ($, e, next) => {
+    const res = await next(e)
+    if (e.agentId === undefined && next.origin.plugin === 'engine') {
+      try {
+        await watcher?.toolCompleted()
+      } catch (err) {
+        $.ui.log(`${$.plugin.name} mailbox: tool boundary flush failed: ${String(err)}`, { to: 'debug' })
+      }
+    }
+    return res
+  })
+
   // A failure keeps the result the tool gave: next(e) replays what it settled to.
   on('tool.call', { tool: /__workflow_manual$/ }, async ($, e, next) => {
     const res = await next(e)
@@ -671,10 +728,28 @@ export const register: Register = (on) => {
     return res
   })
 
-  // Each feature's turn end in isolation; both only schedule work that runs
-  // after this hook has returned.
+  on('turn.start', async ($, e, next) => {
+    if (e.agentId === undefined) mainTurn = true
+    return next(e)
+  })
+
+  // Each feature's turn end in isolation; none waits on what it starts.
   on('turn.complete', async ($, e, next) => {
-    const res = await next(e)
+    // The mailbox's turn end runs even when a hook beneath rejects: a turn
+    // flag left set would queue mail with no boundary or end to flush it.
+    let res: Awaited<ReturnType<typeof next>>
+    try {
+      res = await next(e)
+    } finally {
+      if (e.agentId === undefined) {
+        mainTurn = false
+        try {
+          watcher?.turnCompleted()
+        } catch (err) {
+          $.ui.log(`${$.plugin.name} mailbox: turn end handling failed: ${String(err)}`, { to: 'debug' })
+        }
+      }
+    }
     try {
       if (compactionEnabledFor($.plugin.name)) compaction.turnComplete(e.agentId, e.reason)
     } catch (err) {
@@ -715,10 +790,12 @@ export const register: Register = (on) => {
   on('session.end', async ($, e, next) => {
     // Mailbox: every end reason stops the loop: after `clear` or `resume` the
     // process goes on under another session id, and a loop still bound to the
-    // old key would drain its mail into an unrelated conversation. Compaction
-    // is not a session end, so it keeps the binding.
+    // old key would drain its mail into an unrelated conversation; mail still
+    // queued for a turn is recorded, not delivered. Compaction is not a
+    // session end, so it keeps the binding.
     try {
       autoKey = undefined
+      mainTurn = false
       stopWatcher(`session.end ${e.reason}`)
     } catch (err) {
       $.ui.log(`${$.plugin.name} mailbox: stop failed: ${String(err)}`, { to: 'debug' })

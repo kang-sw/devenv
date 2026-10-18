@@ -1,4 +1,4 @@
-import { expect, mock, test, type TestBody } from 'claude-code/testing'
+import { expect, mock, test, type Plugin, type TestBody } from 'claude-code/testing'
 
 type Engine = Parameters<TestBody>[0]
 type On = Parameters<TestBody>[1]
@@ -39,6 +39,10 @@ function world(on: On, opts: { store?: Record<string, unknown>; processOk?: bool
     connectDelays: [] as number[],
     dropSubmits: 0,
     prompts: [] as string[],
+    /** The text of each row the mod appended to the conversation. */
+    appended: [] as string[],
+    /** The next appends refused, as a policy plugin above would. */
+    refuseAppends: 0,
     logs: [] as { text: string; to: string }[],
   }
   on('store.get', ($, e) => ({ value: w.store.get(e.key) }))
@@ -48,6 +52,21 @@ function world(on: On, opts: { store?: Record<string, unknown>; processOk?: bool
   on('session.id', () => ({ value: 'sess-1' }))
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+  on('turn.start', ($, e) => ({ turnId: e.turnId }))
+  on('turn.complete', ($, e) => ({ text: e.answer }))
+  on('session.append', { door: 'note' }, ($, e, next) => {
+    if (w.refuseAppends > 0) {
+      w.refuseAppends -= 1
+      return { deny: 'policy' }
+    }
+    w.appended.push(e.message.content.map((b) => (b.type === 'text' ? b.text : '')).join(''))
+    return next(e)
+  })
+  on('tool.call', { tool: /^Bash$/ }, async ($, e) => {
+    // A long call, for the interrupter below to abandon midway.
+    if ((e as { command?: unknown }).command === INTERRUPT) await clock.sleep(100)
+    return { result: 'ok' } as never
+  })
   on('process.run', () =>
     opts.processOk === false
       ? { deny: 'no host commands on this surface' }
@@ -118,6 +137,63 @@ async function bind($: Engine, w: ReturnType<typeof world>, key: string, agentId
   await w.clock.settle()
   return res
 }
+
+// No settle after a turn start or a tool call: neither leaves work running
+// (the boundary flush is awaited inside the call), and each settle waits out
+// the pending wait child.
+async function turnStart($: Engine, agentId?: string) {
+  await $.turn.start({ text: '', turnId: 't', ...(agentId ? { agentId } : {}) })
+}
+
+async function turnEnd($: Engine, w: ReturnType<typeof world>, opts: { reason?: string; agentId?: string } = {}) {
+  const reason = opts.reason ?? 'answer'
+  await $.turn.complete({
+    answer: '',
+    durationMs: 1,
+    isAborted: reason === 'aborted',
+    turnId: 't',
+    reason,
+    ...(opts.agentId ? { agentId: opts.agentId } : {}),
+  } as never)
+  await w.clock.settle()
+}
+
+const INTERRUPT = 'sleep 60 # interrupted'
+
+/**
+ * Stands for the person's Esc during a tool call: a plugin above the mod that
+ * settles the call first, which aborts the mod's next.signal as an interrupt
+ * does (the kit has no interrupt of its own for a test's tool call).
+ */
+const interrupter: Plugin = {
+  name: 'interrupter',
+  tier: 'prepend',
+  register: (on) => {
+    on('tool.call', { tool: /^Bash$/ }, async ($, e, next) => {
+      // A literal: the plugin runs in its own environment, outside this module.
+      if ((e as { command?: unknown }).command !== 'sleep 60 # interrupted') return next(e)
+      void next(e).catch(() => {})
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      return { result: '[Request interrupted by user for tool use]' } as never
+    })
+  },
+}
+
+/** A tool call the model made (the test's $ raises it with the engine as origin). */
+async function modelTool($: Engine, agentId?: string) {
+  await $.tool.call({ tool: 'Bash', command: 'true', ...(agentId ? { agentId } : {}) } as never)
+}
+
+/** The latest wait exits with mail; in ws the mod's drain answers `answer`. */
+async function arrive(w: ReturnType<typeof world>, answer: Recv = batch()) {
+  if (w.plugin === 'ws') w.recvAnswers.push(answer)
+  w.exits[w.exits.length - 1]!(0)
+  await w.clock.settle()
+}
+
+/** What the package delivers for one arrival for k1: the drained batch (ws) or the notice. */
+const delivered = (w: { plugin: string }) =>
+  w.plugin === 'ws' ? '2 message(s) arrived for session_key k1' : `Call ${recvName(w.plugin)} with session_key k1`
 
 /** The model's own recv call (the test's $ raises it with the engine as origin). */
 async function modelRecv($: Engine, w: ReturnType<typeof world>, key: string, answer: Recv) {
@@ -422,18 +498,34 @@ test('a reload restore yields to a bind made while it resolves its slug', async 
   expect(w.spawns.map((a) => a[5])).toEqual(['k1'])
 })
 
-test('ws records a drained batch in the transcript when its prompt is dropped', async ($, on) => {
+test('ws appends a drained batch as a row when its idle prompt is dropped, recording nothing', async ($, on) => {
   const w = world(on)
   await start($, w)
   if (w.plugin !== 'ws') return
   await bind($, w, 'k1')
   w.dropSubmits = 1
+  await arrive(w)
+  expect(w.prompts).toEqual([])
+  expect(w.appended.length).toBe(1)
+  expect(w.appended[0]).toContain(delivered(w))
+  expect(transcript(w).some((t) => t.includes('drained mail was not submitted'))).toBe(false)
+  expect(w.spawns.length).toBe(2)
+})
+
+test('ws records a drained batch in the transcript when its prompt is dropped and its row refused', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  if (w.plugin !== 'ws') return
+  await bind($, w, 'k1')
+  w.dropSubmits = 1
+  w.refuseAppends = 1
   w.recvAnswers.push(batch())
   w.exits[0]!(0)
   await w.clock.settle()
   expect(w.prompts).toEqual([])
+  expect(w.appended).toEqual([])
   const record = transcript(w).find((t) => t.includes('drained mail was not submitted'))
-  expect(record).toContain('(prompt submit failed: Error: prompt dropped: a Stop stands)')
+  expect(record).toContain('(prompt submit failed: Error: prompt dropped: a Stop stands; row append failed: Error: row refused: policy)')
   expect(record).toContain('2 message(s) arrived for session_key k1')
   expect(record).toContain('mail from id:peer (t1):\nhello from peer')
   expect(w.logs.some((l) => l.to === 'debug' && l.text === record)).toBe(true)
@@ -483,4 +575,162 @@ test('a failing recv beneath the observer is never run a second time', async ($,
   await w.clock.settle()
   expect(w.recvCalls.length).toBe(1)
   expect(res).toEqual({ isError: true, result: undefined, text: 'mailbox recv failed' })
+})
+
+test('mail arriving during a main-thread turn joins it as one row at the next model tool call, not as a prompt', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  await bind($, w, 'k1')
+  await turnStart($)
+  await arrive(w)
+  expect(w.prompts).toEqual([])
+  expect(w.appended).toEqual([])
+  // A subagent's tool call is no boundary of the main turn.
+  await modelTool($, 'sub-1')
+  expect(w.appended).toEqual([])
+  await modelTool($)
+  expect(w.appended.length).toBe(1)
+  expect(w.appended[0]).toContain(delivered(w))
+  await modelTool($)
+  await turnEnd($, w)
+  expect(w.appended.length).toBe(1)
+  expect(w.prompts).toEqual([])
+})
+
+test('ws joins several mid-turn drains into one row; the mod\'s own recv calls between them flush nothing', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  if (w.plugin !== 'ws') return
+  await bind($, w, 'k1')
+  await turnStart($)
+  await arrive(w)
+  expect(w.spawns.length).toBe(2) // re-armed at once, not held until the boundary
+  await arrive(w, { result: undefined, text: '[{"from":"z@machine","content":"third","sent_at":"t3"}]' })
+  expect(w.recvCalls).toEqual([
+    { key: 'k1', origin: 'ws' },
+    { key: 'k1', origin: 'ws' },
+  ])
+  expect(w.appended).toEqual([])
+  await modelTool($)
+  expect(w.appended.length).toBe(1)
+  expect(w.appended[0]).toContain('mail from id:peer (t1):\nhello from peer')
+  expect(w.appended[0]).toContain('mail from z@machine (t3):\nthird')
+})
+
+test('mail still queued at the main-thread turn end is submitted as one prompt; a subagent turn end submits nothing', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  await bind($, w, 'k1')
+  await turnStart($)
+  await turnStart($, 'sub-1')
+  await arrive(w)
+  await turnEnd($, w, { agentId: 'sub-1' })
+  expect(w.prompts).toEqual([])
+  await turnEnd($, w)
+  expect(w.appended).toEqual([])
+  expect(w.prompts.length).toBe(1)
+  expect(w.prompts[0]).toContain(delivered(w))
+})
+
+test('ws submits mail arriving after the turn ended as its own prompt, as when idle', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  if (w.plugin !== 'ws') return
+  await bind($, w, 'k1')
+  await turnStart($)
+  await turnEnd($, w)
+  await arrive(w)
+  expect(w.appended).toEqual([])
+  expect(w.prompts.length).toBe(1)
+  expect(w.prompts[0]).toContain(delivered(w))
+})
+
+test('an interrupted turn submits what is still queued at its end', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  await bind($, w, 'k1')
+  await turnStart($)
+  await arrive(w)
+  await turnEnd($, w, { reason: 'aborted' })
+  expect(w.appended).toEqual([])
+  expect(w.prompts.length).toBe(1)
+  expect(w.prompts[0]).toContain(delivered(w))
+})
+
+test('a row appended right before an interrupt is not delivered again at the turn end', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  await bind($, w, 'k1')
+  await turnStart($)
+  await arrive(w)
+  await modelTool($)
+  await turnEnd($, w, { reason: 'aborted' })
+  // The appended row rides the next prompt's request instead.
+  expect(w.appended.length).toBe(1)
+  expect(w.prompts).toEqual([])
+})
+
+test('ws records queued mail in the transcript when its row is refused', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  if (w.plugin !== 'ws') return
+  await bind($, w, 'k1')
+  await turnStart($)
+  await arrive(w)
+  w.refuseAppends = 1
+  await modelTool($)
+  await turnEnd($, w)
+  expect(w.appended).toEqual([])
+  expect(w.prompts).toEqual([])
+  const record = transcript(w).find((t) => t.includes('drained mail was not submitted'))
+  expect(record).toContain('(row append failed: Error: row refused: policy)')
+  expect(record).toContain('mail from id:peer (t1):\nhello from peer')
+})
+
+test('ws records mail still queued for the turn when the session ends', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  if (w.plugin !== 'ws') return
+  await bind($, w, 'k1')
+  await turnStart($)
+  await arrive(w)
+  await $.session.end({ reason: 'clear', sessionId: 'sess-1', resume: undefined as never })
+  await w.clock.settle()
+  await modelTool($)
+  await turnEnd($, w)
+  expect(w.appended).toEqual([])
+  expect(w.prompts).toEqual([])
+  const record = transcript(w).find((t) => t.includes('drained mail was not submitted'))
+  expect(record).toContain('(the push loop stopped: session.end clear)')
+})
+
+test('mail queued during a tool call the person interrupts is appended at that boundary; the turn end submits nothing for it', { plugins: [interrupter] }, async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  await bind($, w, 'k1')
+  await turnStart($)
+  await arrive(w)
+  await $.tool.call({ tool: 'Bash', command: INTERRUPT } as never)
+  await w.clock.advance(100)
+  // The row rides the person's next prompt: the host starts no plugin turn after a stop.
+  expect(w.appended.length).toBe(1)
+  expect(w.appended[0]).toContain(delivered(w))
+  await turnEnd($, w, { reason: 'aborted' })
+  expect(w.appended.length).toBe(1)
+  expect(w.prompts).toEqual([])
+})
+
+test('mail queued after the last tool boundary: a turn-end submit the host drops after an interrupt is appended as a row, not recorded as lost', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  await bind($, w, 'k1')
+  await turnStart($)
+  await arrive(w)
+  // No tool boundary follows the arrival, so the mail is still queued at the turn end.
+  w.dropSubmits = 1
+  await turnEnd($, w, { reason: 'aborted' })
+  expect(w.prompts).toEqual([])
+  expect(w.appended.length).toBe(1)
+  expect(w.appended[0]).toContain(delivered(w))
+  expect(transcript(w).some((t) => t.includes('was not submitted'))).toBe(false)
 })

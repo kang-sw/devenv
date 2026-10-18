@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: c7f9cf258963222e
 sage-review-completeness-reviewed: c7f9cf258963222e
+completed: 2026-10-18
 ---
 
 # Deliver Claude mod mail and compaction continuations into the running turn
@@ -147,3 +148,111 @@ calls not flushing. The phase is complete when these pass. Live dogfood
 (mid-turn mail from a peer during a long tool call; a prompt typed during a
 lever compaction) is the lead's, after merge review, and is outside the
 worker's boundary.
+
+### Result (7fe04e8e6) - 2026-10-18
+
+Landed in 7fe04e8e6 with review fixes in 720b51e37. The wsflow copy is byte-identical.
+
+- `watcher.ts`: `WatcherEdges` gains `turnRunning` and `append`, and
+  `Watcher` gains `toolCompleted` and `turnCompleted`. A batch or notice
+  that becomes ready while a main-thread turn runs goes into a session-wide
+  queue. The queue survives a rebind; a stop gives it up. At the next
+  boundary the queue is appended as one row, and anything left at turn end
+  is submitted as one prompt. A refused row, a failed turn-end submit, or a
+  stop records each queued batch through the existing `keep` path. A lost
+  queued notice backs off and re-notices. A queued notice is withdrawn once
+  the model's own recv for that key completes.
+- `register.ts`: `mainTurn` is set by `turn.start` and cleared at
+  `turn.complete` (main thread only). The clear and the leftover flush run
+  in a `finally`. A catch-all `tool.call` hook is registered first, so it
+  wraps the mod-served tools. It awaits the flush before returning the
+  result, and only for `next.origin.plugin === 'engine'` calls with no
+  `agentId`. A new `prompt.submit` hook attaches the held continuation as
+  `context` to a composer prompt that has no `command`. When that prompt is
+  dropped or rejected, the hook releases the continuation.
+- `compaction.ts`: `CONTINUATION_WINDOW_MS = 1500`. The new `delay` edge and
+  `claim()` hold the continuation after the lever's own compaction, whether
+  it landed or was vetoed. A release submits through the `after` edge,
+  because the host refuses `$.prompt.submit` inside a `prompt.submit` hook
+  (kit probe). A session end inside the window records the continuation to
+  the transcript. The path where another compaction landed first keeps its
+  immediate submit. Decision taken: threshold messages also wait while a
+  continuation is held, since one sent then would run ahead of the
+  continuation.
+- Verification: `claude plugin test agents-plugin` and
+  `claude plugin test agents-plugin-wsflow` each passed 258 tests with 0
+  failures. `claude plugin validate` passed for both packages. `go test
+  ./internal/wsrsrc -run TestWsflowHooksMirrorUpToDate` passed, and the
+  hooks manifest and neutrality unittests passed. The engine tests cover
+  every case named in the phase verification.
+- Live dogfood is the lead's. It should include checking that mail still
+  queued at turn end starts its follow-up turn: that submit runs inline in
+  `turn.complete`, and the test kit does not model the host's turn-hold
+  check there.
+
+#### Edition (846c811df) - 2026-10-18
+
+- Live dogfood found a gap. Mail was queued during a main-thread tool call,
+  and the person interrupted that call with Esc. The flush still appended the
+  mail at the call's boundary, and no model request followed in that turn.
+  So the queue was empty at `turn.complete` (reason `aborted`). The model
+  read the mail only with the next typed prompt.
+- `register.ts`: the tool-boundary flush now also requires
+  `!next.signal.aborted`. Mail queued during an interrupted call stays
+  queued, and the turn end submits it as a follow-up turn.
+- Engine test: the kit has no interrupt for a test's tool call. A
+  prepend-tier plugin that settles the call first aborts the mod's
+  `next.signal`, so the test uses it to stand in for Esc. The test fails
+  without the guard.
+- Verification: `claude plugin test agents-plugin` and
+  `claude plugin test agents-plugin-wsflow` each passed 259 tests with 0
+  failures. The wsflow mirror is byte-identical.
+
+#### Edition (05ae99992) - 2026-10-18
+
+- Live dogfood after 846c811df: the interrupted-call guard kept the mail
+  queued. The host then dropped the turn-end submit, because a plugin
+  `$.prompt.submit` is dropped after the person stops a turn until they send
+  input. So the mail went to the loss record, which the model never reads.
+- `watcher.ts`: one `deliver()` helper now backs every mailbox submit: the
+  idle drained batch, the idle notice, and the turn-end leftovers. When the
+  submit is rejected or dropped, it appends the same text as a row. A row
+  appended while idle rides the person's next prompt. The text is recorded
+  as lost only when the append fails too, and the loss reason names both
+  failures. A notice delivered by the append suspends the loop as a
+  submitted one does. The compaction and reconnect continuation submits are
+  unchanged.
+- Tests cover these cases:
+  - An idle submit that is dropped is appended (unit and engine).
+  - A turn-end submit dropped after an interrupt is appended and not
+    recorded (engine, both packages).
+  - A dropped notice is appended and the loop suspends (unit).
+  - When both the submit and the append fail, the text is recorded as lost
+    (unit and engine).
+- Verification: `claude plugin test agents-plugin` and
+  `claude plugin test agents-plugin-wsflow` each passed 264 tests with 0
+  failures. `claude plugin validate` passed for both packages. `go test
+  -count=1 ./internal/wsrsrc -run TestWsflowHooksMirrorUpToDate` passed.
+
+#### Edition (a5d8a4b3e) - 2026-10-18
+
+- The user decided to reverse 846c811df and keep 05ae99992.
+- 846c811df's `!next.signal.aborted` guard on the tool-boundary flush is
+  removed. Mail queued during a call the person interrupts is appended at
+  that call's boundary again, and it reaches the model with their next
+  prompt.
+- Why: an interrupt needs no new turn. The person is present, and the host
+  forbids plugin-started turns after a stop anyway. Before the guard, the
+  row appended at the aborted boundary already reached the model with the
+  next prompt (live, ping-3 run).
+- The 05ae99992 fallback (submit, then append) stays. It closes the real
+  gap: idle mail or turn-end leftovers that the host drops after a stop.
+  The live recheck (ping-6) confirmed that the appended row reached the
+  model prepended to the next prompt.
+- Tests: the interrupt engine test now asserts that the boundary appends the
+  mail and the turn end submits nothing for it. The dropped turn-end submit
+  test queues its mail after the last tool boundary, so it does not depend
+  on the guard.
+- Verification: `claude plugin test` passed 264 tests with 0 failures for
+  each package. `claude plugin validate` passed for both packages. The Go
+  mirror guard passed.

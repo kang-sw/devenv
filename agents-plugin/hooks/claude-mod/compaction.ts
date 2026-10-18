@@ -27,6 +27,14 @@ import {
  * still writes the summary, and its auto compaction stays the hard point: the
  * feature never vetoes or preempts a compaction.
  *
+ * The continuation after the lever's own compaction (landed or vetoed) is
+ * held for CONTINUATION_WINDOW_MS rather than submitted at once: a prompt the
+ * person typed during the compaction is released right after it, ahead of
+ * any prompt the mod submits, so it would run first and push the
+ * continuation into a follow-up turn. A composer prompt entering within the
+ * window takes the continuation as context instead (`claim`); the window's
+ * end submits it only when none did.
+ *
  * Main session only: thresholds read the main thread's usage, the lever
  * refuses a subagent, and a subagent's or fork's own compaction is ignored.
  * The engine calls arrive as edges bound in register.ts, so the state machine
@@ -38,6 +46,9 @@ export function compactionEnabledFor(pluginName: string): boolean {
   return pluginName === 'ws'
 }
 
+/** How long the lever's continuation waits for a prompt typed during its compaction. */
+export const CONTINUATION_WINDOW_MS = 1500
+
 export type CompactionEdges = {
   /** Queue a prompt that starts its own turn once the session is idle. */
   submit: (text: string) => Promise<PromptSubmitResult>
@@ -45,6 +56,8 @@ export type CompactionEdges = {
   compact: () => Promise<SessionCompactResult>
   /** Run `fn` once, after the calling hook has returned. */
   after: (fn: () => void) => void
+  /** Run `fn` once, `ms` from now. */
+  delay: (ms: number, fn: () => void) => void
   log: (text: string, to: 'transcript' | 'debug') => void
   /**
    * Told when the lever's own compaction landed. The engine routes it past
@@ -53,6 +66,9 @@ export type CompactionEdges = {
    */
   leverLanded?: () => void
 }
+
+/** A held continuation a prompt took; `release` submits it should that prompt not enter. */
+export type Claimed = { text: string; release: (why: string) => void }
 
 /** The lever tool's answer: a refusal, a tool error, or its result text. */
 export type LeverAnswer = { deny: string } | { isError: true; result: string; text: string } | { result: string }
@@ -70,6 +86,11 @@ export type Compaction = {
   turnComplete: (agentId: string | undefined, reason: string) => void
   /** A session.compact as it settled beneath the feature's hook. */
   compacted: (trigger: SessionCompactTrigger, agentId: string | undefined, res: SessionCompactResult) => void
+  /**
+   * A composer prompt (not a slash command) is entering: take the held
+   * continuation to attach as its context, or undefined when none is held.
+   */
+  claim: () => Claimed | undefined
 }
 
 /** A lever call waiting for its turn to end. */
@@ -102,6 +123,8 @@ export function createCompaction(): Compaction {
   /** The level last delivered; undefined until the first usage observed since a session start or end. */
   let latch: Level | undefined
   let request: Request | undefined
+  /** The lever's continuation held for its window; see CONTINUATION_WINDOW_MS. */
+  let held: { text: string } | undefined
   /**
    * True while the lever's own compaction runs. The engine routes a
    * `$.session.compact` past the calling plugin's own session.compact hook,
@@ -126,6 +149,7 @@ export function createCompaction(): Compaction {
     cached = undefined
     latch = undefined
     request = undefined
+    held = undefined
   }
 
   /**
@@ -156,6 +180,28 @@ export function createCompaction(): Compaction {
   const finish = (r: Request, text: string) => {
     if (request === r) request = undefined
     submit(text, true)
+  }
+
+  /**
+   * Settle `r` after its own compaction: hold the continuation for a prompt
+   * typed meanwhile, and submit it at the window's end unless one took it.
+   */
+  const hold = (r: Request, text: string) => {
+    if (request === r) request = undefined
+    if (held) submit(held.text, true) // a window still open: never lose its text
+    const h = { text }
+    held = h
+    try {
+      edges?.delay(CONTINUATION_WINDOW_MS, () => {
+        if (held !== h) return
+        held = undefined
+        submit(h.text, true)
+      })
+    } catch (err) {
+      debug(`the continuation window was not started (${String(err)}); submitting it now`)
+      if (held === h) held = undefined
+      submit(text, true)
+    }
   }
 
   /**
@@ -191,9 +237,9 @@ export function createCompaction(): Compaction {
     if (request !== r) return
     if (res.skip !== undefined) {
       notice(`the requested compaction did not run (${res.skip}); the continuation follows with a note`)
-      finish(r, skippedContinuationText(res.skip, r.continuation))
+      hold(r, skippedContinuationText(res.skip, r.continuation))
     } else {
-      finish(r, continuationText(r.continuation))
+      hold(r, continuationText(r.continuation))
     }
   }
 
@@ -205,6 +251,7 @@ export function createCompaction(): Compaction {
 
     end: (reason) => {
       if (request) debug(`session.end ${reason} dropped a pending compaction request`)
+      if (held) notice(`a prompt was not submitted (session.end ${reason}):\n${held.text}`)
       reset()
     },
 
@@ -234,8 +281,9 @@ export function createCompaction(): Compaction {
       if (!t) return
       // No threshold message while a lever request is pending: its turn could
       // start first and make compact() reject, or land beside the
-      // continuation with stale figures. The crossing stays pending in the latch.
-      const step = observe(latch, levelAt(t, tokens), request === undefined)
+      // continuation with stale figures. Nor while its continuation is held,
+      // which it would run ahead of. The crossing stays pending in the latch.
+      const step = observe(latch, levelAt(t, tokens), request === undefined && held === undefined)
       latch = step.latch
       if (!step.deliver) return
       debug(`${step.deliver.kind === 'advisory' ? 'advisory' : `milestone ${step.deliver.which}`} at ${percentOf(tokens, t.raw)}%`)
@@ -279,6 +327,32 @@ export function createCompaction(): Compaction {
       if (request?.compact) {
         request.compact = false
         notice(`a ${trigger} compaction landed first, so the requested compaction is dropped; its continuation follows at the next turn end`)
+      }
+    },
+
+    // Taken at most once: the window's end then submits nothing. A prompt
+    // that does not enter after all gives it back through release, which
+    // submits it at once rather than holding it again. Release runs inside
+    // the prompt.submit hook, where the engine refuses a submit (it would
+    // wait on the turn the hook holds), so the submit runs after it returns.
+    claim: () => {
+      const h = held
+      if (!h) return undefined
+      held = undefined
+      debug('a prompt typed during the compaction carries its continuation')
+      let released = false
+      return {
+        text: h.text,
+        release: (why) => {
+          if (released) return
+          released = true
+          debug(`the prompt carrying the continuation did not enter (${why}); submitting the continuation`)
+          try {
+            edges?.after(() => submit(h.text, true))
+          } catch (err) {
+            notice(`a prompt was not submitted (${String(err)}):\n${h.text}`)
+          }
+        },
       }
     },
   }
