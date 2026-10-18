@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 0fa63f5bd3ef1b3d
 sage-review-completeness-reviewed: 0fa63f5bd3ef1b3d
+completed: 2026-10-18
 ---
 
 # Model-invoked MCP reconnect lever in the Claude mod
@@ -248,3 +249,55 @@ Verification:
   the server's tools back in the list, and exactly one success continuation.
   A second run with the reconnect made to fail (for example the launcher
   unavailable) shows the failure continuation.
+
+### Result (2615834e6) - 2026-10-18
+
+Landed `agents-plugin/hooks/claude-mod/reconnect.ts` (pure core and the lever
+state machine) with `reconnect.test.ts` and `reconnect-engine.test.ts`, wired
+into `register.ts` as a third isolated feature: its own `session.start` setup,
+a matched `tool.call` hook, and isolated steps in the shared `turn.complete`
+and `session.end` hooks (the reconnect reset runs before the awaited `$.store`
+delete). The step runs after the turn-end hook through `$.clock.after`,
+issues `/mcp reconnect <server>` via `$.command.run`, polls `$.tool.list` for
+the server's prefix every 500 ms for up to 10 s, re-resolves the server on
+success, and submits the pinned success or failure continuation. The server
+name is resolved at `session.start` into one cache (`server` beside
+`useServer`) shared with the mailbox feature. Resynced the byte-identical
+wsflow copy; reworded the ws `hooks.json` description, the `register.ts`
+header, and the Claude Mod paragraph of `wsflow-mirroring.md`; added the
+reconnect-tool branch and the two reworded invariants to `mcp-server-repair`
+(wsflow copy regenerated, skills manifest hash regenerated). The two
+compaction-engine isolation tests now filter to their own feature's tool.
+
+Decisions taken:
+
+- A `/mcp reconnect` answer whose text does not say "reconnected" is a
+  failure with the command's words as the reason, checked before the
+  tool-list poll. Headless answers "Reconnect, enable, and disable aren't
+  available in this session." while the tools stay listed (research probe run
+  6), so the tool list alone would misreport success there. The tool list
+  remains the success judge; this only adds a failure signal.
+- The step takes the request as it starts: a call made during a slow
+  reconnect is a new request for a later turn end. A session end during the
+  step drops its continuation (generation counter).
+- The mailbox reload restore awaits the shared `session.start` resolution
+  instead of calling `$.mcp.connect` again.
+
+Verification:
+
+- `claude plugin validate` passes and `claude plugin test` reports 147 pass,
+  0 fail for both `agents-plugin` and `agents-plugin-wsflow`.
+- `python3 -m unittest discover` passes for `agents-plugin/tests` (78) and
+  `agents-plugin-wsflow/tests` (15); `go test -race ./internal/wsrsrc/`
+  passes (hooks and skills mirror guards, skills manifest drift).
+- Live check (tmux, Claude Code 2.1.302, macOS, scratch copy of
+  `agents-plugin` via `--plugin-dir`): after `kill -9` of ws-mcp,
+  `mcp__plugin_ws_ws__config_list` left the tool list while
+  `mcp__ws__request_mcp_reconnect` stayed listed and callable (stop condition
+  cleared). Calling it led to "Successfully reconnected to plugin:ws:ws", a
+  new ws-mcp PID, exactly one success continuation, and a successful
+  `config_list` call. With the launcher renamed, the transcript showed "Failed
+  to reconnect to plugin:ws:ws" and the failure continuation (tools not back
+  within 10 s) arrived.
+- Lite review: no Critical or Important findings; the unused engine-test
+  answer variant was removed (5e0db2815).
