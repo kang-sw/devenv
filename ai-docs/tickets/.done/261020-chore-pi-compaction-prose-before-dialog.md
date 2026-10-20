@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 26592f881e820a32
 sage-review-completeness-reviewed: 26592f881e820a32
+completed: 2026-10-20
 ---
 
 # Put the lead prose before the reference-data sections in the Pi lead compaction summary
@@ -109,3 +110,25 @@ sections follow the prose, that `## Resume` stays last, that
 Dialog quotes both `## Carried forward by the lead` and `## Resume`, and that
 it still extracts the prose from an old-layout summary. `npm test` in
 `agents-plugin-pi` passes.
+
+### Result (0324cbb55) - 2026-10-20
+
+Landed the reorder in `buildLeadCompactionSummary` (intro, Session, prose,
+child-agent sections, background tasks, file lists, Dialog, Resume) and the
+forward `extractLeadProse` with the old-layout fallback; the Dialog header now
+reads "carried by the prose above". Tests: updated the order/wording pins in
+`test/lead-compaction.test.ts` and `test/goal-loop.test.ts` (the file-list
+sections are now followed by `## Dialog`); added cases for the full heading
+order with Resume last, a Dialog quoting the prose, child-agent, and Resume
+headings, and an old-layout summary.
+
+Verification: `node --test test/lead-compaction.test.ts test/goal-loop.test.ts`
+276 pass, 0 fail. Full `npm test` in `agents-plugin-pi` shows 31 failures
+(child-spawn, web-search, and socket tests) identical with and without the
+change (baseline 2301 pass / 31 fail; after 2304 pass / 31 fail); this worktree
+needed temporary node_modules symlinks to run at all. `lite` review: clean.
+
+Decisions: a new-layout match with no `## Child agents in flight` terminator
+falls through to the backward search (defensive, untested). Minor reviewer
+note: prose containing a literal `\n\n## Child agents in flight\n` would
+truncate extraction, the same risk class as the old Resume anchor.

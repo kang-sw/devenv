@@ -407,7 +407,7 @@ export function buildDialogSection(entries: readonly SessionEntry[], budgetBytes
     if (toolFamily && !isToolFamily(kept[i + 1])) lines.push(TOOL_GROUP_CLOSE);
   }
   const header = selected.omitted > 0
-    ? `The newest ${selected.lines.length} of ${selected.total} dialog items (older ones are carried by the prose below).`
+    ? `The newest ${selected.lines.length} of ${selected.total} dialog items (older ones are carried by the prose above).`
     : `All ${selected.total} dialog items of this session.`;
   const search = sessionFile
     ? `Full tool output and every earlier message remain in the session file \`${sessionFile}\`; search it (for example with grep) when you need them.`
@@ -777,6 +777,7 @@ export const LEAD_PROSE_SECTION_HEADING = "## Carried forward by the lead";
 /** Running exec-hatch background tasks (timed and monitors); `ws-background-abort` takes their ids. */
 export const BACKGROUND_TASKS_SECTION_HEADING = "## Background tasks running";
 const RESUME_SECTION_HEADING = "## Resume";
+const CHILD_AGENTS_IN_FLIGHT_HEADING = "## Child agents in flight";
 
 export interface LeadCompactionSummaryInput {
   sessionKey: string | undefined;
@@ -831,15 +832,17 @@ export function buildLeadCompactionSummary(input: LeadCompactionSummaryInput): s
   const sections = [
     "The ws Pi adapter wrote this summary. Durable state lives in ws tooling (tickets, commits, notes, agenda, todos); the sections below point at it and carry only what the conversation alone held.",
     ["## Session", `- ws session key: ${keyText}`, ticketLine, playbookLine].join("\n"),
-    ["## Child agents in flight", ...(inFlight.length ? inFlight : ["(none)"])].join("\n"),
+    // Directly after `## Session`, ahead of all reference data: earlier text weighs more with the resumed
+    // lead. `extractLeadProse` relies on this slot and on `## Child agents in flight` following the prose.
+    `${LEAD_PROSE_SECTION_HEADING}\n${prose}`,
+    [CHILD_AGENTS_IN_FLIGHT_HEADING, ...(inFlight.length ? inFlight : ["(none)"])].join("\n"),
     ["## Child agents finished since the previous compaction", ...(finished.length ? finished : ["(none)"])].join("\n"),
     // Only when some run: a lead that lost a task id across compaction can
     // still abort it; sessions that never background anything see no change.
     ...(backgroundTasks.length ? [[BACKGROUND_TASKS_SECTION_HEADING, ...backgroundTasks.map((task) => formatBackgroundTaskLine(task, input.now))].join("\n")] : []),
-    buildDialogSection(branchEntries, dialogBudgetBytes, sessionFile),
-    // Before the prose heading, so `extractLeadProse` never carries them.
+    // After the prose, so `extractLeadProse` never carries them.
     ...buildFileListSections(input.fileLists, input.cwd ?? process.cwd(), input.rereadBudgetBytes ?? DEFAULT_REREAD_BUDGET_BYTES),
-    `${LEAD_PROSE_SECTION_HEADING}\n${prose}`,
+    buildDialogSection(branchEntries, dialogBudgetBytes, sessionFile),
     `${RESUME_SECTION_HEADING}\nBefore any other workflow action, invoke \`lead-revive\` (\`ws-skill lead-revive\`) with session key ${sessionKey?.trim() ? `\`${sessionKey}\`` : "(recover it first)"}; it restores agenda, todos, and notes through \`workflow_manual\`. After \`lead-revive\`, read the files under Required re-reads (to read first), then resume from this summary, the inlined files, and the immediate next step; open a reference or any other file only when a step needs it, not to rebuild the earlier context.`,
   ];
   return sections.join("\n\n");
@@ -847,11 +850,26 @@ export function buildLeadCompactionSummary(input: LeadCompactionSummaryInput): s
 
 /**
  * The lead's prose out of a previous ws summary, or the whole text when it is
- * not one (another summarizer wrote it). Searched from the end: the prose and
- * `## Resume` are the summary's last sections, and the `## Dialog` section
+ * not one (another summarizer wrote it). Current layout: the prose heading is
+ * the first heading after `## Session` and the prose ends at the next
+ * `## Child agents in flight`; only generated text precedes that, so the
+ * forward search cannot land inside a `## Dialog` quote. Any other summary
+ * (the previous layout put `## Child agents in flight` right after
+ * `## Session`, with the prose near the end) is searched from the end: the
+ * prose and `## Resume` are its last sections, and the `## Dialog` section
  * before them may quote either heading verbatim.
  */
 export function extractLeadProse(summary: string): string {
+  const session = summary.indexOf("\n\n## Session\n");
+  if (session >= 0) {
+    const first = summary.indexOf("\n\n## ", session + 1);
+    const proseHeading = `\n\n${LEAD_PROSE_SECTION_HEADING}\n`;
+    if (first >= 0 && summary.startsWith(proseHeading, first)) {
+      const start = first + proseHeading.length;
+      const end = summary.indexOf(`\n\n${CHILD_AGENTS_IN_FLIGHT_HEADING}\n`, start);
+      if (end >= 0) return summary.slice(start, end);
+    }
+  }
   const resume = summary.lastIndexOf(`\n\n${RESUME_SECTION_HEADING}\n`);
   const end = resume < 0 ? summary.length : resume;
   const start = summary.lastIndexOf(`${LEAD_PROSE_SECTION_HEADING}\n`, end);
