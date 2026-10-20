@@ -4436,13 +4436,13 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "note.write",
-			"description": "Write one or more notes to the machine (PC-global), worktree (worktree-local, ephemeral), clone (project-scoped, worktree-agnostic, untracked), or repo (git-tracked, one file per key under ai-docs/ws-notes/) note layer. Full-overwrite per key, including priority. Higher integer priority is surfaced first in the workflow_manual ambient Notes block.",
+			"description": "Write one or more notes to the machine (PC-global), worktree (worktree-local, ephemeral), clone (project-scoped, worktree-agnostic, untracked), or repo (git-tracked, one file per key under ai-docs/ws-notes/) note layer. Full-overwrite per key, including priority. A larger integer priority is surfaced first in the workflow_manual ambient Notes block.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
 					"layer":       enumStringProperty(`Which layer to write: "machine" (PC-global, project-agnostic), "worktree" (this worktree only, ephemeral), "clone" (this project's checkouts, worktree-agnostic, untracked), or "repo" (git-tracked, one file per key under ai-docs/ws-notes/; staging/commit rides the caller's normal git.commit).`, []string{"machine", "worktree", "clone", "repo"}),
-					"notes":       objectArrayProperty(`Notes to write, each {"key": string, "value": string, "priority": integer}. priority defaults to 0; higher = higher priority.`),
+					"notes":       objectArrayProperty(`Notes to write, each {"key": string, "value": string, "priority": integer}. priority is an integer defaulting to 0; a larger number is surfaced earlier (5 before 1).`),
 				},
 				"required": []string{"session_key", "layer", "notes"},
 			},
@@ -4488,7 +4488,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "note.query",
-			"description": "Query notes by key glob and optional written_at date range. \"layer\" is optional: a single layer name (\"machine\", \"worktree\", \"clone\", or \"repo\") queries just that layer and returns a plain untagged record array (today's shape); an array of layer names, or omitting \"layer\" entirely, queries multiple/all layers and returns each record tagged with its originating layer. Retrieves notes elided from the workflow_manual ambient Notes block.",
+			"description": "Query notes by key glob and optional written_at date range. \"layer\" is optional: a single layer name (\"machine\", \"worktree\", \"clone\", or \"repo\") queries just that layer and returns a plain untagged record array (today's shape); an array of layer names, or omitting \"layer\" entirely, queries multiple/all layers and returns each record tagged with its originating layer. Results are ordered by priority descending (larger number first), then newest written_at, then key. Retrieves notes elided from the workflow_manual ambient Notes block.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{

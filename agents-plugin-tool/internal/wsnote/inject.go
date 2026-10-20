@@ -114,6 +114,6 @@ func Compute(root string, opts wsconfig.Options, limit int) string {
 	if muted > 0 {
 		fmt.Fprintf(&sb, "(%d muted — use note.query to view.)\n", muted)
 	}
-	sb.WriteString("_Post-it reminders: `note.write` to pin, `note.erase` when done._\n")
+	sb.WriteString("_Post-it reminders, higher priority number first: `note.write` to pin, `note.erase` when done._\n")
 	return strings.TrimRight(sb.String(), "\n")
 }

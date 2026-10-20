@@ -29,7 +29,7 @@ func TestComputeAppendsStandingHintWhenVisible(t *testing.T) {
 	}
 
 	got := Compute("", opts, 20)
-	want := "_Post-it reminders: `note.write` to pin, `note.erase` when done._"
+	want := "_Post-it reminders, higher priority number first: `note.write` to pin, `note.erase` when done._"
 	if !strings.HasSuffix(got, want) {
 		t.Fatalf("Compute with visible notes = %q, want suffix %q", got, want)
 	}
@@ -50,7 +50,7 @@ func TestComputeAppendsStandingHintWhenAllMuted(t *testing.T) {
 	}
 
 	got := Compute("", opts, 20)
-	want := "_Post-it reminders: `note.write` to pin, `note.erase` when done._"
+	want := "_Post-it reminders, higher priority number first: `note.write` to pin, `note.erase` when done._"
 	if !strings.HasSuffix(got, want) {
 		t.Fatalf("Compute with all-muted notes = %q, want suffix %q", got, want)
 	}
