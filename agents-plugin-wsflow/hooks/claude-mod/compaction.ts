@@ -8,14 +8,14 @@ import type {
 
 import {
   checkLeverCall,
-  continuationText,
   deliveryText,
   leverResult,
   levelAt,
   observe,
   percentOf,
-  skippedContinuationText,
+  RESUME_TEXT,
   thresholdsFor,
+  vetoedResumeText,
   type Level,
   type Thresholds,
 } from './timing'
@@ -27,17 +27,18 @@ import {
  * still writes the summary, and its auto compaction stays the hard point: the
  * feature never vetoes or preempts a compaction.
  *
- * The continuation is optional: a lever call that omits it (work does not
- * need to resume by itself) submits nothing after the step and opens no
- * window, and a veto is told to the person through a transcript notice only.
+ * The resume prompt is opt-in: a lever call without its `continue` flag
+ * (work does not need to resume by itself) submits nothing after the step
+ * and opens no window, and a veto is told to the person through a transcript
+ * notice only.
  *
- * A supplied continuation after the lever's own compaction (landed or vetoed)
- * is held for CONTINUATION_WINDOW_MS rather than submitted at once: a prompt
- * the person typed during the compaction is released right after it, ahead of
- * any prompt the mod submits, so it would run first and push the
- * continuation into a follow-up turn. A composer prompt entering within the
- * window takes the continuation as context instead (`claim`); the window's
- * end submits it only when none did.
+ * With the flag, the fixed resume prompt after the lever's own compaction
+ * (landed or vetoed) is held for CONTINUATION_WINDOW_MS rather than submitted
+ * at once, and any main-thread turn starting within the window cancels it: a
+ * prompt the person typed during the compaction, or a background agent's
+ * notification, already started the first turn after it, which resumes the
+ * work there, so the resume would arrive only as a stale prompt after that
+ * turn. The window's end submits it only when no turn started.
  *
  * Main session only: thresholds read the main thread's usage, the lever
  * refuses a subagent, and a subagent's or fork's own compaction is ignored.
@@ -50,7 +51,7 @@ export function compactionEnabledFor(pluginName: string): boolean {
   return pluginName === 'ws'
 }
 
-/** How long the lever's continuation waits for a prompt typed during its compaction. */
+/** How long the lever's resume prompt waits for another prompt to start the first turn after its compaction. */
 export const CONTINUATION_WINDOW_MS = 1500
 
 export type CompactionEdges = {
@@ -71,11 +72,8 @@ export type CompactionEdges = {
   leverLanded?: () => void
 }
 
-/** A held continuation a prompt took; `release` submits it should that prompt not enter. */
-export type Claimed = { text: string; release: (why: string) => void }
-
-/** The lever tool's answer: a refusal, a tool error, or its result text. */
-export type LeverAnswer = { deny: string } | { isError: true; result: string; text: string } | { result: string }
+/** The lever tool's answer: a refusal or its result text. */
+export type LeverAnswer = { deny: string } | { result: string }
 
 export type Compaction = {
   /** session.start: bind the edges and start the conversation's state over. */
@@ -83,25 +81,22 @@ export type Compaction = {
   /** session.end: start the conversation's state over; any end reason. */
   end: (reason: string) => void
   /** A lever tool call. */
-  lever: (agentId: string | undefined, continuation: unknown) => LeverAnswer
+  lever: (agentId: string | undefined, flag: unknown) => LeverAnswer
   /** A session.measure: compare usage with the thresholds and submit at most one threshold message. */
   measure: (context: SessionContextUsage, readBreakdown: () => Promise<SessionUsage>) => Promise<void>
-  /** A turn.complete: schedule a pending request's compact step, or submit its continuation. */
+  /** A turn.start: a main-thread one cancels a held resume prompt. */
+  turnStarted: (agentId: string | undefined) => void
+  /** A turn.complete: schedule a pending request's compact step, or submit its resume prompt. */
   turnComplete: (agentId: string | undefined, reason: string) => void
   /** A session.compact as it settled beneath the feature's hook. */
   compacted: (trigger: SessionCompactTrigger, agentId: string | undefined, res: SessionCompactResult) => void
-  /**
-   * A composer prompt (not a slash command) is entering: take the held
-   * continuation to attach as its context, or undefined when none is held.
-   */
-  claim: () => Claimed | undefined
 }
 
 /** A lever call waiting for its turn to end. */
 type Request = {
-  /** The latest call's continuation; undefined when that call omitted it, which leaves nothing to submit. */
-  continuation: string | undefined
-  /** False once a compaction landed elsewhere first: the continuation (if any) is still owed, the compact step is not. */
+  /** Whether the latest call set the `continue` flag; unset leaves nothing to submit. */
+  resume: boolean
+  /** False once a compaction landed elsewhere first: the resume prompt (if any) is still owed, the compact step is not. */
   compact: boolean
   /**
    * The token of its queued compact step, from the turn end that queued it
@@ -127,7 +122,7 @@ export function createCompaction(): Compaction {
   /** The level last delivered; undefined until the first usage observed since a session start or end. */
   let latch: Level | undefined
   let request: Request | undefined
-  /** The lever's continuation held for its window; see CONTINUATION_WINDOW_MS. */
+  /** The lever's resume prompt held for its window; see CONTINUATION_WINDOW_MS. */
   let held: { text: string } | undefined
   /**
    * True while the lever's own compaction runs. The engine routes a
@@ -158,8 +153,8 @@ export function createCompaction(): Compaction {
 
   /**
    * Queue `text`; not awaited, since a submit resolves only as its turn
-   * starts. A `record`ed prompt is the only holder of what it says (a
-   * continuation), so a failed submit writes it to the transcript.
+   * starts. A lost `record`ed prompt (a resume) is written to the
+   * transcript, so the person sees the work was meant to resume.
    */
   const submit = (text: string, record: boolean) => {
     if (!edges) return
@@ -180,19 +175,19 @@ export function createCompaction(): Compaction {
     latch = 0
   }
 
-  /** Settle `r` with its continuation prompt; an omitted continuation submits nothing. */
+  /** Settle `r` with its resume prompt, unguarded; an unset flag submits nothing. */
   const finish = (r: Request) => {
     if (request === r) request = undefined
-    if (r.continuation !== undefined) submit(continuationText(r.continuation), true)
+    if (r.resume) submit(RESUME_TEXT, true)
   }
 
   /**
-   * Settle `r` after its own compaction: hold the continuation for a prompt
-   * typed meanwhile, and submit it at the window's end unless one took it.
+   * Settle `r` after its own compaction: hold the resume prompt, and submit
+   * it at the window's end unless a main-thread turn started meanwhile.
    */
   const hold = (r: Request, text: string) => {
     if (request === r) request = undefined
-    if (held) submit(held.text, true) // a window still open: never lose its text
+    // A window still open is superseded: one resume prompt covers both.
     const h = { text }
     held = h
     try {
@@ -202,7 +197,7 @@ export function createCompaction(): Compaction {
         submit(h.text, true)
       })
     } catch (err) {
-      debug(`the continuation window was not started (${String(err)}); submitting it now`)
+      debug(`the resume window was not started (${String(err)}); submitting the resume prompt now`)
       if (held === h) held = undefined
       submit(text, true)
     }
@@ -211,8 +206,8 @@ export function createCompaction(): Compaction {
   /**
    * The scheduled compact step. A rejection (most often a turn started
    * first) keeps the request for the next main-thread turn end and is noted
-   * in the transcript once per request; a veto still submits the
-   * continuation, with the note that nothing was compacted.
+   * in the transcript once per request; a veto with the flag still holds a
+   * resume prompt, saying that nothing was compacted.
    */
   const runLever = async (r: Request) => {
     if (!edges || request !== r) return
@@ -239,16 +234,16 @@ export function createCompaction(): Compaction {
       }
     }
     if (request !== r) return
-    if (r.continuation === undefined) {
+    if (!r.resume) {
       // No turn follows, so a veto is told to the person here: the model is
-      // not started to hear it and no consume window opens.
+      // not started to hear it and no window opens.
       request = undefined
-      if (res.skip !== undefined) notice(`the requested compaction did not run (${res.skip}); no continuation was requested, so no turn follows`)
+      if (res.skip !== undefined) notice(`the requested compaction did not run (${res.skip}); no resume was requested, so no turn follows`)
     } else if (res.skip !== undefined) {
-      notice(`the requested compaction did not run (${res.skip}); the continuation follows with a note`)
-      hold(r, skippedContinuationText(res.skip, r.continuation))
+      notice(`the requested compaction did not run (${res.skip}); a resume prompt follows with a note`)
+      hold(r, vetoedResumeText(res.skip))
     } else {
-      hold(r, continuationText(r.continuation))
+      hold(r, RESUME_TEXT)
     }
   }
 
@@ -264,17 +259,16 @@ export function createCompaction(): Compaction {
       reset()
     },
 
-    lever: (agentId, continuation) => {
-      const checked = checkLeverCall(agentId, continuation)
+    lever: (agentId, flag) => {
+      const checked = checkLeverCall(agentId, flag)
       if ('deny' in checked) return { deny: checked.deny }
-      if ('error' in checked) return { isError: true, result: checked.error, text: checked.error }
-      // A repeat call while one is pending states the current next step: it
-      // replaces the continuation (an omitted one clears an earlier one) and
-      // keeps the request's compact-step state.
-      if (request) request.continuation = checked.continuation
-      else request = { continuation: checked.continuation, compact: true, scheduled: undefined, rejectionNoted: false }
-      debug(`compaction requested; continuation: ${checked.continuation ?? '(none)'}`)
-      return { result: leverResult(checked.continuation) }
+      // A repeat call while one is pending replaces the flag (latest wins, so
+      // an unset one clears an earlier true) and keeps the request's
+      // compact-step state.
+      if (request) request.resume = checked.resume
+      else request = { resume: checked.resume, compact: true, scheduled: undefined, rejectionNoted: false }
+      debug(`compaction requested; resume: ${checked.resume}`)
+      return { result: leverResult(checked.resume) }
     },
 
     measure: async (context, readBreakdown) => {
@@ -290,14 +284,23 @@ export function createCompaction(): Compaction {
       const t = cached.thresholds
       if (!t) return
       // No threshold message while a lever request is pending: its turn could
-      // start first and make compact() reject, or land beside the
-      // continuation with stale figures. Nor while its continuation is held,
-      // which it would run ahead of. The crossing stays pending in the latch.
+      // start first and make compact() reject, or land beside the resume
+      // prompt with stale figures. Nor while its resume prompt is held: a
+      // threshold turn would start first and cancel it. The crossing stays pending in the latch.
       const step = observe(latch, levelAt(t, tokens), request === undefined && held === undefined)
       latch = step.latch
       if (!step.deliver) return
       debug(`${step.deliver.kind === 'advisory' ? 'advisory' : `milestone ${step.deliver.which}`} at ${percentOf(tokens, t.raw)}%`)
       submit(deliveryText(step.deliver, t, tokens), false)
+    },
+
+    // Any main-thread turn start, whatever started it, is the first turn
+    // after the step: it resumes the work, so the held resume would only
+    // arrive after it as a stale prompt. A subagent's turn is not that turn.
+    turnStarted: (agentId) => {
+      if (agentId !== undefined || !held) return
+      held = undefined
+      debug('a turn started within the resume window; the resume prompt is not submitted')
     },
 
     // The compact step runs after the turn.complete hook has returned:
@@ -338,34 +341,8 @@ export function createCompaction(): Compaction {
         request.compact = false
         notice(
           `a ${trigger} compaction landed first, so the requested compaction is dropped; ` +
-            (request.continuation === undefined ? 'no continuation was requested, so no prompt follows' : 'its continuation follows at the next turn end'),
+            (request.resume ? 'its resume prompt follows at the next turn end' : 'no resume was requested, so no prompt follows'),
         )
-      }
-    },
-
-    // Taken at most once: the window's end then submits nothing. A prompt
-    // that does not enter after all gives it back through release, which
-    // submits it at once rather than holding it again. Release runs inside
-    // the prompt.submit hook, where the engine refuses a submit (it would
-    // wait on the turn the hook holds), so the submit runs after it returns.
-    claim: () => {
-      const h = held
-      if (!h) return undefined
-      held = undefined
-      debug('a prompt typed during the compaction carries its continuation')
-      let released = false
-      return {
-        text: h.text,
-        release: (why) => {
-          if (released) return
-          released = true
-          debug(`the prompt carrying the continuation did not enter (${why}); submitting the continuation`)
-          try {
-            edges?.after(() => submit(h.text, true))
-          } catch (err) {
-            notice(`a prompt was not submitted (${String(err)}):\n${h.text}`)
-          }
-        },
       }
     },
   }

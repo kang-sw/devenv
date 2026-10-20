@@ -1,15 +1,7 @@
 import { expect, mock, test, type TestBody } from 'claude-code/testing'
 
 import { CONTINUATION_WINDOW_MS } from './compaction'
-import {
-  advisoryText,
-  continuationText,
-  LEVER_DESCRIPTION,
-  LEVER_RESULT,
-  LEVER_RESULT_NO_CONTINUATION,
-  skippedContinuationText,
-  thresholdsFor,
-} from './timing'
+import { advisoryText, LEVER_DESCRIPTION, LEVER_RESULT, LEVER_RESULT_NO_RESUME, RESUME_TEXT, thresholdsFor, vetoedResumeText } from './timing'
 
 type Engine = Parameters<TestBody>[0]
 type On = Parameters<TestBody>[1]
@@ -39,13 +31,12 @@ function world(on: On, opts: { processOk?: boolean; refuseRegister?: string } = 
     /** Who compacted, and with what instructions (the kit leaves a plugin call's trigger unset; the engine sets `plugin`). */
     compactCalls: [] as { origin: string; instructions: unknown }[],
     compactAnswers: [] as CompactAnswer[],
+    /** Prompts submitted from elsewhere than the composer: the mod's own, among them. */
     prompts: [] as string[],
+    /** The next such prompts refused beneath the mod. */
+    dropPrompts: 0,
     /** Prompts the person typed, with the context they entered with. */
     typed: [] as { text: string; context: readonly string[] | undefined }[],
-    /** The next typed prompts refused beneath the mod. */
-    dropTyped: 0,
-    /** The next typed prompts whose hook beneath throws. */
-    throwTyped: 0,
     logs: [] as { text: string; to: string }[],
     /** Delays (ms on the mock clock) for the next store deletes, in call order. */
     deleteDelays: [] as number[],
@@ -62,6 +53,7 @@ function world(on: On, opts: { processOk?: boolean; refuseRegister?: string } = 
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.end', ($, e) => ({ sessionId: e.sessionId }))
   on('session.measure', ($, e) => ({ changed: e.changed }))
+  on('turn.start', ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', ($, e) => ({ text: e.answer }))
   on('process.run', () =>
     opts.processOk === false
@@ -85,17 +77,16 @@ function world(on: On, opts: { processOk?: boolean; refuseRegister?: string } = 
     return answer === 'lands' ? { messages: SUMMARY } : answer
   })
   on('prompt.submit', ($, e) => {
-    if (e.origin?.kind !== 'composer') return (w.prompts.push(e.text), { text: e.text })
-    if (w.dropTyped > 0) {
-      w.dropTyped -= 1
+    if (e.origin?.kind === 'composer') {
+      w.typed.push({ text: e.text, context: e.context })
+      return { text: e.text, context: e.context }
+    }
+    if (w.dropPrompts > 0) {
+      w.dropPrompts -= 1
       return { drop: 'blocked beneath' }
     }
-    if (w.throwTyped > 0) {
-      w.throwTyped -= 1
-      throw new Error('failed beneath')
-    }
-    w.typed.push({ text: e.text, context: e.context })
-    return { text: e.text, context: e.context }
+    w.prompts.push(e.text)
+    return { text: e.text }
   })
   return w
 }
@@ -125,16 +116,27 @@ async function turnEnd($: Engine, w: World, opts: { reason?: string; agentId?: s
   await w.clock.settle()
 }
 
-async function lever($: Engine, w: World, continuation: unknown, agentId?: string) {
-  const res = await $.tool.call({ tool: `mcp__${w.plugin}__request_compaction`, continuation, ...(agentId ? { agentId } : {}) } as never)
+/** A turn starting: the main thread's, or a subagent's with `agentId`. */
+async function turnStart($: Engine, w: World, agentId?: string) {
+  await $.turn.start({ text: '', turnId: 't', ...(agentId ? { agentId } : {}) } as never)
+  await w.clock.settle()
+}
+
+/** A lever call with the given tool arguments (`{ continue: true }`, or none). */
+async function lever($: Engine, w: World, args: Record<string, unknown> = {}, agentId?: string) {
+  const res = await $.tool.call({ tool: `mcp__${w.plugin}__request_compaction`, ...args, ...(agentId ? { agentId } : {}) } as never)
   await w.clock.settle()
   return res
 }
 
-/** A prompt the person typed (origin composer), or a slash command's line with `command`. */
-async function type($: Engine, w: World, text: string, opts: { command?: { name: string; args: string }; kind?: string } = {}) {
+/**
+ * A prompt that enters and starts a main-thread turn: typed at the composer,
+ * a slash command's line with `command`, or from elsewhere with `kind`.
+ */
+async function prompted($: Engine, w: World, text: string, opts: { command?: { name: string; args: string }; kind?: string } = {}) {
   const res = await $.prompt.submit({ text, origin: { kind: opts.kind ?? 'composer' }, ...(opts.command ? { command: opts.command } : {}) } as never)
   await w.clock.settle()
+  await turnStart($, w)
   return res
 }
 
@@ -143,14 +145,14 @@ const isWs = (w: World) => w.plugin === 'ws'
 /** The transcript (user-visible) lines the mod logged. */
 const transcript = (w: World) => w.logs.filter((l) => l.to === 'transcript').map((l) => l.text)
 
-test('ws registers the compaction request tool with its pinned description; another package registers none', async ($, on) => {
+test('ws registers the compaction request tool with its pinned description and boolean flag; another package registers none', async ($, on) => {
   const w = world(on)
   await start($, w)
   const tool = w.registered.find((r) => r.name === 'request_compaction')
   if (isWs(w)) {
     expect(tool).toEqual({ name: 'request_compaction', description: LEVER_DESCRIPTION, isDeferred: false, inputSchema: tool?.inputSchema })
-    // The continuation is optional: the schema lists it, and does not require it.
-    expect(tool?.inputSchema).toEqual({ type: 'object', properties: { continuation: { type: 'string' } } })
+    // The flag is optional: the schema lists it, and does not require it.
+    expect(tool?.inputSchema).toEqual({ type: 'object', properties: { continue: { type: 'boolean' } } })
   } else {
     expect(['wsflow']).toContain(w.plugin)
     expect(tool).toBeUndefined()
@@ -184,11 +186,11 @@ test('ws: a crossing that session.measure reports submits the advisory, reading 
   expect(w.usageCalls).toEqual([{ breakdown: 'summary' }])
 })
 
-test('ws: a lever call compacts after the main-thread turn end, then submits its continuation once', async ($, on) => {
+test('ws: a lever call with the flag compacts after the main-thread turn end, then submits the resume prompt once', async ($, on) => {
   const w = world(on)
   await start($, w)
   if (!isWs(w)) return
-  const res = await lever($, w, 'continue Phase 2')
+  const res = await lever($, w, { continue: true })
   expect(res.result).toBe(LEVER_RESULT)
   await turnEnd($, w, { agentId: 'sub-1' })
   await turnEnd($, w, { reason: 'aborted' })
@@ -197,18 +199,18 @@ test('ws: a lever call compacts after the main-thread turn end, then submits its
   expect(w.compactCalls).toEqual([{ origin: 'ws', instructions: undefined }])
   expect(w.prompts).toEqual([])
   await w.clock.advance(CONTINUATION_WINDOW_MS)
-  expect(w.prompts).toEqual([continuationText('continue Phase 2')])
+  expect(w.prompts).toEqual([RESUME_TEXT])
   await turnEnd($, w)
   expect(w.compactCalls.length).toBe(1)
   expect(w.prompts.length).toBe(1)
 })
 
-test('ws: a lever call without a continuation compacts at the turn end and submits nothing, with no window', async ($, on) => {
+test('ws: a lever call without the flag compacts at the turn end and submits nothing, with no window', async ($, on) => {
   const w = world(on)
   await start($, w)
   if (!isWs(w)) return
-  const res = await lever($, w, undefined)
-  expect(res.result).toBe(LEVER_RESULT_NO_CONTINUATION)
+  const res = await lever($, w)
+  expect(res.result).toBe(LEVER_RESULT_NO_RESUME)
   await turnEnd($, w)
   expect(w.compactCalls).toEqual([{ origin: 'ws', instructions: undefined }])
   await w.clock.advance(CONTINUATION_WINDOW_MS)
@@ -217,40 +219,68 @@ test('ws: a lever call without a continuation compacts at the turn end and submi
   expect(w.compactCalls.length).toBe(1)
 })
 
+test('ws: a leftover continuation argument, or a non-boolean flag, reads as unset', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  if (!isWs(w)) return
+  expect((await lever($, w, { continuation: 'go on' })).result).toBe(LEVER_RESULT_NO_RESUME)
+  expect((await lever($, w, { continue: 'true' })).result).toBe(LEVER_RESULT_NO_RESUME)
+  await turnEnd($, w)
+  expect(w.compactCalls.length).toBe(1)
+  await w.clock.advance(CONTINUATION_WINDOW_MS)
+  expect(w.prompts).toEqual([])
+})
+
+test('ws: a repeat lever call replaces the flag, latest wins', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  if (!isWs(w)) return
+  await lever($, w, { continue: true })
+  await lever($, w)
+  await turnEnd($, w)
+  await w.clock.advance(CONTINUATION_WINDOW_MS)
+  expect(w.prompts).toEqual([])
+  await lever($, w)
+  await lever($, w, { continue: true })
+  await turnEnd($, w)
+  await w.clock.advance(CONTINUATION_WINDOW_MS)
+  expect(w.compactCalls.length).toBe(2)
+  expect(w.prompts).toEqual([RESUME_TEXT])
+})
+
 test("ws: the lever's own landing resets the latch, though the engine routes it past the feature's own hook", async ($, on) => {
   const w = world(on)
   await start($, w)
   if (!isWs(w)) return
   await measure($, w, 50_000)
   await measure($, w, 104_000)
-  await lever($, w, 'go on')
+  await lever($, w, { continue: true })
   await turnEnd($, w)
   expect(w.compactCalls).toEqual([{ origin: 'ws', instructions: undefined }])
   await w.clock.advance(CONTINUATION_WINDOW_MS)
   // Usage still past the advisory after the landing: a reset latch delivers it again, from a fresh breakdown.
   await measure($, w, 104_000)
-  expect(w.prompts).toEqual([advisoryText(T, 104_000), continuationText('go on'), advisoryText(T, 104_000)])
+  expect(w.prompts).toEqual([advisoryText(T, 104_000), RESUME_TEXT, advisoryText(T, 104_000)])
   expect(w.usageCalls.length).toBe(2)
   expect(transcript(w)).toEqual([])
 })
 
-test('ws: a subagent lever call is refused and a multi-line continuation is a tool error', async ($, on) => {
+test('ws: a subagent lever call is refused and requests nothing', async ($, on) => {
   const w = world(on)
   await start($, w)
   if (!isWs(w)) return
-  const fromSub = await lever($, w, 'go on', 'sub-1')
+  const fromSub = await lever($, w, { continue: true }, 'sub-1')
   expect(fromSub.deny).toBe('request_compaction compacts the main session only; called from subagent sub-1.')
-  const multi = await lever($, w, 'one\ntwo')
-  expect(multi.isError).toBe(true)
   await turnEnd($, w)
   expect(w.compactCalls).toEqual([])
+  expect(w.prompts).toEqual([])
 })
 
 test('ws: a rejected compaction retries at the next main-thread turn end', async ($, on) => {
   const w = world(on)
   await start($, w)
   if (!isWs(w)) return
-  await lever($, w, 'go on')
+  await lever($, w, { continue: true })
   w.compactAnswers.push('rejects')
   await turnEnd($, w)
   expect(w.compactCalls.length).toBe(1)
@@ -263,30 +293,44 @@ test('ws: a rejected compaction retries at the next main-thread turn end', async
   await turnEnd($, w)
   expect(w.compactCalls.length).toBe(2)
   await w.clock.advance(CONTINUATION_WINDOW_MS)
-  expect(w.prompts).toEqual([continuationText('go on')])
+  expect(w.prompts).toEqual([RESUME_TEXT])
 })
 
-test('ws: a vetoed compaction still submits the continuation with the note', async ($, on) => {
+test('ws: a vetoed compaction with the flag still submits the noted resume prompt when no turn started', async ($, on) => {
   const w = world(on)
   await start($, w)
   if (!isWs(w)) return
-  await lever($, w, 'go on')
+  await lever($, w, { continue: true })
   w.compactAnswers.push({ skip: 'blocked by policy' })
   await turnEnd($, w)
   await w.clock.advance(CONTINUATION_WINDOW_MS)
-  expect(w.prompts).toEqual([skippedContinuationText('blocked by policy', 'go on')])
+  expect(w.prompts).toEqual([vetoedResumeText('blocked by policy')])
 })
 
-test('ws: a manual compaction landing first drops the compact step; the continuation follows at the turn end', async ($, on) => {
+test('ws: a vetoed compaction with the flag submits nothing when a turn started within the window', async ($, on) => {
   const w = world(on)
   await start($, w)
   if (!isWs(w)) return
-  await lever($, w, 'go on')
+  await lever($, w, { continue: true })
+  w.compactAnswers.push({ skip: 'blocked by policy' })
+  await turnEnd($, w)
+  await turnStart($, w)
+  await w.clock.advance(CONTINUATION_WINDOW_MS)
+  expect(w.prompts).toEqual([])
+})
+
+test('ws: a manual compaction landing first drops the compact step; the resume prompt follows at the turn end, unguarded', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  if (!isWs(w)) return
+  await lever($, w, { continue: true })
   await $.session.compact({ trigger: 'manual', messages: SUMMARY } as never)
   await w.clock.settle()
+  // No window is open: a turn start before that turn end does not cancel it.
+  await turnStart($, w)
   await turnEnd($, w)
   expect(w.compactCalls).toEqual([{ origin: 'engine', instructions: undefined }])
-  expect(w.prompts).toEqual([continuationText('go on')])
+  expect(w.prompts).toEqual([RESUME_TEXT])
 })
 
 test('ws: session.end drops a pending request and starts the latch over', async ($, on) => {
@@ -294,7 +338,7 @@ test('ws: session.end drops a pending request and starts the latch over', async 
   await start($, w)
   if (!isWs(w)) return
   await measure($, w, 50_000)
-  await lever($, w, 'go on')
+  await lever($, w, { continue: true })
   await $.session.end({ reason: 'clear', sessionId: 'sess-1', resume: undefined as never })
   await w.clock.settle()
   await turnEnd($, w)
@@ -307,7 +351,7 @@ test('ws: session.end resets the compaction state before awaiting the store dele
   const w = world(on)
   await start($, w)
   if (!isWs(w)) return
-  await lever($, w, 'go on')
+  await lever($, w, { continue: true })
   // A delete still pending stands for one the hook's time bound cuts short.
   w.deleteDelays.push(100)
   const ended = $.session.end({ reason: 'clear', sessionId: 'sess-1', resume: undefined as never })
@@ -334,92 +378,101 @@ test('another package stays inert: no usage read, no prompt, no compaction, and 
   expect(w.compactCalls).toEqual([{ origin: 'engine', instructions: undefined }])
 })
 
-test('ws: a prompt typed within the window after the lever compaction carries the continuation, which starts no turn of its own', async ($, on) => {
+test('ws: a prompt typed within the window starts the first turn, so the resume prompt is not submitted; the typed prompt carries nothing', async ($, on) => {
   const w = world(on)
   await start($, w)
   if (!isWs(w)) return
-  await lever($, w, 'go on')
+  await lever($, w, { continue: true })
   await turnEnd($, w)
   await w.clock.advance(CONTINUATION_WINDOW_MS - 1)
-  await type($, w, 'what I typed meanwhile')
-  expect(w.typed).toEqual([{ text: 'what I typed meanwhile', context: [continuationText('go on')] }])
+  await prompted($, w, 'what I typed meanwhile')
+  expect(w.typed).toEqual([{ text: 'what I typed meanwhile', context: undefined }])
   await w.clock.advance(CONTINUATION_WINDOW_MS)
   expect(w.prompts).toEqual([])
-  await type($, w, 'a later prompt')
-  expect(w.typed[1]).toEqual({ text: 'a later prompt', context: undefined })
+  expect(transcript(w)).toEqual([])
 })
 
-test('ws: a slash command, or a prompt not typed at the composer, leaves the continuation to the window end', async ($, on) => {
+test('ws: a slash command or a prompt not typed at the composer that starts a turn within the window cancels the resume prompt too', async ($, on) => {
   const w = world(on)
   await start($, w)
   if (!isWs(w)) return
-  await lever($, w, 'go on')
+  await lever($, w, { continue: true })
   await turnEnd($, w)
-  await type($, w, '/cost', { command: { name: 'cost', args: '' } })
-  await type($, w, 'from a phone', { kind: 'bridge' })
-  expect(w.typed[0]).toEqual({ text: '/cost', context: undefined })
+  await prompted($, w, '/cost', { command: { name: 'cost', args: '' } })
+  await w.clock.advance(CONTINUATION_WINDOW_MS)
+  expect(w.prompts).toEqual([])
+  await lever($, w, { continue: true })
+  await turnEnd($, w)
+  expect(w.compactCalls.length).toBe(2)
+  await prompted($, w, 'from a phone', { kind: 'bridge' })
+  await w.clock.advance(CONTINUATION_WINDOW_MS)
   expect(w.prompts).toEqual(['from a phone'])
-  await w.clock.advance(CONTINUATION_WINDOW_MS)
-  expect(w.prompts).toEqual(['from a phone', continuationText('go on')])
 })
 
-test('ws: a prompt typed after the window finds the continuation already submitted', async ($, on) => {
+test("ws: a background agent's notification turn within the window cancels the resume prompt", async ($, on) => {
   const w = world(on)
   await start($, w)
   if (!isWs(w)) return
-  await lever($, w, 'go on')
+  await lever($, w, { continue: true })
+  await turnEnd($, w)
+  // A turn started with no prompt through the composer: a notification, a queued submit.
+  await turnStart($, w)
+  await w.clock.advance(CONTINUATION_WINDOW_MS)
+  expect(w.prompts).toEqual([])
+})
+
+test('ws: a subagent turn started within the window does not cancel the resume prompt', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  if (!isWs(w)) return
+  await lever($, w, { continue: true })
+  await turnEnd($, w)
+  await turnStart($, w, 'sub-1')
+  await w.clock.advance(CONTINUATION_WINDOW_MS)
+  expect(w.prompts).toEqual([RESUME_TEXT])
+})
+
+test('ws: a prompt typed after the window finds the resume prompt already submitted', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  if (!isWs(w)) return
+  await lever($, w, { continue: true })
   await turnEnd($, w)
   await w.clock.advance(CONTINUATION_WINDOW_MS)
-  await type($, w, 'too late')
-  expect(w.prompts).toEqual([continuationText('go on')])
+  await prompted($, w, 'too late')
+  expect(w.prompts).toEqual([RESUME_TEXT])
   expect(w.typed).toEqual([{ text: 'too late', context: undefined }])
 })
 
-test('ws: when the prompt that took the continuation is dropped, the continuation is submitted at once and once only', async ($, on) => {
+test('ws: a session end inside the window records the held resume prompt in the transcript', async ($, on) => {
   const w = world(on)
   await start($, w)
   if (!isWs(w)) return
-  await lever($, w, 'go on')
-  await turnEnd($, w)
-  w.dropTyped = 1
-  const res = await type($, w, 'refused prompt')
-  expect(res.drop).toBe('blocked beneath')
-  expect(w.prompts).toEqual([continuationText('go on')])
-  await w.clock.advance(CONTINUATION_WINDOW_MS)
-  expect(w.prompts).toEqual([continuationText('go on')])
-})
-
-test('ws: a session end inside the window records the held continuation in the transcript', async ($, on) => {
-  const w = world(on)
-  await start($, w)
-  if (!isWs(w)) return
-  await lever($, w, 'go on')
+  await lever($, w, { continue: true })
   await turnEnd($, w)
   await $.session.end({ reason: 'clear', sessionId: 'sess-1', resume: undefined as never })
   await w.clock.settle()
   await w.clock.advance(CONTINUATION_WINDOW_MS)
   expect(w.prompts).toEqual([])
-  expect(transcript(w)).toEqual([`ws compaction: a prompt was not submitted (session.end clear):\n${continuationText('go on')}`])
+  expect(transcript(w)).toEqual([`ws compaction: a prompt was not submitted (session.end clear):\n${RESUME_TEXT}`])
+})
+
+test('ws: a resume prompt refused beneath the mod is recorded in the transcript', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  if (!isWs(w)) return
+  await lever($, w, { continue: true })
+  await turnEnd($, w)
+  w.dropPrompts = 1
+  await w.clock.advance(CONTINUATION_WINDOW_MS)
+  expect(w.prompts).toEqual([])
+  expect(transcript(w)).toEqual([`ws compaction: a prompt was not submitted (dropped: blocked beneath):\n${RESUME_TEXT}`])
 })
 
 test('another package attaches nothing to a typed prompt', async ($, on) => {
   const w = world(on)
   await start($, w)
   if (isWs(w)) return
-  await type($, w, 'hello')
+  await prompted($, w, 'hello')
   expect(w.typed).toEqual([{ text: 'hello', context: undefined }])
-})
-
-test('ws: when the prompt that took the continuation fails beneath, the continuation is submitted once', async ($, on) => {
-  const w = world(on)
-  await start($, w)
-  if (!isWs(w)) return
-  await lever($, w, 'go on')
-  await turnEnd($, w)
-  w.throwTyped = 1
-  await $.prompt.submit({ text: 'failing prompt', origin: { kind: 'composer' } } as never).catch(() => undefined)
-  await w.clock.settle()
-  expect(w.prompts).toEqual([continuationText('go on')])
-  await w.clock.advance(CONTINUATION_WINDOW_MS)
-  expect(w.prompts).toEqual([continuationText('go on')])
 })
