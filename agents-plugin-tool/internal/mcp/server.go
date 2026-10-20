@@ -3246,6 +3246,9 @@ func formatGitCommit(result wsgit.CommitResult) string {
 func formatTicketCreate(res wsdoc.TicketCreateResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Created %s\n", res.Path)
+	if res.Warning != "" {
+		fmt.Fprintf(&b, "warning: %s\n", res.Warning)
+	}
 	fmt.Fprintf(&b, "Tip: %s\n", res.Tip)
 	b.WriteString("next_instruction: This is a valid empty skeleton + applicable initial posture only, not a full mutation orchestrator; call tickets.template for the body skeleton before treating this ticket as populated.\n")
 	return b.String()
@@ -4769,7 +4772,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.create_empty",
-			"description": "Create a dated ticket stub at ai-docs/tickets/<status>/<YYMMDD>-<stem>.md with minimal frontmatter (title plus resolved sage-review posture for ready or epic todo). Yields only a valid empty skeleton + applicable initial posture, not a full mutation orchestrator — populate the body via tickets.template. When the ticket-assignee-aware project flag is on, set_assignee (default true) stamps the assignee: true = the caller's current git user.email (nothing when unset), false = leave unassigned, or an array of emails = assign to those. Inert while the flag is off. Returns the path and a promotion tip; does not stage or commit.",
+			"description": "Create a dated ticket stub at ai-docs/tickets/<status>/<YYMMDD>-<stem>.md with minimal frontmatter (title plus resolved sage-review posture for ready or epic todo). Yields only a valid empty skeleton + applicable initial posture, not a full mutation orchestrator — populate the body via tickets.template. When the ticket-assignee-aware project flag is on, set_assignee (default true) stamps the assignee: true = the caller's current git user.email (nothing when unset), false = leave unassigned, or an array of emails = assign to those. Inert while the flag is off. Returns the path and a promotion tip, plus a warning when the path lies outside this worktree's active sparse-checkout scope (git drops such a file from the worktree once it is committed); does not stage or commit.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{

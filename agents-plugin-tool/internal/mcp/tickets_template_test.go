@@ -78,3 +78,15 @@ func TestTicketTemplate(t *testing.T) {
 		t.Error("TicketTemplate(\"\") expected error, got nil")
 	}
 }
+
+// TestFormatTicketCreateRendersScopeWarning: the out-of-scope create warning
+// reaches the text response, and a create without one renders no warning line.
+func TestFormatTicketCreateRendersScopeWarning(t *testing.T) {
+	with := formatTicketCreate(wsdoc.TicketCreateResult{Path: "p.md", Tip: "tip", Warning: "outside scope"})
+	if !strings.Contains(with, "Created p.md\nwarning: outside scope\nTip: tip\n") {
+		t.Fatalf("warning not rendered:\n%s", with)
+	}
+	if without := formatTicketCreate(wsdoc.TicketCreateResult{Path: "p.md", Tip: "tip"}); strings.Contains(without, "warning:") {
+		t.Fatalf("warning line without a warning:\n%s", without)
+	}
+}

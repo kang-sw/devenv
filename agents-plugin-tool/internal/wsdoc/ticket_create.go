@@ -44,6 +44,10 @@ type TicketCreateOptions struct {
 type TicketCreateResult struct {
 	Path string
 	Tip  string
+	// Warning is set when the created path lies outside this worktree's
+	// active sparse-checkout scope: the file is on disk now, but git does not
+	// keep it materialized there.
+	Warning string
 }
 
 func TicketCreate(root string, opts TicketCreateOptions) (TicketCreateResult, error) {
@@ -105,7 +109,8 @@ func TicketCreate(root string, opts TicketCreateOptions) (TicketCreateResult, er
 	// would silently clobber a ticket the caller cannot see. The check stays
 	// destination-path-only — a same-stem ticket in a *different* status
 	// directory does not block creation today either.
-	if scope := newTicketScope(root); scope != nil {
+	scope := newTicketScope(root)
+	if scope != nil {
 		exists, err := scope.hasIndexPath(relPath)
 		if err != nil {
 			return TicketCreateResult{}, err
@@ -177,7 +182,16 @@ func TicketCreate(root string, opts TicketCreateOptions) (TicketCreateResult, er
 		tip = "sage review posture: design " + design + "."
 	}
 
-	return TicketCreateResult{Path: relPath, Tip: tip}, nil
+	result := TicketCreateResult{Path: relPath, Tip: tip}
+	// check-rules fails open on git < 2.42, so an old git never warns.
+	if scope != nil && !scope.includes(relPath) {
+		result.Warning = fmt.Sprintf(
+			"%s is outside this worktree's sparse-checkout scope (core.sparseCheckout): it is on disk now, but a later "+
+				"checkout or `git sparse-checkout reapply` drops it from this worktree once it is committed; widen the scope "+
+				"(`git sparse-checkout add %s`) to keep working on it here",
+			relPath, relPath)
+	}
+	return result, nil
 }
 
 // assigneeFrontmatter renders an `assignee:` YAML sequence for the create stub,
