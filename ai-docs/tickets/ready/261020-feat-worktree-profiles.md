@@ -8,6 +8,10 @@ related:
   260806-feat-worktree-ticket-scope: ticket-board sparse scope and lead-scope-worktree, retired in Phase 4
   260924-research-origin-ticket-ownership-index: references lead-scope-worktree; reference updated in Phase 4
   260923-bug-worktree-acquire-concurrent-pool-claim: adjacent pool-claim race, deliberately not addressed here
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 006cf6dce77af8c8
+sage-review-completeness-reviewed: 006cf6dce77af8c8
 ---
 
 # Named worktree profiles for worktree.acquire/release
@@ -49,10 +53,23 @@ ticket carries its Confirmed Decisions as contract.
 - **`config.tune` writes the `repo` scope** (`.ws-workflow/config.json` in the
   caller's worktree), following the `note.write(layer: "repo")` precedent: the
   tool writes the tracked file and staging rides the caller's `git.commit`.
-  This applies to every key, not only profiles. Rejected: keeping `repo`
+  This applies to every repo-scoped key, not only profiles; keys the repo
+  layer never reads (global-only keys, `agents.tier`) refuse `scope: "repo"`.
+  The write path resolves the repo root from the session (the
+  `sessionConfigOptions` anchoring `config.list` already uses), not the empty
+  `wsconfig.Options{}` today's tune writers build. The tune result names the
+  written path and says it must be included in the caller's next
+  `git.commit` paths. Rejected: keeping `repo`
   read-only (260917's "for now" choice) - it protects nothing when agents edit
   the file and skips write-time validation on the scope that holds most
   profiles.
+- **Forward-compatible on-disk layout.** Older ws versions parse every config
+  file into `map[string]string` overrides and fail the whole resolution on a
+  parse error, so a profile object must never be stored as a value inside
+  `overrides`. Store structured values in a separate top-level member that an
+  older reader's `json.Unmarshal` ignores. Rejected: an object under
+  `overrides` (takes down every knob for a teammate on an older plugin);
+  string-encoded JSON in `overrides` (unreadable for agents editing the file).
 - **Override granularity.** A higher scope replaces a whole profile; no field
   merge. Builtin profiles can be overridden by name.
 - **Name validation:** `^[a-z][a-z0-9-]*$`.
@@ -96,11 +113,16 @@ ticket carries its Confirmed Decisions as contract.
   provenance scope) and tells the lead to pass a profile to `acquire` for
   workers. No separate `worktree.profile.list` tool.
 - **Profile marker.** A marker file in the worktree's git admin dir records
-  the profile name plus a hash of the resolved definition and survives
-  release (the lease file is deleted on release, so it cannot carry the
-  profile). A hash mismatch at acquire means a definition change:
-  re-apply declared sparse and run `post_provision` (re-adoption).
-- **Ticket visibility invariant.** After provisioning, an acquired worktree
+  the profile name plus a hash of the profile's provisioning inputs and
+  survives release (the lease file is deleted on release, so it cannot carry
+  the profile). The hash covers only `sparse` and `hooks.post_provision`, so
+  editing `description`, `preserve`, or another hook does not re-provision the
+  pool. A hash mismatch at acquire means a provisioning change: re-apply
+  declared sparse and run `post_provision` (re-adoption). Rejected: hashing the
+  whole definition (re-provisions every pooled worktree on a description
+  edit, costly for large checkouts).
+- **Ticket visibility invariant.** After every acquire-path hook (that is,
+  after `post_acquire`, since a hook may narrow sparse), an acquired worktree
   must expose `ai-docs/tickets` (workers record results into the ticket);
   otherwise acquire fails loudly naming the profile.
 
@@ -118,6 +140,10 @@ ticket carries its Confirmed Decisions as contract.
   env vars `WS_WORKTREE_DIR`, `WS_BASE`, `WS_TARGET_BRANCH`, not `${...}`
   templating. No `WS_REUSED`: the hook choice already distinguishes fresh
   from reuse.
+- **Hook timeout.** Each hook runs under a fixed 10-minute timeout; a timeout
+  is a hook failure (fail-loud, quarantine where applicable). Rejected: no
+  timeout (a hanging hook would block the MCP call indefinitely); a
+  per-hook timeout field (not in the agreed profile shape).
 - **Hook provenance.** acquire/release/remove results report each executed
   hook's argv, source scope, and exit code.
 - **Hook failure is fail-loud.** A failing hook fails its operation, leaves
@@ -139,15 +165,19 @@ ticket carries its Confirmed Decisions as contract.
 - **Legacy adoption.** Pooled worktrees without a marker are adopted lazily
   into builtin profiles only, by today's boolean rule (sparse-active =>
   `housekeeping` whatever its cone, otherwise `full`), stamping the marker on
-  claim. Custom profiles never adopt unmarked entries. Releasing an unmarked
+  claim with an empty hash so the first claim re-adopts once and normalizes
+  an arbitrary prior cone to the builtin's declared sparse. Custom profiles never adopt unmarked entries. Releasing an unmarked
   leased worktree runs today's hygiene only. `worktree.list` labels unmarked
   entries `legacy`.
 
 ### `worktree.remove` and the nudge
 
 - **`worktree.remove`** is a new tool. It runs `pre_remove`, removes the git
-  worktree, and cleans the lease and marker. It refuses a dirty worktree, or
-  one whose checked-out branch holds commits reachable from nowhere else.
+  worktree, and cleans the lease and marker. It keeps the checked-out branch
+  (as `git worktree remove` does), so its refusals guard unmerged work
+  rather than branch deletion: it refuses a dirty worktree, one whose
+  checked-out branch holds commits reachable from no other branch, and one
+  whose detached `HEAD` holds commits reachable from no ref.
 - **Stale-pool nudge**, at most once a day per pool, at acquire time, listing
   worktrees with a checked-out branch and no activity for 7 days or more, or
   detached with 1 GB or more of preserved ignored artifacts.
@@ -155,14 +185,28 @@ ticket carries its Confirmed Decisions as contract.
   - Preserved size is measured at release and recorded in the marker; it is
     never walked at acquire.
   - The throttle timestamp is stored per pool in the git common dir.
-  - Thresholds are config knobs defaulting to 7 days / 1 GB.
-  - Shipped playbook text tells the lead to relay the nudge to the user.
+  - Thresholds are config knobs `worktree.nudge_stale_days` (default 7) and
+    `worktree.nudge_preserved_gb` (default 1), outside the
+    `worktree.profile.` family.
+  - The workflow manual's worktree guidance (where the profile list renders)
+    tells the lead to relay the nudge to the user.
   Rejected: auto-deleting stale worktrees.
 
 ### Submodules (downstream Issue 4)
 
-- Hygiene and branch-switch git commands pass `-c submodule.recurse=false`;
-  the explicit `git submodule update --init --recursive` stays.
+- Every checkout-family git invocation on the acquire, release, and remove
+  paths passes `-c submodule.recurse=false`: `worktree add`,
+  `sparse-checkout set`, `reset --hard`, `clean`, `switch`, and
+  `checkout --detach` (including the dispatcher rollback in `server.go`). The
+  explicit `git submodule update --init --recursive` stays.
+
+### Pi package
+
+- `agents-plugin-pi/` is in scope: every changed shipped playbook under
+  `agents-plugin/rsrc/` is resynced into its byte-mirrored `rsrc/` copy
+  (`ai-docs/manuals/ws-mcp.md`; `TestPiMirrorUpToDate` enforces it), and
+  Phase 4 deletes its `lead-scope-worktree` skill, playbook, and manifest
+  entries along with the `agents-plugin/` and wsflow copies.
 
 ### Ticket-scope retirement (downstream Issue 5)
 
@@ -220,12 +264,6 @@ ticket carries its Confirmed Decisions as contract.
 | risk.test | moderate | needs git fixtures for submodules, cone and patterns sparse, hooks, and live git checks recorded in Results |
 | risk.security_or_contract | high | committed repo-scope config can now carry executable hooks and config.tune writes a tracked file; acquire schema breaks callers |
 
-## Open Decision Queue
-
-Last ID: (1)
-
-(1) [open] [announced] The `agents-plugin-pi/` package is in scope: Phases 2-4 resync its byte-mirrored `rsrc/` copies of every changed shipped playbook, and Phase 4 deletes its `lead-scope-worktree` skill, playbook, and manifest entries - citation: `ai-docs/manuals/ws-mcp.md` requires the Pi mirror resync from `agents-plugin/rsrc/` and `TestPiMirrorUpToDate` enforces it; deleting the Pi copies is a direct consequence of the confirmed `lead-scope-worktree` retirement.
-
 ## Phases
 
 ### Phase 1: Structured config values, profile key family, repo-scope writes, submodule fix
@@ -241,13 +279,17 @@ Deliver the config substrate and the independent Issue 4 fix.
   staging).
 - Builtin `full` and `housekeeping` profile definitions exist and resolve
   (acquire does not consume them yet).
-- `-c submodule.recurse=false` on hygiene and switch commands.
+- `-c submodule.recurse=false` on every checkout-family invocation listed in
+  Decisions.
 
 Verification: unit tests for resolver precedence of structured values across
 project/repo/global/builtin, session refusal, bad-name and bad-schema
 refusal at write, a malformed committed file failing resolve with file and
 key named, `config.tune` repo write creating/updating
-`.ws-workflow/config.json` without staging, and reset removing a profile. An
+`.ws-workflow/config.json` without staging and naming the path in its result,
+a repo write refused for a global-only key, reset removing a profile, and a
+pre-change `Config` parse (plain `overrides` map) of a file carrying a
+profile still succeeding. An
 acquire test with a submodule fixture under `submodule.recurse=true` passes.
 
 ### Phase 2: Profile-partitioned acquire/release with hooks and quarantine
@@ -257,7 +299,10 @@ parameter and implement marker, declared sparse (cone and patterns),
 `preserve` in both hygiene points, the four-point lifecycle minus
 `pre_remove`, env-var hook execution, provenance reporting, fail-loud
 failure, quarantine, the `post_provision` preserve warning, legacy adoption,
-and the ticket-visibility check. Update the acquire tool description
+and the ticket-visibility check. Land it as two reviewable commits: first
+profile partitioning (parameter, marker, builtins, legacy adoption, sparse,
+preserve, visibility check), then hooks (execution, provenance, timeout,
+failure, quarantine, preserve warning). Update the acquire tool description
 (dropping the "sparse state matches" overstatement), `worktree.list`
 (profile, `legacy`, quarantine shown), and every caller that passes
 `sparse_paths`: the occupied-root banner, the `git.merge` and `wsgit`
@@ -277,7 +322,13 @@ survives reuse; a definition change triggers re-adoption; a failing
 `post_acquire` quarantines, frees the branch, and is never reused; a
 `patterns` profile excluding a directory leaves it unchecked-out; an
 unmarked sparse worktree is adopted as `housekeeping`; a profile that hides
-`ai-docs/tickets` fails acquire. Live check: `git sparse-checkout set --cone`
+`ai-docs/tickets` fails acquire; hooks receive `WS_WORKTREE_DIR`, `WS_BASE`,
+`WS_TARGET_BRANCH` and run in the worktree or the relative `cwd`; results
+report each hook's argv, scope, and exit code; a failing `pre_release` leaves
+the worktree leased and unchanged; the quarantine error counts the profile's
+quarantined worktrees; a timed-out hook is a failure; an unpreserved ignored
+path created by `post_provision` produces the warning; releasing an unmarked
+leased worktree runs today's hygiene only. Live check: `git sparse-checkout set --cone`
 on a worktree left in non-cone mode behaves as the implementation assumes
 (record the observation in the Result).
 
@@ -305,10 +356,15 @@ copies at `agents-plugin-pi/rsrc/lead-scope-worktree/`,
 banner with its tests; add the `tickets.create` out-of-scope warning; update
 `260924-research-origin-ticket-ownership-index`'s reference to
 `lead-scope-worktree`; add a release-note line telling downstream worktrees
-that applied a ticket scope to run `git sparse-checkout disable`.
+that applied a ticket scope to run `git sparse-checkout disable`. The repo
+has no release-notes file (the release workflow writes a generic body), so
+the line goes into the Phase 4 Result as a `Forward:` note for the ship step
+to put into the GitHub release body of the release that carries it.
 
 Verification: `go test ./...` in `agents-plugin-tool`, the plugin and wsflow
 Python test suites, and `claude plugin validate agents-plugin` pass;
-`grep -rn "lead-scope-worktree\|sparse_paths"` over `agents-plugin*` finds
-nothing outside history. Downstream follow-up (not checkable here): MSBuild
+`grep -rn "lead-scope-worktree\|sparse_paths"` over `agents-plugin*/`
+(excluding `node_modules/`) finds no live reference; a test asserting that the
+removed parameter is rejected may name it. Pi `skills/` deletions are done by
+hand (`TestPiMirrorUpToDate` covers only Pi `rsrc/`). Downstream follow-up (not checkable here): MSBuild
 incremental build after reuse with preserve and stable sparse in place.
