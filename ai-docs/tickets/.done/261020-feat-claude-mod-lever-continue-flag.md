@@ -10,6 +10,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 43672875b556f384
 sage-review-completeness-reviewed: 43672875b556f384
+completed: 2026-10-20
 ---
 
 # Make the Claude mod lever continuation a flag that yields to an already-started turn
@@ -145,3 +146,37 @@ window (any origin) -> nothing submitted; flag unset -> nothing submitted;
 veto with flag -> veto resume under the same guard; reconnect success with
 flag and an intervening turn -> nothing; reconnect failure -> always
 reported. The claude-mod test suite passes in both copies.
+
+### Result (816801dbd) - 2026-10-20
+
+Landed in 1bd9bf100 (source), a310c8f84 (tests), 816801dbd (wsflow resync).
+
+- `request_compaction` and `request_mcp_reconnect` take `continue: boolean`
+  (schema `{ continue: { type: 'boolean' } }`); only a literal `true` sets it,
+  so a leftover `continuation` string reads as unset and the old multi-line
+  tool error is gone (`LeverAnswer` / `ReconnectAnswer` lost their `isError`
+  variant).
+- Fixed texts per Decisions: `RESUME_TEXT`, `vetoedResumeText(reason)`,
+  reconnect `successText(plugin)` ending in `RESUME_SENTENCE`, and
+  `failureText(plugin, reason, resume)` appending that sentence with the flag.
+  Lever/reconnect descriptions and results, advisory and milestone prose, and
+  `agents-plugin/hooks/hooks.json` updated.
+- Guard: `register.ts` `turn.start` feeds `compaction.turnStarted` and
+  `reconnect.turnStarted`. A main-thread turn start cancels the held
+  compaction resume (landed or vetoed); a reconnect success with the flag
+  submits only when the main-thread turn counter has not moved since the step
+  started. `claim` and its `prompt.submit` hook are removed. The
+  compacted-elsewhere path submits `RESUME_TEXT` at the next turn end
+  unguarded.
+- Decision: a second hold while a window is still open replaces it instead of
+  submitting the older text (the text is fixed, so one resume covers both).
+- Verification: `claude plugin test agents-plugin` 302 pass / 0 fail;
+  `claude plugin test agents-plugin-wsflow` 302 pass / 0 fail; `claude plugin
+  validate` passes on both; `go test ./internal/wsrsrc -run
+  TestWsflowHooksMirrorUpToDate` ok. Removing the `turn.start` feed fails six
+  engine guard tests (mutation check, not committed).
+- Lite review: no Critical or Important findings. Minor: a main-thread turn
+  starting between turn.complete and the reconnect step's start is not
+  counted (matches "since the step started"); `failureText` still names the
+  repair skill, which `261020-chore-retire-mcp-server-repair-skill` rewrites
+  at merge.
