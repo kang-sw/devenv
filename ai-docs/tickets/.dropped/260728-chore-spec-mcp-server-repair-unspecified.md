@@ -6,6 +6,7 @@ related:
     asserted coverage that does not exist, which is how the gap surfaced
   260624-epic-pre-release-cleanup: item 8 is the repair-pointer coverage line this
     belongs under
+dropped: 2026-10-20
 ---
 
 # `mcp-server-repair` is unspecified
@@ -68,3 +69,8 @@ whatever spec text gets written.
   of an already-reviewed phase.
 - `260728-chore-ws-tree-skill-pointer-guard` — the enforcement-asymmetry sibling
   from the same phase.
+
+
+## Resolution (2026-10-20)
+
+Subject retired: the mcp-server-repair skill was removed by 261020-chore-retire-mcp-server-repair-skill.

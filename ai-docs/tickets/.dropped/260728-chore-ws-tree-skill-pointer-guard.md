@@ -6,6 +6,7 @@ related:
     pointer sweep and surfaced this asymmetry as a residual minor
   260624-epic-pre-release-cleanup: item 8 is the repair-pointer coverage line this
     belongs under
+dropped: 2026-10-20
 ---
 
 # The ws tree has no SKILL.md shim-shape guard
@@ -69,3 +70,8 @@ name list, or the list becomes the next thing that drifts.
 - `adbf5ec3` — established the pointer wording; the un-guarded origin.
 - `260726-chore-mcp-repair-pointer-mid-procedure-skills` — the sweep; its Phase 1
   `### Result` records this as deferred with the reasoning.
+
+
+## Resolution (2026-10-20)
+
+Subject retired: the repair pointer tail in ws-tree SKILL.md files was removed by 261020-chore-retire-mcp-server-repair-skill.
