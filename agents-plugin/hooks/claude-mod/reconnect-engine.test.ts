@@ -6,9 +6,11 @@ import {
   REASON_NO_SERVER,
   REASON_TOOLS_ABSENT,
   RECONNECT_RESULT,
-  RECONNECT_RESULT_NO_CONTINUATION,
+  RECONNECT_RESULT_NO_RESUME,
   reconnectDescription,
+  RESUME_SENTENCE,
   successText,
+  TOOLS_POLL_MS,
   TOOLS_WAIT_MS,
 } from './reconnect'
 
@@ -34,6 +36,8 @@ function world(on: On, opts: { processOk?: boolean; refuseRegister?: string; con
     commands: [] as { command: string; args: string }[],
     /** Answers for the next reconnect commands; absent: the reconnect brings the server back. */
     commandAnswers: [] as CommandAnswer[],
+    /** How long (ms on the mock clock) the next reconnect commands take to answer, in call order. */
+    commandDelays: [] as number[],
     connects: 0,
     prompts: [] as string[],
     logs: [] as { text: string; to: string }[],
@@ -53,6 +57,7 @@ function world(on: On, opts: { processOk?: boolean; refuseRegister?: string; con
   on('session.id', () => ({ value: 'sess-1' }))
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+  on('turn.start', ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', ($, e) => ({ text: e.answer }))
   on('process.run', () =>
     opts.processOk === false
@@ -78,9 +83,11 @@ function world(on: On, opts: { processOk?: boolean; refuseRegister?: string; con
       ...(w.serverUp ? [{ name: `mcp__${server().replace(/[^A-Za-z0-9_-]/g, '_')}__config_list`, description: 'x', mcp: true }] : []),
     ],
   }))
-  on('command.run', ($, e) => {
+  on('command.run', async ($, e) => {
     w.commands.push({ command: e.command, args: e.args })
     w.order.push('command')
+    const delay = w.commandDelays.shift()
+    if (delay) await clock.sleep(delay)
     const answer = w.commandAnswers.shift() ?? 'brings-back'
     if (answer === 'brings-back') {
       w.serverUp = true
@@ -113,15 +120,22 @@ async function turnEnd($: Engine, w: World, opts: { reason?: string; agentId?: s
   await w.clock.settle()
 }
 
-async function request($: Engine, w: World, continuation: unknown, agentId?: string) {
-  const res = await $.tool.call({ tool: `mcp__${w.plugin}__request_mcp_reconnect`, continuation, ...(agentId ? { agentId } : {}) } as never)
+/** A turn starting: the main thread's, or a subagent's with `agentId`. */
+async function turnStart($: Engine, w: World, agentId?: string) {
+  await $.turn.start({ text: '', turnId: 't', ...(agentId ? { agentId } : {}) } as never)
+  await w.clock.settle()
+}
+
+/** A tool call with the given arguments (`{ continue: true }`, or none). */
+async function request($: Engine, w: World, args: Record<string, unknown> = {}, agentId?: string) {
+  const res = await $.tool.call({ tool: `mcp__${w.plugin}__request_mcp_reconnect`, ...args, ...(agentId ? { agentId } : {}) } as never)
   await w.clock.settle()
   return res
 }
 
 const reconnectArgs = (w: World) => ({ command: 'mcp', args: `reconnect plugin:${w.plugin}:${w.plugin}` })
 
-test('every package registers the reconnect tool with its pinned description', async ($, on) => {
+test('every package registers the reconnect tool with its pinned description and boolean flag', async ($, on) => {
   const w = world(on)
   await start($, w)
   expect(['ws', 'wsflow']).toContain(w.plugin)
@@ -132,8 +146,8 @@ test('every package registers the reconnect tool with its pinned description', a
     isDeferred: false,
     inputSchema: tool?.inputSchema,
   })
-  // The continuation is optional: the schema lists it, and does not require it.
-  expect(tool?.inputSchema).toEqual({ type: 'object', properties: { continuation: { type: 'string' } } })
+  // The flag is optional: the schema lists it, and does not require it.
+  expect(tool?.inputSchema).toEqual({ type: 'object', properties: { continue: { type: 'boolean' } } })
 })
 
 test('reconnect setup does not depend on the mailbox or compaction setups', async ($, on) => {
@@ -151,22 +165,21 @@ test('the mailbox and compaction setups do not depend on the reconnect setup', a
   expect(names).not.toContain('request_mcp_reconnect')
 })
 
-test('a subagent call is refused and a multi-line continuation is a tool error', async ($, on) => {
+test('a subagent call is refused and requests nothing', async ($, on) => {
   const w = world(on)
   await start($, w)
-  const fromSub = await request($, w, 'go on', 'sub-1')
+  const fromSub = await request($, w, { continue: true }, 'sub-1')
   expect(fromSub.deny).toBe('request_mcp_reconnect serves the main session only; called from subagent sub-1.')
-  expect((await request($, w, 'one\ntwo')).isError).toBe(true)
   await turnEnd($, w)
   expect(w.commands).toEqual([])
   expect(w.prompts).toEqual([])
 })
 
-test('after the server died, the reconnect runs at the next main-thread turn end, after the hook returned, and one success continuation follows', async ($, on) => {
+test('after the server died, the reconnect runs at the next main-thread turn end, after the hook returned, and one resume prompt follows a success with the flag', async ($, on) => {
   const w = world(on)
   await start($, w)
   w.serverUp = false
-  const res = await request($, w, 'resume the review')
+  const res = await request($, w, { continue: true })
   expect(res.result).toBe(RECONNECT_RESULT)
   await turnEnd($, w, { agentId: 'sub-1' })
   await turnEnd($, w, { reason: 'aborted' })
@@ -175,35 +188,100 @@ test('after the server died, the reconnect runs at the next main-thread turn end
   await turnEnd($, w)
   expect(w.order).toEqual(['turn.complete returned', 'command'])
   expect(w.commands).toEqual([reconnectArgs(w)])
-  expect(w.prompts).toEqual([successText(w.plugin, 'resume the review')])
+  expect(w.prompts).toEqual([successText(w.plugin)])
   await turnEnd($, w)
   expect(w.commands.length).toBe(1)
   expect(w.prompts.length).toBe(1)
 })
 
-test('an omitted or whitespace-only continuation is accepted: a success submits nothing, a failure still reports', async ($, on) => {
+test('an unset flag, or a leftover continuation argument, is accepted: a success submits nothing, a failure still reports without the resume sentence', async ($, on) => {
   const w = world(on)
   await start($, w)
   w.serverUp = false
-  expect((await request($, w, undefined)).result).toBe(RECONNECT_RESULT_NO_CONTINUATION)
+  expect((await request($, w)).result).toBe(RECONNECT_RESULT_NO_RESUME)
   await turnEnd($, w)
   expect(w.commands).toEqual([reconnectArgs(w)])
   expect(w.prompts).toEqual([])
   const headless = "Reconnect, enable, and disable aren't available in this session."
   w.commandAnswers.push({ text: headless })
-  expect((await request($, w, '   ')).result).toBe(RECONNECT_RESULT_NO_CONTINUATION)
+  expect((await request($, w, { continuation: 'go on' })).result).toBe(RECONNECT_RESULT_NO_RESUME)
   await turnEnd($, w)
-  expect(w.prompts).toEqual([failureText(w.plugin, reasonCommandAnswered(headless), undefined)])
+  expect(w.prompts).toEqual([failureText(w.plugin, reasonCommandAnswered(headless), false)])
+  expect(w.prompts[0]).not.toContain(RESUME_SENTENCE)
 })
 
-test('a repeat call replaces the continuation', async ($, on) => {
+test('a repeat call replaces the flag, latest wins', async ($, on) => {
   const w = world(on)
   await start($, w)
-  await request($, w, 'first')
-  await request($, w, 'second')
+  await request($, w, { continue: true })
+  await request($, w)
   await turnEnd($, w)
   expect(w.commands.length).toBe(1)
-  expect(w.prompts).toEqual([successText(w.plugin, 'second')])
+  expect(w.prompts).toEqual([])
+  await request($, w)
+  await request($, w, { continue: true })
+  await turnEnd($, w)
+  expect(w.commands.length).toBe(2)
+  expect(w.prompts).toEqual([successText(w.plugin)])
+})
+
+test('a main-thread turn started while the reconnect command is pending: the success submits no resume prompt', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  w.serverUp = false
+  w.commandDelays.push(100)
+  await request($, w, { continue: true })
+  await turnEnd($, w)
+  expect(w.commands).toEqual([reconnectArgs(w)])
+  await turnStart($, w)
+  await w.clock.advance(100)
+  expect(w.serverUp).toBe(true)
+  expect(w.prompts).toEqual([])
+})
+
+test('a main-thread turn started during the tool-list wait: the success submits no resume prompt', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  w.serverUp = false
+  w.commandAnswers.push({})
+  await request($, w, { continue: true })
+  await turnEnd($, w)
+  await turnStart($, w)
+  w.serverUp = true
+  await w.clock.advance(TOOLS_POLL_MS)
+  await w.clock.advance(TOOLS_WAIT_MS)
+  expect(w.prompts).toEqual([])
+})
+
+test('a subagent turn started during the step does not suppress the resume prompt', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  w.serverUp = false
+  w.commandDelays.push(100)
+  await request($, w, { continue: true })
+  await turnEnd($, w)
+  await turnStart($, w, 'sub-1')
+  await w.clock.advance(100)
+  expect(w.prompts).toEqual([successText(w.plugin)])
+})
+
+test('a failure is reported though a main-thread turn started during the step; with the flag it ends with the resume sentence', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  w.serverUp = false
+  w.commandAnswers.push({})
+  await request($, w, { continue: true })
+  await turnEnd($, w)
+  await turnStart($, w)
+  await w.clock.advance(TOOLS_WAIT_MS)
+  expect(w.prompts).toEqual([failureText(w.plugin, REASON_TOOLS_ABSENT, true)])
+  expect(w.prompts[0]!.endsWith(` ${RESUME_SENTENCE}`)).toBe(true)
+  w.commandAnswers.push({})
+  await request($, w)
+  await turnEnd($, w)
+  await turnStart($, w)
+  await w.clock.advance(TOOLS_WAIT_MS)
+  expect(w.prompts).toEqual([failureText(w.plugin, REASON_TOOLS_ABSENT, true), failureText(w.plugin, REASON_TOOLS_ABSENT, false)])
 })
 
 test('success is judged from the tool list: tools still gone after the wait is a failure', async ($, on) => {
@@ -211,12 +289,12 @@ test('success is judged from the tool list: tools still gone after the wait is a
   await start($, w)
   w.serverUp = false
   w.commandAnswers.push({})
-  await request($, w, 'go on')
+  await request($, w, { continue: true })
   await turnEnd($, w)
   expect(w.commands).toEqual([reconnectArgs(w)])
   expect(w.prompts).toEqual([])
   await w.clock.advance(TOOLS_WAIT_MS)
-  expect(w.prompts).toEqual([failureText(w.plugin, REASON_TOOLS_ABSENT, 'go on')])
+  expect(w.prompts).toEqual([failureText(w.plugin, REASON_TOOLS_ABSENT, true)])
 })
 
 test('a reconnect the session cannot run is a failure though the tools stay listed', async ($, on) => {
@@ -224,19 +302,19 @@ test('a reconnect the session cannot run is a failure though the tools stay list
   await start($, w)
   const headless = "Reconnect, enable, and disable aren't available in this session."
   w.commandAnswers.push({ text: headless })
-  await request($, w, 'go on')
+  await request($, w, { continue: true })
   await turnEnd($, w)
-  expect(w.prompts).toEqual([failureText(w.plugin, reasonCommandAnswered(headless), 'go on')])
+  expect(w.prompts).toEqual([failureText(w.plugin, reasonCommandAnswered(headless), true)])
 })
 
 test('a request with no resolved server reports failure without reconnecting', async ($, on) => {
   const w = world(on, { connect: false })
   await start($, w)
   expect(w.connects).toBe(1)
-  await request($, w, 'go on')
+  await request($, w, { continue: true })
   await turnEnd($, w)
   expect(w.commands).toEqual([])
-  expect(w.prompts).toEqual([failureText(w.plugin, REASON_NO_SERVER, 'go on')])
+  expect(w.prompts).toEqual([failureText(w.plugin, REASON_NO_SERVER, true)])
 })
 
 test('the server name resolved at start serves a reconnect after the server died, and is resolved again after it', async ($, on) => {
@@ -244,7 +322,7 @@ test('the server name resolved at start serves a reconnect after the server died
   await start($, w)
   expect(w.connects).toBe(1)
   w.serverUp = false
-  await request($, w, 'go on')
+  await request($, w, { continue: true })
   await turnEnd($, w)
   expect(w.commands).toEqual([reconnectArgs(w)])
   expect(w.connects).toBe(2)
@@ -253,7 +331,7 @@ test('the server name resolved at start serves a reconnect after the server died
 test('session.end drops a pending request before awaiting the store delete', async ($, on) => {
   const w = world(on)
   await start($, w)
-  await request($, w, 'go on')
+  await request($, w, { continue: true })
   w.deleteDelays.push(100)
   const ended = $.session.end({ reason: 'clear', sessionId: 'sess-1', resume: undefined as never })
   await w.clock.settle()
