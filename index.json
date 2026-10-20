@@ -136,26 +136,6 @@
     "260728-bug-chmod-based-tests-skip-silently": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
-    "260728-chore-spec-mcp-server-repair-unspecified": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-20T13:16:31Z"
-      }
-    },
-    "260728-chore-ws-tree-skill-pointer-guard": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-20T13:16:37Z"
-      }
-    },
     "260728-research-duplicate-ticket-stem-silent-resolve": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
@@ -601,49 +581,13 @@
         }
       }
     },
-    "261020-chore-pi-compaction-prose-before-dialog": {
-      "registered_at": "2026-10-20T11:45:11Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-20T11:59:20Z",
-        "impl": {
-          "branch": "impl/develop/qualm-fall-silt"
-        }
-      }
-    },
-    "261020-chore-pi-compaction-user-preferences-last": {
-      "registered_at": "2026-10-20T08:58:34Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-20T11:45:38Z"
-      }
-    },
-    "261020-chore-retire-mcp-server-repair-skill": {
-      "registered_at": "2026-10-20T12:18:44Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-20T13:01:08Z",
-        "impl": {
-          "branch": "impl/develop/sulk-ferry-kilt"
-        }
-      }
-    },
     "261020-feat-claude-mod-lever-continue-flag": {
       "registered_at": "2026-10-20T12:18:49Z",
       "lease": {
         "email": "ki6080@gmail.com",
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-10-20T13:00:42Z",
         "impl": {
           "branch": "impl/develop/salad-skirt-gecko"
