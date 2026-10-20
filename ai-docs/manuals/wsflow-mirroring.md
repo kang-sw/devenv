@@ -45,7 +45,6 @@ Included:
 - `lead-tune`
 - `lead-delegate`
 - `lead-run`
-- `lead-scope-worktree`
 - `lead-use-mailbox`
 - `lead-revive` (inline-body exception; see below)
 - `lead-proceed` (wsflow-only backward-compat alias; see **wsflow-only

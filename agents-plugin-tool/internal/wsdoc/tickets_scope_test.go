@@ -767,6 +767,32 @@ func TestTicketCreateRejectsHiddenCollision(t *testing.T) {
 	}
 }
 
+func TestTicketCreateWarnsOutsideScope(t *testing.T) {
+	f := newGraphFixture(t)
+	f.ticket("todo", "260101-feat-visible")
+	f.ticket("todo", "260102-feat-hidden")
+	f.scope([]string{"todo"}, "ai-docs/tickets/todo/260101-feat-visible.md")
+
+	inside, err := TicketCreate(f.root, TicketCreateOptions{Stem: "feat-in-scope", InitialState: "idea", Today: "260102"})
+	if err != nil {
+		t.Fatalf("TicketCreate in scope: %v", err)
+	}
+	if inside.Warning != "" {
+		t.Fatalf("in-scope create warned: %s", inside.Warning)
+	}
+
+	outside, err := TicketCreate(f.root, TicketCreateOptions{Stem: "feat-out-of-scope", InitialState: "todo", Today: "260102"})
+	if err != nil {
+		t.Fatalf("TicketCreate outside scope: %v", err)
+	}
+	if !gitSupportsScopeDestPreflight(t) {
+		// check-rules is absent below git 2.42, so the warning fails open.
+		return
+	}
+	requireContains(t, outside.Warning, "ai-docs/tickets/todo/260102-feat-out-of-scope.md is outside this worktree's sparse-checkout scope")
+	requireContains(t, outside.Warning, "git sparse-checkout add ai-docs/tickets/todo/260102-feat-out-of-scope.md")
+}
+
 // --- Fully excluded status directories --------------------------------------
 
 func TestScanTicketsSurvivesFullyExcludedDirectories(t *testing.T) {

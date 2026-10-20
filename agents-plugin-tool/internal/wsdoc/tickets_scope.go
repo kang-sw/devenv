@@ -441,9 +441,9 @@ type TicketScopeInfo struct {
 	// Cone reports whether this worktree's sparse-checkout is in cone mode
 	// (core.sparseCheckoutCone). A cone-mode worktree is a housekeeping or
 	// development checkout (directory-level patterns), never a ticket-board
-	// scope, which is file-level and requires --no-cone. Consumers use it to
-	// suppress the ticket-scope advisory, whose "restore with git
-	// sparse-checkout disable" remedy would be false in a cone worktree.
+	// scope, which is file-level and requires --no-cone. Callers read it to
+	// tell a ticket scope from a cone checkout, where a "restore with git
+	// sparse-checkout disable" remedy would be false.
 	Cone bool `json:"cone,omitempty"`
 }
 

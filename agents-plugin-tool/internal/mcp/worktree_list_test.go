@@ -30,7 +30,7 @@ func worktreeListServer(t *testing.T) (s *Server, root, base, leadKey string) {
 func acquireForTest(t *testing.T, s *Server, id int, leadKey, base, branch string) worktreeAcquireResult {
 	t.Helper()
 	resp := callToolOnce(t, s, id, "worktree.acquire", map[string]any{
-		"session_key": leadKey, "base": base, "target_branch": branch, "format": "json",
+		"session_key": leadKey, "base": base, "profile": "full", "target_branch": branch, "format": "json",
 	})
 	if toolIsError(t, resp) {
 		t.Fatalf("acquire %s failed: %s", branch, resp)
@@ -84,7 +84,7 @@ func TestWorktreeListDispatch(t *testing.T) {
 	ctx := context.Background()
 
 	// Pre-change worktree: provisioned without a lease, still branch-held.
-	legacy, err := provisionWorktree(ctx, wsgit.ExecRunner{}, root, base, "impl/test/legacy", nil, "")
+	legacy, err := provisionWorktree(ctx, wsgit.ExecRunner{}, root, base, "impl/test/legacy", builtinProfile(t, worktreeProfileFull), "")
 	if err != nil {
 		t.Fatalf("provision legacy: %v", err)
 	}
@@ -157,6 +157,9 @@ func TestWorktreeListDispatch(t *testing.T) {
 	if c.Branch == nil || *c.Branch != "impl/test/clean" || c.Dirty == nil || *c.Dirty || c.NewestDirtyMtime != "" {
 		t.Fatalf("held clean entry facts wrong: %+v", c)
 	}
+	if c.Profile != worktreeProfileFull {
+		t.Fatalf("held clean entry profile = %q, want %q", c.Profile, worktreeProfileFull)
+	}
 	if c.WorktreeLease == nil || c.WorktreeLease.WorkerKey != clean.WorkerKey || c.WorktreeLease.ParentKey != leadKey || c.WorktreeLease.AcquiredAt == "" {
 		t.Fatalf("held clean entry lease wrong: %+v", c.WorktreeLease)
 	}
@@ -212,7 +215,7 @@ func TestWorktreeListDispatch(t *testing.T) {
 
 	// Text form is the default and states the same facts.
 	text := toolText(t, callToolOnce(t, s, 7, "worktree.list", map[string]any{"session_key": leadKey}))
-	for _, want := range []string{"worktree: " + clean.Path, "branch: (detached)", "state: dirty", "worktree_lease: no lease record", "worker_key " + clean.WorkerKey + " (record mtime ", "release: releasable via worktree.release"} {
+	for _, want := range []string{"worktree: " + clean.Path, "branch: (detached)", "state: dirty", "worktree_lease: no lease record", "worker_key " + clean.WorkerKey + " (record mtime ", "release: releasable via worktree.release", "profile: full"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("text output lacks %q:\n%s", want, text)
 		}
@@ -275,11 +278,11 @@ func TestWorktreeListIncludesLegacyInTreePoolUnderDefaultConfig(t *testing.T) {
 	runGit(t, root, "worktree", "add", "--detach", legacyPath, base)
 	res := listForTest(t, s, 1, leadKey)
 	e := listEntryByPath(t, res, canonicalRootForTest(t, legacyPath))
-	if e.Branch != nil || e.WorktreeLease != nil {
+	if e.Branch != nil || e.WorktreeLease != nil || e.Profile != worktreeLegacyLabel {
 		t.Fatalf("legacy pool entry facts wrong: %+v", e)
 	}
 	// Symmetric with release: what list shows, release accepts.
-	if err := releaseWorktree(context.Background(), wsgit.ExecRunner{}, e.Path, defaultWorktreePoolTemplate); err != nil {
+	if _, err := releaseWorktree(context.Background(), wsgit.ExecRunner{}, e.Path, defaultWorktreePoolTemplate, builtinProfileLookup(t)); err != nil {
 		t.Fatalf("a listed legacy pool worktree must be releasable: %v", err)
 	}
 }

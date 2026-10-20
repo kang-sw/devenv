@@ -104,7 +104,7 @@ const bootstrapToolName = "ferrule"
 // preserved no-op, since the pre-rename tickets.sage_record was reachable by
 // a delegate-scoped key.
 func isLeadOnlyTool(name string) bool {
-	return name == bootstrapToolName || name == "workflow_manual" || name == "workflow_state" || name == "tickets.sage_stamp" || name == "tickets.index_init" || name == "git.merge" || name == "worktree.acquire" || name == "worktree.release" || name == "worktree.list" || strings.HasPrefix(name, "lead.") || workflowPreferenceWriterTool(name)
+	return name == bootstrapToolName || name == "workflow_manual" || name == "workflow_state" || name == "tickets.sage_stamp" || name == "tickets.index_init" || name == "git.merge" || name == "worktree.acquire" || name == "worktree.release" || name == "worktree.remove" || name == "worktree.list" || strings.HasPrefix(name, "lead.") || workflowPreferenceWriterTool(name)
 }
 
 func workflowPreferenceWriterTool(name string) bool {
@@ -512,13 +512,15 @@ func RuntimeNamespace() string {
 
 func builtinConfigDefaults() map[string]string {
 	return map[string]string{
-		wsconfig.ItemWorkflowPreferSubagent: "off",
-		wsconfig.ItemSageReview:             "auto",
-		wsconfig.ItemSageReviewDesign:       "off",
-		wsconfig.ItemReviewPhase:            "lite",
-		wsconfig.ItemBootstrapAlarm:         "on",
-		wsconfig.ItemWorktreePool:           defaultWorktreePoolTemplate,
-		wsconfig.ItemTicketAssigneeAware:    "off",
+		wsconfig.ItemWorkflowPreferSubagent:   "off",
+		wsconfig.ItemSageReview:               "auto",
+		wsconfig.ItemSageReviewDesign:         "off",
+		wsconfig.ItemReviewPhase:              "lite",
+		wsconfig.ItemBootstrapAlarm:           "on",
+		wsconfig.ItemWorktreePool:             defaultWorktreePoolTemplate,
+		wsconfig.ItemTicketAssigneeAware:      "off",
+		wsconfig.ItemWorktreeNudgeStaleDays:   worktreeNudgeStaleDaysKey.Default,
+		wsconfig.ItemWorktreeNudgePreservedGB: worktreeNudgePreservedGBKey.Default,
 	}
 }
 
@@ -937,6 +939,13 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: agents.tier only supports project or global scope; got %q", explicitScope))
 		}
 		reset, _ := params.Arguments["reset"].(bool)
+		if entry.Structured {
+			text, err := s.tuneStructured(entry, params.Arguments["value"], sessionKey, explicitScope, reset)
+			return toolTextResponse(req.ID, text, err)
+		}
+		// Writers anchor the committed repo scope at the session's worktree
+		// root, so scope "repo" writes that worktree's .ws-workflow/config.json.
+		writeOpts := s.sessionConfigOptions(sessionKey)
 		if reset {
 			if entry.ResetTool == "" {
 				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %s does not support reset", key))
@@ -963,7 +972,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 					storedHarness = "all"
 				}
 				overrideKey := "prompt." + pointID + "." + storedHarness
-				resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+				resolver := wsconfig.NewResolver(writeOpts, nil, adapter, adapter)
 				if err := resolver.Unset(overrideKey, wsconfig.SetOptions{ExplicitScope: explicitScope, SessionKey: sessionKey}); err != nil {
 					return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %w", err))
 				}
@@ -971,26 +980,26 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 				if resolvedScope == "" {
 					resolvedScope = wsconfig.DefaultScope(overrideKey)
 				}
-				return toolTextResponse(req.ID, fmt.Sprintf("prompt override cleared: %s/%s (scope: %s)\n", pointID, storedHarness, resolvedScope), nil)
+				return toolTextResponse(req.ID, fmt.Sprintf("prompt override cleared: %s/%s (scope: %s)\n", pointID, storedHarness, resolvedScope)+repoWriteNote(&resolver, resolvedScope), nil)
 			}
 			// scalar resolver-backed knob reset (subsumes the alarm/preference resets).
 			// Reset means "drop the override and fall back to the builtin default" —
 			// distinct from explicitly writing the builtin's current value.
-			resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
+			resolver := wsconfig.NewResolver(writeOpts, builtinConfigDefaults(), adapter, adapter)
 			if err := resolver.Unset(entry.Key, wsconfig.SetOptions{ExplicitScope: explicitScope, SessionKey: sessionKey}); err != nil {
 				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %w", err))
 			}
 			// The echo reads through the session-anchored resolver so a reset
-			// reports the committed repo value that now applies; the writer above
-			// stays repo-unaware because repo scope is read-only to config.tune.
-			// The reset already happened, so an echo load failure is reported
-			// beside it rather than as a failed tune.
+			// reports the value that now applies (a committed repo value
+			// included). The reset already happened, so an echo load failure is
+			// reported beside it rather than as a failed tune.
+			note := repoWriteNote(&resolver, resetEchoScope(explicitScope, entry))
 			echo := s.sessionResolver(sessionKey, s.declared.withDefaults(builtinConfigDefaults()))
 			resolved, err := echo.Get(sessionKey, entry.Key)
 			if err != nil {
-				return toolTextResponse(req.ID, fmt.Sprintf("%s: reset [scope:%s]\nwarning: effective value unreadable: %v\n", entry.Key, resetEchoScope(explicitScope, entry), err), nil)
+				return toolTextResponse(req.ID, fmt.Sprintf("%s: reset [scope:%s]\nwarning: effective value unreadable: %v\n", entry.Key, resetEchoScope(explicitScope, entry), err)+note, nil)
 			}
-			return toolTextResponse(req.ID, fmt.Sprintf("%s: %s [scope:%s]\n", entry.Key, resolved.Value, resolved.Scope), nil)
+			return toolTextResponse(req.ID, fmt.Sprintf("%s: %s [scope:%s]\n", entry.Key, resolved.Value, resolved.Scope)+note, nil)
 		}
 		// Non-reset write branch, dispatched by key family. Every key except
 		// agents.tier reads a string value; reject any other JSON type here so it
@@ -1019,7 +1028,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 				storedHarness = "all"
 			}
 			overrideKey := "prompt." + pointID + "." + storedHarness
-			resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+			resolver := wsconfig.NewResolver(writeOpts, nil, adapter, adapter)
 			if err := resolver.Set(overrideKey, promptText, wsconfig.SetOptions{ExplicitScope: explicitScope, SessionKey: sessionKey}); err != nil {
 				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %w", err))
 			}
@@ -1027,7 +1036,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			if resolvedScope == "" {
 				resolvedScope = wsconfig.DefaultScope(overrideKey)
 			}
-			return toolTextResponse(req.ID, fmt.Sprintf("prompt override set: %s/%s (scope: %s)\n", pointID, storedHarness, resolvedScope), nil)
+			return toolTextResponse(req.ID, fmt.Sprintf("prompt override set: %s/%s (scope: %s)\n", pointID, storedHarness, resolvedScope)+repoWriteNote(&resolver, resolvedScope), nil)
 		default:
 			// scalar resolver-backed knob (subagent / bootstrap_alarm).
 			// Resolver.Set enforces global-only + session-key.
@@ -1054,7 +1063,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 					return toolTextResponse(req.ID, "", err)
 				}
 			}
-			resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
+			resolver := wsconfig.NewResolver(writeOpts, builtinConfigDefaults(), adapter, adapter)
 			if err := resolver.Set(entry.Key, value, wsconfig.SetOptions{ExplicitScope: explicitScope, SessionKey: sessionKey}); err != nil {
 				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %w", err))
 			}
@@ -1062,7 +1071,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			if resolvedScope == "" {
 				resolvedScope = entry.DefaultScope()
 			}
-			text := fmt.Sprintf("%s: %s [scope:%s]\n", entry.Key, value, resolvedScope)
+			text := fmt.Sprintf("%s: %s [scope:%s]\n", entry.Key, value, resolvedScope) + repoWriteNote(&resolver, resolvedScope)
 			// A write below a set scope (for example a global write under a
 			// committed repo value) does not take effect; say which value does.
 			echo := s.sessionResolver(sessionKey, s.declared.withDefaults(builtinConfigDefaults()))
@@ -1273,13 +1282,28 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if strings.TrimSpace(base) == "" {
 			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.acquire: base is required"))
 		}
-		sparsePaths := stringList(params.Arguments["sparse_paths"])
+		if _, legacy := params.Arguments["sparse_paths"]; legacy {
+			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.acquire: sparse_paths was removed; pass profile instead (profile %q is the ai-docs checkout sparse_paths: [\"ai-docs\"] gave)", worktreeProfileHousekeeping))
+		}
 		resolver := s.sessionResolver(key, builtinConfigDefaults())
+		profiles, err := resolveWorktreeProfiles(&resolver)
+		if err != nil {
+			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.acquire: %w; fix or reset that profile (config.list shows the family's value_schema) before acquiring", err))
+		}
+		profileName, _ := params.Arguments["profile"].(string)
+		profileName = strings.TrimSpace(profileName)
+		if profileName == "" {
+			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.acquire: profile is required; resolved profiles: %s", worktreeProfileNames(profiles)))
+		}
+		profile, found := findWorktreeProfile(profiles, profileName)
+		if !found {
+			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.acquire: unknown profile %q; resolved profiles: %s", profileName, worktreeProfileNames(profiles)))
+		}
 		poolRV, err := resolver.Get(key, wsconfig.ItemWorktreePool)
 		if err != nil {
 			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.acquire: %w", err))
 		}
-		result, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, entry.root, base, targetBranch, sparsePaths, poolRV.Value)
+		result, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, entry.root, base, targetBranch, profile, poolRV.Value)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
@@ -1293,7 +1317,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			// Detach the freshly provisioned worktree so a failed mint does not
 			// leave it branch-checked-out and thus ineligible for pool reuse.
-			_, _ = wsgit.ExecRunner{}.RunGit(context.Background(), result.Path, "checkout", "--detach")
+			_, _ = wsgit.ExecRunner{}.RunGit(context.Background(), result.Path, noSubmoduleRecurse("checkout", "--detach")...)
 			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.acquire: mint worker key: %w", err))
 		}
 		// The lease is written only after a successful mint, so the failed-mint
@@ -1303,11 +1327,17 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		// minted key is left unused and ages out through key pruning.
 		lease := worktreeLease{WorkerKey: workerKey, ParentKey: key, AcquiredAt: time.Now().UTC().Format(time.RFC3339)}
 		if err := writeWorktreeLease(context.Background(), wsgit.ExecRunner{}, result.Path, lease); err != nil {
-			_, _ = wsgit.ExecRunner{}.RunGit(context.Background(), result.Path, "checkout", "--detach")
+			_, _ = wsgit.ExecRunner{}.RunGit(context.Background(), result.Path, noSubmoduleRecurse("checkout", "--detach")...)
 			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.acquire: record worktree lease: %w", err))
 		}
 		result.Path = mintPath
 		result.WorkerKey = workerKey
+		staleAfter, preservedLimit := worktreeNudgeThresholds(&resolver, key)
+		if nudge, err := poolNudge(context.Background(), wsgit.ExecRunner{}, entry.root, result.Pool, staleAfter, preservedLimit, time.Now()); err != nil {
+			result.Warnings = append(result.Warnings, "stale-pool check failed: "+err.Error())
+		} else {
+			result.Nudge = nudge
+		}
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, result, nil)
 		}
@@ -1336,13 +1366,55 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.release: %w", err))
 		}
-		if err := releaseWorktree(context.Background(), wsgit.ExecRunner{}, path, poolRV.Value); err != nil {
+		lookup := func(name string) (resolvedWorktreeProfile, bool, error) {
+			profiles, err := resolveWorktreeProfiles(&resolver)
+			return staticProfileLookup(profiles, err)(name)
+		}
+		result, err := releaseWorktree(context.Background(), wsgit.ExecRunner{}, path, poolRV.Value, lookup)
+		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
 		if wantsJSON(params.Arguments) {
-			return toolJSONResponse(req.ID, map[string]any{"path": path, "detached": true}, nil)
+			return toolJSONResponse(req.ID, result, nil)
 		}
-		return toolTextResponse(req.ID, fmt.Sprintf("released: %s\ndetached: true\n", path), nil)
+		return toolTextResponse(req.ID, result.text(), nil)
+	case "worktree.remove":
+		key, err := s.requireLeadSessionKey("worktree.remove", params.Arguments)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		path, _ := params.Arguments["path"].(string)
+		workerKey, _ := params.Arguments["key"].(string)
+		path = strings.TrimSpace(path)
+		workerKey = strings.TrimSpace(workerKey)
+		if path == "" && workerKey == "" {
+			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.remove: path or key is required"))
+		}
+		if path == "" {
+			wentry, ok := s.sessions.lookup(workerKey)
+			if !ok {
+				return toolTextResponse(req.ID, "", fmt.Errorf("worktree.remove: key %q is not a known session key", workerKey))
+			}
+			path = wentry.root
+		}
+		resolver := s.sessionResolver(key, builtinConfigDefaults())
+		poolRV, err := resolver.Get(key, wsconfig.ItemWorktreePool)
+		if err != nil {
+			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.remove: %w", err))
+		}
+		lookup := func(name string) (resolvedWorktreeProfile, bool, error) {
+			profiles, err := resolveWorktreeProfiles(&resolver)
+			return staticProfileLookup(profiles, err)(name)
+		}
+		staleAfter, _ := worktreeNudgeThresholds(&resolver, key)
+		result, err := removeWorktree(context.Background(), wsgit.ExecRunner{}, path, poolRV.Value, staleAfter, time.Now(), lookup)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, result, nil)
+		}
+		return toolTextResponse(req.ID, result.text(), nil)
 	case "worktree.list":
 		key, err := s.requireLeadSessionKey("worktree.list", params.Arguments)
 		if err != nil {
@@ -2499,6 +2571,15 @@ type tuningKnob struct {
 	// only when RepoScope is true. It differs from ID for prompt.* knobs,
 	// whose stored keys carry a harness bucket suffix.
 	RepoKey string `json:"repo_key,omitempty"`
+	// RepoMember names the config-file member RepoKey lives in when it is not
+	// overrides: structured_overrides for a structured (object) knob.
+	RepoMember string `json:"repo_member,omitempty"`
+	// ValueSchema is the JSON Schema of a structured knob's value.
+	ValueSchema any `json:"value_schema,omitempty"`
+	// Error reports why Current could not be resolved (an invalid stored
+	// value, naming its file and key); config.list still lists the knob so
+	// the lead can fix it.
+	Error string `json:"error,omitempty"`
 }
 
 type tuningWriter struct {
@@ -2672,6 +2753,45 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 		Current:        agentTiers,
 	})
 
+	profileEntry := worktreeProfileKnobEntry("<name>")
+	profileKnob := tuningKnob{
+		ID:          profileEntry.Key,
+		Kind:        "worktree_profile",
+		Description: "One worktree profile per key: the pool partition and lifecycle worktree.acquire(profile: <name>) provisions. A pooled worktree is reused only by an acquire naming the same profile. The value is a whole profile object (value_schema); a higher scope replaces a lower scope's profile of the same name, with no field merge. Builtins: full (plain checkout) and housekeeping (cone sparse of ai-docs). Hooks run as argv arrays from any scope, so a repo-scope profile carries commands the repository's scripts provide; each runs under a 10-minute timeout. post_provision runs when a worktree enters the profile, post_acquire on every acquire, pre_release before release hygiene, pre_remove before worktree.remove. A failing post_provision or post_acquire quarantines the worktree (never reused; worktree.remove clears it); a failing pre_release or pre_remove fails that call and leaves the worktree as it was. current lists every resolved profile with the scope and file it came from.",
+		Writer:      tuningWriter{Tool: profileEntry.WriterTool, FixedArguments: map[string]string{"key": profileEntry.Key}},
+		Reset: &tuningWriter{
+			Tool:           profileEntry.ResetTool,
+			FixedArguments: map[string]string{"key": profileEntry.Key, "reset": "true"},
+		},
+		SelectorFields: profileEntry.SelectorFields,
+		ValueFields:    profileEntry.ValueFields,
+		ValueSchema:    worktreeProfileValueSchema(),
+		RepoMember:     "structured_overrides",
+	}
+	if profiles, err := resolveWorktreeProfiles(resolver); err != nil {
+		profileKnob.Error = err.Error()
+	} else {
+		profileKnob.Current = profiles
+	}
+	appendKnob(profileEntry, profileKnob)
+
+	for _, k := range []declaredConfigKey{worktreeNudgeStaleDaysKey, worktreeNudgePreservedGBKey} {
+		entry := k.entry()
+		appendKnob(entry, tuningKnob{
+			ID:          entry.Key,
+			Kind:        "worktree_nudge",
+			Description: k.Description + " Value: " + k.domain() + "; builtin " + k.Default + ".",
+			Writer:      tuningWriter{Tool: entry.WriterTool, FixedArguments: map[string]string{"key": entry.Key}},
+			Reset: &tuningWriter{
+				Tool:           entry.ResetTool,
+				FixedArguments: map[string]string{"key": entry.Key, "reset": "true"},
+			},
+			SelectorFields: entry.SelectorFields,
+			ValueFields:    entry.ValueFields,
+			Current:        currentWorkflowPreference(resolver, sessionKey, entry.Key),
+		})
+	}
+
 	return catalog, nil
 }
 
@@ -2826,6 +2946,15 @@ func formatTuningCatalog(catalog tuningCatalog) string {
 		fmt.Fprintf(&b, "  repo_scope: %s\n", yesNo(knob.RepoScope))
 		if knob.RepoKey != "" {
 			fmt.Fprintf(&b, "  repo_key: %s\n", knob.RepoKey)
+		}
+		if knob.RepoMember != "" {
+			fmt.Fprintf(&b, "  repo_member: %s\n", knob.RepoMember)
+		}
+		if knob.ValueSchema != nil {
+			fmt.Fprintf(&b, "  value_schema: %s\n", formatTuningCurrent(knob.ValueSchema))
+		}
+		if knob.Error != "" {
+			fmt.Fprintf(&b, "  error: %s\n", knob.Error)
 		}
 		b.WriteString("\n")
 	}
@@ -3117,6 +3246,9 @@ func formatGitCommit(result wsgit.CommitResult) string {
 func formatTicketCreate(res wsdoc.TicketCreateResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Created %s\n", res.Path)
+	if res.Warning != "" {
+		fmt.Fprintf(&b, "warning: %s\n", res.Warning)
+	}
 	fmt.Fprintf(&b, "Tip: %s\n", res.Tip)
 	b.WriteString("next_instruction: This is a valid empty skeleton + applicable initial posture only, not a full mutation orchestrator; call tickets.template for the body skeleton before treating this ticket as populated.\n")
 	return b.String()
@@ -4187,13 +4319,13 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "config.tune",
-			"description": "Write one ws config knob, selected by its key (e.g. workflow.prefer_subagent, bootstrap_alarm, agents.tier, prompt.<pointId>). Call config.list first for each key's exact value domain, scope rules, and harness applicability. value is a string for scalar knobs and an object ({tier, backend, model, effort}) for agents.tier; agents.tier reset takes value: {tier} only. scope is optional and backstops to the key's declared default; harness is load-bearing for prompt.* and agents.tier and warning-only (ignored) for keys that do not vary by harness. reset: true drops a knob's override back to its builtin/inherited default (only for keys that support reset). session_key is required at dispatch for lead-authority keys and prompt.* keys. Lead-only: delegate and leaf keys are blocked by the config.* prefix gate.",
+			"description": "Write one ws config knob, selected by its key (e.g. workflow.prefer_subagent, bootstrap_alarm, agents.tier, prompt.<pointId>, worktree.profile.<name>). Call config.list first for each key's exact value domain, scope rules, and harness applicability. value is a string for scalar knobs, an object ({tier, backend, model, effort}) for agents.tier, and a whole profile object (config.list value_schema) for worktree.profile.<name>; agents.tier reset takes value: {tier} only. scope is optional and backstops to the key's declared default; scope repo writes the committed .ws-workflow/config.json in the session's worktree without staging it, so include the reported path in your next git.commit paths; harness is load-bearing for prompt.* and agents.tier and warning-only (ignored) for keys that do not vary by harness. reset: true drops a knob's override back to its builtin/inherited default (only for keys that support reset). session_key is required at dispatch for lead-authority keys and prompt.* keys. Lead-only: delegate and leaf keys are blocked by the config.* prefix gate.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"key":         stringProperty("Config knob key to write, e.g. workflow.prefer_subagent, bootstrap_alarm, agents.tier, prompt.<pointId>, or an adapter-declared key. See config.list for the supported set."),
-					"value":       stringOrObjectProperty("New value. A string for scalar knobs (e.g. on/off), or an object {tier, backend, model, effort} for agents.tier. For agents.tier reset pass only {tier}; omit for other resets."),
-					"scope":       enumStringProperty("Optional storage scope. When omitted the write lands in the key's declared default scope. Global-only keys reject non-global scopes; agents.tier supports project and global scopes.", wsconfig.ScopeSchemaEnum()),
+					"key":         stringProperty("Config knob key to write, e.g. workflow.prefer_subagent, bootstrap_alarm, agents.tier, prompt.<pointId>, worktree.profile.<name>, or an adapter-declared key. See config.list for the supported set."),
+					"value":       stringOrObjectProperty("New value. A string for scalar knobs (e.g. on/off), an object {tier, backend, model, effort} for agents.tier, or a profile object for worktree.profile.<name>. For agents.tier reset pass only {tier}; omit for other resets."),
+					"scope":       enumStringProperty("Optional storage scope. When omitted the write lands in the key's declared default scope. repo writes the committed .ws-workflow/config.json in the session's worktree (session_key required) and leaves staging to your next git.commit. Global-only keys reject non-global scopes; agents.tier supports project and global scopes; worktree.profile.<name> supports project, repo, and global.", wsconfig.ScopeSchemaEnum()),
 					"harness":     stringProperty("Optional harness selector. Load-bearing for prompt.* (claude, codex, pi, or * for all) and agents.tier (alias key); ignored for keys that do not vary by harness. When omitted for a harness-applicable key, defaults to the current session's detected harness."),
 					"reset":       boolProperty("When true, drop the key's override and fall back to its builtin/inherited default instead of writing an explicit value. Mutually exclusive with value except agents.tier, which requires value: {tier}; only valid for keys that support reset."),
 					"session_key": stringProperty("Caller's lead ws session key. Required at dispatch for lead-authority keys (global-only workflow preferences and alarms) and for prompt.* keys; also the target session for a session-scope write."),
@@ -4364,26 +4496,38 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "worktree.acquire",
-			"description": fmt.Sprintf("Lead-only. Provision an isolated Git worktree from a recycled pool for a parallel worker: reuse an eligible idle pooled worktree or create one, create target_branch on base if it does not exist and check it out, hygiene-reset the tree, sync submodules, mint a worktree-bound worker session key, and record a worktree lease (worker_key, parent_key, acquired_at) in the worktree's Git admin directory for worktree.list. Returns the worktree path and worker_key. The pool location is the worktree_pool config knob (default %s). With sparse_paths the worktree is created without a checkout and materializes only those cone directories — the lead's housekeeping worktree while a worker occupies the root. Defaults to text; use format=json for structured output.", defaultWorktreePoolTemplate),
+			"description": fmt.Sprintf("Lead-only. Provision an isolated Git worktree of a named profile from a recycled pool for a parallel worker: reuse an idle pooled worktree of that profile or create one, put it into the profile when it is fresh or the profile's provisioning inputs changed (declared sparse-checkout, then post_provision hooks), create target_branch on base if it does not exist and check it out, hygiene-reset the tree keeping the profile's preserve patterns, sync submodules, run the profile's post_acquire hooks, mint a worktree-bound worker session key, and record a worktree lease (worker_key, parent_key, acquired_at) in the worktree's Git admin directory for worktree.list. Fails when the acquired worktree hides the ticket board its commit tracks; a failing post_provision or post_acquire hook quarantines the worktree and fails the call. Returns the worktree path, worker_key, profile, and each hook run (argv, scope, exit code). At most once a day per pool, the result's nudge lists pooled worktrees with a branch checked out and no activity for worktree.nudge_stale_days, or detached with worktree.nudge_preserved_gb or more of preserved artifacts; relay it to the user, who decides whether worktree.remove deletes them. The pool location is the worktree_pool config knob (default %s); profiles are the worktree.profile.<name> config family (config.list), with builtins full (plain checkout) and housekeeping (the ai-docs checkout a lead uses while a worker occupies the root). Defaults to text; use format=json for structured output.", defaultWorktreePoolTemplate),
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"base":          stringProperty("Base commit-ish the worktree branch is created on, e.g. the goal branch."),
 					"target_branch": stringProperty("Branch to create (when absent) and check out in the worktree, e.g. impl/<parent>/<slug>. Omit to check out base itself; base must then be a local branch not checked out in another worktree."),
-					"sparse_paths":  stringArrayProperty(`Optional cone-mode sparse-checkout directories, e.g. ["ai-docs"]. Omitted: full checkout. A pooled worktree is reused only when its sparse state matches.`),
+					"profile":       stringProperty("Worktree profile name, e.g. full or housekeeping, or a project profile config.list lists. A pooled worktree is reused only by an acquire naming the same profile."),
 					"format":        stringProperty(`Optional output format. Use "json" for structured output.`),
 				},
-				"required": []string{"base"},
+				"required": []string{"base", "profile"},
 			},
 		},
 		{
 			"name":        "worktree.release",
-			"description": "Lead-only. Return a worktree to the pool: clean it (git reset --hard + git clean -ffdx, discarding uncommitted changes), detach HEAD so it becomes reuse-eligible, and remove its worktree lease. Never deletes the worktree and does not retire the worker key. Identify it by path or by a worker session key bound to it. Defaults to text; use format=json for structured output.",
+			"description": "Lead-only. Return a worktree to the pool: run its profile's pre_release hooks (a failure leaves it unchanged and leased), clean it (git reset --hard + git clean -ffdx, discarding uncommitted changes and every ignored path its profile does not preserve), detach HEAD so it becomes reuse-eligible, record the size of the preserved artifacts it kept for acquire's nudge, and remove its worktree lease. Never deletes the worktree (worktree.remove does) and does not retire the worker key. Identify it by path or by a worker session key bound to it. Defaults to text; use format=json for structured output.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"path":   stringProperty("Absolute worktree path to release. Provide path or key."),
 					"key":    stringProperty("A worker session key bound to the worktree to release. Provide path or key."),
+					"format": stringProperty(`Optional output format. Use "json" for structured output.`),
+				},
+			},
+		},
+		{
+			"name":        "worktree.remove",
+			"description": "Lead-only. Delete a pooled worktree: refuse a dirty one, one whose checked-out branch holds commits no other branch reaches, one whose detached HEAD holds commits no ref reaches, the primary worktree, a path outside the owned pool, and a leased one active more recently than worktree.nudge_stale_days; then run its profile's pre_remove hooks (a failure leaves it in place; skipped with a note when the profile no longer resolves) and remove it with its lease and profile marker, clearing any quarantine. Keeps the checked-out branch. Identify it by path or by a worker session key bound to it. Returns the path, profile, kept branch, and each hook run (argv, scope, exit code). Defaults to text; use format=json for structured output.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"path":   stringProperty("Absolute worktree path to remove. Provide path or key."),
+					"key":    stringProperty("A worker session key bound to the worktree to remove. Provide path or key."),
 					"format": stringProperty(`Optional output format. Use "json" for structured output.`),
 				},
 			},
@@ -4628,7 +4772,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.create_empty",
-			"description": "Create a dated ticket stub at ai-docs/tickets/<status>/<YYMMDD>-<stem>.md with minimal frontmatter (title plus resolved sage-review posture for ready or epic todo). Yields only a valid empty skeleton + applicable initial posture, not a full mutation orchestrator — populate the body via tickets.template. When the ticket-assignee-aware project flag is on, set_assignee (default true) stamps the assignee: true = the caller's current git user.email (nothing when unset), false = leave unassigned, or an array of emails = assign to those. Inert while the flag is off. Returns the path and a promotion tip; does not stage or commit.",
+			"description": "Create a dated ticket stub at ai-docs/tickets/<status>/<YYMMDD>-<stem>.md with minimal frontmatter (title plus resolved sage-review posture for ready or epic todo). Yields only a valid empty skeleton + applicable initial posture, not a full mutation orchestrator — populate the body via tickets.template. When the ticket-assignee-aware project flag is on, set_assignee (default true) stamps the assignee: true = the caller's current git user.email (nothing when unset), false = leave unassigned, or an array of emails = assign to those. Inert while the flag is off. Returns the path and a promotion tip, plus a warning when the path lies outside this worktree's active sparse-checkout scope (git drops such a file from the worktree once it is committed); does not stage or commit.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -4843,7 +4987,7 @@ func toolSchemaRequiresSessionKey(name string) bool {
 		"rationale.query", "git.followups",
 		"project_tree",
 		"review.marker", "review.stamp",
-		"worktree.acquire", "worktree.release", "worktree.list",
+		"worktree.acquire", "worktree.release", "worktree.remove", "worktree.list",
 		"tickets.query", "tickets.close", "tickets.move", "tickets.create_empty", "tickets.sage_gate", "tickets.sage_stamp", "tickets.verify",
 		"tickets.acquire", "tickets.release", "tickets.index_init", "path.generate", "playbook.render":
 		return true

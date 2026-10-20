@@ -38,6 +38,13 @@ type Config struct {
 	// Keys are item identifiers; values are string-encoded config values.
 	// The field is additive: existing configs without it parse with a nil map.
 	Overrides map[string]string `json:"overrides,omitempty"`
+	// StructuredOverrides holds JSON-object values (a worktree profile) keyed by
+	// the full item key, mirroring Overrides. It is a separate top-level member,
+	// never an object inside Overrides: an older ws decodes Overrides as
+	// map[string]string and fails the whole resolution on an object there, while
+	// its json.Unmarshal ignores this unknown member. The member name is a
+	// committed on-disk format downstream repositories carry; do not rename it.
+	StructuredOverrides map[string]json.RawMessage `json:"structured_overrides,omitempty"`
 }
 
 type AgentsConfig struct {
@@ -80,6 +87,7 @@ func Load(opts Options) (Config, error) {
 	}
 	cfg := effectiveAgentConfig(stored)
 	cfg.Overrides = stored.Overrides
+	cfg.StructuredOverrides = stored.StructuredOverrides
 	return cfg, nil
 }
 
@@ -714,56 +722,75 @@ var errConfigUnchanged = errors.New("ws config unchanged")
 // Config. A missing file reads as Config{}; callers whose no-op must not create
 // the directory or lock file check for the file before calling.
 func updateConfigFile(path string, mutate func(*Config) error) (Config, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return Config{}, fmt.Errorf("create config dir: %w", err)
-	}
-
+	var cfg Config
 	// The lock is a sibling file so it survives the atomic rename of the config.
-	lockPath := path + ".lock"
+	err := rewriteLocked(path, path+".lock", func(raw []byte, exists bool) ([]byte, error) {
+		if exists {
+			if jerr := json.Unmarshal(raw, &cfg); jerr != nil {
+				return nil, fmt.Errorf("parse config for update: %w", jerr)
+			}
+		}
+		if err := mutate(&cfg); err != nil {
+			return nil, err
+		}
+		cfg.SchemaVersion = schemaVersion
+		payload, err := json.MarshalIndent(cfg, "", "  ")
+		if err != nil {
+			return nil, fmt.Errorf("encode config: %w", err)
+		}
+		return append(payload, '\n'), nil
+	})
+	if errors.Is(err, errConfigUnchanged) {
+		return cfg, nil
+	}
+	if err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
+}
+
+// rewriteLocked holds lockPath's flock across reading path, transform, and an
+// atomic temp-write + rename of transform's payload, so every writer of one
+// file serializes against every other while unlocked readers see the old or
+// the new file, never a torn one. A missing file reaches transform with
+// exists=false. A transform error (errConfigUnchanged included) skips the write
+// and is returned unchanged.
+func rewriteLocked(path, lockPath string, transform func(raw []byte, exists bool) ([]byte, error)) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create config dir: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
+		return fmt.Errorf("create config lock dir: %w", err)
+	}
 	fl := flock.New(lockPath)
 	ctx, cancel := context.WithTimeout(context.Background(), lockTimeout)
 	defer cancel()
 	locked, err := fl.TryLockContext(ctx, 50*time.Millisecond)
 	if err != nil {
-		return Config{}, fmt.Errorf("acquire config lock: %w", err)
+		return fmt.Errorf("acquire config lock: %w", err)
 	}
 	if !locked {
-		return Config{}, fmt.Errorf("timed out waiting for config file lock: %s", lockPath)
+		return fmt.Errorf("timed out waiting for config file lock: %s", lockPath)
 	}
 	defer fl.Unlock() //nolint:errcheck
 
-	var cfg Config
 	raw, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
-		return Config{}, fmt.Errorf("read config for update: %w", err)
+		return fmt.Errorf("read config for update: %w", err)
 	}
-	if err == nil {
-		if jerr := json.Unmarshal(raw, &cfg); jerr != nil {
-			return Config{}, fmt.Errorf("parse config for update: %w", jerr)
-		}
-	}
-	if err := mutate(&cfg); err != nil {
-		if errors.Is(err, errConfigUnchanged) {
-			return cfg, nil
-		}
-		return Config{}, err
-	}
-	cfg.SchemaVersion = schemaVersion
-
-	payload, err := json.MarshalIndent(cfg, "", "  ")
+	payload, err := transform(raw, err == nil)
 	if err != nil {
-		return Config{}, fmt.Errorf("encode config: %w", err)
+		return err
 	}
-	payload = append(payload, '\n')
 	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+"-*.tmp")
 	if err != nil {
-		return Config{}, fmt.Errorf("create temp config: %w", err)
+		return fmt.Errorf("create temp config: %w", err)
 	}
 	tmpName := tmp.Name()
-	fail := func(format string, err error) (Config, error) {
+	fail := func(format string, err error) error {
 		tmp.Close()
 		os.Remove(tmpName)
-		return Config{}, fmt.Errorf(format, err)
+		return fmt.Errorf(format, err)
 	}
 	// CreateTemp opens 0600: keep an existing file's mode, and give a new file
 	// the 0644 the config file has always been created with.
@@ -779,13 +806,13 @@ func updateConfigFile(path string, mutate func(*Config) error) (Config, error) {
 	}
 	if err := tmp.Close(); err != nil {
 		os.Remove(tmpName)
-		return Config{}, fmt.Errorf("close temp config: %w", err)
+		return fmt.Errorf("close temp config: %w", err)
 	}
 	if err := replaceConfigFile(tmpName, path); err != nil {
 		os.Remove(tmpName)
-		return Config{}, fmt.Errorf("atomic rename config: %w", err)
+		return fmt.Errorf("atomic rename config: %w", err)
 	}
-	return cfg, nil
+	return nil
 }
 
 // configFileExists reports whether path exists, for no-op callers that must not

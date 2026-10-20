@@ -64,14 +64,14 @@ func TestReleaseWorktreeToleratesMissingLease(t *testing.T) {
 	root, base := worktreeFixture(t)
 	// provisionWorktree alone writes no lease: the shape of a worktree acquired
 	// before worktree leases existed.
-	res, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/alpha", nil, "")
+	res, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/alpha", builtinProfile(t, worktreeProfileFull), "")
 	if err != nil {
 		t.Fatalf("provision: %v", err)
 	}
 	if lease, err := readWorktreeLease(context.Background(), wsgit.ExecRunner{}, res.Path); err != nil || lease != nil {
 		t.Fatalf("precondition: no lease expected, got %v err=%v", lease, err)
 	}
-	if err := releaseWorktree(context.Background(), wsgit.ExecRunner{}, res.Path, ""); err != nil {
+	if _, err := releaseWorktree(context.Background(), wsgit.ExecRunner{}, res.Path, "", builtinProfileLookup(t)); err != nil {
 		t.Fatalf("release without a lease file must succeed: %v", err)
 	}
 	if b := wtBranch(t, res.Path); b != "HEAD" {
@@ -94,7 +94,7 @@ func TestWorktreeAcquireFailedLeaseWriteDetaches(t *testing.T) {
 	}
 
 	resp := callToolOnce(t, s, 3, "worktree.acquire", map[string]any{
-		"session_key": leadKey, "base": base, "target_branch": "impl/test/beta",
+		"session_key": leadKey, "base": base, "profile": "full", "target_branch": "impl/test/beta",
 	})
 	if !toolIsError(t, resp) {
 		t.Fatalf("acquire must fail when the worktree lease cannot be written: %s", resp)
@@ -110,7 +110,7 @@ func TestWorktreeAcquireFailedLeaseWriteDetaches(t *testing.T) {
 func TestWriteWorktreeLeaseOverwritesUnreleasedLease(t *testing.T) {
 	root, base := worktreeFixture(t)
 	ctx := context.Background()
-	res, err := provisionWorktree(ctx, wsgit.ExecRunner{}, root, base, "impl/test/alpha", nil, "")
+	res, err := provisionWorktree(ctx, wsgit.ExecRunner{}, root, base, "impl/test/alpha", builtinProfile(t, worktreeProfileFull), "")
 	if err != nil {
 		t.Fatalf("provision: %v", err)
 	}

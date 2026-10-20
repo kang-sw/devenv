@@ -74,6 +74,10 @@ type configKeyEntry struct {
 	// config_manifest.go); its type validates config.tune writes and its
 	// DefaultScope replaces the wsconfig scope registry lookup.
 	Declared *declaredConfigKey
+	// Structured marks a key whose value is a JSON object stored in a config
+	// file's structured_overrides member (the worktree.profile.<name> family)
+	// rather than a string in overrides. It never has a session-scope value.
+	Structured bool
 }
 
 // GlobalOnly reports whether this key's writes are constrained to
@@ -345,8 +349,8 @@ func configKeyEntryForTool(toolName string) (configKeyEntry, bool) {
 // key argument (e.g. "workflow.prefer_subagent", "agents.tier",
 // "prompt.UserPreferenceSection"). Unlike configKeyEntryForTool (keyed by tool
 // name), this is keyed by the config key itself, which is what config.tune's
-// generic dispatch receives. The dynamic prompt.* family resolves through the
-// shared template keyed by the trimmed point id.
+// generic dispatch receives. The dynamic prompt.* and worktree.profile.*
+// families resolve through their shared templates keyed by the trimmed suffix.
 func resolveConfigEntryForKey(key string) (configKeyEntry, bool) {
 	for _, entry := range configRegistry {
 		if entry.Key == key {
@@ -355,6 +359,14 @@ func resolveConfigEntryForKey(key string) (configKeyEntry, bool) {
 	}
 	if strings.HasPrefix(key, "prompt.") {
 		return promptKnobEntry(strings.TrimPrefix(key, "prompt.")), true
+	}
+	if strings.HasPrefix(key, worktreeProfilePrefix) {
+		return worktreeProfileKnobEntry(strings.TrimPrefix(key, worktreeProfilePrefix)), true
+	}
+	for _, k := range []declaredConfigKey{worktreeNudgeStaleDaysKey, worktreeNudgePreservedGBKey} {
+		if k.Key == key {
+			return k.entry(), true
+		}
 	}
 	return configKeyEntry{}, false
 }

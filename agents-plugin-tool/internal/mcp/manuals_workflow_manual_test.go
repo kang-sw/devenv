@@ -9,9 +9,8 @@ import (
 // TestWorkflowManualCarriesManualsBlockOnFreshAndContinue verifies the
 // ambient "# Manuals" block (260807 Phase 1) is injected into workflow_manual
 // output on both the FRESH-with-root branch and the CONTINUE branch when a
-// fixture manual exists under ai-docs/manuals/, alongside the existing scope
-// announcement injection (see scope_announcement_test.go for the sibling
-// pattern this test mirrors).
+// fixture manual exists under ai-docs/manuals/, alongside the other ambient
+// workflow_manual injections.
 func TestWorkflowManualCarriesManualsBlockOnFreshAndContinue(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()

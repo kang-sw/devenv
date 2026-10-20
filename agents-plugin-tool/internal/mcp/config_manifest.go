@@ -37,8 +37,9 @@ var (
 	manifestNamespacePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]*\.$`)
 	manifestKeySuffixPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]*$`)
 	// reservedConfigPrefixes are built-in key families a manifest namespace
-	// may not claim: prompt.<pointId> overrides and the agents.tier writer.
-	reservedConfigPrefixes = []string{"prompt.", "agents."}
+	// may not claim: prompt.<pointId> overrides, the agents.tier writer, and
+	// the worktree.* knobs (the worktree.profile.<name> family included).
+	reservedConfigPrefixes = []string{"prompt.", "agents.", "worktree."}
 )
 
 // configManifestFile is the on-disk adapter key manifest:
@@ -253,7 +254,9 @@ func validateManifestKey(raw configManifestKey, namespace string) (declaredConfi
 	case string(wsconfig.ScopeSession), string(wsconfig.ScopeProject), string(wsconfig.ScopeGlobal):
 		key.DefaultScope = wsconfig.Scope(raw.DefaultScope)
 	default:
-		return declaredConfigKey{}, fmt.Errorf("key %q: default_scope must be one of %s; got %q", raw.Key, strings.Join(wsconfig.ScopeSchemaEnum(), ", "), raw.DefaultScope)
+		// repo stays out of a declared key's default: a write that lands in a
+		// tracked file is chosen per call (scope: "repo"), never implied.
+		return declaredConfigKey{}, fmt.Errorf("key %q: default_scope must be one of session, project, global; got %q", raw.Key, raw.DefaultScope)
 	}
 	stored, err := manifestDefaultString(key, raw.Default)
 	if err != nil {
@@ -489,6 +492,18 @@ const configGetUnsetScope = "unset"
 func (s *Server) resolveConfigGet(sessionKey, key string) (configGetResult, error) {
 	builtins := s.declared.withDefaults(builtinConfigDefaults())
 	resolver := s.sessionResolver(sessionKey, builtins)
+	if strings.HasPrefix(key, worktreeProfilePrefix) {
+		// A profile is a structured value: it never lives in the string overlay
+		// Get walks, so read it through the family's own resolution.
+		profiles, err := resolveWorktreeProfiles(&resolver)
+		if err != nil {
+			return configGetResult{}, err
+		}
+		if profile, found := findWorktreeProfile(profiles, strings.TrimPrefix(key, worktreeProfilePrefix)); found {
+			return configGetResult{Key: key, Value: profile.Definition, Scope: string(profile.Scope)}, nil
+		}
+		return configGetResult{Key: key, Scope: configGetUnsetScope}, nil
+	}
 	rv, err := resolver.Get(sessionKey, key)
 	if err != nil {
 		return configGetResult{}, err
@@ -517,7 +532,13 @@ func formatConfigGet(result configGetResult) string {
 	if result.Scope == configGetUnsetScope {
 		fmt.Fprintf(&b, "%s: <unset>\n", result.Key)
 	} else {
-		fmt.Fprintf(&b, "%s: %v [scope:%s]\n", result.Key, result.Value, result.Scope)
+		value := result.Value
+		if _, isProfile := value.(worktreeProfile); isProfile {
+			if raw, err := json.Marshal(value); err == nil {
+				value = string(raw)
+			}
+		}
+		fmt.Fprintf(&b, "%s: %v [scope:%s]\n", result.Key, value, result.Scope)
 	}
 	for _, warning := range result.Warnings {
 		fmt.Fprintf(&b, "warning: %s\n", warning)

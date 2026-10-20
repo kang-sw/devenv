@@ -223,6 +223,7 @@ func TestRepoScopeAppliesAtTicketMutatorsAndWorktreePool(t *testing.T) {
 
 		resp := callToolWithKey(t, server, 920207, key, "worktree.acquire", map[string]any{
 			"base":          base,
+			"profile":       "full",
 			"target_branch": "impl/test/repo-scope-pool",
 			"format":        "json",
 		})

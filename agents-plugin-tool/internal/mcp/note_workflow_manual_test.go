@@ -189,7 +189,7 @@ func TestWorkflowManualCarriesCloneLayerNote(t *testing.T) {
 
 // TestWorkflowManualNotesBlockRendersEmptyStateHintWhenNoNotesExist verifies
 // the "# Notes" block always renders — a deliberate divergence from the
-// scopeAnnouncement/computeManuals-style silent-when-empty contract — showing
+// computeManuals-style silent-when-empty contract — showing
 // the empty-state hint when no note has ever been written on any layer.
 func TestWorkflowManualNotesBlockRendersEmptyStateHintWhenNoNotesExist(t *testing.T) {
 	setupWorkflowManualNoteEnv(t)

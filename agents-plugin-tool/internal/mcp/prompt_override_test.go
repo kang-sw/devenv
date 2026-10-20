@@ -1219,7 +1219,7 @@ func TestConfigTuningCatalogProjectsPromptAndSchemaKnobs(t *testing.T) {
 	for _, want := range []string{
 		"prompt.SeedSection",
 		"harness[claude|codex|pi|*]",
-		"scope[session|project|global]",
+		"scope[session|project|repo|global]",
 		`"scope":"session"`,
 	} {
 		if !strings.Contains(text, want) {
@@ -1235,7 +1235,7 @@ func TestConfigTuningCatalogProjectsPromptAndSchemaKnobs(t *testing.T) {
 		t.Fatalf("prompt knob reset mismatch: %+v", promptKnob.Reset)
 	}
 	assertFieldEnum(t, promptKnob.SelectorFields, "harness", []string{"claude", "codex", "pi", "*"})
-	assertFieldEnum(t, promptKnob.SelectorFields, "scope", []string{"session", "project", "global"})
+	assertFieldEnum(t, promptKnob.SelectorFields, "scope", []string{"session", "project", "repo", "global"})
 	assertFieldRequired(t, promptKnob.ValueFields, "prompt", true)
 	if !strings.Contains(mustMarshalJSON(t, promptKnob.Current), `"scope":"session"`) {
 		t.Fatalf("prompt knob current override missing session scope: %+v", promptKnob.Current)
@@ -1266,7 +1266,7 @@ func TestConfigTuningCatalogProjectsPromptAndSchemaKnobs(t *testing.T) {
 	if sageReviewKnob.Reset == nil || sageReviewKnob.Reset.Tool != "config.tune" || sageReviewKnob.Reset.FixedArguments["key"] != wsconfig.ItemSageReview || sageReviewKnob.Reset.FixedArguments["reset"] != "true" {
 		t.Fatalf("sage_review reset mismatch: %+v", sageReviewKnob.Reset)
 	}
-	assertFieldEnum(t, sageReviewKnob.SelectorFields, "scope", []string{"session", "project", "global"})
+	assertFieldEnum(t, sageReviewKnob.SelectorFields, "scope", []string{"session", "project", "repo", "global"})
 	assertFieldEnum(t, sageReviewKnob.ValueFields, "value", []string{"off", "ask", "auto"})
 	if !strings.Contains(mustMarshalJSON(t, sageReviewKnob.Current), `"value":"auto"`) || !strings.Contains(mustMarshalJSON(t, sageReviewKnob.Current), `"scope":"builtin"`) {
 		t.Fatalf("sage_review builtin default should be cataloged as auto/builtin: %+v", sageReviewKnob.Current)
@@ -1290,7 +1290,7 @@ func TestConfigTuningCatalogProjectsPromptAndSchemaKnobs(t *testing.T) {
 		if knob.Reset == nil || knob.Reset.FixedArguments["key"] != tc.key || knob.Reset.FixedArguments["reset"] != "true" {
 			t.Fatalf("%s reset mismatch: %+v", tc.key, knob.Reset)
 		}
-		assertFieldEnum(t, knob.SelectorFields, "scope", []string{"session", "project", "global"})
+		assertFieldEnum(t, knob.SelectorFields, "scope", []string{"session", "project", "repo", "global"})
 		assertFieldEnum(t, knob.ValueFields, "value", tc.domain)
 		if current := mustMarshalJSON(t, knob.Current); !strings.Contains(current, `"value":"`+tc.wantBuiltin+`"`) || !strings.Contains(current, `"scope":"builtin"`) {
 			t.Fatalf("%s builtin default should be cataloged as %s/builtin: %s", tc.key, tc.wantBuiltin, current)

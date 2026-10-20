@@ -1,6 +1,8 @@
 package wsconfig
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -16,10 +18,11 @@ import (
 const repoConfigDirName = ".ws-workflow"
 
 // RepoOverridesShape is the committed repo-scope file's accepted shape: only the
-// overrides map contributes (see loadRepoConfig), keyed by the item key verbatim.
+// overrides map (string values) and the structured_overrides map (object
+// values) contribute (see loadRepoConfig), each keyed by the item key verbatim.
 // config.list publishes it so a lead can draft the file without carrying the
 // format itself.
-const RepoOverridesShape = `{"overrides": {"<knob>": "<value>"}}`
+const RepoOverridesShape = `{"overrides": {"<knob>": "<value>"}, "structured_overrides": {"<structured knob>": {...}}}`
 
 // RepoScopeInfo describes the committed repo scope a resolver reads: the file
 // path anchored at the caller's worktree root (empty when no root anchors it),
@@ -82,4 +85,56 @@ func loadRepoConfig(opts Options) (Config, error) {
 		return Config{}, fmt.Errorf("parse repo ws config %s: %w", path, err)
 	}
 	return cfg, nil
+}
+
+// updateRepoConfigFile edits the committed repo-scope file in place. It
+// rewrites only the overrides and structured_overrides members and keeps every
+// other member verbatim, so a write never adds agent-tier or schema_version
+// noise to a tracked file and never drops a member a newer ws wrote. It does
+// not stage the file: staging rides the caller's git.commit.
+//
+// The lock lives in the OS temp dir, keyed by the file path, not beside the
+// file: a sibling lock file would sit in the working tree as an untracked file.
+func updateRepoConfigFile(path string, mutate func(overrides map[string]string, structured map[string]json.RawMessage) error) error {
+	sum := sha256.Sum256([]byte(filepath.Clean(path)))
+	lockPath := filepath.Join(os.TempDir(), "ws-repo-config-"+hex.EncodeToString(sum[:8])+".lock")
+	return rewriteLocked(path, lockPath, func(raw []byte, exists bool) ([]byte, error) {
+		members := map[string]json.RawMessage{}
+		if exists {
+			if err := json.Unmarshal(raw, &members); err != nil {
+				return nil, fmt.Errorf("parse repo ws config %s: %w", path, err)
+			}
+		}
+		overrides := map[string]string{}
+		structured := map[string]json.RawMessage{}
+		if v, ok := members["overrides"]; ok {
+			if err := json.Unmarshal(v, &overrides); err != nil {
+				return nil, fmt.Errorf("parse repo ws config %s: overrides: %w", path, err)
+			}
+		}
+		if v, ok := members["structured_overrides"]; ok {
+			if err := json.Unmarshal(v, &structured); err != nil {
+				return nil, fmt.Errorf("parse repo ws config %s: structured_overrides: %w", path, err)
+			}
+		}
+		if err := mutate(overrides, structured); err != nil {
+			return nil, err
+		}
+		for name, value := range map[string]any{"overrides": overrides, "structured_overrides": structured} {
+			encoded, err := json.Marshal(value)
+			if err != nil {
+				return nil, fmt.Errorf("encode repo ws config: %w", err)
+			}
+			if string(encoded) == "{}" || string(encoded) == "null" {
+				delete(members, name)
+				continue
+			}
+			members[name] = encoded
+		}
+		payload, err := json.MarshalIndent(members, "", "  ")
+		if err != nil {
+			return nil, fmt.Errorf("encode repo ws config: %w", err)
+		}
+		return append(payload, '\n'), nil
+	})
 }

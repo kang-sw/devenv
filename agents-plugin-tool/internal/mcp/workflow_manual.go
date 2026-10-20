@@ -168,6 +168,40 @@ func injectSkepticalPosture(body string) string {
 	return skepticalPostureBlock + body
 }
 
+// injectWorktreeProfiles places the resolved profile block at the end of the
+// manual's "### Git" section, where the acquire guidance refers to "the
+// resolved list below"; a body without that heading (an override that dropped
+// it) gets the block appended so the list is never lost.
+func injectWorktreeProfiles(body, block string) string {
+	lines := strings.Split(body, "\n")
+	inGit := false
+	for i, line := range lines {
+		if strings.TrimSpace(line) == "### Git" {
+			inGit = true
+			continue
+		}
+		if inGit && (strings.HasPrefix(line, "### ") || strings.HasPrefix(line, "## ")) {
+			insert := strings.Split(strings.TrimRight(block, "\n")+"\n", "\n")
+			out := append(append(append([]string{}, lines[:i]...), insert...), lines[i:]...)
+			return strings.Join(out, "\n")
+		}
+	}
+	return strings.TrimRight(body, "\n") + "\n\n" + block
+}
+
+// worktreeProfilesForManual resolves the profiles visible from opts (its
+// RepoRoot anchors the committed scope) into the manual block. A bad profile
+// fails the manual, naming the file and key, like any malformed committed
+// config the manual reads.
+func worktreeProfilesForManual(opts wsconfig.Options) (string, error) {
+	resolver := wsconfig.NewResolver(opts, builtinConfigDefaults(), nil, nil)
+	profiles, err := resolveWorktreeProfiles(&resolver)
+	if err != nil {
+		return "", fmt.Errorf("workflow_manual: %w; every worktree.acquire fails until that profile is fixed or reset with config.tune (config.list shows the family's value_schema)", err)
+	}
+	return worktreeProfileManualBlock(profiles), nil
+}
+
 func injectSessionKeyLine(body, key string) string {
 	lines := strings.Split(body, "\n")
 	result := make([]string, 0, len(lines)+1)
@@ -301,6 +335,12 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 			if err != nil {
 				return toolTextResponse(id, "", fmt.Errorf("workflow_manual: canonicalize root: %w", err))
 			}
+			// Resolved before the mint, so a bad profile fails the call without
+			// leaving a minted key the caller never received.
+			profilesBlock, err := worktreeProfilesForManual(wsconfig.Options{RepoRoot: canonical})
+			if err != nil {
+				return toolTextResponse(id, "", err)
+			}
 			mintedKey, err := s.sessions.mint(canonical, roleLead, "")
 			if err != nil {
 				return toolTextResponse(id, "", fmt.Errorf("workflow_manual: mint session: %w", err))
@@ -313,6 +353,7 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 			// promise a channel this session was never actually bound to.
 			s.rebindMailboxOwnerAtFerrule(mintedKey, "", roleLead, canonical)
 			body = stripModeGatedRegion(body, false)
+			body = injectWorktreeProfiles(body, profilesBlock)
 			body = injectSessionKeyLine(body, mintedKey)
 			body += "\n\n## Session Key\n" + mintedKey
 			body += "\n\n" + renderSessionState(sessionRecord{})
@@ -326,7 +367,6 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 				warning := bootstrapStalenessWarning(canonical, skillsRoot, &warningResolver, mintedKey)
 				body = injectBootstrapStalenessWarning(body, warning)
 			}
-			body = injectBootstrapStalenessWarning(body, scopeAnnouncement(canonical))
 			// FRESH-with-root mints a parent-less top-lead key (parent: ""), so
 			// the occupied-root banner is always safe to inject here.
 			body = injectBootstrapStalenessWarning(body, occupiedRootAnnouncement(canonical))
@@ -347,6 +387,13 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 	} else {
 		// 4. CONTINUE (recOK): strip both markers and inner content; append state.
 		body = stripModeGatedRegion(body, false)
+		if rec.Root != "" {
+			profilesBlock, err := worktreeProfilesForManual(s.sessionConfigOptions(key))
+			if err != nil {
+				return toolTextResponse(id, "", err)
+			}
+			body = injectWorktreeProfiles(body, profilesBlock)
+		}
 		body = injectSessionKeyLine(body, key)
 		body += "\n\n## Session Key\n" + key
 		body += "\n\n" + renderSessionState(rec)
@@ -361,7 +408,6 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 				warning := bootstrapStalenessWarning(rec.Root, skillsRoot, &warningResolver, key)
 				body = injectBootstrapStalenessWarning(body, warning)
 			}
-			body = injectBootstrapStalenessWarning(body, scopeAnnouncement(rec.Root))
 			// Only a top-level lead key (empty parent) gets the occupied-root
 			// banner: a worker's own key carries the lead's key as parent, and on
 			// its own impl/* root the banner would tell it "do not commit here"

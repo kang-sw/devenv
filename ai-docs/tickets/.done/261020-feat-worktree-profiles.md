@@ -12,6 +12,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 9419f414981f48c5
 sage-review-completeness-reviewed: 9419f414981f48c5
+completed: 2026-10-20
 ---
 
 # Named worktree profiles for worktree.acquire/release
@@ -317,6 +318,39 @@ pre-change `Config` parse (plain `overrides` map) of a file carrying a
 profile still succeeding. An
 acquire test with a submodule fixture under `submodule.recurse=true` passes.
 
+### Result (1cdd2f6f7) - 2026-10-20
+
+- Landed: wsconfig structured values in a separate `structured_overrides`
+  member (project > repo > global > builtin, whole-value override, session
+  refused); `config.tune` repo-scope writes for every key through a
+  member-preserving writer that never stages and names the written path;
+  the `worktree.profile.<name>` family with name and strict schema
+  validation at write and at resolve (a bad committed profile fails naming
+  file and key), builtin `full` and `housekeeping`, and a `config.list` knob
+  carrying `value_schema` plus resolved profiles with provenance;
+  `-c submodule.recurse=false` on every checkout-family call, including the
+  dispatcher rollback.
+- Verification: `go test ./...` in `agents-plugin-tool` passed. New tests:
+  TestListStructuredPrecedence, TestStructuredRefusesSessionScope,
+  TestRepoStructuredWritePreservesOtherMembers,
+  TestUnsetStructuredRemovesAndNoOps, TestRepoWriteNeedsRoot,
+  TestRepoWriteRefusedForGlobalOnlyKey,
+  TestListStructuredMalformedFileNamesPath,
+  TestPreStructuredConfigShapeParsesStructuredFile,
+  TestParseWorktreeProfile, TestValidateWorktreeProfileName,
+  TestBuiltinWorktreeProfilesResolve,
+  TestResolveWorktreeProfilesRejectsBadCommittedProfile,
+  TestConfigTuneWorktreeProfileRepoWrite, TestConfigTuneScalarRepoWrite,
+  TestConfigListWorktreeProfileKnob, TestWorktreeAcquireSubmoduleRecurseTrue.
+- Decisions: `structured_overrides` is a new member because an older ws
+  decodes `overrides` as `map[string]string`; caveat: an older ws writing the
+  project or global file drops the member. The profile family defaults to
+  project scope (repo writes a tracked file, so it is explicit); declared
+  adapter keys still may not default to repo, and `worktree.` is a reserved
+  adapter namespace. Validation is a strict decoder mirroring the published
+  schema, not a schema library. `config.list` reports a bad profile as the
+  knob's error rather than failing the whole catalog.
+
 ### Phase 2: Profile-partitioned acquire/release with hooks and quarantine
 
 Depends on Phase 1. Replace `sparse_paths` with the required `profile`
@@ -359,6 +393,62 @@ Live check: `git sparse-checkout set --cone`
 on a worktree left in non-cone mode behaves as the implementation assumes
 (record the observation in the Result).
 
+### Result (5a7122c03, 1b9d8d617) - 2026-10-20
+
+- Landed as the two planned commits. 5a7122c03 (partitioning): required
+  `profile` (`sparse_paths` rejected with a pointer to `housekeeping`),
+  profile marker in the worktree's git admin dir with provisioning hash,
+  partitioned reuse, declared cone/patterns sparse applied only on entry,
+  `preserve` at both hygiene points, lazy legacy adoption into builtins,
+  ticket-board visibility check, `worktree.list` profile/`legacy`, workflow
+  manual profile list in `### Git` plus worker-profile guidance, `lead-run`
+  acquire step naming a profile, and the banner/`git.merge`/`wsgit` strings
+  pointing at `profile: "housekeeping"`; wsflow and Pi mirrors regenerated.
+  1b9d8d617 (hooks): argv hooks at post_provision/post_acquire/pre_release
+  with `WS_WORKTREE_DIR`/`WS_BASE`/`WS_TARGET_BRANCH`, worktree or relative
+  `cwd`, 10-minute timeout, provenance (argv, scope, exit code) in results,
+  quarantine in the marker with a per-profile count, quarantined entries
+  shown by `worktree.list` and never reused, pre_release failure leaving the
+  worktree leased and unchanged, and the post_provision preserve warning.
+- Verification: `go test ./...` in `agents-plugin-tool` passed (mcp 448s);
+  `python3 -m unittest discover` over `agents-plugin/tests` and
+  `agents-plugin-wsflow/tests` passed. New
+  tests: TestProvisionWorktreeHousekeepingProfile,
+  TestProvisionWorktreeReusePartitionsByProfile,
+  TestProvisionWorktreePreserveSurvivesHygiene,
+  TestProvisionWorktreeDefinitionChangeReadopts,
+  TestProvisionWorktreePatternsProfileExcludesDir,
+  TestProvisionWorktreeAdoptsLegacyIntoBuiltinsOnly,
+  TestProvisionWorktreeHiddenTicketBoardFails,
+  TestReleaseWorktreeLegacyAndVanishedProfile,
+  TestWorkflowManualRendersWorktreeProfiles,
+  TestWorktreeAcquireHousekeepingDispatch,
+  TestWorktreeHooksEnvCwdAndProvenance,
+  TestWorktreeHookSparseWideningSurvivesReuse,
+  TestWorktreeHookPostProvisionPreserveWarning,
+  TestWorktreeHookPostAcquireFailureQuarantines,
+  TestWorktreeHookPostProvisionFailureQuarantines (fresh create and
+  re-adoption, no lease), TestWorktreeHookPreReleaseFailureLeavesWorktree,
+  TestWorktreeHookTimeoutFails. Mutation checks: dropping the quarantine
+  skip and dropping the timeout each fail their test.
+- Live check (git 2.50.1): `git sparse-checkout set --cone ai-docs` on a
+  worktree in non-cone mode flips `core.sparseCheckoutCone` false to true and
+  materializes only the cone, so applying a declared sparse needs no
+  `disable` step between modes.
+- Decisions: the marker is stamped with an empty hash before provisioning,
+  so a part-way failure stays in this profile's partition and re-provisions
+  on its next claim. A hidden ticket board returns the worktree to the pool
+  with release hygiene and a loud error, not a quarantine (no hook failed).
+  `workflow_manual` fails on a bad committed profile, as it already does for
+  a malformed committed config file. Hook tests re-execute the test binary as
+  the hook so they run on the Windows CI leg. The quarantine record keeps a
+  combined stdout+stderr tail rather than stderr only (cosmetic: hooks often
+  report failures on stdout). At pre_release `WS_BASE` is empty and
+  `WS_TARGET_BRANCH` is the checked-out branch; an acquire without
+  `target_branch` passes the base as `WS_TARGET_BRANCH`. The preserve warning
+  diffs `git clean -ndx` against `git clean -nd` with the preserve
+  exclusions.
+
 ### Phase 3: worktree.remove and the stale-pool nudge
 
 Depends on Phase 2. Add `worktree.remove` (with `pre_remove`, refusals, lease
@@ -377,6 +467,52 @@ worktree whose marker names a profile that no longer resolves (skipping
 per day with thresholds honored. Live check: whether `git worktree remove`
 needs `--force` with preserved ignored files or initialized submodules
 present (record in the Result).
+
+### Result (6ad303b09) - 2026-10-20
+
+- Landed: lead-only `worktree.remove` (by path or worker key) checking every
+  refusal first (primary, outside the owned pool, unregistered, dirty, a
+  branch holding commits no other branch reaches, a detached `HEAD` holding
+  commits no ref reaches, a lease active within
+  `worktree.nudge_stale_days`), then the marker profile's `pre_remove`
+  (skipped with a result note when the profile no longer resolves), then
+  `git worktree remove --force`, which takes the admin dir (lease, marker,
+  quarantine) with it and keeps the branch; release and remove share one
+  ownership-refusal helper. Release records the preserved ignored size in
+  the marker. Acquire carries a once-a-day-per-pool `nudge` (throttle file
+  in the git common dir) for idle branch holders and detached worktrees at
+  or above `worktree.nudge_preserved_gb`; both knobs are integer
+  `config.tune` keys (defaults 7 and 1) listed by `config.list`. The
+  workflow manual's `### Git` section tells the lead to relay nudge entries
+  to the user. `worktree.remove` is in the lead-only and session-key lists,
+  the three `runtime.json` tool contracts, and the Pi bridge tool list.
+- Verification: `go test ./... -count=1 -timeout 25m` in
+  `agents-plugin-tool` passed; `python3 -m unittest discover` over
+  `agents-plugin/tests` (78) and `agents-plugin-wsflow/tests` (15) passed;
+  `node --test test/bridge.test.ts` in `agents-plugin-pi` passed (80/80,
+  tool-contract count now 65). New tests: TestRemoveWorktreeRefusals (dirty,
+  unique branch commits, unique detached commits, primary, outside pool,
+  fresh lease refused before `pre_remove`; stale lease removed with hook
+  provenance and the branch kept),
+  TestRemoveWorktreeFailingPreRemoveKeepsWorktree,
+  TestRemoveWorktreeQuarantinedAndVanishedProfile,
+  TestRemoveWorktreeWithInitializedSubmodule, TestWorktreeRemoveDispatch,
+  TestReleaseRecordsPreservedBytes, TestPoolNudgeThrottleAndThresholds,
+  TestWorktreeNudgeKnobsAndAcquireWiring. Mutation checks: dropping the
+  lease-recency refusal, the throttle, or `--force` each fails its test.
+- Live check (git 2.50.1): `git worktree remove` without `--force` removes a
+  worktree whose only extra content is ignored files (they go with it), but
+  refuses one with an initialized submodule ("working trees containing
+  submodules cannot be moved or removed"). Remove therefore runs its own
+  dirty and unmerged-work refusals first and then always passes `--force`.
+- Decisions: branch uniqueness uses `rev-list --count refs/heads/<b> --not
+  --exclude=<b> --branches --remotes` (the short name; `--exclude` with the
+  full ref does not exclude it), detached uniqueness uses `--not --branches
+  --tags --remotes` (`--all` includes `HEAD` itself). The nudge knobs reuse
+  the declared-integer key validation; a hand-edited value that does not
+  parse falls back to the default. The nudge runs after the lease is
+  written, so the worktree just acquired is never listed, and a nudge
+  failure is a result warning, never an acquire failure.
 
 ### Phase 4: Retire ticket-board scoping and close out
 
@@ -401,3 +537,61 @@ Python test suites, and `claude plugin validate agents-plugin` pass;
 removed parameter is rejected may name it. Pi `skills/` deletions are done by
 hand (`TestPiMirrorUpToDate` covers only Pi `rsrc/`). Downstream follow-up (not checkable here): MSBuild
 incremental build after reuse with preserve and stable sparse in place.
+
+### Result (17710149d, 1dc39961c, 7bd325a51) - 2026-10-20
+
+- Landed: 17710149d deletes `lead-scope-worktree` (skill, playbook, wsflow
+  and Pi rsrc copies, manifest entries, dispatch/bundle/playbook-contract
+  test rows) and the `workflow_manual` sparse-checkout scope banner with its
+  test; comments that named the banner now describe the behavior they mean,
+  the wsflow-mirroring manual drops the skill, and
+  `260924-research-origin-ticket-ownership-index` records that the scope
+  assignment is no longer an acquire path. 1dc39961c adds the
+  `tickets.create` warning when the created path lies outside the active
+  sparse scope (`check-rules`; fails open below git 2.42); 7bd325a51 is an
+  empty commit recording that content, because 1dc39961c landed under a
+  mis-scoped subject from a concurrent delegate commit and the branch is
+  never rewritten. Generic sparse safety (`SparseCheckoutActive`,
+  `git add --sparse`, the move/close `check-rules` gate, the create
+  collision refusal) is unchanged.
+- Verification: `go test ./... -count=1 -timeout 25m` in
+  `agents-plugin-tool` passed (all 17 packages); `python3 -m unittest
+  discover` over `agents-plugin/tests` (78) and `agents-plugin-wsflow/tests`
+  (15) passed; `claude plugin validate agents-plugin` passed;
+  `grep -rn "lead-scope-worktree\|sparse_paths"` over `agents-plugin*/`
+  (excluding `node_modules/` and the gitignored Pi `skills/`) finds only the
+  acquire dispatch's rejection branch for the removed parameter and its
+  test. New tests: TestTicketCreateWarnsOutsideScope,
+  TestFormatTicketCreateRendersScopeWarning; mutation check: disabling the
+  warning condition fails the first. Live check (git 2.50.1): a committed
+  out-of-scope file vanishes from the worktree on the next `checkout -b` and
+  stays gone after `sparse-checkout reapply`, which the warning text states.
+- Decisions: the Pi `skills/` copy named in this phase is generated from
+  `agents-plugin/skills` at pack time and gitignored, so deleting the source
+  covers it (cosmetic deviation). The verification grep names `sparse_paths`
+  in the acquire dispatch as well as its test, because the rejection must
+  read that key; that is the rejection, not a live use (cosmetic
+  deviation). `TicketScopeInfo.Cone` stays as part of the JSON scope info
+  with its comment no longer naming the banner. The mechanical deletions
+  were done by a delegate and reviewed before commit.
+- Review (lite, one pass over eaa6a7980..7bd325a51): clean, no Critical or
+  Important; 7 Minor left unfixed per the lite allocation. The ones a
+  follow-up may want: release and remove resolve the whole profile family,
+  so an unrelated invalid profile (or a newer field an older ws rejects)
+  blocks them; a fresh sparse-profile worktree whose sparse or branch step
+  fails is left `--no-checkout` with an empty index (dirty, only
+  `worktree.release` recovers it, as with the former `sparse_paths`); a
+  housekeeping worker key resolves config without the repo scope because
+  the cone omits `.ws-workflow/`; the repo-write note names the file even
+  on a no-op reset; the `sparse-checkout add <file>` advice is wrong in
+  cone mode (shared with the collision message); the manual's "list below"
+  dangles on a no-root render; the repo writer reorders hand-authored
+  members.
+- Forward: release note for the release that carries this ticket (the root
+  `CHANGELOG.md` has not been maintained since v0.42.0, so the ship step
+  puts this into the GitHub release body): "`lead-scope-worktree` and the
+  session-bootstrap sparse-scope banner are retired. A downstream worktree
+  that applied a ticket scope with it is still sparse; run
+  `git sparse-checkout disable` there to restore the full checkout.
+  `worktree.acquire` now requires a `profile` (`full` for workers,
+  `housekeeping` for the ai-docs checkout) and rejects `sparse_paths`."

@@ -105,12 +105,23 @@ A root whose `HEAD` is on an `impl/*` branch is a worker's until the lead
 restores it (the occupied-root banner names the parent branch): a commit or
 ticket move there lands on the worker's branch. Housekeeping meanwhile goes
 through `{{.McpNamespace}}/worktree.acquire(base: <parent branch>,
-sparse_paths: ["ai-docs"])`, which checks the parent branch out in a sparse
-pooled worktree and returns the key to commit with there; release it with
-`{{.McpNamespace}}/worktree.release(key: <that key>)` before anything checks
-the parent branch out elsewhere, because Git holds one checkout per branch:
-a `{{.McpNamespace}}/git.merge` into a branch still held that way is
+profile: "housekeeping")`, which checks the parent branch out in a pooled
+ticket-housekeeping worktree and returns the key to commit with there; release
+it with `{{.McpNamespace}}/worktree.release(key: <that key>)` before anything
+checks the parent branch out elsewhere, because Git holds one checkout per
+branch: a `{{.McpNamespace}}/git.merge` into a branch still held that way is
 refused, not stolen.
+
+Every `{{.McpNamespace}}/worktree.acquire` names a profile from the resolved
+list below. For a worker, pass `full` unless a listed project profile
+describes that work's checkout, because the builtin `housekeeping`
+materializes only `ai-docs` and a worker there cannot build; a pooled worktree
+is reused only by an acquire naming the same profile.
+
+Relay every `nudge` entry an acquire result carries to the user, because it is
+the only report of pooled worktrees left idle or holding large preserved
+artifacts; removing one with `{{.McpNamespace}}/worktree.remove(path: ...)` is
+the user's call.
 
 ### API documentation
 
