@@ -578,7 +578,14 @@
       "registered_at": "2026-10-20T11:45:11Z"
     },
     "261020-chore-pi-compaction-user-preferences-last": {
-      "registered_at": "2026-10-20T08:58:34Z"
+      "registered_at": "2026-10-20T08:58:34Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "closed",
+        "touched_at": "2026-10-20T11:45:38Z"
+      }
     },
     "261020-feat-worktree-profiles": {
       "registered_at": "2026-10-20T08:47:50Z"
