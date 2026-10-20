@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/kang-sw/devenv/internal/wsdoc"
 	"github.com/kang-sw/devenv/internal/wsgit"
@@ -27,14 +28,21 @@ type worktreeAcquireResult struct {
 	// sparse was applied.
 	Provisioned bool `json:"provisioned"`
 	// Hooks lists every profile hook this acquire ran, in order.
-	Hooks    []worktreeHookRun `json:"hooks,omitempty"`
-	Warnings []string          `json:"warnings,omitempty"`
+	Hooks []worktreeHookRun `json:"hooks,omitempty"`
+	// Nudge lists pooled worktrees worth removing (stale branch holders,
+	// detached ones with large preserved artifacts); the once-a-day check
+	// fills it on at most one acquire per pool per day.
+	Nudge    []string `json:"nudge,omitempty"`
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 func (r worktreeAcquireResult) text() string {
 	text := fmt.Sprintf("path: %s\nworker_key: %s\nreused: %t\npool: %s\nprofile: %s\nprovisioned: %t\n", r.Path, r.WorkerKey, r.Reused, r.Pool, r.Profile, r.Provisioned)
 	for _, h := range r.Hooks {
 		text += h.text()
+	}
+	for _, n := range r.Nudge {
+		text += "nudge: " + n + "\n"
 	}
 	for _, w := range r.Warnings {
 		text += "warning: " + w + "\n"
@@ -589,6 +597,45 @@ func (r worktreeReleaseResult) text() string {
 	return text
 }
 
+// ownedPoolWorktree canonicalizes wtPath through git and refuses, on behalf of
+// tool, anything but a registered linked worktree under the owned pool: the
+// primary worktree and foreign paths are never hygiene-reset or removed. It
+// returns the canonical target, its worktree-list entry, and the primary root.
+func ownedPoolWorktree(ctx context.Context, runner wsgit.Runner, wtPath, poolConfigValue, tool string) (string, worktreeEntry, string, error) {
+	wtPath = strings.TrimSpace(wtPath)
+	if wtPath == "" {
+		return "", worktreeEntry{}, "", fmt.Errorf("%s requires a path", tool)
+	}
+	entries, err := listWorktrees(ctx, runner, wtPath)
+	if err != nil {
+		return "", worktreeEntry{}, "", err
+	}
+	if len(entries) == 0 {
+		return "", worktreeEntry{}, "", fmt.Errorf("could not resolve the primary worktree for %q", wtPath)
+	}
+	mainRoot := entries[0].Path
+	// Canonicalize the target through git so a symlinked or non-clean path
+	// compares against the git-canonical worktree-list paths.
+	target, err := wtRun(ctx, runner, wtPath, "rev-parse", "--path-format=absolute", "--show-toplevel")
+	if err != nil {
+		return "", worktreeEntry{}, "", err
+	}
+	target = filepath.Clean(target)
+	if target == filepath.Clean(mainRoot) {
+		return "", worktreeEntry{}, "", fmt.Errorf("%s refuses the primary worktree %q", tool, target)
+	}
+	poolRoots := ownedPoolRoots(poolConfigValue, mainRoot)
+	if !underAnyPool(poolRoots, target) {
+		return "", worktreeEntry{}, "", fmt.Errorf("%s refuses %q: not under the owned worktree pool %q", tool, target, poolRoots[0])
+	}
+	for _, e := range entries {
+		if filepath.Clean(e.Path) == target {
+			return target, e, mainRoot, nil
+		}
+	}
+	return "", worktreeEntry{}, "", fmt.Errorf("%s refuses %q: not a registered git worktree", tool, target)
+}
+
 // worktreeLegacyLabel is the profile an unmarked pooled worktree reports.
 const worktreeLegacyLabel = "legacy"
 
@@ -607,45 +654,13 @@ const worktreeLegacyLabel = "legacy"
 // root must not hard-reset the primary working tree.
 func releaseWorktree(ctx context.Context, runner wsgit.Runner, wtPath, poolConfigValue string, lookup worktreeProfileLookup) (worktreeReleaseResult, error) {
 	var res worktreeReleaseResult
-	wtPath = strings.TrimSpace(wtPath)
-	if wtPath == "" {
-		return res, fmt.Errorf("worktree release requires a path")
-	}
-	entries, err := listWorktrees(ctx, runner, wtPath)
+	target, entry, _, err := ownedPoolWorktree(ctx, runner, wtPath, poolConfigValue, "worktree.release")
 	if err != nil {
 		return res, err
 	}
-	if len(entries) == 0 {
-		return res, fmt.Errorf("could not resolve the primary worktree for %q", wtPath)
-	}
-	mainRoot := entries[0].Path
-	// Canonicalize the target through git so a symlinked or non-clean path
-	// compares against the git-canonical worktree-list paths.
-	target, err := wtRun(ctx, runner, wtPath, "rev-parse", "--path-format=absolute", "--show-toplevel")
-	if err != nil {
-		return res, err
-	}
-	target = filepath.Clean(target)
-	if target == filepath.Clean(mainRoot) {
-		return res, fmt.Errorf("worktree.release refuses to release the primary worktree %q", target)
-	}
-	poolRoots := ownedPoolRoots(poolConfigValue, mainRoot)
-	if !underAnyPool(poolRoots, target) {
-		return res, fmt.Errorf("worktree.release refuses %q: not under the owned worktree pool %q", target, poolRoots[0])
-	}
-	listed := false
 	var branch string
-	for _, e := range entries {
-		if filepath.Clean(e.Path) == target {
-			listed = true
-			if !e.Detached {
-				branch = strings.TrimPrefix(e.Branch, "refs/heads/")
-			}
-			break
-		}
-	}
-	if !listed {
-		return res, fmt.Errorf("worktree.release refuses %q: not a registered git worktree", target)
+	if !entry.Detached {
+		branch = strings.TrimPrefix(entry.Branch, "refs/heads/")
 	}
 	res.Path = target
 
@@ -680,6 +695,21 @@ func releaseWorktree(ctx context.Context, runner wsgit.Runner, wtPath, poolConfi
 		return res, err
 	}
 	res.Detached = true
+	if marker != nil {
+		// What hygiene kept is exactly the preserved artifacts; record their
+		// size for the stale-pool nudge, which never walks the tree itself.
+		var size int64
+		if len(preserve) > 0 {
+			if size, err = preservedIgnoredBytes(ctx, runner, target); err != nil {
+				res.Warnings = append(res.Warnings, "could not measure preserved artifacts: "+err.Error())
+			}
+		}
+		marker.PreservedBytes = size
+		marker.PreservedMeasuredAt = time.Now().UTC().Format(time.RFC3339)
+		if err := writeWorktreeMarker(ctx, runner, target, *marker); err != nil {
+			res.Warnings = append(res.Warnings, "could not record the preserved size in the profile marker: "+err.Error())
+		}
+	}
 	// Drop the lease only once the worktree is actually back in the pool, so a
 	// failed reset/clean/detach leaves the holder still identifiable.
 	if err := removeWorktreeLease(ctx, runner, target); err != nil {

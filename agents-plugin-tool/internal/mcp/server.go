@@ -104,7 +104,7 @@ const bootstrapToolName = "ferrule"
 // preserved no-op, since the pre-rename tickets.sage_record was reachable by
 // a delegate-scoped key.
 func isLeadOnlyTool(name string) bool {
-	return name == bootstrapToolName || name == "workflow_manual" || name == "workflow_state" || name == "tickets.sage_stamp" || name == "tickets.index_init" || name == "git.merge" || name == "worktree.acquire" || name == "worktree.release" || name == "worktree.list" || strings.HasPrefix(name, "lead.") || workflowPreferenceWriterTool(name)
+	return name == bootstrapToolName || name == "workflow_manual" || name == "workflow_state" || name == "tickets.sage_stamp" || name == "tickets.index_init" || name == "git.merge" || name == "worktree.acquire" || name == "worktree.release" || name == "worktree.remove" || name == "worktree.list" || strings.HasPrefix(name, "lead.") || workflowPreferenceWriterTool(name)
 }
 
 func workflowPreferenceWriterTool(name string) bool {
@@ -512,13 +512,15 @@ func RuntimeNamespace() string {
 
 func builtinConfigDefaults() map[string]string {
 	return map[string]string{
-		wsconfig.ItemWorkflowPreferSubagent: "off",
-		wsconfig.ItemSageReview:             "auto",
-		wsconfig.ItemSageReviewDesign:       "off",
-		wsconfig.ItemReviewPhase:            "lite",
-		wsconfig.ItemBootstrapAlarm:         "on",
-		wsconfig.ItemWorktreePool:           defaultWorktreePoolTemplate,
-		wsconfig.ItemTicketAssigneeAware:    "off",
+		wsconfig.ItemWorkflowPreferSubagent:   "off",
+		wsconfig.ItemSageReview:               "auto",
+		wsconfig.ItemSageReviewDesign:         "off",
+		wsconfig.ItemReviewPhase:              "lite",
+		wsconfig.ItemBootstrapAlarm:           "on",
+		wsconfig.ItemWorktreePool:             defaultWorktreePoolTemplate,
+		wsconfig.ItemTicketAssigneeAware:      "off",
+		wsconfig.ItemWorktreeNudgeStaleDays:   worktreeNudgeStaleDaysKey.Default,
+		wsconfig.ItemWorktreeNudgePreservedGB: worktreeNudgePreservedGBKey.Default,
 	}
 }
 
@@ -1330,6 +1332,12 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		}
 		result.Path = mintPath
 		result.WorkerKey = workerKey
+		staleAfter, preservedLimit := worktreeNudgeThresholds(&resolver, key)
+		if nudge, err := poolNudge(context.Background(), wsgit.ExecRunner{}, entry.root, result.Pool, staleAfter, preservedLimit, time.Now()); err != nil {
+			result.Warnings = append(result.Warnings, "stale-pool check failed: "+err.Error())
+		} else {
+			result.Nudge = nudge
+		}
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, result, nil)
 		}
@@ -1363,6 +1371,43 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			return staticProfileLookup(profiles, err)(name)
 		}
 		result, err := releaseWorktree(context.Background(), wsgit.ExecRunner{}, path, poolRV.Value, lookup)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, result, nil)
+		}
+		return toolTextResponse(req.ID, result.text(), nil)
+	case "worktree.remove":
+		key, err := s.requireLeadSessionKey("worktree.remove", params.Arguments)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		path, _ := params.Arguments["path"].(string)
+		workerKey, _ := params.Arguments["key"].(string)
+		path = strings.TrimSpace(path)
+		workerKey = strings.TrimSpace(workerKey)
+		if path == "" && workerKey == "" {
+			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.remove: path or key is required"))
+		}
+		if path == "" {
+			wentry, ok := s.sessions.lookup(workerKey)
+			if !ok {
+				return toolTextResponse(req.ID, "", fmt.Errorf("worktree.remove: key %q is not a known session key", workerKey))
+			}
+			path = wentry.root
+		}
+		resolver := s.sessionResolver(key, builtinConfigDefaults())
+		poolRV, err := resolver.Get(key, wsconfig.ItemWorktreePool)
+		if err != nil {
+			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.remove: %w", err))
+		}
+		lookup := func(name string) (resolvedWorktreeProfile, bool, error) {
+			profiles, err := resolveWorktreeProfiles(&resolver)
+			return staticProfileLookup(profiles, err)(name)
+		}
+		staleAfter, _ := worktreeNudgeThresholds(&resolver, key)
+		result, err := removeWorktree(context.Background(), wsgit.ExecRunner{}, path, poolRV.Value, staleAfter, time.Now(), lookup)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
@@ -2729,6 +2774,23 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 		profileKnob.Current = profiles
 	}
 	appendKnob(profileEntry, profileKnob)
+
+	for _, k := range []declaredConfigKey{worktreeNudgeStaleDaysKey, worktreeNudgePreservedGBKey} {
+		entry := k.entry()
+		appendKnob(entry, tuningKnob{
+			ID:          entry.Key,
+			Kind:        "worktree_nudge",
+			Description: k.Description + " Value: " + k.domain() + "; builtin " + k.Default + ".",
+			Writer:      tuningWriter{Tool: entry.WriterTool, FixedArguments: map[string]string{"key": entry.Key}},
+			Reset: &tuningWriter{
+				Tool:           entry.ResetTool,
+				FixedArguments: map[string]string{"key": entry.Key, "reset": "true"},
+			},
+			SelectorFields: entry.SelectorFields,
+			ValueFields:    entry.ValueFields,
+			Current:        currentWorkflowPreference(resolver, sessionKey, entry.Key),
+		})
+	}
 
 	return catalog, nil
 }
@@ -4431,7 +4493,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "worktree.acquire",
-			"description": fmt.Sprintf("Lead-only. Provision an isolated Git worktree of a named profile from a recycled pool for a parallel worker: reuse an idle pooled worktree of that profile or create one, put it into the profile when it is fresh or the profile's provisioning inputs changed (declared sparse-checkout, then post_provision hooks), create target_branch on base if it does not exist and check it out, hygiene-reset the tree keeping the profile's preserve patterns, sync submodules, run the profile's post_acquire hooks, mint a worktree-bound worker session key, and record a worktree lease (worker_key, parent_key, acquired_at) in the worktree's Git admin directory for worktree.list. Fails when the acquired worktree hides the ticket board its commit tracks; a failing post_provision or post_acquire hook quarantines the worktree and fails the call. Returns the worktree path, worker_key, profile, and each hook run (argv, scope, exit code). The pool location is the worktree_pool config knob (default %s); profiles are the worktree.profile.<name> config family (config.list), with builtins full (plain checkout) and housekeeping (the ai-docs checkout a lead uses while a worker occupies the root). Defaults to text; use format=json for structured output.", defaultWorktreePoolTemplate),
+			"description": fmt.Sprintf("Lead-only. Provision an isolated Git worktree of a named profile from a recycled pool for a parallel worker: reuse an idle pooled worktree of that profile or create one, put it into the profile when it is fresh or the profile's provisioning inputs changed (declared sparse-checkout, then post_provision hooks), create target_branch on base if it does not exist and check it out, hygiene-reset the tree keeping the profile's preserve patterns, sync submodules, run the profile's post_acquire hooks, mint a worktree-bound worker session key, and record a worktree lease (worker_key, parent_key, acquired_at) in the worktree's Git admin directory for worktree.list. Fails when the acquired worktree hides the ticket board its commit tracks; a failing post_provision or post_acquire hook quarantines the worktree and fails the call. Returns the worktree path, worker_key, profile, and each hook run (argv, scope, exit code). At most once a day per pool, the result's nudge lists pooled worktrees with a branch checked out and no activity for worktree.nudge_stale_days, or detached with worktree.nudge_preserved_gb or more of preserved artifacts; relay it to the user, who decides whether worktree.remove deletes them. The pool location is the worktree_pool config knob (default %s); profiles are the worktree.profile.<name> config family (config.list), with builtins full (plain checkout) and housekeeping (the ai-docs checkout a lead uses while a worker occupies the root). Defaults to text; use format=json for structured output.", defaultWorktreePoolTemplate),
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -4445,12 +4507,24 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "worktree.release",
-			"description": "Lead-only. Return a worktree to the pool: run its profile's pre_release hooks (a failure leaves it unchanged and leased), clean it (git reset --hard + git clean -ffdx, discarding uncommitted changes and every ignored path its profile does not preserve), detach HEAD so it becomes reuse-eligible, and remove its worktree lease. Never deletes the worktree and does not retire the worker key. Identify it by path or by a worker session key bound to it. Defaults to text; use format=json for structured output.",
+			"description": "Lead-only. Return a worktree to the pool: run its profile's pre_release hooks (a failure leaves it unchanged and leased), clean it (git reset --hard + git clean -ffdx, discarding uncommitted changes and every ignored path its profile does not preserve), detach HEAD so it becomes reuse-eligible, record the size of the preserved artifacts it kept for acquire's nudge, and remove its worktree lease. Never deletes the worktree (worktree.remove does) and does not retire the worker key. Identify it by path or by a worker session key bound to it. Defaults to text; use format=json for structured output.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"path":   stringProperty("Absolute worktree path to release. Provide path or key."),
 					"key":    stringProperty("A worker session key bound to the worktree to release. Provide path or key."),
+					"format": stringProperty(`Optional output format. Use "json" for structured output.`),
+				},
+			},
+		},
+		{
+			"name":        "worktree.remove",
+			"description": "Lead-only. Delete a pooled worktree: refuse a dirty one, one whose checked-out branch holds commits no other branch reaches, one whose detached HEAD holds commits no ref reaches, the primary worktree, a path outside the owned pool, and a leased one active more recently than worktree.nudge_stale_days; then run its profile's pre_remove hooks (a failure leaves it in place; skipped with a note when the profile no longer resolves) and remove it with its lease and profile marker, clearing any quarantine. Keeps the checked-out branch. Identify it by path or by a worker session key bound to it. Returns the path, profile, kept branch, and each hook run (argv, scope, exit code). Defaults to text; use format=json for structured output.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"path":   stringProperty("Absolute worktree path to remove. Provide path or key."),
+					"key":    stringProperty("A worker session key bound to the worktree to remove. Provide path or key."),
 					"format": stringProperty(`Optional output format. Use "json" for structured output.`),
 				},
 			},
@@ -4910,7 +4984,7 @@ func toolSchemaRequiresSessionKey(name string) bool {
 		"rationale.query", "git.followups",
 		"project_tree",
 		"review.marker", "review.stamp",
-		"worktree.acquire", "worktree.release", "worktree.list",
+		"worktree.acquire", "worktree.release", "worktree.remove", "worktree.list",
 		"tickets.query", "tickets.close", "tickets.move", "tickets.create_empty", "tickets.sage_gate", "tickets.sage_stamp", "tickets.verify",
 		"tickets.acquire", "tickets.release", "tickets.index_init", "path.generate", "playbook.render":
 		return true

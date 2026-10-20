@@ -118,6 +118,11 @@ describes that work's checkout, because the builtin `housekeeping`
 materializes only `ai-docs` and a worker there cannot build; a pooled worktree
 is reused only by an acquire naming the same profile.
 
+Relay every `nudge` entry an acquire result carries to the user, because it is
+the only report of pooled worktrees left idle or holding large preserved
+artifacts; removing one with `{{.McpNamespace}}/worktree.remove(path: ...)` is
+the user's call.
+
 ### API documentation
 
 Use `{{.McpNamespace}}/api.list` to inspect local API documentation cache domains.

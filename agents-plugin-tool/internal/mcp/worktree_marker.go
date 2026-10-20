@@ -30,6 +30,11 @@ type worktreeMarker struct {
 	// Quarantine is set when a post_provision or post_acquire hook failed; a
 	// quarantined worktree is never reused.
 	Quarantine *worktreeQuarantine `json:"quarantine,omitempty"`
+	// PreservedBytes is the size of the preserved ignored artifacts the last
+	// release left behind, measured then (never at acquire) for the
+	// stale-pool nudge.
+	PreservedBytes      int64  `json:"preserved_bytes,omitempty"`
+	PreservedMeasuredAt string `json:"preserved_measured_at,omitempty"`
 }
 
 // readWorktreeMarker returns wtPath's marker, or nil when it has none (a

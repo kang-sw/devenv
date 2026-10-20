@@ -71,6 +71,7 @@
     "git.commit": ">=0.47.0-dev <0.48.0",
     "worktree.acquire": ">=0.47.0-dev <0.48.0",
     "worktree.release": ">=0.47.0-dev <0.48.0",
+    "worktree.remove": ">=0.47.0-dev <0.48.0",
     "worktree.list": ">=0.47.0-dev <0.48.0",
     "api.list": ">=0.47.0-dev <0.48.0"
   },

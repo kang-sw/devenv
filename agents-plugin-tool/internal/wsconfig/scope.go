@@ -117,6 +117,14 @@ const (
 	// (project/global/session files + builtin) rather than a dedicated
 	// config.tune writer.
 	ItemWorktreePool = "worktree_pool"
+
+	// ItemWorktreeNudgeStaleDays and ItemWorktreeNudgePreservedGB are the
+	// thresholds of worktree.acquire's once-a-day stale-pool nudge (whole
+	// days without activity; whole GB of preserved ignored artifacts).
+	// ItemWorktreeNudgeStaleDays also bounds worktree.remove's lease-recency
+	// refusal.
+	ItemWorktreeNudgeStaleDays   = "worktree.nudge_stale_days"
+	ItemWorktreeNudgePreservedGB = "worktree.nudge_preserved_gb"
 )
 
 func init() {
@@ -139,6 +147,8 @@ func init() {
 	// choice (declared explicitly even though ScopeProject is the fallback, to
 	// keep every item's scope declaration visible in one place).
 	RegisterDefaultScope(ItemWorktreePool, ScopeProject)
+	RegisterDefaultScope(ItemWorktreeNudgeStaleDays, ScopeProject)
+	RegisterDefaultScope(ItemWorktreeNudgePreservedGB, ScopeProject)
 	// ticket-assignee-aware is a committed team decision with no config.tune
 	// writer; declaring it makes config.list's scoped view always list it with
 	// its repo-scope flag, so a team sees the key before it commits one.

@@ -363,6 +363,11 @@ func resolveConfigEntryForKey(key string) (configKeyEntry, bool) {
 	if strings.HasPrefix(key, worktreeProfilePrefix) {
 		return worktreeProfileKnobEntry(strings.TrimPrefix(key, worktreeProfilePrefix)), true
 	}
+	for _, k := range []declaredConfigKey{worktreeNudgeStaleDaysKey, worktreeNudgePreservedGBKey} {
+		if k.Key == key {
+			return k.entry(), true
+		}
+	}
 	return configKeyEntry{}, false
 }
 
