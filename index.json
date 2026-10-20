@@ -553,31 +553,8 @@
     "261008-bug-ws-git-merge-switches-worker-occupied-root": {
       "registered_at": "2026-10-08T04:40:47Z"
     },
-    "261016-research-claude-mod-mailbox-active-push": {
-      "registered_at": "2026-10-16T08:54:20Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-17T23:43:37Z"
-      }
-    },
     "261016-research-claude-mod-pi-like-compaction": {
       "registered_at": "2026-10-16T08:30:06Z"
-    },
-    "261017-feat-claude-mod-lead-compaction-timing": {
-      "registered_at": "2026-10-17T12:53:11Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-17T14:53:38Z",
-        "impl": {
-          "branch": "impl/develop/polio-vegan-fling"
-        }
-      }
     },
     "261018-bug-claude-mod-stale-mailbox-watch-after-hot-reload": {
       "registered_at": "2026-10-18T05:36:08Z"
@@ -588,71 +565,6 @@
     "261018-feat-claude-mod-compaction-threshold-knob": {
       "registered_at": "2026-10-17T23:46:26Z"
     },
-    "261018-feat-claude-mod-lead-key-adoption-mailbox-auto-bind": {
-      "registered_at": "2026-10-18T04:25:01Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-18T04:48:30Z",
-        "impl": {
-          "branch": "impl/develop/flock-boat-shiny"
-        }
-      }
-    },
-    "261018-feat-claude-mod-mcp-reconnect-lever": {
-      "registered_at": "2026-10-18T01:22:52Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-18T02:04:31Z",
-        "impl": {
-          "branch": "impl/develop/creme-fiber-groin"
-        }
-      }
-    },
-    "261018-feat-claude-mod-mid-turn-steer-delivery": {
-      "registered_at": "2026-10-18T06:42:11Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-18T06:53:42Z",
-        "impl": {
-          "branch": "impl/develop/ebony-uncut-silk"
-        }
-      }
-    },
-    "261018-feat-claude-mod-optional-lever-continuation": {
-      "registered_at": "2026-10-18T08:23:08Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-18T09:10:46Z",
-        "impl": {
-          "branch": "impl/develop/haven-shrug-good"
-        }
-      }
-    },
-    "261018-feat-claude-mod-ws-manual-injection": {
-      "registered_at": "2026-10-18T01:22:57Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-18T03:28:48Z",
-        "impl": {
-          "branch": "impl/develop/sake-old-spoon"
-        }
-      }
-    },
     "261018-research-claude-mod-mid-turn-steer": {
       "registered_at": "2026-10-18T06:42:05Z"
     },
@@ -661,6 +573,9 @@
     },
     "261018-research-claude-mod-ws-mcp-reconnect": {
       "registered_at": "2026-10-17T15:30:06Z"
+    },
+    "261020-research-worktree-profiles": {
+      "registered_at": "2026-10-20T08:23:34Z"
     }
   }
 }
