@@ -617,7 +617,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-20T12:59:45Z"
+        "touched_at": "2026-10-20T13:01:08Z",
+        "impl": {
+          "branch": "impl/develop/sulk-ferry-kilt"
+        }
       }
     },
     "261020-feat-claude-mod-lever-continue-flag": {
