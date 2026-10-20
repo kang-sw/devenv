@@ -601,7 +601,14 @@
       }
     },
     "261020-chore-retire-mcp-server-repair-skill": {
-      "registered_at": "2026-10-20T12:18:44Z"
+      "registered_at": "2026-10-20T12:18:44Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-10-20T12:59:45Z"
+      }
     },
     "261020-feat-claude-mod-lever-continue-flag": {
       "registered_at": "2026-10-20T12:18:49Z"
