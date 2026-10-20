@@ -413,7 +413,8 @@ class WsflowSkillBundleTest(unittest.TestCase):
             "For each approved ticket, resolve its canonical branch with "
             "`{{.McpNamespace}}/git.resolve_impl_branch` against your exact base branch, "
             "then pass that returned branch verbatim as `target_branch` to "
-            "`{{.McpNamespace}}/worktree.acquire`. Keep the `worker_key` it returns",
+            "`{{.McpNamespace}}/worktree.acquire`, with the worker `profile` the workflow "
+            "manual's `### Git` guidance selects. Keep the `worker_key` it returns",
             run,
         )
         self.assertIn("it is the sole branch owner, so skip Spawn step 3", run)

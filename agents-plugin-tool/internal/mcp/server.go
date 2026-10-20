@@ -1280,13 +1280,28 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if strings.TrimSpace(base) == "" {
 			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.acquire: base is required"))
 		}
-		sparsePaths := stringList(params.Arguments["sparse_paths"])
+		if _, legacy := params.Arguments["sparse_paths"]; legacy {
+			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.acquire: sparse_paths was removed; pass profile instead (profile %q is the ai-docs checkout sparse_paths: [\"ai-docs\"] gave)", worktreeProfileHousekeeping))
+		}
 		resolver := s.sessionResolver(key, builtinConfigDefaults())
+		profiles, err := resolveWorktreeProfiles(&resolver)
+		if err != nil {
+			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.acquire: %w; fix or reset that profile (config.list shows the family's value_schema) before acquiring", err))
+		}
+		profileName, _ := params.Arguments["profile"].(string)
+		profileName = strings.TrimSpace(profileName)
+		if profileName == "" {
+			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.acquire: profile is required; resolved profiles: %s", worktreeProfileNames(profiles)))
+		}
+		profile, found := findWorktreeProfile(profiles, profileName)
+		if !found {
+			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.acquire: unknown profile %q; resolved profiles: %s", profileName, worktreeProfileNames(profiles)))
+		}
 		poolRV, err := resolver.Get(key, wsconfig.ItemWorktreePool)
 		if err != nil {
 			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.acquire: %w", err))
 		}
-		result, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, entry.root, base, targetBranch, sparsePaths, poolRV.Value)
+		result, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, entry.root, base, targetBranch, profile, poolRV.Value)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
@@ -1343,13 +1358,18 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.release: %w", err))
 		}
-		if err := releaseWorktree(context.Background(), wsgit.ExecRunner{}, path, poolRV.Value); err != nil {
+		lookup := func(name string) (resolvedWorktreeProfile, bool, error) {
+			profiles, err := resolveWorktreeProfiles(&resolver)
+			return staticProfileLookup(profiles, err)(name)
+		}
+		result, err := releaseWorktree(context.Background(), wsgit.ExecRunner{}, path, poolRV.Value, lookup)
+		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
 		if wantsJSON(params.Arguments) {
-			return toolJSONResponse(req.ID, map[string]any{"path": path, "detached": true}, nil)
+			return toolJSONResponse(req.ID, result, nil)
 		}
-		return toolTextResponse(req.ID, fmt.Sprintf("released: %s\ndetached: true\n", path), nil)
+		return toolTextResponse(req.ID, result.text(), nil)
 	case "worktree.list":
 		key, err := s.requireLeadSessionKey("worktree.list", params.Arguments)
 		if err != nil {
@@ -4411,21 +4431,21 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "worktree.acquire",
-			"description": fmt.Sprintf("Lead-only. Provision an isolated Git worktree from a recycled pool for a parallel worker: reuse an eligible idle pooled worktree or create one, create target_branch on base if it does not exist and check it out, hygiene-reset the tree, sync submodules, mint a worktree-bound worker session key, and record a worktree lease (worker_key, parent_key, acquired_at) in the worktree's Git admin directory for worktree.list. Returns the worktree path and worker_key. The pool location is the worktree_pool config knob (default %s). With sparse_paths the worktree is created without a checkout and materializes only those cone directories — the lead's housekeeping worktree while a worker occupies the root. Defaults to text; use format=json for structured output.", defaultWorktreePoolTemplate),
+			"description": fmt.Sprintf("Lead-only. Provision an isolated Git worktree of a named profile from a recycled pool for a parallel worker: reuse an idle pooled worktree of that profile or create one, put it into the profile when it is fresh or the profile's provisioning inputs changed (declared sparse-checkout), create target_branch on base if it does not exist and check it out, hygiene-reset the tree keeping the profile's preserve patterns, sync submodules, mint a worktree-bound worker session key, and record a worktree lease (worker_key, parent_key, acquired_at) in the worktree's Git admin directory for worktree.list. Fails when the acquired worktree hides the ticket board its commit tracks. Returns the worktree path, worker_key, and profile. The pool location is the worktree_pool config knob (default %s); profiles are the worktree.profile.<name> config family (config.list), with builtins full (plain checkout) and housekeeping (the ai-docs checkout a lead uses while a worker occupies the root). Defaults to text; use format=json for structured output.", defaultWorktreePoolTemplate),
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"base":          stringProperty("Base commit-ish the worktree branch is created on, e.g. the goal branch."),
 					"target_branch": stringProperty("Branch to create (when absent) and check out in the worktree, e.g. impl/<parent>/<slug>. Omit to check out base itself; base must then be a local branch not checked out in another worktree."),
-					"sparse_paths":  stringArrayProperty(`Optional cone-mode sparse-checkout directories, e.g. ["ai-docs"]. Omitted: full checkout. A pooled worktree is reused only when its sparse state matches.`),
+					"profile":       stringProperty("Worktree profile name, e.g. full or housekeeping, or a project profile config.list lists. A pooled worktree is reused only by an acquire naming the same profile."),
 					"format":        stringProperty(`Optional output format. Use "json" for structured output.`),
 				},
-				"required": []string{"base"},
+				"required": []string{"base", "profile"},
 			},
 		},
 		{
 			"name":        "worktree.release",
-			"description": "Lead-only. Return a worktree to the pool: clean it (git reset --hard + git clean -ffdx, discarding uncommitted changes), detach HEAD so it becomes reuse-eligible, and remove its worktree lease. Never deletes the worktree and does not retire the worker key. Identify it by path or by a worker session key bound to it. Defaults to text; use format=json for structured output.",
+			"description": "Lead-only. Return a worktree to the pool: clean it (git reset --hard + git clean -ffdx, discarding uncommitted changes and every ignored path its profile does not preserve), detach HEAD so it becomes reuse-eligible, and remove its worktree lease. Never deletes the worktree and does not retire the worker key. Identify it by path or by a worker session key bound to it. Defaults to text; use format=json for structured output.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{

@@ -127,7 +127,7 @@ func TestImplIdentityResolveProvisionRouteIntegration(t *testing.T) {
 
 			var acquired worktreeAcquireResult
 			acquire := callToolOnce(t, server, 2, "worktree.acquire", map[string]any{
-				"session_key": key, "base": tc.base, "target_branch": resolved.Branch, "format": "json",
+				"session_key": key, "base": tc.base, "profile": "full", "target_branch": resolved.Branch, "format": "json",
 			})
 			if err := json.Unmarshal([]byte(toolText(t, acquire)), &acquired); err != nil {
 				t.Fatalf("acquire response: %v\n%s", err, acquire)

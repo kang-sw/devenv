@@ -25,6 +25,10 @@ type worktreeListEntry struct {
 	Path string `json:"path"`
 	// Branch is the checked-out branch's short name; null when HEAD is detached.
 	Branch *string `json:"branch"`
+	// Profile is the worktree profile its marker names, "legacy" for an
+	// unmarked worktree created before profiles existed, or empty when the
+	// marker could not be read (the entry then carries a warning).
+	Profile string `json:"profile"`
 	// Dirty counts untracked files as dirty; null when git status could not be
 	// read (the entry then carries a warning and no release nudge).
 	Dirty *bool `json:"dirty"`
@@ -58,7 +62,7 @@ type worktreeListLease struct {
 type keyRecordMtimeFunc func(key string) (time.Time, bool)
 
 func worktreeReleaseNudge(path string) string {
-	return fmt.Sprintf("releasable via worktree.release(path: %q) once its holder is done with it; warning: release discards uncommitted changes and untracked or ignored files (git reset --hard + git clean -ffdx)", path)
+	return fmt.Sprintf("releasable via worktree.release(path: %q) once its holder is done with it; warning: release discards uncommitted changes and untracked or ignored files its profile does not preserve (git reset --hard + git clean -ffdx)", path)
 }
 
 func (r worktreeListResult) text() string {
@@ -80,6 +84,9 @@ func (r worktreeListResult) text() string {
 			fmt.Fprintf(&b, "  branch: %s\n", *e.Branch)
 		} else {
 			b.WriteString("  branch: (detached)\n")
+		}
+		if e.Profile != "" {
+			fmt.Fprintf(&b, "  profile: %s\n", e.Profile)
 		}
 		switch {
 		case e.Dirty == nil:
@@ -141,6 +148,14 @@ func describePoolWorktree(ctx context.Context, runner wsgit.Runner, e worktreeEn
 	if !e.Detached && e.Branch != "" {
 		branch := strings.TrimPrefix(e.Branch, "refs/heads/")
 		out.Branch = &branch
+	}
+
+	if marker, err := readWorktreeMarker(ctx, runner, e.Path); err != nil {
+		out.Warnings = append(out.Warnings, "cannot read worktree profile marker: "+err.Error())
+	} else if marker == nil {
+		out.Profile = worktreeLegacyLabel
+	} else {
+		out.Profile = marker.Profile
 	}
 
 	if dirtyPaths, err := porcelainPaths(ctx, runner, e.Path); err != nil {

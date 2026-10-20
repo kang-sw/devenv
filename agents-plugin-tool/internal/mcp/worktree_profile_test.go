@@ -361,3 +361,90 @@ func TestConfigListWorktreeProfileKnob(t *testing.T) {
 	}
 }
 
+// builtinProfile resolves a builtin profile the way acquire would with no
+// config set.
+func builtinProfile(t *testing.T, name string) resolvedWorktreeProfile {
+	t.Helper()
+	profiles := builtinProfilesForTest(t)
+	p, ok := findWorktreeProfile(profiles, name)
+	if !ok {
+		t.Fatalf("no builtin profile %q", name)
+	}
+	return p
+}
+
+func builtinProfilesForTest(t *testing.T) []resolvedWorktreeProfile {
+	t.Helper()
+	r := wsconfig.NewResolver(wsconfig.Options{CacheHome: t.TempDir(), ConfigHome: t.TempDir()}, nil, nil, nil)
+	profiles, err := resolveWorktreeProfiles(&r)
+	if err != nil {
+		t.Fatalf("resolve builtin profiles: %v", err)
+	}
+	return profiles
+}
+
+// builtinProfileLookup is release's profile lookup over the builtins only.
+func builtinProfileLookup(t *testing.T) worktreeProfileLookup {
+	t.Helper()
+	return staticProfileLookup(builtinProfilesForTest(t), nil)
+}
+
+// customProfile parses a test profile definition under name.
+func customProfile(t *testing.T, name, definition string) resolvedWorktreeProfile {
+	t.Helper()
+	p, err := parseWorktreeProfile(json.RawMessage(definition))
+	if err != nil {
+		t.Fatalf("parse profile %s: %v", definition, err)
+	}
+	return resolvedWorktreeProfile{Name: name, Scope: wsconfig.ScopeRepo, Definition: p}
+}
+
+// TestWorkflowManualRendersWorktreeProfiles: the manual lists every resolved
+// profile with its scope and description at the end of the Git section, and a
+// bad committed profile fails the manual naming the file and key (also on the
+// fresh-with-root path, before any key is minted).
+func TestWorkflowManualRendersWorktreeProfiles(t *testing.T) {
+	server, root, key := profileServer(t)
+	text := toolText(t, keyedCall(t, server, 940400, key, "workflow_manual", map[string]any{}))
+	git := strings.Index(text, "### Git")
+	list := strings.Index(text, worktreeProfileManualHeading)
+	next := strings.Index(text, "### API documentation")
+	if git < 0 || list < git || next < list {
+		t.Fatalf("profile list must sit at the end of the Git section (git=%d list=%d next=%d):\n%s", git, list, next, text)
+	}
+	for _, want := range []string{
+		"- `full` [builtin]: Full checkout of the base.",
+		"- `housekeeping` [builtin]: Ticket and doc housekeeping",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("manual missing %q", want)
+		}
+	}
+
+	if resp := keyedCall(t, server, 940401, key, "config.tune", map[string]any{
+		"key": "worktree.profile.build", "scope": "repo", "value": map[string]any{"description": "build checkout"},
+	}); toolIsError(t, resp) {
+		t.Fatalf("config.tune: %s", resp)
+	}
+	text = toolText(t, keyedCall(t, server, 940402, key, "workflow_manual", map[string]any{}))
+	if !strings.Contains(text, "- `build` [repo]: build checkout") {
+		t.Fatalf("manual must list the repo profile with its scope:\n%s", text)
+	}
+
+	repoFile := filepath.Join(root, ".ws-workflow", "config.json")
+	mustWrite(t, root, ".ws-workflow/config.json", `{"structured_overrides":{"worktree.profile.bad":{"sparse":{"mode":"tree","paths":["a"]}}}}`)
+	for i, args := range []map[string]any{
+		{"session_key": key},
+		{"session_key": freshBootstrapKey, "root": root},
+	} {
+		resp := callToolOnce(t, server, 940410+i, "workflow_manual", args)
+		if !toolIsError(t, resp) {
+			t.Fatalf("workflow_manual(%v) must fail on a bad committed profile: %s", args, resp)
+		}
+		for _, want := range []string{"worktree.profile.bad", repoFile} {
+			if !strings.Contains(toolText(t, resp), want) {
+				t.Fatalf("workflow_manual(%v) error must name %q: %s", args, want, resp)
+			}
+		}
+	}
+}

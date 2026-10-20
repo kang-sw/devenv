@@ -17,16 +17,20 @@ import (
 // completes, because minting a session key needs the Server the pure lifecycle
 // code deliberately does not carry.
 type worktreeAcquireResult struct {
-	Path      string   `json:"path"`
-	WorkerKey string   `json:"worker_key,omitempty"`
-	Reused    bool     `json:"reused"`
-	Pool      string   `json:"pool"`
-	Sparse    bool     `json:"sparse"`
-	Warnings  []string `json:"warnings,omitempty"`
+	Path      string `json:"path"`
+	WorkerKey string `json:"worker_key,omitempty"`
+	Reused    bool   `json:"reused"`
+	Pool      string `json:"pool"`
+	Profile   string `json:"profile"`
+	// Provisioned reports that this acquire put the worktree into the profile
+	// (fresh, adopted, or re-adopted after a definition change): declared
+	// sparse was applied.
+	Provisioned bool     `json:"provisioned"`
+	Warnings    []string `json:"warnings,omitempty"`
 }
 
 func (r worktreeAcquireResult) text() string {
-	text := fmt.Sprintf("path: %s\nworker_key: %s\nreused: %t\npool: %s\nsparse: %t\n", r.Path, r.WorkerKey, r.Reused, r.Pool, r.Sparse)
+	text := fmt.Sprintf("path: %s\nworker_key: %s\nreused: %t\npool: %s\nprofile: %s\nprovisioned: %t\n", r.Path, r.WorkerKey, r.Reused, r.Pool, r.Profile, r.Provisioned)
 	for _, w := range r.Warnings {
 		text += "warning: " + w + "\n"
 	}
@@ -232,24 +236,28 @@ func registerPoolExclude(commonDir, mainRoot, poolRoot string) error {
 // provisionWorktree owns the whole worktree lifecycle for worktree.acquire
 // except the session-key mint (which the dispatch handler performs): resolve the
 // pool root against the primary worktree root, reuse an eligible idle pooled
-// worktree or create a new one, create/check out target_branch on base,
-// hygiene-reset the tree, and sync submodules.
+// worktree of the requested profile or create a new one, provision it into the
+// profile when it is fresh or its provisioning inputs changed, create/check out
+// target_branch on base, hygiene-reset the tree (keeping the profile's
+// preserve patterns), sync submodules, and check that the ticket board is
+// visible.
 //
 // root is the caller's repository root; it may be the main worktree or any
 // linked worktree. The pool always resolves against the primary root, so a call
 // from a linked worktree never nests a per-worktree pool.
-func provisionWorktree(ctx context.Context, runner wsgit.Runner, root, base, targetBranch string, sparsePaths []string, poolConfigValue string) (worktreeAcquireResult, error) {
+func provisionWorktree(ctx context.Context, runner wsgit.Runner, root, base, targetBranch string, profile resolvedWorktreeProfile, poolConfigValue string) (worktreeAcquireResult, error) {
 	var res worktreeAcquireResult
 	base = strings.TrimSpace(base)
 	targetBranch = strings.TrimSpace(targetBranch)
 	if base == "" {
 		return res, fmt.Errorf("worktree provisioning requires base")
 	}
-	// A sparse request materializes only the requested cone directories; an
-	// empty list is a full checkout, keeping the parallel route's calls
-	// byte-for-byte unchanged.
-	wantSparse := len(sparsePaths) > 0
-	res.Sparse = wantSparse
+	if profile.Name == "" {
+		return res, fmt.Errorf("worktree provisioning requires a profile")
+	}
+	res.Profile = profile.Name
+	def := profile.Definition
+	hash := def.provisionHash()
 
 	entries, err := listWorktrees(ctx, runner, root)
 	if err != nil {
@@ -297,26 +305,35 @@ func provisionWorktree(ctx context.Context, runner wsgit.Runner, root, base, tar
 	}
 
 	// Reuse eligibility (conservative golden rule): under the owned pool prefix,
-	// at detached HEAD, and clean. A branch-checked-out or dirty worktree is
-	// skipped so no in-progress work is stomped. The sparse shape must also
-	// match the request: a sparse candidate serves only a sparse request and a
-	// full candidate only a full request, so a reuse never hands back the wrong
-	// materialization (and a sparse reuse always re-applies the pattern set
-	// below, so a stale prior pattern never survives).
+	// at detached HEAD, and clean — a branch-checked-out or dirty worktree is
+	// skipped so no in-progress work is stomped — and in the requested profile:
+	// its marker names the profile, so a worktree provisioned for one profile
+	// never serves another. An unmarked worktree predates profiles: it is
+	// adopted only into the builtin its sparse state matches (sparse-active =>
+	// housekeeping, otherwise full); a custom profile never adopts one.
 	var claim string
+	var claimMarker *worktreeMarker
 	for _, e := range entries {
 		if e.Path == mainRoot || !pathUnder(poolRoot, e.Path) || !e.Detached {
 			continue
 		}
-		if wsdoc.SparseCheckoutActive(e.Path) != wantSparse {
+		marker, err := readWorktreeMarker(ctx, runner, e.Path)
+		if err != nil {
+			continue // an unreadable candidate is skipped, never adopted
+		}
+		if marker != nil {
+			if marker.Profile != profile.Name {
+				continue
+			}
+		} else if legacyWorktreeProfile(e.Path) != profile.Name {
 			continue
 		}
 		status, err := wtRun(ctx, runner, e.Path, "status", "--porcelain")
 		if err != nil {
-			continue // an unreadable candidate is skipped, never adopted
+			continue
 		}
 		if status == "" {
-			claim = e.Path
+			claim, claimMarker = e.Path, marker
 			break
 		}
 	}
@@ -329,11 +346,11 @@ func provisionWorktree(ctx context.Context, runner wsgit.Runner, root, base, tar
 			return res, err
 		}
 		wtPath = filepath.Join(poolRoot, stem)
-		// A sparse worktree is created without a checkout so the cone patterns
-		// below decide what materializes; the branch step then populates only
-		// the cone (git switch honors the sparse patterns).
+		// A sparse profile's worktree is created without a checkout so its
+		// declared patterns decide what materializes; the hygiene reset below
+		// then populates only what the patterns select.
 		addArgs := noSubmoduleRecurse("worktree", "add", "--detach")
-		if wantSparse {
+		if def.Sparse != nil {
 			addArgs = append(addArgs, "--no-checkout")
 		}
 		addArgs = append(addArgs, wtPath, base)
@@ -342,14 +359,22 @@ func provisionWorktree(ctx context.Context, runner wsgit.Runner, root, base, tar
 		}
 	}
 
-	// Apply the requested cone pattern set every time — new or reused — before
-	// the branch step, so a reused sparse worktree never keeps a prior request's
-	// pattern set and a fresh --no-checkout worktree gets its cone before the
-	// switch populates it.
-	if wantSparse {
-		if _, err := wtRun(ctx, runner, wtPath, noSubmoduleRecurse(append([]string{"sparse-checkout", "set", "--cone"}, sparsePaths...)...)...); err != nil {
+	// A worktree enters the profile when it is fresh, unmarked (legacy), or
+	// marked under different provisioning inputs (a definition change). Stamp
+	// the profile with an empty hash first: a failure from here on leaves the
+	// worktree in this profile's partition, re-provisioned on its next claim,
+	// never an unmarked entry a builtin could adopt.
+	provision := claimMarker == nil || claimMarker.ProvisionHash != hash
+	if provision {
+		if err := writeWorktreeMarker(ctx, runner, wtPath, worktreeMarker{Profile: profile.Name}); err != nil {
+			return res, fmt.Errorf("worktree.acquire: record profile marker: %w", err)
+		}
+		// Declared sparse is applied only here, on entry, so sparse changes a
+		// hook makes afterwards persist across reuse.
+		if err := applyDeclaredSparse(ctx, runner, wtPath, def.Sparse); err != nil {
 			return res, err
 		}
+		res.Provisioned = true
 	}
 
 	// Branch step. With target_branch omitted, check base out directly so the
@@ -382,12 +407,10 @@ func provisionWorktree(ctx context.Context, runner wsgit.Runner, root, base, tar
 	}
 
 	// Hygiene: clear any uncommitted change and untracked/ignored cruft so no
-	// prior run's working-tree state leaks forward. This never moves a branch
-	// pointer, so committed work on target_branch is preserved.
-	if _, err := wtRun(ctx, runner, wtPath, noSubmoduleRecurse("reset", "--hard")...); err != nil {
-		return res, err
-	}
-	if _, err := wtRun(ctx, runner, wtPath, noSubmoduleRecurse("clean", "-ffdx")...); err != nil {
+	// prior run's working-tree state leaks forward, keeping the profile's
+	// preserve patterns. This never moves a branch pointer, so committed work
+	// on target_branch is preserved.
+	if err := worktreeHygiene(ctx, runner, wtPath, def.Preserve); err != nil {
 		return res, err
 	}
 
@@ -399,45 +422,176 @@ func provisionWorktree(ctx context.Context, runner wsgit.Runner, root, base, tar
 		}
 	}
 
+	if provision {
+		if err := writeWorktreeMarker(ctx, runner, wtPath, worktreeMarker{Profile: profile.Name, ProvisionHash: hash}); err != nil {
+			return res, fmt.Errorf("worktree.acquire: record profile marker: %w", err)
+		}
+	}
+
+	// Workers record results into their ticket, so an acquired worktree must
+	// expose the ticket board whenever the checked-out commit tracks one.
+	if err := checkTicketBoardVisible(ctx, runner, wtPath); err != nil {
+		detachErr := releaseHygiene(ctx, runner, wtPath, def.Preserve)
+		msg := fmt.Sprintf("worktree.acquire: profile %q leaves %s hidden in %s (%v); a worker could not record its ticket result there. Fix the profile's sparse (or the hook that narrows it) so %s stays checked out", profile.Name, wsdoc.TicketsDir, wtPath, err, wsdoc.TicketsDir)
+		if detachErr != nil {
+			msg += fmt.Sprintf("; returning the worktree to the pool also failed: %v", detachErr)
+		}
+		return res, fmt.Errorf("%s", msg)
+	}
+
 	res.Path = wtPath
 	return res, nil
 }
 
-// releaseWorktree returns a worktree to the pool: clean it, detach HEAD so it
-// becomes reuse-eligible, and remove its worktree lease. It never deletes the
-// worktree — the expensive derivation is what the pool amortizes.
+// legacyWorktreeProfile is the builtin an unmarked (pre-profile) pooled
+// worktree is adopted into, by the boolean rule pool reuse used before
+// profiles: any active sparse-checkout => housekeeping, otherwise full. The
+// first claim re-provisions it, normalizing an arbitrary prior cone to the
+// builtin's declared sparse.
+func legacyWorktreeProfile(wtPath string) string {
+	if wsdoc.SparseCheckoutActive(wtPath) {
+		return worktreeProfileHousekeeping
+	}
+	return worktreeProfileFull
+}
+
+// applyDeclaredSparse puts wtPath's sparse-checkout in the profile's declared
+// shape: none (a full checkout), cone, or non-cone patterns. set rewrites both
+// the pattern file and core.sparseCheckoutCone, so a worktree previously in
+// the other mode switches cleanly.
+func applyDeclaredSparse(ctx context.Context, runner wsgit.Runner, wtPath string, sparse *worktreeProfileSparse) error {
+	switch {
+	case sparse == nil:
+		if !wsdoc.SparseCheckoutActive(wtPath) {
+			return nil
+		}
+		_, err := wtRun(ctx, runner, wtPath, noSubmoduleRecurse("sparse-checkout", "disable")...)
+		return err
+	case sparse.Mode == worktreeSparseModePatterns:
+		_, err := wtRun(ctx, runner, wtPath, noSubmoduleRecurse(append([]string{"sparse-checkout", "set", "--no-cone"}, sparse.Paths...)...)...)
+		return err
+	default:
+		_, err := wtRun(ctx, runner, wtPath, noSubmoduleRecurse(append([]string{"sparse-checkout", "set", "--cone"}, sparse.Paths...)...)...)
+		return err
+	}
+}
+
+// worktreeHygiene discards every uncommitted change and untracked or ignored
+// path except those matching preserve. Under -x, git clean still honors the
+// -e patterns as ignore rules, so a preserved path survives while every other
+// ignored build product is removed.
+func worktreeHygiene(ctx context.Context, runner wsgit.Runner, wtPath string, preserve []string) error {
+	if _, err := wtRun(ctx, runner, wtPath, noSubmoduleRecurse("reset", "--hard")...); err != nil {
+		return err
+	}
+	clean := []string{"clean", "-ffdx"}
+	for _, pattern := range preserve {
+		clean = append(clean, "-e", pattern)
+	}
+	_, err := wtRun(ctx, runner, wtPath, noSubmoduleRecurse(clean...)...)
+	return err
+}
+
+// releaseHygiene is release's working-tree step: hygiene, then a detached HEAD
+// so the checked-out branch is freed and the worktree is reuse-eligible.
+func releaseHygiene(ctx context.Context, runner wsgit.Runner, wtPath string, preserve []string) error {
+	if err := worktreeHygiene(ctx, runner, wtPath, preserve); err != nil {
+		return err
+	}
+	_, err := wtRun(ctx, runner, wtPath, noSubmoduleRecurse("checkout", "--detach")...)
+	return err
+}
+
+// checkTicketBoardVisible reports an error when the checked-out commit tracks
+// the ticket board but the worktree does not materialize it.
+func checkTicketBoardVisible(ctx context.Context, runner wsgit.Runner, wtPath string) error {
+	if _, err := wtRun(ctx, runner, wtPath, "cat-file", "-e", "HEAD:"+wsdoc.TicketsDir); err != nil {
+		return nil // the commit tracks no ticket board; nothing to expose
+	}
+	info, err := os.Stat(filepath.Join(wtPath, filepath.FromSlash(wsdoc.TicketsDir)))
+	if err != nil {
+		return fmt.Errorf("%s is not checked out", wsdoc.TicketsDir)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%s is not a directory", wsdoc.TicketsDir)
+	}
+	return nil
+}
+
+// worktreeProfileLookup resolves a profile name at release time. It reports
+// found=false for a name no scope defines any longer, and an error when the
+// profiles could not be resolved at all.
+type worktreeProfileLookup func(name string) (resolvedWorktreeProfile, bool, error)
+
+// staticProfileLookup serves a lookup from one resolution result.
+func staticProfileLookup(profiles []resolvedWorktreeProfile, resolveErr error) worktreeProfileLookup {
+	return func(name string) (resolvedWorktreeProfile, bool, error) {
+		if resolveErr != nil {
+			return resolvedWorktreeProfile{}, false, resolveErr
+		}
+		p, ok := findWorktreeProfile(profiles, name)
+		return p, ok, nil
+	}
+}
+
+// worktreeReleaseResult is the return shape of worktree.release.
+type worktreeReleaseResult struct {
+	Path     string   `json:"path"`
+	Detached bool     `json:"detached"`
+	Profile  string   `json:"profile"`
+	Warnings []string `json:"warnings,omitempty"`
+}
+
+func (r worktreeReleaseResult) text() string {
+	text := fmt.Sprintf("released: %s\ndetached: %t\nprofile: %s\n", r.Path, r.Detached, r.Profile)
+	for _, w := range r.Warnings {
+		text += "warning: " + w + "\n"
+	}
+	return text
+}
+
+// worktreeLegacyLabel is the profile an unmarked pooled worktree reports.
+const worktreeLegacyLabel = "legacy"
+
+// releaseWorktree returns a worktree to the pool: clean it (keeping its
+// profile's preserve patterns), detach HEAD so it becomes reuse-eligible, and
+// remove its worktree lease. It never deletes the worktree — the expensive
+// derivation is what the pool amortizes. An unmarked (legacy) worktree gets
+// the pre-profile hygiene only; a worktree whose profile no longer resolves
+// gets the same, with a warning.
 //
 // Because reset --hard/clean -ffdx are destructive, release refuses any target
 // that is not a linked worktree under the owned pool: it never touches the
 // primary worktree or a foreign path. This is the symmetric guard to acquire's
 // reuse-eligibility rule — a mistaken path or a lead's own key bound to the main
 // root must not hard-reset the primary working tree.
-func releaseWorktree(ctx context.Context, runner wsgit.Runner, wtPath, poolConfigValue string) error {
+func releaseWorktree(ctx context.Context, runner wsgit.Runner, wtPath, poolConfigValue string, lookup worktreeProfileLookup) (worktreeReleaseResult, error) {
+	var res worktreeReleaseResult
 	wtPath = strings.TrimSpace(wtPath)
 	if wtPath == "" {
-		return fmt.Errorf("worktree release requires a path")
+		return res, fmt.Errorf("worktree release requires a path")
 	}
 	entries, err := listWorktrees(ctx, runner, wtPath)
 	if err != nil {
-		return err
+		return res, err
 	}
 	if len(entries) == 0 {
-		return fmt.Errorf("could not resolve the primary worktree for %q", wtPath)
+		return res, fmt.Errorf("could not resolve the primary worktree for %q", wtPath)
 	}
 	mainRoot := entries[0].Path
 	// Canonicalize the target through git so a symlinked or non-clean path
 	// compares against the git-canonical worktree-list paths.
 	target, err := wtRun(ctx, runner, wtPath, "rev-parse", "--path-format=absolute", "--show-toplevel")
 	if err != nil {
-		return err
+		return res, err
 	}
 	target = filepath.Clean(target)
 	if target == filepath.Clean(mainRoot) {
-		return fmt.Errorf("worktree.release refuses to release the primary worktree %q", target)
+		return res, fmt.Errorf("worktree.release refuses to release the primary worktree %q", target)
 	}
 	poolRoots := ownedPoolRoots(poolConfigValue, mainRoot)
 	if !underAnyPool(poolRoots, target) {
-		return fmt.Errorf("worktree.release refuses %q: not under the owned worktree pool %q", target, poolRoots[0])
+		return res, fmt.Errorf("worktree.release refuses %q: not under the owned worktree pool %q", target, poolRoots[0])
 	}
 	listed := false
 	for _, e := range entries {
@@ -447,21 +601,38 @@ func releaseWorktree(ctx context.Context, runner wsgit.Runner, wtPath, poolConfi
 		}
 	}
 	if !listed {
-		return fmt.Errorf("worktree.release refuses %q: not a registered git worktree", target)
+		return res, fmt.Errorf("worktree.release refuses %q: not a registered git worktree", target)
 	}
-	if _, err := wtRun(ctx, runner, target, noSubmoduleRecurse("reset", "--hard")...); err != nil {
-		return err
+	res.Path = target
+
+	marker, err := readWorktreeMarker(ctx, runner, target)
+	if err != nil {
+		return res, fmt.Errorf("worktree.release: %w", err)
 	}
-	if _, err := wtRun(ctx, runner, target, noSubmoduleRecurse("clean", "-ffdx")...); err != nil {
-		return err
+	var preserve []string
+	switch {
+	case marker == nil:
+		res.Profile = worktreeLegacyLabel
+	default:
+		res.Profile = marker.Profile
+		profile, found, err := lookup(marker.Profile)
+		if err != nil {
+			return res, fmt.Errorf("worktree.release: resolve profile %q of %s: %w", marker.Profile, target, err)
+		}
+		if found {
+			preserve = profile.Definition.Preserve
+		} else {
+			res.Warnings = append(res.Warnings, fmt.Sprintf("profile %q no longer resolves; released with plain hygiene (nothing preserved)", marker.Profile))
+		}
 	}
-	if _, err := wtRun(ctx, runner, target, noSubmoduleRecurse("checkout", "--detach")...); err != nil {
-		return err
+	if err := releaseHygiene(ctx, runner, target, preserve); err != nil {
+		return res, err
 	}
+	res.Detached = true
 	// Drop the lease only once the worktree is actually back in the pool, so a
 	// failed reset/clean/detach leaves the holder still identifiable.
 	if err := removeWorktreeLease(ctx, runner, target); err != nil {
-		return fmt.Errorf("worktree.release: %q is detached, but its worktree lease could not be removed: %w", target, err)
+		return res, fmt.Errorf("worktree.release: %q is detached, but its worktree lease could not be removed: %w", target, err)
 	}
-	return nil
+	return res, nil
 }

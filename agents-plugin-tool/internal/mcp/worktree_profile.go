@@ -307,3 +307,22 @@ func worktreeProfileKnobEntry(name string) configKeyEntry {
 }
 
 var worktreeProfileScopeEnum = []string{string(wsconfig.ScopeProject), string(wsconfig.ScopeRepo), string(wsconfig.ScopeGlobal)}
+
+// worktreeProfileManualHeading heads the resolved profile list the workflow
+// manual's Git guidance points at ("the resolved list below").
+const worktreeProfileManualHeading = "#### Worktree profiles"
+
+// worktreeProfileManualBlock renders the resolved profile list for the
+// workflow manual: name, scope it came from, and description.
+func worktreeProfileManualBlock(profiles []resolvedWorktreeProfile) string {
+	var b strings.Builder
+	b.WriteString(worktreeProfileManualHeading + "\n\n")
+	for _, p := range profiles {
+		fmt.Fprintf(&b, "- `%s` [%s]", p.Name, p.Scope)
+		if d := strings.TrimSpace(p.Definition.Description); d != "" {
+			b.WriteString(": " + d)
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
+}

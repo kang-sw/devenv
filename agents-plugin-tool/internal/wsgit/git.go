@@ -531,7 +531,7 @@ func (c Client) Commit(ctx context.Context, root string, opts CommitOptions) (Co
 			if parent := implBranchParent(actualBranch); parent != "" {
 				base = fmt.Sprintf("%q", parent)
 			}
-			refusal += fmt.Sprintf("; the actual checkout is a worker's impl/ branch — housekeeping meanwhile goes through worktree.acquire(base: %s, sparse_paths: [\"ai-docs\"]) and its returned key, not this root", base)
+			refusal += fmt.Sprintf("; the actual checkout is a worker's impl/ branch — housekeeping meanwhile goes through worktree.acquire(base: %s, profile: \"housekeeping\") and its returned key, not this root", base)
 		}
 		return CommitResult{}, fmt.Errorf("%s", refusal)
 	}

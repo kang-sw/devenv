@@ -3040,7 +3040,7 @@ func TestPlaybookPrintLeadRunWorkerTierPolicy(t *testing.T) {
 				`One per-run user approval, "may this run provision worktrees and execute ready tickets in parallel", opens this route`,
 				"The approved batch is the concurrency cap.",
 				"Render `ticket-batch-selector` and spawn it at its recommended tier; it owns the parallel-safety read.",
-				"For each approved ticket, resolve its canonical branch with `" + product + "/git.resolve_impl_branch` against your exact base branch, then pass that returned branch verbatim as `target_branch` to `" + product + "/worktree.acquire`. Keep the `worker_key` it returns",
+				"For each approved ticket, resolve its canonical branch with `" + product + "/git.resolve_impl_branch` against your exact base branch, then pass that returned branch verbatim as `target_branch` to `" + product + "/worktree.acquire`, with the worker `profile` the workflow manual's `### Git` guidance selects. Keep the `worker_key` it returns",
 				"it is the sole branch owner, so skip Spawn step 3",
 				"Render each worker with `root_override: <that worktree path>`",
 				"Handle each terminal report by **Handle the report** as it arrives: the batch is independent, so no merge waits on another worker's report.",

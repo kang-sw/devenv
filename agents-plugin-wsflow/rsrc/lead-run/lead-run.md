@@ -178,7 +178,8 @@ approved batch is the concurrency cap. Differences from the serial route:
 - For each approved ticket, resolve its canonical branch with
   `{{.McpNamespace}}/git.resolve_impl_branch` against your exact base branch,
   then pass that returned branch verbatim as `target_branch` to
-  `{{.McpNamespace}}/worktree.acquire`. Keep the `worker_key` it returns; it
+  `{{.McpNamespace}}/worktree.acquire`, with the worker `profile` the workflow
+  manual's `### Git` guidance selects. Keep the `worker_key` it returns; it
   is the sole branch owner, so skip Spawn step 3. Render each worker with
   `root_override: <that worktree path>` and put the acquired branch on the
   task block's Branch line. When a batch worker's route verdict is not
