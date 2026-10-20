@@ -12,6 +12,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 9419f414981f48c5
 sage-review-completeness-reviewed: 9419f414981f48c5
+completed: 2026-10-20
 ---
 
 # Named worktree profiles for worktree.acquire/release
