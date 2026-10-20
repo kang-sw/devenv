@@ -317,6 +317,39 @@ pre-change `Config` parse (plain `overrides` map) of a file carrying a
 profile still succeeding. An
 acquire test with a submodule fixture under `submodule.recurse=true` passes.
 
+### Result (1cdd2f6f7) - 2026-10-20
+
+- Landed: wsconfig structured values in a separate `structured_overrides`
+  member (project > repo > global > builtin, whole-value override, session
+  refused); `config.tune` repo-scope writes for every key through a
+  member-preserving writer that never stages and names the written path;
+  the `worktree.profile.<name>` family with name and strict schema
+  validation at write and at resolve (a bad committed profile fails naming
+  file and key), builtin `full` and `housekeeping`, and a `config.list` knob
+  carrying `value_schema` plus resolved profiles with provenance;
+  `-c submodule.recurse=false` on every checkout-family call, including the
+  dispatcher rollback.
+- Verification: `go test ./...` in `agents-plugin-tool` passed. New tests:
+  TestListStructuredPrecedence, TestStructuredRefusesSessionScope,
+  TestRepoStructuredWritePreservesOtherMembers,
+  TestUnsetStructuredRemovesAndNoOps, TestRepoWriteNeedsRoot,
+  TestRepoWriteRefusedForGlobalOnlyKey,
+  TestListStructuredMalformedFileNamesPath,
+  TestPreStructuredConfigShapeParsesStructuredFile,
+  TestParseWorktreeProfile, TestValidateWorktreeProfileName,
+  TestBuiltinWorktreeProfilesResolve,
+  TestResolveWorktreeProfilesRejectsBadCommittedProfile,
+  TestConfigTuneWorktreeProfileRepoWrite, TestConfigTuneScalarRepoWrite,
+  TestConfigListWorktreeProfileKnob, TestWorktreeAcquireSubmoduleRecurseTrue.
+- Decisions: `structured_overrides` is a new member because an older ws
+  decodes `overrides` as `map[string]string`; caveat: an older ws writing the
+  project or global file drops the member. The profile family defaults to
+  project scope (repo writes a tracked file, so it is explicit); declared
+  adapter keys still may not default to repo, and `worktree.` is a reserved
+  adapter namespace. Validation is a strict decoder mirroring the published
+  schema, not a schema library. `config.list` reports a bad profile as the
+  knob's error rather than failing the whole catalog.
+
 ### Phase 2: Profile-partitioned acquire/release with hooks and quarantine
 
 Depends on Phase 1. Replace `sparse_paths` with the required `profile`
@@ -358,6 +391,62 @@ quarantines on both a fresh create and a re-adoption, and leaves no lease.
 Live check: `git sparse-checkout set --cone`
 on a worktree left in non-cone mode behaves as the implementation assumes
 (record the observation in the Result).
+
+### Result (5a7122c03, 1b9d8d617) - 2026-10-20
+
+- Landed as the two planned commits. 5a7122c03 (partitioning): required
+  `profile` (`sparse_paths` rejected with a pointer to `housekeeping`),
+  profile marker in the worktree's git admin dir with provisioning hash,
+  partitioned reuse, declared cone/patterns sparse applied only on entry,
+  `preserve` at both hygiene points, lazy legacy adoption into builtins,
+  ticket-board visibility check, `worktree.list` profile/`legacy`, workflow
+  manual profile list in `### Git` plus worker-profile guidance, `lead-run`
+  acquire step naming a profile, and the banner/`git.merge`/`wsgit` strings
+  pointing at `profile: "housekeeping"`; wsflow and Pi mirrors regenerated.
+  1b9d8d617 (hooks): argv hooks at post_provision/post_acquire/pre_release
+  with `WS_WORKTREE_DIR`/`WS_BASE`/`WS_TARGET_BRANCH`, worktree or relative
+  `cwd`, 10-minute timeout, provenance (argv, scope, exit code) in results,
+  quarantine in the marker with a per-profile count, quarantined entries
+  shown by `worktree.list` and never reused, pre_release failure leaving the
+  worktree leased and unchanged, and the post_provision preserve warning.
+- Verification: `go test ./...` in `agents-plugin-tool` passed (mcp 448s);
+  `python3 -m unittest discover` over `agents-plugin/tests` and
+  `agents-plugin-wsflow/tests` passed. New
+  tests: TestProvisionWorktreeHousekeepingProfile,
+  TestProvisionWorktreeReusePartitionsByProfile,
+  TestProvisionWorktreePreserveSurvivesHygiene,
+  TestProvisionWorktreeDefinitionChangeReadopts,
+  TestProvisionWorktreePatternsProfileExcludesDir,
+  TestProvisionWorktreeAdoptsLegacyIntoBuiltinsOnly,
+  TestProvisionWorktreeHiddenTicketBoardFails,
+  TestReleaseWorktreeLegacyAndVanishedProfile,
+  TestWorkflowManualRendersWorktreeProfiles,
+  TestWorktreeAcquireHousekeepingDispatch,
+  TestWorktreeHooksEnvCwdAndProvenance,
+  TestWorktreeHookSparseWideningSurvivesReuse,
+  TestWorktreeHookPostProvisionPreserveWarning,
+  TestWorktreeHookPostAcquireFailureQuarantines,
+  TestWorktreeHookPostProvisionFailureQuarantines (fresh create and
+  re-adoption, no lease), TestWorktreeHookPreReleaseFailureLeavesWorktree,
+  TestWorktreeHookTimeoutFails. Mutation checks: dropping the quarantine
+  skip and dropping the timeout each fail their test.
+- Live check (git 2.50.1): `git sparse-checkout set --cone ai-docs` on a
+  worktree in non-cone mode flips `core.sparseCheckoutCone` false to true and
+  materializes only the cone, so applying a declared sparse needs no
+  `disable` step between modes.
+- Decisions: the marker is stamped with an empty hash before provisioning,
+  so a part-way failure stays in this profile's partition and re-provisions
+  on its next claim. A hidden ticket board returns the worktree to the pool
+  with release hygiene and a loud error, not a quarantine (no hook failed).
+  `workflow_manual` fails on a bad committed profile, as it already does for
+  a malformed committed config file. Hook tests re-execute the test binary as
+  the hook so they run on the Windows CI leg. The quarantine record keeps a
+  combined stdout+stderr tail rather than stderr only (cosmetic: hooks often
+  report failures on stdout). At pre_release `WS_BASE` is empty and
+  `WS_TARGET_BRANCH` is the checked-out branch; an acquire without
+  `target_branch` passes the base as `WS_TARGET_BRANCH`. The preserve warning
+  diffs `git clean -ndx` against `git clean -nd` with the preserve
+  exclusions.
 
 ### Phase 3: worktree.remove and the stale-pool nudge
 
