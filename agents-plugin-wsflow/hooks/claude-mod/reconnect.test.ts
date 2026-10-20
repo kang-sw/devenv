@@ -10,8 +10,9 @@ import {
   REASON_NO_SERVER,
   REASON_TOOLS_ABSENT,
   RECONNECT_RESULT,
-  RECONNECT_RESULT_NO_CONTINUATION,
+  RECONNECT_RESULT_NO_RESUME,
   reconnectDescription,
+  RESUME_SENTENCE,
   successText,
   TOOLS_POLL_MS,
   TOOLS_WAIT_MS,
@@ -41,6 +42,10 @@ function harness(opts: { plugin?: string; server?: string | null } = {}) {
     resolves: 0,
     submits: [] as string[],
     dropSubmits: 0,
+    /** The next submits that reject. */
+    rejectSubmits: 0,
+    /** Run at each sleep of the tool-list wait, while the step is pending. */
+    onSleep: undefined as (() => void) | undefined,
     scheduled: [] as (() => void)[],
     afterThrows: 0,
     logs: [] as { text: string; to: string }[],
@@ -64,6 +69,10 @@ function harness(opts: { plugin?: string; server?: string | null } = {}) {
     },
     resolve: async () => void (h.resolves += 1),
     submit: async (text) => {
+      if (h.rejectSubmits > 0) {
+        h.rejectSubmits -= 1
+        throw new Error('submit failed')
+      }
       if (h.dropSubmits > 0) {
         h.dropSubmits -= 1
         return { drop: 'a Stop stands' } as never
@@ -78,7 +87,10 @@ function harness(opts: { plugin?: string; server?: string | null } = {}) {
       }
       h.scheduled.push(fn)
     },
-    sleep: async (ms) => void (h.slept += ms),
+    sleep: async (ms) => {
+      h.slept += ms
+      h.onSleep?.()
+    },
     log: (text, to) => void h.logs.push({ text, to }),
   }
   r.start(edges)
@@ -91,21 +103,27 @@ function harness(opts: { plugin?: string; server?: string | null } = {}) {
     r.turnComplete(agentId, reason)
     await runScheduled()
   }
+  /** A turn.start, whatever started it: the main thread's when agentId is undefined. */
+  const turnStart = (agentId?: string) => r.turnStarted(agentId)
   const transcript = () => h.logs.filter((l) => l.to === 'transcript').map((l) => l.text)
-  return { h, r, edges, turnEnd, runScheduled, transcript }
+  const debugLog = () => h.logs.filter((l) => l.to === 'debug').map((l) => l.text)
+  return { h, r, edges, turnEnd, turnStart, runScheduled, transcript, debugLog }
 }
 
+const SUBAGENT_DENY = 'request_mcp_reconnect serves the main session only; called from subagent sub-1.'
+
+/** Make every tool-list read of the step answer not listed, so the wait runs out. */
+const neverBack = (h: ReturnType<typeof harness>['h']) => h.listed.push(...Array.from({ length: 100 }, () => false))
+
 describe('pure core', () => {
-  test('the tool accepts one trimmed line from the main session only', () => {
-    expect(checkReconnectCall(undefined, '  resume the review  ')).toEqual({ continuation: 'resume the review' })
-    expect(checkReconnectCall('sub-1', 'x')).toEqual({ deny: 'request_mcp_reconnect serves the main session only; called from subagent sub-1.' })
-    const omitted = { continuation: undefined }
-    expect(checkReconnectCall(undefined, '')).toEqual(omitted)
-    expect(checkReconnectCall(undefined, '   ')).toEqual(omitted)
-    expect(checkReconnectCall(undefined, undefined)).toEqual(omitted)
-    expect(checkReconnectCall(undefined, 42)).toEqual(omitted)
-    expect(checkReconnectCall(undefined, 'one\ntwo')).toEqual({ error: 'request_mcp_reconnect: continuation must be one line.' })
-    expect(checkReconnectCall(undefined, 'one\rtwo')).toEqual({ error: 'request_mcp_reconnect: continuation must be one line.' })
+  test('only a literal true sets the flag; any other value reads as unset, never as an error; a subagent is refused', () => {
+    expect(checkReconnectCall(undefined, true)).toEqual({ resume: true })
+    // A non-boolean, and a leftover continuation string (one line or several), read as unset.
+    for (const value of [undefined, false, 'true', 1, 'go on', 'one\ntwo', 'one\rtwo', '', null]) {
+      expect(checkReconnectCall(undefined, value)).toEqual({ resume: false })
+    }
+    expect(checkReconnectCall('sub-1', true)).toEqual({ deny: SUBAGENT_DENY })
+    expect(checkReconnectCall('sub-1', undefined)).toEqual({ deny: SUBAGENT_DENY })
   })
 
   test('a reconnect answer is a refusal only when it has words that do not say it reconnected', () => {
@@ -123,25 +141,26 @@ describe('pure core', () => {
 describe('pinned prose', () => {
   test('tool description and result', () => {
     expect(reconnectDescription('ws')).toBe(
-      "Call this first when the ws MCP server's tools have left your tool list or a call reports it not connected. It reconnects the ws MCP server when the current turn ends. `continuation` is optional: pass it only when work must resume by itself after the reconnect attempt, as one line naming what to do next; it is sent as your next prompt with the outcome. Omit it when the next turn will come from the human or from a background agent's notification; a failed reconnect is still reported to you. Main session only.",
+      "Call this first when the ws MCP server's tools have left your tool list or a call reports it not connected. It reconnects the ws MCP server when the current turn ends. Set `continue` to true only when work must resume by itself after the reconnect attempt: a fixed resume prompt then follows a successful reconnect, unless another prompt has already started the next turn. Leave it unset when the next turn will come from the human or from a background agent's notification; a failed reconnect is always reported to you. Main session only.",
     )
     expect(RECONNECT_RESULT).toBe(
-      'Reconnect requested. End your turn now without further tool calls; the reconnect runs when the turn ends, and your continuation resumes the work.',
+      'Reconnect requested. End your turn now without further tool calls; the reconnect runs when the turn ends, and a resume prompt follows a success unless another prompt has already started the next turn. A failed reconnect is reported to you in a prompt.',
     )
-    expect(RECONNECT_RESULT_NO_CONTINUATION).toBe(
+    expect(RECONNECT_RESULT_NO_RESUME).toBe(
       "Reconnect requested. End your turn now without further tool calls; the reconnect runs when the turn ends. A successful reconnect submits no prompt: the next turn comes from the human or from a background agent's notification. A failed reconnect is reported to you in a prompt.",
     )
   })
 
-  test('continuations', () => {
-    expect(successText('wsflow', 'resume the review')).toBe(
-      '[wsflow mcp] The wsflow MCP server reconnected; its tools are available again.\nContinue: resume the review',
+  test('success and failure reports', () => {
+    expect(RESUME_SENTENCE).toBe('Resume the interrupted work.')
+    expect(successText('wsflow')).toBe(
+      '[wsflow mcp] The wsflow MCP server reconnected; its tools are available again. Resume the interrupted work.',
     )
-    expect(failureText('wsflow', 'its tools were not back within 10 s', undefined)).toBe(
+    expect(failureText('wsflow', 'its tools were not back within 10 s', false)).toBe(
       '[wsflow mcp] The wsflow MCP server did not come back (its tools were not back within 10 s). Do not call request_mcp_reconnect again for this drop: a reconnect that just failed fails the same way. Ask the user to re-enable the server from /mcp, run /reload-plugins, or restart the session.',
     )
-    expect(failureText('wsflow', 'its tools were not back within 10 s', 'resume the review')).toBe(
-      '[wsflow mcp] The wsflow MCP server did not come back (its tools were not back within 10 s). Do not call request_mcp_reconnect again for this drop: a reconnect that just failed fails the same way. Ask the user to re-enable the server from /mcp, run /reload-plugins, or restart the session.\nContinue: resume the review',
+    expect(failureText('wsflow', 'its tools were not back within 10 s', true)).toBe(
+      '[wsflow mcp] The wsflow MCP server did not come back (its tools were not back within 10 s). Do not call request_mcp_reconnect again for this drop: a reconnect that just failed fails the same way. Ask the user to re-enable the server from /mcp, run /reload-plugins, or restart the session. Resume the interrupted work.',
     )
   })
 
@@ -154,57 +173,55 @@ describe('pinned prose', () => {
 })
 
 describe('lever', () => {
-  test('a subagent call is refused and a multi-line continuation is a tool error; neither requests', async () => {
+  test('a subagent call is refused and requests nothing', async () => {
     const { h, r, turnEnd } = harness()
-    expect(r.lever('sub-1', 'go on')).toEqual({ deny: 'request_mcp_reconnect serves the main session only; called from subagent sub-1.' })
-    expect(r.lever(undefined, 'one\ntwo')).toEqual({
-      isError: true,
-      result: 'request_mcp_reconnect: continuation must be one line.',
-      text: 'request_mcp_reconnect: continuation must be one line.',
-    })
+    expect(r.lever('sub-1', true)).toEqual({ deny: SUBAGENT_DENY })
+    expect(r.lever('sub-1', undefined)).toEqual({ deny: SUBAGENT_DENY })
     await turnEnd()
     expect(h.reconnects).toEqual([])
     expect(h.submits).toEqual([])
   })
 
-  test('an omitted, whitespace-only, or non-string continuation is accepted with the no-continuation result', () => {
-    for (const value of [undefined, '', '  \t ', 42]) {
+  test('an absent, false, or non-boolean flag is accepted with the no-resume result', () => {
+    for (const value of [undefined, false, 'true', 1, 'go on', 'one\ntwo']) {
       const { r } = harness()
-      expect(r.lever(undefined, value)).toEqual({ result: RECONNECT_RESULT_NO_CONTINUATION })
+      expect(r.lever(undefined, value)).toEqual({ result: RECONNECT_RESULT_NO_RESUME })
     }
-    expect(harness().r.lever('sub-1', undefined)).toEqual({ deny: 'request_mcp_reconnect serves the main session only; called from subagent sub-1.' })
+    expect(harness().r.lever(undefined, true)).toEqual({ result: RECONNECT_RESULT })
   })
 
-  test('without a continuation a successful reconnect still runs and submits nothing', async () => {
-    const { h, r, turnEnd, transcript } = harness()
-    r.lever(undefined, undefined)
-    await turnEnd()
-    expect(h.reconnects).toEqual([SERVER])
-    expect(h.resolves).toBe(1)
-    expect(h.submits).toEqual([])
-    expect(transcript()).toEqual([])
-    await turnEnd()
-    expect(h.reconnects.length).toBe(1)
+  test('without the flag a successful reconnect still runs and submits nothing', async () => {
+    for (const value of [undefined, false, 'go on']) {
+      const { h, r, turnEnd, transcript } = harness()
+      r.lever(undefined, value)
+      await turnEnd()
+      expect(h.reconnects).toEqual([SERVER])
+      expect(h.resolves).toBe(1)
+      expect(h.submits).toEqual([])
+      expect(transcript()).toEqual([])
+      await turnEnd()
+      expect(h.reconnects.length).toBe(1)
+    }
   })
 
-  test('without a continuation a failed reconnect submits its failure notice, with no Continue line', async () => {
+  test('without the flag a failed reconnect submits its failure report, with no resume sentence', async () => {
     const a = harness()
-    a.h.listed.push(...Array.from({ length: 100 }, () => false))
-    a.r.lever(undefined, '  ')
+    neverBack(a.h)
+    a.r.lever(undefined, 'go on')
     await a.turnEnd()
     await tick(1000)
-    expect(a.h.submits).toEqual([failureText('ws', REASON_TOOLS_ABSENT, undefined)])
-    expect(a.h.submits[0]).not.toContain('Continue:')
+    expect(a.h.submits).toEqual([failureText('ws', REASON_TOOLS_ABSENT, false)])
+    expect(a.h.submits[0]).not.toContain(RESUME_SENTENCE)
 
     const b = harness({ server: null })
     b.r.lever(undefined, undefined)
     await b.turnEnd()
-    expect(b.h.submits).toEqual([failureText('ws', REASON_NO_SERVER, undefined)])
+    expect(b.h.submits).toEqual([failureText('ws', REASON_NO_SERVER, false)])
   })
 
-  test('a repeat call in both orders: an omitted one clears an earlier continuation, a supplied one sets it', async () => {
+  test('a repeat call in both orders: the latest flag wins', async () => {
     const a = harness()
-    a.r.lever(undefined, 'first')
+    a.r.lever(undefined, true)
     a.r.lever(undefined, undefined)
     await a.turnEnd()
     expect(a.h.reconnects.length).toBe(1)
@@ -212,15 +229,15 @@ describe('lever', () => {
 
     const b = harness()
     b.r.lever(undefined, undefined)
-    b.r.lever(undefined, 'second')
+    b.r.lever(undefined, true)
     await b.turnEnd()
     expect(b.h.reconnects.length).toBe(1)
-    expect(b.h.submits).toEqual([successText('ws', 'second')])
+    expect(b.h.submits).toEqual([successText('ws')])
   })
 
   test('the reconnect waits for a non-aborted main-thread turn end, then runs after the hook returned', async () => {
     const { h, r, turnEnd } = harness()
-    expect(r.lever(undefined, 'go on')).toEqual({ result: RECONNECT_RESULT })
+    expect(r.lever(undefined, true)).toEqual({ result: RECONNECT_RESULT })
     await turnEnd('answer', 'sub-1')
     await turnEnd('aborted')
     expect(h.reconnects).toEqual([])
@@ -230,13 +247,13 @@ describe('lever', () => {
     expect(h.reconnects).toEqual([])
   })
 
-  test('success: the tools are listed after the command, the name is resolved again, and one continuation follows', async () => {
+  test('success with the flag: the tools are listed after the command, the name is resolved again, and one resume prompt follows', async () => {
     const { h, r, turnEnd } = harness()
-    r.lever(undefined, 'go on')
+    r.lever(undefined, true)
     await turnEnd()
     expect(h.reconnects).toEqual([SERVER])
     expect(h.resolves).toBe(1)
-    expect(h.submits).toEqual([successText('ws', 'go on')])
+    expect(h.submits).toEqual([successText('ws')])
     await turnEnd()
     expect(h.reconnects.length).toBe(1)
     expect(h.submits.length).toBe(1)
@@ -244,95 +261,110 @@ describe('lever', () => {
 
   test('the reconnect runs even when the tools are listed before it', async () => {
     const { h, r, turnEnd } = harness()
-    r.lever(undefined, 'go on')
+    r.lever(undefined, true)
     await turnEnd()
     expect(h.reconnects).toEqual([SERVER])
   })
 
-  test('a repeat call while pending replaces the continuation; one reconnect', async () => {
+  test('a repeat call with the flag while pending reconnects once', async () => {
     const { h, r, turnEnd } = harness()
-    r.lever(undefined, 'first')
-    r.lever(undefined, 'second')
+    r.lever(undefined, true)
+    r.lever(undefined, true)
     await turnEnd()
     expect(h.reconnects.length).toBe(1)
-    expect(h.submits).toEqual([successText('ws', 'second')])
+    expect(h.submits).toEqual([successText('ws')])
   })
 
   test('the tool list is polled for a bounded time before success', async () => {
     const { h, r, turnEnd } = harness()
     h.listed.push(false, false, false)
-    r.lever(undefined, 'go on')
+    r.lever(undefined, true)
     await turnEnd()
     expect(h.listReads).toBe(4)
     expect(h.slept).toBe(3 * TOOLS_POLL_MS)
-    expect(h.submits).toEqual([successText('ws', 'go on')])
+    expect(h.submits).toEqual([successText('ws')])
   })
 
   test('failure: the tools not back within the wait', async () => {
     const { h, r, turnEnd } = harness()
-    h.listed.push(...Array.from({ length: 100 }, () => false))
-    r.lever(undefined, 'go on')
+    neverBack(h)
+    r.lever(undefined, true)
     await turnEnd()
     await tick(1000)
     expect(h.slept).toBe(TOOLS_WAIT_MS)
     expect(h.resolves).toBe(0)
-    expect(h.submits).toEqual([failureText('ws', REASON_TOOLS_ABSENT, 'go on')])
+    expect(h.submits).toEqual([failureText('ws', REASON_TOOLS_ABSENT, true)])
   })
 
   test('a failing tool-list read counts as not listed', async () => {
     const { h, r, turnEnd } = harness()
     h.listed.push(new Error('list failed'))
-    r.lever(undefined, 'go on')
+    r.lever(undefined, true)
     await turnEnd()
     expect(h.listReads).toBe(2)
-    expect(h.submits).toEqual([successText('ws', 'go on')])
+    expect(h.submits).toEqual([successText('ws')])
   })
 
   test('failure: the command rejects', async () => {
     const { h, r, turnEnd } = harness()
     h.reconnectAnswers.push(new Error('past a Stop'))
-    r.lever(undefined, 'go on')
+    r.lever(undefined, true)
     await turnEnd()
     expect(h.listReads).toBe(0)
-    expect(h.submits).toEqual([failureText('ws', reasonCommandFailed(new Error('past a Stop')), 'go on')])
+    expect(h.submits).toEqual([failureText('ws', reasonCommandFailed(new Error('past a Stop')), true)])
   })
 
   test('failure: the command answers that it cannot reconnect, though the tools stay listed (headless)', async () => {
     const { h, r, turnEnd } = harness()
     const headless = "Reconnect, enable, and disable aren't available in this session."
     h.reconnectAnswers.push({ text: headless })
-    r.lever(undefined, 'go on')
+    r.lever(undefined, true)
     await turnEnd()
-    expect(h.submits).toEqual([failureText('ws', reasonCommandAnswered(headless), 'go on')])
+    expect(h.submits).toEqual([failureText('ws', reasonCommandAnswered(headless), true)])
   })
 
   test('failure without reconnecting: no server name was resolved', async () => {
     const { h, r, turnEnd } = harness({ server: null })
-    r.lever(undefined, 'go on')
+    r.lever(undefined, true)
     await turnEnd()
     expect(h.reconnects).toEqual([])
-    expect(h.submits).toEqual([failureText('ws', REASON_NO_SERVER, 'go on')])
+    expect(h.submits).toEqual([failureText('ws', REASON_NO_SERVER, true)])
   })
 
   test('a call made while the step runs is a new request for a later turn end', async () => {
     const { h, r, turnEnd } = harness()
     h.holdReconnect = true
-    r.lever(undefined, 'first')
+    r.lever(undefined, true)
     await turnEnd()
     expect(h.reconnects.length).toBe(1)
-    r.lever(undefined, 'second')
+    r.lever(undefined, true)
     h.held.shift()!({})
     await tick()
-    expect(h.submits).toEqual([successText('ws', 'first')])
+    expect(h.submits).toEqual([successText('ws')])
     h.holdReconnect = false
     await turnEnd()
     expect(h.reconnects.length).toBe(2)
-    expect(h.submits).toEqual([successText('ws', 'first'), successText('ws', 'second')])
+    expect(h.submits).toEqual([successText('ws'), successText('ws')])
+  })
+
+  test('a call without the flag made while the step runs does not change that step', async () => {
+    const { h, r, turnEnd } = harness()
+    h.holdReconnect = true
+    r.lever(undefined, true)
+    await turnEnd()
+    r.lever(undefined, undefined)
+    h.held.shift()!({})
+    await tick()
+    expect(h.submits).toEqual([successText('ws')])
+    h.holdReconnect = false
+    await turnEnd()
+    expect(h.reconnects.length).toBe(2)
+    expect(h.submits).toEqual([successText('ws')])
   })
 
   test('a step still queued at a later turn end is queued again; the stale one stays inert', async () => {
     const { h, r, runScheduled } = harness()
-    r.lever(undefined, 'go on')
+    r.lever(undefined, true)
     r.turnComplete(undefined, 'answer')
     const stale = h.scheduled.splice(0)
     r.turnComplete(undefined, 'answer')
@@ -346,36 +378,158 @@ describe('lever', () => {
   test('a step the clock refused is retried at the next turn end', async () => {
     const { h, r, turnEnd } = harness()
     h.afterThrows = 1
-    r.lever(undefined, 'go on')
+    r.lever(undefined, true)
     await turnEnd()
     expect(h.reconnects).toEqual([])
     await turnEnd()
     expect(h.reconnects.length).toBe(1)
   })
 
-  test('a dropped continuation is written to the transcript', async () => {
+  test('a dropped resume prompt is written to the transcript with its fixed text', async () => {
     const { h, r, turnEnd, transcript } = harness()
     h.dropSubmits = 1
-    r.lever(undefined, 'go on')
+    r.lever(undefined, true)
     await turnEnd()
-    expect(transcript()).toEqual([`ws mcp reconnect: a prompt was not submitted (dropped: a Stop stands):\n${successText('ws', 'go on')}`])
+    expect(h.submits).toEqual([])
+    expect(transcript()).toEqual([`ws mcp reconnect: a prompt was not submitted (dropped: a Stop stands):\n${successText('ws')}`])
+  })
+
+  test('a resume prompt whose submit rejects is written to the transcript with its fixed text', async () => {
+    const { h, r, turnEnd, transcript } = harness()
+    h.rejectSubmits = 1
+    r.lever(undefined, true)
+    await turnEnd()
+    expect(h.submits).toEqual([])
+    expect(transcript()).toEqual([`ws mcp reconnect: a prompt was not submitted (Error: submit failed):\n${successText('ws')}`])
+  })
+
+  test('a lost failure report is written to the transcript', async () => {
+    const { h, r, turnEnd, transcript } = harness({ server: null })
+    h.dropSubmits = 1
+    r.lever(undefined, undefined)
+    await turnEnd()
+    expect(transcript()).toEqual([
+      `ws mcp reconnect: a prompt was not submitted (dropped: a Stop stands):\n${failureText('ws', REASON_NO_SERVER, false)}`,
+    ])
+  })
+})
+
+describe('turn-start guard', () => {
+  test('a main-thread turn started while the reconnect command is pending: a success submits no resume prompt', async () => {
+    const { h, r, turnEnd, turnStart, debugLog } = harness()
+    h.holdReconnect = true
+    r.lever(undefined, true)
+    await turnEnd()
+    turnStart()
+    h.held.shift()!({})
+    await tick()
+    expect(h.resolves).toBe(1)
+    expect(h.submits).toEqual([])
+    expect(debugLog()).toContain('ws mcp reconnect: a turn started during the reconnect step; the resume prompt is not submitted')
+  })
+
+  test('a main-thread turn started during the tool-list wait: a success submits no resume prompt', async () => {
+    const { h, r, turnEnd, turnStart } = harness()
+    h.listed.push(false, false)
+    h.onSleep = () => {
+      h.onSleep = undefined
+      turnStart()
+    }
+    r.lever(undefined, true)
+    await turnEnd()
+    expect(h.listReads).toBe(3)
+    expect(h.submits).toEqual([])
+  })
+
+  test('a subagent turn started during the step does not suppress the resume prompt', async () => {
+    const { h, r, turnEnd, turnStart } = harness()
+    h.holdReconnect = true
+    r.lever(undefined, true)
+    await turnEnd()
+    turnStart('sub-1')
+    h.held.shift()!({})
+    await tick()
+    expect(h.submits).toEqual([successText('ws')])
+  })
+
+  test('a main-thread turn started before the step starts does not suppress its resume prompt', async () => {
+    const { h, r, runScheduled, turnStart } = harness()
+    turnStart()
+    r.lever(undefined, true)
+    r.turnComplete(undefined, 'answer')
+    turnStart()
+    await runScheduled()
+    expect(h.submits).toEqual([successText('ws')])
+  })
+
+  test('a failure is reported whatever turn started during the step; with the flag it ends with the resume sentence', async () => {
+    const a = harness()
+    a.h.holdReconnect = true
+    a.r.lever(undefined, true)
+    await a.turnEnd()
+    a.turnStart()
+    a.h.held.shift()!({ text: 'Failed to reconnect' })
+    await tick()
+    expect(a.h.submits).toEqual([failureText('ws', reasonCommandAnswered('Failed to reconnect'), true)])
+    expect(a.h.submits[0]!.endsWith(` ${RESUME_SENTENCE}`)).toBe(true)
+
+    const b = harness()
+    b.h.holdReconnect = true
+    b.r.lever(undefined, undefined)
+    await b.turnEnd()
+    b.turnStart()
+    b.h.held.shift()!({ text: 'Failed to reconnect' })
+    await tick()
+    expect(b.h.submits).toEqual([failureText('ws', reasonCommandAnswered('Failed to reconnect'), false)])
+    expect(b.h.submits[0]).not.toContain(RESUME_SENTENCE)
+  })
+
+  test('a failure with no intervening turn is reported the same way', async () => {
+    const a = harness()
+    neverBack(a.h)
+    a.r.lever(undefined, true)
+    await a.turnEnd()
+    await tick(1000)
+    expect(a.h.submits).toEqual([failureText('ws', REASON_TOOLS_ABSENT, true)])
+
+    const b = harness()
+    neverBack(b.h)
+    b.r.lever(undefined, false)
+    await b.turnEnd()
+    await tick(1000)
+    expect(b.h.submits).toEqual([failureText('ws', REASON_TOOLS_ABSENT, false)])
+  })
+
+  test('a turn the step suppressed does not carry over: the next request with the flag resumes', async () => {
+    const { h, r, turnEnd, turnStart } = harness()
+    h.holdReconnect = true
+    r.lever(undefined, true)
+    await turnEnd()
+    turnStart()
+    h.held.shift()!({})
+    await tick()
+    expect(h.submits).toEqual([])
+    h.holdReconnect = false
+    r.lever(undefined, true)
+    await turnEnd()
+    expect(h.submits).toEqual([successText('ws')])
   })
 })
 
 describe('session end', () => {
   test('drops a pending request', async () => {
     const { h, r, turnEnd } = harness()
-    r.lever(undefined, 'go on')
+    r.lever(undefined, true)
     r.end('clear')
     await turnEnd()
     expect(h.reconnects).toEqual([])
     expect(h.submits).toEqual([])
   })
 
-  test('drops the continuation of a step that was running', async () => {
+  test('drops the report of a step that was running', async () => {
     const { h, r, turnEnd } = harness()
     h.holdReconnect = true
-    r.lever(undefined, 'go on')
+    r.lever(undefined, true)
     await turnEnd()
     r.end('resume')
     h.held.shift()!({})
@@ -385,7 +539,7 @@ describe('session end', () => {
 
   test('a scheduled step that had not started does nothing after the end', async () => {
     const { h, r, runScheduled } = harness()
-    r.lever(undefined, 'go on')
+    r.lever(undefined, true)
     r.turnComplete(undefined, 'answer')
     r.end('clear')
     await runScheduled()

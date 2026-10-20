@@ -2,7 +2,7 @@ import { expect, mock, test, type TestBody } from 'claude-code/testing'
 
 import { CONTINUATION_WINDOW_MS } from './compaction'
 import { adoptionNotice, KEY_STORE_PREFIX, MAILBOX_LINE, pointerText, SECTION_ID } from './manual'
-import { continuationText } from './timing'
+import { RESUME_TEXT } from './timing'
 
 type Engine = Parameters<TestBody>[0]
 type On = Parameters<TestBody>[1]
@@ -342,12 +342,12 @@ test("ws: the lever's own landing sets the flag, though the engine routes it pas
   if (!isWs(w)) return
   await compose($, w)
   expect(seen(await read($, w, 'workflow_manual', { session_key: 'kept-key' }))).toBe(keyedResponse('kept-key', '(no todos)'))
-  await $.tool.call({ tool: 'mcp__ws__request_compaction', continuation: 'go on' } as never)
+  await $.tool.call({ tool: 'mcp__ws__request_compaction', continue: true } as never)
   await w.clock.settle()
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer' } as never)
   await w.clock.settle()
   await w.clock.advance(CONTINUATION_WINDOW_MS)
-  expect(w.prompts).toEqual([continuationText('go on')])
+  expect(w.prompts).toEqual([RESUME_TEXT])
   await compose($, w)
   expect(seen(await read($, w, 'workflow_manual', { session_key: 'kept-key' }))).toMatch(/^Workflow manual is in your system prompt;/)
 })

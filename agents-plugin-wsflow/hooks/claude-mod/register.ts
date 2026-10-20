@@ -1,4 +1,4 @@
-import type { HookStream, ProcessSpawnChunk, ProcessSpawnResult, PromptSubmitResult, Register, ToolCallResult } from 'claude-code'
+import type { HookStream, ProcessSpawnChunk, ProcessSpawnResult, Register, ToolCallResult } from 'claude-code'
 
 import { compactionEnabledFor, createCompaction } from './compaction'
 import { createManual, SECTION_ID, type ReadFamily } from './manual'
@@ -26,12 +26,12 @@ import {
 //   project) the mod binds every key the conversation gets itself; elsewhere
 //   the agent binds its key through the mod-registered mailbox watch tool.
 // - Lead compaction timing: advisory and milestone wake turns before native
-//   auto compaction, and the compaction request tool, whose optional
-//   continuation a prompt typed during the compaction carries (see
+//   auto compaction, and the compaction request tool, whose opt-in resume
+//   prompt yields to any turn already started after the compaction (see
 //   compaction.ts).
 // - MCP reconnect lever: a tool the model calls when the plugin's MCP server
-//   has gone, and `/mcp reconnect` at the next main-thread turn end (see
-//   reconnect.ts).
+//   has gone, and `/mcp reconnect` at the next main-thread turn end, with the
+//   same opt-in resume prompt (see reconnect.ts).
 // - Workflow manual injection (ws only, in a ws project): a lead session key
 //   minted per conversation and the keyed workflow manual in the system
 //   prompt, `workflow_manual` answered with the session state alone while
@@ -493,7 +493,7 @@ export const register: Register = (on) => {
         description: LEVER_DESCRIPTION,
         inputSchema: {
           type: 'object',
-          properties: { continuation: { type: 'string' } },
+          properties: { continue: { type: 'boolean' } },
         },
         isDeferred: false,
       })
@@ -520,7 +520,7 @@ export const register: Register = (on) => {
         description: reconnectDescription($.plugin.name),
         inputSchema: {
           type: 'object',
-          properties: { continuation: { type: 'string' } },
+          properties: { continue: { type: 'boolean' } },
         },
         isDeferred: false,
       })
@@ -607,25 +607,6 @@ export const register: Register = (on) => {
     return out === undefined ? res : { result: out }
   }
 
-  // A prompt the person typed during the lever's compaction carries its held
-  // continuation as context, so the continuation starts no turn of its own.
-  // A slash command does not take it (it may never reach the model), and a
-  // prompt that did not enter gives it back.
-  on('prompt.submit', async ($, e, next) => {
-    if (!compactionEnabledFor($.plugin.name) || e.origin?.kind !== 'composer' || e.command) return next(e)
-    const claimed = compaction.claim()
-    if (!claimed) return next(e)
-    let res: PromptSubmitResult
-    try {
-      res = await next({ ...e, context: [...(e.context ?? []), claimed.text] })
-    } catch (err) {
-      claimed.release(String(err))
-      throw err
-    }
-    if (res.drop !== undefined) claimed.release(`dropped: ${res.drop}`)
-    return res
-  })
-
   // Mailbox steer: mail queued while a main-thread turn runs is appended at
   // the turn's next tool boundary, before the result returns, since a tool
   // result is always followed by a model request in the same turn. Only the
@@ -702,14 +683,14 @@ export const register: Register = (on) => {
 
   on('tool.call', { tool: /__request_compaction$/ }, async ($, e, next) => {
     if (!compactionEnabledFor($.plugin.name) || e.tool !== leverTool) return next(e)
-    return compaction.lever(e.agentId, (e as { continuation?: unknown }).continuation)
+    return compaction.lever(e.agentId, (e as { continue?: unknown }).continue)
   }).catch(($, e, next) => (next.called ? next(e) : { deny: `${LEVER_TOOL}: the compaction request hook failed; see the debug log.` }))
 
   // Served by the mod, not by the MCP server, so it stays callable after the
   // server has gone.
   on('tool.call', { tool: /__request_mcp_reconnect$/ }, async ($, e, next) => {
     if (e.tool !== reconnectTool) return next(e)
-    return reconnect.lever(e.agentId, (e as { continuation?: unknown }).continuation)
+    return reconnect.lever(e.agentId, (e as { continue?: unknown }).continue)
   }).catch(($, e, next) => (next.called ? next(e) : { deny: `${RECONNECT_TOOL}: the reconnect request hook failed; see the debug log.` }))
 
   // Pushed after each main-thread turn (and on rate-limit moves); the plain
@@ -727,8 +708,20 @@ export const register: Register = (on) => {
     return res
   })
 
+  // A main-thread turn start also tells the compaction and reconnect
+  // features, whose resume prompts yield to a turn already started.
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) mainTurn = true
+    try {
+      if (compactionEnabledFor($.plugin.name)) compaction.turnStarted(e.agentId)
+    } catch (err) {
+      $.ui.log(`ws compaction: turn start handling failed: ${String(err)}`, { to: 'debug' })
+    }
+    try {
+      reconnect.turnStarted(e.agentId)
+    } catch (err) {
+      $.ui.log(`${$.plugin.name} mcp reconnect: turn start handling failed: ${String(err)}`, { to: 'debug' })
+    }
     return next(e)
   })
 
