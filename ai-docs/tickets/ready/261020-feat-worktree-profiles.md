@@ -536,3 +536,61 @@ Python test suites, and `claude plugin validate agents-plugin` pass;
 removed parameter is rejected may name it. Pi `skills/` deletions are done by
 hand (`TestPiMirrorUpToDate` covers only Pi `rsrc/`). Downstream follow-up (not checkable here): MSBuild
 incremental build after reuse with preserve and stable sparse in place.
+
+### Result (17710149d, 1dc39961c, 7bd325a51) - 2026-10-20
+
+- Landed: 17710149d deletes `lead-scope-worktree` (skill, playbook, wsflow
+  and Pi rsrc copies, manifest entries, dispatch/bundle/playbook-contract
+  test rows) and the `workflow_manual` sparse-checkout scope banner with its
+  test; comments that named the banner now describe the behavior they mean,
+  the wsflow-mirroring manual drops the skill, and
+  `260924-research-origin-ticket-ownership-index` records that the scope
+  assignment is no longer an acquire path. 1dc39961c adds the
+  `tickets.create` warning when the created path lies outside the active
+  sparse scope (`check-rules`; fails open below git 2.42); 7bd325a51 is an
+  empty commit recording that content, because 1dc39961c landed under a
+  mis-scoped subject from a concurrent delegate commit and the branch is
+  never rewritten. Generic sparse safety (`SparseCheckoutActive`,
+  `git add --sparse`, the move/close `check-rules` gate, the create
+  collision refusal) is unchanged.
+- Verification: `go test ./... -count=1 -timeout 25m` in
+  `agents-plugin-tool` passed (all 17 packages); `python3 -m unittest
+  discover` over `agents-plugin/tests` (78) and `agents-plugin-wsflow/tests`
+  (15) passed; `claude plugin validate agents-plugin` passed;
+  `grep -rn "lead-scope-worktree\|sparse_paths"` over `agents-plugin*/`
+  (excluding `node_modules/` and the gitignored Pi `skills/`) finds only the
+  acquire dispatch's rejection branch for the removed parameter and its
+  test. New tests: TestTicketCreateWarnsOutsideScope,
+  TestFormatTicketCreateRendersScopeWarning; mutation check: disabling the
+  warning condition fails the first. Live check (git 2.50.1): a committed
+  out-of-scope file vanishes from the worktree on the next `checkout -b` and
+  stays gone after `sparse-checkout reapply`, which the warning text states.
+- Decisions: the Pi `skills/` copy named in this phase is generated from
+  `agents-plugin/skills` at pack time and gitignored, so deleting the source
+  covers it (cosmetic deviation). The verification grep names `sparse_paths`
+  in the acquire dispatch as well as its test, because the rejection must
+  read that key; that is the rejection, not a live use (cosmetic
+  deviation). `TicketScopeInfo.Cone` stays as part of the JSON scope info
+  with its comment no longer naming the banner. The mechanical deletions
+  were done by a delegate and reviewed before commit.
+- Review (lite, one pass over eaa6a7980..7bd325a51): clean, no Critical or
+  Important; 7 Minor left unfixed per the lite allocation. The ones a
+  follow-up may want: release and remove resolve the whole profile family,
+  so an unrelated invalid profile (or a newer field an older ws rejects)
+  blocks them; a fresh sparse-profile worktree whose sparse or branch step
+  fails is left `--no-checkout` with an empty index (dirty, only
+  `worktree.release` recovers it, as with the former `sparse_paths`); a
+  housekeeping worker key resolves config without the repo scope because
+  the cone omits `.ws-workflow/`; the repo-write note names the file even
+  on a no-op reset; the `sparse-checkout add <file>` advice is wrong in
+  cone mode (shared with the collision message); the manual's "list below"
+  dangles on a no-root render; the repo writer reorders hand-authored
+  members.
+- Forward: release note for the release that carries this ticket (the root
+  `CHANGELOG.md` has not been maintained since v0.42.0, so the ship step
+  puts this into the GitHub release body): "`lead-scope-worktree` and the
+  session-bootstrap sparse-scope banner are retired. A downstream worktree
+  that applied a ticket scope with it is still sparse; run
+  `git sparse-checkout disable` there to restore the full checkout.
+  `worktree.acquire` now requires a `profile` (`full` for workers,
+  `housekeeping` for the ai-docs checkout) and rejects `sparse_paths`."
