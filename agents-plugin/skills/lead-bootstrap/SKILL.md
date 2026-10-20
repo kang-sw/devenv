@@ -7,4 +7,3 @@ description: Bootstrap or upgrade a downstream project to AGENTS.md-based ws wor
 
 Call `ws/playbook.read(name: "lead-bootstrap")` and execute the returned procedure
 inline against the user request.
-If this call fails to connect, run `/ws:mcp-server-repair`.

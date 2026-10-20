@@ -10,4 +10,3 @@ Call in parallel:
 - `ws/workflow_manual(session_key: <your key or "obsidian-latch" if fresh>, root: <absolute worktree path if fresh>)`
 
 After both return, execute the procedure returned by `ws/playbook.read`.
-If this call fails to connect, run `/ws:mcp-server-repair`.

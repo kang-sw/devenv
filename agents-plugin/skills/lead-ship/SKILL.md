@@ -7,4 +7,3 @@ description: Ship, release, publish, tag, or deploy a configured project from it
 
 Call `ws/playbook.read(name: "lead-ship")` and execute the returned procedure
 inline against the user request.
-If this call fails to connect, run `/ws:mcp-server-repair`.

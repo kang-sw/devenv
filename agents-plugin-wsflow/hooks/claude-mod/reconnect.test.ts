@@ -123,7 +123,7 @@ describe('pure core', () => {
 describe('pinned prose', () => {
   test('tool description and result', () => {
     expect(reconnectDescription('ws')).toBe(
-      "Reconnect the ws MCP server when the current turn ends. Use it when that server's tools have left your tool list or a call reports the server not connected. `continuation` is optional: pass it only when work must resume by itself after the reconnect attempt, as one line naming what to do next; it is sent as your next prompt with the outcome. Omit it when the next turn will come from the human or from a background agent's notification; a failed reconnect is still reported to you. Main session only.",
+      "Call this first when the ws MCP server's tools have left your tool list or a call reports it not connected. It reconnects the ws MCP server when the current turn ends. `continuation` is optional: pass it only when work must resume by itself after the reconnect attempt, as one line naming what to do next; it is sent as your next prompt with the outcome. Omit it when the next turn will come from the human or from a background agent's notification; a failed reconnect is still reported to you. Main session only.",
     )
     expect(RECONNECT_RESULT).toBe(
       'Reconnect requested. End your turn now without further tool calls; the reconnect runs when the turn ends, and your continuation resumes the work.',
@@ -138,10 +138,10 @@ describe('pinned prose', () => {
       '[wsflow mcp] The wsflow MCP server reconnected; its tools are available again.\nContinue: resume the review',
     )
     expect(failureText('wsflow', 'its tools were not back within 10 s', undefined)).toBe(
-      '[wsflow mcp] The wsflow MCP server did not come back (its tools were not back within 10 s). Follow the wsflow:mcp-server-repair skill: keep working through its CLI fallback and relay its reconnect steps to the user.',
+      '[wsflow mcp] The wsflow MCP server did not come back (its tools were not back within 10 s). Do not call request_mcp_reconnect again for this drop: a reconnect that just failed fails the same way. Ask the user to re-enable the server from /mcp, run /reload-plugins, or restart the session.',
     )
     expect(failureText('wsflow', 'its tools were not back within 10 s', 'resume the review')).toBe(
-      '[wsflow mcp] The wsflow MCP server did not come back (its tools were not back within 10 s). Follow the wsflow:mcp-server-repair skill: keep working through its CLI fallback and relay its reconnect steps to the user.\nContinue: resume the review',
+      '[wsflow mcp] The wsflow MCP server did not come back (its tools were not back within 10 s). Do not call request_mcp_reconnect again for this drop: a reconnect that just failed fails the same way. Ask the user to re-enable the server from /mcp, run /reload-plugins, or restart the session.\nContinue: resume the review',
     )
   })
 

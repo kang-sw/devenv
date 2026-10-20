@@ -6,4 +6,5 @@ description: Create, edit, promote, drop, or close a workflow ticket. Owns the O
 # Ticket
 
 Call `wsflow/playbook.read(name: "lead-ticket")` and execute the returned procedure
-inline against the current user request. If this call fails to connect, run `/wsflow:mcp-server-repair`.
+inline against the current user request. If the playbook cannot be loaded, stop
+and report that blocker.

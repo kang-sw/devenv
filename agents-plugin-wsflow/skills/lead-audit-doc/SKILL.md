@@ -6,4 +6,5 @@ description: Draft, revise, or audit frequently reread project documents such as
 # Audit Doc
 
 Call `wsflow/playbook.read(name: "lead-audit-doc")` and execute the returned procedure
-inline against the current user request. If this call fails to connect, run `/wsflow:mcp-server-repair`.
+inline against the current user request. If the playbook cannot be loaded, stop
+and report that blocker.

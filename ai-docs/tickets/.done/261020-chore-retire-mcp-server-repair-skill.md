@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 6a4c0b64e5292e00
 sage-review-completeness-reviewed: 6a4c0b64e5292e00
+completed: 2026-10-20
 ---
 
 # Retire the mcp-server-repair skill in favor of the reconnect tool
@@ -155,3 +156,32 @@ plans are records and stay untouched, and the gitignored Pi skill copy
 regenerates from `agents-plugin/skills/`); the Python plugin tests, the
 wsflow bundle tests, `npm test` in `agents-plugin-pi`, `go test ./...` in
 `agents-plugin-tool`, and the claude-mod tests pass.
+
+### Result (b1648732a) - 2026-10-20
+
+Landed: the `mcp-server-repair` skill is deleted from `agents-plugin/skills/`
+and `agents-plugin-wsflow/skills/`, with its manifest entry (regenerated) and
+every pointer line in the lead SKILL.md files of both trees. wsflow single-call
+shims revert to the generic "If the playbook cannot be loaded, stop and report
+that blocker." tail; parallel-init and `lead-revive` shims just lose the line.
+`reconnectDescription` opens with its trigger and `failureText` inlines the
+`/mcp` re-enable, `/reload-plugins` and restart steps plus the no-retry rule
+(names the tool through `TOOL_NAME`); both claude-mod copies are byte-identical.
+Tests updated: `reconnect.test.ts`, the wsflow bundle test (generic shim
+assertion plus a dedicated `lead-use-mailbox` session_key tail check),
+`test_skill_dispatch_contracts.py`, `skills_mirror_test.go`
+(`substitutionMirroredSkills` is now empty), and the Pi fixture name.
+`wsflow-mirroring.md` updated; the substitution mechanism stays with no members.
+
+Verification: `git grep mcp-server-repair` outside the excluded historical
+paths is empty; `python3 -m unittest discover agents-plugin-wsflow/tests` 15 OK;
+`discover agents-plugin/tests` 78 OK; `go test ./...` in `agents-plugin-tool`
+all ok; `claude plugin test agents-plugin` and `agents-plugin-wsflow` 279 pass
+each; Pi `test/skills-dir.test.ts` 15 pass. Full `npm test` in
+`agents-plugin-pi` fails in this worktree on environment (no node_modules,
+then sandbox socket and web-search credential failures unrelated to this diff).
+Lite review: clean.
+
+Decisions: the wsflow generic shim test excludes `lead-use-mailbox` and checks
+it separately (renamed `POINTER_TAIL_TITLES` to `SESSION_KEY_SHIM_TITLES`);
+the parallel-init and alias regexes simply drop the pointer line.

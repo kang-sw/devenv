@@ -22,7 +22,6 @@ EXPECTED_LEAD_SKILLS = {
     "lead-bootstrap",
     "lead-tune",
     "lead-revive",
-    "mcp-server-repair",
     "lead-audit-doc",
     "lead-use-mailbox",
     # undecided disposition; survive unchanged

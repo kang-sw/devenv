@@ -326,10 +326,10 @@ describe("prepareSkillsDir", () => {
       const pluginDir = join(root, "agents-plugin-pi");
       const source = join(root, "agents-plugin", "skills");
       const generated = join(pluginDir, "skills");
-      mkdirSync(join(source, "mcp-server-repair"), { recursive: true });
-      mkdirSync(join(generated, "mcp-server-repair"), { recursive: true });
-      writeFileSync(join(source, "mcp-server-repair", "SKILL.md"), "No playbook target.");
-      writeFileSync(join(generated, "mcp-server-repair", "SKILL.md"), "old");
+      mkdirSync(join(source, "no-playbook-skill"), { recursive: true });
+      mkdirSync(join(generated, "no-playbook-skill"), { recursive: true });
+      writeFileSync(join(source, "no-playbook-skill", "SKILL.md"), "No playbook target.");
+      writeFileSync(join(generated, "no-playbook-skill", "SKILL.md"), "old");
       writeFileSync(join(generated, "stale-extra.md"), "must disappear");
 
       assert.equal(prepareSkillsDir(pluginDir, root), generated);

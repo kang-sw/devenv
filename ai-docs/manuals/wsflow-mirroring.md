@@ -48,7 +48,6 @@ Included:
 - `lead-scope-worktree`
 - `lead-use-mailbox`
 - `lead-revive` (inline-body exception; see below)
-- `mcp-server-repair` (inline-body exception; see below)
 - `lead-proceed` (wsflow-only backward-compat alias; see **wsflow-only
   aliases** below)
 
@@ -106,13 +105,6 @@ drift, and it is the one exception to "wsflow ships no wsflow-only skills":
   package test encodes this through `EXPECTED_INLINE_SKILLS`, which exempts it
   from the thin-shim, shared-stem, and full-counterpart checks. Any future
   inline wsflow skill must be added to that set and documented here.
-- Exception: `mcp-server-repair` also ships an inline, substitution-generated
-  body rather than a `playbook.read` shim, and has no shared rsrc playbook.
-  Its full-ws counterpart is the `agents-plugin/skills/mcp-server-repair/`
-  skill directory (not a `lead-*` skill). It is inline by deliberate design:
-  the skill exists to recover when the MCP server is down, so its body must be
-  readable without any tool call — a `playbook.read` shim would die exactly
-  when the skill is needed. It is in `EXPECTED_INLINE_SKILLS` for that reason.
 - Do not mention `ws/`, `ws:`, `ws.`, `subquery`, or `agents.*` in
   distributed wsflow skill text.
 - Do not describe wsflow as ws-lite, a ws mode, or a ws-compatible product.
@@ -154,13 +146,12 @@ compatibility alias.
 This is a **bounded exception**, parallel to but separate from the rsrc
 "Generated-sameness carve-out" below — it does not loosen the general
 skill-mirroring rule that wsflow skill bodies are curated, not generated. It
-applies only to the specific, currently exhaustive list of skills explicitly
-and deliberately migrated out of `playbook.read` into inline procedure
-bodies:
+applies only to skills explicitly and deliberately migrated out of
+`playbook.read` into inline procedure bodies. Current members (exhaustive):
+**none**. The sole member was retired; the mechanism, its generator, and its
+drift guard stay in place for the next entry.
 
-- `mcp-server-repair`
-
-For these skills only, `agents-plugin-wsflow/skills/<name>/SKILL.md` is
+For a member skill only, `agents-plugin-wsflow/skills/<name>/SKILL.md` is
 generated from `agents-plugin/skills/<name>/SKILL.md` via literal namespace
 substitution (`ws:` → `wsflow:`, `ws/` → `wsflow/`) rather than hand-authored
 or curated independently. This is not a blanket auto-mirror mechanism; adding

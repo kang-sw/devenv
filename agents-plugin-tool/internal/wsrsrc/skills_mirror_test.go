@@ -11,10 +11,9 @@ import (
 // substitutionMirroredSkills is the curated, bounded list of skills eligible
 // for substitution-mirrored generation: only skills explicitly and
 // deliberately migrated out of playbook.read. This is not a blanket
-// auto-mirror mechanism — see ai-docs/manuals/wsflow-mirroring.md.
-var substitutionMirroredSkills = []string{
-	"mcp-server-repair",
-}
+// auto-mirror mechanism — see ai-docs/manuals/wsflow-mirroring.md. No skill is
+// a member at present; the mechanism stays for the next one.
+var substitutionMirroredSkills = []string{}
 
 // fullSkillsRoot is the canonical full-ws skills tree relative to this
 // package dir (agents-plugin-tool/internal/wsrsrc -> repo root ->
@@ -57,9 +56,9 @@ func TestWsflowSkillsMirrorUpToDate(t *testing.T) {
 		}
 	}
 
-	// Synthetic namespace-token fixture: none of the curated skills above
-	// currently contain ws:/ws/ tokens, so without this case the loop above
-	// never actually exercises substitution — it only detects added, removed,
+	// Synthetic namespace-token fixture: the curated list above is
+	// currently empty, so without this case the loop above never actually
+	// exercises substitution — it only detects added, removed,
 	// or byte-edited mirrors. This pins substitution correctness through the
 	// exact same want-vs-got comparison path.
 	syntheticSrc := "---\nname: synthetic-drift-fixture\n---\n\n" +
