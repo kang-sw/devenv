@@ -581,18 +581,8 @@
         }
       }
     },
-    "261020-feat-worktree-profiles": {
-      "registered_at": "2026-10-20T08:47:50Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-20T11:49:42Z",
-        "impl": {
-          "branch": "impl/develop/area-relic-ranch"
-        }
-      }
+    "261020-bug-worktree-profiles-review-followups": {
+      "registered_at": "2026-10-20T13:35:50Z"
     },
     "261020-research-worktree-profiles": {
       "registered_at": "2026-10-20T08:23:34Z"
