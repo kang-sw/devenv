@@ -10,8 +10,8 @@ related:
   260923-bug-worktree-acquire-concurrent-pool-claim: adjacent pool-claim race, deliberately not addressed here
 sage-review-design: completed
 sage-review-completeness: completed
-sage-review-design-reviewed: 006cf6dce77af8c8
-sage-review-completeness-reviewed: 006cf6dce77af8c8
+sage-review-design-reviewed: 9419f414981f48c5
+sage-review-completeness-reviewed: 9419f414981f48c5
 ---
 
 # Named worktree profiles for worktree.acquire/release
@@ -67,7 +67,10 @@ ticket carries its Confirmed Decisions as contract.
   file into `map[string]string` overrides and fail the whole resolution on a
   parse error, so a profile object must never be stored as a value inside
   `overrides`. Store structured values in a separate top-level member that an
-  older reader's `json.Unmarshal` ignores. Rejected: an object under
+  older reader's `json.Unmarshal` ignores: `structured_overrides`, keyed by
+  the full config key (`"worktree.profile.<name>": { ... }`), mirroring
+  `overrides`. The member name is fixed here because it is a committed
+  on-disk format downstream repositories carry. Rejected: an object under
   `overrides` (takes down every knob for a teammate on an older plugin);
   string-encoded JSON in `overrides` (unreadable for agents editing the file).
 - **Override granularity.** A higher scope replaces a whole profile; no field
@@ -146,18 +149,25 @@ ticket carries its Confirmed Decisions as contract.
   per-hook timeout field (not in the agreed profile shape).
 - **Hook provenance.** acquire/release/remove results report each executed
   hook's argv, source scope, and exit code.
-- **Hook failure is fail-loud.** A failing hook fails its operation, leaves
-  the worktree in its pre-operation state, and the error strongly directs the
-  agent to fix the profile/pool.
+- **Hook failure is fail-loud.** A failing hook fails its operation and the
+  error strongly directs the agent to fix the profile/pool. A failing
+  `pre_release` or `pre_remove` leaves the worktree in its pre-operation
+  state; a failing `post_provision` or `post_acquire` follows Quarantine
+  below (a fresh worktree has no pre-operation state, and Quarantine runs
+  release-equivalent hygiene).
 - **Quarantine.** On `post_acquire` failure: run release-equivalent hygiene
   (without `pre_release`) so the target branch is freed, mark the worktree
   quarantined in its marker (argv, scope, exit code, stderr tail, time), and
   return an error that counts the profile's quarantined worktrees (2+ means a
   likely profile/hook defect). Never auto-retry on a fresh worktree. A
   `post_provision` failure uses the same quarantine. A quarantined worktree is
-  never reused; only `worktree.remove` clears it. Rejected: an explicit
-  `clear_quarantine` on release (would return a possibly broken worktree to
-  the pool).
+  never reused; only `worktree.remove` clears it. A quarantined worktree
+  holds no lease: `post_provision` and `post_acquire` run inside
+  provisioning, before the dispatcher writes the lease (today it writes the
+  lease only after provisioning succeeds), so the lease-recency refusal of
+  `worktree.remove` never blocks clearing a fresh quarantine. Rejected: an
+  explicit `clear_quarantine` on release (would return a possibly broken
+  worktree to the pool).
 - **`post_provision` outputs** (override files, hardlinks) survive hygiene
   only when listed in `preserve`. The acquire result warns when a path a
   `post_provision` hook created is ignored and not covered by `preserve`.
@@ -172,12 +182,27 @@ ticket carries its Confirmed Decisions as contract.
 
 ### `worktree.remove` and the nudge
 
-- **`worktree.remove`** is a new tool. It runs `pre_remove`, removes the git
-  worktree, and cleans the lease and marker. It keeps the checked-out branch
+- **`worktree.remove`** is a new tool. It checks every refusal below first,
+  then runs `pre_remove`, removes the git worktree, and cleans the lease and
+  marker; a refused target never runs a hook. `pre_remove` comes from the
+  profile named in the marker; when that profile no longer resolves (deleted
+  or renamed), remove skips `pre_remove` and says so in its result, so a
+  worktree of a removed profile stays removable. It keeps the checked-out branch
   (as `git worktree remove` does), so its refusals guard unmerged work
   rather than branch deletion: it refuses a dirty worktree, one whose
   checked-out branch holds commits reachable from no other branch, and one
   whose detached `HEAD` holds commits reachable from no ref.
+  - It also refuses the primary worktree and any target outside the owned
+    pool roots, as `releaseWorktree` already does
+    (`agents-plugin-tool/internal/mcp/worktree_tools.go#L425-L429`).
+  - It refuses a leased worktree whose activity (the nudge's
+    `max(lease acquired_at, HEAD commit time)`) is newer than
+    `worktree.nudge_stale_days`, so a live worker's clean, commit-less
+    worktree cannot be removed under it while the nudge-listed stale leases
+    stay removable. Rejected: refusing every leased worktree (blocks the
+    nudge's own remedy; a stale lease would need a release that runs hygiene
+    on abandoned work); a `force` parameter (new schema surface); no lease
+    check.
 - **Stale-pool nudge**, at most once a day per pool, at acquire time, listing
   worktrees with a checked-out branch and no activity for 7 days or more, or
   detached with 1 GB or more of preserved ignored artifacts.
@@ -328,7 +353,9 @@ report each hook's argv, scope, and exit code; a failing `pre_release` leaves
 the worktree leased and unchanged; the quarantine error counts the profile's
 quarantined worktrees; a timed-out hook is a failure; an unpreserved ignored
 path created by `post_provision` produces the warning; releasing an unmarked
-leased worktree runs today's hygiene only. Live check: `git sparse-checkout set --cone`
+leased worktree runs today's hygiene only; a failing `post_provision`
+quarantines on both a fresh create and a re-adoption, and leaves no lease.
+Live check: `git sparse-checkout set --cone`
 on a worktree left in non-cone mode behaves as the implementation assumes
 (record the observation in the Result).
 
@@ -339,8 +366,14 @@ and marker cleanup, quarantine clearing), release-time size recording, and
 the throttled acquire nudge with its config knobs; the lead playbook text
 relays the nudge to the user.
 
-Verification: tests for remove refusing a dirty worktree and a branch with
-unique commits, removing a quarantined worktree, and the nudge firing once
+Verification: tests for remove refusing a dirty worktree, a branch with
+unique commits, the primary worktree, a path outside the pool, and a leased
+worktree newer than the stale threshold (while removing a stale-leased one),
+removing a quarantined worktree, refusals checked before `pre_remove` runs,
+a failing `pre_remove` leaving the worktree in place, the remove result
+reporting each executed hook's argv, scope, and exit code, removal of a
+worktree whose marker names a profile that no longer resolves (skipping
+`pre_remove` with a result note), and the nudge firing once
 per day with thresholds honored. Live check: whether `git worktree remove`
 needs `--force` with preserved ignored files or initialized submodules
 present (record in the Result).
