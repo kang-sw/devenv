@@ -9,9 +9,12 @@ import type { PromptSubmitResult } from 'claude-code'
  * the request and the step runs after the turn.complete hook has returned.
  *
  * The step always runs `/mcp reconnect <server>` (a listed-but-failing server
- * is one a skip would miss), judges the outcome from the tool list, and submits
- * the continuation with the outcome. A call without a continuation submits
- * nothing on success and only the failure notice on failure. The engine calls arrive as edges bound in
+ * is one a skip would miss), judges the outcome from the tool list, and reports
+ * it. A failure is always submitted. A success submits the fixed resume prompt
+ * only for a call with the `continue` flag, and only when no main-thread turn
+ * started since the step started: such a turn (a background agent's
+ * notification, a typed prompt) already resumes the work, so the resume would
+ * arrive after it as a stale prompt. The engine calls arrive as edges bound in
  * register.ts, so the state machine here is driven and tested without an
  * engine.
  */
@@ -26,33 +29,36 @@ export function reconnectDescription(plugin: string): string {
   return (
     `Reconnect the ${plugin} MCP server when the current turn ends. ` +
     "Use it when that server's tools have left your tool list or a call reports the server not connected. " +
-    '`continuation` is optional: pass it only when work must resume by itself after the reconnect attempt, as one line naming what to do next; it is sent as your next prompt with the outcome. ' +
-    "Omit it when the next turn will come from the human or from a background agent's notification; a failed reconnect is still reported to you. " +
+    'Set `continue` to true only when work must resume by itself after the reconnect attempt: a fixed resume prompt then follows a successful reconnect, unless another prompt has already started the next turn. ' +
+    "Leave it unset when the next turn will come from the human or from a background agent's notification; a failed reconnect is always reported to you. " +
     'Main session only.'
   )
 }
 
 export const RECONNECT_RESULT =
-  'Reconnect requested. End your turn now without further tool calls; the reconnect runs when the turn ends, and your continuation resumes the work.'
+  'Reconnect requested. End your turn now without further tool calls; the reconnect runs when the turn ends, and a resume prompt follows a success unless another prompt has already started the next turn. A failed reconnect is reported to you in a prompt.'
 
-/** The lever's result for a call without a continuation: a successful reconnect submits nothing. */
-export const RECONNECT_RESULT_NO_CONTINUATION =
+/** The tool's result for a call without the `continue` flag: a successful reconnect submits nothing. */
+export const RECONNECT_RESULT_NO_RESUME =
   "Reconnect requested. End your turn now without further tool calls; the reconnect runs when the turn ends. A successful reconnect submits no prompt: the next turn comes from the human or from a background agent's notification. A failed reconnect is reported to you in a prompt."
 
-/** What the tool's result says for a call with or without a continuation. */
-export function reconnectResult(continuation: string | undefined): string {
-  return continuation === undefined ? RECONNECT_RESULT_NO_CONTINUATION : RECONNECT_RESULT
+/** What the tool's result says for a call with or without the `continue` flag. */
+export function reconnectResult(resume: boolean): string {
+  return resume ? RECONNECT_RESULT : RECONNECT_RESULT_NO_RESUME
 }
 
-export function successText(plugin: string, continuation: string): string {
-  return `[${plugin} mcp] The ${plugin} MCP server reconnected; its tools are available again.\nContinue: ${continuation}`
+/** The last sentence of the resume prompt, which also ends a failure report for a call with the flag. */
+export const RESUME_SENTENCE = 'Resume the interrupted work.'
+
+export function successText(plugin: string): string {
+  return `[${plugin} mcp] The ${plugin} MCP server reconnected; its tools are available again. ${RESUME_SENTENCE}`
 }
 
-export function failureText(plugin: string, reason: string, continuation: string | undefined): string {
+export function failureText(plugin: string, reason: string, resume: boolean): string {
   const head =
     `[${plugin} mcp] The ${plugin} MCP server did not come back (${reason}). ` +
     `Follow the ${plugin}:mcp-server-repair skill: keep working through its CLI fallback and relay its reconnect steps to the user.`
-  return continuation === undefined ? head : `${head}\nContinue: ${continuation}`
+  return resume ? `${head} ${RESUME_SENTENCE}` : head
 }
 
 /** The failure reasons the step words; the command's own words fill the last two. */
@@ -66,21 +72,15 @@ export function reasonCommandAnswered(text: string): string {
 }
 
 /**
- * Main-loop-only guard and input check for the tool: a refusal, a tool error,
- * or the trimmed continuation (undefined when omitted: absent, non-string, or
- * whitespace-only).
+ * Main-loop-only guard and input read for the tool: a refusal, or whether the
+ * call set the `continue` flag. Only a literal `true` sets it; absent or any
+ * other value (a non-boolean, a leftover string argument) reads as unset.
  */
-export function checkReconnectCall(
-  agentId: string | undefined,
-  continuation: unknown,
-): { continuation: string | undefined } | { deny: string } | { error: string } {
+export function checkReconnectCall(agentId: string | undefined, flag: unknown): { resume: boolean } | { deny: string } {
   if (agentId !== undefined) {
     return { deny: `${TOOL_NAME} serves the main session only; called from subagent ${agentId}.` }
   }
-  const text = typeof continuation === 'string' ? continuation.trim() : ''
-  if (!text) return { continuation: undefined }
-  if (/[\r\n]/.test(text)) return { error: `${TOOL_NAME}: continuation must be one line.` }
-  return { continuation: text }
+  return { resume: flag === true }
 }
 
 /**
@@ -115,24 +115,26 @@ export type ReconnectEdges = {
   log: (text: string, to: 'transcript' | 'debug') => void
 }
 
-/** The tool's answer: a refusal, a tool error, or its result text. */
-export type ReconnectAnswer = { deny: string } | { isError: true; result: string; text: string } | { result: string }
+/** The tool's answer: a refusal or its result text. */
+export type ReconnectAnswer = { deny: string } | { result: string }
 
 export type Reconnect = {
   /** session.start: bind the edges and drop any request. */
   start: (edges: ReconnectEdges) => void
-  /** session.end: drop a pending request and any step's continuation still owed; any end reason. */
+  /** session.end: drop a pending request and any step's report still owed; any end reason. */
   end: (reason: string) => void
   /** A tool call. */
-  lever: (agentId: string | undefined, continuation: unknown) => ReconnectAnswer
+  lever: (agentId: string | undefined, flag: unknown) => ReconnectAnswer
+  /** A turn.start: a main-thread one makes a running step's success owe no resume prompt. */
+  turnStarted: (agentId: string | undefined) => void
   /** A turn.complete: schedule a pending request's reconnect step. */
   turnComplete: (agentId: string | undefined, reason: string) => void
 }
 
 /** A tool call waiting for its turn to end. */
 type Request = {
-  /** The latest call's continuation; undefined when that call omitted it. */
-  continuation: string | undefined
+  /** Whether the latest call set the `continue` flag. */
+  resume: boolean
   /** The token of its queued step, from the turn end that queued it until the step starts. */
   scheduled: number | undefined
 }
@@ -145,6 +147,8 @@ export function createReconnect(): Reconnect {
   let dispatches = 0
   /** Bumped at every session start or end: a step that awaited across one owes nothing to the new conversation. */
   let generation = 0
+  /** Bumped at every main-thread turn start: a step that sees it move started no resume of its own. */
+  let turns = 0
 
   const label = () => `${edges?.plugin ?? 'plugin'} mcp reconnect`
   const debug = (text: string) => edges?.log(`${label()}: ${text}`, 'debug')
@@ -188,24 +192,32 @@ export function createReconnect(): Reconnect {
 
   /**
    * The scheduled step. It takes the request as it starts, so a call made
-   * while it runs is a new request for a later turn end. A continuation is the
-   * only holder of its text, so a failed submit writes it to the transcript.
+   * while it runs is a new request for a later turn end. A lost submit is
+   * written to the transcript, so the person sees what the model missed.
    */
   const run = async (r: Request) => {
     const e = edges
     if (!e || request !== r) return
     request = undefined
     const gen = generation
+    const startedAt = turns
     const outcome = await attempt(e)
     if (gen !== generation) {
-      debug('the session ended during the reconnect step; its continuation is dropped')
+      debug('the session ended during the reconnect step; its report is dropped')
       return
     }
     debug(outcome.ok ? 'reconnected' : `not reconnected (${outcome.reason})`)
-    // Without a continuation a success owes the model nothing, but a failure
-    // still does: it must learn its tools are gone.
-    if (outcome.ok && r.continuation === undefined) return
-    const text = outcome.ok ? successText(e.plugin, r.continuation as string) : failureText(e.plugin, outcome.reason, r.continuation)
+    // A failure is always reported: the model must learn its tools are gone,
+    // whatever turn runs. A success owes a resume only with the flag, and
+    // only while no turn started since the step did.
+    if (outcome.ok) {
+      if (!r.resume) return
+      if (turns !== startedAt) {
+        debug('a turn started during the reconnect step; the resume prompt is not submitted')
+        return
+      }
+    }
+    const text = outcome.ok ? successText(e.plugin) : failureText(e.plugin, outcome.reason, r.resume)
     const failed = (why: string) => notice(`a prompt was not submitted (${why}):\n${text}`)
     e.submit(text).then(
       (res) => {
@@ -226,16 +238,19 @@ export function createReconnect(): Reconnect {
       reset()
     },
 
-    lever: (agentId, continuation) => {
-      const checked = checkReconnectCall(agentId, continuation)
+    lever: (agentId, flag) => {
+      const checked = checkReconnectCall(agentId, flag)
       if ('deny' in checked) return { deny: checked.deny }
-      if ('error' in checked) return { isError: true, result: checked.error, text: checked.error }
-      // A repeat call while one is pending states the current next step; an
-      // omitted continuation clears an earlier one.
-      if (request) request.continuation = checked.continuation
-      else request = { continuation: checked.continuation, scheduled: undefined }
-      debug(`reconnect requested; continuation: ${checked.continuation ?? '(none)'}`)
-      return { result: reconnectResult(checked.continuation) }
+      // A repeat call while one is pending replaces the flag (latest wins, so
+      // an unset one clears an earlier true).
+      if (request) request.resume = checked.resume
+      else request = { resume: checked.resume, scheduled: undefined }
+      debug(`reconnect requested; resume: ${checked.resume}`)
+      return { result: reconnectResult(checked.resume) }
+    },
+
+    turnStarted: (agentId) => {
+      if (agentId === undefined) turns += 1
     },
 
     // The step runs after the turn.complete hook has returned: the host refuses

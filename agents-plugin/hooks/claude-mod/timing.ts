@@ -79,7 +79,7 @@ export function advisoryText(t: Thresholds, tokens: number): string {
     '\n' +
     'This is not an instruction to compact right now. If you are in active discussion with the human, awaiting their answer or clarification, or holding working context that would be costly to rebuild (a half-applied change or a diagnosis in progress), carry on for now. A pause after asking the human a question is not a boundary.\n' +
     '\n' +
-    `From here on, look for a good moment to compact before ${hard}%. A good moment is a natural boundary where most of what this context holds is no longer needed for the work ahead, and what is still needed can be restored cheaply after compaction from durable records (tickets, commits, notes, agenda) and the summary. Typical cases: work just landed, you are waiting only on background agents, or the next work is weakly related to the current context. When such a moment comes, first bring durable records up to date with anything still needed that only this context holds, then call the compaction request tool and end your turn. Pass a one-line continuation only when work must resume by itself after compaction; omit it when the next turn will come from the human or from a background agent's notification. Compacting at a moment you choose keeps the work coherent; at ${hard}% it happens automatically, mid-work if need be. Reminders follow at ${percentOf(t.m1, t.raw)}% and ${percentOf(t.m2, t.raw)}%.\n` +
+    `From here on, look for a good moment to compact before ${hard}%. A good moment is a natural boundary where most of what this context holds is no longer needed for the work ahead, and what is still needed can be restored cheaply after compaction from durable records (tickets, commits, notes, agenda) and the summary. Typical cases: work just landed, you are waiting only on background agents, or the next work is weakly related to the current context. When such a moment comes, first bring durable records up to date with anything still needed that only this context holds, then call the compaction request tool and end your turn. Set its \`continue\` flag only when work must resume by itself after compaction; leave it unset when the next turn will come from the human or from a background agent's notification. Compacting at a moment you choose keeps the work coherent; at ${hard}% it happens automatically, mid-work if need be. Reminders follow at ${percentOf(t.m1, t.raw)}% and ${percentOf(t.m2, t.raw)}%.\n` +
     '\n' +
     'If now is not such a moment, end this turn without replying and keep looking for one as you work.'
   )
@@ -91,9 +91,9 @@ export function milestoneText(which: 1 | 2, t: Thresholds, tokens: number): stri
   const head = `${LABEL}Context window: ${n}% / ${hard}% (automatic compaction point). `
   return which === 1
     ? head +
-        `Past ${hard}%, Claude Code compacts automatically, mid-work if need be. From here on, a good boundary is worth taking; if this is one, update durable records and call the compaction request tool, as the advisory describes (a continuation only when work must resume by itself). Otherwise end this turn without replying.`
+        `Past ${hard}%, Claude Code compacts automatically, mid-work if need be. From here on, a good boundary is worth taking; if this is one, update durable records and call the compaction request tool, as the advisory describes (the \`continue\` flag only when work must resume by itself). Otherwise end this turn without replying.`
     : head +
-        'This is the last reading before automatic compaction. Compacting at a boundary you choose keeps the work coherent; take this one if it fits, update durable records and call the compaction request tool, as the advisory describes (a continuation only when work must resume by itself). Otherwise end this turn without replying, and take the next good boundary.'
+        'This is the last reading before automatic compaction. Compacting at a boundary you choose keeps the work coherent; take this one if it fits, update durable records and call the compaction request tool, as the advisory describes (the `continue` flag only when work must resume by itself). Otherwise end this turn without replying, and take the next good boundary.'
 }
 
 export function deliveryText(d: Delivery, t: Thresholds, tokens: number): string {
@@ -101,44 +101,36 @@ export function deliveryText(d: Delivery, t: Thresholds, tokens: number): string
 }
 
 export const LEVER_DESCRIPTION =
-  'Request compaction of this conversation when the current turn ends. Before calling, bring durable records (tickets, notes, agenda) up to date with anything still needed that only this context holds. `continuation` is optional: pass it only when work must resume by itself after compaction, as one line naming what to do next (for example "continue Phase 2 implementation"); it is sent as your next prompt after compaction. Omit it when the next turn will come from the human or from a background agent\'s notification. Main session only.'
+  'Request compaction of this conversation when the current turn ends. Before calling, bring durable records (tickets, notes, agenda) up to date with anything still needed that only this context holds. Set `continue` to true only when work must resume by itself after compaction: a fixed resume prompt then follows the compaction, unless another prompt (the human\'s, or a background agent\'s notification) has already started the next turn. Leave it unset when the next turn will come from the human or from a background agent\'s notification. Main session only.'
 
 export const LEVER_RESULT =
-  'Compaction requested. End your turn now without further tool calls; compaction runs when the turn ends, and your continuation resumes the work.'
+  'Compaction requested. End your turn now without further tool calls; compaction runs when the turn ends, and a resume prompt follows it unless another prompt has already started the next turn.'
 
-/** The lever's result for a call without a continuation: nothing is submitted after the compaction. */
-export const LEVER_RESULT_NO_CONTINUATION =
+/** The lever's result for a call without the `continue` flag: nothing is submitted after the compaction. */
+export const LEVER_RESULT_NO_RESUME =
   'Compaction requested. End your turn now without further tool calls; compaction runs when the turn ends, and no prompt follows it: the next turn comes from the human or from a background agent\'s notification.'
 
-/** What the lever's result says for a call with or without a continuation. */
-export function leverResult(continuation: string | undefined): string {
-  return continuation === undefined ? LEVER_RESULT_NO_CONTINUATION : LEVER_RESULT
+/** What the lever's result says for a call with or without the `continue` flag. */
+export function leverResult(resume: boolean): string {
+  return resume ? LEVER_RESULT : LEVER_RESULT_NO_RESUME
 }
 
-/** The continuation after a compaction landed: the lever's own, or another that landed first. */
-export function continuationText(continuation: string): string {
-  return `${LABEL}Continue after compaction: ${continuation}`
-}
+/** The resume prompt after a compaction landed: the lever's own, or another that landed first. */
+export const RESUME_TEXT = `${LABEL}Compaction landed; resume the work in progress from the summary and your durable records.`
 
-/** The continuation after a hook vetoed the lever's compaction with `{ skip }`. */
-export function skippedContinuationText(reason: string, continuation: string): string {
-  return `${LABEL}Compaction did not run (${reason}); your context is unchanged.\nContinue: ${continuation}`
+/** The resume prompt after a hook vetoed the lever's compaction with `{ skip }`. */
+export function vetoedResumeText(reason: string): string {
+  return `${LABEL}Compaction did not run (${reason}); your context is unchanged. Resume the work in progress.`
 }
 
 /**
- * Main-loop-only guard and input check for the lever: a refusal, a tool
- * error, or the trimmed continuation (undefined when omitted: absent,
- * non-string, or whitespace-only).
+ * Main-loop-only guard and input read for the lever: a refusal, or whether
+ * the call set the `continue` flag. Only a literal `true` sets it; absent or
+ * any other value (a non-boolean, a leftover string argument) reads as unset.
  */
-export function checkLeverCall(
-  agentId: string | undefined,
-  continuation: unknown,
-): { continuation: string | undefined } | { deny: string } | { error: string } {
+export function checkLeverCall(agentId: string | undefined, flag: unknown): { resume: boolean } | { deny: string } {
   if (agentId !== undefined) {
     return { deny: `${TOOL_NAME} compacts the main session only; called from subagent ${agentId}.` }
   }
-  const text = typeof continuation === 'string' ? continuation.trim() : ''
-  if (!text) return { continuation: undefined }
-  if (/[\r\n]/.test(text)) return { error: `${TOOL_NAME}: continuation must be one line.` }
-  return { continuation: text }
+  return { resume: flag === true }
 }
