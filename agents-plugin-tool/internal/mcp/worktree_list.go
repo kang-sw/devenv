@@ -29,6 +29,9 @@ type worktreeListEntry struct {
 	// unmarked worktree created before profiles existed, or empty when the
 	// marker could not be read (the entry then carries a warning).
 	Profile string `json:"profile"`
+	// Quarantine is set when a post_provision or post_acquire hook failed in
+	// this worktree: it is never reused, and worktree.remove clears it.
+	Quarantine *worktreeQuarantine `json:"quarantine,omitempty"`
 	// Dirty counts untracked files as dirty; null when git status could not be
 	// read (the entry then carries a warning and no release nudge).
 	Dirty *bool `json:"dirty"`
@@ -87,6 +90,9 @@ func (r worktreeListResult) text() string {
 		}
 		if e.Profile != "" {
 			fmt.Fprintf(&b, "  profile: %s\n", e.Profile)
+		}
+		if q := e.Quarantine; q != nil {
+			fmt.Fprintf(&b, "  quarantined: %s hook %q (%s scope) exited %d at %s; never reused, cleared by worktree.remove\n", q.Point, strings.Join(q.Argv, " "), q.Scope, q.ExitCode, q.At)
 		}
 		switch {
 		case e.Dirty == nil:
@@ -156,6 +162,7 @@ func describePoolWorktree(ctx context.Context, runner wsgit.Runner, e worktreeEn
 		out.Profile = worktreeLegacyLabel
 	} else {
 		out.Profile = marker.Profile
+		out.Quarantine = marker.Quarantine
 	}
 
 	if dirtyPaths, err := porcelainPaths(ctx, runner, e.Path); err != nil {
@@ -196,7 +203,7 @@ func describePoolWorktree(ctx context.Context, runner wsgit.Runner, e worktreeEn
 		}
 	}
 
-	if out.Dirty != nil && !*out.Dirty {
+	if out.Dirty != nil && !*out.Dirty && out.Quarantine == nil {
 		out.Release = worktreeReleaseNudge(e.Path)
 	}
 	return out

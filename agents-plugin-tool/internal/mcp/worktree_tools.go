@@ -25,12 +25,17 @@ type worktreeAcquireResult struct {
 	// Provisioned reports that this acquire put the worktree into the profile
 	// (fresh, adopted, or re-adopted after a definition change): declared
 	// sparse was applied.
-	Provisioned bool     `json:"provisioned"`
-	Warnings    []string `json:"warnings,omitempty"`
+	Provisioned bool `json:"provisioned"`
+	// Hooks lists every profile hook this acquire ran, in order.
+	Hooks    []worktreeHookRun `json:"hooks,omitempty"`
+	Warnings []string          `json:"warnings,omitempty"`
 }
 
 func (r worktreeAcquireResult) text() string {
 	text := fmt.Sprintf("path: %s\nworker_key: %s\nreused: %t\npool: %s\nprofile: %s\nprovisioned: %t\n", r.Path, r.WorkerKey, r.Reused, r.Pool, r.Profile, r.Provisioned)
+	for _, h := range r.Hooks {
+		text += h.text()
+	}
 	for _, w := range r.Warnings {
 		text += "warning: " + w + "\n"
 	}
@@ -239,8 +244,9 @@ func registerPoolExclude(commonDir, mainRoot, poolRoot string) error {
 // worktree of the requested profile or create a new one, provision it into the
 // profile when it is fresh or its provisioning inputs changed, create/check out
 // target_branch on base, hygiene-reset the tree (keeping the profile's
-// preserve patterns), sync submodules, and check that the ticket board is
-// visible.
+// preserve patterns), sync submodules, run the profile's post_provision (on
+// entry) and post_acquire hooks, and check that the ticket board is visible.
+// A failing post_provision or post_acquire hook quarantines the worktree.
 //
 // root is the caller's repository root; it may be the main worktree or any
 // linked worktree. The pool always resolves against the primary root, so a call
@@ -310,7 +316,8 @@ func provisionWorktree(ctx context.Context, runner wsgit.Runner, root, base, tar
 	// its marker names the profile, so a worktree provisioned for one profile
 	// never serves another. An unmarked worktree predates profiles: it is
 	// adopted only into the builtin its sparse state matches (sparse-active =>
-	// housekeeping, otherwise full); a custom profile never adopts one.
+	// housekeeping, otherwise full); a custom profile never adopts one. A
+	// quarantined worktree is never reused.
 	var claim string
 	var claimMarker *worktreeMarker
 	for _, e := range entries {
@@ -322,7 +329,7 @@ func provisionWorktree(ctx context.Context, runner wsgit.Runner, root, base, tar
 			continue // an unreadable candidate is skipped, never adopted
 		}
 		if marker != nil {
-			if marker.Profile != profile.Name {
+			if marker.Profile != profile.Name || marker.Quarantine != nil {
 				continue
 			}
 		} else if legacyWorktreeProfile(e.Path) != profile.Name {
@@ -422,10 +429,38 @@ func provisionWorktree(ctx context.Context, runner wsgit.Runner, root, base, tar
 		}
 	}
 
+	hookEnv := worktreeHookEnv{WorktreeDir: wtPath, Base: base, TargetBranch: targetBranch}
+	if hookEnv.TargetBranch == "" {
+		hookEnv.TargetBranch = base
+	}
+	var hooks worktreeProfileHooks
+	if def.Hooks != nil {
+		hooks = *def.Hooks
+	}
 	if provision {
+		runs, failure := runWorktreeHooks(ctx, worktreeHookPostProvision, hooks.PostProvision, profile.Scope, hookEnv)
+		res.Hooks = append(res.Hooks, runs...)
+		if failure != nil {
+			return res, quarantineWorktree(ctx, runner, root, poolRoot, wtPath, profile, failure)
+		}
+		if len(runs) > 0 {
+			// Hygiene ran just before the hooks, so every unpreserved ignored
+			// path now present is one a post_provision hook created; the next
+			// acquire's hygiene would delete it.
+			if paths, err := unpreservedIgnoredPaths(ctx, runner, wtPath, def.Preserve); err != nil {
+				res.Warnings = append(res.Warnings, "could not check post_provision outputs against preserve: "+err.Error())
+			} else if len(paths) > 0 {
+				res.Warnings = append(res.Warnings, fmt.Sprintf("post_provision created ignored paths that preserve does not cover, so the next acquire's hygiene deletes them: %s; add them to profile %q's preserve if they must persist", strings.Join(paths, ", "), profile.Name))
+			}
+		}
 		if err := writeWorktreeMarker(ctx, runner, wtPath, worktreeMarker{Profile: profile.Name, ProvisionHash: hash}); err != nil {
 			return res, fmt.Errorf("worktree.acquire: record profile marker: %w", err)
 		}
+	}
+	runs, failure := runWorktreeHooks(ctx, worktreeHookPostAcquire, hooks.PostAcquire, profile.Scope, hookEnv)
+	res.Hooks = append(res.Hooks, runs...)
+	if failure != nil {
+		return res, quarantineWorktree(ctx, runner, root, poolRoot, wtPath, profile, failure)
 	}
 
 	// Workers record results into their ticket, so an acquired worktree must
@@ -536,14 +571,18 @@ func staticProfileLookup(profiles []resolvedWorktreeProfile, resolveErr error) w
 
 // worktreeReleaseResult is the return shape of worktree.release.
 type worktreeReleaseResult struct {
-	Path     string   `json:"path"`
-	Detached bool     `json:"detached"`
-	Profile  string   `json:"profile"`
-	Warnings []string `json:"warnings,omitempty"`
+	Path     string            `json:"path"`
+	Detached bool              `json:"detached"`
+	Profile  string            `json:"profile"`
+	Hooks    []worktreeHookRun `json:"hooks,omitempty"`
+	Warnings []string          `json:"warnings,omitempty"`
 }
 
 func (r worktreeReleaseResult) text() string {
 	text := fmt.Sprintf("released: %s\ndetached: %t\nprofile: %s\n", r.Path, r.Detached, r.Profile)
+	for _, h := range r.Hooks {
+		text += h.text()
+	}
 	for _, w := range r.Warnings {
 		text += "warning: " + w + "\n"
 	}
@@ -553,9 +592,10 @@ func (r worktreeReleaseResult) text() string {
 // worktreeLegacyLabel is the profile an unmarked pooled worktree reports.
 const worktreeLegacyLabel = "legacy"
 
-// releaseWorktree returns a worktree to the pool: clean it (keeping its
-// profile's preserve patterns), detach HEAD so it becomes reuse-eligible, and
-// remove its worktree lease. It never deletes the worktree — the expensive
+// releaseWorktree returns a worktree to the pool: run its profile's
+// pre_release hooks (a failure leaves the worktree untouched and leased), clean
+// it (keeping its profile's preserve patterns), detach HEAD so it becomes
+// reuse-eligible, and remove its worktree lease. It never deletes the worktree — the expensive
 // derivation is what the pool amortizes. An unmarked (legacy) worktree gets
 // the pre-profile hygiene only; a worktree whose profile no longer resolves
 // gets the same, with a warning.
@@ -594,9 +634,13 @@ func releaseWorktree(ctx context.Context, runner wsgit.Runner, wtPath, poolConfi
 		return res, fmt.Errorf("worktree.release refuses %q: not under the owned worktree pool %q", target, poolRoots[0])
 	}
 	listed := false
+	var branch string
 	for _, e := range entries {
 		if filepath.Clean(e.Path) == target {
 			listed = true
+			if !e.Detached {
+				branch = strings.TrimPrefix(e.Branch, "refs/heads/")
+			}
 			break
 		}
 	}
@@ -621,6 +665,13 @@ func releaseWorktree(ctx context.Context, runner wsgit.Runner, wtPath, poolConfi
 		}
 		if found {
 			preserve = profile.Definition.Preserve
+			if h := profile.Definition.Hooks; h != nil {
+				runs, failure := runWorktreeHooks(ctx, worktreeHookPreRelease, h.PreRelease, profile.Scope, worktreeHookEnv{WorktreeDir: target, TargetBranch: branch})
+				res.Hooks = runs
+				if failure != nil {
+					return res, fmt.Errorf("worktree.release: profile %q: %w. %s is unchanged and still leased; fix the hook or the profile (config.tune), then release again", marker.Profile, failure, target)
+				}
+			}
 		} else {
 			res.Warnings = append(res.Warnings, fmt.Sprintf("profile %q no longer resolves; released with plain hygiene (nothing preserved)", marker.Profile))
 		}

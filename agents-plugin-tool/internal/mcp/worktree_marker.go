@@ -27,6 +27,9 @@ type worktreeMarker struct {
 	SchemaVersion int    `json:"schema_version"`
 	Profile       string `json:"profile"`
 	ProvisionHash string `json:"provision_hash"`
+	// Quarantine is set when a post_provision or post_acquire hook failed; a
+	// quarantined worktree is never reused.
+	Quarantine *worktreeQuarantine `json:"quarantine,omitempty"`
 }
 
 // readWorktreeMarker returns wtPath's marker, or nil when it has none (a
