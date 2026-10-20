@@ -594,7 +594,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-20T11:49:01Z"
+        "touched_at": "2026-10-20T11:49:42Z",
+        "impl": {
+          "branch": "impl/develop/area-relic-ranch"
+        }
       }
     },
     "261020-research-worktree-profiles": {
