@@ -169,68 +169,69 @@ Source reading only; nothing was executed.
     worktrees never run `workflow_manual` (they are subagent implementation
     spaces), so a profile-aware replacement is unnecessary.
 
-### Proposals
-
-Presented in discussion without an explicit confirmation; settle before
-deriving an actionable ticket.
-
-- Profile marker in the worktree admin dir that survives release (profile name
-  plus definition hash); the lease is deleted on release, so it cannot carry
-  the profile.
-- Hook execution: argv arrays (not shell strings), default cwd = worktree,
-  values passed by env vars (`WS_WORKTREE_DIR`, `WS_BASE`,
-  `WS_TARGET_BRANCH`) rather than `${...}` templating; no `WS_REUSED`, since
-  the hook choice already distinguishes fresh from reuse.
-- Hook provenance: acquire/release/remove results report each executed hook's
-  argv, source scope, and exit code; `config.list` and the manual's profile
-  list show per-field provenance.
-- `post_acquire` failure handling detail: run release-equivalent hygiene
-  (without `pre_release`) so the target branch is freed, mark the worktree
-  quarantined in its marker with argv/scope/exit/stderr tail/time, return a
-  fail-loud error that counts quarantined worktrees in the profile (2+ ⇒
-  likely a profile/hook defect), and never auto-retry on a fresh worktree.
-  `post_provision` failure uses the same quarantine.
-- `post_provision` outputs (override files, hardlinks) only survive if listed
-  in `preserve`; document or warn.
-- Legacy adoption: unmarked pooled worktrees are adopted lazily into builtin
-  profiles only, by today's boolean rule (sparse-active ⇒ `housekeeping`
-  whatever its cone, otherwise `full`), stamping the marker on claim; custom
-  profiles never adopt unmarked entries. A release of an unmarked leased
-  worktree runs today's hygiene only. `worktree.list` labels unmarked entries
-  `legacy`.
-- `worktree.remove` refusals: dirty worktree, or a checked-out branch holding
-  commits reachable from nowhere else.
-- Nudge detail: activity = `max(lease acquired_at, HEAD commit time)`;
-  preserved size measured at release and recorded in the marker (never walked
-  at acquire); throttle timestamp stored per pool in the git common dir;
-  thresholds as config knobs defaulting to 7 days / 1 GB; shipped playbook text
-  tells the lead to relay the nudge to the user.
-- Profile name validation, e.g. `^[a-z][a-z0-9-]*$`.
-- `config.list` catalog shows the family pattern with a `value_schema` (JSON
-  Schema) plus resolved profiles; validation at `config.tune` write and at
-  resolve time (a bad committed file fails acquire and manual render loudly,
-  naming file and key).
-- Override granularity: a higher scope replaces a whole profile; no field
-  merge. Builtin profiles can be overridden by name.
-- Issue 4 fix: pass `-c submodule.recurse=false` to hygiene/switch commands,
-  keep the explicit `submodule update`, add a submodule fixture test.
-- Retirement keeps generic sparse safety: `SparseCheckoutActive`,
-  `git add --sparse` staging, the move/close `check-rules` gate, the create
-  collision refusal; add a `tickets.create` warning when the created path is
-  outside the active sparse scope.
-- Retirement follow-through: a release note line on `git sparse-checkout
-  disable` for downstream worktrees that applied a scope; update
-  `260924-research-origin-ticket-ownership-index`'s reference to
-  `lead-scope-worktree`.
-- Fix the `sparse_paths`/acquire tool description wording as part of the
-  schema change.
+16. **Profile marker.** A marker in the worktree admin dir records the profile
+    name plus a definition hash and survives release; the lease is deleted on
+    release, so it cannot carry the profile.
+17. **Hook execution.** Hooks are argv arrays (not shell strings) with default
+    cwd = the worktree. Values reach hooks through env vars (`WS_WORKTREE_DIR`,
+    `WS_BASE`, `WS_TARGET_BRANCH`), not `${...}` templating. No `WS_REUSED`:
+    the hook choice already distinguishes fresh from reuse.
+18. **Hook provenance.** acquire/release/remove results report each executed
+    hook's argv, source scope, and exit code; `config.list` and the manual's
+    profile list show per-field provenance.
+19. **Failure handling detail.** On `post_acquire` failure: run
+    release-equivalent hygiene (without `pre_release`) so the target branch is
+    freed, mark the worktree quarantined in its marker with argv, scope, exit
+    code, stderr tail, and time, and return a fail-loud error that counts the
+    profile's quarantined worktrees (2+ means a likely profile/hook defect).
+    Never auto-retry on a fresh worktree. `post_provision` failure uses the
+    same quarantine.
+20. **`post_provision` outputs** (override files, hardlinks) survive only when
+    listed in `preserve`; document this or warn about it (which one is settled
+    when the actionable ticket is derived).
+21. **Legacy adoption.** Unmarked pooled worktrees are adopted lazily into
+    builtin profiles only, by today's boolean rule (sparse-active ⇒
+    `housekeeping` whatever its cone, otherwise `full`), stamping the marker on
+    claim. Custom profiles never adopt unmarked entries. Releasing an unmarked
+    leased worktree runs today's hygiene only. `worktree.list` labels unmarked
+    entries `legacy`.
+22. **`worktree.remove` refusals:** a dirty worktree, or a checked-out branch
+    holding commits reachable from nowhere else.
+23. **Nudge detail.** Activity = `max(lease acquired_at, HEAD commit time)`.
+    Preserved size is measured at release and recorded in the marker, never
+    walked at acquire. The throttle timestamp is stored per pool in the git
+    common dir. Thresholds are config knobs defaulting to 7 days / 1 GB.
+    Shipped playbook text tells the lead to relay the nudge to the user.
+24. **Profile name validation:** `^[a-z][a-z0-9-]*$`.
+25. **Schema and validation.** The `config.list` catalog shows the family
+    pattern with a `value_schema` (JSON Schema) plus the resolved profiles.
+    Validation runs at `config.tune` write and at resolve time; a bad committed
+    file fails acquire and manual render loudly, naming file and key.
+26. **Override granularity.** A higher scope replaces a whole profile; no field
+    merge. Builtin profiles can be overridden by name.
+27. **Issue 4 fix.** Pass `-c submodule.recurse=false` to the hygiene and
+    switch commands, keep the explicit `submodule update`, and add a submodule
+    fixture test.
+28. **Retirement keeps generic sparse safety:** `SparseCheckoutActive`,
+    `git add --sparse` staging, the move/close `check-rules` gate, and the
+    create collision refusal stay; `tickets.create` gains a warning when the
+    created path is outside the active sparse scope.
+29. **Retirement follow-through:** a release note line on `git sparse-checkout
+    disable` for downstream worktrees that applied a scope, and an update of
+    `260924-research-origin-ticket-ownership-index`'s reference to
+    `lead-scope-worktree`.
+30. **Tool description wording.** Fix the acquire tool description (the
+    "sparse state matches" overstatement) as part of the schema change.
+31. **`config.tune` writes the `repo` scope** in this landing. This reverses
+    the 260917 "read-only / hand-edited for now" choice, confirmed by the
+    user: agents edit the committed JSON anyway, and refusing the write would
+    skip write-time schema validation (Decision 25) on the scope that holds
+    most profile definitions. Follow the `note.write(layer: "repo")`
+    precedent: write `.ws-workflow/config.json` in the caller's worktree and
+    leave staging to the caller's `git.commit`.
 
 ### Open Questions
 
-- Should `config.tune` write the `repo` scope? The 260917 refusal was a
-  minimal "for now" choice; agents edit the committed JSON anyway, and
-  `note.write(layer: "repo")` is a precedent for writing a tracked file while
-  staging rides the caller's `git.commit`.
 - Live checks still needed:
   - `git sparse-checkout set --cone` on a worktree left in non-cone mode;
   - whether `git worktree remove` needs `--force` with preserved ignored files
@@ -258,5 +259,7 @@ deriving an actionable ticket.
   chosen by the lead.
 - A profile-aware replacement banner: acquired worktrees never render the
   workflow manual.
+- Keeping the `repo` scope read-only to `config.tune`: protects nothing when
+  agents edit the file, and loses write-time validation.
 - A single `worktree.profiles` map key: per-scope whole-value override would
   prevent per-profile layering.
