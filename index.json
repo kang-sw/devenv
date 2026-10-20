@@ -597,6 +597,9 @@
         "touched_at": "2026-10-20T11:45:38Z"
       }
     },
+    "261020-chore-retire-mcp-server-repair-skill": {
+      "registered_at": "2026-10-20T12:18:44Z"
+    },
     "261020-feat-worktree-profiles": {
       "registered_at": "2026-10-20T08:47:50Z",
       "lease": {
