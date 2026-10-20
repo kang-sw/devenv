@@ -25,8 +25,6 @@ EXPECTED_LEAD_SKILLS = {
     "mcp-server-repair",
     "lead-audit-doc",
     "lead-use-mailbox",
-    # undecided disposition; survive unchanged
-    "lead-scope-worktree",
 }
 
 # Names that must not reappear on this flagship package's shipped skill or

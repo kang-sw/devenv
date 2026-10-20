@@ -26,13 +26,12 @@ const manualsAuthoringGuidance = "Shared project procedures (build, deploy, env 
 // presence-gated memory dump like `# Notes`.
 //
 // It returns "" only on a genuine resolution error (a non-NotExist ReadDir
-// failure), preserving the scopeAnnouncement-style "silent, never blocks
-// workflow_manual" doctrine for the error path; a missing/empty
-// ai-docs/manuals/ directory is the common steady state and still renders the
-// anchor with the "(none yet)" placeholder.
+// failure), preserving the "silent, never blocks workflow_manual" doctrine
+// for the error path; a missing/empty ai-docs/manuals/ directory is the common
+// steady state and still renders the anchor with the "(none yet)" placeholder.
 //
-// Unlike scopeAnnouncement there is no applicability predicate — every tracked
-// manual's path + summary is injected unconditionally (260807 Phase 1).
+// There is no applicability predicate — every tracked manual's path + summary
+// is injected unconditionally (260807 Phase 1).
 //
 // A tracked manual with no `summary:` frontmatter is still listed, with an
 // explicit no-summary marker rather than a silently blank or omitted line, so

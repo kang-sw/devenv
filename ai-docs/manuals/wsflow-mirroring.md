@@ -45,7 +45,6 @@ Included:
 - `lead-tune`
 - `lead-delegate`
 - `lead-run`
-- `lead-scope-worktree`
 - `lead-use-mailbox`
 - `lead-revive` (inline-body exception; see below)
 - `mcp-server-repair` (inline-body exception; see below)

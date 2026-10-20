@@ -158,7 +158,8 @@ registration and ownership on top without changing folder semantics.
     pruning clears it.
   - The owner is surfaced in `tickets.query`, `git.status`, and queue
     selection.
-  - In index mode, a `lead-scope-worktree` scope assignment is an acquire.
+  - The former `lead-scope-worktree` scope assignment was retired (by ticket
+    261020-feat-worktree-profiles) and is no longer an acquire path.
 - **Pruning.**
   - A registration is pruned once its closure lands on the origin review-track.
     In the MVP, that means the file sits under `.done/` or `.dropped/`.

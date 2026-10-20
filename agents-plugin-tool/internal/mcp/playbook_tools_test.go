@@ -2381,10 +2381,6 @@ func TestPlaybookPrintTicketIndexContracts(t *testing.T) {
 		},
 		"ticket-worker":          workerRecord,
 		"ticket-worker-elevated": workerRecord,
-		"lead-scope-worktree": {
-			"/tickets.acquire(ticket_stem: <stem>)` from this worktree for every ticket step 5 listed as visible",
-			"set the override flag only on the user's explicit instruction to take that ticket over",
-		},
 		"ticket-selector": {
 			"inspect `ready/` with `unleased_or_mine: true` on every candidate query",
 		},

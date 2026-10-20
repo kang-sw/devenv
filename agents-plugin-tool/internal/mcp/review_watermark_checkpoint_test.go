@@ -110,7 +110,7 @@ func TestServeStdioWorkflowManualReviewWatermarkNudgeSurfacesAndQuiets(t *testin
 
 	// workflow_manual injects the raw CheckpointNudge text directly (no
 	// "review-watermark:" label prefix, unlike the other three call sites),
-	// mirroring the scopeAnnouncement/computeManuals injection shape.
+	// mirroring the computeManuals injection shape.
 	const nudgeMarker = "review watermark is"
 
 	freshResp := callToolWithKey(t, s, 1, freshBootstrapKey, "workflow_manual", map[string]any{"root": root})

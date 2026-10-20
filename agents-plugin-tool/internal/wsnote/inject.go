@@ -18,16 +18,13 @@ type layeredRecord struct {
 
 // Compute computes the ambient "# Notes" block: the highest-priority notes
 // across the machine, worktree, clone, and repo layers, up to limit items,
-// or "" when there are no notes at all. Modeled on computeManuals /
-// scopeAnnouncement in package mcp: silent-by-design, never blocks
-// workflow_manual from rendering.
+// or "" when there are no notes at all. Modeled on computeManuals in
+// package mcp: silent-by-design, never blocks workflow_manual from rendering.
 //
 // A resolution error on any layer (including an empty root, which also
 // skips the worktree, clone, and repo layers entirely) is treated the same
 // as "no notes on that layer" and degrades to whatever the other layers
-// have —
-// mirroring scopeAnnouncement's "a resolution error is treated the same as
-// inactive" contract — rather than failing the whole block.
+// have, rather than failing the whole block.
 func Compute(root string, opts wsconfig.Options, limit int) string {
 	var all []layeredRecord
 
