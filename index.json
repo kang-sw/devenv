@@ -575,7 +575,14 @@
       "registered_at": "2026-10-17T15:30:06Z"
     },
     "261020-bug-claude-mod-milestone-percent-stale": {
-      "registered_at": "2026-10-20T12:18:55Z"
+      "registered_at": "2026-10-20T12:18:55Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-10-20T13:00:01Z"
+      }
     },
     "261020-chore-pi-compaction-prose-before-dialog": {
       "registered_at": "2026-10-20T11:45:11Z",
