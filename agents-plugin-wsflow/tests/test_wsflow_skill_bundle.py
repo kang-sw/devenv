@@ -33,7 +33,6 @@ EXPECTED_SKILLS = {
     "lead-revive",
     "lead-scope-worktree",
     "lead-use-mailbox",
-    "mcp-server-repair",
 }
 
 # wsflow-only backward-compat aliases mapped to the shared playbook they route
@@ -49,7 +48,6 @@ WSFLOW_ALIAS_TARGET = {"lead-proceed": "lead-run"}
 EXPECTED_WSFLOW_ONLY_SKILLS: set = set(WSFLOW_ALIAS_TARGET)
 EXPECTED_INLINE_SKILLS = {
     "lead-revive",
-    "mcp-server-repair",
 }
 EXPECTED_PARALLEL_INIT_SKILLS = {
     "lead-delegate",
@@ -62,18 +60,10 @@ PARALLEL_INIT_TITLES = {
     "lead-run": "Run",
 }
 
-# Single-call shims that carry the mcp-server-repair pointer tail instead of
-# the generic "stop and report that blocker" un-pointed form.
-POINTER_TAIL_TITLES = {
-    "lead-ticket": "Ticket",
-    "lead-audit-doc": "Audit Doc",
-    "lead-bootstrap": "Bootstrap",
-    "lead-review": "Review",
-    "lead-ship": "Ship",
-    "lead-tune": "Workflow Tuning",
-    "lead-check-blockers": "Check Blockers",
-    "lead-workflow-manual": "Workflow Manual",
-    "lead-scope-worktree": "Scope Worktree",
+# The single-call shim that threads a session_key into playbook.read; it keeps
+# its own exact-tail check. Every other single-call shim falls under the generic
+# shim assertion.
+SESSION_KEY_SHIM_TITLES = {
     "lead-use-mailbox": "Use Mailbox",
 }
 
@@ -169,20 +159,15 @@ class WsflowSkillBundleTest(unittest.TestCase):
         self.assertEqual(offenders, [])
 
     def test_skill_files_are_thin_playbook_shims(self):
-        # lead-ticket, lead-audit-doc, lead-bootstrap, lead-review,
-        # lead-ship, lead-tune, lead-check-blockers, and
-        # lead-workflow-manual all
-        # carry the mcp-server-repair pointer in place of the generic "stop
-        # and report that blocker" tail, so they are checked separately below
-        # (see POINTER_TAIL_TITLES) with their own exact tail. That accounts
-        # for every non-inline, non-parallel-init shim; none remain on the
-        # un-pointed form.
+        # Every non-inline, non-parallel-init, non-alias shim carries the
+        # generic "stop and report that blocker" tail. lead-use-mailbox threads a
+        # session_key into playbook.read and is checked separately below.
         offenders = []
         for skill in sorted(
             EXPECTED_SKILLS
             - EXPECTED_INLINE_SKILLS
             - EXPECTED_PARALLEL_INIT_SKILLS
-            - set(POINTER_TAIL_TITLES)
+            - set(SESSION_KEY_SHIM_TITLES)
             - set(WSFLOW_ALIAS_TARGET)
         ):
             path = SKILLS_DIR / skill / "SKILL.md"
@@ -202,37 +187,27 @@ class WsflowSkillBundleTest(unittest.TestCase):
                 offenders.append(str(path.relative_to(PLUGIN_DIR)))
         self.assertEqual(offenders, [])
 
-    def test_single_call_shims_carry_repair_pointer(self):
-        # All single-call shims in POINTER_TAIL_TITLES share the identical
-        # joined-tail shape, differing only by skill name and title. A missing
-        # pointer on any of them must fail loudly rather than silently
-        # matching the generic un-pointed shim regex instead.
-        #
+    def test_session_key_shims_pin_their_clause(self):
         # lead-use-mailbox alone threads a session_key into playbook.read so the
         # render can emit a concrete wait command; that clause is REQUIRED there
-        # and FORBIDDEN on the other single-call shims. The per-skill expected
-        # arg (not an optional regex group) keeps the change pinned: a reverted
-        # lead-use-mailbox, or the clause leaking onto another shim, both fail.
-        session_key_shims = {"lead-use-mailbox"}
+        # and FORBIDDEN on the other single-call shims (the generic shim
+        # assertion above has no session_key arg, so a leak onto another shim
+        # fails there, and a reverted lead-use-mailbox fails here).
         offenders = []
-        for skill, title in POINTER_TAIL_TITLES.items():
+        for skill, title in SESSION_KEY_SHIM_TITLES.items():
             path = SKILLS_DIR / skill / "SKILL.md"
             text = path.read_text(encoding="utf-8")
-            session_key_arg = (
-                r", session_key: <your key, omit if fresh>"
-                if skill in session_key_shims
-                else r""
-            )
             match = re.fullmatch(
                 r"---\n"
                 rf"name: {re.escape(skill)}\n"
                 r"description: .+\n"
                 r"---\n\n"
                 rf"# {re.escape(title)}\n\n"
-                rf"Call `wsflow/playbook\.read\(name: \"{re.escape(skill)}\"{session_key_arg}"
+                rf"Call `wsflow/playbook\.read\(name: \"{re.escape(skill)}\", session_key: <your key, omit if fresh>"
                 r"\)` and execute the returned procedure\n"
                 r"inline against the current user request\. "
-                r"If this call fails to connect, run `/wsflow:mcp-server-repair`\.\n",
+                r"If the playbook cannot be loaded, stop\n"
+                r"and report that blocker\.\n",
                 text,
             )
             if match is None:
@@ -240,15 +215,6 @@ class WsflowSkillBundleTest(unittest.TestCase):
         self.assertEqual(offenders, [])
 
     def test_parallel_init_skill_files_are_playbook_shims(self):
-        # Every parallel-init skill gains the mcp-server-repair pointer
-        # after the existing final line. Explicit per-skill tails (not an
-        # optional regex group) so a missing pointer on any of them fails
-        # loudly instead of silently passing.
-        pointer_tail = {
-            "lead-delegate": r"\nIf this call fails to connect, run `/wsflow:mcp-server-repair`\.",
-            "lead-discuss": r"\nIf this call fails to connect, run `/wsflow:mcp-server-repair`\.",
-            "lead-run": r"\nIf this call fails to connect, run `/wsflow:mcp-server-repair`\.",
-        }
         offenders = []
         for skill in sorted(EXPECTED_PARALLEL_INIT_SKILLS):
             path = SKILLS_DIR / skill / "SKILL.md"
@@ -263,9 +229,7 @@ class WsflowSkillBundleTest(unittest.TestCase):
                 r"Call in parallel:\n"
                 rf"- `wsflow/playbook\.read\(name: \"{re.escape(skill)}\", session_key: <your key, omit if fresh>\)`\n"
                 r'- `wsflow/workflow_manual\(session_key: <your key or "obsidian-latch" if fresh>, root: <absolute worktree path if fresh>\)`\n\n'
-                r"After both return, execute the procedure returned by `wsflow/playbook\.read`\."
-                + pointer_tail[skill]
-                + r"\n",
+                r"After both return, execute the procedure returned by `wsflow/playbook\.read`\.\n",
                 text,
             )
             if match is None:
@@ -316,8 +280,7 @@ class WsflowSkillBundleTest(unittest.TestCase):
                 r"Call in parallel:\n"
                 rf'- `wsflow/playbook\.read\(name: "{re.escape(target)}", session_key: <your key, omit if fresh>\)`\n'
                 r'- `wsflow/workflow_manual\(session_key: <your key or "obsidian-latch" if fresh>, root: <absolute worktree path if fresh>\)`\n\n'
-                r"After both return, execute the procedure returned by `wsflow/playbook\.read`\."
-                r"\nIf this call fails to connect, run `/wsflow:mcp-server-repair`\.\n",
+                r"After both return, execute the procedure returned by `wsflow/playbook\.read`\.\n",
                 text,
             )
             if match is None:

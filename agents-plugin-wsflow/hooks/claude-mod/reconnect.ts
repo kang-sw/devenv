@@ -24,8 +24,8 @@ export const TOOLS_POLL_MS = 500
 
 export function reconnectDescription(plugin: string): string {
   return (
-    `Reconnect the ${plugin} MCP server when the current turn ends. ` +
-    "Use it when that server's tools have left your tool list or a call reports the server not connected. " +
+    `Call this first when the ${plugin} MCP server's tools have left your tool list or a call reports it not connected. ` +
+    `It reconnects the ${plugin} MCP server when the current turn ends. ` +
     '`continuation` is optional: pass it only when work must resume by itself after the reconnect attempt, as one line naming what to do next; it is sent as your next prompt with the outcome. ' +
     "Omit it when the next turn will come from the human or from a background agent's notification; a failed reconnect is still reported to you. " +
     'Main session only.'
@@ -51,7 +51,8 @@ export function successText(plugin: string, continuation: string): string {
 export function failureText(plugin: string, reason: string, continuation: string | undefined): string {
   const head =
     `[${plugin} mcp] The ${plugin} MCP server did not come back (${reason}). ` +
-    `Follow the ${plugin}:mcp-server-repair skill: keep working through its CLI fallback and relay its reconnect steps to the user.`
+    `Do not call ${TOOL_NAME} again for this drop: a reconnect that just failed fails the same way. ` +
+    'Ask the user to re-enable the server from /mcp, run /reload-plugins, or restart the session.'
   return continuation === undefined ? head : `${head}\nContinue: ${continuation}`
 }
 

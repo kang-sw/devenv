@@ -1,21 +1,20 @@
 {
   "schema_version": 1,
   "files": {
-    "lead-audit-doc/SKILL.md": "c18c312d42a489bcfee3e535a58d618d9fac758cf90f5328230c16dc81fcdd3b",
+    "lead-audit-doc/SKILL.md": "53f634f5a371ea6b4aeff932617f6f0cfd98f6f32370162df591663fc0762699",
     "lead-bootstrap/AGENTS.template.md": "1b96aee76f5d3af61002efb3a7514af87035c29cf3b0cd6af636e9a83199cb16",
-    "lead-bootstrap/SKILL.md": "a15f6e640341b35a2b770239768c714e51cedb4b9c04c8fbd1c1effc9694a631",
+    "lead-bootstrap/SKILL.md": "6043d6356a662aa1c99656844b04febeb29af2936d988bea79e8e980f12d094f",
     "lead-bootstrap/WORKFLOW.md": "957e4447a79ccfd49971f9b699d9979e5a7e95b7b513e47a102d50fdde7fa9e5",
-    "lead-delegate/SKILL.md": "39b52ccfcb3471b60c6eff90019b426434c1de1e8f8942411548739b85bb560e",
-    "lead-discuss/SKILL.md": "babc922918b21c1438b00c0c7d0e66ab2362567c2789d5b64ef39c5663214e81",
+    "lead-delegate/SKILL.md": "db47ca5c0c5c7ce25beb01d7c7ecca0d1852a7638801b041d7bf16af95993776",
+    "lead-discuss/SKILL.md": "16ed98868718f63c99b6bcb3b173be07ba5bc43636b66624c9270aab42c95364",
     "lead-discuss/agents/openai.yaml": "25bf5112c8b0d204f522e117248c26e683d6e4543bfd21a43a2d0e08eff15f69",
-    "lead-review/SKILL.md": "10bfc4839505bfe9cedec564afe5672a5a310aba32ad377dd81afbe93594450c",
-    "lead-revive/SKILL.md": "bbaf416690ffd5df3c3b04eebac0a4168fad2f35b584308f9242d34a33a09bf5",
-    "lead-run/SKILL.md": "7b6d4d778914cd74fbc6e3107869f45c8bebbdb550889d6d8af3ce08eb6a7503",
-    "lead-scope-worktree/SKILL.md": "52ecb91f5a66e2b882525d910e283bd25000e8ec7628881ee81457b4bdbbc2b2",
-    "lead-ship/SKILL.md": "3af6ee6ff42c12cc5e2e50492fb31e49d82f3f7a2ea910393625d0c8fa9f1f43",
-    "lead-ticket/SKILL.md": "be262c31e63190c21eb0f585f2cfd44ce25265656a5f98ae2beb3eb2b9532d9e",
-    "lead-tune/SKILL.md": "95f7b5fc6c35b7b5901ae877233faeb38ad9e1593fdc87517ba253618daca996",
-    "lead-use-mailbox/SKILL.md": "80daa25a3b32184c21eb0836aa29c25cd36d82eee005b352fe15a4f64bdb10cc",
-    "mcp-server-repair/SKILL.md": "5483729cf87bdad7f2bf929b7d7d7133d64ee4a8151f7ecff5dfc00e68611055"
+    "lead-review/SKILL.md": "9de702a704491a993be14f678441587d9ba41422d6281915f155eb420f5a6a9d",
+    "lead-revive/SKILL.md": "1bd032108969d12234968c624010286f2c26ceaa7cd432ef3cf2759cbef5b6b8",
+    "lead-run/SKILL.md": "600ddac1b17b0a317f38e001ec74674cd37b05415b07a2e2e59f4a4abfef8128",
+    "lead-scope-worktree/SKILL.md": "3aa3447b48181dab19d66b4365183570fdf526e912f154fb6da7f04680bf9536",
+    "lead-ship/SKILL.md": "7f79b540ba447b9bf03a88d9e24cfe430a4e819a6d724bf03345fc16d0cb20db",
+    "lead-ticket/SKILL.md": "b61215f901a2f78290e81fdd6a4480d891765968b7dd95f1b5708574fe6e61f0",
+    "lead-tune/SKILL.md": "e12b2952c1e3c26125464867001e24f4d43eb854e2759be975da51adc825b007",
+    "lead-use-mailbox/SKILL.md": "0ade789732b480b4315c3bddb5c5059c084cb78a2846784d281e303b7ca24671"
   }
 }

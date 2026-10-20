@@ -6,4 +6,5 @@ description: Bootstrap or upgrade a downstream project to AGENTS.md-based wsflow
 # Bootstrap
 
 Call `wsflow/playbook.read(name: "lead-bootstrap")` and execute the returned procedure
-inline against the current user request. If this call fails to connect, run `/wsflow:mcp-server-repair`.
+inline against the current user request. If the playbook cannot be loaded, stop
+and report that blocker.

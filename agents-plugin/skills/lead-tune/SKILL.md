@@ -7,4 +7,3 @@ description: Use when the user wants to tune or customize how the ws workflow ru
 
 Call `ws/playbook.read(name: "lead-tune")` and execute the returned procedure
 inline against the user request.
-If this call fails to connect, run `/ws:mcp-server-repair`.
