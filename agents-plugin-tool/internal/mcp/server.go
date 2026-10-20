@@ -937,6 +937,13 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: agents.tier only supports project or global scope; got %q", explicitScope))
 		}
 		reset, _ := params.Arguments["reset"].(bool)
+		if entry.Structured {
+			text, err := s.tuneStructured(entry, params.Arguments["value"], sessionKey, explicitScope, reset)
+			return toolTextResponse(req.ID, text, err)
+		}
+		// Writers anchor the committed repo scope at the session's worktree
+		// root, so scope "repo" writes that worktree's .ws-workflow/config.json.
+		writeOpts := s.sessionConfigOptions(sessionKey)
 		if reset {
 			if entry.ResetTool == "" {
 				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %s does not support reset", key))
@@ -963,7 +970,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 					storedHarness = "all"
 				}
 				overrideKey := "prompt." + pointID + "." + storedHarness
-				resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+				resolver := wsconfig.NewResolver(writeOpts, nil, adapter, adapter)
 				if err := resolver.Unset(overrideKey, wsconfig.SetOptions{ExplicitScope: explicitScope, SessionKey: sessionKey}); err != nil {
 					return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %w", err))
 				}
@@ -971,26 +978,26 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 				if resolvedScope == "" {
 					resolvedScope = wsconfig.DefaultScope(overrideKey)
 				}
-				return toolTextResponse(req.ID, fmt.Sprintf("prompt override cleared: %s/%s (scope: %s)\n", pointID, storedHarness, resolvedScope), nil)
+				return toolTextResponse(req.ID, fmt.Sprintf("prompt override cleared: %s/%s (scope: %s)\n", pointID, storedHarness, resolvedScope)+repoWriteNote(&resolver, resolvedScope), nil)
 			}
 			// scalar resolver-backed knob reset (subsumes the alarm/preference resets).
 			// Reset means "drop the override and fall back to the builtin default" —
 			// distinct from explicitly writing the builtin's current value.
-			resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
+			resolver := wsconfig.NewResolver(writeOpts, builtinConfigDefaults(), adapter, adapter)
 			if err := resolver.Unset(entry.Key, wsconfig.SetOptions{ExplicitScope: explicitScope, SessionKey: sessionKey}); err != nil {
 				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %w", err))
 			}
 			// The echo reads through the session-anchored resolver so a reset
-			// reports the committed repo value that now applies; the writer above
-			// stays repo-unaware because repo scope is read-only to config.tune.
-			// The reset already happened, so an echo load failure is reported
-			// beside it rather than as a failed tune.
+			// reports the value that now applies (a committed repo value
+			// included). The reset already happened, so an echo load failure is
+			// reported beside it rather than as a failed tune.
+			note := repoWriteNote(&resolver, resetEchoScope(explicitScope, entry))
 			echo := s.sessionResolver(sessionKey, s.declared.withDefaults(builtinConfigDefaults()))
 			resolved, err := echo.Get(sessionKey, entry.Key)
 			if err != nil {
-				return toolTextResponse(req.ID, fmt.Sprintf("%s: reset [scope:%s]\nwarning: effective value unreadable: %v\n", entry.Key, resetEchoScope(explicitScope, entry), err), nil)
+				return toolTextResponse(req.ID, fmt.Sprintf("%s: reset [scope:%s]\nwarning: effective value unreadable: %v\n", entry.Key, resetEchoScope(explicitScope, entry), err)+note, nil)
 			}
-			return toolTextResponse(req.ID, fmt.Sprintf("%s: %s [scope:%s]\n", entry.Key, resolved.Value, resolved.Scope), nil)
+			return toolTextResponse(req.ID, fmt.Sprintf("%s: %s [scope:%s]\n", entry.Key, resolved.Value, resolved.Scope)+note, nil)
 		}
 		// Non-reset write branch, dispatched by key family. Every key except
 		// agents.tier reads a string value; reject any other JSON type here so it
@@ -1019,7 +1026,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 				storedHarness = "all"
 			}
 			overrideKey := "prompt." + pointID + "." + storedHarness
-			resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+			resolver := wsconfig.NewResolver(writeOpts, nil, adapter, adapter)
 			if err := resolver.Set(overrideKey, promptText, wsconfig.SetOptions{ExplicitScope: explicitScope, SessionKey: sessionKey}); err != nil {
 				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %w", err))
 			}
@@ -1027,7 +1034,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			if resolvedScope == "" {
 				resolvedScope = wsconfig.DefaultScope(overrideKey)
 			}
-			return toolTextResponse(req.ID, fmt.Sprintf("prompt override set: %s/%s (scope: %s)\n", pointID, storedHarness, resolvedScope), nil)
+			return toolTextResponse(req.ID, fmt.Sprintf("prompt override set: %s/%s (scope: %s)\n", pointID, storedHarness, resolvedScope)+repoWriteNote(&resolver, resolvedScope), nil)
 		default:
 			// scalar resolver-backed knob (subagent / bootstrap_alarm).
 			// Resolver.Set enforces global-only + session-key.
@@ -1054,7 +1061,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 					return toolTextResponse(req.ID, "", err)
 				}
 			}
-			resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
+			resolver := wsconfig.NewResolver(writeOpts, builtinConfigDefaults(), adapter, adapter)
 			if err := resolver.Set(entry.Key, value, wsconfig.SetOptions{ExplicitScope: explicitScope, SessionKey: sessionKey}); err != nil {
 				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %w", err))
 			}
@@ -1062,7 +1069,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			if resolvedScope == "" {
 				resolvedScope = entry.DefaultScope()
 			}
-			text := fmt.Sprintf("%s: %s [scope:%s]\n", entry.Key, value, resolvedScope)
+			text := fmt.Sprintf("%s: %s [scope:%s]\n", entry.Key, value, resolvedScope) + repoWriteNote(&resolver, resolvedScope)
 			// A write below a set scope (for example a global write under a
 			// committed repo value) does not take effect; say which value does.
 			echo := s.sessionResolver(sessionKey, s.declared.withDefaults(builtinConfigDefaults()))
@@ -1293,7 +1300,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			// Detach the freshly provisioned worktree so a failed mint does not
 			// leave it branch-checked-out and thus ineligible for pool reuse.
-			_, _ = wsgit.ExecRunner{}.RunGit(context.Background(), result.Path, "checkout", "--detach")
+			_, _ = wsgit.ExecRunner{}.RunGit(context.Background(), result.Path, noSubmoduleRecurse("checkout", "--detach")...)
 			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.acquire: mint worker key: %w", err))
 		}
 		// The lease is written only after a successful mint, so the failed-mint
@@ -1303,7 +1310,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		// minted key is left unused and ages out through key pruning.
 		lease := worktreeLease{WorkerKey: workerKey, ParentKey: key, AcquiredAt: time.Now().UTC().Format(time.RFC3339)}
 		if err := writeWorktreeLease(context.Background(), wsgit.ExecRunner{}, result.Path, lease); err != nil {
-			_, _ = wsgit.ExecRunner{}.RunGit(context.Background(), result.Path, "checkout", "--detach")
+			_, _ = wsgit.ExecRunner{}.RunGit(context.Background(), result.Path, noSubmoduleRecurse("checkout", "--detach")...)
 			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.acquire: record worktree lease: %w", err))
 		}
 		result.Path = mintPath
@@ -2499,6 +2506,15 @@ type tuningKnob struct {
 	// only when RepoScope is true. It differs from ID for prompt.* knobs,
 	// whose stored keys carry a harness bucket suffix.
 	RepoKey string `json:"repo_key,omitempty"`
+	// RepoMember names the config-file member RepoKey lives in when it is not
+	// overrides: structured_overrides for a structured (object) knob.
+	RepoMember string `json:"repo_member,omitempty"`
+	// ValueSchema is the JSON Schema of a structured knob's value.
+	ValueSchema any `json:"value_schema,omitempty"`
+	// Error reports why Current could not be resolved (an invalid stored
+	// value, naming its file and key); config.list still lists the knob so
+	// the lead can fix it.
+	Error string `json:"error,omitempty"`
 }
 
 type tuningWriter struct {
@@ -2672,6 +2688,28 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 		Current:        agentTiers,
 	})
 
+	profileEntry := worktreeProfileKnobEntry("<name>")
+	profileKnob := tuningKnob{
+		ID:          profileEntry.Key,
+		Kind:        "worktree_profile",
+		Description: "One worktree profile per key: the pool partition and lifecycle worktree.acquire(profile: <name>) provisions. A pooled worktree is reused only by an acquire naming the same profile. The value is a whole profile object (value_schema); a higher scope replaces a lower scope's profile of the same name, with no field merge. Builtins: full (plain checkout) and housekeeping (cone sparse of ai-docs). Hooks run as argv arrays from any scope, so a repo-scope profile carries commands the repository's scripts provide. current lists every resolved profile with the scope and file it came from.",
+		Writer:      tuningWriter{Tool: profileEntry.WriterTool, FixedArguments: map[string]string{"key": profileEntry.Key}},
+		Reset: &tuningWriter{
+			Tool:           profileEntry.ResetTool,
+			FixedArguments: map[string]string{"key": profileEntry.Key, "reset": "true"},
+		},
+		SelectorFields: profileEntry.SelectorFields,
+		ValueFields:    profileEntry.ValueFields,
+		ValueSchema:    worktreeProfileValueSchema(),
+		RepoMember:     "structured_overrides",
+	}
+	if profiles, err := resolveWorktreeProfiles(resolver); err != nil {
+		profileKnob.Error = err.Error()
+	} else {
+		profileKnob.Current = profiles
+	}
+	appendKnob(profileEntry, profileKnob)
+
 	return catalog, nil
 }
 
@@ -2826,6 +2864,15 @@ func formatTuningCatalog(catalog tuningCatalog) string {
 		fmt.Fprintf(&b, "  repo_scope: %s\n", yesNo(knob.RepoScope))
 		if knob.RepoKey != "" {
 			fmt.Fprintf(&b, "  repo_key: %s\n", knob.RepoKey)
+		}
+		if knob.RepoMember != "" {
+			fmt.Fprintf(&b, "  repo_member: %s\n", knob.RepoMember)
+		}
+		if knob.ValueSchema != nil {
+			fmt.Fprintf(&b, "  value_schema: %s\n", formatTuningCurrent(knob.ValueSchema))
+		}
+		if knob.Error != "" {
+			fmt.Fprintf(&b, "  error: %s\n", knob.Error)
 		}
 		b.WriteString("\n")
 	}
@@ -4187,13 +4234,13 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "config.tune",
-			"description": "Write one ws config knob, selected by its key (e.g. workflow.prefer_subagent, bootstrap_alarm, agents.tier, prompt.<pointId>). Call config.list first for each key's exact value domain, scope rules, and harness applicability. value is a string for scalar knobs and an object ({tier, backend, model, effort}) for agents.tier; agents.tier reset takes value: {tier} only. scope is optional and backstops to the key's declared default; harness is load-bearing for prompt.* and agents.tier and warning-only (ignored) for keys that do not vary by harness. reset: true drops a knob's override back to its builtin/inherited default (only for keys that support reset). session_key is required at dispatch for lead-authority keys and prompt.* keys. Lead-only: delegate and leaf keys are blocked by the config.* prefix gate.",
+			"description": "Write one ws config knob, selected by its key (e.g. workflow.prefer_subagent, bootstrap_alarm, agents.tier, prompt.<pointId>, worktree.profile.<name>). Call config.list first for each key's exact value domain, scope rules, and harness applicability. value is a string for scalar knobs, an object ({tier, backend, model, effort}) for agents.tier, and a whole profile object (config.list value_schema) for worktree.profile.<name>; agents.tier reset takes value: {tier} only. scope is optional and backstops to the key's declared default; scope repo writes the committed .ws-workflow/config.json in the session's worktree without staging it, so include the reported path in your next git.commit paths; harness is load-bearing for prompt.* and agents.tier and warning-only (ignored) for keys that do not vary by harness. reset: true drops a knob's override back to its builtin/inherited default (only for keys that support reset). session_key is required at dispatch for lead-authority keys and prompt.* keys. Lead-only: delegate and leaf keys are blocked by the config.* prefix gate.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"key":         stringProperty("Config knob key to write, e.g. workflow.prefer_subagent, bootstrap_alarm, agents.tier, prompt.<pointId>, or an adapter-declared key. See config.list for the supported set."),
-					"value":       stringOrObjectProperty("New value. A string for scalar knobs (e.g. on/off), or an object {tier, backend, model, effort} for agents.tier. For agents.tier reset pass only {tier}; omit for other resets."),
-					"scope":       enumStringProperty("Optional storage scope. When omitted the write lands in the key's declared default scope. Global-only keys reject non-global scopes; agents.tier supports project and global scopes.", wsconfig.ScopeSchemaEnum()),
+					"key":         stringProperty("Config knob key to write, e.g. workflow.prefer_subagent, bootstrap_alarm, agents.tier, prompt.<pointId>, worktree.profile.<name>, or an adapter-declared key. See config.list for the supported set."),
+					"value":       stringOrObjectProperty("New value. A string for scalar knobs (e.g. on/off), an object {tier, backend, model, effort} for agents.tier, or a profile object for worktree.profile.<name>. For agents.tier reset pass only {tier}; omit for other resets."),
+					"scope":       enumStringProperty("Optional storage scope. When omitted the write lands in the key's declared default scope. repo writes the committed .ws-workflow/config.json in the session's worktree (session_key required) and leaves staging to your next git.commit. Global-only keys reject non-global scopes; agents.tier supports project and global scopes; worktree.profile.<name> supports project, repo, and global.", wsconfig.ScopeSchemaEnum()),
 					"harness":     stringProperty("Optional harness selector. Load-bearing for prompt.* (claude, codex, pi, or * for all) and agents.tier (alias key); ignored for keys that do not vary by harness. When omitted for a harness-applicable key, defaults to the current session's detected harness."),
 					"reset":       boolProperty("When true, drop the key's override and fall back to its builtin/inherited default instead of writing an explicit value. Mutually exclusive with value except agents.tier, which requires value: {tier}; only valid for keys that support reset."),
 					"session_key": stringProperty("Caller's lead ws session key. Required at dispatch for lead-authority keys (global-only workflow preferences and alarms) and for prompt.* keys; also the target session for a session-scope write."),

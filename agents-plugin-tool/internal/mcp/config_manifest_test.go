@@ -167,7 +167,7 @@ func configGetJSON(t *testing.T, server *Server, id int, args map[string]any) co
 // parses the string value against the declared type, stores the canonical
 // form, and writes the manifest's default scope when the call names none.
 func TestConfigTuneValidatesDeclaredKeys(t *testing.T) {
-	server, _, key := manifestServer(t)
+	server, root, key := manifestServer(t)
 	tune := func(id int, args map[string]any) string {
 		t.Helper()
 		return keyedCall(t, server, id, key, "config.tune", args)
@@ -188,7 +188,6 @@ func TestConfigTuneValidatesDeclaredKeys(t *testing.T) {
 		{map[string]any{"key": "acme.code", "value": "1abc"}, "matching the pattern [a-z]+"},
 		{map[string]any{"key": "acme.code", "value": ""}, "matching the pattern [a-z]+"},
 		{map[string]any{"key": "acme.undeclared", "value": "x"}, "unknown config key"},
-		{map[string]any{"key": "acme.limit", "value": "4", "scope": "repo"}, "unsupported write scope"},
 	}
 	for i, tc := range rejects {
 		resp := tune(930100+i, tc.args)
@@ -199,6 +198,10 @@ func TestConfigTuneValidatesDeclaredKeys(t *testing.T) {
 
 	if resp := tune(930200, map[string]any{"key": "acme.limit", "value": " 07 "}); !strings.Contains(toolText(t, resp), "acme.limit: 7 [scope:project]") {
 		t.Fatalf("integer write echo: %s", resp)
+	}
+	// An explicit repo write lands in the session worktree's committed file.
+	if resp := tune(930208, map[string]any{"key": "acme.limit", "value": "4", "scope": "repo"}); !strings.Contains(toolText(t, resp), "acme.limit: 4 [scope:repo]") || !strings.Contains(toolText(t, resp), filepath.Join(root, ".ws-workflow", "config.json")) {
+		t.Fatalf("repo write echo: %s", resp)
 	}
 	if resp := tune(930201, map[string]any{"key": "acme.animate", "value": "FALSE"}); !strings.Contains(toolText(t, resp), "acme.animate: false [scope:project]") {
 		t.Fatalf("boolean write echo: %s", resp)

@@ -15,9 +15,10 @@ const (
 	// is shared across every contributor and read deterministically by the tools.
 	// It sits below the machine-local project scope so a per-machine override can
 	// still win for local experimentation, and above global so a committed
-	// project baseline overrides a cross-project user default. Read-only here:
-	// the file is hand-edited (or edited by a dedicated flow), not written via
-	// config.tune — hence it is absent from ScopeSchemaEnum.
+	// project baseline overrides a cross-project user default. config.tune
+	// writes it in the caller's worktree (validating the value on the way) and
+	// leaves staging to the caller's git.commit, following note.write's repo
+	// layer.
 	ScopeRepo Scope = "repo"
 	// ScopeGlobal is the cross-project global file (~/.ws/config.json).
 	ScopeGlobal Scope = "global"
@@ -200,7 +201,7 @@ func DefaultScope(key string) Scope {
 // MCP tool inputSchema enum properties. This is the shared schema fragment that
 // every scope-aware config tool can consume.
 func ScopeSchemaEnum() []string {
-	return []string{"session", "project", "global"}
+	return []string{"session", "project", "repo", "global"}
 }
 
 // RegisteredItemKeys returns every item key that declares a default scope or

@@ -1,6 +1,8 @@
 package wsconfig
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -11,7 +13,8 @@ const lockTimeout = 10 * time.Second
 // SetOptions controls a scoped set operation.
 type SetOptions struct {
 	// ExplicitScope, when non-empty, overrides the item's declared default scope.
-	// Must be one of ScopeSession, ScopeProject, or ScopeGlobal.
+	// Must be one of ScopeSession, ScopeProject, ScopeRepo, or ScopeGlobal; a
+	// repo write needs Options.RepoRoot to anchor the committed file.
 	ExplicitScope Scope
 	// SessionKey is required when ExplicitScope == ScopeSession or when the
 	// item's declared default scope is ScopeSession.
@@ -193,6 +196,15 @@ func (r *Resolver) Set(itemKey, value string, setOpts SetOptions) error {
 			return err
 		}
 		return setOverrideInFile(path, itemKey, value)
+	case ScopeRepo:
+		path, err := r.repoWritePath()
+		if err != nil {
+			return err
+		}
+		return updateRepoConfigFile(path, func(overrides map[string]string, _ map[string]json.RawMessage) error {
+			overrides[itemKey] = value
+			return nil
+		})
 	case ScopeGlobal:
 		path, err := GlobalPath(r.opts)
 		if err != nil {
@@ -202,6 +214,20 @@ func (r *Resolver) Set(itemKey, value string, setOpts SetOptions) error {
 	default:
 		return fmt.Errorf("resolver: unsupported write scope %q", targetScope)
 	}
+}
+
+// RepoWritePath reports the committed repo-scope file a repo write lands in,
+// or an error when no worktree root anchors it.
+func (r *Resolver) RepoWritePath() (string, error) {
+	return r.repoWritePath()
+}
+
+func (r *Resolver) repoWritePath() (string, error) {
+	path, ok := RepoPath(r.opts)
+	if !ok {
+		return "", fmt.Errorf("resolver: repo scope needs a session whose worktree root anchors .ws-workflow/config.json; pass session_key")
+	}
+	return path, nil
 }
 
 // Unset resets an item to its next-broader-scope (or builtin) resolution by
@@ -232,6 +258,25 @@ func (r *Resolver) Unset(itemKey string, setOpts SetOptions) error {
 			return err
 		}
 		return deleteOverrideInFile(path, itemKey)
+	case ScopeRepo:
+		path, err := r.repoWritePath()
+		if err != nil {
+			return err
+		}
+		if !configFileExists(path) {
+			return nil
+		}
+		err = updateRepoConfigFile(path, func(overrides map[string]string, _ map[string]json.RawMessage) error {
+			if _, exists := overrides[itemKey]; !exists {
+				return errConfigUnchanged
+			}
+			delete(overrides, itemKey)
+			return nil
+		})
+		if errors.Is(err, errConfigUnchanged) {
+			return nil
+		}
+		return err
 	case ScopeGlobal:
 		path, err := GlobalPath(r.opts)
 		if err != nil {

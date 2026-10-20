@@ -33,6 +33,17 @@ func (r worktreeAcquireResult) text() string {
 	return text
 }
 
+// noSubmoduleRecurse prefixes a checkout-family git invocation (worktree add,
+// sparse-checkout set, reset --hard, clean, switch, checkout --detach) with
+// -c submodule.recurse=false. Under a user or repository submodule.recurse=true
+// those verbs recurse into submodules a pool worktree has not initialized and
+// fail with "not a git repository" (worktree add even leaves a broken submodule
+// gitfile behind that also breaks the later submodule update). The explicit
+// submodule update --init --recursive is what initializes submodules here.
+func noSubmoduleRecurse(args ...string) []string {
+	return append([]string{"-c", "submodule.recurse=false"}, args...)
+}
+
 // wtRun runs a git subcommand under root and returns trimmed combined output.
 func wtRun(ctx context.Context, runner wsgit.Runner, root string, args ...string) (string, error) {
 	out, err := runner.RunGit(ctx, root, args...)
@@ -321,7 +332,7 @@ func provisionWorktree(ctx context.Context, runner wsgit.Runner, root, base, tar
 		// A sparse worktree is created without a checkout so the cone patterns
 		// below decide what materializes; the branch step then populates only
 		// the cone (git switch honors the sparse patterns).
-		addArgs := []string{"worktree", "add", "--detach"}
+		addArgs := noSubmoduleRecurse("worktree", "add", "--detach")
 		if wantSparse {
 			addArgs = append(addArgs, "--no-checkout")
 		}
@@ -336,7 +347,7 @@ func provisionWorktree(ctx context.Context, runner wsgit.Runner, root, base, tar
 	// pattern set and a fresh --no-checkout worktree gets its cone before the
 	// switch populates it.
 	if wantSparse {
-		if _, err := wtRun(ctx, runner, wtPath, append([]string{"sparse-checkout", "set", "--cone"}, sparsePaths...)...); err != nil {
+		if _, err := wtRun(ctx, runner, wtPath, noSubmoduleRecurse(append([]string{"sparse-checkout", "set", "--cone"}, sparsePaths...)...)...); err != nil {
 			return res, err
 		}
 	}
@@ -351,7 +362,7 @@ func provisionWorktree(ctx context.Context, runner wsgit.Runner, root, base, tar
 	// misread as a pathspec.
 	switch {
 	case targetBranch == "":
-		if _, err := wtRun(ctx, runner, wtPath, "switch", "--no-guess", "--", base); err != nil {
+		if _, err := wtRun(ctx, runner, wtPath, noSubmoduleRecurse("switch", "--no-guess", "--", base)...); err != nil {
 			return res, fmt.Errorf("worktree.acquire: check out base %q: %v; the actual checkout is held elsewhere — release the worktree holding it first, or pass target_branch", base, err)
 		}
 	default:
@@ -360,11 +371,11 @@ func provisionWorktree(ctx context.Context, runner wsgit.Runner, root, base, tar
 			branchExists = true
 		}
 		if branchExists {
-			if _, err := wtRun(ctx, runner, wtPath, "switch", "--no-guess", "--", targetBranch); err != nil {
+			if _, err := wtRun(ctx, runner, wtPath, noSubmoduleRecurse("switch", "--no-guess", "--", targetBranch)...); err != nil {
 				return res, err
 			}
 		} else {
-			if _, err := wtRun(ctx, runner, wtPath, "switch", "-c", targetBranch, base); err != nil {
+			if _, err := wtRun(ctx, runner, wtPath, noSubmoduleRecurse("switch", "-c", targetBranch, base)...); err != nil {
 				return res, err
 			}
 		}
@@ -373,10 +384,10 @@ func provisionWorktree(ctx context.Context, runner wsgit.Runner, root, base, tar
 	// Hygiene: clear any uncommitted change and untracked/ignored cruft so no
 	// prior run's working-tree state leaks forward. This never moves a branch
 	// pointer, so committed work on target_branch is preserved.
-	if _, err := wtRun(ctx, runner, wtPath, "reset", "--hard"); err != nil {
+	if _, err := wtRun(ctx, runner, wtPath, noSubmoduleRecurse("reset", "--hard")...); err != nil {
 		return res, err
 	}
-	if _, err := wtRun(ctx, runner, wtPath, "clean", "-ffdx"); err != nil {
+	if _, err := wtRun(ctx, runner, wtPath, noSubmoduleRecurse("clean", "-ffdx")...); err != nil {
 		return res, err
 	}
 
@@ -438,13 +449,13 @@ func releaseWorktree(ctx context.Context, runner wsgit.Runner, wtPath, poolConfi
 	if !listed {
 		return fmt.Errorf("worktree.release refuses %q: not a registered git worktree", target)
 	}
-	if _, err := wtRun(ctx, runner, target, "reset", "--hard"); err != nil {
+	if _, err := wtRun(ctx, runner, target, noSubmoduleRecurse("reset", "--hard")...); err != nil {
 		return err
 	}
-	if _, err := wtRun(ctx, runner, target, "clean", "-ffdx"); err != nil {
+	if _, err := wtRun(ctx, runner, target, noSubmoduleRecurse("clean", "-ffdx")...); err != nil {
 		return err
 	}
-	if _, err := wtRun(ctx, runner, target, "checkout", "--detach"); err != nil {
+	if _, err := wtRun(ctx, runner, target, noSubmoduleRecurse("checkout", "--detach")...); err != nil {
 		return err
 	}
 	// Drop the lease only once the worktree is actually back in the pool, so a

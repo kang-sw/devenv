@@ -753,3 +753,56 @@ func TestWorktreeAcquireSparseDispatch(t *testing.T) {
 		t.Fatalf("develop tip subject = %q, want the sparse commit", subject)
 	}
 }
+
+// submoduleWorktreeFixture builds a repo whose base commit declares one
+// submodule, with submodule.recurse=true set in the repository config (as a
+// downstream user's config would), so every checkout-family verb would recurse
+// unless the call opts out. protocol.file.allow (through the environment, since
+// a submodule clone does not read the superproject's config) lets the
+// local-path submodule clone, including in the explicit submodule update.
+func submoduleWorktreeFixture(t *testing.T) (root, base string) {
+	t.Helper()
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "protocol.file.allow")
+	t.Setenv("GIT_CONFIG_VALUE_0", "always")
+	sub := canonicalRootForTest(t, initGitRepo(t))
+	if err := os.WriteFile(filepath.Join(sub, "s.txt"), []byte("sub\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, sub, "add", ".")
+	runGit(t, sub, "commit", "-m", "sub")
+	root, _ = worktreeFixture(t)
+	runGit(t, root, "submodule", "add", "-q", sub, "deps/sub")
+	runGit(t, root, "commit", "-m", "add submodule")
+	runGit(t, root, "config", "submodule.recurse", "true")
+	base = strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "HEAD")))
+	return root, base
+}
+
+// TestWorktreeAcquireSubmoduleRecurseTrue: under submodule.recurse=true a
+// fresh acquire, a release, and a reusing acquire all succeed, and the
+// explicit submodule sync still initializes the submodule.
+func TestWorktreeAcquireSubmoduleRecurseTrue(t *testing.T) {
+	root, base := submoduleWorktreeFixture(t)
+	ctx := context.Background()
+	res, err := provisionWorktree(ctx, wsgit.ExecRunner{}, root, base, "impl/test/sub", nil, "")
+	if err != nil {
+		t.Fatalf("fresh acquire under submodule.recurse=true: %v", err)
+	}
+	if len(res.Warnings) != 0 {
+		t.Fatalf("fresh acquire warnings: %v", res.Warnings)
+	}
+	if _, err := os.Stat(filepath.Join(res.Path, "deps", "sub", "s.txt")); err != nil {
+		t.Fatalf("submodule not initialized in the acquired worktree: %v", err)
+	}
+	if err := releaseWorktree(ctx, wsgit.ExecRunner{}, res.Path, ""); err != nil {
+		t.Fatalf("release under submodule.recurse=true: %v", err)
+	}
+	again, err := provisionWorktree(ctx, wsgit.ExecRunner{}, root, base, "impl/test/sub2", nil, "")
+	if err != nil {
+		t.Fatalf("reusing acquire under submodule.recurse=true: %v", err)
+	}
+	if !again.Reused || again.Path != res.Path {
+		t.Fatalf("second acquire = %+v, want reuse of %s", again, res.Path)
+	}
+}
