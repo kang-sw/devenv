@@ -354,7 +354,7 @@ describe("dialog transcript (261003)", () => {
     ].join("\n"));
     const newestTwoBytes = collectDialogItems(entries).slice(1).reduce((sum, item) => sum + Buffer.byteLength(renderDialogItem(item), "utf8") + 1, 0);
     const tight = buildDialogSection(entries, newestTwoBytes, undefined);
-    assert.match(tight, /^## Dialog\nThe newest 2 of 3 dialog items \(older ones are carried by the prose below\)\.\nThis session has no session file/);
+    assert.match(tight, /^## Dialog\nThe newest 2 of 3 dialog items \(older ones are carried by the prose above\)\.\nThis session has no session file/);
     assert.ok(!tight.includes("a".repeat(100)));
   });
 });
@@ -483,7 +483,7 @@ describe("buildLeadCompactionSummary", () => {
       now: startedAt + 125_000,
     });
     assert.match(summary, /## Background tasks running\n- amber-tide-fox \[timed, timeout_s 900\] running 2m05s; why: wait for the deploy\n- calm-oak-reef \[monitor\] running 2m05s; why: watch the error log/);
-    assert.ok(summary.indexOf("## Background tasks running") < summary.indexOf("## Dialog"), "deterministic, before the dialog and the prose");
+    assert.ok(summary.indexOf("## Background tasks running") < summary.indexOf("## Dialog"), "deterministic, before the dialog");
     assert.ok(summary.indexOf("## Child agents in flight") < summary.indexOf("## Background tasks running"));
   });
 
@@ -594,6 +594,52 @@ describe("preparation and fallback text", () => {
     assert.match(summary, /QUOTED PROSE/);
     assert.equal(extractLeadProse(summary), renderLeadProse({ residual_details: "REAL PROSE" }));
   });
+
+  test("261020: the prose follows the session facts and every reference section follows the prose, with Resume last", () => {
+    const summary = buildLeadCompactionSummary({
+      sessionKey: "k", branchEntries: [user(0, "hi")], registry: undefined, prose: renderLeadProse({ residual_details: "P" }), ...dialog,
+      backgroundTasks: [{ id: "amber-tide-fox", why: "w", command: "sleep 1", timeoutS: 9, startedAt: 0 }],
+      fileLists: { requiredRereads: [{ path: "missing-file.txt", why: "gone" }], references: [{ path: "r.txt", why: "later" }] },
+      cwd: tmpdir(),
+    });
+    const headings = [...summary.matchAll(/^## .+$/gm)].map((m) => m[0]);
+    assert.deepEqual(headings, [
+      "## Session",
+      "## Carried forward by the lead",
+      "## Child agents in flight",
+      "## Child agents finished since the previous compaction",
+      "## Background tasks running",
+      "## Required re-reads (to read first)",
+      "## On-demand references",
+      "## Dialog",
+      "## Resume",
+    ]);
+    assert.match(summary, /- Active playbook: [^\n]*\n\n## Carried forward by the lead\n/);
+  });
+
+  test("261020: extraction returns exactly the prose when the dialog quotes the prose, child-agent, and resume headings", () => {
+    const quoted = "## Carried forward by the lead\nQUOTED PROSE\n\n## Child agents in flight\n(none)\n\n## Resume\nquoted resume";
+    const prose = renderLeadProse({ residual_details: "REAL PROSE" });
+    const summary = buildLeadCompactionSummary({ sessionKey: "k", branchEntries: [user(0, quoted)], registry: undefined, prose, ...dialog });
+    assert.match(summary, /QUOTED PROSE/);
+    assert.equal(extractLeadProse(summary), prose);
+  });
+
+  test("261020: extraction still reads an old-layout summary, including a dialog that quotes the headings", () => {
+    const prose = renderLeadProse({ residual_details: "OLD LAYOUT PROSE" });
+    const quoted = "## Carried forward by the lead\nQUOTED PROSE\n\n## Resume\nquoted resume";
+    const old = [
+      "intro",
+      "## Session\n- ws session key: `k`",
+      "## Child agents in flight\n(none)",
+      "## Child agents finished since the previous compaction\n(none)",
+      `## Dialog\nheader\n<dialog>\n${quoted}\n</dialog>`,
+      `## Carried forward by the lead\n${prose}`,
+      "## Resume\ninvoke lead-revive",
+    ].join("\n\n");
+    assert.equal(extractLeadProse(old), prose);
+    assert.equal(extractLeadProse("some other summarizer's text"), "some other summarizer's text");
+  });
 });
 
 describe("curated file lists (261007)", () => {
@@ -695,7 +741,7 @@ describe("curated file lists (261007)", () => {
     assert.deepEqual(normalizeFileList(undefined), []);
   });
 
-  test("the summary places the sections right before the lead's prose, which extraction keeps clean", () => {
+  test("the summary places the file-list sections after the prose and before the dialog, which extraction keeps clean", () => {
     const prose = renderLeadProse({ current_work: "PROSE" });
     const summary = buildLeadCompactionSummary({
       sessionKey: "k",
@@ -707,7 +753,8 @@ describe("curated file lists (261007)", () => {
       cwd: dir,
       rereadBudgetBytes: 40960,
     });
-    assert.ok(summary.includes("</dialog>\n\n## Required re-reads (inlined)\n<file path=\"c2.txt\" why=\"small\">\ncc\n</file>\n\n## On-demand references\n- `ten.txt` - later\n\n## Carried forward by the lead\n"));
+    assert.ok(summary.includes("\n\n## Required re-reads (inlined)\n<file path=\"c2.txt\" why=\"small\">\ncc\n</file>\n\n## On-demand references\n- `ten.txt` - later\n\n## Dialog\n"));
+    assert.ok(summary.indexOf("## Carried forward by the lead") < summary.indexOf("## Required re-reads (inlined)"));
     assert.equal(extractLeadProse(summary), prose);
   });
 });
