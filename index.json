@@ -581,7 +581,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-20T13:00:01Z"
+        "touched_at": "2026-10-20T13:00:58Z",
+        "impl": {
+          "branch": "impl/develop/wife-twins-hut"
+        }
       }
     },
     "261020-chore-pi-compaction-prose-before-dialog": {
