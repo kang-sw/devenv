@@ -194,6 +194,38 @@ ticket carries its Confirmed Decisions as contract.
 - Convention: ai-docs/manuals/skill-authoring.md (declared for agents-plugin/rsrc/, agents-plugin/skills/, agents-plugin-wsflow/rsrc/, agents-plugin-wsflow/skills/)
 - Convention: ai-docs/manuals/wsflow-mirroring.md (declared for agents-plugin/rsrc/, agents-plugin/skills/, agents-plugin-wsflow/)
 
+## Prior Decisions
+
+- 260917-feat-ws-committed-project-config-scope (2026-09-17, Result e73ed082): "Read-only surface: `ScopeRepo` is excluded from `ScopeSchemaEnum`, so `config.tune` never offers `repo` as a writable scope; the committed file is hand-edited." — bearing: constrains
+- 260918-feat-ws-sparse-housekeeping-worktree-occupied-root (2026-09-18, Decisions): "Pool reuse matches sparse shape. A pooled candidate is eligible only when its `core.sparseCheckout` state matches the request; a sparse reuse re-applies the requested pattern set every time." — bearing: constrains
+- 76a45c38 (2026-09-18, commit): "Submodule sync stays unconditional; verified empirically that `submodule update --init --recursive` is a clean no-op (exit 0) under a cone that excludes the submodule path (Decision 11)." — bearing: supports
+- 76a45c38 (2026-09-18, commit): "Empirically pinned on git 2.50.1: cone worktree materializes only the cone; core.sparseCheckoutCone=true for cone / false for --no-cone; held-branch switch fails exit 128." — bearing: supports
+- 95d18ff6 (2026-09-15, commit): "Reuse eligibility is the conservative golden rule from the ticket: under the owned pool prefix, at detached HEAD, and clean. A branch-checked-out or dirty worktree is skipped so no in-progress work is stomped." — bearing: constrains
+- 95d18ff6 (2026-09-15, commit): "Branch setup uses `git switch` (branch-only verb) not `checkout`, and never resets an existing branch to base, so committed work on a re-entered target_branch is preserved." — bearing: constrains
+- 261020-research-worktree-profiles (2026-10-20, Confirmed Decisions): "`post_provision` outputs (override files, hardlinks) survive only when listed in `preserve`; document this or warn about it (which one is settled when the actionable ticket is derived)." — bearing: supports
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-tool/internal/mcp/worktree_tools.go, server.go, config_registry.go, occupied_root_announcement.go, git_merge.go, scope_announcement.go, workflow_manual.go; internal/wsconfig/scope.go, repo.go; internal/wsgit/git.go; agents-plugin, wsflow, and Pi rsrc/skills lead-workflow-manual, lead-run, lead-scope-worktree |
+| scope.surface | public-interface | worktree.acquire schema replaces sparse_paths with required profile; config.tune gains repo scope; shipped skill deletion |
+| scope.new_public_symbol | yes | worktree.remove tool, worktree.profile.name config key family, acquire profile parameter, builtin full and housekeeping profiles |
+| scope.new_type_contract | yes | profile JSON object with sparse, preserve, hooks fields; structured config values in the wsconfig resolver; profile marker file |
+| scope.test_surface | existing | agents-plugin-tool/internal/mcp/worktree_tools_test.go, config_repo_scope_test.go, scope_announcement_test.go, agents-plugin/tests/test_skill_dispatch_contracts.py, agents-plugin-wsflow/tests/test_wsflow_skill_bundle.py |
+| complexity.reuse_points | confirmed | wsdoc.SparseCheckoutActive at internal/wsdoc/tickets_scope.go#L457, prompt. prefix dispatch at config_registry.go#L113, repo scope loader internal/wsconfig/repo.go, lease in git admin dir worktree_lease.go |
+| complexity.side_effect_risk | high | destructive reset and clean -ffdx with new exclusions, arbitrary hook argv execution, and new worktree deletion |
+| risk.correctness | high | pool partitioning, marker hash re-adoption, quarantine, and preserve exclusions must not lose work or reuse broken worktrees |
+| risk.fit | high | spans config resolver, MCP schemas, shipped playbooks with wsflow and Pi mirrors, and a skill deletion |
+| risk.test | moderate | needs git fixtures for submodules, cone and patterns sparse, hooks, and live git checks recorded in Results |
+| risk.security_or_contract | high | committed repo-scope config can now carry executable hooks and config.tune writes a tracked file; acquire schema breaks callers |
+
+## Open Decision Queue
+
+Last ID: (1)
+
+(1) [open] [announced] The `agents-plugin-pi/` package is in scope: Phases 2-4 resync its byte-mirrored `rsrc/` copies of every changed shipped playbook, and Phase 4 deletes its `lead-scope-worktree` skill, playbook, and manifest entries - citation: `ai-docs/manuals/ws-mcp.md` requires the Pi mirror resync from `agents-plugin/rsrc/` and `TestPiMirrorUpToDate` enforces it; deleting the Pi copies is a direct consequence of the confirmed `lead-scope-worktree` retirement.
+
 ## Phases
 
 ### Phase 1: Structured config values, profile key family, repo-scope writes, submodule fix
@@ -229,7 +261,11 @@ and the ticket-visibility check. Update the acquire tool description
 (dropping the "sparse state matches" overstatement), `worktree.list`
 (profile, `legacy`, quarantine shown), and every caller that passes
 `sparse_paths`: the occupied-root banner, the `git.merge` and `wsgit`
-refusal strings, the workflow manual's `### Git` housekeeping line, and
+refusal strings, the workflow manual's `### Git` housekeeping line (which
+also exists in the byte-synced Pi mirror
+`agents-plugin-pi/rsrc/lead-workflow-manual/lead-workflow-manual.md#L108`, resynced
+from `agents-plugin/rsrc/` per `ai-docs/manuals/ws-mcp.md#L149-L152`, and the
+wsflow mirror), and
 `lead-run`'s worker acquire step, which now names a profile. The workflow
 manual renders the resolved profile list and tells the lead to pass a profile
 to `acquire` for workers.
@@ -261,7 +297,11 @@ present (record in the Result).
 ### Phase 4: Retire ticket-board scoping and close out
 
 Depends on Phase 2. Delete `lead-scope-worktree` (skill, playbook, wsflow
-mirror, manifest entries, dispatch/bundle tests) and the `scopeAnnouncement`
+mirror, manifest entries, dispatch/bundle tests; the Pi package also carries
+copies at `agents-plugin-pi/rsrc/lead-scope-worktree/`,
+`agents-plugin-pi/skills/lead-scope-worktree/SKILL.md`, and entries in
+`agents-plugin-pi/rsrc/manifest.json#L26` and
+`agents-plugin-pi/skills/manifest.json#L14`) and the `scopeAnnouncement`
 banner with its tests; add the `tickets.create` out-of-scope warning; update
 `260924-research-origin-ticket-ownership-index`'s reference to
 `lead-scope-worktree`; add a release-note line telling downstream worktrees
