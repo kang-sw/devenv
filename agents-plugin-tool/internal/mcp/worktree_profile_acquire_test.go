@@ -253,6 +253,26 @@ func TestProvisionWorktreeHiddenTicketBoardFails(t *testing.T) {
 	runGit(t, root, "switch", "impl/develop/a")
 }
 
+// TestProvisionWorktreeHookNarrowedTicketBoardFails: the ticket-board check
+// runs after post_acquire, so a hook that narrows sparse away from the board
+// fails acquire the same way a declared sparse does.
+func TestProvisionWorktreeHookNarrowedTicketBoardFails(t *testing.T) {
+	root := profileWorktreeFixture(t)
+	narrowing := hookProfile(t, "narrowing", nil, map[string][]map[string]any{
+		"post_acquire": {hook(hookArgv(t, "sparse-set", "src"))},
+	})
+	_, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, "develop", "impl/develop/a", narrowing, "")
+	if err == nil {
+		t.Fatal("a post_acquire hook hiding the ticket board must fail acquire")
+	}
+	for _, want := range []string{`profile "narrowing"`, "ai-docs/tickets"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q must contain %q", err, want)
+		}
+	}
+	runGit(t, root, "switch", "impl/develop/a")
+}
+
 // TestReleaseWorktreeLegacyAndVanishedProfile: releasing an unmarked leased
 // worktree runs the pre-profile hygiene only (nothing preserved, reported as
 // legacy), and a marker naming a profile that no longer resolves gets the same

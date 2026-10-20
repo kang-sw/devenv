@@ -26,6 +26,13 @@ the worker reported them.
 - **A housekeeping worker key misses repo-scope config.** The cone checkout
   omits `.ws-workflow/`, so repo-defined profiles are invisible to that key.
 
+- **The strict profile decoder also gates `workflow_manual` and acquire.**
+  Raised by the v0.48.0 release-gate correctness review:
+  `worktree_profile.go:139` decodes with `DisallowUnknownFields`, and
+  `workflow_manual.go:340/:391` resolves the whole family. A profile field added
+  by a later ws would fail an older teammate's session-bootstrap manual and
+  acquire, not only release and remove.
+
 ## Questions
 
 - Should release and remove resolve only the profile the worktree is marked

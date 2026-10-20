@@ -53,6 +53,11 @@ func TestWorktreeHookHelperProcess(t *testing.T) {
 		if err := os.WriteFile(p, []byte("generated"), 0o644); err != nil {
 			os.Exit(92)
 		}
+	case "sparse-set":
+		if out, err := exec.Command("git", "sparse-checkout", "set", args[1]).CombinedOutput(); err != nil {
+			os.Stderr.Write(out)
+			os.Exit(94)
+		}
 	case "sparse-add":
 		if out, err := exec.Command("git", "sparse-checkout", "add", args[1]).CombinedOutput(); err != nil {
 			os.Stderr.Write(out)

@@ -1,12 +1,14 @@
 # Worktree Ticket Scope (sparse-checkout)
 
-This file is reference material for `ws:lead-scope-worktree`, not the
-caller-visible contract itself. That contract is the code and its tests:
+This file is reference material on sparse-checkout ticket scoping, not the
+caller-visible contract itself. The `ws:lead-scope-worktree` skill and its
+`workflow_manual` scope banner were retired by
+`261020-feat-worktree-profiles`; ws no longer applies a ticket scope. The
+board resolution that still tolerates a scoped worktree is the code and its
+tests:
 
-- scope mechanism and board resolution:
+- scope detection and board resolution:
   `agents-plugin-tool/internal/wsdoc/tickets_scope.go`
-- `workflow_manual` scope-announcement rendering:
-  `agents-plugin-tool/internal/mcp/scope_announcement.go`
 
 ## What This Covers
 
@@ -92,10 +94,10 @@ be written** — every pattern shape exercised in the 2x2 behaved correctly in
 this experiment, so no shape is provably safe either. The only consequence
 that follows is procedural: pattern application must be verified by listing
 the affected directories every time, because the failure direction is "hides
-too much", which is silent without that check. `ws:lead-scope-worktree`
-treats this verification step as mandatory, not optional, for exactly this
-reason — it is the only defense that survives the experiment not isolating a
-cause.
+too much", which is silent without that check. Anyone applying such a
+scope must treat this verification step as mandatory, not optional, for
+exactly this reason — it is the only defense that survives the experiment not
+isolating a cause.
 
 ## Restore
 
