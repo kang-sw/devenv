@@ -467,6 +467,52 @@ per day with thresholds honored. Live check: whether `git worktree remove`
 needs `--force` with preserved ignored files or initialized submodules
 present (record in the Result).
 
+### Result (6ad303b09) - 2026-10-20
+
+- Landed: lead-only `worktree.remove` (by path or worker key) checking every
+  refusal first (primary, outside the owned pool, unregistered, dirty, a
+  branch holding commits no other branch reaches, a detached `HEAD` holding
+  commits no ref reaches, a lease active within
+  `worktree.nudge_stale_days`), then the marker profile's `pre_remove`
+  (skipped with a result note when the profile no longer resolves), then
+  `git worktree remove --force`, which takes the admin dir (lease, marker,
+  quarantine) with it and keeps the branch; release and remove share one
+  ownership-refusal helper. Release records the preserved ignored size in
+  the marker. Acquire carries a once-a-day-per-pool `nudge` (throttle file
+  in the git common dir) for idle branch holders and detached worktrees at
+  or above `worktree.nudge_preserved_gb`; both knobs are integer
+  `config.tune` keys (defaults 7 and 1) listed by `config.list`. The
+  workflow manual's `### Git` section tells the lead to relay nudge entries
+  to the user. `worktree.remove` is in the lead-only and session-key lists,
+  the three `runtime.json` tool contracts, and the Pi bridge tool list.
+- Verification: `go test ./... -count=1 -timeout 25m` in
+  `agents-plugin-tool` passed; `python3 -m unittest discover` over
+  `agents-plugin/tests` (78) and `agents-plugin-wsflow/tests` (15) passed;
+  `node --test test/bridge.test.ts` in `agents-plugin-pi` passed (80/80,
+  tool-contract count now 65). New tests: TestRemoveWorktreeRefusals (dirty,
+  unique branch commits, unique detached commits, primary, outside pool,
+  fresh lease refused before `pre_remove`; stale lease removed with hook
+  provenance and the branch kept),
+  TestRemoveWorktreeFailingPreRemoveKeepsWorktree,
+  TestRemoveWorktreeQuarantinedAndVanishedProfile,
+  TestRemoveWorktreeWithInitializedSubmodule, TestWorktreeRemoveDispatch,
+  TestReleaseRecordsPreservedBytes, TestPoolNudgeThrottleAndThresholds,
+  TestWorktreeNudgeKnobsAndAcquireWiring. Mutation checks: dropping the
+  lease-recency refusal, the throttle, or `--force` each fails its test.
+- Live check (git 2.50.1): `git worktree remove` without `--force` removes a
+  worktree whose only extra content is ignored files (they go with it), but
+  refuses one with an initialized submodule ("working trees containing
+  submodules cannot be moved or removed"). Remove therefore runs its own
+  dirty and unmerged-work refusals first and then always passes `--force`.
+- Decisions: branch uniqueness uses `rev-list --count refs/heads/<b> --not
+  --exclude=<b> --branches --remotes` (the short name; `--exclude` with the
+  full ref does not exclude it), detached uniqueness uses `--not --branches
+  --tags --remotes` (`--all` includes `HEAD` itself). The nudge knobs reuse
+  the declared-integer key validation; a hand-edited value that does not
+  parse falls back to the default. The nudge runs after the lease is
+  written, so the worktree just acquired is never listed, and a nudge
+  failure is a result warning, never an acquire failure.
+
 ### Phase 4: Retire ticket-board scoping and close out
 
 Depends on Phase 2. Delete `lead-scope-worktree` (skill, playbook, wsflow
