@@ -4,6 +4,10 @@ related:
   261017-feat-claude-mod-lead-compaction-timing: shipped the fixed 50% advisory with no config key; this ticket revisits that decision
   261016-feat-pi-compaction-token-thresholds: the pi knob grammar (percent, token count, or "whichever comes first") this knob mirrors
   261020-bug-claude-mod-milestone-percent-stale: sibling; also edits the timing.ts advisory and milestone texts
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: e138a1b8d605ec2b
+sage-review-completeness-reviewed: e138a1b8d605ec2b
 ---
 
 # Configurable advisory threshold for the Claude mod lead compaction timing
@@ -51,7 +55,9 @@ mod's workflow manual feature already calls ws MCP tools at session start
   varies by model, so tune time cannot know it.
 - **D5. Milestones follow the configured advisory.** Milestones stay at one
   and two thirds between the configured advisory and the hard point, and the
-  advisory text renders the configured point instead of the fixed `50%`.
+  advisory text renders the configured point instead of the fixed `50%`, as
+  the resolved percent of the compaction window (a token or combined value
+  shows as that percent, like every other figure in the text).
 - **D6. Never hard-fail on a stored value.** A stored value that does not
   parse (written outside `config.tune`) falls back to 50%, as pi's
   `resolveCompactionAdvisoryThreshold` does.
@@ -80,7 +86,10 @@ mod's workflow manual feature already calls ws MCP tools at session start
   for two JSON files in separate packages costs more than a drift test.
 - **D12. Verify manifest path resolution live.** The Phase verifies the
   manifest path resolves from `.mcp.json`'s `cwd: "."` under both the Claude
-  and Codex launches; a wrong path is a startup failure on both hosts.
+  and Codex launches. A wrong path does not fail startup:
+  `loadDeclaredConfig` rejects an unreadable manifest silently, the key stays
+  undeclared, and the mod stays at 50% under D1/D6. So the check is that the
+  key appears in `config.list` on each launch, not that the server starts.
 - **D13. The key is listed, inert, on Codex.** `agents-plugin/.mcp.json` is
   shared by both hosts, so Codex's `config.list` shows the key; its
   description names Claude Code and nothing reads it there.
@@ -89,12 +98,47 @@ mod's workflow manual feature already calls ws MCP tools at session start
 
 ## Constraints
 
-- Manuals: `ai-docs/manuals/shipped-surface-boundary.md` (the mod, the
-  manifest, and the key description ship downstream),
-  `ai-docs/manuals/wsflow-mirroring.md`, and `ai-docs/manuals/ws-mcp.md`
-  (`agents-plugin-tool/internal/mcp/` config manifest loading).
+- The new manifest entry declares no `default_scope: "repo"`; declared
+  adapter keys may not default to `repo` (`1cdd2f6f`). Copying the
+  `pi.compaction_advisory_percent` entry, which declares no `default_scope`,
+  satisfies this.
+- The session-start read is not awaited before the first prompt, so a
+  `session.measure` can run before it settles. A read that settles after
+  thresholds were cached still applies to that session (await it inside
+  `measure` under the existing generation check, or invalidate the cache when
+  it settles).
 - pi (`agents-plugin-pi`) behavior is out of scope; its manifest is only read
   as the grammar reference.
+- Convention: `ai-docs/manuals/shipped-surface-boundary.md` (declared for `agents-plugin/`, `agents-plugin-wsflow/`, `agents-plugin-tool/`; the mod, the manifest, and the key description ship downstream)
+- Convention: `ai-docs/manuals/wsflow-mirroring.md` (declared for `agents-plugin/rsrc/`, `agents-plugin/skills/`, `agents-plugin/hooks/`, `agents-plugin-wsflow/`)
+- Convention: `ai-docs/manuals/ws-mcp.md` (declared for `agents-plugin-tool/internal/mcp/`)
+
+## Prior Decisions
+
+- 261017-feat-claude-mod-lead-compaction-timing (2026-10-17, Decisions): "Thresholds are measured against the compaction window. The advisory is a fixed 50% of the breakdown's rawMaxTokens in this first step, with no config key (a config read would need an MCP tool call...)" — bearing: constrains
+- 261017-feat-claude-mod-lead-compaction-timing (2026-10-17, Decisions): "Thresholds run only when auto compaction is on. When isAutoCompactEnabled is false, autoCompactThreshold is absent, or it is not above the advisory point, the mod sends no advisory or milestone" — bearing: supports
+- 52d7f6d0 (2026-10-18, commit): "The breakdown is read lazily at the first session.measure after each invalidation point (session start or end, landed compaction, window change)... A generation counter drops an observation that awaited the breakdown" — bearing: constrains
+- db596a0c (2026-10-18, commit): "the original no-config-key premise (no MCP call from the compaction mod) needs rechecking now that one mod also runs the mailbox push." — bearing: supports
+- 261016-feat-pi-compaction-token-thresholds (2026-10-16, Decisions): "No clamp. A token threshold beyond the window is not clamped; it simply never fires and Pi's native automatic compaction takes over. The combined form is how a user bounds a token threshold by a percent." — bearing: supports
+- 261016-feat-pi-compaction-token-thresholds (2026-10-17, Result): "Comparison is in percent space: each threshold resolves to min(percent, tokens / window * 100) against the same window as the usage percent." — bearing: supports
+- 261020-bug-claude-mod-milestone-percent-stale (2026-10-20, Decisions): "Head format. Context window: <n>% (<used>k / <window>k tokens) / <hard>% (automatic compaction point)., following Pi's advisory." — bearing: constrains
+- 1cdd2f6f (2026-10-20, commit): "Declared adapter keys still may not default to repo for the same reason, and worktree. is now a reserved manifest namespace." — bearing: constrains
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin/hooks/claude-mod/timing.ts, agents-plugin/hooks/claude-mod/compaction.ts, agents-plugin/hooks/claude-mod/register.ts, new agents-plugin/config-manifest.json, agents-plugin/.mcp.json, wsflow mirror under agents-plugin-wsflow/hooks/claude-mod/, a Go test under agents-plugin-tool/internal/mcp/ |
+| scope.surface | public-interface | new shipped config key claude.compaction_advisory_percent and a new adapter manifest loaded by the ws MCP server on both Claude and Codex launches |
+| scope.new_public_symbol | yes | config key claude.compaction_advisory_percent |
+| scope.new_type_contract | yes | key value grammar copied from pi.compaction_advisory_percent pattern in agents-plugin-pi/config-manifest.json#L27-L31 |
+| scope.test_surface | existing | agents-plugin/hooks/claude-mod/compaction.test.ts, compaction-engine.test.ts, agents-plugin-tool/internal/mcp/config_manifest_test.go, agents-plugin-tool/internal/wsrsrc/wsflow_hooks_mirror_test.go |
+| complexity.reuse_points | confirmed | WS_MCP_CONFIG_MANIFESTS loader agents-plugin-tool/internal/mcp/config_manifest.go#L22; pi resolveThresholdPercent agents-plugin-pi/src/goal-loop.ts#L265; mod $.mcp.call path agents-plugin/hooks/claude-mod/register.ts#L552-L557 |
+| complexity.side_effect_risk | moderate | agents-plugin/.mcp.json is shared by Claude and Codex launches, so a wrong manifest path silently leaves the key undeclared on both hosts (loadDeclaredConfig never fails the server) |
+| risk.correctness | moderate | threshold resolution must match pi's combined-form and no-clamp semantics and keep the existing measure generation-counter ordering with an async session-start read |
+| risk.fit | moderate | concurrent edits to timing.ts advisory text by ready ticket 261020-bug-claude-mod-milestone-percent-stale |
+| risk.test | moderate | live verification on both Claude and Codex launches is required beyond unit tests |
+| risk.security_or_contract | moderate | adds a downstream-shipped config key and manifest contract that must stay pattern-identical to the pi key |
 
 ## Phases
 
@@ -112,11 +156,12 @@ Verification:
   combined value; a combined value whose token term exceeds the hard point
   resolves to the percent term; a lone term at or beyond the hard point sends
   nothing; a malformed stored value and a failed `config_get` both fall back
-  to 50%; the advisory text names the configured point.
+  to 50%; a read that settles after the first measure still applies; the
+  advisory text names the configured point as the resolved percent.
 - Go test: the `claude.` key is declared, patterned, accepts and rejects the
   same values as the `pi.` key, and `config.tune` validates it.
 - Live: on a Claude launch, `config.tune` of the key then a new session shows
-  the advisory at the configured point; on a Codex launch, the server starts
-  with the manifest loaded.
+  the advisory at the configured point; on both Claude and Codex launches,
+  `config.list` shows the key (proving the manifest path resolved).
 - `claude plugin validate` / `claude plugin test` on both packages and the
   wsflow mirror drift guard.
