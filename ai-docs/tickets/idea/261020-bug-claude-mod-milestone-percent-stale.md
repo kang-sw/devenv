@@ -37,6 +37,17 @@ definition of `context.tokens` is unconfirmed.
 The user wants the message to show the exact usage at the moment it is
 delivered.
 
+Leading hypothesis (2026-10-21, unverified; demoted to `idea/` on it): the
+denominator. The mod's percent is of the compaction window, while Claude
+Code's "Context left until auto-compact" indicator is relative to the
+automatic compaction point, so it reads higher at the same moment (with the
+hard point at 89%, a mod figure of 65% reads as about 73% used there). If
+the user's 70-80% came from that indicator, the gap is two scales, not a
+stale sample. A probe should record which figure the user read (`/context`
+or the status-line indicator). Since `261018-feat-claude-mod-compaction-threshold-knob`,
+a low `claude.compaction_advisory_percent` (e.g. `10%`) brings the
+milestones down to roughly 36% and 63% for a cheap live repro.
+
 ## Decisions
 
 - **Show live usage.** The figure shown is the usage at delivery time, not a
