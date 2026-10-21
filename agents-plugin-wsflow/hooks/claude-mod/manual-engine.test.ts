@@ -121,8 +121,10 @@ function world(
   })
   on('mcp.connect', ($, e) => ({ value: { isConnected: true, server: `plugin:${e.server}:${e.server}` } }))
   on('mcp.call', async ($, e) => {
-    w.mcpCalls.push({ server: e.server, tool: e.tool, args: e.args })
     const text = (t: string) => ({ value: { content: [{ type: 'text', text: t }], isError: false } })
+    // The compaction feature's advisory read at every session start, not the manual's: answered, not recorded.
+    if (e.tool === 'config_get') return text(JSON.stringify({ key: e.args.key, value: '50%', scope: 'builtin' }))
+    w.mcpCalls.push({ server: e.server, tool: e.tool, args: e.args })
     if (e.tool === 'ferrule') {
       const relogin = e.args.relogin_session_key
       if (typeof relogin === 'string') {

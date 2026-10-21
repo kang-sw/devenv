@@ -13,9 +13,12 @@ import {
   levelAt,
   observe,
   percentOf,
+  resolveAdvisory,
   RESUME_TEXT,
   thresholdsFor,
   vetoedResumeText,
+  DEFAULT_ADVISORY,
+  type AdvisorySpec,
   type Level,
   type Thresholds,
 } from './timing'
@@ -39,6 +42,12 @@ import {
  * notification, already started the first turn after it, which resumes the
  * work there, so the resume would arrive only as a stale prompt after that
  * turn. The window's end submits it only when no turn started.
+ *
+ * The advisory point is the configured one, read once per session start
+ * (readAdvisory) and not awaited: until the read settles, and whenever it
+ * fails or its value does not parse, the default applies. A read that settles
+ * after the thresholds were cached drops the cache, so the configured point
+ * applies from the next usage observation of that session.
  *
  * Main session only: thresholds read the main thread's usage, the lever
  * refuses a subagent, and a subagent's or fork's own compaction is ignored.
@@ -70,6 +79,12 @@ export type CompactionEdges = {
    * landing hears of this one only here.
    */
   leverLanded?: () => void
+  /**
+   * Read the configured advisory point's stored value, called once per
+   * session start; absent, a rejection, or a value that does not parse leaves
+   * the default.
+   */
+  readAdvisory?: () => Promise<unknown>
 }
 
 /** The lever tool's answer: a refusal or its result text. */
@@ -110,6 +125,11 @@ type Request = {
 /** The breakdown's figures, keyed by the model window they were read under. */
 type Cached = { window: number; thresholds: Thresholds | undefined }
 
+function describeAdvisory(spec: AdvisorySpec): string {
+  const terms = [spec.percent !== undefined ? `${spec.percent}%` : undefined, spec.tokens !== undefined ? `${spec.tokens} tokens` : undefined]
+  return terms.filter((t) => t !== undefined).join(' or ')
+}
+
 function describeWindow(t: Thresholds | undefined): string {
   if (!t) return 'thresholds off (auto compaction off, or its point not above the advisory point)'
   const p = (tokens: number) => `${percentOf(tokens, t.raw)}%`
@@ -131,6 +151,10 @@ export function createCompaction(): Compaction {
    * this keeps it from being read as another's landing or counted twice.
    */
   let leverCompacting = false
+  /** The advisory point the thresholds use; the default until a session start's read settles. */
+  let advisory: AdvisorySpec = DEFAULT_ADVISORY
+  /** Bumped at every session start: a read from an earlier start is dropped. */
+  let reads = 0
   /** The last compact-step token handed out; see Request.scheduled. */
   let dispatches = 0
   /**
@@ -251,6 +275,24 @@ export function createCompaction(): Compaction {
     start: (bound) => {
       edges = bound
       reset()
+      advisory = DEFAULT_ADVISORY
+      const read = (reads += 1)
+      const readAdvisory = bound.readAdvisory
+      if (!readAdvisory) return
+      Promise.resolve()
+        .then(readAdvisory)
+        .then(
+          (value) => {
+            if (read !== reads) return
+            advisory = resolveAdvisory(value)
+            // Thresholds cached under the default are figured again at the next observation.
+            cached = undefined
+            debug(`advisory point ${JSON.stringify(value)} read as ${describeAdvisory(advisory)}`)
+          },
+          (err) => {
+            if (read === reads) debug(`advisory point not read (${String(err)}); the default applies`)
+          },
+        )
     },
 
     end: (reason) => {
@@ -278,7 +320,7 @@ export function createCompaction(): Compaction {
       if (!cached || cached.window !== context.window) {
         const breakdown = (await readBreakdown()).context.breakdown
         if (gen !== generation || !breakdown) return
-        cached = { window: context.window, thresholds: thresholdsFor(breakdown) }
+        cached = { window: context.window, thresholds: thresholdsFor(breakdown, advisory) }
         debug(describeWindow(cached.thresholds))
       }
       const t = cached.thresholds

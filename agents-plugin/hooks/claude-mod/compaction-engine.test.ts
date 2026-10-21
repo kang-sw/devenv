@@ -20,7 +20,7 @@ type CompactAnswer = { skip: string } | 'lands' | 'rejects'
 /** A compaction leaves at least one message: the summary. */
 const SUMMARY = [{ role: 'user', text: 'summary', toolUses: [] }]
 
-function world(on: On, opts: { processOk?: boolean; refuseRegister?: string } = {}) {
+function world(on: On, opts: { processOk?: boolean; refuseRegister?: string; advisory?: unknown; advisoryError?: boolean } = {}) {
   const clock = mock.clock(on)
   mock.env(on, {})
   const w = {
@@ -40,7 +40,17 @@ function world(on: On, opts: { processOk?: boolean; refuseRegister?: string } = 
     logs: [] as { text: string; to: string }[],
     /** Delays (ms on the mock clock) for the next store deletes, in call order. */
     deleteDelays: [] as number[],
+    /** The config_get calls the mod made, with their server. */
+    configGets: [] as { server: string; args: Record<string, unknown> }[],
   }
+  on('mcp.connect', ($, e) => ({ value: { isConnected: true, server: `plugin:${e.server}:${e.server}` } }))
+  on('mcp.call', ($, e) => {
+    if (e.tool !== 'config_get') return { value: { content: [{ type: 'text', text: `no ${e.tool} here` }], isError: true } }
+    w.configGets.push({ server: e.server, args: e.args })
+    if (opts.advisoryError) return { value: { content: [{ type: 'text', text: 'ws-mcp is unhealthy' }], isError: true } }
+    const value = opts.advisory === undefined ? '50%' : opts.advisory
+    return { value: { content: [{ type: 'text', text: JSON.stringify({ key: e.args.key, value, scope: 'project' }) }], isError: false } }
+  })
   on('store.get', () => ({ value: undefined }))
   on('store.set', () => ({ value: undefined }))
   on('store.delete', async () => {
@@ -185,6 +195,41 @@ test('ws: a crossing that session.measure reports submits the advisory, reading 
   expect(w.prompts).toEqual([advisoryText(T, 104_000)])
   expect(w.usageCalls).toEqual([{ breakdown: 'summary' }])
 })
+
+test('ws: each session start reads the advisory key once over the plugin server, and a tuned value moves the advisory', async ($, on) => {
+  const w = world(on, { advisory: '40%|300k' })
+  await start($, w)
+  if (!isWs(w)) {
+    expect(w.configGets).toEqual([])
+    return
+  }
+  expect(w.configGets).toEqual([{ server: 'plugin:ws:ws', args: { key: 'claude.compaction_advisory_percent', format: 'json' } }])
+  await measure($, w, 50_000)
+  await measure($, w, 79_000)
+  expect(w.prompts).toEqual([])
+  await measure($, w, 81_000)
+  expect(w.prompts).toEqual([advisoryText(thresholdsFor(WINDOW, { percent: 40, tokens: 300_000 })!, 81_000)])
+  expect(w.prompts[0]).toContain('(advisory point: 40%)')
+  await start($, w)
+  expect(w.configGets.length).toBe(2)
+})
+
+for (const [what, opts] of [
+  ['reports an error', { advisoryError: true }],
+  ['returns a stored value that does not parse', { advisory: 'lots' }],
+] as const) {
+  test(`ws: an advisory read that ${what} leaves the advisory at 50%`, async ($, on) => {
+    const w = world(on, opts)
+    await start($, w)
+    if (!isWs(w)) return
+    expect(w.configGets.length).toBe(1)
+    await measure($, w, 50_000)
+    await measure($, w, 81_000)
+    expect(w.prompts).toEqual([])
+    await measure($, w, 104_000)
+    expect(w.prompts).toEqual([advisoryText(T, 104_000)])
+  })
+}
 
 test('ws: a lever call with the flag compacts after the main-thread turn end, then submits the resume prompt once', async ($, on) => {
   const w = world(on)

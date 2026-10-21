@@ -10,6 +10,8 @@ import {
   LEVER_RESULT_NO_RESUME,
   milestoneText,
   observe,
+  parseAdvisory,
+  resolveAdvisory,
   RESUME_TEXT,
   thresholdsFor,
   vetoedResumeText,
@@ -30,7 +32,7 @@ const tick = async (n = 30) => {
 type CompactAnswer = { skip?: string } | Error
 
 /** Fake edges: submits and compactions are recorded; scheduled steps run when the test says. */
-function harness(opts: { window?: Partial<CompactionWindow> | null } = {}) {
+function harness(opts: { window?: Partial<CompactionWindow> | null; readAdvisory?: () => Promise<unknown> } = {}) {
   const h = {
     submits: [] as string[],
     /** Answers for the next compact() calls in order; an Error rejects. Absent: the compaction lands. */
@@ -96,6 +98,7 @@ function harness(opts: { window?: Partial<CompactionWindow> | null } = {}) {
       h.leverLandings += 1
       if (h.leverLandedThrows) throw new Error('listener failed')
     },
+    readAdvisory: opts.readAdvisory,
   }
   c.start(edges)
   const readBreakdown = async () => {
@@ -125,7 +128,17 @@ function harness(opts: { window?: Partial<CompactionWindow> | null } = {}) {
     for (const t of h.delayed.splice(0)) t.fn()
     await tick()
   }
-  return { h, c, measure, turnEnd, turnStart, runScheduled, closeWindow, transcript, debugLog, routeOwnCompaction }
+  /** A second session.start with the same edges. */
+  const restart = () => c.start(edges)
+  return { h, c, measure, turnEnd, turnStart, runScheduled, closeWindow, transcript, debugLog, routeOwnCompaction, restart }
+}
+
+/** A promise the test settles. */
+function deferred<T>() {
+  let resolve!: (v: T) => void
+  let reject!: (err: unknown) => void
+  const promise = new Promise<T>((res, rej) => ((resolve = res), (reject = rej)))
+  return { promise, resolve, reject }
 }
 
 const SUBAGENT_DENY = 'request_compaction compacts the main session only; called from subagent sub-1.'
@@ -222,6 +235,139 @@ If now is not such a moment, end this turn without replying and keep looking for
     expect(vetoedResumeText('a hook said no')).toBe(
       '[ws compaction] Compaction did not run (a hook said no); your context is unchanged. Resume the work in progress.',
     )
+  })
+})
+
+describe('configured advisory point', () => {
+  // The same corpus the server-side test runs against the key's manifest pattern.
+  const ACCEPTED = ['50', '50%', '1', '1%', '100', '100%', '150k', '1.5m', '0.5k', '1.0004k', '007k', '50%|150k', '150k|50%', '100|1m']
+  const REJECTED = ['0', '0%', '101', '101%', '050', '50.5', '-5', '', '0k', '0.0m', '00.00k', '150K', '1.5M', '15ok', 'k', '.5k', '5.k',
+    '50%%', '50%|60%', '150k|1m', '50%|150k|1m', '50% | 150k', ' 50', '50 ', '|50%', '50%|', '1e3k']
+
+  test('the grammar accepts a percent, a token count, or one of each joined by |', () => {
+    for (const value of ACCEPTED) expect(parseAdvisory(value)).toBeDefined()
+    for (const value of REJECTED) expect(parseAdvisory(value)).toBeUndefined()
+    expect(parseAdvisory('40')).toEqual({ percent: 40 })
+    expect(parseAdvisory('1.5m')).toEqual({ tokens: 1_500_000 })
+    expect(parseAdvisory('0.5k')).toEqual({ tokens: 500 })
+    expect(parseAdvisory('150k|40%')).toEqual({ percent: 40, tokens: 150_000 })
+  })
+
+  test('a value that does not parse, or none, resolves to 50%', () => {
+    for (const value of [undefined, null, 40, 'lots', '50%|60%', {}]) expect(resolveAdvisory(value)).toEqual({ percent: 50 })
+  })
+
+  test('a percent, a token count, and the earlier of a combined value set the advisory; milestones follow it', () => {
+    expect(thresholdsFor(WINDOW, { percent: 40 })?.advisory).toBe(80_000)
+    expect(thresholdsFor(WINDOW, { tokens: 110_000 })?.advisory).toBe(110_000)
+    expect(thresholdsFor(WINDOW, { percent: 40, tokens: 150_000 })?.advisory).toBe(80_000)
+    expect(thresholdsFor(WINDOW, { percent: 60, tokens: 110_000 })?.advisory).toBe(110_000)
+    const t = thresholdsFor(WINDOW, { tokens: 110_000 })!
+    expect(t.m1).toBe(130_000)
+    expect(t.m2).toBe(150_000)
+    expect(t.hard).toBe(HARD)
+  })
+
+  test('a token term at or beyond the auto-compact point leaves the percent term to decide, and alone sends nothing', () => {
+    expect(thresholdsFor(WINDOW, { percent: 40, tokens: 180_000 })?.advisory).toBe(80_000)
+    expect(thresholdsFor(WINDOW, { percent: 40, tokens: 400_000 })?.advisory).toBe(80_000)
+    expect(thresholdsFor(WINDOW, { tokens: 180_000 })).toBeUndefined()
+    expect(thresholdsFor(WINDOW, { tokens: HARD })).toBeUndefined()
+    expect(thresholdsFor(WINDOW, { percent: 90 })).toBeUndefined()
+    expect(thresholdsFor(WINDOW, { percent: 90, tokens: 400_000 })).toBeUndefined()
+  })
+
+  test('the advisory text names the configured point as its percent of the window', () => {
+    const t = thresholdsFor(WINDOW, { tokens: 110_000 })!
+    expect(advisoryText(t, 112_000)).toContain(
+      '[ws compaction] Context usage is 56% of the window (advisory point: 55%). Claude Code compacts automatically at about 85%.',
+    )
+    expect(advisoryText(t, 112_000)).toContain('Reminders follow at 65% and 75%.')
+  })
+
+  test('with no key set the advisory stays at 50%', async () => {
+    const { h, measure } = harness({ readAdvisory: async () => null })
+    await measure(10_000)
+    await measure(99_000)
+    expect(h.submits).toEqual([])
+    await measure(101_000)
+    expect(h.submits).toEqual([advisoryText(T, 101_000)])
+  })
+
+  test('a configured point read at start moves the advisory and the milestones', async () => {
+    const { h, measure } = harness({ readAdvisory: async () => '40%' })
+    await measure(10_000)
+    await measure(81_000)
+    const t = thresholdsFor(WINDOW, { percent: 40 })!
+    expect(h.submits).toEqual([advisoryText(t, 81_000)])
+    expect(h.submits[0]).toContain('(advisory point: 40%)')
+    await measure(111_000)
+    expect(h.submits.length).toBe(2)
+  })
+
+  test('a configured point with no threshold below the auto-compact point sends nothing', async () => {
+    const { h, measure } = harness({ readAdvisory: async () => '180k' })
+    await measure(10_000)
+    await measure(160_000)
+    await measure(169_000)
+    expect(h.submits).toEqual([])
+  })
+
+  test('a malformed stored value and a failed read both fall back to 50%', async () => {
+    for (const readAdvisory of [async () => 'lots', async () => Promise.reject(new Error('config_get reported an error')), () => {
+      throw new Error('MCP server not resolved')
+    }]) {
+      const { h, measure, debugLog } = harness({ readAdvisory })
+      await measure(10_000)
+      await measure(81_000)
+      expect(h.submits).toEqual([])
+      await measure(101_000)
+      expect(h.submits).toEqual([advisoryText(T, 101_000)])
+      expect(debugLog().some((l) => l.includes('advisory point'))).toBe(true)
+    }
+  })
+
+  test('a read that settles after the first observation still applies to the session', async () => {
+    const read = deferred<unknown>()
+    const { h, measure } = harness({ readAdvisory: () => read.promise })
+    await measure(10_000)
+    expect(h.breakdownReads).toBe(1)
+    read.resolve('40%')
+    await tick()
+    await measure(81_000)
+    expect(h.breakdownReads).toBe(2)
+    expect(h.submits).toEqual([advisoryText(thresholdsFor(WINDOW, { percent: 40 })!, 81_000)])
+  })
+
+  test('a read that settles while an observation awaits the breakdown applies to it', async () => {
+    const read = deferred<unknown>()
+    const { h, c } = harness({ readAdvisory: () => read.promise })
+    await c.measure({ tokens: 10_000, window: 1_000_000 }, async () => {
+      read.resolve('40%')
+      await tick()
+      return { startedAt: 0, context: { window: 1_000_000, breakdown: WINDOW }, rateLimits: [] } as never
+    })
+    await c.measure({ tokens: 81_000, window: 1_000_000 }, async () => {
+      throw new Error('not read again')
+    })
+    await tick()
+    expect(h.submits).toEqual([advisoryText(thresholdsFor(WINDOW, { percent: 40 })!, 81_000)])
+  })
+
+  test('each session start reads again, and a read from an earlier start is dropped', async () => {
+    const reads = [deferred<unknown>(), deferred<unknown>()]
+    let n = 0
+    const { h, measure, restart } = harness({ readAdvisory: () => reads[n++].promise })
+    restart()
+    await tick()
+    expect(n).toBe(2)
+    reads[1].resolve(null)
+    reads[0].resolve('40%')
+    await measure(10_000)
+    await measure(81_000)
+    expect(h.submits).toEqual([])
+    await measure(101_000)
+    expect(h.submits).toEqual([advisoryText(T, 101_000)])
   })
 })
 
