@@ -563,7 +563,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-21T05:52:37Z"
+        "touched_at": "2026-10-21T05:52:55Z",
+        "impl": {
+          "branch": "impl/develop/omega-thigh-smock"
+        }
       }
     },
     "261018-research-claude-mod-mid-turn-steer": {
