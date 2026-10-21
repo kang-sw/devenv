@@ -6,8 +6,58 @@
 export const TOOL_NAME = 'request_compaction'
 /** Opens every prompt the mod submits, so it never reads as the human's own words. */
 export const LABEL = '[ws compaction] '
-/** The advisory point as a fraction of the compaction window. */
-export const ADVISORY_FRACTION = 0.5
+/** The config key that sets the advisory point; read once per session start. */
+export const ADVISORY_KEY = 'claude.compaction_advisory_percent'
+
+/**
+ * An advisory point before it is resolved against a compaction window: a
+ * percent of the window, a token count, or both (whichever is reached first).
+ * At least one term is set.
+ */
+export type AdvisorySpec = { percent?: number; tokens?: number }
+
+/** The advisory point with no key set, or with one that does not parse. */
+export const DEFAULT_ADVISORY: AdvisorySpec = { percent: 50 }
+
+// One term each of the advisory grammar; the key's manifest pattern accepts
+// exactly the strings parseAdvisory accepts.
+const PERCENT_TERM = /^(100|[1-9][0-9]?)%?$/
+const TOKEN_TERM = /^([0-9]*[1-9][0-9]*(?:\.[0-9]+)?|0+\.[0-9]*[1-9][0-9]*)([km])$/
+
+/**
+ * Parses an advisory value: `50` or `50%` (an integer percent, 1-100), `150k`
+ * or `1.5m` (tokens, k = 1,000 and m = 1,000,000, rounded to a whole token),
+ * or one percent term and one token term joined by `|` in either order
+ * (`50%|150k`). Anything else is undefined.
+ */
+export function parseAdvisory(value: unknown): AdvisorySpec | undefined {
+  if (typeof value !== 'string') return undefined
+  const terms = value.split('|')
+  if (terms.length > 2) return undefined
+  const spec: AdvisorySpec = {}
+  for (const term of terms) {
+    const percent = PERCENT_TERM.exec(term)
+    const tokens = percent ? null : TOKEN_TERM.exec(term)
+    if (percent && spec.percent === undefined) spec.percent = Number(percent[1])
+    else if (tokens && spec.tokens === undefined) spec.tokens = Math.round(Number(tokens[1]) * (tokens[2] === 'k' ? 1_000 : 1_000_000))
+    else return undefined
+  }
+  return spec
+}
+
+/** The configured advisory point, or the default when `value` does not parse; never fails. */
+export function resolveAdvisory(value: unknown): AdvisorySpec {
+  return parseAdvisory(value) ?? DEFAULT_ADVISORY
+}
+
+/**
+ * The advisory point in tokens of a `raw`-token window: the earlier of its
+ * terms. A token term is not clamped to the window; beyond the automatic
+ * compaction point it never fires, and the other term (if any) decides.
+ */
+export function advisoryTokens(spec: AdvisorySpec, raw: number): number {
+  return Math.min(spec.percent !== undefined ? (raw * spec.percent) / 100 : Infinity, spec.tokens ?? Infinity)
+}
 
 /** The compaction-window figures of a `summary` context breakdown that the thresholds use. */
 export type CompactionWindow = {
@@ -31,9 +81,9 @@ export type Thresholds = {
  * Milestones sit one and two thirds of the way from the advisory to the
  * native auto-compact point.
  */
-export function thresholdsFor(w: CompactionWindow): Thresholds | undefined {
+export function thresholdsFor(w: CompactionWindow, spec: AdvisorySpec = DEFAULT_ADVISORY): Thresholds | undefined {
   if (!w.isAutoCompactEnabled || w.autoCompactThreshold === undefined || !(w.rawMaxTokens > 0)) return undefined
-  const advisory = w.rawMaxTokens * ADVISORY_FRACTION
+  const advisory = advisoryTokens(spec, w.rawMaxTokens)
   const hard = w.autoCompactThreshold
   if (!(hard > advisory)) return undefined
   const step = (hard - advisory) / 3
@@ -75,7 +125,7 @@ export function percentOf(tokens: number, raw: number): number {
 export function advisoryText(t: Thresholds, tokens: number): string {
   const hard = percentOf(t.hard, t.raw)
   return (
-    `${LABEL}Context usage is ${percentOf(tokens, t.raw)}% of the window (advisory point: ${ADVISORY_FRACTION * 100}%). Claude Code compacts automatically at about ${hard}%.\n` +
+    `${LABEL}Context usage is ${percentOf(tokens, t.raw)}% of the window (advisory point: ${percentOf(t.advisory, t.raw)}%). Claude Code compacts automatically at about ${hard}%.\n` +
     '\n' +
     'This is not an instruction to compact right now. If you are in active discussion with the human, awaiting their answer or clarification, or holding working context that would be costly to rebuild (a half-applied change or a diagnosis in progress), carry on for now. A pause after asking the human a question is not a boundary.\n' +
     '\n' +

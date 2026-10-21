@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "namespace": "claude.",
+  "keys": [
+    {
+      "key": "claude.compaction_advisory_percent",
+      "type": "string",
+      "pattern": "(?:100|[1-9][0-9]?)%?|(?:[0-9]*[1-9][0-9]*(?:\\.[0-9]+)?|0+\\.[0-9]*[1-9][0-9]*)[km]|(?:100|[1-9][0-9]?)%?\\|(?:[0-9]*[1-9][0-9]*(?:\\.[0-9]+)?|0+\\.[0-9]*[1-9][0-9]*)[km]|(?:[0-9]*[1-9][0-9]*(?:\\.[0-9]+)?|0+\\.[0-9]*[1-9][0-9]*)[km]\\|(?:100|[1-9][0-9]?)%?",
+      "default": "50%",
+      "description": "Claude Code only (unused on other hosts): context-usage point at which the lead is advised to compact at its next good boundary: a percent of the compaction window (50 or 50%, an integer 1-100), a token count (150k or 1.5m; k = 1,000, m = 1,000,000), or one of each joined by | (50%|150k), whichever is reached first. Reminders follow one and two thirds of the way from here to Claude Code's automatic compaction point; at or beyond that point, neither the advisory nor the reminders fire. A token count beyond the window never fires. Read at session start, so a change applies from the next session."
+    }
+  ]
+}

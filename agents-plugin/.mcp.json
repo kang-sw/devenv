@@ -4,6 +4,9 @@
       "command": "python3",
       "cwd": ".",
       "args": ["./bin/ws-mcp-launcher.py", "serve", "--stdio"],
+      "env": {
+        "WS_MCP_CONFIG_MANIFESTS": "./config-manifest.json"
+      },
       "startup_timeout_sec": 30,
       "tool_timeout_sec": 600
     }

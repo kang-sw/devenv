@@ -3,7 +3,7 @@ import type { HookStream, ProcessSpawnChunk, ProcessSpawnResult, Register, ToolC
 import { compactionEnabledFor, createCompaction } from './compaction'
 import { createManual, SECTION_ID, type ReadFamily } from './manual'
 import { createReconnect, reconnectDescription, TOOL_NAME as RECONNECT_TOOL } from './reconnect'
-import { LEVER_DESCRIPTION, TOOL_NAME as LEVER_TOOL } from './timing'
+import { ADVISORY_KEY, LEVER_DESCRIPTION, TOOL_NAME as LEVER_TOOL } from './timing'
 import {
   createWatcher,
   mapWaitExit,
@@ -478,6 +478,14 @@ export const register: Register = (on) => {
       $.ui.log(`${label}: setup failed: ${String(err)}`, { to: 'debug' })
     })
 
+    /** One ws MCP tool call's text; an error result rejects with its text. */
+    const callText = async (name: string, tool: string, args: Record<string, unknown>) => {
+      const res = await $.mcp.call(name, tool, args)
+      const text = res.content.flatMap((b) => (b.type === 'text' && typeof b.text === 'string' ? [b.text] : [])).join('\n')
+      if (res.isError) throw new Error(text || `${tool} reported an error`)
+      return text
+    }
+
     const compactionSetup = (async () => {
       if (!compactionEnabledFor($.plugin.name)) return
       compaction.start({
@@ -487,6 +495,12 @@ export const register: Register = (on) => {
         delay: (ms, fn) => void $.clock.after(ms, fn),
         log: (text, to) => $.ui.log(text, { to }),
         leverLanded: () => manual.landed('plugin'),
+        // One config_get per session start, once the shared server resolution settles.
+        readAdvisory: async () => {
+          await serverResolved
+          if (!server) throw new Error('MCP server not resolved')
+          return (JSON.parse(await callText(server, 'config_get', { key: ADVISORY_KEY, format: 'json' })) as { value?: unknown }).value
+        },
       })
       const registered = await $.tool.register({
         name: LEVER_TOOL,
@@ -549,12 +563,7 @@ export const register: Register = (on) => {
             await serverResolved
             return server
           },
-          call: async (name, tool, args) => {
-            const res = await $.mcp.call(name, tool, args)
-            const text = res.content.flatMap((b) => (b.type === 'text' && typeof b.text === 'string' ? [b.text] : [])).join('\n')
-            if (res.isError) throw new Error(text || `${tool} reported an error`)
-            return text
-          },
+          call: callText,
           root: () => $.session.root(),
           sessionId: () => $.session.id(),
           store: {

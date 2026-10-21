@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kang-sw/devenv/internal/wsconfig"
 )
 
 const testManifest = `{
@@ -388,13 +390,41 @@ func TestConfigGetTypesAndFallbacks(t *testing.T) {
 // manifest would only log at startup and silently leave every adapter knob
 // untunable.
 func TestShippedAdapterManifestsLoad(t *testing.T) {
-	path := filepath.Join("..", "..", "..", "agents-plugin-pi", "config-manifest.json")
-	declared := loadDeclaredConfig(path)
-	if len(declared.rejected) != 0 {
-		t.Fatalf("shipped manifest rejected: %v", declared.rejected)
+	for _, path := range []string{piManifestPath, claudeManifestPath} {
+		declared := loadDeclaredConfig(path)
+		if len(declared.rejected) != 0 {
+			t.Fatalf("shipped manifest rejected: %v", declared.rejected)
+		}
+		if len(declared.keys) == 0 {
+			t.Fatalf("shipped manifest %s declares no keys", path)
+		}
 	}
-	if len(declared.keys) == 0 {
-		t.Fatalf("shipped manifest %s declares no keys", path)
+}
+
+var (
+	piManifestPath     = filepath.Join("..", "..", "..", "agents-plugin-pi", "config-manifest.json")
+	claudeManifestPath = filepath.Join("..", "..", "..", "agents-plugin", "config-manifest.json")
+)
+
+// The compaction-threshold grammar corpus: the Pi adapter-config test runs it
+// against Pi's parser, and the tests below against each patterned key.
+var (
+	thresholdAccepted = []string{"50", "50%", "1", "1%", "100", "100%", "150k", "1.5m", "0.5k", "1.0004k", "007k", "50%|150k", "150k|50%", "100|1m"}
+	thresholdRejected = []string{"0", "0%", "101", "101%", "050", "50.5", "-5", "", "0k", "0.0m", "00.00k", "150K", "1.5M", "15ok", "k", ".5k", "5.k",
+		"50%%", "50%|60%", "150k|1m", "50%|150k|1m", "50% | 150k", " 50", "50 ", "|50%", "50%|", "1e3k"}
+)
+
+func checkThresholdCorpus(t *testing.T, name string, key declaredConfigKey) {
+	t.Helper()
+	for _, value := range thresholdAccepted {
+		if _, err := key.normalize(value); err != nil {
+			t.Errorf("%s rejects %q: %v", name, value, err)
+		}
+	}
+	for _, value := range thresholdRejected {
+		if _, err := key.normalize(value); err == nil {
+			t.Errorf("%s accepts %q", name, value)
+		}
 	}
 }
 
@@ -404,24 +434,60 @@ func TestShippedAdapterManifestsLoad(t *testing.T) {
 // config.tune never accepts a value Pi would silently replace with the
 // default.
 func TestShippedPiCompactionThresholdPattern(t *testing.T) {
-	declared := loadDeclaredConfig(filepath.Join("..", "..", "..", "agents-plugin-pi", "config-manifest.json"))
-	accepted := []string{"50", "50%", "1", "1%", "100", "100%", "150k", "1.5m", "0.5k", "1.0004k", "007k", "50%|150k", "150k|50%", "100|1m"}
-	rejected := []string{"0", "0%", "101", "101%", "050", "50.5", "-5", "", "0k", "0.0m", "00.00k", "150K", "1.5M", "15ok", "k", ".5k", "5.k",
-		"50%%", "50%|60%", "150k|1m", "50%|150k|1m", "50% | 150k", " 50", "50 ", "|50%", "50%|", "1e3k"}
+	declared := loadDeclaredConfig(piManifestPath)
 	for _, name := range []string{"pi.compaction_advisory_percent", "pi.compaction_hard_percent"} {
 		key, ok := declared.lookup(name)
 		if !ok || key.Type != declaredTypeString || key.Pattern == "" {
 			t.Fatalf("%s = %+v, want a patterned string key", name, key)
 		}
-		for _, value := range accepted {
-			if _, err := key.normalize(value); err != nil {
-				t.Errorf("%s rejects %q: %v", name, value, err)
-			}
+		checkThresholdCorpus(t, name, key)
+	}
+}
+
+// TestShippedClaudeAdvisoryMatchesPi: the Claude mod's advisory key accepts
+// exactly what Pi's advisory key accepts (the Claude mod's parser copies Pi's
+// grammar), carries the same pattern and default, and keeps the default
+// project scope, since a declared adapter key may not default to repo.
+func TestShippedClaudeAdvisoryMatchesPi(t *testing.T) {
+	const name = "claude.compaction_advisory_percent"
+	claude, ok := loadDeclaredConfig(claudeManifestPath).lookup(name)
+	if !ok || claude.Type != declaredTypeString || claude.Pattern == "" {
+		t.Fatalf("%s = %+v, want a patterned string key", name, claude)
+	}
+	pi, ok := loadDeclaredConfig(piManifestPath).lookup("pi.compaction_advisory_percent")
+	if !ok {
+		t.Fatal("pi.compaction_advisory_percent is not declared")
+	}
+	if claude.Pattern != pi.Pattern {
+		t.Fatalf("%s pattern drifted from pi.compaction_advisory_percent:\n%s\n%s", name, claude.Pattern, pi.Pattern)
+	}
+	if claude.Default != pi.Default || claude.Default != "50%" {
+		t.Fatalf("%s default = %q, pi default = %q, want both 50%%", name, claude.Default, pi.Default)
+	}
+	if claude.DefaultScope == wsconfig.ScopeRepo {
+		t.Fatalf("%s defaults to repo scope", name)
+	}
+	checkThresholdCorpus(t, name, claude)
+}
+
+// TestConfigTuneValidatesClaudeAdvisory: a server launched with the Claude
+// manifest validates the key at config.tune and reads it typed at config.get.
+func TestConfigTuneValidatesClaudeAdvisory(t *testing.T) {
+	server, _, key := manifestServer(t, claudeManifestPath)
+	const name = "claude.compaction_advisory_percent"
+	if got := configGetJSON(t, server, 930700, map[string]any{"key": name, "session_key": key}); got.Value != "50%" || got.Scope != "builtin" {
+		t.Fatalf("unset %s = %+v", name, got)
+	}
+	for i, value := range []string{"50%|60%", "0", "150K"} {
+		resp := keyedCall(t, server, 930710+i, key, "config.tune", map[string]any{"key": name, "value": value})
+		if !toolIsError(t, resp) || !strings.Contains(toolText(t, resp), "matching the pattern") {
+			t.Fatalf("config.tune(%q) = %s, want a pattern rejection", value, resp)
 		}
-		for _, value := range rejected {
-			if _, err := key.normalize(value); err == nil {
-				t.Errorf("%s accepts %q", name, value)
-			}
-		}
+	}
+	if resp := keyedCall(t, server, 930720, key, "config.tune", map[string]any{"key": name, "value": "40%|300k"}); !strings.Contains(toolText(t, resp), name+": 40%|300k [scope:project]") {
+		t.Fatalf("config.tune echo: %s", resp)
+	}
+	if got := configGetJSON(t, server, 930721, map[string]any{"key": name}); got.Value != "40%|300k" || got.Scope != "project" {
+		t.Fatalf("tuned %s without a session key = %+v", name, got)
 	}
 }
