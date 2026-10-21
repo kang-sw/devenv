@@ -586,6 +586,9 @@
     },
     "261020-research-worktree-profiles": {
       "registered_at": "2026-10-20T08:23:34Z"
+    },
+    "261021-feat-claude-mod-manual-static-body-dedupe": {
+      "registered_at": "2026-10-21T04:11:31Z"
     }
   }
 }
