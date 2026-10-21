@@ -557,7 +557,14 @@
       "registered_at": "2026-10-18T04:08:20Z"
     },
     "261018-feat-claude-mod-compaction-threshold-knob": {
-      "registered_at": "2026-10-17T23:46:26Z"
+      "registered_at": "2026-10-17T23:46:26Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-10-21T05:52:37Z"
+      }
     },
     "261018-research-claude-mod-mid-turn-steer": {
       "registered_at": "2026-10-18T06:42:05Z"
