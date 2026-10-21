@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: e138a1b8d605ec2b
 sage-review-completeness-reviewed: e138a1b8d605ec2b
+completed: 2026-10-21
 ---
 
 # Configurable advisory threshold for the Claude mod lead compaction timing
@@ -165,3 +166,55 @@ Verification:
   `config.list` shows the key (proving the manifest path resolved).
 - `claude plugin validate` / `claude plugin test` on both packages and the
   wsflow mirror drift guard.
+
+### Result (a9ce2c084) - 2026-10-21
+
+Landed `claude.compaction_advisory_percent` (default `50%`, pattern
+byte-identical to `pi.compaction_advisory_percent`) in a new
+`agents-plugin/config-manifest.json`, wired through
+`WS_MCP_CONFIG_MANIFESTS`. The compaction feature reads it with one
+`config_get` per session start (not awaited) over the shared server
+resolution; `timing.ts` parses pi's grammar (`parseAdvisory` /
+`resolveAdvisory`), resolves the advisory as the earlier term with no clamp
+(`advisoryTokens`), and `thresholdsFor` / the advisory text use the resolved
+point. Mirrored byte-identically to wsflow.
+
+Decisions taken:
+
+- D10/D12 adapted to code reality: Claude Code launches the server from
+  `.claude-plugin/plugin.json` (`${CLAUDE_PLUGIN_ROOT}` launcher path, no
+  `cwd`), not `.mcp.json`, which only Codex reads. The env is set in both:
+  `./config-manifest.json` in `.mcp.json`, and
+  `${CLAUDE_PLUGIN_ROOT}/config-manifest.json` in `plugin.json`. The
+  `ws-mcp.md` launcher table records this.
+- A late read invalidates the threshold cache (the Constraint's second
+  option) instead of being awaited in `measure`; the latch is kept.
+- The read survives `session.end` (a `clear` has no following
+  `session.start`), and a read from an earlier start is dropped.
+- `config_get` is called without a session key, so a session-scope tune is
+  not seen; project, repo, global, and builtin scopes are.
+
+Verification:
+
+- `claude plugin test agents-plugin` and `agents-plugin-wsflow`: 317/317
+  each (new unit tests for grammar, resolution, combined/no-clamp, lone term
+  beyond hard, malformed and failed reads, a late read, a read settling
+  mid-observation, per-start reads; engine tests for the one `config_get` per
+  start and the fallbacks). A mutation dropping the cache invalidation fails
+  three of them.
+- `go test ./...` in `agents-plugin-tool`: all ok, including the new
+  `TestShippedClaudeAdvisoryMatchesPi` and
+  `TestConfigTuneValidatesClaudeAdvisory`; `go test ./internal/wsrsrc` (mirror
+  drift guard) ok.
+- `claude plugin validate` on both packages passed;
+  `python3 -m unittest discover` on `agents-plugin/tests` (78) and
+  `agents-plugin-wsflow/tests` (15) ok.
+- Live, Claude: a `claude -p --plugin-dir agents-plugin` session tuned the key
+  to `40%` (accepted, so the manifest resolved under the Claude launch); the
+  next session's debug log showed `advisory point "40%" read as 40%` and
+  thresholds at 40%, milestones 56% and 73%, auto compaction 89%.
+- Live, Codex-shaped: the launcher started from the plugin root with
+  `WS_MCP_CONFIG_MANIFESTS=./config-manifest.json` lists the key in
+  `config.list`; started from another cwd it does not (control). The
+  installed Codex plugin cache was not exercised: it needs a user-performed
+  plugin refresh.
