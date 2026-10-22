@@ -1,7 +1,7 @@
 import { expect, mock, test, type TestBody } from 'claude-code/testing'
 
 import { CONTINUATION_WINDOW_MS } from './compaction'
-import { advisoryText, LEVER_DESCRIPTION, LEVER_RESULT, LEVER_RESULT_NO_RESUME, RESUME_TEXT, thresholdsFor, vetoedResumeText } from './timing'
+import { ADVISORY_KEY, advisoryText, LEVER_DESCRIPTION, LEVER_RESULT, LEVER_RESULT_NO_RESUME, RESUME_TEXT, thresholdsFor, vetoedResumeText } from './timing'
 
 type Engine = Parameters<TestBody>[0]
 type On = Parameters<TestBody>[1]
@@ -40,12 +40,13 @@ function world(on: On, opts: { processOk?: boolean; refuseRegister?: string; adv
     logs: [] as { text: string; to: string }[],
     /** Delays (ms on the mock clock) for the next store deletes, in call order. */
     deleteDelays: [] as number[],
-    /** The config_get calls the mod made, with their server. */
+    /** The advisory key's config_get calls the mod made, with their server (other features read keys of their own). */
     configGets: [] as { server: string; args: Record<string, unknown> }[],
   }
   on('mcp.connect', ($, e) => ({ value: { isConnected: true, server: `plugin:${e.server}:${e.server}` } }))
   on('mcp.call', ($, e) => {
     if (e.tool !== 'config_get') return { value: { content: [{ type: 'text', text: `no ${e.tool} here` }], isError: true } }
+    if (e.args.key !== ADVISORY_KEY) return { value: { content: [{ type: 'text', text: JSON.stringify({ key: e.args.key, value: null, scope: 'unset' }) }], isError: false } }
     w.configGets.push({ server: e.server, args: e.args })
     if (opts.advisoryError) return { value: { content: [{ type: 'text', text: 'ws-mcp is unhealthy' }], isError: true } }
     const value = opts.advisory === undefined ? '50%' : opts.advisory

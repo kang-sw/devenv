@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -489,5 +490,57 @@ func TestConfigTuneValidatesClaudeAdvisory(t *testing.T) {
 	}
 	if got := configGetJSON(t, server, 930721, map[string]any{"key": name}); got.Value != "40%|300k" || got.Scope != "project" {
 		t.Fatalf("tuned %s without a session key = %+v", name, got)
+	}
+}
+
+// TestShippedClaudeCaptionStyleMatchesMod: the caption style key's manifest
+// default is the Claude mod's own fallback text (DEFAULT_STYLE in
+// captions.tsx), so a failed read draws captions in the style config.list
+// shows. The mod's test kit has no file access, so the pin reads the mod source
+// here.
+func TestShippedClaudeCaptionStyleMatchesMod(t *testing.T) {
+	const name = "claude.display_summary_style"
+	style, ok := loadDeclaredConfig(claudeManifestPath).lookup(name)
+	if !ok || style.Type != declaredTypeString {
+		t.Fatalf("%s = %+v, want a string key", name, style)
+	}
+	source, err := os.ReadFile(filepath.Join("..", "..", "..", "agents-plugin", "hooks", "claude-mod", "captions.tsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	match := regexp.MustCompile(`export const DEFAULT_STYLE = '([^'\\]*)'`).FindSubmatch(source)
+	if match == nil {
+		t.Fatal("captions.tsx declares no single-quoted DEFAULT_STYLE literal")
+	}
+	if style.Default != string(match[1]) {
+		t.Fatalf("%s default drifted from the mod's DEFAULT_STYLE:\nmanifest: %s\nmod:      %s", name, style.Default, match[1])
+	}
+}
+
+// TestConfigGetReadsClaudeCaptionKeys: a server launched with the Claude
+// manifest answers each caption key typed and keyless, a tune included, and
+// refuses a context window below one token.
+func TestConfigGetReadsClaudeCaptionKeys(t *testing.T) {
+	server, _, key := manifestServer(t, claudeManifestPath)
+	for i, want := range []struct {
+		name  string
+		value any
+	}{
+		{"claude.display_summary_enabled", false},
+		{"claude.display_summary_model", "haiku"},
+		{"claude.display_summary_context_tokens", float64(200000)},
+	} {
+		if got := configGetJSON(t, server, 930800+i, map[string]any{"key": want.name}); got.Value != want.value || got.Scope != "builtin" {
+			t.Fatalf("unset %s = %+v, want %v", want.name, got, want.value)
+		}
+	}
+	if resp := keyedCall(t, server, 930810, key, "config.tune", map[string]any{"key": "claude.display_summary_context_tokens", "value": "0"}); !toolIsError(t, resp) {
+		t.Fatalf("config.tune(context_tokens=0) = %s, want a rejection", resp)
+	}
+	if resp := keyedCall(t, server, 930811, key, "config.tune", map[string]any{"key": "claude.display_summary_enabled", "value": "true"}); toolIsError(t, resp) {
+		t.Fatalf("config.tune(enabled=true) = %s", resp)
+	}
+	if got := configGetJSON(t, server, 930812, map[string]any{"key": "claude.display_summary_enabled"}); got.Value != true || got.Scope != "project" {
+		t.Fatalf("tuned claude.display_summary_enabled without a session key = %+v", got)
 	}
 }

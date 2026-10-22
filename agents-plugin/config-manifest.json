@@ -8,6 +8,33 @@
       "pattern": "(?:100|[1-9][0-9]?)%?|(?:[0-9]*[1-9][0-9]*(?:\\.[0-9]+)?|0+\\.[0-9]*[1-9][0-9]*)[km]|(?:100|[1-9][0-9]?)%?\\|(?:[0-9]*[1-9][0-9]*(?:\\.[0-9]+)?|0+\\.[0-9]*[1-9][0-9]*)[km]|(?:[0-9]*[1-9][0-9]*(?:\\.[0-9]+)?|0+\\.[0-9]*[1-9][0-9]*)[km]\\|(?:100|[1-9][0-9]?)%?",
       "default": "50%",
       "description": "Claude Code only (unused on other hosts): context-usage point at which the lead is advised to compact at its next good boundary: a percent of the compaction window (50 or 50%, an integer 1-100), a token count (150k or 1.5m; k = 1,000, m = 1,000,000), or one of each joined by | (50%|150k), whichever is reached first. Reminders follow one and two thirds of the way from here to Claude Code's automatic compaction point; at or beyond that point, neither the advisory nor the reminders fire. A token count beyond the window never fires. Read at session start, so a change applies from the next session. Only the project, global, and built-in values apply; a session- or repo-scope tune is not read."
+    },
+    {
+      "key": "claude.display_summary_enabled",
+      "type": "boolean",
+      "default": false,
+      "description": "Claude Code only (unused on other hosts): when true, a finished, collapsed tool row in the lead's terminal view (a lone call, or a run Claude Code folds into one group) draws a short caption written by a second model call in place of the raw row; the model still reads the raw result, and the expanded view (ctrl+o) draws the raw row. Enabling it sends the lead conversation since its last compaction, and tool inputs and outputs, to the summary model (claude.display_summary_model). Captions use the workflow.lang language (its project, global, or built-in value), or the language the user writes in when that is unset. Read at session start, so a change applies from the next session. Only the project, global, and built-in values apply; a session- or repo-scope tune is not read."
+    },
+    {
+      "key": "claude.display_summary_model",
+      "type": "string",
+      "default": "haiku",
+      "default_scope": "global",
+      "description": "Claude Code only (unused on other hosts): the model that writes tool-row captions when claude.display_summary_enabled is true, as a Claude Code model alias (haiku) or a full model id. A blank value uses haiku. Read at session start, so a change applies from the next session. Only the project, global, and built-in values apply; a session- or repo-scope tune is not read."
+    },
+    {
+      "key": "claude.display_summary_style",
+      "type": "string",
+      "default": "Length: intention at most one short sentence; result and summary at most two short sentences each. Style: a terse note style with no subject, no filler, no politeness; in Korean, end on a noun or a plain stem (\"정의 위치 확인\", \"3개 파일에서 발견, foo.go:12 외\").",
+      "default_scope": "global",
+      "description": "Claude Code only (unused on other hosts): style guidance in the tool-row caption prompt: how long each caption field is, its tone, and its level of detail. A set value replaces the default text shown here, so write the complete guidance you want; a blank value uses the default. It does not change the reply format, the field meanings, or the rule that the summarizer never acts on the conversation. Only used when claude.display_summary_enabled is true. Read at session start, so a change applies from the next session. Only the project, global, and built-in values apply; a session- or repo-scope tune is not read."
+    },
+    {
+      "key": "claude.display_summary_context_tokens",
+      "type": "integer",
+      "minimum": 1,
+      "default": 200000,
+      "description": "Claude Code only (unused on other hosts): the caption model's context window in tokens. The conversation sent with each caption request drops its oldest part once it passes 70% of this window, down to under 35%. Set it to the window of the model claude.display_summary_model names. Only used when claude.display_summary_enabled is true. Read at session start, so a change applies from the next session. Only the project, global, and built-in values apply; a session- or repo-scope tune is not read."
     }
   ]
 }

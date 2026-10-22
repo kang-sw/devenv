@@ -1,5 +1,7 @@
+import { atom, read, update } from 'claude-code'
 import type { HookStream, ProcessSpawnChunk, ProcessSpawnResult, Register, ToolCallResult } from 'claude-code'
 
+import { createCaptions, drawCall, drawEmpty, drawRun, groupUnit, toolUseUnit } from './captions'
 import { compactionEnabledFor, createCompaction } from './compaction'
 import { createManual, SECTION_ID, type ReadFamily } from './manual'
 import { createReconnect, reconnectDescription, TOOL_NAME as RECONNECT_TOOL } from './reconnect'
@@ -16,7 +18,7 @@ import {
 } from './watcher'
 
 // The Claude Code mod: the one hooks module a package's hooks.json names,
-// carrying four features.
+// carrying five features.
 //
 // - Mailbox push: the mod loops the one-shot `mailbox wait` as a peek-only
 //   signal for one bound session key, and arriving mail starts a turn through
@@ -37,6 +39,10 @@ import {
 //   prompt, `workflow_manual` answered with the session state alone while
 //   the prompt carries the manual, repeat ws reads collapsed to a pointer, and
 //   a revive's key adopted as the conversation's (see manual.ts).
+// - Tool-call captions (ws only, off until its config switch is set): a
+//   finished, collapsed tool row, or a run the engine folds into one group,
+//   drawn as a short caption a second model call wrote, the raw row still the
+//   one the model reads and the expanded view draws (see captions.tsx).
 //
 // Claude Code accepts one hooks module per plugin and one unmatched hook per
 // event in it, so the lifecycle events (session.start, session.end,
@@ -52,9 +58,10 @@ import {
 // features,
 // $.plugin.root locates the launcher, and $.mcp.connect(<plugin name>)
 // resolves the MCP server, at session.start for every feature (a dead server
-// cannot be resolved later). The one package name the mod spells is the one
-// drainModeFor (here) and compactionEnabledFor (compaction.ts) compare
-// against; no server name is spelled.
+// cannot be resolved later). The one package name the mod spells is `ws`: the
+// one drainModeFor (here) and compactionEnabledFor (compaction.ts) compare
+// against, and the owner of the caption feature's $.state values (below and
+// state.d.ts), which only that package reaches; no server name is spelled.
 
 export const TOOL_NAME = 'mailbox_watch'
 /** A finite window, as the pi adapter uses, so an orphaned wait cannot outlive its session. */
@@ -62,10 +69,16 @@ export const WAIT_TIMEOUT = '10m'
 /**
  * $.store key prefix for the bound key, suffixed with the session id. $.store
  * rather than $.state: a $.state ref must spell its owning plugin as a literal,
- * which a source shared by several packages cannot. Entries are deleted at
+ * and the mailbox push runs in every package that shares this source (only the
+ * ws-only caption feature spells `ws` there). Entries are deleted at
  * session.end, so the binding lives as long as the session, like $.state.
  */
 export const STORE_PREFIX = 'mailbox-watch:'
+
+// The caption feature's values. The owner is a literal, which holds because
+// the feature runs in the ws package only.
+const toolCaptions = atom({ plugin: 'ws', key: 'toolCaptions' } as const, {})
+const runCaptions = atom({ plugin: 'ws', key: 'runCaptions' } as const, {})
 
 /** The package that drains through recv itself; every other package takes the notice path. */
 export function drainModeFor(pluginName: string): DrainMode {
@@ -344,6 +357,9 @@ export const register: Register = (on) => {
   // package compactionEnabledFor admits.
   const manual = createManual()
 
+  // Caption feature state; started at session.start under the same package gate.
+  const captions = createCaptions()
+
   on('session.start', async ($, e, next) => {
     const label = `${$.plugin.name} mailbox`
     const resolveServer = async () => {
@@ -494,7 +510,10 @@ export const register: Register = (on) => {
         after: (fn) => void $.clock.after(0, fn),
         delay: (ms, fn) => void $.clock.after(ms, fn),
         log: (text, to) => $.ui.log(text, { to }),
-        leverLanded: () => manual.landed('plugin'),
+        leverLanded: () => {
+          manual.landed('plugin')
+          captions.leverLanded()
+        },
         // One config_get per session start, once the shared server resolution settles.
         readAdvisory: async () => {
           await serverResolved
@@ -542,6 +561,31 @@ export const register: Register = (on) => {
     })().catch((err) =>
       $.ui.log(`${$.plugin.name} mcp reconnect: setup failed (${String(err)}); ${RECONNECT_TOOL} not registered`, { to: 'debug' }),
     )
+
+    // Registers nothing; its settings read runs on in the background, and rows
+    // draw raw until it settles on.
+    try {
+      if (compactionEnabledFor($.plugin.name)) {
+        captions.start({
+          // One keyless config_get per key, once the shared server resolution settles.
+          readSetting: async (key) => {
+            await serverResolved
+            if (!server) throw new Error('MCP server not resolved')
+            return (JSON.parse(await callText(server, 'config_get', { key, format: 'json' })) as { value?: unknown }).value
+          },
+          messages: () => $.session.messages({ as: 'api' }),
+          complete: (request) => $.model.complete(request),
+          save: async (lone, runs) => {
+            if (Object.keys(lone).length > 0) await update($, toolCaptions, (current) => ({ ...(current ?? {}), ...lone }))
+            if (Object.keys(runs).length > 0) await update($, runCaptions, (current) => ({ ...(current ?? {}), ...runs }))
+          },
+          every: (ms, fn) => $.clock.every(ms, fn),
+          log: (text) => $.ui.log(text, { to: 'debug' }),
+        })
+      }
+    } catch (err) {
+      $.ui.log(`ws captions: setup failed: ${String(err)}`, { to: 'debug' })
+    }
 
     // Registers no tool: its setup runs on in the background, and the first
     // compose waits for it.
@@ -628,6 +672,9 @@ export const register: Register = (on) => {
   // does, and a skipped hook keeps what its next settled to, where a .catch
   // replaying next(e) would turn an answer a hook beneath gave into that
   // rejection.
+  // The caption capture rides here too (the mod gets one unmatched hook per
+  // event): wrapping the rewrite hooks below, it keeps the result the lead
+  // reads.
   on('tool.call', async ($, e, next) => {
     const res = await next(e)
     if (e.agentId === undefined && next.origin.plugin === 'engine') {
@@ -635,6 +682,13 @@ export const register: Register = (on) => {
         await watcher?.toolCompleted()
       } catch (err) {
         $.ui.log(`${$.plugin.name} mailbox: tool boundary flush failed: ${String(err)}`, { to: 'debug' })
+      }
+    }
+    if (compactionEnabledFor($.plugin.name)) {
+      try {
+        captions.captured(e as unknown as Record<string, unknown>, res)
+      } catch (err) {
+        $.ui.log(`ws captions: capture failed: ${String(err)}`, { to: 'debug' })
       }
     }
     return res
@@ -781,8 +835,51 @@ export const register: Register = (on) => {
     } catch (err) {
       $.ui.log(`ws manual: compaction observation failed: ${String(err)}`, { to: 'debug' })
     }
+    try {
+      captions.compacted(e.trigger, e.agentId, res)
+    } catch (err) {
+      $.ui.log(`ws captions: compaction observation failed: ${String(err)}`, { to: 'debug' })
+    }
     return res
   }).catch(($, e, next) => next(e))
+
+  // Tool-call captions. Fullscreen folds runs of calls into one ToolGroup, so
+  // most rows are drawn there; the main screen draws calls one by one, each
+  // its own unit. A unit with no caption yet draws raw and is queued; the
+  // live group, a running call and the expanded view always draw raw.
+  on('ui.render', { component: 'ToolGroup' }, async ($, e, next) => {
+    if (!compactionEnabledFor($.plugin.name) || !captions.isOn()) return next(e)
+    const unit = groupUnit(e.props)
+    if (!unit) return next(e)
+    const [first] = unit.calls
+    if (unit.calls.length === 1 && first) {
+      const caption = (await read($, toolCaptions))[first.id]
+      if (caption) return drawCall($.ui.resolve(e), first, caption, e.viewport?.columns)
+    } else {
+      const caption = (await read($, runCaptions))[unit.key]
+      if (caption) return drawRun($.ui.resolve(e), unit.calls, caption, e.viewport?.columns)
+    }
+    captions.request(unit)
+    return next(e)
+  })
+
+  on('ui.render', { component: 'ToolUse' }, async ($, e, next) => {
+    if (!compactionEnabledFor($.plugin.name) || !captions.isOn()) return next(e)
+    const unit = toolUseUnit(e.props)
+    const [call] = unit?.calls ?? []
+    if (!unit || !call) return next(e)
+    const caption = (await read($, toolCaptions))[call.id]
+    if (caption) return drawCall($.ui.resolve(e), call, caption, e.viewport?.columns)
+    captions.request(unit)
+    return next(e)
+  })
+
+  // A captioned call's row already draws its result.
+  on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
+    if (!compactionEnabledFor($.plugin.name) || !captions.isOn() || e.props.isExpanded || e.props.isErrored) return next(e)
+    if (!(await read($, toolCaptions))[e.props.tool_use_id]) return next(e)
+    return drawEmpty($.ui.resolve(e))
+  })
 
   // Each step ends in isolation, so a throw in one never skips another. The
   // synchronous steps run before the one awaited: should the hook's time
@@ -814,6 +911,12 @@ export const register: Register = (on) => {
       reconnect.end(e.reason)
     } catch (err) {
       $.ui.log(`${$.plugin.name} mcp reconnect: reset failed: ${String(err)}`, { to: 'debug' })
+    }
+    // Captions: the next conversation's mirror starts empty.
+    try {
+      if (compactionEnabledFor($.plugin.name)) captions.end()
+    } catch (err) {
+      $.ui.log(`ws captions: reset failed: ${String(err)}`, { to: 'debug' })
     }
     // Manual: every end reason drops the cached manual and the snapshot flag,
     // so the next conversation (no session.start follows `clear`) sets up
