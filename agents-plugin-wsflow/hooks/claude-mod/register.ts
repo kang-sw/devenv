@@ -1,4 +1,3 @@
-import { atom, read, update } from 'claude-code'
 import type { HookStream, ProcessSpawnChunk, ProcessSpawnResult, Register, ToolCallResult } from 'claude-code'
 
 import { createCaptions, drawCall, drawEmpty, drawRun, groupUnit, toolUseUnit } from './captions'
@@ -58,10 +57,9 @@ import {
 // features,
 // $.plugin.root locates the launcher, and $.mcp.connect(<plugin name>)
 // resolves the MCP server, at session.start for every feature (a dead server
-// cannot be resolved later). The one package name the mod spells is `ws`: the
-// one drainModeFor (here) and compactionEnabledFor (compaction.ts) compare
-// against, and the owner of the caption feature's $.state values (below and
-// state.d.ts), which only that package reaches; no server name is spelled.
+// cannot be resolved later). The one package name the mod spells is the one
+// drainModeFor (here) and compactionEnabledFor (compaction.ts) compare
+// against; no server name is spelled.
 
 export const TOOL_NAME = 'mailbox_watch'
 /** A finite window, as the pi adapter uses, so an orphaned wait cannot outlive its session. */
@@ -69,16 +67,10 @@ export const WAIT_TIMEOUT = '10m'
 /**
  * $.store key prefix for the bound key, suffixed with the session id. $.store
  * rather than $.state: a $.state ref must spell its owning plugin as a literal,
- * and the mailbox push runs in every package that shares this source (only the
- * ws-only caption feature spells `ws` there). Entries are deleted at
+ * which a source shared by several packages cannot. Entries are deleted at
  * session.end, so the binding lives as long as the session, like $.state.
  */
 export const STORE_PREFIX = 'mailbox-watch:'
-
-// The caption feature's values. The owner is a literal, which holds because
-// the feature runs in the ws package only.
-const toolCaptions = atom({ plugin: 'ws', key: 'toolCaptions' } as const, {})
-const runCaptions = atom({ plugin: 'ws', key: 'runCaptions' } as const, {})
 
 /** The package that drains through recv itself; every other package takes the notice path. */
 export function drainModeFor(pluginName: string): DrainMode {
@@ -575,10 +567,7 @@ export const register: Register = (on) => {
           },
           messages: () => $.session.messages({ as: 'api' }),
           complete: (request) => $.model.complete(request),
-          save: async (lone, runs) => {
-            if (Object.keys(lone).length > 0) await update($, toolCaptions, (current) => ({ ...(current ?? {}), ...lone }))
-            if (Object.keys(runs).length > 0) await update($, runCaptions, (current) => ({ ...(current ?? {}), ...runs }))
-          },
+          redraw: () => $.ui.invalidate('ui.render'),
           every: (ms, fn) => $.clock.every(ms, fn),
           log: (text) => $.ui.log(text, { to: 'debug' }),
         })
@@ -853,10 +842,10 @@ export const register: Register = (on) => {
     if (!unit) return next(e)
     const [first] = unit.calls
     if (unit.calls.length === 1 && first) {
-      const caption = (await read($, toolCaptions))[first.id]
+      const caption = captions.toolCaption(first.id)
       if (caption) return drawCall($.ui.resolve(e), first, caption, e.viewport?.columns)
     } else {
-      const caption = (await read($, runCaptions))[unit.key]
+      const caption = captions.runCaption(unit.key)
       if (caption) return drawRun($.ui.resolve(e), unit.calls, caption, e.viewport?.columns)
     }
     captions.request(unit)
@@ -868,7 +857,7 @@ export const register: Register = (on) => {
     const unit = toolUseUnit(e.props)
     const [call] = unit?.calls ?? []
     if (!unit || !call) return next(e)
-    const caption = (await read($, toolCaptions))[call.id]
+    const caption = captions.toolCaption(call.id)
     if (caption) return drawCall($.ui.resolve(e), call, caption, e.viewport?.columns)
     captions.request(unit)
     return next(e)
@@ -877,7 +866,7 @@ export const register: Register = (on) => {
   // A captioned call's row already draws its result.
   on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
     if (!compactionEnabledFor($.plugin.name) || !captions.isOn() || e.props.isExpanded || e.props.isErrored) return next(e)
-    if (!(await read($, toolCaptions))[e.props.tool_use_id]) return next(e)
+    if (!captions.toolCaption(e.props.tool_use_id)) return next(e)
     return drawEmpty($.ui.resolve(e))
   })
 
@@ -912,7 +901,8 @@ export const register: Register = (on) => {
     } catch (err) {
       $.ui.log(`${$.plugin.name} mcp reconnect: reset failed: ${String(err)}`, { to: 'debug' })
     }
-    // Captions: the next conversation's mirror starts empty.
+    // Captions: the next conversation's mirror starts empty; the captions,
+    // keyed by the session's own tool_use_ids, stay.
     try {
       if (compactionEnabledFor($.plugin.name)) captions.end()
     } catch (err) {

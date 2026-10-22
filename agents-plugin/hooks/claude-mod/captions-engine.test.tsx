@@ -41,6 +41,8 @@ function world(on: On, opts: { config?: Record<string, unknown>; failKeys?: stri
     replies: [] as Reply[],
     configKeys: [] as string[],
     compactAnswers: 0,
+    /** The events the mod asked the engine to draw again. */
+    invalidated: [] as string[],
   }
   const config = { [ENABLED_KEY]: true, ...(opts.config ?? {}) }
   on('mcp.connect', ($, e) => ({ value: { isConnected: true, server: `plugin:${e.server}:${e.server}` } }))
@@ -69,6 +71,10 @@ function world(on: On, opts: { config?: Record<string, unknown>; failKeys?: stri
   })
   on('session.compact', () => ((w.compactAnswers += 1), { messages: [{ role: 'user', text: 'summary', toolUses: [] }] }))
   on('session.messages', () => ({ value: w.messages }))
+  on('ui.invalidate', ($, e) => {
+    w.invalidated.push(e.event)
+    return { value: undefined }
+  })
   on('tool.call', ($, e) => ({ result: { stdout: `out of ${String((e as { command?: unknown }).command ?? e.tool)}`, stderr: '', interrupted: false } }))
   on('model.complete', (_, e) => {
     w.requests.push({ model: e.model, prompt: String(e.prompt), effort: e.effort, timeoutMs: e.timeoutMs, blocks: e.promptBlocks ?? [] })
@@ -141,6 +147,8 @@ test('ws: a lone call is captioned once drawn, collapsed only, and its result ro
   expect(w.requests[0]!.prompt).toContain('out of ls')
   expect(w.requests[0]!.effort).toBe('low')
   expect(w.requests[0]!.timeoutMs).toBe(30_000)
+  // A stored caption asks the engine to draw the rows again.
+  expect(w.invalidated).toEqual(['ui.render'])
 
   expect(await find($, toolUse(w, 'toolu_1'), /두 개/)).toContain('두 개')
   expect(await find($, toolUse(w, 'toolu_1'), /파일 목록/)).toBe('파일 목록 확인')
@@ -380,6 +388,36 @@ test('ws: the mirror starts over when the lead compaction lever lands, and on a 
   await tick(w)
   expect(w.requests[2]!.prompt).toContain('SUMMARY two')
   expect(w.requests[2]!.prompt).not.toContain('SUMMARY one')
+})
+
+test('ws: session.end starts the mirror over and keeps the captions', async ($, on) => {
+  const messages: Message[] = [
+    { role: 'user', content: [{ type: 'text', text: 'alpha old conversation' }] },
+    { role: 'assistant', content: [{ type: 'text', text: 'beta old conversation' }] },
+  ]
+  const w = world(on, { messages })
+  await start($, w)
+  if (!isWs(w)) return
+  w.replies.push({ text: '[{"id":"u1","subtitle":"ls","intention":"목록 확인","result":"두 개"}]' })
+  await isRaw($, toolUse(w, 'toolu_1'))
+  await tick(w)
+  expect(w.requests[0]!.prompt).toContain('alpha old conversation')
+
+  // After /clear no session.start follows, and the new conversation is
+  // already longer than the old one, so only the end tells the mirror.
+  await $.session.end({ reason: 'clear', sessionId: 'sess-1', resume: undefined as never })
+  await w.clock.settle()
+  messages.splice(0, messages.length,
+    { role: 'user', content: [{ type: 'text', text: 'new one' }] },
+    { role: 'assistant', content: [{ type: 'text', text: 'new two' }] },
+    { role: 'user', content: [{ type: 'text', text: 'new three' }] },
+  )
+  await isRaw($, toolUse(w, 'toolu_2'))
+  await tick(w)
+  expect(w.requests.length).toBe(2)
+  expect(w.requests[1]!.prompt).toContain('new one')
+  expect(w.requests[1]!.prompt).not.toContain('alpha old conversation')
+  expect(await find($, toolUse(w, 'toolu_1'), /두 개/)).toContain('두 개')
 })
 
 test('ws: a caption row names an MCP tool as the server spells it', async ($, on) => {

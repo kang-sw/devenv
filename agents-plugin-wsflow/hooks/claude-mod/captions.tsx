@@ -8,7 +8,27 @@ import type {
   ToolGroupCall,
 } from 'claude-code'
 
-import type { RunCaption, ToolCaption } from './state'
+/** A lone call's caption. */
+export type ToolCaption = {
+  /** The call's concrete target, drawn after the tool name; "" when none. */
+  subtitle: string
+  /** What the call was for. */
+  intention: string
+  /** What came back. */
+  result: string
+  /** Characters of the raw call (input and output) the lead's context holds. */
+  bytes: number
+}
+
+/** A folded run's caption. */
+export type RunCaption = {
+  /** One target per call, in the run's order; "" when a call has none. */
+  subtitles: string[]
+  /** What the run set out to do and what came of it. */
+  summary: string
+  /** Characters of the run's raw calls the lead's context holds. */
+  bytes: number
+}
 
 /**
  * Tool-call captions, the display feature of the Claude mod (ws only, off
@@ -300,8 +320,8 @@ export type CaptionEdges = {
   /** The main conversation in Messages API form. */
   messages: () => Promise<readonly ApiMessageLike[]>
   complete: (request: ModelCompleteRequest) => Promise<ModelCompleteResult>
-  /** Merge new captions into the session's $.state values. */
-  save: (lone: Record<string, ToolCaption>, runs: Record<string, RunCaption>) => Promise<void>
+  /** Ask the engine to draw the rows again: new captions were stored. */
+  redraw: () => void
   /** Run `fn` every `ms`; the returned function stops it. */
   every: (ms: number, fn: () => void) => () => void
   log: (text: string) => void
@@ -316,13 +336,17 @@ export type Captions = {
   settings: () => CaptionSettings
   /** A tool.call as it settled beneath the capture: keeps a main-thread call's raw text. */
   captured: (call: Record<string, unknown>, res: { result?: unknown; deny?: string }) => void
+  /** A lone call's caption, by its tool_use_id. */
+  toolCaption: (id: string) => ToolCaption | undefined
+  /** A run's caption, by its unit key. */
+  runCaption: (key: string) => RunCaption | undefined
   /** A drawn unit with no caption yet: queue it once. */
   request: (unit: Unit) => void
   /** A session.compact as it settled. */
   compacted: (trigger: SessionCompactTrigger, agentId: string | undefined, res: SessionCompactResult) => void
   /** The lever's own compaction landed (it does not pass the session.compact hook). */
   leverLanded: () => void
-  /** session.end: the next conversation's mirror starts empty. */
+  /** session.end: the next conversation's mirror starts empty; the captions stay. */
   end: () => void
 }
 
@@ -332,8 +356,12 @@ export function createCaptions(): Captions {
   /** Bumped by every start, so an earlier start's settings read is dropped. */
   let reads = 0
 
-  // Module state: a reload starts it over, which drops captured outputs and
-  // units not yet sent (a drawn unit asks again).
+  // Module state: a reload starts it over, which drops the captions, captured
+  // outputs and units not yet sent (a drawn unit asks again, once). Lone
+  // captions are keyed by tool_use_id, run captions by the run's ids joined
+  // with ','; the ids are the session's own, so no reset clears them.
+  const toolCaptions = new Map<string, ToolCaption>()
+  const runCaptions = new Map<string, RunCaption>()
   const captured = new Map<string, Captured>()
   let units: Unit[] = []
   const requested = new Set<string>()
@@ -473,8 +501,7 @@ export function createCaptions(): Captions {
 
     const byLabel = new Map(labelled.map(({ label, unit }) => [label, unit]))
     const bytesOf = (id: string) => seenOf(id)?.bytes ?? 0
-    const lone: Record<string, ToolCaption> = {}
-    const runs: Record<string, RunCaption> = {}
+    let stored = 0
     for (const item of parseReply(text)) {
       const unit = typeof item.id === 'string' ? byLabel.get(item.id) : undefined
       if (!unit) continue
@@ -482,18 +509,21 @@ export function createCaptions(): Captions {
       if (unit.calls.length === 1 && first) {
         if (typeof item.intention !== 'string' || typeof item.result !== 'string') continue
         const subtitle = typeof item.subtitle === 'string' ? item.subtitle : ''
-        lone[first.id] = { subtitle, intention: item.intention, result: item.result, bytes: bytesOf(first.id) }
+        toolCaptions.set(first.id, { subtitle, intention: item.intention, result: item.result, bytes: bytesOf(first.id) })
+        stored += 1
       } else {
         if (typeof item.summary !== 'string') continue
         const subtitles = Array.isArray(item.subtitles) ? item.subtitles : []
-        runs[unit.key] = {
+        runCaptions.set(unit.key, {
           subtitles: unit.calls.map((_, index) => (typeof subtitles[index] === 'string' ? (subtitles[index] as string) : '')),
           summary: item.summary,
           bytes: unit.calls.reduce((n, call) => n + bytesOf(call.id), 0),
-        }
+        })
+        stored += 1
       }
     }
-    if (Object.keys(lone).length + Object.keys(runs).length > 0) await bound.save(lone, runs)
+    // The engine reuses a row's last answer until told to draw it again.
+    if (stored > 0) bound.redraw()
   }
 
   const tick = () => {
@@ -527,6 +557,8 @@ export function createCaptions(): Captions {
     },
     isOn: () => current.enabled,
     settings: () => current,
+    toolCaption: (id) => toolCaptions.get(id),
+    runCaption: (key) => runCaptions.get(key),
     captured(call, res) {
       if (!current.enabled || call.agentId !== undefined || res.deny !== undefined) return
       const { tool: _tool, tool_use_id: id, agentId: _agent, requestMeta: _meta, ...args } = call

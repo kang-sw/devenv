@@ -318,10 +318,7 @@ and binds the mailbox push to every key the conversation gets, so the
 without `ai-docs/WORKFLOW.md`) the lever registers and binds as before.
 Tool-call captions run under the same package gate (and only once their
 config switch reads true): in wsflow they read no config, capture no call, and
-draw every row raw. Their `$.state` values spell owner `ws` as a literal, so
-the mod's state contract (`claude-mod/state.d.ts`, named by `types` in both
-packages' `plugin.json`) declares them under `ws` in both. The reconnect
-lever runs in both packages. Each package's
+draw every row raw. The reconnect lever runs in both packages. Each package's
 `hooks/hooks.json` is curated (wsflow lists only `modules`).
 
 - **Drift guard:** `TestWsflowHooksMirrorUpToDate` (in `internal/wsrsrc`).

@@ -7,7 +7,6 @@
   },
   "repository": "https://github.com/kang-sw/devenv",
   "license": "MIT",
-  "types": "./hooks/claude-mod/state.d.ts",
   "agents": [
     "./claude-agents/effort-low.md",
     "./claude-agents/effort-medium.md",
