@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: ac9edf211a1cc6cf
 sage-review-completeness-reviewed: ac9edf211a1cc6cf
+completed: 2026-10-22
 ---
 
 # Retry transient Windows sharing violations on mailbox store reads
@@ -70,3 +71,12 @@ Give `wsmailbox` a read helper that retries a transient Windows open failure wit
 The parameterized retry loop lives in a file without a build tag, taking the read function, transient classifier, clock, and sleep as inputs (as `WaitOptions` already injects time); only the wiring - which classifier is used, and whether a retry applies at all - is split across `replace_file_windows.go` / `replace_file_other.go`. Inside `WithLock` no cooperating writer can be replacing the file, so a retry there fires only on an outside holder such as an AV scanner; note at the site that this can lengthen the lock hold beyond `LockTimeout`.
 
 Verification: unit tests drive the retry loop through an injected read function and transient-error classifier on every platform - transient errors N times then success, a non-transient error returned at once, a missing file passed through unchanged, and budget exhaustion returning the last error (driven by the injected clock and sleep, not real time). `go test ./...` passes on Linux and `GOOS=windows go vet ./...` passes; Windows CI, including `TestMailboxRecvConcurrentCallsNeverDoubleDeliver`, is the real-contention acceptance.
+
+### Result (da5a0359d) - 2026-10-22
+
+- New untagged `wsmailbox/read_file.go` `readFileRetrying(path, read, transient, now, sleep)`: retries while `transient(err)` for a 2s budget, 5ms back-off doubling up to a 200ms cap, and returns the last error unwrapped so `os.IsNotExist` and existing messages are unchanged.
+- `readFile` wiring: `replace_file_windows.go` uses `os.ReadFile` + `isTransientReplaceError` (ERROR_SHARING_VIOLATION / ERROR_ACCESS_DENIED) + real clock; `replace_file_other.go` is plain `os.ReadFile`.
+- `Load`, `LoadReplyStore`, `ReadListeningMarker`, `readHookNotifyState` all read through `readFile`; `WithLock` notes at the site that an outside-holder retry can lengthen the lock hold beyond `LockTimeout`.
+- Tests (`read_file_test.go`, all platforms, injected fake clock/sleep): transient x3 then success with the exact back-off sequence, non-transient returned at once, missing file passed through unchanged, budget exhaustion returning the last error with the cap held, and `readFile` matching `os.ReadFile` on the host platform.
+- Decision: the cap is clamped with `min()`. Copying `replaceFile`'s `if backoff < 200ms { backoff *= 2 }` reaches 320ms, which the budget test caught. `replaceFile` is out of scope and was left unchanged.
+- Verification: `go test ./...` (agents-plugin-tool) exit 0; `GOOS=windows go vet ./...` exit 0. Lite review: clean. Real-contention acceptance (Windows CI, `TestMailboxRecvConcurrentCallsNeverDoubleDeliver`) is pending CI.
