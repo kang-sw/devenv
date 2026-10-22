@@ -591,7 +591,14 @@
       "registered_at": "2026-10-21T04:11:31Z"
     },
     "261022-feat-mailbox-recent-peers-and-correspondents": {
-      "registered_at": "2026-10-22T01:31:39Z"
+      "registered_at": "2026-10-22T01:31:39Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-10-22T01:40:34Z"
+      }
     }
   }
 }
