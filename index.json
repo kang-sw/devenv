@@ -442,19 +442,6 @@
     "260923-bug-worktree-acquire-concurrent-pool-claim": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
-    "260923-bug-ws-mailbox-windows-store-read-sharing-violation": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-22T05:04:33Z",
-        "impl": {
-          "branch": "impl/develop/ruby-saint-spilt"
-        }
-      }
-    },
     "260923-research-pi-parent-child-loopback-control-channel": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
