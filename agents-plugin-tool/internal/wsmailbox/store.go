@@ -159,9 +159,10 @@ func PathForScope(scope Scope, root string) (string, error) {
 // non-nil StoreFile, mirroring wsnote.Load's "no file yet" contract. Load
 // never locks: writes go through temp+atomic-rename (see WithLock), so a
 // concurrent reader observes either the old or the new whole file, never a
-// partial one.
+// partial one. On Windows the read retries a transient sharing violation
+// against an in-flight replace (see readFile).
 func Load(path string) (StoreFile, error) {
-	raw, err := os.ReadFile(path)
+	raw, err := readFile(path)
 	if os.IsNotExist(err) {
 		return emptyStore(), nil
 	}
@@ -214,6 +215,9 @@ func WithLock(path string, fn func(*StoreFile) error) error {
 	}
 	defer fl.Unlock() //nolint:errcheck
 
+	// No cooperating writer can be replacing path while we hold the lock, so
+	// Load's Windows read retry fires here only on an outside holder such as
+	// an AV scanner; that retry can lengthen the lock hold beyond LockTimeout.
 	current, err := Load(path)
 	if err != nil {
 		return err

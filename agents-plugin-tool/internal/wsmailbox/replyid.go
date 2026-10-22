@@ -119,7 +119,7 @@ func ReplyRegistryPath() (string, error) {
 // LoadReplyStore reads the reply-id registry. A missing file returns an
 // empty, non-nil ReplyStore.
 func LoadReplyStore(path string) (ReplyStore, error) {
-	raw, err := os.ReadFile(path)
+	raw, err := readFile(path)
 	if os.IsNotExist(err) {
 		return emptyReplyStore(), nil
 	}

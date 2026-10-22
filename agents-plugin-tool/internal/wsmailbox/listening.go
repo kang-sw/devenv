@@ -137,7 +137,7 @@ func ReadListeningMarker(sessionKey string) (marker ListeningMarker, ok bool, er
 	if perr != nil {
 		return ListeningMarker{}, false, perr
 	}
-	raw, rerr := os.ReadFile(path)
+	raw, rerr := readFile(path)
 	if os.IsNotExist(rerr) {
 		return ListeningMarker{}, false, nil
 	}
