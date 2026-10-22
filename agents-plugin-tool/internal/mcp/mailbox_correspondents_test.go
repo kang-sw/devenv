@@ -228,6 +228,44 @@ func TestMailboxCorrespondentsFromSendAndRecv(t *testing.T) {
 	}
 }
 
+// TestMailboxCorrespondentsRecvRecordsNamedSender pins recv's counterparty
+// preference: an envelope stamped with the sender's named identity (From)
+// records that slug@scope address, with the harness/cwd of its named
+// presence, rather than the sender's reply-id.
+func TestMailboxCorrespondentsRecvRecordsNamedSender(t *testing.T) {
+	setupMailboxTestEnv(t)
+	t.Setenv(envMailboxAuto, "")
+	root := t.TempDir()
+	initGit(t, root)
+	t0 := time.Date(2026, 10, 22, 10, 0, 0, 0, time.UTC)
+	setMailboxClock(t, t0)
+
+	t.Setenv(envMailbox, "alice@worktree")
+	serverA := NewServer(root, "test")
+	keyA := mailboxLogin(t, serverA, 1, root)
+
+	t.Setenv(envMailbox, "bob@worktree")
+	serverB := NewServer(root, "test")
+	serverB.sessionHarness = "pi"
+	keyB := mailboxLogin(t, serverB, 1, root)
+
+	// bob@worktree -> alice@worktree: a named sender mailing a named
+	// recipient stamps From with its slug.
+	callToolWithKey(t, serverB, 2, keyB, "mailbox.send", map[string]any{"to": "alice@worktree", "content": "from bob"})
+
+	t1 := t0.Add(5 * time.Minute)
+	setMailboxClock(t, t1)
+	if recv := callToolWithKey(t, serverA, 3, keyA, "mailbox.recv", nil); !strings.Contains(recv, "bob@worktree: from bob") {
+		t.Fatalf("alice did not receive bob's named mail: %s", recv)
+	}
+
+	got := lookupPeersJSON(t, serverA, 4, keyA, "worktree")
+	want := mailboxCorrespondentOut{Address: "bob@worktree", LastExchange: t1.Format(time.RFC3339), Harness: "pi", Cwd: root}
+	if len(got.Correspondents) != 1 || got.Correspondents[0] != want {
+		t.Fatalf("recv did not record the named sender from its presence: %#v, want [%#v]", got.Correspondents, want)
+	}
+}
+
 // TestMailboxCorrespondentsSelfExclusionMergeAndRecvOnlyRetention pins the
 // remaining history rules: mailing one's own reply-id or own named inbox
 // records no contact; a later publish (lookup or send) keeps existing
