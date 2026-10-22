@@ -206,10 +206,18 @@ export type UnitCall = { id: string; tool: string; input: unknown; isErrored: bo
 export type Unit = { key: string; calls: UnitCall[] }
 
 /**
+ * A call has resolved once it is not running and carries its output. A row is
+ * drawn before its call runs (input streaming, a permission prompt) with
+ * isRunning false, an empty input and no output; captioning it then would
+ * send nothing and, being asked once, keep that caption.
+ */
+const isResolved = (call: { isRunning: boolean; output?: unknown }) => !call.isRunning && call.output !== undefined
+
+/**
  * A ToolGroup's unit when it is finished and collapsed, every call carries an
- * id, and it holds only calls or a failed call; undefined draws it raw.
- * isCallsOnly is false both for a group holding other rows (raw) and for one
- * where a call errored or was interrupted (captioned, that call red).
+ * id and has resolved, and it holds only calls or a failed call; undefined
+ * draws it raw. isCallsOnly is false both for a group holding other rows (raw)
+ * and for one where a call errored or was interrupted (captioned, that call red).
  */
 export function groupUnit(props: {
   calls: ReadonlyArray<ToolGroupCall>
@@ -221,7 +229,7 @@ export function groupUnit(props: {
   if (isExpanded || isActive || calls.length === 0) return undefined
   const hasFailedCall = calls.some((call) => call.isErrored || call.isInterrupted)
   if (isCallsOnly === false && !hasFailedCall) return undefined
-  if (calls.some((call) => !call.tool_use_id)) return undefined
+  if (calls.some((call) => !call.tool_use_id || !isResolved(call))) return undefined
   const unitCalls = calls.map((call) => ({
     id: call.tool_use_id as string,
     tool: call.tool,
@@ -231,7 +239,7 @@ export function groupUnit(props: {
   return { key: unitCalls.map((call) => call.id).join(','), calls: unitCalls }
 }
 
-/** A main-screen ToolUse's unit (a lone call) when it is finished and collapsed. */
+/** A main-screen ToolUse's unit (a lone call) when it has resolved and is collapsed. */
 export function toolUseUnit(props: {
   tool_use_id: string
   tool: string
@@ -240,8 +248,9 @@ export function toolUseUnit(props: {
   isErrored: boolean
   isInterrupted: boolean
   isExpanded?: boolean
+  output?: unknown
 }): Unit | undefined {
-  if (props.isExpanded || props.isRunning) return undefined
+  if (props.isExpanded || !isResolved(props)) return undefined
   const isErrored = Boolean(props.isErrored || props.isInterrupted)
   return { key: props.tool_use_id, calls: [{ id: props.tool_use_id, tool: props.tool, input: props.input, isErrored }] }
 }
@@ -324,6 +333,8 @@ export type CaptionEdges = {
   redraw: () => void
   /** Run `fn` every `ms`; the returned function stops it. */
   every: (ms: number, fn: () => void) => () => void
+  /** Milliseconds since the epoch. */
+  now: () => Promise<number>
   log: (text: string) => void
 }
 
@@ -456,9 +467,10 @@ export function createCaptions(): Captions {
       }),
       { text: [latest && `${LATEST_HEADER}\n${latest}`, task].filter(Boolean).join(BLOCK_END) },
     ]
+    const startedAt = await bound.now()
     const reply = await bound.complete({ model: settings.model, prompt, maxTokens, effort: 'low', timeoutMs: TIMEOUT_MS })
     if (!reply.isAnswered) {
-      log(`request not answered: ${reply.reason}`)
+      log(`request not answered: ${reply.reason} after ${(await bound.now()) - startedAt} ms`)
       return undefined
     }
     const { usage } = reply
@@ -497,22 +509,36 @@ export function createCaptions(): Captions {
       return
     }
     // A failed unit is not asked again until a reload: a render loop must not retry it.
-    if (text === undefined) return
+    if (text === undefined) {
+      log(`left raw, no answer: ${batch.map((unit) => unit.key).join(' ')}`)
+      return
+    }
 
     const byLabel = new Map(labelled.map(({ label, unit }) => [label, unit]))
     const bytesOf = (id: string) => seenOf(id)?.bytes ?? 0
+    const answered = new Set<string>()
     let stored = 0
     for (const item of parseReply(text)) {
       const unit = typeof item.id === 'string' ? byLabel.get(item.id) : undefined
-      if (!unit) continue
+      if (!unit) {
+        log(`reply item skipped, unknown id ${JSON.stringify(item.id)}`)
+        continue
+      }
+      answered.add(item.id as string)
       const [first] = unit.calls
       if (unit.calls.length === 1 && first) {
-        if (typeof item.intention !== 'string' || typeof item.result !== 'string') continue
+        if (typeof item.intention !== 'string' || typeof item.result !== 'string') {
+          log(`reply item skipped, missing fields: ${unit.key}`)
+          continue
+        }
         const subtitle = typeof item.subtitle === 'string' ? item.subtitle : ''
         toolCaptions.set(first.id, { subtitle, intention: item.intention, result: item.result, bytes: bytesOf(first.id) })
         stored += 1
       } else {
-        if (typeof item.summary !== 'string') continue
+        if (typeof item.summary !== 'string') {
+          log(`reply item skipped, missing fields: ${unit.key}`)
+          continue
+        }
         const subtitles = Array.isArray(item.subtitles) ? item.subtitles : []
         runCaptions.set(unit.key, {
           subtitles: unit.calls.map((_, index) => (typeof subtitles[index] === 'string' ? (subtitles[index] as string) : '')),
@@ -521,6 +547,9 @@ export function createCaptions(): Captions {
         })
         stored += 1
       }
+    }
+    for (const { label, unit } of labelled) {
+      if (!answered.has(label)) log(`left raw, absent from the reply: ${unit.key}`)
     }
     // The engine reuses a row's last answer until told to draw it again.
     if (stored > 0) bound.redraw()
@@ -574,6 +603,7 @@ export function createCaptions(): Captions {
       const bound = edges
       if (!bound || !current.enabled || requested.has(unit.key)) return
       requested.add(unit.key)
+      log(`queued ${unit.key}`)
       units.push(unit)
       stopTicking ??= bound.every(FLUSH_MS, tick)
     },

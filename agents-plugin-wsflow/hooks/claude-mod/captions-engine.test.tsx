@@ -23,7 +23,8 @@ type On = Parameters<TestBody>[1]
 // test early in ws.
 
 const USAGE = { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }
-const BASE = { isRunning: false, isErrored: false, isInterrupted: false }
+/** A resolved call's row: not running, with its output. */
+const BASE = { isRunning: false, isErrored: false, isInterrupted: false, output: 'done' }
 
 type Message = { role: 'user' | 'assistant'; content: Array<Record<string, unknown>> }
 type Reply = { text: string; tokens?: (prompt: string) => number } | 'unanswered'
@@ -43,6 +44,8 @@ function world(on: On, opts: { config?: Record<string, unknown>; failKeys?: stri
     compactAnswers: 0,
     /** The events the mod asked the engine to draw again. */
     invalidated: [] as string[],
+    /** The debug lines the mod wrote. */
+    logs: [] as string[],
     /** The config values config_get answers; a key absent here reads as unset. */
     config: { [ENABLED_KEY]: true, ...(opts.config ?? {}) } as Record<string, unknown>,
   }
@@ -59,7 +62,10 @@ function world(on: On, opts: { config?: Record<string, unknown>; failKeys?: stri
   on('store.get', () => ({ value: undefined }))
   on('store.set', () => ({ value: undefined }))
   on('store.delete', () => ({ value: undefined }))
-  on('ui.log', () => ({ value: undefined }))
+  on('ui.log', ($, e) => {
+    w.logs.push(e.text)
+    return { value: undefined }
+  })
   on('session.id', () => ({ value: 'sess-1' }))
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.end', ($, e) => ({ sessionId: e.sessionId }))
@@ -391,6 +397,70 @@ test('ws: a failed request is not retried', async ($, on) => {
   await tick(w)
   await tick(w)
   expect(w.requests.length).toBe(1)
+  expect(w.logs).toContain('ws captions: queued toolu_1')
+  expect(w.logs.some((line) => /^ws captions: request not answered: empty-reply after \d+ ms$/.test(line))).toBe(true)
+  expect(w.logs).toContain('ws captions: left raw, no answer: toolu_1')
+})
+
+test('ws: a row drawn before its call has run stays raw and unsent, then is captioned once it resolves', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  if (!isWs(w)) return
+  w.replies.push({ text: '[{"id":"u1","subtitle":"a.txt","intention":"파일 작성","result":"작성됨"}]' })
+  // Input still streaming or a permission prompt up: not running, no output.
+  const prerun = toolUse(w, 'toolu_w', { tool: 'Write', input: {}, output: undefined })
+  expect(await isRaw($, prerun)).toBe(true)
+  await tick(w)
+  expect(w.requests.length).toBe(0)
+  expect(await isRaw($, toolUse(w, 'toolu_w', { tool: 'Write', input: {}, isRunning: true, output: undefined }))).toBe(true)
+  await tick(w)
+  expect(w.requests.length).toBe(0)
+
+  await $.tool.call({ tool: 'Write', file_path: 'a.txt', content: 'hi', tool_use_id: 'toolu_w' } as never)
+  const resolved = toolUse(w, 'toolu_w', { tool: 'Write', input: { file_path: 'a.txt', content: 'hi' } })
+  expect(await isRaw($, resolved)).toBe(true)
+  await tick(w)
+  expect(w.requests.length).toBe(1)
+  expect(w.requests[0]!.prompt).toContain('a.txt')
+  expect(w.requests[0]!.prompt).not.toContain('(not available)')
+  expect(await find($, resolved, /작성됨/)).toContain('작성됨')
+})
+
+test('ws: a group holding a call that has not run stays raw and unsent until every call resolves', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  if (!isWs(w)) return
+  w.replies.push({ text: '[{"id":"u1","subtitles":["ls","a.txt"],"summary":"목록 확인 후 파일 수정"}]' })
+  const done = { ...BASE, tool_use_id: 'toolu_g1', tool: 'Bash', input: { command: 'ls' } }
+  const pending = { ...BASE, tool_use_id: 'toolu_g2', tool: 'Edit', input: {}, output: undefined }
+  const props = { isActive: false, isExpanded: false, isCallsOnly: true }
+
+  expect(await isRaw($, group(w, { ...props, calls: [done, pending] }))).toBe(true)
+  await tick(w)
+  expect(w.requests.length).toBe(0)
+
+  const calls = [done, { ...pending, input: { file_path: 'a.txt' }, output: 'edited' }]
+  expect(await isRaw($, group(w, { ...props, calls }))).toBe(true)
+  await tick(w)
+  expect(w.requests.length).toBe(1)
+  expect(await find($, group(w, { ...props, calls }), /파일 수정/)).toContain('목록 확인 후 파일 수정')
+})
+
+test('ws: reply items naming no unit, missing fields, or absent each leave a debug line', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  if (!isWs(w)) return
+  w.replies.push({ text: '[{"id":"u9","intention":"x","result":"y"},{"id":"u1","intention":"only intention"}]' })
+  await isRaw($, toolUse(w, 'toolu_a'))
+  await isRaw($, toolUse(w, 'toolu_b'))
+  await tick(w)
+  expect(w.requests.length).toBe(1)
+  expect(w.logs).toContain('ws captions: queued toolu_a')
+  expect(w.logs).toContain('ws captions: queued toolu_b')
+  expect(w.logs).toContain('ws captions: reply item skipped, unknown id "u9"')
+  expect(w.logs).toContain('ws captions: reply item skipped, missing fields: toolu_a')
+  expect(w.logs).toContain('ws captions: left raw, absent from the reply: toolu_b')
+  expect(w.logs).not.toContain('ws captions: left raw, absent from the reply: toolu_a')
 })
 
 test('ws: the mirror starts over when the lead compaction lever lands, and on a main-thread compaction', async ($, on) => {

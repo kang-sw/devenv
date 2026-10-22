@@ -573,6 +573,7 @@ export const register: Register = (on) => {
             const timer = $.clock.every(ms, fn)
             return () => timer.cancel()
           },
+          now: () => $.clock.now(),
           log: (text) => $.ui.log(text, { to: 'debug' }),
         })
       }
