@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 87533597c9d77ffd
 sage-review-completeness-reviewed: 87533597c9d77ffd
+completed: 2026-10-22
 ---
 
 # Claude mod tool-call captions
@@ -241,6 +242,32 @@ plugin name rows draw raw with no config read and no model request. The Go style
 above. `claude plugin validate` passing with no errors and `claude plugin
 test` passing on both packages; the Go config-manifest and mirror drift
 tests.
+
+### Result (cdcc56187) - 2026-10-22
+
+Shipped as `agents-plugin/hooks/claude-mod/captions.tsx`, wired from
+`register.ts`, and mirrored byte-identically to wsflow, where the feature
+stays inert. Commits:
+- 1c2313ba0: the feature, the four `claude.display_summary_*` keys and the Go
+  style pin.
+- 9ffa27860: persistence moved to module memory plus
+  `$.ui.invalidate('ui.render')`; `state.d.ts` and both `types` entries
+  removed.
+- cdcc56187: lite review fixes.
+
+- Spike bug fixed: `$.model.complete` joins prompt blocks with nothing
+  between them, so each fixed block now ends with a blank line. The
+  separator is the same on every request, so the cache marks still hit.
+- Settings: the switch is read first, and the other four keys only when it
+  is true.
+- Lite review found a Critical: the `every` edge returned the
+  `$.clock.every` Timer where a stop function was promised, so a second
+  session.start in one module lifetime threw before rebinding. Fixed with a
+  restart test. The capture also no longer sends the envelope's `consent`
+  text. The re-review is clean.
+- Verification: `claude plugin validate` passes on both packages;
+  `claude plugin test` gives 334/334 on both; `go test ./internal/mcp` and
+  `./internal/wsrsrc` pass; the Python package tests pass.
 
 ## Constraints
 
