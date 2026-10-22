@@ -218,3 +218,14 @@ Verification:
   `config.list`; started from another cwd it does not (control). The
   installed Codex plugin cache was not exercised: it needs a user-performed
   plugin refresh.
+
+#### Edition (0fed7fd40) - 2026-10-22
+
+Correction to the Result's scope bullet. A keyless `config_get` leaves the
+server's repo root unanchored (`sessionConfigOptions` sets `RepoRoot` only from
+a known session key), so the repo layer is skipped as well as the session
+layer: the mod reads project, global, and built-in values only. The release
+gate review over `a278ef1fe..0fed7fd40` surfaced this; the user decided the
+compaction point does not need the repo scope, so the behavior stays and the
+key description in `agents-plugin/config-manifest.json` now states the
+limitation instead.
