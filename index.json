@@ -449,7 +449,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-22T05:04:09Z"
+        "touched_at": "2026-10-22T05:04:33Z",
+        "impl": {
+          "branch": "impl/develop/ruby-saint-spilt"
+        }
       }
     },
     "260923-research-pi-parent-child-loopback-control-channel": {
