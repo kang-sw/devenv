@@ -591,7 +591,14 @@
       "registered_at": "2026-10-22T06:49:06Z"
     },
     "261022-feat-claude-mod-tool-call-captions": {
-      "registered_at": "2026-10-22T07:59:29Z"
+      "registered_at": "2026-10-22T07:59:29Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-10-22T08:15:48Z"
+      }
     }
   }
 }
