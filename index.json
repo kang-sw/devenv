@@ -588,7 +588,14 @@
       "registered_at": "2026-10-21T04:11:31Z"
     },
     "261022-bug-claude-mod-caption-failed-unit-stays-raw": {
-      "registered_at": "2026-10-22T12:26:25Z"
+      "registered_at": "2026-10-22T12:26:25Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "closed",
+        "touched_at": "2026-10-22T13:42:57Z"
+      }
     },
     "261022-bug-claude-mod-caption-prerun-row": {
       "registered_at": "2026-10-22T12:47:54Z",
