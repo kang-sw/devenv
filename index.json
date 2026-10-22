@@ -590,6 +590,9 @@
     "261022-bug-claude-mod-caption-failed-unit-stays-raw": {
       "registered_at": "2026-10-22T12:26:25Z"
     },
+    "261022-bug-claude-mod-caption-prerun-row": {
+      "registered_at": "2026-10-22T12:47:54Z"
+    },
     "261022-bug-git-status-shows-lease-of-closed-ticket": {
       "registered_at": "2026-10-22T06:49:06Z"
     }
