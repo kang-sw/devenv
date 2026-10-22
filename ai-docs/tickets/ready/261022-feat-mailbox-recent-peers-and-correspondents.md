@@ -225,3 +225,49 @@ Verification: Go tests in `agents-plugin-tool/internal/mcp` covering
 - JSON `self` unchanged (existing self-address tests keep passing).
 Plugin package tests (`agents-plugin`, `agents-plugin-wsflow`, Pi) pass after
 the playbook text change.
+
+### Result (4284354ad) - 2026-10-22
+
+Landed as specified:
+- `lookup_peers` named peers: no live-only filter; newest `last_seen` first
+  (ties by name), caller's own inbox excluded before the 20 cap, non-live
+  `auto` records omitted, CONFLICT shown only on live records (also for the
+  relocated self conflict). JSON `peers[]` gains `last_seen`; text adds
+  `last_seen=` and says `no peers` when empty.
+- `wsmailbox.ReplyEntry` gains `harness`, `cwd`, `contacts`
+  (`Contact{last_exchange, harness, cwd}`), with `RecordContact` trimming to
+  `MaxContacts` (20) and `SortedContacts` ordering newest first.
+- `publishReplyID(sessionKey, root, ownNamed, contacts...)` merges into the
+  existing entry (refresh `last_seen`/`harness`/`cwd`, keep contacts),
+  records contacts in the same reply-lock write, and skips self addresses.
+  Send passes its target (slug presence read before the lock; reply-id
+  metadata from the peer's entry inside it). Recv records each drained
+  envelope's `From`/`ReplyTo` in one separate reply-lock write after the
+  drains; a recv draining nothing writes nothing.
+- `lookup_peers` returns a top-level `correspondents` array (always an
+  array) for every scope; text appends a `correspondents:` block with
+  `no correspondents` when empty.
+- Tool description in `server.go` and the `lead-use-mailbox` playbook (plus
+  wsflow rsrc regen and Pi hand-sync, manifests regenerated) updated.
+
+Verification:
+- `go test ./internal/... -count=1` (agents-plugin-tool): all packages ok.
+- New tests: `TestMailboxLookupPeersRecencyOrderCapAndAutoExclusion`,
+  `TestMailboxCorrespondentsFromSendAndRecv`,
+  `TestMailboxCorrespondentsSelfExclusionMergeAndRecvOnlyRetention`,
+  `TestRecordContactTrimsToNewest`; the old dead-filter test was rewritten as
+  `TestMailboxLookupPeersListsOfflinePeersAndSurfacesLiveConflict`.
+  Mutation-checked (recv recording, auto exclusion, live-gated conflict,
+  entry merge, send self-exclusion each fail a test).
+- `python3 -m unittest discover agents-plugin/tests`: 78 ok;
+  `agents-plugin-wsflow/tests`: 15 ok; Pi `npm test`: 2335 pass, 1 fail —
+  `web-package.test.ts` packed offline install, `ENOTCACHED` for
+  `ipaddr.js` in the local npm cache (environmental, unrelated).
+- Lite review: no Critical/Important findings.
+
+Decisions:
+- A send records its contact before queue delivery (inside the existing
+  publish write), so a failed delivery can leave a contact with no delivered
+  mail; accepted as a rare path.
+- Self-exclusion lives only in `publishReplyID`; a recv-side pre-filter was
+  unobservable and dropped.
