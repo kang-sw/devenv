@@ -47,6 +47,18 @@ marked `requested` at an earlier render and never asked again. Telling these
 apart needs a debug log inside the ws mod (requested unit keys, skipped reply
 items, unanswered reason with elapsed time); the probe mod cannot see it.
 
+Instrumented dogfood 2026-10-22 (debug.log, installed 5f1cc20ed): lone Bash
+calls `toolu_018KfS56…` (13:12:30) and `toolu_013S2WcA…` (13:15:33) were
+dropped as `reply item skipped, missing fields`, and a 3-call run (13:10:28) as
+`left raw, absent from the reply`: the haiku reply broke the contract, not the
+request or the redraw. Likely factor: the reply contract sat only in the rules
+block that opens the prompt, up to the whole conversation window before
+`UNITS`, and the prompt ended on the UNITS data with no closing instruction.
+Mitigation landed: a closing block after UNITS restates, per unit id, the
+fields its answer takes (`answerPrompt`), and the skip/absent lines now name
+the item's keys and the reply's ids. Still open: whether drops persist after
+it, and then a lenient parse or one bounded retry.
+
 ### Edit diff after a caption
 
 A captioned Edit draws no diff: the `ToolResult` hook (`register.ts:871-875`)

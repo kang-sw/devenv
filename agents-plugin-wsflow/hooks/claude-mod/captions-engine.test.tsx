@@ -4,6 +4,7 @@ import {
   CONTEXT_KEY,
   DEFAULT_STYLE,
   displayToolName,
+  answerPrompt,
   ENABLED_KEY,
   fileChange,
   FLUSH_MS,
@@ -200,6 +201,8 @@ test('ws: a finished run is captioned as one unit in one request; a live one sta
   await tick(w)
   expect(w.requests.length).toBe(1)
   expect(w.requests[0]!.prompt).toContain('"id":"u1","calls":[{"tool":"Read"')
+  // The prompt closes on the answer each unit takes.
+  expect(w.requests[0]!.prompt.endsWith(`\n\n${answerPrompt([{ label: 'u1', calls: 2 }])}`)).toBe(true)
 
   expect(await find($, group(w, finished), /테스트 실패/)).toContain('파서 진입점 수정')
   expect(await find($, group(w, finished), /go test/)).toContain('go test')
@@ -596,6 +599,16 @@ test('file changes: an edit, a new file and an overwrite read as the change; oth
   )
   expect(fileChange({ stdout: 'ok', stderr: '' })).toBeUndefined()
   expect(fileChange('plain text')).toBeUndefined()
+})
+
+test('the closing lines name each unit and the fields its answer takes', () => {
+  expect(answerPrompt([{ label: 'u1', calls: 1 }, { label: 'u2', calls: 3 }])).toBe(
+    [
+      'Answer now: only a JSON array holding exactly these objects, ids verbatim, no prose or code fence.',
+      'u1: lone call -> {id, subtitle, intention, result}',
+      'u2: run of 3 calls -> {id, subtitles (3), summary}',
+    ].join('\n'),
+  )
 })
 
 test('display tool names: plugin MCP tools, other MCP servers, and built-ins', () => {

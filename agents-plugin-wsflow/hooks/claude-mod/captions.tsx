@@ -120,6 +120,20 @@ export function rulesPrompt(style: string, lang: string | undefined): string {
   ].join('\n')
 }
 
+/**
+ * The request's closing lines: the answer each unit takes, restated after
+ * UNITS. The rules open the prompt, a long conversation away; without this the
+ * reply drops units or gives a lone call a run's fields.
+ */
+export function answerPrompt(units: ReadonlyArray<{ label: string; calls: number }>): string {
+  return [
+    'Answer now: only a JSON array holding exactly these objects, ids verbatim, no prose or code fence.',
+    ...units.map(({ label, calls }) =>
+      calls === 1 ? `${label}: lone call -> {id, subtitle, intention, result}` : `${label}: run of ${calls} calls -> {id, subtitles (${calls}), summary}`,
+    ),
+  ].join('\n')
+}
+
 export const clip = (text: string, cap = FIELD_CAP): string =>
   text.length <= cap ? text : `${text.slice(0, cap / 2)}\n…[${text.length - cap} chars cut]…\n${text.slice(-cap / 2)}`
 
@@ -539,7 +553,8 @@ export function createCaptions(): Captions {
       }
     })
     const callCount = batch.reduce((n, unit) => n + unit.calls.length, 0)
-    const text = await ask(bound, settings, `UNITS\n${JSON.stringify(request)}`, 300 * batch.length + 40 * callCount)
+    const task = `UNITS\n${JSON.stringify(request)}${BLOCK_END}${answerPrompt(labelled.map(({ label, unit }) => ({ label, calls: unit.calls.length })))}`
+    const text = await ask(bound, settings, task, 300 * batch.length + 40 * callCount)
     if (text === 'stale') {
       units.unshift(...batch)
       return
