@@ -561,7 +561,9 @@ export function createCaptions(): Captions {
     runCaption: (key) => runCaptions.get(key),
     captured(call, res) {
       if (!current.enabled || call.agentId !== undefined || res.deny !== undefined) return
-      const { tool: _tool, tool_use_id: id, agentId: _agent, requestMeta: _meta, ...args } = call
+      // The envelope's reserved fields (a button press's consent text among
+      // them) are not the call's input.
+      const { tool: _tool, tool_use_id: id, agentId: _agent, requestMeta: _meta, consent: _consent, ...args } = call
       if (typeof id !== 'string') return
       const input = stringify(args)
       const output = stringify(res.result)

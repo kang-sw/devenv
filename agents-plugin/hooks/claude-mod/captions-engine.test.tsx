@@ -43,8 +43,10 @@ function world(on: On, opts: { config?: Record<string, unknown>; failKeys?: stri
     compactAnswers: 0,
     /** The events the mod asked the engine to draw again. */
     invalidated: [] as string[],
+    /** The config values config_get answers; a key absent here reads as unset. */
+    config: { [ENABLED_KEY]: true, ...(opts.config ?? {}) } as Record<string, unknown>,
   }
-  const config = { [ENABLED_KEY]: true, ...(opts.config ?? {}) }
+  const config = w.config
   on('mcp.connect', ($, e) => ({ value: { isConnected: true, server: `plugin:${e.server}:${e.server}` } }))
   on('mcp.call', ($, e) => {
     const key = String(e.args.key)
@@ -268,7 +270,8 @@ test('ws: a call in neither the capture nor the transcript sends its drawn input
 })
 
 test('captions are off by default: rows draw raw, nothing is sent, and the other settings are not read', async ($, on) => {
-  const w = world(on, { config: { [ENABLED_KEY]: false } })
+  const w = world(on)
+  delete w.config[ENABLED_KEY]
   await start($, w)
   await $.tool.call({ tool: 'Bash', command: 'ls', tool_use_id: 'toolu_1' } as never)
   const calls = [{ ...BASE, tool_use_id: 'toolu_1', tool: 'Bash', input: { command: 'ls' } }]
@@ -319,16 +322,61 @@ test('ws: the model, style, language and window settings are applied', async ($,
 })
 
 test('ws: failed or invalid setting reads leave the defaults, and an unset language follows the user', async ($, on) => {
-  const w = world(on, { failKeys: [STYLE_KEY, MODEL_KEY], config: { [CONTEXT_KEY]: -3, [LANG_KEY]: '' } })
+  // A few settled messages: a window of -3 tokens would pivot past them all.
+  const messages: Message[] = [
+    { role: 'user', content: [{ type: 'text', text: 'first note' }] },
+    { role: 'assistant', content: [{ type: 'text', text: 'second note' }] },
+    { role: 'user', content: [{ type: 'text', text: 'third note' }] },
+    { role: 'assistant', content: [{ type: 'text', text: 'fourth note' }] },
+  ]
+  const w = world(on, { messages, failKeys: [STYLE_KEY, MODEL_KEY], config: { [CONTEXT_KEY]: -3, [LANG_KEY]: '' } })
   await start($, w)
   if (!isWs(w)) return
   await isRaw($, toolUse(w, 'toolu_1'))
   await tick(w)
   expect(w.requests[0]!.model).toBe('haiku')
+  expect(w.requests[0]!.prompt).toContain('first note')
+  expect(w.requests[0]!.prompt).not.toContain(OMITTED_LINE)
   const rules = w.requests[0]!.blocks[0]!.text.trimEnd()
   expect(rules).toBe(rulesPrompt(DEFAULT_STYLE, undefined))
   expect(rules).toContain('Write intention, result and summary in the language the user writes in.')
   expect(rules.split('\n').at(-1)).toBe(DEFAULT_STYLE)
+})
+
+test('ws: a later session start in the same module stops the old ticker and reads the settings again', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  if (!isWs(w)) return
+  await isRaw($, toolUse(w, 'toolu_1'))
+  await tick(w)
+  expect(w.requests.length).toBe(1)
+
+  // A tune between sessions: the next start reads the new model.
+  w.config[MODEL_KEY] = 'claude-sonnet-x'
+  await start($, w)
+  await isRaw($, toolUse(w, 'toolu_2'))
+  await tick(w)
+  expect(w.requests.length).toBe(2)
+  expect(w.requests[1]!.model).toBe('claude-sonnet-x')
+
+  // And a switch turned off takes the rows back to raw.
+  w.config[ENABLED_KEY] = false
+  await start($, w)
+  expect(await isRaw($, toolUse(w, 'toolu_3'))).toBe(true)
+  await tick(w)
+  await tick(w)
+  expect(w.requests.length).toBe(2)
+})
+
+test('ws: the consent text of a call is not sent as its input', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  if (!isWs(w)) return
+  await $.tool.call({ tool: 'Bash', command: 'ls', tool_use_id: 'toolu_k', consent: 'pressed Run in the pane' } as never)
+  await isRaw($, toolUse(w, 'toolu_k'))
+  await tick(w)
+  expect(w.requests[0]!.prompt).toContain('out of ls')
+  expect(w.requests[0]!.prompt).not.toContain('pressed Run')
 })
 
 test('ws: a failed request is not retried', async ($, on) => {

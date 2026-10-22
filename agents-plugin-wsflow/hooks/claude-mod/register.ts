@@ -568,7 +568,11 @@ export const register: Register = (on) => {
           messages: () => $.session.messages({ as: 'api' }),
           complete: (request) => $.model.complete(request),
           redraw: () => $.ui.invalidate('ui.render'),
-          every: (ms, fn) => $.clock.every(ms, fn),
+          // $.clock.every hands back a Timer; the edge promises its stop function.
+          every: (ms, fn) => {
+            const timer = $.clock.every(ms, fn)
+            return () => timer.cancel()
+          },
           log: (text) => $.ui.log(text, { to: 'debug' }),
         })
       }
