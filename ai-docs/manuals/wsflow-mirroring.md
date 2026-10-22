@@ -303,7 +303,7 @@ The Claude mod is a second generated-sameness carve-out:
 `agents-plugin-wsflow/hooks/claude-mod/` a byte-identical copy. Claude Code
 accepts one hooks module per plugin, so the mod is one entry (`register.ts`)
 carrying every Claude mod feature: mailbox push, lead compaction timing, the
-MCP reconnect lever, and workflow manual injection.
+MCP reconnect lever, workflow manual injection, and tool-call captions.
 The mod reads its package identity (plugin name, root, MCP server) from the
 engine at runtime, so nothing in it varies per package; per-package behavior
 is chosen inside the shared source from the engine-reported plugin name. The
@@ -315,8 +315,10 @@ wsflow it mints no key, adds no system-prompt section, and rewrites no tool
 result. Where it runs, it also adopts a revive's key as the conversation's
 and binds the mailbox push to every key the conversation gets, so the
 `mailbox_watch` lever is not registered there; in wsflow (and in a project
-without `ai-docs/WORKFLOW.md`) the lever registers and binds as before. The
-reconnect lever runs in both packages. Each package's
+without `ai-docs/WORKFLOW.md`) the lever registers and binds as before.
+Tool-call captions run under the same package gate (and only once their
+config switch reads true): in wsflow they read no config, capture no call, and
+draw every row raw. The reconnect lever runs in both packages. Each package's
 `hooks/hooks.json` is curated (wsflow lists only `modules`).
 
 - **Drift guard:** `TestWsflowHooksMirrorUpToDate` (in `internal/wsrsrc`).
