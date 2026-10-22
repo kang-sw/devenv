@@ -554,7 +554,8 @@ export function createCaptions(): Captions {
     const bytesOf = (id: string) => seenOf(id)?.bytes ?? 0
     const answered = new Set<string>()
     let stored = 0
-    for (const item of parseReply(text)) {
+    const items = parseReply(text)
+    for (const item of items) {
       const unit = typeof item.id === 'string' ? byLabel.get(item.id) : undefined
       if (!unit) {
         log(`reply item skipped, unknown id ${JSON.stringify(item.id)}`)
@@ -564,7 +565,7 @@ export function createCaptions(): Captions {
       const [first] = unit.calls
       if (unit.calls.length === 1 && first) {
         if (typeof item.intention !== 'string' || typeof item.result !== 'string') {
-          log(`reply item skipped, missing fields: ${unit.key}`)
+          log(`reply item skipped, missing fields: ${unit.key} (has ${Object.keys(item).join(',')})`)
           continue
         }
         const subtitle = typeof item.subtitle === 'string' ? item.subtitle : ''
@@ -572,7 +573,7 @@ export function createCaptions(): Captions {
         stored += 1
       } else {
         if (typeof item.summary !== 'string') {
-          log(`reply item skipped, missing fields: ${unit.key}`)
+          log(`reply item skipped, missing fields: ${unit.key} (has ${Object.keys(item).join(',')})`)
           continue
         }
         const subtitles = Array.isArray(item.subtitles) ? item.subtitles : []
@@ -585,7 +586,7 @@ export function createCaptions(): Captions {
       }
     }
     for (const { label, unit } of labelled) {
-      if (!answered.has(label)) log(`left raw, absent from the reply: ${unit.key}`)
+      if (!answered.has(label)) log(`left raw, absent from the reply: ${unit.key} (reply ids ${items.map((item) => JSON.stringify(item.id)).join(',') || 'none'}, ${text.length} chars)`)
     }
     // The engine reuses a row's last answer until told to draw it again.
     if (stored > 0) bound.redraw()

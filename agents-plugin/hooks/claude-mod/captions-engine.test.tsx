@@ -461,9 +461,9 @@ test('ws: reply items naming no unit, missing fields, or absent each leave a deb
   expect(w.logs).toContain('ws captions: queued toolu_a')
   expect(w.logs).toContain('ws captions: queued toolu_b')
   expect(w.logs).toContain('ws captions: reply item skipped, unknown id "u9"')
-  expect(w.logs).toContain('ws captions: reply item skipped, missing fields: toolu_a')
-  expect(w.logs).toContain('ws captions: left raw, absent from the reply: toolu_b')
-  expect(w.logs).not.toContain('ws captions: left raw, absent from the reply: toolu_a')
+  expect(w.logs).toContain('ws captions: reply item skipped, missing fields: toolu_a (has id,intention)')
+  expect(w.logs).toContain('ws captions: left raw, absent from the reply: toolu_b (reply ids "u9","u1", 83 chars)')
+  expect(w.logs.some((line) => line.startsWith('ws captions: left raw, absent from the reply: toolu_a'))).toBe(false)
 })
 
 test('ws: the mirror starts over when the lead compaction lever lands, and on a main-thread compaction', async ($, on) => {
