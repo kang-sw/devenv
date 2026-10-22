@@ -154,7 +154,7 @@ func ShouldNotifyNamedInboxUnread(slug, root string) (bool, int, error) {
 }
 
 func readHookNotifyState(path string) (hookNotifyState, bool, error) {
-	raw, err := os.ReadFile(path)
+	raw, err := readFile(path)
 	if os.IsNotExist(err) {
 		return hookNotifyState{}, false, nil
 	}

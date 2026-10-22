@@ -33,6 +33,13 @@ func replaceFile(tmp, path string) error {
 	}
 }
 
+// readFile reads path, retrying the same transient holds replaceFile retries:
+// a reader that opens path while another process's replace is in flight sees
+// ERROR_SHARING_VIOLATION or ERROR_ACCESS_DENIED for that brief window.
+func readFile(path string) ([]byte, error) {
+	return readFileRetrying(path, os.ReadFile, isTransientReplaceError, time.Now, time.Sleep)
+}
+
 func isTransientReplaceError(err error) bool {
 	var errno syscall.Errno
 	if !errors.As(err, &errno) {
