@@ -556,19 +556,6 @@
     "261018-bug-lead-run-wrapped-line-reads-as-heading": {
       "registered_at": "2026-10-18T04:08:20Z"
     },
-    "261018-feat-claude-mod-compaction-threshold-knob": {
-      "registered_at": "2026-10-17T23:46:26Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-21T05:52:55Z",
-        "impl": {
-          "branch": "impl/develop/omega-thigh-smock"
-        }
-      }
-    },
     "261018-research-claude-mod-mid-turn-steer": {
       "registered_at": "2026-10-18T06:42:05Z"
     },
@@ -602,6 +589,9 @@
     },
     "261021-feat-claude-mod-manual-static-body-dedupe": {
       "registered_at": "2026-10-21T04:11:31Z"
+    },
+    "261022-feat-mailbox-recent-peers-and-correspondents": {
+      "registered_at": "2026-10-22T01:31:39Z"
     }
   }
 }
