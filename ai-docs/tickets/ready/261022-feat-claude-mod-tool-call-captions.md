@@ -4,8 +4,8 @@ related:
   261018-feat-claude-mod-compaction-threshold-knob: precedent (claude.* knob read by the Claude mod at session start)
 sage-review-design: completed
 sage-review-completeness: completed
-sage-review-design-reviewed: 98cd44ed4a7a6c3b
-sage-review-completeness-reviewed: 98cd44ed4a7a6c3b
+sage-review-design-reviewed: 87533597c9d77ffd
+sage-review-completeness-reviewed: 87533597c9d77ffd
 ---
 
 # Claude mod tool-call captions
@@ -76,14 +76,20 @@ raw row.
 - **No spike diagnostics.** The status line, the `/tool-summary` command, the
   catch-all `ui.render` counter and the `diag` object are dropped; failures
   go to `$.ui.log(..., {to: 'debug'})`.
-- **Persistence.** Session `$.state` atoms, their contract named by `types` in
-  both packages' plugin.json (the byte-identical module names the keys in
-  both). The atoms spell owner `plugin: 'ws'` as a literal, which holds only
-  because the feature is ws-only; the `STORE_PREFIX` comment and the
-  `register.ts` header claim about the one package name the mod spells are
-  updated to match. The declaration file lives inside `hooks/claude-mod/`, so
-  `TestWsflowHooksMirrorUpToDate` and the rsync step cover it. Rejected: cross-session `$.store` (captions describe this session's
-  rows; a resumed session re-requests drawn units at bounded cost).
+- **Persistence.** Captions live in module memory, and each stored reply is
+  followed by `$.ui.invalidate('ui.render')` so the waiting rows redraw. No
+  `$.state` contract: no types declaration file and no `types` entry in
+  either plugin.json. A mod reload forgets captions, and already-drawn units
+  are requested again once each. Rejected: session `$.state` atoms (the
+  validator refuses a write to a value another plugin owns, so
+  `claude plugin validate agents-plugin-wsflow` fails on the byte-identical
+  module's `ws.*` writes, observed at 1c2313ba0; accepting that failure would
+  hide future regressions). With no `$.state` value, the `register.ts`
+  header, the `STORE_PREFIX` comment and `wsflow-mirroring.md`
+  `## Claude Mod Mirror` make no `$.state` or `types` claim for the caption
+  feature. Rejected: `$.store` keyed by session id with
+  session.end cleanup (disk writes and cleanup handling for a rare reload).
+  Rejected: cross-session `$.store` (captions describe this session's rows).
 - **Prompt text** is the Claude mod's own. Rejected: sharing text with Pi
   (the reply contracts differ).
 
@@ -102,10 +108,10 @@ raw row.
 
 | fact | value | evidence |
 |---|---|---|
-| scope.span | multi-file | agents-plugin/hooks/claude-mod/register.ts plus a new feature file and engine test, agents-plugin-wsflow/hooks/claude-mod/ mirror, agents-plugin/config-manifest.json, agents-plugin/.claude-plugin/plugin.json, agents-plugin-wsflow/.claude-plugin/plugin.json |
-| scope.surface | public-interface | four new claude.display_summary_* config keys in the shipped manifest; a types entry in both packages' plugin.json; shipped rules prompt text |
+| scope.span | multi-file | agents-plugin/hooks/claude-mod/register.ts plus a new feature file and engine test, agents-plugin-wsflow/hooks/claude-mod/ mirror, agents-plugin/config-manifest.json, agents-plugin-tool/internal/mcp/config_manifest_test.go |
+| scope.surface | public-interface | four new claude.display_summary_* config keys in the shipped manifest; shipped rules prompt text |
 | scope.new_public_symbol | yes | claude.display_summary_enabled, claude.display_summary_model, claude.display_summary_style, claude.display_summary_context_tokens |
-| scope.new_type_contract | yes | model reply contract {id, subtitle, intention, result} and {id, subtitles[], summary}; $.state atom contract in a types declaration |
+| scope.new_type_contract | yes | model reply contract {id, subtitle, intention, result} and {id, subtitles[], summary} |
 | scope.test_surface | new-files | new claude-mod engine test for captions beside agents-plugin/hooks/claude-mod/compaction-engine.test.ts; existing agents-plugin-tool/internal/mcp/config_manifest_test.go and agents-plugin-tool/internal/wsrsrc/wsflow_hooks_mirror_test.go |
 | complexity.reuse_points | confirmed | compactionEnabledFor agents-plugin/hooks/claude-mod/compaction.ts#L59-L61; keyless config_get over shared server resolution agents-plugin/hooks/claude-mod/register.ts#L490-L505; spike at final-spike 5ed84f2 read |
 | complexity.side_effect_risk | moderate | sends conversation and tool content to a second model call when enabled, and adds render hooks on every collapsed tool row |
@@ -163,7 +169,12 @@ Behavior carried over from the accepted spike:
   result carries messages, on the compaction feature's `leverLanded` edge
   (the engine routes the lever's own `$.session.compact` past the mod's
   `session.compact` hook, and the lever is a ws lead's main compaction path),
-  and when the transcript shrinks.
+  on `session.end` (the event carries no `agentId`, so every one resets;
+  after /clear no session.start follows, and a new conversation can outgrow
+  the old read count before its first flush, so the shrink check alone misses
+  it), and when the transcript shrinks. A reset clears the mirror only (its pivot
+  and read count); the caption, dedupe and capture maps stay, since
+  later rows carry new `tool_use_id`s.
 - **Reply contract.** A JSON array, one object per unit with its id: a lone
   call `{id, subtitle, intention, result}`, a run `{id, subtitles[],
   summary}`. Unparsable or missing items leave those units uncaptioned.
@@ -195,8 +206,13 @@ Behavior carried over from the accepted spike:
   Length: intention at most one short sentence; result and summary at most two short sentences each. Style: a terse note style with no subject, no filler, no politeness; in Korean, end on a noun or a plain stem ("정의 위치 확인", "3개 파일에서 발견, foo.go:12 외").
   ```
 
-  The mod's fallback for a failed read is the same text; a test pins the
-  two equal, as the compaction knob pins `DEFAULT_ADVISORY`.
+  The mod's fallback for a failed read is the same text; a Go test
+  (`TestShippedClaudeCaptionStyleMatchesMod` in
+  `agents-plugin-tool/internal/mcp/config_manifest_test.go`, extracting the
+  single-quoted `DEFAULT_STYLE` literal from
+  `agents-plugin/hooks/claude-mod/captions.tsx` by regex) pins it equal to
+  the manifest default, because the mod test kit has no file
+  access to read the manifest. Rejected: an engine test for the pin.
 - **Drawing.** No white text. Outer box `paddingLeft 2`, `marginTop 1`. A
   header row per call: a dim `· ` or a red `✗ ` for a failed or interrupted
   call, the dim display tool name (`mcp__plugin_<p>_<s>__<a_b>` →
@@ -204,9 +220,9 @@ Behavior carried over from the accepted spike:
   (`truncate-end` in a run). A body under a dim `  ⎿  `: a lone call draws
   the dim intention, then a cyan `N KB` and a dim `· result`; a run draws the
   dim summary, then a cyan `N calls · M KB`.
-- **Persistence.** Captions live in `$.state` atoms (session-scoped, survive
-  a mod reload): lone captions keyed by `tool_use_id`, run captions keyed by
-  the run's ids joined with `,`.
+- **Persistence.** Captions live in module memory: lone captions keyed by
+  `tool_use_id`, run captions keyed by the run's ids joined with `,`. Storing
+  a reply calls `$.ui.invalidate('ui.render')`.
 - **Shipped feature lists.** `agents-plugin/hooks/hooks.json` `description`,
   the `register.ts` header feature list, and `ai-docs/manuals/wsflow-mirroring.md`
   `## Claude Mod Mirror` each name the caption feature: ws only, inert in
@@ -218,12 +234,13 @@ finished run captioned as one unit in one request while a live run stays raw;
 the prompt carries the conversation and pivots past the window; a call
 captured before a reload takes output and size from the transcript), plus
 engine tests for: the knob reads (off by default draws raw rows and sends no
-request; style and window values applied); the mirror reset on a lever
-landing; no retry after a failed request; the display tool-name mapping; the
-style default pinned to the manifest. `claude plugin validate` and
-`claude plugin test` on both packages, including that wsflow's validate
-accepts a contract declaring `PluginState['ws']`; the Go config-manifest and
-mirror drift tests.
+request; style and window values applied; a failed style read falls back to
+`DEFAULT_STYLE`); the mirror reset on a lever landing and on session.end; no
+retry after a failed request; the display tool-name mapping; under a non-ws
+plugin name rows draw raw with no config read and no model request. The Go style pin
+above. `claude plugin validate` passing with no errors and `claude plugin
+test` passing on both packages; the Go config-manifest and mirror drift
+tests.
 
 ## Constraints
 
