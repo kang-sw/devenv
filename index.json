@@ -587,11 +587,11 @@
     "261021-feat-claude-mod-manual-static-body-dedupe": {
       "registered_at": "2026-10-21T04:11:31Z"
     },
+    "261022-bug-claude-mod-caption-failed-unit-stays-raw": {
+      "registered_at": "2026-10-22T12:26:25Z"
+    },
     "261022-bug-git-status-shows-lease-of-closed-ticket": {
       "registered_at": "2026-10-22T06:49:06Z"
-    },
-    "261022-feat-claude-mod-tool-call-captions": {
-      "registered_at": "2026-10-22T07:59:29Z"
     }
   }
 }
