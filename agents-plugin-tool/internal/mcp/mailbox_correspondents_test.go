@@ -53,6 +53,18 @@ func replyEntryFor(t *testing.T, key string) (wsmailbox.ReplyEntry, bool) {
 	return entry, ok
 }
 
+// sessionCwd is the cwd the server records for a session rooted at root:
+// its canonical Git root. On Windows t.TempDir() can be an 8.3 short path
+// (RUNNER~1) that canonicalization expands, so compare against this, not root.
+func sessionCwd(t *testing.T, root string) string {
+	t.Helper()
+	cwd, err := canonicalGitRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cwd
+}
+
 // TestMailboxLookupPeersRecencyOrderCapAndAutoExclusion pins the named-peer
 // listing: records are listed whether or not their process is live, newest
 // last_seen first, at most mailboxPeerListCap per scope with the caller's
@@ -139,6 +151,7 @@ func TestMailboxCorrespondentsFromSendAndRecv(t *testing.T) {
 	t.Setenv(envMailboxAuto, "")
 	root := t.TempDir()
 	initGit(t, root)
+	cwd := sessionCwd(t, root)
 	t0 := time.Date(2026, 10, 22, 9, 0, 0, 0, time.UTC)
 	setMailboxClock(t, t0)
 
@@ -173,7 +186,7 @@ func TestMailboxCorrespondentsFromSendAndRecv(t *testing.T) {
 	}
 	replyB := wsmailbox.ReplyIDPrefix + wsmailbox.ReplyID(keyB)
 	gotA := lookupPeersJSON(t, serverA, 6, keyA, "worktree")
-	if len(gotA.Correspondents) != 1 || gotA.Correspondents[0] != (mailboxCorrespondentOut{Address: replyB, LastExchange: t1.Format(time.RFC3339), Harness: "pi", Cwd: root}) {
+	if len(gotA.Correspondents) != 1 || gotA.Correspondents[0] != (mailboxCorrespondentOut{Address: replyB, LastExchange: t1.Format(time.RFC3339), Harness: "pi", Cwd: cwd}) {
 		t.Fatalf("recv did not record the reply-id sender with its metadata: %#v", gotA.Correspondents)
 	}
 
@@ -190,8 +203,8 @@ func TestMailboxCorrespondentsFromSendAndRecv(t *testing.T) {
 
 	replyA := wsmailbox.ReplyIDPrefix + wsmailbox.ReplyID(keyA)
 	wantB := []mailboxCorrespondentOut{
-		{Address: replyA, LastExchange: t3.Format(time.RFC3339), Harness: "codex", Cwd: root},
-		{Address: "alice@worktree", LastExchange: t0.Format(time.RFC3339), Harness: "codex", Cwd: root},
+		{Address: replyA, LastExchange: t3.Format(time.RFC3339), Harness: "codex", Cwd: cwd},
+		{Address: "alice@worktree", LastExchange: t0.Format(time.RFC3339), Harness: "codex", Cwd: cwd},
 	}
 	for i, scope := range []string{"worktree", "machine", "clone"} {
 		got := lookupPeersJSON(t, serverB, 10+i, keyB, scope)
@@ -237,6 +250,7 @@ func TestMailboxCorrespondentsRecvRecordsNamedSender(t *testing.T) {
 	t.Setenv(envMailboxAuto, "")
 	root := t.TempDir()
 	initGit(t, root)
+	cwd := sessionCwd(t, root)
 	t0 := time.Date(2026, 10, 22, 10, 0, 0, 0, time.UTC)
 	setMailboxClock(t, t0)
 
@@ -260,7 +274,7 @@ func TestMailboxCorrespondentsRecvRecordsNamedSender(t *testing.T) {
 	}
 
 	got := lookupPeersJSON(t, serverA, 4, keyA, "worktree")
-	want := mailboxCorrespondentOut{Address: "bob@worktree", LastExchange: t1.Format(time.RFC3339), Harness: "pi", Cwd: root}
+	want := mailboxCorrespondentOut{Address: "bob@worktree", LastExchange: t1.Format(time.RFC3339), Harness: "pi", Cwd: cwd}
 	if len(got.Correspondents) != 1 || got.Correspondents[0] != want {
 		t.Fatalf("recv did not record the named sender from its presence: %#v, want [%#v]", got.Correspondents, want)
 	}
@@ -277,6 +291,7 @@ func TestMailboxCorrespondentsSelfExclusionMergeAndRecvOnlyRetention(t *testing.
 	t.Setenv(envMailboxAuto, "")
 	root := t.TempDir()
 	initGit(t, root)
+	cwd := sessionCwd(t, root)
 	t0 := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
 	setMailboxClock(t, t0)
 
@@ -323,7 +338,7 @@ func TestMailboxCorrespondentsSelfExclusionMergeAndRecvOnlyRetention(t *testing.
 	// Repeated publishes keep the history.
 	lookupPeersJSON(t, serverB, 9, keyB, "worktree")
 	lookupPeersJSON(t, serverB, 10, keyB, "machine")
-	if entryB, _ = replyEntryFor(t, keyB); len(entryB.Contacts) != 1 || entryB.Contacts["owner@worktree"].LastExchange == "" || entryB.Cwd != root {
+	if entryB, _ = replyEntryFor(t, keyB); len(entryB.Contacts) != 1 || entryB.Contacts["owner@worktree"].LastExchange == "" || entryB.Cwd != cwd {
 		t.Fatalf("repeated publishReplyID lost contacts or metadata: %#v", entryB)
 	}
 
