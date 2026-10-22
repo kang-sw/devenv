@@ -587,28 +587,11 @@
     "261021-feat-claude-mod-manual-static-body-dedupe": {
       "registered_at": "2026-10-21T04:11:31Z"
     },
-    "261022-bug-claude-mod-caption-failed-unit-stays-raw": {
-      "registered_at": "2026-10-22T12:26:25Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-22T13:42:57Z"
-      }
-    },
-    "261022-bug-claude-mod-caption-prerun-row": {
-      "registered_at": "2026-10-22T12:47:54Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-22T13:04:24Z"
-      }
-    },
     "261022-bug-git-status-shows-lease-of-closed-ticket": {
       "registered_at": "2026-10-22T06:49:06Z"
+    },
+    "261022-bug-windows-ci-mcp-shard-test-flakes": {
+      "registered_at": "2026-10-22T14:38:23Z"
     }
   }
 }
