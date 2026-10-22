@@ -597,7 +597,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-22T01:40:34Z"
+        "touched_at": "2026-10-22T01:41:00Z",
+        "impl": {
+          "branch": "impl/develop/swore-saved-buddy"
+        }
       }
     }
   }
