@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 519271ac53fe59ee
 sage-review-completeness-reviewed: 519271ac53fe59ee
+completed: 2026-10-22
 ---
 
 # Mailbox lookup_peers lists recent peers and the caller's correspondents
