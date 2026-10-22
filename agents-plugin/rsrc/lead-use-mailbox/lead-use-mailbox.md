@@ -49,9 +49,16 @@ Wake
    env above — your live reply handle, once you have sent or looked yourself
    up at least once.
 2. Relay your address to whoever should mail you. The same call's peer list
-   shows other live addresses at the scope you ask for, with enough
-   descriptive metadata (harness, working directory, start time) to tell
-   peers apart before you relay one on to a human.
+   shows the most recently seen named addresses at the scope you ask for,
+   whether or not their session is running now (mail to one that is not
+   waits until it returns), with enough descriptive metadata (harness,
+   working directory, start and last-seen time) to tell peers apart before
+   you relay one on to a human.
+3. To reach a session you were already corresponding with — its handle
+   scrolled away or was lost to compaction — read the same call's
+   correspondents list: every address you yourself sent mail to or received
+   mail from, in any scope, newest first, with its harness and working
+   directory when known.
 
 ## On: send and receive
 

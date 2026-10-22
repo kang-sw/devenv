@@ -543,12 +543,13 @@ func TestMailboxTieredSlugDurabilityAcrossScopeAndFerrule(t *testing.T) {
 	}
 }
 
-// TestMailboxLookupPeersFiltersDeadPeersAndSurfacesConflict verifies
-// Decision 2: lookup_peers hides a peer once its heartbeat is older than
-// the liveness threshold, and a duplicate live-name registration never
-// clobbers the first process's presence record but flags it Conflict,
-// surfaced through lookup_peers.
-func TestMailboxLookupPeersFiltersDeadPeersAndSurfacesConflict(t *testing.T) {
+// TestMailboxLookupPeersListsOfflinePeersAndSurfacesLiveConflict verifies
+// lookup_peers keeps listing an explicit named peer once its heartbeat is
+// older than the liveness threshold (recency listing, not a live-only
+// filter), and that a duplicate live-name registration never clobbers the
+// first process's presence record but flags it Conflict, surfaced through
+// lookup_peers.
+func TestMailboxLookupPeersListsOfflinePeersAndSurfacesLiveConflict(t *testing.T) {
 	setupMailboxTestEnv(t)
 	root := t.TempDir()
 	initGit(t, root)
@@ -570,9 +571,20 @@ func TestMailboxLookupPeersFiltersDeadPeersAndSurfacesConflict(t *testing.T) {
 	t.Cleanup(func() { mailboxNow = original })
 	mailboxNow = func() time.Time { return original().Add(mailboxLivenessThreshold + time.Minute) }
 
-	deadResp := callToolWithKey(t, serverLooker, 3, keyLooker, "mailbox.lookup_peers", map[string]any{"scope": "worktree"})
-	if strings.Contains(deadResp, "dora@worktree") {
-		t.Fatalf("lookup_peers listed a peer with no heartbeat inside the liveness window: %s", deadResp)
+	// An explicit WS_MAILBOX name whose heartbeat has lapsed is still
+	// listed, with its last_seen: mail to it queues until the name returns.
+	offlineResp := callToolWithKey(t, serverLooker, 3, keyLooker, "mailbox.lookup_peers", map[string]any{"scope": "worktree"})
+	doraLine := ""
+	for _, line := range strings.Split(offlineResp, "\n") {
+		if strings.HasPrefix(line, "dora@worktree") {
+			doraLine = line
+		}
+	}
+	if doraLine == "" || !strings.Contains(doraLine, " last_seen=") {
+		t.Fatalf("lookup_peers did not list an offline explicit peer with its last_seen: %s", offlineResp)
+	}
+	if strings.Contains(offlineResp, "no peers") {
+		t.Fatalf("lookup_peers reported no peers while listing an offline one: %s", offlineResp)
 	}
 	mailboxNow = original
 

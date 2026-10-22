@@ -35,9 +35,10 @@ const (
 	mailboxHeartbeatThrottle = time.Minute
 
 	// mailboxLivenessThreshold is the missed-heartbeat window past which a
-	// presence record is treated as dead: eligible for lookup_peers to hide
-	// and for a fresh process to reclaim the name outright. Implementation-
-	// chosen default.
+	// presence record is treated as dead: eligible for a fresh process to
+	// reclaim the name outright, never flagged as a conflict, and (for an
+	// auto identity only) omitted from lookup_peers. Implementation-chosen
+	// default.
 	mailboxLivenessThreshold = 10 * time.Minute
 )
 
@@ -401,19 +402,80 @@ func reapStaleReplyIDs(store *wsmailbox.ReplyStore, now time.Time) {
 	}
 }
 
+// mailboxContact is one counterparty observed at a send or recv: its
+// literal address ("id:<reply-id>" or "slug@scope") and, for a slug, the
+// harness/cwd read from its presence record before the reply lock is taken
+// (never nested inside it). An id: counterparty's metadata is resolved from
+// its own ReplyEntry under the reply lock instead.
+type mailboxContact struct {
+	Address string
+	Harness string
+	Cwd     string
+}
+
+// mailboxContactFor builds the contact for address, reading a slug
+// counterparty's presence record from its scope store (resolved against the
+// caller's root). An unreadable store or missing record leaves the
+// metadata empty: it is descriptive only.
+func mailboxContactFor(address, root string) mailboxContact {
+	c := mailboxContact{Address: address}
+	if strings.HasPrefix(address, wsmailbox.ReplyIDPrefix) {
+		return c
+	}
+	name, scope, err := wsmailbox.ParseSlugScope(address)
+	if err != nil || (scope != wsmailbox.ScopeMachine && strings.TrimSpace(root) == "") {
+		return c
+	}
+	path, err := wsmailbox.PathForScope(scope, root)
+	if err != nil {
+		return c
+	}
+	store, err := wsmailbox.Load(path)
+	if err != nil {
+		return c
+	}
+	if p, ok := store.Presence[name]; ok {
+		c.Harness, c.Cwd = p.Harness, p.Cwd
+	}
+	return c
+}
+
 // publishReplyID publishes/refreshes callerSessionKey's reply-id entry in
 // the machine-tier registry (the channel-open act of Decision 11 send, and
-// Decision 5's env-less self-lookup) and returns the reply-id.
-func (s *Server) publishReplyID(callerSessionKey string) (string, error) {
+// Decision 5's env-less self-lookup) and returns the reply-id. It merges
+// into an existing entry: LastSeen, Harness, and Cwd (root, the calling
+// session's own root) are refreshed and the correspondence history is kept.
+// contacts are recorded in the same locked write with the caller's own
+// current time as their last exchange; ownNamed is the caller's owned
+// named-inbox address ("" when none), and a contact equal to it or to the
+// caller's own reply-id is skipped (self-exclusion).
+func (s *Server) publishReplyID(callerSessionKey, root, ownNamed string, contacts ...mailboxContact) (string, error) {
 	replyID := s.mailboxReplyID(callerSessionKey)
 	path, err := wsmailbox.ReplyRegistryPath()
 	if err != nil {
 		return "", err
 	}
 	nowStr := mailboxNowString()
+	harness := s.currentHarness()
 	if err := wsmailbox.WithReplyLock(path, func(store *wsmailbox.ReplyStore) error {
 		reapStaleReplyIDs(store, mailboxNow())
-		store.Entries[replyID] = wsmailbox.ReplyEntry{LastSeen: nowStr}
+		entry := store.Entries[replyID]
+		entry.LastSeen = nowStr
+		entry.Harness = harness
+		entry.Cwd = root
+		for _, c := range contacts {
+			if c.Address == "" || c.Address == wsmailbox.ReplyIDPrefix+replyID || (ownNamed != "" && c.Address == ownNamed) {
+				continue
+			}
+			rec := wsmailbox.Contact{LastExchange: nowStr, Harness: c.Harness, Cwd: c.Cwd}
+			if peerID, ok := strings.CutPrefix(c.Address, wsmailbox.ReplyIDPrefix); ok {
+				if peer, found := store.Entries[peerID]; found {
+					rec.Harness, rec.Cwd = peer.Harness, peer.Cwd
+				}
+			}
+			entry.RecordContact(c.Address, rec)
+		}
+		store.Entries[replyID] = entry
 		return nil
 	}); err != nil {
 		return "", err

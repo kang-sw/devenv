@@ -1,10 +1,12 @@
 package wsmailbox
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kang-sw/devenv/internal/wskey"
 )
@@ -46,5 +48,35 @@ func TestReplyIDDeterministicWithoutPersistence(t *testing.T) {
 	}
 	if _, err := os.Stat(cache); !os.IsNotExist(err) {
 		t.Fatalf("pure derivation touched cache: %v", err)
+	}
+}
+
+// TestRecordContactTrimsToNewest pins the correspondence-history bound: an
+// upsert past MaxContacts keeps only the MaxContacts newest entries, and
+// SortedContacts orders newest first.
+func TestRecordContactTrimsToNewest(t *testing.T) {
+	var entry ReplyEntry
+	for i := 0; i < MaxContacts+5; i++ {
+		stamp := time.Date(2026, 10, 22, 0, i, 0, 0, time.UTC).Format(time.RFC3339)
+		entry.RecordContact(fmt.Sprintf("id:peer%c", 'a'+i), Contact{LastExchange: stamp})
+	}
+	if len(entry.Contacts) != MaxContacts {
+		t.Fatalf("contacts = %d, want %d", len(entry.Contacts), MaxContacts)
+	}
+	for i := 0; i < 5; i++ {
+		if _, ok := entry.Contacts[fmt.Sprintf("id:peer%c", 'a'+i)]; ok {
+			t.Fatalf("oldest contact %d survived the trim: %#v", i, entry.Contacts)
+		}
+	}
+	sorted := SortedContacts(entry.Contacts)
+	if sorted[0].Address != fmt.Sprintf("id:peer%c", 'a'+MaxContacts+4) || sorted[len(sorted)-1].Address != "id:peerf" {
+		t.Fatalf("SortedContacts not newest first: first=%s last=%s", sorted[0].Address, sorted[len(sorted)-1].Address)
+	}
+
+	// Re-recording an existing address refreshes it in place.
+	newest := time.Date(2026, 10, 23, 0, 0, 0, 0, time.UTC).Format(time.RFC3339)
+	entry.RecordContact("id:peerf", Contact{LastExchange: newest, Harness: "codex"})
+	if len(entry.Contacts) != MaxContacts || SortedContacts(entry.Contacts)[0].Address != "id:peerf" {
+		t.Fatalf("re-recorded contact not refreshed to newest: %#v", SortedContacts(entry.Contacts)[0])
 	}
 }
