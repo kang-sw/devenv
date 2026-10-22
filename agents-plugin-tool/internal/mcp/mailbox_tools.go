@@ -46,17 +46,6 @@ func (s *Server) handleMailboxSend(id json.RawMessage, args map[string]any) resp
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 	}
 
-	// Universal send + always-on reply-id (Decision 11): every send opens/
-	// refreshes the sender's own return channel, regardless of whether it
-	// also holds a durable slug.
-	replyID, err := s.publishReplyID(sessionKey)
-	if err != nil {
-		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
-	}
-	s.markMailboxReplyOpened(sessionKey)
-
-	now := mailboxNowString()
-
 	// The from: stamp claims this process's WS_MAILBOX/WS_MAILBOX_AUTO
 	// identity on the sender's behalf, so it is itself gated by the
 	// caller==owner check (Decision 3: "governs the named slug inbox (send
@@ -64,8 +53,9 @@ func (s *Server) handleMailboxSend(id json.RawMessage, args map[string]any) resp
 	// sharing this process must not be able to claim the owner's slug
 	// identity when sending, only fall back to its own reply-id. An
 	// unbound owner pointer (no ferrule yet) also means nobody may claim it.
-	var from string
+	var from, ownNamed string
 	if isOwner, identity, oerr := s.mailboxOwnerCheck(sessionKey, entry.root); oerr == nil && isOwner {
+		ownNamed = identity.address()
 		switch addr.Kind {
 		case wsmailbox.AddressSlug:
 			from = mailboxFromStamp(identity, addr.Scope, false)
@@ -73,6 +63,24 @@ func (s *Server) handleMailboxSend(id json.RawMessage, args map[string]any) resp
 			from = mailboxFromStamp(identity, "", true)
 		}
 	}
+
+	// Universal send + always-on reply-id (Decision 11): every send opens/
+	// refreshes the sender's own return channel, regardless of whether it
+	// also holds a durable slug. The same locked write records the target as
+	// one of the caller's correspondents; a slug target's presence metadata
+	// is read here, before the reply lock.
+	counterparty := wsmailbox.ReplyIDPrefix + addr.ReplyID
+	if addr.Kind == wsmailbox.AddressSlug {
+		counterparty = addr.Name + "@" + string(addr.Scope)
+	}
+	replyID, err := s.publishReplyID(sessionKey, entry.root, ownNamed, mailboxContactFor(counterparty, entry.root))
+	if err != nil {
+		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
+	}
+	s.markMailboxReplyOpened(sessionKey)
+
+	now := mailboxNowString()
+
 	replyTo := ""
 	if from == "" {
 		replyTo = wsmailbox.ReplyIDPrefix + replyID
@@ -140,9 +148,11 @@ func (s *Server) handleMailboxRecv(id json.RawMessage, args map[string]any) resp
 	// pending the real disk write — risks reporting a message as delivered
 	// while it is still sitting in the on-disk queue, causing a duplicate
 	// delivery on the next recv.
+	ownNamed := ""
 	if isOwner, identity, oerr := s.mailboxOwnerCheck(sessionKey, entry.root); oerr != nil {
 		readErrs = append(readErrs, fmt.Errorf("named-inbox owner check: %w", oerr))
 	} else if isOwner {
+		ownNamed = identity.address()
 		if path, perr := wsmailbox.PathForScope(identity.Scope, entry.root); perr != nil {
 			readErrs = append(readErrs, fmt.Errorf("named-inbox path: %w", perr))
 		} else {
@@ -201,6 +211,7 @@ func (s *Server) handleMailboxRecv(id json.RawMessage, args map[string]any) resp
 	}
 
 	sort.SliceStable(drained, func(i, j int) bool { return drained[i].SentAt < drained[j].SentAt })
+	s.recordMailboxRecvContacts(sessionKey, entry.root, ownNamed, drained)
 
 	if wantsJSON(args) {
 		return toolJSONResponse(id, drained, nil)
@@ -219,14 +230,56 @@ func (s *Server) handleMailboxRecv(id json.RawMessage, args map[string]any) resp
 	return toolTextResponse(id, b.String(), nil)
 }
 
+// recordMailboxRecvContacts records each drained envelope's counterparty
+// (its From, else its ReplyTo — the handle recv displays and replies to) as
+// one of the caller's correspondents; publishReplyID skips the caller's own
+// reply-id and owned named inbox. Nothing drained records nothing and
+// creates no reply-id entry. A failed write is logged, never surfaced: the
+// drained mail has already left its queue and must still be returned.
+func (s *Server) recordMailboxRecvContacts(sessionKey, root, ownNamed string, drained []wsmailbox.Envelope) {
+	seen := map[string]bool{}
+	var contacts []mailboxContact
+	for _, m := range drained {
+		handle := m.From
+		if handle == "" {
+			handle = m.ReplyTo
+		}
+		if handle == "" || seen[handle] {
+			continue
+		}
+		seen[handle] = true
+		contacts = append(contacts, mailboxContactFor(handle, root))
+	}
+	if len(contacts) == 0 {
+		return
+	}
+	if _, err := s.publishReplyID(sessionKey, root, ownNamed, contacts...); err != nil {
+		appendDebugEvent("mailbox.recv_contact_error", map[string]any{"error": err.Error()})
+	}
+}
+
 // mailboxPeerOut is lookup_peers' per-peer JSON/text shape.
 type mailboxPeerOut struct {
 	Address   string `json:"address"`
 	Harness   string `json:"harness,omitempty"`
 	Cwd       string `json:"cwd,omitempty"`
 	StartedAt string `json:"started_at,omitempty"`
+	LastSeen  string `json:"last_seen"`
 	Conflict  bool   `json:"conflict,omitempty"`
 }
+
+// mailboxCorrespondentOut is lookup_peers' per-correspondent JSON/text shape.
+type mailboxCorrespondentOut struct {
+	Address      string `json:"address"`
+	LastExchange string `json:"last_exchange"`
+	Harness      string `json:"harness,omitempty"`
+	Cwd          string `json:"cwd,omitempty"`
+}
+
+// mailboxPeerListCap bounds lookup_peers' named-peer listing per queried
+// scope; dead records are never pruned (out of scope), so the cap is what
+// bounds output.
+const mailboxPeerListCap = 20
 
 func (s *Server) handleMailboxLookupPeers(id json.RawMessage, args map[string]any) response {
 	const tool = "mailbox.lookup_peers"
@@ -268,19 +321,32 @@ func (s *Server) handleMailboxLookupPeers(id json.RawMessage, args map[string]an
 		isOwner = false
 	}
 
+	// Named peers: the most recent records in this scope regardless of
+	// liveness (mail to an explicit WS_MAILBOX name queues and is drained
+	// when that name is reclaimed), newest last_seen first, capped after
+	// self-exclusion. Liveness is not displayed; it only gates the
+	// auto-record exclusion and the conflict marker below.
 	now := mailboxNow()
 	names := make([]string, 0, len(store.Presence))
 	for name := range store.Presence {
 		names = append(names, name)
 	}
-	sort.Strings(names)
+	sort.Slice(names, func(i, j int) bool {
+		a, b := store.Presence[names[i]].LastSeen, store.Presence[names[j]].LastSeen
+		if a != b {
+			return a > b
+		}
+		return names[i] < names[j]
+	})
 	var peers []mailboxPeerOut
 	selfConflict := false
 	for _, name := range names {
 		p := store.Presence[name]
-		if !mailboxPresenceLive(p, now) {
-			continue // lookup_peers filters dead peers (Decision: liveness)
-		}
+		live := mailboxPresenceLive(p, now)
+		// A conflict is defined only between live processes (the dead-PID
+		// override in mailboxPresenceLive), so a non-live record never
+		// carries the marker even when its stored flag is set.
+		conflict := p.Conflict && live
 		// Self-exclusion (260913-bug-mailbox-lookup-peers-self-leak): the
 		// caller's own registered named inbox must surface only under
 		// self, never inside peers[]. A caller's own reply-id never faces
@@ -288,7 +354,7 @@ func (s *Server) handleMailboxLookupPeers(id json.RawMessage, args map[string]an
 		// registry, not this scope's Presence map); a named inbox shares
 		// this same Presence map with every other name in scope, so it
 		// needs an explicit exclusion by owned identity (name+scope)
-		// instead. This only ever drops the caller's own live entry — a
+		// instead. This only ever drops the caller's own entry — a
 		// genuinely distinct second name (or a conflicted duplicate of a
 		// name this session does not own) is untouched.
 		if isOwner && identity.Scope == scope && name == identity.Name {
@@ -300,11 +366,19 @@ func (s *Server) handleMailboxLookupPeers(id json.RawMessage, args map[string]an
 			// the owner is the party that most needs the warning — so
 			// relocate it into self instead (repair of the self-leak
 			// hotfix, which dropped the entry without relocating this).
-			selfConflict = p.Conflict
+			selfConflict = conflict
+			continue
+		}
+		// A WS_MAILBOX_AUTO stem is re-minted on restart, so mail to a dead
+		// auto address is never drained: omit it.
+		if p.Auto && !live {
+			continue
+		}
+		if len(peers) == mailboxPeerListCap {
 			continue
 		}
 		peers = append(peers, mailboxPeerOut{
-			Address: name + "@" + string(scope), Harness: p.Harness, Cwd: p.Cwd, StartedAt: p.StartedAt, Conflict: p.Conflict,
+			Address: name + "@" + string(scope), Harness: p.Harness, Cwd: p.Cwd, StartedAt: p.StartedAt, LastSeen: p.LastSeen, Conflict: conflict,
 		})
 	}
 
@@ -323,14 +397,30 @@ func (s *Server) handleMailboxLookupPeers(id json.RawMessage, args map[string]an
 		// inbox either — publishes the caller's reply-id (the same
 		// channel-open a send performs) rather than returning an address
 		// this particular session cannot actually use.
-		if replyID, rerr := s.publishReplyID(sessionKey); rerr == nil {
+		if replyID, rerr := s.publishReplyID(sessionKey, entry.root, ""); rerr == nil {
 			s.markMailboxReplyOpened(sessionKey)
 			self["reply_id"] = wsmailbox.ReplyIDPrefix + replyID
 		}
 	}
 
+	// Correspondents: only the caller's own exchange history, read from its
+	// reply-id entry in the machine-tier registry, so it ignores scope.
+	// Every entry is an address the caller already held or was handed
+	// (delivery, not enumeration): other sessions' reply-ids stay
+	// undiscoverable.
+	correspondents := []mailboxCorrespondentOut{}
+	if path, perr := wsmailbox.ReplyRegistryPath(); perr == nil {
+		if registry, lerr := wsmailbox.LoadReplyStore(path); lerr == nil {
+			for _, c := range wsmailbox.SortedContacts(registry.Entries[s.mailboxReplyID(sessionKey)].Contacts) {
+				correspondents = append(correspondents, mailboxCorrespondentOut{
+					Address: c.Address, LastExchange: c.LastExchange, Harness: c.Harness, Cwd: c.Cwd,
+				})
+			}
+		}
+	}
+
 	if wantsJSON(args) {
-		return toolJSONResponse(id, map[string]any{"self": self, "peers": peers}, nil)
+		return toolJSONResponse(id, map[string]any{"self": self, "peers": peers, "correspondents": correspondents}, nil)
 	}
 	var b strings.Builder
 	if addr, ok := self["address"].(string); ok {
@@ -347,7 +437,7 @@ func (s *Server) handleMailboxLookupPeers(id json.RawMessage, args map[string]an
 		fmt.Fprintf(&b, "self: %s (reply-id only; no durable inbox)\n", rid)
 	}
 	if len(peers) == 0 {
-		b.WriteString("no live peers\n")
+		b.WriteString("no peers\n")
 	}
 	for _, p := range peers {
 		line := p.Address
@@ -360,8 +450,25 @@ func (s *Server) handleMailboxLookupPeers(id json.RawMessage, args map[string]an
 		if p.StartedAt != "" {
 			line += " started_at=" + p.StartedAt
 		}
+		if p.LastSeen != "" {
+			line += " last_seen=" + p.LastSeen
+		}
 		if p.Conflict {
 			line += " CONFLICT: multiple live processes claim this name"
+		}
+		b.WriteString(line + "\n")
+	}
+	b.WriteString("correspondents:\n")
+	if len(correspondents) == 0 {
+		b.WriteString("no correspondents\n")
+	}
+	for _, c := range correspondents {
+		line := c.Address + " last_exchange=" + c.LastExchange
+		if c.Harness != "" {
+			line += " harness=" + c.Harness
+		}
+		if c.Cwd != "" {
+			line += " cwd=" + c.Cwd
 		}
 		b.WriteString(line + "\n")
 	}

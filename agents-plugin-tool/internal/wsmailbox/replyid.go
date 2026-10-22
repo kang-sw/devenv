@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -31,8 +32,71 @@ func ReplyID(callerSessionKey string) string {
 // registry knows a reply-id is "live" purely from LastSeen recency,
 // refreshed on every send / session-aware call that touches it (Decision
 // 11's lazy expiry).
+//
+// Harness/Cwd describe the registering session (descriptive only, never
+// gating), so a correspondent that knows this reply-id can tell sessions
+// apart. Contacts is this session's own correspondence history, keyed by
+// the literal counterparty address ("id:<reply-id>" or "slug@scope"); it is
+// reaped together with the entry and bounded by MaxContacts.
 type ReplyEntry struct {
-	LastSeen string `json:"last_seen"`
+	LastSeen string             `json:"last_seen"`
+	Harness  string             `json:"harness,omitempty"`
+	Cwd      string             `json:"cwd,omitempty"`
+	Contacts map[string]Contact `json:"contacts,omitempty"`
+}
+
+// Contact is one counterparty the owning session exchanged mail with.
+// LastExchange is the owning session's own send/recv time, not the
+// envelope's sent_at; Harness/Cwd are the counterparty's metadata as known
+// at that exchange (empty when unknown).
+type Contact struct {
+	LastExchange string `json:"last_exchange"`
+	Harness      string `json:"harness,omitempty"`
+	Cwd          string `json:"cwd,omitempty"`
+}
+
+// MaxContacts bounds one entry's correspondence history: a long-lived
+// session's entry is never reaped, so the history is trimmed to the most
+// recent MaxContacts on every write.
+const MaxContacts = 20
+
+// ContactRecord is one Contacts entry with its address key, as returned by
+// SortedContacts.
+type ContactRecord struct {
+	Address string
+	Contact
+}
+
+// SortedContacts returns contacts ordered by LastExchange newest first, ties
+// broken by address for determinism. LastExchange values are RFC3339 UTC
+// stamps, so lexical order is chronological order.
+func SortedContacts(contacts map[string]Contact) []ContactRecord {
+	out := make([]ContactRecord, 0, len(contacts))
+	for addr, c := range contacts {
+		out = append(out, ContactRecord{Address: addr, Contact: c})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].LastExchange != out[j].LastExchange {
+			return out[i].LastExchange > out[j].LastExchange
+		}
+		return out[i].Address < out[j].Address
+	})
+	return out
+}
+
+// RecordContact upserts address into e.Contacts and trims the history to
+// the MaxContacts most recent entries.
+func (e *ReplyEntry) RecordContact(address string, c Contact) {
+	if e.Contacts == nil {
+		e.Contacts = map[string]Contact{}
+	}
+	e.Contacts[address] = c
+	if len(e.Contacts) <= MaxContacts {
+		return
+	}
+	for _, rec := range SortedContacts(e.Contacts)[MaxContacts:] {
+		delete(e.Contacts, rec.Address)
+	}
 }
 
 // ReplyStore is the machine-tier reply-id registry: one entry + one queue
