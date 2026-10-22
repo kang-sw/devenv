@@ -113,6 +113,7 @@ export function rulesPrompt(style: string, lang: string | undefined): string {
     'subtitle: the call\'s target as a noun phrase (path, command, query, URL, ticket stem), at most 60 characters, shortened by cutting the middle of a path rather than its file name; "" when there is none.',
     'intention: the purpose, taken from the conversation where it says: what the call tries to learn or change, not how. "where X is defined", not "runs grep for X".',
     "result: what came back, the outcome first: counts, the value found, files changed, tests passed or failed; for a failure, the error's gist; for empty output, that it was empty. Never restate the intention.",
+    'A file change has an output opening with "edit", "create" or "update", the path and +added -removed line counts, then its diff hunks. Its subtitle is the path; its result says what changed in the content: which function, section or setting and how ("nil check added to parse()", "FLUSH_MS 1500 -> 1000"), then the line counts. Never only "file updated".',
     'summary: the run as a whole: first what it set out to do, taken from the conversation where it says, then what came of it, naming a failure that mattered; not a list of the calls. "parser nil check added, tests pass", not "3 files read, tests pass".',
     `Write intention, result and summary ${language}. Keep identifiers, paths, commands, code and error text verbatim.`,
     style,
@@ -129,6 +130,41 @@ export function stringify(value: unknown): string {
   } catch {
     return String(value)
   }
+}
+
+/**
+ * A file-changing call's output as the caption reads it: the change, not the
+ * record. Edit and Write answer with the whole original file beside the patch,
+ * which crowds the patch out of a clipped field; this keeps the path, the kind
+ * of change, the line counts and the diff hunks. Undefined for any other result.
+ */
+export function fileChange(result: unknown): string | undefined {
+  if (typeof result !== 'object' || result === null) return undefined
+  const record = result as Record<string, unknown>
+  if (typeof record.filePath !== 'string' || !Array.isArray(record.structuredPatch)) return undefined
+  const kind = record.type === 'create' || record.type === 'update' ? record.type : 'edit'
+  const hunks: string[] = []
+  let added = 0
+  let removed = 0
+  for (const hunk of record.structuredPatch as Array<Record<string, unknown>>) {
+    const lines = Array.isArray(hunk?.lines) ? hunk.lines.map(String) : []
+    hunks.push(`@@ -${String(hunk?.oldStart)},${String(hunk?.oldLines)} +${String(hunk?.newStart)},${String(hunk?.newLines)} @@`, ...lines)
+    for (const line of lines) {
+      if (line.startsWith('+')) added += 1
+      else if (line.startsWith('-')) removed += 1
+    }
+  }
+  // A new file has no patch: its lines are the content the input carries.
+  if (kind === 'create' && hunks.length === 0 && typeof record.content === 'string') {
+    added = record.content.split('\n').length - (record.content.endsWith('\n') ? 1 : 0)
+  }
+  const notes = [
+    record.replaceAll === true ? 'all occurrences' : '',
+    record.userModified === true ? 'user modified' : '',
+    record.staged === true ? 'held for review, file unchanged' : '',
+  ].filter(Boolean)
+  const head = `${kind} ${record.filePath}  +${added} -${removed}${notes.length > 0 ? ` (${notes.join(', ')})` : ''}`
+  return [head, ...hunks].join('\n')
 }
 
 /** The reply's JSON array of items, or none when it does not parse. */
@@ -346,7 +382,7 @@ export type Captions = {
   /** The settings in force. */
   settings: () => CaptionSettings
   /** A tool.call as it settled beneath the capture: keeps a main-thread call's raw text. */
-  captured: (call: Record<string, unknown>, res: { result?: unknown; deny?: string }) => void
+  captured: (call: Record<string, unknown>, res: { result?: unknown; deny?: string; text?: string }) => void
   /** A lone call's caption, by its tool_use_id. */
   toolCaption: (id: string) => ToolCaption | undefined
   /** A run's caption, by its unit key. */
@@ -595,8 +631,11 @@ export function createCaptions(): Captions {
       const { tool: _tool, tool_use_id: id, agentId: _agent, requestMeta: _meta, consent: _consent, ...args } = call
       if (typeof id !== 'string') return
       const input = stringify(args)
-      const output = stringify(res.result)
-      captured.set(id, { input, output, bytes: input.length + output.length })
+      const output = fileChange(res.result) ?? stringify(res.result)
+      // The size is what the lead's context holds: the input it wrote and the
+      // text it read, not the tool's record (an Edit's holds the whole file).
+      const read = typeof res.text === 'string' ? res.text : output
+      captured.set(id, { input, output, bytes: input.length + read.length })
       if (captured.size > CAPTURED_LIMIT) captured.delete(captured.keys().next().value as string)
     },
     request(unit) {

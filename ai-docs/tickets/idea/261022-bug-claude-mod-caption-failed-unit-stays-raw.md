@@ -57,6 +57,26 @@ for Edit; a debug log of that hook's props on a click would show it. This is
 information loss, so it ranks above the cosmetic cases. Also decide whether
 file-edit calls should keep their diff while captioned.
 
+Cause confirmed 2026-10-22 (probe mod, debug.log after 13:05:36): every Bash
+call rendered inside a `ToolGroup` (45 group-call entries, all Bash), while
+every Write/Edit call rendered only as a standalone `ToolUse` (16 renders, no
+group). The click and hover highlight belong to the engine's group line (a
+click unfolds the group, mod API `ToolGroup.isExpanded`); a standalone
+`ToolUse` row has no click-to-expand, and its `isExpanded` comes only from
+ctrl+o or `--verbose`. Without the mod an Edit diff is always shown, so nothing
+needed a click; once the caption empties its `ToolResult`, only ctrl+o brings it
+back. The user saw no hover highlight on Edit rows, consistent with this. The
+fix is therefore a mod choice, not an engine signal to wait for: keep the
+`ToolResult` for file-mutating tools, or draw a pressable caption of the mod's
+own that toggles the raw row.
+
+Decided 2026-10-22 (user): neither. The diff stays hidden (mostly noise in the
+transcript); the caption describes the change instead. Landed with the
+file-change caption commit: an Edit/Write output reaches the summarizer as its
+path, change kind, line counts and diff hunks (not the whole original file),
+and a prompt rule asks for what changed in the content. ctrl+o remains the way
+to the raw diff. This item is closed; the raw-row item above stays open.
+
 ## Open
 
 - Capture a raw row that never swaps in with the debug lines that landed with

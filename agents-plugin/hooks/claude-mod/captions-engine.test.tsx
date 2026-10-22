@@ -5,6 +5,7 @@ import {
   DEFAULT_STYLE,
   displayToolName,
   ENABLED_KEY,
+  fileChange,
   FLUSH_MS,
   LANG_KEY,
   MODEL_KEY,
@@ -46,6 +47,8 @@ function world(on: On, opts: { config?: Record<string, unknown>; failKeys?: stri
     invalidated: [] as string[],
     /** The debug lines the mod wrote. */
     logs: [] as string[],
+    /** What tool.call answers for a tool named here; any other tool answers Bash-like output. */
+    results: {} as Record<string, { result: unknown; text?: string }>,
     /** The config values config_get answers; a key absent here reads as unset. */
     config: { [ENABLED_KEY]: true, ...(opts.config ?? {}) } as Record<string, unknown>,
   }
@@ -83,7 +86,7 @@ function world(on: On, opts: { config?: Record<string, unknown>; failKeys?: stri
     w.invalidated.push(e.event)
     return { value: undefined }
   })
-  on('tool.call', ($, e) => ({ result: { stdout: `out of ${String((e as { command?: unknown }).command ?? e.tool)}`, stderr: '', interrupted: false } }))
+  on('tool.call', ($, e) => w.results[e.tool] ?? ({ result: { stdout: `out of ${String((e as { command?: unknown }).command ?? e.tool)}`, stderr: '', interrupted: false } }) as never)
   on('model.complete', (_, e) => {
     w.requests.push({ model: e.model, prompt: String(e.prompt), effort: e.effort, timeoutMs: e.timeoutMs, blocks: e.promptBlocks ?? [] })
     const reply = w.replies.shift() ?? { text: '[]' }
@@ -547,6 +550,52 @@ test('ws: a caption row names an MCP tool as the server spells it', async ($, on
   await isRaw($, row)
   await tick(w)
   expect(await find($, row, /plugin:ws:ws/)).toBe('plugin:ws:ws/tickets.release  release lease')
+})
+
+test('ws: a file edit sends its change, not the original file, and its size is what the lead read', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  if (!isWs(w)) return
+  const original = `${'filler line\n'.repeat(400)}const FLUSH_MS = 1500\n`
+  const text = 'The file timing.ts has been updated successfully.'
+  w.results.Edit = {
+    result: {
+      filePath: 'timing.ts',
+      oldString: 'const FLUSH_MS = 1500',
+      newString: 'const FLUSH_MS = 1000',
+      originalFile: original,
+      structuredPatch: [{ oldStart: 401, oldLines: 1, newStart: 401, newLines: 1, lines: ['-const FLUSH_MS = 1500', '+const FLUSH_MS = 1000'] }],
+      userModified: false,
+      replaceAll: false,
+    },
+    text,
+  }
+  w.replies.push({ text: '[{"id":"u1","subtitle":"timing.ts","intention":"주기 단축","result":"FLUSH_MS 1500 -> 1000, +1 -1"}]' })
+  const input = { file_path: 'timing.ts', old_string: 'const FLUSH_MS = 1500', new_string: 'const FLUSH_MS = 1000' }
+  await $.tool.call({ tool: 'Edit', ...input, tool_use_id: 'toolu_e' } as never)
+  const row = toolUse(w, 'toolu_e', { tool: 'Edit', input })
+  await isRaw($, row)
+  await tick(w)
+  const prompt = w.requests[0]!.prompt
+  expect(prompt).toContain('edit timing.ts  +1 -1')
+  expect(prompt).toContain('+const FLUSH_MS = 1000')
+  expect(prompt).not.toContain('filler line')
+  expect(prompt).toContain('Never only "file updated"')
+  const size = JSON.stringify(input).length + text.length
+  expect(await find($, row, /KB/)).toContain(`${(size / 1024).toFixed(1)} KB`)
+})
+
+test('file changes: an edit, a new file and an overwrite read as the change; other results are not one', () => {
+  const hunk = { oldStart: 3, oldLines: 2, newStart: 3, newLines: 2, lines: [' keep', '-old', '+new'] }
+  expect(fileChange({ filePath: 'a.go', oldString: 'old', newString: 'new', originalFile: 'x', structuredPatch: [hunk], userModified: false, replaceAll: true })).toBe(
+    'edit a.go  +1 -1 (all occurrences)\n@@ -3,2 +3,2 @@\n keep\n-old\n+new',
+  )
+  expect(fileChange({ type: 'create', filePath: 'n.md', content: 'one\ntwo\nthree\n', structuredPatch: [], originalFile: null })).toBe('create n.md  +3 -0')
+  expect(fileChange({ type: 'update', filePath: 'n.md', content: 'new', structuredPatch: [hunk], originalFile: 'x', userModified: true })).toBe(
+    'update n.md  +1 -1 (user modified)\n@@ -3,2 +3,2 @@\n keep\n-old\n+new',
+  )
+  expect(fileChange({ stdout: 'ok', stderr: '' })).toBeUndefined()
+  expect(fileChange('plain text')).toBeUndefined()
 })
 
 test('display tool names: plugin MCP tools, other MCP servers, and built-ins', () => {
