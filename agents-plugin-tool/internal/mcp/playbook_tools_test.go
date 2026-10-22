@@ -2257,7 +2257,7 @@ func TestPlaybookPrintGoldenLeadTicket(t *testing.T) {
 				// announced defaults, then technical decisions with the reader
 				// hint and their one-line format, then the visibly labeled
 				// policy group closest to the reply.
-				"```text\n# Open Decision Queue\n\n**Announced defaults** - acknowledge once, together with the technical decisions\n(1) Will <do X> - <citation>\n\n**Technical decisions** - acknowledge once, together with the defaults; worth reviewing if you hold the technical picture\n(2) Will <X> over <Y> - <technical reason>\n\n**Policy questions** - answer each\n(3) <one-line decision>\n- <context>\n- <alternative: ...>\n> <recommendation and why>\n```",
+				"```text\n# Open Decision Queue\n\n**Announced defaults** - these follow from existing constraints or earlier decisions, so each has one answer; acknowledge once, together with the technical decisions\n(1) Will <do X> - <citation>\n\n**Technical decisions** - calls I made as the technically best option, with the reason on each line; acknowledge once together with the defaults, or object to any item\n(2) Will <X> over <Y> - <technical reason>\n\n**Policy questions** - answer each\n(3) <one-line decision>\n- <context>\n- <alternative: ...>\n> <recommendation and why>\n```",
 			} {
 				if !strings.Contains(body, want) {
 					t.Errorf("body missing lead-ticket text %q:\n%s", want, body)
@@ -2322,7 +2322,7 @@ func TestPlaybookPrintGoldenLeadTicket(t *testing.T) {
 				"Report the items settled this round in one line",
 				"items settled in earlier rounds are not repeated",
 				"This per-round settlement report is not the announced or technical group",
-				"The `# Open Decision Queue` heading, the three group labels, and the status tags stay in English; item content follows the user's conversation language",
+				"The `# Open Decision Queue` heading, the three bold group label names, and the status tags stay in English; the explanation after each group label follows the user's conversation language, as item content does",
 				// Trace before write.
 				"trace it: apply the change to the ticket as written and follow its consequences through `## Decisions`, `## Constraints`, the phases, the verification expectations, `## Prior Decisions`",
 				"The trace precedes recording the change anywhere in the ticket, including as a new queue item",
