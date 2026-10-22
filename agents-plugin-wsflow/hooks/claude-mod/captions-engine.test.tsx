@@ -47,8 +47,6 @@ function world(on: On, opts: { config?: Record<string, unknown>; failKeys?: stri
     compactAnswers: 0,
     /** The events the mod asked the engine to draw again. */
     invalidated: [] as string[],
-    /** The debug lines the mod wrote. */
-    logs: [] as string[],
     /** What tool.call answers for a tool named here; any other tool answers Bash-like output. */
     results: {} as Record<string, { result: unknown; text?: string }>,
     /** The config values config_get answers; a key absent here reads as unset. */
@@ -67,10 +65,7 @@ function world(on: On, opts: { config?: Record<string, unknown>; failKeys?: stri
   on('store.get', () => ({ value: undefined }))
   on('store.set', () => ({ value: undefined }))
   on('store.delete', () => ({ value: undefined }))
-  on('ui.log', ($, e) => {
-    w.logs.push(e.text)
-    return { value: undefined }
-  })
+  on('ui.log', () => ({ value: undefined }))
   on('session.id', () => ({ value: 'sess-1' }))
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.end', ($, e) => ({ sessionId: e.sessionId }))
@@ -404,9 +399,6 @@ test('ws: a failed request is not retried', async ($, on) => {
   await tick(w)
   await tick(w)
   expect(w.requests.length).toBe(1)
-  expect(w.logs).toContain('ws captions: queued toolu_1')
-  expect(w.logs.some((line) => /^ws captions: request not answered: empty-reply after \d+ ms$/.test(line))).toBe(true)
-  expect(w.logs).toContain('ws captions: left raw, no answer: toolu_1')
 })
 
 test('ws: a row drawn before its call has run stays raw and unsent, then is captioned once it resolves', async ($, on) => {
@@ -451,24 +443,6 @@ test('ws: a group holding a call that has not run stays raw and unsent until eve
   await tick(w)
   expect(w.requests.length).toBe(1)
   expect(await find($, group(w, { ...props, calls }), /파일 수정/)).toContain('목록 확인 후 파일 수정')
-})
-
-test('ws: reply items naming no unit, missing fields, or absent each leave a debug line', async ($, on) => {
-  const w = world(on)
-  await start($, w)
-  if (!isWs(w)) return
-  w.replies.push({ text: '[{"id":"u9","intention":"x","result":"y"},{"id":"u1","intention":"only intention"}]' })
-  await isRaw($, toolUse(w, 'toolu_a'))
-  await isRaw($, toolUse(w, 'toolu_b'))
-  await tick(w)
-  expect(w.requests.length).toBe(1)
-  expect(w.logs).toContain('ws captions: queued toolu_a')
-  expect(w.logs).toContain('ws captions: queued toolu_b')
-  expect(w.logs).toContain(`ws captions: reply: ${'[{"id":"u9","intention":"x","result":"y"},{"id":"u1","intention":"only intention"}]'}`)
-  expect(w.logs).toContain('ws captions: reply item skipped, unknown id "u9"')
-  expect(w.logs).toContain('ws captions: reply item skipped, missing fields: toolu_a (has id,intention)')
-  expect(w.logs).toContain('ws captions: left raw, absent from the reply: toolu_b (reply ids "u9","u1", 83 chars)')
-  expect(w.logs.some((line) => line.startsWith('ws captions: left raw, absent from the reply: toolu_a'))).toBe(false)
 })
 
 test('ws: a subtitle the reply leaves blank is read off the call input', async ($, on) => {

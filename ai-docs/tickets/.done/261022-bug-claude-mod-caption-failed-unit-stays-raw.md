@@ -3,6 +3,7 @@ title: Claude mod captions - raw rows that never caption, and Edit diffs a click
 related:
   261022-feat-claude-mod-tool-call-captions: the feature these issues are in
   261022-bug-claude-mod-caption-prerun-row: the confirmed empty-caption cause, split out and fixed there
+completed: 2026-10-22
 ---
 
 # Claude mod captions - raw rows that never caption, and Edit diffs a click cannot reopen
@@ -104,3 +105,17 @@ to the raw diff. This item is closed; the raw-row item above stays open.
 ### Phase 1: Confirm the causes, then fix
 
 Confirm each cause above with a debug log before choosing its fix.
+
+### Result (26d64b142) - 2026-10-22
+
+Raw rows: the cause was the summarizer reply breaking the contract (units
+dropped or given the wrong fields), confirmed with the debug lines from
+`261022-bug-claude-mod-caption-prerun-row`. The fix is the closing
+`answerPrompt` block after UNITS (04a515f31); a later dogfood of about a dozen
+requests had no dropped unit, and the user judged the issue resolved. A
+lenient parse or bounded retry was not needed. The diagnostic debug lines
+(queued keys, skipped or absent reply items, reply text, elapsed time) were
+removed afterwards at the user's request; `request not answered` and
+`request failed` remain. Edit click: decided as recorded above (diff stays
+hidden, the caption describes the change, d66a79399). Blank subtitles a reply
+leaves are now filled from the call input (26d64b142).
