@@ -169,7 +169,7 @@ export function fileChange(result: unknown): string | undefined {
     }
   }
   // A new file has no patch: its lines are the content the input carries.
-  if (kind === 'create' && hunks.length === 0 && typeof record.content === 'string') {
+  if (kind === 'create' && hunks.length === 0 && typeof record.content === 'string' && record.content !== '') {
     added = record.content.split('\n').length - (record.content.endsWith('\n') ? 1 : 0)
   }
   const notes = [
@@ -256,6 +256,15 @@ export function serializeMessage(message: ApiMessageLike): string {
 
 type Captured = { input: string; output: string; bytes: number }
 
+/** A tool_result's content as the model read it: the string, or its text blocks joined. */
+function resultText(content: unknown): string {
+  if (!Array.isArray(content)) return stringify(content)
+  return content
+    .map((block) => (typeof block === 'object' && block !== null && (block as ApiBlock).type === 'text' ? stringify((block as ApiBlock).text) : ''))
+    .filter(Boolean)
+    .join('\n')
+}
+
 /** What the transcript holds for each call, by tool_use_id: the fallback for a call captured before a reload. */
 function transcriptCalls(api: readonly ApiMessageLike[]): Map<string, Captured> {
   const inputs = new Map<string, string>()
@@ -266,7 +275,7 @@ function transcriptCalls(api: readonly ApiMessageLike[]): Map<string, Captured> 
       if (block.type !== 'tool_result') continue
       const id = stringify(block.tool_use_id)
       const input = inputs.get(id) ?? ''
-      const output = stringify(block.content)
+      const output = resultText(block.content)
       calls.set(id, { input, output, bytes: input.length + output.length })
     }
   }
@@ -501,6 +510,8 @@ export function createCaptions(): Captions {
       lang: nonBlank(lang),
     }
     log(`on: model ${current.model}, window ${current.contextTokens} tokens, language ${current.lang ?? '(the user\'s)'}`)
+    // Rows drawn while the read was pending answered raw, and a repaint reuses that answer.
+    bound.redraw()
   }
 
   /**

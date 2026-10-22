@@ -30,7 +30,7 @@ const USAGE = { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 
 const BASE = { isRunning: false, isErrored: false, isInterrupted: false, output: 'done' }
 
 type Message = { role: 'user' | 'assistant'; content: Array<Record<string, unknown>> }
-type Reply = { text: string; tokens?: (prompt: string) => number } | 'unanswered'
+type Reply = { text: string; tokens?: (prompt: string) => number } | 'unanswered' | 'reject'
 
 function world(on: On, opts: { config?: Record<string, unknown>; failKeys?: string[]; messages?: Message[] } = {}) {
   const clock = mock.clock(on)
@@ -88,6 +88,7 @@ function world(on: On, opts: { config?: Record<string, unknown>; failKeys?: stri
     w.requests.push({ model: e.model, prompt: String(e.prompt), effort: e.effort, timeoutMs: e.timeoutMs, blocks: e.promptBlocks ?? [] })
     const reply = w.replies.shift() ?? { text: '[]' }
     if (reply === 'unanswered') return { value: { isAnswered: false, reason: 'empty-reply', usage: USAGE } }
+    if (reply === 'reject') throw new Error('gateway down')
     const tokens = reply.tokens?.(String(e.prompt)) ?? 1
     return { value: { isAnswered: true, text: reply.text, usage: { ...USAGE, input_tokens: tokens } } }
   })
@@ -144,6 +145,9 @@ test('ws: a lone call is captioned once drawn, collapsed only, and its result ro
   await start($, w)
   if (!isWs(w)) return
   w.replies.push({ text: '[{"id":"u1","subtitle":"ls","intention":"파일 목록 확인","result":"두 개"}]' })
+  // Turning on redraws: rows drawn while the settings were read answered raw.
+  expect(w.invalidated).toEqual(['ui.render'])
+  w.invalidated.length = 0
 
   await $.tool.call({ tool: 'Bash', command: 'ls', tool_use_id: 'toolu_1' } as never)
   await tick(w)
@@ -247,6 +251,66 @@ test('ws: the prompt carries the conversation and pivots past the window', async
   expect(w.requests[1]!.prompt).toContain(OMITTED_LINE)
   expect(w.requests[1]!.prompt).not.toContain('find the parser')
   expect(w.requests[1]!.prompt).toContain('big3')
+})
+
+test('ws: the history prefix stays the same between requests until a pivot', async ($, on) => {
+  const messages: Message[] = [
+    { role: 'user', content: [{ type: 'text', text: 'one' }] },
+    { role: 'assistant', content: [{ type: 'text', text: 'two' }] },
+  ]
+  const w = world(on, { messages })
+  await start($, w)
+  if (!isWs(w)) return
+  await isRaw($, toolUse(w, 'toolu_p1'))
+  await tick(w)
+  messages.push({ role: 'user', content: [{ type: 'text', text: 'three' }] }, { role: 'assistant', content: [{ type: 'text', text: 'four' }] })
+  await isRaw($, toolUse(w, 'toolu_p2'))
+  await tick(w)
+  expect(w.requests.length).toBe(2)
+  const [first, second] = [w.requests[0]!.blocks.map((b) => b.text), w.requests[1]!.blocks.map((b) => b.text)]
+  // All but the uncached tail opens the next request byte for byte.
+  expect(second.slice(0, first.length - 1)).toEqual(first.slice(0, -1))
+  expect(second.length).toBe(first.length + 2)
+})
+
+test('ws: the measured tokens per character move the pivot', async ($, on) => {
+  const messages: Message[] = [{ role: 'user', content: [{ type: 'text', text: 'cal start' }] }]
+  const w = world(on, { messages, config: { [CONTEXT_KEY]: 2000 } })
+  await start($, w)
+  if (!isWs(w)) return
+  // Four tokens per character: far above the 0.5 the mirror assumes before a reply.
+  const reply = { text: '[]', tokens: (prompt: string) => prompt.length * 4 }
+  w.replies.push(reply, reply)
+  await isRaw($, toolUse(w, 'toolu_k1'))
+  await tick(w)
+  expect(w.requests[0]!.prompt).not.toContain(OMITTED_LINE)
+
+  const mid = (role: 'user' | 'assistant', mark: string): Message => ({ role, content: [{ type: 'text', text: `${mark} ${'y'.repeat(300)}` }] })
+  messages.push(mid('assistant', 'mid1'), mid('user', 'mid2'), mid('assistant', 'mid3'), mid('user', 'mid4'))
+  // About 1000 history characters: 500 tokens at the assumed rate (no pivot), 4000 at the measured one.
+  await isRaw($, toolUse(w, 'toolu_k2'))
+  await tick(w)
+  expect(w.requests[1]!.prompt).toContain(OMITTED_LINE)
+  expect(w.requests[1]!.prompt).not.toContain('cal start')
+})
+
+test('ws: a transcript shorter than the mirror read starts the mirror over', async ($, on) => {
+  const messages: Message[] = [
+    { role: 'user', content: [{ type: 'text', text: 'alpha old' }] },
+    { role: 'assistant', content: [{ type: 'text', text: 'beta old' }] },
+    { role: 'user', content: [{ type: 'text', text: 'gamma old' }] },
+  ]
+  const w = world(on, { messages })
+  await start($, w)
+  if (!isWs(w)) return
+  await isRaw($, toolUse(w, 'toolu_s1'))
+  await tick(w)
+  expect(w.requests[0]!.prompt).toContain('alpha old')
+  messages.splice(0, messages.length, { role: 'user', content: [{ type: 'text', text: 'delta fresh' }] })
+  await isRaw($, toolUse(w, 'toolu_s2'))
+  await tick(w)
+  expect(w.requests[1]!.prompt).toContain('delta fresh')
+  expect(w.requests[1]!.prompt).not.toContain('alpha old')
 })
 
 test('ws: a call captured before a reload takes its output and size from the transcript', async ($, on) => {
@@ -396,6 +460,82 @@ test('ws: a failed request is not retried', async ($, on) => {
   await tick(w)
   expect(w.requests.length).toBe(1)
   expect(await isRaw($, toolUse(w, 'toolu_1'))).toBe(true)
+  await tick(w)
+  await tick(w)
+  expect(w.requests.length).toBe(1)
+})
+
+test('ws: a rejected request leaves its unit raw, and later units still flush', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  if (!isWs(w)) return
+  w.replies.push('reject', { text: '[{"id":"u1","subtitle":"pwd","intention":"위치 확인","result":"/tmp"}]' })
+  await isRaw($, toolUse(w, 'toolu_x1'))
+  await tick(w)
+  expect(w.requests.length).toBe(1)
+  expect(await isRaw($, toolUse(w, 'toolu_x1'))).toBe(true)
+  await isRaw($, toolUse(w, 'toolu_x2'))
+  await tick(w)
+  expect(w.requests.length).toBe(2)
+  expect(w.requests[1]!.prompt).not.toContain('toolu_x1')
+  expect(await find($, toolUse(w, 'toolu_x2'), /위치/)).toBe('위치 확인')
+})
+
+test('ws: a request holds at most 24 calls and never splits a unit', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  if (!isWs(w)) return
+  const callsIn = (prompt: string) => prompt.split('"failed":').length - 1
+  for (let i = 1; i <= 25; i += 1) await isRaw($, toolUse(w, `toolu_b${i}`))
+  await tick(w)
+  expect(callsIn(w.requests[0]!.prompt)).toBe(24)
+  expect(w.requests[0]!.prompt).toContain('"id":"u24"')
+  expect(w.requests[0]!.prompt).not.toContain('"id":"u25"')
+  await tick(w)
+  expect(callsIn(w.requests[1]!.prompt)).toBe(1)
+
+  const run = (prefix: string, n: number) => ({
+    calls: Array.from({ length: n }, (_, i) => ({ ...BASE, tool_use_id: `toolu_${prefix}${i}`, tool: 'Bash', input: { command: 'ls' } })),
+    isActive: false,
+    isExpanded: false,
+    isCallsOnly: true,
+  })
+  await isRaw($, group(w, run('s', 20)))
+  await isRaw($, group(w, run('t', 10)))
+  await tick(w)
+  expect(callsIn(w.requests[2]!.prompt)).toBe(20)
+  await tick(w)
+  expect(callsIn(w.requests[3]!.prompt)).toBe(10)
+})
+
+test('ws: a reply keeps only its well-formed items; the rest stay raw and are not asked again', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  if (!isWs(w)) return
+  // Prose and a fence around the array; u2 answers a lone call with a run's
+  // fields, u4 a run without its summary, u3 is absent, u9 names no unit.
+  w.replies.push({
+    text: 'Here:\n```json\n[{"id":"u1","subtitle":"ls","intention":"목록 확인","result":"세 개"},{"id":"u2","subtitles":["x"],"summary":"wrong shape"},{"id":"u4","subtitles":["a","b"]},{"id":"u9","intention":"x","result":"y"}]\n```',
+  })
+  const run = {
+    calls: [
+      { ...BASE, tool_use_id: 'toolu_m4', tool: 'Bash', input: { command: 'a' } },
+      { ...BASE, tool_use_id: 'toolu_m5', tool: 'Bash', input: { command: 'b' } },
+    ],
+    isActive: false,
+    isExpanded: false,
+    isCallsOnly: true,
+  }
+  for (const id of ['toolu_m1', 'toolu_m2', 'toolu_m3']) await isRaw($, toolUse(w, id))
+  await isRaw($, group(w, run))
+  const before = w.invalidated.length
+  await tick(w)
+  expect(w.requests.length).toBe(1)
+  expect(w.invalidated.length).toBe(before + 1)
+  expect(await find($, toolUse(w, 'toolu_m1'), /세 개/)).toContain('세 개')
+  expect(await isRaw($, toolUse(w, 'toolu_m2'))).toBe(true)
+  expect(await isRaw($, toolUse(w, 'toolu_m3'))).toBe(true)
+  expect(await isRaw($, group(w, run))).toBe(true)
   await tick(w)
   await tick(w)
   expect(w.requests.length).toBe(1)
@@ -594,6 +734,7 @@ test('file changes: an edit, a new file and an overwrite read as the change; oth
   )
   expect(fileChange({ stdout: 'ok', stderr: '' })).toBeUndefined()
   expect(fileChange('plain text')).toBeUndefined()
+  expect(fileChange({ type: 'create', filePath: '/e', content: '', structuredPatch: [] })).toBe('create /e  +0 -0')
 })
 
 test('the closing lines name each unit and the fields its answer takes', () => {
