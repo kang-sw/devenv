@@ -218,8 +218,8 @@ func TestMailboxCorrespondentsFromSendAndRecv(t *testing.T) {
 
 	text := callToolWithKey(t, serverB, 14, keyB, "mailbox.lookup_peers", map[string]any{"scope": "worktree"})
 	wantBlock := "correspondents:\n" +
-		replyA + " last_exchange=" + t3.Format(time.RFC3339) + " harness=codex cwd=" + root + "\n" +
-		"alice@worktree last_exchange=" + t0.Format(time.RFC3339) + " harness=codex cwd=" + root + "\n"
+		replyA + " last_exchange=" + t3.Format(time.RFC3339) + " harness=codex cwd=" + cwd + "\n" +
+		"alice@worktree last_exchange=" + t0.Format(time.RFC3339) + " harness=codex cwd=" + cwd + "\n"
 	if !strings.Contains(text, wantBlock) {
 		t.Fatalf("text correspondents block = %s, want it to contain %s", text, wantBlock)
 	}
