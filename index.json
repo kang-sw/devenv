@@ -589,6 +589,9 @@
     },
     "261022-bug-git-status-shows-lease-of-closed-ticket": {
       "registered_at": "2026-10-22T06:49:06Z"
+    },
+    "261022-feat-claude-mod-tool-call-captions": {
+      "registered_at": "2026-10-22T07:59:29Z"
     }
   }
 }
