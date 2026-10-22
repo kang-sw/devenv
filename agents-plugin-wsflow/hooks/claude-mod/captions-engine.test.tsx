@@ -8,6 +8,7 @@ import {
   ENABLED_KEY,
   fileChange,
   FLUSH_MS,
+  inputSubtitle,
   LANG_KEY,
   MODEL_KEY,
   OMITTED_LINE,
@@ -463,10 +464,30 @@ test('ws: reply items naming no unit, missing fields, or absent each leave a deb
   expect(w.requests.length).toBe(1)
   expect(w.logs).toContain('ws captions: queued toolu_a')
   expect(w.logs).toContain('ws captions: queued toolu_b')
+  expect(w.logs).toContain(`ws captions: reply: ${'[{"id":"u9","intention":"x","result":"y"},{"id":"u1","intention":"only intention"}]'}`)
   expect(w.logs).toContain('ws captions: reply item skipped, unknown id "u9"')
   expect(w.logs).toContain('ws captions: reply item skipped, missing fields: toolu_a (has id,intention)')
   expect(w.logs).toContain('ws captions: left raw, absent from the reply: toolu_b (reply ids "u9","u1", 83 chars)')
   expect(w.logs.some((line) => line.startsWith('ws captions: left raw, absent from the reply: toolu_a'))).toBe(false)
+})
+
+test('ws: a subtitle the reply leaves blank is read off the call input', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  if (!isWs(w)) return
+  w.replies.push({ text: '[{"id":"u1","subtitle":"","intention":"시각 확인","result":"22:25:35"},{"id":"u2","subtitles":["  ","b.txt"],"summary":"두 파일 확인"}]' })
+  await isRaw($, toolUse(w, 'toolu_d', { input: { command: 'date +%T', description: 'Print current time' } }))
+  const calls = [
+    { ...BASE, tool_use_id: 'toolu_g1', tool: 'Bash', input: { command: 'wc -c a.txt' } },
+    { ...BASE, tool_use_id: 'toolu_g2', tool: 'Read', input: { file_path: 'b.txt' } },
+  ]
+  const finished = { calls, isActive: false, isExpanded: false, isCallsOnly: true }
+  await isRaw($, group(w, finished))
+  await tick(w)
+  expect(w.requests.length).toBe(1)
+  expect(await find($, toolUse(w, 'toolu_d', { input: { command: 'date +%T', description: 'Print current time' } }), /date/)).toContain('date +%T')
+  expect(await find($, group(w, finished), /wc -c/)).toContain('wc -c a.txt')
+  expect(await find($, group(w, finished), /b\.txt/)).toContain('b.txt')
 })
 
 test('ws: the mirror starts over when the lead compaction lever lands, and on a main-thread compaction', async ($, on) => {
@@ -609,6 +630,21 @@ test('the closing lines name each unit and the fields its answer takes', () => {
       'u2: run of 3 calls -> {id, subtitles (3), summary}',
     ].join('\n'),
   )
+})
+
+test('input subtitles: the first target field, its first line, the middle cut past 60 characters', () => {
+  expect(inputSubtitle({ command: 'date +%T', description: 'Print current time' })).toBe('date +%T')
+  expect(inputSubtitle({ file_path: '/a/b.ts', command: 'x' })).toBe('/a/b.ts')
+  expect(inputSubtitle({ command: 'git status\ngit log' })).toBe('git status')
+  expect(inputSubtitle({ description: 'Print current time' })).toBe('Print current time')
+  const long = `/very/long/${'d/'.repeat(40)}captions.tsx`
+  const cut = inputSubtitle({ file_path: long })
+  expect(cut.length).toBe(60)
+  expect(cut.endsWith('captions.tsx')).toBe(true)
+  expect(cut).toContain('…')
+  expect(inputSubtitle({ session_key: 'k' })).toBe('')
+  expect(inputSubtitle({ command: '   ' })).toBe('')
+  expect(inputSubtitle('ls')).toBe('')
 })
 
 test('display tool names: plugin MCP tools, other MCP servers, and built-ins', () => {

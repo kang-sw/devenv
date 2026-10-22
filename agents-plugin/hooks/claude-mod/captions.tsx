@@ -58,7 +58,7 @@ export const LANG_KEY = 'workflow.lang'
 export const DEFAULT_MODEL = 'haiku'
 export const DEFAULT_CONTEXT_TOKENS = 200_000
 /** The style layer with no key set or a failed read: the manifest default of STYLE_KEY, which a test pins equal. */
-export const DEFAULT_STYLE = 'Length: intention at most one short sentence; result and summary at most two short sentences each. Style: a terse note style with no subject, no filler, no politeness; in Korean, end on a noun or a plain stem ("정의 위치 확인", "3개 파일에서 발견, foo.go:12 외").'
+export const DEFAULT_STYLE = 'Length: intention at most one short sentence; result at most two short sentences; summary two short sentences, up to four for a run of many calls. Style: a terse note style with no subject, no filler, no politeness; in Korean, end on a noun or a plain stem ("정의 위치 확인", "3개 파일에서 발견, foo.go:12 외").'
 
 /** How often queued units are sent. */
 export const FLUSH_MS = 1500
@@ -110,11 +110,11 @@ export function rulesPrompt(style: string, lang: string | undefined): string {
     'UNITS is a JSON array of {id, calls}, each call {tool, input, output, failed}. A unit of one call is a lone call; a unit of several is a run the agent made back to back.',
     'Answer with only a JSON array, one object per unit, ids copied verbatim, no prose or code fence.',
     'A lone call: {id, subtitle, intention, result}. A run: {id, subtitles, summary}, subtitles holding one subtitle per call in order.',
-    'subtitle: the call\'s target as a noun phrase (path, command, query, URL, ticket stem), at most 60 characters, shortened by cutting the middle of a path rather than its file name; "" when there is none.',
+    'subtitle: the call\'s target as a noun phrase (path, command, query, URL, ticket stem), at most 60 characters, shortened by cutting the middle of a path rather than its file name. A shell command\'s subtitle is the command itself, shortened. "" only when the input names no target at all.',
     'intention: the purpose, taken from the conversation where it says: what the call tries to learn or change, not how. "where X is defined", not "runs grep for X".',
     "result: what came back, the outcome first: counts, the value found, files changed, tests passed or failed; for a failure, the error's gist; for empty output, that it was empty. Never restate the intention.",
     'A file change has an output opening with "edit", "create" or "update", the path and +added -removed line counts, then its diff hunks. Its subtitle is the path; its result says what changed in the content: which function, section or setting and how ("nil check added to parse()", "FLUSH_MS 1500 -> 1000"), then the line counts. Never only "file updated".',
-    'summary: the run as a whole: first what it set out to do, taken from the conversation where it says, then what came of it, naming a failure that mattered; not a list of the calls. "parser nil check added, tests pass", not "3 files read, tests pass".',
+    'summary: the run as a whole: first what it set out to do, taken from the conversation where it says, then what came of it: the findings the outputs show (values, counts, paths, file:line, error text), naming a failure that mattered; not a list of the calls, and not only that a check was done. "parser nil check added, tests pass", not "3 files read, tests pass".',
     `Write intention, result and summary ${language}. Keep identifiers, paths, commands, code and error text verbatim.`,
     style,
   ].join('\n')
@@ -179,6 +179,28 @@ export function fileChange(result: unknown): string | undefined {
   ].filter(Boolean)
   const head = `${kind} ${record.filePath}  +${added} -${removed}${notes.length > 0 ? ` (${notes.join(', ')})` : ''}`
   return [head, ...hunks].join('\n')
+}
+
+/** The input fields that name a call's target, most specific first. */
+const TARGET_FIELDS = ['file_path', 'notebook_path', 'path', 'command', 'pattern', 'url', 'query', 'description']
+const SUBTITLE_CAP = 60
+
+/**
+ * A subtitle read off the call's own input, for a reply that left it blank:
+ * the first target field's first line, the middle cut past 60 characters so a
+ * path keeps its file name. "" when the input names no target.
+ */
+export function inputSubtitle(input: unknown): string {
+  if (typeof input !== 'object' || input === null) return ''
+  const record = input as Record<string, unknown>
+  for (const field of TARGET_FIELDS) {
+    const value = nonBlank(record[field])?.split('\n')[0]?.trim()
+    if (!value) continue
+    if (value.length <= SUBTITLE_CAP) return value
+    const half = (SUBTITLE_CAP - 1) / 2
+    return `${value.slice(0, Math.ceil(half))}…${value.slice(-Math.floor(half))}`
+  }
+  return ''
 }
 
 /** The reply's JSON array of items, or none when it does not parse. */
@@ -564,6 +586,7 @@ export function createCaptions(): Captions {
       log(`left raw, no answer: ${batch.map((unit) => unit.key).join(' ')}`)
       return
     }
+    log(`reply: ${clip(text)}`)
 
     const byLabel = new Map(labelled.map(({ label, unit }) => [label, unit]))
     const bytesOf = (id: string) => seenOf(id)?.bytes ?? 0
@@ -583,7 +606,7 @@ export function createCaptions(): Captions {
           log(`reply item skipped, missing fields: ${unit.key} (has ${Object.keys(item).join(',')})`)
           continue
         }
-        const subtitle = typeof item.subtitle === 'string' ? item.subtitle : ''
+        const subtitle = nonBlank(item.subtitle) ?? inputSubtitle(first.input)
         toolCaptions.set(first.id, { subtitle, intention: item.intention, result: item.result, bytes: bytesOf(first.id) })
         stored += 1
       } else {
@@ -593,7 +616,7 @@ export function createCaptions(): Captions {
         }
         const subtitles = Array.isArray(item.subtitles) ? item.subtitles : []
         runCaptions.set(unit.key, {
-          subtitles: unit.calls.map((_, index) => (typeof subtitles[index] === 'string' ? (subtitles[index] as string) : '')),
+          subtitles: unit.calls.map((call, index) => nonBlank(subtitles[index]) ?? inputSubtitle(call.input)),
           summary: item.summary,
           bytes: unit.calls.reduce((n, call) => n + bytesOf(call.id), 0),
         })

@@ -25,7 +25,7 @@
     {
       "key": "claude.display_summary_style",
       "type": "string",
-      "default": "Length: intention at most one short sentence; result and summary at most two short sentences each. Style: a terse note style with no subject, no filler, no politeness; in Korean, end on a noun or a plain stem (\"정의 위치 확인\", \"3개 파일에서 발견, foo.go:12 외\").",
+      "default": "Length: intention at most one short sentence; result at most two short sentences; summary two short sentences, up to four for a run of many calls. Style: a terse note style with no subject, no filler, no politeness; in Korean, end on a noun or a plain stem (\"정의 위치 확인\", \"3개 파일에서 발견, foo.go:12 외\").",
       "default_scope": "global",
       "description": "Claude Code only (unused on other hosts): style guidance in the tool-row caption prompt: how long each caption field is, its tone, and its level of detail. A set value replaces the default text shown here, so write the complete guidance you want; a blank value uses the default. It does not change the reply format, the field meanings, or the rule that the summarizer never acts on the conversation. Only used when claude.display_summary_enabled is true. Read at session start, so a change applies from the next session. Only the project, global, and built-in values apply; a session- or repo-scope tune is not read."
     },
