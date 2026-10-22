@@ -245,7 +245,7 @@ export function serializeMessage(message: ApiMessageLike): string {
       case 'tool_use':
         return `(call ${stringify(block.id)} ${stringify(block.name)}) ${clip(stringify(block.input), TRAFFIC_CAP)}`
       case 'tool_result':
-        return `(result ${stringify(block.tool_use_id)}) ${clip(stringify(block.content), TRAFFIC_CAP)}`
+        return `(result ${stringify(block.tool_use_id)}) ${clip(resultText(block.content), TRAFFIC_CAP)}`
       default:
         return ''
     }
@@ -256,13 +256,17 @@ export function serializeMessage(message: ApiMessageLike): string {
 
 type Captured = { input: string; output: string; bytes: number }
 
-/** A tool_result's content as the model read it: the string, or its text blocks joined. */
+/**
+ * A tool_result's content as the model read it: the string, or its text blocks
+ * joined; blocks with no text (an image) leave a marker, not their data.
+ */
 function resultText(content: unknown): string {
   if (!Array.isArray(content)) return stringify(content)
-  return content
+  const text = content
     .map((block) => (typeof block === 'object' && block !== null && (block as ApiBlock).type === 'text' ? stringify((block as ApiBlock).text) : ''))
     .filter(Boolean)
     .join('\n')
+  return text || (content.length > 0 ? '(no text output)' : '')
 }
 
 /** What the transcript holds for each call, by tool_use_id: the fallback for a call captured before a reload. */

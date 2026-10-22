@@ -331,6 +331,30 @@ test('ws: a call captured before a reload takes its output and size from the tra
   expect(await find($, toolUse(w, 'toolu_old'), /KB/)).toContain('2.0 KB')
 })
 
+test('ws: a transcript result of blocks counts and sends their text, in the history too, and marks a result with none', async ($, on) => {
+  const w = world(on, {
+    messages: [
+      { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_tx', name: 'Bash', input: { command: 'ls' } }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_tx', content: [{ type: 'text', text: 'x'.repeat(2048) }] }] },
+      { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_img', name: 'Read', input: { file_path: '/a.png' } }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_img', content: [{ type: 'image', source: { type: 'base64', data: 'QUJD' } }] }] },
+    ],
+  })
+  await start($, w)
+  if (!isWs(w)) return
+  w.replies.push({ text: '[{"id":"u1","subtitle":"ls","intention":"목록 확인","result":"출력 있음"}]' })
+
+  await isRaw($, toolUse(w, 'toolu_tx'))
+  await tick(w)
+  expect(w.requests[0]!.prompt).not.toContain('"type":"text"')
+  expect(await find($, toolUse(w, 'toolu_tx'), /KB/)).toContain('2.0 KB')
+
+  await isRaw($, toolUse(w, 'toolu_img', { tool: 'Read', input: { file_path: '/a.png' } }))
+  await tick(w)
+  expect(w.requests[1]!.prompt).toContain('(no text output)')
+  expect(w.requests[1]!.prompt).not.toContain('QUJD')
+})
+
 test('ws: a call in neither the capture nor the transcript sends its drawn input and no output', async ($, on) => {
   const w = world(on)
   await start($, w)
