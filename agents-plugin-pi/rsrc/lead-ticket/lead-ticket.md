@@ -174,8 +174,9 @@ through review rounds as each change's contradictions surface one round later.
 
 ### Response format
 
-The `# Open Decision Queue` heading, the three group labels, and the status
-tags stay in English; item content follows the user's conversation language.
+The `# Open Decision Queue` heading, the three bold group label names, and the
+status tags stay in English; the explanation after each group label follows the
+user's conversation language, as item content does.
 
 Each response asks every item still awaiting an answer, in three groups:
 announced defaults, then technical decisions, then the policy questions under
@@ -185,10 +186,10 @@ reply. Omit a group that has no item this round.
 ```text
 # Open Decision Queue
 
-**Announced defaults** - acknowledge once, together with the technical decisions
+**Announced defaults** - these follow from existing constraints or earlier decisions, so each has one answer; acknowledge once, together with the technical decisions
 (1) Will <do X> - <citation>
 
-**Technical decisions** - acknowledge once, together with the defaults; worth reviewing if you hold the technical picture
+**Technical decisions** - calls I made as the technically best option, with the reason on each line; acknowledge once together with the defaults, or object to any item
 (2) Will <X> over <Y> - <technical reason>
 
 **Policy questions** - answer each
