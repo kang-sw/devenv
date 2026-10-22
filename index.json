@@ -591,7 +591,14 @@
       "registered_at": "2026-10-22T12:26:25Z"
     },
     "261022-bug-claude-mod-caption-prerun-row": {
-      "registered_at": "2026-10-22T12:47:54Z"
+      "registered_at": "2026-10-22T12:47:54Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "closed",
+        "touched_at": "2026-10-22T13:04:24Z"
+      }
     },
     "261022-bug-git-status-shows-lease-of-closed-ticket": {
       "registered_at": "2026-10-22T06:49:06Z"
