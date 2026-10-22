@@ -123,7 +123,7 @@ non-authoritative entries.
   records its context, alternatives, and your recommendation as the policy
   block of the **Response format** below; an announced default records its
   citation in their place, and a technical decision records its one line
-  `Will <X> over <Y> - <technical reason>`, the reason standing where the
+  `<X> over <Y> - <technical reason>`, the reason standing where the
   citation stands. An announced or technical item that becomes a policy
   question changes its class tag,
   returns to `[open]` (back from `## Decisions` into the section if it had
@@ -177,6 +177,8 @@ through review rounds as each change's contradictions surface one round later.
 The `# Open Decision Queue` heading, the three bold group label names, and the
 status tags stay in English; the explanation after each group label follows the
 user's conversation language, as item content does.
+The skeleton's connecting words, such as "over", are written in the
+conversation language like the rest of the item content.
 
 Each response asks every item still awaiting an answer, in three groups:
 announced defaults, then technical decisions, then the policy questions under
@@ -187,10 +189,10 @@ reply. Omit a group that has no item this round.
 # Open Decision Queue
 
 **Announced defaults** - these follow from existing constraints or earlier decisions, so each has one answer; acknowledge once, together with the technical decisions
-(1) Will <do X> - <citation>
+(1) <decision> - <citation>
 
 **Technical decisions** - calls I made as the technically best option, with the reason on each line; acknowledge once together with the defaults, or object to any item
-(2) Will <X> over <Y> - <technical reason>
+(2) <X> over <Y> - <technical reason>
 
 **Policy questions** - answer each
 (3) <one-line decision>

@@ -2257,7 +2257,7 @@ func TestPlaybookPrintGoldenLeadTicket(t *testing.T) {
 				// announced defaults, then technical decisions with the reader
 				// hint and their one-line format, then the visibly labeled
 				// policy group closest to the reply.
-				"```text\n# Open Decision Queue\n\n**Announced defaults** - these follow from existing constraints or earlier decisions, so each has one answer; acknowledge once, together with the technical decisions\n(1) Will <do X> - <citation>\n\n**Technical decisions** - calls I made as the technically best option, with the reason on each line; acknowledge once together with the defaults, or object to any item\n(2) Will <X> over <Y> - <technical reason>\n\n**Policy questions** - answer each\n(3) <one-line decision>\n- <context>\n- <alternative: ...>\n> <recommendation and why>\n```",
+				"```text\n# Open Decision Queue\n\n**Announced defaults** - these follow from existing constraints or earlier decisions, so each has one answer; acknowledge once, together with the technical decisions\n(1) <decision> - <citation>\n\n**Technical decisions** - calls I made as the technically best option, with the reason on each line; acknowledge once together with the defaults, or object to any item\n(2) <X> over <Y> - <technical reason>\n\n**Policy questions** - answer each\n(3) <one-line decision>\n- <context>\n- <alternative: ...>\n> <recommendation and why>\n```",
 			} {
 				if !strings.Contains(body, want) {
 					t.Errorf("body missing lead-ticket text %q:\n%s", want, body)
@@ -2281,7 +2281,7 @@ func TestPlaybookPrintGoldenLeadTicket(t *testing.T) {
 				"returns to `[open]` (back from `## Decisions` into the section if it had moved there)",
 				"Each item records its ID, status tag, class tag, and one-line decision",
 				"class tags are `[announced]`, `[technical]`, and `[policy]`",
-				"an announced default records its citation in their place, and a technical decision records its one line `Will <X> over <Y> - <technical reason>`, the reason standing where the citation stands",
+				"an announced default records its citation in their place, and a technical decision records its one line `<X> over <Y> - <technical reason>`, the reason standing where the citation stands",
 				"a technical decision carrying its `<Y>` into that decision's `Rejected:` text",
 				// Item classes: citation admission, reversal rule, and the
 				// open-round consequence hold.
