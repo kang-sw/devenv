@@ -59,29 +59,14 @@ unless a decision is needed.
 
 ### Item classes
 
-Each item is one of three classes, so the user answers only the choices that
-depend on their preferences and can review the rest at the depth they choose.
+Each item is an announced default, a technical decision, or a policy
+question, as the workflow manual's `### Asking the user` defines them; ticket
+work adds:
 
-- **Announced default**: the item has one answer, and you can cite the reason
-  its alternatives lose. The citation is one of: a language or platform
-  constraint; a prior commit or ticket decision; an established project
-  convention; a direct consequence of an already-confirmed decision; or a
-  documentation-placement choice (parent or `related:` link, epic child or
+- A documentation-placement choice (parent or `related:` link, epic child or
   standalone, absorb or rewrite, initial status, stem naming, which commit
-  carries the edit), whose line names the placement and cites the neighbouring
-  ticket or convention it follows.
-- **Technical decision**: the item has no such citation, and its answer does
-  not hinge on the user's values: you pick it on technical reasoning (simpler,
-  fewer moving parts, a clearer failure mode) and state that reasoning. Your
-  own uncertainty about a technical call does not make it a policy question;
-  it stays a technical decision with its reasoning stated, or the policy group
-  fills with calls the user cannot judge.
-- **Policy question**: the answer depends on the user's preferences,
-  priorities, or product direction, such as the audience or scale a default
-  assumes, scope in or out, cost or risk tolerance, or a trade-off in
-  downstream-observable behavior.
-- An item that reverses a prior decision is always a policy question, even
-  when you can cite a reason for the reversal.
+  carries the edit) is an announced default, whose line names the placement
+  and cites the neighbouring ticket or convention it follows.
 - A consequence of a policy question still open in the same round is not yet
   a consequence of an already-confirmed decision: hold it, and add it to the
   next round's announced defaults once that answer lands.
@@ -114,10 +99,12 @@ Research tickets do not use the section; their Outcome Ledger holds their
 non-authoritative entries.
 
 - Keep the heading line exactly `## Open Decision Queue`; the line under it
-  records the last ID used, so the next number survives after settled items
-  have left.
+  records the last ID used, so the next number survives compaction and the
+  departure of settled items. IDs otherwise follow the workflow manual's
+  `### Asking the user`, including its renumbering of a resumed queue on a
+  collision.
 - Each item records its ID, status tag, class tag, and one-line decision, with
-  the tags after the ID: `(1) [open] [policy] <one-line decision>`. Status
+  the tags after the ID: `(01) [open] [policy] <one-line decision>`. Status
   tags are `[open]`, `[confirmed]`, `[rejected]`, and `[deferred]`; class tags
   are `[announced]`, `[technical]`, and `[policy]`. A policy question also
   records its context, alternatives, and your recommendation as the policy
@@ -129,10 +116,6 @@ non-authoritative entries.
   returns to `[open]` (back from `## Decisions` into the section if it had
   moved there), and gains the policy block. Section text is English, like
   the rest of the ticket.
-- IDs are `(1)`, `(2)`, `(3)`, ... and never change. A new item takes one past
-  the highest ID used so far in this conversation, across every affected
-  section and earlier rounds, so a re-created section continues the numbering
-  instead of restarting at `(1)`.
 - The one-line decision is the decision itself, self-describing, not a label.
 - An item that affects several tickets (a batch coherence issue, a gap
   spanning members) is recorded under the same ID in the section of every
@@ -189,13 +172,13 @@ reply. Omit a group that has no item this round.
 # Open Decision Queue
 
 **Announced defaults** - these follow from existing constraints or earlier decisions, so each has one answer; acknowledge once, together with the technical decisions
-(1) <decision> - <citation>
+(01) <decision> - <citation>
 
 **Technical decisions** - calls I made as the technically best option, with the reason on each line; acknowledge once together with the defaults, or object to any item
-(2) <X> over <Y> - <technical reason>
+(02) <X> over <Y> - <technical reason>
 
 **Policy questions** - answer each
-(3) <one-line decision>
+(03) <one-line decision>
 - <context>
 - <alternative: ...>
 > <recommendation and why>
@@ -209,10 +192,10 @@ reply. Omit a group that has no item this round.
   question.
   The recommendation lives only in the trailing `>` line of its block.
 - A policy question already presented is re-asked as one line,
-  `(n) [open] <one-line decision>`; re-print its context only when the user
+  `(nn) [open] <one-line decision>`; re-print its context only when the user
   asks, or point at the ticket section.
 - Report the items settled this round in one line, such as
-  `(1), (2) confirmed · (4) deferred`; items settled in earlier rounds are not
+  `(01), (02) confirmed · (04) deferred`; items settled in earlier rounds are not
   repeated. This per-round settlement report is not the announced or
   technical group.
 

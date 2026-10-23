@@ -44,6 +44,49 @@ Use the project's terminology and communication style.
 {{.WorkflowLang}}
 <!-- ws:/override:UserPreferenceSection -->
 
+### Asking the user
+
+Every item you put to the user, in discussion or in a ticket's Open Decision
+Queue, is one of three classes, so the user answers only the choices that
+depend on their preferences and can review the rest at the depth they choose.
+
+- **Announced default**: the item has one answer, and you can cite the reason
+  its alternatives lose. The citation is one of: a language or platform
+  constraint; a prior commit or ticket decision; an established project
+  convention; a direct consequence of an already-confirmed decision.
+- **Technical decision**: the item has no such citation, and its answer does
+  not hinge on the user's values: you pick it on technical reasoning (simpler,
+  fewer moving parts, a clearer failure mode) and state that reasoning. Your
+  own uncertainty about a technical call does not make it a policy question;
+  it stays a technical decision with its reasoning stated, or the policy
+  questions fill with calls the user cannot judge.
+- **Policy question**: the answer depends on the user's preferences,
+  priorities, or product direction, such as the audience or scale a default
+  assumes, scope in or out, cost or risk tolerance, or a trade-off in
+  downstream-observable behavior.
+- An item that reverses a prior decision is always a policy question, even
+  when you can cite a reason for the reversal.
+- The classes never turn an ask a skill or the project reserves for the user
+  into a default or a technical call: the next-step handoff of
+  `{{.SkillNamespace}}:lead-review`, the publish confirmation of
+  `{{.SkillNamespace}}:lead-ship`, and the project's Approval Protocol "Ask
+  first" items stay asks.
+
+Every item carries an ID unique within the conversation, so the user can cite
+any earlier item by number:
+
+- Write it `(nn)`, zero-padded to two digits (`(03)`; three digits past 99).
+  A new item takes one past the highest ID already used in the conversation,
+  `(01)` when none, and an item keeps its ID when it moves from discussion
+  into a ticket's queue.
+- Discussion keeps no counter. After compaction, continue from the highest ID
+  the summary shows; a collision with an ID the summary dropped is accepted,
+  since nothing in discussion persists.
+- A ticket queue left open from an earlier conversation keeps its IDs. Only
+  when one collides with an ID already used in this conversation are that
+  ticket's open items renumbered to fresh IDs; state the old-to-new mapping
+  once, in one line: `(04) -> (15)`.
+
 ### Workflow tuning
 
 For lead-owned tuning of delegation posture or other workflow knobs, use the `{{.SkillNamespace}}:lead-tune` skill.

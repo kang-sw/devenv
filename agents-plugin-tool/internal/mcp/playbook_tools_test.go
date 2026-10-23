@@ -2225,13 +2225,13 @@ func TestPlaybookPrintGoldenLeadWorkflowManual(t *testing.T) {
 // single commit. It also pins the ticket-held queue contract: no harness
 // task-list guidance is spliced in any more (the include was removed), the
 // queue state lives in a temporary ticket section whose settled items move to
-// their home sections, the three item classes (announced defaults admitted
-// only on a citation, technical decisions as one-line opinionated calls,
-// policy questions defined positively, reversals always policy questions, one
-// explicit acknowledgement covering the announced and technical groups with
-// silence not counting), the three-group response format in the order
-// announced, technical, policy with the labeled groups and the one-line
-// re-ask, the settle point that
+// their home sections, the pointer to the workflow manual's item classes plus
+// the ticket-only class rules (documentation-placement citation, open-round
+// consequence hold, reviewer `missing` always policy, one explicit
+// acknowledgement covering the announced and technical groups with silence
+// not counting), the zero-padded `(nn)` IDs, the three-group response format
+// in the order announced, technical, policy with the labeled groups and the
+// one-line re-ask, the settle point that
 // replaced the retired final confirmation, and the trace-before-write
 // instruction. delegates:false — no tip.
 func TestPlaybookPrintGoldenLeadTicket(t *testing.T) {
@@ -2257,7 +2257,7 @@ func TestPlaybookPrintGoldenLeadTicket(t *testing.T) {
 				// announced defaults, then technical decisions with the reader
 				// hint and their one-line format, then the visibly labeled
 				// policy group closest to the reply.
-				"```text\n# Open Decision Queue\n\n**Announced defaults** - these follow from existing constraints or earlier decisions, so each has one answer; acknowledge once, together with the technical decisions\n(1) <decision> - <citation>\n\n**Technical decisions** - calls I made as the technically best option, with the reason on each line; acknowledge once together with the defaults, or object to any item\n(2) <X> over <Y> - <technical reason>\n\n**Policy questions** - answer each\n(3) <one-line decision>\n- <context>\n- <alternative: ...>\n> <recommendation and why>\n```",
+				"```text\n# Open Decision Queue\n\n**Announced defaults** - these follow from existing constraints or earlier decisions, so each has one answer; acknowledge once, together with the technical decisions\n(01) <decision> - <citation>\n\n**Technical decisions** - calls I made as the technically best option, with the reason on each line; acknowledge once together with the defaults, or object to any item\n(02) <X> over <Y> - <technical reason>\n\n**Policy questions** - answer each\n(03) <one-line decision>\n- <context>\n- <alternative: ...>\n> <recommendation and why>\n```",
 			} {
 				if !strings.Contains(body, want) {
 					t.Errorf("body missing lead-ticket text %q:\n%s", want, body)
@@ -2270,7 +2270,9 @@ func TestPlaybookPrintGoldenLeadTicket(t *testing.T) {
 				"it is non-authoritative working state, not a persisted decision",
 				"Persisting means the commit and any `ready/` move",
 				"the line under it records the last ID used",
-				"A new item takes one past the highest ID used so far in this conversation",
+				"the line under it records the last ID used, so the next number survives compaction and the departure of settled items",
+				"IDs otherwise follow the workflow manual's `### Asking the user`, including its renumbering of a resumed queue on a collision",
+				"`(01) [open] [policy] <one-line decision>`",
 				"recorded under the same ID in the section of every affected ticket",
 				// Settlement moves.
 				"a confirmed item moves into `## Decisions`",
@@ -2283,16 +2285,14 @@ func TestPlaybookPrintGoldenLeadTicket(t *testing.T) {
 				"class tags are `[announced]`, `[technical]`, and `[policy]`",
 				"an announced default records its citation in their place, and a technical decision records its one line `<X> over <Y> - <technical reason>`, the reason standing where the citation stands",
 				"a technical decision carrying its `<Y>` into that decision's `Rejected:` text",
-				// Item classes: citation admission, reversal rule, and the
-				// open-round consequence hold.
-				"**Announced default**: the item has one answer, and you can cite the reason its alternatives lose",
-				"a language or platform constraint; a prior commit or ticket decision; an established project convention; a direct consequence of an already-confirmed decision; or a documentation-placement choice",
-				// Technical class and the positive policy definition.
-				"**Technical decision**: the item has no such citation, and its answer does not hinge on the user's values: you pick it on technical reasoning",
-				"Your own uncertainty about a technical call does not make it a policy question",
-				"**Policy question**: the answer depends on the user's preferences, priorities, or product direction",
+				// Item classes: the definitions live in the workflow
+				// manual (pinned by TestPlaybookPrintGoldenLeadWorkflowManualAskingTheUser);
+				// lead-ticket keeps the pointer and its ticket-specific rules:
+				// the documentation-placement citation, the open-round
+				// consequence hold, and the reviewer `missing` rule.
+				"Each item is an announced default, a technical decision, or a policy question, as the workflow manual's `### Asking the user` defines them",
+				"A documentation-placement choice (parent or `related:` link, epic child or standalone, absorb or rewrite, initial status, stem naming, which commit carries the edit) is an announced default, whose line names the placement and cites the neighbouring ticket or convention it follows",
 				"A fact-populator decision gap or a reviewer issue is classed by the same rules as any other item",
-				"An item that reverses a prior decision is always a policy question, even when you can cite a reason for the reversal",
 				"A consequence of a policy question still open in the same round is not yet a consequence of an already-confirmed decision",
 				"A reviewer `missing` issue is always a policy question",
 				// Single explicit acknowledgement; silence is not consent.
@@ -2318,8 +2318,8 @@ func TestPlaybookPrintGoldenLeadTicket(t *testing.T) {
 				"An announced default or a technical decision is one line and asks no per-item answer.",
 				"A technical decision's line names the losing alternative and why it lost",
 				"The recommendation lives only in the trailing `>` line",
-				"A policy question already presented is re-asked as one line, `(n) [open] <one-line decision>`",
-				"Report the items settled this round in one line",
+				"A policy question already presented is re-asked as one line, `(nn) [open] <one-line decision>`",
+				"Report the items settled this round in one line, such as `(01), (02) confirmed · (04) deferred`",
 				"items settled in earlier rounds are not repeated",
 				"This per-round settlement report is not the announced or technical group",
 				"The `# Open Decision Queue` heading, the three bold group label names, and the status tags stay in English; the explanation after each group label follows the user's conversation language, as item content does",
@@ -2349,6 +2349,11 @@ func TestPlaybookPrintGoldenLeadTicket(t *testing.T) {
 				"Final confirmation",
 				// The retired catch-all policy definition.
 				"every item without such a citation",
+				// The retired single-digit ID notation and the never-change
+				// rule the collision renumbering replaced.
+				"IDs are `(1)`",
+				"(1) <decision>",
+				"`(n) [open]",
 			} {
 				if strings.Contains(body, forbidden) || strings.Contains(normalized, forbidden) {
 					t.Errorf("body still names retired surface %q:\n%s", forbidden, body)
@@ -2615,12 +2620,91 @@ func TestPlaybookPrintGoldenLeadDiscuss(t *testing.T) {
 			t.Errorf("body missing lead-discuss text %q:\n%s", want, body)
 		}
 	}
+	// Questions use the workflow manual's classes and IDs conversationally,
+	// the single-ambiguity rule is replaced by the fewest-policy-questions
+	// rule, the anti-inference intent stays, and the stop is an unanswered
+	// policy question.
+	normalized := strings.Join(strings.Fields(body), " ")
+	for _, want := range []string{
+		"Ask in the classes and IDs of the workflow manual's `### Asking the user`, in prose",
+		"which are policy questions the user must decide before the next topic",
+		"No block format and no queue; nothing here is persisted",
+		"Ask the fewest policy questions, ask independent ones together, and hold one that depends on an unanswered one to a later turn",
+		"Never fill unanswered intent with inference",
+		"A policy question you asked and the user has not answered",
+	} {
+		if !strings.Contains(normalized, want) {
+			t.Errorf("body missing lead-discuss question rule %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		"single highest-leverage ambiguity",
+		"An ambiguity you surfaced",
+	} {
+		if strings.Contains(normalized, forbidden) {
+			t.Errorf("body still names retired discuss rule %q", forbidden)
+		}
+	}
 	if strings.Contains(body, "{{.ExploreAgent}}") {
 		t.Errorf("body %q: ExploreAgent left unsubstituted", body)
 	}
 	// delegates:true (exploration spawn) — tip must appear.
 	if !strings.Contains(body, "Continuity tip") {
 		t.Errorf("body %q: expected delegation tip for delegates:true playbook", body)
+	}
+}
+
+// TestPlaybookPrintGoldenLeadWorkflowManualAskingTheUser pins the shared
+// question classes and the conversation-unique ID space in the workflow
+// manual, which every lead skill that asks the user points at: the three
+// class definitions lifted from lead-ticket, the reversal and uncertainty
+// rules, the reserved asks the classes never lift, the zero-padded `(nn)`
+// notation, the discussion compaction rule, and the resumed-queue collision
+// renumbering.
+func TestPlaybookPrintGoldenLeadWorkflowManualAskingTheUser(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	idx := strings.Index(body, "### Asking the user")
+	if idx < 0 {
+		t.Fatalf("workflow manual must carry the Asking the user heading:\n%s", body)
+	}
+	section := body[idx+len("### Asking the user"):]
+	if next := strings.Index(section, "\n### "); next >= 0 {
+		section = section[:next]
+	}
+	normalized := strings.Join(strings.Fields(section), " ")
+	for _, want := range []string{
+		"Every item you put to the user, in discussion or in a ticket's Open Decision Queue, is one of three classes",
+		"**Announced default**: the item has one answer, and you can cite the reason its alternatives lose",
+		"a language or platform constraint; a prior commit or ticket decision; an established project convention; a direct consequence of an already-confirmed decision.",
+		"**Technical decision**: the item has no such citation, and its answer does not hinge on the user's values: you pick it on technical reasoning",
+		"Your own uncertainty about a technical call does not make it a policy question",
+		"**Policy question**: the answer depends on the user's preferences, priorities, or product direction",
+		"An item that reverses a prior decision is always a policy question, even when you can cite a reason for the reversal",
+		"The classes never turn an ask a skill or the project reserves for the user into a default or a technical call: the next-step handoff of `ws:lead-review`, the publish confirmation of `ws:lead-ship`, and the project's Approval Protocol \"Ask first\" items stay asks",
+		"Every item carries an ID unique within the conversation",
+		"Write it `(nn)`, zero-padded to two digits (`(03)`; three digits past 99)",
+		"A new item takes one past the highest ID already used in the conversation, `(01)` when none, and an item keeps its ID when it moves from discussion into a ticket's queue",
+		"Discussion keeps no counter. After compaction, continue from the highest ID the summary shows",
+		"A ticket queue left open from an earlier conversation keeps its IDs. Only when one collides with an ID already used in this conversation are that ticket's open items renumbered to fresh IDs; state the old-to-new mapping once, in one line: `(04) -> (15)`",
+	} {
+		if !strings.Contains(normalized, want) {
+			t.Errorf("Asking the user section missing %q:\n%s", want, section)
+		}
+	}
+	for _, forbidden := range []string{
+		"every item without such a citation",
+		"#nn",
+		"documentation-placement",
+	} {
+		if strings.Contains(normalized, forbidden) {
+			t.Errorf("Asking the user section must not carry %q", forbidden)
+		}
 	}
 }
 

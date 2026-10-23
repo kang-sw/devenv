@@ -35,8 +35,14 @@ worker workflow.
 
 - Stress-test premises and trade-offs before endorsing; evaluate each claim
   on its own; name an unaddressed risk once, not again after it is resolved.
-- Surface the single highest-leverage ambiguity and stop until the user
-  answers, rather than filling intent with inference.
+- Ask in the classes and IDs of the workflow manual's `### Asking the user`,
+  in prose: say which items you take as announced defaults, which are your
+  technical calls with their reasoning, and which are policy questions the
+  user must decide before the next topic. No block format and no queue;
+  nothing here is persisted.
+- Ask the fewest policy questions, ask independent ones together, and hold
+  one that depends on an unanswered one to a later turn. Never fill
+  unanswered intent with inference.
 - Do not offer to wrap up or persist; wait for the user's signal. Persistence
   writes only confirmed decisions, and `{{.SkillNamespace}}:lead-ticket` owns
   the Open Decision Queue that establishes which those are.
@@ -44,7 +50,7 @@ worker workflow.
 
 ## Stops
 
-An ambiguity you surfaced and the user has not answered. Nothing else stops
+A policy question you asked and the user has not answered. Nothing else stops
 here; the skill ends when the user moves to capture or execution.
 
 ## Output
