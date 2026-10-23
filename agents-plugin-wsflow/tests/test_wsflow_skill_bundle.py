@@ -52,17 +52,12 @@ EXPECTED_PARALLEL_INIT_SKILLS = {
     "lead-delegate",
     "lead-discuss",
     "lead-run",
+    "lead-use-mailbox",
 }
 PARALLEL_INIT_TITLES = {
     "lead-delegate": "Delegate",
     "lead-discuss": "Discuss",
     "lead-run": "Run",
-}
-
-# The single-call shim that threads a session_key into playbook.read; it keeps
-# its own exact-tail check. Every other single-call shim falls under the generic
-# shim assertion.
-SESSION_KEY_SHIM_TITLES = {
     "lead-use-mailbox": "Use Mailbox",
 }
 
@@ -159,14 +154,12 @@ class WsflowSkillBundleTest(unittest.TestCase):
 
     def test_skill_files_are_thin_playbook_shims(self):
         # Every non-inline, non-parallel-init, non-alias shim carries the
-        # generic "stop and report that blocker" tail. lead-use-mailbox threads a
-        # session_key into playbook.read and is checked separately below.
+        # generic "stop and report that blocker" tail.
         offenders = []
         for skill in sorted(
             EXPECTED_SKILLS
             - EXPECTED_INLINE_SKILLS
             - EXPECTED_PARALLEL_INIT_SKILLS
-            - set(SESSION_KEY_SHIM_TITLES)
             - set(WSFLOW_ALIAS_TARGET)
         ):
             path = SKILLS_DIR / skill / "SKILL.md"
@@ -179,33 +172,6 @@ class WsflowSkillBundleTest(unittest.TestCase):
                 r"# .+\n\n"
                 rf"Call `wsflow/playbook\.read\(name: \"{re.escape(skill)}\"\)` and execute the returned procedure\n"
                 r"inline against the current user request\. If the playbook cannot be loaded, stop\n"
-                r"and report that blocker\.\n",
-                text,
-            )
-            if match is None:
-                offenders.append(str(path.relative_to(PLUGIN_DIR)))
-        self.assertEqual(offenders, [])
-
-    def test_session_key_shims_pin_their_clause(self):
-        # lead-use-mailbox alone threads a session_key into playbook.read so the
-        # render can emit a concrete wait command; that clause is REQUIRED there
-        # and FORBIDDEN on the other single-call shims (the generic shim
-        # assertion above has no session_key arg, so a leak onto another shim
-        # fails there, and a reverted lead-use-mailbox fails here).
-        offenders = []
-        for skill, title in SESSION_KEY_SHIM_TITLES.items():
-            path = SKILLS_DIR / skill / "SKILL.md"
-            text = path.read_text(encoding="utf-8")
-            match = re.fullmatch(
-                r"---\n"
-                rf"name: {re.escape(skill)}\n"
-                r"description: .+\n"
-                r"---\n\n"
-                rf"# {re.escape(title)}\n\n"
-                rf"Call `wsflow/playbook\.read\(name: \"{re.escape(skill)}\", session_key: <your key, omit if fresh>"
-                r"\)` and execute the returned procedure\n"
-                r"inline against the current user request\. "
-                r"If the playbook cannot be loaded, stop\n"
                 r"and report that blocker\.\n",
                 text,
             )

@@ -8,8 +8,10 @@ import type { SessionCompactResult, SessionCompactTrigger } from 'claude-code'
  * carries the manual, and collapses a repeat `playbook_read` or
  * `workflow_manual` result to a pointer while the earlier identical result is
  * still in the conversation. A main-thread `workflow_manual` call with another
- * lead key (a revive) is adopted as the conversation's key, and every key the
- * conversation gets is handed to the mailbox push through the key listener.
+ * lead key (a revive), or with the fresh-bootstrap sentinel whose result
+ * carries the key ws-mcp minted, is adopted as the conversation's key, and
+ * every key the conversation gets is handed to the mailbox push through the
+ * key listener.
  *
  * The engine snapshots the main thread's system prompt once per conversation:
  * only the first `prompt.compose` answer after a session start, a landed
@@ -65,26 +67,47 @@ export function sectionText(key: string, manual: string, push = false): string {
   return `${STATE_POINTER_LINE}\n\n${keyed}\n\n${manual}`
 }
 
-/** ws-mcp's fresh-bootstrap sentinel: a `workflow_manual` call with it mints a separate key, so it is never a revive. */
+/**
+ * ws-mcp's fresh-bootstrap sentinel: a `workflow_manual` call with it (and a
+ * root) mints a separate key and returns it under `## Session Key`. A lead
+ * calls it when it saw no key, which is also when the system prompt section
+ * did not reach it (an organization policy can keep it out), so that minted
+ * key is the one the lead holds.
+ */
 export const FRESH_BOOTSTRAP_SENTINEL = 'obsidian-latch'
 
+/** The key on the line after the first whole `## Session Key` line, or undefined. */
+function resultKey(text: string): string | undefined {
+  const lines = text.split('\n')
+  const at = lines.indexOf(SESSION_KEY_ANCHOR)
+  const key = at === -1 ? undefined : lines[at + 1]?.trim()
+  return key || undefined
+}
+
 /**
- * The key a main-thread `workflow_manual` call revives with, when it is to be
- * adopted: an explicit key, not the sentinel, other than the conversation's
- * current one.
+ * The key a main-thread `workflow_manual` call leaves the lead holding, when
+ * it is to be adopted: an explicit key (a revive), or for the sentinel the key
+ * its result `text` carries under `## Session Key` (none without that line),
+ * in either case other than the sentinel and the conversation's current key.
  */
-export function revivedKeyToAdopt(raw: unknown, current: string | undefined): string | undefined {
+export function revivedKeyToAdopt(raw: unknown, current: string | undefined, text = ''): string | undefined {
   if (typeof raw !== 'string') return undefined
-  const key = raw.trim()
+  const arg = raw.trim()
+  const key = arg === FRESH_BOOTSTRAP_SENTINEL ? resultKey(text) : arg
   if (!key || key === FRESH_BOOTSTRAP_SENTINEL || key === current) return undefined
   return key
 }
 
-/** Appended to the adopting `workflow_manual` result after a blank line. */
-export function adoptionNotice(previous: string | undefined, current: string): string {
+/**
+ * Appended to the adopting `workflow_manual` result after a blank line; with
+ * `push` (the mailbox push runs here) it says the push follows, since a lead
+ * whose system prompt lacks the mailbox line would otherwise arm a wait.
+ */
+export function adoptionNotice(previous: string | undefined, current: string, push = false): string {
   return (
     `[ws] Lead session key changed: ${previous ?? '(none)'} -> ${current}. ` +
-    `Keep passing ${current} as session_key; this conversation resumes with it, and the system prompt names it after the next /compact or compaction request.`
+    `Keep passing ${current} as session_key; this conversation resumes with it, and the system prompt names it after the next /compact or compaction request.` +
+    (push ? ` Mailbox push is bound to ${current}: arriving mail starts your next turn even when you are idle, so launch no mailbox wait.` : '')
   )
 }
 
@@ -515,17 +538,18 @@ export function createManual(): Manual {
   }
 
   /**
-   * Adopt the key a main-thread `workflow_manual` call revived with, as pi
-   * does: re-log in with it, make it the conversation's key (the push
-   * follows through the listener), rewrite the key entry so a later resume
-   * re-logs in with it, and rebuild the cache with it. The snapshot still
+   * Adopt the key a main-thread `workflow_manual` call revived with (as pi
+   * does) or the sentinel's result carries: re-log in with it, make it the
+   * conversation's key (the push follows through the listener), rewrite the
+   * key entry so a later resume re-logs in with it, and rebuild the cache
+   * with it. The snapshot still
    * carries the previous key's section, so the flag goes false until the next
    * refreshing reset. The adoption notice, or undefined; never throws.
    */
-  const adopt = async (args: Record<string, unknown>): Promise<string | undefined> => {
+  const adopt = async (args: Record<string, unknown>, text: string): Promise<string | undefined> => {
     const e = edges
     if (!e) return undefined
-    const revived = revivedKeyToAdopt(args.session_key, current)
+    const revived = revivedKeyToAdopt(args.session_key, current, text)
     if (revived === undefined) return undefined
     try {
       const gen = generation
@@ -551,8 +575,8 @@ export function createManual(): Manual {
       // rebuilds with it (the setup writes the entry again), and it reads as
       // reused: the flag stays false until a landing.
       begin(revived, rewrite)
-      await rewrite
-      return adoptionNotice(previous, revived)
+      const [push] = await Promise.all([e.pushAvailable().catch(() => false), rewrite])
+      return adoptionNotice(previous, revived, push)
     } catch (err) {
       debug(`adoption of ${revived} failed: ${String(err)}`)
       return undefined
@@ -615,9 +639,13 @@ export function createManual(): Manual {
     read: async (family, tool, args, text) => {
       try {
         if (gate !== true) return undefined
-        const seen = family === 'workflow_manual' ? await stateOnly(args, text) : text
+        // A sentinel call means the lead saw no key, so no manual either: it
+        // reads the whole result, never the cut or a workflow_state fallback.
+        const sentinel = typeof args.session_key === 'string' && args.session_key.trim() === FRESH_BOOTSTRAP_SENTINEL
+        const whole = family !== 'workflow_manual' || sentinel
+        const seen = whole ? text : await stateOnly(args, text)
         const out = await dedupe(family, tool, args, seen)
-        const notice = family === 'workflow_manual' ? await adopt(args) : undefined
+        const notice = family === 'workflow_manual' ? await adopt(args, text) : undefined
         const final = notice === undefined ? out : `${out}\n\n${notice}`
         return final === text ? undefined : final
       } catch (err) {

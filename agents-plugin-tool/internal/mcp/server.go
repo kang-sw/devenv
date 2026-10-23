@@ -3535,11 +3535,11 @@ const sageRestampAfterFixes = " Once those edits are in the ticket, call ws/tick
 func sageRecordIssueRouting(result wsdoc.SageRecordResult) string {
 	switch {
 	case result.Autonomous > 0 && result.Missing > 0:
-		return fmt.Sprintf(" Route the recorded issues first: fix the %d autonomous issue(s) in the ticket yourself, and take the %d missing issue(s) through the Open Decision Queue — they need a user decision you cannot supply.%s", result.Autonomous, result.Missing, sageRestampAfterFixes)
+		return fmt.Sprintf(" Route the recorded issues first: fix the %d autonomous issue(s) in the ticket yourself, and take the %d missing issue(s) through the Open Decision Queue, each classed by the same rules as any other item.%s", result.Autonomous, result.Missing, sageRestampAfterFixes)
 	case result.Autonomous > 0:
 		return fmt.Sprintf(" Fix the %d autonomous issue(s) in the ticket yourself first; none of them need a user decision.%s", result.Autonomous, sageRestampAfterFixes)
 	case result.Missing > 0:
-		return fmt.Sprintf(" Take the %d missing issue(s) through the Open Decision Queue first — they need a user decision you cannot supply.", result.Missing)
+		return fmt.Sprintf(" Take the %d missing issue(s) through the Open Decision Queue first, each classed by the same rules as any other item.", result.Missing)
 	}
 	return ""
 }
@@ -4070,7 +4070,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "agenda.set",
-			"description": "Upsert a session-level agenda blob under a key. Agenda blobs hold mode context ('what are we doing and why') and are reminded at workflow-manual load. Freeform fallback for cases not covered by a typed enter.* tool. Pass merge: true to patch the stored blob (RFC 7396 JSON Merge Patch) instead of replacing it, so a small change does not re-send the whole blob.",
+			"description": "Upsert a session-level agenda blob under a key. Agenda blobs hold mode context ('what are we doing and why') and are reminded at workflow-manual load. Session-scoped: clear a blob when its work ends; a fact a future session needs belongs in note.write. Freeform fallback for cases not covered by a typed enter.* tool. Pass merge: true to patch the stored blob (RFC 7396 JSON Merge Patch) instead of replacing it, so a small change does not re-send the whole blob.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -4580,7 +4580,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "note.write",
-			"description": "Write one or more notes to the machine (PC-global), worktree (worktree-local, ephemeral), clone (project-scoped, worktree-agnostic, untracked), or repo (git-tracked, one file per key under ai-docs/ws-notes/) note layer. Full-overwrite per key, including priority. A larger integer priority is surfaced first in the workflow_manual ambient Notes block.",
+			"description": "Write one or more notes to the machine (PC-global), worktree (worktree-local, ephemeral), clone (project-scoped, worktree-agnostic, untracked), or repo (git-tracked, one file per key under ai-docs/ws-notes/) note layer. A note outlives the session until erased; in-session state (a pending question, a next step) belongs in agenda.set. Full-overwrite per key, including priority. A larger integer priority is surfaced first in the workflow_manual ambient Notes block.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{

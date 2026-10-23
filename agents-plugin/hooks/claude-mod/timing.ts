@@ -122,10 +122,24 @@ export function percentOf(tokens: number, raw: number): number {
   return Math.round((tokens / raw) * 100)
 }
 
+/** `tokens` in whole thousands, as the message heads show token counts. */
+function thousands(tokens: number): string {
+  return `${Math.round(tokens / 1000)}k`
+}
+
+/**
+ * The head both messages open with. `tokens` is the usage read when the main
+ * thread went idle before delivery; other queued prompts may still run before
+ * the message's own turn, so the head names that point.
+ */
+function head(t: Thresholds, tokens: number): string {
+  return `${LABEL}Context window at the end of the last turn: ${percentOf(tokens, t.raw)}% (${thousands(tokens)} / ${thousands(t.raw)} tokens) / ${percentOf(t.hard, t.raw)}% (automatic compaction point). `
+}
+
 export function advisoryText(t: Thresholds, tokens: number): string {
   const hard = percentOf(t.hard, t.raw)
   return (
-    `${LABEL}Context usage is ${percentOf(tokens, t.raw)}% of the window (advisory point: ${percentOf(t.advisory, t.raw)}%). Claude Code compacts automatically at about ${hard}%.\n` +
+    `${head(t, tokens)}This is past the advisory point (${percentOf(t.advisory, t.raw)}%).\n` +
     '\n' +
     'This is not an instruction to compact right now. If you are in active discussion with the human, awaiting their answer or clarification, or holding working context that would be costly to rebuild (a half-applied change or a diagnosis in progress), carry on for now. A pause after asking the human a question is not a boundary.\n' +
     '\n' +
@@ -136,13 +150,11 @@ export function advisoryText(t: Thresholds, tokens: number): string {
 }
 
 export function milestoneText(which: 1 | 2, t: Thresholds, tokens: number): string {
-  const n = percentOf(tokens, t.raw)
   const hard = percentOf(t.hard, t.raw)
-  const head = `${LABEL}Context window: ${n}% / ${hard}% (automatic compaction point). `
   return which === 1
-    ? head +
+    ? head(t, tokens) +
         `Past ${hard}%, Claude Code compacts automatically, mid-work if need be. From here on, a good boundary is worth taking; if this is one, update durable records and call the compaction request tool, as the advisory describes (the \`continue\` flag only when work must resume by itself). Otherwise end this turn without replying.`
-    : head +
+    : head(t, tokens) +
         'This is the last reading before automatic compaction. Compacting at a boundary you choose keeps the work coherent; take this one if it fits, update durable records and call the compaction request tool, as the advisory describes (the `continue` flag only when work must resume by itself). Otherwise end this turn without replying, and take the next good boundary.'
 }
 

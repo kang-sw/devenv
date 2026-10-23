@@ -299,6 +299,13 @@ func TestFormatSageRecordIssueRouting(t *testing.T) {
 	if !strings.Contains(missingOnly, "Take the 1 missing issue(s) through the Open Decision Queue") {
 		t.Fatalf("formatSageRecord missing-only routing:\n%s", missingOnly)
 	}
+	// A missing issue is classed like any other queue item, so the routing
+	// must not preassign it to the user.
+	for _, out := range []string{both, missingOnly} {
+		if !strings.Contains(out, "classed by the same rules as any other item") || strings.Contains(out, "user decision you cannot supply") {
+			t.Fatalf("formatSageRecord missing routing must defer to the item classes:\n%s", out)
+		}
+	}
 }
 
 // TestFormatSageRecordAutonomousOrdersRestamp pins the digest rule the routing

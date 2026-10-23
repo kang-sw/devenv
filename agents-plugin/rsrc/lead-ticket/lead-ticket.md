@@ -48,7 +48,7 @@ one item per decision. Reconcile item by item; where an answer's reach is
 unclear, state your reading on its own line and leave the item open until the
 user confirms it. The settle point is reached when the announced defaults and
 technical decisions are acknowledged and every policy question is confirmed,
-rejected, or explicitly deferred; only confirmed items are authoritative. At the settle point, persist
+rejected, or explicitly deferred. At the settle point, persist
 without showing the confirmed set again for approval: the acknowledgement
 already showed every item, and the trace below and the Sage reviewers guard
 against interacting decisions.
@@ -59,35 +59,20 @@ unless a decision is needed.
 
 ### Item classes
 
-Each item is one of three classes, so the user answers only the choices that
-depend on their preferences and can review the rest at the depth they choose.
+Each item is an announced default, a technical decision, or a policy
+question, as the workflow manual's `### Asking the user` defines them; ticket
+work adds:
 
-- **Announced default**: the item has one answer, and you can cite the reason
-  its alternatives lose. The citation is one of: a language or platform
-  constraint; a prior commit or ticket decision; an established project
-  convention; a direct consequence of an already-confirmed decision; or a
-  documentation-placement choice (parent or `related:` link, epic child or
+- A documentation-placement choice (parent or `related:` link, epic child or
   standalone, absorb or rewrite, initial status, stem naming, which commit
-  carries the edit), whose line names the placement and cites the neighbouring
-  ticket or convention it follows.
-- **Technical decision**: the item has no such citation, and its answer does
-  not hinge on the user's values: you pick it on technical reasoning (simpler,
-  fewer moving parts, a clearer failure mode) and state that reasoning. Your
-  own uncertainty about a technical call does not make it a policy question;
-  it stays a technical decision with its reasoning stated, or the policy group
-  fills with calls the user cannot judge.
-- **Policy question**: the answer depends on the user's preferences,
-  priorities, or product direction, such as the audience or scale a default
-  assumes, scope in or out, cost or risk tolerance, or a trade-off in
-  downstream-observable behavior.
-- An item that reverses a prior decision is always a policy question, even
-  when you can cite a reason for the reversal.
+  carries the edit) is an announced default when a neighbouring ticket or
+  convention gives the placement, and its line names the placement and cites
+  that source; with nothing to cite, it is a technical decision.
 - A consequence of a policy question still open in the same round is not yet
   a consequence of an already-confirmed decision: hold it, and add it to the
   next round's announced defaults once that answer lands.
 - A fact-populator decision gap or a reviewer issue is classed by the same
-  rules as any other item. A reviewer `missing` issue is always a policy
-  question, since it is a choice the reviewer could not derive.
+  rules as any other item.
 
 Announced defaults and technical decisions are still shown and confirmed,
 because items a lead treats as settled are sometimes materially revised once
@@ -114,10 +99,12 @@ Research tickets do not use the section; their Outcome Ledger holds their
 non-authoritative entries.
 
 - Keep the heading line exactly `## Open Decision Queue`; the line under it
-  records the last ID used, so the next number survives after settled items
-  have left.
+  records the last ID used, so the next number survives compaction and the
+  departure of settled items. IDs otherwise follow the workflow manual's
+  `### Asking the user`, including its renumbering of a resumed queue on a
+  collision.
 - Each item records its ID, status tag, class tag, and one-line decision, with
-  the tags after the ID: `(1) [open] [policy] <one-line decision>`. Status
+  the tags after the ID: `(01) [open] [policy] <one-line decision>`. Status
   tags are `[open]`, `[confirmed]`, `[rejected]`, and `[deferred]`; class tags
   are `[announced]`, `[technical]`, and `[policy]`. A policy question also
   records its context, alternatives, and your recommendation as the policy
@@ -125,14 +112,8 @@ non-authoritative entries.
   citation in their place, and a technical decision records its one line
   `<X> over <Y> - <technical reason>`, the reason standing where the
   citation stands. An announced or technical item that becomes a policy
-  question changes its class tag,
-  returns to `[open]` (back from `## Decisions` into the section if it had
-  moved there), and gains the policy block. Section text is English, like
-  the rest of the ticket.
-- IDs are `(1)`, `(2)`, `(3)`, ... and never change. A new item takes one past
-  the highest ID used so far in this conversation, across every affected
-  section and earlier rounds, so a re-created section continues the numbering
-  instead of restarting at `(1)`.
+  question changes its class tag and gains the policy block. Section text is
+  English, like the rest of the ticket.
 - The one-line decision is the decision itself, self-describing, not a label.
 - An item that affects several tickets (a batch coherence issue, a gap
   spanning members) is recorded under the same ID in the section of every
@@ -142,8 +123,9 @@ non-authoritative entries.
   decision's `Rejected:` text; a rejected item moves into the relevant decision's
   `Rejected:` text when it is a meaningful alternative and is otherwise
   dropped; a deferred item moves into `## Constraints` as out of scope.
-- A correction returns its item to `[open]` under its existing ID, back from
-  `## Decisions` into the section, and it is reconciled like any other open
+- A correction, an objection, or a reclass to a policy question returns its
+  item to `[open]` under its existing ID, back from `## Decisions` into the
+  section if it had moved there, and it is reconciled like any other open
   item.
 - Delete the section only at the settle point. `ready/` promotion and design
   review refuse a ticket that still carries it, whatever its item statuses.
@@ -183,19 +165,21 @@ conversation language like the rest of the item content.
 Each response asks every item still awaiting an answer, in three groups:
 announced defaults, then technical decisions, then the policy questions under
 their visible label, so the items that need an answer sit closest to the
-reply. Omit a group that has no item this round.
+reply. Omit a group that has no item this round. A response shows an item
+by its `(nn)` ID; the status and class tags stay in the section, apart from a
+re-ask's status tag.
 
 ```text
 # Open Decision Queue
 
 **Announced defaults** - these follow from existing constraints or earlier decisions, so each has one answer; acknowledge once, together with the technical decisions
-(1) <decision> - <citation>
+(01) <decision> - <citation>
 
 **Technical decisions** - calls I made as the technically best option, with the reason on each line; acknowledge once together with the defaults, or object to any item
-(2) <X> over <Y> - <technical reason>
+(02) <X> over <Y> - <technical reason>
 
 **Policy questions** - answer each
-(3) <one-line decision>
+(03) <one-line decision>
 - <context>
 - <alternative: ...>
 > <recommendation and why>
@@ -209,10 +193,10 @@ reply. Omit a group that has no item this round.
   question.
   The recommendation lives only in the trailing `>` line of its block.
 - A policy question already presented is re-asked as one line,
-  `(n) [open] <one-line decision>`; re-print its context only when the user
+  `(nn) [open] <one-line decision>`; re-print its context only when the user
   asks, or point at the ticket section.
 - Report the items settled this round in one line, such as
-  `(1), (2) confirmed · (4) deferred`; items settled in earlier rounds are not
+  `(01), (02) confirmed · (04) deferred`; items settled in earlier rounds are not
   repeated. This per-round settlement report is not the announced or
   technical group.
 

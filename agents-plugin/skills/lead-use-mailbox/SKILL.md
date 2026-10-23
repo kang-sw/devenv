@@ -5,5 +5,8 @@ description: Guide the lead and user through cross-session mail between independ
 
 # Use Mailbox
 
-Call `ws/playbook.read(name: "lead-use-mailbox", session_key: <your key, omit if fresh>)` and execute the returned procedure
-inline against the user request.
+Call in parallel:
+- `ws/playbook.read(name: "lead-use-mailbox", session_key: <your key, omit if fresh>)`
+- `ws/workflow_manual(session_key: <your key or "obsidian-latch" if fresh>, root: <absolute worktree path if fresh>)`
+
+After both return, execute the procedure returned by `ws/playbook.read`.

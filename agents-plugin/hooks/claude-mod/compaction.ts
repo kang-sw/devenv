@@ -49,6 +49,15 @@ import {
  * after the thresholds were cached drops the cache, so the configured point
  * applies from the next usage observation of that session.
  *
+ * A threshold message reports usage as of its delivery, not of the
+ * observation that crossed: session.measure also fires mid-turn (a rate-limit
+ * window moving a point, a subagent's requests among them), and the rest of
+ * that turn grows the context before a submitted prompt reaches the model. So
+ * a crossing observed while a main-thread turn runs is only recorded, and is
+ * delivered at whichever comes first of an observation while no main-thread
+ * turn runs and a main-thread turn end not aborted; delivery reads the usage
+ * afresh and figures the level and the figures from that read.
+ *
  * Main session only: thresholds read the main thread's usage, the lever
  * refuses a subagent, and a subagent's or fork's own compaction is ignored.
  * The engine calls arrive as edges bound in register.ts, so the state machine
@@ -73,6 +82,10 @@ export type CompactionEdges = {
   /** Run `fn` once, `ms` from now. */
   delay: (ms: number, fn: () => void) => void
   log: (text: string, to: 'transcript' | 'debug') => void
+  /** Whether a main-thread turn runs, from its turn.start to its turn.complete. */
+  turnRunning: () => boolean
+  /** Read the live usage afresh, without a breakdown; a threshold message's figures come from it. */
+  readUsage: () => Promise<SessionContextUsage>
   /**
    * Told when the lever's own compaction landed. The engine routes it past
    * the mod's session.compact hook, so another feature that resets on a
@@ -97,11 +110,18 @@ export type Compaction = {
   end: (reason: string) => void
   /** A lever tool call. */
   lever: (agentId: string | undefined, flag: unknown) => LeverAnswer
-  /** A session.measure: compare usage with the thresholds and submit at most one threshold message. */
+  /**
+   * A session.measure: compare usage with the thresholds and record a
+   * crossing; while no main-thread turn runs, deliver it at once (at most one
+   * threshold message).
+   */
   measure: (context: SessionContextUsage, readBreakdown: () => Promise<SessionUsage>) => Promise<void>
   /** A turn.start: a main-thread one cancels a held resume prompt. */
   turnStarted: (agentId: string | undefined) => void
-  /** A turn.complete: schedule a pending request's compact step, or submit its resume prompt. */
+  /**
+   * A turn.complete: schedule a recorded crossing's delivery, and a pending
+   * request's compact step, or submit its resume prompt.
+   */
   turnComplete: (agentId: string | undefined, reason: string) => void
   /** A session.compact as it settled beneath the feature's hook. */
   compacted: (trigger: SessionCompactTrigger, agentId: string | undefined, res: SessionCompactResult) => void
@@ -141,6 +161,13 @@ export function createCompaction(): Compaction {
   let cached: Cached | undefined
   /** The level last delivered; undefined until the first usage observed since a session start or end. */
   let latch: Level | undefined
+  /**
+   * A crossing above the latch not delivered yet, with the usage of the
+   * observation that first recorded it (for the delivery's debug line).
+   */
+  let crossing: { tokens: number } | undefined
+  /** True while a delivery awaits its usage read: a second one waits for the next delivery point. */
+  let delivering = false
   let request: Request | undefined
   /** The lever's resume prompt held for its window; see CONTINUATION_WINDOW_MS. */
   let held: { text: string } | undefined
@@ -171,6 +198,7 @@ export function createCompaction(): Compaction {
     generation += 1
     cached = undefined
     latch = undefined
+    crossing = undefined
     request = undefined
     held = undefined
   }
@@ -197,6 +225,50 @@ export function createCompaction(): Compaction {
     generation += 1
     cached = undefined
     latch = 0
+    crossing = undefined
+  }
+
+  /**
+   * Deliver the recorded crossing with a fresh usage read: its level and its
+   * figures are that read's, so a crossing that grew past the next milestone
+   * meanwhile delivers the higher one. No threshold message while a lever
+   * request is pending (its turn could start first and make compact() reject,
+   * or land beside the resume prompt with stale figures), nor while its
+   * resume prompt is held (a threshold turn would start first and cancel it),
+   * nor once a main-thread turn started during the read: the crossing then
+   * stays recorded for a later delivery point.
+   */
+  const deliver = async () => {
+    const c0 = cached
+    const t = c0?.thresholds
+    if (!edges || !crossing || delivering || !t || request !== undefined || held !== undefined) return
+    const gen = generation
+    let fresh: SessionContextUsage
+    delivering = true
+    try {
+      fresh = await edges.readUsage()
+    } catch (err) {
+      debug(`usage not read for delivery (${String(err)}); the crossing stays recorded`)
+      return
+    } finally {
+      delivering = false
+    }
+    const crossed = crossing
+    if (gen !== generation || cached !== c0 || !crossed || request !== undefined || held !== undefined || edges.turnRunning()) return
+    // Thresholds figured under another model window are stale; the next observation reads the breakdown again.
+    if (fresh.window !== c0.window) return
+    const tokens = fresh.tokens ?? crossed.tokens
+    const step = observe(latch, levelAt(t, tokens), true)
+    latch = step.latch
+    crossing = undefined
+    if (!step.deliver) return
+    debug(
+      `${step.deliver.kind === 'advisory' ? 'advisory' : `milestone ${step.deliver.which}`} delivered: ` +
+        `crossing measured at ${crossed.tokens} tokens (${percentOf(crossed.tokens, t.raw)}%), ` +
+        `fresh read ${fresh.tokens === undefined ? 'without tokens, so the crossing\'s figure is shown' : `${fresh.tokens} tokens (${percentOf(fresh.tokens, t.raw)}%)`}, ` +
+        `compaction window ${t.raw} tokens, model window ${fresh.window} tokens`,
+    )
+    submit(deliveryText(step.deliver, t, tokens), false)
   }
 
   /** Settle `r` with its resume prompt, unguarded; an unset flag submits nothing. */
@@ -325,15 +397,13 @@ export function createCompaction(): Compaction {
       }
       const t = cached.thresholds
       if (!t) return
-      // No threshold message while a lever request is pending: its turn could
-      // start first and make compact() reject, or land beside the resume
-      // prompt with stale figures. Nor while its resume prompt is held: a
-      // threshold turn would start first and cancel it. The crossing stays pending in the latch.
-      const step = observe(latch, levelAt(t, tokens), request === undefined && held === undefined)
-      latch = step.latch
-      if (!step.deliver) return
-      debug(`${step.deliver.kind === 'advisory' ? 'advisory' : `milestone ${step.deliver.which}`} at ${percentOf(tokens, t.raw)}%`)
-      submit(deliveryText(step.deliver, t, tokens), false)
+      // Record only: the latch baselines or re-arms here, and a crossing
+      // above it is delivered by deliver().
+      const level = levelAt(t, tokens)
+      latch = observe(latch, level, false).latch
+      if (level <= latch) crossing = undefined
+      else crossing ??= { tokens }
+      if (crossing && !edges?.turnRunning()) await deliver()
     },
 
     // Any main-thread turn start, whatever started it, is the first turn
@@ -353,6 +423,17 @@ export function createCompaction(): Compaction {
     // callback whose dispatch a hook refused), so it is queued again; the
     // token keeps the stale one inert should it run after all.
     turnComplete: (agentId, reason) => {
+      // A crossing recorded during the turn is delivered once the hook has
+      // returned; an observation arriving after the turn end may deliver it
+      // first, and the latch keeps it from being delivered twice. An aborted
+      // turn's crossing waits for the next idle observation or turn end.
+      if (agentId === undefined && reason !== 'aborted' && crossing && edges) {
+        try {
+          edges.after(() => void deliver().catch((err) => debug(`delivery failed: ${String(err)}`)))
+        } catch (err) {
+          debug(`the delivery was not scheduled (${String(err)}); the crossing stays recorded`)
+        }
+      }
       const r = request
       if (agentId !== undefined || reason === 'aborted' || !r || leverCompacting || !edges) return
       if (!r.compact) return finish(r)
