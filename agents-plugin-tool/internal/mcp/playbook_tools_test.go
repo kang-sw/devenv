@@ -2628,7 +2628,7 @@ func TestPlaybookPrintGoldenLeadDiscuss(t *testing.T) {
 	for _, want := range []string{
 		"Ask in the classes and IDs of the workflow manual's `### Asking the user`, in prose",
 		"which are policy questions the user must decide before the next topic",
-		"No block format and no queue; nothing here is persisted",
+		"Announced and technical items need no acknowledgement here. No block format and no queue; nothing here is persisted",
 		"Ask the fewest policy questions, ask independent ones together, and hold one that depends on an unanswered one to a later turn",
 		"Never fill unanswered intent with inference",
 		"A policy question you asked and the user has not answered",
@@ -2686,12 +2686,12 @@ func TestPlaybookPrintGoldenLeadWorkflowManualAskingTheUser(t *testing.T) {
 		"Your own uncertainty about a technical call does not make it a policy question",
 		"**Policy question**: the answer depends on the user's preferences, priorities, or product direction",
 		"An item that reverses a prior decision is always a policy question, even when you can cite a reason for the reversal",
-		"The classes never turn an ask a skill or the project reserves for the user into a default or a technical call: the next-step handoff of `ws:lead-review`, the publish confirmation of `ws:lead-ship`, and the project's Approval Protocol \"Ask first\" items stay asks",
+		"The classes never turn an ask a skill or the project reserves for the user into a default or a technical call: the next-step handoff of `ws:lead-review`, the publish confirmation of `ws:lead-ship`, and the project's Approval Protocol \"Ask first\" and \"Always ask\" items stay asks",
 		"Every item carries an ID unique within the conversation",
 		"Write it `(nn)`, zero-padded to two digits (`(03)`; three digits past 99)",
-		"A new item takes one past the highest ID already used in the conversation, `(01)` when none, and an item keeps its ID when it moves from discussion into a ticket's queue",
+		"A new item takes one past the highest ID already used in the conversation, counting the IDs and the last-ID line of every ticket queue you have read, `(01)` when none; an item keeps its ID when it moves from discussion into a ticket's queue",
 		"Discussion keeps no counter. After compaction, continue from the highest ID the summary shows",
-		"A ticket queue left open from an earlier conversation keeps its IDs. Only when one collides with an ID already used in this conversation are that ticket's open items renumbered to fresh IDs; state the old-to-new mapping once, in one line: `(04) -> (15)`",
+		"A ticket queue left open from an earlier conversation keeps its IDs. Only when one collides with an ID already used in this conversation are the items still in that ticket's queue renumbered to fresh IDs, in every ticket that carries them, with the last-ID line updated; state the old-to-new mapping once, in one line: `(04) -> (15), (05) -> (16)`",
 	} {
 		if !strings.Contains(normalized, want) {
 			t.Errorf("Asking the user section missing %q:\n%s", want, section)

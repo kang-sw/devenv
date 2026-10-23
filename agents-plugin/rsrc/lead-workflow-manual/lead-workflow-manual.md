@@ -70,22 +70,24 @@ depend on their preferences and can review the rest at the depth they choose.
   into a default or a technical call: the next-step handoff of
   `{{.SkillNamespace}}:lead-review`, the publish confirmation of
   `{{.SkillNamespace}}:lead-ship`, and the project's Approval Protocol "Ask
-  first" items stay asks.
+  first" and "Always ask" items stay asks.
 
 Every item carries an ID unique within the conversation, so the user can cite
 any earlier item by number:
 
 - Write it `(nn)`, zero-padded to two digits (`(03)`; three digits past 99).
   A new item takes one past the highest ID already used in the conversation,
-  `(01)` when none, and an item keeps its ID when it moves from discussion
-  into a ticket's queue.
+  counting the IDs and the last-ID line of every ticket queue you have read,
+  `(01)` when none; an item keeps its ID when it moves from discussion into a
+  ticket's queue.
 - Discussion keeps no counter. After compaction, continue from the highest ID
   the summary shows; a collision with an ID the summary dropped is accepted,
   since nothing in discussion persists.
 - A ticket queue left open from an earlier conversation keeps its IDs. Only
-  when one collides with an ID already used in this conversation are that
-  ticket's open items renumbered to fresh IDs; state the old-to-new mapping
-  once, in one line: `(04) -> (15)`.
+  when one collides with an ID already used in this conversation are the
+  items still in that ticket's queue renumbered to fresh IDs, in every ticket
+  that carries them, with the last-ID line updated; state the old-to-new
+  mapping once, in one line: `(04) -> (15), (05) -> (16)`.
 
 ### Workflow tuning
 

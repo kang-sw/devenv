@@ -38,8 +38,9 @@ worker workflow.
 - Ask in the classes and IDs of the workflow manual's `### Asking the user`,
   in prose: say which items you take as announced defaults, which are your
   technical calls with their reasoning, and which are policy questions the
-  user must decide before the next topic. No block format and no queue;
-  nothing here is persisted.
+  user must decide before the next topic. Announced and technical items need
+  no acknowledgement here. No block format and no queue; nothing here is
+  persisted.
 - Ask the fewest policy questions, ask independent ones together, and hold
   one that depends on an unanswered one to a later turn. Never fill
   unanswered intent with inference.
