@@ -591,7 +591,14 @@
       "registered_at": "2026-10-22T14:38:23Z"
     },
     "261023-bug-claude-mod-sentinel-key-mailbox-push": {
-      "registered_at": "2026-10-23T06:55:23Z"
+      "registered_at": "2026-10-23T06:55:23Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-10-23T07:57:30Z"
+      }
     },
     "261023-feat-ws-shared-question-classes-and-ids": {
       "registered_at": "2026-10-23T07:31:25Z"
