@@ -65,14 +65,14 @@ work adds:
 
 - A documentation-placement choice (parent or `related:` link, epic child or
   standalone, absorb or rewrite, initial status, stem naming, which commit
-  carries the edit) is an announced default, whose line names the placement
-  and cites the neighbouring ticket or convention it follows.
+  carries the edit) is an announced default when a neighbouring ticket or
+  convention gives the placement, and its line names the placement and cites
+  that source; with nothing to cite, it is a technical decision.
 - A consequence of a policy question still open in the same round is not yet
   a consequence of an already-confirmed decision: hold it, and add it to the
   next round's announced defaults once that answer lands.
 - A fact-populator decision gap or a reviewer issue is classed by the same
-  rules as any other item. A reviewer `missing` issue is always a policy
-  question, since it is a choice the reviewer could not derive.
+  rules as any other item.
 
 Announced defaults and technical decisions are still shown and confirmed,
 because items a lead treats as settled are sometimes materially revised once

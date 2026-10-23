@@ -2227,7 +2227,7 @@ func TestPlaybookPrintGoldenLeadWorkflowManual(t *testing.T) {
 // queue state lives in a temporary ticket section whose settled items move to
 // their home sections, the pointer to the workflow manual's item classes plus
 // the ticket-only class rules (documentation-placement citation, open-round
-// consequence hold, reviewer `missing` always policy, one explicit
+// consequence hold, one explicit
 // acknowledgement covering the announced and technical groups with silence
 // not counting), the zero-padded `(nn)` IDs, the three-group response format
 // in the order announced, technical, policy with the labeled groups and the
@@ -2289,13 +2289,12 @@ func TestPlaybookPrintGoldenLeadTicket(t *testing.T) {
 				// Item classes: the definitions live in the workflow
 				// manual (pinned by TestPlaybookPrintGoldenLeadWorkflowManualAskingTheUser);
 				// lead-ticket keeps the pointer and its ticket-specific rules:
-				// the documentation-placement citation, the open-round
-				// consequence hold, and the reviewer `missing` rule.
+				// the documentation-placement citation, and the open-round
+				// consequence hold.
 				"Each item is an announced default, a technical decision, or a policy question, as the workflow manual's `### Asking the user` defines them",
-				"A documentation-placement choice (parent or `related:` link, epic child or standalone, absorb or rewrite, initial status, stem naming, which commit carries the edit) is an announced default, whose line names the placement and cites the neighbouring ticket or convention it follows",
+				"A documentation-placement choice (parent or `related:` link, epic child or standalone, absorb or rewrite, initial status, stem naming, which commit carries the edit) is an announced default when a neighbouring ticket or convention gives the placement, and its line names the placement and cites that source; with nothing to cite, it is a technical decision",
 				"A fact-populator decision gap or a reviewer issue is classed by the same rules as any other item",
 				"A consequence of a policy question still open in the same round is not yet a consequence of an already-confirmed decision",
-				"A reviewer `missing` issue is always a policy question",
 				// Single explicit acknowledgement; silence is not consent.
 				"One explicit user acknowledgement confirms the announced and technical groups together",
 				"Silence is not consent",
@@ -2356,6 +2355,8 @@ func TestPlaybookPrintGoldenLeadTicket(t *testing.T) {
 				"IDs are `(1)`",
 				"(1) <decision>",
 				"`(n) [open]",
+				// The retired always-policy rule for a reviewer `missing` issue.
+				"is always a policy",
 			} {
 				if strings.Contains(body, forbidden) || strings.Contains(normalized, forbidden) {
 					t.Errorf("body still names retired surface %q:\n%s", forbidden, body)
