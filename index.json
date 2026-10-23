@@ -569,7 +569,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-23T07:57:26Z"
+        "touched_at": "2026-10-23T07:58:40Z",
+        "impl": {
+          "branch": "impl/develop/wife-twins-hut"
+        }
       }
     },
     "261020-bug-worktree-profiles-review-followups": {
