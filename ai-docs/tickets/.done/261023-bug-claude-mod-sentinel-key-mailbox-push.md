@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: b9321f2ac8c89a85
 sage-review-completeness-reviewed: b9321f2ac8c89a85
+completed: 2026-10-23
 ---
 
 # Claude mod mailbox push stays on a key the lead never saw when the manual section does not reach the model
@@ -160,3 +161,46 @@ Implementation notes from review:
   single-call form for that shim, by this ticket's Decisions.
 - Parallel with `261023-feat-ws-shared-question-classes-and-ids`: on a
   manifest or mirror conflict at merge, regenerate, never hand-merge.
+
+### Result (f0558ec9d) - 2026-10-23
+
+- `manual.ts`: `revivedKeyToAdopt(raw, current, text)` takes the sentinel's key
+  from the line after the result's first `## Session Key` line (never the call
+  argument); the key goes through the unchanged `adopt` flow (re-login,
+  `switchKey`, key entry rewrite, rebuild under the generation guard). A
+  sentinel result without that line adopts nothing. A sentinel call's result
+  bypasses `stateOnly` entirely: the span guard already kept a keyed sentinel
+  result whole, but a root-less sentinel result (manual, no `## Session Key`)
+  hit the end-anchor miss and fell back to `workflow_state` with the sentinel
+  as key; that path is closed. `adoptionNotice(previous, current, push)`
+  appends "Mailbox push is bound to <key>: ... so launch no mailbox wait."
+  when `pushAvailable()` resolves true, for every adoption, a revive's
+  included. `ferrule` needed no code: `rewriteRead` hooks only
+  `workflow_manual`/`playbook_read`. wsflow copy resynced byte-identical.
+- Shims: ws and wsflow `lead-use-mailbox` take the `lead-discuss` two-call
+  parallel form (wsflow drops its blocker sentence). There is no tracked
+  `agents-plugin-pi/skills/` tree: pi copies `agents-plugin/skills/` at pack
+  time (`scripts/copy-skills.mjs`), so the ws edit covers pi and there is no
+  pi skills manifest to regenerate.
+- `arm-the-wait.claude.md` step 3 is now the one gated fallback line (neither
+  the system prompt nor a key-change notice says the push is bound); steps 1,
+  2, 4 unchanged. rsrc manifest regenerated; wsflow and pi rsrc mirrors
+  resynced; skills manifest regenerated.
+- Tests: `manual.test.ts` inverts the sentinel case (adopted like a revive,
+  read whole), adds a whole-result case for a matching cut and for a
+  root-less result, and pins the push sentence on sentinel and revive
+  notices; `manual-engine.test.ts` adds main-thread sentinel adoption (push
+  re-bound) and subagent-sentinel, keyless-sentinel, and `ferrule` no-ops,
+  and the revive notice now carries the push sentence. wsflow bundle test
+  moves `lead-use-mailbox` to `EXPECTED_PARALLEL_INIT_SKILLS` and retires
+  `SESSION_KEY_SHIM_TITLES` with `test_session_key_shims_pin_their_clause`;
+  `claudeFallback` pins the new step 3 text.
+- Verification: `claude plugin test agents-plugin` 355 pass / 0 fail;
+  `claude plugin test agents-plugin-wsflow` 355 pass / 0 fail;
+  `claude plugin validate` passes on both; `python3 -m unittest discover
+  agents-plugin-wsflow/tests` OK (14); `go test ./internal/wsrsrc/...` ok;
+  `go test ./internal/mcp/...` ok. `agents-plugin-pi` `lead-skills.test.ts`
+  cannot run in this worktree (no `node_modules`; fails identically on the
+  unchanged base); `skills-dir.test.ts` passes.
+- Review (lite): clean; one minor note that `resultKey` takes the first
+  `## Session Key` line, the same assumption `stateOnly`'s end anchor makes.

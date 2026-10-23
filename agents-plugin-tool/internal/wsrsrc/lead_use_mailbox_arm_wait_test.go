@@ -17,7 +17,8 @@ import (
 // placeholder that render-time injection substitutes. The Claude overlay
 // must lead with the automatic-push branch (a system prompt that says the push
 // is bound launches nothing), then the mailbox watch tool, and keep the
-// shell-wait fallback, without the base's Codex nuance.
+// shell-wait fallback (gated on neither the system prompt nor a key-change
+// notice saying the push is bound), without the base's Codex nuance.
 func TestLeadUseMailboxArmTheWaitHarnessComposition(t *testing.T) {
 	root := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 
@@ -31,7 +32,7 @@ func TestLeadUseMailboxArmTheWaitHarnessComposition(t *testing.T) {
 		piNoLaunchSentence = "you never launch anything from"
 		claudeAutoPush     = "If your system prompt says mailbox push is bound to your session key"
 		claudeWatchTool    = "if the mailbox watch tool is available, call it with your"
-		claudeFallback     = "Your harness re-invokes you when that background task"
+		claudeFallback     = "neither your system prompt nor a key-change notice says"
 	)
 
 	cases := []struct {

@@ -218,6 +218,10 @@ describe('pinned prose', () => {
     expect(adoptionNotice(undefined, 'k-2')).toBe(
       '[ws] Lead session key changed: (none) -> k-2. Keep passing k-2 as session_key; this conversation resumes with it, and the system prompt names it after the next /compact or compaction request.',
     )
+    expect(adoptionNotice('k-1', 'k-2', true)).toBe(
+      '[ws] Lead session key changed: k-1 -> k-2. Keep passing k-2 as session_key; this conversation resumes with it, and the system prompt names it after the next /compact or compaction request. ' +
+        'Mailbox push is bound to k-2: arriving mail starts your next turn even when you are idle, so launch no mailbox wait.',
+    )
   })
 })
 
@@ -256,10 +260,17 @@ describe('pure helpers', () => {
     expect(readKey('workflow_manual', { session_key: 'k-1', root: '/r' })).toBe(readKey('workflow_manual', { session_key: 'k-1' }))
   })
 
-  test('a revive is an explicit key other than the sentinel and the current key', () => {
+  test('the key to adopt is an explicit key, or the sentinel result\'s ## Session Key, other than the sentinel and the current key', () => {
     expect(revivedKeyToAdopt(' other ', 'mine')).toBe('other')
     expect(revivedKeyToAdopt('other', undefined)).toBe('other')
+    expect(revivedKeyToAdopt('other', 'mine', response('ignored'))).toBe('other')
     expect(revivedKeyToAdopt('mine', 'mine')).toBeUndefined()
+    expect(revivedKeyToAdopt('obsidian-latch', 'mine', response('fresh-1'))).toBe('fresh-1')
+    expect(revivedKeyToAdopt(' obsidian-latch ', undefined, response('fresh-1'))).toBe('fresh-1')
+    expect(revivedKeyToAdopt('obsidian-latch', 'fresh-1', response('fresh-1'))).toBeUndefined()
+    expect(revivedKeyToAdopt('obsidian-latch', 'mine', response('obsidian-latch'))).toBeUndefined()
+    expect(revivedKeyToAdopt('obsidian-latch', 'mine', '# Workflow Manual\nno key here\n')).toBeUndefined()
+    expect(revivedKeyToAdopt('obsidian-latch', 'mine', '## Session Key\n\n## Session State\n')).toBeUndefined()
     expect(revivedKeyToAdopt('obsidian-latch', 'mine')).toBeUndefined()
     expect(revivedKeyToAdopt('obsidian-latch', undefined)).toBeUndefined()
     expect(revivedKeyToAdopt('  ', 'mine')).toBeUndefined()
@@ -818,12 +829,55 @@ describe('revive key adoption', () => {
     expect(h.keys.length).toBe(2)
   })
 
-  test('no adoption for the sentinel, the current key, or a key ws-mcp refuses', async () => {
+  test('a sentinel result carrying a minted key is adopted like a revive, and the lead reads it whole', async () => {
+    const { h, m, tools } = await ready()
+    expect(m.snapshot()).toBe(true)
+    h.known.add('fresh-1')
+    const before = tools().length
+    const minted = response('fresh-1')
+    expect(await m.read('workflow_manual', WM_TOOL, { session_key: 'obsidian-latch', root: '/repo' }, minted)).toBe(
+      `${minted}\n\n${adoptionNotice('minted-1', 'fresh-1')}`,
+    )
+    expect(h.calls[before]).toEqual({ server: SERVER, tool: 'ferrule', args: { root: '/repo/sub', format: 'json', relogin_session_key: 'fresh-1' } })
+    expect(h.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'fresh-1', at: NOW })
+    expect(h.keys).toEqual([
+      ['minted-1', undefined],
+      ['fresh-1', 'minted-1'],
+    ])
+    expect(m.key()).toBe('fresh-1')
+    await tick()
+    expect(tools().slice(before)).toEqual(['ferrule', 'ferrule', 'workflow_manual', 'playbook_read'])
+    expect(h.minted).toBe(1)
+    m.compacted('manual', undefined, { messages: [] })
+    expect(await m.compose([])).toBe(sectionText('fresh-1', manualPart(response('fresh-1'))!))
+  })
+
+  test('a sentinel result reaches the lead whole even when its cut would match or its anchors miss', async () => {
+    const { h, m, tools } = await ready()
+    // The section's own key, as a sentinel answer: the cut would match, yet nothing is cut and nothing adopted.
+    expect(await m.read('workflow_manual', WM_TOOL, { session_key: 'obsidian-latch' }, response('minted-1'))).toBeUndefined()
+    // A sentinel call without a root: the manual with no ## Session Key line, so no workflow_state fallback either.
+    const before = tools().length
+    const bodyOnly = `${STATIC_BODY}\nCall ferrule to bootstrap.\n`
+    expect(await m.read('workflow_manual', WM_TOOL, { session_key: 'obsidian-latch' }, bodyOnly)).toBeUndefined()
+    expect(tools().length).toBe(before)
+    expect(h.keys).toEqual([['minted-1', undefined]])
+    expect(m.snapshot()).toBe(true)
+  })
+
+  test('every adoption notice names the push when it runs here, a revive\'s included', async () => {
+    const { h, m } = await ready()
+    h.push = true
+    h.known.add('fresh-1')
+    const minted = response('fresh-1')
+    expect(await m.read('workflow_manual', WM_TOOL, { session_key: 'obsidian-latch' }, minted)).toBe(`${minted}\n\n${adoptionNotice('minted-1', 'fresh-1', true)}`)
+    await tick()
+    expect(await revive(m)).toBe(`${response('revived')}\n\n${adoptionNotice('fresh-1', 'revived', true)}`)
+  })
+
+  test('no adoption for the current key or a key ws-mcp refuses', async () => {
     const { h, m, tools } = await ready()
     const before = tools().length
-    const sentinel = response('obsidian-latch')
-    expect(await m.read('workflow_manual', WM_TOOL, { session_key: 'obsidian-latch' }, sentinel)).toBeUndefined()
-    expect(tools().length).toBe(before)
     expect(await m.read('workflow_manual', WM_TOOL, { session_key: 'minted-1' }, response('minted-1'))).toMatch(/^Workflow manual is in your system prompt;/)
     expect(tools().length).toBe(before)
     expect(await revive(m, 'unknown-key')).toBeUndefined()

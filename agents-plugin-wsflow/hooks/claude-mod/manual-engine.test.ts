@@ -478,7 +478,7 @@ test('ws adopts a main-thread revive: re-login, entry rewritten, notice verbatim
   const calls = w.mcpCalls.length
   const res = await read($, w, 'workflow_manual', { session_key: 'revived' })
   expect(seen(res)).toBe(
-    `${keyedResponse('revived', '(no todos)')}\n\n[ws] Lead session key changed: minted-1 -> revived. Keep passing revived as session_key; this conversation resumes with it, and the system prompt names it after the next /compact or compaction request.`,
+    `${keyedResponse('revived', '(no todos)')}\n\n[ws] Lead session key changed: minted-1 -> revived. Keep passing revived as session_key; this conversation resumes with it, and the system prompt names it after the next /compact or compaction request. Mailbox push is bound to revived: arriving mail starts your next turn even when you are idle, so launch no mailbox wait.`,
   )
   expect(w.mcpCalls[calls]).toEqual({ server: 'plugin:ws:ws', tool: 'ferrule', args: { root: '/repo/sub', format: 'json', relogin_session_key: 'revived' } })
   expect(w.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'revived', at: 1_800_000_000_000 })
@@ -492,6 +492,48 @@ test('ws adopts a main-thread revive: re-login, entry rewritten, notice verbatim
   expect(seen(await read($, w, 'workflow_manual', { session_key: 'revived' }))).toMatch(/^Workflow manual is in your system prompt;/)
   expect(boundKeys(w)).toEqual(['minted-1', 'revived'])
 })
+
+test('ws adopts the key a main-thread sentinel call minted: the lead reads the result whole, and the push re-binds to it', LIVE_CHILD, async ($, on) => {
+  const w = world(on, { processOk: true })
+  await start($, w)
+  if (!isWs(w)) return
+  await compose($, w)
+  // ws-mcp's FRESH-with-root answer: the manual keyed to the key it minted.
+  w.known.add('fresh-1')
+  w.coreManual = keyedResponse('fresh-1', '(no todos)')
+  const calls = w.mcpCalls.length
+  const res = await read($, w, 'workflow_manual', { session_key: 'obsidian-latch', root: '/repo/sub' })
+  expect(seen(res)).toBe(`${keyedResponse('fresh-1', '(no todos)')}\n\n${adoptionNotice('minted-1', 'fresh-1', true)}`)
+  expect(w.mcpCalls[calls]).toEqual({ server: 'plugin:ws:ws', tool: 'ferrule', args: { root: '/repo/sub', format: 'json', relogin_session_key: 'fresh-1' } })
+  expect(w.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'fresh-1', at: 1_800_000_000_000 })
+  expect(boundKeys(w)).toEqual(['minted-1', 'fresh-1'])
+  expect(w.killed).toEqual([0])
+})
+
+for (const variant of ['subagent sentinel', 'keyless sentinel', 'ferrule'] as const) {
+  test(`ws: a ${variant} call leaves the push where it is`, LIVE_CHILD, async ($, on) => {
+    const w = world(on, { processOk: true })
+    await start($, w)
+    if (!isWs(w)) return
+    await compose($, w)
+    w.known.add('fresh-1')
+    const calls = w.mcpCalls.length
+    if (variant === 'subagent sentinel') {
+      w.coreManual = keyedResponse('fresh-1', '(no todos)')
+      expect(seen(await read($, w, 'workflow_manual', { session_key: 'obsidian-latch', root: '/repo/sub' }, 'sub-1'))).toBe(w.coreManual)
+    } else if (variant === 'keyless sentinel') {
+      // No root: ws-mcp mints nothing and the result carries no ## Session Key line.
+      w.coreManual = `${STATIC_BODY}\nCall ferrule to bootstrap.\n`
+      expect(seen(await read($, w, 'workflow_manual', { session_key: 'obsidian-latch' }))).toBe(w.coreManual)
+    } else {
+      await $.tool.call({ tool: `mcp__plugin_${w.plugin}_${w.plugin}__ferrule`, root: '/repo/sub' } as never)
+      await w.clock.settle()
+    }
+    expect(w.mcpCalls.length).toBe(calls)
+    expect(boundKeys(w)).toEqual(['minted-1'])
+    expect(w.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'minted-1', at: 1_800_000_000_000 })
+  })
+}
 
 test('ws binds automatically at a re-login on resume or hot reload, and at the lazy mint after /clear', LIVE_CHILD, async ($, on) => {
   const w = world(on, { processOk: true, store: { [`${KEY_STORE_PREFIX}sess-1`]: { sessionKey: 'kept-key', at: 1_800_000_000_000 } } })
