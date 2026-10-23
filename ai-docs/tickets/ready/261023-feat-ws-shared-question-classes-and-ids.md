@@ -1,7 +1,11 @@
 ---
 title: Shared question classes and conversation-unique question IDs in the workflow manual
-sage-review-design: required
-sage-review-completeness: required
+related:
+  261007-feat-odq-technical-decision-class: origin of the three item classes this ticket lifts
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 84cdcad4ad73f182
+sage-review-completeness-reviewed: 84cdcad4ad73f182
 ---
 
 # Shared question classes and conversation-unique question IDs in the workflow manual
@@ -39,7 +43,10 @@ mandated-read costs and judges procedural prose a poor producer of behavior
     priorities, or product direction;
   - an item that reverses a prior decision is always a policy question;
   - the lead's own uncertainty about a technical call does not make it a
-    policy question.
+    policy question;
+  - the classes never lift an ask a playbook or the project reserves for the
+    user (the `lead-review` next-step handoff, the `lead-ship` publish
+    confirmation, a project's Approval Protocol "Ask first" items).
   Rejected: a short new definition in the manual with `lead-ticket` keeping
   its full copy (two definitions drift, and the drift brings back the
   register gap this ticket removes); placing them inside `### User
@@ -89,7 +96,8 @@ mandated-read costs and judges procedural prose a poor producer of behavior
 
 - `lead-ticket` behavior is unchanged apart from the ID notation and the
   collision rule: only the `### Queue state` ID bullets and the
-  `### Response format` skeleton change there, besides `### Item classes`.
+  `### Response format` skeleton and the bullets below it that carry the
+  old `(n)` form change there, besides `### Item classes`.
 - Every copy stays identical in substance: `agents-plugin/rsrc/`,
   `agents-plugin-wsflow/rsrc/`, and `agents-plugin-pi/rsrc/` for
   `lead-workflow-manual`, `lead-discuss`, and `lead-ticket`.
@@ -146,3 +154,17 @@ suites pass in every copy, and one fresh-read audit of the three changed
 documents per `skill-authoring.md` reports no unresolved finding. A scripted
 conversation test is not attempted: the question register is model behavior
 with no deterministic test surface.
+
+Implementation notes from review:
+- The ID-space and collision rules live in the manual's `### Asking the
+  user` subsection with the classes; `lead-ticket` `### Queue state` points at
+  them and keeps only its last-ID line.
+- A ticket queue's first ID continues from the highest ID already used in
+  the conversation (`(01)` when none).
+- In discussion-only work there is no last-ID line; after compaction the
+  lead continues from the highest ID in the summary or restarts at the next
+  free number, accepting a loose collision, since nothing persists.
+- Items acknowledged in discussion are acknowledged again when they enter a
+  ticket queue; `lead-ticket` acknowledgement behavior is unchanged.
+- Parallel with `261023-bug-claude-mod-sentinel-key-mailbox-push`: on a
+  manifest or mirror conflict at merge, regenerate, never hand-merge.

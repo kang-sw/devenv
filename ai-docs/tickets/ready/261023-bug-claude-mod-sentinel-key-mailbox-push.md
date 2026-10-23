@@ -3,8 +3,10 @@ title: Claude mod mailbox push stays on a key the lead never saw when the manual
 related:
   261018-feat-claude-mod-lead-key-adoption-mailbox-auto-bind: reverses its "sentinel is never adopted" decision
   261018-feat-claude-mod-ws-manual-injection: origin of the minted key and the system prompt section
-sage-review-design: required
-sage-review-completeness: required
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: b9321f2ac8c89a85
+sage-review-completeness-reviewed: b9321f2ac8c89a85
 ---
 
 # Claude mod mailbox push stays on a key the lead never saw when the manual section does not reach the model
@@ -65,6 +67,10 @@ shim loads only its playbook and never bootstraps a key.
 - **The CLI wait is a one-line fallback.** `arm-the-wait.claude.md` step 3
   shrinks to one line for a Claude Code without the mod (the only Claude host
   where neither the push nor the watch tool exists). Steps 1, 2 and 4 stay.
+  The line applies only when neither the system prompt nor a key-change
+  notice says the push is bound: the notice arrives in a tool result, so the
+  pinned step 1 never fires on it. Rejected: amending step 1 to accept the
+  notice (it would change a step this ticket keeps).
   Rejected: deleting step 3 (a Claude Code without the mod would have no
   wake path).
 
@@ -127,5 +133,30 @@ Verification, by unit tests rather than a live organization-account probe
 `manual-engine.test.ts`: a main-thread sentinel result is adopted and the key
 listener is told the new key; a `ferrule` result, a subagent's sentinel call,
 and a sentinel result without `## Session Key` adopt nothing; the push
-sentence appears only when the push runs. The claude-mod suites and the
+sentence appears only when the push runs; a main-thread sentinel result
+reaches the model whole, not cut to the state-only text (if `stateOnly` cuts
+it, fix that here: a cut leaves the lead in this scenario without the
+manual). The claude-mod suites and the
 skill-shim drift tests pass in every copy.
+
+Implementation notes from review:
+- The minted key is parsed from the result text's `## Session Key` section
+  (the line after the heading), not from the call argument.
+- "The push runs" means `pushAvailable()` resolves true (its host-command
+  probe passed), the same condition that gives `sectionText` its mailbox
+  line.
+- The pi shim is `agents-plugin-pi/skills/lead-use-mailbox/SKILL.md`.
+- Step 3's new line, in substance: "Without the mod, and when neither the
+  system prompt nor a key-change notice says the push is bound, arm the CLI
+  wait in the background and stop the turn."
+- The `manual.test.ts` test "no adoption for the sentinel, the current key,
+  or a key ws-mcp refuses" (around L822-L826) is inverted for the sentinel
+  case, not merely extended; the reaches-the-model-whole check sits beside it.
+- Regenerate `agents-plugin/skills/manifest.json` (WSRSRC_REGEN_SKILLS) and
+  `agents-plugin-pi/skills/manifest.json` with the shim edits.
+- The wsflow test move adds `PARALLEL_INIT_TITLES["lead-use-mailbox"]` and
+  retires or rewrites `test_session_key_shims_pin_their_clause` if
+  `SESSION_KEY_SHIM_TITLES` empties. This partly reverses `b1648732`'s
+  single-call form for that shim, by this ticket's Decisions.
+- Parallel with `261023-feat-ws-shared-question-classes-and-ids`: on a
+  manifest or mirror conflict at merge, regenerate, never hand-merge.

@@ -5,8 +5,8 @@ related:
   261020-feat-claude-mod-lever-continue-flag: sibling; also edits compaction.ts and timing.ts
 sage-review-design: completed
 sage-review-completeness: completed
-sage-review-design-reviewed: 1b3f627c103c824c
-sage-review-completeness-reviewed: 1b3f627c103c824c
+sage-review-design-reviewed: 134e37318eff9222
+sage-review-completeness-reviewed: 134e37318eff9222
 ---
 
 # Claude mod compaction milestone shows a context percentage well below live usage
@@ -152,3 +152,19 @@ measure crosses a threshold while a main-thread turn runs delivers nothing
 until the turn ends, then delivers once with the fresh read's figure and
 token counts; a crossing measured while idle delivers at once; the
 claude-mod test suite passes in both copies.
+
+Implementation notes from review:
+- The head format applies to both messages: the advisory head
+  (`advisoryText`) adopts the same `Context window at the end of the last
+  turn: ...` line that replaces `milestoneText`'s current
+  `Context window: <n>% / <hard>% ...` head (`timing.ts#L141`).
+- At delivery, re-run the latch's level evaluation with the fresh read, so a
+  crossing that grew past the next milestone delivers the higher level once
+  rather than a stale lower one.
+- The existing lever-request and held-continuation gating still applies at
+  both new delivery points: a withheld delivery stays latched for a later
+  measure, as today.
+- The aborted-turn exclusion matters only when no idle measure follows; keep
+  it, it costs one check.
+- Verification also asserts the delivery debug line (through the `debug`
+  edge in `compaction.ts`) carries the crossing's tokens and the fresh read.
