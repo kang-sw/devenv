@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 84cdcad4ad73f182
 sage-review-completeness-reviewed: 84cdcad4ad73f182
+completed: 2026-10-23
 ---
 
 # Shared question classes and conversation-unique question IDs in the workflow manual
@@ -168,3 +169,15 @@ Implementation notes from review:
   ticket queue; `lead-ticket` acknowledgement behavior is unchanged.
 - Parallel with `261023-bug-claude-mod-sentinel-key-mailbox-push`: on a
   manifest or mirror conflict at merge, regenerate, never hand-merge.
+
+### Result (c6af23a7) - 2026-10-23
+
+Landed in `f780b22a5` and `c6af23a72`:
+- `lead-workflow-manual` gains `### Asking the user` after `### User preferences`. It holds the three class definitions (lifted verbatim from `lead-ticket`), the reversal and uncertainty rules, and the reserved asks: the `lead-review` next-step handoff, the `lead-ship` publish confirmation, and Approval Protocol "Ask first" and "Always ask" items. It also holds the conversation-unique `(nn)` ID space. The next ID counts the IDs and the last-ID line of every ticket queue read. Discussion keeps no counter, and after compaction a loose collision is accepted. A resumed queue renumbers only on a collision: every item still in the queue is renumbered, in every ticket carrying it, the last-ID line is updated, and the lead gives a one-line mapping.
+- `lead-ticket` `### Item classes` points at the manual and keeps the documentation-placement, open-round-hold, and reviewer-`missing` rules. In `### Queue state`, the last-ID line now points at the manual, and the never-change ID bullet is removed. The response skeleton, re-ask, and settlement report use `(01)`/`(nn)`.
+- `lead-discuss` asks in the manual's classes and IDs in prose. Announced and technical items need no acknowledgement there. It asks the fewest policy questions, asks independent ones together, and holds dependent ones. It never fills intent by inference. Its stop is now an unanswered policy question.
+- Pins: `TestPlaybookPrintGoldenLeadTicket` was updated, and the moved class pins live in the new `TestPlaybookPrintGoldenLeadWorkflowManualAskingTheUser`. `TestPlaybookPrintGoldenLeadDiscuss` gained the question rules. The `e05c7b23` forbidden phrase was kept. The retired `(1)`/`(n)` notation and the single-ambiguity rule were added as forbidden.
+
+Verification: manifests were regenerated (WSRSRC_REGEN, WS_REGEN_WSFLOW_RSRC). The pi tree was copied by hand, and `diff -r` shows all three rsrc trees identical. These all pass: `go test ./internal/mcp -count=1 -timeout 30m` (431s), `go test` over every other package, `go test ./internal/wsrsrc/...` (pi/wsflow mirror and manifest guards), and `python3 -m unittest discover agents-plugin-wsflow/tests`. pi `npm test` was not run because no node_modules are installed. The lite review came back clean with two Minor findings, both fixed in `c6af23a72`. One fresh-read audit was run, and its in-scope findings were fixed in `c6af23a72`. The rest were classified out of scope, because the ticket fixes the lifted wording and limits `lead-ticket` changes. One was an intentional difference: the manual is always in lead context.
+
+Decisions: "Always ask" was added beside "Ask first" as a conservative widening.
