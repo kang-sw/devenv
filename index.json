@@ -566,13 +566,10 @@
       "registered_at": "2026-10-20T12:18:55Z",
       "lease": {
         "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
+        "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-20T13:00:58Z",
-        "impl": {
-          "branch": "impl/develop/wife-twins-hut"
-        }
+        "touched_at": "2026-10-23T07:57:26Z"
       }
     },
     "261020-bug-worktree-profiles-review-followups": {
