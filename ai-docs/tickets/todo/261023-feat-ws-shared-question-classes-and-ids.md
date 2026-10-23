@@ -1,0 +1,104 @@
+---
+title: Shared question classes and conversation-unique question IDs in the workflow manual
+---
+
+# Shared question classes and conversation-unique question IDs in the workflow manual
+
+## Background
+
+How the lead asks the user is defined only inside the `lead-ticket`
+playbook's Open Decision Queue (`### Item classes`, `### Queue state`,
+`### Response format`): announced defaults, technical decisions, and policy
+questions, each with an ID. `lead-discuss` instead says "Surface the single
+highest-leverage ambiguity and stop until the user answers" (from
+`3cec0ec03`, which named inference-filling as the failure mode). The user
+finds the shift awkward: questions in discussion are loose prose, then
+ticket authoring switches to a separate structured register, and the
+conversation feels detached at that point. The user also wants every
+question to carry an ID they can cite when answering earlier items.
+
+The workflow manual is in every lead session's context, and the binding
+anchor `260909-research-ws-refoundation-evidence-audit` counts it among the
+mandated-read costs and judges procedural prose a poor producer of behavior
+(A8), so only definitions move up; the queue mechanics stay in
+`lead-ticket`.
+
+## Decisions
+
+- **Question classes live in the workflow manual.** A new `### Asking the
+  user` subsection after `### User preferences` defines the three classes and the rules that hold wherever the lead asks the user:
+  - announced default: one answer, with a citable reason its alternatives
+    lose (a language or platform constraint; a prior commit or ticket
+    decision; an established project convention; a direct consequence of an
+    already-confirmed decision);
+  - technical decision: no such citation, and the answer does not hinge on
+    the user's values; the lead picks it and states the reasoning;
+  - policy question: the answer depends on the user's preferences,
+    priorities, or product direction;
+  - an item that reverses a prior decision is always a policy question;
+  - the lead's own uncertainty about a technical call does not make it a
+    policy question.
+  Rejected: a short new definition in the manual with `lead-ticket` keeping
+  its full copy (two definitions drift, and the drift brings back the
+  register gap this ticket removes); placing them inside `### User
+  preferences` (that is the user's own preference list, and a separate
+  heading lets the playbooks point at it by name).
+- **`lead-ticket` points at the manual.** Its `### Item classes` keeps only
+  the ticket-specific rules: documentation-placement choices (parent or
+  `related:` link, epic child or standalone, absorb or rewrite, initial
+  status, stem naming, which commit carries the edit) as announced-default
+  citations; a reviewer `missing` issue is always a policy question; a
+  consequence of a policy question still open in the same round is held to
+  the next round. Its queue state, acknowledgement rules, trace, and
+  response format keep their behavior.
+- **`lead-discuss` asks in the same classes, conversationally.** The lead
+  says which items will be defaults, which are its technical calls, and
+  which are policy questions the user must decide before the next topic, in
+  prose: no block format, no queue, nothing persisted. The single-ambiguity
+  rule becomes: ask the fewest policy questions, ask independent ones
+  together, and hold a question that depends on an unanswered one to a
+  later turn. The anti-inference intent of `3cec0ec03` stays: unanswered
+  intent is never filled by inference. `## Stops` changes from an
+  unanswered surfaced ambiguity to an unanswered policy question. Rejected: laying out every open item
+  in groups as the ticket queue does (in discussion an earlier answer often
+  makes later questions vanish).
+- **One conversation-unique ID space.** Every item the lead puts to the user,
+  in discussion or in a ticket queue, carries an ID unique within the
+  conversation, written `(nn)` zero-padded to two digits (`(03)`; three
+  digits past 99). An item keeps its ID when it moves from discussion into a
+  ticket queue. The ticket queue's last-ID line stays, so numbering
+  continues after compaction. Rejected: `#nn` (GitHub autolinks it to an
+  issue in commit messages); a per-ticket counter mapped to a separate
+  conversation number (the queue section is deleted at the settle point, so
+  a ticket-local number has no lasting use, and the mapping is one more
+  place to confirm the wrong item).
+- **Collisions on a resumed ticket.** A ticket queue left open from an
+  earlier conversation keeps its IDs; only when one collides with an ID
+  already used in the current conversation are that ticket's open items
+  renumbered to fresh IDs, and the lead states the old-to-new mapping once
+  in one line (`(04) -> (15)`).
+
+## Constraints
+
+- `lead-ticket` behavior is unchanged apart from the ID notation and the
+  collision rule: only the `### Queue state` ID bullets and the
+  `### Response format` skeleton change there, besides `### Item classes`.
+- Every copy stays identical in substance: `agents-plugin/rsrc/`,
+  `agents-plugin-wsflow/rsrc/`, and `agents-plugin-pi/rsrc/` for
+  `lead-workflow-manual`, `lead-discuss`, and `lead-ticket`.
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for agents-plugin/, agents-plugin-wsflow/)
+- Convention: ai-docs/manuals/skill-authoring.md (declared for agents-plugin/rsrc/, agents-plugin/skills/, agents-plugin-wsflow/rsrc/, agents-plugin-wsflow/skills/)
+- Convention: ai-docs/manuals/wsflow-mirroring.md (declared for agents-plugin/rsrc/, agents-plugin/skills/, agents-plugin/hooks/, agents-plugin-wsflow/)
+
+## Phases
+
+### Phase 1: Lift the classes and IDs, align discuss and ticket
+
+Edit `lead-workflow-manual`, `lead-discuss`, and `lead-ticket` per
+Decisions in every package copy.
+
+Verification: the existing playbook render, mirror-drift, and package test
+suites pass in every copy, and one fresh-read audit of the three changed
+documents per `skill-authoring.md` reports no unresolved finding. A scripted
+conversation test is not attempted: the question register is model behavior
+with no deterministic test surface.
