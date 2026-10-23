@@ -607,7 +607,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-23T07:57:34Z"
+        "touched_at": "2026-10-23T07:58:32Z",
+        "impl": {
+          "branch": "impl/develop/exert-sleet-carol"
+        }
       }
     }
   }
