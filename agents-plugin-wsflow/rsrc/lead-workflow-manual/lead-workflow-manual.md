@@ -55,17 +55,18 @@ depend on their preferences and can review the rest at the depth they choose.
   constraint; a prior commit or ticket decision; an established project
   convention; a direct consequence of an already-confirmed decision.
 - **Technical decision**: the item has no such citation, and its answer does
-  not hinge on the user's values: you pick it on technical reasoning (simpler,
-  fewer moving parts, a clearer failure mode) and state that reasoning. Your
-  own uncertainty about a technical call does not make it a policy question;
-  it stays a technical decision with its reasoning stated, or the policy
-  questions fill with calls the user cannot judge.
+  not hinge on the user's preferences or priorities: you pick it on technical
+  reasoning (simpler, fewer moving parts, a clearer failure mode) and state
+  that reasoning. Your own uncertainty about a technical call keeps it a
+  technical decision: state the reasoning and the uncertainty, since as a
+  policy question it would hand the user a call they cannot judge.
 - **Policy question**: the answer depends on the user's preferences,
   priorities, or product direction, such as the audience or scale a default
   assumes, scope in or out, cost or risk tolerance, or a trade-off in
   downstream-observable behavior.
-- An item that reverses a prior decision is always a policy question, even
-  when you can cite a reason for the reversal.
+- An item you raise that reverses a prior decision is a policy question, even
+  when you can cite a reason for the reversal; a reversal the user states is
+  their answer, not a new question.
 - The classes never turn an ask a skill or the project reserves for the user
   into a default or a technical call: the next-step handoff of
   `{{.SkillNamespace}}:lead-review`, the publish confirmation of

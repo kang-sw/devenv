@@ -48,7 +48,7 @@ one item per decision. Reconcile item by item; where an answer's reach is
 unclear, state your reading on its own line and leave the item open until the
 user confirms it. The settle point is reached when the announced defaults and
 technical decisions are acknowledged and every policy question is confirmed,
-rejected, or explicitly deferred; only confirmed items are authoritative. At the settle point, persist
+rejected, or explicitly deferred. At the settle point, persist
 without showing the confirmed set again for approval: the acknowledgement
 already showed every item, and the trace below and the Sage reviewers guard
 against interacting decisions.
@@ -112,10 +112,8 @@ non-authoritative entries.
   citation in their place, and a technical decision records its one line
   `<X> over <Y> - <technical reason>`, the reason standing where the
   citation stands. An announced or technical item that becomes a policy
-  question changes its class tag,
-  returns to `[open]` (back from `## Decisions` into the section if it had
-  moved there), and gains the policy block. Section text is English, like
-  the rest of the ticket.
+  question changes its class tag and gains the policy block. Section text is
+  English, like the rest of the ticket.
 - The one-line decision is the decision itself, self-describing, not a label.
 - An item that affects several tickets (a batch coherence issue, a gap
   spanning members) is recorded under the same ID in the section of every
@@ -125,8 +123,9 @@ non-authoritative entries.
   decision's `Rejected:` text; a rejected item moves into the relevant decision's
   `Rejected:` text when it is a meaningful alternative and is otherwise
   dropped; a deferred item moves into `## Constraints` as out of scope.
-- A correction returns its item to `[open]` under its existing ID, back from
-  `## Decisions` into the section, and it is reconciled like any other open
+- A correction, an objection, or a reclass to a policy question returns its
+  item to `[open]` under its existing ID, back from `## Decisions` into the
+  section if it had moved there, and it is reconciled like any other open
   item.
 - Delete the section only at the settle point. `ready/` promotion and design
   review refuse a ticket that still carries it, whatever its item statuses.
@@ -166,7 +165,9 @@ conversation language like the rest of the item content.
 Each response asks every item still awaiting an answer, in three groups:
 announced defaults, then technical decisions, then the policy questions under
 their visible label, so the items that need an answer sit closest to the
-reply. Omit a group that has no item this round.
+reply. Omit a group that has no item this round. A response shows an item
+by its `(nn)` ID; the status and class tags stay in the section, apart from a
+re-ask's status tag.
 
 ```text
 # Open Decision Queue

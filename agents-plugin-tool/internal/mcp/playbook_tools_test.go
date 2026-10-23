@@ -2280,7 +2280,8 @@ func TestPlaybookPrintGoldenLeadTicket(t *testing.T) {
 				"a deferred item moves into `## Constraints` as out of scope",
 				"Delete the section only at the settle point",
 				"A reviewer `missing` issue enters the section as a new item",
-				"returns to `[open]` (back from `## Decisions` into the section if it had moved there)",
+				"back from `## Decisions` into the section if it had moved there",
+				"An announced or technical item that becomes a policy question changes its class tag and gains the policy block",
 				"Each item records its ID, status tag, class tag, and one-line decision",
 				"class tags are `[announced]`, `[technical]`, and `[policy]`",
 				"an announced default records its citation in their place, and a technical decision records its one line `<X> over <Y> - <technical reason>`, the reason standing where the citation stands",
@@ -2305,7 +2306,8 @@ func TestPlaybookPrintGoldenLeadTicket(t *testing.T) {
 				// Settle point replacing the retired final confirmation.
 				"The settle point is reached when the announced defaults and technical decisions are acknowledged and every policy question is confirmed, rejected, or explicitly deferred",
 				"At the settle point, persist without showing the confirmed set again for approval",
-				"A correction returns its item to `[open]` under its existing ID",
+				"A correction, an objection, or a reclass to a policy question returns its item to `[open]` under its existing ID",
+				"A response shows an item by its `(nn)` ID; the status and class tags stay in the section, apart from a re-ask's status tag",
 				"has no settlement step",
 				// Settlement still precedes the sage gate at both review
 				// entry points, and an unacknowledged group still stops.
@@ -2682,10 +2684,10 @@ func TestPlaybookPrintGoldenLeadWorkflowManualAskingTheUser(t *testing.T) {
 		"Every item you put to the user, in discussion or in a ticket's Open Decision Queue, is one of three classes",
 		"**Announced default**: the item has one answer, and you can cite the reason its alternatives lose",
 		"a language or platform constraint; a prior commit or ticket decision; an established project convention; a direct consequence of an already-confirmed decision.",
-		"**Technical decision**: the item has no such citation, and its answer does not hinge on the user's values: you pick it on technical reasoning",
-		"Your own uncertainty about a technical call does not make it a policy question",
+		"**Technical decision**: the item has no such citation, and its answer does not hinge on the user's preferences or priorities: you pick it on technical reasoning",
+		"Your own uncertainty about a technical call keeps it a technical decision: state the reasoning and the uncertainty",
 		"**Policy question**: the answer depends on the user's preferences, priorities, or product direction",
-		"An item that reverses a prior decision is always a policy question, even when you can cite a reason for the reversal",
+		"An item you raise that reverses a prior decision is a policy question, even when you can cite a reason for the reversal; a reversal the user states is their answer, not a new question",
 		"The classes never turn an ask a skill or the project reserves for the user into a default or a technical call: the next-step handoff of `ws:lead-review`, the publish confirmation of `ws:lead-ship`, and the project's Approval Protocol \"Ask first\" and \"Always ask\" items stay asks",
 		"Every item carries an ID unique within the conversation",
 		"Write it `(nn)`, zero-padded to two digits (`(03)`; three digits past 99)",
@@ -2699,6 +2701,8 @@ func TestPlaybookPrintGoldenLeadWorkflowManualAskingTheUser(t *testing.T) {
 	}
 	for _, forbidden := range []string{
 		"every item without such a citation",
+		"the user's values",
+		"is always a policy question",
 		"#nn",
 		"documentation-placement",
 	} {
