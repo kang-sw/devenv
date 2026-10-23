@@ -1,7 +1,7 @@
 import { expect, mock, test, type TestBody } from 'claude-code/testing'
 
 import { CONTINUATION_WINDOW_MS } from './compaction'
-import { ADVISORY_KEY, advisoryText, LEVER_DESCRIPTION, LEVER_RESULT, LEVER_RESULT_NO_RESUME, RESUME_TEXT, thresholdsFor, vetoedResumeText } from './timing'
+import { ADVISORY_KEY, advisoryText, LEVER_DESCRIPTION, milestoneText, LEVER_RESULT, LEVER_RESULT_NO_RESUME, RESUME_TEXT, thresholdsFor, vetoedResumeText } from './timing'
 
 type Engine = Parameters<TestBody>[0]
 type On = Parameters<TestBody>[1]
@@ -28,6 +28,8 @@ function world(on: On, opts: { processOk?: boolean; refuseRegister?: string; adv
     plugin: '',
     registered: [] as { name: string; description: string; isDeferred?: boolean; inputSchema?: unknown }[],
     usageCalls: [] as unknown[],
+    /** The tokens a usage read reports: the last measure's, unless a test moves it. */
+    live: undefined as number | undefined,
     /** Who compacted, and with what instructions (the kit leaves a plugin call's trigger unset; the engine sets `plugin`). */
     compactCalls: [] as { origin: string; instructions: unknown }[],
     compactAnswers: [] as CompactAnswer[],
@@ -79,7 +81,7 @@ function world(on: On, opts: { processOk?: boolean; refuseRegister?: string; adv
   })
   on('session.usage', ($, e) => {
     w.usageCalls.push(e)
-    return { value: { startedAt: 0, context: { window: 1_000_000, breakdown: e.breakdown ? WINDOW : undefined }, rateLimits: [] } as never }
+    return { value: { startedAt: 0, context: { tokens: w.live, window: 1_000_000, breakdown: e.breakdown ? WINDOW : undefined }, rateLimits: [] } as never }
   })
   on('session.compact', ($, e, next) => {
     w.compactCalls.push({ origin: next.origin.plugin, instructions: e.instructions })
@@ -110,6 +112,7 @@ async function start($: Engine, w: World) {
 }
 
 async function measure($: Engine, w: World, tokens: number) {
+  w.live = tokens
   await $.session.measure({ context: { tokens, window: 1_000_000 }, rateLimits: [], changed: ['context'] } as never)
   await w.clock.settle()
 }
@@ -155,6 +158,7 @@ const isWs = (w: World) => w.plugin === 'ws'
 
 /** The transcript (user-visible) lines the mod logged. */
 const transcript = (w: World) => w.logs.filter((l) => l.to === 'transcript').map((l) => l.text)
+const debug = (w: World) => w.logs.filter((l) => l.to === 'debug').map((l) => l.text)
 
 test('ws registers the compaction request tool with its pinned description and boolean flag; another package registers none', async ($, on) => {
   const w = world(on)
@@ -186,7 +190,7 @@ test('mailbox setup does not depend on the compaction setup', async ($, on) => {
   expect(names.filter((n) => n === 'request_compaction')).toEqual([])
 })
 
-test('ws: a crossing that session.measure reports submits the advisory, reading the summary breakdown once', async ($, on) => {
+test('ws: a crossing that session.measure reports while idle submits the advisory at once, reading the summary breakdown once and the usage afresh', async ($, on) => {
   const w = world(on)
   await start($, w)
   if (!isWs(w)) return
@@ -194,7 +198,44 @@ test('ws: a crossing that session.measure reports submits the advisory, reading 
   await measure($, w, 104_000)
   await measure($, w, 105_000)
   expect(w.prompts).toEqual([advisoryText(T, 104_000)])
-  expect(w.usageCalls).toEqual([{ breakdown: 'summary' }])
+  expect(w.usageCalls).toEqual([{ breakdown: 'summary' }, {}])
+})
+
+test('ws: a crossing measured while a main-thread turn runs is delivered at the turn end, once, with the fresh figures', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  if (!isWs(w)) return
+  await measure($, w, 50_000)
+  await turnStart($, w)
+  // A mid-turn measure (a rate-limit move) crosses the advisory; the turn goes on growing the context.
+  await measure($, w, 104_000)
+  expect(w.prompts).toEqual([])
+  w.live = 118_000
+  await turnEnd($, w)
+  expect(w.prompts).toEqual([advisoryText(T, 118_000)])
+  expect(w.prompts[0]).toContain('59% (118k / 200k tokens)')
+  expect(debug(w).filter((l) => l.startsWith('ws compaction: advisory delivered'))).toEqual([
+    'ws compaction: advisory delivered: crossing measured at 104000 tokens (52%), fresh read 118000 tokens (59%), compaction window 200000 tokens, model window 1000000 tokens',
+  ])
+  // The end-of-turn measure arriving after the turn end delivers nothing again.
+  await measure($, w, 118_000)
+  expect(w.prompts).toEqual([advisoryText(T, 118_000)])
+})
+
+test('ws: a mid-turn crossing that grew past a milestone by the turn end delivers that milestone once, skipping the lower one', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  if (!isWs(w)) return
+  await measure($, w, 50_000)
+  await measure($, w, 104_000)
+  expect(w.prompts).toEqual([advisoryText(T, 104_000)])
+  await turnStart($, w)
+  await measure($, w, 125_000)
+  w.live = 150_000
+  await turnEnd($, w)
+  expect(w.prompts).toEqual([advisoryText(T, 104_000), milestoneText(2, T, 150_000)])
+  await measure($, w, 150_000)
+  expect(w.prompts.length).toBe(2)
 })
 
 test('ws: each session start reads the advisory key once over the plugin server, and a tuned value moves the advisory', async ($, on) => {
@@ -210,7 +251,7 @@ test('ws: each session start reads the advisory key once over the plugin server,
   expect(w.prompts).toEqual([])
   await measure($, w, 81_000)
   expect(w.prompts).toEqual([advisoryText(thresholdsFor(WINDOW, { percent: 40, tokens: 300_000 })!, 81_000)])
-  expect(w.prompts[0]).toContain('(advisory point: 40%)')
+  expect(w.prompts[0]).toContain('This is past the advisory point (40%).')
   await start($, w)
   expect(w.configGets.length).toBe(2)
 })
@@ -307,7 +348,8 @@ test("ws: the lever's own landing resets the latch, though the engine routes it 
   // Usage still past the advisory after the landing: a reset latch delivers it again, from a fresh breakdown.
   await measure($, w, 104_000)
   expect(w.prompts).toEqual([advisoryText(T, 104_000), RESUME_TEXT, advisoryText(T, 104_000)])
-  expect(w.usageCalls.length).toBe(2)
+  // Each delivery reads the usage afresh; the landing drops the cached breakdown.
+  expect(w.usageCalls).toEqual([{ breakdown: 'summary' }, {}, { breakdown: 'summary' }, {}])
   expect(transcript(w)).toEqual([])
 })
 

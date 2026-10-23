@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 134e37318eff9222
 sage-review-completeness-reviewed: 134e37318eff9222
+completed: 2026-10-23
 ---
 
 # Claude mod compaction milestone shows a context percentage well below live usage
@@ -168,3 +169,31 @@ Implementation notes from review:
   it, it costs one check.
 - Verification also asserts the delivery debug line (through the `debug`
   edge in `compaction.ts`) carries the crossing's tokens and the fresh read.
+
+### Result (9007e572b) - 2026-10-23
+
+Landed in `compaction.ts`, `timing.ts`, `register.ts` and both test files,
+mirrored byte-identical into `agents-plugin-wsflow/hooks/claude-mod/`.
+
+- `measure` now only records a crossing (`crossing`, with the first
+  observation's tokens) and delivers at once only when no main-thread turn
+  runs. `turnComplete` schedules delivery through `after` for a main-thread,
+  non-aborted turn end with a recorded crossing.
+- `deliver()` reads `readUsage` afresh, re-runs `observe` with the fresh
+  level, and submits with the fresh tokens; gating (pending request, held
+  resume) applies, and a withheld, failed-read, turn-started-during-read, or
+  model-window-changed delivery leaves the crossing recorded. A fresh read
+  without tokens falls back to the crossing's figure.
+- New `CompactionEdges` members `turnRunning` (bound to `mainTurn`) and
+  `readUsage` (`$.session.usage()` without breakdown).
+- Both messages open with `Context window at the end of the last turn: N%
+  (usedk / windowk tokens) / H% (automatic compaction point).`; the advisory
+  follows with `This is past the advisory point (A%).` (window = compaction
+  window `rawMaxTokens`, the percent's denominator).
+- Delivery debug line: `<kind> delivered: crossing measured at X tokens (p%),
+  fresh read Y tokens (q%), compaction window R tokens, model window W tokens`.
+
+Verification: `claude plugin test agents-plugin` 357 pass / 0 fail;
+`claude plugin test agents-plugin-wsflow` 357 pass / 0 fail;
+`claude plugin validate` passes on both; `go test ./internal/wsrsrc/ -run
+Wsflow` ok. Lite review: clean.

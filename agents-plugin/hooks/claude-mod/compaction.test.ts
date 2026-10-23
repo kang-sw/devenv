@@ -55,6 +55,17 @@ function harness(opts: { window?: Partial<CompactionWindow> | null; readAdvisory
     /** Whether that report throws. */
     leverLandedThrows: false,
     window: opts.window === null ? null : ({ ...WINDOW, ...opts.window } as CompactionWindow),
+    /** Whether a main-thread turn runs, as register.ts tracks it. */
+    turnRunning: false,
+    /** What the next fresh usage reads return; undefined repeats the last measure's figures. */
+    live: undefined as { tokens: number | undefined; window: number } | undefined,
+    /** The figures of the last measure. */
+    measured: { tokens: undefined as number | undefined, window: 1_000_000 },
+    usageReads: 0,
+    /** The next usage reads that reject. */
+    rejectUsageReads: 0,
+    /** Set, a usage read settles only once it resolves. */
+    usageGate: undefined as Promise<void> | undefined,
   }
   const c = createCompaction()
   /** Whether the fake engine routes the lever's own compaction through the feature's hook (the engine does not). */
@@ -94,6 +105,16 @@ function harness(opts: { window?: Partial<CompactionWindow> | null; readAdvisory
       h.delayed.push({ ms, fn })
     },
     log: (text, to) => void h.logs.push({ text, to }),
+    turnRunning: () => h.turnRunning,
+    readUsage: async () => {
+      h.usageReads += 1
+      if (h.usageGate) await h.usageGate
+      if (h.rejectUsageReads > 0) {
+        h.rejectUsageReads -= 1
+        throw new Error('usage unavailable')
+      }
+      return { ...(h.live ?? h.measured) }
+    },
     leverLanded: () => {
       h.leverLandings += 1
       if (h.leverLandedThrows) throw new Error('listener failed')
@@ -106,6 +127,7 @@ function harness(opts: { window?: Partial<CompactionWindow> | null; readAdvisory
     return { startedAt: 0, context: { window: 1_000_000, breakdown: h.window ?? undefined }, rateLimits: [] } as never
   }
   const measure = async (tokens: number | undefined, window = 1_000_000) => {
+    h.measured = { tokens, window }
     await c.measure({ tokens, window }, readBreakdown)
     await tick()
   }
@@ -199,7 +221,7 @@ describe('pure core', () => {
 describe('pinned prose', () => {
   test('advisory', () => {
     expect(advisoryText(T, 104_000)).toBe(
-      `[ws compaction] Context usage is 52% of the window (advisory point: 50%). Claude Code compacts automatically at about 85%.
+      `[ws compaction] Context window at the end of the last turn: 52% (104k / 200k tokens) / 85% (automatic compaction point). This is past the advisory point (50%).
 
 This is not an instruction to compact right now. If you are in active discussion with the human, awaiting their answer or clarification, or holding working context that would be costly to rebuild (a half-applied change or a diagnosis in progress), carry on for now. A pause after asking the human a question is not a boundary.
 
@@ -211,10 +233,10 @@ If now is not such a moment, end this turn without replying and keep looking for
 
   test('milestones', () => {
     expect(milestoneText(1, T, 125_000)).toBe(
-      '[ws compaction] Context window: 63% / 85% (automatic compaction point). Past 85%, Claude Code compacts automatically, mid-work if need be. From here on, a good boundary is worth taking; if this is one, update durable records and call the compaction request tool, as the advisory describes (the `continue` flag only when work must resume by itself). Otherwise end this turn without replying.',
+      '[ws compaction] Context window at the end of the last turn: 63% (125k / 200k tokens) / 85% (automatic compaction point). Past 85%, Claude Code compacts automatically, mid-work if need be. From here on, a good boundary is worth taking; if this is one, update durable records and call the compaction request tool, as the advisory describes (the `continue` flag only when work must resume by itself). Otherwise end this turn without replying.',
     )
     expect(milestoneText(2, T, 150_000)).toBe(
-      '[ws compaction] Context window: 75% / 85% (automatic compaction point). This is the last reading before automatic compaction. Compacting at a boundary you choose keeps the work coherent; take this one if it fits, update durable records and call the compaction request tool, as the advisory describes (the `continue` flag only when work must resume by itself). Otherwise end this turn without replying, and take the next good boundary.',
+      '[ws compaction] Context window at the end of the last turn: 75% (150k / 200k tokens) / 85% (automatic compaction point). This is the last reading before automatic compaction. Compacting at a boundary you choose keeps the work coherent; take this one if it fits, update durable records and call the compaction request tool, as the advisory describes (the `continue` flag only when work must resume by itself). Otherwise end this turn without replying, and take the next good boundary.',
     )
   })
 
@@ -280,7 +302,7 @@ describe('configured advisory point', () => {
   test('the advisory text names the configured point as its percent of the window', () => {
     const t = thresholdsFor(WINDOW, { tokens: 110_000 })!
     expect(advisoryText(t, 112_000)).toContain(
-      '[ws compaction] Context usage is 56% of the window (advisory point: 55%). Claude Code compacts automatically at about 85%.',
+      '[ws compaction] Context window at the end of the last turn: 56% (112k / 200k tokens) / 85% (automatic compaction point). This is past the advisory point (55%).',
     )
     expect(advisoryText(t, 112_000)).toContain('Reminders follow at 65% and 75%.')
   })
@@ -300,7 +322,7 @@ describe('configured advisory point', () => {
     await measure(81_000)
     const t = thresholdsFor(WINDOW, { percent: 40 })!
     expect(h.submits).toEqual([advisoryText(t, 81_000)])
-    expect(h.submits[0]).toContain('(advisory point: 40%)')
+    expect(h.submits[0]).toContain('This is past the advisory point (40%).')
     await measure(111_000)
     expect(h.submits.length).toBe(2)
   })
@@ -413,6 +435,117 @@ describe('thresholds', () => {
     await measure(60_000)
     await measure(102_000)
     expect(h.submits).toEqual([advisoryText(T, 104_000), advisoryText(T, 102_000)])
+  })
+
+  test('a crossing measured while a main-thread turn runs delivers nothing until the turn ends, then once with the fresh read', async () => {
+    const { h, measure, turnEnd, debugLog } = harness()
+    await measure(50_000)
+    h.turnRunning = true
+    await measure(104_000)
+    await measure(110_000)
+    expect(h.submits).toEqual([])
+    expect(h.usageReads).toBe(0)
+    h.turnRunning = false
+    h.live = { tokens: 118_000, window: 1_000_000 }
+    await turnEnd()
+    expect(h.submits).toEqual([advisoryText(T, 118_000)])
+    expect(h.submits[0]).toContain('59% (118k / 200k tokens)')
+    expect(debugLog().filter((l) => l.includes('delivered'))).toEqual([
+      'ws compaction: advisory delivered: crossing measured at 104000 tokens (52%), fresh read 118000 tokens (59%), compaction window 200000 tokens, model window 1000000 tokens',
+    ])
+    // The end-of-turn measure after the turn end, and a later turn end, deliver nothing again.
+    await measure(118_000)
+    await turnEnd()
+    expect(h.submits).toEqual([advisoryText(T, 118_000)])
+    expect(h.usageReads).toBe(1)
+  })
+
+  test('a crossing measured while idle delivers at once, with the fresh read', async () => {
+    const { h, measure, debugLog } = harness()
+    await measure(50_000)
+    h.live = { tokens: 106_000, window: 1_000_000 }
+    await measure(104_000)
+    expect(h.submits).toEqual([advisoryText(T, 106_000)])
+    expect(debugLog()).toContain(
+      'ws compaction: advisory delivered: crossing measured at 104000 tokens (52%), fresh read 106000 tokens (53%), compaction window 200000 tokens, model window 1000000 tokens',
+    )
+  })
+
+  test('a crossing that grew past the next milestone by delivery delivers the higher level once', async () => {
+    const { h, measure, turnEnd } = harness()
+    await measure(50_000)
+    await measure(104_000)
+    h.turnRunning = true
+    await measure(125_000)
+    h.turnRunning = false
+    h.live = { tokens: 150_000, window: 1_000_000 }
+    await turnEnd()
+    expect(h.submits).toEqual([advisoryText(T, 104_000), milestoneText(2, T, 150_000)])
+    await measure(155_000)
+    expect(h.submits.length).toBe(2)
+  })
+
+  test('an aborted or a subagent turn end delivers nothing; the next idle measure delivers the crossing', async () => {
+    const { h, measure, turnEnd } = harness()
+    await measure(50_000)
+    h.turnRunning = true
+    await measure(104_000)
+    h.turnRunning = false
+    await turnEnd('aborted')
+    await turnEnd('answer', 'sub-1')
+    expect(h.submits).toEqual([])
+    await measure(105_000)
+    expect(h.submits).toEqual([advisoryText(T, 105_000)])
+  })
+
+  test('a fresh read that fails, or a main-thread turn starting during it, keeps the crossing for the next delivery point', async () => {
+    const { h, c, measure, turnEnd, debugLog } = harness()
+    await measure(50_000)
+    h.rejectUsageReads = 1
+    await measure(104_000)
+    expect(h.submits).toEqual([])
+    expect(debugLog()).toContain('ws compaction: usage not read for delivery (Error: usage unavailable); the crossing stays recorded')
+    // A read that settles after a main-thread turn started delivers nothing.
+    const gate = deferred<void>()
+    h.usageGate = gate.promise
+    c.turnComplete(undefined, 'answer')
+    for (const fn of h.scheduled.splice(0)) fn()
+    await tick()
+    h.turnRunning = true
+    gate.resolve()
+    await tick()
+    expect(h.submits).toEqual([])
+    h.usageGate = undefined
+    h.turnRunning = false
+    await turnEnd()
+    expect(h.submits).toEqual([advisoryText(T, 104_000)])
+  })
+
+  test('a fresh read without tokens shows the crossing figure; one under another model window delivers nothing yet', async () => {
+    const { h, measure, turnEnd } = harness()
+    await measure(50_000)
+    h.live = { tokens: 104_000, window: 500_000 }
+    await measure(104_000)
+    expect(h.submits).toEqual([])
+    h.live = { tokens: undefined, window: 1_000_000 }
+    await turnEnd()
+    expect(h.submits).toEqual([advisoryText(T, 104_000)])
+  })
+
+  test('a crossing withheld at the turn end by a pending request stays latched for a later measure', async () => {
+    const { h, c, measure, turnEnd } = harness()
+    await measure(50_000)
+    h.turnRunning = true
+    await measure(104_000)
+    c.lever(undefined, false)
+    h.turnRunning = false
+    h.compactAnswers.push({ skip: 'not now' })
+    await turnEnd()
+    expect(h.compacts).toBe(1)
+    expect(h.submits).toEqual([])
+    expect(h.usageReads).toBe(0)
+    await measure(106_000)
+    expect(h.submits).toEqual([advisoryText(T, 106_000)])
   })
 
   test('the breakdown is re-read when the model window changes, and not cached while absent', async () => {

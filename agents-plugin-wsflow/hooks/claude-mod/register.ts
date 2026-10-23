@@ -502,6 +502,8 @@ export const register: Register = (on) => {
         after: (fn) => void $.clock.after(0, fn),
         delay: (ms, fn) => void $.clock.after(ms, fn),
         log: (text, to) => $.ui.log(text, { to }),
+        turnRunning: () => mainTurn,
+        readUsage: async () => (await $.session.usage()).context,
         leverLanded: () => {
           manual.landed('plugin')
           captions.leverLanded()
@@ -749,10 +751,11 @@ export const register: Register = (on) => {
     return reconnect.lever(e.agentId, (e as { continue?: unknown }).continue)
   }).catch(($, e, next) => (next.called ? next(e) : { deny: `${RECONNECT_TOOL}: the reconnect request hook failed; see the debug log.` }))
 
-  // Pushed after each main-thread turn (and on rate-limit moves); the plain
-  // figures cost nothing, and the breakdown is read only when the feature's
-  // cache is empty (session start or end, a landed compaction) or the window
-  // changed.
+  // Pushed after each main-thread turn and on rate-limit moves, so also
+  // mid-turn: the feature only records a crossing then, and delivers it with a
+  // fresh usage read once the main thread is idle. The plain figures cost
+  // nothing, and the breakdown is read only when the feature's cache is empty
+  // (session start or end, a landed compaction) or the window changed.
   on('session.measure', async ($, e, next) => {
     if (!compactionEnabledFor($.plugin.name)) return next(e)
     const res = await next(e)
