@@ -1,5 +1,7 @@
 ---
 title: Shared question classes and conversation-unique question IDs in the workflow manual
+sage-review-design: required
+sage-review-completeness: required
 ---
 
 # Shared question classes and conversation-unique question IDs in the workflow manual
@@ -57,8 +59,13 @@ mandated-read costs and judges procedural prose a poor producer of behavior
   prose: no block format, no queue, nothing persisted. The single-ambiguity
   rule becomes: ask the fewest policy questions, ask independent ones
   together, and hold a question that depends on an unanswered one to a
-  later turn. The anti-inference intent of `3cec0ec03` stays: unanswered
-  intent is never filled by inference. `## Stops` changes from an
+  later turn, as one line with no procedure or judge. The anti-inference
+  intent of `3cec0ec03` stays: unanswered intent is never filled by
+  inference. This does not reverse `61e45964`, which replaced the Interview
+  Workflow (a procedure for question order: decision tree, one question per
+  turn, judge-driven entry) as too rigid; that decision is about the order
+  and procedure of asking, this one about which decisions the lead takes and
+  which it hands to the user (user, 2026-10-23). `## Stops` changes from an
   unanswered surfaced ambiguity to an unanswered policy question. Rejected: laying out every open item
   in groups as the ticket queue does (in discussion an earlier answer often
   makes later questions vanish).
@@ -89,13 +96,50 @@ mandated-read costs and judges procedural prose a poor producer of behavior
 - Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for agents-plugin/, agents-plugin-wsflow/)
 - Convention: ai-docs/manuals/skill-authoring.md (declared for agents-plugin/rsrc/, agents-plugin/skills/, agents-plugin-wsflow/rsrc/, agents-plugin-wsflow/skills/)
 - Convention: ai-docs/manuals/wsflow-mirroring.md (declared for agents-plugin/rsrc/, agents-plugin/skills/, agents-plugin/hooks/, agents-plugin-wsflow/)
+- Convention: ai-docs/manuals/ws-mcp.md (declared for agents-plugin-tool/internal/mcp/)
+
+## Prior Decisions
+
+- 261007-feat-odq-technical-decision-class (2026-10-07, Decisions): "Three item classes. This supersedes the two-class decision of 260925-feat-odq-announced-defaults-and-policy-questions, at the user's direction (2026-10-07); its other decisions stand." — bearing: supports
+- 260925-feat-odq-announced-defaults-and-policy-questions (2026-09-25, Decisions): "The queue mechanism itself stays. Items still get stable IDs, live in the ticket's temporary ## Open Decision Queue section, and block persistence until settled." — bearing: constrains
+- e05c7b23 (2026-10-07, commit): "The retired catch-all phrase "every item without such a citation" is added to the golden forbidden list so the old policy definition cannot return." — bearing: constrains
+- d5682a35 (2026-09-26, commit): "Mirror process: WSRSRC_REGEN manifest regen, then WS_REGEN_WSFLOW_RSRC regen. The pi rsrc has no regen entrypoint ... copied and checked with diff -r. TestPiMirrorUpToDate and TestWsflowRsrcMirrorUpToDate pass." — bearing: constrains
+- 95301971 (2026-09-24, commit): "The heading line must stay exactly ## Open Decision Queue and the last ID goes on the line under it, because the tooling gate matches the exact heading line" — bearing: constrains
+- dd4b01b5 (2026-09-26, commit): "lead-discuss needs no change: its capture handoff says persistence writes only confirmed decisions, which still holds because announced defaults are confirmed by explicit acknowledgement." — bearing: supports
+- 61e45964 (2026-07-01, commit, 260630-epic-skill-playbook-diet): "Interview Workflow removed as does-not-work-in-practice; replaced by single-question discipline rule." — bearing: contradiction-candidate
+- 3cec0ec0 (2026-07-01, commit): "Rule now names the failure mode (inference-filling) and enforces hard stop, consistent with the "doubt the user" posture in workflow_manual." — bearing: constrains
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin, agents-plugin-wsflow, agents-plugin-pi rsrc/lead-workflow-manual/lead-workflow-manual.md, rsrc/lead-discuss/lead-discuss.md, rsrc/lead-ticket/lead-ticket.md, plus each package rsrc/manifest.json hash and agents-plugin-tool/internal/mcp/playbook_tools_test.go pins |
+| scope.surface | cross-module | shipped playbook text in three packages; no exported code symbol changes |
+| scope.new_public_symbol | no | none; a new manual heading Asking the user only |
+| scope.new_type_contract | no | ID notation changes from (1) to (01) in prose; the ODQ tooling gate matches only the heading line per agents-plugin-tool/internal/wsdoc/tickets_open_decision_queue_test.go |
+| scope.test_surface | existing | TestPlaybookPrintGoldenLeadTicket in agents-plugin-tool/internal/mcp/playbook_tools_test.go#L2236-L2350 pins Item classes sentences and the (1)/(2)/(3) skeleton verbatim and must be updated; prompt_override_test.go#L602-L634 bounds the User preferences section at the next ### heading; TestPiMirrorUpToDate and TestWsflowRsrcMirrorUpToDate |
+| complexity.reuse_points | confirmed | existing class definitions in agents-plugin/rsrc/lead-ticket/lead-ticket.md#L60-L106 are lifted, not rewritten |
+| complexity.side_effect_risk | moderate | the workflow manual is rendered into every lead session, so the new subsection changes context for all lead skills |
+| risk.correctness | moderate | dozens of verbatim golden pins and three hand-synced copies plus manifests must move together; lead-ticket line 132 says IDs never change, which the collision rule must amend |
+| risk.fit | moderate | relaxes the single-question discuss rule from 61e45964 and 3cec0ec03 and adds mandated-read text the anchor counts as cost |
+| risk.test | moderate | question register is model behavior with no deterministic test; only text pins guard it |
+| risk.security_or_contract | low | no tool schema or parser reads item IDs; only the heading gate is mechanical |
 
 ## Phases
 
 ### Phase 1: Lift the classes and IDs, align discuss and ticket
 
 Edit `lead-workflow-manual`, `lead-discuss`, and `lead-ticket` per
-Decisions in every package copy.
+Decisions in every package copy: regenerate each `rsrc/manifest.json`
+(WSRSRC_REGEN, then WS_REGEN_WSFLOW_RSRC) and hand-copy the pi tree, checked
+by `TestPiMirrorUpToDate` and `TestWsflowRsrcMirrorUpToDate` (`d5682a35`).
+Update `TestPlaybookPrintGoldenLeadTicket`
+(`agents-plugin-tool/internal/mcp/playbook_tools_test.go`) to the new
+`lead-ticket` text, and add golden pins for the manual's `### Asking the
+user` definitions, the `(nn)` notation, the collision rule, and the
+`lead-discuss` rule; keep `e05c7b23`'s forbidden-phrase list. Rejected:
+dropping the moved pins (the regression guard would leave the text that now
+carries the definitions).
 
 Verification: the existing playbook render, mirror-drift, and package test
 suites pass in every copy, and one fresh-read audit of the three changed
