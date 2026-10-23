@@ -8,13 +8,10 @@
    arriving mail starts your next turn even when you are idle, so you launch
    nothing else from this section. Calling it again with the same key changes
    nothing.
-3. Otherwise, whenever you actually intend to sit idle waiting on a peer,
-   launch `{{.MailboxWaitCommand}}` as a background process through your
-   harness's own background-task capability, never inline and never in a
-   poll loop. Your harness re-invokes you when that background task
-   completes, so its exit is your cue to come back; read what it printed and
-   act. Arm it whenever you go idle, whether or not you hold a registered
-   address.
+3. Otherwise, when neither your system prompt nor a key-change notice says
+   mailbox push is bound, launch `{{.MailboxWaitCommand}}`
+   as a background process before you go idle waiting on a peer, and end the
+   turn; its completion re-invokes you.
 4. Every wake path, the automatic push included, is best-effort while you or
    your user are genuinely away from the harness: it fires promptly once the
    harness next actually takes a turn, not necessarily the instant mail
