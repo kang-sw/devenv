@@ -131,6 +131,11 @@ directly. Include terminal inventory only when the question requires history.
 
 ### Notes / durable memory
 
+A note persists beyond this session until erased; the agenda is this
+session's own state, restored with its key and cleared when its work ends. A
+pending question, a next step, or a finding the current work will consume goes
+in the agenda (`{{.McpNamespace}}/agenda.set`), not a note.
+
 Write a durable note when a future session would otherwise re-derive a
 non-obvious fact with no better home. Use the narrowest layer that reaches its
 readers. Repository facts, commit rationale, and ticket state belong in the
