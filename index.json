@@ -595,6 +595,9 @@
     },
     "261023-bug-claude-mod-sentinel-key-mailbox-push": {
       "registered_at": "2026-10-23T06:55:23Z"
+    },
+    "261023-feat-ws-shared-question-classes-and-ids": {
+      "registered_at": "2026-10-23T07:31:25Z"
     }
   }
 }
