@@ -592,6 +592,9 @@
     },
     "261022-bug-windows-ci-mcp-shard-test-flakes": {
       "registered_at": "2026-10-22T14:38:23Z"
+    },
+    "261023-bug-claude-mod-sentinel-key-mailbox-push": {
+      "registered_at": "2026-10-23T06:55:23Z"
     }
   }
 }
