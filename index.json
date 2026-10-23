@@ -600,7 +600,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-23T07:57:30Z"
+        "touched_at": "2026-10-23T07:58:49Z",
+        "impl": {
+          "branch": "impl/develop/zit-lunar-shaft"
+        }
       }
     },
     "261023-feat-ws-shared-question-classes-and-ids": {
