@@ -107,6 +107,10 @@ All decisions below were confirmed by the user in discussion on 2026-10-26.
     reads as the default outcome of a discussion; bounded settled work routes
     to `lead-delegate` under the new gate. Rejected: leaving `lead-discuss`
     untouched, which keeps a ticket-first framing upstream of the gate.
+    Rejected: having `lead-discuss` itself ask "implement now or write a
+    ticket?" once a discussion converges, because it re-creates the premature
+    wrap-up offer that the "Do not offer to wrap up or persist; wait for the
+    user's signal" rule exists to stop; that rule stays.
 13. **Canonical flow.** This repository's `AGENTS.md` `Canonical flows`
     `Delegate:` line becomes `delegate <bounded task> -> follow-up on the same
     native agent -> review`. `lead-bootstrap`'s `AGENTS.template.md` has no
@@ -157,3 +161,4 @@ plan path and floor splice; a worker child key gets neither; missing stem uses
 `delegate`), the pinned prose fixtures and dispatch-contract tests from
 `## Constraints`, the wsflow/pi mirror tests, and a real `playbook.render` of
 `delegate-implementer` in both product modes.
+
