@@ -1,7 +1,7 @@
 {
   "meta": {
     "schema": 1,
-    "last_gc": "2026-09-24T10:38:33Z"
+    "last_gc": "2026-10-26T10:43:26Z"
   },
   "registrations": {
     "260512-research-claude-cli-stream-json": {
@@ -448,12 +448,6 @@
     "260924-bug-pi-removal-claim-abandonment-and-generation": {
       "registered_at": "2026-09-24T12:38:53Z"
     },
-    "260924-idea-ownership-dogfood-scratch-a": {
-      "registered_at": "2026-09-24T10:41:27Z"
-    },
-    "260924-idea-ownership-dogfood-scratch-b": {
-      "registered_at": "2026-09-24T10:41:54Z"
-    },
     "260925-bug-ticket-index-move-guard-silent-during-absence-ttl": {
       "registered_at": "2026-09-25T06:27:11Z"
     },
@@ -562,19 +556,6 @@
     "261018-research-claude-mod-ws-mcp-reconnect": {
       "registered_at": "2026-10-17T15:30:06Z"
     },
-    "261020-bug-claude-mod-milestone-percent-stale": {
-      "registered_at": "2026-10-20T12:18:55Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-23T07:58:40Z",
-        "impl": {
-          "branch": "impl/develop/wife-twins-hut"
-        }
-      }
-    },
     "261020-bug-worktree-profiles-review-followups": {
       "registered_at": "2026-10-20T13:35:50Z"
     },
@@ -593,31 +574,8 @@
     "261022-bug-windows-ci-mcp-shard-test-flakes": {
       "registered_at": "2026-10-22T14:38:23Z"
     },
-    "261023-bug-claude-mod-sentinel-key-mailbox-push": {
-      "registered_at": "2026-10-23T06:55:23Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-23T07:58:49Z",
-        "impl": {
-          "branch": "impl/develop/zit-lunar-shaft"
-        }
-      }
-    },
-    "261023-feat-ws-shared-question-classes-and-ids": {
-      "registered_at": "2026-10-23T07:31:25Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-23T07:58:32Z",
-        "impl": {
-          "branch": "impl/develop/exert-sleet-carol"
-        }
-      }
+    "261026-feat-delegate-default-with-plan-brief-and-post-hoc-review": {
+      "registered_at": "2026-10-26T10:43:26Z"
     }
   }
 }
