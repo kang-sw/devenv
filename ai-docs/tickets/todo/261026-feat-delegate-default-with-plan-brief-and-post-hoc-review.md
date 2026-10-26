@@ -1,7 +1,7 @@
 ---
 title: Delegate by default for settled bounded work, with a write-once plan brief and post-hoc review
-parent: 260909-epic-ws-worker-interpreter-refoundation
 related:
+  260909-epic-ws-worker-interpreter-refoundation: closed refoundation epic whose lead-surface work this continues
   260909-research-ws-refoundation-evidence-audit: binding anchor; retired the plan/spec/mental-model document layers as write-heavy, read-light, drift-prone; this ticket revives `ai-docs/.plans/` only as a write-once record
   260911-research-golden-fixture-verification-gap: the lead-delegate playbook prose is pinned by a golden fixture
 ---
