@@ -8,8 +8,8 @@ includes:
 
 Topic: cross-session mail between independent {{.SkillNamespace}} harness
 sessions — registering an address, discovering it, sending and receiving,
-arming a wait so an idle session wakes on mail, and using that to have one
-session drive another's otherwise-idle agent loop.
+arming a wait so an idle session wakes on mail, and using that to work with
+another session as a peer lead.
 
 ## Invariants
 
@@ -73,18 +73,26 @@ Wake
    identifies you correctly to a sender who may hold no durable address of
    their own.
 
-## On: remote-control another session
+## On: work with a peer lead session
 
-Use this to have one session act on your behalf inside a different,
-otherwise-idle session — for example, telling an idle executor to run a
-bounded task while you keep working elsewhere.
+The session on the other end is a peer lead with the same workflow authority
+as yours: it can discuss, write and run tickets through its own workers in
+parallel worktrees, review, and merge, and it answers to its own user. Mail
+sent by a top-level lead starts with a `[ws note: from a peer lead session
+...]` line saying so; reading such a sender as your worker or executor makes
+you audit or direct it instead of collaborating.
 
-1. Get the target session's own address (`On: find an address`, run by the
-   target and relayed to you, typically by the user).
-2. `mailbox.send` it plain-language content, for example "run <task>".
-3. The target must actually be positioned to notice: idle with its wait
+1. Get the peer's own address (`On: find an address`, run by the peer and
+   relayed to you, typically by the user).
+2. `mailbox.send` it the outcome you want in plain language, as you would ask
+   a fellow lead, for example "please run <ticket> and tell me when it
+   lands". The peer decides how to get there, may push back or consult its
+   own user, and owns the work it runs.
+3. The peer must actually be positioned to notice: idle with its wait
    armed, or on a harness that itself delivers arriving mail as a
    turn-starting message under the condition `On: arm the wait` states. A
-   target with neither only notices at its own next active turn.
-4. The target drains with `mailbox.recv`, acts on the instruction, and can
-   `mailbox.send` its own reply back using the handle its envelope carried.
+   peer with neither only notices at its own next active turn.
+4. The peer drains with `mailbox.recv`, weighs the request on its own
+   judgment, and can `mailbox.send` its reply back using the handle its
+   envelope carried. When you are the receiving side, answer the same way:
+   as a fellow lead, not as a worker reporting to its lead.

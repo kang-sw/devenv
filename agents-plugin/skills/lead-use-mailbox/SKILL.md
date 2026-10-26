@@ -1,6 +1,6 @@
 ---
 name: lead-use-mailbox
-description: Guide the lead and user through cross-session mail between independent harness sessions — registering a mailbox address, discovering peers, sending and receiving, arming a wait so an idle session wakes on mail, and remote-controlling another session's idle agent loop by mailing it an instruction such as running a ticket. Use when the user wants to message another session, set up or find a mailbox address, wake an idle executor, or have one session direct another.
+description: Guide the lead and user through cross-session mail between independent harness sessions — registering a mailbox address, discovering peers, sending and receiving, arming a wait so an idle session wakes on mail, and working with another session as a peer lead of equal authority, such as asking it to run a ticket. Use when the user wants to message another session, set up or find a mailbox address, wake an idle session, or coordinate work with another lead session.
 ---
 
 # Use Mailbox
