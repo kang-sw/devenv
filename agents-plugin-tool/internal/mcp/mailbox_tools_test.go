@@ -245,7 +245,8 @@ func TestMailboxEnvelopeStampingSameTier(t *testing.T) {
 	}
 
 	recvResp := callToolWithKey(t, serverB, 3, keyB, "mailbox.recv", nil)
-	if !strings.Contains(recvResp, "alice@worktree: same tier") {
+	// A top-level lead sender's body carries the peer-lead note line first.
+	if !strings.Contains(recvResp, "alice@worktree: "+stampPeerLeadNote("same tier", "")) {
 		t.Fatalf("recv did not surface the sender's durable from: handle: %s", recvResp)
 	}
 }
@@ -1431,5 +1432,64 @@ func TestMailboxReloginRefusesLiveDifferentPIDHolder(t *testing.T) {
 	}
 	if got := after.Presence["kim"].PID; got != otherLivePID {
 		t.Fatalf("re-login clobbered the live holder's presence record: PID = %d, want %d", got, otherLivePID)
+	}
+}
+
+// TestMailboxSendStampsPeerLeadNote verifies the sender-side peer-lead note:
+// a top-level lead's send is stored with the note line naming its harness, a
+// body already carrying the note is not stamped twice, and a parented
+// worker session or a parent-less delegate sends the body untouched.
+func TestMailboxSendStampsPeerLeadNote(t *testing.T) {
+	setupMailboxTestEnv(t)
+	t.Setenv(envMailboxAuto, "")
+	root := t.TempDir()
+	initGit(t, root)
+
+	t.Setenv(envMailbox, "alice@worktree")
+	serverA := NewServer(root, "test")
+	keyA := mailboxLogin(t, serverA, 1, root)
+
+	t.Setenv(envMailbox, "")
+	serverB := NewServer(root, "test")
+	serverB.sessionHarness = "codex"
+	leadKey := mailboxLogin(t, serverB, 1, root)
+	workerKey, _ := parseLoginResponse(t, callLogin(t, serverB, 2, root, map[string]any{"parent_session_key": leadKey}))
+	delegateKey, _ := parseLoginResponse(t, callLogin(t, serverB, 3, root, map[string]any{"capability": "delegate"}))
+
+	note := "[ws note: from a peer lead session (codex, not a worker), with the same authority as yours]\n"
+	sends := []struct {
+		key, content, want string
+	}{
+		{leadKey, "run the ticket", note + "run the ticket"},
+		{leadKey, note + "already noted", note + "already noted"},
+		{workerKey, "worker result", "worker result"},
+		{delegateKey, "delegate result", "delegate result"},
+	}
+	for i, tc := range sends {
+		callToolWithKey(t, serverB, 10+i, tc.key, "mailbox.send", map[string]any{"to": "alice@worktree", "content": tc.content})
+	}
+
+	raw := callToolWithKey(t, serverA, 20, keyA, "mailbox.recv", map[string]any{"format": "json"})
+	var envelopes []wsmailbox.Envelope
+	if err := json.Unmarshal([]byte(raw), &envelopes); err != nil {
+		t.Fatalf("recv JSON: %v: %s", err, raw)
+	}
+	if len(envelopes) != len(sends) {
+		t.Fatalf("recv returned %d envelopes, want %d: %s", len(envelopes), len(sends), raw)
+	}
+	for i, tc := range sends {
+		if envelopes[i].Content != tc.want {
+			t.Fatalf("envelope %d content = %q, want %q", i, envelopes[i].Content, tc.want)
+		}
+	}
+}
+
+// TestStampPeerLeadNoteWithoutHarness pins the fallback when the sender's
+// harness was never detected: the harness name and its comma are omitted.
+func TestStampPeerLeadNoteWithoutHarness(t *testing.T) {
+	got := stampPeerLeadNote("hi", "  ")
+	want := "[ws note: from a peer lead session (not a worker), with the same authority as yours]\nhi"
+	if got != want {
+		t.Fatalf("stampPeerLeadNote = %q, want %q", got, want)
 	}
 }

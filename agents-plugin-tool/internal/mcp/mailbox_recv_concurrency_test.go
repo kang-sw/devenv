@@ -66,7 +66,15 @@ func TestMailboxRecvConcurrentCallsNeverDoubleDeliver(t *testing.T) {
 				return res
 			}
 			for _, e := range envs {
-				res.contents = append(res.contents, e.Content)
+				// The sender is a top-level lead, so each body carries the
+				// peer-lead note line; the seeded payload follows it.
+				c := e.Content
+				if strings.HasPrefix(c, peerLeadNotePrefix) {
+					if _, rest, ok := strings.Cut(c, "\n"); ok {
+						c = rest
+					}
+				}
+				res.contents = append(res.contents, c)
 			}
 			if finished && len(envs) == 0 {
 				return res

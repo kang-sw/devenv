@@ -85,6 +85,9 @@ func (s *Server) handleMailboxSend(id json.RawMessage, args map[string]any) resp
 	if from == "" {
 		replyTo = wsmailbox.ReplyIDPrefix + replyID
 	}
+	if entry.scope == roleLead && entry.parent == "" {
+		content = stampPeerLeadNote(content, s.currentHarness())
+	}
 	envelope := wsmailbox.Envelope{From: from, ReplyTo: replyTo, Content: content, SentAt: now}
 
 	switch addr.Kind {
@@ -613,4 +616,25 @@ func formatMailboxBadge(unread int, senders []string) string {
 		suffix = ", …"
 	}
 	return fmt.Sprintf("\nunread %d: from %s%s -> call mailbox.recv\n", unread, strings.Join(shown, ", "), suffix)
+}
+
+// peerLeadNotePrefix opens the line a top-level lead's sends carry. Receivers
+// tend to treat any mail sender as their own executor; the note tells them it
+// is a peer lead with the same workflow authority. It is stamped into the
+// stored Content (not an Envelope field, not recv rendering) so a receiver
+// running any older ws-mcp binary still sees it with no schema change.
+const peerLeadNotePrefix = "[ws note: from a peer lead session"
+
+// stampPeerLeadNote prepends the peer-lead note line to content, naming the
+// sender's harness when known. Content already carrying the note is returned
+// unchanged so a forwarded or re-sent body is never double-stamped.
+func stampPeerLeadNote(content, harness string) string {
+	if strings.HasPrefix(content, peerLeadNotePrefix) {
+		return content
+	}
+	who := "not a worker"
+	if h := strings.TrimSpace(harness); h != "" {
+		who = h + ", not a worker"
+	}
+	return peerLeadNotePrefix + " (" + who + "), with the same authority as yours]\n" + content
 }

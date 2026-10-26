@@ -4648,7 +4648,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "mailbox.send",
-			"description": `Send a message to another harness session by stable address, without blocking. "to" is either "<slug>@<scope>" (scope one of "machine", "worktree", "clone") to reach a named inbox, or "id:<reply-id>" to reply to whatever mailbox.recv/mailbox.lookup_peers most recently surfaced as your_reply_id/reply_id for that peer. Works even when the caller has no mailbox identity of its own (WS_MAILBOX/WS_MAILBOX_AUTO unset): the first send from any session opens that session's own reply-id return channel, so a reply sent back to "id:<your reply-id>" is always retrievable via mailbox.recv.`,
+			"description": `Send a message to another harness session by stable address, without blocking. "to" is either "<slug>@<scope>" (scope one of "machine", "worktree", "clone") to reach a named inbox, or "id:<reply-id>" to reply to whatever mailbox.recv/mailbox.lookup_peers most recently surfaced as your_reply_id/reply_id for that peer. Works even when the caller has no mailbox identity of its own (WS_MAILBOX/WS_MAILBOX_AUTO unset): the first send from any session opens that session's own reply-id return channel, so a reply sent back to "id:<your reply-id>" is always retrievable via mailbox.recv. A top-level lead's sends are prefixed with a "[ws note: from a peer lead session ...]" line telling the receiver the sender is a peer lead, not its worker.`,
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{

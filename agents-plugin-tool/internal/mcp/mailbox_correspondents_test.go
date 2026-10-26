@@ -269,7 +269,7 @@ func TestMailboxCorrespondentsRecvRecordsNamedSender(t *testing.T) {
 
 	t1 := t0.Add(5 * time.Minute)
 	setMailboxClock(t, t1)
-	if recv := callToolWithKey(t, serverA, 3, keyA, "mailbox.recv", nil); !strings.Contains(recv, "bob@worktree: from bob") {
+	if recv := callToolWithKey(t, serverA, 3, keyA, "mailbox.recv", nil); !strings.Contains(recv, "bob@worktree: "+stampPeerLeadNote("from bob", "pi")) {
 		t.Fatalf("alice did not receive bob's named mail: %s", recv)
 	}
 
