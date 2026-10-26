@@ -5,16 +5,6 @@
 `AGENTS.md` is the canonical root workflow context for this repository.
 `CLAUDE.md` is a compatibility shim whose body is `@AGENTS.md`.
 
-This repo is still mid-migration from a Claude-centered workflow to a
-host-neutral Agents/open-conventions workflow. Treat these as authoritative until
-a ticket replaces them:
-
-- `AGENTS.md` - root behavioral rules, project-specific invariants, and (via
-  `## Project Orientation`) project memory and orientation.
-- `agents-plugin/` - Codex-first plugin distribution candidate.
-- `agents-plugin-tool/` - native MCP/tooling source tree.
-- Root `CLAUDE.md` - compatibility shim whose body is `@AGENTS.md`.
-
 If shared host-neutral guidance and Claude compatibility guidance conflict,
 follow the more conservative rule and surface the conflict before changing
 workflow semantics.
@@ -32,10 +22,7 @@ Read at every session start, before other action:
 2. **Project arc** - run `git log --oneline --graph -50`.
 3. **Binding anchor** - read this project's declared binding anchor
    (`## Workflow` -> `### Binding Anchor`) when the task touches one of its
-   declared topics. The declared anchor sits under epic
-   `260909-epic-ws-worker-interpreter-refoundation`; the prior anchor
-   `260605-research-ws-native-subagent-pivot` remains the harness-infrastructure
-   reference under the prior epic.
+   declared topics.
 
 ## Response Discipline
 
@@ -69,13 +56,15 @@ constraint on shipped behavior. This is distinct from Architecture Rule 4,
 which governs what shipped text may depend on, not who a feature is designed
 for.
 
-Root migration artifacts stay grouped by deliverable:
+Deliverables stay grouped by package:
 
-- `agents-plugin/` - Codex-first plugin distribution candidate.
+- `agents-plugin/` - the `ws` plugin.
+- `agents-plugin-wsflow/` - the agentless `wsflow` derivative.
+- `agents-plugin-pi/` - the Pi harness package.
 - `agents-plugin-tool/` - native tooling and MCP source tree.
 
 Do not add loose root-level `cmd/`, `internal/`, `scripts/`, or language module
-files for this migration unless a ticket changes the layout.
+files for plugin or tooling code unless a ticket changes the layout.
 
 ## Code Standards
 
@@ -197,9 +186,9 @@ not stage it unless explicitly requested.
 
 1. **Workflow repo scope.** Tickets and manuals describe the ws workflow system
    itself; downstream application rules belong in downstream projects.
-2. **Grouped migration layout.** `agents-plugin/` and `agents-plugin-tool/` own
-   the Codex/plugin-runtime migration surface; do not introduce new root
-   module directories without a ticket.
+2. **Grouped package layout.** Plugin and tooling code lives in the
+   `agents-plugin*/` packages; do not introduce new root module directories
+   without a ticket.
 3. **Host-neutral first.** Shared skill text prefers canonical MCP tool names
    and host-neutral behavior, treating Claude-specific commands and paths as
    adapter or fallback behavior.
@@ -285,9 +274,7 @@ ai-docs/tickets/.dropped/
   - `install.sh` snapshots only `agents-plugin/` for Claude-compatible plugin
     installs when Claude Code is available; it intentionally does not install
     wsflow into Claude.
-  - `agents-plugin/` is registered through `.agents/plugins/marketplace.json`;
-    Codex UI install has verified the ticket-authoring and discussion skills
-    (`ws:lead-ticket` since its rename from `ws:lead-write-ticket`).
+  - `agents-plugin/` is registered through `.agents/plugins/marketplace.json`.
   - `agents-plugin-wsflow/` is an agentless derivative package with
     Codex/Claude manifests, package-local no-agent MCP env, shared launcher
     copies, a reduced `runtime.json`, thin wsflow skill shims over shared
@@ -296,16 +283,8 @@ ai-docs/tickets/.dropped/
     Codex plugin entries; `.claude-plugin/marketplace.json` exposes both
     packages for manual Claude marketplace installation while `install.sh`
     still installs only `ws`.
-  - Codex local plugin iteration has no known CLI refresh path; use UI
-    uninstall/install or a fresh Codex session after editing the registered
-    source.
-  - `agents-plugin/.codex-plugin/plugin.json` references plugin-local
-    `.mcp.json` through `"mcpServers": "./.mcp.json"`.
-  - Changed plugin-managed Codex MCP config requires user-performed plugin
-    cache refresh before installed-cache verification.
-  - `claude plugin validate agents-plugin` passes; runtime Claude invocation
-    of `agents-plugin` remains compatibility behavior, not a separate source
-    tree.
+  - Codex plugin refresh and plugin-managed MCP config behavior:
+    `ai-docs/manuals/codex-integration.md`.
   - `ai-docs/.old/` is the Git-tracked project archive for inactive reference
     material that should not appear in default file listings.
   - MCP tool schemas and inventory are runtime-discoverable through
@@ -332,16 +311,8 @@ ai-docs/tickets/.dropped/
 - Workflow shape and plugin-less maintenance guidance live in
   `ai-docs/WORKFLOW.md`; it is explanatory and does not override ws runtime or
   MCP parser behavior.
-- Current priority is making the project and ticket system usable from
-  Agents/Codex while retiring the legacy Claude tree behind explicit tickets.
-- Research anchor: `260909-research-ws-refoundation-evidence-audit`, coordinated
-  by epic `260909-epic-ws-worker-interpreter-refoundation`. The prior
-  `260605-research-ws-native-subagent-pivot` remains the harness-infrastructure
-  reference under the prior epic.
 - Existing historical Claude workflow notes may mention `ws-*` on `PATH`; new
   shared guidance should use MCP tools and bundled runtime documents.
-- Claude plugin source artifacts were retired from the live tree; do not add a
-  new `claude-plugin/` mirror for Codex behavior.
 
 <!-- Inclusion test: keep a rule in this file only if it applies to every
      path and its body is one sentence after the bold name. A rule whose
