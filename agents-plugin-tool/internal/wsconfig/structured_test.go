@@ -93,6 +93,34 @@ func TestListStructuredPrecedence(t *testing.T) {
 	}
 }
 
+// TestRepoWriteToleratesNullMembers verifies a repo write over a hand-edited
+// file whose whole body, overrides, or structured_overrides is JSON null treats
+// it as empty instead of panicking on a nil map.
+func TestRepoWriteToleratesNullMembers(t *testing.T) {
+	for _, body := range []string{`null`, `{"overrides":null}`, `{"structured_overrides":null}`} {
+		t.Run(body, func(t *testing.T) {
+			r, opts := newRepoTestResolver(t, nil)
+			repoPath, _ := RepoPath(opts)
+			writeRawFile(t, repoPath, body+"\n")
+
+			if err := r.Set("review_phase", "full", SetOptions{ExplicitScope: ScopeRepo}); err != nil {
+				t.Fatalf("Set repo: %v", err)
+			}
+			if err := r.SetStructured("fam.a", json.RawMessage(`{"x":1}`), ScopeRepo); err != nil {
+				t.Fatalf("SetStructured: %v", err)
+			}
+			members := readJSONMembers(t, repoPath)
+			var overrides map[string]string
+			if err := json.Unmarshal(members["overrides"], &overrides); err != nil || overrides["review_phase"] != "full" {
+				t.Fatalf("overrides = %s (%v)", members["overrides"], err)
+			}
+			if !strings.Contains(string(members["structured_overrides"]), `"fam.a"`) {
+				t.Fatalf("structured_overrides = %s", members["structured_overrides"])
+			}
+		})
+	}
+}
+
 // TestRepoStructuredWritePreservesOtherMembers verifies a repo write touches
 // only overrides/structured_overrides: an unknown member survives, no
 // schema_version or agents noise is added, and no lock file lands in the

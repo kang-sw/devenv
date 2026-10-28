@@ -105,16 +105,27 @@ func updateRepoConfigFile(path string, mutate func(overrides map[string]string, 
 				return nil, fmt.Errorf("parse repo ws config %s: %w", path, err)
 			}
 		}
+		// A JSON null decodes into a map as nil, and the writes below would
+		// then panic: a hand-edited "null" file or member reads as empty.
+		if members == nil {
+			members = map[string]json.RawMessage{}
+		}
 		overrides := map[string]string{}
 		structured := map[string]json.RawMessage{}
 		if v, ok := members["overrides"]; ok {
 			if err := json.Unmarshal(v, &overrides); err != nil {
 				return nil, fmt.Errorf("parse repo ws config %s: overrides: %w", path, err)
 			}
+			if overrides == nil {
+				overrides = map[string]string{}
+			}
 		}
 		if v, ok := members["structured_overrides"]; ok {
 			if err := json.Unmarshal(v, &structured); err != nil {
 				return nil, fmt.Errorf("parse repo ws config %s: structured_overrides: %w", path, err)
+			}
+			if structured == nil {
+				structured = map[string]json.RawMessage{}
 			}
 		}
 		if err := mutate(overrides, structured); err != nil {
