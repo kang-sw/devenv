@@ -126,7 +126,7 @@ single-maintainer-serial posture.
 
 ```text
 anchor: ai-docs/tickets/idea/260909-research-ws-refoundation-evidence-audit.md
-topics: lead surface, worker interpreter, document-layer retirement, stop conditions
+topics: document-layer retirement, stop conditions
 ```
 
 `anchor` names the ticket a lead must read before answering or editing when a
