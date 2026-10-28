@@ -105,11 +105,18 @@ class SkillDispatchContractsTest(unittest.TestCase):
             self.assertNotIn("with that path as the contract", handoff)
             delegate = (package / "lead-delegate" / "lead-delegate.md").read_text()
             gate = delegate.split("## Routing")[1].split("## Assignment")[0]
-            self.assertIn("public behavior, an API, protocol, schema, template", gate)
-            self.assertIn("canonical flow, or architecture", gate)
-            self.assertIn("unresolved product or workflow decision", gate)
-            self.assertIn("independent review is needed, unless the task is a local NEEDS FIX repair", gate)
-            self.assertIn("whose follow-up review supplies\n  that verification", gate)
+            # The gate states the cheap default and the escalations; a NEEDS FIX
+            # repair takes the same gate (and so gets a plan) with no exception.
+            self.assertIn("Default to delegate when the outcome is settled and you can name the files\nbefore starting", gate)
+            self.assertIn("a decision is still open, the work spans phases or outlives this session, or\nthe scope cannot be named up front", gate)
+            self.assertIn("A local NEEDS FIX repair handed off\nby {{.SkillNamespace}}:lead-review takes this same gate", gate)
+            self.assertIn("Independent review comes after the commit, so the need for one does not route\nwork to a ticket", gate)
+            for retired in ("public behavior, an API, protocol, schema, template", "independent review is needed", "whose follow-up review supplies"):
+                self.assertNotIn(retired, gate)
+            # Plans added in the reviewed range are the contract; absence never blocks.
+            steps = review.split("## Review")[1].split("## Verdict")[0]
+            self.assertIn("Each plan file the range adds\n   under `ai-docs/.plans/` is the contract", steps)
+            self.assertIn("a missing\n   plan never blocks the review", steps)
 
     def test_delegate_implementer_is_a_tier_unaware_reviewer_free_floor(self):
         # The delegate-side implementer floor is a render-only rsrc playbook with
@@ -121,6 +128,14 @@ class SkillDispatchContractsTest(unittest.TestCase):
             head = body.split("---", 2)[1]
             self.assertNotIn("tier:", head)
             self.assertNotRegex(body, r"(?i)\breview(er)?\b")
+            # The plan section is conditional on the render-appended plan-path
+            # line, and the plan is write-once and committed with the change.
+            plan = body.split("## Plan")[1].split("## Verify")[0]
+            self.assertIn("only when this floor ends with a `plan-path:` line", plan)
+            self.assertIn("never edit it", plan)
+            self.assertIn("Commit it unchanged in the same commit as your implementation", plan)
+            self.assertIn("staging that path alone among the\nplan files", plan)
+            self.assertIn("follow-up instruction the lead sends you", plan)
         self.assertFalse((SKILLS_DIR / "delegate-implementer").exists())
         delegate = (RSRC_DIR / "lead-delegate" / "lead-delegate.md").read_text(encoding="utf-8")
         self.assertIn('playbook.render(name:\n"delegate-implementer"', delegate)

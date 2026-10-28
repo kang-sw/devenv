@@ -743,6 +743,10 @@ func TestRepoScopeMalformedFileFailsLoudAtPlaybookReaders(t *testing.T) {
 			if text := toolText(t, resp); !strings.Contains(text, wantPath) {
 				t.Fatalf("%s error does not name the file path %q: %s", tc.tool, wantPath, text)
 			}
+			// A failed delegate-implementer render reserves no plan file.
+			if _, err := os.Stat(filepath.Join(root, "ai-docs", ".plans")); !os.IsNotExist(err) {
+				t.Fatalf("%s left a plan directory behind after failing (stat err %v)", tc.tool, err)
+			}
 		})
 	}
 }

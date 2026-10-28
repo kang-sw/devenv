@@ -12,11 +12,11 @@ risk, and trade-offs before capture or execution. You own the conversation and
 decision-making; subagents may gather evidence only. Edit no source and write
 no document here.
 
-What the user confirms is captured through
-`{{.SkillNamespace}}:lead-ticket`. When the user moves to execution, invoke
-`{{.SkillNamespace}}:lead-delegate` for a bounded task or
-`{{.SkillNamespace}}:lead-run` for implementation that warrants the full
-worker workflow.
+When the user moves to execution, invoke
+`{{.SkillNamespace}}:lead-delegate`; its routing gate hands settled, bounded
+work to an executor and sends the rest to a ticket. Invoke
+`{{.SkillNamespace}}:lead-ticket` when the user asks to capture the work, and
+`{{.SkillNamespace}}:lead-run` for a ready ticket.
 
 ## Evidence
 

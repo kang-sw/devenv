@@ -31,8 +31,14 @@ you resolve the target, adjudicate their findings, and carry the decisions.
    `{{.McpNamespace}}/playbook.render(name, session_key: <your key>)`; spawn
    each with the rendered path, the range (`<merge-base>..<head>` for a
    branch), the config path, and the review authority — the ticket or inline
-   contract the change names, when there is one. Each returns severity-graded
-   findings and an `omitted:` field.
+   contract the change names, when there is one. Each plan file the range adds
+   under `ai-docs/.plans/` is the contract for the changes committed with it,
+   and for the same delegate's later commits in the range read together with
+   their `## AI Context`, where a lead-directed follow-up is recorded rather
+   than a deviation from the plan; pass those paths with the authority. A
+   commit with no plan is judged from its diff and `## AI Context`; a missing
+   plan never blocks the review. Each returns severity-graded findings and an
+   `omitted:` field.
 3. Range scenario adds the Landing Lens phase — the config's section, or the
    built-in default in the template below — plus a test change alongside every
    behavior change.
