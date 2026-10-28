@@ -584,7 +584,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-28T10:38:18Z"
+        "touched_at": "2026-10-28T10:39:16Z",
+        "impl": {
+          "branch": "impl/develop/balmy-ranch-rogue"
+        }
       }
     },
     "261028-feat-pi-agent-widget-expanded-mode": {
