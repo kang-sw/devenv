@@ -9,13 +9,13 @@ import {
   createBand,
   ENABLED_KEY,
   fitChips,
+  folderParts,
   parseAgenda,
   parseTodos,
   pctColor,
   row2Layout,
   titleParts,
   todoView,
-  USAGE_THROTTLE_MS,
   type Run,
 } from './band'
 
@@ -718,7 +718,7 @@ test('ws: a tool call refreshes git at most every two seconds, a turn end always
   expect(statusRuns()).toBe(3)
 })
 
-test('ws: a model tool call re-reads the context fill at most every two seconds, and redraws with it', async ($, on) => {
+test('ws: each model tool call re-reads the context fill and redraws with it', async ($, on) => {
   const w = world(on)
   await start($, w)
   if (!isWs(w)) return
@@ -726,19 +726,19 @@ test('ws: a model tool call re-reads the context fill at most every two seconds,
   const first = w.usageCalls
   expect(first).toBeGreaterThan(0)
   expect(await bar()).toContain(' 25% 50,000 / 200K')
-  // The agent is mid-turn: no session.measure, the fill moves with the tool call.
+  // The agent is mid-turn: no session.measure, the fill moves with each tool call, however close together.
   w.usage.context.tokens = 100_000
-  await modelCall($, w, 'todo_check', { session_key: 'minted-1', key: 'gamma', status: 'wip' })
-  expect(w.usageCalls).toBe(first)
-  expect(await bar()).toContain(' 25% 50,000 / 200K')
-  await w.clock.advance(2000)
   await modelCall($, w, 'todo_check', { session_key: 'minted-1', key: 'gamma', status: 'wip' })
   expect(w.usageCalls).toBe(first + 1)
   expect(await bar()).toContain(' 50% 100,000 / 200K')
-  // A session.measure still reads at once, inside the throttle window.
-  await measure($, w, 120_000)
-  expect(w.usageCalls).toBeGreaterThan(first + 1)
+  w.usage.context.tokens = 120_000
+  await modelCall($, w, 'todo_check', { session_key: 'minted-1', key: 'gamma', status: 'wip' })
+  expect(w.usageCalls).toBe(first + 2)
   expect(await bar()).toContain(' 60% 120,000 / 200K')
+  // A session.measure reads too.
+  await measure($, w, 140_000)
+  expect(w.usageCalls).toBeGreaterThan(first + 2)
+  expect(await bar()).toContain(' 70% 140,000 / 200K')
 })
 
 test('ws: the bar is measured against the compaction window when the breakdown carries it, else the model window', async ($, on) => {
@@ -762,8 +762,7 @@ test('ws: the bar is measured against the compaction window when the breakdown c
 test('createBand: a usage read in flight leaves one trailing read, and the mod\'s own tool calls read nothing', async () => {
   let usageCalls = 0
   let release: (() => void) | undefined
-  const gate = () => new Promise<void>((r) => (release = r))
-  let nowMs = NOW
+  let gated = false
   const usage = { startedAt: 0, context: { tokens: 1, window: 100 }, rateLimits: [] } as never
   const band = createBand()
   band.start({
@@ -773,33 +772,45 @@ test('createBand: a usage read in flight leaves one trailing read, and the mod\'
     git: async () => null,
     usage: async () => {
       usageCalls += 1
-      if (usageCalls === 2) await gate()
+      if (gated) await new Promise<void>((r) => (release = r))
       return usage
     },
     model: async () => 'm',
     cwd: async () => '/c',
     root: async () => '/c',
-    now: async () => nowMs,
+    now: async () => NOW,
     every: () => () => {},
     redraw: () => {},
     log: () => {},
   } as never)
   await band.idle()
   expect(usageCalls).toBe(1)
+  // No read in flight and no time throttle: only the guard keeps the mod's own call from reading.
   band.toolCalled('Bash', undefined, false)
   await band.idle()
   expect(usageCalls).toBe(1)
-  nowMs += USAGE_THROTTLE_MS
+  band.toolCalled('Bash', undefined, true)
+  await band.idle()
+  expect(usageCalls).toBe(2)
+  gated = true
   band.toolCalled('Bash', undefined, true)
   await new Promise((r) => setTimeout(r, 0))
-  expect(usageCalls).toBe(2)
-  nowMs += USAGE_THROTTLE_MS
+  expect(usageCalls).toBe(3)
   band.toolCalled('Bash', undefined, true)
   band.measured()
+  gated = false
   release?.()
   await band.idle()
   // Both late arrivals folded into one trailing read.
-  expect(usageCalls).toBe(3)
+  expect(usageCalls).toBe(4)
+})
+
+test('folderParts: either path separator splits the folder name from the path below the root', () => {
+  expect(folderParts('/repo/sub', '/repo')).toEqual({ dirName: 'sub', rel: '/sub' })
+  expect(folderParts('C:\\repo\\sub', 'C:\\repo')).toEqual({ dirName: 'sub', rel: '\\sub' })
+  expect(folderParts('C:\\repo', 'C:\\repo')).toEqual({ dirName: 'repo', rel: '' })
+  expect(folderParts('/repository/sub', '/repo')).toEqual({ dirName: 'sub', rel: '' })
+  expect(folderParts('/repo/sub', '')).toEqual({ dirName: 'sub', rel: '' })
 })
 
 test('todo and agenda text: every todo status and agenda key the server renders is read', () => {

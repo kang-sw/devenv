@@ -27,8 +27,6 @@ export const ENABLED_KEY = 'claude.status_band_enabled'
 
 /** A tool call refreshes git at most this often; a turn end always does. */
 export const GIT_THROTTLE_MS = 2000
-/** A tool call re-reads the usage at most this often; a session.measure always does. */
-export const USAGE_THROTTLE_MS = 2000
 /** How often the clock the budget deltas read moves on. */
 export const TICK_MS = 10_000
 /** The context bar shrinks to this many cells before a row 2 capsule drops. */
@@ -406,8 +404,7 @@ export function drawBand(ui: Elements, d: BandData, W: number) {
   const rows: RenderChildren[] = []
 
   // Row 1: mailbox, folder | branch, changes.
-  const dirName = d.cwd.split('/').pop() ?? ''
-  const rel = d.root && d.cwd.startsWith(`${d.root}/`) ? d.cwd.slice(d.root.length) : ''
+  const { dirName, rel } = folderParts(d.cwd, d.root)
   const g = d.git
   rows.push(
     row(
@@ -608,6 +605,13 @@ export function drawBand(ui: Elements, d: BandData, W: number) {
   )
 }
 
+/** The folder capsule's name and its path below the repository root; either separator splits, for a Windows cwd. */
+export function folderParts(cwd: string, root: string): { dirName: string; rel: string } {
+  const dirName = cwd.split(/[\\/]/).pop() ?? ''
+  const rel = root && cwd.startsWith(root) && /[\\/]/.test(cwd.charAt(root.length)) ? cwd.slice(root.length) : ''
+  return { dirName, rel }
+}
+
 /**
  * The usage figures the band draws, from a `$.session.usage({ breakdown: 'summary' })` read.
  * The window is the one the session compacts at (the breakdown's
@@ -689,7 +693,6 @@ export function createBand(): Band {
   let gitAt = -Infinity
   let gitBusy = false
   let gitAgain = false
-  let usageAt = -Infinity
   let usageBusy = false
   let usageAgain = false
   const inflight = new Set<Promise<unknown>>()
@@ -774,28 +777,26 @@ export function createBand(): Band {
 
   /**
    * One usage read at a time, so a late answer never overwrites a newer one.
-   * An unforced read inside the throttle window is dropped; any read that
-   * arrives during one in flight leaves a trailing read.
+   * A read requested while one is in flight leaves one trailing read, however
+   * many arrive. There is no time throttle: the read is a local estimate, and
+   * the bar follows each settled model tool call.
    */
-  const readUsage = (e: BandEdges, force: boolean) => {
+  const readUsage = (e: BandEdges) => {
     if (!on) return
+    if (usageBusy) {
+      usageAgain = true
+      return
+    }
+    usageBusy = true
     track(
       'usage read',
       (async () => {
-        const now = await e.now()
-        if (!force && now - usageAt < USAGE_THROTTLE_MS) return
-        if (usageBusy) {
-          usageAgain = true
-          return
-        }
-        usageBusy = true
-        usageAt = now
         try {
           do {
             usageAgain = false
             const figures = usageFigures(await e.usage())
-            const at = await e.now()
-            if (on) patch({ ...figures, now: at })
+            const now = await e.now()
+            if (on) patch({ ...figures, now })
           } while (usageAgain && on)
         } finally {
           usageBusy = false
@@ -853,7 +854,7 @@ export function createBand(): Band {
         if (on && !d.model) patch({ model })
       }),
     )
-    readUsage(e, true)
+    readUsage(e)
     readGit(e, true)
     readWs(e)
     readAddress(e)
@@ -906,7 +907,6 @@ export function createBand(): Band {
       key = undefined
       d = { ...EMPTY }
       gitAt = -Infinity
-      usageAt = -Infinity
       wsSeq += 1
       addrSeq += 1
       void readKnob(bound)
@@ -939,10 +939,10 @@ export function createBand(): Band {
       }
       readGit(e, false)
       // The mod's own calls make no model request, so the fill stays put.
-      if (byModel) readUsage(e, false)
+      if (byModel) readUsage(e)
     },
     measured() {
-      if (edges) readUsage(edges, true)
+      if (edges) readUsage(edges)
     },
     stepped(model, effort) {
       const next = { model, effort: effort === undefined ? '' : String(effort) }
