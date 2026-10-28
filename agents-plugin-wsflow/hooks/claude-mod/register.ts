@@ -1,5 +1,6 @@
 import type { HookStream, ProcessSpawnChunk, ProcessSpawnResult, Register, ToolCallResult } from 'claude-code'
 
+import { createBand, drawBand, readGit } from './band'
 import { createCaptions, drawCall, drawEmpty, drawRun, groupUnit, toolUseUnit } from './captions'
 import { compactionEnabledFor, createCompaction } from './compaction'
 import { createManual, SECTION_ID, type ReadFamily } from './manual'
@@ -17,7 +18,7 @@ import {
 } from './watcher'
 
 // The Claude Code mod: the one hooks module a package's hooks.json names,
-// carrying five features.
+// carrying six features.
 //
 // - Mailbox push: the mod loops the one-shot `mailbox wait` as a peek-only
 //   signal for one bound session key, and arriving mail starts a turn through
@@ -42,10 +43,14 @@ import {
 //   finished, collapsed tool row, or a run the engine folds into one group,
 //   drawn as a short caption a second model call wrote, the raw row still the
 //   one the model reads and the expanded view draws (see captions.tsx).
+// - Status band (ws only, off until its config switch is set): a framed band
+//   above the prompt with the model, folder, git, context, rate-limit and
+//   cost figures, and the held key's todos, agenda and mailbox address, each
+//   refreshed by events (see band.tsx).
 //
 // Claude Code accepts one hooks module per plugin and one unmatched hook per
 // event in it, so the lifecycle events (session.start, session.end,
-// turn.start, turn.complete, session.compact) are registered once here and
+// turn.start, turn.step, turn.complete, session.compact) are registered once here and
 // drive each feature in isolation: a throw in one is logged and leaves the
 // others running. The one cross-feature wait is the shared ws-project gate: the
 // mailbox setup awaits it to decide whether its bind tool registers, and the
@@ -352,6 +357,9 @@ export const register: Register = (on) => {
   // Caption feature state; started at session.start under the same package gate.
   const captions = createCaptions()
 
+  // Status band state; started at session.start under the same package gate.
+  const band = createBand()
+
   on('session.start', async ($, e, next) => {
     const label = `${$.plugin.name} mailbox`
     const resolveServer = async () => {
@@ -582,6 +590,42 @@ export const register: Register = (on) => {
       $.ui.log(`ws captions: setup failed: ${String(err)}`, { to: 'debug' })
     }
 
+    // Registers nothing; its knob read runs on in the background, and the band
+    // draws nothing until it settles on. Started before the manual feature,
+    // whose key listener it follows.
+    try {
+      if (compactionEnabledFor($.plugin.name)) {
+        const wsCall = async (tool: string, args: Record<string, unknown>) => {
+          await serverResolved
+          if (!server) throw new Error('MCP server not resolved')
+          return callText(server, tool, args)
+        }
+        band.start({
+          // Session-keyed while a key is held, so a session-scope tune is honored.
+          readSetting: async (key, sessionKey) =>
+            (JSON.parse(await wsCall('config_get', { key, format: 'json', ...(sessionKey ? { session_key: sessionKey } : {}) })) as { value?: unknown })
+              .value,
+          call: wsCall,
+          address: async (sessionKey) =>
+            selfAddress({ text: await wsCall('mailbox_lookup_peers', { session_key: sessionKey, scope: 'worktree', format: 'json' }) } as ToolCallResult),
+          git: (cwd) => readGit((argv, init) => $.process.run(argv, init), cwd),
+          usage: () => $.session.usage({ breakdown: 'summary' }),
+          model: () => $.session.model(),
+          cwd: () => $.session.cwd(),
+          root: () => $.session.root(),
+          now: () => $.clock.now(),
+          every: (ms, fn) => {
+            const timer = $.clock.every(ms, fn)
+            return () => timer.cancel()
+          },
+          redraw: () => $.ui.invalidate('ui.render'),
+          log: (text) => $.ui.log(text, { to: 'debug' }),
+        })
+      }
+    } catch (err) {
+      $.ui.log(`ws band: setup failed: ${String(err)}`, { to: 'debug' })
+    }
+
     // Registers no tool: its setup runs on in the background, and the first
     // compose waits for it.
     try {
@@ -597,6 +641,11 @@ export const register: Register = (on) => {
             autoKey = key
             const target = watcher
             if (target) bindAuto(target, mailboxLog)
+            try {
+              band.keyChanged(key)
+            } catch (err) {
+              $.ui.log(`ws band: key change handling failed: ${String(err)}`, { to: 'debug' })
+            }
           },
           server: async () => {
             await serverResolved
@@ -685,6 +734,13 @@ export const register: Register = (on) => {
       } catch (err) {
         $.ui.log(`ws captions: capture failed: ${String(err)}`, { to: 'debug' })
       }
+      // The band's refresh rides here too: git, and a ws read after the
+      // model's todo, agenda, mailbox or config tune call.
+      try {
+        band.toolCalled(e.tool, server, next.origin.plugin === 'engine')
+      } catch (err) {
+        $.ui.log(`ws band: tool call handling failed: ${String(err)}`, { to: 'debug' })
+      }
     }
     return res
   })
@@ -764,7 +820,25 @@ export const register: Register = (on) => {
     } catch (err) {
       $.ui.log(`ws compaction: usage observation failed: ${String(err)}`, { to: 'debug' })
     }
+    try {
+      band.measured()
+    } catch (err) {
+      $.ui.log(`ws band: usage observation failed: ${String(err)}`, { to: 'debug' })
+    }
     return res
+  })
+
+  // The effort is known only from each model request: the band takes the
+  // main loop's, with its model.
+  on('turn.step', async function* ($, e, next) {
+    if (e.agentId === undefined && compactionEnabledFor($.plugin.name)) {
+      try {
+        band.stepped(e.model, e.effort)
+      } catch (err) {
+        $.ui.log(`ws band: model request handling failed: ${String(err)}`, { to: 'debug' })
+      }
+    }
+    return yield* next(e)
   })
 
   // A main-thread turn start also tells the compaction and reconnect
@@ -805,6 +879,11 @@ export const register: Register = (on) => {
       if (compactionEnabledFor($.plugin.name)) compaction.turnComplete(e.agentId, e.reason)
     } catch (err) {
       $.ui.log(`ws compaction: turn end handling failed: ${String(err)}`, { to: 'debug' })
+    }
+    try {
+      if (e.agentId === undefined && compactionEnabledFor($.plugin.name)) band.turnCompleted()
+    } catch (err) {
+      $.ui.log(`ws band: turn end handling failed: ${String(err)}`, { to: 'debug' })
     }
     try {
       reconnect.turnComplete(e.agentId, e.reason)
@@ -877,6 +956,15 @@ export const register: Register = (on) => {
     return drawEmpty($.ui.resolve(e))
   })
 
+  // The status band, drawn only while its switch reads on; a survey holds the
+  // band's place first.
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (!compactionEnabledFor($.plugin.name) || e.props.hasSurvey) return next(e)
+    const data = band.data()
+    if (!data) return next(e)
+    return drawBand($.ui.resolve(e), data, e.props.bodyColumns)
+  })
+
   // Each step ends in isolation, so a throw in one never skips another. The
   // synchronous steps run before the one awaited: should the hook's time
   // bound cut the $.store delete short, the loop is already stopped and the
@@ -914,6 +1002,13 @@ export const register: Register = (on) => {
       if (compactionEnabledFor($.plugin.name)) captions.end()
     } catch (err) {
       $.ui.log(`ws captions: reset failed: ${String(err)}`, { to: 'debug' })
+    }
+    // Band: the next conversation gets its own key, so the key's rows and
+    // address go until it arrives; the switch and the figures stay.
+    try {
+      if (compactionEnabledFor($.plugin.name)) band.end()
+    } catch (err) {
+      $.ui.log(`ws band: reset failed: ${String(err)}`, { to: 'debug' })
     }
     // Manual: every end reason drops the cached manual and the snapshot flag,
     // so the next conversation (no session.start follows `clear`) sets up

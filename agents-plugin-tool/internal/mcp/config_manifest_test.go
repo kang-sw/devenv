@@ -518,8 +518,9 @@ func TestShippedClaudeCaptionStyleMatchesMod(t *testing.T) {
 }
 
 // TestConfigGetReadsClaudeCaptionKeys: a server launched with the Claude
-// manifest answers each caption key typed and keyless, a tune included, and
-// refuses a context window below one token.
+// manifest answers each caption key and the status band switch typed and
+// keyless, a tune included, refuses a context window below one token, and
+// answers a session-scope tune of the band switch only to a keyed read.
 func TestConfigGetReadsClaudeCaptionKeys(t *testing.T) {
 	server, _, key := manifestServer(t, claudeManifestPath)
 	for i, want := range []struct {
@@ -529,6 +530,7 @@ func TestConfigGetReadsClaudeCaptionKeys(t *testing.T) {
 		{"claude.display_summary_enabled", false},
 		{"claude.display_summary_model", "haiku"},
 		{"claude.display_summary_context_tokens", float64(200000)},
+		{"claude.status_band_enabled", false},
 	} {
 		if got := configGetJSON(t, server, 930800+i, map[string]any{"key": want.name}); got.Value != want.value || got.Scope != "builtin" {
 			t.Fatalf("unset %s = %+v, want %v", want.name, got, want.value)
@@ -542,5 +544,16 @@ func TestConfigGetReadsClaudeCaptionKeys(t *testing.T) {
 	}
 	if got := configGetJSON(t, server, 930812, map[string]any{"key": "claude.display_summary_enabled"}); got.Value != true || got.Scope != "project" {
 		t.Fatalf("tuned claude.display_summary_enabled without a session key = %+v", got)
+	}
+	// The status band reads its switch with the held key, so a session-scope
+	// tune turns it on for that session alone.
+	if resp := keyedCall(t, server, 930813, key, "config.tune", map[string]any{"key": "claude.status_band_enabled", "value": "true", "scope": "session"}); toolIsError(t, resp) {
+		t.Fatalf("config.tune(status_band_enabled=true, session) = %s", resp)
+	}
+	if got := configGetJSON(t, server, 930814, map[string]any{"key": "claude.status_band_enabled", "session_key": key}); got.Value != true || got.Scope != "session" {
+		t.Fatalf("session-tuned claude.status_band_enabled with the session key = %+v", got)
+	}
+	if got := configGetJSON(t, server, 930815, map[string]any{"key": "claude.status_band_enabled"}); got.Value != false || got.Scope != "builtin" {
+		t.Fatalf("session-tuned claude.status_band_enabled without a session key = %+v", got)
 	}
 }

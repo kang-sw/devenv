@@ -16,6 +16,12 @@
       "description": "Claude Code only (unused on other hosts): when true, a finished, collapsed tool row in the lead's terminal view (a lone call, or a run Claude Code folds into one group) draws a short caption written by a second model call in place of the raw row; the model still reads the raw result, and the expanded view (ctrl+o) draws the raw row. Enabling it sends the lead conversation since its last compaction, and tool inputs and outputs, to the summary model (claude.display_summary_model). Captions use the workflow.lang language (its project, global, or built-in value), or the language the user writes in when that is unset. Read at session start, so a change applies from the next session. Only the project, global, and built-in values apply; a session- or repo-scope tune is not read."
     },
     {
+      "key": "claude.status_band_enabled",
+      "type": "boolean",
+      "default": false,
+      "description": "Claude Code only (unused on other hosts): when true, the lead's terminal view draws a framed status band above the prompt: the model and effort, the folder, the git branch and changes, a context usage bar, the 5-hour and 7-day rate-limit usage, the session cost, and the lead session's mailbox address, todos and agenda keys. Read at session start, when the lead session key changes, and after each config tune call, so a change shows in the running session. Session-scope tunes apply, along with the repo, project, global, and built-in values."
+    },
+    {
       "key": "claude.display_summary_model",
       "type": "string",
       "default": "haiku",
