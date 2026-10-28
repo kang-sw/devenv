@@ -237,6 +237,7 @@ import { createAgentStorageContext, pruneStaleAgentHomes, reportOwnershipDiagnos
 import { createAgentFooterSessionLifecycle, type AgentFooterContext, type AgentFooterSessionLifecycle } from "./agent-footer.ts";
 import { descendantUsageValue, retentionEvictionCost } from "./agent-cost.ts";
 import { createDescendantUsageReporter, descendantUsageReporterRef, evaluateDescendantUsage } from "./agent-usage-rollup.ts";
+import { AgentViewUpstream, agentViewUpstreamRef, buildAgentViewModel, scheduleAgentViewPublish } from "./agent-view.ts";
 import { loadHostPiTui } from "./pi-tui.ts";
 import { assertPolicyTool, readDelegationPolicy } from "./delegation-policy.ts";
 import { registerScopedWriteTools } from "./write-scopes.ts";
@@ -519,6 +520,9 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   // ref and no bootstrap, so reporting stops for the rest of that launch;
   // RPC children have no reload command.
   if (channel) descendantUsageReporterRef.current = createDescendantUsageReporter(channel);
+  // 261028 Phase 2: this hop's descendant tool-batch relay, the same
+  // one-per-channel lifetime as the usage reporter above.
+  if (channel) agentViewUpstreamRef.current = new AgentViewUpstream(channel);
   const delegation = readDelegationPolicy();
   // Same-name wrappers preserve Pi's native schema, diff renderer, queue, and
   // result shape while the explicit policy — not tool visibility — authorizes
@@ -993,6 +997,8 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     const usageRegistry = agentTools.rpcRegistry;
     descendantUsageReporterRef.current?.setSource(() => descendantUsageValue(usageRegistry));
     evaluateDescendantUsage();
+    agentViewUpstreamRef.current?.setSource(() => buildAgentViewModel(usageRegistry));
+    scheduleAgentViewPublish();
     if (readSpawnRole(process.env) === "worker" || readSpawnRole(process.env) === "explore") {
       const orphanPush = buildOrphanPush(recoveredRegistry);
       if (orphanPush) pi.sendMessage(buildOrphanNoticeMessage(orphanPush), { deliverAs: "nextTurn" });
@@ -1195,6 +1201,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     await persistShutdownAgentSnapshots(claimedTools, claimedSidecar, claimedThreads);
     if (shutdownEpoch === sessionStartEpoch) {
       descendantUsageReporterRef.current?.setSource(undefined);
+      agentViewUpstreamRef.current?.setSource(undefined);
       // Held inputs die with the session, exactly like the Pi followUp queue
       // they stand in for: report registries are about to be discarded and goal
       // replacement controls are intentionally volatile. The sidecar written

@@ -129,6 +129,7 @@ import { withItemSummaryIds, withSummaryId } from "./summary-id.ts";
 import { capacityEvictionCost, isRemovedAgent, persistAgentCostCheckpoint, persistEvictedAgentCost, registerAgentCostOwner } from "./agent-cost.ts";
 import { createOutputRateTracker, type OutputRateTracker } from "./output-rate.ts";
 import { closeOpenBatch, createBatchBuffer, observeBatchEvent, type AgentBatchBuffer } from "./agent-batches.ts";
+import { observeAgentView, scheduleAgentViewPublish, type AgentViewModel } from "./agent-view.ts";
 
 // ---------------------------------------------------------------------------
 // Pure helpers shared by persistent RPC-backed child paths.
@@ -581,6 +582,12 @@ export interface RpcAgentRecord {
    * persisted.
    */
   toolBatches?: AgentBatchBuffer;
+  /**
+   * 261028 Phase 2: the batch model this child last relayed for its own
+   * descendants over the launch's channel (`agent-view.ts`). Dropped when the
+   * child disconnects or exits; live-only, never persisted.
+   */
+  descendantViews?: AgentViewModel;
   /** Parent's view of this child's subtree (`observeSubtreeChannel`): true while unknown, disconnected, or busy. */
   waitingOnChildren?: boolean;
   /** Last successful writer to this child. Absence is the legacy/lead default. */
@@ -1438,6 +1445,12 @@ function onDescendantUsageChanged(): void {
   evaluateDescendantUsage();
 }
 
+/** 261028 Phase 2: a direct child's relayed descendant batch model changed or dropped: repaint and forward upward. */
+function onAgentViewChanged(): void {
+  triggerAgentWidgetRefresh();
+  scheduleAgentViewPublish();
+}
+
 /** Read current idleness with the independent compaction hold composed in. Delivery also requires an initialized, live accessor. */
 export function isOwningAgentIdle(): boolean {
   if (leadCompactingRef.current) return false;
@@ -2241,7 +2254,9 @@ function clearLiveState(record: RpcAgentRecord, registry?: RpcAgentRegistry): vo
   record.subtreeDescendants = [];
   // A launch that ends mid-batch must not leave a batch running forever.
   if (record.toolBatches) closeOpenBatch(record.toolBatches, Date.now());
+  record.descendantViews = undefined;
   publishSubtree(registry);
+  scheduleAgentViewPublish();
   triggerAgentWidgetRefresh();
 }
 
@@ -3227,6 +3242,7 @@ export function attachEventListener(
     if (outcome.push) {
       pushToLead(pi, registry, record, outcome.push.family, outcome.push.payload, outcome.push.deliverAs);
     }
+    if (batchChanged) scheduleAgentViewPublish();
     if (e.type === "agent_start" || batchChanged) {
       // 260905 (live-agent widget ticket): streaming just flipped true — a
       // fresh "running" row transition. 261028: a tool batch started, ended,
@@ -3713,6 +3729,7 @@ export async function spawnAgent(
     registry.set(agentId, record);
     observeChildSubtree(registry, record, channel);
     attachDescendantUsage(record, channel, onDescendantUsageChanged);
+    observeAgentView(record, channel, onAgentViewChanged);
     startOwnedSessionObserver(record);
     return { agentId, eviction, sessionPath, forkSourcePath, record };
   };
@@ -3991,6 +4008,7 @@ export async function sendToAgent(
       record.channel = channel;
       observeChildSubtree(registry, record, channel);
       attachDescendantUsage(record, channel, onDescendantUsageChanged);
+      observeAgentView(record, channel, onAgentViewChanged);
       Object.assign(options.env!, channel.bootstrapEnv());
       bootstrapFailure = captureChildBootstrapFailure(client);
       await client.start();

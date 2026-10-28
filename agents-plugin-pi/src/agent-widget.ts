@@ -311,8 +311,9 @@ export function buildAgentRows(records: RpcAgentRegistry, threads: readonly Thre
  * 261028: one `buildAgentRows` row with the identity the expanded mode needs
  * beside it, kept off `AgentRow` so the row's established data shape stays
  * unchanged. `batchSource` marks a row that owns a tool-batch allotment in the
- * expanded mode: a locally-owned record, whose batches this process observes
- * directly.
+ * expanded mode: every agent row (a locally-owned record's batches come from
+ * its own buffer, a descendant's from the relayed `agent-view` model, Phase 2);
+ * a synthetic thread row has none.
  */
 export interface AgentRowEntry {
   row: AgentRow;
@@ -400,7 +401,9 @@ export function buildAgentRowEntries(records: RpcAgentRegistry, threads: readonl
       blocks.push(block);
     }
     const row = rowById.get(node.id);
-    if (row) block?.push({ row, agentId: node.id, batchSource: node.openable });
+    // Every agent row owns an allotment: a local record's batches come from
+    // its own buffer, a descendant's from the relayed `agent-view` model.
+    if (row) block?.push({ row, agentId: node.id, batchSource: true });
   }
 
   for (const thread of threads) {
@@ -902,11 +905,16 @@ export function hasRunningBatch(entries: readonly AgentRowEntry[], batches: Read
   return entries.some((entry) => entry.agentId !== undefined && (batches.get(entry.agentId) ?? []).some((view) => view.running !== undefined));
 }
 
-/** Every local record's batch views, keyed by agent id. */
+/** Every local record's batch views plus each record's relayed descendant views, keyed by agent id; a local buffer wins. */
 export function collectBatchViews(records: RpcAgentRegistry): Map<string, BatchView[]> {
   const out = new Map<string, BatchView[]>();
   for (const record of records.values()) {
     if (record.toolBatches) out.set(record.agentId, batchViews(record.toolBatches));
+  }
+  for (const record of records.values()) {
+    for (const [id, views] of record.descendantViews ?? []) {
+      if (!out.has(id)) out.set(id, views);
+    }
   }
   return out;
 }

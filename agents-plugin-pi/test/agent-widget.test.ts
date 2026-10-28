@@ -1104,7 +1104,7 @@ describe("expanded mode: batch row formatting", () => {
 });
 
 describe("expanded mode: row entries", () => {
-  test("buildAgentRowEntries returns the buildAgentRows rows; batchSource is true only for local records", () => {
+  test("buildAgentRowEntries returns the buildAgentRows rows; every agent row is a batch source, a synthetic thread row is not", () => {
     const parent = liveRecord("parent", {
       subtreeDescendants: [
         { id: "child000-0000-0000-0000-000000000000", parentId: null, depth: 0, role: "explore", live: true },
@@ -1122,7 +1122,7 @@ describe("expanded mode: row entries", () => {
     assert.equal(byName.get("sibling")!.batchSource, true);
     const descendants = entries.filter((entry) => entry.agentId?.startsWith("child000") || entry.agentId?.startsWith("grand000"));
     assert.equal(descendants.length, 2);
-    assert.ok(descendants.every((entry) => entry.batchSource === false), "propagated descendants own no allotment in Phase 1");
+    assert.ok(descendants.every((entry) => entry.batchSource === true), "Phase 2: propagated descendants own an allotment fed by the relayed agent-view model");
     const synthetic = entries.find((entry) => entry.row.role === "thread")!;
     assert.equal(synthetic.batchSource, false);
     assert.equal(synthetic.agentId, undefined);
@@ -1130,21 +1130,25 @@ describe("expanded mode: row entries", () => {
 });
 
 describe("expanded mode: fixed allotment", () => {
-  test("each batch-source agent gets exactly `allotment` rows after its header, blank-padded; descendants get headers only", () => {
+  test("each batch-source agent gets exactly `allotment` rows after its header, blank-padded; a descendant renders its relayed batches", () => {
+    const childId = "child000-0000-0000-0000-000000000000";
     const busy = liveRecord("busy", {
       runStartedAt: NOW - 50_000,
-      subtreeDescendants: [{ id: "child000-0000-0000-0000-000000000000", parentId: null, depth: 0, role: "worker", live: true }],
+      subtreeDescendants: [{ id: childId, parentId: null, depth: 0, role: "worker", live: true }],
+      descendantViews: new Map([[childId, [{ seq: 4, toolNames: ["grep"], callCount: 2, startedAt: NOW - 9_000, endedAt: NOW - 8_000 }]]]),
     });
     addBatch(busy.toolBatches!, ["read"], NOW - 40_000);
     const fresh = liveRecord("fresh", { runStartedAt: NOW - 5_000 });
     const lines = expandedLines(registryOf(busy, fresh), { allotment: 3 });
-    assert.equal(lines.length, 1 + 3 + 1 + 1 + 3, "busy header + 3, its descendant header only, fresh header + 3");
+    assert.equal(lines.length, 1 + 3 + 1 + 3 + 1 + 3, "busy header + 3, its descendant header + 3, fresh header + 3");
     assert.match(lines[0], /^· busy/);
     assert.match(lines[1], /^ {2}called read/);
     assert.deepEqual(lines.slice(2, 4), ["", ""], "blank padding up to the allotment at depth 0");
-    assert.match(lines[4], /^│ · child000/, "the descendant is a header row with no batch rows");
-    assert.match(lines[5], /^· fresh/);
-    assert.deepEqual(lines.slice(6), ["", "", ""], "an agent with no batches is all padding");
+    assert.match(lines[4], /^│ · child000/);
+    assert.match(lines[5], /^│ {3}called grep · total 2 tool calls · 8s ago/, "relayed rows sit under the descendant's gutter");
+    assert.deepEqual(lines.slice(6, 8), ["│ ", "│ "], "a descendant's padding keeps its tree lane");
+    assert.match(lines[8], /^· fresh/);
+    assert.deepEqual(lines.slice(9), ["", "", ""], "an agent with no batches is all padding");
   });
 
   test("the latest batches are shown oldest-first with the running one last", () => {
