@@ -374,6 +374,22 @@ describe("AgentViewUpstream", () => {
     assert.equal(link.sent.length, 1);
   });
 
+  test("an unchanged rebuild holds off the next build for an interval", (t) => {
+    const { link, upstream, state, advance } = upstreamHarness(t);
+    let builds = 0;
+    upstream.setSource(() => { builds += 1; return state.model; });
+    upstream.schedule();
+    advance(1_000);
+    upstream.schedule();
+    assert.equal(builds, 2, "the schedule past the interval rebuilds");
+    upstream.schedule();
+    upstream.schedule();
+    assert.equal(builds, 2, "repeated schedules inside the interval wait for one timer");
+    advance(1_000);
+    assert.equal(builds, 3, "the timer rebuilds once at the interval end");
+    assert.equal(link.sent.length, 1, "an unchanged model is still not resent");
+  });
+
   test("while disconnected nothing is sent and nothing is queued; the reconnect resends the current model once", (t) => {
     const { link, upstream, advance, change } = upstreamHarness(t);
     upstream.schedule();

@@ -236,7 +236,12 @@ export class AgentViewUpstream {
       return; // advisory display never fails a lifecycle event
     }
     const key = JSON.stringify(message.agents);
-    if (key === this.lastKey) return;
+    if (key === this.lastKey) {
+      // The build was the cost: an unchanged model still holds off the next
+      // one for an interval, or every streaming delta rebuilds the subtree.
+      this.lastSentAt = this.now();
+      return;
+    }
     try {
       this.channel.send(message);
     } catch {
