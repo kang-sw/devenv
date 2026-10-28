@@ -225,7 +225,8 @@ describe("call shape", () => {
     h.summarizer.request([item("a", 1)]);
     await until(() => h.calls.length === 1, "the call");
     const call = h.calls[0];
-    assert.equal(call.context.systemPrompt, BATCH_SUMMARY_SYSTEM_PROMPT);
+    assert.equal(call.context.systemPrompt, [BATCH_SUMMARY_SYSTEM_PROMPT, "Write every summary in the language the batch content is mostly written in, else English."].join("\n"));
+    assert.equal(call.text.split("\n")[0], "Write every summary in the language the batch content is mostly written in, else English.");
     assert.deepEqual(call.context.tools?.map((tool) => tool.name), [BATCH_SUMMARY_OUTPUT_TOOL]);
     assert.equal(call.options.reasoning, "low");
     assert.ok(call.options.signal instanceof AbortSignal);
@@ -235,6 +236,23 @@ describe("call shape", () => {
     off.summarizer.request([item("a", 1)]);
     await until(() => off.calls.length === 1, "the call");
     assert.equal("reasoning" in off.calls[0].options, false);
+  });
+
+  test("system and user prompts follow the effective language on each request", async () => {
+    const h = harness(batchSummaryConfigFrom({
+      [BATCH_SUMMARY_ENABLED_KEY]: true, [DISPLAY_SUMMARY_MODEL_KEY]: "acme/mini", [WORKFLOW_LANG_KEY]: " Korean ",
+    }));
+    h.summarizer.request([item("a", 1)]);
+    await until(() => h.state.summaries === 1, "the Korean summary");
+    assert.equal(h.calls[0].context.systemPrompt, [BATCH_SUMMARY_SYSTEM_PROMPT, "Write every summary in this language: Korean."].join("\n"));
+    assert.equal(h.calls[0].text.split("\n")[0], "Write every summary in this language: Korean.");
+
+    h.state.config = { ...h.state.config, lang: "French" };
+    h.summarizer.request([item("a", 2)]);
+    await until(() => h.state.summaries === 2, "the changed-language summary");
+    assert.equal(h.calls[1].context.systemPrompt, [BATCH_SUMMARY_SYSTEM_PROMPT, "Write every summary in this language: French."].join("\n"));
+    assert.equal(h.calls[1].text.split("\n")[0], "Write every summary in this language: French.");
+    assert.ok(!h.calls[1].context.systemPrompt!.includes("Korean"));
   });
 
   test("a request that outlives timeoutMs is aborted and leaves the fallback", async () => {

@@ -204,7 +204,7 @@ export function createBatchSummarizer(deps: BatchSummarizerDeps): BatchSummarize
       let response: AssistantMessage;
       try {
         response = await deps.complete(model, {
-          systemPrompt: BATCH_SUMMARY_SYSTEM_PROMPT,
+          systemPrompt: [BATCH_SUMMARY_SYSTEM_PROMPT, languageLine(config.lang)].join("\n"),
           messages: [{ role: "user", content: [{ type: "text", text: buildBatchSummaryRequest(rows, config.lang) }], timestamp: Date.now() }],
           tools: [OUTPUT_TOOL],
         }, options);
