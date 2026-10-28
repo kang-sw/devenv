@@ -1535,6 +1535,68 @@ describe("attachEventListener: output-rate wiring", () => {
   });
 });
 
+describe("attachEventListener: tool batch wiring (261028)", () => {
+  test("client events feed record.toolBatches, refresh the widget on batch changes only, and a re-attach keeps the buffer but closes an open batch", (t) => {
+    let now = 1_000;
+    t.mock.method(Date, "now", () => now);
+    let listener: ((event: unknown) => void) | undefined;
+    const client = {
+      onEvent(callback: (event: unknown) => void) { listener = callback; return () => {}; },
+      getState: async () => ({}),
+    } as unknown as RpcClient;
+    const record = freshRpcRecord({ client, running: true, streaming: true });
+    const registry = new Map([[record.agentId, record]]);
+    let refreshes = 0;
+    agentWidgetRefreshRef.current = () => { refreshes += 1; };
+    t.after(() => { agentWidgetRefreshRef.current = undefined; });
+    attachEventListener(undefined, registry, record, client);
+    assert.deepEqual(record.toolBatches?.batches, [], "attach creates an empty buffer");
+    const buffer = record.toolBatches!;
+
+    const message = { role: "assistant", provider: "p", model: "m", stopReason: "toolUse", usage: { output: 10 }, content: [
+      { type: "toolCall", id: "c1", name: "read", arguments: { path: "a.ts" } },
+      { type: "toolCall", id: "c2", name: "grep", arguments: { pattern: "x" } },
+    ] };
+    listener?.({ type: "message_update", message, assistantMessageEvent: { type: "text_delta", delta: "hi" } });
+    assert.deepEqual(buffer.batches, [], "token deltas never touch the buffer");
+
+    now = 2_000;
+    const before = refreshes;
+    listener?.({ type: "message_end", message });
+    assert.equal(buffer.batches.length, 1);
+    assert.deepEqual(buffer.batches[0].calls.map((call) => [call.toolName, call.argsPreview]), [["read", "path: a.ts"], ["grep", "pattern: x"]]);
+    assert.ok(refreshes > before, "an opened batch refreshes the widget");
+
+    now = 3_000;
+    listener?.({ type: "tool_execution_start", toolCallId: "c1", toolName: "read", args: { path: "a.ts" } });
+    now = 4_000;
+    listener?.({ type: "tool_execution_start", toolCallId: "c2", toolName: "grep", args: { pattern: "x" } });
+    assert.deepEqual(buffer.batches[0].calls.map((call) => call.startedAt), [3_000, 4_000]);
+    now = 5_000;
+    listener?.({ type: "tool_execution_end", toolCallId: "c1", result: { content: [{ type: "text", text: "done" }] } });
+    assert.equal(buffer.batches[0].endedAt, undefined, "one call is still in flight");
+
+    const quiet = refreshes;
+    listener?.({ type: "message_update", message, assistantMessageEvent: { type: "text_delta", delta: "more" } });
+    assert.equal(refreshes, quiet, "a token delta causes no widget refresh");
+
+    // The launch ends mid-batch; a re-attach (next launch) keeps history but never leaves the batch running.
+    now = 9_000;
+    attachEventListener(undefined, registry, record, client);
+    assert.equal(record.toolBatches, buffer, "the buffer survives the re-attach");
+    assert.equal(buffer.batches.length, 1);
+    assert.equal(buffer.batches[0].endedAt, 9_000);
+
+    now = 10_000;
+    listener?.({ type: "tool_execution_start", toolCallId: "c3", toolName: "bash", args: { command: "ls" } });
+    now = 11_000;
+    listener?.({ type: "tool_execution_end", toolCallId: "c3" });
+    assert.equal(buffer.batches.length, 2);
+    assert.equal(buffer.batches[1].endedAt, 11_000);
+    assert.deepEqual(buffer.batches.map((batch) => batch.seq), [1, 2]);
+  });
+});
+
 describe("WORKER_LIFECYCLE_GUIDE: no mid-run questions", () => {
   test("limits ws-report-to-lead to progress and directs decide-or-settle instead of asking", () => {
     assert.match(WORKER_LIFECYCLE_GUIDE, /ws-report-to-lead is only for progress before settlement\./);
