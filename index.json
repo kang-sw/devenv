@@ -600,7 +600,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-28T12:20:09Z"
+        "touched_at": "2026-10-28T12:20:54Z",
+        "impl": {
+          "branch": "impl/develop/poser-could-down"
+        }
       }
     },
     "261028-feat-pi-agent-widget-expanded-mode": {
