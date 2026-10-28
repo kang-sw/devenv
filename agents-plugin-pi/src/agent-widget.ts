@@ -1161,7 +1161,9 @@ export function createAgentWidgetController(ctx: AgentWidgetUiCtx, registry: Rpc
     const summaries = options.batchSummaries;
     if (batches && summaries) {
       try {
-        summaries.request(visibleBatchSummaryItems(entries, batches, registry, rowsNow));
+        // The last layout's allotment, when it has shrunk below the
+        // configured rows, bounds what is shown and so what is summarized.
+        summaries.request(visibleBatchSummaryItems(entries, batches, registry, Math.min(rowsNow, layout?.allotment ?? rowsNow)));
       } catch {
         // Cosmetic: a summarizer failure never costs a repaint.
       }

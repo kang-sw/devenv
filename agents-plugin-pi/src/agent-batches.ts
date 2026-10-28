@@ -88,6 +88,14 @@ export function createBatchBuffer(): AgentBatchBuffer {
 }
 
 /**
+ * A tool name is model-supplied; strip control characters before it can
+ * reach a terminal row (relayed names get the same treatment in agent-view).
+ */
+export function cleanToolName(name: string): string {
+  return name.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").trim() || "tool";
+}
+
+/**
  * Flattens a call's arguments to one display line: object entries as
  * `key: value` joined by `, ` (strings raw, everything else JSON), whitespace
  * runs collapsed to one space, control characters removed, and the result
@@ -160,7 +168,7 @@ function assistantToolCalls(message: unknown): BatchCall[] | undefined {
   for (const block of m.content) {
     const b = block as { type?: unknown; id?: unknown; name?: unknown; arguments?: unknown } | undefined;
     if (!b || b.type !== "toolCall" || typeof b.name !== "string") continue;
-    calls.push({ id: typeof b.id === "string" ? b.id : "", toolName: b.name, argsPreview: flattenArgsPreview(b.arguments) });
+    calls.push({ id: typeof b.id === "string" ? b.id : "", toolName: cleanToolName(b.name), argsPreview: flattenArgsPreview(b.arguments) });
   }
   return calls;
 }
@@ -191,7 +199,7 @@ export function observeBatchEvent(
     }
     case "tool_execution_start": {
       const id = typeof evt.toolCallId === "string" ? evt.toolCallId : "";
-      const toolName = typeof evt.toolName === "string" ? evt.toolName : "tool";
+      const toolName = typeof evt.toolName === "string" ? cleanToolName(evt.toolName) : "tool";
       const batch = openBatch(buffer) ?? startBatch(buffer, now, []);
       let call = batch.calls.find((candidate) => candidate.id === id && candidate.startedAt === undefined);
       if (!call) {

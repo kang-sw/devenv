@@ -8,6 +8,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import {
+  cleanToolName,
   AGENT_BATCH_CAP,
   BATCH_ARGS_PREVIEW_CAP,
   BATCH_TOOL_NAME_CAP,
@@ -283,4 +284,14 @@ describe("flattenArgsPreview", () => {
     assert.doesNotThrow(() => flattenArgsPreview({ cyclic }));
     assert.match(flattenArgsPreview({ cyclic }), /^cyclic: /);
   });
+});
+
+test("model-supplied tool names lose control characters before they are stored", () => {
+  const buffer = createBatchBuffer();
+  observeBatchEvent(buffer, { type: "message_end", message: { role: "assistant", content: [{ type: "toolCall", id: "c1", name: "gr\u001b[31mep", arguments: {} }] } }, 1);
+  observeBatchEvent(buffer, { type: "tool_execution_start", toolCallId: "c2", toolName: "\u0007bash", args: {} }, 2);
+  const names = buffer.batches.flatMap((batch) => batch.calls.map((call) => call.toolName));
+  assert.ok(names.length >= 2);
+  for (const name of names) assert.doesNotMatch(name, /[\u0000-\u001f\u007f-\u009f]/);
+  assert.equal(cleanToolName("\u001b"), "tool");
 });
