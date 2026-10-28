@@ -574,19 +574,6 @@
     "261022-bug-windows-ci-mcp-shard-test-flakes": {
       "registered_at": "2026-10-22T14:38:23Z"
     },
-    "261026-feat-delegate-default-with-plan-brief-and-post-hoc-review": {
-      "registered_at": "2026-10-26T10:43:26Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-28T01:05:07Z",
-        "impl": {
-          "branch": "impl/develop/aloof-sway-boned"
-        }
-      }
-    },
     "261028-bug-wsnote-windows-rename-retry": {
       "registered_at": "2026-10-28T02:45:53Z"
     },
@@ -597,7 +584,14 @@
       "registered_at": "2026-10-28T02:46:01Z"
     },
     "261028-chore-pi-review-followup-backlog": {
-      "registered_at": "2026-10-28T02:45:56Z"
+      "registered_at": "2026-10-28T02:45:56Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "closed",
+        "touched_at": "2026-10-28T04:53:01Z"
+      }
     }
   }
 }
