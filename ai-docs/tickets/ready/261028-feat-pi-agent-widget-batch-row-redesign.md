@@ -214,6 +214,35 @@ summary versus tool-name prose, nested indentation at depth 2 and 3, and the
 unchanged fixed height and fold rule. Check the layout in both `tuiMode`s with
 an isolated tmux probe.
 
+### Result (eee08749b) - 2026-10-28
+
+Expanded-mode batch rows now begin with a dim `│` under their agent's
+bullet, then a mark column (`✓` finished, the spinner running, a dim `-`
+placeholder in each unfilled history slot), the prose left (display summary,
+else tool names, else the running call with its args preview) and the
+metrics right-aligned at the row's edge (`N calls · Xs ago`;
+`<done>/<n> · +<k> · <elapsed>`). Expanded headers indent two spaces per
+depth instead of the `│ ` lanes; normal mode is unchanged. Fold padding after
+the `+N more` tail stays blank.
+
+Verification: `npm test -- test/agent-widget.test.ts` 103/103 pass (new
+tests pin the mark column, right-aligned metrics at 40/60/80/120 columns,
+prose truncating before metrics, summary versus tool-name prose, nested
+indentation at depth 1-3, narrow-width clipping without split styling, and
+the unchanged fixed height and fold rule). Full suite: the same 31
+pre-existing failures as the base commit (socket and child-process tests in
+this sandbox), no new ones. Isolated tmux probes (`tmux -L ws-probe-<pid>`,
+Pi 1.0.4, `--offline --no-session --no-extensions` plus a synthetic-registry
+probe extension driving the real controller) rendered the sketch's layout at
+depth 0-2 in both regular (90 columns) and fullscreen (70 columns) `tuiMode`.
+
+Decisions: an empty display summary falls back to the tool names; the
+running row keeps truncating its args preview inside the parentheses within
+the prose budget; when the metrics alone exceed the width they truncate and
+the prose is dropped. The old formatter exports (test-only consumers) were
+replaced by `formatFinishedBatchMetrics`, `formatRunningBatchMetrics` and
+`layoutBatchRowBody`.
+
 ### Phase 2: Generating phase and failure marks
 
 Open the running batch row at the assistant message's start and drive its
