@@ -581,7 +581,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-28T01:04:40Z"
+        "touched_at": "2026-10-28T01:05:07Z",
+        "impl": {
+          "branch": "impl/develop/aloof-sway-boned"
+        }
       }
     }
   }
