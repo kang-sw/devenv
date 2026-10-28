@@ -43,7 +43,13 @@ you resolve the target, adjudicate their findings, and carry the decisions.
    built-in default in the template below — plus a test change alongside every
    behavior change.
 4. Config checklist items go to the user in one response.
-5. Verdict from the aggregate: BLOCKED, LGTM, NEEDS FIX, or OPEN.
+5. Verdict from the aggregate: BLOCKED, LGTM, NEEDS FIX, or OPEN. First
+   re-grade as Important, counting toward NEEDS FIX, each reviewer Minor
+   describing a defect a caller or user can hit today (a crash, wrong output,
+   a refused call that should succeed, data loss) with a plausible current
+   trigger, because the release gate lists `minor` follow-ups only and lets
+   them age out of later ranges; only coverage gaps and tidy-ups stay
+   acceptable as `minor` follow-ups.
 6. Range scenario only: `{{.McpNamespace}}/review.marker(bootstrap: true)`
    seeds an empty ledger, then `{{.McpNamespace}}/review.stamp(base, head,
    verdict, ref)` with the invocation's own `<base>` and `<head>` verbatim

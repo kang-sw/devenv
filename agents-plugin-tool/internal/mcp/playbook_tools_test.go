@@ -2762,6 +2762,10 @@ func TestPlaybookPrintGoldenLeadReview(t *testing.T) {
 		"Each plan file the range adds under `ai-docs/.plans/` is the contract for the changes committed with it",
 		"for the same delegate's later commits in the range read together with their `## AI Context`, where a lead-directed follow-up is recorded rather than a deviation from the plan",
 		"A commit with no plan is judged from its diff and `## AI Context`; a missing plan never blocks the review",
+		// A defect mis-graded Minor would only be listed at the release gate
+		// and then age out, so the verdict re-grades it before acceptance.
+		"re-grade as Important, counting toward NEEDS FIX, each reviewer Minor describing a defect a caller or user can hit today",
+		"only coverage gaps and tidy-ups stay acceptable as `minor` follow-ups",
 	} {
 		if !strings.Contains(normalizedReview, want) {
 			t.Errorf("body missing lead-review plan contract %q", want)
