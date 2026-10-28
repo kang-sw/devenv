@@ -2623,6 +2623,20 @@ func TestPlaybookPrintGoldenLeadDiscuss(t *testing.T) {
 			t.Errorf("body missing lead-discuss text %q:\n%s", want, body)
 		}
 	}
+	// Execution routes through the delegate gate first; ticket capture is the
+	// user's explicit ask, not the default outcome of a discussion.
+	opening := strings.Join(strings.Fields(body), " ")
+	for _, want := range []string{
+		"When the user moves to execution, invoke `ws:lead-delegate`; its routing gate hands settled, bounded work to an executor and sends the rest to a ticket",
+		"Invoke `ws:lead-ticket` when the user asks to capture the work, and `ws:lead-run` for a ready ticket",
+	} {
+		if !strings.Contains(opening, want) {
+			t.Errorf("body missing lead-discuss execution routing %q", want)
+		}
+	}
+	if strings.Contains(opening, "What the user confirms is captured through") {
+		t.Error("lead-discuss still frames ticket capture as the default outcome")
+	}
 	// Questions use the workflow manual's classes and IDs conversationally,
 	// the single-ambiguity rule is replaced by the fewest-policy-questions
 	// rule, the anti-inference intent stays, and the stop is an unanswered
@@ -2739,6 +2753,18 @@ func TestPlaybookPrintGoldenLeadReview(t *testing.T) {
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing lead-review text %q:\n%s", want, body)
+		}
+	}
+	// Plans added in the reviewed range are the delegated changes' contract;
+	// follow-ups are judged with their AI Context, and absence never blocks.
+	normalizedReview := strings.Join(strings.Fields(body), " ")
+	for _, want := range []string{
+		"Each plan file the range adds under `ai-docs/.plans/` is the contract for the changes committed with it",
+		"for the same delegate's later commits in the range read together with their `## AI Context`, where a lead-directed follow-up is recorded rather than a deviation from the plan",
+		"A commit with no plan is judged from its diff and `## AI Context`; a missing plan never blocks the review",
+	} {
+		if !strings.Contains(normalizedReview, want) {
+			t.Errorf("body missing lead-review plan contract %q", want)
 		}
 	}
 	if strings.Contains(body, "[design-review:") {

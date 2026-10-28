@@ -9,6 +9,18 @@ scope, permitted actions, and return boundary decide what you do. This is the
 floor beneath that assignment — the minimum every code change meets whatever the
 assignment asks — not a second task.
 
+## Plan
+
+This section applies only when this floor ends with a `plan-path:` line. That
+file holds the lead's written brief for your assignment; read it as part of the
+assignment. It is a write-once record: never edit it, not even to note progress
+or a deviation. Commit it unchanged in the same commit as your implementation
+(the first one, when the work spans several), staging that path alone among the
+plan files, since any other plan file there belongs to another assignment.
+Record results, deviations, and every follow-up instruction the lead sends you
+in the commit message, in its `## AI Context` section when the project's commit
+format has one, never in the plan.
+
 ## Verify
 
 Run the project's own build and test commands for the code you touched (they

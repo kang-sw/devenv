@@ -17,27 +17,28 @@ release execution to {{.SkillNamespace}}:lead-ship.
 
 For other work, apply this gate before dispatch and when scope changes.
 
-Use lead-run when any of these is true; when no ticket owns the work yet,
-capture it first through {{.SkillNamespace}}:lead-ticket:
+Default to delegate when the outcome is settled and you can name the files
+before starting. Capture a ticket through {{.SkillNamespace}}:lead-ticket when
+a decision is still open, the work adds new structure (a new type, exported
+symbol, module, or externally observed contract) whose reuse and fit need a
+design read before code, the work spans phases or outlives this session, or
+the scope cannot be named up front; the ready ticket then routes to
+{{.SkillNamespace}}:lead-run. A ready ticket that already owns the work routes
+to {{.SkillNamespace}}:lead-run directly. A local NEEDS FIX repair handed off
+by {{.SkillNamespace}}:lead-review takes this same gate.
 
-- a ready ticket owns the work;
-- the change affects public behavior, an API, protocol, schema, template,
-  canonical flow, or architecture;
-- the implementation scope is unclear or crosses module responsibilities;
-- independent review is needed, unless the task is a local NEEDS FIX repair
-  handed off by {{.SkillNamespace}}:lead-review, whose follow-up review supplies
-  that verification;
-- the task contains an unresolved product or workflow decision.
-
-Otherwise the lead may use lead-delegate for a bounded, reversible,
-self-verifying task, including repository mutations such as housekeeping,
-mechanical updates, and localized internal hotfixes.
+Independent review comes after the commit, so the need for one does not route
+work to a ticket. When the project's `AGENTS.md` `### Review Policy` declares a
+`review-track`, delegated commits on that branch are reviewed afterward through
+{{.SkillNamespace}}:lead-review, by its review sweep or the release gate.
+Without one, offer {{.SkillNamespace}}:lead-review over the delegate's commits
+once it returns.
 
 If the delegate discovers broader scope or material impact, it stops before
 that expanded change and returns its findings to the lead, which captures the
 work as a ticket through {{.SkillNamespace}}:lead-ticket rather than expanding
-the delegate assignment. The ready ticket then routes to
-{{.SkillNamespace}}:lead-run.
+the delegate assignment, carrying the delegation's brief into the ticket. The
+ready ticket then routes to {{.SkillNamespace}}:lead-run.
 
 ## Assignment
 
@@ -52,12 +53,23 @@ rather than naming a model directly.
 
 When the assignment writes code — any repository mutation — render the
 implementer floor with `{{.McpNamespace}}/playbook.render(name:
-"delegate-implementer", session_key: <your key>)` and give the returned path to
-the executor as part of its system prompt; it carries the minimum commit,
-verification, and convention discipline every code change meets, beneath the
-assignment above it. A pure evidence-gathering or investigation assignment does
-not get it. The floor names no tier; resolve the executor's model separately as
-above.
+"delegate-implementer", session_key: <your key>, context: {plan_stem: <short
+kebab-case task name>})` and give the returned path to the executor as part of
+its system prompt; it carries the minimum commit, verification, and convention
+discipline every code change meets, beneath the assignment above it. A pure
+evidence-gathering or investigation assignment does not get it. The floor names
+no tier; resolve the executor's model separately as above.
+
+When the render also returns a `plan-path:` line, that file is the delegation's
+write-once plan: write the brief into it before spawning, because the executor
+commits it with the implementation and a later
+{{.SkillNamespace}}:lead-review judges the change against it. Never edit it
+once the executor starts; a later instruction to the same agent goes in its
+message and the executor records it in the commit. Continuing the same agent
+gets no new render or plan. Delete the plan when no executor commits it: you
+did not spawn, or the executor stopped at the scope boundary or failed. An
+uncommitted plan left in the tree would ride a later commit as a false
+contract.
 
 Keep decisions made in this conversation with the lead. Give the executor
 the settled constraints and room to decide how to complete the assignment.

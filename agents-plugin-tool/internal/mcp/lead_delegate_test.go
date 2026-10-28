@@ -25,17 +25,24 @@ func TestLeadDelegateReadContract(t *testing.T) {
 				"# Delegate",
 				"Route collaborative direction-setting to " + namespace + ":lead-discuss",
 				namespace + ":lead-ticket", namespace + ":lead-review", namespace + ":lead-ship",
-				"a ready ticket owns the work",
-				"public behavior, an API, protocol, schema, template",
-				"canonical flow, or architecture",
-				"scope is unclear or crosses module responsibilities",
-				"independent review is needed",
-				"unresolved product or workflow decision",
-				"bounded, reversible,\nself-verifying task",
+				"Default to delegate when the outcome is settled and you can name the files\nbefore starting",
+				"a decision is still open, the work adds new structure (a new type, exported\nsymbol, module, or externally observed contract) whose reuse and fit need a\ndesign read before code, the work spans phases or outlives this session, or\nthe scope cannot be named up front",
+				"A ready ticket that already owns the work routes\nto " + namespace + ":lead-run directly",
+				"A local NEEDS FIX repair handed off\nby " + namespace + ":lead-review takes this same gate",
+				"Independent review comes after the commit, so the need for one does not route\nwork to a ticket",
+				"`AGENTS.md` `### Review Policy` declares a\n`review-track`",
+				"Without one, offer " + namespace + ":lead-review over the delegate's commits\nonce it returns",
 				"stops before\nthat expanded change",
 				"captures the\nwork as a ticket through " + namespace + ":lead-ticket",
-				"The ready ticket then routes to\n" + namespace + ":lead-run",
+				"carrying the delegation's brief into the ticket",
+				"ready ticket then routes to " + namespace + ":lead-run",
 				namespace + "/playbook.render(name:\n\"delegate-implementer\"",
+				"context: {plan_stem: <short\nkebab-case task name>}",
+				"When the render also returns a `plan-path:` line",
+				"write the brief into it before spawning",
+				"Never edit it\nonce the executor starts",
+				"Continuing the same agent\ngets no new render or plan",
+				"Delete the plan when no executor commits it",
 				"there is no\nfixed executor role or read-only default",
 				"Permissions stay within existing\nuser authorization",
 				"Start a fresh agent for a new assignment or an independent judgment",
@@ -52,7 +59,14 @@ func TestLeadDelegateReadContract(t *testing.T) {
 					t.Errorf("rendered contract missing %q", want)
 				}
 			}
-			for _, forbidden := range []string{"{{.", "lead-prefer-subagent", "route.resolve_implement", "## Worker Protocol"} {
+			for _, forbidden := range []string{
+				"{{.", "lead-prefer-subagent", "route.resolve_implement", "## Worker Protocol",
+				// The retired touched-surface gate sent nearly every shipped-text
+				// change to a ticket; it must not come back.
+				"public behavior, an API, protocol, schema, template",
+				"independent review is needed",
+				"bounded, reversible,\nself-verifying task",
+			} {
 				if strings.Contains(body, forbidden) {
 					t.Errorf("rendered contract contains %q", forbidden)
 				}

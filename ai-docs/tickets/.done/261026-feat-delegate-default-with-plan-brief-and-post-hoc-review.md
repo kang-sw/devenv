@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 0f604c396c79d565
 sage-review-completeness-reviewed: 0f604c396c79d565
+completed: 2026-10-28
 ---
 
 # Delegate by default for settled bounded work, with a write-once plan brief and post-hoc review
@@ -241,3 +242,37 @@ plan path and floor splice; a worker child key gets neither; missing stem uses
 `## Constraints`, the wsflow/pi mirror tests, and a real `playbook.render` of
 `delegate-implementer` in both product modes.
 
+
+### Result (94ec6499c) - 2026-10-28
+
+Landed as specified. `playbook.render(name: "delegate-implementer")` from a
+top-level lead (`scope == roleLead && parent == ""`) reserves an empty plan
+under the render's resolved worktree root via the plan path generator, named
+from context `plan_stem` (blank or absent: `delegate`), ends the floor with a
+`plan-path: <path>` line, and returns the same line last in the output (after
+any `recommended-*` lines, so the prompt path stays line 1). `plan_stem` is
+consumed for every delegate-implementer render, so worker-key renders get no
+plan and never fail validation; for other playbooks it stays undeclared. The
+plan is reserved only after the body renders and is removed again if the
+prompt cannot be written. The floor gained a conditional `## Plan` section;
+`lead-delegate` carries the cheap-default gate, post-hoc review, write-before-
+spawn, follow-ups without re-render, and uncommitted-plan deletion;
+`lead-review` reads plans added in the range as the contract; `lead-discuss`
+routes execution through `lead-delegate` first; `AGENTS.md`'s Delegate flow
+ends in `review`.
+
+Decisions: the `lead-delegate` SKILL.md description (ws and wsflow) was also
+reworded, because its "eligible low-impact changes / capture material
+implementation through lead-ticket" text would steer auto-selection against
+Decision 1. `renderPlaybook` keeps its signature as a wrapper over the new
+`renderPlaybookWithPlan`.
+
+Verification: `go test ./...` all ok (new `playbook_render_plan_test.go`
+covers lead allocation in ws and wsflow, stem fallback, `root_override`,
+worker key, failed render, and non-consumption for other playbooks; the
+malformed-config test now asserts no plan directory); Python
+`agents-plugin/tests` 78 ok and `agents-plugin-wsflow/tests` 14 ok; pi
+`npm test` 2335 pass, 1 environmental failure (offline npm cache in the
+packed-install test); stdio `playbook.render` smoke in ws and wsflow product
+modes returned the plan-path line and an empty reserved plan. Lite review:
+no Critical or Important findings.

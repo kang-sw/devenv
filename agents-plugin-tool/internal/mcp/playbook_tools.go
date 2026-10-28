@@ -602,6 +602,22 @@ const (
 	// every keyed read and, on the render path, route the reserved var through
 	// the wsflow free-text bridge for render-eligible stems.
 	mailboxWaitPlaybookName = "lead-use-mailbox"
+	// delegateImplementerPlaybookName is the only stem whose render reserves a
+	// write-once plan file, and only for a top-level lead caller: a worker's
+	// leaves are governed by its ticket, so a plan per leaf would be noise.
+	delegateImplementerPlaybookName = "delegate-implementer"
+	// planStemContextKey carries the plan stem in the render context. The
+	// render handler consumes it before variable validation, so it is never a
+	// declared template variable and a render that gets no plan never fails
+	// over it.
+	planStemContextKey = "plan_stem"
+	// defaultPlanStem names the plan when the caller passed no stem; the
+	// timestamped path is already unique, so a missing stem costs no retry.
+	defaultPlanStem = "delegate"
+	// planPathLinePrefix starts both the plan-path output line (appended after
+	// the prompt path, which callers read as the first line) and the line the
+	// rendered floor ends with.
+	planPathLinePrefix = "plan-path: "
 )
 
 // builtinPromptOverrideDefaults supplies defaults for configurable prompt points.
@@ -1034,6 +1050,18 @@ func printPlaybook(s *Server, rsrcRoot, name string, callerContext map[string]st
 // this render only — see renderPlaybookBody and resolveEffectiveTier. Pass ""
 // to leave frontmatter-tier behavior unchanged.
 func renderPlaybook(s *Server, rsrcRoot, worktreeRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn, tierOverride string) (string, string, error) {
+	path, _, recommendedTier, err := renderPlaybookWithPlan(s, rsrcRoot, worktreeRoot, name, callerContext, configOpts, mintRoot, parentKey, workflowLang, overrideLookup, tierOverride, "")
+	return path, recommendedTier, err
+}
+
+// renderPlaybookWithPlan is renderPlaybook plus an optional write-once plan
+// reservation. When planStem is non-empty it reserves an empty plan file under
+// worktreeRoot through the plan path generator and ends the rendered body with
+// a plan-path line naming it, returning that path as planPath. The plan is
+// reserved only after the body rendered, and removed again when the prompt
+// cannot be written, so a failed render never leaves an orphan plan that a
+// later commit could pick up as a false contract.
+func renderPlaybookWithPlan(s *Server, rsrcRoot, worktreeRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn, tierOverride string, planStem string) (promptPath string, planPath string, recommendedTier string, err error) {
 	templateContext := callerContext
 	var renderContext map[string]string
 	if NoAgentMode() && wsflowRenderEligibleStems[name] && len(callerContext) > 0 {
@@ -1042,23 +1070,68 @@ func renderPlaybook(s *Server, rsrcRoot, worktreeRoot, name string, callerContex
 		// keys while allowing declared variables to render normally.
 		declared, err := declaredPlaybookVariables(s, rsrcRoot, name)
 		if err != nil {
-			return "", "", err
+			return "", "", "", err
 		}
 		templateContext, renderContext = splitDeclaredRenderContext(callerContext, declared)
 	}
 	body, recommendedTier, err := renderPlaybookBody(s, rsrcRoot, name, templateContext, configOpts, mintRoot, parentKey, workflowLang, overrideLookup, tierOverride)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	body = appendRenderContext(body, renderContext)
-	generated, err := wsstate.NewManager(wsstate.Options{}).GeneratePaths(worktreeRoot, "prompt", []string{name})
+	manager := wsstate.NewManager(wsstate.Options{})
+	if planStem != "" {
+		plans, err := manager.GeneratePaths(worktreeRoot, "plan", []string{planStem})
+		if err != nil {
+			return "", "", "", fmt.Errorf("allocate plan path: %w", err)
+		}
+		planPath = plans[0].Path
+		body = strings.TrimRight(body, "\n") + "\n\n" + planPathLinePrefix + planPath + "\n"
+	}
+	discardPlan := func() {
+		if planPath != "" {
+			_ = os.Remove(planPath)
+		}
+	}
+	generated, err := manager.GeneratePaths(worktreeRoot, "prompt", []string{name})
 	if err != nil {
-		return "", "", fmt.Errorf("allocate playbook path: %w", err)
+		discardPlan()
+		return "", "", "", fmt.Errorf("allocate playbook path: %w", err)
 	}
 	if err := os.WriteFile(generated[0].Path, []byte(body), 0o644); err != nil {
-		return "", "", fmt.Errorf("write playbook %s: %w", generated[0].Path, err)
+		discardPlan()
+		return "", "", "", fmt.Errorf("write playbook %s: %w", generated[0].Path, err)
 	}
-	return generated[0].Path, recommendedTier, nil
+	return generated[0].Path, planPath, recommendedTier, nil
+}
+
+// renderPlanStem decides whether a playbook.render call reserves a plan and
+// under which stem. It consumes planStemContextKey from callerContext for the
+// delegate-implementer stem whoever the caller is, so the key never reaches
+// variable validation, and returns a stem only for a top-level lead (a lead
+// key with no parent; a worker's key carries one). An absent or blank stem
+// falls back to defaultPlanStem.
+func renderPlanStem(name string, callerContext map[string]string, topLevelLead bool) (map[string]string, string) {
+	if name != delegateImplementerPlaybookName {
+		return callerContext, ""
+	}
+	stem, ok := callerContext[planStemContextKey]
+	if ok {
+		rest := make(map[string]string, len(callerContext)-1)
+		for key, value := range callerContext {
+			if key != planStemContextKey {
+				rest[key] = value
+			}
+		}
+		callerContext = rest
+	}
+	if !topLevelLead {
+		return callerContext, ""
+	}
+	if stem = strings.TrimSpace(stem); stem == "" {
+		stem = defaultPlanStem
+	}
+	return callerContext, stem
 }
 
 func declaredPlaybookVariables(s *Server, rsrcRoot, name string) (map[string]bool, error) {

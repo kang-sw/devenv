@@ -2060,6 +2060,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
+		topLevelLead := false
 		if keyStr, ok := params.Arguments["session_key"].(string); ok && strings.TrimSpace(keyStr) != "" {
 			capturedKey := strings.TrimSpace(keyStr)
 			if entry, found := s.sessions.lookup(capturedKey); found && entry.scope == roleLead {
@@ -2070,8 +2071,12 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 					mintRoot = entry.root
 				}
 				parentKey = capturedKey
+				// Same top-level-lead test as the mailbox peer-lead stamp:
+				// a worker's key is a lead-scope child with a parent.
+				topLevelLead = entry.parent == ""
 			}
 		}
+		callerContext, planStem := renderPlanStem(name, callerContext, topLevelLead)
 
 		// Resolve workflow.lang for language-binding injection.
 		renderLangResolver := s.sessionResolver(renderSessionKey, nil)
@@ -2079,8 +2084,12 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		path, recommendedTier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, name, callerContext, wsconfig.Options{}, mintRoot, parentKey, renderWorkflowLangRV.Value, renderOverrideLookup, tierOverride)
-		return toolTextResponse(req.ID, withRecommendedRenderBinding(path, s.currentHarness(), recommendedTier, wsconfig.Options{})+"\n", err)
+		path, planPath, recommendedTier, err := renderPlaybookWithPlan(s, rsrcRoot, worktreeRoot, name, callerContext, wsconfig.Options{}, mintRoot, parentKey, renderWorkflowLangRV.Value, renderOverrideLookup, tierOverride, planStem)
+		text := withRecommendedRenderBinding(path, s.currentHarness(), recommendedTier, wsconfig.Options{})
+		if planPath != "" {
+			text += "\n" + planPathLinePrefix + planPath
+		}
+		return toolTextResponse(req.ID, text+"\n", err)
 
 	case "mailbox.send":
 		return s.handleMailboxSend(req.ID, params.Arguments)
@@ -4938,13 +4947,13 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "playbook.render",
-			"description": namespaceText("Render a playbook to a worktree-scoped tmp file and return its path plus stable recommended-tier metadata when the playbook declares a tier (or tier_override supplies one), with optional config-resolved recommended-model/recommended-reasoning-effort bindings. Lead callers receive a render-minted child session key spliced into the rendered body. Available in both full and agentless product modes."),
+			"description": namespaceText("Render a playbook to a worktree-scoped tmp file and return its path plus stable recommended-tier metadata when the playbook declares a tier (or tier_override supplies one), with optional config-resolved recommended-model/recommended-reasoning-effort bindings. Lead callers receive a render-minted child session key spliced into the rendered body. A top-level lead render of delegate-implementer also reserves an empty write-once plan file under the worktree's ai-docs/.plans/, named from context plan_stem (default \"delegate\"), ends the rendered body with its path, and returns it as a final plan-path: line. Available in both full and agentless product modes."),
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"session_key":   stringProperty("Caller's ws session key (required for root resolution; lead callers trigger child-key minting)."),
 					"name":          stringProperty("Playbook name (bare stem resolvable by the rsrc loader)."),
-					"context":       map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}, "description": "Optional caller-supplied substitution values for variables declared in the playbook's frontmatter. In wsflow no-agent mode, legacy render-eligible stems append context as a ## Render Context block instead."},
+					"context":       map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}, "description": "Optional caller-supplied substitution values for variables declared in the playbook's frontmatter. In wsflow no-agent mode, legacy render-eligible stems append context as a ## Render Context block instead. For delegate-implementer, the plan_stem key names the reserved plan and is not a template variable."},
 					"root_override": stringProperty("Optional delegate worktree path for prompt artifact allocation and child-key binding. Playbooks, manifests, and includes use the plugin resource root (WS_RSRC_ROOT or the executable-derived bundle)."),
 					"tier_override": stringProperty("Optional capability tier (small/medium/large/xlarge) that replaces the playbook's own frontmatter tier for this render only, driving both the in-body RoleModel substitution and the recommended-tier/recommended-model/recommended-reasoning-effort payload lines. Absent, render uses the frontmatter tier unchanged. An unknown tier is rejected, not coerced."),
 				},
