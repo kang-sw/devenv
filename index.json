@@ -578,7 +578,14 @@
       "registered_at": "2026-10-28T02:45:53Z"
     },
     "261028-feat-claude-mod-status-band": {
-      "registered_at": "2026-10-28T07:09:20Z"
+      "registered_at": "2026-10-28T07:09:20Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-10-28T10:38:18Z"
+      }
     },
     "261028-feat-pi-agent-widget-expanded-mode": {
       "registered_at": "2026-10-28T06:37:54Z"
