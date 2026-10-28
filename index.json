@@ -594,7 +594,14 @@
       }
     },
     "261028-feat-pi-agent-widget-batch-row-redesign": {
-      "registered_at": "2026-10-28T11:58:32Z"
+      "registered_at": "2026-10-28T11:58:32Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-10-28T12:20:09Z"
+      }
     },
     "261028-feat-pi-agent-widget-expanded-mode": {
       "registered_at": "2026-10-28T06:37:54Z",
