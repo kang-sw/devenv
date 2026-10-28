@@ -618,23 +618,42 @@ func formatMailboxBadge(unread int, senders []string) string {
 	return fmt.Sprintf("\nunread %d: from %s%s -> call mailbox.recv\n", unread, strings.Join(shown, ", "), suffix)
 }
 
-// peerLeadNotePrefix opens the line a top-level lead's sends carry. Receivers
-// tend to treat any mail sender as their own executor; the note tells them it
-// is a peer lead with the same workflow authority. It is stamped into the
-// stored Content (not an Envelope field, not recv rendering) so a receiver
-// running any older ws-mcp binary still sees it with no schema change.
-const peerLeadNotePrefix = "[ws note: from a peer lead session"
+// peerLeadNoteBody follows "[<product>" on the line a top-level lead's sends
+// carry. Receivers tend to treat any mail sender as their own executor; the
+// note tells them it is a peer lead with the same workflow authority. It is
+// stamped into the stored Content (not an Envelope field, not recv rendering)
+// so a receiver running any older ws-mcp binary still sees it with no schema
+// change.
+const peerLeadNoteBody = " note: from a peer lead session"
+
+// peerLeadNotePrefix is the note line's opening for the given product
+// namespace (ws or wsflow), so each product's users see their own name.
+func peerLeadNotePrefix(namespace string) string {
+	return "[" + namespace + peerLeadNoteBody
+}
+
+// hasPeerLeadNote reports whether content already opens with a peer-lead note
+// from either product: mail crosses product boundaries, so a body a ws lead
+// stamped and a wsflow lead forwards must not be stamped twice.
+func hasPeerLeadNote(content string) bool {
+	for _, namespace := range []string{RuntimeNamespace(), "ws", "wsflow"} {
+		if strings.HasPrefix(content, peerLeadNotePrefix(namespace)) {
+			return true
+		}
+	}
+	return false
+}
 
 // stampPeerLeadNote prepends the peer-lead note line to content, naming the
 // sender's harness when known. Content already carrying the note is returned
 // unchanged so a forwarded or re-sent body is never double-stamped.
 func stampPeerLeadNote(content, harness string) string {
-	if strings.HasPrefix(content, peerLeadNotePrefix) {
+	if hasPeerLeadNote(content) {
 		return content
 	}
 	who := "not a worker"
 	if h := strings.TrimSpace(harness); h != "" {
 		who = h + ", not a worker"
 	}
-	return peerLeadNotePrefix + " (" + who + "), with the same authority as yours]\n" + content
+	return peerLeadNotePrefix(RuntimeNamespace()) + " (" + who + "), with the same authority as yours]\n" + content
 }

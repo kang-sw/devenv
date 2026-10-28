@@ -69,7 +69,7 @@ func TestMailboxRecvConcurrentCallsNeverDoubleDeliver(t *testing.T) {
 				// The sender is a top-level lead, so each body carries the
 				// peer-lead note line; the seeded payload follows it.
 				c := e.Content
-				if strings.HasPrefix(c, peerLeadNotePrefix) {
+				if hasPeerLeadNote(c) {
 					if _, rest, ok := strings.Cut(c, "\n"); ok {
 						c = rest
 					}

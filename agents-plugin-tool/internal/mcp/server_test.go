@@ -1835,6 +1835,9 @@ func TestServeStdioNoAgentModeHidesAgentBackedTools(t *testing.T) {
 	if strings.Contains(list, "Full ws") || strings.Contains(list, "full ws") {
 		t.Fatalf("tools/list retained full-ws-only playbook wording in wsflow mode: %s", list)
 	}
+	if strings.Contains(list, "[ws note") {
+		t.Fatalf("tools/list named the ws product in the peer-lead stamp in wsflow mode: %s", list)
+	}
 	if toolIsError(t, byID["2"]) {
 		t.Fatalf("api.list should remain callable in no-agent mode: %s", byID["2"])
 	}

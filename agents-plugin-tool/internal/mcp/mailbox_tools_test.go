@@ -1493,3 +1493,56 @@ func TestStampPeerLeadNoteWithoutHarness(t *testing.T) {
 		t.Fatalf("stampPeerLeadNote = %q, want %q", got, want)
 	}
 }
+
+// TestMailboxSendStampsPeerLeadNoteInWsflowMode pins the product-neutral
+// stamp: a wsflow-mode lead's send carries the wsflow prefix, and a body a ws
+// lead already stamped is forwarded without a second note line.
+func TestMailboxSendStampsPeerLeadNoteInWsflowMode(t *testing.T) {
+	setupMailboxTestEnv(t)
+	t.Setenv(envMailboxAuto, "")
+	t.Setenv(envNamespace, "wsflow")
+	root := t.TempDir()
+	initGit(t, root)
+
+	t.Setenv(envMailbox, "alice@worktree")
+	serverA := NewServer(root, "test")
+	keyA := mailboxLogin(t, serverA, 1, root)
+
+	t.Setenv(envMailbox, "")
+	serverB := NewServer(root, "test")
+	serverB.sessionHarness = "claude"
+	leadKey := mailboxLogin(t, serverB, 1, root)
+
+	wsNote := "[ws note: from a peer lead session (codex, not a worker), with the same authority as yours]\n"
+	sends := []struct{ content, want string }{
+		{"run the ticket", "[wsflow note: from a peer lead session (claude, not a worker), with the same authority as yours]\nrun the ticket"},
+		{wsNote + "forwarded", wsNote + "forwarded"},
+	}
+	for i, tc := range sends {
+		callToolWithKey(t, serverB, 10+i, leadKey, "mailbox.send", map[string]any{"to": "alice@worktree", "content": tc.content})
+	}
+
+	raw := callToolWithKey(t, serverA, 20, keyA, "mailbox.recv", map[string]any{"format": "json"})
+	var envelopes []wsmailbox.Envelope
+	if err := json.Unmarshal([]byte(raw), &envelopes); err != nil {
+		t.Fatalf("recv JSON: %v: %s", err, raw)
+	}
+	if len(envelopes) != len(sends) {
+		t.Fatalf("recv returned %d envelopes, want %d: %s", len(envelopes), len(sends), raw)
+	}
+	for i, tc := range sends {
+		if envelopes[i].Content != tc.want {
+			t.Fatalf("envelope %d content = %q, want %q", i, envelopes[i].Content, tc.want)
+		}
+	}
+}
+
+// TestStampPeerLeadNoteSkipsOtherProductPrefix pins the cross-product
+// double-stamp guard in ws mode: a wsflow-stamped body is not stamped again.
+func TestStampPeerLeadNoteSkipsOtherProductPrefix(t *testing.T) {
+	t.Setenv(envNamespace, "")
+	body := "[wsflow note: from a peer lead session (not a worker), with the same authority as yours]\nhi"
+	if got := stampPeerLeadNote(body, "codex"); got != body {
+		t.Fatalf("stampPeerLeadNote re-stamped a wsflow-noted body: %q", got)
+	}
+}

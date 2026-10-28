@@ -78,9 +78,9 @@ Wake
 The session on the other end is a peer lead with the same workflow authority
 as yours: it can discuss, write and run tickets through its own workers in
 parallel worktrees, review, and merge, and it answers to its own user. Mail
-sent by a top-level lead starts with a `[ws note: from a peer lead session
-...]` line saying so; reading such a sender as your worker or executor makes
-you audit or direct it instead of collaborating.
+sent by a top-level lead starts with a `[{{.McpNamespace}} note: from a peer
+lead session ...]` line saying so; reading such a sender as your worker or
+executor makes you audit or direct it instead of collaborating.
 
 1. Get the peer's own address (`On: find an address`, run by the peer and
    relayed to you, typically by the user).
