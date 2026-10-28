@@ -27,6 +27,8 @@ export const ENABLED_KEY = 'claude.status_band_enabled'
 
 /** A tool call refreshes git at most this often; a turn end always does. */
 export const GIT_THROTTLE_MS = 2000
+/** A tool call re-reads the usage at most this often; a session.measure always does. */
+export const USAGE_THROTTLE_MS = 2000
 /** How often the clock the budget deltas read moves on. */
 export const TICK_MS = 10_000
 /** The context bar shrinks to this many cells before a row 2 capsule drops. */
@@ -606,15 +608,20 @@ export function drawBand(ui: Elements, d: BandData, W: number) {
   )
 }
 
-/** The usage figures the band draws, from a `$.session.usage({ breakdown: 'summary' })` read. */
+/**
+ * The usage figures the band draws, from a `$.session.usage({ breakdown: 'summary' })` read.
+ * The window is the one the session compacts at (the breakdown's
+ * `rawMaxTokens`), else the model's.
+ */
 export function usageFigures(u: SessionUsage): Pick<BandData, 'tokens' | 'window' | 'cacheHit' | 'cost' | 'r5' | 'r7'> {
   const api = u.context.breakdown?.apiUsage
+  const raw = u.context.breakdown?.rawMaxTokens
   const cached = api ? api.cache_read_input_tokens + api.cache_creation_input_tokens : 0
   const r5 = u.rateLimits.find((r) => r.kind === 'five_hour')
   const r7 = u.rateLimits.find((r) => r.kind === 'seven_day')
   return {
     tokens: u.context.tokens,
-    window: u.context.window,
+    window: raw !== undefined && raw > 0 ? raw : u.context.window,
     cacheHit: api && cached > 0 ? (api.cache_read_input_tokens / cached) * 100 : undefined,
     cost: u.cost?.usd,
     r5: r5 && { pct: r5.percentUsed, resetsAt: r5.resetsAt },
@@ -653,7 +660,7 @@ export type Band = {
   /**
    * A settled tool call. `tool` is its model-facing name and `server` the ws
    * MCP server's; `byModel` is false for the mod's own calls, which trigger
-   * no ws read.
+   * no ws or usage read.
    */
   toolCalled: (tool: string, server: string | undefined, byModel: boolean) => void
   /** A session.measure: the usage moved. */
@@ -682,6 +689,9 @@ export function createBand(): Band {
   let gitAt = -Infinity
   let gitBusy = false
   let gitAgain = false
+  let usageAt = -Infinity
+  let usageBusy = false
+  let usageAgain = false
   const inflight = new Set<Promise<unknown>>()
 
   const log = (text: string) => {
@@ -762,14 +772,34 @@ export function createBand(): Band {
     )
   }
 
-  const readUsage = (e: BandEdges) => {
+  /**
+   * One usage read at a time, so a late answer never overwrites a newer one.
+   * An unforced read inside the throttle window is dropped; any read that
+   * arrives during one in flight leaves a trailing read.
+   */
+  const readUsage = (e: BandEdges, force: boolean) => {
     if (!on) return
     track(
       'usage read',
       (async () => {
-        const figures = usageFigures(await e.usage())
         const now = await e.now()
-        if (on) patch({ ...figures, now })
+        if (!force && now - usageAt < USAGE_THROTTLE_MS) return
+        if (usageBusy) {
+          usageAgain = true
+          return
+        }
+        usageBusy = true
+        usageAt = now
+        try {
+          do {
+            usageAgain = false
+            const figures = usageFigures(await e.usage())
+            const at = await e.now()
+            if (on) patch({ ...figures, now: at })
+          } while (usageAgain && on)
+        } finally {
+          usageBusy = false
+        }
       })(),
     )
   }
@@ -823,7 +853,7 @@ export function createBand(): Band {
         if (on && !d.model) patch({ model })
       }),
     )
-    readUsage(e)
+    readUsage(e, true)
     readGit(e, true)
     readWs(e)
     readAddress(e)
@@ -876,6 +906,7 @@ export function createBand(): Band {
       key = undefined
       d = { ...EMPTY }
       gitAt = -Infinity
+      usageAt = -Infinity
       wsSeq += 1
       addrSeq += 1
       void readKnob(bound)
@@ -907,9 +938,11 @@ export function createBand(): Band {
         if (name.startsWith('mailbox_')) readAddress(e)
       }
       readGit(e, false)
+      // The mod's own calls make no model request, so the fill stays put.
+      if (byModel) readUsage(e, false)
     },
     measured() {
-      if (edges) readUsage(edges)
+      if (edges) readUsage(edges, true)
     },
     stepped(model, effort) {
       const next = { model, effort: effort === undefined ? '' : String(effort) }
