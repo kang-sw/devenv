@@ -1442,6 +1442,7 @@ func TestMailboxReloginRefusesLiveDifferentPIDHolder(t *testing.T) {
 func TestMailboxSendStampsPeerLeadNote(t *testing.T) {
 	setupMailboxTestEnv(t)
 	t.Setenv(envMailboxAuto, "")
+	t.Setenv(envNamespace, "")
 	root := t.TempDir()
 	initGit(t, root)
 
@@ -1487,10 +1488,36 @@ func TestMailboxSendStampsPeerLeadNote(t *testing.T) {
 // TestStampPeerLeadNoteWithoutHarness pins the fallback when the sender's
 // harness was never detected: the harness name and its comma are omitted.
 func TestStampPeerLeadNoteWithoutHarness(t *testing.T) {
+	t.Setenv(envNamespace, "")
 	got := stampPeerLeadNote("hi", "  ")
 	want := "[ws note: from a peer lead session (not a worker), with the same authority as yours]\nhi"
 	if got != want {
 		t.Fatalf("stampPeerLeadNote = %q, want %q", got, want)
+	}
+}
+
+// TestLeadUseMailboxNamesRuntimeProductInPeerLeadNote pins the playbook half of
+// the product-neutral stamp: the prose quoting the note line names the running
+// product, so a wsflow reader never sees the ws prefix.
+func TestLeadUseMailboxNamesRuntimeProductInPeerLeadNote(t *testing.T) {
+	for _, tc := range []struct{ namespace, want, reject string }{
+		{"", "[ws note: from a peer", "[wsflow note"},
+		{"wsflow", "[wsflow note: from a peer", "[ws note"},
+	} {
+		t.Run("namespace="+tc.namespace, func(t *testing.T) {
+			setupMailboxTestEnv(t)
+			t.Setenv(envNamespace, tc.namespace)
+			root := t.TempDir()
+			initGit(t, root)
+			s := NewServer(root, "test")
+			body := callToolWithKey(t, s, 1, "not-a-real-session-key", "playbook.read", map[string]any{"name": "lead-use-mailbox"})
+			if !strings.Contains(body, tc.want) {
+				t.Fatalf("lead-use-mailbox body lacks %q: %s", tc.want, body)
+			}
+			if strings.Contains(body, tc.reject) {
+				t.Fatalf("lead-use-mailbox body carries %q: %s", tc.reject, body)
+			}
+		})
 	}
 }
 
