@@ -286,8 +286,12 @@ function descendantRole(record: RpcAgentRecord): SubtreeDescendantRole {
   return "worker";
 }
 
-/** Builds a bounded, parent-before-child advisory tree. Count accounting is intentionally separate. */
-function subtreeDescendants(registry: RpcAgentRegistry): SubtreeDescendant[] {
+/**
+ * Builds a bounded, parent-before-child advisory tree. Count accounting is
+ * intentionally separate. Exported as the selection `agent-view.ts` reuses
+ * past `MAX_SUBTREE_DESCENDANTS`, so the batch relay keeps the same agents.
+ */
+export function selectSubtreeDescendants(registry: RpcAgentRegistry): SubtreeDescendant[] {
   const rows: SubtreeDescendant[] = [];
   const included = new Set<string>();
   for (const record of registry.values()) {
@@ -342,7 +346,7 @@ export function publishSubtree(registry: RpcAgentRegistry | undefined, dispatche
   const ownTurn = p.ownTurn();
   const state: SubtreeState = {
     outstanding, active, deliveries: p.deliveries(), delegated: p.delegated,
-    turnOwed: ownTurn.owed, turnsStarted: ownTurn.started, descendants: subtreeDescendants(registry),
+    turnOwed: ownTurn.owed, turnsStarted: ownTurn.started, descendants: selectSubtreeDescendants(registry),
   };
   if (!p.upstream) return { ...state, revision: 0 };
   const promptKey = promptPublicationKey(state);

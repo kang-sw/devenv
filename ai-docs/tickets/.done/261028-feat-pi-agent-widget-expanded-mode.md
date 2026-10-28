@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: bb2b583fd91051a7
 sage-review-completeness-reviewed: bb2b583fd91051a7
+completed: 2026-10-28
 ---
 # Pi agent widget expanded mode with live per-agent tool batches
 
@@ -246,6 +247,32 @@ show their existing header rows. Verify the layout in both `tuiMode`s with an
 isolated tmux probe, and pin row formatting, the batch buffer, the height
 budget and the awaiting-agent fold rule with unit tests.
 
+### Result (6cc32ae6d) - 2026-10-28
+
+Landed `/agents` (TUI lead/fork only) toggling an expanded live-agent widget:
+per-agent bounded tool-batch buffer (`agent-batches.ts`, cap 5, per-agent
+seq), running-batch rows (`⠋ tool (args) · elapsed · d/n done · +k
+running`), no-model finished rows (`called X · total N tool calls · Ts ago`),
+fixed per-agent allotment N from new `pi.agent_widget_rows` (1..5, default
+3), uniform shrink to 1, then a fold of running agents into `+N more` that
+never hides awaiting/attention rows or their ancestors, constant height via
+padding, layout recomputed only on membership/resize/N change, 1 s repaint
+while a batch runs and 10 s otherwise. Commits 6cc32ae6d (spine), 340a18588
+(tests).
+
+Verification: unit tests for the buffer, row formatting, budget, allotment
+shrink, fold rule and padding; isolated tmux probes (`tmux -L
+ws-probe-<pid>`, Pi 1.0.4, `--offline --no-session --no-extensions` plus a
+synthetic-registry probe extension driving the real controller): regular
+`tuiMode` toggle works, 8 agents shrink to allotment 2, 16 agents fold with
+the approval row kept and a `+3 more` tail; fullscreen `tuiMode` folds the
+same way and a 100x30 resize recomputes the layout (`+8 more`).
+
+Decisions: N max is 5 (the buffer cap); `/agents` is registered only where
+the widget can arm (lead or fork) and notifies a warning outside a TUI; no
+host built-in `/agents` exists to collide with. Commit 6cc32ae6d is missing
+its `Co-Authored-By` trailer (no amend allowed); later commits carry it.
+
 ### Phase 2: Descendant batch rows over the control channel
 
 Add the `agent-view` control-channel message per `## Decisions`: each
@@ -254,6 +281,31 @@ relays, and the root widget renders descendant batch rows from it. Pin the
 message parse, the hop merge and its bound, the throttle, and the
 drop-on-disconnect with unit tests, and check a three-level tree live with an
 isolated tmux probe.
+
+### Result (56b698635) - 2026-10-28
+
+Landed the `agent-view` control-channel message (`agent-view.ts`): each
+process publishes its children's batch views plus relayed descendants
+child-to-parent, throttled at the subtree telemetry interval (1 s), skipped
+when unchanged, dropped while disconnected and republished on reconnect;
+the parent drops a child's forwarded model on disconnect or exit; the bound
+reuses the subtree snapshot selection (128 descendants, now exported as
+`selectSubtreeDescendants`). The root widget renders descendant batch rows
+under the tree gutter, with local buffers winning over relayed views.
+Commits 56b698635 (impl), cfaebb9e3 (tests).
+
+Verification: 30 unit tests covering parse, hop merge and bound, throttle,
+skip-unchanged, drop-on-disconnect, reconnect republish, a three-level relay
+and a real-socket integration test; an isolated tmux probe of a three-level
+tree on real Pi 1.0.4 rendered mid and leaf descendant batch rows with
+intact `│ │` tree marks. Full suite 2391/2394 pass, 0 fail (3 skipped).
+
+Decisions: the live three-level probe used a synthetic registry rather than
+model-backed agents (that needs real auth, quota and the worktree package
+installed); the real-socket test plus the synthetic real-host probe stand in.
+A forwarded entry whose id is a direct child without its own buffer is
+dropped by `buildAgentViewModel` (local state wins). Two Phase 1 tests were
+updated to the Phase 2 contract (descendants now own an allotment).
 
 ### Phase 3: Display summary for finished batches
 
@@ -265,3 +317,30 @@ are the input. Pin with unit tests: flag off makes zero model calls even with
 a summary model set, each batch (descendants' by sequence number) is
 summarized once, finished batches across agents coalesce into one flush, and a
 descendant's request carries tool names only.
+
+### Result (55fcf4f48) - 2026-10-28
+
+Landed `batch-summary.ts` and the new `pi.agent_widget_batch_summary_enabled`
+flag (boolean, default false). With the flag raised and
+`pi.display_summary_model` set, the owner lead's expanded widget offers each
+shown finished batch once (key `agentId:seq`), coalesced into one request
+per 1.5 s window with one request in flight, reusing the display summary
+model, effort and `workflow.lang`; direct children send args/result
+previews, relayed descendants tool names only; summaries render as
+`<summary> · N tool calls · <relative time>`. Commits 55fcf4f48 (impl),
+333b28560 (tests), f7d72c5e0 (review fixes).
+
+Verification: 30 summarizer tests plus 6 widget tests pin flag-off zero
+calls (with a model set), once-per-key with no retry, cross-agent
+coalescing, descendant tool-names-only requests, parsing/formatting and
+dispose; adapter-config pins the flag default. Full suite 2459/2462 pass, 0
+fail (3 skipped). Lite review: no Critical or Important; two Minors fixed in
+f7d72c5e0 (control characters stripped from stored tool names; summary
+requests bounded by the last layout's allotment).
+
+Decisions: summaries run only while expanded, for the owner lead only (not
+forks or children). While the flag is off a batch's key stays marked, so it
+costs one config read, and raising the flag summarizes only later batches.
+Agents folded into `+N more` may still be requested, and a relaunched
+intermediate agent restarting its relayed seq at 1 can reuse an old
+summary key; both are left as review Minors.

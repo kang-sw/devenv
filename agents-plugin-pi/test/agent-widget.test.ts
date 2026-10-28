@@ -15,6 +15,30 @@ import type { RpcAgentRecord, RpcAgentRegistry } from "../src/spawner.ts";
 import type { ThreadRecord } from "../src/ask.ts";
 import { visibleWidth } from "../src/text-width.ts";
 import { agentDisplayDetail, type AgentDisplayDetail } from "../src/agent-display.ts";
+import {
+  AGENT_WIDGET_COMMAND,
+  AGENT_WIDGET_EXPANDED_TICK_MS,
+  DEFAULT_AGENT_WIDGET_BATCH_ROWS,
+  ESTIMATED_DOCK_ROWS,
+  MAX_AGENT_WIDGET_BATCH_ROWS,
+  buildAgentRowEntries,
+  buildExpandedWidgetLines,
+  chooseBatchAllotment,
+  collectBatchViews,
+  computeExpandedBudget,
+  formatFinishedBatchFallback,
+  formatFinishedBatchSummary,
+  visibleBatchSummaryItems,
+  formatRunningBatch,
+  measureDockRows,
+  planExpandedRows,
+  registerAgentWidgetCommand,
+  resolveAgentWidgetRows,
+  type AgentRowEntry,
+  type AgentWidgetController,
+} from "../src/agent-widget.ts";
+import { batchSummaryKey, type BatchSummaryItem } from "../src/batch-summary.ts";
+import { batchView, batchViews, closeOpenBatch, createBatchBuffer, observeBatchEvent, type AgentBatchBuffer } from "../src/agent-batches.ts";
 
 const NOW = Date.parse("2026-09-05T10:05:00.000Z");
 
@@ -959,5 +983,698 @@ describe("output TPS duration field", () => {
     assert.equal(rows.find((row) => row.name === measured.agentId.slice(0, 8))?.outputTps, 42);
     assert.ok(!("outputTps" in rows.find((row) => row.name === unmeasured.agentId.slice(0, 8))!));
     assert.ok(!("outputTps" in rows.find((row) => row.role === "thread")!));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 261028 Phase 1: the expanded mode.
+// ---------------------------------------------------------------------------
+
+/** Appends a batch built through the real event path: one assistant message announcing `tools`, each call started then (unless `running`) ended. */
+function addBatch(buffer: AgentBatchBuffer, tools: string[], startedAt: number, opts: { running?: boolean; endedAt?: number; args?: unknown } = {}): void {
+  const calls = tools.map((name, i) => ({ type: "toolCall", id: `${startedAt}-${i}`, name, arguments: opts.args ?? { path: `${name}.ts` } }));
+  observeBatchEvent(buffer, { type: "message_end", message: { role: "assistant", content: calls } }, startedAt);
+  calls.forEach((call, i) => observeBatchEvent(buffer, { type: "tool_execution_start", toolCallId: call.id, toolName: call.name }, startedAt + 1 + i));
+  if (opts.running) return;
+  const endedAt = opts.endedAt ?? startedAt + 100;
+  calls.forEach((call) => observeBatchEvent(buffer, { type: "tool_execution_end", toolCallId: call.id, result: { content: [{ type: "text", text: "ok" }] } }, endedAt));
+}
+
+let liveSeq = 0;
+/** A locally-owned live (running) agent with a fresh batch buffer. */
+function liveRecord(alias: string, overrides: Partial<RpcAgentRecord> = {}): RpcAgentRecord {
+  liveSeq += 1;
+  return record({
+    agentId: `${String(liveSeq).padStart(8, "0")}-aaaa-bbbb-cccc-000000000000`,
+    alias,
+    client: {} as never,
+    running: true,
+    runStartedAt: NOW - 10_000 - (1_000 - liveSeq),
+    toolBatches: createBatchBuffer(),
+    ...overrides,
+  });
+}
+
+const fakeTheme = { fg: (color: string, text: string) => `<${color}>${text}</${color}>` };
+const SPINNER = "[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]";
+
+/** Rows for `registry` through the same path the controller uses. */
+function expandedLines(registry: RpcAgentRegistry, opts: { width?: number; allotment?: number; budget?: number; theme?: typeof fakeTheme; threads?: ThreadRecord[] } = {}): string[] {
+  const entries = buildAgentRowEntries(registry, opts.threads ?? [], NOW);
+  return buildExpandedWidgetLines(entries, 0, {
+    width: opts.width ?? 120, now: NOW, allotment: opts.allotment ?? 3, budget: opts.budget ?? 100,
+    batches: collectBatchViews(registry), theme: opts.theme,
+  }) ?? [];
+}
+
+/** A hand-built entry for the pure planner tests; `depth` puts it in a tree. */
+function planEntry(name: string, state: AgentRowState, depth = 0, batchSource = true): AgentRowEntry {
+  return { agentId: name, batchSource, row: { name, role: "worker", state, elapsedMs: 1_000, lastActivityMs: 1_000, depth } };
+}
+
+describe("expanded mode: batch row formatting", () => {
+  test("a finished batch without a summary reads `called <names> · total N tool calls · <rel> ago`, singular for one call", () => {
+    const buffer = createBatchBuffer();
+    addBatch(buffer, ["read", "edit", "read"], NOW - 70_000, { endedAt: NOW - 65_000 });
+    addBatch(buffer, ["bash"], NOW - 20_000, { endedAt: NOW - 5_000 });
+    const [three, one] = buffer.batches.map(batchView);
+    assert.equal(formatFinishedBatchFallback(three, NOW), "called read, edit · total 3 tool calls · 1m ago");
+    assert.equal(formatFinishedBatchFallback(one, NOW), "called bash · total 1 tool call · 5s ago");
+  });
+
+  test("finished rows are dimmed through the theme and the running row is not", () => {
+    const rec = liveRecord("alpha");
+    addBatch(rec.toolBatches!, ["read"], NOW - 60_000);
+    addBatch(rec.toolBatches!, ["grep"], NOW - 12_000, { running: true });
+    const lines = expandedLines(registryOf(rec), { theme: fakeTheme });
+    const finished = lines.find((line) => line.includes("called read"))!;
+    assert.ok(finished.includes("<dim>called read · total 1 tool call · "), finished);
+    const running = lines.find((line) => line.includes("grep"))!;
+    assert.ok(!running.includes("<dim>"), running);
+    assert.ok(!running.includes("called"));
+  });
+
+  test("the running row is `<spinner> <tool> (<args>) · <elapsed> · <done>/<n> done`, with `+<k> running` only when k > 0", () => {
+    const buffer = createBatchBuffer();
+    // Three parallel calls; the first (oldest) started 12s ago and is reported.
+    observeBatchEvent(buffer, { type: "message_end", message: { role: "assistant", content: ["a", "b", "c"].map((id, i) => ({ type: "toolCall", id, name: ["read", "grep", "bash"][i], arguments: { path: `${id}.ts` } })) } }, NOW - 13_000);
+    observeBatchEvent(buffer, { type: "tool_execution_start", toolCallId: "a", toolName: "read" }, NOW - 12_000);
+    observeBatchEvent(buffer, { type: "tool_execution_start", toolCallId: "b", toolName: "grep" }, NOW - 11_000);
+    observeBatchEvent(buffer, { type: "tool_execution_start", toolCallId: "c", toolName: "bash" }, NOW - 10_000);
+    assert.match(formatRunningBatch(batchView(buffer.batches[0]), NOW, 120), new RegExp(`^${SPINNER} read \\(path: a\\.ts\\) · 12s · 0/3 done · \\+2 running$`));
+    observeBatchEvent(buffer, { type: "tool_execution_end", toolCallId: "a" }, NOW - 8_000);
+    assert.match(formatRunningBatch(batchView(buffer.batches[0]), NOW, 120), new RegExp(`^${SPINNER} grep \\(path: b\\.ts\\) · 11s · 1/3 done · \\+1 running$`));
+    observeBatchEvent(buffer, { type: "tool_execution_end", toolCallId: "c" }, NOW - 7_000);
+    const last = formatRunningBatch(batchView(buffer.batches[0]), NOW, 120);
+    assert.match(last, new RegExp(`^${SPINNER} grep \\(path: b\\.ts\\) · 11s · 2/3 done$`));
+    assert.ok(!last.includes("running"));
+  });
+
+  test("the spinner advances once per second and no tool-verb prefix column leads either row kind", () => {
+    const rec = liveRecord("alpha");
+    addBatch(rec.toolBatches!, ["read"], NOW - 60_000);
+    addBatch(rec.toolBatches!, ["edit"], NOW - 5_000, { running: true });
+    const view = batchView(rec.toolBatches!.batches[1]);
+    assert.notEqual(formatRunningBatch(view, NOW, 80)[0], formatRunningBatch(view, NOW + 1_000, 80)[0]);
+    const lines = expandedLines(registryOf(rec));
+    for (const line of lines.slice(1)) {
+      assert.doesNotMatch(line, /^\s*(read|ran|edit|bash)\s*\|/);
+      assert.doesNotMatch(line, /\|/);
+    }
+    assert.match(lines[1], /^ {2}called read/, "a finished row is the 2-column indent plus its text, with no verb column");
+    assert.match(lines[2], new RegExp(`^ {2}${SPINNER} edit \\(`), "the running row leads with the spinner, then the tool name");
+  });
+
+  test("only the args preview is truncated, so every line fits at 40, 80 and 120 columns", () => {
+    const rec = liveRecord("alpha");
+    addBatch(rec.toolBatches!, ["bash", "read", "grep"], NOW - 20_000, { running: true, args: { command: "x".repeat(200) } });
+    // The first call alone finishes: 1/3 done, the two others still run.
+    observeBatchEvent(rec.toolBatches!, { type: "tool_execution_end", toolCallId: `${NOW - 20_000}-0` }, NOW - 15_000);
+    const other = liveRecord("beta");
+    addBatch(other.toolBatches!, ["write"], NOW - 90_000);
+    for (const width of [40, 80, 120]) {
+      const lines = expandedLines(registryOf(rec, other), { width });
+      assert.ok(lines.every((line) => visibleWidth(line) <= width), `width=${width}: ${lines.map((l) => visibleWidth(l)).join(",")}`);
+      const running = lines.find((line) => new RegExp(`^ {2}${SPINNER} `).test(line))!;
+      assert.ok(running, `width=${width}: a running row renders`);
+      if (width >= 80) {
+        assert.ok(running.includes("…) · "), `width=${width}: the args preview is truncated inside its parentheses`);
+        assert.match(running, /· 19s · 1\/3 done · \+1 running$/, `width=${width}: the fixed fields survive intact`);
+        assert.ok(!running.includes("x".repeat(100)));
+      }
+    }
+  });
+});
+
+describe("expanded mode: row entries", () => {
+  test("buildAgentRowEntries returns the buildAgentRows rows; every agent row is a batch source, a synthetic thread row is not", () => {
+    const parent = liveRecord("parent", {
+      subtreeDescendants: [
+        { id: "child000-0000-0000-0000-000000000000", parentId: null, depth: 0, role: "explore", live: true },
+        { id: "grand000-0000-0000-0000-000000000000", parentId: "child000-0000-0000-0000-000000000000", depth: 1, role: "worker", live: true },
+      ],
+    });
+    const sibling = liveRecord("sibling");
+    const threads = [thread({ threadId: "q9", title: "owner question", status: "pending" })];
+    const registry = registryOf(parent, sibling);
+    const entries = buildAgentRowEntries(registry, threads, NOW);
+    assert.deepEqual(entries.map((entry) => entry.row), buildAgentRows(registry, threads, NOW));
+    const byName = new Map(entries.map((entry) => [entry.row.name, entry]));
+    assert.equal(byName.get("parent")!.batchSource, true);
+    assert.equal(byName.get("parent")!.agentId, parent.agentId);
+    assert.equal(byName.get("sibling")!.batchSource, true);
+    const descendants = entries.filter((entry) => entry.agentId?.startsWith("child000") || entry.agentId?.startsWith("grand000"));
+    assert.equal(descendants.length, 2);
+    assert.ok(descendants.every((entry) => entry.batchSource === true), "Phase 2: propagated descendants own an allotment fed by the relayed agent-view model");
+    const synthetic = entries.find((entry) => entry.row.role === "thread")!;
+    assert.equal(synthetic.batchSource, false);
+    assert.equal(synthetic.agentId, undefined);
+  });
+});
+
+describe("expanded mode: fixed allotment", () => {
+  test("each batch-source agent gets exactly `allotment` rows after its header, blank-padded; a descendant renders its relayed batches", () => {
+    const childId = "child000-0000-0000-0000-000000000000";
+    const busy = liveRecord("busy", {
+      runStartedAt: NOW - 50_000,
+      subtreeDescendants: [{ id: childId, parentId: null, depth: 0, role: "worker", live: true }],
+      descendantViews: new Map([[childId, [{ seq: 4, toolNames: ["grep"], callCount: 2, startedAt: NOW - 9_000, endedAt: NOW - 8_000 }]]]),
+    });
+    addBatch(busy.toolBatches!, ["read"], NOW - 40_000);
+    const fresh = liveRecord("fresh", { runStartedAt: NOW - 5_000 });
+    const lines = expandedLines(registryOf(busy, fresh), { allotment: 3 });
+    assert.equal(lines.length, 1 + 3 + 1 + 3 + 1 + 3, "busy header + 3, its descendant header + 3, fresh header + 3");
+    assert.match(lines[0], /^· busy/);
+    assert.match(lines[1], /^ {2}called read/);
+    assert.deepEqual(lines.slice(2, 4), ["", ""], "blank padding up to the allotment at depth 0");
+    assert.match(lines[4], /^│ · child000/);
+    assert.match(lines[5], /^│ {3}called grep · total 2 tool calls · 8s ago/, "relayed rows sit under the descendant's gutter");
+    assert.deepEqual(lines.slice(6, 8), ["│ ", "│ "], "a descendant's padding keeps its tree lane");
+    assert.match(lines[8], /^· fresh/);
+    assert.deepEqual(lines.slice(9), ["", "", ""], "an agent with no batches is all padding");
+  });
+
+  test("the latest batches are shown oldest-first with the running one last", () => {
+    const rec = liveRecord("long");
+    for (let i = 1; i <= 4; i++) addBatch(rec.toolBatches!, [`t${i}`], NOW - (5 - i) * 10_000);
+    addBatch(rec.toolBatches!, ["t5"], NOW - 2_000, { running: true });
+    const lines = expandedLines(registryOf(rec), { allotment: 3 });
+    assert.equal(lines.length, 4);
+    assert.match(lines[1], /called t3/);
+    assert.match(lines[2], /called t4/);
+    assert.match(lines[3], new RegExp(`^ {2}${SPINNER} t5 \\(`));
+    assert.equal(expandedLines(registryOf(rec), { allotment: 1 }).length, 2);
+    assert.match(expandedLines(registryOf(rec), { allotment: 1 })[1], new RegExp(`${SPINNER} t5`), "at allotment 1 the running batch alone remains");
+  });
+
+  test("the height is the same however many batches the agents hold", () => {
+    const rec = liveRecord("steady");
+    const heights: number[] = [];
+    heights.push(expandedLines(registryOf(rec)).length);
+    addBatch(rec.toolBatches!, ["read"], NOW - 30_000);
+    heights.push(expandedLines(registryOf(rec)).length);
+    addBatch(rec.toolBatches!, ["edit"], NOW - 20_000, { running: true });
+    heights.push(expandedLines(registryOf(rec)).length);
+    for (let i = 0; i < 6; i++) addBatch(rec.toolBatches!, ["bash"], NOW - 10_000 + i);
+    heights.push(expandedLines(registryOf(rec)).length);
+    assert.deepEqual(heights, [4, 4, 4, 4]);
+  });
+});
+
+describe("expanded mode: sizing", () => {
+  test("chooseBatchAllotment shrinks uniformly from the requested rows down to 1", () => {
+    const three = [planEntry("a", "running"), planEntry("b", "running"), planEntry("c", "running")];
+    // headers + sources * n must fit the budget.
+    assert.equal(chooseBatchAllotment(three, 5, 18), 5);
+    assert.equal(chooseBatchAllotment(three, 5, 17), 4);
+    assert.equal(chooseBatchAllotment(three, 5, 15), 4);
+    assert.equal(chooseBatchAllotment(three, 5, 14), 3);
+    assert.equal(chooseBatchAllotment(three, 5, 12), 3);
+    assert.equal(chooseBatchAllotment(three, 5, 11), 2);
+    assert.equal(chooseBatchAllotment(three, 5, 9), 2);
+    assert.equal(chooseBatchAllotment(three, 5, 8), 1);
+    assert.equal(chooseBatchAllotment(three, 5, 0), 1, "never below one row");
+    assert.equal(chooseBatchAllotment(three, 2, 100), 2, "never above the requested rows");
+    const withDescendant = [...three, planEntry("d", "running", 1, false)];
+    assert.equal(chooseBatchAllotment(withDescendant, 5, 4 + 3 * 5), 5, "a non-source header costs one row but no allotment");
+    assert.equal(chooseBatchAllotment(withDescendant, 5, 4 + 3 * 5 - 1), 4);
+  });
+
+  test("computeExpandedBudget is terminal rows minus the reserved dock minus 5, at least 1", () => {
+    assert.equal(computeExpandedBudget(40, 10), 25);
+    assert.equal(computeExpandedBudget(40, 0), 35);
+    assert.equal(computeExpandedBudget(40.9, 10.9), 25, "fractions floor");
+    assert.equal(computeExpandedBudget(15, 10), 1);
+    assert.equal(computeExpandedBudget(10, 30), 1);
+    assert.equal(computeExpandedBudget(30, -5), 25, "a negative reservation counts as none");
+  });
+
+  test("resolveAgentWidgetRows clamps to 1..5 and defaults to 3", () => {
+    assert.equal(DEFAULT_AGENT_WIDGET_BATCH_ROWS, 3);
+    assert.equal(MAX_AGENT_WIDGET_BATCH_ROWS, 5);
+    for (const [input, expected] of [[1, 1], [2, 2], [3, 3], [5, 5], [6, 5], [99, 5], [0, 3], [-2, 3], [2.5, 3], [Number.NaN, 3], ["4", 3], [undefined, 3], [null, 3]] as const) {
+      assert.equal(resolveAgentWidgetRows(input), expected, String(input));
+    }
+  });
+});
+
+describe("expanded mode: planExpandedRows fold", () => {
+  const running = (n: number) => Array.from({ length: n }, (_, i) => planEntry(`r${i}`, "running"));
+  const names = (plan: ReturnType<typeof planExpandedRows>) => plan.items.map((item) => item.entry.row.name);
+
+  test("everything shown when it fits the budget", () => {
+    const plan = planExpandedRows(running(3), 2, 9);
+    assert.equal(plan.hidden, 0);
+    assert.equal(plan.padding, 0);
+    assert.deepEqual(plan.items.map((item) => item.batchRows), [2, 2, 2]);
+  });
+
+  test("over budget at allotment 1, running agents fold into a `+N more` tail and the output pads to the budget", () => {
+    const entries = running(6);
+    const plan = planExpandedRows(entries, 1, 7);
+    assert.deepEqual(names(plan), ["r0", "r1", "r2"]);
+    assert.equal(plan.hidden, 3);
+    assert.equal(plan.padding, 0);
+    const padded = planExpandedRows(entries, 1, 8);
+    assert.equal(padded.hidden, 3);
+    assert.equal(padded.padding, 1, "the unused row is padding, so the height stays at the budget");
+
+    for (const budget of [7, 8, 9]) {
+      const lines = buildExpandedWidgetLines(entries, 0, { width: 80, now: NOW, allotment: 1, budget, batches: new Map() })!;
+      assert.equal(lines.length, budget, `budget=${budget}`);
+      assert.ok(lines.some((line) => /^\+\d+ more$/.test(line)), `budget=${budget}: the tail is present`);
+    }
+    const folded = buildExpandedWidgetLines(entries, 0, { width: 80, now: NOW, allotment: 1, budget: 7, batches: new Map() })!;
+    assert.equal(folded.at(-1), "+3 more");
+  });
+
+  test("an awaiting agent never folds and keeps its ancestors' headers; only running agents collapse", () => {
+    const entries = [
+      planEntry("r0", "running"),
+      planEntry("r1", "running"),
+      planEntry("parent", "running"),
+      planEntry("waiting", "awaiting-approval", 1, false),
+      planEntry("r2", "running"),
+    ];
+    const plan = planExpandedRows(entries, 1, 4);
+    assert.deepEqual(names(plan), ["parent", "waiting"], "the awaiting row brings its running ancestor along");
+    assert.equal(plan.hidden, 3);
+    assert.deepEqual(plan.items.map((item) => item.batchRows), [1, 0]);
+    const lines = buildExpandedWidgetLines(entries, 0, { width: 80, now: NOW, allotment: 1, budget: 4, batches: new Map() })!;
+    assert.equal(lines.length, 4);
+    assert.match(lines[0], /parent/);
+    assert.match(lines[2], /^│ .*waiting/);
+    assert.equal(lines[3], "+3 more");
+  });
+
+  test("every ancestor up the chain is kept, and an awaiting-owner row at the top level needs none", () => {
+    const entries = [
+      planEntry("filler", "running"),
+      planEntry("root", "running"),
+      planEntry("mid", "running", 1, false),
+      planEntry("leaf", "awaiting-owner", 2, false),
+      planEntry("ask", "awaiting-owner"),
+    ];
+    const plan = planExpandedRows(entries, 1, 3);
+    assert.deepEqual(names(plan), ["root", "mid", "leaf", "ask"]);
+    assert.equal(plan.hidden, 1);
+    assert.deepEqual(plan.items.map((item) => item.batchRows), [0, 0, 0, 0], "no budget is left for batch rows");
+  });
+
+  test("when the kept headers alone exceed the budget, the output exceeds the budget instead of hiding them", () => {
+    const entries = [
+      planEntry("w0", "awaiting-owner"),
+      planEntry("w1", "awaiting-approval"),
+      planEntry("w2", "idle-awaiting-owner"),
+      planEntry("w3", "awaiting-approval"),
+      planEntry("run", "running"),
+    ];
+    const plan = planExpandedRows(entries, 1, 2);
+    assert.deepEqual(names(plan), ["w0", "w1", "w2", "w3"]);
+    assert.equal(plan.hidden, 1);
+    assert.equal(plan.padding, 0);
+    const lines = buildExpandedWidgetLines(entries, 0, { width: 80, now: NOW, allotment: 1, budget: 2, batches: new Map() })!;
+    assert.equal(lines.length, 5, "four awaiting headers plus the tail, over the budget of 2");
+    assert.equal(lines.at(-1), "+1 more");
+    for (const name of ["w0", "w1", "w2", "w3"]) assert.ok(lines.some((line) => line.includes(name)), `${name} stays visible`);
+  });
+});
+
+describe("expanded mode: measureDockRows", () => {
+  const block = (height: number, seen?: number[]) => ({ render: (width: number) => { seen?.push(width); return Array.from({ length: height }, () => "x"); } });
+
+  test("sums the render heights of tui.children after the first and skips the widget inside its container", () => {
+    const self = block(7);
+    const widths: number[] = [];
+    const tui = { children: [block(100), { children: [block(2, widths), self, block(1)], render: () => ["never-used"] }, block(3)] };
+    assert.equal(measureDockRows(tui, self, 90), 2 + 1 + 3);
+    assert.deepEqual(widths, [90], "children render at the widget's width");
+  });
+
+  test("skips the widget when it is itself a top-level child", () => {
+    const self = block(4);
+    assert.equal(measureDockRows({ children: [block(50), block(2), self, block(1)] }, self, 80), 3);
+  });
+
+  test("undefined when the widget is not found or the host shape is not as expected", () => {
+    const self = block(4);
+    assert.equal(measureDockRows({ children: [block(50), block(2)] }, self, 80), undefined, "widget not found");
+    assert.equal(measureDockRows({}, self, 80), undefined, "children absent");
+    assert.equal(measureDockRows(undefined, self, 80), undefined);
+    assert.equal(measureDockRows({ children: [block(50)] }, self, 80), undefined, "only the transcript");
+    assert.equal(measureDockRows({ children: "nope" }, self, 80), undefined);
+    const throwing = { children: [block(1), { render() { throw new Error("boom"); } }, self] };
+    assert.equal(measureDockRows(throwing, self, 80), undefined, "a throwing sibling falls back rather than crashing the paint");
+  });
+});
+
+describe("expanded mode: controller", () => {
+  type Factory = (tui: unknown, theme: unknown) => { render(width: number): string[] };
+
+  /** Mocks the clock and the interval API; returns the live interval cadences. */
+  function installClock(t: { mock: { method: (...args: any[]) => unknown } }) {
+    const live = new Map<number, number>();
+    let next = 1;
+    t.mock.method(Date, "now", () => NOW);
+    t.mock.method(global, "setInterval", ((_callback: () => void, ms: number) => { const id = next++; live.set(id, ms); return { id, unref() {} } as never; }) as typeof setInterval);
+    t.mock.method(global, "clearInterval", ((timer: { id: number }) => { live.delete(timer.id); }) as typeof clearInterval);
+    return { live: () => [...live.values()].sort((a, b) => a - b) };
+  }
+
+  function harness(registry: RpcAgentRegistry, options: Parameters<typeof createAgentWidgetController>[3] = {}) {
+    const state: { factory?: Factory; paints: number } = { paints: 0 };
+    const controller = createAgentWidgetController({ ui: {
+      setWidget(_key, content) { state.paints += 1; state.factory = typeof content === "function" ? content as Factory : undefined; },
+      setStatus() {},
+    } }, registry, new Map(), options);
+    const render = (rows = 40, width = 120, children?: unknown[]) => state.factory!({ terminal: { rows }, children }, {}).render(width);
+    return { controller, state, render };
+  }
+
+  test("toggleExpanded and isExpanded switch modes and repaint", (t) => {
+    installClock(t);
+    const rec = liveRecord("alpha");
+    addBatch(rec.toolBatches!, ["read"], NOW - 30_000);
+    const { controller, state, render } = harness(registryOf(rec));
+    controller.refresh();
+    assert.equal(controller.isExpanded(), false, "every launch starts in the normal mode");
+    assert.equal(render().length, 1, "normal mode: the header alone");
+    const before = state.paints;
+    assert.equal(controller.toggleExpanded(), true);
+    assert.equal(controller.isExpanded(), true);
+    assert.ok(state.paints > before, "toggling repaints");
+    const lines = render();
+    assert.equal(lines.length, 1 + DEFAULT_AGENT_WIDGET_BATCH_ROWS);
+    assert.match(lines[1], /called read/);
+    assert.equal(controller.toggleExpanded(), false);
+    assert.equal(render().length, 1, "back to the normal mode");
+    controller.stop();
+  });
+
+  test("a new controller starts normal regardless of an earlier one's state", (t) => {
+    installClock(t);
+    const rec = liveRecord("alpha");
+    const first = harness(registryOf(rec));
+    first.controller.toggleExpanded();
+    first.controller.stop();
+    const second = harness(registryOf(rec));
+    assert.equal(second.controller.isExpanded(), false);
+    second.controller.refresh();
+    assert.equal(second.render().length, 1);
+    second.controller.stop();
+  });
+
+  test("the expanded height holds while batches come and go, and moves on enter/leave and on terminal resize", (t) => {
+    installClock(t);
+    const a = liveRecord("alpha");
+    const b = liveRecord("beta");
+    const registry = registryOf(a);
+    const { controller, render } = harness(registry);
+    controller.toggleExpanded();
+    assert.equal(render().length, 4);
+
+    addBatch(a.toolBatches!, ["read"], NOW - 50_000);
+    controller.refresh();
+    assert.equal(render().length, 4, "a first batch");
+    addBatch(a.toolBatches!, ["edit"], NOW - 20_000, { running: true });
+    controller.refresh();
+    assert.equal(render().length, 4, "a running batch");
+    closeOpenBatch(a.toolBatches!, NOW - 1_000);
+    for (let i = 0; i < 6; i++) addBatch(a.toolBatches!, ["bash"], NOW - 10_000 + i);
+    controller.refresh();
+    assert.equal(render().length, 4, "finished and many batches");
+
+    registry.set(b.agentId, b);
+    controller.refresh();
+    assert.equal(render().length, 8, "an agent entering adds its header and allotment");
+    registry.delete(b.agentId);
+    controller.refresh();
+    assert.equal(render().length, 4, "an agent leaving removes them");
+
+    // No dock children: the estimated reservation applies, so a short terminal shrinks the allotment.
+    assert.equal(render(18).length, 1 + 2, "rows 18 -> budget 18 - 10 - 5 = 3 -> allotment 2, recomputed on resize");
+    assert.equal(render(40).length, 4, "and back when the terminal grows");
+    controller.stop();
+  });
+
+  test("the dock is measured from tui.children when the host exposes it", (t) => {
+    installClock(t);
+    const recs = ["a", "b", "c"].map((alias) => liveRecord(alias));
+    const { controller, state } = harness(registryOf(...recs), { rowsPerAgent: () => 5 });
+    controller.toggleExpanded();
+    const block = (height: number) => ({ render: () => Array.from({ length: height }, () => "x") });
+    const tui: { terminal: { rows: number }; children: unknown[] } = { terminal: { rows: 30 }, children: [] };
+    const component = state.factory!(tui, {});
+    tui.children.push(block(60), { children: [component, block(5)], render: () => [] }, block(2));
+    // Measured reservation 5 + 2 = 7: budget 30 - 7 - 5 = 18 = 3 headers + 3 * 5.
+    assert.equal(component.render(100).length, 18);
+    assert.equal(ESTIMATED_DOCK_ROWS, 10);
+    controller.stop();
+
+    // Without children the 10-row estimate gives budget 15 -> allotment 4 -> 15 rows.
+    const bare = harness(registryOf(...recs), { rowsPerAgent: () => 5 });
+    bare.controller.toggleExpanded();
+    assert.equal(bare.state.factory!({ terminal: { rows: 30 } }, {}).render(100).length, 15);
+    bare.controller.stop();
+  });
+
+  test("the repaint timer is 1s only while expanded with a running batch, else the 10s tick", (t) => {
+    const clock = installClock(t);
+    const rec = liveRecord("alpha");
+    addBatch(rec.toolBatches!, ["read"], NOW - 30_000);
+    const { controller } = harness(registryOf(rec));
+    assert.equal(AGENT_WIDGET_EXPANDED_TICK_MS, 1_000);
+    controller.refresh();
+    assert.deepEqual(clock.live(), [AGENT_WIDGET_TICK_MS], "normal mode");
+    controller.toggleExpanded();
+    assert.deepEqual(clock.live(), [AGENT_WIDGET_TICK_MS], "expanded but nothing running");
+
+    addBatch(rec.toolBatches!, ["edit"], NOW - 3_000, { running: true });
+    controller.refresh();
+    assert.deepEqual(clock.live(), [AGENT_WIDGET_EXPANDED_TICK_MS], "expanded with a running batch swaps to the fast tick");
+
+    closeOpenBatch(rec.toolBatches!, NOW);
+    controller.refresh();
+    assert.deepEqual(clock.live(), [AGENT_WIDGET_TICK_MS], "the batch finished");
+
+    addBatch(rec.toolBatches!, ["grep"], NOW - 1_000, { running: true });
+    controller.refresh();
+    assert.deepEqual(clock.live(), [AGENT_WIDGET_EXPANDED_TICK_MS]);
+    controller.toggleExpanded();
+    assert.deepEqual(clock.live(), [AGENT_WIDGET_TICK_MS], "leaving the expanded mode drops back");
+    controller.stop();
+    assert.deepEqual(clock.live(), []);
+  });
+
+  test("rowsPerAgent changes the allotment, read synchronously or as a Promise, and is clamped", async (t) => {
+    installClock(t);
+    const rec = liveRecord("alpha");
+    const sync = harness(registryOf(rec), { rowsPerAgent: () => 2 });
+    sync.controller.toggleExpanded();
+    assert.equal(sync.render().length, 3);
+    sync.controller.stop();
+
+    const clamped = harness(registryOf(rec), { rowsPerAgent: () => 9 });
+    clamped.controller.toggleExpanded();
+    assert.equal(clamped.render().length, 1 + MAX_AGENT_WIDGET_BATCH_ROWS);
+    clamped.controller.stop();
+
+    const invalid = harness(registryOf(rec), { rowsPerAgent: () => 0 });
+    invalid.controller.toggleExpanded();
+    assert.equal(invalid.render().length, 1 + DEFAULT_AGENT_WIDGET_BATCH_ROWS);
+    invalid.controller.stop();
+
+    const lazy = harness(registryOf(rec), { rowsPerAgent: async () => 5 });
+    lazy.controller.toggleExpanded();
+    assert.equal(lazy.render().length, 1 + DEFAULT_AGENT_WIDGET_BATCH_ROWS, "the default applies while the read is pending");
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(lazy.render().length, 1 + 5, "the landed value repaints");
+    lazy.controller.stop();
+  });
+});
+
+describe("registerAgentWidgetCommand", () => {
+  function fakePi() {
+    const commands = new Map<string, { description: string; handler: (args: string, ctx: { ui?: { notify?(message: string, type?: string): void } }) => unknown }>();
+    return { commands, pi: { registerCommand: (name: string, options: never) => { commands.set(name, options); } } };
+  }
+
+  test("registers `agents`; the handler toggles the live handle", () => {
+    const { commands, pi } = fakePi();
+    let toggles = 0;
+    const handle = { toggleExpanded: () => { toggles += 1; return true; }, isExpanded: () => true, refresh() {}, stop() {} } as AgentWidgetController;
+    registerAgentWidgetCommand(pi, () => handle);
+    assert.equal(AGENT_WIDGET_COMMAND, "agents");
+    assert.deepEqual([...commands.keys()], ["agents"]);
+    assert.ok(commands.get("agents")!.description.length > 0);
+    const notices: unknown[] = [];
+    commands.get("agents")!.handler("", { ui: { notify: (...args) => { notices.push(args); } } });
+    assert.equal(toggles, 1);
+    assert.deepEqual(notices, []);
+  });
+
+  test("the handle is read at each invocation; with none it notifies a warning and toggles nothing", () => {
+    const { commands, pi } = fakePi();
+    let handle: AgentWidgetController | undefined;
+    let toggles = 0;
+    registerAgentWidgetCommand(pi, () => handle);
+    const notices: Array<[string, string | undefined]> = [];
+    const ctx = { ui: { notify: (message: string, type?: string) => { notices.push([message, type]); } } };
+    commands.get("agents")!.handler("", ctx);
+    assert.equal(notices.length, 1);
+    assert.equal(notices[0][1], "warning");
+    assert.match(notices[0][0], /TUI/);
+    assert.doesNotThrow(() => commands.get("agents")!.handler("", {}), "no ui at all is tolerated");
+
+    handle = { toggleExpanded: () => { toggles += 1; return false; }, isExpanded: () => false, refresh() {}, stop() {} } as AgentWidgetController;
+    commands.get("agents")!.handler("", ctx);
+    assert.equal(toggles, 1, "a handle that appears later is used");
+    assert.equal(notices.length, 1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 261028 Phase 3: batch summaries in the expanded mode.
+// ---------------------------------------------------------------------------
+
+describe("expanded mode: batch summaries", () => {
+  test("a summary replaces the fallback text, keeps the count and relative time, stays dimmed, and fits the width", () => {
+    const rec = liveRecord("alpha");
+    addBatch(rec.toolBatches!, ["read", "grep"], NOW - 60_000, { endedAt: NOW - 30_000 });
+    addBatch(rec.toolBatches!, ["bash"], NOW - 20_000, { endedAt: NOW - 5_000 });
+    const registry = registryOf(rec);
+    const entries = buildAgentRowEntries(registry, [], NOW);
+    const views = collectBatchViews(registry);
+    const firstKey = batchSummaryKey(rec.agentId, views.get(rec.agentId)![0].seq);
+    const render = (width: number, summaryFor: (id: string, view: { seq: number }) => string | undefined, theme?: typeof fakeTheme) =>
+      buildExpandedWidgetLines(entries, 0, { width, now: NOW, allotment: 3, budget: 100, batches: views, summaryFor, theme })!;
+
+    const lines = render(120, (id, view) => batchSummaryKey(id, view.seq) === firstKey ? "Read the widget sources" : undefined, fakeTheme);
+    assert.equal(lines[1], "  " + fakeTheme.fg("dim", "Read the widget sources · 2 tool calls · 30s ago"));
+    assert.ok(!lines[1].includes("called"), "the summary takes the fallback's place");
+    assert.ok(lines[2].includes("<dim>called bash · total 1 tool call · 5s ago</dim>"), "an unsummarized batch keeps its fallback");
+    assert.equal(formatFinishedBatchSummary("S", batchView(rec.toolBatches!.batches[0]), NOW), "S · 2 tool calls · 30s ago");
+
+    for (const width of [20, 40, 80]) {
+      const narrow = render(width, () => "x".repeat(300));
+      assert.ok(narrow.every((line) => visibleWidth(line) <= width), `width=${width}`);
+    }
+    assert.deepEqual(render(120, () => undefined), render(120, () => undefined), "summaryFor returning nothing is the fallback rendering");
+    assert.match(render(120, () => undefined)[1], /called read, grep/);
+  });
+
+  test("visibleBatchSummaryItems offers the finished batches an agent shows: latest N, never a running or unended one", () => {
+    const rec = liveRecord("alpha");
+    for (let i = 0; i < 4; i++) addBatch(rec.toolBatches!, [`t${i}`], NOW - 100_000 + i * 1_000);
+    addBatch(rec.toolBatches!, ["live"], NOW - 1_000, { running: true });
+    const registry = registryOf(rec);
+    const entries = buildAgentRowEntries(registry, [thread({ threadId: "q9", status: "pending" })], NOW);
+    const views = collectBatchViews(registry);
+    const keys = (rowsPerAgent: number) => visibleBatchSummaryItems(entries, views, registry, rowsPerAgent).map((entry) => entry.key);
+    const seqs = rec.toolBatches!.batches.map((batch) => batch.seq);
+    assert.deepEqual(seqs, [1, 2, 3, 4, 5]);
+    assert.deepEqual(keys(3), [`${rec.agentId}:3`, `${rec.agentId}:4`], "the running batch occupies one of the three shown rows");
+    assert.deepEqual(keys(1), [], "only the running batch is shown");
+    assert.deepEqual(keys(5), [1, 2, 3, 4].map((seq) => `${rec.agentId}:${seq}`));
+
+    const item = visibleBatchSummaryItems(entries, views, registry, 3).at(-1)!;
+    assert.equal(item.agentName, "alpha");
+    assert.deepEqual(item.toolNames, ["t3"]);
+    assert.equal(item.callCount, 1);
+    assert.deepEqual(item.calls, [{ toolName: "t3", argsPreview: "path: t3.ts", resultPreview: "ok", isError: false }], "a local record's item carries its call previews");
+
+    const unended = new Map(views);
+    unended.set(rec.agentId, [{ seq: 77, toolNames: ["x"], callCount: 1, startedAt: 1 }]);
+    assert.deepEqual(visibleBatchSummaryItems(entries, unended, registry, 3), [], "a view with neither endedAt nor running is skipped");
+  });
+
+  test("a relayed descendant's item has no calls, and a thread row has none at all", () => {
+    const root = liveRecord("root", {
+      subtreeDescendants: [{ id: "grand000-0000-0000-0000-000000000000", parentId: null, depth: 0, role: "worker", live: true }],
+    });
+    const relayedBuffer = createBatchBuffer();
+    addBatch(relayedBuffer, ["edit"], NOW - 9_000);
+    root.descendantViews = new Map([["grand000-0000-0000-0000-000000000000", batchViews(relayedBuffer)]]);
+    const registry = registryOf(root);
+    const entries = buildAgentRowEntries(registry, [thread({ threadId: "q9", status: "pending" })], NOW);
+    const items = visibleBatchSummaryItems(entries, collectBatchViews(registry), registry, 3);
+    assert.equal(items.length, 1);
+    assert.equal(items[0].key, "grand000-0000-0000-0000-000000000000:1");
+    assert.deepEqual(items[0].toolNames, ["edit"]);
+    assert.equal("calls" in items[0], false);
+  });
+
+  describe("controller option", () => {
+    function summaryHarness() {
+      const requests: BatchSummaryItem[][] = [];
+      const summaries = new Map<string, string>();
+      let throwOnRequest = false;
+      const batchSummaries = {
+        request(items: readonly BatchSummaryItem[]) { requests.push([...items]); if (throwOnRequest) throw new Error("summarizer down"); },
+        get: (key: string) => summaries.get(key),
+      };
+      return { requests, summaries, batchSummaries, breakRequests: () => { throwOnRequest = true; } };
+    }
+
+    function install(t: { mock: { method: (...args: any[]) => unknown } }) {
+      t.mock.method(Date, "now", () => NOW);
+      t.mock.method(global, "setInterval", (() => ({ unref() {} })) as unknown as typeof setInterval);
+      t.mock.method(global, "clearInterval", (() => {}) as typeof clearInterval);
+    }
+
+    function controllerOf(registry: RpcAgentRegistry, batchSummaries: unknown) {
+      let factory: ((tui: unknown, theme: unknown) => { render(width: number): string[] }) | undefined;
+      const controller = createAgentWidgetController({ ui: {
+        setWidget(_key, content) { factory = typeof content === "function" ? content as typeof factory : undefined; },
+        setStatus() {},
+      } }, registry, new Map(), { batchSummaries: batchSummaries as never });
+      return { controller, render: () => factory!({ terminal: { rows: 40 } }, {}).render(120) };
+    }
+
+    test("requests only while expanded and never while collapsed", (t) => {
+      install(t);
+      const rec = liveRecord("alpha");
+      addBatch(rec.toolBatches!, ["read"], NOW - 30_000);
+      const h = summaryHarness();
+      const { controller } = controllerOf(registryOf(rec), h.batchSummaries);
+      controller.refresh();
+      controller.refresh();
+      assert.equal(h.requests.length, 0, "collapsed: the summarizer is never asked");
+      controller.toggleExpanded();
+      assert.ok(h.requests.length >= 1);
+      assert.deepEqual(h.requests.at(-1)!.map((entry) => entry.key), [`${rec.agentId}:1`]);
+      const seen = h.requests.length;
+      controller.toggleExpanded();
+      controller.refresh();
+      assert.equal(h.requests.length, seen, "collapsing again stops the requests");
+      controller.stop();
+    });
+
+    test("a stored summary replaces the fallback row, and a throwing summarizer never costs the repaint", (t) => {
+      install(t);
+      const rec = liveRecord("alpha");
+      addBatch(rec.toolBatches!, ["read"], NOW - 30_000, { endedAt: NOW - 20_000 });
+      const h = summaryHarness();
+      const { controller, render } = controllerOf(registryOf(rec), h.batchSummaries);
+      controller.toggleExpanded();
+      assert.match(render()[1], /called read/);
+      h.summaries.set(`${rec.agentId}:1`, "Opened the sources");
+      controller.refresh();
+      assert.match(render()[1], /^ {2}Opened the sources · 1 tool call · 20s ago$/);
+      h.breakRequests();
+      assert.doesNotThrow(() => controller.refresh());
+      assert.match(render()[1], /Opened the sources/);
+      controller.stop();
+    });
+
+    test("without a summarizer the expanded rows are the fallback", (t) => {
+      install(t);
+      const rec = liveRecord("alpha");
+      addBatch(rec.toolBatches!, ["read"], NOW - 30_000);
+      const { controller, render } = controllerOf(registryOf(rec), undefined);
+      controller.toggleExpanded();
+      assert.match(render()[1], /called read/);
+      controller.stop();
+    });
   });
 });

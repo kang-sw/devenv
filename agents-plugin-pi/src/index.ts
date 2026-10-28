@@ -199,14 +199,14 @@ import {
   type RpcAgentRecord,
   type RpcAgentRegistry,
 } from "./spawner.ts";
-import { createAgentWidgetController, shouldArmAgentWidget, type AgentWidgetController } from "./agent-widget.ts";
+import { createAgentWidgetController, registerAgentWidgetCommand, resolveAgentWidgetRows, shouldArmAgentWidget, type AgentWidgetController } from "./agent-widget.ts";
 import { registerPushMessageRenderers } from "./push-render.ts";
 import { buildOrphanNoticeMessage, buildOrphanPush, captureOrphans, noSessionSidecarPath, readAndClearSidecarAt, reviveOrphans, sidecarPath, writeSidecarAt, type PersistedOrphan } from "./agent-sidecar.ts";
 import { registerGoalLoop, resolveAgentWaitAnimation, resolveChildRetentionTtlDays, resolveSettleDelayMs, type GoalLoopConfig } from "./goal-loop.ts";
 import { registerCompactionHistory } from "./compaction-history.ts";
 import { registerLeadMemoryLog } from "./lead-memory-log.ts";
 import { ADAPTER_CONFIG_MANIFEST_FILE, createWsConfigKeyReader, createWsConfigReader, thenOrNow } from "./adapter-config.ts";
-import { createDisplaySummaryStore, DISPLAY_SUMMARY_CONFIG_KEYS, displaySummaryConfigFrom, readManifestDefaultStyle, type DisplaySummaryStore } from "./display-summary.ts";
+import { createDisplaySummaryStore, createModelResolver, createProviderCompletion, DISPLAY_SUMMARY_CONFIG_KEYS, displaySummaryConfigFrom, readManifestDefaultStyle, type DisplaySummaryStore } from "./display-summary.ts";
 import { registerDisplaySummarySession } from "./display-summary-session.ts";
 import { confirmSummarizedBuiltinTools, registerAdapterMessageRenderers, registerDisplaySummaryToolResolver, type SummaryToolResolver } from "./display-summary-render.ts";
 import { registerSkillResources } from "./skills-dir.ts";
@@ -237,6 +237,8 @@ import { createAgentStorageContext, pruneStaleAgentHomes, reportOwnershipDiagnos
 import { createAgentFooterSessionLifecycle, type AgentFooterContext, type AgentFooterSessionLifecycle } from "./agent-footer.ts";
 import { descendantUsageValue, retentionEvictionCost } from "./agent-cost.ts";
 import { createDescendantUsageReporter, descendantUsageReporterRef, evaluateDescendantUsage } from "./agent-usage-rollup.ts";
+import { AgentViewUpstream, agentViewUpstreamRef, buildAgentViewModel, scheduleAgentViewPublish } from "./agent-view.ts";
+import { BATCH_SUMMARY_CONFIG_KEYS, batchSummaryConfigFrom, createBatchSummarizer, type BatchSummarizer } from "./batch-summary.ts";
 import { loadHostPiTui } from "./pi-tui.ts";
 import { assertPolicyTool, readDelegationPolicy } from "./delegation-policy.ts";
 import { registerScopedWriteTools } from "./write-scopes.ts";
@@ -519,6 +521,9 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   // ref and no bootstrap, so reporting stops for the rest of that launch;
   // RPC children have no reload command.
   if (channel) descendantUsageReporterRef.current = createDescendantUsageReporter(channel);
+  // 261028 Phase 2: this hop's descendant tool-batch relay, the same
+  // one-per-channel lifetime as the usage reporter above.
+  if (channel) agentViewUpstreamRef.current = new AgentViewUpstream(channel);
   const delegation = readDelegationPolicy();
   // Same-name wrappers preserve Pi's native schema, diff renderer, queue, and
   // result shape while the explicit policy — not tool visibility — authorizes
@@ -614,6 +619,9 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   // `session_shutdown`. `undefined` in every non-TUI or non-lead/fork process,
   // which is also what keeps `agentWidgetRefreshRef.current` unset there.
   let agentWidgetHandle: AgentWidgetController | undefined;
+  // 261028 Phase 3: the owner lead's batch summarizer, same lifetime as the
+  // widget controller; off at runtime unless its own flag is raised.
+  let batchSummarizer: BatchSummarizer | undefined;
   // 260914 (pi native mailbox push): the session-bound background waiter that
   // drives `ws-mcp mailbox wait` and actively steers arriving mail into the
   // live conversation. Owner-lead only (`readSpawnRole` === undefined), started
@@ -660,6 +668,11 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   // This event fires for both startup and /reload, so local workflow syncs
   // replace the ignored generated tree before Pi rebuilds its skill list.
   registerSkillResources(pi, pluginDir, repoRoot);
+
+  // 261028: `/agents` toggles the live-agent widget's expanded mode. Lead and
+  // fork processes only, like the widget; the handler reads the live handle,
+  // which exists only in a TUI session.
+  if (isLeadOrFork(readSpawnRole(process.env))) registerAgentWidgetCommand(pi, () => agentWidgetHandle);
 
   // Read-only: lists Pi's currently scoped (or, if unscoped, all available)
   // models as `provider/id` candidates for the user to hand-copy into a
@@ -988,6 +1001,8 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     const usageRegistry = agentTools.rpcRegistry;
     descendantUsageReporterRef.current?.setSource(() => descendantUsageValue(usageRegistry));
     evaluateDescendantUsage();
+    agentViewUpstreamRef.current?.setSource(() => buildAgentViewModel(usageRegistry));
+    scheduleAgentViewPublish();
     if (readSpawnRole(process.env) === "worker" || readSpawnRole(process.env) === "explore") {
       const orphanPush = buildOrphanPush(recoveredRegistry);
       if (orphanPush) pi.sendMessage(buildOrphanNoticeMessage(orphanPush), { deliverAs: "nextTurn" });
@@ -1036,9 +1051,18 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
       agentCostRefreshRef.current = undefined;
       if (shouldArmAgentWidget(spawnRole, ctx.mode)) {
         agentWidgetHandle?.stop();
+        batchSummarizer?.dispose();
+        batchSummarizer = spawnRole === undefined ? createBatchSummarizer({
+          readConfig: async () => batchSummaryConfigFrom(await readConfigKeys(BATCH_SUMMARY_CONFIG_KEYS)),
+          resolveModel: createModelResolver(ctx.modelRegistry),
+          complete: createProviderCompletion(ctx.modelRegistry),
+          onSummaries: () => { agentWidgetHandle?.refresh(); },
+        }) : undefined;
         agentWidgetHandle = createAgentWidgetController(ctx, agentTools.rpcRegistry, threadHandle.threads, {
+          ...(batchSummarizer ? { batchSummaries: batchSummarizer } : {}),
           ownerLead: spawnRole === undefined,
           animationEnabled: () => thenOrNow(readAdapterConfig(["agent_wait_animation"]), resolveAgentWaitAnimation),
+          rowsPerAgent: () => thenOrNow(readAdapterConfig(["agent_widget_rows"]), (config) => resolveAgentWidgetRows(config.agent_widget_rows)),
         });
         agentWidgetRefreshRef.current = () => { agentWidgetHandle?.refresh(); };
         agentCostRefreshRef.current = () => { agentFooterLifecycle.refreshAgents(); };
@@ -1189,6 +1213,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     await persistShutdownAgentSnapshots(claimedTools, claimedSidecar, claimedThreads);
     if (shutdownEpoch === sessionStartEpoch) {
       descendantUsageReporterRef.current?.setSource(undefined);
+      agentViewUpstreamRef.current?.setSource(undefined);
       // Held inputs die with the session, exactly like the Pi followUp queue
       // they stand in for: report registries are about to be discarded and goal
       // replacement controls are intentionally volatile. The sidecar written
@@ -1206,6 +1231,8 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
       applySessionShutdownOwnershipDiagnostics();
       agentWidgetHandle?.stop();
       agentWidgetHandle = undefined;
+      batchSummarizer?.dispose();
+      batchSummarizer = undefined;
       applySessionShutdownAgentFooter(agentFooterLifecycle);
       agentWidgetRefreshRef.current = undefined;
       agentCostRefreshRef.current = undefined;
