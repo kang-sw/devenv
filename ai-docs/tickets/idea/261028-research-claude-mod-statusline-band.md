@@ -102,6 +102,10 @@ Mod authoring traps the spike hit:
 
 - Fold the statusline into the claude mod as an `AbovePrompt` band, rather
   than keeping a shell `statusLine.command`.
+- The band's layout, frame, ws rows, mailbox capsule, knob and gating were
+  settled with the user in the spike (2026-10-28) and are the contract of
+  `261028-feat-claude-mod-status-band`; the spike source is kept at
+  `ai-docs/ref/claude-mod-status-band-spike.tsx`.
 
 ### Proposals
 
