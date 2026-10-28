@@ -578,7 +578,14 @@
       "registered_at": "2026-10-28T02:45:53Z"
     },
     "261028-chore-claude-mod-review-followup-backlog": {
-      "registered_at": "2026-10-28T02:45:59Z"
+      "registered_at": "2026-10-28T02:45:59Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "closed",
+        "touched_at": "2026-10-28T04:53:04Z"
+      }
     },
     "261028-chore-core-review-followup-backlog": {
       "registered_at": "2026-10-28T02:46:01Z"
