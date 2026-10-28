@@ -19,7 +19,9 @@ For other work, apply this gate before dispatch and when scope changes.
 
 Default to delegate when the outcome is settled and you can name the files
 before starting. Capture a ticket through {{.SkillNamespace}}:lead-ticket when
-a decision is still open, the work spans phases or outlives this session, or
+a decision is still open, the work adds new structure (a new type, exported
+symbol, module, or externally observed contract) whose reuse and fit need a
+design read before code, the work spans phases or outlives this session, or
 the scope cannot be named up front; the ready ticket then routes to
 {{.SkillNamespace}}:lead-run. A ready ticket that already owns the work routes
 to {{.SkillNamespace}}:lead-run directly. A local NEEDS FIX repair handed off

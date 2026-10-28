@@ -26,7 +26,7 @@ func TestLeadDelegateReadContract(t *testing.T) {
 				"Route collaborative direction-setting to " + namespace + ":lead-discuss",
 				namespace + ":lead-ticket", namespace + ":lead-review", namespace + ":lead-ship",
 				"Default to delegate when the outcome is settled and you can name the files\nbefore starting",
-				"a decision is still open, the work spans phases or outlives this session, or\nthe scope cannot be named up front",
+				"a decision is still open, the work adds new structure (a new type, exported\nsymbol, module, or externally observed contract) whose reuse and fit need a\ndesign read before code, the work spans phases or outlives this session, or\nthe scope cannot be named up front",
 				"A ready ticket that already owns the work routes\nto " + namespace + ":lead-run directly",
 				"A local NEEDS FIX repair handed off\nby " + namespace + ":lead-review takes this same gate",
 				"Independent review comes after the commit, so the need for one does not route\nwork to a ticket",

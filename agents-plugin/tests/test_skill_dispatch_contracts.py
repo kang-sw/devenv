@@ -108,7 +108,7 @@ class SkillDispatchContractsTest(unittest.TestCase):
             # The gate states the cheap default and the escalations; a NEEDS FIX
             # repair takes the same gate (and so gets a plan) with no exception.
             self.assertIn("Default to delegate when the outcome is settled and you can name the files\nbefore starting", gate)
-            self.assertIn("a decision is still open, the work spans phases or outlives this session, or\nthe scope cannot be named up front", gate)
+            self.assertIn("a decision is still open, the work adds new structure (a new type, exported\nsymbol, module, or externally observed contract) whose reuse and fit need a\ndesign read before code, the work spans phases or outlives this session, or\nthe scope cannot be named up front", gate)
             self.assertIn("A local NEEDS FIX repair handed off\nby {{.SkillNamespace}}:lead-review takes this same gate", gate)
             self.assertIn("Independent review comes after the commit, so the need for one does not route\nwork to a ticket", gate)
             for retired in ("public behavior, an API, protocol, schema, template", "independent review is needed", "whose follow-up review supplies"):
