@@ -9,7 +9,7 @@
  * provider path (`createProviderCompletion`), but none of its conversation
  * state: each request is one stateless call.
  *
- * - Each batch is summarized at most once, keyed `<agentId>:<seq>`; a failed
+ * - Each batch is summarized at most once, keyed `<agentId>:<epoch>:<seq>`; a failed
  *   or unanswered request leaves the fallback text and is not retried.
  * - Finished batches across agents coalesce into one request per short
  *   window, one request in flight at a time.
@@ -65,7 +65,7 @@ export const BATCH_SUMMARY_SYSTEM_PROMPT = [
 
 /** One finished batch to summarize. */
 export interface BatchSummaryItem {
-  /** `<agentId>:<seq>`. */
+  /** `batchSummaryKey` of the batch. */
   key: string;
   agentName: string;
   toolNames: string[];
@@ -74,8 +74,9 @@ export interface BatchSummaryItem {
   calls?: Array<Pick<BatchCall, "toolName" | "argsPreview" | "resultPreview" | "isError">>;
 }
 
-export function batchSummaryKey(agentId: string, seq: number): string {
-  return `${agentId}:${seq}`;
+/** `<agentId>:<epoch>:<seq>`; the epoch separates a relaunched agent's batches from its earlier launch's, whose `seq` restarts at 1. */
+export function batchSummaryKey(agentId: string, seq: number, epoch?: string): string {
+  return epoch ? `${agentId}:${epoch}:${seq}` : `${agentId}:${seq}`;
 }
 
 /** The summarizer's config: the flag plus the display summary keys it reuses. */
@@ -249,7 +250,7 @@ export function createBatchSummarizer(deps: BatchSummarizerDeps): BatchSummarize
 /** Builds the summary item for one finished batch; `calls` only for a direct child's own buffer. */
 export function batchSummaryItem(agentId: string, agentName: string, view: BatchView, calls?: readonly BatchCall[]): BatchSummaryItem {
   return {
-    key: batchSummaryKey(agentId, view.seq),
+    key: batchSummaryKey(agentId, view.seq, view.epoch),
     agentName,
     toolNames: view.toolNames,
     callCount: view.callCount,

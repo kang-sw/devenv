@@ -1281,7 +1281,7 @@ export function createAgentWidgetController(ctx: AgentWidgetUiCtx, registry: Rpc
         // Cosmetic: a summarizer failure never costs a repaint.
       }
     }
-    const summaryFor = summaries ? (agentId: string, view: BatchView) => summaries.get(batchSummaryKey(agentId, view.seq)) : undefined;
+    const summaryFor = summaries ? (agentId: string, view: BatchView) => summaries.get(batchSummaryKey(agentId, view.seq, view.epoch)) : undefined;
     const pendingCount = threadList.filter((thread) => thread.status === "pending").length;
     const visible = rows.length > 0 || pendingCount > 0;
     const qualifying = rows.some((row) => isAttentionState(row.state));

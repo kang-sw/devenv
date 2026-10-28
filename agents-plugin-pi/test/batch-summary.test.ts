@@ -177,6 +177,12 @@ describe("once per batch", () => {
     assert.equal((h.calls[1].text.match(/^\[b\d+\]/gm) ?? []).length, 1, "only agent-1:9 is new");
   });
 
+  test("the epoch keeps a relaunched agent's batch 1 apart from its earlier launch's batch 1", () => {
+    assert.equal(batchSummaryKey("agent-1", 1, "e1"), "agent-1:e1:1");
+    assert.notEqual(batchSummaryKey("agent-1", 1, "e1"), batchSummaryKey("agent-1", 1, "e2"));
+    assert.equal(batchSummaryKey("agent-1", 1), "agent-1:1", "a peer without an epoch keeps the plain key");
+  });
+
   test("duplicate keys inside one request collapse to one entry", async () => {
     const h = harness();
     h.summarizer.request([item("a", 1), item("a", 1)]);

@@ -36,6 +36,18 @@ function messageEnd(...calls: Call[]) {
 const start = (id: string, toolName: string, args?: unknown) => ({ type: "tool_execution_start", toolCallId: id, toolName, args });
 const end = (id: string, extra: { result?: unknown; isError?: boolean } = {}) => ({ type: "tool_execution_end", toolCallId: id, ...extra });
 
+describe("buffer epoch", () => {
+  test("each buffer has its own epoch, and every view it projects carries it", () => {
+    const first = createBatchBuffer();
+    const second = createBatchBuffer();
+    assert.match(first.epoch, /^[a-z0-9]{8}$/);
+    assert.notEqual(first.epoch, second.epoch, "a recreated buffer restarts seq at 1 under a new epoch");
+    observeBatchEvent(first, messageEnd({ id: "c1", name: "read", arguments: {} }), 100);
+    observeBatchEvent(first, assistantStart, 110);
+    assert.deepEqual(batchViews(first).map((view) => view.epoch), [first.epoch, first.epoch], "a batch and the generating row alike");
+  });
+});
+
 describe("observeBatchEvent: batch boundaries", () => {
   test("an assistant message_end with tool calls opens a batch; one without makes none", () => {
     const buffer = createBatchBuffer();
@@ -314,7 +326,7 @@ describe("generating phase", () => {
     assert.equal(observeBatchEvent(buffer, { type: "message_start", message: { role: "toolResult", content: [] } }, 5), false);
     assert.deepEqual(batchViews(buffer), []);
     assert.equal(observeBatchEvent(buffer, assistantStart, 10), true);
-    assert.deepEqual(batchViews(buffer), [{ seq: 1, toolNames: [], callCount: 0, failed: 0, startedAt: 10, generating: { kind: "thinking", phaseStartedAt: 10 } }]);
+    assert.deepEqual(batchViews(buffer), [{ epoch: buffer.epoch, seq: 1, toolNames: [], callCount: 0, failed: 0, startedAt: 10, generating: { kind: "thinking", phaseStartedAt: 10 } }]);
     assert.deepEqual(buffer.batches, [], "the generating message is held outside the batch list");
   });
 

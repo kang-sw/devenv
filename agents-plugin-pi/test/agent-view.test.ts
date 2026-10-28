@@ -184,6 +184,17 @@ describe("parseAgentViewMessage", () => {
     assert.ok([...controls[0].generating!.toolName!].length <= 64);
   });
 
+  test("a relayed epoch survives the wire; a malformed or absent one is dropped without dropping the batch", () => {
+    const parsed = parseAgentViewMessage(wire({ t: AGENT_VIEW_MESSAGE, agents: [{ id: "x", batches: [
+      finished(1, { epoch: "ab12-_Z" }),
+      finished(2, { epoch: "bad:epoch" }),
+      finished(3, { epoch: 7 as never }),
+      finished(4),
+    ] }] }))!.get("x")!;
+    assert.deepEqual(parsed.map((view) => [view.seq, view.epoch]), [[1, "ab12-_Z"], [2, undefined], [3, undefined], [4, undefined]]);
+    assert.equal("epoch" in parsed[1], false);
+  });
+
   test("control characters in relayed strings never reach the widget", () => {
     const parsed = parseAgentViewMessage({ agents: [{ id: "x", batches: [
       finished(1, { toolNames: ["re\u001b[31mad\u0000"] }),
@@ -459,7 +470,8 @@ function fakeParent() {
 }
 
 describe("observeAgentView", () => {
-  const model = (): AgentViewModel => new Map([["g", batchViews(bufferOf("g", ["done", "running"]))]]);
+  const views = batchViews(bufferOf("g", ["done", "running"]));
+  const model = (): AgentViewModel => new Map([["g", views]]);
 
   test("stores the parsed model on the record and reports the change", () => {
     const parent = fakeParent();

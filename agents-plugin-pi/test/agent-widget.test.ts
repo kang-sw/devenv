@@ -1709,11 +1709,11 @@ describe("expanded mode: batch summaries", () => {
     const registry = registryOf(rec);
     const entries = buildAgentRowEntries(registry, [], NOW);
     const views = collectBatchViews(registry);
-    const firstKey = batchSummaryKey(rec.agentId, views.get(rec.agentId)![0].seq);
-    const render = (width: number, summaryFor: (id: string, view: { seq: number }) => string | undefined, theme?: typeof fakeTheme) =>
+    const firstKey = batchSummaryKey(rec.agentId, views.get(rec.agentId)![0].seq, rec.toolBatches!.epoch);
+    const render = (width: number, summaryFor: (id: string, view: { seq: number; epoch?: string }) => string | undefined, theme?: typeof fakeTheme) =>
       buildExpandedWidgetLines(entries, 0, { width, now: NOW, allotment: 3, budget: 100, batches: views, summaryFor, theme })!;
 
-    const lines = render(60, (id, view) => batchSummaryKey(id, view.seq) === firstKey ? "Read the widget sources" : undefined, fakeTheme);
+    const lines = render(60, (id, view) => batchSummaryKey(id, view.seq, view.epoch) === firstKey ? "Read the widget sources" : undefined, fakeTheme);
     const body = "Read the widget sources" + " ".repeat(60 - 4 - 23 - "2 calls · 30s ago".length) + "2 calls · 30s ago";
     assert.equal(lines[1], `<dim>│</dim> <dim>✓</dim> <dim>${body}</dim>`);
     assert.ok(!lines[1].includes("read, grep"), "the summary takes the tool names' place");
@@ -1738,9 +1738,9 @@ describe("expanded mode: batch summaries", () => {
     const keys = (rowsPerAgent: number) => visibleBatchSummaryItems(entries, views, registry, rowsPerAgent).map((entry) => entry.key);
     const seqs = rec.toolBatches!.batches.map((batch) => batch.seq);
     assert.deepEqual(seqs, [1, 2, 3, 4, 5]);
-    assert.deepEqual(keys(3), [`${rec.agentId}:3`, `${rec.agentId}:4`], "the running batch occupies one of the three shown rows");
+    assert.deepEqual(keys(3), [3, 4].map((seq) => batchSummaryKey(rec.agentId, seq, rec.toolBatches!.epoch)), "the running batch occupies one of the three shown rows");
     assert.deepEqual(keys(1), [], "only the running batch is shown");
-    assert.deepEqual(keys(5), [1, 2, 3, 4].map((seq) => `${rec.agentId}:${seq}`));
+    assert.deepEqual(keys(5), [1, 2, 3, 4].map((seq) => batchSummaryKey(rec.agentId, seq, rec.toolBatches!.epoch)));
 
     const item = visibleBatchSummaryItems(entries, views, registry, 3).at(-1)!;
     assert.equal(item.agentName, "alpha");
@@ -1764,7 +1764,7 @@ describe("expanded mode: batch summaries", () => {
     const entries = buildAgentRowEntries(registry, [thread({ threadId: "q9", status: "pending" })], NOW);
     const items = visibleBatchSummaryItems(entries, collectBatchViews(registry), registry, 3);
     assert.equal(items.length, 1);
-    assert.equal(items[0].key, "grand000-0000-0000-0000-000000000000:1");
+    assert.equal(items[0].key, batchSummaryKey("grand000-0000-0000-0000-000000000000", 1, relayedBuffer.epoch));
     assert.deepEqual(items[0].toolNames, ["edit"]);
     assert.equal("calls" in items[0], false);
   });
@@ -1807,7 +1807,7 @@ describe("expanded mode: batch summaries", () => {
       assert.equal(h.requests.length, 0, "collapsed: the summarizer is never asked");
       controller.toggleExpanded();
       assert.ok(h.requests.length >= 1);
-      assert.deepEqual(h.requests.at(-1)!.map((entry) => entry.key), [`${rec.agentId}:1`]);
+      assert.deepEqual(h.requests.at(-1)!.map((entry) => entry.key), [batchSummaryKey(rec.agentId, 1, rec.toolBatches!.epoch)]);
       const seen = h.requests.length;
       controller.toggleExpanded();
       controller.refresh();
@@ -1823,12 +1823,40 @@ describe("expanded mode: batch summaries", () => {
       const { controller, render } = controllerOf(registryOf(rec), h.batchSummaries);
       controller.toggleExpanded();
       assert.match(render()[1], /^│ ✓ read /);
-      h.summaries.set(`${rec.agentId}:1`, "Opened the sources");
+      h.summaries.set(batchSummaryKey(rec.agentId, 1, rec.toolBatches!.epoch), "Opened the sources");
       controller.refresh();
       assert.match(render()[1], /^│ ✓ Opened the sources +1 call · 20s ago$/);
       h.breakRequests();
       assert.doesNotThrow(() => controller.refresh());
       assert.match(render()[1], /Opened the sources/);
+      controller.stop();
+    });
+
+    test("a summary recorded for launch 1's batch 1 is not shown for a relaunched agent's batch 1", (t) => {
+      install(t);
+      const descendantId = "grand000-0000-0000-0000-000000000000";
+      const root = liveRecord("root", {
+        subtreeDescendants: [{ id: descendantId, parentId: null, depth: 0, role: "worker", live: true }],
+      });
+      const launch1 = createBatchBuffer();
+      addBatch(launch1, ["edit"], NOW - 30_000, { endedAt: NOW - 20_000 });
+      root.descendantViews = new Map([[descendantId, batchViews(launch1)]]);
+      const h = summaryHarness();
+      const { controller, render } = controllerOf(registryOf(root), h.batchSummaries);
+      controller.toggleExpanded();
+      h.summaries.set(batchSummaryKey(descendantId, 1, launch1.epoch), "Edited launch one");
+      controller.refresh();
+      assert.ok(render().some((line) => line.includes("Edited launch one")), "launch 1's batch 1 shows its summary");
+
+      // The intermediate agent is relaunched: its revived descendant's buffer restarts at seq 1.
+      const launch2 = createBatchBuffer();
+      addBatch(launch2, ["edit"], NOW - 10_000, { endedAt: NOW - 5_000 });
+      assert.equal(batchViews(launch2)[0].seq, 1);
+      root.descendantViews = new Map([[descendantId, batchViews(launch2)]]);
+      controller.refresh();
+      const lines = render();
+      assert.ok(!lines.some((line) => line.includes("Edited launch one")), "launch 2's batch 1 must not inherit launch 1's summary");
+      assert.ok(lines.some((line) => /✓ edit /.test(line)), "it falls back to the tool names");
       controller.stop();
     });
 

@@ -86,6 +86,13 @@ export interface GeneratingState extends BatchGeneratingView {
 
 /** Bounded per-agent batch history. Only the newest batch may be open (no `endedAt`). */
 export interface AgentBatchBuffer {
+  /**
+   * Identity of this buffer's lifetime. `seq` restarts at 1 whenever a buffer
+   * is recreated (a relaunched intermediate agent revives its descendants with
+   * fresh buffers), so the epoch is what keeps a batch's identity unique across
+   * launches. Carried on every `BatchView`.
+   */
+  epoch: string;
   nextSeq: number;
   batches: ToolBatch[];
   /** The assistant message in flight, outside the capped `batches` list. */
@@ -109,6 +116,8 @@ export interface BatchRunningView {
  * present.
  */
 export interface BatchView {
+  /** The producing buffer's `epoch`; absent from a peer that predates it. Pair with `seq` for a launch-unique identity. */
+  epoch?: string;
   /** The batch's sequence number; a generating view carries the number its batch would take. */
   seq: number;
   /** Distinct tool names in call order, capped at `BATCH_TOOL_NAME_CAP`. */
@@ -126,7 +135,7 @@ export interface BatchView {
 }
 
 export function createBatchBuffer(): AgentBatchBuffer {
-  return { nextSeq: 1, batches: [] };
+  return { epoch: Math.random().toString(36).slice(2, 10).padEnd(8, "0"), nextSeq: 1, batches: [] };
 }
 
 /**
@@ -323,14 +332,14 @@ export function observeBatchEvent(
 }
 
 /** Projects one batch to its width-independent view. */
-export function batchView(batch: ToolBatch): BatchView {
+export function batchView(batch: ToolBatch, epoch?: string): BatchView {
   const toolNames: string[] = [];
   for (const call of batch.calls) {
     if (toolNames.length >= BATCH_TOOL_NAME_CAP) break;
     if (!toolNames.includes(call.toolName)) toolNames.push(call.toolName);
   }
   const failed = batch.calls.filter((call) => call.isError === true || (batch.endedAt !== undefined && call.endedAt === undefined)).length;
-  const view: BatchView = { seq: batch.seq, toolNames, callCount: batch.calls.length, failed, startedAt: batch.startedAt };
+  const view: BatchView = { ...(epoch !== undefined ? { epoch } : {}), seq: batch.seq, toolNames, callCount: batch.calls.length, failed, startedAt: batch.startedAt };
   if (batch.endedAt !== undefined) {
     view.endedAt = batch.endedAt;
     return view;
@@ -357,13 +366,13 @@ function generatingView(buffer: AgentBatchBuffer, generating: GeneratingState): 
     phase.toolName = generating.toolName ?? "tool";
     phase.chars = generating.chars ?? 0;
   }
-  return { seq: buffer.nextSeq, toolNames: [], callCount: 0, failed: 0, startedAt: generating.startedAt, generating: phase };
+  return { epoch: buffer.epoch, seq: buffer.nextSeq, toolNames: [], callCount: 0, failed: 0, startedAt: generating.startedAt, generating: phase };
 }
 
 /** The buffer's views, oldest first; a generating message's view is last. */
 export function batchViews(buffer: AgentBatchBuffer | undefined): BatchView[] {
   if (!buffer) return [];
-  const views = buffer.batches.map(batchView);
+  const views = buffer.batches.map((batch) => batchView(batch, buffer.epoch));
   if (buffer.generating) views.push(generatingView(buffer, buffer.generating));
   return views;
 }

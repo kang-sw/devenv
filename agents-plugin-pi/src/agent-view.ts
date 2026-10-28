@@ -52,6 +52,9 @@ export type AgentViewModel = Map<string, BatchView[]>;
 /** Characters a relayed tool name keeps. */
 const TOOL_NAME_CAP = 64;
 
+/** A relayed epoch becomes part of a summary key, so only plain tokens are kept. */
+const EPOCH_PATTERN = /^[A-Za-z0-9_-]{1,32}$/;
+
 function isCount(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 0;
 }
@@ -100,7 +103,7 @@ function parseBatch(raw: unknown): BatchView | undefined {
     .filter((name): name is string => typeof name === "string" && name.length > 0)
     .slice(0, BATCH_TOOL_NAME_CAP)
     .map((name) => capString(name, TOOL_NAME_CAP));
-  const view: BatchView = { seq: value.seq as number, toolNames, callCount: value.callCount, failed: value.failed, startedAt: value.startedAt };
+  const view: BatchView = { ...(typeof value.epoch === "string" && EPOCH_PATTERN.test(value.epoch) ? { epoch: value.epoch } : {}), seq: value.seq as number, toolNames, callCount: value.callCount, failed: value.failed, startedAt: value.startedAt };
   const present = [value.endedAt, value.running, value.generating].filter((field) => field !== undefined).length;
   if (present !== 1) return undefined;
   if (value.endedAt !== undefined) {
