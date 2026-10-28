@@ -586,6 +586,9 @@
           "branch": "impl/develop/aloof-sway-boned"
         }
       }
+    },
+    "261028-bug-wsnote-windows-rename-retry": {
+      "registered_at": "2026-10-28T02:45:53Z"
     }
   }
 }
