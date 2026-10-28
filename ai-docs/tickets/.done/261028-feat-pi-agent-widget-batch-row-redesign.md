@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 892a99aa6f8a720f
 sage-review-design-reviewed: 892a99aa6f8a720f
+completed: 2026-10-28
 ---
 # Pi agent widget batch row redesign with generating phase and failure marks
 
