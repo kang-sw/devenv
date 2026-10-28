@@ -172,6 +172,16 @@ for the implementation.
 | risk.test | moderate | engine tests can pin the drawn tree but not what the terminal actually draws for emoji widths |
 | risk.security_or_contract | moderate | adds a public config key and consumes the mailbox_lookup_peers JSON self shape; config_get read is permission-gated per 0acdd4a5 |
 
+## Blocked (2026-10-28)
+
+Phase 1 is merged into `develop` (f9e7a6b9). Only the live-session check is
+left, and the user runs it with the installed plugin, because a subagent cannot
+drive an interactive Claude Code session. The check covers three things: the
+key shows in `config.list`, a todo update under the default permission mode
+raises no permission dialog for the band's reads, and the bar's width matches
+the terminal's emoji cells. When it passes, the lead closes the ticket. Do not
+dispatch a worker for it.
+
 ## Phases
 
 ### Phase 1: Status band behind `claude.status_band_enabled`
