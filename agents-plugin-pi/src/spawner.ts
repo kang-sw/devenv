@@ -2887,12 +2887,19 @@ function markAgentOutput(record: RpcAgentRecord): void {
   record.lastOutputAt = Date.now();
 }
 
-/** Only assistant text/thinking deltas are output; lifecycle and input events are not. */
+/**
+ * Only assistant output is output: text, thinking and tool-call argument
+ * deltas, and a text-bearing message_end; lifecycle and input events are not.
+ * 261028 batch-row redesign: `toolcall_delta` counts too, so a long tool-call
+ * argument stream (a large `write`) takes the O(1) streaming path instead of
+ * a per-token subtree publish and widget refresh, and resets the activity
+ * clock like any other sign the model is producing output.
+ */
 function isStreamedAssistantOutput(evt: { type?: string; assistantMessageEvent?: unknown; message?: unknown }): boolean {
   if (evt.type === "message_end") return assistantMessageText(evt.message) !== undefined;
   if (evt.type !== "message_update" || !evt.assistantMessageEvent || typeof evt.assistantMessageEvent !== "object") return false;
   const event = evt.assistantMessageEvent as { type?: unknown; delta?: unknown };
-  return (event.type === "text_delta" || event.type === "thinking_delta") && typeof event.delta === "string";
+  return (event.type === "text_delta" || event.type === "thinking_delta" || event.type === "toolcall_delta") && typeof event.delta === "string";
 }
 
 export function applyRpcEvent(
@@ -3227,8 +3234,10 @@ export function attachEventListener(
         record.lastTextGeneration = record.workGeneration;
       }
     }
-    // Tool batches change only at message/tool/turn boundaries, never per token.
-    const batchChanged = !streamingDelta && observeBatchEvent(toolBatches, e, Date.now());
+    // Tool batches and the generating row: O(1) per event. A streaming delta
+    // changes at most the streaming call's character count, which the widget
+    // reads at its 1 s tick and the agent-view relay at its throttle.
+    const batchChanged = observeBatchEvent(toolBatches, e, Date.now());
     const outcome = applyRpcEvent(record, e);
     // A settle publishes only after its terminal admission below: published
     // here, the run's end would read quiescent before the terminal delivery
@@ -3242,11 +3251,13 @@ export function attachEventListener(
     if (outcome.push) {
       pushToLead(pi, registry, record, outcome.push.family, outcome.push.payload, outcome.push.deliverAs);
     }
+    // Dirty mark only: the publish is throttled and returns at once while its
+    // timer is pending, so this stays O(1) on the streaming-delta path.
     if (batchChanged) scheduleAgentViewPublish();
-    if (e.type === "agent_start" || batchChanged) {
+    if (e.type === "agent_start" || (batchChanged && !streamingDelta)) {
       // 260905 (live-agent widget ticket): streaming just flipped true — a
       // fresh "running" row transition. 261028: a tool batch started, ended,
-      // or changed its in-flight calls.
+      // or changed its in-flight calls, or the generating row changed phase.
       triggerAgentWidgetRefresh();
     }
     // Held while the view reads waiting, and also while the view is not

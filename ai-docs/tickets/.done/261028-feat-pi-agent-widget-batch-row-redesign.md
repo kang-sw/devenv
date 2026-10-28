@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 892a99aa6f8a720f
 sage-review-design-reviewed: 892a99aa6f8a720f
+completed: 2026-10-28
 ---
 # Pi agent widget batch row redesign with generating phase and failure marks
 
@@ -214,6 +215,35 @@ summary versus tool-name prose, nested indentation at depth 2 and 3, and the
 unchanged fixed height and fold rule. Check the layout in both `tuiMode`s with
 an isolated tmux probe.
 
+### Result (eee08749b) - 2026-10-28
+
+Expanded-mode batch rows now begin with a dim `│` under their agent's
+bullet, then a mark column (`✓` finished, the spinner running, a dim `-`
+placeholder in each unfilled history slot), the prose left (display summary,
+else tool names, else the running call with its args preview) and the
+metrics right-aligned at the row's edge (`N calls · Xs ago`;
+`<done>/<n> · +<k> · <elapsed>`). Expanded headers indent two spaces per
+depth instead of the `│ ` lanes; normal mode is unchanged. Fold padding after
+the `+N more` tail stays blank.
+
+Verification: `npm test -- test/agent-widget.test.ts` 103/103 pass (new
+tests pin the mark column, right-aligned metrics at 40/60/80/120 columns,
+prose truncating before metrics, summary versus tool-name prose, nested
+indentation at depth 1-3, narrow-width clipping without split styling, and
+the unchanged fixed height and fold rule). Full suite: the same 31
+pre-existing failures as the base commit (socket and child-process tests in
+this sandbox), no new ones. Isolated tmux probes (`tmux -L ws-probe-<pid>`,
+Pi 1.0.4, `--offline --no-session --no-extensions` plus a synthetic-registry
+probe extension driving the real controller) rendered the sketch's layout at
+depth 0-2 in both regular (90 columns) and fullscreen (70 columns) `tuiMode`.
+
+Decisions: an empty display summary falls back to the tool names; the
+running row keeps truncating its args preview inside the parentheses within
+the prose budget; when the metrics alone exceed the width they truncate and
+the prose is dropped. The old formatter exports (test-only consumers) were
+replaced by `formatFinishedBatchMetrics`, `formatRunningBatchMetrics` and
+`layoutBatchRowBody`.
+
 ### Phase 2: Generating phase and failure marks
 
 Open the running batch row at the assistant message's start and drive its
@@ -228,3 +258,59 @@ O(1) handling per delta (feeding N `toolcall_delta` events triggers no
 `publishSubtree` or `refresh` call, while the character count still reaches
 the widget and the relay). Check a live child doing a long `write` with an
 isolated tmux probe.
+
+### Result (1b6079a5c) - 2026-10-28
+
+An assistant message now shows a running row from its `message_start`: a
+generating phase (`thinking`, `replying`, or the streaming tool's name with
+`<N> chars`, elapsed from the phase start) held on
+`AgentBatchBuffer.generating`, outside the capped batch list. It becomes the
+batch at `message_end`, taking the sequence number its view carried, or
+disappears when the message made no tool call. `BatchView` gains `failed` and
+`generating`. A finished batch with a failure shows `✗` in the error color
+and `N failed` in its metrics; a running batch keeps its spinner and carries
+`N failed` until it finishes. `agent-view` requires `failed` and accepts
+exactly one of `endedAt` / `running` / `generating`. The spawner classifies
+`toolcall_delta` as a streaming delta, which resets the activity clock.
+`observeBatchEvent` runs O(1) on that path, and a delta only marks the
+throttled agent-view publish dirty: no `publishSubtree`, no telemetry
+refresh, no widget refresh. The 1 s expanded tick repaints the count.
+
+Verification: `npm test -- test/agent-batches.test.ts test/agent-view.test.ts
+test/agent-widget.test.ts` 181/181 pass. The new tests cover:
+- phase transitions, the pre-content `thinking` choice, several streamed
+  calls, and RPC-shaped events with no `partial`;
+- tool-free removal without eviction, and the generating row dropped at turn
+  end or close;
+- the failure count, including the unfinished-call choice;
+- the `✗` and running `N failed` rows;
+- `hasRunningBatch` and the 1 s tick for a generating row alone;
+- agent-view parse of the new fields, rejection of malformed ones, and a
+  three-level hop carrying the phase, the count and failures.
+
+A new spawner test feeds 500 `toolcall_delta` events. It sees no
+`publishSubtree`, no `getState` refresh and no widget refresh, one relay
+dirty mark per delta, the count at 4 × N in the buffer, and `lastOutputAt`
+reset. Reverting the classifier makes that test fail.
+
+The full suite shows the same 31 failures as the base commit, all
+environmental, and no new ones. An isolated tmux probe ran a live RPC child
+(real `pi --mode rpc`, real model) whose events fed the real buffer and
+controller in a regular-`tuiMode` Pi 1.0.4. The child wrote a 1500-word
+`write` (2042 deltas). The row read `thinking` (13 s), then `write <N> chars`
+counting up for about 1m45s, then `✓ write`. A failing `read` showed
+`✗ read · 1 call · 1 failed`, then `thinking`, then `replying`, then the row
+was removed into a `-` placeholder.
+
+Lite review: clean, no findings.
+
+Decisions:
+- Before the first content block the row reads `thinking`, timed from
+  `message_start`, and a following `thinking_start` keeps that clock.
+- Calls still unfinished when `turn_end`, `agent_end` or `agent_settled`
+  closes their batch count as failed. A re-attach or launch end through
+  `closeOpenBatch` counts them the same way.
+- `closeOpenBatch` also drops the generating message.
+- The live probe fed the child's events to the buffer directly, not through
+  the spawner's `client.onEvent`. The spawner wiring is covered by its unit
+  test.

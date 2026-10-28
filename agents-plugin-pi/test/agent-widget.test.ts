@@ -26,10 +26,13 @@ import {
   chooseBatchAllotment,
   collectBatchViews,
   computeExpandedBudget,
-  formatFinishedBatchFallback,
-  formatFinishedBatchSummary,
+  formatFinishedBatchMetrics,
+  formatGeneratingMetrics,
+  formatGeneratingProse,
+  formatRunningBatchMetrics,
+  hasRunningBatch,
+  layoutBatchRowBody,
   visibleBatchSummaryItems,
-  formatRunningBatch,
   measureDockRows,
   planExpandedRows,
   registerAgentWidgetCommand,
@@ -38,7 +41,7 @@ import {
   type AgentWidgetController,
 } from "../src/agent-widget.ts";
 import { batchSummaryKey, type BatchSummaryItem } from "../src/batch-summary.ts";
-import { batchView, batchViews, closeOpenBatch, createBatchBuffer, observeBatchEvent, type AgentBatchBuffer } from "../src/agent-batches.ts";
+import { batchView, batchViews, closeOpenBatch, createBatchBuffer, observeBatchEvent, type AgentBatchBuffer, type BatchView } from "../src/agent-batches.ts";
 
 const NOW = Date.parse("2026-09-05T10:05:00.000Z");
 
@@ -1033,76 +1036,221 @@ function planEntry(name: string, state: AgentRowState, depth = 0, batchSource = 
 }
 
 describe("expanded mode: batch row formatting", () => {
-  test("a finished batch without a summary reads `called <names> · total N tool calls · <rel> ago`, singular for one call", () => {
+  test("a finished row is `│ ✓ <tool names>` with `N calls · <rel> ago` right-aligned at the row's edge, singular for one call", () => {
     const buffer = createBatchBuffer();
     addBatch(buffer, ["read", "edit", "read"], NOW - 70_000, { endedAt: NOW - 65_000 });
     addBatch(buffer, ["bash"], NOW - 20_000, { endedAt: NOW - 5_000 });
     const [three, one] = buffer.batches.map(batchView);
-    assert.equal(formatFinishedBatchFallback(three, NOW), "called read, edit · total 3 tool calls · 1m ago");
-    assert.equal(formatFinishedBatchFallback(one, NOW), "called bash · total 1 tool call · 5s ago");
+    assert.equal(formatFinishedBatchMetrics(three, NOW), "3 calls · 1m ago");
+    assert.equal(formatFinishedBatchMetrics(one, NOW), "1 call · 5s ago");
+    const rec = liveRecord("alpha");
+    rec.toolBatches = buffer;
+    const lines = expandedLines(registryOf(rec), { width: 60 });
+    assert.equal(lines[1], "│ ✓ read, edit" + " ".repeat(60 - 4 - "read, edit".length - "3 calls · 1m ago".length) + "3 calls · 1m ago");
+    assert.equal(lines[2], "│ ✓ bash" + " ".repeat(60 - 4 - "bash".length - "1 call · 5s ago".length) + "1 call · 5s ago");
+    assert.ok(lines.slice(1, 3).every((line) => visibleWidth(line) === 60));
+    assert.ok(!lines.some((line) => /called|total/.test(line)), "the `called` / `total` wording is gone");
   });
 
-  test("finished rows are dimmed through the theme and the running row is not", () => {
+  test("finished rows are dimmed, their `✓` included; the running row is bright behind a dim `│`", () => {
     const rec = liveRecord("alpha");
     addBatch(rec.toolBatches!, ["read"], NOW - 60_000);
     addBatch(rec.toolBatches!, ["grep"], NOW - 12_000, { running: true });
     const lines = expandedLines(registryOf(rec), { theme: fakeTheme });
-    const finished = lines.find((line) => line.includes("called read"))!;
-    assert.ok(finished.includes("<dim>called read · total 1 tool call · "), finished);
+    const finished = lines.find((line) => line.includes("read"))!;
+    assert.ok(finished.startsWith("<dim>│</dim> <dim>✓</dim> <dim>read "), finished);
+    assert.ok(finished.endsWith("1 call · 59s ago</dim>"), finished);
     const running = lines.find((line) => line.includes("grep"))!;
-    assert.ok(!running.includes("<dim>"), running);
-    assert.ok(!running.includes("called"));
+    assert.ok(running.startsWith("<dim>│</dim> "), running);
+    assert.equal(running.split("<dim>").length, 2, `only the │ is dimmed: ${running}`);
   });
 
-  test("the running row is `<spinner> <tool> (<args>) · <elapsed> · <done>/<n> done`, with `+<k> running` only when k > 0", () => {
+  test("the running row is `<spinner> <tool> (<args>)` with `<done>/<n> · +<k> · <elapsed>` right-aligned, `+<k>` only when k > 0", () => {
     const buffer = createBatchBuffer();
     // Three parallel calls; the first (oldest) started 12s ago and is reported.
     observeBatchEvent(buffer, { type: "message_end", message: { role: "assistant", content: ["a", "b", "c"].map((id, i) => ({ type: "toolCall", id, name: ["read", "grep", "bash"][i], arguments: { path: `${id}.ts` } })) } }, NOW - 13_000);
     observeBatchEvent(buffer, { type: "tool_execution_start", toolCallId: "a", toolName: "read" }, NOW - 12_000);
     observeBatchEvent(buffer, { type: "tool_execution_start", toolCallId: "b", toolName: "grep" }, NOW - 11_000);
     observeBatchEvent(buffer, { type: "tool_execution_start", toolCallId: "c", toolName: "bash" }, NOW - 10_000);
-    assert.match(formatRunningBatch(batchView(buffer.batches[0]), NOW, 120), new RegExp(`^${SPINNER} read \\(path: a\\.ts\\) · 12s · 0/3 done · \\+2 running$`));
+    assert.equal(formatRunningBatchMetrics(batchView(buffer.batches[0]), NOW), "0/3 · +2 · 12s");
+    const rec = liveRecord("alpha");
+    rec.toolBatches = buffer;
+    assert.match(expandedLines(registryOf(rec), { width: 60 })[1], new RegExp(`^│ ${SPINNER} read \\(path: a\\.ts\\) +0/3 · \\+2 · 12s$`));
     observeBatchEvent(buffer, { type: "tool_execution_end", toolCallId: "a" }, NOW - 8_000);
-    assert.match(formatRunningBatch(batchView(buffer.batches[0]), NOW, 120), new RegExp(`^${SPINNER} grep \\(path: b\\.ts\\) · 11s · 1/3 done · \\+1 running$`));
+    assert.equal(formatRunningBatchMetrics(batchView(buffer.batches[0]), NOW), "1/3 · +1 · 11s");
     observeBatchEvent(buffer, { type: "tool_execution_end", toolCallId: "c" }, NOW - 7_000);
-    const last = formatRunningBatch(batchView(buffer.batches[0]), NOW, 120);
-    assert.match(last, new RegExp(`^${SPINNER} grep \\(path: b\\.ts\\) · 11s · 2/3 done$`));
-    assert.ok(!last.includes("running"));
+    assert.equal(formatRunningBatchMetrics(batchView(buffer.batches[0]), NOW), "2/3 · 11s");
+    const row = expandedLines(registryOf(rec), { width: 60 })[1];
+    assert.match(row, new RegExp(`^│ ${SPINNER} grep \\(path: b\\.ts\\) +2/3 · 11s$`));
+    assert.equal(visibleWidth(row), 60);
   });
 
-  test("the spinner advances once per second and no tool-verb prefix column leads either row kind", () => {
+  test("`✓`, the spinner and the `-` placeholder share one mark column under the agent's bullet", () => {
     const rec = liveRecord("alpha");
     addBatch(rec.toolBatches!, ["read"], NOW - 60_000);
     addBatch(rec.toolBatches!, ["edit"], NOW - 5_000, { running: true });
+    const lines = expandedLines(registryOf(rec), { allotment: 3 });
+    assert.match(lines[0], /^· alpha/);
+    assert.match(lines[1], /^│ ✓ read /);
+    assert.match(lines[2], new RegExp(`^│ ${SPINNER} edit \\(`));
+    assert.equal(lines[3], "│ -", "an unfilled history slot is the `│` and a `-`, nothing else");
+    const markColumn = (line: string) => [...line][2];
+    assert.deepEqual(lines.slice(1).map(markColumn).map((glyph) => /[✓\-]/.test(glyph) || new RegExp(SPINNER).test(glyph)), [true, true, true]);
+    assert.equal(lines.slice(1).map((line) => [...line][0]).join(""), "│││");
     const view = batchView(rec.toolBatches!.batches[1]);
-    assert.notEqual(formatRunningBatch(view, NOW, 80)[0], formatRunningBatch(view, NOW + 1_000, 80)[0]);
-    const lines = expandedLines(registryOf(rec));
-    for (const line of lines.slice(1)) {
-      assert.doesNotMatch(line, /^\s*(read|ran|edit|bash)\s*\|/);
-      assert.doesNotMatch(line, /\|/);
-    }
-    assert.match(lines[1], /^ {2}called read/, "a finished row is the 2-column indent plus its text, with no verb column");
-    assert.match(lines[2], new RegExp(`^ {2}${SPINNER} edit \\(`), "the running row leads with the spinner, then the tool name");
+    const at = (now: number) => [...(buildExpandedWidgetLines(buildAgentRowEntries(registryOf(rec), [], NOW), 0, { width: 80, now, allotment: 3, budget: 100, batches: new Map([[rec.agentId, [view]]]) }) ?? [])[1]][2];
+    assert.notEqual(at(NOW), at(NOW + 1_000), "the spinner advances once per second");
   });
 
-  test("only the args preview is truncated, so every line fits at 40, 80 and 120 columns", () => {
+  test("the metric column stays right-aligned at several widths and the prose truncates first", () => {
     const rec = liveRecord("alpha");
     addBatch(rec.toolBatches!, ["bash", "read", "grep"], NOW - 20_000, { running: true, args: { command: "x".repeat(200) } });
     // The first call alone finishes: 1/3 done, the two others still run.
     observeBatchEvent(rec.toolBatches!, { type: "tool_execution_end", toolCallId: `${NOW - 20_000}-0` }, NOW - 15_000);
     const other = liveRecord("beta");
-    addBatch(other.toolBatches!, ["write"], NOW - 90_000);
-    for (const width of [40, 80, 120]) {
+    addBatch(other.toolBatches!, ["write", "edit", "read", "grep", "bash"], NOW - 90_000);
+    for (const width of [40, 60, 80, 120]) {
       const lines = expandedLines(registryOf(rec, other), { width });
       assert.ok(lines.every((line) => visibleWidth(line) <= width), `width=${width}: ${lines.map((l) => visibleWidth(l)).join(",")}`);
-      const running = lines.find((line) => new RegExp(`^ {2}${SPINNER} `).test(line))!;
-      assert.ok(running, `width=${width}: a running row renders`);
-      if (width >= 80) {
-        assert.ok(running.includes("…) · "), `width=${width}: the args preview is truncated inside its parentheses`);
-        assert.match(running, /· 19s · 1\/3 done · \+1 running$/, `width=${width}: the fixed fields survive intact`);
-        assert.ok(!running.includes("x".repeat(100)));
-      }
+      const running = lines.find((line) => new RegExp(`^│ ${SPINNER} `).test(line))!;
+      assert.ok(running.endsWith("1/3 · +1 · 19s"), `width=${width}: the metrics survive intact at the right edge: ${running}`);
+      assert.equal(visibleWidth(running), width);
+      assert.ok(running.includes("…)"), `width=${width}: the args preview is truncated inside its parentheses`);
+      const finished = lines.find((line) => line.startsWith("│ ✓ "))!;
+      assert.ok(finished.endsWith("5 calls · 1m ago"), `width=${width}: ${finished}`);
+      assert.equal(visibleWidth(finished), width);
+      if (width < 60) assert.ok(finished.includes("…"), `width=${width}: the tool-name prose truncated, not the metrics`);
     }
+  });
+
+  test("layoutBatchRowBody: prose truncates before metrics; metrics truncate only when they alone do not fit", () => {
+    assert.equal(layoutBatchRowBody({ head: "read, grep" }, "4 calls · 1m ago", 30), "read, grep" + " ".repeat(30 - 10 - 16) + "4 calls · 1m ago");
+    assert.equal(layoutBatchRowBody({ head: "a long tool name list" }, "4 calls · 1m ago", 24), "a long…" + " " + "4 calls · 1m ago");
+    assert.equal(layoutBatchRowBody({ head: "prose" }, "4 calls · 1m ago", 17), " 4 calls · 1m ago", "no room for prose: the metrics stay right-aligned");
+    assert.equal(layoutBatchRowBody({ head: "prose" }, "4 calls · 1m ago", 16), "4 calls · 1m ago");
+    assert.equal(layoutBatchRowBody({ head: "prose" }, "4 calls · 1m ago", 10), "4 calls ·…", "metrics alone over the width truncate");
+    assert.equal(layoutBatchRowBody({ head: "bash", args: "cd x && go test ./..." }, "1/3 · 12s", 30), "bash (cd x && go t…) 1/3 · 12s");
+    assert.equal(layoutBatchRowBody({ head: "x" }, "m", 0), "");
+  });
+
+  test("a display summary is the prose; without one the prose is the finished batch's tool names", () => {
+    const rec = liveRecord("alpha");
+    addBatch(rec.toolBatches!, ["read", "grep"], NOW - 60_000, { endedAt: NOW - 30_000 });
+    const registry = registryOf(rec);
+    const render = (summaryFor?: (id: string, view: BatchView) => string | undefined) =>
+      buildExpandedWidgetLines(buildAgentRowEntries(registry, [], NOW), 0, { width: 60, now: NOW, allotment: 1, budget: 100, batches: collectBatchViews(registry), summaryFor })!;
+    assert.match(render()[1], /^│ ✓ read, grep +2 calls · 30s ago$/);
+    assert.match(render(() => "Read the widget sources")[1], /^│ ✓ Read the widget sources +2 calls · 30s ago$/);
+    assert.match(render(() => "")[1], /^│ ✓ read, grep /, "an empty summary falls back to the tool names");
+  });
+
+  test("a child header is indented two spaces per depth and its batch rows' `│` sits under its bullet, at depth 1, 2 and 3", () => {
+    const ids = ["d1", "d2", "d3"].map((d) => `${d}000000-0000-0000-0000-000000000000`);
+    const finished = (seq: number) => [{ seq, toolNames: ["read"], callCount: 2, failed: 0, startedAt: NOW - 9_000, endedAt: NOW - 5_000 }];
+    const root = liveRecord("root", {
+      subtreeDescendants: ids.map((id, depth) => ({ id, parentId: depth === 0 ? null : ids[depth - 1], depth, role: "worker" as const, live: true })),
+      descendantViews: new Map(ids.map((id, i) => [id, finished(i + 1)])),
+    });
+    addBatch(root.toolBatches!, ["grep"], NOW - 30_000);
+    const lines = expandedLines(registryOf(root), { allotment: 2, width: 80 });
+    assert.equal(lines.length, 4 * 3);
+    for (let depth = 0; depth <= 3; depth++) {
+      const header = lines[depth * 3];
+      const indent = " ".repeat(2 * depth);
+      assert.ok(header.startsWith(indent + "· "), `depth ${depth} header: ${JSON.stringify(header)}`);
+      assert.ok(!header.includes("│"), "no `│ ` lane on an expanded header");
+      assert.ok(lines[depth * 3 + 1].startsWith(indent + "│ ✓ "), `depth ${depth} batch row`);
+      assert.equal(lines[depth * 3 + 2], indent + "│ -", `depth ${depth} placeholder`);
+      assert.ok(visibleWidth(lines[depth * 3 + 1]) === 80, "the metrics reach the right edge at every depth");
+    }
+  });
+
+  test("a narrow, deep row clips to the width without cutting a styled part", () => {
+    const deep = "d0000000-0000-0000-0000-000000000000";
+    const root = liveRecord("root", {
+      subtreeDescendants: [{ id: deep, parentId: null, depth: 0, role: "worker", live: true }],
+      descendantViews: new Map([[deep, [{ seq: 1, toolNames: ["read"], callCount: 1, failed: 0, startedAt: 0, endedAt: NOW }]]]),
+    });
+    for (const width of [1, 2, 3, 4, 5, 8, 12]) {
+      const plain = expandedLines(registryOf(root), { allotment: 1, width });
+      assert.ok(plain.every((line) => visibleWidth(line) <= width), `width=${width}: ${JSON.stringify(plain)}`);
+      const themed = expandedLines(registryOf(root), { allotment: 1, width, theme: fakeTheme });
+      for (const line of themed) assert.equal((line.match(/<dim>/g) ?? []).length, (line.match(/<\/dim>/g) ?? []).length, line);
+    }
+  });
+});
+
+describe("expanded mode: generating phase and failure marks (261028 redesign)", () => {
+  const assistantStart = { type: "message_start", message: { role: "assistant", content: [] } };
+  const update = (assistantMessageEvent: Record<string, unknown>) => ({ type: "message_update", assistantMessageEvent });
+
+  test("the generating row reads `thinking`, `replying`, or `<tool>` with `<N> chars`, elapsed from the phase start, behind the spinner", () => {
+    const rec = liveRecord("alpha");
+    const buffer = rec.toolBatches!;
+    addBatch(buffer, ["read"], NOW - 60_000);
+    observeBatchEvent(buffer, assistantStart, NOW - 9_000);
+    const row = () => expandedLines(registryOf(rec), { width: 60 })[2];
+    assert.match(row(), new RegExp(`^│ ${SPINNER} thinking +9s$`), "before any content block: thinking, timed from the message start");
+    assert.equal(visibleWidth(row()), 60);
+    observeBatchEvent(buffer, update({ type: "text_start", contentIndex: 0 }), NOW - 4_000);
+    assert.match(row(), new RegExp(`^│ ${SPINNER} replying +4s$`));
+    observeBatchEvent(buffer, update({ type: "toolcall_start", contentIndex: 1, id: "w", toolName: "write" }), NOW - 2_000);
+    for (let i = 0; i < 250; i++) observeBatchEvent(buffer, update({ type: "toolcall_delta", contentIndex: 1, delta: "abcd" }), NOW - 1_000);
+    assert.match(row(), new RegExp(`^│ ${SPINNER} write +1000 chars · 2s$`));
+    const view = batchViews(buffer).at(-1)!;
+    assert.equal(formatGeneratingProse(view), "write");
+    assert.equal(formatGeneratingMetrics(view, NOW), "1000 chars · 2s");
+    const themed = expandedLines(registryOf(rec), { width: 60, theme: fakeTheme })[2];
+    assert.equal(themed.split("<dim>").length, 2, `the generating row is bright behind its dim │: ${themed}`);
+  });
+
+  test("a generating row counts as running: hasRunningBatch and the relayed batch map include it", () => {
+    const rec = liveRecord("alpha");
+    const entries = buildAgentRowEntries(registryOf(rec), [], NOW);
+    assert.equal(hasRunningBatch(entries, collectBatchViews(registryOf(rec))), false);
+    observeBatchEvent(rec.toolBatches!, assistantStart, NOW - 1_000);
+    const views = collectBatchViews(registryOf(rec));
+    assert.ok(views.get(rec.agentId)!.at(-1)!.generating);
+    assert.equal(hasRunningBatch(entries, views), true);
+  });
+
+  test("a message ending without tool calls removes the generating row; the slot refills from history, else a placeholder", () => {
+    const rec = liveRecord("alpha");
+    const buffer = rec.toolBatches!;
+    addBatch(buffer, ["read"], NOW - 60_000);
+    observeBatchEvent(buffer, assistantStart, NOW - 5_000);
+    observeBatchEvent(buffer, update({ type: "text_start", contentIndex: 0 }), NOW - 4_000);
+    const lines = expandedLines(registryOf(rec), { allotment: 2 });
+    assert.match(lines[1], /^│ ✓ read /);
+    assert.match(lines[2], /replying/);
+    observeBatchEvent(buffer, { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "done" }] } }, NOW);
+    assert.deepEqual(expandedLines(registryOf(rec), { allotment: 2 }).slice(1).map((line) => line.slice(0, 6)), ["│ ✓ re", "│ -"]);
+    assert.equal(expandedLines(registryOf(rec), { allotment: 2 }).length, 3, "the fixed height holds");
+  });
+
+  test("a finished batch with a failed call shows `✗` in the error color and `N failed` among its metrics; the rest stays dimmed", () => {
+    const rec = liveRecord("alpha");
+    const buffer = rec.toolBatches!;
+    observeBatchEvent(buffer, { type: "message_end", message: { role: "assistant", content: [{ type: "toolCall", id: "e", name: "edit", arguments: {} }] } }, NOW - 25_000);
+    observeBatchEvent(buffer, { type: "tool_execution_start", toolCallId: "e", toolName: "edit" }, NOW - 24_000);
+    observeBatchEvent(buffer, { type: "tool_execution_end", toolCallId: "e", isError: true }, NOW - 20_000);
+    assert.equal(formatFinishedBatchMetrics(batchView(buffer.batches[0]), NOW), "1 call · 1 failed · 20s ago");
+    const plain = expandedLines(registryOf(rec), { width: 60 })[1];
+    assert.equal(plain, "│ ✗ edit" + " ".repeat(60 - 4 - 4 - "1 call · 1 failed · 20s ago".length) + "1 call · 1 failed · 20s ago");
+    const themed = expandedLines(registryOf(rec), { width: 60, theme: fakeTheme })[1];
+    assert.ok(themed.startsWith("<dim>│</dim> <error>✗</error> <dim>edit "), themed);
+    assert.ok(themed.endsWith("1 failed · 20s ago</dim>"), themed);
+  });
+
+  test("a running batch keeps its spinner after a call failed and carries `N failed` until it finishes", () => {
+    const rec = liveRecord("alpha");
+    const buffer = rec.toolBatches!;
+    observeBatchEvent(buffer, { type: "message_end", message: { role: "assistant", content: ["a", "b"].map((id) => ({ type: "toolCall", id, name: "bash", arguments: { command: id } })) } }, NOW - 13_000);
+    observeBatchEvent(buffer, { type: "tool_execution_start", toolCallId: "a", toolName: "bash" }, NOW - 12_000);
+    observeBatchEvent(buffer, { type: "tool_execution_start", toolCallId: "b", toolName: "bash" }, NOW - 11_000);
+    observeBatchEvent(buffer, { type: "tool_execution_end", toolCallId: "a", isError: true }, NOW - 8_000);
+    assert.equal(formatRunningBatchMetrics(batchView(buffer.batches[0]), NOW), "1/2 · 1 failed · 11s");
+    assert.match(expandedLines(registryOf(rec), { width: 60 })[1], new RegExp(`^│ ${SPINNER} bash \\(command: b\\) +1/2 · 1 failed · 11s$`));
   });
 });
 
@@ -1133,25 +1281,25 @@ describe("expanded mode: row entries", () => {
 });
 
 describe("expanded mode: fixed allotment", () => {
-  test("each batch-source agent gets exactly `allotment` rows after its header, blank-padded; a descendant renders its relayed batches", () => {
+  test("each batch-source agent gets exactly `allotment` rows after its header, placeholder-padded; a descendant renders its relayed batches", () => {
     const childId = "child000-0000-0000-0000-000000000000";
     const busy = liveRecord("busy", {
       runStartedAt: NOW - 50_000,
       subtreeDescendants: [{ id: childId, parentId: null, depth: 0, role: "worker", live: true }],
-      descendantViews: new Map([[childId, [{ seq: 4, toolNames: ["grep"], callCount: 2, startedAt: NOW - 9_000, endedAt: NOW - 8_000 }]]]),
+      descendantViews: new Map([[childId, [{ seq: 4, toolNames: ["grep"], callCount: 2, failed: 0, startedAt: NOW - 9_000, endedAt: NOW - 8_000 }]]]),
     });
     addBatch(busy.toolBatches!, ["read"], NOW - 40_000);
     const fresh = liveRecord("fresh", { runStartedAt: NOW - 5_000 });
     const lines = expandedLines(registryOf(busy, fresh), { allotment: 3 });
     assert.equal(lines.length, 1 + 3 + 1 + 3 + 1 + 3, "busy header + 3, its descendant header + 3, fresh header + 3");
     assert.match(lines[0], /^· busy/);
-    assert.match(lines[1], /^ {2}called read/);
-    assert.deepEqual(lines.slice(2, 4), ["", ""], "blank padding up to the allotment at depth 0");
-    assert.match(lines[4], /^│ · child000/);
-    assert.match(lines[5], /^│ {3}called grep · total 2 tool calls · 8s ago/, "relayed rows sit under the descendant's gutter");
-    assert.deepEqual(lines.slice(6, 8), ["│ ", "│ "], "a descendant's padding keeps its tree lane");
+    assert.match(lines[1], /^│ ✓ read /);
+    assert.deepEqual(lines.slice(2, 4), ["│ -", "│ -"], "placeholder rows up to the allotment at depth 0");
+    assert.match(lines[4], /^ {2}· child000/);
+    assert.match(lines[5], /^ {2}│ ✓ grep +2 calls · 8s ago$/, "relayed rows sit under the descendant's bullet");
+    assert.deepEqual(lines.slice(6, 8), ["  │ -", "  │ -"], "a descendant's placeholders keep its indent");
     assert.match(lines[8], /^· fresh/);
-    assert.deepEqual(lines.slice(9), ["", "", ""], "an agent with no batches is all padding");
+    assert.deepEqual(lines.slice(9), ["│ -", "│ -", "│ -"], "an agent with no batches is all placeholders");
   });
 
   test("the latest batches are shown oldest-first with the running one last", () => {
@@ -1160,9 +1308,9 @@ describe("expanded mode: fixed allotment", () => {
     addBatch(rec.toolBatches!, ["t5"], NOW - 2_000, { running: true });
     const lines = expandedLines(registryOf(rec), { allotment: 3 });
     assert.equal(lines.length, 4);
-    assert.match(lines[1], /called t3/);
-    assert.match(lines[2], /called t4/);
-    assert.match(lines[3], new RegExp(`^ {2}${SPINNER} t5 \\(`));
+    assert.match(lines[1], /^│ ✓ t3 /);
+    assert.match(lines[2], /^│ ✓ t4 /);
+    assert.match(lines[3], new RegExp(`^│ ${SPINNER} t5 \\(`));
     assert.equal(expandedLines(registryOf(rec), { allotment: 1 }).length, 2);
     assert.match(expandedLines(registryOf(rec), { allotment: 1 })[1], new RegExp(`${SPINNER} t5`), "at allotment 1 the running batch alone remains");
   });
@@ -1263,7 +1411,8 @@ describe("expanded mode: planExpandedRows fold", () => {
     const lines = buildExpandedWidgetLines(entries, 0, { width: 80, now: NOW, allotment: 1, budget: 4, batches: new Map() })!;
     assert.equal(lines.length, 4);
     assert.match(lines[0], /parent/);
-    assert.match(lines[2], /^│ .*waiting/);
+    assert.match(lines[1], /^│ -$/, "the parent's one slot is a placeholder");
+    assert.match(lines[2], /^ {2}\S.*waiting/, "an expanded header is indented, not laned");
     assert.equal(lines[3], "+3 more");
   });
 
@@ -1365,7 +1514,7 @@ describe("expanded mode: controller", () => {
     assert.ok(state.paints > before, "toggling repaints");
     const lines = render();
     assert.equal(lines.length, 1 + DEFAULT_AGENT_WIDGET_BATCH_ROWS);
-    assert.match(lines[1], /called read/);
+    assert.match(lines[1], /^│ ✓ read /);
     assert.equal(controller.toggleExpanded(), false);
     assert.equal(render().length, 1, "back to the normal mode");
     controller.stop();
@@ -1466,6 +1615,21 @@ describe("expanded mode: controller", () => {
     assert.deepEqual(clock.live(), []);
   });
 
+  test("a generating row alone keeps the 1s tick while expanded", (t) => {
+    const clock = installClock(t);
+    const rec = liveRecord("alpha");
+    const { controller } = harness(registryOf(rec));
+    controller.toggleExpanded();
+    assert.deepEqual(clock.live(), [AGENT_WIDGET_TICK_MS]);
+    observeBatchEvent(rec.toolBatches!, { type: "message_start", message: { role: "assistant", content: [] } }, NOW);
+    controller.refresh();
+    assert.deepEqual(clock.live(), [AGENT_WIDGET_EXPANDED_TICK_MS], "a generating row counts as running");
+    observeBatchEvent(rec.toolBatches!, { type: "message_end", message: { role: "assistant", content: [] } }, NOW);
+    controller.refresh();
+    assert.deepEqual(clock.live(), [AGENT_WIDGET_TICK_MS]);
+    controller.stop();
+  });
+
   test("rowsPerAgent changes the allotment, read synchronously or as a Promise, and is clamped", async (t) => {
     installClock(t);
     const rec = liveRecord("alpha");
@@ -1538,7 +1702,7 @@ describe("registerAgentWidgetCommand", () => {
 // ---------------------------------------------------------------------------
 
 describe("expanded mode: batch summaries", () => {
-  test("a summary replaces the fallback text, keeps the count and relative time, stays dimmed, and fits the width", () => {
+  test("a summary replaces the tool-name prose, keeps the metric column, stays dimmed, and fits the width", () => {
     const rec = liveRecord("alpha");
     addBatch(rec.toolBatches!, ["read", "grep"], NOW - 60_000, { endedAt: NOW - 30_000 });
     addBatch(rec.toolBatches!, ["bash"], NOW - 20_000, { endedAt: NOW - 5_000 });
@@ -1549,18 +1713,19 @@ describe("expanded mode: batch summaries", () => {
     const render = (width: number, summaryFor: (id: string, view: { seq: number }) => string | undefined, theme?: typeof fakeTheme) =>
       buildExpandedWidgetLines(entries, 0, { width, now: NOW, allotment: 3, budget: 100, batches: views, summaryFor, theme })!;
 
-    const lines = render(120, (id, view) => batchSummaryKey(id, view.seq) === firstKey ? "Read the widget sources" : undefined, fakeTheme);
-    assert.equal(lines[1], "  " + fakeTheme.fg("dim", "Read the widget sources · 2 tool calls · 30s ago"));
-    assert.ok(!lines[1].includes("called"), "the summary takes the fallback's place");
-    assert.ok(lines[2].includes("<dim>called bash · total 1 tool call · 5s ago</dim>"), "an unsummarized batch keeps its fallback");
-    assert.equal(formatFinishedBatchSummary("S", batchView(rec.toolBatches!.batches[0]), NOW), "S · 2 tool calls · 30s ago");
+    const lines = render(60, (id, view) => batchSummaryKey(id, view.seq) === firstKey ? "Read the widget sources" : undefined, fakeTheme);
+    const body = "Read the widget sources" + " ".repeat(60 - 4 - 23 - "2 calls · 30s ago".length) + "2 calls · 30s ago";
+    assert.equal(lines[1], `<dim>│</dim> <dim>✓</dim> <dim>${body}</dim>`);
+    assert.ok(!lines[1].includes("read, grep"), "the summary takes the tool names' place");
+    assert.ok(lines[2].includes("<dim>bash ") && lines[2].endsWith("1 call · 5s ago</dim>"), "an unsummarized batch keeps its tool names");
 
     for (const width of [20, 40, 80]) {
       const narrow = render(width, () => "x".repeat(300));
       assert.ok(narrow.every((line) => visibleWidth(line) <= width), `width=${width}`);
+      if (width >= 40) assert.ok(narrow[1].endsWith("2 calls · 30s ago"), `width=${width}: the summary truncates before the metrics`);
     }
     assert.deepEqual(render(120, () => undefined), render(120, () => undefined), "summaryFor returning nothing is the fallback rendering");
-    assert.match(render(120, () => undefined)[1], /called read, grep/);
+    assert.match(render(120, () => undefined)[1], /^│ ✓ read, grep /);
   });
 
   test("visibleBatchSummaryItems offers the finished batches an agent shows: latest N, never a running or unended one", () => {
@@ -1584,7 +1749,7 @@ describe("expanded mode: batch summaries", () => {
     assert.deepEqual(item.calls, [{ toolName: "t3", argsPreview: "path: t3.ts", resultPreview: "ok", isError: false }], "a local record's item carries its call previews");
 
     const unended = new Map(views);
-    unended.set(rec.agentId, [{ seq: 77, toolNames: ["x"], callCount: 1, startedAt: 1 }]);
+    unended.set(rec.agentId, [{ seq: 77, toolNames: ["x"], callCount: 1, failed: 0, startedAt: 1 }]);
     assert.deepEqual(visibleBatchSummaryItems(entries, unended, registry, 3), [], "a view with neither endedAt nor running is skipped");
   });
 
@@ -1657,10 +1822,10 @@ describe("expanded mode: batch summaries", () => {
       const h = summaryHarness();
       const { controller, render } = controllerOf(registryOf(rec), h.batchSummaries);
       controller.toggleExpanded();
-      assert.match(render()[1], /called read/);
+      assert.match(render()[1], /^│ ✓ read /);
       h.summaries.set(`${rec.agentId}:1`, "Opened the sources");
       controller.refresh();
-      assert.match(render()[1], /^ {2}Opened the sources · 1 tool call · 20s ago$/);
+      assert.match(render()[1], /^│ ✓ Opened the sources +1 call · 20s ago$/);
       h.breakRequests();
       assert.doesNotThrow(() => controller.refresh());
       assert.match(render()[1], /Opened the sources/);
@@ -1673,7 +1838,7 @@ describe("expanded mode: batch summaries", () => {
       addBatch(rec.toolBatches!, ["read"], NOW - 30_000);
       const { controller, render } = controllerOf(registryOf(rec), undefined);
       controller.toggleExpanded();
-      assert.match(render()[1], /called read/);
+      assert.match(render()[1], /^│ ✓ read /);
       controller.stop();
     });
   });

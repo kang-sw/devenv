@@ -16,6 +16,17 @@
  * in-flight call (the one holding the batch up), the finished-call count,
  * and how many other calls are still running.
  *
+ * 261028 batch-row redesign: before a batch exists, the assistant message
+ * that may become one is shown as a generating row. It opens at an assistant
+ * `message_start`, follows the `message_update` block boundaries (thinking,
+ * reply text, tool-call argument streaming with the streaming call's tool
+ * name and character count), and at that message's `message_end` either
+ * becomes the batch (tool calls) or disappears (none). It is held outside
+ * the `AGENT_BATCH_CAP` list, so a tool-free message never evicts a batch.
+ * Over RPC an assistant event carries no `partial` message, so a
+ * `toolcall_start` names its tool directly and a `toolcall_delta` holds only
+ * its `delta` text; every delta is O(1).
+ *
  * Pure data and pure functions only: no IO, no timers, no registry access.
  */
 
@@ -53,10 +64,32 @@ export interface ToolBatch {
   calls: BatchCall[];
 }
 
+/** Generating-phase kinds: thinking (also before the first content block), reply text, tool-call argument streaming. */
+export type BatchGeneratingKind = "thinking" | "replying" | "tool";
+
+/** The generating row's current phase. */
+export interface BatchGeneratingView {
+  kind: BatchGeneratingKind;
+  /** Start of the current phase, so thinking and argument-writing time read separately. */
+  phaseStartedAt: number;
+  /** The streaming call's tool name; present exactly when `kind` is `tool`. */
+  toolName?: string;
+  /** Characters of the streaming call's arguments so far; present exactly when `kind` is `tool`. */
+  chars?: number;
+}
+
+/** An assistant message in flight, not yet a batch. */
+export interface GeneratingState extends BatchGeneratingView {
+  /** The message's `message_start`. */
+  startedAt: number;
+}
+
 /** Bounded per-agent batch history. Only the newest batch may be open (no `endedAt`). */
 export interface AgentBatchBuffer {
   nextSeq: number;
   batches: ToolBatch[];
+  /** The assistant message in flight, outside the capped `batches` list. */
+  generating?: GeneratingState;
 }
 
 /** The running batch's in-flight summary. */
@@ -70,17 +103,26 @@ export interface BatchRunningView {
   othersRunning: number;
 }
 
-/** Width-independent projection of one batch: what the widget renders and what a hop relays. */
+/**
+ * Width-independent projection of one batch: what the widget renders and what
+ * a hop relays. Exactly one of `endedAt`, `running` and `generating` is
+ * present.
+ */
 export interface BatchView {
+  /** The batch's sequence number; a generating view carries the number its batch would take. */
   seq: number;
   /** Distinct tool names in call order, capped at `BATCH_TOOL_NAME_CAP`. */
   toolNames: string[];
   callCount: number;
+  /** Failed calls: an error result, or a call still unfinished when its batch was closed. */
+  failed: number;
   startedAt: number;
   /** Present exactly when the batch is finished. */
   endedAt?: number;
   /** Present exactly when the batch is still running. */
   running?: BatchRunningView;
+  /** Present exactly when the view is an assistant message still generating. */
+  generating?: BatchGeneratingView;
 }
 
 export function createBatchBuffer(): AgentBatchBuffer {
@@ -153,12 +195,45 @@ function startBatch(buffer: AgentBatchBuffer, now: number, calls: BatchCall[]): 
   return batch;
 }
 
-/** Ends the open batch, if any. Returns whether anything changed. */
+/** Ends the open batch and drops any generating message. Returns whether anything changed. */
 export function closeOpenBatch(buffer: AgentBatchBuffer, now: number): boolean {
+  const hadGenerating = buffer.generating !== undefined;
+  buffer.generating = undefined;
   const open = openBatch(buffer);
-  if (!open) return false;
+  if (!open) return hadGenerating;
   open.endedAt = now;
   return true;
+}
+
+/**
+ * Applies one `message_update` to the generating state: `thinking_start`,
+ * `text_start` and `toolcall_start` move the phase (the same kind again
+ * keeps its phase clock, except a new tool call); `toolcall_delta` adds its
+ * `delta` length to the streaming call's count. Every other update, and any
+ * update with no generating message, changes nothing. O(1) per event.
+ */
+function observeGenerating(buffer: AgentBatchBuffer, update: unknown, now: number): boolean {
+  const generating = buffer.generating;
+  if (!generating || !update || typeof update !== "object") return false;
+  const event = update as { type?: unknown; delta?: unknown; toolName?: unknown };
+  switch (event.type) {
+    case "toolcall_delta":
+      if (generating.kind !== "tool" || typeof event.delta !== "string" || event.delta.length === 0) return false;
+      generating.chars = (generating.chars ?? 0) + event.delta.length;
+      return true;
+    case "thinking_start":
+    case "text_start": {
+      const kind: BatchGeneratingKind = event.type === "thinking_start" ? "thinking" : "replying";
+      if (generating.kind === kind) return false;
+      buffer.generating = { startedAt: generating.startedAt, kind, phaseStartedAt: now };
+      return true;
+    }
+    case "toolcall_start":
+      buffer.generating = { startedAt: generating.startedAt, kind: "tool", phaseStartedAt: now, toolName: typeof event.toolName === "string" ? cleanToolName(event.toolName) : "tool", chars: 0 };
+      return true;
+    default:
+      return false;
+  }
 }
 
 function assistantToolCalls(message: unknown): BatchCall[] | undefined {
@@ -176,24 +251,41 @@ function assistantToolCalls(message: unknown): BatchCall[] | undefined {
 /**
  * Applies one RPC event to `buffer`. Returns whether the buffer changed.
  *
- * - assistant `message_end` with tool calls: ends any open batch and opens a
- *   new one announcing those calls (no tool calls: no batch).
+ * - assistant `message_start`: opens the generating message (phase
+ *   `thinking` until its first content block says otherwise).
+ * - `message_update`: moves the generating phase or counts tool-call
+ *   argument characters (`observeGenerating`).
+ * - assistant `message_end`: drops the generating message; with tool calls,
+ *   ends any open batch and opens a new one announcing those calls (no tool
+ *   calls: no batch).
  * - `tool_execution_start` / `tool_execution_end`: start and finish a call of
  *   the open batch (an unannounced call joins it, or opens one). The batch
  *   ends when every call has finished.
- * - `turn_end`, `agent_end`, `agent_settled`: end the open batch, so an
- *   aborted or failed turn never leaves a batch running.
+ * - `turn_end`, `agent_end`, `agent_settled`: end the open batch and drop
+ *   the generating message, so an aborted or failed turn never leaves either
+ *   running. Calls still unfinished then count as failed (`batchView`).
  */
 export function observeBatchEvent(
   buffer: AgentBatchBuffer,
-  evt: { type?: string; message?: unknown; toolCallId?: string; toolName?: string; args?: unknown; result?: unknown; isError?: unknown },
+  evt: { type?: string; message?: unknown; assistantMessageEvent?: unknown; toolCallId?: string; toolName?: string; args?: unknown; result?: unknown; isError?: unknown },
   now: number,
 ): boolean {
   switch (evt.type) {
+    case "message_start": {
+      if ((evt.message as { role?: unknown } | undefined)?.role !== "assistant") return false;
+      buffer.generating = { startedAt: now, kind: "thinking", phaseStartedAt: now };
+      return true;
+    }
+    case "message_update":
+      return observeGenerating(buffer, evt.assistantMessageEvent, now);
     case "message_end": {
       const calls = assistantToolCalls(evt.message);
-      if (!calls || calls.length === 0) return false;
-      closeOpenBatch(buffer, now);
+      if (!calls) return false;
+      const hadGenerating = buffer.generating !== undefined;
+      buffer.generating = undefined;
+      if (calls.length === 0) return hadGenerating;
+      const open = openBatch(buffer);
+      if (open) open.endedAt = now;
       startBatch(buffer, now, calls);
       return true;
     }
@@ -237,7 +329,8 @@ export function batchView(batch: ToolBatch): BatchView {
     if (toolNames.length >= BATCH_TOOL_NAME_CAP) break;
     if (!toolNames.includes(call.toolName)) toolNames.push(call.toolName);
   }
-  const view: BatchView = { seq: batch.seq, toolNames, callCount: batch.calls.length, startedAt: batch.startedAt };
+  const failed = batch.calls.filter((call) => call.isError === true || (batch.endedAt !== undefined && call.endedAt === undefined)).length;
+  const view: BatchView = { seq: batch.seq, toolNames, callCount: batch.calls.length, failed, startedAt: batch.startedAt };
   if (batch.endedAt !== undefined) {
     view.endedAt = batch.endedAt;
     return view;
@@ -257,7 +350,20 @@ export function batchView(batch: ToolBatch): BatchView {
   return view;
 }
 
-/** The buffer's views, oldest first. */
+/** The generating message's view: no calls yet, the sequence number its batch would take. */
+function generatingView(buffer: AgentBatchBuffer, generating: GeneratingState): BatchView {
+  const phase: BatchGeneratingView = { kind: generating.kind, phaseStartedAt: generating.phaseStartedAt };
+  if (generating.kind === "tool") {
+    phase.toolName = generating.toolName ?? "tool";
+    phase.chars = generating.chars ?? 0;
+  }
+  return { seq: buffer.nextSeq, toolNames: [], callCount: 0, failed: 0, startedAt: generating.startedAt, generating: phase };
+}
+
+/** The buffer's views, oldest first; a generating message's view is last. */
 export function batchViews(buffer: AgentBatchBuffer | undefined): BatchView[] {
-  return buffer ? buffer.batches.map(batchView) : [];
+  if (!buffer) return [];
+  const views = buffer.batches.map(batchView);
+  if (buffer.generating) views.push(generatingView(buffer, buffer.generating));
+  return views;
 }

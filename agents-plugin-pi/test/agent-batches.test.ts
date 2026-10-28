@@ -295,3 +295,153 @@ test("model-supplied tool names lose control characters before they are stored",
   for (const name of names) assert.doesNotMatch(name, /[\u0000-\u001f\u007f-\u009f]/);
   assert.equal(cleanToolName("\u001b"), "tool");
 });
+
+// ---------------------------------------------------------------------------
+// 261028 batch-row redesign: the generating phase and failure counts.
+// ---------------------------------------------------------------------------
+
+/** RPC-shaped assistant stream events: no `partial`, no `message` on updates. */
+const assistantStart = { type: "message_start", message: { role: "assistant", content: [] } };
+const update = (assistantMessageEvent: Record<string, unknown>) => ({ type: "message_update", assistantMessageEvent });
+const toolcallStart = (toolName: string, contentIndex = 0) => update({ type: "toolcall_start", contentIndex, id: `id-${contentIndex}`, toolName });
+const toolcallDelta = (delta: string, contentIndex = 0) => update({ type: "toolcall_delta", contentIndex, delta });
+const generatingOf = (buffer: AgentBatchBuffer) => batchViews(buffer).at(-1)?.generating;
+
+describe("generating phase", () => {
+  test("an assistant message_start opens a generating view; user and toolResult message_starts do not", () => {
+    const buffer = createBatchBuffer();
+    assert.equal(observeBatchEvent(buffer, { type: "message_start", message: { role: "user", content: "hi" } }, 5), false);
+    assert.equal(observeBatchEvent(buffer, { type: "message_start", message: { role: "toolResult", content: [] } }, 5), false);
+    assert.deepEqual(batchViews(buffer), []);
+    assert.equal(observeBatchEvent(buffer, assistantStart, 10), true);
+    assert.deepEqual(batchViews(buffer), [{ seq: 1, toolNames: [], callCount: 0, failed: 0, startedAt: 10, generating: { kind: "thinking", phaseStartedAt: 10 } }]);
+    assert.deepEqual(buffer.batches, [], "the generating message is held outside the batch list");
+  });
+
+  test("before the first content block the row reads `thinking`, and a following thinking block keeps that phase clock", () => {
+    const buffer = createBatchBuffer();
+    observeBatchEvent(buffer, assistantStart, 10);
+    assert.equal(observeBatchEvent(buffer, update({ type: "thinking_start", contentIndex: 0 }), 14), false, "already thinking: nothing changes");
+    assert.deepEqual(generatingOf(buffer), { kind: "thinking", phaseStartedAt: 10 });
+  });
+
+  test("phase transitions: thinking -> replying -> tool streaming -> execution -> finished", () => {
+    const buffer = createBatchBuffer();
+    observeBatchEvent(buffer, assistantStart, 10);
+    observeBatchEvent(buffer, update({ type: "thinking_start", contentIndex: 0 }), 11);
+    observeBatchEvent(buffer, update({ type: "thinking_delta", contentIndex: 0, delta: "hmm" }), 12);
+    observeBatchEvent(buffer, update({ type: "thinking_end", contentIndex: 0, content: "hmm" }), 13);
+    assert.equal(observeBatchEvent(buffer, update({ type: "text_start", contentIndex: 1 }), 20), true);
+    assert.deepEqual(generatingOf(buffer), { kind: "replying", phaseStartedAt: 20 }, "elapsed restarts at the new phase");
+    assert.equal(observeBatchEvent(buffer, update({ type: "text_delta", contentIndex: 1, delta: "ok" }), 21), false);
+    assert.equal(observeBatchEvent(buffer, toolcallStart("write", 2), 30), true);
+    assert.deepEqual(generatingOf(buffer), { kind: "tool", phaseStartedAt: 30, toolName: "write", chars: 0 });
+    assert.equal(observeBatchEvent(buffer, toolcallDelta("{\"path\":\"a", 2), 31), true);
+    observeBatchEvent(buffer, toolcallDelta(".ts\"}", 2), 32);
+    assert.deepEqual(generatingOf(buffer), { kind: "tool", phaseStartedAt: 30, toolName: "write", chars: 15 });
+    assert.equal(observeBatchEvent(buffer, update({ type: "toolcall_end", contentIndex: 2, toolCall: { type: "toolCall", id: "w", name: "write", arguments: {} } }), 33), false);
+    assert.equal(generatingOf(buffer)?.chars, 15, "the count holds until the next block or message_end");
+
+    assert.equal(observeBatchEvent(buffer, messageEnd({ id: "w", name: "write", arguments: { path: "a.ts" } }), 40), true);
+    assert.equal(buffer.generating, undefined);
+    assert.equal(buffer.batches.length, 1);
+    assert.equal(buffer.batches[0].seq, 1, "the batch takes the sequence number the generating view carried");
+    const views = batchViews(buffer);
+    assert.equal(views.length, 1);
+    assert.ok(views[0].running && !views[0].generating, "execution phase");
+    observeBatchEvent(buffer, start("w", "write"), 41);
+    observeBatchEvent(buffer, end("w"), 50);
+    assert.equal(batchViews(buffer)[0].endedAt, 50, "finished");
+  });
+
+  test("several streamed tool calls: the row shows the call now streaming, its count covering that call alone", () => {
+    const buffer = createBatchBuffer();
+    observeBatchEvent(buffer, assistantStart, 10);
+    observeBatchEvent(buffer, toolcallStart("read", 0), 11);
+    observeBatchEvent(buffer, toolcallDelta("x".repeat(40), 0), 12);
+    observeBatchEvent(buffer, toolcallStart("write", 1), 20);
+    observeBatchEvent(buffer, toolcallDelta("y".repeat(7), 1), 21);
+    assert.deepEqual(generatingOf(buffer), { kind: "tool", phaseStartedAt: 20, toolName: "write", chars: 7 });
+  });
+
+  test("a toolcall_start tool name is cleaned; a missing one reads `tool`; a delta outside tool streaming or without text changes nothing", () => {
+    const buffer = createBatchBuffer();
+    observeBatchEvent(buffer, assistantStart, 10);
+    assert.equal(observeBatchEvent(buffer, toolcallDelta("early"), 11), false, "no tool call is streaming yet");
+    observeBatchEvent(buffer, update({ type: "toolcall_start", contentIndex: 0 }), 12);
+    assert.equal(generatingOf(buffer)?.toolName, "tool");
+    observeBatchEvent(buffer, toolcallStart("wr\u001bite"), 13);
+    assert.equal(generatingOf(buffer)?.toolName, "wr ite");
+    assert.equal(observeBatchEvent(buffer, update({ type: "toolcall_delta", contentIndex: 0 }), 14), false);
+    assert.equal(observeBatchEvent(buffer, toolcallDelta(""), 14), false);
+    assert.equal(observeBatchEvent(buffer, update(null as never), 14), false);
+  });
+
+  test("message_update without a generating message changes nothing (it opens only on message_start)", () => {
+    const buffer = createBatchBuffer();
+    for (const event of [toolcallStart("write"), toolcallDelta("abc"), update({ type: "text_start", contentIndex: 0 })]) {
+      assert.equal(observeBatchEvent(buffer, event, 5), false);
+    }
+    assert.deepEqual(batchViews(buffer), []);
+  });
+
+  test("a message ending with no tool calls removes the row and never evicts a retained batch", () => {
+    const buffer = createBatchBuffer();
+    for (let i = 1; i <= AGENT_BATCH_CAP; i++) observeBatchEvent(buffer, messageEnd({ id: `c${i}`, name: "read" }), i);
+    observeBatchEvent(buffer, { type: "turn_end" }, 9);
+    observeBatchEvent(buffer, assistantStart, 10);
+    observeBatchEvent(buffer, update({ type: "text_start", contentIndex: 0 }), 11);
+    assert.equal(batchViews(buffer).length, AGENT_BATCH_CAP + 1, "the generating view rides on top of a full history");
+    assert.equal(observeBatchEvent(buffer, { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "done" }] } }, 20), true);
+    assert.equal(buffer.generating, undefined);
+    assert.deepEqual(batchViews(buffer).map((view) => view.seq), [1, 2, 3, 4, 5], "no batch was evicted and no sequence number consumed");
+    assert.equal(buffer.nextSeq, AGENT_BATCH_CAP + 1);
+  });
+
+  for (const type of ["turn_end", "agent_end", "agent_settled"]) {
+    test(`${type} drops a generating message`, () => {
+      const buffer = createBatchBuffer();
+      observeBatchEvent(buffer, assistantStart, 10);
+      assert.equal(observeBatchEvent(buffer, { type }, 20), true);
+      assert.deepEqual(batchViews(buffer), []);
+    });
+  }
+
+  test("closeOpenBatch (a re-attach or launch end) drops a generating message and reports the change", () => {
+    const buffer = createBatchBuffer();
+    observeBatchEvent(buffer, assistantStart, 10);
+    assert.equal(closeOpenBatch(buffer, 20), true);
+    assert.equal(buffer.generating, undefined);
+    assert.equal(closeOpenBatch(buffer, 30), false);
+  });
+});
+
+describe("failure count", () => {
+  test("failed counts error results, also while the batch still runs", () => {
+    const buffer = createBatchBuffer();
+    observeBatchEvent(buffer, messageEnd({ id: "a", name: "edit" }, { id: "b", name: "bash" }, { id: "c", name: "read" }), 10);
+    for (const id of ["a", "b", "c"]) observeBatchEvent(buffer, start(id, "x"), 11);
+    assert.equal(batchView(buffer.batches[0]).failed, 0);
+    observeBatchEvent(buffer, end("a", { isError: true }), 20);
+    const running = batchView(buffer.batches[0]);
+    assert.equal(running.failed, 1);
+    assert.ok(running.running, "a running batch stays running after a failure");
+    observeBatchEvent(buffer, end("b"), 21);
+    observeBatchEvent(buffer, end("c", { isError: true }), 22);
+    assert.equal(batchView(buffer.batches[0]).failed, 2);
+    assert.equal(batchView(buffer.batches[0]).endedAt, 22);
+  });
+
+  test("calls still unfinished when turn_end / agent_end / agent_settled closes the batch count as failed", () => {
+    for (const type of ["turn_end", "agent_end", "agent_settled"]) {
+      const buffer = createBatchBuffer();
+      observeBatchEvent(buffer, messageEnd({ id: "a", name: "bash" }, { id: "b", name: "read" }, { id: "c", name: "grep" }), 10);
+      observeBatchEvent(buffer, start("a", "bash"), 11);
+      observeBatchEvent(buffer, start("b", "read"), 11);
+      observeBatchEvent(buffer, end("b"), 12);
+      assert.equal(batchView(buffer.batches[0]).failed, 0, `${type}: unfinished calls of a running batch are not failures yet`);
+      observeBatchEvent(buffer, { type }, 20);
+      assert.equal(batchView(buffer.batches[0]).failed, 2, `${type}: the in-flight call and the never-started one`);
+    }
+  });
+});

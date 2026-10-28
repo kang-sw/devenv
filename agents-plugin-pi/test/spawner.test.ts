@@ -157,6 +157,7 @@ import { approvalConsumedMessage } from "../src/approval-protocol.ts";
 import type { ChannelConnection, ChannelHello } from "../src/agent-channel.ts";
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
 import { installSubtreePublisher, SubtreeUpstream } from "../src/subtree-lifecycle.ts";
+import { agentViewUpstreamRef } from "../src/agent-view.ts";
 import { fakeParentChannel, fakeUplink, idleOwnTurn, until } from "./fixtures/subtree-channels.ts";
 /** One event-loop turn: lets the zero-delay settle-time wake timer run. */
 const macrotask = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
@@ -1493,6 +1494,46 @@ describe("applyRpcEvent", () => {
     assert.equal(record.lastOutputAt, 1_100);
     assert.equal(refreshes, 0, "streaming writes the high-water field only; the periodic gutter clock renders it");
     assert.equal(uplink.sent.length, sendsBefore, "token deltas send no subtree snapshot upstream");
+  });
+});
+
+describe("attachEventListener: tool-call argument streaming (261028 batch-row redesign)", () => {
+  test("N toolcall_delta events cost no subtree publish and no refresh, yet the character count reaches the widget's buffer and the relay, and the activity clock resets", (t) => {
+    let now = 1_000;
+    t.mock.method(Date, "now", () => now);
+    let listener: ((event: unknown) => void) | undefined;
+    let getStateCalls = 0;
+    const client = {
+      onEvent(callback: (event: unknown) => void) { listener = callback; return () => {}; },
+      getState: async () => { getStateCalls += 1; return {}; },
+    } as unknown as RpcClient;
+    const record = freshRpcRecord({ client, running: true, streaming: true });
+    const registry = new Map([[record.agentId, record]]);
+    let publishes = 0;
+    installSubtreePublisher(registry, new SubtreeUpstream(fakeUplink().channel), () => 0, () => { publishes += 1; return idleOwnTurn(); });
+    let refreshes = 0;
+    agentWidgetRefreshRef.current = () => { refreshes += 1; };
+    let relaySchedules = 0;
+    agentViewUpstreamRef.current = { schedule() { relaySchedules += 1; } } as never;
+    t.after(() => { agentWidgetRefreshRef.current = undefined; agentViewUpstreamRef.current = undefined; });
+    attachEventListener(undefined, registry, record, client);
+
+    // RPC shape: message_start keeps its message; updates carry no message and no partial.
+    listener?.({ type: "message_start", message: { role: "assistant", content: [] } });
+    listener?.({ type: "message_update", assistantMessageEvent: { type: "toolcall_start", contentIndex: 0, id: "w1", toolName: "write" } });
+    assert.equal(record.toolBatches?.generating?.toolName, "write");
+    const before = { publishes, refreshes, getStateCalls, relaySchedules };
+    const N = 500;
+    for (let i = 0; i < N; i++) {
+      now = 2_000 + i;
+      listener?.({ type: "message_update", assistantMessageEvent: { type: "toolcall_delta", contentIndex: 0, delta: "abcd" } });
+    }
+    assert.equal(publishes, before.publishes, "no publishSubtree per delta");
+    assert.equal(getStateCalls, before.getStateCalls, "no telemetry refresh per delta");
+    assert.equal(refreshes, before.refreshes, "no widget refresh per delta; the 1 s expanded tick repaints");
+    assert.equal(relaySchedules - before.relaySchedules, N, "each delta only marks the throttled agent-view relay dirty");
+    assert.equal(record.toolBatches?.generating?.chars, 4 * N, "the count reaches the buffer the widget and relay read");
+    assert.equal(record.lastOutputAt, 2_000 + N - 1, "argument streaming resets the activity clock");
   });
 });
 

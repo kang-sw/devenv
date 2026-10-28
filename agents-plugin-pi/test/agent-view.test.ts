@@ -29,9 +29,9 @@ import type { RpcAgentRecord, RpcAgentRegistry } from "../src/spawner.ts";
 // Fixtures
 // ---------------------------------------------------------------------------
 
-const finished = (seq: number, overrides: Record<string, unknown> = {}) => ({ seq, toolNames: ["read"], callCount: 1, startedAt: seq * 10, endedAt: seq * 10 + 5, ...overrides });
+const finished = (seq: number, overrides: Record<string, unknown> = {}) => ({ seq, toolNames: ["read"], callCount: 1, failed: 0, startedAt: seq * 10, endedAt: seq * 10 + 5, ...overrides });
 const runningBatch = (seq: number, overrides: Record<string, unknown> = {}) => ({
-  seq, toolNames: ["bash"], callCount: 2, startedAt: seq * 10,
+  seq, toolNames: ["bash"], callCount: 2, failed: 0, startedAt: seq * 10,
   running: { toolName: "bash", argsPreview: "command: ls", startedAt: seq * 10 + 1, done: 1, othersRunning: 0 },
   ...overrides,
 });
@@ -154,6 +154,34 @@ describe("parseAgentViewMessage", () => {
     assert.equal([...long[1].running!.argsPreview].length, BATCH_ARGS_PREVIEW_CAP);
     assert.ok(long[1].running!.argsPreview.endsWith("…"));
     assert.ok([...long[1].running!.toolName].length <= 64, "a relayed tool name is bounded too");
+  });
+
+  test("261028 redesign: `failed` and a generating view round-trip; malformed ones are dropped", () => {
+    const generating = (seq: number, phase: Record<string, unknown>, overrides: Record<string, unknown> = {}) => ({ seq, toolNames: [], callCount: 0, failed: 0, startedAt: seq * 10, generating: phase, ...overrides });
+    const good = [
+      finished(1, { callCount: 3, failed: 2 }),
+      runningBatch(2, { failed: 1 }),
+      generating(3, { kind: "thinking", phaseStartedAt: 31 }),
+      generating(4, { kind: "replying", phaseStartedAt: 41 }),
+      generating(5, { kind: "tool", phaseStartedAt: 51, toolName: "write", chars: 12_345 }),
+    ];
+    const parsed = parseAgentViewMessage(wire({ agents: [{ id: "a", batches: good }] }))!.get("a")!;
+    assert.deepEqual(parsed, good, "the new fields survive the wire unchanged");
+
+    const bad = [
+      finished(10, { failed: undefined }), finished(11, { failed: -1 }), finished(12, { failed: 1.5 }), finished(13, { failed: 2 }),
+      generating(14, { kind: "thinking", phaseStartedAt: 1 }, { endedAt: 5 }), // two of endedAt / running / generating
+      generating(15, { kind: "dreaming", phaseStartedAt: 1 }),
+      generating(16, { kind: "thinking" }),
+      generating(17, { kind: "tool", phaseStartedAt: 1, chars: 3 }), // no tool name
+      generating(18, { kind: "tool", phaseStartedAt: 1, toolName: "write", chars: -3 }),
+      generating(19, "thinking"),
+    ];
+    const kept = parseAgentViewMessage({ agents: [{ id: "a", batches: [...bad, generating(20, { kind: "thinking", phaseStartedAt: 1, toolName: "ignored", chars: 9 })] }] })!.get("a")!;
+    assert.deepEqual(kept, [generating(20, { kind: "thinking", phaseStartedAt: 1 })], "a non-tool phase drops stray tool fields");
+    const controls = parseAgentViewMessage({ agents: [{ id: "a", batches: [generating(1, { kind: "tool", phaseStartedAt: 1, toolName: "wr\u001bite" + "x".repeat(100), chars: 1 })] }] })!.get("a")!;
+    assert.ok(!/[\u0000-\u001f]/.test(controls[0].generating!.toolName!));
+    assert.ok([...controls[0].generating!.toolName!].length <= 64);
   });
 
   test("control characters in relayed strings never reach the widget", () => {
@@ -568,6 +596,51 @@ describe("three-level relay", () => {
     link2.drop();
     assert.equal(mInRoot.descendantViews, undefined);
     assert.equal(collectBatchViews(registryRoot).size, 0);
+  });
+});
+
+describe("three-level relay: generating phase and failures (261028 redesign)", () => {
+  test("a grandchild's generating phase, streamed character count and failure count reach the root through two hops", () => {
+    let now = 50_000;
+    const z = rec("zzzzzzzz-z", { toolBatches: createBatchBuffer() });
+    const registryX = registryOf(z);
+    const xInM = rec("xxxxxxxx-x", { toolBatches: bufferOf("x", ["done"]), subtreeDescendants: [nested("zzzzzzzz-z")] });
+    const registryM = registryOf(xInM);
+    const mInRoot = rec("mmmmmmmm-m");
+    const registryRoot = registryOf(mInRoot);
+    const link2 = link();
+    mInRoot.channel = link2.parent.parent as never;
+    observeAgentView(mInRoot, link2.parent.parent as never, () => {});
+    const upstreamM = new AgentViewUpstream(link2.child.channel, { intervalMs: 0, now: () => now });
+    upstreamM.setSource(() => buildAgentViewModel(registryM));
+    const link1 = link();
+    xInM.channel = link1.parent.parent as never;
+    observeAgentView(xInM, link1.parent.parent as never, () => { upstreamM.schedule(); });
+    const upstreamX = new AgentViewUpstream(link1.child.channel, { intervalMs: 0, now: () => now });
+    upstreamX.setSource(() => buildAgentViewModel(registryX));
+    const atRoot = () => collectBatchViews(registryRoot).get("zzzzzzzz-z")!;
+
+    // RPC-shaped stream: no `partial`, the tool name on toolcall_start, bare deltas.
+    const zb = z.toolBatches!;
+    observeBatchEvent(zb, { type: "message_start", message: { role: "assistant", content: [] } }, now);
+    upstreamX.schedule();
+    assert.deepEqual(atRoot().at(-1)!.generating, { kind: "thinking", phaseStartedAt: 50_000 });
+    now = 53_000;
+    observeBatchEvent(zb, { type: "message_update", assistantMessageEvent: { type: "toolcall_start", contentIndex: 0, id: "w1", toolName: "write" } }, now);
+    for (const delta of ["{\"path\":", "\"a.ts\",", "\"content\":\"xyz\"}"]) observeBatchEvent(zb, { type: "message_update", assistantMessageEvent: { type: "toolcall_delta", contentIndex: 0, delta } }, now);
+    upstreamX.schedule();
+    assert.deepEqual(atRoot().at(-1)!.generating, { kind: "tool", phaseStartedAt: 53_000, toolName: "write", chars: 31 });
+
+    // The message ends with the call; it executes and fails.
+    observeBatchEvent(zb, { type: "message_end", message: { role: "assistant", content: [{ type: "toolCall", id: "w1", name: "write", arguments: { path: "a.ts" } }] } }, now);
+    observeBatchEvent(zb, { type: "tool_execution_start", toolCallId: "w1", toolName: "write" }, now);
+    observeBatchEvent(zb, { type: "tool_execution_end", toolCallId: "w1", isError: true }, now + 1);
+    upstreamX.schedule();
+    const last = atRoot().at(-1)!;
+    assert.equal(last.generating, undefined);
+    assert.equal(last.failed, 1);
+    assert.equal(last.endedAt, now + 1);
+    assert.deepEqual(atRoot(), batchViews(zb), "the root holds exactly the grandchild's own views");
   });
 });
 

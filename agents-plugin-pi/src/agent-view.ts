@@ -28,10 +28,18 @@
  * snapshot keeps (`selectSubtreeDescendants`, parent-before-child). The
  * receiver computes elapsed time from each running call's start time, so a
  * running batch needs no per-second publish.
+ *
+ * 261028 batch-row redesign: each batch carries a `failed` count, and an
+ * assistant message still generating travels as a view with `generating`
+ * (phase kind, phase start, and while a tool call streams its tool name and
+ * character count). The count changes with every streamed delta, so a
+ * streaming child republishes at the throttle rate; no compatibility
+ * fallback exists, since every RPC child loads the parent's exact extension
+ * entry.
  */
 
 import type { ChildChannel, ParentChannel } from "./agent-channel.ts";
-import { AGENT_BATCH_CAP, BATCH_ARGS_PREVIEW_CAP, BATCH_TOOL_NAME_CAP, batchViews, type BatchRunningView, type BatchView } from "./agent-batches.ts";
+import { AGENT_BATCH_CAP, BATCH_ARGS_PREVIEW_CAP, BATCH_TOOL_NAME_CAP, batchViews, type BatchGeneratingView, type BatchRunningView, type BatchView } from "./agent-batches.ts";
 import { MAX_SUBTREE_DESCENDANTS, SUBTREE_TELEMETRY_INTERVAL_MS, selectSubtreeDescendants } from "./subtree-lifecycle.ts";
 import type { RpcAgentRecord, RpcAgentRegistry } from "./spawner.ts";
 
@@ -70,25 +78,42 @@ function parseRunning(raw: unknown): BatchRunningView | undefined {
   };
 }
 
-/** One relayed batch, or `undefined` when malformed. Exactly one of `endedAt` (finished) and `running` must be present. */
+function parseGenerating(raw: unknown): BatchGeneratingView | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const value = raw as Partial<Record<keyof BatchGeneratingView, unknown>>;
+  if (!isClock(value.phaseStartedAt)) return undefined;
+  if (value.kind === "thinking" || value.kind === "replying") return { kind: value.kind, phaseStartedAt: value.phaseStartedAt };
+  if (value.kind !== "tool" || typeof value.toolName !== "string" || !isCount(value.chars)) return undefined;
+  return { kind: "tool", phaseStartedAt: value.phaseStartedAt, toolName: capString(value.toolName, TOOL_NAME_CAP), chars: value.chars };
+}
+
+/**
+ * One relayed batch, or `undefined` when malformed. Exactly one of `endedAt`
+ * (finished), `running` and `generating` must be present, and `failed` is a
+ * count no larger than `callCount`.
+ */
 function parseBatch(raw: unknown): BatchView | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const value = raw as Partial<Record<keyof BatchView, unknown>>;
-  if (!Number.isSafeInteger(value.seq) || (value.seq as number) <= 0 || !isCount(value.callCount) || !isClock(value.startedAt) || !Array.isArray(value.toolNames)) return undefined;
+  if (!Number.isSafeInteger(value.seq) || (value.seq as number) <= 0 || !isCount(value.callCount) || !isCount(value.failed) || value.failed > value.callCount || !isClock(value.startedAt) || !Array.isArray(value.toolNames)) return undefined;
   const toolNames = (value.toolNames as unknown[])
     .filter((name): name is string => typeof name === "string" && name.length > 0)
     .slice(0, BATCH_TOOL_NAME_CAP)
     .map((name) => capString(name, TOOL_NAME_CAP));
-  const view: BatchView = { seq: value.seq as number, toolNames, callCount: value.callCount, startedAt: value.startedAt };
-  const hasEnd = value.endedAt !== undefined;
-  const running = value.running !== undefined ? parseRunning(value.running) : undefined;
-  if (hasEnd === (value.running !== undefined)) return undefined;
-  if (hasEnd) {
+  const view: BatchView = { seq: value.seq as number, toolNames, callCount: value.callCount, failed: value.failed, startedAt: value.startedAt };
+  const present = [value.endedAt, value.running, value.generating].filter((field) => field !== undefined).length;
+  if (present !== 1) return undefined;
+  if (value.endedAt !== undefined) {
     if (!isClock(value.endedAt)) return undefined;
     view.endedAt = value.endedAt;
-  } else {
+  } else if (value.running !== undefined) {
+    const running = parseRunning(value.running);
     if (!running) return undefined;
     view.running = running;
+  } else {
+    const generating = parseGenerating(value.generating);
+    if (!generating) return undefined;
+    view.generating = generating;
   }
   return view;
 }
