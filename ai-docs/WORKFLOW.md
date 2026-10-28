@@ -1,18 +1,18 @@
-# ws Workflow Guide
+# Workflow Guide
 
 This guide is copied to `ai-docs/WORKFLOW.md` by bootstrap so a
-maintainer can preserve the project shape when ws skills or MCP tools are not
+maintainer can preserve the project shape when plugin skills or MCP tools are not
 available. It is an explanation and manual fallback only: editing this file does
 not change MCP parser behavior, plugin/runtime semantics, ticket status logic,
 or any other machine contract.
 
-When this guide and installed ws tooling disagree, treat the installed plugin,
+When this guide and installed plugin tooling disagree, treat the installed plugin,
 runtime, and bundled conventions as canonical. Update the upstream bootstrap
 template rather than relying on a project-local guide override.
 
 ## Authority Files
 
-- `AGENTS.md` is the canonical root workflow context for agents.
+- `AGENTS.md` is the canonical root workflow context for AI agents and automation.
 - `CLAUDE.md` exists only for Claude compatibility and should contain
   `@AGENTS.md` when the project has migrated to the host-neutral context.
 - `ai-docs/WORKFLOW.md` is this pinned guide for plugin-less
@@ -30,13 +30,9 @@ template rather than relying on a project-local guide override.
   one file per topic with a `summary:` frontmatter line describing when it
   applies; a `*.local.md` sibling (gitignored) holds machine-local procedure
   content such as credentials, IPs, hostnames, or host-specific runbooks.
-- Volatile local context (not shared through Git) lives in the `worktree` or
-  `clone` note layer, written through `ws/note.write(layer: "worktree" | "clone",
-  ...)` - `worktree` by default, `clone` only when the content is shared
-  across worktrees of the same clone.
-- `ws-notes/` is the git-tracked `repo` note layer, one file per key, written
-  through `ws/note.write(layer: "repo", ...)`. It holds volatile or tracked
-  session context; prune stale entries qualitatively as the project advances.
+- `ws-notes/` is the git-tracked `repo` note layer, one file per key. It holds
+  volatile or tracked session context; prune stale entries qualitatively as
+  the project advances.
 - `tickets/` stores work by status directory: `idea/`, `todo/`, `ready/`,
   `.done/`, and `.dropped/`.
 - `ref/` stores static references and non-derivable external facts that are
@@ -88,15 +84,6 @@ document. Manuals carry no per-commit update obligation; drift is fixed on
 contact and by review.
 
 ## Execution Model
-
-The working entries are `lead-discuss`, `lead-ticket`, `lead-delegate`,
-`lead-run`, `lead-review`, and `lead-ship`. `lead-delegate` manages a bounded,
-session-local native executor with follow-up continuity. It permits reversible,
-self-verifying low-impact work; ready tickets, material behavior or contract
-changes, unclear or cross-module scope, independent-review needs, and unresolved
-design decisions route to `lead-run`. Ticket capture, standalone review, and
-release retain their owning workflows. `workflow.prefer_subagent` defaults only
-eligible general work to `lead-delegate`.
 
 The ticket is the plan. At actionable `ready/` promotion its stated facts are
 checked against the code and written into it, then its plan passes independent
@@ -176,9 +163,9 @@ instead of full dissolution:
 6. Compact source-derived detail to source pointers, static material to
    `ai-docs/ref/` or API-doc pointers, work history to Git or ticket archives,
    and duplicated maps to start-here pointers.
-7. Route deeper semantic work through the owning workflow: procedures to
-   `ai-docs/manuals/`, ticket readiness/status wording to `ws:lead-ticket`, and
-   ambiguous direction to `ws:lead-discuss`.
+7. Route deeper semantic work through the owning workflow: procedures into
+   `ai-docs/manuals/`, ticket readiness/status wording into the ticket body,
+   and ambiguous direction to a discussion pass.
 
 ## Commit Traceability
 
@@ -189,12 +176,12 @@ instead of full dissolution:
 
 ## Manual Fallback
 
-When ws skills, MCP tools, or Claude compatibility commands are unavailable:
+When workflow skills, MCP tools, or Claude compatibility commands are unavailable:
 
 1. Read `AGENTS.md`, this guide, and the relevant current docs.
 2. Use existing nearby tickets and manuals as formatting examples.
 3. Prefer conservative, append-only changes when parser behavior is uncertain.
 4. Keep generated AI docs and commit messages in English unless a human-facing
    product string requires another language.
-5. Verify with plain Git and shell commands, then re-run ws verification tools
-   when they become available.
+5. Verify with plain Git and shell commands, then re-run plugin verification
+   tools when they become available.
