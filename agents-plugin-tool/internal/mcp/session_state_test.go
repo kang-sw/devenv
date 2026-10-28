@@ -638,6 +638,50 @@ func TestRenderTodosEmptyInstructionsOmitted(t *testing.T) {
 	}
 }
 
+// TestTodoAndAgendaListTextTheClaudeBandParses pins the todo.list full-mode
+// and agenda.list text, one item of each todo status, to the literals the
+// Claude mod's status band parses (TODO_TEXT and AGENDA_TEXT in
+// agents-plugin/hooks/claude-mod/band-engine.test.tsx): neither tool has a
+// structured format, so a change here must change the band's parse with it.
+func TestTodoAndAgendaListTextTheClaudeBandParses(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 931000, root, nil))
+
+	id := 931001
+	call := func(name string, args map[string]any) string {
+		id++
+		return callToolWithKey(t, server, id, key, name, args)
+	}
+	if got := call("todo.list", map[string]any{"mode": "full"}); got != "(no todos)\n" {
+		t.Fatalf("empty todo.list full = %q", got)
+	}
+	if got := call("agenda.list", nil); got != "no agenda blobs\n" {
+		t.Fatalf("empty agenda.list = %q", got)
+	}
+	call("todo.add", map[string]any{"key": "alpha", "title": "Alpha done"})
+	call("todo.add", map[string]any{"key": "beta", "title": "Beta in progress", "instruction": "Beta instruction"})
+	call("todo.add", map[string]any{"key": "gamma", "title": "Gamma pending"})
+	call("todo.add", map[string]any{"key": "delta", "title": "Delta deferred"})
+	call("todo.check", map[string]any{"key": "alpha", "status": "done"})
+	call("todo.check", map[string]any{"key": "beta", "status": "wip"})
+	call("todo.check", map[string]any{"key": "delta", "status": "defer"})
+	call("agenda.set", map[string]any{"key": "plan", "value": "x"})
+	call("agenda.set", map[string]any{"key": "implement", "value": map[string]any{"mode": "delegated"}})
+
+	const todoText = "- [x] {alpha} Alpha done\n- [~] {beta} Beta in progress\n      Beta instruction\n- [ ] {gamma} Gamma pending\n- [>] {delta} Delta deferred\n"
+	if got := call("todo.list", map[string]any{"mode": "full"}); got != todoText {
+		t.Fatalf("todo.list full drifted from the band's literal:\n got: %q\nwant: %q", got, todoText)
+	}
+	const agendaText = "- implement: {mode}\n- plan: \"x\"\n"
+	if got := call("agenda.list", nil); got != agendaText {
+		t.Fatalf("agenda.list drifted from the band's literal:\n got: %q\nwant: %q", got, agendaText)
+	}
+}
+
 func TestRenderTodosCheckpointAdjacentActionableInstructions(t *testing.T) {
 	list := []todoItem{
 		{Key: "a", Title: "A", Status: todoDone, Instruction: stringPtr("Alpha full instruction")},

@@ -197,3 +197,46 @@ Then check a live session, which engine tests cannot see: the key appears in
 permission dialog for the band's reads, and the bar's width matches what the
 terminal draws with the emoji cells. If a permission dialog does appear,
 stop and report instead of redesigning the read path.
+
+### Result (4ca59787) - 2026-10-28
+
+Landed (05c47a4a, 4ca59787): `band.tsx` (pure layout/parse helpers, the
+`createBand` state machine, `drawBand`) joined to `register.ts`'s fan-out
+(session.start, the unmatched tool.call, session.measure, a new main-loop
+`turn.step`, turn.complete, session.end) with a ws-only `ui.render`
+`AbovePrompt` hook; `claude.status_band_enabled` in
+`agents-plugin/config-manifest.json`; `band-engine.test.tsx` (23 engine
+tests covering every case this phase lists); the key pinned in
+`TestConfigGetReadsClaudeCaptionKeys` with a session-scope tune read only by
+a keyed read; `TestTodoAndAgendaListTextTheClaudeBandParses` pinning the
+`todo.list` full / `agenda.list` text to the literals the band test parses;
+the wsflow mirror resynced; `hooks.json` and the wsflow mirroring manual name
+the band.
+
+Verification: `claude plugin test agents-plugin` 387 pass / 0 fail;
+`claude plugin test agents-plugin-wsflow` 387 pass / 0 fail;
+`go test ./...` (agents-plugin-tool) all ok; `TestWsflowHooksMirrorUpToDate`
+ok; `python3 -m unittest discover` for both package test dirs OK; tsc over
+`band.tsx` and `register.ts` against the engine's types clean;
+`claude plugin validate agents-plugin` passed. Lite review: no Critical or
+Important findings.
+
+Decisions taken here:
+- Layout widths are computed explicitly (`row2Layout`, `fitChips`,
+  `titleParts`) and every content row is laid out at the inner width with
+  `overflow: hidden`, so the frame stays intact at any width.
+- A bar label clamped into the fill near 100% is drawn on the fill color, so
+  the 100% capsule with both caps fill-colored reads as one piece.
+- Deferred todos count as settled in `todo <done>/<total>`; the rest row
+  lists every other open (wip or pending) key.
+- ws, mailbox and config-tune refreshes fire only on the model's own calls
+  (origin engine), so the mod's own lookups never loop.
+
+Not done: the live-session check (the key in a running server's
+`config.list`, no permission dialog for the band's reads under the default
+mode, the bar's width against the terminal's emoji cells) needs an
+interactive Claude Code session with the updated plugin, which the worker
+could not drive. Review observations left open (Minor): staged-only changes
+read as `clean` (unstaged `git diff --numstat`, inherited from the spike); the
+budget-delta math and the 10 s tick have no test; overlapping usage reads
+carry no sequence guard; a rejected `cwd()`/`root()` skips that git patch.
