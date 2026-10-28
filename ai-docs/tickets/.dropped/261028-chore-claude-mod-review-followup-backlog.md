@@ -1,5 +1,6 @@
 ---
 title: Work down the claude-mod hook review follow-up backlog
+dropped: 2026-10-28
 ---
 # Work down the claude-mod hook review follow-up backlog
 
@@ -78,3 +79,8 @@ for one worker pass.
 | doorpost-relive-morphine | claude-mod/compaction.test.ts:1-19 | still imports ./timing; no timing.test.ts |
 | exponent-skinning-nutlike | agents-plugin/hooks/ | no tsconfig anywhere under hooks (mailbox-push dir gone); tsc claim not reproducible (?) |
 | custard-frenzy-backlog | claude-mod/register.ts:475-482 | restore reads stale STORE_PREFIX entry on same session id; no sweep (manual has prune, mailbox none); noise only (?) |
+
+
+## Resolution (2026-10-28)
+
+Dropped by user decision the same day. The canonical design lets minor review follow-ups age out of later release-gate ranges (lead-ship Release gate step 1), and lead-review now re-grades a hittable-defect Minor to Important before the verdict (5a3e14a2a), so the remaining TEST/TIDY rows are left to age out rather than kept as a standing backlog. The two open policy questions (credible-amid-patrol: Korean in the shipped caption DEFAULT_STYLE; thievish-dodge-suggest) were not decided and are dropped with it; raise them again if the caption feature is revisited. The rows stay here as a reference.

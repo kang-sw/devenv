@@ -1,5 +1,6 @@
 ---
 title: Work down the agents-plugin-pi review follow-up backlog
+dropped: 2026-10-28
 ---
 # Work down the agents-plugin-pi review follow-up backlog
 
@@ -112,3 +113,8 @@ for one worker pass.
 | dairy-doable-parted | src/goal-loop.ts:681-686 | keptTailMessages docstring omits overflow exception (exception noted at call site 1675) |
 | excretion-churn-mayflower | test/goal-loop.test.ts:1862 | title says ws-mcp config.get but body uses fileReader shim |
 | canteen-rare-void | src/lead-skills.ts:39, src/bridge.ts:709-710 | comments still name retired lead-drain-ready-queue / lead-proceed.md (no such skill/rsrc at HEAD) |
+
+
+## Resolution (2026-10-28)
+
+Dropped by user decision the same day. The canonical design lets minor review follow-ups age out of later release-gate ranges (lead-ship Release gate step 1), and lead-review now re-grades a hittable-defect Minor to Important before the verdict (5a3e14a2a), so the remaining TEST/TIDY rows are left to age out rather than kept as a standing backlog. The rows stay here, with their original follow-up ids, as a reference if any area is picked up later.

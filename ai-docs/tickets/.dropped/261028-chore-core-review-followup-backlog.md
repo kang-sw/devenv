@@ -1,5 +1,6 @@
 ---
 title: Work down the MCP tooling and playbook review follow-up backlog
+dropped: 2026-10-28
 ---
 # Work down the MCP tooling and playbook review follow-up backlog
 
@@ -75,3 +76,8 @@ for one worker pass.
 | envious-exorcist-unwarlike | mcp/playbook_tools.go:257 | helper placement; manifest env pins missing |
 | matchbox-elevating-qualify | mcp/mailbox_runtime.go:374 | one-line wrapper |
 | awaken-spinout-duh | mcp/git_followups.go:15, server.go:1501 | `followups: []` from non-root key refused; deliberately pinned by git_followups_test.go:79-83 with a clear message and nothing committed, so a design choice rather than a defect (?) (could be BUG if workers routinely send []) |
+
+
+## Resolution (2026-10-28)
+
+Dropped by user decision the same day. The canonical design lets minor review follow-ups age out of later release-gate ranges (lead-ship Release gate step 1), and lead-review now re-grades a hittable-defect Minor to Important before the verdict (5a3e14a2a), so the remaining TEST/TIDY rows are left to age out rather than kept as a standing backlog. The Windows replace-retry rows live on in 261028-bug-wsnote-windows-rename-retry. The rows stay here as a reference.
