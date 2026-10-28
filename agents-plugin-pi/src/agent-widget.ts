@@ -826,25 +826,48 @@ function plural(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
-/** Mark-column glyphs of a batch row (the running row's mark is the spinner). */
+/** Mark-column glyphs of a batch row (a running or generating row's mark is the spinner). */
 export const BATCH_FINISHED_MARK = "✓";
+export const BATCH_FAILED_MARK = "✗";
 export const BATCH_PLACEHOLDER_MARK = "-";
 
-/** The metric column of a finished batch: `N calls · <rel> ago`. */
+/** ` · N failed` when any call failed, else nothing. */
+function failedMetric(view: BatchView): string {
+  return view.failed > 0 ? ` · ${view.failed} failed` : "";
+}
+
+/** The metric column of a finished batch: `N calls · N failed · <rel> ago`, `N failed` only when any call failed. */
 export function formatFinishedBatchMetrics(view: BatchView, now: number): string {
-  return `${plural(view.callCount, "call")} · ${formatRelative(now - (view.endedAt ?? now))}`;
+  return `${plural(view.callCount, "call")}${failedMetric(view)} · ${formatRelative(now - (view.endedAt ?? now))}`;
 }
 
 /**
- * The metric column of a running batch: `<done>/<n> · +<k> · <elapsed>`,
- * with `+<k>` (other calls still in flight) only when k > 0 and the elapsed
- * time of the reported (oldest in-flight) call.
+ * The metric column of a running batch: `<done>/<n> · +<k> · N failed ·
+ * <elapsed>`, with `+<k>` (other calls still in flight) only when k > 0,
+ * `N failed` only when a call already failed, and the elapsed time of the
+ * reported (oldest in-flight) call.
  */
 export function formatRunningBatchMetrics(view: BatchView, now: number): string {
   const running = view.running;
   if (!running) return formatFinishedBatchMetrics(view, now);
   const others = running.othersRunning > 0 ? ` · +${running.othersRunning}` : "";
-  return `${running.done}/${view.callCount}${others} · ${formatCompactDuration(clampElapsed(now - running.startedAt))}`;
+  return `${running.done}/${view.callCount}${others}${failedMetric(view)} · ${formatCompactDuration(clampElapsed(now - running.startedAt))}`;
+}
+
+/** A generating row's prose: `thinking`, `replying`, or the streaming call's tool name. */
+export function formatGeneratingProse(view: BatchView): string {
+  const generating = view.generating;
+  if (!generating) return "";
+  if (generating.kind === "tool") return sanitizeDisplayTitle(generating.toolName, "tool");
+  return generating.kind === "thinking" ? "thinking" : "replying";
+}
+
+/** A generating row's metrics: `<N> chars · <elapsed>` while a tool call streams, else `<elapsed>`; elapsed from the phase's start. */
+export function formatGeneratingMetrics(view: BatchView, now: number): string {
+  const generating = view.generating;
+  if (!generating) return "";
+  const elapsed = formatCompactDuration(clampElapsed(now - generating.phaseStartedAt));
+  return generating.kind === "tool" ? `${plural(generating.chars ?? 0, "char")} · ${elapsed}` : elapsed;
 }
 
 /** The spinner frame for `now`: one step per expanded tick. */
@@ -909,11 +932,22 @@ function formatRunningBatchRow(view: BatchView, depth: number, now: number, widt
   return composeBatchRow(depth, width, spinnerFrame(now), undefined, body, undefined, theme);
 }
 
-/** A finished batch row, dimmed whole: `✓`, the summary or tool names, and its metrics. */
+/** The generating row, bright: the spinner, the phase label or streaming tool, and its metrics. */
+function formatGeneratingBatchRow(view: BatchView, depth: number, now: number, width: number, theme: AgentWidgetTheme | undefined): string {
+  const available = Math.max(0, width - 2 * depth - 4);
+  const body = layoutBatchRowBody({ head: formatGeneratingProse(view) }, formatGeneratingMetrics(view, now), available);
+  return composeBatchRow(depth, width, spinnerFrame(now), undefined, body, undefined, theme);
+}
+
+/**
+ * A finished batch row, dimmed: `✓` (or `✗` in the error color when a call
+ * failed), the summary or tool names, and its metrics.
+ */
 function formatFinishedBatchRow(view: BatchView, summary: string | undefined, depth: number, now: number, width: number, theme: AgentWidgetTheme | undefined): string {
   const available = Math.max(0, width - 2 * depth - 4);
   const body = layoutBatchRowBody({ head: summary ?? view.toolNames.join(", ") }, formatFinishedBatchMetrics(view, now), available);
-  return composeBatchRow(depth, width, BATCH_FINISHED_MARK, "dim", body, "dim", theme);
+  const failed = view.failed > 0;
+  return composeBatchRow(depth, width, failed ? BATCH_FAILED_MARK : BATCH_FINISHED_MARK, failed ? "error" : "dim", body, "dim", theme);
 }
 
 /** An unfilled history slot: the `│`, then a dim `-` in the mark column. */
@@ -942,7 +976,9 @@ export interface ExpandedWidgetOptions {
  * then `-` placeholder rows up to its allotment, then the `+N more` tail and
  * any blank fold padding. Every batch row starts with a dim `│` under its
  * agent's bullet; prose sits left and metrics right-aligned. Finished rows
- * are dimmed, `✓` included; the running row is bright. `undefined` under
+ * are dimmed, `✓` included, and only a failed batch's `✗` takes the error
+ * color; the running row and the generating row (an assistant message not
+ * yet a batch) are bright. `undefined` under
  * the same hide rule as `buildWidgetLines`.
  */
 export function buildExpandedWidgetLines(entries: readonly AgentRowEntry[], pendingCount: number, options: ExpandedWidgetOptions): string[] | undefined {
@@ -960,6 +996,10 @@ export function buildExpandedWidgetLines(entries: readonly AgentRowEntry[], pend
     const views = (entry.agentId !== undefined ? options.batches.get(entry.agentId) : undefined) ?? [];
     const shown = views.slice(-batchRows);
     for (const view of shown) {
+      if (view.generating) {
+        lines.push(formatGeneratingBatchRow(view, depth, options.now, width, theme));
+        continue;
+      }
       if (view.running) {
         lines.push(formatRunningBatchRow(view, depth, options.now, width, theme));
         continue;
@@ -974,9 +1014,9 @@ export function buildExpandedWidgetLines(entries: readonly AgentRowEntry[], pend
   return lines;
 }
 
-/** Whether any shown agent has a running batch — the expanded mode's 1 s repaint condition. */
+/** Whether any shown agent has a running or generating batch — the expanded mode's 1 s repaint condition. */
 export function hasRunningBatch(entries: readonly AgentRowEntry[], batches: ReadonlyMap<string, readonly BatchView[]>): boolean {
-  return entries.some((entry) => entry.agentId !== undefined && (batches.get(entry.agentId) ?? []).some((view) => view.running !== undefined));
+  return entries.some((entry) => entry.agentId !== undefined && (batches.get(entry.agentId) ?? []).some((view) => view.running !== undefined || view.generating !== undefined));
 }
 
 /** Every local record's batch views plus each record's relayed descendant views, keyed by agent id; a local buffer wins. */
