@@ -580,7 +580,7 @@
         "email": "ki6080@gmail.com",
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-10-28T01:05:07Z",
         "impl": {
           "branch": "impl/develop/aloof-sway-boned"
