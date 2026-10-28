@@ -15,6 +15,8 @@ import { createAgentStorageContext } from "../src/agent-storage.ts";
 import { CHANNEL_PROTOCOL_VERSION, connectChannelEndpoint, readAndDeleteChannelBootstrap, type ChildChannel, type ParentChannel } from "../src/agent-channel.ts";
 import { agentCostRefreshRef, heldPushQueue, leadIdleRef, sendToAgent, spawnAgent, stopAgent, type RpcAgentRecord } from "../src/spawner.ts";
 import { DESCENDANT_USAGE_MESSAGE, descendantUsageReporterRef } from "../src/agent-usage-rollup.ts";
+import { AGENT_VIEW_MESSAGE, agentViewMessage } from "../src/agent-view.ts";
+import { batchViews, createBatchBuffer, observeBatchEvent } from "../src/agent-batches.ts";
 import { captureForkResume, rehydrateForkRecord, type PersistedForkResume } from "../src/ask.ts";
 import { SubtreeUpstream } from "../src/subtree-lifecycle.ts";
 import { closeFakeChildren, connectFakeChild, type FakeChildOptions } from "./fixtures/channel-child.ts";
@@ -402,6 +404,76 @@ describe("descendant-usage reports over the launch's channel", () => {
       assert.deepEqual(calls, ["refresh", "evaluate"]);
     } finally { rpc.restore(); }
   });
+});
+
+describe("agent-view relay over the launch's channel (261028)", () => {
+  /** One finished batch of a grandchild, as its parent hop would relay it. */
+  function relayedMessage(): ReturnType<typeof agentViewMessage> {
+    const buffer = createBatchBuffer();
+    observeBatchEvent(buffer, { type: "message_end", message: { role: "assistant", content: [{ type: "toolCall", id: "c1", name: "read", arguments: {} }] } }, 1_000);
+    observeBatchEvent(buffer, { type: "tool_execution_start", toolCallId: "c1", toolName: "read" }, 1_001);
+    observeBatchEvent(buffer, { type: "tool_execution_end", toolCallId: "c1" }, 1_002);
+    return agentViewMessage(new Map([["grandchild", batchViews(buffer)]]));
+  }
+
+  async function relayed(record: RpcAgentRecord, child: ChildChannel): Promise<void> {
+    child.send(relayedMessage());
+    await until(() => record.descendantViews !== undefined, "the relayed model reaching the record");
+    assert.deepEqual([...record.descendantViews!.keys()], ["grandchild"]);
+    assert.equal(record.descendantViews!.get("grandchild")![0].callCount, 1);
+  }
+
+  test("spawn: an agent-view message from the child lands on record.descendantViews", async () => {
+    const rpc = installRpcHarness();
+    const registry = new Map<string, RpcAgentRecord>();
+    const ctx = contexts(registry, {});
+    try {
+      let child: ChildChannel | undefined;
+      rpc.state.hook = async function () { child = await connectFakeChild(this.options?.env, this.options?.args); };
+      const { agent_id } = await spawnAgent(registry as any, ctx.fork.spawn as any, ctx.fork.params as any);
+      assert.ok(child, "precondition: the fake child holds the launch's channel");
+      await relayed(registry.get(agent_id)!, child);
+    } finally { rpc.restore(); }
+  });
+
+  test("dormant relaunch: the new launch's channel is observed the same way", async () => {
+    const rpc = installRpcHarness();
+    const registry = new Map<string, RpcAgentRecord>();
+    const ctx = contexts(registry, {});
+    try {
+      const record = await ctx.dormant("fork");
+      let child: ChildChannel | undefined;
+      rpc.state.hook = async function () { child = await connectFakeChild(this.options?.env, this.options?.args); };
+      await sendToAgent(registry as any, ctx.resume as any, record.agentId, "again");
+      assert.ok(child, "precondition: the fake child holds the relaunch's channel");
+      await relayed(record, child);
+    } finally { rpc.restore(); }
+  });
+
+  for (const path of ["spawn", "resume"] as const) {
+    test(`${path}: a launch that fails after relaying drops the relayed model`, async () => {
+      const rpc = installRpcHarness();
+      const registry = new Map<string, RpcAgentRecord>();
+      const ctx = contexts(registry, { readinessTimeoutMs: 300 });
+      try {
+        const record = path === "resume" ? await ctx.dormant("fork") : undefined;
+        let relayedOnce: Promise<void> | undefined;
+        rpc.state.hook = async function () {
+          const child = await connectFakeChild(this.options?.env, this.options?.args, { fork: null });
+          const launched = [...registry.values()][0]!;
+          child.send(relayedMessage());
+          relayedOnce = until(() => launched.descendantViews !== undefined, "the relayed model reaching the record");
+        };
+        const message = FORK_MISSING;
+        if (record) await assert.rejects(sendToAgent(registry as any, ctx.resume as any, record.agentId, "again"), { message });
+        else await assert.rejects(spawnAgent(registry as any, ctx.fork.spawn as any, ctx.fork.params as any), { message });
+        await relayedOnce;
+        const failed = record ?? [...registry.values()][0]!;
+        assert.equal(failed.client, undefined);
+        assert.equal(failed.descendantViews, undefined, "the failed launch's relayed model does not outlive it");
+      } finally { rpc.restore(); }
+    });
+  }
 });
 
 test("an older fork resume that still carries subtreeChannel relaunches with a fresh channel and reports subtree state over it", async () => {

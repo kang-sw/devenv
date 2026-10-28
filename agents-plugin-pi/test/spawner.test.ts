@@ -157,7 +157,8 @@ import { approvalConsumedMessage } from "../src/approval-protocol.ts";
 import type { ChannelConnection, ChannelHello } from "../src/agent-channel.ts";
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
 import { installSubtreePublisher, SubtreeUpstream } from "../src/subtree-lifecycle.ts";
-import { agentViewUpstreamRef } from "../src/agent-view.ts";
+import { agentViewUpstreamRef, type AgentViewModel } from "../src/agent-view.ts";
+import { batchViews, createBatchBuffer, observeBatchEvent } from "../src/agent-batches.ts";
 import { fakeParentChannel, fakeUplink, idleOwnTurn, until } from "./fixtures/subtree-channels.ts";
 /** One event-loop turn: lets the zero-delay settle-time wake timer run. */
 const macrotask = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
@@ -2778,6 +2779,53 @@ describe("pending approval retirement", () => {
     assert.equal(stopped.pendingApproval, undefined);
     assert.equal(classifyRegistryRowState(stopped), undefined);
     assert.deepEqual(evictForCapacity(stoppedRegistry, 1), { ok: true, evictedLabel: "stopped" });
+  });
+});
+
+/**
+ * 261028 relay wiring: `clearLiveState` ends every launch (stop, exit, failed
+ * launch). A launch that ends mid-batch must not leave the batch running, and
+ * the relayed descendant model belongs to the launch, so it is dropped with it.
+ */
+describe("clearLiveState: tool batch and relayed model on launch end (261028)", () => {
+  /** A live record with one batch still open and a relayed model for a descendant. */
+  function relayRecord(): RpcAgentRecord {
+    const toolBatches = createBatchBuffer();
+    observeBatchEvent(toolBatches, { type: "message_end", message: { role: "assistant", content: [{ type: "toolCall", id: "c1", name: "read", arguments: { path: "a.ts" } }] } }, 1_000);
+    observeBatchEvent(toolBatches, { type: "tool_execution_start", toolCallId: "c1", toolName: "read" }, 1_001);
+    assert.equal(toolBatches.batches[0].endedAt, undefined, "precondition: the batch is open");
+    const descendantViews: AgentViewModel = new Map([["grandchild", batchViews(createBatchBuffer())]]);
+    return liveRpcRecord({
+      agentId: "relay",
+      running: true,
+      toolBatches,
+      descendantViews,
+      client: { abort: async () => undefined, stop: async () => undefined } as unknown as RpcClient,
+    });
+  }
+
+  function assertLaunchEnded(record: RpcAgentRecord): void {
+    assert.notEqual(record.toolBatches!.batches[0].endedAt, undefined, "the open batch is closed, not left running");
+    assert.equal(record.toolBatches!.batches.length, 1, "history is kept");
+    assert.equal(record.descendantViews, undefined, "the launch's relayed model is dropped");
+  }
+
+  test("a process exit", () => {
+    const record = relayRecord();
+    markAgentExited(undefined, new Map([[record.agentId, record]]), record, { suppressTerminal: true });
+    assertLaunchEnded(record);
+  });
+
+  test("a stop", async () => {
+    const record = relayRecord();
+    await stopAgent(new Map([[record.agentId, record]]), record.agentId, undefined, { silent: true, skipCostCheckpoint: true });
+    assertLaunchEnded(record);
+  });
+
+  test("a failed launch", () => {
+    const record = relayRecord();
+    pushSpawnFailed(fakePi().api, new Map([[record.agentId, record]]), record, new Error("client.start() failed"));
+    assertLaunchEnded(record);
   });
 });
 
