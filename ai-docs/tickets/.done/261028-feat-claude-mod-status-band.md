@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 4b7b291a83cfc70a
 sage-review-design-reviewed: 4b7b291a83cfc70a
+completed: 2026-10-28
 ---
 # Claude mod status band behind a config knob
 
@@ -250,3 +251,8 @@ could not drive. Review observations left open (Minor): staged-only changes
 read as `clean` (unstaged `git diff --numstat`, inherited from the spike); the
 budget-delta math and the 10 s tick have no test; overlapping usage reads
 carry no sequence guard; a rejected `cwd()`/`root()` skips that git patch.
+
+
+## Resolution (2026-10-28)
+
+The live-session check passed on 2026-10-28, after a session restart onto the 0.48.4 ws MCP server. The key shows in `config.list` with a builtin value of `false`. With it tuned to `true` at global scope, the band draws its frame and the ws rows. A todo update under the default permission mode raised no permission dialog for the band's reads. The bar and capsules fit the row with the emoji cells, and the frame stays aligned. This supersedes the Blocked (2026-10-28) note.
