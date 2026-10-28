@@ -577,35 +577,8 @@
     "261028-bug-wsnote-windows-rename-retry": {
       "registered_at": "2026-10-28T02:45:53Z"
     },
-    "261028-chore-claude-mod-review-followup-backlog": {
-      "registered_at": "2026-10-28T02:45:59Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-28T04:53:04Z"
-      }
-    },
-    "261028-chore-core-review-followup-backlog": {
-      "registered_at": "2026-10-28T02:46:01Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-28T04:53:07Z"
-      }
-    },
-    "261028-chore-pi-review-followup-backlog": {
-      "registered_at": "2026-10-28T02:45:56Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-28T04:53:01Z"
-      }
+    "261028-research-claude-mod-statusline-band": {
+      "registered_at": "2026-10-28T06:25:12Z"
     }
   }
 }
