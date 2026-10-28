@@ -24,6 +24,14 @@ type sessionEntry struct {
 	parent string
 }
 
+// isTopLevelLead reports whether the entry is a top-level lead: lead scope with
+// no parent. A worker's key is also lead-scoped but carries its lead's key as
+// parent. Plan allocation and the mailbox peer-lead stamp share this test so
+// they cannot drift apart.
+func (e sessionEntry) isTopLevelLead() bool {
+	return e.scope == roleLead && e.parent == ""
+}
+
 // sessionChild is one enumerated descendant of a queried key.
 type sessionChild struct {
 	key    string

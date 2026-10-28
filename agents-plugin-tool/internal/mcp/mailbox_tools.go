@@ -85,7 +85,7 @@ func (s *Server) handleMailboxSend(id json.RawMessage, args map[string]any) resp
 	if from == "" {
 		replyTo = wsmailbox.ReplyIDPrefix + replyID
 	}
-	if entry.scope == roleLead && entry.parent == "" {
+	if entry.isTopLevelLead() {
 		content = stampPeerLeadNote(content, s.currentHarness())
 	}
 	envelope := wsmailbox.Envelope{From: from, ReplyTo: replyTo, Content: content, SentAt: now}

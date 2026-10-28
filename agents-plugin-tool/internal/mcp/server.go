@@ -2071,9 +2071,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 					mintRoot = entry.root
 				}
 				parentKey = capturedKey
-				// Same top-level-lead test as the mailbox peer-lead stamp:
-				// a worker's key is a lead-scope child with a parent.
-				topLevelLead = entry.parent == ""
+				topLevelLead = entry.isTopLevelLead()
 			}
 		}
 		callerContext, planStem := renderPlanStem(name, callerContext, topLevelLead)
