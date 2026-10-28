@@ -594,7 +594,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-28T10:38:27Z"
+        "touched_at": "2026-10-28T10:39:16Z",
+        "impl": {
+          "branch": "impl/develop/body-vista-stage"
+        }
       }
     },
     "261028-research-claude-mod-statusline-band": {
