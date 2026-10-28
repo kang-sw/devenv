@@ -574,6 +574,9 @@
     "261022-bug-windows-ci-mcp-shard-test-flakes": {
       "registered_at": "2026-10-22T14:38:23Z"
     },
+    "261028-bug-pi-agent-batch-summary-language-drift": {
+      "registered_at": "2026-10-28T11:45:02Z"
+    },
     "261028-bug-wsnote-windows-rename-retry": {
       "registered_at": "2026-10-28T02:45:53Z"
     },
