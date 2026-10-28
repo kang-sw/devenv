@@ -27,6 +27,8 @@ import {
   collectBatchViews,
   computeExpandedBudget,
   formatFinishedBatchFallback,
+  formatFinishedBatchSummary,
+  visibleBatchSummaryItems,
   formatRunningBatch,
   measureDockRows,
   planExpandedRows,
@@ -35,7 +37,8 @@ import {
   type AgentRowEntry,
   type AgentWidgetController,
 } from "../src/agent-widget.ts";
-import { batchView, closeOpenBatch, createBatchBuffer, observeBatchEvent, type AgentBatchBuffer } from "../src/agent-batches.ts";
+import { batchSummaryKey, type BatchSummaryItem } from "../src/batch-summary.ts";
+import { batchView, batchViews, closeOpenBatch, createBatchBuffer, observeBatchEvent, type AgentBatchBuffer } from "../src/agent-batches.ts";
 
 const NOW = Date.parse("2026-09-05T10:05:00.000Z");
 
@@ -1527,5 +1530,151 @@ describe("registerAgentWidgetCommand", () => {
     commands.get("agents")!.handler("", ctx);
     assert.equal(toggles, 1, "a handle that appears later is used");
     assert.equal(notices.length, 1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 261028 Phase 3: batch summaries in the expanded mode.
+// ---------------------------------------------------------------------------
+
+describe("expanded mode: batch summaries", () => {
+  test("a summary replaces the fallback text, keeps the count and relative time, stays dimmed, and fits the width", () => {
+    const rec = liveRecord("alpha");
+    addBatch(rec.toolBatches!, ["read", "grep"], NOW - 60_000, { endedAt: NOW - 30_000 });
+    addBatch(rec.toolBatches!, ["bash"], NOW - 20_000, { endedAt: NOW - 5_000 });
+    const registry = registryOf(rec);
+    const entries = buildAgentRowEntries(registry, [], NOW);
+    const views = collectBatchViews(registry);
+    const firstKey = batchSummaryKey(rec.agentId, views.get(rec.agentId)![0].seq);
+    const render = (width: number, summaryFor: (id: string, view: { seq: number }) => string | undefined, theme?: typeof fakeTheme) =>
+      buildExpandedWidgetLines(entries, 0, { width, now: NOW, allotment: 3, budget: 100, batches: views, summaryFor, theme })!;
+
+    const lines = render(120, (id, view) => batchSummaryKey(id, view.seq) === firstKey ? "Read the widget sources" : undefined, fakeTheme);
+    assert.equal(lines[1], "  " + fakeTheme.fg("dim", "Read the widget sources · 2 tool calls · 30s ago"));
+    assert.ok(!lines[1].includes("called"), "the summary takes the fallback's place");
+    assert.ok(lines[2].includes("<dim>called bash · total 1 tool call · 5s ago</dim>"), "an unsummarized batch keeps its fallback");
+    assert.equal(formatFinishedBatchSummary("S", batchView(rec.toolBatches!.batches[0]), NOW), "S · 2 tool calls · 30s ago");
+
+    for (const width of [20, 40, 80]) {
+      const narrow = render(width, () => "x".repeat(300));
+      assert.ok(narrow.every((line) => visibleWidth(line) <= width), `width=${width}`);
+    }
+    assert.deepEqual(render(120, () => undefined), render(120, () => undefined), "summaryFor returning nothing is the fallback rendering");
+    assert.match(render(120, () => undefined)[1], /called read, grep/);
+  });
+
+  test("visibleBatchSummaryItems offers the finished batches an agent shows: latest N, never a running or unended one", () => {
+    const rec = liveRecord("alpha");
+    for (let i = 0; i < 4; i++) addBatch(rec.toolBatches!, [`t${i}`], NOW - 100_000 + i * 1_000);
+    addBatch(rec.toolBatches!, ["live"], NOW - 1_000, { running: true });
+    const registry = registryOf(rec);
+    const entries = buildAgentRowEntries(registry, [thread({ threadId: "q9", status: "pending" })], NOW);
+    const views = collectBatchViews(registry);
+    const keys = (rowsPerAgent: number) => visibleBatchSummaryItems(entries, views, registry, rowsPerAgent).map((entry) => entry.key);
+    const seqs = rec.toolBatches!.batches.map((batch) => batch.seq);
+    assert.deepEqual(seqs, [1, 2, 3, 4, 5]);
+    assert.deepEqual(keys(3), [`${rec.agentId}:3`, `${rec.agentId}:4`], "the running batch occupies one of the three shown rows");
+    assert.deepEqual(keys(1), [], "only the running batch is shown");
+    assert.deepEqual(keys(5), [1, 2, 3, 4].map((seq) => `${rec.agentId}:${seq}`));
+
+    const item = visibleBatchSummaryItems(entries, views, registry, 3).at(-1)!;
+    assert.equal(item.agentName, "alpha");
+    assert.deepEqual(item.toolNames, ["t3"]);
+    assert.equal(item.callCount, 1);
+    assert.deepEqual(item.calls, [{ toolName: "t3", argsPreview: "path: t3.ts", resultPreview: "ok", isError: false }], "a local record's item carries its call previews");
+
+    const unended = new Map(views);
+    unended.set(rec.agentId, [{ seq: 77, toolNames: ["x"], callCount: 1, startedAt: 1 }]);
+    assert.deepEqual(visibleBatchSummaryItems(entries, unended, registry, 3), [], "a view with neither endedAt nor running is skipped");
+  });
+
+  test("a relayed descendant's item has no calls, and a thread row has none at all", () => {
+    const root = liveRecord("root", {
+      subtreeDescendants: [{ id: "grand000-0000-0000-0000-000000000000", parentId: null, depth: 0, role: "worker", live: true }],
+    });
+    const relayedBuffer = createBatchBuffer();
+    addBatch(relayedBuffer, ["edit"], NOW - 9_000);
+    root.descendantViews = new Map([["grand000-0000-0000-0000-000000000000", batchViews(relayedBuffer)]]);
+    const registry = registryOf(root);
+    const entries = buildAgentRowEntries(registry, [thread({ threadId: "q9", status: "pending" })], NOW);
+    const items = visibleBatchSummaryItems(entries, collectBatchViews(registry), registry, 3);
+    assert.equal(items.length, 1);
+    assert.equal(items[0].key, "grand000-0000-0000-0000-000000000000:1");
+    assert.deepEqual(items[0].toolNames, ["edit"]);
+    assert.equal("calls" in items[0], false);
+  });
+
+  describe("controller option", () => {
+    function summaryHarness() {
+      const requests: BatchSummaryItem[][] = [];
+      const summaries = new Map<string, string>();
+      let throwOnRequest = false;
+      const batchSummaries = {
+        request(items: readonly BatchSummaryItem[]) { requests.push([...items]); if (throwOnRequest) throw new Error("summarizer down"); },
+        get: (key: string) => summaries.get(key),
+      };
+      return { requests, summaries, batchSummaries, breakRequests: () => { throwOnRequest = true; } };
+    }
+
+    function install(t: { mock: { method: (...args: any[]) => unknown } }) {
+      t.mock.method(Date, "now", () => NOW);
+      t.mock.method(global, "setInterval", (() => ({ unref() {} })) as unknown as typeof setInterval);
+      t.mock.method(global, "clearInterval", (() => {}) as typeof clearInterval);
+    }
+
+    function controllerOf(registry: RpcAgentRegistry, batchSummaries: unknown) {
+      let factory: ((tui: unknown, theme: unknown) => { render(width: number): string[] }) | undefined;
+      const controller = createAgentWidgetController({ ui: {
+        setWidget(_key, content) { factory = typeof content === "function" ? content as typeof factory : undefined; },
+        setStatus() {},
+      } }, registry, new Map(), { batchSummaries: batchSummaries as never });
+      return { controller, render: () => factory!({ terminal: { rows: 40 } }, {}).render(120) };
+    }
+
+    test("requests only while expanded and never while collapsed", (t) => {
+      install(t);
+      const rec = liveRecord("alpha");
+      addBatch(rec.toolBatches!, ["read"], NOW - 30_000);
+      const h = summaryHarness();
+      const { controller } = controllerOf(registryOf(rec), h.batchSummaries);
+      controller.refresh();
+      controller.refresh();
+      assert.equal(h.requests.length, 0, "collapsed: the summarizer is never asked");
+      controller.toggleExpanded();
+      assert.ok(h.requests.length >= 1);
+      assert.deepEqual(h.requests.at(-1)!.map((entry) => entry.key), [`${rec.agentId}:1`]);
+      const seen = h.requests.length;
+      controller.toggleExpanded();
+      controller.refresh();
+      assert.equal(h.requests.length, seen, "collapsing again stops the requests");
+      controller.stop();
+    });
+
+    test("a stored summary replaces the fallback row, and a throwing summarizer never costs the repaint", (t) => {
+      install(t);
+      const rec = liveRecord("alpha");
+      addBatch(rec.toolBatches!, ["read"], NOW - 30_000, { endedAt: NOW - 20_000 });
+      const h = summaryHarness();
+      const { controller, render } = controllerOf(registryOf(rec), h.batchSummaries);
+      controller.toggleExpanded();
+      assert.match(render()[1], /called read/);
+      h.summaries.set(`${rec.agentId}:1`, "Opened the sources");
+      controller.refresh();
+      assert.match(render()[1], /^ {2}Opened the sources · 1 tool call · 20s ago$/);
+      h.breakRequests();
+      assert.doesNotThrow(() => controller.refresh());
+      assert.match(render()[1], /Opened the sources/);
+      controller.stop();
+    });
+
+    test("without a summarizer the expanded rows are the fallback", (t) => {
+      install(t);
+      const rec = liveRecord("alpha");
+      addBatch(rec.toolBatches!, ["read"], NOW - 30_000);
+      const { controller, render } = controllerOf(registryOf(rec), undefined);
+      controller.toggleExpanded();
+      assert.match(render()[1], /called read/);
+      controller.stop();
+    });
   });
 });
