@@ -521,8 +521,17 @@ function formatDepthGutter(depth: number, width: number, theme: AgentWidgetTheme
   return { text: theme && plain ? theme.fg("dim", plain) : plain, width: visibleWidth(plain) };
 }
 
-function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, ownerActionColor: OwnerActionColor | undefined, theme?: AgentWidgetTheme): string {
-  const gutter = formatDepthGutter(row.depth ?? 0, width, theme);
+/**
+ * 261028 batch-row redesign: the expanded mode's tree cue on a header row is
+ * plain indentation, two spaces per depth; its batch rows carry the `│`.
+ */
+function formatDepthIndent(depth: number, width: number): { text: string; width: number } {
+  const text = " ".repeat(Math.max(0, Math.min(2 * depth, width)));
+  return { text, width: text.length };
+}
+
+function formatRow(row: AgentRow, width = DEFAULT_AGENT_WIDGET_WIDTH, ownerActionColor: OwnerActionColor | undefined, theme?: AgentWidgetTheme, treeCue: "lanes" | "indent" = "lanes"): string {
+  const gutter = treeCue === "indent" ? formatDepthIndent(row.depth ?? 0, width) : formatDepthGutter(row.depth ?? 0, width, theme);
   const rowWidth = Math.max(0, width - gutter.width);
   const bullet = formatBullet(row.state, rowWidth, ownerActionColor, theme);
   const bodyWidth = Math.max(0, rowWidth - bullet.width);
@@ -817,34 +826,99 @@ function plural(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
-/** One finished batch's text without a display summary model. */
-export function formatFinishedBatchFallback(view: BatchView, now: number): string {
-  return `called ${view.toolNames.join(", ")} · total ${plural(view.callCount, "tool call")} · ${formatRelative(now - (view.endedAt ?? now))}`;
-}
+/** Mark-column glyphs of a batch row (the running row's mark is the spinner). */
+export const BATCH_FINISHED_MARK = "✓";
+export const BATCH_PLACEHOLDER_MARK = "-";
 
-/** One finished batch's text with its display summary. */
-export function formatFinishedBatchSummary(summary: string, view: BatchView, now: number): string {
-  return `${summary} · ${plural(view.callCount, "tool call")} · ${formatRelative(now - (view.endedAt ?? now))}`;
+/** The metric column of a finished batch: `N calls · <rel> ago`. */
+export function formatFinishedBatchMetrics(view: BatchView, now: number): string {
+  return `${plural(view.callCount, "call")} · ${formatRelative(now - (view.endedAt ?? now))}`;
 }
 
 /**
- * The running batch row: spinner, oldest in-flight call with its args
- * preview, its elapsed time, the batch's finished-call count, and how many
- * other calls are still running (only when any are). The args preview alone
- * is truncated to fit `width`; the whole line truncates only when the fixed
- * fields do not fit.
+ * The metric column of a running batch: `<done>/<n> · +<k> · <elapsed>`,
+ * with `+<k>` (other calls still in flight) only when k > 0 and the elapsed
+ * time of the reported (oldest in-flight) call.
  */
-export function formatRunningBatch(view: BatchView, now: number, width: number): string {
+export function formatRunningBatchMetrics(view: BatchView, now: number): string {
   const running = view.running;
-  if (!running) return truncateToWidth(formatFinishedBatchFallback(view, now), width);
-  const spinner = SPINNER_FRAMES[Math.floor(Math.max(0, now) / AGENT_WIDGET_EXPANDED_TICK_MS) % SPINNER_FRAMES.length];
-  const others = running.othersRunning > 0 ? ` · +${running.othersRunning} running` : "";
-  const tail = ` · ${formatCompactDuration(clampElapsed(now - running.startedAt))} · ${running.done}/${view.callCount} done${others}`;
-  const head = `${spinner} ${sanitizeDisplayTitle(running.toolName, "tool")}`;
-  if (running.argsPreview === "") return truncateToWidth(head + tail, width);
-  const fixed = visibleWidth(`${head} ()${tail}`);
-  if (fixed + 2 > width) return truncateToWidth(`${head} (${running.argsPreview})${tail}`, width);
-  return `${head} (${truncateToWidth(running.argsPreview, width - fixed)})${tail}`;
+  if (!running) return formatFinishedBatchMetrics(view, now);
+  const others = running.othersRunning > 0 ? ` · +${running.othersRunning}` : "";
+  return `${running.done}/${view.callCount}${others} · ${formatCompactDuration(clampElapsed(now - running.startedAt))}`;
+}
+
+/** The spinner frame for `now`: one step per expanded tick. */
+function spinnerFrame(now: number): string {
+  return SPINNER_FRAMES[Math.floor(Math.max(0, now) / AGENT_WIDGET_EXPANDED_TICK_MS) % SPINNER_FRAMES.length];
+}
+
+/**
+ * Fits a batch row's prose into `width`. A running call's prose is
+ * `<tool> (<args>)`: its args preview alone truncates, inside the
+ * parentheses, while `<tool> ()` and two columns of args fit.
+ */
+function fitBatchProse(head: string, args: string, width: number): string {
+  if (args === "") return truncateToWidth(head, width);
+  const fixed = visibleWidth(`${head} ()`);
+  if (fixed + 2 > width) return truncateToWidth(`${head} (${args})`, width);
+  return `${head} (${truncateToWidth(args, width - fixed)})`;
+}
+
+/**
+ * A batch row's body after its mark: the prose left, the metric column
+ * right-aligned to exactly `width` columns with at least one space between.
+ * The prose truncates first; when the metrics alone do not fit, they
+ * truncate and the prose is dropped.
+ */
+export function layoutBatchRowBody(prose: { head: string; args?: string }, metrics: string, width: number): string {
+  if (width <= 0) return "";
+  const metricsWidth = visibleWidth(metrics);
+  if (metricsWidth > width) return truncateToWidth(metrics, width);
+  const proseWidth = width - metricsWidth - 1;
+  const fitted = proseWidth > 0 ? fitBatchProse(prose.head, prose.args ?? "", proseWidth) : "";
+  return fitted + " ".repeat(width - visibleWidth(fitted) - metricsWidth) + metrics;
+}
+
+type BatchRowStyle = "dim" | "error" | undefined;
+
+/**
+ * One expanded-mode batch row: the agent's indent (two spaces per depth), a
+ * dim `│`, the mark column, then the body. Parts are clipped to `width` in
+ * plain text and styled afterwards, so a narrow row never cuts an escape.
+ */
+function composeBatchRow(depth: number, width: number, mark: string, markStyle: BatchRowStyle, body: string, bodyStyle: BatchRowStyle, theme: AgentWidgetTheme | undefined): string {
+  const indent = formatDepthIndent(depth, width);
+  const parts: Array<[string, BatchRowStyle]> = [["│", "dim"], [" ", undefined], [mark, markStyle]];
+  if (body !== "") parts.push([" ", undefined], [body, bodyStyle]);
+  let remaining = width - indent.width;
+  let out = indent.text;
+  for (const [text, style] of parts) {
+    if (remaining <= 0 || text === "") break;
+    const clipped = visibleWidth(text) <= remaining ? text : truncateToWidth(text, remaining);
+    remaining -= visibleWidth(clipped);
+    out += style && theme && clipped.trim() !== "" ? theme.fg(style, clipped) : clipped;
+  }
+  return out;
+}
+
+/** The running batch row: the spinner, then `<tool> (<args>)` and its running metrics. */
+function formatRunningBatchRow(view: BatchView, depth: number, now: number, width: number, theme: AgentWidgetTheme | undefined): string {
+  const running = view.running!;
+  const available = Math.max(0, width - 2 * depth - 4);
+  const body = layoutBatchRowBody({ head: sanitizeDisplayTitle(running.toolName, "tool"), args: running.argsPreview }, formatRunningBatchMetrics(view, now), available);
+  return composeBatchRow(depth, width, spinnerFrame(now), undefined, body, undefined, theme);
+}
+
+/** A finished batch row, dimmed whole: `✓`, the summary or tool names, and its metrics. */
+function formatFinishedBatchRow(view: BatchView, summary: string | undefined, depth: number, now: number, width: number, theme: AgentWidgetTheme | undefined): string {
+  const available = Math.max(0, width - 2 * depth - 4);
+  const body = layoutBatchRowBody({ head: summary ?? view.toolNames.join(", ") }, formatFinishedBatchMetrics(view, now), available);
+  return composeBatchRow(depth, width, BATCH_FINISHED_MARK, "dim", body, "dim", theme);
+}
+
+/** An unfilled history slot: the `│`, then a dim `-` in the mark column. */
+function formatPlaceholderBatchRow(depth: number, width: number, theme: AgentWidgetTheme | undefined): string {
+  return composeBatchRow(depth, width, BATCH_PLACEHOLDER_MARK, "dim", "", undefined, theme);
 }
 
 export interface ExpandedWidgetOptions {
@@ -863,10 +937,13 @@ export interface ExpandedWidgetOptions {
 
 /**
  * Renders the expanded mode: each planned agent's header row (the normal
- * mode's `formatRow`), then its latest batch rows (oldest first, the running
- * batch last) padded with blank rows to its allotment, then the `+N more`
- * tail and any fold padding. Finished batch rows are dimmed; the running row
- * is bright. `undefined` under the same hide rule as `buildWidgetLines`.
+ * mode's `formatRow`, indented two spaces per depth instead of the `│ `
+ * lanes), then its latest batch rows (oldest first, the running batch last),
+ * then `-` placeholder rows up to its allotment, then the `+N more` tail and
+ * any blank fold padding. Every batch row starts with a dim `│` under its
+ * agent's bullet; prose sits left and metrics right-aligned. Finished rows
+ * are dimmed, `✓` included; the running row is bright. `undefined` under
+ * the same hide rule as `buildWidgetLines`.
  */
 export function buildExpandedWidgetLines(entries: readonly AgentRowEntry[], pendingCount: number, options: ExpandedWidgetOptions): string[] | undefined {
   if (entries.length === 0 && pendingCount <= 0) return undefined;
@@ -877,24 +954,20 @@ export function buildExpandedWidgetLines(entries: readonly AgentRowEntry[], pend
   const lines: string[] = [];
   for (const { entry, batchRows } of plan.items) {
     const row = entry.row;
-    lines.push(formatRow(row, width, emphasizeOwnerAttention && isAttentionState(row.state) ? options.ownerActionColor ?? "error" : undefined, theme));
+    const depth = row.depth ?? 0;
+    lines.push(formatRow(row, width, emphasizeOwnerAttention && isAttentionState(row.state) ? options.ownerActionColor ?? "error" : undefined, theme, "indent"));
     if (batchRows === 0) continue;
-    const gutter = formatDepthGutter(row.depth ?? 0, width, theme);
-    const indent = Math.min(2, Math.max(0, width - gutter.width));
-    const prefix = gutter.text + " ".repeat(indent);
-    const available = Math.max(0, width - gutter.width - indent);
     const views = (entry.agentId !== undefined ? options.batches.get(entry.agentId) : undefined) ?? [];
     const shown = views.slice(-batchRows);
     for (const view of shown) {
       if (view.running) {
-        lines.push(prefix + formatRunningBatch(view, options.now, available));
+        lines.push(formatRunningBatchRow(view, depth, options.now, width, theme));
         continue;
       }
       const summary = entry.agentId !== undefined ? options.summaryFor?.(entry.agentId, view) : undefined;
-      const text = truncateToWidth(summary ? formatFinishedBatchSummary(summary, view, options.now) : formatFinishedBatchFallback(view, options.now), available);
-      lines.push(prefix + (theme && text ? theme.fg("dim", text) : text));
+      lines.push(formatFinishedBatchRow(view, summary || undefined, depth, options.now, width, theme));
     }
-    for (let blank = shown.length; blank < batchRows; blank++) lines.push(gutter.text);
+    for (let slot = shown.length; slot < batchRows; slot++) lines.push(formatPlaceholderBatchRow(depth, width, theme));
   }
   if (plan.hidden > 0) lines.push(truncateToWidth(`+${plan.hidden} more`, width));
   for (let pad = 0; pad < plan.padding; pad++) lines.push("");
