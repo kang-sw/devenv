@@ -38,6 +38,7 @@ func TestLeadDelegateReadContract(t *testing.T) {
 				"ready ticket then routes to " + namespace + ":lead-run",
 				namespace + "/playbook.render(name:\n\"delegate-implementer\"",
 				"context: {plan_stem: <short\nkebab-case task name>}",
+				"pass\nthat checkout as `root_override` on the render",
 				"When the render also returns a `plan-path:` line",
 				"write the brief into it before spawning",
 				"Never edit it\nonce the executor starts",

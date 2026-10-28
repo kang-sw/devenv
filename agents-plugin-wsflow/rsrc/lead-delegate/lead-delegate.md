@@ -57,8 +57,11 @@ implementer floor with `{{.McpNamespace}}/playbook.render(name:
 kebab-case task name>})` and give the returned path to the executor as part of
 its system prompt; it carries the minimum commit, verification, and convention
 discipline every code change meets, beneath the assignment above it. A pure
-evidence-gathering or investigation assignment does not get it. The floor names
-no tier; resolve the executor's model separately as above.
+evidence-gathering or investigation assignment does not get it. When the
+executor commits in a different checkout, such as a separate worktree, also pass
+that checkout as `root_override` on the render, so the plan is reserved where
+the executor commits it. The floor names no tier; resolve the executor's model
+separately as above.
 
 When the render also returns a `plan-path:` line, that file is the delegation's
 write-once plan: write the brief into it before spawning, because the executor
