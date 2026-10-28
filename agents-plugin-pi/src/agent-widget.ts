@@ -44,6 +44,7 @@ import { visibleWidth } from "./text-width.ts";
 import { isLeadOrFork, type SpawnRole } from "./process-role.ts";
 import { formatOutputRate } from "./output-rate.ts";
 import { AGENT_BATCH_CAP, batchViews, type BatchView } from "./agent-batches.ts";
+import { batchSummaryItem, batchSummaryKey, type BatchSummaryItem } from "./batch-summary.ts";
 
 /** `ctx.ui.setWidget` key for the live-agent panel (`belowEditor`, not a footer/header replacement). */
 export const AGENT_WIDGET_KEY = "ws-agents";
@@ -1085,6 +1086,32 @@ export interface AgentWidgetControllerOptions {
    * Absent means `DEFAULT_AGENT_WIDGET_BATCH_ROWS`.
    */
   rowsPerAgent?: () => number | Promise<number>;
+  /**
+   * 261028 Phase 3: the batch summarizer (`batch-summary.ts`), owner lead
+   * only. While expanded, every finished batch the widget shows is offered
+   * to it once; its summaries replace the fallback row text. The summarizer
+   * itself makes no model call unless its flag and model are configured.
+   */
+  batchSummaries?: { request(items: readonly BatchSummaryItem[]): void; get(key: string): string | undefined };
+}
+
+/**
+ * The finished batches an expanded widget shows (each agent's latest
+ * `rowsPerAgent`), as summary items. A local record's item carries its calls'
+ * previews; a relayed descendant's carries tool names only.
+ */
+export function visibleBatchSummaryItems(entries: readonly AgentRowEntry[], batches: ReadonlyMap<string, readonly BatchView[]>, records: RpcAgentRegistry, rowsPerAgent: number): BatchSummaryItem[] {
+  const items: BatchSummaryItem[] = [];
+  for (const entry of entries) {
+    if (!entry.batchSource || entry.agentId === undefined) continue;
+    const local = records.get(entry.agentId)?.toolBatches;
+    for (const view of (batches.get(entry.agentId) ?? []).slice(-rowsPerAgent)) {
+      if (view.running || view.endedAt === undefined) continue;
+      const calls = local?.batches.find((batch) => batch.seq === view.seq)?.calls;
+      items.push(batchSummaryItem(entry.agentId, entry.row.name, view, calls));
+    }
+  }
+  return items;
 }
 
 /**
@@ -1131,6 +1158,15 @@ export function createAgentWidgetController(ctx: AgentWidgetUiCtx, registry: Rpc
     const batches = expandedNow ? collectBatchViews(registry) : undefined;
     const fastTick = batches !== undefined && hasRunningBatch(entries, batches);
     const rowsNow = rowsPerAgent;
+    const summaries = options.batchSummaries;
+    if (batches && summaries) {
+      try {
+        summaries.request(visibleBatchSummaryItems(entries, batches, registry, rowsNow));
+      } catch {
+        // Cosmetic: a summarizer failure never costs a repaint.
+      }
+    }
+    const summaryFor = summaries ? (agentId: string, view: BatchView) => summaries.get(batchSummaryKey(agentId, view.seq)) : undefined;
     const pendingCount = threadList.filter((thread) => thread.status === "pending").length;
     const visible = rows.length > 0 || pendingCount > 0;
     const qualifying = rows.some((row) => isAttentionState(row.state));
@@ -1159,7 +1195,7 @@ export function createAgentWidgetController(ctx: AgentWidgetUiCtx, registry: Rpc
                 layout = { signature, budget, allotment: chooseBatchAllotment(entries, rowsNow, budget) };
               }
               return buildExpandedWidgetLines(entries, pendingCount, {
-                width, now, allotment: layout.allotment, budget: layout.budget, batches,
+                width, now, allotment: layout.allotment, budget: layout.budget, batches, summaryFor,
                 emphasizeAttention: ownerActionColor !== undefined, theme: asAgentWidgetTheme(theme), ownerActionColor: ownerActionColor ?? "error",
               }) ?? [];
             },

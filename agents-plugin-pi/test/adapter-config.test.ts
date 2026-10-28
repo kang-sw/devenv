@@ -46,6 +46,7 @@ import {
   DISPLAY_SUMMARY_MODEL_KEY,
   displaySummaryConfigFrom,
 } from "../src/display-summary.ts";
+import { BATCH_SUMMARY_CONFIG_KEYS, BATCH_SUMMARY_ENABLED_KEY, batchSummaryConfigFrom } from "../src/batch-summary.ts";
 
 interface ManifestKey { key: string; type: string; default: unknown; pattern?: string }
 const manifest = JSON.parse(readFileSync(join(process.cwd(), ADAPTER_CONFIG_MANIFEST_FILE), "utf8")) as { namespace: string; keys: ManifestKey[] };
@@ -65,7 +66,7 @@ const resolvers: Record<GoalLoopConfigKey, (config: GoalLoopConfig | undefined) 
 };
 
 /** The display summarizer's adapter keys (display-summary.ts), read by full name. */
-const displaySummaryKeys = DISPLAY_SUMMARY_CONFIG_KEYS.filter((key) => key.startsWith(ADAPTER_CONFIG_NAMESPACE));
+const displaySummaryKeys = [...DISPLAY_SUMMARY_CONFIG_KEYS, BATCH_SUMMARY_ENABLED_KEY].filter((key) => key.startsWith(ADAPTER_CONFIG_NAMESPACE));
 
 describe("shipped adapter manifest", () => {
   test("declares exactly the knobs the adapter reads, under its namespace", () => {
@@ -86,6 +87,16 @@ describe("shipped adapter manifest", () => {
     assert.equal(effort.default, DEFAULT_DISPLAY_SUMMARY_EFFORT);
     assert.deepEqual(effort.enum, [...DISPLAY_SUMMARY_EFFORT_LEVELS]);
     assert.ok(DISPLAY_SUMMARY_CONFIG_KEYS.includes("workflow.lang"), "the summary language is the unprefixed ws key");
+  });
+
+  test("batch-summary default: the flag is off even when a summary model is configured", () => {
+    const flag = manifest.keys.find((k) => k.key === BATCH_SUMMARY_ENABLED_KEY)!;
+    assert.equal(flag.type, "boolean");
+    assert.equal(flag.default, false);
+    assert.equal(batchSummaryConfigFrom({ [BATCH_SUMMARY_ENABLED_KEY]: flag.default, [DISPLAY_SUMMARY_MODEL_KEY]: "anthropic/claude-haiku" }).enabled, false);
+    assert.equal(batchSummaryConfigFrom({ [BATCH_SUMMARY_ENABLED_KEY]: "true" }).enabled, false, "only a literal true raises the flag");
+    assert.equal(batchSummaryConfigFrom({ [BATCH_SUMMARY_ENABLED_KEY]: true }).enabled, true);
+    assert.ok(BATCH_SUMMARY_CONFIG_KEYS.includes(BATCH_SUMMARY_ENABLED_KEY));
   });
 
   test("each manifest default resolves exactly like an untuned knob", () => {

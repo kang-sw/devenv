@@ -19,6 +19,13 @@
       "description": "Tool-batch rows shown under each agent in the live-agent widget's expanded mode, toggled with /agents. When the terminal is too short, every agent's rows shrink together, down to one."
     },
     {
+      "key": "pi.agent_widget_batch_summary_enabled",
+      "type": "boolean",
+      "default": false,
+      "default_scope": "global",
+      "description": "Summarize each finished tool batch shown in the live-agent widget's expanded mode with pi.display_summary_model, effort and workflow.lang. Off by default even when a summary model is set, because summarizing every child batch costs quota. Enabling it sends child agents' tool names, arguments and result excerpts to that provider."
+    },
+    {
       "key": "pi.runaway_threshold",
       "type": "integer",
       "minimum": 1,

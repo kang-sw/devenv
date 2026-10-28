@@ -206,7 +206,7 @@ import { registerGoalLoop, resolveAgentWaitAnimation, resolveChildRetentionTtlDa
 import { registerCompactionHistory } from "./compaction-history.ts";
 import { registerLeadMemoryLog } from "./lead-memory-log.ts";
 import { ADAPTER_CONFIG_MANIFEST_FILE, createWsConfigKeyReader, createWsConfigReader, thenOrNow } from "./adapter-config.ts";
-import { createDisplaySummaryStore, DISPLAY_SUMMARY_CONFIG_KEYS, displaySummaryConfigFrom, readManifestDefaultStyle, type DisplaySummaryStore } from "./display-summary.ts";
+import { createDisplaySummaryStore, createModelResolver, createProviderCompletion, DISPLAY_SUMMARY_CONFIG_KEYS, displaySummaryConfigFrom, readManifestDefaultStyle, type DisplaySummaryStore } from "./display-summary.ts";
 import { registerDisplaySummarySession } from "./display-summary-session.ts";
 import { confirmSummarizedBuiltinTools, registerAdapterMessageRenderers, registerDisplaySummaryToolResolver, type SummaryToolResolver } from "./display-summary-render.ts";
 import { registerSkillResources } from "./skills-dir.ts";
@@ -238,6 +238,7 @@ import { createAgentFooterSessionLifecycle, type AgentFooterContext, type AgentF
 import { descendantUsageValue, retentionEvictionCost } from "./agent-cost.ts";
 import { createDescendantUsageReporter, descendantUsageReporterRef, evaluateDescendantUsage } from "./agent-usage-rollup.ts";
 import { AgentViewUpstream, agentViewUpstreamRef, buildAgentViewModel, scheduleAgentViewPublish } from "./agent-view.ts";
+import { BATCH_SUMMARY_CONFIG_KEYS, batchSummaryConfigFrom, createBatchSummarizer, type BatchSummarizer } from "./batch-summary.ts";
 import { loadHostPiTui } from "./pi-tui.ts";
 import { assertPolicyTool, readDelegationPolicy } from "./delegation-policy.ts";
 import { registerScopedWriteTools } from "./write-scopes.ts";
@@ -618,6 +619,9 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   // `session_shutdown`. `undefined` in every non-TUI or non-lead/fork process,
   // which is also what keeps `agentWidgetRefreshRef.current` unset there.
   let agentWidgetHandle: AgentWidgetController | undefined;
+  // 261028 Phase 3: the owner lead's batch summarizer, same lifetime as the
+  // widget controller; off at runtime unless its own flag is raised.
+  let batchSummarizer: BatchSummarizer | undefined;
   // 260914 (pi native mailbox push): the session-bound background waiter that
   // drives `ws-mcp mailbox wait` and actively steers arriving mail into the
   // live conversation. Owner-lead only (`readSpawnRole` === undefined), started
@@ -1047,7 +1051,15 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
       agentCostRefreshRef.current = undefined;
       if (shouldArmAgentWidget(spawnRole, ctx.mode)) {
         agentWidgetHandle?.stop();
+        batchSummarizer?.dispose();
+        batchSummarizer = spawnRole === undefined ? createBatchSummarizer({
+          readConfig: async () => batchSummaryConfigFrom(await readConfigKeys(BATCH_SUMMARY_CONFIG_KEYS)),
+          resolveModel: createModelResolver(ctx.modelRegistry),
+          complete: createProviderCompletion(ctx.modelRegistry),
+          onSummaries: () => { agentWidgetHandle?.refresh(); },
+        }) : undefined;
         agentWidgetHandle = createAgentWidgetController(ctx, agentTools.rpcRegistry, threadHandle.threads, {
+          ...(batchSummarizer ? { batchSummaries: batchSummarizer } : {}),
           ownerLead: spawnRole === undefined,
           animationEnabled: () => thenOrNow(readAdapterConfig(["agent_wait_animation"]), resolveAgentWaitAnimation),
           rowsPerAgent: () => thenOrNow(readAdapterConfig(["agent_widget_rows"]), (config) => resolveAgentWidgetRows(config.agent_widget_rows)),
@@ -1219,6 +1231,8 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
       applySessionShutdownOwnershipDiagnostics();
       agentWidgetHandle?.stop();
       agentWidgetHandle = undefined;
+      batchSummarizer?.dispose();
+      batchSummarizer = undefined;
       applySessionShutdownAgentFooter(agentFooterLifecycle);
       agentWidgetRefreshRef.current = undefined;
       agentCostRefreshRef.current = undefined;
