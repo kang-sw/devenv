@@ -10,6 +10,15 @@
       "description": "Animate the live-agent widget while a child waits on the lead; false shows a steady highlight instead."
     },
     {
+      "key": "pi.agent_widget_rows",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 5,
+      "default": 3,
+      "default_scope": "global",
+      "description": "Tool-batch rows shown under each agent in the live-agent widget's expanded mode, toggled with /agents. When the terminal is too short, every agent's rows shrink together, down to one."
+    },
+    {
       "key": "pi.runaway_threshold",
       "type": "integer",
       "minimum": 1,

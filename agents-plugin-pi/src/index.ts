@@ -199,7 +199,7 @@ import {
   type RpcAgentRecord,
   type RpcAgentRegistry,
 } from "./spawner.ts";
-import { createAgentWidgetController, shouldArmAgentWidget, type AgentWidgetController } from "./agent-widget.ts";
+import { createAgentWidgetController, registerAgentWidgetCommand, resolveAgentWidgetRows, shouldArmAgentWidget, type AgentWidgetController } from "./agent-widget.ts";
 import { registerPushMessageRenderers } from "./push-render.ts";
 import { buildOrphanNoticeMessage, buildOrphanPush, captureOrphans, noSessionSidecarPath, readAndClearSidecarAt, reviveOrphans, sidecarPath, writeSidecarAt, type PersistedOrphan } from "./agent-sidecar.ts";
 import { registerGoalLoop, resolveAgentWaitAnimation, resolveChildRetentionTtlDays, resolveSettleDelayMs, type GoalLoopConfig } from "./goal-loop.ts";
@@ -661,6 +661,11 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   // replace the ignored generated tree before Pi rebuilds its skill list.
   registerSkillResources(pi, pluginDir, repoRoot);
 
+  // 261028: `/agents` toggles the live-agent widget's expanded mode. Lead and
+  // fork processes only, like the widget; the handler reads the live handle,
+  // which exists only in a TUI session.
+  if (isLeadOrFork(readSpawnRole(process.env))) registerAgentWidgetCommand(pi, () => agentWidgetHandle);
+
   // Read-only: lists Pi's currently scoped (or, if unscoped, all available)
   // models as `provider/id` candidates for the user to hand-copy into a
   // `config.tune agents.tier harness:pi` write (see lead-tune). No writes —
@@ -1039,6 +1044,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
         agentWidgetHandle = createAgentWidgetController(ctx, agentTools.rpcRegistry, threadHandle.threads, {
           ownerLead: spawnRole === undefined,
           animationEnabled: () => thenOrNow(readAdapterConfig(["agent_wait_animation"]), resolveAgentWaitAnimation),
+          rowsPerAgent: () => thenOrNow(readAdapterConfig(["agent_widget_rows"]), (config) => resolveAgentWidgetRows(config.agent_widget_rows)),
         });
         agentWidgetRefreshRef.current = () => { agentWidgetHandle?.refresh(); };
         agentCostRefreshRef.current = () => { agentFooterLifecycle.refreshAgents(); };

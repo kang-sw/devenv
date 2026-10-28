@@ -128,6 +128,7 @@ import { labelAdapterContent, labelAdapterText } from "./adapter-label.ts";
 import { withItemSummaryIds, withSummaryId } from "./summary-id.ts";
 import { capacityEvictionCost, isRemovedAgent, persistAgentCostCheckpoint, persistEvictedAgentCost, registerAgentCostOwner } from "./agent-cost.ts";
 import { createOutputRateTracker, type OutputRateTracker } from "./output-rate.ts";
+import { closeOpenBatch, createBatchBuffer, observeBatchEvent, type AgentBatchBuffer } from "./agent-batches.ts";
 
 // ---------------------------------------------------------------------------
 // Pure helpers shared by persistent RPC-backed child paths.
@@ -573,6 +574,13 @@ export interface RpcAgentRecord {
   launching?: Promise<void>;
   /** Last advisory identity tree published by this child process. */
   subtreeDescendants?: SubtreeDescendant[];
+  /**
+   * 261028: bounded recent tool batches of this direct child, fed by
+   * `attachEventListener`'s `client.onEvent` handler (`observeBatchEvent`)
+   * and rendered by the live agent widget's expanded mode. Live-only, never
+   * persisted.
+   */
+  toolBatches?: AgentBatchBuffer;
   /** Parent's view of this child's subtree (`observeSubtreeChannel`): true while unknown, disconnected, or busy. */
   waitingOnChildren?: boolean;
   /** Last successful writer to this child. Absence is the legacy/lead default. */
@@ -2231,6 +2239,8 @@ function clearLiveState(record: RpcAgentRecord, registry?: RpcAgentRegistry): vo
   record.subtreeTurn = undefined;
   record.heldSettlementGeneration = undefined;
   record.subtreeDescendants = [];
+  // A launch that ends mid-batch must not leave a batch running forever.
+  if (record.toolBatches) closeOpenBatch(record.toolBatches, Date.now());
   publishSubtree(registry);
   triggerAgentWidgetRefresh();
 }
@@ -3087,6 +3097,10 @@ export function attachEventListener(
   // Spans exist only as receipt times of this launch's live deltas.
   const outputRate = createOutputRateTracker();
   record.outputRate = outputRate;
+  // Batches outlive a launch (the widget keeps showing the latest ones), but a
+  // batch left open by the previous launch can never finish.
+  const toolBatches = record.toolBatches ??= createBatchBuffer();
+  closeOpenBatch(toolBatches, Date.now());
   const refresh = (includeStats = false) => {
     dirty = true;
     statsDirty ||= includeStats;
@@ -3198,6 +3212,8 @@ export function attachEventListener(
         record.lastTextGeneration = record.workGeneration;
       }
     }
+    // Tool batches change only at message/tool/turn boundaries, never per token.
+    const batchChanged = !streamingDelta && observeBatchEvent(toolBatches, e, Date.now());
     const outcome = applyRpcEvent(record, e);
     // A settle publishes only after its terminal admission below: published
     // here, the run's end would read quiescent before the terminal delivery
@@ -3211,9 +3227,10 @@ export function attachEventListener(
     if (outcome.push) {
       pushToLead(pi, registry, record, outcome.push.family, outcome.push.payload, outcome.push.deliverAs);
     }
-    if (e.type === "agent_start") {
+    if (e.type === "agent_start" || batchChanged) {
       // 260905 (live-agent widget ticket): streaming just flipped true — a
-      // fresh "running" row transition.
+      // fresh "running" row transition. 261028: a tool batch started, ended,
+      // or changed its in-flight calls.
       triggerAgentWidgetRefresh();
     }
     // Held while the view reads waiting, and also while the view is not

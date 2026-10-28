@@ -43,6 +43,7 @@ export { classifyRegistryRowState, rowName, type AgentRowState } from "./agent-d
 import { visibleWidth } from "./text-width.ts";
 import { isLeadOrFork, type SpawnRole } from "./process-role.ts";
 import { formatOutputRate } from "./output-rate.ts";
+import { AGENT_BATCH_CAP, batchViews, type BatchView } from "./agent-batches.ts";
 
 /** `ctx.ui.setWidget` key for the live-agent panel (`belowEditor`, not a footer/header replacement). */
 export const AGENT_WIDGET_KEY = "ws-agents";
@@ -303,6 +304,25 @@ function clampElapsed(deltaMs: number): number {
  * now counts visible rows by eye).
  */
 export function buildAgentRows(records: RpcAgentRegistry, threads: readonly ThreadRecord[], now: number): AgentRow[] {
+  return buildAgentRowEntries(records, threads, now).map((entry) => entry.row);
+}
+
+/**
+ * 261028: one `buildAgentRows` row with the identity the expanded mode needs
+ * beside it, kept off `AgentRow` so the row's established data shape stays
+ * unchanged. `batchSource` marks a row that owns a tool-batch allotment in the
+ * expanded mode: a locally-owned record, whose batches this process observes
+ * directly.
+ */
+export interface AgentRowEntry {
+  row: AgentRow;
+  /** Agent id of an RPC-backed or propagated row; absent on a synthetic thread row. */
+  agentId?: string;
+  batchSource: boolean;
+}
+
+/** `buildAgentRows` with each row's identity; same inclusion, order, and data. */
+export function buildAgentRowEntries(records: RpcAgentRegistry, threads: readonly ThreadRecord[], now: number): AgentRowEntry[] {
   const tree = buildAgentTree(records);
   const coveredThreadIds = new Set<string>();
   const rowById = new Map<string, AgentRow>();
@@ -372,21 +392,21 @@ export function buildAgentRows(records: RpcAgentRegistry, threads: readonly Thre
 
   // Preserve each subtree as a contiguous block while retaining the flat
   // panel's state/elapsed ordering between root-level blocks.
-  const blocks: AgentRow[][] = [];
-  let block: AgentRow[] | undefined;
+  const blocks: AgentRowEntry[][] = [];
+  let block: AgentRowEntry[] | undefined;
   for (const node of tree) {
     if (node.depth === 0) {
       block = [];
       blocks.push(block);
     }
     const row = rowById.get(node.id);
-    if (row) block?.push(row);
+    if (row) block?.push({ row, agentId: node.id, batchSource: node.openable });
   }
 
   for (const thread of threads) {
     if (!isLiveThreadStatus(thread.status) || coveredThreadIds.has(thread.threadId)) continue;
     const elapsedMs = clampElapsed(now - Date.parse(thread.touchedAt));
-    blocks.push([{
+    blocks.push([{ batchSource: false, row: {
       name: sanitizeDisplayTitle(thread.title, thread.threadId),
       role: "thread",
       state: "awaiting-owner",
@@ -400,13 +420,13 @@ export function buildAgentRows(records: RpcAgentRegistry, threads: readonly Thre
       ...(thread.forkResume?.telemetry?.effort ?? thread.forkResume?.observedEffort ? { effort: thread.forkResume?.telemetry?.effort ?? thread.forkResume?.observedEffort } : {}),
       ...((thread.forkResume?.telemetry?.contextTokens ?? thread.forkResume?.observedContextTokens) !== undefined ? { contextTokens: thread.forkResume?.telemetry?.contextTokens ?? thread.forkResume?.observedContextTokens } : {}),
       ...(thread.forkResume?.telemetry?.estimatedUsd !== undefined ? { estimatedUsd: thread.forkResume.telemetry.estimatedUsd } : {}),
-    }]);
+    } }]);
   }
 
   const nonEmptyBlocks = blocks.filter((candidate) => candidate.length > 0);
   nonEmptyBlocks.sort((a, b) => {
-    const rankDiff = AGENT_STATE_RANK[a[0].state] - AGENT_STATE_RANK[b[0].state];
-    return rankDiff !== 0 ? rankDiff : b[0].elapsedMs - a[0].elapsedMs;
+    const rankDiff = AGENT_STATE_RANK[a[0].row.state] - AGENT_STATE_RANK[b[0].row.state];
+    return rankDiff !== 0 ? rankDiff : b[0].row.elapsedMs - a[0].row.elapsedMs;
   });
   return nonEmptyBlocks.flat();
 }
@@ -653,6 +673,297 @@ export function buildWidgetLines(rows: readonly AgentRow[], pendingCount: number
   return lines;
 }
 
+// ---------------------------------------------------------------------------
+// 261028: expanded mode — per-agent tool batch rows under each agent header.
+// ---------------------------------------------------------------------------
+
+/** Default batch rows per agent in the expanded mode (`pi.agent_widget_rows`). */
+export const DEFAULT_AGENT_WIDGET_BATCH_ROWS = 3;
+
+/** Upper bound on batch rows per agent: a relayed descendant view carries at most this many batches. */
+export const MAX_AGENT_WIDGET_BATCH_ROWS = AGENT_BATCH_CAP;
+
+/** Repaint cadence while expanded and a batch is running, for its elapsed field and spinner. */
+export const AGENT_WIDGET_EXPANDED_TICK_MS = 1_000;
+
+/** Transcript rows the expanded widget always leaves visible. */
+export const MIN_TRANSCRIPT_ROWS = 5;
+
+/**
+ * Conservative estimate of the dock rows outside this widget (editor, footer,
+ * status line, widget spacers) when the host's components cannot be measured.
+ * Overestimating only shrinks the widget; underestimating would push more
+ * transcript into scrollback.
+ */
+export const ESTIMATED_DOCK_ROWS = 10;
+
+/** Terminal height assumed when the host exposes none. */
+const FALLBACK_TERMINAL_ROWS = 24;
+
+const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
+
+/** Clamps a configured batch row count to `1..MAX_AGENT_WIDGET_BATCH_ROWS`; anything else is the default. */
+export function resolveAgentWidgetRows(value: unknown): number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1
+    ? Math.min(value, MAX_AGENT_WIDGET_BATCH_ROWS)
+    : DEFAULT_AGENT_WIDGET_BATCH_ROWS;
+}
+
+/** Rows the expanded widget may use: terminal rows minus the rest of the dock and `MIN_TRANSCRIPT_ROWS`, never below one. */
+export function computeExpandedBudget(terminalRows: number, reservedRows: number): number {
+  return Math.max(1, Math.floor(terminalRows) - Math.max(0, Math.floor(reservedRows)) - MIN_TRANSCRIPT_ROWS);
+}
+
+/**
+ * The uniform per-agent batch allotment: the largest `n <= rowsPerAgent` at
+ * which every header plus `n` rows for each batch source fits `budget`, down
+ * to one. Below one row each, `planExpandedRows` folds agents into a tail.
+ */
+export function chooseBatchAllotment(entries: readonly AgentRowEntry[], rowsPerAgent: number, budget: number): number {
+  const sources = entries.filter((entry) => entry.batchSource).length;
+  for (let n = Math.max(1, rowsPerAgent); n > 1; n--) {
+    if (entries.length + sources * n <= budget) return n;
+  }
+  return 1;
+}
+
+export interface ExpandedPlanItem {
+  entry: AgentRowEntry;
+  /** Batch rows under this header: the allotment, or zero for a header kept only for visibility. */
+  batchRows: number;
+}
+
+export interface ExpandedPlan {
+  items: ExpandedPlanItem[];
+  /** Agents folded into the `+N more` tail. */
+  hidden: number;
+  /** Blank lines appended so a folded widget keeps exactly `budget` rows. */
+  padding: number;
+}
+
+/** Index of each entry's nearest preceding shallower entry: its parent in the parent-before-child row order. */
+function parentIndexes(entries: readonly AgentRowEntry[]): number[] {
+  const parents: number[] = [];
+  const stack: number[] = [];
+  entries.forEach((entry, index) => {
+    const depth = entry.row.depth ?? 0;
+    while (stack.length > 0 && (entries[stack[stack.length - 1]].row.depth ?? 0) >= depth) stack.pop();
+    parents.push(stack.length > 0 ? stack[stack.length - 1] : -1);
+    stack.push(index);
+  });
+  return parents;
+}
+
+/**
+ * Which agents the expanded widget shows, and with how many batch rows.
+ *
+ * When every header plus the allotment for each batch source fits `budget`,
+ * everything is shown. Otherwise running agents fold into a `+N more` tail:
+ * an agent in any non-running state is never folded and keeps at least its
+ * header, together with its ancestors' headers so its tree marks stay intact;
+ * the remaining budget then goes, in row order, to those agents' batch rows
+ * and to running agents (header, any hidden ancestors, and the allotment).
+ * When the kept headers alone exceed `budget`, `budget` is exceeded rather
+ * than such a row hidden. A folded widget pads to exactly `budget` rows.
+ */
+export function planExpandedRows(entries: readonly AgentRowEntry[], allotment: number, budget: number): ExpandedPlan {
+  const sources = entries.filter((entry) => entry.batchSource).length;
+  if (entries.length + sources * allotment <= budget) {
+    return { items: entries.map((entry) => ({ entry, batchRows: entry.batchSource ? allotment : 0 })), hidden: 0, padding: 0 };
+  }
+  const parents = parentIndexes(entries);
+  const shown = entries.map(() => false);
+  const batchRows = entries.map(() => 0);
+  const showWithAncestors = (index: number): void => {
+    for (let at = index; at >= 0 && !shown[at]; at = parents[at]) shown[at] = true;
+  };
+  entries.forEach((entry, index) => {
+    if (entry.row.state !== "running") showWithAncestors(index);
+  });
+  let remaining = budget - shown.filter(Boolean).length - 1;
+  entries.forEach((entry, index) => {
+    const rows = entry.batchSource ? allotment : 0;
+    if (shown[index]) {
+      if (rows > 0 && remaining >= rows) {
+        batchRows[index] = rows;
+        remaining -= rows;
+      }
+      return;
+    }
+    let hiddenAncestors = 0;
+    for (let at = parents[index]; at >= 0 && !shown[at]; at = parents[at]) hiddenAncestors++;
+    const cost = 1 + hiddenAncestors + rows;
+    if (cost > remaining) return;
+    showWithAncestors(index);
+    batchRows[index] = rows;
+    remaining -= cost;
+  });
+  const items = entries.flatMap((entry, index) => (shown[index] ? [{ entry, batchRows: batchRows[index] }] : []));
+  const hidden = entries.length - items.length;
+  const height = items.length + batchRows.reduce((sum, rows) => sum + rows, 0) + (hidden > 0 ? 1 : 0);
+  return { items, hidden, padding: Math.max(0, budget - height) };
+}
+
+/** `Xs ago`-style relative time from the shared compact duration formatter. */
+function formatRelative(ms: number): string {
+  return `${formatCompactDuration(ms)} ago`;
+}
+
+function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+}
+
+/** One finished batch's text without a display summary model. */
+export function formatFinishedBatchFallback(view: BatchView, now: number): string {
+  return `called ${view.toolNames.join(", ")} · total ${plural(view.callCount, "tool call")} · ${formatRelative(now - (view.endedAt ?? now))}`;
+}
+
+/** One finished batch's text with its display summary. */
+export function formatFinishedBatchSummary(summary: string, view: BatchView, now: number): string {
+  return `${summary} · ${plural(view.callCount, "tool call")} · ${formatRelative(now - (view.endedAt ?? now))}`;
+}
+
+/**
+ * The running batch row: spinner, oldest in-flight call with its args
+ * preview, its elapsed time, the batch's finished-call count, and how many
+ * other calls are still running (only when any are). The args preview alone
+ * is truncated to fit `width`; the whole line truncates only when the fixed
+ * fields do not fit.
+ */
+export function formatRunningBatch(view: BatchView, now: number, width: number): string {
+  const running = view.running;
+  if (!running) return truncateToWidth(formatFinishedBatchFallback(view, now), width);
+  const spinner = SPINNER_FRAMES[Math.floor(Math.max(0, now) / AGENT_WIDGET_EXPANDED_TICK_MS) % SPINNER_FRAMES.length];
+  const others = running.othersRunning > 0 ? ` · +${running.othersRunning} running` : "";
+  const tail = ` · ${formatCompactDuration(clampElapsed(now - running.startedAt))} · ${running.done}/${view.callCount} done${others}`;
+  const head = `${spinner} ${sanitizeDisplayTitle(running.toolName, "tool")}`;
+  if (running.argsPreview === "") return truncateToWidth(head + tail, width);
+  const fixed = visibleWidth(`${head} ()${tail}`);
+  if (fixed + 2 > width) return truncateToWidth(`${head} (${running.argsPreview})${tail}`, width);
+  return `${head} (${truncateToWidth(running.argsPreview, width - fixed)})${tail}`;
+}
+
+export interface ExpandedWidgetOptions {
+  width?: number;
+  now: number;
+  allotment: number;
+  budget: number;
+  /** Each agent's batch views, oldest first. */
+  batches: ReadonlyMap<string, readonly BatchView[]>;
+  /** Display summary of a finished batch, when one exists. */
+  summaryFor?: (agentId: string, view: BatchView) => string | undefined;
+  emphasizeAttention?: boolean;
+  theme?: AgentWidgetTheme;
+  ownerActionColor?: OwnerActionColor;
+}
+
+/**
+ * Renders the expanded mode: each planned agent's header row (the normal
+ * mode's `formatRow`), then its latest batch rows (oldest first, the running
+ * batch last) padded with blank rows to its allotment, then the `+N more`
+ * tail and any fold padding. Finished batch rows are dimmed; the running row
+ * is bright. `undefined` under the same hide rule as `buildWidgetLines`.
+ */
+export function buildExpandedWidgetLines(entries: readonly AgentRowEntry[], pendingCount: number, options: ExpandedWidgetOptions): string[] | undefined {
+  if (entries.length === 0 && pendingCount <= 0) return undefined;
+  const width = options.width ?? DEFAULT_AGENT_WIDGET_WIDTH;
+  const theme = options.theme;
+  const emphasizeOwnerAttention = options.emphasizeAttention === true && entries.some((entry) => isAttentionState(entry.row.state));
+  const plan = planExpandedRows(entries, options.allotment, options.budget);
+  const lines: string[] = [];
+  for (const { entry, batchRows } of plan.items) {
+    const row = entry.row;
+    lines.push(formatRow(row, width, emphasizeOwnerAttention && isAttentionState(row.state) ? options.ownerActionColor ?? "error" : undefined, theme));
+    if (batchRows === 0) continue;
+    const gutter = formatDepthGutter(row.depth ?? 0, width, theme);
+    const indent = Math.min(2, Math.max(0, width - gutter.width));
+    const prefix = gutter.text + " ".repeat(indent);
+    const available = Math.max(0, width - gutter.width - indent);
+    const views = (entry.agentId !== undefined ? options.batches.get(entry.agentId) : undefined) ?? [];
+    const shown = views.slice(-batchRows);
+    for (const view of shown) {
+      if (view.running) {
+        lines.push(prefix + formatRunningBatch(view, options.now, available));
+        continue;
+      }
+      const summary = entry.agentId !== undefined ? options.summaryFor?.(entry.agentId, view) : undefined;
+      const text = truncateToWidth(summary ? formatFinishedBatchSummary(summary, view, options.now) : formatFinishedBatchFallback(view, options.now), available);
+      lines.push(prefix + (theme && text ? theme.fg("dim", text) : text));
+    }
+    for (let blank = shown.length; blank < batchRows; blank++) lines.push(gutter.text);
+  }
+  if (plan.hidden > 0) lines.push(truncateToWidth(`+${plan.hidden} more`, width));
+  for (let pad = 0; pad < plan.padding; pad++) lines.push("");
+  return lines;
+}
+
+/** Whether any shown agent has a running batch — the expanded mode's 1 s repaint condition. */
+export function hasRunningBatch(entries: readonly AgentRowEntry[], batches: ReadonlyMap<string, readonly BatchView[]>): boolean {
+  return entries.some((entry) => entry.agentId !== undefined && (batches.get(entry.agentId) ?? []).some((view) => view.running !== undefined));
+}
+
+/** Every local record's batch views, keyed by agent id. */
+export function collectBatchViews(records: RpcAgentRegistry): Map<string, BatchView[]> {
+  const out = new Map<string, BatchView[]>();
+  for (const record of records.values()) {
+    if (record.toolBatches) out.set(record.agentId, batchViews(record.toolBatches));
+  }
+  return out;
+}
+
+/** Duck-typed host component: anything with `render(width)` and, for containers, `children`. */
+interface MeasurableComponent {
+  render?(width: number): unknown;
+  children?: unknown;
+}
+
+/**
+ * Measures the host dock rows outside this widget: every top-level TUI child
+ * after the first (the transcript), with this widget's own component skipped
+ * inside its container. `undefined` when the host does not expose that shape
+ * or this widget is not found in it, so the caller falls back to
+ * `ESTIMATED_DOCK_ROWS`.
+ */
+export function measureDockRows(tui: unknown, self: unknown, width: number): number | undefined {
+  try {
+    const children = (tui as { children?: unknown } | undefined)?.children;
+    if (!Array.isArray(children) || children.length < 2) return undefined;
+    const height = (component: MeasurableComponent): number => {
+      const lines = component?.render?.(width);
+      return Array.isArray(lines) ? lines.length : 0;
+    };
+    let total = 0;
+    let found = false;
+    for (const child of children.slice(1) as MeasurableComponent[]) {
+      if (child === self) {
+        found = true;
+        continue;
+      }
+      const nested = child?.children;
+      if (Array.isArray(nested) && nested.includes(self)) {
+        found = true;
+        for (const sibling of nested as MeasurableComponent[]) if (sibling !== self) total += height(sibling);
+        continue;
+      }
+      total += height(child);
+    }
+    return found ? total : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** An entry's identity for the expanded layout cache: who it is and whether it owns an allotment, not its state or order. */
+function entryLayoutKey(entry: AgentRowEntry): string {
+  return `${entry.agentId ?? `thread:${entry.row.name}`}:${entry.batchSource ? 1 : 0}`;
+}
+
+/** Terminal height from the host TUI, when exposed. */
+function terminalRowsOf(tui: unknown): number | undefined {
+  const rows = (tui as { terminal?: { rows?: unknown } } | undefined)?.terminal?.rows;
+  return typeof rows === "number" && Number.isFinite(rows) && rows > 0 ? rows : undefined;
+}
+
 /**
  * 260905 review relay #1 (Important #5): the widget's own arming gate,
  * extracted out of `index.ts`'s `session_start` into a small pure predicate
@@ -666,6 +977,33 @@ export function buildWidgetLines(rows: readonly AgentRow[], pendingCount: number
  */
 export function shouldArmAgentWidget(role: SpawnRole | undefined, mode: string | undefined): boolean {
   return isLeadOrFork(role) && mode === "tui";
+}
+
+/** 261028: the slash command that toggles the expanded mode. Checked against the host's built-in commands: no clash. */
+export const AGENT_WIDGET_COMMAND = "agents";
+
+/** Duck-typed slice of `pi.registerCommand` this module uses. */
+export interface AgentWidgetCommandHost {
+  registerCommand(name: string, options: { description: string; handler: (args: string, ctx: { ui?: { notify?(message: string, type?: string): void } }) => unknown }): void;
+}
+
+/**
+ * Registers `/agents`, a toggle between the widget's normal and expanded
+ * modes. `handle` is read at each invocation: it is undefined outside a TUI
+ * lead or fork session, where the command only reports that.
+ */
+export function registerAgentWidgetCommand(pi: AgentWidgetCommandHost, handle: () => AgentWidgetController | undefined): void {
+  pi.registerCommand(AGENT_WIDGET_COMMAND, {
+    description: "Toggle the live agent widget between its normal and expanded mode (recent tool batches per agent).",
+    handler: (_args, ctx) => {
+      const controller = handle();
+      if (!controller) {
+        ctx.ui?.notify?.("The live agent widget is available only in a TUI lead session.", "warning");
+        return;
+      }
+      controller.toggleExpanded();
+    },
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -717,6 +1055,9 @@ export interface AgentWidgetUiCtx {
 export interface AgentWidgetController {
   /** Recomputes rows from the live registries and repaints the widget. Arms the elapsed timer when the panel becomes visible, disarms it when it becomes empty. */
   refresh(): void;
+  /** 261028: switches between the normal and the expanded mode, repaints, and returns whether the widget is now expanded. Session-only state. */
+  toggleExpanded(): boolean;
+  isExpanded(): boolean;
   /** Disarms the timer, clears the widget, and clears the retired status segment. Call once, from `session_shutdown`. */
   stop(): void;
 }
@@ -730,6 +1071,12 @@ export interface AgentWidgetControllerOptions {
    * last answer rather than re-reading at every frame. Absent means enabled.
    */
   animationEnabled?: () => boolean | Promise<boolean>;
+  /**
+   * 261028: the expanded mode's batch rows per agent (`pi.agent_widget_rows`),
+   * read afresh at each `refresh()` the same way as `animationEnabled`.
+   * Absent means `DEFAULT_AGENT_WIDGET_BATCH_ROWS`.
+   */
+  rowsPerAgent?: () => number | Promise<number>;
 }
 
 /**
@@ -751,6 +1098,14 @@ export function createAgentWidgetController(ctx: AgentWidgetUiCtx, registry: Rpc
   let attentionPhase = 0;
   let animationEnabled = true;
   let stopped = false;
+  let timerMs: number | undefined;
+  // 261028: expanded mode. Every launch starts in normal mode.
+  let expanded = false;
+  let rowsPerAgent = DEFAULT_AGENT_WIDGET_BATCH_ROWS;
+  // The allotment and budget hold until an agent enters or leaves, the
+  // terminal resizes, or the row count changes, so the expanded widget's
+  // height does not move while batches come and go.
+  let layout: { signature: string; allotment: number; budget: number } | undefined;
 
   function clearAttentionTimer(): void {
     if (attentionTimer) {
@@ -761,7 +1116,13 @@ export function createAgentWidgetController(ctx: AgentWidgetUiCtx, registry: Rpc
 
   function paint(): void {
     const threadList = [...threads.values()];
-    const rows = buildAgentRows(registry, threadList, Date.now());
+    const now = Date.now();
+    const entries = buildAgentRowEntries(registry, threadList, now);
+    const rows = entries.map((entry) => entry.row);
+    const expandedNow = expanded;
+    const batches = expandedNow ? collectBatchViews(registry) : undefined;
+    const fastTick = batches !== undefined && hasRunningBatch(entries, batches);
+    const rowsNow = rowsPerAgent;
     const pendingCount = threadList.filter((thread) => thread.status === "pending").length;
     const visible = rows.length > 0 || pendingCount > 0;
     const qualifying = rows.some((row) => isAttentionState(row.state));
@@ -779,11 +1140,26 @@ export function createAgentWidgetController(ctx: AgentWidgetUiCtx, registry: Rpc
       // width-is-a-render-time-input contract.
       ctx.ui?.setWidget?.(
         AGENT_WIDGET_KEY,
-        visible ? (_tui, theme) => ({
-          render: (width: number) => buildWidgetLines(rows, pendingCount, width, ownerActionColor !== undefined, asAgentWidgetTheme(theme), ownerActionColor ?? "error") ?? [],
-          // Rendering is stateless and consults the live Theme object each time.
-          invalidate() {},
-        }) : undefined,
+        visible ? (tui, theme) => {
+          const component: AgentWidgetComponent = {
+            render: (width: number) => {
+              if (!batches) return buildWidgetLines(rows, pendingCount, width, ownerActionColor !== undefined, asAgentWidgetTheme(theme), ownerActionColor ?? "error") ?? [];
+              const terminalRows = terminalRowsOf(tui) ?? FALLBACK_TERMINAL_ROWS;
+              const signature = [terminalRows, width, rowsNow, ...entries.map(entryLayoutKey).sort()].join("\u0000");
+              if (layout?.signature !== signature) {
+                const budget = computeExpandedBudget(terminalRows, measureDockRows(tui, component, width) ?? ESTIMATED_DOCK_ROWS);
+                layout = { signature, budget, allotment: chooseBatchAllotment(entries, rowsNow, budget) };
+              }
+              return buildExpandedWidgetLines(entries, pendingCount, {
+                width, now, allotment: layout.allotment, budget: layout.budget, batches,
+                emphasizeAttention: ownerActionColor !== undefined, theme: asAgentWidgetTheme(theme), ownerActionColor: ownerActionColor ?? "error",
+              }) ?? [];
+            },
+            // Rendering is stateless and consults the live Theme object each time.
+            invalidate() {},
+          };
+          return component;
+        } : undefined,
         { placement: "belowEditor" },
       );
       ctx.ui?.setStatus?.(AGENT_STATUS_KEY, undefined);
@@ -796,12 +1172,18 @@ export function createAgentWidgetController(ctx: AgentWidgetUiCtx, registry: Rpc
       // guards against (`triggerAgentWidgetRefresh`/`refreshAgentWidget`).
     }
 
-    if (visible && !timer) {
-      timer = setInterval(paint, AGENT_WIDGET_TICK_MS);
-      timer.unref?.();
-    } else if (!visible && timer) {
+    // 261028: a running batch in the expanded mode needs its elapsed field
+    // every second; otherwise the normal 10 s clock tick.
+    const wantedTickMs = visible ? (fastTick ? AGENT_WIDGET_EXPANDED_TICK_MS : AGENT_WIDGET_TICK_MS) : undefined;
+    if (timer && timerMs !== wantedTickMs) {
       clearInterval(timer);
       timer = undefined;
+      timerMs = undefined;
+    }
+    if (wantedTickMs !== undefined && !timer) {
+      timer = setInterval(paint, wantedTickMs);
+      timerMs = wantedTickMs;
+      timer.unref?.();
     }
     if (animate && !attentionTimer) {
       attentionTimer = setInterval(() => {
@@ -832,16 +1214,40 @@ export function createAgentWidgetController(ctx: AgentWidgetUiCtx, registry: Rpc
     } else {
       animationEnabled = read !== false;
     }
+    let rowsRead: number | Promise<number> | undefined;
+    try {
+      rowsRead = options.rowsPerAgent?.();
+    } catch {
+      rowsRead = undefined;
+    }
+    if (rowsRead instanceof Promise) {
+      rowsRead.then((value) => {
+        const resolved = resolveAgentWidgetRows(value);
+        if (stopped || resolved === rowsPerAgent) return;
+        rowsPerAgent = resolved;
+        paint();
+      }, () => {});
+    } else {
+      rowsPerAgent = resolveAgentWidgetRows(rowsRead);
+    }
     paint();
   }
 
   return {
     refresh,
+    toggleExpanded() {
+      expanded = !expanded;
+      layout = undefined;
+      refresh();
+      return expanded;
+    },
+    isExpanded: () => expanded,
     stop() {
       stopped = true;
       if (timer) {
         clearInterval(timer);
         timer = undefined;
+        timerMs = undefined;
       }
       clearAttentionTimer();
       ctx.ui?.setWidget?.(AGENT_WIDGET_KEY, undefined, { placement: "belowEditor" });

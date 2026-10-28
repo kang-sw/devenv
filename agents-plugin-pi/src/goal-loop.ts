@@ -135,6 +135,8 @@ import type { PushBatchItem } from "./push-protocol.ts";
 export interface GoalLoopConfig {
   /** Whether an owner lead animates actionable child waits in the live-agent widget. Only literal false disables the 330ms cue. */
   agent_wait_animation?: boolean;
+  /** 261028: batch rows per agent in the live-agent widget's expanded mode; resolved by `agent-widget.ts`'s `resolveAgentWidgetRows`. */
+  agent_widget_rows?: number;
   runaway_threshold?: number;
   /** Advisory context-usage threshold (`parseCompactionThreshold` grammar): surfaced in the reinject reminder, and (261002) the point where the lead is nudged once to prepare for compaction. */
   compaction_advisory_percent?: number | string;

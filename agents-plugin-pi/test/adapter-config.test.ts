@@ -37,6 +37,7 @@ import {
   type GoalLoopConfig,
 } from "../src/goal-loop.ts";
 import { clearWakeStart, leadWakeStartPendingRef, reserveWakeStart } from "../src/spawner.ts";
+import { resolveAgentWidgetRows } from "../src/agent-widget.ts";
 import {
   DEFAULT_DISPLAY_SUMMARY_EFFORT,
   DISPLAY_SUMMARY_CONFIG_KEYS,
@@ -52,6 +53,7 @@ const manifest = JSON.parse(readFileSync(join(process.cwd(), ADAPTER_CONFIG_MANI
 /** Every knob the adapter reads, with the resolver that turns it into behavior. */
 const resolvers: Record<GoalLoopConfigKey, (config: GoalLoopConfig | undefined) => unknown> = {
   agent_wait_animation: resolveAgentWaitAnimation,
+  agent_widget_rows: (config) => resolveAgentWidgetRows(config?.agent_widget_rows),
   runaway_threshold: resolveRunawayThreshold,
   settle_delay_ms: resolveSettleDelayMs,
   compaction_advisory_percent: resolveCompactionAdvisoryThreshold,
@@ -70,7 +72,7 @@ describe("shipped adapter manifest", () => {
     assert.equal(manifest.namespace, ADAPTER_CONFIG_NAMESPACE);
     const declared = manifest.keys.map((k) => k.key).sort();
     assert.deepEqual(declared, [...Object.keys(resolvers).map((k) => `${ADAPTER_CONFIG_NAMESPACE}${k}`), ...displaySummaryKeys].sort());
-    const read = new Set<GoalLoopConfigKey>([...SETTLE_CONFIG_KEYS, ...COMPACTION_TRIGGER_CONFIG_KEYS, ...COMPACTION_BUDGET_CONFIG_KEYS, "agent_wait_animation", "child_retention_ttl_days"]);
+    const read = new Set<GoalLoopConfigKey>([...SETTLE_CONFIG_KEYS, ...COMPACTION_TRIGGER_CONFIG_KEYS, ...COMPACTION_BUDGET_CONFIG_KEYS, "agent_wait_animation", "agent_widget_rows", "child_retention_ttl_days"]);
     assert.deepEqual([...read].sort(), Object.keys(resolvers).sort());
   });
 
