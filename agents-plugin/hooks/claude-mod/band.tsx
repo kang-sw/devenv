@@ -164,8 +164,11 @@ export type Run = { text: string; color: string; bg?: string }
 
 /**
  * A context bar of `w` cells: 1/8-block fill in `barColor`, with the label
- * laid over it just past the fill edge, clamped to fit. A label clamped into
- * the fill (near 100%) is drawn on the fill color, so the bar stays whole.
+ * pinned at cell 0. A label cell over the fill is drawn `C.onFill` on the fill
+ * color, one past it keeps its run's color; the fill edge under the label
+ * counts as filled from half a cell, and the 1/8 glyph draws only past the
+ * label. `labels[0]` (the percent) always stays, clipped to `w` if need be;
+ * the later segments drop from the last while the label overflows `w`.
  */
 export function barRuns(pct: number, w: number, labels: Run[], barColor: string): Run[] {
   if (w <= 0) return []
@@ -173,24 +176,26 @@ export function barRuns(pct: number, w: number, labels: Run[], barColor: string)
   const filled = (v / 100) * w
   const full = Math.floor(filled)
   const frac = filled - full
-  const labelW = labels.reduce((n, r) => n + cells(r.text), 0)
-  const fits = labelW > 0 && labelW <= w
-  let lpos = full + (frac > 0.0625 ? 1 : 0)
-  if (lpos + labelW > w) lpos = w - labelW
-  if (lpos < 0) lpos = 0
-  const onFill = lpos < full
+  const width = (rs: Run[]) => rs.reduce((n, r) => n + cells(r.text), 0)
+  let segs = labels
+  while (segs.length > 1 && width(segs) > w) segs = segs.slice(0, -1)
+  const head = segs[0]
+  if (head && cells(head.text) > w) segs = [{ ...head, text: sliceCells(head.text, w) }]
   const out: Run[] = []
   const push = (text: string, color: string, bg?: string) => {
     const last = out[out.length - 1]
     if (last && last.color === color && last.bg === bg) last.text += text
     else out.push(bg === undefined ? { text, color } : { text, color, bg })
   }
-  for (let i = 0; i < w; ) {
-    if (fits && i === lpos) {
-      for (const r of labels) push(r.text, onFill ? C.onFill : r.color, onFill ? barColor : undefined)
-      i += labelW
-      continue
+  let i = 0
+  for (const r of segs) {
+    for (const ch of r.text) {
+      const on = i < full || (i === full && frac >= 0.5)
+      push(ch, on ? C.onFill : r.color, on ? barColor : undefined)
+      i += cells(ch)
     }
+  }
+  for (; i < w; i++) {
     let ch = ' '
     if (i < full) ch = '█'
     else if (i === full) {
@@ -198,7 +203,6 @@ export function barRuns(pct: number, w: number, labels: Run[], barColor: string)
       ch = idx >= 8 ? '█' : idx > 0 ? (BLK[idx - 1] ?? ' ') : ' '
     }
     push(ch, barColor)
-    i++
   }
   return out
 }
@@ -462,10 +466,11 @@ export function drawBand(ui: Elements, d: BandData, W: number) {
   const { barW, right } = row2Layout(inner, candidates)
   const fill = pctColor(pct)
   const labels: Run[] = [
-    { text: ` ${Math.trunc(pct)}% ${d.tokens === undefined ? '-' : commafy(d.tokens)}`, color: C.fg },
+    // Kept in drop order: barRuns drops from the last, keeping the percent.
+    { text: ` ${Math.trunc(pct)}%`, color: C.fg },
+    { text: ` ${d.tokens === undefined ? '-' : commafy(d.tokens)}`, color: C.fg },
     { text: ` / ${fmtMax(d.window)}`, color: C.dim },
     ...(d.cacheHit !== undefined ? [{ text: ` ⚡${d.cacheHit.toFixed(1)}%`, color: pctColor(100 - d.cacheHit) }] : []),
-    { text: ' ', color: C.dim },
   ]
   const runs = barRuns(pct, barW, labels, fill)
   const caps = barCaps(pct, barW)
