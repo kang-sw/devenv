@@ -1,6 +1,6 @@
 import type { HookStream, ProcessSpawnChunk, ProcessSpawnResult, Register, ToolCallResult } from 'claude-code'
 
-import { createBand, drawBand, readGit } from './band'
+import { createBand, drawBand, readGit, type Mailbox } from './band'
 import { createCaptions, drawCall, drawEmpty, drawRun, groupUnit, toolUseUnit } from './captions'
 import { createCompaction } from './compaction'
 import { createManual, SECTION_ID, type ReadFamily } from './manual'
@@ -47,8 +47,9 @@ import {
 //   one the model reads and the expanded view draws (see captions.tsx).
 // - Status band (off until claude.status_band_enabled is set): a framed band
 //   above the prompt with the model, folder, git, context, rate-limit and
-//   cost figures, and the held key's todos, agenda and mailbox address, each
-//   refreshed by events (see band.tsx).
+//   cost figures, and the held key's todos, agenda and mailbox address (its
+//   reply id when it owns no named inbox), each refreshed by events (see
+//   band.tsx).
 //
 // Claude Code accepts one hooks module per plugin and one unmatched hook per
 // event in it, so the lifecycle events (session.start, session.end,
@@ -166,12 +167,8 @@ export function isModelRecvCompletion(
   )
 }
 
-/**
- * The caller's own named-inbox address from a `lookup_peers` `format: "json"`
- * result (`self.address`, present only when the key owns that inbox), or
- * undefined for a refusal, an error, or no address.
- */
-export function selfAddress(res: ToolCallResult): string | undefined {
+/** The `self` object of a `lookup_peers` `format: "json"` result; undefined for a refusal, an error, or unparsable text. */
+function lookupSelf(res: ToolCallResult): Record<string, unknown> | undefined {
   if (res.deny !== undefined || res.isError) return undefined
   const text =
     typeof res.text === 'string'
@@ -179,11 +176,36 @@ export function selfAddress(res: ToolCallResult): string | undefined {
       : (res.result as { content?: { type: string; text?: string }[] } | undefined)?.content?.find((b) => b.type === 'text')?.text
   if (!text) return undefined
   try {
-    const address = (JSON.parse(text) as { self?: { address?: unknown } } | null)?.self?.address
-    return typeof address === 'string' && address.trim() ? address.trim() : undefined
+    const self = (JSON.parse(text) as { self?: unknown } | null)?.self
+    return self && typeof self === 'object' ? (self as Record<string, unknown>) : undefined
   } catch {
     return undefined
   }
+}
+
+const trimmed = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : undefined)
+
+/**
+ * The caller's own named-inbox address from a `lookup_peers` `format: "json"`
+ * result (`self.address`, present only when the key owns that inbox), or
+ * undefined for a refusal, an error, or no address. Never the reply id: this
+ * is the watcher's slug, and a reply id names no inbox to wait on.
+ */
+export function selfAddress(res: ToolCallResult): string | undefined {
+  return trimmed(lookupSelf(res)?.address)
+}
+
+/**
+ * What the band's mailbox capsule shows from the same result: the named-inbox
+ * address when the key owns one, else its reply id (`self.reply_id`, flagged
+ * `reply` so the band draws it dimmer); undefined with neither or a failed read.
+ */
+export function bandMailbox(res: ToolCallResult): Mailbox | undefined {
+  const self = lookupSelf(res)
+  const address = trimmed(self?.address)
+  if (address) return { id: address, reply: false }
+  const replyId = trimmed(self?.reply_id)
+  return replyId ? { id: replyId, reply: true } : undefined
 }
 
 /**
@@ -699,7 +721,7 @@ export const register: Register = (on) => {
             .value,
         call: wsCall,
         address: async (sessionKey) =>
-          selfAddress({ text: await wsCall('mailbox_lookup_peers', { session_key: sessionKey, scope: 'worktree', format: 'json' }) } as ToolCallResult),
+          bandMailbox({ text: await wsCall('mailbox_lookup_peers', { session_key: sessionKey, scope: 'worktree', format: 'json' }) } as ToolCallResult),
         git: (cwd) => readGit((argv, init) => $.process.run(argv, init), cwd),
         usage: () => $.session.usage({ breakdown: 'summary' }),
         model: () => $.session.model(),

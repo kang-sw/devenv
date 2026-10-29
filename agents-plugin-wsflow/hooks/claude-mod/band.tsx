@@ -5,8 +5,9 @@ import type { EngineInterface, RenderChildren, SessionUsage } from 'claude-code'
  * `claude.status_band_enabled` is set): a framed band above the prompt with
  * the model as its border title and up to four rows.
  *
- * - Row 1: the mailbox address, the folder (spanning the spare width), then
- *   the branch and the working-tree changes.
+ * - Row 1: the mailbox address (the key's reply id, dimmer, when it owns no
+ *   named inbox), the folder (spanning the spare width), then the branch and
+ *   the working-tree changes.
  * - Row 2: the context bar (spanning the spare width), then the 5h and 7d
  *   rate-limit capsules and the cost.
  * - Row 3 (ws focus row): the session's in-progress or first pending todo,
@@ -17,7 +18,7 @@ import type { EngineInterface, RenderChildren, SessionUsage } from 'claude-code'
  * module memory, refreshed by events (never by a read per redraw), and the
  * engine is asked to draw again after each change. Every read fails closed: a
  * failed knob read is off, a failed ws read hides the ws rows, a failed
- * mailbox read leaves the address out.
+ * mailbox read leaves the capsule out.
  *
  * The engine calls arrive as edges bound in register.ts; the drawing takes
  * the surface's element table, never `$`.
@@ -63,13 +64,16 @@ export type BandData = {
   git: Git | null
   /** The clock the budget deltas read. */
   now: number
-  /** The held key's own named-inbox address; undefined when it owns none or the read failed. */
-  address?: string
+  /** The held key's mailbox capsule; undefined when it owns no named inbox and has no reply id, or the read failed. */
+  address?: Mailbox
   /** The held key's todos; undefined with no key or a failed read. */
   todos?: Todo[]
   /** The held key's agenda blob keys; undefined with no key or a failed read. */
   agenda?: string[]
 }
+
+/** The mailbox capsule's id: the key's named-inbox address, else its reply id (`reply`, drawn dimmer). */
+export type Mailbox = { id: string; reply: boolean }
 
 export const EMPTY: BandData = { model: '', effort: '', cwd: '', root: '', window: 0, git: null, now: 0 }
 
@@ -414,7 +418,7 @@ export function drawBand(ui: Elements, d: BandData, W: number) {
     row(
       'status',
       <Box key="left" flexDirection="row" gap={1} flexGrow={1} flexShrink={1}>
-        {d.address ? pill('mailbox', C.pillBg, <Text color={C.blue}>{` ✉ ${d.address} `}</Text>) : null}
+        {d.address ? pill('mailbox', C.pillBg, <Text color={d.address.reply ? C.dim : C.blue}>{` ✉ ${d.address.id} `}</Text>) : null}
         {spanPill(
           'folder',
           C.pillBg,
@@ -643,8 +647,8 @@ export type BandEdges = {
   readSetting: (key: string, sessionKey: string | undefined) => Promise<unknown>
   /** One ws MCP tool call's text; rejects on a failed call or an error result. */
   call: (tool: string, args: Record<string, unknown>) => Promise<string>
-  /** The key's own named-inbox address; undefined when it owns none. May reject. */
-  address: (sessionKey: string) => Promise<string | undefined>
+  /** The key's named-inbox address, else its reply id; undefined with neither. May reject. */
+  address: (sessionKey: string) => Promise<Mailbox | undefined>
   /** The working tree's git state at `cwd`; null outside a repository. May reject. */
   git: (cwd: string) => Promise<Git | null>
   usage: () => Promise<SessionUsage>

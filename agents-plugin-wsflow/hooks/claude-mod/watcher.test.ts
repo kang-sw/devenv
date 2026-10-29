@@ -2,6 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import {
   abortableSleep,
+  bandMailbox,
   checkWatchCall,
   classifyRecv,
   consumeWait,
@@ -864,12 +865,25 @@ describe('pure helpers', () => {
     const json = (v: unknown) => ({ result: undefined, text: JSON.stringify(v) }) as never
     expect(selfAddress(json({ self: { address: 'lead-ab12@worktree', auto: true }, peers: [] }))).toBe('lead-ab12@worktree')
     expect(selfAddress({ result: { content: [{ type: 'text', text: '{"self":{"address":"x@machine"}}' }] } } as never)).toBe('x@machine')
+    // The reply id never becomes the watcher's slug, alone or beside an address.
     expect(selfAddress(json({ self: { reply_id: 'id:abc' }, peers: [] }))).toBe(undefined)
+    expect(selfAddress(json({ self: { address: 'a@worktree', reply_id: 'id:abc' } }))).toBe('a@worktree')
     expect(selfAddress(json({ self: { address: '  ' } }))).toBe(undefined)
     expect(selfAddress(json(null))).toBe(undefined)
     expect(selfAddress({ result: undefined, text: 'self: x@machine' } as never)).toBe(undefined)
     expect(selfAddress({ deny: 'declined' } as never)).toBe(undefined)
     expect(selfAddress({ isError: true, result: undefined, text: '{"self":{"address":"x@m"}}' } as never)).toBe(undefined)
+  })
+
+  test('the band mailbox is the named address, else the reply id flagged as one', () => {
+    const json = (v: unknown) => ({ result: undefined, text: JSON.stringify(v) }) as never
+    expect(bandMailbox(json({ self: { address: 'a@worktree', reply_id: 'id:abc' } }))).toEqual({ id: 'a@worktree', reply: false })
+    expect(bandMailbox(json({ self: { reply_id: ' id:abc ' } }))).toEqual({ id: 'id:abc', reply: true })
+    expect(bandMailbox(json({ self: { address: '  ', reply_id: 'id:abc' } }))).toEqual({ id: 'id:abc', reply: true })
+    expect(bandMailbox(json({ self: {} }))).toBe(undefined)
+    expect(bandMailbox(json(null))).toBe(undefined)
+    expect(bandMailbox({ deny: 'declined' } as never)).toBe(undefined)
+    expect(bandMailbox({ isError: true, result: undefined, text: '{"self":{"reply_id":"id:abc"}}' } as never)).toBe(undefined)
   })
 
   test('the recv observer never throws into the recv it observes', () => {
