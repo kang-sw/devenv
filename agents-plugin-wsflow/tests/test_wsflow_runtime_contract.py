@@ -25,10 +25,6 @@ HIDDEN_TOOLS = {
     "exec.raw.grep",
 }
 
-HIDDEN_COMMANDS = {
-    "config.tune",
-}
-
 
 class WsflowRuntimeContractTest(unittest.TestCase):
     def load_mcp_env(self):
@@ -51,8 +47,22 @@ class WsflowRuntimeContractTest(unittest.TestCase):
                 "WS_MCP_NO_AGENT": "1",
                 "WS_MCP_NAMESPACE": "wsflow",
                 "WS_MCP_SETUP_TOOL": "setup",
+                "WS_MCP_CONFIG_MANIFESTS": "./config-manifest.json",
             },
         )
+
+    def test_config_manifest_env_resolves_in_both_launch_configs(self):
+        # .mcp.json resolves against cwd "." (the plugin root); the Claude
+        # manifest names it under ${CLAUDE_PLUGIN_ROOT}. A path that does not
+        # resolve fails nothing at runtime, so pin that both point at a file.
+        codex = json.loads((PLUGIN_DIR / ".mcp.json").read_text(encoding="utf-8"))
+        claude = json.loads((PLUGIN_DIR / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+        for value, prefix in (
+            (codex["mcpServers"]["wsflow"]["env"]["WS_MCP_CONFIG_MANIFESTS"], "./"),
+            (claude["mcpServers"]["wsflow"]["env"]["WS_MCP_CONFIG_MANIFESTS"], "${CLAUDE_PLUGIN_ROOT}/"),
+        ):
+            self.assertTrue(value.startswith(prefix), value)
+            self.assertTrue((PLUGIN_DIR / value[len(prefix):]).is_file(), value)
 
     def test_runtime_contract_matches_agentless_capabilities(self):
         contract = self.load_contract()
@@ -76,7 +86,7 @@ class WsflowRuntimeContractTest(unittest.TestCase):
         self.assertEqual(set(contract["tools"]), set(payload["tools"]))
         self.assertEqual(set(contract["commands"]), set(payload["commands"]))
         self.assertFalse(HIDDEN_TOOLS & set(contract["tools"]))
-        self.assertFalse(HIDDEN_COMMANDS & set(contract["commands"]))
+        self.assertIn("config.tune", contract["commands"])
         self.assertIn("api.list", contract["tools"])
         self.assertIn("config.list", contract["tools"])
         self.assertIn("config.tune", contract["tools"])

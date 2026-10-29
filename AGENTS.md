@@ -59,7 +59,8 @@ for.
 Deliverables stay grouped by package:
 
 - `agents-plugin/` - the `ws` plugin.
-- `agents-plugin-wsflow/` - the agentless `wsflow` derivative.
+- `agents-plugin-wsflow/` - the `wsflow` package: the same product with
+  conservative per-package config defaults.
 - `agents-plugin-pi/` - the Pi harness package.
 - `agents-plugin-tool/` - native tooling and MCP source tree.
 
@@ -262,8 +263,8 @@ ai-docs/tickets/.dropped/
   agents, plugin packaging, helper commands, MCP tooling, and dev-environment
   templates. Tickets and manuals here describe the workflow system itself;
   downstream application material belongs in downstream projects. Active plugin
-  package: `agents-plugin/` (`ws@0.48.5`). Agentless
-  derivative package: `agents-plugin-wsflow/` (`wsflow@0.48.5`). Native
+  package: `agents-plugin/` (`ws@0.48.5`). Conservative-default
+  distribution: `agents-plugin-wsflow/` (`wsflow@0.48.5`). Native
   MCP/tooling source: `agents-plugin-tool/`. Retired Claude source material:
   `ai-docs/ref/claude-home-legacy.md` and git history.
 - **Project map / topology.**
@@ -275,10 +276,12 @@ ai-docs/tickets/.dropped/
     installs when Claude Code is available; it intentionally does not install
     wsflow into Claude.
   - `agents-plugin/` is registered through `.agents/plugins/marketplace.json`.
-  - `agents-plugin-wsflow/` is an agentless derivative package with
-    Codex/Claude manifests, package-local no-agent MCP env, shared launcher
-    copies, a reduced `runtime.json`, thin wsflow skill shims over shared
-    playbooks, and package tests for runtime-contract plus skill-shim drift.
+  - `agents-plugin-wsflow/` is a conservative-default distribution of the
+    same product: Codex/Claude manifests, package-local MCP env, its own
+    `config-manifest.json` (the same keys as ws's, only `default` differs),
+    shared launcher copies, its own `runtime.json`, thin wsflow skill shims
+    over shared playbooks, and package tests for runtime-contract plus
+    skill-shim drift.
   - `.agents/plugins/marketplace.json` exposes both `ws` and `wsflow` as local
     Codex plugin entries; `.claude-plugin/marketplace.json` exposes both
     packages for manual Claude marketplace installation while `install.sh`

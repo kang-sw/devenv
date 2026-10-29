@@ -1,7 +1,7 @@
 {
   "name": "wsflow",
   "version": "0.48.5",
-  "description": "Agentless workflow plugin for project context, tickets, specs, docs, and Git tools.",
+  "description": "Workflow plugin for project context, tickets, docs, and Git tools, shipped with conservative defaults: its optional Claude Code features stay off until a config tune turns them on.",
   "author": {
     "name": "kang-sw"
   },
@@ -26,7 +26,8 @@
         "WS_MCP_NO_AGENT": "1",
         "WS_MCP_NAMESPACE": "wsflow",
         "WS_MCP_SETUP_TOOL": "setup",
-        "WS_MCP_CLI_NAME": "wsflow-cli"
+        "WS_MCP_CLI_NAME": "wsflow-cli",
+        "WS_MCP_CONFIG_MANIFESTS": "${CLAUDE_PLUGIN_ROOT}/config-manifest.json"
       },
       "startup_timeout_sec": 30,
       "tool_timeout_sec": 600

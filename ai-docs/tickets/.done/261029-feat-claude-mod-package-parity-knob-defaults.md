@@ -12,6 +12,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 4970cc0f267c9008
 sage-review-completeness-reviewed: 4970cc0f267c9008
+completed: 2026-10-29
 ---
 
 # Claude mod package parity with per-package knob defaults
@@ -251,3 +252,46 @@ Verification:
   `python3 -m unittest discover agents-plugin/tests`,
   `python3 -m unittest discover agents-plugin-wsflow/tests`, and
   `claude plugin validate` plus `claude plugin test` on both packages.
+
+### Result (d865587ea) - 2026-10-29
+
+Landed in 99a94b8a1 (mod spine + engine tests), 382b017c0 (per-package
+manifests + D9 guard), 7cf3d25e5 (CLI config tune in wsflow), 2bfe8f183
+(revive nudge in both packages), d865587ea (docs).
+
+- D1/D7/D8/D12-D14: `compactionEnabledFor` and `drainModeFor` are gone;
+  register.ts reads `KNOB.compaction`, `KNOB.manual`, `KNOB.drain` keyless
+  (`drainModeOf`: only the exact value `direct` drains directly). Compaction
+  and drain are read per session.start; the manual knob is read once per
+  module instance inside the ws-project gate, and only after
+  `ai-docs/WORKFLOW.md` is found. The lever, watcher, and `mailbox_watch`
+  come up when their read settles; session.start awaits only the reconnect
+  lever. Captions, band, and manual start in every package and self-gate.
+- D12 probe: a live `claude -p --plugin-dir` mod registering a tool 1.5 s
+  after session.start saw it listed at the next model request and the model
+  called it.
+- D2/D3/D9: `agents-plugin-wsflow/config-manifest.json` added and wired in
+  both wsflow launch configs; ws band default now `true`.
+  `claude.mailbox_drain` is `"type": "enum"` (the loader rejects enum on a
+  string key). `TestShippedClaudeManifestsDifferOnlyInDefaults` and
+  `TestShippedClaudePackageDefaults` guard the shape and defaults.
+- D5: `fatalIfNoAgentCommand`/`filterNoAgentCommands` removed;
+  `TestNoAgentCLIConfigTuneSucceeds` runs a real tune in temp dirs.
+- D4/D15: `compact-revive-nudge.py <package>` prints only with
+  `ai-docs/WORKFLOW.md` at the git toplevel (ancestor walk outside a repo);
+  mirrored under `TestWsflowReviveNudgeMirrorUpToDate`.
+- D6: AGENTS.md, wsflow-mirroring.md, README, wsflow manifest/marketplace
+  descriptions, and both hooks.json descriptions rewritten; the band knob
+  description states the D10 key-row condition.
+- Decision: in a wsflow session in a WORKFLOW.md project the first
+  prompt.compose may wait up to the existing 5 s bound for the manual knob
+  read while the server starts.
+
+Verification: `claude plugin test` 414/414 on both packages; `claude plugin
+validate` passed on both; `go test ./...` in agents-plugin-tool all ok
+(TestWsflowHooksMirrorUpToDate, TestWsflowReviveNudgeMirrorUpToDate ok);
+`python3 -m unittest discover agents-plugin/tests` 80 OK,
+`agents-plugin-wsflow/tests` 18 OK. Lite review: clean, 3 Minor left open
+(lever call after the knob reads off is unanswered; a manual knob read that
+fails at the first start stays off for the module instance, by D8; the
+restore's `restoreSeq` guard is now nearly unreachable).

@@ -12,7 +12,7 @@
     {
       "name": "wsflow",
       "source": "./agents-plugin-wsflow",
-      "description": "Agentless workflow plugin for project context, tickets, specs, docs, and Git tools."
+      "description": "Workflow plugin for project context, tickets, docs, and Git tools, shipped with conservative defaults: its optional Claude Code features stay off until a config tune turns them on."
     }
   ]
 }

@@ -15,15 +15,15 @@ import {
   rulesPrompt,
   STYLE_KEY,
 } from './captions'
+import { KNOB } from './register'
 
 type Engine = Parameters<TestBody>[0]
 type On = Parameters<TestBody>[1]
 
 // Engine-backed tests of the tool-call caption feature. The same file is
-// mirrored into every package that ships the mod, and the kit has no
-// plugin-name override, so each test reads the package identity from the
-// registrations: the ws tests return early elsewhere, and the inert-package
-// test early in ws.
+// mirrored into every package that ships the mod and runs identically in
+// each: captions run while their own knob reads true, set through the
+// world's config_get answers.
 
 const USAGE = { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }
 /** A resolved call's row: not running, with its output. */
@@ -101,8 +101,6 @@ function world(on: On, opts: { config?: Record<string, unknown>; failKeys?: stri
 
 type World = ReturnType<typeof world>
 
-const isWs = (w: World) => w.plugin === 'ws'
-
 async function start($: Engine, w: World) {
   await $.session.start({ cwd: '/tmp', surface: 'terminal', isInteractive: true })
   await w.clock.settle()
@@ -140,10 +138,9 @@ async function find($: Engine, row: Parameters<Engine['ui']['mount']>[0], patter
   return text
 }
 
-test('ws: a lone call is captioned once drawn, collapsed only, and its result row draws nothing', async ($, on) => {
+test('a lone call is captioned once drawn, collapsed only, and its result row draws nothing', async ($, on) => {
   const w = world(on)
   await start($, w)
-  if (!isWs(w)) return
   w.replies.push({ text: '[{"id":"u1","subtitle":"ls","intention":"파일 목록 확인","result":"두 개"}]' })
   // Turning on redraws: rows drawn while the settings were read answered raw.
   expect(w.invalidated).toEqual(['ui.render'])
@@ -174,10 +171,9 @@ test('ws: a lone call is captioned once drawn, collapsed only, and its result ro
   expect(w.requests.length).toBe(1)
 })
 
-test('ws: a finished run is captioned as one unit in one request; a live one stays raw', async ($, on) => {
+test('a finished run is captioned as one unit in one request; a live one stays raw', async ($, on) => {
   const w = world(on)
   await start($, w)
-  if (!isWs(w)) return
   w.replies.push({ text: '[{"id":"u1","subtitles":["parse.go","go test"],"summary":"파서 진입점 수정, 테스트 실패"}]' })
 
   await $.tool.call({ tool: 'Read', file_path: 'parse.go', tool_use_id: 'toolu_r1' } as never)
@@ -214,14 +210,13 @@ test('ws: a finished run is captioned as one unit in one request; a live one sta
   expect(w.requests.length).toBe(1)
 })
 
-test('ws: the prompt carries the conversation and pivots past the window', async ($, on) => {
+test('the prompt carries the conversation and pivots past the window', async ($, on) => {
   const messages: Message[] = [
     { role: 'user', content: [{ type: 'text', text: 'find the parser' }] },
     { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_c1', name: 'Grep', input: { pattern: 'parse' } }] },
   ]
   const w = world(on, { messages, config: { [CONTEXT_KEY]: 2000 } })
   await start($, w)
-  if (!isWs(w)) return
   const reply = { text: '[]', tokens: (prompt: string) => Math.round(prompt.length / 2) }
   w.replies.push(reply, reply)
 
@@ -253,14 +248,13 @@ test('ws: the prompt carries the conversation and pivots past the window', async
   expect(w.requests[1]!.prompt).toContain('big3')
 })
 
-test('ws: the history prefix stays the same between requests until a pivot', async ($, on) => {
+test('the history prefix stays the same between requests until a pivot', async ($, on) => {
   const messages: Message[] = [
     { role: 'user', content: [{ type: 'text', text: 'one' }] },
     { role: 'assistant', content: [{ type: 'text', text: 'two' }] },
   ]
   const w = world(on, { messages })
   await start($, w)
-  if (!isWs(w)) return
   await isRaw($, toolUse(w, 'toolu_p1'))
   await tick(w)
   messages.push({ role: 'user', content: [{ type: 'text', text: 'three' }] }, { role: 'assistant', content: [{ type: 'text', text: 'four' }] })
@@ -273,11 +267,10 @@ test('ws: the history prefix stays the same between requests until a pivot', asy
   expect(second.length).toBe(first.length + 2)
 })
 
-test('ws: the measured tokens per character move the pivot', async ($, on) => {
+test('the measured tokens per character move the pivot', async ($, on) => {
   const messages: Message[] = [{ role: 'user', content: [{ type: 'text', text: 'cal start' }] }]
   const w = world(on, { messages, config: { [CONTEXT_KEY]: 2000 } })
   await start($, w)
-  if (!isWs(w)) return
   // Four tokens per character: far above the 0.5 the mirror assumes before a reply.
   const reply = { text: '[]', tokens: (prompt: string) => prompt.length * 4 }
   w.replies.push(reply, reply)
@@ -294,7 +287,7 @@ test('ws: the measured tokens per character move the pivot', async ($, on) => {
   expect(w.requests[1]!.prompt).not.toContain('cal start')
 })
 
-test('ws: a transcript shorter than the mirror read starts the mirror over', async ($, on) => {
+test('a transcript shorter than the mirror read starts the mirror over', async ($, on) => {
   const messages: Message[] = [
     { role: 'user', content: [{ type: 'text', text: 'alpha old' }] },
     { role: 'assistant', content: [{ type: 'text', text: 'beta old' }] },
@@ -302,7 +295,6 @@ test('ws: a transcript shorter than the mirror read starts the mirror over', asy
   ]
   const w = world(on, { messages })
   await start($, w)
-  if (!isWs(w)) return
   await isRaw($, toolUse(w, 'toolu_s1'))
   await tick(w)
   expect(w.requests[0]!.prompt).toContain('alpha old')
@@ -313,7 +305,7 @@ test('ws: a transcript shorter than the mirror read starts the mirror over', asy
   expect(w.requests[1]!.prompt).not.toContain('alpha old')
 })
 
-test('ws: a call captured before a reload takes its output and size from the transcript', async ($, on) => {
+test('a call captured before a reload takes its output and size from the transcript', async ($, on) => {
   const w = world(on, {
     messages: [
       { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_old', name: 'Bash', input: { command: 'ls' } }] },
@@ -321,7 +313,6 @@ test('ws: a call captured before a reload takes its output and size from the tra
     ],
   })
   await start($, w)
-  if (!isWs(w)) return
   w.replies.push({ text: '[{"id":"u1","subtitle":"ls","intention":"목록 확인","result":"출력 있음"}]' })
 
   await isRaw($, toolUse(w, 'toolu_old'))
@@ -331,7 +322,7 @@ test('ws: a call captured before a reload takes its output and size from the tra
   expect(await find($, toolUse(w, 'toolu_old'), /KB/)).toContain('2.0 KB')
 })
 
-test('ws: a transcript result of blocks counts and sends their text, in the history too, and marks a result with none', async ($, on) => {
+test('a transcript result of blocks counts and sends their text, in the history too, and marks a result with none', async ($, on) => {
   const w = world(on, {
     messages: [
       { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_tx', name: 'Bash', input: { command: 'ls' } }] },
@@ -341,7 +332,6 @@ test('ws: a transcript result of blocks counts and sends their text, in the hist
     ],
   })
   await start($, w)
-  if (!isWs(w)) return
   w.replies.push({ text: '[{"id":"u1","subtitle":"ls","intention":"목록 확인","result":"출력 있음"}]' })
 
   await isRaw($, toolUse(w, 'toolu_tx'))
@@ -355,10 +345,9 @@ test('ws: a transcript result of blocks counts and sends their text, in the hist
   expect(w.requests[1]!.prompt).not.toContain('QUJD')
 })
 
-test('ws: a call in neither the capture nor the transcript sends its drawn input and no output', async ($, on) => {
+test('a call in neither the capture nor the transcript sends its drawn input and no output', async ($, on) => {
   const w = world(on)
   await start($, w)
-  if (!isWs(w)) return
   await isRaw($, toolUse(w, 'toolu_gone', { input: { command: 'make lint' } }))
   await tick(w)
   expect(w.requests[0]!.prompt).toContain('make lint')
@@ -376,37 +365,22 @@ test('captions are off by default: rows draw raw, nothing is sent, and the other
   await tick(w)
   await tick(w)
   expect(w.requests).toEqual([])
-  if (isWs(w)) expect(w.configKeys).toContain(ENABLED_KEY)
-  else expect(w.configKeys.filter((k) => k.startsWith('claude.display_summary_') || k === LANG_KEY)).toEqual([])
+  expect(w.configKeys).toContain(ENABLED_KEY)
   for (const key of [MODEL_KEY, STYLE_KEY, CONTEXT_KEY, LANG_KEY]) expect(w.configKeys).not.toContain(key)
 })
 
-test('another package is inert even with the switch on: rows draw raw and nothing is read or sent', async ($, on) => {
-  const w = world(on)
-  await start($, w)
-  if (isWs(w)) return
-  expect(['wsflow']).toContain(w.plugin)
-  await $.tool.call({ tool: 'Bash', command: 'ls', tool_use_id: 'toolu_1' } as never)
-  expect(await isRaw($, toolUse(w, 'toolu_1'))).toBe(true)
-  await tick(w)
-  expect(w.requests).toEqual([])
-  expect(w.configKeys.filter((k) => k.startsWith('claude.display_summary_') || k === LANG_KEY)).toEqual([])
-})
-
-test('ws: a read failure of the switch leaves captions off', async ($, on) => {
+test('a read failure of the switch leaves captions off', async ($, on) => {
   const w = world(on, { failKeys: [ENABLED_KEY] })
   await start($, w)
-  if (!isWs(w)) return
   expect(await isRaw($, toolUse(w, 'toolu_1'))).toBe(true)
   await tick(w)
   expect(w.requests).toEqual([])
 })
 
-test('ws: the model, style, language and window settings are applied', async ($, on) => {
+test('the model, style, language and window settings are applied', async ($, on) => {
   const style = 'Style: one word per field.'
   const w = world(on, { config: { [MODEL_KEY]: 'claude-sonnet-x', [STYLE_KEY]: style, [LANG_KEY]: 'Korean', [CONTEXT_KEY]: 50_000 } })
   await start($, w)
-  if (!isWs(w)) return
   await isRaw($, toolUse(w, 'toolu_1'))
   await tick(w)
   expect(w.requests[0]!.model).toBe('claude-sonnet-x')
@@ -417,7 +391,7 @@ test('ws: the model, style, language and window settings are applied', async ($,
   expect(rules).not.toContain(DEFAULT_STYLE)
 })
 
-test('ws: failed or invalid setting reads leave the defaults, and an unset language follows the user', async ($, on) => {
+test('failed or invalid setting reads leave the defaults, and an unset language follows the user', async ($, on) => {
   // A few settled messages: a window of -3 tokens would pivot past them all.
   const messages: Message[] = [
     { role: 'user', content: [{ type: 'text', text: 'first note' }] },
@@ -427,7 +401,6 @@ test('ws: failed or invalid setting reads leave the defaults, and an unset langu
   ]
   const w = world(on, { messages, failKeys: [STYLE_KEY, MODEL_KEY], config: { [CONTEXT_KEY]: -3, [LANG_KEY]: '' } })
   await start($, w)
-  if (!isWs(w)) return
   await isRaw($, toolUse(w, 'toolu_1'))
   await tick(w)
   expect(w.requests[0]!.model).toBe('haiku')
@@ -439,10 +412,9 @@ test('ws: failed or invalid setting reads leave the defaults, and an unset langu
   expect(rules.split('\n').at(-1)).toBe(DEFAULT_STYLE)
 })
 
-test('ws: a later session start in the same module stops the old ticker and reads the settings again', async ($, on) => {
+test('a later session start in the same module stops the old ticker and reads the settings again', async ($, on) => {
   const w = world(on)
   await start($, w)
-  if (!isWs(w)) return
   await isRaw($, toolUse(w, 'toolu_1'))
   await tick(w)
   expect(w.requests.length).toBe(1)
@@ -464,10 +436,9 @@ test('ws: a later session start in the same module stops the old ticker and read
   expect(w.requests.length).toBe(2)
 })
 
-test('ws: the consent text of a call is not sent as its input', async ($, on) => {
+test('the consent text of a call is not sent as its input', async ($, on) => {
   const w = world(on)
   await start($, w)
-  if (!isWs(w)) return
   await $.tool.call({ tool: 'Bash', command: 'ls', tool_use_id: 'toolu_k', consent: 'pressed Run in the pane' } as never)
   await isRaw($, toolUse(w, 'toolu_k'))
   await tick(w)
@@ -475,10 +446,9 @@ test('ws: the consent text of a call is not sent as its input', async ($, on) =>
   expect(w.requests[0]!.prompt).not.toContain('pressed Run')
 })
 
-test('ws: a failed request is not retried', async ($, on) => {
+test('a failed request is not retried', async ($, on) => {
   const w = world(on)
   await start($, w)
-  if (!isWs(w)) return
   w.replies.push('unanswered')
   await isRaw($, toolUse(w, 'toolu_1'))
   await tick(w)
@@ -489,10 +459,9 @@ test('ws: a failed request is not retried', async ($, on) => {
   expect(w.requests.length).toBe(1)
 })
 
-test('ws: a rejected request leaves its unit raw, and later units still flush', async ($, on) => {
+test('a rejected request leaves its unit raw, and later units still flush', async ($, on) => {
   const w = world(on)
   await start($, w)
-  if (!isWs(w)) return
   w.replies.push('reject', { text: '[{"id":"u1","subtitle":"pwd","intention":"위치 확인","result":"/tmp"}]' })
   await isRaw($, toolUse(w, 'toolu_x1'))
   await tick(w)
@@ -505,10 +474,9 @@ test('ws: a rejected request leaves its unit raw, and later units still flush', 
   expect(await find($, toolUse(w, 'toolu_x2'), /위치/)).toBe('위치 확인')
 })
 
-test('ws: a request holds at most 24 calls and never splits a unit', async ($, on) => {
+test('a request holds at most 24 calls and never splits a unit', async ($, on) => {
   const w = world(on)
   await start($, w)
-  if (!isWs(w)) return
   const callsIn = (prompt: string) => prompt.split('"failed":').length - 1
   for (let i = 1; i <= 25; i += 1) await isRaw($, toolUse(w, `toolu_b${i}`))
   await tick(w)
@@ -532,10 +500,9 @@ test('ws: a request holds at most 24 calls and never splits a unit', async ($, o
   expect(callsIn(w.requests[3]!.prompt)).toBe(10)
 })
 
-test('ws: a reply keeps only its well-formed items; the rest stay raw and are not asked again', async ($, on) => {
+test('a reply keeps only its well-formed items; the rest stay raw and are not asked again', async ($, on) => {
   const w = world(on)
   await start($, w)
-  if (!isWs(w)) return
   // Prose and a fence around the array; u2 answers a lone call with a run's
   // fields, u4 a run without its summary, u3 is absent, u9 names no unit.
   w.replies.push({
@@ -565,10 +532,9 @@ test('ws: a reply keeps only its well-formed items; the rest stay raw and are no
   expect(w.requests.length).toBe(1)
 })
 
-test('ws: a row drawn before its call has run stays raw and unsent, then is captioned once it resolves', async ($, on) => {
+test('a row drawn before its call has run stays raw and unsent, then is captioned once it resolves', async ($, on) => {
   const w = world(on)
   await start($, w)
-  if (!isWs(w)) return
   w.replies.push({ text: '[{"id":"u1","subtitle":"a.txt","intention":"파일 작성","result":"작성됨"}]' })
   // Input still streaming or a permission prompt up: not running, no output.
   const prerun = toolUse(w, 'toolu_w', { tool: 'Write', input: {}, output: undefined })
@@ -589,10 +555,9 @@ test('ws: a row drawn before its call has run stays raw and unsent, then is capt
   expect(await find($, resolved, /작성됨/)).toContain('작성됨')
 })
 
-test('ws: a group holding a call that has not run stays raw and unsent until every call resolves', async ($, on) => {
+test('a group holding a call that has not run stays raw and unsent until every call resolves', async ($, on) => {
   const w = world(on)
   await start($, w)
-  if (!isWs(w)) return
   w.replies.push({ text: '[{"id":"u1","subtitles":["ls","a.txt"],"summary":"목록 확인 후 파일 수정"}]' })
   const done = { ...BASE, tool_use_id: 'toolu_g1', tool: 'Bash', input: { command: 'ls' } }
   const pending = { ...BASE, tool_use_id: 'toolu_g2', tool: 'Edit', input: {}, output: undefined }
@@ -609,10 +574,9 @@ test('ws: a group holding a call that has not run stays raw and unsent until eve
   expect(await find($, group(w, { ...props, calls }), /파일 수정/)).toContain('목록 확인 후 파일 수정')
 })
 
-test('ws: a subtitle the reply leaves blank is read off the call input', async ($, on) => {
+test('a subtitle the reply leaves blank is read off the call input', async ($, on) => {
   const w = world(on)
   await start($, w)
-  if (!isWs(w)) return
   w.replies.push({ text: '[{"id":"u1","subtitle":"","intention":"시각 확인","result":"22:25:35"},{"id":"u2","subtitles":["  ","b.txt"],"summary":"두 파일 확인"}]' })
   await isRaw($, toolUse(w, 'toolu_d', { input: { command: 'date +%T', description: 'Print current time' } }))
   const calls = [
@@ -628,15 +592,15 @@ test('ws: a subtitle the reply leaves blank is read off the call input', async (
   expect(await find($, group(w, finished), /b\.txt/)).toContain('b.txt')
 })
 
-test('ws: the mirror starts over when the lead compaction lever lands, and on a main-thread compaction', async ($, on) => {
+test('the mirror starts over when the lead compaction lever lands, and on a main-thread compaction', async ($, on) => {
   const messages: Message[] = [
     { role: 'user', content: [{ type: 'text', text: 'alpha before compaction' }] },
     { role: 'assistant', content: [{ type: 'text', text: 'beta before compaction' }] },
     { role: 'user', content: [{ type: 'text', text: 'gamma latest' }] },
   ]
-  const w = world(on, { messages })
+  // The compaction knob on: the lever this test lands is that feature's.
+  const w = world(on, { messages, config: { [KNOB.compaction]: true } })
   await start($, w)
-  if (!isWs(w)) return
   await isRaw($, toolUse(w, 'toolu_1'))
   await tick(w)
   expect(w.requests[0]!.prompt).toContain('alpha before compaction')
@@ -673,14 +637,13 @@ test('ws: the mirror starts over when the lead compaction lever lands, and on a 
   expect(w.requests[2]!.prompt).not.toContain('SUMMARY one')
 })
 
-test('ws: session.end starts the mirror over and keeps the captions', async ($, on) => {
+test('session.end starts the mirror over and keeps the captions', async ($, on) => {
   const messages: Message[] = [
     { role: 'user', content: [{ type: 'text', text: 'alpha old conversation' }] },
     { role: 'assistant', content: [{ type: 'text', text: 'beta old conversation' }] },
   ]
   const w = world(on, { messages })
   await start($, w)
-  if (!isWs(w)) return
   w.replies.push({ text: '[{"id":"u1","subtitle":"ls","intention":"목록 확인","result":"두 개"}]' })
   await isRaw($, toolUse(w, 'toolu_1'))
   await tick(w)
@@ -703,10 +666,9 @@ test('ws: session.end starts the mirror over and keeps the captions', async ($, 
   expect(await find($, toolUse(w, 'toolu_1'), /두 개/)).toContain('두 개')
 })
 
-test('ws: a caption row names an MCP tool as the server spells it', async ($, on) => {
+test('a caption row names an MCP tool as the server spells it', async ($, on) => {
   const w = world(on)
   await start($, w)
-  if (!isWs(w)) return
   w.replies.push({ text: '[{"id":"u1","subtitle":"release lease","intention":"lease","result":"ok"}]' })
   const row = toolUse(w, 'toolu_m', { tool: 'mcp__plugin_ws_ws__tickets_release', input: {} })
   await isRaw($, row)
@@ -714,10 +676,9 @@ test('ws: a caption row names an MCP tool as the server spells it', async ($, on
   expect(await find($, row, /plugin:ws:ws/)).toBe('plugin:ws:ws/tickets.release  release lease')
 })
 
-test('ws: a file edit sends its change, not the original file, and its size is what the lead read', async ($, on) => {
+test('a file edit sends its change, not the original file, and its size is what the lead read', async ($, on) => {
   const w = world(on)
   await start($, w)
-  if (!isWs(w)) return
   const original = `${'filler line\n'.repeat(400)}const FLUSH_MS = 1500\n`
   const text = 'The file timing.ts has been updated successfully.'
   w.results.Edit = {

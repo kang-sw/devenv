@@ -391,7 +391,7 @@ func TestConfigGetTypesAndFallbacks(t *testing.T) {
 // manifest would only log at startup and silently leave every adapter knob
 // untunable.
 func TestShippedAdapterManifestsLoad(t *testing.T) {
-	for _, path := range []string{piManifestPath, claudeManifestPath} {
+	for _, path := range []string{piManifestPath, claudeManifestPath, wsflowClaudeManifestPath} {
 		declared := loadDeclaredConfig(path)
 		if len(declared.rejected) != 0 {
 			t.Fatalf("shipped manifest rejected: %v", declared.rejected)
@@ -405,6 +405,9 @@ func TestShippedAdapterManifestsLoad(t *testing.T) {
 var (
 	piManifestPath     = filepath.Join("..", "..", "..", "agents-plugin-pi", "config-manifest.json")
 	claudeManifestPath = filepath.Join("..", "..", "..", "agents-plugin", "config-manifest.json")
+	// wsflowClaudeManifestPath is the wsflow package's own Claude manifest:
+	// the same keys as claudeManifestPath, differing only in each default.
+	wsflowClaudeManifestPath = filepath.Join("..", "..", "..", "agents-plugin-wsflow", "config-manifest.json")
 )
 
 // The compaction-threshold grammar corpus: the Pi adapter-config test runs it
@@ -530,7 +533,7 @@ func TestConfigGetReadsClaudeCaptionKeys(t *testing.T) {
 		{"claude.display_summary_enabled", false},
 		{"claude.display_summary_model", "haiku"},
 		{"claude.display_summary_context_tokens", float64(200000)},
-		{"claude.status_band_enabled", false},
+		{"claude.status_band_enabled", true},
 	} {
 		if got := configGetJSON(t, server, 930800+i, map[string]any{"key": want.name}); got.Value != want.value || got.Scope != "builtin" {
 			t.Fatalf("unset %s = %+v, want %v", want.name, got, want.value)
@@ -546,14 +549,14 @@ func TestConfigGetReadsClaudeCaptionKeys(t *testing.T) {
 		t.Fatalf("tuned claude.display_summary_enabled without a session key = %+v", got)
 	}
 	// The status band reads its switch with the held key, so a session-scope
-	// tune turns it on for that session alone.
-	if resp := keyedCall(t, server, 930813, key, "config.tune", map[string]any{"key": "claude.status_band_enabled", "value": "true", "scope": "session"}); toolIsError(t, resp) {
-		t.Fatalf("config.tune(status_band_enabled=true, session) = %s", resp)
+	// tune turns it off for that session alone.
+	if resp := keyedCall(t, server, 930813, key, "config.tune", map[string]any{"key": "claude.status_band_enabled", "value": "false", "scope": "session"}); toolIsError(t, resp) {
+		t.Fatalf("config.tune(status_band_enabled=false, session) = %s", resp)
 	}
-	if got := configGetJSON(t, server, 930814, map[string]any{"key": "claude.status_band_enabled", "session_key": key}); got.Value != true || got.Scope != "session" {
+	if got := configGetJSON(t, server, 930814, map[string]any{"key": "claude.status_band_enabled", "session_key": key}); got.Value != false || got.Scope != "session" {
 		t.Fatalf("session-tuned claude.status_band_enabled with the session key = %+v", got)
 	}
-	if got := configGetJSON(t, server, 930815, map[string]any{"key": "claude.status_band_enabled"}); got.Value != false || got.Scope != "builtin" {
+	if got := configGetJSON(t, server, 930815, map[string]any{"key": "claude.status_band_enabled"}); got.Value != true || got.Scope != "builtin" {
 		t.Fatalf("session-tuned claude.status_band_enabled without a session key = %+v", got)
 	}
 }

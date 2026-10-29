@@ -2,7 +2,7 @@ import type { HookStream, ProcessSpawnChunk, ProcessSpawnResult, Register, ToolC
 
 import { createBand, drawBand, readGit } from './band'
 import { createCaptions, drawCall, drawEmpty, drawRun, groupUnit, toolUseUnit } from './captions'
-import { compactionEnabledFor, createCompaction } from './compaction'
+import { createCompaction } from './compaction'
 import { createManual, SECTION_ID, type ReadFamily } from './manual'
 import { createReconnect, reconnectDescription, TOOL_NAME as RECONNECT_TOOL } from './reconnect'
 import { ADVISORY_KEY, LEVER_DESCRIPTION, TOOL_NAME as LEVER_TOOL } from './timing'
@@ -24,26 +24,28 @@ import {
 //   signal for one bound session key, and arriving mail starts a turn through
 //   $.prompt.submit, or, while a main-thread turn runs, joins it through
 //   $.session.append at its next tool boundary (see watcher.ts for the loop).
-//   Where the manual feature owns the conversation's key (ws, in a ws
-//   project) the mod binds every key the conversation gets itself; elsewhere
-//   the agent binds its key through the mod-registered mailbox watch tool.
-// - Lead compaction timing: advisory and milestone wake turns before native
-//   auto compaction, and the compaction request tool, whose opt-in resume
-//   prompt yields to any turn already started after the compaction (see
-//   compaction.ts).
+//   The drain mode is the claude.mailbox_drain knob's. Where the manual
+//   feature owns the conversation's key (its knob on, in a ws project) the
+//   mod binds every key the conversation gets itself; elsewhere the agent
+//   binds its key through the mod-registered mailbox watch tool.
+// - Lead compaction timing (behind claude.compaction_enabled): advisory and
+//   milestone wake turns before native auto compaction, and the compaction
+//   request tool, whose opt-in resume prompt yields to any turn already
+//   started after the compaction (see compaction.ts).
 // - MCP reconnect lever: a tool the model calls when the plugin's MCP server
 //   has gone, and `/mcp reconnect` at the next main-thread turn end, with the
 //   same opt-in resume prompt (see reconnect.ts).
-// - Workflow manual injection (ws only, in a ws project): a lead session key
+// - Workflow manual injection (behind claude.manual_injection_enabled, in a
+//   ws project): a lead session key
 //   minted per conversation and the keyed workflow manual in the system
 //   prompt, `workflow_manual` answered with the session state alone while
 //   the prompt carries the manual, repeat ws reads collapsed to a pointer, and
 //   a revive's key adopted as the conversation's (see manual.ts).
-// - Tool-call captions (ws only, off until its config switch is set): a
+// - Tool-call captions (off until claude.display_summary_enabled is set): a
 //   finished, collapsed tool row, or a run the engine folds into one group,
 //   drawn as a short caption a second model call wrote, the raw row still the
 //   one the model reads and the expanded view draws (see captions.tsx).
-// - Status band (ws only, off until its config switch is set): a framed band
+// - Status band (off until claude.status_band_enabled is set): a framed band
 //   above the prompt with the model, folder, git, context, rate-limit and
 //   cost figures, and the held key's todos, agenda and mailbox address, each
 //   refreshed by events (see band.tsx).
@@ -58,13 +60,22 @@ import {
 //
 // One source serves every package that ships it (this directory is mirrored
 // byte-identically), so package identity is read from the engine at runtime:
-// $.plugin.name picks the drain mode and gates the compaction and manual
-// features,
-// $.plugin.root locates the launcher, and $.mcp.connect(<plugin name>)
-// resolves the MCP server, at session.start for every feature (a dead server
-// cannot be resolved later). The one package name the mod spells is the one
-// drainModeFor (here) and compactionEnabledFor (compaction.ts) compare
-// against; no server name is spelled.
+// $.plugin.name names the server and the transcript lines, $.plugin.root
+// locates the launcher, and $.mcp.connect(<plugin name>) resolves the MCP
+// server, at session.start for every feature (a dead server cannot be
+// resolved later). No package or server name is spelled: what differs per
+// package is only each knob's default, in the package's config manifest.
+//
+// The compaction, manual and drain knobs (KNOB) are read keyless, once at
+// session start (the manual's once per module instance, inside the ws-project
+// gate), so only their project, global and built-in values apply: the manual
+// knob decides whether a key is minted at all, so no key exists to read it
+// with, and switching key minting or the mailbox binding mid-session is
+// unsafe. A failed or refused read leaves its feature inert (the drain reads
+// as notice). The features those reads gate come up when the read settles,
+// outside session.start's awaited path, so a slow server start never delays
+// the first prompt: a tool registered after session.start is listed to the
+// model from its next request on.
 
 export const TOOL_NAME = 'mailbox_watch'
 /** A finite window, as the pi adapter uses, so an orphaned wait cannot outlive its session. */
@@ -77,9 +88,16 @@ export const WAIT_TIMEOUT = '10m'
  */
 export const STORE_PREFIX = 'mailbox-watch:'
 
-/** The package that drains through recv itself; every other package takes the notice path. */
-export function drainModeFor(pluginName: string): DrainMode {
-  return pluginName === 'ws' ? 'direct' : 'notice'
+/** The keys of the knobs register.ts reads itself; captions and the band read their own. */
+export const KNOB = {
+  compaction: 'claude.compaction_enabled',
+  manual: 'claude.manual_injection_enabled',
+  drain: 'claude.mailbox_drain',
+} as const
+
+/** The drain mode a claude.mailbox_drain value selects: `direct` drains through recv itself; anything else, a failed read among them, takes the notice path. */
+export function drainModeOf(value: unknown): DrainMode {
+  return value === 'direct' ? 'direct' : 'notice'
 }
 
 /** The model-facing name of an MCP server's tool, as the engine spells it. */
@@ -297,13 +315,15 @@ export const register: Register = (on) => {
   /** Whether the latest session.start's mailbox probe passed; the manual's section says the push is bound only then. */
   let pushAvailable: Promise<boolean> = Promise.resolve(false)
   /**
-   * Whether the session runs in a ws project under a package whose manual
-   * feature runs: evaluated once per module instance and shared by the manual
-   * feature (it mints keys only then) and the mailbox feature (its bind tool
-   * registers only otherwise), so a session never holds both the lever and
-   * the automatic bind. A failed check reads as closed for both.
+   * Whether the session runs in a ws project with the manual knob on:
+   * evaluated once per module instance and shared by the manual feature (it
+   * mints keys only then) and the mailbox feature (its bind tool registers
+   * only otherwise), so a session never holds both the lever and the
+   * automatic bind. A failed check or knob read reads as closed for both.
    */
   let wsGate: Promise<boolean> | undefined
+  /** Bumped by every session.start: a setup still waiting on its knob read yields to a newer start. */
+  let starts = 0
 
   const stopWatcher = (reason: string) => {
     armSeq += 1
@@ -341,23 +361,27 @@ export const register: Register = (on) => {
     )
   }
 
-  // Compaction feature state; its tool name is set at session.start, and only
-  // under the package compactionEnabledFor admits.
+  // Compaction feature state; started, and its tool registered, once the
+  // latest session.start's compaction knob read settles on. Every compaction
+  // hook runs only while that read held.
   const compaction = createCompaction()
   let leverTool: string | undefined
+  let compactionOn = false
 
   // Reconnect feature state; its tool name is set at session.start.
   const reconnect = createReconnect()
   let reconnectTool: string | undefined
 
-  // Manual feature state; started at session.start, and only under the
-  // package compactionEnabledFor admits.
+  // Manual feature state; started at every session.start, inert unless the
+  // ws-project gate (its knob among it) opens.
   const manual = createManual()
 
-  // Caption feature state; started at session.start under the same package gate.
+  // Caption feature state; started at every session.start, inert until its
+  // own knob reads on.
   const captions = createCaptions()
 
-  // Status band state; started at session.start under the same package gate.
+  // Status band state; started at every session.start, drawing nothing until
+  // its own knob reads on.
   const band = createBand()
 
   on('session.start', async ($, e, next) => {
@@ -374,20 +398,43 @@ export const register: Register = (on) => {
     })
     serverResolved = resolved
     const mailboxLog = (text: string) => $.ui.log(`${label}: ${text}`, { to: 'debug' })
-    wsGate ??= compactionEnabledFor($.plugin.name)
-      ? (async () => {
-          const repoRoot = await $.session.repo().then(
-            (repo) => repo?.root,
-            () => undefined,
-          )
-          if (repoRoot) return $.fs.exists(`${repoRoot.replace(/[\\/]+$/, '')}/ai-docs/WORKFLOW.md`)
-          return (await $.fs.ancestors({ names: ['ai-docs/WORKFLOW.md'] })).length > 0
-        })().catch((err) => {
-          $.ui.log(`${$.plugin.name} mod: ws project check failed (${String(err)}); reading as no ws project`, { to: 'debug' })
-          return false
-        })
-      : Promise.resolve(false)
+
+    /** One ws MCP tool call's text; an error result rejects with its text. */
+    const callText = async (name: string, tool: string, args: Record<string, unknown>) => {
+      const res = await $.mcp.call(name, tool, args)
+      const text = res.content.flatMap((b) => (b.type === 'text' && typeof b.text === 'string' ? [b.text] : [])).join('\n')
+      if (res.isError) throw new Error(text || `${tool} reported an error`)
+      return text
+    }
+    /** A keyless config_get once the shared server resolution settles; rejects on any failure. */
+    const readSetting = async (key: string) => {
+      await serverResolved
+      if (!server) throw new Error('MCP server not resolved')
+      return (JSON.parse(await callText(server, 'config_get', { key, format: 'json' })) as { value?: unknown }).value
+    }
+    /** A knob read for this start: a failure or a refusal is logged and settles undefined, the inert state. */
+    const readKnob = (key: string): Promise<unknown> =>
+      readSetting(key).catch((err) => {
+        $.ui.log(`${$.plugin.name} mod: ${key} not read (${String(err)}); its feature stays off`, { to: 'debug' })
+        return undefined
+      })
+
+    // The project check first: outside a ws project the manual knob is never read.
+    wsGate ??= (async () => {
+      const repoRoot = await $.session.repo().then(
+        (repo) => repo?.root,
+        () => undefined,
+      )
+      const isWsProject = repoRoot
+        ? await $.fs.exists(`${repoRoot.replace(/[\\/]+$/, '')}/ai-docs/WORKFLOW.md`)
+        : (await $.fs.ancestors({ names: ['ai-docs/WORKFLOW.md'] })).length > 0
+      return isWsProject && (await readKnob(KNOB.manual)) === true
+    })().catch((err) => {
+      $.ui.log(`${$.plugin.name} mod: ws project check failed (${String(err)}); reading as no ws project`, { to: 'debug' })
+      return false
+    })
     const gate = wsGate
+    const startSeq = ++starts
     let settlePush!: (available: boolean) => void
     pushAvailable = new Promise<boolean>((resolve) => (settlePush = resolve))
     const mailboxSetup = (async () => {
@@ -405,7 +452,9 @@ export const register: Register = (on) => {
       }
       settlePush(true)
       const launcher = launcherPath($.plugin.root)
-      const mode = drainModeFor($.plugin.name)
+      // The watcher comes up once the drain read settles; a newer start meanwhile owns the mailbox.
+      const mode = drainModeOf(await readKnob(KNOB.drain))
+      if (startSeq !== starts) return
       // WS_MAILBOX is the fallback slug: a re-derived auto-minted address would
       // not match the server's, so the direct mode asks the server for the
       // key's own address (lookup_peers self.address) through the same tool
@@ -494,16 +543,11 @@ export const register: Register = (on) => {
       $.ui.log(`${label}: setup failed: ${String(err)}`, { to: 'debug' })
     })
 
-    /** One ws MCP tool call's text; an error result rejects with its text. */
-    const callText = async (name: string, tool: string, args: Record<string, unknown>) => {
-      const res = await $.mcp.call(name, tool, args)
-      const text = res.content.flatMap((b) => (b.type === 'text' && typeof b.text === 'string' ? [b.text] : [])).join('\n')
-      if (res.isError) throw new Error(text || `${tool} reported an error`)
-      return text
-    }
-
+    // Until this start's knob read settles on, every compaction hook is inert.
+    compactionOn = false
     const compactionSetup = (async () => {
-      if (!compactionEnabledFor($.plugin.name)) return
+      if ((await readKnob(KNOB.compaction)) !== true || startSeq !== starts) return
+      compactionOn = true
       compaction.start({
         submit: (text) => $.prompt.submit({ text }),
         compact: () => $.session.compact(),
@@ -517,11 +561,7 @@ export const register: Register = (on) => {
           captions.leverLanded()
         },
         // One config_get per session start, once the shared server resolution settles.
-        readAdvisory: async () => {
-          await serverResolved
-          if (!server) throw new Error('MCP server not resolved')
-          return (JSON.parse(await callText(server, 'config_get', { key: ADVISORY_KEY, format: 'json' })) as { value?: unknown }).value
-        },
+        readAdvisory: () => readSetting(ADVISORY_KEY),
       })
       const registered = await $.tool.register({
         name: LEVER_TOOL,
@@ -567,25 +607,19 @@ export const register: Register = (on) => {
     // Registers nothing; its settings read runs on in the background, and rows
     // draw raw until it settles on.
     try {
-      if (compactionEnabledFor($.plugin.name)) {
-        captions.start({
-          // One keyless config_get per key, once the shared server resolution settles.
-          readSetting: async (key) => {
-            await serverResolved
-            if (!server) throw new Error('MCP server not resolved')
-            return (JSON.parse(await callText(server, 'config_get', { key, format: 'json' })) as { value?: unknown }).value
-          },
-          messages: () => $.session.messages({ as: 'api' }),
-          complete: (request) => $.model.complete(request),
-          redraw: () => $.ui.invalidate('ui.render'),
-          // $.clock.every hands back a Timer; the edge promises its stop function.
-          every: (ms, fn) => {
-            const timer = $.clock.every(ms, fn)
-            return () => timer.cancel()
-          },
-          log: (text) => $.ui.log(text, { to: 'debug' }),
-        })
-      }
+      captions.start({
+        // One keyless config_get per key, once the shared server resolution settles.
+        readSetting,
+        messages: () => $.session.messages({ as: 'api' }),
+        complete: (request) => $.model.complete(request),
+        redraw: () => $.ui.invalidate('ui.render'),
+        // $.clock.every hands back a Timer; the edge promises its stop function.
+        every: (ms, fn) => {
+          const timer = $.clock.every(ms, fn)
+          return () => timer.cancel()
+        },
+        log: (text) => $.ui.log(text, { to: 'debug' }),
+      })
     } catch (err) {
       $.ui.log(`ws captions: setup failed: ${String(err)}`, { to: 'debug' })
     }
@@ -593,85 +627,89 @@ export const register: Register = (on) => {
     // Registers nothing; its knob read runs on in the background, and the band
     // draws nothing until it settles on. Started before the manual feature,
     // whose key listener it follows.
+    // Without the manual feature no key arrives, so the band draws its
+    // key-less rows only.
     try {
-      if (compactionEnabledFor($.plugin.name)) {
-        const wsCall = async (tool: string, args: Record<string, unknown>) => {
-          await serverResolved
-          if (!server) throw new Error('MCP server not resolved')
-          return callText(server, tool, args)
-        }
-        band.start({
-          // Session-keyed while a key is held, so a session-scope tune is honored.
-          readSetting: async (key, sessionKey) =>
-            (JSON.parse(await wsCall('config_get', { key, format: 'json', ...(sessionKey ? { session_key: sessionKey } : {}) })) as { value?: unknown })
-              .value,
-          call: wsCall,
-          address: async (sessionKey) =>
-            selfAddress({ text: await wsCall('mailbox_lookup_peers', { session_key: sessionKey, scope: 'worktree', format: 'json' }) } as ToolCallResult),
-          git: (cwd) => readGit((argv, init) => $.process.run(argv, init), cwd),
-          usage: () => $.session.usage({ breakdown: 'summary' }),
-          model: () => $.session.model(),
-          cwd: () => $.session.cwd(),
-          root: () => $.session.root(),
-          now: () => $.clock.now(),
-          every: (ms, fn) => {
-            const timer = $.clock.every(ms, fn)
-            return () => timer.cancel()
-          },
-          redraw: () => $.ui.invalidate('ui.render'),
-          log: (text) => $.ui.log(text, { to: 'debug' }),
-        })
+      const wsCall = async (tool: string, args: Record<string, unknown>) => {
+        await serverResolved
+        if (!server) throw new Error('MCP server not resolved')
+        return callText(server, tool, args)
       }
+      band.start({
+        // Session-keyed while a key is held, so a session-scope tune is honored.
+        readSetting: async (key, sessionKey) =>
+          (JSON.parse(await wsCall('config_get', { key, format: 'json', ...(sessionKey ? { session_key: sessionKey } : {}) })) as { value?: unknown })
+            .value,
+        call: wsCall,
+        address: async (sessionKey) =>
+          selfAddress({ text: await wsCall('mailbox_lookup_peers', { session_key: sessionKey, scope: 'worktree', format: 'json' }) } as ToolCallResult),
+        git: (cwd) => readGit((argv, init) => $.process.run(argv, init), cwd),
+        usage: () => $.session.usage({ breakdown: 'summary' }),
+        model: () => $.session.model(),
+        cwd: () => $.session.cwd(),
+        root: () => $.session.root(),
+        now: () => $.clock.now(),
+        every: (ms, fn) => {
+          const timer = $.clock.every(ms, fn)
+          return () => timer.cancel()
+        },
+        redraw: () => $.ui.invalidate('ui.render'),
+        log: (text) => $.ui.log(text, { to: 'debug' }),
+      })
     } catch (err) {
       $.ui.log(`ws band: setup failed: ${String(err)}`, { to: 'debug' })
     }
 
     // Registers no tool: its setup runs on in the background, and the first
-    // compose waits for it.
+    // compose waits for it. Inert (no key, no section, no rewrite) unless the
+    // ws-project gate opens.
     try {
-      if (compactionEnabledFor($.plugin.name)) {
-        manual.start({
-          isWsProject: () => gate,
-          pushAvailable: () => pushAvailable,
-          // Only records the key; the bind runs through arm once a watcher
-          // exists. A key change after session.end binds nothing: the manual
-          // generation drops it, and stopWatcher's armSeq bump cancels a bind
-          // still resolving.
-          keyChanged: (key) => {
-            autoKey = key
-            const target = watcher
-            if (target) bindAuto(target, mailboxLog)
-            try {
-              band.keyChanged(key)
-            } catch (err) {
-              $.ui.log(`ws band: key change handling failed: ${String(err)}`, { to: 'debug' })
-            }
-          },
-          server: async () => {
-            await serverResolved
-            return server
-          },
-          call: callText,
-          root: () => $.session.root(),
-          sessionId: () => $.session.id(),
-          store: {
-            get: (key) => $.store.get(key),
-            set: (key, value) => $.store.set(key, value),
-            delete: (key) => $.store.delete(key),
-            keys: () => $.store.keys(),
-          },
-          now: () => $.clock.now(),
-          timer: (ms, fn) => $.clock.after(ms, fn),
-          messages: () => $.session.messages({ as: 'api' }),
-          log: (text, to) => $.ui.log(text, { to }),
-        })
-      }
+      manual.start({
+        isWsProject: () => gate,
+        pushAvailable: () => pushAvailable,
+        // Only records the key; the bind runs through arm once a watcher
+        // exists. A key change after session.end binds nothing: the manual
+        // generation drops it, and stopWatcher's armSeq bump cancels a bind
+        // still resolving.
+        keyChanged: (key) => {
+          autoKey = key
+          const target = watcher
+          if (target) bindAuto(target, mailboxLog)
+          try {
+            band.keyChanged(key)
+          } catch (err) {
+            $.ui.log(`ws band: key change handling failed: ${String(err)}`, { to: 'debug' })
+          }
+        },
+        server: async () => {
+          await serverResolved
+          return server
+        },
+        call: callText,
+        root: () => $.session.root(),
+        sessionId: () => $.session.id(),
+        store: {
+          get: (key) => $.store.get(key),
+          set: (key, value) => $.store.set(key, value),
+          delete: (key) => $.store.delete(key),
+          keys: () => $.store.keys(),
+        },
+        now: () => $.clock.now(),
+        timer: (ms, fn) => $.clock.after(ms, fn),
+        messages: () => $.session.messages({ as: 'api' }),
+        log: (text, to) => $.ui.log(text, { to }),
+      })
     } catch (err) {
       $.ui.log(`ws manual: setup failed: ${String(err)}`, { to: 'debug' })
     }
 
-    // Every registration is awaited, so each tool is listed by turn one.
-    await Promise.all([mailboxSetup, compactionSetup, reconnectSetup])
+    // The reconnect lever's registration is awaited, so it is listed by turn
+    // one. The mailbox and compaction setups wait on knob reads, so they run
+    // on and their tools are listed from the model's next request after they
+    // register.
+    void mailboxSetup
+    void compactionSetup
+    await reconnectSetup
     return next(e)
   })
 
@@ -680,7 +718,6 @@ export const register: Register = (on) => {
   // the rest append what is cached. A failure appends nothing.
   on('prompt.compose', async ($, e, next) => {
     const res = await next(e)
-    if (!compactionEnabledFor($.plugin.name)) return res
     const text = await manual.compose(e.traits)
     if (text === undefined || res.sections.some((s) => s.id === SECTION_ID)) return res
     return { sections: [...res.sections, { id: SECTION_ID, text, scope: 'session' as const }] }
@@ -728,19 +765,19 @@ export const register: Register = (on) => {
         $.ui.log(`${$.plugin.name} mailbox: tool boundary flush failed: ${String(err)}`, { to: 'debug' })
       }
     }
-    if (compactionEnabledFor($.plugin.name)) {
-      try {
-        captions.captured(e as unknown as Record<string, unknown>, res)
-      } catch (err) {
-        $.ui.log(`ws captions: capture failed: ${String(err)}`, { to: 'debug' })
-      }
-      // The band's refresh rides here too: git, and a ws read after the
-      // model's todo, agenda, mailbox or config tune call.
-      try {
-        band.toolCalled(e.tool, server, next.origin.plugin === 'engine')
-      } catch (err) {
-        $.ui.log(`ws band: tool call handling failed: ${String(err)}`, { to: 'debug' })
-      }
+    // Each feature checks its own knob: captions capture only while on, and
+    // the band re-reads its knob after a config tune and refreshes only while on.
+    try {
+      captions.captured(e as unknown as Record<string, unknown>, res)
+    } catch (err) {
+      $.ui.log(`ws captions: capture failed: ${String(err)}`, { to: 'debug' })
+    }
+    // The band's refresh rides here too: git, and a ws read after the
+    // model's todo, agenda, mailbox or config tune call.
+    try {
+      band.toolCalled(e.tool, server, next.origin.plugin === 'engine')
+    } catch (err) {
+      $.ui.log(`ws band: tool call handling failed: ${String(err)}`, { to: 'debug' })
     }
     return res
   })
@@ -748,13 +785,11 @@ export const register: Register = (on) => {
   // A failure keeps the result the tool gave: next(e) replays what it settled to.
   on('tool.call', { tool: /__workflow_manual$/ }, async ($, e, next) => {
     const res = await next(e)
-    if (!compactionEnabledFor($.plugin.name)) return res
     return rewriteRead('workflow_manual', e, res)
   }).catch(($, e, next) => next(e))
 
   on('tool.call', { tool: /__playbook_read$/ }, async ($, e, next) => {
     const res = await next(e)
-    if (!compactionEnabledFor($.plugin.name)) return res
     return rewriteRead('playbook_read', e, res)
   }).catch(($, e, next) => next(e))
 
@@ -796,7 +831,7 @@ export const register: Register = (on) => {
   )
 
   on('tool.call', { tool: /__request_compaction$/ }, async ($, e, next) => {
-    if (!compactionEnabledFor($.plugin.name) || e.tool !== leverTool) return next(e)
+    if (!compactionOn || e.tool !== leverTool) return next(e)
     return compaction.lever(e.agentId, (e as { continue?: unknown }).continue)
   }).catch(($, e, next) => (next.called ? next(e) : { deny: `${LEVER_TOOL}: the compaction request hook failed; see the debug log.` }))
 
@@ -813,10 +848,9 @@ export const register: Register = (on) => {
   // nothing, and the breakdown is read only when the feature's cache is empty
   // (session start or end, a landed compaction) or the window changed.
   on('session.measure', async ($, e, next) => {
-    if (!compactionEnabledFor($.plugin.name)) return next(e)
     const res = await next(e)
     try {
-      await compaction.measure(e.context, () => $.session.usage({ breakdown: 'summary' }))
+      if (compactionOn) await compaction.measure(e.context, () => $.session.usage({ breakdown: 'summary' }))
     } catch (err) {
       $.ui.log(`ws compaction: usage observation failed: ${String(err)}`, { to: 'debug' })
     }
@@ -831,7 +865,7 @@ export const register: Register = (on) => {
   // The effort is known only from each model request: the band takes the
   // main loop's, with its model.
   on('turn.step', async function* ($, e, next) {
-    if (e.agentId === undefined && compactionEnabledFor($.plugin.name)) {
+    if (e.agentId === undefined) {
       try {
         band.stepped(e.model, e.effort)
       } catch (err) {
@@ -846,7 +880,7 @@ export const register: Register = (on) => {
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) mainTurn = true
     try {
-      if (compactionEnabledFor($.plugin.name)) compaction.turnStarted(e.agentId)
+      if (compactionOn) compaction.turnStarted(e.agentId)
     } catch (err) {
       $.ui.log(`ws compaction: turn start handling failed: ${String(err)}`, { to: 'debug' })
     }
@@ -876,12 +910,12 @@ export const register: Register = (on) => {
       }
     }
     try {
-      if (compactionEnabledFor($.plugin.name)) compaction.turnComplete(e.agentId, e.reason)
+      if (compactionOn) compaction.turnComplete(e.agentId, e.reason)
     } catch (err) {
       $.ui.log(`ws compaction: turn end handling failed: ${String(err)}`, { to: 'debug' })
     }
     try {
-      if (e.agentId === undefined && compactionEnabledFor($.plugin.name)) band.turnCompleted()
+      if (e.agentId === undefined) band.turnCompleted()
     } catch (err) {
       $.ui.log(`ws band: turn end handling failed: ${String(err)}`, { to: 'debug' })
     }
@@ -898,10 +932,9 @@ export const register: Register = (on) => {
   // own compaction does not pass here; the compaction feature tells the
   // manual feature of that landing itself (leverLanded).
   on('session.compact', async ($, e, next) => {
-    if (!compactionEnabledFor($.plugin.name)) return next(e)
     const res = await next(e)
     try {
-      compaction.compacted(e.trigger, e.agentId, res)
+      if (compactionOn) compaction.compacted(e.trigger, e.agentId, res)
     } catch (err) {
       $.ui.log(`ws compaction: compaction observation failed: ${String(err)}`, { to: 'debug' })
     }
@@ -923,7 +956,7 @@ export const register: Register = (on) => {
   // its own unit. A unit with no caption yet draws raw and is queued; the
   // live group, a running call and the expanded view always draw raw.
   on('ui.render', { component: 'ToolGroup' }, async ($, e, next) => {
-    if (!compactionEnabledFor($.plugin.name) || !captions.isOn()) return next(e)
+    if (!captions.isOn()) return next(e)
     const unit = groupUnit(e.props)
     if (!unit) return next(e)
     const [first] = unit.calls
@@ -939,7 +972,7 @@ export const register: Register = (on) => {
   })
 
   on('ui.render', { component: 'ToolUse' }, async ($, e, next) => {
-    if (!compactionEnabledFor($.plugin.name) || !captions.isOn()) return next(e)
+    if (!captions.isOn()) return next(e)
     const unit = toolUseUnit(e.props)
     const [call] = unit?.calls ?? []
     if (!unit || !call) return next(e)
@@ -951,7 +984,7 @@ export const register: Register = (on) => {
 
   // A captioned call's row already draws its result.
   on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
-    if (!compactionEnabledFor($.plugin.name) || !captions.isOn() || e.props.isExpanded || e.props.isErrored) return next(e)
+    if (!captions.isOn() || e.props.isExpanded || e.props.isErrored) return next(e)
     if (!captions.toolCaption(e.props.tool_use_id)) return next(e)
     return drawEmpty($.ui.resolve(e))
   })
@@ -959,7 +992,7 @@ export const register: Register = (on) => {
   // The status band, drawn only while its switch reads on; a survey holds the
   // band's place first.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    if (!compactionEnabledFor($.plugin.name) || e.props.hasSurvey) return next(e)
+    if (e.props.hasSurvey) return next(e)
     const data = band.data()
     if (!data) return next(e)
     return drawBand($.ui.resolve(e), data, e.props.bodyColumns)
@@ -985,7 +1018,7 @@ export const register: Register = (on) => {
     // Compaction: every end reason starts the conversation's state over; the
     // next conversation baselines the latch from its first usage.
     try {
-      if (compactionEnabledFor($.plugin.name)) compaction.end(e.reason)
+      if (compactionOn) compaction.end(e.reason)
     } catch (err) {
       $.ui.log(`ws compaction: reset failed: ${String(err)}`, { to: 'debug' })
     }
@@ -999,14 +1032,14 @@ export const register: Register = (on) => {
     // Captions: the next conversation's mirror starts empty; the captions,
     // keyed by the session's own tool_use_ids, stay.
     try {
-      if (compactionEnabledFor($.plugin.name)) captions.end()
+      captions.end()
     } catch (err) {
       $.ui.log(`ws captions: reset failed: ${String(err)}`, { to: 'debug' })
     }
     // Band: the next conversation gets its own key, so the key's rows and
     // address go until it arrives; the switch and the figures stay.
     try {
-      if (compactionEnabledFor($.plugin.name)) band.end()
+      band.end()
     } catch (err) {
       $.ui.log(`ws band: reset failed: ${String(err)}`, { to: 'debug' })
     }
@@ -1015,7 +1048,7 @@ export const register: Register = (on) => {
     // again with its own key and picks up an updated manual. Its stored key
     // stays, for a later resume of the ended session.
     try {
-      if (compactionEnabledFor($.plugin.name)) manual.end(e.reason)
+      manual.end(e.reason)
     } catch (err) {
       $.ui.log(`ws manual: reset failed: ${String(err)}`, { to: 'debug' })
     }

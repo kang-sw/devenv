@@ -35,8 +35,8 @@ ai-docs/               workflow specs, tickets, mental models, references
 - **`ws` plugin**: Codex-first workflow skills plus the `ws-mcp` runtime.
   Claude Code compatibility uses the `agents-plugin/` package metadata; there is
   no live `claude-plugin/` source tree.
-- **`wsflow` plugin**: Agentless workflow skills that reuse the shared runtime
-  without ws managed-agent orchestration.
+- **`wsflow` plugin**: the same workflow and shared runtime as `ws`, shipped
+  with conservative defaults (its optional Claude Code features off).
 - **Runtime source**: Go tooling and MCP server code under `agents-plugin-tool/`.
 - **Workflow docs**: specs, tickets, mental models, and references under
   `ai-docs/`.

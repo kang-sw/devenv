@@ -64,11 +64,6 @@ import {
  * here is driven and tested without an engine.
  */
 
-/** Whether the compaction feature runs for this package; every other package ships it inert. */
-export function compactionEnabledFor(pluginName: string): boolean {
-  return pluginName === 'ws'
-}
-
 /** How long the lever's resume prompt waits for another prompt to start the first turn after its compaction. */
 export const CONTINUATION_WINDOW_MS = 1500
 

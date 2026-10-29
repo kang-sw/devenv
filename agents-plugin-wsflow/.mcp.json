@@ -7,7 +7,8 @@
       "env": {
         "WS_MCP_NO_AGENT": "1",
         "WS_MCP_NAMESPACE": "wsflow",
-        "WS_MCP_SETUP_TOOL": "setup"
+        "WS_MCP_SETUP_TOOL": "setup",
+        "WS_MCP_CONFIG_MANIFESTS": "./config-manifest.json"
       },
       "startup_timeout_sec": 30,
       "tool_timeout_sec": 600

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { compactionEnabledFor, CONTINUATION_WINDOW_MS, createCompaction, type CompactionEdges } from './compaction'
+import { CONTINUATION_WINDOW_MS, createCompaction, type CompactionEdges } from './compaction'
 import {
   advisoryText,
   checkLeverCall,
@@ -166,12 +166,6 @@ function deferred<T>() {
 const SUBAGENT_DENY = 'request_compaction compacts the main session only; called from subagent sub-1.'
 
 describe('pure core', () => {
-  test('compaction runs for the ws package only', () => {
-    expect(compactionEnabledFor('ws')).toBe(true)
-    expect(compactionEnabledFor('wsflow')).toBe(false)
-    expect(compactionEnabledFor('')).toBe(false)
-  })
-
   test('thresholds sit at the advisory and one and two thirds of the way to the auto-compact point', () => {
     expect(T.advisory).toBe(100_000)
     expect(T.hard).toBe(170_000)

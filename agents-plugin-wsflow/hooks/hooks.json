@@ -1,1 +1,20 @@
-{ "modules": ["./claude-mod/register.ts"] }
+{
+  "description": "A SessionStart(compact) hook that nudges a compacted lead to run wsflow:lead-revive before anything else, only in a project with ai-docs/WORKFLOW.md at its repository root (or, outside a repository, at the nearest ancestor holding one), and the Claude mod (claude-mod/register.ts), the one hooks module Claude Code accepts per plugin. Every mod feature but the MCP reconnect lever is switched by a claude.* config key; this package ships conservative defaults: compaction timing, workflow manual injection, tool-call captions and the status band are off, and the mailbox drain is notice, until a config tune turns them on. The compaction, manual injection and drain keys are read once at session start from the project, global and built-in values; a failed or refused read leaves the feature off (the drain reads as notice). Its mailbox push feature: arriving cross-session mail for the bound session key starts a turn even in an idle session, and mail arriving while a main-thread turn runs joins that turn at its next tool call's result; with claude.mailbox_drain direct the mod receives the mail itself and submits it, and with notice it submits a prompt telling the lead to receive it. Where the workflow manual injection feature owns the conversation's key the mod binds every key the conversation gets itself and registers no bind tool, and elsewhere the agent binds its key through the mod's mailbox watch tool. Its lead compaction timing feature (claude.compaction_enabled): advisory and milestone wake turns before native auto compaction, and a compaction request tool the lead calls at a boundary of its choosing, whose continue flag, when set, submits a fixed resume prompt after the compaction unless another prompt has already started the next turn. Its MCP reconnect feature: a reconnect request tool the agent calls when the plugin's MCP server has gone, and a /mcp reconnect at the next main-thread turn end, reported to the agent on failure and followed on success by the same guarded resume prompt when its continue flag is set. Its workflow manual injection feature (claude.manual_injection_enabled, in a project with ai-docs/WORKFLOW.md at its repository root): a lead session key minted per conversation and the keyed workflow manual carried in the system prompt, workflow_manual answered with the session state alone while the prompt carries the manual, a repeated playbook_read or workflow_manual collapsed to a pointer while its earlier result is still in the conversation, and a main-thread workflow_manual call with another lead key (a revive) adopted as the conversation's key. Its tool-call caption feature (claude.display_summary_enabled): a finished, collapsed tool row, or a run Claude Code folds into one group, drawn as a short caption a second model call wrote from the call and the lead conversation since its last compaction; the model still reads the raw result and the expanded view draws the raw row. Its status band feature (claude.status_band_enabled, read with the lead session key when one is held so a session-scope tune applies, and read again after each config tune call): a framed band above the prompt with the model and effort as its border title, the folder, the git branch and changes, a context usage bar, the rate-limit and cost figures, and, while the manual injection feature holds a lead session key, that session's mailbox address, todos and agenda keys, each refreshed by events rather than per redraw. Claude Code auto-discovers this file by its hooks/hooks.json path; there is no plugin.json pointer to it.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/compact-revive-nudge.py\" wsflow || true",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  },
+  "modules": [
+    "./claude-mod/register.ts"
+  ]
+}

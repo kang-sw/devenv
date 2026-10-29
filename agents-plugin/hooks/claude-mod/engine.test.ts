@@ -1,12 +1,16 @@
 import { expect, mock, test, type Plugin, type TestBody } from 'claude-code/testing'
 
+import { KNOB } from './register'
+
 type Engine = Parameters<TestBody>[0]
 type On = Parameters<TestBody>[1]
 
 // Engine-backed tests: the plugin under test runs inside the engine's own
 // host, and the hooks below stand for the engine beneath it. The same file is
-// mirrored into every package that ships the mod, so each test reads the
-// package identity from the registration and asserts that package's mode.
+// mirrored into every package that ships the mod and runs identically in each:
+// the drain mode is the claude.mailbox_drain knob's, which each test sets
+// through the world's config_get answers. The package name only spells tool
+// and server names.
 
 type Recv = { result: unknown; text: string } | { deny: string } | { isError: true; result: unknown; text: string }
 
@@ -16,11 +20,32 @@ const batch = (): Recv => ({
   text: '[{"reply_to":"id:peer","content":"hello from peer","sent_at":"t1"},{"from":"x@machine","content":"second","sent_at":"t2"}]',
 })
 
-function world(on: On, opts: { store?: Record<string, unknown>; processOk?: boolean; env?: Record<string, string> } = {}) {
+type Drain = 'direct' | 'notice'
+const DRAINS = ['direct', 'notice'] as const
+
+/** How one mcp.connect answers: after a delay (ms on the mock clock), not connected, or with a rejection. */
+type Connect = number | 'down' | 'reject'
+
+function world(
+  on: On,
+  opts: {
+    store?: Record<string, unknown>
+    processOk?: boolean
+    env?: Record<string, string>
+    /** The claude.mailbox_drain value config_get answers; unset reads as null. */
+    drain?: unknown
+    /** The drain knob's config_get answers an error result. */
+    failDrain?: boolean
+    /** The drain value is tuned at session scope only: a read without session_key finds it unset. */
+    sessionScoped?: boolean
+  } = {},
+) {
   const clock = mock.clock(on)
   mock.env(on, opts.env ?? {})
   const w = {
     clock,
+    /** The drain mode the test expects the watcher to run in: direct only for a readable `direct`. */
+    drain: (opts.drain === 'direct' && !opts.failDrain && !opts.sessionScoped ? 'direct' : 'notice') as Drain,
     store: new Map<string, unknown>(Object.entries(opts.store ?? {})),
     plugin: '',
     registered: [] as string[],
@@ -36,7 +61,10 @@ function world(on: On, opts: { store?: Record<string, unknown>; processOk?: bool
     /** lookup_peers answers by session key; a key not listed has no named inbox. */
     lookupAnswers: {} as Record<string, Recv>,
     lookupDelays: [] as number[],
-    connectDelays: [] as number[],
+    /** Answers for the next mcp.connect calls, in call order; absent: connected at once. */
+    connects: [] as Connect[],
+    /** Every config_get the mod made: its arguments. */
+    configCalls: [] as Record<string, unknown>[],
     dropSubmits: 0,
     prompts: [] as string[],
     /** The text of each row the mod appended to the conversation. */
@@ -78,9 +106,20 @@ function world(on: On, opts: { store?: Record<string, unknown>; processOk?: bool
     return { value: { tool: `mcp__${w.plugin}__${e.name}` } }
   })
   on('mcp.connect', async ($, e) => {
-    const delay = w.connectDelays.shift()
-    if (delay) await clock.sleep(delay)
+    const answer = w.connects.shift()
+    if (typeof answer === 'number') await clock.sleep(answer)
+    if (answer === 'reject') throw new Error('connect failed')
+    if (answer === 'down') return { value: { isConnected: false, reason: 'failed', message: 'did not connect' } }
     return { value: { isConnected: true, server: `plugin:${e.server}:${e.server}` } }
+  })
+  on('mcp.call', ($, e) => {
+    const text = (t: string, isError = false) => ({ value: { content: [{ type: 'text', text: t }], isError } })
+    if (e.tool !== 'config_get') return text(`no ${e.tool} here`, true)
+    w.configCalls.push({ ...e.args })
+    if (e.args.key !== KNOB.drain) return text(JSON.stringify({ key: e.args.key, value: null, scope: 'unset' }))
+    if (opts.failDrain) return text('ws-mcp is unhealthy', true)
+    const value = opts.drain === undefined || (opts.sessionScoped && e.args.session_key === undefined) ? null : opts.drain
+    return text(JSON.stringify({ key: e.args.key, value, scope: value === null ? 'unset' : 'project' }))
   })
   on('process.spawn', async function* ($, e, next) {
     const index = w.spawns.length
@@ -121,7 +160,7 @@ const waitTail = (key: string, slug?: string) => ['mailbox', 'wait', '--session-
 /** The transcript (user-visible) lines the mod logged. */
 const transcript = (w: { logs: { text: string; to: string }[] }) => w.logs.filter((l) => l.to === 'transcript').map((l) => l.text)
 
-/** The mailbox tools among every registration (the compaction feature registers its own in ws). */
+/** The mailbox tools among every registration (the reconnect and compaction features register their own). */
 const mailboxTools = (w: { registered: string[] }) => w.registered.filter((name) => name.startsWith('mailbox_'))
 
 const recvName = (plugin: string) => `mcp__plugin_${plugin}_${plugin}__mailbox_recv`
@@ -184,16 +223,16 @@ async function modelTool($: Engine, agentId?: string) {
   await $.tool.call({ tool: 'Bash', command: 'true', ...(agentId ? { agentId } : {}) } as never)
 }
 
-/** The latest wait exits with mail; in ws the mod's drain answers `answer`. */
+/** The latest wait exits with mail; in the direct mode the mod's drain answers `answer`. */
 async function arrive(w: ReturnType<typeof world>, answer: Recv = batch()) {
-  if (w.plugin === 'ws') w.recvAnswers.push(answer)
+  if (w.drain === 'direct') w.recvAnswers.push(answer)
   w.exits[w.exits.length - 1]!(0)
   await w.clock.settle()
 }
 
-/** What the package delivers for one arrival for k1: the drained batch (ws) or the notice. */
-const delivered = (w: { plugin: string }) =>
-  w.plugin === 'ws' ? '2 message(s) arrived for session_key k1' : `Call ${recvName(w.plugin)} with session_key k1`
+/** What the drain mode delivers for one arrival for k1: the drained batch (direct) or the notice. */
+const delivered = (w: { plugin: string; drain: Drain }) =>
+  w.drain === 'direct' ? '2 message(s) arrived for session_key k1' : `Call ${recvName(w.plugin)} with session_key k1`
 
 /** The model's own recv call (the test's $ raises it with the engine as origin). */
 async function modelRecv($: Engine, w: ReturnType<typeof world>, key: string, answer: Recv) {
@@ -316,15 +355,14 @@ test('an error exit backs off instead of respawning at once', async ($, on) => {
   expect(w.spawns.length).toBe(4)
 })
 
-test('ws drains once and submits the whole drain as one prompt, then re-arms', async ($, on) => {
-  const w = world(on)
+test('the direct drain drains once and submits the whole drain as one prompt, then re-arms', async ($, on) => {
+  const w = world(on, { drain: 'direct' })
   await start($, w)
-  if (w.plugin !== 'ws') return
   await bind($, w, 'k1')
   w.recvAnswers.push(batch())
   w.exits[0]!(0)
   await w.clock.settle()
-  expect(w.recvCalls).toEqual([{ key: 'k1', origin: 'ws' }])
+  expect(w.recvCalls).toEqual([{ key: 'k1', origin: w.plugin }])
   expect(w.prompts.length).toBe(1)
   expect(w.prompts[0]).toContain('2 message(s) arrived for session_key k1')
   expect(w.prompts[0]).toContain('mail from id:peer (t1):\nhello from peer')
@@ -332,17 +370,16 @@ test('ws drains once and submits the whole drain as one prompt, then re-arms', a
   expect(w.spawns.length).toBe(2)
 })
 
-test('ws with a refused drain submits one notice and suspends until the model receives', async ($, on) => {
-  const w = world(on)
+test('the direct drain: a refused drain submits one notice and suspends until the model receives', async ($, on) => {
+  const w = world(on, { drain: 'direct' })
   await start($, w)
-  if (w.plugin !== 'ws') return
   await bind($, w, 'k1')
   w.recvAnswers.push({ deny: 'Claude requested permissions to use mailbox_recv' })
   w.exits[0]!(0)
   await w.clock.settle()
   expect(w.recvCalls.length).toBe(1)
   expect(w.prompts.length).toBe(1)
-  expect(w.prompts[0]).toContain(`Call ${recvName('ws')} with session_key k1`)
+  expect(w.prompts[0]).toContain(`Call ${recvName(w.plugin)} with session_key k1`)
   expect(w.spawns.length).toBe(1) // suspended: no re-arm over the queued mail
   await w.clock.advance(120_000)
   expect(w.spawns.length).toBe(1)
@@ -351,10 +388,9 @@ test('ws with a refused drain submits one notice and suspends until the model re
   expect(w.spawns.length).toBe(2)
 })
 
-test('wsflow submits one notice per arrival and never calls recv itself', async ($, on) => {
-  const w = world(on)
+test('the notice drain submits one notice per arrival and never calls recv itself', async ($, on) => {
+  const w = world(on, { drain: 'notice' })
   await start($, w)
-  if (w.plugin === 'ws') return
   await bind($, w, 'k1')
   w.exits[0]!(0)
   await w.clock.settle()
@@ -371,34 +407,113 @@ test('wsflow submits one notice per arrival and never calls recv itself', async 
   expect(w.recvCalls.every((c) => c.origin === 'engine')).toBe(true)
 })
 
-test('after a notice only a successful model recv for the bound key re-arms', async ($, on) => {
-  const w = world(on)
+for (const drain of DRAINS) {
+  test(`after a notice only a successful model recv for the bound key re-arms (${drain} drain)`, async ($, on) => {
+    const w = world(on, { drain })
+    await start($, w)
+    await bind($, w, 'k1')
+    if (w.drain === 'direct') w.recvAnswers.push({ deny: 'refused' })
+    w.exits[0]!(0)
+    await w.clock.settle()
+    expect(w.prompts.length).toBe(1)
+    expect(w.spawns.length).toBe(1)
+
+    await modelRecv($, w, 'k1', { deny: 'the user declined' })
+    expect(w.spawns.length).toBe(1)
+    await modelRecv($, w, 'k1', { isError: true, result: undefined, text: 'recv failed' })
+    expect(w.spawns.length).toBe(1)
+    await modelRecv($, w, 'other-key', batch())
+    expect(w.spawns.length).toBe(1)
+    expect(w.prompts.length).toBe(1)
+
+    await modelRecv($, w, 'k1', empty())
+    expect(w.spawns.length).toBe(2)
+  })
+}
+
+/** One arrival for k1 in the notice mode: the notice submitted, no recv and no slug lookup of the mod's own. */
+async function expectNoticeMode($: Engine, w: ReturnType<typeof world>) {
+  w.recvAnswers.push(batch())
+  w.exits[w.exits.length - 1]!(0)
+  await w.clock.settle()
+  expect(w.recvCalls).toEqual([])
+  expect(w.lookupCalls).toEqual([])
+  expect(w.prompts.length).toBe(1)
+  expect(w.prompts[0]).toContain(`Call ${recvName(w.plugin)} with session_key k1`)
+}
+
+/** The drain knob's reads: every one keyless, so only its project, global and built-in values apply. */
+const drainReads = (w: ReturnType<typeof world>) => w.configCalls.filter((a) => a.key === KNOB.drain)
+
+for (const [what, opts] of [
+  ['unset', {}],
+  ['any value but direct', { drain: 'DIRECT' }],
+  ['an error result (a failed read)', { drain: 'direct', failDrain: true }],
+  ['tuned at session scope only', { drain: 'direct', sessionScoped: true }],
+] as const) {
+  test(`a drain knob ${what} runs the notice mode`, async ($, on) => {
+    const w = world(on, opts)
+    expect(w.drain).toBe('notice')
+    await start($, w)
+    expect(mailboxTools(w)).toEqual(['mailbox_watch'])
+    await bind($, w, 'k1')
+    await expectNoticeMode($, w)
+    expect(drainReads(w)).toEqual([{ key: KNOB.drain, format: 'json' }])
+  })
+}
+
+test('the drain knob is read once per session start, keyless', async ($, on) => {
+  const w = world(on, { drain: 'direct' })
   await start($, w)
   await bind($, w, 'k1')
-  if (w.plugin === 'ws') w.recvAnswers.push({ deny: 'refused' })
-  w.exits[0]!(0)
-  await w.clock.settle()
-  expect(w.prompts.length).toBe(1)
-  expect(w.spawns.length).toBe(1)
-
-  await modelRecv($, w, 'k1', { deny: 'the user declined' })
-  expect(w.spawns.length).toBe(1)
-  await modelRecv($, w, 'k1', { isError: true, result: undefined, text: 'recv failed' })
-  expect(w.spawns.length).toBe(1)
-  await modelRecv($, w, 'other-key', batch())
-  expect(w.spawns.length).toBe(1)
-  expect(w.prompts.length).toBe(1)
-
-  await modelRecv($, w, 'k1', empty())
-  expect(w.spawns.length).toBe(2)
+  await bind($, w, 'k2')
+  expect(drainReads(w)).toEqual([{ key: KNOB.drain, format: 'json' }])
+  await start($, w)
+  expect(drainReads(w)).toEqual([
+    { key: KNOB.drain, format: 'json' },
+    { key: KNOB.drain, format: 'json' },
+  ])
 })
 
-test('the package identity comes from the engine, so each mirrored copy runs its own mode', async ($, on) => {
-  const w = world(on)
+test('a slow server start does not hold session.start; the bind tool and the direct watcher come up once it connects', async ($, on) => {
+  const w = world(on, { drain: 'direct' })
+  w.connects.push(1_000)
+  let started = false
+  void $.session.start({ cwd: '/tmp', surface: 'terminal', isInteractive: true }).then(() => (started = true))
+  await w.clock.settle()
+  expect(started).toBe(true)
+  expect(mailboxTools(w)).toEqual([])
+  expect(drainReads(w)).toEqual([])
+  await w.clock.advance(1_000)
+  expect(mailboxTools(w)).toEqual(['mailbox_watch'])
+  await bind($, w, 'k1')
+  await arrive(w)
+  expect(w.recvCalls).toEqual([{ key: 'k1', origin: w.plugin }])
+  expect(w.prompts[0]).toContain('2 message(s) arrived for session_key k1')
+})
+
+for (const unresolved of ['down', 'reject'] as const) {
+  test(`a server ${unresolved === 'down' ? 'not connected' : 'whose connect rejects'} at start registers the bind tool and runs the notice mode`, async ($, on) => {
+    const w = world(on, { drain: 'direct' })
+    // At start only: the bind's own connect finds the server up.
+    w.connects.push(unresolved)
+    await start($, w)
+    expect(mailboxTools(w)).toEqual(['mailbox_watch'])
+    // The knob was never read: no server to read it from.
+    expect(drainReads(w)).toEqual([])
+    const bound = await bind($, w, 'k1')
+    expect(String(bound.result)).toContain('bound')
+    await expectNoticeMode($, w)
+  })
+}
+
+test('a reload restore waits out a slow connect, then re-binds the stored key', async ($, on) => {
+  const w = world(on, { store: { 'mailbox-watch:sess-1': { sessionKey: 'k9' } } })
+  w.connects.push(100)
   await start($, w)
-  // Mode-specific tests above return early for the other package; this pins
-  // that each package actually exercised one of them.
-  expect(['ws', 'wsflow']).toContain(w.plugin)
+  expect(w.spawns.length).toBe(0)
+  await w.clock.advance(100)
+  expect(w.spawns.map((a) => a[5])).toEqual(['k9'])
 })
 
 test('state notices reach the user transcript, not only the debug log', async ($, on) => {
@@ -411,25 +526,23 @@ test('state notices reach the user transcript, not only the debug log', async ($
   expect(transcript(w)).toEqual([`${w.plugin} mailbox: armed k1`, `${w.plugin} mailbox: wait error, retrying with backoff`])
 })
 
-test('ws wakes on the named inbox lookup_peers reports, re-resolved on every rebind', async ($, on) => {
-  const w = world(on, { env: { WS_MAILBOX: 'env@machine' } })
+test('the direct drain: wakes on the named inbox lookup_peers reports, re-resolved on every rebind', async ($, on) => {
+  const w = world(on, { drain: 'direct', env: { WS_MAILBOX: 'env@machine' } })
   w.lookupAnswers = { k1: peers('lead-ab12@worktree'), k2: peers('other-cd34@worktree') }
   await start($, w)
-  if (w.plugin !== 'ws') return
   await bind($, w, 'k1')
   await bind($, w, 'k2')
   expect(w.lookupCalls).toEqual([
-    { key: 'k1', origin: 'ws' },
-    { key: 'k2', origin: 'ws' },
+    { key: 'k1', origin: w.plugin },
+    { key: 'k2', origin: w.plugin },
   ])
   expect(w.spawns.map((a) => a.slice(2))).toEqual([waitTail('k1', 'lead-ab12@worktree'), waitTail('k2', 'other-cd34@worktree')])
 })
 
-test('ws falls back to WS_MAILBOX when lookup_peers is refused or names no inbox', async ($, on) => {
-  const w = world(on, { env: { WS_MAILBOX: 'env@machine' } })
+test('the direct drain: falls back to WS_MAILBOX when lookup_peers is refused or names no inbox', async ($, on) => {
+  const w = world(on, { drain: 'direct', env: { WS_MAILBOX: 'env@machine' } })
   w.lookupAnswers = { k1: { deny: 'the user declined' } }
   await start($, w)
-  if (w.plugin !== 'ws') return
   await bind($, w, 'k1')
   await bind($, w, 'k2')
   expect(w.lookupCalls.map((c) => c.key)).toEqual(['k1', 'k2'])
@@ -437,9 +550,8 @@ test('ws falls back to WS_MAILBOX when lookup_peers is refused or names no inbox
 })
 
 test('overlapping binds resolve latest-wins while a slug lookup is in flight', async ($, on) => {
-  const w = world(on)
+  const w = world(on, { drain: 'direct' })
   await start($, w)
-  if (w.plugin !== 'ws') return
   w.lookupDelays.push(100)
   const first = $.tool.call({ tool: watchName(w.plugin), session_key: 'k1' } as never)
   await w.clock.settle()
@@ -451,9 +563,8 @@ test('overlapping binds resolve latest-wins while a slug lookup is in flight', a
 })
 
 test('a session end cancels a bind whose slug lookup is still in flight', async ($, on) => {
-  const w = world(on)
+  const w = world(on, { drain: 'direct' })
   await start($, w)
-  if (w.plugin !== 'ws') return
   w.lookupDelays.push(100)
   const pending = $.tool.call({ tool: watchName(w.plugin), session_key: 'k1' } as never)
   await w.clock.settle()
@@ -466,10 +577,9 @@ test('a session end cancels a bind whose slug lookup is still in flight', async 
 })
 
 test('a session end cancels a reload restore whose slug lookup is still in flight', async ($, on) => {
-  const w = world(on, { store: { 'mailbox-watch:sess-1': { sessionKey: 'k9' } } })
+  const w = world(on, { drain: 'direct', store: { 'mailbox-watch:sess-1': { sessionKey: 'k9' } } })
   w.lookupDelays.push(100)
   await start($, w)
-  if (w.plugin !== 'ws') return
   expect(w.lookupCalls.map((c) => c.key)).toEqual(['k9'])
   await $.session.end({ reason: 'clear', sessionId: 'sess-1', resume: undefined as never })
   await w.clock.advance(100)
@@ -477,31 +587,19 @@ test('a session end cancels a reload restore whose slug lookup is still in fligh
   expect(w.store.has('mailbox-watch:sess-1')).toBe(false)
 })
 
-test('a reload restore yields to a bind made while it connects', async ($, on) => {
-  const w = world(on, { store: { 'mailbox-watch:sess-1': { sessionKey: 'k9' } } })
-  w.connectDelays.push(100)
-  await start($, w)
-  expect(w.spawns.length).toBe(0)
-  await bind($, w, 'k1')
-  await w.clock.advance(100)
-  expect(w.spawns.map((a) => a[5])).toEqual(['k1'])
-})
-
 test('a reload restore yields to a bind made while it resolves its slug', async ($, on) => {
-  const w = world(on, { store: { 'mailbox-watch:sess-1': { sessionKey: 'k9' } } })
+  const w = world(on, { drain: 'direct', store: { 'mailbox-watch:sess-1': { sessionKey: 'k9' } } })
   w.lookupDelays.push(100)
   await start($, w)
-  if (w.plugin !== 'ws') return
   expect(w.lookupCalls.map((c) => c.key)).toEqual(['k9'])
   await bind($, w, 'k1')
   await w.clock.advance(100)
   expect(w.spawns.map((a) => a[5])).toEqual(['k1'])
 })
 
-test('ws appends a drained batch as a row when its idle prompt is dropped, recording nothing', async ($, on) => {
-  const w = world(on)
+test('the direct drain: appends a drained batch as a row when its idle prompt is dropped, recording nothing', async ($, on) => {
+  const w = world(on, { drain: 'direct' })
   await start($, w)
-  if (w.plugin !== 'ws') return
   await bind($, w, 'k1')
   w.dropSubmits = 1
   await arrive(w)
@@ -512,10 +610,9 @@ test('ws appends a drained batch as a row when its idle prompt is dropped, recor
   expect(w.spawns.length).toBe(2)
 })
 
-test('ws records a drained batch in the transcript when its prompt is dropped and its row refused', async ($, on) => {
-  const w = world(on)
+test('the direct drain: records a drained batch in the transcript when its prompt is dropped and its row refused', async ($, on) => {
+  const w = world(on, { drain: 'direct' })
   await start($, w)
-  if (w.plugin !== 'ws') return
   await bind($, w, 'k1')
   w.dropSubmits = 1
   w.refuseAppends = 1
@@ -532,10 +629,9 @@ test('ws records a drained batch in the transcript when its prompt is dropped an
   expect(w.spawns.length).toBe(2)
 })
 
-test('ws records, not submits, a drain in flight when session.end stops the loop', async ($, on) => {
-  const w = world(on)
+test('the direct drain: records, not submits, a drain in flight when session.end stops the loop', async ($, on) => {
+  const w = world(on, { drain: 'direct' })
   await start($, w)
-  if (w.plugin !== 'ws') return
   await bind($, w, 'k1')
   w.recvAnswers.push(batch())
   w.recvDelays.push(100)
@@ -551,10 +647,9 @@ test('ws records, not submits, a drain in flight when session.end stops the loop
   expect(w.spawns.length).toBe(1)
 })
 
-test('ws still submits a drain in flight across a rebind', async ($, on) => {
-  const w = world(on)
+test('the direct drain: still submits a drain in flight across a rebind', async ($, on) => {
+  const w = world(on, { drain: 'direct' })
   await start($, w)
-  if (w.plugin !== 'ws') return
   await bind($, w, 'k1')
   w.recvAnswers.push(batch())
   w.recvDelays.push(100)
@@ -577,38 +672,39 @@ test('a failing recv beneath the observer is never run a second time', async ($,
   expect(res).toEqual({ isError: true, result: undefined, text: 'mailbox recv failed' })
 })
 
-test('mail arriving during a main-thread turn joins it as one row at the next model tool call, not as a prompt', async ($, on) => {
-  const w = world(on)
-  await start($, w)
-  await bind($, w, 'k1')
-  await turnStart($)
-  await arrive(w)
-  expect(w.prompts).toEqual([])
-  expect(w.appended).toEqual([])
-  // A subagent's tool call is no boundary of the main turn.
-  await modelTool($, 'sub-1')
-  expect(w.appended).toEqual([])
-  await modelTool($)
-  expect(w.appended.length).toBe(1)
-  expect(w.appended[0]).toContain(delivered(w))
-  await modelTool($)
-  await turnEnd($, w)
-  expect(w.appended.length).toBe(1)
-  expect(w.prompts).toEqual([])
-})
+for (const drain of DRAINS) {
+  test(`mail arriving during a main-thread turn joins it as one row at the next model tool call, not as a prompt (${drain} drain)`, async ($, on) => {
+    const w = world(on, { drain })
+    await start($, w)
+    await bind($, w, 'k1')
+    await turnStart($)
+    await arrive(w)
+    expect(w.prompts).toEqual([])
+    expect(w.appended).toEqual([])
+    // A subagent's tool call is no boundary of the main turn.
+    await modelTool($, 'sub-1')
+    expect(w.appended).toEqual([])
+    await modelTool($)
+    expect(w.appended.length).toBe(1)
+    expect(w.appended[0]).toContain(delivered(w))
+    await modelTool($)
+    await turnEnd($, w)
+    expect(w.appended.length).toBe(1)
+    expect(w.prompts).toEqual([])
+  })
+}
 
-test('ws joins several mid-turn drains into one row; the mod\'s own recv calls between them flush nothing', async ($, on) => {
-  const w = world(on)
+test('the direct drain: joins several mid-turn drains into one row; the mod\'s own recv calls between them flush nothing', async ($, on) => {
+  const w = world(on, { drain: 'direct' })
   await start($, w)
-  if (w.plugin !== 'ws') return
   await bind($, w, 'k1')
   await turnStart($)
   await arrive(w)
   expect(w.spawns.length).toBe(2) // re-armed at once, not held until the boundary
   await arrive(w, { result: undefined, text: '[{"from":"z@machine","content":"third","sent_at":"t3"}]' })
   expect(w.recvCalls).toEqual([
-    { key: 'k1', origin: 'ws' },
-    { key: 'k1', origin: 'ws' },
+    { key: 'k1', origin: w.plugin },
+    { key: 'k1', origin: w.plugin },
   ])
   expect(w.appended).toEqual([])
   await modelTool($)
@@ -617,63 +713,67 @@ test('ws joins several mid-turn drains into one row; the mod\'s own recv calls b
   expect(w.appended[0]).toContain('mail from z@machine (t3):\nthird')
 })
 
-test('mail still queued at the main-thread turn end is submitted as one prompt; a subagent turn end submits nothing', async ($, on) => {
-  const w = world(on)
+for (const drain of DRAINS) {
+  test(`mail still queued at the main-thread turn end is submitted as one prompt; a subagent turn end submits nothing (${drain} drain)`, async ($, on) => {
+    const w = world(on, { drain })
+    await start($, w)
+    await bind($, w, 'k1')
+    await turnStart($)
+    await turnStart($, 'sub-1')
+    await arrive(w)
+    await turnEnd($, w, { agentId: 'sub-1' })
+    expect(w.prompts).toEqual([])
+    await turnEnd($, w)
+    expect(w.appended).toEqual([])
+    expect(w.prompts.length).toBe(1)
+    expect(w.prompts[0]).toContain(delivered(w))
+  })
+}
+
+test('the direct drain: submits mail arriving after the turn ended as its own prompt, as when idle', async ($, on) => {
+  const w = world(on, { drain: 'direct' })
   await start($, w)
   await bind($, w, 'k1')
   await turnStart($)
-  await turnStart($, 'sub-1')
-  await arrive(w)
-  await turnEnd($, w, { agentId: 'sub-1' })
-  expect(w.prompts).toEqual([])
   await turnEnd($, w)
-  expect(w.appended).toEqual([])
-  expect(w.prompts.length).toBe(1)
-  expect(w.prompts[0]).toContain(delivered(w))
-})
-
-test('ws submits mail arriving after the turn ended as its own prompt, as when idle', async ($, on) => {
-  const w = world(on)
-  await start($, w)
-  if (w.plugin !== 'ws') return
-  await bind($, w, 'k1')
-  await turnStart($)
-  await turnEnd($, w)
   await arrive(w)
   expect(w.appended).toEqual([])
   expect(w.prompts.length).toBe(1)
   expect(w.prompts[0]).toContain(delivered(w))
 })
 
-test('an interrupted turn submits what is still queued at its end', async ($, on) => {
-  const w = world(on)
-  await start($, w)
-  await bind($, w, 'k1')
-  await turnStart($)
-  await arrive(w)
-  await turnEnd($, w, { reason: 'aborted' })
-  expect(w.appended).toEqual([])
-  expect(w.prompts.length).toBe(1)
-  expect(w.prompts[0]).toContain(delivered(w))
-})
+for (const drain of DRAINS) {
+  test(`an interrupted turn submits what is still queued at its end (${drain} drain)`, async ($, on) => {
+    const w = world(on, { drain })
+    await start($, w)
+    await bind($, w, 'k1')
+    await turnStart($)
+    await arrive(w)
+    await turnEnd($, w, { reason: 'aborted' })
+    expect(w.appended).toEqual([])
+    expect(w.prompts.length).toBe(1)
+    expect(w.prompts[0]).toContain(delivered(w))
+  })
+}
 
-test('a row appended right before an interrupt is not delivered again at the turn end', async ($, on) => {
-  const w = world(on)
-  await start($, w)
-  await bind($, w, 'k1')
-  await turnStart($)
-  await arrive(w)
-  await modelTool($)
-  await turnEnd($, w, { reason: 'aborted' })
-  // The appended row rides the next prompt's request instead.
-  expect(w.appended.length).toBe(1)
-  expect(w.prompts).toEqual([])
-})
+for (const drain of DRAINS) {
+  test(`a row appended right before an interrupt is not delivered again at the turn end (${drain} drain)`, async ($, on) => {
+    const w = world(on, { drain })
+    await start($, w)
+    await bind($, w, 'k1')
+    await turnStart($)
+    await arrive(w)
+    await modelTool($)
+    await turnEnd($, w, { reason: 'aborted' })
+    // The appended row rides the next prompt's request instead.
+    expect(w.appended.length).toBe(1)
+    expect(w.prompts).toEqual([])
+  })
+}
 
-test('ws records queued mail in the transcript when its row is refused', async ($, on) => {
-  const w = world(on)
+test('the direct drain: records queued mail in the transcript when its row is refused', async ($, on) => {
+  const w = world(on, { drain: 'direct' })
   await start($, w)
-  if (w.plugin !== 'ws') return
   await bind($, w, 'k1')
   await turnStart($)
   await arrive(w)
@@ -687,10 +787,9 @@ test('ws records queued mail in the transcript when its row is refused', async (
   expect(record).toContain('mail from id:peer (t1):\nhello from peer')
 })
 
-test('ws records mail still queued for the turn when the session ends', async ($, on) => {
-  const w = world(on)
+test('the direct drain: records mail still queued for the turn when the session ends', async ($, on) => {
+  const w = world(on, { drain: 'direct' })
   await start($, w)
-  if (w.plugin !== 'ws') return
   await bind($, w, 'k1')
   await turnStart($)
   await arrive(w)
@@ -704,33 +803,37 @@ test('ws records mail still queued for the turn when the session ends', async ($
   expect(record).toContain('(the push loop stopped: session.end clear)')
 })
 
-test('mail queued during a tool call the person interrupts is appended at that boundary; the turn end submits nothing for it', { plugins: [interrupter] }, async ($, on) => {
-  const w = world(on)
-  await start($, w)
-  await bind($, w, 'k1')
-  await turnStart($)
-  await arrive(w)
-  await $.tool.call({ tool: 'Bash', command: INTERRUPT } as never)
-  await w.clock.advance(100)
-  // The row rides the person's next prompt: the host starts no plugin turn after a stop.
-  expect(w.appended.length).toBe(1)
-  expect(w.appended[0]).toContain(delivered(w))
-  await turnEnd($, w, { reason: 'aborted' })
-  expect(w.appended.length).toBe(1)
-  expect(w.prompts).toEqual([])
-})
+for (const drain of DRAINS) {
+  test(`mail queued during a tool call the person interrupts is appended at that boundary; the turn end submits nothing for it (${drain} drain)`, { plugins: [interrupter] }, async ($, on) => {
+    const w = world(on, { drain })
+    await start($, w)
+    await bind($, w, 'k1')
+    await turnStart($)
+    await arrive(w)
+    await $.tool.call({ tool: 'Bash', command: INTERRUPT } as never)
+    await w.clock.advance(100)
+    // The row rides the person's next prompt: the host starts no plugin turn after a stop.
+    expect(w.appended.length).toBe(1)
+    expect(w.appended[0]).toContain(delivered(w))
+    await turnEnd($, w, { reason: 'aborted' })
+    expect(w.appended.length).toBe(1)
+    expect(w.prompts).toEqual([])
+  })
+}
 
-test('mail queued after the last tool boundary: a turn-end submit the host drops after an interrupt is appended as a row, not recorded as lost', async ($, on) => {
-  const w = world(on)
-  await start($, w)
-  await bind($, w, 'k1')
-  await turnStart($)
-  await arrive(w)
-  // No tool boundary follows the arrival, so the mail is still queued at the turn end.
-  w.dropSubmits = 1
-  await turnEnd($, w, { reason: 'aborted' })
-  expect(w.prompts).toEqual([])
-  expect(w.appended.length).toBe(1)
-  expect(w.appended[0]).toContain(delivered(w))
-  expect(transcript(w).some((t) => t.includes('was not submitted'))).toBe(false)
-})
+for (const drain of DRAINS) {
+  test(`mail queued after the last tool boundary: a turn-end submit the host drops after an interrupt is appended as a row, not recorded as lost (${drain} drain)`, async ($, on) => {
+    const w = world(on, { drain })
+    await start($, w)
+    await bind($, w, 'k1')
+    await turnStart($)
+    await arrive(w)
+    // No tool boundary follows the arrival, so the mail is still queued at the turn end.
+    w.dropSubmits = 1
+    await turnEnd($, w, { reason: 'aborted' })
+    expect(w.prompts).toEqual([])
+    expect(w.appended.length).toBe(1)
+    expect(w.appended[0]).toContain(delivered(w))
+    expect(transcript(w).some((t) => t.includes('was not submitted'))).toBe(false)
+  })
+}

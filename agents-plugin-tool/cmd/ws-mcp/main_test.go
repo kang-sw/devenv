@@ -140,12 +140,12 @@ func TestRuntimeCapabilitiesCommandReportsNoAgentSurface(t *testing.T) {
 			t.Fatalf("no-agent capabilities missing visible tool %s in %v", visible, got.Tools)
 		}
 	}
-	for _, hidden := range []string{"subquery", "config.tune"} {
+	for _, hidden := range []string{"subquery"} {
 		if slices.Contains(got.Commands, hidden) {
 			t.Fatalf("no-agent capabilities exposed hidden command %s in %v", hidden, got.Commands)
 		}
 	}
-	for _, visible := range []string{"config.list", "tickets.list", "runtime.capabilities"} {
+	for _, visible := range []string{"config.list", "config.tune", "tickets.list", "runtime.capabilities"} {
 		if !slices.Contains(got.Commands, visible) {
 			t.Fatalf("no-agent capabilities missing visible command %s in %v", visible, got.Commands)
 		}
@@ -229,31 +229,42 @@ func TestTopLevelUsageListsTheWholeSubcommandSet(t *testing.T) {
 	}
 }
 
-func TestNoAgentCLICommandsReturnDisabledErrors(t *testing.T) {
+// TestNoAgentCLIConfigTuneSucceeds: the CLI config tune is not refused in a
+// no-agent (wsflow) runtime. It runs in a throwaway project, cache, config,
+// and HOME so the write never reaches a real user's or this repository's
+// config.
+func TestNoAgentCLIConfigTuneSucceeds(t *testing.T) {
 	bin := wsMCPTestBin(t)
 	build := exec.Command("go", "build", "-o", bin, ".")
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("go build failed: %v\n%s", err, string(out))
 	}
 
-	for _, tc := range []struct {
-		name string
-		args []string
-		want string
-	}{
-		{name: "config tune", args: []string{"config", "tune", "--tier", "core"}, want: "wsflow agentless mode disables agent-backed command: config tune"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			cmd := exec.Command(bin, tc.args...)
-			cmd.Env = append(os.Environ(), "WS_MCP_NO_AGENT=1", "WS_MCP_NAMESPACE=wsflow")
-			out, err := cmd.CombinedOutput()
-			if err == nil {
-				t.Fatalf("ws-mcp %v unexpectedly succeeded: %s", tc.args, string(out))
-			}
-			if !strings.Contains(string(out), tc.want) {
-				t.Fatalf("ws-mcp %v error missing %q:\n%s", tc.args, tc.want, string(out))
-			}
-		})
+	project := t.TempDir()
+	cache := filepath.Join(t.TempDir(), "cache")
+	cmd := exec.Command(bin, "config", "tune", "--tier", "medium", "--model", "claude-test-model", "--harness", "claude")
+	cmd.Dir = project
+	cmd.Env = append(os.Environ(),
+		"WS_MCP_NO_AGENT=1",
+		"WS_MCP_NAMESPACE=wsflow",
+		"WS_MCP_PROJECT_ROOT="+project,
+		"WS_CACHE_HOME="+cache,
+		"WS_CONFIG_HOME="+t.TempDir(),
+		"HOME="+t.TempDir(),
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("ws-mcp config tune under WS_MCP_NO_AGENT=1 failed: %v\n%s", err, string(out))
+	}
+	if !strings.Contains(string(out), "claude-test-model") {
+		t.Fatalf("config tune output does not carry the tuned model:\n%s", string(out))
+	}
+	written, err := os.ReadFile(filepath.Join(cache, "config.json"))
+	if err != nil {
+		t.Fatalf("config tune wrote no config under the temp cache: %v", err)
+	}
+	if !strings.Contains(string(written), "claude-test-model") {
+		t.Fatalf("temp cache config does not carry the tuned model:\n%s", string(written))
 	}
 }
 
