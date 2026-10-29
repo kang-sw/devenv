@@ -309,11 +309,11 @@ MCP reconnect lever, workflow manual injection, tool-call captions, and the
 status band.
 The mod reads its package identity (plugin name, root, MCP server) from the
 engine at runtime, and selects no feature by package name: every feature but
-the reconnect lever is switched by a `claude.*` config key, and the only
-per-package difference is each key's `default` in the package's own
-`config-manifest.json` (ws: compaction timing, manual injection, the direct
-mailbox drain, and the status band on; wsflow: all off and the drain
-`notice`; captions off in both). `TestShippedClaudeManifestsDifferOnlyInDefaults`
+the reconnect and compaction request levers is switched by a `claude.*` config
+key, and the only per-package difference is each key's `default` in the
+package's own `config-manifest.json` (ws: the compaction advisory, manual
+injection, the direct mailbox drain, and the status band on; wsflow: all off
+and the drain `notice`; captions off in both). `TestShippedClaudeManifestsDifferOnlyInDefaults`
 pins that the two manifests declare the same keys with every field but
 `default` identical, so a shared description never states a package's
 default. This supersedes the earlier package-name gates
@@ -321,17 +321,19 @@ default. This supersedes the earlier package-name gates
 `261018-feat-claude-mod-compaction-threshold-knob` D8 (wsflow stays inert and
 declares no manifest).
 
-The compaction, manual-injection, and drain knobs are read keyless once at
-session start; a failed or refused read leaves the feature off (the drain
-reads as `notice`). Workflow manual injection runs only with its knob on and
+The compaction-advisory, manual-injection, and drain knobs are read keyless
+once at session start; a failed or refused read leaves the feature off (the
+drain reads as `notice`). Workflow manual injection runs only with its knob on and
 `ai-docs/WORKFLOW.md` at the repository root: it mints the conversation's key,
 adds the system-prompt section, rewrites the ws reads, adopts a revive's or a
 fresh-bootstrap sentinel call's key, and binds the mailbox push to every key
 the conversation gets, so the `mailbox_watch` lever is not registered there;
 with the knob off (or outside such a project) the lever registers and binds,
 and the status band draws only its key-less rows. Tool-call captions and the
-status band read their own knobs as before. The reconnect lever runs in both
-packages.
+status band read their own knobs as before. The reconnect and compaction
+request levers run in both packages whatever the knobs read;
+`claude.compaction_advisory_enabled` gates only the advisory and its
+reminders.
 
 Both packages' `hooks/hooks.json` also register the SessionStart(`compact`)
 revive nudge, `hooks/compact-revive-nudge.py`, passed the package name as its

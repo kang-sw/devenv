@@ -15,7 +15,6 @@ import {
   rulesPrompt,
   STYLE_KEY,
 } from './captions'
-import { KNOB } from './register'
 
 type Engine = Parameters<TestBody>[0]
 type On = Parameters<TestBody>[1]
@@ -598,8 +597,7 @@ test('the mirror starts over when the lead compaction lever lands, and on a main
     { role: 'assistant', content: [{ type: 'text', text: 'beta before compaction' }] },
     { role: 'user', content: [{ type: 'text', text: 'gamma latest' }] },
   ]
-  // The compaction knob on: the lever this test lands is that feature's.
-  const w = world(on, { messages, config: { [KNOB.compaction]: true } })
+  const w = world(on, { messages })
   await start($, w)
   await isRaw($, toolUse(w, 'toolu_1'))
   await tick(w)

@@ -103,7 +103,7 @@ var claudePackageDefaults = []struct {
 	ws     any
 	wsflow any
 }{
-	{"claude.compaction_enabled", true, false},
+	{"claude.compaction_advisory_enabled", true, false},
 	{"claude.manual_injection_enabled", true, false},
 	{"claude.mailbox_drain", "direct", "notice"},
 	{"claude.display_summary_enabled", false, false},

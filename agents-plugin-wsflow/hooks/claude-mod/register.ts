@@ -28,10 +28,10 @@ import {
 //   feature owns the conversation's key (its knob on, in a ws project) the
 //   mod binds every key the conversation gets itself; elsewhere the agent
 //   binds its key through the mod-registered mailbox watch tool.
-// - Lead compaction timing (behind claude.compaction_enabled): advisory and
-//   milestone wake turns before native auto compaction, and the compaction
-//   request tool, whose opt-in resume prompt yields to any turn already
-//   started after the compaction (see compaction.ts).
+// - Lead compaction timing: the compaction request tool, always registered,
+//   whose opt-in resume prompt yields to any turn already started after the
+//   compaction, and (behind claude.compaction_advisory_enabled) advisory and
+//   milestone wake turns before native auto compaction (see compaction.ts).
 // - MCP reconnect lever: a tool the model calls when the plugin's MCP server
 //   has gone, and `/mcp reconnect` at the next main-thread turn end, with the
 //   same opt-in resume prompt (see reconnect.ts).
@@ -66,7 +66,7 @@ import {
 // resolved later). No package or server name is spelled: what differs per
 // package is only each knob's default, in the package's config manifest.
 //
-// The compaction, manual and drain knobs (KNOB) are read keyless, once at
+// The advisory, manual and drain knobs (KNOB) are read keyless, once at
 // session start (the manual's once per module instance, inside the ws-project
 // gate), so only their project, global and built-in values apply: the manual
 // knob decides whether a key is minted at all, so no key exists to read it
@@ -75,7 +75,9 @@ import {
 // as notice). The features those reads gate come up when the read settles,
 // outside session.start's awaited path, so a slow server start never delays
 // the first prompt: a tool registered after session.start is listed to the
-// model from its next request on.
+// model from its next request on. The compaction lever reads no knob: it is
+// registered in session.start's awaited path, so no start leaves a listed
+// lever without the handler that answers it.
 
 export const TOOL_NAME = 'mailbox_watch'
 /** A finite window, as the pi adapter uses, so an orphaned wait cannot outlive its session. */
@@ -90,7 +92,7 @@ export const STORE_PREFIX = 'mailbox-watch:'
 
 /** The keys of the knobs register.ts reads itself; captions and the band read their own. */
 export const KNOB = {
-  compaction: 'claude.compaction_enabled',
+  compactionAdvisory: 'claude.compaction_advisory_enabled',
   manual: 'claude.manual_injection_enabled',
   drain: 'claude.mailbox_drain',
 } as const
@@ -361,12 +363,12 @@ export const register: Register = (on) => {
     )
   }
 
-  // Compaction feature state; started, and its tool registered, once the
-  // latest session.start's compaction knob read settles on. Every compaction
-  // hook runs only while that read held.
+  // Compaction feature state; started, and its lever registered, at every
+  // session.start. Only the advisory's usage observation waits for the
+  // latest start's advisory knob read to settle on.
   const compaction = createCompaction()
   let leverTool: string | undefined
-  let compactionOn = false
+  let advisoryOn = false
 
   // Reconnect feature state; its tool name is set at session.start.
   const reconnect = createReconnect()
@@ -512,8 +514,6 @@ export const register: Register = (on) => {
         mailboxLog(`push binds the conversation's key automatically; ${TOOL_NAME} not registered`)
         return
       }
-      // A bind from here on is newer than the restore below, which yields to it.
-      const restoreSeq = armSeq
       const registered = await $.tool.register({
         name: TOOL_NAME,
         description:
@@ -530,7 +530,7 @@ export const register: Register = (on) => {
       toolName = registered.tool
       // Restore a binding a hot reload dropped, without delaying the first prompt.
       const restoreFrom = STORE_PREFIX + (await $.session.id())
-      const current = () => watcher === created && armSeq === restoreSeq
+      const current = () => watcher === created
       void (async () => {
         const key = storedKey(await $.store.get(restoreFrom))
         if (!key || !current()) return
@@ -543,11 +543,14 @@ export const register: Register = (on) => {
       $.ui.log(`${label}: setup failed: ${String(err)}`, { to: 'debug' })
     })
 
-    // Until this start's knob read settles on, every compaction hook is inert.
-    compactionOn = false
+    // Until this start's advisory knob read settles on, no usage is observed,
+    // so no advisory or milestone turn is sent; the lever works regardless.
+    advisoryOn = false
+    const advisoryRead = readKnob(KNOB.compactionAdvisory).then((value) => value === true)
+    void advisoryRead.then((enabled) => {
+      if (enabled && startSeq === starts) advisoryOn = true
+    })
     const compactionSetup = (async () => {
-      if ((await readKnob(KNOB.compaction)) !== true || startSeq !== starts) return
-      compactionOn = true
       compaction.start({
         submit: (text) => $.prompt.submit({ text }),
         compact: () => $.session.compact(),
@@ -560,8 +563,11 @@ export const register: Register = (on) => {
           manual.landed('plugin')
           captions.leverLanded()
         },
-        // One config_get per session start, once the shared server resolution settles.
-        readAdvisory: () => readSetting(ADVISORY_KEY),
+        // One config_get per session start with the advisory on, once its knob read settles.
+        readAdvisory: async () => {
+          if (!(await advisoryRead)) throw new Error(`${KNOB.compactionAdvisory} is off`)
+          return readSetting(ADVISORY_KEY)
+        },
       })
       const registered = await $.tool.register({
         name: LEVER_TOOL,
@@ -573,7 +579,7 @@ export const register: Register = (on) => {
         isDeferred: false,
       })
       leverTool = registered.tool
-    })().catch((err) => $.ui.log(`ws compaction: setup failed (${String(err)}); ${LEVER_TOOL} not registered`, { to: 'debug' }))
+    })().catch((err) => $.ui.log(`${$.plugin.name} compaction: setup failed (${String(err)}); ${LEVER_TOOL} not registered`, { to: 'debug' }))
 
     const reconnectSetup = (async () => {
       reconnect.start({
@@ -703,13 +709,12 @@ export const register: Register = (on) => {
       $.ui.log(`ws manual: setup failed: ${String(err)}`, { to: 'debug' })
     }
 
-    // The reconnect lever's registration is awaited, so it is listed by turn
-    // one. The mailbox and compaction setups wait on knob reads, so they run
-    // on and their tools are listed from the model's next request after they
-    // register.
+    // The reconnect and compaction levers' registrations are awaited, so they
+    // are listed by turn one. The mailbox setup waits on knob reads, so it
+    // runs on and its tool is listed from the model's next request after it
+    // registers.
     void mailboxSetup
-    void compactionSetup
-    await reconnectSetup
+    await Promise.all([reconnectSetup, compactionSetup])
     return next(e)
   })
 
@@ -831,7 +836,7 @@ export const register: Register = (on) => {
   )
 
   on('tool.call', { tool: /__request_compaction$/ }, async ($, e, next) => {
-    if (!compactionOn || e.tool !== leverTool) return next(e)
+    if (e.tool !== leverTool) return next(e)
     return compaction.lever(e.agentId, (e as { continue?: unknown }).continue)
   }).catch(($, e, next) => (next.called ? next(e) : { deny: `${LEVER_TOOL}: the compaction request hook failed; see the debug log.` }))
 
@@ -850,7 +855,7 @@ export const register: Register = (on) => {
   on('session.measure', async ($, e, next) => {
     const res = await next(e)
     try {
-      if (compactionOn) await compaction.measure(e.context, () => $.session.usage({ breakdown: 'summary' }))
+      if (advisoryOn) await compaction.measure(e.context, () => $.session.usage({ breakdown: 'summary' }))
     } catch (err) {
       $.ui.log(`ws compaction: usage observation failed: ${String(err)}`, { to: 'debug' })
     }
@@ -880,7 +885,7 @@ export const register: Register = (on) => {
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) mainTurn = true
     try {
-      if (compactionOn) compaction.turnStarted(e.agentId)
+      compaction.turnStarted(e.agentId)
     } catch (err) {
       $.ui.log(`ws compaction: turn start handling failed: ${String(err)}`, { to: 'debug' })
     }
@@ -910,7 +915,7 @@ export const register: Register = (on) => {
       }
     }
     try {
-      if (compactionOn) compaction.turnComplete(e.agentId, e.reason)
+      compaction.turnComplete(e.agentId, e.reason)
     } catch (err) {
       $.ui.log(`ws compaction: turn end handling failed: ${String(err)}`, { to: 'debug' })
     }
@@ -934,7 +939,7 @@ export const register: Register = (on) => {
   on('session.compact', async ($, e, next) => {
     const res = await next(e)
     try {
-      if (compactionOn) compaction.compacted(e.trigger, e.agentId, res)
+      compaction.compacted(e.trigger, e.agentId, res)
     } catch (err) {
       $.ui.log(`ws compaction: compaction observation failed: ${String(err)}`, { to: 'debug' })
     }
@@ -1018,7 +1023,7 @@ export const register: Register = (on) => {
     // Compaction: every end reason starts the conversation's state over; the
     // next conversation baselines the latch from its first usage.
     try {
-      if (compactionOn) compaction.end(e.reason)
+      compaction.end(e.reason)
     } catch (err) {
       $.ui.log(`ws compaction: reset failed: ${String(err)}`, { to: 'debug' })
     }

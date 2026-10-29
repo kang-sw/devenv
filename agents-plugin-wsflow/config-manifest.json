@@ -3,10 +3,10 @@
   "namespace": "claude.",
   "keys": [
     {
-      "key": "claude.compaction_enabled",
+      "key": "claude.compaction_advisory_enabled",
       "type": "boolean",
       "default": false,
-      "description": "Claude Code only (unused on other hosts): when true, lead compaction timing runs: an advisory turn at the claude.compaction_advisory_percent point and two reminder turns after it, before Claude Code's automatic compaction, and a tool the lead calls to request a compaction at a boundary of its own choosing. When false, neither runs; Claude Code's automatic compaction is unchanged either way. Read at session start, so a change applies from the next session. Only the project, global, and built-in values apply; a session- or repo-scope tune is not read. A failed or refused read leaves it off."
+      "description": "Claude Code only (unused on other hosts): when true, the advisory runs: an advisory turn at the claude.compaction_advisory_percent point and two reminder turns after it, before Claude Code's automatic compaction. When false, neither runs. This key gates only the advisory and its reminders: the tool the lead calls to request a compaction at a boundary of its own choosing is always available, and Claude Code's automatic compaction is unchanged either way. Read at session start, so a change applies from the next session. Only the project, global, and built-in values apply; a session- or repo-scope tune is not read. A failed or refused read leaves it off."
     },
     {
       "key": "claude.compaction_advisory_percent",

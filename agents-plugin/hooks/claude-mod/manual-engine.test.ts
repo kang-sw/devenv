@@ -360,7 +360,7 @@ test('with the snapshot carrying the manual, a main-thread workflow_manual reads
 })
 
 test("the lever's own landing sets the flag, though the engine routes it past the mod's session.compact hook", async ($, on) => {
-  const w = world(on, { knobs: { ...ON, [KNOB.compaction]: true }, store: { [`${KEY_STORE_PREFIX}sess-1`]: { sessionKey: 'kept-key', at: 1_800_000_000_000 } } })
+  const w = world(on, { knobs: ON, store: { [`${KEY_STORE_PREFIX}sess-1`]: { sessionKey: 'kept-key', at: 1_800_000_000_000 } } })
   w.known.add('kept-key')
   await start($, w)
   await compose($, w)

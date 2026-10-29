@@ -13,7 +13,6 @@ import {
   TOOLS_POLL_MS,
   TOOLS_WAIT_MS,
 } from './reconnect'
-import { KNOB } from './register'
 
 type Engine = Parameters<TestBody>[0]
 type On = Parameters<TestBody>[1]
@@ -157,13 +156,13 @@ test('every package registers the reconnect tool with its pinned description and
 })
 
 test('reconnect setup does not depend on the mailbox or compaction setups', async ($, on) => {
-  const w = world(on, { processOk: false, refuseRegister: 'request_compaction', knobs: { [KNOB.compaction]: true } })
+  const w = world(on, { processOk: false, refuseRegister: 'request_compaction' })
   await start($, w)
   expect(w.registered.map((r) => r.name)).toEqual(['request_mcp_reconnect'])
 })
 
 test('the mailbox and compaction setups do not depend on the reconnect setup', async ($, on) => {
-  const w = world(on, { refuseRegister: 'request_mcp_reconnect', knobs: { [KNOB.compaction]: true } })
+  const w = world(on, { refuseRegister: 'request_mcp_reconnect' })
   await start($, w)
   const names = w.registered.map((r) => r.name)
   expect(names).toContain('mailbox_watch')

@@ -9,9 +9,10 @@ type On = Parameters<TestBody>[1]
 
 // Engine-backed tests of the compaction feature's wiring; the feature's state
 // machine is covered in compaction.test.ts. The same file is mirrored into
-// every package that ships the mod and runs identically in each: the feature
-// runs only while the claude.compaction_enabled knob reads true, which each
-// test sets through the world's config_get answers (ON).
+// every package that ships the mod and runs identically in each: the lever
+// runs whatever the knobs read, and the advisory and its milestones only while
+// the claude.compaction_advisory_enabled knob reads true, which each test sets
+// through the world's config_get answers (ON).
 
 const WINDOW = { rawMaxTokens: 200_000, autoCompactThreshold: 170_000, isAutoCompactEnabled: true }
 const T = thresholdsFor(WINDOW)!
@@ -29,9 +30,9 @@ type Opts = {
   refuseRegister?: string
   advisory?: unknown
   advisoryError?: boolean
-  /** The claude.compaction_enabled value config_get answers; unset reads as null. */
+  /** The claude.compaction_advisory_enabled value config_get answers; unset reads as null. */
   compaction?: unknown
-  /** The compaction knob's config_get answers an error result. */
+  /** The advisory knob's config_get answers an error result. */
   failKnob?: boolean
   /** The knob is tuned at session scope only: a read without session_key finds it unset. */
   sessionScoped?: boolean
@@ -39,7 +40,7 @@ type Opts = {
   connect?: Connect
 }
 
-/** The feature's knob on. */
+/** The advisory knob on. */
 const ON = { compaction: true } as const
 
 function world(on: On, opts: Opts = {}) {
@@ -66,9 +67,9 @@ function world(on: On, opts: Opts = {}) {
     deleteDelays: [] as number[],
     /** The advisory key's config_get calls the mod made, with their server (other features read keys of their own). */
     configGets: [] as { server: string; args: Record<string, unknown> }[],
-    /** The compaction knob's config_get arguments. */
+    /** The advisory knob's config_get arguments. */
     knobReads: [] as Record<string, unknown>[],
-    /** The compaction knob's value, for a later session start to read. */
+    /** The advisory knob's value, for a later session start to read. */
     compaction: opts.compaction,
   }
   let connect = opts.connect
@@ -82,7 +83,7 @@ function world(on: On, opts: Opts = {}) {
   })
   on('mcp.call', ($, e) => {
     if (e.tool !== 'config_get') return { value: { content: [{ type: 'text', text: `no ${e.tool} here` }], isError: true } }
-    if (e.args.key === KNOB.compaction) {
+    if (e.args.key === KNOB.compactionAdvisory) {
       w.knobReads.push({ ...e.args })
       if (opts.failKnob) return { value: { content: [{ type: 'text', text: 'ws-mcp is unhealthy' }], isError: true } }
       const value = w.compaction === undefined || (opts.sessionScoped && e.args.session_key === undefined) ? null : w.compaction
@@ -198,15 +199,15 @@ async function prompted($: Engine, w: World, text: string, opts: { command?: { n
 const transcript = (w: World) => w.logs.filter((l) => l.to === 'transcript').map((l) => l.text)
 const debug = (w: World) => w.logs.filter((l) => l.to === 'debug').map((l) => l.text)
 
-test('the knob on registers the compaction request tool with its pinned description and boolean flag', async ($, on) => {
-  const w = world(on, ON)
+test('every start registers the compaction request tool with its pinned description and boolean flag, whatever the advisory knob reads', async ($, on) => {
+  const w = world(on)
   await start($, w)
   const tool = w.registered.find((r) => r.name === 'request_compaction')
   expect(tool).toEqual({ name: 'request_compaction', description: LEVER_DESCRIPTION, isDeferred: false, inputSchema: tool?.inputSchema })
   // The flag is optional: the schema lists it, and does not require it.
   expect(tool?.inputSchema).toEqual({ type: 'object', properties: { continue: { type: 'boolean' } } })
   // Read keyless, so a session-scope tune cannot reach it.
-  expect(w.knobReads).toEqual([{ key: KNOB.compaction, format: 'json' }])
+  expect(w.knobReads).toEqual([{ key: KNOB.compactionAdvisory, format: 'json' }])
 })
 
 test('compaction setup does not depend on the mailbox setup', async ($, on) => {
@@ -467,9 +468,9 @@ test('session.end resets the compaction state before awaiting the store delete',
   await ended
 })
 
-/** The feature inert: no lever, no advisory read, no usage read, no prompt, no compaction, and compactions pass through untouched. */
+/** The advisory inert: no advisory read, no usage read, no prompt, no compaction, and compactions pass through untouched; the lever still works. */
 async function expectInert($: Engine, w: World) {
-  expect(w.registered.map((r) => r.name)).not.toContain('request_compaction')
+  expect(w.registered.map((r) => r.name)).toContain('request_compaction')
   expect(w.configGets).toEqual([])
   await measure($, w, 50_000)
   await measure($, w, 160_000)
@@ -486,6 +487,12 @@ async function expectInert($: Engine, w: World) {
   await w.clock.settle()
   expect(w.prompts).toEqual([])
   expect(transcript(w)).toEqual([])
+  await start($, w)
+  expect((await lever($, w, { continue: true })).result).toBe(LEVER_RESULT)
+  await turnEnd($, w)
+  await w.clock.advance(CONTINUATION_WINDOW_MS)
+  expect(w.compactCalls).toEqual([{ origin: 'engine', instructions: undefined }, { origin: w.plugin, instructions: undefined }])
+  expect(w.prompts).toEqual([RESUME_TEXT])
 }
 
 for (const [what, opts] of [
@@ -495,16 +502,16 @@ for (const [what, opts] of [
   ['an error result (a failed read)', { compaction: true, failKnob: true }],
   ['tuned at session scope only', { compaction: true, sessionScoped: true }],
 ] as const) {
-  test(`a compaction knob ${what} leaves the feature inert`, async ($, on) => {
+  test(`an advisory knob ${what} leaves the advisory inert, and the lever works`, async ($, on) => {
     const w = world(on, opts)
     await start($, w)
-    expect(w.knobReads).toEqual([{ key: KNOB.compaction, format: 'json' }])
+    expect(w.knobReads).toEqual([{ key: KNOB.compactionAdvisory, format: 'json' }])
     await expectInert($, w)
   })
 }
 
 for (const unresolved of ['down', 'reject'] as const) {
-  test(`a server ${unresolved === 'down' ? 'not connected' : 'whose connect rejects'} at start leaves the feature inert though the knob is on`, async ($, on) => {
+  test(`a server ${unresolved === 'down' ? 'not connected' : 'whose connect rejects'} at start leaves the advisory inert though its knob is on, and the lever works`, async ($, on) => {
     const w = world(on, { ...ON, connect: unresolved })
     await start($, w)
     expect(w.knobReads).toEqual([])
@@ -512,22 +519,25 @@ for (const unresolved of ['down', 'reject'] as const) {
   })
 }
 
-test('a slow server start does not hold session.start; the lever comes up and works once the knob read settles', async ($, on) => {
+test('a slow server start holds neither session.start nor the lever; the advisory comes up once its knob read settles', async ($, on) => {
   const w = world(on, { ...ON, connect: 1_000 })
   let started = false
   void $.session.start({ cwd: '/tmp', surface: 'terminal', isInteractive: true }).then(() => (started = true))
   await w.clock.settle()
   expect(started).toBe(true)
-  expect(w.registered.map((r) => r.name)).toEqual(['request_mcp_reconnect'])
+  expect(w.registered.map((r) => r.name).sort()).toEqual(['request_compaction', 'request_mcp_reconnect'])
   expect(w.knobReads).toEqual([])
-  await w.clock.advance(1_000)
-  expect(w.registered.map((r) => r.name)).toContain('request_compaction')
-  expect((await lever($, w, { continue: true })).result).toBe(LEVER_RESULT)
+  expect((await lever($, w)).result).toBe(LEVER_RESULT_NO_RESUME)
   await turnEnd($, w)
   expect(w.compactCalls).toEqual([{ origin: w.plugin, instructions: undefined }])
+  await w.clock.advance(1_000)
+  expect(w.knobReads).toEqual([{ key: KNOB.compactionAdvisory, format: 'json' }])
+  await measure($, w, 50_000)
+  await measure($, w, 104_000)
+  expect(w.prompts).toEqual([advisoryText(T, 104_000)])
 })
 
-test('each session start reads the knob afresh: a later start reading off leaves the feature inert', async ($, on) => {
+test('each session start reads the advisory knob afresh: a later start reading off leaves the advisory inert, and the lever answered', async ($, on) => {
   const w = world(on, ON)
   await start($, w)
   await measure($, w, 50_000)
@@ -540,6 +550,10 @@ test('each session start reads the knob afresh: a later start reading off leaves
   await turnEnd($, w)
   expect(w.usageCalls.length).toBe(usageCalls)
   expect(w.prompts).toEqual([])
+  // The lever the first start registered is still answered.
+  expect((await lever($, w)).result).toBe(LEVER_RESULT_NO_RESUME)
+  await turnEnd($, w)
+  expect(w.compactCalls).toEqual([{ origin: w.plugin, instructions: undefined }])
 })
 
 test('a prompt typed within the window starts the first turn, so the resume prompt is not submitted; the typed prompt carries nothing', async ($, on) => {
