@@ -327,7 +327,8 @@ test('ws: status rows only outside a ws project: the titled frame around two row
   expect(hasText(d.rows[0], /^ 📁 sub$/)).toBe(true)
   expect(hasText(d.rows[0], /^ 🌿 main$/)).toBe(true)
   expect(shown(d.rows[0])).toContain('+3 -1 ~1 ?1')
-  expect(hasText(d.rows[1], /^ 25% 50,000$/)).toBe(true)
+  // The label may split at the fill edge into several runs; it reads whole.
+  expect(shown(d.rows[1])).toContain(' 25% 50,000 / 200K')
   expect(hasText(d.rows[1], /^\d\dH$/)).toBe(true)
   expect(hasText(d.rows[1], /^(Sun|Mon|Tue|Wed|Thu|Fri|Sat)$/)).toBe(true)
   expect(hasText(d.rows[1], /^ \$1\.50 $/)).toBe(true)
@@ -544,42 +545,100 @@ test('ws: narrow widths drop cost, then 7d, then 5h once the bar is at its floor
   }
 })
 
-test('bar caps and runs: the fill color reaches a cap only once the fill does; a label clamped into the fill sits on it', () => {
-  const labels: Run[] = [
-    { text: ' 50%', color: C.fg },
-    { text: ' ', color: C.dim },
-  ]
+test('bar caps: the fill color reaches a cap only once the fill does', () => {
   expect(barCaps(0, 20)).toEqual({ left: false, right: false })
   expect(barCaps(4, 20)).toEqual({ left: false, right: false })
   expect(barCaps(50, 20)).toEqual({ left: true, right: false })
   expect(barCaps(99, 20)).toEqual({ left: true, right: false })
   expect(barCaps(100, 20)).toEqual({ left: true, right: true })
   expect(barCaps(100, 0)).toEqual({ left: false, right: false })
-
-  const empty = barRuns(0, 20, labels, pctColor(0))
-  expect(empty[0]).toEqual({ text: ' 50%', color: C.fg })
-  expect(empty.some((r) => r.bg !== undefined)).toBe(false)
-
-  const mid = barRuns(50, 20, labels, pctColor(50))
-  expect(mid[0]).toEqual({ text: '█'.repeat(10), color: pctColor(50) })
-  expect(mid[1]).toEqual({ text: ' 50%', color: C.fg })
-  expect(mid.some((r) => r.bg !== undefined)).toBe(false)
-  expect(mid.reduce((n, r) => n + cells(r.text), 0)).toBe(20)
-
-  const full = barRuns(100, 20, labels, pctColor(100))
-  expect(full.at(-1)).toEqual({ text: ' 50% ', color: C.onFill, bg: pctColor(100) })
-  expect(full[0]).toEqual({ text: '█'.repeat(15), color: pctColor(100) })
-  expect(full.reduce((n, r) => n + cells(r.text), 0)).toBe(20)
-  expect(barRuns(50, 0, labels, pctColor(50))).toEqual([])
 })
 
-test('ws: the drawn bar caps take the fill color at 0%, mid-range and 100%, and a measure moves the label', async ($, on) => {
+// The label's segments in drop order: 4 + 8 + 7 + 8 = 27 cells, the ⚡ two.
+const CACHE = '#123456'
+const BAR_LABELS: Run[] = [
+  { text: ' 50%', color: C.fg },
+  { text: ' 100,000', color: C.fg },
+  { text: ' / 200K', color: C.dim },
+  { text: ' ⚡90.0%', color: CACHE },
+]
+const runCells = (runs: Run[]) => runs.reduce((n, r) => n + cells(r.text), 0)
+
+test('bar runs: the label is pinned at cell 0 whatever the fill', () => {
+  for (const pct of [0, 13, 50, 77, 100]) {
+    const runs = barRuns(pct, 40, BAR_LABELS, pctColor(pct))
+    expect(runs.map((r) => r.text).join('').startsWith(' 50% 100,000 / 200K ⚡90.0%'), `at ${pct}%`).toBe(true)
+    expect(runCells(runs), `at ${pct}%`).toBe(40)
+  }
+  const empty = barRuns(0, 40, BAR_LABELS, pctColor(0))
+  expect(empty).toEqual([
+    { text: ' 50% 100,000', color: C.fg },
+    { text: ' / 200K', color: C.dim },
+    { text: ' ⚡90.0%', color: CACHE },
+    { text: ' '.repeat(13), color: pctColor(0) },
+  ])
+  const full = barRuns(100, 40, BAR_LABELS, pctColor(100))
+  expect(full).toEqual([
+    { text: ' 50% 100,000 / 200K ⚡90.0%', color: C.onFill, bg: pctColor(100) },
+    { text: '█'.repeat(13), color: pctColor(100) },
+  ])
+  expect(barRuns(50, 0, BAR_LABELS, pctColor(50))).toEqual([])
+})
+
+test('bar runs: a label over the fill edge is split, on the fill color up to the edge and its own colors past it', () => {
+  // 40% of 40 cells: 16 filled, the edge inside the window segment.
+  const fill = pctColor(40)
+  expect(barRuns(40, 40, BAR_LABELS, fill)).toEqual([
+    { text: ' 50% 100,000 / 2', color: C.onFill, bg: fill },
+    { text: '00K', color: C.dim },
+    { text: ' ⚡90.0%', color: CACHE },
+    { text: ' '.repeat(13), color: fill },
+  ])
+})
+
+test('bar runs: the 1/8 glyph draws only past the label; under it the edge cell is filled from one half', () => {
+  // 30.5 cells filled: past the label, so the half block draws.
+  const past = barRuns(76.25, 40, BAR_LABELS, pctColor(76.25))
+  expect(past.at(-1)).toEqual({ text: '███▌' + ' '.repeat(9), color: pctColor(76.25) })
+  // 10.5 cells: the edge cell sits under the label and counts as filled.
+  const half = barRuns(26.25, 40, BAR_LABELS, pctColor(26.25))
+  expect(half[0]).toEqual({ text: ' 50% 100,00', color: C.onFill, bg: pctColor(26.25) })
+  // 10.25 cells: under one half, the edge cell keeps the label's color.
+  const less = barRuns(25.625, 40, BAR_LABELS, pctColor(25.625))
+  expect(less[0]).toEqual({ text: ' 50% 100,0', color: C.onFill, bg: pctColor(25.625) })
+  for (const runs of [half, less]) expect(runs.some((r) => /[▏▎▍▌▋▊▉]/.test(r.text))).toBe(false)
+})
+
+test('bar runs: a narrow bar drops the cache hit, then the window, then the tokens, and clips the percent last', () => {
+  const label = (w: number) =>
+    barRuns(0, w, BAR_LABELS, pctColor(0))
+      .filter((r) => r.color !== pctColor(0))
+      .map((r) => r.text)
+      .join('')
+  const cases: [number, string][] = [
+    [27, ' 50% 100,000 / 200K ⚡90.0%'],
+    [26, ' 50% 100,000 / 200K'],
+    [19, ' 50% 100,000 / 200K'],
+    [18, ' 50% 100,000'],
+    [12, ' 50% 100,000'],
+    [11, ' 50%'],
+    [4, ' 50%'],
+    [3, ' 50'],
+    [1, ' '],
+  ]
+  for (const [w, text] of cases) {
+    expect(label(w), `at ${w}`).toBe(text)
+    expect(runCells(barRuns(0, w, BAR_LABELS, pctColor(0))), `at ${w}`).toBe(w)
+  }
+})
+
+test('ws: the drawn bar caps take the fill color at 0%, mid-range and 100%, and a measure recolors the pinned label', async ($, on) => {
   const w = world(on)
   await start($, w)
   if (!isWs(w)) return
   const caps = async (tokens: number) => {
     await measure($, w, tokens)
-    // Wide enough that the mid-range label fits past the fill edge.
+    // Wide enough that the mid-range fill edge lies past the label.
     const d = await draw($, w, 160)
     const bar = byKey(d.rows[1], 'bar')
     const [left, runs, right] = kids(bar)
@@ -587,12 +646,13 @@ test('ws: the drawn bar caps take the fill color at 0%, mid-range and 100%, and 
   }
   const empty = await caps(0)
   expect([empty.left, empty.right]).toEqual([C.pillBg2, C.pillBg2])
-  expect(empty.label).toContain(' 0% 0 / 200K')
+  expect(empty.label.startsWith(' 0% 0 / 200K')).toBe(true)
+  expect(empty.runs.some((r) => r.props?.backgroundColor !== undefined)).toBe(false)
 
   const mid = await caps(100_000)
   expect([mid.left, mid.right]).toEqual([pctColor(50), C.pillBg2])
-  expect(mid.label).toContain(' 50% 100,000 / 200K')
-  expect(mid.runs.some((r) => r.props?.backgroundColor !== undefined)).toBe(false)
+  expect(mid.label.startsWith(' 50% 100,000 / 200K')).toBe(true)
+  expect(mid.runs[0]?.props).toEqual({ color: C.onFill, backgroundColor: pctColor(50) })
 
   const full = await caps(200_000)
   expect([full.left, full.right]).toEqual([pctColor(100), pctColor(100)])
