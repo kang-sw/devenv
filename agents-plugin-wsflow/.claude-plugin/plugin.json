@@ -26,7 +26,8 @@
         "WS_MCP_NO_AGENT": "1",
         "WS_MCP_NAMESPACE": "wsflow",
         "WS_MCP_SETUP_TOOL": "setup",
-        "WS_MCP_CLI_NAME": "wsflow-cli"
+        "WS_MCP_CLI_NAME": "wsflow-cli",
+        "WS_MCP_CONFIG_MANIFESTS": "${CLAUDE_PLUGIN_ROOT}/config-manifest.json"
       },
       "startup_timeout_sec": 30,
       "tool_timeout_sec": 600

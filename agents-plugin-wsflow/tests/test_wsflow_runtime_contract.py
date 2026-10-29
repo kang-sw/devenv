@@ -51,8 +51,22 @@ class WsflowRuntimeContractTest(unittest.TestCase):
                 "WS_MCP_NO_AGENT": "1",
                 "WS_MCP_NAMESPACE": "wsflow",
                 "WS_MCP_SETUP_TOOL": "setup",
+                "WS_MCP_CONFIG_MANIFESTS": "./config-manifest.json",
             },
         )
+
+    def test_config_manifest_env_resolves_in_both_launch_configs(self):
+        # .mcp.json resolves against cwd "." (the plugin root); the Claude
+        # manifest names it under ${CLAUDE_PLUGIN_ROOT}. A path that does not
+        # resolve fails nothing at runtime, so pin that both point at a file.
+        codex = json.loads((PLUGIN_DIR / ".mcp.json").read_text(encoding="utf-8"))
+        claude = json.loads((PLUGIN_DIR / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+        for value, prefix in (
+            (codex["mcpServers"]["wsflow"]["env"]["WS_MCP_CONFIG_MANIFESTS"], "./"),
+            (claude["mcpServers"]["wsflow"]["env"]["WS_MCP_CONFIG_MANIFESTS"], "${CLAUDE_PLUGIN_ROOT}/"),
+        ):
+            self.assertTrue(value.startswith(prefix), value)
+            self.assertTrue((PLUGIN_DIR / value[len(prefix):]).is_file(), value)
 
     def test_runtime_contract_matches_agentless_capabilities(self):
         contract = self.load_contract()
