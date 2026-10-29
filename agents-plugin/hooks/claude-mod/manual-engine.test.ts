@@ -94,6 +94,10 @@ function world(
     coreError: undefined as string | undefined,
     /** Every config_get's arguments. */
     configCalls: [] as Record<string, unknown>[],
+    /** Keys whose config_get answers an error result; a test may change it between reads. */
+    failKnobs: new Set<string>(opts.failKnobs ?? []),
+    /** The `/mcp reconnect` commands the mod ran. */
+    reconnects: 0,
   }
   let serverDown = opts.serverDown === true
   on('store.get', ($, e) => ({ value: w.store.get(e.key) }))
@@ -145,7 +149,7 @@ function world(
     if (e.tool === 'config_get') {
       const key = String(e.args.key)
       w.configCalls.push({ ...e.args })
-      if (opts.failKnobs?.includes(key)) return { value: { content: [{ type: 'text', text: 'ws-mcp is unhealthy' }], isError: true } }
+      if (w.failKnobs.has(key)) return { value: { content: [{ type: 'text', text: 'ws-mcp is unhealthy' }], isError: true } }
       const knobs: Record<string, unknown> = { 'claude.compaction_advisory_percent': '50%', ...(opts.knobs ?? {}) }
       const value = key in knobs && !(opts.sessionScoped && e.args.session_key === undefined) ? knobs[key] : null
       return text(JSON.stringify({ key, value, scope: value === null ? 'unset' : 'project' }))
@@ -190,6 +194,9 @@ function world(
     return { result: [{ type: 'text', text }], text } as never
   })
   on('prompt.compose', () => ({ sections: ENGINE_SECTIONS }))
+  // A reconnect always brings the server's tools back.
+  on('command.run', () => ((w.reconnects += 1), {}))
+  on('tool.list', () => ({ value: [{ name: `mcp__plugin_${w.plugin}_${w.plugin}__config_get`, description: 'x', mcp: true }] }))
   on('session.compact', () => ({ messages: [{ role: 'user', text: 'summary', toolUses: [] }] }) as never)
   on('prompt.submit', ($, e) => (w.prompts.push(e.text), { text: e.text }))
   return w
@@ -426,6 +433,63 @@ test('a repeat workflow_manual collapses to its pointer on the state-only text',
 
 /** A live wait child makes each settle cost about a second of real time; these tests settle several times with one. */
 const LIVE_CHILD = { timeoutMs: 20_000 }
+
+/** A reconnect the model requests, run at the main-thread turn end; it resolves the server again. */
+async function reconnect($: Engine, w: World) {
+  await $.tool.call({ tool: `mcp__${w.plugin}__request_mcp_reconnect` } as never)
+  await w.clock.settle()
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer' } as never)
+  await w.clock.settle()
+}
+
+test('a failed first manual knob read is read again once a reconnect resolves the server, and a true read starts the feature', async ($, on) => {
+  const w = world(on, { knobs: ON, failKnobs: [KNOB.manual] })
+  await start($, w)
+  expect(manualReads(w).length).toBe(1)
+  expect(w.minted).toBe(0)
+  expect(await compose($, w)).toEqual({ sections: ENGINE_SECTIONS })
+  w.failKnobs.delete(KNOB.manual)
+  await reconnect($, w)
+  expect(w.reconnects).toBe(1)
+  expect(manualReads(w)).toEqual([
+    { key: KNOB.manual, format: 'json' },
+    { key: KNOB.manual, format: 'json' },
+  ])
+  expect(w.mcpCalls.map((c) => c.tool)).toEqual(['ferrule', 'workflow_manual', 'playbook_read'])
+  expect(w.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'minted-1', at: 1_800_000_000_000 })
+  // The first compose is past: the full result passes through until a landing carries the section.
+  expect(seen(await read($, w, 'workflow_manual', { session_key: 'minted-1' }))).toBe(keyedResponse('minted-1', '(no todos)'))
+  await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'summary', toolUses: [] }] } as never)
+  await w.clock.settle()
+  expect(manualSection(await compose($, w))?.text).toBe(INJECTED('minted-1'))
+  expect(seen(await read($, w, 'workflow_manual', { session_key: 'minted-1' }))).toMatch(/^Workflow manual is in your system prompt;/)
+  // Read once more only: a later reconnect reads nothing again.
+  await reconnect($, w)
+  expect(manualReads(w).length).toBe(2)
+})
+
+test('a manual knob read false is never read again, though a reconnect resolves the server', async ($, on) => {
+  const w = world(on, { knobs: { [KNOB.manual]: false } })
+  await start($, w)
+  await reconnect($, w)
+  expect(w.reconnects).toBe(1)
+  expect(manualReads(w).length).toBe(1)
+  expect(w.mcpCalls).toEqual([])
+  expect(w.minted).toBe(0)
+})
+
+test('a retried manual knob read that fails again leaves the feature off, and is not retried again', async ($, on) => {
+  const w = world(on, { knobs: ON, failKnobs: [KNOB.manual] })
+  await start($, w)
+  await reconnect($, w)
+  expect(manualReads(w).length).toBe(2)
+  await reconnect($, w)
+  expect(w.reconnects).toBe(2)
+  expect(manualReads(w).length).toBe(2)
+  expect(w.mcpCalls).toEqual([])
+  expect(w.minted).toBe(0)
+  expect(await compose($, w)).toEqual({ sections: ENGINE_SECTIONS })
+})
 
 const watchTool = (w: World) => w.registered.includes('mailbox_watch')
 const boundKeys = (w: World) => w.spawns.map((argv) => argv[5])

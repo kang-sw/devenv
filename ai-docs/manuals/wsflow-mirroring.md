@@ -323,7 +323,9 @@ declares no manifest).
 
 The compaction-advisory, manual-injection, and drain knobs are read keyless
 once at session start; a failed or refused read leaves the feature off (the
-drain reads as `notice`). Workflow manual injection runs only with its knob on and
+drain reads as `notice`), except that a failed first manual-injection read is
+read once more at the next successful server resolution (a later session
+start, an MCP reconnect) and starts the feature then if it reads true. Workflow manual injection runs only with its knob on and
 `ai-docs/WORKFLOW.md` at the repository root: it mints the conversation's key,
 adds the system-prompt section, rewrites the ws reads, adopts a revive's or a
 fresh-bootstrap sentinel call's key, and binds the mailbox push to every key

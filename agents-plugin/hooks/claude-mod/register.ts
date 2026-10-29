@@ -72,7 +72,8 @@ import {
 // knob decides whether a key is minted at all, so no key exists to read it
 // with, and switching key minting or the mailbox binding mid-session is
 // unsafe. A failed or refused read leaves its feature inert (the drain reads
-// as notice). The features those reads gate come up when the read settles,
+// as notice); only a failed first manual read is read once more, at the next
+// successful server resolution (a later start, a reconnect). The features those reads gate come up when the read settles,
 // outside session.start's awaited path, so a slow server start never delays
 // the first prompt: a tool registered after session.start is listed to the
 // model from its next request on. The compaction lever reads no knob: it is
@@ -322,8 +323,19 @@ export const register: Register = (on) => {
    * mints keys only then) and the mailbox feature (its bind tool registers
    * only otherwise), so a session never holds both the lever and the
    * automatic bind. A failed check or knob read reads as closed for both.
+   * The one exception is a failed first knob read (manualRetry): it is read
+   * again once the server resolves again, and a true read then opens the
+   * gate late, after the mailbox already registered its bind tool, which
+   * stays; both binds then go through arm, the latest key winning.
    */
   let wsGate: Promise<boolean> | undefined
+  /**
+   * Set when the first manual knob read failed (server unresolved, or the
+   * read errored or was refused): the next successful server resolution
+   * (a later start, a reconnect) reads it once more. A read that returned a
+   * value, whatever it was, is never read again in this module instance.
+   */
+  let manualRetry = false
   /** Bumped by every session.start: a setup still waiting on its knob read yields to a newer start. */
   let starts = 0
 
@@ -388,17 +400,6 @@ export const register: Register = (on) => {
 
   on('session.start', async ($, e, next) => {
     const label = `${$.plugin.name} mailbox`
-    const resolveServer = async () => {
-      const conn = await $.mcp.connect($.plugin.name)
-      if (conn.isConnected) useServer(conn.server)
-      return conn
-    }
-    // Not awaited, so a slow server start never delays the first prompt.
-    const resolved = resolveServer().catch((err) => {
-      $.ui.log(`${$.plugin.name} mod: MCP server not resolved at start: ${String(err)}`, { to: 'debug' })
-      return undefined
-    })
-    serverResolved = resolved
     const mailboxLog = (text: string) => $.ui.log(`${label}: ${text}`, { to: 'debug' })
 
     /** One ws MCP tool call's text; an error result rejects with its text. */
@@ -420,6 +421,33 @@ export const register: Register = (on) => {
         $.ui.log(`${$.plugin.name} mod: ${key} not read (${String(err)}); its feature stays off`, { to: 'debug' })
         return undefined
       })
+    /** The one retry of a failed first manual knob read: a true read opens the gate and starts the manual feature. */
+    const retryManual = () => {
+      if (!manualRetry) return
+      manualRetry = false
+      readSetting(KNOB.manual).then(
+        (value) => {
+          if (value !== true) return
+          wsGate = Promise.resolve(true)
+          manual.opened()
+        },
+        (err) => $.ui.log(`${$.plugin.name} mod: ${KNOB.manual} not read again (${String(err)}); its feature stays off`, { to: 'debug' }),
+      )
+    }
+    const resolveServer = async () => {
+      const conn = await $.mcp.connect($.plugin.name)
+      if (conn.isConnected) {
+        useServer(conn.server)
+        retryManual()
+      }
+      return conn
+    }
+    // Not awaited, so a slow server start never delays the first prompt.
+    const resolved = resolveServer().catch((err) => {
+      $.ui.log(`${$.plugin.name} mod: MCP server not resolved at start: ${String(err)}`, { to: 'debug' })
+      return undefined
+    })
+    serverResolved = resolved
 
     // The project check first: outside a ws project the manual knob is never read.
     wsGate ??= (async () => {
@@ -430,7 +458,14 @@ export const register: Register = (on) => {
       const isWsProject = repoRoot
         ? await $.fs.exists(`${repoRoot.replace(/[\\/]+$/, '')}/ai-docs/WORKFLOW.md`)
         : (await $.fs.ancestors({ names: ['ai-docs/WORKFLOW.md'] })).length > 0
-      return isWsProject && (await readKnob(KNOB.manual)) === true
+      if (!isWsProject) return false
+      try {
+        return (await readSetting(KNOB.manual)) === true
+      } catch (err) {
+        manualRetry = true
+        $.ui.log(`${$.plugin.name} mod: ${KNOB.manual} not read (${String(err)}); its feature stays off until the server resolves again`, { to: 'debug' })
+        return false
+      }
     })().catch((err) => {
       $.ui.log(`${$.plugin.name} mod: ws project check failed (${String(err)}); reading as no ws project`, { to: 'debug' })
       return false

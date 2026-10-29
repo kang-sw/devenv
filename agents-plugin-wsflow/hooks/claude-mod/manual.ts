@@ -326,6 +326,13 @@ export type Manual = {
   /** A landed main-conversation compaction, including the compaction lever's own. */
   landed: (trigger: SessionCompactTrigger) => void
   /**
+   * The ws-project gate opened after it read closed (register.ts retried a
+   * failed knob read): set up now. This conversation's first compose is past,
+   * so the section reaches the model only from the next landing on, and the
+   * snapshot flag stays false until then.
+   */
+  opened: () => void
+  /**
    * A main-thread ws read result: the text the model should read in place of
    * `text`, or undefined to keep the result as it is. `tool` is its
    * model-facing name. A `workflow_manual` result reaching here (not refused,
@@ -427,10 +434,12 @@ export function createManual(): Manual {
     const e = edges
     if (!e) return
     if (gate === undefined) {
-      gate = await e.isWsProject().catch((err) => {
+      const open = await e.isWsProject().catch((err) => {
         debug(`project check failed (${String(err)}); reading as no ws project`)
         return false
       })
+      // An opened() meanwhile keeps the gate open.
+      gate ??= open
     }
     if (!gate) return
     const server = await e.server()
@@ -635,6 +644,13 @@ export function createManual(): Manual {
     },
 
     landed,
+
+    opened: () => {
+      if (gate === true) return
+      gate = true
+      debug('the project gate opened late; setting up now')
+      if (edges && !pending && !cache) begin()
+    },
 
     read: async (family, tool, args, text) => {
       try {
