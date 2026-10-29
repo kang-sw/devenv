@@ -18,16 +18,17 @@ import {
   todoView,
   type Run,
 } from './band'
+import { KNOB } from './register'
 
 type Engine = Parameters<TestBody>[0]
 type On = Parameters<TestBody>[1]
 
 // Engine-backed tests of the status band: the knob, the reads that follow it
 // and the held key, and the drawn tree at several widths. The same file is
-// mirrored into every package that ships the mod, and the kit has no
-// plugin-name override, so each test reads the package identity from the
-// registrations: the ws tests return early elsewhere, and the inert-package
-// test early in ws.
+// mirrored into every package that ships the mod and runs identically in
+// each: the band draws while its knob reads true, and its key comes only from
+// the manual feature, on in a ws project with its own knob (`manual`), each
+// set through the world's config_get answers.
 
 // Byte-identical to the literals in the server's
 // TestTodoAndAgendaListTextTheClaudeBandParses: its todo.list full-mode and
@@ -57,7 +58,7 @@ type Usage = {
   cost?: { usd: number }
 }
 
-function world(on: On, opts: { config?: Record<string, unknown>; wsProject?: boolean } = {}) {
+function world(on: On, opts: { config?: Record<string, unknown>; wsProject?: boolean; manual?: boolean } = {}) {
   const clock = mock.clock(on, { now: NOW })
   mock.env(on, {})
   const w = {
@@ -66,7 +67,7 @@ function world(on: On, opts: { config?: Record<string, unknown>; wsProject?: boo
     store: new Map<string, unknown>(),
     sessionId: 'sess-1',
     /** The config values config_get answers; a key absent here reads as unset. */
-    config: { [ENABLED_KEY]: true, ...(opts.config ?? {}) } as Record<string, unknown>,
+    config: { [ENABLED_KEY]: true, ...(opts.manual ? { [KNOB.manual]: true } : {}), ...(opts.config ?? {}) } as Record<string, unknown>,
     /** While set, the knob's config_get answers an error result. */
     failKnob: false,
     failTodos: false,
@@ -194,8 +195,6 @@ function world(on: On, opts: { config?: Record<string, unknown>; wsProject?: boo
 
 type World = ReturnType<typeof world>
 
-const isWs = (w: World) => w.plugin === 'ws'
-
 async function start($: Engine, w: World) {
   await $.session.start({ cwd: '/repo/sub', surface: 'terminal', isInteractive: true })
   await w.clock.settle()
@@ -282,12 +281,11 @@ const bandConfigCalls = (w: World) => w.configCalls.filter((a) => a.key === ENAB
 const wsReads = (w: World, tool?: string) => w.wsCalls.filter((c) => tool === undefined || c.tool === tool)
 
 for (const variant of ['unset', 'false'] as const) {
-  test(`ws: with the switch ${variant}, the engine's row draws and nothing past the switch is read`, async ($, on) => {
-    const w = world(on, { wsProject: true, config: variant === 'false' ? { [ENABLED_KEY]: false } : {} })
+  test(`with the switch ${variant}, the engine's row draws and nothing past the switch is read`, async ($, on) => {
+    const w = world(on, { wsProject: true, manual: true, config: variant === 'false' ? { [ENABLED_KEY]: false } : {} })
     if (variant === 'unset') delete w.config[ENABLED_KEY]
     w.todos['minted-1'] = TODO_TEXT
     await start($, w)
-    if (!isWs(w)) return
     expect(w.minted).toBe(1)
     expect(bandConfigCalls(w).length).toBeGreaterThan(0)
     await modelCall($, w, 'todo_check', { session_key: 'minted-1', key: 'gamma', status: 'wip' })
@@ -300,10 +298,9 @@ for (const variant of ['unset', 'false'] as const) {
   })
 }
 
-test('ws: status rows only outside a ws project: the titled frame around two rows, the effort after the first main-loop request', async ($, on) => {
+test('status rows only outside a ws project: the titled frame around two rows, the effort after the first main-loop request', async ($, on) => {
   const w = world(on)
   await start($, w)
-  if (!isWs(w)) return
   const W = 80
   let d = await draw($, w, W)
   expectFrame(d, W, 2)
@@ -336,12 +333,11 @@ test('ws: status rows only outside a ws project: the titled frame around two row
   expect(d.text).not.toContain('✉')
 })
 
-test('ws: status plus ws rows: the focus todo and count, the other open keys folding into +N, the agenda keys', async ($, on) => {
-  const w = world(on, { wsProject: true })
+test('status plus ws rows: the focus todo and count, the other open keys folding into +N, the agenda keys', async ($, on) => {
+  const w = world(on, { wsProject: true, manual: true })
   w.todos['minted-1'] = MANY_TODOS
   w.agenda['minted-1'] = AGENDA_TEXT
   await start($, w)
-  if (!isWs(w)) return
   let W = 100
   let d = await draw($, w, W)
   expectFrame(d, W, 4)
@@ -380,10 +376,9 @@ test('ws: status plus ws rows: the focus todo and count, the other open keys fol
   expect(wsReads(w, 'todo_list').at(-1)?.args).toEqual({ session_key: 'minted-1', mode: 'full' })
 })
 
-test('ws: with no todos and no agenda the band is the two status rows', async ($, on) => {
-  const w = world(on, { wsProject: true })
+test('with no todos and no agenda the band is the two status rows', async ($, on) => {
+  const w = world(on, { wsProject: true, manual: true })
   await start($, w)
-  if (!isWs(w)) return
   expect(wsReads(w, 'todo_list').length).toBe(1)
   expectFrame(await draw($, w, 80), 80, 2)
   // An agenda alone draws the rest row and no focus row.
@@ -394,10 +389,9 @@ test('ws: with no todos and no agenda the band is the two status rows', async ($
   expect(d.rows[2]?.props?.key).toBe('rest')
 })
 
-test('ws: the mailbox capsule shows the key\'s own address, and is absent with none or a failed lookup', async ($, on) => {
-  const w = world(on, { wsProject: true })
+test('the mailbox capsule shows the key\'s own address, and is absent with none or a failed lookup', async ($, on) => {
+  const w = world(on, { wsProject: true, manual: true })
   await start($, w)
-  if (!isWs(w)) return
   const lookups = wsReads(w, 'mailbox_lookup_peers')
   expect(lookups.length).toBe(1)
   expect(lookups[0]!.args).toEqual({ session_key: 'minted-1', scope: 'worktree', format: 'json' })
@@ -416,11 +410,10 @@ test('ws: the mailbox capsule shows the key\'s own address, and is absent with n
   expect(d.text).not.toContain('✉')
 })
 
-test('ws: a config_tune call turns the band on and off without a restart, re-reading the switch with the held key', async ($, on) => {
-  const w = world(on, { wsProject: true, config: { [ENABLED_KEY]: false } })
+test('a config_tune call turns the band on and off without a restart, re-reading the switch with the held key', async ($, on) => {
+  const w = world(on, { wsProject: true, manual: true, config: { [ENABLED_KEY]: false } })
   w.todos['minted-1'] = TODO_TEXT
   await start($, w)
-  if (!isWs(w)) return
   expect((await draw($, w, 80)).raw).toBe(true)
 
   w.config[ENABLED_KEY] = true
@@ -493,12 +486,11 @@ test('cells: wide emoji and East Asian characters take two, combining marks none
   expect(cells('╭─ ')).toBe(3)
 })
 
-test('ws: narrow widths drop cost, then 7d, then 5h once the bar is at its floor, and below every floor the frame stays whole', async ($, on) => {
-  const w = world(on, { wsProject: true })
+test('narrow widths drop cost, then 7d, then 5h once the bar is at its floor, and below every floor the frame stays whole', async ($, on) => {
+  const w = world(on, { wsProject: true, manual: true })
   w.todos['minted-1'] = MANY_TODOS
   w.agenda['minted-1'] = AGENDA_TEXT
   await start($, w)
-  if (!isWs(w)) return
   await step($, w, MODEL, 'high')
   const COST = /^ \$1\.50 $/
   const WEEKDAY = /^(Sun|Mon|Tue|Wed|Thu|Fri|Sat)$/
@@ -573,10 +565,9 @@ test('bar caps and runs: the fill color reaches a cap only once the fill does; a
   expect(barRuns(50, 0, labels, pctColor(50))).toEqual([])
 })
 
-test('ws: the drawn bar caps take the fill color at 0%, mid-range and 100%, and a measure moves the label', async ($, on) => {
+test('the drawn bar caps take the fill color at 0%, mid-range and 100%, and a measure moves the label', async ($, on) => {
   const w = world(on)
   await start($, w)
-  if (!isWs(w)) return
   const caps = async (tokens: number) => {
     await measure($, w, tokens)
     // Wide enough that the mid-range label fits past the fill edge.
@@ -600,12 +591,11 @@ test('ws: the drawn bar caps take the fill color at 0%, mid-range and 100%, and 
   expect(label?.props).toEqual({ color: C.onFill, backgroundColor: pctColor(100) })
 })
 
-test('ws: a failed switch read draws nothing, and reads nothing past it', async ($, on) => {
-  const w = world(on, { wsProject: true })
+test('a failed switch read draws nothing, and reads nothing past it', async ($, on) => {
+  const w = world(on, { wsProject: true, manual: true })
   w.failKnob = true
   w.todos['minted-1'] = TODO_TEXT
   await start($, w)
-  if (!isWs(w)) return
   expect(bandConfigCalls(w).length).toBeGreaterThan(0)
   expect((await draw($, w, 80)).raw).toBe(true)
   expect(w.wsCalls).toEqual([])
@@ -613,14 +603,13 @@ test('ws: a failed switch read draws nothing, and reads nothing past it', async 
 })
 
 for (const variant of ['todo_list', 'agenda_list'] as const) {
-  test(`ws: a failed ${variant} read hides the ws rows and leaves the status rows`, async ($, on) => {
-    const w = world(on, { wsProject: true })
+  test(`a failed ${variant} read hides the ws rows and leaves the status rows`, async ($, on) => {
+    const w = world(on, { wsProject: true, manual: true })
     w.todos['minted-1'] = TODO_TEXT
     w.agenda['minted-1'] = AGENDA_TEXT
     if (variant === 'todo_list') w.failTodos = true
     else w.failAgenda = true
     await start($, w)
-    if (!isWs(w)) return
     expect(wsReads(w, variant).length).toBe(1)
     const d = await draw($, w, 80)
     expectFrame(d, 80, 2)
@@ -629,15 +618,14 @@ for (const variant of ['todo_list', 'agenda_list'] as const) {
   })
 }
 
-test('ws: an adopted key re-reads the switch, the rows and the address with it, and the old key\'s rows go', async ($, on) => {
-  const w = world(on, { wsProject: true })
+test('an adopted key re-reads the switch, the rows and the address with it, and the old key\'s rows go', async ($, on) => {
+  const w = world(on, { wsProject: true, manual: true })
   w.todos['minted-1'] = TODO_TEXT
   w.agenda['minted-1'] = AGENDA_TEXT
   w.addresses['minted-1'] = 'old-otter'
   w.todos.revived = '- [ ] {rv} Revived pending\n'
   w.addresses.revived = 'new-heron'
   await start($, w)
-  if (!isWs(w)) return
   let d = await draw($, w, 100)
   expectFrame(d, 100, 4)
   expect(hasText(d.rows[2], /^▶ beta$/)).toBe(true)
@@ -659,12 +647,11 @@ test('ws: an adopted key re-reads the switch, the rows and the address with it, 
   for (const old of ['beta', 'gamma', 'implement', 'old-otter']) expect(d.text).not.toContain(old)
 })
 
-test('ws: after /clear the next conversation\'s minted key carries the reads, and the old key\'s rows go at the end', async ($, on) => {
-  const w = world(on, { wsProject: true })
+test('after /clear the next conversation\'s minted key carries the reads, and the old key\'s rows go at the end', async ($, on) => {
+  const w = world(on, { wsProject: true, manual: true })
   w.todos['minted-1'] = TODO_TEXT
   w.todos['minted-2'] = '- [~] {fresh} Fresh work\n'
   await start($, w)
-  if (!isWs(w)) return
   expectFrame(await draw($, w, 100), 100, 4)
   await $.session.end({ reason: 'clear', sessionId: 'sess-1', resume: undefined as never })
   await w.clock.settle()
@@ -684,10 +671,9 @@ test('ws: after /clear the next conversation\'s minted key carries the reads, an
   expect(d.text).not.toContain('beta')
 })
 
-test('ws: the switch is read keyless before a key is held, and with the key once it is', async ($, on) => {
-  const w = world(on, { wsProject: true })
+test('the switch is read keyless before a key is held, and with the key once it is', async ($, on) => {
+  const w = world(on, { wsProject: true, manual: true })
   await start($, w)
-  if (!isWs(w)) return
   const calls = bandConfigCalls(w)
   expect(calls.length).toBeGreaterThanOrEqual(2)
   expect(calls[0]).toEqual({ key: ENABLED_KEY, format: 'json' })
@@ -696,10 +682,9 @@ test('ws: the switch is read keyless before a key is held, and with the key once
   for (const c of w.configCalls.filter((a) => a.key !== ENABLED_KEY)) expect(c.session_key).toBeUndefined()
 })
 
-test('ws: a tool call refreshes git at most every two seconds, a turn end always does', async ($, on) => {
+test('a tool call refreshes git at most every two seconds, a turn end always does', async ($, on) => {
   const w = world(on)
   await start($, w)
-  if (!isWs(w)) return
   const statusRuns = () => w.gitRuns.filter((argv) => argv.includes('status')).length
   expect(statusRuns()).toBe(1)
   expect(w.gitRuns[0]).toEqual(['git', 'status', '--porcelain', '-b'])
@@ -718,10 +703,9 @@ test('ws: a tool call refreshes git at most every two seconds, a turn end always
   expect(statusRuns()).toBe(3)
 })
 
-test('ws: each model tool call re-reads the context fill and redraws with it', async ($, on) => {
+test('each model tool call re-reads the context fill and redraws with it', async ($, on) => {
   const w = world(on)
   await start($, w)
-  if (!isWs(w)) return
   const bar = async () => shown(kids(byKey((await draw($, w, 160)).rows[1], 'bar'))[1])
   const first = w.usageCalls
   expect(first).toBeGreaterThan(0)
@@ -741,12 +725,11 @@ test('ws: each model tool call re-reads the context fill and redraws with it', a
   expect(await bar()).toContain(' 70% 140,000 / 200K')
 })
 
-test('ws: the bar is measured against the compaction window when the breakdown carries it, else the model window', async ($, on) => {
+test('the bar is measured against the compaction window when the breakdown carries it, else the model window', async ($, on) => {
   const w = world(on)
   w.usage.context.window = 1_000_000
   w.usage.context.breakdown = { rawMaxTokens: 200_000 }
   await start($, w)
-  if (!isWs(w)) return
   const bar = async () => shown(kids(byKey((await draw($, w, 160)).rows[1], 'bar'))[1])
   await measure($, w, 100_000)
   expect(await bar()).toContain(' 50% 100,000 / 200K')
@@ -831,15 +814,31 @@ test('todo and agenda text: every todo status and agenda key the server renders 
   expect([view.focus?.key, view.rest.map((t) => t.key), view.done, view.total]).toEqual(['beta', ['gamma'], 2, 4])
 })
 
-test('another package is inert even with the switch on: the engine\'s row draws and the switch is not read', async ($, on) => {
+test('the band on with the manual knob off draws the key-less rows only, and reads nothing key-bound', async ($, on) => {
   const w = world(on, { wsProject: true })
+  w.todos['minted-1'] = TODO_TEXT
+  w.agenda['minted-1'] = AGENDA_TEXT
+  w.addresses['minted-1'] = 'quiet-otter'
   await start($, w)
-  if (isWs(w)) return
-  expect(['wsflow']).toContain(w.plugin)
+  // No key: the manual feature minted none, so the band holds none.
+  expect(w.minted).toBe(0)
+  expect(w.configCalls.filter((a) => a.key === KNOB.manual)).toEqual([{ key: KNOB.manual, format: 'json' }])
   await step($, w, MODEL, 'high')
+  let d = await draw($, w, 100)
+  expectFrame(d, 100, 2)
+  expect(shown(kids(d.top)[1])).toBe(MODEL)
+  expect(hasText(d.rows[0], /^ 📁 sub$/)).toBe(true)
+  expect(hasText(d.rows[1], /^ 25% 50,000$/)).toBe(true)
+  expect(d.text).not.toContain('✉')
+  // The model's ws calls refresh nothing key-bound either.
+  await modelCall($, w, 'todo_check', { session_key: 'minted-1', key: 'gamma', status: 'wip' })
+  await modelCall($, w, 'agenda_set', { session_key: 'minted-1', key: 'plan', value: 'x' })
+  await modelCall($, w, 'mailbox_send', { session_key: 'minted-1' })
   await turnEnd($, w)
-  expect((await draw($, w, 80)).raw).toBe(true)
-  expect(bandConfigCalls(w)).toEqual([])
+  d = await draw($, w, 100)
+  expectFrame(d, 100, 2)
   expect(w.wsCalls).toEqual([])
-  expect(w.gitRuns).toEqual([])
+  // The switch stays keyless.
+  for (const c of bandConfigCalls(w)) expect(c.session_key).toBeUndefined()
+  expect(w.gitRuns.length).toBeGreaterThan(0)
 })

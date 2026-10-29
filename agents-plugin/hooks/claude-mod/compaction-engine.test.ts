@@ -1,6 +1,7 @@
 import { expect, mock, test, type TestBody } from 'claude-code/testing'
 
 import { CONTINUATION_WINDOW_MS } from './compaction'
+import { KNOB } from './register'
 import { ADVISORY_KEY, advisoryText, LEVER_DESCRIPTION, milestoneText, LEVER_RESULT, LEVER_RESULT_NO_RESUME, RESUME_TEXT, thresholdsFor, vetoedResumeText } from './timing'
 
 type Engine = Parameters<TestBody>[0]
@@ -8,9 +9,9 @@ type On = Parameters<TestBody>[1]
 
 // Engine-backed tests of the compaction feature's wiring; the feature's state
 // machine is covered in compaction.test.ts. The same file is mirrored into
-// every package that ships the mod, and the kit has no plugin-name override,
-// so each test reads the package identity from the registrations: the ws
-// tests return early elsewhere, and the inert-package tests early in ws.
+// every package that ships the mod and runs identically in each: the feature
+// runs only while the claude.compaction_enabled knob reads true, which each
+// test sets through the world's config_get answers (ON).
 
 const WINDOW = { rawMaxTokens: 200_000, autoCompactThreshold: 170_000, isAutoCompactEnabled: true }
 const T = thresholdsFor(WINDOW)!
@@ -20,7 +21,28 @@ type CompactAnswer = { skip: string } | 'lands' | 'rejects'
 /** A compaction leaves at least one message: the summary. */
 const SUMMARY = [{ role: 'user', text: 'summary', toolUses: [] }]
 
-function world(on: On, opts: { processOk?: boolean; refuseRegister?: string; advisory?: unknown; advisoryError?: boolean } = {}) {
+/** How one mcp.connect answers: after a delay (ms on the mock clock), not connected, or with a rejection. */
+type Connect = number | 'down' | 'reject'
+
+type Opts = {
+  processOk?: boolean
+  refuseRegister?: string
+  advisory?: unknown
+  advisoryError?: boolean
+  /** The claude.compaction_enabled value config_get answers; unset reads as null. */
+  compaction?: unknown
+  /** The compaction knob's config_get answers an error result. */
+  failKnob?: boolean
+  /** The knob is tuned at session scope only: a read without session_key finds it unset. */
+  sessionScoped?: boolean
+  /** The start's mcp.connect answer. */
+  connect?: Connect
+}
+
+/** The feature's knob on. */
+const ON = { compaction: true } as const
+
+function world(on: On, opts: Opts = {}) {
   const clock = mock.clock(on)
   mock.env(on, {})
   const w = {
@@ -44,10 +66,28 @@ function world(on: On, opts: { processOk?: boolean; refuseRegister?: string; adv
     deleteDelays: [] as number[],
     /** The advisory key's config_get calls the mod made, with their server (other features read keys of their own). */
     configGets: [] as { server: string; args: Record<string, unknown> }[],
+    /** The compaction knob's config_get arguments. */
+    knobReads: [] as Record<string, unknown>[],
+    /** The compaction knob's value, for a later session start to read. */
+    compaction: opts.compaction,
   }
-  on('mcp.connect', ($, e) => ({ value: { isConnected: true, server: `plugin:${e.server}:${e.server}` } }))
+  let connect = opts.connect
+  on('mcp.connect', async ($, e) => {
+    const answer = connect
+    connect = undefined
+    if (typeof answer === 'number') await clock.sleep(answer)
+    if (answer === 'reject') throw new Error('connect failed')
+    if (answer === 'down') return { value: { isConnected: false, reason: 'failed', message: 'did not connect' } }
+    return { value: { isConnected: true, server: `plugin:${e.server}:${e.server}` } }
+  })
   on('mcp.call', ($, e) => {
     if (e.tool !== 'config_get') return { value: { content: [{ type: 'text', text: `no ${e.tool} here` }], isError: true } }
+    if (e.args.key === KNOB.compaction) {
+      w.knobReads.push({ ...e.args })
+      if (opts.failKnob) return { value: { content: [{ type: 'text', text: 'ws-mcp is unhealthy' }], isError: true } }
+      const value = w.compaction === undefined || (opts.sessionScoped && e.args.session_key === undefined) ? null : w.compaction
+      return { value: { content: [{ type: 'text', text: JSON.stringify({ key: e.args.key, value, scope: value === null ? 'unset' : 'project' }) }], isError: false } }
+    }
     if (e.args.key !== ADVISORY_KEY) return { value: { content: [{ type: 'text', text: JSON.stringify({ key: e.args.key, value: null, scope: 'unset' }) }], isError: false } }
     w.configGets.push({ server: e.server, args: e.args })
     if (opts.advisoryError) return { value: { content: [{ type: 'text', text: 'ws-mcp is unhealthy' }], isError: true } }
@@ -154,46 +194,40 @@ async function prompted($: Engine, w: World, text: string, opts: { command?: { n
   return res
 }
 
-const isWs = (w: World) => w.plugin === 'ws'
-
 /** The transcript (user-visible) lines the mod logged. */
 const transcript = (w: World) => w.logs.filter((l) => l.to === 'transcript').map((l) => l.text)
 const debug = (w: World) => w.logs.filter((l) => l.to === 'debug').map((l) => l.text)
 
-test('ws registers the compaction request tool with its pinned description and boolean flag; another package registers none', async ($, on) => {
-  const w = world(on)
+test('the knob on registers the compaction request tool with its pinned description and boolean flag', async ($, on) => {
+  const w = world(on, ON)
   await start($, w)
   const tool = w.registered.find((r) => r.name === 'request_compaction')
-  if (isWs(w)) {
-    expect(tool).toEqual({ name: 'request_compaction', description: LEVER_DESCRIPTION, isDeferred: false, inputSchema: tool?.inputSchema })
-    // The flag is optional: the schema lists it, and does not require it.
-    expect(tool?.inputSchema).toEqual({ type: 'object', properties: { continue: { type: 'boolean' } } })
-  } else {
-    expect(['wsflow']).toContain(w.plugin)
-    expect(tool).toBeUndefined()
-  }
+  expect(tool).toEqual({ name: 'request_compaction', description: LEVER_DESCRIPTION, isDeferred: false, inputSchema: tool?.inputSchema })
+  // The flag is optional: the schema lists it, and does not require it.
+  expect(tool?.inputSchema).toEqual({ type: 'object', properties: { continue: { type: 'boolean' } } })
+  // Read keyless, so a session-scope tune cannot reach it.
+  expect(w.knobReads).toEqual([{ key: KNOB.compaction, format: 'json' }])
 })
 
 test('compaction setup does not depend on the mailbox setup', async ($, on) => {
-  const w = world(on, { processOk: false })
+  const w = world(on, { ...ON, processOk: false })
   await start($, w)
   const names = w.registered.map((r) => r.name)
   expect(names.filter((n) => n.startsWith('mailbox_'))).toEqual([])
-  if (w.plugin === 'ws') expect(names.filter((n) => n === 'request_compaction')).toEqual(['request_compaction'])
+  expect(names.filter((n) => n === 'request_compaction')).toEqual(['request_compaction'])
 })
 
 test('mailbox setup does not depend on the compaction setup', async ($, on) => {
-  const w = world(on, { refuseRegister: 'request_compaction' })
+  const w = world(on, { ...ON, refuseRegister: 'request_compaction' })
   await start($, w)
   const names = w.registered.map((r) => r.name)
   expect(names.filter((n) => n.startsWith('mailbox_'))).toEqual(['mailbox_watch'])
   expect(names.filter((n) => n === 'request_compaction')).toEqual([])
 })
 
-test('ws: a crossing that session.measure reports while idle submits the advisory at once, reading the summary breakdown once and the usage afresh', async ($, on) => {
-  const w = world(on)
+test('a crossing that session.measure reports while idle submits the advisory at once, reading the summary breakdown once and the usage afresh', async ($, on) => {
+  const w = world(on, ON)
   await start($, w)
-  if (!isWs(w)) return
   await measure($, w, 50_000)
   await measure($, w, 104_000)
   await measure($, w, 105_000)
@@ -201,10 +235,9 @@ test('ws: a crossing that session.measure reports while idle submits the advisor
   expect(w.usageCalls).toEqual([{ breakdown: 'summary' }, {}])
 })
 
-test('ws: a crossing measured while a main-thread turn runs is delivered at the turn end, once, with the fresh figures', async ($, on) => {
-  const w = world(on)
+test('a crossing measured while a main-thread turn runs is delivered at the turn end, once, with the fresh figures', async ($, on) => {
+  const w = world(on, ON)
   await start($, w)
-  if (!isWs(w)) return
   await measure($, w, 50_000)
   await turnStart($, w)
   // A mid-turn measure (a rate-limit move) crosses the advisory; the turn goes on growing the context.
@@ -222,10 +255,9 @@ test('ws: a crossing measured while a main-thread turn runs is delivered at the 
   expect(w.prompts).toEqual([advisoryText(T, 118_000)])
 })
 
-test('ws: a mid-turn crossing that grew past a milestone by the turn end delivers that milestone once, skipping the lower one', async ($, on) => {
-  const w = world(on)
+test('a mid-turn crossing that grew past a milestone by the turn end delivers that milestone once, skipping the lower one', async ($, on) => {
+  const w = world(on, ON)
   await start($, w)
-  if (!isWs(w)) return
   await measure($, w, 50_000)
   await measure($, w, 104_000)
   expect(w.prompts).toEqual([advisoryText(T, 104_000)])
@@ -238,14 +270,10 @@ test('ws: a mid-turn crossing that grew past a milestone by the turn end deliver
   expect(w.prompts.length).toBe(2)
 })
 
-test('ws: each session start reads the advisory key once over the plugin server, and a tuned value moves the advisory', async ($, on) => {
-  const w = world(on, { advisory: '40%|300k' })
+test('each session start reads the advisory key once over the plugin server, and a tuned value moves the advisory', async ($, on) => {
+  const w = world(on, { ...ON, advisory: '40%|300k' })
   await start($, w)
-  if (!isWs(w)) {
-    expect(w.configGets).toEqual([])
-    return
-  }
-  expect(w.configGets).toEqual([{ server: 'plugin:ws:ws', args: { key: 'claude.compaction_advisory_percent', format: 'json' } }])
+  expect(w.configGets).toEqual([{ server: `plugin:${w.plugin}:${w.plugin}`, args: { key: 'claude.compaction_advisory_percent', format: 'json' } }])
   await measure($, w, 50_000)
   await measure($, w, 79_000)
   expect(w.prompts).toEqual([])
@@ -254,16 +282,16 @@ test('ws: each session start reads the advisory key once over the plugin server,
   expect(w.prompts[0]).toContain('This is past the advisory point (40%).')
   await start($, w)
   expect(w.configGets.length).toBe(2)
+  expect(w.knobReads.length).toBe(2)
 })
 
 for (const [what, opts] of [
   ['reports an error', { advisoryError: true }],
   ['returns a stored value that does not parse', { advisory: 'lots' }],
 ] as const) {
-  test(`ws: an advisory read that ${what} leaves the advisory at 50%`, async ($, on) => {
-    const w = world(on, opts)
+  test(`an advisory read that ${what} leaves the advisory at 50%`, async ($, on) => {
+    const w = world(on, { ...ON, ...opts })
     await start($, w)
-    if (!isWs(w)) return
     expect(w.configGets.length).toBe(1)
     await measure($, w, 50_000)
     await measure($, w, 81_000)
@@ -273,17 +301,16 @@ for (const [what, opts] of [
   })
 }
 
-test('ws: a lever call with the flag compacts after the main-thread turn end, then submits the resume prompt once', async ($, on) => {
-  const w = world(on)
+test('a lever call with the flag compacts after the main-thread turn end, then submits the resume prompt once', async ($, on) => {
+  const w = world(on, ON)
   await start($, w)
-  if (!isWs(w)) return
   const res = await lever($, w, { continue: true })
   expect(res.result).toBe(LEVER_RESULT)
   await turnEnd($, w, { agentId: 'sub-1' })
   await turnEnd($, w, { reason: 'aborted' })
   expect(w.compactCalls).toEqual([])
   await turnEnd($, w)
-  expect(w.compactCalls).toEqual([{ origin: 'ws', instructions: undefined }])
+  expect(w.compactCalls).toEqual([{ origin: w.plugin, instructions: undefined }])
   expect(w.prompts).toEqual([])
   await w.clock.advance(CONTINUATION_WINDOW_MS)
   expect(w.prompts).toEqual([RESUME_TEXT])
@@ -292,24 +319,22 @@ test('ws: a lever call with the flag compacts after the main-thread turn end, th
   expect(w.prompts.length).toBe(1)
 })
 
-test('ws: a lever call without the flag compacts at the turn end and submits nothing, with no window', async ($, on) => {
-  const w = world(on)
+test('a lever call without the flag compacts at the turn end and submits nothing, with no window', async ($, on) => {
+  const w = world(on, ON)
   await start($, w)
-  if (!isWs(w)) return
   const res = await lever($, w)
   expect(res.result).toBe(LEVER_RESULT_NO_RESUME)
   await turnEnd($, w)
-  expect(w.compactCalls).toEqual([{ origin: 'ws', instructions: undefined }])
+  expect(w.compactCalls).toEqual([{ origin: w.plugin, instructions: undefined }])
   await w.clock.advance(CONTINUATION_WINDOW_MS)
   expect(w.prompts).toEqual([])
   await turnEnd($, w)
   expect(w.compactCalls.length).toBe(1)
 })
 
-test('ws: a leftover continuation argument, or a non-boolean flag, reads as unset', async ($, on) => {
-  const w = world(on)
+test('a leftover continuation argument, or a non-boolean flag, reads as unset', async ($, on) => {
+  const w = world(on, ON)
   await start($, w)
-  if (!isWs(w)) return
   expect((await lever($, w, { continuation: 'go on' })).result).toBe(LEVER_RESULT_NO_RESUME)
   expect((await lever($, w, { continue: 'true' })).result).toBe(LEVER_RESULT_NO_RESUME)
   await turnEnd($, w)
@@ -318,10 +343,9 @@ test('ws: a leftover continuation argument, or a non-boolean flag, reads as unse
   expect(w.prompts).toEqual([])
 })
 
-test('ws: a repeat lever call replaces the flag, latest wins', async ($, on) => {
-  const w = world(on)
+test('a repeat lever call replaces the flag, latest wins', async ($, on) => {
+  const w = world(on, ON)
   await start($, w)
-  if (!isWs(w)) return
   await lever($, w, { continue: true })
   await lever($, w)
   await turnEnd($, w)
@@ -335,15 +359,14 @@ test('ws: a repeat lever call replaces the flag, latest wins', async ($, on) => 
   expect(w.prompts).toEqual([RESUME_TEXT])
 })
 
-test("ws: the lever's own landing resets the latch, though the engine routes it past the feature's own hook", async ($, on) => {
-  const w = world(on)
+test("the lever's own landing resets the latch, though the engine routes it past the feature's own hook", async ($, on) => {
+  const w = world(on, ON)
   await start($, w)
-  if (!isWs(w)) return
   await measure($, w, 50_000)
   await measure($, w, 104_000)
   await lever($, w, { continue: true })
   await turnEnd($, w)
-  expect(w.compactCalls).toEqual([{ origin: 'ws', instructions: undefined }])
+  expect(w.compactCalls).toEqual([{ origin: w.plugin, instructions: undefined }])
   await w.clock.advance(CONTINUATION_WINDOW_MS)
   // Usage still past the advisory after the landing: a reset latch delivers it again, from a fresh breakdown.
   await measure($, w, 104_000)
@@ -353,10 +376,9 @@ test("ws: the lever's own landing resets the latch, though the engine routes it 
   expect(transcript(w)).toEqual([])
 })
 
-test('ws: a subagent lever call is refused and requests nothing', async ($, on) => {
-  const w = world(on)
+test('a subagent lever call is refused and requests nothing', async ($, on) => {
+  const w = world(on, ON)
   await start($, w)
-  if (!isWs(w)) return
   const fromSub = await lever($, w, { continue: true }, 'sub-1')
   expect(fromSub.deny).toBe('request_compaction compacts the main session only; called from subagent sub-1.')
   await turnEnd($, w)
@@ -364,10 +386,9 @@ test('ws: a subagent lever call is refused and requests nothing', async ($, on) 
   expect(w.prompts).toEqual([])
 })
 
-test('ws: a rejected compaction retries at the next main-thread turn end', async ($, on) => {
-  const w = world(on)
+test('a rejected compaction retries at the next main-thread turn end', async ($, on) => {
+  const w = world(on, ON)
   await start($, w)
-  if (!isWs(w)) return
   await lever($, w, { continue: true })
   w.compactAnswers.push('rejects')
   await turnEnd($, w)
@@ -384,10 +405,9 @@ test('ws: a rejected compaction retries at the next main-thread turn end', async
   expect(w.prompts).toEqual([RESUME_TEXT])
 })
 
-test('ws: a vetoed compaction with the flag still submits the noted resume prompt when no turn started', async ($, on) => {
-  const w = world(on)
+test('a vetoed compaction with the flag still submits the noted resume prompt when no turn started', async ($, on) => {
+  const w = world(on, ON)
   await start($, w)
-  if (!isWs(w)) return
   await lever($, w, { continue: true })
   w.compactAnswers.push({ skip: 'blocked by policy' })
   await turnEnd($, w)
@@ -395,10 +415,9 @@ test('ws: a vetoed compaction with the flag still submits the noted resume promp
   expect(w.prompts).toEqual([vetoedResumeText('blocked by policy')])
 })
 
-test('ws: a vetoed compaction with the flag submits nothing when a turn started within the window', async ($, on) => {
-  const w = world(on)
+test('a vetoed compaction with the flag submits nothing when a turn started within the window', async ($, on) => {
+  const w = world(on, ON)
   await start($, w)
-  if (!isWs(w)) return
   await lever($, w, { continue: true })
   w.compactAnswers.push({ skip: 'blocked by policy' })
   await turnEnd($, w)
@@ -407,10 +426,9 @@ test('ws: a vetoed compaction with the flag submits nothing when a turn started 
   expect(w.prompts).toEqual([])
 })
 
-test('ws: a manual compaction landing first drops the compact step; the resume prompt follows at the turn end, unguarded', async ($, on) => {
-  const w = world(on)
+test('a manual compaction landing first drops the compact step; the resume prompt follows at the turn end, unguarded', async ($, on) => {
+  const w = world(on, ON)
   await start($, w)
-  if (!isWs(w)) return
   await lever($, w, { continue: true })
   await $.session.compact({ trigger: 'manual', messages: SUMMARY } as never)
   await w.clock.settle()
@@ -421,10 +439,9 @@ test('ws: a manual compaction landing first drops the compact step; the resume p
   expect(w.prompts).toEqual([RESUME_TEXT])
 })
 
-test('ws: session.end drops a pending request and starts the latch over', async ($, on) => {
-  const w = world(on)
+test('session.end drops a pending request and starts the latch over', async ($, on) => {
+  const w = world(on, ON)
   await start($, w)
-  if (!isWs(w)) return
   await measure($, w, 50_000)
   await lever($, w, { continue: true })
   await $.session.end({ reason: 'clear', sessionId: 'sess-1', resume: undefined as never })
@@ -435,10 +452,9 @@ test('ws: session.end drops a pending request and starts the latch over', async 
   expect(w.prompts).toEqual([])
 })
 
-test('ws: session.end resets the compaction state before awaiting the store delete', async ($, on) => {
-  const w = world(on)
+test('session.end resets the compaction state before awaiting the store delete', async ($, on) => {
+  const w = world(on, ON)
   await start($, w)
-  if (!isWs(w)) return
   await lever($, w, { continue: true })
   // A delete still pending stands for one the hook's time bound cuts short.
   w.deleteDelays.push(100)
@@ -451,10 +467,10 @@ test('ws: session.end resets the compaction state before awaiting the store dele
   await ended
 })
 
-test('another package stays inert: no usage read, no prompt, no compaction, and compactions pass through untouched', async ($, on) => {
-  const w = world(on)
-  await start($, w)
-  if (isWs(w)) return
+/** The feature inert: no lever, no advisory read, no usage read, no prompt, no compaction, and compactions pass through untouched. */
+async function expectInert($: Engine, w: World) {
+  expect(w.registered.map((r) => r.name)).not.toContain('request_compaction')
+  expect(w.configGets).toEqual([])
   await measure($, w, 50_000)
   await measure($, w, 160_000)
   await turnEnd($, w)
@@ -464,12 +480,71 @@ test('another package stays inert: no usage read, no prompt, no compaction, and 
   expect(w.usageCalls).toEqual([])
   expect(w.prompts).toEqual([])
   expect(w.compactCalls).toEqual([{ origin: 'engine', instructions: undefined }])
+  await prompted($, w, 'hello')
+  expect(w.typed).toEqual([{ text: 'hello', context: undefined }])
+  await $.session.end({ reason: 'clear', sessionId: 'sess-1', resume: undefined as never })
+  await w.clock.settle()
+  expect(w.prompts).toEqual([])
+  expect(transcript(w)).toEqual([])
+}
+
+for (const [what, opts] of [
+  ['unset', {}],
+  ['false', { compaction: false }],
+  ['a non-boolean true', { compaction: 'true' }],
+  ['an error result (a failed read)', { compaction: true, failKnob: true }],
+  ['tuned at session scope only', { compaction: true, sessionScoped: true }],
+] as const) {
+  test(`a compaction knob ${what} leaves the feature inert`, async ($, on) => {
+    const w = world(on, opts)
+    await start($, w)
+    expect(w.knobReads).toEqual([{ key: KNOB.compaction, format: 'json' }])
+    await expectInert($, w)
+  })
+}
+
+for (const unresolved of ['down', 'reject'] as const) {
+  test(`a server ${unresolved === 'down' ? 'not connected' : 'whose connect rejects'} at start leaves the feature inert though the knob is on`, async ($, on) => {
+    const w = world(on, { ...ON, connect: unresolved })
+    await start($, w)
+    expect(w.knobReads).toEqual([])
+    await expectInert($, w)
+  })
+}
+
+test('a slow server start does not hold session.start; the lever comes up and works once the knob read settles', async ($, on) => {
+  const w = world(on, { ...ON, connect: 1_000 })
+  let started = false
+  void $.session.start({ cwd: '/tmp', surface: 'terminal', isInteractive: true }).then(() => (started = true))
+  await w.clock.settle()
+  expect(started).toBe(true)
+  expect(w.registered.map((r) => r.name)).toEqual(['request_mcp_reconnect'])
+  expect(w.knobReads).toEqual([])
+  await w.clock.advance(1_000)
+  expect(w.registered.map((r) => r.name)).toContain('request_compaction')
+  expect((await lever($, w, { continue: true })).result).toBe(LEVER_RESULT)
+  await turnEnd($, w)
+  expect(w.compactCalls).toEqual([{ origin: w.plugin, instructions: undefined }])
 })
 
-test('ws: a prompt typed within the window starts the first turn, so the resume prompt is not submitted; the typed prompt carries nothing', async ($, on) => {
-  const w = world(on)
+test('each session start reads the knob afresh: a later start reading off leaves the feature inert', async ($, on) => {
+  const w = world(on, ON)
   await start($, w)
-  if (!isWs(w)) return
+  await measure($, w, 50_000)
+  const usageCalls = w.usageCalls.length
+  // A hot reload's start, after the knob was turned off at the project scope.
+  w.compaction = false
+  await start($, w)
+  expect(w.knobReads.length).toBe(2)
+  await measure($, w, 160_000)
+  await turnEnd($, w)
+  expect(w.usageCalls.length).toBe(usageCalls)
+  expect(w.prompts).toEqual([])
+})
+
+test('a prompt typed within the window starts the first turn, so the resume prompt is not submitted; the typed prompt carries nothing', async ($, on) => {
+  const w = world(on, ON)
+  await start($, w)
   await lever($, w, { continue: true })
   await turnEnd($, w)
   await w.clock.advance(CONTINUATION_WINDOW_MS - 1)
@@ -480,10 +555,9 @@ test('ws: a prompt typed within the window starts the first turn, so the resume 
   expect(transcript(w)).toEqual([])
 })
 
-test('ws: a slash command or a prompt not typed at the composer that starts a turn within the window cancels the resume prompt too', async ($, on) => {
-  const w = world(on)
+test('a slash command or a prompt not typed at the composer that starts a turn within the window cancels the resume prompt too', async ($, on) => {
+  const w = world(on, ON)
   await start($, w)
-  if (!isWs(w)) return
   await lever($, w, { continue: true })
   await turnEnd($, w)
   await prompted($, w, '/cost', { command: { name: 'cost', args: '' } })
@@ -497,10 +571,9 @@ test('ws: a slash command or a prompt not typed at the composer that starts a tu
   expect(w.prompts).toEqual(['from a phone'])
 })
 
-test("ws: a background agent's notification turn within the window cancels the resume prompt", async ($, on) => {
-  const w = world(on)
+test("a background agent's notification turn within the window cancels the resume prompt", async ($, on) => {
+  const w = world(on, ON)
   await start($, w)
-  if (!isWs(w)) return
   await lever($, w, { continue: true })
   await turnEnd($, w)
   // A turn started with no prompt through the composer: a notification, a queued submit.
@@ -509,10 +582,9 @@ test("ws: a background agent's notification turn within the window cancels the r
   expect(w.prompts).toEqual([])
 })
 
-test('ws: a subagent turn started within the window does not cancel the resume prompt', async ($, on) => {
-  const w = world(on)
+test('a subagent turn started within the window does not cancel the resume prompt', async ($, on) => {
+  const w = world(on, ON)
   await start($, w)
-  if (!isWs(w)) return
   await lever($, w, { continue: true })
   await turnEnd($, w)
   await turnStart($, w, 'sub-1')
@@ -520,10 +592,9 @@ test('ws: a subagent turn started within the window does not cancel the resume p
   expect(w.prompts).toEqual([RESUME_TEXT])
 })
 
-test('ws: a prompt typed after the window finds the resume prompt already submitted', async ($, on) => {
-  const w = world(on)
+test('a prompt typed after the window finds the resume prompt already submitted', async ($, on) => {
+  const w = world(on, ON)
   await start($, w)
-  if (!isWs(w)) return
   await lever($, w, { continue: true })
   await turnEnd($, w)
   await w.clock.advance(CONTINUATION_WINDOW_MS)
@@ -532,10 +603,9 @@ test('ws: a prompt typed after the window finds the resume prompt already submit
   expect(w.typed).toEqual([{ text: 'too late', context: undefined }])
 })
 
-test('ws: a session end inside the window records the held resume prompt in the transcript', async ($, on) => {
-  const w = world(on)
+test('a session end inside the window records the held resume prompt in the transcript', async ($, on) => {
+  const w = world(on, ON)
   await start($, w)
-  if (!isWs(w)) return
   await lever($, w, { continue: true })
   await turnEnd($, w)
   await $.session.end({ reason: 'clear', sessionId: 'sess-1', resume: undefined as never })
@@ -545,22 +615,13 @@ test('ws: a session end inside the window records the held resume prompt in the 
   expect(transcript(w)).toEqual([`ws compaction: a prompt was not submitted (session.end clear):\n${RESUME_TEXT}`])
 })
 
-test('ws: a resume prompt refused beneath the mod is recorded in the transcript', async ($, on) => {
-  const w = world(on)
+test('a resume prompt refused beneath the mod is recorded in the transcript', async ($, on) => {
+  const w = world(on, ON)
   await start($, w)
-  if (!isWs(w)) return
   await lever($, w, { continue: true })
   await turnEnd($, w)
   w.dropPrompts = 1
   await w.clock.advance(CONTINUATION_WINDOW_MS)
   expect(w.prompts).toEqual([])
   expect(transcript(w)).toEqual([`ws compaction: a prompt was not submitted (dropped: blocked beneath):\n${RESUME_TEXT}`])
-})
-
-test('another package attaches nothing to a typed prompt', async ($, on) => {
-  const w = world(on)
-  await start($, w)
-  if (isWs(w)) return
-  await prompted($, w, 'hello')
-  expect(w.typed).toEqual([{ text: 'hello', context: undefined }])
 })

@@ -2,6 +2,7 @@ import { expect, mock, test, type TestBody } from 'claude-code/testing'
 
 import { CONTINUATION_WINDOW_MS } from './compaction'
 import { adoptionNotice, KEY_STORE_PREFIX, MAILBOX_LINE, pointerText, SECTION_ID } from './manual'
+import { KNOB } from './register'
 import { RESUME_TEXT } from './timing'
 
 type Engine = Parameters<TestBody>[0]
@@ -9,9 +10,9 @@ type On = Parameters<TestBody>[1]
 
 // Engine-backed tests of the manual feature's wiring; its state machine is
 // covered in manual.test.ts. The same file is mirrored into every package that
-// ships the mod, and the kit has no plugin-name override, so each test reads
-// the package identity from the registrations: the ws tests return early
-// elsewhere, and the inert-package test early in ws.
+// ships the mod and runs identically in each: the feature runs only in a ws
+// project with the claude.manual_injection_enabled knob reading true, which
+// each test sets through the world's config_get answers (ON).
 
 const STATIC_BODY = '# Workflow Manual\n\n> **Session invariant:** keep the key.\n\n## On: invoke\n\nLoad this manual.\n'
 
@@ -55,6 +56,14 @@ function world(
     probeDelayMs?: number
     /** The mailbox_lookup_peers a slug resolution makes answers this late on the mock clock. */
     lookupDelayMs?: number
+    /** The values config_get answers by key; a key absent reads as unset, the advisory as 50%. */
+    knobs?: Record<string, unknown>
+    /** Keys whose config_get answers an error result. */
+    failKnobs?: readonly string[]
+    /** The knobs are tuned at session scope only: a read without session_key finds them unset. */
+    sessionScoped?: boolean
+    /** The start's mcp.connect answers not connected. */
+    serverDown?: boolean
   } = {},
 ) {
   const clock = mock.clock(on, { now: 1_800_000_000_000 })
@@ -83,7 +92,10 @@ function world(
     killed: [] as number[],
     /** While set, core answers the model's workflow_manual with this error. */
     coreError: undefined as string | undefined,
+    /** Every config_get's arguments. */
+    configCalls: [] as Record<string, unknown>[],
   }
+  let serverDown = opts.serverDown === true
   on('store.get', ($, e) => ({ value: w.store.get(e.key) }))
   on('store.set', ($, e) => (w.store.set(e.key, e.value), { value: undefined }))
   on('store.delete', ($, e) => (w.store.delete(e.key), { value: undefined }))
@@ -119,11 +131,25 @@ function world(
     w.registered.push(e.name)
     return { value: { tool: `mcp__${w.plugin}__${e.name}` } }
   })
-  on('mcp.connect', ($, e) => ({ value: { isConnected: true, server: `plugin:${e.server}:${e.server}` } }))
+  on('mcp.connect', ($, e) => {
+    // At start only: a later connect (a bind's) finds the server up.
+    const down = serverDown
+    serverDown = false
+    return down
+      ? { value: { isConnected: false, reason: 'failed', message: 'did not connect' } }
+      : { value: { isConnected: true, server: `plugin:${e.server}:${e.server}` } }
+  })
   on('mcp.call', async ($, e) => {
     const text = (t: string) => ({ value: { content: [{ type: 'text', text: t }], isError: false } })
-    // The compaction feature's advisory read at every session start, not the manual's: answered, not recorded.
-    if (e.tool === 'config_get') return text(JSON.stringify({ key: e.args.key, value: '50%', scope: 'builtin' }))
+    // Knob reads: recorded apart from the manual's own ws calls.
+    if (e.tool === 'config_get') {
+      const key = String(e.args.key)
+      w.configCalls.push({ ...e.args })
+      if (opts.failKnobs?.includes(key)) return { value: { content: [{ type: 'text', text: 'ws-mcp is unhealthy' }], isError: true } }
+      const knobs: Record<string, unknown> = { 'claude.compaction_advisory_percent': '50%', ...(opts.knobs ?? {}) }
+      const value = key in knobs && !(opts.sessionScoped && e.args.session_key === undefined) ? knobs[key] : null
+      return text(JSON.stringify({ key, value, scope: value === null ? 'unset' : 'project' }))
+    }
     w.mcpCalls.push({ server: e.server, tool: e.tool, args: e.args })
     if (e.tool === 'ferrule') {
       const relogin = e.args.relogin_session_key
@@ -197,14 +223,18 @@ function remember(w: World, tool: string, args: Record<string, unknown>, text: s
 
 const seen = (res: { result?: unknown; text?: string }) => (typeof res.result === 'string' ? res.result : res.text)
 
-const isWs = (w: World) => w.plugin === 'ws'
+/** The feature's knob on. */
+const ON = { [KNOB.manual]: true }
+/** The manual knob's reads. */
+const manualReads = (w: World) => w.configCalls.filter((a) => a.key === KNOB.manual)
 
-test('ws in a ws project: a key is minted at start and the first compose appends the pinned section last', async ($, on) => {
-  const w = world(on)
+test('in a ws project: a key is minted at start and the first compose appends the pinned section last', async ($, on) => {
+  const w = world(on, { knobs: ON, knobs: ON })
   await start($, w)
-  if (!isWs(w)) return
   expect(w.mcpCalls.map((c) => c.tool)).toEqual(['ferrule', 'workflow_manual', 'playbook_read'])
-  expect(w.mcpCalls[0]).toEqual({ server: 'plugin:ws:ws', tool: 'ferrule', args: { root: '/repo/sub', format: 'json' } })
+  expect(w.mcpCalls[0]).toEqual({ server: `plugin:${w.plugin}:${w.plugin}`, tool: 'ferrule', args: { root: '/repo/sub', format: 'json' } })
+  // The knob is read once, keyless: no key exists yet to read it with.
+  expect(manualReads(w)).toEqual([{ key: KNOB.manual, format: 'json' }])
   // The project check reads the repository root, not the launch directory.
   expect(w.existsChecks).toEqual(['/repo/ai-docs/WORKFLOW.md'])
   const res = await compose($, w)
@@ -215,27 +245,24 @@ test('ws in a ws project: a key is minted at start and the first compose appends
   expect(w.mcpCalls.length).toBe(3)
 })
 
-test('ws without ai-docs/WORKFLOW.md at the repository root mints nothing and appends nothing', async ($, on) => {
-  const w = world(on, { workflowFile: false })
+test('without ai-docs/WORKFLOW.md at the repository root mints nothing and appends nothing', async ($, on) => {
+  const w = world(on, { knobs: ON, workflowFile: false })
   await start($, w)
-  if (!isWs(w)) return
   expect(w.mcpCalls).toEqual([])
   expect(manualSection(await compose($, w))).toBeUndefined()
 })
 
-test('ws outside a repository falls back to the ancestor walk', async ($, on) => {
-  const w = world(on, { repo: 'none' })
+test('outside a repository falls back to the ancestor walk', async ($, on) => {
+  const w = world(on, { knobs: ON, repo: 'none' })
   await start($, w)
-  if (!isWs(w)) return
   expect(w.existsChecks).toEqual([])
   expect(manualSection(await compose($, w))?.text).toBe(INJECTED('minted-1'))
 })
 
-test('ws: a stored key (hot reload, resume) re-logs in instead of minting', async ($, on) => {
-  const w = world(on, { store: { [`${KEY_STORE_PREFIX}sess-1`]: { sessionKey: 'kept-key', at: 1_800_000_000_000 - 60_000 } } })
+test('a stored key (hot reload, resume) re-logs in instead of minting', async ($, on) => {
+  const w = world(on, { knobs: ON, store: { [`${KEY_STORE_PREFIX}sess-1`]: { sessionKey: 'kept-key', at: 1_800_000_000_000 - 60_000 } } })
   w.known.add('kept-key')
   await start($, w)
-  if (!isWs(w)) return
   expect(w.mcpCalls[0].args).toEqual({ root: '/repo/sub', format: 'json', relogin_session_key: 'kept-key' })
   expect(w.minted).toBe(0)
   expect(manualSection(await compose($, w))?.text).toBe(INJECTED('kept-key'))
@@ -245,17 +272,17 @@ test('ws: a stored key (hot reload, resume) re-logs in instead of minting', asyn
   expect(seen(res)).toBe(keyedResponse('kept-key', '(no todos)'))
 })
 
-test('ws: /clear ends the conversation; the next compose mints a new key under the new session id, and stale entries are pruned at start', async ($, on) => {
+test('/clear ends the conversation; the next compose mints a new key under the new session id, and stale entries are pruned at start', async ($, on) => {
   const day = 24 * 60 * 60 * 1000
   const now = 1_800_000_000_000
   const w = world(on, {
+    knobs: ON,
     store: {
       [`${KEY_STORE_PREFIX}gone`]: { sessionKey: 'gone-key', at: now - 31 * day },
       [`${KEY_STORE_PREFIX}recent`]: { sessionKey: 'recent-key', at: now - day },
     },
   })
   await start($, w)
-  if (!isWs(w)) return
   expect([...w.store.keys()]).not.toContain(`${KEY_STORE_PREFIX}gone`)
   expect([...w.store.keys()]).toContain(`${KEY_STORE_PREFIX}recent`)
   await compose($, w)
@@ -267,10 +294,9 @@ test('ws: /clear ends the conversation; the next compose mints a new key under t
   expect(w.store.get(`${KEY_STORE_PREFIX}sess-2`)).toEqual({ sessionKey: 'minted-2', at: now })
 })
 
-test('ws: the first compose waits a bounded time; on timeout it appends nothing and the full result passes through', async ($, on) => {
-  const w = world(on, { holdManualMs: 8_000 })
+test('the first compose waits a bounded time; on timeout it appends nothing and the full result passes through', async ($, on) => {
+  const w = world(on, { knobs: ON, holdManualMs: 8_000 })
   await start($, w)
-  if (!isWs(w)) return
   const pending = $.prompt.compose({ model: 'm', promptModel: 'm', surfaces: ['terminal'], tools: [], outputStyle: null, traits: [] } as never)
   await w.clock.advance(5_000)
   const res = await pending
@@ -281,10 +307,9 @@ test('ws: the first compose waits a bounded time; on timeout it appends nothing 
   expect(seen(await read($, w, 'workflow_manual', { session_key: 'minted-1' }))).toBe(keyedResponse('minted-1', '(no todos)'))
 })
 
-test('ws: a compose while the setup is still pending answers at once, without the section', async ($, on) => {
-  const w = world(on, { holdManualMs: 8_000 })
+test('a compose while the setup is still pending answers at once, without the section', async ($, on) => {
+  const w = world(on, { knobs: ON, holdManualMs: 8_000 })
   await start($, w)
-  if (!isWs(w)) return
   const first = $.prompt.compose({ model: 'm', promptModel: 'm', surfaces: ['terminal'], tools: [], outputStyle: null, traits: [] } as never)
   await w.clock.advance(5_000)
   expect(manualSection(await first)).toBeUndefined()
@@ -294,25 +319,23 @@ test('ws: a compose while the setup is still pending answers at once, without th
   expect(answered).toEqual({ sections: ENGINE_SECTIONS })
 })
 
-test('ws: a failed setup appends nothing, and the full result passes through', async ($, on) => {
-  const w = world(on, { failMint: true })
+test('a failed setup appends nothing, and the full result passes through', async ($, on) => {
+  const w = world(on, { knobs: ON, failMint: true })
   await start($, w)
-  if (!isWs(w)) return
   expect(manualSection(await compose($, w))).toBeUndefined()
   expect(w.mcpCalls.map((c) => c.tool)).toEqual(['ferrule', 'ferrule'])
   expect(seen(await read($, w, 'workflow_manual', { session_key: 'minted-1' }))).toBe(keyedResponse('minted-1', '(no todos)'))
   expect(w.store.size).toBe(0)
 })
 
-test('ws: a workflow_manual whose anchors moved reads as workflow_state with the same key; a body-less notice passes through', async ($, on) => {
-  const w = world(on)
+test('a workflow_manual whose anchors moved reads as workflow_state with the same key; a body-less notice passes through', async ($, on) => {
+  const w = world(on, { knobs: ON, knobs: ON })
   await start($, w)
-  if (!isWs(w)) return
   await compose($, w)
   w.coreManual = '# Renamed Manual\n\n## Session Key\nminted-1\n\n## Session State\n'
   const res = await read($, w, 'workflow_manual', { session_key: 'minted-1', root: '/repo' })
   expect(res.result).toBe('Workflow manual is in your system prompt; this is your current session state.\n\n## Session State\n\n### Todos\n(no todos)\n')
-  expect(w.mcpCalls.at(-1)).toEqual({ server: 'plugin:ws:ws', tool: 'workflow_state', args: { session_key: 'minted-1' } })
+  expect(w.mcpCalls.at(-1)).toEqual({ server: `plugin:${w.plugin}:${w.plugin}`, tool: 'workflow_state', args: { session_key: 'minted-1' } })
   const calls = w.mcpCalls.length
   w.coreManual = '## Session State\n(no restorable state for session key "gone")\n'
   expect(seen(await read($, w, 'workflow_manual', { session_key: 'gone' }))).toBe(w.coreManual)
@@ -320,10 +343,9 @@ test('ws: a workflow_manual whose anchors moved reads as workflow_state with the
   expect(w.mcpCalls.slice(calls).map((c) => c.tool)).toEqual(['ferrule'])
 })
 
-test('ws: with the snapshot carrying the manual, a main-thread workflow_manual reads as state only; a subagent call is untouched', async ($, on) => {
-  const w = world(on)
+test('with the snapshot carrying the manual, a main-thread workflow_manual reads as state only; a subagent call is untouched', async ($, on) => {
+  const w = world(on, { knobs: ON, knobs: ON })
   await start($, w)
-  if (!isWs(w)) return
   await compose($, w)
   w.state = '- [ ] {a} do it'
   const res = await read($, w, 'workflow_manual', { session_key: 'minted-1' })
@@ -337,14 +359,13 @@ test('ws: with the snapshot carrying the manual, a main-thread workflow_manual r
   expect(seen(await read($, w, 'workflow_manual', { session_key: 'other-key' }))).toBe(keyedResponse('other-key', '- [ ] {a} do it'))
 })
 
-test("ws: the lever's own landing sets the flag, though the engine routes it past the mod's session.compact hook", async ($, on) => {
-  const w = world(on, { store: { [`${KEY_STORE_PREFIX}sess-1`]: { sessionKey: 'kept-key', at: 1_800_000_000_000 } } })
+test("the lever's own landing sets the flag, though the engine routes it past the mod's session.compact hook", async ($, on) => {
+  const w = world(on, { knobs: { ...ON, [KNOB.compaction]: true }, store: { [`${KEY_STORE_PREFIX}sess-1`]: { sessionKey: 'kept-key', at: 1_800_000_000_000 } } })
   w.known.add('kept-key')
   await start($, w)
-  if (!isWs(w)) return
   await compose($, w)
   expect(seen(await read($, w, 'workflow_manual', { session_key: 'kept-key' }))).toBe(keyedResponse('kept-key', '(no todos)'))
-  await $.tool.call({ tool: 'mcp__ws__request_compaction', continue: true } as never)
+  await $.tool.call({ tool: `mcp__${w.plugin}__request_compaction`, continue: true } as never)
   await w.clock.settle()
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer' } as never)
   await w.clock.settle()
@@ -354,11 +375,10 @@ test("ws: the lever's own landing sets the flag, though the engine routes it pas
   expect(seen(await read($, w, 'workflow_manual', { session_key: 'kept-key' }))).toMatch(/^Workflow manual is in your system prompt;/)
 })
 
-test('ws: a manual compaction landing sets the flag for a resumed conversation', async ($, on) => {
-  const w = world(on, { store: { [`${KEY_STORE_PREFIX}sess-1`]: { sessionKey: 'kept-key', at: 1_800_000_000_000 } } })
+test('a manual compaction landing sets the flag for a resumed conversation', async ($, on) => {
+  const w = world(on, { knobs: ON, store: { [`${KEY_STORE_PREFIX}sess-1`]: { sessionKey: 'kept-key', at: 1_800_000_000_000 } } })
   w.known.add('kept-key')
   await start($, w)
-  if (!isWs(w)) return
   await compose($, w)
   await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'summary', toolUses: [] }] } as never)
   await w.clock.settle()
@@ -366,10 +386,9 @@ test('ws: a manual compaction landing sets the flag for a resumed conversation',
   expect(seen(await read($, w, 'workflow_manual', { session_key: 'kept-key' }))).toMatch(/^Workflow manual is in your system prompt;/)
 })
 
-test('ws: a repeat playbook_read collapses to the pointer while the earlier result is in the conversation, read only on a hint match', async ($, on) => {
-  const w = world(on)
+test('a repeat playbook_read collapses to the pointer while the earlier result is in the conversation, read only on a hint match', async ($, on) => {
+  const w = world(on, { knobs: ON, knobs: ON })
   await start($, w)
-  if (!isWs(w)) return
   await compose($, w)
   const args = { name: 'lead-run', session_key: 'minted-1' }
   const full = '# lead-run\n## Steps\nwork'
@@ -393,10 +412,9 @@ test('ws: a repeat playbook_read collapses to the pointer while the earlier resu
   expect(w.messageReads).toBe(reads)
 })
 
-test('ws: a repeat workflow_manual collapses to its pointer on the state-only text', async ($, on) => {
-  const w = world(on)
+test('a repeat workflow_manual collapses to its pointer on the state-only text', async ($, on) => {
+  const w = world(on, { knobs: ON, knobs: ON })
   await start($, w)
-  if (!isWs(w)) return
   await compose($, w)
   const first = seen(await read($, w, 'workflow_manual', { session_key: 'minted-1' }))!
   remember(w, 'workflow_manual', { session_key: 'minted-1' }, first)
@@ -406,33 +424,50 @@ test('ws: a repeat workflow_manual collapses to its pointer on the state-only te
   )
 })
 
-test('another package stays inert: no key, no section, no rewrite', async ($, on) => {
-  const w = world(on)
-  await start($, w)
-  if (isWs(w)) return
-  expect(['wsflow']).toContain(w.plugin)
-  expect(w.mcpCalls).toEqual([])
-  const res = await compose($, w)
-  expect(res).toEqual({ sections: ENGINE_SECTIONS })
-  const args = { session_key: 'k' }
-  expect(seen(await read($, w, 'workflow_manual', args))).toBe(keyedResponse('k', '(no todos)'))
-  remember(w, 'playbook_read', { name: 'x' }, '# x\n## Steps\nwork')
-  await read($, w, 'playbook_read', { name: 'x' })
-  expect(seen(await read($, w, 'playbook_read', { name: 'x' }))).toBe('# x\n## Steps\nwork')
-  expect(w.messageReads).toBe(0)
-  expect([...w.store.keys()]).toEqual([])
-})
-
 /** A live wait child makes each settle cost about a second of real time; these tests settle several times with one. */
 const LIVE_CHILD = { timeoutMs: 20_000 }
 
 const watchTool = (w: World) => w.registered.includes('mailbox_watch')
 const boundKeys = (w: World) => w.spawns.map((argv) => argv[5])
 
-test('ws in a ws project: no mailbox_watch tool; the minted key is bound automatically and the section says so', LIVE_CHILD, async ($, on) => {
-  const w = world(on, { processOk: true })
+for (const [what, opts] of [
+  ['unset', {}],
+  ['false', { knobs: { [KNOB.manual]: false } }],
+  ['a non-boolean true', { knobs: { [KNOB.manual]: 'true' } }],
+  ['an error result (a failed read)', { knobs: ON, failKnobs: [KNOB.manual] }],
+  ['tuned at session scope only', { knobs: ON, sessionScoped: true }],
+  ['unread: the server was not connected at start', { knobs: ON, serverDown: true }],
+] as const) {
+  test(`a manual knob ${what} in a ws project: no key, no section, no rewrite, and mailbox_watch registers and binds`, LIVE_CHILD, async ($, on) => {
+    const w = world(on, { ...opts, processOk: true })
+    await start($, w)
+    // The project check passed; the knob closed the gate.
+    expect(w.existsChecks).toEqual(['/repo/ai-docs/WORKFLOW.md'])
+    expect(manualReads(w)).toEqual('serverDown' in opts ? [] : [{ key: KNOB.manual, format: 'json' }])
+    expect(w.mcpCalls).toEqual([])
+    const res = await compose($, w)
+    expect(res).toEqual({ sections: ENGINE_SECTIONS })
+    const args = { session_key: 'k' }
+    expect(seen(await read($, w, 'workflow_manual', args))).toBe(keyedResponse('k', '(no todos)'))
+    remember(w, 'playbook_read', { name: 'x' }, '# x\n## Steps\nwork')
+    await read($, w, 'playbook_read', { name: 'x' })
+    expect(seen(await read($, w, 'playbook_read', { name: 'x' }))).toBe('# x\n## Steps\nwork')
+    expect(w.messageReads).toBe(0)
+    expect([...w.store.keys()]).toEqual([])
+    // The mailbox gate is the manual's: closed, so the agent binds its own key.
+    expect(watchTool(w)).toBe(true)
+    expect(w.spawns).toEqual([])
+    const bound = await $.tool.call({ tool: `mcp__${w.plugin}__mailbox_watch`, session_key: 'k1' } as never)
+    await w.clock.settle()
+    expect(String(bound.result)).toContain('bound')
+    expect(boundKeys(w)).toEqual(['k1'])
+    expect(w.minted).toBe(0)
+  })
+}
+
+test('in a ws project: no mailbox_watch tool; the minted key is bound automatically and the section says so', LIVE_CHILD, async ($, on) => {
+  const w = world(on, { knobs: ON, processOk: true })
   await start($, w)
-  if (!isWs(w)) return
   expect(watchTool(w)).toBe(false)
   expect(boundKeys(w)).toEqual(['minted-1'])
   expect(manualSection(await compose($, w))?.text).toBe(INJECTED_PUSH('minted-1'))
@@ -440,20 +475,18 @@ test('ws in a ws project: no mailbox_watch tool; the minted key is bound automat
   expect([...w.store.keys()].some((k) => k.startsWith('mailbox-watch:'))).toBe(false)
 })
 
-test('ws without host commands: no tool, no bind, and no mailbox line', async ($, on) => {
-  const w = world(on)
+test('without host commands: no tool, no bind, and no mailbox line', async ($, on) => {
+  const w = world(on, { knobs: ON, knobs: ON })
   await start($, w)
-  if (!isWs(w)) return
   expect(watchTool(w)).toBe(false)
   expect(w.spawns).toEqual([])
   expect(manualSection(await compose($, w))?.text).toBe(INJECTED('minted-1'))
 })
 
 for (const variant of ['subagent', 'errored'] as const) {
-  test(`ws: ${variant === 'subagent' ? 'a subagent' : 'an errored'} workflow_manual call adopts nothing`, LIVE_CHILD, async ($, on) => {
-    const w = world(on, { processOk: true })
+  test(`${variant === 'subagent' ? 'a subagent' : 'an errored'} workflow_manual call adopts nothing`, LIVE_CHILD, async ($, on) => {
+    const w = world(on, { knobs: ON, processOk: true })
     await start($, w)
-    if (!isWs(w)) return
     await compose($, w)
     w.known.add('revived')
     const calls = w.mcpCalls.length
@@ -469,10 +502,9 @@ for (const variant of ['subagent', 'errored'] as const) {
   })
 }
 
-test('ws adopts a main-thread revive: re-login, entry rewritten, notice verbatim, push re-bound, and the section follows at the next landing', LIVE_CHILD, async ($, on) => {
-  const w = world(on, { processOk: true })
+test('adopts a main-thread revive: re-login, entry rewritten, notice verbatim, push re-bound, and the section follows at the next landing', LIVE_CHILD, async ($, on) => {
+  const w = world(on, { knobs: ON, processOk: true })
   await start($, w)
-  if (!isWs(w)) return
   await compose($, w)
   w.known.add('revived')
   const calls = w.mcpCalls.length
@@ -480,7 +512,7 @@ test('ws adopts a main-thread revive: re-login, entry rewritten, notice verbatim
   expect(seen(res)).toBe(
     `${keyedResponse('revived', '(no todos)')}\n\n[ws] Lead session key changed: minted-1 -> revived. Keep passing revived as session_key; this conversation resumes with it, and the system prompt names it after the next /compact or compaction request. Mailbox push is bound to revived: arriving mail starts your next turn even when you are idle, so launch no mailbox wait.`,
   )
-  expect(w.mcpCalls[calls]).toEqual({ server: 'plugin:ws:ws', tool: 'ferrule', args: { root: '/repo/sub', format: 'json', relogin_session_key: 'revived' } })
+  expect(w.mcpCalls[calls]).toEqual({ server: `plugin:${w.plugin}:${w.plugin}`, tool: 'ferrule', args: { root: '/repo/sub', format: 'json', relogin_session_key: 'revived' } })
   expect(w.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'revived', at: 1_800_000_000_000 })
   expect(boundKeys(w)).toEqual(['minted-1', 'revived'])
   expect(w.killed).toEqual([0])
@@ -493,10 +525,9 @@ test('ws adopts a main-thread revive: re-login, entry rewritten, notice verbatim
   expect(boundKeys(w)).toEqual(['minted-1', 'revived'])
 })
 
-test('ws adopts the key a main-thread sentinel call minted: the lead reads the result whole, and the push re-binds to it', LIVE_CHILD, async ($, on) => {
-  const w = world(on, { processOk: true })
+test('adopts the key a main-thread sentinel call minted: the lead reads the result whole, and the push re-binds to it', LIVE_CHILD, async ($, on) => {
+  const w = world(on, { knobs: ON, processOk: true })
   await start($, w)
-  if (!isWs(w)) return
   await compose($, w)
   // ws-mcp's FRESH-with-root answer: the manual keyed to the key it minted.
   w.known.add('fresh-1')
@@ -504,17 +535,16 @@ test('ws adopts the key a main-thread sentinel call minted: the lead reads the r
   const calls = w.mcpCalls.length
   const res = await read($, w, 'workflow_manual', { session_key: 'obsidian-latch', root: '/repo/sub' })
   expect(seen(res)).toBe(`${keyedResponse('fresh-1', '(no todos)')}\n\n${adoptionNotice('minted-1', 'fresh-1', true)}`)
-  expect(w.mcpCalls[calls]).toEqual({ server: 'plugin:ws:ws', tool: 'ferrule', args: { root: '/repo/sub', format: 'json', relogin_session_key: 'fresh-1' } })
+  expect(w.mcpCalls[calls]).toEqual({ server: `plugin:${w.plugin}:${w.plugin}`, tool: 'ferrule', args: { root: '/repo/sub', format: 'json', relogin_session_key: 'fresh-1' } })
   expect(w.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'fresh-1', at: 1_800_000_000_000 })
   expect(boundKeys(w)).toEqual(['minted-1', 'fresh-1'])
   expect(w.killed).toEqual([0])
 })
 
 for (const variant of ['subagent sentinel', 'keyless sentinel', 'ferrule'] as const) {
-  test(`ws: a ${variant} call leaves the push where it is`, LIVE_CHILD, async ($, on) => {
-    const w = world(on, { processOk: true })
+  test(`a ${variant} call leaves the push where it is`, LIVE_CHILD, async ($, on) => {
+    const w = world(on, { knobs: ON, processOk: true })
     await start($, w)
-    if (!isWs(w)) return
     await compose($, w)
     w.known.add('fresh-1')
     const calls = w.mcpCalls.length
@@ -535,11 +565,10 @@ for (const variant of ['subagent sentinel', 'keyless sentinel', 'ferrule'] as co
   })
 }
 
-test('ws binds automatically at a re-login on resume or hot reload, and at the lazy mint after /clear', LIVE_CHILD, async ($, on) => {
-  const w = world(on, { processOk: true, store: { [`${KEY_STORE_PREFIX}sess-1`]: { sessionKey: 'kept-key', at: 1_800_000_000_000 } } })
+test('binds automatically at a re-login on resume or hot reload, and at the lazy mint after /clear', LIVE_CHILD, async ($, on) => {
+  const w = world(on, { knobs: ON, processOk: true, store: { [`${KEY_STORE_PREFIX}sess-1`]: { sessionKey: 'kept-key', at: 1_800_000_000_000 } } })
   w.known.add('kept-key')
   await start($, w)
-  if (!isWs(w)) return
   expect(boundKeys(w)).toEqual(['kept-key'])
   await compose($, w)
   await $.session.end({ reason: 'clear', sessionId: 'sess-1', resume: undefined as never })
@@ -554,8 +583,8 @@ test('ws binds automatically at a re-login on resume or hot reload, and at the l
   expect(boundKeys(w)).toEqual(['kept-key', 'minted-1', 'minted-1'])
 })
 
-test('ws: a key produced before the watcher exists is bound once it does', LIVE_CHILD, async ($, on) => {
-  const w = world(on, { processOk: true, probeDelayMs: 1_000 })
+test('a key produced before the watcher exists is bound once it does', LIVE_CHILD, async ($, on) => {
+  const w = world(on, { knobs: ON, processOk: true, probeDelayMs: 1_000 })
   const started = $.session.start({ cwd: '/repo/sub', surface: 'terminal', isInteractive: true })
   await w.clock.settle()
   const mintedEarly = w.mcpCalls.some((c) => c.tool === 'ferrule')
@@ -563,34 +592,32 @@ test('ws: a key produced before the watcher exists is bound once it does', LIVE_
   await w.clock.advance(1_000)
   await started
   await w.clock.settle()
-  if (!isWs(w)) return
   expect(mintedEarly).toBe(true)
   expect(spawnedEarly).toBe(0)
   expect(boundKeys(w)).toEqual(['minted-1'])
 })
 
-test('ws: a session end that lands while the mint runs binds nothing', async ($, on) => {
-  const w = world(on, { processOk: true, holdMintMs: 1_000 })
+test('a session end that lands while the mint runs binds nothing', async ($, on) => {
+  const w = world(on, { knobs: ON, processOk: true, holdMintMs: 1_000 })
   await start($, w)
-  if (!isWs(w)) return
   await $.session.end({ reason: 'clear', sessionId: 'sess-1', resume: undefined as never })
   await w.clock.advance(1_000)
   expect(w.spawns).toEqual([])
   expect(w.store.has(`${KEY_STORE_PREFIX}sess-1`)).toBe(false)
 })
 
-test('ws: a project check that cannot tell reads as closed for both features: the lever registers and nothing is minted', async ($, on) => {
-  const w = world(on, { processOk: true, repo: 'none', ancestorsThrow: true })
+test('a project check that cannot tell reads as closed for both features: the lever registers and nothing is minted', async ($, on) => {
+  const w = world(on, { knobs: ON, processOk: true, repo: 'none', ancestorsThrow: true })
   await start($, w)
-  if (!isWs(w)) return
   expect(watchTool(w)).toBe(true)
   expect(w.mcpCalls).toEqual([])
   expect(manualSection(await compose($, w))).toBeUndefined()
 })
 
-test('without ai-docs/WORKFLOW.md the lever registers and binds as before', LIVE_CHILD, async ($, on) => {
-  const w = world(on, { processOk: true, workflowFile: false })
+test('without ai-docs/WORKFLOW.md the lever registers and binds as before, the knob on and unread', LIVE_CHILD, async ($, on) => {
+  const w = world(on, { knobs: ON, processOk: true, workflowFile: false })
   await start($, w)
+  expect(manualReads(w)).toEqual([])
   expect(watchTool(w)).toBe(true)
   expect(w.spawns).toEqual([])
   const res = await $.tool.call({ tool: `mcp__${w.plugin}__mailbox_watch`, session_key: 'k1' } as never)
@@ -600,17 +627,8 @@ test('without ai-docs/WORKFLOW.md the lever registers and binds as before', LIVE
   expect(w.mcpCalls).toEqual([])
 })
 
-test('another package keeps the lever in a ws project and binds nothing itself', async ($, on) => {
-  const w = world(on, { processOk: true })
-  await start($, w)
-  if (isWs(w)) return
-  expect(watchTool(w)).toBe(true)
-  expect(w.spawns).toEqual([])
-  expect(w.existsChecks).toEqual([])
-})
-
-test('ws: a session end before the watcher exists drops the recorded key, so the new watcher binds nothing', LIVE_CHILD, async ($, on) => {
-  const w = world(on, { processOk: true, probeDelayMs: 1_000 })
+test('a session end before the watcher exists drops the recorded key, so the new watcher binds nothing', LIVE_CHILD, async ($, on) => {
+  const w = world(on, { knobs: ON, processOk: true, probeDelayMs: 1_000 })
   const started = $.session.start({ cwd: '/repo/sub', surface: 'terminal', isInteractive: true })
   await w.clock.settle()
   const minted = w.mcpCalls.some((c) => c.tool === 'ferrule')
@@ -618,15 +636,14 @@ test('ws: a session end before the watcher exists drops the recorded key, so the
   await w.clock.advance(1_000)
   await started
   await w.clock.settle()
-  if (!isWs(w)) return
   expect(minted).toBe(true)
   expect(w.spawns).toEqual([])
 })
 
-test('ws: a session end cancels an automatic bind whose slug lookup is still in flight', LIVE_CHILD, async ($, on) => {
-  const w = world(on, { processOk: true, lookupDelayMs: 1_000 })
+test('a session end cancels an automatic bind whose slug lookup is still in flight', LIVE_CHILD, async ($, on) => {
+  // The direct drain: only it resolves the key's slug through lookup_peers.
+  const w = world(on, { knobs: { ...ON, [KNOB.drain]: 'direct' }, processOk: true, lookupDelayMs: 1_000 })
   await start($, w)
-  if (!isWs(w)) return
   expect(w.spawns).toEqual([])
   await $.session.end({ reason: 'clear', sessionId: 'sess-1', resume: undefined as never })
   await w.clock.advance(1_000)

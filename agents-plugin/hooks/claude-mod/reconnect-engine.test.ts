@@ -13,6 +13,7 @@ import {
   TOOLS_POLL_MS,
   TOOLS_WAIT_MS,
 } from './reconnect'
+import { KNOB } from './register'
 
 type Engine = Parameters<TestBody>[0]
 type On = Parameters<TestBody>[1]
@@ -24,7 +25,7 @@ type On = Parameters<TestBody>[1]
 
 type CommandAnswer = { text?: string } | 'brings-back'
 
-function world(on: On, opts: { processOk?: boolean; refuseRegister?: string; connect?: boolean } = {}) {
+function world(on: On, opts: { processOk?: boolean; refuseRegister?: string; connect?: boolean; knobs?: Record<string, unknown> } = {}) {
   const clock = mock.clock(on)
   mock.env(on, {})
   const w = {
@@ -75,6 +76,12 @@ function world(on: On, opts: { processOk?: boolean; refuseRegister?: string; con
     return opts.connect === false || !w.serverUp
       ? { value: { isConnected: false, reason: 'failed', message: 'did not connect' } }
       : { value: { isConnected: true, server: `plugin:${e.server}:${e.server}` } }
+  })
+  // Knob reads: the values given, every other key unset.
+  on('mcp.call', ($, e) => {
+    const key = String(e.args.key)
+    const value = e.tool === 'config_get' && opts.knobs && key in opts.knobs ? opts.knobs[key] : null
+    return { value: { content: [{ type: 'text', text: JSON.stringify({ key, value, scope: value === null ? 'unset' : 'project' }) }], isError: false } }
   })
   on('tool.list', () => ({
     value: [
@@ -138,7 +145,6 @@ const reconnectArgs = (w: World) => ({ command: 'mcp', args: `reconnect plugin:$
 test('every package registers the reconnect tool with its pinned description and boolean flag', async ($, on) => {
   const w = world(on)
   await start($, w)
-  expect(['ws', 'wsflow']).toContain(w.plugin)
   const tool = w.registered.find((r) => r.name === 'request_mcp_reconnect')
   expect(tool).toEqual({
     name: 'request_mcp_reconnect',
@@ -151,17 +157,17 @@ test('every package registers the reconnect tool with its pinned description and
 })
 
 test('reconnect setup does not depend on the mailbox or compaction setups', async ($, on) => {
-  const w = world(on, { processOk: false, refuseRegister: 'request_compaction' })
+  const w = world(on, { processOk: false, refuseRegister: 'request_compaction', knobs: { [KNOB.compaction]: true } })
   await start($, w)
   expect(w.registered.map((r) => r.name)).toEqual(['request_mcp_reconnect'])
 })
 
 test('the mailbox and compaction setups do not depend on the reconnect setup', async ($, on) => {
-  const w = world(on, { refuseRegister: 'request_mcp_reconnect' })
+  const w = world(on, { refuseRegister: 'request_mcp_reconnect', knobs: { [KNOB.compaction]: true } })
   await start($, w)
   const names = w.registered.map((r) => r.name)
   expect(names).toContain('mailbox_watch')
-  if (w.plugin === 'ws') expect(names).toContain('request_compaction')
+  expect(names).toContain('request_compaction')
   expect(names).not.toContain('request_mcp_reconnect')
 })
 

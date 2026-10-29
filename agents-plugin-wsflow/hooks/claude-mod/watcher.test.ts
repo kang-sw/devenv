@@ -5,7 +5,7 @@ import {
   checkWatchCall,
   classifyRecv,
   consumeWait,
-  drainModeFor,
+  drainModeOf,
   isModelRecvCompletion,
   launcherPath,
   mcpToolName,
@@ -797,10 +797,13 @@ describe('lifecycle', () => {
 })
 
 describe('pure helpers', () => {
-  test('drain mode follows the package name', () => {
-    expect(drainModeFor('ws')).toBe('direct')
-    expect(drainModeFor('wsflow')).toBe('notice')
-    expect(drainModeFor('anything-else')).toBe('notice')
+  test('drain mode follows the knob value; anything but direct, a failed read among them, is notice', () => {
+    expect(drainModeOf('direct')).toBe('direct')
+    expect(drainModeOf('notice')).toBe('notice')
+    expect(drainModeOf(undefined)).toBe('notice')
+    expect(drainModeOf(null)).toBe('notice')
+    expect(drainModeOf('DIRECT')).toBe('notice')
+    expect(drainModeOf(true)).toBe('notice')
   })
 
   test('names and paths', () => {
