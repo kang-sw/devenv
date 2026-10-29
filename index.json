@@ -590,7 +590,14 @@
       "registered_at": "2026-10-29T00:09:05Z"
     },
     "261029-feat-claude-mod-package-parity-knob-defaults": {
-      "registered_at": "2026-10-29T00:09:02Z"
+      "registered_at": "2026-10-29T00:09:02Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-10-29T01:32:37Z"
+      }
     }
   }
 }
