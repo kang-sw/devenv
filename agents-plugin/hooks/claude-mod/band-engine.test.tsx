@@ -78,6 +78,8 @@ function world(on: On, opts: { config?: Record<string, unknown>; wsProject?: boo
     agenda: {} as Record<string, string>,
     /** The key's own named-inbox address per session key; absent owns none. */
     addresses: {} as Record<string, string>,
+    /** The key's reply id per session key; absent answers none. */
+    replyIds: {} as Record<string, string>,
     known: new Set<string>(),
     minted: 0,
     /** Every config_get's arguments, in order. */
@@ -133,7 +135,8 @@ function world(on: On, opts: { config?: Record<string, unknown>; wsProject?: boo
         w.wsCalls.push({ tool: e.tool, args: { ...e.args } })
         if (w.failLookup) return error('lookup failed')
         const address = w.addresses[key]
-        return text(JSON.stringify({ self: address ? { address } : {}, peers: [] }))
+        const replyId = w.replyIds[key]
+        return text(JSON.stringify({ self: address ? { address } : replyId ? { reply_id: replyId } : {}, peers: [] }))
       }
       default:
         return error(`no ${e.tool} here`)
@@ -390,7 +393,7 @@ test('with no todos and no agenda the band is the two status rows', async ($, on
   expect(d.rows[2]?.props?.key).toBe('rest')
 })
 
-test('the mailbox capsule shows the key\'s own address, and is absent with none or a failed lookup', async ($, on) => {
+test('the mailbox capsule shows the key\'s own address, else its reply id dimmed, and is absent with neither or a failed lookup', async ($, on) => {
   const w = world(on, { wsProject: true, manual: true })
   await start($, w)
   const lookups = wsReads(w, 'mailbox_lookup_peers')
@@ -398,14 +401,26 @@ test('the mailbox capsule shows the key\'s own address, and is absent with none 
   expect(lookups[0]!.args).toEqual({ session_key: 'minted-1', scope: 'worktree', format: 'json' })
   expect((await draw($, w, 80)).text).not.toContain('✉')
 
-  w.addresses['minted-1'] = 'quiet-otter'
+  // With no named inbox the capsule falls back to the reply id, drawn dim.
+  w.replyIds['minted-1'] = 'id:gnarly-otter'
   await modelCall($, w, 'mailbox_send', { session_key: 'minted-1' })
   let d = await draw($, w, 80)
-  expect(hasText(d.rows[0], /^ ✉ quiet-otter $/)).toBe(true)
+  // The capsule's own Text, inside the pill's background Text.
+  const capsuleOf = (n: unknown, pattern: RegExp) => elements(n).find((e) => e.type === 'Text' && e.props?.color !== undefined && pattern.test(shown(e)))
+  let capsule = capsuleOf(d.rows[0], /^ ✉ id:gnarly-otter $/)
+  expect(capsule?.props?.color).toBe(C.dim)
+
+  // A named inbox wins over the reply id and keeps its own color.
+  w.addresses['minted-1'] = 'quiet-otter'
+  await modelCall($, w, 'mailbox_send', { session_key: 'minted-1' })
+  d = await draw($, w, 80)
+  capsule = capsuleOf(d.rows[0], /^ ✉ quiet-otter $/)
+  expect(capsule?.props?.color).toBe(C.blue)
+  expect(d.text).not.toContain('gnarly')
 
   w.failLookup = true
   await modelCall($, w, 'mailbox_recv', { session_key: 'minted-1' })
-  expect(wsReads(w, 'mailbox_lookup_peers').length).toBe(3)
+  expect(wsReads(w, 'mailbox_lookup_peers').length).toBe(4)
   d = await draw($, w, 80)
   expectFrame(d, 80, 2)
   expect(d.text).not.toContain('✉')
