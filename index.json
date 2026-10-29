@@ -586,21 +586,11 @@
     "261029-bug-sage-stamp-restamp-repeats-fix-instruction": {
       "registered_at": "2026-10-29T01:19:07Z"
     },
+    "261029-bug-ws-mcp-git-lookup-per-spawn-slow-path-head": {
+      "registered_at": "2026-10-29T08:57:09Z"
+    },
     "261029-chore-wsflow-no-agent-env-rename-and-setup-tool-removal": {
       "registered_at": "2026-10-29T00:09:05Z"
-    },
-    "261029-feat-claude-mod-package-parity-knob-defaults": {
-      "registered_at": "2026-10-29T00:09:02Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-29T01:33:41Z",
-        "impl": {
-          "branch": "impl/develop/baggy-wrath-chant"
-        }
-      }
     }
   }
 }
