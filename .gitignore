@@ -26,11 +26,6 @@ agents-plugin-pi/node_modules/
 /node_modules/
 /package-lock.json
 agents-plugin-tool/dist/
-ai-docs/presentation/node_modules/
-ai-docs/presentation/package.json
-ai-docs/presentation/package-lock.json
-ai-docs/presentation/*.pptx
-ai-docs/presentation/*.pdf
-ai-docs/presentation/slides/
+ai-docs/presentation/
 agents-plugin/.claude-plugin/types/
 agents-plugin-wsflow/.claude-plugin/types/
