@@ -583,6 +583,9 @@
     "261028-research-claude-mod-statusline-band": {
       "registered_at": "2026-10-28T06:25:12Z"
     },
+    "261029-bug-sage-stamp-restamp-repeats-fix-instruction": {
+      "registered_at": "2026-10-29T01:19:07Z"
+    },
     "261029-chore-wsflow-no-agent-env-rename-and-setup-tool-removal": {
       "registered_at": "2026-10-29T00:09:05Z"
     },
