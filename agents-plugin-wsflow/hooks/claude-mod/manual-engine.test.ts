@@ -99,6 +99,10 @@ function world(
     failKnobs: new Set<string>(opts.failKnobs ?? []),
     /** The `/mcp reconnect` commands the mod ran. */
     reconnects: 0,
+    /** The next connect finds the server down, as at a start (a hot reload) before it is up. */
+    downAtNextConnect: () => {
+      serverDown = true
+    },
   }
   let serverDown = opts.serverDown === true
   on('store.get', ($, e) => ({ value: w.store.get(e.key) }))
@@ -520,6 +524,28 @@ test('a late open keeps the key the model bound through mailbox_watch: re-login 
   await w.clock.settle()
   expect(String(rebound.result)).toContain('rebound')
   expect(boundKeys(w)).toEqual(['k1', 'k2'])
+})
+
+test('a late open after a hot reload whose restore found the server down keeps the key the model bound: its reload entry, no mint', LIVE_CHILD, async ($, on) => {
+  const w = world(on, { knobs: ON, failKnobs: [KNOB.manual], processOk: true })
+  await start($, w)
+  w.known.add('k1')
+  await $.tool.call({ tool: `mcp__${w.plugin}__mailbox_watch`, session_key: 'k1' } as never)
+  await w.clock.settle()
+  expect(boundKeys(w)).toEqual(['k1'])
+  // A hot reload while the server is down: the old watcher stops, and the
+  // restore of k1 gives up on the unresolved server, so no watcher holds it.
+  w.downAtNextConnect()
+  await start($, w)
+  expect(w.killed).toEqual([0])
+  expect(boundKeys(w)).toEqual(['k1'])
+  w.failKnobs.delete(KNOB.manual)
+  await reconnect($, w)
+  expect(w.minted).toBe(0)
+  expect(w.mcpCalls.filter((c) => c.tool === 'ferrule').map((c) => c.args)).toEqual([{ root: '/repo/sub', format: 'json', relogin_session_key: 'k1' }])
+  expect(w.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'k1', at: 1_800_000_000_000 })
+  expect(boundKeys(w)).toEqual(['k1', 'k1'])
+  expect(bandKeys(w)).toEqual(['k1'])
 })
 
 test('a late open with no key bound mints one and binds the push to it', LIVE_CHILD, async ($, on) => {

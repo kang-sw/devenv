@@ -174,7 +174,12 @@ class ClaudeHooksManifestTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             plain = Path(tmp) / "plain"
             plain.mkdir()
-            self.assertEqual(self._run_nudge({"source": "compact", "cwd": str(plain)}, tmp).stdout, "")
+            # Outside a repository the script walks every ancestor, so a temp
+            # directory inside a tree that holds the marker would print; the
+            # plain case is checked only when no ancestor holds one.
+            enclosed = any((p / "ai-docs" / "WORKFLOW.md").is_file() for p in Path(os.path.realpath(tmp)).parents)
+            if not enclosed:
+                self.assertEqual(self._run_nudge({"source": "compact", "cwd": str(plain)}, tmp).stdout, "")
             # A repository whose root lacks it stays silent, even under an
             # ancestor that holds one: the repository root decides.
             (Path(tmp) / "ai-docs").mkdir()

@@ -329,7 +329,9 @@ export const register: Register = (on) => {
    * stays. A key the model already bound through it is handed to the manual
    * feature, which re-logs in with that key instead of minting, so the late
    * open never moves the push off a key the model holds; both binds then go
-   * through arm, the latest key winning.
+   * through arm, the latest key winning. With the watcher unbound (a hot
+   * reload whose restore found the server down), that key is the bind's
+   * reload entry.
    */
   let wsGate: Promise<boolean> | undefined
   /**
@@ -428,14 +430,19 @@ export const register: Register = (on) => {
     const retryManual = () => {
       if (!manualRetry) return
       manualRetry = false
-      readSetting(KNOB.manual).then(
-        (value) => {
+      readSetting(KNOB.manual)
+        .then(async (value) => {
           if (value !== true) return
+          // The key the model bound: the watcher's, else the bind's reload
+          // entry, which a reload restore that found the server down never
+          // re-bound. Read before the gate opens, so a failed read leaves
+          // it closed rather than minting over that key.
+          const reloaded = storedKey(await $.store.get(STORE_PREFIX + (await $.session.id())))
+          const held = watcher?.current() ?? reloaded
           wsGate = Promise.resolve(true)
-          manual.opened(watcher?.current())
-        },
-        (err) => $.ui.log(`${$.plugin.name} mod: ${KNOB.manual} not read again (${String(err)}); its feature stays off`, { to: 'debug' }),
-      )
+          manual.opened(held)
+        })
+        .catch((err) => $.ui.log(`${$.plugin.name} mod: ${KNOB.manual} not read again (${String(err)}); its feature stays off`, { to: 'debug' }))
     }
     const resolveServer = async () => {
       const conn = await $.mcp.connect($.plugin.name)

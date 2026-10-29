@@ -1067,6 +1067,28 @@ describe('late open', () => {
     expect(m.key()).toBe('held-1')
   })
 
+  test('a session end drops the held key: the next conversation mints its own', async () => {
+    const { h, m, edges } = harness({ wsProject: false })
+    h.known.add('held-1')
+    m.start(edges)
+    await tick()
+    m.opened('held-1')
+    await tick()
+    expect(m.key()).toBe('held-1')
+    m.end('clear')
+    h.sessionId = 'sess-2'
+    const composed = m.compose([])
+    await tick()
+    await composed
+    expect(h.minted).toBe(1)
+    expect(m.key()).toBe('minted-1')
+    expect(h.store.get(`${KEY_STORE_PREFIX}sess-2`)).toEqual({ sessionKey: 'minted-1', at: NOW })
+    expect(h.keys).toEqual([
+      ['held-1', undefined],
+      ['minted-1', undefined],
+    ])
+  })
+
   test('a late open whose held key is refused mints nothing, and neither does a later compose', async () => {
     const { h, m, edges } = harness({ wsProject: false })
     m.start(edges)

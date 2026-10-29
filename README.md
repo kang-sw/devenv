@@ -63,7 +63,8 @@ claude plugin install ws@kang-sw-devenv
 ```
 
 The conservative-default `wsflow` package lives in `agents-plugin-wsflow/`
-for separate marketplace installation. `install.sh` does not install `wsflow` into Claude.
+for separate marketplace installation. `install.sh` does not install `wsflow`
+into Claude.
 
 ## Pi Adapter
 
