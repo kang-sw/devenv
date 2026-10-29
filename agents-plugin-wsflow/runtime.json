@@ -80,6 +80,7 @@
     "runtime.capabilities": ">=0.48.5-dev <0.49.0",
     "smoke": ">=0.48.5-dev <0.49.0",
     "config.list": ">=0.48.5-dev <0.49.0",
+    "config.tune": ">=0.48.5-dev <0.49.0",
     "path.generate": ">=0.48.5-dev <0.49.0",
     "git.status": ">=0.48.5-dev <0.49.0",
     "git.diff": ">=0.48.5-dev <0.49.0",

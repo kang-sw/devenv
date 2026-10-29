@@ -25,10 +25,6 @@ HIDDEN_TOOLS = {
     "exec.raw.grep",
 }
 
-HIDDEN_COMMANDS = {
-    "config.tune",
-}
-
 
 class WsflowRuntimeContractTest(unittest.TestCase):
     def load_mcp_env(self):
@@ -90,7 +86,7 @@ class WsflowRuntimeContractTest(unittest.TestCase):
         self.assertEqual(set(contract["tools"]), set(payload["tools"]))
         self.assertEqual(set(contract["commands"]), set(payload["commands"]))
         self.assertFalse(HIDDEN_TOOLS & set(contract["tools"]))
-        self.assertFalse(HIDDEN_COMMANDS & set(contract["commands"]))
+        self.assertIn("config.tune", contract["commands"])
         self.assertIn("api.list", contract["tools"])
         self.assertIn("config.list", contract["tools"])
         self.assertIn("config.tune", contract["tools"])

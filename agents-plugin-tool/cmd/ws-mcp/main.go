@@ -217,29 +217,8 @@ func runtimeCapabilityCommandNames() []string {
 		"tickets.status",
 		"tickets.verify",
 	}
-	if mcp.NoAgentMode() {
-		commands = filterNoAgentCommands(commands)
-	}
 	sort.Strings(commands)
 	return commands
-}
-
-func filterNoAgentCommands(commands []string) []string {
-	out := make([]string, 0, len(commands))
-	for _, command := range commands {
-		if command == "config.tune" {
-			continue
-		}
-		out = append(out, command)
-	}
-	return out
-}
-
-func fatalIfNoAgentCommand(command string) {
-	if !mcp.NoAgentMode() {
-		return
-	}
-	fatal(command, fmt.Errorf("%s agentless mode disables agent-backed command: %s", mcp.RuntimeNamespace(), command))
 }
 
 func configCommand(args []string) {
@@ -251,7 +230,6 @@ func configCommand(args []string) {
 	case "list":
 		configList(args[1:])
 	case "tune":
-		fatalIfNoAgentCommand("config tune")
 		configTune(args[1:])
 	default:
 		configUsage()
