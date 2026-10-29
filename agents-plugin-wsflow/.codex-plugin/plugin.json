@@ -1,7 +1,7 @@
 {
   "name": "wsflow",
   "version": "0.48.5",
-  "description": "Agentless workflow plugin for project context, tickets, specs, docs, and Git tools.",
+  "description": "Workflow plugin for project context, tickets, docs, and Git tools, shipped with conservative defaults: its optional Claude Code features stay off until a config tune turns them on.",
   "author": {
     "name": "kang-sw"
   },
@@ -16,8 +16,8 @@
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "wsflow",
-    "shortDescription": "Agentless workflow skills",
-    "longDescription": "A workflow plugin for project context, tickets, specs, docs, and Git tools without managed named-agent orchestration.",
+    "shortDescription": "Workflow skills with conservative defaults",
+    "longDescription": "A workflow plugin for project context, tickets, docs, and Git tools, shipped with conservative defaults that a config tune can change.",
     "developerName": "kang-sw",
     "category": "Productivity",
     "capabilities": [

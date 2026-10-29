@@ -41,7 +41,7 @@
       "key": "claude.status_band_enabled",
       "type": "boolean",
       "default": false,
-      "description": "Claude Code only (unused on other hosts): when true, the lead's terminal view draws a framed status band above the prompt: the model and effort, the folder, the git branch and changes, a context usage bar, the 5-hour and 7-day rate-limit usage, the session cost, and the lead session's mailbox address, todos and agenda keys. Read at session start, when the lead session key changes, and after each config tune call, so a change shows in the running session. Session-scope tunes apply, along with the repo, project, global, and built-in values."
+      "description": "Claude Code only (unused on other hosts): when true, the lead's terminal view draws a framed status band above the prompt: the model and effort, the folder, the git branch and changes, a context usage bar, the 5-hour and 7-day rate-limit usage, the session cost, and, while workflow manual injection holds a lead session key (claude.manual_injection_enabled), the lead session's mailbox address, todos and agenda keys. Read at session start, when the lead session key changes, and after each config tune call, so a change shows in the running session. Session-scope tunes apply, along with the repo, project, global, and built-in values."
     },
     {
       "key": "claude.display_summary_model",
