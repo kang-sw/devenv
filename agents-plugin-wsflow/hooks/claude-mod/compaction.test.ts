@@ -12,11 +12,15 @@ import {
   observe,
   parseAdvisory,
   resolveAdvisory,
-  RESUME_TEXT,
+  resumeText,
   thresholdsFor,
   vetoedResumeText,
   type CompactionWindow,
 } from './timing'
+
+// The harness runs as the plugin `ws` unless a test names another, so the
+// texts pinned below are the ws rendering.
+const RESUME_TEXT = resumeText('ws')
 
 // A 200k compaction window compacting automatically at 170k (85%): advisory
 // 100k (50%), milestones about 123.3k (62%) and 146.7k (73%).
@@ -32,7 +36,7 @@ const tick = async (n = 30) => {
 type CompactAnswer = { skip?: string } | Error
 
 /** Fake edges: submits and compactions are recorded; scheduled steps run when the test says. */
-function harness(opts: { window?: Partial<CompactionWindow> | null; readAdvisory?: () => Promise<unknown> } = {}) {
+function harness(opts: { window?: Partial<CompactionWindow> | null; readAdvisory?: () => Promise<unknown>; plugin?: string } = {}) {
   const h = {
     submits: [] as string[],
     /** Answers for the next compact() calls in order; an Error rejects. Absent: the compaction lands. */
@@ -105,6 +109,7 @@ function harness(opts: { window?: Partial<CompactionWindow> | null; readAdvisory
       h.delayed.push({ ms, fn })
     },
     log: (text, to) => void h.logs.push({ text, to }),
+    plugin: opts.plugin ?? 'ws',
     turnRunning: () => h.turnRunning,
     readUsage: async () => {
       h.usageReads += 1
@@ -214,7 +219,7 @@ describe('pure core', () => {
 
 describe('pinned prose', () => {
   test('advisory', () => {
-    expect(advisoryText(T, 104_000)).toBe(
+    expect(advisoryText('ws', T, 104_000)).toBe(
       `[ws compaction] Context window at the end of the last turn: 52% (104k / 200k tokens) / 85% (automatic compaction point). This is past the advisory point (50%).
 
 This is not an instruction to compact right now. If you are in active discussion with the human, awaiting their answer or clarification, or holding working context that would be costly to rebuild (a half-applied change or a diagnosis in progress), carry on for now. A pause after asking the human a question is not a boundary.
@@ -226,10 +231,10 @@ If now is not such a moment, end this turn without replying and keep looking for
   })
 
   test('milestones', () => {
-    expect(milestoneText(1, T, 125_000)).toBe(
+    expect(milestoneText('ws', 1, T, 125_000)).toBe(
       '[ws compaction] Context window at the end of the last turn: 63% (125k / 200k tokens) / 85% (automatic compaction point). Past 85%, Claude Code compacts automatically, mid-work if need be. From here on, a good boundary is worth taking; if this is one, update durable records and call the compaction request tool, as the advisory describes (the `continue` flag only when work must resume by itself). Otherwise end this turn without replying.',
     )
-    expect(milestoneText(2, T, 150_000)).toBe(
+    expect(milestoneText('ws', 2, T, 150_000)).toBe(
       '[ws compaction] Context window at the end of the last turn: 75% (150k / 200k tokens) / 85% (automatic compaction point). This is the last reading before automatic compaction. Compacting at a boundary you choose keeps the work coherent; take this one if it fits, update durable records and call the compaction request tool, as the advisory describes (the `continue` flag only when work must resume by itself). Otherwise end this turn without replying, and take the next good boundary.',
     )
   })
@@ -248,9 +253,35 @@ If now is not such a moment, end this turn without replying and keep looking for
 
   test('resume prompts', () => {
     expect(RESUME_TEXT).toBe('[ws compaction] Compaction landed; resume the work in progress from the summary and your durable records.')
-    expect(vetoedResumeText('a hook said no')).toBe(
+    expect(vetoedResumeText('ws', 'a hook said no')).toBe(
       '[ws compaction] Compaction did not run (a hook said no); your context is unchanged. Resume the work in progress.',
     )
+  })
+
+  test('a plugin not named ws spells its own name in every prompt, notice and log line, and ws nowhere', async () => {
+    const { h, c, measure, turnEnd, closeWindow, transcript, debugLog } = harness({ plugin: 'pkgx' })
+    await measure(50_000)
+    await measure(104_000)
+    await measure(125_000)
+    // A lever whose compaction lands, then one a hook vetoes, each with a resume prompt.
+    c.lever(undefined, true)
+    await turnEnd()
+    await closeWindow()
+    c.lever(undefined, true)
+    h.compactAnswers.push({ skip: 'blocked by policy' })
+    await turnEnd()
+    await closeWindow()
+    expect(h.submits).toEqual([
+      advisoryText('pkgx', T, 104_000),
+      milestoneText('pkgx', 1, T, 125_000),
+      resumeText('pkgx'),
+      vetoedResumeText('pkgx', 'blocked by policy'),
+    ])
+    for (const text of h.submits) expect(text.startsWith('[pkgx compaction] '), text).toBe(true)
+    expect(transcript().length).toBeGreaterThan(0)
+    expect(debugLog().length).toBeGreaterThan(0)
+    for (const text of [...transcript(), ...debugLog()]) expect(text.startsWith('pkgx compaction: '), text).toBe(true)
+    for (const text of [...h.submits, ...h.logs.map((l) => l.text)]) expect(text).not.toMatch(/(?<![A-Za-z])ws(?![A-Za-z])/)
   })
 })
 
@@ -295,10 +326,10 @@ describe('configured advisory point', () => {
 
   test('the advisory text names the configured point as its percent of the window', () => {
     const t = thresholdsFor(WINDOW, { tokens: 110_000 })!
-    expect(advisoryText(t, 112_000)).toContain(
+    expect(advisoryText('ws', t, 112_000)).toContain(
       '[ws compaction] Context window at the end of the last turn: 56% (112k / 200k tokens) / 85% (automatic compaction point). This is past the advisory point (55%).',
     )
-    expect(advisoryText(t, 112_000)).toContain('Reminders follow at 65% and 75%.')
+    expect(advisoryText('ws', t, 112_000)).toContain('Reminders follow at 65% and 75%.')
   })
 
   test('with no key set the advisory stays at 50%', async () => {
@@ -307,7 +338,7 @@ describe('configured advisory point', () => {
     await measure(99_000)
     expect(h.submits).toEqual([])
     await measure(101_000)
-    expect(h.submits).toEqual([advisoryText(T, 101_000)])
+    expect(h.submits).toEqual([advisoryText('ws', T, 101_000)])
   })
 
   test('a configured point read at start moves the advisory and the milestones', async () => {
@@ -315,7 +346,7 @@ describe('configured advisory point', () => {
     await measure(10_000)
     await measure(81_000)
     const t = thresholdsFor(WINDOW, { percent: 40 })!
-    expect(h.submits).toEqual([advisoryText(t, 81_000)])
+    expect(h.submits).toEqual([advisoryText('ws', t, 81_000)])
     expect(h.submits[0]).toContain('This is past the advisory point (40%).')
     await measure(111_000)
     expect(h.submits.length).toBe(2)
@@ -338,7 +369,7 @@ describe('configured advisory point', () => {
       await measure(81_000)
       expect(h.submits).toEqual([])
       await measure(101_000)
-      expect(h.submits).toEqual([advisoryText(T, 101_000)])
+      expect(h.submits).toEqual([advisoryText('ws', T, 101_000)])
       expect(debugLog().some((l) => l.includes('advisory point'))).toBe(true)
     }
   })
@@ -352,7 +383,7 @@ describe('configured advisory point', () => {
     await tick()
     await measure(81_000)
     expect(h.breakdownReads).toBe(2)
-    expect(h.submits).toEqual([advisoryText(thresholdsFor(WINDOW, { percent: 40 })!, 81_000)])
+    expect(h.submits).toEqual([advisoryText('ws', thresholdsFor(WINDOW, { percent: 40 })!, 81_000)])
   })
 
   test('a read that settles while an observation awaits the breakdown applies to it', async () => {
@@ -367,7 +398,7 @@ describe('configured advisory point', () => {
       throw new Error('not read again')
     })
     await tick()
-    expect(h.submits).toEqual([advisoryText(thresholdsFor(WINDOW, { percent: 40 })!, 81_000)])
+    expect(h.submits).toEqual([advisoryText('ws', thresholdsFor(WINDOW, { percent: 40 })!, 81_000)])
   })
 
   test('each session start reads again, and a read from an earlier start is dropped', async () => {
@@ -383,7 +414,7 @@ describe('configured advisory point', () => {
     await measure(81_000)
     expect(h.submits).toEqual([])
     await measure(101_000)
-    expect(h.submits).toEqual([advisoryText(T, 101_000)])
+    expect(h.submits).toEqual([advisoryText('ws', T, 101_000)])
   })
 })
 
@@ -402,13 +433,13 @@ describe('thresholds', () => {
     const { h, measure } = harness()
     await measure(50_000)
     await measure(104_000)
-    expect(h.submits).toEqual([advisoryText(T, 104_000)])
+    expect(h.submits).toEqual([advisoryText('ws', T, 104_000)])
     await measure(110_000)
     await measure(125_000)
     await measure(130_000)
     await measure(150_000)
     await measure(160_000)
-    expect(h.submits).toEqual([advisoryText(T, 104_000), milestoneText(1, T, 125_000), milestoneText(2, T, 150_000)])
+    expect(h.submits).toEqual([advisoryText('ws', T, 104_000), milestoneText('ws', 1, T, 125_000), milestoneText('ws', 2, T, 150_000)])
     expect(h.breakdownReads).toBe(1)
   })
 
@@ -417,9 +448,9 @@ describe('thresholds', () => {
     await measure(50_000)
     await measure(130_000)
     await measure(140_000)
-    expect(h.submits).toEqual([advisoryText(T, 130_000)])
+    expect(h.submits).toEqual([advisoryText('ws', T, 130_000)])
     await measure(150_000)
-    expect(h.submits).toEqual([advisoryText(T, 130_000), milestoneText(2, T, 150_000)])
+    expect(h.submits).toEqual([advisoryText('ws', T, 130_000), milestoneText('ws', 2, T, 150_000)])
   })
 
   test('usage below the latch re-arms it', async () => {
@@ -428,7 +459,7 @@ describe('thresholds', () => {
     await measure(104_000)
     await measure(60_000)
     await measure(102_000)
-    expect(h.submits).toEqual([advisoryText(T, 104_000), advisoryText(T, 102_000)])
+    expect(h.submits).toEqual([advisoryText('ws', T, 104_000), advisoryText('ws', T, 102_000)])
   })
 
   test('a crossing measured while a main-thread turn runs delivers nothing until the turn ends, then once with the fresh read', async () => {
@@ -442,7 +473,7 @@ describe('thresholds', () => {
     h.turnRunning = false
     h.live = { tokens: 118_000, window: 1_000_000 }
     await turnEnd()
-    expect(h.submits).toEqual([advisoryText(T, 118_000)])
+    expect(h.submits).toEqual([advisoryText('ws', T, 118_000)])
     expect(h.submits[0]).toContain('59% (118k / 200k tokens)')
     expect(debugLog().filter((l) => l.includes('delivered'))).toEqual([
       'ws compaction: advisory delivered: crossing measured at 104000 tokens (52%), fresh read 118000 tokens (59%), compaction window 200000 tokens, model window 1000000 tokens',
@@ -450,7 +481,7 @@ describe('thresholds', () => {
     // The end-of-turn measure after the turn end, and a later turn end, deliver nothing again.
     await measure(118_000)
     await turnEnd()
-    expect(h.submits).toEqual([advisoryText(T, 118_000)])
+    expect(h.submits).toEqual([advisoryText('ws', T, 118_000)])
     expect(h.usageReads).toBe(1)
   })
 
@@ -459,7 +490,7 @@ describe('thresholds', () => {
     await measure(50_000)
     h.live = { tokens: 106_000, window: 1_000_000 }
     await measure(104_000)
-    expect(h.submits).toEqual([advisoryText(T, 106_000)])
+    expect(h.submits).toEqual([advisoryText('ws', T, 106_000)])
     expect(debugLog()).toContain(
       'ws compaction: advisory delivered: crossing measured at 104000 tokens (52%), fresh read 106000 tokens (53%), compaction window 200000 tokens, model window 1000000 tokens',
     )
@@ -474,7 +505,7 @@ describe('thresholds', () => {
     h.turnRunning = false
     h.live = { tokens: 150_000, window: 1_000_000 }
     await turnEnd()
-    expect(h.submits).toEqual([advisoryText(T, 104_000), milestoneText(2, T, 150_000)])
+    expect(h.submits).toEqual([advisoryText('ws', T, 104_000), milestoneText('ws', 2, T, 150_000)])
     await measure(155_000)
     expect(h.submits.length).toBe(2)
   })
@@ -489,7 +520,7 @@ describe('thresholds', () => {
     await turnEnd('answer', 'sub-1')
     expect(h.submits).toEqual([])
     await measure(105_000)
-    expect(h.submits).toEqual([advisoryText(T, 105_000)])
+    expect(h.submits).toEqual([advisoryText('ws', T, 105_000)])
   })
 
   test('a fresh read that fails, or a main-thread turn starting during it, keeps the crossing for the next delivery point', async () => {
@@ -512,7 +543,7 @@ describe('thresholds', () => {
     h.usageGate = undefined
     h.turnRunning = false
     await turnEnd()
-    expect(h.submits).toEqual([advisoryText(T, 104_000)])
+    expect(h.submits).toEqual([advisoryText('ws', T, 104_000)])
   })
 
   test('a fresh read without tokens shows the crossing figure; one under another model window delivers nothing yet', async () => {
@@ -523,7 +554,7 @@ describe('thresholds', () => {
     expect(h.submits).toEqual([])
     h.live = { tokens: undefined, window: 1_000_000 }
     await turnEnd()
-    expect(h.submits).toEqual([advisoryText(T, 104_000)])
+    expect(h.submits).toEqual([advisoryText('ws', T, 104_000)])
   })
 
   test('a crossing withheld at the turn end by a pending request stays latched for a later measure', async () => {
@@ -539,7 +570,7 @@ describe('thresholds', () => {
     expect(h.submits).toEqual([])
     expect(h.usageReads).toBe(0)
     await measure(106_000)
-    expect(h.submits).toEqual([advisoryText(T, 106_000)])
+    expect(h.submits).toEqual([advisoryText('ws', T, 106_000)])
   })
 
   test('the breakdown is re-read when the model window changes, and not cached while absent', async () => {
@@ -579,9 +610,9 @@ describe('thresholds', () => {
     await measure(104_500)
     expect(h.submits).toEqual([])
     await closeWindow()
-    expect(h.submits).toEqual([vetoedResumeText('not now')])
+    expect(h.submits).toEqual([vetoedResumeText('ws', 'not now')])
     await measure(105_000)
-    expect(h.submits).toEqual([vetoedResumeText('not now'), advisoryText(T, 105_000)])
+    expect(h.submits).toEqual([vetoedResumeText('ws', 'not now'), advisoryText('ws', T, 105_000)])
   })
 
   test('a landed compaction resets the latch: usage still past the advisory after it gets the advisory again', async () => {
@@ -590,7 +621,7 @@ describe('thresholds', () => {
     await measure(104_000)
     c.compacted('manual', undefined, { messages: [] })
     await measure(101_000)
-    expect(h.submits).toEqual([advisoryText(T, 104_000), advisoryText(T, 101_000)])
+    expect(h.submits).toEqual([advisoryText('ws', T, 104_000), advisoryText('ws', T, 101_000)])
     expect(h.breakdownReads).toBe(2)
   })
 
@@ -770,7 +801,7 @@ describe('lever', () => {
     await turnEnd()
     expect(h.submits).toEqual([])
     await closeWindow()
-    expect(h.submits).toEqual([vetoedResumeText('blocked by policy')])
+    expect(h.submits).toEqual([vetoedResumeText('ws', 'blocked by policy')])
     expect(transcript()).toEqual(['ws compaction: the requested compaction did not run (blocked by policy); a resume prompt follows with a note'])
   })
 
@@ -824,7 +855,7 @@ describe('lever', () => {
     expect(transcript()).toEqual([])
     await closeWindow()
     await measure(101_000)
-    expect(h.submits).toEqual([advisoryText(T, 104_000), RESUME_TEXT, advisoryText(T, 101_000)])
+    expect(h.submits).toEqual([advisoryText('ws', T, 104_000), RESUME_TEXT, advisoryText('ws', T, 101_000)])
     expect(h.breakdownReads).toBe(2)
     expect(h.leverLandings).toBe(1)
   })
@@ -840,7 +871,7 @@ describe('lever', () => {
     expect(transcript()).toEqual([])
     await closeWindow()
     await measure(101_000)
-    expect(h.submits).toEqual([advisoryText(T, 104_000), RESUME_TEXT, advisoryText(T, 101_000)])
+    expect(h.submits).toEqual([advisoryText('ws', T, 104_000), RESUME_TEXT, advisoryText('ws', T, 101_000)])
     expect(h.breakdownReads).toBe(2)
   })
 
@@ -853,7 +884,7 @@ describe('lever', () => {
     await turnEnd()
     await closeWindow()
     await measure(105_000)
-    expect(h.submits).toEqual([advisoryText(T, 104_000), vetoedResumeText('no')])
+    expect(h.submits).toEqual([advisoryText('ws', T, 104_000), vetoedResumeText('ws', 'no')])
     expect(h.breakdownReads).toBe(1)
     expect(h.leverLandings).toBe(0)
   })
@@ -914,7 +945,7 @@ describe('lever', () => {
     expect(h.submits).toEqual([])
     expect(transcript()).toEqual([
       'ws compaction: the requested compaction did not run (blocked by policy); a resume prompt follows with a note',
-      `ws compaction: a prompt was not submitted (dropped: a Stop stands):\n${vetoedResumeText('blocked by policy')}`,
+      `ws compaction: a prompt was not submitted (dropped: a Stop stands):\n${vetoedResumeText('ws', 'blocked by policy')}`,
     ])
   })
 
@@ -1116,7 +1147,7 @@ describe('resume window guard', () => {
     await a.turnEnd()
     expect(a.h.delayed.map((t) => t.ms)).toEqual([CONTINUATION_WINDOW_MS])
     await a.closeWindow()
-    expect(a.h.submits).toEqual([vetoedResumeText('blocked by policy')])
+    expect(a.h.submits).toEqual([vetoedResumeText('ws', 'blocked by policy')])
 
     const b = harness()
     b.c.lever(undefined, true)
@@ -1150,7 +1181,7 @@ describe('resume window guard', () => {
     expect(h.submits).toEqual([])
     turnStart()
     await measure(105_000)
-    expect(h.submits).toEqual([advisoryText(T, 105_000)])
+    expect(h.submits).toEqual([advisoryText('ws', T, 105_000)])
   })
 
   test('a second lever compaction within an open window leaves one resume prompt', async () => {

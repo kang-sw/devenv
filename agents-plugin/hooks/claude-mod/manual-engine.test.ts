@@ -3,7 +3,7 @@ import { expect, mock, test, type TestBody } from 'claude-code/testing'
 import { CONTINUATION_WINDOW_MS } from './compaction'
 import { adoptionNotice, KEY_STORE_PREFIX, MAILBOX_LINE, pointerText, SECTION_ID } from './manual'
 import { KNOB } from './register'
-import { RESUME_TEXT } from './timing'
+import { resumeText } from './timing'
 
 type Engine = Parameters<TestBody>[0]
 type On = Parameters<TestBody>[1]
@@ -21,14 +21,15 @@ function keyedResponse(key: string, state: string): string {
   return `# Manuals\n- none\n\n${body}\n\n## Session Key\n${key}\n\n## Session State\n\n### Todos\n${state}\n`
 }
 
-const INJECTED = (key: string) =>
+/** The injected section for `key`; `plugin` is the engine-reported name, which the key line's revive skill spells. */
+const INJECTED = (plugin: string, key: string) =>
   'Your session state (agenda, todos, notes) is not in this prompt. When no `workflow_manual` result is visible in your context — a fresh session, or after compaction — call `workflow_manual` before acting.\n\n' +
-  `Your lead session key for this conversation is \`${key}\`; pass it as \`session_key\`. Continuing another track (for example \`ws:lead-revive\` with a preserved key) is still allowed.\n\n` +
+  `Your lead session key for this conversation is \`${key}\`; pass it as \`session_key\`. Continuing another track (for example \`${plugin}:lead-revive\` with a preserved key) is still allowed.\n\n` +
   keyedResponse(key, '').split('\n## Session Key')[0].trimEnd()
 
 /** The section where the mailbox push runs: the mailbox line follows the key line. */
-const INJECTED_PUSH = (key: string) => {
-  const [pointer, keyed, ...rest] = INJECTED(key).split('\n\n')
+const INJECTED_PUSH = (plugin: string, key: string) => {
+  const [pointer, keyed, ...rest] = INJECTED(plugin, key).split('\n\n')
   return [pointer, keyed, MAILBOX_LINE, ...rest].join('\n\n')
 }
 
@@ -246,9 +247,9 @@ test('in a ws project: a key is minted at start and the first compose appends th
   expect(w.existsChecks).toEqual(['/repo/ai-docs/WORKFLOW.md'])
   const res = await compose($, w)
   expect(res.sections.slice(0, 2)).toEqual(ENGINE_SECTIONS)
-  expect(res.sections.at(-1)).toEqual({ id: 'ws:workflow-manual', text: INJECTED('minted-1'), scope: 'session' })
+  expect(res.sections.at(-1)).toEqual({ id: 'ws:workflow-manual', text: INJECTED(w.plugin, 'minted-1'), scope: 'session' })
   // Later composes append the same section without asking ws-mcp again.
-  expect(manualSection(await compose($, w))?.text).toBe(INJECTED('minted-1'))
+  expect(manualSection(await compose($, w))?.text).toBe(INJECTED(w.plugin, 'minted-1'))
   expect(w.mcpCalls.length).toBe(3)
 })
 
@@ -263,7 +264,7 @@ test('outside a repository falls back to the ancestor walk', async ($, on) => {
   const w = world(on, { knobs: ON, repo: 'none' })
   await start($, w)
   expect(w.existsChecks).toEqual([])
-  expect(manualSection(await compose($, w))?.text).toBe(INJECTED('minted-1'))
+  expect(manualSection(await compose($, w))?.text).toBe(INJECTED(w.plugin, 'minted-1'))
 })
 
 test('a stored key (hot reload, resume) re-logs in instead of minting', async ($, on) => {
@@ -272,7 +273,7 @@ test('a stored key (hot reload, resume) re-logs in instead of minting', async ($
   await start($, w)
   expect(w.mcpCalls[0].args).toEqual({ root: '/repo/sub', format: 'json', relogin_session_key: 'kept-key' })
   expect(w.minted).toBe(0)
-  expect(manualSection(await compose($, w))?.text).toBe(INJECTED('kept-key'))
+  expect(manualSection(await compose($, w))?.text).toBe(INJECTED(w.plugin, 'kept-key'))
   expect(w.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'kept-key', at: 1_800_000_000_000 })
   // A replayed snapshot: the full workflow_manual result passes through.
   const res = await read($, w, 'workflow_manual', { session_key: 'kept-key' })
@@ -296,7 +297,7 @@ test('/clear ends the conversation; the next compose mints a new key under the n
   await $.session.end({ reason: 'clear', sessionId: 'sess-1', resume: undefined as never })
   await w.clock.settle()
   w.sessionId = 'sess-2'
-  expect(manualSection(await compose($, w))?.text).toBe(INJECTED('minted-2'))
+  expect(manualSection(await compose($, w))?.text).toBe(INJECTED(w.plugin, 'minted-2'))
   expect(w.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'minted-1', at: now })
   expect(w.store.get(`${KEY_STORE_PREFIX}sess-2`)).toEqual({ sessionKey: 'minted-2', at: now })
 })
@@ -310,7 +311,7 @@ test('the first compose waits a bounded time; on timeout it appends nothing and 
   expect(manualSection(res)).toBeUndefined()
   await w.clock.advance(3_000)
   // Cached by now: a later compose appends it at once (its answer is discarded), and no rewrite follows.
-  expect(manualSection(await compose($, w))?.text).toBe(INJECTED('minted-1'))
+  expect(manualSection(await compose($, w))?.text).toBe(INJECTED(w.plugin, 'minted-1'))
   expect(seen(await read($, w, 'workflow_manual', { session_key: 'minted-1' }))).toBe(keyedResponse('minted-1', '(no todos)'))
 })
 
@@ -377,7 +378,7 @@ test("the lever's own landing sets the flag, though the engine routes it past th
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer' } as never)
   await w.clock.settle()
   await w.clock.advance(CONTINUATION_WINDOW_MS)
-  expect(w.prompts).toEqual([RESUME_TEXT])
+  expect(w.prompts).toEqual([resumeText(w.plugin)])
   await compose($, w)
   expect(seen(await read($, w, 'workflow_manual', { session_key: 'kept-key' }))).toMatch(/^Workflow manual is in your system prompt;/)
 })
@@ -461,7 +462,7 @@ test('a failed first manual knob read is read again once a reconnect resolves th
   expect(seen(await read($, w, 'workflow_manual', { session_key: 'minted-1' }))).toBe(keyedResponse('minted-1', '(no todos)'))
   await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'summary', toolUses: [] }] } as never)
   await w.clock.settle()
-  expect(manualSection(await compose($, w))?.text).toBe(INJECTED('minted-1'))
+  expect(manualSection(await compose($, w))?.text).toBe(INJECTED(w.plugin, 'minted-1'))
   expect(seen(await read($, w, 'workflow_manual', { session_key: 'minted-1' }))).toMatch(/^Workflow manual is in your system prompt;/)
   // Read once more only: a later reconnect reads nothing again.
   await reconnect($, w)
@@ -493,6 +494,67 @@ test('a retried manual knob read that fails again leaves the feature off, and is
 
 const watchTool = (w: World) => w.registered.includes('mailbox_watch')
 const boundKeys = (w: World) => w.spawns.map((argv) => argv[5])
+/** The band's knob reads made with a session key: the key it holds. */
+const bandKeys = (w: World) => w.configCalls.filter((a) => a.key === 'claude.status_band_enabled' && a.session_key !== undefined).map((a) => a.session_key)
+
+test('a late open keeps the key the model bound through mailbox_watch: re-login with it, no mint, and the push, band and key entry stay on it', LIVE_CHILD, async ($, on) => {
+  const w = world(on, { knobs: ON, failKnobs: [KNOB.manual], processOk: true })
+  await start($, w)
+  expect(watchTool(w)).toBe(true)
+  w.known.add('k1')
+  const bound = await $.tool.call({ tool: `mcp__${w.plugin}__mailbox_watch`, session_key: 'k1' } as never)
+  await w.clock.settle()
+  expect(String(bound.result)).toContain('bound')
+  w.failKnobs.delete(KNOB.manual)
+  await reconnect($, w)
+  expect(manualReads(w).length).toBe(2)
+  expect(w.minted).toBe(0)
+  expect(w.mcpCalls.filter((c) => c.tool === 'ferrule').map((c) => c.args)).toEqual([{ root: '/repo/sub', format: 'json', relogin_session_key: 'k1' }])
+  expect(w.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'k1', at: 1_800_000_000_000 })
+  // The automatic bind of the same key leaves the running wait alone.
+  expect(boundKeys(w)).toEqual(['k1'])
+  expect(w.killed).toEqual([])
+  expect(bandKeys(w)).toEqual(['k1'])
+  // mailbox_watch stays registered after the late open, and still rebinds.
+  const rebound = await $.tool.call({ tool: `mcp__${w.plugin}__mailbox_watch`, session_key: 'k2' } as never)
+  await w.clock.settle()
+  expect(String(rebound.result)).toContain('rebound')
+  expect(boundKeys(w)).toEqual(['k1', 'k2'])
+})
+
+test('a late open with no key bound mints one and binds the push to it', LIVE_CHILD, async ($, on) => {
+  const w = world(on, { knobs: ON, failKnobs: [KNOB.manual], processOk: true })
+  await start($, w)
+  expect(w.spawns).toEqual([])
+  w.failKnobs.delete(KNOB.manual)
+  await reconnect($, w)
+  expect(w.minted).toBe(1)
+  expect(w.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'minted-1', at: 1_800_000_000_000 })
+  expect(boundKeys(w)).toEqual(['minted-1'])
+  expect(bandKeys(w)).toEqual(['minted-1'])
+  expect(watchTool(w)).toBe(true)
+})
+
+test('a manual knob unread at start (server down) is read at a later start, and a start after the late open binds automatically, registering no bind tool', LIVE_CHILD, async ($, on) => {
+  const w = world(on, { knobs: ON, serverDown: true, processOk: true })
+  await start($, w)
+  expect(manualReads(w)).toEqual([])
+  expect(w.minted).toBe(0)
+  // A later start (a hot reload) resolves the server: the retry reads true and the feature starts.
+  await start($, w)
+  expect(manualReads(w)).toEqual([{ key: KNOB.manual, format: 'json' }])
+  expect(w.minted).toBe(1)
+  expect(w.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'minted-1', at: 1_800_000_000_000 })
+  expect(boundKeys(w)).toEqual(['minted-1'])
+  const watchRegistrations = () => w.registered.filter((name) => name === 'mailbox_watch').length
+  expect(watchRegistrations()).toBe(2)
+  // The gate is open for every start after it: no bind tool, and the re-logged-in key is bound by the mod.
+  await start($, w)
+  expect(watchRegistrations()).toBe(2)
+  expect(w.mcpCalls.filter((c) => c.tool === 'ferrule').at(-1)?.args).toEqual({ root: '/repo/sub', format: 'json', relogin_session_key: 'minted-1' })
+  expect(boundKeys(w)).toEqual(['minted-1', 'minted-1'])
+  expect(manualReads(w).length).toBe(1)
+})
 
 for (const [what, opts] of [
   ['unset', {}],
@@ -534,7 +596,7 @@ test('in a ws project: no mailbox_watch tool; the minted key is bound automatica
   await start($, w)
   expect(watchTool(w)).toBe(false)
   expect(boundKeys(w)).toEqual(['minted-1'])
-  expect(manualSection(await compose($, w))?.text).toBe(INJECTED_PUSH('minted-1'))
+  expect(manualSection(await compose($, w))?.text).toBe(INJECTED_PUSH(w.plugin, 'minted-1'))
   // The automatic bind leaves no lever binding behind.
   expect([...w.store.keys()].some((k) => k.startsWith('mailbox-watch:'))).toBe(false)
 })
@@ -544,7 +606,7 @@ test('without host commands: no tool, no bind, and no mailbox line', async ($, o
   await start($, w)
   expect(watchTool(w)).toBe(false)
   expect(w.spawns).toEqual([])
-  expect(manualSection(await compose($, w))?.text).toBe(INJECTED('minted-1'))
+  expect(manualSection(await compose($, w))?.text).toBe(INJECTED(w.plugin, 'minted-1'))
 })
 
 for (const variant of ['subagent', 'errored'] as const) {
@@ -574,7 +636,7 @@ test('adopts a main-thread revive: re-login, entry rewritten, notice verbatim, p
   const calls = w.mcpCalls.length
   const res = await read($, w, 'workflow_manual', { session_key: 'revived' })
   expect(seen(res)).toBe(
-    `${keyedResponse('revived', '(no todos)')}\n\n[ws] Lead session key changed: minted-1 -> revived. Keep passing revived as session_key; this conversation resumes with it, and the system prompt names it after the next /compact or compaction request. Mailbox push is bound to revived: arriving mail starts your next turn even when you are idle, so launch no mailbox wait.`,
+    `${keyedResponse('revived', '(no todos)')}\n\n[${w.plugin}] Lead session key changed: minted-1 -> revived. Keep passing revived as session_key; this conversation resumes with it, and the system prompt names it after the next /compact or compaction request. Mailbox push is bound to revived: arriving mail starts your next turn even when you are idle, so launch no mailbox wait.`,
   )
   expect(w.mcpCalls[calls]).toEqual({ server: `plugin:${w.plugin}:${w.plugin}`, tool: 'ferrule', args: { root: '/repo/sub', format: 'json', relogin_session_key: 'revived' } })
   expect(w.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'revived', at: 1_800_000_000_000 })
@@ -584,7 +646,7 @@ test('adopts a main-thread revive: re-login, entry rewritten, notice verbatim, p
   expect(seen(await read($, w, 'workflow_manual', { session_key: 'revived' }))).toBe(keyedResponse('revived', '(no todos)'))
   await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'summary', toolUses: [] }] } as never)
   await w.clock.settle()
-  expect(manualSection(await compose($, w))?.text).toBe(INJECTED_PUSH('revived'))
+  expect(manualSection(await compose($, w))?.text).toBe(INJECTED_PUSH(w.plugin, 'revived'))
   expect(seen(await read($, w, 'workflow_manual', { session_key: 'revived' }))).toMatch(/^Workflow manual is in your system prompt;/)
   expect(boundKeys(w)).toEqual(['minted-1', 'revived'])
 })
@@ -598,7 +660,7 @@ test('adopts the key a main-thread sentinel call minted: the lead reads the resu
   w.coreManual = keyedResponse('fresh-1', '(no todos)')
   const calls = w.mcpCalls.length
   const res = await read($, w, 'workflow_manual', { session_key: 'obsidian-latch', root: '/repo/sub' })
-  expect(seen(res)).toBe(`${keyedResponse('fresh-1', '(no todos)')}\n\n${adoptionNotice('minted-1', 'fresh-1', true)}`)
+  expect(seen(res)).toBe(`${keyedResponse('fresh-1', '(no todos)')}\n\n${adoptionNotice(w.plugin, 'minted-1', 'fresh-1', true)}`)
   expect(w.mcpCalls[calls]).toEqual({ server: `plugin:${w.plugin}:${w.plugin}`, tool: 'ferrule', args: { root: '/repo/sub', format: 'json', relogin_session_key: 'fresh-1' } })
   expect(w.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'fresh-1', at: 1_800_000_000_000 })
   expect(boundKeys(w)).toEqual(['minted-1', 'fresh-1'])
@@ -639,7 +701,7 @@ test('binds automatically at a re-login on resume or hot reload, and at the lazy
   await w.clock.settle()
   expect(w.killed).toEqual([0])
   w.sessionId = 'sess-2'
-  expect(manualSection(await compose($, w))?.text).toBe(INJECTED_PUSH('minted-1'))
+  expect(manualSection(await compose($, w))?.text).toBe(INJECTED_PUSH(w.plugin, 'minted-1'))
   expect(boundKeys(w)).toEqual(['kept-key', 'minted-1'])
   // A hot reload runs session.start again: the re-login binds the same key anew.
   await start($, w)

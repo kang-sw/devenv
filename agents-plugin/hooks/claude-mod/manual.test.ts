@@ -75,12 +75,14 @@ const PR_TOOL = 'mcp__plugin_ws_ws__playbook_read'
 type Call = { server: string; tool: string; args: Record<string, unknown> }
 
 /** Fake edges over a fake ws-mcp: calls are recorded, timers fire when the test says. */
-function harness(opts: { store?: Record<string, unknown>; wsProject?: boolean | 'rejects'; server?: string | undefined } = {}) {
+function harness(opts: { store?: Record<string, unknown>; wsProject?: boolean | 'rejects'; server?: string | undefined; plugin?: string } = {}) {
   const h = {
     calls: [] as Call[],
     store: new Map<string, unknown>(Object.entries(opts.store ?? {})),
     wsProject: opts.wsProject ?? true,
     gateChecks: 0,
+    /** While set, the project check waits on it. */
+    gateHold: undefined as Promise<void> | undefined,
     sessionId: 'sess-1',
     root: '/repo/sub',
     now: NOW,
@@ -114,6 +116,7 @@ function harness(opts: { store?: Record<string, unknown>; wsProject?: boolean | 
   const edges: ManualEdges = {
     isWsProject: async () => {
       h.gateChecks += 1
+      if (h.gateHold) await h.gateHold
       if (h.wsProject === 'rejects') throw new Error('cannot tell')
       return h.wsProject
     },
@@ -170,6 +173,7 @@ function harness(opts: { store?: Record<string, unknown>; wsProject?: boolean | 
       return h.messages
     },
     log: (text, to) => void h.logs.push({ text, to }),
+    plugin: opts.plugin ?? 'ws',
   }
   /** Fire every live timer of `ms`. */
   const fire = (ms: number) => {
@@ -189,7 +193,7 @@ function conversation(tool: string, results: { input: Record<string, unknown>; t
 
 describe('pinned prose', () => {
   test('the section, the state-only line, and both pointers read as pinned', () => {
-    expect(sectionText('k-1', 'MANUAL')).toBe(
+    expect(sectionText('ws', 'k-1', 'MANUAL')).toBe(
       'Your session state (agenda, todos, notes) is not in this prompt. When no `workflow_manual` result is visible in your context — a fresh session, or after compaction — call `workflow_manual` before acting.\n\n' +
         'Your lead session key for this conversation is `k-1`; pass it as `session_key`. Continuing another track (for example `ws:lead-revive` with a preserved key) is still allowed.\n\n' +
         'MANUAL',
@@ -206,22 +210,38 @@ describe('pinned prose', () => {
   })
 
   test('the mailbox line and the adoption notice read as pinned', () => {
-    expect(sectionText('k-1', 'MANUAL', true)).toBe(
+    expect(sectionText('ws', 'k-1', 'MANUAL', true)).toBe(
       'Your session state (agenda, todos, notes) is not in this prompt. When no `workflow_manual` result is visible in your context — a fresh session, or after compaction — call `workflow_manual` before acting.\n\n' +
         'Your lead session key for this conversation is `k-1`; pass it as `session_key`. Continuing another track (for example `ws:lead-revive` with a preserved key) is still allowed.\n\n' +
         'Mailbox push is bound to this key automatically: arriving mail starts your next turn even when you are idle, so launch no mailbox wait. If a revive switches your key, the push follows it.\n\n' +
         'MANUAL',
     )
-    expect(adoptionNotice('k-1', 'k-2')).toBe(
+    expect(adoptionNotice('ws', 'k-1', 'k-2')).toBe(
       '[ws] Lead session key changed: k-1 -> k-2. Keep passing k-2 as session_key; this conversation resumes with it, and the system prompt names it after the next /compact or compaction request.',
     )
-    expect(adoptionNotice(undefined, 'k-2')).toBe(
+    expect(adoptionNotice('ws', undefined, 'k-2')).toBe(
       '[ws] Lead session key changed: (none) -> k-2. Keep passing k-2 as session_key; this conversation resumes with it, and the system prompt names it after the next /compact or compaction request.',
     )
-    expect(adoptionNotice('k-1', 'k-2', true)).toBe(
+    expect(adoptionNotice('ws', 'k-1', 'k-2', true)).toBe(
       '[ws] Lead session key changed: k-1 -> k-2. Keep passing k-2 as session_key; this conversation resumes with it, and the system prompt names it after the next /compact or compaction request. ' +
         'Mailbox push is bound to k-2: arriving mail starts your next turn even when you are idle, so launch no mailbox wait.',
     )
+  })
+
+  test('a plugin not named ws spells its own name in the section, the adoption notice and the log lines, and ws nowhere', async () => {
+    const notWs = /(?<![A-Za-z])ws(?![A-Za-z])/
+    const section = sectionText('pkgx', 'k-1', 'MANUAL', true)
+    expect(section).toContain('`pkgx:lead-revive`')
+    expect(section).not.toMatch(notWs)
+    const notice = adoptionNotice('pkgx', 'k-1', 'k-2', true)
+    expect(notice.startsWith('[pkgx] Lead session key changed: k-1 -> k-2.')).toBe(true)
+    expect(notice).not.toMatch(notWs)
+    const { h, m, edges } = harness({ plugin: 'pkgx' })
+    m.start(edges)
+    await tick()
+    expect(await m.compose([])).toBe(sectionText('pkgx', 'minted-1', manualPart(response('minted-1'))!))
+    expect(h.logs.length).toBeGreaterThan(0)
+    for (const l of h.logs) expect(l.text.startsWith('pkgx manual: '), l.text).toBe(true)
   })
 })
 
@@ -329,7 +349,7 @@ describe('setup and compose', () => {
     expect(h.calls[1].args).toEqual({ session_key: 'minted-1' })
     expect(h.calls[2].args).toEqual({ name: 'lead-workflow-manual', session_key: 'minted-1' })
     expect(h.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'minted-1', at: NOW })
-    expect(await m.compose([])).toBe(sectionText('minted-1', manualPart(response('minted-1'))!))
+    expect(await m.compose([])).toBe(sectionText('ws', 'minted-1', manualPart(response('minted-1'))!))
     expect(m.snapshot()).toBe(true)
     expect(h.timers.length).toBe(0)
   })
@@ -766,7 +786,7 @@ describe('key listener', () => {
     await tick()
     expect(done).toBe(false)
     release()
-    expect(await composed).toBe(sectionText('minted-1', manualPart(response('minted-1'))!, true))
+    expect(await composed).toBe(sectionText('ws', 'minted-1', manualPart(response('minted-1'))!, true))
     expect(m.snapshot()).toBe(true)
   })
 })
@@ -786,7 +806,7 @@ describe('revive key adoption', () => {
     const { h, m, tools } = await ready()
     expect(m.snapshot()).toBe(true)
     const before = tools().length
-    expect(await revive(m)).toBe(`${response('revived')}\n\n${adoptionNotice('minted-1', 'revived')}`)
+    expect(await revive(m)).toBe(`${response('revived')}\n\n${adoptionNotice('ws', 'minted-1', 'revived')}`)
     expect(h.calls[before]).toEqual({ server: SERVER, tool: 'ferrule', args: { root: '/repo/sub', format: 'json', relogin_session_key: 'revived' } })
     expect(h.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'revived', at: NOW })
     expect(h.keys).toEqual([
@@ -809,7 +829,7 @@ describe('revive key adoption', () => {
     await m.compose([])
     expect(m.snapshot()).toBe(false)
     m.compacted('manual', undefined, { messages: [] })
-    expect(await m.compose([])).toBe(sectionText('revived', manualPart(response('revived'))!))
+    expect(await m.compose([])).toBe(sectionText('ws', 'revived', manualPart(response('revived'))!))
     expect(m.snapshot()).toBe(true)
     expect(await revive(m)).toMatch(/^Workflow manual is in your system prompt;/)
     expect(h.keys.length).toBe(2)
@@ -836,7 +856,7 @@ describe('revive key adoption', () => {
     const before = tools().length
     const minted = response('fresh-1')
     expect(await m.read('workflow_manual', WM_TOOL, { session_key: 'obsidian-latch', root: '/repo' }, minted)).toBe(
-      `${minted}\n\n${adoptionNotice('minted-1', 'fresh-1')}`,
+      `${minted}\n\n${adoptionNotice('ws', 'minted-1', 'fresh-1')}`,
     )
     expect(h.calls[before]).toEqual({ server: SERVER, tool: 'ferrule', args: { root: '/repo/sub', format: 'json', relogin_session_key: 'fresh-1' } })
     expect(h.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'fresh-1', at: NOW })
@@ -849,7 +869,7 @@ describe('revive key adoption', () => {
     expect(tools().slice(before)).toEqual(['ferrule', 'ferrule', 'workflow_manual', 'playbook_read'])
     expect(h.minted).toBe(1)
     m.compacted('manual', undefined, { messages: [] })
-    expect(await m.compose([])).toBe(sectionText('fresh-1', manualPart(response('fresh-1'))!))
+    expect(await m.compose([])).toBe(sectionText('ws', 'fresh-1', manualPart(response('fresh-1'))!))
   })
 
   test('a sentinel result reaches the lead whole even when its cut would match or its anchors miss', async () => {
@@ -870,9 +890,9 @@ describe('revive key adoption', () => {
     h.push = true
     h.known.add('fresh-1')
     const minted = response('fresh-1')
-    expect(await m.read('workflow_manual', WM_TOOL, { session_key: 'obsidian-latch' }, minted)).toBe(`${minted}\n\n${adoptionNotice('minted-1', 'fresh-1', true)}`)
+    expect(await m.read('workflow_manual', WM_TOOL, { session_key: 'obsidian-latch' }, minted)).toBe(`${minted}\n\n${adoptionNotice('ws', 'minted-1', 'fresh-1', true)}`)
     await tick()
-    expect(await revive(m)).toBe(`${response('revived')}\n\n${adoptionNotice('fresh-1', 'revived', true)}`)
+    expect(await revive(m)).toBe(`${response('revived')}\n\n${adoptionNotice('ws', 'fresh-1', 'revived', true)}`)
   })
 
   test('no adoption for the current key or a key ws-mcp refuses', async () => {
@@ -894,7 +914,7 @@ describe('revive key adoption', () => {
     await tick()
     h.failing.clear()
     h.known.add('revived')
-    expect(await revive(m)).toBe(`${response('revived')}\n\n${adoptionNotice(undefined, 'revived')}`)
+    expect(await revive(m)).toBe(`${response('revived')}\n\n${adoptionNotice('ws', undefined, 'revived')}`)
     expect(h.keys).toEqual([['revived', undefined]])
     expect(h.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'revived', at: NOW })
   })
@@ -907,7 +927,7 @@ describe('revive key adoption', () => {
     h.ferruleHold = (args) => (args.relogin_session_key === undefined ? held : undefined)
     m.start(edges)
     await tick()
-    expect(await revive(m)).toContain(adoptionNotice(undefined, 'revived'))
+    expect(await revive(m)).toContain(adoptionNotice('ws', undefined, 'revived'))
     release()
     await tick()
     expect(h.minted).toBe(1)
@@ -927,7 +947,7 @@ describe('revive key adoption', () => {
     h.ferruleHold = (args) => (args.relogin_session_key === 'kept-key' ? held : undefined)
     m.start(edges)
     await tick()
-    expect(await revive(m)).toContain(adoptionNotice(undefined, 'revived'))
+    expect(await revive(m)).toContain(adoptionNotice('ws', undefined, 'revived'))
     release()
     await tick()
     expect(h.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'revived', at: NOW })
@@ -951,7 +971,7 @@ describe('revive key adoption', () => {
   test('a failed key entry rewrite still rebuilds with the adopted key, never reverting to the stored one', async () => {
     const { h, m } = await ready()
     h.storeFails = true
-    expect(await revive(m)).toContain(adoptionNotice('minted-1', 'revived'))
+    expect(await revive(m)).toContain(adoptionNotice('ws', 'minted-1', 'revived'))
     // Transient: the rebuild's own write lands, from the adopted key, not the stale entry.
     expect(h.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'minted-1', at: NOW })
     h.storeFails = false
@@ -1014,5 +1034,71 @@ describe('revive key adoption', () => {
     expect(await composed).toContain('`revived`')
     expect(m.snapshot()).toBe(true)
     expect(tools().filter((t) => t === 'playbook_read').length).toBe(3)
+  })
+})
+
+describe('late open', () => {
+  test('an opened() while the project check is in flight keeps the gate open: the check reading closed does not shut it', async () => {
+    const { h, m, edges } = harness({ wsProject: false })
+    let release!: () => void
+    h.gateHold = new Promise<void>((resolve) => (release = resolve))
+    m.start(edges)
+    await tick()
+    m.opened()
+    release()
+    await tick()
+    expect(h.minted).toBe(1)
+    expect(m.key()).toBe('minted-1')
+  })
+
+  test('a late open with a held key re-logs in with it over the key entry, never minting, and the listener and entry follow it', async () => {
+    const { h, m, edges, tools } = harness({ wsProject: false, store: { [`${KEY_STORE_PREFIX}sess-1`]: { sessionKey: 'stored-1', at: NOW } } })
+    h.known.add('stored-1')
+    h.known.add('held-1')
+    m.start(edges)
+    await tick()
+    expect(tools()).toEqual([])
+    m.opened('held-1')
+    await tick()
+    expect(h.minted).toBe(0)
+    expect(h.calls[0].args).toEqual({ root: '/repo/sub', format: 'json', relogin_session_key: 'held-1' })
+    expect(h.keys).toEqual([['held-1', undefined]])
+    expect(h.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'held-1', at: NOW })
+    expect(m.key()).toBe('held-1')
+  })
+
+  test('a late open whose held key is refused mints nothing, and neither does a later compose', async () => {
+    const { h, m, edges } = harness({ wsProject: false })
+    m.start(edges)
+    await tick()
+    m.opened('gone-1')
+    await tick()
+    expect(await m.compose([])).toBeUndefined()
+    expect(h.minted).toBe(0)
+    expect(h.keys).toEqual([])
+    expect(m.key()).toBeUndefined()
+  })
+
+  test('an adoption after a late open moves the conversation off the held key: a later setup re-logs in with the adopted key', async () => {
+    const { h, m, edges } = harness({ wsProject: false })
+    h.known.add('held-1')
+    h.known.add('revived')
+    m.start(edges)
+    await tick()
+    m.opened('held-1')
+    await tick()
+    // The adoption's rebuild fails, so a later setup runs from the key entry.
+    h.failing.add('workflow_manual')
+    await m.read('workflow_manual', WM_TOOL, { session_key: 'revived' }, response('revived'))
+    await tick()
+    expect(m.key()).toBe('revived')
+    h.failing.delete('workflow_manual')
+    m.landed('manual')
+    expect(await m.compose([])).toContain('`revived`')
+    expect(h.keys).toEqual([
+      ['held-1', undefined],
+      ['revived', 'held-1'],
+    ])
+    expect(h.minted).toBe(0)
   })
 })

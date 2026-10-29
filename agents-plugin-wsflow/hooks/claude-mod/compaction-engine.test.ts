@@ -2,7 +2,7 @@ import { expect, mock, test, type TestBody } from 'claude-code/testing'
 
 import { CONTINUATION_WINDOW_MS } from './compaction'
 import { KNOB } from './register'
-import { ADVISORY_KEY, advisoryText, LEVER_DESCRIPTION, milestoneText, LEVER_RESULT, LEVER_RESULT_NO_RESUME, RESUME_TEXT, thresholdsFor, vetoedResumeText } from './timing'
+import { ADVISORY_KEY, advisoryText, LEVER_DESCRIPTION, milestoneText, LEVER_RESULT, LEVER_RESULT_NO_RESUME, resumeText, thresholdsFor, vetoedResumeText } from './timing'
 
 type Engine = Parameters<TestBody>[0]
 type On = Parameters<TestBody>[1]
@@ -232,7 +232,7 @@ test('a crossing that session.measure reports while idle submits the advisory at
   await measure($, w, 50_000)
   await measure($, w, 104_000)
   await measure($, w, 105_000)
-  expect(w.prompts).toEqual([advisoryText(T, 104_000)])
+  expect(w.prompts).toEqual([advisoryText(w.plugin, T, 104_000)])
   expect(w.usageCalls).toEqual([{ breakdown: 'summary' }, {}])
 })
 
@@ -246,14 +246,14 @@ test('a crossing measured while a main-thread turn runs is delivered at the turn
   expect(w.prompts).toEqual([])
   w.live = 118_000
   await turnEnd($, w)
-  expect(w.prompts).toEqual([advisoryText(T, 118_000)])
+  expect(w.prompts).toEqual([advisoryText(w.plugin, T, 118_000)])
   expect(w.prompts[0]).toContain('59% (118k / 200k tokens)')
-  expect(debug(w).filter((l) => l.startsWith('ws compaction: advisory delivered'))).toEqual([
-    'ws compaction: advisory delivered: crossing measured at 104000 tokens (52%), fresh read 118000 tokens (59%), compaction window 200000 tokens, model window 1000000 tokens',
+  expect(debug(w).filter((l) => l.startsWith(`${w.plugin} compaction: advisory delivered`))).toEqual([
+    `${w.plugin} compaction: advisory delivered: crossing measured at 104000 tokens (52%), fresh read 118000 tokens (59%), compaction window 200000 tokens, model window 1000000 tokens`,
   ])
   // The end-of-turn measure arriving after the turn end delivers nothing again.
   await measure($, w, 118_000)
-  expect(w.prompts).toEqual([advisoryText(T, 118_000)])
+  expect(w.prompts).toEqual([advisoryText(w.plugin, T, 118_000)])
 })
 
 test('a mid-turn crossing that grew past a milestone by the turn end delivers that milestone once, skipping the lower one', async ($, on) => {
@@ -261,12 +261,12 @@ test('a mid-turn crossing that grew past a milestone by the turn end delivers th
   await start($, w)
   await measure($, w, 50_000)
   await measure($, w, 104_000)
-  expect(w.prompts).toEqual([advisoryText(T, 104_000)])
+  expect(w.prompts).toEqual([advisoryText(w.plugin, T, 104_000)])
   await turnStart($, w)
   await measure($, w, 125_000)
   w.live = 150_000
   await turnEnd($, w)
-  expect(w.prompts).toEqual([advisoryText(T, 104_000), milestoneText(2, T, 150_000)])
+  expect(w.prompts).toEqual([advisoryText(w.plugin, T, 104_000), milestoneText(w.plugin, 2, T, 150_000)])
   await measure($, w, 150_000)
   expect(w.prompts.length).toBe(2)
 })
@@ -279,7 +279,7 @@ test('each session start reads the advisory key once over the plugin server, and
   await measure($, w, 79_000)
   expect(w.prompts).toEqual([])
   await measure($, w, 81_000)
-  expect(w.prompts).toEqual([advisoryText(thresholdsFor(WINDOW, { percent: 40, tokens: 300_000 })!, 81_000)])
+  expect(w.prompts).toEqual([advisoryText(w.plugin, thresholdsFor(WINDOW, { percent: 40, tokens: 300_000 })!, 81_000)])
   expect(w.prompts[0]).toContain('This is past the advisory point (40%).')
   await start($, w)
   expect(w.configGets.length).toBe(2)
@@ -298,7 +298,7 @@ for (const [what, opts] of [
     await measure($, w, 81_000)
     expect(w.prompts).toEqual([])
     await measure($, w, 104_000)
-    expect(w.prompts).toEqual([advisoryText(T, 104_000)])
+    expect(w.prompts).toEqual([advisoryText(w.plugin, T, 104_000)])
   })
 }
 
@@ -314,7 +314,7 @@ test('a lever call with the flag compacts after the main-thread turn end, then s
   expect(w.compactCalls).toEqual([{ origin: w.plugin, instructions: undefined }])
   expect(w.prompts).toEqual([])
   await w.clock.advance(CONTINUATION_WINDOW_MS)
-  expect(w.prompts).toEqual([RESUME_TEXT])
+  expect(w.prompts).toEqual([resumeText(w.plugin)])
   await turnEnd($, w)
   expect(w.compactCalls.length).toBe(1)
   expect(w.prompts.length).toBe(1)
@@ -357,7 +357,7 @@ test('a repeat lever call replaces the flag, latest wins', async ($, on) => {
   await turnEnd($, w)
   await w.clock.advance(CONTINUATION_WINDOW_MS)
   expect(w.compactCalls.length).toBe(2)
-  expect(w.prompts).toEqual([RESUME_TEXT])
+  expect(w.prompts).toEqual([resumeText(w.plugin)])
 })
 
 test("the lever's own landing resets the latch, though the engine routes it past the feature's own hook", async ($, on) => {
@@ -371,7 +371,7 @@ test("the lever's own landing resets the latch, though the engine routes it past
   await w.clock.advance(CONTINUATION_WINDOW_MS)
   // Usage still past the advisory after the landing: a reset latch delivers it again, from a fresh breakdown.
   await measure($, w, 104_000)
-  expect(w.prompts).toEqual([advisoryText(T, 104_000), RESUME_TEXT, advisoryText(T, 104_000)])
+  expect(w.prompts).toEqual([advisoryText(w.plugin, T, 104_000), resumeText(w.plugin), advisoryText(w.plugin, T, 104_000)])
   // Each delivery reads the usage afresh; the landing drops the cached breakdown.
   expect(w.usageCalls).toEqual([{ breakdown: 'summary' }, {}, { breakdown: 'summary' }, {}])
   expect(transcript(w)).toEqual([])
@@ -397,13 +397,13 @@ test('a rejected compaction retries at the next main-thread turn end', async ($,
   expect(w.prompts).toEqual([])
   // The rejection's own text is the engine's; the notice carries it whole.
   expect(transcript(w).length).toBe(1)
-  expect(transcript(w)[0]).toMatch(/^ws compaction: the requested compaction was rejected \(.+\); retrying at the next turn end$/)
+  expect(transcript(w)[0]).toMatch(new RegExp(`^${w.plugin} compaction: the requested compaction was rejected \\(.+\\); retrying at the next turn end$`))
   await w.clock.advance(60_000)
   expect(w.compactCalls.length).toBe(1)
   await turnEnd($, w)
   expect(w.compactCalls.length).toBe(2)
   await w.clock.advance(CONTINUATION_WINDOW_MS)
-  expect(w.prompts).toEqual([RESUME_TEXT])
+  expect(w.prompts).toEqual([resumeText(w.plugin)])
 })
 
 test('a vetoed compaction with the flag still submits the noted resume prompt when no turn started', async ($, on) => {
@@ -413,7 +413,7 @@ test('a vetoed compaction with the flag still submits the noted resume prompt wh
   w.compactAnswers.push({ skip: 'blocked by policy' })
   await turnEnd($, w)
   await w.clock.advance(CONTINUATION_WINDOW_MS)
-  expect(w.prompts).toEqual([vetoedResumeText('blocked by policy')])
+  expect(w.prompts).toEqual([vetoedResumeText(w.plugin, 'blocked by policy')])
 })
 
 test('a vetoed compaction with the flag submits nothing when a turn started within the window', async ($, on) => {
@@ -437,7 +437,7 @@ test('a manual compaction landing first drops the compact step; the resume promp
   await turnStart($, w)
   await turnEnd($, w)
   expect(w.compactCalls).toEqual([{ origin: 'engine', instructions: undefined }])
-  expect(w.prompts).toEqual([RESUME_TEXT])
+  expect(w.prompts).toEqual([resumeText(w.plugin)])
 })
 
 test('session.end drops a pending request and starts the latch over', async ($, on) => {
@@ -492,7 +492,7 @@ async function expectInert($: Engine, w: World) {
   await turnEnd($, w)
   await w.clock.advance(CONTINUATION_WINDOW_MS)
   expect(w.compactCalls).toEqual([{ origin: 'engine', instructions: undefined }, { origin: w.plugin, instructions: undefined }])
-  expect(w.prompts).toEqual([RESUME_TEXT])
+  expect(w.prompts).toEqual([resumeText(w.plugin)])
 }
 
 for (const [what, opts] of [
@@ -534,7 +534,7 @@ test('a slow server start holds neither session.start nor the lever; the advisor
   expect(w.knobReads).toEqual([{ key: KNOB.compactionAdvisory, format: 'json' }])
   await measure($, w, 50_000)
   await measure($, w, 104_000)
-  expect(w.prompts).toEqual([advisoryText(T, 104_000)])
+  expect(w.prompts).toEqual([advisoryText(w.plugin, T, 104_000)])
 })
 
 test('each session start reads the advisory knob afresh: a later start reading off leaves the advisory inert, and the lever answered', async ($, on) => {
@@ -554,6 +554,23 @@ test('each session start reads the advisory knob afresh: a later start reading o
   expect((await lever($, w)).result).toBe(LEVER_RESULT_NO_RESUME)
   await turnEnd($, w)
   expect(w.compactCalls).toEqual([{ origin: w.plugin, instructions: undefined }])
+})
+
+test('a start whose advisory read outlasts a newer start reading off leaves the advisory inert', async ($, on) => {
+  const w = world(on, { ...ON, connect: 1_000 })
+  void $.session.start({ cwd: '/tmp', surface: 'terminal', isInteractive: true })
+  await w.clock.settle()
+  // A newer start (a hot reload) connects at once and reads the knob off.
+  w.compaction = false
+  await start($, w)
+  // The older start's read, settling last, finds it on.
+  w.compaction = true
+  await w.clock.advance(1_000)
+  expect(w.knobReads.length).toBe(2)
+  await measure($, w, 50_000)
+  await measure($, w, 104_000)
+  await turnEnd($, w)
+  expect(w.prompts).toEqual([])
 })
 
 test('a prompt typed within the window starts the first turn, so the resume prompt is not submitted; the typed prompt carries nothing', async ($, on) => {
@@ -603,7 +620,7 @@ test('a subagent turn started within the window does not cancel the resume promp
   await turnEnd($, w)
   await turnStart($, w, 'sub-1')
   await w.clock.advance(CONTINUATION_WINDOW_MS)
-  expect(w.prompts).toEqual([RESUME_TEXT])
+  expect(w.prompts).toEqual([resumeText(w.plugin)])
 })
 
 test('a prompt typed after the window finds the resume prompt already submitted', async ($, on) => {
@@ -613,7 +630,7 @@ test('a prompt typed after the window finds the resume prompt already submitted'
   await turnEnd($, w)
   await w.clock.advance(CONTINUATION_WINDOW_MS)
   await prompted($, w, 'too late')
-  expect(w.prompts).toEqual([RESUME_TEXT])
+  expect(w.prompts).toEqual([resumeText(w.plugin)])
   expect(w.typed).toEqual([{ text: 'too late', context: undefined }])
 })
 
@@ -626,7 +643,7 @@ test('a session end inside the window records the held resume prompt in the tran
   await w.clock.settle()
   await w.clock.advance(CONTINUATION_WINDOW_MS)
   expect(w.prompts).toEqual([])
-  expect(transcript(w)).toEqual([`ws compaction: a prompt was not submitted (session.end clear):\n${RESUME_TEXT}`])
+  expect(transcript(w)).toEqual([`${w.plugin} compaction: a prompt was not submitted (session.end clear):\n${resumeText(w.plugin)}`])
 })
 
 test('a resume prompt refused beneath the mod is recorded in the transcript', async ($, on) => {
@@ -637,5 +654,5 @@ test('a resume prompt refused beneath the mod is recorded in the transcript', as
   w.dropPrompts = 1
   await w.clock.advance(CONTINUATION_WINDOW_MS)
   expect(w.prompts).toEqual([])
-  expect(transcript(w)).toEqual([`ws compaction: a prompt was not submitted (dropped: blocked beneath):\n${RESUME_TEXT}`])
+  expect(transcript(w)).toEqual([`${w.plugin} compaction: a prompt was not submitted (dropped: blocked beneath):\n${resumeText(w.plugin)}`])
 })

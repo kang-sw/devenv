@@ -24,7 +24,7 @@ type On = Parameters<TestBody>[1]
 
 type CommandAnswer = { text?: string } | 'brings-back'
 
-function world(on: On, opts: { processOk?: boolean; refuseRegister?: string; connect?: boolean; knobs?: Record<string, unknown> } = {}) {
+function world(on: On, opts: { processOk?: boolean; refuseRegister?: string; connect?: boolean } = {}) {
   const clock = mock.clock(on)
   mock.env(on, {})
   const w = {
@@ -76,11 +76,10 @@ function world(on: On, opts: { processOk?: boolean; refuseRegister?: string; con
       ? { value: { isConnected: false, reason: 'failed', message: 'did not connect' } }
       : { value: { isConnected: true, server: `plugin:${e.server}:${e.server}` } }
   })
-  // Knob reads: the values given, every other key unset.
+  // Knob reads: every key unset, so the reconnect lever runs with every knob-gated feature off.
   on('mcp.call', ($, e) => {
     const key = String(e.args.key)
-    const value = e.tool === 'config_get' && opts.knobs && key in opts.knobs ? opts.knobs[key] : null
-    return { value: { content: [{ type: 'text', text: JSON.stringify({ key, value, scope: value === null ? 'unset' : 'project' }) }], isError: false } }
+    return { value: { content: [{ type: 'text', text: JSON.stringify({ key, value: null, scope: 'unset' }) }], isError: false } }
   })
   on('tool.list', () => ({
     value: [

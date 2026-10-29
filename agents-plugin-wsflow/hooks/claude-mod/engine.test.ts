@@ -38,14 +38,24 @@ function world(
     failDrain?: boolean
     /** The drain value is tuned at session scope only: a read without session_key finds it unset. */
     sessionScoped?: boolean
+    /** Delays (ms on the mock clock) for the next env reads, in call order. */
+    envDelays?: number[]
   } = {},
 ) {
   const clock = mock.clock(on)
-  mock.env(on, opts.env ?? {})
+  const envDelays = [...(opts.envDelays ?? [])]
+  // mock.env's answers, with a delay a test can put on a read.
+  on('env.get', async ($, e) => {
+    const delay = envDelays.shift()
+    if (delay) await clock.sleep(delay)
+    return { value: opts.env?.[e.name] }
+  })
   const w = {
     clock,
     /** The drain mode the test expects the watcher to run in: direct only for a readable `direct`. */
     drain: (opts.drain === 'direct' && !opts.failDrain && !opts.sessionScoped ? 'direct' : 'notice') as Drain,
+    /** The claude.mailbox_drain value config_get answers; a test may change it between reads (and `drain` with it). */
+    drainValue: opts.drain,
     store: new Map<string, unknown>(Object.entries(opts.store ?? {})),
     plugin: '',
     registered: [] as string[],
@@ -118,7 +128,7 @@ function world(
     w.configCalls.push({ ...e.args })
     if (e.args.key !== KNOB.drain) return text(JSON.stringify({ key: e.args.key, value: null, scope: 'unset' }))
     if (opts.failDrain) return text('ws-mcp is unhealthy', true)
-    const value = opts.drain === undefined || (opts.sessionScoped && e.args.session_key === undefined) ? null : opts.drain
+    const value = w.drainValue === undefined || (opts.sessionScoped && e.args.session_key === undefined) ? null : w.drainValue
     return text(JSON.stringify({ key: e.args.key, value, scope: value === null ? 'unset' : 'project' }))
   })
   on('process.spawn', async function* ($, e, next) {
@@ -462,17 +472,65 @@ for (const [what, opts] of [
   })
 }
 
-test('the drain knob is read once per session start, keyless', async ($, on) => {
-  const w = world(on, { drain: 'direct' })
+// A live wait child makes each settle cost about a second of real time; this test settles six times.
+test('the drain knob is read once per session start, keyless, and a later start runs the mode it read', { timeoutMs: 20_000 }, async ($, on) => {
+  const w = world(on, { drain: 'notice' })
   await start($, w)
   await bind($, w, 'k1')
   await bind($, w, 'k2')
   expect(drainReads(w)).toEqual([{ key: KNOB.drain, format: 'json' }])
+  // A hot reload's start, after the knob was tuned to direct at the project scope.
+  w.drainValue = 'direct'
+  w.drain = 'direct'
   await start($, w)
   expect(drainReads(w)).toEqual([
     { key: KNOB.drain, format: 'json' },
     { key: KNOB.drain, format: 'json' },
   ])
+  await bind($, w, 'k1')
+  await arrive(w)
+  expect(w.recvCalls).toEqual([{ key: 'k1', origin: w.plugin }])
+  expect(w.prompts[0]).toContain('2 message(s) arrived for session_key k1')
+})
+
+test('a start whose drain read outlasts a newer start yields the mailbox to it: one bind tool, the newer drain mode', async ($, on) => {
+  const w = world(on, { drain: 'direct' })
+  w.connects.push(1_000)
+  void $.session.start({ cwd: '/tmp', surface: 'terminal', isInteractive: true })
+  await w.clock.settle()
+  // A newer start (a hot reload) connects at once and reads direct.
+  await start($, w)
+  expect(mailboxTools(w)).toEqual(['mailbox_watch'])
+  // The older start's read, settling last, finds notice.
+  w.drainValue = 'notice'
+  await w.clock.advance(1_000)
+  expect(drainReads(w).length).toBe(2)
+  expect(mailboxTools(w)).toEqual(['mailbox_watch'])
+  await bind($, w, 'k1')
+  await arrive(w)
+  expect(w.recvCalls).toEqual([{ key: 'k1', origin: w.plugin }])
+  expect(w.prompts[0]).toContain('2 message(s) arrived for session_key k1')
+  expect(w.spawns.length).toBe(2)
+})
+
+test('a start whose env read outlasts a newer start assigns no watcher of its own: the newer one is the only one', async ($, on) => {
+  const w = world(on, { envDelays: [1_000] })
+  // The older start reads notice, then waits on its WS_MAILBOX read.
+  void $.session.start({ cwd: '/tmp', surface: 'terminal', isInteractive: true })
+  await w.clock.settle()
+  w.drainValue = 'direct'
+  w.drain = 'direct'
+  await start($, w)
+  expect(mailboxTools(w)).toEqual(['mailbox_watch'])
+  await w.clock.advance(1_000)
+  expect(drainReads(w).length).toBe(2)
+  expect(mailboxTools(w)).toEqual(['mailbox_watch'])
+  await bind($, w, 'k1')
+  await arrive(w)
+  // The bind reached the newer start's direct watcher, and no other loop runs.
+  expect(w.recvCalls).toEqual([{ key: 'k1', origin: w.plugin }])
+  expect(w.prompts[0]).toContain('2 message(s) arrived for session_key k1')
+  expect(w.spawns.length).toBe(2)
 })
 
 test('a slow server start does not hold session.start; the bind tool and the direct watcher come up once it connects', async ($, on) => {

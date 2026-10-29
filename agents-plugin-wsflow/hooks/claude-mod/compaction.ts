@@ -14,7 +14,7 @@ import {
   observe,
   percentOf,
   resolveAdvisory,
-  RESUME_TEXT,
+  resumeText,
   thresholdsFor,
   vetoedResumeText,
   DEFAULT_ADVISORY,
@@ -77,6 +77,8 @@ export type CompactionEdges = {
   /** Run `fn` once, `ms` from now. */
   delay: (ms: number, fn: () => void) => void
   log: (text: string, to: 'transcript' | 'debug') => void
+  /** The engine-reported plugin name: the prompts' label and the log lines' prefix spell it. */
+  plugin: string
   /** Whether a main-thread turn runs, from its turn.start to its turn.complete. */
   turnRunning: () => boolean
   /** Read the live usage afresh, without a breakdown; a threshold message's figures come from it. */
@@ -186,8 +188,9 @@ export function createCompaction(): Compaction {
    */
   let generation = 0
 
-  const debug = (text: string) => edges?.log(`ws compaction: ${text}`, 'debug')
-  const notice = (text: string) => edges?.log(`ws compaction: ${text}`, 'transcript')
+  const plugin = () => edges?.plugin ?? 'plugin'
+  const debug = (text: string) => edges?.log(`${plugin()} compaction: ${text}`, 'debug')
+  const notice = (text: string) => edges?.log(`${plugin()} compaction: ${text}`, 'transcript')
 
   const reset = () => {
     generation += 1
@@ -263,13 +266,13 @@ export function createCompaction(): Compaction {
         `fresh read ${fresh.tokens === undefined ? 'without tokens, so the crossing\'s figure is shown' : `${fresh.tokens} tokens (${percentOf(fresh.tokens, t.raw)}%)`}, ` +
         `compaction window ${t.raw} tokens, model window ${fresh.window} tokens`,
     )
-    submit(deliveryText(step.deliver, t, tokens), false)
+    submit(deliveryText(plugin(), step.deliver, t, tokens), false)
   }
 
   /** Settle `r` with its resume prompt, unguarded; an unset flag submits nothing. */
   const finish = (r: Request) => {
     if (request === r) request = undefined
-    if (r.resume) submit(RESUME_TEXT, true)
+    if (r.resume) submit(resumeText(plugin()), true)
   }
 
   /**
@@ -332,9 +335,9 @@ export function createCompaction(): Compaction {
       if (res.skip !== undefined) notice(`the requested compaction did not run (${res.skip}); no resume was requested, so no turn follows`)
     } else if (res.skip !== undefined) {
       notice(`the requested compaction did not run (${res.skip}); a resume prompt follows with a note`)
-      hold(r, vetoedResumeText(res.skip))
+      hold(r, vetoedResumeText(plugin(), res.skip))
     } else {
-      hold(r, RESUME_TEXT)
+      hold(r, resumeText(plugin()))
     }
   }
 

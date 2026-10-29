@@ -325,7 +325,12 @@ The compaction-advisory, manual-injection, and drain knobs are read keyless
 once at session start; a failed or refused read leaves the feature off (the
 drain reads as `notice`), except that a failed first manual-injection read is
 read once more at the next successful server resolution (a later session
-start, an MCP reconnect) and starts the feature then if it reads true. Workflow manual injection runs only with its knob on and
+start, an MCP reconnect) and starts the feature then if it reads true; that
+late start re-logs in with the key the agent already bound through
+`mailbox_watch` and mints only when none is bound, so the push, the band rows
+and the stored key never move off a key the model holds. Every label, prompt
+prefix, transcript notice, and debug log prefix the mod writes spells the
+engine-reported plugin name, never a package name. Workflow manual injection runs only with its knob on and
 `ai-docs/WORKFLOW.md` at the repository root: it mints the conversation's key,
 adds the system-prompt section, rewrites the ws reads, adopts a revive's or a
 fresh-bootstrap sentinel call's key, and binds the mailbox push to every key
@@ -344,8 +349,9 @@ root (or the nearest ancestor outside a repository). The script is shared
 byte-identically like the mod; each `hooks.json` stays curated (its
 description and the nudge's package argument differ).
 
-- **Drift guard:** `TestWsflowHooksMirrorUpToDate` (in `internal/wsrsrc`),
-  covering the mod directory and the revive nudge script.
+- **Drift guard:** `TestWsflowHooksMirrorUpToDate` (the mod directory) and
+  `TestWsflowReviveNudgeMirrorUpToDate` (the revive nudge script), both in
+  `internal/wsrsrc`.
 - **Resync:** `rsync -a --delete agents-plugin/hooks/claude-mod/
   agents-plugin-wsflow/hooks/claude-mod/` after any edit to the source, and
   copy `agents-plugin/hooks/compact-revive-nudge.py` over its wsflow copy.

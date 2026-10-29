@@ -326,7 +326,10 @@ export const register: Register = (on) => {
    * The one exception is a failed first knob read (manualRetry): it is read
    * again once the server resolves again, and a true read then opens the
    * gate late, after the mailbox already registered its bind tool, which
-   * stays; both binds then go through arm, the latest key winning.
+   * stays. A key the model already bound through it is handed to the manual
+   * feature, which re-logs in with that key instead of minting, so the late
+   * open never moves the push off a key the model holds; both binds then go
+   * through arm, the latest key winning.
    */
   let wsGate: Promise<boolean> | undefined
   /**
@@ -429,7 +432,7 @@ export const register: Register = (on) => {
         (value) => {
           if (value !== true) return
           wsGate = Promise.resolve(true)
-          manual.opened()
+          manual.opened(watcher?.current())
         },
         (err) => $.ui.log(`${$.plugin.name} mod: ${KNOB.manual} not read again (${String(err)}); its feature stays off`, { to: 'debug' }),
       )
@@ -467,7 +470,7 @@ export const register: Register = (on) => {
         return false
       }
     })().catch((err) => {
-      $.ui.log(`${$.plugin.name} mod: ws project check failed (${String(err)}); reading as no ws project`, { to: 'debug' })
+      $.ui.log(`${$.plugin.name} mod: workflow project check failed (${String(err)}); reading as no workflow project`, { to: 'debug' })
       return false
     })
     const gate = wsGate
@@ -489,14 +492,18 @@ export const register: Register = (on) => {
       }
       settlePush(true)
       const launcher = launcherPath($.plugin.root)
-      // The watcher comes up once the drain read settles; a newer start meanwhile owns the mailbox.
+      // The watcher comes up once the drain read settles.
       const mode = drainModeOf(await readKnob(KNOB.drain))
-      if (startSeq !== starts) return
       // WS_MAILBOX is the fallback slug: a re-derived auto-minted address would
       // not match the server's, so the direct mode asks the server for the
       // key's own address (lookup_peers self.address) through the same tool
       // path its drain uses. The notice mode makes no tool calls of its own.
       const envSlug = (await $.env.get('WS_MAILBOX'))?.trim() || undefined
+      // A newer start since this one began owns the mailbox. Checked after
+      // the last await before the assignment: that start stopped the watcher
+      // before this one existed, so one assigned now would be overwritten
+      // unstopped and its wait loop run on beside the newer one.
+      if (startSeq !== starts) return
       resolveSlug = async (key) => {
         if (mode !== 'direct' || !lookupTool) return envSlug
         try {
@@ -592,6 +599,7 @@ export const register: Register = (on) => {
         after: (fn) => void $.clock.after(0, fn),
         delay: (ms, fn) => void $.clock.after(ms, fn),
         log: (text, to) => $.ui.log(text, { to }),
+        plugin: $.plugin.name,
         turnRunning: () => mainTurn,
         readUsage: async () => (await $.session.usage()).context,
         leverLanded: () => {
@@ -660,9 +668,10 @@ export const register: Register = (on) => {
           return () => timer.cancel()
         },
         log: (text) => $.ui.log(text, { to: 'debug' }),
+        plugin: $.plugin.name,
       })
     } catch (err) {
-      $.ui.log(`ws captions: setup failed: ${String(err)}`, { to: 'debug' })
+      $.ui.log(`${$.plugin.name} captions: setup failed: ${String(err)}`, { to: 'debug' })
     }
 
     // Registers nothing; its knob read runs on in the background, and the band
@@ -696,9 +705,10 @@ export const register: Register = (on) => {
         },
         redraw: () => $.ui.invalidate('ui.render'),
         log: (text) => $.ui.log(text, { to: 'debug' }),
+        plugin: $.plugin.name,
       })
     } catch (err) {
-      $.ui.log(`ws band: setup failed: ${String(err)}`, { to: 'debug' })
+      $.ui.log(`${$.plugin.name} band: setup failed: ${String(err)}`, { to: 'debug' })
     }
 
     // Registers no tool: its setup runs on in the background, and the first
@@ -719,7 +729,7 @@ export const register: Register = (on) => {
           try {
             band.keyChanged(key)
           } catch (err) {
-            $.ui.log(`ws band: key change handling failed: ${String(err)}`, { to: 'debug' })
+            $.ui.log(`${$.plugin.name} band: key change handling failed: ${String(err)}`, { to: 'debug' })
           }
         },
         server: async () => {
@@ -739,9 +749,10 @@ export const register: Register = (on) => {
         timer: (ms, fn) => $.clock.after(ms, fn),
         messages: () => $.session.messages({ as: 'api' }),
         log: (text, to) => $.ui.log(text, { to }),
+        plugin: $.plugin.name,
       })
     } catch (err) {
-      $.ui.log(`ws manual: setup failed: ${String(err)}`, { to: 'debug' })
+      $.ui.log(`${$.plugin.name} manual: setup failed: ${String(err)}`, { to: 'debug' })
     }
 
     // The reconnect and compaction levers' registrations are awaited, so they
@@ -810,14 +821,14 @@ export const register: Register = (on) => {
     try {
       captions.captured(e as unknown as Record<string, unknown>, res)
     } catch (err) {
-      $.ui.log(`ws captions: capture failed: ${String(err)}`, { to: 'debug' })
+      $.ui.log(`${$.plugin.name} captions: capture failed: ${String(err)}`, { to: 'debug' })
     }
     // The band's refresh rides here too: git, and a ws read after the
     // model's todo, agenda, mailbox or config tune call.
     try {
       band.toolCalled(e.tool, server, next.origin.plugin === 'engine')
     } catch (err) {
-      $.ui.log(`ws band: tool call handling failed: ${String(err)}`, { to: 'debug' })
+      $.ui.log(`${$.plugin.name} band: tool call handling failed: ${String(err)}`, { to: 'debug' })
     }
     return res
   })
@@ -892,12 +903,12 @@ export const register: Register = (on) => {
     try {
       if (advisoryOn) await compaction.measure(e.context, () => $.session.usage({ breakdown: 'summary' }))
     } catch (err) {
-      $.ui.log(`ws compaction: usage observation failed: ${String(err)}`, { to: 'debug' })
+      $.ui.log(`${$.plugin.name} compaction: usage observation failed: ${String(err)}`, { to: 'debug' })
     }
     try {
       band.measured()
     } catch (err) {
-      $.ui.log(`ws band: usage observation failed: ${String(err)}`, { to: 'debug' })
+      $.ui.log(`${$.plugin.name} band: usage observation failed: ${String(err)}`, { to: 'debug' })
     }
     return res
   })
@@ -909,7 +920,7 @@ export const register: Register = (on) => {
       try {
         band.stepped(e.model, e.effort)
       } catch (err) {
-        $.ui.log(`ws band: model request handling failed: ${String(err)}`, { to: 'debug' })
+        $.ui.log(`${$.plugin.name} band: model request handling failed: ${String(err)}`, { to: 'debug' })
       }
     }
     return yield* next(e)
@@ -922,7 +933,7 @@ export const register: Register = (on) => {
     try {
       compaction.turnStarted(e.agentId)
     } catch (err) {
-      $.ui.log(`ws compaction: turn start handling failed: ${String(err)}`, { to: 'debug' })
+      $.ui.log(`${$.plugin.name} compaction: turn start handling failed: ${String(err)}`, { to: 'debug' })
     }
     try {
       reconnect.turnStarted(e.agentId)
@@ -952,12 +963,12 @@ export const register: Register = (on) => {
     try {
       compaction.turnComplete(e.agentId, e.reason)
     } catch (err) {
-      $.ui.log(`ws compaction: turn end handling failed: ${String(err)}`, { to: 'debug' })
+      $.ui.log(`${$.plugin.name} compaction: turn end handling failed: ${String(err)}`, { to: 'debug' })
     }
     try {
       if (e.agentId === undefined) band.turnCompleted()
     } catch (err) {
-      $.ui.log(`ws band: turn end handling failed: ${String(err)}`, { to: 'debug' })
+      $.ui.log(`${$.plugin.name} band: turn end handling failed: ${String(err)}`, { to: 'debug' })
     }
     try {
       reconnect.turnComplete(e.agentId, e.reason)
@@ -976,17 +987,17 @@ export const register: Register = (on) => {
     try {
       compaction.compacted(e.trigger, e.agentId, res)
     } catch (err) {
-      $.ui.log(`ws compaction: compaction observation failed: ${String(err)}`, { to: 'debug' })
+      $.ui.log(`${$.plugin.name} compaction: compaction observation failed: ${String(err)}`, { to: 'debug' })
     }
     try {
       manual.compacted(e.trigger, e.agentId, res)
     } catch (err) {
-      $.ui.log(`ws manual: compaction observation failed: ${String(err)}`, { to: 'debug' })
+      $.ui.log(`${$.plugin.name} manual: compaction observation failed: ${String(err)}`, { to: 'debug' })
     }
     try {
       captions.compacted(e.trigger, e.agentId, res)
     } catch (err) {
-      $.ui.log(`ws captions: compaction observation failed: ${String(err)}`, { to: 'debug' })
+      $.ui.log(`${$.plugin.name} captions: compaction observation failed: ${String(err)}`, { to: 'debug' })
     }
     return res
   }).catch(($, e, next) => next(e))
@@ -1060,7 +1071,7 @@ export const register: Register = (on) => {
     try {
       compaction.end(e.reason)
     } catch (err) {
-      $.ui.log(`ws compaction: reset failed: ${String(err)}`, { to: 'debug' })
+      $.ui.log(`${$.plugin.name} compaction: reset failed: ${String(err)}`, { to: 'debug' })
     }
     // Reconnect: every end reason drops a pending request, so it never acts
     // in the next conversation after `clear` or `resume`.
@@ -1074,14 +1085,14 @@ export const register: Register = (on) => {
     try {
       captions.end()
     } catch (err) {
-      $.ui.log(`ws captions: reset failed: ${String(err)}`, { to: 'debug' })
+      $.ui.log(`${$.plugin.name} captions: reset failed: ${String(err)}`, { to: 'debug' })
     }
     // Band: the next conversation gets its own key, so the key's rows and
     // address go until it arrives; the switch and the figures stay.
     try {
       band.end()
     } catch (err) {
-      $.ui.log(`ws band: reset failed: ${String(err)}`, { to: 'debug' })
+      $.ui.log(`${$.plugin.name} band: reset failed: ${String(err)}`, { to: 'debug' })
     }
     // Manual: every end reason drops the cached manual and the snapshot flag,
     // so the next conversation (no session.start follows `clear`) sets up
@@ -1090,7 +1101,7 @@ export const register: Register = (on) => {
     try {
       manual.end(e.reason)
     } catch (err) {
-      $.ui.log(`ws manual: reset failed: ${String(err)}`, { to: 'debug' })
+      $.ui.log(`${$.plugin.name} manual: reset failed: ${String(err)}`, { to: 'debug' })
     }
     try {
       await $.store.delete(STORE_PREFIX + e.sessionId)

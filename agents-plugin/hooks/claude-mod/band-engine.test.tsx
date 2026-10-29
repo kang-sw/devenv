@@ -597,8 +597,31 @@ test('bar runs: the 1/8 glyph draws only past the label; under it the edge cell 
   expect(half[0]).toEqual({ text: ' 50% 100,00', color: C.onFill, bg: pctColor(26.25) })
   // 10.25 cells: under one half, the edge cell keeps the label's color.
   const less = barRuns(25.625, 40, BAR_LABELS, pctColor(25.625))
-  expect(less[0]).toEqual({ text: ' 50% 100,0', color: C.onFill, bg: pctColor(25.625) })
+  expect(less).toEqual([
+    { text: ' 50% 100,0', color: C.onFill, bg: pctColor(25.625) },
+    { text: '00', color: C.fg },
+    { text: ' / 200K', color: C.dim },
+    { text: ' ⚡90.0%', color: CACHE },
+    { text: ' '.repeat(13), color: pctColor(25.625) },
+  ])
   for (const runs of [half, less]) expect(runs.some((r) => /[▏▎▍▌▋▊▉]/.test(r.text))).toBe(false)
+})
+
+test('bar runs: a two-cell glyph the fill edge straddles takes its first cell\'s fill state', () => {
+  // 21.25 cells: the ⚡ sits on cells 20 and 21, the edge between them.
+  const fill = pctColor(53.125)
+  expect(barRuns(53.125, 40, BAR_LABELS, fill)).toEqual([
+    { text: ' 50% 100,000 / 200K ⚡', color: C.onFill, bg: fill },
+    { text: '90.0%', color: CACHE },
+    { text: ' '.repeat(13), color: fill },
+  ])
+  // 20.25 cells: the edge falls in the ⚡'s first cell, under one half, so the whole glyph keeps its color.
+  const under = pctColor(50.625)
+  expect(barRuns(50.625, 40, BAR_LABELS, under)).toEqual([
+    { text: ' 50% 100,000 / 200K ', color: C.onFill, bg: under },
+    { text: '⚡90.0%', color: CACHE },
+    { text: ' '.repeat(13), color: under },
+  ])
 })
 
 test('bar runs: a narrow bar drops the cache hit, then the window, then the tokens, and clips the percent last', () => {

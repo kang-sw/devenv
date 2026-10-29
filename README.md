@@ -24,7 +24,7 @@ nvim/                  Neovim config
 shell/                 tmux, WezTerm, Starship, zsh, helper scripts
 tools/                 local Claude session TUIs
 agents-plugin/         ws plugin package
-agents-plugin-wsflow/  agentless wsflow plugin package
+agents-plugin-wsflow/  wsflow plugin package (conservative defaults)
 agents-plugin-tool/    native ws MCP runtime and tooling source
 ai-docs/               workflow specs, tickets, mental models, references
 ```
@@ -62,8 +62,8 @@ claude plugin marketplace add kang-sw/devenv
 claude plugin install ws@kang-sw-devenv
 ```
 
-The agentless `wsflow` package lives in `agents-plugin-wsflow/` for separate
-marketplace installation. `install.sh` does not install `wsflow` into Claude.
+The conservative-default `wsflow` package lives in `agents-plugin-wsflow/`
+for separate marketplace installation. `install.sh` does not install `wsflow` into Claude.
 
 ## Pi Adapter
 

@@ -419,6 +419,8 @@ export type CaptionEdges = {
   /** Run `fn` every `ms`; the returned function stops it. */
   every: (ms: number, fn: () => void) => () => void
   log: (text: string) => void
+  /** The engine-reported plugin name, the log lines' prefix. */
+  plugin: string
 }
 
 export type Captions = {
@@ -488,7 +490,7 @@ export function createCaptions(): Captions {
 
   const log = (text: string) => {
     try {
-      edges?.log(`ws captions: ${text}`)
+      edges?.log(`${edges?.plugin ?? 'plugin'} captions: ${text}`)
     } catch {
       // Logging is best effort.
     }

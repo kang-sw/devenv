@@ -7,6 +7,7 @@ exists next to the file, and the distributed text names this package only.
 """
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -55,6 +56,8 @@ class WsflowClaudeHooksManifestTest(unittest.TestCase):
                 input=json.dumps({"source": "compact", "cwd": str(repo)}),
                 capture_output=True,
                 text=True,
+                # Keeps git from finding a repository that encloses TMPDIR.
+                env={**os.environ, "GIT_CEILING_DIRECTORIES": os.path.realpath(tmp)},
             )
             self.assertEqual(res.returncode, 0, res.stderr)
             self.assertIn("wsflow:lead-revive", res.stdout)

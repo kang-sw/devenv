@@ -28,6 +28,7 @@ Covers:
 """
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -112,13 +113,17 @@ class ClaudeHooksManifestTest(unittest.TestCase):
             f"no SessionStart(compact) hook runs compact-revive-nudge.py with this package's name: {commands}",
         )
 
-    def _run_nudge(self, payload, package="ws"):
+    def _run_nudge(self, payload, ceiling, package="ws"):
+        # The ceiling keeps git from finding a repository that encloses the
+        # temporary directory (TMPDIR inside a checkout), whose root would
+        # decide the nudge in place of the layout the test builds.
         script = PLUGIN_ROOT / "hooks" / "compact-revive-nudge.py"
         return subprocess.run(
             [sys.executable, str(script), *([package] if package else [])],
             input=json.dumps(payload),
             capture_output=True,
             text=True,
+            env={**os.environ, "GIT_CEILING_DIRECTORIES": os.path.realpath(ceiling)},
         )
 
     def _git_init(self, path):
@@ -131,27 +136,27 @@ class ClaudeHooksManifestTest(unittest.TestCase):
             (repo / "ai-docs" / "WORKFLOW.md").write_text("x", encoding="utf-8")
             self._git_init(repo)
 
-            compact = self._run_nudge({"source": "compact", "cwd": str(repo)})
+            compact = self._run_nudge({"source": "compact", "cwd": str(repo)}, tmp)
             self.assertEqual(compact.returncode, 0, compact.stderr)
             self.assertIn("ws:lead-revive", compact.stdout)
             self.assertIn("[message from ws plugin]", compact.stdout)
             self.assertIn("not a spawned worker or subagent", compact.stdout)
 
-            startup = self._run_nudge({"source": "startup", "cwd": str(repo)})
+            startup = self._run_nudge({"source": "startup", "cwd": str(repo)}, tmp)
             self.assertEqual(startup.returncode, 0, startup.stderr)
             self.assertEqual(startup.stdout, "")
 
             # From a subdirectory, the repository root decides.
             sub = repo / "a" / "b"
             sub.mkdir(parents=True)
-            from_sub = self._run_nudge({"source": "compact", "cwd": str(sub)})
+            from_sub = self._run_nudge({"source": "compact", "cwd": str(sub)}, tmp)
             self.assertIn("ws:lead-revive", from_sub.stdout)
 
             # The text names the package passed; without one nothing prints.
-            other = self._run_nudge({"source": "compact", "cwd": str(repo)}, package="pkgx")
+            other = self._run_nudge({"source": "compact", "cwd": str(repo)}, tmp, package="pkgx")
             self.assertIn("pkgx:lead-revive", other.stdout)
             self.assertNotIn("ws:", other.stdout)
-            bare = self._run_nudge({"source": "compact", "cwd": str(repo)}, package="")
+            bare = self._run_nudge({"source": "compact", "cwd": str(repo)}, tmp, package="")
             self.assertEqual(bare.stdout, "")
 
     def test_revive_nudge_outside_a_repository_walks_ancestors(self):
@@ -161,7 +166,7 @@ class ClaudeHooksManifestTest(unittest.TestCase):
             (top / "ai-docs" / "WORKFLOW.md").write_text("x", encoding="utf-8")
             deep = top / "x" / "y"
             deep.mkdir(parents=True)
-            res = self._run_nudge({"source": "compact", "cwd": str(deep)})
+            res = self._run_nudge({"source": "compact", "cwd": str(deep)}, tmp)
             self.assertEqual(res.returncode, 0, res.stderr)
             self.assertIn("ws:lead-revive", res.stdout)
 
@@ -169,7 +174,7 @@ class ClaudeHooksManifestTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             plain = Path(tmp) / "plain"
             plain.mkdir()
-            self.assertEqual(self._run_nudge({"source": "compact", "cwd": str(plain)}).stdout, "")
+            self.assertEqual(self._run_nudge({"source": "compact", "cwd": str(plain)}, tmp).stdout, "")
             # A repository whose root lacks it stays silent, even under an
             # ancestor that holds one: the repository root decides.
             (Path(tmp) / "ai-docs").mkdir()
@@ -177,7 +182,7 @@ class ClaudeHooksManifestTest(unittest.TestCase):
             repo = Path(tmp) / "repo"
             repo.mkdir()
             self._git_init(repo)
-            self.assertEqual(self._run_nudge({"source": "compact", "cwd": str(repo)}).stdout, "")
+            self.assertEqual(self._run_nudge({"source": "compact", "cwd": str(repo)}, tmp).stdout, "")
 
 
 if __name__ == "__main__":

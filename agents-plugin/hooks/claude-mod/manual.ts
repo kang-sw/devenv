@@ -1,8 +1,8 @@
 import type { SessionCompactResult, SessionCompactTrigger } from 'claude-code'
 
 /**
- * Workflow manual injection, a feature of the Claude mod (ws only, and only
- * in a ws project): the mod mints a lead session key for the conversation,
+ * Workflow manual injection, a feature of the Claude mod (behind its knob,
+ * and only in a ws project): the mod mints a lead session key for the conversation,
  * puts the keyed workflow manual in the system prompt, answers a main-thread
  * `workflow_manual` call with the session state alone while the system prompt
  * carries the manual, and collapses a repeat `playbook_read` or
@@ -51,10 +51,11 @@ export const SESSION_KEY_ANCHOR = '## Session Key'
 export const STATE_POINTER_LINE =
   'Your session state (agenda, todos, notes) is not in this prompt. When no `workflow_manual` result is visible in your context — a fresh session, or after compaction — call `workflow_manual` before acting.'
 
-export function keyLine(key: string): string {
+/** The key line; `plugin` is the engine-reported plugin name, which namespaces its revive skill. */
+export function keyLine(plugin: string, key: string): string {
   return (
     `Your lead session key for this conversation is \`${key}\`; pass it as \`session_key\`. ` +
-    'Continuing another track (for example `ws:lead-revive` with a preserved key) is still allowed.'
+    `Continuing another track (for example \`${plugin}:lead-revive\` with a preserved key) is still allowed.`
   )
 }
 
@@ -62,8 +63,8 @@ export const MAILBOX_LINE =
   'Mailbox push is bound to this key automatically: arriving mail starts your next turn even when you are idle, so launch no mailbox wait. If a revive switches your key, the push follows it.'
 
 /** The system prompt section: the state pointer, the key line, the mailbox line when the push runs here, then the manual. */
-export function sectionText(key: string, manual: string, push = false): string {
-  const keyed = push ? `${keyLine(key)}\n\n${MAILBOX_LINE}` : keyLine(key)
+export function sectionText(plugin: string, key: string, manual: string, push = false): string {
+  const keyed = push ? `${keyLine(plugin, key)}\n\n${MAILBOX_LINE}` : keyLine(plugin, key)
   return `${STATE_POINTER_LINE}\n\n${keyed}\n\n${manual}`
 }
 
@@ -103,9 +104,9 @@ export function revivedKeyToAdopt(raw: unknown, current: string | undefined, tex
  * `push` (the mailbox push runs here) it says the push follows, since a lead
  * whose system prompt lacks the mailbox line would otherwise arm a wait.
  */
-export function adoptionNotice(previous: string | undefined, current: string, push = false): string {
+export function adoptionNotice(plugin: string, previous: string | undefined, current: string, push = false): string {
   return (
-    `[ws] Lead session key changed: ${previous ?? '(none)'} -> ${current}. ` +
+    `[${plugin}] Lead session key changed: ${previous ?? '(none)'} -> ${current}. ` +
     `Keep passing ${current} as session_key; this conversation resumes with it, and the system prompt names it after the next /compact or compaction request.` +
     (push ? ` Mailbox push is bound to ${current}: arriving mail starts your next turn even when you are idle, so launch no mailbox wait.` : '')
   )
@@ -312,6 +313,8 @@ export type ManualEdges = {
   /** The main conversation in Messages API form. */
   messages: () => Promise<readonly ApiMessageLike[]>
   log: (text: string, to: 'transcript' | 'debug') => void
+  /** The engine-reported plugin name: the log lines' prefix, the notice's label, and the key line's revive skill spell it. */
+  plugin: string
 }
 
 export type Manual = {
@@ -329,9 +332,13 @@ export type Manual = {
    * The ws-project gate opened after it read closed (register.ts retried a
    * failed knob read): set up now. This conversation's first compose is past,
    * so the section reaches the model only from the next landing on, and the
-   * snapshot flag stays false until then.
+   * snapshot flag stays false until then. `bound` is a key the model already
+   * bound the mailbox push to while the gate read closed: the conversation
+   * keeps it (a re-login with it, never a mint, as an adoption's rebuild),
+   * so the push, the band and the key entry stay on the key the model holds.
+   * Without one the setup mints as at a start.
    */
-  opened: () => void
+  opened: (bound?: string) => void
   /**
    * A main-thread ws read result: the text the model should read in place of
    * `text`, or undefined to keep the result as it is. `tool` is its
@@ -387,10 +394,17 @@ export function createManual(): Manual {
    * the cache's key, since an adoption switches it before the rebuild lands.
    */
   let current: string | undefined
+  /**
+   * The key the model held when the gate opened late (opened's `bound`): a
+   * setup re-logs in with it in place of the key entry and never mints over
+   * it. Dropped at every session start or end and at an adoption, which
+   * moves the conversation to another key.
+   */
+  let lateBound: string | undefined
   /** (family, key) -> hash of the text last read: only tells when to read the conversation. */
   const hints = new Map<string, string>()
 
-  const debug = (text: string) => edges?.log(`ws manual: ${text}`, 'debug')
+  const debug = (text: string) => edges?.log(`${edges?.plugin ?? 'plugin'} manual: ${text}`, 'debug')
 
   const reset = () => {
     generation += 1
@@ -399,6 +413,7 @@ export function createManual(): Manual {
     snapshot = false
     awaiting = 'start'
     current = undefined
+    lateBound = undefined
   }
 
   /** Make `key` the conversation's key, telling the listener when it changed. */
@@ -425,17 +440,18 @@ export function createManual(): Manual {
   }
 
   /**
-   * Re-log in with the stored key (or `adopted`, an adoption's rebuild) or mint
-   * one, write the key entry, tell the listener, and fill the cache. An
-   * adoption's rebuild never mints: a refused re-login there fails the setup,
-   * so the push stays on the key the lead just adopted.
+   * Re-log in with the stored key (or `adopted`, an adoption's rebuild, or the
+   * key the model held at a late open) or mint one, write the key entry, tell
+   * the listener, and fill the cache. Neither an adoption's rebuild nor a late
+   * open over a held key mints: a refused re-login there fails the setup, so
+   * the push stays on the key the lead holds.
    */
   const setup = async (gen: number, adopted?: string) => {
     const e = edges
     if (!e) return
     if (gate === undefined) {
       const open = await e.isWsProject().catch((err) => {
-        debug(`project check failed (${String(err)}); reading as no ws project`)
+        debug(`project check failed (${String(err)}); reading as no workflow project`)
         return false
       })
       // An opened() meanwhile keeps the gate open.
@@ -446,10 +462,11 @@ export function createManual(): Manual {
     if (!server) throw new Error('the MCP server was not resolved')
     const [sessionId, root] = await Promise.all([e.sessionId(), e.root()])
     const entry = KEY_STORE_PREFIX + sessionId
-    const stored = adopted ?? storedKey(await e.store.get(entry))
+    const held = adopted ?? lateBound
+    const stored = held ?? storedKey(await e.store.get(entry))
     let key = stored !== undefined && (await relogin(e, server, root, stored)) ? stored : undefined
     if (key === undefined) {
-      if (adopted !== undefined) throw new Error(`the rebuild's re-login with ${adopted} was refused`)
+      if (held !== undefined) throw new Error(`the re-login with the held key ${held} was refused`)
       key = ferruleKey(await e.call(server, 'ferrule', { root, format: 'json' }))
       if (key === undefined) throw new Error('ferrule answered no session key')
     }
@@ -469,7 +486,7 @@ export function createManual(): Manual {
     if (!staticBody.trim()) throw new Error('the static manual body was empty')
     if (gen !== generation) return
     const cut = cutStaticBody(response, staticBody)
-    cache = { key, section: sectionText(key, manual, push), staticBody, span: cut.found ? cut.span : undefined, reused: stored !== undefined }
+    cache = { key, section: sectionText(e.plugin, key, manual, push), staticBody, span: cut.found ? cut.span : undefined, reused: stored !== undefined }
     debug(`${key === stored ? 're-logged in with' : 'minted'} ${key}`)
   }
 
@@ -570,6 +587,7 @@ export function createManual(): Manual {
       generation += 1
       const mine = generation
       const previous = current
+      lateBound = undefined
       cache = undefined
       snapshot = false
       switchKey(e, revived)
@@ -585,7 +603,7 @@ export function createManual(): Manual {
       // reused: the flag stays false until a landing.
       begin(revived, rewrite)
       const [push] = await Promise.all([e.pushAvailable().catch(() => false), rewrite])
-      return adoptionNotice(previous, revived, push)
+      return adoptionNotice(e.plugin, previous, revived, push)
     } catch (err) {
       debug(`adoption of ${revived} failed: ${String(err)}`)
       return undefined
@@ -645,10 +663,11 @@ export function createManual(): Manual {
 
     landed,
 
-    opened: () => {
+    opened: (bound) => {
       if (gate === true) return
       gate = true
-      debug('the project gate opened late; setting up now')
+      lateBound = bound
+      debug(`the project gate opened late; setting up now${bound === undefined ? '' : ` with the bound key ${bound}`}`)
       if (edges && !pending && !cache) begin()
     },
 

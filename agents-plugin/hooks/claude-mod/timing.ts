@@ -4,8 +4,14 @@
 // engine; nothing here touches `$`.
 
 export const TOOL_NAME = 'request_compaction'
-/** Opens every prompt the mod submits, so it never reads as the human's own words. */
-export const LABEL = '[ws compaction] '
+/**
+ * Opens every prompt the mod submits, so it never reads as the human's own
+ * words; `plugin` is the engine-reported plugin name, as the reconnect
+ * feature's prompts spell it.
+ */
+export function label(plugin: string): string {
+  return `[${plugin} compaction] `
+}
 /** The config key that sets the advisory point; read once per session start. */
 export const ADVISORY_KEY = 'claude.compaction_advisory_percent'
 
@@ -132,14 +138,14 @@ function thousands(tokens: number): string {
  * thread went idle before delivery; other queued prompts may still run before
  * the message's own turn, so the head names that point.
  */
-function head(t: Thresholds, tokens: number): string {
-  return `${LABEL}Context window at the end of the last turn: ${percentOf(tokens, t.raw)}% (${thousands(tokens)} / ${thousands(t.raw)} tokens) / ${percentOf(t.hard, t.raw)}% (automatic compaction point). `
+function head(plugin: string, t: Thresholds, tokens: number): string {
+  return `${label(plugin)}Context window at the end of the last turn: ${percentOf(tokens, t.raw)}% (${thousands(tokens)} / ${thousands(t.raw)} tokens) / ${percentOf(t.hard, t.raw)}% (automatic compaction point). `
 }
 
-export function advisoryText(t: Thresholds, tokens: number): string {
+export function advisoryText(plugin: string, t: Thresholds, tokens: number): string {
   const hard = percentOf(t.hard, t.raw)
   return (
-    `${head(t, tokens)}This is past the advisory point (${percentOf(t.advisory, t.raw)}%).\n` +
+    `${head(plugin, t, tokens)}This is past the advisory point (${percentOf(t.advisory, t.raw)}%).\n` +
     '\n' +
     'This is not an instruction to compact right now. If you are in active discussion with the human, awaiting their answer or clarification, or holding working context that would be costly to rebuild (a half-applied change or a diagnosis in progress), carry on for now. A pause after asking the human a question is not a boundary.\n' +
     '\n' +
@@ -149,17 +155,17 @@ export function advisoryText(t: Thresholds, tokens: number): string {
   )
 }
 
-export function milestoneText(which: 1 | 2, t: Thresholds, tokens: number): string {
+export function milestoneText(plugin: string, which: 1 | 2, t: Thresholds, tokens: number): string {
   const hard = percentOf(t.hard, t.raw)
   return which === 1
-    ? head(t, tokens) +
+    ? head(plugin, t, tokens) +
         `Past ${hard}%, Claude Code compacts automatically, mid-work if need be. From here on, a good boundary is worth taking; if this is one, update durable records and call the compaction request tool, as the advisory describes (the \`continue\` flag only when work must resume by itself). Otherwise end this turn without replying.`
-    : head(t, tokens) +
+    : head(plugin, t, tokens) +
         'This is the last reading before automatic compaction. Compacting at a boundary you choose keeps the work coherent; take this one if it fits, update durable records and call the compaction request tool, as the advisory describes (the `continue` flag only when work must resume by itself). Otherwise end this turn without replying, and take the next good boundary.'
 }
 
-export function deliveryText(d: Delivery, t: Thresholds, tokens: number): string {
-  return d.kind === 'advisory' ? advisoryText(t, tokens) : milestoneText(d.which, t, tokens)
+export function deliveryText(plugin: string, d: Delivery, t: Thresholds, tokens: number): string {
+  return d.kind === 'advisory' ? advisoryText(plugin, t, tokens) : milestoneText(plugin, d.which, t, tokens)
 }
 
 export const LEVER_DESCRIPTION =
@@ -178,11 +184,13 @@ export function leverResult(resume: boolean): string {
 }
 
 /** The resume prompt after a compaction landed: the lever's own, or another that landed first. */
-export const RESUME_TEXT = `${LABEL}Compaction landed; resume the work in progress from the summary and your durable records.`
+export function resumeText(plugin: string): string {
+  return `${label(plugin)}Compaction landed; resume the work in progress from the summary and your durable records.`
+}
 
 /** The resume prompt after a hook vetoed the lever's compaction with `{ skip }`. */
-export function vetoedResumeText(reason: string): string {
-  return `${LABEL}Compaction did not run (${reason}); your context is unchanged. Resume the work in progress.`
+export function vetoedResumeText(plugin: string, reason: string): string {
+  return `${label(plugin)}Compaction did not run (${reason}); your context is unchanged. Resume the work in progress.`
 }
 
 /**

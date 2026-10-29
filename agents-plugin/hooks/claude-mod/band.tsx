@@ -657,6 +657,8 @@ export type BandEdges = {
   /** Ask the engine to draw the band again: a figure changed. */
   redraw: () => void
   log: (text: string) => void
+  /** The engine-reported plugin name, the log lines' prefix. */
+  plugin: string
 }
 
 export type Band = {
@@ -704,7 +706,7 @@ export function createBand(): Band {
 
   const log = (text: string) => {
     try {
-      edges?.log(`ws band: ${text}`)
+      edges?.log(`${edges?.plugin ?? 'plugin'} band: ${text}`)
     } catch {
       // Logging is best effort.
     }
@@ -737,7 +739,7 @@ export function createBand(): Band {
       return
     }
     track(
-      'ws read',
+      'todo and agenda read',
       (async () => {
         let todos: Todo[] | undefined
         let agenda: string[] | undefined
@@ -750,7 +752,7 @@ export function createBand(): Band {
           agenda = parseAgenda(agendaText)
           if (todos === undefined || agenda === undefined) throw new Error('unreadable todo_list or agenda_list text')
         } catch (err) {
-          log(`ws rows hidden: ${String(err)}`)
+          log(`todo and agenda rows hidden: ${String(err)}`)
           todos = undefined
           agenda = undefined
         }
