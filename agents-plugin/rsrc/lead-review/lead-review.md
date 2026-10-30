@@ -74,8 +74,8 @@ you resolve the target, adjudicate their findings, and carry the decisions.
   else asks "Merge?" and merges on confirmation, then notifies per the
   config's Notification Method; a range scenario ends at the step-7 commit.
 - **NEEDS FIX**: write the findings to
-  `{{.McpNamespace}}/path.generate(kind: "review")` and ask: fix locally, or
-  post to the contributor. Locally →
+  `{{.McpNamespace}}/path.generate(kind: "review", stems: ["findings"])`
+  and ask: fix locally, or post to the contributor. Locally →
   `{{.SkillNamespace}}:lead-delegate` with the findings path and the reviewed
   target for a bounded repair. If its routing gate requires a ticket, invoke
   `{{.SkillNamespace}}:lead-ticket` with those inputs, then

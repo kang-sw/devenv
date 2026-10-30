@@ -44,8 +44,8 @@ Wake
 ## On: find an address
 
 1. Read the workflow ambient block, or call
-   `{{.McpNamespace}}/mailbox.lookup_peers(session_key: <your key>)`: its self
-   entry reports your own resolved address, or — if you set neither launch
+   `{{.McpNamespace}}/mailbox.lookup_peers(session_key: <your key>, scope:
+   "machine")`: its self entry reports your own resolved address, or — if you set neither launch
    env above — your live reply handle, once you have sent or looked yourself
    up at least once.
 2. Relay your address to whoever should mail you. The same call's peer list
