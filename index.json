@@ -618,7 +618,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-30T15:01:29Z"
+        "touched_at": "2026-10-30T15:02:08Z",
+        "impl": {
+          "branch": "impl/develop/used-five-zebra"
+        }
       }
     },
     "261030-feat-note-layer-discipline-and-worker-readonly": {
