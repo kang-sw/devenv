@@ -628,7 +628,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-30T05:35:13Z"
+        "touched_at": "2026-10-30T05:35:48Z",
+        "impl": {
+          "branch": "impl/develop/cacti-frill-lance"
+        }
       }
     }
   }
