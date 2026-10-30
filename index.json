@@ -622,7 +622,17 @@
       }
     },
     "261030-feat-lead-coauthor-paged-document": {
-      "registered_at": "2026-10-30T05:28:42Z"
+      "registered_at": "2026-10-30T05:28:42Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-10-30T06:11:05Z",
+        "impl": {
+          "branch": "impl/develop/eats-ruse-mural"
+        }
+      }
     },
     "261030-feat-workflow-manual-worktree-work-mode": {
       "registered_at": "2026-10-30T04:48:11Z",
