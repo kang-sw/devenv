@@ -158,6 +158,64 @@ export function formatNotice(label: string, recvTool: string, key: string): stri
   return `[${label}] Mail is waiting for session_key ${key}. Call ${recvTool} with session_key ${key} to receive it.`
 }
 
+/** The label the mailbox's prompts carry in brackets: `<plugin> mailbox`. */
+export function mailboxLabel(plugin: string): string {
+  return `${plugin} mailbox`
+}
+
+/** One envelope read back out of a formatBatch prompt: its sender's handle and its body. */
+export type RowMail = { from: string; body: string }
+
+const escapeRe = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const ENVELOPE_HEAD = /^mail from (.+?)(?: \([^()\n]*\))?:$/
+const UNPARSED_HEAD = 'unparsed mailbox recv output:'
+
+/**
+ * What a row of the mailbox's own prompts holds, read back out of its text:
+ * formatBatch and formatNotice prompts, several joined by a blank line when
+ * they were queued for a running turn. Mail when any batch is among them (its
+ * envelopes in order; a row of mail and notices together is mail), the
+ * notice's one-line caption when only notices are, and undefined for text
+ * these templates did not write. A body that itself holds a blank line and
+ * an envelope or notice line is split there: the row is only drawn from this.
+ */
+export function mailboxRow(label: string, text: string): { mail: RowMail[] } | { caption: string } | undefined {
+  const tag = escapeRe(`[${label}]`)
+  const notice = new RegExp(`^${tag} Mail is waiting for session_key (.+?)\\. Call (.+) with session_key \\1 to receive it\\.$`)
+  const batchHead = new RegExp(`^${tag} \\d+ message\\(s\\) arrived for session_key .+?\\. They were already received through .+; do not call it again for these\\.$`)
+  const mail: RowMail[] = []
+  let batches = 0
+  let notices = 0
+  /** The envelope the next unrecognized chunk continues, if any. */
+  let open: RowMail | undefined
+  for (const chunk of text.split('\n\n')) {
+    if (notice.test(chunk)) {
+      notices += 1
+      open = undefined
+      continue
+    }
+    if (batchHead.test(chunk)) {
+      batches += 1
+      open = undefined
+      continue
+    }
+    const newline = chunk.indexOf('\n')
+    const first = newline < 0 ? chunk : chunk.slice(0, newline)
+    const rest = newline < 0 ? '' : chunk.slice(newline + 1)
+    const sender = batches > 0 ? (first === UNPARSED_HEAD ? 'unparsed recv output' : ENVELOPE_HEAD.exec(first)?.[1]) : undefined
+    if (sender !== undefined) {
+      open = { from: sender, body: rest }
+      mail.push(open)
+    } else if (open) {
+      open.body += `\n\n${chunk}`
+    } else {
+      return undefined
+    }
+  }
+  if (batches > 0) return { mail }
+  return notices > 0 ? { caption: `[${label}] mail waiting` } : undefined
+}
+
 export interface Watcher {
   /** Arm the loop for `key`, waking on its reply-id queue and, when given, the named inbox `slug`. */
   bind: (key: string, slug?: string) => BindResult

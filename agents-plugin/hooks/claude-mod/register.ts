@@ -1,13 +1,14 @@
 import type { HookStream, ProcessSpawnChunk, ProcessSpawnResult, Register, ToolCallResult } from 'claude-code'
 
 import { createBand, drawBand, readGit, type Mailbox } from './band'
-import { createCaptions, drawCall, drawEmpty, drawRun, groupUnit, toolUseUnit } from './captions'
+import { createCaptions, drawCall, drawEmpty, drawRun, groupUnit, toolUseUnit, userRowUnit } from './captions'
 import { createCompaction } from './compaction'
 import { createManual, SECTION_ID, type ReadFamily } from './manual'
 import { createReconnect, reconnectDescription, TOOL_NAME as RECONNECT_TOOL } from './reconnect'
 import { ADVISORY_KEY, LEVER_DESCRIPTION, TOOL_NAME as LEVER_TOOL } from './timing'
 import {
   createWatcher,
+  mailboxLabel,
   mapWaitExit,
   parseRecvText,
   type BindResult,
@@ -47,7 +48,9 @@ import {
 // - Tool-call captions (off until claude.display_summary_enabled is set): a
 //   finished, collapsed tool row, or a run the engine folds into one group,
 //   drawn as a short caption a second model call wrote, the raw row still the
-//   one the model reads and the expanded view draws (see captions.tsx).
+//   one the model reads and the expanded view draws (see captions.tsx). The
+//   mod's own prompt rows draw compact under the same switch: a fixed notice
+//   as one line, a mailbox delivery as a recap.
 // - Status band (off until claude.status_band_enabled is set): a framed band
 //   above the prompt with the model, folder, git, context, rate-limit and
 //   cost figures, and the held key's todos, agenda and mailbox address (its
@@ -478,7 +481,7 @@ export const register: Register = (on) => {
   const band = createBand()
 
   on('session.start', async ($, e, next) => {
-    const label = `${$.plugin.name} mailbox`
+    const label = mailboxLabel($.plugin.name)
     const mailboxLog = (text: string) => $.ui.log(`${label}: ${text}`, { to: 'debug' })
 
     /** One ws MCP tool call's text; an error result rejects with its text. */
@@ -1166,6 +1169,21 @@ export const register: Register = (on) => {
     const caption = captions.toolCaption(call.id)
     if (caption) return drawCall($.ui.resolve(e), call, caption, e.viewport?.columns)
     captions.request(unit)
+    return next(e)
+  })
+
+  // The mod's own user-role rows (compaction, reconnect and mailbox prompts):
+  // a fixed notice draws its one-line caption, a mail row its recap once one
+  // arrived (raw and queued until then). The rewrite is the drawing alone;
+  // the stored row and the model's input stay as they were.
+  on('ui.render', { component: 'UserMessage' }, async ($, e, next) => {
+    if (!captions.isOn()) return next(e)
+    const row = userRowUnit($.plugin.name, e.props)
+    if (!row) return next(e)
+    if ('caption' in row) return next({ ...e, props: { ...e.props, text: row.caption } })
+    const recap = captions.mailRecap(row.unit.key)
+    if (recap !== undefined) return next({ ...e, props: { ...e.props, text: `${row.tag} ${recap}` } })
+    captions.request(row.unit)
     return next(e)
   })
 

@@ -63,16 +63,39 @@ export function reconnectResult(resume: boolean): string {
 /** The last sentence of the resume prompt, which also ends a failure report for a call with the flag. */
 export const RESUME_SENTENCE = 'Resume the interrupted work.'
 
+/** Opens every prompt the lever submits, so it never reads as the human's own words. */
+export function label(plugin: string): string {
+  return `[${plugin} mcp] `
+}
+
 export function successText(plugin: string): string {
-  return `[${plugin} mcp] The ${plugin} MCP server reconnected; its tools are available again. ${RESUME_SENTENCE}`
+  return `${label(plugin)}The ${plugin} MCP server reconnected; its tools are available again. ${RESUME_SENTENCE}`
 }
 
 export function failureText(plugin: string, reason: string, resume: boolean): string {
   const head =
-    `[${plugin} mcp] The ${plugin} MCP server did not come back (${reason}). ` +
+    `${label(plugin)}The ${plugin} MCP server did not come back (${reason}). ` +
     `Do not call ${TOOL_NAME} again for this drop: a reconnect that just failed fails the same way. ` +
     'Ask the user to re-enable the server from /mcp, run /reload-plugins, or restart the session.'
   return resume ? `${head} ${RESUME_SENTENCE}` : head
+}
+
+/**
+ * The one-line caption a collapsed row of the success or failure prompt
+ * draws, label first: the outcome, and a failure's reason read back out of
+ * the text (the render carries no row id). Undefined for any other text,
+ * which then draws raw.
+ */
+export function reconnectCaption(plugin: string, text: string): string | undefined {
+  const tag = label(plugin).trimEnd()
+  if (text === successText(plugin)) return `${tag} reconnected`
+  for (const resume of [false, true]) {
+    const [head = '', tail = ''] = failureText(plugin, '\u0000', resume).split('\u0000')
+    if (text.length >= head.length + tail.length && text.startsWith(head) && text.endsWith(tail)) {
+      return `${tag} failed: ${text.slice(head.length, text.length - tail.length)}`
+    }
+  }
+  return undefined
 }
 
 /** The failure reasons the step words; the command's own words fill the last two. */
