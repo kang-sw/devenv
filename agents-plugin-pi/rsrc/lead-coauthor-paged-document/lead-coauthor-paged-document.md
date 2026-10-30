@@ -106,7 +106,7 @@ Progress section
   .progress { --p-ink: #1f2328; --p-mute: #656d76; --p-line: #e1e4e8; --p-accent: #1f6f8b;
     --p-done: #1a7f37; --p-review: #bf8700; --p-todo: #8c959f;
     max-width: 1280px; margin: 32px auto; background: #fff; color: var(--p-ink);
-    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", "Malgun Gothic", sans-serif;
+    font: 15px/1.5 system-ui, sans-serif;
     padding: 28px 40px 32px; box-sizing: border-box; border-top: 4px solid var(--p-ink); }
   .p-eyebrow { font-size: 14px; font-weight: 700; color: var(--p-accent); letter-spacing: .02em; }
   .p-eyebrow span { color: var(--p-mute); font-weight: 500; margin-left: 8px; }
@@ -123,7 +123,7 @@ Progress section
     font-variant-numeric: tabular-nums; }
   .p-foot { display: grid; grid-template-columns: 92px 1fr; gap: 6px 12px; margin-top: 20px; font-size: 14px; }
   .p-foot b { color: var(--p-mute); font-weight: 600; }
-  .p-foot .id { font-family: ui-monospace, Consolas, monospace; color: var(--p-mute); font-size: 13px; }
+  .p-foot .id { font-family: ui-monospace, monospace; color: var(--p-mute); font-size: 13px; }
   @media print { .progress { display: none !important; } }
   body.presenting .progress { display: none; }
   </style>
