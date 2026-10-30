@@ -65,7 +65,8 @@ func TestNoteWriteSearchEraseRoundTripPerLayer(t *testing.T) {
 	for _, layer := range []string{"machine", "worktree", "clone"} {
 		t.Run(layer, func(t *testing.T) {
 			writeResp := callToolWithKey(t, s, 2, key, "note.write", map[string]any{
-				"layer": layer,
+				"layer":  layer,
+				"reason": "test fixture: another worktree or project needs it",
 				"notes": []any{
 					map[string]any{"key": "roundtrip." + layer, "value": "hello " + layer, "priority": 3},
 				},
@@ -202,12 +203,14 @@ func TestNoteWriteFullOverwriteUpdatesPriority(t *testing.T) {
 	_, key := mintRootKey(t, s, 1)
 
 	callToolWithKey(t, s, 2, key, "note.write", map[string]any{
-		"layer": "machine",
-		"notes": []any{map[string]any{"key": "overwrite.me", "value": "v1", "priority": 1}},
+		"layer":  "machine",
+		"reason": "test fixture: another worktree or project needs it",
+		"notes":  []any{map[string]any{"key": "overwrite.me", "value": "v1", "priority": 1}},
 	})
 	callToolWithKey(t, s, 3, key, "note.write", map[string]any{
-		"layer": "machine",
-		"notes": []any{map[string]any{"key": "overwrite.me", "value": "v2", "priority": 9}},
+		"layer":  "machine",
+		"reason": "test fixture: another worktree or project needs it",
+		"notes":  []any{map[string]any{"key": "overwrite.me", "value": "v2", "priority": 9}},
 	})
 
 	searchResp := callToolWithKey(t, s, 4, key, "note.query", map[string]any{
@@ -243,8 +246,9 @@ func TestNoteWorktreeLayerIsolatedAcrossWorktrees(t *testing.T) {
 		"notes": []any{map[string]any{"key": "wt.only.main", "value": "main worktree note", "priority": 1}},
 	})
 	callToolWithKey(t, s, 4, keyMain, "note.write", map[string]any{
-		"layer": "machine",
-		"notes": []any{map[string]any{"key": "machine.shared", "value": "visible everywhere", "priority": 1}},
+		"layer":  "machine",
+		"reason": "test fixture: another worktree or project needs it",
+		"notes":  []any{map[string]any{"key": "machine.shared", "value": "visible everywhere", "priority": 1}},
 	})
 
 	// The worktree note must be visible under the main worktree's own key...
@@ -290,8 +294,9 @@ func TestNoteCloneLayerIsProjectScopedAndWorktreeAgnostic(t *testing.T) {
 	_, keyOther := mintRootKey(t, s, 3)
 
 	callToolWithKey(t, s, 4, keyMain, "note.write", map[string]any{
-		"layer": "clone",
-		"notes": []any{map[string]any{"key": "clone.shared", "value": "visible across worktrees", "priority": 1}},
+		"layer":  "clone",
+		"reason": "test fixture: another worktree or project needs it",
+		"notes":  []any{map[string]any{"key": "clone.shared", "value": "visible across worktrees", "priority": 1}},
 	})
 
 	// Visible from the sibling worktree of the same project (worktree-agnostic).
@@ -342,8 +347,9 @@ func TestNoteWriteRestampsWrittenAtOnOverwrite(t *testing.T) {
 
 	noteNow = func() time.Time { return firstInstant }
 	callToolWithKey(t, s, 2, key, "note.write", map[string]any{
-		"layer": "machine",
-		"notes": []any{map[string]any{"key": "restamp.me", "value": "v1", "priority": 1}},
+		"layer":  "machine",
+		"reason": "test fixture: another worktree or project needs it",
+		"notes":  []any{map[string]any{"key": "restamp.me", "value": "v1", "priority": 1}},
 	})
 	first := searchSingleNoteRecord(t, s, 3, key, "machine", "restamp.me")
 	if first.WrittenAt != firstInstant.Format(time.RFC3339) {
@@ -352,8 +358,9 @@ func TestNoteWriteRestampsWrittenAtOnOverwrite(t *testing.T) {
 
 	noteNow = func() time.Time { return secondInstant }
 	callToolWithKey(t, s, 4, key, "note.write", map[string]any{
-		"layer": "machine",
-		"notes": []any{map[string]any{"key": "restamp.me", "value": "v2", "priority": 1}},
+		"layer":  "machine",
+		"reason": "test fixture: another worktree or project needs it",
+		"notes":  []any{map[string]any{"key": "restamp.me", "value": "v2", "priority": 1}},
 	})
 	second := searchSingleNoteRecord(t, s, 5, key, "machine", "restamp.me")
 
@@ -410,8 +417,9 @@ func TestNoteWriteMachineLayerRequiresKnownSessionKey(t *testing.T) {
 	s := NewServer(t.TempDir(), "test")
 
 	resp := callToolWithKey(t, s, 1, "not-a-real-key", "note.write", map[string]any{
-		"layer": "machine",
-		"notes": []any{map[string]any{"key": "a", "value": "b"}},
+		"layer":  "machine",
+		"reason": "test fixture: another worktree or project needs it",
+		"notes":  []any{map[string]any{"key": "a", "value": "b"}},
 	})
 	if !strings.Contains(resp, "unknown_session") {
 		t.Fatalf("note.write(machine, unknown key) = %s, want unknown_session error", resp)
@@ -428,8 +436,9 @@ func TestNoteWriteMachineLayerRejectsEmptySessionKey(t *testing.T) {
 	s := NewServer(t.TempDir(), "test")
 
 	resp := callToolWithKey(t, s, 1, "", "note.write", map[string]any{
-		"layer": "machine",
-		"notes": []any{map[string]any{"key": "a", "value": "b"}},
+		"layer":  "machine",
+		"reason": "test fixture: another worktree or project needs it",
+		"notes":  []any{map[string]any{"key": "a", "value": "b"}},
 	})
 	if !strings.Contains(resp, "session_key is required") {
 		t.Fatalf("note.write(machine, empty session_key) = %s, want a session_key-required error", resp)
@@ -450,8 +459,9 @@ func TestNoteMuteUnmuteRoundTrip(t *testing.T) {
 		t.Run(layer, func(t *testing.T) {
 			noteKey := "mute.roundtrip." + layer
 			callToolWithKey(t, s, id, key, "note.write", map[string]any{
-				"layer": layer,
-				"notes": []any{map[string]any{"key": noteKey, "value": "v", "priority": 1}},
+				"layer":  layer,
+				"reason": "test fixture: another worktree or project needs it",
+				"notes":  []any{map[string]any{"key": noteKey, "value": "v", "priority": 1}},
 			})
 			id++
 
@@ -510,8 +520,9 @@ func TestNoteMuteUnmuteDoesNotRestampWrittenAt(t *testing.T) {
 
 	noteNow = func() time.Time { return writeInstant }
 	callToolWithKey(t, s, 2, key, "note.write", map[string]any{
-		"layer": "machine",
-		"notes": []any{map[string]any{"key": "no.restamp", "value": "v", "priority": 1}},
+		"layer":  "machine",
+		"reason": "test fixture: another worktree or project needs it",
+		"notes":  []any{map[string]any{"key": "no.restamp", "value": "v", "priority": 1}},
 	})
 	wantWrittenAt := writeInstant.Format(time.RFC3339)
 
@@ -547,16 +558,18 @@ func TestNoteWriteOverMutedKeyPreservesMute(t *testing.T) {
 	_, key := mintRootKey(t, s, 1)
 
 	callToolWithKey(t, s, 2, key, "note.write", map[string]any{
-		"layer": "machine",
-		"notes": []any{map[string]any{"key": "write.over.mute", "value": "v1", "priority": 1}},
+		"layer":  "machine",
+		"reason": "test fixture: another worktree or project needs it",
+		"notes":  []any{map[string]any{"key": "write.over.mute", "value": "v1", "priority": 1}},
 	})
 	callToolWithKey(t, s, 3, key, "note.mute", map[string]any{
 		"layer": "machine",
 		"keys":  []any{"write.over.mute"},
 	})
 	callToolWithKey(t, s, 4, key, "note.write", map[string]any{
-		"layer": "machine",
-		"notes": []any{map[string]any{"key": "write.over.mute", "value": "v2", "priority": 9}},
+		"layer":  "machine",
+		"reason": "test fixture: another worktree or project needs it",
+		"notes":  []any{map[string]any{"key": "write.over.mute", "value": "v2", "priority": 9}},
 	})
 
 	rec := searchSingleNoteRecord(t, s, 5, key, "machine", "write.over.mute")
@@ -576,8 +589,9 @@ func TestNoteMuteAlreadyMutedKeyIsNoop(t *testing.T) {
 	_, key := mintRootKey(t, s, 1)
 
 	callToolWithKey(t, s, 2, key, "note.write", map[string]any{
-		"layer": "machine",
-		"notes": []any{map[string]any{"key": "double.mute", "value": "v", "priority": 1}},
+		"layer":  "machine",
+		"reason": "test fixture: another worktree or project needs it",
+		"notes":  []any{map[string]any{"key": "double.mute", "value": "v", "priority": 1}},
 	})
 	callToolWithKey(t, s, 3, key, "note.mute", map[string]any{
 		"layer": "machine",
@@ -644,8 +658,9 @@ func TestNoteSearchOmittedLayerSearchesAllFourTagged(t *testing.T) {
 	id := 2
 	writeLayerNote := func(layer string, priority int) {
 		callToolWithKey(t, s, id, key, "note.write", map[string]any{
-			"layer": layer,
-			"notes": []any{map[string]any{"key": "omit.all." + layer, "value": "v-" + layer, "priority": priority}},
+			"layer":  layer,
+			"reason": "test fixture: another worktree or project needs it",
+			"notes":  []any{map[string]any{"key": "omit.all." + layer, "value": "v-" + layer, "priority": priority}},
 		})
 		id++
 	}
@@ -692,8 +707,9 @@ func TestNoteSearchArrayLayerScopesToThoseLayers(t *testing.T) {
 	id := 2
 	for _, layer := range []string{"machine", "worktree", "clone", "repo"} {
 		callToolWithKey(t, s, id, key, "note.write", map[string]any{
-			"layer": layer,
-			"notes": []any{map[string]any{"key": "array.scope." + layer, "value": "v", "priority": 1}},
+			"layer":  layer,
+			"reason": "test fixture: another worktree or project needs it",
+			"notes":  []any{map[string]any{"key": "array.scope." + layer, "value": "v", "priority": 1}},
 		})
 		id++
 	}
@@ -733,8 +749,9 @@ func TestNoteSearchSingleStringLayerStaysUntagged(t *testing.T) {
 	_, key := mintRootKey(t, s, 1)
 
 	callToolWithKey(t, s, 2, key, "note.write", map[string]any{
-		"layer": "clone",
-		"notes": []any{map[string]any{"key": "single.untagged", "value": "v", "priority": 1}},
+		"layer":  "clone",
+		"reason": "test fixture: another worktree or project needs it",
+		"notes":  []any{map[string]any{"key": "single.untagged", "value": "v", "priority": 1}},
 	})
 
 	resp := callToolWithKey(t, s, 3, key, "note.query", map[string]any{
@@ -765,8 +782,9 @@ func TestNoteSearchMultiLayerIncludesMutedNotes(t *testing.T) {
 	_, key := mintRootKey(t, s, 1)
 
 	callToolWithKey(t, s, 2, key, "note.write", map[string]any{
-		"layer": "clone",
-		"notes": []any{map[string]any{"key": "muted.multilayer", "value": "v", "priority": 1}},
+		"layer":  "clone",
+		"reason": "test fixture: another worktree or project needs it",
+		"notes":  []any{map[string]any{"key": "muted.multilayer", "value": "v", "priority": 1}},
 	})
 	callToolWithKey(t, s, 3, key, "note.mute", map[string]any{
 		"layer": "clone",
@@ -806,8 +824,9 @@ func TestNoteSearchArrayVsSingleLayerOrderParity(t *testing.T) {
 		map[string]any{"key": "parity.high", "value": "v", "priority": 9},
 	}
 	callToolWithKey(t, s, 2, key, "note.write", map[string]any{
-		"layer": "clone",
-		"notes": notes,
+		"layer":  "clone",
+		"reason": "test fixture: another worktree or project needs it",
+		"notes":  notes,
 	})
 
 	singleResp := callToolWithKey(t, s, 3, key, "note.query", map[string]any{
@@ -1076,7 +1095,8 @@ func TestNoteWriteCloneLayerOversizeUsesCloneChallengeText(t *testing.T) {
 	_, key := mintRootKey(t, s, 1)
 
 	resp := callToolWithKey(t, s, 2, key, "note.write", map[string]any{
-		"layer": "clone",
+		"layer":  "clone",
+		"reason": "test fixture: another worktree or project needs it",
 		"notes": []any{
 			map[string]any{"key": "clone.big", "value": strings.Repeat("a", noteOversizeThreshold), "priority": 1},
 		},
@@ -1096,7 +1116,8 @@ func TestNoteWriteMachineLayerOversizeUsesMachineChallengeText(t *testing.T) {
 	_, key := mintRootKey(t, s, 1)
 
 	resp := callToolWithKey(t, s, 2, key, "note.write", map[string]any{
-		"layer": "machine",
+		"layer":  "machine",
+		"reason": "test fixture: another worktree or project needs it",
 		"notes": []any{
 			map[string]any{"key": "machine.big", "value": strings.Repeat("a", noteOversizeThreshold), "priority": 1},
 		},

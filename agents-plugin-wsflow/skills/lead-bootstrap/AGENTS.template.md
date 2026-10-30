@@ -239,9 +239,10 @@ Adapt structure to the project; this is a starting point, not a schema.
   machine-local procedure content (credentials, IPs, hostnames, host-specific
   runbooks) to a new gitignored `ai-docs/manuals/*.local.md` sibling following
   the manuals convention; volatile local context to `wsflow/note.write(session_key,
-  layer: "worktree", ...)` by default, or `layer: "clone"` only when the
-  content is judged clone-wide (shared across worktrees of the same clone)
-  rather than worktree-specific. Then delete `ai-docs/_index.local.md`, remove
+  layer: "worktree", ...)` by default, or `layer: "clone", reason: ...` only
+  when the content is judged clone-wide (shared across worktrees of the same
+  clone) rather than worktree-specific; the reason states why a session in
+  another worktree would fail without it. Then delete `ai-docs/_index.local.md`, remove
   its `## Project Memory` read step (renumbering trailing steps), and remove
   the `_index.local.md` layout-tree entry from this template's MIGRATION
   scaffold comment above. Fresh bootstrap must never create
