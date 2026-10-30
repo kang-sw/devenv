@@ -593,7 +593,14 @@
       "registered_at": "2026-10-29T00:09:05Z"
     },
     "261030-bug-claude-mod-headless-compaction-and-captions": {
-      "registered_at": "2026-10-30T14:07:49Z"
+      "registered_at": "2026-10-30T14:07:49Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-10-30T14:55:34Z"
+      }
     },
     "261030-bug-tickets-move-stages-on-occupied-root": {
       "registered_at": "2026-10-30T06:10:05Z"
