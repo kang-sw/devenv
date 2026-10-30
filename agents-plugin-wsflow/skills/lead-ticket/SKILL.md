@@ -5,6 +5,8 @@ description: Create, edit, promote, drop, or close a workflow ticket. Owns the O
 
 # Ticket
 
+<ws-preload playbook="lead-ticket">
 Call `wsflow/playbook.read(name: "lead-ticket")` and execute the returned procedure
 inline against the current user request. If the playbook cannot be loaded, stop
 and report that blocker.
+</ws-preload>

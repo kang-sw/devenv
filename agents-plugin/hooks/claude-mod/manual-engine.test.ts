@@ -99,6 +99,8 @@ function world(
     failKnobs: new Set<string>(opts.failKnobs ?? []),
     /** The `/mcp reconnect` commands the mod ran. */
     reconnects: 0,
+    /** What playbook_read answers for a name other than lead-workflow-manual; undefined answers an error result. */
+    playbookText: ((name: string) => `# ${name}\n\nThe ${name} procedure.\n`) as ((name: string, key: unknown) => string | undefined),
     /** The test's engine, bound at start: the lever's `/compact` raises its compaction through it. */
     engine: undefined as Engine | undefined,
     /** The next connect finds the server down, as at a start (a hot reload) before it is up. */
@@ -180,7 +182,11 @@ function world(
       if (opts.holdManualMs) await clock.sleep(opts.holdManualMs)
       return text(keyedResponse(e.args.session_key as string, w.state))
     }
-    if (e.tool === 'playbook_read') return text(STATIC_BODY)
+    if (e.tool === 'playbook_read') {
+      if (e.args.name === 'lead-workflow-manual') return text(STATIC_BODY)
+      const body = w.playbookText(String(e.args.name), e.args.session_key)
+      return body === undefined ? { value: { content: [{ type: 'text', text: 'no such playbook' }], isError: true } } : text(body)
+    }
     if (e.tool === 'workflow_state') return text(`## Session State\n\n### Todos\n${w.state}\n`)
     return { value: { content: [{ type: 'text', text: `unknown tool ${e.tool}` }], isError: true } }
   })
@@ -211,6 +217,8 @@ function world(
   on('tool.list', () => ({ value: [{ name: `mcp__plugin_${w.plugin}_${w.plugin}__config_get`, description: 'x', mcp: true }] }))
   on('session.compact', () => ({ messages: [{ role: 'user', text: 'summary', toolUses: [] }] }) as never)
   on('prompt.submit', ($, e) => (w.prompts.push(e.text), { text: e.text }))
+  // Core for a skill's expansion: the text as the skill computed it.
+  on('skill.prompt', ($, e) => ({ text: e.text }))
   return w
 }
 
@@ -809,4 +817,94 @@ test('a session end cancels an automatic bind whose slug lookup is still in flig
   await $.session.end({ reason: 'clear', sessionId: 'sess-1', resume: undefined as never })
   await w.clock.advance(1_000)
   expect(w.spawns).toEqual([])
+})
+
+// The playbook preload: a lead skill shim's `<ws-preload>` block replaced with
+// its playbook body, read with the conversation's key the manual feature holds.
+
+/** A shim with today's fallback prose inside the block, as the skill computes it. */
+const shim = (title: string, playbook: string) =>
+  `# ${title}\n\n<ws-preload playbook="${playbook}">\nCall \`ws/playbook.read(name: "${playbook}")\` and execute the returned procedure.\n</ws-preload>\n\nARGUMENTS: decide the thing\n`
+
+/** `pluginName` null: a project skill, which comes from no plugin. */
+async function expand($: Engine, w: World, skill: string, text: string, pluginName: string | null = w.plugin) {
+  const res = await $.skill.prompt({ skill, text, source: pluginName === null ? 'projectSettings' : 'plugin', ...(pluginName === null ? {} : { pluginName }) })
+  await w.clock.settle()
+  return res.text
+}
+
+const playbookReads = (w: World) => w.mcpCalls.filter((c) => c.tool === 'playbook_read' && c.args.name !== 'lead-workflow-manual')
+
+test('preload: a ws lead skill block is replaced with its playbook body, read with the conversation key', async ($, on) => {
+  const w = world(on, { knobs: ON })
+  await start($, w)
+  const before = w.mcpCalls.length
+  const text = await expand($, w, 'lead-discuss', shim('Discuss', 'lead-discuss'))
+  expect(text).toBe('# Discuss\n\n# lead-discuss\n\nThe lead-discuss procedure.\n\nARGUMENTS: decide the thing\n')
+  // The one read the expansion makes: the playbook, never the state.
+  expect(w.mcpCalls.slice(before)).toEqual([{ server: `plugin:${w.plugin}:${w.plugin}`, tool: 'playbook_read', args: { name: 'lead-discuss', session_key: 'minted-1' } }])
+  // A namespaced skill name expands the same way.
+  expect(await expand($, w, `${w.plugin}:lead-ticket`, shim('Ticket', 'lead-ticket'))).toContain('The lead-ticket procedure.')
+})
+
+test('preload: the expanded text carries no session state and no key, and a body carrying the key passes through', async ($, on) => {
+  const w = world(on, { knobs: ON })
+  w.state = '- [ ] the secret todo'
+  await start($, w)
+  const text = await expand($, w, 'lead-run', shim('Run', 'lead-run'))
+  expect(text).toContain('The lead-run procedure.')
+  expect(text).not.toContain('minted-1')
+  expect(text).not.toContain('the secret todo')
+  w.playbookText = (name, key) => `# ${name}\n\nWait with --session-key ${String(key)}.\n`
+  const original = shim('Review', 'lead-review')
+  expect(await expand($, w, 'lead-review', original)).toBe(original)
+})
+
+test('preload: another plugin, a project skill, and a block naming a tool instead of a playbook pass through unread', async ($, on) => {
+  const w = world(on, { knobs: ON })
+  await start($, w)
+  const original = shim('Discuss', 'lead-discuss')
+  expect(await expand($, w, 'lead-discuss', original, 'other-plugin')).toBe(original)
+  expect(await expand($, w, 'lead-discuss', original, null)).toBe(original)
+  const toolBlock = '# Discuss\n\n<ws-preload tool="workflow_state">\nCall `ws/workflow_state`.\n</ws-preload>\n'
+  expect(await expand($, w, 'lead-discuss', toolBlock)).toBe(toolBlock)
+  expect(playbookReads(w)).toEqual([])
+  expect(w.mcpCalls.filter((c) => c.tool === 'workflow_state')).toEqual([])
+})
+
+test('preload: lead-use-mailbox and a block naming another playbook pass through unread', async ($, on) => {
+  const w = world(on, { knobs: ON })
+  await start($, w)
+  const mailbox = shim('Use Mailbox', 'lead-use-mailbox')
+  expect(await expand($, w, 'lead-use-mailbox', mailbox)).toBe(mailbox)
+  const other = shim('Discuss', 'lead-run')
+  expect(await expand($, w, 'lead-discuss', other)).toBe(other)
+  expect(playbookReads(w)).toEqual([])
+})
+
+test('preload: a failed read passes the text through unchanged', async ($, on) => {
+  const w = world(on, { knobs: ON })
+  await start($, w)
+  w.playbookText = () => undefined
+  const original = shim('Ship', 'lead-ship')
+  expect(await expand($, w, 'lead-ship', original)).toBe(original)
+  expect(playbookReads(w).map((c) => c.args.name)).toEqual(['lead-ship'])
+})
+
+test('preload: with no key held (the knob off, or outside a ws project) the block passes through unread', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  const original = shim('Discuss', 'lead-discuss')
+  expect(await expand($, w, 'lead-discuss', original)).toBe(original)
+  expect(playbookReads(w)).toEqual([])
+})
+
+test('preload: after /clear the block passes through until the next conversation key arrives', async ($, on) => {
+  const w = world(on, { knobs: ON })
+  await start($, w)
+  await $.session.end({ reason: 'clear', sessionId: 'sess-1', resume: undefined as never })
+  await w.clock.settle()
+  const original = shim('Discuss', 'lead-discuss')
+  expect(await expand($, w, 'lead-discuss', original)).toBe(original)
+  expect(playbookReads(w)).toEqual([])
 })

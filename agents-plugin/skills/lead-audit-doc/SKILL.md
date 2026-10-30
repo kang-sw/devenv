@@ -5,5 +5,7 @@ description: Draft, revise, or audit frequently reread project documents such as
 
 # Audit Doc
 
+<ws-preload playbook="lead-audit-doc">
 Call `ws/playbook.read(name: "lead-audit-doc")` and execute the returned procedure
 inline against the user request.
+</ws-preload>

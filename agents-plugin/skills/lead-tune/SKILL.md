@@ -5,5 +5,7 @@ description: Use when the user wants to tune or customize how the ws workflow ru
 
 # Workflow Tuning
 
+<ws-preload playbook="lead-tune">
 Call `ws/playbook.read(name: "lead-tune")` and execute the returned procedure
 inline against the user request.
+</ws-preload>

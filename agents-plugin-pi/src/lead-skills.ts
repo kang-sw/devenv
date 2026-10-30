@@ -75,7 +75,8 @@
  * the ticket's "neither path throws" constraint.
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
+import { isAbsolute, relative, resolve } from "node:path";
 import type { ExtensionAPI, SlashCommandInfo } from "@earendil-works/pi-coding-agent";
 import { parseFrontmatter, type SkillFrontmatter } from "@earendil-works/pi-coding-agent";
 import { isLeadOrFork, type SpawnRole } from "./process-role.ts";
@@ -221,6 +222,67 @@ export function computeWsSkillReadResult(name: string, entries: readonly SkillEn
 }
 
 /**
+ * Skills whose `<ws-preload>` block always stays a model read: the playbook
+ * body substitutes a key-specific mailbox wait command.
+ */
+export const PRELOAD_EXCLUDED: ReadonlySet<string> = new Set(["lead-use-mailbox"]);
+
+/** One block: the open tag with its playbook name, the fallback prose, the close tag. */
+const PRELOAD_BLOCK = /<ws-preload playbook="([^"\n]+)">[\s\S]*?<\/ws-preload>/;
+
+/** What `ws-skill` needs to expand a block; undefined (no bridge yet) leaves every block. */
+export interface WsSkillPreload {
+  /** The adapter's own skills directory (`resources_discover`'s path): only skills under it expand. */
+  ownSkillsDir: string;
+  /** This process's own key (the lead's, or a fork's own), or undefined while none is held. */
+  sessionKey: string | undefined;
+  /** `playbook.read(name, session_key)`'s text; rejects on a failed call or an error result. */
+  readPlaybook: (name: string, sessionKey: string) => Promise<string>;
+}
+
+function inside(path: string, dir: string): boolean {
+  const rel = relative(dir, path);
+  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+}
+
+/**
+ * Whether `path` lies inside `dir`: as joined, or with links resolved on
+ * both (a symlinked skills tree, `/var` -> `/private/var`).
+ */
+export function isInsideDir(path: string, dir: string): boolean {
+  if (inside(resolve(path), resolve(dir))) return true;
+  try {
+    return inside(realpathSync(path), realpathSync(dir));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The `ws-skill` body with its `<ws-preload playbook="<name>">` block replaced
+ * by that playbook's body, read with this process's own key, or `body`
+ * unchanged: a skill outside the adapter's own skills tree, an excluded
+ * skill, a block naming another playbook, no key held, a failed or empty
+ * read, and a read whose text carries the key all keep the block and the
+ * fallback prose inside it. Only the playbook body is inlined, never session
+ * state or the key. Never throws.
+ */
+export async function expandWsSkillPreload(name: string, entryPath: string, body: string, preload: WsSkillPreload | undefined): Promise<string> {
+  try {
+    if (!preload || PRELOAD_EXCLUDED.has(name) || !isInsideDir(entryPath, preload.ownSkillsDir)) return body;
+    const block = PRELOAD_BLOCK.exec(body);
+    if (!block || block[1] !== name) return body;
+    const key = preload.sessionKey?.trim();
+    if (!key) return body;
+    const playbook = (await preload.readPlaybook(name, key)).trim();
+    if (!playbook || playbook.includes(key)) return body;
+    return body.slice(0, block.index) + playbook + body.slice(block.index + block[0].length);
+  } catch {
+    return body;
+  }
+}
+
+/**
  * Pure, lead-AND-fork-gated `ws-skill` active-tools addition. Uses
  * `isLeadOrFork` (not the narrower lead-only `role !== undefined` gate
  * `addForkToolIfLead`/`addAskToolsIfLead` use in fork.ts/ask.ts) — see this
@@ -243,9 +305,19 @@ export function addSkillToolIfLeadOrFork(activeTools: readonly string[], role: S
  * `session_start` returns, so a snapshot taken at registration or at
  * `session_start` time can miss every ws skill on the affected path. Whether
  * `ws-skill` is ever ACTIVE for a given session is `addSkillToolIfLeadOrFork`'s
- * job, not this function's.
+ * job, not this function's. `preload` is read per call too, for the same
+ * reason (the bridge and its key arrive at `session_start`): a successful
+ * read's `<ws-preload>` block is expanded through `expandWsSkillPreload`
+ * before the dedupe sees the text. Pi's own `/skill:<name>` expansion has no
+ * extension hook (its `input` event fires before the expansion, on the raw
+ * command line), so a typed `/skill:` command keeps the block and its
+ * fallback prose.
  */
-export function registerWsSkillTool(pi: ExtensionAPI, toolPreviewTuiRef: ToolPreviewTuiRef = createToolPreviewTuiRef()): void {
+export function registerWsSkillTool(
+  pi: ExtensionAPI,
+  toolPreviewTuiRef: ToolPreviewTuiRef = createToolPreviewTuiRef(),
+  preload: () => WsSkillPreload | undefined = () => undefined,
+): void {
   registerWsTool(pi, {
     name: WS_SKILL_TOOL_NAME,
     label: WS_SKILL_TOOL_NAME,
@@ -263,8 +335,12 @@ export function registerWsSkillTool(pi: ExtensionAPI, toolPreviewTuiRef: ToolPre
       const entries = resolveSkillEntries(pi.getCommands());
       const read = computeWsSkillReadResult(p.name, entries, (path) => loadSkillFile(path));
       if (!read.success) return { content: [{ type: "text", text: read.text }] };
+      // A successful read is known by that name; an expansion that passes
+      // through leaves the plain body, which dedupes as before.
+      const entryPath = entries.find((e) => e.name === p.name)!.path;
+      const text = await expandWsSkillPreload(p.name, entryPath, read.text, preload());
       const visibleEntries = toolCtx?.sessionManager?.buildContextEntries?.() ?? [];
-      const decision = dedupeRead(visibleEntries, toolCallId, "ws-skill", wsSkillKey(p), read.text);
+      const decision = dedupeRead(visibleEntries, toolCallId, "ws-skill", wsSkillKey(p), text);
       return { content: [{ type: "text", text: decision.text }] };
     },
   }, toolPreviewTuiRef);

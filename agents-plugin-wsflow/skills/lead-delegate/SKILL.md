@@ -5,8 +5,10 @@ description: Start or continue a session-local native subagent when the user wan
 
 # Delegate
 
+<ws-preload playbook="lead-delegate">
 Call in parallel:
 - `wsflow/playbook.read(name: "lead-delegate", session_key: <your key, omit if fresh>)`
 - `wsflow/workflow_manual(session_key: <your key or "obsidian-latch" if fresh>, root: <absolute worktree path if fresh>)`
 
 After both return, execute the procedure returned by `wsflow/playbook.read`.
+</ws-preload>

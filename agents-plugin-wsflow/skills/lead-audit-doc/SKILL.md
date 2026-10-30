@@ -5,6 +5,8 @@ description: Draft, revise, or audit frequently reread project documents such as
 
 # Audit Doc
 
+<ws-preload playbook="lead-audit-doc">
 Call `wsflow/playbook.read(name: "lead-audit-doc")` and execute the returned procedure
 inline against the current user request. If the playbook cannot be loaded, stop
 and report that blocker.
+</ws-preload>

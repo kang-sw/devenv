@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: fbd2fad9ff60b2c7
 sage-review-completeness-reviewed: fbd2fad9ff60b2c7
+completed: 2026-10-31
 ---
 
 # ws-preload - expand lead skill shims with their playbook at skill-load time
@@ -157,6 +158,41 @@ unexpanded; the wsflow shim drift test
 (`agents-plugin-wsflow/tests/test_wsflow_skill_bundle.py`) passes; a manual check that `/ws:lead-discuss` reaches the playbook
 without a model-issued `playbook.read`.
 
+### Result (b22697bdd) - 2026-10-31
+
+- Landed: `agents-plugin/hooks/claude-mod/preload.ts` (pure `expandPreload`,
+  `findBlock`, `bareSkill`, `PRELOAD_EXCLUDED`) and a `skill.prompt` hook in
+  `register.ts` that reads with `manual.key()` and passes through on any
+  failure (`.catch(next(e))`); the mod is resynced into
+  `agents-plugin-wsflow/hooks/claude-mod/`. Blocks added to every ws and
+  wsflow lead shim that reads its own playbook; none in `lead-revive`,
+  `lead-use-mailbox`, or the wsflow `lead-proceed` alias. ws `lead-ticket`
+  keeps its fresh-session bootstrap line and the "inline against the user
+  request" phrase outside the block, reworded to read correctly expanded or
+  not. Shape checks updated in `test_wsflow_skill_bundle.py`
+  (`EXPECTED_PRELOAD_EXCLUDED`, a block-names-own-playbook test) and added to
+  `agents-plugin/tests/test_skill_dispatch_contracts.py`; the
+  `wsflow-mirroring.md` shim-shape wording, both `hooks.json` descriptions,
+  and the skills manifest are updated.
+- Verification: `claude plugin test` 521/521 in both packages (12 new:
+  expansion, allowlist with another plugin / a project skill / a tool block,
+  failure pass-through, no state or key and a key-carrying body, the
+  `lead-use-mailbox` exclusion, a mismatched `playbook` attribute, the no-key
+  and post-`/clear` pass-through); `python3 -m unittest discover` on
+  `agents-plugin/tests` (81) and `agents-plugin-wsflow/tests` (19);
+  `go test ./...` in `agents-plugin-tool`; `claude plugin validate` on both
+  packages. Manual check: `claude -p --plugin-dir <worktree>/agents-plugin
+  "/ws:lead-discuss ..."` with tools forbidden answered in one turn that the
+  skill text held no `<ws-preload` tag and no "Call in parallel", i.e. the
+  block arrived expanded with the real engine's `skill`/`pluginName` values.
+- Decisions: a body containing the lead key also passes through (beyond the
+  `lead-use-mailbox` exclusion); no snapshot-flag gate, since a first typed
+  `/ws:lead-*` can expand before the first compose; the tag keeps its `ws-`
+  name in wsflow (shared mod contract, matches no forbidden pattern).
+- Observation (lite review, Minor): a repeated expansion re-inlines the full
+  playbook, where a repeated model `playbook_read` used to collapse to a
+  pointer through `manual.read`.
+
 ### Phase 2: Pi expansion
 
 Expand the same block in the Pi adapter's `ws-skill` tool under the same
@@ -172,3 +208,27 @@ reported in the Result.
 
 Verification: Pi adapter tests for `ws-skill` expansion, the exclusions,
 and pass-through.
+
+### Result (f3ed3a77a) - 2026-10-31
+
+- Landed: `expandWsSkillPreload`, `isInsideDir`, and `PRELOAD_EXCLUDED` in
+  `agents-plugin-pi/src/lead-skills.ts`; `registerWsSkillTool` takes a
+  per-call `preload` getter that `index.ts` binds to the bridge client
+  (`playbook.read` with `defaultSessionKeyRef.current`, the lead's or a
+  fork's own key) and `resolveSkillsDir(pluginDir, repoRoot)` as the
+  allowlist. Expansion runs after a successful read and before `dedupeRead`,
+  so an expanded repeat still collapses to a pointer, an expansion failure
+  yields the plain body (deduped as before), and lookup/read failures still
+  bypass dedupe (67f3ed9f).
+- Gap: Pi offers no hook on the typed `/skill:<name>` expansion. Its
+  `input` event fires on the raw command line before `_expandSkillCommand`
+  (`agent-session.js`), so expanding there would reimplement Pi's expansion;
+  a typed `/skill:` command keeps the block and its fallback prose. Only
+  `ws-skill` expands.
+- Verification: `node --test test/lead-skills.test.ts` 35/35 (6 new);
+  full `npm test` 2472 pass / 31 fail / 1 cancelled, the same failing set as
+  base `b643eeeba` run in a scratch worktree (web-search and agent-channel
+  environment failures, unrelated).
+- Observation (lite review, Minor): the `index.ts` wiring itself (that
+  `resolveSkillsDir` contains Pi's real entry paths) has no test; both use
+  the same `join(pluginDir, "skills")` derivation.

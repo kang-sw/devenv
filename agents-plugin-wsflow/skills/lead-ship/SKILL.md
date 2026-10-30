@@ -5,6 +5,8 @@ description: Ship, release, publish, tag, or deploy a configured project from it
 
 # Ship
 
+<ws-preload playbook="lead-ship">
 Call `wsflow/playbook.read(name: "lead-ship")` and execute the returned procedure
 inline against the current user request. If the playbook cannot be loaded, stop
 and report that blocker.
+</ws-preload>

@@ -12,7 +12,7 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI, SlashCommandInfo, SourceInfo } from "@earendil-works/pi-coding-agent";
@@ -21,11 +21,15 @@ import {
   addSkillToolIfLeadOrFork,
   buildSkillsBlock,
   computeWsSkillResult,
+  expandWsSkillPreload,
+  isInsideDir,
   loadSkillFile,
+  PRELOAD_EXCLUDED,
   registerWsSkillTool,
   resolveSkillEntries,
   type LoadedSkill,
   type SkillEntry,
+  type WsSkillPreload,
 } from "../src/lead-skills.ts";
 
 function sourceInfo(path: string): SourceInfo {
@@ -343,5 +347,100 @@ describe("registerWsSkillTool (fake pi)", () => {
     const thirdContext = { sessionManager: { buildContextEntries: () => [...secondContext.sessionManager.buildContextEntries(), { type: "message", message: { role: "toolResult", toolCallId: "two", content: second.content, isError: false } }, { type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "three", name: "ws-skill", arguments: { name: "repeat" } }] } }] } };
     const third = await tool.execute("three", { name: "repeat" }, undefined, undefined, thirdContext);
     assert.equal(third.content[0].text, first.content[0].text);
+  });
+
+  test("expands the preload block of an own skill with the process's key, and the expanded text dedupes", async () => {
+    const own = mkdtempSync(join(tmpdir(), "ws-pi-preload-skills-"));
+    const path = join(own, "SKILL.md");
+    writeFileSync(path, '---\nname: lead-discuss\n---\n# Discuss\n\n<ws-preload playbook="lead-discuss">\nCall `ws/playbook.read(name: "lead-discuss")`.\n</ws-preload>\n');
+    const tools = new Map<string, FakeTool>();
+    const pi = fakePi(tools, () => [skillCommand("lead-discuss", "d", path)]);
+    const reads: [string, string][] = [];
+    registerWsSkillTool(pi, undefined, () => ({ ownSkillsDir: own, sessionKey: "fork-key", readPlaybook: async (name, key) => (reads.push([name, key]), `# ${name}\n## Steps\nwork\n`) }));
+    const tool = tools.get(WS_SKILL_TOOL_NAME)!;
+    const first = await tool.execute("one", { name: "lead-discuss" }, undefined, undefined, { sessionManager: { buildContextEntries: () => [] } });
+    assert.equal(first.content[0].text, "# Discuss\n\n# lead-discuss\n## Steps\nwork");
+    assert.deepEqual(reads, [["lead-discuss", "fork-key"]]);
+    const context = { sessionManager: { buildContextEntries: () => [
+      { type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "one", name: "ws-skill", arguments: { name: "lead-discuss" } }] } },
+      { type: "message", message: { role: "toolResult", toolCallId: "one", content: first.content, isError: false } },
+      { type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "two", name: "ws-skill", arguments: { name: "lead-discuss" } }] } },
+    ] } };
+    const second = await tool.execute("two", { name: "lead-discuss" }, undefined, undefined, context);
+    assert.match(second.content[0].text, /^The result is unchanged\./);
+  });
+
+  test("an expansion failure returns the plain body, which still dedupes; an unknown skill still bypasses dedupe", async () => {
+    const own = mkdtempSync(join(tmpdir(), "ws-pi-preload-skills-"));
+    const path = join(own, "SKILL.md");
+    const plain = '# Run\n\n<ws-preload playbook="lead-run">\nCall `ws/playbook.read(name: "lead-run")`.\n</ws-preload>';
+    writeFileSync(path, `---\nname: lead-run\n---\n${plain}\n`);
+    const tools = new Map<string, FakeTool>();
+    const pi = fakePi(tools, () => [skillCommand("lead-run", "d", path)]);
+    registerWsSkillTool(pi, undefined, () => ({ ownSkillsDir: own, sessionKey: "lead-key", readPlaybook: async () => Promise.reject(new Error("bridge down")) }));
+    const tool = tools.get(WS_SKILL_TOOL_NAME)!;
+    const first = await tool.execute("one", { name: "lead-run" }, undefined, undefined, { sessionManager: { buildContextEntries: () => [] } });
+    assert.equal(first.content[0].text, plain);
+    const context = { sessionManager: { buildContextEntries: () => [
+      { type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "one", name: "ws-skill", arguments: { name: "lead-run" } }] } },
+      { type: "message", message: { role: "toolResult", toolCallId: "one", content: first.content, isError: false } },
+      { type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "two", name: "ws-skill", arguments: { name: "lead-run" } }] } },
+    ] } };
+    assert.match((await tool.execute("two", { name: "lead-run" }, undefined, undefined, context)).content[0].text, /^The result is unchanged\./);
+    assert.match((await tool.execute("three", { name: "missing" }, undefined, undefined, context)).content[0].text, /^Unknown skill "missing"/);
+  });
+});
+
+describe("expandWsSkillPreload", () => {
+  const own = mkdtempSync(join(tmpdir(), "ws-pi-preload-own-"));
+  const ownPath = join(own, "lead-discuss", "SKILL.md");
+  const body = '# Discuss\n\n<ws-preload playbook="lead-discuss">\nfallback prose\n</ws-preload>\n\nafter';
+
+  function preload(over: Partial<WsSkillPreload> = {}): WsSkillPreload & { reads: [string, string][] } {
+    const reads: [string, string][] = [];
+    return { ownSkillsDir: own, sessionKey: "lead-key", readPlaybook: async (name, key) => (reads.push([name, key]), `# ${name}\n\nBody.\n`), ...over, reads };
+  }
+
+  test("replaces the block with the trimmed playbook body, keeping the text around it", async () => {
+    const p = preload();
+    assert.equal(await expandWsSkillPreload("lead-discuss", ownPath, body, p), "# Discuss\n\n# lead-discuss\n\nBody.\n\nafter");
+    assert.deepEqual(p.reads, [["lead-discuss", "lead-key"]]);
+  });
+
+  test("passes through without reading: another tree, an excluded skill, a mismatched block, a tool block, no key, no bridge", async () => {
+    const cases: [string, string, string, WsSkillPreload & { reads: [string, string][] } | undefined][] = [
+      ["lead-discuss", "/other/skills/lead-discuss/SKILL.md", body, preload()],
+      ["lead-use-mailbox", join(own, "lead-use-mailbox", "SKILL.md"), body.replace("lead-discuss", "lead-use-mailbox"), preload()],
+      ["lead-run", join(own, "lead-run", "SKILL.md"), body, preload()],
+      ["lead-discuss", ownPath, '<ws-preload tool="workflow_state">\nx\n</ws-preload>', preload()],
+      ["lead-discuss", ownPath, body, preload({ sessionKey: undefined })],
+      ["lead-discuss", ownPath, body, preload({ sessionKey: "  " })],
+      ["lead-discuss", ownPath, body, undefined],
+    ];
+    for (const [name, path, text, p] of cases) {
+      assert.equal(await expandWsSkillPreload(name, path, text, p), text, `${name} at ${path}`);
+      assert.deepEqual(p?.reads ?? [], []);
+    }
+    assert.ok(PRELOAD_EXCLUDED.has("lead-use-mailbox"));
+  });
+
+  test("a failed, empty, or key-carrying read passes through, never inlining the key or state", async () => {
+    assert.equal(await expandWsSkillPreload("lead-discuss", ownPath, body, preload({ readPlaybook: async () => Promise.reject(new Error("down")) })), body);
+    assert.equal(await expandWsSkillPreload("lead-discuss", ownPath, body, preload({ readPlaybook: async () => " \n" })), body);
+    assert.equal(await expandWsSkillPreload("lead-discuss", ownPath, body, preload({ readPlaybook: async () => "wait --session-key lead-key" })), body);
+    const expanded = await expandWsSkillPreload("lead-discuss", ownPath, body, preload());
+    assert.doesNotMatch(expanded, /lead-key|Session State|Todos/);
+  });
+
+  test("isInsideDir accepts only paths strictly inside the directory", () => {
+    assert.equal(isInsideDir(ownPath, own), true);
+    assert.equal(isInsideDir(own, own), false);
+    assert.equal(isInsideDir(join(own, "..", "elsewhere", "SKILL.md"), own), false);
+    // An existing file reached through a link to the tree counts as inside.
+    mkdirSync(join(own, "linked-skill"), { recursive: true });
+    writeFileSync(join(own, "linked-skill", "SKILL.md"), "# Linked\n");
+    const link = join(mkdtempSync(join(tmpdir(), "ws-pi-preload-link-")), "skills");
+    symlinkSync(own, link);
+    assert.equal(isInsideDir(join(link, "linked-skill", "SKILL.md"), own), true);
   });
 });

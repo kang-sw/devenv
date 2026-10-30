@@ -5,5 +5,7 @@ description: Independent review of a contributor branch or a commit range. The l
 
 # Review
 
+<ws-preload playbook="lead-review">
 Call `ws/playbook.read(name: "lead-review")` and execute the returned procedure
 inline against the user request.
+</ws-preload>

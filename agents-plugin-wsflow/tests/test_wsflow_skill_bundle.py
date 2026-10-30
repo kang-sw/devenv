@@ -55,6 +55,14 @@ EXPECTED_PARALLEL_INIT_SKILLS = {
     "lead-run",
     "lead-use-mailbox",
 }
+# Shims whose playbook read stays a model call: the Claude mod never expands
+# lead-use-mailbox (its body carries a key-specific wait command), and the
+# inline revive and the alias read no playbook of their own name. Every other
+# shim wraps its fallback prose in a `<ws-preload playbook="<own name>">` block
+# the mod replaces with the playbook body.
+EXPECTED_PRELOAD_EXCLUDED = {
+    "lead-use-mailbox",
+}
 PARALLEL_INIT_TITLES = {
     "lead-delegate": "Delegate",
     "lead-discuss": "Discuss",
@@ -171,9 +179,11 @@ class WsflowSkillBundleTest(unittest.TestCase):
                 r"description: .+\n"
                 r"---\n\n"
                 r"# .+\n\n"
+                rf'<ws-preload playbook="{re.escape(skill)}">\n'
                 rf"Call `wsflow/playbook\.read\(name: \"{re.escape(skill)}\"\)` and execute the returned procedure\n"
                 r"inline against the current user request\. If the playbook cannot be loaded, stop\n"
-                r"and report that blocker\.\n",
+                r"and report that blocker\.\n"
+                r"</ws-preload>\n",
                 text,
             )
             if match is None:
@@ -186,20 +196,38 @@ class WsflowSkillBundleTest(unittest.TestCase):
             path = SKILLS_DIR / skill / "SKILL.md"
             text = path.read_text(encoding="utf-8")
             title = PARALLEL_INIT_TITLES[skill]
+            preload = skill not in EXPECTED_PRELOAD_EXCLUDED
             match = re.fullmatch(
                 r"---\n"
                 rf"name: {re.escape(skill)}\n"
                 r"description: .+\n"
                 r"---\n\n"
                 rf"# {re.escape(title)}\n\n"
-                r"Call in parallel:\n"
+                + (rf'<ws-preload playbook="{re.escape(skill)}">\n' if preload else "")
+                + r"Call in parallel:\n"
                 rf"- `wsflow/playbook\.read\(name: \"{re.escape(skill)}\", session_key: <your key, omit if fresh>\)`\n"
                 r'- `wsflow/workflow_manual\(session_key: <your key or "obsidian-latch" if fresh>, root: <absolute worktree path if fresh>\)`\n\n'
-                r"After both return, execute the procedure returned by `wsflow/playbook\.read`\.\n",
+                r"After both return, execute the procedure returned by `wsflow/playbook\.read`\.\n"
+                + (r"</ws-preload>\n" if preload else ""),
                 text,
             )
             if match is None:
                 offenders.append(str(path.relative_to(PLUGIN_DIR)))
+        self.assertEqual(offenders, [])
+
+    def test_preload_blocks_name_their_own_playbook(self):
+        # The Claude mod expands a block only when its playbook attribute names
+        # the skill being expanded, so a block naming another playbook would
+        # silently stay a model read. Excluded skills, the inline revive, and
+        # the aliases carry no block at all.
+        no_block = EXPECTED_PRELOAD_EXCLUDED | EXPECTED_INLINE_SKILLS | set(WSFLOW_ALIAS_TARGET)
+        offenders = []
+        for skill in sorted(EXPECTED_SKILLS):
+            text = (SKILLS_DIR / skill / "SKILL.md").read_text(encoding="utf-8")
+            names = re.findall(r'<ws-preload playbook="([^"]+)">', text)
+            expected = [] if skill in no_block else [skill]
+            if names != expected or text.count("</ws-preload>") != len(expected):
+                offenders.append(f"{skill}: blocks {names}, expected {expected}")
         self.assertEqual(offenders, [])
 
     def test_skill_shims_point_to_shared_playbooks(self):
