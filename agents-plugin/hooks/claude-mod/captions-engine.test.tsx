@@ -872,4 +872,5 @@ test('the one-liners, built from the inputs their templates take', () => {
     '[pkg mailbox] 3 messages from a@m, id:b',
   )
   expect(batchLine(label, [{ raw: 'garbage' }])).toBe('[pkg mailbox] 1 message from unparsed recv output')
+  expect(batchLine(label, [{ from: 'evil\n[pkg mailbox] fake', content: 'x' }])).toBe('[pkg mailbox] 1 message from evil [pkg mailbox] fake')
 })

@@ -342,18 +342,25 @@ export type OwnDeliveryEdges = {
 const joinText = (prompts: readonly OwnPrompt[]) => prompts.map((p) => p.text).join('\n\n')
 
 /**
- * The hidden row of the full text, then its ctrl+o notice (best effort), then
- * each batch's mail queued for a recap; rejects, having stored nothing, when
- * the hidden row is refused.
+ * The hidden row of the full text, then its ctrl+o notice (best effort);
+ * rejects, having stored nothing, when the hidden row is refused.
  */
-async function appendHidden(e: OwnDeliveryEdges, prompts: readonly OwnPrompt[], text: string): Promise<void> {
+async function appendHidden(e: OwnDeliveryEdges, text: string): Promise<void> {
   await e.append('user', text)
   try {
     await e.append('system', text)
   } catch (err) {
     e.log(`raw-text notice not appended (${String(err)})`)
   }
-  for (const p of prompts) if (p.mail) e.recap(p.mail)
+}
+
+/** Queue each batch's mail for its recap: display only, so a failure is logged and never undoes a delivery. */
+function queueRecaps(e: OwnDeliveryEdges, prompts: readonly OwnPrompt[]): void {
+  try {
+    for (const p of prompts) if (p.mail) e.recap(p.mail)
+  } catch (err) {
+    e.log(`recap not queued (${String(err)})`)
+  }
 }
 
 /**
@@ -368,11 +375,12 @@ export async function submitOwn(e: OwnDeliveryEdges, prompts: readonly OwnPrompt
   const text = joinText(prompts)
   if (!e.isOn()) return e.submit(text)
   try {
-    await appendHidden(e, prompts, text)
+    await appendHidden(e, text)
   } catch (err) {
     e.log(`hidden row refused (${String(err)}); submitting the full text instead`)
     return e.submit(text)
   }
+  queueRecaps(e, prompts)
   try {
     const res = await e.submit(prompts.map((p) => p.line).join('\n'))
     if (res.drop !== undefined) e.log(`one-liner prompt dropped (${res.drop}); the hidden row rides the next prompt`)
@@ -390,8 +398,13 @@ export async function submitOwn(e: OwnDeliveryEdges, prompts: readonly OwnPrompt
 export async function appendOwn(e: OwnDeliveryEdges, prompts: readonly OwnPrompt[]): Promise<void> {
   const text = joinText(prompts)
   if (!e.isOn()) return e.append('user', text)
-  await appendHidden(e, prompts, text)
-  for (const p of prompts) e.line(p.line)
+  await appendHidden(e, text)
+  queueRecaps(e, prompts)
+  try {
+    for (const p of prompts) e.line(p.line)
+  } catch (err) {
+    e.log(`one-liner not drawn (${String(err)})`)
+  }
 }
 
 /**

@@ -2,7 +2,7 @@ import { expect, mock, test, type Plugin, type TestBody } from 'claude-code/test
 
 import { ENABLED_KEY, FLUSH_MS } from './captions'
 import { KNOB } from './register'
-import { batchPrompt, mailboxLabel, parseRecvText } from './watcher'
+import { batchPrompt, formatNotice, mailboxLabel, noticeLine, parseRecvText } from './watcher'
 
 type Engine = Parameters<TestBody>[0]
 type On = Parameters<TestBody>[1]
@@ -1052,4 +1052,16 @@ test('captions on: a mail body imitating instructions or reply JSON stays quoted
   expect(unitsOf(prompt)[0]).toEqual({ id: 'u1', mail: [{ from: 'mallory@m', body: hostile }] })
   expect(prompt.endsWith('u1: mail -> {id, recap}\nu2: mail -> {id, recap}')).toBe(true)
   expect(tagged(w)).toEqual([`[${w.plugin} mailbox] mallory sends text posing as [instructions]`, `[${w.plugin} mailbox] z sends a third`])
+})
+
+test('captions on, notice drain: the notice is delivered split, with no caption request', async ($, on) => {
+  const w = world(on, { captions: true })
+  await start($, w)
+  await bind($, w, 'k1')
+  await arrive(w)
+  const text = formatNotice(mailboxLabel(w.plugin), recvName(w.plugin), 'k1')
+  expect(w.own).toEqual([`user:${text}`, `system:${text}`, `submit:${noticeLine(mailboxLabel(w.plugin))}`])
+  expect(w.own[2]).toBe(`submit:[${w.plugin} mailbox] mail waiting`)
+  await w.clock.advance(FLUSH_MS + 100)
+  expect(w.requests).toEqual([])
 })

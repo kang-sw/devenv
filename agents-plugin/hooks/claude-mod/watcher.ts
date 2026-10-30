@@ -170,9 +170,12 @@ export function mailItems(mail: readonly DrainedMail[]): MailItem[] {
   )
 }
 
-/** The one-liner a batch shows the person while captions are on: the count and the senders, each once. */
+/**
+ * The one-liner a batch shows the person while captions are on: the count and
+ * the senders, each once, a peer-supplied handle kept to one printable line.
+ */
 export function batchLine(label: string, mail: readonly DrainedMail[]): string {
-  const senders = [...new Set(mailItems(mail).map((m) => m.from))]
+  const senders = [...new Set(mailItems(mail).map((m) => m.from.replace(/[\s\u0000-\u001f\u007f]+/g, ' ')))]
   return `[${label}] ${mail.length} ${mail.length === 1 ? 'message' : 'messages'} from ${senders.join(', ')}`
 }
 
