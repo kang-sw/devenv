@@ -211,3 +211,17 @@ As a result, the plugin-origin qualification path (the main path) cannot
 fire in the live engine. Only the `unclassified` label-prefix fallback could
 fire, and only for rows stored before origin stamps. The engine typings do
 not document this re-entry rule.
+
+## Blocked (2026-10-30)
+
+The worker stopped under stop (c): the live probe falsified the premise that
+the mod can rewrite its own `UserMessage` rows. The lead confirmed the rule in
+the Claude Code 2.1.314 binary. The hook dispatcher drops a plugin's own
+registrations when the event's origin chain names that plugin (`hooks module
+<label> <event> skipped: re-entry (the plugin's own code raised it; ...)`).
+The only exemption is the engine-internal origin lending used for served
+calls, which the mod API does not expose. Re-scoping is a user decision; the
+impl branch `impl/develop/dole-ebook-feast` (14e6a0d22, ddaf186b7) stays
+unmerged until then. One option already exists with no code change:
+`claude.mailbox_drain: notice` delivers mail bodies as the recv tool's
+result, and the existing tool-call captions caption that result.
