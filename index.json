@@ -622,7 +622,14 @@
       "registered_at": "2026-10-30T05:28:42Z"
     },
     "261030-feat-workflow-manual-worktree-work-mode": {
-      "registered_at": "2026-10-30T04:48:11Z"
+      "registered_at": "2026-10-30T04:48:11Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-10-30T05:35:13Z"
+      }
     }
   }
 }
