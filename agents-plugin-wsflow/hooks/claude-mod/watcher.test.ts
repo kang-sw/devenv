@@ -65,7 +65,7 @@ function harness(mode: DrainMode) {
   /** Every submit attempted, as the prompts it carried. */
   const submittedPrompts: (readonly OwnPrompt[])[] = []
   /** The next submits' answers with captions on: busy (a turn started during the settle) or stale; run as the submit answers. */
-  const submitAnswers: (() => 'busy' | 'stale')[] = []
+  const submitAnswers: (() => 'busy' | 'stale' | Promise<'busy' | 'stale'>)[] = []
   /** Each submit's live check, to read later as the settle's end would. */
   const lives: (() => boolean)[] = []
   const appendFailures: Error[] = []
@@ -195,6 +195,28 @@ describe('a submit that found a main-thread turn started first (captions on)', (
     expect(h.submittedPrompts.length).toBe(3)
     expect(h.appended).toEqual([])
     expect(h.records).toEqual([])
+  })
+
+  test('a turn-end batch found busy goes ahead of mail steered in during its settle: arrival order holds', async () => {
+    const h = harness('direct')
+    const w = createWatcher(h.edges)
+    w.bind('k1')
+    await tick()
+    h.turn.running = true
+    await arrive(h, { kind: 'mail', mail: mailA })
+    h.turn.running = false
+    h.submitAnswers.push(async () => {
+      h.turn.running = true
+      await arrive(h, { kind: 'mail', mail: mailB })
+      return 'busy' as const
+    })
+    w.turnCompleted()
+    await tick()
+    await tick()
+    await w.toolCompleted()
+    expect(h.appended).toEqual([
+      [formatBatch('pkg mailbox', RECV, 'k1', mailA), formatBatch('pkg mailbox', RECV, 'k1', mailB)].join('\n\n'),
+    ])
   })
 
   test('a notice found busy is queued for the turn and keeps the loop suspended until the model receives', async () => {

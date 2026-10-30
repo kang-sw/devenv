@@ -395,7 +395,8 @@ test('captions on: a failure report whose settle sees a turn start joins that tu
   await turnEnd($, w)
   await turnStart($, w)
   await w.clock.advance(OWN_SETTLE_MS)
-  const text = failureText(w.plugin, reasonCommandAnswered(headless), true)
+  // The lever had the flag, yet the row asks no resume: the person's request comes first.
+  const text = failureText(w.plugin, reasonCommandAnswered(headless), false)
   expect(w.own).toEqual([`user:${text}`, `system:${text}`])
   expect(w.prompts).toEqual([])
 })

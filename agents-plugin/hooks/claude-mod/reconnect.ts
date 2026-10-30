@@ -366,14 +366,16 @@ export function createReconnect(): Reconnect {
     const failed = (why: string) => notice(`a prompt was not submitted (${why}):\n${prompt.text}`)
     // A turn that started before the prompt went out: a success's resume is
     // owed no more, as when one starts during the step; a failure joins that
-    // turn as a row, since the model must learn its tools are gone.
+    // turn as a row, since the model must learn its tools are gone. That row
+    // asks no resume: the started turn's own request comes first.
     const busy = async () => {
       if (outcome.ok) return debug('a turn started before the resume prompt went out; it is not submitted')
+      const row = { ...prompt, text: failureText(e.plugin, outcome.reason, false) }
       try {
-        await e.append(prompt)
+        await e.append(row)
         debug('a turn started before the failure report went out; it joined that turn as a row')
       } catch (err) {
-        failed(`a turn started first, and its row was refused: ${String(err)}`)
+        notice(`a prompt was not submitted (a turn started first, and its row was refused: ${String(err)}):\n${row.text}`)
       }
     }
     e.submit(prompt, () => gen === generation).then(

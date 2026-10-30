@@ -282,7 +282,8 @@ export function createWatcher(edges: WatcherEdges): Watcher {
       if (res === 'stale') return `the push loop stopped: ${lastStop}`
       if (res !== 'busy') return undefined
       if (edges.turnRunning()) {
-        queued.push(...items)
+        // Ahead of anything steered in during the settle: mail keeps its arrival order.
+        queued.unshift(...items)
         edges.log(`${edges.label}: a turn started before ${items.length} prompt(s) were submitted; queued for it`)
         return undefined
       }

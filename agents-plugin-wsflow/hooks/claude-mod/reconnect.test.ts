@@ -815,7 +815,9 @@ describe('a submit that found a main-thread turn started first (captions on)', (
     r.lever(undefined, true)
     await turnEnd()
     expect(h.submits).toEqual([])
-    expect(h.appended).toEqual([failureText('ws', reasonCommandAnswered(headless), true)])
+    // The row asks no resume, though the lever had the flag: the started turn's request comes first.
+    expect(h.appended).toEqual([failureText('ws', reasonCommandAnswered(headless), false)])
+    expect(h.appended[0]).not.toContain(RESUME_SENTENCE)
     h.refuseAppends = 1
     r.lever(undefined, false)
     await turnEnd()
