@@ -50,6 +50,10 @@ function harness(opts: { window?: Partial<CompactionWindow> | null; readAdvisory
     logs: [] as { text: string; to: string }[],
     breakdownReads: 0,
     dropSubmits: 0,
+    /** The next submits that answer busy (a main-thread turn started first) or stale, with captions on. */
+    submitAnswers: [] as ('busy' | 'stale')[],
+    /** Each submit's live check, to read later as the wait's end would. */
+    lives: [] as (() => boolean)[],
     /** The next submits that reject. */
     rejectSubmits: 0,
     /** The next after() calls that throw. */
@@ -75,7 +79,11 @@ function harness(opts: { window?: Partial<CompactionWindow> | null; readAdvisory
   /** Whether the fake engine routes the lever's own compaction through the feature's hook (the engine does not). */
   let ownHook = false
   const edges: CompactionEdges = {
-    submit: async ({ text }) => {
+    submit: async ({ text }, live) => {
+      h.lives.push(live)
+      const answer = h.submitAnswers.shift()
+      if (answer === 'busy') return { busy: true }
+      if (answer === 'stale') return { stale: true }
       if (h.rejectSubmits > 0) {
         h.rejectSubmits -= 1
         throw new Error('submit failed')
@@ -1226,5 +1234,50 @@ describe('resume window guard', () => {
     turnStart()
     await closeWindow()
     expect(h.submits).toEqual([RESUME_TEXT])
+  })
+})
+
+describe('a submit that found a main-thread turn started first (captions on)', () => {
+  test('a threshold message keeps its crossing and is delivered at that turn end, with fresh figures', async () => {
+    const { h, measure, turnEnd, debugLog } = harness()
+    await measure(50_000)
+    h.submitAnswers.push('busy')
+    await measure(104_000)
+    expect(h.submits).toEqual([])
+    expect(debugLog()).toContain('ws compaction: a main-thread turn started before the threshold message went out; the crossing stays recorded for its end')
+    h.live = { tokens: 110_000, window: 1_000_000 }
+    await turnEnd()
+    expect(h.submits).toEqual([advisoryText('ws', T, 110_000)])
+    // ...and a second busy keeps cycling through the same rule.
+    h.submitAnswers.push('busy')
+    h.live = { tokens: 128_000, window: 1_000_000 }
+    await measure(128_000)
+    expect(h.submits.length).toBe(1)
+    await turnEnd()
+    expect(h.submits).toEqual([advisoryText('ws', T, 110_000), milestoneText('ws', 1, T, 128_000)])
+  })
+
+  test('a resume prompt is not submitted: that turn carries the work on', async () => {
+    const { h, c, turnEnd, closeWindow, debugLog, transcript } = harness()
+    c.lever(undefined, true)
+    await turnEnd()
+    h.submitAnswers.push('busy')
+    await closeWindow()
+    expect(h.submits).toEqual([])
+    expect(transcript()).toEqual([])
+    expect(debugLog()).toContain('ws compaction: a main-thread turn started before the resume prompt went out; it is not submitted')
+  })
+
+  test('the live check reads false once the session ends or a compaction lands, and a stale answer submits nothing', async () => {
+    const { h, c, measure, debugLog } = harness()
+    await measure(50_000)
+    h.submitAnswers.push('stale')
+    await measure(104_000)
+    expect(h.submits).toEqual([])
+    expect(debugLog()).toContain('ws compaction: the conversation moved on before a prompt went out; it is not submitted')
+    const [live] = h.lives
+    expect(live!()).toBe(true)
+    c.end('clear')
+    expect(live!()).toBe(false)
   })
 })

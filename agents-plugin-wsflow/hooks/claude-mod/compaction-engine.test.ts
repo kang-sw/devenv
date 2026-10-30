@@ -1,6 +1,6 @@
 import { expect, mock, test, type TestBody } from 'claude-code/testing'
 
-import { ENABLED_KEY } from './captions'
+import { ENABLED_KEY, OWN_SETTLE_MS } from './captions'
 import { CONTINUATION_WINDOW_MS } from './compaction'
 import { KNOB } from './register'
 import {
@@ -693,6 +693,9 @@ test('a resume prompt refused beneath the mod is recorded in the transcript', as
 // The caption switch on: each prompt of the feature is delivered split, the
 // full text in a hidden row and a raw-text notice, then its one-liner.
 
+/** The settle a split submit waits out before it looks for a started turn. */
+const settle = (w: World) => w.clock.advance(OWN_SETTLE_MS)
+
 /** What one split delivery of `text` with its one-liner `line` leaves, in order. */
 const split = (text: string, line: string) => [`user:${text}`, `system:${text}`, `submit:${line}`]
 
@@ -708,9 +711,10 @@ test('captions on: the advisory and both milestones are delivered split, with no
   const w = world(on, { ...ON, captions: true })
   await start($, w)
   await measure($, w, 50_000)
-  await measure($, w, 104_000)
-  await measure($, w, 128_000)
-  await measure($, w, 150_000)
+  for (const tokens of [104_000, 128_000, 150_000]) {
+    await measure($, w, tokens)
+    await settle(w)
+  }
   expect(w.own).toEqual([
     ...split(advisoryText(w.plugin, T, 104_000), deliveryLine(w.plugin, { kind: 'advisory' }, T, 104_000)),
     ...split(milestoneText(w.plugin, 1, T, 128_000), deliveryLine(w.plugin, { kind: 'milestone', which: 1 }, T, 128_000)),
@@ -727,6 +731,7 @@ test('captions on: the landed and the vetoed resume prompts are delivered split'
   await lever($, w, { continue: true })
   await turnEnd($, w)
   await w.clock.advance(CONTINUATION_WINDOW_MS)
+  await settle(w)
   expect(w.own).toEqual(split(resumeText(w.plugin), resumeLine(w.plugin)))
   expect(w.own[2]).toBe(`submit:[${w.plugin} compaction] landed`)
   w.own.length = 0
@@ -734,6 +739,7 @@ test('captions on: the landed and the vetoed resume prompts are delivered split'
   w.compactAnswers.push({ skip: 'blocked by policy' })
   await turnEnd($, w)
   await w.clock.advance(CONTINUATION_WINDOW_MS)
+  await settle(w)
   expect(w.own).toEqual(split(vetoedResumeText(w.plugin, 'blocked by policy'), vetoedResumeLine(w.plugin, 'blocked by policy')))
   expect(w.own[2]).toBe(`submit:[${w.plugin} compaction] did not run: blocked by policy`)
   expect(w.completions).toBe(0)
@@ -746,8 +752,47 @@ test('captions on: a dropped one-liner appends nothing further and is logged to 
   await turnEnd($, w)
   w.dropPrompts = 1
   await w.clock.advance(CONTINUATION_WINDOW_MS)
+  await settle(w)
   expect(w.own).toEqual(split(resumeText(w.plugin), resumeLine(w.plugin)))
   expect(w.prompts).toEqual([])
   expect(transcript(w).filter((l) => l.includes('not submitted'))).toEqual([])
   expect(debug(w).filter((l) => l.includes('one-liner prompt dropped')).length).toBe(1)
+})
+
+test('captions on: an advisory whose settle sees a turn start stores nothing, and goes out split after that turn ends', async ($, on) => {
+  const w = world(on, { ...ON, captions: true })
+  await start($, w)
+  await measure($, w, 50_000)
+  await measure($, w, 104_000)
+  await turnStart($, w)
+  await settle(w)
+  expect(w.own).toEqual([])
+  w.live = 110_000
+  await turnEnd($, w)
+  await settle(w)
+  expect(w.own).toEqual(split(advisoryText(w.plugin, T, 110_000), deliveryLine(w.plugin, { kind: 'advisory' }, T, 110_000)))
+})
+
+test('captions on: a resume prompt whose settle sees a turn start is not submitted', async ($, on) => {
+  const w = world(on, { ...ON, captions: true })
+  await start($, w)
+  await lever($, w, { continue: true })
+  await turnEnd($, w)
+  await w.clock.advance(CONTINUATION_WINDOW_MS)
+  await turnStart($, w)
+  await settle(w)
+  await turnEnd($, w)
+  await settle(w)
+  expect(w.own).toEqual([])
+  expect(w.prompts).toEqual([])
+})
+
+test('captions on: a session end during the settle submits nothing', async ($, on) => {
+  const w = world(on, { ...ON, captions: true })
+  await start($, w)
+  await measure($, w, 50_000)
+  await measure($, w, 104_000)
+  await $.session.end({ reason: 'clear', sessionId: 'sess-1', resume: undefined as never })
+  await settle(w)
+  expect(w.own).toEqual([])
 })

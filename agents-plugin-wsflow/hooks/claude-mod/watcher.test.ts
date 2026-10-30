@@ -64,6 +64,10 @@ function harness(mode: DrainMode) {
   const appended: string[] = []
   /** Every submit attempted, as the prompts it carried. */
   const submittedPrompts: (readonly OwnPrompt[])[] = []
+  /** The next submits' answers with captions on: busy (a turn started during the settle) or stale; run as the submit answers. */
+  const submitAnswers: (() => 'busy' | 'stale')[] = []
+  /** Each submit's live check, to read later as the settle's end would. */
+  const lives: (() => boolean)[] = []
   const appendFailures: Error[] = []
   const edges: WatcherEdges = {
     mode,
@@ -80,9 +84,12 @@ function harness(mode: DrainMode) {
       if (held) return held.promise
       return drainQueue.shift() ?? { kind: 'mail', mail: [] }
     },
-    submit: async (prompts) => {
+    submit: async (prompts, live) => {
       const text = joined(prompts)
       submittedPrompts.push(prompts)
+      lives.push(live)
+      const answer = submitAnswers.shift()
+      if (answer) return answer()
       if (holdSubmits > 0) {
         holdSubmits -= 1
         const d = deferred<Error | undefined>()
@@ -122,6 +129,8 @@ function harness(mode: DrainMode) {
     heldDrains,
     submitted,
     submittedPrompts,
+    submitAnswers,
+    lives,
     submitFailures,
     heldSubmits,
     holdNextSubmit: () => (holdSubmits += 1),
@@ -145,6 +154,95 @@ async function arrive(h: ReturnType<typeof harness>, drained?: DrainResult) {
   h.waits[h.waits.length - 1]!.d.resolve('mail')
   await tick()
 }
+
+describe('a submit that found a main-thread turn started first (captions on)', () => {
+  test('a drained batch goes to the started turn: appended at its next tool boundary, never submitted', async () => {
+    const h = harness('direct')
+    const w = createWatcher(h.edges)
+    w.bind('k1')
+    await tick()
+    h.submitAnswers.push(() => ((h.turn.running = true), 'busy'))
+    await arrive(h, { kind: 'mail', mail: mailA })
+    expect(h.submitted).toEqual([])
+    await w.toolCompleted()
+    expect(h.appended).toEqual([formatBatch('pkg mailbox', RECV, 'k1', mailA)])
+    h.turn.running = false
+    w.turnCompleted()
+    await tick()
+    expect(h.submitted).toEqual([])
+    expect(h.submittedPrompts.length).toBe(1)
+  })
+
+  test('a turn-end flush that finds a turn running again requeues for that turn, and one that finds it over already submits anew', async () => {
+    const h = harness('direct')
+    const w = createWatcher(h.edges)
+    w.bind('k1')
+    await tick()
+    h.turn.running = true
+    await arrive(h, { kind: 'mail', mail: mailA })
+    h.turn.running = false
+    // The next turn started during the settle: queued for it.
+    h.submitAnswers.push(() => ((h.turn.running = true), 'busy'))
+    w.turnCompleted()
+    await tick()
+    expect(h.submitted).toEqual([])
+    h.turn.running = false
+    // That turn ended without a tool boundary, and the turn seen busy is over again by the check: submitted anew.
+    h.submitAnswers.push(() => 'busy')
+    w.turnCompleted()
+    await tick()
+    expect(h.submitted).toEqual([formatBatch('pkg mailbox', RECV, 'k1', mailA)])
+    expect(h.submittedPrompts.length).toBe(3)
+    expect(h.appended).toEqual([])
+    expect(h.records).toEqual([])
+  })
+
+  test('a notice found busy is queued for the turn and keeps the loop suspended until the model receives', async () => {
+    const h = harness('notice')
+    const w = createWatcher(h.edges)
+    w.bind('k1')
+    await tick()
+    h.submitAnswers.push(() => ((h.turn.running = true), 'busy'))
+    await arrive(h)
+    expect(w.isSuspended()).toBe(true)
+    await w.toolCompleted()
+    expect(h.appended).toEqual([formatNotice('pkg mailbox', RECV, 'k1')])
+    w.recvCompleted('k1')
+    await tick()
+    expect(w.isSuspended()).toBe(false)
+  })
+
+  test('a stop during the settle makes the live check read false, and the stale batch is recorded, not submitted', async () => {
+    const h = harness('direct')
+    const w = createWatcher(h.edges)
+    w.bind('k1')
+    await tick()
+    h.submitAnswers.push(() => {
+      w.stop('session.end clear')
+      return 'stale'
+    })
+    await arrive(h, { kind: 'mail', mail: mailA })
+    expect(h.lives[0]!()).toBe(false)
+    expect(h.submitted).toEqual([])
+    expect(h.records).toEqual([
+      `pkg mailbox: drained mail was not submitted (the push loop stopped: session.end clear); recorded here instead:\n\n${formatBatch('pkg mailbox', RECV, 'k1', mailA)}`,
+    ])
+  })
+
+  test('a rebind during the settle keeps the live check true: the batch is still delivered', async () => {
+    const h = harness('direct')
+    const w = createWatcher(h.edges)
+    w.bind('k1')
+    await tick()
+    h.submitAnswers.push(() => {
+      w.bind('k2')
+      return h.lives[0]!() ? ('busy' as const) : 'stale'
+    })
+    await arrive(h, { kind: 'mail', mail: mailA })
+    // Busy with no turn running: the submit is tried anew and goes out.
+    expect(h.submitted).toEqual([formatBatch('pkg mailbox', RECV, 'k1', mailA)])
+  })
+})
 
 describe('mid-turn steer', () => {
   test('mail drained while a turn runs is queued, then appended as one row at the next tool boundary', async () => {

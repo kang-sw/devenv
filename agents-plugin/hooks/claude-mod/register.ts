@@ -494,6 +494,8 @@ export const register: Register = (on) => {
       submit: (text) => $.prompt.submit({ text }),
       line: (text) => $.ui.log(text),
       recap: (mail) => captions.recap(mail),
+      turnRunning: () => mainTurn,
+      sleep: (ms) => new Promise<void>((resolve) => void $.clock.after(ms, resolve)),
       log: (text) => $.ui.log(`${$.plugin.name} captions: ${text}`, { to: 'debug' }),
     }
 
@@ -633,9 +635,10 @@ export const register: Register = (on) => {
           if (!recvTool) return { kind: 'failed', reason: 'MCP server not resolved' }
           return classifyRecv(await $.tool.call({ tool: recvTool as `mcp__${string}__${string}`, session_key: key, format: 'json' }))
         },
-        submit: async (prompts) => {
-          const res = await submitOwn(own, prompts)
+        submit: async (prompts, live) => {
+          const res = await submitOwn(own, prompts, live)
           if (res.drop !== undefined) throw new Error(`prompt dropped: ${res.drop}`)
+          return res.busy ? 'busy' : res.stale ? 'stale' : undefined
         },
         turnRunning: () => mainTurn,
         append: (prompts) => appendOwn(own, prompts),
@@ -693,7 +696,7 @@ export const register: Register = (on) => {
     })
     const compactionSetup = (async () => {
       compaction.start({
-        submit: (prompt) => submitOwn(own, [prompt]),
+        submit: (prompt, live) => submitOwn(own, [prompt], live),
         compact: () => $.session.compact(),
         after: (fn) => void $.clock.after(0, fn),
         delay: (ms, fn) => void $.clock.after(ms, fn),
@@ -771,7 +774,8 @@ export const register: Register = (on) => {
           return (await $.tool.list()).some((t) => t.name.startsWith(prefix))
         },
         resolve: async () => void (await resolveServer()),
-        submit: (prompt) => submitOwn(own, [prompt]),
+        submit: (prompt, live) => submitOwn(own, [prompt], live),
+        append: (prompt) => appendOwn(own, [prompt]),
         after: (fn) => void $.clock.after(0, fn),
         sleep: (ms) => new Promise<void>((resolve) => void $.clock.after(ms, resolve)),
         log: (text, to) => $.ui.log(text, { to }),

@@ -44,6 +44,14 @@ function harness(opts: { plugin?: string; server?: string | null } = {}) {
     slept: 0,
     resolves: 0,
     submits: [] as string[],
+    /** The next submits that answer busy (a main-thread turn started first) or stale, with captions on. */
+    submitAnswers: [] as ('busy' | 'stale')[],
+    /** Each submit's live check, to read later as the wait's end would. */
+    lives: [] as (() => boolean)[],
+    /** Rows appended to a running turn. */
+    appended: [] as string[],
+    /** The next appends that reject. */
+    refuseAppends: 0,
     dropSubmits: 0,
     /** The next submits that reject. */
     rejectSubmits: 0,
@@ -75,7 +83,11 @@ function harness(opts: { plugin?: string; server?: string | null } = {}) {
       return answer
     },
     resolve: async () => void (h.resolves += 1),
-    submit: async ({ text }) => {
+    submit: async ({ text }, live) => {
+      h.lives.push(live)
+      const answer = h.submitAnswers.shift()
+      if (answer === 'busy') return { busy: true }
+      if (answer === 'stale') return { stale: true }
       if (h.rejectSubmits > 0) {
         h.rejectSubmits -= 1
         throw new Error('submit failed')
@@ -86,6 +98,13 @@ function harness(opts: { plugin?: string; server?: string | null } = {}) {
       }
       h.submits.push(text)
       return {}
+    },
+    append: async ({ text }) => {
+      if (h.refuseAppends > 0) {
+        h.refuseAppends -= 1
+        throw new Error('row refused: policy')
+      }
+      h.appended.push(text)
     },
     after: (fn) => {
       if (h.afterThrows > 0) {
@@ -773,5 +792,51 @@ describe('watchdog', () => {
     h.listed.push(new Error('list failed'))
     await fire()
     expect(h.reconnects).toEqual([])
+  })
+})
+
+describe('a submit that found a main-thread turn started first (captions on)', () => {
+  const headless = "Reconnect, enable, and disable aren't available in this session."
+
+  test("a success's resume prompt is not submitted: that turn carries the work on", async () => {
+    const { h, r, turnEnd, debugLog } = harness()
+    h.submitAnswers.push('busy')
+    r.lever(undefined, true)
+    await turnEnd()
+    expect(h.submits).toEqual([])
+    expect(h.appended).toEqual([])
+    expect(debugLog()).toContain('ws mcp reconnect: a turn started before the resume prompt went out; it is not submitted')
+  })
+
+  test('a failure report joins that turn as a row; a refused row is recorded in the transcript', async () => {
+    const { h, r, turnEnd, transcript } = harness()
+    h.reconnectAnswers.push({ text: headless }, { text: headless })
+    h.submitAnswers.push('busy', 'busy')
+    r.lever(undefined, true)
+    await turnEnd()
+    expect(h.submits).toEqual([])
+    expect(h.appended).toEqual([failureText('ws', reasonCommandAnswered(headless), true)])
+    h.refuseAppends = 1
+    r.lever(undefined, false)
+    await turnEnd()
+    expect(h.appended.length).toBe(1)
+    expect(transcript()).toEqual([
+      `ws mcp reconnect: a prompt was not submitted (a turn started first, and its row was refused: Error: row refused: policy):\n${failureText('ws', reasonCommandAnswered(headless), false)}`,
+    ])
+  })
+
+  test('the live check reads false once the session ends, and a stale answer submits nothing', async () => {
+    const { h, r, turnEnd, debugLog } = harness()
+    h.reconnectAnswers.push({ text: headless })
+    h.submitAnswers.push('stale')
+    r.lever(undefined, true)
+    await turnEnd()
+    expect(h.submits).toEqual([])
+    expect(h.appended).toEqual([])
+    expect(debugLog()).toContain('ws mcp reconnect: the session ended before the report went out; it is dropped')
+    const [live] = h.lives
+    expect(live!()).toBe(true)
+    r.end('clear')
+    expect(live!()).toBe(false)
   })
 })

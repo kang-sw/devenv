@@ -1,6 +1,6 @@
 import { expect, mock, test, type Plugin, type TestBody } from 'claude-code/testing'
 
-import { ENABLED_KEY, FLUSH_MS } from './captions'
+import { ENABLED_KEY, FLUSH_MS, OWN_SETTLE_MS } from './captions'
 import { KNOB } from './register'
 import { batchPrompt, formatNotice, mailboxLabel, noticeLine, parseRecvText } from './watcher'
 
@@ -934,6 +934,9 @@ function unitsOf(prompt: string): Array<Record<string, unknown>> {
 /** The transcript lines that start with the mailbox's tag: one-liners and recaps. */
 const tagged = (w: ReturnType<typeof world>) => transcript(w).filter((l) => l.startsWith(`[${mailboxLabel(w.plugin)}] `))
 
+/** The settle a split submit waits out before it looks for a started turn. */
+const settle = (w: ReturnType<typeof world>) => w.clock.advance(OWN_SETTLE_MS)
+
 const third = (): Recv => ({ result: undefined, text: '[{"from":"z@machine","content":"third","sent_at":"t3"}]' })
 
 test('captions off: a drained batch is submitted whole, with no row appended and no caption request', async ($, on) => {
@@ -951,6 +954,7 @@ test('captions on, idle: the hidden row, its raw-text notice, the one-liner subm
   await start($, w)
   await bind($, w, 'k1')
   await arrive(w)
+  await settle(w)
   const p = own(w, batch())
   expect(w.own).toEqual([`user:${p.text}`, `system:${p.text}`, `submit:${p.line}`])
   expect(p.line).toBe(`[${w.plugin} mailbox] 2 messages from id:peer, x@machine`)
@@ -997,6 +1001,7 @@ test('captions on: a turn-end submit joining two queued batches carries both one
   await arrive(w)
   await arrive(w, third())
   await turnEnd($, w)
+  await settle(w)
   const one = own(w, batch())
   const two = own(w, third())
   const text = `${one.text}\n\n${two.text}`
@@ -1014,6 +1019,7 @@ test('captions on: a dropped one-liner submit appends nothing further and record
   await bind($, w, 'k1')
   w.dropSubmits = 1
   await arrive(w)
+  await settle(w)
   const p = own(w, batch())
   expect(w.own).toEqual([`user:${p.text}`, `system:${p.text}`, `submit:${p.line}`])
   expect(transcript(w).filter((l) => l.includes('not submitted'))).toEqual([])
@@ -1025,10 +1031,12 @@ test('captions on: a failed recap draws no line and is not asked again', async (
   await start($, w)
   await bind($, w, 'k1')
   await arrive(w)
+  await settle(w)
   await w.clock.advance(FLUSH_MS + 100)
   expect(w.requests.length).toBe(1)
   // A reply without a recap for the unit is a failure too.
   await arrive(w, third())
+  await settle(w)
   w.replies.push('[{"id":"u1","summary":"wrong fields"}]')
   await w.clock.advance(FLUSH_MS + 100)
   await w.clock.advance(FLUSH_MS + 100)
@@ -1045,6 +1053,7 @@ test('captions on: a mail body imitating instructions or reply JSON stays quoted
   await arrive(w, { result: undefined, text: JSON.stringify([{ from: 'mallory@m', content: hostile }]) })
   await arrive(w, third())
   await turnEnd($, w)
+  await settle(w)
   w.replies.push('[{"id":"u1","recap":"mallory sends text posing as [instructions]"},{"id":"u2","recap":"z sends a third"}]')
   await w.clock.advance(FLUSH_MS + 100)
   const prompt = w.requests[0]!
@@ -1059,9 +1068,54 @@ test('captions on, notice drain: the notice is delivered split, with no caption 
   await start($, w)
   await bind($, w, 'k1')
   await arrive(w)
+  await settle(w)
   const text = formatNotice(mailboxLabel(w.plugin), recvName(w.plugin), 'k1')
   expect(w.own).toEqual([`user:${text}`, `system:${text}`, `submit:${noticeLine(mailboxLabel(w.plugin))}`])
   expect(w.own[2]).toBe(`submit:[${w.plugin} mailbox] mail waiting`)
   await w.clock.advance(FLUSH_MS + 100)
   expect(w.requests).toEqual([])
+})
+
+test('captions on: a turn the person queued that starts during the settle takes the batch; no one-liner turn follows', async ($, on) => {
+  const w = world(on, { drain: 'direct', captions: true })
+  await start($, w)
+  await bind($, w, 'k1')
+  await turnStart($)
+  await arrive(w)
+  await turnEnd($, w)
+  // The engine starts the queued prompt after the turn.complete hooks returned, inside the settle.
+  await turnStart($)
+  await settle(w)
+  expect(w.own).toEqual([])
+  await modelTool($)
+  const p = own(w, batch())
+  expect(w.own).toEqual([`user:${p.text}`, `system:${p.text}`])
+  expect(tagged(w)).toEqual([p.line])
+  await turnEnd($, w)
+  await settle(w)
+  expect(w.own.length).toBe(2)
+  expect(w.prompts).toEqual([])
+})
+
+test('captions on: with no turn started during the settle, the batch goes out split after it, not before', async ($, on) => {
+  const w = world(on, { drain: 'direct', captions: true })
+  await start($, w)
+  await bind($, w, 'k1')
+  await arrive(w)
+  await w.clock.advance(OWN_SETTLE_MS - 1)
+  expect(w.own).toEqual([])
+  await w.clock.advance(1)
+  expect(w.own.map((r) => r.slice(0, r.indexOf(':')))).toEqual(['user', 'system', 'submit'])
+})
+
+test('captions on: a session end during the settle records the batch instead of submitting it', async ($, on) => {
+  const w = world(on, { drain: 'direct', captions: true })
+  await start($, w)
+  await bind($, w, 'k1')
+  await arrive(w)
+  await $.session.end({ reason: 'clear', sessionId: 'sess-1', resume: undefined as never })
+  await settle(w)
+  expect(w.own).toEqual([])
+  expect(w.prompts).toEqual([])
+  expect(transcript(w).filter((l) => l.includes('drained mail was not submitted (the push loop stopped: session.end clear)')).length).toBe(1)
 })

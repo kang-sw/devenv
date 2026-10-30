@@ -13,6 +13,7 @@ import {
   LANG_KEY,
   MODEL_KEY,
   OMITTED_LINE,
+  OWN_SETTLE_MS,
   rulesPrompt,
   STYLE_KEY,
   submitOwn,
@@ -769,8 +770,9 @@ const WINDOW = thresholdsFor({ rawMaxTokens: 200_000, autoCompactThreshold: 178_
 const RECV = 'mcp__plugin_x_x__mailbox_recv'
 
 /** Fake split-delivery edges: every append, submit, line and recap in one ordered list. */
-function ownEdges(opts: { on?: boolean; submit?: 'drop' | 'reject'; refuse?: Array<'user' | 'system'> } = {}) {
+function ownEdges(opts: { on?: boolean; submit?: 'drop' | 'reject'; refuse?: Array<'user' | 'system'>; startsTurn?: boolean } = {}) {
   const events: string[] = []
+  const turn = { running: false }
   const recaps: Array<{ tag: string; items: unknown[] }> = []
   const refuse = [...(opts.refuse ?? [])]
   const edges: OwnDeliveryEdges = {
@@ -789,9 +791,15 @@ function ownEdges(opts: { on?: boolean; submit?: 'drop' | 'reject'; refuse?: Arr
     },
     line: (text) => void events.push(`line:${text}`),
     recap: (mail) => void recaps.push(mail),
+    turnRunning: () => turn.running,
+    // The settle: a turn the test says starts during it is running once it ends.
+    sleep: async (ms) => {
+      events.push(`sleep:${ms}`)
+      if (opts.startsTurn) turn.running = true
+    },
     log: (text) => void events.push(`log:${text}`),
   }
-  return { edges, events, recaps }
+  return { edges, events, recaps, turn }
 }
 
 const fixed = (text: string, line: string): OwnPrompt => ({ text, line })
@@ -812,7 +820,7 @@ test('captions on: the hidden row, then its raw-text notice, then the one-liner 
   const mail = batchPrompt('p mailbox', RECV, 'k', [{ from: 'alpha', content: 'hi' }])
   const text = `A\n\n${mail.text}`
   expect(await submitOwn(on.edges, [fixed('A', 'a'), mail])).toEqual({})
-  expect(on.events).toEqual([`user:${text}`, `system:${text}`, `submit:a\n${mail.line}`])
+  expect(on.events).toEqual([`sleep:${OWN_SETTLE_MS}`, `user:${text}`, `system:${text}`, `submit:a\n${mail.line}`])
   expect(on.recaps).toEqual([mail.mail])
 })
 
@@ -820,25 +828,45 @@ test('captions on: a dropped or rejected one-liner submit appends nothing furthe
   for (const submit of ['drop', 'reject'] as const) {
     const on = ownEdges({ submit })
     expect(await submitOwn(on.edges, [fixed('A', 'a')])).toEqual({})
-    expect(on.events.slice(0, 3)).toEqual(['user:A', 'system:A', 'submit:a'])
-    expect(on.events.length).toBe(4)
-    expect(on.events[3]).toMatch(/^log:one-liner prompt/)
+    expect(on.events.slice(0, 4)).toEqual([`sleep:${OWN_SETTLE_MS}`, 'user:A', 'system:A', 'submit:a'])
+    expect(on.events.length).toBe(5)
+    expect(on.events[4]).toMatch(/^log:one-liner prompt/)
   }
 })
 
 test('captions on: a refused hidden row falls back to the full-text submit; a refused notice is logged and the rest goes on', async () => {
   const noRow = ownEdges({ refuse: ['user'], submit: 'drop' })
   expect(await submitOwn(noRow.edges, [fixed('A', 'a')])).toEqual({ drop: 'a Stop stands' })
-  expect(noRow.events.length).toBe(2)
-  expect(noRow.events[0]).toMatch(/^log:hidden row refused/)
-  expect(noRow.events[1]).toBe('submit:A')
+  expect(noRow.events.length).toBe(3)
+  expect(noRow.events[1]).toMatch(/^log:hidden row refused/)
+  expect(noRow.events[2]).toBe('submit:A')
   expect(noRow.recaps).toEqual([])
   const noNotice = ownEdges({ refuse: ['system'] })
   await submitOwn(noNotice.edges, [fixed('A', 'a')])
-  expect(noNotice.events.length).toBe(3)
-  expect(noNotice.events[0]).toBe('user:A')
-  expect(noNotice.events[1]).toMatch(/^log:raw-text notice not appended/)
-  expect(noNotice.events[2]).toBe('submit:a')
+  expect(noNotice.events.length).toBe(4)
+  expect(noNotice.events[1]).toBe('user:A')
+  expect(noNotice.events[2]).toMatch(/^log:raw-text notice not appended/)
+  expect(noNotice.events[3]).toBe('submit:a')
+})
+
+test('captions on: a turn that started during the settle stores and submits nothing (busy); a failed live check likewise (stale)', async () => {
+  const busy = ownEdges({ startsTurn: true })
+  const mail = batchPrompt('p mailbox', RECV, 'k', [{ from: 'alpha', content: 'hi' }])
+  expect(await submitOwn(busy.edges, [mail])).toEqual({ busy: true })
+  expect(busy.events).toEqual([`sleep:${OWN_SETTLE_MS}`])
+  expect(busy.recaps).toEqual([])
+  const stale = ownEdges({ startsTurn: true })
+  let live = true
+  stale.edges.sleep = async () => void (live = false)
+  expect(await submitOwn(stale.edges, [mail], () => live)).toEqual({ stale: true })
+  expect(stale.events).toEqual([])
+})
+
+test('captions off: no settle, whatever turn runs', async () => {
+  const off = ownEdges({ on: false, startsTurn: true })
+  off.turn.running = true
+  await submitOwn(off.edges, [fixed('A', 'a')], () => false)
+  expect(off.events).toEqual(['submit:A'])
 })
 
 test('captions on, mid-turn: the hidden row and its notice, no submit, and each one-liner drawn as a transcript line', async () => {

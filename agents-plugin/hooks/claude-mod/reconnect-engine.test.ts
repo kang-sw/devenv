@@ -1,6 +1,6 @@
 import { expect, mock, test, type TestBody } from 'claude-code/testing'
 
-import { ENABLED_KEY } from './captions'
+import { ENABLED_KEY, OWN_SETTLE_MS } from './captions'
 import {
   failureLine,
   failureText,
@@ -363,6 +363,7 @@ test('captions on: the success and the failure prompts are delivered split; capt
   w.serverUp = false
   await request($, w, { continue: true })
   await turnEnd($, w)
+  await w.clock.advance(OWN_SETTLE_MS)
   expect(w.own).toEqual([`user:${successText(w.plugin)}`, `system:${successText(w.plugin)}`, `submit:${successLine(w.plugin)}`])
   expect(w.own[2]).toBe(`submit:[${w.plugin} mcp] reconnected`)
   w.own.length = 0
@@ -370,6 +371,7 @@ test('captions on: the success and the failure prompts are delivered split; capt
   w.commandAnswers.push({ text: headless })
   await request($, w, { continue: true })
   await turnEnd($, w)
+  await w.clock.advance(OWN_SETTLE_MS)
   const text = failureText(w.plugin, reasonCommandAnswered(headless), true)
   expect(w.own).toEqual([`user:${text}`, `system:${text}`, `submit:${failureLine(w.plugin, reasonCommandAnswered(headless))}`])
   expect(w.own[2]).toBe(`submit:[${w.plugin} mcp] failed: ${reasonCommandAnswered(headless)}`)
@@ -382,4 +384,18 @@ test('captions off: the success prompt is submitted whole, with no row appended'
   await request($, w, { continue: true })
   await turnEnd($, w)
   expect(w.own).toEqual([`submit:${successText(w.plugin)}`])
+})
+
+test('captions on: a failure report whose settle sees a turn start joins that turn as a row, with no extra turn', async ($, on) => {
+  const w = world(on, { captions: true })
+  await start($, w)
+  const headless = "Reconnect, enable, and disable aren't available in this session."
+  w.commandAnswers.push({ text: headless })
+  await request($, w, { continue: true })
+  await turnEnd($, w)
+  await turnStart($, w)
+  await w.clock.advance(OWN_SETTLE_MS)
+  const text = failureText(w.plugin, reasonCommandAnswered(headless), true)
+  expect(w.own).toEqual([`user:${text}`, `system:${text}`])
+  expect(w.prompts).toEqual([])
 })

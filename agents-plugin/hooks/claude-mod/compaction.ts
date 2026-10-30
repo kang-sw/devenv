@@ -5,7 +5,7 @@ import type {
   SessionUsage,
 } from 'claude-code'
 
-import type { OwnPrompt } from './captions'
+import type { OwnPrompt, OwnSubmitResult } from './captions'
 import {
   checkLeverCall,
   deliveryLine,
@@ -71,8 +71,13 @@ import {
 export const CONTINUATION_WINDOW_MS = 1500
 
 export type CompactionEdges = {
-  /** Queue a prompt that starts its own turn once the session is idle: its text, and the one-liner the person sees while captions are on. */
-  submit: (prompt: OwnPrompt) => Promise<{ drop?: string }>
+  /**
+   * Queue a prompt that starts its own turn once the session is idle: its
+   * text, and the one-liner the person sees while captions are on. With
+   * captions on it may submit nothing: `busy` when a main-thread turn started
+   * first, `stale` when `live` read false after the wait (see submitOwn).
+   */
+  submit: (prompt: OwnPrompt, live: () => boolean) => Promise<OwnSubmitResult>
   /** Compact the conversation between turns; rejects while a turn runs. */
   compact: () => Promise<SessionCompactResult>
   /** Run `fn` once, after the calling hook has returned. */
@@ -207,19 +212,27 @@ export function createCompaction(): Compaction {
   /**
    * Queue `prompt`; not awaited, since a submit resolves only as its turn
    * starts. A lost `record`ed prompt (a resume) is written to the
-   * transcript, so the person sees the work was meant to resume.
+   * transcript, so the person sees the work was meant to resume. One a
+   * session start, end or landed compaction made stale before it went out is
+   * dropped; `busy` (a main-thread turn started first) is the caller's.
    */
-  const submit = (prompt: OwnPrompt, record: boolean) => {
+  const submit = (prompt: OwnPrompt, record: boolean, busy: () => void) => {
     if (!edges) return
+    const gen = generation
     const failed = (why: string) =>
       record ? notice(`a prompt was not submitted (${why}):\n${prompt.text}`) : debug(`a prompt was not submitted (${why})`)
-    edges.submit(prompt).then(
+    edges.submit(prompt, () => gen === generation).then(
       (res) => {
-        if (res.drop !== undefined) failed(`dropped: ${res.drop}`)
+        if (res.stale) debug('the conversation moved on before a prompt went out; it is not submitted')
+        else if (res.busy) busy()
+        else if (res.drop !== undefined) failed(`dropped: ${res.drop}`)
       },
       (err) => failed(String(err)),
     )
   }
+
+  /** A resume prompt that found a main-thread turn started first: that turn carries the work on, as within the window. */
+  const resumeBusy = () => debug('a main-thread turn started before the resume prompt went out; it is not submitted')
 
   /** A landed main-conversation compaction: the latch and the breakdown start over. */
   const landed = () => {
@@ -259,6 +272,7 @@ export function createCompaction(): Compaction {
     // Thresholds figured under another model window are stale; the next observation reads the breakdown again.
     if (fresh.window !== c0.window) return
     const tokens = fresh.tokens ?? crossed.tokens
+    const before = latch
     const step = observe(latch, levelAt(t, tokens), true)
     latch = step.latch
     crossing = undefined
@@ -269,13 +283,21 @@ export function createCompaction(): Compaction {
         `fresh read ${fresh.tokens === undefined ? 'without tokens, so the crossing\'s figure is shown' : `${fresh.tokens} tokens (${percentOf(fresh.tokens, t.raw)}%)`}, ` +
         `compaction window ${t.raw} tokens, model window ${fresh.window} tokens`,
     )
-    submit({ text: deliveryText(plugin(), step.deliver, t, tokens), line: deliveryLine(plugin(), step.deliver, t, tokens) }, false)
+    const delivered = step.latch
+    // A turn that started first takes the crossing back: delivered at its end with fresh figures.
+    const busy = () => {
+      if (gen !== generation || latch !== delivered) return
+      latch = before
+      crossing ??= crossed
+      debug('a main-thread turn started before the threshold message went out; the crossing stays recorded for its end')
+    }
+    submit({ text: deliveryText(plugin(), step.deliver, t, tokens), line: deliveryLine(plugin(), step.deliver, t, tokens) }, false, busy)
   }
 
   /** Settle `r` with its resume prompt, unguarded; an unset flag submits nothing. */
   const finish = (r: Request) => {
     if (request === r) request = undefined
-    if (r.resume) submit({ text: resumeText(plugin()), line: resumeLine(plugin()) }, true)
+    if (r.resume) submit({ text: resumeText(plugin()), line: resumeLine(plugin()) }, true, resumeBusy)
   }
 
   /**
@@ -291,12 +313,12 @@ export function createCompaction(): Compaction {
       edges?.delay(CONTINUATION_WINDOW_MS, () => {
         if (held !== h) return
         held = undefined
-        submit(h.prompt, true)
+        submit(h.prompt, true, resumeBusy)
       })
     } catch (err) {
       debug(`the resume window was not started (${String(err)}); submitting the resume prompt now`)
       if (held === h) held = undefined
-      submit(prompt, true)
+      submit(prompt, true, resumeBusy)
     }
   }
 

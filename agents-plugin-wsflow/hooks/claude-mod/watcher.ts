@@ -72,9 +72,11 @@ export interface WatcherEdges {
   drain: (key: string) => Promise<DrainResult>
   /**
    * Submit one prompt, the given prompts joined, that starts a turn once the
-   * session is idle; rejects when it did not reach the conversation.
+   * session is idle; rejects when it did not reach the conversation. May
+   * instead store and submit nothing: `busy` when a main-thread turn started
+   * first (the prompts belong to that turn), `stale` when `live` read false.
    */
-  submit: (prompts: readonly OwnPrompt[]) => Promise<void>
+  submit: (prompts: readonly OwnPrompt[], live: () => boolean) => Promise<'busy' | 'stale' | void>
   /**
    * Whether a main-thread turn runs now: a prompt ready then is queued for
    * that turn's next tool boundary or its end rather than submitted.
@@ -257,17 +259,33 @@ export function createWatcher(edges: WatcherEdges): Watcher {
   }
 
   /**
-   * Submit `prompts`, falling back to appending them as a row when the submit
-   * is rejected or dropped. Never rejects: answers why neither reached the
-   * conversation, or undefined when one did.
+   * Submit `items`' prompts, falling back to appending them as a row when the
+   * submit is rejected or dropped. A turn that started first takes them into
+   * the queue for its next tool boundary or its end, and a turn that ended
+   * again by then gets the submit tried anew, so they are never left behind.
+   * Never rejects: answers why they did not reach the conversation (a stop
+   * since this call, or neither submit nor row), or undefined when they did
+   * or were queued.
    */
-  async function deliver(prompts: readonly OwnPrompt[]): Promise<string | undefined> {
+  async function deliver(items: readonly Queued[]): Promise<string | undefined> {
+    const prompts = items.map((q) => q.prompt)
+    const at = stops
     let submitErr: unknown
-    try {
-      await edges.submit(prompts)
-      return undefined
-    } catch (err) {
-      submitErr = err
+    for (;;) {
+      let res: 'busy' | 'stale' | void
+      try {
+        res = await edges.submit(prompts, () => stops === at)
+      } catch (err) {
+        submitErr = err
+        break
+      }
+      if (res === 'stale') return `the push loop stopped: ${lastStop}`
+      if (res !== 'busy') return undefined
+      if (edges.turnRunning()) {
+        queued.push(...items)
+        edges.log(`${edges.label}: a turn started before ${items.length} prompt(s) were submitted; queued for it`)
+        return undefined
+      }
     }
     edges.log(`${edges.label}: prompt submit failed (${String(submitErr)}); appending it as a row instead`)
     try {
@@ -327,7 +345,7 @@ export function createWatcher(edges: WatcherEdges): Watcher {
       if (steer(notice, fail, myKey)) {
         edges.log(`${edges.label}: notice for ${myKey} queued for the running turn`)
       } else {
-        const why = await deliver([notice])
+        const why = await deliver([{ prompt: notice, lost: fail, noticeFor: myKey }])
         if (why !== undefined) fail(why)
       }
       await resumed
@@ -401,13 +419,14 @@ export function createWatcher(edges: WatcherEdges): Watcher {
         keep(`the push loop stopped: ${lastStop}`, batch.text)
         return
       }
-      if (steer(batch, (why) => keep(why, batch.text))) {
+      const lost = (why: string) => keep(why, batch.text)
+      if (steer(batch, lost)) {
         edges.log(`${edges.label}: drained ${mail.length} message(s) for ${myKey}; queued for the running turn`)
         continue
       }
       edges.log(`${edges.label}: drained ${mail.length} message(s) for ${myKey}; submitting one prompt`)
-      const why = await deliver([batch])
-      if (why !== undefined) keep(why, batch.text)
+      const why = await deliver([{ prompt: batch, lost }])
+      if (why !== undefined) lost(why)
     }
   }
 
@@ -456,7 +475,7 @@ export function createWatcher(edges: WatcherEdges): Watcher {
       const taken = takeQueued()
       if (!taken) return
       edges.log(`${edges.label}: submitting ${taken.items.length} prompt(s) still queued at the turn end as one prompt`)
-      void deliver(taken.prompts).then((why) => {
+      void deliver(taken.items).then((why) => {
         if (why !== undefined) lose(taken.items, why)
       })
     },

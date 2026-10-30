@@ -336,8 +336,29 @@ export type OwnDeliveryEdges = {
   line: (text: string) => void
   /** Queue a batch's mail for its recap. */
   recap: (mail: { tag: string; items: MailItem[] }) => void
+  /** Whether a main-thread turn runs now. */
+  turnRunning: () => boolean
+  /** Resolve after `ms` on the session clock. */
+  sleep: (ms: number) => Promise<void>
   log: (text: string) => void
 }
+
+/**
+ * How long a split submit waits, once the session reads idle, before it looks
+ * again. At a turn end the engine starts a prompt the person queued only after
+ * the turn.complete hooks return; a hidden row appended before that turn.start
+ * would be read in the person's turn, with a redundant one-liner turn after it.
+ */
+export const OWN_SETTLE_MS = 1_000
+
+/**
+ * What submitOwn did: submitted (`{}`), or the full text's submit was dropped
+ * (`drop`); with captions on it may also store nothing and submit nothing,
+ * because a main-thread turn started during the settle (`busy`: the caller
+ * hands the prompt to its turn-running path) or the caller's `live` check
+ * failed after it (`stale`).
+ */
+export type OwnSubmitResult = { drop?: string; busy?: true; stale?: true }
 
 const joinText = (prompts: readonly OwnPrompt[]) => prompts.map((p) => p.text).join('\n\n')
 
@@ -365,15 +386,20 @@ function queueRecaps(e: OwnDeliveryEdges, prompts: readonly OwnPrompt[]): void {
 
 /**
  * Start a turn with `prompts`, joined. Captions off: one submit of the full
- * text, as before. On: the hidden row first (a row appended after the submit
- * is missed for that whole reply), then a submit of the one-liners; a
- * dropped or rejected one-liner submit is only logged, since the hidden row
- * is stored and rides the next prompt. A refused hidden row falls back to
- * the submit of the full text. Resolves `drop` only for a full-text submit.
+ * text at once, as before. On: after OWN_SETTLE_MS, nothing when `live` reads
+ * false (`stale`) or a main-thread turn started (`busy`); otherwise the hidden
+ * row first (a row appended after the submit is missed for that whole reply),
+ * then a submit of the one-liners. A dropped or rejected one-liner submit is
+ * only logged, since the hidden row is stored and rides the next prompt. A
+ * refused hidden row falls back to the submit of the full text. Resolves
+ * `drop` only for a full-text submit.
  */
-export async function submitOwn(e: OwnDeliveryEdges, prompts: readonly OwnPrompt[]): Promise<{ drop?: string }> {
+export async function submitOwn(e: OwnDeliveryEdges, prompts: readonly OwnPrompt[], live: () => boolean = () => true): Promise<OwnSubmitResult> {
   const text = joinText(prompts)
   if (!e.isOn()) return e.submit(text)
+  await e.sleep(OWN_SETTLE_MS)
+  if (!live()) return { stale: true }
+  if (e.turnRunning()) return { busy: true }
   try {
     await appendHidden(e, text)
   } catch (err) {
