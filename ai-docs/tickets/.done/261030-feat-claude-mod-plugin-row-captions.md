@@ -258,6 +258,80 @@ Implemented in 6a2e905fd; review fixes in c1841910a.
   surface cannot close this.
 - No test pins a mail unit's weight against `BATCH_CALLS`.
 
+#### Edition (27f3d2140) - 2026-10-30
+
+Settle before the split submit, added before merge at the user's request.
+The problem it fixes: a prompt from the person queued during a turn starts
+right after that turn's turn.complete hooks return. A split submit at that
+point put its hidden row into the person's turn, and a redundant one-liner
+turn ran after it.
+
+- With the switch on, `submitOwn` waits `OWN_SETTLE_MS` (1 s) and then runs
+  a caller-supplied live check. After that it looks at `turnRunning()`.
+  - A started turn answers `busy`; nothing is stored and nothing is
+    submitted.
+  - A failed live check answers `stale`.
+  - With the switch off, nothing changes and there is no delay.
+- Turn-running paths, one per feature, each matching how that feature
+  already handles a running turn:
+  - Watcher: the existing steer queue, at the front so arrival order holds.
+    It is appended at the next tool boundary or flushed at the turn end. A
+    flush that finds a turn running again cycles through the same rule. A
+    busy answer when the turn has already ended is submitted anew, so a
+    prompt is never lost.
+  - Compaction threshold message: the crossing and latch are restored. The
+    turn-end delivery then sends it with fresh figures, which is the
+    existing rule for a crossing measured mid-turn.
+  - Compaction resume prompt: dropped. A main-thread turn.start inside the
+    continuation window already drops it, and the lever says "unless
+    another prompt has already started the next turn".
+  - Reconnect success resume: dropped, matching the existing rule for a
+    turn started during the step.
+  - Reconnect failure: appended to the running turn as a row without the
+    resume sentence (24fe7fb63). The model must learn its tools are gone,
+    but the person's request comes first.
+- Races during the wait:
+  - Watcher: a stop since delivery began (session end, unbind) makes the
+    batch stale, and it is recorded rather than submitted. A rebind still
+    delivers.
+  - Compaction and reconnect: a `generation` change makes the prompt stale.
+    Session start and session end change it, and for compaction so does a
+    landed compaction.
+- Verification:
+  - Both plugin suites passed, 509/509 each, with the mirror identical.
+  - Removing the busy re-check failed 5 of the new tests. Pushing instead
+    of unshifting failed the ordering test.
+  - New engine tests cover:
+    - settle then idle, delivered after 1 s and not before;
+    - a queued turn starting inside the settle: no submit, the row goes
+      in at that turn's tool boundary, and no one-liner turn follows;
+    - an advisory busy, delivered at that turn's end;
+    - a resume busy, dropped;
+    - a reconnect failure busy, appended;
+    - session end during the settle.
+- Live probe on an isolated tmux socket (Haiku, switch on):
+  - Setup: during a long no-tool turn, the person queued "run sleep 3,
+    then quote any mail", and mail arrived mid-turn.
+  - At the turn end the watcher went to submit the queued batch. The
+    queued prompt's turn.start came 310 ms after turn.complete, inside the
+    settle. The busy answer queued the batch for that turn.
+  - It was appended as a hidden row at the `sleep 3` tool boundary. The
+    model quoted the mail in the person's turn.
+  - No plugin prompt was submitted afterwards, so no extra turn ran.
+  - An earlier run with nothing queued submitted the split prompt 1.0 s
+    after turn.complete.
+- Review (lite): 1 Important, fixed in 24fe7fb63 (the appended failure row
+  carried the resume sentence into the person's turn). One Minor fixed too
+  (requeue order).
+- Left open:
+  - Captions switched off during the settle still deliver split.
+  - A stale drop at session end is logged to debug only.
+  - A watchdog success during the settle does not cancel a pending failure
+    report. This race predates the change, in a shorter window.
+  - The open note above about the hidden row binding to the next turn now
+    applies only to a turn that starts more than `OWN_SETTLE_MS` after the
+    turn end.
+
 ## Live Probe Findings (2026-10-30)
 
 Implementation landed on `impl/develop/dole-ebook-feast` (14e6a0d22), with
