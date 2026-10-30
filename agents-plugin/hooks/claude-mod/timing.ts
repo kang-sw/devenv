@@ -168,6 +168,16 @@ export function deliveryText(plugin: string, d: Delivery, t: Thresholds, tokens:
   return d.kind === 'advisory' ? advisoryText(plugin, t, tokens) : milestoneText(plugin, d.which, t, tokens)
 }
 
+/**
+ * The one-liner a threshold message shows the person while captions are on,
+ * from the same figures its text names: the label, the usage, the reminder
+ * for a milestone, and the automatic compaction point.
+ */
+export function deliveryLine(plugin: string, d: Delivery, t: Thresholds, tokens: number): string {
+  const reminder = d.kind === 'milestone' ? ` · reminder ${d.which}/2` : ''
+  return `${label(plugin).trimEnd()} ${percentOf(tokens, t.raw)}%${reminder} · auto-compact ${percentOf(t.hard, t.raw)}%`
+}
+
 export const LEVER_DESCRIPTION =
   'Request compaction of this conversation when the current turn ends. Before calling, bring durable records (tickets, notes, agenda) up to date with anything still needed that only this context holds. Set `continue` to true only when work must resume by itself after compaction: a fixed resume prompt then follows the compaction, unless another prompt (the human\'s, or a background agent\'s notification) has already started the next turn. Leave it unset when the next turn will come from the human or from a background agent\'s notification. Main session only.'
 
@@ -191,6 +201,16 @@ export function resumeText(plugin: string): string {
 /** The resume prompt after a hook vetoed the lever's compaction with `{ skip }`. */
 export function vetoedResumeText(plugin: string, reason: string): string {
   return `${label(plugin)}Compaction did not run (${reason}); your context is unchanged. Resume the work in progress.`
+}
+
+/** The one-liner the resume prompt shows the person while captions are on. */
+export function resumeLine(plugin: string): string {
+  return `${label(plugin).trimEnd()} landed`
+}
+
+/** The one-liner the vetoed resume prompt shows the person while captions are on. */
+export function vetoedResumeLine(plugin: string, reason: string): string {
+  return `${label(plugin).trimEnd()} did not run: ${reason}`
 }
 
 /**

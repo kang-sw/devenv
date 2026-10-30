@@ -1,6 +1,8 @@
 import { expect, mock, test, type TestBody } from 'claude-code/testing'
 
+import { ENABLED_KEY, OWN_SETTLE_MS } from './captions'
 import {
+  failureLine,
   failureText,
   reasonCommandAnswered,
   REASON_NO_SERVER,
@@ -9,6 +11,7 @@ import {
   RECONNECT_RESULT_NO_RESUME,
   reconnectDescription,
   RESUME_SENTENCE,
+  successLine,
   successText,
   TOOLS_POLL_MS,
   TOOLS_WAIT_MS,
@@ -24,7 +27,7 @@ type On = Parameters<TestBody>[1]
 
 type CommandAnswer = { text?: string } | 'brings-back'
 
-function world(on: On, opts: { processOk?: boolean; refuseRegister?: string; connect?: boolean } = {}) {
+function world(on: On, opts: { processOk?: boolean; refuseRegister?: string; connect?: boolean; captions?: boolean } = {}) {
   const clock = mock.clock(on)
   mock.env(on, {})
   const w = {
@@ -44,6 +47,8 @@ function world(on: On, opts: { processOk?: boolean; refuseRegister?: string; con
     /** Events in order, for the step's place relative to the turn end. */
     order: [] as string[],
     deleteDelays: [] as number[],
+    /** The mod's own rows and submits, in order: `user:`, `system:` or `submit:` and the text. */
+    own: [] as string[],
   }
   const server = () => `plugin:${w.plugin}:${w.plugin}`
   on('store.get', () => ({ value: undefined }))
@@ -76,10 +81,16 @@ function world(on: On, opts: { processOk?: boolean; refuseRegister?: string; con
       ? { value: { isConnected: false, reason: 'failed', message: 'did not connect' } }
       : { value: { isConnected: true, server: `plugin:${e.server}:${e.server}` } }
   })
-  // Knob reads: every key unset, so the reconnect lever runs with every knob-gated feature off.
+  // Knob reads: every key unset, so the reconnect lever runs with every knob-gated feature off;
+  // the caption switch reads true when the test asks.
   on('mcp.call', ($, e) => {
     const key = String(e.args.key)
-    return { value: { content: [{ type: 'text', text: JSON.stringify({ key, value: null, scope: 'unset' }) }], isError: false } }
+    const value = opts.captions && key === ENABLED_KEY ? true : null
+    return { value: { content: [{ type: 'text', text: JSON.stringify({ key, value, scope: value === null ? 'unset' : 'project' }) }], isError: false } }
+  })
+  on('session.append', ($, e, next) => {
+    w.own.push(`${e.message.type}:${e.message.content.map((b) => (b.type === 'text' ? b.text : '')).join('')}`)
+    return next(e)
   })
   on('tool.list', () => ({
     value: [
@@ -100,7 +111,7 @@ function world(on: On, opts: { processOk?: boolean; refuseRegister?: string; con
     }
     return answer
   })
-  on('prompt.submit', ($, e) => (w.prompts.push(e.text), { text: e.text }))
+  on('prompt.submit', ($, e) => (w.own.push(`submit:${e.text}`), w.prompts.push(e.text), { text: e.text }))
   return w
 }
 
@@ -344,4 +355,48 @@ test('session.end drops a pending request before awaiting the store delete', asy
   expect(w.prompts).toEqual([])
   await w.clock.advance(100)
   await ended
+})
+
+test('captions on: the success and the failure prompts are delivered split; captions off, whole with no row', async ($, on) => {
+  const w = world(on, { captions: true })
+  await start($, w)
+  w.serverUp = false
+  await request($, w, { continue: true })
+  await turnEnd($, w)
+  await w.clock.advance(OWN_SETTLE_MS)
+  expect(w.own).toEqual([`user:${successText(w.plugin)}`, `system:${successText(w.plugin)}`, `submit:${successLine(w.plugin)}`])
+  expect(w.own[2]).toBe(`submit:[${w.plugin} mcp] reconnected`)
+  w.own.length = 0
+  const headless = "Reconnect, enable, and disable aren't available in this session."
+  w.commandAnswers.push({ text: headless })
+  await request($, w, { continue: true })
+  await turnEnd($, w)
+  await w.clock.advance(OWN_SETTLE_MS)
+  const text = failureText(w.plugin, reasonCommandAnswered(headless), true)
+  expect(w.own).toEqual([`user:${text}`, `system:${text}`, `submit:${failureLine(w.plugin, reasonCommandAnswered(headless))}`])
+  expect(w.own[2]).toBe(`submit:[${w.plugin} mcp] failed: ${reasonCommandAnswered(headless)}`)
+})
+
+test('captions off: the success prompt is submitted whole, with no row appended', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  w.serverUp = false
+  await request($, w, { continue: true })
+  await turnEnd($, w)
+  expect(w.own).toEqual([`submit:${successText(w.plugin)}`])
+})
+
+test('captions on: a failure report whose settle sees a turn start joins that turn as a row, with no extra turn', async ($, on) => {
+  const w = world(on, { captions: true })
+  await start($, w)
+  const headless = "Reconnect, enable, and disable aren't available in this session."
+  w.commandAnswers.push({ text: headless })
+  await request($, w, { continue: true })
+  await turnEnd($, w)
+  await turnStart($, w)
+  await w.clock.advance(OWN_SETTLE_MS)
+  // The lever had the flag, yet the row asks no resume: the person's request comes first.
+  const text = failureText(w.plugin, reasonCommandAnswered(headless), false)
+  expect(w.own).toEqual([`user:${text}`, `system:${text}`])
+  expect(w.prompts).toEqual([])
 })

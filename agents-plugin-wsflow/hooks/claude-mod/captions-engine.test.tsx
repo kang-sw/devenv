@@ -1,6 +1,7 @@
 import { expect, mock, test, type TestBody } from 'claude-code/testing'
 
 import {
+  appendOwn,
   CONTEXT_KEY,
   DEFAULT_STYLE,
   displayToolName,
@@ -12,9 +13,16 @@ import {
   LANG_KEY,
   MODEL_KEY,
   OMITTED_LINE,
+  OWN_SETTLE_MS,
   rulesPrompt,
   STYLE_KEY,
+  submitOwn,
+  type OwnDeliveryEdges,
+  type OwnPrompt,
 } from './captions'
+import { failureLine, REASON_TOOLS_ABSENT, reasonCommandAnswered, successLine } from './reconnect'
+import { deliveryLine, resumeLine, thresholdsFor, vetoedResumeLine } from './timing'
+import { batchLine, batchPrompt, mailboxLabel, noticeLine } from './watcher'
 
 type Engine = Parameters<TestBody>[0]
 type On = Parameters<TestBody>[1]
@@ -385,7 +393,7 @@ test('the model, style, language and window settings are applied', async ($, on)
   expect(w.requests[0]!.model).toBe('claude-sonnet-x')
   const rules = w.requests[0]!.blocks[0]!.text.trimEnd()
   expect(rules).toBe(rulesPrompt(style, 'Korean'))
-  expect(rules).toContain('Write intention, result and summary in Korean only.')
+  expect(rules).toContain('Write intention, result, summary and recap in Korean only.')
   expect(rules.split('\n').at(-1)).toBe(style)
   expect(rules).not.toContain(DEFAULT_STYLE)
 })
@@ -407,7 +415,7 @@ test('failed or invalid setting reads leave the defaults, and an unset language 
   expect(w.requests[0]!.prompt).not.toContain(OMITTED_LINE)
   const rules = w.requests[0]!.blocks[0]!.text.trimEnd()
   expect(rules).toBe(rulesPrompt(DEFAULT_STYLE, undefined))
-  expect(rules).toContain('Write intention, result and summary in the language the user writes in.')
+  expect(rules).toContain('Write intention, result, summary and recap in the language the user writes in.')
   expect(rules.split('\n').at(-1)).toBe(DEFAULT_STYLE)
 })
 
@@ -721,11 +729,12 @@ test('file changes: an edit, a new file and an overwrite read as the change; oth
 })
 
 test('the closing lines name each unit and the fields its answer takes', () => {
-  expect(answerPrompt([{ label: 'u1', calls: 1 }, { label: 'u2', calls: 3 }])).toBe(
+  expect(answerPrompt([{ label: 'u1', calls: 1 }, { label: 'u2', calls: 3 }, { label: 'u3', calls: 1, isMail: true }])).toBe(
     [
       'Answer now: only a JSON array holding exactly these objects, ids verbatim, no prose or code fence.',
       'u1: lone call -> {id, subtitle, intention, result}',
       'u2: run of 3 calls -> {id, subtitles (3), summary}',
+      'u3: mail -> {id, recap}',
     ].join('\n'),
   )
 })
@@ -751,4 +760,145 @@ test('display tool names: plugin MCP tools, other MCP servers, and built-ins', (
   expect(displayToolName('mcp__github__get_issue')).toBe('github/get.issue')
   expect(displayToolName('mcp__ws__note_write')).toBe('ws/note.write')
   expect(displayToolName('Bash')).toBe('Bash')
+})
+
+// The mod's own prompts, delivered split while captions are on. Engine-level
+// delivery is covered beside each feature's own engine tests.
+
+/** A window whose advisory point is 50% and auto-compact point 89% (reminders at 63% and 76%). */
+const WINDOW = thresholdsFor({ rawMaxTokens: 200_000, autoCompactThreshold: 178_000, isAutoCompactEnabled: true }, { percent: 50 })!
+const RECV = 'mcp__plugin_x_x__mailbox_recv'
+
+/** Fake split-delivery edges: every append, submit, line and recap in one ordered list. */
+function ownEdges(opts: { on?: boolean; submit?: 'drop' | 'reject'; refuse?: Array<'user' | 'system'>; startsTurn?: boolean } = {}) {
+  const events: string[] = []
+  const turn = { running: false }
+  const recaps: Array<{ tag: string; items: unknown[] }> = []
+  const refuse = [...(opts.refuse ?? [])]
+  const edges: OwnDeliveryEdges = {
+    isOn: () => opts.on ?? true,
+    append: async (type, text) => {
+      if (refuse[0] === type) {
+        refuse.shift()
+        throw new Error('row refused: policy')
+      }
+      events.push(`${type}:${text}`)
+    },
+    submit: async (text) => {
+      events.push(`submit:${text}`)
+      if (opts.submit === 'reject') throw new Error('no session')
+      return opts.submit === 'drop' ? { drop: 'a Stop stands' } : { text }
+    },
+    line: (text) => void events.push(`line:${text}`),
+    recap: (mail) => void recaps.push(mail),
+    turnRunning: () => turn.running,
+    // The settle: a turn the test says starts during it is running once it ends.
+    sleep: async (ms) => {
+      events.push(`sleep:${ms}`)
+      if (opts.startsTurn) turn.running = true
+    },
+    log: (text) => void events.push(`log:${text}`),
+  }
+  return { edges, events, recaps, turn }
+}
+
+const fixed = (text: string, line: string): OwnPrompt => ({ text, line })
+
+test('captions off: one submit of the full text, or one row appended, as before', async () => {
+  const off = ownEdges({ on: false })
+  const mail = batchPrompt('p mailbox', RECV, 'k', [{ from: 'alpha', content: 'hi' }])
+  expect(await submitOwn(off.edges, [fixed('A', 'a'), mail])).toEqual({ text: `A\n\n${mail.text}` })
+  await appendOwn(off.edges, [fixed('B', 'b')])
+  expect(off.events).toEqual([`submit:A\n\n${mail.text}`, 'user:B'])
+  expect(off.recaps).toEqual([])
+  // A drop is the caller's to handle, as before.
+  expect(await submitOwn(ownEdges({ on: false, submit: 'drop' }).edges, [fixed('A', 'a')])).toEqual({ drop: 'a Stop stands' })
+})
+
+test('captions on: the hidden row, then its raw-text notice, then the one-liner submit; each batch queued for a recap', async () => {
+  const on = ownEdges()
+  const mail = batchPrompt('p mailbox', RECV, 'k', [{ from: 'alpha', content: 'hi' }])
+  const text = `A\n\n${mail.text}`
+  expect(await submitOwn(on.edges, [fixed('A', 'a'), mail])).toEqual({})
+  expect(on.events).toEqual([`sleep:${OWN_SETTLE_MS}`, `user:${text}`, `system:${text}`, `submit:a\n${mail.line}`])
+  expect(on.recaps).toEqual([mail.mail])
+})
+
+test('captions on: a dropped or rejected one-liner submit appends nothing further and logs only', async () => {
+  for (const submit of ['drop', 'reject'] as const) {
+    const on = ownEdges({ submit })
+    expect(await submitOwn(on.edges, [fixed('A', 'a')])).toEqual({})
+    expect(on.events.slice(0, 4)).toEqual([`sleep:${OWN_SETTLE_MS}`, 'user:A', 'system:A', 'submit:a'])
+    expect(on.events.length).toBe(5)
+    expect(on.events[4]).toMatch(/^log:one-liner prompt/)
+  }
+})
+
+test('captions on: a refused hidden row falls back to the full-text submit; a refused notice is logged and the rest goes on', async () => {
+  const noRow = ownEdges({ refuse: ['user'], submit: 'drop' })
+  expect(await submitOwn(noRow.edges, [fixed('A', 'a')])).toEqual({ drop: 'a Stop stands' })
+  expect(noRow.events.length).toBe(3)
+  expect(noRow.events[1]).toMatch(/^log:hidden row refused/)
+  expect(noRow.events[2]).toBe('submit:A')
+  expect(noRow.recaps).toEqual([])
+  const noNotice = ownEdges({ refuse: ['system'] })
+  await submitOwn(noNotice.edges, [fixed('A', 'a')])
+  expect(noNotice.events.length).toBe(4)
+  expect(noNotice.events[1]).toBe('user:A')
+  expect(noNotice.events[2]).toMatch(/^log:raw-text notice not appended/)
+  expect(noNotice.events[3]).toBe('submit:a')
+})
+
+test('captions on: a turn that started during the settle stores and submits nothing (busy); a failed live check likewise (stale)', async () => {
+  const busy = ownEdges({ startsTurn: true })
+  const mail = batchPrompt('p mailbox', RECV, 'k', [{ from: 'alpha', content: 'hi' }])
+  expect(await submitOwn(busy.edges, [mail])).toEqual({ busy: true })
+  expect(busy.events).toEqual([`sleep:${OWN_SETTLE_MS}`])
+  expect(busy.recaps).toEqual([])
+  const stale = ownEdges({ startsTurn: true })
+  let live = true
+  stale.edges.sleep = async () => void (live = false)
+  expect(await submitOwn(stale.edges, [mail], () => live)).toEqual({ stale: true })
+  expect(stale.events).toEqual([])
+})
+
+test('captions off: no settle, whatever turn runs', async () => {
+  const off = ownEdges({ on: false, startsTurn: true })
+  off.turn.running = true
+  await submitOwn(off.edges, [fixed('A', 'a')], () => false)
+  expect(off.events).toEqual(['submit:A'])
+})
+
+test('captions on, mid-turn: the hidden row and its notice, no submit, and each one-liner drawn as a transcript line', async () => {
+  const on = ownEdges()
+  const one = batchPrompt('p mailbox', RECV, 'k', [{ from: 'alpha', content: 'x' }])
+  const two = batchPrompt('p mailbox', RECV, 'k', [{ from: 'beta', content: 'y' }])
+  const text = `${one.text}\n\n${two.text}`
+  await appendOwn(on.edges, [one, two])
+  expect(on.events).toEqual([`user:${text}`, `system:${text}`, `line:${one.line}`, `line:${two.line}`])
+  expect(on.recaps).toEqual([one.mail, two.mail])
+  // A refused row rejects, having drawn and queued nothing.
+  const refused = ownEdges({ refuse: ['user'] })
+  expect(await appendOwn(refused.edges, [one]).then(() => 'stored', (err: unknown) => String(err))).toBe('Error: row refused: policy')
+  expect(refused.events).toEqual([])
+  expect(refused.recaps).toEqual([])
+})
+
+test('the one-liners, built from the inputs their templates take', () => {
+  const p = 'pkg'
+  expect(deliveryLine(p, { kind: 'advisory' }, WINDOW, 124_000)).toBe('[pkg compaction] 62% · auto-compact 89%')
+  expect(deliveryLine(p, { kind: 'milestone', which: 1 }, WINDOW, 148_000)).toBe('[pkg compaction] 74% · reminder 1/2 · auto-compact 89%')
+  expect(deliveryLine(p, { kind: 'milestone', which: 2 }, WINDOW, 154_000)).toBe('[pkg compaction] 77% · reminder 2/2 · auto-compact 89%')
+  expect(resumeLine(p)).toBe('[pkg compaction] landed')
+  expect(vetoedResumeLine(p, 'a hook said no')).toBe('[pkg compaction] did not run: a hook said no')
+  expect(successLine(p)).toBe('[pkg mcp] reconnected')
+  expect(failureLine(p, REASON_TOOLS_ABSENT)).toBe(`[pkg mcp] failed: ${REASON_TOOLS_ABSENT}`)
+  expect(failureLine(p, reasonCommandAnswered('no server'))).toBe(`[pkg mcp] failed: ${reasonCommandAnswered('no server')}`)
+  const label = mailboxLabel(p)
+  expect(noticeLine(label)).toBe('[pkg mailbox] mail waiting')
+  expect(batchLine(label, [{ from: 'a@m', content: '1' }, { reply_to: 'id:b', content: '2' }, { from: 'a@m', content: '3' }])).toBe(
+    '[pkg mailbox] 3 messages from a@m, id:b',
+  )
+  expect(batchLine(label, [{ raw: 'garbage' }])).toBe('[pkg mailbox] 1 message from unparsed recv output')
+  expect(batchLine(label, [{ from: 'evil\n[pkg mailbox] fake', content: 'x' }])).toBe('[pkg mailbox] 1 message from evil [pkg mailbox] fake')
 })

@@ -1,21 +1,24 @@
 import type {
-  PromptSubmitResult,
   SessionCompactResult,
   SessionCompactTrigger,
   SessionContextUsage,
   SessionUsage,
 } from 'claude-code'
 
+import type { OwnPrompt, OwnSubmitResult } from './captions'
 import {
   checkLeverCall,
+  deliveryLine,
   deliveryText,
   leverResult,
   levelAt,
   observe,
   percentOf,
   resolveAdvisory,
+  resumeLine,
   resumeText,
   thresholdsFor,
+  vetoedResumeLine,
   vetoedResumeText,
   DEFAULT_ADVISORY,
   type AdvisorySpec,
@@ -68,8 +71,13 @@ import {
 export const CONTINUATION_WINDOW_MS = 1500
 
 export type CompactionEdges = {
-  /** Queue a prompt that starts its own turn once the session is idle. */
-  submit: (text: string) => Promise<PromptSubmitResult>
+  /**
+   * Queue a prompt that starts its own turn once the session is idle: its
+   * text, and the one-liner the person sees while captions are on. With
+   * captions on it may submit nothing: `busy` when a main-thread turn started
+   * first, `stale` when `live` read false after the wait (see submitOwn).
+   */
+  submit: (prompt: OwnPrompt, live: () => boolean) => Promise<OwnSubmitResult>
   /** Compact the conversation between turns; rejects while a turn runs. */
   compact: () => Promise<SessionCompactResult>
   /** Run `fn` once, after the calling hook has returned. */
@@ -167,7 +175,7 @@ export function createCompaction(): Compaction {
   let delivering = false
   let request: Request | undefined
   /** The lever's resume prompt held for its window; see CONTINUATION_WINDOW_MS. */
-  let held: { text: string } | undefined
+  let held: { prompt: OwnPrompt } | undefined
   /**
    * True while the lever's own compaction runs. The engine routes a
    * `$.session.compact` past the calling plugin's own session.compact hook,
@@ -202,21 +210,29 @@ export function createCompaction(): Compaction {
   }
 
   /**
-   * Queue `text`; not awaited, since a submit resolves only as its turn
+   * Queue `prompt`; not awaited, since a submit resolves only as its turn
    * starts. A lost `record`ed prompt (a resume) is written to the
-   * transcript, so the person sees the work was meant to resume.
+   * transcript, so the person sees the work was meant to resume. One a
+   * session start, end or landed compaction made stale before it went out is
+   * dropped; `busy` (a main-thread turn started first) is the caller's.
    */
-  const submit = (text: string, record: boolean) => {
+  const submit = (prompt: OwnPrompt, record: boolean, busy: () => void) => {
     if (!edges) return
+    const gen = generation
     const failed = (why: string) =>
-      record ? notice(`a prompt was not submitted (${why}):\n${text}`) : debug(`a prompt was not submitted (${why})`)
-    edges.submit(text).then(
+      record ? notice(`a prompt was not submitted (${why}):\n${prompt.text}`) : debug(`a prompt was not submitted (${why})`)
+    edges.submit(prompt, () => gen === generation).then(
       (res) => {
-        if (res.drop !== undefined) failed(`dropped: ${res.drop}`)
+        if (res.stale) debug('the conversation moved on before a prompt went out; it is not submitted')
+        else if (res.busy) busy()
+        else if (res.drop !== undefined) failed(`dropped: ${res.drop}`)
       },
       (err) => failed(String(err)),
     )
   }
+
+  /** A resume prompt that found a main-thread turn started first: that turn carries the work on, as within the window. */
+  const resumeBusy = () => debug('a main-thread turn started before the resume prompt went out; it is not submitted')
 
   /** A landed main-conversation compaction: the latch and the breakdown start over. */
   const landed = () => {
@@ -256,6 +272,7 @@ export function createCompaction(): Compaction {
     // Thresholds figured under another model window are stale; the next observation reads the breakdown again.
     if (fresh.window !== c0.window) return
     const tokens = fresh.tokens ?? crossed.tokens
+    const before = latch
     const step = observe(latch, levelAt(t, tokens), true)
     latch = step.latch
     crossing = undefined
@@ -266,34 +283,42 @@ export function createCompaction(): Compaction {
         `fresh read ${fresh.tokens === undefined ? 'without tokens, so the crossing\'s figure is shown' : `${fresh.tokens} tokens (${percentOf(fresh.tokens, t.raw)}%)`}, ` +
         `compaction window ${t.raw} tokens, model window ${fresh.window} tokens`,
     )
-    submit(deliveryText(plugin(), step.deliver, t, tokens), false)
+    const delivered = step.latch
+    // A turn that started first takes the crossing back: delivered at its end with fresh figures.
+    const busy = () => {
+      if (gen !== generation || latch !== delivered) return
+      latch = before
+      crossing ??= crossed
+      debug('a main-thread turn started before the threshold message went out; the crossing stays recorded for its end')
+    }
+    submit({ text: deliveryText(plugin(), step.deliver, t, tokens), line: deliveryLine(plugin(), step.deliver, t, tokens) }, false, busy)
   }
 
   /** Settle `r` with its resume prompt, unguarded; an unset flag submits nothing. */
   const finish = (r: Request) => {
     if (request === r) request = undefined
-    if (r.resume) submit(resumeText(plugin()), true)
+    if (r.resume) submit({ text: resumeText(plugin()), line: resumeLine(plugin()) }, true, resumeBusy)
   }
 
   /**
    * Settle `r` after its own compaction: hold the resume prompt, and submit
    * it at the window's end unless a main-thread turn started meanwhile.
    */
-  const hold = (r: Request, text: string) => {
+  const hold = (r: Request, prompt: OwnPrompt) => {
     if (request === r) request = undefined
     // A window still open is superseded: one resume prompt covers both.
-    const h = { text }
+    const h = { prompt }
     held = h
     try {
       edges?.delay(CONTINUATION_WINDOW_MS, () => {
         if (held !== h) return
         held = undefined
-        submit(h.text, true)
+        submit(h.prompt, true, resumeBusy)
       })
     } catch (err) {
       debug(`the resume window was not started (${String(err)}); submitting the resume prompt now`)
       if (held === h) held = undefined
-      submit(text, true)
+      submit(prompt, true, resumeBusy)
     }
   }
 
@@ -335,9 +360,9 @@ export function createCompaction(): Compaction {
       if (res.skip !== undefined) notice(`the requested compaction did not run (${res.skip}); no resume was requested, so no turn follows`)
     } else if (res.skip !== undefined) {
       notice(`the requested compaction did not run (${res.skip}); a resume prompt follows with a note`)
-      hold(r, vetoedResumeText(plugin(), res.skip))
+      hold(r, { text: vetoedResumeText(plugin(), res.skip), line: vetoedResumeLine(plugin(), res.skip) })
     } else {
-      hold(r, resumeText(plugin()))
+      hold(r, { text: resumeText(plugin()), line: resumeLine(plugin()) })
     }
   }
 
@@ -367,7 +392,7 @@ export function createCompaction(): Compaction {
 
     end: (reason) => {
       if (request) debug(`session.end ${reason} dropped a pending compaction request`)
-      if (held) notice(`a prompt was not submitted (session.end ${reason}):\n${held.text}`)
+      if (held) notice(`a prompt was not submitted (session.end ${reason}):\n${held.prompt.text}`)
       reset()
     },
 

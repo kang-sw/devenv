@@ -1,4 +1,4 @@
-import type { PromptSubmitResult } from 'claude-code'
+import type { OwnPrompt, OwnSubmitResult } from './captions'
 
 /**
  * The MCP reconnect lever, a feature of the Claude mod: a tool the model calls
@@ -63,16 +63,31 @@ export function reconnectResult(resume: boolean): string {
 /** The last sentence of the resume prompt, which also ends a failure report for a call with the flag. */
 export const RESUME_SENTENCE = 'Resume the interrupted work.'
 
+/** Opens every prompt the lever submits, so it never reads as the human's own words. */
+export function label(plugin: string): string {
+  return `[${plugin} mcp] `
+}
+
 export function successText(plugin: string): string {
-  return `[${plugin} mcp] The ${plugin} MCP server reconnected; its tools are available again. ${RESUME_SENTENCE}`
+  return `${label(plugin)}The ${plugin} MCP server reconnected; its tools are available again. ${RESUME_SENTENCE}`
 }
 
 export function failureText(plugin: string, reason: string, resume: boolean): string {
   const head =
-    `[${plugin} mcp] The ${plugin} MCP server did not come back (${reason}). ` +
+    `${label(plugin)}The ${plugin} MCP server did not come back (${reason}). ` +
     `Do not call ${TOOL_NAME} again for this drop: a reconnect that just failed fails the same way. ` +
     'Ask the user to re-enable the server from /mcp, run /reload-plugins, or restart the session.'
   return resume ? `${head} ${RESUME_SENTENCE}` : head
+}
+
+/** The one-liner the success prompt shows the person while captions are on. */
+export function successLine(plugin: string): string {
+  return `${label(plugin).trimEnd()} reconnected`
+}
+
+/** The one-liner the failure prompt shows the person while captions are on. */
+export function failureLine(plugin: string, reason: string): string {
+  return `${label(plugin).trimEnd()} failed: ${reason}`
 }
 
 /** The failure reasons the step words; the command's own words fill the last two. */
@@ -142,8 +157,14 @@ export type ReconnectEdges = {
   toolsListed: (server: string) => Promise<boolean>
   /** Resolve the server name again after a reconnect, updating the shared cache. */
   resolve: () => Promise<void>
-  /** Queue a prompt that starts its own turn once the session is idle. */
-  submit: (text: string) => Promise<PromptSubmitResult>
+  /**
+   * Queue a prompt that starts its own turn once the session is idle. With
+   * captions on it may submit nothing: `busy` when a main-thread turn started
+   * first, `stale` when `live` read false after the wait (see submitOwn).
+   */
+  submit: (prompt: OwnPrompt, live: () => boolean) => Promise<OwnSubmitResult>
+  /** Join the running main-thread turn with `prompt` as a row its next model request reads; rejects when refused. */
+  append: (prompt: OwnPrompt) => Promise<void>
   /** Run `fn` once, after the calling hook has returned. */
   after: (fn: () => void) => void
   sleep: (ms: number) => Promise<void>
@@ -339,11 +360,29 @@ export function createReconnect(): Reconnect {
         return
       }
     }
-    const text = outcome.ok ? successText(e.plugin) : failureText(e.plugin, outcome.reason, r.resume)
-    const failed = (why: string) => notice(`a prompt was not submitted (${why}):\n${text}`)
-    e.submit(text).then(
-      (res) => {
-        if (res.drop !== undefined) failed(`dropped: ${res.drop}`)
+    const prompt = outcome.ok
+      ? { text: successText(e.plugin), line: successLine(e.plugin) }
+      : { text: failureText(e.plugin, outcome.reason, r.resume), line: failureLine(e.plugin, outcome.reason) }
+    const failed = (why: string) => notice(`a prompt was not submitted (${why}):\n${prompt.text}`)
+    // A turn that started before the prompt went out: a success's resume is
+    // owed no more, as when one starts during the step; a failure joins that
+    // turn as a row, since the model must learn its tools are gone. That row
+    // asks no resume: the started turn's own request comes first.
+    const busy = async () => {
+      if (outcome.ok) return debug('a turn started before the resume prompt went out; it is not submitted')
+      const row = { ...prompt, text: failureText(e.plugin, outcome.reason, false) }
+      try {
+        await e.append(row)
+        debug('a turn started before the failure report went out; it joined that turn as a row')
+      } catch (err) {
+        notice(`a prompt was not submitted (a turn started first, and its row was refused: ${String(err)}):\n${row.text}`)
+      }
+    }
+    e.submit(prompt, () => gen === generation).then(
+      async (res) => {
+        if (res.stale) debug('the session ended before the report went out; it is dropped')
+        else if (res.busy) await busy()
+        else if (res.drop !== undefined) failed(`dropped: ${res.drop}`)
       },
       (err) => failed(String(err)),
     )
