@@ -176,3 +176,38 @@ Verification (merge gate):
   no-op, not a defect to chase); a compaction advisory row and a mail batch
   row draw compact, and ctrl+o shows them raw.
 - Existing caption, mirror, and manifest drift tests pass for both packages.
+
+## Live Probe Findings (2026-10-30)
+
+Implementation landed on `impl/develop/dole-ebook-feast` (14e6a0d22), with
+engine tests passing. The live probe then contradicted a premise of the
+Decisions. The phase has no `### Result` yet.
+
+Setup: Claude Code 2.1.314 on Linux, an isolated tmux socket, and a scratch
+copy of `agents-plugin` loaded via `--plugin-dir` with the caption switch on.
+The copy added one debug line that logged every `UserMessage` render the mod
+saw (origin, from, task, text head).
+
+- **Plugin-origin rows never reach the mod's own `ui.render` hook.** For the
+  idle mailbox batch row (`$.prompt.submit`), the debug log shows `hooks
+  module ws@inline ui.render skipped: re-entry (the plugin's own code raised
+  it; origin ws)` on its first draw and on every periodic redraw. In the same
+  redraw passes, the composer rows reached the hook (`origin={"kind":"composer"}`).
+  The engine draws the row as `› Prompt from the ws plugin` / `❯ The ws plugin
+  sent a message:` plus the raw text, with framing that nothing hooks.
+- **A resumed transcript is skipped the same way** (`claude --continue`). The
+  stored ws-origin row is skipped as re-entry too, so it is not delivered as
+  `unclassified`.
+- **An appended mid-turn mail row draws no row at all.** The log shows the
+  watcher's `appending 1 queued prompt(s) to the running turn as one row`.
+  After that, no `UserMessage` render fires for the row, and the row is absent
+  from both the collapsed view and ctrl+o. Per the phase text, the append half
+  is a no-op, not a defect.
+- The compaction advisory and reconnect prompts use the same
+  `$.prompt.submit` path, so the same re-entry skip covers them. The probe did
+  not drive them separately.
+
+As a result, the plugin-origin qualification path (the main path) cannot
+fire in the live engine. Only the `unclassified` label-prefix fallback could
+fire, and only for rows stored before origin stamps. The engine typings do
+not document this re-entry rule.
