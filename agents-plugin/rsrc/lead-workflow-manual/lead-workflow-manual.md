@@ -174,6 +174,28 @@ the only report of pooled worktrees left idle or holding large preserved
 artifacts; removing one with `{{.McpNamespace}}/worktree.remove(path: ...)` is
 the user's call.
 
+### Worktree-based work mode
+
+Only when the user asks (the `### Git` housekeeping worktree excepted), work
+in worktrees instead of moving the current worktree's branch: per unit, pass
+a new branch as `target_branch` to `{{.McpNamespace}}/worktree.acquire` (for
+a ticket, the one `{{.McpNamespace}}/git.resolve_impl_branch` returns).
+Release that worktree before merging its branch or when the unit ends
+unmerged; a worktree that keeps a branch checked out blocks
+`{{.McpNamespace}}/git.merge` and every other checkout of it.
+
+#### Parallel mode
+
+Only a strict dependency (`blocked-by:`, a prerequisite `related:` or
+`parent:`, or a body-stated need-first) orders units; overlapping files never
+defer one, because the conflicts that matter are semantic and are checked at
+merge. Merge units one at a time as they finish. When earlier merges moved the
+target, first diff the target against the tree
+`git merge-tree --write-tree <target> <branch>` prints, looking for
+interactions with those merges. An interaction or a merge conflict goes to
+`{{.SkillNamespace}}:lead-delegate`, which reruns the affected verification;
+the user sees it only when the delegate cannot settle it.
+
 ### API documentation
 
 Use `{{.McpNamespace}}/api.list` to inspect local API documentation cache domains.

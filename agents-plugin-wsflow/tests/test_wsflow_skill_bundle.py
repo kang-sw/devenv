@@ -323,45 +323,41 @@ class WsflowSkillBundleTest(unittest.TestCase):
         self.assertIn("call `{{.McpNamespace}}/git.status` and decide", run)
         self.assertIn("Branch-explicit calls need no check.", run)
         # Opt-in parallel route: the byte-mirror must carry the gated
-        # provisioning approval, the delegated batch selection, the
-        # worktree.acquire/release lifecycle (release before each merge), and the
-        # on-arrival serial git.merge with an unresolvable conflict as a merge
-        # stop into the wsflow package.
+        # approval (which a worktree/parallel instruction already is), the
+        # delegated batch selection, and the pointers to the workflow manual's
+        # worktree mode, which owns provisioning, release, and serial merges.
         self.assertIn("## Parallel route (opt-in)", run)
         self.assertIn("unless the opt-in parallel route below is approved for this run", run)
         self.assertIn("Serial is the default.", run)
         self.assertIn(
-            'One per-run user approval, "may this run provision worktrees and execute'
-            ' ready tickets in parallel", opens this route',
+            "This route runs the workflow manual's `#### Parallel mode` over ready"
+            " tickets and opens on one per-run user approval",
+            run,
+        )
+        self.assertIn(
+            "a user instruction to work in worktree or parallel mode is that approval.",
             run,
         )
         self.assertIn("The approved batch is the concurrency cap.", run)
-        self.assertIn("Render `ticket-batch-selector` and spawn it at its recommended tier", run)
+        self.assertIn("Render `ticket-batch-selector` at its recommended tier", run)
         self.assertIn(
-            "For each approved ticket, resolve its canonical branch with "
-            "`{{.McpNamespace}}/git.resolve_impl_branch` against your exact base branch, "
-            "then pass that returned branch verbatim as `target_branch` to "
-            "`{{.McpNamespace}}/worktree.acquire`, with the worker `profile` the workflow "
-            "manual's `### Git` guidance selects. Keep the `worker_key` it returns",
+            "Provision each ticket by the manual's `### Worktree-based work mode`, skip"
+            " Spawn step 3, and render its worker with `root_override: <worktree path>`"
+            " and the acquired branch on the Branch line.",
             run,
         )
-        self.assertIn("it is the sole branch owner, so skip Spawn step 3", run)
-        self.assertIn("Render each worker with `root_override: <that worktree path>`", run)
-        self.assertIn(
-            "Handle each terminal report by **Handle the report** as it arrives: the"
-            " batch is independent, so no merge waits on another worker's report.",
-            run,
+        manual = " ".join(
+            (RSRC_DIR / "lead-workflow-manual" / "lead-workflow-manual.md")
+            .read_text(encoding="utf-8")
+            .split()
         )
         self.assertIn(
-            "Release that worker's worktree with"
-            " `{{.McpNamespace}}/worktree.release(key: <its worker_key>)` before its merge",
-            run,
+            "Release that worktree before merging its branch or when the unit ends"
+            " unmerged; a worktree that keeps a branch checked out blocks"
+            " `{{.McpNamespace}}/git.merge` and every other checkout of it.",
+            manual,
         )
-        self.assertIn("Merges run one at a time through `{{.McpNamespace}}/git.merge`", run)
-        self.assertIn(
-            "cannot resolve is a merge stop: surface it and leave that branch retained",
-            run,
-        )
+        self.assertIn("Merge units one at a time as they finish.", manual)
         # The parallel-safety predicate moved out of lead-run into its own
         # delegate playbook; the mirror must carry that playbook too.
         batch = " ".join(

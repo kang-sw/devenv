@@ -400,7 +400,8 @@ func customProfile(t *testing.T, name, definition string) resolvedWorktreeProfil
 }
 
 // TestWorkflowManualRendersWorktreeProfiles: the manual lists every resolved
-// profile with its scope and description at the end of the Git section, and a
+// profile with its scope and description at the end of the Git section (before
+// the next heading, "### Worktree-based work mode"), and a
 // bad committed profile fails the manual naming the file and key (also on the
 // fresh-with-root path, before any key is minted).
 func TestWorkflowManualRendersWorktreeProfiles(t *testing.T) {
@@ -408,7 +409,7 @@ func TestWorkflowManualRendersWorktreeProfiles(t *testing.T) {
 	text := toolText(t, keyedCall(t, server, 940400, key, "workflow_manual", map[string]any{}))
 	git := strings.Index(text, "### Git")
 	list := strings.Index(text, worktreeProfileManualHeading)
-	next := strings.Index(text, "### API documentation")
+	next := strings.Index(text, "### Worktree-based work mode")
 	if git < 0 || list < git || next < list {
 		t.Fatalf("profile list must sit at the end of the Git section (git=%d list=%d next=%d):\n%s", git, list, next, text)
 	}

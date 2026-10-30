@@ -168,32 +168,20 @@ agent is gone, re-spawn with the same task block plus one line:
 
 ## Parallel route (opt-in)
 
-Serial is the default. One per-run user approval, "may this run provision
-worktrees and execute ready tickets in parallel", opens this route, because
-provisioning is expensive in large or submodule-heavy repositories. The
-approved batch is the concurrency cap. Differences from the serial route:
+Serial is the default. This route runs the workflow manual's
+`#### Parallel mode` over ready tickets and opens on one per-run user
+approval, because provisioning is expensive in large or submodule-heavy
+repositories; a user instruction to work in worktree or parallel mode is that
+approval. The approved batch is the concurrency cap.
 
-- Render `ticket-batch-selector` and spawn it at its recommended tier; it owns
-  the parallel-safety read. Present its `batch:` with the approval request.
-- For each approved ticket, resolve its canonical branch with
-  `{{.McpNamespace}}/git.resolve_impl_branch` against your exact base branch,
-  then pass that returned branch verbatim as `target_branch` to
-  `{{.McpNamespace}}/worktree.acquire`, with the worker `profile` the workflow
-  manual's `### Git` guidance selects. Keep the `worker_key` it returns; it
-  is the sole branch owner, so skip Spawn step 3. Render each worker with
-  `root_override: <that worktree path>` and put the acquired branch on the
-  task block's Branch line. When a batch worker's route verdict is not
-  `continue`, follow that verdict as reported rather than re-provisioning.
-- Handle each terminal report by **Handle the report** as it arrives: the
-  batch is independent, so no merge waits on another worker's report.
-  Release that worker's worktree with
-  `{{.McpNamespace}}/worktree.release(key: <its worker_key>)` before its
-  merge, because `{{.McpNamespace}}/git.merge` deletes the merged impl branch
-  and Git refuses to delete a branch a worktree still has checked out; a
-  stopped worker's worktree is released the same way and its branch stays
-  retained. Merges run one at a time through `{{.McpNamespace}}/git.merge`; a
-  conflict it cannot resolve is a merge stop: surface it and leave that
-  branch retained.
+- Render `ticket-batch-selector` at its recommended tier; it owns the
+  parallel-safety read. Present its `batch:` with the approval request, or
+  report it and proceed when the instruction already approved.
+- Provision each ticket by the manual's `### Worktree-based work mode`, skip
+  Spawn step 3, and render its worker with `root_override: <worktree path>`
+  and the acquired branch on the Branch line. A route verdict other than
+  `continue` is followed as reported, not re-provisioned.
+- Handle each report by **Handle the report** as it arrives.
 
 ## Terminal: `ready/` empty on a goal branch
 
