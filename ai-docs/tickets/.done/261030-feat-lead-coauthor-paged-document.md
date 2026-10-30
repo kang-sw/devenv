@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 54f3b7497690ecf9
 sage-review-design-reviewed: 54f3b7497690ecf9
+completed: 2026-10-30
 ---
 
 # lead-coauthor-paged-document: co-author a human-facing paged document with the user, page by page, to PDF
