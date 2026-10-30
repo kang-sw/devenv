@@ -209,7 +209,7 @@ import { ADAPTER_CONFIG_MANIFEST_FILE, createWsConfigKeyReader, createWsConfigRe
 import { createDisplaySummaryStore, createModelResolver, createProviderCompletion, DISPLAY_SUMMARY_CONFIG_KEYS, displaySummaryConfigFrom, readManifestDefaultStyle, type DisplaySummaryStore } from "./display-summary.ts";
 import { registerDisplaySummarySession } from "./display-summary-session.ts";
 import { confirmSummarizedBuiltinTools, registerAdapterMessageRenderers, registerDisplaySummaryToolResolver, type SummaryToolResolver } from "./display-summary-render.ts";
-import { registerSkillResources } from "./skills-dir.ts";
+import { registerSkillResources, resolveSkillsDir } from "./skills-dir.ts";
 import { computeSessionBootstrap, registerLeadBootstrap, type LeadPromptRef, type SkillsBlockCache, type WsBlockBase } from "./lead-bootstrap.ts";
 import { registerModelPrompts } from "./model-prompts.ts";
 import { applyForkAffinity, captureRegisteredTools, classifyForkRegistrations, compareForkRegistrations, effectiveForkDescriptor, formatForkRegistrationMismatch, frameForkInput, readForkLaunchContext, removeForkTransport, restoreForkContext, restoreForkKeys, FORK_READINESS_KIND, type ForkContext } from "./fork-context.ts";
@@ -732,7 +732,22 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   // activate. Whether it is ever ACTIVE is that gate's job, not this call's.
   // Dogfood fix: takes only `pi` now — it reads `pi.getCommands()` live
   // inside its own `execute()`, never a ref filled at `session_start`.
-  registerWsSkillTool(pi, toolPreviewTuiRef);
+  // The preload block expands with this process's own key once the bridge
+  // is up; before it, and in a process with no key, the block stays.
+  registerWsSkillTool(pi, toolPreviewTuiRef, () => {
+    const bridge = handle;
+    if (!bridge) return undefined;
+    return {
+      ownSkillsDir: resolveSkillsDir(pluginDir, repoRoot),
+      sessionKey: bridge.defaultSessionKeyRef.current,
+      readPlaybook: async (name, sessionKey) => {
+        const result = await bridge.client.callTool("playbook.read", { name, session_key: sessionKey });
+        const text = result.content.flatMap((item) => item.type === "text" && typeof item.text === "string" ? [item.text] : []).join("\n");
+        if (result.isError) throw new Error(text || "playbook.read reported an error");
+        return text;
+      },
+    };
+  });
   // 260905 Edition: releases the child pushes that arrived while this session
   // was mid-turn, each with a status line computed at release time. Factory
   // scope (like registerGoalLoop above, never inside session_start) so a
