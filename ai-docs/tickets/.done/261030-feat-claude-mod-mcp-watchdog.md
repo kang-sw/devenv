@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 26f91b05f1bf06a9
 sage-review-completeness-reviewed: 26f91b05f1bf06a9
+completed: 2026-10-30
 ---
 
 # Claude mod MCP watchdog that reconnects a dropped plugin server without the model
@@ -205,3 +206,90 @@ tools leave the list, whether the watchdog restores the server and mail push,
 whether orphaned `python3`/`ws-mcp` processes remain, and whether reconnect
 attempts made inside the nightly kill window fail (evidence for revisiting
 the attempt-count failure bound).
+
+### Result (1cbecd950, b67400cc6) - 2026-10-30
+
+Landed in the single Claude mod (mirrored byte-identically into wsflow):
+
+- `reconnect.ts`: `watch(intervalMs)` arms a `$.clock.every` watchdog;
+  `resolved()` ends a failure streak. A tick reads the tool list for the
+  `mcpToolName(server, '')` prefix and, when nothing is listed, runs the
+  lever's own `attempt` through one shared in-flight guard: a tick skips
+  while a main-thread turn runs or a lever step is scheduled or running
+  (checked again after its tool-list read); a lever step that comes due
+  during a watchdog attempt reports that attempt's outcome instead of
+  reconnecting again. A success writes `watchdogSuccessText` to the
+  transcript and submits nothing; a failure writes `watchdogFailureText` once
+  per streak, and after `WATCHDOG_MAX_FAILURES` (3) the tick stops attempting
+  until `resolved()`, a tick that finds the tools listed again, or a new
+  session start.
+- `register.ts`: knobs `claude.mcp_watchdog_enabled` and
+  `claude.mcp_watchdog_interval_minutes`, read keyless at session start; a
+  failed, refused, or invalid read takes the default from
+  `$.plugin.root/config-manifest.json` (the deliberate exception to the inert
+  rule, commented at the module header). The server name for a session whose
+  server never resolved is derived from `$.plugin.root/.claude-plugin/plugin.json`
+  as `plugin:<plugin>:<first mcpServers key>`. It feeds only the reconnect
+  `server()` edge, so the lever reconnects such a session too. The shared
+  `server` cache is still set only by a connected resolution, which now also
+  calls `reconnect.resolved()`.
+- Manifests: both keys in both packages (enabled: ws `true`, wsflow
+  `false`; interval: integer, minimum 1, default 10 in both). The Go parity
+  test pins the enabled default per package. A new
+  `TestShippedClaudeWatchdogInterval` pins the interval and refuses `0`.
+- Mailbox recovery needed no new code. `watcher.test.ts` pins that a killed
+  wait child reads as `error` and re-arms the same binding after backoff,
+  and that a drain failing while the server is down retries and delivers
+  once it is back.
+- Both `hooks.json` descriptions and `wsflow-mirroring.md` describe the
+  watchdog.
+
+Verification:
+
+- `claude plugin test` passed 467/467 for both `agents-plugin` and
+  `agents-plugin-wsflow`. New tests: `watchdog-engine.test.ts` (engine
+  wiring, knob fallback, derived name for the watchdog and the lever,
+  interval, turn suppression, 3-failure stop and restart), the `watchdog`
+  block in `reconnect.test.ts`, and the server-drop block in
+  `watcher.test.ts`. A mutation check showed the new tests catch each
+  removed guard: no piggyback, no streak stop, no scheduled-step skip, and
+  no re-check after the read. `claude plugin validate` passes for both
+  packages.
+- `go test ./internal/wsrsrc` ok (mirror drift). `go test ./internal/mcp -run
+  'Manifest|Config|Claude|Tune'` ok. The full `internal/mcp` suite ran
+  longer than the default 10-minute timeout on this host. The test that was
+  running when it timed out passes when run alone.
+- `python3 -m unittest discover` passes in `agents-plugin/tests` (80) and
+  `agents-plugin-wsflow/tests` (18).
+- Live probe, run on Linux with Claude Code 2.1.314 on an isolated tmux
+  socket. It used a scratch copy of `agents-plugin` loaded through
+  `--plugin-dir`, with the copy's interval default set to 1, inside a scratch
+  ws project:
+  - The watchdog armed at start. At 01:30:23Z the probe killed ws-mcp
+    `serve` and the session's `mailbox wait` with `kill -9`.
+  - The 01:30:52Z tick ran `/mcp reconnect plugin:ws:ws` and the server came
+    back as a new `serve` PID. The transcript got the one watchdog line, no
+    model turn ran, and the cost stayed at $0.00.
+  - The mailbox wait had already re-armed after its backoff. A message sent
+    after the restore was drained and pushed as a prompt.
+- Lite review, one pass: no Critical or Important findings. One minor was
+  fixed in b67400cc6: a session start now resets the streak, as the shipped
+  description says. The other minors are left as observations (see the
+  report).
+
+Decisions:
+
+- A tick that finds the tools listed again ends the failure streak, so a
+  person's own `/mcp reconnect` re-arms a stopped watchdog. This adds to the
+  "until the next successful server resolution" bound and keeps it bounded.
+- A session start resets the streak, following the Decision's "(a lever
+  reconnect or a new session start)".
+- The enabled knob treats a non-boolean read, such as unset `null`, as
+  unreadable, which mirrors the interval's positive-integer rule.
+- The timer survives `session.end`, because the server belongs to the
+  process and `clear` is not followed by a session start. Each session start
+  replaces the timer.
+- An overlap between two lever steps keeps the lever's existing behavior.
+  Only a watchdog attempt is shared.
+- The downstream-neutral guard test no longer matches `.claude-plugin/`.
+  This fixes a false positive; the guard still flags a bare `claude-plugin/`.
