@@ -615,7 +615,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-30T07:45:07Z"
+        "touched_at": "2026-10-30T07:45:36Z",
+        "impl": {
+          "branch": "impl/develop/ice-afar-pang"
+        }
       }
     }
   }
