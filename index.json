@@ -592,34 +592,11 @@
     "261029-chore-wsflow-no-agent-env-rename-and-setup-tool-removal": {
       "registered_at": "2026-10-29T00:09:05Z"
     },
+    "261030-bug-claude-mod-watchdog-no-reconnect-windows": {
+      "registered_at": "2026-10-30T10:33:50Z"
+    },
     "261030-bug-tickets-move-stages-on-occupied-root": {
       "registered_at": "2026-10-30T06:10:05Z"
-    },
-    "261030-feat-lead-coauthor-paged-document": {
-      "registered_at": "2026-10-30T05:28:42Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-30T06:11:43Z",
-        "impl": {
-          "branch": "impl/develop/eats-ruse-mural"
-        }
-      }
-    },
-    "261030-feat-paged-document-templates": {
-      "registered_at": "2026-10-30T07:39:20Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-30T07:45:36Z",
-        "impl": {
-          "branch": "impl/develop/ice-afar-pang"
-        }
-      }
     }
   }
 }
