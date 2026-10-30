@@ -604,6 +604,9 @@
           "branch": "impl/develop/wrath-squad-jet"
         }
       }
+    },
+    "261030-feat-claude-mod-plugin-row-captions": {
+      "registered_at": "2026-10-30T02:12:26Z"
     }
   }
 }
