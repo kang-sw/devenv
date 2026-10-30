@@ -165,6 +165,49 @@ Verified facts this ticket builds on:
 | risk.test | high | Race coverage and live dashboard acceptance are required. |
 | risk.security_or_contract | moderate | External Orca bridge is private and unversioned. |
 
+## Blocked (2026-10-30) — no supported structured RPC delivery path
+
+The lead stopped implementation after new evidence contradicted the integration
+premise for the owner's actual Orca Pi RPC session. The owner had authorized
+overnight implementation and merge, but did not authorize a terminal-only
+scope change or Orca-side modifications. This ticket remains open without a
+Phase 1 Result; do not dispatch it until the integration contract is settled.
+
+Verified in the actual root session using presence booleans only:
+`ORCA_PANE_KEY`, `ORCA_AGENT_HOOK_PORT`, `ORCA_AGENT_HOOK_TOKEN`, and
+`ORCA_CHAT_SCRATCH_DIR` are absent; `ORCA_PI_STATUS_OWNED` is present. No
+values or credentials were printed. The ownership marker proves extension
+initialization, not hook delivery.
+
+The peer co-lead independently corroborated the installed Orca 1.4.245 code:
+`~/.pi/agent/extensions/orca-agent-status.ts`, `postOnce` around lines 300-311,
+returns without pane key, port, and token. The structured Pi launcher in
+`out/main/chunks/abort-aware-delay-D4NfEMlz.js:48` deliberately deletes the
+pane/hook variables through `inheritedEnvToDelete: EM`. Its Pi JSONL-RPC
+translator in `structured-agent-session-host-assembly-5BQCq7U4.js:115` has no
+subagent/child cases; the ACP/Codex child machinery is not wired to Pi. No
+supported alternative destination was found. Thus the emitter alone cannot
+reach the target session's dashboard/busy UI; this is a contract failure,
+not merely an unobserved live acceptance check.
+
+Incomplete prototype: `5c51c7e77` on `impl/develop/exes-defy-cache`, retained
+unmerged (branch tip `53888ac25` includes blocked-state documentation).
+Changed prototype paths: `agents-plugin-pi/src/subagent-lifecycle.ts`,
+`src/spawner.ts`, `src/subtree-lifecycle.ts`, and
+`test/subagent-lifecycle.test.ts`. The worker reports targeted tests passed
+using `npm test -- --test-reporter=dot test/subagent-lifecycle.test.ts
+ test/subtree-lifecycle.test.ts test/recursive-worker.test.ts test/spawner.test.ts`.
+The full suite, remaining integration coverage, independent implementation
+review, and live UI acceptance were not completed; the prototype is not
+merge-ready. The clean pooled worktree was released, preserving its branch.
+
+Only this blocked-state documentation lands on develop. No source merge,
+production install/reload, synthetic hook call, forged environment, or Orca
+patch was performed. Resume requires the owner's scope decision: establish
+an Orca-side structured-Pi integration prerequisite, or explicitly choose a
+terminal-mode target and validate that bridge there. Neither option is yet
+approved; morning UI inspection alone does not remove this blocker.
+
 ## Phases
 
 ### Phase 1: Lifecycle emitter
