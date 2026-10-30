@@ -485,7 +485,11 @@ func formatEffortForText(effort string) string {
 //     unrestricted scope a lead holds. The key is a distinct child of the
 //     caller (parent = caller key) minted at the caller's root. That root is
 //     the key's default binding, not a confinement: lead scope permits every
-//     tool, ferrule included, so a worker is trusted at lead level by design.
+//     tool, ferrule included, so a worker is trusted at lead level by design,
+//     with one exception keyed on its parent: note.write, note.erase,
+//     note.mute, and note.unmute are denied to every key that is not a
+//     top-level lead (see isNoteMutationTool), so a worker hands a note to its
+//     lead through its report.
 //   - "lead", "", unknown → ("", false): lead playbooks never mint child keys.
 func childRoleForPlaybookRole(role string) (toolRole, bool) {
 	switch strings.ToLower(strings.TrimSpace(role)) {

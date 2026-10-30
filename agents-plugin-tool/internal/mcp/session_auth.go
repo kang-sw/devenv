@@ -26,8 +26,9 @@ type sessionEntry struct {
 
 // isTopLevelLead reports whether the entry is a top-level lead: lead scope with
 // no parent. A worker's key is also lead-scoped but carries its lead's key as
-// parent. Plan allocation and the mailbox peer-lead stamp share this test so
-// they cannot drift apart.
+// parent, as does a spawner-launched fork's. Plan allocation, the mailbox
+// peer-lead stamp, the note read-only gate, and the notes cleanup warning
+// share this test so they cannot drift apart.
 func (e sessionEntry) isTopLevelLead() bool {
 	return e.scope == roleLead && e.parent == ""
 }

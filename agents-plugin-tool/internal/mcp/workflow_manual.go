@@ -357,7 +357,8 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 			body = injectSessionKeyLine(body, mintedKey)
 			body += "\n\n## Session Key\n" + mintedKey
 			body += "\n\n" + renderSessionState(sessionRecord{})
-			body += "\n\n" + computeNotes(canonical)
+			notes := computeNotesBlock(canonical)
+			body += "\n\n" + notes.Text
 			if skepticalPosture {
 				body = injectSkepticalPosture(body)
 			}
@@ -371,6 +372,9 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 			// the occupied-root banner is always safe to inject here.
 			body = injectBootstrapStalenessWarning(body, occupiedRootAnnouncement(canonical))
 			body = injectBootstrapStalenessWarning(body, mailboxAddressAnnouncement(s, mintedKey, canonical))
+			// The minted key is a top-level lead, so it may spend the clone's
+			// daily cleanup-warning slot.
+			body = injectBootstrapStalenessWarning(body, notesCleanupWarning(canonical, notes, notesCleanupNow()))
 			body = injectBootstrapStalenessWarning(body, computeManuals(canonical))
 			body = injectBootstrapStalenessWarning(body, wsreview.CheckpointNudge(context.Background(), canonical))
 			if nudge := reviewTrackNudge(canonical); nudge != "" {
@@ -397,7 +401,8 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 		body = injectSessionKeyLine(body, key)
 		body += "\n\n## Session Key\n" + key
 		body += "\n\n" + renderSessionState(rec)
-		body += "\n\n" + computeNotes(rec.Root)
+		notes := computeNotesBlock(rec.Root)
+		body += "\n\n" + notes.Text
 		if skepticalPosture {
 			body = injectSkepticalPosture(body)
 		}
@@ -416,6 +421,12 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 				body = injectBootstrapStalenessWarning(body, occupiedRootAnnouncement(rec.Root))
 			}
 			body = injectBootstrapStalenessWarning(body, mailboxAddressAnnouncement(s, key, rec.Root))
+			// Only a top-level lead renders and consumes the clone's daily
+			// cleanup-warning slot: a worker is note read-only and could
+			// neither act on the warning nor leave it for its lead.
+			if (sessionEntry{scope: toolRole(rec.Scope), parent: rec.Parent}).isTopLevelLead() {
+				body = injectBootstrapStalenessWarning(body, notesCleanupWarning(rec.Root, notes, notesCleanupNow()))
+			}
 			body = injectBootstrapStalenessWarning(body, computeManuals(rec.Root))
 			body = injectBootstrapStalenessWarning(body, wsreview.CheckpointNudge(context.Background(), rec.Root))
 			if !rec.ReviewTrackNudgeShown {
