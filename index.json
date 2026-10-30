@@ -606,7 +606,14 @@
       }
     },
     "261030-feat-claude-mod-plugin-row-captions": {
-      "registered_at": "2026-10-30T02:12:26Z"
+      "registered_at": "2026-10-30T02:12:26Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-10-30T02:21:10Z"
+      }
     }
   }
 }
