@@ -607,6 +607,9 @@
           "branch": "impl/develop/eats-ruse-mural"
         }
       }
+    },
+    "261030-feat-paged-document-templates": {
+      "registered_at": "2026-10-30T07:39:20Z"
     }
   }
 }
