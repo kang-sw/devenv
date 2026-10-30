@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 6ad994b123c76b48
 sage-review-completeness-reviewed: 6ad994b123c76b48
+completed: 2026-10-30
 ---
 
 # lead-coauthor-paged-document: reusable document templates (create, find, apply)
@@ -210,3 +211,36 @@ regenerate the skills manifest and any skills mirror those trees require.
 
 Verification: as in the Verification decision. The commit resolves followup
 `target-handwrite-zoning` through the `resolves` field of `ws/git.commit`.
+
+### Result (b6cc688ed) - 2026-10-30
+
+Landed in 6ffaaf62a and b6cc688ed. The playbook
+`lead-coauthor-paged-document` now carries a `## Templates` section
+(location: project `ai-docs/paged-templates/` over the global
+`$WS_CONFIG_HOME/paged-templates/`, else `~/.ws/paged-templates/`; collision
+precedence and project/global labeling; folder contents with a
+placeholder-only rule; save rules with default-global, update-in-place,
+project commit question, and `.gitignore` guard). `On: invoke` routes template
+requests to a new `On: template` procedure, lists templates at step 2, copies
+the chosen template into `document.html` and records it in `plan.md` at step 4,
+asks the save / update-or-new question at step 8, and reports at step 9.
+`On: template` ends with its own report line. The Style invariant follows a
+chosen template; the progress theme stays fixed. The ws and wsflow skill
+descriptions gained an identical template clause. rsrc manifest, wsflow rsrc
+mirror, Pi rsrc mirror (copied byte-for-byte; no regen entrypoint), and skills
+manifest regenerated. Followup `target-handwrite-zoning` resolved by 6ffaaf62a.
+
+Verification: `go test ./internal/wsrsrc/... ./internal/mcp/... -count=1` ok;
+`python3 -m unittest discover agents-plugin-wsflow/tests` OK (18);
+`python3 -m unittest discover agents-plugin/tests` OK (80); a temporary
+`printPlaybook` render of the playbook in ws and wsflow product modes differs
+only in the `ws:`/`wsflow:` skill namespace, and the wsflow render has no
+`ws/` or `ws:` reference besides the exempt `~/.ws/paged-templates/` path.
+Lite review: clean, three minor wording findings fixed in b6cc688ed.
+
+Decisions: step 8 skips the save question when a used template's look did not
+change (a literal reading of (69a) would offer to save a duplicate of it); an
+update writes the template back to its own location instead of following the
+default-global rule for new templates; `On: template` carries no progress
+section, since the ticket names only the render check and correction
+recording for template mode.
