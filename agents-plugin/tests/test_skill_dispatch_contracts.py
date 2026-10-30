@@ -24,6 +24,7 @@ EXPECTED_LEAD_SKILLS = {
     "lead-revive",
     "lead-audit-doc",
     "lead-use-mailbox",
+    "lead-coauthor-paged-document",
 }
 
 # Names that must not reappear on this flagship package's shipped skill or

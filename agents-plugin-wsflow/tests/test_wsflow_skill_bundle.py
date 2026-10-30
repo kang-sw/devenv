@@ -19,6 +19,7 @@ RSRC_DIR = PLUGIN_DIR / "rsrc"
 
 EXPECTED_SKILLS = {
     "lead-audit-doc",
+    "lead-coauthor-paged-document",
     "lead-bootstrap",
     "lead-discuss",
     "lead-check-blockers",

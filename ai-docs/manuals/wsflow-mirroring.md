@@ -42,6 +42,7 @@ Included:
 - `lead-check-blockers`
 - `lead-bootstrap`
 - `lead-audit-doc`
+- `lead-coauthor-paged-document`
 - `lead-ship`
 - `lead-review`
 - `lead-tune`

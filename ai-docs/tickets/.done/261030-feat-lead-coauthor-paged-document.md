@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 54f3b7497690ecf9
 sage-review-design-reviewed: 54f3b7497690ecf9
+completed: 2026-10-30
 ---
 
 # lead-coauthor-paged-document: co-author a human-facing paged document with the user, page by page, to PDF
@@ -223,6 +224,36 @@ manifests, the wsflow shim, the Pi mirror (`TestPiMirrorUpToDate`), and
 playbook rendering pass; `playbook.read` of the
 new playbook renders cleanly in ws and in wsflow product mode, with wsflow
 output carrying no `ws/` tool or `ws:` skill references.
+
+### Result (4a3677a73) - 2026-10-30
+
+Landed the kind:print playbook
+`agents-plugin/rsrc/lead-coauthor-paged-document/lead-coauthor-paged-document.md`
+(procedure steps 1-7 with the progress-section upkeep folded into step 6 and
+the Mechanics section; plan-file authority; folder-`.gitignore`-only tracking;
+commit timing; page, progress, render-check, and PDF mechanics; no visual
+style), the single-call ws and wsflow skill shims, regenerated rsrc and skills
+manifests, byte-identical wsflow and Pi rsrc mirrors, both hardcoded Python
+skill inventories, and the wsflow-mirroring shipped-skill list.
+
+Verification:
+- `python3 -m unittest discover agents-plugin/tests`: 80 tests OK.
+- `python3 -m unittest discover agents-plugin-wsflow/tests`: 18 tests OK.
+- `go test ./... -count=1` in agents-plugin-tool: all 17 packages ok
+  (includes TestPiMirrorUpToDate, TestWsflowRsrcMirrorUpToDate,
+  TestSkillsManifestDriftIsVisible).
+- `printPlaybook` render via a scratch (uncommitted) test, ws and wsflow
+  product modes on claude and codex harnesses: renders cleanly; ws emits
+  `ws:lead-audit-doc`, wsflow emits `wsflow:lead-audit-doc` and carries no
+  `ws/`, `ws:`, or `ws.` token.
+- Lite review: clean; one optional minor (talk time is asked in step 1 rather
+  than step 2) left as is, since the ticket's step 1 already names talk time.
+
+Decisions:
+- The playbook declares the `ExploreAgent` variable but not `delegates: true`;
+  the lead authors the document, so the delegate continuity tip does not fit.
+- The skill description names bare `lead-audit-doc` so ws and wsflow share one
+  namespace-free description.
 
 ## Sage Review Round 1 (2026-10-30)
 
