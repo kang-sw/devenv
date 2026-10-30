@@ -976,6 +976,19 @@ test('captions on, idle: the hidden row, its raw-text notice, the one-liner subm
   expect(w.requests.length).toBe(1)
 })
 
+test('a headless session with the caption switch on: a drained batch is submitted whole, and no recap is requested', async ($, on) => {
+  const w = world(on, { drain: 'direct', captions: true })
+  await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false } as never)
+  await w.clock.settle()
+  await bind($, w, 'k1')
+  await arrive(w)
+  await settle(w)
+  await w.clock.advance(FLUSH_MS + 100)
+  expect(w.own).toEqual([`submit:${own(w, batch()).text}`])
+  expect(w.requests).toEqual([])
+  expect(tagged(w)).toEqual([])
+})
+
 test('captions on, mid-turn: the hidden row and its notice with no submit; the one-liner and the recap drawn as transcript lines', async ($, on) => {
   const w = world(on, { drain: 'direct', captions: true })
   await start($, w)

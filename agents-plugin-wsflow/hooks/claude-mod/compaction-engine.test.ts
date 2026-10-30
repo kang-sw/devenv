@@ -825,6 +825,19 @@ test('captions on: the landed and the vetoed resume prompts are delivered split'
   expect(w.completions).toBe(0)
 })
 
+test('a headless session with the caption switch on: the resume prompt is submitted whole, with no row appended', async ($, on) => {
+  const w = world(on, { ...ON, captions: true })
+  w.engine = $
+  await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false } as never)
+  await w.clock.settle()
+  await lever($, w, { continue: true })
+  await turnEnd($, w)
+  await w.clock.advance(CONTINUATION_WINDOW_MS)
+  await settle(w)
+  expect(w.own).toEqual([`submit:${resumeText(w.plugin)}`])
+  expect(w.completions).toBe(0)
+})
+
 test('captions on: a dropped one-liner appends nothing further and is logged to debug only', async ($, on) => {
   const w = world(on, { ...ON, captions: true })
   await start($, w)

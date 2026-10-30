@@ -385,6 +385,27 @@ test('captions are off by default: rows draw raw, nothing is sent, and the other
   for (const key of [MODEL_KEY, STYLE_KEY, CONTEXT_KEY, LANG_KEY]) expect(w.configKeys).not.toContain(key)
 })
 
+test('a headless session keeps captions off with the switch on: rows draw raw, nothing is sent, and no setting is read', async ($, on) => {
+  const w = world(on)
+  w.engine = $
+  await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false } as never)
+  await w.clock.settle()
+  await $.tool.call({ tool: 'Bash', command: 'ls', tool_use_id: 'toolu_1' } as never)
+  const calls = [{ ...BASE, tool_use_id: 'toolu_1', tool: 'Bash', input: { command: 'ls' } }]
+  expect(await isRaw($, toolUse(w, 'toolu_1'))).toBe(true)
+  expect(await isRaw($, group(w, { calls, isActive: false, isExpanded: false, isCallsOnly: true }))).toBe(true)
+  await tick(w)
+  await tick(w)
+  expect(w.requests).toEqual([])
+  expect(w.invalidated).toEqual([])
+  for (const key of [ENABLED_KEY, MODEL_KEY, STYLE_KEY, CONTEXT_KEY, LANG_KEY]) expect(w.configKeys).not.toContain(key)
+  // The stored switch is untouched, and the next interactive start turns captions on.
+  expect(w.config[ENABLED_KEY]).toBe(true)
+  await start($, w)
+  expect(w.configKeys).toContain(ENABLED_KEY)
+  expect(w.invalidated).toEqual(['ui.render'])
+})
+
 test('a read failure of the switch leaves captions off', async ($, on) => {
   const w = world(on, { failKeys: [ENABLED_KEY] })
   await start($, w)

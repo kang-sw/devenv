@@ -822,6 +822,9 @@ export const register: Register = (on) => {
         },
         log: (text) => $.ui.log(text, { to: 'debug' }),
         plugin: $.plugin.name,
+        // Headless forces captions off for the session, and with them the
+        // split delivery of the mod's own prompts and the mailbox recaps.
+        interactive: e.isInteractive,
       })
     } catch (err) {
       $.ui.log(`${$.plugin.name} captions: setup failed: ${String(err)}`, { to: 'debug' })
