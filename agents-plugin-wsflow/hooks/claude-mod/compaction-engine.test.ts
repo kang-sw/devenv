@@ -1,8 +1,22 @@
 import { expect, mock, test, type TestBody } from 'claude-code/testing'
 
+import { ENABLED_KEY } from './captions'
 import { CONTINUATION_WINDOW_MS } from './compaction'
 import { KNOB } from './register'
-import { ADVISORY_KEY, advisoryText, LEVER_DESCRIPTION, milestoneText, LEVER_RESULT, LEVER_RESULT_NO_RESUME, resumeText, thresholdsFor, vetoedResumeText } from './timing'
+import {
+  ADVISORY_KEY,
+  advisoryText,
+  deliveryLine,
+  LEVER_DESCRIPTION,
+  milestoneText,
+  LEVER_RESULT,
+  LEVER_RESULT_NO_RESUME,
+  resumeLine,
+  resumeText,
+  thresholdsFor,
+  vetoedResumeLine,
+  vetoedResumeText,
+} from './timing'
 
 type Engine = Parameters<TestBody>[0]
 type On = Parameters<TestBody>[1]
@@ -38,6 +52,8 @@ type Opts = {
   sessionScoped?: boolean
   /** The start's mcp.connect answer. */
   connect?: Connect
+  /** The caption switch (claude.display_summary_enabled) reads true. */
+  captions?: boolean
 }
 
 /** The advisory knob on. */
@@ -71,6 +87,10 @@ function world(on: On, opts: Opts = {}) {
     knobReads: [] as Record<string, unknown>[],
     /** The advisory knob's value, for a later session start to read. */
     compaction: opts.compaction,
+    /** The mod's own rows and non-composer submits, in order: `user:`, `system:` or `submit:` and the text. */
+    own: [] as string[],
+    /** The model requests the mod made (captions, among them). */
+    completions: 0,
   }
   let connect = opts.connect
   on('mcp.connect', async ($, e) => {
@@ -88,6 +108,9 @@ function world(on: On, opts: Opts = {}) {
       if (opts.failKnob) return { value: { content: [{ type: 'text', text: 'ws-mcp is unhealthy' }], isError: true } }
       const value = w.compaction === undefined || (opts.sessionScoped && e.args.session_key === undefined) ? null : w.compaction
       return { value: { content: [{ type: 'text', text: JSON.stringify({ key: e.args.key, value, scope: value === null ? 'unset' : 'project' }) }], isError: false } }
+    }
+    if (opts.captions && e.args.key === ENABLED_KEY) {
+      return { value: { content: [{ type: 'text', text: JSON.stringify({ key: e.args.key, value: true, scope: 'project' }) }], isError: false } }
     }
     if (e.args.key !== ADVISORY_KEY) return { value: { content: [{ type: 'text', text: JSON.stringify({ key: e.args.key, value: null, scope: 'unset' }) }], isError: false } }
     w.configGets.push({ server: e.server, args: e.args })
@@ -120,6 +143,15 @@ function world(on: On, opts: Opts = {}) {
     w.registered.push({ name: e.name, description: e.description, isDeferred: e.isDeferred, inputSchema: e.inputSchema })
     return { value: { tool: `mcp__${w.plugin}__${e.name}` } }
   })
+  on('session.append', ($, e, next) => {
+    w.own.push(`${e.message.type}:${e.message.content.map((b) => (b.type === 'text' ? b.text : '')).join('')}`)
+    return next(e)
+  })
+  on('session.messages', () => ({ value: [] }))
+  on('model.complete', () => {
+    w.completions += 1
+    return { value: { isAnswered: false, reason: 'empty-reply', usage: { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } } }
+  })
   on('session.usage', ($, e) => {
     w.usageCalls.push(e)
     return { value: { startedAt: 0, context: { tokens: w.live, window: 1_000_000, breakdown: e.breakdown ? WINDOW : undefined }, rateLimits: [] } as never }
@@ -135,6 +167,7 @@ function world(on: On, opts: Opts = {}) {
       w.typed.push({ text: e.text, context: e.context })
       return { text: e.text, context: e.context }
     }
+    w.own.push(`submit:${e.text}`)
     if (w.dropPrompts > 0) {
       w.dropPrompts -= 1
       return { drop: 'blocked beneath' }
@@ -655,4 +688,66 @@ test('a resume prompt refused beneath the mod is recorded in the transcript', as
   await w.clock.advance(CONTINUATION_WINDOW_MS)
   expect(w.prompts).toEqual([])
   expect(transcript(w)).toEqual([`${w.plugin} compaction: a prompt was not submitted (dropped: blocked beneath):\n${resumeText(w.plugin)}`])
+})
+
+// The caption switch on: each prompt of the feature is delivered split, the
+// full text in a hidden row and a raw-text notice, then its one-liner.
+
+/** What one split delivery of `text` with its one-liner `line` leaves, in order. */
+const split = (text: string, line: string) => [`user:${text}`, `system:${text}`, `submit:${line}`]
+
+test('captions off: the advisory is submitted whole, with no row appended', async ($, on) => {
+  const w = world(on, ON)
+  await start($, w)
+  await measure($, w, 50_000)
+  await measure($, w, 104_000)
+  expect(w.own).toEqual([`submit:${advisoryText(w.plugin, T, 104_000)}`])
+})
+
+test('captions on: the advisory and both milestones are delivered split, with no model request', async ($, on) => {
+  const w = world(on, { ...ON, captions: true })
+  await start($, w)
+  await measure($, w, 50_000)
+  await measure($, w, 104_000)
+  await measure($, w, 128_000)
+  await measure($, w, 150_000)
+  expect(w.own).toEqual([
+    ...split(advisoryText(w.plugin, T, 104_000), deliveryLine(w.plugin, { kind: 'advisory' }, T, 104_000)),
+    ...split(milestoneText(w.plugin, 1, T, 128_000), deliveryLine(w.plugin, { kind: 'milestone', which: 1 }, T, 128_000)),
+    ...split(milestoneText(w.plugin, 2, T, 150_000), deliveryLine(w.plugin, { kind: 'milestone', which: 2 }, T, 150_000)),
+  ])
+  expect(w.own[2]).toBe(`submit:[${w.plugin} compaction] 52% · auto-compact 85%`)
+  expect(w.own[5]).toBe(`submit:[${w.plugin} compaction] 64% · reminder 1/2 · auto-compact 85%`)
+  expect(w.completions).toBe(0)
+})
+
+test('captions on: the landed and the vetoed resume prompts are delivered split', async ($, on) => {
+  const w = world(on, { ...ON, captions: true })
+  await start($, w)
+  await lever($, w, { continue: true })
+  await turnEnd($, w)
+  await w.clock.advance(CONTINUATION_WINDOW_MS)
+  expect(w.own).toEqual(split(resumeText(w.plugin), resumeLine(w.plugin)))
+  expect(w.own[2]).toBe(`submit:[${w.plugin} compaction] landed`)
+  w.own.length = 0
+  await lever($, w, { continue: true })
+  w.compactAnswers.push({ skip: 'blocked by policy' })
+  await turnEnd($, w)
+  await w.clock.advance(CONTINUATION_WINDOW_MS)
+  expect(w.own).toEqual(split(vetoedResumeText(w.plugin, 'blocked by policy'), vetoedResumeLine(w.plugin, 'blocked by policy')))
+  expect(w.own[2]).toBe(`submit:[${w.plugin} compaction] did not run: blocked by policy`)
+  expect(w.completions).toBe(0)
+})
+
+test('captions on: a dropped one-liner appends nothing further and is logged to debug only', async ($, on) => {
+  const w = world(on, { ...ON, captions: true })
+  await start($, w)
+  await lever($, w, { continue: true })
+  await turnEnd($, w)
+  w.dropPrompts = 1
+  await w.clock.advance(CONTINUATION_WINDOW_MS)
+  expect(w.own).toEqual(split(resumeText(w.plugin), resumeLine(w.plugin)))
+  expect(w.prompts).toEqual([])
+  expect(transcript(w).filter((l) => l.includes('not submitted'))).toEqual([])
+  expect(debug(w).filter((l) => l.includes('one-liner prompt dropped')).length).toBe(1)
 })

@@ -1,3 +1,5 @@
+import type { MailItem, OwnPrompt } from './captions'
+
 /**
  * Pure mailbox-push controller for the Claude Code mod in register.ts; the
  * Claude counterpart of the pi adapter's mailbox waiter.
@@ -68,19 +70,22 @@ export interface WatcherEdges {
   wait: (key: string, slug: string | undefined, signal: AbortSignal) => Promise<WaitOutcome>
   /** Drain via mailbox recv (direct mode only). */
   drain: (key: string) => Promise<DrainResult>
-  /** Submit one prompt that starts a turn once the session is idle. */
-  submit: (text: string) => Promise<void>
+  /**
+   * Submit one prompt, the given prompts joined, that starts a turn once the
+   * session is idle; rejects when it did not reach the conversation.
+   */
+  submit: (prompts: readonly OwnPrompt[]) => Promise<void>
   /**
    * Whether a main-thread turn runs now: a prompt ready then is queued for
    * that turn's next tool boundary or its end rather than submitted.
    */
   turnRunning: () => boolean
   /**
-   * Append one user row: a running main-thread turn's next model request
-   * reads it, and while idle it rides the person's next prompt. Rejects when
-   * refused.
+   * Append one user row, the given prompts joined: a running main-thread
+   * turn's next model request reads it, and while idle it rides the person's
+   * next prompt. Rejects when refused.
    */
-  append: (text: string) => Promise<void>
+  append: (prompts: readonly OwnPrompt[]) => Promise<void>
   /** The recv tool's name as the model calls it, for prompt text. */
   recvTool: () => string
   /** Resolve after `ms`, or early (resolve, not reject) when `signal` aborts. */
@@ -158,62 +163,37 @@ export function formatNotice(label: string, recvTool: string, key: string): stri
   return `[${label}] Mail is waiting for session_key ${key}. Call ${recvTool} with session_key ${key} to receive it.`
 }
 
+/** A drained item as a caption unit reads it: its sender's handle (as formatEnvelope names it) and its body. */
+export function mailItems(mail: readonly DrainedMail[]): MailItem[] {
+  return mail.map((m) =>
+    'content' in m ? { from: field(m.from) || field(m.reply_to) || 'unknown', body: m.content } : { from: 'unparsed recv output', body: m.raw },
+  )
+}
+
+/** The one-liner a batch shows the person while captions are on: the count and the senders, each once. */
+export function batchLine(label: string, mail: readonly DrainedMail[]): string {
+  const senders = [...new Set(mailItems(mail).map((m) => m.from))]
+  return `[${label}] ${mail.length} ${mail.length === 1 ? 'message' : 'messages'} from ${senders.join(', ')}`
+}
+
+/** The one-liner the notice-path prompt shows the person while captions are on. */
+export function noticeLine(label: string): string {
+  return `[${label}] mail waiting`
+}
+
+/** A drained batch as one of the mod's own prompts: its text, its one-liner, and its mail for a recap. */
+export function batchPrompt(label: string, recvTool: string, key: string, mail: readonly DrainedMail[]): OwnPrompt {
+  return { text: formatBatch(label, recvTool, key, mail), line: batchLine(label, mail), mail: { tag: `[${label}]`, items: mailItems(mail) } }
+}
+
+/** The notice-path prompt as one of the mod's own prompts. */
+export function noticePrompt(label: string, recvTool: string, key: string): OwnPrompt {
+  return { text: formatNotice(label, recvTool, key), line: noticeLine(label) }
+}
+
 /** The label the mailbox's prompts carry in brackets: `<plugin> mailbox`. */
 export function mailboxLabel(plugin: string): string {
   return `${plugin} mailbox`
-}
-
-/** One envelope read back out of a formatBatch prompt: its sender's handle and its body. */
-export type RowMail = { from: string; body: string }
-
-const escapeRe = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-const ENVELOPE_HEAD = /^mail from (.+?)(?: \([^()\n]*\))?:$/
-const UNPARSED_HEAD = 'unparsed mailbox recv output:'
-
-/**
- * What a row of the mailbox's own prompts holds, read back out of its text:
- * formatBatch and formatNotice prompts, several joined by a blank line when
- * they were queued for a running turn. Mail when any batch is among them (its
- * envelopes in order; a row of mail and notices together is mail), the
- * notice's one-line caption when only notices are, and undefined for text
- * these templates did not write. A body that itself holds a blank line and
- * an envelope or notice line is split there: the row is only drawn from this.
- */
-export function mailboxRow(label: string, text: string): { mail: RowMail[] } | { caption: string } | undefined {
-  const tag = escapeRe(`[${label}]`)
-  const notice = new RegExp(`^${tag} Mail is waiting for session_key (.+?)\\. Call (.+) with session_key \\1 to receive it\\.$`)
-  const batchHead = new RegExp(`^${tag} \\d+ message\\(s\\) arrived for session_key .+?\\. They were already received through .+; do not call it again for these\\.$`)
-  const mail: RowMail[] = []
-  let batches = 0
-  let notices = 0
-  /** The envelope the next unrecognized chunk continues, if any. */
-  let open: RowMail | undefined
-  for (const chunk of text.split('\n\n')) {
-    if (notice.test(chunk)) {
-      notices += 1
-      open = undefined
-      continue
-    }
-    if (batchHead.test(chunk)) {
-      batches += 1
-      open = undefined
-      continue
-    }
-    const newline = chunk.indexOf('\n')
-    const first = newline < 0 ? chunk : chunk.slice(0, newline)
-    const rest = newline < 0 ? '' : chunk.slice(newline + 1)
-    const sender = batches > 0 ? (first === UNPARSED_HEAD ? 'unparsed recv output' : ENVELOPE_HEAD.exec(first)?.[1]) : undefined
-    if (sender !== undefined) {
-      open = { from: sender, body: rest }
-      mail.push(open)
-    } else if (open) {
-      open.body += `\n\n${chunk}`
-    } else {
-      return undefined
-    }
-  }
-  if (batches > 0) return { mail }
-  return notices > 0 ? { caption: `[${label}] mail waiting` } : undefined
 }
 
 export interface Watcher {
@@ -240,7 +220,7 @@ export interface Watcher {
  * the model; `noticeFor` marks a notice, withdrawn once the model has
  * received that key's mail on its own.
  */
-type Queued = { text: string; lost: (why: string) => void; noticeFor?: string }
+type Queued = { prompt: OwnPrompt; lost: (why: string) => void; noticeFor?: string }
 
 export function createWatcher(edges: WatcherEdges): Watcher {
   let key: string | undefined
@@ -258,37 +238,37 @@ export function createWatcher(edges: WatcherEdges): Watcher {
    */
   let queued: Queued[] = []
 
-  /** Queue `text` for the running main-thread turn; false when none runs, and the caller submits it. */
-  function steer(text: string, lost: (why: string) => void, noticeFor?: string): boolean {
+  /** Queue `prompt` for the running main-thread turn; false when none runs, and the caller submits it. */
+  function steer(prompt: OwnPrompt, lost: (why: string) => void, noticeFor?: string): boolean {
     if (!edges.turnRunning()) return false
-    queued.push({ text, lost, noticeFor })
+    queued.push({ prompt, lost, noticeFor })
     return true
   }
 
-  /** Take everything queued, joined into one text; undefined when nothing is. */
-  function takeQueued(): { items: Queued[]; text: string } | undefined {
+  /** Take everything queued, in order; undefined when nothing is. */
+  function takeQueued(): { items: Queued[]; prompts: OwnPrompt[] } | undefined {
     if (queued.length === 0) return undefined
     const items = queued
     queued = []
-    return { items, text: items.map((q) => q.text).join('\n\n') }
+    return { items, prompts: items.map((q) => q.prompt) }
   }
 
   /**
-   * Submit `text`, falling back to appending it as a row when the submit is
-   * rejected or dropped. Never rejects: answers why neither reached the
+   * Submit `prompts`, falling back to appending them as a row when the submit
+   * is rejected or dropped. Never rejects: answers why neither reached the
    * conversation, or undefined when one did.
    */
-  async function deliver(text: string): Promise<string | undefined> {
+  async function deliver(prompts: readonly OwnPrompt[]): Promise<string | undefined> {
     let submitErr: unknown
     try {
-      await edges.submit(text)
+      await edges.submit(prompts)
       return undefined
     } catch (err) {
       submitErr = err
     }
     edges.log(`${edges.label}: prompt submit failed (${String(submitErr)}); appending it as a row instead`)
     try {
-      await edges.append(text)
+      await edges.append(prompts)
       return undefined
     } catch (err) {
       return `prompt submit failed: ${String(submitErr)}; row append failed: ${String(err)}`
@@ -340,11 +320,11 @@ export function createWatcher(edges: WatcherEdges): Watcher {
         failure ??= why
         resume() // this loop's own suspension, never a rebound loop's
       }
-      const notice = formatNotice(edges.label, edges.recvTool(), myKey)
+      const notice = noticePrompt(edges.label, edges.recvTool(), myKey)
       if (steer(notice, fail, myKey)) {
         edges.log(`${edges.label}: notice for ${myKey} queued for the running turn`)
       } else {
-        const why = await deliver(notice)
+        const why = await deliver([notice])
         if (why !== undefined) fail(why)
       }
       await resumed
@@ -411,20 +391,20 @@ export function createWatcher(edges: WatcherEdges): Watcher {
         continue
       }
       emptyStreak = 0
-      const batch = formatBatch(edges.label, edges.recvTool(), myKey, mail)
+      const batch = batchPrompt(edges.label, edges.recvTool(), myKey, mail)
       // A stop means the conversation this mail was for is gone; a rebind
       // within it still delivers, since recv already removed this mail.
       if (stops !== stopsAtStart) {
-        keep(`the push loop stopped: ${lastStop}`, batch)
+        keep(`the push loop stopped: ${lastStop}`, batch.text)
         return
       }
-      if (steer(batch, (why) => keep(why, batch))) {
+      if (steer(batch, (why) => keep(why, batch.text))) {
         edges.log(`${edges.label}: drained ${mail.length} message(s) for ${myKey}; queued for the running turn`)
         continue
       }
       edges.log(`${edges.label}: drained ${mail.length} message(s) for ${myKey}; submitting one prompt`)
-      const why = await deliver(batch)
-      if (why !== undefined) keep(why, batch)
+      const why = await deliver([batch])
+      if (why !== undefined) keep(why, batch.text)
     }
   }
 
@@ -464,7 +444,7 @@ export function createWatcher(edges: WatcherEdges): Watcher {
       if (!taken) return
       edges.log(`${edges.label}: appending ${taken.items.length} queued prompt(s) to the running turn as one row`)
       try {
-        await edges.append(taken.text)
+        await edges.append(taken.prompts)
       } catch (err) {
         lose(taken.items, `row append failed: ${String(err)}`)
       }
@@ -473,7 +453,7 @@ export function createWatcher(edges: WatcherEdges): Watcher {
       const taken = takeQueued()
       if (!taken) return
       edges.log(`${edges.label}: submitting ${taken.items.length} prompt(s) still queued at the turn end as one prompt`)
-      void deliver(taken.text).then((why) => {
+      void deliver(taken.prompts).then((why) => {
         if (why !== undefined) lose(taken.items, why)
       })
     },

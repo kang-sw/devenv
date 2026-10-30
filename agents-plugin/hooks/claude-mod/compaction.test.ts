@@ -75,17 +75,17 @@ function harness(opts: { window?: Partial<CompactionWindow> | null; readAdvisory
   /** Whether the fake engine routes the lever's own compaction through the feature's hook (the engine does not). */
   let ownHook = false
   const edges: CompactionEdges = {
-    submit: async (text) => {
+    submit: async ({ text }) => {
       if (h.rejectSubmits > 0) {
         h.rejectSubmits -= 1
         throw new Error('submit failed')
       }
       if (h.dropSubmits > 0) {
         h.dropSubmits -= 1
-        return { drop: 'a Stop stands' } as never
+        return { drop: 'a Stop stands' }
       }
       h.submits.push(text)
-      return { text }
+      return {}
     },
     compact: async () => {
       h.compacts += 1

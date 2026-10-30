@@ -3,15 +3,11 @@ import type {
   ModelCompleteRequest,
   ModelCompleteResult,
   ModelTextBlock,
-  RenderPropsOf,
+  PromptSubmitResult,
   SessionCompactResult,
   SessionCompactTrigger,
   ToolGroupCall,
 } from 'claude-code'
-
-import { label as reconnectLabel, reconnectCaption } from './reconnect'
-import { compactionCaption, label as compactionLabel } from './timing'
-import { mailboxLabel, mailboxRow, type RowMail } from './watcher'
 
 /** A lone call's caption. */
 export type ToolCaption = {
@@ -50,13 +46,14 @@ export type RunCaption = {
  * one request over a mirror of the lead's conversation since its last
  * compaction, so a caption can say why a call was made.
  *
- * The mod's own user-role rows (its compaction, reconnect and mailbox
- * prompts) draw compact too, under the same switch: a fixed notice as a
- * one-line caption read back out of its text with no model call, a mail row
- * as a recap queued and sent like a tool unit. Only a row the engine stamped
- * with this plugin's origin qualifies, or an unstamped one (stored before
- * stamps) that opens with one of the mod's labels; the person's, a peer's, a
- * teammate's and a notification's rows never do.
+ * The mod's own prompts (compaction, reconnect and mailbox) are delivered
+ * split under the same switch (submitOwn, appendOwn): the model reads the
+ * full text from a hidden user row, ctrl+o shows it from a notice the model
+ * never reads, and the person sees a one-liner the template's own inputs
+ * built. A mailbox batch's mail is also a caption unit, sent like a tool
+ * unit, whose recap draws as one transcript line. The engine never hands a
+ * plugin's own rows to that plugin's render hooks, so the split happens at
+ * the source rather than at draw time.
  *
  * The engine calls arrive as edges bound in register.ts; the drawing helpers
  * take the surface's element table, never `$`.
@@ -308,43 +305,93 @@ function transcriptCalls(api: readonly ApiMessageLike[]): Map<string, Captured> 
 export type UnitCall = { id: string; tool: string; input: unknown; isErrored: boolean }
 /** A drawn tool unit: a lone call (key: its id) or a folded run (key: its ids joined with ','). */
 export type ToolUnit = { key: string; calls: UnitCall[] }
-/** A drawn mail row of the mod's own (key: the row's text, as the render carries no row id). */
-export type MailUnit = { key: string; mail: RowMail[] }
+/** One message of a mailbox batch as a caption unit reads it. */
+export type MailItem = { from: string; body: string }
+/** A delivered mailbox batch (key: unique per batch); its recap draws as a transcript line after `tag`. */
+export type MailUnit = { key: string; mail: MailItem[]; tag: string }
 export type Unit = ToolUnit | MailUnit
 
-/** What a unit weighs against BATCH_CALLS: a mail row counts as one call. */
+/** What a unit weighs against BATCH_CALLS: a mail batch counts as one call. */
 const weight = (unit: Unit) => ('mail' in unit ? 1 : unit.calls.length)
 
-type UserRow = Pick<RenderPropsOf['UserMessage'], 'text' | 'origin' | 'isExpanded' | 'from' | 'task'>
+/**
+ * One of the mod's own prompts: the full text the model reads, the one-liner
+ * the person sees while captions are on, and for a mailbox batch its mail
+ * (with the label its recap is drawn after).
+ */
+export type OwnPrompt = { text: string; line: string; mail?: { tag: string; items: MailItem[] } }
+
+export type OwnDeliveryEdges = {
+  /** Whether captions are on now. */
+  isOn: () => boolean
+  /**
+   * Append one row: `user` the model reads and the person sees nowhere,
+   * `system` a notice ctrl+o draws and the model never reads. Rejects when
+   * refused.
+   */
+  append: (type: 'user' | 'system', text: string) => Promise<void>
+  /** Submit a prompt that starts a turn once the session is idle. */
+  submit: (text: string) => Promise<PromptSubmitResult>
+  /** Show the person one transcript line the model does not read. */
+  line: (text: string) => void
+  /** Queue a batch's mail for its recap. */
+  recap: (mail: { tag: string; items: MailItem[] }) => void
+  log: (text: string) => void
+}
+
+const joinText = (prompts: readonly OwnPrompt[]) => prompts.map((p) => p.text).join('\n\n')
 
 /**
- * Whether a UserMessage row is one of the mod's own: stamped with this
- * plugin's origin, or unstamped (`unclassified`, stored before stamps, with
- * no sender and no task) and opening with one of the labels the mod's
- * prompts carry. Any other origin never qualifies, whatever its text says.
+ * The hidden row of the full text, then its ctrl+o notice (best effort), then
+ * each batch's mail queued for a recap; rejects, having stored nothing, when
+ * the hidden row is refused.
  */
-export function isOwnRow(plugin: string, row: UserRow): boolean {
-  const { origin } = row
-  if (origin.kind === 'plugin') return origin.name === plugin
-  if (origin.kind !== 'unclassified' || row.from !== undefined || row.task !== undefined) return false
-  return [compactionLabel(plugin), reconnectLabel(plugin), `[${mailboxLabel(plugin)}] `].some((lead) => row.text.startsWith(lead))
+async function appendHidden(e: OwnDeliveryEdges, prompts: readonly OwnPrompt[], text: string): Promise<void> {
+  await e.append('user', text)
+  try {
+    await e.append('system', text)
+  } catch (err) {
+    e.log(`raw-text notice not appended (${String(err)})`)
+  }
+  for (const p of prompts) if (p.mail) e.recap(p.mail)
 }
 
 /**
- * What a collapsed row of the mod's own draws: a fixed notice's one-line
- * caption, or a mail row's unit with the tag its recap is drawn after;
- * undefined draws it raw (the expanded view, another party's row, text no
- * template of the mod wrote).
+ * Start a turn with `prompts`, joined. Captions off: one submit of the full
+ * text, as before. On: the hidden row first (a row appended after the submit
+ * is missed for that whole reply), then a submit of the one-liners; a
+ * dropped or rejected one-liner submit is only logged, since the hidden row
+ * is stored and rides the next prompt. A refused hidden row falls back to
+ * the submit of the full text. Resolves `drop` only for a full-text submit.
  */
-export function userRowUnit(plugin: string, row: UserRow): { caption: string } | { unit: MailUnit; tag: string } | undefined {
-  if (row.isExpanded || !isOwnRow(plugin, row)) return undefined
-  const fixed = compactionCaption(plugin, row.text) ?? reconnectCaption(plugin, row.text)
-  if (fixed !== undefined) return { caption: fixed }
-  const label = mailboxLabel(plugin)
-  const mailbox = mailboxRow(label, row.text)
-  if (!mailbox) return undefined
-  if ('caption' in mailbox) return { caption: mailbox.caption }
-  return { unit: { key: row.text, mail: mailbox.mail }, tag: `[${label}]` }
+export async function submitOwn(e: OwnDeliveryEdges, prompts: readonly OwnPrompt[]): Promise<{ drop?: string }> {
+  const text = joinText(prompts)
+  if (!e.isOn()) return e.submit(text)
+  try {
+    await appendHidden(e, prompts, text)
+  } catch (err) {
+    e.log(`hidden row refused (${String(err)}); submitting the full text instead`)
+    return e.submit(text)
+  }
+  try {
+    const res = await e.submit(prompts.map((p) => p.line).join('\n'))
+    if (res.drop !== undefined) e.log(`one-liner prompt dropped (${res.drop}); the hidden row rides the next prompt`)
+  } catch (err) {
+    e.log(`one-liner prompt not submitted (${String(err)}); the hidden row rides the next prompt`)
+  }
+  return {}
+}
+
+/**
+ * Join a running turn with `prompts` as one row the model reads. Captions on:
+ * also the ctrl+o notice, and each one-liner as a transcript line. Rejects
+ * when the row is refused.
+ */
+export async function appendOwn(e: OwnDeliveryEdges, prompts: readonly OwnPrompt[]): Promise<void> {
+  const text = joinText(prompts)
+  if (!e.isOn()) return e.append('user', text)
+  await appendHidden(e, prompts, text)
+  for (const p of prompts) e.line(p.line)
 }
 
 /**
@@ -473,6 +520,8 @@ export type CaptionEdges = {
   complete: (request: ModelCompleteRequest) => Promise<ModelCompleteResult>
   /** Ask the engine to draw the rows again: new captions were stored. */
   redraw: () => void
+  /** Show the person one transcript line the model does not read: a mail recap. */
+  transcript: (text: string) => void
   /** Run `fn` every `ms`; the returned function stops it. */
   every: (ms: number, fn: () => void) => () => void
   log: (text: string) => void
@@ -493,8 +542,8 @@ export type Captions = {
   toolCaption: (id: string) => ToolCaption | undefined
   /** A run's caption, by its unit key. */
   runCaption: (key: string) => RunCaption | undefined
-  /** A mail row's recap, by its unit key (the row's text). */
-  mailRecap: (key: string) => string | undefined
+  /** A delivered mailbox batch: queue it once for a recap, drawn as a transcript line after `tag`. */
+  recap: (mail: { tag: string; items: MailItem[] }) => void
   /** A drawn unit with no caption yet: queue it once. */
   request: (unit: Unit) => void
   /** A session.compact as it settled. */
@@ -514,11 +563,11 @@ export function createCaptions(): Captions {
   // Module state: a reload starts it over, which drops the captions, captured
   // outputs and units not yet sent (a drawn unit asks again, once). Lone
   // captions are keyed by tool_use_id, run captions by the run's ids joined
-  // with ','; the ids are the session's own, so no reset clears them. Mail
-  // recaps are keyed by the row's text, which stays the row's own too.
+  // with ','; the ids are the session's own, so no reset clears them.
   const toolCaptions = new Map<string, ToolCaption>()
   const runCaptions = new Map<string, RunCaption>()
-  const mailRecaps = new Map<string, string>()
+  /** Numbers the mail units: a batch has no id of its own. */
+  let mails = 0
   const captured = new Map<string, Captured>()
   let units: Unit[] = []
   const requested = new Set<string>()
@@ -669,11 +718,9 @@ export function createCaptions(): Captions {
       const unit = typeof item.id === 'string' ? byLabel.get(item.id) : undefined
       if (!unit) continue
       if ('mail' in unit) {
-        // One printable line: the row draws it in place of the mail.
+        // One printable line, drawn after the batch's one-liner.
         const recap = nonBlank(item.recap)?.replace(/[\s\u0000-\u001f\u007f]+/g, ' ')
-        if (recap === undefined) continue
-        mailRecaps.set(unit.key, recap)
-        stored += 1
+        if (recap !== undefined) bound.transcript(`${unit.tag} ${recap}`)
         continue
       }
       const [first] = unit.calls
@@ -714,6 +761,14 @@ export function createCaptions(): Captions {
       })
   }
 
+  const request = (unit: Unit) => {
+    const bound = edges
+    if (!bound || !current.enabled || requested.has(unit.key)) return
+    requested.add(unit.key)
+    units.push(unit)
+    stopTicking ??= bound.every(FLUSH_MS, tick)
+  }
+
   return {
     start(bound) {
       stopTicking?.()
@@ -730,7 +785,10 @@ export function createCaptions(): Captions {
     settings: () => current,
     toolCaption: (id) => toolCaptions.get(id),
     runCaption: (key) => runCaptions.get(key),
-    mailRecap: (key) => mailRecaps.get(key),
+    recap(mail) {
+      mails += 1
+      request({ key: `mail:${mails}`, mail: mail.items, tag: mail.tag })
+    },
     captured(call, res) {
       if (!current.enabled || call.agentId !== undefined || res.deny !== undefined) return
       // The envelope's reserved fields (a button press's consent text among
@@ -745,13 +803,7 @@ export function createCaptions(): Captions {
       captured.set(id, { input, output, bytes: input.length + read.length })
       if (captured.size > CAPTURED_LIMIT) captured.delete(captured.keys().next().value as string)
     },
-    request(unit) {
-      const bound = edges
-      if (!bound || !current.enabled || requested.has(unit.key)) return
-      requested.add(unit.key)
-      units.push(unit)
-      stopTicking ??= bound.every(FLUSH_MS, tick)
-    },
+    request,
     compacted(trigger, agentId, res) {
       if (agentId === undefined && trigger !== 'precompute' && res.messages !== undefined) resetMirror()
     },

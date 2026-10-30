@@ -75,17 +75,17 @@ function harness(opts: { plugin?: string; server?: string | null } = {}) {
       return answer
     },
     resolve: async () => void (h.resolves += 1),
-    submit: async (text) => {
+    submit: async ({ text }) => {
       if (h.rejectSubmits > 0) {
         h.rejectSubmits -= 1
         throw new Error('submit failed')
       }
       if (h.dropSubmits > 0) {
         h.dropSubmits -= 1
-        return { drop: 'a Stop stands' } as never
+        return { drop: 'a Stop stands' }
       }
       h.submits.push(text)
-      return { text }
+      return {}
     },
     after: (fn) => {
       if (h.afterThrows > 0) {

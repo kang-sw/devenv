@@ -168,6 +168,16 @@ export function deliveryText(plugin: string, d: Delivery, t: Thresholds, tokens:
   return d.kind === 'advisory' ? advisoryText(plugin, t, tokens) : milestoneText(plugin, d.which, t, tokens)
 }
 
+/**
+ * The one-liner a threshold message shows the person while captions are on,
+ * from the same figures its text names: the label, the usage, the reminder
+ * for a milestone, and the automatic compaction point.
+ */
+export function deliveryLine(plugin: string, d: Delivery, t: Thresholds, tokens: number): string {
+  const reminder = d.kind === 'milestone' ? ` · reminder ${d.which}/2` : ''
+  return `${label(plugin).trimEnd()} ${percentOf(tokens, t.raw)}%${reminder} · auto-compact ${percentOf(t.hard, t.raw)}%`
+}
+
 export const LEVER_DESCRIPTION =
   'Request compaction of this conversation when the current turn ends. Before calling, bring durable records (tickets, notes, agenda) up to date with anything still needed that only this context holds. Set `continue` to true only when work must resume by itself after compaction: a fixed resume prompt then follows the compaction, unless another prompt (the human\'s, or a background agent\'s notification) has already started the next turn. Leave it unset when the next turn will come from the human or from a background agent\'s notification. Main session only.'
 
@@ -193,37 +203,14 @@ export function vetoedResumeText(plugin: string, reason: string): string {
   return `${label(plugin)}Compaction did not run (${reason}); your context is unchanged. Resume the work in progress.`
 }
 
-/** The text a template writes before and after one filled-in slot, by filling it with a marker no text holds. */
-function around(template: (slot: string) => string): [string, string] {
-  const [before = '', after = ''] = template('\u0000').split('\u0000')
-  return [before, after]
+/** The one-liner the resume prompt shows the person while captions are on. */
+export function resumeLine(plugin: string): string {
+  return `${label(plugin).trimEnd()} landed`
 }
 
-const HEAD_RE = /^Context window at the end of the last turn: (\d+)% \(\d+k \/ \d+k tokens\) \/ (\d+)% \(automatic compaction point\)\. ([\s\S]*)$/
-
-/**
- * The one-line caption a collapsed row of one of the prompts above draws:
- * label first, the numbers the template filled kept, in English. The render
- * that draws the row carries no row id and module state does not survive a
- * reload, so the numbers are read back out of the text; undefined for text
- * these templates did not write, which then draws raw.
- */
-export function compactionCaption(plugin: string, text: string): string | undefined {
-  const lead = label(plugin)
-  if (!text.startsWith(lead)) return undefined
-  const tag = lead.trimEnd()
-  if (text === resumeText(plugin)) return `${tag} landed`
-  const [vetoHead, vetoTail] = around((reason) => vetoedResumeText(plugin, reason))
-  if (text.length >= vetoHead.length + vetoTail.length && text.startsWith(vetoHead) && text.endsWith(vetoTail)) {
-    return `${tag} did not run: ${text.slice(vetoHead.length, text.length - vetoTail.length)}`
-  }
-  const head = HEAD_RE.exec(text.slice(lead.length))
-  if (!head) return undefined
-  const [, used = '', hard = '', rest = ''] = head
-  if (rest.startsWith('This is past the advisory point (')) return `${tag} ${used}% · auto-compact ${hard}%`
-  if (rest.startsWith(`Past ${hard}%, Claude Code compacts automatically`)) return `${tag} ${used}% · reminder 1/2 · auto-compact ${hard}%`
-  if (rest.startsWith('This is the last reading before automatic compaction.')) return `${tag} ${used}% · reminder 2/2 · auto-compact ${hard}%`
-  return undefined
+/** The one-liner the vetoed resume prompt shows the person while captions are on. */
+export function vetoedResumeLine(plugin: string, reason: string): string {
+  return `${label(plugin).trimEnd()} did not run: ${reason}`
 }
 
 /**

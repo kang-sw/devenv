@@ -14,9 +14,12 @@ import {
   selfAddress,
 } from './register'
 import {
+  batchLine,
+  batchPrompt,
   createWatcher,
   formatBatch,
   formatNotice,
+  mailItems,
   mapWaitExit,
   nextBackoff,
   parseRecvText,
@@ -25,6 +28,7 @@ import {
   type WaitOutcome,
   type WatcherEdges,
 } from './watcher'
+import type { OwnPrompt } from './captions'
 
 type Deferred<T> = { promise: Promise<T>; resolve: (v: T) => void }
 function deferred<T>(): Deferred<T> {
@@ -37,6 +41,9 @@ const tick = async (n = 30) => {
 }
 
 /** Fake edges: each wait is a deferred the test resolves; drains come from a queue. */
+/** Prompts joined as the watcher's edges join them for one turn. */
+const joined = (prompts: readonly OwnPrompt[]) => prompts.map((p) => p.text).join('\n\n')
+
 function harness(mode: DrainMode) {
   const waits: { key: string; slug: string | undefined; signal: AbortSignal; d: Deferred<WaitOutcome> }[] = []
   const drains: string[] = []
@@ -55,6 +62,8 @@ function harness(mode: DrainMode) {
   /** Whether a main-thread turn runs, as the turn hooks would report it. */
   const turn = { running: false }
   const appended: string[] = []
+  /** Every submit attempted, as the prompts it carried. */
+  const submittedPrompts: (readonly OwnPrompt[])[] = []
   const appendFailures: Error[] = []
   const edges: WatcherEdges = {
     mode,
@@ -71,7 +80,9 @@ function harness(mode: DrainMode) {
       if (held) return held.promise
       return drainQueue.shift() ?? { kind: 'mail', mail: [] }
     },
-    submit: async (text) => {
+    submit: async (prompts) => {
+      const text = joined(prompts)
+      submittedPrompts.push(prompts)
       if (holdSubmits > 0) {
         holdSubmits -= 1
         const d = deferred<Error | undefined>()
@@ -86,7 +97,8 @@ function harness(mode: DrainMode) {
       submitted.push(text)
     },
     turnRunning: () => turn.running,
-    append: async (text) => {
+    append: async (prompts) => {
+      const text = joined(prompts)
       const failure = appendFailures.shift()
       if (failure) throw failure
       appended.push(text)
@@ -109,6 +121,7 @@ function harness(mode: DrainMode) {
     drainQueue,
     heldDrains,
     submitted,
+    submittedPrompts,
     submitFailures,
     heldSubmits,
     holdNextSubmit: () => (holdSubmits += 1),
@@ -190,6 +203,23 @@ ${formatBatch('pkg mailbox', RECV, 'k1', mailB)}`,
     w.turnCompleted()
     await tick()
     expect(h.submitted.length).toBe(1)
+  })
+
+  test('the turn-end submit carries each queued prompt in order: its text, its one-liner, and a batch its mail', async () => {
+    const h = harness('direct')
+    const w = createWatcher(h.edges)
+    w.bind('k1')
+    await tick()
+    h.turn.running = true
+    await arrive(h, { kind: 'mail', mail: mailA })
+    await arrive(h, { kind: 'mail', mail: mailB })
+    h.turn.running = false
+    w.turnCompleted()
+    await tick()
+    expect(h.submittedPrompts).toEqual([[batchPrompt('pkg mailbox', RECV, 'k1', mailA), batchPrompt('pkg mailbox', RECV, 'k1', mailB)]])
+    const [a] = h.submittedPrompts[0]!
+    expect(a!.line).toBe(batchLine('pkg mailbox', mailA))
+    expect(a!.mail).toEqual({ tag: '[pkg mailbox]', items: mailItems(mailA) })
   })
 
   test('mail drained while idle is submitted as before, with nothing queued', async () => {

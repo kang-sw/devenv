@@ -1,7 +1,7 @@
 import type { HookStream, ProcessSpawnChunk, ProcessSpawnResult, Register, ToolCallResult } from 'claude-code'
 
 import { createBand, drawBand, readGit, type Mailbox } from './band'
-import { createCaptions, drawCall, drawEmpty, drawRun, groupUnit, toolUseUnit, userRowUnit } from './captions'
+import { appendOwn, createCaptions, drawCall, drawEmpty, drawRun, groupUnit, submitOwn, toolUseUnit, type OwnDeliveryEdges } from './captions'
 import { createCompaction } from './compaction'
 import { createManual, SECTION_ID, type ReadFamily } from './manual'
 import { createReconnect, reconnectDescription, TOOL_NAME as RECONNECT_TOOL } from './reconnect'
@@ -49,8 +49,9 @@ import {
 //   finished, collapsed tool row, or a run the engine folds into one group,
 //   drawn as a short caption a second model call wrote, the raw row still the
 //   one the model reads and the expanded view draws (see captions.tsx). The
-//   mod's own prompt rows draw compact under the same switch: a fixed notice
-//   as one line, a mailbox delivery as a recap.
+//   mod's own prompts are delivered split under the same switch: the model
+//   reads the full text from a hidden row, the person sees a one-liner, and
+//   a mailbox batch's recap draws as a transcript line.
 // - Status band (off until claude.status_band_enabled is set): a framed band
 //   above the prompt with the model, folder, git, context, rate-limit and
 //   cost figures, and the held key's todos, agenda and mailbox address (its
@@ -483,6 +484,18 @@ export const register: Register = (on) => {
   on('session.start', async ($, e, next) => {
     const label = mailboxLabel($.plugin.name)
     const mailboxLog = (text: string) => $.ui.log(`${label}: ${text}`, { to: 'debug' })
+    // How the mod's own prompts reach the conversation: split while captions are on (see submitOwn).
+    const own: OwnDeliveryEdges = {
+      isOn: () => captions.isOn(),
+      append: async (type, text) => {
+        const res = await $.session.append({ message: { type, content: [{ type: 'text', text }] } })
+        if (res.deny !== undefined) throw new Error(`row refused: ${res.deny}`)
+      },
+      submit: (text) => $.prompt.submit({ text }),
+      line: (text) => $.ui.log(text),
+      recap: (mail) => captions.recap(mail),
+      log: (text) => $.ui.log(`${$.plugin.name} captions: ${text}`, { to: 'debug' }),
+    }
 
     /** One ws MCP tool call's text; an error result rejects with its text. */
     const callText = async (name: string, tool: string, args: Record<string, unknown>) => {
@@ -620,15 +633,12 @@ export const register: Register = (on) => {
           if (!recvTool) return { kind: 'failed', reason: 'MCP server not resolved' }
           return classifyRecv(await $.tool.call({ tool: recvTool as `mcp__${string}__${string}`, session_key: key, format: 'json' }))
         },
-        submit: async (text) => {
-          const res = await $.prompt.submit({ text })
+        submit: async (prompts) => {
+          const res = await submitOwn(own, prompts)
           if (res.drop !== undefined) throw new Error(`prompt dropped: ${res.drop}`)
         },
         turnRunning: () => mainTurn,
-        append: async (text) => {
-          const res = await $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] } })
-          if (res.deny !== undefined) throw new Error(`row refused: ${res.deny}`)
-        },
+        append: (prompts) => appendOwn(own, prompts),
         recvTool: () => recvTool ?? 'mailbox recv',
         sleep: (ms, signal) => abortableSleep((d, fn) => $.clock.after(d, fn), ms, signal),
         notice: (text) => $.ui.log(text),
@@ -683,7 +693,7 @@ export const register: Register = (on) => {
     })
     const compactionSetup = (async () => {
       compaction.start({
-        submit: (text) => $.prompt.submit({ text }),
+        submit: (prompt) => submitOwn(own, [prompt]),
         compact: () => $.session.compact(),
         after: (fn) => void $.clock.after(0, fn),
         delay: (ms, fn) => void $.clock.after(ms, fn),
@@ -761,7 +771,7 @@ export const register: Register = (on) => {
           return (await $.tool.list()).some((t) => t.name.startsWith(prefix))
         },
         resolve: async () => void (await resolveServer()),
-        submit: (text) => $.prompt.submit({ text }),
+        submit: (prompt) => submitOwn(own, [prompt]),
         after: (fn) => void $.clock.after(0, fn),
         sleep: (ms) => new Promise<void>((resolve) => void $.clock.after(ms, resolve)),
         log: (text, to) => $.ui.log(text, { to }),
@@ -801,6 +811,7 @@ export const register: Register = (on) => {
         messages: () => $.session.messages({ as: 'api' }),
         complete: (request) => $.model.complete(request),
         redraw: () => $.ui.invalidate('ui.render'),
+        transcript: (text) => $.ui.log(text),
         // $.clock.every hands back a Timer; the edge promises its stop function.
         every: (ms, fn) => {
           const timer = $.clock.every(ms, fn)
@@ -1169,21 +1180,6 @@ export const register: Register = (on) => {
     const caption = captions.toolCaption(call.id)
     if (caption) return drawCall($.ui.resolve(e), call, caption, e.viewport?.columns)
     captions.request(unit)
-    return next(e)
-  })
-
-  // The mod's own user-role rows (compaction, reconnect and mailbox prompts):
-  // a fixed notice draws its one-line caption, a mail row its recap once one
-  // arrived (raw and queued until then). The rewrite is the drawing alone;
-  // the stored row and the model's input stay as they were.
-  on('ui.render', { component: 'UserMessage' }, async ($, e, next) => {
-    if (!captions.isOn()) return next(e)
-    const row = userRowUnit($.plugin.name, e.props)
-    if (!row) return next(e)
-    if ('caption' in row) return next({ ...e, props: { ...e.props, text: row.caption } })
-    const recap = captions.mailRecap(row.unit.key)
-    if (recap !== undefined) return next({ ...e, props: { ...e.props, text: `${row.tag} ${recap}` } })
-    captions.request(row.unit)
     return next(e)
   })
 

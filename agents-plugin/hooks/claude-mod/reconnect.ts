@@ -1,4 +1,4 @@
-import type { PromptSubmitResult } from 'claude-code'
+import type { OwnPrompt } from './captions'
 
 /**
  * The MCP reconnect lever, a feature of the Claude mod: a tool the model calls
@@ -80,22 +80,14 @@ export function failureText(plugin: string, reason: string, resume: boolean): st
   return resume ? `${head} ${RESUME_SENTENCE}` : head
 }
 
-/**
- * The one-line caption a collapsed row of the success or failure prompt
- * draws, label first: the outcome, and a failure's reason read back out of
- * the text (the render carries no row id). Undefined for any other text,
- * which then draws raw.
- */
-export function reconnectCaption(plugin: string, text: string): string | undefined {
-  const tag = label(plugin).trimEnd()
-  if (text === successText(plugin)) return `${tag} reconnected`
-  for (const resume of [false, true]) {
-    const [head = '', tail = ''] = failureText(plugin, '\u0000', resume).split('\u0000')
-    if (text.length >= head.length + tail.length && text.startsWith(head) && text.endsWith(tail)) {
-      return `${tag} failed: ${text.slice(head.length, text.length - tail.length)}`
-    }
-  }
-  return undefined
+/** The one-liner the success prompt shows the person while captions are on. */
+export function successLine(plugin: string): string {
+  return `${label(plugin).trimEnd()} reconnected`
+}
+
+/** The one-liner the failure prompt shows the person while captions are on. */
+export function failureLine(plugin: string, reason: string): string {
+  return `${label(plugin).trimEnd()} failed: ${reason}`
 }
 
 /** The failure reasons the step words; the command's own words fill the last two. */
@@ -166,7 +158,7 @@ export type ReconnectEdges = {
   /** Resolve the server name again after a reconnect, updating the shared cache. */
   resolve: () => Promise<void>
   /** Queue a prompt that starts its own turn once the session is idle. */
-  submit: (text: string) => Promise<PromptSubmitResult>
+  submit: (prompt: OwnPrompt) => Promise<{ drop?: string }>
   /** Run `fn` once, after the calling hook has returned. */
   after: (fn: () => void) => void
   sleep: (ms: number) => Promise<void>
@@ -362,9 +354,11 @@ export function createReconnect(): Reconnect {
         return
       }
     }
-    const text = outcome.ok ? successText(e.plugin) : failureText(e.plugin, outcome.reason, r.resume)
-    const failed = (why: string) => notice(`a prompt was not submitted (${why}):\n${text}`)
-    e.submit(text).then(
+    const prompt = outcome.ok
+      ? { text: successText(e.plugin), line: successLine(e.plugin) }
+      : { text: failureText(e.plugin, outcome.reason, r.resume), line: failureLine(e.plugin, outcome.reason) }
+    const failed = (why: string) => notice(`a prompt was not submitted (${why}):\n${prompt.text}`)
+    e.submit(prompt).then(
       (res) => {
         if (res.drop !== undefined) failed(`dropped: ${res.drop}`)
       },
