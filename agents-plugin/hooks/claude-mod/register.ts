@@ -697,17 +697,16 @@ export const register: Register = (on) => {
     const compactionSetup = (async () => {
       compaction.start({
         submit: (prompt, live) => submitOwn(own, [prompt], live),
-        compact: () => $.session.compact(),
+        // The slash command, not $.session.compact(): that call is refused in a
+        // headless (-p / SDK) session, and the command compacts under the REPL
+        // and headless alike, passing this mod's own session.compact hook.
+        compact: () => $.command.run({ command: 'compact' }),
         after: (fn) => void $.clock.after(0, fn),
         delay: (ms, fn) => void $.clock.after(ms, fn),
         log: (text, to) => $.ui.log(text, { to }),
         plugin: $.plugin.name,
         turnRunning: () => mainTurn,
         readUsage: async () => (await $.session.usage()).context,
-        leverLanded: () => {
-          manual.landed('plugin')
-          captions.leverLanded()
-        },
         // One config_get per session start with the advisory on, once its knob read settles.
         readAdvisory: async () => {
           if (!(await advisoryRead)) throw new Error(`${KNOB.compactionAdvisory} is off`)
@@ -823,6 +822,9 @@ export const register: Register = (on) => {
         },
         log: (text) => $.ui.log(text, { to: 'debug' }),
         plugin: $.plugin.name,
+        // Headless forces captions off for the session, and with them the
+        // split delivery of the mod's own prompts and the mailbox recaps.
+        interactive: e.isInteractive,
       })
     } catch (err) {
       $.ui.log(`${$.plugin.name} captions: setup failed: ${String(err)}`, { to: 'debug' })
@@ -1134,8 +1136,8 @@ export const register: Register = (on) => {
 
   // Observes every compaction without changing it; an observer never vetoes,
   // so a failure replays what settled beneath, or lets it run. The lever's
-  // own compaction does not pass here; the compaction feature tells the
-  // manual feature of that landing itself (leverLanded).
+  // own compaction (a `/compact` command) passes here like any other, so
+  // this is the one landing fan-out for it too.
   on('session.compact', async ($, e, next) => {
     const res = await next(e)
     try {

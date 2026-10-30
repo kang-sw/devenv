@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 13292e025704603c
 sage-review-completeness-reviewed: 13292e025704603c
+completed: 2026-10-31
 ---
 
 # claude-mod in headless sessions - compaction lever rejected, captions run uselessly
@@ -220,6 +221,64 @@ fail-fast, and the fallback branch's transient retry if it exists);
 then the lead's live checks: a lever call compacts at the turn end in a
 headless (Orca) session and in an interactive session.
 
+### Result (455e70820) - 2026-10-31
+
+Interactive check passed, so the lever has one route (`$.command.run({
+command: "compact" })`) and no `isInteractive` branch. The check used a fresh
+scratch mod, `/tmp/ws-compact-spike2/mod`, that schedules the command with
+`$.clock.after(1000, ...)` from the first main-thread `turn.complete`, on
+Claude Code 2.1.314:
+
+- REPL (`claude --model haiku --plugin-dir ...` under tmux,
+  `isInteractive=true`): turn.complete 15:00:35.624, settled step 15:00:36.629,
+  `session.compact` hook `trigger=manual agentId=undefined` 15:00:36.672,
+  result `skip=none` 15:00:41.479, then `command.run resolved {}`
+  15:00:41.481. The transcript showed "Prompt from the compact-spike2 plugin /
+  /compact" and "Compacted".
+- Headless streaming input (`claude -p --input-format stream-json
+  --output-format stream-json`, stdin held open, `isInteractive=false`):
+  the step fired 1 s after the turn end and was not rejected. The hook result
+  `skip=none` came at 14:58:57.162 and `command.run resolved {}` at
+  14:58:57.164. The stream had a `compact_boundary` with
+  `trigger: "manual"` (pre/post 21992/7777).
+- In both runs, the hook's landing settled about 2 ms before
+  `command.run` resolved. Neither run raised a `turn.start` for the queued
+  `/compact`, so a held resume is not cancelled by the command itself.
+
+What landed (`compaction.ts`, `register.ts`, `captions.tsx`, `timing.ts`, and
+the wsflow mirror):
+
+- The `compact` edge now runs `/compact`.
+- The compact step is `delay(SETTLE_MS = 1000)` after a non-aborted
+  main-thread turn end. It checks `turnRunning()` first, clears
+  `r.scheduled`, and makes no call while a turn runs.
+- The outcome is the main-conversation compaction that `compacted()` sees
+  while `leverCompacting` is set. A landing wins over a veto, and the window
+  does not drop the step.
+- A refused command and an unobserved outcome both settle through `vetoed()`
+  with their own reason (`the compact command was refused: ...`,
+  `UNOBSERVED_REASON`), with no retry.
+- `landed()` moved into `compacted()`.
+- The `leverLanded` edge and `captions.leverLanded` are removed. The lever's
+  landing now reaches `manual.compacted` and `captions.compacted` through the
+  mod's hook, which is the one fan-out.
+
+Verification:
+- `claude plugin test agents-plugin` gave 515 pass / 0 fail. The tests cover
+  command use, landed and vetoed outcomes, resume with and without
+  `continue`, landing inside versus outside the window, a turn running at the
+  settled step (including a dropped step's resume), the unobserved veto,
+  permanent refusal, and a headless start.
+- `go test ./internal/wsrsrc -run TestWsflowHooksMirrorUpToDate` passed.
+- `claude plugin validate` passed on both packages.
+- The lead's live Orca and interactive checks remain.
+
+Decisions:
+- The no-fallback route was chosen from the check above.
+- The engine-test worlds raise the command's compaction through the test
+  body's engine, because the kit refuses `$.session.compact` from a test
+  hook's own `$`.
+
 ### Phase 2: Headless caption force-off
 
 Gate captions on `isInteractive` per the decision. `captions.isOn()` also
@@ -230,3 +289,25 @@ own prompts plainly and requests no recaps; that is intended.
 Verification: captions engine tests: headless start with the knob on draws
 nothing, requests no summaries or recaps, and delivers own prompts plainly;
 interactive start unchanged.
+
+### Result (392230dc6) - 2026-10-31
+
+`CaptionEdges.interactive` is now required. `register.ts` passes
+`e.isInteractive` to it. A non-interactive `captions.start` resets its state
+and then returns before reading any setting, so captions, the split delivery
+of the mod's own prompts, and mailbox recaps are all off in that session. The
+knob is never written.
+
+The Pi gate was confirmed: `shouldRunDisplaySummary` returns
+`mode === "tui" && role === undefined`
+(`agents-plugin-pi/src/display-summary-session.ts#L34-L35`). Pi is unchanged.
+
+Verification:
+- New engine tests:
+  - A headless start with the switch on draws raw rows, sends no request,
+    reads no caption key, and a later interactive start turns captions on.
+  - A headless resume prompt is submitted whole.
+  - A headless drained mailbox batch is submitted whole, with no recap.
+- These tests fail with the gate disabled.
+- `claude plugin test agents-plugin` gave 518 pass / 0 fail.
+- The mirror drift guard and `claude plugin validate` passed.

@@ -198,7 +198,7 @@ export function resumeText(plugin: string): string {
   return `${label(plugin)}Compaction landed; resume the work in progress from the summary and your durable records.`
 }
 
-/** The resume prompt after a hook vetoed the lever's compaction with `{ skip }`. */
+/** The resume prompt after the lever's compaction did not run: a hook's `{ skip }`, a refused command, or none observed. */
 export function vetoedResumeText(plugin: string, reason: string): string {
   return `${label(plugin)}Compaction did not run (${reason}); your context is unchanged. Resume the work in progress.`
 }

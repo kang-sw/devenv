@@ -1,6 +1,6 @@
 import { expect, mock, test, type TestBody } from 'claude-code/testing'
 
-import { CONTINUATION_WINDOW_MS } from './compaction'
+import { CONTINUATION_WINDOW_MS, SETTLE_MS } from './compaction'
 import { adoptionNotice, KEY_STORE_PREFIX, MAILBOX_LINE, pointerText, SECTION_ID } from './manual'
 import { KNOB } from './register'
 import { resumeText } from './timing'
@@ -99,6 +99,8 @@ function world(
     failKnobs: new Set<string>(opts.failKnobs ?? []),
     /** The `/mcp reconnect` commands the mod ran. */
     reconnects: 0,
+    /** The test's engine, bound at start: the lever's `/compact` raises its compaction through it. */
+    engine: undefined as Engine | undefined,
     /** The next connect finds the server down, as at a start (a hot reload) before it is up. */
     downAtNextConnect: () => {
       serverDown = true
@@ -200,7 +202,12 @@ function world(
   })
   on('prompt.compose', () => ({ sections: ENGINE_SECTIONS }))
   // A reconnect always brings the server's tools back.
-  on('command.run', () => ((w.reconnects += 1), {}))
+  on('command.run', async ($, e) => {
+    if (e.command !== 'compact') return (w.reconnects += 1), {}
+    // `/compact` compacts as a typed one does: a manual compaction through every plugin's session.compact hook.
+    await w.engine!.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'summary', toolUses: [] }] } as never)
+    return {}
+  })
   on('tool.list', () => ({ value: [{ name: `mcp__plugin_${w.plugin}_${w.plugin}__config_get`, description: 'x', mcp: true }] }))
   on('session.compact', () => ({ messages: [{ role: 'user', text: 'summary', toolUses: [] }] }) as never)
   on('prompt.submit', ($, e) => (w.prompts.push(e.text), { text: e.text }))
@@ -208,6 +215,7 @@ function world(
 }
 
 async function start($: Engine, w: World) {
+  w.engine = $
   await $.session.start({ cwd: '/repo/sub', surface: 'terminal', isInteractive: true })
   await w.clock.settle()
 }
@@ -371,7 +379,7 @@ test('with the snapshot carrying the manual, a main-thread workflow_manual reads
   expect(seen(await read($, w, 'workflow_manual', { session_key: 'other-key' }))).toBe(keyedResponse('other-key', '- [ ] {a} do it'))
 })
 
-test("the lever's own landing sets the flag, though the engine routes it past the mod's session.compact hook", async ($, on) => {
+test("the lever's own landing, a manual compaction through the mod's session.compact hook, sets the flag", async ($, on) => {
   const w = world(on, { knobs: ON, store: { [`${KEY_STORE_PREFIX}sess-1`]: { sessionKey: 'kept-key', at: 1_800_000_000_000 } } })
   w.known.add('kept-key')
   await start($, w)
@@ -381,6 +389,7 @@ test("the lever's own landing sets the flag, though the engine routes it past th
   await w.clock.settle()
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer' } as never)
   await w.clock.settle()
+  await w.clock.advance(SETTLE_MS)
   await w.clock.advance(CONTINUATION_WINDOW_MS)
   expect(w.prompts).toEqual([resumeText(w.plugin)])
   await compose($, w)
