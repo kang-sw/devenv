@@ -595,6 +595,9 @@
     "261030-bug-tickets-move-stages-on-occupied-root": {
       "registered_at": "2026-10-30T06:10:05Z"
     },
+    "261030-bug-workflow-manual-sentinel-mints-lead-key-for-subagents": {
+      "registered_at": "2026-10-30T14:07:33Z"
+    },
     "261030-feat-note-layer-discipline-and-worker-readonly": {
       "registered_at": "2026-10-30T14:07:26Z"
     },
