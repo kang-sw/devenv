@@ -631,7 +631,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-30T15:08:19Z"
+        "touched_at": "2026-10-30T15:09:04Z",
+        "impl": {
+          "branch": "impl/develop/myth-wing-pagan"
+        }
       }
     },
     "261030-feat-pi-orca-subagent-lifecycle-emitter": {
