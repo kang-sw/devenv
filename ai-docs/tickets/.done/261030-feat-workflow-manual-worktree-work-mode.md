@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 055a1cca2920b146
 sage-review-completeness-reviewed: 055a1cca2920b146
+completed: 2026-10-30
 ---
 
 # Workflow manual worktree-based work mode with a parallel subsection
@@ -243,6 +244,33 @@ list must precede `### Worktree-based work mode` (it currently anchors only on
 `### API documentation`), the Go tests covering the workflow manual and `lead-run` render
 pass, and a fresh read of the changed manual and `lead-run` text finds each
 moved rule exactly once.
+
+### Result (137158e18) - 2026-10-30
+
+Landed the approved prose verbatim: `### Worktree-based work mode` and
+`#### Parallel mode` in the workflow manual after `### Git`, and the new
+`## Parallel route (opt-in)` body in `lead-run`. `ticket-batch-selector` is
+unchanged. Mirrored byte-identically into `agents-plugin-wsflow/rsrc/` (regen)
+and `agents-plugin-pi/rsrc/` (hand copy), each with its `manifest.json`.
+
+Tests: the `lead-run` parallel-route pins in `playbook_tools_test.go` now
+cover the heading, the sentence naming `#### Parallel mode`, the
+instruction-is-approval clause, and the `root_override` clause.
+`TestPlaybookPrintGoldenLeadWorkflowManual` pins the new headings, the
+release-before-merge sentence, and the strict-dependency sentence.
+`TestWorkflowManualRendersWorktreeProfiles` now anchors on
+`### Worktree-based work mode`. The wsflow package test
+(`test_wsflow_run_and_stop_protocol_carry_merge_obligation_text`) pinned the
+dropped `lead-run` sentences, so it was re-pinned to the new `lead-run` text
+and the manual's release and serial-merge lines.
+
+Verification: `go test ./internal/wsrsrc/... -count=1` ok (includes
+`TestPiMirrorUpToDate`, wsflow rsrc mirror); `go test ./internal/mcp/
+-count=1 -timeout 40m` ok (478s; a concurrent run hit the default 10m
+timeout); `python3 -m unittest discover agents-plugin-wsflow/tests` 18 tests
+OK. Lite review: clean, with no findings. It confirmed that the copies are
+byte-identical, that each moved rule appears exactly once, and that no
+dropped wording is left behind.
 
 ## Sage Review Round 1 (2026-10-30)
 
