@@ -612,7 +612,14 @@
       "registered_at": "2026-10-30T14:07:33Z"
     },
     "261030-feat-claude-mod-ws-preload-skill-expansion": {
-      "registered_at": "2026-10-30T14:07:44Z"
+      "registered_at": "2026-10-30T14:07:44Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-10-30T15:01:29Z"
+      }
     },
     "261030-feat-note-layer-discipline-and-worker-readonly": {
       "registered_at": "2026-10-30T14:07:26Z"
