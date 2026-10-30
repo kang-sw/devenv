@@ -625,7 +625,14 @@
       }
     },
     "261030-feat-note-layer-discipline-and-worker-readonly": {
-      "registered_at": "2026-10-30T14:07:26Z"
+      "registered_at": "2026-10-30T14:07:26Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-10-30T15:08:19Z"
+      }
     },
     "261030-feat-pi-orca-subagent-lifecycle-emitter": {
       "registered_at": "2026-10-30T14:07:38Z"
