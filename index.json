@@ -608,17 +608,7 @@
       "registered_at": "2026-10-30T14:07:26Z"
     },
     "261030-feat-pi-orca-subagent-lifecycle-emitter": {
-      "registered_at": "2026-10-30T14:07:38Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "active",
-        "touched_at": "2026-10-30T14:45:08Z",
-        "impl": {
-          "branch": "impl/develop/exes-defy-cache"
-        }
-      }
+      "registered_at": "2026-10-30T14:07:38Z"
     },
     "261030-feat-session-whiteboard-mode": {
       "registered_at": "2026-10-30T11:50:02Z"
