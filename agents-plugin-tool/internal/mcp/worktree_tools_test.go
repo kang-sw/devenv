@@ -727,9 +727,9 @@ func TestWorktreeAcquireHousekeepingDispatch(t *testing.T) {
 		want string
 	}{
 		{map[string]any{"base": "develop", "sparse_paths": []string{"ai-docs"}}, "sparse_paths was removed"},
-		// profile is a required property: the central argument precheck refuses
-		// its absence with the tool's schema before the handler runs.
-		{map[string]any{"base": "develop"}, "missing required: profile"},
+		// A missing profile defers past the argument precheck so the
+		// handler's resolved-profile list reaches the caller.
+		{map[string]any{"base": "develop"}, "profile is required; resolved profiles: full, housekeeping"},
 		{map[string]any{"base": "develop", "profile": "nope"}, `unknown profile "nope"`},
 	} {
 		tc.args["session_key"] = leadKey

@@ -2733,8 +2733,9 @@ func TestServeStdioGitCommitAIContextConditionsAndDebugEvent(t *testing.T) {
 	}
 	absentFieldText := toolText(t, byID["2"])
 	// ai_context is a required property, so the central argument precheck
-	// refuses its absence before the handler runs (and before its debug
-	// event); the handler's absent-field branch stays for non-MCP callers.
+	// refuses its absence before the handler runs; its generic
+	// tools.call.precheck_refused event (TestPrecheckRefusalEmitsDebugEvent)
+	// replaces the handler's absent-field event over MCP.
 	if !strings.Contains(byID["2"], `"isError":true`) || !strings.Contains(absentFieldText, "missing required: ai_context") {
 		t.Fatalf("git.commit with absent ai_context field = %s", byID["2"])
 	}

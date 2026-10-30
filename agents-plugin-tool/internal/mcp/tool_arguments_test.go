@@ -148,3 +148,51 @@ func TestHandlerOwnedArgumentsStayUndeclared(t *testing.T) {
 		}
 	}
 }
+
+// TestPrecheckRefusalEmitsDebugEvent pins that every refusal leaves one
+// generic tools.call.precheck_refused event, so a harness that drops a field
+// stays diagnosable through runtime.debug_events although no handler ran.
+func TestPrecheckRefusalEmitsDebugEvent(t *testing.T) {
+	server, key := newPrecheckServer(t)
+
+	line := callToolLineWithKey(t, server, 2, key, "git.commit", map[string]any{
+		"paths":           []string{"x"},
+		"title":           "precheck debug event",
+		"expected_branch": "main",
+		"message":         "m",
+	})
+	if !toolIsError(t, line) {
+		t.Fatalf("git.commit without ai_context was not refused: %s", line)
+	}
+
+	events := callToolWithKey(t, server, 3, key, "runtime.debug_events", map[string]any{"limit": 256})
+	var found map[string]any
+	for _, raw := range strings.Split(strings.TrimSpace(events), "\n") {
+		var event map[string]any
+		if err := json.Unmarshal([]byte(raw), &event); err != nil {
+			t.Fatalf("parse debug event %q: %v", raw, err)
+		}
+		if event["event"] == "tools.call.precheck_refused" && event["tool"] == "git.commit" {
+			found = event
+		}
+	}
+	if found == nil {
+		t.Fatalf("no tools.call.precheck_refused event for git.commit:\n%s", events)
+	}
+	missing, _ := found["missing"].([]any)
+	unknown, _ := found["unknown"].([]any)
+	if len(missing) != 1 || missing[0] != "ai_context" || len(unknown) != 1 || unknown[0] != "message" {
+		t.Fatalf("precheck_refused event fields = %#v", found)
+	}
+}
+
+// TestPrecheckDefersHandlerGuidedRequired pins that a missing
+// handler-guided required property skips the precheck refusal.
+func TestPrecheckDefersHandlerGuidedRequired(t *testing.T) {
+	if _, ok := precheckToolArguments("worktree.acquire", map[string]any{"session_key": "k", "base": "develop"}); !ok {
+		t.Fatal("worktree.acquire without profile was refused by the precheck; the handler owns that answer")
+	}
+	if _, ok := precheckToolArguments("worktree.acquire", map[string]any{"session_key": "k", "profile": "full"}); ok {
+		t.Fatal("worktree.acquire without base was not refused")
+	}
+}

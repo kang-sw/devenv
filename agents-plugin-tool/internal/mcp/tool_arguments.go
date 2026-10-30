@@ -34,6 +34,16 @@ var handlerOwnedArguments = map[string][]string{
 	"tickets.verify":       {"spec_stem"},
 }
 
+// handlerGuidedRequired lists, per tool, required properties whose absence
+// the handler answers with runtime guidance a static schema cannot carry, so
+// the precheck defers a call missing one to the handler. session_key is
+// implicitly on every tool's list: its handler error names the route to
+// obtain a key. worktree.acquire's profile error lists the profiles resolved
+// for this project, including project-declared ones the schema never names.
+var handlerGuidedRequired = map[string][]string{
+	"worktree.acquire": {"profile"},
+}
+
 // toolInputSchema returns the raw inputSchema of the named tool from the same
 // definitions tools/list serves, or nil when the tool has no definition (a
 // removed tool whose handler only answers with a migration error).
@@ -58,11 +68,13 @@ func precheckToolArguments(name string, arguments map[string]any) (string, bool)
 		return "", true
 	}
 	required := schemaStringList(schema["required"])
-	// A missing session_key defers the whole call to the handler: its
-	// session-key error carries the recovery route (how to obtain a key),
-	// which a schema refusal would drop. The retry then meets this check.
-	if _, present := arguments["session_key"]; !present && slices.Contains(required, "session_key") {
-		return "", true
+	// A missing handler-guided required property defers the whole call to
+	// the handler: its error carries guidance a static schema cannot (see
+	// handlerGuidedRequired). The retry then meets this check.
+	for _, property := range append([]string{"session_key"}, handlerGuidedRequired[name]...) {
+		if _, present := arguments[property]; !present && slices.Contains(required, property) {
+			return "", true
+		}
 	}
 	// A handler-owned argument likewise defers the call, so the handler's
 	// re-login or migration answer is the one the caller sees.
@@ -100,6 +112,13 @@ func precheckToolArguments(name string, arguments map[string]any) (string, bool)
 	if len(missing) == 0 && len(unknown) == 0 {
 		return "", true
 	}
+	// One generic event per refusal keeps dropped-field diagnosis visible in
+	// runtime.debug_events for every tool, since the handler never runs.
+	appendDebugEvent("tools.call.precheck_refused", map[string]any{
+		"tool":    name,
+		"missing": nonNilStrings(missing),
+		"unknown": nonNilStrings(unknown),
+	})
 	return toolArgumentsRefusal(name, schema, missing, unknown), false
 }
 
@@ -156,4 +175,11 @@ func toolArgumentsRefusal(name string, schema map[string]any, missing, unknown [
 	b.Write(raw)
 	b.WriteString("\n")
 	return b.String()
+}
+
+func nonNilStrings(values []string) []string {
+	if values == nil {
+		return []string{}
+	}
+	return values
 }
