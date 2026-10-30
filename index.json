@@ -598,6 +598,9 @@
     "261030-bug-workflow-manual-sentinel-mints-lead-key-for-subagents": {
       "registered_at": "2026-10-30T14:07:33Z"
     },
+    "261030-feat-claude-mod-ws-preload-skill-expansion": {
+      "registered_at": "2026-10-30T14:07:44Z"
+    },
     "261030-feat-note-layer-discipline-and-worker-readonly": {
       "registered_at": "2026-10-30T14:07:26Z"
     },
