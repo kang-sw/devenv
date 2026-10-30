@@ -617,6 +617,9 @@
           "branch": "impl/develop/dole-ebook-feast"
         }
       }
+    },
+    "261030-feat-workflow-manual-worktree-work-mode": {
+      "registered_at": "2026-10-30T04:48:11Z"
     }
   }
 }
