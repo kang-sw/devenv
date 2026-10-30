@@ -1,7 +1,7 @@
 import { expect, mock, test, type TestBody } from 'claude-code/testing'
 
 import { ENABLED_KEY, OWN_SETTLE_MS } from './captions'
-import { CONTINUATION_WINDOW_MS } from './compaction'
+import { CONTINUATION_WINDOW_MS, SETTLE_MS, UNOBSERVED_REASON } from './compaction'
 import { KNOB } from './register'
 import {
   ADVISORY_KEY,
@@ -31,7 +31,12 @@ type On = Parameters<TestBody>[1]
 const WINDOW = { rawMaxTokens: 200_000, autoCompactThreshold: 170_000, isAutoCompactEnabled: true }
 const T = thresholdsFor(WINDOW)!
 
-type CompactAnswer = { skip: string } | 'lands' | 'rejects'
+/**
+ * How the lever's next `/compact` command goes: its compaction lands or is
+ * vetoed beneath the mod; `rejects` is the engine refusing the command;
+ * `unobserved` runs it with no compaction.
+ */
+type CompactAnswer = { skip: string } | 'lands' | 'rejects' | 'unobserved'
 
 /** A compaction leaves at least one message: the summary. */
 const SUMMARY = [{ role: 'user', text: 'summary', toolUses: [] }]
@@ -69,9 +74,15 @@ function world(on: On, opts: Opts = {}) {
     usageCalls: [] as unknown[],
     /** The tokens a usage read reports: the last measure's, unless a test moves it. */
     live: undefined as number | undefined,
-    /** Who compacted, and with what instructions (the kit leaves a plugin call's trigger unset; the engine sets `plugin`). */
-    compactCalls: [] as { origin: string; instructions: unknown }[],
+    /** The compactions that reached the engine, with their trigger. */
+    compactCalls: [] as { trigger: unknown; instructions: unknown }[],
+    /** The `/compact` commands run, and by whom. */
+    commands: [] as { command: string; args: unknown; origin: string }[],
     compactAnswers: [] as CompactAnswer[],
+    /** The answer the next compaction beneath the mod gives; absent, it lands. */
+    pendingCompact: undefined as { skip: string } | undefined,
+    /** The test's engine, bound at start: a test hook's own `$` may not raise a compaction. */
+    engine: undefined as Engine | undefined,
     /** Prompts submitted from elsewhere than the composer: the mod's own, among them. */
     prompts: [] as string[],
     /** The next such prompts refused beneath the mod. */
@@ -156,11 +167,22 @@ function world(on: On, opts: Opts = {}) {
     w.usageCalls.push(e)
     return { value: { startedAt: 0, context: { tokens: w.live, window: 1_000_000, breakdown: e.breakdown ? WINDOW : undefined }, rateLimits: [] } as never }
   })
-  on('session.compact', ($, e, next) => {
-    w.compactCalls.push({ origin: next.origin.plugin, instructions: e.instructions })
+  on('session.compact', ($, e) => {
+    w.compactCalls.push({ trigger: e.trigger, instructions: e.instructions })
+    const answer = w.pendingCompact
+    w.pendingCompact = undefined
+    return answer ?? { messages: SUMMARY }
+  })
+  // `/compact` compacts as a typed one does: a manual compaction through every plugin's session.compact hook.
+  on('command.run', async ($, e) => {
+    if (e.command !== 'compact') return {}
+    w.commands.push({ command: e.command, args: e.args, origin: e.origin.kind === 'plugin' ? e.origin.name : e.origin.kind })
     const answer = w.compactAnswers.shift() ?? 'lands'
-    if (answer === 'rejects') throw new Error('a turn is running')
-    return answer === 'lands' ? { messages: SUMMARY } : answer
+    if (answer === 'rejects') throw new Error('past a Stop')
+    if (answer === 'unobserved') return {}
+    if (answer !== 'lands') w.pendingCompact = answer
+    await w.engine!.session.compact({ trigger: 'manual', messages: SUMMARY } as never)
+    return {}
   })
   on('prompt.submit', ($, e) => {
     if (e.origin?.kind === 'composer') {
@@ -180,7 +202,13 @@ function world(on: On, opts: Opts = {}) {
 
 type World = ReturnType<typeof world>
 
+/** The lever's `/compact` command, run by the mod. */
+const LEVER_COMMAND = (w: World) => ({ command: 'compact', args: '', origin: w.plugin })
+/** A manual compaction as it reached the engine. */
+const MANUAL = { trigger: 'manual', instructions: undefined }
+
 async function start($: Engine, w: World) {
+  w.engine = $
   await $.session.start({ cwd: '/tmp', surface: 'terminal', isInteractive: true })
   await w.clock.settle()
 }
@@ -191,7 +219,8 @@ async function measure($: Engine, w: World, tokens: number) {
   await w.clock.settle()
 }
 
-async function turnEnd($: Engine, w: World, opts: { reason?: string; agentId?: string } = {}) {
+/** A turn end, then SETTLE_MS on the clock unless `settle` is false: a pending request's compact step runs within it. */
+async function turnEnd($: Engine, w: World, opts: { reason?: string; agentId?: string; settle?: boolean } = {}) {
   const reason = opts.reason ?? 'answer'
   await $.turn.complete({
     answer: '',
@@ -202,6 +231,7 @@ async function turnEnd($: Engine, w: World, opts: { reason?: string; agentId?: s
     ...(opts.agentId ? { agentId: opts.agentId } : {}),
   } as never)
   await w.clock.settle()
+  if (opts.settle !== false) await w.clock.advance(SETTLE_MS)
 }
 
 /** A turn starting: the main thread's, or a subagent's with `agentId`. */
@@ -342,14 +372,14 @@ test('a lever call with the flag compacts after the main-thread turn end, then s
   expect(res.result).toBe(LEVER_RESULT)
   await turnEnd($, w, { agentId: 'sub-1' })
   await turnEnd($, w, { reason: 'aborted' })
-  expect(w.compactCalls).toEqual([])
+  expect(w.commands).toEqual([])
   await turnEnd($, w)
-  expect(w.compactCalls).toEqual([{ origin: w.plugin, instructions: undefined }])
+  expect(w.commands).toEqual([LEVER_COMMAND(w)])
   expect(w.prompts).toEqual([])
   await w.clock.advance(CONTINUATION_WINDOW_MS)
   expect(w.prompts).toEqual([resumeText(w.plugin)])
   await turnEnd($, w)
-  expect(w.compactCalls.length).toBe(1)
+  expect(w.commands.length).toBe(1)
   expect(w.prompts.length).toBe(1)
 })
 
@@ -359,11 +389,11 @@ test('a lever call without the flag compacts at the turn end and submits nothing
   const res = await lever($, w)
   expect(res.result).toBe(LEVER_RESULT_NO_RESUME)
   await turnEnd($, w)
-  expect(w.compactCalls).toEqual([{ origin: w.plugin, instructions: undefined }])
+  expect(w.commands).toEqual([LEVER_COMMAND(w)])
   await w.clock.advance(CONTINUATION_WINDOW_MS)
   expect(w.prompts).toEqual([])
   await turnEnd($, w)
-  expect(w.compactCalls.length).toBe(1)
+  expect(w.commands.length).toBe(1)
 })
 
 test('a leftover continuation argument, or a non-boolean flag, reads as unset', async ($, on) => {
@@ -372,7 +402,7 @@ test('a leftover continuation argument, or a non-boolean flag, reads as unset', 
   expect((await lever($, w, { continuation: 'go on' })).result).toBe(LEVER_RESULT_NO_RESUME)
   expect((await lever($, w, { continue: 'true' })).result).toBe(LEVER_RESULT_NO_RESUME)
   await turnEnd($, w)
-  expect(w.compactCalls.length).toBe(1)
+  expect(w.commands.length).toBe(1)
   await w.clock.advance(CONTINUATION_WINDOW_MS)
   expect(w.prompts).toEqual([])
 })
@@ -389,18 +419,18 @@ test('a repeat lever call replaces the flag, latest wins', async ($, on) => {
   await lever($, w, { continue: true })
   await turnEnd($, w)
   await w.clock.advance(CONTINUATION_WINDOW_MS)
-  expect(w.compactCalls.length).toBe(2)
+  expect(w.commands.length).toBe(2)
   expect(w.prompts).toEqual([resumeText(w.plugin)])
 })
 
-test("the lever's own landing resets the latch, though the engine routes it past the feature's own hook", async ($, on) => {
+test("the lever's own landing, a manual compaction through the feature's own hook, resets the latch once", async ($, on) => {
   const w = world(on, ON)
   await start($, w)
   await measure($, w, 50_000)
   await measure($, w, 104_000)
   await lever($, w, { continue: true })
   await turnEnd($, w)
-  expect(w.compactCalls).toEqual([{ origin: w.plugin, instructions: undefined }])
+  expect(w.commands).toEqual([LEVER_COMMAND(w)])
   await w.clock.advance(CONTINUATION_WINDOW_MS)
   // Usage still past the advisory after the landing: a reset latch delivers it again, from a fresh breakdown.
   await measure($, w, 104_000)
@@ -416,25 +446,70 @@ test('a subagent lever call is refused and requests nothing', async ($, on) => {
   const fromSub = await lever($, w, { continue: true }, 'sub-1')
   expect(fromSub.deny).toBe('request_compaction compacts the main session only; called from subagent sub-1.')
   await turnEnd($, w)
-  expect(w.compactCalls).toEqual([])
+  expect(w.commands).toEqual([])
   expect(w.prompts).toEqual([])
 })
 
-test('a rejected compaction retries at the next main-thread turn end', async ($, on) => {
+test('a refused compact command is permanent: one notice, a noted resume, no retry at later turn ends', async ($, on) => {
   const w = world(on, ON)
   await start($, w)
   await lever($, w, { continue: true })
   w.compactAnswers.push('rejects')
   await turnEnd($, w)
-  expect(w.compactCalls.length).toBe(1)
+  expect(w.commands.length).toBe(1)
+  expect(w.compactCalls).toEqual([])
   expect(w.prompts).toEqual([])
-  // The rejection's own text is the engine's; the notice carries it whole.
+  // The refusal's own text is the engine's; the notice carries it whole.
   expect(transcript(w).length).toBe(1)
-  expect(transcript(w)[0]).toMatch(new RegExp(`^${w.plugin} compaction: the requested compaction was rejected \\(.+\\); retrying at the next turn end$`))
-  await w.clock.advance(60_000)
-  expect(w.compactCalls.length).toBe(1)
+  expect(transcript(w)[0]).toMatch(
+    new RegExp(`^${w.plugin} compaction: the requested compaction did not run \\(the compact command was refused: .+\\); a resume prompt follows with a note$`),
+  )
+  await w.clock.advance(CONTINUATION_WINDOW_MS)
+  expect(w.prompts.length).toBe(1)
+  expect(w.prompts[0]).toMatch(/Compaction did not run \(the compact command was refused: .+\); your context is unchanged/)
   await turnEnd($, w)
-  expect(w.compactCalls.length).toBe(2)
+  expect(w.commands.length).toBe(1)
+  expect(transcript(w).length).toBe(1)
+})
+
+test('a compact command that ran with no compaction observed settles as a veto, not a landing or a retry', async ($, on) => {
+  const w = world(on, ON)
+  await start($, w)
+  await lever($, w, { continue: true })
+  w.compactAnswers.push('unobserved')
+  await turnEnd($, w)
+  await w.clock.advance(CONTINUATION_WINDOW_MS)
+  expect(w.prompts).toEqual([vetoedResumeText(w.plugin, UNOBSERVED_REASON)])
+  await turnEnd($, w)
+  expect(w.commands.length).toBe(1)
+})
+
+test('the lever compacts in a headless session too: the same command, no session.compact call', async ($, on) => {
+  const w = world(on, ON)
+  w.engine = $
+  await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false } as never)
+  await w.clock.settle()
+  await lever($, w, { continue: true })
+  await turnEnd($, w)
+  expect(w.commands).toEqual([LEVER_COMMAND(w)])
+  expect(w.compactCalls).toEqual([MANUAL])
+  await w.clock.advance(CONTINUATION_WINDOW_MS)
+  expect(w.prompts).toEqual([resumeText(w.plugin)])
+})
+
+test('the compact step waits SETTLE_MS after the turn end, and a turn started by then holds it for that turn end', async ($, on) => {
+  const w = world(on, ON)
+  await start($, w)
+  await lever($, w, { continue: true })
+  await turnEnd($, w, { settle: false })
+  await w.clock.advance(SETTLE_MS - 1)
+  expect(w.commands).toEqual([])
+  // A queued prompt starts its turn before the step: no command is queued behind it.
+  await turnStart($, w)
+  await w.clock.advance(1)
+  expect(w.commands).toEqual([])
+  await turnEnd($, w)
+  expect(w.commands).toEqual([LEVER_COMMAND(w)])
   await w.clock.advance(CONTINUATION_WINDOW_MS)
   expect(w.prompts).toEqual([resumeText(w.plugin)])
 })
@@ -469,7 +544,8 @@ test('a manual compaction landing first drops the compact step; the resume promp
   // No window is open: a turn start before that turn end does not cancel it.
   await turnStart($, w)
   await turnEnd($, w)
-  expect(w.compactCalls).toEqual([{ origin: 'engine', instructions: undefined }])
+  expect(w.compactCalls).toEqual([MANUAL])
+  expect(w.commands).toEqual([])
   expect(w.prompts).toEqual([resumeText(w.plugin)])
 })
 
@@ -482,7 +558,7 @@ test('session.end drops a pending request and starts the latch over', async ($, 
   await w.clock.settle()
   await turnEnd($, w)
   await measure($, w, 120_000)
-  expect(w.compactCalls).toEqual([])
+  expect(w.commands).toEqual([])
   expect(w.prompts).toEqual([])
 })
 
@@ -495,7 +571,7 @@ test('session.end resets the compaction state before awaiting the store delete',
   const ended = $.session.end({ reason: 'clear', sessionId: 'sess-1', resume: undefined as never })
   await w.clock.settle()
   await turnEnd($, w)
-  expect(w.compactCalls).toEqual([])
+  expect(w.commands).toEqual([])
   expect(w.prompts).toEqual([])
   await w.clock.advance(100)
   await ended
@@ -513,7 +589,8 @@ async function expectInert($: Engine, w: World) {
   expect(res).toEqual({ messages: SUMMARY })
   expect(w.usageCalls).toEqual([])
   expect(w.prompts).toEqual([])
-  expect(w.compactCalls).toEqual([{ origin: 'engine', instructions: undefined }])
+  expect(w.compactCalls).toEqual([MANUAL])
+  expect(w.commands).toEqual([])
   await prompted($, w, 'hello')
   expect(w.typed).toEqual([{ text: 'hello', context: undefined }])
   await $.session.end({ reason: 'clear', sessionId: 'sess-1', resume: undefined as never })
@@ -524,7 +601,8 @@ async function expectInert($: Engine, w: World) {
   expect((await lever($, w, { continue: true })).result).toBe(LEVER_RESULT)
   await turnEnd($, w)
   await w.clock.advance(CONTINUATION_WINDOW_MS)
-  expect(w.compactCalls).toEqual([{ origin: 'engine', instructions: undefined }, { origin: w.plugin, instructions: undefined }])
+  expect(w.compactCalls).toEqual([MANUAL, MANUAL])
+  expect(w.commands).toEqual([LEVER_COMMAND(w)])
   expect(w.prompts).toEqual([resumeText(w.plugin)])
 }
 
@@ -555,6 +633,7 @@ for (const unresolved of ['down', 'reject'] as const) {
 test('a slow server start holds neither session.start nor the lever; the advisory comes up once its knob read settles', async ($, on) => {
   const w = world(on, { ...ON, connect: 1_000 })
   let started = false
+  w.engine = $
   void $.session.start({ cwd: '/tmp', surface: 'terminal', isInteractive: true }).then(() => (started = true))
   await w.clock.settle()
   expect(started).toBe(true)
@@ -562,7 +641,7 @@ test('a slow server start holds neither session.start nor the lever; the advisor
   expect(w.knobReads).toEqual([])
   expect((await lever($, w)).result).toBe(LEVER_RESULT_NO_RESUME)
   await turnEnd($, w)
-  expect(w.compactCalls).toEqual([{ origin: w.plugin, instructions: undefined }])
+  expect(w.commands).toEqual([LEVER_COMMAND(w)])
   await w.clock.advance(1_000)
   expect(w.knobReads).toEqual([{ key: KNOB.compactionAdvisory, format: 'json' }])
   await measure($, w, 50_000)
@@ -586,11 +665,12 @@ test('each session start reads the advisory knob afresh: a later start reading o
   // The lever the first start registered is still answered.
   expect((await lever($, w)).result).toBe(LEVER_RESULT_NO_RESUME)
   await turnEnd($, w)
-  expect(w.compactCalls).toEqual([{ origin: w.plugin, instructions: undefined }])
+  expect(w.commands).toEqual([LEVER_COMMAND(w)])
 })
 
 test('a start whose advisory read outlasts a newer start reading off leaves the advisory inert', async ($, on) => {
   const w = world(on, { ...ON, connect: 1_000 })
+  w.engine = $
   void $.session.start({ cwd: '/tmp', surface: 'terminal', isInteractive: true })
   await w.clock.settle()
   // A newer start (a hot reload) connects at once and reads the knob off.
@@ -629,7 +709,7 @@ test('a slash command or a prompt not typed at the composer that starts a turn w
   expect(w.prompts).toEqual([])
   await lever($, w, { continue: true })
   await turnEnd($, w)
-  expect(w.compactCalls.length).toBe(2)
+  expect(w.commands.length).toBe(2)
   await prompted($, w, 'from a phone', { kind: 'bridge' })
   await w.clock.advance(CONTINUATION_WINDOW_MS)
   expect(w.prompts).toEqual(['from a phone'])

@@ -587,8 +587,6 @@ export type Captions = {
   request: (unit: Unit) => void
   /** A session.compact as it settled. */
   compacted: (trigger: SessionCompactTrigger, agentId: string | undefined, res: SessionCompactResult) => void
-  /** The lever's own compaction landed (it does not pass the session.compact hook). */
-  leverLanded: () => void
   /** session.end: the next conversation's mirror starts empty; the captions stay. */
   end: () => void
 }
@@ -846,7 +844,6 @@ export function createCaptions(): Captions {
     compacted(trigger, agentId, res) {
       if (agentId === undefined && trigger !== 'precompute' && res.messages !== undefined) resetMirror()
     },
-    leverLanded: resetMirror,
     end: resetMirror,
   }
 }

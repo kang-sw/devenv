@@ -20,6 +20,7 @@ import {
   type OwnDeliveryEdges,
   type OwnPrompt,
 } from './captions'
+import { SETTLE_MS } from './compaction'
 import { failureLine, REASON_TOOLS_ABSENT, reasonCommandAnswered, successLine } from './reconnect'
 import { deliveryLine, resumeLine, thresholdsFor, vetoedResumeLine } from './timing'
 import { batchLine, batchPrompt, mailboxLabel, noticeLine } from './watcher'
@@ -52,6 +53,8 @@ function world(on: On, opts: { config?: Record<string, unknown>; failKeys?: stri
     replies: [] as Reply[],
     configKeys: [] as string[],
     compactAnswers: 0,
+    /** The test's engine, bound at start: the lever's `/compact` raises its compaction through it. */
+    engine: undefined as Engine | undefined,
     /** The events the mod asked the engine to draw again. */
     invalidated: [] as string[],
     /** What tool.call answers for a tool named here; any other tool answers Bash-like output. */
@@ -85,6 +88,11 @@ function world(on: On, opts: { config?: Record<string, unknown>; failKeys?: stri
     return { value: { tool: `mcp__${w.plugin}__${e.name}` } }
   })
   on('session.compact', () => ((w.compactAnswers += 1), { messages: [{ role: 'user', text: 'summary', toolUses: [] }] }))
+  // `/compact` compacts as a typed one does: a manual compaction through every plugin's session.compact hook.
+  on('command.run', async ($, e) => {
+    if (e.command === 'compact') await w.engine!.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'summary', toolUses: [] }] } as never)
+    return {}
+  })
   on('session.messages', () => ({ value: w.messages }))
   on('ui.invalidate', ($, e) => {
     w.invalidated.push(e.event)
@@ -109,6 +117,7 @@ function world(on: On, opts: { config?: Record<string, unknown>; failKeys?: stri
 type World = ReturnType<typeof world>
 
 async function start($: Engine, w: World) {
+  w.engine = $
   await $.session.start({ cwd: '/tmp', surface: 'terminal', isInteractive: true })
   await w.clock.settle()
 }
@@ -616,6 +625,8 @@ test('the mirror starts over when the lead compaction lever lands, and on a main
   await $.tool.call({ tool: `mcp__${w.plugin}__request_compaction` } as never)
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer' } as never)
   await w.clock.settle()
+  await w.clock.advance(SETTLE_MS)
+  // One landing, through the hook: the mirror starts over once.
   expect(w.compactAnswers).toBe(1)
   messages.splice(0, messages.length,
     { role: 'user', content: [{ type: 'text', text: 'SUMMARY one' }] },
