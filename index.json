@@ -609,7 +609,14 @@
       }
     },
     "261030-feat-paged-document-templates": {
-      "registered_at": "2026-10-30T07:39:20Z"
+      "registered_at": "2026-10-30T07:39:20Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-10-30T07:45:07Z"
+      }
     }
   }
 }
