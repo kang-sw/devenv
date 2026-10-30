@@ -592,18 +592,11 @@
     "261029-chore-wsflow-no-agent-env-rename-and-setup-tool-removal": {
       "registered_at": "2026-10-29T00:09:05Z"
     },
-    "261030-bug-claude-mod-watchdog-no-reconnect-windows": {
-      "registered_at": "2026-10-30T10:33:50Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-30T10:46:45Z"
-      }
-    },
     "261030-bug-tickets-move-stages-on-occupied-root": {
       "registered_at": "2026-10-30T06:10:05Z"
+    },
+    "261030-feat-note-layer-discipline-and-worker-readonly": {
+      "registered_at": "2026-10-30T14:07:26Z"
     },
     "261030-feat-session-whiteboard-mode": {
       "registered_at": "2026-10-30T11:50:02Z"
