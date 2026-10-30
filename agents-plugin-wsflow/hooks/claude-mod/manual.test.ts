@@ -531,7 +531,7 @@ describe('setup and compose', () => {
     m.compacted('manual', undefined, { messages: [] })
     expect(await m.compose([])).toContain('`kept-key`')
     expect(m.snapshot()).toBe(true)
-    // The lever's own landing arrives through landed().
+    // A landing reported directly through landed() sets it too.
     const lever = harness({ store: { [`${KEY_STORE_PREFIX}sess-1`]: { sessionKey: 'kept-key', at: NOW } } })
     lever.h.known.add('kept-key')
     lever.m.start(lever.edges)

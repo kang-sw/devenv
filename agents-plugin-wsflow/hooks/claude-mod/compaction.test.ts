@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { CONTINUATION_WINDOW_MS, createCompaction, type CompactionEdges } from './compaction'
+import { CONTINUATION_WINDOW_MS, createCompaction, SETTLE_MS, UNOBSERVED_REASON, type CompactionEdges } from './compaction'
 import {
   advisoryText,
   checkLeverCall,
@@ -33,7 +33,13 @@ const tick = async (n = 30) => {
   for (let i = 0; i < n; i++) await Promise.resolve()
 }
 
-type CompactAnswer = { skip?: string } | Error
+/**
+ * How the next `/compact` command goes: it lands, or is vetoed with `skip`,
+ * either reported through the feature's hook while the command is awaited;
+ * an Error is the engine refusing the command; `unobserved` runs it with no
+ * compaction reported.
+ */
+type CompactAnswer = { skip?: string } | Error | 'unobserved'
 
 /** Fake edges: submits and compactions are recorded; scheduled steps run when the test says. */
 function harness(opts: { window?: Partial<CompactionWindow> | null; readAdvisory?: () => Promise<unknown>; plugin?: string } = {}) {
@@ -42,7 +48,14 @@ function harness(opts: { window?: Partial<CompactionWindow> | null; readAdvisory
     /** Answers for the next compact() calls in order; an Error rejects. Absent: the compaction lands. */
     compactAnswers: [] as CompactAnswer[],
     compacts: 0,
+    /** Set, a `/compact` command reports nothing itself and resolves only once it resolves: the test reports what landed. */
+    compactGate: undefined as Promise<void> | undefined,
+    /** after() callbacks, run when the test says. */
     scheduled: [] as (() => void)[],
+    /** The settled compact steps (delay(SETTLE_MS) timers), run when the test says. */
+    settled: [] as (() => void)[],
+    /** The next settled-step schedules that throw. */
+    settleThrows: 0,
     /** delay() timers, run when the test says. */
     delayed: [] as { ms: number; fn: () => void }[],
     /** The next delay() calls that throw. */
@@ -58,10 +71,6 @@ function harness(opts: { window?: Partial<CompactionWindow> | null; readAdvisory
     rejectSubmits: 0,
     /** The next after() calls that throw. */
     afterThrows: 0,
-    /** How many times the lever's own landing was reported. */
-    leverLandings: 0,
-    /** Whether that report throws. */
-    leverLandedThrows: false,
     window: opts.window === null ? null : ({ ...WINDOW, ...opts.window } as CompactionWindow),
     /** Whether a main-thread turn runs, as register.ts tracks it. */
     turnRunning: false,
@@ -76,8 +85,6 @@ function harness(opts: { window?: Partial<CompactionWindow> | null; readAdvisory
     usageGate: undefined as Promise<void> | undefined,
   }
   const c = createCompaction()
-  /** Whether the fake engine routes the lever's own compaction through the feature's hook (the engine does not). */
-  let ownHook = false
   const edges: CompactionEdges = {
     submit: async ({ text }, live) => {
       h.lives.push(live)
@@ -95,12 +102,18 @@ function harness(opts: { window?: Partial<CompactionWindow> | null; readAdvisory
       h.submits.push(text)
       return {}
     },
+    // The command's compaction passes the feature's hook as a manual one, as a typed `/compact` does.
     compact: async () => {
       h.compacts += 1
+      if (h.compactGate) {
+        await h.compactGate
+        return {}
+      }
       const answer = h.compactAnswers.shift() ?? {}
       if (answer instanceof Error) throw answer
-      if (ownHook && answer.skip === undefined) c.compacted('plugin', undefined, { messages: [] })
-      return answer.skip === undefined ? { messages: [] } : { skip: answer.skip }
+      if (answer === 'unobserved') return {}
+      c.compacted('manual', undefined, answer.skip === undefined ? { messages: [] } : { skip: answer.skip })
+      return {}
     },
     after: (fn) => {
       if (h.afterThrows > 0) {
@@ -110,6 +123,14 @@ function harness(opts: { window?: Partial<CompactionWindow> | null; readAdvisory
       h.scheduled.push(fn)
     },
     delay: (ms, fn) => {
+      if (ms === SETTLE_MS) {
+        if (h.settleThrows > 0) {
+          h.settleThrows -= 1
+          throw new Error('clock refused')
+        }
+        h.settled.push(fn)
+        return
+      }
       if (h.delayThrows > 0) {
         h.delayThrows -= 1
         throw new Error('clock refused')
@@ -128,10 +149,6 @@ function harness(opts: { window?: Partial<CompactionWindow> | null; readAdvisory
       }
       return { ...(h.live ?? h.measured) }
     },
-    leverLanded: () => {
-      h.leverLandings += 1
-      if (h.leverLandedThrows) throw new Error('listener failed')
-    },
     readAdvisory: opts.readAdvisory,
   }
   c.start(edges)
@@ -144,9 +161,11 @@ function harness(opts: { window?: Partial<CompactionWindow> | null; readAdvisory
     await c.measure({ tokens, window }, readBreakdown)
     await tick()
   }
-  /** Run what turnComplete scheduled, as the engine's clock would once the hook returned. */
+  /** Run what turnComplete scheduled, as the engine's clock would: the after() callbacks, then the settled steps. */
   const runScheduled = async () => {
     for (const fn of h.scheduled.splice(0)) fn()
+    await tick()
+    for (const fn of h.settled.splice(0)) fn()
     await tick()
   }
   const turnEnd = async (reason = 'answer', agentId?: string) => {
@@ -157,7 +176,6 @@ function harness(opts: { window?: Partial<CompactionWindow> | null; readAdvisory
   const turnStart = (agentId?: string) => c.turnStarted(agentId)
   const transcript = () => h.logs.filter((l) => l.to === 'transcript').map((l) => l.text)
   const debugLog = () => h.logs.filter((l) => l.to === 'debug').map((l) => l.text)
-  const routeOwnCompaction = () => void (ownHook = true)
   /** End the resume window: run the delay() timers, as the engine's clock would after it. */
   const closeWindow = async () => {
     for (const t of h.delayed.splice(0)) t.fn()
@@ -165,7 +183,7 @@ function harness(opts: { window?: Partial<CompactionWindow> | null; readAdvisory
   }
   /** A second session.start with the same edges. */
   const restart = () => c.start(edges)
-  return { h, c, measure, turnEnd, turnStart, runScheduled, closeWindow, transcript, debugLog, routeOwnCompaction, restart }
+  return { h, c, measure, turnEnd, turnStart, runScheduled, closeWindow, transcript, debugLog, restart }
 }
 
 /** A promise the test settles. */
@@ -720,7 +738,7 @@ describe('lever', () => {
     const a = harness()
     a.c.lever(undefined, undefined)
     a.c.turnComplete(undefined, 'answer')
-    expect(a.h.scheduled.length).toBe(1)
+    expect(a.h.settled.length).toBe(1)
     a.c.lever(undefined, true)
     await a.runScheduled()
     await a.closeWindow()
@@ -741,7 +759,7 @@ describe('lever', () => {
   test('a compact step that could not be scheduled is scheduled again at the next turn end', async () => {
     const { h, c, turnEnd, closeWindow, debugLog } = harness()
     c.lever(undefined, true)
-    h.afterThrows = 1
+    h.settleThrows = 1
     await turnEnd()
     expect(h.compacts).toBe(0)
     expect(debugLog()).toContain('ws compaction: the compaction step was not scheduled (Error: clock refused); retrying at the next turn end')
@@ -755,7 +773,7 @@ describe('lever', () => {
     const { h, c, turnEnd, closeWindow } = harness()
     c.lever(undefined, true)
     c.turnComplete(undefined, 'answer')
-    const refused = h.scheduled.splice(0)
+    const refused = h.settled.splice(0)
     expect(refused.length).toBe(1)
     await turnEnd()
     await closeWindow()
@@ -767,39 +785,83 @@ describe('lever', () => {
     expect(h.submits.length).toBe(1)
   })
 
-  test('a rejected compaction keeps the request for the next turn end, with no timer retry', async () => {
-    const { h, c, turnEnd, runScheduled, closeWindow } = harness()
+  test('the compact step waits SETTLE_MS after the turn end, then runs the command once', async () => {
+    const { h, c, runScheduled, closeWindow } = harness()
     c.lever(undefined, true)
-    h.compactAnswers.push(new Error('a turn is running'))
-    await turnEnd()
-    expect(h.compacts).toBe(1)
-    expect(h.submits).toEqual([])
+    c.turnComplete(undefined, 'answer')
+    expect(h.compacts).toBe(0)
+    expect(h.scheduled).toEqual([])
+    expect(h.settled.length).toBe(1)
     await runScheduled()
     expect(h.compacts).toBe(1)
-    await turnEnd()
     await closeWindow()
-    expect(h.compacts).toBe(2)
     expect(h.submits).toEqual([RESUME_TEXT])
   })
 
-  test('a rejected compaction is noted in the transcript once per request', async () => {
-    const { h, c, turnEnd, closeWindow, transcript, debugLog } = harness()
-    const rejected = 'ws compaction: the requested compaction was rejected (Error: a turn is running); retrying at the next turn end'
+  test('a settled step that finds a main-thread turn running makes no call; that turn end schedules it again', async () => {
+    const { h, c, runScheduled, turnEnd, closeWindow, debugLog } = harness()
     c.lever(undefined, true)
-    h.compactAnswers.push(new Error('a turn is running'), new Error('a turn is running'))
+    c.turnComplete(undefined, 'answer')
+    h.turnRunning = true
+    await runScheduled()
+    expect(h.compacts).toBe(0)
+    expect(debugLog()).toContain('ws compaction: a main-thread turn runs at the settled compaction step; it waits for that turn to end')
+    h.turnRunning = false
     await turnEnd()
-    expect(transcript()).toEqual([rejected])
-    await turnEnd()
-    expect(h.compacts).toBe(2)
-    expect(transcript()).toEqual([rejected])
-    expect(debugLog()).toContain(rejected)
-    await turnEnd()
+    // The step was settled, not lost: no missed-step line at the next turn end.
+    expect(debugLog().some((l) => l.includes('did not run; scheduling it again'))).toBe(false)
     await closeWindow()
+    expect(h.compacts).toBe(1)
     expect(h.submits).toEqual([RESUME_TEXT])
+  })
+
+  test("a settled step that finds a turn running submits nothing for a dropped step's resume either; that turn end does", async () => {
+    const { h, c, runScheduled, turnEnd } = harness()
     c.lever(undefined, true)
-    h.compactAnswers.push(new Error('a turn is running'))
+    c.turnComplete(undefined, 'answer')
+    // A queued prompt started its turn first, and that turn's auto compaction dropped the step.
+    h.turnRunning = true
+    c.compacted('auto', undefined, { messages: [] })
+    await runScheduled()
+    expect(h.compacts).toBe(0)
+    expect(h.submits).toEqual([])
+    h.turnRunning = false
     await turnEnd()
-    expect(transcript()).toEqual([rejected, rejected])
+    expect(h.compacts).toBe(0)
+    expect(h.submits).toEqual([RESUME_TEXT])
+  })
+
+  test('a refused command is permanent: one notice, the step dropped, the resume held with the note, no retry', async () => {
+    const { h, c, turnEnd, closeWindow, transcript } = harness()
+    const reason = 'the compact command was refused: Error: past a Stop'
+    c.lever(undefined, true)
+    h.compactAnswers.push(new Error('past a Stop'))
+    await turnEnd()
+    expect(h.compacts).toBe(1)
+    expect(h.submits).toEqual([])
+    expect(transcript()).toEqual([`ws compaction: the requested compaction did not run (${reason}); a resume prompt follows with a note`])
+    await closeWindow()
+    expect(h.submits).toEqual([vetoedResumeText('ws', reason)])
+    await turnEnd()
+    expect(h.compacts).toBe(1)
+    expect(transcript().length).toBe(1)
+  })
+
+  test('a command that ran with no compaction observed is a veto with its own reason, not a landing or a retry', async () => {
+    const { h, c, measure, turnEnd, closeWindow, transcript } = harness()
+    await measure(50_000)
+    await measure(104_000)
+    c.lever(undefined, true)
+    h.compactAnswers.push('unobserved')
+    await turnEnd()
+    expect(transcript()).toEqual([`ws compaction: the requested compaction did not run (${UNOBSERVED_REASON}); a resume prompt follows with a note`])
+    await closeWindow()
+    // No re-key: the latch and the cached breakdown stay.
+    await measure(105_000)
+    expect(h.submits).toEqual([advisoryText('ws', T, 104_000), vetoedResumeText('ws', UNOBSERVED_REASON)])
+    expect(h.breakdownReads).toBe(1)
+    await turnEnd()
+    expect(h.compacts).toBe(1)
   })
 
   test('a veto with the flag still submits a resume prompt, with the note, and says why in the transcript', async () => {
@@ -865,22 +927,68 @@ describe('lever', () => {
     await measure(101_000)
     expect(h.submits).toEqual([advisoryText('ws', T, 104_000), RESUME_TEXT, advisoryText('ws', T, 101_000)])
     expect(h.breakdownReads).toBe(2)
-    expect(h.leverLandings).toBe(1)
   })
 
-  test("should the feature's hook see the lever's own landing, it is neither another's nor counted twice", async () => {
-    const { h, c, measure, turnEnd, closeWindow, transcript, routeOwnCompaction } = harness()
-    routeOwnCompaction()
+  test("a landing inside the awaited command window is the lever's own: not another's, resumed with the lever's prompt", async () => {
+    const { h, c, measure, turnEnd, closeWindow, transcript } = harness()
     await measure(50_000)
     await measure(104_000)
+    const gate = deferred<void>()
+    h.compactGate = gate.promise
     c.lever(undefined, true)
     await turnEnd()
     expect(h.compacts).toBe(1)
+    // A manual trigger, as a typed /compact would carry: the window, not the trigger, says whose it is.
+    c.compacted('manual', undefined, { messages: [] })
+    expect(transcript()).toEqual([])
+    gate.resolve()
+    await tick()
     expect(transcript()).toEqual([])
     await closeWindow()
     await measure(101_000)
     expect(h.submits).toEqual([advisoryText('ws', T, 104_000), RESUME_TEXT, advisoryText('ws', T, 101_000)])
     expect(h.breakdownReads).toBe(2)
+  })
+
+  test('a veto inside the awaited command window is the lever\'s veto; a landing outside it is another\'s', async () => {
+    const a = harness()
+    const gate = deferred<void>()
+    a.h.compactGate = gate.promise
+    a.c.lever(undefined, true)
+    await a.turnEnd()
+    a.c.compacted('manual', undefined, { skip: 'blocked by policy' })
+    gate.resolve()
+    await tick()
+    await a.closeWindow()
+    expect(a.h.submits).toEqual([vetoedResumeText('ws', 'blocked by policy')])
+
+    // Outside the window (before the step ran) the same landing drops the step.
+    const b = harness()
+    b.c.lever(undefined, true)
+    b.c.turnComplete(undefined, 'answer')
+    b.c.compacted('manual', undefined, { messages: [] })
+    await b.runScheduled()
+    expect(b.h.compacts).toBe(0)
+    expect(b.transcript()).toEqual([
+      'ws compaction: a manual compaction landed first, so the requested compaction is dropped; its resume prompt follows at the next turn end',
+    ])
+    expect(b.h.submits).toEqual([RESUME_TEXT])
+  })
+
+  test('a turn end while the command is awaited leaves the request to the command', async () => {
+    const { h, c, turnEnd, closeWindow } = harness()
+    const gate = deferred<void>()
+    h.compactGate = gate.promise
+    c.lever(undefined, true)
+    await turnEnd()
+    await turnEnd()
+    expect(h.compacts).toBe(1)
+    c.compacted('manual', undefined, { messages: [] })
+    gate.resolve()
+    await tick()
+    await closeWindow()
+    expect(h.compacts).toBe(1)
+    expect(h.submits).toEqual([RESUME_TEXT])
   })
 
   test('a vetoed lever compaction keeps the latch', async () => {
@@ -894,24 +1002,6 @@ describe('lever', () => {
     await measure(105_000)
     expect(h.submits).toEqual([advisoryText('ws', T, 104_000), vetoedResumeText('ws', 'no')])
     expect(h.breakdownReads).toBe(1)
-    expect(h.leverLandings).toBe(0)
-  })
-
-  test("only the lever's own landing is reported as the lever's; a throwing listener changes nothing", async () => {
-    const { h, c, turnEnd, closeWindow, debugLog } = harness()
-    c.compacted('manual', undefined, { messages: [] })
-    expect(h.leverLandings).toBe(0)
-    c.lever(undefined, true)
-    h.compactAnswers.push(new Error('a turn is running'))
-    await turnEnd()
-    expect(h.leverLandings).toBe(0)
-    expect(debugLog().some((l) => l.includes('landing notification failed'))).toBe(false)
-    h.leverLandedThrows = true
-    await turnEnd()
-    await closeWindow()
-    expect(h.leverLandings).toBe(1)
-    expect(h.submits).toEqual([RESUME_TEXT])
-    expect(debugLog().some((l) => l.includes('landing notification failed'))).toBe(true)
   })
 
   test('session end drops a pending request', async () => {
@@ -997,7 +1087,6 @@ describe('unset flag', () => {
       c.lever(undefined, value)
       await turnEnd()
       expect(h.compacts).toBe(1)
-      expect(h.leverLandings).toBe(1)
       expect(h.delayed).toEqual([])
       await closeWindow()
       expect(h.submits).toEqual([])
@@ -1006,16 +1095,6 @@ describe('unset flag', () => {
       await turnEnd()
       expect(h.compacts).toBe(1)
     }
-  })
-
-  test('a landing through the hook also submits nothing', async () => {
-    const { h, c, turnEnd, closeWindow, routeOwnCompaction } = harness()
-    routeOwnCompaction()
-    c.lever(undefined, 'go on')
-    await turnEnd()
-    await closeWindow()
-    expect(h.compacts).toBe(1)
-    expect(h.submits).toEqual([])
   })
 
   test('a compaction landing elsewhere first drops the compact step and submits nothing', async () => {
@@ -1043,26 +1122,26 @@ describe('unset flag', () => {
     await closeWindow()
     expect(h.submits).toEqual([])
     expect(h.delayed).toEqual([])
-    expect(h.leverLandings).toBe(0)
     expect(transcript()).toEqual([
       'ws compaction: the requested compaction did not run (blocked by policy); no resume was requested, so no turn follows',
     ])
     expect(debugLog().some((l) => l.includes('blocked by policy'))).toBe(false)
   })
 
-  test('a rejected compaction keeps the request and retries at the next turn end, then submits nothing', async () => {
-    const { h, c, turnEnd, closeWindow, transcript } = harness()
-    c.lever(undefined, undefined)
-    h.compactAnswers.push(new Error('a turn started'))
-    await turnEnd()
-    expect(h.compacts).toBe(1)
-    expect(h.submits).toEqual([])
-    expect(transcript()).toEqual(['ws compaction: the requested compaction was rejected (Error: a turn started); retrying at the next turn end'])
-    await turnEnd()
-    await closeWindow()
-    expect(h.compacts).toBe(2)
-    expect(h.leverLandings).toBe(1)
-    expect(h.submits).toEqual([])
+  test('a refused command or no observed outcome submits nothing, opens no window, and is told once', async () => {
+    for (const answer of [new Error('past a Stop'), 'unobserved'] as const) {
+      const { h, c, turnEnd, closeWindow, transcript } = harness()
+      const reason = answer instanceof Error ? 'the compact command was refused: Error: past a Stop' : UNOBSERVED_REASON
+      c.lever(undefined, undefined)
+      h.compactAnswers.push(answer)
+      await turnEnd()
+      await closeWindow()
+      expect(h.submits).toEqual([])
+      expect(h.delayed).toEqual([])
+      expect(transcript()).toEqual([`ws compaction: the requested compaction did not run (${reason}); no resume was requested, so no turn follows`])
+      await turnEnd()
+      expect(h.compacts).toBe(1)
+    }
   })
 
   test('a repeat call in both orders: the latest flag wins', async () => {

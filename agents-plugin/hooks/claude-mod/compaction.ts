@@ -70,6 +70,16 @@ import {
 /** How long the lever's resume prompt waits for another prompt to start the first turn after its compaction. */
 export const CONTINUATION_WINDOW_MS = 1500
 
+/**
+ * How long after a main-thread turn end the compact step waits before it
+ * checks for a running turn: a prompt already queued in the engine starts its
+ * turn first, so the check sees it rather than queueing `/compact` behind it.
+ */
+export const SETTLE_MS = 1000
+
+/** The skip reason of a lever compaction whose command ran with no landing or veto observed. */
+export const UNOBSERVED_REASON = 'no compaction was observed'
+
 export type CompactionEdges = {
   /**
    * Queue a prompt that starts its own turn once the session is idle: its
@@ -78,8 +88,14 @@ export type CompactionEdges = {
    * first, `stale` when `live` read false after the wait (see submitOwn).
    */
   submit: (prompt: OwnPrompt, live: () => boolean) => Promise<OwnSubmitResult>
-  /** Compact the conversation between turns; rejects while a turn runs. */
-  compact: () => Promise<SessionCompactResult>
+  /**
+   * Run the `/compact` slash command; resolves once it ran, and rejects when
+   * the engine refuses it (an unknown name, inside a hook the turn waits on,
+   * past a Stop or a host's limit). Its outcome is not in the answer: the
+   * compaction passes the mod's own session.compact hook, which reports it
+   * through `compacted` while the call is awaited.
+   */
+  compact: () => Promise<unknown>
   /** Run `fn` once, after the calling hook has returned. */
   after: (fn: () => void) => void
   /** Run `fn` once, `ms` from now. */
@@ -91,12 +107,6 @@ export type CompactionEdges = {
   turnRunning: () => boolean
   /** Read the live usage afresh, without a breakdown; a threshold message's figures come from it. */
   readUsage: () => Promise<SessionContextUsage>
-  /**
-   * Told when the lever's own compaction landed. The engine routes it past
-   * the mod's session.compact hook, so another feature that resets on a
-   * landing hears of this one only here.
-   */
-  leverLanded?: () => void
   /**
    * Read the configured advisory point's stored value, called once per
    * session start; absent, a rejection, or a value that does not parse leaves
@@ -143,8 +153,6 @@ type Request = {
    * until that step starts; undefined while none is queued.
    */
   scheduled: number | undefined
-  /** Whether a rejection of its compaction was already noted in the transcript. */
-  rejectionNoted: boolean
 }
 
 /** The breakdown's figures, keyed by the model window they were read under. */
@@ -177,12 +185,16 @@ export function createCompaction(): Compaction {
   /** The lever's resume prompt held for its window; see CONTINUATION_WINDOW_MS. */
   let held: { prompt: OwnPrompt } | undefined
   /**
-   * True while the lever's own compaction runs. The engine routes a
-   * `$.session.compact` past the calling plugin's own session.compact hook,
-   * so runLever settles the landing itself; should the hook see it anyway,
-   * this keeps it from being read as another's landing or counted twice.
+   * True while the lever's awaited `/compact` command is pending. A
+   * main-conversation compaction the feature's hook sees meanwhile is the
+   * lever's own (it lands with a `manual` trigger, like a typed `/compact`,
+   * so the trigger cannot tell them apart): its result is kept in
+   * leverOutcome for runLever, and it does not drop the request as another's
+   * landing would.
    */
   let leverCompacting = false
+  /** The lever's own compaction as the hook saw it settle; undefined until one is seen. */
+  let leverOutcome: SessionCompactResult | undefined
   /** The advisory point the thresholds use; the default until a session start's read settles. */
   let advisory: AdvisorySpec = DEFAULT_ADVISORY
   /** Bumped at every session start: a read from an earlier start is dropped. */
@@ -246,7 +258,7 @@ export function createCompaction(): Compaction {
    * Deliver the recorded crossing with a fresh usage read: its level and its
    * figures are that read's, so a crossing that grew past the next milestone
    * meanwhile delivers the higher one. No threshold message while a lever
-   * request is pending (its turn could start first and make compact() reject,
+   * request is pending (its turn could start first and hold the compact step,
    * or land beside the resume prompt with stale figures), nor while its
    * resume prompt is held (a threshold turn would start first and cancel it),
    * nor once a main-thread turn started during the read: the crossing then
@@ -323,47 +335,51 @@ export function createCompaction(): Compaction {
   }
 
   /**
-   * The scheduled compact step. A rejection (most often a turn started
-   * first) keeps the request for the next main-thread turn end and is noted
-   * in the transcript once per request; a veto with the flag still holds a
-   * resume prompt, saying that nothing was compacted.
+   * Settle `r` after its compaction did not run: one notice, the compact
+   * step dropped, and with the flag a resume prompt held with the note.
    */
-  const runLever = async (r: Request) => {
-    if (!edges || request !== r) return
-    if (!r.compact) return finish(r)
-    let res: SessionCompactResult
-    leverCompacting = true
-    try {
-      res = await edges.compact()
-    } catch (err) {
-      const text = `the requested compaction was rejected (${String(err)}); retrying at the next turn end`
-      if (r.rejectionNoted) debug(text)
-      else notice(text)
-      r.rejectionNoted = true
-      return
-    } finally {
-      leverCompacting = false
-    }
-    if (res.skip === undefined) {
-      landed()
-      try {
-        edges?.leverLanded?.()
-      } catch (err) {
-        debug(`landing notification failed: ${String(err)}`)
-      }
-    }
-    if (request !== r) return
+  const vetoed = (r: Request, reason: string) => {
     if (!r.resume) {
       // No turn follows, so a veto is told to the person here: the model is
       // not started to hear it and no window opens.
       request = undefined
-      if (res.skip !== undefined) notice(`the requested compaction did not run (${res.skip}); no resume was requested, so no turn follows`)
-    } else if (res.skip !== undefined) {
-      notice(`the requested compaction did not run (${res.skip}); a resume prompt follows with a note`)
-      hold(r, { text: vetoedResumeText(plugin(), res.skip), line: vetoedResumeLine(plugin(), res.skip) })
-    } else {
-      hold(r, { text: resumeText(plugin()), line: resumeLine(plugin()) })
+      notice(`the requested compaction did not run (${reason}); no resume was requested, so no turn follows`)
+      return
     }
+    notice(`the requested compaction did not run (${reason}); a resume prompt follows with a note`)
+    hold(r, { text: vetoedResumeText(plugin(), reason), line: vetoedResumeLine(plugin(), reason) })
+  }
+
+  /**
+   * The settled compact step, run only while no main-thread turn runs (the
+   * scheduled step checks that first). It awaits the `/compact` command, and
+   * the hook's report of a main-conversation compaction meanwhile is the
+   * outcome: landed, or vetoed with its reason. A refused command is
+   * permanent and settles as a veto; so does a command that ran with no
+   * outcome observed, rather than being read as a landing or retried.
+   */
+  const runLever = async (r: Request) => {
+    if (!edges || request !== r) return
+    if (!r.compact) return finish(r)
+    let refused: string | undefined
+    leverCompacting = true
+    leverOutcome = undefined
+    try {
+      await edges.compact()
+    } catch (err) {
+      refused = `the compact command was refused: ${String(err)}`
+    } finally {
+      leverCompacting = false
+    }
+    const outcome = leverOutcome
+    leverOutcome = undefined
+    if (request !== r) return
+    if (outcome !== undefined && outcome.skip === undefined) {
+      if (r.resume) hold(r, { text: resumeText(plugin()), line: resumeLine(plugin()) })
+      else request = undefined
+      return
+    }
+    vetoed(r, outcome?.skip ?? refused ?? UNOBSERVED_REASON)
   }
 
   return {
@@ -403,7 +419,7 @@ export function createCompaction(): Compaction {
       // an unset one clears an earlier true) and keeps the request's
       // compact-step state.
       if (request) request.resume = checked.resume
-      else request = { resume: checked.resume, compact: true, scheduled: undefined, rejectionNoted: false }
+      else request = { resume: checked.resume, compact: true, scheduled: undefined }
       debug(`compaction requested; resume: ${checked.resume}`)
       return { result: leverResult(checked.resume) }
     },
@@ -438,13 +454,16 @@ export function createCompaction(): Compaction {
       debug('a turn started within the resume window; the resume prompt is not submitted')
     },
 
-    // The compact step runs after the turn.complete hook has returned:
-    // compact() rejects while a turn runs, and the declarations do not say the
-    // turn has stopped running inside its own turn.complete. An interrupted
-    // turn leaves the request pending: the human is taking over. A step still
-    // queued at a later turn end never started (the engine runs no `after`
-    // callback whose dispatch a hook refused), so it is queued again; the
-    // token keeps the stale one inert should it run after all.
+    // The compact step runs SETTLE_MS after the turn end, and only when no
+    // main-thread turn runs then, checked before every other branch: a
+    // `/compact` queued behind a turn cannot be withdrawn, and that turn's
+    // own auto compaction would be credited to the lever and followed by a
+    // second one. A step that finds a turn running does nothing; that turn's
+    // end schedules it again. An interrupted turn leaves the request pending:
+    // the human is taking over. A step still queued at a later turn end never
+    // ran (the engine runs no timer callback whose dispatch a hook refused),
+    // so it is queued again; the token keeps the stale one inert should it run
+    // after all.
     turnComplete: (agentId, reason) => {
       // A crossing recorded during the turn is delivered once the hook has
       // returned; an observation arriving after the turn end may deliver it
@@ -464,9 +483,13 @@ export function createCompaction(): Compaction {
       const token = (dispatches += 1)
       r.scheduled = token
       try {
-        edges.after(() => {
+        edges.delay(SETTLE_MS, () => {
           if (r.scheduled !== token) return
           r.scheduled = undefined
+          if (edges?.turnRunning()) {
+            debug('a main-thread turn runs at the settled compaction step; it waits for that turn to end')
+            return
+          }
           runLever(r).catch((err) => debug(`compaction step failed: ${String(err)}`))
         })
       } catch (err) {
@@ -477,12 +500,17 @@ export function createCompaction(): Compaction {
 
     // `precompute` installs nothing, a veto leaves the conversation as it
     // was, and a subagent's or fork's own compaction is not the main
-    // conversation's. A landed one resets the latch and the breakdown, and
-    // drops a pending compact step. Compactions run one at a time, so one
-    // landing while the lever's own runs is that one, which runLever settles.
+    // conversation's. A landed one resets the latch and the breakdown, and,
+    // outside the lever's awaited command, drops a pending compact step.
+    // Compactions run one at a time, so one seen while the command is
+    // pending is the lever's own: its outcome (a landing over a veto) is kept
+    // for runLever.
     compacted: (trigger, agentId, res) => {
-      if (agentId !== undefined || trigger === 'precompute' || res.skip !== undefined || leverCompacting) return
+      if (agentId !== undefined || trigger === 'precompute') return
+      if (leverCompacting && (leverOutcome === undefined || leverOutcome.skip !== undefined)) leverOutcome = res
+      if (res.skip !== undefined) return
       landed()
+      if (leverCompacting) return
       if (request?.compact) {
         request.compact = false
         notice(

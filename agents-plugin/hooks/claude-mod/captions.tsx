@@ -33,7 +33,8 @@ export type RunCaption = {
 
 /**
  * Tool-call captions, the display feature of the Claude mod (ws only, off
- * until `claude.display_summary_enabled` is set): a finished, collapsed tool
+ * until `claude.display_summary_enabled` is set, and always off in a headless
+ * session): a finished, collapsed tool
  * row draws a short caption a second model call wrote, in place of the raw
  * row. Display only: the model always reads the raw result, and the expanded
  * view (ctrl+o) draws the raw row.
@@ -566,6 +567,14 @@ export type CaptionEdges = {
   log: (text: string) => void
   /** The engine-reported plugin name, the log lines' prefix. */
   plugin: string
+  /**
+   * Whether the session is interactive (session.start's `isInteractive`).
+   * A headless (-p / SDK) one draws no tool rows, so captions stay off there
+   * whatever the switch reads, and no setting is read; the stored value is
+   * never rewritten. Read once per start: a surface attached later does not
+   * turn them on.
+   */
+  interactive: boolean
 }
 
 export type Captions = {
@@ -587,8 +596,6 @@ export type Captions = {
   request: (unit: Unit) => void
   /** A session.compact as it settled. */
   compacted: (trigger: SessionCompactTrigger, agentId: string | undefined, res: SessionCompactResult) => void
-  /** The lever's own compaction landed (it does not pass the session.compact hook). */
-  leverLanded: () => void
   /** session.end: the next conversation's mirror starts empty; the captions stay. */
   end: () => void
 }
@@ -818,6 +825,10 @@ export function createCaptions(): Captions {
       requested.clear()
       resetMirror()
       const read = ++reads
+      if (!bound.interactive) {
+        log('off: the session is not interactive, so no tool row is drawn')
+        return
+      }
       void readSettings(bound, read).catch((err) => log(`settings not read: ${String(err)}`))
     },
     isOn: () => current.enabled,
@@ -846,7 +857,6 @@ export function createCaptions(): Captions {
     compacted(trigger, agentId, res) {
       if (agentId === undefined && trigger !== 'precompute' && res.messages !== undefined) resetMirror()
     },
-    leverLanded: resetMirror,
     end: resetMirror,
   }
 }
