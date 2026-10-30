@@ -28,7 +28,8 @@ import type { PromptSubmitResult } from 'claude-code'
  * again. A success writes one transcript line and submits nothing; a failure
  * writes one transcript notice per failure streak, and after
  * WATCHDOG_MAX_FAILURES attempts in a row it stops attempting until the server
- * resolves again (`resolved`) or a tick finds its tools listed again.
+ * resolves again (`resolved`), a tick finds its tools listed again, or a new
+ * session start re-arms it.
  */
 
 export const TOOL_NAME = 'request_mcp_reconnect'
@@ -349,11 +350,13 @@ export function createReconnect(): Reconnect {
   }
 
   return {
-    // A new start re-reads the watchdog knobs and re-arms it; an end leaves it
-    // armed, since the server belongs to the process, not the conversation.
+    // A new start re-reads the watchdog knobs and re-arms it with a fresh
+    // failure streak; an end leaves it armed, since the server belongs to the
+    // process, not the conversation.
     start: (bound) => {
       unwatch?.()
       unwatch = undefined
+      failures = 0
       edges = bound
       reset()
     },

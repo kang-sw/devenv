@@ -715,6 +715,19 @@ describe('watchdog', () => {
     expect(transcript()).toEqual([watchdogFailureText('ws', REASON_TOOLS_ABSENT, MS), watchdogFailureText('ws', REASON_TOOLS_ABSENT, MS)])
   })
 
+  test('a session start re-arms a stopped watchdog with a fresh failure streak', async () => {
+    const { h, r, edges, fire } = harness()
+    r.watch(MS)
+    neverBack(h)
+    for (let i = 0; i < WATCHDOG_MAX_FAILURES; i++) await fire()
+    await fire()
+    expect(h.reconnects.length).toBe(WATCHDOG_MAX_FAILURES)
+    r.start(edges)
+    r.watch(MS)
+    await fire()
+    expect(h.reconnects.length).toBe(WATCHDOG_MAX_FAILURES + 1)
+  })
+
   test('a stopped watchdog that finds the tools listed again restarts', async () => {
     const { h, r, fire } = harness()
     r.watch(MS)
