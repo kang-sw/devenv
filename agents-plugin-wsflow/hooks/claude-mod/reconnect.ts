@@ -17,6 +17,19 @@ import type { PromptSubmitResult } from 'claude-code'
  * arrive after it as a stale prompt. The engine calls arrive as edges bound in
  * register.ts, so the state machine here is driven and tested without an
  * engine.
+ *
+ * The watchdog serves a session with no turn to call the lever in (one left
+ * idle overnight): armed by register.ts when its knob reads on, it looks at the
+ * tool list once per interval and, when none of the server's tools is listed,
+ * runs the lever's own attempt. It runs one attempt at a time with the lever:
+ * a tick does nothing while a main-thread turn runs or a lever step is
+ * scheduled or running, and a lever step that comes due while a watchdog
+ * attempt is in flight reports that attempt's outcome instead of reconnecting
+ * again. A success writes one transcript line and submits nothing; a failure
+ * writes one transcript notice per failure streak, and after
+ * WATCHDOG_MAX_FAILURES attempts in a row it stops attempting until the server
+ * resolves again (`resolved`), a tick finds its tools listed again, or a new
+ * session start re-arms it.
  */
 
 export const TOOL_NAME = 'request_mcp_reconnect'
@@ -72,6 +85,23 @@ export function reasonCommandAnswered(text: string): string {
   return `the reconnect command answered: ${text}`
 }
 
+/** How many failed watchdog attempts in a row stop it until the server resolves again. */
+export const WATCHDOG_MAX_FAILURES = 3
+
+/** The transcript line of a successful watchdog reconnect; no prompt follows it. */
+export function watchdogSuccessText(plugin: string): string {
+  return `${plugin} mcp watchdog: the ${plugin} MCP server had dropped and was reconnected; its tools are available again.`
+}
+
+/** The one transcript notice of a watchdog failure streak. */
+export function watchdogFailureText(plugin: string, reason: string, intervalMs: number): string {
+  return (
+    `${plugin} mcp watchdog: the ${plugin} MCP server dropped and did not come back (${reason}). ` +
+    `It is tried again every ${intervalMs / 60_000} min, ${WATCHDOG_MAX_FAILURES} attempts in a row at most; ` +
+    'after that, re-enable it from /mcp, run /reload-plugins, or restart the session.'
+  )
+}
+
 /**
  * Main-loop-only guard and input read for the tool: a refusal, or whether the
  * call set the `continue` flag. Only a literal `true` sets it; absent or any
@@ -100,7 +130,11 @@ export function commandRefusal(res: { text?: string } | undefined): string | und
 export type ReconnectEdges = {
   /** The package name the prose spells. */
   plugin: string
-  /** The resolved MCP server name, or undefined while none was resolved. */
+  /**
+   * The MCP server name to reconnect: the resolved one, else the name derived
+   * from the plugin's own files for a server that never resolved; undefined
+   * with neither.
+   */
   server: () => string | undefined
   /** Run `/mcp reconnect <server>`; queued by the engine until the session is idle. */
   reconnect: (server: string) => Promise<{ text?: string }>
@@ -114,6 +148,10 @@ export type ReconnectEdges = {
   after: (fn: () => void) => void
   sleep: (ms: number) => Promise<void>
   log: (text: string, to: 'transcript' | 'debug') => void
+  /** Whether a main-thread turn runs now: a watchdog tick then does nothing. */
+  turnRunning: () => boolean
+  /** Call `fn` every `ms` until the answered function stops it. */
+  every: (ms: number, fn: () => void) => () => void
 }
 
 /** The tool's answer: a refusal or its result text. */
@@ -130,6 +168,10 @@ export type Reconnect = {
   turnStarted: (agentId: string | undefined) => void
   /** A turn.complete: schedule a pending request's reconnect step. */
   turnComplete: (agentId: string | undefined, reason: string) => void
+  /** Arm the watchdog with a tick every `intervalMs`, replacing one armed before. */
+  watch: (intervalMs: number) => void
+  /** A successful server resolution: ends a watchdog failure streak. */
+  resolved: () => void
 }
 
 /** A tool call waiting for its turn to end. */
@@ -150,10 +192,20 @@ export function createReconnect(): Reconnect {
   let generation = 0
   /** Bumped at every main-thread turn start: a step that sees it move started no resume of its own. */
   let turns = 0
+  /** The attempt running now, the lever's or the watchdog's; one at a time. */
+  let inFlight: { by: 'lever' | 'watchdog'; outcome: Promise<Outcome> } | undefined
+  /** Stops the armed watchdog timer. */
+  let unwatch: (() => void) | undefined
+  let intervalMs = 0
+  /** Failed watchdog attempts in a row; at WATCHDOG_MAX_FAILURES the watchdog stops attempting. */
+  let failures = 0
+  /** Whether a watchdog tick is under way, so ticks never overlap. */
+  let ticking = false
 
   const label = () => `${edges?.plugin ?? 'plugin'} mcp reconnect`
   const debug = (text: string) => edges?.log(`${label()}: ${text}`, 'debug')
   const notice = (text: string) => edges?.log(`${label()}: ${text}`, 'transcript')
+  const watchDebug = (text: string) => edges?.log(`${edges?.plugin ?? 'plugin'} mcp watchdog: ${text}`, 'debug')
 
   const reset = () => {
     generation += 1
@@ -191,6 +243,71 @@ export function createReconnect(): Reconnect {
     return { ok: true }
   }
 
+  /** Run one attempt as the one in flight. */
+  const tracked = async (by: 'lever' | 'watchdog', e: ReconnectEdges): Promise<Outcome> => {
+    const entry = { by, outcome: attempt(e) }
+    inFlight = entry
+    try {
+      return await entry.outcome
+    } finally {
+      if (inFlight === entry) inFlight = undefined
+    }
+  }
+
+  /** Why a watchdog tick may not attempt now, or undefined when it may. */
+  const busy = (e: ReconnectEdges): string | undefined => {
+    if (inFlight) return `a ${inFlight.by} reconnect is in flight`
+    if (request?.scheduled !== undefined) return 'a lever reconnect step is scheduled'
+    if (e.turnRunning()) return 'a main-thread turn runs'
+    return undefined
+  }
+
+  /**
+   * One watchdog tick. A lever request left pending by an aborted turn does
+   * not hold it off: that request still runs at its next turn end. Never
+   * throws.
+   */
+  const tick = async () => {
+    const e = edges
+    if (!e || ticking) return
+    const held = busy(e)
+    if (held) return watchDebug(`tick skipped: ${held}`)
+    const server = e.server()
+    if (!server) return watchDebug(`tick skipped: ${REASON_NO_SERVER}`)
+    ticking = true
+    try {
+      let listed: boolean
+      try {
+        listed = await e.toolsListed(server)
+      } catch (err) {
+        return watchDebug(`tick skipped: tool list read failed: ${String(err)}`)
+      }
+      if (listed) {
+        // The server is evidently up, however it came back (a person's own
+        // /mcp reconnect among the ways): the failure streak is over.
+        if (failures > 0) watchDebug('the tools are listed again; the failure streak ended')
+        failures = 0
+        return
+      }
+      if (failures >= WATCHDOG_MAX_FAILURES) return watchDebug('tick skipped: stopped after failed attempts until the server resolves again')
+      // Checked again: a lever step or a turn may have started during the read.
+      const late = busy(e)
+      if (late) return watchDebug(`tick skipped: ${late}`)
+      watchDebug(`the ${e.plugin} MCP server's tools are not listed; reconnecting ${server}`)
+      const outcome = await tracked('watchdog', e)
+      if (outcome.ok) {
+        failures = 0
+        e.log(watchdogSuccessText(e.plugin), 'transcript')
+        return
+      }
+      failures += 1
+      watchDebug(`not reconnected (${outcome.reason}); failure ${failures} of ${WATCHDOG_MAX_FAILURES}`)
+      if (failures === 1) e.log(watchdogFailureText(e.plugin, outcome.reason, intervalMs), 'transcript')
+    } finally {
+      ticking = false
+    }
+  }
+
   /**
    * The scheduled step. It takes the request as it starts, so a call made
    * while it runs is a new request for a later turn end. A lost submit is
@@ -202,7 +319,11 @@ export function createReconnect(): Reconnect {
     request = undefined
     const gen = generation
     const startedAt = turns
-    const outcome = await attempt(e)
+    // A watchdog attempt in flight is this request's reconnect: two at once
+    // could race, so the step reports that attempt's outcome.
+    const watchdog = inFlight?.by === 'watchdog' ? inFlight : undefined
+    if (watchdog) debug('a watchdog reconnect is in flight; the step reports its outcome')
+    const outcome = await (watchdog ? watchdog.outcome : tracked('lever', e))
     if (gen !== generation) {
       debug('the session ended during the reconnect step; its report is dropped')
       return
@@ -229,7 +350,13 @@ export function createReconnect(): Reconnect {
   }
 
   return {
+    // A new start re-reads the watchdog knobs and re-arms it with a fresh
+    // failure streak; an end leaves it armed, since the server belongs to the
+    // process, not the conversation.
     start: (bound) => {
+      unwatch?.()
+      unwatch = undefined
+      failures = 0
       edges = bound
       reset()
     },
@@ -276,6 +403,22 @@ export function createReconnect(): Reconnect {
         if (r.scheduled === token) r.scheduled = undefined
         debug(`the reconnect step was not scheduled (${String(err)}); retrying at the next turn end`)
       }
+    },
+
+    watch: (ms) => {
+      const e = edges
+      if (!e) return
+      unwatch?.()
+      intervalMs = ms
+      unwatch = e.every(ms, () => {
+        tick().catch((err) => watchDebug(`tick failed: ${String(err)}`))
+      })
+      watchDebug(`armed; a tick every ${ms / 60_000} min`)
+    },
+
+    resolved: () => {
+      if (failures > 0) watchDebug('the server resolved again; the failure streak ended')
+      failures = 0
     },
   }
 }

@@ -397,6 +397,11 @@ def classify_line(
             if before in NAME_BOUNDARY:
                 idx = after_pos
                 continue
+            # `.claude-plugin/` is the host's plugin-manifest directory every
+            # Claude Code plugin ships, not this repository's retired tree.
+            if name == "claude-plugin/" and before == ".":
+                idx = after_pos
+                continue
             if not name.endswith("/") and after in NAME_BOUNDARY:
                 idx = after_pos
                 continue

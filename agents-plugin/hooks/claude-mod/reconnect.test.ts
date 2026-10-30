@@ -16,6 +16,9 @@ import {
   successText,
   TOOLS_POLL_MS,
   TOOLS_WAIT_MS,
+  WATCHDOG_MAX_FAILURES,
+  watchdogFailureText,
+  watchdogSuccessText,
   type ReconnectEdges,
 } from './reconnect'
 
@@ -49,6 +52,10 @@ function harness(opts: { plugin?: string; server?: string | null } = {}) {
     scheduled: [] as (() => void)[],
     afterThrows: 0,
     logs: [] as { text: string; to: string }[],
+    /** Whether a main-thread turn runs, as register.ts reports it. */
+    turnRunning: false,
+    /** Armed watchdog timers: the period, the tick, and whether it was stopped. */
+    timers: [] as { ms: number; fn: () => void; stopped: boolean }[],
   }
   const r = createReconnect()
   const edges: ReconnectEdges = {
@@ -92,6 +99,12 @@ function harness(opts: { plugin?: string; server?: string | null } = {}) {
       h.onSleep?.()
     },
     log: (text, to) => void h.logs.push({ text, to }),
+    turnRunning: () => h.turnRunning,
+    every: (ms, fn) => {
+      const timer = { ms, fn, stopped: false }
+      h.timers.push(timer)
+      return () => void (timer.stopped = true)
+    },
   }
   r.start(edges)
   /** Run what turnComplete scheduled, as the engine's clock would once the hook returned. */
@@ -107,7 +120,14 @@ function harness(opts: { plugin?: string; server?: string | null } = {}) {
   const turnStart = (agentId?: string) => r.turnStarted(agentId)
   const transcript = () => h.logs.filter((l) => l.to === 'transcript').map((l) => l.text)
   const debugLog = () => h.logs.filter((l) => l.to === 'debug').map((l) => l.text)
-  return { h, r, edges, turnEnd, turnStart, runScheduled, transcript, debugLog }
+  /** One period of the live watchdog timer, as the engine's clock would fire it. */
+  const fire = async () => {
+    const live = h.timers.filter((t) => !t.stopped)
+    expect(live.length).toBe(1)
+    live[0]!.fn()
+    await tick(1000)
+  }
+  return { h, r, edges, turnEnd, turnStart, runScheduled, transcript, debugLog, fire }
 }
 
 const SUBAGENT_DENY = 'request_mcp_reconnect serves the main session only; called from subagent sub-1.'
@@ -545,5 +565,213 @@ describe('session end', () => {
     await runScheduled()
     expect(h.reconnects).toEqual([])
     expect(h.submits).toEqual([])
+  })
+})
+
+describe('watchdog', () => {
+  const MS = 10 * 60_000
+  /** A watchdog armed over a server whose tools are gone until the reconnect brings them back. */
+  const dropped = () => {
+    const w = harness()
+    w.r.watch(MS)
+    // One read finds the tools gone; the attempt's first poll finds them back.
+    w.h.listed.push(false)
+    return w
+  }
+
+  test('watch arms one timer with the interval; a second watch replaces it; a session start stops it', () => {
+    const { h, r, edges } = harness()
+    expect(h.timers).toEqual([])
+    r.watch(MS)
+    expect(h.timers.map((t) => [t.ms, t.stopped])).toEqual([[MS, false]])
+    r.watch(3 * 60_000)
+    expect(h.timers.map((t) => [t.ms, t.stopped])).toEqual([
+      [MS, true],
+      [3 * 60_000, false],
+    ])
+    r.end('clear')
+    expect(h.timers[1]!.stopped).toBe(false)
+    r.start(edges)
+    expect(h.timers[1]!.stopped).toBe(true)
+  })
+
+  test('a tick with the tools listed does nothing', async () => {
+    const { h, r, fire, transcript } = harness()
+    r.watch(MS)
+    await fire()
+    expect(h.listReads).toBe(1)
+    expect(h.reconnects).toEqual([])
+    expect(transcript()).toEqual([])
+  })
+
+  test('a tick with the tools gone runs one reconnect, writes one transcript line, and submits no prompt', async () => {
+    const { h, fire, transcript } = dropped()
+    await fire()
+    expect(h.reconnects).toEqual([SERVER])
+    expect(h.resolves).toBe(1)
+    expect(h.submits).toEqual([])
+    expect(transcript()).toEqual([watchdogSuccessText('ws')])
+  })
+
+  test('a tick while a main-thread turn runs does nothing', async () => {
+    const { h, fire } = dropped()
+    h.turnRunning = true
+    await fire()
+    expect(h.listReads).toBe(0)
+    expect(h.reconnects).toEqual([])
+    h.turnRunning = false
+    await fire()
+    expect(h.reconnects).toEqual([SERVER])
+  })
+
+  test('a tick while a lever step is scheduled or running does nothing', async () => {
+    const { h, r, fire, runScheduled } = dropped()
+    r.lever(undefined, undefined)
+    r.turnComplete(undefined, 'answer')
+    await fire()
+    expect(h.listReads).toBe(0)
+    h.holdReconnect = true
+    await runScheduled()
+    expect(h.reconnects).toEqual([SERVER])
+    await fire()
+    expect(h.reconnects).toEqual([SERVER])
+    h.held.shift()!({})
+    await tick(1000)
+  })
+
+  test('a lever request left pending by an aborted turn does not hold a tick off, and still runs at its next turn end', async () => {
+    const { h, r, fire, turnEnd } = dropped()
+    r.lever(undefined, undefined)
+    await turnEnd('aborted')
+    await fire()
+    expect(h.reconnects).toEqual([SERVER])
+    await turnEnd()
+    expect(h.reconnects).toEqual([SERVER, SERVER])
+  })
+
+  test('a turn starting during the tick tool-list read holds the attempt off', async () => {
+    const { h, r, fire } = harness()
+    r.watch(MS)
+    // The read flips the turn on, as a turn starting while it is pending would.
+    const answers: (boolean | Error)[] = [false]
+    h.listed = new Proxy(answers, {
+      get: (target, prop, receiver) =>
+        prop === 'shift'
+          ? () => {
+              h.turnRunning = true
+              return target.shift()
+            }
+          : Reflect.get(target, prop, receiver),
+    })
+    await fire()
+    expect(h.listReads).toBe(1)
+    expect(h.reconnects).toEqual([])
+  })
+
+  test('a lever step due while a watchdog attempt is in flight reports that attempt instead of reconnecting again', async () => {
+    const { h, r, fire, turnEnd, transcript } = dropped()
+    h.holdReconnect = true
+    await fire()
+    expect(h.reconnects).toEqual([SERVER])
+    r.lever(undefined, true)
+    await turnEnd()
+    expect(h.reconnects).toEqual([SERVER])
+    h.held.shift()!({})
+    await tick(1000)
+    expect(h.reconnects).toEqual([SERVER])
+    expect(h.submits).toEqual([successText('ws')])
+    expect(transcript()).toEqual([watchdogSuccessText('ws')])
+  })
+
+  test('a lever step reports a failed watchdog attempt it waited on', async () => {
+    const { h, r, fire, turnEnd } = harness()
+    r.watch(MS)
+    neverBack(h)
+    h.holdReconnect = true
+    await fire()
+    r.lever(undefined, undefined)
+    await turnEnd()
+    h.held.shift()!({})
+    await tick(1000)
+    expect(h.reconnects).toEqual([SERVER])
+    expect(h.submits).toEqual([failureText('ws', REASON_TOOLS_ABSENT, false)])
+  })
+
+  test(`${WATCHDOG_MAX_FAILURES} failed attempts in a row stop it, with one notice per streak; a later resolution restarts it`, async () => {
+    const { h, r, fire, transcript } = harness()
+    r.watch(MS)
+    neverBack(h)
+    for (let i = 0; i < WATCHDOG_MAX_FAILURES; i++) await fire()
+    expect(h.reconnects.length).toBe(WATCHDOG_MAX_FAILURES)
+    expect(transcript()).toEqual([watchdogFailureText('ws', REASON_TOOLS_ABSENT, MS)])
+    expect(h.submits).toEqual([])
+    await fire()
+    await fire()
+    expect(h.reconnects.length).toBe(WATCHDOG_MAX_FAILURES)
+    // A lever reconnect or a session start resolves the server again.
+    r.resolved()
+    await fire()
+    expect(h.reconnects.length).toBe(WATCHDOG_MAX_FAILURES + 1)
+    expect(transcript()).toEqual([watchdogFailureText('ws', REASON_TOOLS_ABSENT, MS), watchdogFailureText('ws', REASON_TOOLS_ABSENT, MS)])
+  })
+
+  test('a session start re-arms a stopped watchdog with a fresh failure streak', async () => {
+    const { h, r, edges, fire } = harness()
+    r.watch(MS)
+    neverBack(h)
+    for (let i = 0; i < WATCHDOG_MAX_FAILURES; i++) await fire()
+    await fire()
+    expect(h.reconnects.length).toBe(WATCHDOG_MAX_FAILURES)
+    r.start(edges)
+    r.watch(MS)
+    await fire()
+    expect(h.reconnects.length).toBe(WATCHDOG_MAX_FAILURES + 1)
+  })
+
+  test('a stopped watchdog that finds the tools listed again restarts', async () => {
+    const { h, r, fire } = harness()
+    r.watch(MS)
+    neverBack(h)
+    for (let i = 0; i < WATCHDOG_MAX_FAILURES; i++) await fire()
+    h.listed.length = 0
+    await fire()
+    h.listed.push(false)
+    await fire()
+    expect(h.reconnects.length).toBe(WATCHDOG_MAX_FAILURES + 1)
+  })
+
+  test('a success ends a failure streak: the next failure notices again', async () => {
+    const { h, r, fire, transcript } = harness()
+    r.watch(MS)
+    h.listed.push(false, ...Array.from({ length: 30 }, () => false))
+    await fire()
+    expect(transcript()).toEqual([watchdogFailureText('ws', REASON_TOOLS_ABSENT, MS)])
+    h.listed.length = 0
+    h.listed.push(false)
+    await fire()
+    h.listed.push(false, ...Array.from({ length: 30 }, () => false))
+    await fire()
+    expect(transcript()).toEqual([
+      watchdogFailureText('ws', REASON_TOOLS_ABSENT, MS),
+      watchdogSuccessText('ws'),
+      watchdogFailureText('ws', REASON_TOOLS_ABSENT, MS),
+    ])
+  })
+
+  test('a tick with no server name does nothing', async () => {
+    const { h, r, fire, transcript } = harness({ server: null })
+    r.watch(MS)
+    await fire()
+    expect(h.listReads).toBe(0)
+    expect(h.reconnects).toEqual([])
+    expect(transcript()).toEqual([])
+  })
+
+  test('a failing tool-list read skips the tick without attempting', async () => {
+    const { h, r, fire } = harness()
+    r.watch(MS)
+    h.listed.push(new Error('list failed'))
+    await fire()
+    expect(h.reconnects).toEqual([])
   })
 })

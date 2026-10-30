@@ -63,6 +63,19 @@
       "minimum": 1,
       "default": 200000,
       "description": "Claude Code only (unused on other hosts): the caption model's context window in tokens. The conversation sent with each caption request drops its oldest part once it passes 70% of this window, down to under 35%. Set it to the window of the model claude.display_summary_model names. Only used when claude.display_summary_enabled is true. Read at session start, so a change applies from the next session. Only the project, global, and built-in values apply; a session- or repo-scope tune is not read."
+    },
+    {
+      "key": "claude.mcp_watchdog_enabled",
+      "type": "boolean",
+      "default": true,
+      "description": "Claude Code only (unused on other hosts): when true, the MCP watchdog looks every claude.mcp_watchdog_interval_minutes minutes at whether this plugin's MCP server still has tools listed, and when none is listed and no turn runs, reconnects the server through /mcp reconnect with no model call, so a session left idle recovers a server that went away. A success writes one transcript line and submits no prompt. A failure writes one transcript notice per failure streak; after 3 failed attempts in a row the watchdog stops trying until the server is back (its tools listed again, a reconnect through the reconnect request tool, or a new session start). When false, no check runs; the reconnect request tool works either way. Read at session start, so a change applies from the next session. Only the project, global, and built-in values apply; a session- or repo-scope tune is not read. A failed or refused read, or a value that is not a boolean, takes this package's built-in value."
+    },
+    {
+      "key": "claude.mcp_watchdog_interval_minutes",
+      "type": "integer",
+      "minimum": 1,
+      "default": 10,
+      "description": "Claude Code only (unused on other hosts): how many minutes apart the MCP watchdog (claude.mcp_watchdog_enabled) looks at whether this plugin's MCP server still has tools listed; the first look comes one interval after session start. Only used when claude.mcp_watchdog_enabled is true. Read at session start, so a change applies from the next session. Only the project, global, and built-in values apply; a session- or repo-scope tune is not read. A failed or refused read, or a value that is not a positive integer, takes this package's built-in value."
     }
   ]
 }
