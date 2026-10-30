@@ -595,55 +595,16 @@
     "261030-bug-tickets-move-stages-on-occupied-root": {
       "registered_at": "2026-10-30T06:10:05Z"
     },
-    "261030-feat-claude-mod-mcp-watchdog": {
-      "registered_at": "2026-10-30T00:55:31Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-30T01:08:54Z",
-        "impl": {
-          "branch": "impl/develop/wrath-squad-jet"
-        }
-      }
-    },
-    "261030-feat-claude-mod-plugin-row-captions": {
-      "registered_at": "2026-10-30T02:12:26Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-30T02:21:32Z",
-        "impl": {
-          "branch": "impl/develop/dole-ebook-feast"
-        }
-      }
-    },
     "261030-feat-lead-coauthor-paged-document": {
       "registered_at": "2026-10-30T05:28:42Z",
       "lease": {
         "email": "ki6080@gmail.com",
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-10-30T06:11:43Z",
         "impl": {
           "branch": "impl/develop/eats-ruse-mural"
-        }
-      }
-    },
-    "261030-feat-workflow-manual-worktree-work-mode": {
-      "registered_at": "2026-10-30T04:48:11Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-30T05:35:48Z",
-        "impl": {
-          "branch": "impl/develop/cacti-frill-lance"
         }
       }
     }
