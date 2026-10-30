@@ -17,7 +17,8 @@ Authorship
 - You write the document yourself: the draft → review → correct loop with the
   user is the point, and handing pages to a worker breaks it. You may spawn
   {{.ExploreAgent}} to gather source material.
-- The user decides at each confirmation point in `On: invoke`; wait for the
+- The user decides at each confirmation point in `On: invoke` and
+  `On: template`; wait for the
   answer before passing one.
 
 Plan file
@@ -76,11 +77,11 @@ A request to make a reusable template, rather than a document, takes
    corrections, record each in `plan.md`, and repeat.
 7. When the document is complete, ask whether to bake a PDF, and where and
    under what file name.
-8. Ask whether to save the document's look as a template (`## Templates`).
-   When the document used a template and its look changed — `plan.md`
+8. Without a template, ask whether to save the document's look as a
+   template (`## Templates`). With one whose look changed — `plan.md`
    records a correction to the shared CSS or a page-kind skeleton, or an
    added page kind — ask instead whether to update that template or save the
-   look under a new name.
+   look under a new name; with an unchanged template, skip this step.
 9. Report the working-folder path, whether the folder is committed, the
    template used or saved with its location, and the PDF path when one was
    baked.
@@ -125,7 +126,8 @@ Contents
 Save
 - Write the template folder only at this save step; samples and drafts stay
   in the working folder.
-- Save globally by default; save to the project location when the user says
+- Updating a template writes it back to its own location. Save a new
+  template globally by default; save it to the project location when the user says
   the template is for this project only or for team sharing. Name the
   location to the user before writing.
 - Saving to the project location asks whether to commit the template folder.
