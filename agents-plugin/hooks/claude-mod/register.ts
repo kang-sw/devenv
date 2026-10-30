@@ -4,6 +4,7 @@ import { createBand, drawBand, readGit, type Mailbox } from './band'
 import { appendOwn, createCaptions, drawCall, drawEmpty, drawRun, groupUnit, submitOwn, toolUseUnit, type OwnDeliveryEdges } from './captions'
 import { createCompaction } from './compaction'
 import { createManual, SECTION_ID, type ReadFamily } from './manual'
+import { expandPreload } from './preload'
 import { createReconnect, reconnectDescription, TOOL_NAME as RECONNECT_TOOL } from './reconnect'
 import { ADVISORY_KEY, LEVER_DESCRIPTION, TOOL_NAME as LEVER_TOOL } from './timing'
 import {
@@ -19,7 +20,7 @@ import {
 } from './watcher'
 
 // The Claude Code mod: the one hooks module a package's hooks.json names,
-// carrying six features.
+// carrying seven features.
 //
 // - Mailbox push: the mod loops the one-shot `mailbox wait` as a peek-only
 //   signal for one bound session key, and arriving mail starts a turn through
@@ -45,6 +46,10 @@ import {
 //   prompt, `workflow_manual` answered with the session state alone while
 //   the prompt carries the manual, repeat ws reads collapsed to a pointer, and
 //   a revive's key adopted as the conversation's (see manual.ts).
+// - Playbook preload (rides on the manual feature's key): a lead skill shim's
+//   `<ws-preload>` block replaced, when the skill is expanded for the model,
+//   with its playbook body read with the conversation's key, so the skill
+//   arrives with its procedure in it (see preload.ts).
 // - Tool-call captions (off until claude.display_summary_enabled is set): a
 //   finished, collapsed tool row, or a run the engine folds into one group,
 //   drawn as a short caption a second model call wrote, the raw row still the
@@ -412,6 +417,11 @@ export const register: Register = (on) => {
    * value, whatever it was, is never read again in this module instance.
    */
   let manualRetry = false
+  /**
+   * `playbook_read`'s text for the preload, set at session.start once the
+   * mod's MCP call edge exists; undefined before, which reads as a failure.
+   */
+  let readPlaybook: ((name: string, key: string) => Promise<string>) | undefined
   /** Bumped by every session.start: a setup still waiting on its knob read yields to a newer start. */
   let starts = 0
 
@@ -505,6 +515,11 @@ export const register: Register = (on) => {
       const text = res.content.flatMap((b) => (b.type === 'text' && typeof b.text === 'string' ? [b.text] : [])).join('\n')
       if (res.isError) throw new Error(text || `${tool} reported an error`)
       return text
+    }
+    readPlaybook = async (name, key) => {
+      await serverResolved
+      if (!server) throw new Error('MCP server not resolved')
+      return callText(server, 'playbook_read', { name, session_key: key })
     }
     /** A keyless config_get once the shared server resolution settles; rejects on any failure. */
     const readSetting = async (key: string) => {
@@ -945,6 +960,17 @@ export const register: Register = (on) => {
     const out = await manual.read(family, call.tool, call as unknown as Record<string, unknown>, text)
     return out === undefined ? res : { result: out }
   }
+
+  // Playbook preload: only this plugin's skills, and only while the manual
+  // feature holds the conversation's key. A failure passes the text through
+  // as the hooks beneath computed it.
+  on('skill.prompt', async ($, e, next) => {
+    const res = await next(e)
+    const read = readPlaybook
+    if (!read) return res
+    const text = await expandPreload({ skill: e.skill, text: res.text, pluginName: e.pluginName }, { plugin: $.plugin.name, key: () => manual.key(), read })
+    return text === undefined ? res : { text }
+  }).catch(($, e, next) => next(e))
 
   // Mailbox steer: mail queued while a main-thread turn runs is appended at
   // the turn's next tool boundary, before the result returns, since a tool

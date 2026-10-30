@@ -5,5 +5,7 @@ description: Co-author a human-facing paged document (slide deck or A4 report) w
 
 # Co-author Paged Document
 
+<ws-preload playbook="lead-coauthor-paged-document">
 Call `ws/playbook.read(name: "lead-coauthor-paged-document")` and execute the returned procedure
 inline against the user request.
+</ws-preload>

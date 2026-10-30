@@ -348,7 +348,7 @@ export type Manual = {
   read: (family: ReadFamily, tool: string, args: Record<string, unknown>, text: string) => Promise<string | undefined>
   /** Whether the conversation's snapshot carries the section (for tests and logs). */
   snapshot: () => boolean
-  /** The conversation's key, or undefined (for tests and logs). */
+  /** The conversation's key, or undefined (the playbook preload reads with it; tests and logs). */
   key: () => string | undefined
 }
 

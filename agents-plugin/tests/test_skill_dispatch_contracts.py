@@ -145,6 +145,27 @@ class SkillDispatchContractsTest(unittest.TestCase):
         actual = {path.name for path in SKILLS_DIR.iterdir() if path.is_dir()}
         self.assertEqual(actual, EXPECTED_LEAD_SKILLS)
 
+    def test_lead_shims_wrap_their_own_playbook_read_in_a_preload_block(self):
+        # The Claude mod replaces a `<ws-preload playbook="...">` block with the
+        # playbook body only when the attribute names the skill being expanded,
+        # so a block naming another playbook would silently stay a model read.
+        # lead-revive reads no playbook, and lead-use-mailbox is never expanded
+        # (its body carries a key-specific wait command): neither has a block.
+        no_block = {"lead-revive", "lead-use-mailbox"}
+        offenders = []
+        for skill in sorted(EXPECTED_LEAD_SKILLS):
+            text = (SKILLS_DIR / skill / "SKILL.md").read_text(encoding="utf-8")
+            names = re.findall(r'<ws-preload playbook="([^"]+)">', text)
+            expected = [] if skill in no_block else [skill]
+            if names != expected or text.count("</ws-preload>") != len(expected):
+                offenders.append(f"{skill}: blocks {names}, expected {expected}")
+                continue
+            if expected:
+                block = text.split(f'<ws-preload playbook="{skill}">', 1)[1].split("</ws-preload>", 1)[0]
+                if f'ws/playbook.read(name: "{skill}"' not in block:
+                    offenders.append(f"{skill}: the block does not wrap its own playbook read")
+        self.assertEqual(offenders, [])
+
     def test_retired_skill_names_are_gone_from_shipped_surfaces(self):
         offenders = []
         for root in (SKILLS_DIR, RSRC_DIR):

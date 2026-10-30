@@ -5,8 +5,10 @@ description: Use when the user wants to reason with the lead about direction, sc
 
 # Discuss
 
+<ws-preload playbook="lead-discuss">
 Call in parallel:
 - `ws/playbook.read(name: "lead-discuss", session_key: <your key, omit if fresh>)`
 - `ws/workflow_manual(session_key: <your key or "obsidian-latch" if fresh>, root: <absolute worktree path if fresh>)`
 
 After both return, execute the procedure returned by `ws/playbook.read`.
+</ws-preload>

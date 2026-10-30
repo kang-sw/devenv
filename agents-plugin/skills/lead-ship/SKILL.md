@@ -5,5 +5,7 @@ description: Ship, release, publish, tag, or deploy a configured project from it
 
 # Ship
 
+<ws-preload playbook="lead-ship">
 Call `ws/playbook.read(name: "lead-ship")` and execute the returned procedure
 inline against the user request.
+</ws-preload>

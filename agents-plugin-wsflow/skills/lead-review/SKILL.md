@@ -5,6 +5,8 @@ description: Independent review of a contributor branch or a commit range. The l
 
 # Review
 
+<ws-preload playbook="lead-review">
 Call `wsflow/playbook.read(name: "lead-review")` and execute the returned procedure
 inline against the current user request. If the playbook cannot be loaded, stop
 and report that blocker.
+</ws-preload>
