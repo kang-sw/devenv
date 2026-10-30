@@ -17,7 +17,11 @@ rejects it:
 ws compaction: the requested compaction was rejected (HooksError: ws: $.session.compact: not available in a headless (-p / SDK) session yet: compaction here runs inside a turn (a /compact prompt); catch it and carry on); retrying at the next turn end
 ```
 
-The lever then retries at every turn end and fails each time. Lead-chosen
+The lever then retries at every turn end and fails each time. In the same
+Orca session the owner's own `/compact`, sent from Orca's chat, also failed
+(error text not captured), so the engine's "a /compact prompt" hint is not yet
+shown to work on this host; whether the failure is the SDK's or Orca's is
+unknown. Lead-chosen
 compaction is a primary working tool for the owner, so this blocks headless
 use.
 
