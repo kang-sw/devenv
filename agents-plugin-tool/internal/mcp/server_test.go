@@ -2710,10 +2710,10 @@ func TestServeStdioGitCommitAIContextConditionsAndDebugEvent(t *testing.T) {
 	}
 
 	commitInput := strings.Join([]string{
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt"],"title":"test: empty ai_context array","ai_context":[]}}}`,
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt"],"title":"test: absent ai_context field"}}}`,
-		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt"],"title":"test: single empty-string entry","ai_context":[""]}}}`,
-		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt"],"title":"test: single whitespace entry","ai_context":["  "]}}}`,
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt"],"title":"test: empty ai_context array","ai_context":[],"expected_branch":%q}}}`, branch),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt"],"title":"test: absent ai_context field","expected_branch":%q}}}`, branch),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt"],"title":"test: single empty-string entry","ai_context":[""],"expected_branch":%q}}}`, branch),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt"],"title":"test: single whitespace entry","ai_context":["  "],"expected_branch":%q}}}`, branch),
 		fmt.Sprintf(`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt"],"title":"test: large valid ai_context array","ai_context":%s,"expected_branch":%q}}}`, largeAIContextJSON, branch),
 	}, "\n")
 
@@ -2732,7 +2732,10 @@ func TestServeStdioGitCommitAIContextConditionsAndDebugEvent(t *testing.T) {
 		t.Fatalf("git.commit with empty ai_context array = %s", byID["1"])
 	}
 	absentFieldText := toolText(t, byID["2"])
-	if !strings.Contains(byID["2"], `"isError":true`) || !strings.Contains(absentFieldText, "no ai_context field was received") {
+	// ai_context is a required property, so the central argument precheck
+	// refuses its absence before the handler runs (and before its debug
+	// event); the handler's absent-field branch stays for non-MCP callers.
+	if !strings.Contains(byID["2"], `"isError":true`) || !strings.Contains(absentFieldText, "missing required: ai_context") {
 		t.Fatalf("git.commit with absent ai_context field = %s", byID["2"])
 	}
 	emptyStringEntryText := toolText(t, byID["3"])
@@ -2760,8 +2763,8 @@ func TestServeStdioGitCommitAIContextConditionsAndDebugEvent(t *testing.T) {
 
 	after := aiContextDebugEvents(t, server, root)
 	newEvents := newDebugEvents(t, before, after)
-	if len(newEvents) != 5 {
-		t.Fatalf("expected 5 new git.commit.ai_context_received events, got %d (%d before, %d after)", len(newEvents), len(before), len(after))
+	if len(newEvents) != 4 {
+		t.Fatalf("expected 4 new git.commit.ai_context_received events, got %d (%d before, %d after)", len(newEvents), len(before), len(after))
 	}
 
 	// The five git.commit calls above run as concurrent goroutines (see
@@ -2786,8 +2789,8 @@ func TestServeStdioGitCommitAIContextConditionsAndDebugEvent(t *testing.T) {
 	if emptyArrayEvent == nil || emptyArrayEvent["present"] != true || emptyArrayEvent["raw_bytes"] != float64(0) || emptyArrayEvent["post_trim_entry_count"] != float64(0) {
 		t.Fatalf("empty-array debug event = %#v", emptyArrayEvent)
 	}
-	if absentFieldEvent == nil || absentFieldEvent["raw_entry_count"] != float64(-1) || absentFieldEvent["raw_bytes"] != float64(0) || absentFieldEvent["post_trim_entry_count"] != float64(0) {
-		t.Fatalf("absent-field debug event = %#v", absentFieldEvent)
+	if absentFieldEvent != nil {
+		t.Fatalf("precheck-refused absent-field call still reached the handler: %#v", absentFieldEvent)
 	}
 	// One blank-entry event from [""] (raw_bytes 0) and one from ["  "]
 	// (raw_bytes 2); both must report post_trim_entry_count 0 — this is the
@@ -2839,7 +2842,7 @@ func TestServeStdioGitCommitRejectsNonArrayAIContext(t *testing.T) {
 
 	server := NewServer(root, "test")
 	before := aiContextDebugEvents(t, server, root)
-	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt"],"title":"test: prose ai_context","ai_context":"- User intent: prose string instead of array."}}}`
+	input := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt"],"title":"test: prose ai_context","ai_context":"- User intent: prose string instead of array.","expected_branch":%q}}}`, headBranch(t, root))
 
 	var out bytes.Buffer
 	if err := serveStdioWithSession(t, server, root, input, &out); err != nil {

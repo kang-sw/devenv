@@ -2999,7 +2999,7 @@ func TestServeStdioTodoAddErrorBranches(t *testing.T) {
 	// either append or insert can mutate the list.
 	if got := callToolWithKey(t, server, 0, key, "todo.add", map[string]any{
 		"key": "missing-title",
-	}); !strings.Contains(got, "todo.add: title is required") {
+	}); !strings.Contains(got, "missing required: title") {
 		t.Fatalf("missing title error expected, got: %s", got)
 	}
 	if got := callToolWithKey(t, server, 0, key, "todo.add", map[string]any{
@@ -3421,13 +3421,13 @@ func TestServeStdioTodoReorderHandler(t *testing.T) {
 	// Malformed: missing span -> compact error, list unchanged.
 	if got := callToolWithKey(t, server, 1102, key, "todo.reorder", map[string]any{
 		"position": map[string]any{"before": "c"},
-	}); !strings.Contains(got, "span {from_key, to_key} is required") {
+	}); !strings.Contains(got, "missing required: span") {
 		t.Fatalf("missing-span error expected, got: %s", got)
 	}
 	// Malformed: missing position -> compact error.
 	if got := callToolWithKey(t, server, 1103, key, "todo.reorder", map[string]any{
 		"span": map[string]any{"from_key": "a", "to_key": "b"},
-	}); !strings.Contains(got, "position {before|after: ref_key} is required") {
+	}); !strings.Contains(got, "missing required: position") {
 		t.Fatalf("missing-position error expected, got: %s", got)
 	}
 	// Malformed: position with neither before nor after -> compact error.
@@ -3474,7 +3474,7 @@ func TestServeStdioAgendaHandler(t *testing.T) {
 	// missing value -> compact error.
 	if got := callToolWithKey(t, server, 2001, key, "agenda.set", map[string]any{
 		"key": "notes",
-	}); !strings.Contains(got, "value is required") {
+	}); !strings.Contains(got, "missing required: value") {
 		t.Fatalf("missing-value error expected, got: %s", got)
 	}
 

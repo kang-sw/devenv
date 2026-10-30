@@ -858,10 +858,12 @@ func TestMailboxToolBoundaryErrors(t *testing.T) {
 	s := NewServer(root, "test")
 	key := mailboxLogin(t, s, 1, root)
 
-	for _, tool := range []string{"mailbox.send", "mailbox.recv", "mailbox.lookup_peers"} {
-		resp := callToolWithKey(t, s, 2, "not-a-real-session-key", tool, map[string]any{
-			"to": "x@worktree", "content": "hi", "scope": "worktree",
-		})
+	for tool, args := range map[string]map[string]any{
+		"mailbox.send":         {"to": "x@worktree", "content": "hi"},
+		"mailbox.recv":         {},
+		"mailbox.lookup_peers": {"scope": "worktree"},
+	} {
+		resp := callToolWithKey(t, s, 2, "not-a-real-session-key", tool, args)
 		if !strings.Contains(resp, "unknown_session") {
 			t.Fatalf("%s with an unknown session_key did not report unknown_session: %s", tool, resp)
 		}

@@ -552,6 +552,11 @@ func TestIndexAbsentVerbsAnswerPlainOK(t *testing.T) {
 				{"ticket_stem": "not a stem", "dangerously_override_lease_status": true},
 				{"ticket_stem": stemGamma, "track": "x"},
 			} {
+				if tool == "tickets.release" {
+					// The lease-override and track arguments are acquire-only.
+					delete(args, "dangerously_override_lease_status")
+					delete(args, "track")
+				}
 				if text := c.mustCall(tool, args); text != "ok" {
 					t.Fatalf("%s text = %q, want plain ok", tool, text)
 				}

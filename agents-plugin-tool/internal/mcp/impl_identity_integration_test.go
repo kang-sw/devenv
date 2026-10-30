@@ -167,8 +167,8 @@ func TestResolveImplBranchRequestValidationAndDefaultFormat(t *testing.T) {
 		args map[string]any
 		want string
 	}{
-		{name: "missing ticket stem", args: map[string]any{"base": "develop"}, want: "ticket_stem and base"},
-		{name: "missing base", args: map[string]any{"ticket_stem": "260921-feat-example"}, want: "ticket_stem and base"},
+		{name: "missing ticket stem", args: map[string]any{"base": "develop"}, want: "missing required: ticket_stem"},
+		{name: "missing base", args: map[string]any{"ticket_stem": "260921-feat-example"}, want: "missing required: base"},
 		{name: "invalid base", args: map[string]any{"ticket_stem": "260921-feat-example", "base": "invalid..branch"}, want: "invalid branch name"},
 		{name: "detached HEAD", args: map[string]any{"ticket_stem": "260921-feat-example", "base": "HEAD"}, want: "must name a branch"},
 		{name: "trimmed detached HEAD", args: map[string]any{"ticket_stem": "260921-feat-example", "base": " HEAD "}, want: "must name a branch"},

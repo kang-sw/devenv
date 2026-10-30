@@ -674,6 +674,13 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		testPanicHook(params.Name)
 	}
 
+	// Central argument precheck: refuse a call that misses a required
+	// property or carries an undeclared top-level argument before any handler
+	// runs, naming every problem and the tool's own schema at once.
+	if refusal, ok := precheckToolArguments(params.Name, params.Arguments); !ok {
+		return toolErrorTextResponse(req.ID, refusal)
+	}
+
 	switch params.Name {
 	case "runtime.read":
 		info, err := runtimeInfo(s.version, s.sourceCommit)
@@ -4139,7 +4146,11 @@ func tools() []map[string]any {
 						"description": "Opaque implementation-routing input, constructed by the ticket-worker playbook. Inner step of that playbook; not a direct entry point — see its route step for the full field set.",
 					},
 				},
-				"required": []string{"session_key"},
+				// Open top level: the unwrapped typed call shape (target,
+				// policy, facts, format as bare arguments) is a live caller
+				// form, so names outside properties are the handler's to judge.
+				"additionalProperties": true,
+				"required":             []string{"session_key"},
 			},
 		},
 		{
@@ -4154,7 +4165,11 @@ func tools() []map[string]any {
 						"description": "Opaque routing input, constructed by the calling skill. Inner step of that skill; not a direct entry point — see its Fact Contract for the full field set.",
 					},
 				},
-				"required": []string{"session_key"},
+				// Open top level: the unwrapped typed call shape (target,
+				// policy, facts, format as bare arguments) is a live caller
+				// form, so names outside properties are the handler's to judge.
+				"additionalProperties": true,
+				"required":             []string{"session_key"},
 			},
 		},
 		{
@@ -4594,6 +4609,7 @@ func tools() []map[string]any {
 					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
 					"layer":       enumStringProperty(`Which layer to write: "machine" (PC-global, project-agnostic), "worktree" (this worktree only, ephemeral), "clone" (this project's checkouts, worktree-agnostic, untracked), or "repo" (git-tracked, one file per key under ai-docs/ws-notes/; staging/commit rides the caller's normal git.commit).`, []string{"machine", "worktree", "clone", "repo"}),
 					"notes":       objectArrayProperty(`Notes to write, each {"key": string, "value": string, "priority": integer}. priority is an integer defaulting to 0; a larger number is surfaced earlier (5 before 1).`),
+					"format":      stringProperty(`Optional output format. Use "json" for structured output.`),
 				},
 				"required": []string{"session_key", "layer", "notes"},
 			},
@@ -4607,6 +4623,7 @@ func tools() []map[string]any {
 					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
 					"layer":       enumStringProperty(`Which layer to erase from: "machine", "worktree", "clone", or "repo".`, []string{"machine", "worktree", "clone", "repo"}),
 					"keys":        stringArrayProperty("Note keys to erase. A missing key is a no-op."),
+					"format":      stringProperty(`Optional output format. Use "json" for structured output.`),
 				},
 				"required": []string{"session_key", "layer", "keys"},
 			},
@@ -4620,6 +4637,7 @@ func tools() []map[string]any {
 					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
 					"layer":       enumStringProperty(`Which layer to mute on: "machine", "worktree", "clone", or "repo".`, []string{"machine", "worktree", "clone", "repo"}),
 					"keys":        stringArrayProperty("Note keys to mute. A missing key is a no-op."),
+					"format":      stringProperty(`Optional output format. Use "json" for structured output.`),
 				},
 				"required": []string{"session_key", "layer", "keys"},
 			},
@@ -4633,6 +4651,7 @@ func tools() []map[string]any {
 					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
 					"layer":       enumStringProperty(`Which layer to unmute on: "machine", "worktree", "clone", or "repo".`, []string{"machine", "worktree", "clone", "repo"}),
 					"keys":        stringArrayProperty("Note keys to unmute. A missing key is a no-op."),
+					"format":      stringProperty(`Optional output format. Use "json" for structured output.`),
 				},
 				"required": []string{"session_key", "layer", "keys"},
 			},
