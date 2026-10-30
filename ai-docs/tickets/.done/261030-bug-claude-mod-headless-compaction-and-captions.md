@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 13292e025704603c
 sage-review-completeness-reviewed: 13292e025704603c
+completed: 2026-10-31
 ---
 
 # claude-mod in headless sessions - compaction lever rejected, captions run uselessly
