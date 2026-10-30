@@ -305,15 +305,16 @@ The Claude mod is a second generated-sameness carve-out:
 `agents-plugin-wsflow/hooks/claude-mod/` a byte-identical copy. Claude Code
 accepts one hooks module per plugin, so the mod is one entry (`register.ts`)
 carrying every Claude mod feature: mailbox push, lead compaction timing, the
-MCP reconnect lever, workflow manual injection, tool-call captions, and the
-status band.
+MCP reconnect lever and its watchdog, workflow manual injection, tool-call
+captions, and the status band.
 The mod reads its package identity (plugin name, root, MCP server) from the
 engine at runtime, and selects no feature by package name: every feature but
 the reconnect and compaction request levers is switched by a `claude.*` config
 key, and the only per-package difference is each key's `default` in the
 package's own `config-manifest.json` (ws: the compaction advisory, manual
-injection, the direct mailbox drain, and the status band on; wsflow: all off
-and the drain `notice`; captions off in both). `TestShippedClaudeManifestsDifferOnlyInDefaults`
+injection, the direct mailbox drain, the status band, and the MCP watchdog on;
+wsflow: all off and the drain `notice`; captions off in both; the watchdog
+interval 10 minutes in both). `TestShippedClaudeManifestsDifferOnlyInDefaults`
 pins that the two manifests declare the same keys with every field but
 `default` identical, so a shared description never states a package's
 default. This supersedes the earlier package-name gates
@@ -328,7 +329,13 @@ read once more at the next successful server resolution (a later session
 start, an MCP reconnect) and starts the feature then if it reads true; that
 late start re-logs in with the key the agent already bound through
 `mailbox_watch` and mints only when none is bound, so the push, the band rows
-and the stored key never move off a key the model holds. Every label, prompt
+and the stored key never move off a key the model holds. The MCP watchdog
+knobs (`claude.mcp_watchdog_enabled`, `claude.mcp_watchdog_interval_minutes`)
+are read the same way but are the deliberate exception to the inert rule: a
+failed, refused, or invalid read takes the key's `default` from the package's
+own `config-manifest.json` under `$.plugin.root`, so a session whose server
+never came up still runs the watchdog that can reconnect it, under the name
+derived from the package's `plugin.json` `mcpServers` key. Every label, prompt
 prefix, transcript notice, and debug log prefix the mod writes spells the
 engine-reported plugin name, never a hardcoded package name. Workflow manual
 injection runs only with its knob on and `ai-docs/WORKFLOW.md` at the

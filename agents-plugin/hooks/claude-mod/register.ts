@@ -34,7 +34,10 @@ import {
 //   milestone wake turns before native auto compaction (see compaction.ts).
 // - MCP reconnect lever: a tool the model calls when the plugin's MCP server
 //   has gone, and `/mcp reconnect` at the next main-thread turn end, with the
-//   same opt-in resume prompt (see reconnect.ts).
+//   same opt-in resume prompt; and (behind claude.mcp_watchdog_enabled) a
+//   watchdog that runs the same reconnect from a timer when the server's
+//   tools have left the tool list, so an idle session recovers with no model
+//   call (see reconnect.ts).
 // - Workflow manual injection (behind claude.manual_injection_enabled, in a
 //   ws project): a lead session key
 //   minted per conversation and the keyed workflow manual in the system
@@ -65,7 +68,10 @@ import {
 // locates the launcher, and $.mcp.connect(<plugin name>) resolves the MCP
 // server, at session.start for every feature (a dead server cannot be
 // resolved later). No package or server name is spelled: what differs per
-// package is only each knob's default, in the package's config manifest.
+// package is only each knob's default, in the package's config manifest. A
+// server that never resolved (it was not up at start) gets a name for the
+// reconnect alone, derived from the package's own plugin.json under
+// $.plugin.root as `plugin:<plugin name>:<its mcpServers key>`.
 //
 // The advisory, manual and drain knobs (KNOB) are read keyless, once at
 // session start (the manual's once per module instance, inside the ws-project
@@ -74,7 +80,12 @@ import {
 // with, and switching key minting or the mailbox binding mid-session is
 // unsafe. A failed or refused read leaves its feature inert (the drain reads
 // as notice); only a failed first manual read is read once more, at the next
-// successful server resolution (a later start, a reconnect). The features those reads gate come up when the read settles,
+// successful server resolution (a later start, a reconnect). The watchdog
+// knobs are the deliberate exception: a failed, refused or invalid read takes
+// the knob's default from the package's own config-manifest.json under
+// $.plugin.root, so a session whose server never came up still runs the
+// watchdog that can bring it back; reading the package's own file needs no
+// per-package code default. The features those reads gate come up when the read settles,
 // outside session.start's awaited path, so a slow server start never delays
 // the first prompt: a tool registered after session.start is listed to the
 // model from its next request on. The compaction lever reads no knob: it is
@@ -97,7 +108,41 @@ export const KNOB = {
   compactionAdvisory: 'claude.compaction_advisory_enabled',
   manual: 'claude.manual_injection_enabled',
   drain: 'claude.mailbox_drain',
+  watchdog: 'claude.mcp_watchdog_enabled',
+  watchdogInterval: 'claude.mcp_watchdog_interval_minutes',
 } as const
+
+/** Whether a value is a positive integer, the only valid watchdog interval. */
+export function isPositiveInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0
+}
+
+/** The first `mcpServers` key of a plugin.json text, or undefined with none or unparsable text. */
+export function serverKeyOf(pluginJson: string): string | undefined {
+  try {
+    const servers = (JSON.parse(pluginJson) as { mcpServers?: unknown } | null)?.mcpServers
+    if (!servers || typeof servers !== 'object' || Array.isArray(servers)) return undefined
+    return Object.keys(servers)[0]
+  } catch {
+    return undefined
+  }
+}
+
+/** The name the host gives a plugin's MCP server, `plugin:<plugin>:<mcpServers key>`. */
+export function derivedServerName(plugin: string, key: string): string {
+  return `plugin:${plugin}:${key}`
+}
+
+/** A key's `default` in a config-manifest.json text; undefined when absent or the text is unparsable. */
+export function manifestDefault(manifestJson: string, key: string): unknown {
+  try {
+    const keys = (JSON.parse(manifestJson) as { keys?: unknown } | null)?.keys
+    if (!Array.isArray(keys)) return undefined
+    return (keys.find((k) => (k as { key?: unknown } | null)?.key === key) as { default?: unknown } | undefined)?.default
+  } catch {
+    return undefined
+  }
+}
 
 /** The drain mode a claude.mailbox_drain value selects: `direct` drains through recv itself; anything else, a failed read among them, takes the notice path. */
 export function drainModeOf(value: unknown): DrainMode {
@@ -375,6 +420,13 @@ export const register: Register = (on) => {
   // session.start, again by a bind and after a reconnect, and kept while the
   // server is down, when $.mcp.connect can no longer resolve it.
   let server: string | undefined
+  /**
+   * The server name derived from the plugin's own plugin.json, for a server
+   * that never resolved. It feeds only the reconnect's server edge, never the
+   * shared cache above: the band, the knob reads and the recv tool would
+   * otherwise target a server that never connected.
+   */
+  let derivedServer: string | undefined
   /** The latest session.start's resolution, settled; a feature that needs the name at start awaits it. */
   let serverResolved: Promise<unknown> = Promise.resolve()
   const useServer = (resolved: string) => {
@@ -471,6 +523,11 @@ export const register: Register = (on) => {
       if (conn.isConnected) {
         useServer(conn.server)
         retryManual()
+        try {
+          reconnect.resolved()
+        } catch (err) {
+          $.ui.log(`${$.plugin.name} mcp watchdog: resolution handling failed: ${String(err)}`, { to: 'debug' })
+        }
       }
       return conn
     }
@@ -653,10 +710,48 @@ export const register: Register = (on) => {
       leverTool = registered.tool
     })().catch((err) => $.ui.log(`${$.plugin.name} compaction: setup failed (${String(err)}); ${LEVER_TOOL} not registered`, { to: 'debug' }))
 
+    const pluginRoot = $.plugin.root.replace(/[\\/]+$/, '')
+    // Not awaited: read once per module instance, for a server that never resolves.
+    if (derivedServer === undefined) {
+      void $.fs
+        .read(`${pluginRoot}/.claude-plugin/plugin.json`)
+        .then((text) => {
+          const key = serverKeyOf(text)
+          if (key === undefined) throw new Error('no mcpServers key')
+          derivedServer = derivedServerName($.plugin.name, key)
+        })
+        .catch((err) => $.ui.log(`${$.plugin.name} mcp reconnect: server name not derived from plugin.json (${String(err)})`, { to: 'debug' }))
+    }
+    /**
+     * A watchdog knob: the keyless read, else (failed, refused, or not
+     * `valid`) the package manifest's default, else undefined, the inert state.
+     */
+    const readWatchdogKnob = async <T,>(key: string, valid: (value: unknown) => value is T): Promise<T | undefined> => {
+      let why: string
+      try {
+        const value = await readSetting(key)
+        if (valid(value)) return value
+        why = `invalid value ${JSON.stringify(value)}`
+      } catch (err) {
+        why = String(err)
+      }
+      try {
+        const value = manifestDefault(await $.fs.read(`${pluginRoot}/config-manifest.json`), key)
+        if (valid(value)) {
+          $.ui.log(`${$.plugin.name} mod: ${key} not read (${why}); the package default ${JSON.stringify(value)} applies`, { to: 'debug' })
+          return value
+        }
+        throw new Error(`invalid package default ${JSON.stringify(value)}`)
+      } catch (err) {
+        $.ui.log(`${$.plugin.name} mod: ${key} not read (${why}) and no package default (${String(err)}); its feature stays off`, { to: 'debug' })
+        return undefined
+      }
+    }
+
     const reconnectSetup = (async () => {
       reconnect.start({
         plugin: $.plugin.name,
-        server: () => server,
+        server: () => server ?? derivedServer,
         reconnect: (name) => $.command.run({ command: 'mcp', args: `reconnect ${name}` }),
         toolsListed: async (name) => {
           const prefix = mcpToolName(name, '')
@@ -667,7 +762,19 @@ export const register: Register = (on) => {
         after: (fn) => void $.clock.after(0, fn),
         sleep: (ms) => new Promise<void>((resolve) => void $.clock.after(ms, resolve)),
         log: (text, to) => $.ui.log(text, { to }),
+        turnRunning: () => mainTurn,
+        every: (ms, fn) => {
+          const timer = $.clock.every(ms, fn)
+          return () => timer.cancel()
+        },
       })
+      // The watchdog comes up once its knob reads settle, outside the awaited path.
+      void (async () => {
+        if ((await readWatchdogKnob(KNOB.watchdog, (v): v is boolean => typeof v === 'boolean')) !== true) return
+        const minutes = await readWatchdogKnob(KNOB.watchdogInterval, isPositiveInteger)
+        if (minutes === undefined || startSeq !== starts) return
+        reconnect.watch(minutes * 60_000)
+      })().catch((err) => $.ui.log(`${$.plugin.name} mcp watchdog: setup failed: ${String(err)}`, { to: 'debug' }))
       const registered = await $.tool.register({
         name: RECONNECT_TOOL,
         description: reconnectDescription($.plugin.name),

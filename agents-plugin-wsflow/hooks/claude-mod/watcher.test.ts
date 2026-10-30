@@ -797,6 +797,68 @@ describe('lifecycle', () => {
   })
 })
 
+// A dropped MCP server takes the mailbox push with it two ways: its own
+// `mailbox wait` child is killed with the process tree, and the drain's recv
+// fails while the server is gone. Neither needs a mechanism of its own: the
+// loop's backoff re-arms the wait and retries the drain until the watchdog (or
+// the lever) has reconnected the server.
+describe('server drop recovery', () => {
+  test('a killed mailbox wait child reads as an error, never as a stop', async () => {
+    const ended = (end: { code: number | null; signal: string | null }) => ({
+      next: async () => ({ done: true as const, value: end as never }),
+      return: async () => ({ done: true as const, value: undefined as never }),
+    })
+    const signal = new AbortController().signal
+    const debug: string[] = []
+    // Killed by a signal (no exit code), or its wrapping shell killed (a plain failure code).
+    expect(await consumeWait(ended({ code: null, signal: 'SIGKILL' }), signal, (t) => debug.push(t))).toBe('error')
+    expect(await consumeWait(ended({ code: 1, signal: null }), signal, (t) => debug.push(t))).toBe('error')
+    expect(debug.length).toBe(2)
+  })
+
+  test('a mailbox wait that exits abnormally re-arms the same binding after backoff', async () => {
+    const h = harness('direct')
+    const w = createWatcher(h.edges)
+    w.bind('k1', 'inbox')
+    await tick()
+    h.waits[0]!.d.resolve('error')
+    await tick()
+    expect(h.waits.length).toBe(1)
+    expect(h.sleeps.map((s) => s.ms)).toEqual([1_000])
+    h.sleeps[0]!.d.resolve()
+    await tick()
+    expect(h.waits.map((x) => [x.key, x.slug])).toEqual([
+      ['k1', 'inbox'],
+      ['k1', 'inbox'],
+    ])
+    expect(w.current()).toBe('k1')
+    // The re-armed wait delivers as before.
+    await arrive(h, { kind: 'mail', mail: mailA })
+    expect(h.submitted).toEqual([formatBatch('pkg mailbox', RECV, 'k1', mailA)])
+  })
+
+  test('a drain that fails while the server is down retries and delivers once the server is back', async () => {
+    const h = harness('direct')
+    const w = createWatcher(h.edges)
+    w.bind('k1')
+    await tick()
+    const down: DrainResult = { kind: 'failed', reason: 'MCP server not connected' }
+    await arrive(h, down)
+    h.sleeps[0]!.d.resolve()
+    await tick()
+    await arrive(h, down)
+    h.sleeps[1]!.d.resolve()
+    await tick()
+    expect(h.submitted).toEqual([])
+    expect(h.sleeps.map((s) => s.ms)).toEqual([1_000, 2_000])
+    // The server is back: the still-queued mail wakes the re-armed wait and drains once.
+    await arrive(h, { kind: 'mail', mail: mailA })
+    expect(h.drains).toEqual(['k1', 'k1', 'k1'])
+    expect(h.submitted).toEqual([formatBatch('pkg mailbox', RECV, 'k1', mailA)])
+    expect(h.records).toEqual([])
+  })
+})
+
 describe('pure helpers', () => {
   test('drain mode follows the knob value; anything but direct, a failed read among them, is notice', () => {
     expect(drainModeOf('direct')).toBe('direct')

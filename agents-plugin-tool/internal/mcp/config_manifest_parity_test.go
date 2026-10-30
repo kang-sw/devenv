@@ -108,6 +108,7 @@ var claudePackageDefaults = []struct {
 	{"claude.mailbox_drain", "direct", "notice"},
 	{"claude.display_summary_enabled", false, false},
 	{"claude.status_band_enabled", true, false},
+	{"claude.mcp_watchdog_enabled", true, false},
 }
 
 // TestShippedClaudePackageDefaults pins each package's knob defaults, both as
@@ -143,6 +144,35 @@ func TestShippedClaudePackageDefaults(t *testing.T) {
 			}
 			if resp := keyedCall(t, server, 931101, sessionKey, "config.tune", map[string]any{"key": "claude.mailbox_drain", "value": "notice"}); toolIsError(t, resp) {
 				t.Fatalf("config.tune(mailbox_drain=notice) = %s", resp)
+			}
+		})
+	}
+}
+
+// TestShippedClaudeWatchdogInterval pins the watchdog interval: the same
+// positive-integer default of 10 minutes in both packages, as loaded and as a
+// keyless config.get answers it, and a tune below 1 refused.
+func TestShippedClaudeWatchdogInterval(t *testing.T) {
+	const key = "claude.mcp_watchdog_interval_minutes"
+	for _, path := range []string{claudeManifestPath, wsflowClaudeManifestPath} {
+		t.Run(path, func(t *testing.T) {
+			declared := loadDeclaredConfig(path)
+			k, ok := declared.lookup(key)
+			if !ok {
+				t.Fatalf("%s does not declare %s", path, key)
+			}
+			if k.DefaultValue != int64(10) {
+				t.Errorf("%s default = %v (%T), want 10", key, k.DefaultValue, k.DefaultValue)
+			}
+			server, _, sessionKey := manifestServer(t, path)
+			if got := configGetJSON(t, server, 932000, map[string]any{"key": key}); got.Value != float64(10) || got.Scope != "builtin" {
+				t.Errorf("config.get(%s) = %+v, want 10 from builtin", key, got)
+			}
+			if resp := keyedCall(t, server, 932001, sessionKey, "config.tune", map[string]any{"key": key, "value": "0"}); !toolIsError(t, resp) {
+				t.Fatalf("config.tune(%s=0) = %s, want a rejection", key, resp)
+			}
+			if resp := keyedCall(t, server, 932002, sessionKey, "config.tune", map[string]any{"key": key, "value": "1"}); toolIsError(t, resp) {
+				t.Fatalf("config.tune(%s=1) = %s", key, resp)
 			}
 		})
 	}
