@@ -592,6 +592,9 @@
     "261029-chore-wsflow-no-agent-env-rename-and-setup-tool-removal": {
       "registered_at": "2026-10-29T00:09:05Z"
     },
+    "261030-bug-tickets-move-stages-on-occupied-root": {
+      "registered_at": "2026-10-30T06:10:05Z"
+    },
     "261030-feat-claude-mod-mcp-watchdog": {
       "registered_at": "2026-10-30T00:55:31Z",
       "lease": {
