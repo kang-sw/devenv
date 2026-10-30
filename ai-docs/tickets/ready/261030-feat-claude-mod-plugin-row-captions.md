@@ -194,6 +194,69 @@ Verification (merge gate):
   mail recap transcript line appears; the model does not read the recap line.
 - Existing caption, mirror, and manifest drift tests pass for both packages.
 
+### Result (c1841910a) - 2026-10-30
+
+Implemented in 6a2e905fd; review fixes in c1841910a.
+
+- `submitOwn` and `appendOwn` in `captions.tsx` own the split, gated by
+  `captions.isOn()`. Every feature hands one `OwnPrompt {text, line, mail?}`
+  to a single submit edge, which register.ts binds once per session start.
+  - With the switch off, this is one submit of the full text, or the
+    watcher's one user row.
+  - With it on, the order is: hidden user row, system row, then the
+    one-liner submit. Mid-turn mail gets no submit and its one-liners go out
+    as `$.ui.log` lines.
+  - A refused hidden row falls back to the full-text submit. A dropped or
+    rejected one-liner is a debug line only.
+- One-liner builders sit beside their templates and take the template's
+  inputs:
+  - `deliveryLine`, `resumeLine` and `vetoedResumeLine` in timing.ts.
+  - `successLine` and `failureLine` in reconnect.ts.
+  - `noticeLine` and `batchLine` in watcher.ts. Senders are named as
+    `formatEnvelope` names them and kept to one printable line.
+- The watcher queue holds structured prompts. A turn-end join carries every
+  one-liner, joined by newlines, and queues one mail unit per batch. Mail
+  units are keyed by a per-session counter, and each recap draws as one
+  `$.ui.log` transcript line through a new `transcript` edge.
+- Removed: the UserMessage render hook, `isOwnRow`, `userRowUnit`,
+  `compactionCaption`, `reconnectCaption` and `mailboxRow`.
+- Tests: 488/488 pass in each package.
+  - Engine tests cover the split for the advisory, both milestones, landed,
+    vetoed, reconnect success and failure, the notice drain, and idle,
+    mid-turn and joined batches. They also cover dropped submits, a failed
+    recap, a hostile mail body, and switch-off parity.
+  - Unit tests cover `submitOwn` and `appendOwn` ordering and fallbacks, and
+    every one-liner shape.
+  - Mutation check: submitting before the append fails 10 tests.
+  - Also passing: `claude plugin validate` for both packages, python
+    unittest (80 and 18), and `go test ./internal/wsrsrc`.
+  - The wsflow mirror is byte-identical.
+- Live probe, Claude Code 2.1.314 / haiku, isolated socket
+  `tmux -L ws-probe-<pid>`, switch on:
+  - The idle mail batch showed only "› Prompt from the ws plugin / [ws
+    mailbox] 1 message from id:…". The model replied with the code word that
+    only the hidden full text carried. ctrl+o showed the raw batch text. The
+    recap appeared as a `● ws: [ws mailbox] …` line. Asked afterwards, the
+    model did not have the recap phrase in its context, and quoted only the
+    hidden row and the one-liner.
+  - The compaction advisory (run under an isolated `WS_CACHE_HOME` so the
+    probe manifest's `50k` default applied) showed only `[ws compaction] 19%
+    · auto-compact 89%`. The model answered the advisory's boundary
+    guidance, and ctrl+o showed the full advisory.
+- Review (lite): 1 Important, fixed in c1841910a (the notice drain split had
+  no test). Two Minor findings were fixed too: recap and line failures sat
+  under the refused-row catch, and peer handles could break the one-liner.
+
+#### Open notes
+
+- With the switch on, a dropped resume or reconnect one-liner leaves its
+  hidden row to ride the person's next prompt. The decision's drop rule
+  allows this, but no transcript notice records the lost resume.
+- The hidden row binds to whichever turn starts next. A prompt from the
+  person, or from another plugin, that starts first carries it. The engine
+  surface cannot close this.
+- No test pins a mail unit's weight against `BATCH_CALLS`.
+
 ## Live Probe Findings (2026-10-30)
 
 Implementation landed on `impl/develop/dole-ebook-feast` (14e6a0d22), with
