@@ -91,9 +91,12 @@ directly. Include terminal inventory only when the question requires history.
 
 Write a durable note when a future session would otherwise re-derive a
 non-obvious fact with no better home. Use the narrowest layer that reaches its
-readers. Repository facts, commit rationale, and ticket state belong in the
-source tree, `## AI Context`, and the ticket respectively. Query notes when the
-ambient block omits needed context.
+readers: `worktree` by default, `clone` or `machine` only when a session in
+another worktree (`clone`) or another project (`machine`) would fail without
+the fact. A spawned worker writes no notes; it puts such a fact in its final
+report for the lead to write. Repository facts, commit rationale, and ticket
+state belong in the source tree, `## AI Context`, and the ticket respectively.
+Query notes when the ambient block omits needed context.
 
 ### Git
 
@@ -125,4 +128,4 @@ planner-overvalue-mangle
 
 # Notes
 - [repo] session-notes (priority 0, 2026-08-12T07:41:35Z): Open: verify Codex hook feedback semantics on macOS/later CLI; durable leaf role assignment remains deferred.
-_Post-it reminders: `note.write` to pin, `note.erase` when done._
+_Post-it reminders, higher priority number first: erase stale ones immediately with `note.erase`._

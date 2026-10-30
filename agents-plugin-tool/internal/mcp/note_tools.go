@@ -148,7 +148,7 @@ var allNoteLayers = []wsnote.Layer{wsnote.LayerMachine, wsnote.LayerWorktree, ws
 
 // noteLayerEnumValues is the shared 4-value layer enum used both for
 // argument validation here and (via server.go) for the tool schema.
-var noteLayerEnumValues = []string{"machine", "worktree", "clone", "repo"}
+var noteLayerEnumValues = []string{"worktree", "clone", "machine", "repo"}
 
 func isValidNoteLayer(raw string) bool {
 	switch wsnote.Layer(raw) {
@@ -326,10 +326,37 @@ func noteWriteExceedsOversizeThreshold(records []wsnote.Record) bool {
 	return false
 }
 
+// noteWriteReasonCheck rejects a clone or machine write without a non-empty
+// reason, forcing the reach-beyond-this-worktree decision at write time. The
+// reason is checked only, never stored: storing it would grow the notes the
+// Notes block bounds.
+func noteWriteReasonCheck(toolName string, args map[string]any) error {
+	layer, err := noteLayerArg(toolName, args)
+	if err != nil {
+		return err
+	}
+	var reach string
+	switch layer {
+	case wsnote.LayerClone:
+		reach = "a session in another worktree of this project"
+	case wsnote.LayerMachine:
+		reach = "a session in another project"
+	default:
+		return nil
+	}
+	if reason, _ := args["reason"].(string); strings.TrimSpace(reason) != "" {
+		return nil
+	}
+	return fmt.Errorf(`%s: layer %q requires a non-empty reason stating why %s would fail without this note; nothing was written. If only this worktree needs it, write it to layer "worktree" instead`, toolName, layer, reach)
+}
+
 func (s *Server) handleNoteWrite(id json.RawMessage, args map[string]any, meta map[string]any) response {
 	const tool = "note.write"
 	store, err := s.resolveNoteStore(tool, args, meta)
 	if err != nil {
+		return toolTextResponse(id, "", err)
+	}
+	if err := noteWriteReasonCheck(tool, args); err != nil {
 		return toolTextResponse(id, "", err)
 	}
 	records, err := noteRecordsArg(tool, args)

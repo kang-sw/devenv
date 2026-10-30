@@ -177,8 +177,9 @@ func TestWorkflowManualCarriesCloneLayerNote(t *testing.T) {
 	key, _ := parseLoginResponse(t, callLogin(t, s, 1, root, nil))
 
 	callToolWithKey(t, s, 2, key, "note.write", map[string]any{
-		"layer": "clone",
-		"notes": []any{map[string]any{"key": "clone.manual", "value": "clone-scoped note", "priority": 1}},
+		"layer":  "clone",
+		"reason": "test fixture: another worktree or project needs it",
+		"notes":  []any{map[string]any{"key": "clone.manual", "value": "clone-scoped note", "priority": 1}},
 	})
 
 	resp := callToolWithKey(t, s, 3, key, "workflow_manual", nil)
@@ -220,11 +221,11 @@ func TestWorkflowManualNotesBlockRendersEmptyStateHintWhenNoNotesExist(t *testin
 	}
 }
 
-// TestWorkflowManualNotesBlockElidesBeyondCapAndRemainsSearchable verifies
-// more than notesInjectionCap notes cap the injected block at the
-// highest-priority items, show the "N lower-priority notes elided" line, and
-// that elided items are still retrievable via note.query.
-func TestWorkflowManualNotesBlockElidesBeyondCapAndRemainsSearchable(t *testing.T) {
+// TestWorkflowManualNotesBlockListsKeysBeyondCapAndRemainsSearchable verifies
+// more than notesInjectionCap notes inline only the highest-priority bodies,
+// list the next ones key-only, and that a key-only note's body is still
+// retrievable via note.query.
+func TestWorkflowManualNotesBlockListsKeysBeyondCapAndRemainsSearchable(t *testing.T) {
 	setupWorkflowManualNoteEnv(t)
 	root := t.TempDir()
 	initGit(t, root)
@@ -250,13 +251,15 @@ func TestWorkflowManualNotesBlockElidesBeyondCapAndRemainsSearchable(t *testing.
 	if notesBlockIndex(continueResp) < 0 {
 		t.Fatalf("workflow_manual CONTINUE missing '# Notes' block: %s", continueResp)
 	}
-	wantElided := total - notesInjectionCap
-	if !strings.Contains(continueResp, fmt.Sprintf("%d lower-priority notes elided", wantElided)) {
-		t.Fatalf("workflow_manual CONTINUE missing elision line for %d elided notes: %s", wantElided, continueResp)
+	if !strings.Contains(continueResp, "Key only (note.query for the body): [worktree] elide.02, [worktree] elide.01, [worktree] elide.00\n") {
+		t.Fatalf("workflow_manual CONTINUE missing the key-only line for the 3 notes past the cap: %s", continueResp)
 	}
-	// The lowest-priority note (elide.00, priority 0) must be elided, not inlined.
-	if strings.Contains(continueResp, "elide.00 ") {
+	// The lowest-priority note (elide.00, priority 0) must be key-only, not inlined.
+	if strings.Contains(continueResp, "elide.00 (priority") {
 		t.Fatalf("workflow_manual CONTINUE unexpectedly inlined the lowest-priority note: %s", continueResp)
+	}
+	if strings.Contains(continueResp, " hidden — ") {
+		t.Fatalf("workflow_manual CONTINUE hid notes within the key-only tier: %s", continueResp)
 	}
 	// The highest-priority note must be inlined, not elided.
 	highestKey := fmt.Sprintf("elide.%02d", total-1)
@@ -270,7 +273,7 @@ func TestWorkflowManualNotesBlockElidesBeyondCapAndRemainsSearchable(t *testing.
 		"glob":  "elide.00",
 	})
 	if !strings.Contains(searchResp, "elide.00") {
-		t.Fatalf("note.query did not retrieve the elided note elide.00: %s", searchResp)
+		t.Fatalf("note.query did not retrieve the key-only note elide.00: %s", searchResp)
 	}
 }
 
@@ -335,9 +338,9 @@ func TestWorkflowManualMutedNoteDropsFromBlockButStaysSearchable(t *testing.T) {
 // TestWorkflowManualMutingOverCapAdjacentNoteFreesSlotForElidedNote drives
 // the cap-exclusion accounting through the REAL MCP path (note.write ->
 // note.mute -> workflow_manual), not a direct wsnote.Compute call: with
-// exactly notesInjectionCap+1 notes, the lowest-priority one starts elided;
+// exactly notesInjectionCap+1 notes, the lowest-priority one starts key-only;
 // muting the highest-priority (cap-included) note must free its slot so the
-// previously-elided lowest-priority note now renders.
+// previously key-only lowest-priority note now renders with its body.
 func TestWorkflowManualMutingOverCapAdjacentNoteFreesSlotForElidedNote(t *testing.T) {
 	setupWorkflowManualNoteEnv(t)
 	root := t.TempDir()
@@ -364,11 +367,11 @@ func TestWorkflowManualMutingOverCapAdjacentNoteFreesSlotForElidedNote(t *testin
 	highestKey := fmt.Sprintf("cap.%02d", total-1)
 
 	baseline := callToolWithKey(t, s, 3, key, "workflow_manual", nil)
-	if strings.Contains(baseline, lowestKey+" ") {
-		t.Fatalf("baseline workflow_manual unexpectedly included the lowest-priority note %s: %s", lowestKey, baseline)
+	if strings.Contains(baseline, lowestKey+" (priority") {
+		t.Fatalf("baseline workflow_manual unexpectedly inlined the lowest-priority note %s: %s", lowestKey, baseline)
 	}
-	if !strings.Contains(baseline, "1 lower-priority notes elided") {
-		t.Fatalf("baseline workflow_manual missing the 1-elided line: %s", baseline)
+	if !strings.Contains(baseline, "Key only (note.query for the body): [worktree] "+lowestKey+"\n") {
+		t.Fatalf("baseline workflow_manual missing the key-only line for %s: %s", lowestKey, baseline)
 	}
 
 	callToolWithKey(t, s, 4, key, "note.mute", map[string]any{
@@ -380,24 +383,24 @@ func TestWorkflowManualMutingOverCapAdjacentNoteFreesSlotForElidedNote(t *testin
 	if strings.Contains(afterMute, highestKey) {
 		t.Fatalf("workflow_manual after muting %s still rendered it: %s", highestKey, afterMute)
 	}
-	if !strings.Contains(afterMute, lowestKey) {
-		t.Fatalf("workflow_manual after muting the highest-priority note did not free a slot for the previously-elided %s: %s", lowestKey, afterMute)
+	if !strings.Contains(afterMute, "- [worktree] "+lowestKey+" (priority") {
+		t.Fatalf("workflow_manual after muting the highest-priority note did not free a body slot for %s: %s", lowestKey, afterMute)
 	}
-	if strings.Contains(afterMute, "lower-priority notes elided") {
-		t.Fatalf("workflow_manual after muting one of %d notes (now exactly at cap) unexpectedly still shows an elision line: %s", total, afterMute)
+	if strings.Contains(afterMute, "Key only") {
+		t.Fatalf("workflow_manual after muting one of %d notes (now exactly at cap) unexpectedly still shows a key-only line: %s", total, afterMute)
 	}
 	if !strings.Contains(afterMute, "1 muted") {
 		t.Fatalf("workflow_manual after mute missing the muted-count line: %s", afterMute)
 	}
 }
 
-// TestWorkflowManualRendersMutedLineAndElisionLineTogether drives the
+// TestWorkflowManualRendersMutedLineAndHiddenLineTogether drives the
 // "both lines render independently and together" contract through the REAL
-// MCP path: notesInjectionCap+3 notes written, the 2 lowest-priority muted
-// via note.mute, leaving notesInjectionCap+1 visible notes — 1 over-cap
-// elided and 2 muted — so both the elision line and the muted-count line
+// MCP path: notesInjectionCap+notesKeyOnlyCap+3 notes written, the 2
+// lowest-priority muted via note.mute, leaving 1 visible note past both tiers
+// — 1 hidden and 2 muted — so both the hidden line and the muted-count line
 // must appear in the same workflow_manual response.
-func TestWorkflowManualRendersMutedLineAndElisionLineTogether(t *testing.T) {
+func TestWorkflowManualRendersMutedLineAndHiddenLineTogether(t *testing.T) {
 	setupWorkflowManualNoteEnv(t)
 	root := t.TempDir()
 	initGit(t, root)
@@ -405,7 +408,7 @@ func TestWorkflowManualRendersMutedLineAndElisionLineTogether(t *testing.T) {
 	s := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, s, 1, root, nil))
 
-	total := notesInjectionCap + 3
+	total := notesInjectionCap + notesKeyOnlyCap + 3
 	notes := make([]any, 0, total)
 	for i := 0; i < total; i++ {
 		notes = append(notes, map[string]any{
@@ -419,26 +422,26 @@ func TestWorkflowManualRendersMutedLineAndElisionLineTogether(t *testing.T) {
 		"notes": notes,
 	})
 
-	// Mute the 2 lowest-priority notes: visible count drops to
-	// notesInjectionCap+1, so 1 remains over-cap elided.
+	// Mute the 2 lowest-priority notes: 1 visible note remains past both
+	// tiers, so it is hidden.
 	callToolWithKey(t, s, 3, key, "note.mute", map[string]any{
 		"layer": "worktree",
 		"keys":  []any{"both.00", "both.01"},
 	})
 
 	resp := callToolWithKey(t, s, 4, key, "workflow_manual", nil)
-	if !strings.Contains(resp, "1 lower-priority notes elided") {
-		t.Fatalf("workflow_manual missing the elision line: %s", resp)
+	if !strings.Contains(resp, "+1 hidden — ") {
+		t.Fatalf("workflow_manual missing the hidden line: %s", resp)
 	}
 	if !strings.Contains(resp, "2 muted") {
 		t.Fatalf("workflow_manual missing the muted-count line: %s", resp)
 	}
-	elisionIdx := strings.Index(resp, "lower-priority notes elided")
+	hiddenIdx := strings.Index(resp, "+1 hidden — ")
 	mutedIdx := strings.Index(resp, "note.query to view")
-	if elisionIdx < 0 || mutedIdx < 0 || elisionIdx > mutedIdx {
-		t.Fatalf("workflow_manual did not render the elision line before the muted line: %s", resp)
+	if hiddenIdx < 0 || mutedIdx < 0 || hiddenIdx > mutedIdx {
+		t.Fatalf("workflow_manual did not render the hidden line before the muted line: %s", resp)
 	}
-	if strings.Contains(resp, "both.00") || strings.Contains(resp, "both.01") {
+	if strings.Contains(resp, "both.00") || strings.Contains(resp, "both.01") || strings.Contains(resp, "both.02") {
 		t.Fatalf("workflow_manual rendered a muted note's bullet line, want it excluded entirely: %s", resp)
 	}
 }

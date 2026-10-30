@@ -662,10 +662,19 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 	// lead-scoped key, bypassing all capability restrictions. A KEYLESS caller
 	// (no session_key) is unaffected — the normal lead bootstrap path remains
 	// open.
+	//
+	// Note mutation sits beside the role gate, not inside roleAllowsTool,
+	// because it also denies lead-scoped keys that carry a parent (a ticket
+	// worker, a spawned fork): every key but a top-level lead is note
+	// read-only, and its denial names the report hand-off instead of the
+	// generic profile text.
 	if keyStr, ok := params.Arguments["session_key"].(string); ok && strings.TrimSpace(keyStr) != "" {
-		if entry, found := s.sessions.lookup(keyStr); found && entry.scope != roleLead {
-			if isLeadOnlyTool(params.Name) || !roleAllowsTool(entry.scope, params.Name) {
+		if entry, found := s.sessions.lookup(keyStr); found {
+			if entry.scope != roleLead && (isLeadOnlyTool(params.Name) || !roleAllowsTool(entry.scope, params.Name)) {
 				return errorResponse(req.ID, -32601, fmt.Sprintf("tool not available in current %s MCP profile: %s", RuntimeNamespace(), params.Name))
+			}
+			if isNoteMutationTool(params.Name) && !entry.isTopLevelLead() {
+				return errorResponse(req.ID, -32601, noteReadOnlyDenial(params.Name))
 			}
 		}
 	}
@@ -4602,12 +4611,13 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "note.write",
-			"description": "Write one or more notes to the machine (PC-global), worktree (worktree-local, ephemeral), clone (project-scoped, worktree-agnostic, untracked), or repo (git-tracked, one file per key under ai-docs/ws-notes/) note layer. A note outlives the session until erased; in-session state (a pending question, a next step) belongs in agenda.set. Full-overwrite per key, including priority. A larger integer priority is surfaced first in the workflow_manual ambient Notes block.",
+			"description": "Write one or more notes to the worktree (worktree-local, ephemeral; the default), clone (project-scoped, worktree-agnostic, untracked), machine (PC-global), or repo (git-tracked, one file per key under ai-docs/ws-notes/) note layer. A clone or machine write requires a reason. A note outlives the session until erased; in-session state (a pending question, a next step) belongs in agenda.set. Full-overwrite per key, including priority. A larger integer priority is surfaced first in the workflow_manual ambient Notes block.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
-					"layer":       enumStringProperty(`Which layer to write: "machine" (PC-global, project-agnostic), "worktree" (this worktree only, ephemeral), "clone" (this project's checkouts, worktree-agnostic, untracked), or "repo" (git-tracked, one file per key under ai-docs/ws-notes/; staging/commit rides the caller's normal git.commit).`, []string{"machine", "worktree", "clone", "repo"}),
+					"layer":       enumStringProperty(`Which layer to write: "worktree" (this worktree only, ephemeral; write here by default), "clone" (this project's checkouts, worktree-agnostic, untracked; only when a session in another worktree would fail without the fact), "machine" (PC-global, project-agnostic; only when a session in another project would fail without the fact), or "repo" (git-tracked, one file per key under ai-docs/ws-notes/; staging/commit rides the caller's normal git.commit).`, []string{"worktree", "clone", "machine", "repo"}),
+					"reason":      stringProperty(`Required when layer is "clone" or "machine", rejected as missing when empty: why a session in another worktree (clone) or another project (machine) would fail without this note. Checked only; not stored.`),
 					"notes":       objectArrayProperty(`Notes to write, each {"key": string, "value": string, "priority": integer}. priority is an integer defaulting to 0; a larger number is surfaced earlier (5 before 1).`),
 					"format":      stringProperty(`Optional output format. Use "json" for structured output.`),
 				},
@@ -4658,12 +4668,12 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "note.query",
-			"description": "Query notes by key glob and optional written_at date range. \"layer\" is optional: a single layer name (\"machine\", \"worktree\", \"clone\", or \"repo\") queries just that layer and returns a plain untagged record array (today's shape); an array of layer names, or omitting \"layer\" entirely, queries multiple/all layers and returns each record tagged with its originating layer. Results are ordered by priority descending (larger number first), then newest written_at, then key. Retrieves notes elided from the workflow_manual ambient Notes block.",
+			"description": "Query notes by key glob and optional written_at date range. \"layer\" is optional: a single layer name (\"worktree\", \"clone\", \"machine\", or \"repo\") queries just that layer and returns a plain untagged record array (today's shape); an array of layer names, or omitting \"layer\" entirely, queries multiple/all layers and returns each record tagged with its originating layer. Results are ordered by priority descending (larger number first), then newest written_at, then key. Retrieves the bodies the workflow_manual ambient Notes block lists key-only or hides.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
-					"layer":       enumStringOrArrayProperty(`Optional. Which layer(s) to search: a single "machine"/"worktree"/"clone"/"repo" string, or an array of those. Omit to search all four layers. A single-string call returns a plain, untagged record array; an array or omitted call returns each record tagged with its "layer".`, noteLayerEnumValues),
+					"layer":       enumStringOrArrayProperty(`Optional. Which layer(s) to search: a single "worktree"/"clone"/"machine"/"repo" string, or an array of those. Omit to search all four layers. A single-string call returns a plain, untagged record array; an array or omitted call returns each record tagged with its "layer". "worktree" is this worktree only; "clone" holds facts a session in another worktree needs; "machine" holds facts a session in another project needs.`, noteLayerEnumValues),
 					"glob":        stringProperty(`Optional key glob (path.Match syntax, e.g. "ticket.*"). Omit or "*" to match every key.`),
 					"from":        stringProperty("Optional inclusive lower bound on written_at (RFC3339 or a date prefix such as \"2026-08-01\")."),
 					"then":        stringProperty("Optional inclusive upper bound on written_at (RFC3339 or a date prefix)."),
@@ -5095,6 +5105,25 @@ func (s *Server) toolAllowed(name string) bool {
 		return allowed[name]
 	}
 	return true
+}
+
+// isNoteMutationTool reports whether name changes note state every session
+// sees. Mute and unmute count: they change what every Notes block shows.
+func isNoteMutationTool(name string) bool {
+	switch name {
+	case "note.write", "note.erase", "note.mute", "note.unmute":
+		return true
+	default:
+		return false
+	}
+}
+
+// noteReadOnlyDenial is the refusal a spawned session gets for a note
+// mutation. It names the hand-off, because the Notes footer tells every
+// reader to erase stale notes and a worker must learn that erasing is its
+// lead's job.
+func noteReadOnlyDenial(name string) string {
+	return fmt.Sprintf("%s is not available to a spawned session: notes are read-only here (note.query still works). Put the note's content (key, value, and the layer it needs) in your final report so your lead can write it; erasing, muting, and unmuting notes is also your lead's job.", name)
 }
 
 func roleAllowsTool(role toolRole, name string) bool {

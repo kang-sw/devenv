@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: dae665eecf19267a
 sage-review-completeness-reviewed: dae665eecf19267a
+completed: 2026-10-31
 ---
 
 # Note layer discipline - worktree-first writes, worker read-only notes, bounded ambient Notes block
@@ -193,3 +194,50 @@ throttle with a ticket-worker-shaped key (no render, no consumption), machine pi
 footer; the existing note and workflow_manual test suites, the playbook
 manifest and mirror drift tests, and the pi test suite (its fixtures carry
 the manual sentence) pass.
+
+### Result (a893f696) - 2026-10-31
+
+Landed every decision in one commit.
+
+- `note.write` rejects `clone`/`machine` without a non-empty (trimmed)
+  `reason`, which is checked and never stored (`noteWriteReasonCheck`). The
+  `note.write`/`note.query` schemas list `worktree` first and give the
+  clone/machine use criterion.
+- `callTool` denies `note.write`/`erase`/`mute`/`unmute` beside the role gate
+  to every key where `isTopLevelLead()` is false: delegate, leaf, ticket worker,
+  spawned fork. The denial names the final-report hand-off and says erasing is
+  the lead's job. `note.query` stays allowed. The `isTopLevelLead` and
+  `childRoleForPlaybookRole` comments were updated.
+- `wsnote.Compute(root, opts, bodyLimit, keyLimit)` returns
+  `Block{Text, Hidden}`. Visible machine notes come first and are exempt from
+  the caps. Non-machine notes get 20 with body, then 30 on one layer-tagged
+  `Key only (...)` line, then a `+N hidden` line. The footer is now
+  `_Post-it reminders, higher priority number first: erase stale ones immediately with `note.erase`._`.
+- `notesCleanupWarning` is prepended through
+  `injectBootstrapStalenessWarning` only for a top-level lead (in CONTINUE
+  when `isTopLevelLead`, and always in fresh-sentinel-with-root). It is
+  throttled to once per 24h per clone through
+  `<git-common-dir>/ws-notes-cleanup-nudge.json`, and the accepted residual
+  is commented at the throttle site. `workflow_state` never renders it, so
+  its byte-identity with the manual's Session State suffix is unchanged.
+- The manual's Notes paragraph was aligned (rsrc manifest regenerated, wsflow
+  and pi mirrors synced), the v0047 bootstrap example in both packages gained
+  `reason` (skills manifest regenerated), and the Pi fixtures' Notes
+  paragraph and footer were updated.
+
+Verification: `go test ./...` (agents-plugin-tool) all ok. New tests are in
+`internal/mcp/note_discipline_test.go`: reason per layer and blank forms,
+denial for the four child shapes, throttle with a ticket-worker key and across
+worktrees and the 24h boundary, fresh sentinel, and no warning at exactly 50.
+`internal/wsnote/inject_test.go` now covers machine pinning including muted
+machine notes, the 20/21/50/51 boundaries, and the footer. Also passing:
+`python3 -m unittest discover agents-plugin-wsflow/tests` (18 OK) and the pi
+`npm test` (2498 pass, 0 fail). A mutation check confirmed that the worker
+warning test fails when the top-level gate is removed. Lite review came back
+clean.
+
+Decisions: footer wraps `note.erase` in backticks (house style; the ticket
+text was an e.g.). Existing cap tests moved from the machine layer to the
+worktree layer because machine notes are now cap-exempt. Layer enum order is
+now worktree, clone, machine, repo. There was no Template Version bump for
+the v0047 example fix.
