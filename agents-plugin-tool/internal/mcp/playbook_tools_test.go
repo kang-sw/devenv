@@ -2658,7 +2658,7 @@ func TestPlaybookPrintGoldenLeadDiscuss(t *testing.T) {
 	for _, want := range []string{
 		"Ask in the classes and IDs of the workflow manual's `### Asking the user`, in prose",
 		"which are policy questions the user must decide before the next topic",
-		"Announced and technical items need no acknowledgement here. No block format and no queue; nothing here is persisted",
+		"Every item carries its `(nn)` ID, announced and technical ones included, so the user can cite any of them; those two need no acknowledgement here. No block format and no queue; nothing here is persisted",
 		"Ask the fewest policy questions, ask independent ones together, and hold one that depends on an unanswered one to a later turn",
 		"Never fill unanswered intent with inference",
 		"A policy question you asked and the user has not answered",
