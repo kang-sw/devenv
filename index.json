@@ -592,6 +592,9 @@
     "261029-chore-wsflow-no-agent-env-rename-and-setup-tool-removal": {
       "registered_at": "2026-10-29T00:09:05Z"
     },
+    "261030-bug-claude-mod-headless-compaction-and-captions": {
+      "registered_at": "2026-10-30T14:07:49Z"
+    },
     "261030-bug-tickets-move-stages-on-occupied-root": {
       "registered_at": "2026-10-30T06:10:05Z"
     },
