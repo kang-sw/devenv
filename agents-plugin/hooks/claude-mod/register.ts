@@ -49,7 +49,9 @@ import {
 // - Playbook preload (rides on the manual feature's key): a lead skill shim's
 //   `<ws-preload>` block replaced, when the skill is expanded for the model,
 //   with its playbook body read with the conversation's key, so the skill
-//   arrives with its procedure in it (see preload.ts).
+//   arrives with its procedure in it, or with a pointer line ahead of the
+//   block's fallback prose while that body is still visible in the
+//   conversation (see preload.ts).
 // - Tool-call captions (off until claude.display_summary_enabled is set): a
 //   finished, collapsed tool row, or a run the engine folds into one group,
 //   drawn as a short caption a second model call wrote, the raw row still the
@@ -975,13 +977,19 @@ export const register: Register = (on) => {
   }
 
   // Playbook preload: only this plugin's skills, and only while the manual
-  // feature holds the conversation's key. A failure passes the text through
-  // as the hooks beneath computed it.
+  // feature holds the conversation's key. A body still visible in the main
+  // conversation (an earlier expansion or main-thread read) is judged by the
+  // manual feature's dedupe, as a main-thread playbook_read would be. A
+  // failure passes the text through as the hooks beneath computed it.
   on('skill.prompt', async ($, e, next) => {
     const res = await next(e)
     const read = readPlaybook
     if (!read) return res
-    const text = await expandPreload({ skill: e.skill, text: res.text, pluginName: e.pluginName }, { plugin: $.plugin.name, key: () => manual.key(), read })
+    const repeat = async (playbook: string, body: string) => (server ? manual.preloaded(mcpToolName(server, 'playbook_read'), playbook, body) : false)
+    const text = await expandPreload(
+      { skill: e.skill, text: res.text, pluginName: e.pluginName },
+      { plugin: $.plugin.name, key: () => manual.key(), read, repeat },
+    )
     return text === undefined ? res : { text }
   }).catch(($, e, next) => next(e))
 

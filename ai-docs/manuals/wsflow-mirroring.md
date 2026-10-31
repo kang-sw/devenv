@@ -100,13 +100,15 @@ drift, and it is the one exception to "wsflow ships no wsflow-only skills":
 - Keep shipped `agents-plugin-wsflow/skills/lead-*` `SKILL.md` files as thin
   `wsflow/playbook.read(name: "<lead-name>")` entry shims; do not place
   procedure bodies there.
-- Wrap a shim's own-playbook read prose in a `<ws-preload
-  playbook="<lead-name>">` ... `</ws-preload>` block, in both packages. The
-  Claude mod replaces the block with that playbook's body when the skill is
-  expanded for the model (only for its own plugin's skills, only while it holds
-  the conversation's lead key); anywhere else the block stays and the prose
-  inside is the fallback. The attribute must name the shim's own skill, or the
-  block stays a model read. No block: `lead-revive` (inline),
+- Wrap a shim's `# Title` heading and own-playbook read prose in a
+  `<ws-preload playbook="<lead-name>">` ... `</ws-preload>` block, in both
+  packages; the heading must match the playbook's own first heading, which
+  replaces it. The Claude mod and the Pi adapter replace the block with that
+  playbook's body when the skill is expanded for the model (only for their own
+  plugin's skills, only while holding a ws session key), or with a pointer
+  when an identical copy of that playbook is already visible; anywhere else
+  the block stays and the prose inside is the fallback. The attribute must
+  name the shim's own skill, or the block stays a model read. No block: `lead-revive` (inline),
   `lead-use-mailbox` (its playbook body carries a key-specific wait command),
   and the `lead-proceed` alias (it reads another skill's playbook). Both
   packages' skill tests pin this (`EXPECTED_PRELOAD_EXCLUDED` here). The tag

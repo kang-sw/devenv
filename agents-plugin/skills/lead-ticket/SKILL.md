@@ -3,9 +3,9 @@ name: lead-ticket
 description: Create, edit, promote, drop, or close a workflow ticket. Owns the Open Decision Queue, cheap-tier fact population, and the design-review gate into `ready/`.
 ---
 
+<ws-preload playbook="lead-ticket">
 # Ticket
 
-<ws-preload playbook="lead-ticket">
 Call `ws/playbook.read(name: "lead-ticket", session_key: <your key, omit if fresh>)` for the procedure.
 </ws-preload>
 

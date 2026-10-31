@@ -76,12 +76,12 @@
  */
 
 import { readFileSync, realpathSync } from "node:fs";
-import { isAbsolute, relative, resolve } from "node:path";
-import type { ExtensionAPI, SlashCommandInfo } from "@earendil-works/pi-coding-agent";
-import { parseFrontmatter, type SkillFrontmatter } from "@earendil-works/pi-coding-agent";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
+import type { ExtensionAPI, InputEvent, InputEventResult, SlashCommandInfo } from "@earendil-works/pi-coding-agent";
+import { parseFrontmatter, stripFrontmatter, type SkillFrontmatter } from "@earendil-works/pi-coding-agent";
 import { isLeadOrFork, type SpawnRole } from "./process-role.ts";
 import { createToolPreviewTuiRef, registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
-import { dedupeRead, wsSkillKey } from "./playbook-read-dedupe.ts";
+import { dedupePlaybook, dedupeRead, wsSkillKey } from "./playbook-read-dedupe.ts";
 
 /** Lead-facing tool name (pi-lead-guide.md), registered below. */
 export const WS_SKILL_TOOL_NAME = "ws-skill";
@@ -259,15 +259,23 @@ export function isInsideDir(path: string, dir: string): boolean {
 }
 
 /**
- * The `ws-skill` body with its `<ws-preload playbook="<name>">` block replaced
+ * The skill body with its `<ws-preload playbook="<name>">` block replaced
  * by that playbook's body, read with this process's own key, or `body`
  * unchanged: a skill outside the adapter's own skills tree, an excluded
  * skill, a block naming another playbook, no key held, a failed or empty
  * read, and a read whose text carries the key all keep the block and the
  * fallback prose inside it. Only the playbook body is inlined, never session
- * state or the key. Never throws.
+ * state or the key. `repeat` answers the pointer to put in place of a
+ * playbook body that is already visible (`dedupePlaybook`'s block form), or
+ * undefined for the body itself. Never throws.
  */
-export async function expandWsSkillPreload(name: string, entryPath: string, body: string, preload: WsSkillPreload | undefined): Promise<string> {
+export async function expandWsSkillPreload(
+  name: string,
+  entryPath: string,
+  body: string,
+  preload: WsSkillPreload | undefined,
+  repeat: (playbook: string) => string | undefined = () => undefined,
+): Promise<string> {
   try {
     if (!preload || PRELOAD_EXCLUDED.has(name) || !isInsideDir(entryPath, preload.ownSkillsDir)) return body;
     const block = PRELOAD_BLOCK.exec(body);
@@ -276,10 +284,81 @@ export async function expandWsSkillPreload(name: string, entryPath: string, body
     if (!key) return body;
     const playbook = (await preload.readPlaybook(name, key)).trim();
     if (!playbook || playbook.includes(key)) return body;
-    return body.slice(0, block.index) + playbook + body.slice(block.index + block[0].length);
+    return body.slice(0, block.index) + (repeat(playbook) ?? playbook) + body.slice(block.index + block[0].length);
   } catch {
     return body;
   }
+}
+
+/**
+ * Pi's own `/skill:<name>` block (`AgentSession._expandSkillCommand`), with
+ * `body` the frontmatter-stripped, trimmed skill text. Copied from an
+ * installed Pi internal; a test pins it against the installed Pi's output.
+ */
+export function formatSkillBlock(name: string, filePath: string, body: string, args: string): string {
+  const block = `<skill name="${name}" location="${filePath}">\nReferences are relative to ${dirname(filePath)}.\n\n${body}\n</skill>`;
+  return args ? `${block}\n\n${args}` : block;
+}
+
+/** What the typed `/skill:` expansion reads besides the event. */
+export interface TypedSkillDeps {
+  commands: () => readonly SlashCommandInfo[];
+  preload: () => WsSkillPreload | undefined;
+  readFile?: (path: string) => string;
+}
+
+/**
+ * The `input` result for a typed `/skill:<name> [args]`: for one of the
+ * adapter's own skills whose preload block expands, a `transform` to Pi's
+ * own `<skill>` block around the expanded body, so Pi's skill expansion
+ * passes it through; the playbook body is a pointer when an identical copy
+ * is visible in `entries` (`dedupePlaybook`, typed copies keyed by session
+ * entry id). Only `interactive` and `rpc` input is touched (Pi expands
+ * `/skill:` only with prompt templates on, which `sendUserMessage`'s
+ * `extension` source leaves off). Anything else — another source, not a
+ * skill command, an unknown, foreign, or excluded skill, no bridge or key, a
+ * block that does not expand, any failure — is `continue`, and Pi expands the
+ * raw shim as before. A fork's first input reaches here already framed by
+ * the fork handler registered ahead of this one, so it is not a `/skill:`
+ * command and stays as before.
+ */
+export async function computeTypedSkillInput(
+  event: Pick<InputEvent, "text" | "images" | "source">,
+  entries: readonly unknown[],
+  deps: TypedSkillDeps,
+): Promise<InputEventResult> {
+  const pass: InputEventResult = { action: "continue" };
+  try {
+    if ((event.source !== "interactive" && event.source !== "rpc") || !event.text.startsWith("/skill:")) return pass;
+    // Split as `_expandSkillCommand` does, so the same text names the same skill.
+    const space = event.text.indexOf(" ");
+    const name = space === -1 ? event.text.slice(7) : event.text.slice(7, space);
+    const args = space === -1 ? "" : event.text.slice(space + 1).trim();
+    const entry = resolveSkillEntries(deps.commands()).find((e) => e.name === name);
+    if (!entry) return pass;
+    const body = stripFrontmatter((deps.readFile ?? ((p: string) => readFileSync(p, "utf8")))(entry.path)).trim();
+    const expanded = await expandWsSkillPreload(name, entry.path, body, deps.preload(), (playbook) => {
+      const decision = dedupePlaybook(entries, undefined, name, playbook, "block");
+      return decision.deduped ? decision.text : undefined;
+    });
+    if (expanded === body) return pass;
+    return { action: "transform", text: formatSkillBlock(entry.name, entry.path, expanded, args), images: event.images };
+  } catch {
+    return pass;
+  }
+}
+
+/**
+ * Registers the typed `/skill:` expansion as an `input` handler. Pi runs one
+ * extension's `input` handlers in registration order, each on the text the
+ * one before returned, so the caller registers this after the fork
+ * first-input framing handler.
+ */
+export function registerTypedSkillExpansion(pi: Pick<ExtensionAPI, "on" | "getCommands">, preload: () => WsSkillPreload | undefined): void {
+  pi.on("input", async function typedSkillExpansion(event, ctx) {
+    const entries = ctx?.sessionManager?.buildContextEntries?.() ?? [];
+    return computeTypedSkillInput(event, entries, { commands: () => pi.getCommands(), preload });
+  });
 }
 
 /**
@@ -307,11 +386,10 @@ export function addSkillToolIfLeadOrFork(activeTools: readonly string[], role: S
  * `ws-skill` is ever ACTIVE for a given session is `addSkillToolIfLeadOrFork`'s
  * job, not this function's. `preload` is read per call too, for the same
  * reason (the bridge and its key arrive at `session_start`): a successful
- * read's `<ws-preload>` block is expanded through `expandWsSkillPreload`
- * before the dedupe sees the text. Pi's own `/skill:<name>` expansion has no
- * extension hook (its `input` event fires before the expansion, on the raw
- * command line), so a typed `/skill:` command keeps the block and its
- * fallback prose.
+ * read's `<ws-preload>` block is expanded through `expandWsSkillPreload`,
+ * its playbook deduped as one unit with `ws__playbook_read` and typed
+ * `/skill:` copies. A typed `/skill:` command is expanded by
+ * `registerTypedSkillExpansion`'s `input` handler instead.
  */
 export function registerWsSkillTool(
   pi: ExtensionAPI,
@@ -338,8 +416,14 @@ export function registerWsSkillTool(
       // A successful read is known by that name; an expansion that passes
       // through leaves the plain body, which dedupes as before.
       const entryPath = entries.find((e) => e.name === p.name)!.path;
-      const text = await expandWsSkillPreload(p.name, entryPath, read.text, preload());
       const visibleEntries = toolCtx?.sessionManager?.buildContextEntries?.() ?? [];
+      // An inlined playbook dedupes as its playbook unit (with ws__playbook_read
+      // and typed /skill: copies); a skill that inlined nothing dedupes whole.
+      const text = await expandWsSkillPreload(p.name, entryPath, read.text, preload(), (playbook) => {
+        const decision = dedupePlaybook(visibleEntries, toolCallId, p.name, playbook, "block");
+        return decision.deduped ? decision.text : undefined;
+      });
+      if (text !== read.text) return { content: [{ type: "text", text }] };
       const decision = dedupeRead(visibleEntries, toolCallId, "ws-skill", wsSkillKey(p), text);
       return { content: [{ type: "text", text: decision.text }] };
     },

@@ -7,7 +7,9 @@ import type { SessionCompactResult, SessionCompactTrigger } from 'claude-code'
  * `workflow_manual` call with the session state alone while the system prompt
  * carries the manual, and collapses a repeat `playbook_read` or
  * `workflow_manual` result to a pointer while the earlier identical result is
- * still in the conversation. A main-thread `workflow_manual` call with another
+ * still in the conversation; a playbook body the preload inlined (preload.ts)
+ * is an earlier copy too, and the preload asks the same check through
+ * `preloaded`. A main-thread `workflow_manual` call with another
  * lead key (a revive), or with the fresh-bootstrap sentinel whose result
  * carries the key ws-mcp minted, is adopted as the conversation's key, and
  * every key the conversation gets is handed to the mailbox push through the
@@ -126,12 +128,30 @@ export function headings(text: string): string {
   return found.length > 0 ? found.join('; ') : '(no headings)'
 }
 
-/** What a repeat read returns in place of `text`, its unchanged result. */
+/** What a repeat read returns in place of `text`, its unchanged result, when the earlier copy is a result of the same tool. */
 export function pointerText(family: ReadFamily, text: string): string {
   const lead = `The result is unchanged. Continue using the full result of your earlier \`${family}\` call in this conversation`
   return family === 'workflow_manual'
     ? `${lead} as your current session state; call workflow_manual again after you change agenda, todos, or notes. (headings: ${headings(text)})`
     : `${lead}. Do not read it again (headings: ${headings(text)}).`
+}
+
+/**
+ * What a repeat `playbook_read` returns in place of `text` when the earlier
+ * copy is a skill expansion's inlined body: no earlier call exists to name.
+ */
+export function inlinedPointerText(text: string): string {
+  return `The result is unchanged. Its full text is already above in this conversation, inlined when a skill loaded it; continue using that copy. Do not read it again (headings: ${headings(text)}).`
+}
+
+/**
+ * The line a repeat preload puts ahead of its block's fallback prose. The
+ * prose stays because the hook cannot tell a subagent preload from a lead
+ * load: a reader that cannot see the main conversation's copy reads the
+ * playbook itself.
+ */
+export function preloadPointerLine(playbook: string): string {
+  return `The full \`${playbook}\` procedure is already above in this conversation. If you can see that copy, follow it and skip the read instructions below; they are only for a context that cannot see it.`
 }
 
 /** The part of a keyed `workflow_manual` response before its `## Session Key` line, or undefined without one. */
@@ -183,15 +203,13 @@ function stable(value: unknown): string {
 }
 
 /**
- * The dedupe key of a read's arguments: `playbook_read` by `name` and
- * `context` (its outer `session_key` only picks override layers; a
- * `context.session_key` is substitution data and stays in), `workflow_manual`
+ * The dedupe key of a read's arguments: `playbook_read` by `name` alone, the
+ * playbook being the unit (a `context` that renders a different body is told
+ * apart by the body, so it does not split identical ones), `workflow_manual`
  * by `session_key`.
  */
 export function readKey(family: ReadFamily, args: Record<string, unknown>): string {
-  return family === 'playbook_read'
-    ? stable({ name: args.name, context: args.context })
-    : stable({ session_key: args.session_key ?? null })
+  return family === 'playbook_read' ? stable({ name: args.name }) : stable({ session_key: args.session_key ?? null })
 }
 
 /** A cheap 53-bit hash, for the memory hint only: a collision costs one conversation read, never a wrong pointer. */
@@ -208,8 +226,13 @@ export function hashText(text: string): string {
   return `${text.length}:${(4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36)}`
 }
 
-/** One message of the conversation in Messages API form, as far as the dedupe reads it. */
-export type ApiMessageLike = { role: string; content: readonly { type: string; [field: string]: unknown }[] }
+/**
+ * One message of the conversation in Messages API form, as far as the dedupe
+ * reads it. A skill expansion arrives as a user message's `text` block (after
+ * the Skill tool's own result when the model invoked it); content may also be
+ * a plain string.
+ */
+export type ApiMessageLike = { role: string; content: string | readonly { type: string; [field: string]: unknown }[] }
 
 function blockText(content: unknown): string | undefined {
   if (typeof content === 'string') return content
@@ -218,37 +241,71 @@ function blockText(content: unknown): string | undefined {
   return texts.length > 0 ? texts.join('\n') : undefined
 }
 
+/** Which earlier copy a repeat collapses onto: a result of the same tool, or a body a skill expansion inlined. */
+export type Copy = 'result' | 'inlined'
+
 /**
- * Whether a fresh read whose result the model would see as `fresh` collapses
- * to a pointer, judged by the conversation alone: among the earlier results
- * of calls to `tool` with the same key, exactly one is `fresh` itself and none
- * is its pointer. So the read after a pointer returns the full text again,
- * and an earlier result gone from the conversation (compaction, `/clear`, a
- * rewind) is not a repeat.
+ * The earlier copy a fresh read whose result the model would see as `fresh`
+ * collapses onto, or undefined when it is no repeat, judged by the
+ * conversation alone: exactly one earlier copy is `fresh` itself and none is
+ * a pointer to it. A copy is a result of a call to `tool` with the same key;
+ * for `playbook_read` it is also the body inside a user message's own text (a
+ * skill expansion the preload inlined), and its pointers include the preload
+ * pointer line, so a playbook is one unit across both paths. Playbook bodies
+ * compare trimmed, as the preload inlines them. So the read after a pointer
+ * returns the full text again, and an earlier copy gone from the conversation
+ * (compaction, `/clear`, a rewind) is not a repeat.
  */
-export function isRepeat(messages: readonly ApiMessageLike[], tool: string, family: ReadFamily, key: string, fresh: string): boolean {
+export function repeatOf(
+  messages: readonly ApiMessageLike[],
+  tool: string,
+  family: ReadFamily,
+  args: Record<string, unknown>,
+  fresh: string,
+): Copy | undefined {
+  const playbook = family === 'playbook_read'
+  const body = playbook ? fresh.trim() : fresh
+  if (playbook && !body) return undefined
+  const key = readKey(family, args)
   const calls = new Set<string>()
   for (const m of messages) {
-    if (m.role !== 'assistant') continue
+    if (m.role !== 'assistant' || typeof m.content === 'string') continue
     for (const b of m.content) {
       if (b.type !== 'tool_use' || b.name !== tool || typeof b.id !== 'string') continue
       const input = b.input && typeof b.input === 'object' ? (b.input as Record<string, unknown>) : {}
       if (readKey(family, input) === key) calls.add(b.id)
     }
   }
-  const pointer = pointerText(family, fresh)
-  let full = 0
-  let pointers = 0
+  const pointers = playbook ? [pointerText(family, fresh), inlinedPointerText(fresh)] : [pointerText(family, fresh)]
+  const line = playbook && typeof args.name === 'string' ? preloadPointerLine(args.name) : undefined
+  let results = 0
+  let inlined = 0
+  let pointed = 0
+  const ownText = (text: string) => {
+    if (!playbook) return
+    if (text.includes(body)) inlined += 1
+    if (line !== undefined && text.includes(line)) pointed += 1
+  }
   for (const m of messages) {
     if (m.role !== 'user') continue
+    if (typeof m.content === 'string') {
+      ownText(m.content)
+      continue
+    }
     for (const b of m.content) {
+      if (b.type === 'text' && typeof b.text === 'string') {
+        ownText(b.text)
+        continue
+      }
       if (b.type !== 'tool_result' || b.is_error === true || typeof b.tool_use_id !== 'string' || !calls.has(b.tool_use_id)) continue
       const text = blockText(b.content)
-      if (text === fresh) full += 1
-      else if (text === pointer) pointers += 1
+      if (text === undefined) continue
+      if ((playbook ? text.trim() : text) === body) results += 1
+      else if (pointers.includes(text)) pointed += 1
     }
   }
-  return full === 1 && pointers === 0
+  if (results + inlined !== 1 || pointed !== 0) return undefined
+  return results === 1 ? 'result' : 'inlined'
 }
 
 /** The stored lead key of a $.store entry, or undefined. */
@@ -346,6 +403,14 @@ export type Manual = {
    * not an error) may adopt its key. Never throws.
    */
   read: (family: ReadFamily, tool: string, args: Record<string, unknown>, text: string) => Promise<string | undefined>
+  /**
+   * Whether a preload's `body` of `playbook` repeats a copy still visible in
+   * the main conversation, judged as a main-thread read of `tool` (the
+   * model-facing `playbook_read`) with that name would be, so a playbook is one
+   * dedupe unit across both paths. Records the body as the unit's hint. Never
+   * throws; false outside a ws project.
+   */
+  preloaded: (tool: string, playbook: string, body: string) => Promise<boolean>
   /** Whether the conversation's snapshot carries the section (for tests and logs). */
   snapshot: () => boolean
   /** The conversation's key, or undefined (the playbook preload reads with it; tests and logs). */
@@ -548,19 +613,29 @@ export function createManual(): Manual {
     }
   }
 
-  const dedupe = async (family: ReadFamily, tool: string, args: Record<string, unknown>, fresh: string): Promise<string> => {
-    const key = readKey(family, args)
-    const hint = `${family}\n${key}`
-    const hash = hashText(fresh)
+  /**
+   * The one hint memory and visibility check both read paths share: a main-thread
+   * read here, and a preload through `preloaded`. The conversation is read only
+   * when the text matches the unit's hint; never throws.
+   */
+  const repeat = async (family: ReadFamily, tool: string, args: Record<string, unknown>, fresh: string): Promise<Copy | undefined> => {
+    const hint = `${family}\n${readKey(family, args)}`
+    const hash = hashText(family === 'playbook_read' ? fresh.trim() : fresh)
     const seen = hints.get(hint) === hash
     hints.set(hint, hash)
-    if (!seen || !edges) return fresh
+    if (!seen || !edges) return undefined
     try {
-      return isRepeat(await edges.messages(), tool, family, key, fresh) ? pointerText(family, fresh) : fresh
+      return repeatOf(await edges.messages(), tool, family, args, fresh)
     } catch (err) {
       debug(`conversation read failed: ${String(err)}`)
-      return fresh
+      return undefined
     }
+  }
+
+  const dedupe = async (family: ReadFamily, tool: string, args: Record<string, unknown>, fresh: string): Promise<string> => {
+    const copy = await repeat(family, tool, args, fresh)
+    if (copy === undefined) return fresh
+    return copy === 'inlined' ? inlinedPointerText(fresh) : pointerText(family, fresh)
   }
 
   /**
@@ -688,6 +763,8 @@ export function createManual(): Manual {
         return undefined
       }
     },
+
+    preloaded: async (tool, playbook, body) => (gate === true ? (await repeat('playbook_read', tool, { name: playbook }, body)) !== undefined : false),
 
     snapshot: () => snapshot,
     key: () => current,

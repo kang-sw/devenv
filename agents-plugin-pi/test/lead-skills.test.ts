@@ -14,17 +14,22 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import type { ExtensionAPI, SlashCommandInfo, SourceInfo } from "@earendil-works/pi-coding-agent";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { AgentSession, createEventBus, discoverAndLoadExtensions, SessionManager, type ExtensionAPI, type SlashCommandInfo, type SourceInfo } from "@earendil-works/pi-coding-agent";
+import { findActivePlaybook, humanTextOf } from "../src/lead-compaction.ts";
 import {
   WS_SKILL_TOOL_NAME,
   addSkillToolIfLeadOrFork,
   buildSkillsBlock,
+  computeTypedSkillInput,
   computeWsSkillResult,
   expandWsSkillPreload,
+  formatSkillBlock,
   isInsideDir,
   loadSkillFile,
   PRELOAD_EXCLUDED,
+  registerTypedSkillExpansion,
   registerWsSkillTool,
   resolveSkillEntries,
   type LoadedSkill,
@@ -367,7 +372,20 @@ describe("registerWsSkillTool (fake pi)", () => {
       { type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "two", name: "ws-skill", arguments: { name: "lead-discuss" } }] } },
     ] } };
     const second = await tool.execute("two", { name: "lead-discuss" }, undefined, undefined, context);
-    assert.match(second.content[0].text, /^The result is unchanged\./);
+    // The inlined playbook dedupes as its unit: the shim text stays, the body becomes a pointer.
+    assert.match(second.content[0].text, /^# Discuss\n\nThe full `lead-discuss` procedure is already present 1 tool call ago; follow it and do not read it again \(headings: # lead-discuss; ## Steps\)\.\n<!-- ws-pi-read-dedupe-v1 \{"family":"playbook",[^\n]*"originalToolCallId":"one"\} -->$/);
+    const after = { sessionManager: { buildContextEntries: () => [
+      ...context.sessionManager.buildContextEntries(),
+      { type: "message", message: { role: "toolResult", toolCallId: "two", content: second.content, isError: false } },
+      { type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "three", name: "ws-skill", arguments: { name: "lead-discuss" } }] } },
+    ] } };
+    assert.equal((await tool.execute("three", { name: "lead-discuss" }, undefined, undefined, after)).content[0].text, first.content[0].text, "the copy after a pointer is full");
+    const viaRead = { sessionManager: { buildContextEntries: () => [
+      { type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "r", name: "ws__playbook_read", arguments: { name: "lead-discuss" } }] } },
+      { type: "message", message: { role: "toolResult", toolCallId: "r", content: [{ type: "text", text: "# lead-discuss\n## Steps\nwork\n" }], isError: false } },
+      { type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "four", name: "ws-skill", arguments: { name: "lead-discuss" } }] } },
+    ] } };
+    assert.match((await tool.execute("four", { name: "lead-discuss" }, undefined, undefined, viaRead)).content[0].text, /^# Discuss\n\nThe full `lead-discuss` procedure is already present 1 tool call ago;[^\n]*\n<!-- [^\n]*"originalToolCallId":"r"\} -->$/, "an earlier ws__playbook_read copy is the same unit");
   });
 
   test("an expansion failure returns the plain body, which still dedupes; an unknown skill still bypasses dedupe", async () => {
@@ -442,5 +460,95 @@ describe("expandWsSkillPreload", () => {
     const link = join(mkdtempSync(join(tmpdir(), "ws-pi-preload-link-")), "skills");
     symlinkSync(own, link);
     assert.equal(isInsideDir(join(link, "linked-skill", "SKILL.md"), own), true);
+  });
+});
+
+describe("typed /skill: expansion", () => {
+  const own = mkdtempSync(join(tmpdir(), "ws-pi-typed-own-"));
+  const shim = '# Discuss\n\n<ws-preload playbook="lead-discuss">\nfallback prose\n</ws-preload>';
+  const path = join(own, "lead-discuss", "SKILL.md");
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `---\nname: lead-discuss\ndescription: d\n---\n${shim}\n`);
+  const playbook = "# lead-discuss\n\n## Steps\nwork";
+  const deps = (over: Partial<WsSkillPreload> = {}, commands = [skillCommand("lead-discuss", "d", path)]) => ({
+    commands: () => commands,
+    preload: () => ({ ownSkillsDir: own, sessionKey: "lead-key", readPlaybook: async () => `${playbook}\n`, ...over }),
+  });
+  const typed = (text: string, source: "interactive" | "rpc" | "extension" = "interactive") => ({ text, source, images: undefined });
+
+  test("an own skill becomes Pi's own <skill> block around the expanded body, args kept", async () => {
+    const result = await computeTypedSkillInput(typed("/skill:lead-discuss  pick the  tier "), [], deps());
+    assert.deepEqual(result, { action: "transform", text: formatSkillBlock("lead-discuss", path, `# Discuss\n\n${playbook}`, "pick the  tier"), images: undefined });
+    assert.equal((await computeTypedSkillInput(typed("/skill:lead-discuss", "rpc"), [], deps())).action, "transform");
+  });
+
+  test("passes through: another source, not a skill command, unknown/foreign/excluded skill, no bridge, failed read", async () => {
+    const foreign = join(mkdtempSync(join(tmpdir(), "ws-pi-typed-foreign-")), "SKILL.md");
+    writeFileSync(foreign, `---\nname: lead-discuss\n---\n${shim}\n`);
+    const mailbox = join(own, "lead-use-mailbox", "SKILL.md");
+    mkdirSync(dirname(mailbox), { recursive: true });
+    writeFileSync(mailbox, `---\nname: lead-use-mailbox\n---\n${shim.replace("lead-discuss", "lead-use-mailbox")}\n`);
+    const cases: [ReturnType<typeof typed>, ReturnType<typeof deps> | { commands: () => SlashCommandInfo[]; preload: () => undefined }][] = [
+      [typed("/skill:lead-discuss", "extension"), deps()],
+      [typed("please /skill:lead-discuss"), deps()],
+      [typed("/skill:missing"), deps()],
+      [typed("/skill:lead-discuss"), deps({}, [skillCommand("lead-discuss", "d", foreign)])],
+      [typed("/skill:lead-use-mailbox"), deps({}, [skillCommand("lead-use-mailbox", "d", mailbox)])],
+      [typed("/skill:lead-discuss"), { commands: () => [skillCommand("lead-discuss", "d", path)], preload: () => undefined }],
+      [typed("/skill:lead-discuss"), deps({ sessionKey: undefined })],
+      [typed("/skill:lead-discuss"), deps({ readPlaybook: async () => Promise.reject(new Error("down")) })],
+      [typed("/skill:lead-discuss"), { ...deps(), commands: () => { throw new Error("boom"); } }],
+    ];
+    for (const [event, d] of cases) assert.deepEqual(await computeTypedSkillInput(event, [], d), { action: "continue" }, event.text);
+  });
+
+  test("a visible copy of the playbook turns the inlined body into a pointer keyed by the copy", async () => {
+    const entries = [
+      { type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "r", name: "ws__playbook_read", arguments: { name: "lead-discuss" } }] } },
+      { type: "message", message: { role: "toolResult", toolCallId: "r", content: [{ type: "text", text: playbook }], isError: false } },
+    ];
+    const result = await computeTypedSkillInput(typed("/skill:lead-discuss"), entries, deps());
+    assert.equal(result.action, "transform");
+    assert.match((result as { text: string }).text, /\n\n# Discuss\n\nThe full `lead-discuss` procedure is already present earlier in this conversation; [^\n]*\n<!-- [^\n]*"originalToolCallId":"r"\} -->\n<\/skill>$/);
+  });
+
+  test("the block format matches the installed Pi's _expandSkillCommand", () => {
+    const fakeThis = { resourceLoader: { getSkills: () => ({ skills: [{ name: "lead-discuss", filePath: path, baseDir: dirname(path) }] }) }, _extensionRunner: { emitError() {} } };
+    const expand = (text: string) => (AgentSession.prototype as unknown as { _expandSkillCommand(this: unknown, t: string): string })._expandSkillCommand.call(fakeThis, text);
+    assert.equal(formatSkillBlock("lead-discuss", path, shim, "some args"), expand("/skill:lead-discuss some args"));
+    assert.equal(formatSkillBlock("lead-discuss", path, shim, ""), expand("/skill:lead-discuss"));
+    // Pi's expansion passes the transformed text through unchanged.
+    const block = formatSkillBlock("lead-discuss", path, `# Discuss\n\n${playbook}`, "x");
+    assert.equal(expand(block), block);
+  });
+
+  test("the transformed message still reads as the typed command for compaction", async () => {
+    const result = await computeTypedSkillInput(typed("/skill:lead-discuss pick a tier"), [], deps()) as { text: string };
+    assert.equal(humanTextOf(result.text), "/skill:lead-discuss pick a tier");
+    const manager = SessionManager.inMemory(mkdtempSync(join(tmpdir(), "ws-pi-typed-compact-")));
+    manager.appendMessage({ role: "user", content: result.text, timestamp: 1 });
+    assert.deepEqual(findActivePlaybook(manager.getBranch()), { name: "lead-discuss", via: "/skill" });
+  });
+
+  test("registers a named input handler reading the live context", async () => {
+    const handlers: ((event: unknown, ctx: unknown) => Promise<unknown>)[] = [];
+    registerTypedSkillExpansion({ on: (event: string, handler: never) => { assert.equal(event, "input"); handlers.push(handler); }, getCommands: () => [skillCommand("lead-discuss", "d", path)] } as never, deps().preload);
+    assert.equal(handlers.length, 1);
+    assert.equal((handlers[0] as { name: string }).name, "typedSkillExpansion");
+    assert.equal(((await handlers[0]!(typed("/skill:lead-discuss"), { sessionManager: { buildContextEntries: () => [] } })) as { action: string }).action, "transform");
+    assert.equal(((await handlers[0]!(typed("/skill:lead-discuss"), undefined)) as { action: string }).action, "transform");
+  });
+
+  test("the extension registers it after the fork first-input framing handler, and framed fork text passes through", async () => {
+    const root = mkdtempSync(join(tmpdir(), "ws-pi-typed-loader-"));
+    const extensionPath = fileURLToPath(new URL("../src/index.ts", import.meta.url));
+    const loaded = await discoverAndLoadExtensions([extensionPath], root, join(root, "agent"), createEventBus());
+    assert.deepEqual(loaded.errors, []);
+    const input = loaded.extensions.find((candidate) => candidate.resolvedPath === extensionPath)!.handlers.get("input") ?? [];
+    const fork = input.findIndex((handler) => String(handler).includes("frameForkInput"));
+    const typedIndex = input.findIndex((handler) => handler.name === "typedSkillExpansion");
+    assert.ok(fork !== -1 && typedIndex !== -1 && fork < typedIndex, `fork ${fork}, typed ${typedIndex}`);
+    const framed = `Current fork-owned ws session_key: k. Use this key.\n\n/skill:lead-discuss`;
+    assert.deepEqual(await computeTypedSkillInput(typed(framed), [], deps()), { action: "continue" });
   });
 });

@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 21223f5fd81143b5
 sage-review-completeness-reviewed: 21223f5fd81143b5
+completed: 2026-10-31
 ---
 
 # ws-preload - dedupe inlined playbooks by playbook unit (Claude mod + Pi)
@@ -217,6 +218,43 @@ full body; `lead-use-mailbox` and other plugins untouched. A test asserts
 every `<ws-preload>` shim's `# <title>` sits inside its block in both
 packages.
 
+### Result (72808475a) - 2026-10-31
+
+Landed: `manual.ts` `repeatOf` (replaces `isRepeat`) counts `playbook_read`
+results (trimmed for playbooks) and the body inside user-message text as
+copies, and both tool-side pointers and the preload pointer line as
+pointers; `readKey` keys `playbook_read` by `name` alone; a read whose one
+copy is an expansion gets `inlinedPointerText` ("already above in this
+conversation, inlined when a skill loaded it"). `preload.ts` gains a
+`repeat(playbook, body)` edge, bound in `register.ts` to
+`Manual.preloaded`, which shares the read path's hint memory and visibility
+check; a repeat replaces the block with `preloadPointerLine` plus the
+block's fallback prose. Mod mirrored byte-identical to wsflow; both
+`hooks.json` descriptions updated. Every `<ws-preload>` shim's `# <title>`
+moved inside its block (10 ws, 12 wsflow); skills manifest regenerated.
+
+Live probe (Claude Code 2.1.314, `claude -p`, a scratch probe plugin whose
+`skill.prompt` hook logged `$.session.messages({ as: 'api' })`; a scratch
+plugin avoided a name clash with the installed ws plugin): the first
+expansion is visible at the second `skill.prompt`. A model-invoked Skill is
+a user message whose `content` is a block array: a `tool_result` ("Launching
+skill: <name>", string content) and a `text` block holding the whole
+expanded skill text. A typed slash command is a user message whose text
+blocks include `<command-name>...` and then the expanded text. So the
+inlined body is a substring of a user text block, never a whole block;
+`repeatOf` matches it by inclusion, and `ApiMessageLike.content` accepts a
+string or blocks.
+
+Verification: `claude plugin test` in `agents-plugin` and
+`agents-plugin-wsflow`: 538 pass, 0 fail each; `claude plugin validate`
+passes for both; `python3 -m unittest
+agents-plugin-wsflow/tests/test_wsflow_skill_bundle.py`: 12 tests OK;
+`go test ./...` in `agents-plugin-tool`: exit 0. Engine tests in
+`manual-engine.test.ts` cover every case listed above. The heading test
+(`test_preload_shim_headings_sit_inside_their_blocks`) lives in the wsflow
+bundle test, which already reads both packages' skills; it checks each
+heading against its rsrc playbook heading and failed on the old shims.
+
 ### Phase 2: Pi playbook-unit dedupe and typed /skill: expansion
 
 Scope: `agents-plugin-pi/src/lead-skills.ts`, `agents-plugin-pi/src/index.ts`,
@@ -244,3 +282,39 @@ active playbook by `lead-compaction.ts` (`SKILL_EXPANSION_RE` /
 Live checks after a plugin reinstall stay with the owner: in Claude, invoke
 a lead skill twice and see a pointer the second time; in Pi, type
 `/skill:lead-tune` and see the playbook body.
+
+### Result (21e0ea53e) - 2026-10-31
+
+Landed: `playbook-read-dedupe.ts` `dedupePlaybook` is one playbook unit
+across `ws__playbook_read` results (trimmed body equal), `ws-skill` results
+containing the body, and user messages containing it (typed `/skill:`
+copies, provenanced by session entry id; a copy with no id is never pointed
+at). Calls key by playbook name only; any pointer candidate of the unit
+(either pointer prose, a marker in a read result, or a parsed unit marker in
+ws-skill or user text), valid or not, yields the full body, so forged and
+stale markers never suppress a read. Pointer forms: `"result"` keeps Pi's
+pointer prose; `"block"` ("The full `<name>` procedure is already present
+...") replaces a preload block; both carry the
+`ws-pi-read-dedupe-v1` marker, with no fallback prose. The `"playbook.read"`
+family and `playbookReadKey` are gone. `bridge.ts` playbook.read uses the
+result form; `ws-skill` expansion uses the block form, keeping the
+whole-result dedupe only for a skill that inlined nothing.
+`computeTypedSkillInput` / `registerTypedSkillExpansion` (`lead-skills.ts`)
+transform an interactive or rpc `/skill:<own skill>` into Pi's own `<skill>`
+block (`formatSkillBlock`) around the expanded body; every other case
+continues. `index.ts` defines the preload getter once and registers the
+handler after the fork first-input framing handler, with an order comment.
+Header and `registerWsSkillTool` docs updated; `wsflow-mirroring.md` now
+says the heading sits inside the block and the Pi adapter expands it too.
+
+Verification: Pi `npm test`: 2514 tests, 31 fail, 1 cancelled; the failing
+set is identical to the base run at acc7e77ed (2507 tests, 31 fail, 1
+cancelled). New tests cover the transform, each pass-through case
+(`extension` source, non-command text, unknown, foreign, excluded, no
+bridge, no key, read failure, throw), cross-path dedupe among `ws-skill`,
+typed, and `ws__playbook_read`, forged/stale/broken markers, an entry
+without id, compaction of a typed copy, the block format pinned against the
+installed `AgentSession.prototype._expandSkillCommand`, the handler order via
+`discoverAndLoadExtensions` plus framed fork text continuing, and
+`humanTextOf` / `findActivePlaybook` on the transformed message. Lite review
+of acc7e77ed..21e0ea53e: clean.

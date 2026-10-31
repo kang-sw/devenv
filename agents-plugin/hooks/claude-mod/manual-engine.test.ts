@@ -1,7 +1,7 @@
 import { expect, mock, test, type TestBody } from 'claude-code/testing'
 
 import { CONTINUATION_WINDOW_MS, SETTLE_MS } from './compaction'
-import { adoptionNotice, KEY_STORE_PREFIX, MAILBOX_LINE, pointerText, SECTION_ID } from './manual'
+import { adoptionNotice, inlinedPointerText, KEY_STORE_PREFIX, MAILBOX_LINE, pointerText, preloadPointerLine, SECTION_ID } from './manual'
 import { KNOB } from './register'
 import { resumeText } from './timing'
 
@@ -822,9 +822,11 @@ test('a session end cancels an automatic bind whose slug lookup is still in flig
 // The playbook preload: a lead skill shim's `<ws-preload>` block replaced with
 // its playbook body, read with the conversation's key the manual feature holds.
 
-/** A shim with today's fallback prose inside the block, as the skill computes it. */
-const shim = (title: string, playbook: string) =>
-  `# ${title}\n\n<ws-preload playbook="${playbook}">\nCall \`ws/playbook.read(name: "${playbook}")\` and execute the returned procedure.\n</ws-preload>\n\nARGUMENTS: decide the thing\n`
+/** The block's fallback prose: the shim's heading, then the read instructions. */
+const fallback = (title: string, playbook: string) => `# ${title}\n\nCall \`ws/playbook.read(name: "${playbook}")\` and execute the returned procedure.`
+
+/** A shim with its heading and today's fallback prose inside the block, as the skill computes it. */
+const shim = (title: string, playbook: string) => `<ws-preload playbook="${playbook}">\n${fallback(title, playbook)}\n</ws-preload>\n\nARGUMENTS: decide the thing\n`
 
 /** `pluginName` null: a project skill, which comes from no plugin. */
 async function expand($: Engine, w: World, skill: string, text: string, pluginName: string | null = w.plugin) {
@@ -840,7 +842,7 @@ test('preload: a ws lead skill block is replaced with its playbook body, read wi
   await start($, w)
   const before = w.mcpCalls.length
   const text = await expand($, w, 'lead-discuss', shim('Discuss', 'lead-discuss'))
-  expect(text).toBe('# Discuss\n\n# lead-discuss\n\nThe lead-discuss procedure.\n\nARGUMENTS: decide the thing\n')
+  expect(text).toBe('# lead-discuss\n\nThe lead-discuss procedure.\n\nARGUMENTS: decide the thing\n')
   // The one read the expansion makes: the playbook, never the state.
   expect(w.mcpCalls.slice(before)).toEqual([{ server: `plugin:${w.plugin}:${w.plugin}`, tool: 'playbook_read', args: { name: 'lead-discuss', session_key: 'minted-1' } }])
   // A namespaced skill name expands the same way.
@@ -907,4 +909,83 @@ test('preload: after /clear the block passes through until the next conversation
   const original = shim('Discuss', 'lead-discuss')
   expect(await expand($, w, 'lead-discuss', original)).toBe(original)
   expect(playbookReads(w)).toEqual([])
+})
+
+// The playbook is one dedupe unit across the preload and main-thread reads,
+// judged by what the conversation still shows.
+
+/** Record an expansion the model saw as the Skill tool delivers it: its own result, then the text block. */
+function rememberSkill(w: World, skill: string, text: string) {
+  const id = `sk-${w.messages.length}`
+  w.messages.push({ role: 'assistant', content: [{ type: 'tool_use', id, name: 'Skill', input: { skill } }] })
+  w.messages.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: `Launching skill: ${skill}` }, { type: 'text', text }] })
+}
+
+/** A playbook text whose trimmed form equals what core answers for a model read of it. */
+const sameBody = (name: string) => `# ${name}\n## Steps\nwork\n`
+
+/** The expansion's pointer form: the pointer line ahead of the block's fallback prose. */
+const pointed = (title: string, playbook: string) => `${preloadPointerLine(playbook)}\n\n${fallback(title, playbook)}\n\nARGUMENTS: decide the thing\n`
+
+test('preload dedupe: a skill invoked twice gets the pointer and its fallback prose the second time, and a read after that gets the full body', async ($, on) => {
+  const w = world(on, { knobs: ON })
+  w.playbookText = sameBody
+  await start($, w)
+  const first = await expand($, w, 'lead-run', shim('Run', 'lead-run'))
+  expect(first).toBe('# lead-run\n## Steps\nwork\n\nARGUMENTS: decide the thing\n')
+  expect(w.messageReads).toBe(0)
+  rememberSkill(w, `${w.plugin}:lead-run`, first)
+  const second = await expand($, w, 'lead-run', shim('Run', 'lead-run'))
+  expect(second).toBe(pointed('Run', 'lead-run'))
+  rememberSkill(w, `${w.plugin}:lead-run`, second)
+  // A read after a pointer of either kind means the reader lost the copy: the full body.
+  const args = { name: 'lead-run', session_key: 'minted-1' }
+  expect(seen(await read($, w, 'playbook_read', args))).toBe('# lead-run\n## Steps\nwork')
+})
+
+test('preload dedupe: a read after the expansion gets the pointer naming the inlined copy; gone from the conversation, the full body', async ($, on) => {
+  const w = world(on, { knobs: ON })
+  w.playbookText = sameBody
+  await start($, w)
+  rememberSkill(w, `${w.plugin}:lead-run`, await expand($, w, 'lead-run', shim('Run', 'lead-run')))
+  const args = { name: 'lead-run', session_key: 'minted-1' }
+  const res = await read($, w, 'playbook_read', args)
+  expect(res.result).toBe(inlinedPointerText('# lead-run\n## Steps\nwork'))
+  expect(res.result).not.toContain('earlier `playbook_read` call')
+  // A compaction took the expansion away: the read and the next expansion are full again.
+  w.messages = []
+  expect(seen(await read($, w, 'playbook_read', args))).toBe('# lead-run\n## Steps\nwork')
+  w.messages = []
+  expect(await expand($, w, 'lead-run', shim('Run', 'lead-run'))).toBe('# lead-run\n## Steps\nwork\n\nARGUMENTS: decide the thing\n')
+})
+
+test('preload dedupe: an expansion after a visible read gets the pointer and its fallback prose; a context read with a different body stays full', async ($, on) => {
+  const w = world(on, { knobs: ON })
+  w.playbookText = sameBody
+  await start($, w)
+  const args = { name: 'lead-ticket', session_key: 'minted-1' }
+  const full = seen(await read($, w, 'playbook_read', args))!
+  remember(w, 'playbook_read', args, full)
+  expect(await expand($, w, 'lead-ticket', shim('Ticket', 'lead-ticket'))).toBe(pointed('Ticket', 'lead-ticket'))
+  // Another context that renders a different body is another unit: full.
+  w.messages = []
+  w.playbookText = (name, key) => (key === 'minted-1' ? `# ${name}\n## Other context\nwork\n` : undefined)
+  rememberSkill(w, `${w.plugin}:lead-ticket`, await expand($, w, 'lead-ticket', shim('Ticket', 'lead-ticket')))
+  const ctx = { name: 'lead-ticket', session_key: 'minted-1', context: { mode: 'x' } }
+  expect(seen(await read($, w, 'playbook_read', ctx))).toBe('# lead-ticket\n## Steps\nwork')
+})
+
+test('preload dedupe: lead-use-mailbox and another plugin pass through on a repeat too, and read nothing', async ($, on) => {
+  const w = world(on, { knobs: ON })
+  w.playbookText = sameBody
+  await start($, w)
+  const mailbox = shim('Use Mailbox', 'lead-use-mailbox')
+  const other = shim('Discuss', 'lead-discuss')
+  for (let i = 0; i < 2; i++) {
+    expect(await expand($, w, 'lead-use-mailbox', mailbox)).toBe(mailbox)
+    expect(await expand($, w, 'lead-discuss', other, 'other-plugin')).toBe(other)
+    rememberSkill(w, 'x', mailbox)
+  }
+  expect(playbookReads(w)).toEqual([])
+  expect(w.messageReads).toBe(0)
 })
