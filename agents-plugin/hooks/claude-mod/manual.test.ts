@@ -2,23 +2,23 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import {
   adoptionNotice,
-  COMPOSE_WAIT_MS,
   createManual,
-  cutStaticBody,
+  epochCopyVisible,
   hashText,
   headings,
   inlinedPointerText,
   KEY_RETENTION_MS,
   KEY_STORE_PREFIX,
-  landingRefreshes,
-  manualPart,
+  KEY_WAIT_MS,
+  keyLine,
+  MAILBOX_LINE,
   pointerText,
   preloadPointerLine,
   readKey,
   repeatOf,
   revivedKeyToAdopt,
-  sectionText,
-  stateOnlyText,
+  rowHeader,
+  rowText,
   type ApiMessageLike,
   type ManualEdges,
 } from './manual'
@@ -65,6 +65,8 @@ function response(key: string, opts: { state?: string; prefs?: string; prepend?:
   ].join('\n')
 }
 
+const FAIL_LOUD = '## Session State\n(no restorable state for session key "gone")\n'
+
 const tick = async (n = 40) => {
   for (let i = 0; i < n; i++) await Promise.resolve()
 }
@@ -98,6 +100,8 @@ function harness(opts: { store?: Record<string, unknown>; wsProject?: boolean | 
     /** The state a keyed workflow_manual renders. */
     state: '(no todos)',
     prefs: undefined as string | undefined,
+    /** While set, the keyed workflow_manual answers this text instead of the rendered manual. */
+    manualAnswer: undefined as string | undefined,
     /** Whether the mailbox push runs here; while `pushHold` is set, the answer waits on it. */
     push: false,
     pushHold: undefined as Promise<void> | undefined,
@@ -105,13 +109,17 @@ function harness(opts: { store?: Record<string, unknown>; wsProject?: boolean | 
     ferruleHold: undefined as ((args: Record<string, unknown>) => Promise<void> | undefined) | undefined,
     /** While set, every store write rejects. */
     storeFails: false,
-    /** While set, a store write whose value it answers with a promise waits on that promise. */
-    storeHold: undefined as ((value: unknown) => Promise<void> | undefined) | undefined,
     /** Every key listener call, as [current, previous]. */
     keys: [] as [string, string | undefined][],
     timers: [] as { ms: number; fn: () => void; cancelled: boolean }[],
     messages: [] as ApiMessageLike[],
+    /** While set, the conversation read rejects. */
+    messagesFail: false,
     messageReads: 0,
+    /** Every row appended to the main conversation. */
+    appended: [] as string[],
+    /** While set, an append rejects. */
+    appendFails: false,
     logs: [] as { text: string; to: string }[],
   }
   const m = createManual()
@@ -140,10 +148,8 @@ function harness(opts: { store?: Record<string, unknown>; wsProject?: boolean | 
       }
       if (tool === 'workflow_manual') {
         if (h.hold) await h.hold
-        return response(args.session_key as string, { state: h.state, prefs: h.prefs })
+        return h.manualAnswer ?? response(args.session_key as string, { state: h.state, prefs: h.prefs })
       }
-      if (tool === 'playbook_read') return STATIC_BODY
-      if (tool === 'workflow_state') return `## Session State\n\n### Todos\n${h.state}\n`
       throw new Error(`unexpected tool ${tool}`)
     },
     pushAvailable: async () => {
@@ -157,8 +163,6 @@ function harness(opts: { store?: Record<string, unknown>; wsProject?: boolean | 
       get: async (k) => h.store.get(k),
       set: async (k, v) => {
         if (h.storeFails) throw new Error('store write failed')
-        const held = h.storeHold?.(v)
-        if (held) await held
         h.store.set(k, v)
       },
       delete: async (k) => void h.store.delete(k),
@@ -172,7 +176,12 @@ function harness(opts: { store?: Record<string, unknown>; wsProject?: boolean | 
     },
     messages: async () => {
       h.messageReads += 1
+      if (h.messagesFail) throw new Error('no transcript')
       return h.messages
+    },
+    append: async (text) => {
+      if (h.appendFails) throw new Error('append refused')
+      h.appended.push(text)
     },
     log: (text, to) => void h.logs.push({ text, to }),
     plugin: opts.plugin ?? 'ws',
@@ -185,6 +194,14 @@ function harness(opts: { store?: Record<string, unknown>; wsProject?: boolean | 
   return { h, m, edges, fire, tools }
 }
 
+/** A harness whose start has run to completion. */
+async function ready(opts: Parameters<typeof harness>[0] = {}) {
+  const x = harness(opts)
+  x.m.start(x.edges)
+  await tick()
+  return x
+}
+
 /** A conversation holding the given earlier results of calls to `tool`. */
 function conversation(tool: string, results: { input: Record<string, unknown>; text: string }[]): ApiMessageLike[] {
   return results.flatMap((r, i) => [
@@ -193,20 +210,37 @@ function conversation(tool: string, results: { input: Record<string, unknown>; t
   ])
 }
 
+const userText = (text: string): ApiMessageLike => ({ role: 'user', content: [{ type: 'text', text }] })
+
 describe('pinned prose', () => {
-  test('the section, the state-only line, and both pointers read as pinned', () => {
-    expect(sectionText('ws', 'k-1', 'MANUAL')).toBe(
-      'Your session state (agenda, todos, notes) is not in this prompt. When no `workflow_manual` result is visible in your context — a fresh session, or after compaction — call `workflow_manual` before acting.\n\n' +
+  test('the key line, the mailbox line, the row header and the row read as pinned', () => {
+    expect(keyLine('ws', 'k-1')).toBe(
+      'Your lead session key for this conversation is `k-1`; pass it as `session_key`. Continuing another track (for example `ws:lead-revive` with a preserved key) is still allowed.',
+    )
+    expect(MAILBOX_LINE).toBe(
+      'Mailbox push is bound to this key automatically: arriving mail starts your next turn even when you are idle, so launch no mailbox wait. If a revive switches your key, the push follows it.',
+    )
+    expect(rowHeader('ws')).toBe(
+      '[ws] Workflow manual for this conversation, with your session state as of this message. ' +
+        'It is delivered once until the next compaction or /clear; read your agenda, todos, and notes again on demand with workflow_state, agenda_list, todo_list, or note_query.',
+    )
+    expect(rowText('ws', 'k-1', 'RESPONSE\n\n')).toBe(
+      `${rowHeader('ws')}\n\n` +
         'Your lead session key for this conversation is `k-1`; pass it as `session_key`. Continuing another track (for example `ws:lead-revive` with a preserved key) is still allowed.\n\n' +
-        'MANUAL',
+        'RESPONSE',
     )
-    expect(stateOnlyText('STATE')).toBe('Workflow manual is in your system prompt; this is your current session state.\n\nSTATE')
+    expect(rowText('ws', 'k-1', 'RESPONSE', true)).toBe(
+      `${rowHeader('ws')}\n\n` +
+        'Your lead session key for this conversation is `k-1`; pass it as `session_key`. Continuing another track (for example `ws:lead-revive` with a preserved key) is still allowed.\n\n' +
+        'Mailbox push is bound to this key automatically: arriving mail starts your next turn even when you are idle, so launch no mailbox wait. If a revive switches your key, the push follows it.\n\n' +
+        'RESPONSE',
+    )
+  })
+
+  test('the pointers read as pinned', () => {
     const text = '# One\nbody\n## Two\n### Three\n#### Four'
-    expect(pointerText('playbook_read', text)).toBe(
+    expect(pointerText(text)).toBe(
       'The result is unchanged. Continue using the full result of your earlier `playbook_read` call in this conversation. Do not read it again (headings: # One; ## Two; ### Three).',
-    )
-    expect(pointerText('workflow_manual', text)).toBe(
-      'The result is unchanged. Continue using the full result of your earlier `workflow_manual` call in this conversation as your current session state; call workflow_manual again after you change agenda, todos, or notes. (headings: # One; ## Two; ### Three)',
     )
     expect(inlinedPointerText(text)).toBe(
       'The result is unchanged. Its full text is already above in this conversation, inlined when a skill loaded it; continue using that copy. Do not read it again (headings: # One; ## Two; ### Three).',
@@ -217,75 +251,42 @@ describe('pinned prose', () => {
     expect(headings('no headings here')).toBe('(no headings)')
   })
 
-  test('the mailbox line and the adoption notice read as pinned', () => {
-    expect(sectionText('ws', 'k-1', 'MANUAL', true)).toBe(
-      'Your session state (agenda, todos, notes) is not in this prompt. When no `workflow_manual` result is visible in your context — a fresh session, or after compaction — call `workflow_manual` before acting.\n\n' +
-        'Your lead session key for this conversation is `k-1`; pass it as `session_key`. Continuing another track (for example `ws:lead-revive` with a preserved key) is still allowed.\n\n' +
-        'Mailbox push is bound to this key automatically: arriving mail starts your next turn even when you are idle, so launch no mailbox wait. If a revive switches your key, the push follows it.\n\n' +
-        'MANUAL',
-    )
+  test('the adoption notice reads as pinned', () => {
     expect(adoptionNotice('ws', 'k-1', 'k-2')).toBe(
-      '[ws] Lead session key changed: k-1 -> k-2. Keep passing k-2 as session_key; this conversation resumes with it, and the system prompt names it after the next /compact or compaction request.',
+      '[ws] Lead session key changed: k-1 -> k-2. Keep passing k-2 as session_key; this conversation resumes with it, after compaction too.',
     )
     expect(adoptionNotice('ws', undefined, 'k-2')).toBe(
-      '[ws] Lead session key changed: (none) -> k-2. Keep passing k-2 as session_key; this conversation resumes with it, and the system prompt names it after the next /compact or compaction request.',
+      '[ws] Lead session key changed: (none) -> k-2. Keep passing k-2 as session_key; this conversation resumes with it, after compaction too.',
     )
     expect(adoptionNotice('ws', 'k-1', 'k-2', true)).toBe(
-      '[ws] Lead session key changed: k-1 -> k-2. Keep passing k-2 as session_key; this conversation resumes with it, and the system prompt names it after the next /compact or compaction request. ' +
+      '[ws] Lead session key changed: k-1 -> k-2. Keep passing k-2 as session_key; this conversation resumes with it, after compaction too. ' +
         'Mailbox push is bound to k-2: arriving mail starts your next turn even when you are idle, so launch no mailbox wait.',
     )
   })
 
-  test('a plugin not named ws spells its own name in the section, the adoption notice and the log lines, and ws nowhere', async () => {
+  test('a plugin not named ws spells its own name in the row, the adoption notice and the log lines, and ws nowhere', async () => {
     const notWs = /(?<![A-Za-z])ws(?![A-Za-z])/
-    const section = sectionText('pkgx', 'k-1', 'MANUAL', true)
-    expect(section).toContain('`pkgx:lead-revive`')
-    expect(section).not.toMatch(notWs)
+    const row = rowText('pkgx', 'k-1', 'RESPONSE', true)
+    expect(row.startsWith('[pkgx] Workflow manual for this conversation')).toBe(true)
+    expect(row).toContain('`pkgx:lead-revive`')
+    expect(row).not.toMatch(notWs)
     const notice = adoptionNotice('pkgx', 'k-1', 'k-2', true)
     expect(notice.startsWith('[pkgx] Lead session key changed: k-1 -> k-2.')).toBe(true)
     expect(notice).not.toMatch(notWs)
-    const { h, m, edges } = harness({ plugin: 'pkgx' })
-    m.start(edges)
-    await tick()
-    expect(await m.compose([])).toBe(sectionText('pkgx', 'minted-1', manualPart(response('minted-1'))!))
+    const { h, m } = await ready({ plugin: 'pkgx' })
+    await m.deliver(WM_TOOL)
+    expect(h.appended).toEqual([rowText('pkgx', 'minted-1', response('minted-1'))])
     expect(h.logs.length).toBeGreaterThan(0)
     for (const l of h.logs) expect(l.text.startsWith('pkgx manual: '), l.text).toBe(true)
   })
 })
 
 describe('pure helpers', () => {
-  test('the injected manual is the keyed response before its ## Session Key line', () => {
-    const part = manualPart(response('k-1'))!
-    expect(part.startsWith('# Manuals\n')).toBe(true)
-    expect(part.endsWith('Keep it short.')).toBe(true)
-    expect(part).toContain('**Session key: `k-1`**')
-    expect(part).not.toContain('## Session Key')
-    expect(manualPart('## Session State\n(no restorable state for session key "x")\n')).toBeUndefined()
-  })
-
-  test('the cut removes the static body up to ## Session Key and keeps what ws-mcp put around it', () => {
-    const r = response('k-1', { state: '- [ ] {a} do it' })
-    const cut = cutStaticBody(r, STATIC_BODY)
-    if (!cut.found) throw new Error('cut not found')
-    expect(cut.text).toBe('# Manuals\n- build.md — Build steps\n\n## Session Key\nk-1\n\n## Session State\n\n### Todos\n- [ ] {a} do it\n\n# Notes\n- none\n')
-    expect(cut.span.startsWith('# Workflow Manual\n')).toBe(true)
-    expect(cut.span).toContain('**Session key: `k-1`**')
-  })
-
-  test('cut misses: no body, a missing anchor, anchors out of order', () => {
-    expect(cutStaticBody('## Session State\n(no restorable state)\n', STATIC_BODY)).toEqual({ found: false, reason: 'no-body' })
-    expect(cutStaticBody('# Renamed Manual\n\n## Session Key\nk\n', STATIC_BODY)).toEqual({ found: false, reason: 'start-anchor' })
-    expect(cutStaticBody('# Workflow Manual\nbody\n', STATIC_BODY)).toEqual({ found: false, reason: 'end-anchor' })
-    expect(cutStaticBody('## Session Key\nk\n# Workflow Manual\n', STATIC_BODY)).toEqual({ found: false, reason: 'order' })
-  })
-
-  test('a playbook_read key is the name alone (the playbook is the unit; the body tells contexts apart); workflow_manual is keyed by session_key', () => {
-    const a = readKey('playbook_read', { name: 'lead-run', context: { b: '2', a: '1' }, session_key: 'k-1' })
-    expect(readKey('playbook_read', { name: 'lead-run', context: { a: '1', b: '3' }, session_key: 'k-2' })).toBe(a)
-    expect(readKey('playbook_read', { name: 'lead-run' })).toBe(a)
-    expect(readKey('playbook_read', { name: 'lead-ticket' })).not.toBe(a)
-    expect(readKey('workflow_manual', { session_key: 'k-1' })).not.toBe(readKey('workflow_manual', { session_key: 'k-2' }))
-    expect(readKey('workflow_manual', { session_key: 'k-1', root: '/r' })).toBe(readKey('workflow_manual', { session_key: 'k-1' }))
+  test('a playbook_read key is the name alone (the playbook is the unit; the body tells contexts apart)', () => {
+    const a = readKey({ name: 'lead-run', context: { b: '2', a: '1' }, session_key: 'k-1' })
+    expect(readKey({ name: 'lead-run', context: { a: '1', b: '3' }, session_key: 'k-2' })).toBe(a)
+    expect(readKey({ name: 'lead-run' })).toBe(a)
+    expect(readKey({ name: 'lead-ticket' })).not.toBe(a)
   })
 
   test('the key to adopt is an explicit key, or the sentinel result\'s ## Session Key, other than the sentinel and the current key', () => {
@@ -316,15 +317,15 @@ describe('pure helpers', () => {
     const input = { name: 'lead-run', session_key: 'k-1' }
     const body = '# Run\nsteps'
     const repeat = (results: { input: Record<string, unknown>; text: string }[], tool = PR_TOOL) =>
-      repeatOf(conversation(tool, results), PR_TOOL, 'playbook_read', input, body)
+      repeatOf(conversation(tool, results), PR_TOOL, input, body)
     expect(repeat([])).toBeUndefined()
     expect(repeat([{ input, text: body }])).toBe('result')
     expect(repeat([{ input: { name: 'lead-run', session_key: 'k-2' }, text: body }])).toBe('result')
     expect(repeat([{ input, text: body }], 'mcp__other__playbook_read')).toBeUndefined()
     expect(repeat([{ input: { name: 'lead-ticket' }, text: body }])).toBeUndefined()
     expect(repeat([{ input, text: '# Run\nolder steps' }])).toBeUndefined()
-    expect(repeat([{ input, text: body }, { input, text: pointerText('playbook_read', body) }])).toBeUndefined()
-    expect(repeat([{ input, text: body }, { input, text: pointerText('playbook_read', body) }, { input, text: body }])).toBeUndefined()
+    expect(repeat([{ input, text: body }, { input, text: pointerText(body) }])).toBeUndefined()
+    expect(repeat([{ input, text: body }, { input, text: pointerText(body) }, { input, text: body }])).toBeUndefined()
     expect(repeat([{ input, text: body }, { input, text: inlinedPointerText(body) }])).toBeUndefined()
     // Another context of the same name collapses on an identical body (compared trimmed), never on a different one.
     expect(repeat([{ input: { name: 'lead-run', context: { mode: 'x' } }, text: `${body}\n` }])).toBe('result')
@@ -334,12 +335,12 @@ describe('pure helpers', () => {
       { role: 'assistant', content: [{ type: 'tool_use', id: 'a', name: PR_TOOL, input }] },
       { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'a', content: body }] },
     ]
-    expect(repeatOf(asString, PR_TOOL, 'playbook_read', input, body)).toBe('result')
+    expect(repeatOf(asString, PR_TOOL, input, body)).toBe('result')
     const errored: ApiMessageLike[] = [
       { role: 'assistant', content: [{ type: 'tool_use', id: 'a', name: PR_TOOL, input }] },
       { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'a', content: body, is_error: true }] },
     ]
-    expect(repeatOf(errored, PR_TOOL, 'playbook_read', input, body)).toBeUndefined()
+    expect(repeatOf(errored, PR_TOOL, input, body)).toBeUndefined()
   })
 
   test('a playbook body a skill expansion inlined is an earlier copy, and a preload pointer line counts as a pointer', () => {
@@ -355,273 +356,144 @@ describe('pure helpers', () => {
     ]
     const expansion = `Base directory for this skill: /p/skills/lead-run\n\n${body}\n\nARGUMENTS: x`
     const pointed = `Base directory for this skill: /p/skills/lead-run\n\n${preloadPointerLine('lead-run')}\n\n# Run\n\nCall the read.`
-    expect(repeatOf(invoked(expansion), PR_TOOL, 'playbook_read', input, `${body}\n`)).toBe('inlined')
-    expect(repeatOf(typed(expansion), PR_TOOL, 'playbook_read', input, body)).toBe('inlined')
-    expect(repeatOf([{ role: 'user', content: expansion }], PR_TOOL, 'playbook_read', input, body)).toBe('inlined')
+    expect(repeatOf(invoked(expansion), PR_TOOL, input, `${body}\n`)).toBe('inlined')
+    expect(repeatOf(typed(expansion), PR_TOOL, input, body)).toBe('inlined')
+    expect(repeatOf([{ role: 'user', content: expansion }], PR_TOOL, input, body)).toBe('inlined')
     // Two copies, or a copy then a pointer of either kind: the full text again.
-    expect(repeatOf([...invoked(expansion), ...typed(expansion)], PR_TOOL, 'playbook_read', input, body)).toBeUndefined()
-    expect(repeatOf([...invoked(expansion), ...invoked(pointed)], PR_TOOL, 'playbook_read', input, body)).toBeUndefined()
-    expect(repeatOf([...conversation(PR_TOOL, [{ input, text: body }]), ...typed(pointed)], PR_TOOL, 'playbook_read', input, body)).toBeUndefined()
-    expect(repeatOf([...typed(expansion), ...conversation(PR_TOOL, [{ input, text: inlinedPointerText(body) }])], PR_TOOL, 'playbook_read', input, body)).toBeUndefined()
+    expect(repeatOf([...invoked(expansion), ...typed(expansion)], PR_TOOL, input, body)).toBeUndefined()
+    expect(repeatOf([...invoked(expansion), ...invoked(pointed)], PR_TOOL, input, body)).toBeUndefined()
+    expect(repeatOf([...conversation(PR_TOOL, [{ input, text: body }]), ...typed(pointed)], PR_TOOL, input, body)).toBeUndefined()
+    expect(repeatOf([...typed(expansion), ...conversation(PR_TOOL, [{ input, text: inlinedPointerText(body) }])], PR_TOOL, input, body)).toBeUndefined()
     // Another playbook's pointer line, or a different body, is no copy of this one.
-    expect(repeatOf([...typed(expansion), ...typed(preloadPointerLine('lead-ticket'))], PR_TOOL, 'playbook_read', input, body)).toBe('inlined')
-    expect(repeatOf(typed(expansion), PR_TOOL, 'playbook_read', input, '# Run\nother steps')).toBeUndefined()
-    expect(repeatOf(typed(expansion), PR_TOOL, 'playbook_read', input, '  \n')).toBeUndefined()
-    // A workflow_manual is never matched against a user message's own text.
-    expect(repeatOf(typed('STATE'), WM_TOOL, 'workflow_manual', { session_key: 'k-1' }, 'STATE')).toBeUndefined()
-  })
-
-  test('manual and plugin compactions refresh the snapshot; auto is not assumed to', () => {
-    expect(landingRefreshes('manual')).toBe(true)
-    expect(landingRefreshes('plugin')).toBe(true)
-    expect(landingRefreshes('auto')).toBe(false)
-    expect(landingRefreshes('precompute')).toBe(false)
+    expect(repeatOf([...typed(expansion), ...typed(preloadPointerLine('lead-ticket'))], PR_TOOL, input, body)).toBe('inlined')
+    expect(repeatOf(typed(expansion), PR_TOOL, input, '# Run\nother steps')).toBeUndefined()
+    expect(repeatOf(typed(expansion), PR_TOOL, input, '  \n')).toBeUndefined()
   })
 })
 
-describe('setup and compose', () => {
-  test('a new session mints a key at start, stores it, and the first compose appends the keyed manual and sets the flag', async () => {
-    const { h, m, edges, tools } = harness()
-    m.start(edges)
-    await tick()
-    expect(tools()).toEqual(['ferrule', 'workflow_manual', 'playbook_read'])
+describe('epochCopyVisible', () => {
+  const header = rowHeader('ws')
+
+  test('the row header as a whole line of a user text block or a plain string is a copy', () => {
+    expect(epochCopyVisible([userText(`${header}\n\nbody`)], WM_TOOL, 'ws')).toBe(true)
+    expect(epochCopyVisible([{ role: 'user', content: `${header}\n\nbody` }], WM_TOOL, 'ws')).toBe(true)
+    expect(epochCopyVisible([userText('earlier'), userText(rowText('ws', 'k-1', response('k-1')))], WM_TOOL, 'ws')).toBe(true)
+  })
+
+  test('a non-error result of the tool holding a whole ## Session Key line is a copy, whatever its key', () => {
+    expect(epochCopyVisible(conversation(WM_TOOL, [{ input: { session_key: 'any' }, text: response('any') }]), WM_TOOL, 'ws')).toBe(true)
+    expect(epochCopyVisible(conversation(WM_TOOL, [{ input: { session_key: 'a' }, text: FAIL_LOUD }, { input: { session_key: 'b' }, text: response('b') }]), WM_TOOL, 'ws')).toBe(true)
+  })
+
+  test('no copy: a fail-loud result, an error result, another tool, another plugin\'s header, a header that is not a whole line, an assistant message, an empty conversation', () => {
+    expect(epochCopyVisible(conversation(WM_TOOL, [{ input: { session_key: 'gone' }, text: FAIL_LOUD }]), WM_TOOL, 'ws')).toBe(false)
+    const errored: ApiMessageLike[] = [
+      { role: 'assistant', content: [{ type: 'tool_use', id: 'a', name: WM_TOOL, input: { session_key: 'k' } }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'a', content: response('k'), is_error: true }] },
+    ]
+    expect(epochCopyVisible(errored, WM_TOOL, 'ws')).toBe(false)
+    expect(epochCopyVisible(conversation('mcp__other__workflow_manual', [{ input: { session_key: 'k' }, text: response('k') }]), WM_TOOL, 'ws')).toBe(false)
+    expect(epochCopyVisible([userText(rowHeader('pkgx'))], WM_TOOL, 'ws')).toBe(false)
+    expect(epochCopyVisible([userText(`${header} and more on the same line`)], WM_TOOL, 'ws')).toBe(false)
+    expect(epochCopyVisible([{ role: 'assistant', content: [{ type: 'text', text: header }] }], WM_TOOL, 'ws')).toBe(false)
+    expect(epochCopyVisible([], WM_TOOL, 'ws')).toBe(false)
+  })
+})
+
+describe('setup', () => {
+  test('a new session mints a key at start and stores it, reading no manual', async () => {
+    const { h, m, tools } = await ready()
+    expect(tools()).toEqual(['ferrule'])
     expect(h.calls[0]).toEqual({ server: SERVER, tool: 'ferrule', args: { root: '/repo/sub', format: 'json' } })
-    expect(h.calls[1].args).toEqual({ session_key: 'minted-1' })
-    expect(h.calls[2].args).toEqual({ name: 'lead-workflow-manual', session_key: 'minted-1' })
     expect(h.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'minted-1', at: NOW })
-    expect(await m.compose([])).toBe(sectionText('ws', 'minted-1', manualPart(response('minted-1'))!))
-    expect(m.snapshot()).toBe(true)
+    expect(m.key()).toBe('minted-1')
+    expect(h.appended).toEqual([])
     expect(h.timers.length).toBe(0)
   })
 
-  test('a stored key re-logs in instead of minting; the flag stays clear though the section is appended', async () => {
+  test('a stored key re-logs in instead of minting', async () => {
     const { h, m, edges, tools } = harness({ store: { [`${KEY_STORE_PREFIX}sess-1`]: { sessionKey: 'kept-key', at: NOW - 1000 } } })
     h.known.add('kept-key')
     m.start(edges)
     await tick()
-    expect(tools()).toEqual(['ferrule', 'workflow_manual', 'playbook_read'])
+    expect(tools()).toEqual(['ferrule'])
     expect(h.calls[0].args).toEqual({ root: '/repo/sub', format: 'json', relogin_session_key: 'kept-key' })
     expect(h.minted).toBe(0)
     expect(h.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'kept-key', at: NOW })
-    expect(await m.compose([])).toContain('Your lead session key for this conversation is `kept-key`')
-    expect(m.snapshot()).toBe(false)
+    expect(m.key()).toBe('kept-key')
   })
 
-  test('a refused re-login mints a new key; the snapshot is still a replayed one', async () => {
-    const { h, m, edges, tools } = harness({ store: { [`${KEY_STORE_PREFIX}sess-1`]: { sessionKey: 'pruned-key', at: NOW } } })
-    m.start(edges)
-    await tick()
-    expect(tools()).toEqual(['ferrule', 'ferrule', 'workflow_manual', 'playbook_read'])
+  test('a refused re-login mints a new key', async () => {
+    const { h, m, tools } = await ready({ store: { [`${KEY_STORE_PREFIX}sess-1`]: { sessionKey: 'pruned-key', at: NOW } } })
+    expect(tools()).toEqual(['ferrule', 'ferrule'])
     expect(h.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'minted-1', at: NOW })
-    expect(await m.compose([])).toContain('`minted-1`')
-    expect(m.snapshot()).toBe(false)
+    expect(m.key()).toBe('minted-1')
   })
 
   test('outside a ws project nothing is minted, appended, or rewritten', async () => {
-    const { h, m, edges } = harness({ wsProject: false })
-    m.start(edges)
-    await tick()
+    const { h, m } = await ready({ wsProject: false })
     expect(h.calls).toEqual([])
-    expect(await m.compose([])).toBeUndefined()
+    expect(await m.ensureKey()).toBeUndefined()
+    await m.deliver(WM_TOOL)
+    expect(h.appended).toEqual([])
     expect(await m.read('workflow_manual', WM_TOOL, { session_key: 'k' }, response('k'))).toBeUndefined()
     expect(await m.read('playbook_read', PR_TOOL, { name: 'x' }, 'x')).toBeUndefined()
     expect(await m.read('playbook_read', PR_TOOL, { name: 'x' }, 'x')).toBeUndefined()
     expect(h.messageReads).toBe(0)
     // Told once: a later reset does not ask again.
     m.end('clear')
-    expect(await m.compose([])).toBeUndefined()
+    m.turnStarted(undefined)
+    await tick()
+    expect(await m.ensureKey()).toBeUndefined()
     expect(h.gateChecks).toBe(1)
+    expect(h.calls).toEqual([])
   })
 
   test('a gate that could not be told reads as closed for good: the mailbox feature reads the same answer', async () => {
-    const { h, m, edges } = harness({ wsProject: 'rejects' })
-    m.start(edges)
-    await tick()
+    const { h, m } = await ready({ wsProject: 'rejects' })
     expect(h.calls).toEqual([])
     h.wsProject = true
-    expect(await m.compose([])).toBeUndefined()
+    expect(await m.ensureKey()).toBeUndefined()
     m.end('clear')
-    expect(await m.compose([])).toBeUndefined()
+    m.turnStarted(undefined)
+    await tick()
+    expect(await m.ensureKey()).toBeUndefined()
     expect(h.calls).toEqual([])
     expect(h.gateChecks).toBe(1)
     expect(h.keys).toEqual([])
   })
 
-  test('the first compose waits for the pending setup and appends once it lands within the bound', async () => {
-    const { h, m, edges } = harness()
-    let release!: () => void
-    h.hold = new Promise<void>((resolve) => (release = resolve))
-    m.start(edges)
-    await tick()
-    let done = false
-    const composed = m.compose([]).then((text) => ((done = true), text))
-    await tick()
-    expect(done).toBe(false)
-    expect(h.timers.map((t) => t.ms)).toEqual([COMPOSE_WAIT_MS])
-    release()
-    expect(await composed).toContain('`minted-1`')
-    expect(h.timers[0].cancelled).toBe(true)
-    expect(m.snapshot()).toBe(true)
-  })
-
-  test('on timeout the first compose appends nothing and clears the flag; later composes never wait', async () => {
-    const { h, m, edges, fire } = harness()
-    let release!: () => void
-    h.hold = new Promise<void>((resolve) => (release = resolve))
-    m.start(edges)
-    await tick()
-    const composed = m.compose([])
-    await tick()
-    fire(COMPOSE_WAIT_MS)
-    expect(await composed).toBeUndefined()
-    expect(m.snapshot()).toBe(false)
-    // Still pending: a later compose answers at once, without a timer.
-    expect(await m.compose([])).toBeUndefined()
-    expect(h.timers.length).toBe(0)
-    release()
-    await tick()
-    // Cached now: later composes append it (their answers are discarded), and the flag stays clear.
-    expect(await m.compose([])).toContain('`minted-1`')
-    expect(m.snapshot()).toBe(false)
-  })
-
-  test('a setup that failed at start is retried by the first compose', async () => {
-    const { h, m, edges, tools } = harness()
-    h.failing.add('ferrule')
-    m.start(edges)
-    await tick()
-    expect(tools()).toEqual(['ferrule'])
-    h.failing.clear()
-    const composed = m.compose([])
-    await tick()
-    expect(await composed).toContain('`minted-1`')
-    expect(tools()).toEqual(['ferrule', 'ferrule', 'workflow_manual', 'playbook_read'])
-    expect(m.snapshot()).toBe(true)
-  })
-
-  test('an unhealthy ws-mcp costs one bounded wait per reset, not one per compose', async () => {
-    const { h, m, edges, tools } = harness()
-    h.failing.add('ferrule')
-    m.start(edges)
-    await tick()
-    const composed = m.compose([])
-    await tick()
-    expect(await composed).toBeUndefined()
-    expect(m.snapshot()).toBe(false)
-    expect(tools()).toEqual(['ferrule', 'ferrule'])
-    expect(h.timers.length).toBe(1)
-    expect(await m.compose([])).toBeUndefined()
-    expect(await m.compose([])).toBeUndefined()
-    expect(tools()).toEqual(['ferrule', 'ferrule'])
-    expect(h.timers.length).toBe(1)
-    // The next reset's first compose tries once more.
-    m.compacted('manual', undefined, { messages: [] })
-    const again = m.compose([])
-    await tick()
-    expect(await again).toBeUndefined()
-    expect(tools()).toEqual(['ferrule', 'ferrule', 'ferrule'])
-  })
-
-  test('after session.end the first compose sets up again: a new session id mints a new key; the old entry stays', async () => {
-    const { h, m, edges } = harness()
-    m.start(edges)
-    await tick()
-    await m.compose([])
+  test('after session.end the next main-thread turn sets up again: a new session id mints a new key; the old entry stays', async () => {
+    const { h, m } = await ready()
     m.end('clear')
-    expect(m.snapshot()).toBe(false)
+    expect(m.key()).toBeUndefined()
     h.sessionId = 'sess-2'
-    h.state = 'changed'
-    const composed = m.compose([])
+    m.turnStarted(undefined)
     await tick()
-    expect(await composed).toContain('`minted-2`')
-    expect(m.snapshot()).toBe(true)
+    expect(m.key()).toBe('minted-2')
     expect(h.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'minted-1', at: NOW })
     expect(h.store.get(`${KEY_STORE_PREFIX}sess-2`)).toEqual({ sessionKey: 'minted-2', at: NOW })
   })
 
-  test('a setup that ran across session.end fills no cache', async () => {
+  test('a setup that ran across session.end writes nothing, and the next conversation sets up under its own session id', async () => {
     const { h, m, edges } = harness()
     let release!: () => void
-    h.hold = new Promise<void>((resolve) => (release = resolve))
+    const held = new Promise<void>((resolve) => (release = resolve))
+    h.ferruleHold = () => held
     m.start(edges)
     await tick()
     m.end('clear')
     release()
     await tick()
-    h.hold = undefined
+    expect(h.keys).toEqual([])
+    expect(h.store.has(`${KEY_STORE_PREFIX}sess-1`)).toBe(false)
+    expect(m.key()).toBeUndefined()
+    h.ferruleHold = undefined
     h.sessionId = 'sess-2'
-    const composed = m.compose([])
+    m.turnStarted(undefined)
     await tick()
-    expect(await composed).toContain('`minted-2`')
-  })
-
-  test('a landed manual or plugin compaction makes the next compose decide the flag; auto, a subagent, precompute, and a veto do not', async () => {
-    const { h, m, edges } = harness({ store: { [`${KEY_STORE_PREFIX}sess-1`]: { sessionKey: 'kept-key', at: NOW } } })
-    h.known.add('kept-key')
-    m.start(edges)
-    await tick()
-    await m.compose([])
-    expect(m.snapshot()).toBe(false)
-    m.compacted('auto', undefined, { messages: [] })
-    m.compacted('manual', 'sub-1', { messages: [] })
-    m.compacted('precompute', undefined, { messages: [] })
-    m.compacted('manual', undefined, { skip: 'blocked' })
-    await m.compose([])
-    expect(m.snapshot()).toBe(false)
-    m.compacted('manual', undefined, { messages: [] })
-    expect(await m.compose([])).toContain('`kept-key`')
-    expect(m.snapshot()).toBe(true)
-    // A landing reported directly through landed() sets it too.
-    const lever = harness({ store: { [`${KEY_STORE_PREFIX}sess-1`]: { sessionKey: 'kept-key', at: NOW } } })
-    lever.h.known.add('kept-key')
-    lever.m.start(lever.edges)
-    await tick()
-    await lever.m.compose([])
-    lever.m.landed('plugin')
-    await lever.m.compose([])
-    expect(lever.m.snapshot()).toBe(true)
-  })
-
-  test('auto compaction leaves a set flag set', async () => {
-    const { m, edges } = harness()
-    m.start(edges)
-    await tick()
-    await m.compose([])
-    m.compacted('auto', undefined, { messages: [] })
-    await m.compose([])
-    expect(m.snapshot()).toBe(true)
-  })
-
-  test('a measuring compose neither waits nor takes the first compose', async () => {
-    const { h, m, edges } = harness()
-    let release!: () => void
-    h.hold = new Promise<void>((resolve) => (release = resolve))
-    m.start(edges)
-    await tick()
-    expect(await m.compose(['lean', 'analysis', 'skills'])).toBeUndefined()
-    expect(h.timers.length).toBe(0)
-    release()
-    await tick()
-    expect(await m.compose(['analysis'])).toContain('`minted-1`')
-    expect(m.snapshot()).toBe(false)
-    await m.compose([])
-    expect(m.snapshot()).toBe(true)
-  })
-
-  test('a compose before any start leaves the flag clear for that conversation only', async () => {
-    const { h, m, edges } = harness()
-    expect(await m.compose([])).toBeUndefined()
-    m.start(edges)
-    await tick()
-    expect(await m.compose([])).toContain('`minted-1`')
-    expect(m.snapshot()).toBe(false)
-    // The next conversation's first compose decides the flag again.
-    m.end('clear')
-    h.sessionId = 'sess-2'
-    m.start(edges)
-    await tick()
-    expect(await m.compose([])).toContain('`minted-2`')
-    expect(m.snapshot()).toBe(true)
+    expect(m.key()).toBe('minted-2')
+    expect(h.keys).toEqual([['minted-2', undefined]])
   })
 
   test('start prunes key entries past retention, keeping the current and the fresh ones', async () => {
@@ -643,66 +515,270 @@ describe('setup and compose', () => {
   })
 })
 
-describe('workflow_manual rewrite', () => {
-  async function ready(opts: Parameters<typeof harness>[0] = {}) {
-    const x = harness(opts)
-    x.m.start(x.edges)
+describe('turnStarted', () => {
+  test('the first main-thread turn after start retries a setup that failed at start', async () => {
+    const { h, m, edges, tools } = harness()
+    h.failing.add('ferrule')
+    m.start(edges)
     await tick()
-    await x.m.compose([])
-    return x
-  }
-
-  test('with the flag set, the minted key reads as the state behind the pinned line', async () => {
-    const { h, m } = await ready()
-    h.state = '- [ ] {a} do it'
-    const out = await m.read('workflow_manual', WM_TOOL, { session_key: 'minted-1' }, response('minted-1', { state: h.state }))
-    expect(out).toBe(stateOnlyText('# Manuals\n- build.md — Build steps\n\n## Session Key\nminted-1\n\n## Session State\n\n### Todos\n- [ ] {a} do it\n\n# Notes\n- none\n'))
+    expect(tools()).toEqual(['ferrule'])
+    h.failing.clear()
+    m.turnStarted(undefined)
+    await tick()
+    expect(tools()).toEqual(['ferrule', 'ferrule'])
+    expect(m.key()).toBe('minted-1')
   })
 
-  test('a static span that differs from the injected one passes through: another key, or changed config', async () => {
-    const { m } = await ready()
-    // A key ws-mcp refuses to re-log in with is not adopted, so this is the span guard alone.
-    expect(await m.read('workflow_manual', WM_TOOL, { session_key: 'other-key' }, response('other-key'))).toBeUndefined()
-    expect(await m.read('workflow_manual', WM_TOOL, { session_key: 'minted-1' }, response('minted-1', { prefs: 'Be verbose.' }))).toBeUndefined()
+  test('later main turns, and a subagent turn, begin nothing', async () => {
+    const { h, m, edges, tools } = harness()
+    h.failing.add('ferrule')
+    m.start(edges)
+    await tick()
+    // A subagent's turn is not the first main-thread turn, and does not use it up.
+    m.turnStarted('sub-1')
+    await tick()
+    expect(tools()).toEqual(['ferrule'])
+    m.turnStarted(undefined)
+    await tick()
+    expect(tools()).toEqual(['ferrule', 'ferrule'])
+    // The first main turn is used up: no further retry, though no key is held.
+    m.turnStarted(undefined)
+    m.turnStarted(undefined)
+    await tick()
+    expect(tools()).toEqual(['ferrule', 'ferrule'])
+    expect(m.key()).toBeUndefined()
   })
 
-  test('missed anchors fall back to workflow_state with the same key; a body-less notice passes through', async () => {
+  test('a held key or a pending setup is left alone', async () => {
+    const held = await ready()
+    held.m.turnStarted(undefined)
+    await tick()
+    expect(held.tools()).toEqual(['ferrule'])
+
+    const { h, m, edges, tools } = harness()
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    h.ferruleHold = () => gate
+    m.start(edges)
+    await tick()
+    m.turnStarted(undefined)
+    await tick()
+    expect(tools()).toEqual(['ferrule'])
+    release()
+    await tick()
+    expect(tools()).toEqual(['ferrule'])
+    expect(m.key()).toBe('minted-1')
+    expect(h.minted).toBe(1)
+  })
+
+  test('the first main turn after session.end begins a setup; a late subagent turn first does not', async () => {
     const { h, m, tools } = await ready()
-    const drifted = '# Renamed Manual\n\n## Session Key\nminted-1\n\n## Session State\n'
-    expect(await m.read('workflow_manual', WM_TOOL, { session_key: 'minted-1', root: '/repo' }, drifted)).toBe(
-      stateOnlyText('## Session State\n\n### Todos\n(no todos)\n'),
-    )
-    expect(h.calls.at(-1)).toEqual({ server: SERVER, tool: 'workflow_state', args: { session_key: 'minted-1' } })
-    const before = tools().length
-    const notice = '## Session State\n(no restorable state for session key "gone"; ...)\n'
-    expect(await m.read('workflow_manual', WM_TOOL, { session_key: 'gone' }, notice)).toBeUndefined()
-    // Only the refused adoption's re-login: no workflow_state fallback.
-    expect(tools().slice(before)).toEqual(['ferrule'])
+    m.end('clear')
+    h.sessionId = 'sess-2'
+    m.turnStarted('sub-1')
+    await tick()
+    expect(tools()).toEqual(['ferrule'])
+    m.turnStarted(undefined)
+    await tick()
+    expect(tools()).toEqual(['ferrule', 'ferrule'])
+    expect(m.key()).toBe('minted-2')
+  })
+})
+
+describe('ensureKey', () => {
+  test('a held key is returned without a call or a timer', async () => {
+    const { h, m, tools } = await ready()
+    expect(await m.ensureKey()).toBe('minted-1')
+    expect(tools()).toEqual(['ferrule'])
+    expect(h.timers.length).toBe(0)
   })
 
-  test('a failed workflow_state fallback passes the result through', async () => {
+  test('with none held and none pending it begins a setup and returns its key', async () => {
+    const { h, m, edges, tools } = harness()
+    h.failing.add('ferrule')
+    m.start(edges)
+    await tick()
+    h.failing.clear()
+    const key = m.ensureKey()
+    await tick()
+    expect(await key).toBe('minted-1')
+    expect(tools()).toEqual(['ferrule', 'ferrule'])
+    expect(h.timers.map((t) => [t.ms, t.cancelled])).toEqual([[KEY_WAIT_MS, true]])
+  })
+
+  test('it waits for a pending setup, at most KEY_WAIT_MS', async () => {
+    const { h, m, edges, tools } = harness()
+    let release!: () => void
+    const held = new Promise<void>((resolve) => (release = resolve))
+    h.ferruleHold = () => held
+    m.start(edges)
+    await tick()
+    let done = false
+    const waited = m.ensureKey().then((k) => ((done = true), k))
+    await tick()
+    expect(done).toBe(false)
+    expect(h.timers.map((t) => t.ms)).toEqual([KEY_WAIT_MS])
+    // A waiting call begins no second setup.
+    expect(tools()).toEqual(['ferrule'])
+    release()
+    expect(await waited).toBe('minted-1')
+    expect(h.timers[0].cancelled).toBe(true)
+
+    // On timeout it answers undefined; the setup lands later and the key is held after that.
+    const slow = harness()
+    let release2!: () => void
+    const held2 = new Promise<void>((resolve) => (release2 = resolve))
+    slow.h.ferruleHold = () => held2
+    slow.m.start(slow.edges)
+    await tick()
+    const timedOut = slow.m.ensureKey()
+    await tick()
+    slow.fire(KEY_WAIT_MS)
+    expect(await timedOut).toBeUndefined()
+    release2()
+    await tick()
+    expect(await slow.m.ensureKey()).toBe('minted-1')
+  })
+
+  test('it answers undefined on a failed setup and outside a ws project', async () => {
+    const failed = harness()
+    failed.h.failing.add('ferrule')
+    failed.m.start(failed.edges)
+    await tick()
+    const key = failed.m.ensureKey()
+    await tick()
+    expect(await key).toBeUndefined()
+
+    const outside = await ready({ wsProject: false })
+    expect(await outside.m.ensureKey()).toBeUndefined()
+    expect(outside.h.calls).toEqual([])
+    expect(outside.h.timers.length).toBe(0)
+
+    // Before any start there is nothing to ask.
+    expect(await createManual().ensureKey()).toBeUndefined()
+  })
+
+  test('after session.end it sets up again under the new session id', async () => {
     const { h, m } = await ready()
-    h.failing.add('workflow_state')
-    expect(await m.read('workflow_manual', WM_TOOL, { session_key: 'minted-1' }, '# Renamed\n\n## Session Key\nk\n')).toBeUndefined()
+    m.end('clear')
+    h.sessionId = 'sess-2'
+    const key = m.ensureKey()
+    await tick()
+    expect(await key).toBe('minted-2')
+  })
+})
+
+describe('deliver', () => {
+  test('with no copy visible it appends the row once: the key line, then the whole keyed response', async () => {
+    const { h, m, tools } = await ready()
+    await m.deliver(WM_TOOL)
+    expect(h.appended).toEqual([rowText('ws', 'minted-1', response('minted-1'))])
+    expect(h.calls.at(-1)).toEqual({ server: SERVER, tool: 'workflow_manual', args: { session_key: 'minted-1' } })
+    expect(tools()).toEqual(['ferrule', 'workflow_manual'])
+    expect(h.appended[0].startsWith(`${rowHeader('ws')}\n\n${keyLine('ws', 'minted-1')}\n\n# Manuals`)).toBe(true)
+    expect(h.appended[0]).not.toContain('Mailbox push is bound')
+    // The row now in the conversation is a copy: the next lead skill expansion appends nothing.
+    h.messages = [userText(h.appended[0])]
+    await m.deliver(WM_TOOL)
+    expect(h.appended.length).toBe(1)
+    expect(tools()).toEqual(['ferrule', 'workflow_manual'])
+    // The conversation lost it (compaction, /clear, a rewind): the next one appends again, with the current state.
+    h.messages = []
+    h.state = 'changed'
+    await m.deliver(WM_TOOL)
+    expect(h.appended.length).toBe(2)
+    expect(h.appended[1]).toBe(rowText('ws', 'minted-1', response('minted-1', { state: 'changed' })))
   })
 
-  test('with the flag clear the full result passes through', async () => {
-    const { h, m } = await ready({ store: { [`${KEY_STORE_PREFIX}sess-1`]: { sessionKey: 'kept-key', at: NOW } } })
-    expect(h.known.has('kept-key')).toBe(false)
-    expect(m.snapshot()).toBe(false)
+  test('the mailbox line is in the row only when the push runs here, and the row waits for the probe', async () => {
+    const off = await ready()
+    await off.m.deliver(WM_TOOL)
+    expect(off.h.appended[0]).not.toContain(MAILBOX_LINE)
+
+    const { h, m } = await ready()
+    h.push = true
+    let release!: () => void
+    h.pushHold = new Promise<void>((resolve) => (release = resolve))
+    let done = false
+    const delivered = m.deliver(WM_TOOL).then(() => (done = true))
+    await tick()
+    expect(done).toBe(false)
+    expect(h.appended).toEqual([])
+    release()
+    await delivered
+    expect(h.appended).toEqual([rowText('ws', 'minted-1', response('minted-1'), true)])
+    expect(h.appended[0]).toContain(MAILBOX_LINE)
+  })
+
+  test('nothing is appended while the row or a keyed workflow_manual result is visible, and no manual is read', async () => {
+    const { h, m, tools } = await ready()
+    h.messages = [userText(rowText('ws', 'minted-1', response('minted-1')))]
+    await m.deliver(WM_TOOL)
+    h.messages = conversation(WM_TOOL, [{ input: { session_key: 'other-key' }, text: response('other-key') }])
+    await m.deliver(WM_TOOL)
+    expect(h.appended).toEqual([])
+    expect(tools()).toEqual(['ferrule'])
+    // A fail-loud result is no copy.
+    h.messages = conversation(WM_TOOL, [{ input: { session_key: 'gone' }, text: FAIL_LOUD }])
+    await m.deliver(WM_TOOL)
+    expect(h.appended.length).toBe(1)
+  })
+
+  test('a rejecting conversation read appends the row', async () => {
+    const { h, m } = await ready()
+    h.messagesFail = true
+    await m.deliver(WM_TOOL)
+    expect(h.appended).toEqual([rowText('ws', 'minted-1', response('minted-1'))])
+  })
+
+  test('nothing is appended, and nothing throws, when the manual read fails, its response lacks ## Session Key, or the append is refused', async () => {
+    const { h, m } = await ready()
+    h.failing.add('workflow_manual')
+    await m.deliver(WM_TOOL)
+    h.failing.clear()
+    h.manualAnswer = FAIL_LOUD
+    await m.deliver(WM_TOOL)
+    h.manualAnswer = undefined
+    h.appendFails = true
+    await m.deliver(WM_TOOL)
+    expect(h.appended).toEqual([])
+    h.appendFails = false
+    await m.deliver(WM_TOOL)
+    expect(h.appended.length).toBe(1)
+  })
+
+  test('nothing is appended outside a ws project, with no key, or before a start', async () => {
+    const outside = await ready({ wsProject: false })
+    await outside.m.deliver(WM_TOOL)
+    expect(outside.h.appended).toEqual([])
+    expect(outside.h.messageReads).toBe(0)
+
+    const keyless = harness()
+    keyless.h.failing.add('ferrule')
+    keyless.m.start(keyless.edges)
+    await tick()
+    await keyless.m.deliver(WM_TOOL)
+    expect(keyless.h.appended).toEqual([])
+    expect(keyless.h.messageReads).toBe(0)
+    expect(keyless.tools()).toEqual(['ferrule'])
+
+    await createManual().deliver(WM_TOOL)
+  })
+})
+
+describe('workflow_manual read', () => {
+  test('a result that adopts nothing passes through, whatever the conversation holds', async () => {
+    const { h, m, tools } = await ready()
+    const before = tools().length
+    h.messages = conversation(WM_TOOL, [{ input: { session_key: 'minted-1' }, text: response('minted-1') }])
     expect(await m.read('workflow_manual', WM_TOOL, { session_key: 'minted-1' }, response('minted-1'))).toBeUndefined()
+    expect(await m.read('workflow_manual', WM_TOOL, { session_key: 'minted-1', root: '/repo' }, FAIL_LOUD)).toBeUndefined()
+    expect(tools().length).toBe(before)
+    expect(h.messageReads).toBe(0)
   })
 })
 
 describe('repeat-read dedupe', () => {
-  async function ready() {
-    const x = harness()
-    x.m.start(x.edges)
-    await tick()
-    await x.m.compose([])
-    return x
-  }
-
   test('a repeat playbook_read collapses to the pointer only while the earlier result is in the conversation, then reads in full again', async () => {
     const { h, m } = await ready()
     const input = { name: 'lead-run', session_key: 'minted-1' }
@@ -712,12 +788,12 @@ describe('repeat-read dedupe', () => {
     expect(h.messageReads).toBe(0)
     // The same read again, the first result in the conversation: the pointer.
     h.messages = conversation(PR_TOOL, [{ input, text: body }])
-    expect(await m.read('playbook_read', PR_TOOL, input, body)).toBe(pointerText('playbook_read', body))
+    expect(await m.read('playbook_read', PR_TOOL, input, body)).toBe(pointerText(body))
     expect(h.messageReads).toBe(1)
     // After a pointer the next identical read returns the full text again.
     h.messages = conversation(PR_TOOL, [
       { input, text: body },
-      { input, text: pointerText('playbook_read', body) },
+      { input, text: pointerText(body) },
     ])
     expect(await m.read('playbook_read', PR_TOOL, input, body)).toBeUndefined()
     // Compaction took the earlier result away: not a repeat.
@@ -742,20 +818,7 @@ describe('repeat-read dedupe', () => {
     const { h, m } = await ready()
     h.messages = conversation(PR_TOOL, [{ input, text: body }])
     expect(await m.read('playbook_read', PR_TOOL, input, body)).toBeUndefined()
-    expect(await m.read('playbook_read', PR_TOOL, input, body)).toBe(pointerText('playbook_read', body))
-  })
-
-  test('workflow_manual dedupes on the state-only text, keyed by session_key', async () => {
-    const { h, m } = await ready()
-    const raw = response('minted-1')
-    const seen = (await m.read('workflow_manual', WM_TOOL, { session_key: 'minted-1' }, raw))!
-    expect(seen.startsWith('Workflow manual is in your system prompt;')).toBe(true)
-    h.messages = conversation(WM_TOOL, [{ input: { session_key: 'minted-1' }, text: seen }])
-    expect(await m.read('workflow_manual', WM_TOOL, { session_key: 'minted-1' }, raw)).toBe(pointerText('workflow_manual', seen))
-    h.state = 'changed'
-    expect(await m.read('workflow_manual', WM_TOOL, { session_key: 'minted-1' }, response('minted-1', { state: 'changed' }))).toMatch(
-      /^Workflow manual is in your system prompt;/,
-    )
+    expect(await m.read('playbook_read', PR_TOOL, input, body)).toBe(pointerText(body))
   })
 
   test('a preload and a read share one hint memory and one visibility check per playbook', async () => {
@@ -783,9 +846,7 @@ describe('repeat-read dedupe', () => {
   })
 
   test('outside a ws project a preload is never a repeat and reads nothing', async () => {
-    const { h, m, edges } = harness({ wsProject: false })
-    m.start(edges)
-    await tick()
+    const { h, m } = await ready({ wsProject: false })
     h.messages = [{ role: 'user', content: 'body' }]
     expect(await m.preloaded(PR_TOOL, 'lead-run', 'body')).toBe(false)
     expect(await m.preloaded(PR_TOOL, 'lead-run', 'body')).toBe(false)
@@ -793,30 +854,25 @@ describe('repeat-read dedupe', () => {
   })
 
   test('a failed conversation read keeps the full text', async () => {
-    const { m, edges } = await ready()
-    edges.messages = async () => {
-      throw new Error('no transcript')
-    }
+    const { h, m } = await ready()
+    h.messagesFail = true
     await m.read('playbook_read', PR_TOOL, { name: 'x' }, 'body')
     expect(await m.read('playbook_read', PR_TOOL, { name: 'x' }, 'body')).toBeUndefined()
   })
 })
 
 describe('key listener', () => {
-  test('told once per key change: at the mint, at a re-login, and at the mint after session.end', async () => {
-    const { h, m, edges } = harness()
-    m.start(edges)
-    await tick()
+  test('told once per key change: at the mint, not at a turn, at the mint after session.end, and at a re-login after a new start', async () => {
+    const { h, m, edges } = await ready()
     expect(h.keys).toEqual([['minted-1', undefined]])
-    await m.compose([])
-    m.compacted('manual', undefined, { messages: [] })
-    await m.compose([])
+    m.turnStarted(undefined)
+    await m.ensureKey()
+    await m.deliver(WM_TOOL)
     expect(h.keys).toEqual([['minted-1', undefined]])
     m.end('clear')
     h.sessionId = 'sess-2'
-    const composed = m.compose([])
+    m.turnStarted(undefined)
     await tick()
-    await composed
     expect(h.keys).toEqual([
       ['minted-1', undefined],
       ['minted-2', undefined],
@@ -842,43 +898,14 @@ describe('key listener', () => {
     expect(h.keys).toEqual([])
     expect(h.store.has(`${KEY_STORE_PREFIX}sess-1`)).toBe(false)
   })
-
-  test('the section carries the mailbox line only when the push runs here, and the first compose waits for the probe', async () => {
-    const off = harness()
-    off.m.start(off.edges)
-    await tick()
-    expect(await off.m.compose([])).not.toContain('Mailbox push is bound')
-
-    const { h, m, edges } = harness()
-    h.push = true
-    let release!: () => void
-    h.pushHold = new Promise<void>((resolve) => (release = resolve))
-    m.start(edges)
-    await tick()
-    let done = false
-    const composed = m.compose([]).then((text) => ((done = true), text))
-    await tick()
-    expect(done).toBe(false)
-    release()
-    expect(await composed).toBe(sectionText('ws', 'minted-1', manualPart(response('minted-1'))!, true))
-    expect(m.snapshot()).toBe(true)
-  })
 })
 
 describe('revive key adoption', () => {
-  async function ready(opts: Parameters<typeof harness>[0] = {}) {
-    const x = harness(opts)
-    x.h.known.add('revived')
-    x.m.start(x.edges)
-    await tick()
-    await x.m.compose([])
-    return x
-  }
   const revive = (m: ReturnType<typeof harness>['m'], key = 'revived') => m.read('workflow_manual', WM_TOOL, { session_key: key }, response(key))
 
-  test('a revive with another key re-logs in, rewrites the entry, tells the listener, and appends the notice; the flag goes false until the next landing', async () => {
+  test('a revive with another key re-logs in, rewrites the entry, tells the listener, and appends the notice; nothing is rebuilt', async () => {
     const { h, m, tools } = await ready()
-    expect(m.snapshot()).toBe(true)
+    h.known.add('revived')
     const before = tools().length
     expect(await revive(m)).toBe(`${response('revived')}\n\n${adoptionNotice('ws', 'minted-1', 'revived')}`)
     expect(h.calls[before]).toEqual({ server: SERVER, tool: 'ferrule', args: { root: '/repo/sub', format: 'json', relogin_session_key: 'revived' } })
@@ -888,44 +915,30 @@ describe('revive key adoption', () => {
       ['revived', 'minted-1'],
     ])
     expect(m.key()).toBe('revived')
-    expect(m.snapshot()).toBe(false)
     await tick()
-    // The rebuild re-logs in from the rewritten entry.
-    expect(tools().slice(before)).toEqual(['ferrule', 'ferrule', 'workflow_manual', 'playbook_read'])
-    expect(h.calls[before + 1].args).toEqual({ root: '/repo/sub', format: 'json', relogin_session_key: 'revived' })
+    expect(tools().slice(before)).toEqual(['ferrule'])
     expect(h.minted).toBe(1)
-    // No refreshing reset yet: the snapshot still names minted-1, so the adopted key's reads pass through whole.
-    await m.compose([])
-    expect(m.snapshot()).toBe(false)
+    // The adopted key again is the current one: nothing to adopt.
     expect(await revive(m)).toBeUndefined()
-    // Native auto compaction composes nothing: still false.
-    m.compacted('auto', undefined, { messages: [] })
-    await m.compose([])
-    expect(m.snapshot()).toBe(false)
-    m.compacted('manual', undefined, { messages: [] })
-    expect(await m.compose([])).toBe(sectionText('ws', 'revived', manualPart(response('revived'))!))
-    expect(m.snapshot()).toBe(true)
-    expect(await revive(m)).toMatch(/^Workflow manual is in your system prompt;/)
     expect(h.keys.length).toBe(2)
+    // The next row carries the adopted key.
+    await m.deliver(WM_TOOL)
+    expect(h.appended).toEqual([rowText('ws', 'revived', response('revived'))])
   })
 
-  test('the adopted key again while the rebuild runs is not adopted twice', async () => {
+  test('the adopted key again while the adoption is in flight is not adopted twice', async () => {
     const { h, m, tools } = await ready()
-    let release!: () => void
-    h.hold = new Promise<void>((resolve) => (release = resolve))
+    h.known.add('revived')
     await revive(m)
     await tick()
     const calls = tools().length
     expect(await revive(m)).toBeUndefined()
     expect(tools().length).toBe(calls)
-    release()
-    await tick()
     expect(h.keys.length).toBe(2)
   })
 
   test('a sentinel result carrying a minted key is adopted like a revive, and the lead reads it whole', async () => {
     const { h, m, tools } = await ready()
-    expect(m.snapshot()).toBe(true)
     h.known.add('fresh-1')
     const before = tools().length
     const minted = response('fresh-1')
@@ -940,45 +953,39 @@ describe('revive key adoption', () => {
     ])
     expect(m.key()).toBe('fresh-1')
     await tick()
-    expect(tools().slice(before)).toEqual(['ferrule', 'ferrule', 'workflow_manual', 'playbook_read'])
+    expect(tools().slice(before)).toEqual(['ferrule'])
     expect(h.minted).toBe(1)
-    m.compacted('manual', undefined, { messages: [] })
-    expect(await m.compose([])).toBe(sectionText('ws', 'fresh-1', manualPart(response('fresh-1'))!))
   })
 
-  test('a sentinel result reaches the lead whole even when its cut would match or its anchors miss', async () => {
+  test('a sentinel result for the current key, or without a ## Session Key line, reaches the lead whole and adopts nothing', async () => {
     const { h, m, tools } = await ready()
-    // The section's own key, as a sentinel answer: the cut would match, yet nothing is cut and nothing adopted.
     expect(await m.read('workflow_manual', WM_TOOL, { session_key: 'obsidian-latch' }, response('minted-1'))).toBeUndefined()
-    // A sentinel call without a root: the manual with no ## Session Key line, so no workflow_state fallback either.
     const before = tools().length
     const bodyOnly = `${STATIC_BODY}\nCall ferrule to bootstrap.\n`
     expect(await m.read('workflow_manual', WM_TOOL, { session_key: 'obsidian-latch' }, bodyOnly)).toBeUndefined()
     expect(tools().length).toBe(before)
     expect(h.keys).toEqual([['minted-1', undefined]])
-    expect(m.snapshot()).toBe(true)
   })
 
   test('every adoption notice names the push when it runs here, a revive\'s included', async () => {
     const { h, m } = await ready()
     h.push = true
     h.known.add('fresh-1')
+    h.known.add('revived')
     const minted = response('fresh-1')
     expect(await m.read('workflow_manual', WM_TOOL, { session_key: 'obsidian-latch' }, minted)).toBe(`${minted}\n\n${adoptionNotice('ws', 'minted-1', 'fresh-1', true)}`)
     await tick()
     expect(await revive(m)).toBe(`${response('revived')}\n\n${adoptionNotice('ws', 'fresh-1', 'revived', true)}`)
   })
 
-  test('no adoption for the current key or a key ws-mcp refuses', async () => {
+  test('no adoption for a key ws-mcp refuses', async () => {
     const { h, m, tools } = await ready()
     const before = tools().length
-    expect(await m.read('workflow_manual', WM_TOOL, { session_key: 'minted-1' }, response('minted-1'))).toMatch(/^Workflow manual is in your system prompt;/)
-    expect(tools().length).toBe(before)
     expect(await revive(m, 'unknown-key')).toBeUndefined()
     expect(tools().slice(before)).toEqual(['ferrule'])
     expect(h.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'minted-1', at: NOW })
     expect(h.keys).toEqual([['minted-1', undefined]])
-    expect(m.snapshot()).toBe(true)
+    expect(m.key()).toBe('minted-1')
   })
 
   test('a conversation whose mint failed still adopts a revive, from none', async () => {
@@ -991,6 +998,7 @@ describe('revive key adoption', () => {
     expect(await revive(m)).toBe(`${response('revived')}\n\n${adoptionNotice('ws', undefined, 'revived')}`)
     expect(h.keys).toEqual([['revived', undefined]])
     expect(h.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'revived', at: NOW })
+    expect(await m.ensureKey()).toBe('revived')
   })
 
   test('an adoption during an in-flight mint keeps the adopted key in the entry and the listener', async () => {
@@ -1008,8 +1016,6 @@ describe('revive key adoption', () => {
     expect(h.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'revived', at: NOW })
     expect(h.keys).toEqual([['revived', undefined]])
     expect(m.key()).toBe('revived')
-    m.compacted('manual', undefined, { messages: [] })
-    expect(await m.compose([])).toContain('`revived`')
   })
 
   test('an adoption during an in-flight re-login keeps the adopted key in the entry and the listener', async () => {
@@ -1030,6 +1036,7 @@ describe('revive key adoption', () => {
 
   test('a session end while the re-login runs adopts nothing', async () => {
     const { h, m } = await ready()
+    h.known.add('revived')
     let release!: () => void
     const held = new Promise<void>((resolve) => (release = resolve))
     h.ferruleHold = (args) => (args.relogin_session_key === 'revived' ? held : undefined)
@@ -1042,72 +1049,20 @@ describe('revive key adoption', () => {
     expect(h.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'minted-1', at: NOW })
   })
 
-  test('a failed key entry rewrite still rebuilds with the adopted key, never reverting to the stored one', async () => {
+  test('a failed key entry rewrite still adopts the key and gives the notice, leaving the stored entry as it was', async () => {
     const { h, m } = await ready()
+    h.known.add('revived')
     h.storeFails = true
     expect(await revive(m)).toContain(adoptionNotice('ws', 'minted-1', 'revived'))
-    // Transient: the rebuild's own write lands, from the adopted key, not the stale entry.
     expect(h.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'minted-1', at: NOW })
+    expect(m.key()).toBe('revived')
+    expect(h.keys.at(-1)).toEqual(['revived', 'minted-1'])
+    expect(h.logs.some((l) => l.text.includes('key entry rewrite failed'))).toBe(true)
+    // The conversation holds the adopted key from here on: no setup runs behind it.
     h.storeFails = false
-    await tick()
-    expect(h.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'revived', at: NOW })
-    expect(h.calls.filter((c) => c.tool === 'ferrule').map((c) => c.args.relogin_session_key)).toEqual([undefined, 'revived', 'revived'])
-    expect(h.keys.at(-1)).toEqual(['revived', 'minted-1'])
-    m.compacted('manual', undefined, { messages: [] })
-    expect(await m.compose([])).toContain('`revived`')
-    expect(h.keys.length).toBe(2)
-  })
-
-  test('a first compose while the entry rewrite runs waits on the rebuild instead of starting from the old entry', async () => {
-    const { h, m } = await ready()
-    m.compacted('manual', undefined, { messages: [] })
-    let release!: () => void
-    const held = new Promise<void>((resolve) => (release = resolve))
-    h.storeHold = (v) => ((v as { sessionKey?: string }).sessionKey === 'revived' ? held : undefined)
-    const adopting = revive(m)
-    await tick()
-    expect(h.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'minted-1', at: NOW })
-    const composed = m.compose([])
-    await tick()
-    h.storeHold = undefined
-    release()
-    await adopting
-    expect(await composed).toContain('`revived`')
-    expect(h.keys).toEqual([
-      ['minted-1', undefined],
-      ['revived', 'minted-1'],
-    ])
+    m.turnStarted(undefined)
+    expect(await m.ensureKey()).toBe('revived')
     expect(h.minted).toBe(1)
-  })
-
-  test("the rebuild never mints: a refused re-login there fails it and leaves the push on the adopted key", async () => {
-    const { h, m } = await ready()
-    let relogins = 0
-    let release!: () => void
-    const held = new Promise<void>((resolve) => (release = resolve))
-    h.ferruleHold = (args) => (args.relogin_session_key === 'revived' && ++relogins === 2 ? held : undefined)
-    await revive(m)
-    await tick()
-    h.known.delete('revived')
-    release()
-    await tick()
-    expect(h.minted).toBe(1)
-    expect(h.keys.at(-1)).toEqual(['revived', 'minted-1'])
-    expect(h.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'revived', at: NOW })
-  })
-
-  test('a failed rebuild recovers at the next first compose', async () => {
-    const { h, m, tools } = await ready()
-    h.failing.add('playbook_read')
-    await revive(m)
-    await tick()
-    h.failing.clear()
-    m.compacted('manual', undefined, { messages: [] })
-    const composed = m.compose([])
-    await tick()
-    expect(await composed).toContain('`revived`')
-    expect(m.snapshot()).toBe(true)
-    expect(tools().filter((t) => t === 'playbook_read').length).toBe(3)
   })
 })
 
@@ -1151,11 +1106,10 @@ describe('late open', () => {
     expect(m.key()).toBe('held-1')
     m.end('clear')
     h.sessionId = 'sess-2'
-    const composed = m.compose([])
+    const key = m.ensureKey()
     await tick()
-    await composed
+    expect(await key).toBe('minted-1')
     expect(h.minted).toBe(1)
-    expect(m.key()).toBe('minted-1')
     expect(h.store.get(`${KEY_STORE_PREFIX}sess-2`)).toEqual({ sessionKey: 'minted-1', at: NOW })
     expect(h.keys).toEqual([
       ['held-1', undefined],
@@ -1163,19 +1117,21 @@ describe('late open', () => {
     ])
   })
 
-  test('a late open whose held key is refused mints nothing, and neither does a later compose', async () => {
+  test('a late open whose held key is refused mints nothing, and neither does a later ensureKey or turn', async () => {
     const { h, m, edges } = harness({ wsProject: false })
     m.start(edges)
     await tick()
     m.opened('gone-1')
     await tick()
-    expect(await m.compose([])).toBeUndefined()
+    expect(await m.ensureKey()).toBeUndefined()
+    m.turnStarted(undefined)
+    await tick()
     expect(h.minted).toBe(0)
     expect(h.keys).toEqual([])
     expect(m.key()).toBeUndefined()
   })
 
-  test('an adoption after a late open moves the conversation off the held key: a later setup re-logs in with the adopted key', async () => {
+  test('an adoption after a late open moves the listener and the entry off the held key', async () => {
     const { h, m, edges } = harness({ wsProject: false })
     h.known.add('held-1')
     h.known.add('revived')
@@ -1183,14 +1139,10 @@ describe('late open', () => {
     await tick()
     m.opened('held-1')
     await tick()
-    // The adoption's rebuild fails, so a later setup runs from the key entry.
-    h.failing.add('workflow_manual')
     await m.read('workflow_manual', WM_TOOL, { session_key: 'revived' }, response('revived'))
     await tick()
     expect(m.key()).toBe('revived')
-    h.failing.delete('workflow_manual')
-    m.landed('manual')
-    expect(await m.compose([])).toContain('`revived`')
+    expect(h.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'revived', at: NOW })
     expect(h.keys).toEqual([
       ['held-1', undefined],
       ['revived', 'held-1'],

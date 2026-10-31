@@ -1,37 +1,35 @@
-import type { SessionCompactResult, SessionCompactTrigger } from 'claude-code'
-
 /**
- * Workflow manual injection, a feature of the Claude mod (behind its knob,
- * and only in a ws project): the mod mints a lead session key for the conversation,
- * puts the keyed workflow manual in the system prompt, answers a main-thread
- * `workflow_manual` call with the session state alone while the system prompt
- * carries the manual, and collapses a repeat `playbook_read` or
- * `workflow_manual` result to a pointer while the earlier identical result is
- * still in the conversation; a playbook body the preload inlined (preload.ts)
- * is an earlier copy too, and the preload asks the same check through
- * `preloaded`. A main-thread `workflow_manual` call with another
- * lead key (a revive), or with the fresh-bootstrap sentinel whose result
- * carries the key ws-mcp minted, is adopted as the conversation's key, and
- * every key the conversation gets is handed to the mailbox push through the
- * key listener.
+ * Workflow manual delivery, a feature of the Claude mod (behind its knob, and
+ * only in a ws project): the mod mints a lead session key for the
+ * conversation, and when one of its lead skills is expanded (preload.ts) and
+ * no copy of the manual is visible in the conversation, it appends one
+ * model-only row carrying the key line, the mailbox line when the push runs
+ * here, and the whole keyed `workflow_manual` response. The row is appended
+ * once per conversation epoch: compaction, `/clear` and a rewind remove it,
+ * and the next lead skill expansion appends it again. It is not appended
+ * again when the session state changes inside an epoch, since the lead
+ * authored that change and reads its state on demand.
  *
- * The engine snapshots the main thread's system prompt once per conversation:
- * only the first `prompt.compose` answer after a session start, a landed
- * compaction, or `/clear` reaches the API, and a resumed session replays its
- * recorded snapshot. So the first compose after such a reset waits a bounded
- * time for the key and the manual, later composes never wait, and the
- * snapshot flag records whether the conversation's snapshot carries the
- * section. Only while it does is a `workflow_manual` result cut to the state,
- * so the manual is never in neither place.
+ * A row and not the skill text: Claude Code re-attaches invoked skills'
+ * expanded text after compaction, so a key or state inlined there would cross
+ * compaction stale, while an appended row is an ordinary message compaction
+ * summarizes away. `skill.prompt` also fires for a subagent preload, and the
+ * row goes to the main conversation only, so a subagent never receives the
+ * key or the state.
+ *
+ * A repeat `playbook_read` collapses to a pointer while the earlier identical
+ * result is still in the conversation; a playbook body the preload inlined is
+ * an earlier copy too, and the preload asks the same check through
+ * `preloaded`. `workflow_manual` results reach the model as ws-mcp answered
+ * them: a main-thread call with another lead key (a revive), or with the
+ * fresh-bootstrap sentinel whose result carries the key ws-mcp minted, is
+ * adopted as the conversation's key, and only the adoption notice is appended
+ * to it. Every key the conversation gets is handed to the mailbox push
+ * through the key listener.
  *
  * The engine calls arrive as edges bound in register.ts, so the state machine
  * here is driven and tested without an engine.
  */
-
-export const SECTION_ID = 'ws:workflow-manual'
-
-/** The first compose after a reset waits at most this long for the key and the manual (the hook budget is 10 s). */
-export const COMPOSE_WAIT_MS = 5_000
 
 /**
  * $.store key prefix for the conversation's lead key, suffixed with the
@@ -47,11 +45,11 @@ export const KEY_STORE_PREFIX = 'ws-lead-key:'
  */
 export const KEY_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
 
+/** A lead skill expansion waits at most this long for the conversation's key (the hook budget is 10 s). */
+export const KEY_WAIT_MS = 5_000
+
 /** The whole line ws-mcp places after the manual body; session state and notes follow it. */
 export const SESSION_KEY_ANCHOR = '## Session Key'
-
-export const STATE_POINTER_LINE =
-  'Your session state (agenda, todos, notes) is not in this prompt. When no `workflow_manual` result is visible in your context — a fresh session, or after compaction — call `workflow_manual` before acting.'
 
 /** The key line; `plugin` is the engine-reported plugin name, which namespaces its revive skill. */
 export function keyLine(plugin: string, key: string): string {
@@ -64,20 +62,36 @@ export function keyLine(plugin: string, key: string): string {
 export const MAILBOX_LINE =
   'Mailbox push is bound to this key automatically: arriving mail starts your next turn even when you are idle, so launch no mailbox wait. If a revive switches your key, the push follows it.'
 
-/** The system prompt section: the state pointer, the key line, the mailbox line when the push runs here, then the manual. */
-export function sectionText(plugin: string, key: string, manual: string, push = false): string {
+/**
+ * The epoch row's first line, its marker: the epoch scan matches it as a
+ * whole line, so it is spelled only here. `plugin` is the engine-reported name.
+ */
+export function rowHeader(plugin: string): string {
+  return (
+    `[${plugin}] Workflow manual for this conversation, with your session state as of this message. ` +
+    'It is delivered once until the next compaction or /clear; read your agenda, todos, and notes again on demand with workflow_state, agenda_list, todo_list, or note_query.'
+  )
+}
+
+/** The epoch row: its header, the key line, the mailbox line when the push runs here, then the whole keyed `workflow_manual` response. */
+export function rowText(plugin: string, key: string, response: string, push = false): string {
   const keyed = push ? `${keyLine(plugin, key)}\n\n${MAILBOX_LINE}` : keyLine(plugin, key)
-  return `${STATE_POINTER_LINE}\n\n${keyed}\n\n${manual}`
+  return `${rowHeader(plugin)}\n\n${keyed}\n\n${response.trimEnd()}`
 }
 
 /**
  * ws-mcp's fresh-bootstrap sentinel: a `workflow_manual` call with it (and a
  * root) mints a separate key and returns it under `## Session Key`. A lead
- * calls it when it saw no key, which is also when the system prompt section
- * did not reach it (an organization policy can keep it out), so that minted
- * key is the one the lead holds.
+ * calls it when it saw no key (no lead skill delivered the row yet, or an
+ * organization policy kept it out), so that minted key is the one the lead
+ * holds.
  */
 export const FRESH_BOOTSTRAP_SENTINEL = 'obsidian-latch'
+
+/** Whether `text` holds `line` as a whole line. */
+function hasLine(text: string, line: string): boolean {
+  return text.split('\n').some((l) => l.trimEnd() === line)
+}
 
 /** The key on the line after the first whole `## Session Key` line, or undefined. */
 function resultKey(text: string): string | undefined {
@@ -104,20 +118,14 @@ export function revivedKeyToAdopt(raw: unknown, current: string | undefined, tex
 /**
  * Appended to the adopting `workflow_manual` result after a blank line; with
  * `push` (the mailbox push runs here) it says the push follows, since a lead
- * whose system prompt lacks the mailbox line would otherwise arm a wait.
+ * that saw no mailbox line would otherwise arm a wait.
  */
 export function adoptionNotice(plugin: string, previous: string | undefined, current: string, push = false): string {
   return (
     `[${plugin}] Lead session key changed: ${previous ?? '(none)'} -> ${current}. ` +
-    `Keep passing ${current} as session_key; this conversation resumes with it, and the system prompt names it after the next /compact or compaction request.` +
+    `Keep passing ${current} as session_key; this conversation resumes with it, after compaction too.` +
     (push ? ` Mailbox push is bound to ${current}: arriving mail starts your next turn even when you are idle, so launch no mailbox wait.` : '')
   )
-}
-
-export const STATE_ONLY_LINE = 'Workflow manual is in your system prompt; this is your current session state.'
-
-export function stateOnlyText(state: string): string {
-  return `${STATE_ONLY_LINE}\n\n${state}`
 }
 
 export type ReadFamily = 'playbook_read' | 'workflow_manual'
@@ -128,12 +136,9 @@ export function headings(text: string): string {
   return found.length > 0 ? found.join('; ') : '(no headings)'
 }
 
-/** What a repeat read returns in place of `text`, its unchanged result, when the earlier copy is a result of the same tool. */
-export function pointerText(family: ReadFamily, text: string): string {
-  const lead = `The result is unchanged. Continue using the full result of your earlier \`${family}\` call in this conversation`
-  return family === 'workflow_manual'
-    ? `${lead} as your current session state; call workflow_manual again after you change agenda, todos, or notes. (headings: ${headings(text)})`
-    : `${lead}. Do not read it again (headings: ${headings(text)}).`
+/** What a repeat `playbook_read` returns in place of `text`, its unchanged result, when the earlier copy is a result of the same tool. */
+export function pointerText(text: string): string {
+  return `The result is unchanged. Continue using the full result of your earlier \`playbook_read\` call in this conversation. Do not read it again (headings: ${headings(text)}).`
 }
 
 /**
@@ -154,44 +159,6 @@ export function preloadPointerLine(playbook: string): string {
   return `The full \`${playbook}\` procedure is already above in this conversation. If you can see that copy, follow it and skip the read instructions below; they are only for a context that cannot see it.`
 }
 
-/** The part of a keyed `workflow_manual` response before its `## Session Key` line, or undefined without one. */
-export function manualPart(response: string): string | undefined {
-  const lines = response.split('\n')
-  const end = lines.indexOf(SESSION_KEY_ANCHOR)
-  if (end === -1) return undefined
-  const part = lines.slice(0, end).join('\n').trimEnd()
-  return part || undefined
-}
-
-export type Cut =
-  | { found: true; text: string; span: string }
-  | { found: false; reason: 'start-anchor' | 'end-anchor' | 'order' | 'no-body' }
-
-/**
- * Cut the static manual body out of a `workflow_manual` response: from the
- * first whole line equal to `staticBody`'s first non-empty line up to (not
- * including) the first whole `## Session Key` line. What ws-mcp prepends
- * (warnings, banners, the manuals list) stays ahead of the start anchor and
- * what it appends stays from the end anchor on. `span` is what the cut
- * removes. Neither anchor present is ws-mcp's no-restorable-state notice.
- */
-export function cutStaticBody(response: string, staticBody: string): Cut {
-  const startLine = staticBody.split('\n').find((line) => line.length > 0)
-  let start = -1
-  let end = -1
-  let offset = 0
-  for (const line of response.split('\n')) {
-    if (start === -1 && startLine !== undefined && line === startLine) start = offset
-    if (end === -1 && line === SESSION_KEY_ANCHOR) end = offset
-    offset += line.length + 1
-  }
-  if (start === -1 && end === -1) return { found: false, reason: 'no-body' }
-  if (start === -1) return { found: false, reason: 'start-anchor' }
-  if (end === -1) return { found: false, reason: 'end-anchor' }
-  if (end <= start) return { found: false, reason: 'order' }
-  return { found: true, text: response.slice(0, start) + response.slice(end), span: response.slice(start, end) }
-}
-
 function stable(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null'
   if (Array.isArray(value)) return `[${value.map(stable).join(',')}]`
@@ -203,13 +170,12 @@ function stable(value: unknown): string {
 }
 
 /**
- * The dedupe key of a read's arguments: `playbook_read` by `name` alone, the
+ * The dedupe key of a `playbook_read`'s arguments: its `name` alone, the
  * playbook being the unit (a `context` that renders a different body is told
- * apart by the body, so it does not split identical ones), `workflow_manual`
- * by `session_key`.
+ * apart by the body, so it does not split identical ones).
  */
-export function readKey(family: ReadFamily, args: Record<string, unknown>): string {
-  return family === 'playbook_read' ? stable({ name: args.name }) : stable({ session_key: args.session_key ?? null })
+export function readKey(args: Record<string, unknown>): string {
+  return stable({ name: args.name })
 }
 
 /** A cheap 53-bit hash, for the memory hint only: a collision costs one conversation read, never a wrong pointer. */
@@ -227,10 +193,10 @@ export function hashText(text: string): string {
 }
 
 /**
- * One message of the conversation in Messages API form, as far as the dedupe
- * reads it. A skill expansion arrives as a user message's `text` block (after
- * the Skill tool's own result when the model invoked it); content may also be
- * a plain string.
+ * One message of the conversation in Messages API form, as far as the scans
+ * read it. A skill expansion arrives as a user message's `text` block (after
+ * the Skill tool's own result when the model invoked it), and so does an
+ * appended row; content may also be a plain string.
  */
 export type ApiMessageLike = { role: string; content: string | readonly { type: string; [field: string]: unknown }[] }
 
@@ -241,69 +207,107 @@ function blockText(content: unknown): string | undefined {
   return texts.length > 0 ? texts.join('\n') : undefined
 }
 
-/** Which earlier copy a repeat collapses onto: a result of the same tool, or a body a skill expansion inlined. */
-export type Copy = 'result' | 'inlined'
-
-/**
- * The earlier copy a fresh read whose result the model would see as `fresh`
- * collapses onto, or undefined when it is no repeat, judged by the
- * conversation alone: exactly one earlier copy is `fresh` itself and none is
- * a pointer to it. A copy is a result of a call to `tool` with the same key;
- * for `playbook_read` it is also the body inside a user message's own text (a
- * skill expansion the preload inlined), and its pointers include the preload
- * pointer line, so a playbook is one unit across both paths. Playbook bodies
- * compare trimmed, as the preload inlines them. So the read after a pointer
- * returns the full text again, and an earlier copy gone from the conversation
- * (compaction, `/clear`, a rewind) is not a repeat.
- */
-export function repeatOf(
-  messages: readonly ApiMessageLike[],
-  tool: string,
-  family: ReadFamily,
-  args: Record<string, unknown>,
-  fresh: string,
-): Copy | undefined {
-  const playbook = family === 'playbook_read'
-  const body = playbook ? fresh.trim() : fresh
-  if (playbook && !body) return undefined
-  const key = readKey(family, args)
-  const calls = new Set<string>()
+/** The ids of the conversation's calls to `tool` whose input `match` accepts. */
+function callIds(messages: readonly ApiMessageLike[], tool: string, match: (input: Record<string, unknown>) => boolean): Set<string> {
+  const ids = new Set<string>()
   for (const m of messages) {
     if (m.role !== 'assistant' || typeof m.content === 'string') continue
     for (const b of m.content) {
       if (b.type !== 'tool_use' || b.name !== tool || typeof b.id !== 'string') continue
-      const input = b.input && typeof b.input === 'object' ? (b.input as Record<string, unknown>) : {}
-      if (readKey(family, input) === key) calls.add(b.id)
+      if (match(b.input && typeof b.input === 'object' ? (b.input as Record<string, unknown>) : {})) ids.add(b.id)
     }
   }
-  const pointers = playbook ? [pointerText(family, fresh), inlinedPointerText(fresh)] : [pointerText(family, fresh)]
-  const line = playbook && typeof args.name === 'string' ? preloadPointerLine(args.name) : undefined
-  let results = 0
-  let inlined = 0
-  let pointed = 0
-  const ownText = (text: string) => {
-    if (!playbook) return
-    if (text.includes(body)) inlined += 1
-    if (line !== undefined && text.includes(line)) pointed += 1
-  }
+  return ids
+}
+
+/**
+ * Visit each user message's own text (a plain string or a text block) with
+ * `text`, and each non-error result of a call in `calls` with `result`.
+ */
+function scanUser(
+  messages: readonly ApiMessageLike[],
+  calls: ReadonlySet<string>,
+  text: (t: string) => void,
+  result: (t: string) => void,
+): void {
   for (const m of messages) {
     if (m.role !== 'user') continue
     if (typeof m.content === 'string') {
-      ownText(m.content)
+      text(m.content)
       continue
     }
     for (const b of m.content) {
       if (b.type === 'text' && typeof b.text === 'string') {
-        ownText(b.text)
+        text(b.text)
         continue
       }
       if (b.type !== 'tool_result' || b.is_error === true || typeof b.tool_use_id !== 'string' || !calls.has(b.tool_use_id)) continue
-      const text = blockText(b.content)
-      if (text === undefined) continue
-      if ((playbook ? text.trim() : text) === body) results += 1
-      else if (pointers.includes(text)) pointed += 1
+      const t = blockText(b.content)
+      if (t !== undefined) result(t)
     }
   }
+}
+
+/**
+ * Whether the conversation holds an epoch copy of the manual: the mod's row
+ * (a user text holding `rowHeader(plugin)` as a whole line), or a non-error
+ * result of a call to `tool` (the model-facing `workflow_manual`) that
+ * delivers the manual, whatever its key: one holding a whole `## Session Key`
+ * line, which ws-mcp's fail-loud notice for an unresolvable key lacks.
+ */
+export function epochCopyVisible(messages: readonly ApiMessageLike[], tool: string, plugin: string): boolean {
+  const header = rowHeader(plugin)
+  let found = false
+  scanUser(
+    messages,
+    callIds(messages, tool, () => true),
+    (t) => {
+      if (hasLine(t, header)) found = true
+    },
+    (t) => {
+      if (hasLine(t, SESSION_KEY_ANCHOR)) found = true
+    },
+  )
+  return found
+}
+
+/** Which earlier copy a repeat collapses onto: a result of the same tool, or a body a skill expansion inlined. */
+export type Copy = 'result' | 'inlined'
+
+/**
+ * The earlier copy a fresh `playbook_read` whose result the model would see
+ * as `fresh` collapses onto, or undefined when it is no repeat, judged by the
+ * conversation alone: exactly one earlier copy is `fresh` itself and none is
+ * a pointer to it. A copy is a result of a call to `tool` with the same name,
+ * or the body inside a user message's own text (a skill expansion the preload
+ * inlined), and its pointers include the preload pointer line, so a playbook
+ * is one unit across both paths. Bodies compare trimmed, as the preload
+ * inlines them. So the read after a pointer returns the full text again, and
+ * an earlier copy gone from the conversation (compaction, `/clear`, a rewind)
+ * is not a repeat.
+ */
+export function repeatOf(messages: readonly ApiMessageLike[], tool: string, args: Record<string, unknown>, fresh: string): Copy | undefined {
+  const body = fresh.trim()
+  if (!body) return undefined
+  const key = readKey(args)
+  const calls = callIds(messages, tool, (input) => readKey(input) === key)
+  const pointers = [pointerText(fresh), inlinedPointerText(fresh)]
+  const line = typeof args.name === 'string' ? preloadPointerLine(args.name) : undefined
+  let results = 0
+  let inlined = 0
+  let pointed = 0
+  scanUser(
+    messages,
+    calls,
+    (t) => {
+      if (t.includes(body)) inlined += 1
+      if (line !== undefined && t.includes(line)) pointed += 1
+    },
+    (t) => {
+      if (t.trim() === body) results += 1
+      else if (pointers.includes(t)) pointed += 1
+    },
+  )
   if (results + inlined !== 1 || pointed !== 0) return undefined
   return results === 1 ? 'result' : 'inlined'
 }
@@ -322,19 +326,6 @@ export function ferruleKey(text: string): string | undefined {
   } catch {
     return undefined
   }
-}
-
-/**
- * Whether a landed compaction of this trigger refreshes the snapshot. Manual
- * `/compact` and a plugin's compaction do (the first request after them
- * carries a fresh compose answer). Native auto compaction composes nothing:
- * the requests after it carry the latest non-measuring compose answer given
- * (observed on Claude Code 2.1.302), so its landing leaves the flag as it
- * was, which is safe either way: a set flag means the cache was there for
- * every compose since, a clear one only costs full results.
- */
-export function landingRefreshes(trigger: SessionCompactTrigger): boolean {
-  return trigger === 'manual' || trigger === 'plugin'
 }
 
 export type ManualEdges = {
@@ -369,38 +360,55 @@ export type ManualEdges = {
   timer: (ms: number, fn: () => void) => { cancel: () => void }
   /** The main conversation in Messages API form. */
   messages: () => Promise<readonly ApiMessageLike[]>
+  /** Append a model-only user row of `text` to the main conversation; rejects when it is refused. */
+  append: (text: string) => Promise<void>
   log: (text: string, to: 'transcript' | 'debug') => void
-  /** The engine-reported plugin name: the log lines' prefix, the notice's label, and the key line's revive skill spell it. */
+  /** The engine-reported plugin name: the log lines' prefix, the notice's label, the row's header and the key line's revive skill spell it. */
   plugin: string
 }
 
 export type Manual = {
   /** session.start: bind the edges, start the conversation over, prune stale key entries, and begin the setup. */
   start: (edges: ManualEdges) => void
-  /** session.end: drop the cache and the snapshot flag; the next compose sets up again. */
+  /** session.end: drop the conversation's key; the next main-thread turn or lead skill expansion sets up again. */
   end: (reason: string) => void
-  /** A prompt.compose: the section text to append, or undefined. */
-  compose: (traits: readonly string[]) => Promise<string | undefined>
-  /** A session.compact as it settled beneath the mod's hook. */
-  compacted: (trigger: SessionCompactTrigger, agentId: string | undefined, res: SessionCompactResult) => void
-  /** A landed main-conversation compaction, including the compaction lever's own. */
-  landed: (trigger: SessionCompactTrigger) => void
+  /**
+   * A turn started (`agentId` set for a subagent's). The first main-thread
+   * turn after a session start or end begins a setup when the conversation
+   * holds no key and none runs: no session.start follows `/clear`, and a
+   * setup that failed at start is retried here once.
+   */
+  turnStarted: (agentId: string | undefined) => void
   /**
    * The ws-project gate opened after it read closed (register.ts retried a
-   * failed knob read): set up now. This conversation's first compose is past,
-   * so the section reaches the model only from the next landing on, and the
-   * snapshot flag stays false until then. `bound` is a key the model already
-   * bound the mailbox push to while the gate read closed: the conversation
-   * keeps it (a re-login with it, never a mint, as an adoption's rebuild),
-   * so the push, the band and the key entry stay on the key the model holds.
-   * Without one the setup mints as at a start.
+   * failed knob read): set up now. `bound` is a key the model already bound
+   * the mailbox push to while the gate read closed: the conversation keeps it
+   * (a re-login with it, never a mint), so the push, the band and the key
+   * entry stay on the key the model holds. Without one the setup mints as at
+   * a start.
    */
   opened: (bound?: string) => void
   /**
+   * The conversation's key for a lead skill expansion: the key held, else
+   * the result of a setup begun (or already running) now, waited on at most
+   * KEY_WAIT_MS; undefined outside a ws project, on a failed setup, or on
+   * timeout. Never rejects.
+   */
+  ensureKey: () => Promise<string | undefined>
+  /**
+   * A lead skill's preload block was expanded: unless an epoch copy of the
+   * manual is visible in the main conversation, read `workflow_manual` with
+   * the conversation's key and append the epoch row. `tool` is the
+   * model-facing `workflow_manual` name. A failed conversation read appends;
+   * a failed manual read or refused row appends nothing. Never rejects.
+   */
+  deliver: (tool: string) => Promise<void>
+  /**
    * A main-thread ws read result: the text the model should read in place of
    * `text`, or undefined to keep the result as it is. `tool` is its
-   * model-facing name. A `workflow_manual` result reaching here (not refused,
-   * not an error) may adopt its key. Never throws.
+   * model-facing name. A `playbook_read` result may collapse to a pointer; a
+   * `workflow_manual` result reaching here (not refused, not an error) may
+   * adopt its key and gain the adoption notice. Never throws.
    */
   read: (family: ReadFamily, tool: string, args: Record<string, unknown>, text: string) => Promise<string | undefined>
   /**
@@ -411,53 +419,23 @@ export type Manual = {
    * throws; false outside a ws project.
    */
   preloaded: (tool: string, playbook: string, body: string) => Promise<boolean>
-  /** Whether the conversation's snapshot carries the section (for tests and logs). */
-  snapshot: () => boolean
-  /** The conversation's key, or undefined (the playbook preload reads with it; tests and logs). */
+  /** The conversation's key, or undefined (tests and logs). */
   key: () => string | undefined
-}
-
-/** The key and the manual for this conversation. */
-type Cache = {
-  key: string
-  section: string
-  /** The static manual body (`playbook_read` `lead-workflow-manual` with the key); its first line is the cut's start anchor. */
-  staticBody: string
-  /** What the cut removes from the injected response; undefined when its anchors were not found. */
-  span: string | undefined
-  /**
-   * Whether $.store held a key for this session id: a resumed or reloaded
-   * conversation, whose snapshot this start does not refresh (session.start
-   * carries no resume marker; the stored entry is the signal). True as well
-   * when that key's re-login was refused and a new one minted. A forked
-   * resume, or a resume of a session that never stored a key, also replays
-   * its snapshot yet reads as fresh here; the span guard in stateOnly is what
-   * keeps that harmless.
-   */
-  reused: boolean
 }
 
 export function createManual(): Manual {
   let edges: ManualEdges | undefined
   /** Whether this is a ws project; undefined until told. Not conversation state: the root does not change. */
   let gate: boolean | undefined
-  let cache: Cache | undefined
   let pending: Promise<void> | undefined
-  /** Which reset the next compose is the first after; undefined once it ran. */
-  let awaiting: 'start' | 'landing' | undefined
-  let snapshot = false
-  /** A compose ran before any session.start, so the conversation's first compose is already past. */
-  let composedEarly = false
+  /** Whether the next main-thread turn is the first after a session start or end. */
+  let firstTurn = true
   /**
    * Bumped at every session start or end and at every adoption: a setup that
-   * ran across one fills no cache, writes no key entry, and tells the key
-   * listener nothing.
+   * ran across one writes no key entry and tells the key listener nothing.
    */
   let generation = 0
-  /**
-   * The conversation's key, as the key listener was last told; apart from
-   * the cache's key, since an adoption switches it before the rebuild lands.
-   */
+  /** The conversation's key, as the key listener was last told. */
   let current: string | undefined
   /**
    * The key the model held when the gate opened late (opened's `bound`): a
@@ -466,17 +444,15 @@ export function createManual(): Manual {
    * moves the conversation to another key.
    */
   let lateBound: string | undefined
-  /** (family, key) -> hash of the text last read: only tells when to read the conversation. */
+  /** Playbook name -> hash of the text last read: only tells when to read the conversation. */
   const hints = new Map<string, string>()
 
   const debug = (text: string) => edges?.log(`${edges?.plugin ?? 'plugin'} manual: ${text}`, 'debug')
 
   const reset = () => {
     generation += 1
-    cache = undefined
     pending = undefined
-    snapshot = false
-    awaiting = 'start'
+    firstTurn = true
     current = undefined
     lateBound = undefined
   }
@@ -505,13 +481,12 @@ export function createManual(): Manual {
   }
 
   /**
-   * Re-log in with the stored key (or `adopted`, an adoption's rebuild, or the
-   * key the model held at a late open) or mint one, write the key entry, tell
-   * the listener, and fill the cache. Neither an adoption's rebuild nor a late
-   * open over a held key mints: a refused re-login there fails the setup, so
-   * the push stays on the key the lead holds.
+   * Re-log in with the stored key (or the key the model held at a late open)
+   * or mint one, write the key entry, and tell the listener. A late open over
+   * a held key never mints: a refused re-login there fails the setup, so the
+   * push stays on the key the lead holds.
    */
-  const setup = async (gen: number, adopted?: string) => {
+  const setup = async (gen: number) => {
     const e = edges
     if (!e) return
     if (gate === undefined) {
@@ -527,7 +502,7 @@ export function createManual(): Manual {
     if (!server) throw new Error('the MCP server was not resolved')
     const [sessionId, root] = await Promise.all([e.sessionId(), e.root()])
     const entry = KEY_STORE_PREFIX + sessionId
-    const held = adopted ?? lateBound
+    const held = lateBound
     const stored = held ?? storedKey(await e.store.get(entry))
     let key = stored !== undefined && (await relogin(e, server, root, stored)) ? stored : undefined
     if (key === undefined) {
@@ -535,31 +510,19 @@ export function createManual(): Manual {
       key = ferruleKey(await e.call(server, 'ferrule', { root, format: 'json' }))
       if (key === undefined) throw new Error('ferrule answered no session key')
     }
-    // An adoption meanwhile owns the entry and the push: write and tell nothing.
+    // An adoption, or a session start or end, meanwhile owns the entry and the push: write and tell nothing.
     const at = await e.now()
     if (gen !== generation) return
     await e.store.set(entry, { sessionKey: key, at })
     if (gen !== generation) return
     switchKey(e, key)
-    const [response, staticBody, push] = await Promise.all([
-      e.call(server, 'workflow_manual', { session_key: key }),
-      e.call(server, 'playbook_read', { name: 'lead-workflow-manual', session_key: key }),
-      e.pushAvailable(),
-    ])
-    const manual = manualPart(response)
-    if (manual === undefined) throw new Error('the keyed workflow_manual response carried no manual')
-    if (!staticBody.trim()) throw new Error('the static manual body was empty')
-    if (gen !== generation) return
-    const cut = cutStaticBody(response, staticBody)
-    cache = { key, section: sectionText(e.plugin, key, manual, push), staticBody, span: cut.found ? cut.span : undefined, reused: stored !== undefined }
     debug(`${key === stored ? 're-logged in with' : 'minted'} ${key}`)
   }
 
-  /** Start a setup as `pending`; an adoption's runs after `before` (its key entry rewrite). */
-  const begin = (adopted?: string, before?: Promise<void>) => {
+  /** Start a setup as `pending`. */
+  const begin = () => {
     const gen = generation
-    const run: Promise<void> = (before ?? Promise.resolve())
-      .then(() => setup(gen, adopted))
+    const run: Promise<void> = setup(gen)
       .catch((err) => debug(`setup failed: ${String(err)}`))
       .finally(() => {
         if (pending === run) pending = undefined
@@ -569,10 +532,10 @@ export function createManual(): Manual {
 
   /** Delete entries past retention; the current session's is left to the setup. */
   const prune = async (e: ManualEdges) => {
-    const current = KEY_STORE_PREFIX + (await e.sessionId())
+    const own = KEY_STORE_PREFIX + (await e.sessionId())
     const now = await e.now()
     for (const k of await e.store.keys()) {
-      if (!k.startsWith(KEY_STORE_PREFIX) || k === current) continue
+      if (!k.startsWith(KEY_STORE_PREFIX) || k === own) continue
       const at = (((await e.store.get(k)) ?? {}) as { at?: unknown }).at
       if (typeof at !== 'number' || now - at > KEY_RETENTION_MS) await e.store.delete(k)
     }
@@ -589,63 +552,30 @@ export function createManual(): Manual {
     })
 
   /**
-   * The text after the state-only cut, or `text` itself; never throws. The
-   * span guard is load-bearing, not only a drift check: the injected span
-   * carries this conversation's key line, so only a call with the key the
-   * injected section named is cut. Where the snapshot was replayed without
-   * that section (a forked resume reads as fresh), the model never saw the
-   * key, so its calls pass through whole.
+   * The one hint memory and visibility check both playbook paths share: a
+   * main-thread read here, and a preload through `preloaded`. The conversation
+   * is read only when the text matches the unit's hint; never throws.
    */
-  const stateOnly = async (args: Record<string, unknown>, text: string): Promise<string> => {
-    const c = cache
-    if (!snapshot || !c) return text
-    const cut = cutStaticBody(text, c.staticBody)
-    if (cut.found) return c.span !== undefined && cut.span === c.span ? stateOnlyText(cut.text) : text
-    if (cut.reason === 'no-body') return text
-    debug(`workflow_manual cut missed (${cut.reason}); reading workflow_state`)
-    try {
-      const server = await edges?.server()
-      if (!server || !edges) return text
-      return stateOnlyText(await edges.call(server, 'workflow_state', { session_key: args.session_key }))
-    } catch (err) {
-      debug(`workflow_state fallback failed: ${String(err)}`)
-      return text
-    }
-  }
-
-  /**
-   * The one hint memory and visibility check both read paths share: a main-thread
-   * read here, and a preload through `preloaded`. The conversation is read only
-   * when the text matches the unit's hint; never throws.
-   */
-  const repeat = async (family: ReadFamily, tool: string, args: Record<string, unknown>, fresh: string): Promise<Copy | undefined> => {
-    const hint = `${family}\n${readKey(family, args)}`
-    const hash = hashText(family === 'playbook_read' ? fresh.trim() : fresh)
+  const repeat = async (tool: string, args: Record<string, unknown>, fresh: string): Promise<Copy | undefined> => {
+    const hint = readKey(args)
+    const hash = hashText(fresh.trim())
     const seen = hints.get(hint) === hash
     hints.set(hint, hash)
     if (!seen || !edges) return undefined
     try {
-      return repeatOf(await edges.messages(), tool, family, args, fresh)
+      return repeatOf(await edges.messages(), tool, args, fresh)
     } catch (err) {
       debug(`conversation read failed: ${String(err)}`)
       return undefined
     }
   }
 
-  const dedupe = async (family: ReadFamily, tool: string, args: Record<string, unknown>, fresh: string): Promise<string> => {
-    const copy = await repeat(family, tool, args, fresh)
-    if (copy === undefined) return fresh
-    return copy === 'inlined' ? inlinedPointerText(fresh) : pointerText(family, fresh)
-  }
-
   /**
    * Adopt the key a main-thread `workflow_manual` call revived with (as pi
    * does) or the sentinel's result carries: re-log in with it, make it the
-   * conversation's key (the push follows through the listener), rewrite the
-   * key entry so a later resume re-logs in with it, and rebuild the cache
-   * with it. The snapshot still
-   * carries the previous key's section, so the flag goes false until the next
-   * refreshing reset. The adoption notice, or undefined; never throws.
+   * conversation's key (the push follows through the listener), and rewrite
+   * the key entry so a later resume re-logs in with it. The adoption notice,
+   * or undefined; never throws.
    */
   const adopt = async (args: Record<string, unknown>, text: string): Promise<string | undefined> => {
     const e = edges
@@ -663,20 +593,12 @@ export function createManual(): Manual {
       const mine = generation
       const previous = current
       lateBound = undefined
-      cache = undefined
-      snapshot = false
       switchKey(e, revived)
       debug(`adopted ${revived} (was ${previous ?? 'none'})`)
       const rewrite = (async () => {
         const [entry, at] = await Promise.all([e.sessionId().then((id) => KEY_STORE_PREFIX + id), e.now()])
         if (mine === generation) await e.store.set(entry, { sessionKey: revived, at })
       })().catch((err) => debug(`key entry rewrite failed: ${String(err)}`))
-      // The rebuild is pending from here on, so a first compose meanwhile waits
-      // on it instead of starting a setup from the entry not yet rewritten. It
-      // re-logs in with the adopted key itself, so a failed rewrite still
-      // rebuilds with it (the setup writes the entry again), and it reads as
-      // reused: the flag stays false until a landing.
-      begin(revived, rewrite)
       const [push] = await Promise.all([e.pushAvailable().catch(() => false), rewrite])
       return adoptionNotice(e.plugin, previous, revived, push)
     } catch (err) {
@@ -685,88 +607,87 @@ export function createManual(): Manual {
     }
   }
 
-  const landed = (trigger: SessionCompactTrigger) => {
-    if (landingRefreshes(trigger)) awaiting = 'landing'
-  }
-
   return {
     start: (bound) => {
       edges = bound
       reset()
-      if (composedEarly) {
-        // Only this conversation's first compose is past; a later start's is not.
-        awaiting = undefined
-        composedEarly = false
-      }
       begin()
       prune(bound).catch((err) => debug(`key entry prune failed: ${String(err)}`))
     },
 
     end: (reason) => {
-      debug(`session.end ${reason}: the manual and the snapshot flag start over`)
+      debug(`session.end ${reason}: the conversation's key starts over`)
       reset()
     },
 
-    compose: async (traits) => {
-      // A measuring render (`/context`) sends nothing: it shows the section
-      // when cached, never waits, and leaves the first compose to come.
-      if (traits.includes('analysis')) return cache?.section
-      const e = edges
-      if (!e) {
-        composedEarly = true
-        return undefined
-      }
-      const reset = awaiting
-      if (reset === undefined) return cache?.section
-      awaiting = undefined
-      if (gate === false) return undefined
-      if (!cache && !pending) begin()
-      if (pending) await bounded(e, pending, COMPOSE_WAIT_MS)
-      const c = cache
-      snapshot = c !== undefined && (reset === 'landing' || !c.reused)
-      if (!c) debug('no manual by the first compose; the snapshot goes without it')
-      return c?.section
+    turnStarted: (agentId) => {
+      if (agentId !== undefined || !firstTurn) return
+      firstTurn = false
+      if (edges && gate !== false && current === undefined && !pending) begin()
     },
-
-    // `precompute` installs nothing, a veto leaves the conversation as it
-    // was, and a subagent's or fork's own compaction is not the main
-    // conversation's.
-    compacted: (trigger, agentId, res) => {
-      if (agentId !== undefined || trigger === 'precompute' || res.skip !== undefined) return
-      landed(trigger)
-    },
-
-    landed,
 
     opened: (bound) => {
       if (gate === true) return
       gate = true
       lateBound = bound
       debug(`the project gate opened late; setting up now${bound === undefined ? '' : ` with the bound key ${bound}`}`)
-      if (edges && !pending && !cache) begin()
+      if (edges && !pending && current === undefined) begin()
+    },
+
+    ensureKey: async () => {
+      try {
+        const e = edges
+        if (!e || gate === false) return current
+        if (current === undefined && !pending) begin()
+        if (pending) await bounded(e, pending, KEY_WAIT_MS)
+        return current
+      } catch (err) {
+        debug(`key wait failed: ${String(err)}`)
+        return undefined
+      }
+    },
+
+    deliver: async (tool) => {
+      const e = edges
+      const key = current
+      if (!e || gate !== true || key === undefined) return
+      try {
+        let visible = false
+        try {
+          visible = epochCopyVisible(await e.messages(), tool, e.plugin)
+        } catch (err) {
+          debug(`conversation read failed (${String(err)}); appending the manual row`)
+        }
+        if (visible) return
+        const server = await e.server()
+        if (!server) throw new Error('the MCP server was not resolved')
+        const [response, push] = await Promise.all([e.call(server, 'workflow_manual', { session_key: key }), e.pushAvailable().catch(() => false)])
+        if (!hasLine(response, SESSION_KEY_ANCHOR)) throw new Error('the keyed workflow_manual response carried no manual')
+        await e.append(rowText(e.plugin, key, response, push))
+        debug(`appended the manual row for ${key}`)
+      } catch (err) {
+        debug(`manual row not appended: ${String(err)}`)
+      }
     },
 
     read: async (family, tool, args, text) => {
       try {
         if (gate !== true) return undefined
-        // A sentinel call means the lead saw no key, so no manual either: it
-        // reads the whole result, never the cut or a workflow_state fallback.
-        const sentinel = typeof args.session_key === 'string' && args.session_key.trim() === FRESH_BOOTSTRAP_SENTINEL
-        const whole = family !== 'workflow_manual' || sentinel
-        const seen = whole ? text : await stateOnly(args, text)
-        const out = await dedupe(family, tool, args, seen)
-        const notice = family === 'workflow_manual' ? await adopt(args, text) : undefined
-        const final = notice === undefined ? out : `${out}\n\n${notice}`
-        return final === text ? undefined : final
+        if (family === 'workflow_manual') {
+          const notice = await adopt(args, text)
+          return notice === undefined ? undefined : `${text}\n\n${notice}`
+        }
+        const copy = await repeat(tool, args, text)
+        if (copy === undefined) return undefined
+        return copy === 'inlined' ? inlinedPointerText(text) : pointerText(text)
       } catch (err) {
         debug(`${family} rewrite failed: ${String(err)}`)
         return undefined
       }
     },
 
-    preloaded: async (tool, playbook, body) => (gate === true ? (await repeat('playbook_read', tool, { name: playbook }, body)) !== undefined : false),
+    preloaded: async (tool, playbook, body) => (gate === true ? (await repeat(tool, { name: playbook }, body)) !== undefined : false),
 
-    snapshot: () => snapshot,
     key: () => current,
   }
 }
