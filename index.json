@@ -651,7 +651,14 @@
       "registered_at": "2026-10-30T11:50:02Z"
     },
     "261031-feat-ws-preload-playbook-unit-dedupe": {
-      "registered_at": "2026-10-31T02:03:01Z"
+      "registered_at": "2026-10-31T02:03:01Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-10-31T02:15:38Z"
+      }
     }
   }
 }
