@@ -17,23 +17,33 @@
  * (`lead-use-mailbox` substitutes a key-specific wait command) is never
  * expanded.
  *
+ * A playbook is one dedupe unit with the main-thread `playbook_read` reads
+ * (manual.ts `preloaded`): while the identical body is still visible in the
+ * main conversation, from an earlier expansion or read, the block is replaced
+ * by a pointer line followed by its own fallback prose instead of the body.
+ * The prose stays because the conversation judged is the main one, and a
+ * subagent preload that cannot see that copy must still read the playbook.
+ *
  * The engine calls arrive as edges bound in register.ts, so the expansion is
  * driven and tested without an engine.
  */
+
+import { preloadPointerLine } from './manual'
 
 /** Skills whose block always passes through: their body is specific to the reading key. */
 export const PRELOAD_EXCLUDED: ReadonlySet<string> = new Set(['lead-use-mailbox'])
 
 /** One block: the open tag with its playbook name, the fallback prose, the close tag. */
-const BLOCK = /<ws-preload playbook="([^"\n]+)">[\s\S]*?<\/ws-preload>/
+const BLOCK = /<ws-preload playbook="([^"\n]+)">([\s\S]*?)<\/ws-preload>/
 
-export type PreloadBlock = { playbook: string; start: number; end: number }
+/** A block's playbook name, its span in the text, and its fallback prose (trimmed). */
+export type PreloadBlock = { playbook: string; start: number; end: number; fallback: string }
 
 /** The first preload block of `text`, or undefined; a block with any other open tag is none. */
 export function findBlock(text: string): PreloadBlock | undefined {
   const m = BLOCK.exec(text)
   if (!m) return undefined
-  return { playbook: m[1] as string, start: m.index, end: m.index + m[0].length }
+  return { playbook: m[1] as string, start: m.index, end: m.index + m[0].length, fallback: (m[2] as string).trim() }
 }
 
 /** The skill's name without its plugin namespace (`ws:lead-discuss` -> `lead-discuss`). */
@@ -50,14 +60,17 @@ export type PreloadEdges = {
   key: () => string | undefined
   /** `playbook_read(name, session_key: key)`'s text; rejects on a failed call or an error result. */
   read: (name: string, key: string) => Promise<string>
+  /** Whether `body` of `playbook` repeats a copy still visible in the main conversation (manual.ts `preloaded`); never rejects. */
+  repeat: (playbook: string, body: string) => Promise<boolean>
 }
 
 /**
  * The text the model should read in place of `input.text`, or undefined to
  * keep it: the skill is this plugin's and not excluded, its block names the
  * skill's own playbook, the mod holds a key, and the read answered a body
- * that does not carry that key. Rejects when the read does; the hook passes
- * the text through then.
+ * that does not carry that key. The block becomes that body, or, when the
+ * body repeats a visible copy, the pointer line and the block's fallback
+ * prose. Rejects when the read does; the hook passes the text through then.
  */
 export async function expandPreload(input: PreloadInput, edges: PreloadEdges): Promise<string | undefined> {
   if (input.pluginName !== edges.plugin) return undefined
@@ -69,5 +82,6 @@ export async function expandPreload(input: PreloadInput, edges: PreloadEdges): P
   if (key === undefined) return undefined
   const body = (await edges.read(block.playbook, key)).trim()
   if (!body || body.includes(key)) return undefined
-  return input.text.slice(0, block.start) + body + input.text.slice(block.end)
+  const inlined = (await edges.repeat(block.playbook, body)) ? `${preloadPointerLine(block.playbook)}\n\n${block.fallback}` : body
+  return input.text.slice(0, block.start) + inlined + input.text.slice(block.end)
 }

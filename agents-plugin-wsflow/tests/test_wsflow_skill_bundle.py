@@ -178,8 +178,8 @@ class WsflowSkillBundleTest(unittest.TestCase):
                 rf"name: {re.escape(skill)}\n"
                 r"description: .+\n"
                 r"---\n\n"
-                r"# .+\n\n"
                 rf'<ws-preload playbook="{re.escape(skill)}">\n'
+                r"# .+\n\n"
                 rf"Call `wsflow/playbook\.read\(name: \"{re.escape(skill)}\"\)` and execute the returned procedure\n"
                 r"inline against the current user request\. If the playbook cannot be loaded, stop\n"
                 r"and report that blocker\.\n"
@@ -202,9 +202,9 @@ class WsflowSkillBundleTest(unittest.TestCase):
                 rf"name: {re.escape(skill)}\n"
                 r"description: .+\n"
                 r"---\n\n"
-                rf"# {re.escape(title)}\n\n"
                 + (rf'<ws-preload playbook="{re.escape(skill)}">\n' if preload else "")
-                + r"Call in parallel:\n"
+                + rf"# {re.escape(title)}\n\n"
+                r"Call in parallel:\n"
                 rf"- `wsflow/playbook\.read\(name: \"{re.escape(skill)}\", session_key: <your key, omit if fresh>\)`\n"
                 r'- `wsflow/workflow_manual\(session_key: <your key or "obsidian-latch" if fresh>, root: <absolute worktree path if fresh>\)`\n\n'
                 r"After both return, execute the procedure returned by `wsflow/playbook\.read`\.\n"
@@ -228,6 +228,29 @@ class WsflowSkillBundleTest(unittest.TestCase):
             expected = [] if skill in no_block else [skill]
             if names != expected or text.count("</ws-preload>") != len(expected):
                 offenders.append(f"{skill}: blocks {names}, expected {expected}")
+        self.assertEqual(offenders, [])
+
+    def test_preload_shim_headings_sit_inside_their_blocks(self):
+        # A shim's `# <title>` opens its `<ws-preload>` block, so an expansion
+        # replaces it with the playbook's own identical heading instead of
+        # showing the title twice, and a harness that does not expand still
+        # reads the heading first. Both packages ship such shims.
+        offenders = []
+        for skills_dir in (SKILLS_DIR, FULL_PLUGIN_SKILLS_DIR):
+            for path in sorted(skills_dir.glob("*/SKILL.md")):
+                text = path.read_text(encoding="utf-8")
+                block = re.search(r'<ws-preload playbook="([^"]+)">\n(# [^\n]+)\n', text)
+                if "<ws-preload" not in text:
+                    continue
+                label = f"{skills_dir.parent.name}/{path.parent.name}"
+                body = re.sub(r"\A---\n.*?\n---\n\n", "", text, flags=re.DOTALL)
+                if block is None or not body.startswith("<ws-preload "):
+                    offenders.append(f"{label}: the heading does not open the block")
+                    continue
+                playbook = FULL_PLUGIN_RSRC_DIR / block.group(1) / f"{block.group(1)}.md"
+                heading = re.search(r"^# .+$", playbook.read_text(encoding="utf-8"), re.M)
+                if heading is None or heading.group(0) != block.group(2):
+                    offenders.append(f"{label}: {block.group(2)!r} differs from the playbook heading")
         self.assertEqual(offenders, [])
 
     def test_skill_shims_point_to_shared_playbooks(self):

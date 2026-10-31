@@ -3,9 +3,9 @@ name: lead-check-blockers
 description: Check whether the active discussion is blocked; return either the blocker and needed input, or the next workflow route.
 ---
 
+<ws-preload playbook="lead-check-blockers">
 # Check Blockers
 
-<ws-preload playbook="lead-check-blockers">
 Call `wsflow/playbook.read(name: "lead-check-blockers")` and execute the returned procedure
 inline against the current user request. If the playbook cannot be loaded, stop
 and report that blocker.
