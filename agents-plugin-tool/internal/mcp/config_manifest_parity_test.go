@@ -97,14 +97,14 @@ func TestShippedClaudeManifestsDifferOnlyInDefaults(t *testing.T) {
 
 // claudePackageDefaults is each package's built-in value for the
 // package-differing Claude knobs: ws is the opinionated distribution, wsflow
-// the conservative one.
+// the conservative one, except manual injection, which is on in both.
 var claudePackageDefaults = []struct {
 	key    string
 	ws     any
 	wsflow any
 }{
 	{"claude.compaction_advisory_enabled", true, false},
-	{"claude.manual_injection_enabled", true, false},
+	{"claude.manual_injection_enabled", true, true},
 	{"claude.mailbox_drain", "direct", "notice"},
 	{"claude.display_summary_enabled", false, false},
 	{"claude.status_band_enabled", true, false},
