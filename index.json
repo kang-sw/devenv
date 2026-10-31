@@ -605,7 +605,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-31T07:05:46Z"
+        "touched_at": "2026-10-31T07:06:21Z",
+        "impl": {
+          "branch": "impl/develop/blank-glue-ninth"
+        }
       }
     }
   }
