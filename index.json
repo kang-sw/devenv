@@ -565,16 +565,6 @@
     "261021-bug-launcher-local-devenv-minor-bump-breaks-installed-plugin": {
       "registered_at": "2026-10-21T04:11:37Z"
     },
-    "261021-feat-claude-mod-manual-static-body-dedupe": {
-      "registered_at": "2026-10-21T04:11:31Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-31T05:11:55Z"
-      }
-    },
     "261022-bug-git-status-shows-lease-of-closed-ticket": {
       "registered_at": "2026-10-22T06:49:06Z"
     },
@@ -599,89 +589,17 @@
     "261029-chore-wsflow-no-agent-env-rename-and-setup-tool-removal": {
       "registered_at": "2026-10-29T00:09:05Z"
     },
-    "261030-bug-claude-mod-headless-compaction-and-captions": {
-      "registered_at": "2026-10-30T14:07:49Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-30T14:56:14Z",
-        "impl": {
-          "branch": "impl/develop/fax-wing-twig"
-        }
-      }
-    },
     "261030-bug-tickets-move-stages-on-occupied-root": {
       "registered_at": "2026-10-30T06:10:05Z"
     },
     "261030-bug-workflow-manual-sentinel-mints-lead-key-for-subagents": {
       "registered_at": "2026-10-30T14:07:33Z"
     },
-    "261030-feat-claude-mod-ws-preload-skill-expansion": {
-      "registered_at": "2026-10-30T14:07:44Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-30T15:02:08Z",
-        "impl": {
-          "branch": "impl/develop/used-five-zebra"
-        }
-      }
-    },
-    "261030-feat-note-layer-discipline-and-worker-readonly": {
-      "registered_at": "2026-10-30T14:07:26Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-30T15:09:04Z",
-        "impl": {
-          "branch": "impl/develop/myth-wing-pagan"
-        }
-      }
-    },
-    "261030-feat-pi-orca-subagent-lifecycle-emitter": {
-      "registered_at": "2026-10-30T14:07:38Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-31T01:16:18Z"
-      }
-    },
     "261030-feat-session-whiteboard-mode": {
       "registered_at": "2026-10-30T11:50:02Z"
     },
-    "261031-feat-claude-mod-manual-via-preload-once": {
-      "registered_at": "2026-10-31T04:44:30Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-10-31T05:13:12Z",
-        "impl": {
-          "branch": "impl/develop/lung-shirt-chest"
-        }
-      }
-    },
-    "261031-feat-ws-preload-playbook-unit-dedupe": {
-      "registered_at": "2026-10-31T02:03:01Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "active",
-        "touched_at": "2026-10-31T02:16:16Z",
-        "impl": {
-          "branch": "impl/develop/sneer-puma-genre"
-        }
-      }
+    "261031-feat-claude-mod-preload-lead-use-mailbox": {
+      "registered_at": "2026-10-31T06:57:42Z"
     }
   }
 }
