@@ -566,7 +566,14 @@
       "registered_at": "2026-10-21T04:11:37Z"
     },
     "261021-feat-claude-mod-manual-static-body-dedupe": {
-      "registered_at": "2026-10-21T04:11:31Z"
+      "registered_at": "2026-10-21T04:11:31Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "closed",
+        "touched_at": "2026-10-31T05:11:55Z"
+      }
     },
     "261022-bug-git-status-shows-lease-of-closed-ticket": {
       "registered_at": "2026-10-22T06:49:06Z"
