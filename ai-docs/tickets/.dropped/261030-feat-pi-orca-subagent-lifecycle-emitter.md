@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: b7cb0d5a9c1c7861
 sage-review-completeness-reviewed: b7cb0d5a9c1c7861
+dropped: 2026-10-31
 ---
 
 # Pi adapter emits subagent lifecycle events for Orca's status bridge
@@ -236,3 +237,8 @@ delegate shows in the dashboard card count, the lead pane stays busy past the
 lead's turn end, and both settle when the child finishes. Live delivery remains
 unverified at promotion; static/unit evidence is not a substitute for this
 implementation acceptance check.
+
+
+## Resolution (2026-10-31)
+
+Dropped by owner decision (2026-10-31): the Pi peer will keep running as a terminal CLI session rather than a structured Orca Pi session, and structured Pi in Orca has no supported delivery path for the emitter (see ## Blocked). The unmerged prototype branch impl/develop/exes-defy-cache (tip 53888ac25, prototype commit 5c51c7e77) was deleted; recover it from the reflog or the SHA if needed.
