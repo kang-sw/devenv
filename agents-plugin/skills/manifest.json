@@ -1,20 +1,20 @@
 {
   "schema_version": 1,
   "files": {
-    "lead-audit-doc/SKILL.md": "b1b474e6c56db33c5d8eadfa8446e3cc7b652dc104f6b96c88a67bd6ab8457e6",
+    "lead-audit-doc/SKILL.md": "910af43a6f9921271580584d590e14c76effba51350a502197c6fa307971df67",
     "lead-bootstrap/AGENTS.template.md": "77205a45cb8e699fc92a58154c42851b82507890e6d9d0668e5fa58c337ffb55",
-    "lead-bootstrap/SKILL.md": "b030db562794cbaae4ee9e4ef660512d2546a6e9747c7456c9965b7e5b6f3d4c",
+    "lead-bootstrap/SKILL.md": "4348b34724245c3d7de35c4cae2ee0a447c81131551932e388cfcf973149ddc2",
     "lead-bootstrap/WORKFLOW.md": "957e4447a79ccfd49971f9b699d9979e5a7e95b7b513e47a102d50fdde7fa9e5",
-    "lead-coauthor-paged-document/SKILL.md": "926a8facdcf107f58b172da1576b6f0815637c78dece8285c5ea390faf20564a",
-    "lead-delegate/SKILL.md": "838c84cc20037ab652615208907f723668aec204d6fb68af632168828eba37b9",
-    "lead-discuss/SKILL.md": "78e5dda2817f0e8289eb044dc29c77f2be8c48c8750e3d9936851aa9b2bdce71",
+    "lead-coauthor-paged-document/SKILL.md": "ac1136b2b5d7bd0baf2ad19dcf60a180e6ec3e26cedf2016232d4df16323173c",
+    "lead-delegate/SKILL.md": "a5aca630ab4f11e971d3d8daaf1f0211d28d31e1b985a04659c4aae040e28479",
+    "lead-discuss/SKILL.md": "24ccc9b673cc31cf90886492511e6a4fe09a3f579289ee45a7b7f597079b2f37",
     "lead-discuss/agents/openai.yaml": "25bf5112c8b0d204f522e117248c26e683d6e4543bfd21a43a2d0e08eff15f69",
-    "lead-review/SKILL.md": "2bd2b7819745d772e04123908b6320aef01c34f3a44a09e1ab80de8924bb0054",
+    "lead-review/SKILL.md": "09c02984ee2414e22102314d13a8becb19d9032b921ebae38b20ad42507f90dc",
     "lead-revive/SKILL.md": "1bd032108969d12234968c624010286f2c26ceaa7cd432ef3cf2759cbef5b6b8",
-    "lead-run/SKILL.md": "1547742a1d2be2b745321cfd1087bcd3889c954bd79c1d7c23d3ef76f6aff7a8",
-    "lead-ship/SKILL.md": "4fedb15e94137f36dcca70cce19c1c89ba3739fc9bf71ae2b7fbed4f7231c9f6",
-    "lead-ticket/SKILL.md": "8d06cff32b5e5dfcdfbc5adc700435f8bd81ce0400823de42afcaf9013cfe9a4",
-    "lead-tune/SKILL.md": "215dce1ef730d6554c9b36993505b09fb9f898950dac21f8bc370820b5209812",
+    "lead-run/SKILL.md": "aed6303238d4d95f85268dc404a50c3b80ff58f2c07b0368a01a5900eff4ea44",
+    "lead-ship/SKILL.md": "03b9e17e73cdbadd9be8c762fdf75960167b1613bd7a1225ccf92a6cd63552e5",
+    "lead-ticket/SKILL.md": "64d00b8e3c2b91c39470e8a2d7083f332e86c5b62d5ba622066fd4e73e52995b",
+    "lead-tune/SKILL.md": "4b09b413e22a2bd7b511cd61140cb4737a6a5823f2f76c068cd75b298e65c65d",
     "lead-use-mailbox/SKILL.md": "ea5f02130e4a4f8e39e33b404731f55faa9cf3a18a341657c740138d36d02295"
   }
 }

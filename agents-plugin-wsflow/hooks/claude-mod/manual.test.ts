@@ -7,13 +7,15 @@ import {
   cutStaticBody,
   hashText,
   headings,
-  isRepeat,
+  inlinedPointerText,
   KEY_RETENTION_MS,
   KEY_STORE_PREFIX,
   landingRefreshes,
   manualPart,
   pointerText,
+  preloadPointerLine,
   readKey,
+  repeatOf,
   revivedKeyToAdopt,
   sectionText,
   stateOnlyText,
@@ -206,6 +208,12 @@ describe('pinned prose', () => {
     expect(pointerText('workflow_manual', text)).toBe(
       'The result is unchanged. Continue using the full result of your earlier `workflow_manual` call in this conversation as your current session state; call workflow_manual again after you change agenda, todos, or notes. (headings: # One; ## Two; ### Three)',
     )
+    expect(inlinedPointerText(text)).toBe(
+      'The result is unchanged. Its full text is already above in this conversation, inlined when a skill loaded it; continue using that copy. Do not read it again (headings: # One; ## Two; ### Three).',
+    )
+    expect(preloadPointerLine('lead-run')).toBe(
+      'The full `lead-run` procedure is already above in this conversation. If you can see that copy, follow it and skip the read instructions below; they are only for a context that cannot see it.',
+    )
     expect(headings('no headings here')).toBe('(no headings)')
   })
 
@@ -271,11 +279,11 @@ describe('pure helpers', () => {
     expect(cutStaticBody('## Session Key\nk\n# Workflow Manual\n', STATIC_BODY)).toEqual({ found: false, reason: 'order' })
   })
 
-  test('a playbook_read key is name plus context, without the outer session_key; workflow_manual is keyed by session_key', () => {
+  test('a playbook_read key is the name alone (the playbook is the unit; the body tells contexts apart); workflow_manual is keyed by session_key', () => {
     const a = readKey('playbook_read', { name: 'lead-run', context: { b: '2', a: '1' }, session_key: 'k-1' })
-    expect(readKey('playbook_read', { name: 'lead-run', context: { a: '1', b: '2' }, session_key: 'k-2' })).toBe(a)
-    expect(readKey('playbook_read', { name: 'lead-run', context: { a: '1', b: '3' } })).not.toBe(a)
-    expect(readKey('playbook_read', { name: 'lead-run', context: { session_key: 'x' } })).not.toBe(readKey('playbook_read', { name: 'lead-run' }))
+    expect(readKey('playbook_read', { name: 'lead-run', context: { a: '1', b: '3' }, session_key: 'k-2' })).toBe(a)
+    expect(readKey('playbook_read', { name: 'lead-run' })).toBe(a)
+    expect(readKey('playbook_read', { name: 'lead-ticket' })).not.toBe(a)
     expect(readKey('workflow_manual', { session_key: 'k-1' })).not.toBe(readKey('workflow_manual', { session_key: 'k-2' }))
     expect(readKey('workflow_manual', { session_key: 'k-1', root: '/r' })).toBe(readKey('workflow_manual', { session_key: 'k-1' }))
   })
@@ -306,29 +314,61 @@ describe('pure helpers', () => {
 
   test('a repeat needs exactly one identical earlier result and no pointer to it', () => {
     const input = { name: 'lead-run', session_key: 'k-1' }
-    const key = readKey('playbook_read', input)
     const body = '# Run\nsteps'
     const repeat = (results: { input: Record<string, unknown>; text: string }[], tool = PR_TOOL) =>
-      isRepeat(conversation(tool, results), PR_TOOL, 'playbook_read', key, body)
-    expect(repeat([])).toBe(false)
-    expect(repeat([{ input, text: body }])).toBe(true)
-    expect(repeat([{ input: { name: 'lead-run', session_key: 'k-2' }, text: body }])).toBe(true)
-    expect(repeat([{ input, text: body }], 'mcp__other__playbook_read')).toBe(false)
-    expect(repeat([{ input: { name: 'lead-ticket' }, text: body }])).toBe(false)
-    expect(repeat([{ input, text: '# Run\nolder steps' }])).toBe(false)
-    expect(repeat([{ input, text: body }, { input, text: pointerText('playbook_read', body) }])).toBe(false)
-    expect(repeat([{ input, text: body }, { input, text: pointerText('playbook_read', body) }, { input, text: body }])).toBe(false)
+      repeatOf(conversation(tool, results), PR_TOOL, 'playbook_read', input, body)
+    expect(repeat([])).toBeUndefined()
+    expect(repeat([{ input, text: body }])).toBe('result')
+    expect(repeat([{ input: { name: 'lead-run', session_key: 'k-2' }, text: body }])).toBe('result')
+    expect(repeat([{ input, text: body }], 'mcp__other__playbook_read')).toBeUndefined()
+    expect(repeat([{ input: { name: 'lead-ticket' }, text: body }])).toBeUndefined()
+    expect(repeat([{ input, text: '# Run\nolder steps' }])).toBeUndefined()
+    expect(repeat([{ input, text: body }, { input, text: pointerText('playbook_read', body) }])).toBeUndefined()
+    expect(repeat([{ input, text: body }, { input, text: pointerText('playbook_read', body) }, { input, text: body }])).toBeUndefined()
+    expect(repeat([{ input, text: body }, { input, text: inlinedPointerText(body) }])).toBeUndefined()
+    // Another context of the same name collapses on an identical body (compared trimmed), never on a different one.
+    expect(repeat([{ input: { name: 'lead-run', context: { mode: 'x' } }, text: `${body}\n` }])).toBe('result')
+    expect(repeat([{ input: { name: 'lead-run', context: { mode: 'x' } }, text: '# Run\nsteps for x' }])).toBeUndefined()
     // A string tool_result content counts the same; an errored one does not.
     const asString: ApiMessageLike[] = [
       { role: 'assistant', content: [{ type: 'tool_use', id: 'a', name: PR_TOOL, input }] },
       { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'a', content: body }] },
     ]
-    expect(isRepeat(asString, PR_TOOL, 'playbook_read', key, body)).toBe(true)
+    expect(repeatOf(asString, PR_TOOL, 'playbook_read', input, body)).toBe('result')
     const errored: ApiMessageLike[] = [
       { role: 'assistant', content: [{ type: 'tool_use', id: 'a', name: PR_TOOL, input }] },
       { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'a', content: body, is_error: true }] },
     ]
-    expect(isRepeat(errored, PR_TOOL, 'playbook_read', key, body)).toBe(false)
+    expect(repeatOf(errored, PR_TOOL, 'playbook_read', input, body)).toBeUndefined()
+  })
+
+  test('a playbook body a skill expansion inlined is an earlier copy, and a preload pointer line counts as a pointer', () => {
+    const input = { name: 'lead-run' }
+    const body = '# Run\nsteps'
+    // The two shapes a skill expansion arrives in: after the Skill tool's own result, and a typed command's text block.
+    const invoked = (text: string): ApiMessageLike[] => [
+      { role: 'assistant', content: [{ type: 'tool_use', id: 's', name: 'Skill', input: { skill: 'ws:lead-run' } }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 's', content: 'Launching skill: ws:lead-run' }, { type: 'text', text }] },
+    ]
+    const typed = (text: string): ApiMessageLike[] => [
+      { role: 'user', content: [{ type: 'text', text: '<command-name>/ws:lead-run</command-name>' }, { type: 'text', text }] },
+    ]
+    const expansion = `Base directory for this skill: /p/skills/lead-run\n\n${body}\n\nARGUMENTS: x`
+    const pointed = `Base directory for this skill: /p/skills/lead-run\n\n${preloadPointerLine('lead-run')}\n\n# Run\n\nCall the read.`
+    expect(repeatOf(invoked(expansion), PR_TOOL, 'playbook_read', input, `${body}\n`)).toBe('inlined')
+    expect(repeatOf(typed(expansion), PR_TOOL, 'playbook_read', input, body)).toBe('inlined')
+    expect(repeatOf([{ role: 'user', content: expansion }], PR_TOOL, 'playbook_read', input, body)).toBe('inlined')
+    // Two copies, or a copy then a pointer of either kind: the full text again.
+    expect(repeatOf([...invoked(expansion), ...typed(expansion)], PR_TOOL, 'playbook_read', input, body)).toBeUndefined()
+    expect(repeatOf([...invoked(expansion), ...invoked(pointed)], PR_TOOL, 'playbook_read', input, body)).toBeUndefined()
+    expect(repeatOf([...conversation(PR_TOOL, [{ input, text: body }]), ...typed(pointed)], PR_TOOL, 'playbook_read', input, body)).toBeUndefined()
+    expect(repeatOf([...typed(expansion), ...conversation(PR_TOOL, [{ input, text: inlinedPointerText(body) }])], PR_TOOL, 'playbook_read', input, body)).toBeUndefined()
+    // Another playbook's pointer line, or a different body, is no copy of this one.
+    expect(repeatOf([...typed(expansion), ...typed(preloadPointerLine('lead-ticket'))], PR_TOOL, 'playbook_read', input, body)).toBe('inlined')
+    expect(repeatOf(typed(expansion), PR_TOOL, 'playbook_read', input, '# Run\nother steps')).toBeUndefined()
+    expect(repeatOf(typed(expansion), PR_TOOL, 'playbook_read', input, '  \n')).toBeUndefined()
+    // A workflow_manual is never matched against a user message's own text.
+    expect(repeatOf(typed('STATE'), WM_TOOL, 'workflow_manual', { session_key: 'k-1' }, 'STATE')).toBeUndefined()
   })
 
   test('manual and plugin compactions refresh the snapshot; auto is not assumed to', () => {
@@ -716,6 +756,40 @@ describe('repeat-read dedupe', () => {
     expect(await m.read('workflow_manual', WM_TOOL, { session_key: 'minted-1' }, response('minted-1', { state: 'changed' }))).toMatch(
       /^Workflow manual is in your system prompt;/,
     )
+  })
+
+  test('a preload and a read share one hint memory and one visibility check per playbook', async () => {
+    const { h, m } = await ready()
+    const body = '# Run\n## Steps\nwork'
+    const expansion: ApiMessageLike = { role: 'user', content: [{ type: 'text', text: `Base directory for this skill: /p\n\n${body}\n` }] }
+    // The first preload: no hint, no conversation read; it records the hint.
+    expect(await m.preloaded(PR_TOOL, 'lead-run', body)).toBe(false)
+    expect(h.messageReads).toBe(0)
+    // A read after it, its expansion visible: the pointer naming the inlined copy.
+    h.messages = [expansion]
+    expect(await m.read('playbook_read', PR_TOOL, { name: 'lead-run', session_key: 'minted-1' }, `${body}\n`)).toBe(inlinedPointerText(`${body}\n`))
+    expect(h.messageReads).toBe(1)
+    // A preload after a read whose result is visible: a repeat.
+    h.messages = conversation(PR_TOOL, [{ input: { name: 'lead-run' }, text: body }])
+    expect(await m.preloaded(PR_TOOL, 'lead-run', body)).toBe(true)
+    // Gone from the conversation: no repeat.
+    h.messages = []
+    expect(await m.preloaded(PR_TOOL, 'lead-run', body)).toBe(false)
+    // A changed body moves the hint and reads nothing.
+    const reads = h.messageReads
+    h.messages = [expansion]
+    expect(await m.preloaded(PR_TOOL, 'lead-run', '# Run\nchanged')).toBe(false)
+    expect(h.messageReads).toBe(reads)
+  })
+
+  test('outside a ws project a preload is never a repeat and reads nothing', async () => {
+    const { h, m, edges } = harness({ wsProject: false })
+    m.start(edges)
+    await tick()
+    h.messages = [{ role: 'user', content: 'body' }]
+    expect(await m.preloaded(PR_TOOL, 'lead-run', 'body')).toBe(false)
+    expect(await m.preloaded(PR_TOOL, 'lead-run', 'body')).toBe(false)
+    expect(h.messageReads).toBe(0)
   })
 
   test('a failed conversation read keeps the full text', async () => {
