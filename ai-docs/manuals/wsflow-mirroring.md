@@ -108,10 +108,13 @@ drift, and it is the one exception to "wsflow ships no wsflow-only skills":
   plugin's skills, only while holding a ws session key), or with a pointer
   when an identical copy of that playbook is already visible; anywhere else
   the block stays and the prose inside is the fallback. The attribute must
-  name the shim's own skill, or the block stays a model read. No block: `lead-revive` (inline),
-  `lead-use-mailbox` (its playbook body carries a key-specific wait command),
-  and the `lead-proceed` alias (it reads another skill's playbook). Both
-  packages' skill tests pin this (`EXPECTED_PRELOAD_EXCLUDED` here). The tag
+  name the shim's own skill, or the block stays a model read. No block:
+  `lead-revive` (inline) and the `lead-proceed` alias (it reads another
+  skill's playbook). `lead-use-mailbox` has a block although its playbook
+  body carries a key-specific wait command: the Claude mod replaces every
+  occurrence of the key in an expanded body with `<your key>`, and Pi keeps
+  its own exclusion and passes the block through. Both packages' skill tests
+  pin this (`EXPECTED_PRELOAD_EXCLUDED`, now empty, here). The tag
   keeps its `ws-` name in wsflow: it is the shared mod's marker contract, and
   it matches none of the forbidden patterns below.
 - Exception: `lead-revive` ships an inline procedure body, not a

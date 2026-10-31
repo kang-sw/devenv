@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 8461c75a2858ee66
 sage-review-completeness-reviewed: 8461c75a2858ee66
+completed: 2026-10-31
 ---
 
 # Claude mod expands lead-use-mailbox like every other lead skill, with its key as a placeholder
@@ -163,3 +164,41 @@ unittests in `agents-plugin/tests` and `agents-plugin-wsflow/tests`;
 whose read body contains the key inlines the body with `<your key>` in place
 of every occurrence and never the key; it appends the epoch row; a second
 expansion yields the pointer form; other skills' expansions are unchanged.
+
+### Result (439ede92b) - 2026-10-31
+
+- Both `lead-use-mailbox` shims (ws, wsflow) wrap their heading and read
+  lines in `<ws-preload playbook="lead-use-mailbox">`, byte-for-byte the
+  `lead-discuss` shape; skills manifest hash regenerated. The ws shim test's
+  `no_block` keeps only `lead-revive`; wsflow `EXPECTED_PRELOAD_EXCLUDED` is
+  now an empty set; both comments reworded.
+- `expandPreload` (`agents-plugin/hooks/claude-mod/preload.ts`) replaces
+  every occurrence of the key in the body read with the new exported
+  `KEY_PLACEHOLDER` (`<your key>`) before the unchanged `body.includes(key)`
+  backstop; the replaced body is also what the repeat check sees.
+- Decisions: `PRELOAD_EXCLUDED` was deleted from the mod rather than left
+  empty (no other reader; an empty set and its check would be dead code).
+  The key check tightened from `=== undefined` to `!key`, since an empty key
+  would make `replaceAll` splice the placeholder between every character.
+  The backstop is reachable only for a key the placeholder itself contains,
+  so its test uses key `key`. `manual.ts` header left unchanged: its only key
+  claim (the row never reaches a subagent) still holds.
+- Tests: preload.test.ts covers every-occurrence replacement, a
+  `lead-use-mailbox` expansion, the empty-key pass-through and the backstop;
+  manual-engine.test.ts covers a `lead-use-mailbox` expansion that inlines
+  the placeholder, never the key, and appends the row; a second expansion
+  yielding the pointer form; and a keyed direct read between two expansions
+  leaving the second one full (the accepted trade-off). Other skills' cases
+  are unchanged and pass.
+- Docs: both `hooks.json` descriptions say the preload never inlines the key
+  or the session state, the key becomes `<your key>`, and the mailbox address
+  may remain; `lead-use-mailbox` dropped from the pass-through list. The
+  `wsflow-mirroring.md` shim paragraph now lists only `lead-revive` and the
+  `lead-proceed` alias as blockless and explains the mailbox block.
+- Mirror: `rsync -a --delete` to `agents-plugin-wsflow/hooks/claude-mod/`.
+- Verification: `claude plugin test agents-plugin` 556 pass / 0 fail;
+  `claude plugin test agents-plugin-wsflow` 556 pass / 0 fail;
+  `claude plugin validate` passed for both packages; `diff -r` of the two
+  `hooks/claude-mod` trees clean; `python3 -m unittest discover
+  agents-plugin/tests` 81 OK and `agents-plugin-wsflow/tests` 20 OK;
+  `go test ./internal/wsrsrc/... -count=1` ok. Lite review: clean.

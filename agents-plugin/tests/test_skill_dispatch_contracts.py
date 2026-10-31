@@ -149,9 +149,10 @@ class SkillDispatchContractsTest(unittest.TestCase):
         # The Claude mod replaces a `<ws-preload playbook="...">` block with the
         # playbook body only when the attribute names the skill being expanded,
         # so a block naming another playbook would silently stay a model read.
-        # lead-revive reads no playbook, and lead-use-mailbox is never expanded
-        # (its body carries a key-specific wait command): neither has a block.
-        no_block = {"lead-revive", "lead-use-mailbox"}
+        # lead-revive reads no playbook, so it has no block. lead-use-mailbox
+        # has one like every other shim: the mod replaces the key in its
+        # key-specific wait command with a placeholder before inlining it.
+        no_block = {"lead-revive"}
         offenders = []
         for skill in sorted(EXPECTED_LEAD_SKILLS):
             text = (SKILLS_DIR / skill / "SKILL.md").read_text(encoding="utf-8")

@@ -1,6 +1,7 @@
 import { expect, mock, test, type TestBody } from 'claude-code/testing'
 
 import { adoptionNotice, inlinedPointerText, KEY_STORE_PREFIX, KEY_WAIT_MS, MAILBOX_LINE, pointerText, preloadPointerLine, rowText } from './manual'
+import { KEY_PLACEHOLDER } from './preload'
 import { KNOB } from './register'
 
 type Engine = Parameters<TestBody>[0]
@@ -362,11 +363,10 @@ test('a failed manual read or a refused row appends nothing and keeps the expans
   expect(w.rows).toEqual([ROW(w, 'minted-1')])
 })
 
-test('a block that passes through appends nothing: lead-use-mailbox, another plugin, a project skill, a mismatched block, a failed playbook read', async ($, on) => {
+test('a block that passes through appends nothing: another plugin, a project skill, a mismatched block, a failed playbook read', async ($, on) => {
   const w = world(on, { knobs: ON })
   await start($, w)
   for (const [skill, text, plugin] of [
-    ['lead-use-mailbox', shim('Use Mailbox', 'lead-use-mailbox'), w.plugin],
     ['lead-discuss', shim('Discuss', 'lead-discuss'), 'other-plugin'],
     ['lead-discuss', shim('Discuss', 'lead-discuss'), null],
     ['lead-discuss', shim('Discuss', 'lead-run'), w.plugin],
@@ -401,13 +401,21 @@ test('no preload replacement text carries the key, the mailbox line, or the sess
   expect(w.rows).toEqual([ROW(w, 'minted-1', '- [ ] the secret todo', true)])
 })
 
-test('a body carrying the key passes through and appends nothing', async ($, on) => {
+/** A lead-use-mailbox body as ws-mcp renders it with `key`: the key-specific wait command, the key twice. */
+const mailboxBody = (_name: string, key: unknown) => `# Use Mailbox\n## Steps\nRun \`ws-mcp mailbox wait --session-key ${String(key)} --slug quiet-otter\` (key ${String(key)}).\n`
+
+test('lead-use-mailbox expands: every key occurrence in its body becomes the placeholder, never the key, and the row is appended', async ($, on) => {
   const w = world(on, { knobs: ON })
   await start($, w)
-  w.playbookText = (name, key) => `# ${name}\n\nWait with --session-key ${String(key)}.\n`
-  const original = shim('Review', 'lead-review')
-  expect(await expand($, w, 'lead-review', original)).toBe(original)
-  expect(w.rows).toEqual([])
+  w.playbookText = mailboxBody
+  const text = await expand($, w, 'lead-use-mailbox', shim('Use Mailbox', 'lead-use-mailbox'))
+  expect(text).toBe(
+    `# Use Mailbox\n## Steps\nRun \`ws-mcp mailbox wait --session-key ${KEY_PLACEHOLDER} --slug quiet-otter\` (key ${KEY_PLACEHOLDER}).\n\nARGUMENTS: decide the thing\n`,
+  )
+  expect(text).not.toContain('minted-1')
+  expect(playbookReads(w).map((c) => c.args)).toEqual([{ name: 'lead-use-mailbox', session_key: 'minted-1' }])
+  // The real key reaches the lead in the row alone.
+  expect(w.rows).toEqual([ROW(w, 'minted-1')])
 })
 
 test('workflow_manual results reach the model unrewritten: the current key, a repeat, another key, a sentinel without a root, a subagent call', async ($, on) => {
@@ -937,11 +945,9 @@ test('preload: another plugin, a project skill, and a block naming a tool instea
   expect(w.mcpCalls.filter((c) => c.tool === 'workflow_state')).toEqual([])
 })
 
-test('preload: lead-use-mailbox and a block naming another playbook pass through unread', async ($, on) => {
+test('preload: a block naming another playbook passes through unread', async ($, on) => {
   const w = world(on, { knobs: ON })
   await start($, w)
-  const mailbox = shim('Use Mailbox', 'lead-use-mailbox')
-  expect(await expand($, w, 'lead-use-mailbox', mailbox)).toBe(mailbox)
   const other = shim('Discuss', 'lead-run')
   expect(await expand($, w, 'lead-discuss', other)).toBe(other)
   expect(playbookReads(w)).toEqual([])
@@ -1029,18 +1035,41 @@ test('preload dedupe: an expansion after a visible read gets the pointer and its
   expect(seen(await read($, w, 'playbook_read', ctx))).toBe('# lead-ticket\n## Steps\nwork')
 })
 
-test('preload dedupe: lead-use-mailbox and another plugin pass through on a repeat too, and read nothing', async ($, on) => {
+test('preload dedupe: another plugin passes through on a repeat too, and reads nothing', async ($, on) => {
   const w = world(on, { knobs: ON })
   w.playbookText = sameBody
   await start($, w)
-  const mailbox = shim('Use Mailbox', 'lead-use-mailbox')
   const other = shim('Discuss', 'lead-discuss')
   for (let i = 0; i < 2; i++) {
-    expect(await expand($, w, 'lead-use-mailbox', mailbox)).toBe(mailbox)
     expect(await expand($, w, 'lead-discuss', other, 'other-plugin')).toBe(other)
-    rememberSkill(w, 'x', mailbox)
+    rememberSkill(w, 'x', other)
   }
   expect(playbookReads(w)).toEqual([])
   expect(w.messageReads).toBe(0)
   expect(w.rows).toEqual([])
+})
+
+test('preload dedupe: a second lead-use-mailbox expansion gets the pointer and its fallback prose, keyless like the first', async ($, on) => {
+  const w = world(on, { knobs: ON })
+  w.playbookText = mailboxBody
+  await start($, w)
+  const first = await expand($, w, 'lead-use-mailbox', shim('Use Mailbox', 'lead-use-mailbox'))
+  rememberRows(w)
+  rememberSkill(w, `${w.plugin}:lead-use-mailbox`, first)
+  const second = await expand($, w, 'lead-use-mailbox', shim('Use Mailbox', 'lead-use-mailbox'))
+  expect(second).toBe(pointed('Use Mailbox', 'lead-use-mailbox'))
+  expect(second).not.toContain('minted-1')
+  expect(w.rows.length).toBe(1)
+})
+
+test('preload dedupe: a keyed lead-use-mailbox read between two expansions leaves the second one full, a duplicate and never a wrong pointer', async ($, on) => {
+  const w = world(on, { knobs: ON })
+  w.playbookText = mailboxBody
+  await start($, w)
+  const first = await expand($, w, 'lead-use-mailbox', shim('Use Mailbox', 'lead-use-mailbox'))
+  rememberSkill(w, `${w.plugin}:lead-use-mailbox`, first)
+  // The direct read's result is never the placeholder body inlined above (ws-mcp answers it keyed), so it moves the unit's hint.
+  const args = { name: 'lead-use-mailbox', session_key: 'minted-1' }
+  remember(w, 'playbook_read', args, seen(await read($, w, 'playbook_read', args))!)
+  expect(await expand($, w, 'lead-use-mailbox', shim('Use Mailbox', 'lead-use-mailbox'))).toBe(first)
 })
