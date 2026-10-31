@@ -2,6 +2,7 @@
 title: "Claude mod: cut the static workflow manual body when an earlier full result is still in the conversation"
 related:
   261018-feat-claude-mod-ws-manual-injection: extends its state-only cut and repeat-read dedupe
+dropped: 2026-10-31
 ---
 
 # Claude mod: cut the static workflow manual body when an earlier full result is still in the conversation
@@ -117,3 +118,8 @@ Verification:
   a pointer; the snapshot path's output is unchanged.
 - `claude plugin validate` and `claude plugin test` on both packages, and the
   wsflow mirror drift guard.
+
+
+## Resolution (2026-10-31)
+
+Superseded by 261031-feat-claude-mod-manual-via-preload-once, which removes the system-prompt manual section and the state-only cut this ticket extended.
