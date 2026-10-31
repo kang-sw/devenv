@@ -546,6 +546,29 @@ describe('direct mode', () => {
     expect(h.sleeps.map((s) => s.ms)).toEqual([1_000, 2_000])
   })
 
+  test('a drain that rejects, as $.tool.call does while the server is gone, backs off and retries on the drain path, never the notice path', async () => {
+    const h = harness('direct')
+    let down = true
+    const ok = h.edges.drain
+    h.edges.drain = async (key) => {
+      if (down) throw new Error('HooksError: $.tool.call: no tool named "mcp__plugin_pkg_pkg__mailbox_recv" in this session')
+      return ok(key)
+    }
+    const w = createWatcher(h.edges)
+    w.bind('k1')
+    await tick()
+    h.waits[0]!.d.resolve('mail')
+    await tick()
+    expect(h.submitted).toEqual([])
+    expect(h.sleeps.map((s) => s.ms)).toEqual([1_000])
+    expect(w.isSuspended()).toBe(false)
+    down = false
+    h.sleeps[0]!.d.resolve()
+    await tick()
+    await arrive(h, { kind: 'mail', mail: mailA })
+    expect(h.submitted).toEqual([formatBatch('pkg mailbox', RECV, 'k1', mailA)])
+  })
+
   test('a refused drain submits one notice and suspends until recvCompleted', async () => {
     const h = harness('direct')
     const w = createWatcher(h.edges)
@@ -1006,6 +1029,131 @@ describe('server drop recovery', () => {
     expect(h.drains).toEqual(['k1', 'k1', 'k1'])
     expect(h.submitted).toEqual([formatBatch('pkg mailbox', RECV, 'k1', mailA)])
     expect(h.records).toEqual([])
+  })
+})
+
+describe('a crashed push loop', () => {
+  /** Make the next batch's framing throw, as any unguarded failure in the loop would. */
+  function breakRecvTool(h: ReturnType<typeof harness>, broken: { on: boolean }) {
+    const ok = h.edges.recvTool
+    h.edges.recvTool = () => {
+      if (broken.on) throw new Error('boom')
+      return ok()
+    }
+  }
+
+  test('restarts for the same key and slug after the backoff; one notice per crash streak', async () => {
+    const h = harness('direct')
+    const broken = { on: true }
+    breakRecvTool(h, broken)
+    const w = createWatcher(h.edges)
+    w.bind('k1', 'a@worktree')
+    await tick()
+    await arrive(h, { kind: 'mail', mail: mailA })
+    expect(h.sleeps.map((s) => s.ms)).toEqual([1_000])
+    expect(h.waits.length).toBe(1)
+    h.sleeps[0]!.d.resolve()
+    await tick()
+    expect(h.waits.map((x) => [x.key, x.slug])).toEqual([
+      ['k1', 'a@worktree'],
+      ['k1', 'a@worktree'],
+    ])
+    // A second crash without a clean cycle between: longer backoff, no second notice.
+    await arrive(h, { kind: 'mail', mail: mailA })
+    expect(h.sleeps.map((s) => s.ms)).toEqual([1_000, 2_000])
+    h.sleeps[1]!.d.resolve()
+    await tick()
+    expect(h.waits.length).toBe(3)
+    expect(h.notices).toEqual(['pkg mailbox: armed k1', 'pkg mailbox: push loop crashed, restarting with backoff'])
+    // The restarted loop is a working one.
+    broken.on = false
+    await arrive(h, { kind: 'mail', mail: mailB })
+    expect(h.submitted).toEqual([formatBatch('pkg mailbox', RECV, 'k1', mailB)])
+    expect(h.waits.length).toBe(4)
+  })
+
+  test('a clean wait cycle ends the streak: the next crash backs off from the minimum and notices again', async () => {
+    const h = harness('direct')
+    breakRecvTool(h, { on: true })
+    const w = createWatcher(h.edges)
+    w.bind('k1')
+    await tick()
+    await arrive(h, { kind: 'mail', mail: mailA })
+    h.sleeps[0]!.d.resolve()
+    await tick()
+    h.waits[1]!.d.resolve('timeout')
+    await tick()
+    await arrive(h, { kind: 'mail', mail: mailA })
+    expect(h.sleeps.map((s) => s.ms)).toEqual([1_000, 1_000])
+    expect(h.notices).toEqual([
+      'pkg mailbox: armed k1',
+      'pkg mailbox: push loop crashed, restarting with backoff',
+      'pkg mailbox: push loop crashed, restarting with backoff',
+    ])
+  })
+
+  test('a stop during the restart backoff ends it: no new loop starts', async () => {
+    const h = harness('direct')
+    breakRecvTool(h, { on: true })
+    const w = createWatcher(h.edges)
+    w.bind('k1')
+    await tick()
+    await arrive(h, { kind: 'mail', mail: mailA })
+    w.stop('session cleared')
+    await tick()
+    h.sleeps[0]!.d.resolve()
+    await tick()
+    expect(h.waits.length).toBe(1)
+  })
+
+  test('a rebind during the restart backoff leaves only the new binding\'s loop', async () => {
+    const h = harness('direct')
+    breakRecvTool(h, { on: true })
+    const w = createWatcher(h.edges)
+    w.bind('k1')
+    await tick()
+    await arrive(h, { kind: 'mail', mail: mailA })
+    w.bind('k2')
+    await tick()
+    h.sleeps[0]!.d.resolve()
+    await tick()
+    expect(h.waits.map((x) => x.key)).toEqual(['k1', 'k2'])
+  })
+
+  test('a crash in a loop that a rebind superseded is not restarted beside the current loop', async () => {
+    const h = harness('direct')
+    breakRecvTool(h, { on: true })
+    const w = createWatcher(h.edges)
+    const drain = deferred<DrainResult>()
+    h.heldDrains.push(drain)
+    w.bind('k1')
+    await tick()
+    h.waits[0]!.d.resolve('mail')
+    await tick()
+    w.bind('k2')
+    await tick()
+    drain.resolve({ kind: 'mail', mail: mailA })
+    await tick()
+    expect(h.sleeps).toEqual([])
+    expect(h.waits.map((x) => x.key)).toEqual(['k1', 'k2'])
+    expect(h.notices).toEqual(['pkg mailbox: armed k1', 'pkg mailbox: armed k2'])
+  })
+
+  test('a crash in a loop that a stop ended is not restarted', async () => {
+    const h = harness('direct')
+    breakRecvTool(h, { on: true })
+    const w = createWatcher(h.edges)
+    const drain = deferred<DrainResult>()
+    h.heldDrains.push(drain)
+    w.bind('k1')
+    await tick()
+    h.waits[0]!.d.resolve('mail')
+    await tick()
+    w.stop('session cleared')
+    drain.resolve({ kind: 'mail', mail: mailA })
+    await tick()
+    expect(h.sleeps).toEqual([])
+    expect(h.waits.length).toBe(1)
   })
 })
 

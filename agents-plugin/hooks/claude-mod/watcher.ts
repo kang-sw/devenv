@@ -323,7 +323,8 @@ export function createWatcher(edges: WatcherEdges): Watcher {
     return { resumed, resume }
   }
 
-  async function loop(myKey: string, mySlug: string | undefined, signal: AbortSignal): Promise<void> {
+  /** `healthy` is called after a wait that timed out with nothing queued: one whole clean cycle, which ends a crash streak. */
+  async function loop(myKey: string, mySlug: string | undefined, signal: AbortSignal, healthy: () => void): Promise<void> {
     let backoff = 0
     let emptyStreak = 0
     const stopsAtStart = stops
@@ -362,7 +363,6 @@ export function createWatcher(edges: WatcherEdges): Watcher {
       edges.record(text)
     }
 
-    edges.notice(`${edges.label}: armed ${myKey}`)
     while (!signal.aborted) {
       let outcome: WaitOutcome
       try {
@@ -374,6 +374,7 @@ export function createWatcher(edges: WatcherEdges): Watcher {
       if (signal.aborted || outcome === 'stopped') return
       if (outcome === 'timeout') {
         backoff = 0
+        healthy()
         continue
       }
       if (outcome === 'error') {
@@ -431,6 +432,41 @@ export function createWatcher(edges: WatcherEdges): Watcher {
     }
   }
 
+  /**
+   * Run the loop for one binding, and run it again after any crash: push must
+   * never end silently while its binding stands. The `signal` is the binding's
+   * own, aborted by a stop and by a rebind alike, so a crash in a loop that
+   * either superseded is never restarted, and a second loop never runs beside
+   * the current one. The wait between restarts backs off like any other
+   * failure, and the user hears of one crash streak once.
+   */
+  async function supervise(myKey: string, mySlug: string | undefined, signal: AbortSignal): Promise<void> {
+    let backoff = 0
+    edges.notice(`${edges.label}: armed ${myKey}`)
+    while (!signal.aborted) {
+      try {
+        await loop(myKey, mySlug, signal, () => (backoff = 0))
+        return
+      } catch (err) {
+        if (signal.aborted) {
+          edges.log(`${edges.label}: loop for ${myKey} crashed after it was superseded or stopped; not restarted: ${String(err)}`)
+          return
+        }
+        edges.log(`${edges.label}: loop crashed for ${myKey}: ${String(err)}; restarting in ${nextBackoff(backoff)}ms`)
+        // Once per crash streak: a persistent fault restarts every 60s and would flood the transcript.
+        if (backoff === 0) {
+          try {
+            edges.notice(`${edges.label}: push loop crashed, restarting with backoff`)
+          } catch {
+            // a failing notice edge must not end the restart
+          }
+        }
+        backoff = nextBackoff(backoff)
+        await edges.sleep(backoff, signal)
+      }
+    }
+  }
+
   return {
     bind(next, nextSlug) {
       if (next === key && nextSlug === slug && ctrl && !ctrl.signal.aborted) return 'unchanged'
@@ -440,7 +476,7 @@ export function createWatcher(edges: WatcherEdges): Watcher {
       slug = nextSlug
       const mine = new AbortController()
       ctrl = mine
-      void loop(next, nextSlug, mine.signal).catch((err) => edges.log(`${edges.label}: loop crashed: ${String(err)}`))
+      void supervise(next, nextSlug, mine.signal).catch((err) => edges.log(`${edges.label}: push supervisor failed: ${String(err)}`))
       return had ? 'rebound' : 'bound'
     },
     stop(reason) {

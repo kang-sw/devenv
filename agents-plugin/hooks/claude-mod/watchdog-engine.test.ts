@@ -5,7 +5,6 @@ import {
   REASON_NO_SERVER,
   REASON_TOOLS_ABSENT,
   TOOLS_WAIT_MS,
-  WATCHDOG_MAX_FAILURES,
   watchdogFailureText,
   watchdogSuccessText,
 } from './reconnect'
@@ -275,15 +274,15 @@ test('a tick while a main-thread turn runs does nothing; the next idle tick reco
   expect(w.commands.length).toBe(1)
 })
 
-test(`${WATCHDOG_MAX_FAILURES} failed attempts stop the watchdog with one notice; a lever reconnect restarts it`, async ($, on) => {
+test('failed attempts never stop the watchdog; one notice per streak, and a lever reconnect that succeeds ends it', async ($, on) => {
   const { w } = world(on, { knobs: { [KNOB.watchdog]: true, [KNOB.watchdogInterval]: 10 } })
   await start($, w)
   w.serverUp = false
   w.commandAnswers.push(...Array.from({ length: 10 }, () => 'stays-down' as const))
   // Each tick then lands at the end of a step's first advance, its wait inside the second.
   await w.clock.advance(SETTLE_MS)
-  for (let i = 0; i < WATCHDOG_MAX_FAILURES + 2; i++) await advance(w, 10 * MINUTE - SETTLE_MS)
-  expect(w.commands.length).toBe(WATCHDOG_MAX_FAILURES)
+  for (let i = 0; i < 5; i++) await advance(w, 10 * MINUTE - SETTLE_MS)
+  expect(w.commands.length).toBe(5)
   expect(transcript(w).filter((t) => t.includes('mcp watchdog'))).toEqual([
     watchdogFailureText(w.plugin, REASON_TOOLS_ABSENT, 10 * MINUTE),
   ])
@@ -293,8 +292,8 @@ test(`${WATCHDOG_MAX_FAILURES} failed attempts stop the watchdog with one notice
   await $.tool.call({ tool: `mcp__${w.plugin}__request_mcp_reconnect` } as never)
   await turnEnd($, w)
   await w.clock.advance(TOOLS_WAIT_MS)
-  expect(w.commands.length).toBe(WATCHDOG_MAX_FAILURES + 1)
+  expect(w.commands.length).toBe(6)
   w.serverUp = false
   await advance(w, 10 * MINUTE)
-  expect(w.commands.length).toBe(WATCHDOG_MAX_FAILURES + 2)
+  expect(w.commands.length).toBe(7)
 })
