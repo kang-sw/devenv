@@ -3,7 +3,7 @@ import type { HookStream, ProcessSpawnChunk, ProcessSpawnResult, Register, ToolC
 import { createBand, drawBand, readGit, type Mailbox } from './band'
 import { appendOwn, createCaptions, drawCall, drawEmpty, drawRun, groupUnit, submitOwn, toolUseUnit, type OwnDeliveryEdges } from './captions'
 import { createCompaction } from './compaction'
-import { createManual, SECTION_ID, type ReadFamily } from './manual'
+import { createManual, type ReadFamily } from './manual'
 import { expandPreload } from './preload'
 import { createReconnect, reconnectDescription, TOOL_NAME as RECONNECT_TOOL } from './reconnect'
 import { ADVISORY_KEY, LEVER_DESCRIPTION, TOOL_NAME as LEVER_TOOL } from './timing'
@@ -40,18 +40,19 @@ import {
 //   watchdog that runs the same reconnect from a timer when the server's
 //   tools have left the tool list, so an idle session recovers with no model
 //   call (see reconnect.ts).
-// - Workflow manual injection (behind claude.manual_injection_enabled, in a
-//   ws project): a lead session key
-//   minted per conversation and the keyed workflow manual in the system
-//   prompt, `workflow_manual` answered with the session state alone while
-//   the prompt carries the manual, repeat ws reads collapsed to a pointer, and
-//   a revive's key adopted as the conversation's (see manual.ts).
+// - Workflow manual delivery (behind claude.manual_injection_enabled, in a
+//   ws project): a lead session key minted per conversation, the keyed
+//   workflow manual appended as one model-only row per conversation epoch
+//   when a lead skill is expanded and no copy is visible, repeat
+//   playbook_read results collapsed to a pointer, and a revive's key adopted
+//   as the conversation's (see manual.ts).
 // - Playbook preload (rides on the manual feature's key): a lead skill shim's
 //   `<ws-preload>` block replaced, when the skill is expanded for the model,
 //   with its playbook body read with the conversation's key, so the skill
 //   arrives with its procedure in it, or with a pointer line ahead of the
 //   block's fallback prose while that body is still visible in the
-//   conversation (see preload.ts).
+//   conversation; the expansion is the manual row's delivery point (see
+//   preload.ts).
 // - Tool-call captions (off until claude.display_summary_enabled is set): a
 //   finished, collapsed tool row, or a run the engine folds into one group,
 //   drawn as a short caption a second model call wrote, the raw row still the
@@ -71,7 +72,7 @@ import {
 // drive each feature in isolation: a throw in one is logged and leaves the
 // others running. The one cross-feature wait is the shared ws-project gate: the
 // mailbox setup awaits it to decide whether its bind tool registers, and the
-// manual setup awaits the mailbox's host-command probe for its mailbox line.
+// manual row awaits the mailbox's host-command probe for its mailbox line.
 //
 // One source serves every package that ships it (this directory is mirrored
 // byte-identically), so package identity is read from the engine at runtime:
@@ -404,7 +405,7 @@ export const register: Register = (on) => {
    * it over as false, so mail during that turn is submitted as when idle.
    */
   let mainTurn = false
-  /** Whether the latest session.start's mailbox probe passed; the manual's section says the push is bound only then. */
+  /** Whether the latest session.start's mailbox probe passed; the manual row says the push is bound only then. */
   let pushAvailable: Promise<boolean> = Promise.resolve(false)
   /**
    * Whether the session runs in a ws project with the manual knob on:
@@ -895,9 +896,9 @@ export const register: Register = (on) => {
       $.ui.log(`${$.plugin.name} band: setup failed: ${String(err)}`, { to: 'debug' })
     }
 
-    // Registers no tool: its setup runs on in the background, and the first
-    // compose waits for it. Inert (no key, no section, no rewrite) unless the
-    // ws-project gate opens.
+    // Registers no tool: its setup runs on in the background, and a lead
+    // skill expansion waits a bounded time for it. Inert (no key, no row, no
+    // rewrite) unless the ws-project gate opens.
     try {
       manual.start({
         isWsProject: () => gate,
@@ -932,6 +933,10 @@ export const register: Register = (on) => {
         now: () => $.clock.now(),
         timer: (ms, fn) => $.clock.after(ms, fn),
         messages: () => $.session.messages({ as: 'api' }),
+        append: async (text) => {
+          const res = await $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] } })
+          if (res.deny !== undefined) throw new Error(`row refused: ${res.deny}`)
+        },
         log: (text, to) => $.ui.log(text, { to }),
         plugin: $.plugin.name,
       })
@@ -948,20 +953,11 @@ export const register: Register = (on) => {
     return next(e)
   })
 
-  // The manual section, appended last. Only the first compose after a reset
-  // reaches the API, so only that one waits (bounded below the hook budget);
-  // the rest append what is cached. A failure appends nothing.
-  on('prompt.compose', async ($, e, next) => {
-    const res = await next(e)
-    const text = await manual.compose(e.traits)
-    if (text === undefined || res.sections.some((s) => s.id === SECTION_ID)) return res
-    return { sections: [...res.sections, { id: SECTION_ID, text, scope: 'session' as const }] }
-  }).catch(($, e, next) => next(e))
-
   /**
-   * A main-thread ws read's result as the model should see it: the state-only
-   * `workflow_manual` and the repeat-read pointer. A subagent's call, another
-   * server's tool, a refusal, and an error result pass through as they are.
+   * A main-thread ws read's result as the model should see it: the repeat
+   * `playbook_read` pointer, and a `workflow_manual` result unchanged but for
+   * the adoption notice. A subagent's call, another server's tool, a refusal,
+   * and an error result pass through as they are.
    */
   const rewriteRead = async (
     family: ReadFamily,
@@ -977,18 +973,27 @@ export const register: Register = (on) => {
   }
 
   // Playbook preload: only this plugin's skills, and only while the manual
-  // feature holds the conversation's key. A body still visible in the main
-  // conversation (an earlier expansion or main-thread read) is judged by the
-  // manual feature's dedupe, as a main-thread playbook_read would be. A
-  // failure passes the text through as the hooks beneath computed it.
+  // feature holds the conversation's key (waited on a bounded time). A body
+  // still visible in the main conversation (an earlier expansion or
+  // main-thread read) is judged by the manual feature's dedupe, as a
+  // main-thread playbook_read would be. An expansion then appends the manual
+  // row unless an epoch copy is visible, before the text returns. A failure
+  // passes the text through as the hooks beneath computed it.
+  //
+  // Probed live on Claude Code 2.1.314 (interactive and headless -p): a user
+  // row appended here reaches the same model request as the expansion. For a
+  // typed /name it lands in the opening user message ahead of the skill's
+  // command rows; for the Skill tool it lands after the tool's result and
+  // ahead of the skill body, at the request that follows the tool call.
   on('skill.prompt', async ($, e, next) => {
     const res = await next(e)
     const read = readPlaybook
     if (!read) return res
     const repeat = async (playbook: string, body: string) => (server ? manual.preloaded(mcpToolName(server, 'playbook_read'), playbook, body) : false)
+    const deliver = async () => (server ? manual.deliver(mcpToolName(server, 'workflow_manual')) : undefined)
     const text = await expandPreload(
       { skill: e.skill, text: res.text, pluginName: e.pluginName },
-      { plugin: $.plugin.name, key: () => manual.key(), read, repeat },
+      { plugin: $.plugin.name, key: () => manual.ensureKey(), read, repeat, deliver },
     )
     return text === undefined ? res : { text }
   }).catch(($, e, next) => next(e))
@@ -1128,9 +1133,16 @@ export const register: Register = (on) => {
   })
 
   // A main-thread turn start also tells the compaction and reconnect
-  // features, whose resume prompts yield to a turn already started.
+  // features, whose resume prompts yield to a turn already started, and the
+  // manual feature, which sets up after `/clear` (no session.start follows
+  // it) or a failed start at the first main-thread turn.
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) mainTurn = true
+    try {
+      manual.turnStarted(e.agentId)
+    } catch (err) {
+      $.ui.log(`${$.plugin.name} manual: turn start handling failed: ${String(err)}`, { to: 'debug' })
+    }
     try {
       compaction.turnStarted(e.agentId)
     } catch (err) {
@@ -1189,11 +1201,6 @@ export const register: Register = (on) => {
       compaction.compacted(e.trigger, e.agentId, res)
     } catch (err) {
       $.ui.log(`${$.plugin.name} compaction: compaction observation failed: ${String(err)}`, { to: 'debug' })
-    }
-    try {
-      manual.compacted(e.trigger, e.agentId, res)
-    } catch (err) {
-      $.ui.log(`${$.plugin.name} manual: compaction observation failed: ${String(err)}`, { to: 'debug' })
     }
     try {
       captions.compacted(e.trigger, e.agentId, res)
@@ -1295,10 +1302,10 @@ export const register: Register = (on) => {
     } catch (err) {
       $.ui.log(`${$.plugin.name} band: reset failed: ${String(err)}`, { to: 'debug' })
     }
-    // Manual: every end reason drops the cached manual and the snapshot flag,
-    // so the next conversation (no session.start follows `clear`) sets up
-    // again with its own key and picks up an updated manual. Its stored key
-    // stays, for a later resume of the ended session.
+    // Manual: every end reason drops the conversation's key, so the next
+    // conversation (no session.start follows `clear`) sets up again with its
+    // own key at its first main-thread turn or lead skill expansion. Its
+    // stored key stays, for a later resume of the ended session.
     try {
       manual.end(e.reason)
     } catch (err) {

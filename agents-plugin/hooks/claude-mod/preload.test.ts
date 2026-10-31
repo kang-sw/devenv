@@ -6,21 +6,24 @@ import { bareSkill, expandPreload, findBlock, PRELOAD_EXCLUDED, type PreloadEdge
 const BLOCK = '<ws-preload playbook="lead-discuss">\n# Discuss\n\nCall `ws/playbook.read(name: "lead-discuss")`.\n</ws-preload>'
 const SHIM = `${BLOCK}\n`
 
-function edges(over: Partial<PreloadEdges> = {}): PreloadEdges & { reads: [string, string][]; repeats: [string, string][] } {
+function edges(over: Partial<PreloadEdges> = {}): PreloadEdges & { reads: [string, string][]; repeats: [string, string][]; delivered: number } {
   const reads: [string, string][] = []
   const repeats: [string, string][] = []
-  return {
+  const e = {
     plugin: 'ws',
-    key: () => 'lead-key',
-    read: async (name, key) => {
+    key: async () => 'lead-key' as string | undefined,
+    read: async (name: string, key: string) => {
       reads.push([name, key])
       return `# ${name}\n\nBody.\n`
     },
-    repeat: async (playbook, body) => (repeats.push([playbook, body]), false),
+    repeat: async (playbook: string, body: string) => (repeats.push([playbook, body]), false),
+    deliver: async () => void (e.delivered += 1),
     ...over,
     reads,
     repeats,
+    delivered: 0,
   }
+  return e
 }
 
 describe('preload', () => {
@@ -51,6 +54,20 @@ describe('preload', () => {
     expect(e.reads).toEqual([['lead-discuss', 'lead-key']])
     // The repeat check sees the trimmed body it would inline.
     expect(e.repeats).toEqual([['lead-discuss', '# lead-discuss\n\nBody.']])
+    expect(e.delivered).toBe(1)
+  })
+
+  test('delivers before the expanded text returns, and never inlines what it delivers', async () => {
+    const order: string[] = []
+    const e = edges({
+      repeat: async () => (order.push('repeat'), false),
+      deliver: async () => void order.push('deliver'),
+    })
+    const text = await expandPreload({ skill: 'lead-discuss', text: SHIM, pluginName: 'ws' }, e)
+    order.push('returned')
+    expect(order).toEqual(['repeat', 'deliver', 'returned'])
+    expect(text).toBe('# lead-discuss\n\nBody.\n')
+    expect(text).not.toContain('lead-key')
   })
 
   test('a repeat body becomes the pointer line followed by the block fallback prose, heading included', async () => {
@@ -58,30 +75,38 @@ describe('preload', () => {
     expect(await expandPreload({ skill: 'lead-discuss', text: `Base\n\n${SHIM}\nARGUMENTS: x\n`, pluginName: 'ws' }, e)).toBe(
       `Base\n\n${preloadPointerLine('lead-discuss')}\n\n# Discuss\n\nCall \`ws/playbook.read(name: "lead-discuss")\`.\n\nARGUMENTS: x\n`,
     )
+    // The pointer form is an expansion too: the row's scan decides whether to append.
+    expect(e.delivered).toBe(1)
   })
 
-  test('passes through without reading: another plugin, an excluded skill, a mismatched or missing block, no key', async () => {
+  test('passes through without reading or delivering: another plugin, an excluded skill, a mismatched or missing block, no key', async () => {
     const cases: [Parameters<typeof expandPreload>[0], Partial<PreloadEdges>][] = [
       [{ skill: 'lead-discuss', text: SHIM, pluginName: 'wsflow' }, {}],
       [{ skill: 'lead-discuss', text: SHIM }, {}],
       [{ skill: 'lead-use-mailbox', text: SHIM.replaceAll('lead-discuss', 'lead-use-mailbox'), pluginName: 'ws' }, {}],
       [{ skill: 'lead-run', text: SHIM, pluginName: 'ws' }, {}],
       [{ skill: 'lead-discuss', text: '# Discuss\n', pluginName: 'ws' }, {}],
-      [{ skill: 'lead-discuss', text: SHIM, pluginName: 'ws' }, { key: () => undefined }],
+      [{ skill: 'lead-discuss', text: SHIM, pluginName: 'ws' }, { key: async () => undefined }],
     ]
     for (const [input, over] of cases) {
       const e = edges(over)
       expect(await expandPreload(input, e)).toBeUndefined()
       expect(e.reads).toEqual([])
       expect(e.repeats).toEqual([])
+      expect(e.delivered).toBe(0)
     }
     expect(PRELOAD_EXCLUDED.has('lead-use-mailbox')).toBe(true)
   })
 
-  test('an empty body or one carrying the key passes through; a failed read rejects', async () => {
+  test('an empty body or one carrying the key passes through undelivered; a failed read rejects undelivered', async () => {
     const input = { skill: 'lead-discuss', text: SHIM, pluginName: 'ws' }
-    expect(await expandPreload(input, edges({ read: async () => '  \n' }))).toBeUndefined()
-    expect(await expandPreload(input, edges({ read: async () => 'wait --session-key lead-key' }))).toBeUndefined()
-    await expect(expandPreload(input, edges({ read: async () => Promise.reject(new Error('down')) }))).rejects.toThrow('down')
+    for (const read of [async () => '  \n', async () => 'wait --session-key lead-key']) {
+      const e = edges({ read })
+      expect(await expandPreload(input, e)).toBeUndefined()
+      expect(e.delivered).toBe(0)
+    }
+    const failed = edges({ read: async () => Promise.reject(new Error('down')) })
+    await expect(expandPreload(input, failed)).rejects.toThrow('down')
+    expect(failed.delivered).toBe(0)
   })
 })
