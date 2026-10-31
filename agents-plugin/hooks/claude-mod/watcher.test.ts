@@ -1155,6 +1155,105 @@ describe('a crashed push loop', () => {
     expect(h.sleeps).toEqual([])
     expect(h.waits.length).toBe(1)
   })
+
+  describe('drained mail survives a crash before its hand-off', () => {
+    const framed = (mail: typeof mailA) => formatBatch('pkg mailbox', RECV, 'k1', mail)
+    const crashed = (why: string, body: string) =>
+      `pkg mailbox: drained mail was not submitted (the push loop crashed: ${why}); recorded here instead:\n\n${body}`
+
+    test('a throw in the delivery path records the framed batch, logs it, and the loop restarts as before', async () => {
+      const h = harness('direct')
+      const w = createWatcher(h.edges)
+      w.bind('k1')
+      await tick()
+      h.edges.turnRunning = () => {
+        throw new Error('boom')
+      }
+      await arrive(h, { kind: 'mail', mail: mailA })
+      expect(h.records).toEqual([crashed('Error: boom', framed(mailA))])
+      expect(h.logs).toContain(h.records[0]!)
+      expect(h.submitted).toEqual([])
+      expect(h.sleeps.map((x) => x.ms)).toEqual([1_000])
+      h.sleeps[0]!.d.resolve()
+      await tick()
+      expect(h.waits.length).toBe(2)
+      expect(h.notices).toEqual(['pkg mailbox: armed k1', 'pkg mailbox: push loop crashed, restarting with backoff'])
+    })
+
+    test('a throw while framing the batch records each drained item as plain JSON', async () => {
+      const h = harness('direct')
+      const ok = h.edges.recvTool
+      h.edges.recvTool = () => {
+        throw new Error('boom')
+      }
+      const w = createWatcher(h.edges)
+      w.bind('k1')
+      await tick()
+      const mail = [...mailA, ...mailB, { raw: 'not json' }]
+      await arrive(h, { kind: 'mail', mail })
+      const plain = mail.map((m) => JSON.stringify(m)).join('\n')
+      expect(h.records).toEqual([crashed('Error: boom', plain)])
+      expect(h.records[0]).toContain('first')
+      expect(h.records[0]).toContain('second')
+      expect(h.sleeps.map((x) => x.ms)).toEqual([1_000])
+      // Restarted: the next batch is a normal delivery, recorded nowhere.
+      h.edges.recvTool = ok
+      h.sleeps[0]!.d.resolve()
+      await tick()
+      await arrive(h, { kind: 'mail', mail: mailB })
+      expect(h.submitted).toEqual([framed(mailB)])
+      expect(h.records.length).toBe(1)
+    })
+
+    test('a throwing record edge does not drop the mail: the log line still carries it, and the failure is logged', async () => {
+      const h = harness('direct')
+      h.edges.record = () => {
+        throw new Error('transcript closed')
+      }
+      const w = createWatcher(h.edges)
+      w.bind('k1')
+      await tick()
+      h.edges.turnRunning = () => {
+        throw new Error('boom')
+      }
+      await arrive(h, { kind: 'mail', mail: mailA })
+      expect(h.logs).toContain(crashed('Error: boom', framed(mailA)))
+      expect(h.logs.some((l) => l.includes('recording drained mail failed: Error: transcript closed'))).toBe(true)
+      // The crash path itself is unchanged.
+      expect(h.sleeps.map((x) => x.ms)).toEqual([1_000])
+    })
+
+    test('mail already handed over is not also recorded when a later step of the loop throws', async () => {
+      const h = harness('direct')
+      const w = createWatcher(h.edges)
+      w.bind('k1')
+      await tick()
+      h.turn.running = true
+      const log = h.edges.log
+      h.edges.log = (text) => {
+        if (text.includes('queued for the running turn')) throw new Error('log closed')
+        log(text)
+      }
+      await arrive(h, { kind: 'mail', mail: mailA })
+      // The batch is queued for the turn, so the crash must not record it a second time.
+      expect(h.records).toEqual([])
+      expect(h.sleeps.map((x) => x.ms)).toEqual([1_000])
+      await w.toolCompleted()
+      expect(h.appended).toEqual([framed(mailA)])
+      expect(h.records).toEqual([])
+    })
+
+    test('the success path records nothing', async () => {
+      const h = harness('direct')
+      const w = createWatcher(h.edges)
+      w.bind('k1')
+      await tick()
+      await arrive(h, { kind: 'mail', mail: mailA })
+      expect(h.submitted).toEqual([framed(mailA)])
+      expect(h.records).toEqual([])
+      expect(h.sleeps).toEqual([])
+    })
+  })
 })
 
 describe('pure helpers', () => {

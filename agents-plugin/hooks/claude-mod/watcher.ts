@@ -13,8 +13,9 @@ import type { MailItem, OwnPrompt } from './captions'
  *   mail. A refused drain falls back to the notice path; any other failed
  *   drain backs off and retries, since the mail stays queued. Once recv
  *   answered with mail, the loop is that mail's only holder: anything that
- *   keeps it from being submitted (a failed submit, or a stop while the drain
- *   was in flight) writes it to the user-visible `record` instead.
+ *   keeps it from being submitted (a failed submit, a stop while the drain
+ *   was in flight, or a crash before it is handed to the submit path) writes
+ *   it to the user-visible `record` instead.
  * - `notice`: the controller never drains. It submits one notice asking the
  *   model to call recv, then suspends: the peek would exit at once over the
  *   still-queued mail, so the loop re-arms only when the model's own recv for
@@ -359,8 +360,15 @@ export function createWatcher(edges: WatcherEdges): Watcher {
     /** Write drained mail that will not be submitted where the user can see it, and to the debug log. */
     const keep = (why: string, batch: string) => {
       const text = `${edges.label}: drained mail was not submitted (${why}); recorded here instead:\n\n${batch}`
+      // The record goes first, and a throwing one must not cost the log line: it then carries the only copy.
+      let recordErr: unknown
+      try {
+        edges.record(text)
+      } catch (err) {
+        recordErr = err
+      }
       edges.log(text)
-      edges.record(text)
+      if (recordErr !== undefined) edges.log(`${edges.label}: recording drained mail failed: ${String(recordErr)}; the log line above holds it`)
     }
 
     while (!signal.aborted) {
@@ -414,21 +422,43 @@ export function createWatcher(edges: WatcherEdges): Watcher {
         continue
       }
       emptyStreak = 0
-      const batch = batchPrompt(edges.label, edges.recvTool(), myKey, mail)
-      // A stop means the conversation this mail was for is gone; a rebind
-      // within it still delivers, since recv already removed this mail.
-      if (stops !== stopsAtStart) {
-        keep(`the push loop stopped: ${lastStop}`, batch.text)
-        return
+      // recv already removed this mail, so this loop is its only holder until
+      // steer or deliver takes it over. An unexpected throw before that point
+      // records it and rethrows into the supervisor: redelivering would likely
+      // crash on the same batch again, and a restart alone would lose it.
+      let handedOff = false
+      let batch: OwnPrompt | undefined
+      try {
+        batch = batchPrompt(edges.label, edges.recvTool(), myKey, mail)
+        const text = batch.text
+        // A stop means the conversation this mail was for is gone; a rebind
+        // within it still delivers, since recv already removed this mail.
+        if (stops !== stopsAtStart) {
+          handedOff = true
+          keep(`the push loop stopped: ${lastStop}`, text)
+          return
+        }
+        const lost = (why: string) => keep(why, text)
+        if (steer(batch, lost)) {
+          handedOff = true
+          edges.log(`${edges.label}: drained ${mail.length} message(s) for ${myKey}; queued for the running turn`)
+          continue
+        }
+        edges.log(`${edges.label}: drained ${mail.length} message(s) for ${myKey}; submitting one prompt`)
+        const why = await deliver([{ prompt: batch, lost }])
+        handedOff = true // deliver never rejects once it has submitted, appended, or queued
+        if (why !== undefined) lost(why)
+      } catch (err) {
+        if (!handedOff) {
+          try {
+            // Plain rendering when formatting is what failed.
+            keep(`the push loop crashed: ${String(err)}`, batch?.text ?? mail.map((m) => JSON.stringify(m)).join('\n'))
+          } catch {
+            // the crash itself is what the supervisor must hear of
+          }
+        }
+        throw err
       }
-      const lost = (why: string) => keep(why, batch.text)
-      if (steer(batch, lost)) {
-        edges.log(`${edges.label}: drained ${mail.length} message(s) for ${myKey}; queued for the running turn`)
-        continue
-      }
-      edges.log(`${edges.label}: drained ${mail.length} message(s) for ${myKey}; submitting one prompt`)
-      const why = await deliver([{ prompt: batch, lost }])
-      if (why !== undefined) lost(why)
     }
   }
 
