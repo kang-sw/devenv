@@ -664,7 +664,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-10-31T05:12:38Z"
+        "touched_at": "2026-10-31T05:13:12Z",
+        "impl": {
+          "branch": "impl/develop/lung-shirt-chest"
+        }
       }
     },
     "261031-feat-ws-preload-playbook-unit-dedupe": {
