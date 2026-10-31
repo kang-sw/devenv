@@ -55,14 +55,14 @@ EXPECTED_PARALLEL_INIT_SKILLS = {
     "lead-run",
     "lead-use-mailbox",
 }
-# Shims whose playbook read stays a model call: the Claude mod never expands
-# lead-use-mailbox (its body carries a key-specific wait command), and the
-# inline revive and the alias read no playbook of their own name. Every other
-# shim wraps its fallback prose in a `<ws-preload playbook="<own name>">` block
-# the mod replaces with the playbook body.
-EXPECTED_PRELOAD_EXCLUDED = {
-    "lead-use-mailbox",
-}
+# Playbook shims whose read stays a model call, with no preload block: none
+# today. lead-use-mailbox has a block too, since the Claude mod replaces the
+# key in its key-specific wait command with a placeholder before inlining it.
+# The inline revive and the alias read no playbook of their own name and are
+# exempted through their own sets. Every other shim wraps its fallback prose in
+# a `<ws-preload playbook="<own name>">` block the mod replaces with the
+# playbook body.
+EXPECTED_PRELOAD_EXCLUDED: set = set()
 PARALLEL_INIT_TITLES = {
     "lead-delegate": "Delegate",
     "lead-discuss": "Discuss",
@@ -218,8 +218,8 @@ class WsflowSkillBundleTest(unittest.TestCase):
     def test_preload_blocks_name_their_own_playbook(self):
         # The Claude mod expands a block only when its playbook attribute names
         # the skill being expanded, so a block naming another playbook would
-        # silently stay a model read. Excluded skills, the inline revive, and
-        # the aliases carry no block at all.
+        # silently stay a model read. Excluded skills (none today), the inline
+        # revive, and the aliases carry no block at all.
         no_block = EXPECTED_PRELOAD_EXCLUDED | EXPECTED_INLINE_SKILLS | set(WSFLOW_ALIAS_TARGET)
         offenders = []
         for skill in sorted(EXPECTED_SKILLS):

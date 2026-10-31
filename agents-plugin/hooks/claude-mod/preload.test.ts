@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import { preloadPointerLine } from './manual'
-import { bareSkill, expandPreload, findBlock, PRELOAD_EXCLUDED, type PreloadEdges } from './preload'
+import { bareSkill, expandPreload, findBlock, KEY_PLACEHOLDER, type PreloadEdges } from './preload'
 
 const BLOCK = '<ws-preload playbook="lead-discuss">\n# Discuss\n\nCall `ws/playbook.read(name: "lead-discuss")`.\n</ws-preload>'
 const SHIM = `${BLOCK}\n`
@@ -79,14 +79,14 @@ describe('preload', () => {
     expect(e.delivered).toBe(1)
   })
 
-  test('passes through without reading or delivering: another plugin, an excluded skill, a mismatched or missing block, no key', async () => {
+  test('passes through without reading or delivering: another plugin, a mismatched or missing block, no key', async () => {
     const cases: [Parameters<typeof expandPreload>[0], Partial<PreloadEdges>][] = [
       [{ skill: 'lead-discuss', text: SHIM, pluginName: 'wsflow' }, {}],
       [{ skill: 'lead-discuss', text: SHIM }, {}],
-      [{ skill: 'lead-use-mailbox', text: SHIM.replaceAll('lead-discuss', 'lead-use-mailbox'), pluginName: 'ws' }, {}],
       [{ skill: 'lead-run', text: SHIM, pluginName: 'ws' }, {}],
       [{ skill: 'lead-discuss', text: '# Discuss\n', pluginName: 'ws' }, {}],
       [{ skill: 'lead-discuss', text: SHIM, pluginName: 'ws' }, { key: async () => undefined }],
+      [{ skill: 'lead-discuss', text: SHIM, pluginName: 'ws' }, { key: async () => '' }],
     ]
     for (const [input, over] of cases) {
       const e = edges(over)
@@ -95,14 +95,34 @@ describe('preload', () => {
       expect(e.repeats).toEqual([])
       expect(e.delivered).toBe(0)
     }
-    expect(PRELOAD_EXCLUDED.has('lead-use-mailbox')).toBe(true)
   })
 
-  test('an empty body or one carrying the key passes through undelivered; a failed read rejects undelivered', async () => {
+  test('every occurrence of the key in the body read becomes the placeholder, the rest of the body unchanged', async () => {
+    const e = edges({ read: async () => '# lead-discuss\n\nwait --session-key lead-key --slug lead-key-mail; then lead-key again.\n' })
+    const text = await expandPreload({ skill: 'lead-discuss', text: SHIM, pluginName: 'ws' }, e)
+    expect(text).toBe(`# lead-discuss\n\nwait --session-key ${KEY_PLACEHOLDER} --slug ${KEY_PLACEHOLDER}-mail; then ${KEY_PLACEHOLDER} again.\n`)
+    expect(text).not.toContain('lead-key')
+    // The repeat check sees the body as inlined, placeholder and all.
+    expect(e.repeats).toEqual([['lead-discuss', `# lead-discuss\n\nwait --session-key ${KEY_PLACEHOLDER} --slug ${KEY_PLACEHOLDER}-mail; then ${KEY_PLACEHOLDER} again.`]])
+    expect(e.delivered).toBe(1)
+  })
+
+  test('lead-use-mailbox expands like any lead skill: its key-specific wait command inlined with the placeholder, delivered', async () => {
+    const shim = SHIM.replaceAll('lead-discuss', 'lead-use-mailbox')
+    const e = edges({ read: async (_name, key) => `# Use Mailbox\n\nRun \`ws-mcp mailbox wait --session-key ${key} --slug quiet-otter\`.\n` })
+    expect(await expandPreload({ skill: 'ws:lead-use-mailbox', text: shim, pluginName: 'ws' }, e)).toBe(
+      `# Use Mailbox\n\nRun \`ws-mcp mailbox wait --session-key ${KEY_PLACEHOLDER} --slug quiet-otter\`.\n`,
+    )
+    expect(e.delivered).toBe(1)
+  })
+
+  test('an empty body, or one still carrying the key after the replacement, passes through undelivered; a failed read rejects undelivered', async () => {
     const input = { skill: 'lead-discuss', text: SHIM, pluginName: 'ws' }
-    for (const read of [async () => '  \n', async () => 'wait --session-key lead-key']) {
-      const e = edges({ read })
+    // The backstop: a key the placeholder itself contains survives the replacement.
+    for (const over of [{ read: async () => '  \n' }, { key: async () => 'key', read: async () => 'wait --session-key key' }]) {
+      const e = edges(over)
       expect(await expandPreload(input, e)).toBeUndefined()
+      expect(e.repeats).toEqual([])
       expect(e.delivered).toBe(0)
     }
     const failed = edges({ read: async () => Promise.reject(new Error('down')) })
