@@ -26,10 +26,10 @@ import type { OwnPrompt, OwnSubmitResult } from './captions'
  * scheduled or running, and a lever step that comes due while a watchdog
  * attempt is in flight reports that attempt's outcome instead of reconnecting
  * again. A success writes one transcript line and submits nothing; a failure
- * writes one transcript notice per failure streak, and after
- * WATCHDOG_MAX_FAILURES attempts in a row it stops attempting until the server
- * resolves again (`resolved`), a tick finds its tools listed again, or a new
- * session start re-arms it.
+ * writes one transcript notice per failure streak and keeps attempting once
+ * per interval for as long as the server stays gone: it never gives up, and
+ * the streak ends when the server resolves again (`resolved`), a tick finds its
+ * tools listed again, or a new session start re-arms it.
  */
 
 export const TOOL_NAME = 'request_mcp_reconnect'
@@ -100,9 +100,6 @@ export function reasonCommandAnswered(text: string): string {
   return `the reconnect command answered: ${text}`
 }
 
-/** How many failed watchdog attempts in a row stop it until the server resolves again. */
-export const WATCHDOG_MAX_FAILURES = 3
-
 /** The transcript line of a successful watchdog reconnect; no prompt follows it. */
 export function watchdogSuccessText(plugin: string): string {
   return `${plugin} mcp watchdog: the ${plugin} MCP server had dropped and was reconnected; its tools are available again.`
@@ -112,8 +109,8 @@ export function watchdogSuccessText(plugin: string): string {
 export function watchdogFailureText(plugin: string, reason: string, intervalMs: number): string {
   return (
     `${plugin} mcp watchdog: the ${plugin} MCP server dropped and did not come back (${reason}). ` +
-    `It is tried again every ${intervalMs / 60_000} min, ${WATCHDOG_MAX_FAILURES} attempts in a row at most; ` +
-    'after that, re-enable it from /mcp, run /reload-plugins, or restart the session.'
+    `It is tried again every ${intervalMs / 60_000} min until it comes back; ` +
+    'meanwhile, re-enable it from /mcp, run /reload-plugins, or restart the session.'
   )
 }
 
@@ -218,7 +215,7 @@ export function createReconnect(): Reconnect {
   /** Stops the armed watchdog timer. */
   let unwatch: (() => void) | undefined
   let intervalMs = 0
-  /** Failed watchdog attempts in a row; at WATCHDOG_MAX_FAILURES the watchdog stops attempting. */
+  /** Failed watchdog attempts in a row: the notice goes out at the first, and the watchdog attempts on regardless. */
   let failures = 0
   /** Whether a watchdog tick is under way, so ticks never overlap. */
   let ticking = false
@@ -310,7 +307,6 @@ export function createReconnect(): Reconnect {
         failures = 0
         return
       }
-      if (failures >= WATCHDOG_MAX_FAILURES) return watchDebug('tick skipped: stopped after failed attempts until the server resolves again')
       // Checked again: a lever step or a turn may have started during the read.
       const late = busy(e)
       if (late) return watchDebug(`tick skipped: ${late}`)
@@ -322,7 +318,7 @@ export function createReconnect(): Reconnect {
         return
       }
       failures += 1
-      watchDebug(`not reconnected (${outcome.reason}); failure ${failures} of ${WATCHDOG_MAX_FAILURES}`)
+      watchDebug(`not reconnected (${outcome.reason}); failure ${failures} in a row`)
       if (failures === 1) e.log(watchdogFailureText(e.plugin, outcome.reason, intervalMs), 'transcript')
     } finally {
       ticking = false

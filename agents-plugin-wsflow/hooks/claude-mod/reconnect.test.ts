@@ -16,7 +16,6 @@ import {
   successText,
   TOOLS_POLL_MS,
   TOOLS_WAIT_MS,
-  WATCHDOG_MAX_FAILURES,
   watchdogFailureText,
   watchdogSuccessText,
   type ReconnectEdges,
@@ -152,7 +151,7 @@ function harness(opts: { plugin?: string; server?: string | null } = {}) {
 const SUBAGENT_DENY = 'request_mcp_reconnect serves the main session only; called from subagent sub-1.'
 
 /** Make every tool-list read of the step answer not listed, so the wait runs out. */
-const neverBack = (h: ReturnType<typeof harness>['h']) => h.listed.push(...Array.from({ length: 100 }, () => false))
+const neverBack = (h: ReturnType<typeof harness>['h']) => h.listed.push(...Array.from({ length: 1000 }, () => false))
 
 describe('pure core', () => {
   test('only a literal true sets the flag; any other value reads as unset, never as an error; a subagent is refused', () => {
@@ -716,47 +715,50 @@ describe('watchdog', () => {
     expect(h.submits).toEqual([failureText('ws', REASON_TOOLS_ABSENT, false)])
   })
 
-  test(`${WATCHDOG_MAX_FAILURES} failed attempts in a row stop it, with one notice per streak; a later resolution restarts it`, async () => {
+  test('failed attempts never stop it: it attempts every interval with one notice per streak', async () => {
     const { h, r, fire, transcript } = harness()
     r.watch(MS)
     neverBack(h)
-    for (let i = 0; i < WATCHDOG_MAX_FAILURES; i++) await fire()
-    expect(h.reconnects.length).toBe(WATCHDOG_MAX_FAILURES)
+    for (let i = 0; i < 10; i++) await fire()
+    expect(h.reconnects.length).toBe(10)
     expect(transcript()).toEqual([watchdogFailureText('ws', REASON_TOOLS_ABSENT, MS)])
     expect(h.submits).toEqual([])
-    await fire()
-    await fire()
-    expect(h.reconnects.length).toBe(WATCHDOG_MAX_FAILURES)
-    // A lever reconnect or a session start resolves the server again.
+  })
+
+  test('a resolution ends the streak: the next failure notices again, and attempts continue', async () => {
+    const { h, r, fire, transcript } = harness()
+    r.watch(MS)
+    neverBack(h)
+    for (let i = 0; i < 4; i++) await fire()
     r.resolved()
     await fire()
-    expect(h.reconnects.length).toBe(WATCHDOG_MAX_FAILURES + 1)
+    expect(h.reconnects.length).toBe(5)
     expect(transcript()).toEqual([watchdogFailureText('ws', REASON_TOOLS_ABSENT, MS), watchdogFailureText('ws', REASON_TOOLS_ABSENT, MS)])
   })
 
-  test('a session start re-arms a stopped watchdog with a fresh failure streak', async () => {
-    const { h, r, edges, fire } = harness()
+  test('a session start re-arms the watchdog with a fresh failure streak', async () => {
+    const { h, r, edges, fire, transcript } = harness()
     r.watch(MS)
     neverBack(h)
-    for (let i = 0; i < WATCHDOG_MAX_FAILURES; i++) await fire()
-    await fire()
-    expect(h.reconnects.length).toBe(WATCHDOG_MAX_FAILURES)
+    for (let i = 0; i < 4; i++) await fire()
     r.start(edges)
     r.watch(MS)
     await fire()
-    expect(h.reconnects.length).toBe(WATCHDOG_MAX_FAILURES + 1)
+    expect(h.reconnects.length).toBe(5)
+    expect(transcript().length).toBe(2)
   })
 
-  test('a stopped watchdog that finds the tools listed again restarts', async () => {
-    const { h, r, fire } = harness()
+  test('a watchdog that finds the tools listed again ends the streak', async () => {
+    const { h, r, fire, transcript } = harness()
     r.watch(MS)
     neverBack(h)
-    for (let i = 0; i < WATCHDOG_MAX_FAILURES; i++) await fire()
+    for (let i = 0; i < 4; i++) await fire()
     h.listed.length = 0
     await fire()
     h.listed.push(false)
     await fire()
-    expect(h.reconnects.length).toBe(WATCHDOG_MAX_FAILURES + 1)
+    expect(h.reconnects.length).toBe(5)
+    expect(transcript().length).toBe(2)
   })
 
   test('a success ends a failure streak: the next failure notices again', async () => {
