@@ -18,7 +18,7 @@
     {
       "key": "claude.manual_injection_enabled",
       "type": "boolean",
-      "default": false,
+      "default": true,
       "description": "Claude Code only (unused on other hosts): when true, and only in a project with ai-docs/WORKFLOW.md at its repository root, each lead conversation gets a lead session key minted at its start; when one of the plugin's lead skills is expanded and no copy of the workflow manual is visible in the conversation, one model-only message carrying the key, the mailbox push line, and the keyed workflow manual with the session state is appended (once until the next compaction or /clear, not again when the state changes); a lead skill's playbook is inlined with that key; a repeat playbook read is collapsed to a pointer while the earlier identical result is still in the conversation; and the mailbox push is bound to every key the conversation gets. When false, no lead session key is minted, so the mailbox push is bound through the mailbox watch tool and the status band shows no key rows (mailbox address, todos, agenda). Read at session start, so a change applies from the next session. Only the project, global, and built-in values apply; a session- or repo-scope tune is not read. A failed or refused read leaves it off, except that a failed first read is read once more when the MCP server resolves again (a later session start or an MCP reconnect); a true read then starts the feature with the session key the mailbox push was already bound to through the mailbox watch tool, minting one only when none was bound."
     },
     {
