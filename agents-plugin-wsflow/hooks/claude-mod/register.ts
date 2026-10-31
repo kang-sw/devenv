@@ -189,7 +189,18 @@ export function checkWatchCall(agentId: string | undefined, sessionKey: unknown)
   return { key }
 }
 
-/** Classify a recv $.tool.call result: a deny is a refusal (notice path); an error result is a retryable failure. */
+/**
+ * Classify a recv $.tool.call result: a deny is a refusal (notice path); an error result is a retryable failure.
+ *
+ * With the plugin's MCP server dead (probed live in an interactive session by
+ * killing its stdio process; Claude Code 2.1.314) the call does not deny: it
+ * rejects with `HooksError: $.tool.call: no tool named "<recv tool>" in this
+ * session`, and `$.mcp.connect` answers `isConnected: false`. The drain edge
+ * lets that rejection through, so the watcher's drain catch reads it as a
+ * failure and backs off, staying on the drain path. A live server answers a
+ * failing recv with `isError: true` and text, never a deny. A deny is only a
+ * policy or hook refusal, which is why it takes the notice path.
+ */
 export function classifyRecv(res: ToolCallResult): DrainResult {
   if (res.deny !== undefined) return { kind: 'refused', reason: res.deny }
   if (res.isError) return { kind: 'failed', reason: res.text ?? 'recv reported an error' }

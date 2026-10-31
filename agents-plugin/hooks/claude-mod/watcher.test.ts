@@ -546,6 +546,29 @@ describe('direct mode', () => {
     expect(h.sleeps.map((s) => s.ms)).toEqual([1_000, 2_000])
   })
 
+  test('a drain that rejects, as $.tool.call does while the server is gone, backs off and retries on the drain path, never the notice path', async () => {
+    const h = harness('direct')
+    let down = true
+    const ok = h.edges.drain
+    h.edges.drain = async (key) => {
+      if (down) throw new Error('HooksError: $.tool.call: no tool named "mcp__plugin_pkg_pkg__mailbox_recv" in this session')
+      return ok(key)
+    }
+    const w = createWatcher(h.edges)
+    w.bind('k1')
+    await tick()
+    h.waits[0]!.d.resolve('mail')
+    await tick()
+    expect(h.submitted).toEqual([])
+    expect(h.sleeps.map((s) => s.ms)).toEqual([1_000])
+    expect(w.isSuspended()).toBe(false)
+    down = false
+    h.sleeps[0]!.d.resolve()
+    await tick()
+    await arrive(h, { kind: 'mail', mail: mailA })
+    expect(h.submitted).toEqual([formatBatch('pkg mailbox', RECV, 'k1', mailA)])
+  })
+
   test('a refused drain submits one notice and suspends until recvCompleted', async () => {
     const h = harness('direct')
     const w = createWatcher(h.edges)
