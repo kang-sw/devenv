@@ -217,3 +217,46 @@ block appends nothing; no preload replacement text ever contains the key,
 the mailbox line, or session state; `workflow_manual` results reach the
 model unrewritten apart from the adoption notice; sentinel adoption still
 rebinds the key and the mailbox.
+
+### Result (e525c1d53) - 2026-10-31
+
+Landed in f3913ea02 (code, engine and preload tests), f04693b5a (manual unit
+suite), e525c1d53 (descriptions, manual, arm-the-wait wording, mirrors).
+
+- Probe (step 1), live on Claude Code 2.1.314: a user row appended from
+  `skill.prompt` reaches the same model request as the expansion for a typed
+  `/name` (interactive tmux REPL and headless `-p`; the row lands in the
+  opening user message ahead of the command rows) and for the Skill tool (after
+  the tool result, ahead of the skill body). The late-delivery fallback is
+  therefore unused; recorded at the append site in `register.ts`.
+- Removed the `prompt.compose` hook, section text and wait, the setup's
+  `workflow_manual` / `lead-workflow-manual` reads, the snapshot / landing /
+  reused / span state, the state-only cut, its `workflow_state` fallback, and
+  the `workflow_manual` repeat pointer. Playbook dedupe and the adoption notice
+  stay. Playbook dedupe helpers lost their dead `workflow_manual` branches.
+- Row: `expandPreload` calls a `deliver` edge after replacing the block (body
+  or pointer form) and before returning; `manual.deliver` appends
+  `rowText` (marker header line, key line, mailbox line when the push runs,
+  whole response) via `$.session.append` unless `epochCopyVisible` finds the
+  header line or a non-error `workflow_manual` result with a `## Session Key`
+  line. Failed conversation read appends; failed manual read, a response
+  without `## Session Key`, or a refused row append nothing (next expansion
+  retries).
+- Decision: no `session.start` follows `/clear`, and `prompt.compose` was the
+  old next-key trigger. Replaced by the first main-thread `turn.start` per
+  reset and a bounded `ensureKey` (`KEY_WAIT_MS` 5 s) in the preload path, so a
+  lead skill typed right after `/clear` expands with the new key.
+- Decision: `lead-use-mailbox`'s Claude arm-the-wait include reworded from
+  "your system prompt" to "your context" (semantics unchanged); Go guard,
+  rsrc manifest, wsflow and pi rsrc mirrors updated.
+- Verification: `claude plugin test agents-plugin` and
+  `claude plugin test agents-plugin-wsflow`: 552 pass, 0 fail each;
+  `claude plugin validate` passed for both; `diff -r` of the two
+  `hooks/claude-mod` trees clean; `go test ./internal/wsrsrc/...` ok;
+  `go test ./internal/mcp/...` ok.
+- Review (lite): 0 Critical / 0 Important. Minor left: the expansion hook's
+  `pushAvailable()` wait is unbounded inside `deliver` (a hung mailbox probe
+  could push the hook past its budget; the text then passes through); no test
+  pins a subagent-preload expansion appending to main; the sentinel-adoption
+  engine test does not assert the follow-on suppression; the ordering probe
+  has no executable record (engine harness cannot model request ordering).
