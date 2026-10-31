@@ -649,6 +649,9 @@
     },
     "261030-feat-session-whiteboard-mode": {
       "registered_at": "2026-10-30T11:50:02Z"
+    },
+    "261031-feat-ws-preload-playbook-unit-dedupe": {
+      "registered_at": "2026-10-31T02:03:01Z"
     }
   }
 }
