@@ -180,7 +180,6 @@ function world(on: On, opts: { config?: Record<string, unknown>; wsProject?: boo
   on('session.measure', ($, e) => ({ changed: e.changed }))
   on('session.messages', () => ({ value: [] as never }))
   on('session.compact', () => ({ messages: [{ role: 'user', text: 'summary', toolUses: [] }] }) as never)
-  on('prompt.compose', () => ({ sections: [] }))
   on('prompt.submit', ($, e) => ({ text: e.text }))
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', ($, e) => ({ text: e.answer }))
@@ -756,7 +755,8 @@ test('after /clear the next conversation\'s minted key carries the reads, and th
   // Between the end and the next key, the status rows alone.
   expectFrame(await draw($, w, 100), 100, 2)
   w.sessionId = 'sess-2'
-  await $.prompt.compose({ model: 'm', promptModel: 'm', surfaces: ['terminal'], tools: [], outputStyle: null, traits: [] } as never)
+  // No session.start follows /clear: the next main-thread turn sets the next key up.
+  await $.turn.start({ text: '', turnId: 't' } as never)
   await w.clock.settle()
   expect(w.minted).toBe(2)
   expect(bandConfigCalls(w).at(-1)).toEqual({ key: ENABLED_KEY, format: 'json', session_key: 'minted-2' })

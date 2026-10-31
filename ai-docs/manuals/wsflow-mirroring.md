@@ -320,7 +320,7 @@ The Claude mod is a second generated-sameness carve-out:
 `agents-plugin-wsflow/hooks/claude-mod/` a byte-identical copy. Claude Code
 accepts one hooks module per plugin, so the mod is one entry (`register.ts`)
 carrying every Claude mod feature: mailbox push, lead compaction timing, the
-MCP reconnect lever and its watchdog, workflow manual injection and the
+MCP reconnect lever and its watchdog, workflow manual delivery and the
 playbook preload riding on its key, tool-call captions, and the status band.
 The mod reads its package identity (plugin name, root, MCP server) from the
 engine at runtime, and selects no feature by package name: every feature but
@@ -354,9 +354,11 @@ derived from the package's `plugin.json` `mcpServers` key. Every label, prompt
 prefix, transcript notice, and debug log prefix the mod writes spells the
 engine-reported plugin name, never a hardcoded package name. Workflow manual
 injection runs only with its knob on and `ai-docs/WORKFLOW.md` at the
-repository root: it mints the conversation's key, adds the system-prompt
-section, rewrites the ws reads, adopts a revive's or a fresh-bootstrap sentinel
-call's key, and binds the mailbox push to every key the conversation gets, so
+repository root: it mints the conversation's key, appends the keyed manual as
+one model-only row per conversation epoch when a lead skill is expanded and no
+copy is visible, collapses repeat playbook reads, adopts a revive's or a
+fresh-bootstrap sentinel call's key, and binds the mailbox push to every key
+the conversation gets, so
 the `mailbox_watch` lever is not registered there; with the knob off (or
 outside such a project) the lever registers and binds, and the status band
 draws only its key-less rows. Tool-call captions and the
