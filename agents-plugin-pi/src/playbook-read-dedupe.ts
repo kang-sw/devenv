@@ -1,8 +1,15 @@
-/** Stateless active-context dedupe for repeat playbook, skill, and workflow_manual reads. */
+/**
+ * Stateless active-context dedupe for repeat playbook, skill, and
+ * workflow_manual reads. A playbook body is one unit across its
+ * `ws__playbook_read` results, the `ws-skill` results and typed `/skill:`
+ * expansions its preload block was inlined into (`dedupePlaybook`); a skill
+ * with no inlined playbook and workflow_manual dedupe by their whole result
+ * (`dedupeRead`).
+ */
 
-export type ReadFamily = "playbook.read" | "ws-skill" | "workflow_manual";
+export type ReadFamily = "ws-skill" | "workflow_manual";
 
-const READ_FAMILIES: readonly ReadFamily[] = ["playbook.read", "ws-skill", "workflow_manual"];
+const READ_FAMILIES: readonly ReadFamily[] = ["ws-skill", "workflow_manual"];
 
 export interface ReadDedupeOptions {
   /**
@@ -31,11 +38,12 @@ function stable(value: unknown): string {
   return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stable(record[key])}`).join(",")}}`;
 }
 
-export function playbookReadKey(params: Record<string, unknown>): string {
-  // Routing's outer session_key does not participate because this key only
-  // projects name/context. A context.session_key is playbook substitution
-  // data, so it remains part of the semantic context map.
-  return stable({ name: params.name, context: params.context });
+/**
+ * A playbook unit's key: the name alone. A `context` that renders a different
+ * body is told apart by the body, so it does not split identical ones.
+ */
+export function playbookKey(name: unknown): string {
+  return stable({ name });
 }
 
 export function wsSkillKey(params: Record<string, unknown>): string {
@@ -103,7 +111,6 @@ function callInfo(entries: readonly unknown[], currentToolCallId: string, option
     if (entry?.type !== "message" || entry.message?.role !== "assistant") continue;
     for (const call of entry.message.content ?? []) {
       if (call?.type !== "toolCall" || call.id === currentToolCallId || !call.arguments || typeof call.arguments !== "object") continue;
-      if (call.name === "ws__playbook_read") calls.set(call.id, { family: "playbook.read", key: playbookReadKey(call.arguments) });
       if (call.name === "ws-skill") calls.set(call.id, { family: "ws-skill", key: wsSkillKey(call.arguments) });
       if (call.name === "ws__workflow_manual") {
         const sessionKey = options.workflowManualSessionKey ? options.workflowManualSessionKey(call.arguments) : call.arguments.session_key;
@@ -160,4 +167,98 @@ export function dedupeRead(entries: readonly unknown[], currentToolCallId: strin
     return { text: pointerText(originalToolCallId, family, key, freshBody, toolCallDistance(entries, originalToolCallId, currentToolCallId)), deduped: true };
   }
   return { text: freshBody, deduped: false };
+}
+
+/** A playbook copy: a tool call's result, or a session entry's own user text (a typed `/skill:` expansion). */
+export type PlaybookCopy = { toolCallId: string } | { entryId: string };
+
+interface PlaybookProvenance { family: "playbook"; key: string; originalToolCallId?: string; originalEntryId?: string }
+
+const MARKER_RE = /<!-- ws-pi-read-dedupe-v1 ([\s\S]*?) -->/g;
+
+/** How many provenance markers in `text` belong to the playbook unit `key`; a marker that does not parse belongs to none. */
+function unitMarkers(text: string, key: string): number {
+  let count = 0;
+  for (const match of text.matchAll(MARKER_RE)) {
+    try {
+      const value = JSON.parse(match[1]!) as Partial<PlaybookProvenance>;
+      if (value.family === "playbook" && value.key === key) count += 1;
+    } catch { /* not a marker of any unit */ }
+  }
+  return count;
+}
+
+function userText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content.flatMap((item: any) => (item?.type === "text" && typeof item.text === "string" ? [item.text as string] : [])).join("\n");
+}
+
+/**
+ * Where the one earlier copy is, as the pointer prose says it: a tool call's
+ * distance only when the current text is itself a tool result.
+ */
+function copyPlace(entries: readonly unknown[], copy: PlaybookCopy, currentToolCallId: string | undefined): string {
+  if ("entryId" in copy) return "in an earlier message of this conversation";
+  if (currentToolCallId === undefined) return "earlier in this conversation";
+  const distance = toolCallDistance(entries, copy.toolCallId, currentToolCallId);
+  return `${distance} tool call${distance === 1 ? "" : "s"} ago`;
+}
+
+/**
+ * Playbook-unit dedupe over Pi's supplied active context. `freshBody` is the
+ * playbook body about to reach the model; copies compare trimmed, as a
+ * preload inlines the trimmed body. A copy is a successful `ws__playbook_read`
+ * result for `name` equal to it, a successful `ws-skill` result for `name`
+ * containing it, or a user message containing it (a typed `/skill:`
+ * expansion, whose provenance is its session entry id). Exactly one copy and
+ * no pointer of this unit yields a pointer: `form` `"result"` for a
+ * `ws__playbook_read` result (Pi's existing pointer form), `"block"` for the
+ * text replacing a preload block. Any pointer candidate of this unit, valid or
+ * not, yields the full body, so a forged or stale marker never suppresses a
+ * read; a copy with no entry id carries no provenance and is never pointed at.
+ */
+export function dedupePlaybook(entries: readonly unknown[], currentToolCallId: string | undefined, name: string, freshBody: string, form: "result" | "block"): ReadDedupeDecision {
+  const body = freshBody.trim();
+  if (!body) return { text: freshBody, deduped: false };
+  const key = playbookKey(name);
+  const calls = new Map<string, "read" | "skill">();
+  for (const entry of entries as any[]) {
+    if (entry?.type !== "message" || entry.message?.role !== "assistant") continue;
+    for (const call of entry.message.content ?? []) {
+      if (call?.type !== "toolCall" || call.id === currentToolCallId || call.arguments?.name !== name) continue;
+      if (call.name === "ws__playbook_read") calls.set(call.id, "read");
+      if (call.name === "ws-skill") calls.set(call.id, "skill");
+    }
+  }
+  const copies: Array<PlaybookCopy | undefined> = [];
+  let pointers = 0;
+  for (const entry of entries as any[]) {
+    if (entry?.type !== "message") continue;
+    const message = entry.message;
+    if (message?.role === "user") {
+      const text = userText(message.content);
+      if (text.includes(body)) copies.push(typeof entry.id === "string" ? { entryId: entry.id } : undefined);
+      pointers += unitMarkers(text, key);
+      continue;
+    }
+    if (message?.role !== "toolResult" || message.isError) continue;
+    const kind = calls.get(message.toolCallId);
+    const text = message.content?.find((item: any) => item?.type === "text")?.text;
+    if (kind === undefined || typeof text !== "string") continue;
+    const pointerLike = text.startsWith(POINTER_PROSE_PREFIX) || text.startsWith(LEGACY_POINTER_PROSE_PREFIX);
+    if (kind === "read" ? text.trim() === body : text.includes(body)) copies.push({ toolCallId: message.toolCallId });
+    else if (pointerLike || (kind === "read" && text.includes(PROVENANCE_PREFIX))) pointers += 1;
+    if (kind === "skill") pointers += unitMarkers(text, key);
+  }
+  const copy = copies.length === 1 && pointers === 0 ? copies[0] : undefined;
+  if (copy === undefined) return { text: freshBody, deduped: false };
+  const provenance: PlaybookProvenance = "entryId" in copy
+    ? { family: "playbook", key, originalEntryId: copy.entryId }
+    : { family: "playbook", key, originalToolCallId: copy.toolCallId };
+  const place = copyPlace(entries, copy, currentToolCallId);
+  const prose = form === "result"
+    ? `${POINTER_PROSE_PREFIX}${place}. Do not read it again (headings: ${headings(body)}).`
+    : `The full \`${name}\` procedure is already present ${place}; follow it and do not read it again (headings: ${headings(body)}).`;
+  return { text: `${prose}\n${PROVENANCE_PREFIX}${JSON.stringify(provenance)}${PROVENANCE_SUFFIX}`, deduped: true };
 }

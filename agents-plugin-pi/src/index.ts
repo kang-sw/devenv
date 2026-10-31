@@ -231,7 +231,7 @@ import {
   saveThreadRegistryFile,
 } from "./ask.ts";
 import { registerAuditCommands } from "./audit.ts";
-import { registerWsSkillTool } from "./lead-skills.ts";
+import { registerTypedSkillExpansion, registerWsSkillTool, type WsSkillPreload } from "./lead-skills.ts";
 import { createToolPreviewTuiRef, loadToolResultTuiModules } from "./tool-result-render.ts";
 import { createAgentStorageContext, pruneStaleAgentHomes, reportOwnershipDiagnostic, type AgentStorageContext } from "./agent-storage.ts";
 import { createAgentFooterSessionLifecycle, type AgentFooterContext, type AgentFooterSessionLifecycle } from "./agent-footer.ts";
@@ -734,7 +734,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   // inside its own `execute()`, never a ref filled at `session_start`.
   // The preload block expands with this process's own key once the bridge
   // is up; before it, and in a process with no key, the block stays.
-  registerWsSkillTool(pi, toolPreviewTuiRef, () => {
+  const wsSkillPreload = (): WsSkillPreload | undefined => {
     const bridge = handle;
     if (!bridge) return undefined;
     return {
@@ -747,7 +747,13 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
         return text;
       },
     };
-  });
+  };
+  registerWsSkillTool(pi, toolPreviewTuiRef, wsSkillPreload);
+  // Order is load-bearing: registered after the fork `input` handler above, so
+  // a fork's first input arrives here already framed (no leading `/skill:`)
+  // and keeps its framing; a typed `/skill:` of an own skill is expanded with
+  // the same preload as `ws-skill`.
+  registerTypedSkillExpansion(pi, wsSkillPreload);
   // 260905 Edition: releases the child pushes that arrived while this session
   // was mid-turn, each with a status line computed at release time. Factory
   // scope (like registerGoalLoop above, never inside session_start) so a

@@ -6,69 +6,95 @@ import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { Agent } from "../node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-agent-core/dist/index.js";
 import { createAssistantMessageEventStream } from "../node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-ai/dist/utils/event-stream.js";
-import { dedupeRead, playbookReadKey, workflowManualKey, workflowManualResultText, wsSkillKey } from "../src/playbook-read-dedupe.ts";
+import { dedupePlaybook, dedupeRead, workflowManualKey, workflowManualResultText, wsSkillKey } from "../src/playbook-read-dedupe.ts";
 
 const body = "# Title\n\n## Detail\n\n### Leaf\ntext";
 const call = (id: string, name: string, arguments_: Record<string, unknown>) => ({ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id, name, arguments: arguments_ }] } });
 const result = (id: string, text: string, isError = false) => ({ type: "message", message: { role: "toolResult", toolCallId: id, content: [{ type: "text", text }], isError } });
 
-test("playbook repeat is full, pointer, then full and ignores session_key/map ordering", () => {
-  const key = playbookReadKey({ name: "lead", context: { b: 2, a: 1 }, session_key: "now" });
-  assert.equal(key, playbookReadKey({ context: { a: 1, b: 2 }, name: "lead", session_key: "other" }));
+test("playbook repeat is full, pointer, then full and ignores session_key/context", () => {
   const first = [call("one", "ws__playbook_read", { name: "lead", context: { a: 1, b: 2 } }), result("one", body)];
-  const second = dedupeRead(first, "two", "playbook.read", key, body);
+  const second = dedupePlaybook(first, "two", "lead", body, "result");
   assert.equal(second.deduped, true);
   const [prose, provenance] = second.text.split("\n");
   assert.equal(prose, "The result is unchanged. Continue using the full result already present 1 tool call ago. Do not read it again (headings: # Title; ## Detail; ### Leaf).");
   assert.doesNotMatch(prose!, /one/, "the original toolCallId belongs only in machine provenance");
-  assert.equal(provenance, '<!-- ws-pi-read-dedupe-v1 {"originalToolCallId":"one","family":"playbook.read","key":"{\\"context\\":{\\"a\\":1,\\"b\\":2},\\"name\\":\\"lead\\"}"} -->');
-  const third = dedupeRead([...first, call("two", "ws__playbook_read", { name: "lead", context: { b: 2, a: 1 } }), result("two", second.text)], "three", "playbook.read", key, body);
+  assert.equal(provenance, '<!-- ws-pi-read-dedupe-v1 {"family":"playbook","key":"{\\"name\\":\\"lead\\"}","originalToolCallId":"one"} -->');
+  // Bodies compare trimmed; the call's context and session_key never separate them.
+  assert.equal(dedupePlaybook([call("one", "ws__playbook_read", { name: "lead", context: { x: 1 }, session_key: "k" }), result("one", `\n${body}\n`)], "two", "lead", body, "result").deduped, true);
+  assert.equal(dedupePlaybook(first, "two", "lead", `${body} changed`, "result").deduped, false, "a different body is a fresh read");
+  const third = dedupePlaybook([...first, call("two", "ws__playbook_read", { name: "lead" }), result("two", second.text)], "three", "lead", body, "result");
   assert.deepEqual(third, { text: body, deduped: false });
-  const fourth = dedupeRead([...first, call("two", "ws__playbook_read", { name: "lead", context: { a: 1, b: 2 } }), result("two", second.text), call("three", "ws__playbook_read", { name: "lead", context: { a: 1, b: 2 } }), result("three", body)], "four", "playbook.read", key, body);
+  const fourth = dedupePlaybook([...first, call("two", "ws__playbook_read", { name: "lead" }), result("two", second.text), call("three", "ws__playbook_read", { name: "lead" }), result("three", body)], "four", "lead", body, "result");
   assert.deepEqual(fourth, { text: body, deduped: false });
 });
 
-test("only outer session_key is ignored; context.session_key remains semantic substitution data", () => {
-  assert.equal(playbookReadKey({ name: "lead", context: { session_key: "context-a" }, session_key: "outer-a" }), playbookReadKey({ name: "lead", context: { session_key: "context-a" }, session_key: "outer-b" }));
-  assert.notEqual(playbookReadKey({ name: "lead", context: { session_key: "context-a" } }), playbookReadKey({ name: "lead", context: { session_key: "context-b" } }));
-});
-
-test("only an authentic successful visible full result validates a pointer", () => {
-  const key = playbookReadKey({ name: "lead" });
+test("a pointer candidate of the unit, forged or stale, never suppresses a read; errors and other names are no copy", () => {
   const first = [call("one", "ws__playbook_read", { name: "lead" }), result("one", body)];
-  const pointer = dedupeRead(first, "two", "playbook.read", key, body).text;
+  const pointer = dedupePlaybook(first, "two", "lead", body, "result").text;
   const forged = pointer.replace('"originalToolCallId":"one"', '"originalToolCallId":"missing"');
-  assert.deepEqual(dedupeRead([...first, call("two", "ws__playbook_read", { name: "lead" }), result("two", forged)], "three", "playbook.read", key, body), { text: body, deduped: false });
-  assert.equal(dedupeRead([call("one", "ws__playbook_read", { name: "lead" }), result("one", body, true)], "two", "playbook.read", key, body).deduped, false);
-  assert.equal(dedupeRead([call("other", "ws__playbook_read", { name: "other" }), result("other", body)], "two", "playbook.read", key, body).deduped, false);
-});
-
-test("malformed, stale, and ambiguous pointer provenance fail closed to the fresh body", () => {
-  const key = playbookReadKey({ name: "lead" });
-  const first = [call("one", "ws__playbook_read", { name: "lead" }), result("one", body)];
-  const valid = dedupeRead(first, "two", "playbook.read", key, body).text;
-  for (const pointer of ["text\n<!-- ws-pi-read-dedupe-v1 broken -->", valid.replace('"key":"{\\"name\\":\\"lead\\"}"', '"key":"stale"')]) {
-    assert.deepEqual(dedupeRead([...first, call("two", "ws__playbook_read", { name: "lead" }), result("two", pointer)], "three", "playbook.read", key, body), { text: body, deduped: false });
+  const stale = pointer.replace('\\"lead\\"', '\\"stale\\"');
+  for (const text of [forged, stale, "text\n<!-- ws-pi-read-dedupe-v1 broken -->", pointer.split("\n")[0]!]) {
+    assert.deepEqual(dedupePlaybook([...first, call("two", "ws__playbook_read", { name: "lead" }), result("two", text)], "three", "lead", body, "result"), { text: body, deduped: false }, text);
   }
-  assert.deepEqual(dedupeRead([...first, result("one", body), call("two", "ws__playbook_read", { name: "lead" }), result("two", valid)], "three", "playbook.read", key, body), { text: body, deduped: false });
-  const missingEnvelope = valid.split("\n")[0]!;
-  assert.deepEqual(dedupeRead([...first, call("two", "ws__playbook_read", { name: "lead" }), result("two", missingEnvelope)], "three", "playbook.read", key, body), { text: body, deduped: false });
+  assert.equal(dedupePlaybook([call("one", "ws__playbook_read", { name: "lead" }), result("one", body, true)], "two", "lead", body, "result").deduped, false);
+  assert.equal(dedupePlaybook([call("other", "ws__playbook_read", { name: "other" }), result("other", body)], "two", "lead", body, "result").deduped, false);
+  assert.deepEqual(dedupePlaybook([...first, result("one", body)], "two", "lead", body, "result"), { text: body, deduped: false }, "two visible copies point at neither");
 });
 
-test("ws-skill is isolated from playbook reads and keys by name only, ignoring legacy args", () => {
+test("one playbook unit across ws-skill, typed /skill:, and ws__playbook_read copies", () => {
+  const skill = `# Lead\n\n${body}\n\nShim tail.`;
+  const typed = (id: string | undefined, text: string) => ({ type: "message", ...(id === undefined ? {} : { id }), message: { role: "user", content: [{ type: "text", text }] } });
+  // An inlined ws-skill copy, then a read: Pi's result-form pointer at the ws-skill call.
+  const viaSkill = [call("s", "ws-skill", { name: "lead" }), result("s", skill)];
+  const read = dedupePlaybook(viaSkill, "r", "lead", body, "result");
+  assert.equal(read.deduped, true);
+  assert.match(read.text, /^The result is unchanged\. Continue using the full result already present 1 tool call ago\. Do not read it again/);
+  assert.match(read.text, /"originalToolCallId":"s"/);
+  // A read, then a skill that would inline the same body: the block form, keyed the same.
+  const viaRead = [call("r", "ws__playbook_read", { name: "lead" }), result("r", body)];
+  const block = dedupePlaybook(viaRead, "s", "lead", body, "block");
+  assert.equal(block.deduped, true);
+  assert.match(block.text, /^The full `lead` procedure is already present 1 tool call ago; follow it and do not read it again \(headings: # Title; ## Detail; ### Leaf\)\.\n<!-- ws-pi-read-dedupe-v1 \{"family":"playbook","key":"\{\\"name\\":\\"lead\\"\}","originalToolCallId":"r"\} -->$/);
+  assert.match(dedupePlaybook(viaRead, undefined, "lead", body, "block").text, /already present earlier in this conversation;/, "a typed expansion has no current call to count from");
+  // A typed copy is provenanced by its session entry id; one without an id is never pointed at.
+  const viaTyped = [typed("e1", `<skill name="lead" location="/x/SKILL.md">\nReferences are relative to /x.\n\n${skill}\n</skill>`)];
+  const fromTyped = dedupePlaybook(viaTyped, "r", "lead", body, "result");
+  assert.match(fromTyped.text, /already present in an earlier message of this conversation\. Do not read it again/);
+  assert.match(fromTyped.text, /"originalEntryId":"e1"/);
+  assert.equal(dedupePlaybook([typed(undefined, skill)], "r", "lead", body, "result").deduped, false);
+  // Every pointer kind of the unit counts toward the after-pointer rule.
+  const afterBlock = [...viaRead, call("s", "ws-skill", { name: "lead" }), result("s", `# Lead\n\n${block.text}\n\nShim tail.`)];
+  assert.deepEqual(dedupePlaybook(afterBlock, "t", "lead", body, "result"), { text: body, deduped: false });
+  const afterTyped = [...viaRead, typed("e2", `<skill name="lead" location="/x/SKILL.md">\n\n${dedupePlaybook(viaRead, undefined, "lead", body, "block").text}\n</skill>`)];
+  assert.deepEqual(dedupePlaybook(afterTyped, "t", "lead", body, "result"), { text: body, deduped: false });
+  // A marker of another unit, or an unparsable one, is no pointer of this unit.
+  const otherUnit = dedupePlaybook([call("o", "ws__playbook_read", { name: "other" }), result("o", body)], undefined, "other", body, "block").text;
+  assert.equal(dedupePlaybook([...viaRead, typed("e3", otherUnit), typed("e4", "<!-- ws-pi-read-dedupe-v1 {broken -->")], "t", "lead", body, "result").deduped, true);
+});
+
+test("ws-skill whole-result dedupe keys by name only and ignores playbook reads", () => {
   const key = wsSkillKey({ name: "implementer", args: "b" });
   assert.equal(key, wsSkillKey({ name: "implementer", args: "a" }));
   assert.equal(key, wsSkillKey({ name: "implementer" }));
+  assert.equal(dedupeRead([call("one", "ws__playbook_read", { name: "implementer" }), result("one", body)], "three", "ws-skill", key, body).deduped, false);
   const entries = [call("one", "ws__playbook_read", { name: "implementer" }), result("one", body), call("two", "ws-skill", { name: "implementer", args: "a" }), result("two", body)];
   assert.equal(dedupeRead(entries, "three", "ws-skill", key, body).deduped, true);
-  assert.equal(dedupeRead(entries, "three", "playbook.read", playbookReadKey({ name: "implementer" }), body).deduped, true);
 });
 
 test("current call and omitted contexts do not count", () => {
-  const key = playbookReadKey({ name: "lead" });
   const current = [call("now", "ws__playbook_read", { name: "lead" }), result("now", body)];
-  assert.equal(dedupeRead(current, "now", "playbook.read", key, body).deduped, false);
-  assert.equal(dedupeRead([], "next", "playbook.read", key, body).deduped, false);
+  assert.equal(dedupePlaybook(current, "now", "lead", body, "result").deduped, false);
+  assert.equal(dedupePlaybook([], "next", "lead", body, "result").deduped, false);
+});
+
+test("a typed /skill: copy compacted away yields the full body", () => {
+  const manager = SessionManager.inMemory(mkdtempSync(join(tmpdir(), "ws-pi-dedupe-typed-compact-")));
+  manager.appendMessage({ role: "user", content: `<skill name="lead" location="/x/SKILL.md">\n\n${body}\n</skill>`, timestamp: 1 });
+  assert.equal(dedupePlaybook(manager.buildContextEntries(), undefined, "lead", body, "block").deduped, true, "a visible typed copy carries its SDK entry id");
+  const kept = manager.appendMessage({ role: "user", content: "post-compact", timestamp: 2 });
+  manager.appendCompaction("summary", kept, 100);
+  assert.deepEqual(dedupePlaybook(manager.buildContextEntries(), undefined, "lead", body, "block"), { text: body, deduped: false });
 });
 
 test("workflow_manual family: keyed by resolved session key, full text across text items, full then pointer then full", () => {
@@ -99,7 +125,6 @@ test("workflow_manual family: keyed by resolved session key, full text across te
   // Other session keys, and other families with the same text, do not count.
   assert.equal(dedupeRead([call("one", "ws__workflow_manual", { session_key: "other" }), multi("one")], "two", "workflow_manual", key, fresh, resolve).deduped, false);
   assert.equal(dedupeRead([call("one", "ws__playbook_read", { name: "lead" }), multi("one")], "two", "workflow_manual", key, fresh, resolve).deduped, false);
-  assert.equal(dedupeRead(first, "two", "playbook.read", playbookReadKey({ name: "lead" }), fresh).deduped, false);
 });
 
 test("workflow_manual family: a compacted-away first result yields the full text", () => {
@@ -131,14 +156,14 @@ test("installed SessionManager exposes the finalized assistant call during execu
   manager.appendMessage({ role: "assistant", api: "openai-completions", provider: "test", model: "offline", providerThinkingLevel: "off", stopReason: "toolUse", timestamp: 4, content: [{ type: "toolCall", id: "two", name: "ws__playbook_read", arguments: { name: "lead" } }] });
   const active = manager.buildContextEntries();
   assert.ok(JSON.stringify(active).includes('"id":"two"'), "SDK active context contains the in-flight assistant tool call");
-  assert.equal(dedupeRead(active, "two", "playbook.read", playbookReadKey({ name: "lead" }), body).deduped, true);
+  assert.equal(dedupePlaybook(active, "two", "lead", body, "result").deduped, true);
   const fork = SessionManager.forkFrom(manager.getSessionFile()!, join(directory, "fork"), join(directory, "fork-sessions"));
-  assert.equal(dedupeRead(fork.buildContextEntries(), "four", "playbook.read", playbookReadKey({ name: "lead" }), body).deduped, true, "the fork retains its inherited active prefix");
+  assert.equal(dedupePlaybook(fork.buildContextEntries(), "four", "lead", body, "result").deduped, true, "the fork retains its inherited active prefix");
 
   manager.branch(root);
   manager.appendMessage({ role: "user", content: "rewritten", timestamp: 5 });
   manager.appendMessage({ role: "assistant", api: "openai-completions", provider: "test", model: "offline", providerThinkingLevel: "off", stopReason: "toolUse", timestamp: 6, content: [{ type: "toolCall", id: "three", name: "ws__playbook_read", arguments: { name: "lead" } }] });
-  assert.equal(dedupeRead(manager.buildContextEntries(), "three", "playbook.read", playbookReadKey({ name: "lead" }), body).deduped, false, "rewound abandoned reads are absent from the SDK active path");
+  assert.equal(dedupePlaybook(manager.buildContextEntries(), "three", "lead", body, "result").deduped, false, "rewound abandoned reads are absent from the SDK active path");
 
   const compacted = SessionManager.inMemory(directory);
   compacted.appendMessage({ role: "assistant", api: "openai-completions", provider: "test", model: "offline", providerThinkingLevel: "off", stopReason: "toolUse", timestamp: 7, content: [{ type: "toolCall", id: "old", name: "ws__playbook_read", arguments: { name: "lead" } }] });
@@ -146,7 +171,7 @@ test("installed SessionManager exposes the finalized assistant call during execu
   const kept = compacted.appendMessage({ role: "user", content: "post-compact", timestamp: 9 });
   compacted.appendCompaction("summary", kept, 100);
   compacted.appendMessage({ role: "assistant", api: "openai-completions", provider: "test", model: "offline", providerThinkingLevel: "off", stopReason: "toolUse", timestamp: 10, content: [{ type: "toolCall", id: "after-compact", name: "ws__playbook_read", arguments: { name: "lead" } }] });
-  assert.equal(dedupeRead(compacted.buildContextEntries(), "after-compact", "playbook.read", playbookReadKey({ name: "lead" }), body).deduped, false, "SDK compaction removes reads before its kept entry");
+  assert.equal(dedupePlaybook(compacted.buildContextEntries(), "after-compact", "lead", body, "result").deduped, false, "SDK compaction removes reads before its kept entry");
 
 });
 

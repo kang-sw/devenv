@@ -41,7 +41,7 @@ import { resolveModelForAliasViaWsMcp, inheritModelFromToolCtx } from "./spawner
 import { labelAdapterText } from "./adapter-label.ts";
 import { modelCatalogFromToolCtx, formatTierWarning, type ModelCatalogEntry, type TierRejection } from "./model-catalog.ts";
 import { registerWsTool, type ToolPreviewTuiRef } from "./tool-result-render.ts";
-import { dedupeRead, playbookReadKey, workflowManualKey, workflowManualResultText } from "./playbook-read-dedupe.ts";
+import { dedupePlaybook, dedupeRead, workflowManualKey, workflowManualResultText } from "./playbook-read-dedupe.ts";
 
 import type { ForkContext } from "./fork-context.ts";
 import { RenderRegistry, assertPolicyTool, assertSessionAuthority, childPolicy, playbookProfile, readDelegationPolicy, readOnlyWsTools, READ_TOOLS, CHILD_MANAGEMENT_TOOLS, type PlaybookProfile } from "./delegation-policy.ts";
@@ -1142,11 +1142,14 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
           const piAliasTableReport = await computeRawDispatchPiAliasTableReport(rawName, (name, callArgs) => client.callTool(name, callArgs), catalog);
           let content = maybeAppendModelCatalogAdvisory(rawName, result.content, piAliasTableReport, inheritModel, catalog.length === 0, advisoryKeyHolder);
           if (rawName === "workflow_manual") content = await adoptRevivedKey(rawParams?.session_key, dedupeManual(content));
-          if (rawName === "playbook.read") {
+          // One playbook unit with the ws-skill and typed /skill: copies its
+          // preload inlined: a visible identical body of the same name, from
+          // either path, collapses this read whatever its context.
+          if (rawName === "playbook.read" && typeof args.name === "string") {
             const body = firstText({ ...result, content });
             if (body !== undefined) {
               const visibleEntries = toolCtx?.sessionManager?.buildContextEntries?.() ?? [];
-              const decision = dedupeRead(visibleEntries, toolCallId, "playbook.read", playbookReadKey(args), body);
+              const decision = dedupePlaybook(visibleEntries, toolCallId, args.name, body, "result");
               if (decision.deduped) {
                 const index = content.findIndex((item) => item.type === "text");
                 content[index] = { ...content[index]!, text: decision.text };
