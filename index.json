@@ -599,7 +599,14 @@
       "registered_at": "2026-10-30T11:50:02Z"
     },
     "261031-feat-claude-mod-preload-lead-use-mailbox": {
-      "registered_at": "2026-10-31T06:57:42Z"
+      "registered_at": "2026-10-31T06:57:42Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-10-31T07:05:46Z"
+      }
     }
   }
 }
