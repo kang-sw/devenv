@@ -310,19 +310,20 @@ details.panel.placeholder { box-shadow: none; opacity: .6; }
   // Reply grammar: "(nn) <option>[, note: <text>]" per answered item,
   // acknowledgements grouped as "(nn), (mm) ok", parts joined by "; ".
   function build() {
-    var parts = [];
+    var parts = [], acked = [];
     q(".card.policy, .card.assumed").forEach(function (card) {
       var id = card.getAttribute("data-id");
       var pick = card.querySelector('[aria-pressed="true"]');
       var noteEl = card.querySelector(".note");
       var note = noteEl ? noteEl.value.trim() : "";
       var s = "";
+      // A confirmed assumed item without a note joins the grouped "ok" segment.
+      if (!note && pick && pick.getAttribute("data-v") === "ok") { acked.push("(" + id + ")"); return; }
       if (pick) s = "(" + id + ") " + (pick.getAttribute("data-opt") || pick.getAttribute("data-v"));
       if (note) s = (s || "(" + id + ")") + (s ? ", " : " ") + "note: " + note;
       if (s) parts.push(s);
     });
     // An acknowledgement with a note leaves the group: "(nn) ok, note: ..." or "(nn) note: ...".
-    var acked = [];
     q(".arow").forEach(function (row) {
       var id = row.getAttribute("data-id");
       var on = row.querySelector(".ack input").checked;

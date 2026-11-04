@@ -347,7 +347,9 @@ because it collides with the HTML `<canvas>` element inside an HTML file.
   - a "copy answers" button builds a reply such as
     `(62) b; (64) a, note: <text>; (19) no, note: <text>; (44), (45) ok`:
     an `assumed` item yields `(nn) ok` or `(nn) no, note: <text>`, and the
-    checked acknowledgements group into one `ok` segment ((75));
+    checked acknowledgements group into one `ok` segment ((75)); a confirmed
+    `assumed` item without a note joins that group too ((88)), since the
+    lead reads every ID in an `ok` group as confirmed either way;
   - one bulk checkbox in the reply bar, shown when the board holds any
     technical, announced, or `assumed` item, checks every acknowledgement
     and confirms every `assumed` item (user request, 2026-11-04); an
