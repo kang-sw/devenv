@@ -1038,6 +1038,10 @@ func printPlaybook(s *Server, rsrcRoot, name string, callerContext map[string]st
 			body += "\n\nUse `" + RuntimeNamespace() + ":lead-delegate` for bounded investigation, diagnosis, drafting, and low-impact operational work."
 		}
 	}
+	body, err = applyWhiteboardVariants(s, rsrcRoot, name, body, configOpts)
+	if err != nil {
+		return "", "", err
+	}
 	return body, recommendedTier, nil
 }
 

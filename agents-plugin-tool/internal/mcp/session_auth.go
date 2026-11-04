@@ -14,6 +14,7 @@ import (
 
 	"github.com/kang-sw/devenv/internal/wskey"
 	"github.com/kang-sw/devenv/internal/wsstate"
+	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
 // sessionEntry associates a canonical repository root and a capability scope
@@ -87,6 +88,11 @@ type sessionRecord struct {
 	// as an additive field; older records parse with the zero value
 	// (false), the correct "never opened" default.
 	MailboxReplyOpened bool `json:"mailbox_reply_opened,omitempty"`
+	// Whiteboard is the session whiteboard's item store (whiteboard_tools.go).
+	// Nil until the first whiteboard.update creates the board; its presence
+	// also gates the implicit todo/agenda re-render. Additive field; older
+	// records parse with nil.
+	Whiteboard *wswhiteboard.State `json:"whiteboard,omitempty"`
 }
 
 const sessionRecordSchemaVersion = 1

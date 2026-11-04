@@ -512,15 +512,16 @@ func RuntimeNamespace() string {
 
 func builtinConfigDefaults() map[string]string {
 	return map[string]string{
-		wsconfig.ItemWorkflowPreferSubagent:   "off",
-		wsconfig.ItemSageReview:               "auto",
-		wsconfig.ItemSageReviewDesign:         "off",
-		wsconfig.ItemReviewPhase:              "lite",
-		wsconfig.ItemBootstrapAlarm:           "on",
-		wsconfig.ItemWorktreePool:             defaultWorktreePoolTemplate,
-		wsconfig.ItemTicketAssigneeAware:      "off",
-		wsconfig.ItemWorktreeNudgeStaleDays:   worktreeNudgeStaleDaysKey.Default,
-		wsconfig.ItemWorktreeNudgePreservedGB: worktreeNudgePreservedGBKey.Default,
+		wsconfig.ItemWorkflowPreferSubagent:    "off",
+		wsconfig.ItemWorkflowWhiteboardEnabled: "off",
+		wsconfig.ItemSageReview:                "auto",
+		wsconfig.ItemSageReviewDesign:          "off",
+		wsconfig.ItemReviewPhase:               "lite",
+		wsconfig.ItemBootstrapAlarm:            "on",
+		wsconfig.ItemWorktreePool:              defaultWorktreePoolTemplate,
+		wsconfig.ItemTicketAssigneeAware:       "off",
+		wsconfig.ItemWorktreeNudgeStaleDays:    worktreeNudgeStaleDaysKey.Default,
+		wsconfig.ItemWorktreeNudgePreservedGB:  worktreeNudgePreservedGBKey.Default,
 	}
 }
 
@@ -667,7 +668,9 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 	// because it also denies lead-scoped keys that carry a parent (a ticket
 	// worker, a spawned fork): every key but a top-level lead is note
 	// read-only, and its denial names the report hand-off instead of the
-	// generic profile text.
+	// generic profile text. The whiteboard tools sit beside it for the same
+	// reason: the board is the top-level lead's channel to its user, so a
+	// spawned key can neither write nor read it.
 	if keyStr, ok := params.Arguments["session_key"].(string); ok && strings.TrimSpace(keyStr) != "" {
 		if entry, found := s.sessions.lookup(keyStr); found {
 			if entry.scope != roleLead && (isLeadOnlyTool(params.Name) || !roleAllowsTool(entry.scope, params.Name)) {
@@ -675,6 +678,9 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			}
 			if isNoteMutationTool(params.Name) && !entry.isTopLevelLead() {
 				return errorResponse(req.ID, -32601, noteReadOnlyDenial(params.Name))
+			}
+			if isWhiteboardTool(params.Name) && !entry.isTopLevelLead() {
+				return errorResponse(req.ID, -32601, whiteboardLeadOnlyDenial(params.Name))
 			}
 		}
 	}
@@ -688,6 +694,12 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 	// runs, naming every problem and the tool's own schema at once.
 	if refusal, ok := precheckToolArguments(params.Name, params.Arguments); !ok {
 		return toolErrorTextResponse(req.ID, refusal)
+	}
+
+	// Once a session's whiteboard exists, a successful todo or agenda write
+	// re-renders its full page (never an embed); see whiteboard_tools.go.
+	if whiteboardDirtyingTool(params.Name) {
+		defer func() { s.refreshWhiteboardAfter(params.Arguments, resp) }()
 	}
 
 	switch params.Name {
@@ -1600,6 +1612,10 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		return s.handleNoteUnmute(req.ID, params.Arguments, params.Meta)
 	case "note.query":
 		return s.handleNoteSearch(req.ID, params.Arguments, params.Meta)
+	case "whiteboard.update":
+		return s.handleWhiteboardUpdate(req.ID, params.Arguments)
+	case "whiteboard.query":
+		return s.handleWhiteboardQuery(req.ID, params.Arguments)
 	case "tickets.query":
 		if hasSpecStemArgument(params.Arguments) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
@@ -2684,6 +2700,20 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 		},
 		ValueFields: subagentEntry.ValueFields,
 		Current:     currentWorkflowPreference(resolver, sessionKey, wsconfig.ItemWorkflowPreferSubagent),
+	})
+
+	whiteboardEntry := registryEntryByKey(wsconfig.ItemWorkflowWhiteboardEnabled)
+	appendKnob(whiteboardEntry, tuningKnob{
+		ID:          whiteboardEntry.Key,
+		Kind:        "workflow_preference",
+		Description: "Session whiteboard as the lead's primary channel, global-only (all of the user's projects). on adds a workflow-manual section, from the next workflow-manual load, that puts every item asked of the user and every explanation on a local HTML page the server renders (and on a per-turn embed snapshot for a host that shows HTML inline), leaving the terminal a one-line pointer; off (builtin) keeps asks and explanations in terminal text. The whiteboard tools work either way. Cost: on needs a browser tab beside the terminal and one whiteboard update per turn; off keeps everything in the terminal.",
+		Writer:      tuningWriter{Tool: whiteboardEntry.WriterTool, FixedArguments: map[string]string{"key": whiteboardEntry.Key}},
+		Reset: &tuningWriter{
+			Tool:           whiteboardEntry.ResetTool,
+			FixedArguments: map[string]string{"key": whiteboardEntry.Key, "reset": "true"},
+		},
+		ValueFields: whiteboardEntry.ValueFields,
+		Current:     currentWorkflowPreference(resolver, sessionKey, wsconfig.ItemWorkflowWhiteboardEnabled),
 	})
 
 	bootstrapEntry := registryEntryByKey(wsconfig.ItemBootstrapAlarm)
@@ -4678,6 +4708,35 @@ func tools() []map[string]any {
 					"from":        stringProperty("Optional inclusive lower bound on written_at (RFC3339 or a date prefix such as \"2026-08-01\")."),
 					"then":        stringProperty("Optional inclusive upper bound on written_at (RFC3339 or a date prefix)."),
 					"format":      stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
+				},
+				"required": []string{"session_key"},
+			},
+		},
+		{
+			// The whiteboard tools advertise only {session_key, payload}: the
+			// inner payload schema lives in the whiteboard playbook, so a host
+			// that loads every schema up front pays almost nothing for a
+			// feature its user never turned on, and the description sends a
+			// curious model to the instructions instead of inviting a call.
+			"name":        "whiteboard.update",
+			"description": "Lead-only. Read the `whiteboard` playbook (ws/playbook.read) before first use; it defines the payload.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"payload":     objectProperty("Defined by the whiteboard playbook."),
+				},
+				"required": []string{"session_key"},
+			},
+		},
+		{
+			"name":        "whiteboard.query",
+			"description": "Lead-only, read-only. Read the `whiteboard` playbook (ws/playbook.read) before first use; it defines the payload.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"payload":     objectProperty("Defined by the whiteboard playbook."),
 				},
 				"required": []string{"session_key"},
 			},
