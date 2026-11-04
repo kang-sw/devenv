@@ -851,6 +851,71 @@ Verification:
   returned bare name, confirm it renders, and confirm a populated board's
   embed stays well under 512 KiB.
 
+### Result (f98d8e832) - 2026-11-04
+
+Landed in f98d8e832 (implementation), d91d04d15 (fresh-reader audit of the
+playbook), and 3e99f523a (lite-review fixes):
+
+- `internal/wswhiteboard`: a pure store (`Apply`, `Query`, `FormatItems`),
+  the view model (`BuildView`), and the renderer (`RenderPage`) over
+  embedded assets ported from the approved mockup (`page.tmpl`, `page.css`,
+  `form.js`, `live.js`, `sprite.svg`). The mockup folder is removed.
+- `internal/mcp`: `whiteboard.update` / `whiteboard.query` advertised as
+  `{session_key, payload}`, lead-only through `isTopLevelLead()`; the store
+  rides `sessionRecord.Whiteboard`. Refusals list every problem and quote
+  the rendered playbook's `## Payload` section, so the schema has one
+  source. Renders write embed, page, then stamp through a temp file and
+  rename with sharing-violation retry; embed file deletions settle only
+  after the record persists. Todo, agenda, and `route.resolve_*` writes
+  re-render the full page once the board exists. The exclude entry is
+  registered before the folder is created; GC runs from `workflow_manual`
+  at most once a day and skips when the key store is unreadable.
+- `workflow.whiteboard_enabled`: built-in, global-only, default `off`, in
+  the lead-tune catalog. Knob on, `printPlaybook` appends the manual's
+  `### Whiteboard` section (mandate plus the playbook demoted under it),
+  replaces the discussion counter rule, swaps lead-discuss's "nothing here
+  is persisted" for the capture line, and adds the lead-ticket queue step
+  before `### Trace a change before writing it`; each variant appends when
+  its anchor text is absent.
+- `whiteboard` playbook in ws rsrc with the wsflow mirror, the Pi copy, and
+  manifests; `runtime.json` lists both tools in all three packages.
+
+Verification:
+
+- `cd agents-plugin-tool && go vet ./... && go test ./... -count=1`: all
+  packages ok; `python3 -m unittest discover agents-plugin-wsflow/tests`
+  (20) and `agents-plugin/tests` (81): OK; `scripts/smoke-ws-mcp.sh ..`:
+  ok. The Phase 3 list is covered by `store_test.go`, `render_test.go`, and
+  `whiteboard_tools_test.go`.
+- Browser check (worker, headless Chrome over CDP against a real `ws-mcp`
+  server, macOS; 21/21): reload after an update and after a todo write,
+  scroll and panel state restored, dirty form defers with the banner and the
+  reply kept, banner click reloads, no reload without a change, embed opened
+  standalone has no loader and collapsed panels, 4 embeds kept, a populated
+  embed of 38 KiB, files 0644, git status clean through the exclude. Copy
+  answers: headless `execCommand('copy')` returned false, so the page fell
+  back to the selected reply (`Ctrl+C` hint); the reply text built from
+  scripted clicks matched the grammar, and copy-then-reload with a real
+  user gesture is unverified here.
+- Not run by the worker: the manual Orca check (it needs the user's chat to
+  render an embed) and native Windows/WSL (see the Phase 2 Result).
+
+Decisions taken in implementation:
+
+- `answer_quote` is required for `assumed` answers too; a policy answer
+  must lead with an option letter (trailing text allowed).
+- `links` are validated only when supplied in a batch, since archive
+  eviction would otherwise refuse later updates.
+- `close_topics` on an unknown topic is refused; adding to a closed topic
+  reopens it; closed topics are outside the 10 most recent settled.
+- Rotation orders by a settle counter, not time; the stamp version is the
+  render sequence; the embed hash is sha256 of sequence and content.
+- Reopening an item clears its answer; withdrawn and superseded keep theirs.
+- `route.resolve_*` count as todo/agenda writers; empty todo and agenda
+  panels are omitted; result paths are relative to the session root.
+- The Phase 2 probe kit under `ai-docs/ref/whiteboard-probe/` is left in
+  place; this phase removed only the mockup, as directed.
+
 ## Sage Review Round 1 (2026-11-04)
 
 ### Design Reviewer — block
