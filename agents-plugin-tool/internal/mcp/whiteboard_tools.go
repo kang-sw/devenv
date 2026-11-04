@@ -155,8 +155,7 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any)
 	var (
 		problems []string
 		outcome  wswhiteboard.Outcome
-		full     string
-		embed    string
+		render   whiteboardRender
 	)
 	err = s.sessions.mutateRecord(key, func(rec *sessionRecord) error {
 		if rec.Whiteboard == nil {
@@ -182,9 +181,10 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any)
 			return errWhiteboardRefused
 		}
 		var renderErr error
-		full, embed, renderErr = renderWhiteboard(rec, key, true)
+		render, renderErr = renderWhiteboard(rec, key, true)
 		return renderErr
 	})
+	render.settle(err == nil)
 	if errors.Is(err, errWhiteboardRefused) {
 		return toolErrorTextResponse(id, s.whiteboardRefusal(tool, problems))
 	}
@@ -199,8 +199,8 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any)
 		}
 		sb.WriteString("ids: " + strings.Join(labels, ", ") + "\n")
 	}
-	sb.WriteString("full: " + full + "\n")
-	sb.WriteString("embed: " + embed + "\n")
+	sb.WriteString("full: " + render.full + "\n")
+	sb.WriteString("embed: " + render.embed + "\n")
 	return toolTextResponse(id, sb.String(), nil)
 }
 
@@ -301,7 +301,7 @@ func (s *Server) refreshWhiteboardAfter(args map[string]any, resp response) {
 			return errNoWhiteboard
 		}
 		rec.Whiteboard.BeginRender()
-		_, _, err := renderWhiteboard(rec, key, false)
+		_, err := renderWhiteboard(rec, key, false)
 		return err
 	})
 	if err != nil && !errors.Is(err, errNoWhiteboard) {
@@ -326,25 +326,27 @@ func responseIsError(resp response) bool {
 // reload triggered by the stamp never reads an older page. It returns the
 // full page path relative to the session root and the embed path (relative,
 // or the bare file name inside a host embed folder).
-func renderWhiteboard(rec *sessionRecord, sessionKey string, withEmbed bool) (string, string, error) {
+func renderWhiteboard(rec *sessionRecord, sessionKey string, withEmbed bool) (whiteboardRender, error) {
+	var out whiteboardRender
 	st := rec.Whiteboard
 	replyID := wsmailbox.ReplyID(sessionKey)
 	dir := filepath.Join(rec.Root, filepath.FromSlash(whiteboardDirRel))
 	if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return "", "", fmt.Errorf("create %s: %w", whiteboardDirRel, err)
-		}
+		// Exclude first: a failed registration leaves no folder behind, so
+		// the next render retries it instead of skipping it forever.
 		if err := registerWhiteboardExclude(rec.Root, dir); err != nil {
-			return "", "", fmt.Errorf("register %s in the git exclude file: %w", whiteboardDirRel, err)
+			return out, fmt.Errorf("register %s in the git exclude file: %w", whiteboardDirRel, err)
+		}
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return out, fmt.Errorf("create %s: %w", whiteboardDirRel, err)
 		}
 	}
 	panels := whiteboardPanels(*rec)
 
-	embedResult := ""
 	if withEmbed {
 		html, err := wswhiteboard.RenderPage(wswhiteboard.BuildView(st, wswhiteboard.ViewInput{Layout: wswhiteboard.LayoutEmbed, ReplyID: replyID, Panels: panels}))
 		if err != nil {
-			return "", "", fmt.Errorf("render embed: %w", err)
+			return out, fmt.Errorf("render embed: %w", err)
 		}
 		name := replyID + "-" + whiteboardEmbedHash(st.Seq, html) + ".html"
 		target := dir
@@ -352,33 +354,57 @@ func renderWhiteboard(rec *sessionRecord, sessionKey string, withEmbed bool) (st
 			target = st.EmbedDir
 		}
 		if err := writeWhiteboardFile(filepath.Join(target, name), []byte(html)); err != nil {
-			return "", "", fmt.Errorf("write embed: %w", err)
+			return out, fmt.Errorf("write embed: %w", err)
 		}
+		out.written = filepath.Join(target, name)
 		if st.EmbedDir != "" {
 			// The host owns its folder's lifetime: the server never evicts
 			// there, since the host re-reads a visual's file when it redraws
 			// its chat history.
-			embedResult = name
+			out.embed = name
 		} else {
 			st.Embeds = append(st.Embeds, wswhiteboard.Embed{Seq: st.Seq, Name: name})
-			evictWhiteboardEmbeds(st, dir)
-			embedResult = whiteboardDirRel + "/" + name
+			out.evicted = evictWhiteboardEmbeds(st, dir)
+			out.embed = whiteboardDirRel + "/" + name
 		}
 		st.LastEmbedSeq = st.Seq
 	}
 
 	html, err := wswhiteboard.RenderPage(wswhiteboard.BuildView(st, wswhiteboard.ViewInput{Layout: wswhiteboard.LayoutFull, ReplyID: replyID, Panels: panels}))
 	if err != nil {
-		return "", "", fmt.Errorf("render full page: %w", err)
+		return out, fmt.Errorf("render full page: %w", err)
 	}
 	if err := writeWhiteboardFile(filepath.Join(dir, replyID+".html"), []byte(html)); err != nil {
-		return "", "", fmt.Errorf("write full page: %w", err)
+		return out, fmt.Errorf("write full page: %w", err)
 	}
 	stamp := fmt.Sprintf("wbStamp(%q);\n", fmt.Sprint(st.Seq))
 	if err := writeWhiteboardFile(filepath.Join(dir, replyID+".stamp.js"), []byte(stamp)); err != nil {
-		return "", "", fmt.Errorf("write stamp: %w", err)
+		return out, fmt.Errorf("write stamp: %w", err)
 	}
-	return whiteboardDirRel + "/" + replyID + ".html", embedResult, nil
+	out.full = whiteboardDirRel + "/" + replyID + ".html"
+	return out, nil
+}
+
+// whiteboardRender is one render's outcome. Its file side effects settle
+// only after the record persists: evicted embeds are deleted on success, and
+// the embed this render wrote is deleted on failure, so a rolled-back record
+// never lists a deleted embed nor misses one left on disk.
+type whiteboardRender struct {
+	full, embed string
+	written     string
+	evicted     []string
+}
+
+func (r whiteboardRender) settle(persisted bool) {
+	if !persisted {
+		if r.written != "" {
+			_ = os.Remove(r.written)
+		}
+		return
+	}
+	for _, path := range r.evicted {
+		_ = os.Remove(path)
+	}
 }
 
 // whiteboardEmbedHash derives an embed's short hash from the render sequence
@@ -391,17 +417,20 @@ func whiteboardEmbedHash(seq int, html string) string {
 }
 
 // evictWhiteboardEmbeds keeps the newest EmbedRetention embeds in the
-// repository folder, ordered by render sequence, never by file mtime.
-func evictWhiteboardEmbeds(st *wswhiteboard.State, dir string) {
+// repository folder, ordered by render sequence, never by file mtime, and
+// returns the paths of the dropped ones for the caller to delete.
+func evictWhiteboardEmbeds(st *wswhiteboard.State, dir string) []string {
 	if len(st.Embeds) <= wswhiteboard.EmbedRetention {
-		return
+		return nil
 	}
 	sort.SliceStable(st.Embeds, func(i, j int) bool { return st.Embeds[i].Seq < st.Embeds[j].Seq })
 	drop := len(st.Embeds) - wswhiteboard.EmbedRetention
+	var paths []string
 	for _, old := range st.Embeds[:drop] {
-		_ = os.Remove(filepath.Join(dir, old.Name))
+		paths = append(paths, filepath.Join(dir, old.Name))
 	}
 	st.Embeds = append([]wswhiteboard.Embed(nil), st.Embeds[drop:]...)
+	return paths
 }
 
 // writeWhiteboardFile replaces path through a temp file and a rename, so a
@@ -413,6 +442,13 @@ func writeWhiteboardFile(path string, data []byte) error {
 		return err
 	}
 	tmpName := tmp.Name()
+	// CreateTemp makes the file 0600; a browser or host reading the page may
+	// run as another user.
+	if err := tmp.Chmod(0o644); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return err
+	}
 	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
 		os.Remove(tmpName)

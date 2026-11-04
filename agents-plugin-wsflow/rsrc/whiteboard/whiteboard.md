@@ -119,7 +119,8 @@ The user answers by ID, typed or pasted from the page's copy-answers button,
 for example `(62) b; (64) a, note: <text>; (19) no, note: <text>; (44), (45) ok`.
 Record each item through `answer`, its `answer_quote` being that item's
 segment of the reply: `(64) a, note: <text>` records the answer
-`a, <text>`, and each ID of `(44), (45) ok` records `ok`, quoting the whole
-group. A reply that names no ID gets your reading with `assumed: true`.
+`a, <text>`, and each ID of `(44), (45) ok` records `ok` (an `assumed`
+policy item records its option letter again), quoting the whole group. A
+reply that names no ID gets your reading with `assumed: true`.
 
 Confirmed decisions reach a ticket only through `{{.SkillNamespace}}:lead-ticket`, once the user moves to capture; the board clears with the session key.

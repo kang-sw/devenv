@@ -477,7 +477,10 @@ func applyPatch(p *problems, work *State, field string, entry map[string]any, ma
 	if status != "" && status != next.Status {
 		next.Status = status
 		if status == StatusOpen {
+			// Reopening asks the item again: its earlier answer no longer
+			// stands. Withdrawn and superseded items keep theirs as history.
 			next.Settled = 0
+			next.Answer, next.AnswerQuote, next.AnsweredAt = "", "", ""
 		} else {
 			work.settle(&next)
 		}

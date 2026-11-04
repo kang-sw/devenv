@@ -326,41 +326,78 @@ func TestWhiteboardEmbedDir(t *testing.T) {
 }
 
 func TestWhiteboardRenameRetriesSharingViolation(t *testing.T) {
+	for _, target := range []string{"page", "stamp"} {
+		t.Run(target, func(t *testing.T) {
+			f := newWhiteboardFixture(t)
+			suffix := map[string]string{"page": f.replyID() + ".html", "stamp": f.replyID() + ".stamp.js"}[target]
+			sharing := errors.New("simulated sharing violation")
+			origRename, origRetryable, origBackoff := whiteboardRename, whiteboardRenameRetryable, whiteboardRenameBackoff
+			defer func() {
+				whiteboardRename, whiteboardRenameRetryable, whiteboardRenameBackoff = origRename, origRetryable, origBackoff
+			}()
+			whiteboardRenameRetryable = func(err error) bool { return errors.Is(err, sharing) }
+			whiteboardRenameBackoff = time.Millisecond
+			failures := 2
+			whiteboardRename = func(from, to string) error {
+				if filepath.Base(to) == suffix && failures > 0 {
+					failures--
+					return sharing
+				}
+				return origRename(from, to)
+			}
+			f.update(t, `{"add":[{"class":"policy","topic":"t","title":"x"}]}`)
+			if failures != 0 || f.stamp(t) != "wbStamp(\"1\");\n" {
+				t.Fatalf("the %s rename must succeed after retries; failures left %d", target, failures)
+			}
+			for i := 0; i < 4; i++ {
+				f.update(t, `{}`)
+			}
+			// A violation that outlasts the retries fails the render. The batch
+			// is not persisted, and the embed files still match the record: the
+			// failed render's own embed is gone and no recorded embed was evicted.
+			whiteboardRename = func(from, to string) error {
+				if filepath.Base(to) == suffix {
+					return sharing
+				}
+				return origRename(from, to)
+			}
+			resp := f.call(t, "whiteboard.update", map[string]any{"payload": map[string]any{"add": []any{map[string]any{"class": "policy", "topic": "t", "title": "y"}}}})
+			if !isToolError(resp) || !strings.Contains(toolText(t, resp), "write "+map[string]string{"page": "full page", "stamp": "stamp"}[target]) {
+				t.Fatalf("persistent sharing violation must fail the render: %s", resp)
+			}
+			rec, _ := f.s.sessions.readState(f.key)
+			if len(rec.Whiteboard.Items) != 1 {
+				t.Fatalf("a failed render must not persist its batch: %d items", len(rec.Whiteboard.Items))
+			}
+			var recorded []string
+			for _, e := range rec.Whiteboard.Embeds {
+				recorded = append(recorded, e.Name)
+			}
+			sort.Strings(recorded)
+			if got := f.embeds(t, f.dir()); strings.Join(got, ",") != strings.Join(recorded, ",") || len(got) != 5 {
+				t.Fatalf("embeds on disk %v must match the record %v after a failed render", got, recorded)
+			}
+		})
+	}
+}
+
+func TestWhiteboardExcludeFailureLeavesNoFolder(t *testing.T) {
 	f := newWhiteboardFixture(t)
-	sharing := errors.New("simulated sharing violation")
-	origRename, origRetryable, origBackoff := whiteboardRename, whiteboardRenameRetryable, whiteboardRenameBackoff
-	defer func() {
-		whiteboardRename, whiteboardRenameRetryable, whiteboardRenameBackoff = origRename, origRetryable, origBackoff
-	}()
-	whiteboardRenameRetryable = func(err error) bool { return errors.Is(err, sharing) }
-	whiteboardRenameBackoff = time.Millisecond
-	failures := 2
-	whiteboardRename = func(from, to string) error {
-		if strings.HasSuffix(to, ".stamp.js") && failures > 0 {
-			failures--
-			return sharing
-		}
-		return origRename(from, to)
+	exclude := filepath.Join(f.root, ".git", "info", "exclude")
+	os.Remove(exclude)
+	if err := os.MkdirAll(exclude, 0o755); err != nil {
+		t.Fatal(err)
 	}
-	f.update(t, `{"add":[{"class":"policy","topic":"t","title":"x"}]}`)
-	if failures != 0 || f.stamp(t) != "wbStamp(\"1\");\n" {
-		t.Fatalf("the stamp rename must succeed after retries; failures left %d", failures)
+	if resp := f.call(t, "whiteboard.update", map[string]any{"payload": map[string]any{}}); !isToolError(resp) {
+		t.Fatalf("an unwritable exclude file must fail the first render: %s", resp)
 	}
-	// A violation that outlasts the retries fails the render, and the batch
-	// is not persisted.
-	whiteboardRename = func(from, to string) error {
-		if strings.HasSuffix(to, ".stamp.js") {
-			return sharing
-		}
-		return origRename(from, to)
+	if _, err := os.Stat(f.dir()); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a failed exclude registration must leave no folder, so the next render retries it")
 	}
-	resp := f.call(t, "whiteboard.update", map[string]any{"payload": map[string]any{"add": []any{map[string]any{"class": "policy", "topic": "t", "title": "y"}}}})
-	if !isToolError(resp) || !strings.Contains(toolText(t, resp), "write stamp") {
-		t.Fatalf("persistent sharing violation must fail the render: %s", resp)
-	}
-	rec, _ := f.s.sessions.readState(f.key)
-	if len(rec.Whiteboard.Items) != 1 {
-		t.Fatalf("a failed render must not persist its batch: %d items", len(rec.Whiteboard.Items))
+	os.Remove(exclude)
+	f.update(t, `{}`)
+	if n := excludeEntries(t, f.root); n != 1 {
+		t.Fatalf("the retried render must register the exclude: %d entries", n)
 	}
 }
 
@@ -592,6 +629,9 @@ func TestWhiteboardWorkflowTextFollowsKnob(t *testing.T) {
 	}
 	if strings.Contains(manualOn, lineDiscussionNoCounter) || strings.Contains(manualOn, "\n# Whiteboard") {
 		t.Fatalf("knob on: the counter rule must be replaced and the playbook title dropped")
+	}
+	if injected := toolText(t, f.call(t, "workflow_manual", map[string]any{})); !strings.Contains(injected, "### Whiteboard") || !strings.Contains(injected, "#### Payload") {
+		t.Fatalf("knob on: the workflow_manual tool must carry the whiteboard section too")
 	}
 	capture := withNamespace(whiteboardCaptureLine)
 	discussOn := read("lead-discuss")

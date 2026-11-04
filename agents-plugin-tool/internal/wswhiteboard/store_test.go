@@ -149,6 +149,15 @@ func TestApplyPatchOptionsRefusedOnNonOpenItem(t *testing.T) {
 	if got := item(t, st, 1); got.Status != StatusOpen || len(got.Options) != 3 || got.Settled != 0 {
 		t.Fatalf("item = %+v", got)
 	}
+	// Reopening drops the earlier answer; withdrawing keeps it as history.
+	if got := item(t, st, 1); got.Answer != "" || got.AnswerQuote != "" || got.AnsweredAt != "" {
+		t.Fatalf("a reopened item must carry no answer: %+v", got)
+	}
+	mustApply(t, st, `{"answer":[{"id":1,"answer":"a","answer_quote":"a then"}]}`)
+	mustApply(t, st, `{"patch":[{"id":1,"status":"withdrawn"}]}`)
+	if got := item(t, st, 1); got.Status != StatusWithdrawn || got.Answer != "a" || got.AnswerQuote != "a then" {
+		t.Fatalf("a withdrawn item keeps its answer: %+v", got)
+	}
 }
 
 func TestApplyAnswerRequiresQuote(t *testing.T) {
