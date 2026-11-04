@@ -289,8 +289,10 @@ because it collides with the HTML `<canvas>` element inside an HTML file.
   chips, not by outlines. Topic blocks are elevated cards with a filled
   title bar; a policy or `assumed` item has a bar in its role color, and
   each acknowledgement row leads with a filled class tag; policy option
-  buttons carry a policy-tinted fill and take the full policy accent when
-  picked. Dark mode uses muted container tones (a dark tinted fill with
+  buttons carry a faint policy-tinted fill, and a picked option keeps that
+  fill and gains a glowing policy-accent outline (user direction,
+  2026-11-04). Rejected: a strong tint (too loud) and a full accent fill on
+  the picked option. Dark mode uses muted container tones (a dark tinted fill with
   light text), not bright fills. Rejected: the outline style of the earlier
   mockup rounds (poor readability).
 - **Symbol-first chrome (technical decision (79)).** Template chrome carries

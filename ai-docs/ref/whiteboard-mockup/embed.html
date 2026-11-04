@@ -23,8 +23,8 @@
   --wb-assumed: #b0245a;     --wb-on-assumed: #ffffff;
   --wb-accent-policy: #b25000;
   --wb-on-accent-policy: #ffffff;
-  --wb-opt: color-mix(in srgb, var(--wb-policy) 11%, var(--wb-card));
-  --wb-opt-hover: color-mix(in srgb, var(--wb-policy) 19%, var(--wb-card));
+  --wb-opt: color-mix(in srgb, var(--wb-policy) 5%, var(--wb-card));
+  --wb-opt-hover: color-mix(in srgb, var(--wb-policy) 10%, var(--wb-card));
   --wb-shadow: 0 1px 2px rgb(0 0 0 / .14), 0 2px 6px rgb(0 0 0 / .06);
   --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .16), 0 6px 18px rgb(0 0 0 / .10);
   --wb-radius: 12px;
@@ -50,8 +50,8 @@
     --wb-assumed: #592a3d;     --wb-on-assumed: #f3d0dd;
     --wb-accent-policy: #e0a36c;
     --wb-on-accent-policy: #1f150b;
-    --wb-opt: color-mix(in srgb, var(--wb-policy) 55%, var(--wb-card));
-    --wb-opt-hover: color-mix(in srgb, var(--wb-policy) 80%, var(--wb-card));
+    --wb-opt: color-mix(in srgb, var(--wb-policy) 20%, var(--wb-card));
+    --wb-opt-hover: color-mix(in srgb, var(--wb-policy) 34%, var(--wb-card));
     --wb-shadow: 0 1px 2px rgb(0 0 0 / .5), 0 2px 8px rgb(0 0 0 / .3);
     --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .55), 0 8px 22px rgb(0 0 0 / .4);
   }
@@ -117,8 +117,8 @@ button { font: inherit; color: inherit; }
 .opt:hover { background: var(--wb-opt-hover); box-shadow: var(--wb-shadow-hi); }
 .opt .k { font-family: var(--wb-mono); font-weight: 800; color: var(--wb-accent-policy); }
 .opt.rec .k::after { content: "★"; color: var(--wb-accent-policy); font-size: 10px; margin-left: 1px; vertical-align: super; }
-.opt[aria-pressed="true"] { background: var(--wb-accent-policy); color: var(--wb-on-accent-policy); font-weight: 600; }
-.opt[aria-pressed="true"] .k, .opt[aria-pressed="true"].rec .k::after { color: inherit; }
+/* selected: neon outline over the same quiet fill, not a fill swap */
+.opt[aria-pressed="true"], .opt[aria-pressed="true"]:hover { box-shadow: 0 0 0 1.5px var(--wb-accent-policy), 0 0 10px 1px color-mix(in srgb, var(--wb-accent-policy) 55%, transparent); font-weight: 600; }
 .rec-line { margin-top: 8px; font-size: 12.5px; color: var(--wb-muted-fg); }
 .rec-line b { color: var(--wb-accent-policy); display: inline-flex; align-items: center; gap: 2px; margin-right: 4px; }
 .note { width: 100%; margin-top: 8px; font: inherit; color: inherit; background: var(--wb-card); border: 0; border-bottom: 2px solid var(--wb-muted-fg); border-radius: 6px 6px 0 0; padding: 6px 9px; }
