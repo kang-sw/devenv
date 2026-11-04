@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Whiteboard - barrette-regain-lumpiness</title>
+<style>/* Material-style board: roles are told apart by filled header bars, not outlines.
+   Surfaces follow the host theme; role fills are template-owned so the text on
+   them keeps its contrast whatever the host palette is. */
+:root {
+  --wb-bg: var(--background, #f3f3f0);
+  --wb-fg: var(--foreground, #1b1d21);
+  --wb-card: var(--card, #ffffff);
+  --wb-muted: var(--muted, #e9e8e3);
+  --wb-muted-fg: var(--muted-foreground, #5f646b);
+  --wb-primary: var(--primary, #2b62d9);
+  --wb-primary-fg: var(--primary-foreground, #ffffff);
+  --wb-topic: #2c3038;
+  --wb-on-topic: #ffffff;
+  --wb-now: var(--wb-primary);
+  --wb-on-now: var(--wb-primary-fg);
+  --wb-policy: #b25000;      --wb-on-policy: #ffffff;
+  --wb-technical: #2457c5;   --wb-on-technical: #ffffff;
+  --wb-announced: #1d7348;   --wb-on-announced: #ffffff;
+  --wb-assumed: #b0245a;     --wb-on-assumed: #ffffff;
+  --wb-accent-policy: #b25000;
+  --wb-on-accent-policy: #ffffff;
+  --wb-opt: color-mix(in srgb, var(--wb-policy) 11%, var(--wb-card));
+  --wb-opt-hover: color-mix(in srgb, var(--wb-policy) 19%, var(--wb-card));
+  --wb-shadow: 0 1px 2px rgb(0 0 0 / .14), 0 2px 6px rgb(0 0 0 / .06);
+  --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .16), 0 6px 18px rgb(0 0 0 / .10);
+  --wb-radius: 12px;
+  --wb-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --wb-bg: var(--background, #141518);
+    --wb-fg: var(--foreground, #e7e7e4);
+    --wb-card: var(--card, #1e2024);
+    --wb-muted: var(--muted, #2b2d32);
+    --wb-muted-fg: var(--muted-foreground, #a2a6ad);
+    --wb-primary: var(--primary, #7aa2ff);
+    --wb-primary-fg: var(--primary-foreground, #0c1424);
+    --wb-topic: #2a2d33;
+    --wb-on-topic: #e4e5e8;
+    --wb-now: #243457;
+    --wb-on-now: #d3defb;
+    --wb-policy: #5b3a1c;      --wb-on-policy: #f6d9bd;
+    --wb-technical: #26385e;   --wb-on-technical: #d2dcf6;
+    --wb-announced: #1f4433;   --wb-on-announced: #c6ead6;
+    --wb-assumed: #592a3d;     --wb-on-assumed: #f3d0dd;
+    --wb-accent-policy: #e0a36c;
+    --wb-on-accent-policy: #1f150b;
+    --wb-opt: color-mix(in srgb, var(--wb-policy) 55%, var(--wb-card));
+    --wb-opt-hover: color-mix(in srgb, var(--wb-policy) 80%, var(--wb-card));
+    --wb-shadow: 0 1px 2px rgb(0 0 0 / .5), 0 2px 8px rgb(0 0 0 / .3);
+    --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .55), 0 8px 22px rgb(0 0 0 / .4);
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--wb-bg); color: var(--wb-fg); }
+body { font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif; }
+.id, code { font-family: var(--wb-mono); }
+button { font: inherit; color: inherit; }
+.wrap { margin: 0 auto; padding: 16px; }
+.full .wrap { max-width: 1200px; }
+.embed .wrap { max-width: 780px; padding: 12px; }
+
+/* page header */
+.top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.top h1 { font-size: 18px; margin: 0; font-weight: 700; }
+.top .meta { color: var(--wb-muted-fg); font-size: 12px; font-family: var(--wb-mono); }
+.top .counts { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+
+/* chips: filled, role-coloured */
+.chip { display: inline-flex; align-items: center; gap: 3px; height: 20px; font-size: 12px; font-weight: 700; line-height: 1; padding: 0 9px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); white-space: nowrap; }
+.chip.policy { background: var(--wb-policy); color: var(--wb-on-policy); }
+.chip.assumed { background: var(--wb-assumed); color: var(--wb-on-assumed); }
+.chip.ok { background: var(--wb-technical); color: var(--wb-on-technical); }
+.chip.fresh { background: var(--wb-now); color: var(--wb-on-now); }
+
+/* layout */
+.grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 18px; align-items: start; }
+@media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+.side { display: flex; flex-direction: column; gap: 10px; position: sticky; top: 12px; }
+.side.flat { position: static; margin-top: 14px; }
+
+/* topic: one elevated surface with a filled title bar */
+.topic { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); margin-bottom: 16px; overflow: hidden; }
+.tbar { display: flex; align-items: center; gap: 6px; padding: 4px 12px; min-height: 30px; background: var(--wb-topic); color: var(--wb-on-topic); }
+.tbar .tname { font-size: 14px; font-weight: 700; margin-right: auto; }
+.tbar .chip:not(.policy):not(.assumed):not(.ok) { background: rgb(127 127 127 / .28); color: inherit; }
+.tbody { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.topic.quiet { box-shadow: none; background: transparent; }
+.topic.quiet .tbar { background: var(--wb-muted); color: var(--wb-muted-fg); border-radius: var(--wb-radius); }
+.topic.quiet .tbar .tname { font-size: 13px; }
+
+/* item card: filled role header + plain body */
+.card { border-radius: 10px; overflow: hidden; background: var(--wb-bg); }
+.cbar { display: flex; align-items: center; gap: 8px; padding: 3px 6px 3px 10px; min-height: 28px; }
+.card.policy .cbar { background: var(--wb-policy); color: var(--wb-on-policy); }
+.card.assumed .cbar { background: var(--wb-assumed); color: var(--wb-on-assumed); }
+.cbar .id { font-size: 12px; font-weight: 700; opacity: .85; flex: none; }
+.cbar .cls { font-size: 10.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; opacity: .8; flex: none; }
+.cbar .title { font-weight: 700; flex: 1; }
+.cbar .btn { background: rgb(255 255 255 / .16); color: inherit; border: 0; }
+.cbar .btn[aria-pressed="true"] { background: currentColor; }
+.cbar .btn[aria-pressed="true"] .i { color: var(--wb-assumed); }
+.cbody { padding: 8px 10px 10px; }
+.new { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--wb-primary); flex: none; align-self: center; }
+.cbar .new, details.now > summary .new { background: currentColor; }
+.ctx { margin: 0 0 8px; padding-left: 18px; color: var(--wb-muted-fg); font-size: 13px; }
+.ctx li { margin: 2px 0; }
+
+/* options: tonal buttons, filled when picked */
+.opts { display: flex; flex-wrap: wrap; gap: 6px; }
+.opt { flex: 1 1 auto; max-width: 100%; display: grid; grid-template-columns: 18px 1fr; gap: 6px; align-items: start; text-align: left; background: var(--wb-opt); border: 0; border-radius: 8px; padding: 7px 11px; cursor: pointer; box-shadow: var(--wb-shadow); }
+.opt:hover { background: var(--wb-opt-hover); box-shadow: var(--wb-shadow-hi); }
+.opt .k { font-family: var(--wb-mono); font-weight: 800; color: var(--wb-accent-policy); }
+.opt.rec .k::after { content: "★"; color: var(--wb-accent-policy); font-size: 10px; margin-left: 1px; vertical-align: super; }
+.opt[aria-pressed="true"] { background: var(--wb-accent-policy); color: var(--wb-on-accent-policy); font-weight: 600; }
+.opt[aria-pressed="true"] .k, .opt[aria-pressed="true"].rec .k::after { color: inherit; }
+.rec-line { margin-top: 8px; font-size: 12.5px; color: var(--wb-muted-fg); }
+.rec-line b { color: var(--wb-accent-policy); display: inline-flex; align-items: center; gap: 2px; margin-right: 4px; }
+.note { width: 100%; margin-top: 8px; font: inherit; color: inherit; background: var(--wb-card); border: 0; border-bottom: 2px solid var(--wb-muted-fg); border-radius: 6px 6px 0 0; padding: 6px 9px; }
+.note:focus { outline: none; border-bottom-color: var(--wb-primary); }
+.read { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; font-size: 13.5px; }
+.quote { color: var(--wb-muted-fg); font-size: 12.5px; }
+
+/* buttons */
+.btn { font-size: 13px; background: var(--wb-muted); border: 0; border-radius: 999px; padding: 3px 12px; cursor: pointer; }
+.btn { display: inline-flex; align-items: center; justify-content: center; }
+.btn.mini { padding: 0; width: 24px; height: 22px; }
+.btn.primary { background: var(--wb-now); color: var(--wb-on-now); padding: 0; width: 40px; height: 32px; }
+.btn.primary .i { width: 17px; height: 17px; }
+.actions { display: inline-flex; gap: 4px; }
+
+/* acknowledgement rows: a filled class tag leads each row */
+.acks { border-radius: 10px; overflow: hidden; background: var(--wb-bg); }
+.ack { display: flex; gap: 8px; padding: 7px 10px; align-items: flex-start; cursor: pointer; line-height: 21px; }
+.ack > :not(.atext) { flex: none; }
+.ack .tag { margin-top: 2px; line-height: 15px; }
+.ack + .ack { border-top: 1px solid var(--wb-muted); }
+.ack input { margin: 4px 0 0; accent-color: var(--wb-primary); }
+.ack .id { font-size: 12px; font-weight: 700; color: var(--wb-muted-fg); }
+.tag { font-size: 10.5px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; padding: 1px 7px; border-radius: 4px; }
+.tag.technical { background: var(--wb-technical); color: var(--wb-on-technical); }
+.tag.announced { background: var(--wb-announced); color: var(--wb-on-announced); }
+.ack .atext { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 0 8px; align-items: baseline; line-height: 1.5; padding-top: 1px; }
+.ack .atext > span:first-child { font-weight: 600; }
+.ack .why { font-size: 12px; color: var(--wb-muted-fg); }
+
+/* settled: collapsed tonal chip */
+details.settled { font-size: 13px; }
+details.settled > summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 3px; font-size: 12px; font-weight: 700; padding: 1px 10px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); }
+details.settled > summary::-webkit-details-marker { display: none; }
+details.settled[open] > summary { margin-bottom: 4px; }
+.tbar details.settled > summary { background: rgb(127 127 127 / .28); color: inherit; }
+.srow { display: grid; grid-template-columns: auto auto 1fr; gap: 6px; padding: 2px 4px; align-items: baseline; }
+.srow .id { font-size: 12px; color: var(--wb-muted-fg); }
+.srow b { font-weight: 600; }
+.more { font-size: 12px; color: var(--wb-muted-fg); padding: 2px 4px 0; }
+
+/* Now slot */
+details.now { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); margin-bottom: 16px; overflow: hidden; }
+details.now > summary { cursor: pointer; list-style: none; display: flex; gap: 8px; align-items: center; padding: 4px 12px; min-height: 30px; background: var(--wb-now); color: var(--wb-on-now); font-weight: 600; }
+details.now > summary::-webkit-details-marker { display: none; }
+details.now > svg { width: 100%; height: auto; display: block; padding: 10px 14px 12px; }
+details.now .box { fill: var(--wb-muted); }
+details.now .box.store { fill: var(--wb-now); }
+details.now text { fill: var(--wb-fg); font: 12px system-ui, sans-serif; }
+details.now text.on { fill: var(--wb-on-now); }
+details.now text.sub { fill: var(--wb-muted-fg); font-size: 10.5px; }
+details.now text.sub.on { fill: var(--wb-on-now); opacity: .8; }
+details.now .edge { stroke: var(--wb-muted-fg); fill: none; stroke-width: 1.4; }
+details.now .edge.dash { stroke-dasharray: 4 3; }
+details.now .arrow { fill: var(--wb-muted-fg); }
+
+/* side panels: tonal title bar */
+details.panel { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); overflow: hidden; }
+details.panel > summary { list-style: none; cursor: pointer; padding: 4px 8px 4px 12px; min-height: 30px; display: flex; gap: 8px; align-items: center; font-weight: 700; font-size: 13px; background: var(--wb-muted); }
+details.panel > summary::-webkit-details-marker { display: none; }
+details.panel > summary .chip { margin-left: auto; background: var(--wb-card); }
+details.panel .body { padding: 8px 12px 10px; font-size: 13px; }
+details.panel.placeholder { box-shadow: none; opacity: .6; }
+/* icons: inline SVG, so alignment does not depend on which font has the glyph */
+.i { width: 14px; height: 14px; flex: none; display: block; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.chip .i, details.settled .i { width: 12px; height: 12px; stroke-width: 2; }
+.rec-line .i { width: 12px; height: 12px; }
+.lead-read { display: inline-flex; align-items: center; gap: 4px; }
+.todo { list-style: none; margin: 0; padding: 0; }
+.todo li { display: flex; gap: 8px; padding: 3px 0; }
+.todo li.done { color: var(--wb-muted-fg); text-decoration: line-through; }
+.todo li.focus { font-weight: 700; }
+.todo .box { font-family: var(--wb-mono); color: var(--wb-muted-fg); }
+.agenda { margin: 0; padding: 0; list-style: none; }
+.agenda li { padding: 4px 0; }
+.agenda li + li { border-top: 1px solid var(--wb-muted); }
+.agenda code { font-size: 12px; color: var(--wb-primary); font-weight: 600; }
+.agenda span { display: block; color: var(--wb-muted-fg); font-size: 12.5px; }
+
+/* reply bar */
+.reply { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow-hi); padding: 10px 12px; display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; margin: 4px 0 12px; }
+.full .reply { position: sticky; bottom: 10px; }
+.reply textarea { font-family: var(--wb-mono); font-size: 12.5px; color: inherit; background: var(--wb-muted); border: 0; border-radius: 8px; padding: 7px 9px; resize: none; height: 34px; width: 100%; }
+.reply .hint { font-size: 12px; color: var(--wb-muted-fg); }
+
+/* update banner, mockup controls */
+.banner { display: none; position: sticky; top: 0; z-index: 5; margin: -16px -16px 12px; padding: 6px 16px; background: var(--wb-now); color: var(--wb-on-now); text-align: center; font-size: 16px; font-weight: 700; cursor: pointer; box-shadow: var(--wb-shadow-hi); }
+.banner.show { display: block; }
+.mock { font-size: 11px; color: var(--wb-muted-fg); background: var(--wb-muted); border-radius: 8px; padding: 4px 8px; margin-bottom: 12px; display: flex; gap: 8px; align-items: center; }
+.chip.fresh .new { background: currentColor; }
+</style></head>
+<body class="embed"><svg width="0" height="0" style="position:absolute" aria-hidden="true"><symbol id="i-check" viewBox="0 0 16 16"><path d="M3 8.5l3.2 3.1L13 4.6"/></symbol><symbol id="i-x" viewBox="0 0 16 16"><path d="M4.2 4.2l7.6 7.6M11.8 4.2l-7.6 7.6"/></symbol><symbol id="i-pen" viewBox="0 0 16 16"><path d="M10.4 2.8l2.8 2.8-7.6 7.6H2.8v-2.8z"/></symbol><symbol id="i-copy" viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8" height="8" rx="1.6"/><path d="M10.5 3.2V3a.8.8 0 0 0-.8-.8H3a.8.8 0 0 0-.8.8v6.7c0 .4.4.8.8.8h.2"/></symbol><symbol id="i-list" viewBox="0 0 16 16"><path d="M3 4.5h10M3 8h10M3 11.5h10"/></symbol><symbol id="i-arrow" viewBox="0 0 16 16"><path d="M2.5 8h10M9 4.5L12.5 8 9 11.5"/></symbol><symbol id="i-ask" viewBox="0 0 16 16"><path d="M6 6.2a2 2 0 1 1 2.8 1.8c-.5.3-.8.7-.8 1.3v.4"/><circle cx="8" cy="12.3" r=".6" fill="currentColor"/></symbol><symbol id="i-star" viewBox="0 0 16 16"><path fill="currentColor" stroke="none" d="M8 1.9l1.8 3.8 4.1.5-3 2.9.8 4.1L8 11.2l-3.7 2 .8-4.1-3-2.9 4.1-.5z"/></symbol><symbol id="i-now" viewBox="0 0 16 16"><path fill="currentColor" stroke="none" d="M8 2l6 6-6 6-6-6z"/></symbol><symbol id="i-todo" viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="11" height="11" rx="2"/><path d="M5.2 8.2l1.9 1.8 3.7-3.8"/></symbol><symbol id="i-agenda" viewBox="0 0 16 16"><path d="M4 13.8V2.4h7.6l-1.7 3 1.7 3H4"/></symbol><symbol id="i-mail" viewBox="0 0 16 16"><rect x="2" y="3.5" width="12" height="9" rx="1.6"/><path d="M2.6 4.6L8 8.8l5.4-4.2"/></symbol><symbol id="i-book" viewBox="0 0 16 16"><path d="M3 3.5a1.5 1.5 0 0 1 1.5-1.5H13v10H4.5A1.5 1.5 0 0 0 3 13.5zM3 13.5A1.5 1.5 0 0 0 4.5 15H13v-3"/></symbol><symbol id="i-board" viewBox="0 0 16 16"><rect x="2" y="2.5" width="12" height="11" rx="1.6"/><path d="M6 2.5v11M10 2.5v11"/></symbol></svg><div class="wrap">
+<div class="top"><h1>Whiteboard</h1><span class="meta">barrette-regain-lumpiness · #12 · 2026-11-04 16:31</span><span class="counts"><span class="chip policy" title="to answer"><svg class="i" aria-hidden="true"><use href="#i-ask"/></svg>2</span><span class="chip assumed" title="assumed"><svg class="i" aria-hidden="true"><use href="#i-arrow"/></svg>1</span><span class="chip ok" title="to acknowledge"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg>3</span><span class="chip fresh" title="new since the previous embed"><span class="new"></span>7</span></span></div><details class="now" id="p-now" open><summary title="now"><svg class="i" aria-hidden="true"><use href="#i-now"/></svg><span class="new" title="new since the previous embed"></span><span class="now-text">update 한 번이 full 페이지와 embed를 함께 씁니다. embed는 최근 5개만 남습니다.</span></summary>
+<svg viewBox="0 0 640 170" role="img">
+  <defs><marker id="ah" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L8,4 L0,8 z"/></marker></defs>
+  <rect class="box" x="10" y="55" width="120" height="50" rx="8"/><text x="24" y="77">lead</text><text class="sub" x="24" y="93">턴당 update 1회</text>
+  <rect class="box store" x="200" y="55" width="140" height="50" rx="8"/><text class="on" x="214" y="77">session store</text><text class="sub on" x="214" y="93">항목 · 순번 · 아카이브</text>
+  <rect class="box" x="430" y="10" width="200" height="50" rx="8"/><text x="444" y="32">full · &lt;id&gt;.html</text><text class="sub" x="444" y="48">덮어쓰기 + stamp</text>
+  <rect class="box" x="430" y="100" width="200" height="50" rx="8"/><text x="444" y="122">embed · &lt;id&gt;-&lt;hash&gt;.html</text><text class="sub" x="444" y="138">새 파일, 최근 5개 유지</text>
+  <path class="edge" d="M130,80 H198" marker-end="url(#ah)"/>
+  <path class="edge" d="M340,72 C385,72 390,35 428,35" marker-end="url(#ah)"/>
+  <path class="edge" d="M340,88 C385,88 390,125 428,125" marker-end="url(#ah)"/>
+  <text class="sub" x="40" y="150">todo · agenda 쓰기 → full만</text>
+  <path class="edge dash" d="M180,146 H395 V48 H428" marker-end="url(#ah)"/>
+</svg></details><section class="topic"><div class="tbar"><span class="tname">embed 보관</span><span class="chip policy" title="to answer"><svg class="i" aria-hidden="true"><use href="#i-ask"/></svg>1</span><span class="chip ok" title="to acknowledge"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg>1</span></div><div class="tbody"><div class="card policy" data-id="77">
+  <div class="cbar"><span class="id">(77)</span><span class="cls">policy</span><span class="new" title="new since the previous embed"></span><span class="title">이전 embed 파일 정리 방식</span><button class="btn mini note-toggle" title="note"><svg class="i" aria-hidden="true"><use href="#i-pen"/></svg></button></div>
+  <div class="cbody"><ul class="ctx"><li>Orca가 파일을 다시 읽는다면, 지운 embed는 채팅 기록에서 빈 화면이 됩니다.</li></ul><div class="opts"><button class="opt" data-opt="a" aria-pressed="false"><span class="k">a</span><span>render마다 이전 embed 삭제</span></button><button class="opt rec" data-opt="b" aria-pressed="false"><span class="k">b</span><span>최근 5개만 유지</span></button><button class="opt" data-opt="c" aria-pressed="false"><span class="k">c</span><span>세션 GC까지 전부 유지</span></button></div>
+  <div class="rec-line" title="recommendation"><b><svg class="i" aria-hidden="true"><use href="#i-star"/></svg>b</b> 채팅 기록이 깨질 위험을 줄이면서 파일 수에 상한이 생깁니다.</div>
+  <input class="note" placeholder="✎" title="note" hidden></div>
+</div><div class="acks"><label class="ack"><input type="checkbox" data-id="78"><span class="id">(78)</span><span class="tag technical">technical</span><span class="new" title="new since the previous embed"></span><span class="atext"><span>삭제 순서는 저장소의 render 순번 기준</span><span class="why">mtime 대신 - 같은 초에 두 번 render하면 mtime이 같고, 복사·동기화로 바뀜</span></span></label></div><details class="settled"><summary title="settled"><svg class="i" aria-hidden="true"><use href="#i-list"/></svg>1</summary><div class="srow"><span class="id">(69)</span><span><b>ai-docs/whiteboards/, .local 없이</b> <span class="quote">“이건 굳이 local.html일 필요는 없겠네요”</span></span></div></details></div></section><section class="topic"><div class="tbar"><span class="tname">embed 레이아웃</span><span class="chip policy" title="to answer"><svg class="i" aria-hidden="true"><use href="#i-ask"/></svg>1</span><span class="chip assumed" title="assumed, confirm or correct"><svg class="i" aria-hidden="true"><use href="#i-arrow"/></svg>1</span></div><div class="tbody"><div class="card policy" data-id="73">
+  <div class="cbar"><span class="id">(73)</span><span class="cls">policy</span><span class="title">embed에서 Now 위치</span><button class="btn mini note-toggle" title="note"><svg class="i" aria-hidden="true"><use href="#i-pen"/></svg></button></div>
+  <div class="cbody"><div class="opts"><button class="opt" data-opt="a" aria-pressed="false"><span class="k">a</span><span>항상 아래</span></button><button class="opt" data-opt="b" aria-pressed="false"><span class="k">b</span><span>항상 위</span></button><button class="opt rec" data-opt="c" aria-pressed="false"><span class="k">c</span><span>이번 턴에 Now가 바뀌었으면 위, 아니면 토픽 목록 아래로 내려서 질문을 먼저 보게 함</span></button></div>
+  <div class="rec-line" title="recommendation"><b><svg class="i" aria-hidden="true"><use href="#i-star"/></svg>c</b> 새 설명이 있을 때만 먼저 읽게 합니다.</div>
+  <input class="note" placeholder="✎" title="note" hidden></div>
+</div><div class="card assumed" data-id="76">
+  <div class="cbar"><span class="id">(76)</span><span class="cls">assumed</span><span class="new" title="new since the previous embed"></span><span class="title">추천 표시는 ★ + 추천 줄</span>
+    <span class="actions"><button class="btn mini" data-v="ok" aria-pressed="false" title="confirm"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg></button><button class="btn mini" data-v="no" aria-pressed="false" title="correct"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button></span></div>
+  <div class="cbody"><div class="read"><span class="lead-read" title="the lead's reading"><svg class="i" aria-hidden="true"><use href="#i-arrow"/></svg><b>승인</b></span><span class="quote" title="your words">“71-76 네 좋아 보입니다”</span></div>
+  <input class="note" placeholder="✎" title="correction" hidden></div>
+</div><details class="settled" open><summary title="settled"><svg class="i" aria-hidden="true"><use href="#i-list"/></svg>2</summary><div class="srow"><span class="id">(71)</span><span class="new" title="new since the previous embed"></span><span><b>full은 2단, 사이드바에 패널</b> <span class="quote">“71-76 네 좋아 보입니다”</span></span></div><div class="srow"><span class="id">(72)</span><span class="new" title="new since the previous embed"></span><span><b>embed는 1단</b> <span class="quote">“71-76 네 좋아 보입니다”</span></span></div></details></div></section><section class="topic"><div class="tbar"><span class="tname">Now 입력</span><span class="chip ok" title="to acknowledge"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg>2</span></div><div class="tbody"><div class="acks"><label class="ack"><input type="checkbox" data-id="80"><span class="id">(80)</span><span class="tag technical">technical</span><span class="new" title="new since the previous embed"></span><span class="atext"><span>now_path로 HTML 파일을 받아 update 시점에 저장</span><span class="why">render마다 다시 읽는 방식 대신 - 파일이 지워지거나 바뀌어도 보드가 조용히 달라지지 않음</span></span></label><label class="ack"><input type="checkbox" data-id="79"><span class="id">(79)</span><span class="tag announced">announced</span><span class="new" title="new since the previous embed"></span><span class="atext"><span>템플릿 문구는 기호 위주, 산문 없음</span><span class="why">근거: 사용자 지시 (템플릿 텍스트 최소화)</span></span></label></div></div></section><section class="topic quiet"><div class="tbar"><span class="tname">도구 표면</span><details class="settled"><summary title="settled"><svg class="i" aria-hidden="true"><use href="#i-list"/></svg>8</summary><div class="srow"><span class="id">(63)</span><span><b>update + query 두 개</b> <span class="quote">“63 네, 이 안이 훨씬 깔끔하네요”</span></span></div><div class="srow"><span class="id">(52)</span><span><b>update마다 full + embed</b> <span class="quote">“전체 승인”</span></span></div><div class="more" title="older settled items; whiteboard.query reads them">+6</div></details></div></section><div class="reply"><textarea id="reply-text" readonly placeholder="(nn) a; (mm) ok"></textarea><button class="btn primary" id="reply-copy" title="copy answers"><svg class="i" aria-hidden="true"><use href="#i-copy"/></svg></button><span class="hint" id="reply-hint"></span></div>
+<div class="side flat"><details class="panel" id="p-todo"><summary><svg class="i" aria-hidden="true"><use href="#i-todo"/></svg>Todos<span class="chip">2/4</span></summary><div class="body"><ul class="todo"><li class="done"><span class="box">[x]</span>목업 1차</li><li class="done"><span class="box">[x]</span>기호 위주 문구로 교체</li><li class=" focus"><span class="box">[ ]</span>토픽 중심 구성 확정</li><li class=""><span class="box">[ ]</span>목업 커밋 + 티켓 반영</li></ul></div></details><details class="panel" id="p-agenda"><summary><svg class="i" aria-hidden="true"><use href="#i-agenda"/></svg>Agendas<span class="chip">1</span></summary><div class="body"><ul class="agenda"><li><code>whiteboard.mockup</code><span>목업 리뷰 중. (73)(77) 확정, (78)-(80) 확인 대기</span></li></ul></div></details><details class="panel placeholder" id="p-mail"><summary><svg class="i" aria-hidden="true"><use href="#i-mail"/></svg>Mailbox<span class="chip">…</span></summary><div class="body">Provider placeholder (mockup only; not shipped in the first cut).</div></details><details class="panel placeholder" id="p-play"><summary><svg class="i" aria-hidden="true"><use href="#i-book"/></svg>Playbooks<span class="chip">…</span></summary><div class="body">Provider placeholder (mockup only; not shipped in the first cut).</div></details><details class="panel placeholder" id="p-tix"><summary><svg class="i" aria-hidden="true"><use href="#i-board"/></svg>Tickets<span class="chip">…</span></summary><div class="body">Provider placeholder (mockup only; not shipped in the first cut).</div></details></div>
+</div>
+<script>(function () {
+  var doc = document;
+  var store = null; // sessionStorage when available; the embed sandbox throws on access
+  try { store = window.sessionStorage; store.getItem("wb"); } catch (e) { store = null; }
+
+  // --- answer form -------------------------------------------------------
+  function q(sel, root) { return Array.prototype.slice.call((root || doc).querySelectorAll(sel)); }
+
+  q(".card.policy").forEach(function (card) {
+    q(".opt", card).forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var on = btn.getAttribute("aria-pressed") === "true";
+        q(".opt", card).forEach(function (b) { b.setAttribute("aria-pressed", "false"); });
+        btn.setAttribute("aria-pressed", on ? "false" : "true");
+        build();
+      });
+    });
+  });
+  q(".card.assumed").forEach(function (card) {
+    q(".btn[data-v]", card).forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var on = btn.getAttribute("aria-pressed") === "true";
+        q(".btn[data-v]", card).forEach(function (b) { b.setAttribute("aria-pressed", "false"); });
+        btn.setAttribute("aria-pressed", on ? "false" : "true");
+        build();
+      });
+    });
+  });
+  q(".note-toggle").forEach(function (t) {
+    t.addEventListener("click", function () {
+      var n = t.closest(".card").querySelector(".note");
+      n.hidden = !n.hidden; if (!n.hidden) n.focus();
+    });
+  });
+  q(".card.assumed .btn[data-v=no]").forEach(function (b) {
+    b.addEventListener("click", function () { var n = b.closest(".card").querySelector(".note"); n.hidden = false; n.focus(); });
+  });
+  q(".note, .ack input").forEach(function (el) { el.addEventListener("input", build); el.addEventListener("change", build); });
+  var all = doc.getElementById("ack-all");
+  if (all) all.addEventListener("change", function () {
+    q(".ack input").forEach(function (c) { c.checked = all.checked; });
+    build();
+  });
+
+  // Reply grammar: "(nn) <option>[, note: <text>]" per answered item,
+  // acknowledgements grouped as "(nn), (mm) ok", parts joined by "; ".
+  function build() {
+    var parts = [];
+    q(".card.policy, .card.assumed").forEach(function (card) {
+      var id = card.getAttribute("data-id");
+      var pick = card.querySelector('[aria-pressed="true"]');
+      var noteEl = card.querySelector(".note");
+      var note = noteEl ? noteEl.value.trim() : "";
+      var s = "";
+      if (pick) s = "(" + id + ") " + (pick.getAttribute("data-opt") || pick.getAttribute("data-v"));
+      if (note) s = (s || "(" + id + ")") + (s ? ", " : " ") + "note: " + note;
+      if (s) parts.push(s);
+    });
+    var acked = q(".ack input:checked").map(function (c) { return "(" + c.getAttribute("data-id") + ")"; });
+    if (acked.length) parts.push(acked.join(", ") + " ok");
+    var ta = doc.getElementById("reply-text");
+    ta.value = parts.join("; ");
+    doc.getElementById("reply-hint").textContent = "";
+    dirty = parts.length > 0;
+  }
+
+  // Copy: execCommand only; navigator.clipboard is denied in sandboxed hosts.
+  doc.getElementById("reply-copy").addEventListener("click", function () {
+    var ta = doc.getElementById("reply-text");
+    var hint = doc.getElementById("reply-hint");
+    if (!ta.value) { hint.textContent = "∅"; return; }
+    ta.focus(); ta.select();
+    var ok = false;
+    try { ok = doc.execCommand("copy"); } catch (e) { ok = false; }
+    hint.textContent = ok ? "✓ ⧉" : "Ctrl+C";
+    if (ok) { copied = true; if (pending) reloadNow(); }
+  });
+
+  // --- panels: remember open state on the full page only -------------------
+  q("details.panel[id]").forEach(function (d) {
+    if (store) {
+      var v = store.getItem("wb-open-" + d.id);
+      if (v !== null) d.open = v === "1";
+      d.addEventListener("toggle", function () { store.setItem("wb-open-" + d.id, d.open ? "1" : "0"); });
+    }
+  });
+
+  // --- change signal (full page only) --------------------------------------
+  var dirty = false, copied = false, pending = false, first = null;
+  var banner = doc.getElementById("wb-banner");
+  function formBusy() {
+    var a = doc.activeElement;
+    return (dirty && !copied) || (a && (a.classList.contains("note") || a.id === "reply-text"));
+  }
+  function reloadNow() {
+    if (store) store.setItem("wb-scroll", String(window.scrollY));
+    location.reload();
+  }
+  function changed() {
+    if (formBusy()) { pending = true; if (banner) banner.classList.add("show"); }
+    else reloadNow();
+  }
+  if (banner) banner.addEventListener("click", reloadNow);
+  if (store) {
+    var y = store.getItem("wb-scroll");
+    if (y !== null) { store.removeItem("wb-scroll"); window.scrollTo(0, +y); }
+  }
+  var stampSrc = doc.documentElement.getAttribute("data-stamp");
+  if (stampSrc) {
+    window.wbStamp = function (v) {
+      if (first === null) { first = v; return; }
+      if (v !== first && !pending) changed();
+    };
+    setInterval(function () {
+      var s = doc.createElement("script");
+      s.src = stampSrc + "?t=" + Date.now();
+      s.onload = s.onerror = function () { s.remove(); };
+      doc.head.appendChild(s);
+    }, 1500);
+  }
+  // Mockup only: simulate a stamp change without a stamp file.
+  var sim = doc.getElementById("mock-update");
+  if (sim) sim.addEventListener("click", function () {
+    if (formBusy()) { pending = true; banner.classList.add("show"); }
+    else { banner.textContent = "↻ ✓ (mock: form clean, reloaded)"; banner.classList.add("show"); setTimeout(function () { banner.classList.remove("show"); banner.textContent = bannerText; }, 1600); }
+  });
+  var bannerText = banner ? banner.textContent : "";
+
+  build();
+})();
+</script>
+</body></html>

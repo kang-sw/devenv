@@ -98,6 +98,15 @@ because it collides with the HTML `<canvas>` element inside an HTML file.
   page); hooking the machine-global key prune (it does not know per-repo
   directories). There is no explicit session-delete path; key expiry is the
   deletion.
+- **Embed retention (user decision (77b)).** A session keeps at most 5 embed
+  snapshots. Each render that writes a new embed deletes that session's
+  oldest embeds beyond 5. Age is the render sequence number the store records
+  per embed, not file mtime (technical decision (78): two renders in the same
+  second share an mtime on coarse filesystems, and copying or syncing changes
+  it).
+  Rejected: (77a) deleting every previous embed at render (if the host
+  re-reads the file, every earlier embed in the chat history goes blank);
+  (77c) keeping every embed until session GC (unbounded file count).
 
 ### Store
 
@@ -133,7 +142,8 @@ because it collides with the HTML `<canvas>` element inside an HTML file.
   Rejected: a server-side answer parser (the server cannot see the
   conversation to verify a quote, and natural-language parsing in Go is
   brittle; the quote's value is visibility, which already addresses
-  problem 4).
+  problem 4). Also rejected: renaming `assumed` to `inferred` ((84); the
+  downstream proposal's term reads clearly enough).
 - **Rotation by count.** The board shows the 10 most recently settled items
   and collapses older settled items into one "settled N" line per topic.
   Closing a topic collapses it at once. The archive keeps at most 500 settled
@@ -168,12 +178,22 @@ because it collides with the HTML `<canvas>` element inside an HTML file.
     close_topics?: [topic],
     watch?:        [stem],
     unwatch?:      [stem],
-    now?:          html)                     # empty string clears the Now slot
+    now?:          html,                     # empty string clears the Now slot
+    now_path?:     path)                     # exclusive with `now`
     -> minted ids in `add` order, full: <path>, embed: <path>
   whiteboard.query(session_key, topic?, status?, id?)    # read-only, includes archived items
   ```
 
   - A batch applies in order; `links` refer to existing IDs only.
+  - `now_path` (technical decision (80)) names a file holding the Now
+    fragment, so a large fragment does not travel inside a JSON tool
+    argument, where escaping errors are frequent. The server reads the file
+    once at update and stores its content; a later change or deletion of the
+    file does not alter the board. Passing both `now` and `now_path` is
+    refused. A full HTML document (`<!DOCTYPE` or `<html`) is refused; the
+    slot takes a fragment only.
+    Rejected: re-reading the file at every render (the board changes
+    silently when the file changes or disappears).
   - A call with no arguments re-renders.
   - Both tools are lead-only, follow the existing schema/precheck path in
     `Server.callTool`, declare every argument they read, and refuse with a
@@ -231,10 +251,59 @@ because it collides with the HTML `<canvas>` element inside an HTML file.
     changed since the previous embed come first, each change with a "new"
     badge; the rest is collapsed.
 
-  The exact layout is settled by the Phase 1 mockup review.
   Rejected: (56a) the embed as a copy of the full page (the whole dashboard
   lands in chat every turn); (56c) two separate features (repeats problem 2
   at feature level).
+- **Approved mockup is the template reference.** The lead built the mockup
+  with the user at design time: `ai-docs/ref/whiteboard-mockup/full.html`
+  and `embed.html`, self-contained, with sample items from the design
+  conversation. Where the bullets below and the mockup differ in detail, the
+  mockup's look and the bullets' rules both hold; the mockup's "mockup
+  controls" strip and placeholder panels are mockup-only.
+- **Layout.**
+  - Full page: two columns, items in the main column and the panels (todos,
+    agendas) in a sticky sidebar; one column below about 900 px
+    ((71)).
+  - Embed: one column, with the reply bar right after the topics and the
+    panels collapsed at the end ((72)).
+  - Topic-first grouping (technical decision (81)): each topic is one block
+    titled by the topic name with per-class count chips; inside it come open
+    policy items, then `assumed` items, then the items to acknowledge, then
+    its settled items collapsed behind a count chip. Topics with an open
+    policy item come first, then topics with an `assumed` item, then topics
+    with acknowledgements, then settled-only topics, each of which collapses
+    to one title line. Rejected: class-first sections across topics (the
+    user loses which decision an item belongs to).
+  - Now position ((73c), extended to the full page by technical decision
+    (82)): Now renders above the topics when the render changed it, else
+    below them. Rejected: (73a) always below; (73b) always above.
+  - Policy options flow as content-sized buttons that wrap (technical
+    decision (83)): short options share a row, a long option takes its own.
+    Rejected: width-based grid columns (a long option wraps inside a narrow
+    cell); server-side character counting (glyph widths differ across
+    scripts).
+  - The recommendation shows twice: a star on the option letter and a
+    recommendation line under the options ((76)).
+- **Design language.** Material-style surfaces (user direction during the
+  mockup review): roles are told apart by filled title bars and filled
+  chips, not by outlines. Topic blocks are elevated cards with a filled
+  title bar; a policy or `assumed` item has a bar in its role color, and
+  each acknowledgement row leads with a filled class tag; policy option
+  buttons carry a policy-tinted fill and take the full policy accent when
+  picked. Dark mode uses muted container tones (a dark tinted fill with
+  light text), not bright fills. Rejected: the outline style of the earlier
+  mockup rounds (poor readability).
+- **Symbol-first chrome (technical decision (79)).** Template chrome carries
+  no prose. English appears only in class tags, IDs, tooltips, and the panel
+  names (Todos, Agendas); the page has no `lang` attribute. Everything else
+  in the chrome is a symbol or a count, so item content in any language
+  reads naturally. Rejected: a locale string table (translation upkeep for
+  every downstream language).
+- **Icons are inline SVG (technical decision (87)).** Chrome icons come from
+  one inline `<symbol>` sprite referenced with `<use>`. Rejected: Unicode
+  symbol glyphs (their metrics depend on whichever fallback font the host
+  has, and they rendered misaligned on a Windows host during the review).
+  Input placeholders keep a glyph because they cannot hold SVG.
 - **Core sections only (user decision (57)).** The core sections are:
   - open asks: policy items with options, then technical and announced items
     to acknowledge;
@@ -244,7 +313,7 @@ because it collides with the HTML `<canvas>` element inside an HTML file.
   - agendas as key plus the one-line summary `agenda_list` already produces.
 
   The renderer is a list of section providers plus a per-view layout. The
-  Phase 1 mockup shows mailbox, playbook, and ticket-board providers as empty
+  approved mockup shows mailbox, playbook, and ticket-board providers as empty
   placeholder panels so the layout can be judged with them. Phase 3 ships
   the provider interface but registers no empty panels.
   Rejected: agenda blob bodies on the page (they are the lead's working
@@ -260,14 +329,18 @@ because it collides with the HTML `<canvas>` element inside an HTML file.
 - **Collapsible panels.** Todos, agendas, and later auxiliary sections sit in
   `<details>` panels. In the embed they start collapsed; it has no storage.
   On the full page their open state survives reloads through
-  `sessionStorage`. Open asks and the Now slot never collapse.
+  `sessionStorage`. Open asks never collapse. The Now slot is collapsible
+  and starts open ((82)).
   Rejected: always-expanded panels (the embed frame grows with its content,
   and chat length is a cost).
 - **Answer round trip.** The form component is shared by both pages:
   - each open policy item gets option buttons and a note field; each
-    acknowledgement item gets a checkbox;
+    `assumed` item gets confirm and correct buttons beside the lead's reading
+    and the user's quote ((74)); each acknowledgement item gets a checkbox;
   - a "copy answers" button builds a reply such as
-    `(62) b; (64) a, note: <text>; (44) ok`;
+    `(62) b; (64) a, note: <text>; (19) no, note: <text>; (44), (45) ok`:
+    an `assumed` item yields `(nn) ok` or `(nn) no, note: <text>`, and the
+    checked acknowledgements group into one `ok` segment ((75));
   - copying uses `document.execCommand('copy')` and falls back to selecting
     a textarea;
   - the lead applies the pasted reply through `whiteboard.update` `answer`,
@@ -281,11 +354,17 @@ because it collides with the HTML `<canvas>` element inside an HTML file.
   the board changes. The embed's own reload is controlled by the host and
   cannot be guarded, so the form stays short.
 - **Self-contained pages.** Scripts and styles are inline, with no CDN
-  (jsdelivr included). Colors are written as `var(--card, <fallback>)`, so
-  the embed takes the host theme variables and the full page uses the
-  fallbacks. Drawing stays within inline SVG and canvas 2D.
+  (jsdelivr included). Surface and text colors are written as
+  `var(--card, <fallback>)`, so the embed takes the host theme variables and
+  the full page uses the fallbacks. Role fills (policy, technical,
+  announced, `assumed`, the topic bar) are template defaults with their own
+  light and dark values (technical decision (86)), because text on a filled
+  bar needs a contrast the host palette does not guarantee. Drawing stays
+  within inline SVG and canvas 2D.
   Rejected: CDN libraries; without them the same page works on `file://`,
-  offline, and in other hosts.
+  offline, and in other hosts. Also rejected: role fills from the host's
+  `--chart-*` variables (a light chart color under light text is
+  unreadable).
 - **Change signal (10-30 decision, carried over).** The full page's `<head>`
   holds a loader block:
   - every 1-2 s it injects `<script src="<reply-id>.stamp.js?t=<now>">`;
@@ -371,28 +450,13 @@ because it collides with the HTML `<canvas>` element inside an HTML file.
 
 ## Phases
 
-### Phase 1: HTML mockup
+### Phase 1: HTML mockup [dropped]
 
-Build two static, self-contained mockups with sample data under
-`ai-docs/ref/whiteboard-mockup/`: `full.html` (dashboard layout) and
-`embed.html` (snapshot layout). They follow the Pages decisions and show:
-
-- open policy items with lettered options and a recommendation;
-- technical and announced items with acknowledgement checkboxes;
-- one `assumed` item, highlighted;
-- recently settled items and a collapsed "settled N" line;
-- a Now slot holding an inline SVG drawing;
-- todo and agenda panels;
-- empty mailbox, playbook, and ticket-board placeholder panels;
-- the answer form with a working "copy answers" button;
-- a mocked "update available" banner on the full page;
-- "new" badges on the embed;
-- theme variables with fallbacks.
-
-Stop for the user's review. Revise until the user approves the layout. The
-approved mockup is the template reference for Phase 3. It stays tracked
-until Phase 3 absorbs it, so the Phase 3 worker can find it; an untracked
-`ws/path.generate` artifact was rejected for that reason.
+Done at design time instead: the lead built the mockup with the user and the
+user approved it. It is tracked at `ai-docs/ref/whiteboard-mockup/` (see
+Pages, "Approved mockup is the template reference") until Phase 3 absorbs
+it, so the Phase 3 worker can find it; an untracked `ws/path.generate`
+artifact was rejected for that reason.
 
 ### Phase 2: Probe file:// behavior on Windows browsers
 
@@ -442,6 +506,11 @@ Verification:
   - `query` returns archived items;
   - each update writes the full page, a new embed, and the stamp, with the
     stamp written after the page through a temp file and rename;
+  - a session keeps at most 5 embeds, evicting by render sequence rather
+    than mtime;
+  - `now_path` content is read once and survives the file's deletion;
+    `now` with `now_path`, and a full HTML document, are refused;
+  - Now renders above the topics only when the render changed it;
   - todo and agenda writes re-render only the full page, and only with the
     knob on;
   - both tools refuse when the knob is off;
