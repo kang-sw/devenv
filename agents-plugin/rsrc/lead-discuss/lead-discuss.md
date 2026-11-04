@@ -57,6 +57,4 @@ here; the skill ends when the user moves to capture or execution.
 
 ## Output
 
-Conversation. When a ticket was read in this conversation, or written through
-`{{.SkillNamespace}}:lead-ticket` during it, end with `Ticket: <path>` on its
-own line.
+Conversation.
