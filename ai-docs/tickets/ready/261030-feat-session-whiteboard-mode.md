@@ -1,7 +1,9 @@
 ---
 title: Session whiteboard - a server-assembled decision board and dashboard for the lead's user channel
-sage-review-design: blocked
-sage-review-completeness: blocked
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: f2eb9c58ab283e4a
+sage-review-completeness-reviewed: f2eb9c58ab283e4a
 ---
 
 # Session whiteboard - a server-assembled decision board and dashboard for the lead's user channel
@@ -186,8 +188,10 @@ because it collides with the HTML `<canvas>` element inside an HTML file.
   the way every other item does, through `add`:
   - `add` takes an optional explicit `id`, so the lead can put a queue
     resumed from an earlier conversation on the board under its ticket IDs.
-    An explicit `id` already in the store is refused; an accepted one raises
-    the session counter to at least that ID.
+    The `id` is a plain number, like `id_floor` (technical decision (112));
+    rejected: the parenthesized string form. An explicit `id` already in the
+    store is refused; an accepted one raises the session counter to at least
+    that ID.
   - ID minting returns one past the maximum of the session counter and
     `id_floor` (below).
   - The lead records each answer in both places: the store through
@@ -261,7 +265,16 @@ because it collides with the HTML `<canvas>` element inside an HTML file.
     problem plus the inner schema, so one retry fixes the call. This holds
     whatever the knob. Rejected: a refusal that only points at the playbook
     (an extra round trip for every malformed call).
-  - A batch applies in order; `links` refer to existing IDs only.
+  - A batch is validated whole before anything applies (technical decision
+    (113)): any refusal, a duplicate explicit `id` included, refuses the
+    whole batch with every problem, as (93) reports them. An accepted batch
+    applies in order; `links` refer to existing IDs only. Rejected:
+    per-entry partial apply (leaves a half-applied batch the lead must
+    reconstruct).
+  - A `patch` that changes `options` is refused on an item that is not open
+    (technical decision (114)), because a policy answer is stored as the
+    option letter (109) and new options would silently re-letter it.
+    Rejected: re-opening the item implicitly.
   - `now_path` (technical decision (80)) names a file holding the Now
     fragment, so a large fragment does not travel inside a JSON tool
     argument, where escaping errors are frequent. The server reads the file
@@ -336,8 +349,8 @@ because it collides with the HTML `<canvas>` element inside an HTML file.
   pages render from the same store and the same section components; only
   the layout differs.
   - Full page: a current-state dashboard (10-30 user decision (41)), updated
-    on every render. Resolved items move to the rotation's recently settled
-    area instead of disappearing.
+    on every render. Resolved items stay in their topic blocks under the
+    rotation rule (109) instead of disappearing.
   - Embed snapshot: a point-in-time record. Open asks and the items new or
     changed since the previous embed come first, each change with a "new"
     badge; the rest is collapsed.
@@ -360,7 +373,8 @@ because it collides with the HTML `<canvas>` element inside an HTML file.
   - Topic-first grouping (technical decision (81)): each topic is one block
     titled by the topic name with per-class count chips; inside it come open
     policy items, then `assumed` items, then the items to acknowledge, then
-    its settled items collapsed behind a count chip. Topics with an open
+    its settled items: the ones among the 10 most recent board-wide
+    expanded, the older ones behind a count chip (109). Topics with an open
     policy item come first, then topics with an `assumed` item, then topics
     with acknowledgements, then settled-only topics, each of which collapses
     to one title line. Rejected: class-first sections across topics (the
@@ -400,7 +414,7 @@ because it collides with the HTML `<canvas>` element inside an HTML file.
 - **Core sections only (user decision (57)).** The core sections are:
   - open asks: policy items with options, then technical and announced items
     to acknowledge;
-  - recently settled;
+  - settled items, inside their topic blocks per the rotation rule (109);
   - Now, an HTML fragment slot;
   - todos in full;
   - agendas as key plus the one-line summary `agenda_list` already produces.
@@ -552,8 +566,12 @@ because it collides with the HTML `<canvas>` element inside an HTML file.
     no action, so it does not lead the reader to record decisions; user
     review, 2026-11-04).
   - lead-ticket gains a knob-on step: when it opens or resumes a queue, it
-    `add`s the queue's open items to the board under their ticket IDs, and
-    applies each settled answer to the store as well as the ticket.
+    `add`s the queue's open items that `whiteboard.query` does not already
+    return to the board under their ticket IDs, passing `id_floor` set to the
+    queue's last-ID line so the store never re-mints an ID already settled
+    into `## Decisions` (announced default (111), from (97), (102a), and
+    lead-ticket's Queue state rule), and applies each settled answer to the
+    store as well as the ticket.
 - **No status band change (user decision (103), 2026-11-04).** The
   Claude status band keeps the Rows 3 and 4 of
   `261028-feat-claude-mod-status-band` unchanged; the per-turn pointer line
@@ -674,8 +692,10 @@ Verification:
 
 - Go tests in `internal/mcp`:
   - a batch applies in order and returns minted IDs in `add` order;
-  - `add` with an explicit `id` adopts it and raises the counter; an
-    explicit `id` already in the store is refused;
+  - `add` with an explicit numeric `id` adopts it and raises the counter;
+    an explicit `id` already in the store is refused;
+  - a batch with any refusal applies nothing and reports every problem;
+  - a `patch` changing `options` on a non-open item is refused;
   - `answered` without `answer_quote` is refused;
   - `tools/list` advertises both tools as `{session_key, payload}` only;
   - a JSON string passed as `payload`, or for an array field inside it, is
@@ -704,14 +724,16 @@ Verification:
     (idempotent);
   - GC removes orphaned files and keeps live ones, at most once per day;
   - the manual section and the playbook variants render only when the knob
-    is on; with the knob off the manual has no whiteboard text and the tool
+    is on; the lead-ticket variant names `id_floor` from the queue's last-ID
+    line and adds only IDs `query` does not return; the `whiteboard`
+    playbook states the per-turn pointer line format (110); with the knob off the manual has no whiteboard text and the tool
     descriptions point at the `whiteboard` playbook.
 - wsflow mirror and Pi tree drift tests pass.
 - A manual browser check of a real full page across several updates
   (reload, scroll and panel restoration, dirty-form deferral, copy
   answers), and of an embed snapshot opened standalone.
 
-## Blocked (2026-11-04)
+## Sage Review Round 1 (2026-11-04)
 
 ### Design Reviewer — block
 
