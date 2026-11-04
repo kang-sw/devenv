@@ -341,6 +341,12 @@ because it collides with the HTML `<canvas>` element inside an HTML file.
     `(62) b; (64) a, note: <text>; (19) no, note: <text>; (44), (45) ok`:
     an `assumed` item yields `(nn) ok` or `(nn) no, note: <text>`, and the
     checked acknowledgements group into one `ok` segment ((75));
+  - one bulk checkbox in the reply bar, shown when the board holds any
+    technical, announced, or `assumed` item, checks every acknowledgement
+    and confirms every `assumed` item (user request, 2026-11-04); an
+    `assumed` item already marked "correct" keeps that answer, policy items
+    stay manual, and the box shows the mixed state when only some of these
+    items are answered;
   - copying uses `document.execCommand('copy')` and falls back to selecting
     a textarea;
   - the lead applies the pasted reply through `whiteboard.update` `answer`,

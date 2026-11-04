@@ -199,9 +199,12 @@ details.panel.placeholder { box-shadow: none; opacity: .6; }
 .agenda span { display: block; color: var(--wb-muted-fg); font-size: 12.5px; }
 
 /* reply bar */
-.reply { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow-hi); padding: 10px 12px; display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; margin: 4px 0 12px; }
+.reply { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow-hi); padding: 10px 12px; display: grid; grid-template-columns: auto 1fr auto auto; gap: 8px; align-items: center; margin: 4px 0 12px; }
 .full .reply { position: sticky; bottom: 10px; }
 .reply textarea { font-family: var(--wb-mono); font-size: 12.5px; color: inherit; background: var(--wb-muted); border: 0; border-radius: 8px; padding: 7px 9px; resize: none; height: 34px; width: 100%; }
+.reply .allok { display: inline-flex; align-items: center; gap: 4px; height: 34px; padding: 0 10px; border-radius: 8px; background: var(--wb-muted); font-size: 12px; font-weight: 700; color: var(--wb-muted-fg); cursor: pointer; user-select: none; }
+.reply .allok input { margin: 0; accent-color: var(--wb-primary); }
+.reply .allok:has(input:checked) { color: var(--wb-fg); }
 .reply .hint { font-size: 12px; color: var(--wb-muted-fg); }
 
 /* update banner, mockup controls */
@@ -238,7 +241,7 @@ details.panel.placeholder { box-shadow: none; opacity: .6; }
     <span class="actions"><button class="btn mini" data-v="ok" aria-pressed="false" title="confirm"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg></button><button class="btn mini" data-v="no" aria-pressed="false" title="correct"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button></span></div>
   <div class="cbody"><div class="read"><span class="lead-read" title="the lead's reading"><svg class="i" aria-hidden="true"><use href="#i-arrow"/></svg><b>승인</b></span><span class="quote" title="your words">“71-76 네 좋아 보입니다”</span></div>
   <input class="note" placeholder="✎" title="correction" hidden></div>
-</div><details class="settled" open><summary title="settled"><svg class="i" aria-hidden="true"><use href="#i-list"/></svg>2</summary><div class="srow"><span class="id">(71)</span><span class="new" title="new since the previous embed"></span><span><b>full은 2단, 사이드바에 패널</b> <span class="quote">“71-76 네 좋아 보입니다”</span></span></div><div class="srow"><span class="id">(72)</span><span class="new" title="new since the previous embed"></span><span><b>embed는 1단</b> <span class="quote">“71-76 네 좋아 보입니다”</span></span></div></details></div></section><section class="topic"><div class="tbar"><span class="tname">Now 입력</span><span class="chip ok" title="to acknowledge"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg>2</span></div><div class="tbody"><div class="acks"><label class="ack"><input type="checkbox" data-id="80"><span class="id">(80)</span><span class="tag technical">technical</span><span class="new" title="new since the previous embed"></span><span class="atext"><span>now_path로 HTML 파일을 받아 update 시점에 저장</span><span class="why">render마다 다시 읽는 방식 대신 - 파일이 지워지거나 바뀌어도 보드가 조용히 달라지지 않음</span></span></label><label class="ack"><input type="checkbox" data-id="79"><span class="id">(79)</span><span class="tag announced">announced</span><span class="new" title="new since the previous embed"></span><span class="atext"><span>템플릿 문구는 기호 위주, 산문 없음</span><span class="why">근거: 사용자 지시 (템플릿 텍스트 최소화)</span></span></label></div></div></section><section class="topic quiet"><div class="tbar"><span class="tname">도구 표면</span><details class="settled"><summary title="settled"><svg class="i" aria-hidden="true"><use href="#i-list"/></svg>8</summary><div class="srow"><span class="id">(63)</span><span><b>update + query 두 개</b> <span class="quote">“63 네, 이 안이 훨씬 깔끔하네요”</span></span></div><div class="srow"><span class="id">(52)</span><span><b>update마다 full + embed</b> <span class="quote">“전체 승인”</span></span></div><div class="more" title="older settled items; whiteboard.query reads them">+6</div></details></div></section><div class="reply"><textarea id="reply-text" readonly placeholder="(nn) a; (mm) ok"></textarea><button class="btn primary" id="reply-copy" title="copy answers"><svg class="i" aria-hidden="true"><use href="#i-copy"/></svg></button><span class="hint" id="reply-hint"></span></div>
+</div><details class="settled" open><summary title="settled"><svg class="i" aria-hidden="true"><use href="#i-list"/></svg>2</summary><div class="srow"><span class="id">(71)</span><span class="new" title="new since the previous embed"></span><span><b>full은 2단, 사이드바에 패널</b> <span class="quote">“71-76 네 좋아 보입니다”</span></span></div><div class="srow"><span class="id">(72)</span><span class="new" title="new since the previous embed"></span><span><b>embed는 1단</b> <span class="quote">“71-76 네 좋아 보입니다”</span></span></div></details></div></section><section class="topic"><div class="tbar"><span class="tname">Now 입력</span><span class="chip ok" title="to acknowledge"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg>2</span></div><div class="tbody"><div class="acks"><label class="ack"><input type="checkbox" data-id="80"><span class="id">(80)</span><span class="tag technical">technical</span><span class="new" title="new since the previous embed"></span><span class="atext"><span>now_path로 HTML 파일을 받아 update 시점에 저장</span><span class="why">render마다 다시 읽는 방식 대신 - 파일이 지워지거나 바뀌어도 보드가 조용히 달라지지 않음</span></span></label><label class="ack"><input type="checkbox" data-id="79"><span class="id">(79)</span><span class="tag announced">announced</span><span class="new" title="new since the previous embed"></span><span class="atext"><span>템플릿 문구는 기호 위주, 산문 없음</span><span class="why">근거: 사용자 지시 (템플릿 텍스트 최소화)</span></span></label></div></div></section><section class="topic quiet"><div class="tbar"><span class="tname">도구 표면</span><details class="settled"><summary title="settled"><svg class="i" aria-hidden="true"><use href="#i-list"/></svg>8</summary><div class="srow"><span class="id">(63)</span><span><b>update + query 두 개</b> <span class="quote">“63 네, 이 안이 훨씬 깔끔하네요”</span></span></div><div class="srow"><span class="id">(52)</span><span><b>update마다 full + embed</b> <span class="quote">“전체 승인”</span></span></div><div class="more" title="older settled items; whiteboard.query reads them">+6</div></details></div></section><div class="reply"><label class="allok" title="acknowledge every technical/announced item and confirm every assumed one"><input type="checkbox" id="ack-all"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg>4</label><textarea id="reply-text" readonly placeholder="(nn) a; (mm) ok"></textarea><button class="btn primary" id="reply-copy" title="copy answers"><svg class="i" aria-hidden="true"><use href="#i-copy"/></svg></button><span class="hint" id="reply-hint"></span></div>
 <div class="side flat"><details class="panel" id="p-todo"><summary><svg class="i" aria-hidden="true"><use href="#i-todo"/></svg>Todos<span class="chip">2/4</span></summary><div class="body"><ul class="todo"><li class="done"><span class="box">[x]</span>목업 1차</li><li class="done"><span class="box">[x]</span>기호 위주 문구로 교체</li><li class=" focus"><span class="box">[ ]</span>토픽 중심 구성 확정</li><li class=""><span class="box">[ ]</span>목업 커밋 + 티켓 반영</li></ul></div></details><details class="panel" id="p-agenda"><summary><svg class="i" aria-hidden="true"><use href="#i-agenda"/></svg>Agendas<span class="chip">1</span></summary><div class="body"><ul class="agenda"><li><code>whiteboard.mockup</code><span>목업 리뷰 중. (73)(77) 확정, (78)-(80) 확인 대기</span></li></ul></div></details><details class="panel placeholder" id="p-mail"><summary><svg class="i" aria-hidden="true"><use href="#i-mail"/></svg>Mailbox<span class="chip">…</span></summary><div class="body">Provider placeholder (mockup only; not shipped in the first cut).</div></details><details class="panel placeholder" id="p-play"><summary><svg class="i" aria-hidden="true"><use href="#i-book"/></svg>Playbooks<span class="chip">…</span></summary><div class="body">Provider placeholder (mockup only; not shipped in the first cut).</div></details><details class="panel placeholder" id="p-tix"><summary><svg class="i" aria-hidden="true"><use href="#i-board"/></svg>Tickets<span class="chip">…</span></summary><div class="body">Provider placeholder (mockup only; not shipped in the first cut).</div></details></div>
 </div>
 <script>(function () {
@@ -279,11 +282,26 @@ details.panel.placeholder { box-shadow: none; opacity: .6; }
     b.addEventListener("click", function () { var n = b.closest(".card").querySelector(".note"); n.hidden = false; n.focus(); });
   });
   q(".note, .ack input").forEach(function (el) { el.addEventListener("input", build); el.addEventListener("change", build); });
+  // Bulk acknowledge: checks every ack row and confirms every assumed card;
+  // an assumed card already marked "no" keeps that answer. Policy items stay manual.
   var all = doc.getElementById("ack-all");
   if (all) all.addEventListener("change", function () {
     q(".ack input").forEach(function (c) { c.checked = all.checked; });
+    q(".card.assumed").forEach(function (card) {
+      var ok = card.querySelector(".btn[data-v=ok]"), no = card.querySelector(".btn[data-v=no]");
+      if (no.getAttribute("aria-pressed") !== "true") ok.setAttribute("aria-pressed", all.checked ? "true" : "false");
+    });
     build();
   });
+  function syncAll() {
+    if (!all) return;
+    var acks = q(".ack input"), cards = q(".card.assumed");
+    var on = acks.filter(function (c) { return c.checked; }).length +
+      cards.filter(function (c) { return c.querySelector('[aria-pressed="true"]'); }).length;
+    var total = acks.length + cards.length;
+    all.checked = total > 0 && on === total;
+    all.indeterminate = on > 0 && on < total;
+  }
 
   // Reply grammar: "(nn) <option>[, note: <text>]" per answered item,
   // acknowledgements grouped as "(nn), (mm) ok", parts joined by "; ".
@@ -305,6 +323,7 @@ details.panel.placeholder { box-shadow: none; opacity: .6; }
     ta.value = parts.join("; ");
     doc.getElementById("reply-hint").textContent = "";
     dirty = parts.length > 0;
+    syncAll();
   }
 
   // Copy: execCommand only; navigator.clipboard is denied in sandboxed hosts.
