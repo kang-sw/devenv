@@ -33,6 +33,13 @@ const (
 	// delegation of eligible general work through lead-delegate. Builtin default: off.
 	ItemWorkflowPreferSubagent = "workflow.prefer_subagent"
 
+	// ItemWorkflowWhiteboardEnabled gates the workflow manual's whiteboard
+	// section, which makes the session whiteboard the lead's primary channel
+	// to the user. It gates only that text: the whiteboard tools work in
+	// every lead session. Global-only because the manual renders without a
+	// repository root. Builtin default: off.
+	ItemWorkflowWhiteboardEnabled = "workflow.whiteboard_enabled"
+
 	// ItemSageReview is the layered config key for the completeness stage of the
 	// sage review gate at actionable ready/ promotion. Value "auto" requires the
 	// completeness reviewer; "ask" recommends it; absent/empty/"off" skips it.
@@ -129,6 +136,7 @@ const (
 
 func init() {
 	RegisterGlobalOnly(ItemWorkflowPreferSubagent)
+	RegisterGlobalOnly(ItemWorkflowWhiteboardEnabled)
 	RegisterGlobalOnly(ItemWorkflowSkepticalPosture)
 	RegisterGlobalOnly(ItemBootstrapAlarm)
 	// sage_review* keys default to project scope: they are project-level opt-ins

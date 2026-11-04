@@ -31,6 +31,8 @@
     "note.mute": ">=0.48.9-dev <0.49.0",
     "note.unmute": ">=0.48.9-dev <0.49.0",
     "note.query": ">=0.48.9-dev <0.49.0",
+    "whiteboard.update": ">=0.48.9-dev <0.49.0",
+    "whiteboard.query": ">=0.48.9-dev <0.49.0",
     "config.list": ">=0.48.9-dev <0.49.0",
     "config.tune": ">=0.48.9-dev <0.49.0",
     "config.resolve_agent": ">=0.48.9-dev <0.49.0",

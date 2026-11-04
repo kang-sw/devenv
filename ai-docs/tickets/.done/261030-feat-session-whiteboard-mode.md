@@ -2,8 +2,9 @@
 title: Session whiteboard - a server-assembled decision board and dashboard for the lead's user channel
 sage-review-design: completed
 sage-review-completeness: completed
-sage-review-design-reviewed: f2eb9c58ab283e4a
+sage-review-design-reviewed: 66e95b4fdb80ea39
 sage-review-completeness-reviewed: f2eb9c58ab283e4a
+completed: 2026-11-04
 ---
 
 # Session whiteboard - a server-assembled decision board and dashboard for the lead's user channel
@@ -93,7 +94,12 @@ because it collides with the HTML `<canvas>` element inside an HTML file.
   the session root:
   - full page `<reply-id>.html`;
   - its stamp `<reply-id>.stamp.js`;
-  - embed snapshots `<reply-id>-<short-hash>.html`.
+  - embed snapshots `<reply-id>-<short-hash>.html`, unless the session set
+    an `embed_dir` (below). `<short-hash>` is derived from the render
+    sequence number together with the content, so an embed name never
+    repeats within a session even when two renders are identical (hosts
+    expect a new file name per visual, and retention deletes recorded
+    paths).
 
   `<reply-id>` is the session's mailbox reply id (`wsmailbox.ReplyID`)
   without the `id:` prefix. `ai-docs/whiteboards/` is registered in the
@@ -133,6 +139,49 @@ because it collides with the HTML `<canvas>` element inside an HTML file.
   Rejected: (77a) deleting every previous embed at render (if the host
   re-reads the file, every earlier embed in the chat history goes blank);
   (77c) keeping every embed until session GC (unbounded file count).
+- **Host embed folder (user decision (115a), 2026-11-04).** Phase 2 showed
+  that Orca embeds only a bare file name read from its chat scratch folder
+  (`$ORCA_CHAT_SCRATCH_DIR`): a repository path, relative or absolute,
+  renders as plain text (Orca 1.4.248 source and its shipped
+  `orca-chat-visuals` skill, confirmed by a live check in the lead's Orca
+  chat). So `whiteboard.update` takes an optional `embed_dir` payload field:
+  - The lead passes the folder its host instructions name; the server
+    stores it in the session state record before that call renders, so the
+    same call's embed and every later one go there until a later
+    `embed_dir` replaces it. An empty string clears it, and embeds return
+    to `ai-docs/whiteboards/`.
+  - A path that is not absolute or not an existing directory is refused.
+    The server never creates the folder. The stored folder is re-checked in
+    every update's whole-batch validation (113); when it has disappeared,
+    the update is refused with a message naming it, before anything
+    applies.
+  - A host folder belongs to one host conversation, while a session key can
+    outlive it (a revive in a new chat). So the lead passes `embed_dir` on
+    its first update after the session starts or is revived; passing it
+    again is cheap and replaces the old value.
+  - With `embed_dir` set, the embed is written only there, under the same
+    `<reply-id>-<short-hash>.html` name (already a valid Orca file name,
+    since the reply id is lowercase words), and the `embed:` result line
+    is the bare file name. The full page and stamp stay in
+    `ai-docs/whiteboards/`.
+  - Embed retention (77b) applies only in `ai-docs/whiteboards/`: an embed
+    written to an `embed_dir` is never deleted by the server, and
+    repository GC never touches that folder, whose lifetime the host owns
+    (user decision (118b), 2026-11-04). The host re-reads a visual's file
+    when it redraws chat history, so evicting there would blank earlier
+    visuals, the (77a) failure; and the unbounded-count reason that
+    rejected (77c) does not hold in a folder the host deletes with its
+    chat. Rejected: (118a) the 5-embed cap inside `embed_dir` as well.
+  - The server names no host and reads no host variable (Architecture
+    Rule 3).
+
+  Rejected: (115b) the lead copying each embed into the host folder itself
+  (one extra tool call per turn, and a forgotten copy shows nothing);
+  (115c) the server reading
+  `ORCA_CHAT_SCRATCH_DIR` (host-specific behavior in shipped code, Rule 3)
+  or a config key (new machinery for a value the lead already has); a
+  per-call `embed_dir` that is not remembered (the lead repeats it every
+  turn).
 
 ### Store
 
@@ -151,7 +200,7 @@ because it collides with the HTML `<canvas>` element inside an HTML file.
 
   | field | notes |
   |-------|-------|
-  | `id` | server-minted, `(nn)` / `(nnn)` |
+  | `id` | server-minted, or an explicit number on `add` ((112), (117)); shown as `(nn)` / `(nnn)` |
   | `class` | `policy` / `technical` / `announced`, the workflow manual's `### Asking the user` classes |
   | `topic` | groups items on the page |
   | `title` | one line |
@@ -164,8 +213,14 @@ because it collides with the HTML `<canvas>` element inside an HTML file.
 - **Answer interpretation stays with the model.** The server enforces
   structure only: `answered` requires `answer_quote`; `assumed` marks an
   answer the lead inferred and renders highlighted until the user confirms
-  or corrects it.
-  Rejected: a server-side answer parser (the server cannot see the
+  or corrects it. A confirmation or correction is another `answer` on the
+  same ID without `assumed`, carrying the user's confirming or correcting
+  words as `answer_quote`, which moves the item to `answered` (technical
+  decision (116)). The new quote replaces the earlier basis quote, and
+  `answered_at` takes the confirmation time, so the item enters the
+  rotation (109) then. Re-answering an `answered` item follows the same
+  rule. Rejected: a separate confirm operation (a second path to
+  the same state change). Also rejected: a server-side answer parser (the server cannot see the
   conversation to verify a quote, and natural-language parsing in Go is
   brittle; the quote's value is visibility, which already addresses
   problem 4). Also rejected: renaming `assumed` to `inferred` ((84); the
@@ -231,7 +286,8 @@ because it collides with the HTML `<canvas>` element inside an HTML file.
     close_topics?: [topic],
     now?:          html,                     # empty string clears the Now slot
     now_path?:     path,                     # exclusive with `now`
-    id_floor?:     number})                  # see Store
+    id_floor?:     number,                   # see Store
+    embed_dir?:    path})                    # absolute; remembered for the session, "" clears (115a)
     -> minted ids in `add` order, full: <path>, embed: <path>
   whiteboard.query(session_key, payload: {topic?, status?, id?})   # read-only, includes archived items
   ```
@@ -316,6 +372,9 @@ because it collides with the HTML `<canvas>` element inside an HTML file.
   full: ai-docs/whiteboards/<reply-id>.html
   embed: ai-docs/whiteboards/<reply-id>-<short-hash>.html
   ```
+
+  With an `embed_dir` set, the `embed:` line is the bare file name
+  `<reply-id>-<short-hash>.html` (see Mode and files, (115a)).
 
   Rejected: re-rendering the full page on every store mutation with embeds
   on request only (one reload per mutation instead of one per call); the
@@ -495,7 +554,9 @@ because it collides with the HTML `<canvas>` element inside an HTML file.
 
   A render writes the page first, then `<reply-id>.stamp.js` containing
   `wbStamp("<version>")` through a temp file and rename, so a reload never
-  reads a torn page.
+  reads a torn page. A rename refused by a Windows sharing violation (the
+  browser polling the file holds a brief read handle) is retried a few times
+  at a short interval before the render fails (technical decision (119)).
   Rejected:
   - Blind periodic reload: resets interactive state even when nothing
     changed.
@@ -537,6 +598,10 @@ because it collides with the HTML `<canvas>` element inside an HTML file.
     syntax.
   - Order per turn: one `whiteboard.update` with the turn's changes, then
     the pointer or embed line.
+  - When the host's instructions name a folder its embeds must live in, the
+    lead passes it as `embed_dir` on its first update after the session
+    starts or is revived, and embeds the returned bare name ((115a)); the
+    `whiteboard` playbook states this without naming a host.
   - The pointer is one terminal line naming the full-page path the update
     returned and the IDs asked this turn, for example
     `Whiteboard: ai-docs/whiteboards/<reply-id>.html - (102), (103)`
@@ -600,10 +665,10 @@ because it collides with the HTML `<canvas>` element inside an HTML file.
   - any Claude status band change ((103));
   - serving the pages over HTTP in any form (local server, SSE, websocket),
     per the change-signal rejection; both pages are plain files.
-- Unverified assumption, probed in Phase 2 ((105)): an inline host can
-  embed a file at `ai-docs/whiteboards/`. The downstream session kept its pages in the Orca
-  chat scratch directory, and nothing has shown whether Orca accepts other
-  paths.
+- Host embed limits (Phase 2, Orca 1.4.248): Orca shows no visuals for WSL
+  or remote sessions, refuses symlinks and files over 512 KiB, and hands
+  the HTML to its iframe as a string, so an embed stays self-contained and
+  small. The server does not enforce a host's size limit.
 
 ## Prior Decisions
 
@@ -668,6 +733,44 @@ The worker records the user's outcome per platform in this phase's
 does not observe changes (the change signal depends on it) or if Orca
 refuses the embed path (a fallback location is then a user decision).
 
+### Result (993404aff) - 2026-11-04
+
+Probe kit landed at `ai-docs/ref/whiteboard-probe/`: `probe.html`, its
+`probe.stamp.js`, one-shot rewriters `rewrite-stamp.sh` (macOS, WSL) and
+`rewrite-stamp.ps1` (native Windows), and `CHECKLIST.md`. Each rewriter run
+rewrites the page version, then the stamp, through a temp file and a rename;
+the page shows `STALE` when a reload reads a cached copy.
+
+User outcome per platform (2026-11-04):
+
+| platform | outcome |
+|----------|---------|
+| macOS Chrome 150, `file://` | pass: stamp change seen 702 ms after a rewrite at a 1.5 s poll, `errors=0`, scroll restored exactly (2528/2528), page fresh, `sessionStorage` kept across 2 reloads with the panel state, `execCommand('copy')` true and paste matched |
+| native Windows Chrome, Edge | not run: the user has no Windows PC and accepted the macOS pass as sufficient |
+| WSL path through `\\wsl.localhost\...` | not run, same reason |
+
+Residual risks of the unverified rows: a rename refused by a Windows sharing
+violation while the browser polls (mitigated by technical decision (119));
+WSL 9P caching delaying stamp visibility, which only slows the refresh.
+`rewrite-stamp.ps1` was never executed.
+
+Before the user run, the worker validated the kit in headless Chrome 156 on
+macOS over CDP (kit check, not platform evidence): all checks passed. That
+run also showed that a status line filled in after `window.scrollTo` grows a
+sticky header, and Chrome scroll anchoring then shifts the restored
+position by 20-41 px. The full page must restore scroll after every
+synchronous DOM fill.
+
+Orca embed path: refused. Orca 1.4.248 accepts only a bare file name
+(`^[A-Za-z0-9][A-Za-z0-9._-]*\.html$`) read from the chat's own scratch
+folder, refuses symlinks, files over 524288 bytes, and WSL or remote
+sessions; the lead's live check showed a bare name in `$ORCA_CHAT_SCRATCH_DIR`
+rendering and `ai-docs/whiteboards/...` relative and absolute paths shown as
+plain text. Resolved by user decision (115a) (`embed_dir`) and (118b).
+
+The re-injection stop condition did not trigger (macOS observed every
+change), so Phase 3 proceeds.
+
 ### Phase 3: Implement the whiteboard
 
 Implement every item in Decisions:
@@ -711,6 +814,19 @@ Verification:
     stamp written after the page through a temp file and rename;
   - a session keeps at most 5 embeds, evicting by render sequence rather
     than mtime;
+  - `embed_dir` is remembered for the session and routes the setting
+    call's own embed and later ones there only, returns the bare file name,
+    is cleared by an empty string, refuses a relative or missing directory,
+    refuses an update when the stored folder has disappeared, and is never
+    touched by repository GC or by embed retention, which evicts only in
+    `ai-docs/whiteboards/`;
+  - a stamp or page rename that fails with a sharing violation is retried
+    before the render fails (simulated failure);
+  - two identical renders produce two distinct embed file names;
+  - an `answer` without `assumed` on an `assumed` item moves it to
+    `answered`, replacing the quote and stamping `answered_at`;
+  - the `whiteboard` playbook states the `embed_dir` instruction without
+    naming a host;
   - `now_path` content is read once and survives the file's deletion;
     `now` with `now_path`, and a full HTML document, are refused;
   - Now renders above the topics only when the render changed it;
@@ -732,6 +848,74 @@ Verification:
 - A manual browser check of a real full page across several updates
   (reload, scroll and panel restoration, dirty-form deferral, copy
   answers), and of an embed snapshot opened standalone.
+- A manual Orca check: set `embed_dir` to the chat scratch folder, embed the
+  returned bare name, confirm it renders, and confirm a populated board's
+  embed stays well under 512 KiB.
+
+### Result (f98d8e832) - 2026-11-04
+
+Landed in f98d8e832 (implementation), d91d04d15 (fresh-reader audit of the
+playbook), and 3e99f523a (lite-review fixes):
+
+- `internal/wswhiteboard`: a pure store (`Apply`, `Query`, `FormatItems`),
+  the view model (`BuildView`), and the renderer (`RenderPage`) over
+  embedded assets ported from the approved mockup (`page.tmpl`, `page.css`,
+  `form.js`, `live.js`, `sprite.svg`). The mockup folder is removed.
+- `internal/mcp`: `whiteboard.update` / `whiteboard.query` advertised as
+  `{session_key, payload}`, lead-only through `isTopLevelLead()`; the store
+  rides `sessionRecord.Whiteboard`. Refusals list every problem and quote
+  the rendered playbook's `## Payload` section, so the schema has one
+  source. Renders write embed, page, then stamp through a temp file and
+  rename with sharing-violation retry; embed file deletions settle only
+  after the record persists. Todo, agenda, and `route.resolve_*` writes
+  re-render the full page once the board exists. The exclude entry is
+  registered before the folder is created; GC runs from `workflow_manual`
+  at most once a day and skips when the key store is unreadable.
+- `workflow.whiteboard_enabled`: built-in, global-only, default `off`, in
+  the lead-tune catalog. Knob on, `printPlaybook` appends the manual's
+  `### Whiteboard` section (mandate plus the playbook demoted under it),
+  replaces the discussion counter rule, swaps lead-discuss's "nothing here
+  is persisted" for the capture line, and adds the lead-ticket queue step
+  before `### Trace a change before writing it`; each variant appends when
+  its anchor text is absent.
+- `whiteboard` playbook in ws rsrc with the wsflow mirror, the Pi copy, and
+  manifests; `runtime.json` lists both tools in all three packages.
+
+Verification:
+
+- `cd agents-plugin-tool && go vet ./... && go test ./... -count=1`: all
+  packages ok; `python3 -m unittest discover agents-plugin-wsflow/tests`
+  (20) and `agents-plugin/tests` (81): OK; `scripts/smoke-ws-mcp.sh ..`:
+  ok. The Phase 3 list is covered by `store_test.go`, `render_test.go`, and
+  `whiteboard_tools_test.go`.
+- Browser check (worker, headless Chrome over CDP against a real `ws-mcp`
+  server, macOS; 21/21): reload after an update and after a todo write,
+  scroll and panel state restored, dirty form defers with the banner and the
+  reply kept, banner click reloads, no reload without a change, embed opened
+  standalone has no loader and collapsed panels, 4 embeds kept, a populated
+  embed of 38 KiB, files 0644, git status clean through the exclude. Copy
+  answers: headless `execCommand('copy')` returned false, so the page fell
+  back to the selected reply (`Ctrl+C` hint); the reply text built from
+  scripted clicks matched the grammar, and copy-then-reload with a real
+  user gesture is unverified here.
+- Not run by the worker: the manual Orca check (it needs the user's chat to
+  render an embed) and native Windows/WSL (see the Phase 2 Result).
+
+Decisions taken in implementation:
+
+- `answer_quote` is required for `assumed` answers too; a policy answer
+  must lead with an option letter (trailing text allowed).
+- `links` are validated only when supplied in a batch, since archive
+  eviction would otherwise refuse later updates.
+- `close_topics` on an unknown topic is refused; adding to a closed topic
+  reopens it; closed topics are outside the 10 most recent settled.
+- Rotation orders by a settle counter, not time; the stamp version is the
+  render sequence; the embed hash is sha256 of sequence and content.
+- Reopening an item clears its answer; withdrawn and superseded keep theirs.
+- `route.resolve_*` count as todo/agenda writers; empty todo and agenda
+  panels are omitted; result paths are relative to the session root.
+- The Phase 2 probe kit under `ai-docs/ref/whiteboard-probe/` is left in
+  place; this phase removed only the mockup, as directed.
 
 ## Sage Review Round 1 (2026-11-04)
 

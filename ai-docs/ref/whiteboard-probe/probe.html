@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html data-stamp="probe.stamp.js">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- rewrite-stamp.sh / rewrite-stamp.ps1 rewrite the number in this tag, then probe.stamp.js -->
+<meta name="probe-page-version" content="__PV_0__">
+<title>whiteboard file:// probe</title>
+<style>
+  :root { color-scheme: light dark; --bg: #fafafa; --fg: #1d1d1f; --card: #fff; --line: #d0d0d6; --ok: #1b7f3b; --bad: #b3261e; --wait: #8a6d00; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #17181b; --fg: #e6e6ea; --card: #222327; --line: #3a3b40; --ok: #6fd28f; --bad: #ff8a80; --wait: #e8c547; } }
+  body { margin: 0; font: 14px/1.45 system-ui, sans-serif; background: var(--bg); color: var(--fg); }
+  header { position: sticky; top: 0; z-index: 1; background: var(--card); border-bottom: 1px solid var(--line); padding: 10px 14px; }
+  h1 { font-size: 15px; margin: 0 0 6px; }
+  table { border-collapse: collapse; width: 100%; }
+  /* Single-line cells keep the sticky header's height fixed while statuses update;
+     a header that grows after the scroll restore would shift it (scroll anchoring). */
+  td { border-top: 1px solid var(--line); padding: 3px 6px; vertical-align: top;
+       white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 0; }
+  td:first-child { font-weight: 600; width: 1%; max-width: none; }
+  .ok { color: var(--ok); font-weight: 600; }
+  .bad { color: var(--bad); font-weight: 600; }
+  .wait { color: var(--wait); font-weight: 600; }
+  code, textarea, input[type=text] { font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace; }
+  textarea { display: block; width: 100%; box-sizing: border-box; height: 3.2em; }
+  input[type=text] { width: 22em; }
+  .row { height: 44px; display: flex; align-items: center; padding: 0 14px; border-bottom: 1px dashed var(--line); }
+  .row:nth-child(10n) { font-weight: 700; }
+  main { padding-bottom: 40px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>whiteboard file:// probe</h1>
+  <table>
+    <tr><td>env</td><td><code id="env"></code></td></tr>
+    <tr><td>1 stamp</td><td><span id="c-stamp" class="wait">waiting</span> <span id="stamp-detail"></span>
+      <label><input type="checkbox" id="auto"> auto-reload on change</label></td></tr>
+    <tr><td>2 reload + scroll</td><td><span id="c-scroll" class="wait">not reloaded yet</span> <span id="scroll-detail"></span></td></tr>
+    <tr><td>3 sessionStorage</td><td><span id="c-store" class="wait">checking</span>
+      note: <input type="text" id="note" placeholder="type here, then reload">
+      <details id="panel"><summary>panel (open me, then reload)</summary>open state survives reloads when sessionStorage works</details></td></tr>
+    <tr><td>4 page fresh</td><td><span id="c-fresh" class="wait">not reloaded yet</span> <span id="fresh-detail"></span></td></tr>
+    <tr><td>5 copy</td><td><button id="copy">copy test string</button> <span id="c-copy" class="wait">not tried</span>
+      paste here: <input type="text" id="paste" placeholder="Ctrl+V / Cmd+V"> <span id="c-paste" class="wait"></span>
+      <textarea id="copy-src" readonly></textarea></td></tr>
+    <tr><td>results</td><td><button id="results-copy">copy results</button> <span id="c-results"></span>
+      <textarea id="results" readonly></textarea></td></tr>
+  </table>
+</header>
+<main id="rows"></main>
+<script>(function () {
+  "use strict";
+  var doc = document;
+  var POLL_MS = 1500; // the planned loader polls every 1-2 s
+  var stampSrc = doc.documentElement.getAttribute("data-stamp");
+  var pageVersion = (/(\d+)/.exec(doc.querySelector('meta[name="probe-page-version"]').content) || [])[1] || "?";
+
+  function $(id) { return doc.getElementById(id); }
+  function mark(id, cls, text) { var el = $(id); el.className = cls; el.textContent = text; }
+
+  // Tall filler so scroll restoration is visible: "row 40" should stay in view across a reload.
+  var rows = $("rows"), frag = doc.createDocumentFragment();
+  for (var i = 1; i <= 80; i++) {
+    var r = doc.createElement("div"); r.className = "row"; r.id = "row-" + i;
+    r.textContent = "row " + (i < 10 ? "0" + i : i); frag.appendChild(r);
+  }
+  rows.appendChild(frag);
+
+  // Test the sessionStorage path the whiteboard loader uses, not the browser's own restoration.
+  if ("scrollRestoration" in history) history.scrollRestoration = "manual";
+
+  // --- 3: sessionStorage ------------------------------------------------------
+  var store = null, storeErr = "";
+  try { store = window.sessionStorage; store.setItem("probe.t", "1"); store.getItem("probe.t"); }
+  catch (e) { store = null; storeErr = e && e.name ? e.name : String(e); }
+  function sget(k, d) { if (!store) return d; var v = store.getItem("probe." + k); return v === null ? d : v; }
+  function sset(k, v) { if (store) store.setItem("probe." + k, String(v)); }
+  var loads = +sget("loads", "0") + 1; sset("loads", loads);
+  var note = $("note"), panel = $("panel"), auto = $("auto");
+  note.value = sget("note", "");
+  note.addEventListener("input", function () { sset("note", note.value); summary(); });
+  panel.open = sget("panel", "0") === "1";
+  panel.addEventListener("toggle", function () { sset("panel", panel.open ? "1" : "0"); summary(); });
+  auto.checked = sget("auto", "1") === "1";
+  auto.addEventListener("change", function () { sset("auto", auto.checked ? "1" : "0"); });
+  if (!store) mark("c-store", "bad", "unavailable: " + storeErr);
+  else if (loads > 1) mark("c-store", "ok", "ok: survived " + (loads - 1) + " reload(s), loads=" + loads);
+  else mark("c-store", "wait", "available; reload once to confirm it survives");
+
+  // --- 1: stamp re-injection --------------------------------------------------
+  var first = null, latest = null, polls = 0, errors = +sget("errors", "0"); // errors: across reloads
+  var changes = +sget("changes", "0"), lastLatency = sget("lastLatency", ""), maxLatency = +sget("maxLatency", "0");
+  function stampView() {
+    var s = "polls=" + polls + " errors=" + errors + " first=" + first + " latest=" + latest +
+      " changes=" + changes + (lastLatency !== "" ? " last-latency=" + lastLatency + "ms max=" + maxLatency + "ms" : "");
+    $("stamp-detail").textContent = s;
+    if (changes > 0) {
+      var ok = maxLatency <= POLL_MS + 1000;
+      mark("c-stamp", ok ? "ok" : "bad", ok ? "ok" : "SLOW");
+    } else if (polls > 0 && latest !== null) mark("c-stamp", "wait", "polling; run the rewriter");
+    else if (errors > 0) mark("c-stamp", "bad", "stamp script fails to load");
+  }
+  window.wbStamp = function (v) {
+    v = String(v); latest = v;
+    if (first === null) { first = v; stampView(); return; }
+    if (v === first) { stampView(); return; }
+    // A rewrite was observed. The stamp carries the writer's clock (epoch ms).
+    var lat = Date.now() - Number(v);
+    changes += 1; lastLatency = String(lat); maxLatency = Math.max(maxLatency, lat);
+    sset("changes", changes); sset("lastLatency", lastLatency); sset("maxLatency", maxLatency);
+    stampView(); summary();
+    if (auto.checked) {
+      sset("reload", JSON.stringify({ stamp: v, y: Math.round(window.scrollY) }));
+      location.reload();
+    } else first = v;
+  };
+  function poll() {
+    var s = doc.createElement("script");
+    s.src = stampSrc + "?t=" + Date.now();
+    s.onload = function () { s.remove(); };
+    s.onerror = function () { errors += 1; sset("errors", errors); s.remove(); stampView(); summary(); };
+    doc.head.appendChild(s);
+    polls += 1;
+  }
+  poll();
+  setInterval(function () { poll(); stampView(); }, POLL_MS);
+
+  // --- 5: document.execCommand('copy') ------------------------------------------
+  var expected = sget("expected", "") || ("wb-probe 한글 " + Date.now());
+  sset("expected", expected);
+  $("copy-src").value = expected;
+  function copyFrom(ta) {
+    ta.focus(); ta.select();
+    var ok = false, err = "";
+    try { ok = doc.execCommand("copy"); } catch (e) { ok = false; err = e && e.name ? e.name : String(e); }
+    return { ok: ok, err: err };
+  }
+  $("copy").addEventListener("click", function () {
+    var r = copyFrom($("copy-src"));
+    sset("copy", r.ok ? "true" : "false" + (r.err ? "(" + r.err + ")" : ""));
+    mark("c-copy", r.ok ? "ok" : "bad", r.ok ? "execCommand returned true; now paste" : "execCommand failed " + r.err + "; text is selected, press Ctrl+C");
+    summary();
+  });
+  $("paste").addEventListener("input", function () {
+    var ok = $("paste").value.trim() === expected;
+    sset("paste", ok ? "match" : "MISMATCH");
+    mark("c-paste", ok ? "ok" : "bad", ok ? "match" : "MISMATCH");
+    summary();
+  });
+  if (sget("copy", "")) mark("c-copy", sget("copy", "") === "true" ? "ok" : "bad", "earlier: " + sget("copy", ""));
+  if (sget("paste", "")) mark("c-paste", sget("paste", "") === "match" ? "ok" : "bad", "earlier: " + sget("paste", ""));
+
+  // --- results line ---------------------------------------------------------
+  $("env").textContent = location.protocol + " " + location.href + " | " + navigator.userAgent;
+  function summary() {
+    var line = "probe | " + navigator.userAgent + " | " + location.href +
+      " | stamp: changes=" + changes + " last=" + (lastLatency || "-") + "ms max=" + maxLatency + "ms errors=" + errors +
+      " | scroll=" + sget("scroll", "-") + " | fresh=" + sget("fresh", "-") +
+      " | storage=" + (store ? "ok loads=" + loads + " note=" + (note.value ? "kept" : "-") + " panel=" + (panel.open ? "open" : "closed") : "unavailable(" + storeErr + ")") +
+      " | copy=" + sget("copy", "-") + " paste=" + sget("paste", "-");
+    $("results").value = line;
+  }
+  $("results-copy").addEventListener("click", function () {
+    summary();
+    var r = copyFrom($("results"));
+    $("c-results").textContent = r.ok ? "copied" : "select and copy by hand";
+  });
+  stampView(); summary();
+
+  // --- 2 and 4: state carried across a stamp-triggered reload -----------------
+  // Runs last, after every synchronous DOM fill, so no later size change above
+  // the viewport shifts the restored position (Chrome scroll anchoring).
+  var rec = null;
+  try { rec = JSON.parse(sget("reload", "null")); } catch (e) { rec = null; }
+  if (store) store.removeItem("probe.reload");
+  if (rec) {
+    var fresh = pageVersion === rec.stamp;
+    sset("fresh", fresh ? "ok" : "STALE(page " + pageVersion + ", stamp " + rec.stamp + ")");
+    mark("c-fresh", fresh ? "ok" : "bad", fresh ? "ok" : "STALE");
+    $("fresh-detail").textContent = "page version " + pageVersion + ", reload triggered by stamp " + rec.stamp;
+    summary();
+    window.scrollTo(0, rec.y);
+    setTimeout(function () {
+      var got = Math.round(window.scrollY);
+      var max = Math.max(0, doc.documentElement.scrollHeight - window.innerHeight);
+      var want = Math.min(rec.y, max);
+      var ok = Math.abs(got - want) <= 2;
+      sset("scroll", (ok ? "ok" : "FAIL") + "(" + got + "/" + rec.y + ")");
+      mark("c-scroll", ok ? "ok" : "bad", ok ? "ok" : "FAIL");
+      $("scroll-detail").textContent = "restored y=" + got + ", saved y=" + rec.y;
+      summary();
+    }, 50);
+  }
+})();
+</script>
+</body>
+</html>

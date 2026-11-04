@@ -138,6 +138,19 @@ var configRegistry = []configKeyEntry{
 		ResolverBacked:        true,
 	},
 	{
+		Key:        wsconfig.ItemWorkflowWhiteboardEnabled,
+		WriterTool: "config.tune",
+		ResetTool:  "config.tune",
+		ValueFields: []tuningField{{
+			Name:        "value",
+			Description: "Desired mode: on or off. Omit when reset is true.",
+			Enum:        onOffEnum,
+		}},
+		NoAgentVisible:        true,
+		RequiresLeadAuthority: wsconfig.GlobalOnly(wsconfig.ItemWorkflowWhiteboardEnabled),
+		ResolverBacked:        true,
+	},
+	{
 		Key:        wsconfig.ItemBootstrapAlarm,
 		WriterTool: "config.tune",
 		ResetTool:  "config.tune",
