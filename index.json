@@ -596,7 +596,14 @@
       "registered_at": "2026-10-30T14:07:33Z"
     },
     "261030-feat-session-whiteboard-mode": {
-      "registered_at": "2026-10-30T11:50:02Z"
+      "registered_at": "2026-10-30T11:50:02Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-04T12:32:56Z"
+      }
     }
   }
 }
