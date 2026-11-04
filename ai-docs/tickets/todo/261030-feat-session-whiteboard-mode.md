@@ -339,6 +339,11 @@ because it collides with the HTML `<canvas>` element inside an HTML file.
   - each open policy item gets option buttons and a note field; each
     `assumed` item gets confirm and correct buttons beside the lead's reading
     and the user's quote ((74)); each acknowledgement item gets a checkbox;
+  - every item kind (policy, `assumed`, technical, announced) carries a note
+    button, because a counterexample can surface against any item, not only
+    a policy question (user request, 2026-11-04); a noted acknowledgement
+    leaves the grouped segment and yields `(nn) ok, note: <text>` when
+    checked or `(nn) note: <text>` when not;
   - a "copy answers" button builds a reply such as
     `(62) b; (64) a, note: <text>; (19) no, note: <text>; (44), (45) ok`:
     an `assumed` item yields `(nn) ok` or `(nn) no, note: <text>`, and the
