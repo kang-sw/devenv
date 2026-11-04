@@ -1,5 +1,7 @@
 ---
 title: Session whiteboard - a server-assembled decision board and dashboard for the lead's user channel
+sage-review-design: blocked
+sage-review-completeness: blocked
 ---
 
 # Session whiteboard - a server-assembled decision board and dashboard for the lead's user channel
@@ -60,14 +62,31 @@ because it collides with the HTML `<canvas>` element inside an HTML file.
   `claude.mcp_watchdog_enabled`. Off by default because it changes the
   model's output channel. A knob change applies at the next workflow-manual
   load.
-- **Knob gates the store too (user decision (68a)).** The item store, the
-  whiteboard tools, and every store-backed manual rule apply only when the
-  knob is on. Knob-off sessions keep today's behavior (no server counter,
-  discussion unpersisted), so problem 1 remains for them.
-  Rejected: (68b) the store always on as every session's ID authority with
-  the knob gating only rendering (extends the reversal of "Discussion keeps
-  no counter" to every downstream session; lifting the gate later is
-  additive).
+  Declared as a built-in `workflow.*` key (technical decision (101)), like
+  `workflow.prefer_subagent`: a wsconfig item plus a `configRegistry` entry
+  with an on/off value, registered global-only (`RegisterGlobalOnly`) and
+  listed in the lead-tune tuning catalog (technical decision (106)).
+  Global-only because `handleWorkflowManual` renders the manual with
+  `wsconfig.Options{}` and no repo root, so a repo-scoped override would be
+  invisible to the manual gate. Rejected: allowing repo scope (needs the
+  root threaded through the manual render for a setting that is the user's
+  habit, not a project property). Both packages default it off, so no per-package
+  default is needed. Rejected: a package `config-manifest.json` key (the
+  `workflow.` namespace is reserved for built-ins in `parseConfigManifest`,
+  and the shipped manifests are single-namespace `claude.`, which would make
+  the knob Claude-only while the manual mandate is host-neutral); extending
+  the manifest mechanism (new machinery for a default both packages share).
+- **Knob gates only the manual mandate (user decision (68), 2026-11-04,
+  reversing the earlier (68a)).** The item store and both whiteboard tools
+  work in every lead session, knob on or off. The knob decides one thing:
+  whether the workflow manual carries the whiteboard section, whose core is
+  "show the user everything through the whiteboard, replacing text output
+  entirely". A knob-off session can still use the whiteboard ad hoc, for
+  example when the user asks for it; its discussion IDs stay lead-counted
+  (problem 1 remains there), bridged by `id_floor` (see Store).
+  Rejected: the earlier (68a) knob gating the store and tools as well (the
+  tools then need a knob-off refusal path, which invites a model to switch
+  the knob on itself to get past it; the user judged ad hoc use harmless).
 - **Location (user decision (69)).** Files live in `ai-docs/whiteboards/` at
   the session root:
   - full page `<reply-id>.html`;
@@ -78,7 +97,10 @@ because it collides with the HTML `<canvas>` element inside an HTML file.
   without the `id:` prefix. `ai-docs/whiteboards/` is registered in the
   repository's local `.git/info/exclude` (common dir, so every worktree is
   covered), in the idempotent manner of `registerPoolExclude`
-  (`internal/mcp/worktree_tools.go`).
+  (`internal/mcp/worktree_tools.go`). Registration and directory creation
+  happen at a session's first render, never earlier (technical decision
+  (96)), so a repository whose sessions never use the whiteboard gets no
+  `ai-docs/whiteboards/` and no exclude entry.
   Rejected:
   - `.ws-workflow/whiteboards/` (the 10-30 location): a hidden dot directory
     the user has a harder time finding.
@@ -89,7 +111,9 @@ because it collides with the HTML `<canvas>` element inside an HTML file.
     (`session_auth.go`) and a file name exposes it to any directory listing;
     the reply id is the existing public, deterministic handle already shown
     in the status band.
-- **GC.** At workflow-manual load, at most once per day per repository,
+- **GC.** At workflow-manual load, knob on or off (a knob-off session can
+  hold an ad hoc board), at most once per day per repository, and only when
+  `ai-docs/whiteboards/` exists,
   bookkept with a marker file in `ai-docs/whiteboards/` (the `maybePrune`
   marker pattern, `internal/mcp/session_prune.go`): delete every whiteboard
   file (full page, stamp, embed snapshots) whose reply id matches no live
@@ -129,7 +153,7 @@ because it collides with the HTML `<canvas>` element inside an HTML file.
   | `class` | `policy` / `technical` / `announced`, the workflow manual's `### Asking the user` classes |
   | `topic` | groups items on the page |
   | `title` | one line |
-  | `options`, `recommendation` | policy items; options are lettered a, b, c on the page |
+  | `options`, `recommendation` | policy items; `options` are plain strings, lettered a, b, c by position on the page; a policy `answer` is the letter ((109)) |
   | `rationale` | technical and announced items (the citation or reasoning) |
   | `status` | `open`, `answered`, `assumed`, `withdrawn`, `superseded` |
   | `answer`, `answer_quote`, `answered_at` | `answer_quote` keeps the user's verbatim words |
@@ -144,46 +168,99 @@ because it collides with the HTML `<canvas>` element inside an HTML file.
   brittle; the quote's value is visibility, which already addresses
   problem 4). Also rejected: renaming `assumed` to `inferred` ((84); the
   downstream proposal's term reads clearly enough).
-- **Rotation by count.** The board shows the 10 most recently settled items
-  and collapses older settled items into one "settled N" line per topic.
-  Closing a topic collapses it at once. The archive keeps at most 500 settled
+- **Rotation by count.** The 10 most recently settled items, counted
+  board-wide, render expanded inside their own topic blocks; every older
+  settled item collapses behind its topic's settled count chip (the
+  approved mockup's per-topic `details.settled`). There is no separate
+  board-wide settled section (technical decision (109)). Closing a topic
+  collapses it at once. The archive keeps at most 500 settled
   items per session, evicting the oldest, and stays queryable until evicted.
-  Rejected: time-based rotation (unrelated to conversation pace) and
+  Rejected: time-based rotation (unrelated to conversation pace),
   render-count-based rotation (renders also come from todo and agenda
-  writes, so the count races).
-- **Ticket queues are read, not owned.** A ticket's `## Open Decision Queue`
-  section stays the authority. The board reads it through `watch`:
-  - each render parses the watched tickets' sections (`(nn) [status] [class]
-    <line>` and the last-ID line);
-  - ID minting returns one past the maximum of the session counter and every
-    watched last-ID line;
-  - an item present in both the store and a watched ticket renders once,
-    from the ticket.
+  writes, so the count races), and a per-topic cap or a standalone settled
+  section (neither matches the approved mockup).
+- **The board renders from the store only (user decision (102a),
+  2026-11-04, reversing the earlier `watch` design).** A ticket's
+  `## Open Decision Queue` section stays the authority for persistence, but
+  the server never parses it. An Open Decision Queue item reaches the board
+  the way every other item does, through `add`:
+  - `add` takes an optional explicit `id`, so the lead can put a queue
+    resumed from an earlier conversation on the board under its ticket IDs.
+    An explicit `id` already in the store is refused; an accepted one raises
+    the session counter to at least that ID.
+  - ID minting returns one past the maximum of the session counter and
+    `id_floor` (below).
+  - The lead records each answer in both places: the store through
+    `answer`, the ticket through lead-ticket, which the ticket authority
+    already requires.
 
-  Rejected: one shared store written by both the ticket and the board (two
-  writers need synchronization, and lead-ticket owns the queue); scanning
-  every ticket that has a queue (shows other sessions' queues on a
-  session-scoped board); dual-writing ticket items into the store
-  (contradicts the ticket authority).
+  Rejected: (102b) keeping `watch` with a merge contract (which source
+  supplies options, recommendation, and topic; a ticket-tag-to-status table
+  plus a board status for `[deferred]`; refusing `answer` on a ticket-only
+  ID; what renders after the settle point), flagged undefined by both Sage
+  reviews; rendering from the one-line ticket form also drops the option
+  buttons. Also rejected, from the earlier design: one store written by both
+  the ticket and the board (two writers), and scanning every ticket that has
+  a queue (other sessions' queues on a session-scoped board).
+
+  `id_floor` (technical decision (97), shaped by the user): an optional
+  `update` payload field. A knob-off session counts discussion IDs by hand,
+  and the server cannot see the conversation, so its first minted ID could
+  repeat one already used in prose. When `id_floor` is given, the session
+  counter is raised to it, so the next minted ID is one past the floor. A
+  floor at or below the counter is ignored silently: it never lowers the
+  counter and never errors, since lowering would let the store mint a duplicate of its
+  own items. Knob-on sessions need not pass it, because every item already
+  goes through the store.
+  Rejected: refusing a low floor (the user judged ID bookkeeping not worth
+  strictness).
 
 ### Tools
 
 - **Two tools (user decision (63)).**
 
   ```text
-  whiteboard.update(session_key,
-    add?:          [{class, topic, title, options?, recommendation?, rationale?, links?}],
+  whiteboard.update(session_key, payload: {
+    add?:          [{id?, class, topic, title, options?, recommendation?, rationale?, links?}],   # id: adopt a ticket-queue ID
     answer?:       [{id, answer, answer_quote, assumed?}],
     patch?:        [{id, title?, options?, recommendation?, rationale?, links?, status?}],   # status: open | withdrawn | superseded
     close_topics?: [topic],
-    watch?:        [stem],
-    unwatch?:      [stem],
     now?:          html,                     # empty string clears the Now slot
-    now_path?:     path)                     # exclusive with `now`
+    now_path?:     path,                     # exclusive with `now`
+    id_floor?:     number})                  # see Store
     -> minted ids in `add` order, full: <path>, embed: <path>
-  whiteboard.query(session_key, topic?, status?, id?)    # read-only, includes archived items
+  whiteboard.query(session_key, payload: {topic?, status?, id?})   # read-only, includes archived items
   ```
 
+  - **Minimal advertised surface (user decision (90c)).** `tools/list`
+    advertises each tool as `{session_key, payload}` only, and each
+    description is deliberately unattractive: lead-only, and "read the
+    `whiteboard` playbook before first use". It does not explain what the
+    board is for. The inner payload schema above and the usage text live in
+    that playbook (see Workflow text). A host that loads every schema up
+    front then pays almost nothing for a feature its user never turned on,
+    and a model searching for "diagram" or "board" finds a tool that sends
+    it to read instructions first.
+    Rejected: (90a) advertising the full inner schema and a descriptive
+    purpose (every non-deferred-loading session pays the schema, and the
+    description invites curiosity calls); (90b) hiding both tools from
+    `tools/list` while the knob is off (the server reads its tool list at
+    process start and sends no `listChanged` notification, so a knob change
+    would need an MCP restart, contradicting "applies at the next
+    workflow-manual load").
+  - **`payload` is an `object` (technical decision (92)).** A JSON string
+    where the object belongs is refused with a type-accurate message, the
+    rejection-over-leniency choice of
+    `260920-bug-ws-mcp-input-shape-coercion-traps`. Rejected: parsing a
+    string payload leniently. Uncertain: if hosts turn out to stringify
+    nested object arguments often, revisit this in favor of parsing.
+  - **A malformed payload is refused with the inner schema (technical
+    decision (93)).** The central precheck in `Server.callTool` sees only
+    `{session_key, payload}`, so its refusal would carry the useless minimal
+    schema. The handler validates the payload itself and refuses with every
+    problem plus the inner schema, so one retry fixes the call. This holds
+    whatever the knob. Rejected: a refusal that only points at the playbook
+    (an extra round trip for every malformed call).
   - A batch applies in order; `links` refer to existing IDs only.
   - `now_path` (technical decision (80)) names a file holding the Now
     fragment, so a large fragment does not travel inside a JSON tool
@@ -194,20 +271,29 @@ because it collides with the HTML `<canvas>` element inside an HTML file.
     slot takes a fragment only.
     Rejected: re-reading the file at every render (the board changes
     silently when the file changes or disappears).
-  - A call with no arguments re-renders.
-  - Both tools are lead-only, follow the existing schema/precheck path in
-    `Server.callTool`, declare every argument they read, and refuse with a
-    knob-off message when the knob is off.
-  - The array-of-object arguments reuse the typed-array rejection from
-    `260920-bug-ws-mcp-input-shape-coercion-traps`, with a type-accurate
-    message when a JSON string arrives where an array is expected.
+  - An `update` with an empty payload re-renders.
+  - Both tools are lead-only: `callTool` refuses them for every key where
+    `isTopLevelLead()` is false, beside the role gate, so a delegated child
+    key can neither write nor read the board (announced default (108), the
+    note-write precedent of
+    `261030-feat-note-layer-discipline-and-worker-readonly`). They follow
+    the existing schema/precheck path in `Server.callTool` for their two
+    top-level arguments. Neither refuses on
+    the knob (user decision (68)).
+  - Array-of-object fields inside the payload get the same type-accurate
+    message as the typed-array rejection from
+    `260920-bug-ws-mcp-input-shape-coercion-traps` when a JSON string
+    arrives where an array is expected.
 
   Rejected: eight single-operation tools (`item_add`, `item_answer`,
   `item_update`, `topic_close`, `now_set`, `ticket_watch`, `render`,
   `query`) and a three-tool split (`items`, `render`, `query`): more tools
   for the same operations. Also rejected: a `board.*` namespace (collides
-  with "ticket board") and one tool with a generic `op` union (weaker
-  per-field schemas).
+  with "ticket board") and one tool with a generic `op` union. With the
+  advertised schema now opaque, that union's original drawback (weaker
+  per-field schemas) no longer applies; the two-tool split stands
+  (announced default (94)) because a read-only `query` beside a mutating
+  `update` keeps reads safe to call freely.
 - **One render per update (user decision (52)).** Every `whiteboard.update`
   call ends in a render that overwrites the full page, bumps its stamp, and
   writes a new embed snapshot. It returns both paths, whether or not the
@@ -224,9 +310,14 @@ because it collides with the HTML `<canvas>` element inside an HTML file.
   `ws/whiteboard.refresh` (every render pays the full structure in tokens,
   and a hand-maintained page drops items; replaces 10-30 user decision
   (43)).
-- **Implicit full render for todo and agenda.** With the knob on, the
-  existing todo write tools, `agenda.set`, and `agenda.clear` also re-render
-  the full page (stamp bumped), never an embed. Each section provider
+- **Implicit full render for todo and agenda.** Once a session's board
+  exists (its first `whiteboard.update` created it), the existing todo write
+  tools, `agenda.set`, and `agenda.clear` also re-render the full page
+  (stamp bumped), never an embed. The gate is board existence, not the knob
+  (technical decision (96)): a knob-on session that has not rendered yet
+  writes no file, and a knob-off session that used the board ad hoc keeps it
+  current. Rejected: gating on the knob (creates pages in sessions that never
+  asked for one, and leaves an ad hoc board stale). Each section provider
   declares which tool calls dirty it. Bursts need no server debounce: the
   loader polls every 1-2 s, and the dirty-form deferral below protects
   input.
@@ -405,6 +496,23 @@ because it collides with the HTML `<canvas>` element inside an HTML file.
 
 ### Workflow text
 
+- **`whiteboard` playbook is the single source (technical decision (95)).**
+  A new bundled playbook `whiteboard` holds the tool usage and the inner
+  payload schema. It also carries the capture line shared with the knob-on
+  lead-discuss variant (technical decision (100)), so an ad hoc knob-off
+  user of the board reads it too: "Confirmed decisions reach a ticket only
+  through lead-ticket, once the user moves to capture; the board clears with
+  the session key." The line names the action (record in a ticket at the
+  user's capture signal), not a disclaimer, and keeps lead-discuss's
+  wait-for-the-user's-signal rule.
+  - Knob off: the workflow manual carries no whiteboard text; the tool
+    descriptions point at `playbook.read` for `whiteboard`.
+  - Knob on: the manual's whiteboard section includes the same playbook
+    content beside the mandate below, so the lead needs no extra read.
+
+  Rejected: the inner schema in the manual unconditionally (every
+  downstream session pays it, the cost (90c) removes); two hand-kept copies
+  of the schema (drift).
 - **Workflow-manual section (rendered only when the knob is on; compact,
   since the manual is injected every session).**
   - The whiteboard is the primary channel (10-30 user decision (40a)).
@@ -415,6 +523,13 @@ because it collides with the HTML `<canvas>` element inside an HTML file.
     syntax.
   - Order per turn: one `whiteboard.update` with the turn's changes, then
     the pointer or embed line.
+  - The pointer is one terminal line naming the full-page path the update
+    returned and the IDs asked this turn, for example
+    `Whiteboard: ai-docs/whiteboards/<reply-id>.html - (102), (103)`
+    (technical decision (110)). The `whiteboard` playbook states it, so ad
+    hoc knob-off use gives it too; an embed-capable host gets the embed line
+    instead. Rejected: a bare "see the whiteboard" line (the user needs the
+    file and which items await an answer).
   - The user answers by ID in the terminal or chat, typed or pasted from
     "copy answers".
   - Skill-reserved asks (the lead-review next-step handoff, the lead-ship
@@ -424,44 +539,80 @@ because it collides with the HTML `<canvas>` element inside an HTML file.
     `Ticket: <path>`) stay in the terminal.
   - Lead sessions only; workers and subagents do not use the whiteboard.
   - The text is host-neutral (Claude, Codex, Pi).
-- **Knob-on variants of existing rules.**
+- **Knob-on variants of existing rules.** They are applied code-side in the
+  `printPlaybook` path, the mechanism the workflow-manual knob append
+  already uses (technical decision (107)), so the rsrc mirrors stay
+  byte-identical. Rejected: a new template conditional (the template engine
+  has none).
   - The workflow manual's `### Asking the user` rule "Discussion keeps no
     counter" gains a knob-on variant: IDs come from the store.
-  - lead-discuss's "nothing here is persisted" gains a knob-on variant: items
-    persist in the session store, which is not a decision record; only
-    lead-ticket persists decisions.
-  - lead-ticket gains a knob-on step: `watch` the ticket whose queue it
-    opens.
-- **Claude status band (claude-mod).**
-  - Row 3:
-    - Left: the full page path relative to the session root, computed from
-      the reply id the band already reads plus the knob. It shows even
-      before the file exists. Make it an OSC 8 link to the absolute
-      `file://` URL when the host's element table supports links.
-    - Right end: one capsule `todo N/M · K agendas`.
-  - Row 4 is removed.
-  - With the knob off, row 3 left falls back to the focus todo (current
-    behavior).
+  - lead-discuss's "nothing here is persisted" gains a knob-on variant: the
+    capture line of the `whiteboard` playbook (see above), word for word.
+    Rejected: "the store is not a decision record" (a disclaimer that names
+    no action, so it does not lead the reader to record decisions; user
+    review, 2026-11-04).
+  - lead-ticket gains a knob-on step: when it opens or resumes a queue, it
+    `add`s the queue's open items to the board under their ticket IDs, and
+    applies each settled answer to the store as well as the ticket.
+- **No status band change (user decision (103), 2026-11-04).** The
+  Claude status band keeps the Rows 3 and 4 of
+  `261028-feat-claude-mod-status-band` unchanged; the per-turn pointer line
+  above is how the user finds the board, and it also reaches users who
+  turned the band off. Rejected: a band row showing the page path, with
+  Row 4 removed (reverses 261028 for every band session, and misses users
+  without the band); the earlier technical decision (98) is withdrawn with
+  it.
 
 ## Constraints
 
 - Manuals that bind this work: `ai-docs/manuals/shipped-surface-boundary.md`
   (tool strings, manual and playbook text, page templates ship downstream),
   `ai-docs/manuals/skill-authoring.md` (manual and playbook prose),
-  `ai-docs/manuals/wsflow-mirroring.md` (knob in both config manifests;
-  manual, playbook, and band mirrors), `ai-docs/manuals/ws-mcp.md` (new
-  tools).
+  `ai-docs/manuals/wsflow-mirroring.md` (manual and playbook mirrors),
+  `ai-docs/manuals/ws-mcp.md` (new tools).
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for agents-plugin/, agents-plugin-wsflow/, agents-plugin-tool/)
+- Convention: ai-docs/manuals/skill-authoring.md (declared for agents-plugin/rsrc/, agents-plugin/skills/, agents-plugin-wsflow/rsrc/, agents-plugin-wsflow/skills/, agents-plugin-tool/internal/wsdoc/conventions/)
+- Convention: ai-docs/manuals/wsflow-mirroring.md (declared for agents-plugin/rsrc/, agents-plugin/skills/, agents-plugin/hooks/, agents-plugin-wsflow/)
+- Convention: ai-docs/manuals/ws-mcp.md (declared for agents-plugin-tool/internal/mcp/)
 - Remote sessions without local file access are out of scope for the full
   page; the knob stays off there.
 - Out of scope:
   - hand-off of items between sessions;
   - section providers beyond the core set;
+  - any Claude status band change ((103));
   - serving the pages over HTTP in any form (local server, SSE, websocket),
     per the change-signal rejection; both pages are plain files.
-- Unverified assumption: an inline host can embed a file at
-  `ai-docs/whiteboards/`. The downstream session kept its pages in the Orca
+- Unverified assumption, probed in Phase 2 ((105)): an inline host can
+  embed a file at `ai-docs/whiteboards/`. The downstream session kept its pages in the Orca
   chat scratch directory, and nothing has shown whether Orca accepts other
   paths.
+
+## Prior Decisions
+
+- 261029-feat-claude-mod-package-parity-knob-defaults (2026-10-29, Decisions D2): "Knobs and per-package defaults. Each default is that package's current behavior, except the ws status band (user change)" — bearing: constrains
+- 261028-feat-claude-mod-status-band (2026-10-28, Decisions): "Row 3 (ws focus row): the session's in-progress todo, or its first pending todo when none is in progress, as `▶ <key> <title>` bright on the left; a `todo <done>/<total>` capsule on the right." — bearing: constrains
+- 261028-feat-claude-mod-status-band (2026-10-28, Decisions): "The knob is `claude.status_band_enabled`, boolean, default `false`, in `agents-plugin/config-manifest.json`, read through `config_get`" (ws default later changed to true by 10cde199) — bearing: supports
+- 261031-feat-claude-mod-manual-via-preload-once (2026-10-31, Decisions (61)): "One appended row per epoch carries manual, key, and state" — the manual reaches a Claude lead once per epoch via lead skill expansion — bearing: constrains
+- 261030-feat-note-layer-discipline-and-worker-readonly (2026-10-31, Result): "`callTool` denies `note.write`/`erase`/`mute`/`unmute` beside the role gate to every key where `isTopLevelLead()` is false" — bearing: supports
+- d17abbea (2026-11-04, commit): "Scope widened beyond the three listed playbook copies to six files: agents-plugin/rsrc/manifest.json, agents-plugin-wsflow/rsrc/manifest.json, and agents-plugin-pi/rsrc/manifest.json each change one line" — bearing: constrains
+- 6d1e00d2 (2026-10-30, commit): "Settled in lead-discuss 2026-10-30: user decisions (40a) whiteboard is the primary channel, (41) current-state page with terminal pointer only, (43) new ws/whiteboard.refresh tool; name whiteboard over blackboard/canvas" — bearing: supports
+- 95d18ff6 (2026-09-15, commit): "$(GitRoot) binds to the primary worktree root (worktree list first entry), so acquire called from any linked worktree resolves the one shared pool" (origin of registerPoolExclude) — bearing: supports
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | built-in config key, internal/mcp tools and session state, rsrc playbooks and manual with wsflow and Pi mirrors |
+| scope.surface | cross-module | two new MCP tools, a new config key, a new playbook, manual text |
+| scope.new_public_symbol | yes | whiteboard.update, whiteboard.query, workflow.whiteboard_enabled, whiteboard playbook |
+| scope.new_type_contract | yes | whiteboard.update payload and item schema (class, status, answer_quote, links) |
+| scope.test_surface | new-files | no whiteboard test exists (search for whiteboard under agents-plugin, agents-plugin-wsflow, agents-plugin-tool, agents-plugin-pi found nothing); existing agents-plugin-tool/internal/mcp tests and wsrsrc/pi_mirror_test.go would extend |
+| complexity.reuse_points | confirmed | registerPoolExclude (agents-plugin-tool/internal/mcp/worktree_tools.go#L216), sessionStore.maybePrune marker (internal/mcp/session_prune.go#L28), session state record (internal/mcp/session_state.go), wsmailbox.ReplyID (internal/wsmailbox/replyid.go#L26) |
+| complexity.side_effect_risk | high | writes files under the repo, adds re-render hooks to todo and agenda write tools, and rewrites a manual injected into every session |
+| risk.correctness | high | many interacting parts: ID minting with explicit ids and id_floor, rotation and eviction, atomic stamp write, GC by derived reply id |
+| risk.fit | high | the knob is a built-in `workflow.*` key (technical decision (101)), not a package config-manifest key; the store, tools, renderer, and playbook span several modules |
+| risk.test | high | browser-side behavior (reload, dirty-form deferral, copy) has only a manual check, and the surface spans Go, TS, and mirrored text |
+| risk.security_or_contract | moderate | new lead-only tool surface and Now fragment HTML written to disk unescaped by design; sandboxed embed, no network |
 
 ## Phases
 
@@ -473,9 +624,14 @@ Pages, "Approved mockup is the template reference") until Phase 3 absorbs
 it, so the Phase 3 worker can find it; an untracked `ws/path.generate`
 artifact was rejected for that reason.
 
-### Phase 2: Probe file:// behavior on Windows browsers
+### Phase 2: Probe file:// behavior and the Orca embed path
 
-Verify on native Windows Chrome and Edge, with a `file://` page:
+A user-run probe (technical decision (104)): the worker host cannot run
+Windows browsers, and a macOS check recorded as Windows coverage would be
+false evidence. The worker builds a self-contained probe page, its stamp
+script, a one-shot stamp rewriter, and a checklist, then hands them to the
+user. The user runs the checklist on native Windows Chrome and Edge, on a
+WSL path opened through `\\wsl.localhost\...`, and on macOS `file://`:
 
 - the page can repeatedly inject `<script src="x.stamp.js?t=<now>">` and
   observe a rewritten stamp within one poll interval (no stale cache);
@@ -483,26 +639,34 @@ Verify on native Windows Chrome and Edge, with a `file://` page:
 - `sessionStorage` survives the reload;
 - `document.execCommand('copy')` works.
 
-Also check a WSL path opened through `\\wsl.localhost\...`. The Orca probe
-does not cover these, because it ran in a sandboxed iframe, not a `file://`
-tab. Record the result. If re-injection does not observe changes, stop and
-return to the lead before Phase 3, because the change signal depends on it.
+The Orca probe from Background does not cover these, because it ran in a
+sandboxed iframe, not a `file://` tab.
+
+Also probe the Orca embed path (technical decision (105)): an embed file
+placed under `ai-docs/whiteboards/` and shown through Orca's embed syntax.
+
+The worker records the user's outcome per platform in this phase's
+`### Result`. Stop and return to the lead before Phase 3 if re-injection
+does not observe changes (the change signal depends on it) or if Orca
+refuses the embed path (a fallback location is then a user decision).
 
 ### Phase 3: Implement the whiteboard
 
 Implement every item in Decisions:
 
-- the knob in both config manifests;
+- the knob as a built-in `workflow.whiteboard_enabled` key;
 - the store in the session state record;
-- `whiteboard.update` and `whiteboard.query`;
+- `whiteboard.update` and `whiteboard.query`, with the minimal advertised
+  schema and the `whiteboard` playbook (ws canonical rsrc, wsflow and Pi
+  mirrors, manifest hashes);
 - the render of the full page, stamp, and embed snapshot from templates
   derived from the approved mockup;
 - the implicit full render from todo and agenda writes;
-- ticket-queue watching;
 - exclude registration and GC;
 - the knob-gated workflow-manual section and the lead-discuss and
-  lead-ticket variants, with wsflow and Pi mirrors;
-- the status band row-3 rework.
+  lead-ticket variants, applied code-side in `printPlaybook`, with wsflow
+  and Pi mirrors;
+- the per-turn pointer line in the `whiteboard` playbook.
 
 Remove `ai-docs/ref/whiteboard-mockup/` once the templates absorb it.
 
@@ -510,13 +674,17 @@ Verification:
 
 - Go tests in `internal/mcp`:
   - a batch applies in order and returns minted IDs in `add` order;
-  - minting exceeds every watched ticket's last-ID line;
-  - an item in both the store and a watched ticket renders once, from the
-    ticket;
+  - `add` with an explicit `id` adopts it and raises the counter; an
+    explicit `id` already in the store is refused;
   - `answered` without `answer_quote` is refused;
-  - a JSON string passed for an array argument is refused with a
-    type-accurate message;
-  - rotation keeps 10 visible settled items, collapses the rest per topic,
+  - `tools/list` advertises both tools as `{session_key, payload}` only;
+  - a JSON string passed as `payload`, or for an array field inside it, is
+    refused with a type-accurate message;
+  - a malformed payload is refused with every problem and the inner schema;
+  - `id_floor` above the counter raises it so the next minted ID is
+    floor+1; a floor at or below the counter is ignored without error;
+  - rotation keeps the 10 most recent settled items board-wide expanded in
+    their topic blocks, collapses the rest behind each topic's chip,
     caps the archive at 500, and `close_topics` collapses at once;
   - `query` returns archived items;
   - each update writes the full page, a new embed, and the stamp, with the
@@ -526,16 +694,45 @@ Verification:
   - `now_path` content is read once and survives the file's deletion;
     `now` with `now_path`, and a full HTML document, are refused;
   - Now renders above the topics only when the render changed it;
-  - todo and agenda writes re-render only the full page, and only with the
-    knob on;
-  - both tools refuse when the knob is off;
-  - the exclude entry is added once (idempotent);
+  - todo and agenda writes re-render only the full page, and only once the
+    session's board exists, knob on or off;
+  - both tools work with the knob off, and refuse a key where
+    `isTopLevelLead()` is false;
+  - the knob is global-only and appears in the lead-tune catalog;
+  - no `ai-docs/whiteboards/` directory or exclude entry exists before a
+    session's first render, and the exclude entry is added once
+    (idempotent);
   - GC removes orphaned files and keeps live ones, at most once per day;
   - the manual section and the playbook variants render only when the knob
-    is on.
+    is on; with the knob off the manual has no whiteboard text and the tool
+    descriptions point at the `whiteboard` playbook.
 - wsflow mirror and Pi tree drift tests pass.
-- claude-mod engine tests for the row-3 layout with the knob on and off,
-  and for row 4's removal.
 - A manual browser check of a real full page across several updates
   (reload, scroll and panel restoration, dirty-form deferral, copy
   answers), and of an embed snapshot opened standalone.
+
+## Blocked (2026-11-04)
+
+### Design Reviewer — block
+
+| # | Title | Severity | Resolution |
+|---|-------|----------|------------|
+| 1 | Status band rework reverses 261028 without naming it | important | missing |
+| 2 | Contract for items in both the store and a watched ticket is undefined | important | missing |
+| 3 | Phase 2 requires native Windows browsers the worker may not have | important | autonomous |
+| 4 | The Orca embed-path assumption has no verification step | important | autonomous |
+| 5 | Knob scope versus manual-render config options | minor | autonomous |
+| 6 | No mechanism named for knob-on playbook variants | minor | autonomous |
+| 7 | Settled rotation versus topic-collapsed settled chips | minor | autonomous |
+| 8 | Lead-only gate granularity | minor | autonomous |
+
+### Completeness Reviewer — block
+
+| # | Title | Severity |
+|---|-------|----------|
+| 1 | Behavior of answer/patch on ticket-sourced items is unspecified | important |
+| 2 | Phase 2 has no executor or environment, and no recording location | minor |
+| 3 | Unverified embed-path assumption has no acceptance check or fallback | minor |
+| 4 | Stale reference in Route Facts | minor |
+| 5 | Settled-item rotation scope is ambiguous | minor |
+| 6 | Band row 4 content and field formats are left to discovery | minor |
