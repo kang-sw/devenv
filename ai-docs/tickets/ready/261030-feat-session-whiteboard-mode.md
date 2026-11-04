@@ -732,6 +732,44 @@ The worker records the user's outcome per platform in this phase's
 does not observe changes (the change signal depends on it) or if Orca
 refuses the embed path (a fallback location is then a user decision).
 
+### Result (993404aff) - 2026-11-04
+
+Probe kit landed at `ai-docs/ref/whiteboard-probe/`: `probe.html`, its
+`probe.stamp.js`, one-shot rewriters `rewrite-stamp.sh` (macOS, WSL) and
+`rewrite-stamp.ps1` (native Windows), and `CHECKLIST.md`. Each rewriter run
+rewrites the page version, then the stamp, through a temp file and a rename;
+the page shows `STALE` when a reload reads a cached copy.
+
+User outcome per platform (2026-11-04):
+
+| platform | outcome |
+|----------|---------|
+| macOS Chrome 150, `file://` | pass: stamp change seen 702 ms after a rewrite at a 1.5 s poll, `errors=0`, scroll restored exactly (2528/2528), page fresh, `sessionStorage` kept across 2 reloads with the panel state, `execCommand('copy')` true and paste matched |
+| native Windows Chrome, Edge | not run: the user has no Windows PC and accepted the macOS pass as sufficient |
+| WSL path through `\\wsl.localhost\...` | not run, same reason |
+
+Residual risks of the unverified rows: a rename refused by a Windows sharing
+violation while the browser polls (mitigated by technical decision (119));
+WSL 9P caching delaying stamp visibility, which only slows the refresh.
+`rewrite-stamp.ps1` was never executed.
+
+Before the user run, the worker validated the kit in headless Chrome 156 on
+macOS over CDP (kit check, not platform evidence): all checks passed. That
+run also showed that a status line filled in after `window.scrollTo` grows a
+sticky header, and Chrome scroll anchoring then shifts the restored
+position by 20-41 px. The full page must restore scroll after every
+synchronous DOM fill.
+
+Orca embed path: refused. Orca 1.4.248 accepts only a bare file name
+(`^[A-Za-z0-9][A-Za-z0-9._-]*\.html$`) read from the chat's own scratch
+folder, refuses symlinks, files over 524288 bytes, and WSL or remote
+sessions; the lead's live check showed a bare name in `$ORCA_CHAT_SCRATCH_DIR`
+rendering and `ai-docs/whiteboards/...` relative and absolute paths shown as
+plain text. Resolved by user decision (115a) (`embed_dir`) and (118b).
+
+The re-injection stop condition did not trigger (macOS observed every
+change), so Phase 3 proceeds.
+
 ### Phase 3: Implement the whiteboard
 
 Implement every item in Decisions:
