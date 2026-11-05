@@ -607,7 +607,7 @@
         "email": "ki6080@gmail.com",
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-11-05T00:37:26Z",
         "impl": {
           "branch": "impl/develop/crumb-shame-aim"
