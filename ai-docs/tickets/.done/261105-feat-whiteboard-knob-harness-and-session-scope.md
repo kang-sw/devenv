@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 04ce7a068fe675a6
 sage-review-completeness-reviewed: 04ce7a068fe675a6
+completed: 2026-11-05
 ---
 
 # workflow.whiteboard_enabled - per-harness and session-scoped values
