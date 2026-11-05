@@ -874,7 +874,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		// config.tuning path: project the per-key writer schema + current values,
 		// with the no-agent full-ws-only cut applied per entry.
 		catalogResolver := s.sessionResolver(sessionKey, s.declared.withDefaults(builtinConfigAndPromptDefaults()))
-		catalog, err := buildTuningCatalog(rsrcRoot, &catalogResolver, sessionKey, NoAgentMode())
+		catalog, err := buildTuningCatalog(rsrcRoot, &catalogResolver, sessionKey, s.currentHarness(), NoAgentMode())
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
@@ -930,8 +930,10 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: session_key is required"))
 			}
 		}
-		// Harness: load-bearing for prompt.* and agents.tier; accepted but ignored
-		// (warning-only, Decision 5) for keys that do not vary by harness.
+		// Harness: load-bearing for harness-applicable keys (the harness-bucketed
+		// prompt.* and workflow.whiteboard_enabled, and agents.tier); accepted
+		// but ignored (warning-only, Decision 5) for keys that do not vary by
+		// harness.
 		harness, _ := params.Arguments["harness"].(string)
 		// Case-insensitive, matching the wsconfig/CLI paths: aliasTargetKey
 		// lowercases via strings.ToLower before matching codex/claude/pi/default,
@@ -963,6 +965,12 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		// wsconfig scope registry Resolver.Set/Unset consult, so resolve it here.
 		if explicitScope == "" && entry.Declared != nil {
 			explicitScope = entry.Declared.DefaultScope
+		}
+		// A harness-bucketed key stores its value under the harness bucket
+		// (harnessBucketKey); every other key stores under its own name.
+		storeKey := entry.Key
+		if entry.HarnessBucketed() {
+			storeKey = harnessBucketKey(entry.Key, harness)
 		}
 		if entry.Key == "agents.tier" && explicitScope != "" && explicitScope != wsconfig.ScopeProject && explicitScope != wsconfig.ScopeGlobal {
 			return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: agents.tier only supports project or global scope; got %q", explicitScope))
@@ -996,18 +1004,14 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			if strings.HasPrefix(entry.Key, "prompt.") {
 				// prompt override unset (subsumes config.prompt.unset).
 				pointID := strings.TrimPrefix(entry.Key, "prompt.")
-				storedHarness := harness
-				if storedHarness == "*" {
-					storedHarness = "all"
-				}
-				overrideKey := "prompt." + pointID + "." + storedHarness
+				storedHarness := strings.TrimPrefix(storeKey, entry.Key+".")
 				resolver := wsconfig.NewResolver(writeOpts, nil, adapter, adapter)
-				if err := resolver.Unset(overrideKey, wsconfig.SetOptions{ExplicitScope: explicitScope, SessionKey: sessionKey}); err != nil {
+				if err := resolver.Unset(storeKey, wsconfig.SetOptions{ExplicitScope: explicitScope, SessionKey: sessionKey}); err != nil {
 					return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %w", err))
 				}
 				resolvedScope := explicitScope
 				if resolvedScope == "" {
-					resolvedScope = wsconfig.DefaultScope(overrideKey)
+					resolvedScope = wsconfig.DefaultScope(storeKey)
 				}
 				return toolTextResponse(req.ID, fmt.Sprintf("prompt override cleared: %s/%s (scope: %s)\n", pointID, storedHarness, resolvedScope)+repoWriteNote(&resolver, resolvedScope), nil)
 			}
@@ -1015,7 +1019,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			// Reset means "drop the override and fall back to the builtin default" —
 			// distinct from explicitly writing the builtin's current value.
 			resolver := wsconfig.NewResolver(writeOpts, builtinConfigDefaults(), adapter, adapter)
-			if err := resolver.Unset(entry.Key, wsconfig.SetOptions{ExplicitScope: explicitScope, SessionKey: sessionKey}); err != nil {
+			if err := resolver.Unset(storeKey, wsconfig.SetOptions{ExplicitScope: explicitScope, SessionKey: sessionKey}); err != nil {
 				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %w", err))
 			}
 			// The echo reads through the session-anchored resolver so a reset
@@ -1023,10 +1027,14 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			// included). The reset already happened, so an echo load failure is
 			// reported beside it rather than as a failed tune.
 			note := repoWriteNote(&resolver, resetEchoScope(explicitScope, entry))
-			echo := s.sessionResolver(sessionKey, s.declared.withDefaults(builtinConfigDefaults()))
-			resolved, err := echo.Get(sessionKey, entry.Key)
+			resolved, _, err := s.effectiveConfigValue(entry, sessionKey)
 			if err != nil {
-				return toolTextResponse(req.ID, fmt.Sprintf("%s: reset [scope:%s]\nwarning: effective value unreadable: %v\n", entry.Key, resetEchoScope(explicitScope, entry), err)+note, nil)
+				return toolTextResponse(req.ID, fmt.Sprintf("%s: reset [scope:%s]\nwarning: effective value unreadable: %v\n", storeKey, resetEchoScope(explicitScope, entry), err)+note, nil)
+			}
+			if entry.HarnessBucketed() {
+				// The cleared bucket and the value that now applies to this
+				// session's harness are different keys, so name both.
+				return toolTextResponse(req.ID, fmt.Sprintf("%s: reset [scope:%s]\neffective %s: %s [scope:%s]\n", storeKey, resetEchoScope(explicitScope, entry), entry.Key, resolved.Value, resolved.Scope)+note, nil)
 			}
 			return toolTextResponse(req.ID, fmt.Sprintf("%s: %s [scope:%s]\n", entry.Key, resolved.Value, resolved.Scope)+note, nil)
 		}
@@ -1052,18 +1060,14 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			if strings.TrimSpace(promptText) == "" {
 				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: prompt must be non-empty"))
 			}
-			storedHarness := harness
-			if storedHarness == "*" {
-				storedHarness = "all"
-			}
-			overrideKey := "prompt." + pointID + "." + storedHarness
+			storedHarness := strings.TrimPrefix(storeKey, entry.Key+".")
 			resolver := wsconfig.NewResolver(writeOpts, nil, adapter, adapter)
-			if err := resolver.Set(overrideKey, promptText, wsconfig.SetOptions{ExplicitScope: explicitScope, SessionKey: sessionKey}); err != nil {
+			if err := resolver.Set(storeKey, promptText, wsconfig.SetOptions{ExplicitScope: explicitScope, SessionKey: sessionKey}); err != nil {
 				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %w", err))
 			}
 			resolvedScope := explicitScope
 			if resolvedScope == "" {
-				resolvedScope = wsconfig.DefaultScope(overrideKey)
+				resolvedScope = wsconfig.DefaultScope(storeKey)
 			}
 			return toolTextResponse(req.ID, fmt.Sprintf("prompt override set: %s/%s (scope: %s)\n", pointID, storedHarness, resolvedScope)+repoWriteNote(&resolver, resolvedScope), nil)
 		default:
@@ -1093,22 +1097,22 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 				}
 			}
 			resolver := wsconfig.NewResolver(writeOpts, builtinConfigDefaults(), adapter, adapter)
-			if err := resolver.Set(entry.Key, value, wsconfig.SetOptions{ExplicitScope: explicitScope, SessionKey: sessionKey}); err != nil {
+			if err := resolver.Set(storeKey, value, wsconfig.SetOptions{ExplicitScope: explicitScope, SessionKey: sessionKey}); err != nil {
 				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %w", err))
 			}
 			resolvedScope := explicitScope
 			if resolvedScope == "" {
 				resolvedScope = entry.DefaultScope()
 			}
-			text := fmt.Sprintf("%s: %s [scope:%s]\n", entry.Key, value, resolvedScope) + repoWriteNote(&resolver, resolvedScope)
+			text := fmt.Sprintf("%s: %s [scope:%s]\n", storeKey, value, resolvedScope) + repoWriteNote(&resolver, resolvedScope)
 			// A write below a set scope (for example a global write under a
-			// committed repo value) does not take effect; say which value does.
-			echo := s.sessionResolver(sessionKey, s.declared.withDefaults(builtinConfigDefaults()))
-			effective, err := echo.Get(sessionKey, entry.Key)
+			// committed repo value), or into another harness's bucket, does not
+			// take effect for this session; say which value does.
+			effective, answeredKey, err := s.effectiveConfigValue(entry, sessionKey)
 			if err != nil {
 				text += fmt.Sprintf("warning: effective value unreadable: %v\n", err)
-			} else if effective.Scope != resolvedScope {
-				text += fmt.Sprintf("shadowed: effective %s: %s [scope:%s]\n", entry.Key, effective.Value, effective.Scope)
+			} else if effective.Scope != resolvedScope || answeredKey != storeKey {
+				text += fmt.Sprintf("shadowed: effective %s: %s [scope:%s]\n", answeredKey, effective.Value, effective.Scope)
 			}
 			return toolTextResponse(req.ID, text, nil)
 		}
@@ -2051,7 +2055,17 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			return toolTextResponse(req.ID, "", err)
 		}
 		// printPlaybook carries no session key, so the session-resolved
-		// ticket_review_auto_ack variant is applied here.
+		// workflow.whiteboard_enabled and ticket_review_auto_ack variants are
+		// applied here.
+		knobResolver := s.sessionResolver(keyStr, builtinConfigDefaults())
+		whiteboardOn, err := s.whiteboardEnabled(&knobResolver, keyStr)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		body, err = applyWhiteboardVariants(s, rsrcRoot, name, body, whiteboardOn)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
 		autoAck, err := s.ticketReviewAutoAckEnabled(keyStr)
 		if err != nil {
 			return toolTextResponse(req.ID, "", fmt.Errorf("resolve %s: %w", wsconfig.ItemTicketReviewAutoAck, err))
@@ -2547,11 +2561,6 @@ type promptOverridePoint struct {
 	Overrides []promptOverrideValue `json:"overrides"`
 }
 
-// promptOverrideHarnessBuckets is the fixed set of harness buckets a stored
-// override can target, in listing order. "all" is the stored spelling of the
-// caller-facing "*".
-var promptOverrideHarnessBuckets = []string{"claude", "codex", "pi", "all"}
-
 // buildPromptOverrideListing resolves the current override value+scope for each
 // declared point across every harness bucket. Unset buckets (empty resolved
 // value) are omitted. Session-scope values are only visible when sessionKey is
@@ -2560,8 +2569,8 @@ func buildPromptOverrideListing(points []overridePointDecl, resolver *wsconfig.R
 	listing := make([]promptOverridePoint, 0, len(points))
 	for _, p := range points {
 		entry := promptOverridePoint{PointId: p.PointId, Desc: p.Desc, Overrides: []promptOverrideValue{}}
-		for _, harness := range promptOverrideHarnessBuckets {
-			rv, _ := resolver.Get(sessionKey, "prompt."+p.PointId+"."+harness)
+		for _, harness := range harnessBuckets {
+			rv, _ := resolver.Get(sessionKey, harnessBucketKey("prompt."+p.PointId, harness))
 			if strings.TrimSpace(rv.Value) == "" {
 				continue
 			}
@@ -2657,7 +2666,9 @@ type tuningAgentTierCurrent struct {
 	Effort  string `json:"effort,omitempty"`
 }
 
-func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey string, noAgentMode bool) (tuningCatalog, error) {
+// harness selects the bucket a harness-bucketed knob's current value is
+// resolved for (the session's detected harness; empty reads only all).
+func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey, harness string, noAgentMode bool) (tuningCatalog, error) {
 	points, err := scanOverridePoints(rsrcRoot)
 	if err != nil {
 		return tuningCatalog{}, err
@@ -2717,14 +2728,15 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 	appendKnob(whiteboardEntry, tuningKnob{
 		ID:          whiteboardEntry.Key,
 		Kind:        "workflow_preference",
-		Description: "Session whiteboard as the lead's primary channel, global-only (all of the user's projects). on adds a workflow-manual section, from the next workflow-manual load, that puts every item asked of the user and every explanation on a local HTML page the server renders (and on a per-turn embed snapshot for a host that shows HTML inline), leaving the terminal a one-line pointer; off (builtin) keeps asks and explanations in terminal text. The whiteboard tools work either way. Cost: on needs a browser tab beside the terminal and one whiteboard update per turn; off keeps everything in the terminal.",
+		Description: "Session whiteboard as the lead's primary channel (builtin off), per harness. on adds a workflow-manual section, from the next workflow-manual load, that puts every item asked of the user and every explanation on a local HTML page the server renders (and on a per-turn embed snapshot for a host that shows HTML inline), leaving the terminal a one-line pointer; off keeps asks and explanations in terminal text. The whiteboard tools work either way. A write lands in the session's harness bucket unless harness names another (* for every harness), and in global scope (all of the user's projects) unless scope names another. A read takes the session's harness bucket from any scope first, then the * bucket from any scope. Cost: on needs a browser tab beside the terminal and one whiteboard update per turn; off keeps everything in the terminal.",
 		Writer:      tuningWriter{Tool: whiteboardEntry.WriterTool, FixedArguments: map[string]string{"key": whiteboardEntry.Key}},
 		Reset: &tuningWriter{
 			Tool:           whiteboardEntry.ResetTool,
 			FixedArguments: map[string]string{"key": whiteboardEntry.Key, "reset": "true"},
 		},
-		ValueFields: whiteboardEntry.ValueFields,
-		Current:     currentWorkflowPreference(resolver, sessionKey, wsconfig.ItemWorkflowWhiteboardEnabled),
+		SelectorFields: whiteboardEntry.SelectorFields,
+		ValueFields:    whiteboardEntry.ValueFields,
+		Current:        currentHarnessBucketedValue(resolver, sessionKey, whiteboardEntry.Key, harness),
 	})
 
 	bootstrapEntry := registryEntryByKey(wsconfig.ItemBootstrapAlarm)
@@ -2980,6 +2992,16 @@ func currentWorkflowPreference(resolver *wsconfig.Resolver, sessionKey, itemKey 
 	}
 }
 
+// currentHarnessBucketedValue is the catalog's current value of a
+// harness-bucketed knob: the value that applies to harness.
+func currentHarnessBucketedValue(resolver *wsconfig.Resolver, sessionKey, itemKey, harness string) tuningScopedValue {
+	rv, _, _ := resolveHarnessBucketed(resolver, sessionKey, itemKey, harness)
+	return tuningScopedValue{
+		Value: rv.Value,
+		Scope: string(rv.Scope),
+	}
+}
+
 func currentAgentTierMappings() ([]tuningAgentTierCurrent, error) {
 	cfg, err := wsconfig.LoadAgentTierConfig(wsconfig.Options{})
 	if err != nil {
@@ -3049,6 +3071,19 @@ func formatManifestErrors(rejected []string) string {
 		fmt.Fprintf(&b, "config manifest rejected: %s\n", msg)
 	}
 	return b.String()
+}
+
+// effectiveConfigValue resolves the value of a resolver-backed knob that
+// applies to sessionKey, through the session-anchored resolver with the
+// declared and builtin defaults, and returns the stored key that answered. A
+// harness-bucketed knob resolves for this server's session harness.
+func (s *Server) effectiveConfigValue(entry configKeyEntry, sessionKey string) (wsconfig.ResolvedValue, string, error) {
+	resolver := s.sessionResolver(sessionKey, s.declared.withDefaults(builtinConfigDefaults()))
+	if entry.HarnessBucketed() {
+		return resolveHarnessBucketed(&resolver, sessionKey, entry.Key, s.currentHarness())
+	}
+	rv, err := resolver.Get(sessionKey, entry.Key)
+	return rv, entry.Key, err
 }
 
 // resetEchoScope names the scope a config.tune reset removed the override from.
@@ -4406,16 +4441,16 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "config.tune",
-			"description": "Write one ws config knob, selected by its key (e.g. workflow.prefer_subagent, bootstrap_alarm, agents.tier, prompt.<pointId>, worktree.profile.<name>). Call config.list first for each key's exact value domain, scope rules, and harness applicability. value is a string for scalar knobs, an object ({tier, backend, model, effort}) for agents.tier, and a whole profile object (config.list value_schema) for worktree.profile.<name>; agents.tier reset takes value: {tier} only. scope is optional and backstops to the key's declared default; scope repo writes the committed .ws-workflow/config.json in the session's worktree without staging it, so include the reported path in your next git.commit paths; harness is load-bearing for prompt.* and agents.tier and warning-only (ignored) for keys that do not vary by harness. reset: true drops a knob's override back to its builtin/inherited default (only for keys that support reset). session_key is required at dispatch for lead-authority keys and prompt.* keys. Lead-only: delegate and leaf keys are blocked by the config.* prefix gate.",
+			"description": "Write one ws config knob, selected by its key (e.g. workflow.prefer_subagent, bootstrap_alarm, agents.tier, prompt.<pointId>, worktree.profile.<name>). Call config.list first for each key's exact value domain, scope rules, and harness applicability. value is a string for scalar knobs, an object ({tier, backend, model, effort}) for agents.tier, and a whole profile object (config.list value_schema) for worktree.profile.<name>; agents.tier reset takes value: {tier} only. scope is optional and backstops to the key's declared default; scope repo writes the committed .ws-workflow/config.json in the session's worktree without staging it, so include the reported path in your next git.commit paths; harness is load-bearing for harness-applicable keys (config.list lists a harness selector for them: prompt.*, workflow.whiteboard_enabled, agents.tier) and warning-only (ignored) for keys that do not vary by harness. reset: true drops a knob's override back to its builtin/inherited default (only for keys that support reset). session_key is required at dispatch for lead-authority keys and prompt.* keys. Lead-only: delegate and leaf keys are blocked by the config.* prefix gate.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"key":         stringProperty("Config knob key to write, e.g. workflow.prefer_subagent, bootstrap_alarm, agents.tier, prompt.<pointId>, worktree.profile.<name>, or an adapter-declared key. See config.list for the supported set."),
 					"value":       stringOrObjectProperty("New value. A string for scalar knobs (e.g. on/off), an object {tier, backend, model, effort} for agents.tier, or a profile object for worktree.profile.<name>. For agents.tier reset pass only {tier}; omit for other resets."),
 					"scope":       enumStringProperty("Optional storage scope. When omitted the write lands in the key's declared default scope. repo writes the committed .ws-workflow/config.json in the session's worktree (session_key required) and leaves staging to your next git.commit. Global-only keys reject non-global scopes; agents.tier supports project and global scopes; worktree.profile.<name> supports project, repo, and global.", wsconfig.ScopeSchemaEnum()),
-					"harness":     stringProperty("Optional harness selector. Load-bearing for prompt.* (claude, codex, pi, or * for all) and agents.tier (alias key); ignored for keys that do not vary by harness. When omitted for a harness-applicable key, defaults to the current session's detected harness."),
+					"harness":     stringProperty("Optional harness selector. Load-bearing for prompt.* and workflow.whiteboard_enabled (claude, codex, pi, or * for all) and agents.tier (alias key); ignored for keys that do not vary by harness. When omitted for a harness-applicable key, defaults to the current session's detected harness."),
 					"reset":       boolProperty("When true, drop the key's override and fall back to its builtin/inherited default instead of writing an explicit value. Mutually exclusive with value except agents.tier, which requires value: {tier}; only valid for keys that support reset."),
-					"session_key": stringProperty("Caller's lead ws session key. Required at dispatch for lead-authority keys (global-only workflow preferences and alarms) and for prompt.* keys; also the target session for a session-scope write."),
+					"session_key": stringProperty("Caller's lead ws session key. Required at dispatch for lead-authority keys (global-only workflow preferences and alarms, and workflow.whiteboard_enabled) and for prompt.* keys; also the target session for a session-scope write."),
 				},
 				"required": []string{"key"},
 			},

@@ -319,22 +319,42 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 	skepticalRV, _ := langResolver.Get(key, wsconfig.ItemWorkflowSkepticalPosture)
 	skepticalPosture := skepticalRV.Value != "off" // builtin default is "on"
 
+	// FRESH with root canonicalizes before rendering so the whiteboard knob
+	// below reads the committed repo scope at that root, as the keyed renders
+	// do; a FRESH render has no session, and the sentinel resolves no root.
+	var canonical string
+	if key == freshBootstrapKey && root != "" {
+		canonical, err = canonicalSetupRoot(root)
+		if err != nil {
+			return toolTextResponse(id, "", fmt.Errorf("workflow_manual: canonicalize root: %w", err))
+		}
+	}
+
 	body, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, workflowLang, overrideLookup)
 	if err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("workflow_manual: render playbook: %w", err))
+	}
+	knobResolver := s.sessionResolver(key, builtinConfigDefaults())
+	if canonical != "" {
+		knobAdapter := sessionConfigAdapter{s: s.sessions}
+		knobResolver = wsconfig.NewResolver(wsconfig.Options{RepoRoot: canonical}, builtinConfigDefaults(), knobAdapter, knobAdapter)
+	}
+	whiteboardOn, err := s.whiteboardEnabled(&knobResolver, key)
+	if err != nil {
+		return toolTextResponse(id, "", fmt.Errorf("workflow_manual: %w", err))
+	}
+	body, err = applyWhiteboardVariants(s, rsrcRoot, workflowManualPlaybookName, body, whiteboardOn)
+	if err != nil {
+		return toolTextResponse(id, "", fmt.Errorf("workflow_manual: %w", err))
 	}
 
 	// Only FRESH (sentinel) and CONTINUE (recOK) remain; the sentinel branch is
 	// checked first so it never depends on a (non-existent) sentinel record.
 	if key == freshBootstrapKey {
 		if root != "" {
-			// 3a. FRESH with root: canonicalize the root, mint a lead key, strip the
-			//     fresh-only block (caller already has a root — no need to instruct
-			//     them to call ferrule), and return the key inline.
-			canonical, err := canonicalSetupRoot(root)
-			if err != nil {
-				return toolTextResponse(id, "", fmt.Errorf("workflow_manual: canonicalize root: %w", err))
-			}
+			// 3a. FRESH with root (canonicalized above): mint a lead key, strip
+			//     the fresh-only block (caller already has a root — no need to
+			//     instruct them to call ferrule), and return the key inline.
 			// Resolved before the mint, so a bad profile fails the call without
 			// leaving a minted key the caller never received.
 			profilesBlock, err := worktreeProfilesForManual(wsconfig.Options{RepoRoot: canonical})

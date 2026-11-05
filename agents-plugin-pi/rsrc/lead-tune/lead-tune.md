@@ -48,7 +48,7 @@ Storage
 1. Take the knob and the value the user chose from its catalog `value` field.
 2. Choose the scope the user named; otherwise suggest one by the scope guidance in `On: explain knobs` and confirm it. A repo-scope choice goes to `On: commit repo-scope setting`.
 3. Confirm the Tuning Proposal.
-4. Call `config.tune` with the knob's id as `key`, `session_key`, the selected scope when the catalog exposes a scope selector, and the value.
+4. Call `config.tune` with the knob's id as `key`, `session_key`, the selected scope when the catalog exposes a scope selector, the harness the user named when the catalog exposes a harness selector (omitted, the write applies to this session's harness only), and the value.
 5. Report the stored value and scope.
 
 ## On: commit repo-scope setting

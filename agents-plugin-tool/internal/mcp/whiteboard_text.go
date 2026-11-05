@@ -8,9 +8,10 @@ import (
 )
 
 // Knob-on workflow text for workflow.whiteboard_enabled. It is applied
-// code-side in printPlaybook, the mechanism the workflow.prefer_subagent hint
-// already uses, so the rsrc mirrors stay byte-identical and the template
-// engine needs no conditional. "{{ns}}" stands for the runtime namespace.
+// code-side, after printPlaybook, by each reader that resolves the knob with
+// its own scopes (the playbook.read handler and the workflow_manual tool), so
+// the rsrc mirrors stay byte-identical and the template engine needs no
+// conditional. "{{ns}}" stands for the runtime namespace.
 // Each variant names the shipped text it replaces; when a prompt override or
 // a later edit removed that text, the variant is appended instead of lost.
 
@@ -68,17 +69,10 @@ func replaceOrAppend(body, old, replacement string) string {
 	return strings.TrimRight(body, "\n") + "\n\n" + replacement
 }
 
-// applyWhiteboardVariants applies the knob-on variants for one playbook.
-func applyWhiteboardVariants(s *Server, rsrcRoot, name, body string, configOpts wsconfig.Options) (string, error) {
-	switch name {
-	case workflowManualPlaybookName, "lead-discuss", "lead-ticket":
-	default:
-		return body, nil
-	}
-	enabled, err := workflowWhiteboardEnabled(configOpts)
-	if err != nil {
-		return "", fmt.Errorf("resolve %s: %w", wsconfig.ItemWorkflowWhiteboardEnabled, err)
-	}
+// applyWhiteboardVariants applies the knob-on variants for one playbook when
+// enabled (see Server.whiteboardEnabled); a disabled knob or another playbook
+// returns body unchanged.
+func applyWhiteboardVariants(s *Server, rsrcRoot, name, body string, enabled bool) (string, error) {
 	if !enabled {
 		return body, nil
 	}

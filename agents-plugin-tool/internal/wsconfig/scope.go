@@ -36,8 +36,10 @@ const (
 	// ItemWorkflowWhiteboardEnabled gates the workflow manual's whiteboard
 	// section, which makes the session whiteboard the lead's primary channel
 	// to the user. It gates only that text: the whiteboard tools work in
-	// every lead session. Global-only because the manual renders without a
-	// repository root. Builtin default: off.
+	// every lead session. It is harness-bucketed: values are stored under
+	// ItemWorkflowWhiteboardEnabled+"."+<claude|codex|pi|all>, and a value
+	// under this bare key is a legacy value read in the all position.
+	// Builtin default: off, held on the bare key only.
 	ItemWorkflowWhiteboardEnabled = "workflow.whiteboard_enabled"
 
 	// ItemSageReview is the layered config key for the completeness stage of the
@@ -145,7 +147,14 @@ const (
 
 func init() {
 	RegisterGlobalOnly(ItemWorkflowPreferSubagent)
-	RegisterGlobalOnly(ItemWorkflowWhiteboardEnabled)
+	// workflow.whiteboard_enabled is a cross-project viewing habit, so a write
+	// naming no scope lands in global; it still resolves through every scope.
+	// Its harness bucket keys carry the same default, or a scope-less bucket
+	// write would land in the unregistered-key default (project).
+	RegisterDefaultScope(ItemWorkflowWhiteboardEnabled, ScopeGlobal)
+	for _, bucket := range []string{"claude", "codex", "pi", "all"} {
+		RegisterDefaultScope(ItemWorkflowWhiteboardEnabled+"."+bucket, ScopeGlobal)
+	}
 	RegisterGlobalOnly(ItemWorkflowSkepticalPosture)
 	RegisterGlobalOnly(ItemBootstrapAlarm)
 	// sage_review* keys default to project scope: they are project-level opt-ins
