@@ -58,9 +58,10 @@ type configKeyEntry struct {
 	// agentless wsflow (no-agent) tuning catalog and tool surface.
 	NoAgentVisible bool
 	// RequiresLeadAuthority marks knobs that require a lead-scoped session
-	// key beyond the config.* prefix gate (today: exactly the global-only
-	// workflow-preference writers — see the 260814 Phase 1 plan's
-	// GlobalOnly-derivation finding).
+	// key beyond the config.* prefix gate (today: the global-only
+	// workflow-preference writers, whose entries derive it from
+	// wsconfig.GlobalOnly, and workflow.whiteboard_enabled, which sets it
+	// explicitly because it resolves through every scope).
 	RequiresLeadAuthority bool
 	// ResolverBacked reports whether this key is read/written through
 	// wsconfig.Resolver.Get/Set/Unset. False only for agents.tier, which
@@ -111,13 +112,71 @@ func (e configKeyEntry) RepoScoped() bool {
 }
 
 // RepoKey is the key a committed repo-scope file stores this knob under. A
-// prompt.* knob stores one entry per harness bucket, so its key names the
-// bucket set (claude|codex|pi|all, where all applies to every harness).
+// harness-bucketed knob stores one entry per harness bucket, so its key names
+// the bucket set (claude|codex|pi|all, where all applies to every harness).
 func (e configKeyEntry) RepoKey() string {
-	if strings.HasPrefix(e.Key, "prompt.") {
-		return e.Key + ".<" + strings.Join(promptOverrideHarnessBuckets, "|") + ">"
+	if e.HarnessBucketed() {
+		return e.Key + ".<" + strings.Join(harnessBuckets, "|") + ">"
 	}
 	return e.Key
+}
+
+// HarnessBucketed reports whether this knob stores one value per harness
+// bucket under <Key>.<bucket> (see harnessBucketKey) and resolves through
+// resolveHarnessBucketed. agents.tier is harness-applicable but not
+// resolver-backed: its structured per-harness values have their own writer,
+// so it never takes the bucket path.
+func (e configKeyEntry) HarnessBucketed() bool {
+	return e.HarnessApplicable && e.ResolverBacked
+}
+
+// harnessBuckets is the fixed set of harness buckets a harness-bucketed knob
+// stores values under, in listing order. "all" is the stored spelling of the
+// caller-facing "*" and applies to every harness.
+var harnessBuckets = []string{"claude", "codex", "pi", "all"}
+
+// harnessBucketKey is the stored key of key's value for one harness bucket;
+// the caller-facing "*" is stored as "all".
+func harnessBucketKey(key, harness string) string {
+	if harness == "*" {
+		harness = "all"
+	}
+	return key + "." + harness
+}
+
+// harnessBucketReadOrder lists the buckets a read for harness tries, in
+// order: the harness's own bucket, then all. An unknown (empty) harness, or
+// all itself, reads only all.
+func harnessBucketReadOrder(harness string) []string {
+	if harness == "" || harness == "*" || harness == "all" {
+		return []string{"all"}
+	}
+	return []string{harness, "all"}
+}
+
+// resolveHarnessBucketed resolves a harness-bucketed knob bucket-major: each
+// bucket in harnessBucketReadOrder through every scope the resolver reads
+// (session, project, repo, global, then a builtin seeded on the bucket key),
+// then the bare key through every scope and its builtin. The bare key holds
+// legacy values stored before the knob was bucketed, read in the all
+// position, and the knob's builtin default. An empty value is unset. It
+// returns the stored key that answered.
+func resolveHarnessBucketed(resolver *wsconfig.Resolver, sessionKey, key, harness string) (wsconfig.ResolvedValue, string, error) {
+	for _, bucket := range harnessBucketReadOrder(harness) {
+		bucketKey := harnessBucketKey(key, bucket)
+		rv, err := resolver.Get(sessionKey, bucketKey)
+		if err != nil {
+			return wsconfig.ResolvedValue{}, "", err
+		}
+		if rv.Value != "" {
+			return rv, bucketKey, nil
+		}
+	}
+	rv, err := resolver.Get(sessionKey, key)
+	if err != nil {
+		return wsconfig.ResolvedValue{}, "", err
+	}
+	return rv, key, nil
 }
 
 // configRegistry holds the static per-key entries. The dynamic prompt.*
@@ -141,13 +200,28 @@ var configRegistry = []configKeyEntry{
 		Key:        wsconfig.ItemWorkflowWhiteboardEnabled,
 		WriterTool: "config.tune",
 		ResetTool:  "config.tune",
+		SelectorFields: []tuningField{
+			{
+				Name:        "harness",
+				Description: "Harness bucket the value applies to. When omitted, defaults to the current session's detected harness. Use * explicitly for every harness (all).",
+				Enum:        promptHarnessEnum,
+			},
+			{
+				Name:        "scope",
+				Description: "Storage scope. When omitted the write lands in the item's declared default scope (global).",
+				Enum:        wsconfig.ScopeSchemaEnum(),
+			},
+		},
 		ValueFields: []tuningField{{
 			Name:        "value",
 			Description: "Desired mode: on or off. Omit when reset is true.",
 			Enum:        onOffEnum,
 		}},
-		NoAgentVisible:        true,
-		RequiresLeadAuthority: wsconfig.GlobalOnly(wsconfig.ItemWorkflowWhiteboardEnabled),
+		HarnessApplicable: true,
+		NoAgentVisible:    true,
+		// A lead-only knob at every scope: it shapes the lead's own channel
+		// to the user, so a write needs a lead session_key.
+		RequiresLeadAuthority: true,
 		ResolverBacked:        true,
 	},
 	{

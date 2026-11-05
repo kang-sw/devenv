@@ -685,7 +685,7 @@ func buildOverrideLookup(s *Server, sessionKey string) (overrideLookupFn, error)
 	if capturedKey == "" {
 		builtins := builtinPromptOverrideDefaults()
 		return func(pointId, harness string) (string, bool) {
-			v := builtins["prompt."+pointId+"."+harness]
+			v := builtins[harnessBucketKey("prompt."+pointId, harness)]
 			return v, v != ""
 		}, nil
 	}
@@ -694,7 +694,7 @@ func buildOverrideLookup(s *Server, sessionKey string) (overrideLookupFn, error)
 		return nil, err
 	}
 	return func(pointId, harness string) (string, bool) {
-		rv, _ := resolver.Get(capturedKey, "prompt."+pointId+"."+harness)
+		rv, _ := resolver.Get(capturedKey, harnessBucketKey("prompt."+pointId, harness))
 		return rv.Value, rv.Value != ""
 	}, nil
 }
@@ -705,8 +705,8 @@ func buildOverrideLookup(s *Server, sessionKey string) (overrideLookupFn, error)
 // from the rendered output — the result contains only resolved content and never
 // any override marker syntax.
 //
-// Resolution order per point: lookup(pointId, harness) → lookup(pointId, "all") →
-// inline seed body. An empty seed body (open marker immediately followed by close
+// Resolution order per point: lookup(pointId, bucket) for each bucket in
+// harnessBucketReadOrder(harness) (the harness, then all) → inline seed body. An empty seed body (open marker immediately followed by close
 // marker) is an extension slot: it renders the stored override or nothing.
 //
 // Robustness guarantees:
@@ -774,17 +774,14 @@ func applyOverrideMarkers(body, harness string, lookup overrideLookupFn) string 
 		seed := applyOverrideMarkers(strings.Join(seedLines, "\n"), harness, lookup)
 
 		// Resolve: harness-specific → all → seed.
-		var resolved string
+		resolved := seed
 		if lookup != nil {
-			if v, ok := lookup(pointId, harness); ok {
-				resolved = v
-			} else if v, ok := lookup(pointId, "all"); ok {
-				resolved = v
-			} else {
-				resolved = seed
+			for _, bucket := range harnessBucketReadOrder(harness) {
+				if v, ok := lookup(pointId, bucket); ok {
+					resolved = v
+					break
+				}
 			}
-		} else {
-			resolved = seed
 		}
 
 		// Append the resolved text (may be empty for empty-seed extension slots
@@ -1037,10 +1034,6 @@ func printPlaybook(s *Server, rsrcRoot, name string, callerContext map[string]st
 		if enabled {
 			body += "\n\nUse `" + RuntimeNamespace() + ":lead-delegate` for bounded investigation, diagnosis, drafting, and low-impact operational work."
 		}
-	}
-	body, err = applyWhiteboardVariants(s, rsrcRoot, name, body, configOpts)
-	if err != nil {
-		return "", "", err
 	}
 	return body, recommendedTier, nil
 }

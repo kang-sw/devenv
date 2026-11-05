@@ -34,6 +34,9 @@ func newWhiteboardFixture(t *testing.T) *whiteboardFixture {
 	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
 	initGit(t, root)
 	s := NewServer(root, "test")
+	// The harness the knob's bucket defaults to; tests switch it to model
+	// another harness's server.
+	s.sessionHarness = "claude"
 	key, loginRoot := parseLoginResponse(t, callLogin(t, s, 910000, root, nil))
 	return &whiteboardFixture{s: s, key: key, root: loginRoot, id: 1}
 }
@@ -533,24 +536,247 @@ func TestWhiteboardToolsRefuseSpawnedKeys(t *testing.T) {
 	f.update(t, `{}`)
 }
 
-func TestWhiteboardKnobIsGlobalOnlyAndCataloged(t *testing.T) {
+func TestWhiteboardKnobWriteDefaultsAndCatalog(t *testing.T) {
 	f := newWhiteboardFixture(t)
-	if !wsconfig.GlobalOnly(wsconfig.ItemWorkflowWhiteboardEnabled) {
-		t.Fatalf("workflow.whiteboard_enabled must be global-only")
+	if wsconfig.GlobalOnly(wsconfig.ItemWorkflowWhiteboardEnabled) {
+		t.Fatalf("workflow.whiteboard_enabled must resolve through every scope")
 	}
-	resp := f.call(t, "config.tune", map[string]any{"key": "workflow.whiteboard_enabled", "value": "on"})
-	if !strings.Contains(toolText(t, resp), "workflow.whiteboard_enabled: on [scope:global]") {
-		t.Fatalf("knob write must land in global scope: %s", resp)
+	entry := registryEntryByKey(wsconfig.ItemWorkflowWhiteboardEnabled)
+	if !entry.HarnessBucketed() || !entry.RequiresLeadAuthority || !entry.RepoScoped() {
+		t.Fatalf("whiteboard entry must be harness-bucketed, lead-only, and repo-scoped: %+v", entry)
 	}
-	resp = f.call(t, "config.tune", map[string]any{"key": "workflow.whiteboard_enabled", "value": "on", "scope": "project"})
-	if !isToolError(resp) {
-		t.Fatalf("a project-scope write must be refused: %s", resp)
+	if got, want := entry.RepoKey(), "workflow.whiteboard_enabled.<claude|codex|pi|all>"; got != want {
+		t.Fatalf("RepoKey = %q, want %q", got, want)
 	}
+	// agents.tier is harness-applicable but keeps its own structured writer.
+	tier := registryEntryByKey("agents.tier")
+	if tier.HarnessBucketed() || tier.RepoKey() != "agents.tier" {
+		t.Fatalf("agents.tier must not take the bucket path: bucketed=%v repo key %q", tier.HarnessBucketed(), tier.RepoKey())
+	}
+
 	catalog := parseTuningCatalogResponse(t, f.call(t, "config.list", map[string]any{"format": "json"}))
 	knob := requireTuningKnob(t, catalog, "workflow.whiteboard_enabled")
 	assertFieldEnum(t, knob.ValueFields, "value", []string{"on", "off"})
-	if !strings.Contains(mustMarshalJSON(t, knob.Current), `"value":"on"`) {
-		t.Fatalf("catalog current value must reflect the write: %+v", knob.Current)
+	assertFieldEnum(t, knob.SelectorFields, "harness", []string{"claude", "codex", "pi", "*"})
+	assertFieldEnum(t, knob.SelectorFields, "scope", wsconfig.ScopeSchemaEnum())
+	if got := mustMarshalJSON(t, knob.Current); !strings.Contains(got, `"value":"off"`) || !strings.Contains(got, `"scope":"builtin"`) {
+		t.Fatalf("catalog current value must be the builtin off: %s", got)
+	}
+	if !knob.RepoScope || knob.RepoKey != "workflow.whiteboard_enabled.<claude|codex|pi|all>" {
+		t.Fatalf("catalog must offer the repo scope under the bucket keys: %+v", knob)
+	}
+
+	// No scope and no harness: global scope, the session's harness bucket.
+	resp := toolText(t, f.call(t, "config.tune", map[string]any{"key": "workflow.whiteboard_enabled", "value": "on"}))
+	if !strings.Contains(resp, "workflow.whiteboard_enabled.claude: on [scope:global]") || strings.Contains(resp, "shadowed") {
+		t.Fatalf("a scope-less, harness-less write must land in the global claude bucket: %s", resp)
+	}
+	if v := readStoredOverride(t, wsconfig.ScopeGlobal, f.root, "workflow.whiteboard_enabled.claude"); v != "on" {
+		t.Fatalf("stored global claude bucket = %q", v)
+	}
+	catalog = parseTuningCatalogResponse(t, f.call(t, "config.list", map[string]any{"format": "json"}))
+	if got := mustMarshalJSON(t, requireTuningKnob(t, catalog, "workflow.whiteboard_enabled").Current); !strings.Contains(got, `"value":"on"`) || !strings.Contains(got, `"scope":"global"`) {
+		t.Fatalf("catalog current value must reflect the write: %s", got)
+	}
+	if got := toolText(t, f.call(t, "config.get", map[string]any{"key": "workflow.whiteboard_enabled"})); !strings.Contains(got, "workflow.whiteboard_enabled: on [scope:global]") {
+		t.Fatalf("config.get must read the session's harness bucket: %s", got)
+	}
+	resp = toolText(t, f.call(t, "config.tune", map[string]any{"key": "workflow.whiteboard_enabled", "reset": true}))
+	if !strings.Contains(resp, "workflow.whiteboard_enabled.claude: reset [scope:global]") || !strings.Contains(resp, "effective workflow.whiteboard_enabled: off [scope:builtin]") {
+		t.Fatalf("a scope-less reset must clear the global claude bucket and echo global: %s", resp)
+	}
+	if v := readStoredOverride(t, wsconfig.ScopeGlobal, f.root, "workflow.whiteboard_enabled.claude"); v != "" {
+		t.Fatalf("reset must remove the global claude bucket, got %q", v)
+	}
+
+	// A write naming another harness lands in its bucket and is reported as
+	// not applying to this session.
+	resp = toolText(t, f.call(t, "config.tune", map[string]any{"key": "workflow.whiteboard_enabled", "value": "on", "harness": "codex"}))
+	if !strings.Contains(resp, "workflow.whiteboard_enabled.codex: on [scope:global]") || !strings.Contains(resp, "shadowed: effective workflow.whiteboard_enabled: off [scope:builtin]") {
+		t.Fatalf("a codex-bucket write from a claude session: %s", resp)
+	}
+	resp = toolText(t, f.call(t, "config.tune", map[string]any{"key": "workflow.whiteboard_enabled", "value": "on", "harness": "*", "scope": "project"}))
+	if !strings.Contains(resp, "workflow.whiteboard_enabled.all: on [scope:project]") {
+		t.Fatalf("harness * must store the all bucket: %s", resp)
+	}
+}
+
+func TestWhiteboardKnobWriteRequiresLeadKeyAtEveryScope(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	delegate, err := f.s.sessions.mint(f.root, roleDelegate, f.key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, scope := range wsconfig.ScopeSchemaEnum() {
+		for _, key := range []string{"", delegate} {
+			resp := f.call(t, "config.tune", map[string]any{"key": "workflow.whiteboard_enabled", "value": "on", "scope": scope, "session_key": key})
+			if !isToolError(resp) {
+				t.Fatalf("scope %s, key %q: a write without a lead session_key must be refused: %s", scope, key, resp)
+			}
+		}
+	}
+}
+
+// readStoredOverride reads one scope's stored override for key without the
+// layered fallback; "" when absent.
+func readStoredOverride(t *testing.T, scope wsconfig.Scope, root, key string) string {
+	t.Helper()
+	var opts wsconfig.Options
+	if scope == wsconfig.ScopeRepo {
+		opts.RepoRoot = root
+	}
+	r := wsconfig.NewResolver(opts, nil, nil, nil)
+	rv, err := r.Get("", key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rv.Scope != scope {
+		return ""
+	}
+	return rv.Value
+}
+
+func (f *whiteboardFixture) tune(t *testing.T, args map[string]any) {
+	t.Helper()
+	args["key"] = "workflow.whiteboard_enabled"
+	if resp := f.call(t, "config.tune", args); isToolError(resp) {
+		t.Fatalf("config.tune(%v): %s", args, resp)
+	}
+}
+
+func (f *whiteboardFixture) manualHasWhiteboard(t *testing.T, key string) bool {
+	t.Helper()
+	return strings.Contains(toolText(t, f.call(t, "workflow_manual", map[string]any{"session_key": key})), "### Whiteboard")
+}
+
+func TestWhiteboardKnobResolvesPerHarness(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	f.tune(t, map[string]any{"value": "on", "harness": "claude"})
+	if !f.manualHasWhiteboard(t, f.key) {
+		t.Fatalf("a global claude on must render the section in a claude session")
+	}
+	f.s.sessionHarness = "codex"
+	if f.manualHasWhiteboard(t, f.key) {
+		t.Fatalf("a global claude on must not render the section in a codex session")
+	}
+	// The all bucket applies when the harness bucket is unset.
+	f.tune(t, map[string]any{"value": "on", "harness": "*"})
+	if !f.manualHasWhiteboard(t, f.key) {
+		t.Fatalf("the all bucket must apply to a codex session with no codex value")
+	}
+	f.tune(t, map[string]any{"value": "off", "harness": "codex"})
+	if f.manualHasWhiteboard(t, f.key) {
+		t.Fatalf("the codex bucket must beat the all bucket")
+	}
+}
+
+func TestWhiteboardKnobBucketMajorPrecedence(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	// A member's global claude value beats a committed repo all value.
+	f.tune(t, map[string]any{"value": "on", "harness": "*", "scope": "repo"})
+	f.tune(t, map[string]any{"value": "off", "harness": "claude"})
+	if f.manualHasWhiteboard(t, f.key) {
+		t.Fatalf("global claude off must beat repo all on")
+	}
+	f.tune(t, map[string]any{"value": "on", "harness": "claude"})
+	f.tune(t, map[string]any{"value": "off", "harness": "*", "scope": "repo"})
+	if !f.manualHasWhiteboard(t, f.key) {
+		t.Fatalf("global claude on must beat repo all off")
+	}
+	// Within one bucket the ordinary scope order holds: repo beats global.
+	f.tune(t, map[string]any{"value": "off", "harness": "claude", "scope": "repo"})
+	if f.manualHasWhiteboard(t, f.key) {
+		t.Fatalf("repo claude off must beat global claude on")
+	}
+	// Resetting a bucket falls back to the next value in order.
+	f.tune(t, map[string]any{"reset": true, "harness": "claude", "scope": "repo"})
+	if !f.manualHasWhiteboard(t, f.key) {
+		t.Fatalf("after the repo claude reset, global claude on must apply")
+	}
+	f.tune(t, map[string]any{"reset": true, "harness": "claude"})
+	if f.manualHasWhiteboard(t, f.key) {
+		t.Fatalf("after the global claude reset, repo all off must apply")
+	}
+}
+
+func TestWhiteboardKnobLegacyBareKeyReadsAsAll(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	// A value stored before the knob was bucketed sits under the bare key.
+	global := wsconfig.NewResolver(wsconfig.Options{}, nil, nil, nil)
+	if err := global.Set(wsconfig.ItemWorkflowWhiteboardEnabled, "on", wsconfig.SetOptions{ExplicitScope: wsconfig.ScopeGlobal}); err != nil {
+		t.Fatal(err)
+	}
+	if !f.manualHasWhiteboard(t, f.key) {
+		t.Fatalf("a legacy global bare on must render the section")
+	}
+	f.s.sessionHarness = "codex"
+	if !f.manualHasWhiteboard(t, f.key) {
+		t.Fatalf("a legacy bare value applies to every harness")
+	}
+	f.s.sessionHarness = "claude"
+	// A repo all off beats the global bare on: .all is tried before the bare key.
+	f.tune(t, map[string]any{"value": "off", "harness": "*", "scope": "repo"})
+	if f.manualHasWhiteboard(t, f.key) {
+		t.Fatalf("a repo all off must beat a global bare on")
+	}
+	f.tune(t, map[string]any{"reset": true, "harness": "*", "scope": "repo"})
+	f.tune(t, map[string]any{"value": "off", "harness": "claude"})
+	if f.manualHasWhiteboard(t, f.key) {
+		t.Fatalf("a claude bucket off must beat a global bare on")
+	}
+}
+
+func TestWhiteboardKnobSessionScope(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	other, _ := parseLoginResponse(t, callLogin(t, f.s, 920000, f.root, nil))
+	f.tune(t, map[string]any{"value": "on", "scope": "session"})
+	if !f.manualHasWhiteboard(t, f.key) {
+		t.Fatalf("a session on must render the section for that session")
+	}
+	if f.manualHasWhiteboard(t, other) {
+		t.Fatalf("a session on must not reach another lead session")
+	}
+	// The playbook variants agree with the manual for the same session.
+	read := func(key, name string) string {
+		t.Helper()
+		return toolText(t, f.call(t, "playbook.read", map[string]any{"name": name, "session_key": key}))
+	}
+	capture := withNamespace(whiteboardCaptureLine)
+	bullet := withNamespace(lineTicketQueueBoard)
+	if !strings.Contains(read(f.key, "lead-discuss"), capture) || !strings.Contains(read(f.key, "lead-ticket"), bullet) {
+		t.Fatalf("lead-discuss and lead-ticket must carry the knob-on variants for the session that set it")
+	}
+	if !strings.Contains(read(f.key, "lead-workflow-manual"), "### Whiteboard") {
+		t.Fatalf("playbook.read of the manual must agree with workflow_manual")
+	}
+	if strings.Contains(read(other, "lead-discuss"), capture) || strings.Contains(read(other, "lead-ticket"), bullet) {
+		t.Fatalf("another session must render the knob-off variants")
+	}
+	// Resetting the session value falls back to the next scope.
+	f.tune(t, map[string]any{"value": "on", "harness": "*"})
+	f.tune(t, map[string]any{"value": "off", "scope": "session"})
+	if f.manualHasWhiteboard(t, f.key) {
+		t.Fatalf("a session off must beat a global all on")
+	}
+	f.tune(t, map[string]any{"reset": true, "scope": "session"})
+	if !f.manualHasWhiteboard(t, f.key) {
+		t.Fatalf("after the session reset, the global all on must apply")
+	}
+}
+
+func TestWhiteboardKnobRepoScopeReachesFreshBootstrapManual(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	f.tune(t, map[string]any{"value": "on", "harness": "*", "scope": "repo"})
+	if _, err := os.Stat(filepath.Join(f.root, ".ws-workflow", "config.json")); err != nil {
+		t.Fatalf("repo write must land in the worktree: %v", err)
+	}
+	fresh := toolText(t, f.call(t, "workflow_manual", map[string]any{"session_key": freshBootstrapKey, "root": f.root}))
+	if !strings.Contains(fresh, "### Whiteboard") {
+		t.Fatalf("a repo-scope on must render the section in a FRESH-with-root bootstrap manual")
+	}
+	// FRESH without a root has no repository to read the repo scope from.
+	if bare := toolText(t, f.call(t, "workflow_manual", map[string]any{"session_key": freshBootstrapKey})); strings.Contains(bare, "### Whiteboard") {
+		t.Fatalf("a FRESH render without a root must not read the repo scope")
 	}
 }
 

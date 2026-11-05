@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 04ce7a068fe675a6
 sage-review-completeness-reviewed: 04ce7a068fe675a6
+completed: 2026-11-05
 ---
 
 # workflow.whiteboard_enabled - per-harness and session-scoped values
@@ -240,3 +241,53 @@ Verification:
   `off`;
 - a value stored under the bare `workflow.whiteboard_enabled` key before
   this change resolves as the `all` bucket.
+
+### Result (9ca6f0039) - 2026-11-05
+
+Landed: `workflow.whiteboard_enabled` is harness-bucketed and resolves
+through session, project, repo, and global scopes. A generic bucket path
+(`configKeyEntry.HarnessBucketed` = `HarnessApplicable && ResolverBacked`,
+plus `harnessBucketKey`, `harnessBucketReadOrder`,
+`resolveHarnessBucketed`, and a generic `RepoKey`, all in
+`internal/mcp/config_registry.go`) replaces the `prompt.`-only branches
+in `config.tune`, `RepoKey`, `buildOverrideLookup`, and
+`applyOverrideMarkers`. Reads go bucket-major: the session's harness
+bucket, then `.all`, then the legacy bare key, each through every scope,
+then the builtin `off` on the bare key. `RegisterGlobalOnly` is dropped.
+The bare key and the four bucket keys register `ScopeGlobal`, and
+`RequiresLeadAuthority` is set explicitly. `config.list` lists harness
+and scope selectors, the bucket repo key, and the effective value for the
+session's harness. `config.get` reads the bucket that applies.
+
+`applyWhiteboardVariants` moved out of `printPlaybook` into its two
+callers, the `playbook.read` handler and `handleWorkflowManual`. Each
+resolves the knob with its own resolver, following the sibling
+auto-ack's pattern, and `printPlaybook` gains no new parameter.
+FRESH-with-root now canonicalizes before rendering and reads the knob
+with `Options{RepoRoot: canonical}`. The `lead-tune` scalar handler now
+passes a harness the user names. That change is mirrored to wsflow and
+Pi, and the manifest is regenerated.
+
+Verification:
+- `go test ./... -count=1` in `agents-plugin-tool`: all packages ok.
+- The wsflow package unittest: 20 tests OK.
+- New tests in `internal/mcp/whiteboard_tools_test.go` cover the ticket's
+  verification list: per harness; session scope through a CONTINUE read;
+  repo scope in a FRESH-with-root manual; bucket-major precedence; reset
+  fallback for a bucket and for a session value; `agents.tier` taking no
+  bucket path; lead key required at every scope; write and reset echo
+  defaults (global, the session's bucket); repo `.all` off beating a
+  global bare on; the `all` fallback; manual and playbook variants
+  agreeing; the catalog selectors with builtin `off`; and a legacy bare
+  value read as `all`. The existing `prompt.*` reset regression tests
+  pass.
+
+Decisions:
+- `config.get` was made bucket-aware, which is beyond the ticket's list
+  of readers; without it, `config.get` would report only the legacy or
+  builtin value. This also applies to `prompt.<pointId>`.
+- A bucketed write echo names the bucket key (`...whiteboard_enabled.claude:
+  on [scope:global]`). A bucketed reset echoes the cleared bucket and the
+  effective value.
+- An undetected harness makes a harness-less write fail the enum check,
+  which is the `prompt.*` rule.

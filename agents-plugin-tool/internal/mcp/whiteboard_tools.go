@@ -575,14 +575,16 @@ func (s *sessionStore) liveReplyIDs() (map[string]bool, bool) {
 	return live, true
 }
 
-// workflowWhiteboardEnabled reads the global-only knob that adds the
-// whiteboard section to the workflow manual and the knob-on variants of
-// lead-discuss and lead-ticket.
-func workflowWhiteboardEnabled(configOpts wsconfig.Options) (bool, error) {
-	resolver := wsconfig.NewResolver(configOpts, builtinConfigDefaults(), nil, nil)
-	rv, err := resolver.Get("", wsconfig.ItemWorkflowWhiteboardEnabled)
+// whiteboardEnabled reads the knob that adds the whiteboard section to the
+// workflow manual and the knob-on variants of lead-discuss and lead-ticket,
+// for this server's session harness. resolver carries the reader's scopes:
+// the lead's session resolver, or a root-anchored one for a bootstrap render
+// that has no session yet; it must be built with builtinConfigDefaults so the
+// bare key's builtin applies.
+func (s *Server) whiteboardEnabled(resolver *wsconfig.Resolver, sessionKey string) (bool, error) {
+	rv, _, err := resolveHarnessBucketed(resolver, sessionKey, wsconfig.ItemWorkflowWhiteboardEnabled, s.currentHarness())
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("resolve %s: %w", wsconfig.ItemWorkflowWhiteboardEnabled, err)
 	}
 	return strings.ToLower(strings.TrimSpace(rv.Value)) == whiteboardOnValue, nil
 }
