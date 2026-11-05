@@ -405,24 +405,30 @@ func TestApplyNowRules(t *testing.T) {
 
 func TestApplyEmbedDir(t *testing.T) {
 	st := &State{}
-	dirs := map[string]bool{"/host/scratch": true}
+	// Absolute paths come from t.TempDir so the test holds on Windows, where
+	// a slash-rooted path such as /host/scratch is not absolute.
+	base := t.TempDir()
+	scratch := filepath.Join(base, "scratch")
+	missing := filepath.Join(base, "missing")
+	embedDir := func(dir string) string { return fmt.Sprintf(`{"embed_dir":%q}`, dir) }
+	dirs := map[string]bool{scratch: true}
 	env := testEnv()
 	env.IsDir = func(path string) bool { return dirs[path] }
 	if _, problems := Apply(st, payload(t, `{"embed_dir":"relative/dir"}`), env); !hasProblem(problems, "must be an absolute path") {
 		t.Fatalf("relative embed_dir problems = %v", problems)
 	}
-	if _, problems := Apply(st, payload(t, `{"embed_dir":"/host/missing"}`), env); !hasProblem(problems, "not an existing directory") {
+	if _, problems := Apply(st, payload(t, embedDir(missing)), env); !hasProblem(problems, "not an existing directory") {
 		t.Fatalf("missing embed_dir problems = %v", problems)
 	}
-	if _, problems := Apply(st, payload(t, `{"embed_dir":"/host/scratch"}`), env); len(problems) > 0 {
+	if _, problems := Apply(st, payload(t, embedDir(scratch)), env); len(problems) > 0 {
 		t.Fatalf("embed_dir refused: %v", problems)
 	}
-	if st.EmbedDir != "/host/scratch" {
+	if st.EmbedDir != scratch {
 		t.Fatalf("embed_dir must be remembered: %q", st.EmbedDir)
 	}
 	// The stored folder is re-checked by every later update.
-	delete(dirs, "/host/scratch")
-	if _, problems := Apply(st, payload(t, `{}`), env); !hasProblem(problems, "/host/scratch (stored for this session) is no longer an existing directory") {
+	delete(dirs, scratch)
+	if _, problems := Apply(st, payload(t, `{}`), env); !hasProblem(problems, scratch+" (stored for this session) is no longer an existing directory") {
 		t.Fatalf("vanished embed_dir problems = %v", problems)
 	}
 	// Clearing it in the same update is accepted.
