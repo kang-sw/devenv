@@ -871,6 +871,9 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
+		if err := s.resolveBucketedOverrideRows(&showResolver, sessionKey, &view); err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
 		// config.tuning path: project the per-key writer schema + current values,
 		// with the no-agent full-ws-only cut applied per entry.
 		catalogResolver := s.sessionResolver(sessionKey, s.declared.withDefaults(builtinConfigAndPromptDefaults()))
@@ -2476,6 +2479,28 @@ func formatStringLines(values []string) string {
 		return ""
 	}
 	return strings.Join(values, "\n") + "\n"
+}
+
+// resolveBucketedOverrideRows re-resolves the bare-key row of each
+// harness-bucketed registry knob in the scoped overrides view for this
+// session's harness. ScopedShow reads the bare key only, which for a bucketed
+// knob is the legacy value or builtin; the effective value lives under the
+// bucket keys. The per-bucket rows are left as ScopedShow reported them: they
+// show where stored values live.
+func (s *Server) resolveBucketedOverrideRows(resolver *wsconfig.Resolver, sessionKey string, view *wsconfig.View) error {
+	for i := range view.ResolvedOverrides {
+		item := &view.ResolvedOverrides[i]
+		entry := registryEntryByKey(item.Key)
+		if !entry.HarnessBucketed() {
+			continue
+		}
+		rv, _, err := resolveHarnessBucketed(resolver, sessionKey, item.Key, s.currentHarness())
+		if err != nil {
+			return err
+		}
+		item.Value, item.Scope = rv.Value, rv.Scope
+	}
+	return nil
 }
 
 func formatConfigView(view wsconfig.View) string {

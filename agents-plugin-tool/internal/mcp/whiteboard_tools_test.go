@@ -905,3 +905,83 @@ func TestWhiteboardPlaybookStatesPointerAndEmbedDirWithoutNamingAHost(t *testing
 		}
 	}
 }
+
+// TestConfigGetPromptKeyResolvesHarnessBucketFirst pins config.get for a
+// prompt.<point> key: the session harness's bucket wins over .all whatever
+// scope holds each, and the result names the scope that answered.
+func TestConfigGetPromptKeyResolvesHarnessBucketFirst(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	const key = "prompt.UserPreferenceSection"
+	tune := func(harness, scope, value string) {
+		t.Helper()
+		resp := f.call(t, "config.tune", map[string]any{"key": key, "harness": harness, "scope": scope, "value": value})
+		if isToolError(resp) {
+			t.Fatalf("config.tune(%s, %s): %s", harness, scope, resp)
+		}
+	}
+	get := func() configGetResult {
+		t.Helper()
+		resp := f.call(t, "config.get", map[string]any{"key": key, "format": "json"})
+		if isToolError(resp) {
+			t.Fatalf("config.get: %s", resp)
+		}
+		var result configGetResult
+		if err := json.Unmarshal([]byte(toolText(t, resp)), &result); err != nil {
+			t.Fatalf("config.get json: %v\n%s", err, toolText(t, resp))
+		}
+		return result
+	}
+
+	tune("*", "session", "all-text")
+	if got := get(); got.Value != "all-text" || got.Scope != "session" {
+		t.Fatalf("only .all set: %+v", got)
+	}
+	// The claude bucket at a broader scope still beats .all at session.
+	tune("claude", "global", "claude-text")
+	if got := get(); got.Value != "claude-text" || got.Scope != "global" {
+		t.Fatalf("claude bucket must win over .all: %+v", got)
+	}
+	// Another harness's bucket does not apply to this claude session.
+	tune("codex", "session", "codex-text")
+	if got := get(); got.Value != "claude-text" || got.Scope != "global" {
+		t.Fatalf("codex bucket must not apply: %+v", got)
+	}
+}
+
+// TestConfigListOverridesResolveBucketedKnobForSessionHarness pins the scoped
+// overrides view: the bare workflow.whiteboard_enabled row shows the value
+// effective for this harness (matching the catalog's current), while the
+// per-bucket rows keep showing where the stored values live.
+func TestConfigListOverridesResolveBucketedKnobForSessionHarness(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	if resp := f.call(t, "config.tune", map[string]any{"key": "workflow.whiteboard_enabled", "value": "on"}); isToolError(resp) {
+		t.Fatalf("config.tune: %s", resp)
+	}
+	if resp := f.call(t, "config.tune", map[string]any{"key": "workflow.whiteboard_enabled", "value": "off", "harness": "codex", "scope": "project"}); isToolError(resp) {
+		t.Fatalf("config.tune codex: %s", resp)
+	}
+	resp := f.call(t, "config.list", map[string]any{"format": "json"})
+	var view struct {
+		ResolvedOverrides []struct {
+			Key   string `json:"key"`
+			Value string `json:"value"`
+			Scope string `json:"scope"`
+		} `json:"resolved_overrides"`
+	}
+	if err := json.Unmarshal([]byte(toolText(t, resp)), &view); err != nil {
+		t.Fatalf("config.list json: %v", err)
+	}
+	rows := map[string][2]string{}
+	for _, item := range view.ResolvedOverrides {
+		rows[item.Key] = [2]string{item.Value, item.Scope}
+	}
+	if got := rows["workflow.whiteboard_enabled"]; got != [2]string{"on", "global"} {
+		t.Fatalf("bare row must show the claude-effective value, got %v", got)
+	}
+	if got := rows["workflow.whiteboard_enabled.claude"]; got != [2]string{"on", "global"} {
+		t.Fatalf("claude bucket row = %v", got)
+	}
+	if got := rows["workflow.whiteboard_enabled.codex"]; got != [2]string{"off", "project"} {
+		t.Fatalf("codex bucket row = %v", got)
+	}
+}

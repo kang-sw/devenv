@@ -78,7 +78,20 @@ func TestPlaybookReadLeadTicketReviewAutoAckFollowsKnob(t *testing.T) {
 		t.Errorf("knob on: lead-ticket reintroduces the retired always-policy phrase")
 	}
 
-	wantOff := applyTicketReviewAutoAckVariant("lead-ticket", on, false)
+	// The knob-off text is read through the tool, not rebuilt with the
+	// function under test, so a wrong variant cannot make this test agree
+	// with itself. Every scope below must render the same text.
+	offFixture := newWhiteboardFixture(t)
+	if resp := offFixture.call(t, "config.tune", map[string]any{"key": wsconfig.ItemTicketReviewAutoAck, "value": "off", "scope": "session"}); isToolError(resp) {
+		t.Fatalf("config.tune off: %s", resp)
+	}
+	wantOff := read(t, offFixture, "lead-ticket")
+	if wantOff == on {
+		t.Fatalf("knob off must change the rendered lead-ticket text")
+	}
+	if strings.Contains(wantOff, "auto-confirm") {
+		t.Errorf("knob off: lead-ticket still names auto-confirmation")
+	}
 	normalizedOff := strings.Join(strings.Fields(wantOff), " ")
 	for _, want := range []string{
 		"The settle point is reached when the announced defaults and technical decisions are acknowledged and every policy question is confirmed, rejected, or explicitly deferred",
