@@ -343,6 +343,12 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 	if err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("workflow_manual: %w", err))
 	}
+	// The whiteboard is a top-level-lead channel: callTool refuses its tools
+	// for any other key, so a spawned key (lead scope with a parent, or a
+	// leaf) reads the knob-off manual. FRESH mints a parent-less lead.
+	if key != freshBootstrapKey && !(sessionEntry{scope: toolRole(rec.Scope), parent: rec.Parent}).isTopLevelLead() {
+		whiteboardOn = false
+	}
 	body, err = applyWhiteboardVariants(s, rsrcRoot, workflowManualPlaybookName, body, whiteboardOn)
 	if err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("workflow_manual: %w", err))

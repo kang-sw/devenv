@@ -11,9 +11,10 @@
   });
 
   // --- change signal ----------------------------------------------------------
-  // The stamp script beside the page calls wbStamp("<version>"); the first value
-  // seen is this page's, a different later one means the board was rewritten.
-  var pending = false, first = null;
+  // The stamp script beside the page calls wbStamp("<seq>"); a value other than
+  // this page's own seq (data-seq) means the board was rewritten, including by a
+  // render that landed between this page's load and its first poll.
+  var pending = false;
   var banner = doc.getElementById("wb-banner");
   function formBusy() {
     var a = doc.activeElement;
@@ -30,10 +31,10 @@
   onCopied = function () { if (pending) reloadNow(); };
   if (banner) banner.addEventListener("click", reloadNow);
   var stampSrc = doc.documentElement.getAttribute("data-stamp");
+  var ownSeq = doc.documentElement.getAttribute("data-seq");
   if (stampSrc) {
     window.wbStamp = function (v) {
-      if (first === null) { first = v; return; }
-      if (v !== first && !pending) changed();
+      if (v !== ownSeq && !pending) changed();
     };
     var poll = function () {
       var s = doc.createElement("script");

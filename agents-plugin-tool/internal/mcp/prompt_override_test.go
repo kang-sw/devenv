@@ -1076,10 +1076,10 @@ func TestConfigPromptListEnumeratesDeclaredPoints(t *testing.T) {
 }
 
 // TestConfigPromptListShowsPiHarnessOverride is a review-relay regression
-// test for promptOverrideHarnessBuckets (server.go): a prompt override
+// test for harnessBuckets (config_registry.go): a prompt override
 // stored for harness "pi" via config.tune must appear in config.list's
 // tuning catalog, not just resolve correctly at render time. Before the fix,
-// promptOverrideHarnessBuckets was still {"claude", "codex", "all"} — the
+// the bucket list was still {"claude", "codex", "all"} — the
 // resolver was never queried for "prompt.<point>.pi", so a Pi lead's own
 // override read back as unset.
 func TestConfigPromptListShowsPiHarnessOverride(t *testing.T) {

@@ -162,6 +162,43 @@ func TestWhiteboardToolsAdvertiseMinimalSchema(t *testing.T) {
 	}
 }
 
+// A description naming a sibling tool must name the runtime namespace, so
+// wsflow's tools/list does not point at ws tools it does not serve.
+func TestToolDescriptionsNameRuntimeNamespace(t *testing.T) {
+	useLeadProfile(t)
+	t.Setenv(envNamespace, "wsflow")
+	s := NewServer(t.TempDir(), "test")
+	var resp struct {
+		Result struct {
+			Tools []struct {
+				Name        string `json:"name"`
+				Description string `json:"description"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(callToolsList(t, s)), &resp); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"whiteboard.update":  "wsflow/playbook.read",
+		"whiteboard.query":   "wsflow/playbook.read",
+		"tickets.sage_stamp": "wsflow/git.commit",
+	}
+	for _, tool := range resp.Result.Tools {
+		ref, ok := want[tool.Name]
+		if !ok {
+			continue
+		}
+		delete(want, tool.Name)
+		if !strings.Contains(tool.Description, ref) || strings.Contains(tool.Description, "(ws/") || strings.Contains(tool.Description, " ws/") {
+			t.Fatalf("%s description must name %q, not ws/: %q", tool.Name, ref, tool.Description)
+		}
+	}
+	if len(want) != 0 {
+		t.Fatalf("tools/list did not advertise %v", want)
+	}
+}
+
 func TestWhiteboardUpdateRendersPageEmbedAndStampInOrder(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	if _, err := os.Stat(f.dir()); !errors.Is(err, os.ErrNotExist) {
@@ -534,6 +571,27 @@ func TestWhiteboardToolsRefuseSpawnedKeys(t *testing.T) {
 	}
 	// The top-level lead works with the knob at its builtin off.
 	f.update(t, `{}`)
+}
+
+// The whiteboard is a top-level-lead channel, so with the knob on a worker
+// key's workflow_manual keeps the knob-off text while its lead's manual
+// carries the section.
+func TestWhiteboardManualVariantsSkipSpawnedKeys(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	f.call(t, "config.tune", map[string]any{"key": "workflow.whiteboard_enabled", "value": "on"})
+	// A worker's key is lead-scoped with a parent; leaf scopes cannot call
+	// workflow_manual at all.
+	worker, err := f.s.sessions.mint(f.root, roleLead, f.key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lead := toolText(t, f.call(t, "workflow_manual", map[string]any{"session_key": f.key})); !strings.Contains(lead, "### Whiteboard") || strings.Contains(lead, lineDiscussionNoCounter) {
+		t.Fatalf("knob on: the top-level lead's manual must carry the whiteboard variants")
+	}
+	manual := toolText(t, f.call(t, "workflow_manual", map[string]any{"session_key": worker}))
+	if strings.Contains(manual, "### Whiteboard") || !strings.Contains(manual, lineDiscussionNoCounter) {
+		t.Fatalf("knob on: a spawned key's manual must keep the knob-off text:\n%s", manual)
+	}
 }
 
 func TestWhiteboardKnobWriteDefaultsAndCatalog(t *testing.T) {

@@ -154,10 +154,12 @@ func TestRenderPageIsSelfContained(t *testing.T) {
 
 func TestRenderPageChangeSignalOnlyOnFull(t *testing.T) {
 	full := render(t, sampleView(LayoutFull))
-	if !strings.Contains(full, `<html data-stamp="barrette-regain-lumpiness.stamp.js">`) {
-		t.Errorf("full page lacks the data-stamp attribute")
+	// The page carries its own seq so the poller compares every stamp, the
+	// first included, against the version it was rendered at.
+	if !strings.Contains(full, `<html data-stamp="barrette-regain-lumpiness.stamp.js" data-seq="12">`) {
+		t.Errorf("full page lacks the data-stamp and data-seq attributes")
 	}
-	for _, want := range []string{"window.wbStamp", "setInterval(poll, 1500)", `id="wb-banner"`, `"wb-scroll"`, `"wb-open-"`} {
+	for _, want := range []string{"window.wbStamp", `getAttribute("data-seq")`, "v !== ownSeq", "setInterval(poll, 1500)", `id="wb-banner"`, `"wb-scroll"`, `"wb-open-"`} {
 		if !strings.Contains(full, want) {
 			t.Errorf("full page lacks %q", want)
 		}
@@ -172,7 +174,7 @@ func TestRenderPageChangeSignalOnlyOnFull(t *testing.T) {
 	view := sampleView(LayoutEmbed)
 	view.StampFile = "stray.stamp.js" // the embed ignores a stamp even when one is set
 	embed := render(t, view)
-	for _, banned := range []string{"data-stamp", "wbStamp", "sessionStorage", "wb-banner", "location.reload"} {
+	for _, banned := range []string{"data-stamp", "data-seq", "wbStamp", "sessionStorage", "wb-banner", "location.reload"} {
 		if strings.Contains(embed, banned) {
 			t.Errorf("embed carries %q", banned)
 		}
