@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 6c67f1f12fd44f30
 sage-review-completeness-reviewed: 6c67f1f12fd44f30
+completed: 2026-11-05
 ---
 
 # Whiteboard explicit item-reference syntax - replace implicit (nn) detection with {{nn}}
