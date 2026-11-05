@@ -198,6 +198,23 @@ var configRegistry = []configKeyEntry{
 		ResolverBacked: true,
 	},
 	{
+		Key:        wsconfig.ItemTicketReviewAutoAck,
+		WriterTool: "config.tune",
+		ResetTool:  "config.tune",
+		SelectorFields: []tuningField{{
+			Name:        "scope",
+			Description: "Storage scope. When omitted the write lands in the item's declared default scope (project).",
+			Enum:        wsconfig.ScopeSchemaEnum(),
+		}},
+		ValueFields: []tuningField{{
+			Name:        "value",
+			Description: "Desired mode: on or off. Omit when reset is true.",
+			Enum:        onOffEnum,
+		}},
+		NoAgentVisible: true,
+		ResolverBacked: true,
+	},
+	{
 		Key:        wsconfig.ItemReviewPhase,
 		WriterTool: "config.tune",
 		ResetTool:  "config.tune",

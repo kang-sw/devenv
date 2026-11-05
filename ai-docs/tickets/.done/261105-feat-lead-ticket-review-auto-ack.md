@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: e125d260dce1cac0
 sage-review-completeness-reviewed: e125d260dce1cac0
+completed: 2026-11-05
 ---
 
 # lead-ticket - lead confirms review-raised announced and technical items autonomously
@@ -198,3 +199,58 @@ Verification:
 - `config.list` shows the key with default on, and `config.tune` writes it,
   in ws and in wsflow (agentless);
 - wsflow mirror and Pi tree drift tests pass.
+
+### Result (1ace37e49) - 2026-11-05
+
+Landed:
+
+- `ticket_review_auto_ack` key (`internal/wsconfig/scope.go`, project
+  default scope), one `builtinConfigDefaults` entry with the value `on`, a `config_registry.go`
+  entry with `NoAgentVisible: true` and a scope selector, and a `config.list`
+  catalog entry (`workflow_preference`).
+- `agents-plugin/rsrc/lead-ticket/lead-ticket.md` states the default-on rule
+  at the five sites: the `## Open Decision Queue` settle point, the
+  `### Item classes` bullet (with the (140) `missing` limit and the (148)
+  knock-on rule), fact-population step 3, `## Stops`, and the
+  `### Response format` settlement report. wsflow and Pi copies and the three
+  manifests were regenerated or copied.
+- `internal/mcp/ticket_review_text.go` holds five whole-sentence or
+  whole-bullet on/off pairs, applied through `replaceOrAppend` when the key
+  resolves off. It is read through `s.sessionResolver(key,
+  builtinConfigDefaults())`.
+
+Verification:
+
+- knob off: the knob-off rendering of the new rsrc was compared with `cmp`
+  against a `printPlaybook` dump made before the change, for both the claude
+  and the codex harness, and was byte-identical. The lite reviewer
+  reproduced this independently.
+- `TestPlaybookReadLeadTicketReviewAutoAckFollowsKnob`: the knob-on phrases
+  are present, "is always a policy" is absent (raw and whitespace-normalized),
+  the old acknowledgement phrases are present on the off render, an `off` at
+  session, project, and repo scope reaches `playbook.read`, and
+  `lead-discuss` is unchanged.
+- `TestTicketReviewAutoAckAnchorsMatchShippedText`: each shipped anchor
+  occurs exactly once.
+- `TestConfigTuningCatalogProjectsPromptAndSchemaKnobs` and
+  `TestConfigTuningCatalogNoAgentShape`: the key is cataloged with builtin
+  `on`. In agentless mode `config.tune` writes it at session scope, and
+  `config.list` then reflects the write.
+- `go test ./... -count=1` (agents-plugin-tool): all packages ok.
+  `python3 -m unittest discover agents-plugin-wsflow/tests`: 20 tests OK.
+  wsflow and Pi rsrc trees match the canonical tree under `diff -r`.
+
+Decisions:
+
+- The knob-off variant is applied in the `playbook.read` handler after
+  `printPlaybook`, not inside it. `printPlaybook` carries no session key, and
+  `261105-feat-whiteboard-knob-harness-and-session-scope` plans to change its
+  signature. `lead-ticket` reaches the model only through `playbook.read`.
+- The settlement report lists an auto-confirmed item with its one-line
+  decision (`(05) auto-confirmed - <one-line decision>`), because the user has
+  not seen the item and a bare ID gives nothing to object to.
+- The whole-body knob-off equality was checked once instead of being kept as
+  a permanent fixture, so later `lead-ticket` edits do not need to regenerate
+  a frozen copy. The lite review recorded this as Minor: the permanent test
+  derives `wantOff` from the variant function and pins only the old
+  fragments.

@@ -54,6 +54,15 @@ const (
 	// review is an opt-in for users who hand most work to agents.
 	ItemSageReviewDesign = "sage_review_design"
 
+	// ItemTicketReviewAutoAck gates whether the lead-ticket playbook lets the
+	// lead confirm, without a user acknowledgement round, an announced or
+	// technical Open Decision Queue item raised by a fact-populator decision
+	// gap or by a reviewer issue marked autonomous. Values: "on" (builtin
+	// default) or "off", which restores the acknowledgement rule for those
+	// items. Read at playbook.read render time through the session resolver,
+	// so session, project, and repo scopes apply.
+	ItemTicketReviewAutoAck = "ticket_review_auto_ack"
+
 	// ItemReviewPhase selects the worker's per-phase independent code review that
 	// route.resolve_implement allocates. Values: "lite" (one fresh medium-tier
 	// reviewer covering correctness and test integrity, one pass, whatever the
@@ -143,6 +152,9 @@ func init() {
 	// that should persist across sessions for the same project.
 	RegisterDefaultScope(ItemSageReview, ScopeProject)
 	RegisterDefaultScope(ItemSageReviewDesign, ScopeProject)
+	// ticket_review_auto_ack is review posture like sage_review*: a
+	// project-level choice that persists across sessions.
+	RegisterDefaultScope(ItemTicketReviewAutoAck, ScopeProject)
 	// review_phase defaults to project scope like the sage_review* keys: a
 	// project-level choice that persists across sessions. A lead's session-scope
 	// value reaches the workers it spawns through the session parent walk.

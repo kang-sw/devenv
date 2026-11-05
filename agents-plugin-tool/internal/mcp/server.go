@@ -516,6 +516,7 @@ func builtinConfigDefaults() map[string]string {
 		wsconfig.ItemWorkflowWhiteboardEnabled: "off",
 		wsconfig.ItemSageReview:                "auto",
 		wsconfig.ItemSageReviewDesign:          "off",
+		wsconfig.ItemTicketReviewAutoAck:       "on",
 		wsconfig.ItemReviewPhase:               "lite",
 		wsconfig.ItemBootstrapAlarm:            "on",
 		wsconfig.ItemWorktreePool:              defaultWorktreePoolTemplate,
@@ -2046,7 +2047,17 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			return toolTextResponse(req.ID, "", err)
 		}
 		body, recommendedTier, err := printPlaybook(s, rsrcRoot, name, callerContext, wsconfig.Options{}, printWorkflowLangRV.Value, printOverrideLookup)
-		return toolTextResponse(req.ID, withRecommendedTier(body, recommendedTier)+"\n", err)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		// printPlaybook carries no session key, so the session-resolved
+		// ticket_review_auto_ack variant is applied here.
+		autoAck, err := s.ticketReviewAutoAckEnabled(keyStr)
+		if err != nil {
+			return toolTextResponse(req.ID, "", fmt.Errorf("resolve %s: %w", wsconfig.ItemTicketReviewAutoAck, err))
+		}
+		body = applyTicketReviewAutoAckVariant(name, body, autoAck)
+		return toolTextResponse(req.ID, withRecommendedTier(body, recommendedTier)+"\n", nil)
 
 	case "playbook.render":
 		// Phase 2c: name + context + root_override; child-key mint for lead callers.
@@ -2758,6 +2769,21 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 		SelectorFields: sageReviewDesignEntry.SelectorFields,
 		ValueFields:    sageReviewDesignEntry.ValueFields,
 		Current:        currentWorkflowPreference(resolver, sessionKey, sageReviewDesignEntry.Key),
+	})
+
+	autoAckEntry := registryEntryByKey(wsconfig.ItemTicketReviewAutoAck)
+	appendKnob(autoAckEntry, tuningKnob{
+		ID:          autoAckEntry.Key,
+		Kind:        "workflow_preference",
+		Description: "Open Decision Queue confirmation of review-raised items during ticket settlement (builtin on). on lets the lead confirm, on its own judgment, an announced default or technical decision raised by a fact-populator decision gap or by a reviewer issue marked autonomous, and list it as auto-confirmed in the round's settlement report; policy questions, reversals, and reviewer issues marked missing are still asked. off asks the user to acknowledge every such item, adding one user round trip before ready/ promotion. Takes effect at the next lead-ticket playbook read.",
+		Writer:      tuningWriter{Tool: autoAckEntry.WriterTool, FixedArguments: map[string]string{"key": autoAckEntry.Key}},
+		Reset: &tuningWriter{
+			Tool:           autoAckEntry.ResetTool,
+			FixedArguments: map[string]string{"key": autoAckEntry.Key, "reset": "true"},
+		},
+		SelectorFields: autoAckEntry.SelectorFields,
+		ValueFields:    autoAckEntry.ValueFields,
+		Current:        currentWorkflowPreference(resolver, sessionKey, autoAckEntry.Key),
 	})
 
 	reviewPhaseEntry := registryEntryByKey(wsconfig.ItemReviewPhase)
