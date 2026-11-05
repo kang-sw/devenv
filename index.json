@@ -605,7 +605,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-05T01:52:57Z"
+        "touched_at": "2026-11-05T01:53:32Z",
+        "impl": {
+          "branch": "impl/develop/game-ion-blend"
+        }
       }
     },
     "261105-feat-whiteboard-explicit-item-ref-syntax": {
