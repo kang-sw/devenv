@@ -1,9 +1,7 @@
 package wswhiteboard
 
 import (
-	"regexp"
 	"sort"
-	"strconv"
 )
 
 // Layout selects which page a View renders as.
@@ -39,6 +37,9 @@ type View struct {
 	BulkAck bool
 	// Answerable reports whether any item takes an answer on this page.
 	Answerable bool
+	// Stored holds every item ID the store holds, so a {{nn}} reference to
+	// an item the page omits still resolves as a known item.
+	Stored map[int]bool
 }
 
 // TopicView is one topic block.
@@ -89,7 +90,9 @@ type ItemView struct {
 	AnswerText   string
 	AnswerQuote  string
 	AnsweredAt   string
-	Links        []LinkView
+	// Links are the item's link strings; a page resolves their {{nn}}
+	// references as it does the other lead-authored text.
+	Links []string
 	// New marks an item changed since the previous embed (embed only).
 	New bool
 }
@@ -101,13 +104,6 @@ type OptionView struct {
 	Recommended bool
 	// Picked marks the option a settled or assumed answer chose.
 	Picked bool
-}
-
-// LinkView is one link; Refs lists the item IDs it names as (nn), which a
-// page may turn into in-page anchors.
-type LinkView struct {
-	Text string
-	Refs []int
 }
 
 // Panel is one collapsible auxiliary section supplied by a section provider.
@@ -138,8 +134,6 @@ type ViewInput struct {
 	Panels  []Panel
 }
 
-var refPattern = regexp.MustCompile(`\((\d+)\)`)
-
 // BuildView derives a page view from state.
 func BuildView(state *State, in ViewInput) View {
 	view := View{
@@ -148,6 +142,10 @@ func BuildView(state *State, in ViewInput) View {
 		Seq:     state.Seq,
 		Now:     state.Now,
 		Panels:  in.Panels,
+		Stored:  map[int]bool{},
+	}
+	for _, item := range state.Items {
+		view.Stored[item.ID] = true
 	}
 	if in.Layout == LayoutFull {
 		view.StampFile = in.ReplyID + ".stamp.js"
@@ -267,6 +265,7 @@ func itemView(item Item) ItemView {
 		Answer:      item.Answer,
 		AnswerQuote: item.AnswerQuote,
 		AnsweredAt:  item.AnsweredAt,
+		Links:       item.Links,
 	}
 	count := len(item.Options)
 	if item.Recommendation != "" {
@@ -283,15 +282,6 @@ func itemView(item Item) ItemView {
 			Recommended: letter == iv.RecLetter,
 			Picked:      item.Status != StatusOpen && letter == iv.AnswerLetter,
 		})
-	}
-	for _, link := range item.Links {
-		lv := LinkView{Text: link}
-		for _, match := range refPattern.FindAllStringSubmatch(link, -1) {
-			if id, err := strconv.Atoi(match[1]); err == nil {
-				lv.Refs = append(lv.Refs, id)
-			}
-		}
-		iv.Links = append(iv.Links, lv)
 	}
 	return iv
 }

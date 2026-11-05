@@ -431,14 +431,17 @@ func TestApplyEmbedDir(t *testing.T) {
 	}
 }
 
-func TestApplyLinksReferToExistingIDs(t *testing.T) {
+func TestApplyAcceptsAnyItemReference(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, `{"add":[{"class":"policy","topic":"t","title":"old"}]}`)
-	mustApply(t, st, `{"add":[{"class":"policy","topic":"t","title":"new","links":["supersedes (01)","261030-feat-x"]}],
-		"patch":[{"id":1,"status":"superseded","links":["superseded by (02)"]}]}`)
-	problems := refused(t, st, `{"add":[{"class":"policy","topic":"t","title":"bad","links":["see (77)"]}]}`)
-	if !hasProblem(problems, `"see (77)" refers to (77), which is not in the store`) {
-		t.Fatalf("problems = %v", problems)
+	mustApply(t, st, `{"add":[{"class":"policy","topic":"t","title":"new","links":["supersedes {{01}}","261030-feat-x"]}],
+		"patch":[{"id":1,"status":"superseded","links":["superseded by {{02}}"]}]}`)
+	// References are display only: an ID the store never held, prose
+	// parentheses, and non-digit brace tokens are all accepted.
+	mustApply(t, st, `{"add":[{"class":"technical","topic":"t","title":"see {{77}} after step (2)",
+		"rationale":"step (3) then {{my-tag}}","links":["see {{77}}","step (2)"]}]}`)
+	if got := st.Items[2].Links; len(got) != 2 || got[0] != "see {{77}}" || got[1] != "step (2)" {
+		t.Fatalf("links stored as %q", got)
 	}
 }
 

@@ -34,8 +34,10 @@ var (
 	assetsErr    error
 
 	spriteSymbolPattern = regexp.MustCompile(`<symbol id="i-([a-z0-9-]+)"`)
-	// linkItemPattern finds the "(nn)" item references inside a link's text.
-	linkItemPattern = regexp.MustCompile(`\((\d+)\)`)
+	// itemRefPattern finds the {{nn}} item references inside lead-authored
+	// text. Only digits between the braces make a reference; any other
+	// {{...}} text renders verbatim.
+	itemRefPattern = regexp.MustCompile(`\{\{([0-9]+)\}\}`)
 )
 
 // fallbackIcon is the sprite symbol a panel gets when it names an unknown one.
@@ -205,38 +207,44 @@ func (d itemData) Reading() string {
 	return d.Answer
 }
 
-// linkPart is a run of link text; Ref is the item it anchors to, zero for
-// plain text.
-type linkPart struct {
+// textPart is a run of lead-authored text; Ref is the item it anchors to,
+// zero for plain text.
+type textPart struct {
 	Text string
 	Ref  int
 }
 
-// LinkParts splits a link's text so that each (nn) naming an item in
-// link.Refs that this page renders becomes an in-page anchor.
-func (d itemData) LinkParts(link LinkView) []linkPart {
-	refs := map[int]bool{}
-	for _, id := range link.Refs {
-		refs[id] = true
-	}
-	var parts []linkPart
+// Parts splits lead-authored text at its {{nn}} item references. A reference
+// to an item this page renders becomes an in-page anchor labelled (nn); one
+// to an item the store holds but the page omits becomes plain (nn); one to an
+// ID the store does not hold stays verbatim. References are display only:
+// the store never refuses an update over one.
+func (p *pageData) Parts(s string) []textPart {
+	var parts []textPart
 	last := 0
-	for _, m := range linkItemPattern.FindAllStringSubmatchIndex(link.Text, -1) {
-		id, err := strconv.Atoi(link.Text[m[2]:m[3]])
-		if err != nil || !refs[id] || !d.Page.onPage[id] {
+	for _, m := range itemRefPattern.FindAllStringSubmatchIndex(s, -1) {
+		id, err := strconv.Atoi(s[m[2]:m[3]])
+		if err != nil || !p.Stored[id] {
 			continue
 		}
 		if m[0] > last {
-			parts = append(parts, linkPart{Text: link.Text[last:m[0]]})
+			parts = append(parts, textPart{Text: s[last:m[0]]})
 		}
-		parts = append(parts, linkPart{Text: link.Text[m[0]:m[1]], Ref: id})
+		part := textPart{Text: FormatID(id)}
+		if p.onPage[id] {
+			part.Ref = id
+		}
+		parts = append(parts, part)
 		last = m[1]
 	}
-	if last < len(link.Text) {
-		parts = append(parts, linkPart{Text: link.Text[last:]})
+	if last < len(s) {
+		parts = append(parts, textPart{Text: s[last:]})
 	}
 	return parts
 }
+
+// Parts splits the item's lead-authored text for the "text" template.
+func (d itemData) Parts(s string) []textPart { return d.Page.Parts(s) }
 
 // panelData is one panel with the page it sits on.
 type panelData struct {
