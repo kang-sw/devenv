@@ -59,8 +59,13 @@ whiteboard.query payload: {topic?, status?, id?}
   option letter, optionally followed by `: <why>`.
 - `rationale`: a technical or announced item's citation or reasoning, or a
   policy item's context.
-- `links`: strings such as a ticket stem, a commit, or `supersedes (12)`; a
-  `(nn)` naming no stored item is refused.
+- `links`: strings such as a ticket stem, a commit, or `supersedes {{12}}`.
+- Item references: write `{{12}}` in `title`, `options`, `recommendation`,
+  `rationale`, `links`, or the reading part of an `answer` to cite item
+  `(12)`. The page shows it as `(12)`, linked when that item is on the page,
+  and leaves it verbatim when the store holds no such item; a reference is
+  never refused. A plain `(12)` is literal text, and `answer_quote` is never
+  resolved, since it is the user's verbatim words.
 - `answer`: for a policy item, its option letter, optionally followed by
   `, <text>`; for a technical or announced item, `ok`, `no`, or short text. A
   later `answer` replaces an earlier one. `answer_quote` is required: the

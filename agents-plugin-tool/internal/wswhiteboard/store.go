@@ -48,8 +48,6 @@ var (
 	classValues       = []string{ClassPolicy, ClassTechnical, ClassAnnounced}
 	statusValues      = []string{StatusOpen, StatusAnswered, StatusAssumed, StatusWithdrawn, StatusSuperseded}
 	patchStatusValues = []string{StatusOpen, StatusWithdrawn, StatusSuperseded}
-	// itemRefPattern finds the "(nn)" item references inside a link string.
-	itemRefPattern = regexp.MustCompile(`\((\d+)\)`)
 	// fullDocumentPattern detects a whole HTML document where the Now slot
 	// takes a fragment.
 	fullDocumentPattern = regexp.MustCompile(`(?i)<!doctype|<html[\s>]`)
@@ -327,9 +325,6 @@ func Apply(state *State, payload any, env Env) (Outcome, []string) {
 		}
 	}
 
-	for _, supplied := range p.links {
-		validateLinks(p, work, supplied.field, supplied.links)
-	}
 	if len(p.list) > 0 {
 		return Outcome{}, p.list
 	}
@@ -372,7 +367,6 @@ func applyAdd(p *problems, work *State, field string, entry map[string]any, mark
 	}
 	if raw, present := entry["links"]; present {
 		item.Links = stringList(p, field+".links", raw)
-		p.supplied(field+".links", item.Links)
 	}
 	if raw, present := entry["recommendation"]; present {
 		item.Recommendation, _ = stringValue(p, field+".recommendation", raw)
@@ -463,7 +457,6 @@ func applyPatch(p *problems, work *State, field string, entry map[string]any, ma
 	}
 	if raw, present := entry["links"]; present {
 		next.Links = stringList(p, field+".links", raw)
-		p.supplied(field+".links", next.Links)
 	}
 	status := ""
 	if raw, present := entry["status"]; present {
@@ -518,22 +511,6 @@ func lookupItem(p *problems, work *State, field string, entry map[string]any) in
 		p.add("%s.id: %s is not in the store", field, FormatID(id))
 	}
 	return idx
-}
-
-// validateLinks checks that every (nn) reference inside the links one batch
-// entry supplied names an item the store holds after the batch. Only
-// supplied links are checked: a stored link may name an item the archive
-// cap has since evicted, and that must not refuse every later update.
-func validateLinks(p *problems, work *State, field string, links []string) {
-	for _, link := range links {
-		for _, match := range itemRefPattern.FindAllStringSubmatch(link, -1) {
-			var id int
-			fmt.Sscanf(match[1], "%d", &id)
-			if work.index(id) < 0 {
-				p.add("%s: %q refers to %s, which is not in the store", field, link, FormatID(id))
-			}
-		}
-	}
 }
 
 // OptionLetterFor returns the letter of the option at index i (a, b, c...).
@@ -652,17 +629,7 @@ func FormatItems(items []Item) string {
 // --- payload parsing -----------------------------------------------------
 
 type problems struct {
-	list  []string
-	links []suppliedLinks
-}
-
-type suppliedLinks struct {
-	field string
-	links []string
-}
-
-func (p *problems) supplied(field string, links []string) {
-	p.links = append(p.links, suppliedLinks{field: field, links: links})
+	list []string
 }
 
 func (p *problems) add(format string, args ...any) {

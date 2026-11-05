@@ -423,6 +423,9 @@ func TestWhiteboardRefusalsCarryProblemsAndSchema(t *testing.T) {
 		"## Payload",
 		"whiteboard.update payload: {",
 		"close_topics?: [topic],",
+		// The rsrc renderer substitutes only {{.Name}} placeholders, so the
+		// item-reference example survives rendering.
+		"`supersedes {{12}}`",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("refusal missing %q:\n%s", want, text)
@@ -620,6 +623,7 @@ func TestWhiteboardWorkflowTextFollowsKnob(t *testing.T) {
 		"The whiteboard is your primary channel to the user.",
 		"#### Payload",
 		"whiteboard.update payload: {",
+		"write `{{12}}` in `title`",
 		"Whiteboard: ai-docs/whiteboards/<reply-id>.html - (102), (103)",
 		"- Discussion IDs come from the whiteboard store",
 	} {

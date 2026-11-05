@@ -35,7 +35,7 @@ func sampleState() *State {
 		Options:        []string{"delete the previous embed on every render", "keep the latest five", "keep everything until session GC"},
 		Recommendation: "b: bounds the file count while chat history keeps rendering",
 		Rationale:      "If the host rereads the file, a deleted embed turns blank in chat history.\nEmbeds in a host folder are never deleted.",
-		Links:          []string{"follows (69)", "see (999) in the archive"},
+		Links:          []string{"follows {{69}}", "see {{999}} in the archive"},
 		Status:         StatusOpen, Changed: 12})
 	add(Item{ID: 78, Class: ClassTechnical, Topic: "embed retention", Title: "Eviction order follows the render sequence",
 		Rationale: "not mtime - two renders in one second share an mtime, and copies change it", Status: StatusOpen, Changed: 11})
@@ -53,7 +53,7 @@ func sampleState() *State {
 	add(Item{ID: 71, Class: ClassAnnounced, Topic: "embed layout", Title: "Full page has two columns, panels in the sidebar",
 		Status: StatusAnswered, Answer: "ok", AnswerQuote: "71-76 look good", Settled: 18, Changed: 11})
 	add(Item{ID: 72, Class: ClassAnnounced, Topic: "embed layout", Title: "Embed has one column",
-		Status: StatusAnswered, Answer: "ok", AnswerQuote: "71-76 look good", Settled: 19, Changed: 11, Links: []string{"pairs with (71)"}})
+		Status: StatusAnswered, Answer: "ok", AnswerQuote: "71-76 look good", Settled: 19, Changed: 11, Links: []string{"pairs with {{71}}"}})
 
 	add(Item{ID: 80, Class: ClassTechnical, Topic: "Now 입력", Title: "now_path로 HTML 파일을 받아 update 시점에 저장",
 		Rationale: "render마다 다시 읽는 방식 대신 - 파일이 지워지거나 바뀌어도 보드가 조용히 달라지지 않음", Status: StatusOpen, Changed: 12})
@@ -208,7 +208,7 @@ func TestRenderPageEscapesItemTextButNotNow(t *testing.T) {
 	st.Items = []Item{
 		{ID: 1, Class: ClassPolicy, Topic: "<script>t()</script>", Title: "<script>alert(1)</script>",
 			Options: []string{`<img src=x onerror=alert(2)>`, "b"}, Recommendation: "a: <b>why</b>",
-			Rationale: "<script>r()</script>", Links: []string{`<a href="javascript:x">(2)</a>`}, Status: StatusOpen},
+			Rationale: "<script>r()</script>", Links: []string{`<a href="javascript:x">{{2}}</a>`}, Status: StatusOpen},
 		{ID: 2, Class: ClassTechnical, Topic: "t", Title: `"quoted" & <tag>`, Status: StatusAnswered, Answer: "ok", AnswerQuote: "</div><script>q()</script>", Settled: 1},
 	}
 	panels := []Panel{{ID: `x"><script>p()</script>`, Title: "<script>pt()</script>", Icon: `"><script>`, Rows: []PanelRow{{State: `"><b>`, Label: "<l>", Text: "<script>pr()</script>"}}}}
@@ -417,8 +417,8 @@ func TestRenderPageLinkAnchors(t *testing.T) {
 	if !strings.Contains(out, `follows <a href="#item-69">(69)</a>`) {
 		t.Errorf("link to an item on the page is not an anchor")
 	}
-	if !strings.Contains(out, `see (999) in the archive`) || strings.Contains(out, `href="#item-999"`) {
-		t.Errorf("link to an item off the page should stay plain text")
+	if !strings.Contains(out, `see {{999}} in the archive`) || strings.Contains(out, `href="#item-999"`) {
+		t.Errorf("link to an ID the store does not hold should stay verbatim")
 	}
 	if !strings.Contains(out, `pairs with <a href="#item-71">(71)</a>`) {
 		t.Errorf("settled row link is not an anchor")
@@ -428,12 +428,88 @@ func TestRenderPageLinkAnchors(t *testing.T) {
 	}
 }
 
+// TestRenderPageItemReferences checks the {{nn}} resolution in every
+// lead-authored field: an item on the page anchors as (nn), an item the store
+// holds but the page omits renders as plain (nn), an ID the store does not
+// hold stays verbatim, and prose parentheses and non-digit brace tokens are
+// literal. The user's answer quote is never resolved.
+func TestRenderPageItemReferences(t *testing.T) {
+	st := &State{Seq: 3, SettleSeq: 2}
+	st.Items = []Item{
+		{ID: 1, Class: ClassTechnical, Topic: "t", Title: "target", Status: StatusOpen},
+		{ID: 2, Class: ClassPolicy, Topic: "t", Title: "title {{01}} step (2)",
+			Options: []string{"option {{01}}", "option {{40}}"}, Recommendation: "a: rec {{01}} {{my-tag}}",
+			Rationale: "why {{01}}\nwhy {{99}}\nhuge {{99999999999999999999}}", Links: []string{"link {{01}}", "step (2)"}, Status: StatusOpen},
+		{ID: 3, Class: ClassPolicy, Topic: "t", Title: "assumed {{01}}", Options: []string{"x {{01}}", "y"},
+			Status: StatusAssumed, Answer: "a: reading {{01}}", AnswerQuote: "quote {{01}}"},
+		{ID: 4, Class: ClassTechnical, Topic: "t", Title: "settled {{01}}", Status: StatusAnswered,
+			Answer: "free reading {{01}}", AnswerQuote: "said {{01}}", Settled: 1},
+		{ID: 5, Class: ClassTechnical, Topic: "t", Title: "ack", Rationale: "ack why {{01}}", Status: StatusOpen},
+		{ID: 6, Class: ClassPolicy, Topic: "t", Title: "unanswered-letter {{01}}", Options: []string{"p", "q"},
+			Status: StatusAssumed, Answer: "plain {{01}}", AnswerQuote: "q"},
+	}
+	view := BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"})
+	// The store holds (40) but no topic renders it: an archived settled item.
+	view.Stored[40] = true
+	out := render(t, view)
+
+	anchor := `<a href="#item-1">(01)</a>`
+	for _, want := range []string{
+		"title " + anchor + " step (2)", // title, with literal prose parentheses
+		"option " + anchor,              // option text
+		"rec " + anchor + " {{my-tag}}", // recommendation, with a verbatim brace token
+		"why " + anchor,                 // rationale
+		"why {{99}}",                    // an ID the store does not hold
+		"huge {{99999999999999999999}}", // an ID past int range stays verbatim
+		"link " + anchor,                // links
+		"step (2)</span>",               // a prose link
+		"assumed " + anchor,             // assumed title
+		"x " + anchor,                   // static option text
+		"reading " + anchor,             // assumed answer reading after the letter
+		"plain " + anchor,               // assumed answer reading without a letter
+		"settled " + anchor,             // settled title
+		"free reading " + anchor,        // settled answer reading
+		"ack why " + anchor,             // ack rationale
+		"option (40)",                   // archived item: plain (nn)
+		"quote {{01}}",                  // answer quote stays literal
+		"said {{01}}",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("rendered page lacks %q", want)
+		}
+	}
+	if strings.Contains(out, `href="#item-40"`) || strings.Contains(out, `href="#item-99"`) {
+		t.Errorf("a reference to an item off the page became an anchor")
+	}
+}
+
+func TestRenderPageItemReferenceKeepsEscaping(t *testing.T) {
+	st := &State{Seq: 2}
+	st.Items = []Item{
+		{ID: 1, Class: ClassTechnical, Topic: "t", Title: `<b>x</b>{{01}}<script>s()</script>`,
+			Rationale: `<i>r</i> {{01}}`, Links: []string{`<em>l</em>{{01}}`}, Status: StatusOpen},
+	}
+	out := render(t, BuildView(st, ViewInput{Layout: LayoutEmbed, ReplyID: "r"}))
+	for _, want := range []string{
+		`&lt;b&gt;x&lt;/b&gt;<a href="#item-1">(01)</a>&lt;script&gt;s()&lt;/script&gt;`,
+		`&lt;i&gt;r&lt;/i&gt; <a href="#item-1">(01)</a>`,
+		`&lt;em&gt;l&lt;/em&gt;<a href="#item-1">(01)</a>`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("rendered page lacks %q", want)
+		}
+	}
+	if strings.Contains(out, "<script>s()") {
+		t.Errorf("item text next to a reference is not escaped")
+	}
+}
+
 func TestRenderPageEmbedSizeBudget(t *testing.T) {
 	long := strings.Repeat("A fairly long sentence about the trade-off, written the way a lead explains it. ", 4)
 	st := &State{Seq: 30, NowSeq: 30, LastEmbedSeq: 20, Now: sampleNow}
 	settle := 0
 	for i := 1; i <= 60; i++ {
-		item := Item{ID: i, Topic: fmt.Sprintf("topic %d", i%6), Title: fmt.Sprintf("Item %d: %s", i, long[:120]), Rationale: long, Links: []string{fmt.Sprintf("see (%d)", max(1, i-1))}, Changed: 15 + i%16}
+		item := Item{ID: i, Topic: fmt.Sprintf("topic %d", i%6), Title: fmt.Sprintf("Item %d: %s", i, long[:120]), Rationale: long, Links: []string{fmt.Sprintf("see {{%d}}", max(1, i-1))}, Changed: 15 + i%16}
 		switch i % 4 {
 		case 0:
 			item.Class, item.Status = ClassPolicy, StatusOpen

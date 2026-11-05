@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 6c67f1f12fd44f30
 sage-review-completeness-reviewed: 6c67f1f12fd44f30
+completed: 2026-11-05
 ---
 
 # Whiteboard explicit item-reference syntax - replace implicit (nn) detection with {{nn}}
@@ -124,3 +125,44 @@ Verification:
 
 The Result notes that links already stored as `(nn)` in a live session lose
 their anchors after the upgrade (cosmetic; the store is session-scoped).
+
+### Result (12e7cc4ec) - 2026-11-05
+
+Landed in 12e7cc4ec, plus 6bfb654e7 (a test for one lite-review minor).
+
+- **One pattern.** `render.go` `itemRefPattern` (`\{\{([0-9]+)\}\}`) replaces
+  the three `(nn)` patterns, and `pageData.Parts` splits every lead-authored
+  field: title, rationale lines, recommendation text, option text, the answer
+  reading (assumed card and settled row), and links. A `"text"` template
+  renders the parts, so html/template still escapes all of the text.
+  `answer_quote` and topic names stay literal.
+- **Three-way resolution.** An item on the page renders as an anchored
+  `(nn)`. An item the store holds but the page omits renders as plain
+  `(nn)`. Any other ID stays verbatim `{{nn}}`, including an ID too large for
+  an int. `View.Stored` (every stored ID) supplies store membership.
+  `LinkView`/`Refs` was dropped, and `ItemView.Links` is now `[]string`.
+- **No refusal.** `validateLinks`, its call site, and the
+  `problems.links`/`supplied` plumbing are deleted.
+  `TestApplyLinksReferToExistingIDs` became `TestApplyAcceptsAnyItemReference`
+  and asserts that `{{77}}`, `step (2)`, and `{{my-tag}}` are accepted.
+- **Playbook.** The `whiteboard` Payload section now documents `{{12}}` in
+  place of the old refusal sentence. The canonical manifest was regenerated,
+  and the wsflow and Pi rsrc copies were resynced. The rsrc renderer replaces
+  only `{{.Name}}` placeholders (`wsrsrc/loader.go` `substituteVars`), so the
+  example needed no escaping. `internal/mcp` whiteboard tests check that the
+  example comes through intact, both in the rendered refusal schema and in
+  the manual with the knob on.
+- **Note on Decision (123).** `BuildView` places every stored item on the
+  page, collapsed settled rows included, and an evicted item is in neither
+  the store nor the page. So the "stored but off-page" branch cannot happen
+  in production today; only a test that sets `View.Stored` directly reaches
+  it. It is kept as the decision specifies, but nothing should rely on it.
+- **Upgrade note.** Links already stored as `(nn)` in a live session lose
+  their anchors after the upgrade. The effect is cosmetic, and the store is
+  session-scoped.
+
+Verification: `go vet ./...` clean; `go test ./... -count=1` (agents-plugin-tool)
+all ok, including the wswhiteboard, wsrsrc wsflow/Pi mirror, and mcp whiteboard
+tests; `python3 -m unittest discover agents-plugin-wsflow/tests`: 20 tests OK.
+Lite review: no Critical or Important findings. Two minors: the
+unreachable-branch note above, and the overflow test, now added.
