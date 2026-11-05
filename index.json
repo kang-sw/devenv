@@ -602,7 +602,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-05T00:37:03Z"
+        "touched_at": "2026-11-05T00:37:26Z",
+        "impl": {
+          "branch": "impl/develop/crumb-shame-aim"
+        }
       }
     }
   }
