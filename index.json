@@ -613,6 +613,9 @@
           "branch": "impl/develop/crumb-shame-aim"
         }
       }
+    },
+    "261105-feat-whiteboard-knob-harness-and-session-scope": {
+      "registered_at": "2026-11-05T01:03:28Z"
     }
   }
 }
