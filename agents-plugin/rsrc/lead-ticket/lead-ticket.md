@@ -47,11 +47,12 @@ For settlement, queue every unconfirmed item that could change ticket text,
 one item per decision. Reconcile item by item; where an answer's reach is
 unclear, state your reading on its own line and leave the item open until the
 user confirms it. The settle point is reached when the announced defaults and
-technical decisions are acknowledged and every policy question is confirmed,
-rejected, or explicitly deferred. At the settle point, persist
-without showing the confirmed set again for approval: the acknowledgement
-already showed every item, and the trace below and the Sage reviewers guard
-against interacting decisions.
+technical decisions are acknowledged or auto-confirmed (see
+`### Item classes`) and every policy question is confirmed, rejected, or
+explicitly deferred. At the settle point, persist without showing the
+confirmed set again for approval: the acknowledgement already showed every
+item it confirmed, the settlement report lists every auto-confirmed item, and
+the trace below and the Sage reviewers guard against interacting decisions.
 
 Research entries explicitly labeled as non-authoritative Proposals or Open
 Questions may be preserved without settlement; they do not open a queue item
@@ -87,8 +88,15 @@ actually asked:
 - An announced or technical item the user objects to becomes a policy question
   under its existing ID. So does an already-acknowledged announced or
   technical item that a later policy answer undercuts.
-- Announced or technical items raised later in the same settlement (a trace
-  knock-on, a new fact-populator gap) need their own acknowledgement.
+- Announced or technical items raised later in the same settlement need
+  their own acknowledgement, except review-raised ones: an announced or
+  technical item that comes from a fact-populator `decision_gaps:` item or
+  from a reviewer issue marked `autonomous` is confirmed on your own
+  judgment, with no acknowledgement round, and reported as auto-confirmed.
+  A reviewer issue marked `missing` gets a user round whatever class you
+  give it, because it is what blocks the promotion and the user sees what
+  cleared the block. A trace knock-on of a review-raised item needs its own
+  acknowledgement unless the reviewer issue itself named it.
 
 ### Queue state
 
@@ -198,7 +206,10 @@ re-ask's status tag.
 - Report the items settled this round in one line, such as
   `(01), (02) confirmed · (04) deferred`; items settled in earlier rounds are not
   repeated. This per-round settlement report is not the announced or
-  technical group.
+  technical group. It also lists each item you auto-confirmed this round
+  with its one-line decision, since the user has not seen it:
+  `(05) auto-confirmed - <one-line decision>`. The report may first reach the
+  user in the turn that moves the ticket to `ready/`.
 
 ## Derive actionable work from research
 
@@ -223,8 +234,9 @@ or reviewing, so the stamp covers the facts the reviewers read:
    `decision_gaps:`, and edits the ticket file itself where its own contract
    says it does. Review any edit as `git diff -- <ticket path>` and revert any
    hunk you reject; apply by hand a correction it reported but did not write.
-   Send each `decision_gaps:` item to the Open Decision Queue; never resolve
-   one from the populator's evidence alone.
+   Send each `decision_gaps:` item to the Open Decision Queue rather than
+   resolving it from the populator's evidence alone; `### Item classes` says
+   which of them you confirm without asking.
 4. Run it again only when an applied correction proved wrong or an unverified
    claim became checkable, and stop as soon as a round returns no fewer
    corrections than the round before; whatever is still unverified goes to the
@@ -343,7 +355,8 @@ Drop: `{{.McpNamespace}}/tickets.close(stem, status: "dropped")`. Closing to
 - Persisting discussion output before the user has explicitly agreed to
   persist.
 - Any Open Decision Queue item the user has not settled, including an
-  announced default or technical decision not yet acknowledged.
+  announced default or technical decision not yet acknowledged, apart from
+  one auto-confirmed under `### Item classes`.
 - A `block` verdict at a settlement boundary.
 - Dependency closure failing.
 

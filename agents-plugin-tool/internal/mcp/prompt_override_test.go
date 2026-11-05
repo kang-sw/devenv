@@ -1282,6 +1282,7 @@ func TestConfigTuningCatalogProjectsPromptAndSchemaKnobs(t *testing.T) {
 	}{
 		{key: wsconfig.ItemSageReviewDesign, domain: []string{"off", "ask", "auto"}, wantBuiltin: "off"},
 		{key: wsconfig.ItemReviewPhase, domain: []string{"off", "lite", "full"}, wantBuiltin: "lite"},
+		{key: wsconfig.ItemTicketReviewAutoAck, domain: []string{"on", "off"}, wantBuiltin: "on"},
 	} {
 		knob := requireTuningKnob(t, catalog, tc.key)
 		if knob.Writer.Tool != "config.tune" || knob.Writer.FixedArguments["key"] != tc.key {
@@ -1404,6 +1405,9 @@ func TestConfigTuningCatalogNoAgentShape(t *testing.T) {
 	requireTuningKnob(t, catalog, wsconfig.ItemSageReview)
 	requireTuningKnob(t, catalog, wsconfig.ItemSageReviewDesign)
 	requireTuningKnob(t, catalog, wsconfig.ItemReviewPhase)
+	if current := mustMarshalJSON(t, requireTuningKnob(t, catalog, wsconfig.ItemTicketReviewAutoAck).Current); !strings.Contains(current, `"value":"on"`) || !strings.Contains(current, `"scope":"builtin"`) {
+		t.Fatalf("no-agent catalog must list ticket_review_auto_ack with builtin on: %s", current)
+	}
 	for i, args := range []map[string]any{
 		{
 			"key":         wsconfig.ItemSageReview,
@@ -1417,11 +1421,21 @@ func TestConfigTuningCatalogNoAgentShape(t *testing.T) {
 			"reset":       true,
 			"session_key": key,
 		},
+		{
+			"key":         wsconfig.ItemTicketReviewAutoAck,
+			"scope":       "session",
+			"value":       "off",
+			"session_key": key,
+		},
 	} {
 		result := callToolOnce(t, s, 10+i, "config.tune", args)
 		if strings.Contains(result, `"isError":true`) {
-			t.Fatalf("no-agent config.tune sage_review request failed: %s", result)
+			t.Fatalf("no-agent config.tune request %v failed: %s", args, result)
 		}
+	}
+	relisted := parseTuningCatalogResponse(t, callToolOnce(t, s, 20, "config.list", map[string]any{"session_key": key, "format": "json"}))
+	if current := mustMarshalJSON(t, requireTuningKnob(t, relisted, wsconfig.ItemTicketReviewAutoAck).Current); !strings.Contains(current, `"value":"off"`) || !strings.Contains(current, `"scope":"session"`) {
+		t.Fatalf("no-agent config.tune must write ticket_review_auto_ack at session scope: %s", current)
 	}
 	subagentKnob := requireTuningKnob(t, catalog, "workflow.prefer_subagent")
 	if subagentKnob.Writer.Tool != "config.tune" || subagentKnob.Writer.FixedArguments["key"] != "workflow.prefer_subagent" {

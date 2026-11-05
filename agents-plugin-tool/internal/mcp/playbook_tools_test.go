@@ -2316,7 +2316,10 @@ func TestPlaybookPrintGoldenLeadTicket(t *testing.T) {
 				"So does an already-acknowledged announced or technical item that a later policy answer undercuts",
 				"need their own acknowledgement",
 				// Settle point replacing the retired final confirmation.
-				"The settle point is reached when the announced defaults and technical decisions are acknowledged and every policy question is confirmed, rejected, or explicitly deferred",
+				// The shipped text is the ticket_review_auto_ack default-on
+				// rule; the knob-off rendering is pinned by
+				// TestPlaybookReadLeadTicketReviewAutoAckFollowsKnob.
+				"The settle point is reached when the announced defaults and technical decisions are acknowledged or auto-confirmed (see `### Item classes`) and every policy question is confirmed, rejected, or explicitly deferred",
 				"At the settle point, persist without showing the confirmed set again for approval",
 				"A correction, an objection, or a reclass to a policy question returns its item to `[open]` under its existing ID",
 				"A response shows an item by its `(nn)` ID; the status and class tags stay in the section, apart from a re-ask's status tag",
