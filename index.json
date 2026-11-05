@@ -595,6 +595,9 @@
     "261030-bug-workflow-manual-sentinel-mints-lead-key-for-subagents": {
       "registered_at": "2026-10-30T14:07:33Z"
     },
+    "261105-bug-sage-stamp-move-next-instruction-loop": {
+      "registered_at": "2026-11-05T00:41:52Z"
+    },
     "261105-feat-lead-ticket-review-auto-ack": {
       "registered_at": "2026-11-05T00:41:05Z"
     },
