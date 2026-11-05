@@ -439,7 +439,7 @@ func TestRenderPageItemReferences(t *testing.T) {
 		{ID: 1, Class: ClassTechnical, Topic: "t", Title: "target", Status: StatusOpen},
 		{ID: 2, Class: ClassPolicy, Topic: "t", Title: "title {{01}} step (2)",
 			Options: []string{"option {{01}}", "option {{40}}"}, Recommendation: "a: rec {{01}} {{my-tag}}",
-			Rationale: "why {{01}}\nwhy {{99}}", Links: []string{"link {{01}}", "step (2)"}, Status: StatusOpen},
+			Rationale: "why {{01}}\nwhy {{99}}\nhuge {{99999999999999999999}}", Links: []string{"link {{01}}", "step (2)"}, Status: StatusOpen},
 		{ID: 3, Class: ClassPolicy, Topic: "t", Title: "assumed {{01}}", Options: []string{"x {{01}}", "y"},
 			Status: StatusAssumed, Answer: "a: reading {{01}}", AnswerQuote: "quote {{01}}"},
 		{ID: 4, Class: ClassTechnical, Topic: "t", Title: "settled {{01}}", Status: StatusAnswered,
@@ -460,6 +460,7 @@ func TestRenderPageItemReferences(t *testing.T) {
 		"rec " + anchor + " {{my-tag}}", // recommendation, with a verbatim brace token
 		"why " + anchor,                 // rationale
 		"why {{99}}",                    // an ID the store does not hold
+		"huge {{99999999999999999999}}", // an ID past int range stays verbatim
 		"link " + anchor,                // links
 		"step (2)</span>",               // a prose link
 		"assumed " + anchor,             // assumed title
