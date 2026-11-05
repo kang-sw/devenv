@@ -631,7 +631,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-05T02:11:31Z"
+        "touched_at": "2026-11-05T02:12:03Z",
+        "impl": {
+          "branch": "impl/develop/icing-corny-theft"
+        }
       }
     },
     "261105-feat-whiteboard-lead-confirmed-status": {
