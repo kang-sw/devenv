@@ -92,6 +92,10 @@ type whiteboardPanelInput struct {
 	// holds its named inbox (mailboxOwnerCheck), which the own address and
 	// the named-inbox unread count depend on.
 	mailbox whiteboardMailbox
+	// served builds the panels for a page served over http (the dashboard
+	// daemon's session page) rather than one written to disk: a ticket row
+	// carries its repo-relative path as text instead of a file link.
+	served bool
 }
 
 type whiteboardMailbox struct {
@@ -238,7 +242,11 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any)
 		}
 		sb.WriteString("ids: " + strings.Join(labels, ", ") + "\n")
 	}
-	sb.WriteString("full: " + render.full + "\n")
+	full := render.full
+	if url, ok := s.dashboardPageURL(key); ok {
+		full = url
+	}
+	sb.WriteString("full: " + full + "\n")
 	sb.WriteString("embed: " + render.embed + "\n")
 	return toolTextResponse(id, sb.String(), nil)
 }

@@ -18,7 +18,8 @@ shows HTML inline. Workers and subagents do not use it.
   change stamp, and writes a new embed snapshot. Make one call per turn
   carrying all of that turn's changes; an empty payload only re-renders. The
   result gives `ids:` (the added IDs in `add` order, when any), `full:` (the
-  full page path relative to the session root, the same every turn), and
+  session's dashboard page URL while the dashboard daemon serves the session,
+  else the full page path relative to the session root), and
   `embed:` (the new snapshot's path, or its bare file name while `embed_dir`
   is set).
 - `{{.McpNamespace}}/whiteboard.query(session_key, payload)` returns stored
@@ -112,11 +113,11 @@ whiteboard.query payload: {topic?, status?, id?}
 
 ## Each turn
 
-After the update, give one terminal line naming the `full:` path the update
-returned and the IDs you asked this turn:
+After the update, give one terminal line naming the `full:` URL or path the
+update returned and the IDs you asked this turn:
 
 ```text
-Whiteboard: ai-docs/whiteboards/<reply-id>.html - (102), (103)
+Whiteboard: <full> - (102), (103)
 ```
 
 When the host's instructions give an embed syntax, emit the host's embed line

@@ -30,8 +30,9 @@ func (s *Server) whiteboardMailbox(sessionKey, root string) whiteboardMailbox {
 }
 
 // ticketPanel lists every ready/ ticket and, on the full page only, the
-// latest whiteboardLatestTodo todo/ tickets, each linking to its file. idea/
-// tickets are never listed.
+// latest whiteboardLatestTodo todo/ tickets, each linking to its file, or on
+// a served page listing its repo-relative path as text. idea/ tickets are
+// never listed.
 func ticketPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 	tickets, err := wsdoc.TicketsList(in.root, wsdoc.TicketListOptions{Statuses: []string{"ready", "todo"}})
 	if err != nil {
@@ -51,6 +52,9 @@ func ticketPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 		title := t.Title
 		if title == "" {
 			title = t.Stem
+		}
+		if in.served {
+			return wswhiteboard.PanelRow{Label: t.Status, Text: title, Path: filepath.ToSlash(t.Path)}
 		}
 		target := filepath.Join(in.root, filepath.FromSlash(t.Path))
 		return wswhiteboard.PanelRow{Label: t.Status, Text: title, Link: whiteboardFileLink(in.root, pageDir, target)}
