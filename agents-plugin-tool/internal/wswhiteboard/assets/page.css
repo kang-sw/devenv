@@ -108,8 +108,25 @@ a { color: var(--wb-primary); }
 .cbody { padding: 8px 10px 10px; }
 .new { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--wb-primary); flex: none; align-self: center; }
 .cbar .new, details.now > summary .new { background: currentColor; }
-.ctx { margin: 0 0 8px; padding-left: 18px; color: var(--wb-muted-fg); font-size: 13px; overflow-wrap: anywhere; }
-.ctx li { margin: 2px 0; }
+.ctx { margin: 0 0 8px; color: var(--wb-muted-fg); font-size: 13px; overflow-wrap: anywhere; }
+
+/* markdown in item fields: inline code everywhere, blocks inside .md */
+:not(pre) > code { font-size: .92em; background: var(--wb-muted); border-radius: 4px; padding: 0 4px; }
+.cbar code { background: rgb(255 255 255 / .18); }
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md p, .md ul, .md ol, .md pre, .md table, .md blockquote { margin: 0 0 6px; }
+.md ul, .md ol { padding-left: 18px; }
+.md li { margin: 2px 0; }
+.md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { font-size: inherit; margin: 0 0 4px; }
+.md blockquote { padding-left: 10px; box-shadow: inset 3px 0 var(--wb-muted); }
+.md img { max-width: 100%; height: auto; border-radius: 6px; vertical-align: middle; }
+.md pre { background: var(--wb-muted); border-radius: 8px; padding: 6px 9px; overflow-x: auto; font-size: 12.5px; }
+.md pre > code { background: none; padding: 0; font-size: inherit; }
+.md table { border-collapse: collapse; font-size: 12.5px; display: block; max-width: 100%; overflow-x: auto; }
+.md th, .md td { padding: 3px 8px; border-bottom: 1px solid var(--wb-muted); text-align: left; vertical-align: top; }
+.md pre.mermaid { background: transparent; padding: 0; text-align: center; font-family: var(--wb-mono); }
+.md pre.mermaid svg { max-width: 100%; height: auto; }
 
 /* options: tonal buttons, filled when picked */
 .opts { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -122,6 +139,11 @@ a { color: var(--wb-primary); }
 .opt.static { cursor: default; }
 .opt.static:not(.picked) { box-shadow: none; opacity: .75; }
 .opt.static:hover { background: var(--wb-opt); }
+/* stacked: a block option is a full-width card whose text stays selectable */
+.opts.stack { flex-direction: column; }
+.opts.stack .opt { flex: none; width: 100%; grid-template-columns: 18px minmax(0, 1fr); user-select: text; }
+.opts.stack .opt .md { min-width: 0; }
+.opt[role="button"]:focus-visible { outline: 2px solid var(--wb-accent-policy); outline-offset: 2px; }
 .rec-line { margin-top: 8px; font-size: 12.5px; color: var(--wb-muted-fg); overflow-wrap: anywhere; }
 .rec-line b { color: var(--wb-accent-policy); display: inline-flex; align-items: center; gap: 2px; margin-right: 4px; }
 .note { width: 100%; margin-top: 8px; font: inherit; color: inherit; background: var(--wb-card); border: 0; border-bottom: 2px solid var(--wb-muted-fg); border-radius: 6px 6px 0 0; padding: 6px 9px; resize: none; overflow: hidden; display: block; line-height: 1.4; }

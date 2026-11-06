@@ -41,6 +41,10 @@ type View struct {
 	// Stored holds every item ID the store holds, so a {{nn}} reference to
 	// an item the page omits still resolves as a known item.
 	Stored map[int]bool
+	// FileLink turns a file path a markdown link or image names (relative
+	// to the session root, or absolute) into the href the page uses from
+	// the folder it is written to. Nil keeps the path as written.
+	FileLink func(path string) string
 }
 
 // TopicView is one topic block.
@@ -138,17 +142,20 @@ type ViewInput struct {
 	Layout  Layout
 	ReplyID string
 	Panels  []Panel
+	// FileLink is copied to View.FileLink.
+	FileLink func(path string) string
 }
 
 // BuildView derives a page view from state.
 func BuildView(state *State, in ViewInput) View {
 	view := View{
-		Layout:  in.Layout,
-		ReplyID: in.ReplyID,
-		Seq:     state.Seq,
-		Now:     state.Now,
-		Panels:  in.Panels,
-		Stored:  map[int]bool{},
+		Layout:   in.Layout,
+		ReplyID:  in.ReplyID,
+		Seq:      state.Seq,
+		Now:      state.Now,
+		Panels:   in.Panels,
+		Stored:   map[int]bool{},
+		FileLink: in.FileLink,
 	}
 	for _, item := range state.Items {
 		view.Stored[item.ID] = true

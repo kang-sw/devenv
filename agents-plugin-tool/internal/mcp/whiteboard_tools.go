@@ -388,14 +388,19 @@ func (s *Server) renderWhiteboard(rec *sessionRecord, sessionKey string, withEmb
 		replyID:    replyID,
 		mailbox:    s.whiteboardMailbox(sessionKey, rec.Root),
 	}
-	panelsFor := func(layout wswhiteboard.Layout) []wswhiteboard.Panel {
+	viewInput := func(layout wswhiteboard.Layout) wswhiteboard.ViewInput {
 		in := panelInput
 		in.layout = layout
-		return whiteboardPanels(in)
+		return wswhiteboard.ViewInput{
+			Layout:   layout,
+			ReplyID:  replyID,
+			Panels:   whiteboardPanels(in),
+			FileLink: whiteboardItemFileLink(rec.Root, whiteboardPageDir(in)),
+		}
 	}
 
 	if withEmbed {
-		html, err := wswhiteboard.RenderPage(wswhiteboard.BuildView(st, wswhiteboard.ViewInput{Layout: wswhiteboard.LayoutEmbed, ReplyID: replyID, Panels: panelsFor(wswhiteboard.LayoutEmbed)}))
+		html, err := wswhiteboard.RenderPage(wswhiteboard.BuildView(st, viewInput(wswhiteboard.LayoutEmbed)))
 		if err != nil {
 			return out, fmt.Errorf("render embed: %w", err)
 		}
@@ -403,6 +408,9 @@ func (s *Server) renderWhiteboard(rec *sessionRecord, sessionKey string, withEmb
 		target := dir
 		if st.EmbedDir != "" {
 			target = st.EmbedDir
+		}
+		if err := ensureWhiteboardMermaid(target, html); err != nil {
+			return out, err
 		}
 		if err := writeWhiteboardFile(filepath.Join(target, name), []byte(html)); err != nil {
 			return out, fmt.Errorf("write embed: %w", err)
@@ -421,9 +429,12 @@ func (s *Server) renderWhiteboard(rec *sessionRecord, sessionKey string, withEmb
 		st.LastEmbedSeq = st.Seq
 	}
 
-	html, err := wswhiteboard.RenderPage(wswhiteboard.BuildView(st, wswhiteboard.ViewInput{Layout: wswhiteboard.LayoutFull, ReplyID: replyID, Panels: panelsFor(wswhiteboard.LayoutFull)}))
+	html, err := wswhiteboard.RenderPage(wswhiteboard.BuildView(st, viewInput(wswhiteboard.LayoutFull)))
 	if err != nil {
 		return out, fmt.Errorf("render full page: %w", err)
+	}
+	if err := ensureWhiteboardMermaid(dir, html); err != nil {
+		return out, err
 	}
 	if err := writeWhiteboardFile(filepath.Join(dir, replyID+".html"), []byte(html)); err != nil {
 		return out, fmt.Errorf("write full page: %w", err)
@@ -434,6 +445,27 @@ func (s *Server) renderWhiteboard(rec *sessionRecord, sessionKey string, withEmb
 	}
 	out.full = whiteboardDirRel + "/" + replyID + ".html"
 	return out, nil
+}
+
+// ensureWhiteboardMermaid writes the shared mermaid script into dir, before
+// the page that loads it, when that page holds a mermaid block and the file
+// is missing: about 3 MB is written once per folder, never per update. Its
+// name carries the asset's hash, so an upgrade adds a file instead of
+// replacing one an older page still loads, and it matches no whiteboard GC
+// pattern.
+func ensureWhiteboardMermaid(dir, html string) error {
+	if !wswhiteboard.UsesMermaid(html) {
+		return nil
+	}
+	name, data := wswhiteboard.MermaidAsset()
+	path := filepath.Join(dir, name)
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	}
+	if err := writeWhiteboardFile(path, data); err != nil {
+		return fmt.Errorf("write %s: %w", name, err)
+	}
+	return nil
 }
 
 // whiteboardRender is one render's outcome. Its file side effects settle

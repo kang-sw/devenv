@@ -227,7 +227,8 @@ func TestRenderPageEscapesItemTextButNotNow(t *testing.T) {
 				t.Errorf("%s: item text %q is not escaped", name, raw)
 			}
 		}
-		for _, escaped := range []string{"&lt;script&gt;alert(1)&lt;/script&gt;", "&#34;quoted&#34; &amp; &lt;tag&gt;"} {
+		// Item text is markdown now: goldmark escapes a quote as &quot;, not &#34;.
+		for _, escaped := range []string{"&lt;script&gt;alert(1)&lt;/script&gt;", "&quot;quoted&quot; &amp; &lt;tag&gt;"} {
 			if !strings.Contains(out, escaped) {
 				t.Errorf("%s: escaped text %q missing", name, escaped)
 			}

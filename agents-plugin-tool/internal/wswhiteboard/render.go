@@ -14,19 +14,23 @@ import (
 
 // The page assets: one template set, the shared stylesheet, the answer-form
 // script both layouts run, the change-signal script only the full page runs,
-// and the icon sprite. Everything is inlined, so a page needs no other file
-// beyond the full page's stamp script.
+// the mermaid theme script a page with a mermaid block runs, and the icon
+// sprite. Everything is inlined, so a page needs no other file beyond the
+// full page's stamp script and, when it holds a mermaid block, the shared
+// mermaid script (MermaidAsset).
 //
-//go:embed assets/page.tmpl assets/page.css assets/form.js assets/live.js assets/sprite.svg
+//go:embed assets/page.tmpl assets/page.css assets/form.js assets/live.js assets/mermaid-init.js assets/sprite.svg
 var assetFS embed.FS
 
 type pageAssets struct {
-	tmpl   *template.Template
-	css    template.CSS
-	form   string
-	live   string
-	sprite template.HTML
-	icons  map[string]bool
+	tmpl *template.Template
+	css  template.CSS
+	form string
+	live string
+	// mermaidInit themes and runs mermaid after the shared script loads.
+	mermaidInit template.JS
+	sprite      template.HTML
+	icons       map[string]bool
 }
 
 var (
@@ -57,11 +61,12 @@ func loadAssets() (*pageAssets, error) {
 			return string(data)
 		}
 		a := &pageAssets{
-			css:    template.CSS(read("page.css")),
-			form:   read("form.js"),
-			live:   read("live.js"),
-			sprite: template.HTML(strings.TrimSpace(read("sprite.svg"))),
-			icons:  map[string]bool{},
+			css:         template.CSS(read("page.css")),
+			form:        read("form.js"),
+			live:        read("live.js"),
+			mermaidInit: template.JS(read("mermaid-init.js")),
+			sprite:      template.HTML(strings.TrimSpace(read("sprite.svg"))),
+			icons:       map[string]bool{},
 		}
 		if assetsErr != nil {
 			return
@@ -89,8 +94,9 @@ func loadAssets() (*pageAssets, error) {
 }
 
 // RenderPage renders view as one self-contained HTML document: the full page
-// for LayoutFull, the embed snapshot for LayoutEmbed. Item text is escaped;
-// view.Now is written unescaped, as the HTML fragment it is.
+// for LayoutFull, the embed snapshot for LayoutEmbed. Item text renders as
+// markdown with raw HTML escaped (markdown.go); view.Now is written
+// unescaped, as the HTML fragment it is.
 func RenderPage(view View) (string, error) {
 	a, err := loadAssets()
 	if err != nil {
@@ -118,10 +124,23 @@ type pageData struct {
 	// CountBulk is how many items the bulk checkbox answers.
 	CountBulk int
 
+	// Mermaid is set while the template renders a mermaid block, so the
+	// page's closing script tags, rendered after every item, load mermaid
+	// only on a page that holds one.
+	Mermaid     bool
+	MermaidInit template.JS
+
 	icons map[string]bool
 	// onPage holds every item ID the page renders, the targets an in-page
 	// link may point at.
 	onPage map[int]bool
+	md     *markdown
+}
+
+// MermaidFile is the shared mermaid script's name, beside the page.
+func (p *pageData) MermaidFile() string {
+	name, _ := MermaidAsset()
+	return name
 }
 
 func newPageData(view View, a *pageAssets) *pageData {
@@ -131,15 +150,16 @@ func newPageData(view View, a *pageAssets) *pageData {
 		script += a.live
 	}
 	p := &pageData{
-		View:    view,
-		Full:    full,
-		Embed:   !full,
-		CSS:     a.css,
-		Script:  template.JS("(function () {\n" + script + "})();\n"),
-		Sprite:  a.sprite,
-		NowHTML: template.HTML(view.Now),
-		icons:   a.icons,
-		onPage:  map[int]bool{},
+		View:        view,
+		Full:        full,
+		Embed:       !full,
+		CSS:         a.css,
+		Script:      template.JS("(function () {\n" + script + "})();\n"),
+		Sprite:      a.sprite,
+		NowHTML:     template.HTML(view.Now),
+		MermaidInit: a.mermaidInit,
+		icons:       a.icons,
+		onPage:      map[int]bool{},
 	}
 	if !full {
 		// The embed has no change-signal loader, so it carries no stamp.
@@ -198,6 +218,17 @@ func (d itemData) PickedOption() *OptionView {
 		}
 	}
 	return nil
+}
+
+// Stacked reports whether the item's options render as stacked cards: any
+// option holds block markdown.
+func (d itemData) Stacked() bool {
+	for _, o := range d.Options {
+		if d.Page.IsBlock(o.Text) {
+			return true
+		}
+	}
+	return false
 }
 
 // Reading is the lead's reading of the answer beyond a picked option: the
@@ -266,8 +297,8 @@ func (d panelData) IconName() string {
 	return fallbackIcon
 }
 
-// rationaleLines splits a rationale into its non-blank lines, one context
-// bullet each.
+// rationaleLines splits a rationale into its non-blank lines, one ack-row
+// reason each.
 func rationaleLines(s string) []string {
 	var out []string
 	for _, line := range strings.Split(s, "\n") {
