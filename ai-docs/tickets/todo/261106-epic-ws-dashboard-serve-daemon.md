@@ -36,26 +36,27 @@ Decided in the 2026-11-06 whiteboard discussion, items (168)-(181) and
 
 ## Child Tickets
 
-Each child is captured later as its own ticket, in this order. The split
-keeps lifecycle, rendering, network access, and each adapter separate,
-because they fail and verify separately; the lifecycle child is isolated
-because the dropped MVP's lifecycle bugs came from it. (199)
-Rejected: one large child.
+Each child is captured later as its own ticket. Parts that fail and verify
+differently are phases inside a child rather than children of their own;
+the lifecycle work stays isolated as the core child's first phase, because
+the dropped MVP's lifecycle bugs came from it. (201)
+Rejected: nine single-concern children (199), too granular; three children
+with browser interaction folded into the core.
 
-- Planned: Claude mod event probe - whether subagent tool-call and
-  generating-phase events reach the mod (196).
-- Planned: daemon foundation - file lock, endpoint file, `/health`, detached
-  auto-spawn, version replacement (174), (178), (179).
-- Planned: machine root registry and the daemon's session index, nudge, and
-  polling (169), (181).
-- Planned: HTTP render of `/` and `/s/<reply-id>` with SSE, and the
+- Planned: daemon core - Phase 1 lifecycle (file lock, endpoint file,
+  `/health`, detached auto-spawn, version replacement) (174), (178), (179);
+  then the machine root registry, session index, nudge, and polling (169),
+  (181); then the HTTP render of `/` and `/s/<reply-id>` with SSE and the
   pointer-line URI (170), (180).
-- Planned: browser answer submission by mail (172).
-- Planned: LAN opt-in and access token (173), (197).
-- Planned: live snapshot - the ws-mcp intake for adapter events and the
-  per-session snapshot file (188), (191), (195).
-- Planned: Pi adapter.
-- Planned: Claude adapter.
+- Planned: browser interaction and access - answer submission by mail
+  (172), LAN opt-in and access token (173), (197). Both are where the
+  browser gains write or network access, so they are reviewed together.
+- Planned: live snapshot and Pi adapter - the ws-mcp intake for adapter
+  events, the per-session snapshot file (188), (191), (195), and the Pi
+  adapter producing it.
+- Planned: Claude adapter - Phase 1 is the event probe (196) and runs
+  before any other child's work; later phases build the adapter on its
+  result.
 
 ## Cross-Child Decisions
 
@@ -156,11 +157,12 @@ Rejected: one large child.
   the shape of Pi's batch model (`BatchView`, `agents-plugin-pi/src/agent-batches.ts`,
   caps `AGENT_BATCH_CAP` 5, `BATCH_TOOL_NAME_CAP` 5, `BATCH_ARGS_PREVIEW_CAP`
   200). The Claude adapter produces the same shape. (195)
-- **Claude adapter probe first.** The first child probes whether the Claude
-  mod receives subagent tool-call and generating-phase events. Verified so
-  far: subagent `turn.start` events carry an `agentId`. If the events are
-  unavailable, the Claude live view falls back to session-level state
-  (193 a). (196)
+- **Claude adapter probe first.** The Claude adapter child's Phase 1
+  probes whether the Claude mod receives subagent tool-call and
+  generating-phase events, and it runs before any other child's work.
+  Verified so far: subagent `turn.start` events carry an `agentId`. If the
+  events are unavailable, the Claude live view falls back to session-level
+  state (193 a). (196), (201)
 
 **Audience**
 - **Host-independent.** The dashboard targets every ws host user: Claude,
