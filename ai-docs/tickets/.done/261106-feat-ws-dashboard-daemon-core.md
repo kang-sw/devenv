@@ -10,6 +10,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: ac72942546448dbd
 sage-review-design-reviewed: ac72942546448dbd
+completed: 2026-11-06
 ---
 
 # ws dashboard daemon core - lifecycle, session discovery, and the session page
