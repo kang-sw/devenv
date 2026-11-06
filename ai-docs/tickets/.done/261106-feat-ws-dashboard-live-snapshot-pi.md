@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 1e76933f5ae0cadd
 sage-review-completeness-reviewed: 1e76933f5ae0cadd
+completed: 2026-11-07
 ---
 
 # ws dashboard live snapshot and Pi adapter - adapter event intake, snapshot file, conversation ring, Pi producer and submission
