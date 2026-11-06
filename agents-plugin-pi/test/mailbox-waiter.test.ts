@@ -15,6 +15,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
+  afterCompactionHold,
   attachMailboxRuntimeCleanup,
   boardWakeOutcome,
   buildMailboxPushMessage,
@@ -424,6 +425,19 @@ describe("startMailboxWaiter: dashboard board inbox", () => {
     waiter.stop();
     await waiter.done;
     assert.deepEqual(wait.arms, [false, false]);
+  });
+});
+
+describe("afterCompactionHold", () => {
+  test("runs after a hold release that the same compaction event schedules later", async () => {
+    let compacting = true;
+    const seen: boolean[] = [];
+    // The settle hook's handler runs first; the hold owner's handler then
+    // schedules its own deferred release, as Pi dispatches one event's handlers in order.
+    afterCompactionHold(() => seen.push(compacting));
+    setImmediate(() => { compacting = false; });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.deepEqual(seen, [false]);
   });
 });
 

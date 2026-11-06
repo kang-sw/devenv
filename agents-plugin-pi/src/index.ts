@@ -220,7 +220,7 @@ import { ChildApprovalGate } from "./approval-protocol.ts";
 import { isLeadOrFork, readSpawnRole, WS_PI_FORK_CONTEXT_ENV, WS_PI_PARENT_SESSION_KEY_ENV, type SpawnRole } from "./process-role.ts";
 import { createApprovalRelay, registerExecuteGateway } from "./execute-gateway.ts";
 import { registerBackgroundTaskShutdown } from "./background-tasks.ts";
-import { attachMailboxRuntimeCleanup, buildMailboxPushMessage, createBridgeDrain, createBridgeInboxDrain, createMailboxWaiterSlot, createSubprocessWait, reportDistinctLinesOnce, resolveMailboxSelfSlug, sessionMailboxWaitOptions, shouldArmMailboxWaiter, stageMailboxRuntime, startMailboxWaiter, type MailboxToolCall, type MailboxWaiterHandle, type StagedMailboxRuntime } from "./mailbox-waiter.ts";
+import { afterCompactionHold, attachMailboxRuntimeCleanup, buildMailboxPushMessage, createBridgeDrain, createBridgeInboxDrain, createMailboxWaiterSlot, createSubprocessWait, reportDistinctLinesOnce, resolveMailboxSelfSlug, sessionMailboxWaitOptions, shouldArmMailboxWaiter, stageMailboxRuntime, startMailboxWaiter, type MailboxToolCall, type MailboxWaiterHandle, type StagedMailboxRuntime } from "./mailbox-waiter.ts";
 import { armForkRoleWiring, registerFork } from "./fork.ts";
 import {
   createThreadRegistryHandle,
@@ -640,14 +640,17 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   // The owner lead's own turn, from Pi `agent_start` to `agent_settled`: a
   // dashboard message that arrives inside it stays held in the inbox until
   // the settle, so the page can still merge into or cancel it. Compaction
-  // also blocks a prompt, so its end releases a held message the same way.
+  // also blocks a prompt, so its end (or failure) releases a held message
+  // the same way, once the compaction hold itself has cleared.
   let leadTurnOpen = false;
   pi.on("agent_start", () => { leadTurnOpen = true; });
   pi.on("agent_settled", () => {
     leadTurnOpen = false;
     mailboxWaiterHandle?.leadSettled?.();
   });
-  pi.on("session_compact", () => { mailboxWaiterHandle?.leadSettled?.(); });
+  for (const event of ["session_compact", "session_compact_failed"] as const) {
+    pi.on(event, () => { afterCompactionHold(() => { mailboxWaiterHandle?.leadSettled?.(); }); });
+  }
   pi.on("session_shutdown", () => { leadTurnOpen = false; });
   // 260917 review fix: monotonic epoch guarding the async self-slug
   // resolution the arm site awaits below. Before that await existed, every

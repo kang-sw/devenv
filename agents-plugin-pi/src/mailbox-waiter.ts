@@ -356,6 +356,16 @@ export function startMailboxWaiter(deps: MailboxWaiterDeps): MailboxWaiterHandle
   };
 }
 
+/**
+ * Run `fn` once the lead's compaction hold has been released. The hold is
+ * cleared in a `setImmediate` that a handler of the same compaction event
+ * schedules, possibly after this call; a second check-phase turn runs after
+ * every immediate queued during that event, so the hold is gone by then.
+ */
+export function afterCompactionHold(fn: () => void, defer: (callback: () => void) => void = setImmediate): void {
+  defer(() => defer(fn));
+}
+
 export interface MailboxWaiterSlotDeps {
   /** Resolve the owned named-inbox slug for `sessionKey` (`resolveMailboxSelfSlug`); must not throw. */
   resolveSlug: (sessionKey: string) => Promise<string | undefined>;
@@ -557,8 +567,9 @@ export function sessionMailboxWaitOptions(
  * The real `runWait`: a source-loaded session invokes its immutable copy of
  * the binary used to bootstrap the connected bridge, avoiding mutable staging
  * and runtime contracts. Release-backed sessions retain the Python launcher.
- * Stdout — the peeked mail — is intentionally ignored (`stdio` drops it): the
- * drain, not the peek, is the source of truth.
+ * Stdout — the peeked mail — is ignored (`stdio` drops it) except for a
+ * `--board-inbox` wait, whose `kinds` alone are read: the drain, not the
+ * peek, is the source of truth.
  */
 export function createSubprocessWait(options: SubprocessWaitOptions): (signal: AbortSignal, arm?: MailboxWaitArm) => Promise<MailboxWaitOutcome> {
   const stderr = options.onStderr ?? (() => {});
