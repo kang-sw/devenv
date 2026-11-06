@@ -290,11 +290,19 @@ with browser interaction folded into the core.
 - **Peer leads.** The tree's lead root holds one "peer lead" group: the
   sessions this lead exchanges mail with. Each row shows the peer's lead
   phase line from the peer's own snapshot, the last exchange time, a
-  `/s/<reply-id>` link, and the peer's subagent count only; the peer's own
-  tree is never nested. (259)
+  `/s/<reply-id>` link, and the peer's subagent count. (259) A peer row is
+  collapsed by default; a peer the user expands shows that peer's lead
+  batches and subagent tree, one level deep: the peer's own peer group
+  never appears. (279) The daemon renders every listed peer's tree inside
+  a collapsed `<details>`, and the browser keeps the expanded set in
+  localStorage keyed by peer reply-id, so a co-lead stays expanded across
+  reloads and days. (280)
   Rejected: recursive peer trees (A and B mailing each other form a cycle,
-  and each page would fan in every peer's updates); a badge on the mailbox
-  panel only.
+  and each page would fan in every peer's updates); peers that never show
+  a tree (279 replaced it: the user follows a co-lead's subagents); the
+  browser reporting its expanded set so the daemon renders only those trees
+  (adds browser-to-daemon state for a list capped at live peers plus 5);
+  a badge on the mailbox panel only.
 - **Peer resolution.** The daemon resolves each mailbox contact to a
   session: an `id:<reply-id>` address resolves directly; a named address
   goes through the mailbox presence record's owner session key and
