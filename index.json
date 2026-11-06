@@ -616,57 +616,8 @@
     "261106-epic-ws-dashboard-serve-daemon": {
       "registered_at": "2026-11-06T04:24:28Z"
     },
-    "261106-feat-mailbox-history-ring": {
-      "registered_at": "2026-11-06T02:46:24Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-06T04:58:47Z",
-        "impl": {
-          "branch": "impl/develop/dice-value-bleak"
-        }
-      }
-    },
-    "261106-feat-whiteboard-board-text-language": {
-      "registered_at": "2026-11-06T02:04:15Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-06T07:11:33Z"
-      }
-    },
-    "261106-feat-whiteboard-dashboard-panels": {
-      "registered_at": "2026-11-06T02:46:28Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-06T06:50:11Z",
-        "impl": {
-          "branch": "impl/develop/giddy-echo-gauze"
-        }
-      }
-    },
     "261106-feat-whiteboard-policy-answer-user-alternative": {
       "registered_at": "2026-11-06T04:42:55Z"
-    },
-    "261106-feat-whiteboard-rich-items": {
-      "registered_at": "2026-11-06T08:27:02Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-06T09:01:39Z",
-        "impl": {
-          "branch": "impl/develop/scone-chemo-vista"
-        }
-      }
     },
     "261106-feat-ws-dashboard-browser-interaction": {
       "registered_at": "2026-11-06T08:59:48Z"
@@ -688,13 +639,10 @@
       "registered_at": "2026-11-06T08:59:44Z",
       "lease": {
         "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
+        "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-06T10:27:27Z",
-        "impl": {
-          "branch": "impl/develop/gills-tall-tweet"
-        }
+        "touched_at": "2026-11-06T12:51:09Z"
       }
     },
     "261106-feat-ws-dashboard-live-snapshot-pi": {
