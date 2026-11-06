@@ -601,6 +601,9 @@
     "261105-feat-whiteboard-lead-confirmed-status": {
       "registered_at": "2026-11-05T01:20:45Z"
     },
+    "261106-epic-ws-dashboard-serve-daemon": {
+      "registered_at": "2026-11-06T04:24:28Z"
+    },
     "261106-feat-mailbox-history-ring": {
       "registered_at": "2026-11-06T02:46:24Z"
     },
