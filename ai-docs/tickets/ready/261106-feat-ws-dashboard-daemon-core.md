@@ -741,6 +741,176 @@ the narrow-screen tabs and the hidden-tab marker; the layout switch and its
 persistence across reload; an expanded peer staying expanded across reload;
 the tree cap at about 38% of the column.
 
+### Result (2f1ea3cc3) - 2026-11-06
+
+Landed:
+- `internal/wswhiteboard` (47ad75d42): `RenderRegions` renders the board and
+  panels fragments from the static page's own templates. `PageAssets` exposes
+  the shared CSS, sprite, form script, and mermaid init. `View.FileText` and
+  `PanelRow.Path` render file targets as path text.
+- `internal/mcp` (0426fcd3d): `DashboardSessionSource.ReadPage`
+  (`wsdashboard.PageSource`) returns the served board and panels, the
+  resolved mail contacts, and the mailbox history bodies. The
+  `ReadSession` fingerprint is widened. The `full:` pointer line is added,
+  and the whiteboard playbook is updated in the ws, wsflow, and Pi mirrors.
+- `internal/wsdashboard` (75ff0c2bc, 3cd05ff28, e4eef7e71):
+  - `pageview.go`: pure view-model builders.
+  - `pages.go`: routes and region rendering.
+  - `sse.go`: the broker and streams.
+  - `assets/`: page and region templates, CSS, the view-state script, and
+    sprite icons.
+  - The routes are `/`, `/events`, `/s/<reply-id>`, `/s/<reply-id>/events`,
+    and `/s/<mermaid asset name>`. All are GET/HEAD only (streams GET only)
+    and sit behind the loopback Host guard, with no CORS.
+- The ws-mcp manual's "Dashboard daemon" section now names the pages and the
+  pointer line (be5c346de).
+
+Settled:
+- **Pointer line ("daemon is up").**
+  - ws-mcp records each session's last nudge outcome: a 204 stores the
+    endpoint port, and any error or a missing endpoint clears it.
+    Unregistering also clears it.
+  - `whiteboard.update` prints `full: http://127.0.0.1:<port>/s/<reply-id>`
+    only when the session is registered and the port is set. Otherwise it
+    prints the page path.
+  - The update path makes no network call, so it never blocks or fails.
+  - Accepted lag: the first update after the daemon dies may still name the
+    URL once, and an update before any nudge has returned names the path.
+- **SSE region mapping.**
+  - Every region element carries `data-region` and `data-h`, a short sha256
+    of its HTML. The page opens `/s/<id>/events?h=name.hash,...` with the
+    hashes it holds. The stream sends `event: region {name, hash, html}` only
+    for regions whose hash differs, then remembers what it sent.
+  - One broker wakes every stream on any index `OnChange`, because a peer's
+    or a delegate's change shows in another session's tree.
+  - Each stream re-renders at most every 250 ms, and every 15 s even without
+    a wake, because liveness windows follow the clock. A keep-alive comment
+    goes out every 25 s.
+  - Times render as fixed UTC text plus epoch ms, and the page script formats
+    them, so an unchanged state hashes the same.
+  - A `mode` pseudo-region (live/board) tells the page that its layout no
+    longer fits. The page reloads unless the composer or the board answers
+    hold input; then it shows a banner.
+  - `event: gone` fires when the session leaves the index.
+  - The composer sits outside every region and is never swapped.
+- **`/` ended sessions.** Live sessions (the Phase 2 registration rule) are
+  listed. Ended sessions are listed under "ended" for 24 h after their last
+  heartbeat or end mark. Older ones are only counted. A project with nothing
+  listed is skipped.
+- **Board images.** A served board renders an image as its alt text followed
+  by `<code class="fpath">` holding the repo-relative path. A non-image file
+  link renders as its label plus the path, or the path alone when the label
+  equals it. There is no `file:` URL and no relative href or src.
+- **Board-first page.** It is chosen when `wslive` adapter presence fails (no
+  snapshot, no adapter, or a stale one). The page has a head, the board, and
+  the panels only: no tree, conversation, composer, or layout control.
+- **Peers.**
+  - Contacts sharing a reply-id merge, keep the latest exchange, and are
+    labelled by the named address.
+  - A served peer's liveness comes from its registration. An unserved named
+    peer follows presence, and its reply-id resolves through the presence
+    Owner at read time, so a rebind follows the new holder. An unserved `id:`
+    peer is live while its reply entry is seen within 10 minutes.
+  - All live peers are shown, plus the last 5 ended; older ones are counted.
+  - A served peer with an adapter shows its lead batches and agents one level
+    deep inside a collapsed `<details data-peer>`, whose open state is saved
+    in localStorage.
+- **Served mailbox panel.** The daemon holds no mailbox identity, so the
+  served panel shows the `id:<reply-id>` address and its unread count, never
+  a named inbox.
+- **Fingerprint.** It adds the served panels (when a board exists), the
+  history entry names, and each contact's address, reply-id, and last
+  exchange. PresenceLive stays out because it changes with the clock alone.
+  This resolves the Phase 2 minor.
+
+Verification:
+- `go test ./... -count=1` in `agents-plugin-tool`: all packages ok.
+- `go test ./internal/wsdashboard -race`: ok.
+- `go vet` for linux, windows, and darwin on wsdashboard, mcp, wswhiteboard,
+  and cmd/ws-mcp: ok.
+- The python unittest suites for `agents-plugin` and `agents-plugin-wsflow`
+  were run by the mcp leaf: ok.
+- `node --check` on the page script: ok.
+
+Tests:
+- `internal/wsdashboard/pages_test.go` covers:
+  - the live page's regions, origin tags, the escaped streamed reply, mail
+    expansion (and first line only once out of history), and the served peer
+    link;
+  - no history key, project path, or `file:` on the page;
+  - a board-first page with no gear, composer, or tabs;
+  - the `/` listing;
+  - 404 for an unknown, invalid, or unreadable session;
+  - the trailing-slash redirect;
+  - HEAD refused on streams;
+  - the mermaid asset served beside the page;
+  - the Host guard on every page route;
+  - an SSE client receiving only `head,board` after a nudge, then
+    `event: gone`;
+  - the mode event when an adapter appears;
+  - region hashes that do not change with render time;
+  - the rendered permission wait and the `/` ended section;
+  - the script and CSS hooks.
+- `internal/wsdashboard/pageview_test.go` covers:
+  - the adapter-presence mode;
+  - agent nesting and delegate links;
+  - peer merge, rules, cap, and order;
+  - one-level peer trees;
+  - conversation mail bodies and live state;
+  - no live state on the board-first page;
+  - the index ended rule.
+- `internal/wswhiteboard/regions_test.go` covers:
+  - regions matching the full page;
+  - the mermaid flag;
+  - FileText path text, including images, absolute paths, and `file:`
+    autolinks;
+  - panel row paths.
+- `internal/mcp/dashboard_page_test.go` covers:
+  - served board and panels that are substrings of the static page;
+  - path text for links, images, and ticket rows;
+  - no session key in the page content;
+  - contacts merging, liveness, and rebind;
+  - mail bodies through a real `mailbox.send`;
+  - the fingerprint covering the page stores;
+  - the pointer line following the last nudge (URL / path / key-off).
+
+Platforms: developed and tested on darwin. Linux and windows were checked by
+`go vet` only, and no daemon was started there.
+
+Hand checks for the lead (no headless browser here). Open `/s/<id>` for a
+session with a live adapter, and for one without:
+- A region update keeps typed composer text, open `<details>` (agents, mail
+  lines, peers, panels), scroll positions, and in-progress board answers.
+- The conversation stays pinned to the bottom unless scrolled up.
+- Tabs and the hidden-tab dot: on narrow screens, and in "Tabs".
+- Gear layout switch (Automatic, Side by side, Tabs): it persists across
+  reload, and the tree is capped at about 38% of the height.
+- An expanded peer stays expanded across reload.
+- Copy (button or Ctrl/Cmd+Enter) yields the composer text, a blank line,
+  then the board answer line.
+- The live indicator goes "offline" when the daemon stops and recovers. The
+  banner appears when a session leaves the index.
+- The board-first page shows a single column with no gear.
+- `/` looks like the mockup, in light and dark.
+- `full:` prints the URL once a nudge succeeds.
+
+Lite review: no Critical or Important findings.
+- Fixed: the trailing-slash URL broke the relative mermaid asset (now a
+  redirect); HEAD held a stream open (streams are now GET only); the
+  permission wait and the `/` ended section were pinned only at the view
+  level.
+- Left as minors:
+  - Every `/` render, and every index SSE render, does a full board read per
+    session to get HasBoard and the counts. A counts-only read would scale
+    better with many sessions and open tabs.
+  - There is no CSP. The lead's Now-slot HTML passes through verbatim by
+    design, and on the daemon it runs same-origin with the other sessions'
+    pages. That reach is new compared with the static file page, so the
+    browser-interaction sibling should weigh it when it adds write routes.
+  - The no-session-key check sits on `PageContent` (the only input the
+    daemon renders), not on rendered pages or SSE events.
+  - Sending from the composer stays with the browser-interaction sibling.
+
 ## Sage Review Round 1 (2026-11-06)
 
 ### Design Reviewer — block
