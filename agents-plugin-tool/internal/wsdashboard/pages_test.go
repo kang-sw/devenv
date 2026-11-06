@@ -443,3 +443,40 @@ func TestRegionHashIgnoresRenderTime(t *testing.T) {
 		t.Errorf("lead has no client-formatted time: %s", a[regionLead].HTML)
 	}
 }
+
+func TestRenderedPermissionWaitAndEndedSessions(t *testing.T) {
+	now := testNow
+	lead := wslive.Lead{Activity: wslive.Activity{Phase: wslive.PhasePermission,
+		Permission: &wslive.Permission{ToolName: "Bash", ArgsPreview: "rm -rf <build>", StartedAt: now.UnixMilli()}}}
+	view := buildSessionView(pageInputs{Session: liveSession("self", "/p", now), Snapshot: liveSnap(now, lead), Now: now})
+	set, err := renderSessionRegions(view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{regionLead, regionConversation} {
+		html := string(set[name].HTML)
+		if !strings.Contains(html, "waiting for approval in the terminal") || !strings.Contains(html, "rm -rf &lt;build&gt;") {
+			t.Errorf("%s region lacks the escaped permission wait: %s", name, html)
+		}
+	}
+
+	old := liveSession("oldend", "/a", now.Add(-48*time.Hour))
+	old.EndedAt = stampFor(now.Add(-48 * time.Hour))
+	idx, err := renderIndexRegions(buildIndexView([]indexInput{
+		{Session: liveSession("livenow", "/a", now)},
+		{Session: endedSession("recentend", "/a", now)},
+		{Session: old},
+	}, now, "1.0.0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(idx[regionSessions].HTML)
+	for _, want := range []string{`href="/s/livenow"`, `<div class="endedhead">ended</div>`, `class="sess ended" href="/s/recentend"`, "1 sessions ended more than a day ago"} {
+		if !strings.Contains(html, want) {
+			t.Errorf("index region lacks %q: %s", want, html)
+		}
+	}
+	if strings.Contains(html, "oldend") {
+		t.Errorf("a session ended two days ago is listed")
+	}
+}
