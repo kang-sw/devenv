@@ -63,7 +63,9 @@ tools never depend on it. Its state lives under `<cache root>/dashboard/`:
 
 - `dashboard.lock` - the single-instance OS file lock; `endpoint.json` - port,
   pid, version, and the shutdown token; `dashboard.log` - the running daemon's
-  log, including one line per session added to or removed from its index.
+  log, including one line per session added to or removed from its index;
+  `lan-token` - the LAN access token (LAN mode only), kept across daemon
+  restarts; deleting it issues a new one at once.
 - `sessions/<reply-id>/registration.json` - one entry per top-level lead
   session whose `dashboard.enabled` resolves on (session scope included),
   written by the serving ws-mcp at its first keyed call and heartbeated every
@@ -85,21 +87,37 @@ tools never depend on it. Its state lives under `<cache root>/dashboard/`:
 After a store write the serving ws-mcp sends `POST /nudge {reply_id,
 project}`; the daemon also re-reads every session every 30 seconds.
 
-The daemon serves its pages, loopback Host only, with no CORS:
-`/` lists sessions by project (ended ones for a day), `/s/<reply-id>` shows one
-session, and `/events` and `/s/<reply-id>/events` are their SSE streams, which
-send only the page regions whose hash changed. A session with a fresh adapter
-snapshot gets the live layout (lead, agent tree, conversation, board); one
-without gets the board-first page. File targets on the served board render as
-repo-relative path text. The live layout's composer sends: `POST
-/s/<reply-id>/message {text, chips}` holds the message in the session's inbox
-(merged into a still-held one), and `POST /s/<reply-id>/cancel {id}` takes a
-held one back; both require an `Origin` equal to the daemon's own, and a
-session without a fresh adapter snapshot gets 409. `whiteboard.update`'s
-`full:` line names
+The daemon serves its pages with no CORS: `/` lists sessions by project
+(ended ones for a day), `/s/<reply-id>` shows one session, and `/events` and
+`/s/<reply-id>/events` are their SSE streams, which send only the page regions
+whose hash changed. A session with a fresh adapter snapshot gets the live
+layout (lead, agent tree, conversation, board); one without gets the
+board-first page. File links on the served board render as repo-relative path
+text; a board image inside the session's project root loads through `GET
+/s/<reply-id>/image?path=<root-relative path>`, which serves only an
+image-extension file that still resolves inside the root after every symlink
+(404 otherwise), and any other image renders as path text. The live layout's
+composer sends: `POST /s/<reply-id>/message {text, chips}` holds the message
+in the session's inbox (merged into a still-held one), and `POST
+/s/<reply-id>/cancel {id}` takes a held one back; both require an `Origin`
+equal to the daemon's own, and a session without a fresh adapter snapshot gets
+409. `whiteboard.update`'s `full:` line names
 `http://127.0.0.1:<port>/s/<reply-id>` once the session's last nudge was
-answered, and the page path otherwise. To restart
-a dev daemon after changing its code, `POST /shutdown` with
+answered, and the page path otherwise.
+
+By default the daemon binds loopback and every route requires a loopback
+Host. LAN mode (`dashboard.lan_enabled`, read from the global config layer
+only and passed as `dashboard --lan`) binds every interface: a request whose
+peer address and Host are both loopback still passes with no token, and every
+other request, on every route, needs the LAN access token, which is separate
+from the endpoint file's shutdown token. The token arrives as `?token=` on the
+address the index page shows to a viewer on this machine only; that answer
+sets an HttpOnly cookie, which the page's links, SSE stream, images, and posts
+then carry, so no rendered URL holds it. `/health` reports the mode as `lan`,
+and a `serve` whose global value differs from a same-version daemon's mode
+replaces it through the normal handoff.
+
+To restart a dev daemon after changing its code, `POST /shutdown` with
 `Authorization: Bearer <token from endpoint.json>`; the next `serve` starts a
 new one.
 
@@ -163,7 +181,7 @@ Current launcher inputs:
 | `WS_MCP_NO_AGENT` | Product-mode gate for agentless distributions such as wsflow. |
 | `WS_MCP_NAMESPACE` | User-facing MCP namespace text override; empty or unset defaults to `ws`. |
 | `WS_MCP_SETUP_TOOL` | Advertised setup tool name override; empty or unset defaults to `ws.setup`. |
-| `WS_MCP_CONFIG_MANIFESTS` | Adapter config key manifests, separated by the platform path-list separator (`:` POSIX, `;` Windows); `;` is accepted on every platform, which the static launcher configs use. Declared keys become `config.tune`-writable, cataloged by `config.list`, and typed in `config.get`; a rejected manifest is logged to stderr and listed by `config.list`. The ws and wsflow packages each ship their own `config-manifest.json` (namespace `claude.`; the same keys, differing only in `default`, pinned by `TestShippedClaudeManifestsDifferOnlyInDefaults`) and set it in both launch configs: `.mcp.json` (Codex) as `./config-manifest.json`, resolved against `cwd: "."` (the plugin root), and `.claude-plugin/plugin.json` as `${CLAUDE_PLUGIN_ROOT}/config-manifest.json`. Each package (ws, wsflow, Pi) also lists its `dashboard-config-manifest.json` (namespace `dashboard.`: `dashboard.enabled`, default on in ws and Pi, off in wsflow; `dashboard.port`, default 29417) beside its own manifest; the Pi bridge joins the two with the platform separator. A path that does not resolve fails nothing: the keys stay undeclared, so check `config.list` after changing either. |
+| `WS_MCP_CONFIG_MANIFESTS` | Adapter config key manifests, separated by the platform path-list separator (`:` POSIX, `;` Windows); `;` is accepted on every platform, which the static launcher configs use. Declared keys become `config.tune`-writable, cataloged by `config.list`, and typed in `config.get`; a rejected manifest is logged to stderr and listed by `config.list`. The ws and wsflow packages each ship their own `config-manifest.json` (namespace `claude.`; the same keys, differing only in `default`, pinned by `TestShippedClaudeManifestsDifferOnlyInDefaults`) and set it in both launch configs: `.mcp.json` (Codex) as `./config-manifest.json`, resolved against `cwd: "."` (the plugin root), and `.claude-plugin/plugin.json` as `${CLAUDE_PLUGIN_ROOT}/config-manifest.json`. Each package (ws, wsflow, Pi) also lists its `dashboard-config-manifest.json` (namespace `dashboard.`: `dashboard.enabled`, default on in ws and Pi, off in wsflow; `dashboard.port`, default 29417; `dashboard.lan_enabled`, global-only and default off in every package) beside its own manifest; the Pi bridge joins the two with the platform separator. A path that does not resolve fails nothing: the keys stay undeclared, so check `config.list` after changing either. |
 | `WS_MCP_CLI_NAME` | Command name that printed agent-runnable CLI commands (the rendered `mailbox wait` command and its re-arm line) start with; empty or unset uses the invoked binary path (`os.Args[0]`). Set by the `ws-cli`/`wsflow-cli` shims and by the Claude manifests' `mcpServers.<name>.env`, where plugin `bin/` is on the agent's Bash PATH; left unset for Codex, which does not put plugin `bin/` on PATH. |
 
 Launcher diagnostics must go to stderr. Stdout belongs to the MCP JSON-RPC

@@ -14,8 +14,9 @@ import (
 // the board and its panels rendered with the static page's templates under
 // the served-page link rule (a file link is path text; a board image inside
 // the session's project root is the image route's URL, and path text
-// otherwise), the mail correspondents, and the mailbox history bodies. Everything here reaches a browser, so no returned field
-// may carry the session key.
+// otherwise), the mail correspondents, and the mailbox history bodies.
+// Everything here reaches a browser, so no returned field may carry the
+// session key.
 
 var _ wsdashboard.PageSource = (*DashboardSessionSource)(nil)
 
