@@ -7,9 +7,9 @@ kind: print
 The session whiteboard is a top-level lead's board for its user. The MCP
 server keeps the items you ask the user (IDs, statuses, the user's verbatim
 answers) in the session state and renders them, with the session's todos,
-agendas, and a Now slot, into a full page the user keeps open beside the
-terminal and an embed snapshot for a host that shows HTML inline. Workers and
-subagents do not use it.
+agendas, ready and todo tickets, mailbox, and a Now slot, into a full page the
+user keeps open beside the terminal and an embed snapshot for a host that
+shows HTML inline. Workers and subagents do not use it.
 
 ## Calls
 
@@ -25,7 +25,11 @@ subagents do not use it.
   items, settled ones included, and changes nothing. Query before adding, so
   a question the board already holds is patched or reused rather than added
   twice.
-- Once the session's first update has rendered, todo and agenda writes
+- Once the session's first update has rendered, todo and agenda writes,
+  ticket moves, closes, and creations
+  (`{{.McpNamespace}}/tickets.move`, `{{.McpNamespace}}/tickets.close`,
+  `{{.McpNamespace}}/tickets.create_empty`), and mailbox sends and receives
+  (`{{.McpNamespace}}/mailbox.send`, `{{.McpNamespace}}/mailbox.recv`)
   re-render the full page and bump its stamp by themselves; they write no
   embed.
 

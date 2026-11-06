@@ -697,8 +697,9 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		return toolErrorTextResponse(req.ID, refusal)
 	}
 
-	// Once a session's whiteboard exists, a successful todo or agenda write
-	// re-renders its full page (never an embed); see whiteboard_tools.go.
+	// Once a session's whiteboard exists, a successful write by a tool that
+	// dirties one of its panels re-renders its full page (never an embed);
+	// see whiteboardProviders in whiteboard_tools.go.
 	if whiteboardDirtyingTool(params.Name) {
 		defer func() { s.refreshWhiteboardAfter(params.Arguments, resp) }()
 	}

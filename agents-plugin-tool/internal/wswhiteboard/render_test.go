@@ -538,11 +538,52 @@ func TestRenderPageEmbedSizeBudget(t *testing.T) {
 		rows[i] = PanelRow{Label: fmt.Sprintf("key.%d", i), Text: long[:100]}
 	}
 	panels = append(panels, Panel{ID: "extra", Title: "Extra", Icon: "board", Count: "20", Rows: rows})
+	// The embed's ticket panel lists every ready ticket with an absolute
+	// file: link (an embed_dir outside the repository), and its mailbox
+	// panel is one line.
+	tickets := make([]PanelRow, 100)
+	for i := range tickets {
+		tickets[i] = PanelRow{Label: "ready", Text: long[:100], Link: fmt.Sprintf("file:///home/someone/projects/a-long-repository-name/ai-docs/tickets/ready/2611%02d-feat-a-fairly-long-ticket-stem-%d.md", i%30, i)}
+	}
+	panels = append(panels,
+		Panel{ID: "tickets", Title: "Tickets", Icon: "board", Count: "100 ready", Rows: tickets},
+		Panel{ID: "mailbox", Title: "Mailbox", Icon: "mail", Count: "3 unread", Rows: []PanelRow{{Label: "someone@worktree", Text: "3 unread"}}},
+	)
 
 	out := render(t, BuildView(st, ViewInput{Layout: LayoutEmbed, ReplyID: "size-check", Panels: panels}))
 	const budget = 512 << 10
 	t.Logf("populated embed: %d bytes (%.1f%% of 512 KiB)", len(out), 100*float64(len(out))/budget)
-	if len(out) > budget/4 {
+	// A third of the limit: the stress is past any real board (60 items,
+	// 100 ready tickets), and the embed has no truncation to fall back on.
+	if len(out) > budget/3 {
 		t.Errorf("populated embed is %d bytes, not well under 512 KiB", len(out))
+	}
+}
+
+// TestRenderPagePanelRowLinks pins a panel row's link: a relative path and
+// a file: URL render as the provider built them (html/template would rewrite
+// an untrusted file: URL to #ZgotmplZ), while any other scheme keeps the
+// template's URL filtering, and a row without a link renders plain text.
+func TestRenderPagePanelRowLinks(t *testing.T) {
+	panels := []Panel{{ID: "tickets", Title: "Tickets", Icon: "board", Rows: []PanelRow{
+		{Label: "ready", Text: "Relative", Link: "../tickets/ready/261106-feat-a.md"},
+		{Label: "ready", Text: "Absolute", Link: "file:///home/u/my%20repo/ai-docs/tickets/ready/261106-feat-b.md"},
+		{Label: "todo", Text: "Script", Link: "javascript:alert(1)"},
+		{Label: "todo", Text: "Plain"},
+		{State: "pending", Label: "k", Text: "Stateful", Link: "../tickets/todo/261106-feat-c.md"},
+	}}}
+	for name, layout := range map[string]Layout{"full": LayoutFull, "embed": LayoutEmbed} {
+		out := render(t, BuildView(&State{}, ViewInput{Layout: layout, ReplyID: "r", Panels: panels}))
+		for _, want := range []string{
+			`<li class="keyed"><code>ready</code><span><a href="../tickets/ready/261106-feat-a.md">Relative</a></span></li>`,
+			`<li class="keyed"><code>ready</code><span><a href="file:///home/u/my%20repo/ai-docs/tickets/ready/261106-feat-b.md">Absolute</a></span></li>`,
+			`<a href="#ZgotmplZ">Script</a>`,
+			`<li class="keyed"><code>todo</code><span>Plain</span></li>`,
+			`<span class="box">[ ]</span><span><a href="../tickets/todo/261106-feat-c.md">Stateful</a></span>`,
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("%s: page lacks %q", name, want)
+			}
+		}
 	}
 }

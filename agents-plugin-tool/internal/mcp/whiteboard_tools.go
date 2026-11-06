@@ -70,11 +70,33 @@ func whiteboardLeadOnlyDenial(name string) string {
 
 // whiteboardSectionProvider supplies one auxiliary panel of both pages and
 // declares which tool calls dirty it. Only real sections are registered; a
-// provider with nothing to show yields no panel.
+// provider with nothing to show yields no panel. A provider gathers its data
+// once per call and shapes the rows for in.layout, so the two pages never
+// drift apart.
 type whiteboardSectionProvider struct {
 	id        string
 	dirtiedBy []string
-	panel     func(rec sessionRecord) (wswhiteboard.Panel, bool)
+	panel     func(in whiteboardPanelInput) (wswhiteboard.Panel, bool)
+}
+
+// whiteboardPanelInput is everything a provider reads, resolved once by the
+// renderer.
+type whiteboardPanelInput struct {
+	rec    sessionRecord
+	layout wswhiteboard.Layout
+	// root is the session root, where the ticket directories live.
+	root       string
+	sessionKey string
+	replyID    string
+	// mailbox is this process's mailbox identity and whether the session
+	// holds its named inbox (mailboxOwnerCheck), which the own address and
+	// the named-inbox unread count depend on.
+	mailbox whiteboardMailbox
+}
+
+type whiteboardMailbox struct {
+	owner    bool
+	identity mailboxIdentity
 }
 
 var whiteboardProviders = []whiteboardSectionProvider{
@@ -88,46 +110,63 @@ var whiteboardProviders = []whiteboardSectionProvider{
 		dirtiedBy: []string{"agenda.set", "agenda.clear", "route.resolve_implement", "route.resolve_proceed"},
 		panel:     agendaPanel,
 	},
+	{
+		id:        "tickets",
+		dirtiedBy: []string{"tickets.move", "tickets.close", "tickets.create_empty"},
+		panel:     ticketPanel,
+	},
+	{
+		id:        "mailbox",
+		dirtiedBy: []string{"mailbox.send", "mailbox.recv"},
+		panel:     mailboxPanel,
+	},
 }
 
-func todoPanel(rec sessionRecord) (wswhiteboard.Panel, bool) {
-	if len(rec.Todos) == 0 {
+// todoPanel lists every todo on the full page; the embed keeps the count and
+// lists only the unfinished ones.
+func todoPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
+	todos := in.rec.Todos
+	if len(todos) == 0 {
 		return wswhiteboard.Panel{}, false
 	}
 	done := 0
-	rows := make([]wswhiteboard.PanelRow, 0, len(rec.Todos))
-	for _, todo := range rec.Todos {
+	rows := make([]wswhiteboard.PanelRow, 0, len(todos))
+	for _, todo := range todos {
 		if todo.Status == todoDone {
 			done++
+			if in.layout == wswhiteboard.LayoutEmbed {
+				continue
+			}
 		}
 		rows = append(rows, wswhiteboard.PanelRow{State: string(todo.Status), Label: todo.Key, Text: todo.Title})
 	}
-	return wswhiteboard.Panel{ID: "todo", Title: "Todos", Icon: "todo", Count: fmt.Sprintf("%d/%d", done, len(rec.Todos)), Rows: rows}, true
+	return wswhiteboard.Panel{ID: "todo", Title: "Todos", Icon: "todo", Count: fmt.Sprintf("%d/%d", done, len(todos)), Rows: rows}, true
 }
 
 // agendaPanel shows each agenda blob as its key and the one-line summary
 // agenda.list produces, never the blob body: agendas are the lead's working
-// notes and may hold unconfirmed reasoning.
-func agendaPanel(rec sessionRecord) (wswhiteboard.Panel, bool) {
-	if len(rec.Agenda) == 0 {
+// notes and may hold unconfirmed reasoning. Both pages show the same rows.
+func agendaPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
+	agenda := in.rec.Agenda
+	if len(agenda) == 0 {
 		return wswhiteboard.Panel{}, false
 	}
-	keys := make([]string, 0, len(rec.Agenda))
-	for k := range rec.Agenda {
+	keys := make([]string, 0, len(agenda))
+	for k := range agenda {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
 	rows := make([]wswhiteboard.PanelRow, 0, len(keys))
 	for _, k := range keys {
-		rows = append(rows, wswhiteboard.PanelRow{Label: k, Text: agendaSummary(rec.Agenda[k])})
+		rows = append(rows, wswhiteboard.PanelRow{Label: k, Text: agendaSummary(agenda[k])})
 	}
 	return wswhiteboard.Panel{ID: "agenda", Title: "Agendas", Icon: "agenda", Count: fmt.Sprint(len(keys)), Rows: rows}, true
 }
 
-func whiteboardPanels(rec sessionRecord) []wswhiteboard.Panel {
+func whiteboardPanels(in whiteboardPanelInput) []wswhiteboard.Panel {
 	var panels []wswhiteboard.Panel
 	for _, provider := range whiteboardProviders {
-		if panel, ok := provider.panel(rec); ok {
+		if panel, ok := provider.panel(in); ok {
 			panels = append(panels, panel)
 		}
 	}
@@ -181,7 +220,7 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any)
 			return errWhiteboardRefused
 		}
 		var renderErr error
-		render, renderErr = renderWhiteboard(rec, key, true)
+		render, renderErr = s.renderWhiteboard(rec, key, true)
 		return renderErr
 	})
 	render.settle(err == nil)
@@ -284,7 +323,8 @@ func markdownSection(body, heading string) string {
 }
 
 // refreshWhiteboardAfter re-renders the full page (stamp bumped, no embed)
-// after a successful todo or agenda write, once the session's board exists.
+// after a successful write by a tool that dirties a panel (see
+// whiteboardProviders), once the session's board exists.
 // The gate is board existence, not the knob: a session that never rendered
 // writes no file, and an ad hoc board stays current.
 func (s *Server) refreshWhiteboardAfter(args map[string]any, resp response) {
@@ -301,7 +341,7 @@ func (s *Server) refreshWhiteboardAfter(args map[string]any, resp response) {
 			return errNoWhiteboard
 		}
 		rec.Whiteboard.BeginRender()
-		_, err := renderWhiteboard(rec, key, false)
+		_, err := s.renderWhiteboard(rec, key, false)
 		return err
 	})
 	if err != nil && !errors.Is(err, errNoWhiteboard) {
@@ -326,7 +366,7 @@ func responseIsError(resp response) bool {
 // reload triggered by the stamp never reads an older page. It returns the
 // full page path relative to the session root and the embed path (relative,
 // or the bare file name inside a host embed folder).
-func renderWhiteboard(rec *sessionRecord, sessionKey string, withEmbed bool) (whiteboardRender, error) {
+func (s *Server) renderWhiteboard(rec *sessionRecord, sessionKey string, withEmbed bool) (whiteboardRender, error) {
 	var out whiteboardRender
 	st := rec.Whiteboard
 	replyID := wsmailbox.ReplyID(sessionKey)
@@ -341,10 +381,21 @@ func renderWhiteboard(rec *sessionRecord, sessionKey string, withEmbed bool) (wh
 			return out, fmt.Errorf("create %s: %w", whiteboardDirRel, err)
 		}
 	}
-	panels := whiteboardPanels(*rec)
+	panelInput := whiteboardPanelInput{
+		rec:        *rec,
+		root:       rec.Root,
+		sessionKey: sessionKey,
+		replyID:    replyID,
+		mailbox:    s.whiteboardMailbox(sessionKey, rec.Root),
+	}
+	panelsFor := func(layout wswhiteboard.Layout) []wswhiteboard.Panel {
+		in := panelInput
+		in.layout = layout
+		return whiteboardPanels(in)
+	}
 
 	if withEmbed {
-		html, err := wswhiteboard.RenderPage(wswhiteboard.BuildView(st, wswhiteboard.ViewInput{Layout: wswhiteboard.LayoutEmbed, ReplyID: replyID, Panels: panels}))
+		html, err := wswhiteboard.RenderPage(wswhiteboard.BuildView(st, wswhiteboard.ViewInput{Layout: wswhiteboard.LayoutEmbed, ReplyID: replyID, Panels: panelsFor(wswhiteboard.LayoutEmbed)}))
 		if err != nil {
 			return out, fmt.Errorf("render embed: %w", err)
 		}
@@ -370,7 +421,7 @@ func renderWhiteboard(rec *sessionRecord, sessionKey string, withEmbed bool) (wh
 		st.LastEmbedSeq = st.Seq
 	}
 
-	html, err := wswhiteboard.RenderPage(wswhiteboard.BuildView(st, wswhiteboard.ViewInput{Layout: wswhiteboard.LayoutFull, ReplyID: replyID, Panels: panels}))
+	html, err := wswhiteboard.RenderPage(wswhiteboard.BuildView(st, wswhiteboard.ViewInput{Layout: wswhiteboard.LayoutFull, ReplyID: replyID, Panels: panelsFor(wswhiteboard.LayoutFull)}))
 	if err != nil {
 		return out, fmt.Errorf("render full page: %w", err)
 	}
