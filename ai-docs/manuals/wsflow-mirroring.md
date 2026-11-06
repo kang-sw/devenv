@@ -325,7 +325,8 @@ The Claude mod is a second generated-sameness carve-out:
 accepts one hooks module per plugin, so the mod is one entry (`register.ts`)
 carrying every Claude mod feature: mailbox push, lead compaction timing, the
 MCP reconnect lever and its watchdog, workflow manual delivery and the
-playbook preload riding on its key, tool-call captions, and the status band.
+playbook preload riding on its key, tool-call captions, the status band, and
+the dashboard feed.
 The mod reads its package identity (plugin name, root, MCP server) from the
 engine at runtime, and selects no feature by package name: every feature but
 the reconnect and compaction request levers is switched by a `claude.*` config

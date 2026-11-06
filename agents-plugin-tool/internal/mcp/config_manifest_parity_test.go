@@ -109,6 +109,7 @@ var claudePackageDefaults = []struct {
 	{"claude.display_summary_enabled", false, false},
 	{"claude.status_band_enabled", true, false},
 	{"claude.mcp_watchdog_enabled", true, false},
+	{"claude.dashboard_enabled", true, false},
 }
 
 // TestShippedClaudePackageDefaults pins each package's knob defaults, both as
