@@ -19,8 +19,8 @@ each session's turn and subagent activity, and answer submission back to the
 session. The browser page is an interactive alternative to the static
 whiteboard page; every ws-mcp keeps working without it.
 
-Decided in the 2026-11-06 whiteboard discussion, items (168)-(181) and
-(187)-(197).
+Decided in the 2026-11-06 whiteboard discussion, items (168)-(181),
+(187)-(197), (200), (201), and (208)-(214).
 
 ## Non-Scope
 
@@ -30,6 +30,8 @@ Decided in the 2026-11-06 whiteboard discussion, items (168)-(181) and
   session or subagent. The browser's only write is answer submission. (172),
   (189)
 - Thinking text and tool result bodies in the live view. (193)
+- Browser input through the mailbox. The mailbox stays agent-to-agent;
+  answers reach a session through the host adapters. (208), (214)
 - Filesystem watching (fsnotify or equivalent). (181)
 - The dropped MVP's IDE scope: browser terminal, file explorer, editor.
 - Multi-user access and public deployment hardening beyond the LAN token.
@@ -48,15 +50,18 @@ with browser interaction folded into the core.
   then the machine root registry, session index, nudge, and polling (169),
   (181); then the HTTP render of `/` and `/s/<reply-id>` with SSE and the
   pointer-line URI (170), (180).
-- Planned: browser interaction and access - answer submission by mail
-  (172), LAN opt-in and access token (173), (197). Both are where the
-  browser gains write or network access, so they are reviewed together.
+- Planned: browser interaction and access - the answer submission endpoint
+  and the per-session board-answer inbox (208), (209), LAN opt-in and access
+  token (173), (197). Both are where the browser gains write or network
+  access, so they are reviewed together.
 - Planned: live snapshot and Pi adapter - the ws-mcp intake for adapter
   events, the per-session snapshot file (188), (191), (195), and the Pi
-  adapter producing it.
+  adapter producing it; a phase for the Pi side of answer submission
+  (drain and inject) (213).
 - Planned: Claude adapter - Phase 1 is the event probe (196) and runs
   before any other child's work; later phases build the adapter on its
-  result.
+  result, including the Claude side of answer submission (drain and inject)
+  (213).
 
 ## Cross-Child Decisions
 
@@ -76,7 +81,8 @@ with browser interaction folded into the core.
 - **The daemon reads on-disk stores only.** It reads each session's stores
   from disk. A stdio ws-mcp registers its project root in a machine registry
   so the daemon can find the stores. There is no protocol that pushes data
-  into the daemon. (169)
+  into the daemon. The daemon's one write is the board-answer inbox of
+  answer submission. (169), (209)
 - **Nudge plus polling.** After a store write, ws-mcp sends a fire-and-forget
   `POST /nudge {reply-id, project}`; errors are ignored. The daemon re-reads
   that session. A polling backstop of about 30 seconds catches missed
@@ -113,8 +119,8 @@ with browser interaction folded into the core.
 - **The LAN view matches the localhost view.** Argument previews show in LAN
   mode too; the access token protects them. (197)
   Rejected: hiding argument previews in LAN mode. The same token already
-  allows answer submission, which can move a session, so hiding read content
-  adds little protection.
+  allows answer submission, which arrives as user input (210) and can move a
+  session, so hiding read content adds little protection.
 
 **URLs**
 - **Routes.** `/` lists projects and sessions. `/s/<reply-id>` shows one
@@ -127,17 +133,38 @@ with browser interaction folded into the core.
 
 **Browser interaction**
 - **The browser views all sessions live.** (172)
-- **Answer submission by mail.** The browser submits whiteboard answers as
-  mail to the session's own address `id:<reply-id>`. The board reply-id and
-  the mailbox reply-id are the same value. Delivery wakes the session's turn
-  through the existing mailbox push. (172)
+- **Answer submission through the host adapters.** (208)
+  - The daemon writes each submitted answer as one file in a per-session
+    board-answer inbox on disk, per-entry files like the mailbox history
+    ring, outside the mailbox store. (209)
+  - The adapters' existing `mailbox wait` child gains a flag to also watch
+    that inbox and to report which kind arrived; a new ws-mcp tool drains
+    the inbox. (209)
+  - The adapter injects a drained answer as the user's own message (Claude
+    `$.prompt.submit`, Pi `pi.sendUserMessage`) with a short label naming the
+    whiteboard, so it carries user authority. (210)
+  - An answer that arrives while the session's turn runs is held and
+    submitted when the turn ends (Claude: the watcher's turn-end flush; Pi:
+    `followUp`). (212)
+
+  Rejected: mail to the session's `id:<reply-id>` (172), because the mailbox
+  stays agent-to-agent. Rejected: a second wait child per session, which
+  doubles the long-running processes each adapter manages; a daemon-to-adapter
+  socket, which would need daemon discovery and token handling in TypeScript
+  (rejected in (191)). Rejected: an adapter notice without user authority
+  (210 b), which makes the user confirm their own answer twice. Rejected:
+  injecting into a running turn; Pi steering is one-at-a-time, and a lead
+  mid-turn has usually not asked anything yet.
 - **Read-only monitoring.** The live view offers no control over sessions or
   subagents. (189)
 
 **Live monitoring**
 - **Hosts without an adapter.** A host with no adapter, such as Codex, shows
   only the state in its on-disk stores. The dashboard works without the live
-  layer. (190)
+  layer. Such a host offers no browser submission; its page keeps only the
+  copy-answers button. (190), (211)
+  Rejected: falling back to mail for those hosts (211 b), which would put
+  user input back into the mailbox.
 - **Subagent tree.** The tree is keyed by the host's native agent id. A
   delegate that holds a ws session key gets that key attached. `session.children`
   sees only keyed delegates, so it cannot be the source of the tree. (192)
@@ -173,7 +200,7 @@ with browser interaction folded into the core.
 
 - Done: every child is done; on Claude and Pi, a browser at `/` shows each
   running session live with its subagent activity, and a submitted answer
-  reaches the session. (200)
+  reaches the session as user input. (200), (210)
 - Dropped: the user drops the direction. A failed adapter probe is not a
   drop trigger, because (190) and (196) define the fallback. (200)
 - Deferred: whatever a child's result defers.
