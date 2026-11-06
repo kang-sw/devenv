@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/wsinbox"
 	"github.com/kang-sw/devenv/internal/wslive"
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
@@ -292,6 +293,9 @@ func (r pageReader) session(replyID string) (SessionView, bool) {
 	in := pageInputs{Session: s, Page: page, Snapshot: r.readSnapshot(replyID), Now: r.clock(), Version: r.version}
 	if adapterPresent(in.Snapshot, in.Now) {
 		in.Ring, _ = wslive.ReadRing(wslive.RingDir(SessionDir(r.dir, replyID)))
+		inbox := wsinbox.Dir(SessionDir(r.dir, replyID))
+		in.Held, _ = wsinbox.Held(inbox)
+		in.Drained, _ = wsinbox.Drained(inbox)
 		snaps := map[string]*wslive.Snapshot{}
 		in.Lookup = func(id string) (Session, *wslive.Snapshot, bool) {
 			peer, ok := r.index.Session(id)
@@ -351,12 +355,17 @@ func (d *Daemon) handleIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleSessionRoutes serves everything under /s/: a session page, its SSE
-// stream, and the shared assets a page loads by relative path.
+// stream, its message and cancel routes, and the shared assets a page loads
+// by relative path.
 func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
+	rest := strings.TrimPrefix(r.URL.Path, "/s/")
+	if replyID, sub, _ := strings.Cut(rest, "/"); sub == "message" || sub == "cancel" {
+		d.handleInboxWrite(w, r, replyID, sub)
+		return
+	}
 	if !readMethod(w, r) {
 		return
 	}
-	rest := strings.TrimPrefix(r.URL.Path, "/s/")
 	if name, _ := wswhiteboard.MermaidAsset(); rest == name {
 		serveMermaid(w)
 		return

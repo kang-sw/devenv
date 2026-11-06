@@ -65,6 +65,9 @@ var (
 	// ErrGone reports that an entry is no longer held: a drain delivered it,
 	// or a cancel or merge already took it.
 	ErrGone = errors.New("message is no longer held")
+	// ErrInvalid reports a send that breaks a limit or carries a malformed
+	// answer; its wrapped text says which.
+	ErrInvalid = errors.New("invalid message")
 
 	entryNamePattern = regexp.MustCompile(`^[0-9]{8}T[0-9]{6}\.[0-9]{9}Z-[0-9a-f]{8}\.json$`)
 	chipIDPattern    = regexp.MustCompile(`^[0-9]{1,6}$`)
@@ -164,7 +167,8 @@ func AnswerBlock(chips []Chip) string {
 
 // Normalize trims and checks one send: empty parts are dropped, chips are
 // validated, and a later chip for an item replaces an earlier one. It
-// returns ErrEmpty when nothing is left to send.
+// returns ErrEmpty when nothing is left to send and an ErrInvalid error for a
+// malformed one.
 func Normalize(e Entry) (Entry, error) {
 	out := Entry{SchemaVersion: SchemaVersion, SentAt: e.SentAt}
 	size := 0
@@ -177,23 +181,23 @@ func Normalize(e Entry) (Entry, error) {
 		out.Parts = append(out.Parts, p)
 	}
 	if size > maxTextBytes {
-		return Entry{}, fmt.Errorf("message text is longer than %d bytes", maxTextBytes)
+		return Entry{}, fmt.Errorf("%w: text is longer than %d bytes", ErrInvalid, maxTextBytes)
 	}
 	if len(e.Chips) > maxChips {
-		return Entry{}, fmt.Errorf("more than %d answers", maxChips)
+		return Entry{}, fmt.Errorf("%w: more than %d answers", ErrInvalid, maxChips)
 	}
 	for _, c := range e.Chips {
 		c.ID = strings.TrimSpace(c.ID)
 		c.Answer = strings.TrimSpace(c.Answer)
 		c.Note = strings.TrimSpace(c.Note)
 		if !chipIDPattern.MatchString(c.ID) {
-			return Entry{}, fmt.Errorf("invalid item id %q", c.ID)
+			return Entry{}, fmt.Errorf("%w: item id %q", ErrInvalid, c.ID)
 		}
 		if c.Answer != "" && !answerPattern.MatchString(c.Answer) {
-			return Entry{}, fmt.Errorf("invalid answer %q for item %s", c.Answer, c.ID)
+			return Entry{}, fmt.Errorf("%w: answer %q for item %s", ErrInvalid, c.Answer, c.ID)
 		}
 		if len(c.Note) > maxNoteBytes {
-			return Entry{}, fmt.Errorf("note for item %s is longer than %d bytes", c.ID, maxNoteBytes)
+			return Entry{}, fmt.Errorf("%w: note for item %s is longer than %d bytes", ErrInvalid, c.ID, maxNoteBytes)
 		}
 		if c.Answer == "" && c.Note == "" {
 			continue

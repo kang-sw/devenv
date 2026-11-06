@@ -167,10 +167,6 @@
       if (box && s.checked) box.checked = true;
     });
   }
-  function boardAnswers() {
-    var b = region("board"), r = b && b.querySelector("#reply-text");
-    return r ? r.value.trim() : "";
-  }
   // A board swap waits while the user is typing in the answer form, and
   // lands when the focus leaves it.
   var deferred = null;
@@ -215,8 +211,10 @@
       writeAnswers(el, answers);
       if (window.wbForm) window.wbForm();
       mermaid();
+      syncChips();
       syncNote();
     }
+    if (board || name === "conversation") applySent();
     restoreScroll(scroll);
     if (pin) pinConvo();
     if (live && TAB[name] && !tabShown(TAB[name])) {
@@ -234,10 +232,103 @@
   }
 
   // --- composer: never inside a region, so a swap never touches it ---------
-  var ctext = $("ctext"), ccopy = $("ccopy"), cnote = $("cnote");
+  // With a live host adapter the composer sends: the typed text plus one
+  // answer chip per board item. Clicking an option, ok/no, or an
+  // acknowledgement on a card attaches (or replaces) that item's chip; the
+  // chips live here, so a chip outlives its card leaving the board.
+  var ctext = $("ctext"), ccopy = $("ccopy"), cnote = $("cnote"), csend = $("csend"), cchips = $("cchips");
+  var chips = {}, chipOrder = [];
+  function chipList() { return chipOrder.map(function (id) { return chips[id]; }); }
+  function putChip(c) { if (!chips[c.id]) chipOrder.push(c.id); chips[c.id] = c; }
+  function dropChip(id) { delete chips[id]; chipOrder = chipOrder.filter(function (x) { return x !== id; }); }
+  // Reply grammar, as the board's copy-answers line and the server's answer
+  // block build it: "(nn) <answer>[, note: <text>]", a note alone as
+  // "(nn) note: <text>", items answered ok without a note grouped last as
+  // "(nn), (mm) ok", parts joined by "; ".
+  function answerBlock(list) {
+    var parts = [], acked = [];
+    list.forEach(function (c) {
+      var note = (c.note || "").trim(), s = "";
+      if (!note && c.answer === "ok") { acked.push("(" + c.id + ")"); return; }
+      if (c.answer) s = "(" + c.id + ") " + c.answer;
+      if (note) s = s ? s + ", note: " + note : "(" + c.id + ") note: " + note;
+      if (s) parts.push(s);
+    });
+    if (acked.length) parts.push(acked.join(", ") + " ok");
+    return parts.join("; ");
+  }
+  function boardItem(id) {
+    var b = region("board");
+    return b ? b.querySelector('.card[data-id="' + id + '"], .arow[data-id="' + id + '"]') : null;
+  }
+  // readItem is a board item's answer as a chip; null when it has none.
+  function readItem(item) {
+    var pick = item.querySelector('.opt[data-opt][aria-pressed="true"], .btn[data-v][aria-pressed="true"]');
+    var box = item.querySelector(".ack input"), note = item.querySelector(".note");
+    var c = { id: item.getAttribute("data-id"), answer: "", note: note ? note.value.trim() : "" };
+    if (pick) c.answer = pick.getAttribute("data-opt") || pick.getAttribute("data-v");
+    else if (box && box.checked) c.answer = "ok";
+    return c.answer || c.note ? c : null;
+  }
+  // setItem puts a chip's answer (or none) on the item's card and lets the
+  // board's form script rebuild its reply line.
+  function setItem(id, c) {
+    var item = boardItem(id);
+    if (!item) return;
+    q(".opt[data-opt], .btn[data-v]", item).forEach(function (b) {
+      var v = b.getAttribute("data-opt") || b.getAttribute("data-v");
+      b.setAttribute("aria-pressed", String(!!c && v === c.answer));
+    });
+    var box = item.querySelector(".ack input"), note = item.querySelector(".note");
+    if (box) box.checked = !!c && c.answer === "ok";
+    if (note) {
+      note.value = c && c.note ? c.note : "";
+      if (note.value) note.hidden = false;
+    }
+    var fire = note || box;
+    if (fire) fire.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+  // syncChips takes the answers of the items on the board into the chips.
+  function syncChips() {
+    var b = region("board");
+    if (!b || !cchips) return;
+    q(".card[data-id], .arow[data-id]", b).forEach(function (item) {
+      var c = readItem(item), id = item.getAttribute("data-id");
+      if (c) putChip(c); else if (chips[id]) dropChip(id);
+    });
+    renderChips();
+  }
+  function renderChips() {
+    if (!cchips) return;
+    cchips.textContent = "";
+    chipList().forEach(function (c) {
+      var el = doc.createElement("span"), b = doc.createElement("b"), x = doc.createElement("button");
+      el.className = "achip";
+      b.textContent = "(" + c.id + ")";
+      el.appendChild(b);
+      el.appendChild(doc.createTextNode(" " + (c.answer || "note")));
+      if (c.note) {
+        var n = doc.createElement("span");
+        n.className = "anote";
+        n.textContent = c.note;
+        el.appendChild(n);
+      }
+      x.className = "unchip";
+      x.setAttribute("data-unchip", c.id);
+      x.title = "remove this answer";
+      x.textContent = "×";
+      el.appendChild(x);
+      cchips.appendChild(el);
+    });
+  }
+  function boardAnswers() {
+    if (cchips) return answerBlock(chipList());
+    var b = region("board"), r = b && b.querySelector("#reply-text");
+    return r ? r.value.trim() : "";
+  }
   function syncNote(text) {
     if (!cnote) return;
-    cnote.textContent = text || (boardAnswers() ? "The board answers are copied with the message." : "");
+    cnote.textContent = text || (!csend && boardAnswers() ? "The board answers are copied with the message." : "");
   }
   function grow() { ctext.style.height = "auto"; ctext.style.height = Math.min(160, ctext.scrollHeight) + "px"; }
   // execCommand first: it works without a secure context or a permission;
@@ -262,16 +353,86 @@
       syncNote(ok ? (a ? "Copied the message and the board answers." : "Copied.") : "Copy failed: select the text and copy it by hand.");
     });
   }
+  // post sends a write route's JSON body; done(ok, answer) gets the parsed
+  // answer, or the server's refusal text.
+  function post(route, body, done) {
+    if (!window.fetch) { done(false, "this browser cannot send"); return; }
+    fetch("/s/" + rid + "/" + route, {
+      method: "POST", credentials: "same-origin", cache: "no-store",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+    }).then(function (r) {
+      return r.text().then(function (s) {
+        if (!r.ok) { done(false, s.trim() || "HTTP " + r.status); return; }
+        var v = {};
+        try { v = JSON.parse(s); } catch (e) { v = {}; }
+        done(true, v);
+      });
+    }, function () { done(false, "the dashboard is not reachable"); });
+  }
+  var sending = false;
+  function sendMessage() {
+    if (sending) return;
+    var t = ctext.value.trim(), list = chipList();
+    if (!t && !list.length) { syncNote("Nothing to send: write a message or answer the board."); return; }
+    sending = true;
+    csend.disabled = true;
+    post("message", { text: t, chips: list }, function (ok, res) {
+      sending = false;
+      csend.disabled = false;
+      if (!ok) { syncNote("Not sent: " + res); return; }
+      if (ctext.value.trim() === t) { ctext.value = ""; grow(); }
+      list.forEach(function (c) { if (chips[c.id] === c) { dropChip(c.id); setItem(c.id, null); } });
+      renderChips();
+      syncNote(res.merged ? "Added to the held message." : "Sent.");
+    });
+  }
+  function cancelHeld(btn) {
+    btn.disabled = true;
+    post("cancel", { id: btn.getAttribute("data-cancel") }, function (ok, res) {
+      if (!ok) { btn.disabled = false; syncNote("Not cancelled: " + res); return; }
+      var cur = ctext.value.trim(), back = res.text || "";
+      ctext.value = back + (back && cur ? "\n\n" : "") + cur;
+      grow();
+      // A chip attached since keeps its newer answer.
+      (res.chips || []).forEach(function (c) { if (!chips[c.id]) { putChip(c); setItem(c.id, c); } });
+      renderChips();
+      syncNote("Cancelled: the message is back in the composer.");
+      ctext.focus();
+    });
+  }
+  // applySent marks each board item the session was sent an answer for, or
+  // holds one for, from the inbox records the conversation region carries.
+  function applySent() {
+    var b = region("board");
+    if (!b) return;
+    q(".sentmark", b).forEach(function (m) { m.parentNode.removeChild(m); });
+    q(".sentdata i[data-id]").forEach(function (i) {
+      var item = boardItem(i.getAttribute("data-id")), head = item && item.querySelector(".head");
+      if (!head) return;
+      var state = i.getAttribute("data-state"), m = doc.createElement("span");
+      m.className = "sentmark " + state;
+      m.textContent = state + " · " + (i.getAttribute("data-answer") || "note");
+      var note = i.getAttribute("data-note");
+      m.title = (state === "held" ? "held until the session's turn ends" : "sent to the session") + (note ? ": " + note : "");
+      var id = head.querySelector(".id");
+      head.insertBefore(m, id ? id.nextSibling : head.firstChild);
+    });
+  }
   if (ctext && ccopy) {
     ccopy.addEventListener("click", copyMessage);
+    if (csend) csend.addEventListener("click", sendMessage);
     ctext.addEventListener("input", function () { grow(); syncNote(); });
     ctext.addEventListener("keydown", function (e) {
-      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); copyMessage(); }
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (csend) sendMessage(); else copyMessage(); }
     });
     // The form script's own listeners have rebuilt the reply line by the
     // time an event bubbles here.
     ["input", "change"].forEach(function (type) {
-      doc.addEventListener(type, function (e) { if (e.target.closest && e.target.closest("#r-board")) syncNote(); });
+      doc.addEventListener(type, function (e) {
+        if (!e.target.closest || !e.target.closest("#r-board")) return;
+        syncChips();
+        syncNote();
+      });
     });
   }
 
@@ -279,7 +440,11 @@
   doc.addEventListener("click", function (e) {
     var t = e.target;
     if (!t || !t.closest) return;
-    if (cnote && t.closest("#r-board")) syncNote();
+    if (cnote && t.closest("#r-board")) { syncChips(); syncNote(); }
+    var u = t.closest("[data-unchip]");
+    if (u) { var uid = u.getAttribute("data-unchip"); dropChip(uid); setItem(uid, null); renderChips(); syncNote(); return; }
+    u = t.closest("#r-conversation [data-cancel]");
+    if (u) { if (!u.disabled) cancelHeld(u); return; }
     if (!live) return;
     var b = t.closest("#gmenu [data-layout]");
     if (b) { save(LAYOUT_KEY, b.getAttribute("data-layout")); setLayout(b.getAttribute("data-layout")); return; }
@@ -346,6 +511,7 @@
   }
   restoreOpen(doc);
   if (window.wbForm) window.wbForm();
+  applySent();
   fmtTimes(doc);
   mermaid();
   pinConvo();

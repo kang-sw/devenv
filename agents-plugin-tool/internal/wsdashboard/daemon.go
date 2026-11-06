@@ -81,6 +81,8 @@ type Daemon struct {
 	index    *Index
 	source   SessionSource
 	broker   *broker
+	// inboxMu serializes the daemon's own inbox writes (sends and cancels).
+	inboxMu sync.Mutex
 
 	closeOnce sync.Once
 	stop      chan struct{}
@@ -243,7 +245,8 @@ func (d *Daemon) Close() {
 
 // Handler is the daemon's HTTP surface. Every route first passes the
 // loopback Host guard; the daemon sends no CORS headers. The pages (/,
-// /s/<reply-id>, and their SSE streams) are read-only.
+// /s/<reply-id>, and their SSE streams) are read-only; a session's message
+// and cancel routes (inbox_routes.go) are the only browser writes.
 func (d *Daemon) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", d.handleHealth)

@@ -58,7 +58,7 @@ func TestNormalizeRejectsEmptyAndMalformed(t *testing.T) {
 		t.Fatalf("blank send: %v, want ErrEmpty", err)
 	}
 	for _, c := range []Chip{{ID: "../x", Answer: "a"}, {ID: "03", Answer: "a b"}, {ID: "", Answer: "a"}} {
-		if _, err := Normalize(Entry{Chips: []Chip{c}}); err == nil {
+		if _, err := Normalize(Entry{Chips: []Chip{c}}); !errors.Is(err, ErrInvalid) {
 			t.Errorf("chip %+v accepted", c)
 		}
 	}
