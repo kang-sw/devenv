@@ -621,7 +621,14 @@
       "registered_at": "2026-11-06T02:04:15Z"
     },
     "261106-feat-whiteboard-dashboard-panels": {
-      "registered_at": "2026-11-06T02:46:28Z"
+      "registered_at": "2026-11-06T02:46:28Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-06T06:49:35Z"
+      }
     },
     "261106-feat-whiteboard-policy-answer-user-alternative": {
       "registered_at": "2026-11-06T04:42:55Z"
