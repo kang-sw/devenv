@@ -47,10 +47,10 @@ func TestMarkdownTitleIsInlineOnly(t *testing.T) {
 			)
 			wantAll(t, out,
 				`<span class="title"><strong>bold</strong> <em>it</em> <code>code</code> <a href="L/docs/a.md">doc</a> shot</span>`,
-				`<span>- not a list</span>`,
-				`<span># not a heading</span>`,
-				`<span><code>mermaid fence</code></span>`,
-				`<span>[x]: not-a-definition</span>`,
+				`<span class="title">- not a list</span>`,
+				`<span class="title"># not a heading</span>`,
+				`<span class="title"><code>mermaid fence</code></span>`,
+				`<span class="title">[x]: not-a-definition</span>`,
 			)
 			wantNone(t, out, "<img", "<ul>", "<h1>not", `class="mermaid"`)
 		})
@@ -202,7 +202,7 @@ func TestMarkdownAckReasonsAreInline(t *testing.T) {
 	out := mdBoard(t, LayoutFull, Item{ID: 1, Class: ClassAnnounced, Topic: "t", Title: "ack *title*",
 		Rationale: "- *first*\n```go\n![img](a.png)", Status: StatusOpen})
 	wantAll(t, out,
-		"<span>ack <em>title</em></span>",
+		`<span class="title">ack <em>title</em></span>`,
 		`<span class="why">- <em>first</em></span>`,
 		"<span class=\"why\">```go</span>",
 		`<span class="why">img</span>`,

@@ -99,9 +99,13 @@ a { color: var(--wb-primary); }
 .cbar { display: flex; align-items: center; gap: 8px; padding: 3px 6px 3px 10px; min-height: 28px; }
 .card.policy .cbar { background: var(--wb-policy); color: var(--wb-on-policy); }
 .card.assumed .cbar { background: var(--wb-assumed); color: var(--wb-on-assumed); }
-.cbar .id { font-size: 12px; font-weight: 700; opacity: .85; flex: none; }
-.cbar .cls { font-size: 10.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; opacity: .8; flex: none; }
-.cbar .title { font-weight: 700; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+/* head: id and chips lead the title inline, so a wrapped title line returns to the left edge */
+.cbar .head { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.cbar .head > :not(.title) { margin-right: 6px; }
+.cbar .id { font-size: 12px; font-weight: 700; opacity: .85; }
+.cbar .cls { font-size: 10.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; opacity: .8; }
+.cbar .title { font-weight: 700; }
+.cbar .new, .ack .new, .srow .new { vertical-align: middle; }
 .cbar .btn { background: rgb(255 255 255 / .16); color: inherit; border: 0; flex: none; }
 .cbar .btn[aria-pressed="true"] { background: currentColor; }
 .cbar .btn[aria-pressed="true"] .i { color: var(--wb-assumed); }
@@ -174,8 +178,8 @@ a { color: var(--wb-primary); }
 .arow > .note { flex-basis: 100%; width: auto; margin: 0 10px 8px 34px; }
 .ack { flex: 1; min-width: 0; display: flex; gap: 8px; padding: 7px 10px; align-items: flex-start; cursor: pointer; line-height: 21px; }
 .ack > :not(.atext) { flex: none; }
-.ack .tag { margin-top: 2px; line-height: 15px; }
-.ack .new { margin-top: 7px; align-self: flex-start; }
+.ack .tag { display: inline-block; line-height: 15px; vertical-align: 1px; }
+.ack .head > :not(.title) { margin-right: 6px; }
 .arow + .arow { border-top: 1px solid var(--wb-muted); }
 .ack input { margin: 4px 0 0; accent-color: var(--wb-primary); }
 .ack .id { font-size: 12px; font-weight: 700; color: var(--wb-muted-fg); }
@@ -184,7 +188,7 @@ a { color: var(--wb-primary); }
 .tag.announced { background: var(--wb-announced); color: var(--wb-on-announced); }
 
 .ack .atext { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 0 8px; align-items: baseline; line-height: 1.5; padding-top: 1px; overflow-wrap: anywhere; }
-.ack .atext > span:first-child { font-weight: 600; }
+.ack .head .title { font-weight: 600; }
 .ack .why { font-size: 12px; color: var(--wb-muted-fg); }
 
 /* settled: collapsed tonal chip */
@@ -196,12 +200,11 @@ details.settled[open] > summary { margin-bottom: 4px; }
 details.more { margin: 2px 0 0 4px; }
 details.more > summary { padding: 0 8px; background: transparent; box-shadow: inset 0 0 0 1px var(--wb-muted); }
 details.more[open] > summary { margin-bottom: 2px; }
-.srow { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px; padding: 2px 4px; align-items: baseline; }
-.srow:has(> .new) { grid-template-columns: auto auto minmax(0, 1fr); }
-.srow > .new { align-self: start; margin-top: 6px; }
+.srow { padding: 2px 4px; }
 .srow .id { font-size: 12px; color: var(--wb-muted-fg); }
+.srow .stext > .id, .srow .stext > .new { margin-right: 6px; }
 .srow b { font-weight: 600; }
-.srow .stext { overflow-wrap: anywhere; }
+.srow .stext { display: block; overflow-wrap: anywhere; }
 .srow .ans { color: var(--wb-muted-fg); }
 .srow.void b { font-weight: 400; text-decoration: line-through; color: var(--wb-muted-fg); }
 
