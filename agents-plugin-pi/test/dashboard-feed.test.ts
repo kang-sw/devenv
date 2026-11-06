@@ -10,9 +10,10 @@ import {
   AGENT_POLL_MS,
   DASHBOARD_INTAKE_TOOL,
   DASHBOARD_LEAD_EVENTS,
-  DISABLED_RECHECK_MS,
+  KNOB_RECHECK_MS,
   FLUSH_INTERVAL_MS,
   INTAKE_CALL_TIMEOUT_MS,
+  RETRY_MS,
   createDashboardFeed,
   dashboardAgentEntries,
   dashboardUserMessage,
@@ -26,7 +27,7 @@ import {
 import { ADAPTER_MESSAGE_LABEL, WHITEBOARD_MESSAGE_LABEL, labelAdapterText, labelWhiteboardText, whiteboardLabeledBody } from "../src/adapter-label.ts";
 import { createBatchBuffer, observeBatchEvent } from "../src/agent-batches.ts";
 import { ADAPTER_ONLY_RAW_TOOLS, filterOutAdapterOnlyTools, filterOutMercenaryTools } from "../src/bridge.ts";
-import type { RpcAgentRecord, RpcAgentRegistry } from "../src/spawner.ts";
+import { markAgentExited, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
 
 interface Call { name: string; args: { session_key: string; adapter: string; events: DashboardEvent[] } }
 
@@ -221,6 +222,8 @@ describe("lead feed", () => {
     const { feed, events, advance } = harness();
     feed.start();
     feed.noteMailWake();
+    // The adapter's own wake message for held mail arrives as extension input first.
+    feed.leadEvent({ type: "input", text: labelAdapterText("1 ws message waiting"), source: "extension" });
     feed.leadEvent({ type: "agent_start" });
     feed.noteMailWake();
     feed.leadEvent({ type: "agent_settled" });
@@ -305,6 +308,18 @@ describe("subagent feed", () => {
 });
 
 describe("dashboardAgentEntries", () => {
+  test("an agent whose finished work was delivered stays done when its idle process exits later; one cut off mid-run is failed", () => {
+    const base = { sessionPath: "/tmp/x/session.jsonl", wsToolNames: [], toolGroup: "full-worker" as const, streaming: false, reportLog: [] };
+    const finished: RpcAgentRecord = { ...base, agentId: "done1", running: false, runStartedAt: 10, settledAt: 20, client: {} as never };
+    const cutOff: RpcAgentRecord = { ...base, agentId: "cut1", running: true, runStartedAt: 10, client: {} as never };
+    const registry: RpcAgentRegistry = new Map([["done1", finished], ["cut1", cutOff]]);
+    markAgentExited(undefined, undefined, finished, { suppressTerminal: true });
+    markAgentExited(undefined, undefined, cutOff, { suppressTerminal: true });
+    const status = new Map(dashboardAgentEntries(registry).map((item) => [item.agentId, item.status]));
+    assert.equal(status.get("done1"), "done");
+    assert.equal(status.get("cut1"), "failed");
+  });
+
   function rec(agentId: string, overrides: Partial<RpcAgentRecord> = {}): RpcAgentRecord {
     return { agentId, sessionPath: "/tmp/x/session.jsonl", wsToolNames: [], toolGroup: "full-worker", streaming: false, running: false, reportLog: [], client: {} as never, ...overrides };
   }
@@ -341,13 +356,60 @@ describe("dashboardAgentEntries", () => {
 });
 
 describe("failure isolation", () => {
-  test("a rejecting intake call is swallowed and the feed keeps sending", async () => {
+  test("a rejecting intake call is swallowed and the feed retries after a wait", async () => {
     const { feed, calls, advance } = harness({ answer: async () => { throw new Error("ws-mcp gone"); } });
     feed.start();
     await advance(0);
     feed.leadEvent(userEnd("hello"));
     await advance(FLUSH_INTERVAL_MS);
+    assert.equal(calls.length, 1, "no retry storm");
+    await advance(RETRY_MS);
     assert.equal(calls.length, 2);
+    assert.equal(calls[1]!.args.events[0]!.kind, "reset");
+  });
+
+  test("a rejected call resyncs: reset, the open turn's turn_start, the lost conversation events, the lead, and every running agent", async () => {
+    let failNext = false;
+    const { feed, calls, advance } = harness({
+      agents: () => [{ agentId: "a1", label: "x", status: "running", caption: "worker", batches: [] }],
+      answer: async () => {
+        if (failNext) { failNext = false; throw new Error("lost"); }
+        return { content: [] };
+      },
+    });
+    feed.start();
+    feed.leadEvent({ type: "agent_start" });
+    await advance(0);
+    const turnStart = calls[0]!.args.events.find((event) => event.kind === "turn_start")!;
+    failNext = true;
+    feed.leadEvent(userEnd("steer this way"));
+    feed.leadEvent(assistantEnd("on it"));
+    await advance(FLUSH_INTERVAL_MS);
+    assert.equal(calls.length, 2);
+    await advance(RETRY_MS);
+    assert.equal(calls.length, 3);
+    const resent = calls[2]!.args.events;
+    assert.deepEqual(resent.slice(0, 2), [{ kind: "reset" }, turnStart]);
+    assert.ok(resent.some((event) => event.kind === "user" && event.text === "steer this way"));
+    assert.ok(resent.some((event) => event.kind === "reply" && event.final === true && event.text === "on it"));
+    assert.ok(resent.some((event) => event.kind === "agent" && event.agentId === undefined), "the lead's batches");
+    assert.ok(resent.some((event) => event.kind === "agent" && event.agentId === "a1" && event.status === "running"));
+  });
+
+  test("a turn whose turn_start was lost gets it back ahead of its turn_end, so the summary is written", async () => {
+    let failNext = false;
+    const { feed, calls, advance } = harness({ answer: async () => { if (failNext) { failNext = false; throw new Error("lost"); } return { content: [] }; } });
+    feed.start();
+    await advance(0);
+    failNext = true;
+    feed.leadEvent({ type: "agent_start" });
+    await advance(FLUSH_INTERVAL_MS);
+    feed.leadEvent({ type: "agent_settled" });
+    await advance(RETRY_MS);
+    const kinds = calls.at(-1)!.args.events.map((event) => event.kind);
+    assert.equal(kinds[0], "reset");
+    assert.equal(kinds.filter((kind) => kind === "turn_start").length, 1);
+    assert.ok(kinds.indexOf("turn_start") < kinds.indexOf("turn_end"));
   });
 
   test("a hanging intake call holds later events (one call in flight, no unbounded queue) until it is abandoned", async () => {
@@ -357,7 +419,7 @@ describe("failure isolation", () => {
     for (let i = 0; i < 300; i++) feed.leadEvent(userEnd(`message ${i}`));
     await advance(FLUSH_INTERVAL_MS * 5);
     assert.equal(calls.length, 1, "nothing else is sent while the call hangs");
-    await advance(INTAKE_CALL_TIMEOUT_MS);
+    await advance(INTAKE_CALL_TIMEOUT_MS + RETRY_MS);
     assert.equal(calls.length, 2);
     const users = events().filter((event) => event.kind === "user");
     assert.ok(users.length <= 100, "held events are bounded");
@@ -396,11 +458,11 @@ describe("knob off", () => {
     feed.leadEvent(assistantEnd("done"));
     feed.leadEvent({ type: "agent_settled" });
     feed.agentsChanged();
-    await advance(DISABLED_RECHECK_MS / 2);
+    await advance(KNOB_RECHECK_MS / 2);
     assert.equal(calls.length, 0);
     assert.equal(reads, 1);
     feed.leadEvent(userEnd("inside the window"));
-    await advance(DISABLED_RECHECK_MS);
+    await advance(KNOB_RECHECK_MS);
     assert.equal(reads, 1, "dropped inside the window without a read");
     feed.leadEvent(userEnd("after the window"));
     await advance(FLUSH_INTERVAL_MS);
@@ -415,13 +477,39 @@ describe("knob off", () => {
     await advance(0);
     assert.equal(calls.length, 0);
     on = true;
-    await advance(DISABLED_RECHECK_MS);
+    await advance(KNOB_RECHECK_MS);
     feed.leadEvent(userEnd("hello"));
     await advance(FLUSH_INTERVAL_MS);
     assert.equal(calls.length, 1);
     const kinds = calls[0]!.args.events.map((event) => event.kind);
     assert.equal(kinds[0], "reset");
     assert.ok(kinds.includes("user"));
+    assert.ok(calls[0]!.args.events.some((event) => event.kind === "agent" && event.agentId === "a1" && event.status === "running"), "a still-running agent is resent");
+  });
+
+  test("an on knob is re-read at most once per recheck window while a reply streams", async () => {
+    let reads = 0;
+    const { feed, calls, advance } = harness({ enabled: () => { reads++; return true; } });
+    feed.start();
+    feed.leadEvent({ type: "agent_start" });
+    let text = "";
+    for (let i = 0; i < 30; i++) {
+      text += "w";
+      feed.leadEvent(textDelta(text));
+      await advance(FLUSH_INTERVAL_MS);
+    }
+    assert.ok(calls.length >= 20, `${calls.length} calls`);
+    assert.ok(reads <= 2, `${reads} knob reads over ${calls.length} calls`);
+  });
+
+  test("a knob read that resolves after its call was abandoned sends nothing", async () => {
+    let release: ((value: boolean) => void) | undefined;
+    const { feed, calls, advance } = harness({ enabled: () => new Promise<boolean>((resolve) => { release = resolve; }) });
+    feed.start();
+    await advance(INTAKE_CALL_TIMEOUT_MS);
+    release!(true);
+    await advance(0);
+    assert.equal(calls.length, 0);
   });
 
   test("no bridge or no session key sends nothing", async () => {

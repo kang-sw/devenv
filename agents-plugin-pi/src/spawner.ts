@@ -2400,7 +2400,9 @@ export function markAgentExited(
   opts?: { suppressTerminal?: boolean },
 ): void {
   if (!record.client) return;
-  record.lastRunFailed = true;
+  // Only an exit that cuts off work in flight is a failure: an idle child
+  // whose finished work was already delivered may exit later without one.
+  if (record.launching !== undefined || record.running || record.streaming) record.lastRunFailed = true;
   const hadQueuedSuccessor = (record.pendingQueuedWork?.length ?? 0) > 0;
   clearLiveState(record, registry);
   record.pendingQueuedWork = undefined;

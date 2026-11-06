@@ -30,9 +30,17 @@
  * drains, not per event; discrete events wait in a bounded list that drops
  * its oldest entry when full. Every call is fire-and-forget: rejections and
  * throws are swallowed, and a call that never answers is abandoned after
- * `INTAKE_CALL_TIMEOUT_MS` so the next flush can run. The `pi.dashboard_enabled`
- * knob is read once per flush; off (or no bridge or session key), the drained
- * events are dropped and no intake call is made.
+ * `INTAKE_CALL_TIMEOUT_MS` so the next flush can run.
+ *
+ * A call that fails (rejects, times out, answers with an error, or finds no
+ * bridge or session key) counts as not delivered: its conversation events go
+ * back to the front of the held list, the next call waits `RETRY_MS`, and
+ * that call resyncs: `reset`, the open turn's `turn_start`, the lead's
+ * batches, and every subagent again.
+ *
+ * The `pi.dashboard_enabled` knob is read at a flush at most once per
+ * `KNOB_RECHECK_MS`. Off, the drained events are dropped, no intake call is
+ * made, and the first call after it turns on again resyncs.
  */
 
 import { ADAPTER_MESSAGE_LABEL, whiteboardLabeledBody } from "./adapter-label.ts";
@@ -55,8 +63,11 @@ export const FLUSH_INTERVAL_MS = 100;
 /** A call still unanswered after this is abandoned, so a hung server cannot stop the feed. */
 export const INTAKE_CALL_TIMEOUT_MS = 5000;
 
-/** After the knob reads off, events drop without another read for this long. */
-export const DISABLED_RECHECK_MS = 2000;
+/** A knob read holds for this long: off, events drop without another read; on, flushes send without one. */
+export const KNOB_RECHECK_MS = 2000;
+
+/** Wait after a call that was not delivered before the next one. */
+export const RETRY_MS = 2000;
 
 /** Re-sample interval while any subagent was last sent as running, for changes no dirty mark reports. */
 export const AGENT_POLL_MS = 1000;
@@ -259,6 +270,10 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
   let nextTurnOrigin: DashboardOrigin | undefined;
   let resyncDue = false;
   let disabledUntil = 0;
+  let enabledUntil = 0;
+  let retryAt = 0;
+  /** The open turn's `turn_start`, or the last turn's once it closed, for a resync to resend. */
+  let lastTurnStart: DashboardEvent | undefined;
   let inFlight = false;
   let lastFlushAt: number | undefined;
   let cancelFlush: (() => void) | undefined;
@@ -270,7 +285,7 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
 
   function scheduleFlush(): void {
     if (stopped || inFlight || cancelFlush || !hasWork()) return;
-    const delay = lastFlushAt === undefined ? 0 : Math.max(0, lastFlushAt + FLUSH_INTERVAL_MS - now());
+    const delay = Math.max(0, lastFlushAt === undefined ? 0 : lastFlushAt + FLUSH_INTERVAL_MS - now(), retryAt - now());
     cancelFlush = schedule(() => {
       cancelFlush = undefined;
       flush();
@@ -373,6 +388,23 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
     resyncDue = true;
     sentAgents = new Map();
     lastStreamText = undefined;
+    leadDirty = true;
+    agentsDirty = options.agents !== undefined;
+  }
+
+  /** The conversation events of an undelivered call, which a resync cannot rebuild from current state. */
+  function requeue(events: DashboardEvent[]): void {
+    const kept = events.filter((event) => event.kind === "user" || event.kind === "turn_start" || event.kind === "turn_end" || (event.kind === "reply" && event.final === true));
+    pending = [...kept, ...pending];
+    if (pending.length > PENDING_EVENT_CAP) pending.splice(0, pending.length - PENDING_EVENT_CAP);
+  }
+
+  /** `reset` and, when the turn it belongs to is not already in `events`, the turn's `turn_start`. */
+  function resyncPrefix(events: DashboardEvent[]): DashboardEvent[] {
+    const firstStart = events.findIndex((event) => event.kind === "turn_start");
+    const firstEnd = events.findIndex((event) => event.kind === "turn_end");
+    const needStart = lastTurnStart !== undefined && (firstStart === -1 ? turnOpen || firstEnd !== -1 : firstEnd !== -1 && firstEnd < firstStart);
+    return needStart ? [{ kind: "reset" }, lastTurnStart!] : [{ kind: "reset" }];
   }
 
   function armPoll(): void {
@@ -394,11 +426,12 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
       markResync();
       return;
     }
-    const events = drain();
+    let events = drain();
     if (events.length === 0) return;
     inFlight = true;
     lastFlushAt = now();
     let finished = false;
+    let outcome: "delivered" | "off" | "failed" = "failed";
     let cancelTimeout: (() => void) | undefined;
     const done = (): void => {
       if (finished) return;
@@ -406,27 +439,42 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
       cancelTimeout?.();
       inFlight = false;
       lastFlushAt = now();
+      if (!stopped && outcome !== "delivered") {
+        // Dropped (off) or maybe lost (failed): ws-mcp's state is stale either way.
+        markResync();
+        if (outcome === "failed") {
+          requeue(events);
+          retryAt = now() + RETRY_MS;
+        }
+      }
       armPoll();
       scheduleFlush();
     };
     cancelTimeout = schedule(done, INTAKE_CALL_TIMEOUT_MS);
     const send = (enabled: unknown): unknown => {
-      if (stopped) return undefined;
-      const target = enabled !== false ? options.target() : undefined;
-      if (!target?.sessionKey) {
-        if (enabled === false) disabledUntil = now() + DISABLED_RECHECK_MS;
-        markResync();
+      // A read that resolves after its call was abandoned must not send a stale batch.
+      if (stopped || finished) return undefined;
+      if (enabled === false) {
+        disabledUntil = now() + KNOB_RECHECK_MS;
+        enabledUntil = 0;
+        outcome = "off";
         return undefined;
       }
+      enabledUntil = Math.max(enabledUntil, now() + KNOB_RECHECK_MS);
+      const target = options.target();
+      if (!target?.sessionKey) return undefined;
       if (resyncDue) {
         resyncDue = false;
-        events.unshift({ kind: "reset" });
+        events = [...resyncPrefix(events), ...events];
       }
-      return target.callTool(DASHBOARD_INTAKE_TOOL, { session_key: target.sessionKey, adapter: DASHBOARD_ADAPTER_NAME, events });
+      return Promise.resolve(target.callTool(DASHBOARD_INTAKE_TOOL, { session_key: target.sessionKey, adapter: DASHBOARD_ADAPTER_NAME, events })).then((result) => {
+        if (!finished && (result as { isError?: unknown } | undefined)?.isError !== true) outcome = "delivered";
+      });
     };
     let run: Promise<unknown>;
     try {
-      run = Promise.resolve(options.enabled()).then((enabled) => enabled, () => true).then(send);
+      const enabled = now() < enabledUntil ? true : options.enabled();
+      run = Promise.resolve(enabled).then((value) => value, () => true).then(send);
     } catch {
       run = Promise.resolve();
     }
@@ -442,13 +490,18 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
   function onLeadEvent(event: unknown): void {
     const e = event as { type?: string; message?: unknown; assistantMessageEvent?: unknown; text?: unknown; source?: unknown };
     switch (e.type) {
-      case "input":
-        if (!turnOpen) nextTurnOrigin = inputTurnOrigin(e.text, e.source);
+      case "input": {
+        // An input with no origin of its own (the adapter's wake message for
+        // held mail, say) keeps the origin already noted for the next turn.
+        const origin = inputTurnOrigin(e.text, e.source);
+        if (!turnOpen && origin) nextTurnOrigin = origin;
         return;
+      }
       case "agent_start":
         if (turnOpen) return;
         turnOpen = true;
-        settleBefore({ kind: "turn_start", ...(nextTurnOrigin ? { origin: nextTurnOrigin } : {}), at: now() });
+        lastTurnStart = { kind: "turn_start", ...(nextTurnOrigin ? { origin: nextTurnOrigin } : {}), at: now() };
+        settleBefore(lastTurnStart);
         nextTurnOrigin = undefined;
         return;
       case "agent_settled":
@@ -511,6 +564,9 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
     nextTurnOrigin = undefined;
     resyncDue = false;
     disabledUntil = 0;
+    enabledUntil = 0;
+    retryAt = 0;
+    lastTurnStart = undefined;
   }
 
   return {
