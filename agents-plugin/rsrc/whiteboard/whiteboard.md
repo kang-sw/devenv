@@ -109,6 +109,8 @@ Whiteboard: ai-docs/whiteboards/<reply-id>.html - (102), (103)
 When the host's instructions give an embed syntax, emit the host's embed line
 for the returned `embed:` in place of the `Whiteboard:` line.
 
+**Never repeat in the terminal or chat what the update wrote on the board; the turn's terminal output is only that pointer (or embed) line plus any fixed-format lines a playbook mandates.**
+
 ## Host embed folder
 
 When the host's instructions name a folder its embedded files must live in,
