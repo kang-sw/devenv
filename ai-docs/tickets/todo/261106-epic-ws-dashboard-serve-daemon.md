@@ -193,7 +193,10 @@ with browser interaction folded into the core.
     `followUp`). (212)
   - A second send while a message is held merges into the held message, so
     one inbox entry starts one turn; for a chip on the same item ID the
-    later one wins. (251)
+    later one wins. (251) The merged text keeps each send as its own
+    paragraph, separated by a blank line, and the held bubble draws a thin
+    divider between them. (277) Rejected: a plain join, which runs separate
+    sends into one paragraph; numbered parts, which are noise to the agent.
     Rejected: queueing each send as its own message; after the first is
     injected the next lands in a running turn and is held again (212).
   - The conversation shows a held message as held, with a cancel control.
@@ -299,7 +302,10 @@ with browser interaction folded into the core.
   does not serve shows its address and last exchange time with no live
   state. (261)
 - **Peer retention.** The group shows every live peer and the last 5 ended
-  peers, ordered by last exchange. (262)
+  peers, ordered by last exchange. (262) A peer this daemon does not serve
+  counts as live only while its mailbox presence record is alive; otherwise
+  it falls under the ended cap. (276) Rejected: always listing unserved
+  peers as live, which grows without bound from stale contacts.
 - **Peers on hosts without an adapter.** The group works for any host; a
   peer without an adapter, such as Codex, shows no phase. (263)
 
@@ -331,7 +337,8 @@ with browser interaction folded into the core.
 - **Layout switch.** A settings control in the top-right corner lets the
   user force either layout. Both layouts arrange the same region elements
   with CSS only (one grid-template-areas rule per layout), and the choice is
-  stored in the browser's localStorage. (257)
+  stored in the browser's localStorage. (257) A host without an adapter has
+  only the board-first layout, so its page hides the control. (278)
   Rejected: offering the drawer layout as a third mode, which adds its own
   open state, overlay, and update alert to maintain.
 - **Lead bar and tree height.** The lead bar stays a one-line status in
