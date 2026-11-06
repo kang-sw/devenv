@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ws dashboard</title>
+<style>
+:root {
+  --wb-bg: #f3f3f0; --wb-fg: #1b1d21; --wb-card: #ffffff; --wb-muted: #e9e8e3; --wb-muted-fg: #5f646b;
+  --wb-primary: #2b62d9; --wb-primary-fg: #ffffff;
+  --wb-topic: #2c3038; --wb-on-topic: #ffffff;
+  --wb-policy: #b25000; --wb-on-policy: #ffffff;
+  --wb-assumed: #b0245a; --wb-on-assumed: #ffffff;
+  --wb-technical: #2457c5; --wb-on-technical: #ffffff;
+  --wb-shadow: 0 1px 2px rgb(0 0 0 / .14), 0 2px 6px rgb(0 0 0 / .06);
+  --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .16), 0 6px 18px rgb(0 0 0 / .10);
+  --wb-radius: 12px;
+  --wb-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --wb-ph-think: #6a4fc4; --wb-on-ph-think: #ffffff;
+  --wb-ph-reply: #0e7a83; --wb-on-ph-reply: #ffffff;
+  --wb-ph-tool: #2457c5;  --wb-on-ph-tool: #ffffff;
+  --wb-ok: #1d7348;
+  --wb-ph-perm: #a35f00; --wb-on-ph-perm: #ffffff;
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --wb-bg: #141518; --wb-fg: #e7e7e4; --wb-card: #1e2024; --wb-muted: #2b2d32; --wb-muted-fg: #a2a6ad;
+  --wb-primary: #7aa2ff; --wb-primary-fg: #0c1424;
+  --wb-topic: #2a2d33; --wb-on-topic: #e4e5e8;
+  --wb-policy: #5b3a1c; --wb-on-policy: #f6d9bd;
+  --wb-assumed: #592a3d; --wb-on-assumed: #f3d0dd;
+  --wb-technical: #26385e; --wb-on-technical: #d2dcf6;
+  --wb-shadow: 0 1px 2px rgb(0 0 0 / .5), 0 2px 8px rgb(0 0 0 / .3);
+  --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .55), 0 8px 22px rgb(0 0 0 / .4);
+  --wb-ph-think: #3d2f6b; --wb-on-ph-think: #ddd3fb;
+  --wb-ph-reply: #1b4a4f; --wb-on-ph-reply: #c5ecef;
+  --wb-ph-tool: #26385e;  --wb-on-ph-tool: #d2dcf6;
+  --wb-ok: #6cc39a;
+  --wb-ph-perm: #55400f; --wb-on-ph-perm: #f6dfae;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--wb-bg); color: var(--wb-fg); }
+body { font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif; }
+code, .id { font-family: var(--wb-mono); }
+a { color: var(--wb-primary); }
+.wrap { margin: 0 auto; padding: 16px; max-width: 1080px; }
+.top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+.top h1 { font-size: 18px; margin: 0; font-weight: 700; }
+.top .meta { color: var(--wb-muted-fg); font-size: 12px; font-family: var(--wb-mono); }
+.top .counts { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+.sse { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--wb-muted-fg); }
+.sse .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--wb-ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--wb-ok) 25%, transparent); }
+.chip { display: inline-flex; align-items: center; gap: 3px; height: 20px; font-size: 12px; font-weight: 700; line-height: 1; padding: 0 9px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); white-space: nowrap; }
+.chip.policy { background: var(--wb-policy); color: var(--wb-on-policy); }
+.chip.assumed { background: var(--wb-assumed); color: var(--wb-on-assumed); }
+.chip.zero { background: transparent; color: var(--wb-muted-fg); opacity: .6; }
+.i { width: 14px; height: 14px; flex: none; display: block; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.chip .i { width: 12px; height: 12px; stroke-width: 2; }
+
+/* project = topic surface; sessions = rows */
+.project { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); margin-bottom: 16px; overflow: hidden; }
+.pbar { display: flex; align-items: center; gap: 8px; padding: 4px 12px; min-height: 32px; background: var(--wb-topic); color: var(--wb-on-topic); }
+.pbar .pname { font-size: 14px; font-weight: 700; }
+.pbar .ppath { font-family: var(--wb-mono); font-size: 11.5px; opacity: .7; margin-right: auto; overflow-wrap: anywhere; }
+.pbar .chip { background: rgb(127 127 127 / .28); color: inherit; }
+.sess { display: grid; grid-template-columns: minmax(0, 1.6fr) 62px 118px 96px 84px; gap: 12px; align-items: center; padding: 8px 12px; text-decoration: none; color: inherit; }
+.sess + .sess { border-top: 1px solid var(--wb-muted); }
+.sess:hover { background: color-mix(in srgb, var(--wb-primary) 6%, var(--wb-card)); }
+.sess .who { min-width: 0; }
+.sess .rid { font-family: var(--wb-mono); font-size: 13px; font-weight: 700; color: var(--wb-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+.sess .sub { font-size: 12px; color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+.sess .sub .tn { font-family: var(--wb-mono); }
+.host { justify-self: start; font-size: 11px; font-weight: 800; letter-spacing: .04em; padding: 1px 7px; border-radius: 4px; background: var(--wb-muted); color: var(--wb-muted-fg); }
+.phase { justify-self: start; display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 8px 0 6px; border-radius: 999px; font-size: 11px; font-weight: 800; white-space: nowrap; }
+.phase.thinking { background: var(--wb-ph-think); color: var(--wb-on-ph-think); }
+.phase.replying { background: var(--wb-ph-reply); color: var(--wb-on-ph-reply); }
+.phase.tool { background: var(--wb-ph-tool); color: var(--wb-on-ph-tool); }
+.phase.permission { background: var(--wb-ph-perm); color: var(--wb-on-ph-perm); }
+.phase.idle { background: var(--wb-muted); color: var(--wb-muted-fg); }
+.phase.none { background: transparent; color: var(--wb-muted-fg); box-shadow: inset 0 0 0 1px var(--wb-muted); font-weight: 600; }
+.spin { width: 10px; height: 10px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: spin .8s linear infinite; flex: none; }
+.paused .spin { animation-play-state: paused; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.idle-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; opacity: .55; }
+.qs { display: flex; gap: 4px; }
+.when { font-size: 12px; color: var(--wb-muted-fg); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.when.flash { animation: fl 1.2s ease-out; }
+@keyframes fl { from { color: var(--wb-primary); font-weight: 700; } }
+.agents-mini { font-size: 11.5px; color: var(--wb-muted-fg); margin-left: 6px; }
+.colhead { display: grid; grid-template-columns: minmax(0, 1.6fr) 62px 118px 96px 84px; gap: 12px; padding: 0 12px 4px; font-size: 11px; font-weight: 700; color: var(--wb-muted-fg); letter-spacing: .04em; }
+.colhead span:last-child { text-align: right; }
+@media (max-width: 720px) { .sess, .colhead { grid-template-columns: minmax(0, 1fr) auto auto; } .sess .qs, .colhead .c-q, .sess .host, .colhead .c-h { display: none; } }
+.foot { font-size: 11.5px; color: var(--wb-muted-fg); text-align: center; margin-top: 8px; }
+
+/* mockup-only */
+.mock { position: fixed; right: 14px; bottom: 14px; z-index: 50; width: 260px; font-size: 12px; background: #fffbe6; color: #3a3000; border: 2px dashed #c79a00; border-radius: 10px; box-shadow: 0 6px 24px rgb(0 0 0 / .25); }
+:root[data-theme="dark"] .mock { background: #2a2610; color: #f3e7b0; border-color: #a88300; }
+.mock > summary { list-style: none; cursor: pointer; padding: 5px 10px; font-weight: 800; display: flex; gap: 6px; background: repeating-linear-gradient(-45deg, rgb(199 154 0 / .22) 0 8px, transparent 8px 16px); border-radius: 8px; }
+.mock > summary::-webkit-details-marker { display: none; }
+.mock .mb { padding: 6px 10px 10px; display: grid; gap: 7px; }
+.mock .mrow { display: grid; grid-template-columns: 60px 1fr; gap: 6px; align-items: center; }
+.mock .seg { display: flex; gap: 3px; }
+.mock .seg button { border: 1px solid currentColor; background: transparent; color: inherit; border-radius: 999px; padding: 0 8px; height: 22px; font-size: 11.5px; cursor: pointer; opacity: .75; }
+.mock .seg button[aria-pressed="true"] { background: #c79a00; color: #fff; border-color: #c79a00; opacity: 1; font-weight: 700; }
+.mock .mnote { font-size: 11px; opacity: .8; }
+</style></head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><symbol id="i-ask" viewBox="0 0 16 16"><path d="M6 6.2a2 2 0 1 1 2.8 1.8c-.5.3-.8.7-.8 1.3v.4"/><circle cx="8" cy="12.3" r=".6" fill="currentColor"/></symbol><symbol id="i-lock" viewBox="0 0 16 16"><rect x="3" y="7" width="10" height="7" rx="1.6"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></symbol><symbol id="i-arrow" viewBox="0 0 16 16"><path d="M2.5 8h10M9 4.5L12.5 8 9 11.5"/></symbol></svg>
+<div class="wrap">
+  <div class="top">
+    <h1>ws dashboard</h1>
+    <span class="meta">swkang-wsl · 127.0.0.1:7781 · v0.48.10</span>
+    <span class="sse"><span class="dot"></span>실시간</span>
+    <span class="counts" id="totals"></span>
+  </div>
+  <div class="colhead"><span>세션</span><span class="c-h">호스트</span><span>lead</span><span class="c-q">열린 질문</span><span>업데이트</span></div>
+  <div id="projects"></div>
+  <div class="foot">세션 행을 누르면 <code>/s/&lt;reply-id&gt;</code> 페이지로 갑니다. 이 페이지는 읽기 전용입니다.</div>
+</div>
+
+<details class="mock" open><summary>⚠ 목업 전용 컨트롤</summary><div class="mb">
+  <div class="mrow"><span>라이브 틱</span><div class="seg" data-ctl="ticks"><button data-v="on">켜기</button><button data-v="off">끄기</button></div></div>
+  <div class="mrow"><span>테마</span><div class="seg" data-ctl="theme"><button data-v="light">light</button><button data-v="dark">dark</button></div></div>
+  <div class="mnote">틱이 켜져 있으면 각 세션의 lead 단계와 업데이트 시각이 바뀝니다. Codex 세션은 라이브 레이어가 없어 단계가 “—”로 남습니다.</div>
+</div></details>
+
+<script>
+(function () {
+  var doc = document;
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+  function icon(n) { return '<svg class="i" aria-hidden="true"><use href="#i-' + n + '"/></svg>'; }
+  function ago(ms) { var s = Math.max(0, Math.round(ms / 1000)); if (s < 60) return s + "초 전"; var m = Math.floor(s / 60); if (m < 60) return m + "분 전"; return Math.floor(m / 60) + "시간 전"; }
+  var params = new URLSearchParams(location.search);
+  var S = { ticks: params.get("ticks") !== "off", theme: params.get("theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light") };
+  var now = Date.now();
+  // phase: thinking | replying | tool | idle | null (no adapter: Codex)
+  var projects = [
+    { name: "devenv", path: "/home/swkang/devenv", sessions: [
+      { rid: "deafeningshrewdlydanderunsnap", host: "Claude", phase: "tool", tool: "Bash", topic: "라이브 레이어 배치", policy: 3, assumed: 1, upd: now - 3000, agents: "서브에이전트 2 실행" },
+      { rid: "quietamberlyfoxglovesprint", host: "Pi", phase: "thinking", topic: "ready 큐 워크트리", policy: 0, assumed: 0, upd: now - 12000, agents: "서브에이전트 1 실행" },
+      { rid: "brittlecalmlyheronwake", host: "Codex", phase: null, topic: "codex 플러그인 MCP env 정리", policy: 1, assumed: 0, upd: now - 540000, agents: "" },
+      { rid: "mossyfrankrelicdrift", host: "Claude", phase: "permission", tool: "Bash", topic: "mailbox history ring 구현", policy: 0, assumed: 2, upd: now - 1860000, agents: "" }
+    ] },
+    { name: "ledger-svc", path: "/home/swkang/work/ledger-svc", sessions: [
+      { rid: "ochrebrisklytidepool", host: "Pi", phase: "idle", topic: "export 포맷 (CSV vs Parquet)", policy: 2, assumed: 0, upd: now - 5000, agents: "" },
+      { rid: "pallidgentlywrenhollow", host: "Claude", phase: "tool", tool: "Bash", topic: "마이그레이션 롤백 순서", policy: 1, assumed: 1, upd: now - 4000, agents: "서브에이전트 2 실행" }
+    ] }
+  ];
+  var KO = { thinking: "생각 중", replying: "응답 중", tool: "도구 호출", permission: "권한 대기", idle: "대기" };
+  function phaseBadge(s) {
+    if (!s.phase) return '<span class="phase none" title="어댑터 없음: 라이브 레이어 없음">— 라이브 없음</span>';
+    if (s.phase === "permission") return '<span class="phase permission" title="터미널에서 권한 승인 대기 중">' + '<svg class="i" style="width:11px;height:11px" aria-hidden="true"><use href="#i-lock"/></svg>' + KO[s.phase] + "</span>";
+    return '<span class="phase ' + s.phase + '">' + (s.phase === "idle" ? '<span class="idle-dot"></span>' : '<span class="spin"></span>') + KO[s.phase] + "</span>";
+  }
+  function row(s) {
+    var href = "session.html?host=" + encodeURIComponent(s.host) + (s.phase ? "&phase=" + s.phase : "") + "&theme=" + S.theme;
+    var sub = s.phase === "permission" ? "터미널에서 권한 승인 대기 · <span class=\"tn\">" + esc(s.tool) + "</span> · " + esc(s.topic) : s.phase === "tool" && s.tool ? '<span class="tn">' + esc(s.tool) + "</span> · " + esc(s.topic) : esc(s.topic);
+    var qs = (s.policy ? '<span class="chip policy" title="to answer">' + icon("ask") + s.policy + "</span>" : '<span class="chip zero">' + icon("ask") + "0</span>") +
+      (s.assumed ? '<span class="chip assumed" title="assumed">' + icon("arrow") + s.assumed + "</span>" : "");
+    return '<a class="sess" href="' + href + '"><span class="who"><span class="rid">' + esc(s.rid) + '</span><span class="sub">' + sub +
+      (s.agents ? '<span class="agents-mini">· ' + esc(s.agents) + "</span>" : "") + "</span></span>" +
+      '<span class="host">' + esc(s.host) + "</span>" + phaseBadge(s) + '<span class="qs">' + qs + "</span>" +
+      '<span class="when' + (s.flash ? " flash" : "") + '">' + ago(Date.now() - s.upd) + "</span></a>";
+  }
+  function render() {
+    var total = 0, open = 0, live = 0, perm = 0;
+    doc.getElementById("projects").innerHTML = projects.map(function (p) {
+      total += p.sessions.length;
+      p.sessions.forEach(function (s) { open += s.policy; if (s.phase && s.phase !== "idle") live++; if (s.phase === "permission") perm++; });
+      return '<section class="project' + (S.ticks ? "" : " paused") + '"><div class="pbar"><span class="pname">' + esc(p.name) + '</span><span class="ppath">' + esc(p.path) + '</span><span class="chip">세션 ' + p.sessions.length + "</span></div>" +
+        p.sessions.map(row).join("") + "</section>";
+    }).join("");
+    doc.getElementById("totals").innerHTML = '<span class="chip">세션 ' + total + '</span><span class="chip">작업 중 ' + live + "</span>" + (perm ? '<span class="chip" style="background:var(--wb-ph-perm);color:var(--wb-on-ph-perm)">권한 대기 ' + perm + "</span>" : "") + '<span class="chip policy">' + icon("ask") + open + "</span>";
+    projects.forEach(function (p) { p.sessions.forEach(function (s) { s.flash = false; }); });
+  }
+  // live ticks: active sessions cycle phases; a phase change bumps the update time
+  var CYCLE = { thinking: "tool", tool: "replying", replying: "idle", idle: "thinking" };
+  var TOOLS = ["Bash", "Edit", "Read", "ws/whiteboard.update", "Grep"];
+  var n = 0;
+  function tick() {
+    if (S.ticks) {
+      n++;
+      var live = [projects[0].sessions[0], projects[0].sessions[1], projects[1].sessions[0]];
+      var s = live[n % live.length];
+      if (n % 2 === 0) {
+        s.phase = CYCLE[s.phase]; s.upd = Date.now(); s.flash = true;
+        if (s.phase === "tool") s.tool = TOOLS[n % TOOLS.length];
+        if (s.phase === "idle" && s.policy === 0) s.policy = 1;
+      }
+    }
+    render();
+  }
+  function sync() {
+    Array.prototype.forEach.call(doc.querySelectorAll(".mock .seg"), function (seg) {
+      var k = seg.getAttribute("data-ctl"), v = k === "ticks" ? (S.ticks ? "on" : "off") : S.theme;
+      Array.prototype.forEach.call(seg.querySelectorAll("button"), function (b) { b.setAttribute("aria-pressed", b.getAttribute("data-v") === v ? "true" : "false"); });
+    });
+    doc.documentElement.setAttribute("data-theme", S.theme);
+  }
+  Array.prototype.forEach.call(doc.querySelectorAll(".mock .seg button"), function (b) {
+    b.addEventListener("click", function () {
+      var k = b.parentElement.getAttribute("data-ctl"), v = b.getAttribute("data-v");
+      if (k === "ticks") S.ticks = v === "on"; else S.theme = v;
+      sync(); render();
+    });
+  });
+  sync(); render();
+  setInterval(tick, 1500);
+})();
+</script>
+</body></html>

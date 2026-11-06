@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Whiteboard - barrette-regain-lumpiness</title>
+<style>:root {
+  --wb-bg: var(--background, #f6f6f3);
+  --wb-fg: var(--foreground, #1d2125);
+  --wb-card: var(--card, #ffffff);
+  --wb-muted: var(--muted, #efeee9);
+  --wb-muted-fg: var(--muted-foreground, #6a6f76);
+  --wb-border: var(--border, #e2e0da);
+  --wb-primary: var(--primary, #2f6feb);
+  --wb-primary-fg: var(--primary-foreground, #ffffff);
+  --wb-policy: var(--chart-1, #d9822b);
+  --wb-technical: var(--chart-2, #2f6feb);
+  --wb-announced: var(--chart-3, #2e9e6b);
+  --wb-assumed: var(--chart-5, #c43d6b);
+  --wb-radius: 10px;
+  --wb-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --wb-bg: var(--background, #161719);
+    --wb-fg: var(--foreground, #e6e6e3);
+    --wb-card: var(--card, #1f2023);
+    --wb-muted: var(--muted, #2a2b2f);
+    --wb-muted-fg: var(--muted-foreground, #9a9ea5);
+    --wb-border: var(--border, #34363b);
+    --wb-primary: var(--primary, #6b9bff);
+    --wb-primary-fg: var(--primary-foreground, #0d1117);
+    --wb-policy: var(--chart-1, #f0a35a);
+    --wb-technical: var(--chart-2, #6b9bff);
+    --wb-announced: var(--chart-3, #4fc28d);
+    --wb-assumed: var(--chart-5, #f06292);
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--wb-bg); color: var(--wb-fg); }
+body { font: 14px/1.5 system-ui, -apple-system, "Segoe UI", "Noto Sans KR", sans-serif; }
+code, .id { font-family: var(--wb-mono); }
+.wrap { margin: 0 auto; padding: 16px; }
+.full .wrap { max-width: 1180px; }
+.embed .wrap { max-width: 780px; padding: 12px; }
+
+/* header */
+.top { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.top h1 { font-size: 15px; margin: 0; font-weight: 650; letter-spacing: .01em; }
+.top .meta { color: var(--wb-muted-fg); font-size: 12px; font-family: var(--wb-mono); }
+.top .counts { margin-left: auto; display: flex; gap: 6px; }
+.pill { font-size: 12px; padding: 1px 8px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); white-space: nowrap; }
+.pill.hot { background: color-mix(in srgb, var(--wb-policy) 18%, transparent); color: var(--wb-fg); }
+
+/* layout */
+.grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; align-items: start; }
+@media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+.side { display: flex; flex-direction: column; gap: 10px; position: sticky; top: 12px; }
+section.block { margin-bottom: 18px; }
+section.block > h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .07em; color: var(--wb-muted-fg); margin: 0 0 8px; font-weight: 650; display: flex; gap: 8px; align-items: center; }
+.topic { font-size: 12px; color: var(--wb-muted-fg); margin: 12px 0 6px; display: flex; align-items: center; gap: 6px; }
+.topic::before { content: ""; width: 6px; height: 6px; border-radius: 2px; background: var(--wb-border); }
+
+/* cards */
+.card { background: var(--wb-card); border: 1px solid var(--wb-border); border-radius: var(--wb-radius); padding: 12px 14px; margin-bottom: 8px; position: relative; }
+.card.policy { border-left: 3px solid var(--wb-policy); }
+.card.assumed { border: 1px solid var(--wb-assumed); background: color-mix(in srgb, var(--wb-assumed) 7%, var(--wb-card)); }
+.head { display: flex; gap: 8px; align-items: baseline; }
+.id { font-size: 12px; font-weight: 650; color: var(--wb-muted-fg); flex: none; }
+.title { font-weight: 600; }
+.tag { font-size: 11px; padding: 0 6px; border-radius: 4px; flex: none; font-weight: 600; }
+.tag.policy { color: var(--wb-policy); background: color-mix(in srgb, var(--wb-policy) 13%, transparent); }
+.tag.technical { color: var(--wb-technical); background: color-mix(in srgb, var(--wb-technical) 13%, transparent); }
+.tag.announced { color: var(--wb-announced); background: color-mix(in srgb, var(--wb-announced) 13%, transparent); }
+.tag.assumed { color: var(--wb-assumed); background: color-mix(in srgb, var(--wb-assumed) 13%, transparent); }
+.new { font-size: 10px; font-weight: 700; letter-spacing: .05em; color: var(--wb-primary-fg); background: var(--wb-primary); border-radius: 4px; padding: 0 5px; flex: none; }
+.ctx { margin: 6px 0 0; padding-left: 18px; color: var(--wb-muted-fg); }
+.ctx li { margin: 2px 0; }
+
+/* options */
+.opts { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.opt { display: grid; grid-template-columns: 22px 1fr; gap: 8px; align-items: start; text-align: left; font: inherit; color: inherit; background: var(--wb-bg); border: 1px solid var(--wb-border); border-radius: 8px; padding: 7px 10px; cursor: pointer; }
+.opt:hover { border-color: color-mix(in srgb, var(--wb-primary) 50%, var(--wb-border)); }
+.opt .k { font-family: var(--wb-mono); font-weight: 700; color: var(--wb-muted-fg); }
+.opt.rec .k::after { content: "★"; color: var(--wb-policy); font-size: 10px; margin-left: 2px; vertical-align: super; }
+.opt[aria-pressed="true"] { border-color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 10%, var(--wb-card)); }
+.opt[aria-pressed="true"] .k { color: var(--wb-primary); }
+.rec-line { margin-top: 8px; font-size: 13px; padding: 6px 10px; border-radius: 6px; background: color-mix(in srgb, var(--wb-policy) 9%, transparent); }
+.rec-line b { color: var(--wb-policy); }
+.note { width: 100%; margin-top: 8px; font: inherit; color: inherit; background: transparent; border: 1px dashed var(--wb-border); border-radius: 6px; padding: 5px 8px; }
+.note:focus { outline: none; border-style: solid; border-color: var(--wb-primary); }
+.quote { margin-top: 6px; font-size: 13px; color: var(--wb-muted-fg); border-left: 2px solid var(--wb-border); padding-left: 8px; }
+.assumed .actions { display: flex; gap: 6px; margin-top: 8px; }
+.btn { font: inherit; font-size: 13px; color: inherit; background: var(--wb-bg); border: 1px solid var(--wb-border); border-radius: 6px; padding: 3px 10px; cursor: pointer; }
+.btn[aria-pressed="true"] { border-color: var(--wb-primary); color: var(--wb-primary); }
+.btn.primary { background: var(--wb-primary); color: var(--wb-primary-fg); border-color: var(--wb-primary); }
+
+/* acknowledgement list */
+.acks { background: var(--wb-card); border: 1px solid var(--wb-border); border-radius: var(--wb-radius); }
+.acks .bar { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--wb-border); font-size: 13px; color: var(--wb-muted-fg); }
+.ack { display: grid; grid-template-columns: 18px auto 1fr; gap: 8px; padding: 7px 14px; border-bottom: 1px solid var(--wb-border); align-items: start; cursor: pointer; }
+.ack:last-child { border-bottom: 0; }
+.ack input { margin: 3px 0 0; accent-color: var(--wb-primary); }
+.ack .why { display: block; font-size: 12.5px; color: var(--wb-muted-fg); }
+.ack .row { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
+
+/* settled */
+.settled .item { display: grid; grid-template-columns: auto 1fr; gap: 8px; padding: 5px 0; border-bottom: 1px dashed var(--wb-border); font-size: 13px; }
+.settled .item:last-of-type { border-bottom: 0; }
+.settled .ans { color: var(--wb-muted-fg); }
+.settled .ans b { color: var(--wb-fg); font-weight: 600; }
+.more { font-size: 12px; color: var(--wb-muted-fg); padding: 6px 0 0; }
+
+/* now slot */
+.now { background: var(--wb-card); border: 1px solid var(--wb-border); border-radius: var(--wb-radius); padding: 14px; }
+.now svg { width: 100%; height: auto; display: block; }
+.now .box { fill: var(--wb-bg); stroke: var(--wb-border); }
+.now .box.store { fill: color-mix(in srgb, var(--wb-primary) 10%, var(--wb-card)); stroke: var(--wb-primary); }
+.now text { fill: var(--wb-fg); font: 12px system-ui, sans-serif; }
+.now text.sub { fill: var(--wb-muted-fg); font-size: 10.5px; }
+.now .edge { stroke: var(--wb-muted-fg); fill: none; stroke-width: 1.3; }
+.now .edge.dash { stroke-dasharray: 4 3; }
+.now .arrow { fill: var(--wb-muted-fg); }
+
+/* panels */
+details.panel { background: var(--wb-card); border: 1px solid var(--wb-border); border-radius: var(--wb-radius); }
+details.panel > summary { list-style: none; cursor: pointer; padding: 8px 12px; display: flex; gap: 8px; align-items: center; font-weight: 600; font-size: 13px; }
+details.panel > summary::-webkit-details-marker { display: none; }
+details.panel > summary::before { content: "▸"; color: var(--wb-muted-fg); font-size: 11px; transition: transform .12s; }
+details.panel[open] > summary::before { transform: rotate(90deg); }
+details.panel > summary .pill { margin-left: auto; }
+details.panel .body { padding: 0 12px 10px; font-size: 13px; }
+details.panel.placeholder { border-style: dashed; opacity: .7; }
+.todo { list-style: none; margin: 0; padding: 0; }
+.todo li { display: flex; gap: 8px; padding: 3px 0; }
+.todo li.done { color: var(--wb-muted-fg); text-decoration: line-through; }
+.todo li.focus { font-weight: 600; }
+.todo .box { font-family: var(--wb-mono); color: var(--wb-muted-fg); }
+.agenda { margin: 0; padding: 0; list-style: none; }
+.agenda li { padding: 4px 0; border-bottom: 1px dashed var(--wb-border); }
+.agenda li:last-child { border-bottom: 0; }
+.agenda code { font-size: 12px; color: var(--wb-primary); }
+.agenda span { display: block; color: var(--wb-muted-fg); font-size: 12.5px; }
+
+/* reply bar */
+.reply { background: var(--wb-card); border: 1px solid var(--wb-border); border-radius: var(--wb-radius); padding: 10px 12px; display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
+.full .reply { position: sticky; bottom: 10px; box-shadow: 0 4px 18px color-mix(in srgb, var(--wb-fg) 12%, transparent); }
+.reply textarea { font-family: var(--wb-mono); font-size: 12.5px; color: inherit; background: var(--wb-bg); border: 1px solid var(--wb-border); border-radius: 6px; padding: 6px 8px; resize: none; height: 34px; width: 100%; }
+.reply .hint { grid-column: 1 / -1; font-size: 12px; color: var(--wb-muted-fg); min-height: 1em; }
+
+/* update banner */
+.banner { display: none; position: sticky; top: 0; z-index: 5; margin: -16px -16px 12px; padding: 8px 16px; background: var(--wb-primary); color: var(--wb-primary-fg); font-size: 13px; cursor: pointer; }
+.banner.show { display: block; }
+.mock { font-size: 11px; color: var(--wb-muted-fg); border: 1px dashed var(--wb-border); border-radius: 6px; padding: 4px 8px; margin-bottom: 12px; display: flex; gap: 8px; align-items: center; }
+
+.ico { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 4px; border-radius: 6px; background: var(--wb-muted); color: var(--wb-muted-fg); font-size: 12px; font-weight: 700; text-transform: none; letter-spacing: 0; }
+.ico.hot { background: color-mix(in srgb, var(--wb-policy) 20%, transparent); color: var(--wb-policy); }
+details.panel > summary .ico { min-width: 18px; height: 18px; }
+.new { background: none; color: var(--wb-primary); padding: 0; font-size: 11px; }
+.read { margin-top: 6px; }
+.banner { text-align: center; font-size: 16px; font-weight: 700; }
+.reply .btn.primary { font-size: 16px; padding: 2px 14px; }
+
+/* --- topic-first layout (round 3) --- */
+.topic { display: block; margin: 0 0 14px; padding: 0; color: inherit; font-size: inherit; }
+.topic::before { content: none; }
+.topic > h3 { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; font-size: 15px; font-weight: 700; }
+.topic > h3 .tname { margin-right: 4px; }
+.topic.quiet > h3 { font-size: 13px; color: var(--wb-muted-fg); }
+.chip { font-size: 11.5px; font-weight: 600; padding: 0 7px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); white-space: nowrap; line-height: 18px; }
+.chip.hot { background: color-mix(in srgb, var(--wb-policy) 20%, transparent); color: var(--wb-policy); }
+.chip.assumed { background: color-mix(in srgb, var(--wb-assumed) 16%, transparent); color: var(--wb-assumed); }
+.top .counts { gap: 4px; }
+.card { padding: 9px 12px; margin-bottom: 6px; }
+.head { align-items: center; }
+.head .title { flex: 1; }
+.btn.mini { padding: 0 7px; font-size: 12px; line-height: 20px; }
+.note-toggle { opacity: .55; }
+.note-toggle:hover { opacity: 1; }
+.ctx { margin: 4px 0 0; font-size: 13px; }
+.opts { display: flex; flex-direction: row; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.opt { flex: 1 1 auto; max-width: 100%; padding: 5px 9px; grid-template-columns: 18px 1fr; }
+.rec-line { background: none; padding: 4px 0 0; font-size: 12.5px; color: var(--wb-muted-fg); }
+.note { margin-top: 6px; }
+.assumed .actions { margin: 0; display: inline-flex; gap: 4px; }
+.read { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; margin-top: 4px; font-size: 13px; }
+.read .quote { margin: 0; }
+.quote { color: var(--wb-muted-fg); border: 0; padding: 0; font-size: 12.5px; }
+.acks { margin-bottom: 6px; }
+.ack { grid-template-columns: 16px auto auto auto 1fr; padding: 5px 12px; gap: 6px; align-items: baseline; }
+.ack .atext { display: flex; flex-wrap: wrap; gap: 0 8px; }
+.ack .why { display: inline; font-size: 12px; }
+details.settled { font-size: 13px; padding: 0 2px; }
+details.settled > summary { cursor: pointer; color: var(--wb-muted-fg); font-size: 12px; list-style: none; display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--wb-muted); }
+details.settled > summary::-webkit-details-marker { display: none; }
+details.settled[open] > summary { margin-bottom: 4px; }
+.srow { display: grid; grid-template-columns: auto auto 1fr; gap: 6px; padding: 2px 0; align-items: baseline; }
+.srow b { font-weight: 600; }
+.more { padding: 2px 0 0; }
+details.now { background: var(--wb-card); border: 1px solid var(--wb-border); border-radius: var(--wb-radius); padding: 8px 12px; margin-bottom: 14px; }
+details.now > summary { cursor: pointer; list-style: none; display: flex; gap: 8px; align-items: center; }
+details.now > summary::-webkit-details-marker { display: none; }
+details.now[open] > summary { margin-bottom: 6px; }
+details.now svg { width: 100%; height: auto; display: block; }
+details.now .box { fill: var(--wb-bg); stroke: var(--wb-border); }
+details.now .box.store { fill: color-mix(in srgb, var(--wb-primary) 10%, var(--wb-card)); stroke: var(--wb-primary); }
+details.now text { fill: var(--wb-fg); font: 12px system-ui, sans-serif; }
+details.now text.sub { fill: var(--wb-muted-fg); font-size: 10.5px; }
+details.now .edge { stroke: var(--wb-muted-fg); fill: none; stroke-width: 1.3; }
+details.now .edge.dash { stroke-dasharray: 4 3; }
+details.now .arrow { fill: var(--wb-muted-fg); }
+.side.flat { position: static; margin-top: 12px; }
+.reply { margin: 4px 0 12px; }
+.reply .hint { grid-column: auto; min-height: 0; }
+.reply { grid-template-columns: 1fr auto auto; }
+</style></head>
+<body class="embed"><div class="wrap">
+<div class="top"><h1>Whiteboard</h1><span class="meta">barrette-regain-lumpiness · #12 · 2026-11-04 16:31</span><span class="counts"><span class="chip hot" title="to answer">? 2</span><span class="chip assumed" title="assumed">→ 1</span><span class="chip" title="to acknowledge">✓ 3</span><span class="chip" title="new since the previous embed"><span class="new">●</span> 7</span></span></div><details class="now" id="p-now" open><summary title="now"><span class="ico">◆</span><span class="new" title="new since the previous embed">●</span><span class="now-text">update 한 번이 full 페이지와 embed를 함께 씁니다. embed는 최근 5개만 남습니다.</span></summary>
+<svg viewBox="0 0 640 170" role="img">
+  <defs><marker id="ah" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L8,4 L0,8 z"/></marker></defs>
+  <rect class="box" x="10" y="55" width="120" height="50" rx="8"/><text x="24" y="77">lead</text><text class="sub" x="24" y="93">턴당 update 1회</text>
+  <rect class="box store" x="200" y="55" width="140" height="50" rx="8"/><text x="214" y="77">session store</text><text class="sub" x="214" y="93">항목 · 순번 · 아카이브</text>
+  <rect class="box" x="430" y="10" width="200" height="50" rx="8"/><text x="444" y="32">full · &lt;id&gt;.html</text><text class="sub" x="444" y="48">덮어쓰기 + stamp</text>
+  <rect class="box" x="430" y="100" width="200" height="50" rx="8"/><text x="444" y="122">embed · &lt;id&gt;-&lt;hash&gt;.html</text><text class="sub" x="444" y="138">새 파일, 최근 5개 유지</text>
+  <path class="edge" d="M130,80 H198" marker-end="url(#ah)"/>
+  <path class="edge" d="M340,72 C385,72 390,35 428,35" marker-end="url(#ah)"/>
+  <path class="edge" d="M340,88 C385,88 390,125 428,125" marker-end="url(#ah)"/>
+  <text class="sub" x="40" y="150">todo · agenda 쓰기 → full만</text>
+  <path class="edge dash" d="M180,146 H395 V48 H428" marker-end="url(#ah)"/>
+</svg></details><section class="topic"><h3><span class="tname">embed 보관</span><span class="chip hot" title="to answer">? 1</span><span class="chip" title="to acknowledge">✓ 1</span></h3><div class="card policy" data-id="77">
+  <div class="head"><span class="id">(77)</span><span class="tag policy">policy</span><span class="new" title="new since the previous embed">●</span><span class="title">이전 embed 파일 정리 방식</span><button class="btn mini note-toggle" title="note">✎</button></div>
+  <ul class="ctx"><li>Orca가 파일을 다시 읽는다면, 지운 embed는 채팅 기록에서 빈 화면이 됩니다.</li></ul><div class="opts"><button class="opt" data-opt="a" aria-pressed="false"><span class="k">a</span><span>render마다 이전 embed 삭제</span></button><button class="opt rec" data-opt="b" aria-pressed="false"><span class="k">b</span><span>최근 5개만 유지</span></button><button class="opt" data-opt="c" aria-pressed="false"><span class="k">c</span><span>세션 GC까지 전부 유지</span></button></div>
+  <div class="rec-line" title="recommendation"><b>★ b</b> 채팅 기록이 깨질 위험을 줄이면서 파일 수에 상한이 생깁니다.</div>
+  <input class="note" placeholder="✎" title="note" hidden>
+</div><div class="acks"><label class="ack"><input type="checkbox" data-id="78"><span class="id">(78)</span><span class="tag technical">technical</span><span class="new" title="new since the previous embed">●</span><span class="atext"><span>삭제 순서는 저장소의 render 순번 기준</span><span class="why">mtime 대신 - 같은 초에 두 번 render하면 mtime이 같고, 복사·동기화로 바뀜</span></span></label></div><details class="settled"><summary title="settled">≡ 1</summary><div class="srow"><span class="id">(69)</span><span><b>ai-docs/whiteboards/, .local 없이</b> <span class="quote">❝ 이건 굳이 local.html일 필요는 없겠네요 ❞</span></span></div></details></section><section class="topic"><h3><span class="tname">embed 레이아웃</span><span class="chip hot" title="to answer">? 1</span><span class="chip assumed" title="assumed, confirm or correct">→ 1</span></h3><div class="card policy" data-id="73">
+  <div class="head"><span class="id">(73)</span><span class="tag policy">policy</span><span class="title">embed에서 Now 위치</span><button class="btn mini note-toggle" title="note">✎</button></div>
+  <div class="opts"><button class="opt" data-opt="a" aria-pressed="false"><span class="k">a</span><span>항상 아래</span></button><button class="opt" data-opt="b" aria-pressed="false"><span class="k">b</span><span>항상 위</span></button><button class="opt rec" data-opt="c" aria-pressed="false"><span class="k">c</span><span>이번 턴에 Now가 바뀌었으면 위, 아니면 토픽 목록 아래로 내려서 질문을 먼저 보게 함</span></button></div>
+  <div class="rec-line" title="recommendation"><b>★ c</b> 새 설명이 있을 때만 먼저 읽게 합니다.</div>
+  <input class="note" placeholder="✎" title="note" hidden>
+</div><div class="card assumed" data-id="76">
+  <div class="head"><span class="id">(76)</span><span class="tag assumed">assumed</span><span class="new" title="new since the previous embed">●</span><span class="title">추천 표시는 ★ + 추천 줄</span>
+    <span class="actions"><button class="btn mini" data-v="ok" aria-pressed="false" title="confirm">✓</button><button class="btn mini" data-v="no" aria-pressed="false" title="correct">✗</button></span></div>
+  <div class="read"><span title="the lead's reading">→ <b>승인</b></span><span class="quote" title="your words">❝ 71-76 네 좋아 보입니다 ❞</span></div>
+  <input class="note" placeholder="✎" title="correction" hidden>
+</div><details class="settled" open><summary title="settled">≡ 2</summary><div class="srow"><span class="id">(71)</span><span class="new" title="new since the previous embed">●</span><span><b>full은 2단, 사이드바에 패널</b> <span class="quote">❝ 71-76 네 좋아 보입니다 ❞</span></span></div><div class="srow"><span class="id">(72)</span><span class="new" title="new since the previous embed">●</span><span><b>embed는 1단</b> <span class="quote">❝ 71-76 네 좋아 보입니다 ❞</span></span></div></details></section><section class="topic"><h3><span class="tname">Now 입력</span><span class="chip" title="to acknowledge">✓ 2</span></h3><div class="acks"><label class="ack"><input type="checkbox" data-id="80"><span class="id">(80)</span><span class="tag technical">technical</span><span class="new" title="new since the previous embed">●</span><span class="atext"><span>now_path로 HTML 파일을 받아 update 시점에 저장</span><span class="why">render마다 다시 읽는 방식 대신 - 파일이 지워지거나 바뀌어도 보드가 조용히 달라지지 않음</span></span></label><label class="ack"><input type="checkbox" data-id="79"><span class="id">(79)</span><span class="tag announced">announced</span><span class="new" title="new since the previous embed">●</span><span class="atext"><span>템플릿 문구는 기호 위주, 산문 없음</span><span class="why">근거: 사용자 지시 (템플릿 텍스트 최소화)</span></span></label></div></section><section class="topic quiet"><h3><span class="tname">도구 표면</span><details class="settled"><summary title="settled">≡ 8</summary><div class="srow"><span class="id">(63)</span><span><b>update + query 두 개</b> <span class="quote">❝ 63 네, 이 안이 훨씬 깔끔하네요 ❞</span></span></div><div class="srow"><span class="id">(52)</span><span><b>update마다 full + embed</b> <span class="quote">❝ 전체 승인 ❞</span></span></div><div class="more" title="older settled items; whiteboard.query reads them">⋯ +6</div></details></h3></section><div class="reply"><textarea id="reply-text" readonly placeholder="(nn) a; (mm) ok"></textarea><button class="btn primary" id="reply-copy" title="copy answers">⧉</button><span class="hint" id="reply-hint"></span></div>
+<div class="side flat"><details class="panel" id="p-todo"><summary><span class="ico">☐</span>Todos<span class="pill">2/4</span></summary><div class="body"><ul class="todo"><li class="done"><span class="box">[x]</span>목업 1차</li><li class="done"><span class="box">[x]</span>기호 위주 문구로 교체</li><li class=" focus"><span class="box">[ ]</span>토픽 중심 구성 확정</li><li class=""><span class="box">[ ]</span>목업 커밋 + 티켓 반영</li></ul></div></details><details class="panel" id="p-agenda"><summary><span class="ico">§</span>Agendas<span class="pill">1</span></summary><div class="body"><ul class="agenda"><li><code>whiteboard.mockup</code><span>목업 리뷰 중. (73)(77) 확정, (78)-(80) 확인 대기</span></li></ul></div></details><details class="panel placeholder" id="p-mail"><summary>✉ Mailbox<span class="pill">…</span></summary><div class="body">Provider placeholder (mockup only; not shipped in the first cut).</div></details><details class="panel placeholder" id="p-play"><summary>▤ Playbooks<span class="pill">…</span></summary><div class="body">Provider placeholder (mockup only; not shipped in the first cut).</div></details><details class="panel placeholder" id="p-tix"><summary>▦ Tickets<span class="pill">…</span></summary><div class="body">Provider placeholder (mockup only; not shipped in the first cut).</div></details></div>
+</div>
+<script>(function () {
+  var doc = document;
+  var store = null; // sessionStorage when available; the embed sandbox throws on access
+  try { store = window.sessionStorage; store.getItem("wb"); } catch (e) { store = null; }
+
+  // --- answer form -------------------------------------------------------
+  function q(sel, root) { return Array.prototype.slice.call((root || doc).querySelectorAll(sel)); }
+
+  q(".card.policy").forEach(function (card) {
+    q(".opt", card).forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var on = btn.getAttribute("aria-pressed") === "true";
+        q(".opt", card).forEach(function (b) { b.setAttribute("aria-pressed", "false"); });
+        btn.setAttribute("aria-pressed", on ? "false" : "true");
+        build();
+      });
+    });
+  });
+  q(".card.assumed").forEach(function (card) {
+    q(".btn[data-v]", card).forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var on = btn.getAttribute("aria-pressed") === "true";
+        q(".btn[data-v]", card).forEach(function (b) { b.setAttribute("aria-pressed", "false"); });
+        btn.setAttribute("aria-pressed", on ? "false" : "true");
+        build();
+      });
+    });
+  });
+  q(".note-toggle").forEach(function (t) {
+    t.addEventListener("click", function () {
+      var n = t.closest(".card").querySelector(".note");
+      n.hidden = !n.hidden; if (!n.hidden) n.focus();
+    });
+  });
+  q(".card.assumed .btn[data-v=no]").forEach(function (b) {
+    b.addEventListener("click", function () { var n = b.closest(".card").querySelector(".note"); n.hidden = false; n.focus(); });
+  });
+  q(".note, .ack input").forEach(function (el) { el.addEventListener("input", build); el.addEventListener("change", build); });
+  var all = doc.getElementById("ack-all");
+  if (all) all.addEventListener("change", function () {
+    q(".ack input").forEach(function (c) { c.checked = all.checked; });
+    build();
+  });
+
+  // Reply grammar: "(nn) <option>[, note: <text>]" per answered item,
+  // acknowledgements grouped as "(nn), (mm) ok", parts joined by "; ".
+  function build() {
+    var parts = [];
+    q(".card.policy, .card.assumed").forEach(function (card) {
+      var id = card.getAttribute("data-id");
+      var pick = card.querySelector('[aria-pressed="true"]');
+      var noteEl = card.querySelector(".note");
+      var note = noteEl ? noteEl.value.trim() : "";
+      var s = "";
+      if (pick) s = "(" + id + ") " + (pick.getAttribute("data-opt") || pick.getAttribute("data-v"));
+      if (note) s = (s || "(" + id + ")") + (s ? ", " : " ") + "note: " + note;
+      if (s) parts.push(s);
+    });
+    var acked = q(".ack input:checked").map(function (c) { return "(" + c.getAttribute("data-id") + ")"; });
+    if (acked.length) parts.push(acked.join(", ") + " ok");
+    var ta = doc.getElementById("reply-text");
+    ta.value = parts.join("; ");
+    doc.getElementById("reply-hint").textContent = "";
+    dirty = parts.length > 0;
+  }
+
+  // Copy: execCommand only; navigator.clipboard is denied in sandboxed hosts.
+  doc.getElementById("reply-copy").addEventListener("click", function () {
+    var ta = doc.getElementById("reply-text");
+    var hint = doc.getElementById("reply-hint");
+    if (!ta.value) { hint.textContent = "∅"; return; }
+    ta.focus(); ta.select();
+    var ok = false;
+    try { ok = doc.execCommand("copy"); } catch (e) { ok = false; }
+    hint.textContent = ok ? "✓ ⧉" : "Ctrl+C";
+    if (ok) { copied = true; if (pending) reloadNow(); }
+  });
+
+  // --- panels: remember open state on the full page only -------------------
+  q("details.panel[id]").forEach(function (d) {
+    if (store) {
+      var v = store.getItem("wb-open-" + d.id);
+      if (v !== null) d.open = v === "1";
+      d.addEventListener("toggle", function () { store.setItem("wb-open-" + d.id, d.open ? "1" : "0"); });
+    }
+  });
+
+  // --- change signal (full page only) --------------------------------------
+  var dirty = false, copied = false, pending = false, first = null;
+  var banner = doc.getElementById("wb-banner");
+  function formBusy() {
+    var a = doc.activeElement;
+    return (dirty && !copied) || (a && (a.classList.contains("note") || a.id === "reply-text"));
+  }
+  function reloadNow() {
+    if (store) store.setItem("wb-scroll", String(window.scrollY));
+    location.reload();
+  }
+  function changed() {
+    if (formBusy()) { pending = true; if (banner) banner.classList.add("show"); }
+    else reloadNow();
+  }
+  if (banner) banner.addEventListener("click", reloadNow);
+  if (store) {
+    var y = store.getItem("wb-scroll");
+    if (y !== null) { store.removeItem("wb-scroll"); window.scrollTo(0, +y); }
+  }
+  var stampSrc = doc.documentElement.getAttribute("data-stamp");
+  if (stampSrc) {
+    window.wbStamp = function (v) {
+      if (first === null) { first = v; return; }
+      if (v !== first && !pending) changed();
+    };
+    setInterval(function () {
+      var s = doc.createElement("script");
+      s.src = stampSrc + "?t=" + Date.now();
+      s.onload = s.onerror = function () { s.remove(); };
+      doc.head.appendChild(s);
+    }, 1500);
+  }
+  // Mockup only: simulate a stamp change without a stamp file.
+  var sim = doc.getElementById("mock-update");
+  if (sim) sim.addEventListener("click", function () {
+    if (formBusy()) { pending = true; banner.classList.add("show"); }
+    else { banner.textContent = "↻ ✓ (mock: form clean, reloaded)"; banner.classList.add("show"); setTimeout(function () { banner.classList.remove("show"); banner.textContent = bannerText; }, 1600); }
+  });
+  var bannerText = banner ? banner.textContent : "";
+
+  build();
+})();
+</script>
+</body></html>
