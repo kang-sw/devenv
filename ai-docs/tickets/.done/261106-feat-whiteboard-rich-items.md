@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 7c09bf51a8123768
 sage-review-design-reviewed: 7c09bf51a8123768
+completed: 2026-11-06
 ---
 
 # Whiteboard items render markdown, images, and mermaid
@@ -199,6 +200,91 @@ full page and one embed with markdown, an image, and a mermaid block to a
 scratch path for the lead to look at, including the mermaid theme in light
 and dark. No inline-HTML host is available here, so the embed's behaviour
 inside a real host is checked by the source fallback test only.
+
+### Result (6881738e2, 10da59e05) - 2026-11-06
+
+Landed:
+
+- Renderer: `internal/wswhiteboard/markdown.go` runs two goldmark (v1.8.7)
+  pipelines per page. The block pipeline has hard wraps, GFM tables, and
+  strikethrough. The inline pipeline's only block parser is the paragraph,
+  with no paragraph transformers, so `- `, `# `, fences, and `[x]: y` stay
+  literal in titles. Neither pipeline registers goldmark's HTML block or raw
+  HTML parser, so a typed tag is escaped text, and a line that starts with
+  a tag no longer swallows the markdown after it. `html.WithUnsafe` stays
+  off as a backstop. Custom renderers cover links, autolinks, images, fenced
+  code (mermaid becomes `<pre class="mermaid">`), paragraphs (a lone
+  paragraph renders without `<p>`), and the `{{nn}}` inline node. A
+  reference inside link text renders as plain `(nn)`.
+- Target allow-list (`resolveTarget`): entity references and backslash
+  escapes in a destination are resolved before its scheme is classified,
+  because goldmark leaves `Destination` raw. `fileHref` then checks the href
+  that `FileLink` returns: a relative href whose first segment holds a colon
+  gets a `./` prefix, and a decoded `#` or `?` is re-escaped. External
+  http(s) links open in a new tab.
+- Link rule injection: `View`/`ViewInput.FileLink`. `internal/mcp` passes
+  `whiteboardItemFileLink(root, whiteboardPageDir(in))`, which resolves the
+  path against the session root and then applies `whiteboardFileLink`.
+- Template, CSS, and JS: titles use `.Page.Inline`; options, rationale, and
+  the recommendation use `.Page.Block`; ack `.why` lines are inline; the
+  picked chip uses `.Page.FirstLine`. `itemData.Stacked` (`IsBlock`:
+  anything but one paragraph, or a paragraph with an image) switches the
+  options to `.opts.stack` cards (`div[role=button][tabindex=0]`).
+  `form.js` ignores clicks on links inside an option and handles Enter and
+  Space on the cards. `.md` styles were added.
+- Mermaid: the 11.17.2 `dist/mermaid.min.js` IIFE is vendored in
+  `assets/mermaid/` with its LICENSE and a README. `MermaidAsset()` names
+  it `wb-mermaid-<sha12>.js`, which matches no whiteboard GC pattern.
+  `assets/mermaid-init.js` resolves the `--wb-*` colours through a probe
+  element and `getComputedStyle`, then calls `mermaid.initialize` with
+  theme `base`, `securityLevel: "strict"`, and a `themeCSS` that maps the
+  box, store (`A:::store`), edge, and sub looks. A page loads the asset
+  only when it rendered a mermaid block (`pageData.Mermaid`, read by the
+  closing tags). `ensureWhiteboardMermaid` writes the file only when it is
+  missing, before the page that uses it, both into the board folder and
+  into `embed_dir`.
+- Playbook: `## Payload` gains one Markdown bullet, and the `options` line
+  no longer says "plain strings". The change is mirrored to wsflow (regen)
+  and Pi (copy), with manifests regenerated.
+
+Verification:
+
+- `go test ./internal/wswhiteboard`: ok. The new `markdown_test.go` covers
+  the inline-only title, block fields, raw HTML escaping, references in
+  markdown and code, the link and image allow-list (javascript:, autolink,
+  entity, data, remote, fragment, `//host`, `file://host`), that a file
+  href cannot become a scheme, hard wraps, inline ack reasons, the
+  stacking set, the picked chip's first line, and the mermaid fallback and
+  theme init. The existing embed size budget test also passes.
+- `go test ./internal/mcp`: ok. The new `whiteboard_markdown_test.go`
+  covers repository-relative links and `file:` links for an embed_dir
+  outside the repository, that the real rule never yields a scheme, and
+  that the mermaid file is written once under its hash name, referenced
+  relatively, and also written into embed_dir.
+- `go test ./...` in `agents-plugin-tool`: ok.
+  `python3 -m unittest discover agents-plugin-wsflow/tests`: ok.
+- Scratch renders, checked with headless Chromium in light and dark (the
+  dark render forces the dark media block; the headless shell ignores
+  `--force-dark-mode`), are in
+  `/tmp/claude-1000/-home-swkang-devenv/a921ec72-4ebb-4fe9-99fe-e15094718125/scratchpad/wb/`:
+  `full.html`, `embed/embed.html`, `full-light.png`, `full-dark.png`,
+  `embed-light.png`.
+
+Decisions:
+
+- Raw HTML is removed at the parser rather than escaped in a renderer. This
+  makes typed tags text and stops a leading tag from swallowing the
+  markdown after it.
+- Per the ack-row decision, an open technical or announced item's rationale
+  shows inline only in the ack row, so a diagram there shows as text. The
+  playbook bullet says so.
+- `UsesMermaid(html)` decides the asset write, so `RenderPage` keeps its
+  signature.
+- Lite review: one Critical, fixed in 10da59e05: a file named
+  `javascript:...` beside the page produced a `javascript:` href. One Minor
+  fixed: `%23` and `%3F` in file names. One Minor left open: in the inline,
+  non-stacked option layout, a link inside the native `<button>` may not be
+  clickable in some browsers.
 
 ## Sage Review Round 1 (2026-11-06)
 
