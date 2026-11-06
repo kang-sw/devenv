@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/wsdashboard"
+	"github.com/kang-sw/devenv/internal/wsinbox"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
 )
 
@@ -520,5 +522,114 @@ func seedReplyMail(t *testing.T, env []string, sessionKey, content string) {
 		return nil
 	}); err != nil {
 		t.Fatalf("seed reply queue: %v", err)
+	}
+}
+
+// seedBoardMessage holds one dashboard-page message in sessionKey's
+// board-answer inbox, where the CLI under test derives it from the same
+// cache root.
+func seedBoardMessage(t *testing.T, env []string, sessionKey, text string) {
+	t.Helper()
+	t.Setenv("WS_CACHE_HOME", cacheHomeFromEnv(t, env))
+	stateDir, err := wsdashboard.Dir("")
+	if err != nil {
+		t.Fatalf("wsdashboard.Dir: %v", err)
+	}
+	inbox := wsinbox.Dir(wsdashboard.SessionDir(stateDir, wsmailbox.ReplyID(sessionKey)))
+	if _, _, err := wsinbox.Send(inbox, wsinbox.Entry{Parts: []string{text}}, time.Now()); err != nil {
+		t.Fatalf("seed inbox: %v", err)
+	}
+}
+
+func TestMailboxWaitBoardInboxFlagWakesOnAnInboxEntry(t *testing.T) {
+	bin := buildWsMCPMailboxTestBin(t)
+	env := mailboxTestEnv(t)
+	const sessionKey = "amber-tide-fox"
+	seedBoardMessage(t, env, sessionKey, "from the page")
+
+	cmd := exec.Command(bin, "mailbox", "wait", "--session-key", sessionKey, "--timeout", "10s", "--board-inbox", "--format", "json")
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("mailbox wait --board-inbox failed: %v\n%s", err, out)
+	}
+	var got struct {
+		TimedOut bool     `json:"timed_out"`
+		Unread   int      `json:"unread"`
+		Board    int      `json:"board"`
+		Kinds    []string `json:"kinds"`
+		Rearm    struct {
+			Command string `json:"command"`
+		} `json:"rearm"`
+	}
+	if uerr := json.Unmarshal(bytes.TrimSpace(out), &got); uerr != nil {
+		t.Fatalf("invalid mailbox wait JSON: %v\n%s", uerr, out)
+	}
+	if got.TimedOut || got.Unread != 0 || got.Board != 1 || len(got.Kinds) != 1 || got.Kinds[0] != "board" {
+		t.Fatalf("mailbox wait JSON = %#v, want one board arrival", got)
+	}
+	if !strings.HasSuffix(got.Rearm.Command, " --board-inbox") {
+		t.Fatalf("re-arm command = %q, want it to keep --board-inbox", got.Rearm.Command)
+	}
+
+	text := exec.Command(bin, "mailbox", "wait", "--session-key", sessionKey, "--timeout", "10s", "--board-inbox")
+	text.Env = env
+	out, err = text.CombinedOutput()
+	if err != nil {
+		t.Fatalf("mailbox wait --board-inbox (text) failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "unread 0\nboard 1\n") {
+		t.Fatalf("text output = %q, want unread 0 then board 1", out)
+	}
+}
+
+func TestMailboxWaitBoardInboxFlagReportsBothKinds(t *testing.T) {
+	bin := buildWsMCPMailboxTestBin(t)
+	env := mailboxTestEnv(t)
+	const sessionKey = "amber-tide-fox"
+	seedReplyMail(t, env, sessionKey, "hello")
+	seedBoardMessage(t, env, sessionKey, "from the page")
+
+	cmd := exec.Command(bin, "mailbox", "wait", "--session-key", sessionKey, "--timeout", "10s", "--board-inbox", "--format", "json")
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("mailbox wait failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Unread int      `json:"unread"`
+		Board  int      `json:"board"`
+		Kinds  []string `json:"kinds"`
+	}
+	if uerr := json.Unmarshal(bytes.TrimSpace(out), &got); uerr != nil {
+		t.Fatalf("invalid mailbox wait JSON: %v\n%s", uerr, out)
+	}
+	if got.Unread != 1 || got.Board != 1 || strings.Join(got.Kinds, ",") != "mail,board" {
+		t.Fatalf("mailbox wait JSON = %#v, want mail and board", got)
+	}
+}
+
+func TestMailboxWaitWithoutBoardInboxFlagIgnoresAnInboxEntry(t *testing.T) {
+	bin := buildWsMCPMailboxTestBin(t)
+	env := mailboxTestEnv(t)
+	const sessionKey = "amber-tide-fox"
+	seedBoardMessage(t, env, sessionKey, "from the page")
+
+	cmd := exec.Command(bin, "mailbox", "wait", "--session-key", sessionKey, "--timeout", "1s", "--format", "json")
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != mailboxWaitExitTimeout {
+		t.Fatalf("mailbox wait did not time out: err=%v out=%s", err, out)
+	}
+	var got struct {
+		TimedOut bool     `json:"timed_out"`
+		Board    int      `json:"board"`
+		Kinds    []string `json:"kinds"`
+	}
+	if uerr := json.Unmarshal(bytes.TrimSpace(out), &got); uerr != nil {
+		t.Fatalf("invalid mailbox wait JSON: %v\n%s", uerr, out)
+	}
+	if !got.TimedOut || got.Board != 0 || got.Kinds == nil || len(got.Kinds) != 0 {
+		t.Fatalf("timeout JSON = %#v, want timed_out with board 0 and kinds []", got)
 	}
 }

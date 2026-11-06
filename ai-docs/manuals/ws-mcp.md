@@ -77,6 +77,10 @@ tools never depend on it. Its state lives under `<cache root>/dashboard/`:
   one file each). ws-mcp writes them from host adapter events
   (`dashboard.intake`) and from its mailbox send and recv path, only for a
   registered session; `internal/wslive` holds the schema and readers.
+- `sessions/<reply-id>/inbox/` - the board-answer inbox (`internal/wsinbox`):
+  held messages the user sent from the page, one file each; `drained/` keeps
+  the newest 20 as sent records. The adapter-only `dashboard.inbox_drain` tool
+  drains it, and `mailbox wait --board-inbox` also wakes on it (peek only).
 
 After a store write the serving ws-mcp sends `POST /nudge {reply_id,
 project}`; the daemon also re-reads every session every 30 seconds.

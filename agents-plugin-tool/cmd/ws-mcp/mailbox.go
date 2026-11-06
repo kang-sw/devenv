@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/mcp"
+	"github.com/kang-sw/devenv/internal/wsdashboard"
+	"github.com/kang-sw/devenv/internal/wsinbox"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
 )
 
@@ -64,6 +66,7 @@ func mailboxWait(args []string) {
 	slug := fs.String("slug", "", `optional explicit "name@scope" to also check the named inbox for (owner-gated); omit for reply-id-only (env-less) wait`)
 	timeout := fs.Duration("timeout", 0, "maximum time to block (e.g. 5m); 0 blocks until mail arrives")
 	format := fs.String("format", "", `output format: text or json`)
+	boardInbox := fs.Bool("board-inbox", false, "also wake on a message the user sent from the dashboard page (held in the session's board-answer inbox); the adapter collects it with the adapter-only dashboard.inbox_drain tool, and this wait only peeks. The result says which kind arrived: mail, board, or both")
 	_ = fs.Parse(args)
 
 	*sessionKey = strings.TrimSpace(*sessionKey)
@@ -75,6 +78,13 @@ func mailboxWait(args []string) {
 	}
 
 	target := wsmailbox.WaitTarget{SessionKey: *sessionKey, Root: defaultRoot(*root), Slug: strings.TrimSpace(*slug)}
+	if *boardInbox {
+		stateDir, err := wsdashboard.Dir("")
+		if err != nil {
+			fatal("mailbox wait", err)
+		}
+		target.InboxDir = wsinbox.Dir(wsdashboard.SessionDir(stateDir, wsmailbox.ReplyID(*sessionKey)))
+	}
 
 	// One-time startup diagnostic (never repeated in the poll loop): warn
 	// when an explicit --slug cannot actually be reached, so a wait that
@@ -147,7 +157,7 @@ func mailboxWait(args []string) {
 	// not only at read time. mcp.CLICommandName() prefers the declared shim
 	// name (a wait launched through the shim re-arms through it) and falls back
 	// to os.Args[0].
-	rearmCmd := buildMailboxWaitRearmCommand(mcp.CLICommandName(), *sessionKey, target.Slug, *timeout)
+	rearmCmd := buildMailboxWaitRearmCommand(mcp.CLICommandName(), *sessionKey, target.Slug, *timeout, *boardInbox)
 
 	select {
 	case out := <-done:
@@ -155,7 +165,7 @@ func mailboxWait(args []string) {
 		if out.err != nil {
 			fatal("mailbox wait", out.err)
 		}
-		emitMailboxWaitResult(out.result, *format, rearmCmd)
+		emitMailboxWaitResult(out.result, *format, rearmCmd, *boardInbox)
 	case <-ctx.Done():
 		clearMarker()
 		fmt.Fprintln(os.Stderr, "ws-mcp mailbox wait: interrupted")
@@ -163,7 +173,7 @@ func mailboxWait(args []string) {
 	}
 }
 
-func emitMailboxWaitResult(result wsmailbox.WaitResult, format, rearmCmd string) {
+func emitMailboxWaitResult(result wsmailbox.WaitResult, format, rearmCmd string, boardInbox bool) {
 	// The re-arm reminder rides every return path (mail or timeout): a single
 	// wait covers one wake, so the caller must re-run to keep listening. In
 	// JSON it is a structured `rearm` object rather than prose, so machine
@@ -173,7 +183,7 @@ func emitMailboxWaitResult(result wsmailbox.WaitResult, format, rearmCmd string)
 	if result.TimedOut {
 		if outputJSON(format) {
 			printJSONOrFatal("mailbox wait", map[string]any{
-				"timed_out": true, "unread": 0,
+				"timed_out": true, "unread": 0, "board": 0, "kinds": []string{},
 				"named": []wsmailbox.Envelope{}, "reply": []wsmailbox.Envelope{},
 				"rearm": rearm,
 			}, nil)
@@ -185,6 +195,15 @@ func emitMailboxWaitResult(result wsmailbox.WaitResult, format, rearmCmd string)
 	}
 
 	total := result.Total()
+	// kinds says which kind of arrival woke the wait; a board entry is only
+	// peeked here, the adapter drains it.
+	kinds := []string{}
+	if total > 0 {
+		kinds = append(kinds, "mail")
+	}
+	if result.Board > 0 {
+		kinds = append(kinds, "board")
+	}
 	if outputJSON(format) {
 		// Normalize a nil (empty) slice to "[]" rather than "null": this
 		// JSON shape is a declared new type contract for future adapters,
@@ -200,6 +219,8 @@ func emitMailboxWaitResult(result wsmailbox.WaitResult, format, rearmCmd string)
 		printJSONOrFatal("mailbox wait", map[string]any{
 			"timed_out": false,
 			"unread":    total,
+			"board":     result.Board,
+			"kinds":     kinds,
 			"named":     named,
 			"reply":     reply,
 			"rearm":     rearm,
@@ -207,6 +228,9 @@ func emitMailboxWaitResult(result wsmailbox.WaitResult, format, rearmCmd string)
 		return
 	}
 	fmt.Printf("unread %d\n", total)
+	if boardInbox && result.Board > 0 {
+		fmt.Printf("board %d\n", result.Board)
+	}
 	for _, m := range result.Named {
 		printMailboxEnvelope(m)
 	}
@@ -226,15 +250,18 @@ const mailboxRearmNudge = "one mailbox wait covers a single wake; re-run the re-
 // buildMailboxWaitRearmCommand reprints the command name (bin, from
 // mcp.CLICommandName) plus the wait-scoping flags this invocation received,
 // producing a command that re-arms an identical wait. It emits only the
-// resolved flags — --session-key (always required), and --slug / --timeout
-// when set.
-func buildMailboxWaitRearmCommand(bin, sessionKey, slug string, timeout time.Duration) string {
+// resolved flags — --session-key (always required), and --slug / --timeout /
+// --board-inbox when set.
+func buildMailboxWaitRearmCommand(bin, sessionKey, slug string, timeout time.Duration, boardInbox bool) string {
 	parts := []string{bin, "mailbox", "wait", "--session-key", sessionKey}
 	if slug != "" {
 		parts = append(parts, "--slug", slug)
 	}
 	if timeout > 0 {
 		parts = append(parts, "--timeout", timeout.String())
+	}
+	if boardInbox {
+		parts = append(parts, "--board-inbox")
 	}
 	return strings.Join(parts, " ")
 }
