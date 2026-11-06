@@ -598,47 +598,11 @@
     "261105-bug-sage-stamp-move-next-instruction-loop": {
       "registered_at": "2026-11-05T00:41:52Z"
     },
-    "261105-feat-lead-ticket-review-auto-ack": {
-      "registered_at": "2026-11-05T00:41:05Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-05T01:53:32Z",
-        "impl": {
-          "branch": "impl/develop/game-ion-blend"
-        }
-      }
-    },
-    "261105-feat-whiteboard-explicit-item-ref-syntax": {
-      "registered_at": "2026-11-04T21:59:52Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-05T00:37:26Z",
-        "impl": {
-          "branch": "impl/develop/crumb-shame-aim"
-        }
-      }
-    },
-    "261105-feat-whiteboard-knob-harness-and-session-scope": {
-      "registered_at": "2026-11-05T01:03:28Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-05T02:12:03Z",
-        "impl": {
-          "branch": "impl/develop/icing-corny-theft"
-        }
-      }
-    },
     "261105-feat-whiteboard-lead-confirmed-status": {
       "registered_at": "2026-11-05T01:20:45Z"
+    },
+    "261106-feat-whiteboard-board-text-language": {
+      "registered_at": "2026-11-06T02:04:15Z"
     }
   }
 }
