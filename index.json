@@ -669,7 +669,14 @@
       "registered_at": "2026-11-06T08:59:54Z"
     },
     "261106-feat-ws-dashboard-daemon-core": {
-      "registered_at": "2026-11-06T08:59:44Z"
+      "registered_at": "2026-11-06T08:59:44Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-06T09:59:56Z"
+      }
     },
     "261106-feat-ws-dashboard-live-snapshot-pi": {
       "registered_at": "2026-11-06T08:59:50Z"
