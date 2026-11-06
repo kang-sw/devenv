@@ -52,6 +52,14 @@ type View struct {
 	// file: links there and a relative path would resolve against the
 	// server's URL, not the session root. FileLink is then unused.
 	FileText func(path string) string
+	// ImageSrc, when set on a page with FileText, serves a file image: an
+	// image whose destination is a file target (a relative or absolute path,
+	// a drive path, or a file: URL) renders as <img src> with the src
+	// ImageSrc returns for the path, and the destination's own query and
+	// fragment are dropped. An empty result leaves the image to FileText's
+	// path text (or FileLink's href without FileText); links and autolinks
+	// never use it.
+	ImageSrc func(path string) string
 }
 
 // TopicView is one topic block.
@@ -153,9 +161,10 @@ type ViewInput struct {
 	Layout  Layout
 	ReplyID string
 	Panels  []Panel
-	// FileLink and FileText are copied to the View.
+	// FileLink, FileText, and ImageSrc are copied to the View.
 	FileLink func(path string) string
 	FileText func(path string) string
+	ImageSrc func(path string) string
 }
 
 // BuildView derives a page view from state.
@@ -169,6 +178,7 @@ func BuildView(state *State, in ViewInput) View {
 		Stored:   map[int]bool{},
 		FileLink: in.FileLink,
 		FileText: in.FileText,
+		ImageSrc: in.ImageSrc,
 	}
 	for _, item := range state.Items {
 		view.Stored[item.ID] = true

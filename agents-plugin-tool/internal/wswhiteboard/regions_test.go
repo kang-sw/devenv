@@ -81,6 +81,34 @@ func TestFileTextRendersFileTargetsAsPathText(t *testing.T) {
 	}
 }
 
+// TestImageSrcServesFileImages pins the served-image rule: with FileText and
+// ImageSrc set, a file image renders as <img src> carrying the ImageSrc
+// result (its query and fragment survive escaping, the destination's own
+// suffix is dropped), an image whose ImageSrc result is empty keeps the
+// path text, and a file link still renders path text.
+func TestImageSrcServesFileImages(t *testing.T) {
+	st := &State{Seq: 2, SettleSeq: 1}
+	st.Items = []Item{{ID: 1, Class: ClassPolicy, Topic: "t", Title: "files", Status: StatusOpen, Options: []string{"a", "b"},
+		Rationale: "![diagram](shots/a.png?x=1#frag)\n\n![outside](/abs/b.png)\n\n[the plan](shots/a.png)"}}
+	imageSrc := func(p string) string {
+		if p == "shots/a.png" {
+			return "/s/r/image?path=shots%2Fa.png"
+		}
+		return ""
+	}
+	out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r",
+		FileText: func(p string) string { return "REL:" + p }, ImageSrc: imageSrc}))
+	wantAll(t, out,
+		`<img src="/s/r/image?path=shots%2Fa.png" alt="diagram">`,
+		`<span class="img-text">outside <code class="fpath">REL:/abs/b.png</code></span>`,
+		`the plan <code class="fpath">REL:shots/a.png</code>`,
+	)
+	wantNone(t, out, "x=1", "#frag", `<a href="/s/`)
+	if strings.Count(out, "<img") != 1 {
+		t.Errorf("only the served image renders as <img>:\n%s", out)
+	}
+}
+
 // TestPanelRowPathText pins a linkless row's path: shown after its text.
 func TestPanelRowPathText(t *testing.T) {
 	panels := []Panel{{ID: "tickets", Title: "Tickets", Icon: "board", Rows: []PanelRow{

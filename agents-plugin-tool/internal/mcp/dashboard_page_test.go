@@ -87,13 +87,17 @@ func TestDashboardReadPageServesTheBoard(t *testing.T) {
 	writeTicket(t, f.root, "ready", "261101-feat-ready-one", "Ready one")
 	writeTicket(t, f.root, "todo", "261102-feat-todo-one", "Todo one")
 	inside := filepath.ToSlash(filepath.Join(f.root, "docs", "inside.md"))
-	f.update(t, fmt.Sprintf(`{"add":[{"class":"policy","topic":"t","title":"files","options":["a","b"],"rationale":"see [the plan](./ai-docs/plan.md) and [inside](%s) and ![shot](shots/a.png)"}]}`, inside))
+	outside := filepath.ToSlash(filepath.Join(t.TempDir(), "out.png"))
+	f.update(t, fmt.Sprintf(`{"add":[{"class":"policy","topic":"t","title":"files","options":["a","b"],"rationale":"see [the plan](./ai-docs/plan.md) and [inside](%s) and ![shot](shots/a.png) and ![away](%s)"}]}`, inside, outside))
 	page = readPageOK(t, src, reg)
 	html := string(page.Board.Board) + string(page.Board.Panels)
 	for _, want := range []string{
 		`the plan <code class="fpath">ai-docs/plan.md</code>`,
 		`inside <code class="fpath">docs/inside.md</code>`,
-		`<code class="fpath">shots/a.png</code>`,
+		// An image inside the root is the image route; one outside it stays
+		// path text.
+		`<img src="/s/` + reg.ReplyID + `/image?path=shots%2Fa.png" alt="shot">`,
+		`<span class="img-text">away <code class="fpath">` + outside + `</code></span>`,
 		`<code class="fpath">ai-docs/tickets/ready/261101-feat-ready-one.md</code>`,
 		`<code class="fpath">ai-docs/tickets/todo/261102-feat-todo-one.md</code>`,
 		"1 ready, 1 todo", // the full layout's ticket count
@@ -105,8 +109,9 @@ func TestDashboardReadPageServesTheBoard(t *testing.T) {
 	if strings.Contains(html, "file:") {
 		t.Error("served page carries a file: URL")
 	}
+	imageRoute := "/s/" + reg.ReplyID + "/image?path="
 	for _, m := range hrefPattern.FindAllStringSubmatch(html, -1) {
-		if !strings.HasPrefix(m[1], "#") && !strings.HasPrefix(m[1], "http://") && !strings.HasPrefix(m[1], "https://") {
+		if !strings.HasPrefix(m[1], "#") && !strings.HasPrefix(m[1], "http://") && !strings.HasPrefix(m[1], "https://") && !strings.HasPrefix(m[1], imageRoute) {
 			t.Errorf("served page carries a relative reference %q", m[0])
 		}
 	}
