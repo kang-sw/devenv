@@ -26,15 +26,18 @@
       });
     });
   });
+  // Size a note textarea to its content; scrollHeight is 0 while hidden.
+  function grow(n) { n.style.height = "auto"; if (n.scrollHeight) n.style.height = n.scrollHeight + "px"; }
   q(".note-toggle").forEach(function (t) {
     t.addEventListener("click", function () {
       var n = t.closest(".card, .arow").querySelector(".note");
-      n.hidden = !n.hidden; if (!n.hidden) n.focus();
+      n.hidden = !n.hidden; if (!n.hidden) { grow(n); n.focus(); }
     });
   });
   q(".card.assumed .btn[data-v=no]").forEach(function (b) {
-    b.addEventListener("click", function () { var n = b.closest(".card").querySelector(".note"); n.hidden = false; n.focus(); });
+    b.addEventListener("click", function () { var n = b.closest(".card").querySelector(".note"); n.hidden = false; grow(n); n.focus(); });
   });
+  q(".note").forEach(function (el) { el.addEventListener("input", function () { grow(el); }); });
   q(".note, .ack input").forEach(function (el) { el.addEventListener("input", build); el.addEventListener("change", build); });
   // Bulk acknowledge: checks every ack row and confirms every assumed card;
   // an assumed card already marked "no" keeps that answer. Policy items stay manual.

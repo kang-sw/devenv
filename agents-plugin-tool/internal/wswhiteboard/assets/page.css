@@ -124,7 +124,8 @@ a { color: var(--wb-primary); }
 .opt.static:hover { background: var(--wb-opt); }
 .rec-line { margin-top: 8px; font-size: 12.5px; color: var(--wb-muted-fg); overflow-wrap: anywhere; }
 .rec-line b { color: var(--wb-accent-policy); display: inline-flex; align-items: center; gap: 2px; margin-right: 4px; }
-.note { width: 100%; margin-top: 8px; font: inherit; color: inherit; background: var(--wb-card); border: 0; border-bottom: 2px solid var(--wb-muted-fg); border-radius: 6px 6px 0 0; padding: 6px 9px; }
+.note { width: 100%; margin-top: 8px; font: inherit; color: inherit; background: var(--wb-card); border: 0; border-bottom: 2px solid var(--wb-muted-fg); border-radius: 6px 6px 0 0; padding: 6px 9px; resize: none; overflow: hidden; display: block; line-height: 1.4; }
+.note[hidden] { display: none; }
 .note:focus { outline: none; border-bottom-color: var(--wb-primary); }
 .read { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; font-size: 13.5px; }
 .opts + .read { margin-top: 8px; }

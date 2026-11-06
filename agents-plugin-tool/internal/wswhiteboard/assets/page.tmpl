@@ -34,17 +34,17 @@
   <div class="cbar"><span class="id">{{.Label}}</span><span class="cls">policy</span>{{template "newdot" .}}<span class="title">{{template "text" (.Parts .Title)}}</span><button class="btn mini note-toggle" title="note">{{icon "pen"}}</button></div>
   <div class="cbody">{{template "ctx" .}}{{template "links" .}}{{with .Options}}<div class="opts">{{range .}}<button class="opt{{if .Recommended}} rec{{end}}" data-opt="{{.Letter}}" aria-pressed="false"><span class="k">{{.Letter}}{{if .Recommended}}{{icon "star"}}{{end}}</span><span>{{template "text" ($.Parts .Text)}}</span></button>{{end}}</div>{{end}}{{if .RecLetter}}
   <div class="rec-line" title="recommendation"><b>{{icon "star"}}{{.RecLetter}}</b> {{template "text" (.Parts .RecText)}}</div>{{end}}
-  <input class="note" placeholder="✎" title="note" hidden></div>
+  <textarea class="note" rows="1" placeholder="✎" title="note" hidden></textarea></div>
 </div>{{end}}
 
 {{define "assumed"}}<div class="card assumed" id="item-{{.ID}}" data-id="{{.Num}}">
   <div class="cbar"><span class="id">{{.Label}}</span><span class="cls">assumed</span>{{template "newdot" .}}<span class="title">{{template "text" (.Parts .Title)}}</span>
     <span class="actions"><button class="btn mini note-toggle" title="note">{{icon "pen"}}</button><button class="btn mini" data-v="ok" aria-pressed="false" title="confirm">{{icon "check"}}</button><button class="btn mini" data-v="no" aria-pressed="false" title="correct">{{icon "x"}}</button></span></div>
   <div class="cbody">{{template "ctx" .}}{{with .Options}}<div class="opts">{{range .}}<span class="opt static{{if .Recommended}} rec{{end}}{{if .Picked}} picked{{end}}"><span class="k">{{.Letter}}{{if .Recommended}}{{icon "star"}}{{end}}</span><span>{{template "text" ($.Parts .Text)}}</span></span>{{end}}</div>{{end}}<div class="read"><span class="lead-read" title="the lead's reading">{{icon "arrow"}}<b>{{if .AnswerLetter}}{{.AnswerLetter}}{{else}}{{template "text" (.Parts .Answer)}}{{end}}</b>{{if .AnswerLetter}}{{with .AnswerText}} {{template "text" ($.Parts .)}}{{end}}{{end}}</span>{{with .AnswerQuote}}<span class="quote" title="your words">“{{.}}”</span>{{end}}</div>{{template "links" .}}
-  <input class="note" placeholder="✎" title="correction" hidden></div>
+  <textarea class="note" rows="1" placeholder="✎" title="correction" hidden></textarea></div>
 </div>{{end}}
 
-{{define "ack"}}<div class="arow" id="item-{{.ID}}" data-id="{{.Num}}"><label class="ack"><input type="checkbox" data-id="{{.Num}}"><span class="id">{{.Label}}</span><span class="tag {{.Class}}">{{.Class}}</span>{{template "newdot" .}}<span class="atext"><span>{{template "text" (.Parts .Title)}}</span>{{range lines .Rationale}}<span class="why">{{template "text" ($.Parts .)}}</span>{{end}}{{template "links" .}}</span></label><button class="btn mini note-toggle" title="note">{{icon "pen"}}</button><input class="note" placeholder="✎" title="note" hidden></div>{{end}}
+{{define "ack"}}<div class="arow" id="item-{{.ID}}" data-id="{{.Num}}"><label class="ack"><input type="checkbox" data-id="{{.Num}}"><span class="id">{{.Label}}</span><span class="tag {{.Class}}">{{.Class}}</span>{{template "newdot" .}}<span class="atext"><span>{{template "text" (.Parts .Title)}}</span>{{range lines .Rationale}}<span class="why">{{template "text" ($.Parts .)}}</span>{{end}}{{template "links" .}}</span></label><button class="btn mini note-toggle" title="note">{{icon "pen"}}</button><textarea class="note" rows="1" placeholder="✎" title="note" hidden></textarea></div>{{end}}
 
 {{define "srow"}}<div class="srow{{if .Void}} void{{end}}" id="item-{{.ID}}"><span class="id"{{if .Void}} title="{{.Status}}"{{end}}>{{.Label}}</span>{{template "newdot" .}}<span class="stext"><b>{{template "text" (.Parts .Title)}}</b>{{with .PickedOption}} <span class="pick" title="picked"><span class="k">{{.Letter}}</span>{{template "text" ($.Parts .Text)}}</span>{{end}}{{with .Reading}} <span class="ans" title="the lead's reading">{{template "text" ($.Parts .)}}</span>{{end}}{{with .AnswerQuote}} <span class="quote" title="your words">“{{.}}”</span>{{end}}{{template "links" .}}</span></div>{{end}}
 
