@@ -15,10 +15,14 @@ import (
 )
 
 // envConfigManifests lists adapter key manifest paths, separated by the
-// platform path-list separator (":" on POSIX, ";" on Windows). An adapter's
-// launcher sets it to its own package's manifest so the ws-mcp instance it
-// starts can validate, catalog, and read that adapter's keys. Only an instance
-// launched with the variable knows those keys; that scoping is intended.
+// platform path-list separator (":" on POSIX, ";" on Windows) or by ";" on
+// every platform. A launcher whose config file is the same on every platform
+// (a plugin manifest's env block) cannot write the platform separator, so ";"
+// is accepted everywhere; a POSIX path containing ";" is therefore not
+// supported. An adapter's launcher sets it to its own package's manifests so
+// the ws-mcp instance it starts can validate, catalog, and read those keys.
+// Only an instance launched with the variable knows those keys; that scoping
+// is intended.
 const envConfigManifests = "WS_MCP_CONFIG_MANIFESTS"
 
 // configManifestSchemaVersion is the only manifest schema_version accepted.
@@ -104,7 +108,7 @@ func loadDeclaredConfig(listValue string) declaredConfig {
 	out := declaredConfig{keys: map[string]declaredConfigKey{}}
 	builtinKeys := builtinConfigKeySet()
 	namespaces := map[string]string{}
-	for _, path := range filepath.SplitList(listValue) {
+	for _, path := range splitManifestList(listValue) {
 		path = strings.TrimSpace(path)
 		if path == "" {
 			continue
@@ -118,6 +122,16 @@ func loadDeclaredConfig(listValue string) declaredConfig {
 		for _, k := range keys {
 			out.keys[k.Key] = k
 		}
+	}
+	return out
+}
+
+// splitManifestList splits an envConfigManifests value on ";" and then on the
+// platform path-list separator.
+func splitManifestList(listValue string) []string {
+	var out []string
+	for _, part := range strings.Split(listValue, ";") {
+		out = append(out, filepath.SplitList(part)...)
 	}
 	return out
 }

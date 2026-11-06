@@ -53,6 +53,8 @@ func main() {
 		toolsCommand(os.Args[2:])
 	case "call":
 		callCommand(os.Args[2:])
+	case "dashboard":
+		dashboardCommand(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -60,7 +62,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|runtime|serve|smoke|config|path|git|tickets|mailbox>")
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|runtime|serve|smoke|config|path|git|tickets|mailbox|dashboard>")
 }
 
 func doctor(args []string) {
@@ -98,6 +100,9 @@ func serve(args []string) {
 		})
 		os.Exit(0)
 	})
+	// The dashboard daemon is optional: the check runs beside the MCP loop and
+	// never delays or fails it.
+	go serveDashboard(server)
 	if err := server.ServeStdio(context.Background(), os.Stdin, os.Stdout); err != nil {
 		fmt.Fprintf(os.Stderr, "ws-mcp serve: %v\n", err)
 		os.Exit(1)
