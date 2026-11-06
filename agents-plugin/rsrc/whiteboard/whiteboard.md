@@ -35,6 +35,8 @@ shows HTML inline. Workers and subagents do not use it.
 
 ## Payload
 
+Write board text (titles, options, rationale, recommendations, answer readings, and the Now fragment) in the conversation language, the `workflow.lang` value when set; item IDs, class and status tags, `ok`/`no` answers, and option letters stay as written.
+
 ```text
 whiteboard.update payload: {
   add?:          [{id?, class, topic, title, options?, recommendation?, rationale?, links?}],
