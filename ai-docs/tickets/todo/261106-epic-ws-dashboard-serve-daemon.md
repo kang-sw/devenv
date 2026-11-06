@@ -221,8 +221,12 @@ with browser interaction folded into the core.
   stays in the terminal. (241) Mail the lead sends or receives shows as a
   line, `→ peer: first line` or `← peer: first line`, linked to the peer's
   page and expanding to the full body from the mailbox history ring; a turn
-  that incoming mail starts carries a `mail` origin tag. (260)
-  Rejected: showing mail in the mailbox panel only (260).
+  that incoming mail starts carries a `mail` origin tag. (260) The history
+  ring keeps 10 messages per session, so a mail line whose message has left
+  it shows its first line with no expansion. (283)
+  Rejected: showing mail in the mailbox panel only (260); copying mail
+  bodies into the conversation ring so every line expands (two stores of
+  the same body, and unbounded entry size) (283).
   Rejected: showing the reply text only once each message ends (250 b);
   keeping the reply text in the terminal only (241 c).
 - **No session control.** The live view offers no control over sessions or
@@ -312,8 +316,12 @@ with browser interaction folded into the core.
 - **Peer retention.** The group shows every live peer and the last 5 ended
   peers, ordered by last exchange. (262) A peer this daemon does not serve
   counts as live only while its mailbox presence record is alive; otherwise
-  it falls under the ended cap. (276) Rejected: always listing unserved
-  peers as live, which grows without bound from stale contacts.
+  it falls under the ended cap. (276) For an `id:<reply-id>` peer, which has
+  no presence record, the reply-id registry entry is that record: the peer
+  is live while its entry exists, until the stale-entry reap removes it.
+  (282) Rejected: always listing unserved peers as live, which grows
+  without bound from stale contacts; treating every unserved reply-id peer
+  as ended, which hides a live co-lead reached by reply-id (282).
 - **Peers on hosts without an adapter.** The group works for any host; a
   peer without an adapter, such as Codex, shows no phase. (263)
 
@@ -376,30 +384,30 @@ with browser interaction folded into the core.
 
 ## Prior Decisions
 
-- df8336ce (2026-08-01, commit): "user closed the dashboard topic definitively" (recorded on 260802-research-ws-pi-native-framework: "Dashboard — closed topic, not absorbed") — bearing: contradiction-candidate
+- 261106-feat-mailbox-history-ring (2026-11-06, Decisions): "One ring per session, both directions, full bodies. Each session keeps the last 10 messages it exchanged, received and sent together." — bearing: constrains
+- 261106-feat-whiteboard-dashboard-panels (2026-11-06, Decisions): "Mailbox panel. The session's own address. Unread count... Whether the session is waiting for mail, from the listening marker... Correspondents with their last exchange time" — bearing: supports
+- 261022-feat-mailbox-recent-peers-and-correspondents (2026-10-22, Decisions): "Correspondents: reply-ids limited to the caller's own exchange history... only the addresses the calling session (its session key) has actually exchanged mail with" — bearing: supports
+- df8336ce (2026-08-01, commit): "user closed the dashboard topic definitively" (recorded on 260802-research-ws-pi-native-framework: "Dashboard — closed topic, not absorbed"); the Audience section names this reopening and answers it with (194) — bearing: constrains
 - 260730-chore-ws-dashboard-drop-sweep (2026-08-01, commit 41157331): "recovery remains archive/ws-dashboard; no dashboard artifact is retained in the live docs tree." — bearing: constrains
-- 261030-feat-pi-orca-subagent-lifecycle-emitter (2026-10-31, commit 3a13e853): "Owner decision 2026-10-31: the Pi peer stays a terminal CLI session, so the structured-Orca emitter (no supported delivery path, see ## Blocked) is no longer wanted." — bearing: supports
 - 261028-feat-pi-agent-widget-batch-row-redesign (2026-10-28, commit 1b6079a5): "The generating state lives on AgentBatchBuffer.generating, outside the capped batches list, and batchViews appends its view last with the seq the batch would take" — bearing: constrains
-- 261028-feat-pi-agent-widget-expanded-mode (2026-10-28, commit 19446d2b): "Two Minor summary-path findings (folded agents still summarized; relaunched intermediate resets batch sequence) are left as follow-ups" — bearing: constrains
 - 261028-feat-claude-mod-status-band (2026-10-28, Decisions): "Refresh is event-driven: usage on session.measure, model and effort on main-loop turn.step, git on tool.call (2 s throttle) and turn.complete" — bearing: supports
-- 260525-feat-ws-dashboard-multi-server-gateway (2026-05-25, Decisions): "The browser always talks to the local dashboard daemon." — bearing: supports
 - 260515-ws-web-daemon-foundation (2026-05-15, commit 03442cdf): "made the dashboard daemon shell caller-visible: `ws-dashboard serve`, loopback default, one-time pairing, owner session cookie, gated health/UI/fallback routes" — bearing: supports
 
 ## Route Facts
 
 | fact | value | evidence |
 |---|---|---|
-| scope.span | multi-file | agents-plugin-pi/src/agent-batches.ts is the only path named; the children also reach agents-plugin-tool/cmd/ws-mcp, agents-plugin-tool/internal/mcp, agents-plugin-tool/internal/wswhiteboard, agents-plugin/hooks/claude-mod, and the Pi adapter |
-| scope.surface | cross-module | new ws-mcp daemon mode, HTTP routes /, /s/reply-id, /health, /nudge, a new inbox-drain MCP tool, a new mailbox wait flag, adapter injection paths |
-| scope.new_public_symbol | yes | daemon mode of ws-mcp, /health and /nudge routes, inbox-drain MCP tool, mailbox wait inbox flag |
-| scope.new_type_contract | yes | endpoint file, machine root registry, per-session live snapshot, board-answer inbox entry, conversation ring entry, nudge body |
-| scope.test_surface | new-files | no daemon code or tests exist; existing agents-plugin-tool/internal/mcp/whiteboard_panels_test.go, mailbox_history_test.go, agents-plugin-pi/test/agent-batches.test.ts would extend |
-| complexity.reuse_points | confirmed | wswhiteboard.View at agents-plugin-tool/internal/wswhiteboard/view.go#L20, panel providers in agents-plugin-tool/internal/mcp/whiteboard_panels.go, per-entry ring in mailbox_history.go, BatchView and caps in agents-plugin-pi/src/agent-batches.ts#L34-L40, ws-mcp mailbox wait in agents-plugin-tool/cmd/ws-mcp/mailbox.go |
+| scope.span | multi-file | agents-plugin-pi/src/agent-batches.ts is the only path named; the children also reach agents-plugin-tool/cmd/ws-mcp, agents-plugin-tool/internal/mcp, agents-plugin-tool/internal/wsmailbox, agents-plugin-tool/internal/wswhiteboard, agents-plugin/hooks/claude-mod, and the Pi adapter |
+| scope.surface | cross-module | new ws-mcp dashboard subcommand, HTTP routes /, /s/reply-id, /health, /nudge, a new inbox-drain MCP tool, a new mailbox wait flag, adapter injection paths |
+| scope.new_public_symbol | yes | ws-mcp dashboard subcommand, /health and /nudge routes, inbox-drain MCP tool, mailbox wait inbox flag |
+| scope.new_type_contract | yes | endpoint file, machine root registry, per-session live snapshot with lead root and peer group, board-answer inbox entry with merged held text, conversation ring entry with mail origin tag, nudge body |
+| scope.test_surface | new-files | no daemon code or tests exist; existing agents-plugin-tool/internal/mcp/whiteboard_panels_test.go, mailbox_history_test.go, mailbox_correspondents_test.go, agents-plugin-pi/test/agent-batches.test.ts would extend |
+| complexity.reuse_points | confirmed | wswhiteboard.View at agents-plugin-tool/internal/wswhiteboard/view.go#L20, panel providers in agents-plugin-tool/internal/mcp/whiteboard_panels.go, mailbox history ring with direction and full body at agents-plugin-tool/internal/mcp/mailbox_history.go#L36-L59, Presence.Owner at agents-plugin-tool/internal/wsmailbox/store.go#L65-L76, ReplyID and ReplyEntry.Contacts at agents-plugin-tool/internal/wsmailbox/replyid.go#L26-L57, mailboxPresenceLive at agents-plugin-tool/internal/mcp/mailbox_runtime.go#L164-L173, BatchView caps at agents-plugin-pi/src/agent-batches.ts#L34-L40, ws-mcp mailbox wait in agents-plugin-tool/cmd/ws-mcp/mailbox.go |
 | complexity.side_effect_risk | high | detached process spawn, OS file locks, a network listener, and injection of messages with user authority into live sessions |
-| risk.correctness | high | daemon lifecycle and replacement caused the dropped MVP's bugs f55de2d62, bff07cafb, e6caac0dc; held-message merge and cancel race against the adapter drain |
-| risk.fit | moderate | the dashboard topic was closed on 2026-08-01 per df8336ce, and ws-mcp already has a serve subcommand that is the stdio MCP server at agents-plugin-tool/cmd/ws-mcp/main.go#L80-L105 |
-| risk.test | high | cross-platform flock and LockFileEx, SSE region swaps in a browser, and the Claude adapter event probe need live hosts |
-| risk.security_or_contract | high | LAN access token, user-authority message injection, and the project-root containment of the image route |
+| risk.correctness | high | daemon lifecycle and replacement caused the dropped MVP's bugs f55de2d62, bff07cafb, e6caac0dc; held-message merge and cancel race against the adapter drain; peer resolution and liveness read mailbox stores other sessions write |
+| risk.fit | moderate | the dashboard topic was closed on 2026-08-01 per df8336ce; ws-mcp serve is the stdio MCP entry at agents-plugin-tool/cmd/ws-mcp/main.go#L80-L105; both prerequisite tickets are in .done |
+| risk.test | high | cross-platform flock and LockFileEx, SSE region swaps and localStorage state in a browser, and the Claude adapter event probe need live hosts |
+| risk.security_or_contract | high | LAN access token, user-authority message injection, project-root containment of the image route, and keeping session keys out of peer rows |
 
 ## Completion Criteria
 
