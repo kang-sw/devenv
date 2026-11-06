@@ -60,9 +60,16 @@ whiteboard.query payload: {topic?, status?, id?}
   minted, adopted, or been floored to. Pass a number to adopt an ID that
   exists outside the board, such as a ticket queue's; an ID the store already
   holds is refused.
-- `options`: plain strings, lettered a, b, c by position; patching `options`
+- `options`: strings, lettered a, b, c by position; patching `options`
   re-letters them, so send `recommendation` with them. `recommendation`: an
   option letter, optionally followed by `: <why>`.
+- Markdown: `title` takes inline markdown (bold, italic, code, links);
+  `options`, `rationale`, and `recommendation` take block markdown with
+  line breaks kept: lists, code blocks, tables, images, and a
+  `` ```mermaid `` fenced block drawn as a diagram. Raw HTML shows as text. A
+  link or image path is relative to the session root or absolute; images
+  are local files only, links may also be http(s). An open technical or
+  announced item shows its `rationale` inline, one line per reason.
 - `rationale`: a technical or announced item's citation or reasoning, or a
   policy item's context.
 - `links`: strings such as a ticket stem, a commit, or `supersedes {{12}}`.

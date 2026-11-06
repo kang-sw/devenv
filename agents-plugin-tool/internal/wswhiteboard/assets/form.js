@@ -8,11 +8,20 @@
   // --- answer form -------------------------------------------------------
   q(".card.policy").forEach(function (card) {
     q(".opt", card).forEach(function (btn) {
-      btn.addEventListener("click", function () {
+      function pick() {
         var on = btn.getAttribute("aria-pressed") === "true";
         q(".opt", card).forEach(function (b) { b.setAttribute("aria-pressed", "false"); });
         btn.setAttribute("aria-pressed", on ? "false" : "true");
         build();
+      }
+      // A link inside an option follows the link and picks nothing.
+      btn.addEventListener("click", function (e) { if (!e.target.closest("a")) pick(); });
+      // A stacked option card is a role="button" element, not a native
+      // button, so it takes Enter and Space itself.
+      if (btn.getAttribute("role") === "button") btn.addEventListener("keydown", function (e) {
+        if (e.target !== btn || (e.key !== "Enter" && e.key !== " ")) return;
+        e.preventDefault();
+        pick();
       });
     });
   });

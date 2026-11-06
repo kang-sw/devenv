@@ -113,6 +113,20 @@ func whiteboardFileLink(root, pageDir, target string) string {
 	return (&url.URL{Scheme: "file", Path: p}).String()
 }
 
+// whiteboardItemFileLink resolves a file path an item's markdown link or
+// image names, for a page written to pageDir: a relative path is taken from
+// the session root, the way now_path is, and a bare absolute path is used as
+// is; either then follows the panel ticket-row rule of whiteboardFileLink.
+func whiteboardItemFileLink(root, pageDir string) func(string) string {
+	return func(path string) string {
+		path = filepath.FromSlash(path)
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(root, path)
+		}
+		return whiteboardFileLink(root, pageDir, path)
+	}
+}
+
 // mailboxPanel shows the session's mailbox. The full page carries the own
 // address, the unread count, whether a wait is armed, the correspondents,
 // and the history ring; the embed carries one line, the address and the
