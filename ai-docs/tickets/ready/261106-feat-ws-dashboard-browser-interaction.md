@@ -460,6 +460,174 @@ outside it, a `..` escape, and a symlink pointing outside, then `go test
 on the LAN that the page needs the token, shows the same content as
 localhost (argument previews included), and loads a board image.
 
+### Result (5c8743c5c) - 2026-11-07
+
+Landed:
+- `internal/wsdashboard` (4f447bc64):
+  - LAN mode: `DaemonOptions.LAN` binds every interface (loopback
+    otherwise), `HealthInfo.LAN` reports it as `lan`, and `Handler()` wraps
+    the mux in `lanGuard` instead of `hostGuard` (`access.go`, new).
+  - The persisted token file `lan-token` (`access.go`).
+  - The index page's `lanbox` block for a local viewer.
+  - The image route `GET /s/<reply-id>/image?path=<p>` and `ImageSrc`
+    (`image_route.go`, new).
+  - `Ensure` now keeps or replaces a daemon through `keepRunning`, and
+    `DaemonArgs(port, lan)` appends `--lan`.
+- `dashboard.lan_enabled` (ed832861b): declared in the ws, wsflow, and Pi
+  `dashboard-config-manifest.json`, default false, `default_scope:
+  global`, and the description says only the global value applies.
+  - `internal/mcp/dashboard_config.go` registers it global-only and reads
+    it into `DashboardSettings.LAN`.
+  - `ws-mcp dashboard --lan`; `startDashboard` passes `LAN`.
+- The served-page image resolver (090f4d005): `View.ImageSrc` /
+  `ViewInput.ImageSrc` in `internal/wswhiteboard`. `fileTarget` consults
+  it for an image's file target (relative, absolute, drive path, or
+  `file:` URL). The served page passes `wsdashboard.ImageSrc(<session
+  root>, <reply-id>, path)`.
+- The ws-mcp manual's "Dashboard daemon" section and the
+  `WS_MCP_CONFIG_MANIFESTS` row (5c8743c5c).
+
+Deviation: registering the key global-only made it a registered wsconfig
+item, and the manifest namespace check treats every registered item as a
+ws-mcp built-in. That check then rejected each `dashboard.` manifest
+("collides with built-in key"). `builtinConfigKeySet` now skips the keys
+in `manifestGlobalOnlyKeys`, which holds only `dashboard.lan_enabled`. The
+manifest still owns the declaration and default; the registration only
+pins the scope.
+
+Settled:
+- **Image path resolution and containment.** `ImageSrc` puts the file's
+  path relative to the session's project root (`Registration.Project` from
+  the index), slash-separated, in `?path=`. The route resolves a relative
+  path against that root and accepts an absolute one only when it is inside
+  the root. It refuses everything else with 404, in both modes. In order:
+  - A lexical check joins and cleans the path under the root, then
+    requires `filepath.Rel` to stay inside it (no `..`, not absolute
+    after Rel). It touches no file, so a UNC or device path is refused
+    before any file call.
+  - `EvalSymlinks` resolves both the root and the file. The resolved file
+    must still be inside the resolved root by the same `Rel` check, so a
+    symlink pointing outside is refused wherever it sits.
+  - The requested name and the resolved name both need an image extension
+    (avif, bmp, gif, ico, jpeg, jpg, png, svg, webp). A `.png` symlink to
+    a non-image is refused.
+  - `os.Stat` must report a regular file before `Open`, so a directory
+    named `x.png` or a FIFO is refused without blocking.
+  - The response is served with `http.ServeContent` and carries `nosniff`,
+    `Cache-Control: no-cache`, `Referrer-Policy: no-referrer`, and the CSP
+    `default-src 'none'; style-src 'unsafe-inline'; sandbox`, so an SVG
+    cannot run script in the daemon's origin.
+
+  `ImageSrc` applies the same lexical and extension rules and returns
+  `""` for a path the route would refuse by name, so such an image stays
+  path text rather than a broken image.
+- **How the global LAN value reaches the daemon.** It travels as a spawn
+  flag, the same way the port does. `dashboard.lan_enabled` is registered
+  through `wsconfig.RegisterGlobalOnly`, so the resolver refuses a write at
+  project, repo, or session scope and ignores such a value on read.
+  `DashboardSettings` resolves it with no session.
+  - `startDashboard` passes it as `EnsureOptions.LAN`, and the spawn adds
+    `--lan`.
+  - `Ensure` reads `lan` from `/health`. A same-version daemon in the
+    other mode is replaced through the normal handoff. A newer daemon is
+    kept whatever its mode, because an older ws-mcp never replaces a newer
+    daemon. A daemon that omits the field reads as off.
+  - The daemon itself reads no config. It honors only its flag.
+- **Token transport.**
+  - Where it lives: `<dashboard dir>/lan-token`, owner-only, written by
+    temp file and rename. It is minted at a LAN-mode start when missing or
+    blank. It is read under a mutex on every check, so deleting the file
+    rotates the token at once. It is unrelated to `endpoint.json`'s
+    shutdown token, and each is refused where the other is expected.
+  - Local viewer: a request whose peer is loopback and whose Host is
+    loopback passes with no token, on every route.
+  - Every other request needs the token, on every route: pages, SSE,
+    image, Phase 1 posts, `/health`, `/nudge`, and `/shutdown`.
+    `/shutdown` still also needs the endpoint bearer.
+  - How it travels: either `?token=<t>` on the request (the bookmark the
+    index shows), or the `ws_dashboard_token` cookie. A good query token
+    sets the cookie: HttpOnly, `SameSite=Lax`, `Path=/`, 400 days. Tokens
+    are compared in constant time. A refusal is 401, and its body points to
+    the index page at localhost on the daemon's machine. An unreadable
+    token file is 503.
+  - The SSE stream, image requests, links, and posts carry the cookie.
+    EventSource cannot send a header, so a header scheme was rejected.
+    Rendered links, the SSE URL, and region payloads never carry the
+    token, so it never enters region hashes, SSE payloads, or the history
+    of in-page links.
+  - The index shows `http://<ipv4>:<port>/?token=<t>` for each non-loopback,
+    non-link-local IPv4 address, plus the token file path. It shows this
+    only to a local viewer in LAN mode, outside every SSE region.
+
+Verification:
+- `go test ./... -count=1` in `agents-plugin-tool`: all 21 packages ok,
+  exit 0 (after 5c8743c5c).
+- `go test -race -count=1` on wsdashboard and wswhiteboard: ok.
+- `go vet ./...`: ok. `GOOS=windows go vet` on wsdashboard, mcp,
+  wswhiteboard, and cmd/ws-mcp: ok.
+- gofmt: no new files listed. Three untouched files were already listed.
+- `python3 -m unittest discover agents-plugin-wsflow/tests`: 20 ok.
+- Tests:
+  - `access_test.go`: `TestLANModeGuardsEveryRoute` covers 11 routes. On
+    each it checks no token (refused), a query token, a cookie, a loopback
+    peer with a loopback Host (passes), a loopback peer with a LAN Host,
+    and a LAN peer with a loopback Host (both refused).
+  - The other `access_test.go` tests cover:
+    - the endpoint token refused as a LAN token
+    - the token surviving a restart, and a new token after the file is
+      deleted
+    - `/` showing the token to a local viewer and not to a LAN one
+    - the token reaching the SSE stream by cookie, over a real connection
+      with a LAN Host
+    - localhost mode ignoring the token
+  - `image_route_test.go`:
+    - served: a nested file under the root
+    - refused: an absolute path outside, a `..` escape, a symlink
+      pointing outside, a `.png` symlink to a non-image, a directory named
+      `dir.png`, a NUL byte, and a POST
+  - `ImageSrc` mapping and `TestImageSrcServesFileImages`: a board image
+    in a served fragment links to the image route URL.
+  - `daemon_test.go`:
+    - `TestEnsureHandoffAppliesAChangedLANMode`: toggling the mode in both
+      directions replaces the daemon through the handoff.
+    - An older ws-mcp leaves a newer daemon in the other mode alone.
+    - `DaemonArgs` adds `--lan`.
+    - LAN mode binds beyond loopback.
+  - `dashboard_config_test.go`:
+    - each package's manifest defaults the key off at global scope, with
+      a description that says only the global value applies
+    - a project-scope write is refused, and a hand-written project value
+      leaves LAN off, while a global value turns it on
+    - the key is off when undeclared
+  - `cmd/ws-mcp/dashboard_test.go`: the `--lan` spawn flag.
+- Mutation checks:
+  - Dropping the peer half of the local-viewer test fails 11 guard cases.
+  - Dropping the symlink containment check fails the `escape.png` and
+    `outlink` cases.
+- Lite review: clean, with no Critical or Important finding. The three
+  Minor findings are listed under Open.
+
+Hand checks for the lead (no second device here). With the global
+`dashboard.lan_enabled` set to true and a new ws-mcp started, from another
+device on the LAN:
+- The page without the token is 401.
+- The bookmark URL from the localhost index page opens it.
+- The page shows the same content as localhost, argument previews
+  included, and keeps streaming.
+- A board image referenced by a project-relative path loads.
+- Deleting `lan-token` makes the next request need the new token.
+
+Open (Minor review findings, accepted):
+- The cookie is host-scoped, not port-scoped. Another service on the same
+  IP receives it. Plain http offers no fix.
+- A TOCTOU window sits between the symlink resolution and `Open`.
+  Exploiting it needs write access inside the project root.
+- A registered root that itself contains a symlink refuses an absolute
+  image path written through the resolved form. This fails closed: the
+  image shows as path text.
+- In LAN mode a taken port falls back to an OS-chosen one, which breaks an
+  existing bookmark until the index shows the new URL.
+
 ## Sage Review Round 1 (2026-11-06)
 
 ### Design Reviewer — block
