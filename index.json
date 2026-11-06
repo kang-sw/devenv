@@ -657,6 +657,9 @@
     },
     "261106-feat-ws-dashboard-daemon-core": {
       "registered_at": "2026-11-06T08:59:44Z"
+    },
+    "261106-feat-ws-dashboard-live-snapshot-pi": {
+      "registered_at": "2026-11-06T08:59:50Z"
     }
   }
 }
