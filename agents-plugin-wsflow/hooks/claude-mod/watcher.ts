@@ -522,6 +522,7 @@ export function createWatcher(edges: WatcherEdges): Watcher {
       }
       if (outcome === 'timeout') {
         backoff = 0
+        emptyBoardStreak = 0
         healthy()
         continue
       }

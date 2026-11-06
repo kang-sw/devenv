@@ -1485,6 +1485,30 @@ describe('board messages', () => {
     expect(h.waits.length).toBe(3)
   })
 
+  test('an idle mail-and-board wake submits the board message, then the mail', async () => {
+    const { h } = await boardOn()
+    h.board.inbox.push('pick B')
+    await wake(h, 'both', { kind: 'mail', mail: mailA })
+    expect(h.order).toEqual(['board', 'mail'])
+    expect(h.waits.at(-1)!.board).toBe(true)
+  })
+
+  test('a turn-end drain that fails keeps the message held and re-arms with the flag, so the idle wake retries it', async () => {
+    const { h, w } = await boardOn()
+    h.turn.running = true
+    h.board.inbox.push('pick B')
+    await wake(h, 'board')
+    h.board.drainFailures.push(new Error('server gone'))
+    h.turn.running = false
+    w.turnCompleted()
+    await tick()
+    expect(h.board.submitted).toEqual([])
+    expect(h.board.inbox).toEqual(['pick B'])
+    expect(h.waits.at(-1)!.board).toBe(true)
+    await wake(h, 'board')
+    expect(h.board.submitted).toEqual([['pick B']])
+  })
+
   test('a mail-and-board wake mid-turn steers the mail and holds the board message', async () => {
     const { h, w } = await boardOn()
     h.turn.running = true
