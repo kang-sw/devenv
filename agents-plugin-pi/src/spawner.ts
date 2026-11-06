@@ -590,6 +590,14 @@ export interface RpcAgentRecord {
   descendantViews?: AgentViewModel;
   /** Parent's view of this child's subtree (`observeSubtreeChannel`): true while unknown, disconnected, or busy. */
   waitingOnChildren?: boolean;
+  /**
+   * The child's own ws session key, known only for a fork (its stage-2
+   * readiness carries it). Live-only, never persisted; the dashboard feed
+   * hands it to ws-mcp, which shows the delegate by its reply-id instead.
+   */
+  ownSessionKey?: string;
+  /** Live-only: the current work ended by its process exiting or its launch failing. Cleared when new work starts. */
+  lastRunFailed?: boolean;
   /** Last successful writer to this child. Absence is the legacy/lead default. */
   lastWriter?: "lead" | "owner";
   /** Owner-authored sends, in delivery order, used to attribute persisted user entries. */
@@ -1427,6 +1435,23 @@ function triggerAgentWidgetRefresh(): void {
   } catch {
     // best effort — see doc comment above.
   }
+  triggerAgentDashboardRefresh();
+}
+
+/**
+ * Dirty notification for the dashboard feed (`dashboard-feed.ts`), filled by
+ * `index.ts` for the owner lead: every widget transition plus every batch
+ * change, streaming deltas included. The feed samples the registry on its own
+ * throttle, so a call here is O(1).
+ */
+export const agentDashboardRefreshRef: { current: (() => void) | undefined } = { current: undefined };
+
+function triggerAgentDashboardRefresh(): void {
+  try {
+    agentDashboardRefreshRef.current?.();
+  } catch {
+    // The dashboard feed is advisory and never fails an agent lifecycle event.
+  }
 }
 
 /** Separate event seam for the footer's bounded telemetry reconciliation. */
@@ -2231,6 +2256,7 @@ function advanceWorkGeneration(record: RpcAgentRecord): void {
   record.workGeneration = (record.workGeneration ?? 0) + 1;
   record.lastText = undefined;
   record.lastTextGeneration = undefined;
+  record.lastRunFailed = undefined;
   clearTerminalFacts(record);
 }
 
@@ -2374,6 +2400,7 @@ export function markAgentExited(
   opts?: { suppressTerminal?: boolean },
 ): void {
   if (!record.client) return;
+  record.lastRunFailed = true;
   const hadQueuedSuccessor = (record.pendingQueuedWork?.length ?? 0) > 0;
   clearLiveState(record, registry);
   record.pendingQueuedWork = undefined;
@@ -2435,6 +2462,7 @@ export function pushSpawnFailed(
   record: RpcAgentRecord,
   err: unknown,
 ): void {
+  record.lastRunFailed = true;
   clearLiveState(record, registry);
   pushToLead(pi, registry, record, "ws-agent-settled", { reason: "spawn-failed", error: err instanceof Error ? err.message : String(err) }, "followUp");
   triggerAgentWidgetRefresh();
@@ -2749,6 +2777,7 @@ export function validateForkReadiness(payload: unknown, record: RpcAgentRecord, 
   }
   if (record.ownership && !containedOwnedPath(record.ownership.home, state.sessionFile)) throw new Error("ws-pi-agent: fork readiness rejected (session escaped owned home)");
   record.sessionPath = state.sessionFile;
+  record.ownSessionKey = ready.ownSessionKey;
   if (record.ownership) { record.ownership = { ...record.ownership, sessionPath: state.sessionFile }; const metadata = readOwnership(record.ownership.home); try { if (metadata) writeOwnership({ ...metadata, sessionPath: state.sessionFile, updatedAt: Date.now(), liveness: { ...metadata.liveness, lifecycle: "live", running: true, observedAt: Date.now() } }); } catch { /* durable facts remain conservative; readiness stays usable */ } }
 }
 
@@ -3253,7 +3282,10 @@ export function attachEventListener(
     }
     // Dirty mark only: the publish is throttled and returns at once while its
     // timer is pending, so this stays O(1) on the streaming-delta path.
-    if (batchChanged) scheduleAgentViewPublish();
+    if (batchChanged) {
+      scheduleAgentViewPublish();
+      if (streamingDelta) triggerAgentDashboardRefresh();
+    }
     if (e.type === "agent_start" || (batchChanged && !streamingDelta)) {
       // 260905 (live-agent widget ticket): streaming just flipped true — a
       // fresh "running" row transition. 261028: a tool batch started, ended,

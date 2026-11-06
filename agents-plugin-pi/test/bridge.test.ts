@@ -173,6 +173,26 @@ test("production bridge registration returns the pointer on a repeat playbook.re
   }
 });
 
+test("production bridge never registers the adapter-only dashboard intake as a model tool", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "ws-pi-adapter-only-"));
+  const launcher = join(directory, "launcher.py");
+  writeFileSync(launcher, `import json,sys\nfor line in sys.stdin:\n q=json.loads(line); m=q['method'];\n if m=='initialize': r={'serverInfo':{'version':${JSON.stringify(BUNDLED_RUNTIME.plugin_version)}},'capabilities':{}}\n elif m=='tools/list': r={'tools':[{'name':'playbook.read','description':'read','inputSchema':{'type':'object','properties':{}}},{'name':'dashboard.intake','description':'Adapter-only: intake','inputSchema':{'type':'object','properties':{}}}]}\n else: r={'isError':False,'content':[]}\n print(json.dumps({'jsonrpc':'2.0','id':q['id'],'result':r}),flush=True)\n`);
+  const tools = new Map<string, any>();
+  const pi = { registerTool: (definition: any) => tools.set(definition.name, definition), on() {} } as unknown as ExtensionAPI;
+  const oldRole = process.env.WS_PI_SPAWN_ROLE;
+  process.env.WS_PI_SPAWN_ROLE = "worker";
+  let handle: Awaited<ReturnType<typeof startBridge>> | undefined;
+  try {
+    handle = await startBridge(pi, { launcherPath: launcher, pluginDir: directory, runtimeJsonPath: join(dirname(fileURLToPath(import.meta.url)), "../runtime.json"), cwd: directory, toolPreviewTuiRef: { current: undefined } });
+    assert.ok(tools.has("ws__playbook_read"));
+    assert.ok(![...tools.keys()].some((name) => name.includes("dashboard")), "dashboard.intake is not a Pi tool");
+    assert.ok(!handle.wsToolNames.some((name) => name.includes("dashboard")), "nor a ws tool name a child could be granted");
+  } finally {
+    handle?.shutdown();
+    if (oldRole === undefined) delete process.env.WS_PI_SPAWN_ROLE; else process.env.WS_PI_SPAWN_ROLE = oldRole;
+  }
+});
+
 test("production bridge launches ws-mcp with the adapter config manifest injected into its env", async () => {
   const directory = mkdtempSync(join(tmpdir(), "ws-pi-manifest-env-"));
   const launcher = join(directory, "launcher.py");

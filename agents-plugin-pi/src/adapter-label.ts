@@ -38,3 +38,23 @@ export function adapterLabeledBody(text: string): string | undefined {
   if (text === ADAPTER_MESSAGE_LABEL) return "";
   return text.startsWith(`${ADAPTER_MESSAGE_LABEL}\n`) ? text.slice(ADAPTER_MESSAGE_LABEL.length + 1) : undefined;
 }
+
+/**
+ * The first line of a message the user wrote on the dashboard whiteboard and
+ * the adapter submits with `sendUserMessage`. Unlike the adapter label it
+ * keeps user authority: it tells the model, and the dashboard feed's origin
+ * tag (dashboard-feed.ts), that the user's words arrived from the whiteboard
+ * rather than the terminal.
+ */
+export const WHITEBOARD_MESSAGE_LABEL = "[user message from the ws whiteboard]";
+
+/** `text` with the whiteboard label as its own first line. */
+export function labelWhiteboardText(text: string): string {
+  return `${WHITEBOARD_MESSAGE_LABEL}\n${text}`;
+}
+
+/** The text after the whiteboard label line, or `undefined` when `text` does not open with it. */
+export function whiteboardLabeledBody(text: string): string | undefined {
+  if (text === WHITEBOARD_MESSAGE_LABEL) return "";
+  return text.startsWith(`${WHITEBOARD_MESSAGE_LABEL}\n`) ? text.slice(WHITEBOARD_MESSAGE_LABEL.length + 1) : undefined;
+}

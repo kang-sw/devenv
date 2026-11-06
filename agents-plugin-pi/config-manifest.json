@@ -26,6 +26,13 @@
       "description": "Summarize each finished tool batch shown in the live-agent widget's expanded mode with pi.display_summary_model, effort and workflow.lang. Off by default even when a summary model is set, because summarizing every child batch costs quota. Enabling it sends child agents' tool names, arguments and result excerpts to that provider."
     },
     {
+      "key": "pi.dashboard_enabled",
+      "type": "boolean",
+      "default": true,
+      "default_scope": "global",
+      "description": "Hand this session's live activity to its ws dashboard: the lead's and subagents' tool batches, turn boundaries, streamed and finished replies, and user messages. Only the owner lead's session feeds it, and the dashboard records nothing while dashboard.enabled is off. False sends nothing."
+    },
+    {
       "key": "pi.runaway_threshold",
       "type": "integer",
       "minimum": 1,

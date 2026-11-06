@@ -47,6 +47,7 @@ import {
   displaySummaryConfigFrom,
 } from "../src/display-summary.ts";
 import { BATCH_SUMMARY_CONFIG_KEYS, BATCH_SUMMARY_ENABLED_KEY, batchSummaryConfigFrom } from "../src/batch-summary.ts";
+import { resolveDashboardEnabled } from "../src/dashboard-feed.ts";
 
 interface ManifestKey { key: string; type: string; default: unknown; pattern?: string }
 const manifest = JSON.parse(readFileSync(join(process.cwd(), ADAPTER_CONFIG_MANIFEST_FILE), "utf8")) as { namespace: string; keys: ManifestKey[] };
@@ -55,6 +56,7 @@ const manifest = JSON.parse(readFileSync(join(process.cwd(), ADAPTER_CONFIG_MANI
 const resolvers: Record<GoalLoopConfigKey, (config: GoalLoopConfig | undefined) => unknown> = {
   agent_wait_animation: resolveAgentWaitAnimation,
   agent_widget_rows: (config) => resolveAgentWidgetRows(config?.agent_widget_rows),
+  dashboard_enabled: resolveDashboardEnabled,
   runaway_threshold: resolveRunawayThreshold,
   settle_delay_ms: resolveSettleDelayMs,
   compaction_advisory_percent: resolveCompactionAdvisoryThreshold,
@@ -73,7 +75,7 @@ describe("shipped adapter manifest", () => {
     assert.equal(manifest.namespace, ADAPTER_CONFIG_NAMESPACE);
     const declared = manifest.keys.map((k) => k.key).sort();
     assert.deepEqual(declared, [...Object.keys(resolvers).map((k) => `${ADAPTER_CONFIG_NAMESPACE}${k}`), ...displaySummaryKeys].sort());
-    const read = new Set<GoalLoopConfigKey>([...SETTLE_CONFIG_KEYS, ...COMPACTION_TRIGGER_CONFIG_KEYS, ...COMPACTION_BUDGET_CONFIG_KEYS, "agent_wait_animation", "agent_widget_rows", "child_retention_ttl_days"]);
+    const read = new Set<GoalLoopConfigKey>([...SETTLE_CONFIG_KEYS, ...COMPACTION_TRIGGER_CONFIG_KEYS, ...COMPACTION_BUDGET_CONFIG_KEYS, "agent_wait_animation", "agent_widget_rows", "child_retention_ttl_days", "dashboard_enabled"]);
     assert.deepEqual([...read].sort(), Object.keys(resolvers).sort());
   });
 

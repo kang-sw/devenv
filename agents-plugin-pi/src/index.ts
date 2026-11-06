@@ -187,6 +187,7 @@ import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding
 import { resolveSessionKey, startBridge, type BridgeHandle } from "./bridge.ts";
 import {
   agentCostRefreshRef,
+  agentDashboardRefreshRef,
   agentWidgetRefreshRef,
   heldPushQueue,
   leadIdleRef,
@@ -244,6 +245,7 @@ import { assertPolicyTool, readDelegationPolicy } from "./delegation-policy.ts";
 import { registerScopedWriteTools } from "./write-scopes.ts";
 import { registerWebTools } from "./web-tools.ts";
 import { publishSubtree, SubtreeUpstream } from "./subtree-lifecycle.ts";
+import { createDashboardFeed, dashboardAgentEntries, registerDashboardLeadEvents, resolveDashboardEnabled, type DashboardFeed } from "./dashboard-feed.ts";
 
 // This is the exact physical entry module Pi loaded (whether from `-e`, an
 // installed package, or a cache). Every RPC child receives this path verbatim
@@ -622,6 +624,11 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   // 261028 Phase 3: the owner lead's batch summarizer, same lifetime as the
   // widget controller; off at runtime unless its own flag is raised.
   let batchSummarizer: BatchSummarizer | undefined;
+  // The owner lead's dashboard feed (dashboard-feed.ts), replaced on every
+  // owner-lead session_start and stopped on shutdown; the lead events are
+  // subscribed once here and reach whichever feed is current.
+  let dashboardFeed: DashboardFeed | undefined;
+  registerDashboardLeadEvents(pi as unknown as Parameters<typeof registerDashboardLeadEvents>[0], () => dashboardFeed);
   // 260914 (pi native mailbox push): the session-bound background waiter that
   // drives `ws-mcp mailbox wait` and actively steers arriving mail into the
   // live conversation. Owner-lead only (`readSpawnRole` === undefined), started
@@ -867,6 +874,24 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     const onApprovalPending = sessionBootstrap.onApprovalPending;
     agentTools = sessionBootstrap.agentTools;
     rpcRegistryRef.current = agentTools.rpcRegistry;
+    dashboardFeed?.stop();
+    dashboardFeed = undefined;
+    agentDashboardRefreshRef.current = undefined;
+    if (readSpawnRole(process.env) === undefined) {
+      // Owner lead only: a child is already shown through its parent's feed.
+      const feedRegistry = agentTools.rpcRegistry;
+      const feed = createDashboardFeed({
+        target: () => {
+          const bridge = handle;
+          return bridge ? { callTool: (name, args) => bridge.client.callTool(name, args), sessionKey: bridge.defaultSessionKeyRef.current } : undefined;
+        },
+        enabled: () => thenOrNow(readAdapterConfig(["dashboard_enabled"]), resolveDashboardEnabled),
+        agents: () => dashboardAgentEntries(feedRegistry),
+      });
+      dashboardFeed = feed;
+      agentDashboardRefreshRef.current = () => { feed.agentsChanged(); };
+      feed.start();
+    }
     registerExecuteGateway(pi, handle, agentTools.rpcRegistry, {
       cwd: ctx.cwd,
       executeWorkerPromptPath: executeWorkerGuidePath,
@@ -950,7 +975,10 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
               onStderr: reportDistinctLinesOnce(reportMailboxWaiterDiagnostic),
             })),
             drainMail: createBridgeDrain(mailboxCallTool, key),
-            admit: (envelopes) => sendBatchToLead(pi, envelopes.map(buildMailboxPushMessage), "steer"),
+            admit: (envelopes) => {
+              dashboardFeed?.noteMailWake();
+              sendBatchToLead(pi, envelopes.map(buildMailboxPushMessage), "steer");
+            },
             onError: reportMailboxWaiterDiagnostic,
           });
         },
@@ -1254,6 +1282,9 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
       agentWidgetHandle = undefined;
       batchSummarizer?.dispose();
       batchSummarizer = undefined;
+      dashboardFeed?.stop();
+      dashboardFeed = undefined;
+      agentDashboardRefreshRef.current = undefined;
       applySessionShutdownAgentFooter(agentFooterLifecycle);
       agentWidgetRefreshRef.current = undefined;
       agentCostRefreshRef.current = undefined;
