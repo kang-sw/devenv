@@ -318,6 +318,70 @@ Phase 1 Result with the user, so Phase 2 may be dispatched.
     never shows and the behaviour equals (301 c). The lead then takes it
     back to the user.
 
+### Result (702e6bb9b) - 2026-11-06
+
+- **Knob.** `claude.dashboard_enabled` (boolean). It is declared in both
+  manifests, on in ws and off in wsflow, with a parity-test row added. It is
+  read keyless once at session start; a failed or refused read leaves the
+  feed off. Events raised before the read settles are dropped.
+- **Shape.** `hooks/claude-mod/dashboard.ts` (pure feed plus batch model)
+  is wired from `register.ts`. Intake goes through
+  `$.mcp.call(server, 'dashboard_intake', {session_key, adapter: 'claude',
+  events})`, which raises no `tool.call` and no permission prompt. Events
+  are coalesced at a 100 ms flush. Failure handling follows the Pi feed: a
+  5 s call timeout and a 2 s retry; user, turn and final-reply events are
+  requeued; the resync is a `reset` plus the open `turn_start`; the pending
+  queue caps at 100. Session key: the manual feature's key, else the
+  mailbox push's bound key. With no key, events are held and resent behind
+  a reset once a key arrives. A key change also resyncs.
+- **Hooks added.** `tool.check`, `agent.spawn`, `prompt.submit` and
+  `classic.Notification`, all observe-only. `turn.step` is tapped (chunks
+  forwarded unchanged) only while the feed runs. Tool begin and end ride
+  the existing unmatched `tool.call` hook, for engine-origin calls only.
+  The turn end runs in `turn.complete`'s `finally`.
+- **Decisions.**
+  - The final reply comes from each step's `answer`; `turn.complete`'s
+    `answer` is sent only when no step already sent it.
+  - A subagent run ending aborted, error or refusal shows `failed`.
+  - Subagents are keyed by the native `agentId`. The label is the spawn
+    description, else the subagent type; the caption is the subagent type.
+    A record created before its spawn resolves is filled in later. Finished
+    agents are pruned to 5.
+  - A delegate's `sessionKey` comes from the first `session_key` argument
+    of its own call to this plugin's MCP tools. Argument previews drop
+    session key arguments.
+  - Permission: one slot per agent, showing its latest marked ask. Asks are
+    keyed by `tool_use_id` and only recorded for a person-approved `ask`.
+    `permission_prompt` marks every pending ask. The `tool.call` end (and
+    the agent's turn end) clears it. No notification means no marker.
+  - User origins: composer, bridge, sdk, unclassified and slack-ping map to
+    `terminal`. This plugin's own prompt whose first line is
+    `[user message from the <plugin> whiteboard]` maps to `whiteboard`, with
+    the label stripped. The mailbox push's submit tags the turn `mail`. The
+    label helpers (`whiteboardLabel`, `labelWhiteboard`) are exported for
+    Phase 3.
+  - The clock edge is `Date.now()`, because `$.clock.now` is async. The
+    engine tests show it is available in the sandbox.
+- **Review (lite, one pass).** No Critical or Important findings. Fixed: the
+  dashboard turn end now survives a rejecting hook beneath, and engine
+  tests cover an unset or unreadable knob. Minors accepted as Pi-parity
+  trade-offs:
+  - after a call timeout that ws-mcp did apply, the ring may hold duplicate
+    entries;
+  - there is no backoff against an intake that always answers an error;
+  - streamed text still unsent at an abort is dropped;
+  - a `session.start` firing mid-turn resets the open turn.
+- **Verification.**
+  - `claude plugin test` in agents-plugin: 593 pass, 0 fail.
+  - `claude plugin test` in agents-plugin-wsflow: 593 pass, 0 fail.
+  - `claude plugin validate` passes for both packages.
+  - `go test ./internal/wsrsrc/ ./internal/mcp/` in agents-plugin-tool: ok.
+  - The hooks manifest and shipped-surface unittest suites pass, as does
+    the wsflow tests suite.
+  - The mirror is byte-identical (`diff -r`).
+  - The not-yet-verified live default-mode notification check (302) stays
+    with the lead.
+
 ### Phase 3: Claude drain and inject
 
 Arm the mod's existing `mailbox wait` child with the inbox flag. On an inbox
