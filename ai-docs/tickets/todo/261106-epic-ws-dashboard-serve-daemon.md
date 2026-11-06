@@ -61,8 +61,9 @@ with browser interaction folded into the core.
   `/health`, detached auto-spawn, version replacement) (174), (178), (179);
   then the machine root registry, session index, nudge, and polling (169),
   (181); then the HTTP render of `/` and `/s/<reply-id>` with partial SSE
-  region updates, the session page layouts, and the pointer-line URI (170),
-  (180), (239), (248), (257).
+  region updates, the session page layouts, the pointer-line URI, and the
+  peer lead group with mail lines in the conversation (170), (180), (239),
+  (248), (257), (259)-(263).
 - Planned: browser interaction and access - the message endpoint, the
   per-session board-answer inbox with held-message merge and cancel (208),
   (209), (240), (249), (251), LAN opt-in and access token (173), (197), and
@@ -70,10 +71,12 @@ with browser interaction folded into the core.
   browser gains write or network access, so they are reviewed together.
 - Planned: live snapshot and Pi adapter - the ws-mcp intake for adapter
   events, the per-session snapshot file (188), (191), (195), (217), (247),
-  the conversation history ring (258), and the Pi adapter producing them; a
+  the conversation history ring with its `mail` origin tag (258), (260),
+  and the Pi adapter producing them; a
   phase for the Pi side of message submission (drain and inject) (213).
 - Planned: Claude adapter - Phase 1 is the event probe (196), (218), (241)
-  and runs before any other child's work; later phases build the adapter on
+  and runs before any other child's work except the core child's Phase 1
+  lifecycle, which may run alongside it (266); later phases build the adapter on
   its result, including the Claude side of message submission (drain and
   inject) (213).
 
@@ -212,7 +215,11 @@ with browser interaction folded into the core.
   is replying (250). When the lead waits on a tool permission prompt, the
   conversation and the lead bar show that it is waiting for approval in the
   terminal, with the tool and its argument preview; the approval itself
-  stays in the terminal. (241)
+  stays in the terminal. (241) Mail the lead sends or receives shows as a
+  line, `→ peer: first line` or `← peer: first line`, linked to the peer's
+  page and expanding to the full body from the mailbox history ring; a turn
+  that incoming mail starts carries a `mail` origin tag. (260)
+  Rejected: showing mail in the mailbox panel only (260).
   Rejected: showing the reply text only once each message ends (250 b);
   keeping the reply text in the terminal only (241 c).
 - **No session control.** The live view offers no control over sessions or
@@ -265,7 +272,8 @@ with browser interaction folded into the core.
   200). The Claude adapter produces the same shape. (195)
 - **Claude adapter probe first.** The Claude adapter child's Phase 1
   probes which events the Claude mod receives, and it runs before any other
-  child's work: subagent tool-call and generating-phase events (196), the
+  child's work except the core child's Phase 1 lifecycle, which depends on
+  no probe result and may run alongside it (266): subagent tool-call and generating-phase events (196), the
   main thread's generating-phase events (218), and the lead's reply text
   and tool-permission waits (241). Verified so far: subagent `turn.start`
   events carry an `agentId`, and the main thread already delivers
@@ -274,6 +282,26 @@ with browser interaction folded into the core.
   state (193 a); if main-thread phase events are unavailable, the lead shows
   tool-call granularity only (218). The fallback for missing reply-text or
   permission-wait events is settled with the probe result. (196), (201)
+  Rejected: holding the core lifecycle phase until the probe lands (266 b),
+  which serializes a phase that reads no snapshot.
+- **Peer leads.** The tree's lead root holds one "peer lead" group: the
+  sessions this lead exchanges mail with. Each row shows the peer's lead
+  phase line from the peer's own snapshot, the last exchange time, a
+  `/s/<reply-id>` link, and the peer's subagent count only; the peer's own
+  tree is never nested. (259)
+  Rejected: recursive peer trees (A and B mailing each other form a cycle,
+  and each page would fan in every peer's updates); a badge on the mailbox
+  panel only.
+- **Peer resolution.** The daemon resolves each mailbox contact to a
+  session: an `id:<reply-id>` address resolves directly; a named address
+  goes through the mailbox presence record's owner session key and
+  `ReplyID()`. Only the reply-id reaches the browser. A peer this daemon
+  does not serve shows its address and last exchange time with no live
+  state. (261)
+- **Peer retention.** The group shows every live peer and the last 5 ended
+  peers, ordered by last exchange. (262)
+- **Peers on hosts without an adapter.** The group works for any host; a
+  peer without an adapter, such as Codex, shows no phase. (263)
 
 **Session page**
 - **Partial updates.** The page never reloads. The daemon sends each
