@@ -704,7 +704,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-06T10:26:40Z"
+        "touched_at": "2026-11-06T10:27:24Z",
+        "impl": {
+          "branch": "impl/develop/clasp-given-sniff"
+        }
       }
     }
   }
