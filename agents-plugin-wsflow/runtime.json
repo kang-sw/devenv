@@ -17,6 +17,7 @@
     "mailbox.send": ">=0.48.10-dev <0.49.0",
     "mailbox.recv": ">=0.48.10-dev <0.49.0",
     "mailbox.lookup_peers": ">=0.48.10-dev <0.49.0",
+    "mailbox.history": ">=0.48.10-dev <0.49.0",
     "agenda.set": ">=0.48.10-dev <0.49.0",
     "agenda.clear": ">=0.48.10-dev <0.49.0",
     "agenda.list": ">=0.48.10-dev <0.49.0",

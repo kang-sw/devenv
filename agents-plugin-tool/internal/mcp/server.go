@@ -2155,6 +2155,8 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		return s.handleMailboxRecv(req.ID, params.Arguments)
 	case "mailbox.lookup_peers":
 		return s.handleMailboxLookupPeers(req.ID, params.Arguments)
+	case "mailbox.history":
+		return s.handleMailboxHistory(req.ID, params.Arguments)
 
 	default:
 		return errorResponse(req.ID, -32602, fmt.Sprintf("unknown tool: %s", params.Name))
@@ -4864,6 +4866,21 @@ func tools() []map[string]any {
 					"format":      stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
 				"required": []string{"session_key", "scope"},
+			},
+		},
+		{
+			"name":        "mailbox.history",
+			"description": `Read-only: list the last 10 messages this session (its session key) sent or received through mailbox.send and mailbox.recv, newest first, without consuming or changing anything. Use it to recover mail the conversation lost after mailbox.recv already drained it, for example after a rewind. Each entry has its direction (recv or sent), the counterparty address, the time this session sent or drained it, and a title: the first line of the body, skipping a leading peer-lead note line, cut at 120 characters. body: true adds the full body as the session saw it. No other session's history is visible, and it survives compaction under the same session key.`,
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"limit":       integerProperty("Optional maximum number of entries. Defaults to 10; a value below 1 uses the default."),
+					"body":        boolProperty("Optional. true includes each entry's full body; defaults to false (title only)."),
+					"direction":   enumStringProperty(`Optional filter: "recv", "sent", or "all" (default).`, []string{"recv", "sent", "all"}),
+					"format":      stringProperty(`Optional output format. Use "json" for structured output.`),
+				},
+				"required": []string{"session_key"},
 			},
 		},
 		{

@@ -20,6 +20,10 @@ import (
 // process is merely wasteful, never harmful (deletes are keyed on mtime, which
 // is idempotent to re-derive).
 //
+// The same pass reaps mailbox history directories idle past the same age
+// (pruneMailboxHistory), so stored message bodies do not outlive the key
+// records that could reach them.
+//
 // Pruning is mtime-only: a record's JSON body is never parsed to decide
 // whether to keep it. This is deliberate — a malformed record still has a
 // valid file mtime, so mtime-only pruning cannot be tripped up by unreadable
@@ -67,6 +71,36 @@ func (s *sessionStore) maybePrune() {
 		}
 		if now.Sub(info.ModTime()) > keyRetentionAge {
 			_ = os.Remove(path)
+		}
+	}
+
+	pruneMailboxHistory(now)
+}
+
+// pruneMailboxHistory removes per-session mailbox history directories whose
+// mtime is older than keyRetentionAge, mtime-only like the key records:
+// creating, renaming, and removing entry files refresh the directory's mtime,
+// so an active ring is never reaped. Errors are ignored.
+func pruneMailboxHistory(now time.Time) {
+	root, err := mailboxHistoryRoot()
+	if err != nil {
+		return
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		path := filepath.Join(root, entry.Name())
+		info, err := os.Stat(path)
+		if err != nil {
+			continue
+		}
+		if now.Sub(info.ModTime()) > keyRetentionAge {
+			_ = os.RemoveAll(path)
 		}
 	}
 }

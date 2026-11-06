@@ -115,6 +115,10 @@ func (s *Server) handleMailboxSend(id json.RawMessage, args map[string]any) resp
 		}
 	}
 
+	// The send is enqueued: record it in the caller's history ring. A failed
+	// ring write is logged inside, never surfaced.
+	recordMailboxHistory(sessionKey, []mailboxHistoryEntry{{Direction: mailboxHistorySent, Counterparty: counterparty, Body: envelope.Content}})
+
 	stampLabel, stampValue := "reply_to", replyTo
 	if from != "" {
 		stampLabel, stampValue = "from", from
@@ -215,6 +219,7 @@ func (s *Server) handleMailboxRecv(id json.RawMessage, args map[string]any) resp
 
 	sort.SliceStable(drained, func(i, j int) bool { return drained[i].SentAt < drained[j].SentAt })
 	s.recordMailboxRecvContacts(sessionKey, entry.root, ownNamed, drained)
+	recordMailboxRecvHistory(sessionKey, drained)
 
 	if wantsJSON(args) {
 		return toolJSONResponse(id, drained, nil)
@@ -259,6 +264,23 @@ func (s *Server) recordMailboxRecvContacts(sessionKey, root, ownNamed string, dr
 	if _, err := s.publishReplyID(sessionKey, root, ownNamed, contacts...); err != nil {
 		appendDebugEvent("mailbox.recv_contact_error", map[string]any{"error": err.Error()})
 	}
+}
+
+// recordMailboxRecvHistory appends each drained envelope to the caller's
+// history ring, one entry per message in the order recv returns them (each
+// queue's order is kept: the SentAt sort is stable). drained holds only mail
+// whose drain write was confirmed. A failed ring write is logged inside, never
+// surfaced: the drained mail must still be returned.
+func recordMailboxRecvHistory(sessionKey string, drained []wsmailbox.Envelope) {
+	entries := make([]mailboxHistoryEntry, 0, len(drained))
+	for _, m := range drained {
+		handle := m.From
+		if handle == "" {
+			handle = m.ReplyTo
+		}
+		entries = append(entries, mailboxHistoryEntry{Direction: mailboxHistoryRecv, Counterparty: handle, Body: m.Content})
+	}
+	recordMailboxHistory(sessionKey, entries)
 }
 
 // mailboxPeerOut is lookup_peers' per-peer JSON/text shape.
