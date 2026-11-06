@@ -1330,6 +1330,8 @@ export const register: Register = (on) => {
           $.ui.log(`${$.plugin.name} mailbox: turn end handling failed: ${String(err)}`, { to: 'debug' })
         }
       }
+      // The feed's turn end too: a turn left open would ignore every later turn start.
+      dashboard.turnCompleted(e.agentId, e.answer, e.reason)
     }
     try {
       compaction.turnComplete(e.agentId, e.reason)
@@ -1346,7 +1348,6 @@ export const register: Register = (on) => {
     } catch (err) {
       $.ui.log(`${$.plugin.name} mcp reconnect: turn end handling failed: ${String(err)}`, { to: 'debug' })
     }
-    dashboard.turnCompleted(e.agentId, e.answer, e.reason)
     return res
   })
 

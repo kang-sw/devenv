@@ -47,6 +47,7 @@ function world(on: On, opts: { dashboard?: unknown; intake?: Intake } = {}) {
       return w.intake === 'error' ? text('unknown session_key', true) : text('ok: 1 of 1 events applied')
     }
     if (e.tool !== 'config_get') return text(`no ${e.tool} here`, true)
+    if (e.args.key === KNOB.dashboard && opts.dashboard === 'unreadable') return text('ws-mcp is unhealthy', true)
     const value = e.args.key === KNOB.dashboard ? (opts.dashboard ?? null) : e.args.key === KNOB.drain ? 'direct' : null
     return text(JSON.stringify({ key: e.args.key, value, scope: value === null ? 'unset' : 'project' }))
   })
@@ -148,17 +149,19 @@ test('knob on: the lead\'s turn reaches the intake tool under the bound key, by 
   expect(kinds(w).at(-1)).toBe('turn_end')
 })
 
-test('knob off, unset, or unreadable: nothing reaches the intake tool', async ($, on) => {
-  const w = world(on, { dashboard: false })
-  await start($, w)
-  await $.turn.start({ text: 'x', turnId: 't' })
-  w.chunks = [{ kind: 'text', index: 0, text: 'hi' }]
-  expect(await step($, w)).toEqual(w.chunks)
-  await $.tool.call({ tool: 'Bash', tool_use_id: 'u1', command: 'ls' } as never)
-  await $.turn.complete({ answer: 'hi', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer' } as never)
-  await flush(w)
-  expect(w.intakes.length).toBe(0)
-})
+for (const knob of [false, null, 'unreadable'] as const) {
+  test(`knob ${String(knob)}: nothing reaches the intake tool`, async ($, on) => {
+    const w = world(on, { dashboard: knob })
+    await start($, w)
+    await $.turn.start({ text: 'x', turnId: 't' })
+    w.chunks = [{ kind: 'text', index: 0, text: 'hi' }]
+    expect(await step($, w)).toEqual(w.chunks)
+    await $.tool.call({ tool: 'Bash', tool_use_id: 'u1', command: 'ls' } as never)
+    await $.turn.complete({ answer: 'hi', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer' } as never)
+    await flush(w)
+    expect(w.intakes.length).toBe(0)
+  })
+}
 
 test('a subagent is keyed by its native id and labelled from its spawn; its own key travels as sessionKey', async ($, on) => {
   const w = world(on, { dashboard: true })
