@@ -1,5 +1,6 @@
 ---
 title: Whiteboard board text follows the conversation language
+completed: 2026-11-06
 ---
 
 # Whiteboard board text follows the conversation language
@@ -23,3 +24,8 @@ Open for design: where the rule lives (the playbook's Calls/Payload text, the
 manual section, or the `workflow.lang` line the manual already carries), and
 whether fixed tokens (IDs, class tags, `ok`/`no` answers, option letters) are
 named as staying untranslated.
+
+
+## Resolution (2026-11-06)
+
+Resolved by 8f2d513d1: one line in the whiteboard playbook's Payload section (mirrored to wsflow and Pi) says board text follows the conversation language.
