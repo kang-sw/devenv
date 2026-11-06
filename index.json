@@ -604,6 +604,9 @@
     "261106-bug-git-commit-trailer-placement": {
       "registered_at": "2026-11-06T07:33:45Z"
     },
+    "261106-bug-git-merge-directory-rename-relocates-tickets": {
+      "registered_at": "2026-11-06T10:06:42Z"
+    },
     "261106-bug-sage-stamp-missing-restamp-loop": {
       "registered_at": "2026-11-06T08:56:03Z"
     },
