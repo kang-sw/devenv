@@ -110,6 +110,71 @@ func RenderPage(view View) (string, error) {
 	return buf.String(), nil
 }
 
+// Regions are a full page's board and panels rendered alone, by the same
+// templates RenderPage uses, so a page that lays them out itself (the
+// dashboard daemon's session page) shows exactly what the static page shows.
+type Regions struct {
+	// Board is the Now slot, the topic blocks, and the reply bar.
+	Board template.HTML
+	// Panels is every panel, in order.
+	Panels template.HTML
+	// Mermaid reports that Board holds a mermaid block, so the page loads
+	// the shared mermaid script (MermaidAsset) and MermaidInitScript.
+	Mermaid bool
+	// CountPolicy, CountAssumed, and CountAcks are the header's counts.
+	CountPolicy, CountAssumed, CountAcks int
+}
+
+// RenderRegions renders view's board and panels as fragments, as the full
+// page shows them; build view with LayoutFull.
+func RenderRegions(view View) (Regions, error) {
+	a, err := loadAssets()
+	if err != nil {
+		return Regions{}, fmt.Errorf("whiteboard page assets: %w", err)
+	}
+	view.Layout = LayoutFull
+	view.StampFile = ""
+	data := newPageData(view, a)
+	var board, panels bytes.Buffer
+	if err := a.tmpl.ExecuteTemplate(&board, "board", data); err != nil {
+		return Regions{}, fmt.Errorf("whiteboard board: %w", err)
+	}
+	for _, panel := range view.Panels {
+		if err := a.tmpl.ExecuteTemplate(&panels, "panel", data.PanelOf(panel)); err != nil {
+			return Regions{}, fmt.Errorf("whiteboard panel %s: %w", panel.ID, err)
+		}
+	}
+	return Regions{
+		Board:        template.HTML(board.String()),
+		Panels:       template.HTML(panels.String()),
+		Mermaid:      data.Mermaid,
+		CountPolicy:  data.CountPolicy,
+		CountAssumed: data.CountAssumed,
+		CountAcks:    data.CountAcks,
+	}, nil
+}
+
+// SharedAssets are the static page's inlined assets, for a page that hosts
+// RenderRegions fragments: the stylesheet the fragments are styled by, the
+// icon sprite they reference, the answer-form script that drives the board's
+// reply bar (a function body: run it inside a function scope, as RenderPage
+// does), and the mermaid theme script that runs after MermaidAsset.
+type SharedAssets struct {
+	CSS         template.CSS
+	Sprite      template.HTML
+	FormScript  template.JS
+	MermaidInit template.JS
+}
+
+// PageAssets returns the static page's shared assets.
+func PageAssets() (SharedAssets, error) {
+	a, err := loadAssets()
+	if err != nil {
+		return SharedAssets{}, fmt.Errorf("whiteboard page assets: %w", err)
+	}
+	return SharedAssets{CSS: a.css, Sprite: a.sprite, FormScript: template.JS(a.form), MermaidInit: a.mermaidInit}, nil
+}
+
 // pageData is what the page template executes on: the view plus the inlined
 // assets and the board-wide counts the header shows.
 type pageData struct {

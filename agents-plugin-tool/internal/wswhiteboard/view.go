@@ -45,6 +45,13 @@ type View struct {
 	// to the session root, or absolute) into the href the page uses from
 	// the folder it is written to. Nil keeps the path as written.
 	FileLink func(path string) string
+	// FileText, when set, renders every file target (a relative or absolute
+	// path, or a file: URL) as text instead: a link keeps its label followed
+	// by the path FileText returns, and an image shows its alt text followed
+	// by that path. A page served over http sets it, since a browser blocks
+	// file: links there and a relative path would resolve against the
+	// server's URL, not the session root. FileLink is then unused.
+	FileText func(path string) string
 }
 
 // TopicView is one topic block.
@@ -135,6 +142,10 @@ type PanelRow struct {
 	// Link, when set, makes Text a link: a relative path or an absolute
 	// file: URL the provider built (see RenderPage); empty for none.
 	Link string
+	// Path is the row's file as text, shown after Text when the row has no
+	// Link: a served page lists a ticket by its repo-relative path instead
+	// of linking it.
+	Path string
 }
 
 // ViewInput is what BuildView needs beyond the State.
@@ -142,8 +153,9 @@ type ViewInput struct {
 	Layout  Layout
 	ReplyID string
 	Panels  []Panel
-	// FileLink is copied to View.FileLink.
+	// FileLink and FileText are copied to the View.
 	FileLink func(path string) string
+	FileText func(path string) string
 }
 
 // BuildView derives a page view from state.
@@ -156,6 +168,7 @@ func BuildView(state *State, in ViewInput) View {
 		Panels:   in.Panels,
 		Stored:   map[int]bool{},
 		FileLink: in.FileLink,
+		FileText: in.FileText,
 	}
 	for _, item := range state.Items {
 		view.Stored[item.ID] = true
