@@ -549,6 +549,140 @@ a nudge. Then `go test ./...` in `agents-plugin-tool`. The lead checks by
 hand that two sessions in two projects both appear in the index of one
 running daemon.
 
+### Result (ee0520fa7) - 2026-11-06
+
+Landed:
+- `internal/wsdashboard`: `registry.go` (the session registry, the liveness
+  rule, and pruning), `index.go` (`Index` built from the registry through a
+  `SessionSource`, with `Refresh`, `Nudge`, `Sessions`, `Session`, and an
+  `OnChange` hook), the daemon's `POST /nudge` route and poll loop
+  (`DaemonOptions.Sessions`, `PollInterval`), and the `SendNudge` client.
+- `internal/mcp/dashboard_sessions.go`: registration, heartbeat, the
+  ended mark, the nudge queue, and `DashboardSessionSource`. The `serve` loop
+  runs the heartbeat. `ws-mcp dashboard` passes the source.
+- The `dashboard.enabled` description in all three manifests (8af00f482),
+  and a "Dashboard daemon" section in the ws-mcp manual.
+
+Settled:
+- **Registry.** One directory per session:
+  `<cache root>/dashboard/sessions/<reply-id>/registration.json`. The file is
+  JSON `{schema_version, reply_id, project, harness, registered_at,
+  heartbeat_at, ended_at}`, written via temp file and rename. Readers ignore
+  unknown fields, and absent fields read as empty.
+  - It registers sessions, not roots. A stdio ws-mcp registers a top-level
+    lead session at that session's first keyed call, but only while
+    `dashboard.enabled` resolves on for that session (session scope
+    included).
+  - A key-off session is never written. If a stale entry for it exists, it is
+    removed. A session-scope tune is re-read at once after `config.tune`,
+    and otherwise on a keyed call at least a minute after the last check.
+  - This is how ws beside wsflow on one root, or a session tuned off, stays
+    off the dashboard.
+  - Child sessions are not registered. They have no board and appear in
+    their lead's tree.
+  - No session key and no pid is recorded.
+- **Stale entries.** Pruning is done by ws-mcp only, at its first
+  registration after a process start. It deletes entries last seen more than
+  7 days ago, and directories without a registration whose mtime is that old.
+  The daemon only reads. It drops from its index any session whose
+  registration file is gone, whose project root is gone, or whose session
+  record no longer maps to a top-level lead rooted at that project.
+- **Served-session liveness rule (Phase 3 peer group).**
+  `Registration.Live(now)`: live means `ended_at` is empty and `heartbeat_at`
+  is within 5 minutes.
+  - ws-mcp heartbeats every 2 minutes, and stops for a session that has made
+    no keyed call for 12 hours. Such a track, abandoned inside a long-lived
+    host process, therefore reads as ended, and its next call revives it.
+  - A clean serve exit, or a parent-death exit, writes `ended_at`. A crash
+    reads as ended within 5 minutes.
+  - `Index.Session(replyID).Live` exposes the rule.
+- **Nudge body.** JSON `{"reply_id", "project"}`, where `project` is the
+  session root exactly as the registration records it. The daemon answers:
+  - 204: the session was re-read; only that session is touched.
+  - 400: malformed body.
+  - 404: unknown session, or a project that does not match.
+
+  `/nudge` passes the loopback Host guard and needs no token. The sender
+  ignores the answer.
+- **Which writes nudge.** A successful `whiteboard.update`, and every tool in
+  `whiteboardProviders`' dirtied-by lists (todo, agenda, route, ticket
+  moves, mailbox send and recv), via `Server.dashboardNudge(sessionKey)`.
+  - A new registration also nudges.
+  - Nudges go through a bounded queue of 64 that never blocks the caller. One
+    goroutine drains it: it folds duplicates and reads the endpoint file for
+    each batch. A full queue drops the nudge, and the poll covers it.
+  - Nothing is sent for an unregistered (key-off) session.
+- **Session set and reply-id.** The registry alone defines the session set,
+  and an entry is keyed by its reply-id (`wsmailbox.ReplyID`). Listing does
+  not depend on any store, so a session with a snapshot but no board is
+  listed.
+  - The daemon maps a reply-id to its session key by scanning the key
+    store's file names. It rescans when the directory changes, or after 5
+    seconds on a miss.
+  - The key stays inside the daemon process. No `Session` field carries it.
+- **For the live-snapshot sibling.** Place the per-session snapshot and ring
+  under `wsdashboard.SessionDir(dir, replyID)`, beside `registration.json`.
+  `dir` is `wsdashboard.Dir("")`. After each write, call
+  `s.dashboardNudge(sessionKey)`; it is a no-op for a key-off session.
+  - Name the snapshot's updated-at field so the core can age snapshots by it.
+  - `DashboardSessionSource.ReadSession` currently fingerprints only the
+    session record. Phase 3, or whichever of the two lands second, adds the
+    snapshot and ring to `SessionData`.
+
+Verification:
+- `go test ./... -count=1` in `agents-plugin-tool`: all packages ok.
+- `go test ./internal/wsdashboard -race -count=3`: ok.
+- `go test ./internal/mcp -race -run TestDashboard`: ok.
+- `go vet` on the changed packages for linux and windows, and a darwin
+  `go build ./...`: ok.
+- Mutation checks: queueing nudges for unregistered sessions fails the key-off
+  tests, and removing the idle cutoff fails the heartbeat test.
+
+Tests:
+- `internal/wsdashboard/index_test.go`:
+  - a registration round trip with unknown fields ignored, and a path-like or
+    mismatched reply-id refused;
+  - the live rule;
+  - pruning;
+  - Refresh adding sessions, listing one with no board, ageing liveness with
+    the clock, and dropping a removed registration, a removed root, and a
+    gone record;
+  - a nudge re-reading exactly one session, with malformed, unknown, and
+    project-mismatched nudges reading and changing nothing;
+  - the polling backstop picking up a write that sent no nudge, using a 20 ms
+    interval;
+  - the `/nudge` route: 204, 404, 400, unknown fields, the Host guard, 405,
+    and no index.
+- `internal/mcp/dashboard_sessions_test.go`:
+  - key-on registration with no session key in the file;
+  - a child session not registered;
+  - one key-on and one key-off server on one root, where only the key-on
+    session is registered, nudged, and indexed (through the real source,
+    with no board), and its board write is seen on the next nudge;
+  - `todo.add` returning the same result with no daemon, a 500 daemon, and a
+    hung daemon, without waiting on the nudge;
+  - a session-scope tune off unregistering the session and stopping nudges;
+  - heartbeat, idle cutoff, resume, and the ended mark;
+  - the first registration pruning expired entries.
+- Also fixed: a Phase 1 test flake. The "wrong token" case equalled the real
+  token whenever its last hex digit was 0.
+
+Not exercised: the lead's hand check that two sessions in two projects both
+appear in one running daemon's index. Look for `dashboard: session <reply-id>
+added (project <path>)` lines in `<cache root>/dashboard/dashboard.log`.
+Because dev builds share one version, stop a running dev daemon by token
+first, so that the rebuilt daemon is the one serving.
+
+Lite review: no Critical or Important findings. One Minor was fixed: the
+manifest description had overstated how fast a per-session change applies
+(8af00f482). Two Minors were left:
+- The fingerprint covers only the session record, so a panel-store nudge (for
+  example from todo or mailbox) does not bump `Rev`. Phase 3 needs to widen
+  it.
+- One session key used against two ws-mcp processes whose
+  `dashboard.enabled` resolves differently would make the registration
+  flap. A lead's key normally stays on one package's server.
+
 ### Phase 3: Index and session page render
 
 Serve `/` (projects, sessions, lead phase badge) and `/s/<reply-id>`

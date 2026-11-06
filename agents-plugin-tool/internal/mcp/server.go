@@ -44,6 +44,9 @@ type Server struct {
 	// declared holds the adapter-declared config keys loaded from the
 	// envConfigManifests manifests at construction.
 	declared declaredConfig
+	// dashboard is the dashboard session registry and nudge state
+	// (dashboard_sessions.go).
+	dashboard dashboardLink
 }
 
 // gitStatusResult keeps the generic git observation intact while allowing the
@@ -195,6 +198,13 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 		<-tickerDone
 	}
 	defer stopPresenceTicker()
+	heartbeatCtx, stopHeartbeat := context.WithCancel(ctx)
+	heartbeatDone := s.startDashboardHeartbeat(heartbeatCtx)
+	defer func() {
+		stopHeartbeat()
+		<-heartbeatDone
+		s.dashboardEnd()
+	}()
 
 	for scanner.Scan() {
 		select {
@@ -683,6 +693,13 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			if isWhiteboardTool(params.Name) && !entry.isTopLevelLead() {
 				return errorResponse(req.ID, -32601, whiteboardLeadOnlyDenial(params.Name))
 			}
+			if entry.isTopLevelLead() {
+				// Registers the session on the dashboard, or keeps it off.
+				s.dashboardTouch(keyStr, entry.root, false)
+				if params.Name == "config.tune" {
+					defer func() { s.dashboardTouch(keyStr, entry.root, true) }()
+				}
+			}
 		}
 	}
 
@@ -700,6 +717,15 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 	// Once a session's whiteboard exists, a successful write by a tool that
 	// dirties one of its panels re-renders its full page (never an embed);
 	// see whiteboardProviders in whiteboard_tools.go.
+	// Registered before the refresh below, so it runs after it: the nudge
+	// follows the rewritten page.
+	if dashboardNudgingTool(params.Name) {
+		defer func() {
+			if key, _ := params.Arguments["session_key"].(string); key != "" && !responseIsError(resp) {
+				s.dashboardNudge(key)
+			}
+		}()
+	}
 	if whiteboardDirtyingTool(params.Name) {
 		defer func() { s.refreshWhiteboardAfter(params.Arguments, resp) }()
 	}

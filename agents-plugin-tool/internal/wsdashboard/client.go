@@ -1,6 +1,7 @@
 package wsdashboard
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -63,6 +64,33 @@ func RequestShutdown(ctx context.Context, client *http.Client, ep Endpoint) erro
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
 	if resp.StatusCode != http.StatusAccepted {
 		return fmt.Errorf("shutdown: status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// SendNudge tells the daemon ep names to re-read one session. The caller
+// treats every error as ignorable: the polling backstop catches a lost nudge.
+func SendNudge(ctx context.Context, client *http.Client, ep Endpoint, body NudgeBody) error {
+	if ep.Port <= 0 {
+		return fmt.Errorf("endpoint has no port")
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpointURL(ep, "/nudge"), bytes.NewReader(raw))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+	if resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("nudge: status %d", resp.StatusCode)
 	}
 	return nil
 }

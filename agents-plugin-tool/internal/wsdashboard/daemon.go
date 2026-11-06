@@ -51,6 +51,23 @@ type DaemonOptions struct {
 	LockWait time.Duration
 	// Log receives diagnostics; nil discards them.
 	Log io.Writer
+	// Sessions reads registered sessions' stores for the session index; nil
+	// runs the daemon without one (no polling, and /nudge answers 404).
+	Sessions SessionSource
+	// PollInterval is the polling backstop period; zero means
+	// DefaultPollInterval.
+	PollInterval time.Duration
+}
+
+// nudgeBodyLimit bounds a /nudge request body.
+const nudgeBodyLimit = 4 << 10
+
+// NudgeBody is the /nudge request body. Readers ignore unknown fields and
+// treat absent ones as empty.
+type NudgeBody struct {
+	ReplyID string `json:"reply_id"`
+	// Project is the session's root path, as its registration records it.
+	Project string `json:"project"`
 }
 
 // Daemon is a running dashboard daemon: it holds the lock, listens on a
@@ -61,8 +78,10 @@ type Daemon struct {
 	server   *http.Server
 	endpoint Endpoint
 	log      io.Writer
+	index    *Index
 
 	closeOnce sync.Once
+	stop      chan struct{}
 	done      chan struct{}
 }
 
@@ -120,6 +139,7 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		dir:  opts.Dir,
 		lock: lock,
 		log:  logw,
+		stop: make(chan struct{}),
 		done: make(chan struct{}),
 		endpoint: Endpoint{
 			SchemaVersion: endpointSchemaVersion,
@@ -129,6 +149,9 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 			Token:         token,
 			StartedAt:     time.Now().UTC().Format(time.RFC3339),
 		},
+	}
+	if opts.Sessions != nil {
+		d.index = NewIndex(IndexOptions{Dir: opts.Dir, Source: opts.Sessions, Log: logw})
 	}
 	d.server = &http.Server{Handler: d.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	if err := writeEndpoint(opts.Dir, d.endpoint); err != nil {
@@ -142,6 +165,9 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 			d.Close()
 		}
 	}()
+	if d.index != nil {
+		go d.poll(opts.PollInterval)
+	}
 	fmt.Fprintf(d.log, "dashboard: version %s listening on 127.0.0.1:%d (pid %d)\n", d.endpoint.Version, d.endpoint.Port, d.endpoint.PID)
 	return d, nil
 }
@@ -165,6 +191,29 @@ func newToken() (string, error) {
 	return hex.EncodeToString(buf), nil
 }
 
+// poll fills the session index at once and then re-reads every registered
+// session each interval until the daemon stops.
+func (d *Daemon) poll(interval time.Duration) {
+	if interval <= 0 {
+		interval = DefaultPollInterval
+	}
+	d.index.Refresh()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-d.stop:
+			return
+		case <-ticker.C:
+			d.index.Refresh()
+		}
+	}
+}
+
+// Index returns the daemon's session index; nil when it runs without a
+// session source.
+func (d *Daemon) Index() *Index { return d.index }
+
 // Endpoint returns what the daemon wrote to its endpoint file.
 func (d *Daemon) Endpoint() Endpoint { return d.endpoint }
 
@@ -177,6 +226,7 @@ func (d *Daemon) Done() <-chan struct{} { return d.done }
 // deleted. Close is idempotent.
 func (d *Daemon) Close() {
 	d.closeOnce.Do(func() {
+		close(d.stop)
 		ctx, cancel := context.WithTimeout(context.Background(), shutdownDeadline)
 		_ = d.server.Shutdown(ctx)
 		cancel()
@@ -193,6 +243,7 @@ func (d *Daemon) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", d.handleHealth)
 	mux.HandleFunc("/shutdown", d.handleShutdown)
+	mux.HandleFunc("/nudge", d.handleNudge)
 	return hostGuard(mux)
 }
 
@@ -254,6 +305,26 @@ func (d *Daemon) handleShutdown(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]any{"shutting_down": true})
 	fmt.Fprintf(d.log, "dashboard: shutdown requested\n")
 	go d.Close()
+}
+
+// handleNudge re-reads the one session the body names. It needs no
+// credential: all it can cause is a re-read of disk. A malformed body is 400,
+// an unknown session 404, and a re-read 204; the sender ignores the answer.
+func (d *Daemon) handleNudge(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body NudgeBody
+	if err := json.NewDecoder(io.LimitReader(r.Body, nudgeBodyLimit)).Decode(&body); err != nil {
+		http.Error(w, "malformed nudge", http.StatusBadRequest)
+		return
+	}
+	if d.index == nil || !d.index.Nudge(body.ReplyID, body.Project) {
+		http.Error(w, "unknown session", http.StatusNotFound)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
