@@ -137,7 +137,9 @@ func splitManifestList(listValue string) []string {
 }
 
 // builtinConfigKeySet is every key ws-mcp itself owns: the tuning registry,
-// the builtin defaults, and every wsconfig item with a scope declaration.
+// the builtin defaults, and every wsconfig item with a scope declaration,
+// except a manifest-declared key that registers itself global-only: the
+// manifest owns its declaration, and the registration only pins its scope.
 func builtinConfigKeySet() map[string]struct{} {
 	set := map[string]struct{}{}
 	for _, entry := range configRegistry {
@@ -147,7 +149,9 @@ func builtinConfigKeySet() map[string]struct{} {
 		set[key] = struct{}{}
 	}
 	for _, key := range wsconfig.RegisteredItemKeys() {
-		set[key] = struct{}{}
+		if _, manifestOwned := manifestGlobalOnlyKeys[key]; !manifestOwned {
+			set[key] = struct{}{}
+		}
 	}
 	return set
 }

@@ -15,6 +15,13 @@
       "maximum": 65535,
       "default": 29417,
       "description": "TCP port the dashboard daemon listens on, on the loopback interface; 0 always uses a port the OS assigns. When the port is taken, the daemon falls back to an OS-assigned port and records the port it uses in its endpoint file. Passed to the daemon when an MCP server starts it, so a running daemon keeps its port until it is next started. Read once at server startup; only the project, global, and built-in values apply."
+    },
+    {
+      "key": "dashboard.lan_enabled",
+      "type": "boolean",
+      "default": false,
+      "default_scope": "global",
+      "description": "When true, the dashboard daemon listens on this machine's network interfaces as well, so another device on the network can open its pages with an access token, while a browser on this machine still opens them at localhost with no token. Only the global value applies: a project, repo, or session value is refused on write and ignored, since one daemon serves every session on the machine. Read once at server startup; a server whose value differs from the running daemon's mode replaces the daemon, so a change applies from the next server start. The access token is shown only on the dashboard's index page viewed on this machine and persists across daemon restarts in the daemon's state directory; deleting its file issues a new one."
     }
   ]
 }
