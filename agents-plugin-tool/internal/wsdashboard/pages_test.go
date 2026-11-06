@@ -91,7 +91,7 @@ type pageFixture struct {
 	base    string
 }
 
-func startPageFixture(t *testing.T) *pageFixture {
+func startPageFixture(t *testing.T, options ...func(*DaemonOptions)) *pageFixture {
 	t.Helper()
 	f := &pageFixture{dir: t.TempDir(), project: t.TempDir(), src: newPageFake()}
 	now := time.Now()
@@ -111,7 +111,7 @@ func startPageFixture(t *testing.T) *pageFixture {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	f.d = startIndexedDaemon(t, f.dir, f.src, time.Hour)
+	f.d = startIndexedDaemon(t, f.dir, f.src, time.Hour, options...)
 	f.base = endpointURL(f.d.Endpoint(), "")
 	// The daemon's first index refresh runs beside its start; a page asked
 	// for before it lands is an unknown session.

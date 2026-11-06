@@ -308,9 +308,15 @@ func TestNudgeRereadsExactlyOneSession(t *testing.T) {
 	}
 }
 
-func startIndexedDaemon(t *testing.T, dir string, src SessionSource, poll time.Duration) *Daemon {
+// startIndexedDaemon starts a daemon over src; each option adjusts its
+// options before the start.
+func startIndexedDaemon(t *testing.T, dir string, src SessionSource, poll time.Duration, options ...func(*DaemonOptions)) *Daemon {
 	t.Helper()
-	d, err := StartDaemon(DaemonOptions{Dir: dir, Port: 0, Version: "1.0.0", LockWait: 200 * time.Millisecond, Sessions: src, PollInterval: poll})
+	opts := DaemonOptions{Dir: dir, Port: 0, Version: "1.0.0", LockWait: 200 * time.Millisecond, Sessions: src, PollInterval: poll}
+	for _, option := range options {
+		option(&opts)
+	}
+	d, err := StartDaemon(opts)
 	if err != nil {
 		t.Fatal(err)
 	}

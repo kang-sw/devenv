@@ -74,6 +74,7 @@ window.wbMermaidFile = {{.Assets.MermaidFile}};</script>
 <style>{{.Assets.CSS}}</style></head>
 <body class="dash index">{{.Assets.WhiteboardSprite}}{{.Assets.Sprite}}<div class="dwrap narrow">
 <div class="top"><h1>ws dashboard</h1><span class="meta">v{{.Version}}</span><span class="sse" id="sse" title="live updates"><span class="dot"></span><span class="sse-label">live</span></span></div>
+{{with .LAN}}<div class="lanbox"><b>LAN access is on.</b> Open this dashboard on another device on this network with its access token:{{range .URLs}}<code class="lanurl">{{.}}</code>{{end}}<span class="lannote">Only this machine sees the token. Delete <code>{{.TokenFile}}</code> to issue a new one.</span></div>{{end}}
 {{region . "sessions"}}
 </div>
 <script>{{.Assets.Script}}</script>

@@ -14,12 +14,14 @@ import (
 type Outcome string
 
 const (
-	// OutcomeRunning: a healthy daemon at least as new as this ws-mcp was
-	// already running and was left alone.
+	// OutcomeRunning: a healthy daemon was already running and was left
+	// alone: newer than this ws-mcp, or as new and in the LAN mode it asks
+	// for.
 	OutcomeRunning Outcome = "running"
 	// OutcomeStarted: no reachable daemon was running; a new one is up.
 	OutcomeStarted Outcome = "started"
-	// OutcomeReplaced: an older daemon was asked to stop and a new one is up.
+	// OutcomeReplaced: an older daemon, or one as new in the other LAN mode,
+	// was asked to stop and a new one is up.
 	OutcomeReplaced Outcome = "replaced"
 	// OutcomeUnavailable: no healthy daemon came up in time, for example
 	// because a hung daemon still holds the lock. Nothing was terminated.
@@ -45,6 +47,9 @@ type EnsureOptions struct {
 	// Port is the configured dashboard.port, passed to a started daemon as
 	// its --port flag.
 	Port int
+	// LAN is the LAN mode this ws-mcp asks for, passed to a started daemon as
+	// its --lan flag; a running daemon as new in the other mode is replaced.
+	LAN bool
 	// Spawn starts a detached daemon process with the given ws-mcp
 	// arguments ("dashboard", "--port", N). It returns once the process is
 	// started; it does not wait for the daemon to serve.
@@ -61,18 +66,25 @@ type EnsureOptions struct {
 	Log io.Writer
 }
 
-// DaemonArgs is the ws-mcp argument list that starts a daemon on port.
-func DaemonArgs(port int) []string {
-	return []string{"dashboard", "--port", strconv.Itoa(port)}
+// DaemonArgs is the ws-mcp argument list that starts a daemon on port, in
+// LAN mode when lan is set.
+func DaemonArgs(port int, lan bool) []string {
+	args := []string{"dashboard", "--port", strconv.Itoa(port)}
+	if lan {
+		args = append(args, "--lan")
+	}
+	return args
 }
 
 // Ensure makes sure a daemon at least as new as opts.Version runs:
 //
-//   - A healthy daemon at least as new is left alone, so an older ws-mcp
-//     never replaces a newer daemon.
-//   - A healthy older daemon gets the token-authenticated shutdown request;
-//     then a new daemon is started, which waits for the old one to release the
-//     lock.
+//   - A healthy newer daemon is left alone whatever its LAN mode, so an older
+//     ws-mcp never replaces a newer daemon; one as new is left alone when its
+//     LAN mode is opts.LAN.
+//   - A healthy older daemon, or one as new in the other LAN mode, gets the
+//     token-authenticated shutdown request; then a new daemon is started,
+//     which waits for the old one to release the lock. So a changed LAN value
+//     applies at the next ws-mcp start, without waiting for an upgrade.
 //   - An unreachable daemon (no endpoint file, a refused or unanswered
 //     /health, an answer from another process) is never treated as dead:
 //     a new daemon is started and the lock decides. When the recorded daemon
@@ -100,7 +112,7 @@ func Ensure(ctx context.Context, opts EnsureOptions) (Outcome, error) {
 		if readErr == nil {
 			info, err := Health(ctx, client, previous)
 			switch {
-			case err == nil && (CompareVersions(info.Version, opts.Version) >= 0 || spawns >= maxSpawns):
+			case err == nil && (keepRunning(info, opts) || spawns >= maxSpawns):
 				switch {
 				case spawns == 0:
 					return OutcomeRunning, nil
@@ -114,7 +126,7 @@ func Ensure(ctx context.Context, opts EnsureOptions) (Outcome, error) {
 					fmt.Fprintf(logw, "dashboard: older daemon %s refused shutdown: %v\n", info.Version, err)
 					return OutcomeRunning, nil
 				}
-				fmt.Fprintf(logw, "dashboard: replacing daemon %s with %s\n", info.Version, opts.Version)
+				fmt.Fprintf(logw, "dashboard: replacing daemon %s (lan %v) with %s (lan %v)\n", info.Version, info.LAN, opts.Version, opts.LAN)
 				replaced = true
 			default:
 				fmt.Fprintf(logw, "dashboard: recorded daemon unreachable (%v); starting one\n", err)
@@ -124,13 +136,25 @@ func Ensure(ctx context.Context, opts EnsureOptions) (Outcome, error) {
 			return OutcomeUnavailable, nil
 		}
 		spawns++
-		if err := opts.Spawn(DaemonArgs(opts.Port)); err != nil {
+		if err := opts.Spawn(DaemonArgs(opts.Port, opts.LAN)); err != nil {
 			return OutcomeUnavailable, fmt.Errorf("dashboard: start daemon: %w", err)
 		}
 		if !waitForSuccessor(ctx, client, opts, previous.Token) {
 			return OutcomeUnavailable, nil
 		}
 	}
+}
+
+// keepRunning reports whether the healthy daemon info describes may stay:
+// it is newer than this ws-mcp, or as new and in the LAN mode opts asks for.
+func keepRunning(info HealthInfo, opts EnsureOptions) bool {
+	switch cmp := CompareVersions(info.Version, opts.Version); {
+	case cmp > 0:
+		return true
+	case cmp == 0:
+		return info.LAN == opts.LAN
+	}
+	return false
 }
 
 // waitForSuccessor polls the endpoint file until it names a healthy daemon

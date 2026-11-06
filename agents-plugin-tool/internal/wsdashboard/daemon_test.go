@@ -218,7 +218,9 @@ func TestTakenPortFallsBackToAnOSAssignedPort(t *testing.T) {
 }
 
 // inProcessSpawner starts daemons in this process the way a detached
-// `ws-mcp dashboard --port N` would, recording each call's arguments.
+// `ws-mcp dashboard --port N [--lan]` would, recording each call's
+// arguments. A LAN daemon binds loopback here, so a test opens no port to
+// the network.
 type inProcessSpawner struct {
 	t        *testing.T
 	dir      string
@@ -236,8 +238,13 @@ func (s *inProcessSpawner) spawn(args []string) error {
 	n := len(s.calls)
 	s.calls = append(s.calls, append([]string(nil), args...))
 	s.mu.Unlock()
-	port, err := strconv.Atoi(args[len(args)-1])
-	if err != nil || len(args) != 3 || args[0] != "dashboard" || args[1] != "--port" {
+	lan := len(args) == 4 && args[3] == "--lan"
+	var port int
+	var err error
+	if len(args) >= 3 {
+		port, err = strconv.Atoi(args[2])
+	}
+	if err != nil || (len(args) != 3 && !lan) || args[0] != "dashboard" || args[1] != "--port" {
 		s.t.Errorf("spawn args = %v", args)
 		return errors.New("bad args")
 	}
@@ -247,7 +254,7 @@ func (s *inProcessSpawner) spawn(args []string) error {
 		wait = 2 * time.Second
 	}
 	go func() {
-		d, err := StartDaemon(DaemonOptions{Dir: s.dir, Port: port, Version: version, LockWait: wait})
+		d, err := StartDaemon(DaemonOptions{Dir: s.dir, Port: port, Version: version, LockWait: wait, LAN: lan, bindHost: "127.0.0.1"})
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		if err != nil {
@@ -333,6 +340,78 @@ func TestEnsureFromAnOlderWsMcpLeavesANewerDaemonRunning(t *testing.T) {
 			t.Fatalf("daemon %s stopped for ws-mcp %s", tc.daemon, tc.client)
 		default:
 		}
+	}
+}
+
+// TestEnsureHandoffAppliesAChangedLANMode: a daemon as new as the ws-mcp
+// but in the other LAN mode is replaced through the normal handoff, so a
+// changed LAN value applies at the next ws-mcp start; the replacement
+// reports the asked-for mode in /health and is then left alone.
+func TestEnsureHandoffAppliesAChangedLANMode(t *testing.T) {
+	for _, lan := range []bool{true, false} {
+		dir := t.TempDir()
+		old, err := StartDaemon(DaemonOptions{Dir: dir, Version: "0.48.0", LockWait: 200 * time.Millisecond, LAN: !lan, bindHost: "127.0.0.1"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(old.Close)
+		sp := &inProcessSpawner{t: t, dir: dir, versions: []string{"0.48.0"}}
+		opts := ensureOpts(dir, "0.48.0", sp.spawn)
+		opts.LAN = lan
+		outcome, err := Ensure(context.Background(), opts)
+		if err != nil || outcome != OutcomeReplaced {
+			t.Fatalf("lan %v: Ensure = %s, %v", lan, outcome, err)
+		}
+		waitDone(t, old)
+		if want := DaemonArgs(0, lan); len(sp.calls) != 1 || strings.Join(sp.calls[0], " ") != strings.Join(want, " ") {
+			t.Fatalf("lan %v: spawn calls = %v, want one %v", lan, sp.calls, want)
+		}
+		ep, _ := ReadEndpoint(dir)
+		if info, err := Health(context.Background(), testClient(), ep); err != nil || info.LAN != lan {
+			t.Fatalf("lan %v: new daemon health = %+v, %v", lan, info, err)
+		}
+		if outcome, err := Ensure(context.Background(), opts); err != nil || outcome != OutcomeRunning || len(sp.calls) != 1 {
+			t.Fatalf("lan %v: second Ensure = %s, %v, %d spawns", lan, outcome, err, len(sp.calls))
+		}
+		sp.closeAll()
+	}
+}
+
+// TestEnsureFromAnOlderWsMcpLeavesANewerDaemonInTheOtherLANMode: the mode
+// never makes an older ws-mcp replace a newer daemon.
+func TestEnsureFromAnOlderWsMcpLeavesANewerDaemonInTheOtherLANMode(t *testing.T) {
+	dir := t.TempDir()
+	d := startTestDaemon(t, dir, "0.49.0")
+	spawned := 0
+	opts := ensureOpts(dir, "0.48.0", func([]string) error { spawned++; return nil })
+	opts.LAN = true
+	if outcome, err := Ensure(context.Background(), opts); err != nil || outcome != OutcomeRunning || spawned != 0 {
+		t.Fatalf("Ensure = %s, %v, %d spawns", outcome, err, spawned)
+	}
+	select {
+	case <-d.Done():
+		t.Fatal("the newer daemon stopped")
+	default:
+	}
+}
+
+func TestDaemonArgsCarryTheLANFlag(t *testing.T) {
+	if got := strings.Join(DaemonArgs(29417, false), " "); got != "dashboard --port 29417" {
+		t.Fatalf("DaemonArgs off = %q", got)
+	}
+	if got := strings.Join(DaemonArgs(29417, true), " "); got != "dashboard --port 29417 --lan" {
+		t.Fatalf("DaemonArgs on = %q", got)
+	}
+}
+
+// TestLANModeBindsBeyondLoopback: localhost mode binds loopback only and LAN
+// mode every interface.
+func TestLANModeBindsBeyondLoopback(t *testing.T) {
+	if got := bindHostFor(DaemonOptions{}); got != "127.0.0.1" {
+		t.Fatalf("localhost mode binds %q", got)
+	}
+	if got := bindHostFor(DaemonOptions{LAN: true}); got != "" {
+		t.Fatalf("LAN mode binds %q, want every interface", got)
 	}
 }
 
