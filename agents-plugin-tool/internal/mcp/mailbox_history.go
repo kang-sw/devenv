@@ -59,11 +59,13 @@ type mailboxHistoryEntry struct {
 }
 
 // mailboxHistoryRecord is a read entry: the stored fields plus the exchange
-// time (RFC3339 UTC, from the file-name stamp) and the derived title.
+// time (RFC3339 UTC, from the file-name stamp), the derived title, and the
+// entry's file name (the key a conversation ring mail line carries).
 type mailboxHistoryRecord struct {
 	mailboxHistoryEntry
 	Time  string
 	Title string
+	Name  string
 }
 
 // mailboxHistoryClock makes entry stamps strictly increasing within this
@@ -237,6 +239,7 @@ func readMailboxHistory(sessionKey string) ([]mailboxHistoryRecord, error) {
 			mailboxHistoryEntry: entry,
 			Time:                at.UTC().Format(time.RFC3339),
 			Title:               mailboxHistoryTitle(entry.Body),
+			Name:                name,
 		})
 	}
 	return records, nil

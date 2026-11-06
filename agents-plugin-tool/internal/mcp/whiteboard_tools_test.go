@@ -945,7 +945,8 @@ func TestWhiteboardWorkflowTextFollowsKnob(t *testing.T) {
 		"#### Payload",
 		"whiteboard.update payload: {",
 		"write `{{12}}` in `title`",
-		"Whiteboard: ai-docs/whiteboards/<reply-id>.html - (102), (103)",
+		"Whiteboard: <full> - (102), (103)",
+		"session's dashboard page URL while the dashboard daemon serves the session,",
 		"- Discussion IDs come from the whiteboard store",
 	} {
 		if !strings.Contains(manualOn, want) {
@@ -984,7 +985,8 @@ func TestWhiteboardPlaybookStatesPointerAndEmbedDirWithoutNamingAHost(t *testing
 	f := newWhiteboardFixture(t)
 	text := toolText(t, f.call(t, "playbook.read", map[string]any{"name": "whiteboard"}))
 	for _, want := range []string{
-		"Whiteboard: ai-docs/whiteboards/<reply-id>.html - (102), (103)",
+		"Whiteboard: <full> - (102), (103)",
+		"session's dashboard page URL while the dashboard daemon serves the session,",
 		"When the host's instructions name a folder its embedded files must live in,",
 		"pass that folder as `embed_dir` on your first update after the session starts",
 		"embed the bare file name the update returns",

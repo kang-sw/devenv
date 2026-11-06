@@ -54,6 +54,6 @@
 
 {{define "row"}}{{if .State}}<li class="{{.State}}"{{with .Label}} title="{{.}}"{{end}}><span class="box">{{icon (box .State)}}</span><span>{{template "rowtext" .}}</span></li>{{else}}<li class="keyed">{{with .Label}}<code>{{.}}</code>{{end}}<span>{{template "rowtext" .}}</span></li>{{end}}{{end}}
 
-{{define "rowtext"}}{{if .Link}}<a href="{{href .Link}}">{{.Text}}</a>{{else}}{{.Text}}{{end}}{{end}}
+{{define "rowtext"}}{{if .Link}}<a href="{{href .Link}}">{{.Text}}</a>{{else}}{{.Text}}{{with .Path}} <code class="fpath">{{.}}</code>{{end}}{{end}}{{end}}
 
 {{define "reply"}}{{if .Answerable}}<div class="reply{{if not .BulkAck}} solo{{end}}">{{if .BulkAck}}<label class="allok" title="acknowledge every technical/announced item and confirm every assumed one"><input type="checkbox" id="ack-all">{{icon "check"}}{{.CountBulk}}</label>{{end}}<textarea id="reply-text" readonly placeholder="(nn) a; (mm) ok"></textarea><button class="btn primary" id="reply-copy" title="copy answers">{{icon "copy"}}</button><span class="hint" id="reply-hint"></span></div>{{end}}{{end}}

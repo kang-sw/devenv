@@ -72,6 +72,10 @@ type dashboardSession struct {
 	reg wsdashboard.Registration
 	// idle is set once the heartbeat stopped for dashboardIdleCutoff.
 	idle bool
+	// servedPort is the daemon port this session's most recent nudge round
+	// trip was answered on (204); zero after a failed one or before any
+	// returned. whiteboard.update's pointer line reads it (dashboardPageURL).
+	servedPort int
 }
 
 func (d *dashboardLink) clock() time.Time {
@@ -143,6 +147,7 @@ func (s *Server) dashboardTouch(sessionKey, root string, force bool) {
 				appendDebugEvent("dashboard.unregister_failed", map[string]any{"error": err.Error()})
 			}
 			sess.reg = wsdashboard.Registration{}
+			sess.servedPort = 0
 		}
 		return
 	}
@@ -196,6 +201,7 @@ func (s *Server) dashboardHeartbeat() {
 				appendDebugEvent("dashboard.unregister_failed", map[string]any{"error": err.Error()})
 			}
 			sess.reg = wsdashboard.Registration{}
+			sess.servedPort = 0
 			continue
 		}
 		reg := sess.reg
@@ -321,26 +327,66 @@ func (s *Server) runDashboardNudges(queue <-chan wsdashboard.NudgeBody) {
 		}
 		dir, err := s.dashboard.stateDir()
 		if err != nil {
+			s.recordDashboardNudges(batch, 0)
 			continue
 		}
 		ep, err := wsdashboard.ReadEndpoint(dir)
 		if err != nil {
+			s.recordDashboardNudges(batch, 0)
 			continue
 		}
 		for _, body := range batch {
 			ctx, cancel := context.WithTimeout(context.Background(), dashboardNudgeTimeout)
 			err := wsdashboard.SendNudge(ctx, client, ep, body)
 			cancel()
+			port := ep.Port
 			if err != nil {
+				port = 0
 				appendDebugEvent("dashboard.nudge_failed", map[string]any{"error": err.Error()})
+			}
+			s.recordDashboardNudges([]wsdashboard.NudgeBody{body}, port)
+		}
+	}
+}
+
+// recordDashboardNudges records the outcome of the nudges in batch on the
+// sessions they name: port is the daemon port that answered 204, or zero
+// for a failed round trip.
+func (s *Server) recordDashboardNudges(batch []wsdashboard.NudgeBody, port int) {
+	d := &s.dashboard
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for _, body := range batch {
+		for _, sess := range d.sessions {
+			if sess.replyID == body.ReplyID && sess.project == body.Project {
+				sess.servedPort = port
 			}
 		}
 	}
 }
 
+// dashboardPageURL is the session's dashboard page URL when the daemon
+// serves it: the session is registered (its dashboard key is on) and its
+// most recent nudge round trip succeeded. It reads only recorded state, so
+// whiteboard.update never waits on, or fails through, the daemon. The
+// accepted lag: the answer reflects the previous nudge, so the first update
+// after the daemon dies may still name the URL once, and a session's first
+// update before any of its nudges returned names the file path.
+func (s *Server) dashboardPageURL(sessionKey string) (string, bool) {
+	d := &s.dashboard
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	sess, ok := d.sessions[strings.TrimSpace(sessionKey)]
+	if !ok || sess.reg.ReplyID == "" || sess.servedPort <= 0 {
+		return "", false
+	}
+	return fmt.Sprintf("http://127.0.0.1:%d/s/%s", sess.servedPort, sess.replyID), true
+}
+
 // DashboardSessionSource reads registered sessions for the daemon's session
 // index from the session key store and the session's live stores (snapshot
-// and conversation ring) in its registry directory. It maps a reply-id to its
+// and conversation ring) in its registry directory, and reads their pages
+// (ReadPage, dashboard_page.go). It maps a reply-id to its
 // session key by scanning the key file names, so no new file ever records a
 // session key; the key stays inside this process and never reaches a page.
 type DashboardSessionSource struct {
@@ -369,10 +415,51 @@ const dashboardRescanAfter = 5 * time.Second
 
 // ReadSession reads the session record behind reg. It reports false when no
 // top-level lead record rooted at reg.Project maps to reg.ReplyID.
+//
+// The fingerprint covers everything the session page shows: the record, the
+// live stores, the board's panels as the served page builds them (ticket
+// directories, mailbox queues, and the listening marker live outside the
+// record), the mailbox history entry names, and the resolved contacts. A
+// contact's liveness is left out: it is derived from the clock, and a
+// re-read that differs only by the time is no change.
 func (src *DashboardSessionSource) ReadSession(reg wsdashboard.Registration) (wsdashboard.SessionData, bool) {
+	key, raw, record, ok := src.lookupRecord(reg)
+	if !ok {
+		return wsdashboard.SessionData{}, false
+	}
+	h := sha256.New()
+	h.Write(raw)
+	updatedAt := src.hashLiveStores(h, reg.ReplyID)
+	if record.Whiteboard != nil {
+		panels, _ := json.Marshal(servedWhiteboardPanels(record, key, reg.ReplyID))
+		fmt.Fprintf(h, "\x00panels\x00%s", panels)
+	}
+	io.WriteString(h, "\x00history")
+	if dir, err := mailboxHistoryDir(key); err == nil {
+		names, _ := mailboxHistoryEntryNames(dir)
+		for _, name := range names {
+			io.WriteString(h, "\x00"+name)
+		}
+	}
+	io.WriteString(h, "\x00contacts")
+	for _, c := range src.readContacts(reg) {
+		fmt.Fprintf(h, "\x00%s\x01%s\x01%s", c.Address, c.ReplyID, c.LastExchange.UTC().Format(time.RFC3339))
+	}
+	return wsdashboard.SessionData{
+		HasBoard:          record.Whiteboard != nil,
+		Fingerprint:       hex.EncodeToString(h.Sum(nil)[:16]),
+		SnapshotUpdatedAt: updatedAt,
+	}, true
+}
+
+// lookupRecord finds the session record behind reg: the top-level lead
+// record rooted at reg.Project whose key maps to reg.ReplyID. It returns the
+// key (which never leaves this process), the raw record file, and the
+// decoded record.
+func (src *DashboardSessionSource) lookupRecord(reg wsdashboard.Registration) (key string, raw []byte, record sessionRecord, ok bool) {
 	dir, err := src.store.keysDir()
 	if err != nil {
-		return wsdashboard.SessionData{}, false
+		return "", nil, sessionRecord{}, false
 	}
 	for attempt := 0; attempt < 2; attempt++ {
 		for _, key := range src.keysFor(dir, reg.ReplyID, attempt > 0) {
@@ -384,17 +471,18 @@ func (src *DashboardSessionSource) ReadSession(reg wsdashboard.Registration) (ws
 			if json.Unmarshal(data, &record) != nil || record.Root != reg.Project || record.Scope != string(roleLead) || record.Parent != "" {
 				continue
 			}
-			h := sha256.New()
-			h.Write(data)
-			updatedAt := src.hashLiveStores(h, reg.ReplyID)
-			return wsdashboard.SessionData{
-				HasBoard:          record.Whiteboard != nil,
-				Fingerprint:       hex.EncodeToString(h.Sum(nil)[:16]),
-				SnapshotUpdatedAt: updatedAt,
-			}, true
+			return key, data, record, true
 		}
 	}
-	return wsdashboard.SessionData{}, false
+	return "", nil, sessionRecord{}, false
+}
+
+// clock is the source's clock.
+func (src *DashboardSessionSource) clock() time.Time {
+	if src.now != nil {
+		return src.now()
+	}
+	return time.Now()
 }
 
 // hashLiveStores folds the session's live stores into h and returns the
@@ -419,11 +507,7 @@ func (src *DashboardSessionSource) hashLiveStores(h io.Writer, replyID string) t
 		if json.Unmarshal(raw, &doc) == nil && json.Unmarshal(raw, &snap) == nil {
 			delete(doc, "updatedAt")
 			canonical, _ := json.Marshal(doc)
-			now := time.Now()
-			if src.now != nil {
-				now = src.now()
-			}
-			fmt.Fprintf(h, "\x00snapshot stale=%t\x00%s", snap.Stale(now), canonical)
+			fmt.Fprintf(h, "\x00snapshot stale=%t\x00%s", snap.Stale(src.clock()), canonical)
 			if snap.UpdatedAt > 0 {
 				updatedAt = time.UnixMilli(snap.UpdatedAt)
 			}
