@@ -620,7 +620,14 @@
       "registered_at": "2026-11-06T04:42:55Z"
     },
     "261106-feat-ws-dashboard-browser-interaction": {
-      "registered_at": "2026-11-06T08:59:48Z"
+      "registered_at": "2026-11-06T08:59:48Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-06T14:08:39Z"
+      }
     },
     "261106-feat-ws-dashboard-claude-adapter": {
       "registered_at": "2026-11-06T08:59:54Z",
