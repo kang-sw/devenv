@@ -12,8 +12,8 @@ related:
 
 ## Scope
 
-A `--serve` mode of the ws-mcp binary runs one dashboard daemon per machine
-environment. It serves every ws session on that machine as a live web page:
+A `dashboard` subcommand of the ws-mcp binary runs one dashboard daemon per
+machine environment. It serves every ws session on that machine as a live web page:
 the whiteboard board and dashboard panels of each session, a live view of
 each session's lead and subagent activity, the session's conversation, and a
 composer that sends user messages back to the session. The goal is that a
@@ -322,6 +322,41 @@ with browser interaction folded into the core.
 - **Host-independent.** The dashboard targets every ws host user: Claude,
   Pi, and Codex in a terminal. It goes ahead whether or not another host UI,
   such as Orca, shows similar views. (194)
+  This reopens the dashboard topic the user closed on 2026-08-01 (df8336ce,
+  `260730-chore-ws-dashboard-drop-sweep`), which dropped an IDE-scale
+  dashboard for host UIs such as Orca; (194) answers that reason, and the
+  IDE scope stays out (Non-Scope).
+- **Daemon entry point.** The daemon is a new `ws-mcp dashboard` subcommand.
+  Rejected: a non-stdio flag on `ws-mcp serve`, which is the stdio MCP entry
+  point every launcher calls (`cmd/ws-mcp/main.go`); a separate subcommand
+  keeps that path untouched.
+
+## Prior Decisions
+
+- df8336ce (2026-08-01, commit): "user closed the dashboard topic definitively" (recorded on 260802-research-ws-pi-native-framework: "Dashboard — closed topic, not absorbed") — bearing: contradiction-candidate
+- 260730-chore-ws-dashboard-drop-sweep (2026-08-01, commit 41157331): "recovery remains archive/ws-dashboard; no dashboard artifact is retained in the live docs tree." — bearing: constrains
+- 261030-feat-pi-orca-subagent-lifecycle-emitter (2026-10-31, commit 3a13e853): "Owner decision 2026-10-31: the Pi peer stays a terminal CLI session, so the structured-Orca emitter (no supported delivery path, see ## Blocked) is no longer wanted." — bearing: supports
+- 261028-feat-pi-agent-widget-batch-row-redesign (2026-10-28, commit 1b6079a5): "The generating state lives on AgentBatchBuffer.generating, outside the capped batches list, and batchViews appends its view last with the seq the batch would take" — bearing: constrains
+- 261028-feat-pi-agent-widget-expanded-mode (2026-10-28, commit 19446d2b): "Two Minor summary-path findings (folded agents still summarized; relaunched intermediate resets batch sequence) are left as follow-ups" — bearing: constrains
+- 261028-feat-claude-mod-status-band (2026-10-28, Decisions): "Refresh is event-driven: usage on session.measure, model and effort on main-loop turn.step, git on tool.call (2 s throttle) and turn.complete" — bearing: supports
+- 260525-feat-ws-dashboard-multi-server-gateway (2026-05-25, Decisions): "The browser always talks to the local dashboard daemon." — bearing: supports
+- 260515-ws-web-daemon-foundation (2026-05-15, commit 03442cdf): "made the dashboard daemon shell caller-visible: `ws-dashboard serve`, loopback default, one-time pairing, owner session cookie, gated health/UI/fallback routes" — bearing: supports
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-pi/src/agent-batches.ts is the only path named; the children also reach agents-plugin-tool/cmd/ws-mcp, agents-plugin-tool/internal/mcp, agents-plugin-tool/internal/wswhiteboard, agents-plugin/hooks/claude-mod, and the Pi adapter |
+| scope.surface | cross-module | new ws-mcp daemon mode, HTTP routes /, /s/reply-id, /health, /nudge, a new inbox-drain MCP tool, a new mailbox wait flag, adapter injection paths |
+| scope.new_public_symbol | yes | daemon mode of ws-mcp, /health and /nudge routes, inbox-drain MCP tool, mailbox wait inbox flag |
+| scope.new_type_contract | yes | endpoint file, machine root registry, per-session live snapshot, board-answer inbox entry, conversation ring entry, nudge body |
+| scope.test_surface | new-files | no daemon code or tests exist; existing agents-plugin-tool/internal/mcp/whiteboard_panels_test.go, mailbox_history_test.go, agents-plugin-pi/test/agent-batches.test.ts would extend |
+| complexity.reuse_points | confirmed | wswhiteboard.View at agents-plugin-tool/internal/wswhiteboard/view.go#L20, panel providers in agents-plugin-tool/internal/mcp/whiteboard_panels.go, per-entry ring in mailbox_history.go, BatchView and caps in agents-plugin-pi/src/agent-batches.ts#L34-L40, ws-mcp mailbox wait in agents-plugin-tool/cmd/ws-mcp/mailbox.go |
+| complexity.side_effect_risk | high | detached process spawn, OS file locks, a network listener, and injection of messages with user authority into live sessions |
+| risk.correctness | high | daemon lifecycle and replacement caused the dropped MVP's bugs f55de2d62, bff07cafb, e6caac0dc; held-message merge and cancel race against the adapter drain |
+| risk.fit | moderate | the dashboard topic was closed on 2026-08-01 per df8336ce, and ws-mcp already has a serve subcommand that is the stdio MCP server at agents-plugin-tool/cmd/ws-mcp/main.go#L80-L105 |
+| risk.test | high | cross-platform flock and LockFileEx, SSE region swaps in a browser, and the Claude adapter event probe need live hosts |
+| risk.security_or_contract | high | LAN access token, user-authority message injection, and the project-root containment of the image route |
 
 ## Completion Criteria
 
