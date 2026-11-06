@@ -44,6 +44,9 @@ type Server struct {
 	// declared holds the adapter-declared config keys loaded from the
 	// envConfigManifests manifests at construction.
 	declared declaredConfig
+	// live holds the dashboard live state of the sessions this process
+	// received adapter intake for (live_snapshot.go).
+	live liveHub
 	// dashboard is the dashboard session registry and nudge state
 	// (dashboard_sessions.go).
 	dashboard dashboardLink
@@ -649,7 +652,9 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 	// Central mailbox piggyback wrapper (Decision: one interception point):
 	// every reply this call produces gets a chance at an unread-mail badge,
 	// regardless of which case below built it. See mailbox_tools.go.
-	if keyStr, ok := params.Arguments["session_key"].(string); ok {
+	// The adapter-only intake is no model-facing reply, so it carries no
+	// badge and costs no mailbox read on its high call rate.
+	if keyStr, ok := params.Arguments["session_key"].(string); ok && params.Name != dashboardIntakeTool {
 		jsonFormat := wantsJSON(params.Arguments)
 		defer func() {
 			resp = s.applyMailboxPiggyback(resp, keyStr, jsonFormat)
@@ -2184,6 +2189,8 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		return s.handleMailboxLookupPeers(req.ID, params.Arguments)
 	case "mailbox.history":
 		return s.handleMailboxHistory(req.ID, params.Arguments)
+	case dashboardIntakeTool:
+		return s.handleDashboardIntake(req.ID, params.Arguments)
 
 	default:
 		return errorResponse(req.ID, -32602, fmt.Sprintf("unknown tool: %s", params.Name))
@@ -4908,6 +4915,23 @@ func tools() []map[string]any {
 					"format":      stringProperty(`Optional output format. Use "json" for structured output.`),
 				},
 				"required": []string{"session_key"},
+			},
+		},
+		{
+			"name":        dashboardIntakeTool,
+			"description": `Adapter-only: a host adapter (the extension or mod that runs inside the agent host) calls this to hand its session's live activity to the dashboard; an agent never calls it. Each call applies an ordered list of events to the session's live state, which ws-mcp writes to the session's live snapshot (debounced) and, for finished conversation messages, to its conversation ring. Event kinds: reset (clear the lead and the subagent tree; send it when the adapter starts); turn_start {origin?: terminal|whiteboard|mail} and turn_end (turn_end records the turn summary: tool calls done and failed, and duration); agent {agentId?, parentId?, label?, sessionKey?, status?: running|done|failed, caption?, batches?} updates the lead (no agentId) or one subagent keyed by the host's native agent id, where batches is the agent's newest batch views (one assistant message and its tool calls each, oldest first; at most 5 kept, 5 tool names each, a 200-character argument preview on the running call only) and sessionKey, a delegate's ws session key, is shown only as its reply-id; permission {agentId?, tool, args} or {agentId?, clear: true} marks a tool permission wait; reply {text, final?} is the lead's reply text so far, replacing the previous text, and final: true moves it to the conversation; user {text, origin?: terminal|whiteboard} is a finished user message. Every event takes an optional at (epoch milliseconds). Coalesce streamed reply text on the adapter side: send the text so far at most about 10 times a second, never one call per token. Session keys never reach the snapshot. With the session's dashboard.enabled off, nothing is recorded. Returns one compact line, plus one line per skipped event.`,
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("The adapter's session key: the ws session key of the session it feeds."),
+					"adapter":     stringProperty(`The adapter's name, for example "pi" or "claude".`),
+					"events": map[string]any{
+						"type":        "array",
+						"description": "Ordered events; each is an object with a kind field.",
+						"items":       map[string]any{"type": "object"},
+					},
+				},
+				"required": []string{"session_key", "adapter", "events"},
 			},
 		},
 		{

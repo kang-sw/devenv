@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/wslive"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
 )
 
@@ -387,7 +388,7 @@ func TestMailboxHistorySkipsUnreadableAndUnparsableEntries(t *testing.T) {
 	resetMailboxHistoryClock(t)
 	setMailboxClock(t, time.Date(2026, 11, 6, 15, 0, 0, 0, time.UTC))
 	const key = "history-skip-key"
-	if err := appendMailboxHistory(key, []mailboxHistoryEntry{
+	if _, err := appendMailboxHistory(key, []mailboxHistoryEntry{
 		{Direction: "sent", Counterparty: "a@machine", Body: "one"},
 		{Direction: "recv", Counterparty: "a@machine", Body: "two"},
 	}); err != nil {
@@ -428,7 +429,8 @@ func TestMailboxHistoryConcurrentAppendsAllLand(t *testing.T) {
 		go func(w int) {
 			defer wg.Done()
 			for i := 0; i < 5; i++ {
-				errs <- appendMailboxHistory(key, []mailboxHistoryEntry{{Direction: "sent", Counterparty: "x@machine", Body: fmt.Sprintf("w%d-%d", w, i)}})
+				_, err := appendMailboxHistory(key, []mailboxHistoryEntry{{Direction: "sent", Counterparty: "x@machine", Body: fmt.Sprintf("w%d-%d", w, i)}})
+				errs <- err
 			}
 		}(w)
 	}
@@ -462,7 +464,7 @@ func TestMaybePruneRemovesStaleMailboxHistory(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	resetMailboxHistoryClock(t)
 	for _, key := range []string{"stale-history", "fresh-history"} {
-		if err := appendMailboxHistory(key, []mailboxHistoryEntry{{Direction: "sent", Counterparty: "x@machine", Body: key}}); err != nil {
+		if _, err := appendMailboxHistory(key, []mailboxHistoryEntry{{Direction: "sent", Counterparty: "x@machine", Body: key}}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -477,5 +479,37 @@ func TestMaybePruneRemovesStaleMailboxHistory(t *testing.T) {
 	}
 	if _, err := os.Stat(freshDir); err != nil {
 		t.Fatalf("fresh history dir was pruned: %v", err)
+	}
+}
+
+// TestMailboxSendAndRecvWriteMailLines pins the mail entries: a send and a
+// receive each add a mail line to the session's ring, carrying the history
+// entry's file name, the direction, the peer, and the first line.
+func TestMailboxSendAndRecvWriteMailLines(t *testing.T) {
+	f := newLiveFixture(t, true)
+	resetMailboxHistoryClock(t)
+	mustSend(t, f.server, 3, f.keyA, wsmailbox.ReplyIDPrefix+f.replyB, "Status update\nbody line")
+	callToolWithKey(t, f.server, 4, f.keyB, "mailbox.recv", nil)
+
+	sent := readLiveRing(t, f.sessionDir(f.replyA))
+	if len(sent) != 1 {
+		t.Fatalf("sender ring = %+v", sent)
+	}
+	if e := sent[0]; e.Kind != wslive.RingMail || e.Direction != "sent" || e.Peer != wsmailbox.ReplyIDPrefix+f.replyB || e.Title != "Status update" {
+		t.Fatalf("sent line = %+v", e)
+	}
+	if names := historyEntryFiles(t, f.keyA); len(names) != 1 || sent[0].HistoryKey != names[0] {
+		t.Fatalf("sent history key %q, history files %v", sent[0].HistoryKey, names)
+	}
+
+	recv := readLiveRing(t, f.sessionDir(f.replyB))
+	if len(recv) != 1 {
+		t.Fatalf("receiver ring = %+v", recv)
+	}
+	if e := recv[0]; e.Direction != "recv" || e.Peer != wsmailbox.ReplyIDPrefix+f.replyA || e.Title != "Status update" {
+		t.Fatalf("recv line = %+v", e)
+	}
+	if names := historyEntryFiles(t, f.keyB); len(names) != 1 || recv[0].HistoryKey != names[0] {
+		t.Fatalf("recv history key %q, history files %v", recv[0].HistoryKey, names)
 	}
 }

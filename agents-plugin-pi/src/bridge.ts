@@ -673,6 +673,18 @@ export function filterOutMercenaryTools<T extends { name: string }>(tools: reado
 }
 
 /**
+ * ws-mcp tools only a host adapter calls (raw names). The extension calls
+ * them through its own client; registered as Pi tools they would only add a
+ * model-visible tool the model must never use.
+ */
+export const ADAPTER_ONLY_RAW_TOOLS: ReadonlySet<string> = new Set(["dashboard.intake"]);
+
+/** Drops the adapter-only tools from the list the bridge registers with Pi and exposes via `wsToolNames`. Pure. */
+export function filterOutAdapterOnlyTools<T extends { name: string }>(tools: readonly T[]): T[] {
+  return tools.filter((tool) => !ADAPTER_ONLY_RAW_TOOLS.has(tool.name));
+}
+
+/**
  * Drops `session_key` from a JSON-Schema's `required` array (keeping it in
  * `properties`, unchanged, so a caller can still supply it explicitly).
  *
@@ -1011,7 +1023,7 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
     });
     assertVersionPin(runtime, initResult.serverInfo.version);
 
-    tools = filterOutMercenaryTools(await client.listTools());
+    tools = filterOutAdapterOnlyTools(filterOutMercenaryTools(await client.listTools()));
     for (const tool of tools) {
       const rawName = tool.name;
       const registeredName = sanitizeToolName(rawName);

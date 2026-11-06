@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"runtime/debug"
@@ -13,6 +15,7 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsdashboard"
+	"github.com/kang-sw/devenv/internal/wslive"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
 )
 
@@ -336,11 +339,17 @@ func (s *Server) runDashboardNudges(queue <-chan wsdashboard.NudgeBody) {
 }
 
 // DashboardSessionSource reads registered sessions for the daemon's session
-// index from the session key store. It maps a reply-id to its session key by
-// scanning the key file names, so no new file ever records a session key;
-// the key stays inside this process and never reaches a page.
+// index from the session key store and the session's live stores (snapshot
+// and conversation ring) in its registry directory. It maps a reply-id to its
+// session key by scanning the key file names, so no new file ever records a
+// session key; the key stays inside this process and never reaches a page.
 type DashboardSessionSource struct {
 	store *sessionStore
+	// stateDir resolves the daemon state directory; nil uses
+	// wsdashboard.Dir("").
+	stateDir func() (string, error)
+	// now is the clock that judges snapshot staleness; nil uses time.Now.
+	now func() time.Time
 
 	mu      sync.Mutex
 	byReply map[string][]string
@@ -375,14 +384,58 @@ func (src *DashboardSessionSource) ReadSession(reg wsdashboard.Registration) (ws
 			if json.Unmarshal(data, &record) != nil || record.Root != reg.Project || record.Scope != string(roleLead) || record.Parent != "" {
 				continue
 			}
-			sum := sha256.Sum256(data)
+			h := sha256.New()
+			h.Write(data)
+			updatedAt := src.hashLiveStores(h, reg.ReplyID)
 			return wsdashboard.SessionData{
-				HasBoard:    record.Whiteboard != nil,
-				Fingerprint: hex.EncodeToString(sum[:16]),
+				HasBoard:          record.Whiteboard != nil,
+				Fingerprint:       hex.EncodeToString(h.Sum(nil)[:16]),
+				SnapshotUpdatedAt: updatedAt,
 			}, true
 		}
 	}
 	return wsdashboard.SessionData{}, false
+}
+
+// hashLiveStores folds the session's live stores into h and returns the
+// snapshot's updatedAt. The snapshot is hashed without updatedAt but with
+// its staleness, so a heartbeat rewrite is no change while a writer that
+// stopped is one; the ring is hashed by its entry names, since an entry
+// file is never rewritten.
+func (src *DashboardSessionSource) hashLiveStores(h io.Writer, replyID string) time.Time {
+	resolve := src.stateDir
+	if resolve == nil {
+		resolve = func() (string, error) { return wsdashboard.Dir("") }
+	}
+	dir, err := resolve()
+	if err != nil {
+		return time.Time{}
+	}
+	sessionDir := wsdashboard.SessionDir(dir, replyID)
+	var updatedAt time.Time
+	if raw, err := os.ReadFile(wslive.SnapshotPath(sessionDir)); err == nil {
+		var doc map[string]any
+		var snap wslive.Snapshot
+		if json.Unmarshal(raw, &doc) == nil && json.Unmarshal(raw, &snap) == nil {
+			delete(doc, "updatedAt")
+			canonical, _ := json.Marshal(doc)
+			now := time.Now()
+			if src.now != nil {
+				now = src.now()
+			}
+			fmt.Fprintf(h, "\x00snapshot stale=%t\x00%s", snap.Stale(now), canonical)
+			if snap.UpdatedAt > 0 {
+				updatedAt = time.UnixMilli(snap.UpdatedAt)
+			}
+		}
+	}
+	if names, err := wslive.RingNames(wslive.RingDir(sessionDir)); err == nil {
+		io.WriteString(h, "\x00ring")
+		for _, name := range names {
+			io.WriteString(h, "\x00"+name)
+		}
+	}
+	return updatedAt
 }
 
 // keysFor returns the session keys whose reply-id is replyID. A miss, or

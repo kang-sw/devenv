@@ -109,60 +109,66 @@ func isMailboxHistoryEntryName(name string) bool {
 }
 
 // appendMailboxHistory writes entries, in order, to sessionKey's ring and then
-// trims it to the newest mailboxHistoryCap. It returns the first write error
-// and stops there; callers log it and never surface it, because the send has
-// already been enqueued or the mail already drained. Trimming is best effort.
-func appendMailboxHistory(sessionKey string, entries []mailboxHistoryEntry) error {
+// trims it to the newest mailboxHistoryCap. It returns the file names of the
+// entries written, in order, and the first write error, stopping there;
+// callers log the error and never surface it, because the send has already
+// been enqueued or the mail already drained. Trimming is best effort.
+func appendMailboxHistory(sessionKey string, entries []mailboxHistoryEntry) ([]string, error) {
 	if len(entries) == 0 {
-		return nil
+		return nil, nil
 	}
 	dir, err := mailboxHistoryDir(sessionKey)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("create mailbox history dir: %w", err)
+		return nil, fmt.Errorf("create mailbox history dir: %w", err)
 	}
-	var werr error
+	var (
+		names []string
+		werr  error
+	)
 	for _, entry := range entries {
-		if werr = writeMailboxHistoryEntry(dir, entry); werr != nil {
+		var name string
+		if name, werr = writeMailboxHistoryEntry(dir, entry); werr != nil {
 			break
 		}
+		names = append(names, name)
 	}
 	trimMailboxHistory(dir)
-	return werr
+	return names, werr
 }
 
-func writeMailboxHistoryEntry(dir string, entry mailboxHistoryEntry) error {
+func writeMailboxHistoryEntry(dir string, entry mailboxHistoryEntry) (string, error) {
 	raw, err := json.Marshal(entry)
 	if err != nil {
-		return err
+		return "", err
 	}
 	var suffix [4]byte
 	if _, err := rand.Read(suffix[:]); err != nil {
-		return err
+		return "", err
 	}
 	name := nextMailboxHistoryStamp().Format(mailboxHistoryStampLayout) + "-" + hex.EncodeToString(suffix[:]) + ".json"
 
 	tmp, err := os.CreateTemp(dir, ".tmp-*")
 	if err != nil {
-		return fmt.Errorf("create mailbox history temp file: %w", err)
+		return "", fmt.Errorf("create mailbox history temp file: %w", err)
 	}
 	tmpPath := tmp.Name()
 	if _, err := tmp.Write(raw); err != nil {
 		tmp.Close()
 		os.Remove(tmpPath)
-		return fmt.Errorf("write mailbox history entry: %w", err)
+		return "", fmt.Errorf("write mailbox history entry: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
 		os.Remove(tmpPath)
-		return fmt.Errorf("write mailbox history entry: %w", err)
+		return "", fmt.Errorf("write mailbox history entry: %w", err)
 	}
 	if err := os.Rename(tmpPath, filepath.Join(dir, name)); err != nil {
 		os.Remove(tmpPath)
-		return fmt.Errorf("commit mailbox history entry: %w", err)
+		return "", fmt.Errorf("commit mailbox history entry: %w", err)
 	}
-	return nil
+	return name, nil
 }
 
 // trimMailboxHistory removes all but the newest mailboxHistoryCap entries,
@@ -257,11 +263,14 @@ func mailboxHistoryTitle(body string) string {
 }
 
 // recordMailboxHistory appends entries to sessionKey's ring, logging a failed
-// write rather than surfacing it.
-func recordMailboxHistory(sessionKey string, entries []mailboxHistoryEntry) {
-	if err := appendMailboxHistory(sessionKey, entries); err != nil {
+// write rather than surfacing it, and returns the written entries' file names
+// in order (fewer than entries after a failed write).
+func recordMailboxHistory(sessionKey string, entries []mailboxHistoryEntry) []string {
+	names, err := appendMailboxHistory(sessionKey, entries)
+	if err != nil {
 		appendDebugEvent("mailbox.history_write_error", map[string]any{"error": err.Error()})
 	}
+	return names
 }
 
 // mailboxHistoryOut is mailbox.history's per-entry JSON shape. Body is a

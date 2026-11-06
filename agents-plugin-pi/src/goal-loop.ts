@@ -137,6 +137,8 @@ export interface GoalLoopConfig {
   agent_wait_animation?: boolean;
   /** 261028: batch rows per agent in the live-agent widget's expanded mode; resolved by `agent-widget.ts`'s `resolveAgentWidgetRows`. */
   agent_widget_rows?: number;
+  /** Whether the owner lead feeds the ws dashboard; resolved by `dashboard-feed.ts`'s `resolveDashboardEnabled`. */
+  dashboard_enabled?: boolean;
   runaway_threshold?: number;
   /** Advisory context-usage threshold (`parseCompactionThreshold` grammar): surfaced in the reinject reminder, and (261002) the point where the lead is nudged once to prepare for compaction. */
   compaction_advisory_percent?: number | string;

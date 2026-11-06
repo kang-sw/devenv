@@ -398,3 +398,30 @@ func TestNudgeRoute(t *testing.T) {
 		t.Fatal("nudge to a daemon without an index succeeded")
 	}
 }
+
+// TestIndexSnapshotAgeIsNotAChange pins the snapshot age: a re-read whose
+// only change is the snapshot's updatedAt (a heartbeat) updates the age the
+// index reports without raising Rev or reporting a change.
+func TestIndexSnapshotAgeIsNotAChange(t *testing.T) {
+	dir := t.TempDir()
+	now := testNow
+	src := newFakeSource()
+	src.set("alpha", SessionData{Fingerprint: "a1", SnapshotUpdatedAt: now})
+	register(t, dir, "alpha", t.TempDir(), now)
+	idx, changes := newTestIndex(t, dir, src, &now)
+	idx.Refresh()
+
+	*changes = nil
+	later := now.Add(30 * time.Second)
+	src.set("alpha", SessionData{Fingerprint: "a1", SnapshotUpdatedAt: later})
+	idx.Refresh()
+	if s, _ := idx.Session("alpha"); s.Rev != 1 || !s.SnapshotUpdatedAt.Equal(later) || len(*changes) != 0 {
+		t.Fatalf("after a heartbeat: %+v, changes %v", s, *changes)
+	}
+
+	src.set("alpha", SessionData{Fingerprint: "a2", SnapshotUpdatedAt: later})
+	idx.Refresh()
+	if s, _ := idx.Session("alpha"); s.Rev != 2 || len(*changes) != 1 {
+		t.Fatalf("after a snapshot change: %+v, changes %v", s, *changes)
+	}
+}
