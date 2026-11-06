@@ -13,8 +13,8 @@
 {{region . "tree"}}
 {{region . "conversation"}}
 <div id="composer" class="composer"><div class="crow"><textarea id="ctext" rows="1" placeholder="Draft a message to paste into the terminal"></textarea><button class="btn primary" id="ccopy" title="copy the message and the board answers">{{icon "copy"}}<span class="clabel">copy</span></button></div><div class="cnote" id="cnote"></div></div>
-{{end}}{{region . "board"}}
-{{region . "panels"}}
+{{end}}<div id="bcol" class="bcol">{{region . "board"}}
+{{region . "panels"}}</div>
 </main></div>
 <script>window.wbForm = function () {
 {{.Assets.FormScript}}};

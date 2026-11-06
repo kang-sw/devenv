@@ -113,6 +113,13 @@ func startPageFixture(t *testing.T) *pageFixture {
 	}
 	f.d = startIndexedDaemon(t, f.dir, f.src, time.Hour)
 	f.base = endpointURL(f.d.Endpoint(), "")
+	// The daemon's first index refresh runs beside its start; a page asked
+	// for before it lands is an unknown session.
+	waitFor(t, "the fixture sessions to be indexed", func() bool {
+		_, live := f.d.Index().Session("livesession")
+		_, board := f.d.Index().Session("boardsession")
+		return live && board
+	})
 	return f
 }
 
@@ -141,6 +148,36 @@ func TestSessionPageRendersLiveRegions(t *testing.T) {
 		if strings.Contains(body, leak) {
 			t.Errorf("session page carries %q", leak)
 		}
+	}
+}
+
+// TestSessionPagesCarryScriptHooks pins the elements and attributes the page
+// script and stylesheet read: the board column that scrolls the board and
+// panels together, the tab bar and its dots, the layout menu, the composer,
+// the live indicator's label, and the banner.
+func TestSessionPagesCarryScriptHooks(t *testing.T) {
+	f := startPageFixture(t)
+	code, live := get(t, f.base+"/s/livesession")
+	if code != http.StatusOK {
+		t.Fatalf("GET /s/livesession = %d: %s", code, live)
+	}
+	for _, want := range []string{
+		`<div id="bcol" class="bcol"><div id="r-board" class="region r-board" data-region="board"`,
+		`id="tabbar"`, `data-tab="convo"`, `data-tab="board"`, `<span class="tdot"></span>`,
+		`id="gmenu"`, `data-layout="auto"`, `data-layout="split"`, `data-layout="tabs"`,
+		`id="ctext"`, `id="ccopy"`, `id="cnote"`, `class="sse-label"`, `id="dash-banner"`,
+	} {
+		if !strings.Contains(live, want) {
+			t.Errorf("live session page lacks %q", want)
+		}
+	}
+	// The board column holds the panels region too.
+	if i, j := strings.Index(live, `id="bcol"`), strings.Index(live, `data-region="panels"`); i < 0 || j < i {
+		t.Errorf("panels region is not inside the board column")
+	}
+	_, board := get(t, f.base+"/s/boardsession")
+	if !strings.Contains(board, `<div id="bcol" class="bcol"><div id="r-board"`) {
+		t.Errorf("board-first page lacks the board column")
 	}
 }
 
