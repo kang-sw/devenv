@@ -79,6 +79,8 @@ type Daemon struct {
 	endpoint Endpoint
 	log      io.Writer
 	index    *Index
+	source   SessionSource
+	broker   *broker
 
 	closeOnce sync.Once
 	stop      chan struct{}
@@ -136,11 +138,13 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		logw = io.Discard
 	}
 	d := &Daemon{
-		dir:  opts.Dir,
-		lock: lock,
-		log:  logw,
-		stop: make(chan struct{}),
-		done: make(chan struct{}),
+		dir:    opts.Dir,
+		lock:   lock,
+		log:    logw,
+		source: opts.Sessions,
+		broker: newBroker(),
+		stop:   make(chan struct{}),
+		done:   make(chan struct{}),
 		endpoint: Endpoint{
 			SchemaVersion: endpointSchemaVersion,
 			Port:          listener.Addr().(*net.TCPAddr).Port,
@@ -151,7 +155,7 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		},
 	}
 	if opts.Sessions != nil {
-		d.index = NewIndex(IndexOptions{Dir: opts.Dir, Source: opts.Sessions, Log: logw})
+		d.index = NewIndex(IndexOptions{Dir: opts.Dir, Source: opts.Sessions, Log: logw, OnChange: d.broker.wake})
 	}
 	d.server = &http.Server{Handler: d.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	if err := writeEndpoint(opts.Dir, d.endpoint); err != nil {
@@ -238,12 +242,16 @@ func (d *Daemon) Close() {
 }
 
 // Handler is the daemon's HTTP surface. Every route first passes the
-// loopback Host guard; the daemon sends no CORS headers.
+// loopback Host guard; the daemon sends no CORS headers. The pages (/,
+// /s/<reply-id>, and their SSE streams) are read-only.
 func (d *Daemon) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", d.handleHealth)
 	mux.HandleFunc("/shutdown", d.handleShutdown)
 	mux.HandleFunc("/nudge", d.handleNudge)
+	mux.HandleFunc("/events", d.handleIndexEvents)
+	mux.HandleFunc("/s/", d.handleSessionRoutes)
+	mux.HandleFunc("/", d.handleIndex)
 	return hostGuard(mux)
 }
 

@@ -1,0 +1,83 @@
+{{define "session"}}<!DOCTYPE html>
+<html data-mode="{{.Mode}}" data-rid="{{.ReplyID}}">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.ReplyID}} - ws dashboard</title>
+<style>{{.Assets.WhiteboardCSS}}</style>
+<style>{{.Assets.CSS}}</style></head>
+<body class="dash {{.Mode}}">{{.Assets.WhiteboardSprite}}{{.Assets.Sprite}}<div class="dwrap">
+<div class="top"><a class="back" href="/" title="all sessions">{{icon "back"}}dashboard</a><h1>Whiteboard</h1>{{region . "head"}}<span class="sse" id="sse" title="live updates"><span class="dot"></span><span class="sse-label">live</span></span>{{if .Adapter}}<span class="gearwrap"><button class="btn gear" id="gear" title="layout">{{icon "gear"}}</button><span class="gmenu" id="gmenu" hidden><span class="gt">Layout</span><button data-layout="auto" aria-pressed="false"><span class="gk">-</span><span>Automatic<span class="gs">side by side, tabs on a narrow screen</span></span></button><button data-layout="split" aria-pressed="false"><span class="gk">A</span><span>Side by side<span class="gs">conversation | board, each column scrolls</span></span></button><button data-layout="tabs" aria-pressed="false"><span class="gk">B</span><span>Tabs<span class="gs">conversation / board tabs</span></span></button><span class="gn">Saved in this browser.</span></span></span>{{end}}</div>
+<div class="banner" id="dash-banner" hidden></div>
+{{if .Adapter}}{{region . "lead"}}{{end}}
+<main id="grid" class="dgrid {{.Mode}}">
+{{if .Adapter}}<nav id="tabbar" class="tabbar"><button data-tab="convo" aria-pressed="true">{{icon "chat"}}Conversation<span class="tdot"></span></button><button data-tab="board" aria-pressed="false">{{icon "board"}}Board<span class="tdot"></span></button></nav>
+{{region . "tree"}}
+{{region . "conversation"}}
+<div id="composer" class="composer"><div class="crow"><textarea id="ctext" rows="1" placeholder="Draft a message to paste into the terminal"></textarea><button class="btn primary" id="ccopy" title="copy the message and the board answers">{{icon "copy"}}<span class="clabel">copy</span></button></div><div class="cnote" id="cnote"></div></div>
+{{end}}{{region . "board"}}
+{{region . "panels"}}
+</main></div>
+<script>window.wbForm = function () {
+{{.Assets.FormScript}}};
+window.wbMermaid = function () {
+{{.Assets.MermaidInit}}};
+window.wbMermaidFile = {{.Assets.MermaidFile}};</script>
+<script>{{.Assets.Script}}</script>
+</body></html>
+{{end}}
+
+{{define "r-head"}}<span class="meta">{{.ReplyID}}{{if .HasBoard}} · #{{.Seq}}{{end}}</span>{{with .Harness}}<span class="host">{{.}}</span>{{end}}<span class="meta">{{.ProjectName}}</span>{{if not .Live}}<span class="ended-chip" title="this session has ended">ended</span>{{end}}{{if not .Adapter}}<span class="nolive" title="no live host adapter: only the session's stores are shown">stores only</span>{{end}}<span class="counts">{{with .CountPolicy}}<span class="chip policy" title="to answer">{{icon "ask"}}{{.}}</span>{{end}}{{with .CountAssumed}}<span class="chip assumed" title="assumed">{{icon "arrow"}}{{.}}</span>{{end}}{{with .CountAcks}}<span class="chip ok" title="to acknowledge">{{icon "check"}}{{.}}</span>{{end}}</span>{{end}}
+
+{{define "r-board"}}{{if .HasBoard}}{{.Board}}{{else}}<div class="empty">This session has no whiteboard yet.</div>{{end}}{{end}}
+
+{{define "r-panels"}}{{.Panels}}{{end}}
+
+{{define "r-lead"}}{{with .Lead}}<div class="lhead {{.Phase}}"><span class="lwho">lead</span>{{template "phase" .Phase}}<span class="lbody">{{if .Permission}}<b>waiting for approval in the terminal</b> · <span class="tn">{{.Permission.ToolName}}</span> <span class="args">{{.Permission.ArgsPreview}}</span>{{else if .Running}}<span class="tn">{{.Running.ToolName}}</span> <span class="args">{{.Running.ArgsPreview}}</span>{{else if and .Generating (eq .Generating.Kind "tool")}}<span class="tn">{{.Generating.ToolName}}</span> writing arguments{{else if eq .Phase "replying"}}writing the reply (streamed in the conversation){{else if eq .Phase "thinking"}}choosing the next step{{else}}turn ended · waiting for the user{{end}}</span><span class="lmetric">{{if .Permission}}{{template "dur" .Permission.StartedAt}}{{else if .Running}}{{template "dur" .Running.StartedAt}}{{else if .PhaseStartedAt}}{{template "dur" .PhaseStartedAt}}{{end}}</span><span class="lturn">{{if .TurnStartedAt}}turn {{template "dur" .TurnStartedAt}}{{if .TurnOrigin}} · {{.TurnOrigin}}{{end}}{{else if .PreviousTurnMs}}last turn {{template "span" .PreviousTurnMs}}{{end}}{{if or .Done .Failed}} · tools {{.Done}}{{with .Failed}} · {{.}} failed{{end}}{{end}}</span></div>{{end}}{{end}}
+
+{{define "phase"}}{{if eq . "permission"}}<span class="phase permission">{{icon "lock"}}approval</span>{{else if eq . "thinking"}}<span class="phase thinking"><span class="spin"></span>thinking</span>{{else if eq . "replying"}}<span class="phase replying"><span class="spin"></span>replying</span>{{else if eq . "tool"}}<span class="phase tool"><span class="spin"></span>tool</span>{{else}}<span class="phase idle"><span class="idle-dot"></span>idle</span>{{end}}{{end}}
+
+{{define "dur"}}<time class="t" data-ms="{{.}}" data-f="since">{{clock .}}</time>{{end}}
+{{define "ago"}}<time class="t" data-ms="{{.}}" data-f="ago">{{clock .}}</time>{{end}}
+{{define "clock"}}<time class="t" data-ms="{{.}}" data-f="clock">{{clock .}}</time>{{end}}
+{{define "span"}}<span class="t" data-span="{{.}}">{{spanText .}}</span>{{end}}
+
+{{define "batch"}}{{if .Failed}}<li class="brow fail"><span class="mk">✗</span>{{else}}<li class="brow done"><span class="mk">✓</span>{{end}}<span class="bp">{{range .ToolNames}}<span class="tool">{{.}}</span>{{end}}</span><span class="bm">{{.CallCount}} calls{{with .Failed}} · {{.}} failed{{end}} · {{template "ago" .EndedAt}}</span></li>{{end}}
+
+{{define "liverows"}}{{with .Permission}}<li class="brow live perm"><span class="mk">{{icon "lock"}}</span><span class="bp"><span class="tool">{{.ToolName}}</span> waiting for approval<span class="args">{{.ArgsPreview}}</span></span><span class="bm">{{template "dur" .StartedAt}}</span></li>{{end}}{{with .Running}}<li class="brow live"><span class="mk"><span class="spin"></span></span><span class="bp"><span class="tool">{{.ToolName}}</span><span class="args">{{.ArgsPreview}}</span></span><span class="bm">{{.Done}} done{{with .OthersRunning}} · +{{.}}{{end}} · {{template "dur" .StartedAt}}</span></li>{{end}}{{with .Generating}}<li class="brow live"><span class="mk"><span class="spin"></span></span><span class="bp">{{if eq .Kind "tool"}}<span class="tool">{{.ToolName}}</span> writing arguments{{else if eq .Kind "thinking"}}thinking{{else}}writing{{end}}</span><span class="bm">{{if eq .Kind "tool"}}{{.Chars}} chars · {{end}}{{template "dur" .PhaseStartedAt}}</span></li>{{end}}{{end}}
+
+{{define "r-tree"}}<div class="thead">{{icon "agents"}}Agents<span class="sum"><span class="chip">running {{.Tree.Running}}</span><span class="chip">done {{.Tree.Finished}}</span><span class="chip">failed {{.Tree.Failed}}</span><span class="chip">{{icon "mail"}}{{len .Tree.Peers.Live}}</span></span></div><div class="tree"><div class="agent root {{.Lead.Phase}}"><details data-key="agent-lead"><summary class="ahead"><span class="amk">{{template "mark" .Lead.Phase}}</span><span class="aname">lead</span><span class="arid nob" title="this session">{{.ReplyID}}</span>{{template "phase" .Lead.Phase}}<span class="am"><span>recent batches {{len .Lead.Finished}}</span>{{icon "chev"}}</span></summary><ol class="brows">{{range .Lead.Finished}}{{template "batch" .}}{{end}}</ol></details><ol class="brows live">{{template "liverows" .Lead}}</ol><div class="kids">{{range .Tree.Agents}}{{template "agent" .}}{{end}}{{template "peers" .Tree.Peers}}</div></div></div>{{end}}
+
+{{define "mark"}}{{if eq . "permission"}}{{icon "lock"}}{{else if or (eq . "idle") (eq . "")}}<span class="idle-dot"></span>{{else}}<span class="spin"></span>{{end}}{{end}}
+
+{{define "agent"}}<div class="agent {{.Status}}"><details data-key="agent-{{.ID}}"><summary class="ahead"><span class="amk">{{if .IsRunning}}<span class="spin"></span>{{else if eq .Status "failed"}}✗{{else}}✓{{end}}</span><span class="aname">{{or .Label .ID}}</span>{{with .ReplyID}}{{if $.Linked}}<a class="arid" href="/s/{{.}}" title="open this delegate's page">{{.}}</a>{{else}}<span class="arid nob">{{.}}</span>{{end}}{{end}}{{if .IsRunning}}{{template "phase" .Phase}}{{end}}<span class="am"><span class="ok" title="done">✓ {{.Done}}</span><span class="{{if .Failed}}f{{end}}" title="failed">✗ {{.Failed}}</span>{{if .IsRunning}}{{with .StartedAt}}<span>{{template "dur" .}}</span>{{end}}{{else}}{{with .EndedAt}}<span>{{template "ago" .}}</span>{{end}}{{end}}{{icon "chev"}}</span></summary><ol class="brows">{{range .Finished}}{{template "batch" .}}{{end}}</ol></details>{{with .Caption}}<div class="acap">{{.}}</div>{{end}}{{if .IsRunning}}<ol class="brows live">{{template "liverows" .}}</ol>{{end}}{{with .Children}}<div class="kids">{{range .}}{{template "agent" .}}{{end}}</div>{{end}}</div>{{end}}
+
+{{define "peers"}}<div class="pgroup"><div class="pghead">{{icon "mail"}}peer leads<span class="chip">{{len .Live}}</span>{{with .Ended}}<span class="chip">ended {{len .}}</span>{{end}}</div>{{range .Rows}}{{template "peer" .}}{{end}}{{with .HiddenEnded}}<div class="thidden">{{.}} older ended peers hidden</div>{{end}}</div>{{end}}
+
+{{define "peerrow"}}<span class="amk">{{if and .Live .Adapter}}{{template "mark" .Lead.Phase}}{{else}}<span class="pdot"></span>{{end}}</span>{{if .Served}}<a class="pname" href="/s/{{.ReplyID}}">{{.Address}}</a>{{else}}<span class="pname">{{.Address}}</span>{{end}}{{if and .Harness .Live}}<span class="host sm">{{.Harness}}</span>{{end}}<span class="pline">{{if not .Live}}<span class="pstate">ended</span>{{else if not .Served}}<span class="pstate">not served here · no live state</span>{{else if .Adapter}}{{template "phase" .Lead.Phase}}{{with .Lead.Running}}<span class="ptool">{{.ToolName}}</span>{{end}}{{end}}</span><span class="am">{{if .Adapter}}<span title="subagents">{{icon "agents"}}{{.AgentCount}}</span>{{end}}<span title="last mail exchange">{{icon "mail"}}{{template "ago" .LastExchange}}</span></span>{{end}}
+
+{{define "peer"}}{{if and .Served .Adapter}}<details class="peer {{if .Live}}live{{else}}ended{{end}}" data-peer="{{.ReplyID}}"><summary>{{template "peerrow" .}}</summary><div class="ptree"><ol class="brows">{{range .Lead.Finished}}{{template "batch" .}}{{end}}{{template "liverows" .Lead}}</ol>{{with .Agents}}<div class="kids">{{range .}}{{template "agent" .}}{{end}}</div>{{end}}</div></details>{{else}}<div class="peer {{if .Live}}{{if .Served}}live nophase{{else}}unserved{{end}}{{else}}ended{{end}}">{{template "peerrow" .}}</div>{{end}}{{end}}
+
+{{define "r-conversation"}}<div class="thead">{{icon "chat"}}Conversation<span class="sum"><span class="chip">user {{.Conversation.Users}}</span><span class="chip">{{icon "mail"}}{{.Conversation.Mails}}</span></span></div><div class="conv">{{range .Conversation.Entries}}{{template "entry" .}}{{end}}{{with .Conversation}}{{with .Reply}}<div class="msg fromlead streaming"><div class="mh"><b>lead</b>{{template "clock" .StartedAt}}</div><div class="bub">{{.Text}}{{if .Truncated}} …{{end}}<span class="caret"></span></div></div>{{end}}{{if .Permission}}<div class="permwait">{{icon "lock"}}<span><b>waiting for approval in the terminal</b> · <code>{{.Permission.ToolName}}</code> <span class="args">{{.Permission.ArgsPreview}}</span></span>{{template "dur" .Permission.StartedAt}}</div>{{else if and .Phase (ne .Phase "idle") (ne .Phase "replying")}}<div class="activity"><span class="spin"></span>lead {{.Phase}}{{with .Running}} · {{.ToolName}}{{else}}{{with .Generating}}{{with .ToolName}} · {{.}}{{end}}{{end}}{{end}}</div>{{end}}{{end}}</div>{{end}}
+
+{{define "origin"}}{{if eq . "whiteboard"}}<span class="src wb">whiteboard</span>{{else if eq . "mail"}}<span class="src mail">mail</span>{{else if eq . "terminal"}}<span class="src">terminal</span>{{end}}{{end}}
+
+{{define "entry"}}{{if eq .Kind "user"}}<div class="msg user"><div class="mh">{{template "origin" .Origin}}{{template "clock" .At}}</div><div class="bub">{{.Text}}{{if .Truncated}} …{{end}}</div></div>{{else if eq .Kind "reply"}}<div class="msg fromlead"><div class="mh"><b>lead</b>{{template "clock" .At}}</div><div class="bub">{{.Text}}{{if .Truncated}} …{{end}}</div></div>{{else if eq .Kind "turn"}}<div class="turnline">{{template "origin" .Origin}}turn · {{.Done}} tool calls{{with .Failed}} · {{.}} failed{{end}}{{with .DurationMs}} · {{template "span" .}}{{end}}</div>{{else if eq .Kind "mail"}}{{if .HasBody}}<details class="mailline {{.Direction}}" data-key="mail-{{.Key}}"><summary>{{template "mailhead" .}}</summary><div class="mbody">{{.Body}}</div></details>{{else}}<div class="mailline {{.Direction}} nobody">{{template "mailhead" .}}</div>{{end}}{{end}}{{end}}
+
+{{define "mailhead"}}<span class="arr">{{if eq .Direction "sent"}}→{{else}}←{{end}}</span>{{if .PeerLinked}}<a class="mpeer" href="/s/{{.PeerReplyID}}">{{.Peer}}</a>{{else}}<span class="mpeer">{{.Peer}}</span>{{end}}<span class="mfirst">: {{.Title}}</span>{{template "clock" .At}}{{end}}
+
+{{define "index"}}<!DOCTYPE html>
+<html data-mode="index">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ws dashboard</title>
+<style>{{.Assets.WhiteboardCSS}}</style>
+<style>{{.Assets.CSS}}</style></head>
+<body class="dash index">{{.Assets.WhiteboardSprite}}{{.Assets.Sprite}}<div class="dwrap narrow">
+<div class="top"><h1>ws dashboard</h1><span class="meta">v{{.Version}}</span><span class="sse" id="sse" title="live updates"><span class="dot"></span><span class="sse-label">live</span></span></div>
+{{region . "sessions"}}
+</div>
+<script>{{.Assets.Script}}</script>
+</body></html>
+{{end}}
+
+{{define "r-sessions"}}<div class="totals"><span class="chip">live {{.Live}}</span><span class="chip">working {{.Busy}}</span></div>{{range .Projects}}<section class="project"><div class="pbar"><span class="pname">{{.Name}}</span><span class="ppath">{{.Path}}</span><span class="chip">{{len .Sessions}}</span></div>{{range .Sessions}}{{template "srow" .}}{{end}}{{if .Ended}}<div class="endedhead">ended</div>{{range .Ended}}{{template "srow" .}}{{end}}{{end}}{{with .HiddenEnded}}<div class="thidden">{{.}} sessions ended more than a day ago</div>{{end}}</section>{{else}}<div class="empty">No sessions are registered with this dashboard.</div>{{end}}{{end}}
+
+{{define "srow"}}<a class="sess{{if not .Live}} ended{{end}}" href="/s/{{.ReplyID}}"><span class="who"><span class="rid">{{.ReplyID}}</span><span class="sub">{{if .Tool}}<span class="tn">{{.Tool}}</span>{{end}}{{with .RunningAgents}}<span class="agents-mini">{{.}} subagents running</span>{{end}}{{if not .HasBoard}}<span class="agents-mini">no board</span>{{end}}</span></span>{{with .Harness}}<span class="host">{{.}}</span>{{else}}<span></span>{{end}}{{if .Adapter}}{{template "phase" .Phase}}{{else}}<span class="phase none" title="no live host adapter">no live state</span>{{end}}<span class="qs">{{with .CountPolicy}}<span class="chip policy" title="to answer">{{icon "ask"}}{{.}}</span>{{end}}{{with .CountAssumed}}<span class="chip assumed" title="assumed">{{icon "arrow"}}{{.}}</span>{{end}}</span><span class="when">{{template "ago" .LastSeen}}</span></a>{{end}}
