@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: ebe3e3a4870c3e0a
 sage-review-completeness-reviewed: ebe3e3a4870c3e0a
+completed: 2026-11-07
 ---
 
 # ws dashboard Claude adapter - event probe, live event feed, and message submission
@@ -412,3 +413,83 @@ passing. The lead checks by hand with a live Claude session: a composer
 message sent while idle starts a turn as user input with the whiteboard
 label; one sent mid-turn shows as held, can be cancelled or merged, and is
 submitted when the turn ends.
+
+### Result (001ba50c9) - 2026-11-07
+
+- **Shape.**
+  - While `claude.dashboard_enabled` reads on, the mailbox push's existing
+    wait is armed with `--board-inbox`. The wait reads which kind woke it
+    (`mail`, `board`, or both) from the JSON `kinds`. Output that names
+    neither counts as both.
+  - The watcher (`watcher.ts`) gets optional `board` edges: `enabled`,
+    `drain`, `submit`, `append`.
+  - `register.ts` drains through
+    `$.mcp.call(server, 'dashboard_inbox_drain', {session_key, format: 'json'})`,
+    which raises no `tool.call` and no permission prompt.
+  - It submits with
+    `$.prompt.submit({ text: labelWhiteboard(plugin, text), asUser: true })`.
+  - With the knob off, or a failed or refused read, the wait carries no
+    flag and nothing is drained. A wait armed before the read settles
+    re-arms through `boardChanged()`.
+- **Hold until turn end.**
+  - A board wake while a main-thread turn runs drains nothing. The entry
+    stays held and the wait re-arms without the flag.
+  - Every main-thread turn end with the knob on drains, submits, then
+    clears the held mark and re-arms the wait with the flag.
+  - The re-arm is a per-wait abort linked to the loop signal.
+  - A tool boundary never drains.
+  - The turn end drains whether or not a wake was seen. This also covers a
+    message that arrived while a notice-mode loop was suspended or between
+    wait arms.
+  - Drains are serialized, and the server's atomic claim keeps injection
+    once-only.
+- **Settled order at `turn.complete`: the board message first, then the
+  mail.**
+  - The leftover mail waits for the board drain and submit, at most
+    `BOARD_FIRST_WAIT_MS` (5 s).
+  - The user's own message then starts the next turn, and the mail joins
+    it through the existing busy and steer path.
+  - Both arrive, and neither is dropped.
+  - Rejected:
+    - mail first, which makes the user wait a whole mail turn;
+    - one combined prompt, which would tag the mail text as the user's
+      whiteboard message in the ring.
+- **Decisions.**
+  - **Ring tagging.** The mod's own `prompt.submit` hook does not see its
+    own `$.prompt.submit` (engine kit evidence). The submit edge therefore
+    tags the turn and the ring itself
+    (`whiteboardSubmitting`/`whiteboardSubmitted`), deduped against a hook
+    that might also record it.
+  - **Several messages in one drain** are submitted as one prompt.
+  - **Failure handling:**
+    - A dropped or rejected submit becomes a user row, and failing that a
+      transcript record.
+    - A board-only drain failure backs off.
+    - An empty board-only drain sleeps, as the empty mail drain does.
+    - On a wake by both kinds, a board failure still lets the mail through.
+    - A stop during a turn-end drain records the claimed messages and the
+      waiting mail instead of submitting them into the next conversation.
+    - A crash between the claim and the submit loses the message (accepted,
+      as for mail).
+  - **Knob description** widened in both manifests.
+  - **Engine tests** live in `dashboard-engine.test.ts`, whose world already
+    reads the knob, not in `engine.test.ts`.
+- **Review (lite, one pass).** No Critical or Important findings.
+  - Fixed in 9bcc4c643:
+    - a timeout now resets the empty board streak;
+    - added tests for an idle mail-and-board wake and a failed turn-end
+      drain.
+  - Accepted minor: a turn that starts while an idle drain is in flight
+    gets the message after it. A plugin submit runs once idle, but merge
+    and cancel no longer apply in that window.
+- **Verification.**
+  - `claude plugin test` in agents-plugin: 615 pass, 0 fail.
+  - `claude plugin test` in agents-plugin-wsflow: 615 pass, 0 fail.
+  - `claude plugin validate` passes for both packages.
+  - `go test ./internal/wsrsrc/ ./internal/mcp/ ./internal/wsconfig/...`
+    in agents-plugin-tool: ok.
+  - The mirror is byte-identical (`diff -r`).
+  - The live hand check stays with the lead:
+    - an idle composer message starts a turn under the whiteboard label;
+    - a mid-turn message shows as held, can be cancelled or merged, and is
+      submitted at the turn end.
