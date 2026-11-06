@@ -126,6 +126,9 @@ type PanelRow struct {
 	State string
 	Label string
 	Text  string
+	// Link, when set, makes Text a link: a relative path or an absolute
+	// file: URL the provider built (see RenderPage); empty for none.
+	Link string
 }
 
 // ViewInput is what BuildView needs beyond the State.

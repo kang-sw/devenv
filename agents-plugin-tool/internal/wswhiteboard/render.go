@@ -5,6 +5,7 @@ import (
 	"embed"
 	"fmt"
 	"html/template"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -77,6 +78,7 @@ func loadAssets() (*pageAssets, error) {
 			},
 			"lines":  rationaleLines,
 			"marker": rowMarker,
+			"href":   rowHref,
 		}
 		a.tmpl, assetsErr = template.New("page").Funcs(funcs).ParseFS(assetFS, "assets/page.tmpl")
 		if assetsErr == nil {
@@ -274,6 +276,18 @@ func rationaleLines(s string) []string {
 		}
 	}
 	return out
+}
+
+// rowHref trusts a panel row link that is a relative path or a file: URL.
+// html/template rewrites any file: URL to #ZgotmplZ, and an embed written
+// outside the repository can only reach a ticket file through one; every
+// other scheme keeps the template's normal URL filtering.
+func rowHref(link string) any {
+	u, err := url.Parse(link)
+	if err == nil && (u.Scheme == "" || u.Scheme == "file") {
+		return template.URL(link)
+	}
+	return link
 }
 
 // rowMarker is the checklist box a panel row's state shows.
