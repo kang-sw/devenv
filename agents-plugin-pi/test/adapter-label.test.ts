@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { ADAPTER_MESSAGE_LABEL, adapterLabeledBody, labelAdapterContent, labelAdapterText } from "../src/adapter-label.ts";
+import { ADAPTER_MESSAGE_LABEL, adapterLabeledBody, labelAdapterContent, labelAdapterText, WHITEBOARD_MESSAGE_LABEL, whiteboardLabeledBody, whiteboardSubmissionText } from "../src/adapter-label.ts";
 
 describe("adapter message label (261007)", () => {
   test("the label wording is pinned", () => {
@@ -26,5 +26,18 @@ describe("adapter message label (261007)", () => {
     const image = { type: "image", data: "AAAA", mimeType: "image/png" };
     assert.deepEqual(labelAdapterContent([image]), [{ type: "text", text: ADAPTER_MESSAGE_LABEL }, image]);
     assert.deepEqual(labelAdapterContent([]), [{ type: "text", text: ADAPTER_MESSAGE_LABEL }]);
+  });
+});
+
+describe("whiteboard submission", () => {
+  test("a drain is one user message: the whiteboard label, then each message as its own paragraph", () => {
+    const sent = whiteboardSubmissionText(["first send\n\n(03) a", "a later send"]);
+    assert.equal(sent, `${WHITEBOARD_MESSAGE_LABEL}\nfirst send\n\n(03) a\n\na later send`);
+    assert.equal(whiteboardLabeledBody(sent), "first send\n\n(03) a\n\na later send");
+    assert.equal(adapterLabeledBody(sent), undefined, "it carries user authority, not the adapter label");
+  });
+
+  test("a single message is the label line and the message", () => {
+    assert.equal(whiteboardSubmissionText(["hi"]), `${WHITEBOARD_MESSAGE_LABEL}\nhi`);
   });
 });

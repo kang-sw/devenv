@@ -58,3 +58,12 @@ export function whiteboardLabeledBody(text: string): string | undefined {
   if (text === WHITEBOARD_MESSAGE_LABEL) return "";
   return text.startsWith(`${WHITEBOARD_MESSAGE_LABEL}\n`) ? text.slice(WHITEBOARD_MESSAGE_LABEL.length + 1) : undefined;
 }
+
+/**
+ * The one user message a drain of dashboard messages is submitted as: the
+ * whiteboard label, then each message as its own paragraph. One message
+ * starts one turn; separate sends would land in that running turn.
+ */
+export function whiteboardSubmissionText(texts: readonly string[]): string {
+  return labelWhiteboardText(texts.join("\n\n"));
+}
