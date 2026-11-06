@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 0d30b12c7c7b6d94
 sage-review-completeness-reviewed: 0d30b12c7c7b6d94
+completed: 2026-11-06
 ---
 
 # Mailbox history ring and mailbox.history tool
@@ -216,3 +217,38 @@ Verification:
     explicit root), never the developer's real cache.
 - `go test ./internal/mcp -run 'Mailbox' -count=1`, then `go test ./...` in
   `agents-plugin-tool` (`internal/mcp` takes several minutes).
+
+### Result (b1771b9df) - 2026-11-06
+
+Landed the per-session history ring and the read-only `mailbox.history`
+tool.
+- `internal/mcp/mailbox_history.go`: one file per entry under
+  `<cache root>/mailbox-history/<session-key>/`, written temp+rename to
+  `<nanosecond UTC stamp>-<random hex>.json`; best-effort trim to the
+  newest 10; read newest first, skipping unreadable/unparsable/unstamped
+  entries; the title rule; the tool handler.
+- `mailbox_tools.go`: send appends after the enqueue succeeds; recv appends
+  the confirmed-drained messages in the order it returns them. Ring write
+  failures log `mailbox.history_write_error` and are never surfaced.
+- `server.go`: dispatch and schema for `mailbox.history`. `session_prune.go`:
+  `maybePrune` also reaps history directories whose mtime is older than
+  `keyRetentionAge`.
+- `mailbox.history` added to the ws, wsflow, and Pi `runtime.json`
+  contracts (the wsflow capability test requires an exact match).
+
+Verification: `go test ./internal/mcp -run 'Mailbox' -count=1` ok;
+`go test ./...` in `agents-plugin-tool` ok (internal/mcp 250s);
+`python3 -m unittest` of the wsflow runtime contract and the
+shipped-surface neutrality tests ok. Lite review: clean, one minor
+(the failed-write test counts events in the capped process-wide debug
+buffer; only theoretical flakiness).
+
+Decisions:
+- The entry file stores direction, counterparty, and body only; the time
+  is derived from the file-name stamp, the single source.
+- Recv entries follow recv's returned order (its stable `SentAt` sort),
+  which keeps each queue's order and matches what the session saw.
+- Text output by default with `format: "json"` opt-in, matching the
+  sibling mailbox tools; `body: false` omits the JSON `body` field.
+- Tests went to a new `mailbox_history_test.go` instead of the existing
+  mailbox test files the route facts named.
