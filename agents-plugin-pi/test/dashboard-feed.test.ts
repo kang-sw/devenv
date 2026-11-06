@@ -24,7 +24,7 @@ import {
   type DashboardEvent,
   type DashboardFeedOptions,
 } from "../src/dashboard-feed.ts";
-import { ADAPTER_MESSAGE_LABEL, WHITEBOARD_MESSAGE_LABEL, labelAdapterText, labelWhiteboardText, whiteboardLabeledBody } from "../src/adapter-label.ts";
+import { ADAPTER_MESSAGE_LABEL, WHITEBOARD_MESSAGE_LABEL, labelAdapterText, labelWhiteboardText, whiteboardLabeledBody, whiteboardSubmissionText } from "../src/adapter-label.ts";
 import { createBatchBuffer, observeBatchEvent } from "../src/agent-batches.ts";
 import { ADAPTER_ONLY_RAW_TOOLS, filterOutAdapterOnlyTools, filterOutMercenaryTools } from "../src/bridge.ts";
 import { markAgentExited, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
@@ -215,6 +215,18 @@ describe("lead feed", () => {
     feed.leadEvent({ type: "agent_start" });
     await advance(0);
     assert.deepEqual(events().filter((event) => event.kind === "user").map(({ text, origin }) => ({ text, origin })), [{ text: "please continue", origin: "whiteboard" }]);
+    assert.equal(events().find((event) => event.kind === "turn_start")!.origin, "whiteboard");
+  });
+
+  test("a drained dashboard submission enters the ring as one user message tagged whiteboard", async () => {
+    const { feed, events, advance } = harness();
+    feed.start();
+    const sent = whiteboardSubmissionText(["first send\n\n(03) a", "a later send"]);
+    feed.leadEvent({ type: "input", text: sent, source: "extension" });
+    feed.leadEvent({ type: "agent_start" });
+    feed.leadEvent(userEnd(sent));
+    await advance(0);
+    assert.deepEqual(events().filter((event) => event.kind === "user").map(({ text, origin }) => ({ text, origin })), [{ text: "first send\n\n(03) a\n\na later send", origin: "whiteboard" }]);
     assert.equal(events().find((event) => event.kind === "turn_start")!.origin, "whiteboard");
   });
 

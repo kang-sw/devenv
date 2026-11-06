@@ -15,10 +15,14 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
+  afterCompactionHold,
   attachMailboxRuntimeCleanup,
+  boardWakeOutcome,
   buildMailboxPushMessage,
   buildMailboxWaitArgv,
   createBridgeDrain,
+  createBridgeInboxDrain,
+  DASHBOARD_INBOX_DRAIN_TOOL,
   createMailboxWaiterSlot,
   createSubprocessWait,
   mapMailboxWaitExit,
@@ -29,7 +33,9 @@ import {
   stageMailboxRuntime,
   startMailboxWaiter,
   WS_MAILBOX_CUSTOM_TYPE,
+  type BoardInboxDeps,
   type MailboxEnvelope,
+  type MailboxWaitArm,
   type MailboxWaitOutcome,
   type MailboxWaiterHandle,
 } from "../src/mailbox-waiter.ts";
@@ -221,6 +227,259 @@ describe("startMailboxWaiter", () => {
   });
 });
 
+/**
+ * A fake board-aware `runWait`: records each arm's `--board-inbox` flag and
+ * yields scripted outcomes, then blocks until its own signal aborts. An
+ * abort from `leadSettled` resolves `stopped` like the real child does.
+ */
+function boardWait(script: MailboxWaitOutcome[]): { runWait: (signal: AbortSignal, arm: MailboxWaitArm) => Promise<MailboxWaitOutcome>; arms: boolean[]; blocked: () => boolean } {
+  const arms: boolean[] = [];
+  let index = 0;
+  let blocking = false;
+  return {
+    arms,
+    blocked: () => blocking,
+    runWait: (signal, arm) => {
+      arms.push(arm.boardInbox);
+      if (index < script.length) return Promise.resolve(script[index++]!);
+      blocking = true;
+      return new Promise<MailboxWaitOutcome>((resolve) => {
+        const end = (): void => { blocking = false; resolve("stopped"); };
+        if (signal.aborted) return end();
+        signal.addEventListener("abort", end, { once: true });
+      });
+    },
+  };
+}
+
+function fakeBoard(overrides: Partial<BoardInboxDeps> & { held?: string[][] } = {}): BoardInboxDeps & { injected: string[][]; drains: () => number; idleRef: { current: boolean } } {
+  const injected: string[][] = [];
+  const queue = overrides.held ?? [["hello from the page"]];
+  let drains = 0;
+  const idleRef = { current: true };
+  return {
+    injected,
+    idleRef,
+    drains: () => drains,
+    enabled: overrides.enabled ?? (() => true),
+    idle: overrides.idle ?? (() => idleRef.current),
+    drain: overrides.drain ?? (() => { drains += 1; return Promise.resolve(queue.shift() ?? []); }),
+    inject: overrides.inject ?? ((texts) => { injected.push(texts); }),
+  };
+}
+
+async function until(predicate: () => boolean, label: string): Promise<void> {
+  for (let attempt = 0; attempt < 500; attempt += 1) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
+  throw new Error(`timed out waiting for ${label}`);
+}
+
+describe("startMailboxWaiter: dashboard board inbox", () => {
+  test("an idle board wake drains and injects at once, then re-arms with the inbox flag", async () => {
+    const wait = boardWait(["board"]);
+    const board = fakeBoard();
+    const waiter = startMailboxWaiter({ runWait: wait.runWait, drainMail: () => assert.fail("a board-only wake drains no mail"), admit: () => {}, sleep: immediateSleep, board });
+    await until(wait.blocked, "the re-armed wait");
+    waiter.stop();
+    await waiter.done;
+    assert.deepEqual(board.injected, [["hello from the page"]]);
+    assert.deepEqual(wait.arms, [true, true]);
+  });
+
+  test("a mid-turn board wake leaves the entry held, re-arms without the flag, and injects only at the lead's settle", async () => {
+    const wait = boardWait(["board"]);
+    const board = fakeBoard();
+    board.idleRef.current = false;
+    const waiter = startMailboxWaiter({ runWait: wait.runWait, drainMail: () => Promise.resolve([]), admit: () => {}, sleep: immediateSleep, board });
+    await until(wait.blocked, "the held wait");
+    assert.deepEqual(wait.arms, [true, false], "the held entry would wake a flagged wait at once, so the flag is dropped");
+    assert.equal(board.drains(), 0, "nothing is drained while the turn runs, so merge and cancel still act on the entry");
+    assert.deepEqual(board.injected, []);
+
+    board.idleRef.current = true;
+    waiter.leadSettled!();
+    await until(() => board.injected.length > 0 && wait.blocked(), "the settle drain and re-arm");
+    waiter.stop();
+    await waiter.done;
+    assert.equal(board.drains(), 1);
+    assert.deepEqual(board.injected, [["hello from the page"]]);
+    assert.deepEqual(wait.arms, [true, false, true], "the flag is restored after the drain");
+  });
+
+  test("a settle with nothing held neither re-arms nor drains", async () => {
+    const wait = boardWait([]);
+    const board = fakeBoard();
+    const waiter = startMailboxWaiter({ runWait: wait.runWait, drainMail: () => Promise.resolve([]), admit: () => {}, sleep: immediateSleep, board });
+    await until(wait.blocked, "the first wait");
+    waiter.leadSettled!();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    waiter.stop();
+    await waiter.done;
+    assert.deepEqual(wait.arms, [true]);
+    assert.equal(board.drains(), 0);
+  });
+
+  test("a turn that ends before the hold is recorded still releases the message before the next wait", async () => {
+    const wait = boardWait(["board"]);
+    // Busy at the wake, idle by the time the loop re-arms.
+    let checks = 0;
+    const board = fakeBoard({ idle: () => checks++ > 0 });
+    const waiter = startMailboxWaiter({ runWait: wait.runWait, drainMail: () => Promise.resolve([]), admit: () => {}, sleep: immediateSleep, board });
+    await until(wait.blocked, "the re-armed wait");
+    waiter.stop();
+    await waiter.done;
+    assert.deepEqual(board.injected, [["hello from the page"]]);
+    assert.deepEqual(wait.arms, [true, true]);
+  });
+
+  test("a held entry the page cancelled is never injected", async () => {
+    const wait = boardWait(["board"]);
+    const board = fakeBoard({ held: [[]] });
+    board.idleRef.current = false;
+    const waiter = startMailboxWaiter({ runWait: wait.runWait, drainMail: () => Promise.resolve([]), admit: () => {}, sleep: immediateSleep, board });
+    await until(wait.blocked, "the held wait");
+    board.idleRef.current = true;
+    waiter.leadSettled!();
+    await until(() => board.drains() === 1 && wait.blocked(), "the settle drain");
+    waiter.stop();
+    await waiter.done;
+    assert.deepEqual(board.injected, [], "the cancel claimed the entry, so the drain found nothing");
+    assert.deepEqual(wait.arms, [true, false, true]);
+  });
+
+  test("a merged entry is injected once, as one message", async () => {
+    const wait = boardWait(["board"]);
+    const board = fakeBoard({ held: [["first send\n\nsecond send\n\n(03) a"]] });
+    const waiter = startMailboxWaiter({ runWait: wait.runWait, drainMail: () => Promise.resolve([]), admit: () => {}, sleep: immediateSleep, board });
+    await until(wait.blocked, "the re-armed wait");
+    waiter.stop();
+    await waiter.done;
+    assert.deepEqual(board.injected, [["first send\n\nsecond send\n\n(03) a"]]);
+  });
+
+  test("with the knob off the wait is armed without the inbox flag and nothing is drained", async () => {
+    const wait = boardWait(["timeout"]);
+    const board = fakeBoard({ enabled: () => Promise.resolve(false) });
+    const waiter = startMailboxWaiter({ runWait: wait.runWait, drainMail: () => Promise.resolve([]), admit: () => {}, sleep: immediateSleep, board });
+    await until(wait.blocked, "the second wait");
+    waiter.stop();
+    await waiter.done;
+    assert.deepEqual(wait.arms, [false, false]);
+    assert.equal(board.drains(), 0);
+  });
+
+  test("a knob read that throws counts as on", async () => {
+    const wait = boardWait([]);
+    const board = fakeBoard({ enabled: () => { throw new Error("config unavailable"); } });
+    const waiter = startMailboxWaiter({ runWait: wait.runWait, drainMail: () => Promise.resolve([]), admit: () => {}, sleep: immediateSleep, board });
+    await until(wait.blocked, "the first wait");
+    waiter.stop();
+    await waiter.done;
+    assert.deepEqual(wait.arms, [true]);
+  });
+
+  test("a wake with both kinds drains the mail and the board", async () => {
+    const wait = boardWait(["mail+board"]);
+    const board = fakeBoard();
+    const admitted: MailboxEnvelope[][] = [];
+    const waiter = startMailboxWaiter({ runWait: wait.runWait, drainMail: () => Promise.resolve([{ from: "peer@machine", content: "hi" }]), admit: (envelopes) => admitted.push(envelopes), sleep: immediateSleep, board });
+    await until(wait.blocked, "the re-armed wait");
+    waiter.stop();
+    await waiter.done;
+    assert.equal(admitted.length, 1);
+    assert.deepEqual(board.injected, [["hello from the page"]]);
+  });
+
+  test("a failed board drain backs off and re-arms with the flag, so the level-triggered wait retries it", async () => {
+    const wait = boardWait(["board"]);
+    const sleeps: number[] = [];
+    const errors: string[] = [];
+    const board = fakeBoard({ drain: () => Promise.reject(new Error("drain refused")) });
+    const waiter = startMailboxWaiter({ runWait: wait.runWait, drainMail: () => Promise.resolve([]), admit: () => {}, sleep: (ms) => { sleeps.push(ms); return Promise.resolve(); }, errorBackoffMs: 42, onError: (message) => errors.push(message), board });
+    await until(wait.blocked, "the re-armed wait");
+    waiter.stop();
+    await waiter.done;
+    assert.deepEqual(sleeps, [42]);
+    assert.deepEqual(errors, ["board drain failed: drain refused"]);
+    assert.deepEqual(wait.arms, [true, true]);
+  });
+
+  test("a throwing inject is reported and the loop keeps running", async () => {
+    const wait = boardWait(["board"]);
+    const errors: string[] = [];
+    const board = fakeBoard({ inject: () => { throw new Error("no session"); } });
+    const waiter = startMailboxWaiter({ runWait: wait.runWait, drainMail: () => Promise.resolve([]), admit: () => {}, sleep: immediateSleep, onError: (message) => errors.push(message), board });
+    await until(wait.blocked, "the re-armed wait");
+    waiter.stop();
+    await waiter.done;
+    assert.deepEqual(errors, ["board inject failed: no session"]);
+  });
+
+  test("without board deps every wait is armed without the flag", async () => {
+    const wait = boardWait(["mail"]);
+    const waiter = startMailboxWaiter({ runWait: wait.runWait, drainMail: () => Promise.resolve([]), admit: () => {}, sleep: immediateSleep });
+    await until(wait.blocked, "the re-armed wait");
+    assert.equal(waiter.leadSettled !== undefined, true);
+    waiter.stop();
+    await waiter.done;
+    assert.deepEqual(wait.arms, [false, false]);
+  });
+});
+
+describe("afterCompactionHold", () => {
+  test("runs after a hold release that the same compaction event schedules later", async () => {
+    let compacting = true;
+    const seen: boolean[] = [];
+    // The settle hook's handler runs first; the hold owner's handler then
+    // schedules its own deferred release, as Pi dispatches one event's handlers in order.
+    afterCompactionHold(() => seen.push(compacting));
+    setImmediate(() => { compacting = false; });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.deepEqual(seen, [false]);
+  });
+});
+
+describe("boardWakeOutcome", () => {
+  test("the kinds a board-inbox wait reports pick the outcome", () => {
+    assert.equal(boardWakeOutcome(JSON.stringify({ kinds: ["board"], board: 1, unread: 0 })), "board");
+    assert.equal(boardWakeOutcome(JSON.stringify({ kinds: ["mail"], board: 0, unread: 2 })), "mail");
+    assert.equal(boardWakeOutcome(JSON.stringify({ kinds: ["mail", "board"] })), "mail+board");
+  });
+
+  test("output that cannot be read counts as both kinds", () => {
+    for (const stdout of ["", "not json", "null", JSON.stringify({}), JSON.stringify({ kinds: "board" }), JSON.stringify({ kinds: [] })]) {
+      assert.equal(boardWakeOutcome(stdout), "mail+board", stdout);
+    }
+  });
+});
+
+describe("createBridgeInboxDrain", () => {
+  test("calls the adapter-only drain tool with the session key and json format and returns the texts in order", async () => {
+    const calls: [string, Record<string, unknown>][] = [];
+    const drain = createBridgeInboxDrain(async (name, args) => {
+      calls.push([name, args]);
+      return { content: [{ type: "text", text: JSON.stringify({ messages: [{ id: "a", text: "first" }, { id: "b", text: "second\n\n(01) ok" }] }) }] };
+    }, "my-key");
+    assert.deepEqual(await drain(), ["first", "second\n\n(01) ok"]);
+    assert.deepEqual(calls, [[DASHBOARD_INBOX_DRAIN_TOOL, { session_key: "my-key", format: "json" }]]);
+    assert.equal(DASHBOARD_INBOX_DRAIN_TOOL, "dashboard.inbox_drain");
+  });
+
+  test("throws on a tool-level error so the loop backs off", async () => {
+    const drain = createBridgeInboxDrain(async () => ({ isError: true, content: [{ type: "text", text: "unknown_session" }] }), "k");
+    await assert.rejects(drain(), /unknown_session/);
+  });
+
+  test("an empty inbox, malformed output, and blank texts give no messages", async () => {
+    for (const text of [JSON.stringify({ messages: [] }), "inbox empty", JSON.stringify({}), JSON.stringify({ messages: [{ text: "  " }, { text: 3 }, null] }), undefined]) {
+      const drain = createBridgeInboxDrain(async () => ({ content: text === undefined ? [] : [{ type: "text", text }] }), "k");
+      assert.deepEqual(await drain(), [], String(text));
+    }
+  });
+});
+
 describe("buildMailboxPushMessage", () => {
   test("a shared-layer sender uses its slug handle and carries the full envelope in details", () => {
     const message = buildMailboxPushMessage({ from: "scout@worktree", content: "run the ready ticket", sent_at: "2026-09-15T12:00:00Z" });
@@ -345,6 +604,24 @@ describe("createSubprocessWait", () => {
       assert.equal(options.runtimeBinary, undefined);
       assert.equal(await createSubprocessWait(options)(new AbortController().signal), "timeout");
       assert.deepEqual(JSON.parse(await readFile(observedPath, "utf8")), buildMailboxWaitArgv(options).slice(1));
+    } finally {
+      await rm(fixtureDir, { recursive: true, force: true });
+    }
+  });
+
+  test("a board-inbox wait passes the flag and reads which kind woke it from stdout", async () => {
+    const fixtureDir = await mkdtemp(join(tmpdir(), "ws-mailbox-board-"));
+    const launcherPath = join(fixtureDir, "board.py");
+    await writeFile(launcherPath, [
+      "import json,sys",
+      "kinds=['board'] if '--board-inbox' in sys.argv else ['mail']",
+      "print(json.dumps({'timed_out':False,'unread':0,'board':1,'kinds':kinds}),flush=True)",
+      "",
+    ].join("\n"));
+    try {
+      const wait = createSubprocessWait({ launcherPath, pluginDir: fixtureDir, sessionKey: "k" });
+      assert.equal(await wait(new AbortController().signal, { boardInbox: true }), "board");
+      assert.equal(await wait(new AbortController().signal, { boardInbox: false }), "mail", "a mail-only wait reads the exit code alone");
     } finally {
       await rm(fixtureDir, { recursive: true, force: true });
     }
@@ -571,6 +848,13 @@ describe("resolveMailboxSelfSlug", () => {
 });
 
 describe("buildMailboxWaitArgv", () => {
+  test("boardInbox adds --board-inbox, and its absence leaves the argv unchanged", () => {
+    const base = { launcherPath: "/l.py", pluginDir: "/p", sessionKey: "k" };
+    assert.deepEqual(buildMailboxWaitArgv({ ...base, boardInbox: true }), [...buildMailboxWaitArgv(base), "--board-inbox"]);
+    assert.deepEqual(buildMailboxWaitArgv({ ...base, boardInbox: false }), buildMailboxWaitArgv(base));
+  });
+
+
   test("with no slug, the invocation is unchanged (reply-id-only, Phase 1 shape)", () => {
     const argv = buildMailboxWaitArgv({ launcherPath: "/l", pluginDir: "/p", sessionKey: "my-key" });
     assert.deepEqual(argv, ["/l", "mailbox", "wait", "--session-key", "my-key", "--timeout", "10m", "--format", "json"]);
@@ -749,6 +1033,21 @@ describe("createMailboxWaiterSlot", () => {
     await slot.done;
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(cleaned, 1);
+  });
+
+  test("leadSettled reaches only the live waiter", async () => {
+    const settled: string[] = [];
+    const slot = createMailboxWaiterSlot({
+      resolveSlug: async () => undefined,
+      start: (key) => ({ stop: () => {}, leadSettled: () => settled.push(key), done: Promise.resolve() }),
+    });
+    slot.leadSettled!();
+    await slot.arm("old-key");
+    await slot.arm("new-key");
+    slot.leadSettled!();
+    assert.deepEqual(settled, ["new-key"]);
+    slot.stop();
+    await slot.done;
   });
 
   test("real waiters: a re-arm stops the old loop and the new loop admits mail for the new key", async () => {

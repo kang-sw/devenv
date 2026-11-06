@@ -46,6 +46,12 @@
  * `lookup_peers` answer is a reliable identity here. No self slug (or a
  * `lookup_peers` transport failure) keeps today's reply-id-only arm exactly
  * as before — additive-only, never a regression.
+ *
+ * The same wait also carries messages the user sends from the dashboard page
+ * (`board` deps, `--board-inbox`): the wait peeks the session's board-answer
+ * inbox, the adapter-only `dashboard.inbox_drain` tool claims its entries,
+ * and the drain is submitted as the user's own message. See
+ * `startMailboxWaiter` for when a message is held until the turn ends.
  */
 
 import { spawn } from "node:child_process";
@@ -65,8 +71,18 @@ export interface MailboxEnvelope {
   sent_at?: string;
 }
 
-/** `mailbox wait`'s result, distilled from its CLI exit code. */
-export type MailboxWaitOutcome = "mail" | "timeout" | "stopped" | "error";
+/**
+ * `mailbox wait`'s result, distilled from its CLI exit code and, for a wait
+ * armed with `--board-inbox`, from the `kinds` its JSON output reports:
+ * `mail` is unread mail only, `board` a held dashboard message only, and
+ * `mail+board` both.
+ */
+export type MailboxWaitOutcome = "mail" | "board" | "mail+board" | "timeout" | "stopped" | "error";
+
+/** How one wait is armed: `boardInbox` adds `--board-inbox`. */
+export interface MailboxWaitArm {
+  boardInbox: boolean;
+}
 
 /** The custom-message `customType` every arriving mail item rides under. */
 export const WS_MAILBOX_CUSTOM_TYPE = "ws-mailbox";
@@ -114,9 +130,25 @@ export function shouldArmMailboxWaiter(role: SpawnRole | undefined, sessionKey: 
   return role === undefined && typeof sessionKey === "string" && sessionKey.length > 0;
 }
 
+/**
+ * Submission of messages the user sent from the dashboard page. They wait
+ * in the session's board-answer inbox until drained; a drained message is
+ * claimed, so the dashboard can no longer merge into or cancel it.
+ */
+export interface BoardInboxDeps {
+  /** The adapter knob; must not throw. `false` arms the wait without `--board-inbox` and drains nothing. */
+  enabled: () => boolean | Promise<boolean>;
+  /** `true` while the lead runs no turn. */
+  idle: () => boolean;
+  /** Claim every held message; resolve with their texts. Throws on a tool error. */
+  drain: () => Promise<string[]>;
+  /** Submit one drain as the user's own input. */
+  inject: (texts: string[]) => void;
+}
+
 export interface MailboxWaiterDeps {
   /** Block until mail is present (or the wait times out); resolve with the outcome. */
-  runWait: (signal: AbortSignal) => Promise<MailboxWaitOutcome>;
+  runWait: (signal: AbortSignal, arm: MailboxWaitArm) => Promise<MailboxWaitOutcome>;
   /** Authoritatively drain (dequeue) the session's mailbox; resolve with what was removed. */
   drainMail: () => Promise<MailboxEnvelope[]>;
   /** Admit one non-empty drain into the live conversation as one unit (through the push FIFO). */
@@ -127,11 +159,19 @@ export interface MailboxWaiterDeps {
   sleep?: (ms: number) => Promise<void>;
   /** Diagnostic sink; omitted diagnostics are discarded rather than written to the host terminal. */
   onError?: (message: string) => void;
+  /** Dashboard message submission; absent, the wait never carries `--board-inbox`. */
+  board?: BoardInboxDeps;
 }
 
 export interface MailboxWaiterHandle {
   /** Stop the loop and abort any in-flight wait. Idempotent. */
   stop: () => void;
+  /**
+   * The lead's turn ended (or compaction finished). A dashboard message held
+   * during the turn is drained and submitted now, and the wait is re-armed
+   * with `--board-inbox`. A no-op when nothing is held.
+   */
+  leadSettled?: () => void;
   /** Resolves once the loop has fully exited, including subprocess close. */
   readonly done: Promise<void>;
 }
@@ -180,11 +220,20 @@ function defaultSleep(ms: number): Promise<void> {
  * loop re-arms (after a backoff for a wait/drain failure, so a persistently
  * failing edge cannot hot-spin). A successful `mail` and a `timeout` both
  * re-arm immediately.
+ *
+ * With `board` deps and the knob on, the wait also watches the dashboard
+ * inbox. A board wake while the lead is idle drains and injects at once. A
+ * board wake during a turn leaves the message held in the inbox, so the
+ * dashboard can still merge into or cancel it, and re-arms without
+ * `--board-inbox`: the wait only peeks, so a held entry would wake it at
+ * once. `leadSettled()` then ends that wait; the loop drains, injects, and
+ * re-arms with the flag.
  */
 export function startMailboxWaiter(deps: MailboxWaiterDeps): MailboxWaiterHandle {
   const controller = new AbortController();
   const sleep = deps.sleep ?? defaultSleep;
   const backoffMs = deps.errorBackoffMs ?? DEFAULT_ERROR_BACKOFF_MS;
+  const board = deps.board;
   const report = (message: string): void => {
     if (controller.signal.aborted) return;
     try {
@@ -193,43 +242,128 @@ export function startMailboxWaiter(deps: MailboxWaiterDeps): MailboxWaiterHandle
       // A failing diagnostic sink must never break the loop.
     }
   };
+  const describe = (error: unknown): string => error instanceof Error ? error.message : String(error);
+  // A board message seen during a turn and left in the inbox until the turn ends.
+  let held = false;
+  // The in-flight wait's own controller: `leadSettled` aborts it to re-arm,
+  // while `controller` (stop) ends the loop.
+  let waitController: AbortController | undefined;
+
+  const boardEnabled = async (): Promise<boolean> => {
+    try {
+      return (await board!.enabled()) !== false;
+    } catch {
+      return true;
+    }
+  };
+  const leadIdle = (): boolean => {
+    try {
+      return board?.idle() === true;
+    } catch {
+      return false;
+    }
+  };
+  /** Drain and inject; `false` when the drain failed. Clears the hold either way. */
+  const drainBoard = async (): Promise<boolean> => {
+    held = false;
+    let texts: string[];
+    try {
+      texts = await board!.drain();
+    } catch (error) {
+      report(`board drain failed: ${describe(error)}`);
+      return false;
+    }
+    if (texts.length > 0 && !controller.signal.aborted) {
+      try {
+        board!.inject(texts);
+      } catch (error) {
+        report(`board inject failed: ${describe(error)}`);
+      }
+    }
+    return true;
+  };
 
   const done = (async () => {
     while (!controller.signal.aborted) {
+      // Without board deps the wait is armed synchronously, as before.
+      const enabled = board ? await boardEnabled() : false;
+      if (controller.signal.aborted) break;
+      if (held && !enabled) held = false;
+      // Checked here rather than only in leadSettled, so a turn that ended
+      // while this loop was busy still releases the held message.
+      if (held && leadIdle() && !(await drainBoard())) {
+        // A failed drain leaves the entry held in the inbox; the next wait
+        // (re-armed with the flag) wakes on it again after the backoff.
+        if (!controller.signal.aborted) await sleep(backoffMs);
+        continue;
+      }
+      if (controller.signal.aborted) break;
+
+      const boardInbox = enabled && !held;
+      const wait = new AbortController();
+      const onStop = (): void => wait.abort();
+      controller.signal.addEventListener("abort", onStop, { once: true });
+      waitController = wait;
       let outcome: MailboxWaitOutcome;
       try {
-        outcome = await deps.runWait(controller.signal);
+        outcome = await deps.runWait(wait.signal, { boardInbox });
       } catch (error) {
         outcome = "error";
-        report(`wait failed: ${error instanceof Error ? error.message : String(error)}`);
+        report(`wait failed: ${describe(error)}`);
+      } finally {
+        waitController = undefined;
+        controller.signal.removeEventListener("abort", onStop);
       }
-      if (controller.signal.aborted || outcome === "stopped") break;
+      if (controller.signal.aborted) break;
+      if (outcome === "stopped") {
+        // Our own re-arm (leadSettled) re-enters the loop; any other stop ends it.
+        if (wait.signal.aborted) continue;
+        break;
+      }
 
-      if (outcome === "mail") {
-        let drainFailed = false;
+      let failed = outcome === "error";
+      if (outcome === "mail" || outcome === "mail+board") {
         try {
           const envelopes = await deps.drainMail();
           if (envelopes.length > 0 && !controller.signal.aborted) {
             try {
               deps.admit(envelopes);
             } catch (error) {
-              report(`admit failed: ${error instanceof Error ? error.message : String(error)}`);
+              report(`admit failed: ${describe(error)}`);
             }
           }
         } catch (error) {
-          drainFailed = true;
-          report(`drain failed: ${error instanceof Error ? error.message : String(error)}`);
+          // A failed drain leaves the mail queued, so an immediate re-arm
+          // would wake at once (peek) and hot-spin; back off first.
+          failed = true;
+          report(`drain failed: ${describe(error)}`);
         }
-        // A failed drain leaves the mail queued, so an immediate re-arm would
-        // wake at once (peek) and hot-spin; back off first.
-        if (drainFailed && !controller.signal.aborted) await sleep(backoffMs);
-      } else if (outcome === "error" && !controller.signal.aborted) {
-        await sleep(backoffMs);
       }
+      if ((outcome === "board" || outcome === "mail+board") && boardInbox && !controller.signal.aborted) {
+        if (!leadIdle()) held = true;
+        else if (!(await drainBoard())) failed = true;
+      }
+      if (failed && !controller.signal.aborted) await sleep(backoffMs);
     }
   })();
 
-  return { stop: () => controller.abort(), done };
+  return {
+    stop: () => controller.abort(),
+    leadSettled: () => {
+      if (held) waitController?.abort();
+    },
+    done,
+  };
+}
+
+/**
+ * Run `fn` once the lead's compaction hold has been released. The hold is
+ * cleared in a `setImmediate` that a handler of the same compaction event
+ * schedules, possibly after this call; a second check-phase turn runs after
+ * every immediate queued during that event, so the hold is gone by then.
+ */
+export function afterCompactionHold(fn: () => void, defer: (callback: () => void) => void = setImmediate): void {
+  defer(() => defer(fn));
 }
 
 export interface MailboxWaiterSlotDeps {
@@ -286,6 +420,7 @@ export function createMailboxWaiterSlot(deps: MailboxWaiterSlotDeps): MailboxWai
       previous?.stop();
       return true;
     },
+    leadSettled: () => live?.leadSettled?.(),
     stop: () => {
       if (stopped) return;
       stopped = true;
@@ -359,6 +494,8 @@ export interface SubprocessWaitOptions {
   root?: string;
   /** `--timeout` value; a finite window self-heals a wedged wait and bounds the listening marker. */
   timeoutArg?: string;
+  /** Adds `--board-inbox`, so a held dashboard message also wakes the wait. Set per wait by the loop. */
+  boardInbox?: boolean;
   /** Diagnostic sink for the child's stderr and spawn failures; omitted diagnostics are discarded. */
   onStderr?: (line: string) => void;
 }
@@ -380,7 +517,30 @@ export function buildMailboxWaitArgv(options: SubprocessWaitOptions): string[] {
   if (root) argv.push("--root", root);
   const slug = options.slug?.trim();
   if (slug) argv.push("--slug", slug);
+  if (options.boardInbox) argv.push("--board-inbox");
   return argv;
+}
+
+/**
+ * Refine a successful `--board-inbox` wait by the `kinds` its JSON output
+ * reports. Output that cannot be read counts as both kinds: a mail drain of
+ * an empty queue and a board check of an empty inbox are both harmless,
+ * while a missed kind would leave that arrival unhandled.
+ */
+export function boardWakeOutcome(stdout: string): MailboxWaitOutcome {
+  let kinds: unknown;
+  try {
+    kinds = (JSON.parse(stdout) as { kinds?: unknown } | null)?.kinds;
+  } catch {
+    return "mail+board";
+  }
+  if (!Array.isArray(kinds)) return "mail+board";
+  const mail = kinds.includes("mail");
+  const board = kinds.includes("board");
+  if (mail && board) return "mail+board";
+  if (board) return "board";
+  if (mail) return "mail";
+  return "mail+board";
 }
 
 /**
@@ -407,13 +567,15 @@ export function sessionMailboxWaitOptions(
  * The real `runWait`: a source-loaded session invokes its immutable copy of
  * the binary used to bootstrap the connected bridge, avoiding mutable staging
  * and runtime contracts. Release-backed sessions retain the Python launcher.
- * Stdout — the peeked mail — is intentionally ignored (`stdio` drops it): the
- * drain, not the peek, is the source of truth.
+ * Stdout — the peeked mail — is ignored (`stdio` drops it) except for a
+ * `--board-inbox` wait, whose `kinds` alone are read: the drain, not the
+ * peek, is the source of truth.
  */
-export function createSubprocessWait(options: SubprocessWaitOptions): (signal: AbortSignal) => Promise<MailboxWaitOutcome> {
+export function createSubprocessWait(options: SubprocessWaitOptions): (signal: AbortSignal, arm?: MailboxWaitArm) => Promise<MailboxWaitOutcome> {
   const stderr = options.onStderr ?? (() => {});
-  return (signal) =>
+  return (signal, arm) =>
     new Promise<MailboxWaitOutcome>((resolve) => {
+      const boardInbox = arm?.boardInbox === true;
       const reportStderr = (line: string): void => {
         if (signal.aborted) return;
         try {
@@ -426,17 +588,24 @@ export function createSubprocessWait(options: SubprocessWaitOptions): (signal: A
         resolve("stopped");
         return;
       }
-      const argv = buildMailboxWaitArgv(options);
+      const argv = buildMailboxWaitArgv({ ...options, boardInbox });
+      // Only a board-inbox wait reads stdout: its `kinds` tell mail from a
+      // board message. A mail-only wake needs no more than the exit code.
       const child = spawn(options.runtimeBinary ?? "python3", options.runtimeBinary ? argv.slice(1) : argv, {
         cwd: options.pluginDir,
-        stdio: ["ignore", "ignore", "pipe"],
+        stdio: ["ignore", boardInbox ? "pipe" : "ignore", "pipe"],
       });
+      let stdout = "";
+      let stdoutEnded = !boardInbox;
+      let onStdoutEnd: (() => void) | undefined;
+      child.stdout?.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+      child.stdout?.on("end", () => { stdoutEnded = true; onStdoutEnd?.(); });
       let settled = false;
       const finish = (outcome: MailboxWaitOutcome): void => {
         if (settled) return;
         settled = true;
         signal.removeEventListener("abort", onAbort);
-        resolve(outcome);
+        resolve(boardInbox && outcome === "mail" ? boardWakeOutcome(stdout) : outcome);
       };
       const onAbort = (): void => {
         try {
@@ -458,8 +627,17 @@ export function createSubprocessWait(options: SubprocessWaitOptions): (signal: A
       // Windows release launchers spawn ws-mcp as a grandchild whose inherited
       // pipe can keep `close` pending after Python exits; no copy is owned by
       // that path, so retain its original exit-based settlement.
+      // A board wake read on exit gives its stdout a short grace to drain;
+      // whatever is unread by then falls back to both kinds.
       if (!options.runtimeBinary) child.on("exit", (code, sig) => {
-        finish(mapMailboxWaitExit(code, sig, signal.aborted));
+        const outcome = mapMailboxWaitExit(code, sig, signal.aborted);
+        if (outcome !== "mail" || stdoutEnded) {
+          finish(outcome);
+          return;
+        }
+        const grace = setTimeout(() => finish(outcome), 250);
+        (grace as { unref?: () => void }).unref?.();
+        onStdoutEnd = () => { clearTimeout(grace); finish(outcome); };
       });
       child.on("close", (code, sig) => {
         finish(mapMailboxWaitExit(code, sig, signal.aborted));
@@ -502,6 +680,36 @@ export function createBridgeDrain(callTool: MailboxToolCall, sessionKey: string)
       (candidate): candidate is MailboxEnvelope =>
         !!candidate && typeof candidate === "object" && typeof (candidate as { content?: unknown }).content === "string",
     );
+  };
+}
+
+/** The adapter-only ws-mcp tool that claims the session's held dashboard messages. */
+export const DASHBOARD_INBOX_DRAIN_TOOL = "dashboard.inbox_drain";
+
+/**
+ * The real board `drain`: claim every held dashboard message through the
+ * bridge's client (`format: "json"` returns `{messages: [{text, ...}]}`) and
+ * resolve with their texts in order. A tool-level error throws, so the loop
+ * backs off; a malformed success degrades to no messages.
+ */
+export function createBridgeInboxDrain(callTool: MailboxToolCall, sessionKey: string): () => Promise<string[]> {
+  return async () => {
+    const result = await callTool(DASHBOARD_INBOX_DRAIN_TOOL, { session_key: sessionKey, format: "json" });
+    const text = result.content.find((item) => item.type === "text")?.text;
+    if (result.isError) throw new Error(text ?? `${DASHBOARD_INBOX_DRAIN_TOOL} failed`);
+    if (!text) return [];
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return [];
+    }
+    const messages = (parsed as { messages?: unknown } | null)?.messages;
+    if (!Array.isArray(messages)) return [];
+    return messages.flatMap((message) => {
+      const body = (message as { text?: unknown } | null)?.text;
+      return typeof body === "string" && body.trim() !== "" ? [body] : [];
+    });
   };
 }
 

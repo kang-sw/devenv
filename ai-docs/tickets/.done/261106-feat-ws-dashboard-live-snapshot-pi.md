@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 1e76933f5ae0cadd
 sage-review-completeness-reviewed: 1e76933f5ae0cadd
+completed: 2026-11-07
 ---
 
 # ws dashboard live snapshot and Pi adapter - adapter event intake, snapshot file, conversation ring, Pi producer and submission
@@ -545,3 +546,92 @@ with a live Pi session: a message sent from the composer while idle starts a
 turn as user input with the whiteboard label and shows in the conversation
 tagged whiteboard; one sent mid-turn shows as held, can be cancelled or
 merged, and is submitted when the turn ends.
+
+### Result (625d361f9) - 2026-11-07
+
+Landed:
+- `agents-plugin-pi/src/mailbox-waiter.ts`: the waiter loop takes optional
+  `board` deps (`enabled`, `idle`, `drain`, `inject`) and a `leadSettled()`
+  handle method, which the slot forwards to its live waiter. Also new:
+  `boardWakeOutcome` (reads the wait's `kinds`), `createBridgeInboxDrain`
+  (`dashboard.inbox_drain`, `format: "json"`), and `afterCompactionHold`.
+  `buildMailboxWaitArgv` adds `--board-inbox` per wait.
+- `agents-plugin-pi/src/adapter-label.ts`: `whiteboardSubmissionText`.
+- `agents-plugin-pi/src/index.ts` wires the owner lead's waiter and adds
+  the lead-turn hooks: `agent_start`, `agent_settled`, `session_compact`,
+  and `session_compact_failed`.
+- The `pi.dashboard_enabled` description now covers submission too.
+- Review fix: 625d361f9.
+
+Settled:
+- **Arming.** The wait carries `--board-inbox` while the knob is on and
+  nothing is held. A knob read that throws counts as on, as in the feed.
+  - Only a board-inbox wait pipes stdout, and it reads only `kinds`.
+  - Output it cannot read counts as both kinds: an empty mail drain and an
+    empty inbox drain are harmless.
+- **Idle.** The lead is idle when it is outside its own `agent_start` to
+  `agent_settled` turn and `isOwningAgentIdle()` holds, which includes the
+  compaction hold. Pi refuses a prompt during compaction, and a drained
+  entry is already claimed.
+- **Board wake.** An idle lead drains and injects at once. During a turn
+  the entry is held: the next wait has no flag, and nothing is drained.
+- **Release.** `leadSettled` (on `agent_settled`, and after a finished or
+  failed compaction once the hold clears) ends the unflagged wait.
+  - The loop checks for held-and-idle before every arm, so a settle that
+    lands between the busy check and the hold still releases the entry.
+  - After the drain and inject, the next wait has the flag again.
+  - A failed drain clears the hold and backs off. The flagged wait then
+    wakes on the entry again.
+- **Injection.** One drain becomes one user message:
+  `pi.sendUserMessage(whiteboardSubmissionText(texts), { deliverAs:
+  "followUp" })`. It is the whiteboard label line, then each drained entry
+  as its own paragraph.
+  - Joining several drained entries (a send racing a drain makes a second
+    entry) starts one turn.
+  - `followUp` matters only if a turn started after the idle check.
+  - The feed's existing label rule tags the ring entry and the turn
+    `whiteboard`.
+- **Knob off.** No flag and no drain. A hold is dropped without draining,
+  so the entry stays in the inbox.
+
+Verification:
+- `npm test` in `agents-plugin-pi`, with `WS_MCP_RUNTIME_DIR` set to a
+  develop build stamped `0.48.10` (the workaround in
+  `261107-bug-pi-source-tests-fetch-release-runtime`): 2570 tests, 2566
+  pass, 1 fail, 3 skipped. The failure is the known stale 65-tool contract
+  check in `bridge.test.ts`. The baseline before the change was 2545 tests
+  with the same single failure.
+- New unit tests in `test/mailbox-waiter.test.ts`:
+  - an idle wake injecting at once;
+  - a mid-turn wake re-arming without the flag and injecting only at
+    `leadSettled`, with the flag restored afterwards;
+  - a settle racing the hold;
+  - a cancelled entry never injected;
+  - a merged entry injected once as one message;
+  - the knob off, and a knob read that throws;
+  - mail and board in one wake;
+  - drain failure backoff and a throwing inject;
+  - `boardWakeOutcome`, `createBridgeInboxDrain`, the argv flag, a
+    subprocess fixture reading `kinds`, slot forwarding, and
+    `afterCompactionHold` ordering.
+- Other test changes:
+  - `test/adapter-label.test.ts`: the submission text.
+  - `test/dashboard-feed.test.ts`: a drained submission reaching the ring
+    as one `whiteboard` user message.
+  - `test/mailbox-rearm.integration.test.ts`: the real extension with a
+    fake launcher. It covers idle inject, the mid-turn hold with no flag
+    and the entry left on disk, inject at `agent_settled` with the flag
+    restored, each entry drained once, and the knob off arming no flag.
+- Lite review: one Important finding, fixed in 625d361f9. The compaction
+  release ran while the hold was still set, and a failed compaction did
+  not release at all. Its stale stdout doc comment is fixed too.
+
+Open:
+- Minor, not fixed: if a compaction starts between the idle check and the
+  send, Pi drops the already-drained message. Pi reports the error
+  asynchronously, and the window is one drain round trip.
+- For the lead, a hand check with a live Pi session and the daemon:
+  - a composer send while the lead is idle starts a turn with the
+    whiteboard label and shows tagged whiteboard;
+  - a mid-turn send shows as held, can be cancelled or merged, and is
+    submitted at turn end.

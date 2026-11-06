@@ -131,3 +131,126 @@ for line in sys.stdin:
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("dashboard messages: an idle wake injects at once with the whiteboard label; a mid-turn one is held and injected at the settle; the knob off arms no inbox flag", { timeout: 120_000 }, async () => {
+  const directory = mkdtempSync(join(tmpdir(), "ws-pi-board-inbox-"));
+  const savedEnv = { ...process.env };
+  let session: any;
+  try {
+    const plugin = join(directory, "plugin");
+    mkdirSync(plugin);
+    for (const name of ["src", "runtime.json", "config-manifest.json", "pi-lead-guide.md", "lead-compact-guide.md", "execute-worker-guide.md", "explore-guide.md"]) cpSync(join(process.cwd(), name), join(plugin, name), { recursive: true });
+    symlinkSync(join(process.cwd(), "node_modules"), join(plugin, "node_modules"), "junction");
+    mkdirSync(join(plugin, "bin"));
+    const version = JSON.parse(readFileSync(join(plugin, "runtime.json"), "utf8")).plugin_version;
+    const waits = join(directory, "waits.jsonl");
+    const drains = join(directory, "drains.jsonl");
+    const held = join(directory, "held");
+    const knobOff = join(directory, "knob-off");
+    const inputs = join(directory, "inputs.jsonl");
+    // The wait peeks: with --board-inbox it wakes at once while `held`
+    // exists and reports the board kind; the drain claims (removes) it.
+    writeFileSync(join(plugin, "bin/ws-mcp-launcher.py"), `import sys,json,time,os
+HELD=${JSON.stringify(held)}
+if sys.argv[1:3]==['mailbox','wait']:
+ with open(${JSON.stringify(waits)},'a') as f: f.write(json.dumps(sys.argv[3:])+'\\n')
+ if '--board-inbox' in sys.argv and os.path.exists(HELD):
+  print(json.dumps({'timed_out':False,'unread':0,'board':1,'kinds':['board']}),flush=True)
+  raise SystemExit(0)
+ time.sleep(0.1)
+ raise SystemExit(3)
+def ok(t): return {'isError':False,'content':[{'type':'text','text':t}]}
+for line in sys.stdin:
+ q=json.loads(line); m=q['method']; p=q.get('params',{}); r={}
+ if m=='initialize': r={'serverInfo':{'name':'offline','version':${JSON.stringify(version)}},'capabilities':{}}
+ elif m=='tools/list': r={'tools':[]}
+ elif m=='tools/call':
+  n=p['name']; a=p.get('arguments') or {}
+  if n=='ferrule': r=ok(json.dumps({'session_key':'board-key'}))
+  elif n=='workflow_manual': r=ok('# Workflow Manual\\n\\n## Session Key\\nboard-key\\n')
+  elif n=='mailbox.lookup_peers': r=ok(json.dumps({'self':{},'peers':[]}))
+  elif n=='mailbox.recv': r=ok('[]')
+  elif n=='config.get' and str(a.get('key','')).endswith('dashboard_enabled'): r=ok(json.dumps({'value': not os.path.exists(${JSON.stringify(knobOff)})}))
+  elif n=='dashboard.inbox_drain':
+   msgs=[]
+   if os.path.exists(HELD):
+    msgs=[{'id':'e1','text':open(HELD).read()}]; os.remove(HELD)
+   with open(${JSON.stringify(drains)},'a') as f: f.write(json.dumps([x['text'] for x in msgs])+'\\n')
+   r=ok(json.dumps({'messages':msgs}))
+  else: r=ok('{}')
+ print(json.dumps({'jsonrpc':'2.0','id':q['id'],'result':r}),flush=True)
+`);
+    // Records every input the session receives, so an injection is seen
+    // without a model to run the turn.
+    const probe = join(directory, "probe.ts");
+    writeFileSync(probe, `import { appendFileSync } from "node:fs";
+export default function (pi: any) {
+  pi.on("input", (event: any) => { appendFileSync(${JSON.stringify(inputs)}, JSON.stringify({ text: event.text, source: event.source }) + "\\n"); });
+}
+`);
+
+    for (const key of ROLE_ENV_KEYS) delete process.env[key];
+    process.env.PI_OFFLINE = "1";
+    const agentDir = join(directory, "agent");
+    mkdirSync(agentDir);
+    const settingsManager = sdk.SettingsManager.inMemory({ compaction: { enabled: false }, retry: { enabled: false } });
+    const modelRuntime = await sdk.ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json"), modelsStorePath: join(agentDir, "store.json"), allowModelNetwork: false });
+    const resourceLoader = new sdk.DefaultResourceLoader({ cwd: directory, agentDir, settingsManager, noSkills: true, noThemes: true, noPromptTemplates: true, noContextFiles: true, additionalExtensionPaths: [join(plugin, "src/index.ts"), probe] });
+    await resourceLoader.reload();
+    assert.deepEqual(resourceLoader.getExtensions().errors, []);
+    ({ session } = await sdk.createAgentSession({ cwd: directory, agentDir, sessionManager: sdk.SessionManager.create(directory, join(directory, "sessions")), resourceLoader, modelRuntime, settingsManager }));
+    const noop = () => {};
+    const ui = new Proxy({ notify: noop, custom: async () => undefined, setFooter: noop }, { get: (target: any, key) => target[key] ?? noop });
+    // With no model the injected prompt fails after its input event; that error is expected here.
+    await session.bindExtensions({ mode: "rpc", uiContext: ui, onError: noop });
+
+    const lines = (path: string): any[] => existsSync(path) ? readFileSync(path, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)) : [];
+    const flagged = (): boolean[] => lines(waits).map((args: string[]) => args.includes("--board-inbox"));
+    const injected = (): string[] => lines(inputs).map((input) => input.text);
+    const label = "[user message from the ws whiteboard]";
+
+    await until(() => flagged().length >= 2, "the first waits", WAIT);
+    assert.ok(flagged().every(Boolean), "an idle lead's wait carries the inbox flag");
+
+    // Idle: injected at once.
+    writeFileSync(held, "idle hello\n\n(01) ok");
+    await until(() => injected().length === 1, "the idle injection", WAIT);
+    assert.equal(injected()[0], `${label}\nidle hello\n\n(01) ok`);
+    assert.equal(lines(inputs)[0].source, "extension");
+    assert.equal(existsSync(held), false);
+
+    // Mid-turn: held until the settle.
+    await session.extensionRunner.emit({ type: "agent_start" });
+    const beforeHold = flagged().length;
+    writeFileSync(held, "busy hello");
+    await until(() => flagged().slice(beforeHold).includes(false), "a re-arm without the inbox flag", WAIT);
+    const unflaggedAt = flagged().length;
+    await until(() => flagged().length >= unflaggedAt + 2, "further waits during the turn", WAIT);
+    assert.ok(flagged().slice(unflaggedAt).every((flag) => !flag), "the wait stays unflagged while the entry is held");
+    assert.equal(existsSync(held), true, "the held entry is not drained mid-turn, so merge and cancel still act on it");
+    assert.equal(injected().length, 1);
+    await session.extensionRunner.emit({ type: "agent_settled" });
+    await until(() => injected().length === 2, "the settle injection", WAIT);
+    assert.equal(injected()[1], `${label}\nbusy hello`);
+    const afterSettle = flagged().length;
+    await until(() => flagged().length >= afterSettle + 1, "the re-armed wait", WAIT);
+    assert.equal(flagged().at(-1), true, "the flag is restored after the drain");
+    assert.deepEqual(lines(drains).filter((texts: string[]) => texts.length > 0), [["idle hello\n\n(01) ok"], ["busy hello"]], "each entry is drained exactly once");
+
+    // Knob off: no inbox flag, nothing drained.
+    writeFileSync(knobOff, "");
+    const beforeOff = flagged().length;
+    await until(() => flagged().slice(beforeOff).includes(false), "a wait armed after the knob turned off", WAIT);
+    const offAt = flagged().length;
+    writeFileSync(held, "while off");
+    await until(() => flagged().length >= offAt + 2, "further waits with the knob off", WAIT);
+    assert.ok(flagged().slice(offAt).every((flag) => !flag));
+    assert.equal(existsSync(held), true);
+    assert.equal(injected().length, 2);
+  } finally {
+    if (session) { await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" }); session.dispose(); }
+    for (const key of Object.keys(process.env)) if (!(key in savedEnv)) delete process.env[key];
+    Object.assign(process.env, savedEnv);
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

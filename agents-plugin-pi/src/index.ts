@@ -190,6 +190,7 @@ import {
   agentDashboardRefreshRef,
   agentWidgetRefreshRef,
   heldPushQueue,
+  isOwningAgentIdle,
   leadIdleRef,
   ownerNotifyRef,
   pushToLead,
@@ -219,7 +220,7 @@ import { ChildApprovalGate } from "./approval-protocol.ts";
 import { isLeadOrFork, readSpawnRole, WS_PI_FORK_CONTEXT_ENV, WS_PI_PARENT_SESSION_KEY_ENV, type SpawnRole } from "./process-role.ts";
 import { createApprovalRelay, registerExecuteGateway } from "./execute-gateway.ts";
 import { registerBackgroundTaskShutdown } from "./background-tasks.ts";
-import { attachMailboxRuntimeCleanup, buildMailboxPushMessage, createBridgeDrain, createMailboxWaiterSlot, createSubprocessWait, reportDistinctLinesOnce, resolveMailboxSelfSlug, sessionMailboxWaitOptions, shouldArmMailboxWaiter, stageMailboxRuntime, startMailboxWaiter, type MailboxToolCall, type MailboxWaiterHandle, type StagedMailboxRuntime } from "./mailbox-waiter.ts";
+import { afterCompactionHold, attachMailboxRuntimeCleanup, buildMailboxPushMessage, createBridgeDrain, createBridgeInboxDrain, createMailboxWaiterSlot, createSubprocessWait, reportDistinctLinesOnce, resolveMailboxSelfSlug, sessionMailboxWaitOptions, shouldArmMailboxWaiter, stageMailboxRuntime, startMailboxWaiter, type MailboxToolCall, type MailboxWaiterHandle, type StagedMailboxRuntime } from "./mailbox-waiter.ts";
 import { armForkRoleWiring, registerFork } from "./fork.ts";
 import {
   createThreadRegistryHandle,
@@ -246,6 +247,7 @@ import { registerScopedWriteTools } from "./write-scopes.ts";
 import { registerWebTools } from "./web-tools.ts";
 import { publishSubtree, SubtreeUpstream } from "./subtree-lifecycle.ts";
 import { createDashboardFeed, dashboardAgentEntries, registerDashboardLeadEvents, resolveDashboardEnabled, type DashboardFeed } from "./dashboard-feed.ts";
+import { whiteboardSubmissionText } from "./adapter-label.ts";
 
 // This is the exact physical entry module Pi loaded (whether from `-e`, an
 // installed package, or a cache). Every RPC child receives this path verbatim
@@ -635,6 +637,21 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   // after bootstrap once this session's own key exists, stopped on
   // `session_shutdown`. `undefined` in every other role/process.
   let mailboxWaiterHandle: MailboxWaiterHandle | undefined;
+  // The owner lead's own turn, from Pi `agent_start` to `agent_settled`: a
+  // dashboard message that arrives inside it stays held in the inbox until
+  // the settle, so the page can still merge into or cancel it. Compaction
+  // also blocks a prompt, so its end (or failure) releases a held message
+  // the same way, once the compaction hold itself has cleared.
+  let leadTurnOpen = false;
+  pi.on("agent_start", () => { leadTurnOpen = true; });
+  pi.on("agent_settled", () => {
+    leadTurnOpen = false;
+    mailboxWaiterHandle?.leadSettled?.();
+  });
+  for (const event of ["session_compact", "session_compact_failed"] as const) {
+    pi.on(event, () => { afterCompactionHold(() => { mailboxWaiterHandle?.leadSettled?.(); }); });
+  }
+  pi.on("session_shutdown", () => { leadTurnOpen = false; });
   // 260917 review fix: monotonic epoch guarding the async self-slug
   // resolution the arm site awaits below. Before that await existed, every
   // stop()-then-start() of `mailboxWaiterHandle` ran fully synchronously, so
@@ -980,6 +997,16 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
               sendBatchToLead(pi, envelopes.map(buildMailboxPushMessage), "steer");
             },
             onError: reportMailboxWaiterDiagnostic,
+            // Messages the user sent from the dashboard page, submitted as
+            // the user's own input under the same knob as the feed.
+            board: {
+              enabled: () => thenOrNow(readAdapterConfig(["dashboard_enabled"]), resolveDashboardEnabled),
+              idle: () => !leadTurnOpen && isOwningAgentIdle(),
+              drain: createBridgeInboxDrain(mailboxCallTool, key),
+              // followUp only matters if a turn started since the idle
+              // check; an idle lead starts a turn with it either way.
+              inject: (texts) => { pi.sendUserMessage(whiteboardSubmissionText(texts), { deliverAs: "followUp" }); },
+            },
           });
         },
       });
