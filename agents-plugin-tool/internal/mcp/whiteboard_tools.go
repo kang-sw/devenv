@@ -122,25 +122,25 @@ var whiteboardProviders = []whiteboardSectionProvider{
 	},
 }
 
-// todoPanel lists every todo on the full page; the embed keeps the count and
-// lists only the unfinished ones.
+// todoPanel lists the unfinished todos in store order. The full page folds the
+// done ones below them; the embed keeps the count and omits them.
 func todoPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 	todos := in.rec.Todos
 	if len(todos) == 0 {
 		return wswhiteboard.Panel{}, false
 	}
-	done := 0
-	rows := make([]wswhiteboard.PanelRow, 0, len(todos))
+	var rows, folded []wswhiteboard.PanelRow
 	for _, todo := range todos {
-		if todo.Status == todoDone {
-			done++
-			if in.layout == wswhiteboard.LayoutEmbed {
-				continue
-			}
+		row := wswhiteboard.PanelRow{State: string(todo.Status), Label: todo.Key, Text: todo.Title}
+		switch {
+		case todo.Status != todoDone:
+			rows = append(rows, row)
+		case in.layout != wswhiteboard.LayoutEmbed:
+			folded = append(folded, row)
 		}
-		rows = append(rows, wswhiteboard.PanelRow{State: string(todo.Status), Label: todo.Key, Text: todo.Title})
 	}
-	return wswhiteboard.Panel{ID: "todo", Title: "Todos", Icon: "todo", Count: fmt.Sprintf("%d/%d", done, len(todos)), Rows: rows}, true
+	count := len(todos) - len(rows)
+	return wswhiteboard.Panel{ID: "todo", Title: "Todos", Icon: "todo", Count: fmt.Sprintf("%d/%d", count, len(todos)), Rows: rows, Folded: folded}, true
 }
 
 // agendaPanel shows each agenda blob as its key and the one-line summary

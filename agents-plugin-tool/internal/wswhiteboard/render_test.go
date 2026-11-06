@@ -395,7 +395,7 @@ func TestRenderPageReplyBar(t *testing.T) {
 
 func TestRenderPagePanels(t *testing.T) {
 	full := render(t, sampleView(LayoutFull))
-	for _, want := range []string{`<details class="panel" id="p-todo" open>`, `<details class="panel" id="p-agenda" open>`, `<aside class="side">`, `<li class="done" title="mockup"><span class="box">[x]</span>`, `<li class="keyed"><code>whiteboard.render</code>`} {
+	for _, want := range []string{`<details class="panel" id="p-todo" open>`, `<details class="panel" id="p-agenda" open>`, `<aside class="side">`, `<li class="done" title="mockup"><span class="box"><svg class="i" aria-hidden="true"><use href="#i-box-done"/></svg></span>`, `<li class="keyed"><code>whiteboard.render</code>`} {
 		if !strings.Contains(full, want) {
 			t.Errorf("full page lacks %q", want)
 		}
@@ -579,11 +579,43 @@ func TestRenderPagePanelRowLinks(t *testing.T) {
 			`<li class="keyed"><code>ready</code><span><a href="file:///home/u/my%20repo/ai-docs/tickets/ready/261106-feat-b.md">Absolute</a></span></li>`,
 			`<a href="#ZgotmplZ">Script</a>`,
 			`<li class="keyed"><code>todo</code><span>Plain</span></li>`,
-			`<span class="box">[ ]</span><span><a href="../tickets/todo/261106-feat-c.md">Stateful</a></span>`,
+			`<span class="box"><svg class="i" aria-hidden="true"><use href="#i-box"/></svg></span><span><a href="../tickets/todo/261106-feat-c.md">Stateful</a></span>`,
 		} {
 			if !strings.Contains(out, want) {
 				t.Errorf("%s: page lacks %q", name, want)
 			}
 		}
+	}
+}
+
+// TestRenderPageTodoRowIcons pins the checklist boxes: each state shows its
+// sprite symbol, never the old text marker, and folded rows sit behind a
+// closed "done N" details after the open rows.
+func TestRenderPageTodoRowIcons(t *testing.T) {
+	panels := []Panel{{ID: "todo", Title: "Todos", Icon: "todo", Count: "1/4",
+		Rows: []PanelRow{
+			{State: "wip", Label: "a", Text: "Working"},
+			{State: "pending", Label: "b", Text: "Waiting"},
+			{State: "defer", Label: "c", Text: "Later"},
+		},
+		Folded: []PanelRow{{State: "done", Label: "d", Text: "Finished"}},
+	}}
+	out := render(t, BuildView(&State{}, ViewInput{Layout: LayoutFull, ReplyID: "r", Panels: panels}))
+	for _, want := range []string{`href="#i-box-wip"`, `href="#i-box"`, `href="#i-box-defer"`, `href="#i-box-done"`,
+		`<details class="folded"><summary class="chip" title="done">done 1</summary>`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("page lacks %q", want)
+		}
+	}
+	for _, bad := range []string{"[x]", "[~]", "[>]", "[ ]"} {
+		if strings.Contains(out, bad) {
+			t.Errorf("page still renders text marker %q", bad)
+		}
+	}
+	if strings.Index(out, "Working") > strings.Index(out, `class="folded"`) || strings.Index(out, `class="folded"`) > strings.Index(out, "Finished") {
+		t.Errorf("order is not open rows, fold, done rows")
+	}
+	if strings.Contains(out, `class="folded" open`) {
+		t.Errorf("done fold must be closed by default")
 	}
 }

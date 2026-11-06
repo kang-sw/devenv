@@ -76,9 +76,9 @@ func loadAssets() (*pageAssets, error) {
 				}
 				return template.HTML(`<svg class="i" aria-hidden="true"><use href="#i-` + name + `"/></svg>`), nil
 			},
-			"lines":  rationaleLines,
-			"marker": rowMarker,
-			"href":   rowHref,
+			"lines": rationaleLines,
+			"box":   rowBox,
+			"href":  rowHref,
 		}
 		a.tmpl, assetsErr = template.New("page").Funcs(funcs).ParseFS(assetFS, "assets/page.tmpl")
 		if assetsErr == nil {
@@ -290,16 +290,16 @@ func rowHref(link string) any {
 	return link
 }
 
-// rowMarker is the checklist box a panel row's state shows.
-func rowMarker(state string) string {
+// rowBox is the sprite symbol of the checklist box a panel row's state shows.
+func rowBox(state string) string {
 	switch state {
 	case "done":
-		return "[x]"
+		return "box-done"
 	case "wip":
-		return "[~]"
+		return "box-wip"
 	case "defer":
-		return "[>]"
+		return "box-defer"
 	default:
-		return "[ ]"
+		return "box"
 	}
 }

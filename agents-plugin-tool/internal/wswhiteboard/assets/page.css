@@ -218,8 +218,14 @@ details.panel .body { padding: 8px 12px 10px; font-size: 13px; }
 .rows li { display: flex; gap: 8px; padding: 3px 0; }
 .rows li.done { color: var(--wb-muted-fg); text-decoration: line-through; }
 .rows li.defer { color: var(--wb-muted-fg); }
-.rows li.wip { font-weight: 700; }
-.rows .box { font-family: var(--wb-mono); color: var(--wb-muted-fg); flex: none; white-space: pre; }
+.rows li.wip { font-weight: 700; background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); border-radius: 6px; padding: 3px 6px; margin: 0 -6px; }
+.rows .box { color: var(--wb-muted-fg); flex: none; padding-top: 1px; }
+.rows li.wip .box { color: var(--wb-primary); }
+details.folded { margin-top: 6px; }
+details.folded > summary { cursor: pointer; list-style: none; width: fit-content; }
+details.folded > summary::-webkit-details-marker { display: none; }
+details.folded[open] > summary { margin-bottom: 4px; }
+details.folded .rows li { color: var(--wb-muted-fg); }
 .rows li.keyed { display: block; padding: 4px 0; }
 .rows li.keyed + li.keyed { border-top: 1px solid var(--wb-muted); }
 .rows li.keyed code { font-size: 12px; color: var(--wb-primary); font-weight: 600; }

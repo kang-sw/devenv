@@ -117,6 +117,8 @@ type Panel struct {
 	Icon  string
 	Count string
 	Rows  []PanelRow
+	// Folded rows render after Rows behind a closed "done N" fold.
+	Folded []PanelRow
 }
 
 // PanelRow is one line of a panel.

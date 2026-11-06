@@ -235,6 +235,16 @@ func TestWhiteboardEmbedTodoPanelShowsUnfinished(t *testing.T) {
 	if !strings.Contains(full, "finished work") || !strings.Contains(full, "open work") {
 		t.Fatalf("full todo panel must list every todo: %s", full)
 	}
+	if !strings.Contains(full, `<span class="chip">1/3</span>`) || !strings.Contains(full, `done 1</summary>`) {
+		t.Fatalf("full todo panel keeps the count and folds done rows: %s", full)
+	}
+	fold := strings.Index(full, `class="folded"`)
+	if fold < 0 || strings.Index(full, "open work") > strings.Index(full, "deferred work") || strings.Index(full, "deferred work") > fold || fold > strings.Index(full, "finished work") {
+		t.Fatalf("full todo panel order must be unfinished rows, fold, done rows: %s", full)
+	}
+	if strings.Contains(embed, "folded") {
+		t.Fatalf("embed todo panel must not fold done rows: %s", embed)
+	}
 }
 
 // TestWhiteboardTicketWriteRerendersFullPage pins the ticket panel's refresh:

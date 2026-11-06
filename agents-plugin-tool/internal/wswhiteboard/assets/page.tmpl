@@ -48,7 +48,9 @@
 
 {{define "srow"}}<div class="srow{{if .Void}} void{{end}}" id="item-{{.ID}}"><span class="id"{{if .Void}} title="{{.Status}}"{{end}}>{{.Label}}</span>{{template "newdot" .}}<span class="stext"><b>{{template "text" (.Parts .Title)}}</b>{{with .PickedOption}} <span class="pick" title="picked"><span class="k">{{.Letter}}</span>{{template "text" ($.Parts .Text)}}</span>{{end}}{{with .Reading}} <span class="ans" title="the lead's reading">{{template "text" ($.Parts .)}}</span>{{end}}{{with .AnswerQuote}} <span class="quote" title="your words">“{{.}}”</span>{{end}}{{template "links" .}}</span></div>{{end}}
 
-{{define "panel"}}<details class="panel" id="p-{{.ID}}"{{if .Page.Full}} open{{end}}><summary>{{icon .IconName}}{{.Title}}{{with .Count}}<span class="chip">{{.}}</span>{{end}}</summary><div class="body"><ul class="rows">{{range .Rows}}{{if .State}}<li class="{{.State}}"{{with .Label}} title="{{.}}"{{end}}><span class="box">{{marker .State}}</span><span>{{template "rowtext" .}}</span></li>{{else}}<li class="keyed">{{with .Label}}<code>{{.}}</code>{{end}}<span>{{template "rowtext" .}}</span></li>{{end}}{{end}}</ul></div></details>{{end}}
+{{define "panel"}}<details class="panel" id="p-{{.ID}}"{{if .Page.Full}} open{{end}}><summary>{{icon .IconName}}{{.Title}}{{with .Count}}<span class="chip">{{.}}</span>{{end}}</summary><div class="body"><ul class="rows">{{range .Rows}}{{template "row" .}}{{end}}</ul>{{with .Folded}}<details class="folded"><summary class="chip" title="done">done {{len .}}</summary><ul class="rows">{{range .}}{{template "row" .}}{{end}}</ul></details>{{end}}</div></details>{{end}}
+
+{{define "row"}}{{if .State}}<li class="{{.State}}"{{with .Label}} title="{{.}}"{{end}}><span class="box">{{icon (box .State)}}</span><span>{{template "rowtext" .}}</span></li>{{else}}<li class="keyed">{{with .Label}}<code>{{.}}</code>{{end}}<span>{{template "rowtext" .}}</span></li>{{end}}{{end}}
 
 {{define "rowtext"}}{{if .Link}}<a href="{{href .Link}}">{{.Text}}</a>{{else}}{{.Text}}{{end}}{{end}}
 
