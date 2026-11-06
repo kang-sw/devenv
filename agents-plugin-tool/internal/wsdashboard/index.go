@@ -22,6 +22,9 @@ type SessionData struct {
 	// Fingerprint changes whenever anything the source read changed, so the
 	// index can tell a re-read that found a change from one that did not.
 	Fingerprint string
+	// SnapshotUpdatedAt is the live snapshot's updatedAt (its writer's last
+	// write or heartbeat); zero when the session has no readable snapshot.
+	SnapshotUpdatedAt time.Time
 }
 
 // SessionSource reads a registered session's on-disk stores. ok is false
@@ -38,6 +41,10 @@ type Session struct {
 	// Live is Registration.Live at the time the index was read.
 	Live     bool
 	HasBoard bool
+	// SnapshotUpdatedAt ages the session's live snapshot (SessionData). A
+	// change of it alone is a heartbeat, not a session change: it does not
+	// raise Rev.
+	SnapshotUpdatedAt time.Time
 	// Rev increases each time a re-read finds the session changed.
 	Rev uint64
 }
@@ -172,7 +179,7 @@ func (x *Index) apply(replyID string, reg *Registration) bool {
 		fmt.Fprintf(x.opts.Log, "dashboard: session %s removed (project %s)\n", replyID, entry.session.Project)
 		return true
 	}
-	next := Session{Registration: *reg, Live: reg.Live(now), HasBoard: data.HasBoard}
+	next := Session{Registration: *reg, Live: reg.Live(now), HasBoard: data.HasBoard, SnapshotUpdatedAt: data.SnapshotUpdatedAt}
 	if !known {
 		next.Rev = 1
 		x.sessions[replyID] = &indexEntry{session: next, fingerprint: data.Fingerprint}
@@ -180,7 +187,10 @@ func (x *Index) apply(replyID string, reg *Registration) bool {
 		return true
 	}
 	next.Rev = entry.session.Rev
-	if next == entry.session && data.Fingerprint == entry.fingerprint {
+	same := next
+	same.SnapshotUpdatedAt = entry.session.SnapshotUpdatedAt
+	if same == entry.session && data.Fingerprint == entry.fingerprint {
+		entry.session.SnapshotUpdatedAt = next.SnapshotUpdatedAt
 		return false
 	}
 	next.Rev++

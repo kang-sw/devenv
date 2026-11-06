@@ -7,10 +7,11 @@
 // snapshot, the ring files, and the readers, so the writer and the reader
 // cannot drift apart.
 //
-// Both stores live under the session's root, beside its whiteboard page:
+// Both stores live in the session's dashboard registry directory (the
+// caller passes it; see wsdashboard.SessionDir), beside its registration:
 //
-//	<root>/ai-docs/whiteboards/live/<reply-id>/snapshot.json
-//	<root>/ai-docs/whiteboards/live/<reply-id>/ring/<stamp>-<hex>.json
+//	<session dir>/snapshot.json
+//	<session dir>/ring/<stamp>-<hex>.json
 //
 // A session is keyed by its reply-id, never by its session key: a session
 // key is tool authority, and everything here reaches a browser.
@@ -31,13 +32,10 @@ const (
 	// value: fields are added, never repurposed.
 	SchemaVersion = 1
 
-	// DirRel is the live folder under a session root, inside the whiteboard
-	// folder so it shares that folder's git exclude entry.
-	DirRel = "ai-docs/whiteboards/live"
-	// SnapshotName is the snapshot file inside a session's live folder.
+	// SnapshotName is the snapshot file inside a session directory.
 	SnapshotName = "snapshot.json"
-	// RingDirName is the conversation ring folder inside a session's live
-	// folder.
+	// RingDirName is the conversation ring folder inside a session
+	// directory.
 	RingDirName = "ring"
 
 	// BatchCap, ToolNameCap, and ArgsPreviewCap are the batch model's caps:
@@ -95,19 +93,14 @@ const (
 	OriginMail       = "mail"
 )
 
-// Dir is a session's live folder.
-func Dir(root, replyID string) string {
-	return filepath.Join(root, filepath.FromSlash(DirRel), replyID)
+// SnapshotPath is the snapshot file in sessionDir.
+func SnapshotPath(sessionDir string) string {
+	return filepath.Join(sessionDir, SnapshotName)
 }
 
-// SnapshotPath is a session's snapshot file.
-func SnapshotPath(root, replyID string) string {
-	return filepath.Join(Dir(root, replyID), SnapshotName)
-}
-
-// RingDir is a session's conversation ring folder.
-func RingDir(root, replyID string) string {
-	return filepath.Join(Dir(root, replyID), RingDirName)
+// RingDir is the conversation ring folder in sessionDir.
+func RingDir(sessionDir string) string {
+	return filepath.Join(sessionDir, RingDirName)
 }
 
 // Snapshot is the snapshot file. Clocks are epoch milliseconds.

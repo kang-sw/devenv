@@ -70,6 +70,13 @@ tools never depend on it. Its state lives under `<cache root>/dashboard/`:
   2 minutes; a session counts as live while its heartbeat is under 5 minutes
   old and it has not ended. The daemon only reads this registry; ws-mcp prunes
   entries unseen for 7 days.
+- `sessions/<reply-id>/snapshot.json` and `sessions/<reply-id>/ring/` - the
+  session's live snapshot (current lead and subagent activity, rewritten
+  debounced and on a 30-second heartbeat, stale after 3 missed heartbeats by
+  its `updatedAt`) and its conversation ring (the last 50 finished messages,
+  one file each). ws-mcp writes them from host adapter events
+  (`dashboard.intake`) and from its mailbox send and recv path, only for a
+  registered session; `internal/wslive` holds the schema and readers.
 
 After a store write the serving ws-mcp sends `POST /nudge {reply_id,
 project}`; the daemon also re-reads every session every 30 seconds. To restart

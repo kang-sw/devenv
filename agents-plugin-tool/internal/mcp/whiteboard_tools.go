@@ -18,7 +18,6 @@ import (
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsgit"
-	"github.com/kang-sw/devenv/internal/wslive"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
@@ -371,9 +370,16 @@ func (s *Server) renderWhiteboard(rec *sessionRecord, sessionKey string, withEmb
 	var out whiteboardRender
 	st := rec.Whiteboard
 	replyID := wsmailbox.ReplyID(sessionKey)
-	dir, err := ensureWhiteboardDir(rec.Root)
-	if err != nil {
-		return out, err
+	dir := filepath.Join(rec.Root, filepath.FromSlash(whiteboardDirRel))
+	if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
+		// Exclude first: a failed registration leaves no folder behind, so
+		// the next render retries it instead of skipping it forever.
+		if err := registerWhiteboardExclude(rec.Root, dir); err != nil {
+			return out, fmt.Errorf("register %s in the git exclude file: %w", whiteboardDirRel, err)
+		}
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return out, fmt.Errorf("create %s: %w", whiteboardDirRel, err)
+		}
 	}
 	panelInput := whiteboardPanelInput{
 		rec:        *rec,
@@ -439,24 +445,6 @@ func (s *Server) renderWhiteboard(rec *sessionRecord, sessionKey string, withEmb
 	}
 	out.full = whiteboardDirRel + "/" + replyID + ".html"
 	return out, nil
-}
-
-// ensureWhiteboardDir returns the whiteboard folder under root, creating it
-// and registering it in the git exclude file when missing. The live dashboard
-// folder sits inside it and shares the exclude entry.
-func ensureWhiteboardDir(root string) (string, error) {
-	dir := filepath.Join(root, filepath.FromSlash(whiteboardDirRel))
-	if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
-		// Exclude first: a failed registration leaves no folder behind, so
-		// the next render retries it instead of skipping it forever.
-		if err := registerWhiteboardExclude(root, dir); err != nil {
-			return "", fmt.Errorf("register %s in the git exclude file: %w", whiteboardDirRel, err)
-		}
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return "", fmt.Errorf("create %s: %w", whiteboardDirRel, err)
-		}
-	}
-	return dir, nil
 }
 
 // ensureWhiteboardMermaid writes the shared mermaid script into dir, before
@@ -602,9 +590,8 @@ func registerWhiteboardExclude(root, dir string) error {
 }
 
 // maybeCollectWhiteboards deletes, at most once a day per whiteboard folder
-// and only when the folder exists, every whiteboard file and live dashboard
-// folder whose reply id matches no live session key record. A host embed
-// folder is never scanned.
+// and only when the folder exists, every whiteboard file whose reply id
+// matches no live session key record. A host embed folder is never scanned.
 func (s *Server) maybeCollectWhiteboards(root string) {
 	if strings.TrimSpace(root) == "" {
 		return
@@ -641,17 +628,6 @@ func (s *Server) maybeCollectWhiteboards(root string) {
 			continue
 		}
 		_ = os.Remove(filepath.Join(dir, entry.Name()))
-	}
-	// The live dashboard folders (one per reply id) follow the same rule.
-	liveDir := filepath.Join(root, filepath.FromSlash(wslive.DirRel))
-	sessions, err := os.ReadDir(liveDir)
-	if err != nil {
-		return
-	}
-	for _, entry := range sessions {
-		if entry.IsDir() && !live[entry.Name()] {
-			_ = os.RemoveAll(filepath.Join(liveDir, entry.Name()))
-		}
 	}
 }
 

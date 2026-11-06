@@ -181,6 +181,17 @@ func ringEntryNames(dir string) ([]string, error) {
 	return names, nil
 }
 
+// RingNames returns the ring's entry file names at dir, oldest first; a
+// missing directory is an empty ring. An entry file is never rewritten, so
+// the names alone tell a reader whether the ring changed.
+func RingNames(dir string) ([]string, error) {
+	names, err := ringEntryNames(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	return names, err
+}
+
 // ReadRing returns the ring at dir, oldest first. A missing directory is an
 // empty ring; an entry that cannot be read or parsed, or whose name carries
 // no valid stamp, is skipped. Unknown entry fields are ignored.

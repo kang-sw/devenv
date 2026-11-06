@@ -491,7 +491,7 @@ func TestMailboxSendAndRecvWriteMailLines(t *testing.T) {
 	mustSend(t, f.server, 3, f.keyA, wsmailbox.ReplyIDPrefix+f.replyB, "Status update\nbody line")
 	callToolWithKey(t, f.server, 4, f.keyB, "mailbox.recv", nil)
 
-	sent := readLiveRing(t, f.root, f.replyA)
+	sent := readLiveRing(t, f.sessionDir(f.replyA))
 	if len(sent) != 1 {
 		t.Fatalf("sender ring = %+v", sent)
 	}
@@ -502,7 +502,7 @@ func TestMailboxSendAndRecvWriteMailLines(t *testing.T) {
 		t.Fatalf("sent history key %q, history files %v", sent[0].HistoryKey, names)
 	}
 
-	recv := readLiveRing(t, f.root, f.replyB)
+	recv := readLiveRing(t, f.sessionDir(f.replyB))
 	if len(recv) != 1 {
 		t.Fatalf("receiver ring = %+v", recv)
 	}

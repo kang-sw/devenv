@@ -5,11 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wslive"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
 )
@@ -20,27 +20,31 @@ import (
 // mailbox send and receive path adds to that ring. The schema, the reducer,
 // and the ring files live in internal/wslive, which the daemon reads with.
 //
+// Both stores sit in the session's dashboard registry directory, beside its
+// registration (wsdashboard.SessionDir), so the daemon finds them from the
+// reply-id alone and the registry's pruning removes them with the session.
+// Only a top-level lead session is registered, so only its stores are
+// written; a child session's activity reaches the dashboard as part of its
+// lead's subagent tree.
+//
 // Nothing here may fail or delay an intake call or a mailbox tool: the
 // snapshot is written from a timer goroutine, ring and snapshot write errors
-// are logged as debug events only, and the nudge runs on its own goroutine.
-// With the session's dashboard.enabled off, nothing is written at all.
+// are logged as debug events only, and each write sends the registry's
+// fire-and-forget nudge (dashboardNudge). With the session's
+// dashboard.enabled off, nothing is written at all.
 
 const dashboardIntakeTool = "dashboard.intake"
 
-// liveSeams are the writer's timings and side effects. debounceUrgent
-// applies to a change of the lead's phase or streamed reply, debounce to
-// every other change; changes inside one window coalesce into one write.
-// nudge tells a running dashboard daemon that a session's stores changed
-// (nil sends nothing); the daemon's nudge sender installs itself there. It
-// runs on its own goroutine, so it may block or fail without touching the
-// caller. Timer goroutines read the seams, so they sit behind a lock.
+// liveSeams are the writer's timings and file writers (test seams).
+// debounceUrgent applies to a change of the lead's phase or streamed reply,
+// debounce to every other change; changes inside one window coalesce into one
+// write. Timer goroutines read the seams, so they sit behind a lock.
 type liveSeams struct {
 	debounceUrgent time.Duration
 	debounce       time.Duration
 	heartbeat      time.Duration
 	writeSnapshot  func(path string, data []byte) error
 	appendRing     func(dir string, entries []wslive.RingEntry) error
-	nudge          func(root, replyID string)
 }
 
 var (
@@ -61,7 +65,7 @@ func currentLiveSeams() liveSeams {
 }
 
 // setLiveSeams changes the seams under the lock and returns the previous
-// value, for a caller (the nudge sender, a test) to install its own.
+// value.
 func setLiveSeams(change func(*liveSeams)) liveSeams {
 	liveSeamMu.Lock()
 	defer liveSeamMu.Unlock()
@@ -78,8 +82,11 @@ type liveHub struct {
 }
 
 type liveSession struct {
-	root    string
+	// dir is the session's registry directory; nudge tells the daemon a
+	// store in it changed.
+	dir     string
 	replyID string
+	nudge   func()
 
 	mu    sync.Mutex
 	state *wslive.State
@@ -94,33 +101,35 @@ type liveSession struct {
 	ringMu sync.Mutex
 }
 
-func (h *liveHub) session(key, root string) *liveSession {
+func (h *liveHub) session(key, dir string, nudge func()) *liveSession {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.sessions == nil {
 		h.sessions = map[string]*liveSession{}
 	}
 	ls, ok := h.sessions[key]
-	if !ok || ls.root != root {
+	if !ok || ls.dir != dir {
 		state := wslive.NewState(key)
-		ls = &liveSession{root: root, replyID: state.ReplyID(), state: state}
+		ls = &liveSession{dir: dir, replyID: state.ReplyID(), nudge: nudge, state: state}
 		h.sessions[key] = ls
 	}
 	return ls
 }
 
-// dashboardOn reports whether the session's dashboard.enabled resolves to
-// true. An undeclared key (its manifest not loaded) is off.
-func (s *Server) dashboardOn(sessionKey string) bool {
-	if _, ok := s.declared.lookup(DashboardEnabledKey); !ok {
-		return false
+// liveSessionDir returns the registry directory that holds the live stores
+// of the session behind sessionKey, or false when nothing may be written for
+// it: not a top-level lead session, its dashboard.enabled off, or no daemon
+// state directory.
+func (s *Server) liveSessionDir(sessionKey string) (string, bool) {
+	entry, found := s.sessions.lookup(sessionKey)
+	if !found || !entry.isTopLevelLead() || !s.dashboardSessionEnabled(sessionKey) {
+		return "", false
 	}
-	got, err := s.resolveConfigGet(sessionKey, DashboardEnabledKey)
+	dir, err := s.dashboard.stateDir()
 	if err != nil {
-		return false
+		return "", false
 	}
-	on, _ := got.Value.(bool)
-	return on
+	return wsdashboard.SessionDir(dir, wsmailbox.ReplyID(sessionKey)), true
 }
 
 func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) response {
@@ -129,8 +138,7 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
-	entry, found := s.sessions.lookup(key)
-	if !found {
+	if _, found := s.sessions.lookup(key); !found {
 		return toolTextResponse(id, "", fmt.Errorf("%s: unknown_session: session key not found", tool))
 	}
 	adapter, _ := args["adapter"].(string)
@@ -141,11 +149,12 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 	if !ok {
 		return toolTextResponse(id, "", fmt.Errorf("%s: events must be an array of event objects", tool))
 	}
-	if !s.dashboardOn(key) {
+	dir, ok := s.liveSessionDir(key)
+	if !ok {
 		return toolTextResponse(id, "dashboard off: nothing recorded\n", nil)
 	}
 
-	ls := s.live.session(key, entry.root)
+	ls := s.live.session(key, dir, func() { s.dashboardNudge(key) })
 	now := time.Now().UnixMilli()
 	var (
 		ring     []wslive.RingEntry
@@ -182,7 +191,7 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 	ls.ringMu.Lock()
 	ls.mu.Unlock()
 	if len(ring) > 0 {
-		s.appendLiveRing(ls.root, ls.replyID, ring)
+		s.appendLiveRing(key, ls.dir, ring)
 	}
 	ls.ringMu.Unlock()
 
@@ -233,13 +242,13 @@ func (ls *liveSession) fire() {
 	data, err := json.Marshal(ls.state.Snapshot(time.Now().UnixMilli()))
 	ls.mu.Unlock()
 	if err == nil {
-		err = writeLiveSnapshot(ls.root, ls.replyID, data)
+		err = writeLiveSnapshot(ls.dir, data)
 	}
 	ls.writeMu.Unlock()
 	if err != nil {
 		appendDebugEvent("dashboard.snapshot_write_error", map[string]any{"error": err.Error()})
 	} else {
-		sendDashboardNudge(ls.root, ls.replyID)
+		ls.nudge()
 	}
 	ls.mu.Lock()
 	if ls.due.IsZero() {
@@ -248,39 +257,34 @@ func (ls *liveSession) fire() {
 	ls.mu.Unlock()
 }
 
-func writeLiveSnapshot(root, replyID string, data []byte) error {
-	if _, err := ensureWhiteboardDir(root); err != nil {
-		return err
-	}
-	dir := wslive.Dir(root, replyID)
+func writeLiveSnapshot(dir string, data []byte) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create live snapshot dir: %w", err)
 	}
-	return currentLiveSeams().writeSnapshot(filepath.Join(dir, wslive.SnapshotName), data)
+	return currentLiveSeams().writeSnapshot(wslive.SnapshotPath(dir), data)
 }
 
-// appendLiveRing writes entries to the session's conversation ring and
-// nudges; a failed write is logged, never surfaced.
-func (s *Server) appendLiveRing(root, replyID string, entries []wslive.RingEntry) {
-	err := func() error {
-		if _, err := ensureWhiteboardDir(root); err != nil {
-			return err
-		}
-		return currentLiveSeams().appendRing(wslive.RingDir(root, replyID), entries)
-	}()
-	if err != nil {
+// appendLiveRing writes entries to the conversation ring in the session
+// directory dir and nudges; a failed write is logged, never surfaced.
+func (s *Server) appendLiveRing(sessionKey, dir string, entries []wslive.RingEntry) {
+	if err := currentLiveSeams().appendRing(wslive.RingDir(dir), entries); err != nil {
 		appendDebugEvent("dashboard.ring_write_error", map[string]any{"error": err.Error()})
 		return
 	}
-	sendDashboardNudge(root, replyID)
+	s.dashboardNudge(sessionKey)
 }
 
 // recordLiveMail adds a mail line to the session's conversation ring for
 // each mailbox history entry just written, while the session's dashboard is
-// on. keys are those entries' history file names, in order; an entry whose
-// history write failed has no key and its line no expansion.
-func (s *Server) recordLiveMail(sessionKey, root string, entries []mailboxHistoryEntry, keys []string) {
-	if len(entries) == 0 || strings.TrimSpace(root) == "" || !s.dashboardOn(sessionKey) {
+// on and it is a top-level lead. keys are those entries' history file names,
+// in order; an entry whose history write failed has no key and its line no
+// expansion.
+func (s *Server) recordLiveMail(sessionKey string, entries []mailboxHistoryEntry, keys []string) {
+	if len(entries) == 0 {
+		return
+	}
+	dir, ok := s.liveSessionDir(sessionKey)
+	if !ok {
 		return
 	}
 	ring := make([]wslive.RingEntry, 0, len(entries))
@@ -291,18 +295,5 @@ func (s *Server) recordLiveMail(sessionKey, root string, entries []mailboxHistor
 		}
 		ring = append(ring, line)
 	}
-	s.appendLiveRing(root, wsmailbox.ReplyID(sessionKey), ring)
-}
-
-// sendDashboardNudge runs the installed nudge sender on its own goroutine;
-// a panic there is contained.
-func sendDashboardNudge(root, replyID string) {
-	nudge := currentLiveSeams().nudge
-	if nudge == nil {
-		return
-	}
-	go func() {
-		defer func() { _ = recover() }()
-		nudge(root, replyID)
-	}()
+	s.appendLiveRing(sessionKey, dir, ring)
 }

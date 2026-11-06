@@ -118,7 +118,7 @@ func (s *Server) handleMailboxSend(id json.RawMessage, args map[string]any) resp
 	// The send is enqueued: record it in the caller's history ring. A failed
 	// ring write is logged inside, never surfaced.
 	sent := []mailboxHistoryEntry{{Direction: mailboxHistorySent, Counterparty: counterparty, Body: envelope.Content}}
-	s.recordLiveMail(sessionKey, entry.root, sent, recordMailboxHistory(sessionKey, sent))
+	s.recordLiveMail(sessionKey, sent, recordMailboxHistory(sessionKey, sent))
 
 	stampLabel, stampValue := "reply_to", replyTo
 	if from != "" {
@@ -220,7 +220,7 @@ func (s *Server) handleMailboxRecv(id json.RawMessage, args map[string]any) resp
 
 	sort.SliceStable(drained, func(i, j int) bool { return drained[i].SentAt < drained[j].SentAt })
 	s.recordMailboxRecvContacts(sessionKey, entry.root, ownNamed, drained)
-	s.recordMailboxRecvHistory(sessionKey, entry.root, drained)
+	s.recordMailboxRecvHistory(sessionKey, drained)
 
 	if wantsJSON(args) {
 		return toolJSONResponse(id, drained, nil)
@@ -273,7 +273,7 @@ func (s *Server) recordMailboxRecvContacts(sessionKey, root, ownNamed string, dr
 // whose drain write was confirmed. A failed ring write is logged inside, never
 // surfaced: the drained mail must still be returned. The same entries become
 // mail lines in the session's conversation ring (recordLiveMail).
-func (s *Server) recordMailboxRecvHistory(sessionKey, root string, drained []wsmailbox.Envelope) {
+func (s *Server) recordMailboxRecvHistory(sessionKey string, drained []wsmailbox.Envelope) {
 	entries := make([]mailboxHistoryEntry, 0, len(drained))
 	for _, m := range drained {
 		handle := m.From
@@ -282,7 +282,7 @@ func (s *Server) recordMailboxRecvHistory(sessionKey, root string, drained []wsm
 		}
 		entries = append(entries, mailboxHistoryEntry{Direction: mailboxHistoryRecv, Counterparty: handle, Body: m.Content})
 	}
-	s.recordLiveMail(sessionKey, root, entries, recordMailboxHistory(sessionKey, entries))
+	s.recordLiveMail(sessionKey, entries, recordMailboxHistory(sessionKey, entries))
 }
 
 // mailboxPeerOut is lookup_peers' per-peer JSON/text shape.
