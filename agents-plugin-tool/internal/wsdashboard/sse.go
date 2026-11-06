@@ -89,6 +89,9 @@ func parseHeld(raw string) map[string]string {
 }
 
 func (d *Daemon) handleSessionEvents(w http.ResponseWriter, r *http.Request, replyID string) {
+	if !streamMethod(w, r) {
+		return
+	}
 	pages := d.pages()
 	if _, ok := pages.session(replyID); !ok {
 		http.Error(w, "unknown session", http.StatusNotFound)
@@ -108,8 +111,18 @@ func (d *Daemon) handleSessionEvents(w http.ResponseWriter, r *http.Request, rep
 	})
 }
 
+// streamMethod admits GET only: a stream has no headers-only form, and a
+// HEAD would hold the connection until the client left.
+func streamMethod(w http.ResponseWriter, r *http.Request) bool {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return false
+	}
+	return true
+}
+
 func (d *Daemon) handleIndexEvents(w http.ResponseWriter, r *http.Request) {
-	if !readMethod(w, r) {
+	if !streamMethod(w, r) {
 		return
 	}
 	pages := d.pages()

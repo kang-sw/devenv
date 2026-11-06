@@ -224,6 +224,29 @@ func TestUnknownPagesAreNotFound(t *testing.T) {
 	if code, _ := get(t, f.base+"/s/boardsession"); code != http.StatusNotFound {
 		t.Errorf("unreadable page = %d, want 404", code)
 	}
+	// The page has one URL, since it loads its assets by relative path.
+	noFollow := &http.Client{Timeout: 500 * time.Millisecond, Transport: &http.Transport{Proxy: nil},
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	if resp, err := noFollow.Get(f.base + "/s/livesession/"); err != nil {
+		t.Fatal(err)
+	} else {
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusMovedPermanently || resp.Header.Get("Location") != "/s/livesession" {
+			t.Errorf("trailing slash = %d %q", resp.StatusCode, resp.Header.Get("Location"))
+		}
+	}
+	// A stream answers GET only.
+	for _, path := range []string{"/events", "/s/livesession/events"} {
+		req, _ := http.NewRequest(http.MethodHead, f.base+path, nil)
+		resp, err := testClient().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusMethodNotAllowed {
+			t.Errorf("HEAD %s = %d", path, resp.StatusCode)
+		}
+	}
 	resp, err := testClient().Post(f.base+"/s/livesession", "text/plain", nil)
 	if err != nil {
 		t.Fatal(err)

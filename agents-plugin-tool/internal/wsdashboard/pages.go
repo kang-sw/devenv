@@ -361,11 +361,15 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 		serveMermaid(w)
 		return
 	}
-	replyID, sub, _ := strings.Cut(rest, "/")
-	switch sub {
-	case "":
+	replyID, sub, slash := strings.Cut(rest, "/")
+	switch {
+	case !slash:
 		d.handleSessionPage(w, r, replyID)
-	case "events":
+	case sub == "" && ValidReplyID(replyID):
+		// The page loads its assets by relative path, so it is served at
+		// one URL only.
+		http.Redirect(w, r, "/s/"+replyID, http.StatusMovedPermanently)
+	case sub == "events":
 		d.handleSessionEvents(w, r, replyID)
 	default:
 		http.NotFound(w, r)
