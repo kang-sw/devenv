@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: ebe3e3a4870c3e0a
 sage-review-completeness-reviewed: ebe3e3a4870c3e0a
+completed: 2026-11-07
 ---
 
 # ws dashboard Claude adapter - event probe, live event feed, and message submission
