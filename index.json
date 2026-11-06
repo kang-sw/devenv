@@ -629,7 +629,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-06T12:51:18Z"
+        "touched_at": "2026-11-06T12:52:03Z",
+        "impl": {
+          "branch": "impl/develop/visa-rut-ashes"
+        }
       }
     },
     "261106-feat-ws-dashboard-daemon-core": {
