@@ -98,6 +98,7 @@ func serve(args []string) {
 			"ppid":   ppid,
 			"action": "self_terminate",
 		})
+		server.DashboardEnd()
 		os.Exit(0)
 	})
 	// The dashboard daemon is optional: the check runs beside the MCP loop and

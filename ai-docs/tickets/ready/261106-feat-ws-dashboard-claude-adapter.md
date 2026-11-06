@@ -269,6 +269,55 @@ granularity the probe allows. If the core's Phase 3 has not landed, the lead
 inspects the snapshot and ring files directly instead, and the live-page
 check happens once it lands.
 
+#### Edition (5bb32e779) - 2026-11-06
+
+This Edition settles the reply-text and permission-wait fallback from the
+Phase 1 Result with the user, so Phase 2 may be dispatched.
+
+- **Reply text: no fallback.** Reply text is available both streamed and
+  finished. The live reply comes from `turn.step` `text` chunks. The finished
+  reply for the conversation ring comes from `turn.complete`'s `answer` (or
+  the `session.append` response row). (300)
+- **Permission waits: the marker is confirmed by the notification.** (301)
+  - When `tool.check` resolves `decision: "ask"` with `approver: "person"`,
+    the call shows only as a running tool, with its tool and argument
+    preview, keyed by `tool_use_id`.
+  - When `classic.Notification` with `notification_type:
+    "permission_prompt"` arrives while that call is still pending, the
+    conversation and the lead bar switch it to "waiting for approval in the
+    terminal" (241).
+  - The notification names no tool, so if several person-approved asks are
+    pending, all of them are marked.
+  - The marker clears when that call's `tool.call` `next(e)` resolves, which
+    happens when the tool runs after approval or returns its refusal after
+    denial.
+  - Consequences:
+    - The marker appears about 6 s after the dialog opens.
+    - An ask that the auto-mode classifier or a hook settles without a dialog
+      never shows the marker.
+  - Rejected:
+    - Setting the marker at the ask itself (301 a). The marker would also
+      show for asks settled with no dialog, and would stay on through the
+      approved tool's own run.
+    - No approval marker at all (301 c).
+  - Verification adds tests covering:
+    - the notification switching a pending person-ask to waiting;
+    - several pending asks all marked;
+    - the marker cleared at the `tool.call` end;
+    - no marker when no notification arrives.
+- **Unverified assumption, accepted.** (302)
+  - The Phase 1 probe saw `classic.Notification` (`permission_prompt`) only
+    for plugin-raised dialogs. Nobody has checked that it also fires for a
+    model-issued dialog in default mode. The live check was skipped by the
+    user's choice: they run mostly in auto mode, and the work starts on the
+    default-mode assumption.
+  - The lead's hand check above also drives a model-issued Bash permission
+    dialog, approved once and denied once. It also checks the origin of a
+    prompt typed in an interactive session, which Phase 1 did not capture.
+  - If the notification does not fire for model-issued dialogs, the marker
+    never shows and the behaviour equals (301 c). The lead then takes it
+    back to the user.
+
 ### Phase 3: Claude drain and inject
 
 Arm the mod's existing `mailbox wait` child with the inbox flag. On an inbox
