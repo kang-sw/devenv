@@ -3,6 +3,7 @@ import type { HookStream, ProcessSpawnChunk, ProcessSpawnResult, Register, ToolC
 import { createBand, drawBand, readGit, type Mailbox } from './band'
 import { appendOwn, createCaptions, drawCall, drawEmpty, drawRun, groupUnit, submitOwn, toolUseUnit, type OwnDeliveryEdges } from './captions'
 import { createCompaction } from './compaction'
+import { callArgs, createDashboard, INTAKE_TOOL, userPrompt, type DashboardEvent } from './dashboard'
 import { createManual, type ReadFamily } from './manual'
 import { expandPreload } from './preload'
 import { createReconnect, reconnectDescription, TOOL_NAME as RECONNECT_TOOL } from './reconnect'
@@ -20,7 +21,7 @@ import {
 } from './watcher'
 
 // The Claude Code mod: the one hooks module a package's hooks.json names,
-// carrying seven features.
+// carrying eight features.
 //
 // - Mailbox push: the mod loops the one-shot `mailbox wait` as a peek-only
 //   signal for one bound session key, and arriving mail starts a turn through
@@ -60,6 +61,11 @@ import {
 //   mod's own prompts are delivered split under the same switch: the model
 //   reads the full text from a hidden row, the person sees a one-liner, and
 //   a mailbox batch's recap draws as a transcript line.
+// - Dashboard feed (behind claude.dashboard_enabled): the lead's and its
+//   subagents' live activity, its replies, the user's messages and turn
+//   summaries handed to the session's own MCP server under the
+//   conversation's lead key, which keeps the session's live dashboard view;
+//   observe-only, it never changes an event (see dashboard.ts).
 // - Status band (off until claude.status_band_enabled is set): a framed band
 //   above the prompt with the model, folder, git, context, rate-limit and
 //   cost figures, and the held key's todos, agenda and mailbox address (its
@@ -68,7 +74,8 @@ import {
 //
 // Claude Code accepts one hooks module per plugin and one unmatched hook per
 // event in it, so the lifecycle events (session.start, session.end,
-// turn.start, turn.step, turn.complete, session.compact) are registered once here and
+// turn.start, turn.step, turn.complete, session.compact, prompt.submit,
+// tool.check, agent.spawn) are registered once here and
 // drive each feature in isolation: a throw in one is logged and leaves the
 // others running. The one cross-feature wait is the shared ws-project gate: the
 // mailbox setup awaits it to decide whether its bind tool registers, and the
@@ -122,7 +129,47 @@ export const KNOB = {
   drain: 'claude.mailbox_drain',
   watchdog: 'claude.mcp_watchdog_enabled',
   watchdogInterval: 'claude.mcp_watchdog_interval_minutes',
+  dashboard: 'claude.dashboard_enabled',
 } as const
+
+/** Whether an intake result was delivered: not an error result. */
+export function intakeDelivered(res: { isError?: boolean } | undefined): boolean {
+  return res?.isError !== true
+}
+
+/**
+ * Forwards a `turn.step` stream unchanged while `observe` sees each chunk and
+ * the result; an observer's throw never reaches the stream, and a stream the
+ * consumer closes early closes the one beneath.
+ */
+export async function* tapStep<C, R>(
+  inner: AsyncGenerator<C, R>,
+  observe: { chunk: (c: C) => void; end: (r: R) => void },
+): AsyncGenerator<C, R> {
+  let finished = false
+  try {
+    for (;;) {
+      const step = await inner.next()
+      if (step.done) {
+        finished = true
+        try {
+          observe.end(step.value)
+        } catch {
+          // observe-only
+        }
+        return step.value
+      }
+      try {
+        observe.chunk(step.value)
+      } catch {
+        // observe-only
+      }
+      yield step.value
+    }
+  } finally {
+    if (!finished) await inner.return(undefined as never)
+  }
+}
 
 /** Whether a value is a positive integer, the only valid watchdog interval. */
 export function isPositiveInteger(value: unknown): value is number {
@@ -438,6 +485,12 @@ export const register: Register = (on) => {
   let readPlaybook: ((name: string, key: string) => Promise<string>) | undefined
   /** Bumped by every session.start: a setup still waiting on its knob read yields to a newer start. */
   let starts = 0
+  /** The conversation's key from the manual feature, the dashboard feed's first choice; cleared at session.end. */
+  let manualKey: string | undefined
+  /** The intake call for the latest session.start; undefined before, which reads as a failed call. */
+  let dashCall: ((args: { session_key: string; adapter: string; events: DashboardEvent[] }) => Promise<boolean>) | undefined
+  let dashLog: (text: string) => void = () => {}
+  let dashAfter: ((ms: number, fn: () => void) => { cancel: () => void }) | undefined
 
   const stopWatcher = (reason: string) => {
     armSeq += 1
@@ -504,6 +557,23 @@ export const register: Register = (on) => {
   // Status band state; started at every session.start, drawing nothing until
   // its own knob reads on.
   const band = createBand()
+
+  // Dashboard feed; started once its knob reads on at a session.start,
+  // stopped (recording nothing) otherwise. It reports under the manual
+  // feature's key, else the key the mailbox push is bound to.
+  const dashboard = createDashboard({
+    key: () => manualKey ?? watcher?.current(),
+    call: (args) => (dashCall ? dashCall(args) : Promise.reject(new Error('the session has not started'))),
+    ownTool: (tool) => server !== undefined && tool.startsWith(mcpToolName(server, '')),
+    now: () => Date.now(),
+    schedule: (ms, fn) => {
+      if (!dashAfter) return () => {}
+      const timer = dashAfter(ms, fn)
+      return () => timer.cancel()
+    },
+    epoch: () => Math.random().toString(36).slice(2, 10).padEnd(8, '0'),
+    log: (text) => dashLog(text),
+  })
 
   on('session.start', async ($, e, next) => {
     const label = mailboxLabel($.plugin.name)
@@ -665,9 +735,16 @@ export const register: Register = (on) => {
           return classifyRecv(await $.tool.call({ tool: recvTool as `mcp__${string}__${string}`, session_key: key, format: 'json' }))
         },
         submit: async (prompts, live) => {
-          const res = await submitOwn(own, prompts, live)
-          if (res.drop !== undefined) throw new Error(`prompt dropped: ${res.drop}`)
-          return res.busy ? 'busy' : res.stale ? 'stale' : undefined
+          dashboard.mailSubmitting()
+          let entered = false
+          try {
+            const res = await submitOwn(own, prompts, live)
+            if (res.drop !== undefined) throw new Error(`prompt dropped: ${res.drop}`)
+            entered = !res.busy && !res.stale
+            return res.busy ? 'busy' : res.stale ? 'stale' : undefined
+          } finally {
+            if (!entered) dashboard.mailSubmitFailed()
+          }
         },
         turnRunning: () => mainTurn,
         append: (prompts) => appendOwn(own, prompts),
@@ -715,6 +792,22 @@ export const register: Register = (on) => {
       settlePush(false)
       $.ui.log(`${label}: setup failed: ${String(err)}`, { to: 'debug' })
     })
+
+    // The feed records nothing until its knob reads on; a failed read leaves it off.
+    dashLog = (text) => $.ui.log(`${$.plugin.name} dashboard: ${text}`, { to: 'debug' })
+    dashAfter = (ms, fn) => $.clock.after(ms, fn)
+    dashCall = async (args) => {
+      await serverResolved
+      if (!server) throw new Error('MCP server not resolved')
+      return intakeDelivered(await $.mcp.call(server, INTAKE_TOOL, args))
+    }
+    void readKnob(KNOB.dashboard)
+      .then((value) => {
+        if (startSeq !== starts) return
+        if (value === true) dashboard.start()
+        else dashboard.stop()
+      })
+      .catch((err) => $.ui.log(`${$.plugin.name} dashboard: setup failed: ${String(err)}`, { to: 'debug' }))
 
     // Until this start's advisory knob read settles on, no usage is observed,
     // so no advisory or milestone turn is sent; the lever works regardless.
@@ -909,6 +1002,8 @@ export const register: Register = (on) => {
         // still resolving.
         keyChanged: (key) => {
           autoKey = key
+          manualKey = key
+          dashboard.keyChanged()
           const target = watcher
           if (target) bindAuto(target, mailboxLog)
           try {
@@ -1013,9 +1108,22 @@ export const register: Register = (on) => {
   // The caption capture rides here too (the mod gets one unmatched hook per
   // event): wrapping the rewrite hooks below, it keeps the result the lead
   // reads.
+  // The dashboard feed's tool begin and end ride here too, for the model's
+  // own calls only: the mod's own calls (its drain, its lookups) are no
+  // activity of the agent's.
   on('tool.call', async ($, e, next) => {
-    const res = await next(e)
-    if (e.agentId === undefined && next.origin.plugin === 'engine') {
+    const modelCall = next.origin.plugin === 'engine'
+    const callId = (e as { tool_use_id?: string }).tool_use_id
+    if (modelCall) dashboard.toolBegan(e.agentId, callId, e.tool, callArgs(e as unknown as Record<string, unknown>))
+    let res: Awaited<ReturnType<typeof next>>
+    try {
+      res = await next(e)
+    } catch (err) {
+      if (modelCall) dashboard.toolEnded(e.agentId, callId, true)
+      throw err
+    }
+    if (modelCall) dashboard.toolEnded(e.agentId, callId, res.deny !== undefined || res.isError === true)
+    if (e.agentId === undefined && modelCall) {
       try {
         await watcher?.toolCompleted()
       } catch (err) {
@@ -1066,6 +1174,7 @@ export const register: Register = (on) => {
       return { result: `mailbox push not changed: a newer bind or a session end superseded session_key=${checked.key}` }
     }
     await $.store.set(STORE_PREFIX + (await $.session.id()), { sessionKey: checked.key })
+    dashboard.keyChanged()
     return { result: `mailbox push ${outcome}: session_key=${checked.key}` }
   }).catch(($, e, next) => (next.called ? next(e) : { deny: `${TOOL_NAME}: the bind hook failed; see the debug log.` }))
 
@@ -1121,6 +1230,8 @@ export const register: Register = (on) => {
 
   // The effort is known only from each model request: the band takes the
   // main loop's, with its model.
+  // The dashboard feed observes the stream while it runs; off, the stream is
+  // forwarded as it was.
   on('turn.step', async function* ($, e, next) {
     if (e.agentId === undefined) {
       try {
@@ -1129,7 +1240,53 @@ export const register: Register = (on) => {
         $.ui.log(`${$.plugin.name} band: model request handling failed: ${String(err)}`, { to: 'debug' })
       }
     }
-    return yield* next(e)
+    if (!dashboard.active()) return yield* next(e)
+    const step = `${e.turnId}/${e.index}`
+    dashboard.stepBegan(e.agentId, step)
+    return yield* tapStep(next(e), {
+      chunk: (c) => dashboard.stepChunk(e.agentId, step, c as Parameters<typeof dashboard.stepChunk>[2]),
+      end: (r) => dashboard.stepEnded(e.agentId, step, r),
+    })
+  })
+
+  // The dashboard feed's user messages and turn origins. Observe-only: it
+  // has no .catch, failing only when the prompt beneath does.
+  on('prompt.submit', async ($, e, next) => {
+    let user: ReturnType<typeof userPrompt>
+    try {
+      user = userPrompt(e, $.plugin.name)
+      dashboard.promptSubmitting(user?.origin, e.turnId === undefined)
+    } catch {
+      user = undefined
+    }
+    const res = await next(e)
+    if (user && res.drop === undefined) dashboard.userMessage(user.text, user.origin)
+    return res
+  })
+
+  // A person-approved ask, for the dashboard feed's permission marker.
+  // Observe-only: the verdict beneath is returned as it settled.
+  on('tool.check', async ($, e, next) => {
+    const res = await next(e)
+    if (next.origin.plugin === 'engine') {
+      dashboard.toolChecked({ agentId: e.agentId, id: e.tool_use_id, tool: e.tool, input: e.input, approver: e.approver }, res.decision)
+    }
+    return res
+  })
+
+  // A subagent's label and parent, for the dashboard feed's tree.
+  on('agent.spawn', async ($, e, next) => {
+    const res = await next(e)
+    if (res.agentId !== undefined) {
+      dashboard.agentSpawned({ agentId: res.agentId, parentId: e.parentAgentId, description: e.description, subagentType: e.subagentType })
+    }
+    return res
+  })
+
+  // A permission dialog's notification confirms the dashboard feed's pending asks.
+  on('classic.Notification', async ($, e, next) => {
+    dashboard.notified(e.notification_type)
+    return next(e)
   })
 
   // A main-thread turn start also tells the compaction and reconnect
@@ -1138,6 +1295,7 @@ export const register: Register = (on) => {
   // it) or a failed start at the first main-thread turn.
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) mainTurn = true
+    dashboard.turnStarted(e.agentId)
     try {
       manual.turnStarted(e.agentId)
     } catch (err) {
@@ -1188,6 +1346,7 @@ export const register: Register = (on) => {
     } catch (err) {
       $.ui.log(`${$.plugin.name} mcp reconnect: turn end handling failed: ${String(err)}`, { to: 'debug' })
     }
+    dashboard.turnCompleted(e.agentId, e.answer, e.reason)
     return res
   })
 
@@ -1269,6 +1428,7 @@ export const register: Register = (on) => {
     // session end, so it keeps the binding.
     try {
       autoKey = undefined
+      manualKey = undefined
       mainTurn = false
       stopWatcher(`session.end ${e.reason}`)
     } catch (err) {
@@ -1302,6 +1462,9 @@ export const register: Register = (on) => {
     } catch (err) {
       $.ui.log(`${$.plugin.name} band: reset failed: ${String(err)}`, { to: 'debug' })
     }
+    // Dashboard: the next conversation starts from an empty view, sent under
+    // its own key once one arrives.
+    dashboard.restart()
     // Manual: every end reason drops the conversation's key, so the next
     // conversation (no session.start follows `clear`) sets up again with its
     // own key at its first main-thread turn or lead skill expansion. Its
