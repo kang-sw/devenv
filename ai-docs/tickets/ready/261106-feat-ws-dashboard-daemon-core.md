@@ -391,6 +391,119 @@ that two concurrent ws-mcp starts leave one daemon. macOS and native Windows
 (LockFileEx, cache-directory removal) need a lead or user run on those hosts;
 the Result names which platforms were exercised live.
 
+### Result (5b359f73c) - 2026-11-06
+
+Landed: `internal/wsdashboard` (lock, endpoint file, loopback HTTP server with
+`/health` and `/shutdown`, Host guard, `Ensure`, detached spawn, Windows binary
+staging), the `ws-mcp dashboard [--port N] [--lock-wait D]` subcommand (exit 3
+when another daemon holds the lock), `go serveDashboard(server)` beside the
+stdio loop in `serve`, `Server.DashboardSettings` in `internal/mcp`, the three
+`dashboard-config-manifest.json` files, and every launcher listing them.
+
+Settled:
+- **Keys and port.** `dashboard.enabled` (boolean; ws true, wsflow false, Pi
+  true) and `dashboard.port` (integer 0-65535, 0 = OS-assigned; 29417 in all
+  three). 29417 is IANA-unassigned (block 29170-29998, checked against the IANA
+  CSV) and below the Linux (32768+) and Windows (49152+) ephemeral ranges. Both
+  are read once at serve startup with no session key: project, global, and
+  built-in values only (the descriptions say so). Phase 2's per-session opt-out
+  needs its own read.
+- **Manifest wiring.** Each package root ships `dashboard-config-manifest.json`
+  (namespace `dashboard.`). `.mcp.json` and `.claude-plugin/plugin.json` list
+  `<own>;<dashboard>`; the Pi bridge joins the two with `path.delimiter`.
+  `WS_MCP_CONFIG_MANIFESTS` now accepts `;` on every platform in addition to the
+  platform separator, because a plugin manifest's env block is one file for
+  every platform and cannot write the platform separator. An undeclared
+  `dashboard.enabled` means off, so a missing, unlisted, or rejected dashboard
+  manifest leaves the dashboard off while `serve` runs.
+- **Liveness.** Only a daemon process takes the lock (gofrs/flock: flock or
+  LockFileEx on `<cache root>/dashboard/dashboard.lock`); ws-mcp never probes
+  it, so a probe can never make a starting daemon think the lock is held.
+  `/health` counts only when its service name and pid match the endpoint file.
+  A pid is never signalled.
+- **Hung daemon.** An unreachable recorded daemon (refused, unanswered,
+  mismatched) leads to a spawn, and the lock decides. A live but hung holder
+  keeps the lock; the new daemon waits its 5 s lock wait and exits; Ensure
+  reports unavailable and nothing is terminated. The holder stays until the user
+  stops it or the machine restarts.
+- **Handoff.** A healthy older daemon gets `POST /shutdown` with
+  `Authorization: Bearer <token>`. It removes its endpoint file, then releases
+  the lock, and the new daemon's lock wait covers "wait for the lock to free".
+  Ensure starts at most two daemons; the second only replaces an older daemon
+  that a concurrent older ws-mcp started and that won the lock race.
+- **Versions.** `CompareVersions` compares MAJOR.MINOR.PATCH (optional `v`)
+  first. With equal cores a pre-release is older than the release, and two
+  pre-releases compare as strings. An unparsable version is older than any
+  parsable one. The order is total, so replacement cannot flap. Consequence for
+  dogfood: unstamped local builds all report `0.48.10-dev`, so a rebuilt dev
+  ws-mcp does not replace a running dev daemon built from older code. Stop it by
+  hand (POST `/shutdown` with the endpoint token) when testing daemon changes.
+- **Idle exit.** None. Spawning happens only at serve startup, so an idle exit
+  would leave already-running sessions without a dashboard until their ws-mcp
+  restarts. An idle daemon costs a few MB and no CPU.
+- **Windows cache removal.** On Windows the daemon runs from a copy at
+  `<cache root>/dashboard/bin/ws-mcp-dashboard-<sha16>.exe`, with that directory
+  as its cwd, so it never locks a versioned plugin cache. Other copies are
+  pruned on the next stage; a running copy survives until a later stage.
+  Spawn tries `CREATE_BREAKAWAY_FROM_JOB` first, then plain `DETACHED_PROCESS`
+  when the host's job forbids breakaway. On POSIX the daemon runs in a new
+  session (`Setsid`).
+- **Endpoint file.** JSON `{schema_version, port, pid, version, token,
+  started_at}` at `<cache root>/dashboard/endpoint.json`, mode 0600, written via
+  temp file and rename. Readers ignore unknown fields and treat absent ones as
+  empty.
+
+Verification:
+- `go test ./... -count=1` in `agents-plugin-tool`: all packages ok.
+- `go test ./internal/wsdashboard -race`: ok.
+- `go vet` for linux and windows on the new packages, plus a darwin build: ok.
+- `python3 -m unittest discover agents-plugin-wsflow/tests` (20) and
+  `agents-plugin/tests` (81): ok.
+- Pi `npm test`: 35 failures and 1 cancelled out of 2514. The base commit
+  5b359f73c fails the identical set (diffed), and the updated bridge manifest
+  test passes.
+
+Tests:
+- In-process in `internal/wsdashboard`:
+  - the lock refusal;
+  - the endpoint round trip with unknown fields;
+  - `/health`, including the pid mismatch;
+  - shutdown without, with a wrong, and with a bare token;
+  - the Host guard on both routes;
+  - the port fallback;
+  - the handoff;
+  - an older client leaving a newer daemon;
+  - a concurrent older winner being replaced;
+  - the hung holder left alone;
+  - a stale endpoint.
+- In `cmd/ws-mcp`:
+  - the key off spawning nothing;
+  - the port key reaching `--port`;
+  - the real subcommand refused by the lock (exit 3) and stopped by token;
+  - a real end-to-end handoff in which an older-stamped binary's daemon is
+    replaced by `serve` and the new detached daemon still answers after `serve`
+    exits;
+  - `serve` answering `tools/list` with the key off, the manifest missing, and
+    the daemon unable to start.
+- In `internal/mcp`: the three manifests loading beside their packages'
+  manifests with per-package defaults and differing only in the enabled
+  default.
+
+Platforms exercised live: Linux (WSL2) only, through the tests above. Not yet
+done:
+- the lead's hand checks on this machine (a detached daemon surviving its
+  spawner in a real host session; two concurrent ws-mcp starts leaving one
+  daemon);
+- macOS;
+- native Windows (LockFileEx, breakaway, cache-directory removal).
+
+Lite review: no Critical or Important findings. Three Minors were left unfixed:
+- Windows staging prunes another spawner's in-flight `.tmp` or not-yet-started
+  copy, so a simultaneous two-version start can fail one spawn until restart.
+- After two spawns, Ensure reports started or replaced even when the winner is
+  still older.
+- Unstamped dev builds do not replace each other (noted above).
+
 ### Phase 2: Root registry, session index, nudge, and polling
 
 Each stdio ws-mcp registers its project root in a machine registry the
