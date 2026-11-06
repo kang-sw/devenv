@@ -670,6 +670,9 @@
           "branch": "impl/develop/clasp-given-sniff"
         }
       }
+    },
+    "261107-bug-pi-source-tests-fetch-release-runtime": {
+      "registered_at": "2026-11-06T15:40:06Z"
     }
   }
 }
