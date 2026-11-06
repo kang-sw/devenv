@@ -1,11 +1,12 @@
 ---
 title: ws dashboard serve daemon - live multi-session dashboard and subagent monitoring
-sage-review-design: required
+sage-review-design: completed
 related:
   261106-feat-whiteboard-dashboard-panels: prerequisite; the daemon reuses its panel providers and View/templates (171)
   261106-feat-mailbox-history-ring: indirect prerequisite through the panels ticket's mailbox panel
   260513-research-streamable-http-mcp-transport: context; that idea replaces the MCP transport, which this epic leaves on stdio (168)
   260514-epic-ws-web-dashboard-mvp: history; dropped IDE-scale web dashboard (terminal, file explorer) whose daemon lifecycle bugs (f55de2d62, bff07cafb, e6caac0dc) inform this epic's lifecycle decisions
+sage-review-design-reviewed: b251eaef33967e28
 ---
 
 # ws dashboard serve daemon - live multi-session dashboard and subagent monitoring
@@ -126,7 +127,10 @@ with browser interaction folded into the core.
   the last N entries (N a child constant, about 50), the per-entry-file
   structure of the mailbox history ring. The message in progress lives only
   in the snapshot. A page reload or a daemon replacement keeps the recent
-  conversation. (258)
+  conversation. (258) A mail entry records the key of its mailbox history
+  entry (the entry's file name), written by ws-mcp's mailbox send and
+  receive path rather than by an adapter event, so a mail line finds its
+  body while the history ring still holds it. (283)
   Rejected: no history, only messages received since the page opened (lost
   on reload); an unbounded append log for the session.
 
@@ -138,15 +142,40 @@ with browser interaction folded into the core.
   (flock / LockFileEx) on a lock file in the machine cache directory. It
   writes an endpoint file with port, pid, version, and token. ws-mcp reads the
   endpoint file and checks `/health`. When the daemon is absent or older,
-  ws-mcp spawns it detached, and the new daemon replaces the older one.
+  ws-mcp spawns it detached; an older daemon is replaced through the
+  handoff below.
   (174), (178)
   Rejected: pid files and port-as-lock, which go stale or race.
+- **Replacement handoff and version tolerance.** A newer ws-mcp asks the
+  older daemon to shut down through a request authenticated with the
+  endpoint-file token, waits for the lock to free, then spawns the new
+  daemon. The core child's Phase 1 states whether an idle daemon exits and
+  how a daemon running from a versioned plugin cache avoids blocking that
+  directory's removal on Windows. Readers of the snapshot, the machine
+  registry, and the nudge body ignore unknown fields and treat absent ones
+  as empty, since a newer daemon reads what older ws-mcp processes still
+  write (the e6caac0dc registry history). Phase 1 also covers a hung
+  daemon that holds the lock but fails `/health`. Rejected: terminating
+  the older daemon by pid, which races pid reuse.
 - **Cross-platform.** Discovery and the single-instance lock work the same on
   Linux, macOS, and Windows. (173)
 
 **Network and access**
 - **Localhost by default; LAN opt-in.** LAN access is opt-in and requires an
   access token. (173)
+- **Localhost guards instead of a token.** Localhost needs no token. In
+  localhost mode every route checks the Host header against loopback
+  names, which stops DNS rebinding; in LAN mode the access token takes the
+  Host check's place. The browser write routes (message, cancel) require
+  an Origin equal to the daemon's own origin, which stops cross-site form
+  posts; the daemon sends no CORS headers. Machine routes carry no Origin:
+  `/nudge` needs no authentication, since it only makes the daemon re-read
+  disk, and the handoff's shutdown request requires the endpoint-file
+  token. A local process can write the inbox files directly, so a
+  localhost credential would guard nothing the browser guards leave open.
+  (284) Rejected: a token on localhost too, which puts the credential in the
+  pointer-line URI and so in agent transcripts; one-time pairing with an
+  owner cookie as 260515 did, a pairing step for the same protection.
 - **The LAN view matches the localhost view.** Argument previews and the
   conversation show in LAN mode too; the access token protects them. (197)
   Rejected: hiding argument previews in LAN mode. The same token already
@@ -190,7 +219,18 @@ with browser interaction folded into the core.
     whiteboard, so it carries user authority. (210)
   - A message that arrives while the session's turn runs is held and
     submitted when the turn ends (Claude: the watcher's turn-end flush; Pi:
-    `followUp`). (212)
+    at agent end). (212) Held means left undrained in the inbox: the
+    adapter drains only at turn end, so merge (251) and cancel (249) act on
+    the entry until then. Draining claims an entry atomically (for example
+    by rename), so a cancelled entry is never also injected and a claimed
+    entry can no longer be merged into or cancelled; the daemon's merge and
+    cancel claim the entry the same way, so a rewrite racing the drain
+    cannot bring back an injected entry. Because `mailbox wait` only peeks,
+    the adapter re-arms it without the inbox flag while an entry is held
+    and adds the flag back after the turn-end drain. Rejected: draining on
+    arrival and queueing with Pi `followUp`, which empties the inbox before
+    merge or cancel can act; reusing the Claude watcher's tool-boundary mail
+    flush, which injects mid-turn.
   - A second send while a message is held merges into the held message, so
     one inbox entry starts one turn; for a chip on the same item ID the
     later one wins. (251) The merged text keeps each send as its own
@@ -312,16 +352,30 @@ with browser interaction folded into the core.
   goes through the mailbox presence record's owner session key and
   `ReplyID()`. Only the reply-id reaches the browser. A peer this daemon
   does not serve shows its address and last exchange time with no live
-  state. (261)
+  state. (261) Contacts that resolve to the same reply-id (an `id:` address
+  and a named address of one session) merge into one row with the latest
+  exchange time. A named contact resolves through the presence owner at
+  render time, so after a rebind the row follows the address's current
+  holder, the session that mail to it now reaches.
 - **Peer retention.** The group shows every live peer and the last 5 ended
   peers, ordered by last exchange. (262) A peer this daemon does not serve
   counts as live only while its mailbox presence record is alive; otherwise
   it falls under the ended cap. (276) For an `id:<reply-id>` peer, which has
-  no presence record, the reply-id registry entry is that record: the peer
-  is live while its entry exists, until the stale-entry reap removes it.
-  (282) Rejected: always listing unserved peers as live, which grows
-  without bound from stale contacts; treating every unserved reply-id peer
-  as ended, which hides a live co-lead reached by reply-id (282).
+  no presence record, that record is the reply-id registry entry, read the
+  way `mailboxPresenceLive` reads named presence: live while its `LastSeen`
+  is within 10 minutes. No ticker refreshes that field and it has no pid,
+  so for such a peer "live" means a mailbox exchange in the last 10
+  minutes, and a quiet one shows as ended; accepted for this rare case
+  over a ticker refresh that writes under the machine-wide reply lock on
+  every tick. Every running ws-mcp in the daemon's environment
+  registers its root (169), so an unserved live peer is the rare case (one
+  outside this environment, or an older ws-mcp without the registry); a
+  served peer's liveness comes from its own session state in the core
+  child's session index. (282) Rejected: always listing unserved peers as
+  live, which grows without bound from stale contacts; counting a reply-id
+  peer live while its registry entry exists, which the 30-day lazy reap
+  (`mailboxReplyIDRetention`) turns into 30 days of a finished peer shown
+  live; counting every unserved reply-id peer as ended (282).
 - **Peers on hosts without an adapter.** The group works for any host; a
   peer without an adapter, such as Codex, shows no phase. (263)
 
@@ -418,3 +472,16 @@ with browser interaction folded into the core.
 - Dropped: the user drops the direction. A failed adapter probe is not a
   drop trigger, because (190) and (196) define the fallback. (200)
 - Deferred: whatever a child's result defers.
+
+## Sage Review Round 1 (2026-11-06)
+
+### Design Reviewer — block
+
+| # | Title | Severity | Resolution |
+|---|-------|----------|------------|
+| 1 | Localhost authentication on the user-authority write path is undecided | important | missing |
+| 2 | Unserved reply-id peers stay live for up to 30 days | important | missing |
+| 3 | Pi followUp hold conflicts with merge and cancel on an inbox entry | important | autonomous |
+| 4 | Daemon exit, replacement handoff, and cross-version tolerance are unstated | minor | autonomous |
+| 5 | No join key from a conversation mail line to its mailbox history entry | minor | autonomous |
+| 6 | Peer rows need dedupe and handling of rebinding | minor | autonomous |
