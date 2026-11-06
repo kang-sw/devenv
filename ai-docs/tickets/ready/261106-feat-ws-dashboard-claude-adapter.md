@@ -162,6 +162,86 @@ prompt, then checks the probe's logged events against the Result's table.
 If probe code is committed, `go test ./internal/wsrsrc/` in
 `agents-plugin-tool` passes (hooks mirror).
 
+### Result (c3ee7f453) - 2026-11-06
+
+No code landed: the probe is a standalone, non-shipped mod, so the hooks
+mirror is untouched. Evidence comes from three sources: the engine's
+declaration file (Claude Code 2.1.318 types, the API the mod is written
+against), a headless run (`claude -p --model haiku --permission-mode default
+--plugin-dir <probe>` on Claude Code 2.1.319, run twice; the event classes
+matched, the step structure differed, and only the second run's log is kept),
+and an interactive run in an isolated tmux server, used only for
+the permission-wait timing. The probe mod and both logs are kept outside the
+repository at
+`/home/swkang/.cache/ws@kang-sw-devenv/proj/dac18b1d/shared/claude-mod-event-probe/`
+(`hooks/register.ts`, `probe-log-headless.jsonl`,
+`probe-log-interactive-permission.jsonl`). The probe hooks `turn.start`,
+`turn.step` (streaming), `turn.complete`, `tool.call`, `tool.check`,
+`agent.spawn`, `session.append`, and `classic.PermissionRequest`,
+`classic.Notification`, `classic.SubagentStart`, `classic.SubagentStop`, and
+`classic.PermissionDenied`. It writes one JSON line per event to
+`<plugin root>/probe-log.jsonl`. The headless driving prompt spawns a haiku
+`general-purpose` subagent that runs Bash `ls` and Reads a file. The lead
+then runs Bash `touch`, which needs approval, and replies.
+
+| event class | available | events and payload fields observed |
+|---|---|---|
+| subagent tool calls | yes | `tool.call` with `agentId`, `tool`, `tool_use_id`, the arguments spread on `e`; its `next(e)` resolves when the tool finishes (begin and end). `tool.check` with `agentId`, `tool`, `input`, `decision`. |
+| subagent generating phases | yes | `turn.step` with `agentId`, `turnId`, `index`, `model`; its stream yields `thinking`, `text`, `tool` (`name`, `id`), `input` (partial JSON), `stop` (`stopReason`), and opaque `engine` chunks; the step result has `answer`, `toolUses`, `stopReason`. `turn.start` and `turn.complete` (`answer`, `reason`) carry the same `agentId`. |
+| main-thread generating phases | yes | the same `turn.step` stream with no `agentId`: thinking, then text (24 pieces over about 0.5 s for a short reply in the kept log), or tool chunks whose `input` pieces stream before `tool.call` begins. The thinking chunks arrive with empty `text` on this model, so the phase shows but its content does not. |
+| lead reply text | yes, streamed and finished | streamed: `turn.step` `text` chunks. Finished: the step result's `answer`, `turn.complete`'s `answer`, and the `session.append` row (`door: "response"`, `origin.kind: "model"`, `message.type: "assistant"`, text and thinking blocks). |
+| tool-permission waits | start yes; end only as the tool call's end | start: `tool.check` resolves `decision: "ask"` with `approver: "person"` (absent headless) plus `tool`, `input`, `tool_use_id`, `reason`. `classic.PermissionRequest` (`tool_name`, `tool_input`) follows within milliseconds, but its `next(e)` resolves at once and does not span the dialog. `classic.Notification` (`notification_type: "permission_prompt"`, generic message, no tool) fires about 6 s later. The answer has no event of its own: the wait ends when that call's `tool.call` `next(e)` resolves, after the tool ran on approval or with a refusal on denial. Approval and the tool's run cannot be told apart. |
+| subagent identity | yes | `agentId` (for example `a9820e793a386bf59`) is on every event of the loop: `turn.start`, `turn.step`, `turn.complete`, `tool.call`, `tool.check`, `session.append`. `agent.spawn`'s result returns the same `agentId`, along with the parent Agent call's `tool_use_id`, `subagentType`, and `description`. `classic.SubagentStart`/`SubagentStop` carry it as `agent_id`. A spawn made inside a subagent carries `parentAgentId` (types only, not probed). |
+
+Fallbacks: neither (193 a) nor (218) applies. Subagent events and
+main-thread phase events are both available, so the live view gets
+per-subagent activity and phase granularity for the lead. Thinking shows
+as a phase without content.
+
+For the reply-text and permission-wait fallback the lead settles: reply
+text streams, so no reply fallback is forced. Permission waits have a
+candidate start with the tool and its argument preview (`tool.check` ask +
+`approver: "person"`, keyed by `tool_use_id`), but it is a "may be
+waiting" signal, not proof of a dialog: per the declarations a core `ask`
+goes to the mode's decider, so the auto-mode classifier or a
+`classic.PermissionRequest` hook answering `decision` can settle it with no
+dialog, and a `tool.check` hook further out in the chain can overturn the
+verdict the mod saw. The probe only observed default-mode, plugin-raised
+asks that did open a dialog. Their end is observable only
+as the call's `tool.call` completion. A "waiting for approval" marker set at
+the ask and cleared when the call ends would also cover the approved tool's
+own run time.
+
+Observed facts Phase 2 must handle:
+
+- The subagent's `turn.start` fires before `agent.spawn`'s `next(e)`
+  resolves (4080 ms against 4082 ms in the kept log), so an `agentId` can appear before
+  its spawn record.
+- Tool calls begin while the same step is still streaming: the main
+  thread's Agent `tool.call` began at 4068 ms and that step ended at
+  4097 ms; in the subagent, Bash `tool.call` began at 5987 ms, before the
+  same step's Read tool chunk at 5993 ms (kept log).
+- Every hook also hears subagent `turn.complete` events, which carry the
+  subagent's final report as `answer`.
+- The user prompt row is `session.append` with `door: "prompt"`; headless
+  it carries `origin.kind: "unclassified"`, and a subagent's prompt carries
+  `origin.kind: "coordinator"`. The interactive origin of a typed prompt
+  was not captured.
+- The current ws mod hooks no `tool.check` and no `agent.spawn`, so the
+  one-unmatched-hook-per-event rule leaves room for both. It already holds
+  the unmatched `tool.call`, `turn.start`, `turn.step`, and `turn.complete`
+  hooks, so the adapter has to extend those.
+
+Not probed live: a model-issued permission dialog answered interactively.
+The interactive run showed the timing on the ws mod's own plugin-raised
+`config_get` calls, which raised person-approved dialogs in a fresh,
+non-ws directory. Approving dialogs through the nested session was then
+refused, rightly, by the auto-mode classifier. The lead's live check covers
+a model-issued prompt, approved and denied.
+
+The worker stops here, per this phase. The reply-text and permission-wait
+fallback Edition on Phase 2 belongs to the lead and the user.
+
 ### Phase 2: Claude live event feed
 
 Build the adapter on the Phase 1 Result and the fallback Edition recorded
