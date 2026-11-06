@@ -264,6 +264,139 @@ mirror check `TestPiMirrorUpToDate`
 (`agents-plugin-tool/internal/wsrsrc/pi_mirror_test.go`). Then `go test
 ./...` in `agents-plugin-tool`.
 
+### Result (14605071e) - 2026-11-06
+
+Landed:
+- `internal/wslive` holds the shared schema, the reducer, the ring, and
+  the readers:
+  - `snapshot.go`: types, caps, `ReadSnapshot`, `Snapshot.Stale`,
+    `AdapterPresent`.
+  - `state.go`: the `State` reducer from adapter events.
+  - `text.go`: line cleaning, argument flattening, and the session-key
+    scrubber.
+  - `ring.go`: `AppendRing`, `ReadRing`, `RingNames`.
+- `internal/mcp/live_snapshot.go` adds:
+  - the adapter-only MCP tool `dashboard.intake`, with args `{session_key,
+    adapter, events[]}` and compact text output (`ok: X of Y events
+    applied`, one `skipped event i: ...` line per rejected event, or
+    `dashboard off: nothing recorded`);
+  - the debounced snapshot writer with its heartbeat;
+  - ring writes, and the mail lines that mailbox send and recv add.
+- The tool is listed in the `runtime.json` of ws, wsflow, and Pi.
+- The ws-mcp manual's "Dashboard daemon" section lists both stores.
+- f49150edc moved the stores and wired the nudge after daemon core Phase 2
+  landed (merged in fe7f4d4a2).
+- 395dfb33a (a review fix) stops the heartbeat of a session that went
+  inactive, so a session tuned off writes nothing more.
+
+Settled:
+- **Locations.** Each session's stores sit in its dashboard registry
+  directory, `wsdashboard.SessionDir(wsdashboard.Dir(""), replyID)`, beside
+  `registration.json`. That is `<cache root>/dashboard/sessions/<reply-id>/`:
+  - `snapshot.json`, overwritten via temp file and rename;
+  - `ring/<UTC ns stamp>-<hex>.json`, one immutable file per entry.
+
+  Only a registered top-level lead session whose `dashboard.enabled`
+  resolves on is written. Child sessions write nothing: they appear in their
+  lead's subagent tree, and their mail gets no ring line.
+  `PruneRegistrations` removes the stores together with the session
+  directory.
+- **Snapshot encoding.** JSON with camelCase fields: `{schemaVersion: 1,
+  replyId, adapter, updatedAt, heartbeatMs, lead, agents[]}`.
+  - `lead` and each agent carry `phase`, `phaseStartedAt`, `caption`,
+    `done`, `failed`, `batches[]`, and `permission {toolName, argsPreview,
+    startedAt}`.
+  - `lead` adds `turnStartedAt`, `turnOrigin`, `previousTurnMs`, and `reply
+    {text, startedAt, truncated}`.
+  - Each agent adds `id`, `parentId`, `label`, `replyId`, `status`
+    (running, done, or failed), `startedAt`, and `endedAt`.
+  - `batches` is Pi's `BatchView` verbatim: `{epoch, seq, toolNames,
+    callCount, failed, startedAt, endedAt | running {toolName, argsPreview,
+    startedAt, done, othersRunning} | generating {kind, phaseStartedAt,
+    toolName, chars}}`.
+  - Caps: 5 batches, 5 tool names, a 200-character preview, 64-rune tool
+    names. Text is capped at 64 KiB, keeping the head and setting
+    `truncated`. The tree keeps every running agent (a defensive cap of 64)
+    plus the 5 most recent finished ones, and a failed agent keeps
+    `status: failed`.
+  - Readers ignore unknown fields, and absent fields read as empty.
+- **Phase.** The first match wins:
+  - `permission` while a permission wait is set;
+  - otherwise the generating view's kind (`thinking`, `replying`, `tool`);
+  - otherwise `tool` while a batch is running;
+  - otherwise `replying` while the lead streams a reply;
+  - otherwise `thinking` inside a turn or for a running agent;
+  - otherwise `idle`.
+- **Ring.** N = 50 (`wslive.RingCap`). An entry is `{kind, origin, text,
+  truncated, done, failed, durationMs, direction, peer, title,
+  historyKey}`, depending on its kind (user, reply, turn, or mail). The
+  entry's time is its file-name stamp.
+- **Debounce.** About 100 ms for a change to the lead's phase or streamed
+  reply, 250 ms for anything else. A burst inside one window becomes one
+  write.
+- **Staleness, for the core worker.** The field is `updatedAt` (epoch ms).
+  ws-mcp also rewrites the snapshot every 30 s as a heartbeat
+  (`heartbeatMs`), and `Snapshot.Stale(now)` is true once `now - updatedAt
+  > 3 * heartbeatMs`. A restarted ws-mcp starts from empty state; a crashed
+  or abandoned writer leaves a snapshot that goes stale.
+  `DashboardSessionSource` now:
+  - reports `SessionData.SnapshotUpdatedAt`, which the index carries as
+    `Session.SnapshotUpdatedAt`;
+  - folds the snapshot (without `updatedAt`, but with its stale flag) and
+    the ring entry names into the fingerprint.
+
+  A heartbeat therefore does not raise `Rev`, while a writer that stopped
+  does, at the next 30 s poll.
+- **Adapter presence.** `wslive.AdapterPresent(path, now)`: a readable,
+  non-stale snapshot with a non-empty `adapter`. A ring alone does not
+  count.
+- **Delegate labels.** An adapter sends a delegate's session key as the
+  event's `sessionKey`. ws-mcp turns it into `replyId` (`wsmailbox.ReplyID`)
+  and never stores the key. Before capping, a scrubber replaces every key
+  seen so far, plus `session_key: <value>` argument forms, with
+  `id:<reply-id>` in previews, labels, captions, and text.
+- **Mail origin.** The adapter marks it through `turn_start {origin:
+  "mail"}`. User messages are tagged `terminal` or `whiteboard`.
+- **Turn summary.** ws-mcp writes it at `turn_end` as `{kind: "turn",
+  origin, done, failed, durationMs}`. The counts are the turn's tool-call
+  totals: finished batches deduplicated by epoch and seq, plus the running
+  batch's finished calls. It contains no model text. A turn_end with no
+  turn_start (ws-mcp restarted mid-turn) writes no summary. turn_end, or an
+  agent ending, closes running batches (an unfinished call counts as
+  failed).
+- **Reply rate.** The adapter sends the full text so far, replacing the
+  previous text, at most about 10 calls a second, coalescing on its own
+  side; the tool description says so. `final: true` moves the text to the
+  ring.
+- **Nudge.** Each successful snapshot or ring write calls
+  `s.dashboardNudge(sessionKey)`. It does not block, and it is a no-op for
+  an unregistered session.
+- **Failure isolation.** Write errors are logged only, as debug events
+  `dashboard.snapshot_write_error` and `dashboard.ring_write_error`. Intake
+  and mailbox calls never fail or wait on the dashboard. The intake tool
+  gets no mailbox piggyback badge.
+
+Verification:
+- `go test ./... -count=1` in `agents-plugin-tool`: all packages ok. That
+  includes the runtime capability tests and `TestPiMirrorUpToDate`.
+- `go test -race` on the new dashboard, live, and mail tests (`-count=3`),
+  and on `internal/wslive`: ok.
+- The new tests are `internal/wslive/state_test.go`, `ring_test.go`,
+  `internal/mcp/live_snapshot_test.go`, the mail-line test in
+  `mailbox_history_test.go`, and `TestIndexSnapshotAgeIsNotAChange`.
+- Lite review: one Important finding (the heartbeat kept writing for a
+  session tuned off), fixed in 395dfb33a with
+  `TestDashboardTurnedOffStopsTheHeartbeat`. A minor finding, that a
+  rejected permission event created an agent, is fixed there too.
+
+Open:
+- Minor review findings not fixed:
+  - a status-less event for an agent that retention already dropped
+    recreates it as running;
+  - tool names, epoch, agent ids, and mail titles are not scrubbed. They
+    are validated identifiers or mailbox text, and mail bodies already sit
+    unscrubbed in the mailbox history.
+
 ### Phase 2: Pi adapter feeds the intake
 
 The Pi extension hands its lead and subagent events to its session's
@@ -294,6 +427,101 @@ live Pi session and a running daemon that the lead bar, the subagent tree,
 and the conversation follow the session, including streamed reply text. If
 the core's Phase 3 has not landed, the lead inspects the snapshot and ring
 files directly instead, and the live-page check happens once it lands.
+
+### Result (2fb9b65f8) - 2026-11-06
+
+Landed:
+- `agents-plugin-pi/src/dashboard-feed.ts` (new) feeds `dashboard.intake`
+  through the bridge's ws-mcp client. It is wired in `index.ts`, with small
+  hooks in `spawner.ts`.
+- `agents-plugin-pi/src/adapter-label.ts` gains the whiteboard label.
+- `agents-plugin-pi/src/bridge.ts` hides adapter-only tools from the model.
+- The `pi.dashboard_enabled` knob is declared in `config-manifest.json` and
+  `goal-loop.ts`.
+- New tests are in `test/dashboard-feed.test.ts`; `adapter-config.test.ts`
+  and `bridge.test.ts` are extended.
+- Review fixes landed in 9926e0b5f.
+
+Settled:
+- **Knob.** `pi.dashboard_enabled`, boolean, default true, global default
+  scope. Its manifest default is pinned to the built-in default by the
+  existing resolver test.
+  - It is read through `readAdapterConfig`, and one read holds for 2 s
+    whether it was on or off.
+  - With the knob off, no intake call is made. Without a bridge or a session
+    key, events are held and retried.
+  - Its description covers only the feed. Phase 3 should widen it to
+    submission.
+- **User-message origin.** `WHITEBOARD_MESSAGE_LABEL = "[user message from
+  the ws whiteboard]"` lives in `adapter-label.ts`, with
+  `labelWhiteboardText` and `whiteboardLabeledBody`. Phase 3 should inject
+  through `pi.sendUserMessage(labelWhiteboardText(text))`.
+  - A finished user message that opens with that label is sent as
+    `whiteboard`, with the label stripped.
+  - Adapter-labelled messages are not sent.
+  - Everything else is `terminal`.
+  - A turn's origin comes from the `input` event that started it.
+  - A mailbox wake of an idle lead marks the next turn `mail`, and an
+    adapter-labelled wake input does not overwrite that mark.
+- **Lead turn.** It runs from Pi `agent_start` to `agent_settled`.
+  - A lead `AgentBatchBuffer` is fed by the same `observeBatchEvent` the
+    widget uses, and goes out as `agent` events with no agentId.
+  - The streamed reply is the full text so far, thinking excluded. Every
+    assistant message with text ends in `reply {final: true}`.
+- **Subagents.** `dashboardAgentEntries(registry)` uses the widget relay's
+  agents, order and batch views, including `parentId`.
+  - Label: alias, then title, then short id. Caption: role plus a state
+    phrase.
+  - Status is running while the agent is launching, running, streaming,
+    awaiting approval, or waiting on its own agents. It is failed when
+    `lastRunFailed` is set, which happens on a spawn failure or an exit
+    during in-flight work. Otherwise it is done.
+  - A fork's own session key comes from its readiness payload. It is held
+    as live-only `ownSessionKey` and sent only as `sessionKey`. Worker and
+    explore children carry no key the parent can see, so they show by label
+    only.
+- **Permission waits.** Pi has no tool permission prompt for the lead. An
+  execute-worker waiting on approval goes out as `permission {agentId,
+  tool: "ws-worker-exec", args: {command}}` and is cleared when the wait
+  ends.
+- **Coalescing and isolation.**
+  - Handlers record state synchronously and never await or throw.
+  - One flush runs at a time, at most one intake call per 100 ms.
+  - Discrete events wait in a list capped at 100 that drops its oldest
+    entry. Each is queued after the lead and stream state held before it.
+  - A call counts as delivered only if it resolves without `isError` within
+    5 s. A rejection, a timeout, or a missing bridge triggers a resync after
+    2 s. The resync sends `reset`, then the remembered `turn_start`, then
+    the lost discrete events and the full lead and tree state.
+- **Hidden tool.** `filterOutAdapterOnlyTools` removes `dashboard.intake`
+  from the registered Pi tools and from `wsToolNames`.
+
+Verification:
+- `npm test` in `agents-plugin-pi`, with `node_modules` linked from the
+  main checkout for the run: 2544 tests, 35 fail, 1 cancelled.
+  - The failing names match the pre-change baseline exactly.
+  - One baseline failure, the bundled 65-tool contract check in
+    `bridge.test.ts`, already failed before this ticket because
+    `runtime.json` lists 69 tools.
+- `test/dashboard-feed.test.ts`: 29 tests pass.
+- Lite review: findings fixed in 9926e0b5f.
+  - Critical: the mail origin was wiped by the wake input.
+  - Important: a failed call was treated as delivered, and a resync did
+    not resend state.
+  - Important: an idle exit after finished work flipped an agent to
+    failed.
+  - Two minor items.
+
+Open:
+- The lead's hand check with a live Pi session and the daemon (the core's
+  Phase 3 page has not landed, so inspect `snapshot.json` and `ring/` under
+  the session's registry directory).
+- A grandchild whose process fails shows as done; only direct children
+  carry the failure flag.
+- A leftover mail mark tags the next turn that has no origin of its own as
+  mail.
+- A call that times out but still lands has its conversation entries
+  resent after the resync, so they appear twice.
 
 ### Phase 3: Pi drain and inject
 
