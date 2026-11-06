@@ -84,8 +84,8 @@ whiteboard.query payload: {topic?, status?, id?}
 - `now`: an HTML fragment, never a full document, for explanations and
   drawings: inline SVG, or canvas 2D drawn by an inline script, with no
   external `src`, `href`, or fetch. It stays until a later `now` replaces it
-  or `""` clears it, above the topics on the update that changed it and below
-  them after. `now_path` names a file holding the fragment, relative to the
+  or `""` clears it, always above the topics: open on the update that changed
+  it, collapsed and greyed after. `now_path` names a file holding the fragment, relative to the
   session root or absolute, read once at that update. A large standalone
   visual goes to a `{{.McpNamespace}}/path.generate` file linked from the
   fragment.

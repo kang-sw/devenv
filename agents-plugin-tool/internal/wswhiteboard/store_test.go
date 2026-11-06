@@ -360,6 +360,20 @@ func TestQueryReturnsArchivedAndFilters(t *testing.T) {
 	}
 }
 
+func TestNowFreshReadsStoreWithoutUpdateSeq(t *testing.T) {
+	var st State
+	if err := json.Unmarshal([]byte(`{"seq":4,"now":"<p>x</p>","now_seq":4}`), &st); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !st.NowFresh() {
+		t.Fatalf("a store without update_seq must judge Now against the current render")
+	}
+	st.BeginRender()
+	if st.NowFresh() {
+		t.Fatalf("a store without update_seq keeps the old per-render judgement")
+	}
+}
+
 func TestApplyNowRules(t *testing.T) {
 	st := &State{}
 	env := testEnv()
@@ -374,14 +388,18 @@ func TestApplyNowRules(t *testing.T) {
 		t.Fatalf("now_path refused: %v", problems)
 	}
 	delete(content, "/tmp/now.html")
-	if st.Now != "<p>from file</p>" || !st.NowChangedThisRender() {
+	if st.Now != "<p>from file</p>" || !st.NowFresh() {
 		t.Fatalf("now_path content must be stored once: %q", st.Now)
 	}
-	// A later render keeps the stored content although the file is gone, and
-	// places Now below because this render did not change it.
+	// An implicit render keeps the stored content although the file is gone,
+	// and keeps Now fresh: freshness follows the latest update only.
 	st.BeginRender()
-	if st.Now != "<p>from file</p>" || st.NowChangedThisRender() {
-		t.Fatalf("Now after an implicit render: %q changed=%v", st.Now, st.NowChangedThisRender())
+	if st.Now != "<p>from file</p>" || !st.NowFresh() {
+		t.Fatalf("Now after an implicit render: %q fresh=%v", st.Now, st.NowFresh())
+	}
+	mustApply(t, st, `{"id_floor":1}`)
+	if st.NowFresh() {
+		t.Fatalf("an update without now must leave Now stale")
 	}
 	if _, problems := Apply(st, payload(t, `{"now":"<p>x</p>","now_path":"/tmp/now.html"}`), env); !hasProblem(problems, "now and now_path are exclusive") {
 		t.Fatalf("now+now_path problems = %v", problems)
@@ -394,7 +412,7 @@ func TestApplyNowRules(t *testing.T) {
 	}
 	// Setting the same content again is not a change.
 	mustApply(t, st, `{"now":"<p>from file</p>"}`)
-	if st.NowChangedThisRender() {
+	if st.NowFresh() {
 		t.Fatalf("identical Now must not count as changed")
 	}
 	mustApply(t, st, `{"now":""}`)

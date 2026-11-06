@@ -183,23 +183,29 @@ func TestRenderPageChangeSignalOnlyOnFull(t *testing.T) {
 
 func TestRenderPageNowPlacement(t *testing.T) {
 	for name, layout := range layouts() {
+		for _, fresh := range []bool{true, false} {
+			view := sampleView(layout)
+			view.NowFresh = fresh
+			out := render(t, view)
+			now, topic := strings.Index(out, `<details class="now`), strings.Index(out, `<section class="topic`)
+			if now < 0 || topic < 0 || now > topic {
+				t.Errorf("%s fresh=%v: Now (%d) is not above the topics (%d)", name, fresh, now, topic)
+			}
+			if !strings.Contains(out, `<span class="label">NOW</span>`) {
+				t.Errorf("%s fresh=%v: Now summary lacks its label", name, fresh)
+			}
+			tag := regexp.MustCompile(`<details class="now[^>]*>`).FindString(out)
+			if want := `<details class="now" id="wb-now" open>`; fresh && tag != want {
+				t.Errorf("%s: fresh Now tag = %q, want %q", name, tag, want)
+			}
+			if want := `<details class="now stale" id="wb-now">`; !fresh && tag != want {
+				t.Errorf("%s: stale Now tag = %q, want %q", name, tag, want)
+			}
+		}
+
 		view := sampleView(layout)
-		view.NowAbove = true
-		out := render(t, view)
-		now, topic := strings.Index(out, `<details class="now"`), strings.Index(out, `<section class="topic`)
-		if now < 0 || topic < 0 || now > topic {
-			t.Errorf("%s: Now (%d) is not above the topics (%d)", name, now, topic)
-		}
-
-		view.NowAbove = false
-		out = render(t, view)
-		now, last := strings.Index(out, `<details class="now"`), strings.LastIndex(out, `<section class="topic`)
-		if now < 0 || now < last {
-			t.Errorf("%s: Now (%d) is not below the topics (%d)", name, now, last)
-		}
-
 		view.Now = ""
-		if out = render(t, view); strings.Contains(out, `<details class="now"`) {
+		if out := render(t, view); strings.Contains(out, `<details class="now`) {
 			t.Errorf("%s: empty Now still renders the slot", name)
 		}
 	}

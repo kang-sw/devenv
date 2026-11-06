@@ -27,8 +27,9 @@ type View struct {
 	// Now is the Now slot's HTML fragment, written unescaped by design;
 	// empty when the slot is clear.
 	Now string
-	// NowAbove places Now above the topics: the render changed it.
-	NowAbove bool
+	// NowFresh marks Now changed by the latest update: it renders open, and
+	// collapsed and greyed otherwise.
+	NowFresh bool
 	Topics   []TopicView
 	// Panels come from the section providers, in registration order.
 	Panels []Panel
@@ -150,7 +151,7 @@ func BuildView(state *State, in ViewInput) View {
 	if in.Layout == LayoutFull {
 		view.StampFile = in.ReplyID + ".stamp.js"
 	}
-	view.NowAbove = state.NowChangedThisRender()
+	view.NowFresh = state.NowFresh()
 
 	expanded := map[int]bool{}
 	if in.Layout == LayoutFull {

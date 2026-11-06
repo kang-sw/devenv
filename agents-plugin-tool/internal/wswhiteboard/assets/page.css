@@ -187,6 +187,8 @@ details.more[open] > summary { margin-bottom: 2px; }
 details.now { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); margin-bottom: 16px; overflow: hidden; }
 details.now > summary { cursor: pointer; list-style: none; display: flex; gap: 8px; align-items: center; padding: 4px 12px; min-height: 30px; background: var(--wb-now); color: var(--wb-on-now); font-weight: 600; }
 details.now > summary::-webkit-details-marker { display: none; }
+details.now > summary .label { font-size: 12px; letter-spacing: .08em; }
+details.now.stale > summary { background: var(--wb-muted); color: var(--wb-muted-fg); }
 .now-body { padding: 10px 14px 12px; overflow-x: auto; overflow-wrap: anywhere; }
 .now-body > :first-child { margin-top: 0; }
 .now-body > :last-child { margin-bottom: 0; }

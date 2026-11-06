@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -492,8 +493,8 @@ func TestWhiteboardQueryAndNowPathThroughTools(t *testing.T) {
 	os.Remove(filepath.Join(f.root, "tmp", "now.html"))
 	f.update(t, `{"answer":[{"id":1,"answer":"ok","answer_quote":"(01) ok"}]}`)
 	page, _ = os.ReadFile(pagePath)
-	if now, item := strings.Index(string(page), "diagram-marker"), strings.Index(string(page), "settle me"); now < 0 || now < item {
-		t.Fatalf("now_path content must survive the file's deletion and render below the topics once unchanged (now %d, item %d)", now, item)
+	if now, item := strings.Index(string(page), "diagram-marker"), strings.Index(string(page), "settle me"); now < 0 || now > item {
+		t.Fatalf("now_path content must survive the file's deletion and stay above the topics once unchanged (now %d, item %d)", now, item)
 	}
 	text := toolText(t, f.call(t, "whiteboard.query", map[string]any{"payload": map[string]any{"id": 1}}))
 	if !strings.Contains(text, "(01) [answered] [technical] t: settle me") || !strings.Contains(text, `answer_quote: "(01) ok"`) {
@@ -501,6 +502,42 @@ func TestWhiteboardQueryAndNowPathThroughTools(t *testing.T) {
 	}
 	if text := toolText(t, f.call(t, "whiteboard.query", map[string]any{})); !strings.Contains(text, "(01)") {
 		t.Fatalf("query with no payload must list every item:\n%s", text)
+	}
+}
+
+func TestWhiteboardNowStaysFreshAcrossImplicitRenders(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	pagePath := filepath.Join(f.dir(), f.replyID()+".html")
+	nowTag := func() string {
+		t.Helper()
+		page, err := os.ReadFile(pagePath)
+		if err != nil {
+			t.Fatalf("read page: %v", err)
+		}
+		return regexp.MustCompile(`<details class="now[^>]*>`).FindString(string(page))
+	}
+	const fresh, stale = `<details class="now" id="wb-now" open>`, `<details class="now stale" id="wb-now">`
+	f.update(t, `{"add":[{"class":"technical","topic":"t","title":"x"}],"now":"<p>n</p>"}`)
+	if got := nowTag(); got != fresh {
+		t.Fatalf("after the update that set Now: %q, want %q", got, fresh)
+	}
+	for _, step := range []struct {
+		tool string
+		args map[string]any
+	}{
+		{"todo.add", map[string]any{"key": "a", "title": "write tests"}},
+		{"agenda.set", map[string]any{"key": "notes", "value": map[string]any{"x": 1}}},
+	} {
+		if resp := f.call(t, step.tool, step.args); isToolError(resp) {
+			t.Fatalf("%s failed: %s", step.tool, resp)
+		}
+		if got := nowTag(); got != fresh {
+			t.Fatalf("after %s: %q, want %q (an implicit render must not make Now stale)", step.tool, got, fresh)
+		}
+	}
+	f.update(t, `{"answer":[{"id":1,"answer":"ok","answer_quote":"(01) ok"}]}`)
+	if got := nowTag(); got != stale {
+		t.Fatalf("after an update without now: %q, want %q", got, stale)
 	}
 }
 

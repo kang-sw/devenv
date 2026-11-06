@@ -100,6 +100,10 @@ type State struct {
 	Now          string   `json:"now,omitempty"`
 	// NowSeq is the render sequence of the update that last changed Now.
 	NowSeq int `json:"now_seq,omitempty"`
+	// UpdateSeq is the render sequence of the latest accepted update, so an
+	// implicit todo/agenda render does not make Now stale. Zero in a store
+	// written before the field existed.
+	UpdateSeq int `json:"update_seq,omitempty"`
 	// LastEmbedSeq is the render sequence of the previous embed snapshot.
 	LastEmbedSeq int     `json:"last_embed_seq,omitempty"`
 	Embeds       []Embed `json:"embeds,omitempty"`
@@ -196,9 +200,14 @@ func (s *State) BeginRender() {
 	s.Seq++
 }
 
-// NowChangedThisRender reports whether the current render changed Now.
-func (s *State) NowChangedThisRender() bool {
-	return s.Now != "" && s.NowSeq == s.Seq
+// NowFresh reports whether the latest update changed Now. A store without
+// UpdateSeq judges against the current render, as it did before the field.
+func (s *State) NowFresh() bool {
+	latest := s.UpdateSeq
+	if latest == 0 {
+		latest = s.Seq
+	}
+	return s.Now != "" && s.NowSeq == latest
 }
 
 // evictArchive drops the oldest settled items beyond ArchiveCap.
@@ -246,6 +255,7 @@ func Apply(state *State, payload any, env Env) (Outcome, []string) {
 	work := state.clone()
 	work.Seq++
 	mark := work.Seq
+	work.UpdateSeq = mark
 	var out Outcome
 
 	if raw, present := obj["embed_dir"]; present {
