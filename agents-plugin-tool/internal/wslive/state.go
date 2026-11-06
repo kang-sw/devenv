@@ -177,6 +177,9 @@ func (st *State) Apply(ev Event, now int64) (Result, error) {
 		}
 		res.Changed = true
 	case KindPermission:
+		if !ev.Clear && strings.TrimSpace(ev.Tool) == "" {
+			return Result{}, fmt.Errorf("permission needs tool, or clear: true")
+		}
 		act, err := st.activityFor(ev.AgentID, at)
 		if err != nil {
 			return Result{}, err
@@ -184,9 +187,6 @@ func (st *State) Apply(ev Event, now int64) (Result, error) {
 		if ev.Clear {
 			act.permission = nil
 		} else {
-			if strings.TrimSpace(ev.Tool) == "" {
-				return Result{}, fmt.Errorf("permission needs tool, or clear: true")
-			}
 			act.permission = &Permission{ToolName: cleanToolName(ev.Tool), ArgsPreview: cleanLine(st.scrub.scrub(flattenArgs(ev.Args)), ArgsPreviewCap), StartedAt: at}
 		}
 		res.Changed = true

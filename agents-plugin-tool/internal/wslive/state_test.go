@@ -387,3 +387,13 @@ func TestStaleSnapshotReading(t *testing.T) {
 		t.Fatal("a missing snapshot reads as an adapter")
 	}
 }
+
+func TestRejectedPermissionCreatesNoAgent(t *testing.T) {
+	st := NewState(ownerKey)
+	if _, err := st.Apply(Event{Kind: KindPermission, AgentID: "ghost"}, 100); err == nil {
+		t.Fatal("permission without tool accepted")
+	}
+	if agents := st.Snapshot(100).Agents; len(agents) != 0 {
+		t.Fatalf("a rejected event created %+v", agents)
+	}
+}

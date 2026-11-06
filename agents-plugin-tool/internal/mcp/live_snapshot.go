@@ -83,15 +83,22 @@ type liveHub struct {
 
 type liveSession struct {
 	// dir is the session's registry directory; nudge tells the daemon a
-	// store in it changed.
+	// store in it changed; active reports whether the session may still be
+	// written to dir (its dashboard key on, its directory unchanged).
 	dir     string
 	replyID string
 	nudge   func()
+	active  func() bool
+	// onStop removes the stopped session from its hub.
+	onStop func()
 
 	mu    sync.Mutex
 	state *wslive.State
 	timer *time.Timer
 	due   time.Time
+	// stopped is set once the session went inactive; its timer never arms
+	// again and the hub replaces it on the next intake.
+	stopped bool
 
 	// writeMu serializes snapshot writes, so a slow write is never
 	// overtaken by an older marshal.
@@ -101,19 +108,52 @@ type liveSession struct {
 	ringMu sync.Mutex
 }
 
-func (h *liveHub) session(key, dir string, nudge func()) *liveSession {
+func (h *liveHub) session(key, dir string, nudge func(), active func() bool) *liveSession {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.sessions == nil {
 		h.sessions = map[string]*liveSession{}
 	}
 	ls, ok := h.sessions[key]
-	if !ok || ls.dir != dir {
-		state := wslive.NewState(key)
-		ls = &liveSession{dir: dir, replyID: state.ReplyID(), nudge: nudge, state: state}
-		h.sessions[key] = ls
+	if ok && ls.dir == dir && !ls.isStopped() {
+		return ls
 	}
+	if ok {
+		ls.stop()
+	}
+	state := wslive.NewState(key)
+	ls = &liveSession{dir: dir, replyID: state.ReplyID(), nudge: nudge, active: active, state: state}
+	created := ls
+	ls.onStop = func() { h.drop(key, created) }
+	h.sessions[key] = ls
 	return ls
+}
+
+// drop removes ls from the hub unless a newer session already replaced it.
+func (h *liveHub) drop(key string, ls *liveSession) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.sessions[key] == ls {
+		delete(h.sessions, key)
+	}
+}
+
+func (ls *liveSession) isStopped() bool {
+	ls.mu.Lock()
+	defer ls.mu.Unlock()
+	return ls.stopped
+}
+
+// stop ends the session's writes: its pending timer is cancelled and never
+// re-armed.
+func (ls *liveSession) stop() {
+	ls.mu.Lock()
+	defer ls.mu.Unlock()
+	ls.stopped = true
+	ls.due = time.Time{}
+	if ls.timer != nil {
+		ls.timer.Stop()
+	}
 }
 
 // liveSessionDir returns the registry directory that holds the live stores
@@ -154,7 +194,10 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 		return toolTextResponse(id, "dashboard off: nothing recorded\n", nil)
 	}
 
-	ls := s.live.session(key, dir, func() { s.dashboardNudge(key) })
+	ls := s.live.session(key, dir, func() { s.dashboardNudge(key) }, func() bool {
+		current, on := s.liveSessionDir(key)
+		return on && current == dir
+	})
 	now := time.Now().UnixMilli()
 	var (
 		ring     []wslive.RingEntry
@@ -221,6 +264,9 @@ func decodeLiveEvent(raw any) (wslive.Event, error) {
 // scheduleLocked arranges a snapshot write within delay, keeping an earlier
 // pending deadline. ls.mu is held.
 func (ls *liveSession) scheduleLocked(delay time.Duration) {
+	if ls.stopped {
+		return
+	}
 	due := time.Now().Add(delay)
 	if !ls.due.IsZero() && !due.Before(ls.due) {
 		return
@@ -234,8 +280,16 @@ func (ls *liveSession) scheduleLocked(delay time.Duration) {
 }
 
 // fire writes the snapshot, nudges, and arms the heartbeat unless a change
-// is already pending.
+// is already pending. A session that went inactive (its dashboard key turned
+// off, or its directory moved) is stopped instead, so the heartbeat neither
+// writes for a key-off session nor keeps a session that no intake drives
+// reading live forever: the next intake call starts it afresh.
 func (ls *liveSession) fire() {
+	if !ls.active() {
+		ls.stop()
+		ls.onStop()
+		return
+	}
 	ls.writeMu.Lock()
 	ls.mu.Lock()
 	ls.due = time.Time{}

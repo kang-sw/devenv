@@ -221,8 +221,8 @@ func TestDashboardOffWritesNothing(t *testing.T) {
 
 // TestLiveWriteFailuresNeverFailOrDelayCalls pins resilience: a failing
 // snapshot write or ring write, and a daemon that never answers a nudge,
-// leave intake and mailbox calls succeeding promptly, and a failed write
-// sends no nudge.
+// leave intake and mailbox calls succeeding promptly, and the stores recover
+// once writes succeed again.
 func TestLiveWriteFailuresNeverFailOrDelayCalls(t *testing.T) {
 	f := newLiveFixture(t, true)
 	fastLive(t, 10*time.Millisecond)
@@ -382,5 +382,41 @@ func TestDashboardSessionSourceTracksLiveStores(t *testing.T) {
 	clock = clock.Add(time.Hour)
 	if stale := read(); stale.Fingerprint == ringed.Fingerprint {
 		t.Fatal("the snapshot going stale kept the fingerprint")
+	}
+}
+
+// TestDashboardTurnedOffStopsTheHeartbeat pins the key-off rule for a
+// session that was on: once its dashboard.enabled turns off, the heartbeat
+// writes nothing more, and an intake call writes nothing either.
+func TestDashboardTurnedOffStopsTheHeartbeat(t *testing.T) {
+	f := newLiveFixture(t, true)
+	fastLive(t, 10*time.Millisecond)
+	setLiveSeams(func(s *liveSeams) { s.heartbeat = 30 * time.Millisecond })
+	var writes atomic.Int32
+	orig := currentLiveSeams().writeSnapshot
+	setLiveSeams(func(s *liveSeams) {
+		s.writeSnapshot = func(path string, data []byte) error { writes.Add(1); return orig(path, data) }
+	})
+	intake(t, f.server, f.keyA, map[string]any{"kind": "reset"})
+	waitFor(t, "heartbeat writes", func() bool { return writes.Load() >= 2 })
+
+	resp := dashCall(t, f.server, "config.tune", map[string]any{"session_key": f.keyA, "key": DashboardEnabledKey, "value": "false", "scope": "session"})
+	if isToolError(resp) {
+		t.Fatalf("config.tune: %s", resp)
+	}
+	time.Sleep(100 * time.Millisecond) // a heartbeat at most is in flight
+	settled := writes.Load()
+	time.Sleep(200 * time.Millisecond)
+	if n := writes.Load(); n != settled {
+		t.Fatalf("%d snapshot writes after the key turned off", n-settled)
+	}
+	if out := intake(t, f.server, f.keyA, map[string]any{"kind": "turn_start"}); !strings.Contains(out, "dashboard off") {
+		t.Fatalf("intake after the key turned off = %q", out)
+	}
+	f.server.live.mu.Lock()
+	_, kept := f.server.live.sessions[f.keyA]
+	f.server.live.mu.Unlock()
+	if kept {
+		t.Fatal("the stopped session stayed in the hub")
 	}
 }
