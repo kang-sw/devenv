@@ -278,7 +278,8 @@ ai-docs/tickets/.dropped/
   - `agents-plugin/` is registered through `.agents/plugins/marketplace.json`.
   - `agents-plugin-wsflow/` is a conservative-default distribution of the
     same product: Codex/Claude manifests, package-local MCP env, its own
-    `config-manifest.json` (the same keys as ws's, only `default` differs),
+    `config-manifest.json` and `dashboard-config-manifest.json` (the same
+    keys as ws's, only `default` differs),
     shared launcher copies, its own `runtime.json`, thin wsflow skill shims
     over shared playbooks, and package tests for runtime-contract plus
     skill-shim drift.

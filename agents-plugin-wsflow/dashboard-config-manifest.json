@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "namespace": "dashboard.",
+  "keys": [
+    {
+      "key": "dashboard.enabled",
+      "type": "boolean",
+      "default": false,
+      "description": "When true, this MCP server checks at startup for the machine's dashboard daemon (one per OS environment, serving local web pages for the workflow sessions on it) and starts it in the background when it is absent or older than this server; when false, this server neither starts nor replaces it. MCP tools behave the same either way, and a daemon that fails to start never fails a tool. Read once at server startup, so a change applies from the next server start. Only the project, global, and built-in values apply; a session- or repo-scope tune is not read. When this key's manifest fails to load, the dashboard stays off."
+    },
+    {
+      "key": "dashboard.port",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 65535,
+      "default": 29417,
+      "description": "TCP port the dashboard daemon listens on, on the loopback interface; 0 always uses a port the OS assigns. When the port is taken, the daemon falls back to an OS-assigned port and records the port it uses in its endpoint file. Passed to the daemon when an MCP server starts it, so a running daemon keeps its port until it is next started. Read once at server startup; only the project, global, and built-in values apply."
+    }
+  ]
+}
