@@ -6,7 +6,7 @@ related:
   261106-feat-mailbox-history-ring: indirect prerequisite through the panels ticket's mailbox panel
   260513-research-streamable-http-mcp-transport: context; that idea replaces the MCP transport, which this epic leaves on stdio (168)
   260514-epic-ws-web-dashboard-mvp: history; dropped IDE-scale web dashboard (terminal, file explorer) whose daemon lifecycle bugs (f55de2d62, bff07cafb, e6caac0dc) inform this epic's lifecycle decisions
-sage-review-design-reviewed: b251eaef33967e28
+sage-review-design-reviewed: 38252f25fce83e80
 ---
 
 # ws dashboard serve daemon - live multi-session dashboard and subagent monitoring
@@ -165,17 +165,21 @@ with browser interaction folded into the core.
   access token. (173)
 - **Localhost guards instead of a token.** Localhost needs no token. In
   localhost mode every route checks the Host header against loopback
-  names, which stops DNS rebinding; in LAN mode the access token takes the
-  Host check's place. The browser write routes (message, cancel) require
-  an Origin equal to the daemon's own origin, which stops cross-site form
-  posts; the daemon sends no CORS headers. Machine routes carry no Origin:
-  `/nudge` needs no authentication, since it only makes the daemon re-read
-  disk, and the handoff's shutdown request requires the endpoint-file
-  token. A local process can write the inbox files directly, so a
-  localhost credential would guard nothing the browser guards leave open.
-  (284) Rejected: a token on localhost too, which puts the credential in the
-  pointer-line URI and so in agent transcripts; one-time pairing with an
-  owner cookie as 260515 did, a pairing step for the same protection.
+  names, which stops DNS rebinding. In LAN mode a request whose peer
+  address and Host header are both loopback still passes by that Host
+  check with no token, and every other request needs the access token.
+  (299) The browser write routes (message, cancel) require an Origin equal
+  to the daemon's own origin, which stops cross-site form posts; the daemon
+  sends no CORS headers. Machine routes carry no Origin: `/nudge` needs no
+  authentication, since it only makes the daemon re-read disk, and the
+  handoff's shutdown request requires the endpoint-file token. A local
+  process can write the inbox files directly, so a localhost credential
+  would guard nothing the browser guards leave open. (284) Rejected: a
+  token on localhost too, which puts the credential in the pointer-line URI
+  and so in agent transcripts; one-time pairing with an owner cookie as
+  260515 did, a pairing step for the same protection (284); the token on
+  every request in LAN mode, loopback included, which puts the token in the
+  pointer-line URI (299).
 - **The LAN view matches the localhost view.** Argument previews and the
   conversation show in LAN mode too; the access token protects them. (197)
   Rejected: hiding argument previews in LAN mode. The same token already

@@ -5,6 +5,10 @@ related:
   261106-feat-ws-dashboard-claude-adapter: prerequisite through its Phase 1 event probe only, which runs before any work here (266); its later phases feed this ticket's Phase 1 intake and produce the same snapshot schema
   261106-feat-ws-dashboard-daemon-core: its Phase 3 renders this ticket's snapshot and ring; Phase 1 here sends the nudge its Phase 2 adds, and whichever of the two lands second wires that call
   261106-feat-ws-dashboard-browser-interaction: prerequisite for Phase 3; the Pi drain and inject uses its board-answer inbox, drain tool, and `mailbox wait` inbox flag
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 1e76933f5ae0cadd
+sage-review-completeness-reviewed: 1e76933f5ae0cadd
 ---
 
 # ws dashboard live snapshot and Pi adapter - adapter event intake, snapshot file, conversation ring, Pi producer and submission
@@ -84,6 +88,11 @@ on it without waiting for the Pi producer.
   which needs its own discovery while both adapters already call ws MCP
   tools (Pi through its MCP client, the Claude mod through `$.tool.call`).
   Cost accepted: one tool entry in `tools/list` on every host.
+- **Dashboard key off writes nothing.** With the session's dashboard key
+  off (the core's `dashboard.` key, added by its Phase 1, which lands first
+  in wave W0), ws-mcp writes no snapshot and no conversation-ring entries.
+  (design review) Rejected: accepting unread ring writes in wsflow and for
+  users who turned the dashboard off.
 - **Nudge wiring.** Snapshot and ring writes call the nudge sender of
   `261106-feat-ws-dashboard-daemon-core` Phase 2; whichever of the two
   phases lands second wires the call. (295) Rejected: serializing them.
@@ -113,8 +122,9 @@ on it without waiting for the Pi producer.
 - **Origin tags.** User messages are tagged by origin, whiteboard or
   terminal, and a turn that incoming mail starts carries a `mail` origin
   tag. (260)
-- **Mail entries.** Mail the lead sends or receives is a ring entry written
-  by ws-mcp's mailbox send and receive path rather than by an adapter event.
+- **Mail entries.** While the session's dashboard key is on, mail the lead
+  sends or receives is a ring entry written by ws-mcp's mailbox send and
+  receive path rather than by an adapter event.
   It records the key of its mailbox history entry (the entry's file name),
   so a mail line finds its body while the history ring still holds it.
   (283) The history ring keeps 10 messages, so the line must still show its
@@ -144,6 +154,7 @@ on it without waiting for the Pi producer.
 
 ## Constraints
 
+- The new intake tool is listed in the `runtime.json` of `agents-plugin/`, `agents-plugin-wsflow/`, and `agents-plugin-pi/`, as `mailbox.history` is; the wsflow capability test requires an exact match.
 - Shipped surface: ws-mcp strings and the Pi package (`agents-plugin-pi/`)
   ship downstream; none may name this repository's tickets, commits, or
   layout.
@@ -162,6 +173,33 @@ on it without waiting for the Pi producer.
 - Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for `agents-plugin/`, `agents-plugin-wsflow/`, `agents-plugin-tool/`)
 - Convention: ai-docs/manuals/ws-mcp.md (declared for `agents-plugin-tool/internal/mcp/`)
 
+## Prior Decisions
+
+- 261106-epic-ws-dashboard-serve-daemon (2026-11-06, Cross-Child Decisions): "Live activity goes through a per-session snapshot file. Host adapters (the Claude mod and the Pi extension) hand live events to their session's ws-mcp. ws-mcp overwrites one per-session live snapshot file, debounced" — bearing: supports
+- 261106-epic-ws-dashboard-serve-daemon (2026-11-06, Cross-Child Decisions): "Nudge plus polling. After a store write, ws-mcp sends a fire-and-forget `POST /nudge {reply-id, project}`; errors are ignored." — bearing: constrains
+- 261106-epic-ws-dashboard-serve-daemon (2026-11-06, Cross-Child Decisions): "stdio MCP unchanged; the daemon is optional. MCP behavior never depends on the daemon." — bearing: constrains
+- 7a70197d (2026-11-06, commit): "Dependency order for promotion and waves: Claude probe || core P1; core P2 || live-snapshot P1; core P3 || Claude P2 || Pi P2; browser interaction; Pi P3 || Claude P3." — bearing: constrains
+- 7a70197d (2026-11-06, commit): "(291) reading for Pi: the Pi package ships in one distribution, so its pi.* knob defaults on with no wsflow default." — bearing: supports
+- 261106-feat-ws-dashboard-daemon-core (2026-11-06, Decisions): "Nudge wiring for snapshot and ring writes. The nudge sender lands in Phase 2 here; the snapshot and conversation-ring writes of `261106-feat-ws-dashboard-live-snapshot-pi` Phase 1 call it." — bearing: supports
+- 261106-feat-ws-dashboard-claude-adapter (2026-11-06, Decisions): "One snapshot schema. The Claude adapter produces the same snapshot shape as Pi's batch model (`BatchView`, caps 5 batches, 5 tool names, 200 preview characters)." — bearing: constrains
+- 144028b0 (2026-11-06, commit): "(258) a adds a per-session conversation history ring (last N, about 50) beside the bounded snapshot (191), so reload and daemon replacement (174) keep recent conversation" — bearing: supports
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-tool/internal/mcp/ new intake tool, snapshot and ring writers, mailbox_history.go send and receive path; agents-plugin-pi/src/ agent-batches.ts, mailbox-waiter.ts, adapter-label.ts, adapter-config.ts, config-manifest.json |
+| scope.surface | cross-module | new adapter-only MCP tool in tools/list, on-disk snapshot and ring files read by the daemon child, Pi extension and ws-mcp both change |
+| scope.new_public_symbol | yes | adapter-only intake MCP tool, name settled by the worker; new pi. dashboard knob in agents-plugin-pi/config-manifest.json |
+| scope.new_type_contract | yes | snapshot file schema in BatchView shape plus lead root fields, conversation ring entry schema, intake tool argument schema |
+| scope.test_surface | existing | agents-plugin-tool/internal/mcp/mailbox_history_test.go, agents-plugin-pi/test/agent-batches.test.ts, mailbox-waiter.test.ts, mailbox-rearm.integration.test.ts, adapter-label.test.ts, adapter-config.test.ts; new Go test files likely for intake and snapshot |
+| complexity.reuse_points | confirmed | agents-plugin-pi/src/agent-batches.ts BatchView and caps at L34-L40, mailboxHistoryCap ring in agents-plugin-tool/internal/mcp/mailbox_history.go#L35-L37, mailbox-waiter.ts, adapter-label.ts sendUserMessage note |
+| complexity.side_effect_risk | high | new disk writes on every adapter event and in the mailbox send and receive path, debounce timers, and Pi user-message injection with user authority |
+| risk.correctness | high | debounce coalescing, retention of running plus 5 finished agents, hold-until-agent-end rearm sequencing, and merge or cancel races in the inbox drain |
+| risk.fit | moderate | must match the Claude adapter's schema and the daemon core's reader across three sibling children landing in parallel waves |
+| risk.test | moderate | timing-dependent debounce and rearm behavior plus live hand checks with a Pi session and daemon |
+| risk.security_or_contract | high | session key must never reach browser-bound fields, injected messages carry user authority, and the snapshot schema is a cross-version on-disk contract |
+
 ## Phases
 
 ### Phase 1: ws-mcp event intake, live snapshot, and conversation ring
@@ -173,7 +211,9 @@ permission wait), the per-session conversation ring with origin tags, mail
 entries written from ws-mcp's mailbox send and receive path carrying their
 history key, and the nudge after each snapshot and ring write (core Phase
 2's sender; if that has not landed, the worker leaves the call for whichever
-lands second and says so in the Result).
+lands second and says so in the Result). With the session's dashboard key
+off (the core's `dashboard.` key from its Phase 1, which lands first), ws-mcp
+writes no snapshot and no ring entries.
 
 The worker settles and records in the Result:
 
@@ -189,6 +229,17 @@ The worker settles and records in the Result:
 - Where a delegate's session key becomes its reply-id label. Constraint:
   the session key never reaches the browser. (192)
 - Which side marks a mail-started turn's `mail` origin. (260)
+- What a turn summary contains and where it comes from. Suggested: the
+  turn's totals (done, failed) and duration from adapter events, with no
+  model-written text.
+- How a stale or restarted snapshot reads, for example an updated-at field
+  the core ages out. Constraint: a ws-mcp restart mid-turn loses its
+  in-memory state, and a crashed session leaves a frozen snapshot; neither
+  may show as live indefinitely. The settled field is the one the daemon
+  core's reader ages snapshots by, so the core's session index uses it; the
+  Result names it for the core worker.
+- The intake call rate for streamed reply text. Constraint: adapters
+  coalesce deltas on their side, and the intake tool's contract says so.
 
 Verification: Go tests in `agents-plugin-tool/internal/mcp/` cover the
 intake producing a snapshot with the lead root fields (turn start, done and
@@ -200,7 +251,17 @@ ignored by the reader, no session key in the snapshot's browser-bound
 fields, the ring keeping N entries and dropping the oldest, origin tags, and
 mail entries from send and receive carrying their history key, direction,
 peer, and first line (extending
-`agents-plugin-tool/internal/mcp/mailbox_history_test.go`), then `go test
+`agents-plugin-tool/internal/mcp/mailbox_history_test.go`), the stale-snapshot
+reading settled above, and a snapshot write error, a ring write error, a
+nudge error, and an unreachable daemon each never failing or delaying an
+intake call or a mailbox send or receive, and the dashboard key off leaving
+no snapshot and no ring entries after intake calls and a mailbox send and
+receive. The intake tool's `runtime.json`
+entries pass `TestRuntimeCapabilitiesCommandReportsLauncherContractSurface`
+and `TestRuntimeCapabilitiesCommandReportsWsflowContractSurface`
+(`agents-plugin-tool/cmd/ws-mcp/main_test.go`) and the Pi package's byte
+mirror check `TestPiMirrorUpToDate`
+(`agents-plugin-tool/internal/wsrsrc/pi_mirror_test.go`). Then `go test
 ./...` in `agents-plugin-tool`.
 
 ### Phase 2: Pi adapter feeds the intake
@@ -223,11 +284,16 @@ The worker settles and records in the Result:
 Verification: Node tests in `agents-plugin-pi/test/` (extending
 `agent-batches.test.ts` or a new test file) cover the events the extension
 sends for a lead turn with tool calls, a subagent with a session key
-labelled by reply-id, streamed reply text, a failed agent, and an intake
-failure leaving the session unaffected; run `npm test` in
-`agents-plugin-pi`. The lead checks by hand with a live Pi session and a
-running daemon that the lead bar, the subagent tree, and the conversation
-follow the session, including streamed reply text.
+labelled by reply-id, streamed reply text, a user message carrying its
+origin tag, a finished reply and a turn summary reaching the ring, the
+permission-wait state, a failed agent, streamed reply deltas coalesced on
+the extension side rather than one intake call per token, an intake failure
+leaving the session unaffected, and the `pi.` knob off sending no intake
+events; run `npm test` in `agents-plugin-pi`. The lead checks by hand with a
+live Pi session and a running daemon that the lead bar, the subagent tree,
+and the conversation follow the session, including streamed reply text. If
+the core's Phase 3 has not landed, the lead inspects the snapshot and ring
+files directly instead, and the live-page check happens once it lands.
 
 ### Phase 3: Pi drain and inject
 
@@ -243,9 +309,11 @@ Verification: Node tests in `agents-plugin-pi/test/` (extending
 `mailbox-waiter.test.ts` and `mailbox-rearm.integration.test.ts`, and
 `adapter-label.test.ts` for the label) cover an idle wake injecting at once,
 a mid-turn wake re-arming without the flag and injecting only at agent end,
-the flag restored after the drain, a cancelled entry never injected, and a
-merged entry injected once as one message; run `npm test` in
-`agents-plugin-pi`. The lead checks by hand with a live Pi session: a
-message sent from the composer while idle starts a turn as user input with
-the whiteboard label; one sent mid-turn shows as held, can be cancelled or
+the flag restored after the drain, a cancelled entry never injected, a
+merged entry injected once as one message, an injected message entering the
+ring tagged `whiteboard`, and the `pi.` knob off arming the wait without the
+inbox flag; run `npm test` in `agents-plugin-pi`. The lead checks by hand
+with a live Pi session: a message sent from the composer while idle starts a
+turn as user input with the whiteboard label and shows in the conversation
+tagged whiteboard; one sent mid-turn shows as held, can be cancelled or
 merged, and is submitted when the turn ends.

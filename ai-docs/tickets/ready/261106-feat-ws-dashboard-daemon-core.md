@@ -6,6 +6,10 @@ related:
   261106-feat-ws-dashboard-live-snapshot-pi: prerequisite for Phase 3; Phase 3 renders the live snapshot schema and the conversation ring (with its mail entries) that its Phase 1 defines; the snapshot and ring writes call this ticket's Phase 2 nudge
   261106-feat-ws-dashboard-browser-interaction: builds on this ticket; its message and cancel routes, composer chips, and held bubble extend the HTTP server and session page of Phase 3
   261106-feat-whiteboard-rich-items: context; Phase 3 serves the shared mermaid asset its page loads by relative path (293)
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-completeness-reviewed: ac72942546448dbd
+sage-review-design-reviewed: ac72942546448dbd
 ---
 
 # ws dashboard daemon core - lifecycle, session discovery, and the session page
@@ -78,8 +82,10 @@ The static whiteboard page and dashboard panels this daemon reuses
   on Linux, macOS, and Windows. (173)
 - **Spawn at `serve` startup, behind a config key.** A stdio `ws-mcp serve`
   checks for the daemon at startup and spawns it when absent, gated by a
-  config key whose default is on in ws and off in wsflow. When the key is
-  off, ws-mcp neither spawns the daemon nor sends nudges, and the pointer
+  config key whose default is on in ws, off in wsflow, and on in Pi (Pi
+  ships one distribution, the (291) reading). The key off means fully opted
+  out: that ws-mcp neither registers its root, spawns the daemon, nor sends
+  nudges, so its sessions never appear on the dashboard, and the pointer
   line prints the file path. (285) Rejected: spawning on the first
   whiteboard update only, which leaves sessions without a board (lead bar,
   tree, conversation) unserved; no automatic spawn, only an explicit
@@ -107,9 +113,10 @@ The static whiteboard page and dashboard panels this daemon reuses
   DNS rebinding. Machine routes carry no Origin: `/nudge` needs no
   authentication, since it only makes the daemon re-read disk, and the
   handoff's shutdown request requires the endpoint-file token. The daemon
-  sends no CORS headers. (284) LAN mode, where the access token takes the
-  Host check's place, and the Origin check on browser write routes belong to
-  the browser-interaction sibling. Rejected: a token on localhost too, which
+  sends no CORS headers. (284) LAN mode, where a request with a loopback
+  peer address and a loopback Host header still passes by this Host check
+  and every other request needs the access token (299), and the Origin
+  check on browser write routes belong to the browser-interaction sibling. Rejected: a token on localhost too, which
   puts the credential in the pointer-line URI and so in agent transcripts.
 - **Routes.** `/` lists projects and sessions. `/s/<reply-id>` shows one
   session's page. The page is keyed by reply-id, never by session key,
@@ -120,6 +127,15 @@ The static whiteboard page and dashboard panels this daemon reuses
   port, which the spawning ws-mcp passes to `ws-mcp dashboard` as a flag.
   (286) Rejected: an environment variable, since config keys already carry
   per-package defaults and show in `config.list`.
+- **Config key home.** The ws and wsflow manifests are single-namespace
+  `claude.` (`internal/mcp/config_manifest.go`), and Pi's ws-mcp loads only
+  the `pi.` manifest (`agents-plugin-pi/src/bridge.ts`). So each package
+  (ws, wsflow, Pi) ships a `dashboard.`-namespace config manifest, listed in
+  its launcher's `WS_MCP_CONFIG_MANIFESTS` beside its existing manifest,
+  that carries the dashboard and port keys with that package's defaults.
+  (design review) Rejected: declaring the keys in the existing `claude.`
+  manifests, which puts a host-neutral key under the `claude.` namespace and
+  which Pi's ws-mcp does not load.
 - **Shared page assets.** The daemon serves the shared static assets the
   whiteboard page loads by relative path, including the mermaid asset of
   `261106-feat-whiteboard-rich-items`, so a served page renders the same as
@@ -127,6 +143,15 @@ The static whiteboard page and dashboard panels this daemon reuses
   serves static assets.
 - **Pointer line.** When the daemon is up, the whiteboard pointer line
   prints the session's URI; otherwise it prints the file path. (180)
+- **Links in served pages.** Link resolution is an injected callback of
+  `RenderPage` (the rich-items ticket; panels use `whiteboardFileLink`), and
+  the daemon injects its own resolver. In a served page a non-image file
+  link renders as its repo-relative path text, not a link: browsers block
+  `file:` links from http pages, and serving arbitrary files is out of
+  scope. The browser-interaction sibling's Phase 2 extends this resolver so
+  a board image maps to its image route URL. (design review) Rejected:
+  reusing the static page's `file:` and page-relative links, which break or
+  resolve under `/s/` in a served page.
 
 **Session page**
 - **Partial updates.** The page never reloads. The daemon sends each changed
@@ -228,7 +253,11 @@ The static whiteboard page and dashboard panels this daemon reuses
   only while its mailbox presence record is alive (276); for an
   `id:<reply-id>` peer that record is the reply-id registry entry, read the
   way `mailboxPresenceLive` reads named presence: live while its `LastSeen`
-  is within 10 minutes. A served peer's liveness comes from its own session
+  is within 10 minutes (`mailboxPresenceLive` also requires
+  `wsstate.ProcessAlive(p.PID)` for named presence, and `ReplyEntry` carries
+  no PID, so only the `LastSeen` half applies:
+  agents-plugin-tool/internal/mcp/mailbox_runtime.go#L164-L173,
+  agents-plugin-tool/internal/wsmailbox/replyid.go#L41-L46). A served peer's liveness comes from its own session
   state in this child's session index. (282) Rejected: always listing
   unserved peers as live, which grows without bound from stale contacts;
   counting a reply-id peer live while its registry entry exists, which the
@@ -247,7 +276,9 @@ The static whiteboard page and dashboard panels this daemon reuses
 ## Constraints
 
 - Shipped surface: the `ws-mcp dashboard` subcommand, its HTML, CSS, and
-  scripts, the pointer line, and every string ws-mcp emits ship downstream;
+  scripts, the pointer line, the three `dashboard.` manifests (the Pi one in
+  `agents-plugin-pi/`, which has no Implementation Conventions row but ships
+  downstream all the same), and every string ws-mcp emits ship downstream;
   none may name this repository's tickets, commits, or layout.
 - The `ws-mcp serve` stdio path and every MCP tool's behavior stay unchanged
   when the daemon is absent, down, hung, or older; nudge and health errors
@@ -269,6 +300,34 @@ The static whiteboard page and dashboard panels this daemon reuses
   `internal/mcp/whiteboard_tools.go`.
 - Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for `agents-plugin/`, `agents-plugin-wsflow/`, `agents-plugin-tool/`)
 - Convention: ai-docs/manuals/ws-mcp.md (declared for `agents-plugin-tool/internal/mcp/`)
+- Convention: ai-docs/manuals/wsflow-mirroring.md (declared for `agents-plugin/rsrc/`, `agents-plugin/skills/`, `agents-plugin/hooks/`, `agents-plugin-wsflow/`)
+
+## Prior Decisions
+
+- 261106-epic-ws-dashboard-serve-daemon (2026-11-06, Cross-Child Decisions): "stdio MCP unchanged; the daemon is optional. MCP behavior never depends on the daemon. When the daemon is down, every whiteboard and dashboard feature works through the static page, and the pointer line prints the file path." — bearing: constrains
+- 261106-epic-ws-dashboard-serve-daemon (2026-11-06, Cross-Child Decisions): "Routes. `/` lists projects and sessions. `/s/<reply-id>` shows one session's page. The page is keyed by reply-id, never by session key, because a session key is tool authority." — bearing: constrains
+- 261106-feat-whiteboard-dashboard-panels (2026-11-06, Decisions): "Mailbox panel. The session's own address. Unread count... Whether the session is waiting for mail, from the listening marker... Correspondents with their last exchange time" — bearing: supports
+- 261106-feat-mailbox-history-ring (2026-11-06, Result b1771b9df): "one file per entry under `<cache root>/mailbox-history/<session-key>/`, written temp+rename...; best-effort trim to the newest 10; read newest first, skipping unreadable/unparsable/unstamped entries" — bearing: supports
+- 261106-feat-ws-dashboard-claude-adapter (2026-11-06, Decisions): "Adapters hand events to their session's ws-mcp. The mod does not post to the daemon. Rejected: adapters posting to the daemon directly." — bearing: constrains
+- bff07cafb (2026-07-29, commit): "fix(dashboard): kill helpers only on positive evidence of unreachability" — bearing: constrains
+- e6caac0dc (2026-07-29, commit): "fix(dashboard): gate terminal-registry kills on a recorded boot identity" — bearing: constrains
+- 260904-bug-windows-parent-watch-pid-reuse-flake (2026-09-04, Open Questions): "Assert on process identity, not just handle-openability — capture the helper's creation time (`GetProcessTimes`) before kill... (true PID-reuse detection)" — bearing: constrains
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-tool/cmd/ws-mcp/main.go, new daemon package, internal/mcp/whiteboard_tools.go, internal/mcp/whiteboard_panels.go, internal/wswhiteboard/, the ws, wsflow, and Pi `dashboard.`-namespace manifests |
+| scope.surface | public-interface | new ws-mcp dashboard subcommand, HTTP routes, two config keys, pointer line text |
+| scope.new_public_symbol | yes | ws-mcp dashboard subcommand, /health, /nudge, /, /s/<reply-id>, dashboard and port config keys |
+| scope.new_type_contract | yes | endpoint file, machine root registry entry, nudge body, served-session liveness rule |
+| scope.test_surface | new-files | new tests beside daemon code plus existing cmd/ws-mcp/main_test.go, internal/mcp/whiteboard_tools_test.go, whiteboard_panels_test.go, mailbox_correspondents_test.go |
+| complexity.reuse_points | confirmed | wswhiteboard.View and RenderPage in internal/wswhiteboard/view.go and render.go, mailboxPresenceLive, wsmailbox.ReplyID, Presence.Owner, wsstate.CacheRoot, mailbox_history.go all present |
+| complexity.side_effect_risk | high | every serve startup may spawn a detached machine-wide process, hold an OS lock, and write cache files |
+| risk.correctness | high | single-instance lock, handoff, hung-daemon handling, and version comparison repeat the failure class of bff07cafb, f55de2d62, e6caac0dc |
+| risk.fit | moderate | new daemon package must reuse static-page templates and panel providers without forking them |
+| risk.test | high | cross-platform lock and Windows cache removal untestable here; page behavior relies on manual browser checks with no headless browser |
+| risk.security_or_contract | high | new localhost HTTP server with Host-header guard, token-authenticated shutdown, and a no-session-key-in-browser invariant |
 
 ## Phases
 
@@ -282,15 +341,21 @@ route, and the ws-mcp side: at `serve` startup, unless the dashboard config
 key is off (285), read the endpoint file, check `/health`, spawn the daemon
 detached with the configured port (286) when it is absent, and replace an
 older one through the handoff (shutdown request, wait for the lock to free,
-spawn). Both config keys are declared in the ws and wsflow config manifests
-with their per-package defaults.
+spawn). Both config keys live in a `dashboard.`-namespace config manifest
+that each package (ws, wsflow, Pi) ships and lists in its launcher's
+`WS_MCP_CONFIG_MANIFESTS` beside its existing manifest.
 
 The worker settles each of these and records the choice and its reason in
 the Result:
 
 - The two config key names and the default port number. Constraint: the
-  dashboard key defaults on in ws and off in wsflow (285); the port is an
-  unassigned high port (286).
+  dashboard key defaults on in ws, off in wsflow, and on in Pi (285), (291);
+  the port is an unassigned high port (286).
+- The exact manifest wiring per package: file names, and how each launcher
+  lists two manifests (the Claude manifests' `env`, Codex `.mcp.json`, and
+  the Pi bridge, which today sets `WS_MCP_CONFIG_MANIFESTS` to one path).
+  Constraint: the platform path-list separator; a manifest that fails to
+  load leaves the dashboard off rather than failing `serve`.
 - Whether an idle daemon exits, and if so on what condition. Constraint: a
   ws-mcp that finds no daemon spawns one, so an exit never strands a running
   session without a way back.
@@ -308,12 +373,19 @@ Verification: Go tests beside the new daemon code and in
 the lock, the endpoint file written and read back with unknown fields
 ignored, `/health`, the shutdown request rejected without the endpoint-file
 token and accepted with it, the replacement handoff end to end (older daemon
-exits, lock frees, newer daemon writes its endpoint file), port fallback when
-the default is taken, a non-loopback Host header refused, the hung-daemon
-path, the dashboard key off spawning no daemon and the port key reaching the
-spawned daemon's flag, and a ws-mcp `serve` whose MCP tools answer normally
-with no daemon,
-then `go test ./...` in `agents-plugin-tool`. The lead checks by hand on this
+exits, lock frees, newer daemon writes its endpoint file), an older ws-mcp
+leaving a newer daemon running (no replacement flapping), each package's
+`dashboard.` manifest loading beside its existing one with the per-package
+defaults, a missing or unparsable `dashboard.` manifest leaving the
+dashboard off while `serve` still runs, port fallback when the default is
+taken, a non-loopback Host header refused, the hung-daemon path, the
+dashboard key off spawning no daemon and the port key reaching the spawned
+daemon's flag, and a ws-mcp `serve` whose MCP tools answer normally with no
+daemon, then `go test ./...` in `agents-plugin-tool`. The Pi launcher change
+(the bridge's `WS_MCP_CONFIG_MANIFESTS` listing both manifests with the
+platform separator) is covered by a test in `agents-plugin-pi/test/` (for
+example extending `bridge.test.ts`), run with `npm test` in
+`agents-plugin-pi`. The lead checks by hand on this
 machine (WSL) that a detached daemon survives the ws-mcp that spawned it and
 that two concurrent ws-mcp starts leave one daemon. macOS and native Windows
 (LockFileEx, cache-directory removal) need a lead or user run on those hosts;
@@ -332,23 +404,37 @@ The worker settles and records in the Result:
 - The registry's location and entry shape, and how stale entries (a
   crashed ws-mcp, a removed root) are recognized. Constraint: readers ignore
   unknown fields; no liveness verdict rests on `(pid, start_time)` alone
-  (e6caac0dc).
+  (e6caac0dc). Constraint: a session whose dashboard key is off never
+  appears on the dashboard, even when another key-on ws-mcp registered the
+  same project root (ws and wsflow in one project, or a session-scope
+  tune); for example, register per session or reply-id rather than per
+  root, or keep a per-session opt-out marker the index honors. (285)
 - The nudge body's encoding of `project`. Constraint: readers ignore unknown
   fields; a nudge naming an unknown session is ignored.
 - The served-session liveness rule the session index exposes, which the peer
   group's retention (Phase 3) reads for a served peer. (282)
 - Which store writes send the nudge. Constraint: a nudge failure never
   delays or fails the write.
+- Which on-disk stores define the session set under a registered root, and
+  how a session maps to its reply-id. Constraint: a session with a live
+  snapshot but no board is listed (285). Record it so the live-snapshot
+  sibling's Phase 1 places the snapshot where this index enumerates.
 
 Verification: Go tests cover registration and stale-entry handling, a nudge
 that re-reads exactly one session, a malformed or unknown nudge ignored, the
 polling backstop picking up a write that sent no nudge (with an injected
 clock or short interval), unknown registry fields ignored, and ws-mcp store
-writes sending a nudge whose failure leaves the tool result unchanged
-(extending `agents-plugin-tool/internal/mcp/whiteboard_tools_test.go` or a
-new test file in `internal/mcp`), then `go test ./...` in
-`agents-plugin-tool`. The lead checks by hand that two sessions in two
-projects both appear in the index of one running daemon.
+writes sending a nudge whose failure leaves the tool result unchanged, a
+ws-mcp with the dashboard key off registering no root and sending no nudge
+so its sessions never enter the index, two ws-mcp processes on one root
+(one key-on, one key-off) leaving only the key-on session in the index, and
+a session with a snapshot but no board listed (extending
+`agents-plugin-tool/internal/mcp/whiteboard_tools_test.go` or a new test
+file in `internal/mcp`). If this phase lands after the live-snapshot
+sibling's Phase 1, the tests also cover its snapshot and ring writes sending
+a nudge. Then `go test ./...` in `agents-plugin-tool`. The lead checks by
+hand that two sessions in two projects both appear in the index of one
+running daemon.
 
 ### Phase 3: Index and session page render
 
@@ -357,8 +443,11 @@ Serve `/` (projects, sessions, lead phase badge) and `/s/<reply-id>`
 conversation with mail lines, topics, board, panels, composer region) from
 the session index and the on-disk stores, with partial SSE region updates,
 view-state re-application after swaps, the side-by-side and tabs layouts
-with the layout switch, the board-first page for a host without an adapter,
-the shared static assets the page loads by relative path, including the
+with the layout switch, the board-first page for a host without an adapter
+(read from the adapter-presence signal the live-snapshot sibling's Phase 1
+settles (297)), the daemon's own link resolver injected into `RenderPage`
+(a non-image file link renders as repo-relative path text), the shared
+static assets the page loads by relative path, including the
 mermaid asset (293), and the pointer line printing the session URI when the
 daemon is up. The
 composer region renders and is never swapped; sending from it is the
@@ -371,26 +460,60 @@ The worker settles and records in the Result:
   prints the file path. (168), (180)
 - How the SSE stream maps a session re-read to changed regions, so an
   unchanged region is not resent.
+- Whether `/` lists ended sessions, and for how long. Constraint: it uses
+  the served-session liveness rule Phase 2 settles. (282)
+- How a board image renders in a served page before the
+  browser-interaction sibling's Phase 2 lands, for example as path text or
+  alt text. Constraint: no `file:` URL and no path resolving under `/s/`.
 
 Verification: Go tests render `/` and `/s/<reply-id>` from fixture stores
 and snapshot files: region fragments match the static page's templates for
 the board and panels, an unknown reply-id is a 404, no session key appears
 in any rendered page or fragment, a host without an adapter renders the
-board-first page without the layout control, the conversation renders
-origin tags, streamed reply text, and the permission-wait state, a mail line
+board-first page without the layout control, the conversation renders origin
+tags, streamed reply text, and the permission-wait state, a mail line
 expands when its history entry exists and shows only its first line when it
 has left the ring, peer rows merge an `id:` contact and a named contact of
 one session, follow a rebind, render one level deep, and apply the live and
 ended rules (served peer from the session index, unserved named peer from
 presence, unserved `id:` peer from `LastSeen` within 10 minutes, last 5
-ended), an SSE client receives only the changed region after a nudge, and
-the pointer line prints the URI with the daemon up and the file path with it
-down (extending `agents-plugin-tool/internal/mcp/whiteboard_tools_test.go`,
+ended), `/` applying the ended-session rule settled above, no served page or
+fragment carrying a `file:` URL or a page-relative path that resolves under
+`/s/` (a non-image file link renders as its repo-relative path text, and a
+board image renders per the rule settled above), the board-first page chosen
+from the adapter-presence signal, an SSE client receives only the changed
+region after a nudge, and the pointer line prints the URI with the daemon up
+and the file path with it down (extending
+`agents-plugin-tool/internal/mcp/whiteboard_tools_test.go`,
 `whiteboard_panels_test.go`, and `mailbox_correspondents_test.go` where they
 fit), then `go test ./...` in `agents-plugin-tool`. No headless browser is
-available here, so the lead opens a live session page by hand and checks:
-a region update keeps typed composer text, open `<details>`, and scroll
+available here, so the lead opens a live session page by hand and checks: a
+region update keeps typed composer text, open `<details>`, and scroll
 positions; the conversation stays pinned to the bottom unless scrolled up;
 the narrow-screen tabs and the hidden-tab marker; the layout switch and its
 persistence across reload; an expanded peer staying expanded across reload;
 the tree cap at about 38% of the column.
+
+## Sage Review Round 1 (2026-11-06)
+
+### Design Reviewer — block
+
+| # | Title | Severity | Resolution |
+|---|-------|----------|------------|
+| 1 | Dashboard and port keys have no host-neutral home in the ws/wsflow manifests | important | autonomous |
+| 2 | Registration and nudging for a session whose key is off | minor | autonomous |
+| 3 | Session enumeration source unstated | minor | autonomous |
+| 4 | Cross-ticket [browser-interaction, daemon-core]: LAN loopback contract versus the epic's token-replaces-Host-check | important | missing |
+| 5 | Cross-ticket [daemon-core, browser-interaction]: no owner for link resolution in daemon-served pages | important | autonomous |
+| 6 | Cross-ticket [claude-adapter, live-snapshot-pi, daemon-core]: adapter feed hand checks need core Phase 3 | minor | autonomous |
+| 7 | Cross-ticket [all four]: phase-level ordering cannot be typed edges | minor | autonomous |
+
+### Completeness Reviewer — pass
+
+| # | Title | Severity |
+|---|-------|----------|
+| 1 | How sessions are enumerated within a registered root is not stated | minor |
+| 2 | Whether / lists ended sessions is not stated | minor |
+| 3 | How the page detects a host without an adapter is not stated | minor |
+| 4 | The cross-ticket nudge wiring has no verification owner | minor |
+| 5 | The handoff direction for an older ws-mcp is implicit | minor |
