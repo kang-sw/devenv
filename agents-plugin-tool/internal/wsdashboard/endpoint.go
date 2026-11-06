@@ -76,33 +76,39 @@ func ReadEndpoint(dir string) (Endpoint, error) {
 	return ep, nil
 }
 
-// writeEndpoint replaces dir's endpoint file atomically (temp file + rename),
-// readable by the owner only because it carries the shutdown token.
+// writeEndpoint replaces dir's endpoint file atomically, readable by the
+// owner only because it carries the shutdown token.
 func writeEndpoint(dir string, ep Endpoint) error {
 	raw, err := json.MarshalIndent(ep, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(dir, endpointFileName+".*.tmp")
+	return writePrivateFile(dir, endpointFileName, append(raw, '\n'))
+}
+
+// writePrivateFile replaces dir/name atomically (temp file + rename) with an
+// owner-only file holding data.
+func writePrivateFile(dir, name string, data []byte) error {
+	tmp, err := os.CreateTemp(dir, name+".*.tmp")
 	if err != nil {
 		return err
 	}
-	name := tmp.Name()
-	if _, err := tmp.Write(append(raw, '\n')); err != nil {
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
 		_ = tmp.Close()
-		_ = os.Remove(name)
+		_ = os.Remove(tmpName)
 		return err
 	}
 	if err := tmp.Close(); err != nil {
-		_ = os.Remove(name)
+		_ = os.Remove(tmpName)
 		return err
 	}
-	if err := os.Chmod(name, 0o600); err != nil {
-		_ = os.Remove(name)
+	if err := os.Chmod(tmpName, 0o600); err != nil {
+		_ = os.Remove(tmpName)
 		return err
 	}
-	if err := os.Rename(name, filepath.Join(dir, endpointFileName)); err != nil {
-		_ = os.Remove(name)
+	if err := os.Rename(tmpName, filepath.Join(dir, name)); err != nil {
+		_ = os.Remove(tmpName)
 		return err
 	}
 	return nil

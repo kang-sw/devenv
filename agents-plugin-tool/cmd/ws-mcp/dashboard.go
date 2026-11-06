@@ -21,6 +21,7 @@ import (
 func dashboardCommand(args []string) {
 	fs := flag.NewFlagSet("dashboard", flag.ExitOnError)
 	port := fs.Int("port", wsdashboard.DefaultPort, "preferred loopback port; 0 lets the OS choose, and a taken port falls back to an OS-chosen one")
+	lan := fs.Bool("lan", false, "listen on every network interface and admit a request from another device only with the LAN access token; ws-mcp serve passes it when the global dashboard.lan_enabled value is on")
 	lockWait := fs.Duration("lock-wait", wsdashboard.DefaultLockWait, "how long to wait for another daemon to release the single-instance lock")
 	_ = fs.Parse(args)
 
@@ -34,6 +35,7 @@ func dashboardCommand(args []string) {
 	daemon, err := wsdashboard.StartDaemon(wsdashboard.DaemonOptions{
 		Dir:      dir,
 		Port:     *port,
+		LAN:      *lan,
 		Version:  version,
 		LockWait: *lockWait,
 		Log:      openDashboardLog(dir),
@@ -86,7 +88,9 @@ func (l *lazyLog) Write(p []byte) (int, error) {
 type dashboardSpawner func(args []string) error
 
 // startDashboard is the serve-startup hook: with the dashboard key on, it
-// makes sure a daemon at least as new as this ws-mcp runs. It never fails or
+// makes sure a daemon at least as new as this ws-mcp runs, in the LAN mode
+// the global dashboard.lan_enabled value asks for (a same-version daemon in the
+// other mode is replaced). It never fails or
 // delays serve: the caller runs it on its own goroutine, and every error is
 // a stderr line.
 func startDashboard(ctx context.Context, settings mcp.DashboardSettings, dir string, spawn dashboardSpawner, logw io.Writer) wsdashboard.Outcome {
@@ -97,6 +101,7 @@ func startDashboard(ctx context.Context, settings mcp.DashboardSettings, dir str
 		Dir:     dir,
 		Version: version,
 		Port:    settings.Port,
+		LAN:     settings.LAN,
 		Spawn:   spawn,
 		Log:     logw,
 	})

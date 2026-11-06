@@ -200,7 +200,8 @@ func convert(md goldmark.Markdown, s string) template.HTML {
 // absolute path is a file path; both, and every file: URL, go through the
 // page's FileLink, which links them from wherever the page is written. On a
 // page with FileText a file target instead comes back as path text, with an
-// empty href and ok true.
+// empty href and ok true. An image file target on a page with ImageSrc comes
+// back as the src ImageSrc returns, unless it returns empty (see fileTarget).
 func (p *pageData) resolveTarget(dest string, image bool) (href, path string, ok bool) {
 	dest = strings.TrimSpace(dest)
 	switch {
@@ -209,7 +210,7 @@ func (p *pageData) resolveTarget(dest string, image bool) (href, path string, ok
 	case strings.HasPrefix(dest, "#"):
 		return dest, "", !image
 	case drivePath.MatchString(dest):
-		return p.fileTarget(dest, "")
+		return p.fileTarget(dest, "", image)
 	}
 	u, err := url.Parse(dest)
 	if err != nil {
@@ -239,20 +240,27 @@ func (p *pageData) resolveTarget(dest string, image bool) (href, path string, ok
 		if path == "" {
 			return "", "", false
 		}
-		return p.fileTarget(path, suffix)
+		return p.fileTarget(path, suffix, image)
 	case "":
 		// "//host/x" is a network reference, not a file path.
 		if u.Host != "" || u.Path == "" {
 			return "", "", false
 		}
-		return p.fileTarget(u.Path, suffix)
+		return p.fileTarget(u.Path, suffix, image)
 	}
 	return "", "", false
 }
 
-// fileTarget resolves a file path: as path text on a page with FileText,
-// else as the href fileHref builds.
-func (p *pageData) fileTarget(path, suffix string) (string, string, bool) {
+// fileTarget resolves a file path: for an image on a page with ImageSrc, as
+// the src ImageSrc returns (the destination's own query and fragment are
+// dropped), when that is non-empty; else as path text on a page with
+// FileText, else as the href fileHref builds.
+func (p *pageData) fileTarget(path, suffix string, image bool) (string, string, bool) {
+	if image && p.ImageSrc != nil {
+		if src := p.ImageSrc(path); src != "" {
+			return src, "", true
+		}
+	}
 	if p.FileText != nil {
 		text := p.FileText(path)
 		if text == "" {

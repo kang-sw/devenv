@@ -6,6 +6,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/wsinbox"
 	"github.com/kang-sw/devenv/internal/wslive"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
 )
@@ -155,6 +156,11 @@ type ConversationView struct {
 	Generating *wslive.GeneratingView
 	// Users and Mails count the user messages and mail lines.
 	Users, Mails int
+	// Held lists the messages sent from the page that the session has not
+	// received yet, oldest first; Sent is each board item's latest sent
+	// answer, which the page marks on the item's card.
+	Held []HeldView
+	Sent []SentMark
 }
 
 // ConvEntry is one conversation ring entry as the page shows it.
@@ -182,8 +188,11 @@ type pageInputs struct {
 	// Snapshot is the session's live snapshot; nil when it has none.
 	Snapshot *wslive.Snapshot
 	Ring     []wslive.RingRecord
-	Now      time.Time
-	Version  string
+	// Held and Drained are the session's board-answer inbox: the messages
+	// sent from the page and not yet received, and the newest received ones.
+	Held, Drained []wsinbox.Record
+	Now           time.Time
+	Version       string
 	// Lookup returns a session this daemon serves and its snapshot (nil when
 	// it has none).
 	Lookup func(replyID string) (Session, *wslive.Snapshot, bool)
@@ -235,6 +244,8 @@ func buildSessionView(in pageInputs) SessionView {
 	contacts := resolvedContacts(in.Page.Contacts, reg.ReplyID)
 	v.Tree.Peers = peerGroup(contacts, lookup, in.Now)
 	v.Conversation = conversation(in.Snapshot.Lead, in.Ring, in.Page.MailBodies, contacts, lookup)
+	v.Conversation.Held = heldViews(in.Held)
+	v.Conversation.Sent = sentMarks(in.Drained, in.Held)
 	return v
 }
 

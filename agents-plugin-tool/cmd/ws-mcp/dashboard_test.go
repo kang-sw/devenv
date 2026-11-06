@@ -48,6 +48,23 @@ func TestStartDashboardPassesThePortKeyAsTheDaemonFlag(t *testing.T) {
 	}
 }
 
+func TestStartDashboardPassesLANAsTheDaemonFlag(t *testing.T) {
+	for _, lan := range []bool{true, false} {
+		var got []string
+		startDashboard(context.Background(), mcp.DashboardSettings{Enabled: true, Port: 12345, LAN: lan}, t.TempDir(), func(args []string) error {
+			got = args
+			return errors.New("spawn refused in test")
+		}, io.Discard)
+		want := []string{"dashboard", "--port", "12345"}
+		if lan {
+			want = append(want, "--lan")
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("lan %v: spawn args = %v, want %v", lan, got, want)
+		}
+	}
+}
+
 // buildDashboardTestBin builds ws-mcp, optionally stamping another version.
 func buildDashboardTestBin(t *testing.T, stampVersion string) string {
 	t.Helper()

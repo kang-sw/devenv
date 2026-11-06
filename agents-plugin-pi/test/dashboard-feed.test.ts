@@ -539,4 +539,10 @@ describe("model-visible tools", () => {
     const listed = [{ name: "playbook.read" }, { name: DASHBOARD_INTAKE_TOOL }, { name: "mercenary.call" }, { name: "mailbox.send" }];
     assert.deepEqual(filterOutAdapterOnlyTools(filterOutMercenaryTools(listed)).map((tool) => tool.name), ["playbook.read", "mailbox.send"]);
   });
+
+  test("the inbox drain tool is adapter-only too", () => {
+    assert.ok(ADAPTER_ONLY_RAW_TOOLS.has("dashboard.inbox_drain"));
+    const listed = [{ name: "playbook.read" }, { name: "dashboard.inbox_drain" }, { name: "mailbox.send" }];
+    assert.deepEqual(filterOutAdapterOnlyTools(listed).map((tool) => tool.name), ["playbook.read", "mailbox.send"]);
+  });
 });

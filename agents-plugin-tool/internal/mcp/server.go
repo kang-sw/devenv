@@ -652,9 +652,9 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 	// Central mailbox piggyback wrapper (Decision: one interception point):
 	// every reply this call produces gets a chance at an unread-mail badge,
 	// regardless of which case below built it. See mailbox_tools.go.
-	// The adapter-only intake is no model-facing reply, so it carries no
-	// badge and costs no mailbox read on its high call rate.
-	if keyStr, ok := params.Arguments["session_key"].(string); ok && params.Name != dashboardIntakeTool {
+	// The adapter-only intake and inbox drain are no model-facing replies, so
+	// they carry no badge and cost no mailbox read on their call rate.
+	if keyStr, ok := params.Arguments["session_key"].(string); ok && params.Name != dashboardIntakeTool && params.Name != dashboardInboxDrainTool {
 		jsonFormat := wantsJSON(params.Arguments)
 		defer func() {
 			resp = s.applyMailboxPiggyback(resp, keyStr, jsonFormat)
@@ -2191,6 +2191,8 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		return s.handleMailboxHistory(req.ID, params.Arguments)
 	case dashboardIntakeTool:
 		return s.handleDashboardIntake(req.ID, params.Arguments)
+	case dashboardInboxDrainTool:
+		return s.handleDashboardInboxDrain(req.ID, params.Arguments)
 
 	default:
 		return errorResponse(req.ID, -32602, fmt.Sprintf("unknown tool: %s", params.Name))
@@ -4932,6 +4934,18 @@ func tools() []map[string]any {
 					},
 				},
 				"required": []string{"session_key", "adapter", "events"},
+			},
+		},
+		{
+			"name":        dashboardInboxDrainTool,
+			"description": `Adapter-only: a host adapter (the extension or mod that runs inside the agent host) calls this at the end of a turn to collect the messages the user sent from the dashboard page; an agent never calls it, because a model call would claim a held message that is then never injected into the conversation. It atomically claims every held whiteboard message of the session (the user's messages sent from the dashboard page), oldest first, and returns each message's text: the typed text with the answer block of any board answers sent along. A claimed message can no longer be merged into or cancelled from the page, and no call returns it twice. The adapter injects each returned message as the user's own message. Works whether or not the session's dashboard is on; an empty inbox reports so. Default output is compact text: "inbox empty", or "drained N" and then per message a "message <id> <time>" line, its text, and a blank line. format: "json" returns {messages: [{id, sent_at (epoch milliseconds), text, parts, chips: [{id, answer, note}]}]}.`,
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("The adapter's session key: the ws session key of the session it feeds."),
+					"format":      stringProperty(`Optional output format. Use "json" for structured output.`),
+				},
+				"required": []string{"session_key"},
 			},
 		},
 		{

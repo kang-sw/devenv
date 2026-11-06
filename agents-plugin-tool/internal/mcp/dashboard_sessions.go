@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsdashboard"
+	"github.com/kang-sw/devenv/internal/wsinbox"
 	"github.com/kang-sw/devenv/internal/wslive"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
 )
@@ -417,7 +418,8 @@ const dashboardRescanAfter = 5 * time.Second
 // top-level lead record rooted at reg.Project maps to reg.ReplyID.
 //
 // The fingerprint covers everything the session page shows: the record, the
-// live stores, the board's panels as the served page builds them (ticket
+// live stores (snapshot, ring, and the board-answer inbox's held and drained
+// entry names), the board's panels as the served page builds them (ticket
 // directories, mailbox queues, and the listening marker live outside the
 // record), the mailbox history entry names, and the resolved contacts. A
 // contact's liveness is left out: it is derived from the clock, and a
@@ -488,8 +490,8 @@ func (src *DashboardSessionSource) clock() time.Time {
 // hashLiveStores folds the session's live stores into h and returns the
 // snapshot's updatedAt. The snapshot is hashed without updatedAt but with
 // its staleness, so a heartbeat rewrite is no change while a writer that
-// stopped is one; the ring is hashed by its entry names, since an entry
-// file is never rewritten.
+// stopped is one; the ring and the board-answer inbox (held and drained) are
+// hashed by their entry names, since an entry file is never rewritten.
 func (src *DashboardSessionSource) hashLiveStores(h io.Writer, replyID string) time.Time {
 	resolve := src.stateDir
 	if resolve == nil {
@@ -515,6 +517,21 @@ func (src *DashboardSessionSource) hashLiveStores(h io.Writer, replyID string) t
 	}
 	if names, err := wslive.RingNames(wslive.RingDir(sessionDir)); err == nil {
 		io.WriteString(h, "\x00ring")
+		for _, name := range names {
+			io.WriteString(h, "\x00"+name)
+		}
+	}
+	// Entry files are never rewritten, so held and drained names tell a send
+	// (a new held name, or a merge replacing one) and a drain apart.
+	inbox := wsinbox.Dir(sessionDir)
+	if names, err := wsinbox.Names(inbox); err == nil {
+		io.WriteString(h, "\x00inbox")
+		for _, name := range names {
+			io.WriteString(h, "\x00"+name)
+		}
+	}
+	if names, err := wsinbox.DrainedNames(inbox); err == nil {
+		io.WriteString(h, "\x00inbox-drained")
 		for _, name := range names {
 			io.WriteString(h, "\x00"+name)
 		}

@@ -47,8 +47,8 @@ func TestShippedDashboardManifestsLoadBesideEachPackageManifest(t *testing.T) {
 				t.Fatalf("rejected: %v", declared.rejected)
 			}
 			own := loadDeclaredConfig(pkg.own)
-			if len(declared.keys) != len(own.keys)+2 {
-				t.Fatalf("%d keys loaded, want the package's %d plus 2 dashboard keys", len(declared.keys), len(own.keys))
+			if len(declared.keys) != len(own.keys)+3 {
+				t.Fatalf("%d keys loaded, want the package's %d plus 3 dashboard keys", len(declared.keys), len(own.keys))
 			}
 			enabled, ok := declared.lookup(DashboardEnabledKey)
 			if !ok || enabled.DefaultValue != pkg.enabled {
@@ -57,6 +57,13 @@ func TestShippedDashboardManifestsLoadBesideEachPackageManifest(t *testing.T) {
 			port, ok := declared.lookup(DashboardPortKey)
 			if !ok || port.DefaultValue != int64(wsdashboard.DefaultPort) {
 				t.Fatalf("%s = %+v (declared %v), want default %d", DashboardPortKey, port.DefaultValue, ok, wsdashboard.DefaultPort)
+			}
+			lan, ok := declared.lookup(DashboardLANKey)
+			if !ok || lan.DefaultValue != false || lan.DefaultScope != wsconfig.ScopeGlobal {
+				t.Fatalf("%s = %+v (declared %v), want default false at global scope", DashboardLANKey, lan, ok)
+			}
+			if !strings.Contains(lan.Description, "Only the global value applies") {
+				t.Fatalf("%s description must state that only the global value applies: %q", DashboardLANKey, lan.Description)
 			}
 			got := dashboardServer(t, list).DashboardSettings()
 			if want := (DashboardSettings{Enabled: pkg.enabled, Port: wsdashboard.DefaultPort}); got != want {
@@ -158,5 +165,46 @@ func TestDashboardSettingsReadTunedValues(t *testing.T) {
 	}
 	if got := server.DashboardSettings(); got.Port != wsdashboard.DefaultPort {
 		t.Fatalf("port with an invalid stored value = %d, want %d", got.Port, wsdashboard.DefaultPort)
+	}
+}
+
+// TestDashboardLANIsGlobalOnly: one daemon serves every session on the
+// machine, so a project-layer value neither writes nor reads, while a global
+// value turns LAN on.
+func TestDashboardLANIsGlobalOnly(t *testing.T) {
+	list := dashboardPackages[0].own + ";" + dashboardPackages[0].dashboard
+	server := dashboardServer(t, list)
+	r := wsconfig.NewResolver(wsconfig.Options{}, nil, nil, nil)
+	if err := r.Set(DashboardLANKey, "true", wsconfig.SetOptions{ExplicitScope: wsconfig.ScopeProject}); err == nil {
+		t.Fatalf("a project-scope write of %s was accepted, want a global-only refusal", DashboardLANKey)
+	}
+	// A project file written by hand (an older or hand-edited one) is ignored.
+	projectFile, err := wsconfig.Path(wsconfig.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(projectFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	project := `{"schema_version": 1, "overrides": {"` + DashboardLANKey + `": "true"}}`
+	if err := os.WriteFile(projectFile, []byte(project), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := server.DashboardSettings(); got.LAN {
+		t.Fatalf("DashboardSettings = %+v, want LAN off with only a project-layer value", got)
+	}
+	if err := r.Set(DashboardLANKey, "true", wsconfig.SetOptions{ExplicitScope: wsconfig.ScopeGlobal}); err != nil {
+		t.Fatal(err)
+	}
+	if got := server.DashboardSettings(); !got.LAN {
+		t.Fatalf("DashboardSettings = %+v, want LAN on with a global-layer value", got)
+	}
+}
+
+// TestDashboardLANOffWhenUndeclared: without the key's manifest entry the
+// setting is off, as the dashboard keys are.
+func TestDashboardLANOffWhenUndeclared(t *testing.T) {
+	if got := dashboardServer(t, claudeManifestPath).DashboardSettings(); got.LAN {
+		t.Fatalf("DashboardSettings = %+v, want LAN off", got)
 	}
 }

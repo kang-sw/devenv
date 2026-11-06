@@ -10,6 +10,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 45f1769c6b18e3a3
 sage-review-completeness-reviewed: 45f1769c6b18e3a3
+completed: 2026-11-07
 ---
 
 # ws dashboard browser interaction and access - message inbox, LAN token, and image route
@@ -250,6 +251,167 @@ chip note, the sent answer block text, sent marks with cards still
 editable, a held bubble with a divider after two sends, and cancel returning
 text and chips to the composer.
 
+### Result (ed7fbc6e1) - 2026-11-06
+
+Landed:
+- `internal/wsinbox` (5a0a0a14f, new, stdlib only): the inbox store, the
+  answer-block grammar, and the claims.
+- `internal/mcp/dashboard_inbox.go` (1e6fcc8d2): the adapter-only drain
+  tool `dashboard.inbox_drain`, listed in the ws, wsflow, and Pi
+  `runtime.json`, excluded from the mailbox badge, and hidden from the Pi
+  model through `ADAPTER_ONLY_RAW_TOOLS`. The session fingerprint now
+  covers the inbox's held and drained names.
+- `mailbox wait --board-inbox` (1e6fcc8d2): `WaitTarget.InboxDir`,
+  `WaitResult.Board`, `WaitResult.Woke()`.
+- `internal/wsdashboard` (62055a214): `POST /s/<reply-id>/message` and
+  `POST /s/<reply-id>/cancel` (`inbox_routes.go`), the held bubble and the
+  sent marks (`pageview_inbox.go`, template, CSS), and the composer's
+  chips and send in `dashboard.js`.
+- ed7fbc6e1: lite review fixes.
+- The ws-mcp manual's "Dashboard daemon" section names the inbox and the
+  two routes.
+
+Settled:
+- **Inbox location.** `wsinbox.Dir(wsdashboard.SessionDir(<dashboard dir>,
+  <reply-id>))`, which is `<cache root>/dashboard/sessions/<reply-id>/inbox/`.
+  The daemon derives it from the reply-id in its index. ws-mcp and the
+  wait CLI derive it from the session key through `wsmailbox.ReplyID`, so
+  no session key reaches the browser. Registry pruning removes it with the
+  session directory.
+- **Entry format.** One immutable file per held message, named
+  `<UTC ns stamp>-<8 hex>.json`, written through temp file and rename. The
+  content is `{schemaVersion: 1, parts: [text of each send], chips: [{id,
+  answer, note}], sentAt: <first send, epoch ms>}`. Readers ignore unknown
+  fields.
+  - The message the session receives (`Entry.Text()`) is each part as its
+    own paragraph, a blank line between, then the answer block.
+  - `AnswerBlock` follows `form.js` `build`: `(nn) a`, `(nn) a, note: x`,
+    `(nn) note: x`, items answered ok without a note grouped last as
+    `(nn), (mm) ok`, and the parts joined by `; `. The composer's copy uses
+    the same grammar in JS.
+  - Limits: 64 KiB of text, 100 chips, a 4 KiB note per chip. An item id
+    is digits, an answer is alphanumeric.
+- **Claims.** Every state change starts with an atomic rename.
+  - Drain renames each entry into `inbox/drained/`.
+  - A merge renames the newest held entry to a hidden claim file, writes
+    the merged entry under a new name, and removes the claim. The later
+    chip for an item replaces the earlier one in place.
+  - Cancel renames the entry to a claim file, reads it, and removes it.
+
+  Exactly one claimer wins an entry. A merge whose claim loses to a drain
+  writes a new entry instead, so the send is not lost and the drained
+  entry never comes back. The daemon also serializes its own sends and
+  cancels with one mutex.
+
+  Accepted gaps:
+  - A crash between a merge's claim and its rewrite loses that held
+    message. This is the same class of gap as drain-then-inject.
+  - For about a millisecond during a merge the inbox reads empty. A drain
+    in that window finds nothing, and the level-triggered wait wakes on
+    the merged entry next.
+- **Held versus drained.** A held entry is a file in `inbox/`. A drained
+  one is in `inbox/drained/`, which keeps the newest 20
+  (`wsinbox.DrainedCap`). The held bubble lists `inbox/` only.
+- **Sent marks.** For each item, the mark is its newest chip across the
+  drained records and then the held entries, so a held answer shows over
+  a delivered one (`held · b`, then `sent · b`).
+  - It is read from disk, so it survives a page reload while the drained
+    ring holds it.
+  - The marks ride the conversation region as hidden `.sentdata` data, and
+    the page script marks the card headers. The board fragments stay the
+    static page's templates.
+- **Drain tool.** `dashboard.inbox_drain {session_key, format?}`. Its
+  description opens with `Adapter-only:` and says why a model must not
+  call it.
+  - Text output: `inbox empty`, or `drained N` and then `message <id>
+    <RFC3339>` with the text for each message.
+  - `format: "json"` returns `{messages: [{id, sent_at, text, parts,
+    chips}]}`.
+  - It drains whether or not the dashboard key is on. It nudges only after
+    claiming something. An error is a tool error only when nothing was
+    claimed.
+- **Wait flag.** `--board-inbox`.
+  - It wakes when mail arrives or when an inbox entry is held. It only
+    peeks.
+  - JSON always carries `board: N` and `kinds` (`mail`, `board`, or both;
+    `[]` on timeout). Text adds `board N` after `unread N`.
+  - The exit codes are unchanged. The re-arm command keeps the flag.
+- **Routes.**
+  - Both require an `Origin` equal to `http://<Host>`. A missing, `null`,
+    or cross-site Origin is 403. There are no CORS headers, and a
+    preflight gets 405.
+  - A session without a fresh adapter snapshot gets 409 and no composer.
+    An unknown session is 404, and a malformed or empty send is 400.
+  - message answers `{id, merged}`.
+  - cancel `{id}` answers `{text, chips}`, where text is the parts joined
+    by a blank line. It is 409 once the entry was drained.
+- **Composer.** The chips live in the composer, keyed by item number, so a
+  chip outlives its card leaving the board.
+  - After each board event the chips are re-read from the board's form
+    state.
+  - Removing a chip (`×`) clears its card.
+  - Send (Ctrl/Cmd+Enter) clears the sent chips and their cards.
+  - Cancel puts the text back ahead of any draft and restores chips that
+    no newer chip has replaced.
+
+Verification:
+- `go test ./... -count=1` in `agents-plugin-tool`: all packages ok, run
+  after 62055a214. After ed7fbc6e1, `go test -race -count=1` on wsinbox,
+  wsdashboard, and mcp: ok.
+- `go test -race` on wsinbox and wsdashboard: ok.
+- `GOOS=windows` and `GOOS=linux` `go vet` on wsinbox and wsdashboard: ok.
+- `node --check` on `dashboard.js`: ok.
+- Tests:
+  - `internal/wsinbox/inbox_test.go`: the grammar, merge, cancel, drain
+    and its cap, a cancel refused after a drain, an unreadable entry left
+    held. Two 300-run races, drain against cancel (exactly one winner) and
+    drain against merge (each send's text delivered or held exactly once).
+  - `internal/mcp/dashboard_inbox_test.go`: the atomic claim, 6
+    concurrent drainers over 12 entries, text and JSON output, the
+    adapter-only description, a nudge after a drain, and the fingerprint.
+  - `internal/wsmailbox/wait_test.go` and `cmd/ws-mcp/mailbox_test.go`:
+    the flag wakes and reports `board`, and without the flag an entry does
+    not wake the wait.
+  - `internal/wsdashboard/inbox_routes_test.go` and
+    `pageview_inbox_test.go`: an entry per send, a merge as a separate
+    paragraph with the later chip winning, cancel returning text and
+    chips, cancel refused on a claimed entry, a send after a drain making
+    a new entry, the Origin cases, no CORS, the session without an adapter
+    (no composer, 409), the held and sent marks across a reload, and the
+    SSE conversation region after a send.
+- Not run: the Pi test added beside the intake one in
+  `agents-plugin-pi/test/dashboard-feed.test.ts`. This worktree has no
+  `node_modules`.
+- Lite review: one Important finding, fixed in ed7fbc6e1. A send of two or
+  more chips cleared only the first, because clearing a card re-synced the
+  chips into new objects. One cheap Minor is fixed too: an unreadable
+  entry was lost on cancel or drain.
+
+Hand checks for the lead (no headless browser here). On a live adapter
+session's page:
+- Clicking options, ok/no, and acknowledgements attaches chips, and a
+  later click replaces the chip.
+- A note shows on its chip.
+- The sent text reads `text`, a blank line, then `(nn) a; (mm) ok`.
+- A send with two or more chips clears all of them.
+- Sent marks appear while the cards stay editable.
+- Two sends while a turn runs show one held bubble with a divider.
+- Cancel returns the text and chips to the composer.
+
+Until the adapters' drain phases land, an entry stays held, which is
+convenient for checking the bubble and cancel.
+
+Open:
+- The adapters' turn-end drain and injection are their own phases. The
+  Pi `pi.dashboard_enabled` description should widen to cover submission
+  there.
+- Minor review items left:
+  - Entry names are monotonic only within one process.
+  - A cancel from a second tab with a pre-merge id gets 409 "already
+    received".
+  - A restored chip whose answer matches no option on its card drops at
+    the next sync.
+
 ### Phase 2: LAN opt-in, access token, and image route
 
 Add LAN mode: the config key that turns it on (in each package's
@@ -298,6 +460,174 @@ outside it, a `..` escape, and a symlink pointing outside, then `go test
 ./...` in `agents-plugin-tool`. The lead checks by hand from a second device
 on the LAN that the page needs the token, shows the same content as
 localhost (argument previews included), and loads a board image.
+
+### Result (5c8743c5c) - 2026-11-07
+
+Landed:
+- `internal/wsdashboard` (4f447bc64):
+  - LAN mode: `DaemonOptions.LAN` binds every interface (loopback
+    otherwise), `HealthInfo.LAN` reports it as `lan`, and `Handler()` wraps
+    the mux in `lanGuard` instead of `hostGuard` (`access.go`, new).
+  - The persisted token file `lan-token` (`access.go`).
+  - The index page's `lanbox` block for a local viewer.
+  - The image route `GET /s/<reply-id>/image?path=<p>` and `ImageSrc`
+    (`image_route.go`, new).
+  - `Ensure` now keeps or replaces a daemon through `keepRunning`, and
+    `DaemonArgs(port, lan)` appends `--lan`.
+- `dashboard.lan_enabled` (ed832861b): declared in the ws, wsflow, and Pi
+  `dashboard-config-manifest.json`, default false, `default_scope:
+  global`, and the description says only the global value applies.
+  - `internal/mcp/dashboard_config.go` registers it global-only and reads
+    it into `DashboardSettings.LAN`.
+  - `ws-mcp dashboard --lan`; `startDashboard` passes `LAN`.
+- The served-page image resolver (090f4d005): `View.ImageSrc` /
+  `ViewInput.ImageSrc` in `internal/wswhiteboard`. `fileTarget` consults
+  it for an image's file target (relative, absolute, drive path, or
+  `file:` URL). The served page passes `wsdashboard.ImageSrc(<session
+  root>, <reply-id>, path)`.
+- The ws-mcp manual's "Dashboard daemon" section and the
+  `WS_MCP_CONFIG_MANIFESTS` row (5c8743c5c).
+
+Deviation: registering the key global-only made it a registered wsconfig
+item, and the manifest namespace check treats every registered item as a
+ws-mcp built-in. That check then rejected each `dashboard.` manifest
+("collides with built-in key"). `builtinConfigKeySet` now skips the keys
+in `manifestGlobalOnlyKeys`, which holds only `dashboard.lan_enabled`. The
+manifest still owns the declaration and default; the registration only
+pins the scope.
+
+Settled:
+- **Image path resolution and containment.** `ImageSrc` puts the file's
+  path relative to the session's project root (`Registration.Project` from
+  the index), slash-separated, in `?path=`. The route resolves a relative
+  path against that root and accepts an absolute one only when it is inside
+  the root. It refuses everything else with 404, in both modes. In order:
+  - A lexical check joins and cleans the path under the root, then
+    requires `filepath.Rel` to stay inside it (no `..`, not absolute
+    after Rel). It touches no file, so a UNC or device path is refused
+    before any file call.
+  - `EvalSymlinks` resolves both the root and the file. The resolved file
+    must still be inside the resolved root by the same `Rel` check, so a
+    symlink pointing outside is refused wherever it sits.
+  - The requested name and the resolved name both need an image extension
+    (avif, bmp, gif, ico, jpeg, jpg, png, svg, webp). A `.png` symlink to
+    a non-image is refused.
+  - `os.Stat` must report a regular file before `Open`, so a directory
+    named `x.png` or a FIFO is refused without blocking.
+  - The response is served with `http.ServeContent` and carries `nosniff`,
+    `Cache-Control: no-cache`, `Referrer-Policy: no-referrer`, and the CSP
+    `default-src 'none'; style-src 'unsafe-inline'; sandbox`, so an SVG
+    cannot run script in the daemon's origin.
+
+  `ImageSrc` applies the same lexical and extension rules and returns
+  `""` for a path the route would refuse by name, so such an image stays
+  path text rather than a broken image.
+- **How the global LAN value reaches the daemon.** It travels as a spawn
+  flag, the same way the port does. `dashboard.lan_enabled` is registered
+  through `wsconfig.RegisterGlobalOnly`, so the resolver refuses a write at
+  project, repo, or session scope and ignores such a value on read.
+  `DashboardSettings` resolves it with no session.
+  - `startDashboard` passes it as `EnsureOptions.LAN`, and the spawn adds
+    `--lan`.
+  - `Ensure` reads `lan` from `/health`. A same-version daemon in the
+    other mode is replaced through the normal handoff. A newer daemon is
+    kept whatever its mode, because an older ws-mcp never replaces a newer
+    daemon. A daemon that omits the field reads as off.
+  - The daemon itself reads no config. It honors only its flag.
+- **Token transport.**
+  - Where it lives: `<dashboard dir>/lan-token`, owner-only, written by
+    temp file and rename. It is minted at a LAN-mode start when missing or
+    blank. It is read under a mutex on every check, so deleting the file
+    rotates the token at once. It is unrelated to `endpoint.json`'s
+    shutdown token, and each is refused where the other is expected.
+  - Local viewer: a request whose peer is loopback and whose Host is
+    loopback passes with no token, on every route.
+  - Every other request needs the token, on every route: pages, SSE,
+    image, Phase 1 posts, `/health`, `/nudge`, and `/shutdown`.
+    `/shutdown` still also needs the endpoint bearer.
+  - How it travels: either `?token=<t>` on the request (the bookmark the
+    index shows), or the `ws_dashboard_token` cookie. A good query token
+    sets the cookie: HttpOnly, `SameSite=Lax`, `Path=/`, 400 days. Tokens
+    are compared in constant time. A refusal is 401, and its body points to
+    the index page at localhost on the daemon's machine. An unreadable
+    token file is 503.
+  - The SSE stream, image requests, links, and posts carry the cookie.
+    EventSource cannot send a header, so a header scheme was rejected.
+    Rendered links, the SSE URL, and region payloads never carry the
+    token, so it never enters region hashes, SSE payloads, or the history
+    of in-page links.
+  - The index shows `http://<ipv4>:<port>/?token=<t>` for each non-loopback,
+    non-link-local IPv4 address, plus the token file path. It shows this
+    only to a local viewer in LAN mode, outside every SSE region.
+
+Verification:
+- `go test ./... -count=1` in `agents-plugin-tool`: all 21 packages ok,
+  exit 0 (after 5c8743c5c).
+- `go test -race -count=1` on wsdashboard and wswhiteboard: ok.
+- `go vet ./...`: ok. `GOOS=windows go vet` on wsdashboard, mcp,
+  wswhiteboard, and cmd/ws-mcp: ok.
+- gofmt: no new files listed. Three untouched files were already listed.
+- `python3 -m unittest discover agents-plugin-wsflow/tests`: 20 ok.
+- Tests:
+  - `access_test.go`: `TestLANModeGuardsEveryRoute` covers 11 routes. On
+    each it checks no token (refused), a query token, a cookie, a loopback
+    peer with a loopback Host (passes), a loopback peer with a LAN Host,
+    and a LAN peer with a loopback Host (both refused).
+  - The other `access_test.go` tests cover:
+    - the endpoint token refused as a LAN token
+    - the token surviving a restart, and a new token after the file is
+      deleted
+    - `/` showing the token to a local viewer and not to a LAN one
+    - the token reaching the SSE stream by cookie, over a real connection
+      with a LAN Host
+    - localhost mode ignoring the token
+  - `image_route_test.go`:
+    - served: a nested file under the root
+    - refused: an absolute path outside, a `..` escape, a symlink
+      pointing outside, a `.png` symlink to a non-image, a directory named
+      `dir.png`, a NUL byte, and a POST
+  - `ImageSrc` mapping and `TestImageSrcServesFileImages`: a board image
+    in a served fragment links to the image route URL.
+  - `daemon_test.go`:
+    - `TestEnsureHandoffAppliesAChangedLANMode`: toggling the mode in both
+      directions replaces the daemon through the handoff.
+    - An older ws-mcp leaves a newer daemon in the other mode alone.
+    - `DaemonArgs` adds `--lan`.
+    - LAN mode binds beyond loopback.
+  - `dashboard_config_test.go`:
+    - each package's manifest defaults the key off at global scope, with
+      a description that says only the global value applies
+    - a project-scope write is refused, and a hand-written project value
+      leaves LAN off, while a global value turns it on
+    - the key is off when undeclared
+  - `cmd/ws-mcp/dashboard_test.go`: the `--lan` spawn flag.
+- Mutation checks:
+  - Dropping the peer half of the local-viewer test fails 11 guard cases.
+  - Dropping the symlink containment check fails the `escape.png` and
+    `outlink` cases.
+- Lite review: clean, with no Critical or Important finding. The three
+  Minor findings are listed under Open.
+
+Hand checks for the lead (no second device here). With the global
+`dashboard.lan_enabled` set to true and a new ws-mcp started, from another
+device on the LAN:
+- The page without the token is 401.
+- The bookmark URL from the localhost index page opens it.
+- The page shows the same content as localhost, argument previews
+  included, and keeps streaming.
+- A board image referenced by a project-relative path loads.
+- Deleting `lan-token` makes the next request need the new token.
+
+Open (Minor review findings, accepted):
+- The cookie is host-scoped, not port-scoped. Another service on the same
+  IP receives it. Plain http offers no fix.
+- A TOCTOU window sits between the symlink resolution and `Open`.
+  Exploiting it needs write access inside the project root.
+- A registered root that itself contains a symlink refuses an absolute
+  image path written through the resolved form. This fails closed: the
+  image shows as path text.
+- In LAN mode a taken port falls back to an OS-chosen one, which breaks an
+  existing bookmark until the index shows the new URL.
 
 ## Sage Review Round 1 (2026-11-06)
 

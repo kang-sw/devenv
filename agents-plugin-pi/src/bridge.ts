@@ -677,7 +677,7 @@ export function filterOutMercenaryTools<T extends { name: string }>(tools: reado
  * them through its own client; registered as Pi tools they would only add a
  * model-visible tool the model must never use.
  */
-export const ADAPTER_ONLY_RAW_TOOLS: ReadonlySet<string> = new Set(["dashboard.intake"]);
+export const ADAPTER_ONLY_RAW_TOOLS: ReadonlySet<string> = new Set(["dashboard.intake", "dashboard.inbox_drain"]);
 
 /** Drops the adapter-only tools from the list the bridge registers with Pi and exposes via `wsToolNames`. Pure. */
 export function filterOutAdapterOnlyTools<T extends { name: string }>(tools: readonly T[]): T[] {

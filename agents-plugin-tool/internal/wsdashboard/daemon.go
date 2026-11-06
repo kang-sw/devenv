@@ -41,9 +41,13 @@ const (
 type DaemonOptions struct {
 	// Dir is the state directory (Dir's result); it is created when absent.
 	Dir string
-	// Port is the preferred loopback port; 0 asks the OS for one. A taken
-	// port falls back to an OS-assigned one.
+	// Port is the preferred port; 0 asks the OS for one. A taken port falls
+	// back to an OS-assigned one.
 	Port int
+	// LAN binds every interface instead of loopback only, and admits a
+	// request that is not from this machine only with the LAN access token
+	// (access.go).
+	LAN bool
 	// Version is reported by /health and written to the endpoint file.
 	Version string
 	// LockWait bounds the wait for the single-instance lock; zero means
@@ -57,6 +61,10 @@ type DaemonOptions struct {
 	// PollInterval is the polling backstop period; zero means
 	// DefaultPollInterval.
 	PollInterval time.Duration
+
+	// bindHost overrides the address the daemon binds, so a test runs LAN
+	// mode on loopback; empty derives it from LAN.
+	bindHost string
 }
 
 // nudgeBodyLimit bounds a /nudge request body.
@@ -70,8 +78,9 @@ type NudgeBody struct {
 	Project string `json:"project"`
 }
 
-// Daemon is a running dashboard daemon: it holds the lock, listens on a
-// loopback port, and has written its endpoint file.
+// Daemon is a running dashboard daemon: it holds the lock, listens on its
+// port (loopback, or every interface in LAN mode), and has written its
+// endpoint file.
 type Daemon struct {
 	dir      string
 	lock     *flock.Flock
@@ -81,6 +90,11 @@ type Daemon struct {
 	index    *Index
 	source   SessionSource
 	broker   *broker
+	// inboxMu serializes the daemon's own inbox writes (sends and cancels).
+	inboxMu sync.Mutex
+	// lan is LAN mode; tokenMu serializes reading and minting the LAN token.
+	lan     bool
+	tokenMu sync.Mutex
 
 	closeOnce sync.Once
 	stop      chan struct{}
@@ -94,10 +108,12 @@ type HealthInfo struct {
 	PID       int    `json:"pid"`
 	Port      int    `json:"port"`
 	StartedAt string `json:"started_at"`
+	// LAN reports LAN mode; an older daemon omits it, which reads as off.
+	LAN bool `json:"lan"`
 }
 
-// StartDaemon takes the single-instance lock, binds the loopback port, writes
-// the endpoint file, and starts serving. It returns ErrLocked when another
+// StartDaemon takes the single-instance lock, binds the port, writes the
+// endpoint file, and starts serving. It returns ErrLocked when another
 // daemon still holds the lock after the lock wait.
 func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 	if opts.Dir == "" {
@@ -122,7 +138,7 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		return nil, ErrLocked
 	}
 
-	listener, err := listenLoopback(opts.Port)
+	listener, err := listen(bindHostFor(opts), opts.Port)
 	if err != nil {
 		_ = lock.Unlock()
 		return nil, err
@@ -143,6 +159,7 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		log:    logw,
 		source: opts.Sessions,
 		broker: newBroker(),
+		lan:    opts.LAN,
 		stop:   make(chan struct{}),
 		done:   make(chan struct{}),
 		endpoint: Endpoint{
@@ -153,6 +170,13 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 			Token:         token,
 			StartedAt:     time.Now().UTC().Format(time.RFC3339),
 		},
+	}
+	if d.lan {
+		// Mint the token now, so the localhost index shows it before any
+		// LAN request; a failure leaves every LAN request refused.
+		if _, err := d.lanToken(); err != nil {
+			fmt.Fprintf(logw, "dashboard: LAN access token unavailable: %v\n", err)
+		}
 	}
 	if opts.Sessions != nil {
 		d.index = NewIndex(IndexOptions{Dir: opts.Dir, Source: opts.Sessions, Log: logw, OnChange: d.broker.wake})
@@ -172,19 +196,31 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 	if d.index != nil {
 		go d.poll(opts.PollInterval)
 	}
-	fmt.Fprintf(d.log, "dashboard: version %s listening on 127.0.0.1:%d (pid %d)\n", d.endpoint.Version, d.endpoint.Port, d.endpoint.PID)
+	fmt.Fprintf(d.log, "dashboard: version %s listening on %s (lan %v, pid %d)\n", d.endpoint.Version, listener.Addr(), d.lan, d.endpoint.PID)
 	return d, nil
 }
 
-// listenLoopback binds 127.0.0.1:port, falling back to an OS-assigned port
-// when port is taken (or 0).
-func listenLoopback(port int) (net.Listener, error) {
+// bindHostFor is the address a daemon binds: loopback, or every interface
+// (the empty host) in LAN mode.
+func bindHostFor(opts DaemonOptions) string {
+	switch {
+	case opts.bindHost != "":
+		return opts.bindHost
+	case opts.LAN:
+		return ""
+	}
+	return "127.0.0.1"
+}
+
+// listen binds host:port, falling back to an OS-assigned port when port is
+// taken (or 0).
+func listen(host string, port int) (net.Listener, error) {
 	if port > 0 {
-		if l, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port))); err == nil {
+		if l, err := net.Listen("tcp", net.JoinHostPort(host, strconv.Itoa(port))); err == nil {
 			return l, nil
 		}
 	}
-	return net.Listen("tcp", "127.0.0.1:0")
+	return net.Listen("tcp", net.JoinHostPort(host, "0"))
 }
 
 func newToken() (string, error) {
@@ -241,9 +277,12 @@ func (d *Daemon) Close() {
 	})
 }
 
-// Handler is the daemon's HTTP surface. Every route first passes the
-// loopback Host guard; the daemon sends no CORS headers. The pages (/,
-// /s/<reply-id>, and their SSE streams) are read-only.
+// Handler is the daemon's HTTP surface. Every route first passes the access
+// guard (the loopback Host guard, or in LAN mode the guard that also admits
+// the LAN token; access.go); the daemon sends no CORS headers. The pages (/,
+// /s/<reply-id>, their SSE streams, and a session's image route) are
+// read-only; a session's message and cancel routes (inbox_routes.go) are the
+// only browser writes.
 func (d *Daemon) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", d.handleHealth)
@@ -252,6 +291,9 @@ func (d *Daemon) Handler() http.Handler {
 	mux.HandleFunc("/events", d.handleIndexEvents)
 	mux.HandleFunc("/s/", d.handleSessionRoutes)
 	mux.HandleFunc("/", d.handleIndex)
+	if d.lan {
+		return d.lanGuard(mux)
+	}
 	return hostGuard(mux)
 }
 
@@ -294,6 +336,7 @@ func (d *Daemon) handleHealth(w http.ResponseWriter, r *http.Request) {
 		PID:       d.endpoint.PID,
 		Port:      d.endpoint.Port,
 		StartedAt: d.endpoint.StartedAt,
+		LAN:       d.lan,
 	})
 }
 

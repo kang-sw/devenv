@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/wsinbox"
 	"github.com/kang-sw/devenv/internal/wslive"
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
@@ -185,7 +186,10 @@ func (p sessionPageData) regionByName(name string) renderedRegion { return p.reg
 
 type indexPageData struct {
 	IndexView
-	Assets  pageAssetsData
+	Assets pageAssetsData
+	// LAN is the LAN access block, set only for a local viewer in LAN mode.
+	// It is outside every region, so no SSE update ever carries the token.
+	LAN     *LANAccess
 	regions regionSet
 }
 
@@ -231,13 +235,13 @@ func renderIndexRegions(view IndexView) (regionSet, error) {
 	return regionSet{regionSessions: newRegion(buf.String())}, nil
 }
 
-func renderIndexPage(view IndexView, regions regionSet) (string, error) {
+func renderIndexPage(view IndexView, regions regionSet, lan *LANAccess) (string, error) {
 	a, err := loadDashboardAssets()
 	if err != nil {
 		return "", err
 	}
 	var buf bytes.Buffer
-	err = a.tmpl.ExecuteTemplate(&buf, "index", indexPageData{IndexView: view, Assets: a.data, regions: regions})
+	err = a.tmpl.ExecuteTemplate(&buf, "index", indexPageData{IndexView: view, Assets: a.data, LAN: lan, regions: regions})
 	return buf.String(), err
 }
 
@@ -292,6 +296,9 @@ func (r pageReader) session(replyID string) (SessionView, bool) {
 	in := pageInputs{Session: s, Page: page, Snapshot: r.readSnapshot(replyID), Now: r.clock(), Version: r.version}
 	if adapterPresent(in.Snapshot, in.Now) {
 		in.Ring, _ = wslive.ReadRing(wslive.RingDir(SessionDir(r.dir, replyID)))
+		inbox := wsinbox.Dir(SessionDir(r.dir, replyID))
+		in.Held, _ = wsinbox.Held(inbox)
+		in.Drained, _ = wsinbox.Drained(inbox)
 		snaps := map[string]*wslive.Snapshot{}
 		in.Lookup = func(id string) (Session, *wslive.Snapshot, bool) {
 			peer, ok := r.index.Session(id)
@@ -341,7 +348,7 @@ func (d *Daemon) handleIndex(w http.ResponseWriter, r *http.Request) {
 	regions, err := renderIndexRegions(view)
 	if err == nil {
 		var html string
-		if html, err = renderIndexPage(view, regions); err == nil {
+		if html, err = renderIndexPage(view, regions, d.lanAccessFor(r)); err == nil {
 			writeHTML(w, html)
 			return
 		}
@@ -351,12 +358,17 @@ func (d *Daemon) handleIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleSessionRoutes serves everything under /s/: a session page, its SSE
-// stream, and the shared assets a page loads by relative path.
+// stream, its image route, its message and cancel routes, and the shared
+// assets a page loads by relative path.
 func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
+	rest := strings.TrimPrefix(r.URL.Path, "/s/")
+	if replyID, sub, _ := strings.Cut(rest, "/"); sub == "message" || sub == "cancel" {
+		d.handleInboxWrite(w, r, replyID, sub)
+		return
+	}
 	if !readMethod(w, r) {
 		return
 	}
-	rest := strings.TrimPrefix(r.URL.Path, "/s/")
 	if name, _ := wswhiteboard.MermaidAsset(); rest == name {
 		serveMermaid(w)
 		return
@@ -371,6 +383,8 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/s/"+replyID, http.StatusMovedPermanently)
 	case sub == "events":
 		d.handleSessionEvents(w, r, replyID)
+	case sub == "image":
+		d.handleImage(w, r, replyID)
 	default:
 		http.NotFound(w, r)
 	}

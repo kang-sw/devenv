@@ -1,6 +1,10 @@
 package wsmailbox
 
-import "time"
+import (
+	"time"
+
+	"github.com/kang-sw/devenv/internal/wsinbox"
+)
 
 // wait.go implements the host-neutral half of the wake path
 // (260913-feat-cross-session-mailbox-wake Phase 1, Decision 6): a
@@ -38,6 +42,11 @@ type WaitTarget struct {
 	// already knows (from the workflow ambient block or lookup_peers' self
 	// entry) instead.
 	Slug string
+	// InboxDir is the session's board-answer inbox directory (internal/
+	// wsinbox) to also watch; empty means not watched. The caller derives it
+	// because the dashboard's state directory is not this package's to know.
+	// Wait only peeks at it, never drains.
+	InboxDir string
 }
 
 // WaitResult is one Wait call's outcome: the envelopes found in each queue
@@ -47,10 +56,18 @@ type WaitResult struct {
 	TimedOut bool
 	Named    []Envelope // from the named inbox, when Slug was set and owned
 	Reply    []Envelope // from the caller's own reply-id queue
+	// Board is how many held entries the watched inbox (WaitTarget.InboxDir)
+	// had; zero when it is not watched or empty.
+	Board int
 }
 
-// Total returns the combined unread count across both queues.
+// Total returns the combined unread mail count across both queues; held
+// inbox entries are counted in Board, not here.
 func (r WaitResult) Total() int { return len(r.Named) + len(r.Reply) }
+
+// Woke reports whether this result is an arrival: unread mail, or a held
+// inbox entry in a watched inbox.
+func (r WaitResult) Woke() bool { return r.Total() > 0 || r.Board > 0 }
 
 // DefaultWaitPoll is Wait's internal recheck interval when WaitOptions.Poll
 // is unset. Implementation-chosen default, not a cross-ticket contract.
@@ -74,7 +91,7 @@ type WaitOptions struct {
 }
 
 // Wait performs target's level-triggered check: an immediate peek, returned
-// at once if either queue already holds unread mail (Decision 6's lost-
+// at once if either queue already holds unread mail, or a watched inbox a held entry (Decision 6's lost-
 // wakeup avoidance — the arm/drain gap is covered because the store is
 // durable and this is a synchronous read on startup, not a wait on a bare
 // arrival event), otherwise blocking in Poll-sized increments until mail
@@ -118,7 +135,7 @@ func Wait(target WaitTarget, opts WaitOptions) (WaitResult, error) {
 		if err != nil {
 			return WaitResult{}, err
 		}
-		if result.Total() > 0 {
+		if result.Woke() {
 			return result, nil
 		}
 		if !hasDeadline {
@@ -145,13 +162,14 @@ type resolvedWaitTarget struct {
 	namedName  string
 	replyPath  string
 	replyID    string
+	inboxDir   string // "" when the board-answer inbox is not watched
 }
 
 // resolveWaitTarget performs every resolution step that only needs to run
 // once per Wait call: parsing/resolving an explicit Slug's store path, and
 // deriving the caller's reply-id + registry path.
 func resolveWaitTarget(target WaitTarget) (resolvedWaitTarget, error) {
-	r := resolvedWaitTarget{sessionKey: target.SessionKey}
+	r := resolvedWaitTarget{sessionKey: target.SessionKey, inboxDir: target.InboxDir}
 
 	if target.Slug != "" {
 		name, scope, err := ParseSlugScope(target.Slug)
@@ -193,7 +211,15 @@ func (r resolvedWaitTarget) peek() (WaitResult, error) {
 	if err != nil {
 		return WaitResult{}, err
 	}
-	return WaitResult{Named: named, Reply: replyStore.Queues[r.replyID]}, nil
+	result := WaitResult{Named: named, Reply: replyStore.Queues[r.replyID]}
+	if r.inboxDir != "" {
+		names, err := wsinbox.Names(r.inboxDir)
+		if err != nil {
+			return WaitResult{}, err
+		}
+		result.Board = len(names)
+	}
+	return result, nil
 }
 
 // NamedInboxStatus is a one-time startup diagnostic (never part of the

@@ -16,6 +16,7 @@
     "mailbox.lookup_peers": ">=0.48.10-dev <0.49.0",
     "mailbox.history": ">=0.48.10-dev <0.49.0",
     "dashboard.intake": ">=0.48.10-dev <0.49.0",
+    "dashboard.inbox_drain": ">=0.48.10-dev <0.49.0",
     "agenda.set": ">=0.48.10-dev <0.49.0",
     "agenda.clear": ">=0.48.10-dev <0.49.0",
     "agenda.list": ">=0.48.10-dev <0.49.0",

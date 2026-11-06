@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/kang-sw/devenv/internal/wsinbox"
 )
 
 // fakeClock drives Wait's Now/Sleep without any real wall-clock delay:
@@ -290,5 +292,85 @@ func TestWaitEnvLessTargetsOwnReplyIDOnly(t *testing.T) {
 	}
 	if len(result.Reply) != 1 || result.Reply[0].Content != "reply" {
 		t.Fatalf("Wait.Reply = %#v, want the caller's own reply mail", result.Reply)
+	}
+}
+
+func seedWaitReplyMail(t *testing.T, sessionKey, content string) {
+	t.Helper()
+	replyPath, err := ReplyRegistryPath()
+	if err != nil {
+		t.Fatalf("ReplyRegistryPath: %v", err)
+	}
+	if err := WithReplyLock(replyPath, func(store *ReplyStore) error {
+		store.Queues = AppendQueue(store.Queues, ReplyID(sessionKey), Envelope{Content: content, SentAt: "2026-09-13T00:00:00Z"})
+		return nil
+	}); err != nil {
+		t.Fatalf("seed reply queue: %v", err)
+	}
+}
+
+func sendBoardMessage(t *testing.T, inboxDir, text string) {
+	t.Helper()
+	if _, _, err := wsinbox.Send(inboxDir, wsinbox.Entry{Parts: []string{text}}, time.Now()); err != nil {
+		t.Fatalf("send inbox entry: %v", err)
+	}
+}
+
+func TestWaitWithInboxDirWakesOnAnEntryArrivingDuringTheBlock(t *testing.T) {
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	inbox := filepath.Join(t.TempDir(), "inbox") // missing until the first send: counts as empty
+
+	clock := &fakeClock{now: time.Date(2026, 9, 13, 0, 0, 0, 0, time.UTC)}
+	clock.onSleep = func(time.Duration) {
+		if clock.sleeps == 2 {
+			sendBoardMessage(t, inbox, "from the page")
+		}
+	}
+	result, err := Wait(WaitTarget{SessionKey: "amber-tide-fox", InboxDir: inbox}, WaitOptions{Now: clock.Now, Sleep: clock.Sleep})
+	if err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	if result.TimedOut || !result.Woke() || result.Board != 1 || result.Total() != 0 {
+		t.Fatalf("Wait = %#v, want a board wake with no mail", result)
+	}
+	if clock.sleeps != 2 {
+		t.Fatalf("Wait slept %d times, want 2", clock.sleeps)
+	}
+	// Wait only peeks: the entry is still held.
+	if names, _ := wsinbox.Names(inbox); len(names) != 1 {
+		t.Fatalf("held entries after Wait = %v, want the one entry left held", names)
+	}
+}
+
+func TestWaitWithoutInboxDirIgnoresAnInboxEntry(t *testing.T) {
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	inbox := filepath.Join(t.TempDir(), "inbox")
+	sendBoardMessage(t, inbox, "from the page")
+
+	clock := &fakeClock{now: time.Date(2026, 9, 13, 0, 0, 0, 0, time.UTC)}
+	result, err := Wait(WaitTarget{SessionKey: "amber-tide-fox"}, WaitOptions{Timeout: 3 * DefaultWaitPoll, Now: clock.Now, Sleep: clock.Sleep})
+	if err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	if !result.TimedOut || result.Woke() || result.Board != 0 {
+		t.Fatalf("Wait = %#v, want a timeout: an unwatched inbox entry never wakes", result)
+	}
+}
+
+func TestWaitWithInboxDirStillWakesOnMailAndLeavesBoardZero(t *testing.T) {
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	const sessionKey = "amber-tide-fox"
+	seedWaitReplyMail(t, sessionKey, "hi")
+
+	clock := &fakeClock{now: time.Date(2026, 9, 13, 0, 0, 0, 0, time.UTC)}
+	result, err := Wait(WaitTarget{SessionKey: sessionKey, InboxDir: filepath.Join(t.TempDir(), "inbox")}, WaitOptions{Now: clock.Now, Sleep: clock.Sleep})
+	if err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	if result.TimedOut || result.Total() != 1 || result.Board != 0 || !result.Woke() {
+		t.Fatalf("Wait = %#v, want a mail wake with Board 0", result)
 	}
 }
