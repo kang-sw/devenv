@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -104,9 +105,14 @@ func TestShutdownRequiresTheEndpointToken(t *testing.T) {
 	d := startTestDaemon(t, dir, "1.0.0")
 	ep := d.Endpoint()
 	url := "http://127.0.0.1:" + strconv.Itoa(ep.Port) + "/shutdown"
+	// The wrong token differs in its last hex digit whatever that digit is.
+	last := "0"
+	if strings.HasSuffix(ep.Token, "0") {
+		last = "1"
+	}
 	for name, header := range map[string]string{
 		"missing":   "",
-		"wrong":     "Bearer " + ep.Token[:63] + "0",
+		"wrong":     "Bearer " + ep.Token[:63] + last,
 		"no scheme": ep.Token,
 	} {
 		req, _ := http.NewRequest(http.MethodPost, url, nil)

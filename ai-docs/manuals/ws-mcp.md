@@ -55,6 +55,28 @@ ws-mcp serve --stdio --root <repo-root>
 `ai-docs/`, and `AGENTS.md`; downstream projects should rely on MCP tools for
 bundled conventions rather than repository-local source paths.
 
+### Dashboard daemon
+
+`ws-mcp dashboard` is an optional machine-wide daemon (one per OS
+environment) that `serve` starts detached when `dashboard.enabled` is on. MCP
+tools never depend on it. Its state lives under `<cache root>/dashboard/`:
+
+- `dashboard.lock` - the single-instance OS file lock; `endpoint.json` - port,
+  pid, version, and the shutdown token; `dashboard.log` - the running daemon's
+  log, including one line per session added to or removed from its index.
+- `sessions/<reply-id>/registration.json` - one entry per top-level lead
+  session whose `dashboard.enabled` resolves on (session scope included),
+  written by the serving ws-mcp at its first keyed call and heartbeated every
+  2 minutes; a session counts as live while its heartbeat is under 5 minutes
+  old and it has not ended. The daemon only reads this registry; ws-mcp prunes
+  entries unseen for 7 days.
+
+After a store write the serving ws-mcp sends `POST /nudge {reply_id,
+project}`; the daemon also re-reads every session every 30 seconds. To restart
+a dev daemon after changing its code, `POST /shutdown` with
+`Authorization: Bearer <token from endpoint.json>`; the next `serve` starts a
+new one.
+
 ## Plugin-Managed Startup
 
 Codex plugin bundles can reference plugin-local MCP configuration:

@@ -37,6 +37,7 @@ func dashboardCommand(args []string) {
 		Version:  version,
 		LockWait: *lockWait,
 		Log:      openDashboardLog(dir),
+		Sessions: mcp.NewDashboardSessionSource(),
 	})
 	if errors.Is(err, wsdashboard.ErrLocked) {
 		fmt.Fprintln(os.Stderr, "ws-mcp dashboard: another dashboard daemon is running (it holds the lock); exiting")
