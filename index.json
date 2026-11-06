@@ -666,7 +666,14 @@
       "registered_at": "2026-11-06T08:59:48Z"
     },
     "261106-feat-ws-dashboard-claude-adapter": {
-      "registered_at": "2026-11-06T08:59:54Z"
+      "registered_at": "2026-11-06T08:59:54Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-06T09:59:59Z"
+      }
     },
     "261106-feat-ws-dashboard-daemon-core": {
       "registered_at": "2026-11-06T08:59:44Z",
