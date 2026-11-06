@@ -652,6 +652,9 @@
     "261106-feat-whiteboard-rich-items": {
       "registered_at": "2026-11-06T08:27:02Z"
     },
+    "261106-feat-ws-dashboard-browser-interaction": {
+      "registered_at": "2026-11-06T08:59:48Z"
+    },
     "261106-feat-ws-dashboard-daemon-core": {
       "registered_at": "2026-11-06T08:59:44Z"
     }
