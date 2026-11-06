@@ -248,11 +248,26 @@ func (p *pageData) resolveTarget(dest string, image bool) (string, bool) {
 	return "", false
 }
 
+// pathURLEscaper keeps a decoded "#" or "?" in a file name from starting a
+// fragment or query; a file: URL from FileLink already has them escaped.
+var pathURLEscaper = strings.NewReplacer("#", "%23", "?", "%3F")
+
+// fileHref links a file path through FileLink and checks the href it gets
+// back, not only the destination it started from: a relative result whose
+// first segment holds a colon ("javascript:alert(1)", for a file of that
+// name beside the page, or a decoded "javascript%3A...") would read as a
+// scheme, so it is anchored with "./". Only a scheme-less href or a file:
+// URL leaves here as is.
 func (p *pageData) fileHref(path, suffix string) string {
+	href := filepath.ToSlash(path)
 	if p.FileLink != nil {
-		return p.FileLink(path) + suffix
+		href = p.FileLink(path)
 	}
-	return filepath.ToSlash(path) + suffix
+	href = pathURLEscaper.Replace(href)
+	if u, err := url.Parse(href); err != nil || (u.Scheme != "" && !strings.EqualFold(u.Scheme, "file")) {
+		href = "./" + href
+	}
+	return href + suffix
 }
 
 // itemRefParser turns {{nn}} into an item reference node. Running as a

@@ -65,6 +65,39 @@ func TestWhiteboardMarkdownFileLinks(t *testing.T) {
 	}
 }
 
+// TestWhiteboardMarkdownFileLinkNeverYieldsAScheme pins the real link rule
+// against a file named like a URL beside the page: relative to the page it
+// is a bare "javascript:..." name, which must not reach an href as a scheme,
+// on the full page and in an embed_dir inside the repository.
+func TestWhiteboardMarkdownFileLinkNeverYieldsAScheme(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	raw, _ := json.Marshal(map[string]any{"embed_dir": f.root, "add": []any{map[string]any{
+		"class": "policy", "topic": "t", "options": []string{"x", "y"},
+		"title":     "[a](./ai-docs/whiteboards/javascript:alert(1)) [b](ai-docs/whiteboards/javascript%3Aalert%282%29)",
+		"rationale": "[c](./javascript:alert(3))\n![d](javascript%3Ax.png)",
+	}}})
+	embed := resultLine(t, f.update(t, string(raw)), "embed: ")
+	full := readWhiteboardPage(t, filepath.Join(f.dir(), f.replyID()+".html"))
+	inRepo := readWhiteboardPage(t, filepath.Join(f.root, embed))
+	for name, page := range map[string]string{"full": full, "embed in the repository root": inRepo} {
+		for _, bad := range []string{`href="javascript`, `src="javascript`} {
+			if strings.Contains(page, bad) {
+				t.Errorf("%s page holds %q", name, bad)
+			}
+		}
+	}
+	for _, want := range []string{`href="./javascript:alert(1)">a</a>`, `href="./javascript:alert(2)">b</a>`} {
+		if !strings.Contains(full, want) {
+			t.Errorf("full page lacks %q", want)
+		}
+	}
+	for _, want := range []string{`href="./javascript:alert(3)">c</a>`, `src="./javascript:x.png"`} {
+		if !strings.Contains(inRepo, want) {
+			t.Errorf("embed in the repository root lacks %q", want)
+		}
+	}
+}
+
 // TestWhiteboardMermaidAssetWrittenOnce pins the shared mermaid script: a
 // page with a mermaid block loads it by its bare hashed name, and the page
 // writer stores it beside that page, in the board folder and in embed_dir,

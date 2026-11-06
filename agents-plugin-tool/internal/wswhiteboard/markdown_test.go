@@ -12,7 +12,7 @@ func mdBoard(t *testing.T, layout Layout, items ...Item) string {
 	t.Helper()
 	st := &State{Seq: 2, SettleSeq: 1}
 	st.Items = append(items, Item{ID: 90, Class: ClassTechnical, Topic: "t", Title: "target", Status: StatusOpen})
-	return render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r", FileLink: func(p string) string { return "LINK:" + p }}))
+	return render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r", FileLink: func(p string) string { return "L/" + p }}))
 }
 
 func wantAll(t *testing.T, out string, wants ...string) {
@@ -46,7 +46,7 @@ func TestMarkdownTitleIsInlineOnly(t *testing.T) {
 				Item{ID: 5, Class: ClassTechnical, Topic: "t", Title: "[x]: not-a-definition", Status: StatusOpen},
 			)
 			wantAll(t, out,
-				`<span class="title"><strong>bold</strong> <em>it</em> <code>code</code> <a href="LINK:docs/a.md">doc</a> shot</span>`,
+				`<span class="title"><strong>bold</strong> <em>it</em> <code>code</code> <a href="L/docs/a.md">doc</a> shot</span>`,
 				`<span>- not a list</span>`,
 				`<span># not a heading</span>`,
 				`<span><code>mermaid fence</code></span>`,
@@ -69,7 +69,7 @@ func TestMarkdownBlockFields(t *testing.T) {
 		"<ul>\n<li>one</li>\n<li>two</li>\n</ul>",
 		`<pre><code class="language-go">x := 1`+"\n</code></pre>",
 		"<th>k</th>", "<td>1</td>",
-		`<img src="LINK:img/d.png" alt="diagram">`,
+		`<img src="L/img/d.png" alt="diagram">`,
 		`<div class="rec-line md" title="recommendation"><b>`,
 		`<div class="ctx md">`,
 	)
@@ -107,7 +107,7 @@ func TestMarkdownItemReferences(t *testing.T) {
 	wantAll(t, out,
 		"<strong>see "+anchor+"</strong> <code>{{90}}</code>",
 		"<li>item "+anchor+"</li>",
-		`<a href="LINK:docs/x.md">link (90)</a>`,
+		`<a href="L/docs/x.md">link (90)</a>`,
 		"code <code>{{90}}</code>",
 		"<pre><code>block {{90}}\n</code></pre>",
 		"{{99}} stays",
@@ -148,23 +148,44 @@ func TestMarkdownLinkAndImageTargets(t *testing.T) {
 			"![fragimg](#item-90)",
 		}, "\n")})
 	wantAll(t, out,
-		`<a href="LINK:docs/a%20b.md#sec">rel</a>`,
-		`<a href="LINK:/srv/notes.md">abs</a>`,
-		`<a href="LINK:/srv/f.md">fileurl</a>`,
+		`<a href="L/docs/a%20b.md#sec">rel</a>`,
+		`<a href="L//srv/notes.md">abs</a>`,
+		`<a href="L//srv/f.md">fileurl</a>`,
 		`<a href="https://example.com/x?a=1&amp;b=2" target="_blank" rel="noopener noreferrer">web</a>`,
 		`<a href="#item-90">frag</a>`,
-		`<a href="LINK:docs/q.md" title="t&quot; onmouseover=&quot;x">quote</a>`,
-		`<a href="LINK:docs/a_b.md">esc</a>`,
+		`<a href="L/docs/q.md" title="t&quot; onmouseover=&quot;x">quote</a>`,
+		`<a href="L/docs/a_b.md">esc</a>`,
 		"<br>\njs<br>\njsmixed<br>\njsentity<br>\ndata<br>\nvb<br>\nnet<br>\nremotefile<br>\n",
 		`<a href="https://auto.example/" target="_blank" rel="noopener noreferrer">https://auto.example/</a>`,
 		"javascript:alert(2)", "mailto:a@b.c", "a@b.c",
-		`<img src="LINK:shots/a.png" alt="imgrel">`,
-		`<img src="LINK:/srv/b.png" alt="imgabs">`,
-		`<img src="LINK:/srv/c.png" alt="imgfile">`,
+		`<img src="L/shots/a.png" alt="imgrel">`,
+		`<img src="L//srv/b.png" alt="imgabs">`,
+		`<img src="L//srv/c.png" alt="imgfile">`,
 		"<br>\nremote<br>\ndataimg<br>\nfragimg",
 	)
 	wantNone(t, out, "javascript:alert(1)", `href="javascript`, `href="JaVa`, `href="data:`, `href="vbscript`, "evil.example",
 		`href="mailto`, `src="https://`, `src="data:`, `src="#`, `onmouseover="x"`)
+}
+
+// TestMarkdownFileHrefCannotBecomeAScheme pins the check on the href a file
+// path resolves to: a relative result whose first segment holds a colon
+// would read as a scheme, so it is anchored with "./", whatever FileLink
+// returned; a decoded "#" or "?" in a file name stays part of the path.
+func TestMarkdownFileHrefCannotBecomeAScheme(t *testing.T) {
+	rationale := "[a](./javascript:alert(1))\n[b](javascript%3Aalert%282%29)\n![c](javascript%3Ax.png)\n[d](notes%231.md#top)\n[e](q%3F.md)"
+	for name, link := range map[string]func(string) string{
+		"nil":  nil,
+		"bare": func(p string) string { return strings.TrimPrefix(p, "./") }, // a page in the same folder
+	} {
+		t.Run(name, func(t *testing.T) {
+			st := &State{Seq: 2}
+			st.Items = []Item{{ID: 1, Class: ClassPolicy, Topic: "t", Title: "q", Options: []string{"x", "y"}, Rationale: rationale, Status: StatusOpen}}
+			out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r", FileLink: link}))
+			wantNone(t, out, `href="javascript`, `src="javascript`)
+			wantAll(t, out, `">a</a>`, `href="./javascript:alert(2)">b</a>`, `src="./javascript:x.png"`,
+				`href="notes%231.md#top">d</a>`, `href="q%3F.md">e</a>`)
+		})
+	}
 }
 
 // TestMarkdownRationaleHardWraps pins the line breaks of a block field: each
