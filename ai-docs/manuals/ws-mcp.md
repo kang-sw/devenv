@@ -79,7 +79,17 @@ tools never depend on it. Its state lives under `<cache root>/dashboard/`:
   registered session; `internal/wslive` holds the schema and readers.
 
 After a store write the serving ws-mcp sends `POST /nudge {reply_id,
-project}`; the daemon also re-reads every session every 30 seconds. To restart
+project}`; the daemon also re-reads every session every 30 seconds.
+
+The daemon serves read-only pages, loopback Host only, with no CORS:
+`/` lists sessions by project (ended ones for a day), `/s/<reply-id>` shows one
+session, and `/events` and `/s/<reply-id>/events` are their SSE streams, which
+send only the page regions whose hash changed. A session with a fresh adapter
+snapshot gets the live layout (lead, agent tree, conversation, board); one
+without gets the board-first page. File targets on the served board render as
+repo-relative path text. `whiteboard.update`'s `full:` line names
+`http://127.0.0.1:<port>/s/<reply-id>` once the session's last nudge was
+answered, and the page path otherwise. To restart
 a dev daemon after changing its code, `POST /shutdown` with
 `Authorization: Bearer <token from endpoint.json>`; the next `serve` starts a
 new one.
