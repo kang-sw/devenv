@@ -682,7 +682,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-06T09:59:56Z"
+        "touched_at": "2026-11-06T10:00:46Z",
+        "impl": {
+          "branch": "impl/develop/gills-tall-tweet"
+        }
       }
     },
     "261106-feat-ws-dashboard-live-snapshot-pi": {
