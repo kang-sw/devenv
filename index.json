@@ -656,7 +656,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-06T09:01:09Z"
+        "touched_at": "2026-11-06T09:01:39Z",
+        "impl": {
+          "branch": "impl/develop/scone-chemo-vista"
+        }
       }
     },
     "261106-feat-ws-dashboard-browser-interaction": {
