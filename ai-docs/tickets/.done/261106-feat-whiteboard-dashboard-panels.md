@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 45b9fb6f4c567495
 sage-review-completeness-reviewed: 45b9fb6f4c567495
+completed: 2026-11-06
 ---
 
 # Whiteboard dashboard panels - tickets, todo summary, mailbox
@@ -197,3 +198,51 @@ Verification:
   `agents-plugin-tool`.
 - No headless browser is installed. Say whether the page was checked
   visually.
+
+### Result (8a926fd83) - 2026-11-06
+
+Landed in 8a926fd83 and eaa8a70bd.
+- **Providers.** They take a `whiteboardPanelInput` with the record, the
+  layout, the session root, the session key, the reply-id, and the mailbox
+  identity plus ownership. The renderer resolves that identity once per
+  render (`Server.renderWhiteboard`).
+- **New panels.** The ticket and mailbox providers are in
+  `internal/mcp/whiteboard_panels.go`.
+- **Embed todo panel.** It lists only unfinished items under the
+  `done/total` chip.
+- **`PanelRow.Link` and `rowHref`.** `PanelRow` gains `Link`. In
+  `wswhiteboard`, `rowHref` marks only links with no scheme or a `file:`
+  scheme as `template.URL`; a `javascript:` link still becomes
+  `#ZgotmplZ`.
+- **Refresh.** `tickets.move`, `tickets.close`, `tickets.create_empty`,
+  `mailbox.send` and `mailbox.recv` now dirty the panels.
+- **Playbook.** The two panel sentences in the whiteboard playbook are
+  updated. The rsrc manifest was regenerated, the wsflow mirror was
+  regenerated with its documented command, and the Pi rsrc copy was synced
+  byte-for-byte.
+
+Verification:
+- `go test ./internal/wswhiteboard -count=1`: ok.
+- `go test ./internal/mcp -run 'Whiteboard' -count=1`: ok, after the
+  review fix as well.
+- `go test ./...` in `agents-plugin-tool`: ok. This run includes
+  `TestWsflowRsrcMirrorUpToDate` and `TestPiMirrorUpToDate`.
+- Lite review: no Critical or Important findings. One minor finding, about
+  the chip count, was fixed in eaa8a70bd.
+- The page was not checked visually; no headless browser is available.
+
+Decisions:
+- **Where the tests live.** Provider behaviour is tested in `internal/mcp`,
+  in `whiteboard_panels_test.go`, because the providers live there. The
+  template and link rendering, and the size stress, are tested in
+  `internal/wswhiteboard`.
+- **Mailbox panel address.** The panel shows the owned named address. A
+  session with history but no named address still gets the panel, labelled
+  with its `id:<reply-id>`.
+- **Armed wait.** A wait counts as armed when the listening marker exists
+  and its PID is alive. A crashed `mailbox wait` leaves its marker behind.
+- **Ticket chip.** On the full page it reads `N ready, M todo`, where M is
+  the whole todo backlog. The rows stay limited to the latest 10.
+- **Embed size bar.** The stress test gained 100 ready rows with long
+  `file:` links, and its bar moved from 1/4 to 1/3 of 512 KiB. The measured
+  size is 151 KB (29%).
