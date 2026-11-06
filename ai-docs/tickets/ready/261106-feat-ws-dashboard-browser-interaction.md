@@ -250,6 +250,167 @@ chip note, the sent answer block text, sent marks with cards still
 editable, a held bubble with a divider after two sends, and cancel returning
 text and chips to the composer.
 
+### Result (ed7fbc6e1) - 2026-11-06
+
+Landed:
+- `internal/wsinbox` (5a0a0a14f, new, stdlib only): the inbox store, the
+  answer-block grammar, and the claims.
+- `internal/mcp/dashboard_inbox.go` (1e6fcc8d2): the adapter-only drain
+  tool `dashboard.inbox_drain`, listed in the ws, wsflow, and Pi
+  `runtime.json`, excluded from the mailbox badge, and hidden from the Pi
+  model through `ADAPTER_ONLY_RAW_TOOLS`. The session fingerprint now
+  covers the inbox's held and drained names.
+- `mailbox wait --board-inbox` (1e6fcc8d2): `WaitTarget.InboxDir`,
+  `WaitResult.Board`, `WaitResult.Woke()`.
+- `internal/wsdashboard` (62055a214): `POST /s/<reply-id>/message` and
+  `POST /s/<reply-id>/cancel` (`inbox_routes.go`), the held bubble and the
+  sent marks (`pageview_inbox.go`, template, CSS), and the composer's
+  chips and send in `dashboard.js`.
+- ed7fbc6e1: lite review fixes.
+- The ws-mcp manual's "Dashboard daemon" section names the inbox and the
+  two routes.
+
+Settled:
+- **Inbox location.** `wsinbox.Dir(wsdashboard.SessionDir(<dashboard dir>,
+  <reply-id>))`, which is `<cache root>/dashboard/sessions/<reply-id>/inbox/`.
+  The daemon derives it from the reply-id in its index. ws-mcp and the
+  wait CLI derive it from the session key through `wsmailbox.ReplyID`, so
+  no session key reaches the browser. Registry pruning removes it with the
+  session directory.
+- **Entry format.** One immutable file per held message, named
+  `<UTC ns stamp>-<8 hex>.json`, written through temp file and rename. The
+  content is `{schemaVersion: 1, parts: [text of each send], chips: [{id,
+  answer, note}], sentAt: <first send, epoch ms>}`. Readers ignore unknown
+  fields.
+  - The message the session receives (`Entry.Text()`) is each part as its
+    own paragraph, a blank line between, then the answer block.
+  - `AnswerBlock` follows `form.js` `build`: `(nn) a`, `(nn) a, note: x`,
+    `(nn) note: x`, items answered ok without a note grouped last as
+    `(nn), (mm) ok`, and the parts joined by `; `. The composer's copy uses
+    the same grammar in JS.
+  - Limits: 64 KiB of text, 100 chips, a 4 KiB note per chip. An item id
+    is digits, an answer is alphanumeric.
+- **Claims.** Every state change starts with an atomic rename.
+  - Drain renames each entry into `inbox/drained/`.
+  - A merge renames the newest held entry to a hidden claim file, writes
+    the merged entry under a new name, and removes the claim. The later
+    chip for an item replaces the earlier one in place.
+  - Cancel renames the entry to a claim file, reads it, and removes it.
+
+  Exactly one claimer wins an entry. A merge whose claim loses to a drain
+  writes a new entry instead, so the send is not lost and the drained
+  entry never comes back. The daemon also serializes its own sends and
+  cancels with one mutex.
+
+  Accepted gaps:
+  - A crash between a merge's claim and its rewrite loses that held
+    message. This is the same class of gap as drain-then-inject.
+  - For about a millisecond during a merge the inbox reads empty. A drain
+    in that window finds nothing, and the level-triggered wait wakes on
+    the merged entry next.
+- **Held versus drained.** A held entry is a file in `inbox/`. A drained
+  one is in `inbox/drained/`, which keeps the newest 20
+  (`wsinbox.DrainedCap`). The held bubble lists `inbox/` only.
+- **Sent marks.** For each item, the mark is its newest chip across the
+  drained records and then the held entries, so a held answer shows over
+  a delivered one (`held · b`, then `sent · b`).
+  - It is read from disk, so it survives a page reload while the drained
+    ring holds it.
+  - The marks ride the conversation region as hidden `.sentdata` data, and
+    the page script marks the card headers. The board fragments stay the
+    static page's templates.
+- **Drain tool.** `dashboard.inbox_drain {session_key, format?}`. Its
+  description opens with `Adapter-only:` and says why a model must not
+  call it.
+  - Text output: `inbox empty`, or `drained N` and then `message <id>
+    <RFC3339>` with the text for each message.
+  - `format: "json"` returns `{messages: [{id, sent_at, text, parts,
+    chips}]}`.
+  - It drains whether or not the dashboard key is on. It nudges only after
+    claiming something. An error is a tool error only when nothing was
+    claimed.
+- **Wait flag.** `--board-inbox`.
+  - It wakes when mail arrives or when an inbox entry is held. It only
+    peeks.
+  - JSON always carries `board: N` and `kinds` (`mail`, `board`, or both;
+    `[]` on timeout). Text adds `board N` after `unread N`.
+  - The exit codes are unchanged. The re-arm command keeps the flag.
+- **Routes.**
+  - Both require an `Origin` equal to `http://<Host>`. A missing, `null`,
+    or cross-site Origin is 403. There are no CORS headers, and a
+    preflight gets 405.
+  - A session without a fresh adapter snapshot gets 409 and no composer.
+    An unknown session is 404, and a malformed or empty send is 400.
+  - message answers `{id, merged}`.
+  - cancel `{id}` answers `{text, chips}`, where text is the parts joined
+    by a blank line. It is 409 once the entry was drained.
+- **Composer.** The chips live in the composer, keyed by item number, so a
+  chip outlives its card leaving the board.
+  - After each board event the chips are re-read from the board's form
+    state.
+  - Removing a chip (`×`) clears its card.
+  - Send (Ctrl/Cmd+Enter) clears the sent chips and their cards.
+  - Cancel puts the text back ahead of any draft and restores chips that
+    no newer chip has replaced.
+
+Verification:
+- `go test ./... -count=1` in `agents-plugin-tool`: all packages ok, run
+  after 62055a214. After ed7fbc6e1, `go test -race -count=1` on wsinbox,
+  wsdashboard, and mcp: ok.
+- `go test -race` on wsinbox and wsdashboard: ok.
+- `GOOS=windows` and `GOOS=linux` `go vet` on wsinbox and wsdashboard: ok.
+- `node --check` on `dashboard.js`: ok.
+- Tests:
+  - `internal/wsinbox/inbox_test.go`: the grammar, merge, cancel, drain
+    and its cap, a cancel refused after a drain, an unreadable entry left
+    held. Two 300-run races, drain against cancel (exactly one winner) and
+    drain against merge (each send's text delivered or held exactly once).
+  - `internal/mcp/dashboard_inbox_test.go`: the atomic claim, 6
+    concurrent drainers over 12 entries, text and JSON output, the
+    adapter-only description, a nudge after a drain, and the fingerprint.
+  - `internal/wsmailbox/wait_test.go` and `cmd/ws-mcp/mailbox_test.go`:
+    the flag wakes and reports `board`, and without the flag an entry does
+    not wake the wait.
+  - `internal/wsdashboard/inbox_routes_test.go` and
+    `pageview_inbox_test.go`: an entry per send, a merge as a separate
+    paragraph with the later chip winning, cancel returning text and
+    chips, cancel refused on a claimed entry, a send after a drain making
+    a new entry, the Origin cases, no CORS, the session without an adapter
+    (no composer, 409), the held and sent marks across a reload, and the
+    SSE conversation region after a send.
+- Not run: the Pi test added beside the intake one in
+  `agents-plugin-pi/test/dashboard-feed.test.ts`. This worktree has no
+  `node_modules`.
+- Lite review: one Important finding, fixed in ed7fbc6e1. A send of two or
+  more chips cleared only the first, because clearing a card re-synced the
+  chips into new objects. One cheap Minor is fixed too: an unreadable
+  entry was lost on cancel or drain.
+
+Hand checks for the lead (no headless browser here). On a live adapter
+session's page:
+- Clicking options, ok/no, and acknowledgements attaches chips, and a
+  later click replaces the chip.
+- A note shows on its chip.
+- The sent text reads `text`, a blank line, then `(nn) a; (mm) ok`.
+- A send with two or more chips clears all of them.
+- Sent marks appear while the cards stay editable.
+- Two sends while a turn runs show one held bubble with a divider.
+- Cancel returns the text and chips to the composer.
+
+Until the adapters' drain phases land, an entry stays held, which is
+convenient for checking the bubble and cancel.
+
+Open:
+- The adapters' turn-end drain and injection are their own phases. The
+  Pi `pi.dashboard_enabled` description should widen to cover submission
+  there.
+- Minor review items left:
+  - Entry names are monotonic only within one process.
+  - A cancel from a second tab with a pre-merge id gets 409 "already
+    received".
+  - A restored chip whose answer matches no option on its card drops at
+    the next sync.
+
 ### Phase 2: LAN opt-in, access token, and image route
 
 Add LAN mode: the config key that turns it on (in each package's
