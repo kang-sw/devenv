@@ -255,3 +255,23 @@ func TestDrainAndMergeRaceLosesNothing(t *testing.T) {
 		}
 	}
 }
+
+func TestUnreadableEntryStaysHeld(t *testing.T) {
+	dir := Dir(t.TempDir())
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	name := "20261106T120000.000000000Z-0123abcd.json"
+	if err := os.WriteFile(filepath.Join(dir, name), []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Cancel(dir, name); err == nil || errors.Is(err, ErrGone) {
+		t.Fatalf("cancel of an unreadable entry: %v", err)
+	}
+	if got, err := Drain(dir); err == nil || len(got) != 0 {
+		t.Fatalf("drain of an unreadable entry = %+v, %v", got, err)
+	}
+	if names, _ := Names(dir); len(names) != 1 || names[0] != name {
+		t.Fatalf("unreadable entry not left held: %v", names)
+	}
+}

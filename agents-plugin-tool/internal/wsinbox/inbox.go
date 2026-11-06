@@ -389,8 +389,13 @@ func Cancel(dir, name string) (Entry, error) {
 		return Entry{}, err
 	}
 	entry, err := readEntry(claimed)
+	if err != nil {
+		// Leave an unreadable entry held rather than lose it.
+		_ = os.Rename(claimed, filepath.Join(dir, name))
+		return Entry{}, err
+	}
 	_ = os.Remove(claimed)
-	return entry, err
+	return entry, nil
 }
 
 // Drain claims every held entry at dir, oldest first, moving each into the
@@ -423,6 +428,8 @@ func Drain(dir string) ([]Record, error) {
 		}
 		entry, err := readEntry(filepath.Join(drained, name))
 		if err != nil {
+			// Put an unreadable entry back rather than lose it unreported.
+			_ = os.Rename(filepath.Join(drained, name), filepath.Join(dir, name))
 			if firstErr == nil {
 				firstErr = err
 			}

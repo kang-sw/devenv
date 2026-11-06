@@ -381,7 +381,12 @@
       csend.disabled = false;
       if (!ok) { syncNote("Not sent: " + res); return; }
       if (ctext.value.trim() === t) { ctext.value = ""; grow(); }
-      list.forEach(function (c) { if (chips[c.id] === c) { dropChip(c.id); setItem(c.id, null); } });
+      // Compare by value: a board event during the send, or clearing one
+      // card, re-reads the chips into new objects. Drop every sent chip
+      // before clearing any card, since clearing one re-syncs the rest.
+      var sent = list.filter(function (c) { var cur = chips[c.id]; return cur && cur.answer === c.answer && cur.note === c.note; });
+      sent.forEach(function (c) { dropChip(c.id); });
+      sent.forEach(function (c) { setItem(c.id, null); });
       renderChips();
       syncNote(res.merged ? "Added to the held message." : "Sent.");
     });
