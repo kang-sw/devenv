@@ -9,6 +9,7 @@ import {
   createDashboard,
   FLUSH_INTERVAL_MS,
   labelWhiteboard,
+  parseInboxDrain,
   PERMISSION_PROMPT,
   RETRY_MS,
   userPrompt,
@@ -104,6 +105,15 @@ describe('pure helpers', () => {
     expect(whiteboardBody(PLUGIN, text)).toBe('answer: yes')
     expect(whiteboardBody(PLUGIN, 'answer: yes')).toBeUndefined()
     expect(whiteboardBody('wsflow', text)).toBeUndefined()
+  })
+
+  test('an inbox drain\'s JSON gives each claimed message\'s text in order; any other shape is kept whole, never dropped', () => {
+    expect(parseInboxDrain('{"messages":[]}')).toEqual([])
+    expect(parseInboxDrain('  ')).toEqual([])
+    expect(parseInboxDrain('{"messages":[{"id":"a","text":"pick B","parts":["pick B"],"chips":[]},{"id":"b","text":"(03) ok"}]}')).toEqual(['pick B', '(03) ok'])
+    expect(parseInboxDrain('{"messages":[{"id":"a"}]}')).toEqual(['{"id":"a"}'])
+    expect(parseInboxDrain('drained 1\nmessage x\nhi')).toEqual(['drained 1\nmessage x\nhi'])
+    expect(parseInboxDrain('{"other":1}')).toEqual(['{"other":1}'])
   })
 
   test('a typed prompt is a terminal user message; this plugin\'s labelled prompt a whiteboard one; anything else none', () => {
@@ -431,6 +441,30 @@ describe('origins', () => {
     dash.mailSubmitFailed()
     events = await after(() => dash.turnStarted(undefined))
     expect(events.find((e) => e.kind === 'turn_start')?.origin).toBeUndefined()
+  })
+
+  test('the mod\'s own whiteboard submit tags the turn and enters the ring once; a failed one leaves no mark', async () => {
+    const { dash, after } = await started()
+    let events = await after(() => {
+      dash.whiteboardSubmitting()
+      dash.turnStarted(undefined)
+      dash.whiteboardSubmitted('pick B', true)
+    })
+    expect(events.find((e) => e.kind === 'turn_start')?.origin).toBe('whiteboard')
+    expect(events.filter((e) => e.kind === 'user')).toEqual([{ kind: 'user', text: 'pick B', origin: 'whiteboard', at: expect.any(Number) }])
+    await after(() => dash.turnCompleted(undefined, '', 'answer'))
+    // Should a hook see the same submit, its message is not entered a second time.
+    events = await after(() => {
+      dash.whiteboardSubmitting()
+      dash.userMessage('pick C', 'whiteboard')
+      dash.whiteboardSubmitted('pick C', true)
+    })
+    expect(events.filter((e) => e.kind === 'user').map((e) => e.text)).toEqual(['pick C'])
+    dash.whiteboardSubmitting()
+    dash.whiteboardSubmitted('dropped', false)
+    events = await after(() => dash.turnStarted(undefined))
+    expect(events.find((e) => e.kind === 'turn_start')?.origin).toBeUndefined()
+    expect(events.some((e) => e.kind === 'user')).toBe(false)
   })
 
   test('a prompt typed into a running turn is a user message and leaves the turn\'s origin alone', async () => {

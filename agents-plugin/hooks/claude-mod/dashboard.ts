@@ -47,6 +47,8 @@
 
 /** The intake tool, as the MCP server names it. */
 export const INTAKE_TOOL = 'dashboard_intake'
+/** The board-answer inbox's drain tool, as the MCP server names it: an atomic claim of every held message. */
+export const INBOX_DRAIN_TOOL = 'dashboard_inbox_drain'
 /** The adapter name the intake records. */
 export const ADAPTER = 'claude'
 /** Minimum gap between two intake calls: at most ten a second. */
@@ -83,6 +85,28 @@ export function whiteboardBody(plugin: string, text: string): string | undefined
   const label = whiteboardLabel(plugin)
   if (text === label) return ''
   return text.startsWith(`${label}\n`) ? text.slice(label.length + 1) : undefined
+}
+
+/**
+ * The messages an inbox drain's `format: "json"` text claimed, oldest first:
+ * each one's `text`. The drain has already claimed whatever it returned, so
+ * text that is not that shape comes back whole as one message, not dropped.
+ */
+export function parseInboxDrain(text: string): string[] {
+  const trimmed = text.trim()
+  if (trimmed === '') return []
+  let messages: unknown
+  try {
+    messages = (JSON.parse(trimmed) as { messages?: unknown } | null)?.messages
+  } catch {
+    return [trimmed]
+  }
+  if (!Array.isArray(messages)) return [trimmed]
+  return messages.flatMap((m): string[] => {
+    const t = (m as { text?: unknown } | null)?.text
+    if (typeof t === 'string') return t.trim() === '' ? [] : [t]
+    return [JSON.stringify(m)]
+  })
 }
 
 export type Origin = 'terminal' | 'whiteboard' | 'mail'
@@ -393,6 +417,14 @@ export interface Dashboard {
   mailSubmitting: () => void
   /** That submit did not enter: a mail mark it left unused goes. */
   mailSubmitFailed: () => void
+  /**
+   * The mod is about to submit a dashboard message as the user's (its own
+   * prompt.submit hook never sees it): an idle lead's next turn is
+   * whiteboard-started.
+   */
+  whiteboardSubmitting: () => void
+  /** That submit settled: entered, `text` is a whiteboard user message; not, its mark goes. */
+  whiteboardSubmitted: (text: string, entered: boolean) => void
   /** A prompt is being submitted; `startsTurn` when it starts a turn rather than joining a running one. */
   promptSubmitting: (origin: Origin | undefined, startsTurn: boolean) => void
   /** A submitted prompt entered: a user message with its origin. */
@@ -424,6 +456,11 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
   let lastFinal: string | undefined
   let turnOpen = false
   let nextOrigin: Origin | undefined
+  /**
+   * A whiteboard submit of the mod's own in flight, and whether a hook already
+   * recorded its user message, so it never enters the ring twice.
+   */
+  let ownWhiteboard: { recorded: boolean } | undefined
   let lastTurnStart: DashboardEvent | undefined
   let resyncDue = false
   let sentKey: string | undefined
@@ -716,7 +753,22 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
     promptSubmitting: guard('prompt submit', (origin: Origin | undefined, startsTurn: boolean) => {
       if (startsTurn && !turnOpen && origin) nextOrigin = origin
     }),
+    whiteboardSubmitting: guard('whiteboard submit', () => {
+      ownWhiteboard = { recorded: false }
+      if (!turnOpen) nextOrigin = 'whiteboard'
+    }),
+    whiteboardSubmitted: guard('whiteboard submit', (text: string, entered: boolean) => {
+      const own = ownWhiteboard
+      ownWhiteboard = undefined
+      if (!entered) {
+        if (!turnOpen && nextOrigin === 'whiteboard') nextOrigin = undefined
+        return
+      }
+      if (own?.recorded) return
+      settleBefore({ kind: 'user', text: text.slice(0, TEXT_SEND_CAP), origin: 'whiteboard', at: edges.now() })
+    }),
     userMessage: guard('user message', (text: string, origin: 'terminal' | 'whiteboard') => {
+      if (origin === 'whiteboard' && ownWhiteboard) ownWhiteboard.recorded = true
       settleBefore({ kind: 'user', text: text.slice(0, TEXT_SEND_CAP), origin, at: edges.now() })
     }),
     turnStarted: guard('turn start', (agentId: string | undefined) => {

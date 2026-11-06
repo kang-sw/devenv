@@ -3,7 +3,7 @@ import type { HookStream, ProcessSpawnChunk, ProcessSpawnResult, Register, ToolC
 import { createBand, drawBand, readGit, type Mailbox } from './band'
 import { appendOwn, createCaptions, drawCall, drawEmpty, drawRun, groupUnit, submitOwn, toolUseUnit, type OwnDeliveryEdges } from './captions'
 import { createCompaction } from './compaction'
-import { callArgs, createDashboard, INTAKE_TOOL, userPrompt, type DashboardEvent } from './dashboard'
+import { callArgs, createDashboard, INBOX_DRAIN_TOOL, INTAKE_TOOL, labelWhiteboard, parseInboxDrain, userPrompt, type DashboardEvent } from './dashboard'
 import { createManual, type ReadFamily } from './manual'
 import { expandPreload } from './preload'
 import { createReconnect, reconnectDescription, TOOL_NAME as RECONNECT_TOOL } from './reconnect'
@@ -65,7 +65,12 @@ import {
 //   subagents' live activity, its replies, the user's messages and turn
 //   summaries handed to the session's own MCP server under the
 //   conversation's lead key, which keeps the session's live dashboard view;
-//   observe-only, it never changes an event (see dashboard.ts).
+//   observe-only, it never changes an event (see dashboard.ts). Under the
+//   same knob the mailbox push's wait also wakes on a message the user sent
+//   from the dashboard page, which the mod drains through the session's
+//   adapter-only inbox drain tool and submits as the user's own message
+//   under the whiteboard label: at once while idle, held until the turn
+//   ends while one runs (see watcher.ts).
 // - Status band (off until claude.status_band_enabled is set): a framed band
 //   above the prompt with the model, folder, git, context, rate-limit and
 //   cost figures, and the held key's todos, agenda and mailbox address (its
@@ -223,10 +228,30 @@ export function launcherPath(pluginRoot: string): string {
  * resolution) adds that named inbox. The wait itself owner-checks the slug
  * and falls back to reply-id-only when this key does not own it.
  */
-export function waitArgv(launcher: string, key: string, slug?: string): string[] {
+export function waitArgv(launcher: string, key: string, slug?: string, board = false): string[] {
   const argv = ['python3', launcher, 'mailbox', 'wait', '--session-key', key]
   if (slug) argv.push('--slug', slug)
+  // Also wake on a message held in the session's board-answer inbox (peek only).
+  if (board) argv.push('--board-inbox')
   return [...argv, '--timeout', WAIT_TIMEOUT, '--format', 'json']
+}
+
+/**
+ * What woke a `--board-inbox` wait that exited with an arrival, from its
+ * JSON `kinds`: mail, a held board message, or both. Output that names
+ * neither reads as both, so nothing that arrived goes unhandled.
+ */
+export function wakeKinds(stdout: string): 'mail' | 'board' | 'both' {
+  let kinds: unknown
+  try {
+    kinds = (JSON.parse(stdout.trim()) as { kinds?: unknown } | null)?.kinds
+  } catch {
+    return 'both'
+  }
+  const has = (k: string) => Array.isArray(kinds) && kinds.includes(k)
+  if (has('mail') && !has('board')) return 'mail'
+  if (has('board') && !has('mail')) return 'board'
+  return 'both'
 }
 
 /** Main-loop-only guard and key validation for the bind tool. */
@@ -362,12 +387,14 @@ export function resultText(res: ToolCallResult): string | undefined {
 /**
  * Consume one spawned `mailbox wait` stream; abort ends it (returning the
  * stream kills the child). Every abort listener it adds is removed when it
- * settles: the loop's signal lives as long as the binding.
+ * settles: the loop's signal lives as long as the binding. A `board` wait's
+ * arrival says from its output which kind woke it.
  */
 export async function consumeWait(
   stream: Pick<HookStream<ProcessSpawnChunk, ProcessSpawnResult>, 'next' | 'return'>,
   signal: AbortSignal,
   debug: (text: string) => void,
+  board = false,
 ): Promise<WaitOutcome> {
   let aborted = false
   let resolveStopped!: (v: 'stopped') => void
@@ -385,10 +412,12 @@ export async function consumeWait(
   try {
     const consumed = (async () => {
       let stderr = ''
+      let stdout = ''
       for (;;) {
         const step = await stream.next()
-        if (step.done) return { end: step.value, stderr }
+        if (step.done) return { end: step.value, stderr, stdout }
         if (step.value.stream === 'stderr') stderr += step.value.text
+        else if (board) stdout += step.value.text
       }
     })()
     const raced = await Promise.race([consumed, stopped])
@@ -400,7 +429,7 @@ export async function consumeWait(
     if (outcome === 'error') {
       debug(`mailbox wait exited code=${raced.end?.code} signal=${raced.end?.signal} ${raced.stderr.trim().slice(0, 300)}`)
     }
-    return outcome
+    return outcome === 'mail' && board ? wakeKinds(raced.stdout) : outcome
   } finally {
     signal.removeEventListener('abort', onAbort)
   }
@@ -491,6 +520,8 @@ export const register: Register = (on) => {
   let dashCall: ((args: { session_key: string; adapter: string; events: DashboardEvent[] }) => Promise<boolean>) | undefined
   let dashLog: (text: string) => void = () => {}
   let dashAfter: ((ms: number, fn: () => void) => { cancel: () => void }) | undefined
+  /** Whether the latest session.start's dashboard knob read on: the push's wait then wakes on board messages too. */
+  let boardOn = false
 
   const stopWatcher = (reason: string) => {
     armSeq += 1
@@ -725,10 +756,10 @@ export const register: Register = (on) => {
       const created = createWatcher({
         mode,
         label,
-        wait: async (key, slug, signal) => {
+        wait: async (key, slug, board, signal) => {
           if (signal.aborted) return 'stopped'
-          const stream = $.process.spawn({ argv: waitArgv(launcher, key, slug) })
-          return consumeWait(stream, signal, (text) => $.ui.log(`${label}: ${text}`, { to: 'debug' }))
+          const stream = $.process.spawn({ argv: waitArgv(launcher, key, slug, board) })
+          return consumeWait(stream, signal, (text) => $.ui.log(`${label}: ${text}`, { to: 'debug' }), board)
         },
         drain: async (key) => {
           if (!recvTool) return { kind: 'failed', reason: 'MCP server not resolved' }
@@ -753,6 +784,34 @@ export const register: Register = (on) => {
         notice: (text) => $.ui.log(text),
         record: (text) => $.ui.log(text),
         log: (text) => $.ui.log(text, { to: 'debug' }),
+        // Board messages: through the server's own call, so no tool.call is
+        // raised and no permission is asked; submitted bare (asUser), the
+        // label telling the model where the user wrote it.
+        board: {
+          enabled: () => boardOn,
+          drain: async (key) => {
+            await serverResolved
+            if (!server) throw new Error('MCP server not resolved')
+            return parseInboxDrain(await callText(server, INBOX_DRAIN_TOOL, { session_key: key, format: 'json' }))
+          },
+          submit: async (texts) => {
+            const text = texts.join('\n\n')
+            dashboard.whiteboardSubmitting()
+            let entered = false
+            try {
+              const res = await $.prompt.submit({ text: labelWhiteboard($.plugin.name, text), asUser: true })
+              if (res.drop !== undefined) throw new Error(`prompt dropped: ${res.drop}`)
+              entered = true
+            } finally {
+              dashboard.whiteboardSubmitted(text, entered)
+            }
+          },
+          append: async (texts) => {
+            const text = labelWhiteboard($.plugin.name, texts.join('\n\n'))
+            const res = await $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] } })
+            if (res.deny !== undefined) throw new Error(`row refused: ${res.deny}`)
+          },
+        },
       })
       watcher = created
       // A key the manual feature produced before the watcher existed.
@@ -801,11 +860,15 @@ export const register: Register = (on) => {
       if (!server) throw new Error('MCP server not resolved')
       return intakeDelivered(await $.mcp.call(server, INTAKE_TOOL, args))
     }
+    boardOn = false
     void readKnob(KNOB.dashboard)
       .then((value) => {
         if (startSeq !== starts) return
+        boardOn = value === true
         if (value === true) dashboard.start()
         else dashboard.stop()
+        // A wait armed before the read settled takes the board flag now.
+        watcher?.boardChanged()
       })
       .catch((err) => $.ui.log(`${$.plugin.name} dashboard: setup failed: ${String(err)}`, { to: 'debug' }))
 
@@ -1317,7 +1380,8 @@ export const register: Register = (on) => {
   // Each feature's turn end in isolation; none waits on what it starts.
   on('turn.complete', async ($, e, next) => {
     // The mailbox's turn end runs even when a hook beneath rejects: a turn
-    // flag left set would queue mail with no boundary or end to flush it.
+    // flag left set would queue mail with no boundary or end to flush it,
+    // and a held dashboard message would wait for a turn end that never came.
     let res: Awaited<ReturnType<typeof next>>
     try {
       res = await next(e)

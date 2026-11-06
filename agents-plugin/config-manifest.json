@@ -47,7 +47,7 @@
       "key": "claude.dashboard_enabled",
       "type": "boolean",
       "default": true,
-      "description": "Claude Code only (unused on other hosts): when true, the lead session hands its live activity to its MCP server for the session's dashboard view: its turns, tool calls, and generating phase, its subagents' activity, its streamed and finished replies, the user's messages, and tool permission waits; when false, it hands over nothing. The MCP server records it only while the session's dashboard.enabled is on. Read at session start, so a change applies from the next session. Only the project, global, and built-in values apply; a session- or repo-scope tune is not read. A failed or refused read leaves the feed off."
+      "description": "Claude Code only (unused on other hosts): when true, the lead session hands its live activity to its MCP server for the session's dashboard view: its turns, tool calls, and generating phase, its subagents' activity, its streamed and finished replies, the user's messages, and tool permission waits, and it submits the messages the user sends from the dashboard page as the user's own: at once while idle, and at the end of a running turn; when false, it hands over nothing and submits nothing. The MCP server records it only while the session's dashboard.enabled is on. Read at session start, so a change applies from the next session. Only the project, global, and built-in values apply; a session- or repo-scope tune is not read. A failed or refused read leaves both off."
     },
     {
       "key": "claude.display_summary_model",

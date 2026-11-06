@@ -39,11 +39,30 @@ import type { MailItem, OwnPrompt } from './captions'
  * input, and a row appended while idle reaches the model with their next
  * prompt. Only when that append fails too does the text count as lost.
  *
+ * Board messages (the `board` edges, present while the dashboard knob reads
+ * on): the messages the user sends from the dashboard page, held in the
+ * session's board-answer inbox until the mod drains them. The same wait also
+ * wakes on a held one (its board flag), and the drain is an atomic claim, so
+ * each message is submitted once. A wake while idle drains and submits at
+ * once, as the user's own message. A wake while a main-thread turn runs
+ * drains nothing: the message stays held, so the page can still merge into it
+ * or cancel it, and the wait re-arms without the flag, since it only peeks
+ * and would wake again at once. Every main-thread turn end drains whatever is
+ * held, submits it, and re-arms the wait with the flag; a tool boundary never
+ * does. The held board message goes ahead of the mail still queued at that
+ * turn end: mail is delivered once the board drain and submit settle (or
+ * BOARD_FIRST_WAIT_MS passes), so the user's own message starts the next turn
+ * and the mail joins it as the mail path delivers it. A board submit the host
+ * drops or rejects is appended as a row instead, and only when that fails too
+ * is the message recorded for the user. A crash between the drain and the
+ * submit loses the message, the same gap mail has.
+ *
  * Every side effect is an injected edge so the loop is testable without a
  * live mailbox or engine.
  */
 
-export type WaitOutcome = 'mail' | 'timeout' | 'stopped' | 'error'
+/** A wait's outcome; `board` and `both` say a held board message woke it, alone or with mail. */
+export type WaitOutcome = 'mail' | 'board' | 'both' | 'timeout' | 'stopped' | 'error'
 
 export type DrainMode = 'direct' | 'notice'
 
@@ -63,12 +82,28 @@ export type DrainResult =
   | { kind: 'refused'; reason: string }
   | { kind: 'failed'; reason: string }
 
+/** The board-message side: the session's board-answer inbox. */
+export interface BoardEdges {
+  /** Whether board submission is on now (the dashboard knob); read at every wait arm and turn end. */
+  enabled: () => boolean
+  /** Claim every held message of `key`'s inbox, oldest first: their texts. Rejects when the drain failed. */
+  drain: (key: string) => Promise<string[]>
+  /** Submit the drained messages as one prompt, the user's own; rejects when it did not reach the conversation. */
+  submit: (texts: readonly string[]) => Promise<void>
+  /** Append the same prompt as a user row instead; rejects when refused. */
+  append: (texts: readonly string[]) => Promise<void>
+}
+
 export interface WatcherEdges {
   mode: DrainMode
   /** Prefix for notice and prompt lines (`<plugin> mailbox`). */
   label: string
-  /** Run one `mailbox wait` for `key`, adding the binding's named inbox `slug`; must resolve `stopped` soon after `signal` aborts. */
-  wait: (key: string, slug: string | undefined, signal: AbortSignal) => Promise<WaitOutcome>
+  /**
+   * Run one `mailbox wait` for `key`, adding the binding's named inbox `slug`,
+   * and with `board` also waking on a held board message; must resolve
+   * `stopped` soon after `signal` aborts.
+   */
+  wait: (key: string, slug: string | undefined, board: boolean, signal: AbortSignal) => Promise<WaitOutcome>
   /** Drain via mailbox recv (direct mode only). */
   drain: (key: string) => Promise<DrainResult>
   /**
@@ -98,6 +133,8 @@ export interface WatcherEdges {
   /** Show the user (never the model) drained mail that could not be submitted. */
   record: (text: string) => void
   log: (text: string) => void
+  /** Board messages; absent, the wait never carries the board flag and nothing is drained. */
+  board?: BoardEdges
 }
 
 export type BindResult = 'bound' | 'unchanged' | 'rebound'
@@ -105,6 +142,8 @@ export type BindResult = 'bound' | 'unchanged' | 'rebound'
 export const BACKOFF_MIN_MS = 1_000
 export const BACKOFF_MAX_MS = 60_000
 export const EMPTY_DRAIN_BACKOFF_MS = 2_000
+/** At a turn end, the longest the queued mail waits for the held board message to go first. */
+export const BOARD_FIRST_WAIT_MS = 5_000
 
 export function nextBackoff(prev: number): number {
   return prev <= 0 ? BACKOFF_MIN_MS : Math.min(prev * 2, BACKOFF_MAX_MS)
@@ -217,8 +256,14 @@ export interface Watcher {
    * result reads it. Never rejects.
    */
   toolCompleted: () => Promise<void>
-  /** The main-thread turn ended: submit whatever is still queued as one prompt, else append it. Never throws. */
+  /**
+   * The main-thread turn ended: drain and submit the held board messages,
+   * then submit whatever mail is still queued as one prompt, else append it.
+   * Never throws.
+   */
   turnCompleted: () => void
+  /** The board switch may have changed: a running wait whose board flag no longer matches is re-armed. */
+  boardChanged: () => void
 }
 
 /**
@@ -243,6 +288,87 @@ export function createWatcher(edges: WatcherEdges): Watcher {
    * Session-wide, not per loop: a rebind keeps them, a stop gives them up.
    */
   let queued: Queued[] = []
+  /**
+   * Set when a board message woke the wait while a main-thread turn ran: it
+   * stays held until the turn end, and the wait re-arms without the board
+   * flag meanwhile. Session-wide like the queue: a rebind keeps it.
+   */
+  let boardHeld = false
+  /** Board drains run one at a time, so a turn end and an idle wake never interleave their submits. */
+  let boardChain: Promise<unknown> = Promise.resolve()
+  /** The wait now running: its own abort, which re-arms it without ending the loop, and its board flag. */
+  let waiting: { ctrl: AbortController; board: boolean } | undefined
+
+  /** Whether the next wait carries the board flag: board submission on and nothing held for a turn end. */
+  function boardWanted(): boolean {
+    if (boardHeld || !edges.board) return false
+    try {
+      return edges.board.enabled()
+    } catch (err) {
+      edges.log(`${edges.label}: reading the board switch failed: ${String(err)}`)
+      return false
+    }
+  }
+
+  /** Re-arm the running wait when its board flag no longer matches. */
+  function rearmStaleWait(): void {
+    if (waiting && waiting.board !== boardWanted()) waiting.ctrl.abort()
+  }
+
+  /** Write board messages that will not be submitted where the user can see them, and to the debug log. */
+  function keepBoard(why: string, texts: readonly string[]): void {
+    const text = `${edges.label}: a message from the dashboard was not submitted (${why}); recorded here instead:\n\n${texts.join('\n\n')}`
+    try {
+      edges.record(text)
+    } catch (err) {
+      edges.log(`${edges.label}: recording a dashboard message failed: ${String(err)}`)
+    }
+    edges.log(text)
+  }
+
+  /**
+   * Drain `myKey`'s held board messages and submit them as one prompt, after
+   * any drain already running. Never rejects: answers `empty` when nothing
+   * was held, `failed` when the drain failed (the messages stay held), and
+   * `done` once claimed messages were submitted, appended, or recorded.
+   */
+  function flushBoard(myKey: string): Promise<'done' | 'empty' | { failed: string }> {
+    const at = stops
+    const run = boardChain.then(async (): Promise<'done' | 'empty' | { failed: string }> => {
+      const board = edges.board
+      if (!board) return 'empty'
+      let texts: string[]
+      try {
+        texts = await board.drain(myKey)
+      } catch (err) {
+        return { failed: String(err) }
+      }
+      if (texts.length === 0) return 'empty'
+      // The drain claimed these: from here this is their only holder. A stop
+      // since means the conversation they were for is gone.
+      if (stops !== at) {
+        keepBoard(`the push loop stopped: ${lastStop}`, texts)
+        return 'done'
+      }
+      edges.log(`${edges.label}: drained ${texts.length} dashboard message(s) for ${myKey}; submitting them as the user's`)
+      let submitErr: unknown
+      try {
+        await board.submit(texts)
+        return 'done'
+      } catch (err) {
+        submitErr = err
+      }
+      edges.log(`${edges.label}: dashboard message submit failed (${String(submitErr)}); appending it as a row instead`)
+      try {
+        await board.append(texts)
+      } catch (err) {
+        keepBoard(`prompt submit failed: ${String(submitErr)}; row append failed: ${String(err)}`, texts)
+      }
+      return 'done'
+    })
+    boardChain = run.catch(() => {})
+    return run.catch((err) => ({ failed: String(err) }))
+  }
 
   /** Queue `prompt` for the running main-thread turn; false when none runs, and the caller submits it. */
   function steer(prompt: OwnPrompt, lost: (why: string) => void, noticeFor?: string): boolean {
@@ -371,15 +497,29 @@ export function createWatcher(edges: WatcherEdges): Watcher {
       if (recordErr !== undefined) edges.log(`${edges.label}: recording drained mail failed: ${String(recordErr)}; the log line above holds it`)
     }
 
+    let emptyBoardStreak = 0
     while (!signal.aborted) {
       let outcome: WaitOutcome
+      const board = boardWanted()
+      const own = { ctrl: new AbortController(), board }
+      const relay = () => own.ctrl.abort()
+      signal.addEventListener('abort', relay, { once: true })
+      waiting = own
       try {
-        outcome = await edges.wait(myKey, mySlug, signal)
+        outcome = await edges.wait(myKey, mySlug, board, own.ctrl.signal)
       } catch (err) {
         edges.log(`${edges.label}: wait failed to start: ${String(err)}`)
         outcome = 'error'
+      } finally {
+        signal.removeEventListener('abort', relay)
+        if (waiting === own) waiting = undefined
       }
-      if (signal.aborted || outcome === 'stopped') return
+      if (signal.aborted) return
+      if (outcome === 'stopped') {
+        // Its own abort re-arms it with the board flag as it now stands.
+        if (own.ctrl.signal.aborted) continue
+        return
+      }
       if (outcome === 'timeout') {
         backoff = 0
         healthy()
@@ -388,6 +528,39 @@ export function createWatcher(edges: WatcherEdges): Watcher {
       if (outcome === 'error') {
         await backOff('wait error', 'mailbox wait exited abnormally')
         continue
+      }
+      if (outcome === 'board' || outcome === 'both') {
+        if (edges.turnRunning()) {
+          // Held for the turn end, where the page can still merge or cancel it.
+          boardHeld = true
+          edges.log(`${edges.label}: a dashboard message for ${myKey} is held until the running turn ends`)
+        } else {
+          const flushed = await flushBoard(myKey)
+          if (signal.aborted) return
+          // Mail that woke the same wait is still handled below; the board
+          // message alone backs off, since the peek would wake again at once.
+          if (typeof flushed === 'object') {
+            if (outcome === 'board') {
+              await backOff('dashboard message drain error', flushed.failed)
+              continue
+            }
+            edges.log(`${edges.label}: dashboard message drain failed for ${myKey}: ${flushed.failed}; handling the mail`)
+          } else if (flushed === 'empty') {
+            if (outcome === 'board') {
+              // The peek saw a held message the drain did not get (cancelled,
+              // merged, or taken by a turn end's drain): never re-arm at once.
+              emptyBoardStreak += 1
+              const delay = Math.min(EMPTY_DRAIN_BACKOFF_MS * emptyBoardStreak, BACKOFF_MAX_MS)
+              edges.log(`${edges.label}: dashboard wake with empty drain for ${myKey} (x${emptyBoardStreak}); sleeping ${delay}ms`)
+              await edges.sleep(delay, signal)
+              continue
+            }
+          } else {
+            emptyBoardStreak = 0
+            if (outcome === 'board') backoff = 0
+          }
+        }
+        if (outcome === 'board') continue
       }
       if (edges.mode === 'notice') {
         if (await notify()) backoff = 0
@@ -512,6 +685,7 @@ export function createWatcher(edges: WatcherEdges): Watcher {
     stop(reason) {
       const left = takeQueued()
       if (left) lose(left.items, `the push loop stopped: ${reason}`)
+      boardHeld = false
       if (!ctrl) return
       stops += 1
       lastStop = reason
@@ -540,11 +714,40 @@ export function createWatcher(edges: WatcherEdges): Watcher {
     },
     turnCompleted() {
       const taken = takeQueued()
-      if (!taken) return
-      edges.log(`${edges.label}: submitting ${taken.items.length} prompt(s) still queued at the turn end as one prompt`)
-      void deliver(taken.items).then((why) => {
-        if (why !== undefined) lose(taken.items, why)
+      const at = stops
+      const sendMail = () => {
+        if (!taken) return
+        // A stop while the mail waited on the board drain took its conversation.
+        if (stops !== at) return lose(taken.items, `the push loop stopped: ${lastStop}`)
+        edges.log(`${edges.label}: submitting ${taken.items.length} prompt(s) still queued at the turn end as one prompt`)
+        void deliver(taken.items).then((why) => {
+          if (why !== undefined) lose(taken.items, why)
+        })
+      }
+      const myKey = key
+      if (myKey === undefined || !edges.board || !(boardHeld || boardWanted())) {
+        boardHeld = false
+        sendMail()
+        return
+      }
+      // The held board message goes first; the mail waits for it a bounded time.
+      const flushed = flushBoard(myKey).then((res) => {
+        if (typeof res === 'object') edges.log(`${edges.label}: turn-end dashboard drain failed (${res.failed}); the messages stay held`)
+        // Cleared only now, so the wait does not wake on what this drain is about to claim.
+        boardHeld = false
+        rearmStaleWait()
       })
+      if (!taken) return
+      const timer = new AbortController()
+      void Promise.race([flushed, edges.sleep(BOARD_FIRST_WAIT_MS, timer.signal)])
+        .catch((err) => edges.log(`${edges.label}: waiting on the turn-end dashboard drain failed: ${String(err)}`))
+        .then(() => {
+          timer.abort()
+          sendMail()
+        })
+    },
+    boardChanged() {
+      rearmStaleWait()
     },
   }
 }

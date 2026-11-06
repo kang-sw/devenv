@@ -12,11 +12,15 @@ import {
   mcpToolName,
   observeRecv,
   selfAddress,
+  waitArgv,
+  wakeKinds,
 } from './register'
 import {
   batchLine,
   batchPrompt,
+  BOARD_FIRST_WAIT_MS,
   createWatcher,
+  EMPTY_DRAIN_BACKOFF_MS,
   formatBatch,
   formatNotice,
   mailItems,
@@ -45,7 +49,7 @@ const tick = async (n = 30) => {
 const joined = (prompts: readonly OwnPrompt[]) => prompts.map((p) => p.text).join('\n\n')
 
 function harness(mode: DrainMode) {
-  const waits: { key: string; slug: string | undefined; signal: AbortSignal; d: Deferred<WaitOutcome> }[] = []
+  const waits: { key: string; slug: string | undefined; board: boolean; signal: AbortSignal; d: Deferred<WaitOutcome> }[] = []
   const drains: string[] = []
   const drainQueue: DrainResult[] = []
   const submitted: string[] = []
@@ -69,13 +73,33 @@ function harness(mode: DrainMode) {
   /** Each submit's live check, to read later as the settle's end would. */
   const lives: (() => boolean)[] = []
   const appendFailures: Error[] = []
+  /**
+   * The board side: the held inbox (one text per held entry), its switch,
+   * and what reached the conversation. `order` records every submit, mail
+   * and board alike, as `mail` or `board`, in the order they were made.
+   */
+  const board = {
+    on: false,
+    inbox: [] as string[],
+    drains: [] as string[],
+    drainFailures: [] as Error[],
+    /** When set, the next board drain waits on it. */
+    heldDrains: [] as Deferred<void>[],
+    /** When set, the next board submit waits on it. */
+    heldSubmits: [] as Deferred<void>[],
+    submitFailures: [] as Error[],
+    appendFailures: [] as Error[],
+    submitted: [] as (readonly string[])[],
+    appended: [] as (readonly string[])[],
+  }
+  const order: string[] = []
   const edges: WatcherEdges = {
     mode,
     label: 'pkg mailbox',
-    wait: (key, slug, signal) => {
+    wait: (key, slug, board, signal) => {
       const d = deferred<WaitOutcome>()
       signal.addEventListener('abort', () => d.resolve('stopped'), { once: true })
-      waits.push({ key, slug, signal, d })
+      waits.push({ key, slug, board, signal, d })
       return d.promise
     },
     drain: async (key) => {
@@ -102,6 +126,7 @@ function harness(mode: DrainMode) {
       const failure = submitFailures.shift()
       if (failure) throw failure
       submitted.push(text)
+      order.push('mail')
     },
     turnRunning: () => turn.running,
     append: async (prompts) => {
@@ -120,8 +145,35 @@ function harness(mode: DrainMode) {
     notice: (text) => notices.push(text),
     record: (text) => records.push(text),
     log: (text) => logs.push(text),
+    board: {
+      enabled: () => board.on,
+      drain: async (key) => {
+        board.drains.push(key)
+        const held = board.heldDrains.shift()
+        if (held) await held.promise
+        const failure = board.drainFailures.shift()
+        if (failure) throw failure
+        // An atomic claim: whatever is held now, once.
+        return board.inbox.splice(0)
+      },
+      submit: async (texts) => {
+        const held = board.heldSubmits.shift()
+        if (held) await held.promise
+        const failure = board.submitFailures.shift()
+        if (failure) throw failure
+        board.submitted.push(texts)
+        order.push('board')
+      },
+      append: async (texts) => {
+        const failure = board.appendFailures.shift()
+        if (failure) throw failure
+        board.appended.push(texts)
+      },
+    },
   }
   return {
+    board,
+    order,
     edges,
     waits,
     drains,
@@ -1256,6 +1308,249 @@ describe('a crashed push loop', () => {
   })
 })
 
+/** Resolve the latest wait as `kind` woke it: a held board message, or one with mail too. */
+async function wake(h: ReturnType<typeof harness>, kind: 'board' | 'both', drained?: DrainResult) {
+  if (drained) h.drainQueue.push(drained)
+  h.waits[h.waits.length - 1]!.d.resolve(kind)
+  await tick()
+}
+
+describe('board messages', () => {
+  /** A watcher bound to k1 with board submission on and its first wait armed. */
+  async function boardOn(mode: DrainMode = 'direct') {
+    const h = harness(mode)
+    h.board.on = true
+    const w = createWatcher(h.edges)
+    w.bind('k1')
+    await tick()
+    return { h, w }
+  }
+
+  test('an idle wake drains once and submits at once as the user\'s message, then re-arms with the flag', async () => {
+    const { h } = await boardOn()
+    expect(h.waits[0]!.board).toBe(true)
+    h.board.inbox.push('pick B')
+    await wake(h, 'board')
+    expect(h.board.drains).toEqual(['k1'])
+    expect(h.board.submitted).toEqual([['pick B']])
+    // The board wake drains no mail.
+    expect(h.drains).toEqual([])
+    expect(h.submitted).toEqual([])
+    expect(h.waits.length).toBe(2)
+    expect(h.waits[1]!.board).toBe(true)
+  })
+
+  test('a mid-turn wake holds the message, re-arms without the flag, and injects only at the turn end; never at a tool boundary', async () => {
+    const { h, w } = await boardOn()
+    h.turn.running = true
+    h.board.inbox.push('pick B')
+    await wake(h, 'board')
+    expect(h.board.drains).toEqual([])
+    expect(h.waits.length).toBe(2)
+    expect(h.waits[1]!.board).toBe(false)
+    await w.toolCompleted()
+    await w.toolCompleted()
+    expect(h.board.drains).toEqual([])
+    expect(h.board.submitted).toEqual([])
+    expect(h.appended).toEqual([])
+    expect(h.board.inbox).toEqual(['pick B'])
+    h.turn.running = false
+    w.turnCompleted()
+    await tick()
+    expect(h.board.drains).toEqual(['k1'])
+    expect(h.board.submitted).toEqual([['pick B']])
+    // The flag is restored after the drain: the flagless wait is re-armed with it.
+    expect(h.waits[1]!.signal.aborted).toBe(true)
+    expect(h.waits.length).toBe(3)
+    expect(h.waits[2]!.board).toBe(true)
+  })
+
+  test('an entry cancelled while held is never injected', async () => {
+    const { h, w } = await boardOn()
+    h.turn.running = true
+    h.board.inbox.push('pick B')
+    await wake(h, 'board')
+    // The page cancels it before the turn ends.
+    h.board.inbox.splice(0)
+    h.turn.running = false
+    w.turnCompleted()
+    await tick()
+    expect(h.board.drains).toEqual(['k1'])
+    expect(h.board.submitted).toEqual([])
+    expect(h.board.appended).toEqual([])
+    expect(h.records).toEqual([])
+    expect(h.waits.at(-1)!.board).toBe(true)
+  })
+
+  test('an entry merged while held is injected once', async () => {
+    const { h, w } = await boardOn()
+    h.turn.running = true
+    h.board.inbox.push('pick B')
+    await wake(h, 'board')
+    // The page merges a second send into the held entry.
+    h.board.inbox[0] = 'pick B\n\nand hurry'
+    h.turn.running = false
+    w.turnCompleted()
+    await tick()
+    expect(h.board.submitted).toEqual([['pick B\n\nand hurry']])
+    // The re-armed wait finds nothing more; another turn end submits nothing.
+    w.turnCompleted()
+    await tick()
+    expect(h.board.submitted.length).toBe(1)
+  })
+
+  test('at the turn end the held board message is submitted first, the leftover mail after it; both arrive', async () => {
+    const { h, w } = await boardOn()
+    h.turn.running = true
+    await wake(h, 'both', { kind: 'mail', mail: mailA })
+    expect(h.board.drains).toEqual([])
+    h.board.inbox.push('pick B')
+    const held = deferred<void>()
+    h.board.heldSubmits.push(held)
+    h.turn.running = false
+    w.turnCompleted()
+    await tick()
+    // The mail waits on the board message's submit.
+    expect(h.submitted).toEqual([])
+    held.resolve()
+    await tick()
+    expect(h.order).toEqual(['board', 'mail'])
+    expect(h.board.submitted).toEqual([['pick B']])
+    expect(h.submitted).toEqual([formatBatch('pkg mailbox', RECV, 'k1', mailA)])
+  })
+
+  test('a turn-end board drain that hangs holds the mail back only BOARD_FIRST_WAIT_MS', async () => {
+    const { h, w } = await boardOn()
+    h.turn.running = true
+    await wake(h, 'both', { kind: 'mail', mail: mailA })
+    h.board.inbox.push('pick B')
+    const hang = deferred<void>()
+    h.board.heldDrains.push(hang)
+    h.turn.running = false
+    w.turnCompleted()
+    await tick()
+    expect(h.submitted).toEqual([])
+    const bounded = h.sleeps.find((x) => x.ms === BOARD_FIRST_WAIT_MS)!
+    bounded.d.resolve()
+    await tick()
+    expect(h.order).toEqual(['mail'])
+    hang.resolve()
+    await tick()
+    expect(h.order).toEqual(['mail', 'board'])
+  })
+
+  test('a stop while the turn end is draining records the board message and the waiting mail, submitting neither', async () => {
+    const { h, w } = await boardOn()
+    h.turn.running = true
+    await wake(h, 'both', { kind: 'mail', mail: mailA })
+    h.board.inbox.push('pick B')
+    const hang = deferred<void>()
+    h.board.heldDrains.push(hang)
+    h.turn.running = false
+    w.turnCompleted()
+    await tick()
+    w.stop('session.end clear')
+    hang.resolve()
+    await tick()
+    expect(h.order).toEqual([])
+    expect(h.records.length).toBe(2)
+    expect(h.records.some((r) => r.includes('pick B'))).toBe(true)
+    expect(h.records.some((r) => r.includes('first'))).toBe(true)
+  })
+
+  test('with the switch off the wait carries no flag and a turn end drains nothing; switching on re-arms the running wait', async () => {
+    const h = harness('direct')
+    const w = createWatcher(h.edges)
+    w.bind('k1')
+    await tick()
+    expect(h.waits[0]!.board).toBe(false)
+    h.turn.running = true
+    await arrive(h, { kind: 'mail', mail: mailA })
+    h.turn.running = false
+    w.turnCompleted()
+    await tick()
+    expect(h.board.drains).toEqual([])
+    expect(h.submitted).toEqual([formatBatch('pkg mailbox', RECV, 'k1', mailA)])
+    w.boardChanged()
+    expect(h.waits.length).toBe(2)
+    h.board.on = true
+    w.boardChanged()
+    await tick()
+    expect(h.waits[1]!.signal.aborted).toBe(true)
+    expect(h.waits.length).toBe(3)
+    expect(h.waits[2]!.board).toBe(true)
+    // An unchanged switch leaves the running wait alone.
+    w.boardChanged()
+    await tick()
+    expect(h.waits.length).toBe(3)
+  })
+
+  test('a mail-and-board wake mid-turn steers the mail and holds the board message', async () => {
+    const { h, w } = await boardOn()
+    h.turn.running = true
+    h.board.inbox.push('pick B')
+    await wake(h, 'both', { kind: 'mail', mail: mailA })
+    expect(h.drains).toEqual(['k1'])
+    expect(h.board.drains).toEqual([])
+    await w.toolCompleted()
+    expect(h.appended).toEqual([formatBatch('pkg mailbox', RECV, 'k1', mailA)])
+    expect(h.board.submitted).toEqual([])
+  })
+
+  test('an idle drain that fails backs off with the message still held; mail that woke the same wait is still delivered', async () => {
+    const { h } = await boardOn()
+    h.board.inbox.push('pick B')
+    h.board.drainFailures.push(new Error('server gone'))
+    await wake(h, 'board')
+    expect(h.sleeps.map((x) => x.ms)).toEqual([1_000])
+    expect(h.board.inbox).toEqual(['pick B'])
+    h.sleeps[0]!.d.resolve()
+    await tick()
+    h.board.drainFailures.push(new Error('server gone'))
+    await wake(h, 'both', { kind: 'mail', mail: mailA })
+    expect(h.submitted).toEqual([formatBatch('pkg mailbox', RECV, 'k1', mailA)])
+  })
+
+  test('an idle wake whose drain finds nothing sleeps instead of re-arming at once', async () => {
+    const { h } = await boardOn()
+    await wake(h, 'board')
+    expect(h.board.drains).toEqual(['k1'])
+    expect(h.sleeps.map((x) => x.ms)).toEqual([EMPTY_DRAIN_BACKOFF_MS])
+    expect(h.waits.length).toBe(1)
+  })
+
+  test('a dropped submit appends the message as a row; with the row refused too it is recorded for the user', async () => {
+    const { h } = await boardOn()
+    h.board.inbox.push('pick B')
+    h.board.submitFailures.push(new Error('prompt dropped: a Stop stands'))
+    await wake(h, 'board')
+    expect(h.board.appended).toEqual([['pick B']])
+    expect(h.records).toEqual([])
+    h.board.inbox.push('pick C')
+    h.board.submitFailures.push(new Error('prompt dropped: a Stop stands'))
+    h.board.appendFailures.push(new Error('row refused: policy'))
+    await wake(h, 'board')
+    expect(h.records.length).toBe(1)
+    expect(h.records[0]).toContain('pick C')
+    expect(h.board.submitted).toEqual([])
+  })
+
+  test('a stop forgets a held message: the next binding\'s turn end does not treat it as held', async () => {
+    const { h, w } = await boardOn()
+    h.turn.running = true
+    h.board.inbox.push('pick B')
+    await wake(h, 'board')
+    w.stop('session cleared')
+    h.board.on = false
+    w.bind('k2')
+    await tick()
+    h.turn.running = false
+    w.turnCompleted()
+    await tick()
+    expect(h.board.drains).toEqual([])
+  })
+})
+
 describe('pure helpers', () => {
   test('drain mode follows the knob value; anything but direct, a failed read among them, is notice', () => {
     expect(drainModeOf('direct')).toBe('direct')
@@ -1270,6 +1565,28 @@ describe('pure helpers', () => {
     expect(mcpToolName('plugin:ws:ws', 'mailbox_recv')).toBe('mcp__plugin_ws_ws__mailbox_recv')
     expect(mcpToolName('plugin:wsflow:wsflow', 'mailbox_recv')).toBe('mcp__plugin_wsflow_wsflow__mailbox_recv')
     expect(launcherPath('/p/root/')).toBe('/p/root/bin/ws-mcp-launcher.py')
+    expect(waitArgv('/l.py', 'k1', 'me@x')).toEqual(['python3', '/l.py', 'mailbox', 'wait', '--session-key', 'k1', '--slug', 'me@x', '--timeout', '10m', '--format', 'json'])
+    expect(waitArgv('/l.py', 'k1', undefined, true)).toEqual(['python3', '/l.py', 'mailbox', 'wait', '--session-key', 'k1', '--board-inbox', '--timeout', '10m', '--format', 'json'])
+  })
+
+  test('a board wait\'s arrival says which kind woke it; output naming neither reads as both', async () => {
+    expect(wakeKinds('{"kinds":["mail"]}')).toBe('mail')
+    expect(wakeKinds('{"kinds":["board"]}')).toBe('board')
+    expect(wakeKinds('{"kinds":["mail","board"]}')).toBe('both')
+    expect(wakeKinds('{"kinds":[]}')).toBe('both')
+    expect(wakeKinds('not json')).toBe('both')
+    const exited = (stdout: string) => {
+      const chunks = [{ stream: 'stdout', text: stdout }]
+      return {
+        next: async () => (chunks.length ? { done: false, value: chunks.shift() } : { done: true, value: { code: 0, signal: null } }),
+        return: async () => ({ done: true }),
+      }
+    }
+    const signal = new AbortController().signal
+    expect(await consumeWait(exited('{"kinds":["board"]}') as never, signal, () => {}, true)).toBe('board')
+    expect(await consumeWait(exited('{"kinds":["mail","board"]}') as never, signal, () => {}, true)).toBe('both')
+    // A wait without the flag reads its output as before: mail.
+    expect(await consumeWait(exited('{"kinds":["board"]}') as never, signal, () => {})).toBe('mail')
   })
 
   test('subagent calls are rejected; main loop calls bind', () => {

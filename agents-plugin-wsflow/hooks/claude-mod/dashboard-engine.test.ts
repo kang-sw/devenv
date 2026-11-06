@@ -1,6 +1,6 @@
 import { expect, mock, test, type TestBody } from 'claude-code/testing'
 
-import { ADAPTER, INTAKE_TOOL, labelWhiteboard, type DashboardEvent } from './dashboard'
+import { ADAPTER, INBOX_DRAIN_TOOL, INTAKE_TOOL, labelWhiteboard, type DashboardEvent } from './dashboard'
 import { KNOB } from './register'
 
 type Engine = Parameters<TestBody>[0]
@@ -26,9 +26,18 @@ function world(on: On, opts: { dashboard?: unknown; intake?: Intake } = {}) {
     /** Every intake call's arguments, in order. */
     intakes: [] as { session_key: string; adapter: string; events: DashboardEvent[] }[],
     intake: opts.intake ?? ('ok' as Intake),
-    exits: [] as ((code: number) => void)[],
+    /** Ends the latest wait child: its exit code and, for an arrival, the kinds its JSON names (mail when unset). */
+    exits: [] as ((code: number, kinds?: string[]) => void)[],
     spawns: 0,
+    /** Each wait child's argv. */
+    argvs: [] as string[][],
     prompts: [] as string[],
+    /** Each submitted prompt's origin, as the hooks beneath saw it. */
+    origins: [] as unknown[],
+    /** The board-answer inbox: one text per held message; a drain claims them all. */
+    inbox: [] as string[],
+    /** Every inbox drain call's arguments. */
+    inboxDrains: [] as Record<string, unknown>[],
     recvAnswers: [] as { result: unknown; text: string }[],
     /** The chunks the next model request streams, and its result. */
     chunks: [] as unknown[],
@@ -45,6 +54,10 @@ function world(on: On, opts: { dashboard?: unknown; intake?: Intake } = {}) {
       w.intakes.push(JSON.parse(JSON.stringify(e.args)))
       if (w.intake === 'throw') throw new Error('server gone')
       return w.intake === 'error' ? text('unknown session_key', true) : text('ok: 1 of 1 events applied')
+    }
+    if (e.tool === INBOX_DRAIN_TOOL) {
+      w.inboxDrains.push({ ...e.args })
+      return text(JSON.stringify({ messages: w.inbox.splice(0).map((t, i) => ({ id: `m${i}`, sent_at: 1, text: t, parts: [t], chips: [] })) }))
     }
     if (e.tool !== 'config_get') return text(`no ${e.tool} here`, true)
     if (e.args.key === KNOB.dashboard && opts.dashboard === 'unreadable') return text('ws-mcp is unhealthy', true)
@@ -70,10 +83,11 @@ function world(on: On, opts: { dashboard?: unknown; intake?: Intake } = {}) {
   on('agent.spawn', () => ({ model: 'haiku', agentId: 'a77' }) as never)
   on('classic.Notification', () => ({}) as never)
   on('process.run', () => ({ value: { exitCode: 0, stdout: 'Python 3.12.0\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
-  on('process.spawn', async function* () {
+  on('process.spawn', async function* ($, e) {
     w.spawns += 1
-    const code = await new Promise<number>((resolve) => w.exits.push(resolve))
-    yield* []
+    w.argvs.push([...e.argv])
+    const [code, kinds] = await new Promise<[number, string[] | undefined]>((resolve) => w.exits.push((c, k) => resolve([c, k])))
+    if (code === 0) yield { stream: 'stdout', text: JSON.stringify({ timed_out: false, kinds: kinds ?? ['mail'] }) } as never
     return { value: { code, signal: null } }
   })
   on('tool.register', ($, e, next) => {
@@ -85,6 +99,7 @@ function world(on: On, opts: { dashboard?: unknown; intake?: Intake } = {}) {
   on('tool.call', () => w.toolResult as never)
   on('prompt.submit', ($, e) => {
     w.prompts.push(e.text)
+    w.origins.push(e.origin)
     return { text: e.text }
   })
   return w
@@ -232,5 +247,56 @@ for (const failure of ['throw', 'error'] as const) {
     await w.clock.advance(2500)
     expect(w.intakes.length).toBeGreaterThan(before)
     expect(w.intakes.at(-1)!.events[0]?.kind).toBe('reset')
+  })
+}
+
+const BOARD_FLAG = '--board-inbox'
+
+test('knob on: an idle board wake drains the inbox and submits the message as the user\'s, labelled, entering the ring as whiteboard', async ($, on) => {
+  const w = world(on, { dashboard: true })
+  await start($, w)
+  expect(w.argvs.at(-1)).toContain(BOARD_FLAG)
+  w.inbox.push('pick B')
+  w.exits.at(-1)!(0, ['board'])
+  await w.clock.settle()
+  expect(w.inboxDrains).toEqual([{ session_key: KEY, format: 'json' }])
+  expect(w.prompts).toEqual([labelWhiteboard(w.plugin, 'pick B')])
+  expect(w.origins).toEqual([expect.objectContaining({ kind: 'plugin', name: w.plugin, asUser: true })])
+  await flush(w)
+  expect(sent(w).filter((e) => e.kind === 'user')).toEqual([{ kind: 'user', text: 'pick B', origin: 'whiteboard', at: expect.any(Number) }])
+  // Re-armed with the flag; no mail was drained for the board wake.
+  expect(w.spawns).toBe(2)
+  expect(w.argvs.at(-1)).toContain(BOARD_FLAG)
+})
+
+test('knob on: a mid-turn wake holds the message until the turn ends, then submits it and re-arms with the flag', async ($, on) => {
+  const w = world(on, { dashboard: true })
+  await start($, w)
+  await $.turn.start({ text: 'x', turnId: 't' })
+  w.inbox.push('pick B')
+  w.exits.at(-1)!(0, ['board'])
+  await w.clock.advance(50)
+  expect(w.inboxDrains).toEqual([])
+  expect(w.argvs.at(-1)).not.toContain(BOARD_FLAG)
+  // A tool boundary injects nothing.
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'u1', command: 'ls' } as never)
+  expect(w.inboxDrains).toEqual([])
+  expect(w.prompts).toEqual([])
+  await $.turn.complete({ answer: 'done', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer' } as never)
+  await w.clock.advance(50)
+  expect(w.inboxDrains.length).toBe(1)
+  expect(w.prompts).toEqual([labelWhiteboard(w.plugin, 'pick B')])
+  expect(w.argvs.at(-1)).toContain(BOARD_FLAG)
+})
+
+for (const knob of [false, 'unreadable'] as const) {
+  test(`knob ${String(knob)}: the wait carries no board flag and a turn end drains no inbox`, async ($, on) => {
+    const w = world(on, { dashboard: knob })
+    await start($, w)
+    expect(w.argvs.at(-1)).not.toContain(BOARD_FLAG)
+    await $.turn.start({ text: 'x', turnId: 't' })
+    await $.turn.complete({ answer: 'done', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer' } as never)
+    await w.clock.advance(50)
+    expect(w.inboxDrains).toEqual([])
   })
 }
