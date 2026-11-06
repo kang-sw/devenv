@@ -16,6 +16,7 @@
     "skills/",
     "runtime.json",
     "config-manifest.json",
+    "dashboard-config-manifest.json",
     "pi-lead-guide.md",
     "lead-compact-guide.md",
     "execute-worker-guide.md",

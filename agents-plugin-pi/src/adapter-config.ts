@@ -22,6 +22,9 @@ import type { McpToolCallResult } from "./mcp-stdio-client.ts";
 /** Package-relative manifest path; the bridge resolves it against the plugin directory. */
 export const ADAPTER_CONFIG_MANIFEST_FILE = "config-manifest.json";
 
+/** Package-relative dashboard manifest (namespace `dashboard.`), listed beside the adapter manifest. */
+export const DASHBOARD_CONFIG_MANIFEST_FILE = "dashboard-config-manifest.json";
+
 /** Prefix every adapter knob carries in ws config. */
 export const ADAPTER_CONFIG_NAMESPACE = "pi.";
 

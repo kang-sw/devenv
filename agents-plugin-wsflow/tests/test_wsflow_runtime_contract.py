@@ -47,22 +47,31 @@ class WsflowRuntimeContractTest(unittest.TestCase):
                 "WS_MCP_NO_AGENT": "1",
                 "WS_MCP_NAMESPACE": "wsflow",
                 "WS_MCP_SETUP_TOOL": "setup",
-                "WS_MCP_CONFIG_MANIFESTS": "./config-manifest.json",
+                "WS_MCP_CONFIG_MANIFESTS": "./config-manifest.json;./dashboard-config-manifest.json",
             },
         )
 
     def test_config_manifest_env_resolves_in_both_launch_configs(self):
         # .mcp.json resolves against cwd "." (the plugin root); the Claude
-        # manifest names it under ${CLAUDE_PLUGIN_ROOT}. A path that does not
-        # resolve fails nothing at runtime, so pin that both point at a file.
+        # manifest names each path under ${CLAUDE_PLUGIN_ROOT}. Both list the
+        # package manifest and the dashboard manifest joined by ";" (the one
+        # separator valid on every platform). A path that does not resolve
+        # fails nothing at runtime, so pin that every listed path is a file.
         codex = json.loads((PLUGIN_DIR / ".mcp.json").read_text(encoding="utf-8"))
         claude = json.loads((PLUGIN_DIR / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
         for value, prefix in (
             (codex["mcpServers"]["wsflow"]["env"]["WS_MCP_CONFIG_MANIFESTS"], "./"),
             (claude["mcpServers"]["wsflow"]["env"]["WS_MCP_CONFIG_MANIFESTS"], "${CLAUDE_PLUGIN_ROOT}/"),
         ):
-            self.assertTrue(value.startswith(prefix), value)
-            self.assertTrue((PLUGIN_DIR / value[len(prefix):]).is_file(), value)
+            paths = value.split(";")
+            self.assertEqual(
+                [p[len(prefix):] for p in paths],
+                ["config-manifest.json", "dashboard-config-manifest.json"],
+                value,
+            )
+            for path in paths:
+                self.assertTrue(path.startswith(prefix), value)
+                self.assertTrue((PLUGIN_DIR / path[len(prefix):]).is_file(), path)
 
     def test_runtime_contract_matches_agentless_capabilities(self):
         contract = self.load_contract()

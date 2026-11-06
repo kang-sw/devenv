@@ -17,7 +17,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   sanitizeToolName,
@@ -39,7 +39,7 @@ import {
   resolvedSessionKeyArg,
   type AdvisoryKeyHolder,
 } from "../src/bridge.ts";
-import { ADAPTER_CONFIG_MANIFEST_FILE, WS_MCP_CONFIG_MANIFESTS_ENV } from "../src/adapter-config.ts";
+import { ADAPTER_CONFIG_MANIFEST_FILE, DASHBOARD_CONFIG_MANIFEST_FILE, WS_MCP_CONFIG_MANIFESTS_ENV } from "../src/adapter-config.ts";
 import type { McpToolCallResult } from "../src/mcp-stdio-client.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
@@ -185,7 +185,7 @@ test("production bridge launches ws-mcp with the adapter config manifest injecte
   try {
     handle = await startBridge(pi, { launcherPath: launcher, pluginDir: directory, runtimeJsonPath: join(dirname(fileURLToPath(import.meta.url)), "../runtime.json"), cwd: directory, toolPreviewTuiRef: { current: undefined } });
     const env = JSON.parse(readFileSync(envFile, "utf8"));
-    assert.equal(env[WS_MCP_CONFIG_MANIFESTS_ENV], join(directory, ADAPTER_CONFIG_MANIFEST_FILE));
+    assert.equal(env[WS_MCP_CONFIG_MANIFESTS_ENV], [join(directory, ADAPTER_CONFIG_MANIFEST_FILE), join(directory, DASHBOARD_CONFIG_MANIFEST_FILE)].join(delimiter));
   } finally {
     handle?.shutdown();
     if (oldRole === undefined) delete process.env.WS_PI_SPAWN_ROLE; else process.env.WS_PI_SPAWN_ROLE = oldRole;
