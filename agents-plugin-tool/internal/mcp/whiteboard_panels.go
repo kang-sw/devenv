@@ -61,11 +61,11 @@ func ticketPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 	}
 	count := fmt.Sprintf("%d ready", len(ready))
 	if in.layout == wswhiteboard.LayoutFull {
-		todo = latestTodoTickets(todo, whiteboardLatestTodo)
-		for _, t := range todo {
+		// The chip counts the whole todo/ backlog, not the rows listed.
+		count += fmt.Sprintf(", %d todo", len(todo))
+		for _, t := range latestTodoTickets(todo, whiteboardLatestTodo) {
 			rows = append(rows, row(t))
 		}
-		count += fmt.Sprintf(", %d todo", len(todo))
 	}
 	if len(rows) == 0 {
 		return wswhiteboard.Panel{}, false

@@ -132,6 +132,9 @@ func TestWhiteboardTicketPanel(t *testing.T) {
 	if got := linkTexts(links); strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("full ticket rows = %q, want %q", got, want)
 	}
+	if !strings.Contains(full, `<span class="chip">2 ready, 12 todo</span>`) {
+		t.Fatalf("ticket chip must count the whole backlog: %s", full)
+	}
 	if strings.Contains(full, "Idea X") {
 		t.Fatalf("idea tickets must not be listed")
 	}
