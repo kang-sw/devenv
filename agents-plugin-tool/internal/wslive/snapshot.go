@@ -182,6 +182,8 @@ type UsageCost struct {
 // Repo is the session root's folder and branch state. Branch is empty when
 // the root is not a repository; Upstream is empty when the branch tracks
 // none, and Ahead and Behind count commits against it as of the last fetch.
+// Modified (unstaged), Staged, and Untracked count working-tree entries; all
+// zero is a clean tree and also a read that failed, which show alike.
 type Repo struct {
 	Folder   string `json:"folder"`
 	Branch   string `json:"branch,omitempty"`
@@ -189,6 +191,10 @@ type Repo struct {
 	Upstream string `json:"upstream,omitempty"`
 	Ahead    int    `json:"ahead,omitempty"`
 	Behind   int    `json:"behind,omitempty"`
+
+	Modified  int `json:"modified,omitempty"`
+	Staged    int `json:"staged,omitempty"`
+	Untracked int `json:"untracked,omitempty"`
 }
 
 // Activity is what the lead and a subagent share: the batch view and the
@@ -329,5 +335,6 @@ func CleanRepo(r Repo) Repo {
 	r.Branch = cleanLine(r.Branch, RepoRunes)
 	r.Upstream = cleanLine(r.Upstream, RepoRunes)
 	r.Ahead, r.Behind = max(r.Ahead, 0), max(r.Behind, 0)
+	r.Modified, r.Staged, r.Untracked = max(r.Modified, 0), max(r.Staged, 0), max(r.Untracked, 0)
 	return r
 }

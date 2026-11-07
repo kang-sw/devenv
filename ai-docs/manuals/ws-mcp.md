@@ -88,11 +88,14 @@ tools never depend on it. Its state lives under `<cache root>/dashboard/`:
   context, usage limits, and cost for the page's status band) only while the
   latest result names it, since an older ws-mcp skips the kind per event, and
   the "dashboard off" result names none. The snapshot's `repo` fields (the
-  root's folder, branch, upstream, ahead and behind) come from ws-mcp's own
-  `rev-parse` and `rev-list --left-right --count` reads, cached per session
-  and refreshed at most once per heartbeat interval from the writer's timer,
-  never per change snapshot; there is no automatic fetch, so behind reflects
-  the last one.
+  root's folder, branch, upstream, ahead and behind, and the counts of
+  modified, staged, and untracked working-tree entries) come from ws-mcp's own
+  `rev-parse`, `rev-list --left-right --count`, and `status --porcelain`
+  reads, cached per session and refreshed at most once per heartbeat interval
+  from the writer's timer, never per change snapshot; there is no automatic
+  fetch, so behind reflects the last one. The status read takes no optional
+  lock and shares the 5 s timeout; when it fails the counts stay zero, which
+  the page shows as no change chip, and branch and sync still show.
 - `sessions/<reply-id>/inbox/` - the board-answer inbox (`internal/wsinbox`):
   held messages the user sent from the page, one file each; `drained/` keeps
   the newest 20 as sent records. The adapter-only `dashboard.inbox_drain` tool

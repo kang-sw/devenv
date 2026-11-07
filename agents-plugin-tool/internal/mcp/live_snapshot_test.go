@@ -471,6 +471,31 @@ func TestDashboardSnapshotRepoFields(t *testing.T) {
 	if repo = readSessionRepo(work); repo.Branch != "topic" || repo.Upstream != "" || repo.Ahead != 0 {
 		t.Fatalf("no upstream: %+v", repo)
 	}
+	if repo.Modified != 0 || repo.Staged != 0 || repo.Untracked != 0 {
+		t.Fatalf("clean tree has counts: %+v", repo)
+	}
+	writeFile := func(name string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(work, name), []byte(name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile("tracked")
+	gitCmd(t, work, "add", "tracked")
+	gitCmd(t, work, "commit", "-q", "-m", "tracked")
+	writeFile("tracked") // same bytes: still clean
+	if repo = readSessionRepo(work); repo.Modified != 0 {
+		t.Fatalf("rewritten identical file counts: %+v", repo)
+	}
+	if err := os.WriteFile(filepath.Join(work, "tracked"), []byte("changed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeFile("staged")
+	gitCmd(t, work, "add", "staged")
+	writeFile("loose")
+	if repo = readSessionRepo(work); repo.Modified != 1 || repo.Staged != 1 || repo.Untracked != 1 || repo.Branch != "topic" {
+		t.Fatalf("dirty tree: %+v, want 1 modified, 1 staged, 1 untracked on topic", repo)
+	}
 	plain := filepath.Join(base, "plain")
 	if err := os.Mkdir(plain, 0o755); err != nil {
 		t.Fatal(err)
