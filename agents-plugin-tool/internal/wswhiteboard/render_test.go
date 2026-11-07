@@ -245,15 +245,36 @@ func TestRenderPageContentOnlyTopic(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, topicXML("notes", "# Plan\n\n- one"))
 	out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-	wantAll(t, out, `<section class="topic"><div class="tbar"><span class="tname">notes</span></div>`,
+	wantAll(t, out, `<section class="topic has-doc"><div class="tbar"><span class="tname">notes</span></div>`,
 		`<details class="tdoc" data-key="doc:notes" open>`, "<h1>Plan</h1>", "<li>one</li>")
 	wantNone(t, out, `class="tbody"`, `class="reply`)
 
 	mustApply(t, st, `<wb:close topic="notes"/>`)
 	out = render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-	wantAll(t, out, `<section class="topic quiet closed"><div class="tbar"><span class="tname" title="closed">notes</span></div>`,
+	wantAll(t, out, `<section class="topic quiet closed has-doc"><div class="tbar"><span class="tname" title="closed">notes</span></div>`,
 		`<details class="tdoc" data-key="doc:notes"><summary`, "<h1>Plan</h1>")
 	wantNone(t, out, `data-key="doc:notes" open`)
+}
+
+// TestRenderPageTopicBodyToggleBelongsToTheBar pins the toggle's hook: a topic
+// with a body is marked has-doc (the bar reserves room for the button) and the
+// stylesheet pins the summary onto the bar instead of giving it a row; a
+// topic without a body carries neither the mark nor a details.
+func TestRenderPageTopicBodyToggleBelongsToTheBar(t *testing.T) {
+	for name, layout := range layouts() {
+		st := sampleState()
+		st.Topics = []TopicDoc{{Name: "embed layout", Body: "layout notes", Changed: 12}}
+		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
+		wantAll(t, out, `<section class="topic has-doc"><div class="tbar"><span class="tname">embed layout</span>`,
+			`.topic.has-doc > .tbar { padding-right:`, `details.tdoc > summary { position: absolute;`)
+		start := strings.Index(out, `<span class="tname">embed retention</span>`)
+		if start < 0 {
+			t.Fatalf("%s: topic missing", name)
+		}
+		if open := strings.LastIndex(out[:start], `<section class="topic`); strings.Contains(out[open:start], "has-doc") {
+			t.Errorf("%s: a topic without a body is marked has-doc", name)
+		}
+	}
 }
 
 // TestRenderPageEmbedMarksANewBody: the embed's body summary carries the new

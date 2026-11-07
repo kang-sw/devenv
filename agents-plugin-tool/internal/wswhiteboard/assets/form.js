@@ -26,13 +26,23 @@
     });
   });
   q(".card.assumed").forEach(function (card) {
+    function pick(btn) {
+      var on = btn.getAttribute("aria-pressed") === "true";
+      q(".btn[data-v]", card).forEach(function (b) { b.setAttribute("aria-pressed", "false"); });
+      btn.setAttribute("aria-pressed", on ? "false" : "true");
+      build();
+    }
     q(".btn[data-v]", card).forEach(function (btn) {
-      btn.addEventListener("click", function () {
-        var on = btn.getAttribute("aria-pressed") === "true";
-        q(".btn[data-v]", card).forEach(function (b) { b.setAttribute("aria-pressed", "false"); });
-        btn.setAttribute("aria-pressed", on ? "false" : "true");
-        build();
-      });
+      btn.addEventListener("click", function () { pick(btn); });
+    });
+    // A click on the card itself toggles ok, as an ack row's label toggles its
+    // checkbox; the buttons, links, and the note keep their own behavior, and
+    // a drag that selected text is not a click.
+    card.addEventListener("click", function (e) {
+      if (e.target.closest(".btn, a, textarea")) return;
+      var sel = window.getSelection && window.getSelection();
+      if (sel && !sel.isCollapsed && card.contains(sel.anchorNode)) return;
+      pick(card.querySelector(".btn[data-v=ok]"));
     });
   });
   // Size a note textarea to its content; scrollHeight is 0 while hidden.

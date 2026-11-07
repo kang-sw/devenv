@@ -91,7 +91,80 @@ func TestTopicWithABodyRanksAmongExpandedTopics(t *testing.T) {
 	if quiet := topicView(t, st, LayoutFull, "quiet"); quiet.Quiet || !quiet.DocOpen(false) {
 		t.Fatalf("a quiet topic that gains an open body is not quiet: %+v", quiet)
 	}
-	wantTopicOrder(t, st, "policy", "acks", "quiet", "notes", "filler")
+	wantTopicOrder(t, st, "policy", "quiet", "acks", "notes", "filler")
+}
+
+// A body changed after the board's latest user answer ranks like an open
+// acknowledgement: below open policy topics, above settled and expanded ones.
+// A later answer anywhere on the board drops it back; an assumed answer is
+// not the user's, so it does not.
+func TestChangedBodyRanksLikeAnOpenAcknowledgement(t *testing.T) {
+	st := &State{}
+	settleItems(t, st, "settled", 1)
+	mustApply(t, st, topicXML("notes", "a body"))
+	mustApply(t, st, addXML(ClassPolicy, "policy", "p", "x", "y"))
+	// The settled item's answer predates the body: the body is unread.
+	wantTopicOrder(t, st, "policy", "notes", "settled")
+	if notes := topicView(t, st, LayoutFull, "notes"); notes.Quiet || !notes.DocOpen(false) {
+		t.Fatalf("notes = %+v", notes)
+	}
+	// An assumption is the lead's, not the user's: it adds an assumed item
+	// (rank 1, above the body) and leaves the body unread.
+	mustApply(t, st, addXML(ClassTechnical, "settled", "again"))
+	mustApply(t, st, `<wb:answer id="3" value="ok" assumed="true">assumed</wb:answer>`)
+	wantTopicOrder(t, st, "policy", "settled", "notes")
+	if st.AnswerSeq == st.Seq {
+		t.Fatalf("an assumed answer moved AnswerSeq to %d", st.AnswerSeq)
+	}
+	// Any user answer after the change counts as having seen the body.
+	mustApply(t, st, `<wb:answer id="3" value="ok">fine</wb:answer>`)
+	wantTopicOrder(t, st, "policy", "settled", "notes")
+	if st.AnswerSeq != st.Seq {
+		t.Fatalf("AnswerSeq = %d, want the answering render %d", st.AnswerSeq, st.Seq)
+	}
+	// Changing the body again after that answer ranks it once more.
+	mustApply(t, st, topicXML("notes", "a newer body"))
+	if !rankedAbove(t, st, "notes", "settled") {
+		t.Fatalf("a body changed after the last answer should outrank a settled topic: %v", topicNames(st))
+	}
+	// A closed topic's body never ranks.
+	mustApply(t, st, `<wb:close topic="notes"/>`)
+	if rankedAbove(t, st, "notes", "settled") {
+		t.Fatalf("a closed topic's body ranked: %v", topicNames(st))
+	}
+}
+
+func rankedAbove(t *testing.T, st *State, a, b string) bool {
+	t.Helper()
+	names := topicNames(st)
+	ia, ib := -1, -1
+	for i, n := range names {
+		switch n {
+		case a:
+			ia = i
+		case b:
+			ib = i
+		}
+	}
+	if ia < 0 || ib < 0 {
+		t.Fatalf("topics %q, %q not both in %v", a, b, names)
+	}
+	return ia < ib
+}
+
+// A board stored before AnswerSeq existed derives the answer point from its
+// answered items rather than ranking every body as unread.
+func TestLastAnswerSeqFallsBackForOlderBoards(t *testing.T) {
+	st := &State{}
+	settleItems(t, st, "settled", 1)
+	mustApply(t, st, topicXML("notes", "a body"))
+	st.AnswerSeq = 0
+	if got := st.LastAnswerSeq(); got == 0 {
+		t.Fatalf("LastAnswerSeq = 0 with an answered item on the board")
+	}
+	if (&State{}).LastAnswerSeq() != 0 {
+		t.Fatal("an empty board has no answer")
+	}
 }
 
 // A topic with a body and no items is a topic block of its own; closing it
