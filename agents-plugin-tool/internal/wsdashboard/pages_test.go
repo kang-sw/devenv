@@ -166,16 +166,16 @@ func TestSessionPagesCarryScriptHooks(t *testing.T) {
 		`<div id="bcol" class="bcol"><div id="r-board" class="region r-board" data-region="board"`,
 		`id="tabbar"`, `data-tab="convo"`, `data-tab="board"`, `<span class="tdot"></span>`,
 		`id="gmenu"`, `data-layout="auto"`, `data-layout="split"`, `data-layout="tabs"`,
-		`id="ctext"`, `id="cnote"`, `class="sse-label"`, `id="dash-banner"`,
+		`id="ctext"`, `id="cnote"`, `id="csend"`, `aria-label="send"`, `class="sse-label"`, `id="dash-banner"`,
 	} {
 		if !strings.Contains(live, want) {
 			t.Errorf("live session page lacks %q", want)
 		}
 	}
-	// The composer sends on a key; the copy and send buttons and the lead
-	// strip are gone, and the splitter sits between the tree and the
+	// The composer sends on a key or the thin icon-only send button; the
+	// copy button and the lead strip are gone, and the splitter sits between the tree and the
 	// conversation.
-	for _, gone := range []string{`id="ccopy"`, `id="csend"`, `data-region="lead"`} {
+	for _, gone := range []string{`id="ccopy"`, `data-region="lead"`} {
 		if strings.Contains(live, gone) {
 			t.Errorf("live session page still carries %q", gone)
 		}

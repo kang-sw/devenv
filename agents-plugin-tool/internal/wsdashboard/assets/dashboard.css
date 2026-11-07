@@ -213,9 +213,13 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 
 /* ===== composer: never swapped ===== */
 .composer { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow-hi); padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
-.crow { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; align-items: end; }
+.crow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: stretch; }
 .composer textarea { font: 13.5px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif; color: inherit; background: var(--wb-muted); border: 0; border-radius: 10px; padding: 8px 10px; resize: none; min-height: 38px; max-height: 160px; width: 100%; display: block; }
 .composer textarea:focus { outline: 1.5px solid var(--wb-primary); }
+.csend { display: inline-flex; align-items: center; justify-content: center; width: 34px; padding: 0; border: 0; border-radius: 10px; cursor: pointer; color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); }
+.csend:hover { background: color-mix(in srgb, var(--wb-primary) 24%, var(--wb-card)); }
+.csend:focus-visible { outline: 1.5px solid var(--wb-primary); }
+.csend .i { width: 17px; height: 17px; }
 .cchips { display: flex; flex-wrap: wrap; gap: 5px; }
 .cchips:empty { display: none; }
 .achip { display: inline-flex; align-items: baseline; gap: 4px; max-width: 100%; font-size: 12px; padding: 2px 4px 2px 9px; border-radius: 999px; background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-primary) 35%, transparent); }
