@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -115,7 +116,15 @@ type State struct {
 
 	agents map[string]*agentState
 	usage  *Usage
+	// evicted names the finished subagents retain dropped, oldest first (at
+	// most evictedCap), so a late event for one does not bring it back as a
+	// running agent (staleEvent).
+	evicted []string
 }
+
+// evictedCap bounds State.evicted; an id forgotten past it is recreated by a
+// late event, as before it was remembered.
+const evictedCap = 256
 
 // NewState is an empty state for the session holding sessionKey. The key
 // names the session's reply-id and is scrubbed from every stored text.
@@ -187,6 +196,9 @@ func (st *State) Apply(ev Event, now int64) (Result, error) {
 		st.turnStartedAt, st.turnOrigin = 0, ""
 		res.Changed = true
 	case KindAgent:
+		if st.staleEvent(ev) {
+			return res, nil
+		}
 		if err := st.applyAgent(ev, at); err != nil {
 			return Result{}, err
 		}
@@ -194,6 +206,9 @@ func (st *State) Apply(ev Event, now int64) (Result, error) {
 	case KindPermission:
 		if !ev.Clear && strings.TrimSpace(ev.Tool) == "" {
 			return Result{}, fmt.Errorf("permission needs tool, or clear: true")
+		}
+		if st.staleEvent(ev) {
+			return res, nil
 		}
 		act, err := st.activityFor(ev.AgentID, at)
 		if err != nil {
@@ -275,6 +290,25 @@ func (st *State) finishReply(text string) RingEntry {
 	return entry
 }
 
+// staleEvent reports whether ev, an agent or permission event, names a
+// subagent the state does not hold and must not create: a permission clear
+// (nothing to clear), or an agent event short of status running for a
+// finished subagent retain already dropped. Either would otherwise recreate
+// the subagent as running, a phantom until the next reset. An explicit
+// running status brings the subagent back.
+func (st *State) staleEvent(ev Event) bool {
+	if ev.AgentID == "" {
+		return false
+	}
+	if _, ok := st.agents[ev.AgentID]; ok {
+		return false
+	}
+	if ev.Kind == KindPermission {
+		return ev.Clear
+	}
+	return ev.Status != StatusRunning && slices.Contains(st.evicted, ev.AgentID)
+}
+
 // activityFor is the lead's activity for an empty id, else the subagent's,
 // created running when new.
 func (st *State) activityFor(id string, at int64) (*activityState, error) {
@@ -289,6 +323,7 @@ func (st *State) agent(id string, at int64) *agentState {
 	if !ok {
 		a = &agentState{id: id, status: StatusRunning, startedAt: at}
 		st.agents[id] = a
+		st.evicted = slices.DeleteFunc(st.evicted, func(e string) bool { return e == id })
 	}
 	a.touched = at
 	return a
@@ -483,6 +518,9 @@ func (st *State) retain() {
 		sort.Slice(list, func(i, j int) bool { return newer(list[i], list[j]) })
 		for _, a := range list[keep:] {
 			delete(st.agents, a.id)
+			if a.status != StatusRunning {
+				st.evicted = append(st.evicted, a.id)
+			}
 		}
 	}
 	drop(running, RunningAgentCap, func(a, b *agentState) bool {
@@ -497,6 +535,9 @@ func (st *State) retain() {
 		}
 		return a.id < b.id
 	})
+	if over := len(st.evicted) - evictedCap; over > 0 {
+		st.evicted = slices.Delete(st.evicted, 0, over)
+	}
 }
 
 // Snapshot is the state as a snapshot, stamped with now (epoch ms).

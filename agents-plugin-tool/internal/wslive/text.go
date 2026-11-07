@@ -156,6 +156,19 @@ func (s *scrubber) scrub(text string) string {
 	return text
 }
 
+// ScrubSessionKeys is the live state's key scrub for browser-bound text the
+// state does not hold (mail titles and bodies): each of keys, and any value
+// passed as a named session-key argument, becomes its reply-id handle
+// ("id:<reply-id>"). Scrub a text before capping it, so a cap never cuts a
+// key in half.
+func ScrubSessionKeys(text string, keys ...string) string {
+	var s scrubber
+	for _, key := range keys {
+		s.add(key)
+	}
+	return s.scrub(text)
+}
+
 func replyHandle(key string) string {
 	return wsmailbox.ReplyIDPrefix + wsmailbox.ReplyID(key)
 }

@@ -266,6 +266,32 @@ func TestDashboardReadPageMailBodies(t *testing.T) {
 	}
 }
 
+// TestDashboardMailKeepsSessionKeysFromTheBrowser pins the key scrub on mail
+// text bound for the browser: the session's own key and a named session-key
+// argument in a mail become reply-id handles in the ring's mail title and in
+// the page's mail body.
+func TestDashboardMailKeepsSessionKeysFromTheBrowser(t *testing.T) {
+	f := newLiveFixture(t, true)
+	resetMailboxHistoryClock(t)
+	mustSend(t, f.server, 3, f.keyA, wsmailbox.ReplyIDPrefix+f.replyB, "mine is "+f.keyA+" and session_key: other-secret-key\nbody "+f.keyA)
+	sent := readLiveRing(t, f.sessionDir(f.replyA))
+	if len(sent) != 1 || sent[0].HistoryKey == "" {
+		t.Fatalf("sender ring = %+v", sent)
+	}
+	if title := sent[0].Title; strings.Contains(title, f.keyA) || strings.Contains(title, "other-secret-key") || !strings.Contains(title, wsmailbox.ReplyIDPrefix+f.replyA) {
+		t.Fatalf("ring mail title = %q", title)
+	}
+	reg, ok := readRegistration(t, f.stateDir, f.keyA)
+	if !ok {
+		t.Fatal("no registration")
+	}
+	src := &DashboardSessionSource{store: newSessionStore(), stateDir: func() (string, error) { return f.stateDir, nil }}
+	body := readPageOK(t, src, reg).MailBodies[sent[0].HistoryKey]
+	if body == "" || strings.Contains(body, f.keyA) || strings.Contains(body, "other-secret-key") || !strings.Contains(body, "body "+wsmailbox.ReplyIDPrefix+f.replyA) {
+		t.Fatalf("page mail body = %q", body)
+	}
+}
+
 // TestDashboardFingerprintCoversPageStores pins the widened fingerprint: a
 // ticket file, a mailbox history entry, or a new contact changes it with
 // the session record unchanged, while the clock alone (a contact's

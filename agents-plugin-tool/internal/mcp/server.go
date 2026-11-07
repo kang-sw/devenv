@@ -702,7 +702,10 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 				// Registers the session on the dashboard, or keeps it off.
 				s.dashboardTouch(keyStr, entry.root, false)
 				if params.Name == "config.tune" {
-					defer func() { s.dashboardTouch(keyStr, entry.root, true) }()
+					defer func() {
+						s.dashboardTouch(keyStr, entry.root, true)
+						s.live.forgetEnabled(keyStr)
+					}()
 				}
 			}
 		}

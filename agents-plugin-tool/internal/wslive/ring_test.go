@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -156,5 +157,35 @@ func TestRingReadSkipsJunkAndToleratesUnknownFields(t *testing.T) {
 	}
 	if got, err := ReadRing(filepath.Join(dir, "missing")); err != nil || got != nil {
 		t.Fatalf("missing ring = %v, %v", got, err)
+	}
+}
+
+// TestRingIsOwnerOnly pins the ring's permissions: it holds conversation
+// text, so its directory and entry files are owner-only.
+func TestRingIsOwnerOnly(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permissions")
+	}
+	dir := filepath.Join(t.TempDir(), "ring")
+	if err := AppendRing(dir, []RingEntry{{Kind: RingUser, Text: "private words"}}); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o700 {
+		t.Errorf("ring dir mode = %o, want 700", perm)
+	}
+	names, err := RingNames(dir)
+	if err != nil || len(names) != 1 {
+		t.Fatalf("ring names = %v, %v", names, err)
+	}
+	info, err = os.Stat(filepath.Join(dir, names[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("ring entry mode = %o, want 600", perm)
 	}
 }
