@@ -26,11 +26,12 @@ window.wbMermaidFile = {{.Assets.MermaidFile}};</script>
 {{end}}
 
 {{/* The drawer: the side panels pulled down from the top, over the page.
-The panels region keeps arriving whole; the page script registers a tab per
-panel it shows and shows one panel at a time. The handle hangs from the top
-edge at the header's right end (the header pads its right side clear of
-it) and rides the sheet's bottom edge while open. */}}
-{{define "drawer"}}<div class="drawer" id="drawer"><div class="dr-in"><div class="dr-clip" id="drclip"><div class="dr-sheet" id="drsheet" role="region" aria-label="side panels"><div class="dr-tabs" id="drtabs" role="tablist"></div><div class="dr-body" id="drbody">{{region . "panels"}}</div></div></div><button type="button" class="dr-handle" id="drhandle" aria-controls="drsheet" aria-expanded="false" title="side panels: click or drag down" hidden><span class="dr-wait" title="an approval is waiting">{{icon "lock"}}</span><span class="dr-counts" id="drcounts"></span><span class="tdot"></span>{{icon "chev"}}</button></div></div>{{end}}
+The panels region keeps arriving whole; the page script registers an entry per
+panel it shows, and the sheet shows every present panel at once as a card. The
+handle hangs from the top edge at the header's right end (the header pads its
+right side clear of it), holds one icon per present panel, and rides the
+sheet's bottom edge while open. */}}
+{{define "drawer"}}<div class="drawer" id="drawer"><div class="dr-in"><div class="dr-clip" id="drclip"><div class="dr-sheet" id="drsheet" role="region" aria-label="side panels"><div class="dr-body" id="drbody">{{region . "panels"}}</div></div></div><button type="button" class="dr-handle" id="drhandle" aria-controls="drsheet" aria-expanded="false" title="side panels: click or drag down" hidden><span class="dr-wait" title="an approval is waiting">{{icon "lock"}}</span><span class="dr-icons" id="dricons"></span><span class="tdot"></span>{{icon "chev"}}</button></div></div>{{end}}
 
 {{define "r-head"}}<span class="meta">{{.ReplyID}}{{if .HasBoard}} · #{{.Seq}}{{end}}</span>{{with .Harness}}<span class="host">{{.}}</span>{{end}}<span class="meta">{{.ProjectName}}</span>{{if not .Live}}<span class="ended-chip" title="this session has ended">ended</span>{{end}}{{if not .Adapter}}<span class="nolive" title="no live host adapter: only the session's stores are shown">stores only</span>{{end}}<span class="counts">{{with .CountPolicy}}<span class="chip policy" title="to answer">{{icon "ask"}}{{.}}</span>{{end}}{{with .CountAssumed}}<span class="chip assumed" title="assumed">{{icon "arrow"}}{{.}}</span>{{end}}{{with .CountAcks}}<span class="chip ok" title="to acknowledge">{{icon "check"}}{{.}}</span>{{end}}</span>{{end}}
 

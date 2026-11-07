@@ -395,32 +395,34 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
    under it. .dr-in matches .dwrap's width; the clip reveals the sheet from
    the header's bottom (--drtop) and the handle rides its bottom edge, or
    hangs from the page's top edge while closed. The page script sets the
-   clip height, the sheet height, and the handle's top; .anim animates a
-   click's open or close, never a drag or a resize. */
-:root { --drhw: 116px; --dpad: 16px; }
+   clip height, the sheet height, the handle's top, and --drhw (the handle's
+   own width, which follows its icons). .anim animates a click's open or
+   close, never a drag or a resize. The sheet shows every present panel as a
+   card: equal columns that each scroll on their own, or one stacked column
+   the body scrolls on a narrow screen. */
+:root { --drhw: 0px; --dpad: 16px; }
 .drawer { position: fixed; top: 0; left: 0; right: 0; height: 0; z-index: 40; pointer-events: none; }
 .dr-in { position: relative; max-width: 1680px; margin: 0 auto; }
 .dr-clip { position: absolute; top: var(--drtop, 48px); left: var(--dpad); right: var(--dpad); height: 0; overflow: hidden; pointer-events: auto; visibility: hidden; border-radius: 0 0 var(--wb-radius) var(--wb-radius); box-shadow: var(--wb-shadow-hi); }
 .drawer.open .dr-clip, .drawer.drag .dr-clip { visibility: visible; }
 .drawer.anim .dr-clip { transition: height .18s ease-out, visibility 0s linear .18s; }
 .drawer.anim.open .dr-clip { transition: height .18s ease-out, visibility 0s; }
-.dr-sheet { position: absolute; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; background: var(--wb-card); border-top: 1px solid var(--wb-muted); }
-.dr-tabs { flex: none; display: flex; gap: 3px; padding: 6px 8px; background: var(--wb-muted); overflow-x: auto; }
-.dr-tabs button { flex: none; border: 0; background: transparent; border-radius: 999px; height: 26px; padding: 0 12px; font-weight: 700; font-size: 12.5px; cursor: pointer; display: inline-flex; gap: 6px; align-items: center; color: var(--wb-muted-fg); }
-.dr-tabs button .i { width: 14px; height: 14px; }
-.dr-tabs button .chip { height: 18px; font-size: 11px; padding: 0 7px; background: var(--wb-card); }
-.dr-tabs button[aria-selected="true"] { background: var(--wb-card); color: var(--wb-fg); box-shadow: var(--wb-shadow); }
-.dr-tabs button[aria-selected="true"] .chip { background: var(--wb-muted); }
-.dr-tabs button:focus-visible { outline: 1.5px solid var(--wb-primary); }
-.dr-body { flex: 1 1 0; min-height: 0; overflow: auto; overscroll-behavior: contain; }
-/* a tab shows its panel's body only: the panel's own title bar is the tab */
-.dr-body .r-panels > [hidden] { display: none !important; }
-.dr-body details.panel { background: transparent; box-shadow: none; border-radius: 0; overflow: visible; }
-.dr-body details.panel > summary { display: none; }
-.dr-body details.panel > .body { padding: 10px 14px 14px; }
-.dr-handle { position: absolute; top: 0; right: var(--dpad); width: var(--drhw); height: 34px; padding: 2px 10px 0; border: 0; border-radius: 0 0 8px 8px; pointer-events: auto; cursor: grab; touch-action: none; display: flex; align-items: center; justify-content: flex-end; gap: 7px; background: var(--wb-card); color: var(--wb-muted-fg); box-shadow: var(--wb-shadow-hi); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.dr-sheet { position: absolute; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; background: var(--wb-bg); border-top: 1px solid var(--wb-muted); }
+.dr-body { flex: 1 1 0; min-height: 0; overflow: hidden; padding: 10px; }
+.dr-body .r-panels { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 10px; height: 100%; }
+.dr-body details.panel { min-width: 0; height: 100%; overflow: auto; overscroll-behavior: contain; }
+.dr-body details.panel > summary { position: sticky; top: 0; z-index: 1; cursor: default; }
+.dr-body details.panel.flash { animation: dr-flash 1.1s ease-out; }
+@keyframes dr-flash { 0%, 35% { box-shadow: 0 0 0 2px var(--wb-primary), var(--wb-shadow-hi); } 100% { box-shadow: var(--wb-shadow); } }
+@media (max-width: 759px) {
+  .dr-body { overflow: auto; overscroll-behavior: contain; }
+  .dr-body .r-panels { display: flex; flex-direction: column; height: auto; }
+  .dr-body details.panel { height: auto; overflow: hidden; flex: none; }
+  .dr-body details.panel > summary { position: static; }
+}
+.dr-handle { position: absolute; top: 0; right: var(--dpad); height: 34px; padding: 2px 10px 0; border: 0; border-radius: 0 0 8px 8px; pointer-events: auto; cursor: grab; touch-action: none; display: flex; align-items: center; justify-content: flex-end; gap: 7px; background: var(--wb-card); color: var(--wb-muted-fg); box-shadow: var(--wb-shadow-hi); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .dr-handle[hidden] { display: none; }
-/* the sticky-note shape: a folded bottom-left corner in the theme's own tones */
+/* the inverted corner where the handle meets the page */
 .dr-handle::before { content: ""; position: absolute; left: 0; bottom: 0; width: 10px; height: 10px; border-radius: 0 0 0 8px; background: linear-gradient(45deg, var(--wb-bg) 50%, var(--wb-muted) 50%); }
 .dr-handle:hover { color: var(--wb-fg); }
 .dr-handle:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: -2px; }
@@ -428,23 +430,25 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .drawer.anim .dr-handle { transition: top .18s ease-out; }
 .dr-handle > .i { width: 14px; height: 14px; flex: none; transition: transform .15s; }
 .drawer.open .dr-handle > .i { transform: rotate(180deg); }
-.dr-counts { display: inline-flex; gap: 8px; align-items: center; min-width: 0; overflow: hidden; }
-.dr-badge { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
-.dr-badge .i { width: 12px; height: 12px; }
+.dr-icons { display: inline-flex; gap: 2px; align-items: center; }
+.dr-ico { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 6px; cursor: pointer; }
+.dr-ico:hover { background: var(--wb-muted); color: var(--wb-fg); }
+.dr-ico .i { width: 16px; height: 16px; }
+.dr-ico b { position: absolute; top: -2px; right: -2px; min-width: 14px; height: 14px; padding: 0 3px; box-sizing: border-box; border-radius: 7px; background: var(--wb-primary); color: var(--wb-primary-fg); font-size: 10px; line-height: 14px; text-align: center; font-weight: 800; }
 .dr-handle .tdot { margin-left: -3px; }
-.dr-wait { display: none; align-items: center; margin-right: auto; color: var(--wb-perm-ink); }
+.dr-wait { display: none; align-items: center; color: var(--wb-perm-ink); }
 .dr-wait .i { width: 13px; height: 13px; }
 /* an approval is waiting: an open drawer can cover the agents tree's row */
 .dr-handle.wait { background: color-mix(in srgb, var(--wb-ph-perm) 22%, var(--wb-card)); color: var(--wb-fg); }
 .dr-handle.wait .dr-wait { display: inline-flex; }
 /* the header keeps every line it wraps to clear of the closed handle */
 .dwrap > .top.dr-room { padding-right: calc(var(--drhw) + 6px); }
+/* the header's fixed items sit left after the title */
+.dwrap > .top .counts { margin-left: 0; }
 @media (max-width: 640px) {
-  :root { --drhw: 96px; --dpad: 10px; }
+  :root { --dpad: 10px; }
   .dr-handle { padding: 2px 7px 0; gap: 5px; }
-  .dr-counts { gap: 6px; }
-  .dr-handle > .i, .dr-tabs button .i { display: none; }
-  .dr-tabs button { padding: 0 10px; }
+  .dr-ico:not(.has-badge) { display: none; }
 }
 
 /* ===== index ===== */

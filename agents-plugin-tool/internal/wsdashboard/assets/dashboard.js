@@ -1027,18 +1027,20 @@
   window.addEventListener("blur", function () { closeLinkMenu(false); });
 
   // --- drawer: the side panels pulled down from the top --------------------
-  // A frame of registered tabs over the page. Each entry is { id, title,
+  // A frame of registered entries over the page. Each entry is { id, title,
   // icon, count, badge, content }: functions read at every sync, content
-  // returning the element the tab shows or null when the tab is absent, and
-  // badge (optional) a count for the handle or null. The four panels are the
-  // first entries: views onto the one panels region, read again after each
-  // swap, so a later tab registers here without reworking the frame. Open
-  // state, height, and last tab are this browser's (ws.dashboard.drawer*).
-  var drawer = $("drawer"), drclip = $("drclip"), drsheet = $("drsheet"), drtabs = $("drtabs"), drbody = $("drbody");
-  var drhandle = $("drhandle"), drcounts = $("drcounts"), drheader = doc.querySelector(".dwrap > .top");
-  var DR_OPEN = "ws.dashboard.drawer", DR_H = "ws.dashboard.drawer.h", DR_TAB = "ws.dashboard.drawer.tab";
+  // returning the element the entry's card is or null when the entry is
+  // absent, and badge (optional) a count for the handle icon or null. The
+  // four panels are the first entries: views onto the one panels region,
+  // read again after each swap, so a later entry registers here without
+  // reworking the frame. The sheet shows every present entry's card at once
+  // and the handle holds one icon per present entry. Open state and height
+  // are this browser's (ws.dashboard.drawer*).
+  var drawer = $("drawer"), drclip = $("drclip"), drsheet = $("drsheet"), drbody = $("drbody");
+  var drhandle = $("drhandle"), dricons = $("dricons"), drheader = doc.querySelector(".dwrap > .top");
+  var DR_OPEN = "ws.dashboard.drawer", DR_H = "ws.dashboard.drawer.h";
   var DR_MIN = 160, DR_DEF = 320, DR_SHUT = 80;
-  var drEntries = [], drWant = false, drOpen = false, drHas = false, drSel = null, drH = DR_DEF, drTop = 0, drTabScroll = {};
+  var drRoomW = -1, drEntries = [], drWant = false, drOpen = false, drHas = false, drH = DR_DEF, drTop = 0;
   function drawerTab(entry) { drEntries.push(entry); }
   var SVGNS = "http://www.w3.org/2000/svg";
   function iconEl(href) {
@@ -1049,7 +1051,7 @@
     svg.appendChild(use);
     return svg;
   }
-  // panelTab registers a panel of the panels region (#p-<id>) as a tab: its
+  // panelTab registers a panel of the panels region (#p-<id>) as an entry: its
   // title, icon, and count chip come from the panel's own title bar.
   function panelTab(id, badge) {
     function el() { var r = region("panels"); return r ? r.querySelector('[id="p-' + id + '"]') : null; }
@@ -1079,58 +1081,38 @@
   });
 
   function drPresent() { return drEntries.filter(function (t) { return !!t.content(); }); }
-  // drawerSync re-reads the entries: the tab strip, the shown panel, the
-  // handle's counts, and whether there is a drawer at all. A sync never
-  // changes the open state, the tab, or the scroll.
+  // drawerSync re-reads the entries: each card kept open, the handle's icon
+  // array and badges, and whether there is a drawer at all. A sync never
+  // changes the open state or the scroll.
   function drawerSync() {
     if (!drawer) return;
     var present = drPresent(), ids = {};
     present.forEach(function (t) { ids[t.id] = true; });
-    var sel = drSel && ids[drSel] ? drSel : present.length ? present[0].id : null;
-    // tab buttons: updated in place, so a focused tab keeps its focus
-    q("[data-drtab]", drtabs).forEach(function (b) { if (!ids[b.getAttribute("data-drtab")]) drtabs.removeChild(b); });
-    present.forEach(function (t, i) {
-      var b = drtabs.querySelector('[data-drtab="' + t.id + '"]');
-      if (!b) {
-        b = doc.createElement("button");
-        b.type = "button";
-        b.setAttribute("role", "tab");
-        b.setAttribute("data-drtab", t.id);
-      }
-      if (drtabs.children[i] !== b) drtabs.insertBefore(b, drtabs.children[i] || null);
-      var icon = t.icon(), title = t.title(), count = t.count();
-      var sig = icon + "\n" + title + "\n" + count;
-      if (b.getAttribute("data-sig") !== sig) {
-        b.setAttribute("data-sig", sig);
-        b.textContent = "";
-        if (icon) b.appendChild(iconEl(icon));
-        b.appendChild(doc.createTextNode(title));
-        if (count) { var c = doc.createElement("span"); c.className = "chip"; c.textContent = count; b.appendChild(c); }
-      }
-      b.setAttribute("aria-selected", String(t.id === sel));
-      b.tabIndex = t.id === sel ? 0 : -1;
-    });
-    drEntries.forEach(function (t) {
+    present.forEach(function (t) {
       var el = t.content();
-      if (!el) return;
-      el.hidden = t.id !== sel;
       if (el.tagName === "DETAILS" && !el.open) el.open = true;
     });
-    drSel = sel;
-    // handle counts
-    drcounts.textContent = "";
+    // handle icons: one per present entry, in drawer order
+    q("[data-drtab]", dricons).forEach(function (b) { if (!ids[b.getAttribute("data-drtab")]) dricons.removeChild(b); });
     var tips = [];
-    present.forEach(function (t) {
-      var bd = t.badge && t.badge(t.count());
-      if (!bd) return;
-      var s = doc.createElement("span"), n = doc.createElement("b"), icon = t.icon();
-      s.className = "dr-badge";
-      s.title = bd.title;
-      if (icon) s.appendChild(iconEl(icon));
-      n.textContent = String(bd.n);
-      s.appendChild(n);
-      drcounts.appendChild(s);
-      tips.push(bd.title);
+    present.forEach(function (t, i) {
+      var b = dricons.querySelector('[data-drtab="' + t.id + '"]');
+      if (!b) {
+        b = doc.createElement("span");
+        b.setAttribute("data-drtab", t.id);
+      }
+      if (dricons.children[i] !== b) dricons.insertBefore(b, dricons.children[i] || null);
+      var icon = t.icon(), title = t.title(), bd = t.badge && t.badge(t.count());
+      var sig = icon + "\n" + title + "\n" + (bd ? bd.n : "");
+      if (b.getAttribute("data-sig") !== sig) {
+        b.setAttribute("data-sig", sig);
+        b.className = "dr-ico" + (bd ? " has-badge" : "");
+        b.title = bd ? title + ": " + bd.title : title;
+        b.textContent = "";
+        if (icon) b.appendChild(iconEl(icon));
+        if (bd) { var n = doc.createElement("b"); n.textContent = String(bd.n); b.appendChild(n); }
+      }
+      if (bd) tips.push(bd.title);
     });
     drhandle.setAttribute("data-tip", tips.join(", "));
     drTitle();
@@ -1141,6 +1123,16 @@
       if (drheader) drheader.classList.toggle("dr-room", has);
       drOpen = has && drWant;
       drApply(false);
+    }
+    drRoom();
+  }
+  // drRoom keeps the header clear of the handle, whose width follows its
+  // icons; the header's own padding reads --drhw.
+  function drRoom() {
+    var w = drHas ? Math.ceil(drhandle.getBoundingClientRect().width) : 0;
+    if (w !== drRoomW) {
+      drRoomW = w;
+      doc.documentElement.style.setProperty("--drhw", w + "px");
     }
   }
   function drTitle() {
@@ -1198,28 +1190,32 @@
     if (open) { var d = drhandle.querySelector(".tdot"); if (d) d.classList.remove("on"); }
     drApply(true);
   }
-  function drSelect(id) {
-    if (id === drSel) return;
-    if (drSel) drTabScroll[drSel] = drbody.scrollTop;
-    drSel = id;
-    save(DR_TAB, id);
-    drawerSync();
-    drbody.scrollTop = drTabScroll[id] || 0;
+  // drReveal opens the drawer for a handle icon and flashes that entry's card,
+  // scrolled into view when the cards stack in a scrolling body.
+  function drReveal(id) {
+    var t = drEntries.filter(function (e) { return e.id === id; })[0], el = t && t.content();
+    if (!drOpen) drSetOpen(true);
+    if (!el) return;
+    if (drbody.scrollHeight > drbody.clientHeight) drbody.scrollTop += el.getBoundingClientRect().top - drbody.getBoundingClientRect().top - 10;
+    el.classList.remove("flash");
+    void el.offsetWidth;
+    el.classList.add("flash");
+    setTimeout(function () { el.classList.remove("flash"); }, 1200);
   }
   if (drawer) {
     drWant = load(DR_OPEN) === "1";
     var savedH = parseFloat(load(DR_H));
     if (isFinite(savedH) && savedH > 0) drH = savedH;
-    drSel = load(DR_TAB);
     drawerSync();
     drawerWait();
     // drag: the handle follows the pointer; past the header's bottom the
     // sheet comes with it, and the release sets the height or, short of
     // DR_SHUT, closes. A press that never moves is a click.
-    var drDrag = null, drDragged = false;
+    var drDrag = null, drDragged = false, drIcon = null;
     drhandle.addEventListener("pointerdown", function (e) {
       if (e.button !== undefined && e.button !== 0) return;
       drMeasure();
+      drIcon = e.target.closest ? e.target.closest("[data-drtab]") : null;
       drDrag = { y0: e.clientY, off: e.clientY - drhandle.getBoundingClientRect().top, moved: false, ext: 0 };
       try { drhandle.setPointerCapture(e.pointerId); } catch (x) { /* no capture: the moves still land */ }
     });
@@ -1253,20 +1249,18 @@
     }
     drhandle.addEventListener("pointerup", drEnd);
     drhandle.addEventListener("pointercancel", drEnd);
-    drhandle.addEventListener("click", function () { if (!drDragged) drSetOpen(!drOpen); });
-    drtabs.addEventListener("click", function (e) {
-      var b = e.target.closest && e.target.closest("[data-drtab]");
-      if (b) drSelect(b.getAttribute("data-drtab"));
+    // The pressed icon is remembered at pointerdown: with the pointer
+    // captured, the click lands on the handle itself.
+    drhandle.addEventListener("click", function () {
+      if (drDragged) return;
+      var ic = drIcon;
+      drIcon = null;
+      if (ic) drReveal(ic.getAttribute("data-drtab"));
+      else drSetOpen(!drOpen);
     });
-    drtabs.addEventListener("keydown", function (e) {
-      var d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
-      if (!d) return;
-      var bs = q("[data-drtab]", drtabs), i = bs.indexOf(doc.activeElement);
-      if (i < 0) return;
-      e.preventDefault();
-      var b = bs[(i + d + bs.length) % bs.length];
-      drSelect(b.getAttribute("data-drtab"));
-      b.focus();
+    // A card's title bar is not a toggle: every card stays open.
+    drbody.addEventListener("click", function (e) {
+      if (e.target.closest && e.target.closest("details.panel > summary")) e.preventDefault();
     });
     // Escape closes the drawer after any open menu (link menu, gear menu)
     // has had it, and never while the composer has focus: there Escape
@@ -1290,6 +1284,8 @@
     // follows its bottom edge. A resize re-clamps the height without saving.
     window.addEventListener("resize", function () { drApply(false); });
     if (window.ResizeObserver && drheader) new ResizeObserver(function () { drApply(false); }).observe(drheader);
+    // The handle's width follows its icons; the header pads clear of it.
+    if (window.ResizeObserver) new ResizeObserver(drRoom).observe(drhandle);
     // The board-first page scrolls the document, and the header with it: the
     // sheet follows the header's bottom (the live layout never scrolls, so
     // this never fires there). Once a frame, and only when the bottom moved,
