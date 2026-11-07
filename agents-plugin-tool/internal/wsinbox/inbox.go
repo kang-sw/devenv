@@ -28,6 +28,12 @@
 // takes every held entry; a steer-only drain (DrainSteer) takes only the
 // steered ones, which the adapter injects mid-turn.
 //
+// An attached image carries a number, which the send's text names it by
+// with an "[Image #N]" marker and the delivered message lists it by with an
+// "Image #N: <path>" line. Numbers are unique within an entry; a merge
+// renumbers the later send's images and markers to continue the earlier
+// ones, since the merged entry reaches the session as one message.
+//
 // Images a send attaches live in the attachments/ subdirectory as
 // <upload-id>-<n>.<ext> files the dashboard daemon writes; an entry records
 // their absolute paths. A file is never renamed and its name is never tied to
@@ -52,6 +58,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -75,6 +82,9 @@ const (
 	maxTextBytes = 64 << 10
 	maxChips     = 100
 	maxNoteBytes = 4 << 10
+	// maxImageNum bounds an image number a send names; a merge may number
+	// past it.
+	maxImageNum = 9999
 )
 
 var (
@@ -89,6 +99,10 @@ var (
 
 	entryNamePattern = regexp.MustCompile(`^[0-9]{8}T[0-9]{6}\.[0-9]{9}Z-[0-9a-f]{8}\.json$`)
 	chipIDPattern    = regexp.MustCompile(`^[0-9]{1,6}$`)
+	// imageMarkerPattern is an ImageMarker in a send's text.
+	imageMarkerPattern = regexp.MustCompile(`\[Image #([1-9][0-9]{0,5})\]`)
+	// imageLinePattern is an ImageLine.
+	imageLinePattern = regexp.MustCompile(`^Image #([1-9][0-9]{0,5}): (.+)$`)
 	answerPattern    = regexp.MustCompile(`^[A-Za-z0-9]{1,16}$`)
 	// attachmentNamePattern is <upload-id>-<n>.<ext>: a 16-hex upload id
 	// minted per message request, the image's 1-based index in it, and the
@@ -116,6 +130,10 @@ type Entry struct {
 	// Images holds the absolute paths of the attached image files, in send
 	// order; a path is listed once.
 	Images []string `json:"images,omitempty"`
+	// ImageNums holds each image's number, parallel to Images. An entry
+	// written before images were numbered has none; Nums numbers its images
+	// 1..n.
+	ImageNums []int `json:"imageNums,omitempty"`
 	// SentAt is the first send's time, epoch milliseconds.
 	SentAt int64 `json:"sentAt,omitempty"`
 	// Steer marks an entry the user promoted to steering: the adapter
@@ -169,18 +187,48 @@ func AttachmentName(attachDir, path string) (string, bool) {
 	return name, ValidAttachmentName(name)
 }
 
-// ImageLine is the line the delivered message carries for one attached
-// image; the dashboard page reads it back to show the image.
-func ImageLine(path string) string { return "[image: " + path + "]" }
+// ImageMarker is the marker a send's text names image n by.
+func ImageMarker(n int) string { return "[Image #" + strconv.Itoa(n) + "]" }
 
-// ImageLinePath returns the path an ImageLine carries; false for any other
-// line.
-func ImageLinePath(line string) (string, bool) {
-	if !strings.HasPrefix(line, "[image: ") || !strings.HasSuffix(line, "]") {
-		return "", false
+// ImageMarkers calls fn with each ImageMarker in text: the byte range it
+// spans and its number.
+func ImageMarkers(text string, fn func(start, end, n int)) {
+	for _, m := range imageMarkerPattern.FindAllStringSubmatchIndex(text, -1) {
+		n, _ := strconv.Atoi(text[m[2]:m[3]])
+		fn(m[0], m[1], n)
 	}
-	path := line[len("[image: ") : len(line)-1]
-	return path, path != ""
+}
+
+// ImageLine is the line the delivered message carries for attached image n;
+// the dashboard page reads it back to show the image.
+func ImageLine(n int, path string) string { return "Image #" + strconv.Itoa(n) + ": " + path }
+
+// ParseImageLine returns the number and path an image line carries: an
+// ImageLine, or the "[image: <path>]" line messages carried before images
+// were numbered, whose number is 0. False for any other line.
+func ParseImageLine(line string) (n int, path string, ok bool) {
+	if m := imageLinePattern.FindStringSubmatch(line); m != nil {
+		n, _ = strconv.Atoi(m[1])
+		return n, m[2], true
+	}
+	if strings.HasPrefix(line, "[image: ") && strings.HasSuffix(line, "]") {
+		path = line[len("[image: ") : len(line)-1]
+		return 0, path, path != ""
+	}
+	return 0, "", false
+}
+
+// Nums returns each image's number, parallel to Images: ImageNums, or 1..n
+// for an entry that has none.
+func (e Entry) Nums() []int {
+	if len(e.ImageNums) == len(e.Images) {
+		return e.ImageNums
+	}
+	nums := make([]int, len(e.Images))
+	for i := range nums {
+		nums[i] = i + 1
+	}
+	return nums
 }
 
 // NameForID maps an entry ID back to its file name; false when id is not a
@@ -200,9 +248,10 @@ func (e Entry) Text() string {
 		}
 	}
 	if len(e.Images) > 0 {
+		nums := e.Nums()
 		lines := make([]string, len(e.Images))
 		for i, path := range e.Images {
-			lines[i] = ImageLine(path)
+			lines[i] = ImageLine(nums[i], path)
 		}
 		paras = append(paras, strings.Join(lines, "\n"))
 	}
@@ -247,8 +296,12 @@ func AnswerBlock(chips []Chip) string {
 
 // Normalize trims and checks one send: empty parts are dropped, chips are
 // validated, a later chip for an item replaces an earlier one, and a repeated
-// image path is dropped. An image counts as content. It returns ErrEmpty when
-// nothing is left to send and an ErrInvalid error for a malformed one.
+// image path is dropped with its number. An image counts as content. Image
+// numbers are optional: ImageNums is empty or parallel to Images, a number is
+// unique and at most maxImageNum, and an image numbered 0 (or every image,
+// when ImageNums is empty) gets the next number above the highest. The
+// result always numbers its images. It returns ErrEmpty when nothing is left
+// to send and an ErrInvalid error for a malformed one.
 func Normalize(e Entry) (Entry, error) {
 	out := Entry{SchemaVersion: SchemaVersion, SentAt: e.SentAt}
 	size := 0
@@ -284,17 +337,45 @@ func Normalize(e Entry) (Entry, error) {
 		}
 		out.Chips = putChip(out.Chips, c)
 	}
-	for _, path := range e.Images {
+	if len(e.ImageNums) != 0 && len(e.ImageNums) != len(e.Images) {
+		return Entry{}, fmt.Errorf("%w: %d image numbers for %d images", ErrInvalid, len(e.ImageNums), len(e.Images))
+	}
+	var nums []int
+	for i, path := range e.Images {
 		if path = strings.TrimSpace(path); path == "" {
 			continue
 		}
 		if !filepath.IsAbs(path) || strings.ContainsAny(path, "\x00\r\n") {
 			return Entry{}, fmt.Errorf("%w: image path %q", ErrInvalid, path)
 		}
-		out.Images = putImage(out.Images, path)
+		if indexOf(out.Images, path) >= 0 {
+			continue
+		}
+		n := 0
+		if len(e.ImageNums) != 0 {
+			n = e.ImageNums[i]
+		}
+		if n < 0 || n > maxImageNum {
+			return Entry{}, fmt.Errorf("%w: image number %d", ErrInvalid, n)
+		}
+		if n != 0 && containsInt(nums, n) {
+			return Entry{}, fmt.Errorf("%w: image number %d given twice", ErrInvalid, n)
+		}
+		out.Images = append(out.Images, path)
+		nums = append(nums, n)
 	}
 	if len(out.Images) > MaxImages {
 		return Entry{}, fmt.Errorf("%w: more than %d images", ErrInvalid, MaxImages)
+	}
+	if len(out.Images) > 0 {
+		next := maxInt(nums)
+		for i := range nums {
+			if nums[i] == 0 {
+				next++
+				nums[i] = next
+			}
+		}
+		out.ImageNums = nums
 	}
 	if len(out.Parts) == 0 && len(out.Chips) == 0 && len(out.Images) == 0 {
 		return Entry{}, ErrEmpty
@@ -313,36 +394,98 @@ func putChip(chips []Chip, c Chip) []Chip {
 	return append(chips, c)
 }
 
-// putImage appends path unless images already lists it.
-func putImage(images []string, path string) []string {
-	for _, p := range images {
-		if p == path {
-			return images
+func indexOf(list []string, s string) int {
+	for i, v := range list {
+		if v == s {
+			return i
 		}
 	}
-	return append(images, path)
+	return -1
+}
+
+func containsInt(list []int, n int) bool {
+	for _, v := range list {
+		if v == n {
+			return true
+		}
+	}
+	return false
+}
+
+func maxInt(list []int) int {
+	m := 0
+	for _, v := range list {
+		if v > m {
+			m = v
+		}
+	}
+	return m
 }
 
 // Merge appends add's parts and images to base's and lays add's chips over
 // base's: the later chip for an item wins. base's first-send time is kept.
-// The image cap is the caller's to check before the send.
+// add's images are renumbered to continue base's, each number raised by
+// base's highest, and every marker in add's parts naming one of add's images
+// is rewritten to its new number; an image base already lists takes base's
+// number. The image cap is the caller's to check before the send.
 func Merge(base, add Entry) Entry {
 	out := Entry{SchemaVersion: SchemaVersion, SentAt: base.SentAt}
 	if out.SentAt == 0 {
 		out.SentAt = add.SentAt
 	}
-	out.Parts = append(append([]string{}, base.Parts...), add.Parts...)
 	out.Chips = append([]Chip{}, base.Chips...)
 	for _, c := range add.Chips {
 		out.Chips = putChip(out.Chips, c)
 	}
-	for _, path := range base.Images {
-		out.Images = putImage(out.Images, path)
+	baseNums := base.Nums()
+	for i, path := range base.Images {
+		if indexOf(out.Images, path) < 0 {
+			out.Images = append(out.Images, path)
+			out.ImageNums = append(out.ImageNums, baseNums[i])
+		}
 	}
-	for _, path := range add.Images {
-		out.Images = putImage(out.Images, path)
+	offset := maxInt(out.ImageNums)
+	renum := map[int]int{}
+	addNums := add.Nums()
+	for i, path := range add.Images {
+		if j := indexOf(out.Images, path); j >= 0 {
+			renum[addNums[i]] = out.ImageNums[j]
+			continue
+		}
+		renum[addNums[i]] = addNums[i] + offset
+		out.Images = append(out.Images, path)
+		out.ImageNums = append(out.ImageNums, addNums[i]+offset)
+	}
+	out.Parts = append([]string{}, base.Parts...)
+	for _, p := range add.Parts {
+		out.Parts = append(out.Parts, renumberMarkers(p, renum))
 	}
 	return out
+}
+
+// renumberMarkers rewrites each ImageMarker in text whose number renum maps
+// to its new number, all at once, so a rewritten marker is never rewritten
+// again.
+func renumberMarkers(text string, renum map[int]int) string {
+	if len(renum) == 0 {
+		return text
+	}
+	var b strings.Builder
+	last := 0
+	ImageMarkers(text, func(start, end, n int) {
+		to, ok := renum[n]
+		if !ok || to == n {
+			return
+		}
+		b.WriteString(text[last:start])
+		b.WriteString(ImageMarker(to))
+		last = end
+	})
+	if last == 0 {
+		return text
+	}
+	b.WriteString(text[last:])
+	return b.String()
 }
 
 // stampNow is the entry name clock (a test seam).

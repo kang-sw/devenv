@@ -128,6 +128,7 @@ func loadDashboardAssets() (*dashboardAssets, error) {
 			"spanText": spanText,
 			"toolName": toolName,
 			"shortID":  shortID,
+			"marked":   markedText,
 		}
 		a.tmpl, dashboardAssetsErr = template.New("dashboard").Funcs(funcs).ParseFS(dashboardFS, "assets/dashboard.tmpl")
 		if dashboardAssetsErr == nil {
