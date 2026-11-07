@@ -638,7 +638,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-07T15:17:56Z"
+        "touched_at": "2026-11-07T15:18:31Z",
+        "impl": {
+          "branch": "impl/develop/plank-shrug-perm"
+        }
       }
     },
     "261107-feat-ws-tracker-ledger-protocol": {
