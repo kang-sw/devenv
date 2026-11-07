@@ -297,6 +297,17 @@ details.panel .body { container-type: inline-size; }
 .reply .allok:has(input:checked) { color: var(--wb-fg); }
 .reply .hint { font-size: 12px; color: var(--wb-muted-fg); min-width: 14px; }
 
+/* open-question pill: a zero-height sticky wrapper at each end of the board's scroll area carries the pill, so showing it moves nothing; the bottom offset is set by pill.js to clear the reply bar */
+.oq-wrap { position: sticky; height: 0; z-index: 4; pointer-events: none; text-align: center; }
+.oq-wrap.top { top: 10px; }
+.oq-wrap.bot { bottom: 10px; }
+.oq-pill { position: absolute; left: 50%; transform: translateX(-50%); pointer-events: auto; cursor: pointer; border: 0; height: 28px; padding: 0 14px; border-radius: 999px; background: var(--wb-policy); color: var(--wb-on-policy); box-shadow: 0 0 0 2px var(--wb-bg), var(--wb-shadow-hi); font-size: 12.5px; font-weight: 700; line-height: 1; white-space: nowrap; }
+.oq-pill[hidden] { display: none; }
+.oq-wrap.top .oq-pill { top: 0; }
+.oq-wrap.bot .oq-pill { bottom: 0; }
+.oq-pill:hover { filter: brightness(1.1); }
+.oq-pill:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 2px; }
+
 /* update banner (full page) and in-page link target highlight */
 .banner { display: none; position: sticky; top: 0; z-index: 5; margin: -16px -16px 12px; padding: 6px 16px; background: var(--wb-now); color: var(--wb-on-now); text-align: center; font-size: 16px; font-weight: 700; cursor: pointer; box-shadow: var(--wb-shadow-hi); }
 .banner.show { display: block; }
