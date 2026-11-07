@@ -192,7 +192,9 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .msg.fromlead .bub { background: var(--wb-card); border-radius: 12px 12px 12px 4px; padding: 8px 12px; box-shadow: var(--wb-shadow); }
 /* a lead reply is markdown: block spacing comes from the board's .md rules; here only wrapping and overflow */
 .msg .bub.md { white-space: normal; min-width: 0; }
-.msg .bub.md pre, .msg .bub.md table { max-width: 100%; overflow-x: auto; }
+.msg .bub.md pre { max-width: 100%; overflow-x: auto; }
+/* chat bubbles keep content-sized tables that scroll sideways; the board's tables span the width (page.css) */
+.msg .bub.md table { display: block; width: fit-content; max-width: 100%; overflow-x: auto; }
 .msg .bub.md pre { white-space: pre; overflow-wrap: normal; }
 .msg .bub.md h1, .msg .bub.md h2, .msg .bub.md h3, .msg .bub.md h4, .msg .bub.md h5, .msg .bub.md h6 { font-weight: 700; margin-top: 8px; }
 .msg .bub.md > h1:first-child, .msg .bub.md > h2:first-child, .msg .bub.md > h3:first-child { margin-top: 0; }
