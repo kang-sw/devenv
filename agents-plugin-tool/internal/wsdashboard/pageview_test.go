@@ -1,6 +1,7 @@
 package wsdashboard
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 	"testing"
@@ -94,7 +95,7 @@ func TestPeerGroupMergesResolvesAndRetains(t *testing.T) {
 	peerSnap := liveSnap(now, wslive.Lead{Activity: wslive.Activity{Phase: wslive.PhaseTool}},
 		wslive.Agent{ID: "p1", Status: wslive.StatusRunning})
 	sessions := map[string]Session{
-		"servedpeer": liveSession("servedpeer", "/q", now),
+		"servedpeer": liveSession("servedpeer", "/p", now),
 		"endedpeer":  endedSession("endedpeer", "/q", now),
 	}
 	snaps := map[string]*wslive.Snapshot{"servedpeer": peerSnap}
@@ -150,7 +151,7 @@ func TestPeerTreeIsOneLevelDeep(t *testing.T) {
 	// The peer's snapshot carries agents; its own contacts are never read,
 	// so its peer group cannot appear inside this page.
 	peerSnap := liveSnap(now, wslive.Lead{}, wslive.Agent{ID: "x", Status: wslive.StatusRunning})
-	sessions := map[string]Session{"peer": liveSession("peer", "/q", now)}
+	sessions := map[string]Session{"peer": liveSession("peer", "/p", now)}
 	v := buildSessionView(pageInputs{Session: liveSession("self", "/p", now), Snapshot: liveSnap(now, wslive.Lead{}), Now: now,
 		Page:   PageContent{Contacts: []Contact{{Address: "id:peer", ReplyID: "peer", LastExchange: now}}},
 		Lookup: lookupOf(sessions, map[string]*wslive.Snapshot{"peer": peerSnap})})
@@ -166,6 +167,88 @@ func TestPeerTreeIsOneLevelDeep(t *testing.T) {
 		Lookup: lookupOf(sessions, map[string]*wslive.Snapshot{"peer": &stale})})
 	if row := v.Tree.Peers.Live[0]; row.Adapter || len(row.Agents) != 0 {
 		t.Fatalf("a peer without an adapter carries live state: %+v", row)
+	}
+}
+
+// renderTree renders the Agents region of a view through the page template.
+func renderTree(t *testing.T, v SessionView) string {
+	t.Helper()
+	a, err := loadDashboardAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := a.tmpl.ExecuteTemplate(&buf, "r-tree", v); err != nil {
+		t.Fatal(err)
+	}
+	return buf.String()
+}
+
+func TestPeerWorktreeCompactAndOrder(t *testing.T) {
+	now := testNow
+	at := func(min int) time.Time { return now.Add(-time.Duration(min) * time.Minute) }
+	snap := func() *wslive.Snapshot {
+		return liveSnap(now, wslive.Lead{Activity: wslive.Activity{Phase: wslive.PhaseTool, Batches: []wslive.BatchView{{Seq: 1, EndedAt: 1}, {Seq: 2, Running: &wslive.RunningView{ToolName: "Bash"}}}}},
+			wslive.Agent{ID: "a", Status: wslive.StatusRunning})
+	}
+	sessions := map[string]Session{
+		"samewt":   liveSession("samewt", "/p/", now), // Clean makes it equal to /p
+		"otherwt":  liveSession("otherwt", "/q", now),
+		"otherwt2": liveSession("otherwt2", "/q", now),
+		"gone":     endedSession("gone", "/q", now),
+	}
+	snaps := map[string]*wslive.Snapshot{"samewt": snap(), "otherwt": snap(), "otherwt2": snap(), "gone": snap()}
+	contacts := []Contact{
+		{Address: "id:otherwt", ReplyID: "otherwt", LastExchange: at(1)},
+		{Address: "id:samewt", ReplyID: "samewt", LastExchange: at(5)},
+		{Address: "id:otherwt2", ReplyID: "otherwt2", LastExchange: at(2)},
+		{Address: "id:unserved", ReplyID: "unserved", LastExchange: at(3), PresenceLive: true},
+		{Address: "id:gone", ReplyID: "gone", LastExchange: at(4)},
+	}
+	v := buildSessionView(pageInputs{Session: liveSession("self", "/p", now), Snapshot: liveSnap(now, wslive.Lead{}), Now: now,
+		Page: PageContent{Contacts: contacts}, Lookup: lookupOf(sessions, snaps)})
+	g := v.Tree.Peers
+	var order []string
+	for _, r := range g.Live {
+		order = append(order, r.ReplyID)
+	}
+	if want := []string{"samewt", "otherwt", "otherwt2", "unserved"}; fmt.Sprint(order) != fmt.Sprint(want) {
+		t.Fatalf("live order = %v, want %v", order, want)
+	}
+	same, other := g.Live[0], g.Live[1]
+	if !same.SameWorktree || same.Compact || !same.Adapter || len(same.Agents) != 1 || same.AgentCount != 1 || same.Lead.Phase != wslive.PhaseTool || len(same.Lead.Finished) != 1 || same.Lead.Running == nil {
+		t.Errorf("same-worktree peer = %+v", same)
+	}
+	if other.SameWorktree || !other.Compact || !other.Adapter || other.Lead.Phase != wslive.PhaseTool ||
+		len(other.Agents) != 0 || other.AgentCount != 0 || len(other.Lead.Finished) != 0 || other.Lead.Running != nil {
+		t.Errorf("other-worktree peer = %+v", other)
+	}
+	if len(g.Ended) != 1 || g.Ended[0].Compact || len(g.Ended[0].Agents) != 1 {
+		t.Errorf("ended peer = %+v", g.Ended)
+	}
+	html := renderTree(t, v)
+	if got := strings.Count(html, `<details class="peer live"`); got != 1 {
+		t.Errorf("expanding live peers = %d: %s", got, html)
+	}
+	if got := strings.Count(html, `class="peer live compact"`); got != 2 {
+		t.Errorf("compact peers = %d: %s", got, html)
+	}
+	// The header chip counts every live peer: 2 compact + 1 same + 1 unserved.
+	if !strings.Contains(html, `<span class="chip">`+"\u003c"[:0]) && !strings.Contains(html, `4</span></span></div>`) {
+		t.Errorf("mail chip does not count every live peer: %s", html)
+	}
+	// The compact row has the phase mark and last mail but no tool, count, or tree.
+	i := strings.Index(html, `class="peer live compact"`)
+	row := html[i : i+strings.Index(html[i:], "</div>")]
+	for _, want := range []string{`href="/s/otherwt"`, `class="spin`, `last mail exchange`} {
+		if !strings.Contains(row, want) {
+			t.Errorf("compact row lacks %q: %s", want, row)
+		}
+	}
+	for _, not := range []string{"ptool", `title="subagents"`, "ptree", "pline"} {
+		if strings.Contains(row, not) {
+			t.Errorf("compact row carries %q: %s", not, row)
+		}
 	}
 }
 
