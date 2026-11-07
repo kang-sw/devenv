@@ -105,9 +105,18 @@ text; a board image inside the session's project root loads through `GET
 /s/<reply-id>/image?path=<root-relative path>`, which serves only an
 image-extension file that still resolves inside the root after every symlink
 (404 otherwise), and any other image renders as path text. The live layout's
-composer sends: `POST /s/<reply-id>/message {text, chips}` holds the message
-in the session's inbox (merged into a still-held one that is not steered),
-`POST /s/<reply-id>/cancel {id}` takes a held one back, and `POST
+composer sends: `POST /s/<reply-id>/message {text, chips, images, refs,
+refNums}` holds the message in the session's inbox (merged into a still-held
+one that is not steered). `images` are new uploads `{name, data, n}` (base64,
+sniffed as PNG/JPEG/GIF/WebP, at most 8 per held message), `refs` name files
+a cancel returned, and `refNums` numbers them; the daemon writes the uploads
+into the inbox's `attachments/` directory. The text names image `n` with an
+`[Image #n]` marker, and the delivered message is the text, one `Image #n:
+<absolute path>` line per image, then the board answers; a send that merges renumbers its
+images and markers to continue the held message's, under the daemon's inbox
+lock. The page still reads the older `[image: <path>]` lines. `POST
+/s/<reply-id>/cancel {id}` takes a held one back, answering `{text, chips,
+images, nums}`, and `POST
 /s/<reply-id>/steer {id}` promotes a held one to steering, answering the
 rewritten entry's new `{id}` (409 once the session has received it). The
 adapter claims a steered message at the session's next tool boundary instead

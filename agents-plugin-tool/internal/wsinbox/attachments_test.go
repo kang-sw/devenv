@@ -42,21 +42,40 @@ func sendImages(t *testing.T, dir, text string, images ...string) (string, bool)
 }
 
 func TestTextListsImagesAfterThePartsAndBeforeTheAnswers(t *testing.T) {
-	e := Entry{Parts: []string{"look", "and this"}, Images: []string{"/s/a/1.png", "/s/a/2.jpg"}, Chips: []Chip{{ID: "03", Answer: "a"}}}
-	want := "look\n\nand this\n\n[image: /s/a/1.png]\n[image: /s/a/2.jpg]\n\n(03) a"
+	e := Entry{Parts: []string{"look [Image #1]", "and this [Image #3]"}, Images: []string{"/s/a/1.png", "/s/a/2.jpg"}, ImageNums: []int{1, 3}, Chips: []Chip{{ID: "03", Answer: "a"}}}
+	want := "look [Image #1]\n\nand this [Image #3]\n\nImage #1: /s/a/1.png\nImage #3: /s/a/2.jpg\n\n(03) a"
 	if got := e.Text(); got != want {
 		t.Fatalf("Text = %q, want %q", got, want)
 	}
-	if got := (Entry{Images: []string{"/x/y.png"}}).Text(); got != "[image: /x/y.png]" {
-		t.Fatalf("image-only Text = %q", got)
+	// An entry written before images were numbered numbers them 1..n.
+	if got := (Entry{Images: []string{"/x/y.png", "/x/z.png"}}).Text(); got != "Image #1: /x/y.png\nImage #2: /x/z.png" {
+		t.Fatalf("unnumbered image-only Text = %q", got)
 	}
-	for _, line := range []string{ImageLine("/x/y.png")} {
-		if p, ok := ImageLinePath(line); !ok || p != "/x/y.png" {
-			t.Fatalf("ImageLinePath(%q) = %q, %v", line, p, ok)
+}
+
+// TestParseImageLineReadsBothForms: the numbered line and the unnumbered
+// "[image: <path>]" line older messages carry both parse; anything else does
+// not.
+func TestParseImageLineReadsBothForms(t *testing.T) {
+	cases := []struct {
+		line string
+		n    int
+		path string
+		ok   bool
+	}{
+		{ImageLine(4, "/x/y.png"), 4, "/x/y.png", true},
+		{"[image: /x/y.png]", 0, "/x/y.png", true},
+		{"[image: ]", 0, "", false},
+		{"Image #0: /x/y.png", 0, "", false},
+		{"Image #2:", 0, "", false},
+		{"see Image #2: /x/y.png", 0, "", false},
+		{"plain", 0, "", false},
+	}
+	for _, c := range cases {
+		n, path, ok := ParseImageLine(c.line)
+		if n != c.n || path != c.path || ok != c.ok {
+			t.Errorf("ParseImageLine(%q) = %d, %q, %v; want %d, %q, %v", c.line, n, path, ok, c.n, c.path, c.ok)
 		}
-	}
-	if _, ok := ImageLinePath("[image: ]"); ok {
-		t.Fatal("an empty image line parsed")
 	}
 }
 
@@ -81,6 +100,87 @@ func TestNormalizeCountsImagesAsContentAndChecksThem(t *testing.T) {
 	}
 	if _, err := Normalize(Entry{Images: []string{" "}}); !errors.Is(err, ErrEmpty) {
 		t.Fatalf("blank image only: %v, want ErrEmpty", err)
+	}
+}
+
+// TestNormalizeNumbersImages: given numbers are kept, gaps included; a
+// repeated path drops its number with it; an unnumbered image gets the next
+// number above the highest; a malformed numbering is refused.
+func TestNormalizeNumbersImages(t *testing.T) {
+	d := t.TempDir()
+	a, b, c := filepath.Join(d, "a.png"), filepath.Join(d, "b.png"), filepath.Join(d, "c.png")
+	e, err := Normalize(Entry{Images: []string{a, " ", b, a}, ImageNums: []int{2, 9, 5, 7}})
+	if err != nil || len(e.ImageNums) != 2 || e.ImageNums[0] != 2 || e.ImageNums[1] != 5 {
+		t.Fatalf("Normalize with numbers = %+v, %v", e, err)
+	}
+	if e, err = Normalize(Entry{Images: []string{a, b, c}, ImageNums: []int{0, 4, 0}}); err != nil || e.ImageNums[0] != 5 || e.ImageNums[1] != 4 || e.ImageNums[2] != 6 {
+		t.Fatalf("Normalize with unnumbered images = %+v, %v", e, err)
+	}
+	if e, err = Normalize(Entry{Images: []string{a, b}}); err != nil || e.ImageNums[0] != 1 || e.ImageNums[1] != 2 {
+		t.Fatalf("Normalize without numbers = %+v, %v", e, err)
+	}
+	for _, bad := range []Entry{
+		{Images: []string{a, b}, ImageNums: []int{1}},
+		{Images: []string{a, b}, ImageNums: []int{3, 3}},
+		{Images: []string{a}, ImageNums: []int{-1}},
+		{Images: []string{a}, ImageNums: []int{maxImageNum + 1}},
+	} {
+		if _, err := Normalize(bad); !errors.Is(err, ErrInvalid) {
+			t.Errorf("Normalize(%+v) = %v, want ErrInvalid", bad, err)
+		}
+	}
+}
+
+// TestMergeRenumbersTheLaterSendsImagesAndMarkers: the later send's images
+// continue the earlier ones' numbers, gaps included, and its markers follow;
+// a marker naming none of its images and an image the earlier send already
+// lists keep the earlier numbering; the earlier send's text is untouched.
+func TestMergeRenumbersTheLaterSendsImagesAndMarkers(t *testing.T) {
+	base := Entry{Parts: []string{"one [Image #1] two [Image #3]"}, Images: []string{"/a.png", "/b.png"}, ImageNums: []int{1, 3}}
+	add := Entry{Parts: []string{"[Image #2] then [Image #1] and [Image #1], old [Image #9], same [Image #3]"}, Images: []string{"/c.png", "/d.png", "/b.png"}, ImageNums: []int{1, 2, 3}}
+	got := Merge(base, add)
+	if want := []string{"one [Image #1] two [Image #3]", "[Image #5] then [Image #4] and [Image #4], old [Image #9], same [Image #3]"}; len(got.Parts) != 2 || got.Parts[0] != want[0] || got.Parts[1] != want[1] {
+		t.Fatalf("merged parts = %q, want %q", got.Parts, want)
+	}
+	if len(got.Images) != 4 || got.Images[2] != "/c.png" || got.Images[3] != "/d.png" {
+		t.Fatalf("merged images = %v", got.Images)
+	}
+	if want := []int{1, 3, 4, 5}; len(got.ImageNums) != 4 || got.ImageNums[0] != want[0] || got.ImageNums[1] != want[1] || got.ImageNums[2] != want[2] || got.ImageNums[3] != want[3] {
+		t.Fatalf("merged numbers = %v, want %v", got.ImageNums, want)
+	}
+	// An entry written before numbering counts as 1..n.
+	legacy := Merge(Entry{Parts: []string{"old"}, Images: []string{"/a.png", "/b.png"}}, Entry{Parts: []string{"[Image #1]"}, Images: []string{"/c.png"}, ImageNums: []int{1}})
+	if legacy.Parts[1] != "[Image #3]" || len(legacy.ImageNums) != 3 || legacy.ImageNums[2] != 3 {
+		t.Fatalf("merge onto an unnumbered entry = %+v", legacy)
+	}
+}
+
+// TestSendMergesWithRenumberingAndSteerKeepsIt: the second send into a held
+// entry delivers its image as the next number, marker included, and a steer
+// keeps the numbering.
+func TestSendMergesWithRenumberingAndSteerKeepsIt(t *testing.T) {
+	dir := Dir(t.TempDir())
+	a := attach(t, dir, "0123456789abcdef-1.png")
+	b := attach(t, dir, "0123456789abcdef-2.png")
+	c := attach(t, dir, "fedcba9876543210-1.png")
+	if _, _, err := Send(dir, Entry{Parts: []string{"first [Image #1] [Image #2]"}, Images: []string{a, b}, ImageNums: []int{1, 2}}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	name, merged, err := Send(dir, Entry{Parts: []string{"second [Image #1]"}, Images: []string{c}, ImageNums: []int{1}}, time.Now())
+	if err != nil || !merged {
+		t.Fatalf("second Send = %v, merged %v", err, merged)
+	}
+	steered, err := Steer(dir, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	held, _ := Held(dir)
+	if len(held) != 1 || held[0].Name != steered {
+		t.Fatalf("held = %+v", held)
+	}
+	want := "first [Image #1] [Image #2]\n\nsecond [Image #3]\n\nImage #1: " + a + "\nImage #2: " + b + "\nImage #3: " + c
+	if got := held[0].Entry.Text(); got != want {
+		t.Fatalf("steered merged Text = %q, want %q", got, want)
 	}
 }
 

@@ -512,42 +512,127 @@
   // uploaded only with the send, so an abandoned paste never touches disk. A
   // chip a cancel returned has a ref instead of data: the file the daemon
   // already wrote, which a re-send names rather than uploads again.
-  var cimgs = $("cimgs"), imgs = [];
+  //
+  // Each image has a number n, and the text names it with an "[Image #n]"
+  // marker inserted at the cursor. Marker and chip stay in sync: deleting the
+  // marker drops the chip, removing the chip deletes the marker. A dropped
+  // image waits in imgTrash, so an undo that brings its marker back brings
+  // the chip back too. Numbers are never reused or rewritten within a draft
+  // (rewriting text the user is editing shakes it); the server renumbers a
+  // send that merges into a held message, so the page never numbers across
+  // sends.
+  var cimgs = $("cimgs"), imgs = [], imgSeq = 0, imgTrash = {};
   var IMG_TYPES = { "image/png": 1, "image/jpeg": 1, "image/gif": 1, "image/webp": 1 };
   var IMG_MAX = 8, IMG_BYTES = 10 * 1024 * 1024;
+  var MARKER = "\\[Image #([1-9][0-9]{0,5})\\]";
   function attachSrc(name) { return "/s/" + rid + "/attachment/" + encodeURIComponent(name); }
+  function marker(n) { return "[Image #" + n + "]"; }
+  // markerNums is the set of image numbers text's markers name.
+  function markerNums(text) {
+    var out = {}, re = new RegExp(MARKER, "g"), m;
+    while ((m = re.exec(text))) out[+m[1]] = true;
+    return out;
+  }
+  // nextNum is a number no image, dropped image, or marker of this draft
+  // has used.
+  function nextNum() {
+    Object.keys(markerNums(ctext.value)).forEach(function (k) { imgSeq = Math.max(imgSeq, +k); });
+    return ++imgSeq;
+  }
+  // editText replaces [start, end) of the composer's text with s through the
+  // browser's editing command, so the undo stack keeps the edit, else
+  // through setRangeText; either way an input event follows.
+  function editText(start, end, s) {
+    if (doc.activeElement !== ctext) ctext.focus();
+    ctext.setSelectionRange(start, end);
+    var done = false;
+    try { done = s ? doc.execCommand("insertText", false, s) : start === end || doc.execCommand("delete"); } catch (e) { done = false; }
+    if (!done) {
+      ctext.setRangeText(s, start, end, "end");
+      ctext.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+  }
+  // insertMarkers puts the markers for nums at the cursor, spaced from the
+  // text around them.
+  function insertMarkers(nums) {
+    if (!nums.length) return;
+    var v = ctext.value, a = ctext.selectionStart, b = ctext.selectionEnd, s = nums.map(marker).join(" ");
+    if (a > 0 && !/\s/.test(v.charAt(a - 1))) s = " " + s;
+    if (b >= v.length || !/\s/.test(v.charAt(b))) s += " ";
+    editText(a, b, s);
+  }
+  // deleteMarkers deletes each marker naming n, with the space after it.
+  function deleteMarkers(n) {
+    var re = new RegExp("\\[Image #" + n + "\\] ?", "g"), v = ctext.value, spans = [], m;
+    while ((m = re.exec(v))) spans.push([m.index, m.index + m[0].length]);
+    spans.reverse().forEach(function (sp) { editText(sp[0], sp[1], ""); });
+  }
   function addFiles(files) {
-    var refused = "";
+    var refused = "", added = [];
     files.forEach(function (f) {
       if (!IMG_TYPES[f.type]) { refused = (f.name || "the file") + " is not a PNG, JPEG, GIF, or WebP image"; return; }
       if (f.size > IMG_BYTES) { refused = (f.name || "the image") + " is larger than 10 MiB"; return; }
       if (imgs.length >= IMG_MAX) { refused = "a message holds at most " + IMG_MAX + " images"; return; }
-      var it = { name: f.name || "pasted image", url: URL.createObjectURL(f), data: null, ref: "" };
+      var it = { name: f.name || "pasted image", url: URL.createObjectURL(f), data: null, ref: "", n: nextNum() };
       imgs.push(it);
+      added.push(it.n);
       var rd = new FileReader();
       rd.onload = function () { var v = String(rd.result); it.data = v.slice(v.indexOf(",") + 1); };
-      rd.onerror = function () { dropImg(it); renderImgs(); syncNote("Could not read " + it.name + "."); };
+      rd.onerror = function () { dropImg(it); release(it); deleteMarkers(it.n); renderImgs(); syncNote("Could not read " + it.name + "."); };
       rd.readAsDataURL(f);
     });
     renderImgs();
+    insertMarkers(added);
     syncNote(refused ? "Not attached: " + refused + "." : "");
   }
   function dropImg(it) {
     var i = imgs.indexOf(it);
-    if (i < 0) return;
-    imgs.splice(i, 1);
-    if (!it.ref) URL.revokeObjectURL(it.url);
+    if (i >= 0) imgs.splice(i, 1);
+  }
+  function release(it) { if (!it.ref) URL.revokeObjectURL(it.url); }
+  // unattach removes a chip the user took off: its markers go, and it waits
+  // in imgTrash for an undo.
+  function unattach(it) {
+    if (!it) return;
+    dropImg(it);
+    imgTrash[it.n] = it;
+    renderImgs();
+    deleteMarkers(it.n);
+  }
+  // clearTrash forgets the dropped images once no undo can bring them back.
+  function clearTrash() {
+    Object.keys(imgTrash).forEach(function (k) { release(imgTrash[k]); });
+    imgTrash = {};
+  }
+  // syncMarkers follows the text: an image whose marker is gone is dropped
+  // (into imgTrash), and a dropped one whose marker is back returns.
+  function syncMarkers() {
+    if (!imgs.length && !Object.keys(imgTrash).length) return;
+    var have = markerNums(ctext.value), changed = false;
+    imgs.slice().forEach(function (it) {
+      if (!have[it.n]) { dropImg(it); imgTrash[it.n] = it; changed = true; }
+    });
+    Object.keys(imgTrash).forEach(function (k) {
+      var it = imgTrash[k];
+      if (have[it.n]) { delete imgTrash[k]; imgs.push(it); changed = true; }
+    });
+    if (!changed) return;
+    imgs.sort(function (a, b) { return a.n - b.n; });
+    renderImgs();
   }
   function renderImgs() {
     if (!cimgs) return;
     cimgs.textContent = "";
     imgs.forEach(function (it, i) {
-      var el = doc.createElement("span"), im = doc.createElement("img"), x = doc.createElement("button");
+      var el = doc.createElement("span"), im = doc.createElement("img"), x = doc.createElement("button"), num = doc.createElement("span");
       el.className = "ichip";
       im.src = it.url;
       im.alt = it.name;
-      el.title = it.name;
+      el.title = "Image #" + it.n + ": " + it.name;
       el.appendChild(im);
+      num.className = "inum";
+      num.textContent = "#" + it.n;
+      el.appendChild(num);
       x.className = "unimg";
       x.setAttribute("data-unimg", String(i));
       x.title = "remove this image";
@@ -577,10 +662,11 @@
       var files = imageFiles(e.clipboardData).filter(function (f) { return f.type.indexOf("image/") === 0; });
       if (!files.length) return;
       // A paste that carries text as well (a copied web page) still pastes
-      // its text; a screenshot carries only the image.
+      // its text; a screenshot carries only the image. The markers go in
+      // once the paste is done, after any pasted text.
       var types = Array.prototype.slice.call(e.clipboardData.types || []);
       if (types.indexOf("text/plain") < 0) e.preventDefault();
-      addFiles(files);
+      setTimeout(function () { addFiles(files); }, 0);
     });
     var hasFiles = function (e) { return e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], "Files") >= 0; };
     composer.addEventListener("dragover", function (e) {
@@ -595,8 +681,8 @@
       composer.classList.remove("drop");
       if (!hasFiles(e)) return;
       e.preventDefault();
-      addFiles(imageFiles(e.dataTransfer));
       ctext.focus();
+      addFiles(imageFiles(e.dataTransfer));
     });
   }
   var sending = false;
@@ -607,14 +693,20 @@
     if (pics.some(function (p) { return !p.ref && p.data === null; })) { syncNote("Still reading an image: send again in a moment."); return; }
     var body = { text: t, chips: list };
     var up = pics.filter(function (p) { return !p.ref; }), refs = pics.filter(function (p) { return !!p.ref; });
-    if (up.length) body.images = up.map(function (p) { return { name: p.name, data: p.data }; });
-    if (refs.length) body.refs = refs.map(function (p) { return p.ref; });
+    if (up.length) body.images = up.map(function (p) { return { name: p.name, data: p.data, n: p.n }; });
+    if (refs.length) {
+      body.refs = refs.map(function (p) { return p.ref; });
+      body.refNums = refs.map(function (p) { return p.n; });
+    }
     sending = true;
     post("message", body, function (ok, res) {
       sending = false;
       if (!ok) { syncNote("Not sent: " + res); return; }
       if (ctext.value.trim() === t) { ctext.value = ""; grow(); }
-      pics.forEach(dropImg);
+      pics.forEach(function (p) { dropImg(p); release(p); });
+      clearTrash();
+      // A fresh draft numbers its images from 1 again.
+      if (!imgs.length && !ctext.value) imgSeq = 0;
       renderImgs();
       // Compare by value: a board event during the send, or clearing one
       // card, re-reads the chips into new objects. Drop every sent chip
@@ -631,15 +723,30 @@
     post("cancel", { id: btn.getAttribute("data-cancel") }, function (ok, res) {
       if (!ok) { btn.disabled = false; syncNote("Not cancelled: " + res); return; }
       var cur = ctext.value.trim(), back = res.text || "";
+      // Its images come back as chips that reference the written files,
+      // with their markers in the returned text. Numbers the draft already
+      // uses are moved above the draft's highest, the markers with them.
+      var names = res.images || [], nums = res.nums || [], top = imgSeq, renum = {};
+      Object.keys(markerNums(cur)).forEach(function (k) { top = Math.max(top, +k); });
+      imgs.forEach(function (p) { top = Math.max(top, p.n); });
+      names.forEach(function (name, i) {
+        var n = nums[i] || i + 1, have = imgs.filter(function (p) { return p.ref === name; })[0];
+        renum[n] = have ? have.n : n + top;
+        if (!have) imgs.push({ name: name, url: attachSrc(name), data: null, ref: name, n: renum[n] });
+        imgSeq = Math.max(imgSeq, renum[n]);
+      });
+      back = back.replace(new RegExp(MARKER, "g"), function (m, k) { return renum[+k] ? marker(renum[+k]) : m; });
+      // A message held before images were numbered has no markers: give
+      // each image one, or the next edit would drop it.
+      var marked = markerNums(back), missing = [];
+      names.forEach(function (name, i) { var n = renum[nums[i] || i + 1]; if (!marked[n]) missing.push(marker(n)); });
+      if (missing.length) back += (back ? "\n" : "") + missing.join(" ");
       ctext.value = back + (back && cur ? "\n\n" : "") + cur;
       grow();
+      imgs.sort(function (a, b) { return a.n - b.n; });
       // A chip attached since keeps its newer answer.
       (res.chips || []).forEach(function (c) { if (!chips[c.id]) { putChip(c); setItem(c.id, c); } });
       renderChips();
-      // Its images come back as chips that reference the written files.
-      (res.images || []).forEach(function (n) {
-        if (!imgs.some(function (p) { return p.ref === n; })) imgs.push({ name: n, url: attachSrc(n), data: null, ref: n });
-      });
       renderImgs();
       syncNote("Cancelled: the message is back in the composer.");
       ctext.focus();
@@ -673,16 +780,55 @@
       head.insertBefore(m, id ? id.nextSibling : head.firstChild);
     });
   }
+  // indentLines indents by two spaces: at the cursor, or every line a
+  // multi-line selection touches (blank lines stay blank). out removes up to
+  // two leading spaces from each line the cursor or selection touches
+  // instead. The selection follows the lines it covered.
+  function indentLines(out) {
+    var v = ctext.value, a = ctext.selectionStart, b = ctext.selectionEnd;
+    var multi = v.slice(a, b).indexOf("\n") >= 0;
+    if (!out && !multi) { editText(a, b, "  "); return; }
+    var last = b > a && v.charAt(b - 1) === "\n" ? b - 1 : b;
+    var ls = a > 0 ? v.lastIndexOf("\n", a - 1) + 1 : 0, le = v.indexOf("\n", last);
+    if (le < 0) le = v.length;
+    var first = 0, total = 0;
+    var lines = v.slice(ls, le).split("\n").map(function (line, i) {
+      var d = 0;
+      if (out) { d = -/^ {0,2}/.exec(line)[0].length; line = line.slice(-d); }
+      else if (line) { d = 2; line = "  " + line; }
+      if (i === 0) first = d;
+      total += d;
+      return line;
+    });
+    if (!total) return;
+    editText(ls, le, lines.join("\n"));
+    // A selection that starts at its line's start keeps starting there.
+    var na = a === ls ? ls : Math.max(ls, a + first);
+    ctext.setSelectionRange(na, a === b ? na : Math.max(na, b + total));
+  }
   if (ctext) {
     var csend = $("csend");
     if (csend) csend.addEventListener("click", function () { sendMessage(); ctext.focus(); });
-    ctext.addEventListener("input", function () { grow(); syncNote(); });
+    ctext.addEventListener("input", function () { grow(); syncNote(); syncMarkers(); });
+    // Tab indents rather than leaving the composer; Escape, then Tab,
+    // leaves it (the keyboard way out).
+    var tabOut = false;
+    ctext.addEventListener("blur", function () { tabOut = false; });
     ctext.addEventListener("keydown", function (e) {
-      if (e.key !== "Enter") return;
-      // An Enter that confirms an IME composition (Korean, Japanese,
-      // Chinese) must never send: browsers report it as isComposing, and
+      // A key that confirms an IME composition (Korean, Japanese, Chinese)
+      // must never send or indent: browsers report it as isComposing, and
       // Safari reports the first keydown after compositionend as keyCode 229.
       if (e.isComposing || e.keyCode === 229) return;
+      if (e.key === "Tab") {
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
+        if (tabOut) { tabOut = false; return; }
+        e.preventDefault();
+        indentLines(e.shiftKey);
+        return;
+      }
+      if (e.key === "Escape") { tabOut = true; return; }
+      if (e.key !== "Shift") tabOut = false;
+      if (e.key !== "Enter") return;
       var mod = e.ctrlKey || e.metaKey;
       if (inputMode === "enter" ? !e.shiftKey && !e.altKey : mod) { e.preventDefault(); sendMessage(); }
     });
@@ -705,7 +851,7 @@
     var u = t.closest("[data-unchip]");
     if (u) { var uid = u.getAttribute("data-unchip"); dropChip(uid); setItem(uid, null); renderChips(); syncNote(); return; }
     u = t.closest("[data-unimg]");
-    if (u) { dropImg(imgs[+u.getAttribute("data-unimg")]); renderImgs(); syncNote(); return; }
+    if (u) { unattach(imgs[+u.getAttribute("data-unimg")]); syncNote(); return; }
     u = t.closest("#r-convlive [data-cancel]");
     if (u) { if (!u.disabled) cancelHeld(u); return; }
     u = t.closest("#r-convlive [data-steer]");

@@ -31,11 +31,15 @@ import (
 //
 // A message may attach images: new ones as base64 data, and ones a cancel
 // returned to the composer as references to their already written files.
+// Each carries the number the composer's text names it by ("[Image #N]").
 // The route writes the new ones into the inbox's attachments directory in the
 // same request that holds the message, and the held entry lists their
-// absolute paths; the session receives each as an "[image: <path>]" line it
-// opens with its own read tool. A steer rewrites the entry whole, so a
-// steered entry keeps its image paths.
+// absolute paths and numbers; the session receives each as an
+// "Image #N: <path>" line it opens with its own read tool. A send merged into
+// a held entry has its images and markers renumbered to continue the held
+// ones (wsinbox.Merge), under d.inboxMu, so the page never numbers across
+// sends. A steer rewrites the entry whole, so a steered entry keeps its image
+// paths and numbers.
 
 const (
 	// inboxBodyLimit bounds a write route's request body, and a message's
@@ -57,16 +61,20 @@ type messageRequest struct {
 	Text  string         `json:"text"`
 	Chips []wsinbox.Chip `json:"chips"`
 	// Images are new images; Refs name files a cancel returned, inside this
-	// session's attachments directory.
-	Images []imageUpload `json:"images"`
-	Refs   []string      `json:"refs"`
+	// session's attachments directory, and RefNums, when present, holds each
+	// ref's image number in order.
+	Images  []imageUpload `json:"images"`
+	Refs    []string      `json:"refs"`
+	RefNums []int         `json:"refNums"`
 }
 
 // imageUpload is one new image: the browser's file name, used only in
-// refusals, and the file's bytes as standard base64.
+// refusals, the file's bytes as standard base64, and its image number (0,
+// or absent, lets the inbox number it).
 type imageUpload struct {
 	Name string `json:"name"`
 	Data string `json:"data"`
+	N    int    `json:"n"`
 }
 
 // decodedImage is an upload that passed the checks, with the extension of
@@ -74,6 +82,7 @@ type imageUpload struct {
 type decodedImage struct {
 	ext  string
 	data []byte
+	n    int
 }
 
 // sniffedExt maps the content types the route accepts, as
@@ -230,7 +239,7 @@ func decodeImage(up imageUpload) (decodedImage, int, string) {
 	if !ok {
 		return decodedImage{}, http.StatusUnsupportedMediaType, fmt.Sprintf("image %q is not a PNG, JPEG, GIF, or WebP image", label)
 	}
-	return decodedImage{ext: ext, data: data}, http.StatusOK, ""
+	return decodedImage{ext: ext, data: data, n: up.N}, http.StatusOK, ""
 }
 
 // sendMessage holds one checked message in the inbox at dir; d.inboxMu is
@@ -240,8 +249,12 @@ func decodeImage(up imageUpload) (decodedImage, int, string) {
 func (d *Daemon) sendMessage(dir string, req messageRequest, images []decodedImage, now time.Time) (int, any) {
 	wsinbox.SweepAttachments(dir, now, attachmentSweepAge)
 	attachDir := wsinbox.AttachmentsDir(dir)
+	if len(req.RefNums) != 0 && len(req.RefNums) != len(req.Refs) {
+		return http.StatusBadRequest, fmt.Sprintf("%d image numbers for %d attachments", len(req.RefNums), len(req.Refs))
+	}
 	var paths []string
-	for _, ref := range req.Refs {
+	var nums []int
+	for i, ref := range req.Refs {
 		if !wsinbox.ValidAttachmentName(ref) {
 			return http.StatusBadRequest, fmt.Sprintf("attachment %q is not an image of this session", ref)
 		}
@@ -250,6 +263,14 @@ func (d *Daemon) sendMessage(dir string, req messageRequest, images []decodedIma
 			return http.StatusBadRequest, fmt.Sprintf("attachment %q no longer exists: attach the image again", ref)
 		}
 		paths = append(paths, path)
+		n := 0
+		if len(req.RefNums) != 0 {
+			n = req.RefNums[i]
+		}
+		nums = append(nums, n)
+	}
+	for _, img := range images {
+		nums = append(nums, img.n)
 	}
 	if count := len(paths) + len(images); count > 0 {
 		// A send merges into the newest unsteered held entry, so the cap
@@ -268,7 +289,7 @@ func (d *Daemon) sendMessage(dir string, req messageRequest, images []decodedIma
 		fmt.Fprintf(d.log, "dashboard: write attachments: %v\n", err)
 		return http.StatusInternalServerError, "could not store the images"
 	}
-	entry := wsinbox.Entry{Parts: []string{req.Text}, Chips: req.Chips, Images: append(paths, written...)}
+	entry := wsinbox.Entry{Parts: []string{req.Text}, Chips: req.Chips, Images: append(paths, written...), ImageNums: nums}
 	name, merged, err := wsinbox.Send(dir, entry, now)
 	if err != nil {
 		removeFiles(written)
@@ -351,16 +372,18 @@ func (d *Daemon) inboxWrite(dir, route string, raw []byte) (int, any) {
 		if chips == nil {
 			chips = []wsinbox.Chip{}
 		}
-		// The images stay on disk: the page gets their names back as chips
-		// that reference the files, and a re-send references them.
-		images := []string{}
+		// The images stay on disk: the page gets their names and numbers back
+		// as chips that reference the files, and a re-send references them.
+		images, nums := []string{}, []int{}
 		attachDir := wsinbox.AttachmentsDir(dir)
-		for _, path := range entry.Images {
+		entryNums := entry.Nums()
+		for i, path := range entry.Images {
 			if name, ok := wsinbox.AttachmentName(attachDir, path); ok {
 				images = append(images, name)
+				nums = append(nums, entryNums[i])
 			}
 		}
-		return http.StatusOK, map[string]any{"text": strings.Join(entry.Parts, "\n\n"), "chips": chips, "images": images}
+		return http.StatusOK, map[string]any{"text": strings.Join(entry.Parts, "\n\n"), "chips": chips, "images": images, "nums": nums}
 	case "steer":
 		var req cancelRequest
 		if err := json.Unmarshal(raw, &req); err != nil {

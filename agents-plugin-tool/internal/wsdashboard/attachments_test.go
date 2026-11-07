@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -30,6 +32,15 @@ func imagesJSON(pairs ...string) string {
 	for i := 0; i+1 < len(pairs); i += 2 {
 		name, _ := json.Marshal(pairs[i])
 		items = append(items, `{"name":`+string(name)+`,"data":"`+b64(pairs[i+1])+`"}`)
+	}
+	return "[" + strings.Join(items, ",") + "]"
+}
+
+// numberedImagesJSON is an images array of PNGs numbered nums.
+func numberedImagesJSON(nums ...int) string {
+	var items []string
+	for _, n := range nums {
+		items = append(items, `{"name":"p.png","data":"`+b64(pngBytes)+`","n":`+strconv.Itoa(n)+`}`)
 	}
 	return "[" + strings.Join(items, ",") + "]"
 }
@@ -61,10 +72,12 @@ func (f *pageFixture) postMessage(t *testing.T, body string) (int, string) {
 // written into the session's attachments dir under the attachment grammar,
 // with the extension of the sniffed type whatever the browser named them;
 // the held entry lists their absolute paths, and the delivered text carries
-// one image line each after the typed text and before the answers.
+// one numbered image line each, by the numbers the page gave (gaps kept),
+// after the typed text and before the answers.
 func TestMessageRouteAttachesSniffedImages(t *testing.T) {
 	f := startPageFixture(t)
-	id, merged := f.send(t, `{"text":"look","chips":[{"id":"03","answer":"a"}],"images":`+imagesJSON("a.png", pngBytes, "b.jpeg", jpegBytes, "c.gif", gifBytes, "named.png", webpBytes)+`}`)
+	images := `[{"name":"a.png","data":"` + b64(pngBytes) + `","n":1},{"name":"b.jpeg","data":"` + b64(jpegBytes) + `","n":2},{"name":"c.gif","data":"` + b64(gifBytes) + `","n":4},{"name":"named.png","data":"` + b64(webpBytes) + `","n":5}]`
+	id, merged := f.send(t, `{"text":"look [Image #1][Image #2] [Image #4] [Image #5]","chips":[{"id":"03","answer":"a"}],"images":`+images+`}`)
 	if merged {
 		t.Fatal("first send merged")
 	}
@@ -84,9 +97,9 @@ func TestMessageRouteAttachesSniffedImages(t *testing.T) {
 		if raw, err := os.ReadFile(path); err != nil || string(raw) != []string{pngBytes, jpegBytes, gifBytes, webpBytes}[i] {
 			t.Errorf("image %d bytes = %q, %v", i, raw, err)
 		}
-		lines = append(lines, "[image: "+path+"]")
+		lines = append(lines, "Image #"+strconv.Itoa([]int{1, 2, 4, 5}[i])+": "+path)
 	}
-	if got, want := held[0].Entry.Text(), "look\n\n"+strings.Join(lines, "\n")+"\n\n(03) a"; got != want {
+	if got, want := held[0].Entry.Text(), "look [Image #1][Image #2] [Image #4] [Image #5]\n\n"+strings.Join(lines, "\n")+"\n\n(03) a"; got != want {
 		t.Fatalf("delivered text = %q, want %q", got, want)
 	}
 
@@ -96,6 +109,53 @@ func TestMessageRouteAttachesSniffedImages(t *testing.T) {
 	}
 	if held := f.held(t); len(held[0].Entry.Images) != 5 {
 		t.Fatalf("merged images = %d, want 5", len(held[0].Entry.Images))
+	}
+}
+
+// TestConcurrentSendsRenumberIntoTheHeldEntry: sends racing into one held
+// entry each number their own image #1, and the merges under the inbox lock
+// renumber every later one to continue the earlier ones, so the held entry
+// numbers its images 1..n and each send's marker names its own image.
+func TestConcurrentSendsRenumberIntoTheHeldEntry(t *testing.T) {
+	f := startPageFixture(t)
+	f.send(t, `{"text":"base [Image #1]","images":`+numberedImagesJSON(1)+`}`)
+	const senders = 5
+	var wg sync.WaitGroup
+	for i := 0; i < senders; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			code, _, raw := postJSON(t, f.base+"/s/livesession/message", f.base, `{"text":"s`+strconv.Itoa(i)+` [Image #1]","images":`+numberedImagesJSON(1)+`}`)
+			if code != http.StatusOK {
+				t.Errorf("send %d = %d: %s", i, code, raw)
+			}
+		}(i)
+	}
+	wg.Wait()
+	held := f.held(t)
+	if len(held) != 1 {
+		t.Fatalf("held = %d entries, want one merged entry", len(held))
+	}
+	e := held[0].Entry
+	if len(e.Images) != senders+1 || len(e.Parts) != senders+1 {
+		t.Fatalf("merged entry = %+v", e)
+	}
+	for i, n := range e.ImageNums {
+		if n != i+1 {
+			t.Fatalf("image numbers = %v, want 1..%d", e.ImageNums, senders+1)
+		}
+	}
+	// A merge appends one part and one image, so part i names exactly the
+	// image at index i: its own send's upload.
+	for i, p := range e.Parts {
+		var nums []int
+		wsinbox.ImageMarkers(p, func(_, _, n int) { nums = append(nums, n) })
+		if len(nums) != 1 || nums[0] != i+1 {
+			t.Errorf("part %d = %q names %v, want [%d]", i, p, nums, i+1)
+		}
+	}
+	if !strings.Contains(e.Text(), "Image #"+strconv.Itoa(senders+1)+": ") {
+		t.Fatalf("delivered text lacks the last numbered line: %q", e.Text())
 	}
 }
 
@@ -238,11 +298,13 @@ func TestCancelReturnsImagesAndAResendReferencesThem(t *testing.T) {
 	var ans struct {
 		Text   string   `json:"text"`
 		Images []string `json:"images"`
+		Nums   []int    `json:"nums"`
 	}
 	if err := json.Unmarshal([]byte(raw), &ans); err != nil {
 		t.Fatal(err)
 	}
-	if ans.Text != "pic" || len(ans.Images) != 2 || ans.Images[0] != filepath.Base(paths[0]) || ans.Images[1] != filepath.Base(paths[1]) {
+	if ans.Text != "pic" || len(ans.Images) != 2 || ans.Images[0] != filepath.Base(paths[0]) || ans.Images[1] != filepath.Base(paths[1]) ||
+		len(ans.Nums) != 2 || ans.Nums[0] != 1 || ans.Nums[1] != 2 {
 		t.Fatalf("cancel answer = %+v", ans)
 	}
 	if names := f.attachments(t); len(names) != 2 {
@@ -266,6 +328,38 @@ func TestCancelReturnsImagesAndAResendReferencesThem(t *testing.T) {
 	}
 	if held := f.held(t); len(held[0].Entry.Parts) != 1 {
 		t.Fatalf("a refused ref changed the held entry: %+v", held)
+	}
+}
+
+// TestCancelAndResendKeepImageNumbers: a cancel returns each image's number
+// with its name, gaps included, and a re-send by reference keeps the numbers
+// it names; a refNums list that does not match the refs is refused.
+func TestCancelAndResendKeepImageNumbers(t *testing.T) {
+	f := startPageFixture(t)
+	id, _ := f.send(t, `{"text":"[Image #2] and [Image #5]","images":`+numberedImagesJSON(2, 5)+`}`)
+	code, _, raw := postJSON(t, f.base+"/s/livesession/cancel", f.base, `{"id":"`+id+`"}`)
+	if code != http.StatusOK {
+		t.Fatalf("cancel = %d: %s", code, raw)
+	}
+	var ans struct {
+		Text   string   `json:"text"`
+		Images []string `json:"images"`
+		Nums   []int    `json:"nums"`
+	}
+	if err := json.Unmarshal([]byte(raw), &ans); err != nil {
+		t.Fatal(err)
+	}
+	if ans.Text != "[Image #2] and [Image #5]" || len(ans.Nums) != 2 || ans.Nums[0] != 2 || ans.Nums[1] != 5 {
+		t.Fatalf("cancel answer = %+v", ans)
+	}
+	refs, _ := json.Marshal(ans.Images)
+	if code, raw := f.postMessage(t, `{"text":"x","refs":`+string(refs)+`,"refNums":[2]}`); code != http.StatusBadRequest {
+		t.Fatalf("mismatched refNums = %d (%s), want 400", code, raw)
+	}
+	f.send(t, `{"text":"[Image #7] and [Image #3]","refs":`+string(refs)+`,"refNums":[7,3]}`)
+	held := f.held(t)
+	if len(held) != 1 || len(held[0].Entry.ImageNums) != 2 || held[0].Entry.ImageNums[0] != 7 || held[0].Entry.ImageNums[1] != 3 {
+		t.Fatalf("re-sent entry = %+v", held)
 	}
 }
 
@@ -371,6 +465,42 @@ func TestPageShowsAttachmentThumbnails(t *testing.T) {
 	}
 }
 
+// TestPageTagsMarkersAndNumbersThumbnails: a held bubble and a delivered
+// user message show their "[Image #N]" markers as tags and their thumbnails
+// labelled #N; a delivered numbered line naming an existing attachment
+// leaves the text, and one naming a removed attachment stays as path text.
+func TestPageTagsMarkersAndNumbersThumbnails(t *testing.T) {
+	f := startPageFixture(t)
+	f.send(t, `{"text":"held [Image #3] <b>","images":`+numberedImagesJSON(3)+`}`)
+	heldName := filepath.Base(f.held(t)[0].Entry.Images[0])
+	delivered := filepath.Join(f.attachDir(), "00000000000000bb-1.jpg")
+	if err := os.WriteFile(delivered, []byte("jpg"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	removed := filepath.Join(f.attachDir(), "00000000000000cc-1.png")
+	text := "see [Image #1] and [Image #2]\n\nImage #1: " + delivered + "\nImage #2: " + removed
+	if err := wslive.AppendRing(wslive.RingDir(SessionDir(f.dir, "livesession")), []wslive.RingEntry{{Kind: wslive.RingUser, Origin: wslive.OriginWhiteboard, Text: text}}); err != nil {
+		t.Fatal(err)
+	}
+	_, page := get(t, f.base+"/s/livesession")
+	tag := func(n string) string {
+		return `<span class="imgtag" title="attached image #` + n + `">#` + n + `</span>`
+	}
+	for _, want := range []string{
+		`<div class="hpart">held ` + tag("3") + ` &lt;b&gt;</div>`,
+		`<img src="/s/livesession/attachment/` + heldName + `" alt="` + heldName + `" loading="lazy"><span class="tnum">#3</span></a>`,
+		`see ` + tag("1") + ` and ` + tag("2") + "\n\n" + `Image #2: ` + removed + `<div class="thumbs">`,
+		`<img src="/s/livesession/attachment/00000000000000bb-1.jpg" alt="00000000000000bb-1.jpg" loading="lazy"><span class="tnum">#1</span></a>`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("session page lacks %q", want)
+		}
+	}
+	if strings.Contains(page, "Image #1: "+delivered) {
+		t.Error("the delivered attachment's numbered line is still shown as text")
+	}
+}
+
 func TestUserImagesKeepsForeignLinesAndTidiesBlanks(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "attachments")
 	in := filepath.Join(dir, "0123456789abcdef-1.png")
@@ -387,6 +517,9 @@ func TestUserImagesKeepsForeignLinesAndTidiesBlanks(t *testing.T) {
 		{"hi\n\n[image: " + in + "]\n\n(03) a", "hi\n\n(03) a"},
 		{"hi\n\n[image: /x/y.png]", "hi\n\n[image: /x/y.png]"},
 		{"hi\n\n[image: " + gone + "]", "hi\n\n[image: " + gone + "]"},
+		{"hi [Image #2]\n\nImage #2: " + in + "\n\n(03) a", "hi [Image #2]\n\n(03) a"},
+		{"hi\n\nImage #1: /x/y.png", "hi\n\nImage #1: /x/y.png"},
+		{"hi\n\nImage #1: " + gone, "hi\n\nImage #1: " + gone},
 	}
 	for _, c := range cases {
 		if got, _ := userImages(c.text, dir, "livesession"); got != c.want {

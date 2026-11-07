@@ -1,7 +1,9 @@
 package wsdashboard
 
 import (
+	"html/template"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/kang-sw/devenv/internal/wsinbox"
@@ -29,19 +31,37 @@ type HeldView struct {
 
 // AttachmentView is one image a message carries. Src is the attachment
 // route's URL when Path names a file in this session's attachments
-// directory; the page shows any other path as text.
+// directory; the page shows any other path as text. Num is the image's
+// number, which the message's "[Image #N]" markers name it by; 0 for an
+// image a message carried before images were numbered.
 type AttachmentView struct {
 	Path, Name, Src string
+	Num             int
 }
 
-// attachmentView maps an image path to its view: a thumbnail for a file
+// attachmentView maps image n's path to its view: a thumbnail for a file
 // that exists in attachDir, the session replyID's attachments directory,
 // else the path, so a removed attachment shows as text, not a broken image.
-func attachmentView(attachDir, replyID, path string) AttachmentView {
+func attachmentView(attachDir, replyID string, n int, path string) AttachmentView {
 	if name, ok := wsinbox.AttachmentName(attachDir, path); ok && ValidReplyID(replyID) && regularFile(path) {
-		return AttachmentView{Path: path, Name: name, Src: AttachmentSrc(replyID, name)}
+		return AttachmentView{Path: path, Name: name, Src: AttachmentSrc(replyID, name), Num: n}
 	}
-	return AttachmentView{Path: path}
+	return AttachmentView{Path: path, Num: n}
+}
+
+// markedText renders a message text with each image marker
+// (wsinbox.ImageMarker) as a tag, escaping the rest; the page shows the text
+// as it is otherwise, whitespace kept.
+func markedText(text string) template.HTML {
+	var b strings.Builder
+	last := 0
+	wsinbox.ImageMarkers(text, func(start, end, n int) {
+		b.WriteString(template.HTMLEscapeString(text[last:start]))
+		b.WriteString(`<span class="imgtag" title="attached image #` + strconv.Itoa(n) + `">#` + strconv.Itoa(n) + `</span>`)
+		last = end
+	})
+	b.WriteString(template.HTMLEscapeString(text[last:]))
+	return template.HTML(b.String())
 }
 
 func regularFile(path string) bool {
@@ -59,18 +79,20 @@ func userEntryImages(entries []ConvEntry, attachDir, replyID string) {
 	}
 }
 
-// userImages takes the image lines (wsinbox.ImageLine) that name this
-// session's attachments out of a delivered user message, returning the text
-// left and their views. A line naming any other path stays in the text.
+// userImages takes the image lines (wsinbox.ParseImageLine: the numbered
+// form and the older unnumbered one) that name this session's existing
+// attachments out of a delivered user message, returning the text left and
+// their views. A line naming any other path, or a removed attachment, stays
+// in the text.
 func userImages(text, attachDir, replyID string) (string, []AttachmentView) {
-	if !strings.Contains(text, "[image: ") {
+	if !strings.Contains(text, "[image: ") && !strings.Contains(text, "Image #") {
 		return text, nil
 	}
 	var kept []string
 	var images []AttachmentView
 	for _, line := range strings.Split(text, "\n") {
-		if path, ok := wsinbox.ImageLinePath(strings.TrimSpace(line)); ok {
-			if v := attachmentView(attachDir, replyID, path); v.Src != "" {
+		if n, path, ok := wsinbox.ParseImageLine(strings.TrimSpace(line)); ok {
+			if v := attachmentView(attachDir, replyID, n, path); v.Src != "" {
 				images = append(images, v)
 				continue
 			}
@@ -100,8 +122,9 @@ func heldViews(held []wsinbox.Record, attachDir, replyID string) []HeldView {
 	out := make([]HeldView, 0, len(held))
 	for _, r := range held {
 		v := HeldView{ID: r.ID(), Steer: r.Entry.Steer, At: r.Entry.SentAt, Parts: r.Entry.Parts, Chips: r.Entry.Chips}
-		for _, path := range r.Entry.Images {
-			v.Images = append(v.Images, attachmentView(attachDir, replyID, path))
+		nums := r.Entry.Nums()
+		for i, path := range r.Entry.Images {
+			v.Images = append(v.Images, attachmentView(attachDir, replyID, nums[i], path))
 		}
 		out = append(out, v)
 	}
