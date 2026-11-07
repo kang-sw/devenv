@@ -200,3 +200,86 @@ func wantVerdict(t *testing.T, l *Ledger, id EventID, want Verdict) Event {
 	}
 	return e
 }
+
+// forger opens a writer for o without Join and without the store lock: a
+// stand-in for an impostor or a thief who writes refs directly.
+func (w *world) forger(o Options) *Ledger {
+	w.t.Helper()
+	ctx := context.Background()
+	l, err := newLedger(ctx, o)
+	if err != nil {
+		w.t.Fatalf("forger %s: %v", o.Member, err)
+	}
+	if err := l.initClone(); err != nil {
+		w.t.Fatal(err)
+	}
+	if err := l.refresh(ctx); err != nil {
+		w.t.Fatal(err)
+	}
+	return l
+}
+
+// evLine builds one event line for a forged commit.
+func evLine(t *testing.T, seq int, ts time.Time, typ string, payload any) journalEvent {
+	t.Helper()
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return journalEvent{Seq: seq, TS: ts, Type: typ, Payload: raw}
+}
+
+// forgeCommit writes a commit signed by l's key with l.stream in its header
+// and arbitrary seqs and seen, without moving any ref.
+func forgeCommit(t *testing.T, l *Ledger, parent string, seen map[string]int, ts time.Time, lines ...journalEvent) string {
+	t.Helper()
+	oid, err := l.writeEventCommit(context.Background(), parent, seen, ts, lines)
+	if err != nil {
+		t.Fatalf("forge commit: %v", err)
+	}
+	return oid
+}
+
+// refTip reads ref straight from the repository l uses; "" when absent.
+func refTip(t *testing.T, l *Ledger, ref string) string {
+	t.Helper()
+	refs, err := l.git.listRefs(context.Background(), ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return refs[ref]
+}
+
+// setRef moves ref from old to oid in the repository l uses; old "" means
+// the ref must not exist.
+func setRef(t *testing.T, l *Ledger, ref, oid, old string) {
+	t.Helper()
+	if err := l.git.updateRef(context.Background(), ref, oid, old); err != nil {
+		t.Fatalf("update-ref %s: %v", ref, err)
+	}
+}
+
+// streamEvents returns the causal (non-broken) events of one stream, by seq.
+func streamEvents(l *Ledger, stream string) []Event {
+	evs, _ := l.Events(Cursor{})
+	var out []Event
+	for _, e := range evs {
+		if e.ID.Stream() == stream && e.ID.Broken == "" {
+			out = append(out, e)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID.Seq < out[j].ID.Seq })
+	return out
+}
+
+// brokenEvents returns the broken events of one stream.
+func brokenEvents(l *Ledger, stream string) []Event {
+	evs, _ := l.Events(Cursor{})
+	var out []Event
+	for _, e := range evs {
+		if e.ID.Stream() == stream && e.ID.Broken != "" {
+			out = append(out, e)
+		}
+	}
+	return out
+}
