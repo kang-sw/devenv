@@ -228,6 +228,31 @@ func TestIndexPageListsSessions(t *testing.T) {
 	}
 }
 
+// TestPagesRefuseFraming pins the clickjacking guard: every daemon HTML page
+// (the index, a session page, and the file view's rendered and not-viewable
+// pages) refuses to be framed, since a framed page's posts pass the
+// same-origin guards.
+func TestPagesRefuseFraming(t *testing.T) {
+	f := startPageFixture(t)
+	writeFile(t, filepath.Join(f.project, "a.md"), "# A\n")
+	writeFile(t, filepath.Join(f.project, "blob.bin"), "BIN\x00")
+	for _, path := range []string{"/", "/s/livesession", "/s/boardsession", "/s/livesession/file?path=a.md", "/s/livesession/file?path=blob.bin"} {
+		resp, err := testClient().Get(f.base + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		h := resp.Header
+		if resp.StatusCode != http.StatusOK || !strings.HasPrefix(h.Get("Content-Type"), "text/html") {
+			t.Errorf("GET %s = %d %q", path, resp.StatusCode, h.Get("Content-Type"))
+			continue
+		}
+		if h.Get("X-Frame-Options") != "DENY" || !strings.Contains(h.Get("Content-Security-Policy"), "frame-ancestors 'none'") {
+			t.Errorf("GET %s is frameable: X-Frame-Options %q, CSP %q", path, h.Get("X-Frame-Options"), h.Get("Content-Security-Policy"))
+		}
+	}
+}
+
 func TestUnknownPagesAreNotFound(t *testing.T) {
 	f := startPageFixture(t)
 	for _, path := range []string{"/s/nosuchsession", "/s/NOT-VALID", "/s/livesession/more", "/elsewhere", "/s/nosuchsession/events"} {

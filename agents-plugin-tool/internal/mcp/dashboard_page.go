@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsdashboard"
+	"github.com/kang-sw/devenv/internal/wslive"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
@@ -35,7 +36,7 @@ func (src *DashboardSessionSource) ReadPage(reg wsdashboard.Registration) (wsdas
 	}
 	if history, err := readMailboxHistory(key); err == nil {
 		for _, r := range history {
-			page.MailBodies[r.Name] = r.Body
+			page.MailBodies[r.Name] = wslive.ScrubSessionKeys(r.Body, key)
 		}
 	}
 	if record.Whiteboard == nil {

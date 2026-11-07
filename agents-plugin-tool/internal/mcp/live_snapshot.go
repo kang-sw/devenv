@@ -37,10 +37,13 @@ import (
 // dashboard.enabled off, nothing is written at all.
 //
 // The snapshot's repo fields (the session root's folder, branch, and
-// upstream standing) are read here, not sent by the adapter: a few git ref
-// reads, cached per session and refreshed at most once per heartbeat
-// interval from the timer goroutine, outside writeMu, so neither a change
-// snapshot nor an intake call ever waits on git.
+// upstream standing, and working-tree counts) are read here, not sent by the
+// adapter: a few git reads, cached per session and refreshed at most once per
+// heartbeat interval. The refresh runs on the timer goroutine, outside
+// writeMu, so an intake call never waits on git; the snapshot write that
+// finds the cache missing or a heartbeat interval old does wait (up to
+// repoReadTimeout): a session's first snapshot, and at most one write per
+// heartbeat interval after it, change or heartbeat alike.
 
 const dashboardIntakeTool = "dashboard.intake"
 
@@ -90,6 +93,29 @@ func setLiveSeams(change func(*liveSeams)) liveSeams {
 type liveHub struct {
 	mu       sync.Mutex
 	sessions map[string]*liveSession
+
+	// enabledMu guards enabled, each session's last resolved
+	// dashboard.enabled (liveDashboardEnabled).
+	enabledMu sync.Mutex
+	enabled   map[string]liveEnabled
+	// resolveEnabled resolves one session's dashboard.enabled; nil uses
+	// Server.dashboardSessionResolve (test seam).
+	resolveEnabled func(sessionKey string) (bool, error)
+}
+
+// liveEnabled is one session's cached dashboard.enabled and when it was
+// resolved.
+type liveEnabled struct {
+	on bool
+	at time.Time
+}
+
+// forgetEnabled drops a session's cached dashboard.enabled, so its next
+// live write resolves the key again (after a config.tune).
+func (h *liveHub) forgetEnabled(sessionKey string) {
+	h.enabledMu.Lock()
+	defer h.enabledMu.Unlock()
+	delete(h.enabled, sessionKey)
 }
 
 type liveSession struct {
@@ -180,7 +206,7 @@ func (ls *liveSession) stop() {
 // state directory.
 func (s *Server) liveSessionDir(sessionKey string) (string, bool) {
 	entry, found := s.sessions.lookup(sessionKey)
-	if !found || !entry.isTopLevelLead() || !s.dashboardSessionEnabled(sessionKey) {
+	if !found || !entry.isTopLevelLead() || !s.liveDashboardEnabled(sessionKey) {
 		return "", false
 	}
 	dir, err := s.dashboard.stateDir()
@@ -188,6 +214,44 @@ func (s *Server) liveSessionDir(sessionKey string) (string, bool) {
 		return "", false
 	}
 	return wsdashboard.SessionDir(dir, wsmailbox.ReplyID(sessionKey)), true
+}
+
+// liveDashboardEnabled is the session's dashboard.enabled for the live
+// layer, which asks on every intake call (about ten a second while a reply
+// streams) and every snapshot write. A resolution is trusted for
+// dashboardRecheck, and config.tune drops it (forgetEnabled). A failed
+// resolve keeps the last known value: reading it as off would stop the
+// session, and the next intake would rebuild an empty wslive.State, losing
+// the turn start, the subagent tree, and the usage figures. A session never
+// resolved is off until a resolve succeeds.
+func (s *Server) liveDashboardEnabled(sessionKey string) bool {
+	h := &s.live
+	h.enabledMu.Lock()
+	cached, known := h.enabled[sessionKey]
+	resolve := h.resolveEnabled
+	h.enabledMu.Unlock()
+	now := time.Now()
+	if known && now.Sub(cached.at) < dashboardRecheck {
+		return cached.on
+	}
+	if resolve == nil {
+		resolve = s.dashboardSessionResolve
+	}
+	on, err := resolve(sessionKey)
+	if err != nil {
+		appendDebugEvent("dashboard.enabled_resolve_error", map[string]any{"error": err.Error()})
+		if !known {
+			return false
+		}
+		on = cached.on
+	}
+	h.enabledMu.Lock()
+	if h.enabled == nil {
+		h.enabled = map[string]liveEnabled{}
+	}
+	h.enabled[sessionKey] = liveEnabled{on: on, at: now}
+	h.enabledMu.Unlock()
+	return on
 }
 
 func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) response {
@@ -409,7 +473,9 @@ func (s *Server) recordLiveMail(sessionKey string, entries []mailboxHistoryEntry
 	}
 	ring := make([]wslive.RingEntry, 0, len(entries))
 	for i, e := range entries {
-		line := wslive.RingEntry{Kind: wslive.RingMail, Direction: e.Direction, Peer: e.Counterparty, Title: mailboxHistoryTitle(e.Body)}
+		// The ring reaches the browser: scrub the body before the title cap.
+		title := mailboxHistoryTitle(wslive.ScrubSessionKeys(e.Body, sessionKey))
+		line := wslive.RingEntry{Kind: wslive.RingMail, Direction: e.Direction, Peer: e.Counterparty, Title: title}
 		if i < len(keys) {
 			line.HistoryKey = keys[i]
 		}

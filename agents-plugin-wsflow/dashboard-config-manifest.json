@@ -14,7 +14,7 @@
       "minimum": 0,
       "maximum": 65535,
       "default": 29417,
-      "description": "TCP port the dashboard daemon listens on, on the loopback interface; 0 always uses a port the OS assigns. When the port is taken, the daemon falls back to an OS-assigned port and records the port it uses in its endpoint file. Passed to the daemon when an MCP server starts it, so a running daemon keeps its port until it is next started. Read once at server startup; only the project, global, and built-in values apply."
+      "description": "TCP port the dashboard daemon listens on, on the loopback interface; 0 always uses a port the OS assigns. When the port is taken, the daemon falls back to the port the last daemon used, then to an OS-assigned port, so a restart keeps its address while the configured port stays taken; a free configured port always wins, and the daemon records the port it uses in its endpoint file. Passed to the daemon when an MCP server starts it, so a running daemon keeps its port until it is next started. Read once at server startup; only the project, global, and built-in values apply."
     },
     {
       "key": "dashboard.lan_enabled",

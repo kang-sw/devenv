@@ -194,6 +194,51 @@ func TestTreeRetainsRunningAndLastFiveFinished(t *testing.T) {
 	}
 }
 
+// TestLateEventsDoNotRecreateEvictedAgents pins the evicted-agent rule: once
+// retain dropped a finished subagent, a permission clear or an agent event
+// short of status running for it changes nothing (no phantom running agent),
+// a permission clear for a never-seen agent creates nothing, and an explicit
+// running status brings the evicted agent back.
+func TestLateEventsDoNotRecreateEvictedAgents(t *testing.T) {
+	st := NewState(ownerKey)
+	for i := 0; i < FinishedAgentCap+1; i++ {
+		id := fmt.Sprintf("fin%d", i)
+		mustApply(t, st, Event{Kind: KindAgent, AgentID: id}, int64(100+i))
+		mustApply(t, st, Event{Kind: KindAgent, AgentID: id, Status: StatusDone}, int64(1000+i))
+	}
+	has := func(id string) (Agent, bool) {
+		for _, a := range st.Snapshot(5000).Agents {
+			if a.ID == id {
+				return a, true
+			}
+		}
+		return Agent{}, false
+	}
+	if _, ok := has("fin0"); ok {
+		t.Fatal("fin0 was not evicted")
+	}
+	for _, ev := range []Event{
+		{Kind: KindPermission, AgentID: "fin0", Clear: true},
+		{Kind: KindAgent, AgentID: "fin0", Caption: strp("late caption")},
+		{Kind: KindAgent, AgentID: "fin0", Status: StatusDone},
+		{Kind: KindPermission, AgentID: "never-seen", Clear: true},
+	} {
+		if res := mustApply(t, st, ev, 3000); res.Changed {
+			t.Errorf("stale %+v reported a change", ev)
+		}
+	}
+	if a, ok := has("fin0"); ok {
+		t.Fatalf("a late event recreated the evicted agent: %+v", a)
+	}
+	if _, ok := has("never-seen"); ok {
+		t.Fatal("a permission clear created an agent")
+	}
+	mustApply(t, st, Event{Kind: KindAgent, AgentID: "fin0", Status: StatusRunning}, 4000)
+	if a, ok := has("fin0"); !ok || a.Status != StatusRunning {
+		t.Fatalf("explicit running did not bring the agent back: %+v %v", a, ok)
+	}
+}
+
 // TestPermissionWaitShowsToolAndPreview pins the permission-wait state on
 // the lead and on a subagent.
 func TestPermissionWaitShowsToolAndPreview(t *testing.T) {

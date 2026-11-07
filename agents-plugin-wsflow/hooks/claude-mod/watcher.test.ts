@@ -27,6 +27,7 @@ import {
   mapWaitExit,
   nextBackoff,
   parseRecvText,
+  STEER_DRAIN_WAIT_MS,
   type DrainMode,
   type DrainResult,
   type WaitOutcome,
@@ -90,11 +91,15 @@ function harness(mode: DrainMode) {
     submitFailures: [] as Error[],
     appendFailures: [] as Error[],
     submitted: [] as (readonly string[])[],
+    /** Each board submit's count of leading texts already in an unread steer row. */
+    shown: [] as number[],
     appended: [] as (readonly string[])[],
     /** Held entries promoted to steering: the steer-only drain takes these alone, the full drain takes them too. */
     steeredInbox: [] as string[],
     steerDrains: [] as string[],
     steerDrainFailures: [] as Error[],
+    /** When set, the next steered drain waits on it before it claims. */
+    heldSteerDrains: [] as Deferred<void>[],
     steerFailures: [] as Error[],
     /** When set, the next steer row waits on it. */
     heldSteers: [] as Deferred<void>[],
@@ -164,12 +169,13 @@ function harness(mode: DrainMode) {
         // An atomic claim: whatever is held now, once.
         return [...board.inbox.splice(0), ...board.steeredInbox.splice(0)]
       },
-      submit: async (texts) => {
+      submit: async (texts, shown) => {
         const held = board.heldSubmits.shift()
         if (held) await held.promise
         const failure = board.submitFailures.shift()
         if (failure) throw failure
         board.submitted.push(texts)
+        board.shown.push(shown)
         order.push('board')
       },
       append: async (texts) => {
@@ -179,6 +185,8 @@ function harness(mode: DrainMode) {
       },
       drainSteer: async (key) => {
         board.steerDrains.push(key)
+        const held = board.heldSteerDrains.shift()
+        if (held) await held.promise
         const failure = board.steerDrainFailures.shift()
         if (failure) throw failure
         return board.steeredInbox.splice(0)
@@ -1404,6 +1412,8 @@ describe('board messages', () => {
     // A boundary with nothing steered appends nothing more.
     await w.toolCompleted()
     expect(h.board.steered.length).toBe(1)
+    // The request after the result reads the steer row.
+    w.requestStarted()
     h.turn.running = false
     w.turnCompleted()
     await tick()
@@ -1471,6 +1481,136 @@ describe('board messages', () => {
     w.stop('session.end clear')
     expect(h.records.length).toBe(1)
     expect(h.records[0]).toContain('now please')
+    h.turn.running = false
+    w.turnCompleted()
+    await tick()
+    expect(h.board.submitted).toEqual([])
+  })
+
+  test('a hung steered drain holds the tool result only STEER_DRAIN_WAIT_MS; no later boundary starts another, and the turn end still flushes', async () => {
+    const { h, w } = await boardOn()
+    h.turn.running = true
+    h.board.inbox.push('later')
+    await wake(h, 'both', { kind: 'mail', mail: mailA })
+    h.board.heldSteerDrains.push(deferred<void>()) // never resolves
+    let returned = false
+    const boundary = w.toolCompleted().then(() => (returned = true))
+    await tick()
+    expect(returned).toBe(false)
+    h.sleeps.find((x) => x.ms === STEER_DRAIN_WAIT_MS)!.d.resolve()
+    await boundary
+    // The boundary went on without it: the queued mail row still went in.
+    expect(h.appended).toEqual([formatBatch('pkg mailbox', RECV, 'k1', mailA)])
+    expect(h.board.steered).toEqual([])
+    // While that drain is out, a later boundary claims nothing and waits on nothing.
+    const sleepsBefore = h.sleeps.length
+    await w.toolCompleted()
+    expect(h.board.steerDrains).toEqual(['k1'])
+    expect(h.sleeps.length).toBe(sleepsBefore)
+    w.requestStarted()
+    h.turn.running = false
+    w.turnCompleted()
+    await tick()
+    expect(h.board.submitted).toEqual([['later']])
+  })
+
+  test('what a timed-out steered drain claims late is submitted at the turn end, or at once once that has passed', async () => {
+    for (const lateAfterTurnEnd of [false, true]) {
+      const { h, w } = await boardOn()
+      h.turn.running = true
+      h.board.steeredInbox.push('now please')
+      const hung = deferred<void>()
+      h.board.heldSteerDrains.push(hung)
+      const boundary = w.toolCompleted()
+      await tick()
+      h.sleeps.find((x) => x.ms === STEER_DRAIN_WAIT_MS)!.d.resolve()
+      await boundary
+      w.requestStarted()
+      if (lateAfterTurnEnd) {
+        h.turn.running = false
+        w.turnCompleted()
+        await tick()
+      }
+      hung.resolve()
+      await tick()
+      expect(h.board.steered).toEqual([])
+      expect(h.board.steeredInbox).toEqual([])
+      if (!lateAfterTurnEnd) {
+        expect(h.board.submitted).toEqual([])
+        h.turn.running = false
+        w.turnCompleted()
+        await tick()
+      }
+      expect(h.board.submitted).toEqual([['now please']])
+      expect(h.records).toEqual([])
+    }
+  })
+
+  test('a steer row the turn ends without any request reading (a refused or interrupted call) is submitted again at the turn end, ahead of the held one', async () => {
+    const { h, w } = await boardOn()
+    h.turn.running = true
+    h.board.inbox.push('later')
+    await wake(h, 'board')
+    h.board.steeredInbox.push('now please')
+    await w.toolCompleted()
+    expect(h.board.steered).toEqual([['now please']])
+    h.turn.running = false
+    w.turnCompleted()
+    await tick()
+    expect(h.board.submitted).toEqual([['now please', 'later']])
+    // The first text is already in the conversation and on the page.
+    expect(h.board.shown).toEqual([1])
+  })
+
+  test('a dropped re-submit of an unread steer row appends nothing more: the row rides the next prompt; the fresh ones still fall back to a row', async () => {
+    const { h, w } = await boardOn()
+    h.turn.running = true
+    h.board.steeredInbox.push('now please')
+    await w.toolCompleted()
+    h.board.submitFailures.push(new Error('prompt dropped: a Stop stands'))
+    h.turn.running = false
+    w.turnCompleted()
+    await tick()
+    expect(h.board.appended).toEqual([])
+    expect(h.records).toEqual([])
+    // With a held message beside it, only the held one becomes a row.
+    h.turn.running = true
+    h.board.steeredInbox.push('again')
+    await w.toolCompleted()
+    h.board.inbox.push('later')
+    h.board.submitFailures.push(new Error('prompt dropped: a Stop stands'))
+    h.turn.running = false
+    w.turnCompleted()
+    await tick()
+    expect(h.board.appended).toEqual([['later']])
+  })
+
+  test('a steer row appended after its turn ended is submitted again at once', async () => {
+    const { h, w } = await boardOn()
+    h.turn.running = true
+    h.board.steeredInbox.push('now please')
+    const held = deferred<void>()
+    h.board.heldSteers.push(held)
+    const boundary = w.toolCompleted()
+    await tick()
+    h.turn.running = false
+    w.turnCompleted()
+    await tick()
+    held.resolve()
+    await boundary
+    await tick()
+    expect(h.board.steered).toEqual([['now please']])
+    expect(h.board.submitted).toEqual([['now please']])
+    expect(h.board.shown).toEqual([1])
+  })
+
+  test('a stop forgets an unread steer row: the conversation that held it is gone', async () => {
+    const { h, w } = await boardOn()
+    h.turn.running = true
+    h.board.steeredInbox.push('now please')
+    await w.toolCompleted()
+    w.stop('session.end clear')
+    expect(h.records).toEqual([])
     h.turn.running = false
     w.turnCompleted()
     await tick()

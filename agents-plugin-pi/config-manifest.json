@@ -30,7 +30,7 @@
       "type": "boolean",
       "default": true,
       "default_scope": "global",
-      "description": "Hand this session's live activity to its ws dashboard: the lead's and subagents' tool batches, turn boundaries, streamed and finished replies, and user messages. Also submit messages the user sends from the dashboard page as the user's own input: at once when the lead is idle, otherwise when its turn ends. Only the owner lead's session does either, and the dashboard records nothing while dashboard.enabled is off. False sends nothing and leaves dashboard messages unsubmitted."
+      "description": "Hand this session's live activity to its ws dashboard: the lead's and subagents' tool batches, turn boundaries, streamed and finished replies, user messages, and the session's usage figures (context, cache hit, cost) for its status band. Also submit messages the user sends from the dashboard page as the user's own input: at once when the lead is idle; while its turn runs, held until that turn ends, unless the user promotes one to steering, which is delivered into the running turn as a steer. Only the owner lead's session does either, and the dashboard records nothing while dashboard.enabled is off. False sends nothing and leaves dashboard messages unsubmitted."
     },
     {
       "key": "pi.runaway_threshold",

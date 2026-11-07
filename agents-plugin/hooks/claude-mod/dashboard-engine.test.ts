@@ -2,6 +2,7 @@ import { expect, mock, test, type TestBody } from 'claude-code/testing'
 
 import { acceptedKinds, ADAPTER, INBOX_DRAIN_TOOL, INTAKE_TOOL, labelWhiteboard, statusFigures, type DashboardEvent } from './dashboard'
 import { intakeResult, KNOB } from './register'
+import { STEER_DRAIN_WAIT_MS } from './watcher'
 
 type Engine = Parameters<TestBody>[0]
 type On = Parameters<TestBody>[1]
@@ -58,6 +59,10 @@ function world(on: On, opts: { dashboard?: unknown; intake?: Intake } = {}) {
     rows: [] as string[],
     /** How many of the next user rows the host refuses. */
     refuseRows: 0,
+    /** How many of the next prompts the plugin submits the host drops. */
+    dropPrompts: 0,
+    /** Whether a steer-only inbox drain never answers, as a hung server's. */
+    hangSteer: false,
     recvAnswers: [] as { result: unknown; text: string }[],
     /** The chunks the next model request streams, and its result. */
     chunks: [] as unknown[],
@@ -80,6 +85,7 @@ function world(on: On, opts: { dashboard?: unknown; intake?: Intake } = {}) {
     if (e.tool === INBOX_DRAIN_TOOL) {
       const steerOnly = e.args.steer_only === true
       ;(steerOnly ? w.steerDrains : w.inboxDrains).push({ ...e.args })
+      if (steerOnly && w.hangSteer) return new Promise<never>(() => {})
       const claimed = steerOnly ? w.steered.splice(0) : [...w.inbox.splice(0), ...w.steered.splice(0)]
       return text(JSON.stringify({ messages: claimed.map((t, i) => ({ id: `m${i}`, sent_at: 1, text: t, parts: [t], chips: [] })) }))
     }
@@ -132,6 +138,10 @@ function world(on: On, opts: { dashboard?: unknown; intake?: Intake } = {}) {
   on('tool.call', { tool: /__mailbox_lookup_peers$/ }, () => ({ result: undefined, text: '{"self":{"reply_id":"id:r"},"peers":[]}' }) as never)
   on('tool.call', () => w.toolResult as never)
   on('prompt.submit', ($, e) => {
+    if (w.dropPrompts > 0) {
+      w.dropPrompts -= 1
+      return { drop: 'dropped by the test' }
+    }
     w.prompts.push(e.text)
     w.origins.push(e.origin)
     return { text: e.text }
@@ -346,6 +356,8 @@ test('knob on: a message promoted to steering is appended at the next main-threa
   await $.tool.call({ tool: 'Bash', tool_use_id: 'u2', command: 'ls', agentId: 'a77' } as never)
   expect(w.steerDrains.length).toBe(before)
   w.steered.splice(0)
+  // The request after the result reads the steer row.
+  await step($, w)
   await $.turn.complete({ answer: 'done', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer' } as never)
   await w.clock.advance(50)
   expect(w.prompts).toEqual([labelWhiteboard(w.plugin, 'later')])
@@ -368,6 +380,51 @@ test('knob on: a refused steer row submits the claimed message at the turn end, 
   expect(w.prompts).toEqual([labelWhiteboard(w.plugin, 'now please\n\nlater')])
   await flush(w)
   expect(sent(w).filter((e) => e.kind === 'user')).toEqual([{ kind: 'user', text: 'now please\n\nlater', origin: 'whiteboard', at: expect.any(Number) }])
+})
+
+test('knob on: a hung steer drain holds a main-thread tool result only STEER_DRAIN_WAIT_MS', async ($, on) => {
+  const w = world(on, { dashboard: true })
+  await start($, w)
+  await $.turn.start({ text: 'x', turnId: 't' })
+  w.hangSteer = true
+  const before = w.steerDrains.length
+  let returned = false
+  const call = $.tool.call({ tool: 'Bash', tool_use_id: 'u1', command: 'ls' } as never).then((r) => ((returned = true), r))
+  await w.clock.advance(STEER_DRAIN_WAIT_MS - 100)
+  expect(returned).toBe(false)
+  await w.clock.advance(200)
+  expect(returned).toBe(true)
+  expect(await call).toEqual(expect.objectContaining({ text: 'ok' }))
+  expect(w.steerDrains.length).toBe(before + 1)
+})
+
+test('knob on: a dropped board submit falls back to a row that still enters the ring as whiteboard', async ($, on) => {
+  const w = world(on, { dashboard: true })
+  await start($, w)
+  w.inbox.push('pick B')
+  w.dropPrompts = 1
+  w.exits.at(-1)!(0, ['board'])
+  await w.clock.settle()
+  expect(w.prompts).toEqual([])
+  expect(w.rows).toEqual([labelWhiteboard(w.plugin, 'pick B')])
+  await flush(w)
+  expect(sent(w).filter((e) => e.kind === 'user')).toEqual([{ kind: 'user', text: 'pick B', origin: 'whiteboard', at: expect.any(Number) }])
+})
+
+test('knob on: a steer row the turn ends without reading is submitted again at the turn end, entering the ring once', async ($, on) => {
+  const w = world(on, { dashboard: true })
+  await start($, w)
+  await $.turn.start({ text: 'x', turnId: 't' })
+  w.steered.push('now please')
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'u1', command: 'ls' } as never)
+  expect(w.rows).toEqual([labelWhiteboard(w.plugin, 'now please')])
+  // The person interrupted: no request follows the result.
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: true, turnId: 't', reason: 'aborted' } as never)
+  await w.clock.advance(50)
+  expect(w.prompts).toEqual([labelWhiteboard(w.plugin, 'now please')])
+  expect(w.rows.length).toBe(1)
+  await flush(w)
+  expect(sent(w).filter((e) => e.kind === 'user')).toEqual([{ kind: 'user', text: 'now please', origin: 'whiteboard', at: expect.any(Number) }])
 })
 
 for (const knob of [false, 'unreadable'] as const) {

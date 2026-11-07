@@ -540,6 +540,31 @@ describe("startMailboxWaiter: steering a promoted dashboard message", () => {
     assert.deepEqual(board.injected, [["now please", "a follow-up"]]);
   });
 
+  test("an idle drain overtaken by a compaction carries its texts to the settle instead of a submission Pi would refuse", async () => {
+    const wait = boardWait(["board"]);
+    let releaseDrain!: (texts: string[]) => void;
+    let drainStarted = false;
+    const board = fakeBoard({
+      drain: () => {
+        drainStarted = true;
+        return new Promise<string[]>((resolve) => { releaseDrain = resolve; });
+      },
+    });
+    const waiter = startMailboxWaiter({ runWait: wait.runWait, drainMail: () => Promise.resolve([]), admit: () => {}, sleep: immediateSleep, board });
+    await until(() => drainStarted, "the idle drain");
+    // A manual /compact starts while the drain call is in flight.
+    board.idleRef.current = false;
+    releaseDrain(["pick B"]);
+    await until(wait.blocked, "the re-armed wait");
+    assert.deepEqual(board.injected, [], "nothing is submitted while the compaction holds the session");
+    board.idleRef.current = true;
+    waiter.leadSettled!();
+    await until(() => board.injected.length > 0 && wait.blocked(), "the settle");
+    waiter.stop();
+    await waiter.done;
+    assert.deepEqual(board.injected, [["pick B"]]);
+  });
+
   test("a throwing steer inject is reported and its texts go out at the settle; a carried text goes out even with the knob turned off", async () => {
     const wait = boardWait(["board", "board"]);
     const errors: string[] = [];

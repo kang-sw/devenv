@@ -113,7 +113,8 @@ func AppendRing(dir string, entries []RingEntry) error {
 	if len(entries) == 0 {
 		return nil
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	// The ring holds conversation text: owner-only, like mailbox history.
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create conversation ring dir: %w", err)
 	}
 	var werr error
@@ -141,12 +142,8 @@ func writeRingEntry(dir string, entry RingEntry) error {
 		return fmt.Errorf("create conversation ring temp file: %w", err)
 	}
 	tmpPath := tmp.Name()
-	// CreateTemp makes the file 0600; the reader may run as another user.
-	if err := tmp.Chmod(0o644); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
-		return fmt.Errorf("write conversation ring entry: %w", err)
-	}
+	// CreateTemp makes the file 0600, which the entry keeps: its reader, the
+	// dashboard daemon, runs as the same user.
 	if _, err := tmp.Write(raw); err != nil {
 		tmp.Close()
 		os.Remove(tmpPath)

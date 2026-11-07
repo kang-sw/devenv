@@ -492,11 +492,15 @@ export interface Dashboard {
    * whiteboard-started.
    */
   whiteboardSubmitting: () => void
-  /** That submit settled: entered, `text` is a whiteboard user message; not, its mark goes. */
+  /**
+   * That submit settled: entered, `text` is a whiteboard user message (empty
+   * when every message in it was recorded already); not, its mark goes.
+   */
   whiteboardSubmitted: (text: string, entered: boolean) => void
   /**
-   * A dashboard message promoted to steering was appended into the running
-   * turn as a row (no prompt.submit hook sees it): a whiteboard user message.
+   * A dashboard message was appended into the conversation as a row (a
+   * message promoted to steering, or a dropped submit's fallback; no
+   * prompt.submit hook sees it): a whiteboard user message.
    */
   whiteboardSteered: (text: string) => void
   /** A prompt is being submitted; `startsTurn` when it starts a turn rather than joining a running one. */
@@ -883,7 +887,7 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
         if (!turnOpen && nextOrigin === 'whiteboard') nextOrigin = undefined
         return
       }
-      if (own?.recorded) return
+      if (own?.recorded || text === '') return
       settleBefore({ kind: 'user', text: text.slice(0, TEXT_SEND_CAP), origin: 'whiteboard', at: edges.now() })
     }),
     whiteboardSteered: guard('whiteboard steer', (text: string) => {

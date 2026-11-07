@@ -81,6 +81,26 @@ func TestBranchSyncReadsUpstreamStanding(t *testing.T) {
 	}
 }
 
+// TestBranchSyncNamesAShadowedBranch pins the branch name when a tag shares
+// it (git's abbreviated forms print "heads/main"), and an unborn branch
+// reading as not ok.
+func TestBranchSyncNamesAShadowedBranch(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	ctx := context.Background()
+	work := t.TempDir()
+	gitIn(t, work, "init", "-q", "-b", "main")
+	if st, ok := BranchSync(ctx, nil, work); ok || st != (BranchStatus{}) {
+		t.Fatalf("unborn: ok=%v %+v", ok, st)
+	}
+	commitFile(t, work, "a")
+	gitIn(t, work, "tag", "main")
+	if st, ok := BranchSync(ctx, nil, work); !ok || st.Head != "main" || st.OID != "" {
+		t.Fatalf("tag-shadowed branch: ok=%v %+v", ok, st)
+	}
+}
+
 type failingRunner struct{}
 
 func (failingRunner) RunGit(context.Context, string, ...string) ([]byte, error) {

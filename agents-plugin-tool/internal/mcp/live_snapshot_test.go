@@ -423,6 +423,54 @@ func TestDashboardTurnedOffStopsTheHeartbeat(t *testing.T) {
 	}
 }
 
+// TestDashboardResolveFailureKeepsTheLiveSession pins the cached key: a
+// transient dashboard.enabled resolve failure keeps the last known value, so
+// the session is neither stopped nor rebuilt empty (its turn start survives),
+// while a session never resolved stays off until a resolve succeeds.
+func TestDashboardResolveFailureKeepsTheLiveSession(t *testing.T) {
+	f := newLiveFixture(t, true)
+	fastLive(t, 10*time.Millisecond)
+	intake(t, f.server, f.keyA, map[string]any{"kind": "reset"}, map[string]any{"kind": "turn_start", "at": 1000})
+	f.server.live.mu.Lock()
+	before := f.server.live.sessions[f.keyA]
+	f.server.live.mu.Unlock()
+
+	var resolves atomic.Int32
+	f.server.live.enabledMu.Lock()
+	f.server.live.resolveEnabled = func(string) (bool, error) {
+		resolves.Add(1)
+		return false, errors.New("transient")
+	}
+	// Age the cached value past its recheck window.
+	for key, c := range f.server.live.enabled {
+		c.at = c.at.Add(-2 * dashboardRecheck)
+		f.server.live.enabled[key] = c
+	}
+	f.server.live.enabledMu.Unlock()
+
+	if out := intake(t, f.server, f.keyA, map[string]any{"kind": "agent", "caption": "still here"}); strings.Contains(out, "dashboard off") {
+		t.Fatalf("intake after a failed resolve = %q", out)
+	}
+	if resolves.Load() == 0 {
+		t.Fatal("the aged value was not resolved again")
+	}
+	f.server.live.mu.Lock()
+	after := f.server.live.sessions[f.keyA]
+	f.server.live.mu.Unlock()
+	if after != before {
+		t.Fatal("a failed resolve replaced the live session")
+	}
+	path := wslive.SnapshotPath(f.sessionDir(f.replyA))
+	waitFor(t, "the snapshot after the failed resolve", func() bool {
+		snap, err := wslive.ReadSnapshot(path)
+		return err == nil && snap.Lead.TurnStartedAt == 1000
+	})
+
+	if out := intake(t, f.server, f.keyB, map[string]any{"kind": "reset"}); !strings.Contains(out, "dashboard off") {
+		t.Fatalf("never-resolved session with a failing resolve = %q", out)
+	}
+}
+
 // TestDashboardIntakeReportsAcceptedKindsAndStatus pins the support report
 // and the status kind end to end: an intake result names the optional kinds
 // this ws-mcp accepts, the "dashboard off" result names none, and a status
