@@ -229,10 +229,16 @@ details.more[open] > summary { margin-bottom: 2px; }
 .srow.void b { font-weight: 400; text-decoration: line-through; color: var(--wb-muted-fg); }
 
 /* topic body: block markdown above the topic's items, folded under its own summary */
-details.tdoc > summary { cursor: pointer; list-style: none; display: flex; gap: 6px; align-items: center; padding: 3px 12px; min-height: 24px; color: var(--wb-muted-fg); }
+/* The summary is the topic bar's button: it is taken out of the details' flow
+   and pinned to the bar's right end (the bar reserves room for it), so the body
+   opens as a full-width block under the bar. */
+.topic { position: relative; }
+.topic.has-doc > .tbar { padding-right: 46px; }
+details.tdoc > summary { position: absolute; top: 5px; right: 12px; cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 9px; border-radius: 999px; background: rgb(127 127 127 / .28); color: var(--wb-on-topic); }
 details.tdoc > summary::-webkit-details-marker { display: none; }
-details.tdoc[open] > summary { border-bottom: 1px solid var(--wb-muted); }
-.topic.quiet details.tdoc { background: var(--wb-card); border-radius: var(--wb-radius); margin-top: 4px; overflow: hidden; }
+details.tdoc > summary .new { background: currentColor; }
+.topic.quiet details.tdoc > summary { color: var(--wb-muted-fg); }
+.topic.quiet details.tdoc[open] { background: var(--wb-card); border-radius: var(--wb-radius); margin-top: 4px; overflow: hidden; }
 .doc-body { padding: 10px 14px 12px; overflow-x: auto; overflow-wrap: anywhere; }
 .doc-body > :first-child { margin-top: 0; }
 .doc-body > :last-child { margin-bottom: 0; }

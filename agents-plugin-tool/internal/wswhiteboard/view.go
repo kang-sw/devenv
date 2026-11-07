@@ -364,7 +364,18 @@ func BuildView(state *State, in ViewInput) View {
 	newestFirst := func(list []ItemView) {
 		sort.SliceStable(list, func(i, j int) bool { return settledOrder[list[i].ID] > settledOrder[list[j].ID] })
 	}
-	rank := func(t *TopicView) int {
+	// A body changed after the user's latest answer is unread like an open
+	// acknowledgement: any answer on the board counts as the user having
+	// seen it, so the topic settles back without a dedicated confirm.
+	answered := state.LastAnswerSeq()
+	docChanged := map[string]int{}
+	for _, doc := range state.Topics {
+		docChanged[doc.Name] = doc.Changed
+	}
+	// visible is the rank by what the page shows; Quiet follows it, so an
+	// unread body that stays folded (the embed, an unchanged body) does not
+	// make a topic look active.
+	visible := func(t *TopicView) int {
 		switch {
 		case len(t.Policy) > 0:
 			return 0
@@ -378,11 +389,18 @@ func BuildView(state *State, in ViewInput) View {
 			return 4
 		}
 	}
+	rank := func(t *TopicView) int {
+		r := visible(t)
+		if r > 2 && t.Doc != "" && !t.Closed && docChanged[t.Name] > answered {
+			return 2
+		}
+		return r
+	}
 	for _, name := range order {
 		block := blocks[name]
 		newestFirst(block.Expanded)
 		newestFirst(block.Collapsed)
-		block.Quiet = rank(block) == 4
+		block.Quiet = visible(block) == 4
 		if len(block.Acks) > 0 || len(block.Assumed) > 0 {
 			view.BulkAck = true
 		}

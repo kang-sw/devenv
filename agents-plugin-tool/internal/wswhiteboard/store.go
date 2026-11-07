@@ -157,7 +157,12 @@ type State struct {
 	// todo/agenda refresh) increments it.
 	Seq int `json:"seq"`
 	// SettleSeq is the last settle order handed out.
-	SettleSeq    int      `json:"settle_seq,omitempty"`
+	SettleSeq int `json:"settle_seq,omitempty"`
+	// AnswerSeq is the render sequence of the last applied wb:answer that
+	// is not an assumption: the board's mark of the user having answered
+	// something. Zero before any such answer and on a board stored before
+	// the field; LastAnswerSeq derives a stand-in for the latter.
+	AnswerSeq    int      `json:"answer_seq,omitempty"`
 	Items        []Item   `json:"items,omitempty"`
 	ClosedTopics []string `json:"closed_topics,omitempty"`
 	// Topics holds the topics that have a body, in first-set order. A store
@@ -311,6 +316,23 @@ func (s *State) reopenTopic(topic string) {
 func (s *State) settle(item *Item) {
 	s.SettleSeq++
 	item.Settled = s.SettleSeq
+}
+
+// LastAnswerSeq is the render sequence of the board's most recent user
+// answer. A board stored before AnswerSeq existed has none recorded; the
+// newest change among its answered items stands in, which can only be later
+// than the real answer (a patch bumps Changed), never earlier.
+func (s *State) LastAnswerSeq() int {
+	if s.AnswerSeq > 0 {
+		return s.AnswerSeq
+	}
+	last := 0
+	for _, item := range s.Items {
+		if item.Status == StatusAnswered {
+			last = max(last, item.Changed)
+		}
+	}
+	return last
 }
 
 // BeginRender advances the render sequence for a render that changes no item
@@ -541,6 +563,7 @@ func applyAnswer(p *problems, work *State, cmd command, mark int, now time.Time)
 		}
 		item.Status = StatusAnswered
 		work.settle(item)
+		work.AnswerSeq = mark
 	}
 }
 
