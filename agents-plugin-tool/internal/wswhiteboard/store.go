@@ -293,7 +293,7 @@ func (s *State) evictArchive() {
 // Apply validates payload as one whiteboard.update batch and applies it to
 // state. The batch is validated whole: any problem leaves state untouched and
 // every problem is returned. An accepted batch applies in the order
-// embed_dir, id_floor, add, answer, patch, close_topics, now, and advances
+// embed_dir, id_floor, add, answer, patch, close_topics, now_path, and advances
 // the render sequence once; the caller renders afterwards.
 func Apply(state *State, payload any, env Env) (Outcome, []string) {
 	p := &problems{}
@@ -301,7 +301,19 @@ func Apply(state *State, payload any, env Env) (Outcome, []string) {
 	if !ok {
 		return Outcome{}, p.list
 	}
-	checkKnownFields(p, "payload", obj, updateFields)
+	// The inline Now field was removed; name its replacement instead of the
+	// generic unknown-field line, and keep it out of that line.
+	known := obj
+	if _, present := obj["now"]; present {
+		p.add("payload.now: no longer accepted; write the Now markdown to the now_file path the update result prints and pass now_path (\"\" clears the slot)")
+		known = make(map[string]any, len(obj))
+		for name, v := range obj {
+			if name != "now" {
+				known[name] = v
+			}
+		}
+	}
+	checkKnownFields(p, "payload", known, updateFields)
 
 	work := state.clone()
 	work.Seq++
@@ -355,34 +367,9 @@ func Apply(state *State, payload any, env Env) (Outcome, []string) {
 		}
 	}
 
-	_, hasNow := obj["now"]
-	_, hasNowPath := obj["now_path"]
-	if hasNow && hasNowPath {
-		p.add("payload: now and now_path are exclusive; pass one")
-	} else if hasNow || hasNowPath {
-		var content string
-		var ok bool
-		if hasNow {
-			content, ok = stringValue(p, "payload.now", obj["now"])
-		} else if path, pathOK := stringValue(p, "payload.now_path", obj["now_path"]); pathOK {
-			data, err := env.ReadFile(path)
-			if err != nil {
-				p.add("payload.now_path: cannot read %s: %v", path, err)
-			} else {
-				content, ok = string(data), true
-			}
-		}
-		if ok {
-			if fullDocument(content) {
-				p.add("payload.now: the Now slot takes markdown with inline HTML, not a full document (found <!DOCTYPE or <html)")
-			} else if content != work.Now {
-				work.Now = content
-				if content == "" {
-					work.NowSeq = 0
-				} else {
-					work.NowSeq = mark
-				}
-			}
+	if raw, present := obj["now_path"]; present {
+		if path, ok := stringValue(p, "payload.now_path", raw); ok {
+			applyNowPath(p, work, path, mark, env)
 		}
 	}
 
@@ -394,8 +381,35 @@ func Apply(state *State, payload any, env Env) (Outcome, []string) {
 	return out, nil
 }
 
+// applyNowPath sets the Now slot from the markdown file at path, read once;
+// "" clears the slot. The same text again is not a change.
+func applyNowPath(p *problems, work *State, path string, mark int, env Env) {
+	content := ""
+	if path != "" {
+		data, err := env.ReadFile(path)
+		if err != nil {
+			p.add("payload.now_path: cannot read %s: %v", path, err)
+			return
+		}
+		content = string(data)
+	}
+	if fullDocument(content) {
+		p.add("payload.now_path: the Now slot takes markdown with inline HTML, not a full document (found <!DOCTYPE or <html)")
+		return
+	}
+	if content == work.Now {
+		return
+	}
+	work.Now = content
+	if content == "" {
+		work.NowSeq = 0
+	} else {
+		work.NowSeq = mark
+	}
+}
+
 var (
-	updateFields = []string{"add", "answer", "patch", "close_topics", "now", "now_path", "id_floor", "embed_dir"}
+	updateFields = []string{"add", "answer", "patch", "close_topics", "now_path", "id_floor", "embed_dir"}
 	addFields    = []string{"id", "class", "topic", "title", "options", "recommendation", "rationale", "links"}
 	answerFields = []string{"id", "answer", "answer_quote", "assumed"}
 	patchFields  = []string{"id", "title", "options", "recommendation", "rationale", "links", "status"}
