@@ -206,6 +206,8 @@ type pageData struct {
 	// trusted, set only while a finished reply renders, records each URL the
 	// markdown renderer resolved (writeTrustRef) for the sanitizer.
 	trusted *[]trustedURL
+	// svgIDs is the id prefix of the finished reply being sanitized.
+	svgIDs string
 }
 
 // MermaidFile is the shared mermaid script's name, beside the page.

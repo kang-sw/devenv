@@ -2,6 +2,7 @@ package wswhiteboard
 
 import (
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -35,10 +36,40 @@ func TestReplyHTMLKeepsInlineHTMLAndSVG(t *testing.T) {
 		"<details open=\"\"><summary>more</summary>", "hidden <em>text</em>",
 		`<th colspan="2" align="left">h</th>`, "<td>2</td>",
 		`<svg viewBox="0 0 100 40" role="img">`,
-		`<marker id="wbr-ah" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">`,
-		`<linearGradient id="wbr-g">`, `fill="url(#wbr-g)"`, `marker-end="url(#wbr-ah)"`,
 		`<text x="64" y="14">label</text>`,
 	)
+	prefix := svgPrefix(t, out)
+	wantAll(t, out,
+		`<marker id="`+prefix+`ah" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">`,
+		`<linearGradient id="`+prefix+`g">`, `fill="url(#`+prefix+`g)"`, `marker-end="url(#`+prefix+`ah)"`,
+	)
+}
+
+// svgPrefix returns the id prefix out's first SVG id carries.
+func svgPrefix(t *testing.T, out string) string {
+	t.Helper()
+	m := regexp.MustCompile(`id="(wbr-[0-9a-f]{8}-)`).FindStringSubmatch(out)
+	if m == nil {
+		t.Fatalf("no prefixed SVG id:\n%s", out)
+	}
+	return m[1]
+}
+
+// TestReplySVGIDsStayApartAcrossReplies pins the per-reply id prefix: two
+// replies on one page that both define id="g" with different paint keep
+// distinct ids, each referenced by its own reply.
+func TestReplySVGIDsStayApartAcrossReplies(t *testing.T) {
+	svg := func(color string) string {
+		return `<svg><defs><linearGradient id="g"><stop stop-color="` + color + `"/></linearGradient></defs><rect fill="url(#g)"/></svg>`
+	}
+	a, b := servedReply(svg("red")), servedReply(svg("blue"))
+	pa, pb := svgPrefix(t, a), svgPrefix(t, b)
+	if pa == pb {
+		t.Fatalf("both replies prefix their ids with %q", pa)
+	}
+	if !strings.Contains(a, `fill="url(#`+pa+`g)"`) || !strings.Contains(b, `fill="url(#`+pb+`g)"`) {
+		t.Errorf("a reply references another's id:\n%s\n%s", a, b)
+	}
 }
 
 // TestReplyHTMLBlockTagSwallowsFollowingLines pins goldmark's HTML block

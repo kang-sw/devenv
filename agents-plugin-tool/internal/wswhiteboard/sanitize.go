@@ -2,6 +2,8 @@ package wswhiteboard
 
 import (
 	"bytes"
+	"fmt"
+	"hash/fnv"
 	"html/template"
 	"regexp"
 	"strconv"
@@ -30,14 +32,16 @@ import (
 //     reply fetches through CSS or lays a layer over the page; the finished
 //     bubble's contain: paint keeps the rest inside it.
 //   - SVG keeps shapes, text, markers, and gradients: an id is prefixed with
-//     svgIDPrefix, so it cannot collide with a page id, and a presentation
-//     value may reference only such a local id through url(#...).
+//     svgIDPrefix and a hash of the reply, so it collides neither with a page
+//     id nor with another reply's same-named id, and a presentation value may
+//     reference only such a local id through url(#...).
 
 // trustAttr carries a writeTrustRef index on a link or image the markdown
 // renderer resolved.
 const trustAttr = "data-wbref"
 
-// svgIDPrefix keeps a reply's SVG ids apart from the page's own ids.
+// svgIDPrefix keeps a reply's SVG ids apart from the page's own ids; the
+// reply hash after it (sanitizeReply) keeps them apart from another reply's.
 const svgIDPrefix = "wbr-"
 
 // trustedURL is one URL the markdown renderer resolved while a finished
@@ -105,8 +109,7 @@ func init() {
 		"h1": "", "h2": "", "h3": "", "h4": "", "h5": "", "h6": "",
 		"blockquote": "", "pre": "", "code": "", "kbd": "", "samp": "", "var": "",
 		"em": "", "strong": "", "b": "", "i": "", "u": "", "s": "", "del": "", "ins": "", "mark": "",
-		"small": "", "sub": "", "sup": "", "abbr": "", "cite": "", "dfn": "", "q": "", "bdi": "", "bdo": "",
-		"time": "datetime",
+		"small": "", "sub": "", "sup": "", "abbr": "", "cite": "", "dfn": "", "q": "", "bdi": "", "bdo": "", "time": "datetime",
 		"ul": "", "ol": "start reversed type", "li": "value", "dl": "", "dt": "", "dd": "",
 		"table": "width", "caption": "", "colgroup": "span width", "col": "span width",
 		"thead": "", "tbody": "", "tfoot": "", "tr": "",
@@ -131,6 +134,9 @@ func (p *pageData) sanitizeReply(fragment string) template.HTML {
 	for _, n := range nodes {
 		root.AppendChild(n)
 	}
+	h := fnv.New32a()
+	h.Write([]byte(fragment))
+	p.svgIDs = fmt.Sprintf("%s%08x-", svgIDPrefix, h.Sum32())
 	p.sanitizeChildren(root)
 	var buf bytes.Buffer
 	for c := root.FirstChild; c != nil; c = c.NextSibling {
@@ -180,7 +186,7 @@ func (p *pageData) sanitizeElement(n *xhtml.Node) {
 		}
 		if replySVGElements[name] {
 			p.sanitizeChildren(n)
-			keepSVGAttrs(n)
+			keepSVGAttrs(n, p.svgIDs)
 			return
 		}
 	}
@@ -342,9 +348,9 @@ func replaceImage(n *xhtml.Node, path string) {
 }
 
 // keepSVGAttrs keeps an SVG element's allowed attributes: style filtered,
-// id prefixed, and every other value checked as a CSS value (svgValue),
-// since the browser parses a presentation attribute as one.
-func keepSVGAttrs(n *xhtml.Node) {
+// id prefixed with prefix, and every other value checked as a CSS value
+// (svgValue), since the browser parses a presentation attribute as one.
+func keepSVGAttrs(n *xhtml.Node, prefix string) {
 	var kept []xhtml.Attribute
 	for _, a := range n.Attr {
 		key := strings.ToLower(a.Key)
@@ -357,10 +363,10 @@ func keepSVGAttrs(n *xhtml.Node) {
 				continue
 			}
 		case "id":
-			a.Val = svgIDPrefix + a.Val
+			a.Val = prefix + a.Val
 		case "class", "role", "aria-label", "aria-hidden":
 		default:
-			v, ok := svgValue(a.Val)
+			v, ok := svgValue(a.Val, prefix)
 			if !ok {
 				continue
 			}
@@ -373,11 +379,11 @@ func keepSVGAttrs(n *xhtml.Node) {
 
 // svgValue rewrites every local url(#id) reference to the prefixed id and
 // refuses a value that still fetches, scripts, or escapes.
-func svgValue(v string) (string, bool) {
+func svgValue(v, prefix string) (string, bool) {
 	if cssFetchOrEscape.MatchString(svgLocalRef.ReplaceAllString(v, "")) {
 		return "", false
 	}
-	return svgLocalRef.ReplaceAllString(v, "url(#"+svgIDPrefix+"$1)"), true
+	return svgLocalRef.ReplaceAllString(v, "url(#"+prefix+"$1)"), true
 }
 
 // filterStyle keeps the declarations of an inline style that name a plain
