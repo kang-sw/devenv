@@ -81,6 +81,9 @@ const (
 	PhaseReplying   = "replying"
 	PhaseTool       = "tool"
 	PhasePermission = "permission"
+	// PhaseCompacting is the lead's alone: a main-conversation compaction
+	// runs.
+	PhaseCompacting = "compacting"
 )
 
 // Agent status values.
@@ -200,7 +203,8 @@ type Repo struct {
 // Activity is what the lead and a subagent share: the batch view and the
 // state around it.
 type Activity struct {
-	// Phase is idle, thinking, replying, tool, or permission.
+	// Phase is idle, thinking, replying, tool, permission, or (the lead's
+	// only) compacting.
 	Phase          string `json:"phase,omitempty"`
 	PhaseStartedAt int64  `json:"phaseStartedAt,omitempty"`
 	// Done and Failed count finished and failed tool calls: over the current

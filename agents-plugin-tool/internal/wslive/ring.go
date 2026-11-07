@@ -32,6 +32,8 @@ const (
 	RingReply = "reply"
 	RingTurn  = "turn"
 	RingMail  = "mail"
+	// RingCompact is a main-conversation compaction that landed or failed.
+	RingCompact = "compact"
 )
 
 // Mail directions.
@@ -45,7 +47,7 @@ const ringStampLayout = "20060102T150405.000000000Z"
 
 // RingEntry is one ring file.
 type RingEntry struct {
-	// Kind is user, reply, turn, or mail.
+	// Kind is user, reply, turn, mail, or compact.
 	Kind string `json:"kind"`
 	// Origin tags a user message (terminal, whiteboard) or a turn summary
 	// (terminal, whiteboard, mail; empty when unknown).
@@ -65,6 +67,11 @@ type RingEntry struct {
 	Peer       string `json:"peer,omitempty"`
 	Title      string `json:"title,omitempty"`
 	HistoryKey string `json:"historyKey,omitempty"`
+	// Trigger (TriggerAuto, TriggerManual, or empty when unknown) and
+	// CompactFailed describe a compaction line: a failure or a veto, else a
+	// compaction that landed.
+	Trigger       string `json:"trigger,omitempty"`
+	CompactFailed bool   `json:"compactFailed,omitempty"`
 }
 
 // RingRecord is a read entry with its file name and time.

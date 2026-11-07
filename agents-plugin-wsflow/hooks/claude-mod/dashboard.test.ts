@@ -705,3 +705,47 @@ describe('usage status', () => {
     expect(statuses(h.calls.slice(before).flatMap((c) => c.events)).length).toBe(1)
   })
 })
+
+describe('compaction', () => {
+  const acceptsCompact: IntakeResult = { ok: true, text: 'ok: 1 of 1 events applied\naccepts: status, compact\n' }
+
+  test('a start held before any result names compact goes once one does; an end lost with a failed call is put back', async () => {
+    const { h, dash, advance, sent } = await started()
+    dash.compactStarted('auto')
+    await advance()
+    expect(sent().some((e) => e.kind === 'compact')).toBe(false)
+    // A result naming compact turns it on: the held start follows, with its own start time.
+    h.answers.push(acceptsCompact, acceptsCompact)
+    dash.turnStarted(undefined)
+    await advance()
+    await advance()
+    expect(sent().filter((e) => e.kind === 'compact')).toEqual([{ kind: 'compact', phase: 'start', trigger: 'auto', at: 1_100 }])
+    h.answers.push(new Error('server gone'))
+    dash.compactEnded('auto', true)
+    await advance()
+    h.answers.push(acceptsCompact, acceptsCompact)
+    await advance(RETRY_MS)
+    const retry = h.calls.at(-1)!.events
+    expect(kinds(retry)[0]).toBe('reset')
+    // The end is a conversation line a resync cannot rebuild, so it travels again; the settled start does not.
+    expect(retry.filter((e) => e.kind === 'compact')).toEqual([{ kind: 'compact', phase: 'end', trigger: 'auto', at: expect.any(Number) }])
+  })
+
+  test('an end while compact is not accepted is dropped; a restart forgets a running compaction', async () => {
+    const { h, dash, advance, sent } = await started()
+    dash.compactStarted('manual')
+    dash.compactEnded('manual', false)
+    await advance()
+    expect(sent().some((e) => e.kind === 'compact')).toBe(false)
+    h.answers.push(acceptsCompact, acceptsCompact, acceptsCompact)
+    dash.turnStarted(undefined)
+    await advance()
+    // Accepted now; a compaction the conversation's end overtakes is not sent into the next one.
+    dash.compactStarted(undefined)
+    dash.restart()
+    await advance()
+    await advance()
+    expect(sent().some((e) => e.kind === 'compact')).toBe(false)
+    expect(kinds(h.calls.at(-1)!.events)[0]).toBe('reset')
+  })
+})

@@ -32,6 +32,12 @@ function world(on: On, opts: { dashboard?: unknown; intake?: Intake } = {}) {
     intake: opts.intake ?? ('ok' as Intake),
     /** Whether an applied intake's result names `status` on its accepts line, as a ws-mcp that takes it does. */
     acceptsStatus: false,
+    /** Whether an applied intake's result names `compact` on its accepts line. */
+    acceptsCompact: false,
+    /** How the compaction beneath answers: it lands, is vetoed, or throws. */
+    compact: 'land' as 'land' | 'skip' | 'throw',
+    /** While set, the compaction beneath waits on it, so a test can look at the feed mid-compaction. */
+    compactGate: undefined as Promise<void> | undefined,
     /** What `$.session.usage` answers. */
     usage: {
       startedAt: 0,
@@ -80,7 +86,8 @@ function world(on: On, opts: { dashboard?: unknown; intake?: Intake } = {}) {
       if (w.intake === 'throw') throw new Error('server gone')
       if (w.intake === 'error') return text('unknown session_key', true)
       if (w.intake === 'off') return text('dashboard off: nothing recorded\n')
-      return text(`ok: 1 of 1 events applied\n${w.acceptsStatus ? 'accepts: status\n' : ''}`)
+      const accepts = [...(w.acceptsStatus ? ['status'] : []), ...(w.acceptsCompact ? ['compact'] : [])]
+      return text(`ok: 1 of 1 events applied\n${accepts.length > 0 ? `accepts: ${accepts.join(', ')}\n` : ''}`)
     }
     if (e.tool === INBOX_DRAIN_TOOL) {
       const steerOnly = e.args.steer_only === true
@@ -118,6 +125,12 @@ function world(on: On, opts: { dashboard?: unknown; intake?: Intake } = {}) {
   on('turn.step', async function* ($, e) {
     for (const chunk of w.chunks) yield chunk as never
     return { turnId: e.turnId, index: e.index, answer: w.step.answer, toolUses: w.step.toolUses, stopReason: 'end_turn', usage: null } as never
+  })
+  on('session.compact', async () => {
+    if (w.compactGate) await w.compactGate
+    if (w.compact === 'throw') throw new Error('summarizer failed')
+    if (w.compact === 'skip') return { skip: 'vetoed by the test' }
+    return { messages: [{ role: 'user', text: 'summary', toolUses: [] }] } as never
   })
   on('tool.check', () => ({ decision: w.check, reason: 'the world decides' }) as never)
   on('agent.spawn', () => ({ model: 'haiku', agentId: 'a77' }) as never)
@@ -560,4 +573,123 @@ test('statusFigures: compaction window, last-response cache hit over all input, 
   expect(
     statusFigures({ startedAt: 0, context: { window: 200_000 }, rateLimits: [{ kind: 'five_hour', percentUsed: 42, resetsAt: 'soon' }] } as never),
   ).toEqual({ context: { tokens: null, window: 200_000 }, limits: [{ kind: 'five_hour', percent: 42 }] })
+})
+
+// ---- Compaction --------------------------------------------------------------
+
+const compacts = (w: World) => sent(w).filter((e) => e.kind === 'compact')
+
+async function compact($: Engine, trigger: string, agentId?: string) {
+  return $.session.compact({ trigger, messages: [{ role: 'user', text: 'long', toolUses: [] }], ...(agentId ? { agentId } : {}) } as never)
+}
+
+test('a main compaction sends its start while it runs, then its end with the trigger; a landing pushes fresh status figures', { timeoutMs: 20_000 }, async ($, on) => {
+  const w = world(on, { dashboard: true })
+  w.acceptsStatus = true
+  w.acceptsCompact = true
+  await start($, w)
+  await flush(w)
+  let open!: () => void
+  w.compactGate = new Promise<void>((resolve) => (open = resolve))
+  const running = compact($, 'auto')
+  await flush(w)
+  expect(compacts(w)).toEqual([{ kind: 'compact', phase: 'start', trigger: 'auto', at: expect.any(Number) }])
+  // The compaction lands; no measure follows it, yet the page gets the context as it reads now.
+  w.usage.context.tokens = 20_000
+  open()
+  const res = await running
+  // Observe-only: the result is the compaction beneath's.
+  expect(res).toEqual({ messages: [expect.objectContaining({ role: 'user', text: 'summary' })] })
+  await flush(w)
+  await flush(w)
+  expect(compacts(w).slice(1)).toEqual([{ kind: 'compact', phase: 'end', trigger: 'auto', at: expect.any(Number) }])
+  const events = sent(w)
+  const end = events.findIndex((e) => e.kind === 'compact' && e.phase === 'end')
+  expect(events.slice(end).filter((e) => e.kind === 'status').at(-1)?.context).toEqual({ tokens: 20_000, window: 200_000, percent: 10 })
+})
+
+for (const [outcome, label] of [
+  ['skip', 'vetoed'],
+  ['throw', 'failed'],
+] as const) {
+  test(`a ${label} compaction ends as failed and pushes no status`, { timeoutMs: 20_000 }, async ($, on) => {
+    const w = world(on, { dashboard: true })
+    w.acceptsStatus = true
+    w.acceptsCompact = true
+    await start($, w)
+    await flush(w)
+    const before = statuses(w).length
+    w.usage.context.tokens = 20_000
+    w.compact = outcome
+    let threw = false
+    try {
+      const res = await compact($, 'manual')
+      expect(res).toEqual({ skip: 'vetoed by the test' })
+    } catch {
+      threw = true
+    }
+    expect(threw).toBe(outcome === 'throw')
+    await flush(w)
+    expect(compacts(w).map((e) => [e.phase, e.trigger])).toEqual([
+      ['start', 'manual'],
+      ['failed', 'manual'],
+    ])
+    expect(statuses(w).length).toBe(before)
+  })
+}
+
+test('a subagent\'s compaction and a precompute send nothing; a plugin\'s carries no trigger', { timeoutMs: 20_000 }, async ($, on) => {
+  const w = world(on, { dashboard: true })
+  w.acceptsCompact = true
+  await start($, w)
+  await flush(w)
+  await compact($, 'auto', 'a77')
+  await compact($, 'precompute')
+  await flush(w)
+  expect(compacts(w)).toEqual([])
+  await compact($, 'plugin')
+  await flush(w)
+  expect(compacts(w)).toEqual([
+    { kind: 'compact', phase: 'start', at: expect.any(Number) },
+    { kind: 'compact', phase: 'end', at: expect.any(Number) },
+  ])
+})
+
+test('compact is never sent while the intake results do not name it', async ($, on) => {
+  const w = world(on, { dashboard: true })
+  w.acceptsStatus = true
+  await start($, w)
+  await flush(w)
+  await compact($, 'auto')
+  await flush(w)
+  expect(w.intakes.length).toBeGreaterThan(0)
+  expect(compacts(w)).toEqual([])
+})
+
+test('a resync while a compaction runs sends its start again behind the reset', { timeoutMs: 20_000 }, async ($, on) => {
+  const w = world(on, { dashboard: true })
+  w.acceptsCompact = true
+  await start($, w)
+  await flush(w)
+  let open!: () => void
+  w.compactGate = new Promise<void>((resolve) => (open = resolve))
+  const running = compact($, 'auto')
+  await flush(w)
+  expect(compacts(w).length).toBe(1)
+  // A failed call resyncs; the start follows the resync's answer.
+  w.intake = 'error'
+  await $.turn.start({ text: 'x', turnId: 't' })
+  await flush(w)
+  w.intake = 'ok'
+  await w.clock.advance(2500)
+  await w.clock.advance(2500)
+  const resync = w.intakes.findLastIndex((c) => c.events[0]?.kind === 'reset')
+  expect(resync).toBeGreaterThan(0)
+  const after = w.intakes.slice(resync).flatMap((c) => c.events)
+  expect(after.filter((e) => e.kind === 'compact')).toEqual([{ kind: 'compact', phase: 'start', trigger: 'auto', at: compacts(w)[0]!.at }])
+  open()
+  await running
+  // The feed's retry gap runs on the wall clock, so it may still hold the end back.
+  await w.clock.advance(2500)
+  expect(compacts(w).at(-1)).toEqual({ kind: 'compact', phase: 'end', trigger: 'auto', at: expect.any(Number) })
 })

@@ -546,3 +546,92 @@ func TestStatusUnknownContextAndBadFigures(t *testing.T) {
 		t.Fatal("a snapshot shares the state's usage")
 	}
 }
+
+// TestCompactionShowsThenSettlesIntoRing pins the compact event: start puts
+// the lead in the compacting phase (clocked from the start, over a running
+// turn's thinking) without a ring entry; end writes one compaction line with
+// the start's trigger when the end names none; failed writes a failure
+// line; and either returns the lead to the phase it would show.
+func TestCompactionShowsThenSettlesIntoRing(t *testing.T) {
+	st := NewState(ownerKey)
+	mustApply(t, st, Event{Kind: KindTurnStart, At: 1_000}, 1_000)
+	res := mustApply(t, st, Event{Kind: KindCompact, Phase: CompactStart, Trigger: TriggerAuto, At: 2_000}, 2_000)
+	if !res.Changed || !res.Urgent || len(res.Ring) != 0 {
+		t.Fatalf("start result = %+v, want a changed, urgent result with no ring entry", res)
+	}
+	lead := st.Snapshot(3_000).Lead
+	if lead.Phase != PhaseCompacting || lead.PhaseStartedAt != 2_000 {
+		t.Fatalf("lead phase = %q since %d, want compacting since 2000", lead.Phase, lead.PhaseStartedAt)
+	}
+	res = mustApply(t, st, Event{Kind: KindCompact, Phase: CompactEnd, At: 4_000}, 4_000)
+	if len(res.Ring) != 1 || res.Ring[0] != (RingEntry{Kind: RingCompact, Trigger: TriggerAuto}) {
+		t.Fatalf("end ring = %+v, want one auto compaction line", res.Ring)
+	}
+	if lead = st.Snapshot(4_000).Lead; lead.Phase != PhaseThinking {
+		t.Fatalf("after end: phase %q, want thinking (the turn still runs)", lead.Phase)
+	}
+
+	mustApply(t, st, Event{Kind: KindTurnEnd, At: 5_000}, 5_000)
+	mustApply(t, st, Event{Kind: KindCompact, Phase: CompactStart, Trigger: TriggerManual, At: 6_000}, 6_000)
+	res = mustApply(t, st, Event{Kind: KindCompact, Phase: CompactFailed, At: 7_000}, 7_000)
+	if len(res.Ring) != 1 || res.Ring[0] != (RingEntry{Kind: RingCompact, Trigger: TriggerManual, CompactFailed: true}) {
+		t.Fatalf("failed ring = %+v, want one manual failure line", res.Ring)
+	}
+	if lead = st.Snapshot(7_000).Lead; lead.Phase != PhaseIdle {
+		t.Fatalf("after failure: phase %q, want idle", lead.Phase)
+	}
+	// An end with no start still records its line.
+	res = mustApply(t, st, Event{Kind: KindCompact, Phase: CompactEnd, Trigger: TriggerManual}, 8_000)
+	if len(res.Ring) != 1 || res.Ring[0].Trigger != TriggerManual || res.Ring[0].CompactFailed {
+		t.Fatalf("lone end ring = %+v", res.Ring)
+	}
+}
+
+// TestCompactionLostEndSettles pins that a compaction whose end never came
+// stops showing at the next turn start or reset, with no ring entry.
+func TestCompactionLostEndSettles(t *testing.T) {
+	for _, settle := range []Event{{Kind: KindTurnStart}, {Kind: KindReset}} {
+		st := NewState(ownerKey)
+		mustApply(t, st, Event{Kind: KindCompact, Phase: CompactStart}, 1_000)
+		res := mustApply(t, st, settle, 2_000)
+		if len(res.Ring) != 0 {
+			t.Fatalf("%s wrote %+v", settle.Kind, res.Ring)
+		}
+		if lead := st.Snapshot(2_000).Lead; lead.Phase == PhaseCompacting {
+			t.Fatalf("%s left the lead compacting", settle.Kind)
+		}
+		// A later end without a trigger records an unknown-trigger line.
+		res = mustApply(t, st, Event{Kind: KindCompact, Phase: CompactEnd}, 3_000)
+		if len(res.Ring) != 1 || res.Ring[0].Trigger != "" {
+			t.Fatalf("%s: later end ring = %+v", settle.Kind, res.Ring)
+		}
+	}
+}
+
+// TestCompactionPermissionWinsAndBadEventsFail pins the phase order (a
+// permission wait shows over a compaction) and the compact event's checks.
+func TestCompactionPermissionWinsAndBadEventsFail(t *testing.T) {
+	st := NewState(ownerKey)
+	mustApply(t, st, Event{Kind: KindCompact, Phase: CompactStart}, 1_000)
+	mustApply(t, st, Event{Kind: KindPermission, Tool: "Bash"}, 2_000)
+	if lead := st.Snapshot(2_000).Lead; lead.Phase != PhasePermission {
+		t.Fatalf("phase = %q, want permission over compacting", lead.Phase)
+	}
+	mustApply(t, st, Event{Kind: KindPermission, Clear: true}, 3_000)
+	if lead := st.Snapshot(3_000).Lead; lead.Phase != PhaseCompacting || lead.PhaseStartedAt != 1_000 {
+		t.Fatalf("phase = %q since %d, want compacting since 1000", lead.Phase, lead.PhaseStartedAt)
+	}
+	for _, ev := range []Event{
+		{Kind: KindCompact},
+		{Kind: KindCompact, Phase: "done"},
+		{Kind: KindCompact, Phase: CompactStart, Trigger: "plugin"},
+		{Kind: KindCompact, Phase: CompactEnd, AgentID: "a1"},
+	} {
+		if _, err := st.Apply(ev, 4_000); err == nil {
+			t.Errorf("Apply(%+v) succeeded, want an error", ev)
+		}
+	}
+	if lead := st.Snapshot(4_000).Lead; lead.Phase != PhaseCompacting {
+		t.Fatalf("a rejected event changed the phase to %q", lead.Phase)
+	}
+}

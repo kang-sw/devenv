@@ -85,11 +85,16 @@ tools never depend on it. Its state lives under `<cache root>/dashboard/`:
   ws-mcp writes them from host adapter events
   (`dashboard.intake`) and from its mailbox send and recv path, only for a
   registered session; `internal/wslive` holds the schema and readers. An
-  intake result carries an `accepts: status` line naming the optional event
-  kinds this ws-mcp takes; an adapter sends a `status` event (the session's
-  context, usage limits, and cost for the page's status band) only while the
-  latest result names it, since an older ws-mcp skips the kind per event, and
-  the "dashboard off" result names none. The snapshot's `repo` fields (the
+  intake result carries an `accepts: status, compact` line naming the
+  optional event kinds this ws-mcp takes; an adapter sends a `status` event
+  (the session's context, usage limits, and cost for the page's status band)
+  or a `compact` event (a lead compaction's `start`, then its `end` or
+  `failed`, with an `auto` or `manual` trigger) only while the latest result
+  names that kind, since an older ws-mcp skips the kind per event, and the
+  "dashboard off" result names none. A running compaction is the lead's
+  `compacting` phase in the snapshot; its end or failure is a `compact` ring
+  entry, and a reset or the next `turn_start` clears a compaction whose end
+  never came. The snapshot's `repo` fields (the
   root's folder, branch, upstream, ahead and behind, and the counts of
   modified, staged, and untracked working-tree entries) come from ws-mcp's own
   `rev-parse`, `symbolic-ref`, `rev-list --left-right --count`, and

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -531,6 +532,46 @@ func TestRenderedPermissionWaitAndEndedSessions(t *testing.T) {
 	}
 	if strings.Contains(html, "oldend") {
 		t.Errorf("a session ended two days ago is listed")
+	}
+}
+
+// TestRenderedCompaction pins the compaction rows: while the lead compacts,
+// the conversation's live region shows one running compaction line in place
+// of the generic activity line and the tree's lead row shows the phase; a
+// landed or failed compaction is a ring entry line naming its trigger.
+func TestRenderedCompaction(t *testing.T) {
+	now := testNow
+	started := now.Add(-3 * time.Second).UnixMilli()
+	lead := wslive.Lead{Activity: wslive.Activity{Phase: wslive.PhaseCompacting, PhaseStartedAt: started}, TurnStartedAt: started}
+	ring := []wslive.RingRecord{
+		{RingEntry: wslive.RingEntry{Kind: wslive.RingCompact, Trigger: wslive.TriggerAuto}, Name: "20261107T000000.000000001Z-a1.json", At: now},
+		{RingEntry: wslive.RingEntry{Kind: wslive.RingCompact, Trigger: wslive.TriggerManual}, Name: "20261107T000000.000000002Z-a2.json", At: now},
+		{RingEntry: wslive.RingEntry{Kind: wslive.RingCompact, CompactFailed: true}, Name: "20261107T000000.000000003Z-a3.json", At: now},
+	}
+	view := buildSessionView(pageInputs{Session: liveSession("self", "/p", now), Snapshot: liveSnap(now, lead), Ring: ring, Now: now})
+	set, err := renderSessionRegions(view, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conv := string(set[regionConvLive].HTML)
+	if !strings.Contains(conv, `<div class="sysline compaction running">`) || !strings.Contains(conv, "compacting context…") || !strings.Contains(conv, `data-ms="`+strconv.FormatInt(started, 10)+`"`) {
+		t.Errorf("live region lacks the running compaction line: %s", conv)
+	}
+	if strings.Contains(conv, `class="activity"`) {
+		t.Errorf("live region also shows the generic activity line: %s", conv)
+	}
+	if tree := string(set[regionTree].HTML); !strings.Contains(tree, `<span class="phase compacting"><span class="spin"></span>compacting</span>`) {
+		t.Errorf("tree's lead row lacks the compacting phase: %s", tree)
+	}
+	entries := string(set[regionEntries].HTML)
+	for _, want := range []string{
+		`<div class="sysline compaction" data-entry="20261107T000000.000000001Z-a1.json"><span class="mk">✓</span>context compacted (auto)`,
+		`<div class="sysline compaction" data-entry="20261107T000000.000000002Z-a2.json"><span class="mk">✓</span>context compacted (manual)`,
+		`<div class="sysline compaction fail" data-entry="20261107T000000.000000003Z-a3.json"><span class="mk">✗</span>context compaction failed<time`,
+	} {
+		if !strings.Contains(entries, want) {
+			t.Errorf("entries region lacks %q: %s", want, entries)
+		}
 	}
 }
 

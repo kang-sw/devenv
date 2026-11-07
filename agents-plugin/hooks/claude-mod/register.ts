@@ -76,8 +76,10 @@ import {
 //   subagents' live activity, its replies, the user's messages and turn
 //   summaries handed to the session's own MCP server under the
 //   conversation's lead key, which keeps the session's live dashboard view,
-//   with the session's usage figures for its status band; it never changes
-//   an event it observes (see dashboard.ts). Under the same knob the mailbox
+//   with the session's usage figures for its status band and the main
+//   conversation's compactions as they start and land (the figures read
+//   again after a landing); it never changes an event it observes (see
+//   dashboard.ts). Under the same knob the mailbox
 //   push's wait also wakes on a message the user sent from the dashboard
 //   page, which the mod drains through the session's adapter-only inbox
 //   drain tool and submits as the user's own message under the whiteboard
@@ -1497,9 +1499,26 @@ export const register: Register = (on) => {
   // Observes every compaction without changing it; an observer never vetoes,
   // so a failure replays what settled beneath, or lets it run. The lever's
   // own compaction (a `/compact` command) passes here like any other, so
-  // this is the one landing fan-out for it too.
+  // this is the one landing fan-out for it too. The dashboard feed is also
+  // told when the main conversation's compaction begins (a subagent's or
+  // fork's, and a precompute, which installs nothing, are not shown), and a
+  // landing reads the usage again: no measure follows it, and the page would
+  // keep the pre-compaction context until the next one.
   on('session.compact', async ($, e, next) => {
-    const res = await next(e)
+    const shown = e.agentId === undefined && e.trigger !== 'precompute'
+    const trigger = e.trigger === 'auto' || e.trigger === 'manual' ? e.trigger : undefined
+    if (shown) dashboard.compactStarted(trigger)
+    let res: Awaited<ReturnType<typeof next>>
+    try {
+      res = await next(e)
+    } catch (err) {
+      if (shown) dashboard.compactEnded(trigger, false)
+      throw err
+    }
+    if (shown) {
+      dashboard.compactEnded(trigger, res.skip === undefined)
+      if (res.skip === undefined) feedStatus()
+    }
     try {
       compaction.compacted(e.trigger, e.agentId, res)
     } catch (err) {
