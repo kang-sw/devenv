@@ -117,3 +117,25 @@ func TestPanelRowPathText(t *testing.T) {
 	out := render(t, BuildView(&State{}, ViewInput{Layout: LayoutFull, ReplyID: "r", Panels: panels}))
 	wantAll(t, out, `<span>A ticket <code class="fpath">ai-docs/tickets/ready/x.md</code></span>`)
 }
+
+// TestPanelLanesRenderCards pins the kanban lane markup: a lane header with
+// name, count, and note; a card with a category chip, a title that links or
+// carries its path as a tooltip, and a stem line; and an empty lane saying so.
+func TestPanelLanesRenderCards(t *testing.T) {
+	panels := []Panel{{ID: "tickets", Title: "Tickets", Icon: "board", Lanes: []PanelLane{
+		{Name: "ready", Count: "2", Rows: []PanelRow{
+			{Label: "epic", Text: "An epic", Sub: "261101-epic-x", Link: "../t/x.md"},
+			{Label: "feat", Text: "Served", Sub: "261102-feat-y", Path: "ai-docs/tickets/ready/y.md"},
+		}},
+		{Name: "todo", Count: "10", Note: "latest 10 of 12"},
+	}}}
+	out := render(t, BuildView(&State{}, ViewInput{Layout: LayoutFull, ReplyID: "r", Panels: panels}))
+	wantAll(t, out,
+		`<span class="lname">ready</span><span class="chip">2</span>`,
+		`<span class="lnote">latest 10 of 12</span>`,
+		`<li class="kcard"><span class="chip cat epic">epic</span><span class="ctitle"><a href="../t/x.md">An epic</a></span><span class="csub" title="261101-epic-x">261101-epic-x</span></li>`,
+		`<span class="ctitle" title="ai-docs/tickets/ready/y.md">Served</span>`,
+		`<li class="none">none</li>`,
+	)
+	wantNone(t, out, `<code class="fpath">ai-docs/tickets/ready/y.md</code>`)
+}

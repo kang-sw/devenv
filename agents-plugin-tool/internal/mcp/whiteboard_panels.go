@@ -29,10 +29,10 @@ func (s *Server) whiteboardMailbox(sessionKey, root string) whiteboardMailbox {
 	return whiteboardMailbox{owner: owner && err == nil, identity: identity}
 }
 
-// ticketPanel lists every ready/ ticket and, on the full page only, the
-// latest whiteboardLatestTodo todo/ tickets, each linking to its file, or on
-// a served page listing its repo-relative path as text. idea/ tickets are
-// never listed.
+// ticketPanel shows the tickets as kanban lanes: every ready/ ticket and, on
+// the full page only, the latest whiteboardLatestTodo todo/ tickets. Each
+// card links to its file, or on a served page carries its repo-relative path
+// as a tooltip. idea/ tickets are never listed.
 func ticketPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 	tickets, err := wsdoc.TicketsList(in.root, wsdoc.TicketListOptions{Statuses: []string{"ready", "todo"}})
 	if err != nil {
@@ -48,33 +48,55 @@ func ticketPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 		}
 	}
 	pageDir := whiteboardPageDir(in)
-	row := func(t wsdoc.TicketInfo) wswhiteboard.PanelRow {
-		title := t.Title
+	card := func(t wsdoc.TicketInfo) wswhiteboard.PanelRow {
+		title, sub := t.Title, t.Stem
 		if title == "" {
-			title = t.Stem
+			title, sub = t.Stem, "" // the stem is already the title
 		}
+		row := wswhiteboard.PanelRow{Label: ticketCategory(t.Stem), Text: title, Sub: sub}
 		if in.served {
-			return wswhiteboard.PanelRow{Label: t.Status, Text: title, Path: filepath.ToSlash(t.Path)}
+			row.Path = filepath.ToSlash(t.Path)
+		} else {
+			target := filepath.Join(in.root, filepath.FromSlash(t.Path))
+			row.Link = whiteboardFileLink(in.root, pageDir, target)
 		}
-		target := filepath.Join(in.root, filepath.FromSlash(t.Path))
-		return wswhiteboard.PanelRow{Label: t.Status, Text: title, Link: whiteboardFileLink(in.root, pageDir, target)}
+		return row
 	}
-	var rows []wswhiteboard.PanelRow
-	for _, t := range ready {
-		rows = append(rows, row(t))
+	lane := func(name string, tickets []wsdoc.TicketInfo, note string) wswhiteboard.PanelLane {
+		l := wswhiteboard.PanelLane{Name: name, Count: fmt.Sprint(len(tickets)), Note: note}
+		for _, t := range tickets {
+			l.Rows = append(l.Rows, card(t))
+		}
+		return l
 	}
+	lanes := []wswhiteboard.PanelLane{lane("ready", ready, "")}
 	count := fmt.Sprintf("%d ready", len(ready))
 	if in.layout == wswhiteboard.LayoutFull {
-		// The chip counts the whole todo/ backlog, not the rows listed.
+		// The chip counts the whole todo/ backlog, not the cards listed.
 		count += fmt.Sprintf(", %d todo", len(todo))
-		for _, t := range latestTodoTickets(todo, whiteboardLatestTodo) {
-			rows = append(rows, row(t))
+		if len(todo) > 0 {
+			latest := latestTodoTickets(todo, whiteboardLatestTodo)
+			note := ""
+			if len(latest) < len(todo) {
+				note = fmt.Sprintf("latest %d of %d", len(latest), len(todo))
+			}
+			lanes = append(lanes, lane("todo", latest, note))
 		}
 	}
-	if len(rows) == 0 {
+	if len(ready) == 0 && (in.layout != wswhiteboard.LayoutFull || len(todo) == 0) {
 		return wswhiteboard.Panel{}, false
 	}
-	return wswhiteboard.Panel{ID: "tickets", Title: "Tickets", Icon: "board", Count: count, Rows: rows}, true
+	return wswhiteboard.Panel{ID: "tickets", Title: "Tickets", Icon: "board", Count: count, Lanes: lanes}, true
+}
+
+// ticketCategory is the category word of a ticket stem (<date>-<category>-
+// <slug>: feat, bug, epic, research, ...), empty when the stem has none.
+func ticketCategory(stem string) string {
+	parts := strings.SplitN(stem, "-", 3)
+	if len(parts) < 3 || parts[1] == "" {
+		return ""
+	}
+	return parts[1]
 }
 
 // latestTodoTickets keeps the newest n tickets by creation date, newest
