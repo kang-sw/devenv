@@ -194,6 +194,8 @@ type pageData struct {
 	// only on a page that holds one.
 	Mermaid     bool
 	MermaidInit template.JS
+	// noMermaid renders a mermaid fence as a plain code block (RenderText).
+	noMermaid bool
 
 	icons map[string]bool
 	// onPage holds every item ID the page renders, the targets an in-page
