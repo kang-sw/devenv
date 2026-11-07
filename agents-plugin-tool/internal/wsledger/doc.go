@@ -94,8 +94,8 @@
 //
 // # Journal and batches
 //
-// Append writes events durably to this clone's journal (journal.jsonl in the
-// store directory). The open batch is closed into one signed commit when the
+// Append writes events durably to this clone's journal
+// (journal.<member>.<clone>.jsonl in the store directory). The open batch is closed into one signed commit when the
 // writer receives new events (its seen would change) or at Sync, so every
 // commit's seen is exact. While this clone's key is not a live key of its
 // member, the batch stays open (PendingReport.KeyNotRegistered); once an
@@ -107,6 +107,29 @@
 //
 // Seq allocation, journal writes, batch close, Fetch, and Sync are
 // serialized across processes by a file lock in the store directory.
+//
+// # Remote
+//
+// Register clones a repository URL into the store's own bare repository.
+// An empty repository gets a new store (genesis, then the creator's claim,
+// then its ref); when another registration's genesis lands first, it fetches
+// and joins instead. A repository with a store is joined (claim first; a
+// lost claim is ErrIDTaken and nothing else is pushed), unless the identity
+// state already holds this key for the member id, which writes no join.
+//
+// Sync closes the batch, pushes this clone's ref fast-forward only, and
+// fetches refs/heads/tracker/* into a snapshot namespace; Fetch does the
+// same without pushing. A fetched ref replaces the local copy only when the
+// local copy is absent or, for a member ref, when the remote fast-forwards
+// it. A deletion, a move to a non-descendant, or a moved create-once ref is
+// refused with a Warning, and Restore pushes the local copy back. The
+// remote copy of this clone's own ref is never taken over local commits:
+// commits this clone did not write there set ForeignAdvance, and
+// MoveToFreshClone moves the unpushed events to a fresh clone id.
+//
+// Every write moves the idle push deadline to at least now plus
+// Options.PushDelay; the deadline is persisted per stream, so opening a
+// store with unpushed writes restarts it, and a due deadline runs Sync.
 //
 // # Reading
 //

@@ -101,6 +101,17 @@ type Ledger struct {
 	gen           uint64
 	marks         map[EventID]mark
 	received      int // events new to this view during the current call
+
+	// Remote state (remote.go).
+	remote        string // remote URL; "" when the store has none
+	remoteChecked bool
+	knownOwn      string // the own ref's last value known on the remote
+	remoteWarns   []Warning
+	foreign       bool // the remote copy of the own ref holds commits this clone did not write
+	ownBlocked    bool // the own ref was deleted or rewound on the remote; only Restore pushes it
+	timer         Timer
+	closed        bool
+	cloneFile     bool // the clone id lives in Dir/clone-id rather than Options
 }
 
 type mark struct {
@@ -168,7 +179,6 @@ func newLedger(ctx context.Context, opts Options) (*Ledger, error) {
 		pubKey:   pub,
 		fp:       fp,
 		epoch:    randomID(),
-		journal:  newJournal(filepath.Join(o.Dir, "journal.jsonl")),
 		refs:     map[string]*refState{},
 		claims:   map[string]*commitRec{},
 		sigCache: map[string]sigInfo{},
@@ -246,7 +256,10 @@ func Open(ctx context.Context, opts Options) (*Ledger, error) {
 		if err := l.initClone(); err != nil {
 			return err
 		}
-		return l.refresh(ctx)
+		if err := l.refresh(ctx); err != nil {
+			return err
+		}
+		return l.afterOpen(ctx)
 	})
 	if err != nil {
 		return nil, err
@@ -254,8 +267,34 @@ func Open(ctx context.Context, opts Options) (*Ledger, error) {
 	return l, nil
 }
 
-// Close releases the instance. The journal is durable; nothing is lost.
-func (l *Ledger) Close() error { return nil }
+// afterOpen restarts the push delay when a journal was left unpushed: the
+// deadline becomes the later of the persisted one and this open plus the
+// delay.
+func (l *Ledger) afterOpen(ctx context.Context) error {
+	if !l.hasRemote(ctx) {
+		return nil
+	}
+	if err := l.loadKnownOwn(ctx); err != nil {
+		return err
+	}
+	if l.pendingLocked().Count > 0 {
+		return l.extendDeadline(l.now())
+	}
+	return nil
+}
+
+// Close stops the push-delay timer. The journal is durable; unpushed writes
+// restart the delay when the store is next opened.
+func (l *Ledger) Close() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.closed = true
+	if l.timer != nil {
+		l.timer.Stop()
+		l.timer = nil
+	}
+	return nil
+}
 
 // MemberID returns this writer's member id.
 func (l *Ledger) MemberID() string { return l.member }
@@ -292,6 +331,7 @@ func randomID() string {
 // else a new random one written there.
 func (l *Ledger) initClone() error {
 	id := l.opts.CloneID
+	l.cloneFile = id == ""
 	if id == "" {
 		path := filepath.Join(l.opts.Dir, "clone-id")
 		data, err := os.ReadFile(path)
@@ -312,6 +352,9 @@ func (l *Ledger) initClone() error {
 	}
 	l.clone = id
 	l.stream = streamKey(l.member, id)
+	// One journal per stream, so a store directory reused under another
+	// member id or after MoveToFreshClone never mixes streams.
+	l.journal = newJournal(filepath.Join(l.opts.Dir, "journal."+l.stream+".jsonl"))
 	return nil
 }
 
@@ -833,13 +876,32 @@ func (l *Ledger) Append(ctx context.Context, events []NewEvent) ([]EventID, erro
 			return err
 		}
 		var err error
-		ids, err = l.appendLocked(events, nil)
-		return err
+		if ids, err = l.appendLocked(events, nil); err != nil {
+			return err
+		}
+		if l.hasRemote(ctx) {
+			return l.extendDeadline(l.now())
+		}
+		return nil
 	})
 	return ids, err
 }
 
 func (l *Ledger) appendLocked(events []NewEvent, of []int) ([]EventID, error) {
+	now := l.now()
+	items := make([]journalEvent, len(events))
+	for i, e := range events {
+		items[i] = journalEvent{TS: now, Type: e.Type, Origin: e.Origin, Payload: e.Payload}
+		if of != nil {
+			items[i].Of = of[i]
+		}
+	}
+	return l.appendEvents(items)
+}
+
+// appendEvents journals events under fresh seqs, keeping each one's ts,
+// type, origin, payload, and re-issue mark.
+func (l *Ledger) appendEvents(events []journalEvent) ([]EventID, error) {
 	if len(events) == 0 {
 		return nil, nil
 	}
@@ -848,19 +910,15 @@ func (l *Ledger) appendLocked(events []NewEvent, of []int) ([]EventID, error) {
 		recs = append(recs, journalRec{K: "open", Seen: l.seenNow()})
 	}
 	seq := max(l.journal.maxSeq(), l.committedMax)
-	ts := l.now()
 	ids := make([]EventID, 0, len(events))
-	for i, e := range events {
+	for _, e := range events {
 		seq++
 		payload := e.Payload
 		if len(payload) == 0 {
 			payload = json.RawMessage("{}")
 		}
-		r := journalRec{K: "ev", Seq: seq, TS: &ts, Type: e.Type, Origin: e.Origin, Payload: payload}
-		if of != nil {
-			r.Of = of[i]
-		}
-		recs = append(recs, r)
+		ts := e.TS
+		recs = append(recs, journalRec{K: "ev", Seq: seq, TS: &ts, Type: e.Type, Origin: e.Origin, Payload: payload, Of: e.Of})
 		ids = append(ids, EventID{Member: l.member, Clone: l.clone, Seq: seq})
 	}
 	if err := l.journal.write(recs...); err != nil {
@@ -899,29 +957,50 @@ func (l *Ledger) reissue() (int, error) {
 	return len(events), nil
 }
 
-// Sync closes the open batch, verifies, and re-issues cut events. With no
-// remote that is the whole apply path.
+// Sync is the apply path: close the open batch, push this clone's ref
+// (fast-forward only), fetch, verify, and re-issue cut events. A failed
+// sync leaves pending writes in place for the next attempt.
 func (l *Ledger) Sync(ctx context.Context) (SyncReport, error) {
 	var rep SyncReport
 	err := l.withLock(ctx, func() error {
 		if err := l.refresh(ctx); err != nil {
 			return err
 		}
-		closed, err := l.closeBatch(ctx)
-		if err != nil {
+		remote := l.hasRemote(ctx)
+		publish := func() error {
+			closed, err := l.closeBatch(ctx)
+			if err != nil {
+				return err
+			}
+			rep.Closed = rep.Closed || closed
+			if !remote {
+				return nil
+			}
+			pushed, err := l.pushAll(ctx)
+			if err != nil {
+				return err
+			}
+			rep.Pushed = rep.Pushed || pushed
+			if err := l.fetchRemote(ctx); err != nil {
+				return err
+			}
+			return l.refresh(ctx)
+		}
+		if err := publish(); err != nil {
 			return err
 		}
-		rep.Closed = closed
 		n, err := l.reissue()
 		if err != nil {
 			return err
 		}
 		rep.Reissued = n
 		if n > 0 {
-			if closed, err = l.closeBatch(ctx); err != nil {
+			if err := publish(); err != nil {
 				return err
 			}
-			rep.Closed = rep.Closed || closed
+		}
+		if remote && l.pendingLocked().Count == 0 {
+			return l.clearDeadline()
 		}
 		return nil
 	})
@@ -929,12 +1008,22 @@ func (l *Ledger) Sync(ctx context.Context) (SyncReport, error) {
 	return rep, err
 }
 
-// Fetch receives without pushing. With no remote it verifies local refs.
+// Fetch receives without pushing: fetch, verify, and close the open batch
+// into a local commit when new events arrived. With no remote it verifies
+// local refs.
 func (l *Ledger) Fetch(ctx context.Context) (SyncReport, error) {
 	var rep SyncReport
 	err := l.withLock(ctx, func() error {
 		if err := l.refresh(ctx); err != nil {
 			return err
+		}
+		if l.hasRemote(ctx) {
+			if err := l.fetchRemote(ctx); err != nil {
+				return err
+			}
+			if err := l.refresh(ctx); err != nil {
+				return err
+			}
 		}
 		closed, err := l.receiveClose(ctx)
 		rep.Closed = closed
@@ -948,7 +1037,7 @@ func (l *Ledger) finishReport(rep *SyncReport) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	rep.Received = l.received
-	rep.Warnings = append(rep.Warnings, l.badRefs...)
+	rep.Warnings = append(append(rep.Warnings, l.remoteWarns...), l.badRefs...)
 	rep.Pending = l.pendingLocked()
 }
 
@@ -966,9 +1055,26 @@ func (l *Ledger) pendingLocked() PendingReport {
 	}
 	pend := l.journal.pending(l.committedMax)
 	rep.Uncommitted = len(pend)
-	rep.Count = len(pend)
-	if len(pend) > 0 {
-		rep.Oldest = pend[0].TS
+	if l.remote == "" {
+		rep.Count = len(pend)
+		if len(pend) > 0 {
+			rep.Oldest = pend[0].TS
+		}
+	} else {
+		// Unpushed: every own event above what the remote is known to hold.
+		known := l.knownOwnMaxSeq()
+		for _, n := range l.view.streams[l.stream] {
+			if n.id.Seq > known {
+				rep.Count++
+				if rep.Oldest.IsZero() || n.line.TS.Before(rep.Oldest) {
+					rep.Oldest = n.line.TS
+				}
+			}
+		}
+		rep.ForeignAdvance = l.foreign
+		if rep.Count > 0 {
+			rep.PushDue = l.readPushState().Deadline
+		}
 	}
 	rep.KeyNotRegistered = !l.view.holdsKey(l.member, l.fp)
 	if c := l.claims[l.member]; c != nil {
