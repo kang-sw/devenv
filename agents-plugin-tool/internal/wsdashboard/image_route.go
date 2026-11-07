@@ -74,7 +74,7 @@ const imageDataMax = 2 << 20
 
 // ImageDataURL is a board image at path (relative to root, or absolute)
 // inlined as a data: URL, under the image route's own containment checks
-// (containedImage), for the Now slot's sandboxed frame: the frame's opaque
+// (containedImage), for a topic body's sandboxed frame: the frame's opaque
 // origin sends no cookie, so in LAN mode the image route would refuse it. It
 // is empty when the route would refuse the path or the file is larger than
 // imageDataMax; the page then falls back to the route's URL (ImageSrc). The

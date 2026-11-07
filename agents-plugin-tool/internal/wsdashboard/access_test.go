@@ -105,7 +105,7 @@ func guardedRoutes() []struct{ method, path, body string } {
 }
 
 // TestLANModeServesTheMermaidScriptToAll pins the guard's one exemption: a
-// read of the shared mermaid script passes without the token, since a Now
+// read of the shared mermaid script passes without the token, since a topic-body
 // frame's opaque origin sends no cookie, while any other method on its path,
 // and a near miss of its name, still meets the guard.
 func TestLANModeServesTheMermaidScriptToAll(t *testing.T) {

@@ -22,8 +22,8 @@ import (
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
-// The session whiteboard: whiteboard.update applies a batch to the item
-// store in the session state record (wswhiteboard.Apply) and renders, in one
+// The session whiteboard: whiteboard.update applies a command string to the
+// item store in the session state record (wswhiteboard.Apply) and renders, in one
 // call, the full page, its change stamp, and a new embed snapshot. The pure
 // store, view, and templates live in internal/wswhiteboard; this file owns
 // the files on disk and their lifecycle.
@@ -45,10 +45,9 @@ const (
 var (
 	errWhiteboardRefused = errors.New("whiteboard batch refused")
 	errNoWhiteboard      = errors.New("session has no whiteboard")
-	// whiteboardFilePattern matches the files a session's board writes, and
-	// the Now file its lead writes: <reply-id>.html, <reply-id>.stamp.js,
-	// <reply-id>-<hash>.html, <reply-id>.now.md.
-	whiteboardFilePattern = regexp.MustCompile(`^([a-z0-9]+)(?:\.html|\.stamp\.js|\.now\.md|-[0-9a-f]+\.html)$`)
+	// whiteboardFilePattern matches the files a session's board writes:
+	// <reply-id>.html, <reply-id>.stamp.js, <reply-id>-<hash>.html.
+	whiteboardFilePattern = regexp.MustCompile(`^([a-z0-9]+)(?:\.html|\.stamp\.js|-[0-9a-f]+\.html)$`)
 )
 
 // Test seams for the rename retry (technical decision 119): a browser polling
@@ -195,33 +194,42 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any)
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
-	payload := args["payload"]
+	// The JSON payload object was replaced by the command string; the
+	// precheck defers a call carrying it here (handlerOwnedArguments), so the
+	// refusal names the replacement instead of a generic unknown argument.
+	if _, present := args["payload"]; present {
+		return toolErrorTextResponse(id, s.whiteboardRefusal(tool, []string{
+			"payload: no longer accepted; whiteboard.update takes commands, one string of wb: commands",
+		}))
+	}
+	commands := ""
+	if raw, present := args["commands"]; present {
+		str, ok := raw.(string)
+		if !ok {
+			return toolErrorTextResponse(id, s.whiteboardRefusal(tool, []string{
+				"commands: must be a string of wb: commands, not a JSON value",
+			}))
+		}
+		commands = str
+	}
 	var (
 		problems []string
 		outcome  wswhiteboard.Outcome
 		render   whiteboardRender
-		root     string
 	)
 	err = s.sessions.mutateRecord(key, func(rec *sessionRecord) error {
 		if rec.Whiteboard == nil {
 			rec.Whiteboard = &wswhiteboard.State{}
 		}
-		root = rec.Root
 		env := wswhiteboard.Env{
 			Now: time.Now(),
-			ReadFile: func(path string) ([]byte, error) {
-				if !filepath.IsAbs(path) {
-					path = filepath.Join(root, path)
-				}
-				return os.ReadFile(path)
-			},
 			IsDir: func(path string) bool {
 				info, err := os.Stat(path)
 				return err == nil && info.IsDir()
 			},
 			IsAbs: filepath.IsAbs,
 		}
-		outcome, problems = wswhiteboard.Apply(rec.Whiteboard, payload, env)
+		outcome, problems = wswhiteboard.Apply(rec.Whiteboard, commands, env)
 		if len(problems) > 0 {
 			return errWhiteboardRefused
 		}
@@ -250,7 +258,6 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any)
 	}
 	sb.WriteString("full: " + full + "\n")
 	sb.WriteString("embed: " + render.embed + "\n")
-	sb.WriteString("now_file: " + whiteboardNowFile(root, key) + "\n")
 	return toolTextResponse(id, sb.String(), nil)
 }
 
@@ -264,34 +271,39 @@ func (s *Server) handleWhiteboardQuery(id json.RawMessage, args map[string]any) 
 	if !ok {
 		return toolTextResponse(id, "", fmt.Errorf("%s: session key not found: %s", tool, key))
 	}
-	items, problems := wswhiteboard.Query(rec.Whiteboard, args["payload"])
+	items, body, problems := wswhiteboard.Query(rec.Whiteboard, args["payload"])
 	if len(problems) > 0 {
 		return toolErrorTextResponse(id, s.whiteboardRefusal(tool, problems))
 	}
-	return toolTextResponse(id, wswhiteboard.FormatItems(items), nil)
+	return toolTextResponse(id, wswhiteboard.FormatItems(items, body), nil)
 }
 
-// whiteboardRefusal lists every problem and then the inner payload schema,
-// read from the whiteboard playbook so the schema has one source, so that
-// one retry can fix the call. The central precheck cannot do this: it sees
-// only the advertised {session_key, payload}.
+// whiteboardRefusal lists every problem and then the tool's own input
+// grammar, read from the whiteboard playbook so the grammar has one source,
+// so that one retry can fix the call: the "## Commands" section for
+// whiteboard.update, the "## Query" section for whiteboard.query. The central
+// precheck cannot do this: it sees only the advertised argument names.
 func (s *Server) whiteboardRefusal(tool string, problems []string) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "%s refused; nothing was applied. Problems:\n", tool)
 	for _, problem := range problems {
 		sb.WriteString("- " + problem + "\n")
 	}
-	if schema := s.whiteboardPayloadSection(); schema != "" {
-		sb.WriteString("\n" + schema + "\n")
+	heading := "## Commands"
+	if tool == "whiteboard.query" {
+		heading = "## Query"
+	}
+	if grammar := s.whiteboardPlaybookSection(heading); grammar != "" {
+		sb.WriteString("\n" + grammar + "\n")
 	} else {
-		fmt.Fprintf(&sb, "\nRead the %s playbook with %s/playbook.read for the payload schema.\n", whiteboardPlaybookName, RuntimeNamespace())
+		fmt.Fprintf(&sb, "\nRead the %s playbook with %s/playbook.read for the input format.\n", whiteboardPlaybookName, RuntimeNamespace())
 	}
 	return sb.String()
 }
 
-// whiteboardPayloadSection returns the playbook's "## Payload" section
-// (heading through the line before the next level-2 heading).
-func (s *Server) whiteboardPayloadSection() string {
+// whiteboardPlaybookSection returns the playbook's section under heading
+// (heading through the line before the next heading of its level or higher).
+func (s *Server) whiteboardPlaybookSection(heading string) string {
 	rsrcRoot, err := resolveRsrcRoot("")
 	if err != nil {
 		return ""
@@ -300,7 +312,7 @@ func (s *Server) whiteboardPayloadSection() string {
 	if err != nil {
 		return ""
 	}
-	return markdownSection(body, "## Payload")
+	return markdownSection(body, heading)
 }
 
 // markdownSection returns the text from the line equal to heading up to the
@@ -477,15 +489,6 @@ func ensureWhiteboardMermaid(dir, html string) error {
 		return fmt.Errorf("write %s: %w", name, err)
 	}
 	return nil
-}
-
-// whiteboardNowFile is the session's stable Now file, an absolute path inside
-// the whiteboard folder: the lead writes its Now markdown there and passes
-// the path as now_path. The name carries the reply id, never the session key,
-// so the folder listing leaks no credential; the orphan scan deletes the file
-// with the rest of a dead session's board. The server never creates it.
-func whiteboardNowFile(root, sessionKey string) string {
-	return filepath.Join(root, filepath.FromSlash(whiteboardDirRel), wsmailbox.ReplyID(sessionKey)+".now.md")
 }
 
 // whiteboardRender is one render's outcome. Its file side effects settle

@@ -113,7 +113,7 @@ a { color: var(--wb-primary); }
 .cbar .btn[aria-pressed="true"] .i { color: var(--wb-assumed); }
 .cbody { padding: 8px 10px 10px; }
 .new { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--wb-primary); flex: none; align-self: center; }
-.cbar .new, details.now > summary .new { background: currentColor; }
+.cbar .new { background: currentColor; }
 .ctx { margin: 0 0 8px; color: var(--wb-muted-fg); font-size: 13px; overflow-wrap: anywhere; }
 
 /* markdown in item fields: inline code everywhere, blocks inside .md */
@@ -228,32 +228,31 @@ details.more[open] > summary { margin-bottom: 2px; }
 .srow .ans { color: var(--wb-muted-fg); }
 .srow.void b { font-weight: 400; text-decoration: line-through; color: var(--wb-muted-fg); }
 
-/* Now slot */
-details.now { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); margin-bottom: 16px; overflow: hidden; }
-details.now > summary { cursor: pointer; list-style: none; display: flex; gap: 8px; align-items: center; padding: 4px 12px; min-height: 30px; background: var(--wb-now); color: var(--wb-on-now); font-weight: 600; }
-details.now > summary::-webkit-details-marker { display: none; }
-details.now > summary .label { font-size: 12px; letter-spacing: .08em; }
-details.now.stale > summary { background: var(--wb-muted); color: var(--wb-muted-fg); }
-.now-body { padding: 10px 14px 12px; overflow-x: auto; overflow-wrap: anywhere; }
-.now-body > :first-child { margin-top: 0; }
-.now-body > :last-child { margin-bottom: 0; }
-.now-body > svg { width: 100%; height: auto; display: block; }
-.now-body img, .now-body canvas { max-width: 100%; height: auto; }
-.now-body pre { background: var(--wb-muted); border-radius: 8px; padding: 8px 10px; overflow-x: auto; font-size: 12.5px; }
-/* a served page's Now: a sandboxed frame sized to its content, which pads itself */
-.now-body.framed { padding: 0; }
-iframe.now-frame { display: block; width: 100%; height: 0; border: 0; }
-/* drawing kit for Now fragments: theme-aware classes for inline SVG (the
-   selectors key on .now-body, which a Now frame's document holds too) */
-.now-body .box { fill: var(--wb-muted); }
-.now-body .box.store { fill: var(--wb-now); }
-.now-body svg text { fill: var(--wb-fg); font: 12px system-ui, sans-serif; }
-.now-body svg text.on { fill: var(--wb-on-now); }
-.now-body svg text.sub { fill: var(--wb-muted-fg); font-size: 10.5px; }
-.now-body svg text.sub.on { fill: var(--wb-on-now); opacity: .8; }
-.now-body .edge { stroke: var(--wb-muted-fg); fill: none; stroke-width: 1.4; }
-.now-body .edge.dash { stroke-dasharray: 4 3; }
-.now-body .arrow { fill: var(--wb-muted-fg); }
+/* topic body: block markdown above the topic's items, folded under its own summary */
+details.tdoc > summary { cursor: pointer; list-style: none; display: flex; gap: 6px; align-items: center; padding: 3px 12px; min-height: 24px; color: var(--wb-muted-fg); }
+details.tdoc > summary::-webkit-details-marker { display: none; }
+details.tdoc[open] > summary { border-bottom: 1px solid var(--wb-muted); }
+.topic.quiet details.tdoc { background: var(--wb-card); border-radius: var(--wb-radius); margin-top: 4px; overflow: hidden; }
+.doc-body { padding: 10px 14px 12px; overflow-x: auto; overflow-wrap: anywhere; }
+.doc-body > :first-child { margin-top: 0; }
+.doc-body > :last-child { margin-bottom: 0; }
+.doc-body > svg { width: 100%; height: auto; display: block; }
+.doc-body img, .doc-body canvas { max-width: 100%; height: auto; }
+.doc-body pre { background: var(--wb-muted); border-radius: 8px; padding: 8px 10px; overflow-x: auto; font-size: 12.5px; }
+/* a served page's topic body: a sandboxed frame sized to its content, which pads itself */
+.doc-body.framed { padding: 0; }
+iframe.doc-frame { display: block; width: 100%; height: 0; border: 0; }
+/* drawing kit for topic bodies: theme-aware classes for inline SVG (the
+   selectors key on .doc-body, which a body frame's document holds too) */
+.doc-body .box { fill: var(--wb-muted); }
+.doc-body .box.store { fill: var(--wb-now); }
+.doc-body svg text { fill: var(--wb-fg); font: 12px system-ui, sans-serif; }
+.doc-body svg text.on { fill: var(--wb-on-now); }
+.doc-body svg text.sub { fill: var(--wb-muted-fg); font-size: 10.5px; }
+.doc-body svg text.sub.on { fill: var(--wb-on-now); opacity: .8; }
+.doc-body .edge { stroke: var(--wb-muted-fg); fill: none; stroke-width: 1.4; }
+.doc-body .edge.dash { stroke-dasharray: 4 3; }
+.doc-body .arrow { fill: var(--wb-muted-fg); }
 
 /* side panels: tonal title bar */
 details.panel { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); overflow: hidden; }

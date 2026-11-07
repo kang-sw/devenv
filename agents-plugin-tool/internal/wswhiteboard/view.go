@@ -24,13 +24,7 @@ type View struct {
 	// StampFile is the change-signal script the full page polls, a bare
 	// file name beside the page. Empty for the embed.
 	StampFile string
-	// Now is the Now slot's markdown with inline HTML, the HTML written as is
-	// by design; empty when the slot is clear.
-	Now string
-	// NowFresh marks Now changed by the latest update: it renders open, and
-	// collapsed and greyed otherwise.
-	NowFresh bool
-	Topics   []TopicView
+	Topics    []TopicView
 	// Panels come from the section providers, in registration order.
 	Panels []Panel
 	// BulkAck shows the reply bar's bulk checkbox: the board holds an open
@@ -60,12 +54,12 @@ type View struct {
 	// path text (or FileLink's href without FileText); links and autolinks
 	// never use it.
 	ImageSrc func(path string) string
-	// NowImageSrc, when set, serves a file image in the Now slot of
-	// RenderRegions' fragments in ImageSrc's place. That Now renders in a
+	// DocImageSrc, when set, serves a file image in a topic body of
+	// RenderRegions' fragments in ImageSrc's place. That body renders in a
 	// sandboxed frame whose requests carry no cookie, so a served page that
 	// needs one to reach its image route returns the image inline, as a
 	// data: URL. An empty result falls back to ImageSrc.
-	NowImageSrc func(path string) string
+	DocImageSrc func(path string) string
 	// FileActions, when set on a page with FileText, turns a file target
 	// into an action link, the element a served page's link menu takes: a
 	// file link or autolink renders as an anchor around its label, and the
@@ -76,7 +70,7 @@ type View struct {
 	// and Abs as data-abs; it is titled with the FileText path unless the
 	// link has a title of its own. A zero FileAction leaves the target to
 	// FileText's path text. A page with FileActions also marks every http(s)
-	// link it resolves data-wl="url". Raw anchors in the Now slot never pass
+	// link it resolves data-wl="url". Raw anchors in a topic body never pass
 	// through here and stay unmarked; a finished reply's raw anchors and
 	// images do, through the reply sanitizer (sanitize.go).
 	FileActions func(path string) FileAction
@@ -98,6 +92,13 @@ type FileAction struct {
 // TopicView is one topic block.
 type TopicView struct {
 	Name string
+	// Doc is the topic's body, markdown with inline HTML written as is; empty
+	// when it has none. It renders above the items: open unless the topic is
+	// closed on the full page, and open on the embed only when it changed
+	// since the previous embed (DocNew).
+	Doc string
+	// DocNew marks a body changed since the previous embed (embed only).
+	DocNew bool
 	// Policy, Assumed, and Acks are the topic's items waiting on the user;
 	// they never collapse.
 	Policy  []ItemView
@@ -110,13 +111,21 @@ type TopicView struct {
 	// Collapsed holds every other settled item, behind the topic's settled
 	// count chip. Newest first.
 	Collapsed []ItemView
-	// Quiet marks a block with nothing waiting and nothing expanded; it
-	// collapses to one title line.
+	// Quiet marks a block with nothing waiting, nothing expanded, and no body
+	// showing; it collapses to one title line (and a closed body's fold).
 	Quiet bool
 	// Closed marks a topic the lead closed.
 	Closed bool
 	// Fresh counts the items new since the previous embed (embed only).
 	Fresh int
+}
+
+// DocOpen reports whether the topic's body renders open.
+func (t TopicView) DocOpen(embed bool) bool {
+	if t.Doc == "" || t.Closed {
+		return false
+	}
+	return !embed || t.DocNew
 }
 
 // SettledCount is the topic's settled total, the count chip's number.
@@ -259,12 +268,12 @@ type ViewInput struct {
 	Layout  Layout
 	ReplyID string
 	Panels  []Panel
-	// FileLink, FileText, ImageSrc, NowImageSrc, and FileActions are copied
+	// FileLink, FileText, ImageSrc, DocImageSrc, and FileActions are copied
 	// to the View.
 	FileLink    func(path string) string
 	FileText    func(path string) string
 	ImageSrc    func(path string) string
-	NowImageSrc func(path string) string
+	DocImageSrc func(path string) string
 	FileActions func(path string) FileAction
 }
 
@@ -274,13 +283,12 @@ func BuildView(state *State, in ViewInput) View {
 		Layout:      in.Layout,
 		ReplyID:     in.ReplyID,
 		Seq:         state.Seq,
-		Now:         state.Now,
 		Panels:      in.Panels,
 		Stored:      map[int]bool{},
 		FileLink:    in.FileLink,
 		FileText:    in.FileText,
 		ImageSrc:    in.ImageSrc,
-		NowImageSrc: in.NowImageSrc,
+		DocImageSrc: in.DocImageSrc,
 		FileActions: in.FileActions,
 	}
 	if in.FileActions != nil && in.FileText != nil {
@@ -292,7 +300,6 @@ func BuildView(state *State, in ViewInput) View {
 	if in.Layout == LayoutFull {
 		view.StampFile = in.ReplyID + ".stamp.js"
 	}
-	view.NowFresh = state.NowFresh()
 
 	expanded := map[int]bool{}
 	if in.Layout == LayoutFull {
@@ -303,13 +310,17 @@ func BuildView(state *State, in ViewInput) View {
 
 	var order []string
 	blocks := map[string]*TopicView{}
-	for _, item := range state.Items {
-		block, ok := blocks[item.Topic]
+	blockOf := func(topic string) *TopicView {
+		block, ok := blocks[topic]
 		if !ok {
-			block = &TopicView{Name: item.Topic, Closed: state.topicClosed(item.Topic)}
-			blocks[item.Topic] = block
-			order = append(order, item.Topic)
+			block = &TopicView{Name: topic, Closed: state.topicClosed(topic)}
+			blocks[topic] = block
+			order = append(order, topic)
 		}
+		return block
+	}
+	for _, item := range state.Items {
+		block := blockOf(item.Topic)
 		iv := itemView(item)
 		if in.Layout == LayoutEmbed && item.Changed > state.LastEmbedSeq {
 			iv.New = true
@@ -335,6 +346,12 @@ func BuildView(state *State, in ViewInput) View {
 		}
 	}
 
+	for _, doc := range state.Topics {
+		block := blockOf(doc.Name)
+		block.Doc = doc.Body
+		block.DocNew = in.Layout == LayoutEmbed && doc.Changed > state.LastEmbedSeq
+	}
+
 	settledOrder := map[int]int{}
 	for _, item := range state.Items {
 		settledOrder[item.ID] = item.Settled
@@ -350,7 +367,7 @@ func BuildView(state *State, in ViewInput) View {
 			return 1
 		case len(t.Acks) > 0:
 			return 2
-		case len(t.Expanded) > 0:
+		case len(t.Expanded) > 0 || t.DocOpen(in.Layout == LayoutEmbed):
 			return 3
 		default:
 			return 4
@@ -373,6 +390,9 @@ func BuildView(state *State, in ViewInput) View {
 	activity := map[string]int{}
 	for _, item := range state.Items {
 		activity[item.Topic] = max(activity[item.Topic], item.Changed)
+	}
+	for _, doc := range state.Topics {
+		activity[doc.Name] = max(activity[doc.Name], doc.Changed)
 	}
 	sort.SliceStable(order, func(i, j int) bool {
 		ri, rj := rank(blocks[order[i]]), rank(blocks[order[j]])

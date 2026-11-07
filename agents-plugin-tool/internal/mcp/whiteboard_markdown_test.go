@@ -1,7 +1,6 @@
 package mcp
 
 import (
-	"encoding/json"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -28,12 +27,13 @@ func readWhiteboardPage(t *testing.T, path string) string {
 func TestWhiteboardMarkdownFileLinks(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	abs := filepath.Join(f.root, "docs", "notes.md")
-	raw, _ := json.Marshal(map[string]any{"add": []any{map[string]any{
-		"class": "policy", "topic": "t", "title": "see [notes](" + filepath.ToSlash(abs) + ")",
-		"options":   []string{"x", "y"},
-		"rationale": "![shot](img/shot%20one.png)\n[web](https://example.com/)",
-	}}})
-	f.update(t, string(raw))
+	f.update(t, `<wb:add class="policy" topic="t">
+<wb:title>see [notes](`+filepath.ToSlash(abs)+`)</wb:title>
+<wb:option>x</wb:option>
+<wb:option>y</wb:option>
+<wb:why>![shot](img/shot%20one.png)
+[web](https://example.com/)</wb:why>
+</wb:add>`)
 	full := readWhiteboardPage(t, filepath.Join(f.dir(), f.replyID()+".html"))
 	for _, want := range []string{
 		`<img src="../../img/shot%20one.png" alt="shot">`,
@@ -46,8 +46,7 @@ func TestWhiteboardMarkdownFileLinks(t *testing.T) {
 	}
 
 	host := t.TempDir()
-	raw, _ = json.Marshal(map[string]any{"embed_dir": host})
-	embed := resultLine(t, f.update(t, string(raw)), "embed: ")
+	embed := resultLine(t, f.update(t, embedDirCommand(host)), "embed: ")
 	page := readWhiteboardPage(t, filepath.Join(host, embed))
 	fileURL := func(p string) string {
 		return (&url.URL{Scheme: "file", Path: filepath.ToSlash(p)}).String()
@@ -71,12 +70,14 @@ func TestWhiteboardMarkdownFileLinks(t *testing.T) {
 // on the full page and in an embed_dir inside the repository.
 func TestWhiteboardMarkdownFileLinkNeverYieldsAScheme(t *testing.T) {
 	f := newWhiteboardFixture(t)
-	raw, _ := json.Marshal(map[string]any{"embed_dir": f.root, "add": []any{map[string]any{
-		"class": "policy", "topic": "t", "options": []string{"x", "y"},
-		"title":     "[a](./ai-docs/whiteboards/javascript:alert(1)) [b](ai-docs/whiteboards/javascript%3Aalert%282%29)",
-		"rationale": "[c](./javascript:alert(3))\n![d](javascript%3Ax.png)",
-	}}})
-	embed := resultLine(t, f.update(t, string(raw)), "embed: ")
+	embed := resultLine(t, f.update(t, embedDirCommand(f.root)+`
+<wb:add class="policy" topic="t">
+<wb:title>[a](./ai-docs/whiteboards/javascript:alert(1)) [b](ai-docs/whiteboards/javascript%3Aalert%282%29)</wb:title>
+<wb:option>x</wb:option>
+<wb:option>y</wb:option>
+<wb:why>[c](./javascript:alert(3))
+![d](javascript%3Ax.png)</wb:why>
+</wb:add>`), "embed: ")
 	full := readWhiteboardPage(t, filepath.Join(f.dir(), f.replyID()+".html"))
 	inRepo := readWhiteboardPage(t, filepath.Join(f.root, embed))
 	for name, page := range map[string]string{"full": full, "embed in the repository root": inRepo} {
@@ -106,17 +107,13 @@ func TestWhiteboardMermaidAssetWrittenOnce(t *testing.T) {
 	name, data := wswhiteboard.MermaidAsset()
 
 	plain := newWhiteboardFixture(t)
-	plain.update(t, `{"add":[{"class":"technical","topic":"t","title":"no diagram"}]}`)
+	plain.update(t, `<wb:add class="technical" topic="t"><wb:title>no diagram</wb:title></wb:add>`)
 	if _, err := os.Stat(filepath.Join(plain.dir(), name)); !os.IsNotExist(err) {
 		t.Fatalf("a board without a mermaid block wrote the mermaid script: %v", err)
 	}
 
 	f := newWhiteboardFixture(t)
-	raw, _ := json.Marshal(map[string]any{"add": []any{map[string]any{
-		"class": "policy", "topic": "t", "title": "diagram", "options": []string{"x", "y"},
-		"rationale": "```mermaid\ngraph LR\nA-->B\n```",
-	}}})
-	embed := resultLine(t, f.update(t, string(raw)), "embed: ")
+	embed := resultLine(t, f.update(t, "<wb:add class=\"policy\" topic=\"t\">\n<wb:title>diagram</wb:title>\n<wb:option>x</wb:option>\n<wb:option>y</wb:option>\n<wb:why>\n```mermaid\ngraph LR\nA-->B\n```\n</wb:why>\n</wb:add>"), "embed: ")
 	asset := filepath.Join(f.dir(), name)
 	got, err := os.ReadFile(asset)
 	if err != nil || len(got) != len(data) {
@@ -133,14 +130,13 @@ func TestWhiteboardMermaidAssetWrittenOnce(t *testing.T) {
 	if err := os.WriteFile(asset, []byte("sentinel"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	f.update(t, `{}`)
+	f.update(t, ``)
 	if got, _ := os.ReadFile(asset); string(got) != "sentinel" {
 		t.Fatalf("an update rewrote the existing mermaid script")
 	}
 
 	host := t.TempDir()
-	raw, _ = json.Marshal(map[string]any{"embed_dir": host})
-	embed = resultLine(t, f.update(t, string(raw)), "embed: ")
+	embed = resultLine(t, f.update(t, embedDirCommand(host)), "embed: ")
 	if got, err := os.ReadFile(filepath.Join(host, name)); err != nil || len(got) != len(data) {
 		t.Fatalf("mermaid script not written into embed_dir: %v", err)
 	}

@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: a83eb620b21bc79b
 sage-review-completeness-reviewed: a83eb620b21bc79b
+completed: 2026-11-07
 ---
 
 # Whiteboard: XML command string input, per-topic content, Now slot removed
@@ -252,3 +253,52 @@ in-order application and whole-batch refusal with positioned problems;
 missing, ambiguous, and `replace_all` matches; a content-only topic; the old
 `payload` argument refused. A headless Chromium check of a page with a topic
 body (light and dark) if practical.
+
+### Result (c87afb80a) - 2026-11-07
+
+Landed in ab9ccd98c (spine), d192e81ff (wswhiteboard tests), d6526beea (mcp
+and wsdashboard tests), 420c93d58 (knob-on text names the wb: commands), and
+c87afb80a (review fix: explanations go to chat).
+
+- `whiteboard.update(session_key, commands)`: one string of flat `wb:`
+  commands read by a dedicated tokenizer (`wswhiteboard/commands.go`), applied
+  in order on a working copy, atomic, every problem listed with command
+  position, tag, and line. The old `payload` argument is refused through
+  `handlerOwnedArguments` with a pointer at `commands`; each tool's refusal
+  repeats its own playbook section (`## Commands`, `## Query`).
+- Topic bodies live in `State.Topics` (`wb:topic` replaces, `wb:edit`
+  find-replaces), render above the topic's items: inline on the static page,
+  one sandboxed frame per body on the dashboard (the former Now frame,
+  renamed `doc-frame`, with per-topic heights kept across swaps by
+  `data-doc`). Now slot, `now_path`, `now_file:`, and the `.now.md` scan
+  pattern removed; stored `now` fields drop on the next write.
+- Playbook rewritten (command table plus one example) and mirrored to wsflow
+  (regen) and Pi (hand copy); manifests regenerated. The knob-on workflow
+  mandate now sends progress and explanations to chat.
+
+Implementer's calls (each pinned by a test):
+- A body loses one newline after its opening tag and one before its closing
+  tag, uniformly; nothing else is trimmed. Attribute values are quoted with
+  `"` or `'` and never decoded.
+- `wb:patch clear="options|links"` empties list fields; an empty
+  `wb:recommend`/`wb:why` clears those. The embed-folder command is
+  `<wb:embed-dir path="..."/>`.
+- A body change bumps topic recency and reopens a closed topic; the same
+  body is no change; `wb:edit` on a topic without a body is refused;
+  clearing the body of an item-less topic drops the topic and its closed
+  mark. `wb:close` accepts body-only topics.
+- `NowFresh` is not carried over: a body is open on the full page unless its
+  topic is closed, and open on the embed only when changed since the
+  previous embed. The full-document refusal carries over to bodies. A closed
+  topic with a body is Quiet with the body as a closed fold.
+- `whiteboard.query` keeps its payload; with `topic` it also prints that
+  topic's stored body, so a lead can quote it in `wb:edit`.
+
+Verification: `go build ./...`; `go vet ./internal/... ./cmd/...`;
+`go test -count=1 ./internal/wswhiteboard/ ./internal/wsrsrc/
+./internal/wsdashboard/ ./internal/mcp/` all ok (mcp 311s);
+`python3 -m unittest discover agents-plugin-wsflow/tests` OK (20 tests); the
+three `whiteboard.md` copies are byte-identical. A headless Chromium render
+of a static page with two topic bodies (one body-only) looked right in light
+and dark. The Pi bridge was not changed, so the Pi suite was not run.
+Lite review: one Important (mandate contradiction) fixed in c87afb80a.

@@ -145,7 +145,7 @@ func TestImageSrcMapsBoardImagesToTheRoute(t *testing.T) {
 	}
 }
 
-// TestImageDataURLInlinesContainedImages pins the Now frame's image source:
+// TestImageDataURLInlinesContainedImages pins a topic-body frame's image source:
 // an image the route would serve comes back as a data: URL of its bytes with
 // the route's content type; one the route refuses (outside the root, not an
 // image, a symlink escaping the root) or one above imageDataMax comes back

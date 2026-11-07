@@ -26,7 +26,7 @@ import (
 //   - it carries the LAN access token.
 //
 // One route needs neither: GET and HEAD of the shared mermaid script
-// (publicAsset), which the Now slot's sandboxed frame loads from an opaque
+// (publicAsset), which a topic body's sandboxed frame loads from an opaque
 // origin that sends no cookie. That frame also inlines its images as data:
 // URLs (ImageDataURL, up to 2 MiB); a larger image falls back to the image
 // route, which a LAN viewer's frame cannot load.
@@ -117,9 +117,9 @@ func (d *Daemon) lanGuard(next http.Handler) http.Handler {
 }
 
 // publicAsset reports a read of the shared mermaid script, the one route
-// LAN mode serves without the token. A board's Now renders in a sandboxed
-// frame whose opaque origin sends no cookie (wswhiteboard framedNow), and a
-// mermaid block there loads this script itself. The script is the vendored
+// LAN mode serves without the token. A board's topic body renders in a
+// sandboxed frame whose opaque origin sends no cookie (wswhiteboard
+// framedDoc), and a mermaid block there loads this script itself. The script is the vendored
 // library under a content-hash name, so serving it reveals nothing about any
 // session.
 func publicAsset(r *http.Request) bool {
