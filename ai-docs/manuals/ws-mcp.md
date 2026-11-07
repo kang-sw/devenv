@@ -65,7 +65,11 @@ tools never depend on it. Its state lives under `<cache root>/dashboard/`:
   pid, version, and the shutdown token; `dashboard.log` - the running daemon's
   log, including one line per session added to or removed from its index;
   `lan-token` - the LAN access token (LAN mode only), kept across daemon
-  restarts; deleting it issues a new one at once.
+  restarts; deleting it issues a new one at once. `last-port` - the port the
+  last daemon bound: when `dashboard.port` is taken by another program, the
+  daemon binds this port before an OS-assigned one, so a restart keeps its
+  origin (page localStorage, LAN bookmark); a free `dashboard.port` always
+  wins.
 - `sessions/<reply-id>/registration.json` - one entry per top-level lead
   session whose `dashboard.enabled` resolves on (session scope included),
   written by the serving ws-mcp at its first keyed call and heartbeated every

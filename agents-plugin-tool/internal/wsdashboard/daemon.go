@@ -42,7 +42,9 @@ type DaemonOptions struct {
 	// Dir is the state directory (Dir's result); it is created when absent.
 	Dir string
 	// Port is the preferred port; 0 asks the OS for one. A taken port falls
-	// back to an OS-assigned one.
+	// back to the port the last daemon bound (last-port file), then to an
+	// OS-assigned one, so a restart keeps its origin while the preferred
+	// port stays taken.
 	Port int
 	// LAN binds every interface instead of loopback only, and admits a
 	// request that is not from this machine only with the LAN access token
@@ -138,20 +140,25 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		return nil, ErrLocked
 	}
 
-	listener, err := listen(bindHostFor(opts), opts.Port)
+	listener, err := listen(bindHostFor(opts), portCandidates(opts.Dir, opts.Port))
 	if err != nil {
-		_ = lock.Unlock()
-		return nil, err
-	}
-	token, err := newToken()
-	if err != nil {
-		_ = listener.Close()
 		_ = lock.Unlock()
 		return nil, err
 	}
 	logw := opts.Log
 	if logw == nil {
 		logw = io.Discard
+	}
+	// Recorded under the lock; losing it only costs the next restart its
+	// sticky port.
+	if err := writeLastPort(opts.Dir, listener.Addr().(*net.TCPAddr).Port); err != nil {
+		fmt.Fprintf(logw, "dashboard: record last port: %v\n", err)
+	}
+	token, err := newToken()
+	if err != nil {
+		_ = listener.Close()
+		_ = lock.Unlock()
+		return nil, err
 	}
 	d := &Daemon{
 		dir:    opts.Dir,
@@ -212,10 +219,26 @@ func bindHostFor(opts DaemonOptions) string {
 	return "127.0.0.1"
 }
 
-// listen binds host:port, falling back to an OS-assigned port when port is
-// taken (or 0).
-func listen(host string, port int) (net.Listener, error) {
-	if port > 0 {
+// portCandidates is the order a daemon tries ports: the preferred port, then
+// the recorded last port when it differs, each only when valid. An
+// OS-assigned port (0) is always the final fallback and is left to listen. A
+// request for an OS-assigned port (preferred 0) skips the record, so it stays
+// deterministic.
+func portCandidates(dir string, preferred int) []int {
+	if preferred <= 0 {
+		return nil
+	}
+	ports := []int{preferred}
+	if last, ok := readLastPort(dir); ok && last != preferred {
+		ports = append(ports, last)
+	}
+	return ports
+}
+
+// listen binds the first of ports that is free on host, falling back to an
+// OS-assigned port when none is.
+func listen(host string, ports []int) (net.Listener, error) {
+	for _, port := range ports {
 		if l, err := net.Listen("tcp", net.JoinHostPort(host, strconv.Itoa(port))); err == nil {
 			return l, nil
 		}

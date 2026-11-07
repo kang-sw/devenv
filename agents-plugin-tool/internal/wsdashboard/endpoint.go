@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/kang-sw/devenv/internal/wsstate"
 )
@@ -35,6 +37,10 @@ const (
 	dirName          = "dashboard"
 	lockFileName     = "dashboard.lock"
 	endpointFileName = "endpoint.json"
+	// lastPortFileName holds the port the last daemon bound. It is not the
+	// endpoint file: that one signals a live daemon and is removed on exit,
+	// while this one must outlive it.
+	lastPortFileName = "last-port"
 
 	endpointSchemaVersion = 1
 )
@@ -112,6 +118,25 @@ func writePrivateFile(dir, name string, data []byte) error {
 		return err
 	}
 	return nil
+}
+
+// readLastPort reads the recorded last port; a missing, unreadable, or
+// malformed record, or a port outside 1..65535, reads as absent.
+func readLastPort(dir string) (int, bool) {
+	raw, err := os.ReadFile(filepath.Join(dir, lastPortFileName))
+	if err != nil {
+		return 0, false
+	}
+	port, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil || port < 1 || port > 65535 {
+		return 0, false
+	}
+	return port, true
+}
+
+// writeLastPort records the port the daemon bound.
+func writeLastPort(dir string, port int) error {
+	return writePrivateFile(dir, lastPortFileName, []byte(strconv.Itoa(port)+"\n"))
 }
 
 // removeEndpointIfOwned deletes dir's endpoint file when it still carries
