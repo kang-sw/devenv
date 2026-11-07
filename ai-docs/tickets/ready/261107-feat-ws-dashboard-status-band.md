@@ -185,3 +185,41 @@ change snapshot; the Pi cost sum of lead and direct calls and the omitted
 chip with no known-price call.
 Live: on Claude and Pi the context value tracks the host's own status line or
 footer.
+
+### Result (b305dc5dc) - 2026-11-07
+
+Landed:
+- wslive: optional `status` event kind (context/limits/cost on the event),
+  snapshot `usage` and `repo` fields; a status event replaces usage, reset
+  clears it. `wslive.OptionalKinds` feeds the intake result's
+  `accepts: status` line (absent on "dashboard off" and errors).
+- wsgit `BranchSync` (rev-parse + `rev-list --left-right --count`, no fetch,
+  no `git status`); ws-mcp caches it per session, refreshed at most once per
+  heartbeat from the writer's timer, outside writeMu.
+- Page: `ctx` and `sline` regions inside the composer (variant C); reset
+  labels and pace are filled by page JS from data attributes so region
+  hashes do not move with time; narrow rule as a container query on sline
+  (340px of sline = 360px band inside the composer padding).
+- claude-mod (mirrored to wsflow): intake edge returns result text;
+  status from `$.session.usage()` on `session.measure`, cache rate by the
+  ticket formula, sent only while the latest result accepts it.
+- Pi: same gate; context from `getContextUsage()`, cache from
+  `latestCacheHitRate`, cost `~$` sum of lead and direct with `+` for
+  unknown-price contributors, omitted with no known-price call.
+
+Verification: `go test` wslive, wsgit, mcp, wsdashboard ok;
+`claude plugin test` 635/635 on agents-plugin and agents-plugin-wsflow,
+`claude plugin validate` both ok, wsrsrc mirror test ok; Pi touched test
+files 69/69, full Pi suite 34 failures identical with the change stashed
+(missing worktree `node_modules` for pi-web-access). Headless Chromium
+render: both limit chips at a 390px viewport, the hi chip alone at 340px.
+Lite review: no Critical or Important.
+
+Decisions:
+- The mockup's dirty-tree chip is left out (no `git status`).
+- Pi cost and cache appear only while the TUI footer is mounted: lead usage
+  is recorded only by the footer's cost estimate; non-TUI leads send
+  context only.
+- A failed intake call turns status support off in both adapters; it
+  returns with the next result that advertises it.
+- Live check (context tracks the host line on Claude and Pi) not run.
