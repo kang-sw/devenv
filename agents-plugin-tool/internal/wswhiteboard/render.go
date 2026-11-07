@@ -16,11 +16,11 @@ import (
 // The page assets: one template set, the shared stylesheet, the answer-form
 // script both layouts run, the change-signal script only the full page runs,
 // the mermaid theme script a page with a mermaid block runs, the script a
-// served page's Now frame runs, and the icon sprite. Everything is inlined,
+// served page's topic-body frames run, and the icon sprite. Everything is inlined,
 // so a page needs no other file beyond the full page's stamp script and,
 // when it holds a mermaid block, the shared mermaid script (MermaidAsset).
 //
-//go:embed assets/page.tmpl assets/page.css assets/form.js assets/live.js assets/pill.js assets/mermaid-init.js assets/now-frame.js assets/sprite.svg
+//go:embed assets/page.tmpl assets/page.css assets/form.js assets/live.js assets/pill.js assets/mermaid-init.js assets/doc-frame.js assets/sprite.svg
 var assetFS embed.FS
 
 type pageAssets struct {
@@ -32,8 +32,8 @@ type pageAssets struct {
 	pill string
 	// mermaidInit themes and runs mermaid after the shared script loads.
 	mermaidInit template.JS
-	// nowFrame runs inside a served page's Now frame (framedNow).
-	nowFrame string
+	// docFrame runs inside a served page's topic-body frame (framedDoc).
+	docFrame string
 	sprite   template.HTML
 	icons    map[string]bool
 }
@@ -71,7 +71,7 @@ func loadAssets() (*pageAssets, error) {
 			live:        read("live.js"),
 			pill:        read("pill.js"),
 			mermaidInit: template.JS(read("mermaid-init.js")),
-			nowFrame:    read("now-frame.js"),
+			docFrame:    read("doc-frame.js"),
 			sprite:      template.HTML(strings.TrimSpace(read("sprite.svg"))),
 			icons:       map[string]bool{},
 		}
@@ -114,8 +114,8 @@ func panelActionAttrs(r PanelRow) template.HTMLAttr {
 
 // RenderPage renders view as one self-contained HTML document: the full page
 // for LayoutFull, the embed snapshot for LayoutEmbed. Item text renders as
-// markdown with raw HTML escaped (markdown.go); view.Now renders as markdown
-// with its raw HTML written as is (pageData.renderNow).
+// markdown with raw HTML escaped (markdown.go); a topic body renders as
+// markdown with its raw HTML written as is (pageData.renderDoc).
 func RenderPage(view View) (string, error) {
 	a, err := loadAssets()
 	if err != nil {
@@ -133,23 +133,23 @@ func RenderPage(view View) (string, error) {
 // templates RenderPage uses, so a page that lays them out itself (the
 // dashboard daemon's session page) shows exactly what the static page shows.
 type Regions struct {
-	// Board is the Now slot, the topic blocks, and the reply bar.
+	// Board is the topic blocks and the reply bar.
 	Board template.HTML
 	// Panels is every panel, in order.
 	Panels template.HTML
-	// Mermaid reports that Board holds a mermaid block outside the Now
-	// frame, so the page loads the shared mermaid script (MermaidAsset) and
-	// MermaidInitScript; the frame loads them itself for a block in Now.
+	// Mermaid reports that Board holds a mermaid block outside the topic-body
+	// frames, so the page loads the shared mermaid script (MermaidAsset) and
+	// MermaidInitScript; a frame loads them itself for a block in its body.
 	Mermaid bool
 	// CountPolicy, CountAssumed, and CountAcks are the header's counts.
 	CountPolicy, CountAssumed, CountAcks int
 }
 
 // RenderRegions renders view's board and panels as fragments, as the full
-// page shows them, with one difference: the Now slot renders inside a
-// sandboxed frame (framedNow), since the page that hosts the fragments is
-// served from the dashboard daemon's origin, and Now's raw HTML and scripts
-// must not run there. Build view with LayoutFull.
+// page shows them, with one difference: each topic body renders inside its
+// own sandboxed frame (framedDoc), since the page that hosts the fragments is
+// served from the dashboard daemon's origin, and a body's raw HTML and
+// scripts must not run there. Build view with LayoutFull.
 func RenderRegions(view View) (Regions, error) {
 	a, err := loadAssets()
 	if err != nil {
@@ -206,13 +206,14 @@ type pageData struct {
 	CSS         template.CSS
 	Script      template.JS
 	Sprite      template.HTML
-	// NowHTML is view.Now rendered by renderNow on every page render, or,
-	// with NowFramed, the sandboxed frame that holds that rendering.
-	NowHTML template.HTML
-	// NowFramed renders Now inside a sandboxed frame (framedNow).
-	NowFramed bool
-	// framing is set while a framed Now renders, so its file images take
-	// NowImageSrc.
+	// docs holds each topic body rendered by renderDoc on every page render,
+	// or, with DocFramed, the sandboxed frame that holds that rendering,
+	// keyed by topic name.
+	docs map[string]template.HTML
+	// DocFramed renders each topic body inside a sandboxed frame (framedDoc).
+	DocFramed bool
+	// framing is set while a framed body renders, so its file images take
+	// DocImageSrc.
 	framing bool
 
 	CountPolicy, CountAssumed, CountAcks, CountFresh int
@@ -250,8 +251,8 @@ func (p *pageData) MermaidFile() string {
 	return name
 }
 
-// newPageData builds the data a page renders from; framed renders the Now
-// slot inside a sandboxed frame (framedNow).
+// newPageData builds the data a page renders from; framed renders each topic
+// body inside a sandboxed frame (framedDoc).
 func newPageData(view View, a *pageAssets, framed bool) *pageData {
 	full := view.Layout != LayoutEmbed
 	script := a.form
@@ -268,7 +269,8 @@ func newPageData(view View, a *pageAssets, framed bool) *pageData {
 		MermaidInit: a.mermaidInit,
 		icons:       a.icons,
 		onPage:      map[int]bool{},
-		NowFramed:   framed,
+		docs:        map[string]template.HTML{},
+		DocFramed:   framed,
 	}
 	if !full {
 		// The embed has no change-signal loader, so it carries no stamp.
@@ -286,30 +288,42 @@ func newPageData(view View, a *pageAssets, framed bool) *pageData {
 		}
 	}
 	p.CountBulk = p.CountAssumed + p.CountAcks
-	// After onPage is complete, so a reference in Now links like one in an
-	// item; a mermaid block in Now sets Mermaid before the template runs.
-	if view.Now != "" {
+	// After onPage is complete, so a reference in a body links like one in
+	// an item; a mermaid block in an unframed body sets Mermaid before the
+	// template runs.
+	for _, t := range view.Topics {
+		if t.Doc == "" {
+			continue
+		}
+		page := p.Mermaid
+		p.Mermaid = false
 		p.framing = framed
-		p.NowHTML = p.renderNow(view.Now)
+		html := p.renderDoc(t.Doc)
 		p.framing = false
 		if framed {
 			// The frame loads mermaid for its own blocks; the page loads it
-			// only for a block outside Now.
-			p.NowHTML = p.framedNow(p.NowHTML, p.Mermaid, a)
+			// only for a block outside every frame.
+			html = p.framedDoc(t.Name, html, p.Mermaid, a)
 			p.Mermaid = false
 		}
+		p.Mermaid = p.Mermaid || page
+		p.docs[t.Name] = html
 	}
 	return p
 }
 
-// frameCSS is what a Now frame adds to the page stylesheet: a transparent
-// page, so the Now card shows through, that never scrolls, since the host
+// DocHTML is topic's rendered body (see docs).
+func (p *pageData) DocHTML(topic string) template.HTML { return p.docs[topic] }
+
+// frameCSS is what a topic-body frame adds to the page stylesheet: a
+// transparent page, so the topic card shows through, that never scrolls, since the host
 // sizes the frame to its content.
 const frameCSS = "html, body { background: transparent; overflow: hidden; }"
 
-// framedNow wraps a rendered Now in the sandboxed frame a served page shows
-// it in. The page lives in the dashboard daemon's origin, whose routes post
-// messages and steers to sessions, so Now's raw HTML must not run there:
+// framedDoc wraps a rendered topic body in the sandboxed frame a served page
+// shows it in, one frame per body. The page lives in the dashboard daemon's
+// origin, whose routes post messages and steers to sessions, so a body's raw
+// HTML must not run there:
 // the frame's srcdoc document gets allow-scripts, so an inline canvas script
 // still draws, but no allow-same-origin, so it runs in an opaque origin that
 // can neither read the host page nor reach the daemon's routes with the
@@ -317,26 +331,28 @@ const frameCSS = "html, body { background: transparent; overflow: hidden; }"
 // a plain link open its new tab (<base target="_blank">) as an ordinary
 // page; there is no allow-forms, allow-top-navigation, or allow-modals.
 //
-// The document carries the page stylesheet, so Now keeps the page's theme
-// variables and light/dark switch, and now-frame.js, which posts the
+// The document carries the page stylesheet, so a body keeps the page's theme
+// variables and light/dark switch, and doc-frame.js, which posts the
 // content height and hands the host its marked-link and item-reference
 // clicks (the host's half lives in the dashboard script). mermaid tells the
 // frame to load the shared mermaid script beside the page for its own
 // blocks. An image reaches the frame as whatever src ImageSrc (or
-// NowImageSrc) gave it: the frame's requests carry no cookie, so a served
-// page inlines Now images rather than pointing at a route that needs one.
-func (p *pageData) framedNow(body template.HTML, mermaid bool, a *pageAssets) template.HTML {
+// DocImageSrc) gave it: the frame's requests carry no cookie, so a served
+// page inlines body images rather than pointing at a route that needs one.
+// The frame carries its topic name as data-doc, so the host can keep each
+// frame's height across a board swap.
+func (p *pageData) framedDoc(topic string, body template.HTML, mermaid bool, a *pageAssets) template.HTML {
 	var doc strings.Builder
 	doc.WriteString(`<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>`)
 	doc.WriteString(string(a.css))
-	doc.WriteString("\n" + frameCSS + `</style></head><body class="now-frame"><div class="now-body md">`)
+	doc.WriteString("\n" + frameCSS + `</style></head><body class="doc-frame"><div class="doc-body md">`)
 	doc.WriteString(string(body))
-	doc.WriteString(`</div><script>` + a.nowFrame + `</script>`)
+	doc.WriteString(`</div><script>` + a.docFrame + `</script>`)
 	if mermaid {
-		doc.WriteString(`<script src="` + template.HTMLEscapeString(p.MermaidFile()) + `"></script><script>wbNowMermaid(function () {` + string(a.mermaidInit) + `});</script>`)
+		doc.WriteString(`<script src="` + template.HTMLEscapeString(p.MermaidFile()) + `"></script><script>wbDocMermaid(function () {` + string(a.mermaidInit) + `});</script>`)
 	}
 	doc.WriteString(`</body></html>`)
-	return template.HTML(`<iframe class="now-frame" title="now" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" srcdoc="` +
+	return template.HTML(`<iframe class="doc-frame" title="` + template.HTMLEscapeString(topic) + `" data-doc="` + template.HTMLEscapeString(topic) + `" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" srcdoc="` +
 		template.HTMLEscapeString(doc.String()) + `"></iframe>`)
 }
 

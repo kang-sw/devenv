@@ -141,7 +141,7 @@ func whiteboardFileLink(root, pageDir, target string) string {
 
 // whiteboardItemFileLink resolves a file path an item's markdown link or
 // image names, for a page written to pageDir: a relative path is taken from
-// the session root, the way now_path is, and a bare absolute path is used as
+// the session root, and a bare absolute path is used as
 // is; either then follows the panel ticket-row rule of whiteboardFileLink.
 func whiteboardItemFileLink(root, pageDir string) func(string) string {
 	return func(path string) string {

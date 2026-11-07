@@ -4840,18 +4840,21 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			// The whiteboard tools advertise only {session_key, payload}: the
-			// inner payload schema lives in the whiteboard playbook, so a host
+			// The whiteboard tools advertise only a session key and one input:
+			// the input's grammar lives in the whiteboard playbook, so a host
 			// that loads every schema up front pays almost nothing for a
 			// feature its user never turned on, and the description sends a
 			// curious model to the instructions instead of inviting a call.
+			// whiteboard.update takes a string, not an object: a model writes
+			// non-ASCII text inside an object argument as \u escapes, which
+			// multiplies the output tokens of a board written in Korean.
 			"name":        "whiteboard.update",
-			"description": "Lead-only. Read the `whiteboard` playbook (ws/playbook.read) before first use; it defines the payload.",
+			"description": "Lead-only. Read the `whiteboard` playbook (ws/playbook.read) before first use; it defines the commands.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
-					"payload":     objectProperty("Defined by the whiteboard playbook."),
+					"commands":    stringProperty("Defined by the whiteboard playbook."),
 				},
 				"required": []string{"session_key"},
 			},

@@ -16,9 +16,10 @@ import (
 //   - relogin_session_key is the bootstrap tool's deliberately unadvertised
 //     re-login input for harness adapters (see handleLeadRelogin); declaring
 //     it would advertise it, refusing it would break adapter re-entry.
-//   - sparse_paths and spec_stem are retired names whose handlers answer with
-//     a specific migration hint (profile, ticket_stem) that a generic
-//     unknown-argument refusal would lose.
+//   - sparse_paths, spec_stem, and whiteboard.update's payload are retired
+//     names whose handlers answer with a specific migration hint (profile,
+//     ticket_stem, commands) that a generic unknown-argument refusal would
+//     lose.
 //
 // Add a name here only for one of those two reasons; a real caller-facing
 // input belongs in the tool's inputSchema instead.
@@ -32,6 +33,7 @@ var handlerOwnedArguments = map[string][]string{
 	"tickets.sage_gate":    {"spec_stem"},
 	"tickets.sage_stamp":   {"spec_stem"},
 	"tickets.verify":       {"spec_stem"},
+	"whiteboard.update":    {"payload"},
 }
 
 // handlerGuidedRequired lists, per tool, required properties whose absence
