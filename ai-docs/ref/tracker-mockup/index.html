@@ -2,26 +2,70 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>tracker mockup v0</title>
-<style>
-  /* layout only; everything else is browser default */
-  #grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1em; align-items: start; }
-  textarea { width: 100%; box-sizing: border-box; font-family: monospace; }
-  pre { white-space: pre-wrap; }
-</style>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tracker mockup v1 - ws dashboard frame</title>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-<h1>tracker mockup v0</h1>
-<p>
-  store <select id="store"></select>
-  viewing as <select id="viewer"></select>
-  <span id="msg"></span>
-</p>
-<div id="grid">
-  <div id="views"></div>
-  <div id="raw"></div>
+<!-- icon sprite, same stroke style as the dashboard's -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-back" viewBox="0 0 16 16"><path d="M10 3.5L5.5 8l4.5 4.5"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></symbol>
+  <symbol id="i-tasks" viewBox="0 0 16 16"><path d="M2.5 4.2l1.4 1.4 2.4-2.6M2.5 10.2l1.4 1.4 2.4-2.6M8.5 4.6h5M8.5 10.6h5"/></symbol>
+  <symbol id="i-panels" viewBox="0 0 16 16"><rect x="2" y="3" width="12" height="10" rx="1.6"/><path d="M6.5 3v10M6.5 8H14"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></symbol>
+  <symbol id="i-x" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></symbol>
+  <symbol id="i-send" viewBox="0 0 16 16"><path d="M2.5 8L13.5 2.8 10.6 13.4 7.6 9.1z"/><path d="M7.6 9.1l5.9-6.3"/></symbol>
+</svg>
+
+<div class="dwrap">
+  <div class="top dr-room" id="top">
+    <a class="back" href="#" title="all sessions"><svg class="i"><use href="#i-back"/></svg>dashboard</a>
+    <h1>Session</h1>
+    <span class="host">CLAUDE</span>
+    <label class="viewing" title="mockup control: whose perspective the tracker is shown from">viewing as
+      <select id="viewer"></select>
+      <span class="chip" id="vstore"></span>
+    </label>
+    <span class="sse" title="live updates"><span class="dot"></span>live</span>
+  </div>
+
+  <!-- static stand-in for the conversation column -->
+  <main class="convo" id="convo">
+    <div class="msg user"><div class="mh"><b>You</b> 09:12</div><div class="bub">What is on my plate today?</div></div>
+    <div class="msg lead"><div class="mh"><b>Lead</b> 09:12</div><div class="bub">
+      I checked your trackers. Open them from the handles at the top right.
+      <div class="convo-links">
+        <button class="btn" data-open-store="team-alpha">open team-alpha</button>
+        <button class="btn" data-open-store="hana-personal">open hana-personal</button>
+      </div>
+    </div></div>
+    <div class="msg lead"><div class="mh"><b>Lead</b> 09:40 <span class="src">TRACKER</span></div><div class="bub">
+      Your agent reported progress on a task assigned to you (recorded automatically, only for your own assignments).
+    </div></div>
+    <div class="sysline">conversation placeholder - the tracker lives in the drawer</div>
+  </main>
+  <div class="composer"><textarea rows="1" placeholder="Message the session..." disabled></textarea><button class="csend" disabled><svg class="i"><use href="#i-send"/></svg></button></div>
 </div>
+
+<!-- the pull-down drawer: one handle per store, stacking leftward from the top right -->
+<div class="drawer" id="drawer">
+  <div class="dr-in">
+    <div class="dr-clip" id="drclip">
+      <div class="dr-sheet" role="region" aria-label="tracker store"><div class="dr-body" id="drbody"></div></div>
+    </div>
+    <div class="dr-handles" id="drhandles"></div>
+  </div>
+</div>
+
+<!-- item detail side sheet -->
+<aside class="sheet" id="sheet" aria-hidden="true"><div class="sheet-in" id="sheetbody"></div></aside>
+
+<dialog id="dlg"></dialog>
+<div id="toast" hidden></div>
+
 <script src="fixtures.js"></script>
+<script src="engine.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
