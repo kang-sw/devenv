@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
@@ -731,5 +732,63 @@ func TestRemoteRestoreRefusesARefMovedMeanwhile(t *testing.T) {
 	}
 	if got := remoteRefs(t, url)[adaRef]; got != first {
 		t.Fatalf("remote %s = %s, want the value set meanwhile %s", adaRef, got, first)
+	}
+}
+
+// TestRemoteRestoreRefusesARemoteAhead: Restore replaces a deletion or a
+// rewind; a remote copy that moved ahead of the local one is left alone.
+func TestRemoteRestoreRefusesARemoteAhead(t *testing.T) {
+	w := newWorld(t)
+	url := w.newRemote("r")
+	ada := w.register(w.remoteOpts("ada", "c1"), url)
+	bo := w.register(w.remoteOpts("bo", "c1"), url)
+	adaRef := memberRef("ada", "c1")
+	appendOne(t, ada, "note", note("a1"))
+	syncOK(t, ada)
+	fetchOK(t, bo)
+	appendOne(t, ada, "note", note("a2"))
+	syncOK(t, ada)
+	ahead := remoteRefs(t, url)[adaRef]
+
+	if err := bo.Restore(context.Background(), adaRef); err == nil {
+		t.Fatal("Restore pushed a stale local copy over a remote that moved ahead")
+	}
+	if got := remoteRefs(t, url)[adaRef]; got != ahead {
+		t.Fatalf("remote %s = %s, want it left at %s", adaRef, got, ahead)
+	}
+	if rep := syncOK(t, ada); len(warningsFor(rep.Warnings, adaRef)) != 0 {
+		t.Fatalf("ada's sync warns about its own ref: %+v", rep.Warnings)
+	}
+}
+
+// TestRemoteRefusedPushFailsSync: a remote that refuses the push itself (a
+// hook, branch protection, a missing permission) fails Sync and Register
+// rather than passing for a lost race; the writes stay pending.
+func TestRemoteRefusedPushFailsSync(t *testing.T) {
+	w := newWorld(t)
+	url := w.newRemote("r")
+	ada := w.register(w.remoteOpts("ada", "c1"), url)
+	hook := filepath.Join(url, "hooks", "pre-receive")
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\necho refused by policy >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	appendOne(t, ada, "note", note("a1"))
+	if _, err := ada.Sync(context.Background()); err == nil {
+		t.Fatal("Sync against a remote that refuses the push returned no error")
+	}
+	if p := ada.Pending(); p.Count != 1 {
+		t.Fatalf("pending after a refused push = %+v, want the write still pending", p)
+	}
+	if l, err := Register(context.Background(), w.remoteOpts("bo", "c1"), url); err == nil {
+		l.Close()
+		t.Fatal("Register against a remote that refuses the push returned no error")
+	}
+
+	if err := os.Remove(hook); err != nil {
+		t.Fatal(err)
+	}
+	if rep := syncOK(t, ada); !rep.Pushed || rep.Pending.Count != 0 {
+		t.Fatalf("sync after the remote accepts again = %+v, want pushed and nothing pending", rep)
 	}
 }

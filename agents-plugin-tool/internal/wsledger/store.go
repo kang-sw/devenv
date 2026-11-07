@@ -466,7 +466,10 @@ func (l *Ledger) joinLocked(ctx context.Context, creator bool) error {
 		if lerr != nil {
 			return lerr
 		}
-		if cur := refs[claimRef(l.member)]; cur != oid {
+		switch cur := refs[claimRef(l.member)]; {
+		case cur == "":
+			return err
+		case cur != oid:
 			return ErrIDTaken
 		}
 	}

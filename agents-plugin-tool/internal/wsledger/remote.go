@@ -105,8 +105,11 @@ const (
 
 // push pushes the local ref to the same name on the remote, fast-forward
 // only, or, with lease set, forced but only while the remote still holds
-// *lease ("" = must not exist). A remote refusal is pushRejected; a
-// transport or credential failure is an error.
+// *lease ("" = must not exist). A client-side "[rejected]" (the remote ref
+// is not what this push expects: a lost race, a foreign advance, a deletion
+// under a lease) is pushRejected, which the fetch after the push explains.
+// A "[remote rejected]" (a hook, branch protection, or missing permission)
+// and a transport or credential failure are errors, so Sync reports them.
 func (g *gitRepo) push(ctx context.Context, ref string, lease *string) (pushOutcome, error) {
 	args := []string{"push", "--porcelain", "--no-verify"}
 	if lease != nil {
@@ -119,7 +122,7 @@ func (g *gitRepo) push(ctx context.Context, ref string, lease *string) (pushOutc
 	if err == nil {
 		return pushOK, nil
 	}
-	if strings.Contains(err.Error(), "!\t"+ref+":"+ref+"\t") {
+	if strings.Contains(err.Error(), "!\t"+ref+":"+ref+"\t[rejected]") {
 		return pushRejected, nil
 	}
 	return pushOK, err
@@ -560,6 +563,14 @@ func (l *Ledger) Restore(ctx context.Context, ref string) error {
 			return err
 		}
 		lease := snap[snapRef(ref)]
+		if lease == tip {
+			return nil // the remote already holds the local copy
+		}
+		if lease != "" && l.git.isAncestor(ctx, tip, lease) {
+			// Not a deletion or a rewind: the remote moved ahead, and
+			// pushing the local copy would discard its newer commits.
+			return fmt.Errorf("ledger: the remote %s is ahead of the local copy; fetch instead of restoring", ref)
+		}
 		out, err := l.git.push(ctx, ref, &lease)
 		if err != nil {
 			return fmt.Errorf("ledger: push: %w", err)
