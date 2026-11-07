@@ -6,12 +6,18 @@
 package wswhiteboard
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"regexp"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/ast"
+	"github.com/yuin/goldmark/extension"
+	"github.com/yuin/goldmark/text"
 )
 
 // Item classes, the workflow manual's asking classes.
@@ -49,9 +55,54 @@ var (
 	statusValues      = []string{StatusOpen, StatusAnswered, StatusAssumed, StatusWithdrawn, StatusSuperseded}
 	patchStatusValues = []string{StatusOpen, StatusWithdrawn, StatusSuperseded}
 	// fullDocumentPattern detects a whole HTML document where the Now slot
-	// takes markdown with inline HTML.
+	// takes markdown with inline HTML; fullDocument applies it to the raw
+	// HTML only.
 	fullDocumentPattern = regexp.MustCompile(`(?i)<!doctype|<html[\s>]`)
+	// nowParser parses Now markdown as renderNow's pipeline does (default
+	// block and inline parsers, raw HTML on, tables and strikethrough).
+	nowParser = goldmark.New(goldmark.WithExtensions(extension.Table, extension.Strikethrough)).Parser()
 )
+
+// fullDocument reports whether Now markdown carries a whole HTML document:
+// a <!DOCTYPE or <html in its raw HTML (an HTML block or inline raw HTML).
+// Text inside a code span or fence that only mentions one is not raw HTML,
+// so a Now that explains HTML is accepted.
+func fullDocument(content string) bool {
+	if !fullDocumentPattern.MatchString(content) {
+		return false
+	}
+	src := []byte(content)
+	found := false
+	_ = ast.Walk(nowParser.Parse(text.NewReader(src)), func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+		if !entering {
+			return ast.WalkContinue, nil
+		}
+		var raw bytes.Buffer
+		switch n := n.(type) {
+		case *ast.HTMLBlock:
+			for i := 0; i < n.Lines().Len(); i++ {
+				seg := n.Lines().At(i)
+				raw.Write(seg.Value(src))
+			}
+			if n.HasClosure() {
+				raw.Write(n.ClosureLine.Value(src))
+			}
+		case *ast.RawHTML:
+			for i := 0; i < n.Segments.Len(); i++ {
+				seg := n.Segments.At(i)
+				raw.Write(seg.Value(src))
+			}
+		default:
+			return ast.WalkContinue, nil
+		}
+		if fullDocumentPattern.Match(raw.Bytes()) {
+			found = true
+			return ast.WalkStop, nil
+		}
+		return ast.WalkSkipChildren, nil
+	})
+	return found
+}
 
 // Item is one asked item on the board.
 type Item struct {
@@ -322,7 +373,7 @@ func Apply(state *State, payload any, env Env) (Outcome, []string) {
 			}
 		}
 		if ok {
-			if fullDocumentPattern.MatchString(content) {
+			if fullDocument(content) {
 				p.add("payload.now: the Now slot takes markdown with inline HTML, not a full document (found <!DOCTYPE or <html)")
 			} else if content != work.Now {
 				work.Now = content

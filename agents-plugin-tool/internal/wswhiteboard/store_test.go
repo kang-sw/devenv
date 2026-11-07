@@ -404,10 +404,23 @@ func TestApplyNowRules(t *testing.T) {
 	if _, problems := Apply(st, payload(t, `{"now":"<p>x</p>","now_path":"/tmp/now.html"}`), env); !hasProblem(problems, "now and now_path are exclusive") {
 		t.Fatalf("now+now_path problems = %v", problems)
 	}
-	for _, doc := range []string{`<!DOCTYPE html><p>x</p>`, `<html><body>x</body></html>`, `<HTML lang=en>`} {
+	for _, doc := range []string{`<!DOCTYPE html><p>x</p>`, `<html><body>x</body></html>`, `<HTML lang=en>`,
+		"# Title\n\n<!DOCTYPE html>\n<p>x</p>", "<!doctype html>\n<html><body>x</body></html>", "Some text <html lang=en> inline."} {
 		raw, _ := json.Marshal(map[string]any{"now": doc})
 		if _, problems := Apply(st, payload(t, string(raw)), env); !hasProblem(problems, "markdown with inline HTML, not a full document") {
 			t.Fatalf("full document %q problems = %v", doc, problems)
+		}
+	}
+	// A Now that only mentions a document tag in code (or in text goldmark
+	// escapes, such as a lowercase doctype alone) is markdown, not a full
+	// document.
+	for _, doc := range []string{"Wrap it in `<html>` and start with `<!DOCTYPE html>`.",
+		"Example:\n\n```html\n<!DOCTYPE html>\n<html lang=en><body></body></html>\n```\n",
+		"Indented:\n\n    <html>\n", "Text <!doctype html> escaped."} {
+		other := &State{}
+		raw, _ := json.Marshal(map[string]any{"now": doc})
+		if _, problems := Apply(other, payload(t, string(raw)), env); len(problems) > 0 || other.Now != doc {
+			t.Fatalf("code-only mention %q: problems %v, Now %q", doc, problems, other.Now)
 		}
 	}
 	// Setting the same content again is not a change.
