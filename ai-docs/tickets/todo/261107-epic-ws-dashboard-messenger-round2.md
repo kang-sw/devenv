@@ -54,6 +54,9 @@ session page usable as the primary conversation surface for a lead session:
   conversation messages.
 - `261107-feat-ws-dashboard-status-band` - context, branch, sync, and usage
   around the composer (mockup variant C).
+- `261107-feat-ws-dashboard-pull-down-drawer` - the side panels (Todo,
+  Agenda, Tickets, Mailbox) move into a drawer pulled down from the top, a
+  frame later tabs register into (user, 2026-11-07).
 - Related, not a child: `261107-feat-ws-whiteboard-now-markdown` - the Now
   slot takes markdown with inline HTML (affects disk boards too).
 - Done as bounded delegates, no ticket (2026-11-07): the composer buttons and
