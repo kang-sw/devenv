@@ -98,8 +98,8 @@ func TestDashboardReadPageServesTheBoard(t *testing.T) {
 		// path text.
 		`<img src="/s/` + reg.ReplyID + `/image?path=shots%2Fa.png" alt="shot">`,
 		`<span class="img-text">away <code class="fpath">` + outside + `</code></span>`,
-		`title="ai-docs/tickets/ready/261101-feat-ready-one.md">Ready one</span>`,
-		`title="ai-docs/tickets/todo/261102-feat-todo-one.md">Todo one</span>`,
+		`title="ai-docs/tickets/ready/261101-feat-ready-one.md"><span class="chip cat feat">feat</span>Ready one</span>`,
+		`title="ai-docs/tickets/todo/261102-feat-todo-one.md"><span class="chip cat feat">feat</span>Todo one</span>`,
 		"1 ready, 1 todo", // the full layout's ticket count
 	} {
 		if !strings.Contains(html, want) {
