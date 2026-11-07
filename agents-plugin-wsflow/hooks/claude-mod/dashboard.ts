@@ -25,7 +25,12 @@
 //   only while the latest intake result names it on its `accepts:` line: an
 //   older ws-mcp skips the kind, and a "dashboard off" or error result names
 //   nothing. The latest figures are held and sent again after a resync, since
-//   `reset` clears them on the server.
+//   `reset` clears them on the server;
+// - `compact` around each compaction of the main conversation: `start` when
+//   it begins, then `end` when it lands or `failed` when it fails or is
+//   vetoed, with its trigger (`auto` or `manual`; none for a plugin's), gated
+//   on the `accepts:` line like `status`. A compaction still running is held
+//   and its start sent again after a resync.
 //
 // A batch is one model request (a `turn.step`) and the tool calls it made:
 // the step streams as a generating view (thinking, replying, or a tool call
@@ -434,9 +439,17 @@ export function statusFigures(u: SessionUsage): StatusFigures {
   return out
 }
 
+// ---- Compaction ------------------------------------------------------------
+
+/** The optional event kind that marks a main-conversation compaction, sent only while the intake names it. */
+export const COMPACT_KIND = 'compact'
+
+/** A compaction's trigger as the intake takes it; a plugin's compaction carries none. */
+export type CompactTrigger = 'auto' | 'manual'
+
 // ---- The feed --------------------------------------------------------------
 
-export type DashboardEvent = { kind: 'reset' | 'turn_start' | 'turn_end' | 'agent' | 'permission' | 'reply' | 'user' | 'status'; [field: string]: unknown }
+export type DashboardEvent = { kind: 'reset' | 'turn_start' | 'turn_end' | 'agent' | 'permission' | 'reply' | 'user' | 'status' | 'compact'; [field: string]: unknown }
 
 /** One intake call's outcome: whether it was delivered (not an error result) and its result text. */
 export type IntakeResult = { ok: boolean; text: string }
@@ -519,6 +532,10 @@ export interface Dashboard {
   agentSpawned: (spawn: { agentId: string; parentId?: string; description?: string; subagentType?: string }) => void
   /** The session's latest usage figures: held, and sent while the intake accepts `status`. */
   status: (figures: StatusFigures) => void
+  /** A main-conversation compaction begins: held while it runs, and its start sent while the intake accepts `compact`. */
+  compactStarted: (trigger: CompactTrigger | undefined) => void
+  /** That compaction settled: `landed`, else it failed or was vetoed. */
+  compactEnded: (trigger: CompactTrigger | undefined, landed: boolean) => void
 }
 
 const LEAD = ''
@@ -558,6 +575,12 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
   let statusDirty = false
   /** Whether the latest intake result named `status` among the kinds it accepts. */
   let statusAccepted = false
+  /** The main conversation's compaction while it runs: its trigger and start. */
+  let compacting: { trigger?: CompactTrigger; at: number } | undefined
+  /** Whether ws-mcp does not hold `compacting`'s start yet. */
+  let compactDirty = false
+  /** Whether the latest intake result named `compact` among the kinds it accepts. */
+  let compactAccepted = false
 
   const lead = (): AgentRec => rec(LEAD)
 
@@ -573,14 +596,15 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
   const idOf = (agentId: string | undefined) => agentId ?? LEAD
 
   const statusDue = () => statusDirty && statusAccepted && status !== undefined
+  const compactDue = () => compactDirty && compactAccepted && compacting !== undefined
 
   function hasWork(): boolean {
-    return pending.length > 0 || replyDirty || statusDue() || [...agents.values()].some((r) => r.dirty)
+    return pending.length > 0 || replyDirty || statusDue() || compactDue() || [...agents.values()].some((r) => r.dirty)
   }
 
   /** Whether streamed reply text is the only pending change, so the slow cadence applies. */
   function textOnly(): boolean {
-    return replyDirty && pending.length === 0 && !statusDue() && ![...agents.values()].some((r) => r.dirty)
+    return replyDirty && pending.length === 0 && !statusDue() && !compactDue() && ![...agents.values()].some((r) => r.dirty)
   }
 
   function scheduleFlush(): void {
@@ -655,12 +679,16 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
     return { kind: 'reply', text }
   }
 
-  /** Every dirty state as events, in a stable order: the lead, the subagents, the streamed reply, the usage status. */
+  /** Every dirty state as events, in a stable order: the lead, the subagents, the streamed reply, a running compaction, the usage status. */
   function dirtyEvents(): DashboardEvent[] {
     const out: DashboardEvent[] = []
     for (const [id, r] of agents) if (r.dirty) out.push(...agentEvents(id, r))
     const stream = streamEvent()
     if (stream) out.push(stream)
+    if (compactDue()) {
+      compactDirty = false
+      out.push({ kind: COMPACT_KIND, phase: 'start', ...(compacting!.trigger ? { trigger: compacting!.trigger } : {}), at: compacting!.at })
+    }
     if (statusDue()) {
       statusDirty = false
       out.push({ kind: STATUS_KIND, ...(JSON.parse(status!) as StatusFigures) })
@@ -691,11 +719,14 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
     lastReplySent = undefined
     replyDirty = reply !== undefined
     statusDirty = status !== undefined
+    compactDirty = compacting !== undefined
   }
 
   /** The conversation events of an undelivered call, which a resync cannot rebuild from current state. */
   function requeue(events: DashboardEvent[]): void {
-    const kept = events.filter((e) => e.kind === 'user' || e.kind === 'turn_start' || e.kind === 'turn_end' || (e.kind === 'reply' && e.final === true))
+    const kept = events.filter(
+      (e) => e.kind === 'user' || e.kind === 'turn_start' || e.kind === 'turn_end' || (e.kind === 'reply' && e.final === true) || (e.kind === COMPACT_KIND && e.phase !== 'start'),
+    )
     pending = [...kept, ...pending]
     if (pending.length > PENDING_EVENT_CAP) pending.splice(0, pending.length - PENDING_EVENT_CAP)
   }
@@ -756,6 +787,9 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
       const accepted = accepts.includes(STATUS_KIND)
       if (accepted && !statusAccepted) statusDirty = status !== undefined
       statusAccepted = accepted
+      const compactOn = accepts.includes(COMPACT_KIND)
+      if (compactOn && !compactAccepted) compactDirty = compacting !== undefined
+      compactAccepted = compactOn
       if (!stopped && !delivered) {
         requeue(events)
         markResync()
@@ -803,6 +837,8 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
     retryAt = 0
     // The held usage outlives a restart: the restart's `reset` clears it on the server, so it goes again.
     statusDirty = status !== undefined
+    compacting = undefined
+    compactDirty = false
   }
 
   /** Runs one handler only while the feed runs; a throw is logged and never reaches the session. */
@@ -843,6 +879,7 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
       status = undefined
       statusDirty = false
       statusAccepted = false
+      compactAccepted = false
       stopped = false
       sentKey = undefined
       resyncDue = true
@@ -854,6 +891,7 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
       status = undefined
       statusDirty = false
       statusAccepted = false
+      compactAccepted = false
       stopped = true
     },
     restart: guard('restart', () => {
@@ -1008,6 +1046,17 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
       status = json
       statusDirty = true
       scheduleFlush()
+    }),
+    compactStarted: guard('compact start', (trigger: CompactTrigger | undefined) => {
+      compacting = { ...(trigger ? { trigger } : {}), at: edges.now() }
+      compactDirty = true
+      scheduleFlush()
+    }),
+    compactEnded: guard('compact end', (trigger: CompactTrigger | undefined, landed: boolean) => {
+      // A start ws-mcp does not hold yet goes ahead of its end (settleBefore drains it first).
+      if (compactAccepted) settleBefore({ kind: COMPACT_KIND, phase: landed ? 'end' : 'failed', ...(trigger ? { trigger } : {}), at: edges.now() })
+      compacting = undefined
+      compactDirty = false
     }),
   }
 }
