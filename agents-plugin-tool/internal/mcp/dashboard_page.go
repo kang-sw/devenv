@@ -63,9 +63,9 @@ func (src *DashboardSessionSource) ReadPageLang(reg wsdashboard.Registration, la
 		ImageSrc: func(path string) string {
 			return wsdashboard.ImageSrc(record.Root, reg.ReplyID, path)
 		},
-		// Now renders in a sandboxed frame that sends no cookie, so its
-		// images are inlined rather than loaded through the image route.
-		NowImageSrc: func(path string) string {
+		// A topic body renders in a sandboxed frame that sends no cookie, so
+		// its images are inlined rather than loaded through the image route.
+		DocImageSrc: func(path string) string {
 			return wsdashboard.ImageDataURL(record.Root, path)
 		},
 		FileActions: wsdashboard.FileActions(record.Root, reg.ReplyID),

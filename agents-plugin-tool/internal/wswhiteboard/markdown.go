@@ -32,7 +32,7 @@ import (
 // has an HTML parser, so a tag the lead types is escaped text (html.WithUnsafe
 // stays off as the backstop), and every link, autolink, and image destination
 // goes through resolveTarget's allow-list. The raw pipeline passes HTML
-// through and serves two callers only: the Now slot, written as is, and a
+// through and serves two callers only: topic bodies, written as is, and a
 // finished lead reply, which sanitize.go filters afterwards.
 
 // mermaidJS is the vendored mermaid build (assets/mermaid/README.md). Pages
@@ -73,8 +73,8 @@ func UsesMermaid(page string) bool {
 // and link targets against that page.
 type markdown struct {
 	block, inline goldmark.Markdown
-	// raw is block with raw HTML passed through, built on first use (Now and
-	// finished lead replies only).
+	// raw is block with raw HTML passed through, built on first use (topic
+	// bodies and finished lead replies only).
 	raw goldmark.Markdown
 }
 
@@ -169,10 +169,10 @@ func (p *pageData) rawMarkdown() goldmark.Markdown {
 	return md.raw
 }
 
-// renderNow renders the Now slot: block markdown with raw HTML written as is,
-// neither balanced nor filtered, so an inline script still runs. Item
+// renderDoc renders a topic body: block markdown with raw HTML written as
+// is, neither balanced nor filtered, so an inline script still runs. Item
 // references resolve in its markdown text, never inside its HTML.
-func (p *pageData) renderNow(s string) template.HTML {
+func (p *pageData) renderDoc(s string) template.HTML {
 	return p.convert(p.rawMarkdown(), s)
 }
 
@@ -323,15 +323,15 @@ func (p *pageData) resolveTarget(dest string, image bool) (target, bool) {
 	return target{}, false
 }
 
-// fileTarget resolves a file path: for an image in a framed Now, as the src
-// NowImageSrc returns, when that is non-empty; for an image on a page with
+// fileTarget resolves a file path: for an image in a framed topic body, as
+// the src DocImageSrc returns, when that is non-empty; for an image on a page with
 // ImageSrc, as the src ImageSrc returns (the destination's own query and fragment are
 // dropped), when that is non-empty; else as path text on a page with
 // FileText, with the FileActions action when the page has them, else as the
 // href fileHref builds.
 func (p *pageData) fileTarget(path, suffix string, image bool) target {
-	if image && p.framing && p.NowImageSrc != nil {
-		if src := p.NowImageSrc(path); src != "" {
+	if image && p.framing && p.DocImageSrc != nil {
+		if src := p.DocImageSrc(path); src != "" {
 			return target{href: src}
 		}
 	}

@@ -9,7 +9,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsi18n"
 )
 
-const sampleNow = `<p>One update writes the full page and an embed; the embed keeps the latest five.</p>
+const sampleDoc = `<p>One update writes the full page and an embed; the embed keeps the latest five.</p>
 <svg viewBox="0 0 640 170" role="img" xmlns="http://www.w3.org/2000/svg">
   <defs><marker id="ah" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L8,4 L0,8 z"/></marker></defs>
   <rect class="box" x="10" y="55" width="120" height="50" rx="8"/><text x="24" y="77">lead</text><text class="sub" x="24" y="93">one update per turn</text>
@@ -24,10 +24,10 @@ const sampleNow = `<p>One update writes the full page and an embed; the embed ke
 
 // sampleState is a board with every item kind: open policy, assumed, open
 // technical and announced, answered, withdrawn, and superseded items across
-// several topics, one of them closed. Seq 12 changed Now; the previous embed
+// several topics, one of them closed, and no topic body. The previous embed
 // was at seq 10.
 func sampleState() *State {
-	st := &State{Counter: 90, Seq: 12, NowSeq: 12, LastEmbedSeq: 10, SettleSeq: 20, Now: sampleNow, ClosedTopics: []string{"초기 범위"}}
+	st := &State{Counter: 90, Seq: 12, LastEmbedSeq: 10, SettleSeq: 20, ClosedTopics: []string{"초기 범위"}}
 	add := func(item Item) { st.Items = append(st.Items, item) }
 	settled := func(id int, topic, title string, order, changed int) Item {
 		return Item{ID: id, Class: ClassTechnical, Topic: topic, Title: title, Status: StatusAnswered, Answer: "ok", AnswerQuote: "looks fine", Settled: order, Changed: changed}
@@ -183,38 +183,94 @@ func TestRenderPageChangeSignalOnlyOnFull(t *testing.T) {
 	}
 }
 
-func TestRenderPageNowPlacement(t *testing.T) {
-	for name, layout := range layouts() {
-		for _, fresh := range []bool{true, false} {
-			view := sampleView(layout)
-			view.NowFresh = fresh
-			out := render(t, view)
-			now, topic := strings.Index(out, `<details class="now`), strings.Index(out, `<section class="topic`)
-			if now < 0 || topic < 0 || now > topic {
-				t.Errorf("%s fresh=%v: Now (%d) is not above the topics (%d)", name, fresh, now, topic)
-			}
-			if !strings.Contains(out, `<span class="label">NOW</span>`) {
-				t.Errorf("%s fresh=%v: Now summary lacks its label", name, fresh)
-			}
-			tag := regexp.MustCompile(`<details class="now[^>]*>`).FindString(out)
-			if want := `<details class="now" id="wb-now" open>`; fresh && tag != want {
-				t.Errorf("%s: fresh Now tag = %q, want %q", name, tag, want)
-			}
-			if want := `<details class="now stale" id="wb-now">`; !fresh && tag != want {
-				t.Errorf("%s: stale Now tag = %q, want %q", name, tag, want)
-			}
-		}
+// docTag finds the topic body's <details> tag on a page.
+var docTag = regexp.MustCompile(`<details class="tdoc"[^>]*>`)
 
-		view := sampleView(layout)
-		view.Now = ""
-		if out := render(t, view); strings.Contains(out, `<details class="now`) {
-			t.Errorf("%s: empty Now still renders the slot", name)
+// TestRenderPageTopicBodyPlacement pins where a topic body sits: inside its
+// topic block, between the title bar and the items, open on the full page
+// unless the topic is closed, and open on the embed only when it changed
+// since the previous embed.
+func TestRenderPageTopicBodyPlacement(t *testing.T) {
+	for name, layout := range layouts() {
+		st := sampleState()
+		st.Topics = []TopicDoc{{Name: "embed layout", Body: "layout **notes**", Changed: 12}, {Name: "초기 범위", Body: "closed notes", Changed: 3}, {Name: "tool surface", Body: "old notes", Changed: 4}}
+		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
+		start := strings.Index(out, `<span class="tname">embed layout</span>`)
+		block := out[start:]
+		block = block[:strings.Index(block, "</section>")]
+		doc, items := strings.Index(block, `<details class="tdoc"`), strings.Index(block, `class="tbody"`)
+		if doc < 0 || items < 0 || doc > items {
+			t.Errorf("%s: the body (%d) is not above the items (%d)", name, doc, items)
+		}
+		wantAll(t, block, `<summary title="topic notes"><svg class="i" aria-hidden="true"><use href="#i-book"/></svg>`, `<div class="doc-body md">layout <strong>notes</strong></div>`)
+		if tag := docTag.FindString(block); tag != `<details class="tdoc" data-key="doc:embed layout" open>` {
+			t.Errorf("%s: body tag = %q, want it open (changed at seq 12, after the embed at 10)", name, tag)
+		}
+		// A body that did not change since the previous embed is open only on the full page.
+		start = strings.Index(out, `<span class="tname">tool surface</span>`)
+		block = out[start:]
+		block = block[:strings.Index(block, "</section>")]
+		tag := docTag.FindString(block)
+		wantOpen := layout == LayoutFull
+		if open := strings.HasSuffix(tag, " open>"); open != wantOpen {
+			t.Errorf("%s: unchanged body tag %q, open = %v, want %v", name, tag, open, wantOpen)
+		}
+		// A closed topic folds its body on both pages.
+		start = strings.Index(out, `<span class="tname" title="closed">초기 범위</span>`)
+		if start < 0 {
+			t.Fatalf("%s: closed topic missing", name)
+		}
+		block = out[start:]
+		block = block[:strings.Index(block, "</section>")]
+		if tag := docTag.FindString(block); tag != `<details class="tdoc" data-key="doc:초기 범위">` {
+			t.Errorf("%s: closed topic's body tag = %q, want a closed fold", name, tag)
+		}
+		if !strings.Contains(block, "closed notes") {
+			t.Errorf("%s: a closed topic still carries its body", name)
+		}
+		// A topic with no body has no body block.
+		start = strings.Index(out, `<span class="tname">embed retention</span>`)
+		block = out[start:]
+		block = block[:strings.Index(block, "</section>")]
+		if strings.Contains(block, "tdoc") {
+			t.Errorf("%s: a topic without a body renders one", name)
 		}
 	}
 }
 
-func TestRenderPageEscapesItemTextButNotNow(t *testing.T) {
-	st := &State{Seq: 2, NowSeq: 2, Now: `<b id="now-raw">raw <i>now</i></b>`}
+// TestRenderPageContentOnlyTopic: a topic with a body and no items renders
+// its block with the body, and closing it makes the block quiet with the body
+// in a closed fold.
+func TestRenderPageContentOnlyTopic(t *testing.T) {
+	st := &State{}
+	mustApply(t, st, topicXML("notes", "# Plan\n\n- one"))
+	out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
+	wantAll(t, out, `<section class="topic"><div class="tbar"><span class="tname">notes</span></div>`,
+		`<details class="tdoc" data-key="doc:notes" open>`, "<h1>Plan</h1>", "<li>one</li>")
+	wantNone(t, out, `class="tbody"`, `class="reply`)
+
+	mustApply(t, st, `<wb:close topic="notes"/>`)
+	out = render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
+	wantAll(t, out, `<section class="topic quiet closed"><div class="tbar"><span class="tname" title="closed">notes</span></div>`,
+		`<details class="tdoc" data-key="doc:notes"><summary`, "<h1>Plan</h1>")
+	wantNone(t, out, `data-key="doc:notes" open`)
+}
+
+// TestRenderPageEmbedMarksANewBody: the embed's body summary carries the new
+// dot only when the body changed since the previous embed.
+func TestRenderPageEmbedMarksANewBody(t *testing.T) {
+	st := &State{Seq: 12, LastEmbedSeq: 10, Topics: []TopicDoc{{Name: "fresh", Body: "f", Changed: 12}, {Name: "stale", Body: "s", Changed: 5}}}
+	embed := render(t, BuildView(st, ViewInput{Layout: LayoutEmbed, ReplyID: "r"}))
+	wantAll(t, embed,
+		`data-key="doc:fresh" open><summary title="topic notes"><svg class="i" aria-hidden="true"><use href="#i-book"/></svg><span class="new" title="new since the previous embed"></span></summary>`,
+		`data-key="doc:stale"><summary title="topic notes"><svg class="i" aria-hidden="true"><use href="#i-book"/></svg></summary>`)
+	full := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
+	wantNone(t, full, `class="new"`)
+	wantAll(t, full, `data-key="doc:fresh" open>`, `data-key="doc:stale" open>`)
+}
+
+func TestRenderPageEscapesItemTextButNotTopicBody(t *testing.T) {
+	st := &State{Seq: 2, Topics: []TopicDoc{{Name: "t", Body: `<b id="doc-raw">raw <i>doc</i></b>`}}}
 	st.Items = []Item{
 		{ID: 1, Class: ClassPolicy, Topic: "<script>t()</script>", Title: "<script>alert(1)</script>",
 			Options: []string{`<img src=x onerror=alert(2)>`, "b"}, Recommendation: "a: <b>why</b>",
@@ -235,8 +291,8 @@ func TestRenderPageEscapesItemTextButNotNow(t *testing.T) {
 				t.Errorf("%s: escaped text %q missing", name, escaped)
 			}
 		}
-		if !strings.Contains(out, `<b id="now-raw">raw <i>now</i></b>`) {
-			t.Errorf("%s: Now fragment is not written unescaped", name)
+		if !strings.Contains(out, `<b id="doc-raw">raw <i>doc</i></b>`) {
+			t.Errorf("%s: topic body is not written unescaped", name)
 		}
 		if !strings.Contains(out, `<use href="#i-list"/>`) {
 			t.Errorf("%s: unknown panel icon did not fall back to the list symbol", name)
@@ -248,87 +304,97 @@ func TestRenderPageEscapesItemTextButNotNow(t *testing.T) {
 	}
 }
 
-// nowBody renders a board whose Now slot holds now, with item 90 on the page
-// for references, and returns the Now body's inner HTML and the page.
-func nowBody(t *testing.T, now string, in ViewInput) (body, page string) {
+// docBody renders a board whose topic "doc" holds body, with item 90 on the
+// page for references, and returns that body's inner HTML and the page.
+func docBody(t *testing.T, body string, in ViewInput) (inner, page string) {
 	t.Helper()
-	st := &State{Seq: 2, NowSeq: 2, Now: now, Items: []Item{{ID: 90, Class: ClassTechnical, Topic: "t", Title: "target", Status: StatusOpen}}}
+	st := &State{Seq: 2, Topics: []TopicDoc{{Name: "doc", Body: body, Changed: 2}}, Items: []Item{{ID: 90, Class: ClassTechnical, Topic: "t", Title: "target", Status: StatusOpen}}}
 	in.ReplyID = "r"
 	page = render(t, BuildView(st, in))
-	const open = `<div class="now-body md">`
+	const open = `<div class="doc-body md">`
 	start := strings.Index(page, open)
 	end := strings.Index(page, "</div></details>")
 	if start < 0 || end < start {
-		t.Fatalf("no Now body in:\n%s", page)
+		t.Fatalf("no topic body in:\n%s", page)
 	}
 	return page[start+len(open) : end], page
 }
 
-// TestNowRendersMarkdownWithInlineHTML pins the Now slot's renderer: block
+// TestTopicBodyRendersMarkdownWithInlineHTML pins the body's renderer: block
 // markdown as in item fields, mermaid included, with raw HTML and inline SVG
 // written as is, on the disk board and the served page alike.
-func TestNowRendersMarkdownWithInlineHTML(t *testing.T) {
-	now := "# Plan\n\n- one\n- **two**\n\n```mermaid\ngraph TD; A-->B\n```\n\n" + sampleNow
+func TestTopicBodyRendersMarkdownWithInlineHTML(t *testing.T) {
+	body := "# Plan\n\n- one\n- **two**\n\n```mermaid\ngraph TD; A-->B\n```\n\n" + sampleDoc
 	for name, in := range map[string]ViewInput{
 		"disk":   {Layout: LayoutFull},
 		"embed":  {Layout: LayoutEmbed},
 		"served": {Layout: LayoutFull, FileText: func(p string) string { return p }, ImageSrc: func(string) string { return "" }},
 	} {
-		body, page := nowBody(t, now, in)
-		wantAll(t, body, "<h1>Plan</h1>", "<li><strong>two</strong></li>", `<pre class="mermaid">graph TD; A--&gt;B`, sampleNow)
+		inner, page := docBody(t, body, in)
+		wantAll(t, inner, "<h1>Plan</h1>", "<li><strong>two</strong></li>", `<pre class="mermaid">graph TD; A--&gt;B`, sampleDoc)
 		if !UsesMermaid(page) {
-			t.Errorf("%s: a mermaid block in Now does not load the mermaid script", name)
+			t.Errorf("%s: a mermaid block in a body does not load the mermaid script", name)
 		}
 	}
-	view := BuildView(&State{Seq: 2, NowSeq: 2, Now: now}, ViewInput{Layout: LayoutFull, ReplyID: "r"})
-	regions, err := RenderRegions(view)
+	// A page without a mermaid block loads no mermaid script.
+	if _, page := docBody(t, "plain", ViewInput{Layout: LayoutFull}); UsesMermaid(page) {
+		t.Errorf("a body without a mermaid block loads mermaid")
+	}
+	st := &State{Seq: 2, Topics: []TopicDoc{{Name: "doc", Body: body, Changed: 2}}}
+	regions, err := RenderRegions(BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The served board renders the same Now inside its frame, which loads
+	// The served board renders the same body inside its frame, which loads
 	// mermaid itself, so the host page need not.
-	doc := frameDoc(t, string(regions.Board))
+	doc := frameDocs(t, string(regions.Board))["doc"]
 	mermaid, _ := MermaidAsset()
-	wantAll(t, doc, "<h1>Plan</h1>", sampleNow, `<pre class="mermaid">`, `<script src="`+mermaid+`"></script>`)
+	wantAll(t, doc, "<h1>Plan</h1>", sampleDoc, `<pre class="mermaid">`, `<script src="`+mermaid+`"></script>`)
 	if regions.Mermaid {
-		t.Errorf("a mermaid block inside the Now frame makes the host page load mermaid")
+		t.Errorf("a mermaid block inside a body frame makes the host page load mermaid")
 	}
 }
 
-// TestNowKeepsInlineScript pins the Now slot's trust: a canvas drawn by an
+// TestTopicBodyKeepsInlineScript pins the body's trust: a canvas drawn by an
 // inline script reaches the page unchanged, blank lines inside the script
 // included, since a script block runs to its closing tag. The canvas line,
 // markdown text with an inline tag, gains a paragraph.
-func TestNowKeepsInlineScript(t *testing.T) {
+func TestTopicBodyKeepsInlineScript(t *testing.T) {
 	script := "<script>\nconst g = document.getElementById(\"c\").getContext(\"2d\");\n\ng.fillRect(0, 0, 10, 10);\n</script>"
-	body, page := nowBody(t, "<canvas id=\"c\" width=\"120\" height=\"40\"></canvas>\n"+script, ViewInput{Layout: LayoutFull})
+	body, page := docBody(t, "<canvas id=\"c\" width=\"120\" height=\"40\"></canvas>\n"+script, ViewInput{Layout: LayoutFull})
 	if want := "<p><canvas id=\"c\" width=\"120\" height=\"40\"></canvas></p>\n" + script; body != want {
-		t.Errorf("Now body = %q, want %q", body, want)
+		t.Errorf("body = %q, want %q", body, want)
 	}
 	if got := strings.Count(page, "<script>"); got != 3 {
-		t.Errorf("page holds %d script elements, want the string table, its own and Now's", got)
+		t.Errorf("page holds %d script elements, want the string table, its own and the body's", got)
 	}
 }
 
-// TestNowHTMLCaveats pins the rules the whiteboard playbook states for HTML
-// in Now: a block tag keeps the lines after it raw up to a blank line, an
-// indented line after a blank line becomes a code block, a fragment that
-// starts with an inline tag is markdown text whose line breaks render as
-// <br>, and {{nn}} resolves in markdown text but not inside HTML.
-func TestNowHTMLCaveats(t *testing.T) {
-	body, _ := nowBody(t, "<div>\n**raw**\n</div>\n\n**md**", ViewInput{Layout: LayoutFull})
+// TestTopicBodyHTMLCaveats pins the rules the whiteboard playbook states for
+// HTML in a body: a block tag keeps the lines after it raw up to a blank
+// line, an indented line after a blank line becomes a code block, a fragment
+// that starts with an inline tag is markdown text whose line breaks render
+// as <br>, and {{nn}} resolves in markdown text but not inside HTML.
+func TestTopicBodyHTMLCaveats(t *testing.T) {
+	body, _ := docBody(t, "<div>\n**raw**\n</div>\n\n**md**", ViewInput{Layout: LayoutFull})
 	wantAll(t, body, "<div>\n**raw**\n</div>", "<strong>md</strong>")
 
-	body, _ = nowBody(t, "<svg viewBox=\"0 0 10 10\">\n<rect width=\"4\" height=\"4\"/>\n\n    <text>x</text>\n</svg>", ViewInput{Layout: LayoutFull})
+	body, _ = docBody(t, "<svg viewBox=\"0 0 10 10\">\n<rect width=\"4\" height=\"4\"/>\n\n    <text>x</text>\n</svg>", ViewInput{Layout: LayoutFull})
 	wantAll(t, body, "<pre><code>&lt;text&gt;x&lt;/text&gt;")
 
-	body, _ = nowBody(t, "<b>Status</b> green\n<i>next</i> deploy", ViewInput{Layout: LayoutFull})
+	body, _ = docBody(t, "<b>Status</b> green\n<i>next</i> deploy", ViewInput{Layout: LayoutFull})
 	if body != "<b>Status</b> green<br>\n<i>next</i> deploy" {
 		t.Errorf("inline-tag fragment = %q", body)
 	}
 
-	body, _ = nowBody(t, "See {{90}}\n\n<div title=\"{{90}}\">{{90}}</div>", ViewInput{Layout: LayoutFull})
+	body, _ = docBody(t, "See {{90}}\n\n<div title=\"{{90}}\">{{90}}</div>", ViewInput{Layout: LayoutFull})
 	wantAll(t, body, `See <a href="#item-90">(90)</a>`, `<div title="{{90}}">{{90}}</div>`)
+
+	// The body a lead writes in the command string reaches the page as written.
+	st := &State{}
+	mustApply(t, st, addXML(ClassTechnical, "t", "x")+"<wb:topic name=\"t\">\n## 배경\n\n<details><summary>접기</summary>\n<p>1 < 2 & 3 > 2</p>\n</details>\n</wb:topic>")
+	page := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
+	wantAll(t, page, "<h2>배경</h2>", "<details><summary>접기</summary>\n<p>1 < 2 & 3 > 2</p>\n</details>")
 }
 
 func TestRenderPageTopicBlockOrder(t *testing.T) {
@@ -601,7 +667,7 @@ func TestRenderPageItemReferenceKeepsEscaping(t *testing.T) {
 
 func TestRenderPageEmbedSizeBudget(t *testing.T) {
 	long := strings.Repeat("A fairly long sentence about the trade-off, written the way a lead explains it. ", 4)
-	st := &State{Seq: 30, NowSeq: 30, LastEmbedSeq: 20, Now: sampleNow}
+	st := &State{Seq: 30, LastEmbedSeq: 20, Topics: []TopicDoc{{Name: "topic 1", Body: sampleDoc, Changed: 30}, {Name: "topic 2", Body: sampleDoc, Changed: 5}}}
 	settle := 0
 	for i := 1; i <= 60; i++ {
 		item := Item{ID: i, Topic: fmt.Sprintf("topic %d", i%6), Title: fmt.Sprintf("Item %d: %s", i, long[:120]), Rationale: long, Links: []string{fmt.Sprintf("see {{%d}}", max(1, i-1))}, Changed: 15 + i%16}

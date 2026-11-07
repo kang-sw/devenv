@@ -9,12 +9,11 @@ import (
 
 // TestRenderRegionsMatchThePage pins the dashboard's reuse contract: the
 // board and panel fragments are exactly what the full page renders for the
-// same view, so a served page cannot drift from the static one. The Now
-// slot is the one difference, framed in the regions
-// (TestServedNowRendersInASandboxedFrame), so it is cleared here.
+// same view, so a served page cannot drift from the static one. A topic body
+// is the one difference, framed in the regions
+// (TestServedTopicBodyRendersInASandboxedFrame), so this board has none.
 func TestRenderRegionsMatchThePage(t *testing.T) {
 	view := sampleView(LayoutFull)
-	view.Now = ""
 	page := render(t, view)
 	regions, err := RenderRegions(view)
 	if err != nil {
@@ -252,58 +251,98 @@ func TestDiskBoardKeepsFileLinks(t *testing.T) {
 	wantNone(t, out, "data-wl", "/s/r/file")
 }
 
-// frameDoc returns the srcdoc document of the one Now frame in board,
-// unescaped as a browser reads the attribute.
-func frameDoc(t *testing.T, board string) string {
+// frameDocs returns the srcdoc document of every topic-body frame in board,
+// keyed by topic name, unescaped as a browser reads the attribute.
+func frameDocs(t *testing.T, board string) map[string]string {
 	t.Helper()
-	m := regexp.MustCompile(`<iframe class="now-frame"[^>]* srcdoc="([^"]*)"></iframe>`).FindAllStringSubmatch(board, -1)
-	if len(m) != 1 {
-		t.Fatalf("board holds %d Now frames, want 1:\n%.600s", len(m), board)
+	out := map[string]string{}
+	for _, m := range regexp.MustCompile(`<iframe class="doc-frame" title="([^"]*)" data-doc="([^"]*)" sandbox="[^"]*" srcdoc="([^"]*)"></iframe>`).FindAllStringSubmatch(board, -1) {
+		name := html.UnescapeString(m[2])
+		if html.UnescapeString(m[1]) != name {
+			t.Errorf("frame title %q differs from its data-doc %q", m[1], m[2])
+		}
+		out[name] = html.UnescapeString(m[3])
 	}
-	return html.UnescapeString(m[0][1])
+	if got := strings.Count(board, "<iframe"); got != len(out) {
+		t.Fatalf("board holds %d frames, %d parsed:\n%.600s", got, len(out), board)
+	}
+	return out
 }
 
-// TestServedNowRendersInASandboxedFrame pins the served page's Now trust:
-// RenderRegions puts Now's HTML, scripts included, in a srcdoc frame with
-// allow-scripts but never allow-same-origin, so none of it runs in the
-// daemon's origin, and the frame document carries the page stylesheet (the
-// theme variables), the frame script, and Now's own markup. The disk page
-// keeps rendering Now inline.
-func TestServedNowRendersInASandboxedFrame(t *testing.T) {
-	const now = "**plan**\n\n<canvas id=\"c\" width=\"40\" height=\"20\"></canvas>\n<script>\nfetch('/s/r/message', {method: 'POST'});\n</script>"
-	st := &State{Seq: 2, NowSeq: 2, Now: now, Items: []Item{{ID: 1, Class: ClassPolicy, Topic: "t", Title: "x", Status: StatusOpen, Options: []string{"a", "b"}}}}
+// TestServedTopicBodyRendersInASandboxedFrame pins the served page's body
+// trust: RenderRegions puts a body's HTML, scripts included, in a srcdoc
+// frame with allow-scripts but never allow-same-origin, so none of it runs
+// in the daemon's origin, and the frame document carries the page stylesheet
+// (the theme variables), the frame script, and the body's own markup. The
+// disk page keeps rendering the body inline.
+func TestServedTopicBodyRendersInASandboxedFrame(t *testing.T) {
+	const doc = "**plan**\n\n<canvas id=\"c\" width=\"40\" height=\"20\"></canvas>\n<script>\nfetch('/s/r/message', {method: 'POST'});\n</script>\n\nSee {{1}}"
+	st := &State{Seq: 2, Topics: []TopicDoc{{Name: "doc", Body: doc, Changed: 2}}, Items: []Item{{ID: 1, Class: ClassPolicy, Topic: "t", Title: "x", Status: StatusOpen, Options: []string{"a", "b"}}}}
 	view := BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"})
 	regions, err := RenderRegions(view)
 	if err != nil {
 		t.Fatal(err)
 	}
 	board := string(regions.Board)
-	if !strings.Contains(board, `<div class="now-body framed"><iframe class="now-frame" title="now" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" srcdoc="`) {
-		t.Fatalf("Now frame missing or its sandbox changed:\n%.600s", board)
+	if !strings.Contains(board, `<div class="doc-body framed"><iframe class="doc-frame" title="doc" data-doc="doc" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" srcdoc="`) {
+		t.Fatalf("body frame missing or its sandbox changed:\n%.600s", board)
 	}
 	wantNone(t, board, "allow-same-origin", "<script", "<canvas")
 	assets, _ := loadAssets()
-	doc := frameDoc(t, board)
-	wantAll(t, doc, `<base target="_blank">`, "--wb-now:", "<strong>plan</strong>", `<canvas id="c"`, "fetch('/s/r/message'", assets.nowFrame, `<body class="now-frame"><div class="now-body md">`)
-	if strings.Contains(doc, "<script src=") {
-		t.Errorf("a Now without a mermaid block loads mermaid in its frame")
+	doc1 := frameDocs(t, board)["doc"]
+	wantAll(t, doc1, `<base target="_blank">`, "--wb-bg:", "<strong>plan</strong>", `<canvas id="c"`, "fetch('/s/r/message'", assets.docFrame, `<body class="doc-frame"><div class="doc-body md">`,
+		`See <a href="#item-1">(01)</a>`)
+	if strings.Contains(doc1, "<script src=") {
+		t.Errorf("a body without a mermaid block loads mermaid in its frame")
 	}
 
 	page := render(t, view)
-	wantAll(t, page, `<div class="now-body md"><p><strong>plan</strong></p>`, "fetch('/s/r/message'")
+	wantAll(t, page, `<div class="doc-body md"><p><strong>plan</strong></p>`, "fetch('/s/r/message'")
 	wantNone(t, page, "<iframe", "srcdoc")
 }
 
-// TestFramedNowImagesTakeNowImageSrc pins where NowImageSrc applies: a file
-// image in the framed Now takes it, an empty result falls back to ImageSrc,
-// and an item's image and the disk page's Now keep ImageSrc.
-func TestFramedNowImagesTakeNowImageSrc(t *testing.T) {
-	st := &State{Seq: 2, NowSeq: 2, Now: "![a](a.png) ![big](big.png)",
+// TestServedBoardFramesEveryBodySeparately: one frame per body, each carrying
+// its topic's name (escaped) and only its own text, closed topics included.
+func TestServedBoardFramesEveryBodySeparately(t *testing.T) {
+	st := &State{}
+	mustApply(t, st, addXML(ClassTechnical, "one", "x")+
+		`<wb:topic name='say "hi" &amp; <go>'>second body</wb:topic>`+
+		topicXML("one", "first body")+topicXML("closed", "third body")+`<wb:close topic="closed"/>`+addXML(ClassTechnical, "no body", "y"))
+	regions, err := RenderRegions(BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	docs := frameDocs(t, string(regions.Board))
+	if len(docs) != 3 {
+		t.Fatalf("frames = %d, want one per body", len(docs))
+	}
+	for name, want := range map[string]string{"one": "first body", `say "hi" &amp; <go>`: "second body", "closed": "third body"} {
+		doc, ok := docs[name]
+		if !ok || !strings.Contains(doc, `<div class="doc-body md">`+want+`</div>`) {
+			t.Errorf("frame %q = %.200q, want %q", name, doc, want)
+		}
+		for other, text := range map[string]string{"one": "first body", `say "hi" &amp; <go>`: "second body", "closed": "third body"} {
+			if other != name && strings.Contains(doc, text) {
+				t.Errorf("frame %q holds %q's text", name, other)
+			}
+		}
+	}
+	// The name reaches the attribute escaped, so it cannot end the attribute.
+	wantAll(t, string(regions.Board), `data-doc="say &#34;hi&#34; &amp;amp; &lt;go&gt;"`)
+	// A closed topic's body sits in a closed fold, framed all the same.
+	wantAll(t, string(regions.Board), `<details class="tdoc" data-key="doc:closed"><summary`)
+}
+
+// TestFramedBodyImagesTakeDocImageSrc pins where DocImageSrc applies: a file
+// image in a framed body takes it, an empty result falls back to ImageSrc,
+// and an item's image and the disk page's body keep ImageSrc.
+func TestFramedBodyImagesTakeDocImageSrc(t *testing.T) {
+	st := &State{Seq: 2, Topics: []TopicDoc{{Name: "doc", Body: "![a](a.png) ![big](big.png)", Changed: 2}},
 		Items: []Item{{ID: 1, Class: ClassPolicy, Topic: "t", Title: "x", Status: StatusOpen, Options: []string{"a", "b"}, Rationale: "![item](a.png)"}}}
 	in := ViewInput{Layout: LayoutFull, ReplyID: "r",
 		FileText: func(p string) string { return p },
 		ImageSrc: func(p string) string { return "/route/" + p },
-		NowImageSrc: func(p string) string {
+		DocImageSrc: func(p string) string {
 			if p == "big.png" {
 				return ""
 			}
@@ -313,11 +352,61 @@ func TestFramedNowImagesTakeNowImageSrc(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	doc := frameDoc(t, string(regions.Board))
+	doc := frameDocs(t, string(regions.Board))["doc"]
 	wantAll(t, doc, `<img src="data:image/png;base64,QUJD" alt="a">`, `<img src="/route/big.png" alt="big">`)
 	wantAll(t, string(regions.Board), `<img src="/route/a.png" alt="item">`)
 	wantNone(t, string(regions.Board), `src="data:image/png;base64,QUJD" alt="item"`)
 
 	page := render(t, BuildView(st, in))
 	wantNone(t, page, "data:image")
+	wantAll(t, page, `<img src="/route/a.png" alt="a">`)
+
+	// Without DocImageSrc the frame's images take ImageSrc.
+	in.DocImageSrc = nil
+	regions, err = RenderRegions(BuildView(st, in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantAll(t, frameDocs(t, string(regions.Board))["doc"], `<img src="/route/a.png" alt="a">`)
+}
+
+// TestRenderRegionsMermaidInBodyAndItems pins which page loads mermaid: the
+// host page for a block outside the frames, the frame for a block in its own
+// body, each alone.
+func TestRenderRegionsMermaidInBodyAndItems(t *testing.T) {
+	const fence = "```mermaid\ngraph TD; A-->B\n```"
+	mermaid, _ := MermaidAsset()
+	item := Item{ID: 1, Class: ClassPolicy, Topic: "t", Title: "x", Options: []string{"a", "b"}, Status: StatusOpen}
+	withMermaid := item
+	withMermaid.Rationale = fence
+	for name, tc := range map[string]struct {
+		items    []Item
+		body     string
+		wantHost bool
+		wantDoc  bool
+	}{
+		"body only":       {[]Item{item}, fence, false, true},
+		"item only":       {[]Item{withMermaid}, "plain body", true, false},
+		"both":            {[]Item{withMermaid}, fence, true, true},
+		"neither":         {[]Item{item}, "plain body", false, false},
+		"empty-body page": {[]Item{withMermaid}, "", true, false},
+	} {
+		st := &State{Seq: 2, Items: tc.items}
+		if tc.body != "" {
+			st.Topics = []TopicDoc{{Name: "doc", Body: tc.body, Changed: 2}}
+		}
+		regions, err := RenderRegions(BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if regions.Mermaid != tc.wantHost {
+			t.Errorf("%s: host mermaid = %v, want %v", name, regions.Mermaid, tc.wantHost)
+		}
+		if tc.body != "" {
+			doc := frameDocs(t, string(regions.Board))["doc"]
+			if has := strings.Contains(doc, `<script src="`+mermaid+`"></script>`); has != tc.wantDoc {
+				t.Errorf("%s: frame loads mermaid = %v, want %v", name, has, tc.wantDoc)
+			}
+		}
+	}
 }

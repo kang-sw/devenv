@@ -1,6 +1,6 @@
 // Package wswhiteboard is the session whiteboard: the item store a lead
 // session keeps in its state record, the validation and application of a
-// whiteboard.update payload, the read-only query, the view model both pages
+// whiteboard.update command string, the read-only query, the view model both pages
 // render from, and the page templates. It does no file I/O of its own; the
 // MCP layer owns persistence, the rendered files, and their lifecycle.
 package wswhiteboard
@@ -10,7 +10,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -54,26 +56,26 @@ var (
 	classValues       = []string{ClassPolicy, ClassTechnical, ClassAnnounced}
 	statusValues      = []string{StatusOpen, StatusAnswered, StatusAssumed, StatusWithdrawn, StatusSuperseded}
 	patchStatusValues = []string{StatusOpen, StatusWithdrawn, StatusSuperseded}
-	// fullDocumentPattern detects a whole HTML document where the Now slot
+	// fullDocumentPattern detects a whole HTML document where a topic body
 	// takes markdown with inline HTML; fullDocument applies it to the raw
 	// HTML only.
 	fullDocumentPattern = regexp.MustCompile(`(?i)<!doctype|<html[\s>]`)
-	// nowParser parses Now markdown as renderNow's pipeline does (default
+	// docParser parses a topic body as renderDoc's pipeline does (default
 	// block and inline parsers, raw HTML on, tables, strikethrough, task lists, footnotes).
-	nowParser = goldmark.New(goldmark.WithExtensions(extension.Table, extension.Strikethrough, extension.TaskList, extension.Footnote)).Parser()
+	docParser = goldmark.New(goldmark.WithExtensions(extension.Table, extension.Strikethrough, extension.TaskList, extension.Footnote)).Parser()
 )
 
-// fullDocument reports whether Now markdown carries a whole HTML document:
+// fullDocument reports whether a topic body carries a whole HTML document:
 // a <!DOCTYPE or <html in its raw HTML (an HTML block or inline raw HTML).
 // Text inside a code span or fence that only mentions one is not raw HTML,
-// so a Now that explains HTML is accepted.
+// so a body that explains HTML is accepted.
 func fullDocument(content string) bool {
 	if !fullDocumentPattern.MatchString(content) {
 		return false
 	}
 	src := []byte(content)
 	found := false
-	_ = ast.Walk(nowParser.Parse(text.NewReader(src)), func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+	_ = ast.Walk(docParser.Parse(text.NewReader(src)), func(n ast.Node, entering bool) (ast.WalkStatus, error) {
 		if !entering {
 			return ast.WalkContinue, nil
 		}
@@ -135,6 +137,16 @@ type Embed struct {
 	Name string `json:"name"`
 }
 
+// TopicDoc is a topic's body: block markdown with inline HTML written as is,
+// rendered above the topic's items.
+type TopicDoc struct {
+	Name string `json:"name"`
+	Body string `json:"body"`
+	// Changed is the render sequence of the update that last changed the
+	// body; it counts toward the topic's recency like an item's Changed.
+	Changed int `json:"changed"`
+}
+
 // State is the whole whiteboard of one session. The MCP layer stores it in
 // the session state record; a nil State means the session has no board.
 type State struct {
@@ -148,13 +160,10 @@ type State struct {
 	SettleSeq    int      `json:"settle_seq,omitempty"`
 	Items        []Item   `json:"items,omitempty"`
 	ClosedTopics []string `json:"closed_topics,omitempty"`
-	Now          string   `json:"now,omitempty"`
-	// NowSeq is the render sequence of the update that last changed Now.
-	NowSeq int `json:"now_seq,omitempty"`
-	// UpdateSeq is the render sequence of the latest accepted update, so an
-	// implicit todo/agenda render does not make Now stale. Zero in a store
-	// written before the field existed.
-	UpdateSeq int `json:"update_seq,omitempty"`
+	// Topics holds the topics that have a body, in first-set order. A store
+	// written while the board had a Now slot keeps its "now" text on disk
+	// until the next write; the field is gone, so nothing reads it.
+	Topics []TopicDoc `json:"topics,omitempty"`
 	// LastEmbedSeq is the render sequence of the previous embed snapshot.
 	LastEmbedSeq int     `json:"last_embed_seq,omitempty"`
 	Embeds       []Embed `json:"embeds,omitempty"`
@@ -166,8 +175,6 @@ type State struct {
 // Env carries the side effects Apply needs, so the store stays testable.
 type Env struct {
 	Now time.Time
-	// ReadFile reads a now_path markdown file once.
-	ReadFile func(path string) ([]byte, error)
 	// IsDir reports whether path is an existing directory (embed_dir).
 	IsDir func(path string) bool
 	// IsAbs reports whether path is absolute on the server's platform.
@@ -176,7 +183,7 @@ type Env struct {
 
 // Outcome is what an accepted update did.
 type Outcome struct {
-	// IDs holds the ID of every add entry, in add order.
+	// IDs holds the ID of every wb:add command, in command order.
 	IDs []int
 }
 
@@ -212,13 +219,74 @@ func (s *State) index(id int) int {
 	return -1
 }
 
+// topicKnown reports whether topic has an item or a body.
 func (s *State) topicKnown(topic string) bool {
 	for _, item := range s.Items {
 		if item.Topic == topic {
 			return true
 		}
 	}
+	return s.topicDocIndex(topic) >= 0
+}
+
+func (s *State) topicHasItems(topic string) bool {
+	for _, item := range s.Items {
+		if item.Topic == topic {
+			return true
+		}
+	}
 	return false
+}
+
+func (s *State) topicDocIndex(topic string) int {
+	for i := range s.Topics {
+		if s.Topics[i].Name == topic {
+			return i
+		}
+	}
+	return -1
+}
+
+// TopicBody returns topic's body, "" when it has none.
+func (s *State) TopicBody(topic string) string {
+	if s == nil {
+		return ""
+	}
+	if i := s.topicDocIndex(topic); i >= 0 {
+		return s.Topics[i].Body
+	}
+	return ""
+}
+
+// setTopicBody sets topic's body; a change marks the topic changed and, as
+// an added item does, reopens a closed topic.
+func (s *State) setTopicBody(topic, body string, mark int) {
+	i := s.topicDocIndex(topic)
+	if i >= 0 && s.Topics[i].Body == body {
+		return
+	}
+	if i < 0 {
+		s.Topics = append(s.Topics, TopicDoc{Name: topic})
+		i = len(s.Topics) - 1
+	}
+	s.Topics[i].Body = body
+	s.Topics[i].Changed = mark
+	if s.topicClosed(topic) {
+		s.reopenTopic(topic)
+	}
+}
+
+// clearTopicBody drops topic's body. A topic left with no item is gone, so
+// its closed mark goes too.
+func (s *State) clearTopicBody(topic string) {
+	i := s.topicDocIndex(topic)
+	if i < 0 {
+		return
+	}
+	s.Topics = append(s.Topics[:i], s.Topics[i+1:]...)
+	if !s.topicHasItems(topic) {
+		s.reopenTopic(topic)
+	}
 }
 
 func (s *State) topicClosed(topic string) bool {
@@ -251,16 +319,6 @@ func (s *State) BeginRender() {
 	s.Seq++
 }
 
-// NowFresh reports whether the latest update changed Now. A store without
-// UpdateSeq judges against the current render, as it did before the field.
-func (s *State) NowFresh() bool {
-	latest := s.UpdateSeq
-	if latest == 0 {
-		latest = s.Seq
-	}
-	return s.Now != "" && s.NowSeq == latest
-}
-
 // evictArchive drops the oldest settled items beyond ArchiveCap.
 func (s *State) evictArchive() {
 	settled := 0
@@ -290,87 +348,65 @@ func (s *State) evictArchive() {
 	s.Items = kept
 }
 
-// Apply validates payload as one whiteboard.update batch and applies it to
-// state. The batch is validated whole: any problem leaves state untouched and
-// every problem is returned. An accepted batch applies in the order
-// embed_dir, id_floor, add, answer, patch, close_topics, now_path, and advances
-// the render sequence once; the caller renders afterwards.
-func Apply(state *State, payload any, env Env) (Outcome, []string) {
+// Apply validates commands, one whiteboard.update command string (see
+// commands.go), and applies it to state. Commands apply in the order written
+// against a working copy; any problem leaves state untouched and every
+// problem is returned. An accepted batch advances the render sequence once;
+// the caller renders afterwards.
+func Apply(state *State, commands string, env Env) (Outcome, []string) {
 	p := &problems{}
-	obj, ok := payloadObject(p, payload)
-	if !ok {
-		return Outcome{}, p.list
-	}
-	// The inline Now field was removed; name its replacement instead of the
-	// generic unknown-field line, and keep it out of that line.
-	known := obj
-	if _, present := obj["now"]; present {
-		p.add("payload.now: no longer accepted; write the Now markdown to the now_file path the update result prints and pass now_path (\"\" clears the slot)")
-		known = make(map[string]any, len(obj))
-		for name, v := range obj {
-			if name != "now" {
-				known[name] = v
-			}
-		}
-	}
-	checkKnownFields(p, "payload", known, updateFields)
+	cmds := parseCommands(p, commands)
 
 	work := state.clone()
 	work.Seq++
 	mark := work.Seq
-	work.UpdateSeq = mark
 	var out Outcome
+	embedDir := false
 
-	if raw, present := obj["embed_dir"]; present {
-		if dir, ok := stringValue(p, "payload.embed_dir", raw); ok {
+	for _, cmd := range cmds {
+		switch cmd.tag {
+		case "wb:add":
+			out.IDs = append(out.IDs, applyAdd(p, work, cmd, mark))
+		case "wb:answer":
+			applyAnswer(p, work, cmd, mark, env.Now)
+		case "wb:patch":
+			applyPatch(p, work, cmd, mark)
+		case "wb:topic":
+			applyTopic(p, work, cmd, mark)
+		case "wb:edit":
+			applyEdit(p, work, cmd, mark)
+		case "wb:close":
+			if topic, ok := requiredAttr(p, cmd, "topic"); ok {
+				switch {
+				case !work.topicKnown(topic):
+					p.add("%s: no item or topic body has topic %q", cmd.at("topic"), topic)
+				case !work.topicClosed(topic):
+					work.ClosedTopics = append(work.ClosedTopics, topic)
+				}
+			}
+		case "wb:floor":
+			if floor, ok := intAttr(p, cmd, "id", true); ok && floor > work.Counter {
+				work.Counter = floor
+			}
+		case "wb:embed-dir":
+			embedDir = true
+			dir, present := cmd.attr("path")
 			switch {
+			case !present:
+				p.add("%s: required (\"\" clears it)", cmd.at("path"))
 			case dir == "":
 				work.EmbedDir = ""
 			case !env.IsAbs(dir):
-				p.add("payload.embed_dir: must be an absolute path; got %q", dir)
+				p.add("%s: must be an absolute path; got %q", cmd.at("path"), dir)
 			case !env.IsDir(dir):
-				p.add("payload.embed_dir: %s is not an existing directory (the server never creates it)", dir)
+				p.add("%s: %s is not an existing directory (the server never creates it)", cmd.at("path"), dir)
 			default:
 				work.EmbedDir = dir
 			}
 		}
-	} else if work.EmbedDir != "" && !env.IsDir(work.EmbedDir) {
-		p.add("embed_dir %s (stored for this session) is no longer an existing directory; pass embed_dir again with the host's current folder, or \"\" to clear it", work.EmbedDir)
 	}
-
-	if raw, present := obj["id_floor"]; present {
-		if floor, ok := intValue(p, "payload.id_floor", raw); ok && floor > work.Counter {
-			work.Counter = floor
-		}
-	}
-
-	for i, entry := range objectList(p, "payload.add", obj["add"]) {
-		field := fmt.Sprintf("payload.add[%d]", i)
-		out.IDs = append(out.IDs, applyAdd(p, work, field, entry, mark))
-	}
-	for i, entry := range objectList(p, "payload.answer", obj["answer"]) {
-		applyAnswer(p, work, fmt.Sprintf("payload.answer[%d]", i), entry, mark, env.Now)
-	}
-	for i, entry := range objectList(p, "payload.patch", obj["patch"]) {
-		applyPatch(p, work, fmt.Sprintf("payload.patch[%d]", i), entry, mark)
-	}
-	if raw, present := obj["close_topics"]; present {
-		for i, topic := range stringList(p, "payload.close_topics", raw) {
-			switch {
-			case strings.TrimSpace(topic) == "":
-				p.add("payload.close_topics[%d]: must be a non-empty topic", i)
-			case !work.topicKnown(topic):
-				p.add("payload.close_topics[%d]: no item has topic %q", i, topic)
-			case !work.topicClosed(topic):
-				work.ClosedTopics = append(work.ClosedTopics, topic)
-			}
-		}
-	}
-
-	if raw, present := obj["now_path"]; present {
-		if path, ok := stringValue(p, "payload.now_path", raw); ok {
-			applyNowPath(p, work, path, mark, env)
-		}
+	if !embedDir && work.EmbedDir != "" && !env.IsDir(work.EmbedDir) {
+		p.add("embed_dir %s (stored for this session) is no longer an existing directory; send <wb:embed-dir path=\"...\"/> with the host's current folder, or path=\"\" to clear it", work.EmbedDir)
 	}
 
 	if len(p.list) > 0 {
@@ -381,72 +417,77 @@ func Apply(state *State, payload any, env Env) (Outcome, []string) {
 	return out, nil
 }
 
-// applyNowPath sets the Now slot from the markdown file at path, read once;
-// "" clears the slot. The same text again is not a change.
-func applyNowPath(p *problems, work *State, path string, mark int, env Env) {
-	content := ""
-	if path != "" {
-		data, err := env.ReadFile(path)
-		if err != nil {
-			p.add("payload.now_path: cannot read %s: %v", path, err)
-			return
-		}
-		content = string(data)
-	}
-	if fullDocument(content) {
-		p.add("payload.now_path: the Now slot takes markdown with inline HTML, not a full document (found <!DOCTYPE or <html)")
-		return
-	}
-	if content == work.Now {
-		return
-	}
-	work.Now = content
-	if content == "" {
-		work.NowSeq = 0
-	} else {
-		work.NowSeq = mark
-	}
+// itemFields are an add or patch command's item fields, read from its field
+// tags; a nil slice or pointer is a field the command did not carry.
+type itemFields struct {
+	title, recommend, why *string
+	options, links        []string
+	hasOptions, hasLinks  bool
 }
 
-var (
-	updateFields = []string{"add", "answer", "patch", "close_topics", "now_path", "id_floor", "embed_dir"}
-	addFields    = []string{"id", "class", "topic", "title", "options", "recommendation", "rationale", "links"}
-	answerFields = []string{"id", "answer", "answer_quote", "assumed"}
-	patchFields  = []string{"id", "title", "options", "recommendation", "rationale", "links", "status"}
-	queryFields  = []string{"topic", "status", "id"}
-)
+func readItemFields(p *problems, cmd command) itemFields {
+	var f itemFields
+	if s, ok := cmd.single(p, "wb:title"); ok {
+		f.title = &s
+	}
+	if s, ok := cmd.single(p, "wb:recommend"); ok {
+		f.recommend = &s
+	}
+	if s, ok := cmd.single(p, "wb:why"); ok {
+		f.why = &s
+	}
+	if options := cmd.fieldsOf("wb:option"); len(options) > 0 {
+		f.hasOptions = true
+		f.options = checkOptions(p, cmd, options)
+	}
+	if links := cmd.fieldsOf("wb:link"); len(links) > 0 {
+		f.hasLinks = true
+		f.links = links
+	}
+	return f
+}
 
-func applyAdd(p *problems, work *State, field string, entry map[string]any, mark int) int {
-	checkKnownFields(p, field, entry, addFields)
+func checkOptions(p *problems, cmd command, options []string) []string {
+	for i, option := range options {
+		if strings.TrimSpace(option) == "" {
+			p.add("%s: option %s must be non-empty", cmd.at("<wb:option>"), OptionLetterFor(i))
+		}
+	}
+	if len(options) > 26 {
+		p.add("%s: at most 26 options (a-z); got %d", cmd.at("<wb:option>"), len(options))
+	}
+	return options
+}
+
+func applyAdd(p *problems, work *State, cmd command, mark int) int {
 	item := Item{Status: StatusOpen, Changed: mark}
 	before := len(p.list)
-	if raw, present := entry["id"]; present {
-		if id, ok := intValue(p, field+".id", raw); ok {
-			if id < 1 {
-				p.add("%s.id: must be a positive number; got %d", field, id)
-			} else if work.index(id) >= 0 {
-				p.add("%s.id: %s is already in the store", field, FormatID(id))
+	if _, present := cmd.attr("id"); present {
+		if id, ok := intAttr(p, cmd, "id", true); ok {
+			if work.index(id) >= 0 {
+				p.add("%s: %s is already in the store", cmd.at("id"), FormatID(id))
 			} else {
 				item.ID = id
 			}
 		}
 	}
-	item.Class, _ = requiredEnum(p, field+".class", entry["class"], classValues)
-	item.Topic, _ = requiredString(p, field+".topic", entry["topic"])
-	item.Title, _ = requiredString(p, field+".title", entry["title"])
-	if raw, present := entry["options"]; present {
-		item.Options = optionList(p, field+".options", raw)
+	item.Class, _ = enumAttr(p, cmd, "class", classValues)
+	item.Topic, _ = requiredAttr(p, cmd, "topic")
+	f := readItemFields(p, cmd)
+	if f.title == nil {
+		p.add("%s: required", cmd.at("<wb:title>"))
+	} else if nonEmpty(p, cmd.at("<wb:title>"), *f.title) {
+		item.Title = *f.title
 	}
-	if raw, present := entry["rationale"]; present {
-		item.Rationale, _ = stringValue(p, field+".rationale", raw)
+	item.Options = f.options
+	item.Links = f.links
+	if f.recommend != nil {
+		item.Recommendation = *f.recommend
 	}
-	if raw, present := entry["links"]; present {
-		item.Links = stringList(p, field+".links", raw)
+	if f.why != nil {
+		item.Rationale = *f.why
 	}
-	if raw, present := entry["recommendation"]; present {
-		item.Recommendation, _ = stringValue(p, field+".recommendation", raw)
-	}
-	checkPolicyShape(p, field, item)
+	checkPolicyShape(p, cmd.label(), item)
 	if len(p.list) > before {
 		return item.ID
 	}
@@ -463,81 +504,141 @@ func applyAdd(p *problems, work *State, field string, entry map[string]any, mark
 	return item.ID
 }
 
-func applyAnswer(p *problems, work *State, field string, entry map[string]any, mark int, now time.Time) {
-	checkKnownFields(p, field, entry, answerFields)
-	idx := lookupItem(p, work, field, entry)
-	answer, answerOK := requiredString(p, field+".answer", entry["answer"])
-	quote, quoteOK := requiredString(p, field+".answer_quote", entry["answer_quote"])
-	assumed := false
-	if raw, present := entry["assumed"]; present {
-		assumed, _ = boolValue(p, field+".assumed", raw)
-	}
-	if idx < 0 || !answerOK || !quoteOK {
+func applyAnswer(p *problems, work *State, cmd command, mark int, now time.Time) {
+	ids := answerIDs(p, cmd)
+	answer, answerOK := requiredAttr(p, cmd, "value")
+	quote := cmd.body
+	quoteOK := nonEmpty(p, cmd.label()+" body (the user's verbatim words)", quote)
+	assumed, _ := boolAttr(p, cmd, "assumed")
+	if !answerOK || !quoteOK {
 		return
 	}
-	item := &work.Items[idx]
-	switch item.Status {
-	case StatusWithdrawn, StatusSuperseded:
-		p.add("%s: %s is %s; patch its status to open before answering it", field, FormatID(item.ID), item.Status)
-		return
+	for _, id := range ids {
+		label := cmd.label() + " " + FormatID(id)
+		idx := work.index(id)
+		if idx < 0 {
+			p.add("%s: not in the store", label)
+			continue
+		}
+		item := &work.Items[idx]
+		switch item.Status {
+		case StatusWithdrawn, StatusSuperseded:
+			p.add("%s: is %s; patch its status to open before answering it", label, item.Status)
+			continue
+		}
+		if item.Class == ClassPolicy && len(item.Options) > 0 && optionLetter(answer, len(item.Options)) == "" {
+			p.add("%s: a policy answer value starts with its option letter (%s); got %q", label, letterRange(len(item.Options)), answer)
+			continue
+		}
+		item.Answer = answer
+		item.AnswerQuote = quote
+		item.AnsweredAt = now.UTC().Format(time.RFC3339)
+		item.Changed = mark
+		if assumed {
+			item.Status = StatusAssumed
+			item.Settled = 0
+			continue
+		}
+		item.Status = StatusAnswered
+		work.settle(item)
 	}
-	if item.Class == ClassPolicy && len(item.Options) > 0 && optionLetter(answer, len(item.Options)) == "" {
-		p.add("%s.answer: a policy answer starts with its option letter (%s); got %q", field, letterRange(len(item.Options)), answer)
-		return
-	}
-	item.Answer = answer
-	item.AnswerQuote = quote
-	item.AnsweredAt = now.UTC().Format(time.RFC3339)
-	item.Changed = mark
-	if assumed {
-		item.Status = StatusAssumed
-		item.Settled = 0
-		return
-	}
-	item.Status = StatusAnswered
-	work.settle(item)
 }
 
-func applyPatch(p *problems, work *State, field string, entry map[string]any, mark int) {
-	checkKnownFields(p, field, entry, patchFields)
-	idx := lookupItem(p, work, field, entry)
-	if idx < 0 {
-		// Still type-check the remaining fields so the refusal lists them.
-		for _, name := range []string{"title", "recommendation", "rationale"} {
-			if raw, present := entry[name]; present {
-				stringValue(p, field+"."+name, raw)
-			}
+// answerIDs reads an answer's id or ids attribute: exactly one of them, ids
+// being space-separated positive numbers without repeats.
+func answerIDs(p *problems, cmd command) []int {
+	_, hasID := cmd.attr("id")
+	raw, hasIDs := cmd.attr("ids")
+	switch {
+	case hasID && hasIDs:
+		p.add("%s: takes id or ids, not both", cmd.label())
+		return nil
+	case hasID:
+		if id, ok := intAttr(p, cmd, "id", true); ok {
+			return []int{id}
 		}
+		return nil
+	case !hasIDs:
+		p.add("%s: id (or ids) required", cmd.label())
+		return nil
+	}
+	var ids []int
+	seen := map[int]bool{}
+	for _, tok := range strings.Fields(raw) {
+		id, err := strconv.Atoi(tok)
+		if err != nil || id < 1 {
+			p.add("%s: %q is not a positive number", cmd.at("ids"), tok)
+			continue
+		}
+		if seen[id] {
+			p.add("%s: %s is listed twice", cmd.at("ids"), FormatID(id))
+			continue
+		}
+		seen[id] = true
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 && len(strings.Fields(raw)) == 0 {
+		p.add("%s: must list at least one id", cmd.at("ids"))
+	}
+	return ids
+}
+
+// patchClearValues are the list fields a patch's clear attribute empties.
+var patchClearValues = []string{"options", "links"}
+
+func applyPatch(p *problems, work *State, cmd command, mark int) {
+	before := len(p.list)
+	idx := -1
+	if id, ok := intAttr(p, cmd, "id", true); ok {
+		if idx = work.index(id); idx < 0 {
+			p.add("%s: %s is not in the store", cmd.at("id"), FormatID(id))
+		}
+	}
+	f := readItemFields(p, cmd)
+	status := ""
+	if _, present := cmd.attr("status"); present {
+		status, _ = enumAttr(p, cmd, "status", patchStatusValues)
+	}
+	clear := map[string]bool{}
+	if raw, present := cmd.attr("clear"); present {
+		for _, tok := range strings.Fields(raw) {
+			if !slices.Contains(patchClearValues, tok) {
+				p.add("%s: must name %s; got %q", cmd.at("clear"), strings.Join(patchClearValues, " or "), tok)
+				continue
+			}
+			clear[tok] = true
+		}
+	}
+	if clear["options"] && f.hasOptions {
+		p.add("%s: clear=\"options\" and <wb:option> fields contradict each other", cmd.label())
+	}
+	if clear["links"] && f.hasLinks {
+		p.add("%s: clear=\"links\" and <wb:link> fields contradict each other", cmd.label())
+	}
+	if idx < 0 {
 		return
 	}
-	before := len(p.list)
 	next := work.Items[idx]
-	if raw, present := entry["title"]; present {
-		if title, ok := requiredString(p, field+".title", raw); ok {
-			next.Title = title
-		}
+	if f.title != nil && nonEmpty(p, cmd.at("<wb:title>"), *f.title) {
+		next.Title = *f.title
 	}
-	if raw, present := entry["options"]; present {
+	if f.hasOptions || clear["options"] {
 		if next.Status != StatusOpen {
-			p.add("%s.options: %s is %s; options change only on an open item, since its answer is stored as an option letter", field, FormatID(next.ID), next.Status)
+			p.add("%s: %s is %s; options change only on an open item, since its answer is stored as an option letter", cmd.at("<wb:option>"), FormatID(next.ID), next.Status)
 		} else {
-			next.Options = optionList(p, field+".options", raw)
+			next.Options = f.options
 		}
 	}
-	if raw, present := entry["recommendation"]; present {
-		next.Recommendation, _ = stringValue(p, field+".recommendation", raw)
+	if f.recommend != nil {
+		next.Recommendation = *f.recommend
 	}
-	if raw, present := entry["rationale"]; present {
-		next.Rationale, _ = stringValue(p, field+".rationale", raw)
+	if f.why != nil {
+		next.Rationale = *f.why
 	}
-	if raw, present := entry["links"]; present {
-		next.Links = stringList(p, field+".links", raw)
+	if f.hasLinks || clear["links"] {
+		next.Links = f.links
 	}
-	status := ""
-	if raw, present := entry["status"]; present {
-		status, _ = requiredEnum(p, field+".status", raw, patchStatusValues)
-	}
-	checkPolicyShape(p, field, next)
+	checkPolicyShape(p, cmd.label(), next)
 	if len(p.list) > before {
 		return
 	}
@@ -556,36 +657,82 @@ func applyPatch(p *problems, work *State, field string, entry map[string]any, ma
 	work.Items[idx] = next
 }
 
+// applyTopic replaces a topic's body whole; an empty (or blank) body clears
+// it. The same body again is no change.
+func applyTopic(p *problems, work *State, cmd command, mark int) {
+	name, ok := requiredAttr(p, cmd, "name")
+	if !ok {
+		return
+	}
+	body := cmd.body
+	if strings.TrimSpace(body) == "" {
+		work.clearTopicBody(name)
+		return
+	}
+	if fullDocument(body) {
+		p.add("%s: a topic body takes markdown with inline HTML, not a full document (found <!DOCTYPE or <html)", cmd.label())
+		return
+	}
+	work.setTopicBody(name, body, mark)
+}
+
+// applyEdit replaces one exact match of old in a topic's body with new, or
+// every match with replace_all="true".
+func applyEdit(p *problems, work *State, cmd command, mark int) {
+	name, nameOK := requiredAttr(p, cmd, "topic")
+	all, _ := boolAttr(p, cmd, "replace_all")
+	old, hasOld := cmd.single(p, "wb:old")
+	repl, hasNew := cmd.single(p, "wb:new")
+	if !hasOld {
+		p.add("%s: required", cmd.at("<wb:old>"))
+	} else if old == "" {
+		p.add("%s: must be non-empty", cmd.at("<wb:old>"))
+	}
+	if !hasNew {
+		p.add("%s: required (empty deletes the match)", cmd.at("<wb:new>"))
+	}
+	if !nameOK || !hasOld || old == "" || !hasNew {
+		return
+	}
+	i := work.topicDocIndex(name)
+	if i < 0 {
+		p.add("%s: topic %q has no body; set one with <wb:topic>", cmd.label(), name)
+		return
+	}
+	body := work.Topics[i].Body
+	switch n := strings.Count(body, old); {
+	case n == 0:
+		p.add("%s: <wb:old> matches nothing in topic %q's body", cmd.label(), name)
+		return
+	case n > 1 && !all:
+		p.add("%s: <wb:old> matches %d places in topic %q's body; widen it to one or set replace_all=\"true\"", cmd.label(), n, name)
+		return
+	}
+	next := strings.ReplaceAll(body, old, repl)
+	if strings.TrimSpace(next) == "" {
+		work.clearTopicBody(name)
+		return
+	}
+	if fullDocument(next) {
+		p.add("%s: the edited body would hold a full document (found <!DOCTYPE or <html)", cmd.label())
+		return
+	}
+	work.setTopicBody(name, next, mark)
+}
+
 // checkPolicyShape checks what a policy item's options and recommendation
 // must satisfy.
-func checkPolicyShape(p *problems, field string, item Item) {
+func checkPolicyShape(p *problems, label string, item Item) {
 	if item.Recommendation == "" {
 		return
 	}
 	if len(item.Options) == 0 {
-		p.add("%s.recommendation: names an option letter, so it needs options", field)
+		p.add("%s <wb:recommend>: names an option letter, so it needs options", label)
 		return
 	}
 	if optionLetter(item.Recommendation, len(item.Options)) == "" {
-		p.add("%s.recommendation: starts with its option letter (%s), optionally followed by \": <why>\"; got %q", field, letterRange(len(item.Options)), item.Recommendation)
+		p.add("%s <wb:recommend>: starts with its option letter (%s), optionally followed by \": <why>\"; got %q", label, letterRange(len(item.Options)), item.Recommendation)
 	}
-}
-
-func lookupItem(p *problems, work *State, field string, entry map[string]any) int {
-	raw, present := entry["id"]
-	if !present {
-		p.add("%s.id: required", field)
-		return -1
-	}
-	id, ok := intValue(p, field+".id", raw)
-	if !ok {
-		return -1
-	}
-	idx := work.index(id)
-	if idx < 0 {
-		p.add("%s.id: %s is not in the store", field, FormatID(id))
-	}
-	return idx
 }
 
 // OptionLetterFor returns the letter of the option at index i (a, b, c...).
@@ -634,13 +781,16 @@ func letterRange(count int) string {
 
 // --- query ---------------------------------------------------------------
 
+var queryFields = []string{"topic", "status", "id"}
+
 // Query returns the items matching payload's filters, archived settled items
-// included, in ID order.
-func Query(state *State, payload any) ([]Item, []string) {
+// included, in ID order, and, when payload names a topic, that topic's body
+// ("" when it has none), so a lead can quote it exactly in a wb:edit.
+func Query(state *State, payload any) ([]Item, string, []string) {
 	p := &problems{}
 	obj, ok := payloadObject(p, payload)
 	if !ok {
-		return nil, p.list
+		return nil, "", p.list
 	}
 	checkKnownFields(p, "payload", obj, queryFields)
 	topic, status, id := "", "", 0
@@ -654,10 +804,10 @@ func Query(state *State, payload any) ([]Item, []string) {
 		id, _ = intValue(p, "payload.id", raw)
 	}
 	if len(p.list) > 0 {
-		return nil, p.list
+		return nil, "", p.list
 	}
 	if state == nil {
-		return nil, nil
+		return nil, "", nil
 	}
 	var out []Item
 	for _, item := range state.Items {
@@ -667,16 +817,25 @@ func Query(state *State, payload any) ([]Item, []string) {
 		out = append(out, item)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out, nil
+	body := ""
+	if topic != "" {
+		body = state.TopicBody(topic)
+	}
+	return out, body, nil
 }
 
-// FormatItems renders query results as compact text, one header line per
-// item and an indented line per non-empty detail.
-func FormatItems(items []Item) string {
-	if len(items) == 0 {
-		return "no matching items\n"
-	}
+// FormatItems renders query results as compact text: a topic body first,
+// between marker lines, then one header line per item and an indented line
+// per non-empty detail.
+func FormatItems(items []Item, body string) string {
 	var sb strings.Builder
+	if body != "" {
+		sb.WriteString("topic body:\n<<<\n" + body + "\n>>>\n")
+	}
+	if len(items) == 0 {
+		sb.WriteString("no matching items\n")
+		return sb.String()
+	}
 	for _, item := range items {
 		fmt.Fprintf(&sb, "%s [%s] [%s] %s: %s\n", FormatID(item.ID), item.Status, item.Class, item.Topic, item.Title)
 		for i, option := range item.Options {
@@ -701,7 +860,7 @@ func FormatItems(items []Item) string {
 	return sb.String()
 }
 
-// --- payload parsing -----------------------------------------------------
+// --- problems and value checks -------------------------------------------
 
 type problems struct {
 	list []string
@@ -743,64 +902,6 @@ func checkKnownFields(p *problems, field string, obj map[string]any, known []str
 	for _, name := range unknown {
 		p.add("%s.%s: unknown field (known: %s)", field, name, strings.Join(known, ", "))
 	}
-}
-
-// objectList returns the entries of an array-of-objects field, reporting a
-// type-accurate problem for anything else. Entries that are not objects are
-// reported and skipped.
-func objectList(p *problems, field string, raw any) []map[string]any {
-	if raw == nil {
-		return nil
-	}
-	list, ok := raw.([]any)
-	if !ok {
-		p.add("%s: must be an array of objects; got %s%s", field, typeName(raw), encodedHint(raw))
-		return nil
-	}
-	out := make([]map[string]any, 0, len(list))
-	for i, entry := range list {
-		obj, ok := entry.(map[string]any)
-		if !ok {
-			p.add("%s[%d]: must be an object; got %s%s", field, i, typeName(entry), encodedHint(entry))
-			continue
-		}
-		out = append(out, obj)
-	}
-	return out
-}
-
-func stringList(p *problems, field string, raw any) []string {
-	if raw == nil {
-		return nil
-	}
-	list, ok := raw.([]any)
-	if !ok {
-		p.add("%s: must be an array of strings; got %s%s", field, typeName(raw), encodedHint(raw))
-		return nil
-	}
-	out := make([]string, 0, len(list))
-	for i, entry := range list {
-		s, ok := entry.(string)
-		if !ok {
-			p.add("%s[%d]: must be a string; got %s", field, i, typeName(entry))
-			continue
-		}
-		out = append(out, s)
-	}
-	return out
-}
-
-func optionList(p *problems, field string, raw any) []string {
-	options := stringList(p, field, raw)
-	for i, option := range options {
-		if strings.TrimSpace(option) == "" {
-			p.add("%s[%d]: must be a non-empty string", field, i)
-		}
-	}
-	if len(options) > 26 {
-		p.add("%s: at most 26 options (a-z); got %d", field, len(options))
-	}
-	return options
 }
 
 func stringValue(p *problems, field string, raw any) (string, bool) {
@@ -855,24 +956,6 @@ func intValue(p *problems, field string, raw any) (int, bool) {
 	return int(n), true
 }
 
-func boolValue(p *problems, field string, raw any) (bool, bool) {
-	b, ok := raw.(bool)
-	if !ok {
-		p.add("%s: must be a boolean; got %s", field, typeName(raw))
-		return false, false
-	}
-	return b, true
-}
-
-// encodedHint adds the remedy for the commonest host mistake: an array or
-// object passed as its JSON encoding.
-func encodedHint(raw any) string {
-	if _, ok := raw.(string); ok {
-		return " (pass the value itself, not a JSON-encoded string)"
-	}
-	return ""
-}
-
 // typeName names a decoded JSON value's type for a type-accurate message.
 func typeName(value any) string {
 	switch value.(type) {
@@ -891,4 +974,69 @@ func typeName(value any) string {
 	default:
 		return fmt.Sprintf("%T", value)
 	}
+}
+
+// nonEmpty reports whether s holds non-blank text, recording a problem when not.
+func nonEmpty(p *problems, label, s string) bool {
+	if strings.TrimSpace(s) == "" {
+		p.add("%s: must be non-empty", label)
+		return false
+	}
+	return true
+}
+
+// requiredAttr returns a command's non-blank attribute.
+func requiredAttr(p *problems, cmd command, name string) (string, bool) {
+	v, present := cmd.attr(name)
+	if !present {
+		p.add("%s: required", cmd.at(name))
+		return "", false
+	}
+	return v, nonEmpty(p, cmd.at(name), v)
+}
+
+func enumAttr(p *problems, cmd command, name string, values []string) (string, bool) {
+	v, ok := requiredAttr(p, cmd, name)
+	if !ok {
+		return "", false
+	}
+	if !slices.Contains(values, v) {
+		p.add("%s: must be one of %s; got %q", cmd.at(name), strings.Join(values, ", "), v)
+		return "", false
+	}
+	return v, true
+}
+
+// intAttr returns a command's positive whole-number attribute; required
+// records a problem when it is absent.
+func intAttr(p *problems, cmd command, name string, required bool) (int, bool) {
+	v, present := cmd.attr(name)
+	if !present {
+		if required {
+			p.add("%s: required", cmd.at(name))
+		}
+		return 0, false
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil || n < 1 {
+		p.add("%s: must be a positive whole number; got %q", cmd.at(name), v)
+		return 0, false
+	}
+	return n, true
+}
+
+// boolAttr returns a command's "true"/"false" attribute, false when absent.
+func boolAttr(p *problems, cmd command, name string) (bool, bool) {
+	v, present := cmd.attr(name)
+	if !present {
+		return false, true
+	}
+	switch v {
+	case "true":
+		return true, true
+	case "false":
+		return false, true
+	}
+	p.add("%s: must be \"true\" or \"false\"; got %q", cmd.at(name), v)
+	return false, false
 }
