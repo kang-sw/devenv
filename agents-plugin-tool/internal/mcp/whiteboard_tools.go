@@ -263,6 +263,9 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any)
 	}
 	sb.WriteString("full: " + full + "\n")
 	sb.WriteString("embed: " + render.embed + "\n")
+	if err := s.enableWhiteboardKnobForSession(key); err != nil {
+		sb.WriteString("warning: " + err.Error() + "\n")
+	}
 	return toolTextResponse(id, sb.String(), nil)
 }
 
@@ -698,4 +701,40 @@ func (s *Server) whiteboardEnabled(resolver *wsconfig.Resolver, sessionKey strin
 		return false, fmt.Errorf("resolve %s: %w", wsconfig.ItemWorkflowWhiteboardEnabled, err)
 	}
 	return strings.ToLower(strings.TrimSpace(rv.Value)) == whiteboardOnValue, nil
+}
+
+// enableWhiteboardKnobForSession turns workflow.whiteboard_enabled on at
+// session scope after a successful whiteboard.update, so a session that
+// started using the board keeps the manual's whiteboard mandate (revive
+// included) when the knob resolves off. It writes what config.tune with scope
+// session writes: the session's harness bucket. A session-scope value for the
+// harness's read buckets or the bare key is the session's own choice and is
+// left alone, so an explicit session off stands. Callers reach it only past
+// the top-level-lead gate on the whiteboard tools.
+func (s *Server) enableWhiteboardKnobForSession(sessionKey string) error {
+	resolver := s.sessionResolver(sessionKey, builtinConfigDefaults())
+	on, err := s.whiteboardEnabled(&resolver, sessionKey)
+	if err != nil {
+		return fmt.Errorf("whiteboard knob not enabled: %w", err)
+	}
+	if on {
+		return nil
+	}
+	harness := s.currentHarness()
+	buckets := harnessBucketReadOrder(harness)
+	storeKeys := []string{wsconfig.ItemWorkflowWhiteboardEnabled}
+	for _, bucket := range buckets {
+		storeKeys = append(storeKeys, harnessBucketKey(wsconfig.ItemWorkflowWhiteboardEnabled, bucket))
+	}
+	for _, storeKey := range storeKeys {
+		if value, ok := s.sessions.getOverride(sessionKey, storeKey); ok && strings.TrimSpace(value) != "" {
+			return nil
+		}
+	}
+	err = resolver.Set(harnessBucketKey(wsconfig.ItemWorkflowWhiteboardEnabled, buckets[0]), whiteboardOnValue,
+		wsconfig.SetOptions{ExplicitScope: wsconfig.ScopeSession, SessionKey: sessionKey})
+	if err != nil {
+		return fmt.Errorf("whiteboard knob not enabled: %w", err)
+	}
+	return nil
 }
