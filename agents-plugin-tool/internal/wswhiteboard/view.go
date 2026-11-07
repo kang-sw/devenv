@@ -368,7 +368,19 @@ func BuildView(state *State, in ViewInput) View {
 			view.Answerable = true
 		}
 	}
-	sort.SliceStable(order, func(i, j int) bool { return rank(blocks[order[i]]) < rank(blocks[order[j]]) })
+	// Within one rank, the topic touched most recently rises; equal activity
+	// keeps first-appearance order (the stable sort).
+	activity := map[string]int{}
+	for _, item := range state.Items {
+		activity[item.Topic] = max(activity[item.Topic], item.Changed)
+	}
+	sort.SliceStable(order, func(i, j int) bool {
+		ri, rj := rank(blocks[order[i]]), rank(blocks[order[j]])
+		if ri != rj {
+			return ri < rj
+		}
+		return activity[order[i]] > activity[order[j]]
+	})
 	for _, name := range order {
 		view.Topics = append(view.Topics, *blocks[name])
 	}
