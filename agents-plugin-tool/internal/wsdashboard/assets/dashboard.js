@@ -1,9 +1,11 @@
 (function () {
   // The dashboard page script, shared by / and /s/<reply-id>. The server
   // renders every region; this script only swaps a region when an SSE event
-  // names it, keeps the browser-side view state across swaps (open details,
-  // scroll offsets, board answers, layout and tab), and formats times. It
-  // never builds region HTML itself.
+  // names it (or, for the conversation entries, merges it by entry name),
+  // loads older conversation entries when scrolled to the top, keeps the
+  // browser-side view state across swaps (open details, scroll offsets,
+  // board answers, layout and tab), and formats times. It never builds
+  // region HTML itself.
   var doc = document, root = doc.documentElement;
   function q(sel, el) { return Array.prototype.slice.call((el || doc).querySelectorAll(sel)); }
   function $(id) { return doc.getElementById(id); }
@@ -62,19 +64,21 @@
     var k = openKey(d);
     if (k) openState[k] = d.open;
   }, true);
+  function restoreOpenOne(d) {
+    if (isPeer(d)) { d.open = load(PEER_KEY + d.getAttribute("data-peer")) === "1"; return; }
+    var k = openKey(d);
+    if (k && Object.prototype.hasOwnProperty.call(openState, k)) d.open = openState[k];
+  }
   function restoreOpen(el) {
-    q("details", el).forEach(function (d) {
-      if (isPeer(d)) { d.open = load(PEER_KEY + d.getAttribute("data-peer")) === "1"; return; }
-      var k = openKey(d);
-      if (k && Object.prototype.hasOwnProperty.call(openState, k)) d.open = openState[k];
-    });
+    if (el.tagName === "DETAILS") restoreOpenOne(el);
+    q("details", el).forEach(restoreOpenOne);
   }
 
   // --- scroll offsets -------------------------------------------------------
   // The panes that scroll on their own; the page itself scrolls on / and on
   // the board-first page. A pane hidden by the tabs view loses its offset, so
   // each pane's last visible offset is kept and put back when it shows again.
-  var PANES = ["bcol", "r-tree", "r-conversation"];
+  var PANES = ["bcol", "r-tree", "convo"];
   var paneScroll = {};
   PANES.forEach(function (id) {
     var el = $(id);
@@ -88,8 +92,10 @@
   }
   function restoreScroll(s) { s.forEach(function (p) { if (p[0].scrollTop !== p[1]) p[0].scrollTop = p[1]; }); }
 
-  // The conversation stays at the bottom while the user has it there.
-  var convo = region("conversation"), stick = true;
+  // The conversation stays at the bottom while the user has it there. Its
+  // two regions (entries, convlive) scroll together inside #convo, which
+  // owns the scroll and the pin.
+  var convo = $("convo"), stick = true;
   function atBottom() { return convo.scrollTop + convo.clientHeight >= convo.scrollHeight - 24; }
   function pinned() { if (visible(convo)) stick = atBottom(); return stick; }
   function pinConvo() { if (stick && visible(convo)) convo.scrollTop = convo.scrollHeight; }
@@ -105,8 +111,8 @@
   var LAYOUT_KEY = "ws.dashboard.layout";
   // TAB maps a region to the tab that shows it; PANE names the element whose
   // visibility tells whether a tab is shown in the current view.
-  var TAB = { tree: "convo", conversation: "convo", board: "board", panels: "board" };
-  var PANE = { convo: "r-conversation", board: "bcol" };
+  var TAB = { tree: "convo", entries: "convo", convlive: "convo", board: "board", panels: "board" };
+  var PANE = { convo: "convo", board: "bcol" };
   function tabShown(t) { return visible($(PANE[t])); }
   function tabDot(t) { var b = doc.querySelector('#tabbar [data-tab="' + t + '"]'); return b && b.querySelector(".tdot"); }
   function revealPanes() {
@@ -115,6 +121,7 @@
       if (visible(el) && Object.prototype.hasOwnProperty.call(paneScroll, id)) el.scrollTop = paneScroll[id];
     });
     pinConvo();
+    nearTop(); // a conversation shown too short to scroll still loads older entries
     Object.keys(PANE).forEach(function (t) { var d = tabDot(t); if (d && tabShown(t)) d.classList.remove("on"); });
   }
   function setLayout(v) {
@@ -140,7 +147,7 @@
   // panes divide (their span less the splitter), with the same pixel floors
   // the stylesheet sets.
   function shareAt(y) {
-    var t = $("r-tree"), c = $("r-conversation");
+    var t = $("r-tree"), c = $("convo");
     if (!visible(t) || !visible(c) || !splitter) return null;
     var top = t.getBoundingClientRect().top, room = c.getBoundingClientRect().bottom - top - splitter.offsetHeight;
     if (room <= 0) return null;
@@ -185,8 +192,8 @@
   // a line. The placeholder tells which one is on.
   var INPUT_KEY = "ws.dashboard.input", inputMode = "enter";
   var HINT = {
-    enter: "Message this session. Enter sends, Shift+Enter adds a line. Board answers attach.",
-    mod: "Message this session. Ctrl/Cmd+Enter sends, Enter adds a line. Board answers attach."
+    enter: "Message this session. Enter sends, Shift+Enter adds a line. Board answers and pasted images attach.",
+    mod: "Message this session. Ctrl/Cmd+Enter sends, Enter adds a line. Board answers and pasted images attach."
   };
   function setInput(v) {
     inputMode = v === "mod" ? "mod" : "enter";
@@ -271,13 +278,16 @@
     if (el.getAttribute("data-h") === hash) { if (board) deferred = null; return; }
     if (board && editing()) { deferred = { hash: hash, html: html }; return; }
     if (board) deferred = null;
-    var pin = name === "conversation" && pinned();
+    var pin = (name === "entries" || name === "convlive") && pinned();
     var scroll = scrollState();
     var answers = board ? readAnswers(el) : null;
-    el.innerHTML = html;
+    if (name === "entries") mergeEntriesRegion(el, html);
+    else {
+      el.innerHTML = html;
+      restoreOpen(el);
+      fmtTimes(el);
+    }
     el.setAttribute("data-h", hash);
-    restoreOpen(el);
-    fmtTimes(el);
     if (board) {
       writeAnswers(el, answers);
       if (window.wbForm) window.wbForm();
@@ -285,7 +295,7 @@
       syncChips();
       syncNote();
     }
-    if (board || name === "conversation") applySent();
+    if (board || name === "convlive") applySent();
     restoreScroll(scroll);
     if (pin) pinConvo();
     if (live && TAB[name] && !tabShown(TAB[name])) {
@@ -293,6 +303,85 @@
       if (dot) dot.classList.add("on");
     }
   }
+
+  // --- conversation entries: merged by key, never re-rendered ----------------
+  // Each entry element carries data-entry, its ring entry name; names sort in
+  // time order. Only the entries container is searched: held bubbles in the
+  // convlive region carry data-entry too (their inbox id) and are not
+  // entries.
+  function entriesBox() { var r = region("entries"); return r && r.querySelector(".centries"); }
+  function frag(html) { var t = doc.createElement("template"); t.innerHTML = html; return t.content; }
+  // mergeEntries inserts each node of src whose name box lacks at its sorted
+  // place and returns how many it inserted; an entry already shown is kept
+  // as it is.
+  function mergeEntries(box, src) {
+    var have = {}, added = 0;
+    Array.prototype.forEach.call(box.children, function (c) { have[c.getAttribute("data-entry")] = true; });
+    Array.prototype.slice.call(src.children).forEach(function (n) {
+      var k = n.getAttribute("data-entry");
+      if (!k || have[k]) return;
+      // New entries are usually the newest (live) or the oldest (history),
+      // so walk back from the end only past entries that sort after k.
+      var c = box.lastElementChild;
+      while (c && (c.getAttribute("data-entry") || "") > k) c = c.previousElementSibling;
+      box.insertBefore(n, c ? c.nextSibling : box.firstChild);
+      have[k] = true;
+      added++;
+      restoreOpen(n);
+      fmtTimes(n);
+    });
+    return added;
+  }
+  // mergeEntriesRegion applies an entries region event: the title bar (its
+  // counts) is replaced, and the entries are merged.
+  function mergeEntriesRegion(el, html) {
+    var src = frag(html), box = entriesBox(), head = el.querySelector(".thead"), nhead = src.querySelector(".thead");
+    var nbox = src.querySelector(".centries");
+    if (!box || !nbox) { el.innerHTML = html; restoreOpen(el); fmtTimes(el); return; }
+    if (head && nhead) { head.parentNode.replaceChild(nhead, head); fmtTimes(nhead); }
+    mergeEntries(box, nbox);
+  }
+
+  // --- older history: loaded a page at a time when scrolled to the top -------
+  // The region draws the newest entries; older ones come from the history
+  // route, are prepended with the scroll position kept, and are never
+  // evicted. histBefore is the next page's cursor ("" asks for the newest
+  // page, so a page that drew no entries can still start loading).
+  var histBefore = null, histEnd = false, histBusy = false;
+  function loadHistory() {
+    if (histEnd || histBusy || !window.fetch || !convo || !visible(convo)) return;
+    var box = entriesBox();
+    if (!box) return;
+    if (histBefore === null) {
+      var first = box.firstElementChild;
+      histBefore = first ? first.getAttribute("data-entry") || "" : "";
+    }
+    histBusy = true;
+    var url = "/s/" + rid + "/history?n=50" + (histBefore ? "&before=" + encodeURIComponent(histBefore) : "");
+    fetch(url, { credentials: "same-origin", cache: "no-store" }).then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    }).then(function (res) {
+      histBusy = false;
+      var h = convo.scrollHeight, top = convo.scrollTop;
+      mergeEntries(box, frag(res.html || ""));
+      // Keep what the user was reading in place: the prepended height goes
+      // above the scroll offset.
+      convo.scrollTop = top + (convo.scrollHeight - h);
+      if (res.before) histBefore = res.before;
+      if (res.end || !res.before) histEnd = true;
+      nearTop();
+    }, function () {
+      // A failed fetch (daemon replaced, network) is retried on the next
+      // scroll to the top, after a pause.
+      setTimeout(function () { histBusy = false; }, 3000);
+    });
+  }
+  // nearTop loads older entries when the conversation is scrolled to (or
+  // too short to scroll away from) its top.
+  function nearTop() { if (convo && visible(convo) && convo.scrollTop < 160) loadHistory(); }
+  if (convo) convo.addEventListener("scroll", nearTop);
+
   function mermaid() {
     if (!q("pre.mermaid:not([data-processed])").length || !window.wbMermaidFile) return;
     if (window.mermaid) { window.wbMermaid(); return; }
@@ -418,16 +507,115 @@
       });
     }, function () { done(false, "the dashboard is not reachable"); });
   }
+  // --- composer images -------------------------------------------------------
+  // A pasted or dropped image is a thumbnail chip held in the page and
+  // uploaded only with the send, so an abandoned paste never touches disk. A
+  // chip a cancel returned has a ref instead of data: the file the daemon
+  // already wrote, which a re-send names rather than uploads again.
+  var cimgs = $("cimgs"), imgs = [];
+  var IMG_TYPES = { "image/png": 1, "image/jpeg": 1, "image/gif": 1, "image/webp": 1 };
+  var IMG_MAX = 8, IMG_BYTES = 10 * 1024 * 1024;
+  function attachSrc(name) { return "/s/" + rid + "/attachment/" + encodeURIComponent(name); }
+  function addFiles(files) {
+    var refused = "";
+    files.forEach(function (f) {
+      if (!IMG_TYPES[f.type]) { refused = (f.name || "the file") + " is not a PNG, JPEG, GIF, or WebP image"; return; }
+      if (f.size > IMG_BYTES) { refused = (f.name || "the image") + " is larger than 10 MiB"; return; }
+      if (imgs.length >= IMG_MAX) { refused = "a message holds at most " + IMG_MAX + " images"; return; }
+      var it = { name: f.name || "pasted image", url: URL.createObjectURL(f), data: null, ref: "" };
+      imgs.push(it);
+      var rd = new FileReader();
+      rd.onload = function () { var v = String(rd.result); it.data = v.slice(v.indexOf(",") + 1); };
+      rd.onerror = function () { dropImg(it); renderImgs(); syncNote("Could not read " + it.name + "."); };
+      rd.readAsDataURL(f);
+    });
+    renderImgs();
+    syncNote(refused ? "Not attached: " + refused + "." : "");
+  }
+  function dropImg(it) {
+    var i = imgs.indexOf(it);
+    if (i < 0) return;
+    imgs.splice(i, 1);
+    if (!it.ref) URL.revokeObjectURL(it.url);
+  }
+  function renderImgs() {
+    if (!cimgs) return;
+    cimgs.textContent = "";
+    imgs.forEach(function (it, i) {
+      var el = doc.createElement("span"), im = doc.createElement("img"), x = doc.createElement("button");
+      el.className = "ichip";
+      im.src = it.url;
+      im.alt = it.name;
+      el.title = it.name;
+      el.appendChild(im);
+      x.className = "unimg";
+      x.setAttribute("data-unimg", String(i));
+      x.title = "remove this image";
+      x.textContent = "×";
+      el.appendChild(x);
+      cimgs.appendChild(el);
+    });
+  }
+  // imageFiles is the image files a clipboard or drop carries.
+  function imageFiles(dt) {
+    var out = [];
+    if (!dt) return out;
+    if (dt.items && dt.items.length) {
+      Array.prototype.forEach.call(dt.items, function (item) {
+        if (item.kind !== "file") return;
+        var f = item.getAsFile();
+        if (f) out.push(f);
+      });
+    } else if (dt.files) {
+      out = Array.prototype.slice.call(dt.files);
+    }
+    return out;
+  }
+  var composer = $("composer");
+  if (ctext && cimgs && composer) {
+    ctext.addEventListener("paste", function (e) {
+      var files = imageFiles(e.clipboardData).filter(function (f) { return f.type.indexOf("image/") === 0; });
+      if (!files.length) return;
+      // A paste that carries text as well (a copied web page) still pastes
+      // its text; a screenshot carries only the image.
+      var types = Array.prototype.slice.call(e.clipboardData.types || []);
+      if (types.indexOf("text/plain") < 0) e.preventDefault();
+      addFiles(files);
+    });
+    var hasFiles = function (e) { return e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], "Files") >= 0; };
+    composer.addEventListener("dragover", function (e) {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      composer.classList.add("drop");
+    });
+    composer.addEventListener("dragleave", function (e) {
+      if (!composer.contains(e.relatedTarget)) composer.classList.remove("drop");
+    });
+    composer.addEventListener("drop", function (e) {
+      composer.classList.remove("drop");
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      addFiles(imageFiles(e.dataTransfer));
+      ctext.focus();
+    });
+  }
   var sending = false;
   function sendMessage() {
     if (sending) return;
-    var t = ctext.value.trim(), list = chipList();
-    if (!t && !list.length) { syncNote("Nothing to send: write a message or answer the board."); return; }
+    var t = ctext.value.trim(), list = chipList(), pics = imgs.slice();
+    if (!t && !list.length && !pics.length) { syncNote("Nothing to send: write a message, answer the board, or attach an image."); return; }
+    if (pics.some(function (p) { return !p.ref && p.data === null; })) { syncNote("Still reading an image: send again in a moment."); return; }
+    var body = { text: t, chips: list };
+    var up = pics.filter(function (p) { return !p.ref; }), refs = pics.filter(function (p) { return !!p.ref; });
+    if (up.length) body.images = up.map(function (p) { return { name: p.name, data: p.data }; });
+    if (refs.length) body.refs = refs.map(function (p) { return p.ref; });
     sending = true;
-    post("message", { text: t, chips: list }, function (ok, res) {
+    post("message", body, function (ok, res) {
       sending = false;
       if (!ok) { syncNote("Not sent: " + res); return; }
       if (ctext.value.trim() === t) { ctext.value = ""; grow(); }
+      pics.forEach(dropImg);
+      renderImgs();
       // Compare by value: a board event during the send, or clearing one
       // card, re-reads the chips into new objects. Drop every sent chip
       // before clearing any card, since clearing one re-syncs the rest.
@@ -448,12 +636,17 @@
       // A chip attached since keeps its newer answer.
       (res.chips || []).forEach(function (c) { if (!chips[c.id]) { putChip(c); setItem(c.id, c); } });
       renderChips();
+      // Its images come back as chips that reference the written files.
+      (res.images || []).forEach(function (n) {
+        if (!imgs.some(function (p) { return p.ref === n; })) imgs.push({ name: n, url: attachSrc(n), data: null, ref: n });
+      });
+      renderImgs();
       syncNote("Cancelled: the message is back in the composer.");
       ctext.focus();
     });
   }
   // steerHeld promotes a held message to steering: the session receives it
-  // at its next tool call instead of when its turn ends. The conversation
+  // at its next tool call instead of when its turn ends. The convlive
   // region's next swap shows the steer marker in place of the button.
   function steerHeld(btn) {
     btn.disabled = true;
@@ -511,9 +704,11 @@
     if (cnote && t.closest("#r-board")) { syncChips(); syncNote(); }
     var u = t.closest("[data-unchip]");
     if (u) { var uid = u.getAttribute("data-unchip"); dropChip(uid); setItem(uid, null); renderChips(); syncNote(); return; }
-    u = t.closest("#r-conversation [data-cancel]");
+    u = t.closest("[data-unimg]");
+    if (u) { dropImg(imgs[+u.getAttribute("data-unimg")]); renderImgs(); syncNote(); return; }
+    u = t.closest("#r-convlive [data-cancel]");
     if (u) { if (!u.disabled) cancelHeld(u); return; }
-    u = t.closest("#r-conversation [data-steer]");
+    u = t.closest("#r-convlive [data-steer]");
     if (u) { if (!u.disabled) steerHeld(u); return; }
     if (!live) return;
     var b = t.closest("#gmenu [data-input]");
@@ -570,7 +765,7 @@
   function modeChanged(next) {
     // The other mode has other regions, and a reload renders them; text typed
     // in the composer or answers picked on the board are never dropped for it.
-    if ((ctext && ctext.value) || boardAnswers()) {
+    if ((ctext && ctext.value) || boardAnswers() || imgs.length) {
       banner("The session's live state " + (next === "live" ? "appeared" : "went away") + ". Reload to update the layout.");
       return;
     }
@@ -589,5 +784,6 @@
   fmtTimes(doc);
   mermaid();
   pinConvo();
+  nearTop();
   connect();
 })();

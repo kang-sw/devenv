@@ -138,6 +138,22 @@ type Panel struct {
 	Rows  []PanelRow
 	// Folded rows render after Rows behind a closed "done N" fold.
 	Folded []PanelRow
+	// Lanes render before Rows as kanban lanes: side by side when the panel
+	// is wide enough, stacked otherwise. A lane's rows render as cards.
+	Lanes []PanelLane
+}
+
+// PanelLane is one kanban lane of a panel: a header and a vertical stack of
+// cards.
+type PanelLane struct {
+	Name string
+	// Count is the lane's card count chip; Note is a short muted remark
+	// after it (for example that the lane lists only the latest cards).
+	Count string
+	Note  string
+	// Rows render as cards: Label is the small chip, Text the clamped title,
+	// Sub the muted second line, and Link or Path as for a plain row.
+	Rows []PanelRow
 }
 
 // PanelRow is one line of a panel.
@@ -152,8 +168,10 @@ type PanelRow struct {
 	Link string
 	// Path is the row's file as text, shown after Text when the row has no
 	// Link: a served page lists a ticket by its repo-relative path instead
-	// of linking it.
+	// of linking it. A card shows it as a tooltip rather than as body text.
 	Path string
+	// Sub is a card's muted second line; plain rows ignore it.
+	Sub string
 }
 
 // ViewInput is what BuildView needs beyond the State.

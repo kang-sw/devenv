@@ -164,6 +164,9 @@ type ConversationView struct {
 	// answer, which the page marks on the item's card.
 	Held []HeldView
 	Sent []SentMark
+	// markdown renders a lead reply; an entry runs it only when the entry
+	// cache misses (renderEntries).
+	markdown func(string) template.HTML
 }
 
 // ConvEntry is one conversation ring entry as the page shows it.
@@ -175,8 +178,13 @@ type ConvEntry struct {
 	// At is the entry's time (epoch ms).
 	At int64
 	// HTML is a lead reply's text rendered as markdown; user messages, mail
-	// bodies, and turn lines stay plain text.
+	// bodies, and turn lines stay plain text. It is set only while the entry
+	// renders on an entry cache miss.
 	HTML template.HTML
+	// Images are a user message's attached images, taken out of its text.
+	Images []AttachmentView
+	// Rendered is the entry's whole element, from the entry cache.
+	Rendered template.HTML
 	// Body is a mail line's full message from the mailbox history; HasBody
 	// is false once the message has left that ring, and the line then shows
 	// only its first line.
@@ -197,8 +205,11 @@ type pageInputs struct {
 	// Held and Drained are the session's board-answer inbox: the messages
 	// sent from the page and not yet received, and the newest received ones.
 	Held, Drained []wsinbox.Record
-	Now           time.Time
-	Version       string
+	// AttachDir is the session's absolute inbox attachments directory: an
+	// image path inside it shows as a thumbnail.
+	AttachDir string
+	Now       time.Time
+	Version   string
 	// Lookup returns a session this daemon serves and its snapshot (nil when
 	// it has none).
 	Lookup func(replyID string) (Session, *wslive.Snapshot, bool)
@@ -250,7 +261,8 @@ func buildSessionView(in pageInputs) SessionView {
 	contacts := resolvedContacts(in.Page.Contacts, reg.ReplyID)
 	v.Tree.Peers = peerGroup(contacts, lookup, in.Now)
 	v.Conversation = conversation(in.Snapshot.Lead, in.Ring, in.Page.MailBodies, contacts, lookup, replyMarkdown(reg.Project, reg.ReplyID))
-	v.Conversation.Held = heldViews(in.Held)
+	userEntryImages(v.Conversation.Entries, in.AttachDir, reg.ReplyID)
+	v.Conversation.Held = heldViews(in.Held, in.AttachDir, reg.ReplyID)
 	v.Conversation.Sent = sentMarks(in.Drained, in.Held)
 	return v
 }
@@ -428,7 +440,8 @@ func replyMarkdown(root, replyID string) func(string) template.HTML {
 
 // conversation turns the ring into the page's stream: each mail line gets
 // its body while the mailbox history still holds it and a link to its peer's
-// page when this daemon serves the peer, and each lead reply its markdown.
+// page when this daemon serves the peer. A lead reply's markdown is left to
+// the entry render (renderEntries), which caches it.
 func conversation(lead wslive.Lead, ring []wslive.RingRecord, bodies map[string]string, contacts []Contact, lookup func(string) (Session, *wslive.Snapshot, bool), render func(string) template.HTML) ConversationView {
 	byAddress := map[string]string{}
 	for _, c := range contacts {
@@ -436,7 +449,7 @@ func conversation(lead wslive.Lead, ring []wslive.RingRecord, bodies map[string]
 			byAddress[c.Address] = c.ReplyID
 		}
 	}
-	cv := ConversationView{Reply: lead.Reply, Phase: lead.Phase, Permission: lead.Permission}
+	cv := ConversationView{Reply: lead.Reply, Phase: lead.Phase, Permission: lead.Permission, markdown: render}
 	if lead.Reply != nil {
 		cv.ReplyHTML = render(lead.Reply.Text)
 	}
@@ -446,8 +459,6 @@ func conversation(lead wslive.Lead, ring []wslive.RingRecord, bodies map[string]
 		switch r.Kind {
 		case wslive.RingUser:
 			cv.Users++
-		case wslive.RingReply:
-			e.HTML = render(r.Text)
 		case wslive.RingMail:
 			cv.Mails++
 			if r.HistoryKey != "" {

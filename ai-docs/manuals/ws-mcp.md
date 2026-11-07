@@ -128,9 +128,15 @@ then carry, so no rendered URL holds it. `/health` reports the mode as `lan`,
 and a `serve` whose global value differs from a same-version daemon's mode
 replaces it through the normal handoff.
 
-To restart a dev daemon after changing its code, `POST /shutdown` with
-`Authorization: Bearer <token from endpoint.json>`; the next `serve` starts a
-new one.
+At an equal version the newer build wins: `/health` reports `build_time` (the
+ws-mcp executable's mtime in Unix milliseconds, read from the original binary
+and passed to the daemon as `dashboard --build-time`), and a `serve` whose
+build time is newer than the daemon's (a daemon that omits it counts as older)
+replaces it; an older or unknown build time never does, so builds of one
+version side by side leave each other's newer daemon alone. A rebuilt dev
+binary therefore replaces the running daemon at the next `serve`. To force a
+restart anyway, `POST /shutdown` with `Authorization: Bearer <token from
+endpoint.json>`; the next `serve` starts a new one.
 
 ## Plugin-Managed Startup
 

@@ -20,8 +20,8 @@ const (
 	OutcomeRunning Outcome = "running"
 	// OutcomeStarted: no reachable daemon was running; a new one is up.
 	OutcomeStarted Outcome = "started"
-	// OutcomeReplaced: an older daemon, or one as new in the other LAN mode,
-	// was asked to stop and a new one is up.
+	// OutcomeReplaced: an older daemon, an older build of the same version,
+	// or one as new in the other LAN mode, was asked to stop and a new one is up.
 	OutcomeReplaced Outcome = "replaced"
 	// OutcomeUnavailable: no healthy daemon came up in time, for example
 	// because a hung daemon still holds the lock. Nothing was terminated.
@@ -44,6 +44,10 @@ type EnsureOptions struct {
 	// Version is this ws-mcp's version; a running daemon older than it is
 	// replaced.
 	Version string
+	// BuildTime is this ws-mcp's build time (ExecutableBuildTime); zero is
+	// unknown. It breaks a version tie: a daemon of the same version with an
+	// older (or no reported) build time is replaced.
+	BuildTime int64
 	// Port is the configured dashboard.port, passed to a started daemon as
 	// its --port flag.
 	Port int
@@ -67,11 +71,14 @@ type EnsureOptions struct {
 }
 
 // DaemonArgs is the ws-mcp argument list that starts a daemon on port, in
-// LAN mode when lan is set.
-func DaemonArgs(port int, lan bool) []string {
+// LAN mode when lan is set, reporting buildTime when it is known (non-zero).
+func DaemonArgs(port int, lan bool, buildTime int64) []string {
 	args := []string{"dashboard", "--port", strconv.Itoa(port)}
 	if lan {
 		args = append(args, "--lan")
+	}
+	if buildTime > 0 {
+		args = append(args, "--build-time", strconv.FormatInt(buildTime, 10))
 	}
 	return args
 }
@@ -80,8 +87,10 @@ func DaemonArgs(port int, lan bool) []string {
 //
 //   - A healthy newer daemon is left alone whatever its LAN mode, so an older
 //     ws-mcp never replaces a newer daemon; one as new is left alone when its
-//     LAN mode is opts.LAN.
-//   - A healthy older daemon, or one as new in the other LAN mode, gets the
+//     LAN mode is opts.LAN and, at the same version, its build time is not
+//     older than opts.BuildTime.
+//   - A healthy older daemon, one of the same version from an older build,
+//     or one as new in the other LAN mode, gets the
 //     token-authenticated shutdown request; then a new daemon is started,
 //     which waits for the old one to release the lock. So a changed LAN value
 //     applies at the next ws-mcp start, without waiting for an upgrade.
@@ -126,7 +135,7 @@ func Ensure(ctx context.Context, opts EnsureOptions) (Outcome, error) {
 					fmt.Fprintf(logw, "dashboard: older daemon %s refused shutdown: %v\n", info.Version, err)
 					return OutcomeRunning, nil
 				}
-				fmt.Fprintf(logw, "dashboard: replacing daemon %s (lan %v) with %s (lan %v)\n", info.Version, info.LAN, opts.Version, opts.LAN)
+				fmt.Fprintf(logw, "dashboard: replacing daemon %s (lan %v, build %d) with %s (lan %v, build %d)\n", info.Version, info.LAN, info.BuildTime, opts.Version, opts.LAN, opts.BuildTime)
 				replaced = true
 			default:
 				fmt.Fprintf(logw, "dashboard: recorded daemon unreachable (%v); starting one\n", err)
@@ -136,7 +145,7 @@ func Ensure(ctx context.Context, opts EnsureOptions) (Outcome, error) {
 			return OutcomeUnavailable, nil
 		}
 		spawns++
-		if err := opts.Spawn(DaemonArgs(opts.Port, opts.LAN)); err != nil {
+		if err := opts.Spawn(DaemonArgs(opts.Port, opts.LAN, opts.BuildTime)); err != nil {
 			return OutcomeUnavailable, fmt.Errorf("dashboard: start daemon: %w", err)
 		}
 		if !waitForSuccessor(ctx, client, opts, previous.Token) {
@@ -147,12 +156,15 @@ func Ensure(ctx context.Context, opts EnsureOptions) (Outcome, error) {
 
 // keepRunning reports whether the healthy daemon info describes may stay:
 // it is newer than this ws-mcp, or as new and in the LAN mode opts asks for.
+// At an equal version the newer build wins: a daemon whose build time is
+// older than opts.BuildTime (a missing one counts as older) is replaced, and
+// an unknown opts.BuildTime never replaces.
 func keepRunning(info HealthInfo, opts EnsureOptions) bool {
 	switch cmp := CompareVersions(info.Version, opts.Version); {
 	case cmp > 0:
 		return true
 	case cmp == 0:
-		return info.LAN == opts.LAN
+		return info.LAN == opts.LAN && (opts.BuildTime <= 0 || info.BuildTime >= opts.BuildTime)
 	}
 	return false
 }

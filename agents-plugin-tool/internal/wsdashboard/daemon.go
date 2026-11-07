@@ -52,6 +52,9 @@ type DaemonOptions struct {
 	LAN bool
 	// Version is reported by /health and written to the endpoint file.
 	Version string
+	// BuildTime is reported by /health (ExecutableBuildTime); zero is
+	// unknown and is omitted.
+	BuildTime int64
 	// LockWait bounds the wait for the single-instance lock; zero means
 	// DefaultLockWait.
 	LockWait time.Duration
@@ -92,11 +95,15 @@ type Daemon struct {
 	index    *Index
 	source   SessionSource
 	broker   *broker
+	// entries caches rendered conversation entries per session.
+	entries *entryCache
 	// inboxMu serializes the daemon's own inbox writes (sends and cancels).
 	inboxMu sync.Mutex
 	// lan is LAN mode; tokenMu serializes reading and minting the LAN token.
 	lan     bool
 	tokenMu sync.Mutex
+	// buildTime is the build time /health reports; zero is unknown.
+	buildTime int64
 
 	closeOnce sync.Once
 	stop      chan struct{}
@@ -112,6 +119,10 @@ type HealthInfo struct {
 	StartedAt string `json:"started_at"`
 	// LAN reports LAN mode; an older daemon omits it, which reads as off.
 	LAN bool `json:"lan"`
+	// BuildTime is the daemon's ws-mcp build time in Unix milliseconds
+	// (ExecutableBuildTime); an older daemon omits it, which reads as older
+	// than any known build.
+	BuildTime int64 `json:"build_time,omitempty"`
 }
 
 // StartDaemon takes the single-instance lock, binds the port, writes the
@@ -161,14 +172,16 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		return nil, err
 	}
 	d := &Daemon{
-		dir:    opts.Dir,
-		lock:   lock,
-		log:    logw,
-		source: opts.Sessions,
-		broker: newBroker(),
-		lan:    opts.LAN,
-		stop:   make(chan struct{}),
-		done:   make(chan struct{}),
+		dir:       opts.Dir,
+		lock:      lock,
+		log:       logw,
+		source:    opts.Sessions,
+		broker:    newBroker(),
+		entries:   newEntryCache(),
+		lan:       opts.LAN,
+		buildTime: opts.BuildTime,
+		stop:      make(chan struct{}),
+		done:      make(chan struct{}),
 		endpoint: Endpoint{
 			SchemaVersion: endpointSchemaVersion,
 			Port:          listener.Addr().(*net.TCPAddr).Port,
@@ -186,7 +199,7 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		}
 	}
 	if opts.Sessions != nil {
-		d.index = NewIndex(IndexOptions{Dir: opts.Dir, Source: opts.Sessions, Log: logw, OnChange: d.broker.wake})
+		d.index = NewIndex(IndexOptions{Dir: opts.Dir, Source: opts.Sessions, Log: logw, OnChange: d.sessionChanged})
 	}
 	d.server = &http.Server{Handler: d.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	if err := writeEndpoint(opts.Dir, d.endpoint); err != nil {
@@ -252,6 +265,17 @@ func newToken() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(buf), nil
+}
+
+// sessionChanged is the index's change hook: it wakes every stream, and
+// drops a session's cached conversation entries once it left the index.
+func (d *Daemon) sessionChanged(replyID string) {
+	if d.index != nil {
+		if _, ok := d.index.Session(replyID); !ok {
+			d.entries.drop(replyID)
+		}
+	}
+	d.broker.wake(replyID)
 }
 
 // poll fills the session index at once and then re-reads every registered
@@ -360,6 +384,7 @@ func (d *Daemon) handleHealth(w http.ResponseWriter, r *http.Request) {
 		Port:      d.endpoint.Port,
 		StartedAt: d.endpoint.StartedAt,
 		LAN:       d.lan,
+		BuildTime: d.buildTime,
 	})
 }
 
