@@ -102,7 +102,7 @@ func (d *Daemon) handleSessionEvents(w http.ResponseWriter, r *http.Request, rep
 		if !ok {
 			return nil, false
 		}
-		regions, err := renderSessionRegions(view)
+		regions, err := renderSessionRegions(view, d.entries)
 		if err != nil {
 			fmt.Fprintf(d.log, "dashboard: render session %s: %v\n", replyID, err)
 			return nil, true

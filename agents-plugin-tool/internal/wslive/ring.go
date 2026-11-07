@@ -9,18 +9,22 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 )
 
-// The conversation ring keeps a session's last RingCap finished conversation
-// messages, one file per entry named <fixed-width UTC nanosecond
-// stamp>-<random hex>.json. Every entry gets a fresh name through
+// The conversation ring keeps a session's last RingHistoryCap finished
+// conversation messages, one file per entry named <fixed-width UTC
+// nanosecond stamp>-<random hex>.json. Every entry gets a fresh name through
 // temp+rename, so concurrent writers (several MCP processes can hold one
 // session key) never replace each other's file and need no lock, and a
-// reader never sees a partial entry. The name's stamp is the entry's time.
+// reader never sees a partial entry. The name's stamp is the entry's time,
+// and since names sort in time order and never change, a name is also a
+// stable paging cursor: ReadRing is the newest RingCap entries (the live
+// view) and ReadRingPage walks older ones a page at a time.
 
 // Ring entry kinds.
 const (
@@ -95,8 +99,15 @@ func isRingEntryName(name string) bool {
 	return !strings.HasPrefix(name, ".") && strings.HasSuffix(name, ".json")
 }
 
+var ringNamePattern = regexp.MustCompile(`^[0-9]{8}T[0-9]{6}\.[0-9]{9}Z-[0-9a-f]+\.json$`)
+
+// ValidRingName reports whether name has the grammar of an entry file name
+// this package writes, so a caller can accept one as a paging cursor without
+// it ever naming a path.
+func ValidRingName(name string) bool { return ringNamePattern.MatchString(name) }
+
 // AppendRing writes entries, in order, to the ring at dir (created when
-// missing) and trims it to the newest RingCap. It returns the first write
+// missing) and trims it to the newest RingHistoryCap. It returns the first write
 // error and stops there. Trimming is best effort.
 func AppendRing(dir string, entries []RingEntry) error {
 	if len(entries) == 0 {
@@ -152,15 +163,15 @@ func writeRingEntry(dir string, entry RingEntry) error {
 	return nil
 }
 
-// trimRing removes all but the newest RingCap entries, ignoring errors: a
-// concurrent trim or a failed remove only leaves extra entries until the
-// next write.
+// trimRing removes all but the newest RingHistoryCap entries, ignoring
+// errors: a concurrent trim or a failed remove only leaves extra entries
+// until the next write, and a reader skips an entry removed under it.
 func trimRing(dir string) {
 	names, err := ringEntryNames(dir)
-	if err != nil || len(names) <= RingCap {
+	if err != nil || len(names) <= RingHistoryCap {
 		return
 	}
-	for _, name := range names[:len(names)-RingCap] {
+	for _, name := range names[:len(names)-RingHistoryCap] {
 		_ = os.Remove(filepath.Join(dir, name))
 	}
 }
@@ -192,36 +203,78 @@ func RingNames(dir string) ([]string, error) {
 	return names, err
 }
 
-// ReadRing returns the ring at dir, oldest first. A missing directory is an
-// empty ring; an entry that cannot be read or parsed, or whose name carries
-// no valid stamp, is skipped. Unknown entry fields are ignored.
+// ReadRing returns the ring's live view at dir: its newest RingCap entries,
+// oldest first (ReadRingPage with no cursor).
 func ReadRing(dir string) ([]RingRecord, error) {
+	page, err := ReadRingPage(dir, "", RingCap)
+	return page.Records, err
+}
+
+// RingPage is one page of the ring, read by ReadRingPage.
+type RingPage struct {
+	// Records are the page's entries, oldest first.
+	Records []RingRecord
+	// Before is the cursor for the next older page: the oldest entry name
+	// the page covered, empty when it covered none.
+	Before string
+	// End reports that no entry older than this page remains.
+	End bool
+}
+
+// ReadRingPage returns the newest n entries at dir whose names sort before
+// before (exclusive; empty means the newest entries), oldest first. A
+// missing directory is an empty ring. An entry that cannot be read or
+// parsed, or whose name carries no valid stamp, is skipped but still counts
+// toward n and the cursor, so a junk file never stalls paging. Unknown entry
+// fields are ignored.
+func ReadRingPage(dir, before string, n int) (RingPage, error) {
 	names, err := ringEntryNames(dir)
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
+		return RingPage{End: true}, nil
 	}
 	if err != nil {
-		return nil, err
+		return RingPage{}, err
 	}
-	records := make([]RingRecord, 0, len(names))
+	if before != "" {
+		names = names[:sort.SearchStrings(names, before)]
+	}
+	if n < 0 {
+		n = 0
+	}
+	start := len(names) - n
+	if start < 0 {
+		start = 0
+	}
+	page := RingPage{End: start == 0}
+	names = names[start:]
+	if len(names) > 0 {
+		page.Before = names[0]
+	}
+	page.Records = make([]RingRecord, 0, len(names))
 	for _, name := range names {
-		stamp, _, ok := strings.Cut(name, "-")
-		if !ok {
-			continue
+		if rec, ok := readRingEntry(dir, name); ok {
+			page.Records = append(page.Records, rec)
 		}
-		at, perr := time.Parse(ringStampLayout, stamp)
-		if perr != nil {
-			continue
-		}
-		raw, rerr := os.ReadFile(filepath.Join(dir, name))
-		if rerr != nil {
-			continue
-		}
-		var entry RingEntry
-		if json.Unmarshal(raw, &entry) != nil {
-			continue
-		}
-		records = append(records, RingRecord{RingEntry: entry, Name: name, At: at.UTC()})
 	}
-	return records, nil
+	return page, nil
+}
+
+func readRingEntry(dir, name string) (RingRecord, bool) {
+	stamp, _, ok := strings.Cut(name, "-")
+	if !ok {
+		return RingRecord{}, false
+	}
+	at, err := time.Parse(ringStampLayout, stamp)
+	if err != nil {
+		return RingRecord{}, false
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, name))
+	if err != nil {
+		return RingRecord{}, false
+	}
+	var entry RingEntry
+	if json.Unmarshal(raw, &entry) != nil {
+		return RingRecord{}, false
+	}
+	return RingRecord{RingEntry: entry, Name: name, At: at.UTC()}, true
 }

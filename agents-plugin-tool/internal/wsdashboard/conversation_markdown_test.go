@@ -8,8 +8,9 @@ import (
 	"github.com/kang-sw/devenv/internal/wslive"
 )
 
-// leadMarkdownView renders the conversation region of a live session whose
-// ring holds the given entries and whose lead streams reply (empty for none).
+// leadMarkdownView renders the conversation regions (entries, then convlive)
+// of a live session whose ring holds the given entries and whose lead
+// streams reply (empty for none).
 func leadMarkdownView(t *testing.T, ring []wslive.RingEntry, reply string) string {
 	t.Helper()
 	now := testNow
@@ -22,11 +23,11 @@ func leadMarkdownView(t *testing.T, ring []wslive.RingEntry, reply string) strin
 		lead.Reply = &wslive.Reply{Text: reply}
 	}
 	v := buildSessionView(pageInputs{Session: liveSession("self", "/proj", now), Snapshot: liveSnap(now, lead), Ring: recs, Now: now})
-	regions, err := renderSessionRegions(v)
+	regions, err := renderSessionRegions(v, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return string(regions[regionConversation].HTML)
+	return string(regions[regionEntries].HTML) + string(regions[regionConvLive].HTML)
 }
 
 func TestLeadReplyRendersAsMarkdown(t *testing.T) {

@@ -82,8 +82,11 @@ code.fpath { font-size: 11.5px; color: var(--wb-muted-fg); overflow-wrap: anywhe
 .empty { margin: 8px 0; padding: 18px 14px; text-align: center; font-size: 13px; color: var(--wb-muted-fg); border: 1px dashed var(--wb-muted-fg); border-radius: var(--wb-radius); }
 
 /* ===== boxes with a sticky title bar: tree and conversation ===== */
-.r-tree, .r-conversation { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); }
-.r-conversation { background: color-mix(in srgb, var(--wb-muted) 45%, var(--wb-bg)); }
+.r-tree, .convo { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); }
+.convo { background: color-mix(in srgb, var(--wb-muted) 45%, var(--wb-bg)); }
+/* the conversation's two regions lay out as the #convo wrapper's own
+   children, so its sticky title bar sticks across both */
+.r-entries, .r-convlive { display: contents; }
 .thead { padding: 4px 8px 4px 12px; min-height: 30px; display: flex; gap: 8px; align-items: center; font-weight: 700; font-size: 13px; background: var(--wb-muted); position: sticky; top: 0; z-index: 1; }
 .thead .sum { margin-left: auto; display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
 .thead .chip { background: var(--wb-card); }
@@ -168,6 +171,7 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 
 /* ===== conversation ===== */
 .conv { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px; }
+.conv.clive { padding-top: 0; }
 .msg { max-width: 100%; }
 .msg .mh { font-size: 11.5px; color: var(--wb-muted-fg); display: flex; gap: 6px; align-items: center; margin-bottom: 3px; }
 .msg .mh b { color: var(--wb-fg); }
@@ -273,10 +277,10 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .dgrid.live > .tabbar { grid-area: tabbar; margin-bottom: 10px; }
 .dgrid.live > .r-tree { grid-area: tree; overflow: auto; }
 .dgrid.live > .splitter { grid-area: split; }
-.dgrid.live > .r-conversation { grid-area: convo; overflow: auto; }
+.dgrid.live > .convo { grid-area: convo; overflow: auto; }
 .dgrid.live > .composer { grid-area: composer; margin-top: 10px; }
 .dgrid.live > .bcol { grid-column: 1; grid-row: tree-start / convo-end; overflow: auto; padding: 2px 4px 0 2px; }
-.dgrid.live[data-tab="board"] > .r-tree, .dgrid.live[data-tab="board"] > .splitter, .dgrid.live[data-tab="board"] > .r-conversation, .dgrid.live:not([data-tab="board"]) > .bcol { display: none; }
+.dgrid.live[data-tab="board"] > .r-tree, .dgrid.live[data-tab="board"] > .splitter, .dgrid.live[data-tab="board"] > .convo, .dgrid.live:not([data-tab="board"]) > .bcol { display: none; }
 .splitter { position: relative; cursor: row-resize; touch-action: none; outline: 0; }
 .splitter::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 3px; margin-top: -1.5px; border-radius: 2px; background: var(--wb-muted); transition: background .15s; }
 .splitter:hover::before, .splitter.drag::before, .splitter:focus-visible::before { background: var(--wb-primary); }
@@ -284,14 +288,14 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
   .dgrid.live[data-layout="split"] { grid-template-columns: minmax(320px, 5fr) minmax(0, 7fr); grid-template-rows: minmax(56px, var(--sa)) 10px minmax(96px, var(--sb)) auto;
     grid-template-areas: "tree board" "split board" "convo board" "composer board"; }
   .dgrid.live[data-layout="split"] > .tabbar { display: none; }
-  .dgrid.live[data-layout="split"] > .r-tree, .dgrid.live[data-layout="split"] > .splitter, .dgrid.live[data-layout="split"] > .r-conversation, .dgrid.live[data-layout="split"] > .bcol { display: block; }
+  .dgrid.live[data-layout="split"] > .r-tree, .dgrid.live[data-layout="split"] > .splitter, .dgrid.live[data-layout="split"] > .convo, .dgrid.live[data-layout="split"] > .bcol { display: block; }
   .dgrid.live[data-layout="split"] > .bcol { grid-area: board; }
 }
 @media (min-width: 1100px) {
   .dgrid.live:not([data-layout="tabs"]) { grid-template-columns: minmax(320px, 5fr) minmax(0, 7fr); grid-template-rows: minmax(56px, var(--sa)) 10px minmax(96px, var(--sb)) auto;
     grid-template-areas: "tree board" "split board" "convo board" "composer board"; }
   .dgrid.live:not([data-layout="tabs"]) > .tabbar { display: none; }
-  .dgrid.live:not([data-layout="tabs"]) > .r-tree, .dgrid.live:not([data-layout="tabs"]) > .splitter, .dgrid.live:not([data-layout="tabs"]) > .r-conversation, .dgrid.live:not([data-layout="tabs"]) > .bcol { display: block; }
+  .dgrid.live:not([data-layout="tabs"]) > .r-tree, .dgrid.live:not([data-layout="tabs"]) > .splitter, .dgrid.live:not([data-layout="tabs"]) > .convo, .dgrid.live:not([data-layout="tabs"]) > .bcol { display: block; }
   .dgrid.live:not([data-layout="tabs"]) > .bcol { grid-area: board; }
 }
 @media (max-width: 640px) {

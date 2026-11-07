@@ -92,6 +92,8 @@ type Daemon struct {
 	index    *Index
 	source   SessionSource
 	broker   *broker
+	// entries caches rendered conversation entries per session.
+	entries *entryCache
 	// inboxMu serializes the daemon's own inbox writes (sends and cancels).
 	inboxMu sync.Mutex
 	// lan is LAN mode; tokenMu serializes reading and minting the LAN token.
@@ -161,14 +163,15 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		return nil, err
 	}
 	d := &Daemon{
-		dir:    opts.Dir,
-		lock:   lock,
-		log:    logw,
-		source: opts.Sessions,
-		broker: newBroker(),
-		lan:    opts.LAN,
-		stop:   make(chan struct{}),
-		done:   make(chan struct{}),
+		dir:     opts.Dir,
+		lock:    lock,
+		log:     logw,
+		source:  opts.Sessions,
+		broker:  newBroker(),
+		entries: newEntryCache(),
+		lan:     opts.LAN,
+		stop:    make(chan struct{}),
+		done:    make(chan struct{}),
 		endpoint: Endpoint{
 			SchemaVersion: endpointSchemaVersion,
 			Port:          listener.Addr().(*net.TCPAddr).Port,
@@ -186,7 +189,7 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		}
 	}
 	if opts.Sessions != nil {
-		d.index = NewIndex(IndexOptions{Dir: opts.Dir, Source: opts.Sessions, Log: logw, OnChange: d.broker.wake})
+		d.index = NewIndex(IndexOptions{Dir: opts.Dir, Source: opts.Sessions, Log: logw, OnChange: d.sessionChanged})
 	}
 	d.server = &http.Server{Handler: d.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	if err := writeEndpoint(opts.Dir, d.endpoint); err != nil {
@@ -252,6 +255,17 @@ func newToken() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(buf), nil
+}
+
+// sessionChanged is the index's change hook: it wakes every stream, and
+// drops a session's cached conversation entries once it left the index.
+func (d *Daemon) sessionChanged(replyID string) {
+	if d.index != nil {
+		if _, ok := d.index.Session(replyID); !ok {
+			d.entries.drop(replyID)
+		}
+	}
+	d.broker.wake(replyID)
 }
 
 // poll fills the session index at once and then re-reads every registered
