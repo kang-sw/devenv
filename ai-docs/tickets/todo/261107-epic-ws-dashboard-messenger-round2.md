@@ -67,6 +67,8 @@ session page usable as the primary conversation surface for a lead session:
 - No host adapter change in this round, except steer promotion: everything
   reaches the session through the existing inbox drain as text. Steer
   promotion changes both adapters (user, 2026-11-07, option (a) of (29)).
+  The status band is the second exception: both adapters feed a new `status`
+  live event (user, 2026-11-07, board (88), (89), (93)).
 - The page keeps showing a waiting approval (conversation and agents tree)
   after any layout change.
 
