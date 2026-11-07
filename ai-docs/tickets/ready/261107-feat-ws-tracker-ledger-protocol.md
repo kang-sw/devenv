@@ -503,6 +503,15 @@ Decisions taken:
 - `ssh-keygen` is run directly only to generate the key. Every git call
   goes through `wsgit.Runner`, and `wsgit` itself is unchanged.
 
+#### Edition (4fbcaf8f0) - 2026-11-08
+
+`verify.go` closed a gap in the signer check. A revocation's memoized
+verdict used to be returned before its commit's signer result was set.
+`Valid` is the zero verdict, so the events after a forged revocation in
+the same commit skipped the signer check and verified Valid.
+`TestRevocationFirstInCommitKeepsSignerCheck` reproduced this before the
+fix.
+
 ### Phase 2: Remote sync, registration, and rewind refusal
 
 Add remotes on top of Phase 1's commit and verify paths.
@@ -541,6 +550,69 @@ Add remotes on top of Phase 1's commit and verify paths.
   clone's own ref it did not write, a poll through `Fetch` that pushes
   nothing, a push delay that restarts
   on each write under a fake clock, and a pending journal surviving reopen.
+
+### Result (acf2ff17a) - 2026-11-08
+
+Landed `remote.go` (1f804457d, b95429231, 4fbcaf8f0, acf2ff17a):
+- `Register`.
+- Remote-aware `Sync` and `Fetch`.
+- The persisted idle push deadline.
+- Rewind refusal, with `Restore` and `MoveToFreshClone`.
+- A per-stream journal (`journal.<member>.<clone>.jsonl`).
+
+The package doc's `# Remote` section covers all of these.
+
+Verification: `go build ./...`, `go vet ./internal/...`, and
+`go test -count=1 ./internal/wsledger/ ./internal/wsgit/` pass. Each
+Phase 2 scenario has a test against temporary bare remotes. The tests
+also cover:
+- a Sync before any Fetch not undoing an own-ref deletion or rewind;
+- a refused push failing Sync and Register;
+- Restore refusing a remote that moved ahead, or one that moved after
+  its own fetch.
+
+The genesis and claim races are forced deterministically by a test
+`Runner` hook that completes the rival's registration just before the
+contested push.
+
+Decisions taken:
+- **Three ref namespaces.** Fetched refs land in `refs/ledger/remote/`. A
+  never-pruned `refs/ledger/known/` records the last value seen on or
+  pushed to the remote. A deletion, which has a known value, therefore
+  stays distinct from a ref that never reached the remote.
+- **Create-once refs.** A genesis or claim this clone wrote but never
+  pushed is replaced by the remote's after a lost push. That is how a lost
+  genesis race continues as a joiner and a lost claim race becomes
+  `IDTaken`. Any value once known on the remote is protected.
+- **Leased own-ref push.** The own ref is pushed on a lease of its
+  last-known remote value rather than as a plain fast-forward. A Sync run
+  by the push-delay timer before any fetch therefore cannot undo a remote
+  deletion or rewind. The fetch that follows every push classifies the
+  rejection and warns. Leased pushes carry no `+` refspec prefix, because
+  git lets `+` override the lease.
+- **Push refusals.** Only a client-side `[rejected]` counts as a lost race.
+  A `[remote rejected]` (hook, branch protection, permission) or a
+  transport failure is an error, and the writes stay pending.
+- **Push deadline.** The deadline is one file per stream, so processes
+  sharing a store directory agree. A write or an open only moves it later.
+- **`MoveToFreshClone`.** It renames the old stream's journal to `.moved`.
+  Reopening the old clone id therefore cannot publish the moved events
+  twice.
+
+Lite review: two Important findings, both fixed in acf2ff17a:
+- a remote-rejected push passed for a lost race;
+- `Restore` could rewind a remote that had moved ahead.
+
+Minor findings, left as follow-ups:
+- `credential.interactive=false` is not a core git option. An HTTPS remote
+  with no credential helper can still reach a terminal prompt; the runner
+  has no environment hook to set `GIT_TERMINAL_PROMPT=0`.
+- No test moves or deletes a genesis or claim ref after it was pushed, and
+  no test covers a forked member ref.
+- `Events`, `Identity`, and `Pending` wait on the store mutex while `Sync`
+  holds it across network calls.
+- The two-process seq test uses two instances in one process, separated
+  only by the file lock.
 
 ## Verification
 
