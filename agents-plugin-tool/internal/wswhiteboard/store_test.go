@@ -377,7 +377,7 @@ func TestNowFreshReadsStoreWithoutUpdateSeq(t *testing.T) {
 func TestApplyNowRules(t *testing.T) {
 	st := &State{}
 	env := testEnv()
-	content := map[string]string{"/tmp/now.html": "<p>from file</p>"}
+	content := map[string]string{"/tmp/now.html": "<p>from file</p>", "/tmp/now.md": "# Status\n\n- <b>green</b>\n"}
 	env.ReadFile = func(path string) ([]byte, error) {
 		if v, ok := content[path]; ok {
 			return []byte(v), nil
@@ -406,7 +406,7 @@ func TestApplyNowRules(t *testing.T) {
 	}
 	for _, doc := range []string{`<!DOCTYPE html><p>x</p>`, `<html><body>x</body></html>`, `<HTML lang=en>`} {
 		raw, _ := json.Marshal(map[string]any{"now": doc})
-		if _, problems := Apply(st, payload(t, string(raw)), env); !hasProblem(problems, "not a full document") {
+		if _, problems := Apply(st, payload(t, string(raw)), env); !hasProblem(problems, "markdown with inline HTML, not a full document") {
 			t.Fatalf("full document %q problems = %v", doc, problems)
 		}
 	}
@@ -418,6 +418,10 @@ func TestApplyNowRules(t *testing.T) {
 	mustApply(t, st, `{"now":""}`)
 	if st.Now != "" {
 		t.Fatalf("empty now must clear the slot")
+	}
+	// now_path names a markdown file, stored verbatim like any Now text.
+	if _, problems := Apply(st, payload(t, `{"now_path":"/tmp/now.md"}`), env); len(problems) > 0 || st.Now != "# Status\n\n- <b>green</b>\n" {
+		t.Fatalf("now_path .md file: %v %q", problems, st.Now)
 	}
 }
 

@@ -36,7 +36,7 @@ shows HTML inline. Workers and subagents do not use it.
 
 ## Payload
 
-Write board text (titles, options, rationale, recommendations, answer readings, and the Now fragment) in the conversation language, the `workflow.lang` value when set; item IDs, class and status tags, `ok`/`no` answers, and option letters stay as written.
+Write board text (titles, options, rationale, recommendations, answer readings, and the Now text) in the conversation language, the `workflow.lang` value when set; item IDs, class and status tags, `ok`/`no` answers, and option letters stay as written.
 
 ```text
 whiteboard.update payload: {
@@ -44,8 +44,8 @@ whiteboard.update payload: {
   answer?:       [{id, answer, answer_quote, assumed?}],
   patch?:        [{id, title?, options?, recommendation?, rationale?, links?, status?}],
   close_topics?: [topic],
-  now?:          html fragment,    "" clears the Now slot
-  now_path?:     path,             exclusive with now
+  now?:          markdown,         "" clears the Now slot
+  now_path?:     .md file path,    exclusive with now
   id_floor?:     number,
   embed_dir?:    absolute path,    "" clears
 }
@@ -67,19 +67,21 @@ whiteboard.query payload: {topic?, status?, id?}
 - Markdown: `title` takes inline markdown (bold, italic, code, links);
   `options`, `rationale`, and `recommendation` take block markdown with
   line breaks kept: lists, code blocks, tables, images, and a
-  `` ```mermaid `` fenced block drawn as a diagram. Raw HTML shows as text. A
-  link or image path is relative to the session root or absolute; images
-  are local files only, links may also be http(s). An open technical or
-  announced item shows its `rationale` inline, one line per reason.
+  `` ```mermaid `` fenced block drawn as a diagram. Raw HTML shows as text in
+  every field but `now`. A link or image path is relative to the session
+  root or absolute; images are local files only, links may also be
+  http(s). An open technical or announced item shows its `rationale` inline,
+  one line per reason.
 - `rationale`: a technical or announced item's citation or reasoning, or a
   policy item's context.
 - `links`: strings such as a ticket stem, a commit, or `supersedes {{12}}`.
 - Item references: write `{{12}}` in `title`, `options`, `recommendation`,
-  `rationale`, `links`, or the reading part of an `answer` to cite item
-  `(12)`. The page shows it as `(12)`, linked when that item is on the page,
-  and leaves it verbatim when the store holds no such item; a reference is
-  never refused. A plain `(12)` is literal text, and `answer_quote` is never
-  resolved, since it is the user's verbatim words.
+  `rationale`, `links`, the markdown text of `now` (never inside its HTML),
+  or the reading part of an `answer` to cite item `(12)`. The page shows it
+  as `(12)`, linked when that item is on the page, and leaves it verbatim
+  when the store holds no such item; a reference is never refused. A plain
+  `(12)` is literal text, and `answer_quote` is never resolved, since it is
+  the user's verbatim words.
 - `answer`: for a policy item, its option letter, optionally followed by
   `, <text>`; for a technical or announced item, `ok`, `no`, or short text. A
   later `answer` replaces an earlier one. `answer_quote` is required: the
@@ -95,14 +97,20 @@ whiteboard.query payload: {topic?, status?, id?}
   an option letter. `query.status` takes any of the five statuses.
 - `close_topics`: collapses the topics' settled items at once; adding an item
   to a closed topic reopens it.
-- `now`: an HTML fragment, never a full document, for explanations and
-  drawings: inline SVG, or canvas 2D drawn by an inline script, with no
-  external `src`, `href`, or fetch. It stays until a later `now` replaces it
-  or `""` clears it, always above the topics: open on the update that changed
-  it, collapsed and greyed after. `now_path` names a file holding the fragment, relative to the
-  session root or absolute, read once at that update. A large standalone
-  visual goes to a `{{.McpNamespace}}/path.generate` file linked from the
-  fragment.
+- `now`: block markdown as in `options`, with inline HTML written as is,
+  never a full HTML document, for explanations and drawings: inline SVG, or
+  canvas 2D drawn by an inline script, with no external `src`, `href`, or
+  fetch. It stays until a later `now` replaces it or `""` clears it, always
+  above the topics: open on the update that changed it, collapsed and greyed
+  after. `now_path` names a markdown file holding it, relative to the session
+  root or absolute, read once at that update. A large standalone visual goes
+  to a `{{.McpNamespace}}/path.generate` file linked from it.
+- HTML in `now`: a line that starts with a block tag such as `<div>` or
+  `<details>`, or holds a lone tag such as `<svg ...>`, starts raw HTML that
+  runs to the next blank line, so put a blank line between HTML and the
+  markdown after it, and keep blank lines out of HTML, since an indented line
+  after one becomes a code block. A line that starts with an inline tag such
+  as `<b>` is markdown text, whose line breaks render as `<br>`.
 - `id_floor`: raises the ID counter so the next minted ID is one past it; a
   floor at or below the counter is ignored.
 - `embed_dir`: see Host embed folder.

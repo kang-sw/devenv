@@ -158,7 +158,7 @@ type PeerRow struct {
 type ConversationView struct {
 	Entries []ConvEntry
 	// Reply is the lead's reply text still streaming; nil when none.
-	// ReplyHTML is its text rendered as markdown.
+	// ReplyHTML is its text rendered as markdown with raw HTML escaped.
 	Reply     *wslive.Reply
 	ReplyHTML template.HTML
 	// Phase and Permission drive the trailing activity or approval line.
@@ -173,8 +173,8 @@ type ConversationView struct {
 	// answer, which the page marks on the item's card.
 	Held []HeldView
 	Sent []SentMark
-	// markdown renders a lead reply; an entry runs it only when the entry
-	// cache misses (renderEntries).
+	// markdown renders a finished lead reply (replyRender.finished); an
+	// entry runs it only when the entry cache misses (renderEntries).
 	markdown func(string) template.HTML
 }
 
@@ -186,9 +186,10 @@ type ConvEntry struct {
 	Key string
 	// At is the entry's time (epoch ms).
 	At int64
-	// HTML is a lead reply's text rendered as markdown; user messages, mail
-	// bodies, and turn lines stay plain text. It is set only while the entry
-	// renders on an entry cache miss.
+	// HTML is a lead reply's text rendered as markdown with its inline HTML
+	// sanitized; user messages, mail bodies, and turn lines stay plain text,
+	// raw HTML included. It is set only while the entry renders on an entry
+	// cache miss.
 	HTML template.HTML
 	// Images are a user message's attached images, taken out of its text.
 	Images []AttachmentView
@@ -451,13 +452,16 @@ type replyRender struct {
 // replyMarkdown renders lead replies under the served page's link rule
 // (servedTargets): a file target is an action link for the page's link
 // menu, and an image inside root is the image route's URL. A finished
-// reply's mermaid fences are drawn by the page; the streaming reply keeps
-// them code blocks, since it re-renders every tick and a diagram would
-// redraw with it.
+// reply's inline HTML is kept through the reply sanitizer under the same
+// rule (wswhiteboard.TextTargets.HTML) and its mermaid fences are drawn by
+// the page; the streaming reply shows raw HTML as text and keeps mermaid
+// fences code blocks, since it re-renders every tick and a half-closed tag
+// would shake the layout and a diagram would redraw with it.
 func replyMarkdown(root, replyID string) replyRender {
 	streaming := servedTargets(root, replyID)
 	finished := servedTargets(root, replyID)
 	finished.Mermaid = true
+	finished.HTML = true
 	return replyRender{
 		finished:  func(s string) template.HTML { return wswhiteboard.RenderText(s, finished) },
 		streaming: func(s string) template.HTML { return wswhiteboard.RenderText(s, streaming) },

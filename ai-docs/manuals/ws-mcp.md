@@ -116,7 +116,12 @@ copies. A file outside the root offers the copies only. A board image inside
 the root loads through `GET /s/<reply-id>/image?path=<root-relative path>`,
 which serves only an image-extension file under the same containment, and
 any other image renders as its path. A finished lead reply draws its mermaid
-fences; the reply still streaming keeps them code blocks. `POST
+fences; the reply still streaming keeps them code blocks. A finished lead
+reply also keeps its inline HTML and SVG through an allow-list sanitizer: no
+script, form, embed, or fetching element or attribute survives, and a raw
+link or image follows the same link rule, so it renders as the same action
+link or path text as its markdown form; the streaming reply, user messages,
+and mail bodies show HTML as text. `POST
 /s/<reply-id>/open {target}` opens an http(s) URL or this session's own file
 view path in the host's default browser with the OS open command, run with
 no shell (`rundll32 url.dll,FileProtocolHandler` on Windows); it requires a

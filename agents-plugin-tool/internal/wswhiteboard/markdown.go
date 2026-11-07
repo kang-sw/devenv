@@ -26,10 +26,12 @@ import (
 // Lead-authored item text renders as markdown: titles and ack-row reasons
 // inline only, options, rationale, and recommendations as blocks. goldmark's
 // output reaches the page template as trusted HTML, so this file is the whole
-// escaping boundary on that text: neither pipeline has an HTML parser, so a
-// tag the lead types is escaped text (html.WithUnsafe stays off as the
-// backstop), and every link, autolink, and image destination goes through
-// resolveTarget's allow-list. The Now slot stays the only HTML channel.
+// escaping boundary on that text: neither the block nor the inline pipeline
+// has an HTML parser, so a tag the lead types is escaped text (html.WithUnsafe
+// stays off as the backstop), and every link, autolink, and image destination
+// goes through resolveTarget's allow-list. The raw pipeline passes HTML
+// through and serves two callers only: the Now slot, written as is, and a
+// finished lead reply, which sanitize.go filters afterwards.
 
 // mermaidJS is the vendored mermaid build (assets/mermaid/README.md). Pages
 // never inline it: the page writer stores it once per folder under
@@ -65,17 +67,39 @@ func UsesMermaid(page string) bool {
 	return strings.Contains(page, `<script src="`+name+`">`)
 }
 
-// markdown holds a page's two goldmark pipelines; both resolve item
-// references and link targets against that page.
+// markdown holds a page's goldmark pipelines; all resolve item references
+// and link targets against that page.
 type markdown struct {
 	block, inline goldmark.Markdown
+	// raw is block with raw HTML passed through, built on first use (Now and
+	// finished lead replies only).
+	raw goldmark.Markdown
 }
 
 func newMarkdown(p *pageData) *markdown {
 	refs := util.Prioritized(itemRefParser{stored: p.Stored}, 100)
-	// goldmark's default block parsers without the HTML block parser, which
-	// would also let a line starting with a tag swallow the markdown after it
-	// up to the next blank line.
+	// Inline only: the paragraph is the one block parser, so list markers,
+	// headings, fences, and quotes stay literal text, and no paragraph
+	// transformer turns a "[x]: y" title into a link definition.
+	inlineParser := parser.NewParser(
+		parser.WithBlockParsers(util.Prioritized(parser.NewParagraphParser(), 100)),
+		parser.WithInlineParsers(inlineParsers(refs, false)...),
+	)
+	inline := goldmark.New(
+		goldmark.WithParser(inlineParser),
+		goldmark.WithRendererOptions(
+			renderer.WithNodeRenderers(util.Prioritized(&mdRenderer{page: p, inline: true}, 100)),
+		),
+	)
+	return &markdown{block: blockMarkdown(p, refs, false), inline: inline}
+}
+
+// blockMarkdown is the block pipeline with hard-wrapped lines. Without
+// rawHTML it has goldmark's default block parsers minus the HTML block parser,
+// which would also let a line starting with a tag swallow the markdown after
+// it up to the next blank line. With rawHTML that parser, the raw HTML inline
+// parser, and html.WithUnsafe are on, so typed HTML is written as is.
+func blockMarkdown(p *pageData, refs util.PrioritizedValue, rawHTML bool) goldmark.Markdown {
 	blocks := []util.PrioritizedValue{
 		util.Prioritized(parser.NewSetextHeadingParser(), 100),
 		util.Prioritized(parser.NewThematicBreakParser(), 200),
@@ -87,44 +111,39 @@ func newMarkdown(p *pageData) *markdown {
 		util.Prioritized(parser.NewBlockquoteParser(), 800),
 		util.Prioritized(parser.NewParagraphParser(), 1000),
 	}
-	block := goldmark.New(
+	options := []renderer.Option{
+		html.WithHardWraps(),
+		renderer.WithNodeRenderers(util.Prioritized(&mdRenderer{page: p}, 100)),
+	}
+	if rawHTML {
+		blocks = append(blocks, util.Prioritized(parser.NewHTMLBlockParser(), 900))
+		options = append(options, html.WithUnsafe())
+	}
+	return goldmark.New(
 		goldmark.WithParser(parser.NewParser(
 			parser.WithBlockParsers(blocks...),
-			parser.WithInlineParsers(inlineParsers(refs)...),
+			parser.WithInlineParsers(inlineParsers(refs, rawHTML)...),
 			parser.WithParagraphTransformers(parser.DefaultParagraphTransformers()...),
 		)),
 		goldmark.WithExtensions(extension.Table, extension.Strikethrough),
-		goldmark.WithRendererOptions(
-			html.WithHardWraps(),
-			renderer.WithNodeRenderers(util.Prioritized(&mdRenderer{page: p}, 100)),
-		),
+		goldmark.WithRendererOptions(options...),
 	)
-	// Inline only: the paragraph is the one block parser, so list markers,
-	// headings, fences, and quotes stay literal text, and no paragraph
-	// transformer turns a "[x]: y" title into a link definition.
-	inlineParser := parser.NewParser(
-		parser.WithBlockParsers(util.Prioritized(parser.NewParagraphParser(), 100)),
-		parser.WithInlineParsers(inlineParsers(refs)...),
-	)
-	inline := goldmark.New(
-		goldmark.WithParser(inlineParser),
-		goldmark.WithRendererOptions(
-			renderer.WithNodeRenderers(util.Prioritized(&mdRenderer{page: p, inline: true}, 100)),
-		),
-	)
-	return &markdown{block: block, inline: inline}
 }
 
-// inlineParsers is goldmark's default inline set without the raw HTML
-// parser, plus refs.
-func inlineParsers(refs util.PrioritizedValue) []util.PrioritizedValue {
-	return []util.PrioritizedValue{
+// inlineParsers is goldmark's default inline set, the raw HTML parser only
+// with rawHTML, plus refs.
+func inlineParsers(refs util.PrioritizedValue, rawHTML bool) []util.PrioritizedValue {
+	list := []util.PrioritizedValue{
 		util.Prioritized(parser.NewCodeSpanParser(), 100),
 		util.Prioritized(parser.NewLinkParser(), 200),
 		util.Prioritized(parser.NewAutoLinkParser(), 300),
 		util.Prioritized(parser.NewEmphasisParser(), 500),
 		refs,
 	}
+	if rawHTML {
+		list = append(list, util.Prioritized(parser.NewRawHTMLParser(), 400))
+	}
+	return list
 }
 
 func (p *pageData) markdown() *markdown {
@@ -132,6 +151,22 @@ func (p *pageData) markdown() *markdown {
 		p.md = newMarkdown(p)
 	}
 	return p.md
+}
+
+// rawMarkdown is the page's raw HTML pipeline.
+func (p *pageData) rawMarkdown() goldmark.Markdown {
+	md := p.markdown()
+	if md.raw == nil {
+		md.raw = blockMarkdown(p, util.Prioritized(itemRefParser{stored: p.Stored}, 100), true)
+	}
+	return md.raw
+}
+
+// renderNow renders the Now slot: block markdown with raw HTML written as is,
+// neither balanced nor filtered, so an inline script still runs. Item
+// references resolve in its markdown text, never inside its HTML.
+func (p *pageData) renderNow(s string) template.HTML {
+	return convert(p.rawMarkdown(), s)
 }
 
 // Inline renders s as inline markdown: emphasis, code, links, and item
@@ -421,7 +456,7 @@ func (r *mdRenderer) link(w util.BufWriter, source []byte, node ast.Node, enteri
 		// A file link on a served page with link actions: the label is the
 		// action link.
 		if entering {
-			writeActionOpen(w, t, n.Title)
+			r.page.writeActionOpen(w, t, n.Title)
 		} else {
 			_, _ = w.WriteString("</a>")
 		}
@@ -436,7 +471,7 @@ func (r *mdRenderer) link(w util.BufWriter, source []byte, node ast.Node, enteri
 		return ast.WalkContinue, nil
 	}
 	if entering {
-		writeAnchorOpen(w, t.href, n.Title, r.page.linkActions())
+		r.writeAnchorOpen(w, t.href, n.Title)
 	} else {
 		_, _ = w.WriteString("</a>")
 	}
@@ -459,13 +494,13 @@ func (r *mdRenderer) autoLink(w util.BufWriter, source []byte, node ast.Node, en
 	case !ok:
 		_, _ = w.Write(label)
 	case t.isAction():
-		writeActionOpen(w, t, nil)
+		r.page.writeActionOpen(w, t, nil)
 		_, _ = w.Write(label)
 		_, _ = w.WriteString("</a>")
 	case t.text != "":
 		writePathText(w, t.text)
 	default:
-		writeAnchorOpen(w, t.href, nil, r.page.linkActions())
+		r.writeAnchorOpen(w, t.href, nil)
 		_, _ = w.Write(label)
 		_, _ = w.WriteString("</a>")
 	}
@@ -482,57 +517,95 @@ func destination(raw []byte) string {
 	return string(util.ResolveEntityNames(v))
 }
 
-// writeAnchorOpen opens an anchor to href. marked marks an http(s) href as
-// a served page's action link (data-wl="url").
-func writeAnchorOpen(w util.BufWriter, href string, title []byte, marked bool) {
-	_, _ = w.WriteString(`<a href="`)
-	_, _ = w.Write(util.EscapeHTML(util.URLEscape([]byte(href), false)))
-	_ = w.WriteByte('"')
+// writeAnchorOpen opens an anchor to a resolved link's href (linkAttrs).
+func (r *mdRenderer) writeAnchorOpen(w util.BufWriter, href string, title []byte) {
+	attrs := r.page.linkAttrs(href)
+	_, _ = w.WriteString(`<a`)
+	writeAttrs(w, attrs[:1])
+	r.page.writeTrustRef(w, attrs, false)
 	if len(title) > 0 {
-		_, _ = w.WriteString(` title="`)
-		_, _ = w.Write(util.EscapeHTML([]byte(destination(title))))
-		_ = w.WriteByte('"')
+		writeAttrs(w, [][2]string{{"title", destination(title)}})
 	}
+	writeAttrs(w, attrs[1:])
+	_ = w.WriteByte('>')
+}
+
+// linkAttrs are the attributes a resolved link that is not an action link
+// opens with besides its title: the URL-escaped href, and for http(s) the
+// new-tab pair and, on a page with link actions, the url marker
+// (data-wl="url") the link menu keys on. The markdown link writer and the
+// reply sanitizer both take them from here, so an attribute added here
+// reaches every link either one resolves.
+func (p *pageData) linkAttrs(href string) [][2]string {
+	attrs := [][2]string{{"href", string(util.URLEscape([]byte(href), false))}}
 	if strings.HasPrefix(href, "http://") || strings.HasPrefix(href, "https://") {
 		// Leaving the board in place would drop an answer in progress.
-		_, _ = w.WriteString(` target="_blank" rel="noopener noreferrer"`)
-		if marked {
-			_, _ = w.WriteString(` data-wl="url"`)
+		attrs = append(attrs, [2]string{"target", "_blank"}, [2]string{"rel", "noopener noreferrer"})
+		if p.linkActions() {
+			attrs = append(attrs, [2]string{"data-wl", "url"})
 		}
+	}
+	return attrs
+}
+
+// writeActionOpen opens a file target's action link (View.FileActions),
+// titled with the link's own title or else the target's path text.
+func (p *pageData) writeActionOpen(w util.BufWriter, t target, title []byte) {
+	attrs := actionAttrs(t)
+	_, _ = w.WriteString(`<a`)
+	writeAttrs(w, attrs)
+	p.writeTrustRef(w, attrs, false)
+	if len(title) > 0 {
+		writeAttrs(w, [][2]string{{"title", destination(title)}})
+	} else {
+		writeAttrs(w, [][2]string{{"title", t.text}})
 	}
 	_ = w.WriteByte('>')
 }
 
-// writeActionOpen opens a file target's action link (View.FileActions): an
-// anchor to the file view when the action has an Href, else an anchor with
-// no href that the link menu offers to copy only.
-func writeActionOpen(w util.BufWriter, t target, title []byte) {
-	_, _ = w.WriteString(`<a`)
+// actionAttrs are the attributes a file target's action link opens with
+// besides its title: an href to the file view when the action has one, else
+// a tabindex for an anchor the link menu offers to copy only, then the file
+// marker (data-wl="file") with the root-relative and absolute paths. The
+// markdown writer and the reply sanitizer both take them from here.
+func actionAttrs(t target) [][2]string {
+	var attrs [][2]string
 	if t.action.Href != "" {
-		_, _ = w.WriteString(` href="`)
-		_, _ = w.Write(util.EscapeHTML(util.URLEscape([]byte(t.action.Href), false)))
-		_ = w.WriteByte('"')
+		attrs = append(attrs, [2]string{"href", string(util.URLEscape([]byte(t.action.Href), false))})
 	} else {
-		_, _ = w.WriteString(` tabindex="0"`)
+		attrs = append(attrs, [2]string{"tabindex", "0"})
 	}
-	_, _ = w.WriteString(` data-wl="file"`)
+	attrs = append(attrs, [2]string{"data-wl", "file"})
 	if t.action.Rel != "" {
-		_, _ = w.WriteString(` data-rel="`)
-		_, _ = w.Write(util.EscapeHTML([]byte(t.action.Rel)))
-		_ = w.WriteByte('"')
+		attrs = append(attrs, [2]string{"data-rel", t.action.Rel})
 	}
 	if t.action.Abs != "" {
-		_, _ = w.WriteString(` data-abs="`)
-		_, _ = w.Write(util.EscapeHTML([]byte(t.action.Abs)))
+		attrs = append(attrs, [2]string{"data-abs", t.action.Abs})
+	}
+	return attrs
+}
+
+// writeAttrs writes each attribute with its value HTML-escaped.
+func writeAttrs(w util.BufWriter, attrs [][2]string) {
+	for _, a := range attrs {
+		_, _ = w.WriteString(" " + a[0] + `="`)
+		_, _ = w.Write(util.EscapeHTML([]byte(a[1])))
 		_ = w.WriteByte('"')
 	}
-	_, _ = w.WriteString(` title="`)
-	if len(title) > 0 {
-		_, _ = w.Write(util.EscapeHTML([]byte(destination(title))))
-	} else {
-		_, _ = w.Write(util.EscapeHTML([]byte(t.text)))
+}
+
+// writeTrustRef marks a link or image the markdown renderer resolved while a
+// finished reply renders (pageData.trusted): the mark is an index into the
+// page's own record of the attributes it opened with, so the sanitizer takes
+// them from that record, never from the markup, and a forged or misplaced
+// mark can only yield attributes resolveTarget already produced, of the same
+// kind.
+func (p *pageData) writeTrustRef(w util.BufWriter, attrs [][2]string, image bool) {
+	if p.trusted == nil {
+		return
 	}
-	_, _ = w.WriteString(`">`)
+	*p.trusted = append(*p.trusted, trustedTarget{attrs: attrs, image: image})
+	_, _ = w.WriteString(` ` + trustAttr + `="` + strconv.Itoa(len(*p.trusted)-1) + `"`)
 }
 
 // image renders an allowed destination as <img> and any other, or any image
@@ -554,7 +627,7 @@ func (r *mdRenderer) image(w util.BufWriter, source []byte, node ast.Node, enter
 		writeAltText(w, source, n)
 		if t.isAction() {
 			_ = w.WriteByte(' ')
-			writeActionOpen(w, t, nil)
+			r.page.writeActionOpen(w, t, nil)
 			writePathCode(w, t.text)
 			_, _ = w.WriteString(`</a>`)
 		} else {
@@ -567,9 +640,12 @@ func (r *mdRenderer) image(w util.BufWriter, source []byte, node ast.Node, enter
 		writeAltText(w, source, n)
 		return ast.WalkSkipChildren, nil
 	}
+	escaped := string(util.URLEscape([]byte(t.href), false))
 	_, _ = w.WriteString(`<img src="`)
-	_, _ = w.Write(util.EscapeHTML(util.URLEscape([]byte(t.href), false)))
-	_, _ = w.WriteString(`" alt="`)
+	_, _ = w.Write(util.EscapeHTML([]byte(escaped)))
+	_ = w.WriteByte('"')
+	r.page.writeTrustRef(w, [][2]string{{"src", escaped}}, true)
+	_, _ = w.WriteString(` alt="`)
 	writeAltText(w, source, n)
 	_ = w.WriteByte('"')
 	if len(n.Title) > 0 {
