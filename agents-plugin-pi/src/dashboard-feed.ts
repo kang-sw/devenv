@@ -17,7 +17,13 @@
  *   approval;
  * - the lead's streamed reply text (the full text so far) and each finished
  *   reply with `final: true`;
- * - each finished user message with its origin.
+ * - each finished user message with its origin;
+ * - `status`, the session's usage figures (context, cache hit, cost
+ *   estimate), only while the latest intake result names it on its
+ *   `accepts:` line: an older ws-mcp skips the kind, and a "dashboard off" or
+ *   error result names nothing. Figures are read when a flush drains after a
+ *   dirty mark, sent only when they changed, and sent again after a resync,
+ *   since `reset` clears them on the server.
  *
  * Pi itself has no tool permission prompt, so the lead never sends a
  * permission wait; only a subagent's pending `ws-worker-exec` approval does.
@@ -46,6 +52,8 @@
 import { ADAPTER_MESSAGE_LABEL, whiteboardLabeledBody } from "./adapter-label.ts";
 import { batchViews, createBatchBuffer, observeBatchEvent, type AgentBatchBuffer, type BatchView } from "./agent-batches.ts";
 import { classifyRegistryRowState, rowName, type AgentRowState } from "./agent-display.ts";
+import type { LeadUsageSummary } from "./agent-cost.ts";
+import type { CumulativeCost } from "./agent-telemetry.ts";
 import { buildAgentViewModel } from "./agent-view.ts";
 import type { GoalLoopConfig } from "./goal-loop.ts";
 import { GATED_EXEC_TOOL_NAME, type RpcAgentRegistry } from "./spawner.ts";
@@ -89,7 +97,7 @@ export function resolveDashboardEnabled(config: GoalLoopConfig | undefined): boo
 export type DashboardOrigin = "terminal" | "whiteboard" | "mail";
 
 export interface DashboardEvent {
-  kind: "reset" | "turn_start" | "turn_end" | "agent" | "permission" | "reply" | "user";
+  kind: "reset" | "turn_start" | "turn_end" | "agent" | "permission" | "reply" | "user" | "status";
   [field: string]: unknown;
 }
 
@@ -123,6 +131,8 @@ export interface DashboardFeedOptions {
   enabled: () => boolean | Promise<boolean>;
   /** The subagent tree, read when a flush drains after a dirty mark. */
   agents?: () => DashboardAgentEntry[];
+  /** The usage figures, read when a flush drains after a status dirty mark while the intake accepts `status`. */
+  status?: () => DashboardStatus | undefined;
   now?: () => number;
   /** Arms a timer and returns its cancel. Defaults to an unref'd `setTimeout`. */
   schedule?: (fn: () => void, ms: number) => () => void;
@@ -139,6 +149,61 @@ export interface DashboardFeed {
   noteMailWake(): void;
   /** Dirty mark for the subagent tree. */
   agentsChanged(): void;
+  /** Dirty mark for the usage figures. */
+  statusChanged(): void;
+}
+
+/** The optional event kind that carries usage figures, sent only while the intake names it. */
+export const STATUS_KIND = "status";
+
+/** A `status` event's figures; a part with no figure is left out. Pi reports no usage limits. */
+export interface DashboardStatus {
+  context?: { tokens: number | null; window: number; percent?: number; cacheHit?: number };
+  cost?: { usd: number; estimate: true; incomplete: boolean };
+}
+
+/** The lead's own usage and its direct delegates' cost, as the footer's estimate holds them. */
+export interface DashboardUsage {
+  lead: LeadUsageSummary;
+  direct: CumulativeCost;
+}
+
+const finiteNonnegative = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0;
+
+/**
+ * The status figures Pi reports. Context is Pi's own `getContextUsage()` read
+ * the way the footer reads it (its window, else the model's; unknown tokens
+ * right after a compaction stay `null`), with Pi's percent sent as is so the
+ * page tracks the footer. The cache hit is the last response's rate, shown
+ * only once a cache read or write was seen, like the footer's `CH`. The cost
+ * is the footer's `L` plus `D` estimate: the known-price calls of the lead
+ * and its direct delegates summed, incomplete when a call of unknown price
+ * contributed, and absent until a known-price call exists.
+ */
+export function dashboardStatus(
+  context: { tokens?: number | null; percent?: number | null; contextWindow?: number } | undefined,
+  modelWindow: number | undefined,
+  usage: DashboardUsage | undefined,
+): DashboardStatus | undefined {
+  const out: DashboardStatus = {};
+  const rawTokens = context?.tokens, percent = context?.percent;
+  const tokens = finiteNonnegative(rawTokens) ? rawTokens : null;
+  const rawWindow = context?.contextWindow ?? modelWindow ?? 0;
+  const window = finiteNonnegative(rawWindow) ? rawWindow : 0;
+  if (window > 0 || tokens !== null) {
+    const part: NonNullable<DashboardStatus["context"]> = { tokens, window };
+    if (tokens !== null && finiteNonnegative(percent)) part.percent = percent;
+    const lead = usage?.lead;
+    if (lead && (lead.cacheRead || lead.cacheWrite) && finiteNonnegative(lead.latestCacheHitRate)) part.cacheHit = Math.min(100, lead.latestCacheHitRate);
+    out.context = part;
+  }
+  if (usage) {
+    const { lead: { cost: leadCost }, direct } = usage;
+    if (leadCost.knownContributors > 0 || direct.knownContributors > 0) {
+      out.cost = { usd: leadCost.knownUsd + direct.knownUsd, estimate: true, incomplete: leadCost.unknownContributors > 0 || direct.unknownContributors > 0 };
+    }
+  }
+  return out.context || out.cost ? out : undefined;
 }
 
 function defaultSchedule(fn: () => void, ms: number): () => void {
@@ -155,6 +220,12 @@ function contentText(content: unknown): string {
     .filter((block) => block && typeof block === "object" && (block as { type?: unknown }).type === "text" && typeof (block as { text?: unknown }).text === "string")
     .map((block) => (block as { text: string }).text)
     .join("\n");
+}
+
+/** The optional event kinds an intake result's `accepts:` line names; none without the line. */
+export function acceptedKinds(result: unknown): string[] {
+  const line = /^accepts:(.*)$/m.exec(contentText((result as { content?: unknown } | undefined)?.content));
+  return line ? line[1]!.split(/[\s,]+/).filter((kind) => kind !== "") : [];
 }
 
 /** An assistant message's reply text: its text blocks only, never thinking or tool calls. */
@@ -274,13 +345,23 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
   let retryAt = 0;
   /** The open turn's `turn_start`, or the last turn's once it closed, for a resync to resend. */
   let lastTurnStart: DashboardEvent | undefined;
+  /** Whether the usage figures may differ from what was last sent. */
+  let statusDirty = false;
+  /** Whether the latest intake result named `status` among the kinds it accepts. */
+  let statusAccepted = false;
+  /** The last sent usage figures, as JSON; undefined when ws-mcp holds none of ours. */
+  let lastStatusSent: string | undefined;
   let inFlight = false;
   let lastFlushAt: number | undefined;
   let cancelFlush: (() => void) | undefined;
   let cancelPoll: (() => void) | undefined;
 
+  function statusDue(): boolean {
+    return statusDirty && statusAccepted && options.status !== undefined;
+  }
+
   function hasWork(): boolean {
-    return pending.length > 0 || leadDirty || agentsDirty || streamMessage !== undefined;
+    return pending.length > 0 || leadDirty || agentsDirty || streamMessage !== undefined || statusDue();
   }
 
   function scheduleFlush(): void {
@@ -370,6 +451,23 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
     return out;
   }
 
+  /** The usage figures, when they changed since the last send. */
+  function statusEvent(): DashboardEvent | undefined {
+    if (!statusDue()) return undefined;
+    statusDirty = false;
+    let figures: DashboardStatus | undefined;
+    try {
+      figures = options.status!();
+    } catch {
+      return undefined;
+    }
+    if (figures === undefined) return undefined;
+    const json = JSON.stringify(figures);
+    if (json === lastStatusSent) return undefined;
+    lastStatusSent = json;
+    return { kind: STATUS_KIND, ...figures };
+  }
+
   function drain(): DashboardEvent[] {
     const events = pending;
     pending = [];
@@ -380,6 +478,8 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
     if (agentsDirty) events.push(...agentEvents());
     const stream = streamEvent();
     if (stream) events.push(stream);
+    const status = statusEvent();
+    if (status) events.push(status);
     return events;
   }
 
@@ -390,6 +490,8 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
     lastStreamText = undefined;
     leadDirty = true;
     agentsDirty = options.agents !== undefined;
+    lastStatusSent = undefined;
+    statusDirty = options.status !== undefined;
   }
 
   /** The conversation events of an undelivered call, which a resync cannot rebuild from current state. */
@@ -432,6 +534,7 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
     lastFlushAt = now();
     let finished = false;
     let outcome: "delivered" | "off" | "failed" = "failed";
+    let accepts: string[] = [];
     let cancelTimeout: (() => void) | undefined;
     const done = (): void => {
       if (finished) return;
@@ -439,6 +542,13 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
       cancelTimeout?.();
       inFlight = false;
       lastFlushAt = now();
+      // Only a delivered call's `accepts:` line turns status on; any other outcome turns it off.
+      const accepted = outcome === "delivered" && accepts.includes(STATUS_KIND);
+      if (accepted && !statusAccepted) {
+        lastStatusSent = undefined;
+        statusDirty = options.status !== undefined;
+      }
+      statusAccepted = accepted;
       if (!stopped && outcome !== "delivered") {
         // Dropped (off) or maybe lost (failed): ws-mcp's state is stale either way.
         markResync();
@@ -468,7 +578,9 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
         events = [...resyncPrefix(events), ...events];
       }
       return Promise.resolve(target.callTool(DASHBOARD_INTAKE_TOOL, { session_key: target.sessionKey, adapter: DASHBOARD_ADAPTER_NAME, events })).then((result) => {
-        if (!finished && (result as { isError?: unknown } | undefined)?.isError !== true) outcome = "delivered";
+        if (finished) return;
+        if ((result as { isError?: unknown } | undefined)?.isError !== true) outcome = "delivered";
+        accepts = acceptedKinds(result);
       });
     };
     let run: Promise<unknown>;
@@ -567,6 +679,9 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
     enabledUntil = 0;
     retryAt = 0;
     lastTurnStart = undefined;
+    statusDirty = false;
+    statusAccepted = false;
+    lastStatusSent = undefined;
   }
 
   return {
@@ -575,6 +690,7 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
       stopped = false;
       push({ kind: "reset" });
       agentsDirty = options.agents !== undefined;
+      statusDirty = options.status !== undefined;
       scheduleFlush();
     },
     stop() {
@@ -599,6 +715,11 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
       } catch {
         // advisory
       }
+    },
+    statusChanged() {
+      if (stopped) return;
+      statusDirty = true;
+      scheduleFlush();
     },
   };
 }

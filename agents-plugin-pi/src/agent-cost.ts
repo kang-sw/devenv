@@ -256,9 +256,10 @@ class CostEstimateState {
     this.lead.cost.descendants = this.lead.cost.knownContributors || this.lead.cost.unknownContributors ? 1 : 0;
   }
 
-  presentation(): { lead: LeadUsageSummary; leadCost: string; directCost: string } {
+  presentation(): { lead: LeadUsageSummary; direct: CumulativeCost; leadCost: string; directCost: string } {
     return {
       lead: { ...this.lead, cost: cloneCost(this.lead.cost) },
+      direct: cloneCost(this.directTotal),
       leadCost: formatCumulativeCost(this.lead.cost),
       directCost: formatCumulativeCost(this.directTotal),
     };

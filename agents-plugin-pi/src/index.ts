@@ -247,7 +247,7 @@ import { assertPolicyTool, readDelegationPolicy } from "./delegation-policy.ts";
 import { registerScopedWriteTools } from "./write-scopes.ts";
 import { registerWebTools } from "./web-tools.ts";
 import { publishSubtree, SubtreeUpstream } from "./subtree-lifecycle.ts";
-import { createDashboardFeed, dashboardAgentEntries, registerDashboardLeadEvents, resolveDashboardEnabled, type DashboardFeed } from "./dashboard-feed.ts";
+import { createDashboardFeed, dashboardAgentEntries, dashboardStatus, registerDashboardLeadEvents, resolveDashboardEnabled, type DashboardFeed } from "./dashboard-feed.ts";
 import { whiteboardSubmissionText } from "./adapter-label.ts";
 
 // This is the exact physical entry module Pi loaded (whether from `-e`, an
@@ -688,6 +688,13 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   registerAgentFooterOutputEvents(pi, agentFooterLifecycle);
   pi.on("session_compact", (event) => { agentFooterLifecycle.acceptUsage(event.compactionEntry); agentFooterLifecycle.checkpoint(); });
   pi.on("session_tree", (event) => { if (event.summaryEntry) agentFooterLifecycle.acceptUsage(event.summaryEntry); });
+  // The dashboard's usage figures follow the footer's: registered after the
+  // footer's own handlers, and read later at the feed's flush, so a mark here
+  // never samples the estimate before this event's usage is accepted. After a
+  // compaction Pi's context tokens read null until the next response.
+  for (const event of ["message_end", "session_compact", "session_tree", "model_select"] as const) {
+    pi.on(event, () => { dashboardFeed?.statusChanged(); });
+  }
   for (const event of ["model_select", "thinking_level_select", "session_info_changed"] as const) {
     pi.on(event, () => { agentFooterLifecycle.refresh(); });
   }
@@ -906,6 +913,8 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
         },
         enabled: () => thenOrNow(readAdapterConfig(["dashboard_enabled"]), resolveDashboardEnabled),
         agents: () => dashboardAgentEntries(feedRegistry),
+        // Cost and cache rate come from the TUI footer's estimate; without a footer only context is sent.
+        status: () => dashboardStatus(ctx.getContextUsage(), ctx.model?.contextWindow, agentFooterLifecycle.usage()),
       });
       dashboardFeed = feed;
       agentDashboardRefreshRef.current = () => { feed.agentsChanged(); };
@@ -1151,7 +1160,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
           rowsPerAgent: () => thenOrNow(readAdapterConfig(["agent_widget_rows"]), (config) => resolveAgentWidgetRows(config.agent_widget_rows)),
         });
         agentWidgetRefreshRef.current = () => { agentWidgetHandle?.refresh(); };
-        agentCostRefreshRef.current = () => { agentFooterLifecycle.refreshAgents(); };
+        agentCostRefreshRef.current = () => { agentFooterLifecycle.refreshAgents(); dashboardFeed?.statusChanged(); };
         agentWidgetHandle.refresh();
       }
     }
@@ -1260,6 +1269,8 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     // snapshot the active tool set before later question tools were registered.
     await applySessionStartAgentFooter(agentFooterLifecycle, bootstrapRole, ctx, agentTools.rpcRegistry, dispatchStorage);
     if (startEpoch !== sessionStartEpoch) await disposeStaleBootstrap();
+    // The feed started before the footer mounted: its first figures may lack the footer's cost.
+    else dashboardFeed?.statusChanged();
   });
 
   pi.on("session_shutdown", async (event, _ctx) => {

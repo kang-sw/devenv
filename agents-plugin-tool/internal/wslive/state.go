@@ -3,6 +3,7 @@ package wslive
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -31,7 +32,15 @@ const (
 	KindReply = "reply"
 	// KindUser is a finished user message for the ring.
 	KindUser = "user"
+	// KindStatus replaces the session's usage figures (context, limits,
+	// cost); a part it omits is shown as unknown. reset clears them too.
+	KindStatus = "status"
 )
+
+// OptionalKinds are the event kinds an older ws-mcp refuses: the intake
+// result names them in an "accepts:" line, and an adapter sends one only
+// while the latest result it received names it.
+var OptionalKinds = []string{KindStatus}
 
 // Event is one adapter event. Clocks are epoch milliseconds; an absent At
 // is the intake time.
@@ -56,6 +65,11 @@ type Event struct {
 	Text    string            `json:"text,omitempty"`
 	Final   bool              `json:"final,omitempty"`
 	Origin  string            `json:"origin,omitempty"`
+	// Context, Limits, and Cost are a status event's figures. They are not
+	// under a "status" key, which is an agent's status above.
+	Context *UsageContext `json:"context,omitempty"`
+	Limits  []UsageLimit  `json:"limits,omitempty"`
+	Cost    *UsageCost    `json:"cost,omitempty"`
 }
 
 // Result is what one event changed.
@@ -100,6 +114,7 @@ type State struct {
 	reply          *Reply
 
 	agents map[string]*agentState
+	usage  *Usage
 }
 
 // NewState is an empty state for the session holding sessionKey. The key
@@ -218,6 +233,13 @@ func (st *State) Apply(ev Event, now int64) (Result, error) {
 		}
 		text, truncated := capText(st.scrub.scrub(ev.Text))
 		res.Ring = append(res.Ring, RingEntry{Kind: RingUser, Origin: origin, Text: text, Truncated: truncated})
+	case KindStatus:
+		if ev.AgentID != "" {
+			return Result{}, fmt.Errorf("status is the session's only; omit agentId")
+		}
+		usage := normalizeUsage(ev)
+		res.Changed = !reflect.DeepEqual(usage, st.usage)
+		st.usage = usage
 	case "":
 		return Result{}, fmt.Errorf("event kind is required")
 	default:
@@ -496,6 +518,7 @@ func (st *State) Snapshot(now int64) Snapshot {
 		reply := *st.reply
 		snap.Lead.Reply = &reply
 	}
+	snap.Usage = st.usage.clone()
 	for _, a := range st.agents {
 		snap.Agents = append(snap.Agents, Agent{
 			Activity:  a.view(),
@@ -645,4 +668,85 @@ func (st *State) normalizeBatch(raw json.RawMessage) (BatchView, bool) {
 		out.Generating = &g
 	}
 	return out, true
+}
+
+// normalizeUsage is a status event's figures as the snapshot keeps them:
+// negative or out-of-range numbers read as unknown, a limit of another kind
+// is dropped (the last of a kind wins, the 5-hour limit first), and nil when
+// nothing is left.
+func normalizeUsage(ev Event) *Usage {
+	u := &Usage{}
+	if c := ev.Context; c != nil {
+		ctx := &UsageContext{Window: max(c.Window, 0)}
+		if c.Tokens != nil && *c.Tokens >= 0 {
+			tokens := *c.Tokens
+			ctx.Tokens = &tokens
+		}
+		switch {
+		case ctx.Tokens == nil:
+		case c.Percent != nil && *c.Percent >= 0:
+			pct := *c.Percent
+			ctx.Percent = &pct
+		case ctx.Window > 0:
+			pct := float64(*ctx.Tokens) / float64(ctx.Window) * 100
+			ctx.Percent = &pct
+		}
+		if c.CacheHit != nil && *c.CacheHit >= 0 && *c.CacheHit <= 100 {
+			hit := *c.CacheHit
+			ctx.CacheHit = &hit
+		}
+		if ctx.Window > 0 || ctx.Tokens != nil {
+			u.Context = ctx
+		}
+	}
+	byKind := map[string]UsageLimit{}
+	for _, l := range ev.Limits {
+		if (l.Kind != LimitFiveHour && l.Kind != LimitSevenDay) || l.Percent < 0 {
+			continue
+		}
+		byKind[l.Kind] = UsageLimit{Kind: l.Kind, Percent: l.Percent, ResetsAt: max(l.ResetsAt, 0)}
+	}
+	for _, kind := range []string{LimitFiveHour, LimitSevenDay} {
+		if l, ok := byKind[kind]; ok {
+			u.Limits = append(u.Limits, l)
+		}
+	}
+	if c := ev.Cost; c != nil && c.USD >= 0 {
+		cost := *c
+		cost.Incomplete = cost.Incomplete && cost.Estimate
+		u.Cost = &cost
+	}
+	if u.Context == nil && u.Limits == nil && u.Cost == nil {
+		return nil
+	}
+	return u
+}
+
+// clone is a deep copy, so a snapshot never shares the state's pointers.
+func (u *Usage) clone() *Usage {
+	if u == nil {
+		return nil
+	}
+	out := &Usage{Limits: append([]UsageLimit(nil), u.Limits...)}
+	if u.Context != nil {
+		c := *u.Context
+		if c.Tokens != nil {
+			v := *c.Tokens
+			c.Tokens = &v
+		}
+		if c.Percent != nil {
+			v := *c.Percent
+			c.Percent = &v
+		}
+		if c.CacheHit != nil {
+			v := *c.CacheHit
+			c.CacheHit = &v
+		}
+		out.Context = &c
+	}
+	if u.Cost != nil {
+		c := *u.Cost
+		out.Cost = &c
+	}
+	return out
 }

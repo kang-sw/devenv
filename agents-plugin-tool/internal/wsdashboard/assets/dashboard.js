@@ -37,9 +37,26 @@
       var f = t.getAttribute("data-f");
       if (f === "since") t.textContent = dur(now - ms);
       else if (f === "ago") t.textContent = dur(now - ms) + " ago";
+      else if (f === "wd") t.textContent = new Date(ms).toLocaleDateString(undefined, { weekday: "short" });
       else { var d = new Date(ms); t.textContent = two(d.getHours()) + ":" + two(d.getMinutes()); }
       t.title = new Date(ms).toLocaleString();
     });
+    q("em.u-pace[data-reset]", el).forEach(function (e) { pace(e, now); });
+  }
+  // A usage limit's pace: its percent used against the straight line from
+  // 0% at the window's start to 100% at its reset; negative is under pace,
+  // nothing on the line.
+  function pace(e, now) {
+    var reset = +e.getAttribute("data-reset"), win = +e.getAttribute("data-win") * 1000, used = +e.getAttribute("data-pct");
+    var text = "", cls = "u-pace";
+    if (reset && win) {
+      var elapsed = Math.max(0, Math.min(win, now - (reset - win)));
+      var d = Math.trunc(used - elapsed / win * 100);
+      if (d > 0) { text = " (+" + d + "%)"; cls += " pos"; }
+      else if (d < 0) { text = " (\u2212" + -d + "%)"; cls += " neg"; }
+    }
+    if (e.textContent !== text) e.textContent = text;
+    if (e.className !== cls) e.className = cls;
   }
   setInterval(function () { fmtTimes(doc); }, 1000);
 

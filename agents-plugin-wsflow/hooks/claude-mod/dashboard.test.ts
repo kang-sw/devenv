@@ -16,6 +16,7 @@ import {
   userPrompt,
   whiteboardBody,
   type DashboardEvent,
+  type IntakeResult,
 } from './dashboard'
 
 const tick = async (n = 30) => {
@@ -27,7 +28,8 @@ const DELEGATE_KEY = 'delegate-key-456'
 const PLUGIN = 'ws'
 const OWN = 'mcp__plugin_ws_ws__'
 
-type Answer = boolean | Error | 'hang'
+/** An answer: delivered or an error result, a whole result, a transport failure, or none. */
+type Answer = boolean | IntakeResult | Error | 'hang'
 
 /** Fake edges: a manual clock with timers, and intake calls answered from a queue (delivered when empty). */
 function harness(opts: { key?: string | undefined } = {}) {
@@ -37,6 +39,8 @@ function harness(opts: { key?: string | undefined } = {}) {
     timers: [] as { at: number; fn: () => void; cancelled: boolean }[],
     calls: [] as { session_key: string; adapter: string; events: DashboardEvent[] }[],
     answers: [] as Answer[],
+    /** Whether a delivered answer's text names `status` on its accepts line. */
+    accepts: false,
     logs: [] as string[],
     epochs: 0,
   }
@@ -45,9 +49,10 @@ function harness(opts: { key?: string | undefined } = {}) {
     call: async (args) => {
       h.calls.push(JSON.parse(JSON.stringify(args)))
       const answer = h.answers.shift() ?? true
-      if (answer === 'hang') return new Promise<boolean>(() => {})
+      if (answer === 'hang') return new Promise<IntakeResult>(() => {})
       if (answer instanceof Error) throw answer
-      return answer
+      if (typeof answer !== 'boolean') return answer
+      return { ok: answer, text: answer ? `ok: 1 of 1 events applied\n${h.accepts ? 'accepts: status\n' : ''}` : 'unknown session_key' }
     },
     ownTool: (tool) => tool.startsWith(OWN),
     now: () => h.now,
@@ -619,5 +624,84 @@ describe('delivery', () => {
     const { h, dash } = await started()
     expect(() => dash.stepChunk(undefined, 't/0', null as never)).not.toThrow()
     expect(h.logs.some((l) => l.includes('dashboard step chunk failed'))).toBe(true)
+  })
+})
+
+describe('usage status', () => {
+  const OFF: IntakeResult = { ok: true, text: 'dashboard off: nothing recorded\n' }
+  const figures = (tokens: number) => ({ context: { tokens, window: 200_000, percent: tokens / 2_000 } })
+  const statuses = (events: DashboardEvent[]) => events.filter((e) => e.kind === 'status')
+
+  test('held figures go only after a result names status, and stop when a result does not', async () => {
+    const { h, dash, advance, sent } = await started()
+    dash.status(figures(10_000))
+    await advance(1000)
+    expect(statuses(sent())).toEqual([])
+    // A result naming status: the held figures go with the next call.
+    h.accepts = true
+    dash.turnStarted('a1')
+    await advance()
+    await advance()
+    expect(statuses(sent())).toEqual([{ kind: 'status', ...figures(10_000) }])
+    dash.status(figures(20_000))
+    await advance()
+    expect(statuses(sent()).at(-1)).toEqual({ kind: 'status', ...figures(20_000) })
+    // The same figures again change nothing.
+    const calls = h.calls.length
+    dash.status(figures(20_000))
+    await advance(1000)
+    expect(h.calls.length).toBe(calls)
+    // A "dashboard off" result names nothing: newer figures are held, not sent.
+    h.answers.push(OFF)
+    dash.turnStarted('a2')
+    await advance()
+    dash.status(figures(30_000))
+    await advance(1000)
+    expect(statuses(sent()).length).toBe(2)
+    // Named again: the latest figures follow.
+    dash.turnStarted('a3')
+    await advance()
+    await advance()
+    expect(statuses(sent()).at(-1)).toEqual({ kind: 'status', ...figures(30_000) })
+  })
+
+  test('an undelivered call turns status off; the resync\'s result turns it on and the held figures go again', async () => {
+    const { h, dash, advance, sent } = await started()
+    h.accepts = true
+    dash.status(figures(10_000))
+    dash.turnStarted('a1')
+    await advance()
+    await advance()
+    expect(statuses(sent()).length).toBe(1)
+    h.answers.push(new Error('server gone'))
+    dash.turnStarted('a2')
+    await advance()
+    await advance(RETRY_MS)
+    const resync = h.calls.findLastIndex((c) => c.events[0]?.kind === 'reset')
+    // The resync call itself carries no status: the failed call left status off.
+    expect(statuses(h.calls[resync]!.events)).toEqual([])
+    await advance()
+    expect(statuses(h.calls.slice(resync).flatMap((c) => c.events))).toEqual([{ kind: 'status', ...figures(10_000) }])
+  })
+
+  test('a restart keeps the held figures and sends them after its reset; a stop drops them', async () => {
+    const { h, dash, advance } = await started()
+    h.accepts = true
+    dash.status(figures(10_000))
+    dash.turnStarted('a1')
+    await advance()
+    await advance()
+    const before = h.calls.length
+    dash.restart()
+    await advance()
+    await advance()
+    const after = h.calls.slice(before).flatMap((c) => c.events)
+    expect(kinds(after)[0]).toBe('reset')
+    expect(statuses(after)).toEqual([{ kind: 'status', ...figures(10_000) }])
+    dash.stop()
+    dash.start()
+    await advance()
+    await advance(1000)
+    expect(statuses(h.calls.slice(before).flatMap((c) => c.events)).length).toBe(1)
   })
 })

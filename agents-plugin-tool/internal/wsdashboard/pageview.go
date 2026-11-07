@@ -61,6 +61,8 @@ type SessionView struct {
 	Lead         LeadView
 	Tree         TreeView
 	Conversation ConversationView
+	// Band is the status band around the composer.
+	Band BandView
 }
 
 // Mode is the page mode, modeLive or modeBoard.
@@ -257,6 +259,7 @@ func buildSessionView(in pageInputs) SessionView {
 		lookup = func(string) (Session, *wslive.Snapshot, bool) { return Session{}, nil, false }
 	}
 	v.Lead = leadView(in.Snapshot.Lead)
+	v.Band = bandView(in.Snapshot)
 	v.Tree.Agents = agentTree(in.Snapshot.Agents, lookup)
 	for _, a := range in.Snapshot.Agents {
 		switch a.Status {

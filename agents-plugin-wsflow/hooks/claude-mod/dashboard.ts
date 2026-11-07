@@ -20,7 +20,12 @@
 //   finished reply (`final: true`);
 // - each finished user message with its origin;
 // - `permission` while a person-approved tool call is waiting on its
-//   dialog, and its clear when the call ends.
+//   dialog, and its clear when the call ends;
+// - `status`, the session's usage figures (context, usage limits, cost),
+//   only while the latest intake result names it on its `accepts:` line: an
+//   older ws-mcp skips the kind, and a "dashboard off" or error result names
+//   nothing. The latest figures are held and sent again after a resync, since
+//   `reset` clears them on the server.
 //
 // A batch is one model request (a `turn.step`) and the tool calls it made:
 // the step streams as a generating view (thinking, replying, or a tool call
@@ -46,6 +51,8 @@
 // its conversation events back, waits RETRY_MS, and resyncs: `reset`, the
 // open turn's `turn_start`, and the full lead and subagent state. With no
 // session key held the feed keeps what it has and sends when a key arrives.
+
+import type { SessionUsage } from 'claude-code'
 
 /** The intake tool, as the MCP server names it. */
 export const INTAKE_TOOL = 'dashboard_intake'
@@ -377,15 +384,68 @@ export function batchViews(buf: Buffer): BatchView[] {
   return views
 }
 
+// ---- Usage status ----------------------------------------------------------
+
+/** The optional event kind that carries usage figures, sent only while the intake names it. */
+export const STATUS_KIND = 'status'
+
+/** The optional event kinds an intake result's `accepts:` line names; none without the line. */
+export function acceptedKinds(text: string): string[] {
+  const line = /^accepts:(.*)$/m.exec(text)
+  return line ? line[1]!.split(/[\s,]+/).filter((k) => k !== '') : []
+}
+
+/** A `status` event's figures; a part with no figure is left out. */
+export type StatusFigures = {
+  context?: { tokens: number | null; window: number; percent?: number; cacheHit?: number }
+  limits?: { kind: 'five_hour' | 'seven_day'; percent: number; resetsAt?: number }[]
+  cost?: { usd: number; estimate: false; incomplete: false }
+}
+
+/**
+ * The status figures of a `$.session.usage({ breakdown: 'summary' })` read.
+ * The window and percent are the terminal band's (the compaction window, else
+ * the model's), so the page tracks the host's own line. The cache hit rate is
+ * the last response's cache reads over all its input (uncached, read,
+ * written), not the band's reads-over-cached figure.
+ */
+export function statusFigures(u: SessionUsage): StatusFigures {
+  const out: StatusFigures = {}
+  const raw = u.context.breakdown?.rawMaxTokens
+  const window = raw !== undefined && raw > 0 ? raw : u.context.window
+  const tokens = u.context.tokens ?? null
+  if (window > 0 || tokens !== null) {
+    const context: NonNullable<StatusFigures['context']> = { tokens, window: Math.max(0, window) }
+    if (tokens !== null && window > 0) context.percent = (tokens / window) * 100
+    const api = u.context.breakdown?.apiUsage
+    const input = api ? api.input_tokens + api.cache_read_input_tokens + api.cache_creation_input_tokens : 0
+    if (api && input > 0) context.cacheHit = (api.cache_read_input_tokens / input) * 100
+    out.context = context
+  }
+  const limits: NonNullable<StatusFigures['limits']> = []
+  for (const kind of ['five_hour', 'seven_day'] as const) {
+    const r = u.rateLimits.find((l) => l.kind === kind)
+    if (!r || !Number.isFinite(r.percentUsed) || r.percentUsed < 0) continue
+    const resetsAt = r.resetsAt === undefined ? NaN : Date.parse(r.resetsAt)
+    limits.push({ kind, percent: r.percentUsed, ...(Number.isFinite(resetsAt) ? { resetsAt } : {}) })
+  }
+  if (limits.length > 0) out.limits = limits
+  if (u.cost && Number.isFinite(u.cost.usd) && u.cost.usd >= 0) out.cost = { usd: u.cost.usd, estimate: false, incomplete: false }
+  return out
+}
+
 // ---- The feed --------------------------------------------------------------
 
-export type DashboardEvent = { kind: 'reset' | 'turn_start' | 'turn_end' | 'agent' | 'permission' | 'reply' | 'user'; [field: string]: unknown }
+export type DashboardEvent = { kind: 'reset' | 'turn_start' | 'turn_end' | 'agent' | 'permission' | 'reply' | 'user' | 'status'; [field: string]: unknown }
+
+/** One intake call's outcome: whether it was delivered (not an error result) and its result text. */
+export type IntakeResult = { ok: boolean; text: string }
 
 export interface DashboardEdges {
   /** The session key the feed reports under: the conversation's lead key, else undefined (held until one arrives). */
   key: () => string | undefined
-  /** One intake call; resolves with whether it was delivered (not an error result), rejects on transport failure. */
-  call: (args: { session_key: string; adapter: string; events: DashboardEvent[] }) => Promise<boolean>
+  /** One intake call; resolves with its outcome and result text, rejects on transport failure. */
+  call: (args: { session_key: string; adapter: string; events: DashboardEvent[] }) => Promise<IntakeResult>
   /** Whether a tool is one of this plugin's MCP server tools, whose `session_key` names a delegate's key. */
   ownTool: (tool: string) => boolean
   now: () => number
@@ -453,6 +513,8 @@ export interface Dashboard {
   toolChecked: (check: { agentId?: string; id?: string; tool: string; input: unknown; approver?: string }, decision: string) => void
   notified: (type: string) => void
   agentSpawned: (spawn: { agentId: string; parentId?: string; description?: string; subagentType?: string }) => void
+  /** The session's latest usage figures: held, and sent while the intake accepts `status`. */
+  status: (figures: StatusFigures) => void
 }
 
 const LEAD = ''
@@ -486,6 +548,12 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
   let slowArmed = false
   /** Bumped by every reset, so a call answered after a stop or a restart changes nothing. */
   let generation = 0
+  /** The latest usage figures, as JSON; undefined before any. */
+  let status: string | undefined
+  /** Whether `status` differs from what ws-mcp holds. */
+  let statusDirty = false
+  /** Whether the latest intake result named `status` among the kinds it accepts. */
+  let statusAccepted = false
 
   const lead = (): AgentRec => rec(LEAD)
 
@@ -500,13 +568,15 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
 
   const idOf = (agentId: string | undefined) => agentId ?? LEAD
 
+  const statusDue = () => statusDirty && statusAccepted && status !== undefined
+
   function hasWork(): boolean {
-    return pending.length > 0 || replyDirty || [...agents.values()].some((r) => r.dirty)
+    return pending.length > 0 || replyDirty || statusDue() || [...agents.values()].some((r) => r.dirty)
   }
 
   /** Whether streamed reply text is the only pending change, so the slow cadence applies. */
   function textOnly(): boolean {
-    return replyDirty && pending.length === 0 && ![...agents.values()].some((r) => r.dirty)
+    return replyDirty && pending.length === 0 && !statusDue() && ![...agents.values()].some((r) => r.dirty)
   }
 
   function scheduleFlush(): void {
@@ -581,12 +651,16 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
     return { kind: 'reply', text }
   }
 
-  /** Every dirty state as events, in a stable order: the lead, the subagents, the streamed reply. */
+  /** Every dirty state as events, in a stable order: the lead, the subagents, the streamed reply, the usage status. */
   function dirtyEvents(): DashboardEvent[] {
     const out: DashboardEvent[] = []
     for (const [id, r] of agents) if (r.dirty) out.push(...agentEvents(id, r))
     const stream = streamEvent()
     if (stream) out.push(stream)
+    if (statusDue()) {
+      statusDirty = false
+      out.push({ kind: STATUS_KIND, ...(JSON.parse(status!) as StatusFigures) })
+    }
     return out
   }
 
@@ -612,6 +686,7 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
     lead()
     lastReplySent = undefined
     replyDirty = reply !== undefined
+    statusDirty = status !== undefined
   }
 
   /** The conversation events of an undelivered call, which a resync cannot rebuild from current state. */
@@ -665,6 +740,7 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
     const callGeneration = generation
     let finished = false
     let delivered = false
+    let accepts: string[] = []
     const done = () => {
       if (finished) return
       finished = true
@@ -672,6 +748,10 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
       if (callGeneration !== generation) return
       inFlight = false
       lastFlushAt = edges.now()
+      // Only an answered call's `accepts:` line turns status on; any other outcome turns it off.
+      const accepted = accepts.includes(STATUS_KIND)
+      if (accepted && !statusAccepted) statusDirty = status !== undefined
+      statusAccepted = accepted
       if (!stopped && !delivered) {
         requeue(events)
         markResync()
@@ -680,15 +760,16 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
       scheduleFlush()
     }
     const cancelTimeout = edges.schedule(CALL_TIMEOUT_MS, done)
-    let run: Promise<boolean>
+    let run: Promise<IntakeResult>
     try {
       run = edges.call({ session_key: key, adapter: ADAPTER, events })
     } catch (err) {
       run = Promise.reject(err)
     }
     run.then(
-      (ok) => {
+      ({ ok, text }) => {
         if (!finished && ok) delivered = true
+        if (!finished) accepts = acceptedKinds(text)
         if (!ok) edges.log('dashboard intake answered an error; resyncing')
         done()
       },
@@ -716,6 +797,8 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
     lastTurnStart = undefined
     resyncDue = false
     retryAt = 0
+    // The held usage outlives a restart: the restart's `reset` clears it on the server, so it goes again.
+    statusDirty = status !== undefined
   }
 
   /** Runs one handler only while the feed runs; a throw is logged and never reaches the session. */
@@ -753,6 +836,9 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
     active: () => !stopped,
     start() {
       reset()
+      status = undefined
+      statusDirty = false
+      statusAccepted = false
       stopped = false
       sentKey = undefined
       resyncDue = true
@@ -761,6 +847,9 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
     },
     stop() {
       reset()
+      status = undefined
+      statusDirty = false
+      statusAccepted = false
       stopped = true
     },
     restart: guard('restart', () => {
@@ -908,6 +997,13 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
       if (label) r.label = label
       if (spawn.subagentType?.trim()) r.caption = spawn.subagentType.trim()
       markDirty(spawn.agentId)
+    }),
+    status: guard('status', (figures: StatusFigures) => {
+      const json = JSON.stringify(figures)
+      if (json === status) return
+      status = json
+      statusDirty = true
+      scheduleFlush()
     }),
   }
 }

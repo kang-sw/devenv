@@ -397,3 +397,107 @@ func TestRejectedPermissionCreatesNoAgent(t *testing.T) {
 		t.Fatalf("a rejected event created %+v", agents)
 	}
 }
+
+func i64p(v int64) *int64     { return &v }
+func f64p(v float64) *float64 { return &v }
+
+// TestStatusEventReplacesUsage pins the status kind: its figures land in the
+// snapshot's usage (percent computed from tokens and window when the host
+// sends none, a host percent kept as sent), a later status event replaces
+// the whole value, an identical one changes nothing, an empty one clears
+// it, and reset clears it too.
+func TestStatusEventReplacesUsage(t *testing.T) {
+	st := NewState(ownerKey)
+	if st.Snapshot(1).Usage != nil {
+		t.Fatal("usage present before any status event")
+	}
+	res := mustApply(t, st, Event{Kind: KindStatus,
+		Context: &UsageContext{Tokens: i64p(45_000), Window: 100_000, CacheHit: f64p(92.5)},
+		Limits:  []UsageLimit{{Kind: LimitSevenDay, Percent: 17, ResetsAt: 9_000}, {Kind: LimitFiveHour, Percent: 42, ResetsAt: 8_000}},
+		Cost:    &UsageCost{USD: 1.5},
+	}, 1_000)
+	if !res.Changed || res.Urgent {
+		t.Fatalf("status result = %+v, want changed and not urgent", res)
+	}
+	u := st.Snapshot(1_000).Usage
+	if u == nil || u.Context == nil || *u.Context.Tokens != 45_000 || u.Context.Window != 100_000 || *u.Context.Percent != 45 || *u.Context.CacheHit != 92.5 {
+		t.Fatalf("context = %+v", u)
+	}
+	if len(u.Limits) != 2 || u.Limits[0].Kind != LimitFiveHour || u.Limits[1].Kind != LimitSevenDay || u.Limits[0].ResetsAt != 8_000 {
+		t.Fatalf("limits = %+v, want the 5-hour limit first", u.Limits)
+	}
+	if u.Cost == nil || u.Cost.USD != 1.5 || u.Cost.Estimate {
+		t.Fatalf("cost = %+v", u.Cost)
+	}
+
+	same := Event{Kind: KindStatus,
+		Context: &UsageContext{Tokens: i64p(45_000), Window: 100_000, CacheHit: f64p(92.5)},
+		Limits:  []UsageLimit{{Kind: LimitFiveHour, Percent: 42, ResetsAt: 8_000}, {Kind: LimitSevenDay, Percent: 17, ResetsAt: 9_000}},
+		Cost:    &UsageCost{USD: 1.5},
+	}
+	if res := mustApply(t, st, same, 2_000); res.Changed {
+		t.Fatal("an identical status event reported a change")
+	}
+
+	// A host percent stays as sent; parts not sent are gone.
+	mustApply(t, st, Event{Kind: KindStatus, Context: &UsageContext{Tokens: i64p(10), Window: 100, Percent: f64p(12.5)}}, 3_000)
+	u = st.Snapshot(3_000).Usage
+	if *u.Context.Percent != 12.5 || u.Limits != nil || u.Cost != nil || u.Context.CacheHit != nil {
+		t.Fatalf("replaced usage = %+v %+v", u, u.Context)
+	}
+
+	if res := mustApply(t, st, Event{Kind: KindStatus}, 4_000); !res.Changed || st.Snapshot(4_000).Usage != nil {
+		t.Fatal("an empty status event did not clear usage")
+	}
+
+	mustApply(t, st, same, 5_000)
+	mustApply(t, st, Event{Kind: KindReset}, 6_000)
+	if st.Snapshot(6_000).Usage != nil {
+		t.Fatal("reset kept usage")
+	}
+}
+
+// TestStatusUnknownContextAndBadFigures pins the unknown states: null tokens
+// (after a compaction) keep the window with no percent, out-of-range
+// numbers read as unknown, a limit of another kind is dropped, and an
+// estimate's incomplete flag survives while an exact cost cannot be
+// incomplete. A status event for a subagent is refused.
+func TestStatusUnknownContextAndBadFigures(t *testing.T) {
+	st := NewState(ownerKey)
+	mustApply(t, st, Event{Kind: KindStatus,
+		Context: &UsageContext{Tokens: nil, Window: 200_000, CacheHit: f64p(140)},
+		Limits:  []UsageLimit{{Kind: "monthly", Percent: 5}, {Kind: LimitFiveHour, Percent: -1}},
+		Cost:    &UsageCost{USD: 0.75, Estimate: true, Incomplete: true},
+	}, 1_000)
+	u := st.Snapshot(1_000).Usage
+	if u.Context == nil || u.Context.Tokens != nil || u.Context.Percent != nil || u.Context.Window != 200_000 || u.Context.CacheHit != nil {
+		t.Fatalf("unknown context = %+v", u.Context)
+	}
+	if u.Limits != nil {
+		t.Fatalf("limits = %+v, want none kept", u.Limits)
+	}
+	if !u.Cost.Estimate || !u.Cost.Incomplete {
+		t.Fatalf("estimate cost = %+v", u.Cost)
+	}
+	raw, err := json.Marshal(st.Snapshot(1_000))
+	if err != nil || !strings.Contains(string(raw), `"tokens":null`) {
+		t.Fatalf("unknown tokens are not null in the snapshot: %s", raw)
+	}
+
+	mustApply(t, st, Event{Kind: KindStatus, Cost: &UsageCost{USD: 2, Incomplete: true}, Context: &UsageContext{Tokens: i64p(-5)}}, 2_000)
+	u = st.Snapshot(2_000).Usage
+	if u.Context != nil || u.Cost.Incomplete {
+		t.Fatalf("exact cost or bad tokens kept: %+v", u)
+	}
+
+	if _, err := st.Apply(Event{Kind: KindStatus, AgentID: "a1"}, 3_000); err == nil {
+		t.Fatal("a subagent status event applied")
+	}
+
+	// The snapshot's usage is a copy the state does not share.
+	snap := st.Snapshot(3_000)
+	snap.Usage.Cost.USD = 99
+	if st.Snapshot(3_000).Usage.Cost.USD != 2 {
+		t.Fatal("a snapshot shares the state's usage")
+	}
+}
