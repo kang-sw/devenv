@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: cce0c1bf7289ab86
 sage-review-completeness-reviewed: cce0c1bf7289ab86
+completed: 2026-11-07
 ---
 
 # Dashboard: link click actions, file view route, and mermaid in the conversation
@@ -152,3 +153,91 @@ render tests that a served page's file paths become actionable links while a
 disk board keeps `file:` links; a finished conversation entry draws mermaid
 and a streaming one keeps the code block. Manual: Cmd/Ctrl+click and the menu
 in a desktop browser, path copy over LAN.
+
+### Result (264ec72cd) - 2026-11-07
+
+Landed in 073fd3873 (renderer), 0336011f8 (routes and wiring), 309256229
+(page menu), d102f72b1 (docs), then the review fix 264ec72cd.
+
+- **Renderer (wswhiteboard).** `View.FileActions` / `TextTargets.FileActions`
+  return a `FileAction{Href, Rel, Abs}` per file target. On a page with
+  FileText, a file link or autolink renders as an anchor around its label,
+  `data-wl="file"` with `href` (file view), `data-rel`, `data-abs`, and a
+  title of the root-relative path. This replaces the trailing path text. An
+  image's fallback path text becomes the same anchor. Outside the root the
+  anchor has no href (`tabindex="0"`, copy only). An Href is accepted only as
+  a scheme-less absolute path (`daemonPath`). http(s) links on such a page get
+  `data-wl="url"`. `TextTargets.Mermaid` opts in to drawn mermaid. A disk
+  board (no FileText) keeps `file:` links and unmarked URLs.
+- **File view.** `GET /s/<rid>/file?path=` (`file_route.go`).
+  - Containment: lexical, Lstat (regular file, so no symlinks), EvalSymlinks
+    against the resolved root, then `os.SameFile` between the Lstat and the
+    open.
+  - What it serves: images inline under the image CSP; `.md`/`.markdown`
+    rendered in escaped mode, mermaid off, under a no-script CSP, with
+    relative links and images resolved against the file's own directory and
+    out-of-root targets as path text (the page has no JS); other UTF-8 text
+    as `text/plain` with nosniff and the image CSP; binary or over-2-MiB
+    files as a "not viewable" page with copy buttons whose one inline script
+    is admitted by a per-response nonce.
+  - Every refusal answers 404.
+- **System open.** `POST /s/<rid>/open {target}` (`sysopen_route.go`).
+  - Gates, in order: POST, `localViewer` (404 otherwise), `sameOrigin` (403),
+    a known session.
+  - Target: an http(s) URL with a host and no userinfo, or exactly
+    `/s/<rid>/file?path=<non-empty>` for this session, which is opened as
+    `http://<request Host>/...`. Printable ASCII only, with no space, quote,
+    or backslash, at most 8 KiB.
+  - It runs exec with no shell: `open`, `xdg-open`, or `rundll32
+    url.dll,FileProtocolHandler`. A start failure answers 500.
+  - `DaemonOptions.openSystem` is the test seam.
+  - The session page carries `data-sysopen="1"` only for a loopback viewer.
+- **Conversation.** `replyMarkdown` returns finished (mermaid drawn) and
+  streaming (code block) renderers, both with the served link rule. The
+  served board in `internal/mcp/dashboard_page.go` gets
+  `wsdashboard.FileActions`.
+- **Page script.** A delegated capture click on `a[data-wl]` opens a fixed
+  menu. Items: open in new tab; open in system browser (data-sysopen only); a
+  file link copies its relative path (when there is one) and absolute path,
+  and a URL link copies the URL.
+  - Cmd/Ctrl+click on a link with an href is left to the browser's new tab;
+    a copy-only link opens the menu.
+  - Keyboard: Enter on a link opens the menu below it, arrows move between
+    items, and Escape closes it. A wheel or touch scroll, a resize, or the
+    window losing focus also closes it.
+  - Copy uses the Clipboard API in a secure context, else a textarea with
+    `execCommand("copy")`, and shows a toast.
+  - `mermaid()` runs after the entries merge and after the history insert,
+    and loads its script once, retrying after a failed load.
+- **Verification.** `go test ./...` in agents-plugin-tool passes,
+  `go vet ./...` is clean, `scripts/smoke-ws-mcp.sh ..` exits 0, and the JS
+  parses under node. New or changed tests:
+  - `wsdashboard/file_route_test.go`: inside root, outside root, traversal,
+    symlinks, `.md` rendering, image and SVG inline, HTML as text, binary
+    and oversize pages with nonce CSP, FileActions mapping.
+  - `wsdashboard/sysopen_route_test.go`: loopback only, LAN token 404,
+    Origin 403, target allow-list, a stubbed command receiving the exact
+    target, 500 on failure, the page flag.
+  - `wsdashboard/access_test.go`: both routes added to `guardedRoutes`.
+  - `wsdashboard/conversation_markdown_test.go`: finished reply draws
+    mermaid while the streaming one keeps the code block; action links in
+    finished and streaming replies.
+  - `wswhiteboard`: action-link rendering, a zero FileAction keeping path
+    text, a disk board keeping `file:` links, the RenderText mermaid and
+    actions options.
+  - `mcp/dashboard_page_test.go`: the served board's action links.
+- **Decisions.**
+  - A served file link is an anchor around its label, not label plus path
+    text, and the path is its title.
+  - Markdown relative links use the md file's directory as their base.
+  - The 2 MiB cap applies to text and md only; images are served as the
+    image route serves them.
+  - The open route answers 404 to non-local viewers, so it stays uniform
+    under the LAN guard test.
+  - `internal/mcp/dashboard_page.go` was touched to wire the served board.
+  - The JS was written directly.
+- **Not done.** The manual browser checks (Cmd/Ctrl+click and the menu in a
+  desktop browser, path copy over LAN) were not run. Panel rows (ticket
+  `PanelRow.Path`) stay path text; actioning them is out of this ticket's
+  scope. The sanitizer collision with 261107-feat-ws-whiteboard-now-markdown
+  passes to that ticket, which lands second.
