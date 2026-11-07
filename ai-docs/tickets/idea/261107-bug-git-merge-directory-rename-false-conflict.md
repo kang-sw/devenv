@@ -1,5 +1,5 @@
 ---
-title: ""
+title: "git.merge: directory-rename detection reports a false conflict on ticket status directories"
 ---
 
 ## Background
