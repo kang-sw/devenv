@@ -315,3 +315,27 @@ func TestMarkdownMermaidBlock(t *testing.T) {
 		})
 	}
 }
+
+// TestRenderTextMermaidOption pins RenderText's mermaid switch: on, a
+// mermaid fence is a <pre class="mermaid"> for the host page to draw; off
+// (the default), it is a plain code block.
+func TestRenderTextMermaidOption(t *testing.T) {
+	src := "```mermaid\ngraph TD; A-->B\n```"
+	if on := string(RenderText(src, TextTargets{Mermaid: true})); !strings.Contains(on, `<pre class="mermaid">graph TD; A--&gt;B`) {
+		t.Errorf("mermaid on: %s", on)
+	}
+	off := string(RenderText(src, TextTargets{}))
+	if strings.Contains(off, `class="mermaid"`) || !strings.Contains(off, `<code class="language-mermaid">`) {
+		t.Errorf("mermaid off: %s", off)
+	}
+}
+
+// TestRenderTextFileActions: RenderText passes FileActions through, so a
+// conversation bubble gets the served page's action links.
+func TestRenderTextFileActions(t *testing.T) {
+	out := string(RenderText("[a](docs/a.md) [w](https://example.com/)", TextTargets{
+		FileText:    func(p string) string { return p },
+		FileActions: func(p string) FileAction { return FileAction{Href: "/s/r/file?path=" + p, Rel: p, Abs: "/root/" + p} },
+	}))
+	wantAll(t, out, `<a href="/s/r/file?path=docs/a.md" data-wl="file" data-rel="docs/a.md" data-abs="/root/docs/a.md" title="docs/a.md">a</a>`, `data-wl="url"`)
+}
