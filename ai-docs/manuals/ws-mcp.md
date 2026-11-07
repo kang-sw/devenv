@@ -100,11 +100,29 @@ The daemon serves its pages with no CORS: `/` lists sessions by project
 `/s/<reply-id>/events` are their SSE streams, which send only the page regions
 whose hash changed. A session with a fresh adapter snapshot gets the live
 layout (lead, agent tree, conversation, board); one without gets the
-board-first page. File links on the served board render as repo-relative path
-text; a board image inside the session's project root loads through `GET
-/s/<reply-id>/image?path=<root-relative path>`, which serves only an
-image-extension file that still resolves inside the root after every symlink
-(404 otherwise), and any other image renders as path text. The live layout's
+board-first page. On the served board and in the conversation's lead
+replies, a file link renders as an action link (`data-wl="file"`, titled with
+its repo-relative path) and an http(s) link is marked `data-wl="url"`: a
+click opens a menu (open in new tab, open in system browser, copy relative or
+absolute path; copy URL for an http(s) link), and Cmd/Ctrl+click opens a new
+tab. A file inside the session's project root links `GET
+/s/<reply-id>/file?path=<root-relative path>`, the file view, which serves a
+regular, non-symlink file that still resolves inside the root after every
+symlink (404 otherwise), to a loopback viewer and a LAN token holder alike:
+an image inline, markdown rendered in the board's escaped mode with relative
+links resolved against the file's own directory, other UTF-8 text as
+`text/plain`, and a binary or over-2-MiB file as a page offering the path
+copies. A file outside the root offers the copies only. A board image inside
+the root loads through `GET /s/<reply-id>/image?path=<root-relative path>`,
+which serves only an image-extension file under the same containment, and
+any other image renders as its path. A finished lead reply draws its mermaid
+fences; the reply still streaming keeps them code blocks. `POST
+/s/<reply-id>/open {target}` opens an http(s) URL or this session's own file
+view path in the host's default browser with the OS open command, run with
+no shell (`rundll32 url.dll,FileProtocolHandler` on Windows); it requires a
+viewer on this machine (404 to any other, token or not) and an `Origin`
+equal to the daemon's own, and the page offers the item only to such a
+viewer. The live layout's
 composer sends: `POST /s/<reply-id>/message {text, chips, images, refs,
 refNums}` holds the message in the session's inbox (merged into a still-held
 one that is not steered). `images` are new uploads `{name, data, n}` (base64,
