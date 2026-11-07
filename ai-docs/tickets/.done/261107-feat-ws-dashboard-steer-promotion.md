@@ -5,6 +5,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 2f337dfa2fc657d8
 sage-review-completeness-reviewed: 2f337dfa2fc657d8
+completed: 2026-11-07
 ---
 
 # Dashboard: promote a held message to steering
@@ -183,3 +184,68 @@ steer delivery, the conversation record, and re-arming without steer mode
 while the drain is refused; a live check on Claude and Pi that a promoted
 message reaches the model before the turn ends, appears in the page
 conversation, and that an unpromoted one arrives after it.
+
+### Result (96647dd8f) - 2026-11-07
+
+Landed in d34ef5c2a (inbox, route, page, drain argument, wait flag,
+Claude mod, runtime.json), b54af3035 (Pi), and 96647dd8f (ws-mcp manual).
+
+- Inbox: `Entry.Steer`; `wsinbox.Steer` claims the held entry and writes
+  the whole entry with `steer: true` under a fresh name (idempotent on an
+  already steered entry, `ErrGone` once drained or rewritten). A steered
+  entry stays held and cancellable. `MergeTarget` (the newest held entry
+  that is not steered, returned as a record) is `Send`'s merge target.
+  `DrainSteer` claims only steered entries, `SteerNames` lists them, and
+  `Drain` still takes everything.
+- Page: `POST /s/<rid>/steer {id}` behind the same Origin, adapter (409),
+  and id (400 malformed, 409 gone) checks, answering the new `{id}`. The
+  held bubble shows a steer button, or a `steer` marker with no button
+  once steered.
+- `dashboard.inbox_drain` takes `steer_only`. `mailbox wait --board-steer`
+  wakes only on a steered entry (peek only; refused together with
+  `--board-inbox`; reported as `board`; kept by the re-arm command).
+- Claude mod: every main-thread tool boundary with board submission on
+  calls the steer-only drain. It appends the texts as one whiteboard-
+  labelled user row ahead of the queued mail row and records a whiteboard
+  user entry (`dashboard.whiteboardSteered`). A refused row carries the
+  texts to the turn-end flush, which submits them ahead of the held drain,
+  even with the knob off since. If the turn already ended, it flushes them
+  at once. A stop records them.
+- Pi: while a message is held and a steer can land (run flag set, no
+  compaction hold), the waiter arms `--board-steer`. Its wake drains steer-
+  only and sends `sendUserMessage(..., {deliverAs: "steer"})` under the
+  whiteboard label, which the feed records as a whiteboard user message.
+  While a steer would be refused, the wait arms without steer mode;
+  `leadSettled` (also fired after compaction) restores it. Texts claimed
+  after the post-drain re-check fails, or whose send throws, are carried
+  to the next idle drain and injected first.
+- Pi run-end steer check (installed 1.0.4): a steer is not dropped as the
+  run ends. While streaming it queues; after the run it starts a new run
+  or is deferred during agent_settled; past the final queued-message check
+  it waits for the next run start. Only compaction refuses it (`prompt()`
+  throws and the wrapper only reports), and the steerable check plus the
+  post-drain re-check cover that case.
+- runtime.json: `dashboard.inbox_drain` minimum raised to `0.48.11-dev` in
+  ws, wsflow, and Pi (Pi kept byte-identical). The launcher checks only
+  tool names and the exact plugin_version, and `bump-ws-version.sh`
+  flattens the ranges, so the exact version match is the effective guard.
+
+Verification: `go test ./...` (agents-plugin-tool) passed, plus race runs
+of the inbox and route tests. `claude plugin test .` passed in agents-plugin
+and agents-plugin-wsflow (626/626 each), `claude plugin validate .` passed
+in both, and `TestWsflowHooksMirrorUpToDate` passed. Targeted Pi
+`node --test` runs passed (mailbox-waiter, mailbox-rearm/bootstrap/push-
+flush integration, native-tool-registration, dashboard-feed,
+adapter-label: 125/125), as did `python3 -m unittest discover
+agents-plugin-wsflow/tests`. Lite review: clean.
+
+Not done here:
+- The image-attach clauses (copy image paths on steer; the attachment cap
+  counts the non-steered target) wait for merge time. This branch's base
+  predates 261107-feat-ws-dashboard-composer-image-attach on develop.
+  `Steer` copies the whole entry, so `Images` carries over. In develop's
+  `sendMessage`, the cap line
+  `held[len(held)-1].Entry.Images` becomes `MergeTarget(dir)`'s record.
+- The live Claude and Pi checks (a promoted message reaches the model
+  before the turn ends and shows in the page conversation; an unpromoted
+  one arrives after it) need a live session.
