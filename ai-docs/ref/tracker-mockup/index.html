@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>tracker mockup v2 - ws dashboard frame</title>
+<title>tracker mockup v3 - ws dashboard frame</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -25,8 +25,14 @@
     <span class="host">CLAUDE</span>
     <label class="viewing" title="mockup control: whose perspective the tracker is shown from">viewing as
       <select id="viewer"></select>
+    </label>
+    <label class="viewing" title="mockup control: which clone (one ref each) the viewer reads and writes; * = unpushed writes">clone
+      <select id="vclone"></select>
       <span class="chip" id="vstore"></span>
     </label>
+    <span class="viewing" title="mockup clock: every write is stamped with it and advances it by a minute">now <code id="vclock"></code>
+      <button class="btn mini" data-act="clock" data-min="60">+1h</button><button class="btn mini" data-act="clock" data-min="1440">+1d</button>
+    </span>
     <span class="sse" title="live updates"><span class="dot"></span>live</span>
   </div>
 
@@ -41,7 +47,7 @@
       </div>
     </div></div>
     <div class="msg lead"><div class="mh"><b>Lead</b> 09:40 <span class="src">TRACKER</span></div><div class="bub">
-      Your agent set the status of a task assigned to you (recorded automatically, only for your own assignments). A request waiting for you is never accepted by the agent.
+      Your agent set the status of a task assigned to you (recorded automatically, only for your own assignments). A pending assignment waiting for you is never accepted or declined by the agent.
     </div></div>
     <div class="sysline">conversation placeholder - the tracker lives in the drawer</div>
   </main>
