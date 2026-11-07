@@ -456,6 +456,53 @@ Build `internal/wsledger` against local repositories only, with no remote.
   signature check), and a verdict flip behind a caller's cursor (a
   revocation cutoff, a filled gap) reaching that caller.
 
+### Result (d930018ff) - 2026-11-08
+
+Landed `agents-plugin-tool/internal/wsledger` (b9bf6f14b, d2593632d,
+d930018ff): `Create` / `Join` / `Open`, the journal with batch close on
+receive or `Sync`, re-issue, and a pure verification core (`verify.go`)
+that never touches git. The package doc (`doc.go`) documents the ref
+layout, commit format, `roles.json`, identity payloads, verdict rules,
+journal, and cursor.
+
+Verification: `go build ./...`, `go vet ./internal/wsledger/`, and
+`go test -count=1 ./internal/wsledger/` pass with real git 2.50.1 and
+`ssh-keygen`. The tests cover every Phase 1 scenario plus a `parsePatch`
+table; `-race` passes on the concurrent-append and veto tests.
+
+Decisions taken:
+- A signature that does not verify cryptographically, or no signature, is
+  an envelope break (no seq). A good signature from a key the author did
+  not hold in the commit's causal past is a Flagged verdict, and its seq
+  counts. git reports the signer fingerprint even when the allowed-signers
+  file does not list the key, so verdicts are a pure function of the commit
+  and are cached by oid. The allowed-signers file is still derived from the
+  identity keys.
+- Each revocation's validity is computed in its own scoped pass over its
+  causal past, using only the cuts of revocations inside that past. This
+  well-founded reading follows "judged against its own causal past only".
+  The mockup's grow-only ignored set can keep cuts from a revocation that
+  later turns invalid.
+- Commit contents are read with one nonce-delimited `git log -p
+  --unified=0` per moved ref. A commit counts only when it is a single
+  pure append that starts at the tracked line count. A commit that is not
+  marks the rest of its ref malformed, because later diffs no longer prove
+  what each commit added.
+- `Event` gained `Pending`: the open batch's events appear as a virtual
+  commit with a provisional verdict, so the domain sees its own writes
+  before the batch closes.
+- `seen` records only the resolved (non-waiting) prefix of each stream. A
+  writer's own events therefore never wait on its own view, and honest
+  writers cannot form causal cycles.
+- When an admin adds this clone's key, a batch whose causal past lacks the
+  key takes the current `seen` before it closes. Without that it could
+  never verify.
+- The join exception applies when `member.join` is the first event of its
+  commit. `Join` refuses a clone that already has commits, because a claim
+  commit must be the root of its stream.
+- `ssh-keygen` is run directly only to generate the key. Every git call
+  goes through `wsgit.Runner`, and `wsgit` itself is unchanged.
+
 ### Phase 2: Remote sync, registration, and rewind refusal
 
 Add remotes on top of Phase 1's commit and verify paths.
