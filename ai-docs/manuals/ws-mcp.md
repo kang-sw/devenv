@@ -113,7 +113,16 @@ tools never depend on it. Its state lives under `<cache root>/dashboard/`:
   message promoted to steering is rewritten with `steer: true` and is no
   longer a merge target; `dashboard.inbox_drain steer_only: true` claims only
   those, and `mailbox wait --board-steer` wakes only on one (the wait an
-  adapter arms mid-turn; exclusive with `--board-inbox`).
+  adapter arms mid-turn; exclusive with `--board-inbox`). An interrupt entry
+  (`interrupt: true`, only its creation time as `sentAt`) asks the adapter to
+  stop the running turn; it is never a message (no merge, no image cap, no
+  held bubble; cancel and steer refuse it).
+  `dashboard.inbox_drain interrupt_only: true` claims only those (each
+  record `interrupt: true`; exclusive with `steer_only`), the steer-only
+  drain leaves them, and the full drain drops them without a `drained/`
+  record. `mailbox wait --board-interrupt` also wakes on one (alone, or with
+  `--board-inbox` or `--board-steer`), counted as `interrupt` (its own
+  `kinds` value), never as `board`.
 
 After a store write the serving ws-mcp sends `POST /nudge {reply_id,
 project}`; the daemon also re-reads every session every 30 seconds.
@@ -178,7 +187,10 @@ images, nums}`, and `POST
 /s/<reply-id>/steer {id}` promotes a held one to steering, answering the
 rewritten entry's new `{id}` (409 once the session has received it). The
 adapter claims a steered message at the session's next tool boundary instead
-of at the turn end. All three require an `Origin` equal to the daemon's own,
+of at the turn end. `POST /s/<reply-id>/interrupt` (body ignored) takes back
+every held message, steered or not, and writes an interrupt entry in one step
+under the inbox lock, answering `{held: [{id, text, chips, images, nums}]}`
+oldest first, each shaped as a cancel's answer. All four require an `Origin` equal to the daemon's own,
 and a session without a fresh adapter snapshot gets 409. `whiteboard.update`'s `full:` line names
 `http://127.0.0.1:<port>/s/<reply-id>` once the session's last nudge was
 answered, and the page path otherwise.

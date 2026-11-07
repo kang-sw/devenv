@@ -23,7 +23,12 @@ import (
 // into the held one when there is one), and POST /s/<reply-id>/cancel takes a
 // held message back. POST /s/<reply-id>/steer promotes a held message to
 // steering: the adapter injects it at the session's next tool boundary
-// instead of at the turn end. The inbox is the daemon's one write target; the
+// instead of at the turn end. POST /s/<reply-id>/interrupt asks the adapter
+// to stop the session's running turn: in one step under d.inboxMu it takes
+// back every held message, steered or not, and writes an interrupt entry
+// (wsinbox.Interrupt), answering the taken messages oldest first, each as a
+// cancel answers one, so the page puts them back in its composer; its body is
+// ignored. The inbox is the daemon's one write target; the
 // session's host adapter drains it and injects the message as the user's own.
 // The routes are offered only for a session with a live host adapter, require
 // an Origin equal to the daemon's own (which stops cross-site form posts),
@@ -126,8 +131,8 @@ func sameOrigin(r *http.Request) bool {
 	return strings.EqualFold(u.Host, r.Host)
 }
 
-// handleInboxWrite serves the message, cancel, and steer routes of one
-// session.
+// handleInboxWrite serves the message, cancel, steer, and interrupt routes
+// of one session.
 func (d *Daemon) handleInboxWrite(w http.ResponseWriter, r *http.Request, replyID, route string) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -176,7 +181,7 @@ func (d *Daemon) handleInboxWrite(w http.ResponseWriter, r *http.Request, replyI
 		status, answer = d.messageWrite(dir, raw, now)
 	} else {
 		d.inboxMu.Lock()
-		status, answer = d.inboxWrite(dir, route, raw)
+		status, answer = d.inboxWrite(dir, route, raw, now)
 		d.inboxMu.Unlock()
 	}
 
@@ -349,11 +354,33 @@ func removeFiles(paths []string) {
 	}
 }
 
-// inboxWrite performs the cancel and steer routes against the inbox at dir;
-// d.inboxMu is held, so the daemon's own sends, cancels, and steers never
-// race each other or the attachment sweep, and
+// heldAnswer is the page's copy of a held message taken back from the inbox
+// at dir: its text, its chips (never null), and the names and numbers of its
+// images inside the inbox's attachments directory. The images stay on disk:
+// the page shows them as chips that reference the files, and a re-send
+// references them.
+func heldAnswer(dir string, entry wsinbox.Entry) map[string]any {
+	chips := entry.Chips
+	if chips == nil {
+		chips = []wsinbox.Chip{}
+	}
+	images, nums := []string{}, []int{}
+	attachDir := wsinbox.AttachmentsDir(dir)
+	entryNums := entry.Nums()
+	for i, path := range entry.Images {
+		if name, ok := wsinbox.AttachmentName(attachDir, path); ok {
+			images = append(images, name)
+			nums = append(nums, entryNums[i])
+		}
+	}
+	return map[string]any{"text": strings.Join(entry.Parts, "\n\n"), "chips": chips, "images": images, "nums": nums}
+}
+
+// inboxWrite performs the cancel, steer, and interrupt routes against the
+// inbox at dir; d.inboxMu is held, so the daemon's own sends, cancels,
+// steers, and interrupts never race each other or the attachment sweep, and
 // the inbox's claims settle a race with the adapter's drain.
-func (d *Daemon) inboxWrite(dir, route string, raw []byte) (int, any) {
+func (d *Daemon) inboxWrite(dir, route string, raw []byte, now time.Time) (int, any) {
 	switch route {
 	case "cancel":
 		var req cancelRequest
@@ -372,22 +399,7 @@ func (d *Daemon) inboxWrite(dir, route string, raw []byte) (int, any) {
 			fmt.Fprintf(d.log, "dashboard: inbox cancel: %v\n", err)
 			return http.StatusInternalServerError, "could not cancel the message"
 		}
-		chips := entry.Chips
-		if chips == nil {
-			chips = []wsinbox.Chip{}
-		}
-		// The images stay on disk: the page gets their names and numbers back
-		// as chips that reference the files, and a re-send references them.
-		images, nums := []string{}, []int{}
-		attachDir := wsinbox.AttachmentsDir(dir)
-		entryNums := entry.Nums()
-		for i, path := range entry.Images {
-			if name, ok := wsinbox.AttachmentName(attachDir, path); ok {
-				images = append(images, name)
-				nums = append(nums, entryNums[i])
-			}
-		}
-		return http.StatusOK, map[string]any{"text": strings.Join(entry.Parts, "\n\n"), "chips": chips, "images": images, "nums": nums}
+		return http.StatusOK, heldAnswer(dir, entry)
 	case "steer":
 		var req cancelRequest
 		if err := json.Unmarshal(raw, &req); err != nil {
@@ -406,6 +418,19 @@ func (d *Daemon) inboxWrite(dir, route string, raw []byte) (int, any) {
 			return http.StatusInternalServerError, "could not steer the message"
 		}
 		return http.StatusOK, map[string]any{"id": wsinbox.Record{Name: steered}.ID()}
+	case "interrupt":
+		records, _, err := wsinbox.Interrupt(dir, now)
+		if err != nil {
+			fmt.Fprintf(d.log, "dashboard: inbox interrupt: %v\n", err)
+			return http.StatusInternalServerError, "could not interrupt the session"
+		}
+		held := make([]map[string]any, 0, len(records))
+		for _, r := range records {
+			item := heldAnswer(dir, r.Entry)
+			item["id"] = r.ID()
+			held = append(held, item)
+		}
+		return http.StatusOK, map[string]any{"held": held}
 	}
 	return http.StatusNotFound, "not found"
 }

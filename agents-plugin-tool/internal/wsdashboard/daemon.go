@@ -337,7 +337,7 @@ func (d *Daemon) Close() {
 // guard (the loopback Host guard, or in LAN mode the guard that also admits
 // the LAN token; access.go); the daemon sends no CORS headers. The pages (/,
 // /s/<reply-id>, their SSE streams, and a session's image, file view, and
-// history routes) are read-only; a session's message, cancel, and steer
+// history routes) are read-only; a session's message, cancel, steer, and interrupt
 // routes (inbox_routes.go) are the only browser writes, and its system-open
 // route (sysopen_route.go) the only route that runs a host command.
 func (d *Daemon) Handler() http.Handler {

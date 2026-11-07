@@ -323,3 +323,81 @@ func TestDashboardSessionFingerprintTracksTheInbox(t *testing.T) {
 		t.Fatalf("a drain left the fingerprint at a previous value (%s)", drained)
 	}
 }
+
+func TestDashboardInboxDrainInterruptOnlyTakesOnlyInterruptEntries(t *testing.T) {
+	f := newLiveFixture(t, true)
+	dir := f.inboxDir(f.replyA)
+	sendBoard(t, dir, "taken back")
+	now := time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)
+	held, interrupt, err := wsinbox.Interrupt(dir, now)
+	if err != nil || len(held) != 1 {
+		t.Fatalf("Interrupt = %+v, %v", held, err)
+	}
+	sendBoard(t, dir, "follow-up")
+
+	// A steer-only drain leaves the interrupt entry in place.
+	if out := callToolWithKey(t, f.server, 2, f.keyA, dashboardInboxDrainTool, map[string]any{"steer_only": true}); out != "inbox empty\n" {
+		t.Fatalf("steer-only drain = %q", out)
+	}
+	out := callToolWithKey(t, f.server, 3, f.keyA, dashboardInboxDrainTool, map[string]any{"interrupt_only": true, "format": "json"})
+	var got struct {
+		Messages []map[string]any `json:"messages"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("json: %v\n%s", err, out)
+	}
+	if len(got.Messages) != 1 {
+		t.Fatalf("interrupt-only drain = %s", out)
+	}
+	m := got.Messages[0]
+	if m["id"] != strings.TrimSuffix(interrupt, ".json") || m["interrupt"] != true || m["sent_at"] != float64(now.UnixMilli()) || m["text"] != "" {
+		t.Fatalf("interrupt record = %v", m)
+	}
+	if parts, ok := m["parts"].([]any); !ok || len(parts) != 0 {
+		t.Fatalf("interrupt record parts = %v", m["parts"])
+	}
+	if chips, ok := m["chips"].([]any); !ok || len(chips) != 0 {
+		t.Fatalf("interrupt record chips = %v", m["chips"])
+	}
+	if out := callToolWithKey(t, f.server, 4, f.keyA, dashboardInboxDrainTool, map[string]any{"interrupt_only": true}); out != "inbox empty\n" {
+		t.Fatalf("second interrupt-only drain = %q", out)
+	}
+	// The follow-up stayed held; a full drain returns it without an
+	// interrupt field.
+	out = callToolWithKey(t, f.server, 5, f.keyA, dashboardInboxDrainTool, map[string]any{"format": "json"})
+	if !strings.Contains(out, `"text":"follow-up"`) || strings.Contains(out, `"interrupt"`) {
+		t.Fatalf("full drain = %s", out)
+	}
+}
+
+func TestDashboardInboxDrainFullDrainNeverReturnsAnInterruptEntry(t *testing.T) {
+	f := newLiveFixture(t, true)
+	dir := f.inboxDir(f.replyA)
+	if _, _, err := wsinbox.Interrupt(dir, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if out := callToolWithKey(t, f.server, 2, f.keyA, dashboardInboxDrainTool, nil); out != "inbox empty\n" {
+		t.Fatalf("full drain over an interrupt entry = %q", out)
+	}
+	if names, _ := wsinbox.Names(dir); len(names) != 0 {
+		t.Fatalf("inbox after the full drain = %v, want the interrupt entry dropped", names)
+	}
+	if names, _ := wsinbox.DrainedNames(dir); len(names) != 0 {
+		t.Fatalf("drained records = %v, want none", names)
+	}
+}
+
+func TestDashboardInboxDrainRefusesSteerOnlyWithInterruptOnly(t *testing.T) {
+	f := newLiveFixture(t, true)
+	dir := f.inboxDir(f.replyA)
+	if _, _, err := wsinbox.Interrupt(dir, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	text, isError := directDrain(t, f.server, f.keyA, map[string]any{"steer_only": true, "interrupt_only": true})
+	if !isError || !strings.Contains(text, "cannot be combined") {
+		t.Fatalf("steer_only with interrupt_only = %q (error %v)", text, isError)
+	}
+	if names, _ := wsinbox.InterruptNames(dir); len(names) != 1 {
+		t.Fatalf("a refused drain took %v", names)
+	}
+}

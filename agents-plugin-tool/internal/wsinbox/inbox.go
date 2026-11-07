@@ -22,11 +22,23 @@
 //     for steering under a new name, and removes the claim. A steered entry
 //     is still held (cancel still takes it), but no later send merges into
 //     it, so a promoted message never absorbs text the user did not promote.
+//   - Interrupt claims every held message entry, steered or not, removes
+//     them, and writes an interrupt entry, returning the claimed messages so
+//     the page can put them back in its composer.
+//
+// An interrupt entry asks the adapter to stop the session's running turn. It
+// carries only its creation time (SentAt) and is never a message: no send
+// merges into it, it counts toward no image cap, Held and MessageNames leave
+// it out, and Cancel and Steer refuse it.
 //
 // Held means undrained: an entry in the inbox directory. A reader tells a
 // held entry from a drained one by the directory it sits in. A full drain
-// takes every held entry; a steer-only drain (DrainSteer) takes only the
-// steered ones, which the adapter injects mid-turn.
+// takes every held message and drops every interrupt entry, which it neither
+// returns nor keeps as a drained record; a steer-only drain (DrainSteer)
+// takes only the steered messages, which the adapter injects mid-turn, and
+// leaves interrupt entries in place; an interrupt drain (DrainInterrupt)
+// takes only the interrupt entries, dropping them too. An interrupt entry no
+// interrupt drain took is dropped by the next full drain.
 //
 // An attached image carries a number, which the send's text names it by
 // with an "[Image #N]" marker and the delivered message lists it by with an
@@ -134,12 +146,16 @@ type Entry struct {
 	// written before images were numbered has none; Nums numbers its images
 	// 1..n.
 	ImageNums []int `json:"imageNums,omitempty"`
-	// SentAt is the first send's time, epoch milliseconds.
+	// SentAt is the first send's time, epoch milliseconds; an interrupt
+	// entry's creation time.
 	SentAt int64 `json:"sentAt,omitempty"`
 	// Steer marks an entry the user promoted to steering: the adapter
 	// injects it at the session's next tool boundary instead of at the turn
 	// end. A steered entry is never a merge target.
 	Steer bool `json:"steer,omitempty"`
+	// Interrupt marks an interrupt entry (Interrupt): a request to stop the
+	// session's running turn, never a message. It carries no other content.
+	Interrupt bool `json:"interrupt,omitempty"`
 }
 
 // Record is an entry read from disk with its file name.
@@ -633,9 +649,9 @@ func Send(dir string, add Entry, now time.Time) (name string, merged bool, err e
 }
 
 // MergeTarget is the held entry a send at dir would merge into: the newest
-// one that is not steered; false when there is none. An entry that cannot be
-// read is skipped. A caller that caps what one entry may carry counts the
-// target's share through it.
+// message that is not steered (never an interrupt entry); false when there
+// is none. An entry that cannot be read is skipped. A caller that caps what
+// one entry may carry counts the target's share through it.
 func MergeTarget(dir string) (Record, bool, error) {
 	names, err := Names(dir)
 	if err != nil {
@@ -646,7 +662,7 @@ func MergeTarget(dir string) (Record, bool, error) {
 		if err != nil {
 			continue
 		}
-		if !e.Steer {
+		if !e.Steer && !e.Interrupt {
 			return Record{Name: names[i], Entry: e}, true, nil
 		}
 	}
@@ -657,7 +673,8 @@ func MergeTarget(dir string) (Record, bool, error) {
 // and writes the same entry with Steer set under a fresh name, so entry files
 // stay never rewritten. It returns the steered entry's name; an entry already
 // steered is left as it is and its own name returned. It returns ErrGone
-// when the entry is no longer held.
+// when the entry is no longer held, or is an interrupt entry, which it
+// leaves in place.
 func Steer(dir, name string) (string, error) {
 	if !entryNamePattern.MatchString(name) {
 		return "", ErrGone
@@ -667,6 +684,10 @@ func Steer(dir, name string) (string, error) {
 		return "", err
 	}
 	entry, err := readEntry(claimed)
+	if err == nil && entry.Interrupt {
+		_ = os.Rename(claimed, filepath.Join(dir, name))
+		return "", ErrGone
+	}
 	if err != nil || entry.Steer {
 		// Leave an unreadable or already steered entry held as it was.
 		_ = os.Rename(claimed, filepath.Join(dir, name))
@@ -687,7 +708,8 @@ func Steer(dir, name string) (string, error) {
 }
 
 // Cancel takes the held entry name out of the inbox at dir and returns it.
-// It returns ErrGone when the entry is no longer held.
+// It returns ErrGone when the entry is no longer held, or is an interrupt
+// entry, which it leaves in place.
 func Cancel(dir, name string) (Entry, error) {
 	if !entryNamePattern.MatchString(name) {
 		return Entry{}, ErrGone
@@ -702,20 +724,119 @@ func Cancel(dir, name string) (Entry, error) {
 		_ = os.Rename(claimed, filepath.Join(dir, name))
 		return Entry{}, err
 	}
+	if entry.Interrupt {
+		_ = os.Rename(claimed, filepath.Join(dir, name))
+		return Entry{}, ErrGone
+	}
 	_ = os.Remove(claimed)
 	return entry, nil
 }
 
-// Drain claims every held entry at dir, oldest first, moving each into the
+// writeInterruptEntry commits Interrupt's entry (a test seam).
+var writeInterruptEntry = writeEntry
+
+// Interrupt claims every held message entry at dir, steered or not, oldest
+// first, removes them, and writes an interrupt entry whose SentAt is now. It
+// returns the claimed records, oldest first, and the interrupt entry's name.
+// A message another claim took first is skipped, and an unreadable one is
+// left held, as Cancel leaves it. When the interrupt entry cannot be written,
+// every claimed message is put back and the error returned.
+func Interrupt(dir string, now time.Time) (held []Record, name string, err error) {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, "", fmt.Errorf("create inbox dir: %w", err)
+	}
+	names, err := entryNames(dir)
+	if err != nil {
+		return nil, "", err
+	}
+	// An entry file is never rewritten, so reading it before the claim tells
+	// whether the claimed file is a message.
+	names = filterNames(dir, names, func(e Entry) bool { return !e.Interrupt })
+	var claims []string
+	putBack := func() {
+		for i, c := range claims {
+			_ = os.Rename(c, filepath.Join(dir, held[i].Name))
+		}
+	}
+	for _, n := range names {
+		claimed, err := claim(dir, n, "interrupt")
+		if errors.Is(err, ErrGone) {
+			continue
+		}
+		if err != nil {
+			putBack()
+			return nil, "", err
+		}
+		entry, err := readEntry(claimed)
+		if err != nil {
+			_ = os.Rename(claimed, filepath.Join(dir, n))
+			continue
+		}
+		claims = append(claims, claimed)
+		held = append(held, Record{Name: n, Entry: entry})
+	}
+	name, err = writeInterruptEntry(dir, Entry{SchemaVersion: SchemaVersion, Interrupt: true, SentAt: now.UnixMilli()})
+	if err != nil {
+		putBack()
+		return nil, "", err
+	}
+	for _, c := range claims {
+		_ = os.Remove(c)
+	}
+	return held, name, nil
+}
+
+// Drain claims every held message at dir, oldest first, moving each into the
 // drained directory, and returns those this call claimed. An entry another
-// claim took first is skipped. The drained directory is then trimmed to the
-// newest DrainedCap records, and the images only trimmed records listed are
-// deleted.
+// claim took first is skipped. Every interrupt entry it meets is claimed and
+// deleted: never moved to the drained directory and never returned. The
+// drained directory is then trimmed to the newest DrainedCap records, and
+// the images only trimmed records listed are deleted.
 func Drain(dir string) ([]Record, error) { return drain(dir, false) }
 
 // DrainSteer is Drain restricted to steered entries: it claims only the held
-// entries marked for steering and leaves every other one held.
+// entries marked for steering and leaves every other one, interrupt entries
+// included, held.
 func DrainSteer(dir string) ([]Record, error) { return drain(dir, true) }
+
+// DrainInterrupt claims only the interrupt entries at dir, oldest first,
+// deletes them, keeping no drained record, and returns those this call
+// claimed. Every message stays held.
+func DrainInterrupt(dir string) ([]Record, error) {
+	names, err := InterruptNames(dir)
+	if err != nil || len(names) == 0 {
+		return nil, err
+	}
+	return takeInterrupts(dir, names)
+}
+
+// takeInterrupts claims and deletes each named interrupt entry at dir and
+// returns those it claimed. A claimed entry that does not read as an
+// interrupt entry is put back.
+func takeInterrupts(dir string, names []string) ([]Record, error) {
+	var out []Record
+	var firstErr error
+	for _, name := range names {
+		claimed, err := claim(dir, name, "drain")
+		if err != nil {
+			if !errors.Is(err, ErrGone) && firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		entry, err := readEntry(claimed)
+		if err != nil || !entry.Interrupt {
+			_ = os.Rename(claimed, filepath.Join(dir, name))
+			if err != nil && firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		_ = os.Remove(claimed)
+		out = append(out, Record{Name: name, Entry: entry})
+	}
+	return out, firstErr
+}
 
 func drain(dir string, steerOnly bool) ([]Record, error) {
 	names, err := entryNames(dir)
@@ -729,6 +850,15 @@ func drain(dir string, steerOnly bool) ([]Record, error) {
 		// An entry file is never rewritten, so reading it before the claim
 		// tells whether the claimed file is steered.
 		names = filterNames(dir, names, func(e Entry) bool { return e.Steer })
+	} else {
+		// Drop the interrupt entries; every other entry, an unreadable one
+		// included, takes the drained path below. A failed drop leaves the
+		// entry for the next full drain.
+		interrupts := filterNames(dir, names, func(e Entry) bool { return e.Interrupt })
+		if len(interrupts) > 0 {
+			_, _ = takeInterrupts(dir, interrupts)
+			names = without(names, interrupts)
+		}
 	}
 	if len(names) == 0 {
 		return nil, nil
@@ -770,6 +900,19 @@ func filterNames(dir string, names []string, keep func(Entry) bool) []string {
 		if e, err := readEntry(filepath.Join(dir, name)); err == nil && keep(e) {
 			out = append(out, name)
 		}
+	}
+	return out
+}
+
+// without returns names less every name in drop; both are sorted.
+func without(names, drop []string) []string {
+	out := names[:0:0]
+	for _, name := range names {
+		if len(drop) > 0 && drop[0] == name {
+			drop = drop[1:]
+			continue
+		}
+		out = append(out, name)
 	}
 	return out
 }
@@ -898,8 +1041,8 @@ func entryNames(dir string) ([]string, error) {
 	return names, nil
 }
 
-// Names returns the held entry names at dir, oldest first; a missing
-// directory holds none. An entry file is never rewritten, so the names alone
+// Names returns the held entry names at dir, interrupt entries included,
+// oldest first; a missing directory holds none. An entry file is never rewritten, so the names alone
 // tell whether the inbox changed.
 func Names(dir string) ([]string, error) {
 	names, err := entryNames(dir)
@@ -919,13 +1062,47 @@ func SteerNames(dir string) ([]string, error) {
 	return filterNames(dir, names, func(e Entry) bool { return e.Steer }), nil
 }
 
+// MessageNames returns the names of the held entries at dir that are
+// messages, not interrupt entries, oldest first; a missing directory holds
+// none.
+func MessageNames(dir string) ([]string, error) {
+	names, err := Names(dir)
+	if err != nil || len(names) == 0 {
+		return nil, err
+	}
+	return filterNames(dir, names, func(e Entry) bool { return !e.Interrupt }), nil
+}
+
+// InterruptNames returns the names of the interrupt entries at dir, oldest
+// first; a missing directory holds none.
+func InterruptNames(dir string) ([]string, error) {
+	names, err := Names(dir)
+	if err != nil || len(names) == 0 {
+		return nil, err
+	}
+	return filterNames(dir, names, func(e Entry) bool { return e.Interrupt }), nil
+}
+
 // DrainedNames returns the drained record names of the inbox at dir, oldest
 // first.
 func DrainedNames(dir string) ([]string, error) { return Names(DrainedDir(dir)) }
 
-// Held reads the held entries at dir, oldest first. An entry that cannot be
-// read (a claim took it meanwhile, or it does not parse) is skipped.
-func Held(dir string) ([]Record, error) { return readAll(dir) }
+// Held reads the held messages at dir, oldest first; interrupt entries are
+// left out. An entry that cannot be read (a claim took it meanwhile, or it
+// does not parse) is skipped.
+func Held(dir string) ([]Record, error) {
+	records, err := readAll(dir)
+	if err != nil {
+		return nil, err
+	}
+	out := records[:0]
+	for _, r := range records {
+		if !r.Entry.Interrupt {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
 
 // Drained reads the drained records of the inbox at dir, oldest first.
 func Drained(dir string) ([]Record, error) { return readAll(DrainedDir(dir)) }
