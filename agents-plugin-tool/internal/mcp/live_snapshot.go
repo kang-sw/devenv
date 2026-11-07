@@ -173,6 +173,13 @@ func (h *liveHub) session(key, dir, root string, nudge func(), active func() boo
 	return ls
 }
 
+// existing is the session's live state, nil when this process has none.
+func (h *liveHub) existing(key string) *liveSession {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.sessions[key]
+}
+
 // drop removes ls from the hub unless a newer session already replaced it.
 func (h *liveHub) drop(key string, ls *liveSession) {
 	h.mu.Lock()
@@ -471,7 +478,23 @@ func (s *Server) recordLiveMail(sessionKey string, entries []mailboxHistoryEntry
 	if !ok {
 		return
 	}
-	ring := make([]wslive.RingEntry, 0, len(entries))
+	// The lead's tool calls finished since its last conversation entry come
+	// first. The state is taken under mu and the ring written under ringMu,
+	// as intake does, so the entries land in the order they were made. A
+	// session with no live state has no tool calls to flush.
+	ls := s.live.existing(sessionKey)
+	var ring []wslive.RingEntry
+	if ls != nil {
+		ls.mu.Lock()
+		ring = ls.state.FlushTools()
+		if len(ring) > 0 {
+			// The snapshot's open gap just emptied.
+			ls.scheduleLocked(currentLiveSeams().debounce)
+		}
+		ls.ringMu.Lock()
+		ls.mu.Unlock()
+		defer ls.ringMu.Unlock()
+	}
 	for i, e := range entries {
 		// The ring reaches the browser: scrub the body before the title cap.
 		title := mailboxHistoryTitle(wslive.ScrubSessionKeys(e.Body, sessionKey))

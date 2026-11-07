@@ -32,6 +32,9 @@ const (
 	RingReply = "reply"
 	RingTurn  = "turn"
 	RingMail  = "mail"
+	// RingTools is the lead's finished tool calls between two conversation
+	// entries, folded into one row (ToolSummary).
+	RingTools = "tools"
 	// RingCompact is a main-conversation compaction that landed or failed.
 	RingCompact = "compact"
 )
@@ -47,7 +50,7 @@ const ringStampLayout = "20060102T150405.000000000Z"
 
 // RingEntry is one ring file.
 type RingEntry struct {
-	// Kind is user, reply, turn, mail, or compact.
+	// Kind is user, reply, turn, mail, compact, or tools.
 	Kind string `json:"kind"`
 	// Origin tags a user message (terminal, whiteboard) or a turn summary
 	// (terminal, whiteboard, mail; empty when unknown).
@@ -60,6 +63,8 @@ type RingEntry struct {
 	Done       int   `json:"done,omitempty"`
 	Failed     int   `json:"failed,omitempty"`
 	DurationMs int64 `json:"durationMs,omitempty"`
+	// Tools is a tools row's summary.
+	Tools *ToolSummary `json:"tools,omitempty"`
 	// Direction, Peer, and Title describe a mail line; HistoryKey is the
 	// file name of the message's entry in the session's mailbox history,
 	// where its body stays while that shorter ring still holds it.

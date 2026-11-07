@@ -231,6 +231,10 @@ type Lead struct {
 	// Reply is the lead's reply text still streaming; a finished reply moves
 	// to the ring.
 	Reply *Reply `json:"reply,omitempty"`
+	// ToolGap summarizes the lead's tool batches finished since its last
+	// conversation entry; the ring takes it as a tools entry just before the
+	// next one. Absent when none finished.
+	ToolGap *ToolSummary `json:"toolGap,omitempty"`
 }
 
 // Agent is one subagent in the tree, keyed by the host's native agent id.

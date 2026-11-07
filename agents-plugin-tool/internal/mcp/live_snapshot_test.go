@@ -129,8 +129,9 @@ func TestDashboardIntakeWritesSnapshotAndRing(t *testing.T) {
 
 	intake(t, f.server, f.keyA, map[string]any{"kind": "reply", "text": "done.", "final": true}, map[string]any{"kind": "turn_end", "at": 4000})
 	ring := readLiveRing(t, f.sessionDir(f.replyA))
-	if len(ring) != 3 || ring[0].Kind != wslive.RingUser || ring[0].Origin != "whiteboard" || ring[1].Kind != wslive.RingReply || ring[1].Text != "done." ||
-		ring[2].Kind != wslive.RingTurn || ring[2].DurationMs != 3000 || ring[2].Done != 1 || ring[2].Failed != 1 {
+	if len(ring) != 4 || ring[0].Kind != wslive.RingUser || ring[0].Origin != "whiteboard" || ring[1].Kind != wslive.RingTools || ring[1].Tools.Calls != 2 || ring[1].Tools.Failed != 1 ||
+		ring[2].Kind != wslive.RingReply || ring[2].Text != "done." ||
+		ring[3].Kind != wslive.RingTurn || ring[3].DurationMs != 3000 || ring[3].Done != 1 || ring[3].Failed != 1 {
 		t.Fatalf("ring = %+v", ring)
 	}
 	waitFor(t, "the turn end in the snapshot", func() bool {

@@ -79,7 +79,12 @@ func TestLeadRootCarriesTurnFieldsAndTotals(t *testing.T) {
 	if last := lead.Batches[len(lead.Batches)-1]; last.Running != nil || last.EndedAt == 0 || last.Failed != 1 {
 		t.Fatalf("running batch not closed at turn end: %+v", last)
 	}
-	if len(res.Ring) != 1 || res.Ring[0] != (RingEntry{Kind: RingTurn, Origin: OriginWhiteboard, Done: 3, Failed: 2, DurationMs: 5_000}) {
+	// The finished batches fold into a tools entry ahead of the turn line,
+	// which stays as it was.
+	if len(res.Ring) != 2 || res.Ring[0].Kind != RingTools || res.Ring[0].Tools.Calls != 5 {
+		t.Fatalf("tools entry = %+v", res.Ring)
+	}
+	if res.Ring[1] != (RingEntry{Kind: RingTurn, Origin: OriginWhiteboard, Done: 3, Failed: 2, DurationMs: 5_000}) {
 		t.Fatalf("turn summary = %+v", res.Ring)
 	}
 

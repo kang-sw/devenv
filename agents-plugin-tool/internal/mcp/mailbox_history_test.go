@@ -513,3 +513,30 @@ func TestMailboxSendAndRecvWriteMailLines(t *testing.T) {
 		t.Fatalf("recv history key %q, history files %v", recv[0].HistoryKey, names)
 	}
 }
+
+// TestMailLineFlushesTheLeadsToolRowFirst pins that a mail line is a
+// conversation entry too: the lead's tool batches finished since its last
+// one land in the ring as a tools entry just before it, and the snapshot's
+// open gap empties.
+func TestMailLineFlushesTheLeadsToolRowFirst(t *testing.T) {
+	f := newLiveFixture(t, true)
+	fastLive(t, 20*time.Millisecond)
+	resetMailboxHistoryClock(t)
+	intake(t, f.server, f.keyA, map[string]any{"kind": "agent", "batches": []any{map[string]any{"epoch": "e", "seq": 1, "toolNames": []any{"Bash"}, "callCount": 3, "failed": 0, "startedAt": 1100, "endedAt": 1200}}})
+	mustSend(t, f.server, 3, f.keyA, wsmailbox.ReplyIDPrefix+f.replyB, "Status update")
+
+	ring := readLiveRing(t, f.sessionDir(f.replyA))
+	if len(ring) != 2 || ring[0].Kind != wslive.RingTools || ring[0].Tools.Calls != 3 || ring[1].Kind != wslive.RingMail {
+		t.Fatalf("ring = %+v", ring)
+	}
+	waitFor(t, "the emptied gap in the snapshot", func() bool {
+		snap, err := wslive.ReadSnapshot(wslive.SnapshotPath(f.sessionDir(f.replyA)))
+		return err == nil && snap.Lead.ToolGap == nil
+	})
+
+	// With nothing finished since, the next mail line stands alone.
+	mustSend(t, f.server, 4, f.keyA, wsmailbox.ReplyIDPrefix+f.replyB, "Second")
+	if ring := readLiveRing(t, f.sessionDir(f.replyA)); len(ring) != 3 || ring[2].Kind != wslive.RingMail {
+		t.Fatalf("ring after a second send = %+v", ring)
+	}
+}
