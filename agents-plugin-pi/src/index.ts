@@ -183,16 +183,18 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { resolveSessionKey, startBridge, type BridgeHandle } from "./bridge.ts";
 import {
   agentCostRefreshRef,
   agentDashboardRefreshRef,
   agentWidgetRefreshRef,
   heldPushQueue,
+  isLeadInterrupted,
   isOwningAgentIdle,
   leadCompactingRef,
   leadIdleRef,
+  markLeadInterrupted,
   ownerNotifyRef,
   pushToLead,
   registerAgentTools,
@@ -221,7 +223,7 @@ import { ChildApprovalGate } from "./approval-protocol.ts";
 import { isLeadOrFork, readSpawnRole, WS_PI_FORK_CONTEXT_ENV, WS_PI_PARENT_SESSION_KEY_ENV, type SpawnRole } from "./process-role.ts";
 import { createApprovalRelay, registerExecuteGateway } from "./execute-gateway.ts";
 import { registerBackgroundTaskShutdown } from "./background-tasks.ts";
-import { afterCompactionHold, attachMailboxRuntimeCleanup, boardSteerDeps, buildMailboxPushMessage, createBridgeDrain, createBridgeInboxDrain, createMailboxWaiterSlot, createSubprocessWait, reportDistinctLinesOnce, resolveMailboxSelfSlug, sessionMailboxWaitOptions, shouldArmMailboxWaiter, stageMailboxRuntime, startMailboxWaiter, type MailboxToolCall, type MailboxWaiterHandle, type StagedMailboxRuntime } from "./mailbox-waiter.ts";
+import { afterCompactionHold, attachMailboxRuntimeCleanup, boardSteerDeps, buildMailboxPushMessage, buildWhiteboardHeldMessage, createBridgeDrain, createBridgeInboxDrain, createBridgeInterruptDrain, createMailboxWaiterSlot, createSubprocessWait, reportDistinctLinesOnce, resolveMailboxSelfSlug, sessionMailboxWaitOptions, shouldArmMailboxWaiter, stageMailboxRuntime, startMailboxWaiter, type MailboxToolCall, type MailboxWaiterHandle, type StagedMailboxRuntime } from "./mailbox-waiter.ts";
 import { armForkRoleWiring, registerFork } from "./fork.ts";
 import {
   createThreadRegistryHandle,
@@ -645,7 +647,19 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   // end (or failure) releases a held message the same way, once the
   // compaction hold itself has cleared, and restores steer mode mid-turn.
   let leadTurnOpen = false;
-  pi.on("agent_start", () => { leadTurnOpen = true; });
+  // When that turn started, on the wall clock a dashboard interrupt entry's
+  // creation time is read on: an interrupt made before it is stale. Pi's
+  // continuations inside one turn (`agent_start` again before the settle)
+  // keep the first start, since the page shows one working span.
+  let leadTurnStartedAt = 0;
+  // The newest live context, the one a dashboard interrupt aborts through: a
+  // context captured before a session reload is stale and throws.
+  let leadContext: Pick<ExtensionContext, "abort"> | undefined;
+  pi.on("agent_start", (_event, ctx) => {
+    if (!leadTurnOpen) leadTurnStartedAt = Date.now();
+    leadTurnOpen = true;
+    leadContext = ctx;
+  });
   pi.on("agent_settled", () => {
     leadTurnOpen = false;
     mailboxWaiterHandle?.leadSettled?.();
@@ -653,7 +667,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   for (const event of ["session_compact", "session_compact_failed"] as const) {
     pi.on(event, () => { afterCompactionHold(() => { mailboxWaiterHandle?.leadSettled?.(); }); });
   }
-  pi.on("session_shutdown", () => { leadTurnOpen = false; });
+  pi.on("session_shutdown", () => { leadTurnOpen = false; leadContext = undefined; });
   // 260917 review fix: monotonic epoch guarding the async self-slug
   // resolution the arm site awaits below. Before that await existed, every
   // stop()-then-start() of `mailboxWaiterHandle` ran fully synchronously, so
@@ -828,6 +842,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     // followUp push raised while this session is mid-turn is held until its
     // turn settles instead of going out with an already-stale status line.
     leadIdleRef.current = () => ctx.isIdle();
+    leadContext = ctx;
     // Do not make native presentation depend on a connected MCP bridge.
     // `loadToolResultTuiModules` always resolves `pi-tui` through
     // `pi-tui.ts`'s `loadHostPiTui()` now (see that file's Addendum doc
@@ -1025,6 +1040,22 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
                 drain: createBridgeInboxDrain(mailboxCallTool, key, { steerOnly: true }),
                 sendUserMessage: (text, options) => { pi.sendUserMessage(text, options); },
               }),
+              // The page's interrupt aborts the running turn through the
+              // newest live context; what that turn leaves behind waits for
+              // the next prompt (spawner.ts `leadInterrupt` for the FIFO and
+              // its ordering limits).
+              interrupt: {
+                drain: createBridgeInterruptDrain(mailboxCallTool, key),
+                turnStartedAt: () => (leadTurnOpen ? leadTurnStartedAt : undefined),
+                mark: markLeadInterrupted,
+                interrupted: isLeadInterrupted,
+                abort: () => {
+                  if (!leadContext) throw new Error("no live session context");
+                  leadContext.abort();
+                },
+                // sendUserMessage has no nextTurn delivery: a held text is a custom message.
+                hold: (texts) => { pi.sendMessage(buildWhiteboardHeldMessage(texts), { deliverAs: "nextTurn" }); },
+              },
             },
           });
         },

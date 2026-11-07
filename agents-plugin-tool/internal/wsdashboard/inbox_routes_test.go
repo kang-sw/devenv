@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -250,9 +251,122 @@ func TestSteerRouteRefusesGoneUnknownAndAdapterlessSessions(t *testing.T) {
 	}
 }
 
+// interruptAnswer is the interrupt route's answer.
+type interruptAnswer struct {
+	Held []struct {
+		ID     string         `json:"id"`
+		Text   string         `json:"text"`
+		Chips  []wsinbox.Chip `json:"chips"`
+		Images []string       `json:"images"`
+		Nums   []int          `json:"nums"`
+	} `json:"held"`
+}
+
+func TestInterruptRouteTakesBackEveryHeldMessageAndWritesTheEntry(t *testing.T) {
+	f := startPageFixture(t)
+	first, _ := f.send(t, `{"text":"promote me","chips":[{"id":"03","answer":"a"}]}`)
+	code, _, raw := postJSON(t, f.base+"/s/livesession/steer", f.base, `{"id":"`+first+`"}`)
+	if code != http.StatusOK {
+		t.Fatalf("steer = %d: %s", code, raw)
+	}
+	steered := f.held(t)[0].ID()
+	second, _ := f.send(t, `{"text":"see [Image #1]","images":`+imagesJSON("a.png", pngBytes)+`}`)
+	merged, ok := f.send(t, `{"text":"and more"}`)
+	if !ok {
+		t.Fatal("follow-up did not merge into the held message")
+	}
+	paths := f.held(t)[1].Entry.Images
+	before := time.Now().UnixMilli()
+
+	code, header, raw := postJSON(t, f.base+"/s/livesession/interrupt", f.base, ``)
+	if code != http.StatusOK {
+		t.Fatalf("interrupt = %d: %s", code, raw)
+	}
+	assertNoCORS(t, header)
+	var ans interruptAnswer
+	if err := json.Unmarshal([]byte(raw), &ans); err != nil {
+		t.Fatalf("interrupt answer %q: %v", raw, err)
+	}
+	if len(ans.Held) != 2 {
+		t.Fatalf("interrupt answer = %s, want both held messages", raw)
+	}
+	a, b := ans.Held[0], ans.Held[1]
+	if a.ID != steered || a.Text != "promote me" || len(a.Chips) != 1 || a.Chips[0].ID != "03" || a.Chips[0].Answer != "a" || len(a.Images) != 0 || a.Nums == nil {
+		t.Errorf("first held = %+v", a)
+	}
+	if b.ID != merged || b.ID == second || b.Text != "see [Image #1]\n\nand more" || b.Chips == nil || len(b.Chips) != 0 ||
+		len(b.Images) != 1 || b.Images[0] != filepath.Base(paths[0]) || len(b.Nums) != 1 || b.Nums[0] != 1 {
+		t.Errorf("second held = %+v", b)
+	}
+	// Nothing is held any more; the interrupt entry is on disk, and the image
+	// stays for a re-send to reference.
+	if held := f.held(t); len(held) != 0 {
+		t.Fatalf("held after interrupt = %+v", held)
+	}
+	inbox := f.inbox("livesession")
+	names, _ := wsinbox.InterruptNames(inbox)
+	if len(names) != 1 {
+		t.Fatalf("interrupt entries = %v, want one", names)
+	}
+	records, err := wsinbox.DrainInterrupt(inbox)
+	if err != nil || len(records) != 1 || !records[0].Entry.Interrupt || records[0].Entry.SentAt < before {
+		t.Fatalf("interrupt entry = %+v, %v", records, err)
+	}
+	if got := f.attachments(t); len(got) != 1 {
+		t.Fatalf("attachments after interrupt = %v", got)
+	}
+
+	// With nothing held the answer is an empty list, and a body is ignored.
+	code, _, raw = postJSON(t, f.base+"/s/livesession/interrupt", f.base, `{}`)
+	if code != http.StatusOK || strings.TrimSpace(raw) != `{"held":[]}` {
+		t.Fatalf("interrupt with nothing held = %d: %s", code, raw)
+	}
+	// The page renders no bubble for the interrupt entry.
+	_, page := get(t, f.base+"/s/livesession")
+	if strings.Contains(page, `class="msg user held"`) {
+		t.Errorf("page renders a held bubble for an interrupt entry")
+	}
+}
+
+func TestInterruptEntryIsRefusedByCancelAndSteerAndNeedsAnAdapter(t *testing.T) {
+	f := startPageFixture(t)
+	if code, _, raw := postJSON(t, f.base+"/s/livesession/interrupt", f.base, ``); code != http.StatusOK {
+		t.Fatalf("interrupt = %d: %s", code, raw)
+	}
+	names, _ := wsinbox.InterruptNames(f.inbox("livesession"))
+	if len(names) != 1 {
+		t.Fatalf("interrupt entries = %v", names)
+	}
+	id := wsinbox.Record{Name: names[0]}.ID()
+	for _, route := range []string{"cancel", "steer"} {
+		if code, _, raw := postJSON(t, f.base+"/s/livesession/"+route, f.base, `{"id":"`+id+`"}`); code != http.StatusConflict {
+			t.Errorf("%s of the interrupt entry = %d (%s), want 409", route, code, raw)
+		}
+	}
+	if got, _ := wsinbox.InterruptNames(f.inbox("livesession")); len(got) != 1 || got[0] != names[0] {
+		t.Fatalf("interrupt entries after refused cancel and steer = %v", got)
+	}
+	// A send after it starts a new message rather than merging into it.
+	if _, merged := f.send(t, `{"text":"after"}`); merged {
+		t.Fatal("a send merged into the interrupt entry")
+	}
+	if code, _, _ := postJSON(t, f.base+"/s/boardsession/interrupt", f.base, ``); code != http.StatusConflict {
+		t.Errorf("interrupt for a session without an adapter = %d, want 409", code)
+	}
+	if names, _ := wsinbox.Names(f.inbox("boardsession")); len(names) != 0 {
+		t.Fatalf("refused interrupt wrote %v", names)
+	}
+	if code, _, _ := postJSON(t, f.base+"/s/nosuchsession/interrupt", f.base, ``); code != http.StatusNotFound {
+		t.Errorf("interrupt for an unknown session = %d, want 404", code)
+	}
+	if code, _ := get(t, f.base+"/s/livesession/interrupt"); code != http.StatusMethodNotAllowed {
+		t.Errorf("GET interrupt = %d, want 405", code)
+	}
+}
+
 func TestWriteRoutesRequireTheDaemonsOwnOrigin(t *testing.T) {
 	f := startPageFixture(t)
-	for _, route := range []string{"message", "cancel", "steer"} {
+	for _, route := range []string{"message", "cancel", "steer", "interrupt"} {
 		for _, origin := range []string{"", "null", "http://evil.example", "https://" + strings.TrimPrefix(f.base, "http://"), "http://localhost:1"} {
 			code, header, _ := postJSON(t, f.base+"/s/livesession/"+route, origin, `{"text":"x","id":"x"}`)
 			if code != http.StatusForbidden {
@@ -261,8 +375,8 @@ func TestWriteRoutesRequireTheDaemonsOwnOrigin(t *testing.T) {
 			assertNoCORS(t, header)
 		}
 	}
-	if held := f.held(t); len(held) != 0 {
-		t.Fatalf("a refused request held %+v", held)
+	if names, _ := wsinbox.Names(f.inbox("livesession")); len(names) != 0 {
+		t.Fatalf("a refused request wrote %v", names)
 	}
 	// A same-origin send passes and still carries no CORS header.
 	code, header, raw := postJSON(t, f.base+"/s/livesession/message", f.base, `{"text":"ok"}`)

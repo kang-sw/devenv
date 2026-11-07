@@ -132,7 +132,7 @@ for line in sys.stdin:
   }
 });
 
-test("dashboard messages: an idle wake injects at once with the whiteboard label; a mid-turn one is held and injected at the settle; the knob off arms no inbox flag", { timeout: 120_000 }, async () => {
+test("dashboard messages: an idle wake injects at once with the whiteboard label; a mid-turn one is held and injected at the settle; every wait carries the interrupt flag while the knob is on; the knob off arms neither flag", { timeout: 120_000 }, async () => {
   const directory = mkdtempSync(join(tmpdir(), "ws-pi-board-inbox-"));
   const savedEnv = { ...process.env };
   let session: any;
@@ -206,11 +206,13 @@ export default function (pi: any) {
 
     const lines = (path: string): any[] => existsSync(path) ? readFileSync(path, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)) : [];
     const flagged = (): boolean[] => lines(waits).map((args: string[]) => args.includes("--board-inbox"));
+    const interruptArmed = (): boolean[] => lines(waits).map((args: string[]) => args.includes("--board-interrupt"));
     const injected = (): string[] => lines(inputs).map((input) => input.text);
     const label = "[user message from the ws whiteboard]";
 
     await until(() => flagged().length >= 2, "the first waits", WAIT);
     assert.ok(flagged().every(Boolean), "an idle lead's wait carries the inbox flag");
+    assert.ok(interruptArmed().every(Boolean), "and the interrupt flag, idle included");
 
     // Idle: injected at once.
     writeFileSync(held, "idle hello\n\n(01) ok");
@@ -227,6 +229,7 @@ export default function (pi: any) {
     const unflaggedAt = flagged().length;
     await until(() => flagged().length >= unflaggedAt + 2, "further waits during the turn", WAIT);
     assert.ok(flagged().slice(unflaggedAt).every((flag) => !flag), "the wait stays unflagged while the entry is held");
+    assert.ok(interruptArmed().slice(unflaggedAt).every(Boolean), "a held entry leaves the interrupt flag armed");
     assert.equal(existsSync(held), true, "the held entry is not drained mid-turn, so merge and cancel still act on it");
     assert.equal(injected().length, 1);
     await session.extensionRunner.emit({ type: "agent_settled" });
@@ -245,6 +248,7 @@ export default function (pi: any) {
     writeFileSync(held, "while off");
     await until(() => flagged().length >= offAt + 2, "further waits with the knob off", WAIT);
     assert.ok(flagged().slice(offAt).every((flag) => !flag));
+    assert.ok(interruptArmed().slice(offAt).every((flag) => !flag), "the knob off drops the interrupt flag too");
     assert.equal(existsSync(held), true);
     assert.equal(injected().length, 2);
   } finally {

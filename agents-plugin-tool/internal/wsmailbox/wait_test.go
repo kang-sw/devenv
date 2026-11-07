@@ -415,3 +415,91 @@ func TestWaitSteerOnlyWakesOnASteeredEntryNotOnAHeldFollowUp(t *testing.T) {
 		t.Fatalf("held entries after Wait = %v, want both left held", held)
 	}
 }
+
+func TestWaitInterruptWatchWakesUnderEveryArm(t *testing.T) {
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	for _, tc := range []struct {
+		name   string
+		target func(inbox string) WaitTarget
+	}{
+		{"alone", func(inbox string) WaitTarget {
+			return WaitTarget{SessionKey: "amber-tide-fox", InboxDir: inbox, InboxInterruptOnly: true}
+		}},
+		{"with the board watch", func(inbox string) WaitTarget {
+			return WaitTarget{SessionKey: "amber-tide-fox", InboxDir: inbox, InboxInterrupt: true}
+		}},
+		{"with the steer watch", func(inbox string) WaitTarget {
+			return WaitTarget{SessionKey: "amber-tide-fox", InboxDir: inbox, InboxSteerOnly: true, InboxInterrupt: true}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			inbox := filepath.Join(t.TempDir(), "inbox")
+			clock := &fakeClock{now: time.Date(2026, 9, 13, 0, 0, 0, 0, time.UTC)}
+			clock.onSleep = func(time.Duration) {
+				if clock.sleeps == 2 {
+					if _, _, err := wsinbox.Interrupt(inbox, clock.now); err != nil {
+						t.Errorf("Interrupt: %v", err)
+					}
+				}
+			}
+			result, err := Wait(tc.target(inbox), WaitOptions{Now: clock.Now, Sleep: clock.Sleep})
+			if err != nil {
+				t.Fatalf("Wait: %v", err)
+			}
+			if result.TimedOut || !result.Woke() || result.Interrupt != 1 || result.Board != 0 || result.Total() != 0 {
+				t.Fatalf("Wait = %#v, want an interrupt wake with Board 0", result)
+			}
+			// Wait only peeks: the entry is still there.
+			if names, _ := wsinbox.InterruptNames(inbox); len(names) != 1 {
+				t.Fatalf("interrupt entries after Wait = %v", names)
+			}
+		})
+	}
+}
+
+func TestWaitInterruptWatchIgnoresAHeldFollowUp(t *testing.T) {
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	inbox := filepath.Join(t.TempDir(), "inbox")
+	sendBoardMessage(t, inbox, "held follow-up")
+	for _, target := range []WaitTarget{
+		{SessionKey: "amber-tide-fox", InboxDir: inbox, InboxInterruptOnly: true},
+		{SessionKey: "amber-tide-fox", InboxDir: inbox, InboxSteerOnly: true, InboxInterrupt: true},
+	} {
+		clock := &fakeClock{now: time.Date(2026, 9, 13, 0, 0, 0, 0, time.UTC)}
+		result, err := Wait(target, WaitOptions{Timeout: 3 * DefaultWaitPoll, Now: clock.Now, Sleep: clock.Sleep})
+		if err != nil {
+			t.Fatalf("Wait: %v", err)
+		}
+		if !result.TimedOut || result.Woke() {
+			t.Fatalf("Wait(%+v) = %#v, want a timeout over a held follow-up", target, result)
+		}
+	}
+}
+
+func TestWaitBoardWatchNeverCountsAnInterruptEntry(t *testing.T) {
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	inbox := filepath.Join(t.TempDir(), "inbox")
+	if _, _, err := wsinbox.Interrupt(inbox, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	clock := &fakeClock{now: time.Date(2026, 9, 13, 0, 0, 0, 0, time.UTC)}
+	result, err := Wait(WaitTarget{SessionKey: "amber-tide-fox", InboxDir: inbox}, WaitOptions{Timeout: 3 * DefaultWaitPoll, Now: clock.Now, Sleep: clock.Sleep})
+	if err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	if !result.TimedOut || result.Woke() {
+		t.Fatalf("Wait = %#v, want a plain board watch to time out over an interrupt entry", result)
+	}
+	// With the interrupt watch on, a held message and the entry count apart.
+	sendBoardMessage(t, inbox, "held")
+	result, err = Wait(WaitTarget{SessionKey: "amber-tide-fox", InboxDir: inbox, InboxInterrupt: true}, WaitOptions{Now: clock.Now, Sleep: clock.Sleep})
+	if err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	if result.Board != 1 || result.Interrupt != 1 {
+		t.Fatalf("Wait = %#v, want Board 1 and Interrupt 1", result)
+	}
+}

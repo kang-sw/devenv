@@ -43,6 +43,8 @@
  * interrupting is their purpose. A child's ordinary assistant answer becomes
  * terminal only at `agent_settled`; its queue admission is independently
  * tracked so pending delivery is recoverable without being called execution.
+ * After a dashboard interrupt of the run, the FIFO and every push the run
+ * did not take wait for the next prompt instead (`leadInterrupt`).
  *
  * The spawn tool's `model_name` param accepts one of the four fixed tiers
  * (`small`/`medium`/`large`/`xlarge`) or a concrete Pi catalog `provider/id`.
@@ -1156,6 +1158,88 @@ export const leadCompactingRef: { current: boolean } = { current: false };
 export const leadWakeStartPendingRef: { current: boolean } = { current: false };
 
 /**
+ * A dashboard interrupt of this session's own run: the user asked the
+ * dashboard page to stop it. The mailbox waiter raises the mark with
+ * `markLeadInterrupted` just before it asks Pi to abort the run, and the
+ * next own `agent_start` clears it. Pi's interactive abort clears its
+ * queues: untaken text steers move into the terminal editor, and queued
+ * custom messages, every push this module steered into the run included,
+ * are dropped. So until the interrupted run settles (`runOpen`), pushes are
+ * held rather than steered, and neither the `agent_end` boundary batch nor a
+ * push wake starts a turn. At that settle the pushes the run was not seen
+ * taking (`untakenPushes`) and then the held FIFO are queued with `nextTurn`,
+ * so they reach the model with the next prompt instead of starting a turn.
+ * Pushes admitted after that settle behave as usual.
+ *
+ * Ordering limits. `nextTurn` items ride only on a `prompt()` turn, placed
+ * after its own message: terminal input, a dashboard submission, or this
+ * module's push wake line, so mail arriving while idle after the interrupt
+ * carries them into its wake turn. A turn a custom message starts on its own
+ * runs without them, and they wait for the next prompt; a session reload or
+ * `/new` drops them. A non-TUI Pi mode has no abort handler: its abort keeps
+ * the queues, and Pi's own continuation starts a new run from them (which
+ * also clears the mark), so this hold does not apply there.
+ */
+let leadInterrupt: { runOpen: boolean } | undefined;
+
+/** Raise the interrupted mark for this session's running run; see `leadInterrupt`. */
+export function markLeadInterrupted(): void {
+  leadInterrupt = { runOpen: true };
+}
+
+/** Whether the interrupted mark stands: from `markLeadInterrupted` until the next own `agent_start`. */
+export function isLeadInterrupted(): boolean {
+  return leadInterrupt !== undefined;
+}
+
+/** Pushes are held for `nextTurn` until the interrupted run settles. */
+function interruptHolding(): boolean {
+  return leadInterrupt?.runOpen === true;
+}
+
+type LeadCustomMessage = Parameters<ExtensionAPI["sendMessage"]>[0];
+
+/**
+ * Custom messages sent as a steer or follow-up that no `message_start` has
+ * shown the lead taking yet, in send order. Pi emits `message_start` with
+ * the very object it queued, whose `details` is the one passed to
+ * `sendMessage`, when the run injects it; so a message still listed when an
+ * interrupt clears Pi's queues was dropped. Emptied at every own settle:
+ * what a run leaves queued past its settle is not this module's to recover.
+ */
+const untakenPushes: LeadCustomMessage[] = [];
+
+/** Send a push into the lead as a steer or follow-up, tracked until the run takes it. */
+function sendIntoRun(pi: ExtensionAPI, message: LeadCustomMessage, deliverAs: PushDeliverAs): void {
+  pi.sendMessage(message, { deliverAs, triggerTurn: true });
+  if (deliverAs !== "nextTurn" && message.details !== undefined) untakenPushes.push(message);
+}
+
+function forgetTakenPush(message: unknown): void {
+  const taken = message as { role?: unknown; details?: unknown } | undefined;
+  if (taken?.role !== "custom" || taken.details === undefined) return;
+  const index = untakenPushes.findIndex((sent) => sent.details === taken.details);
+  if (index >= 0) untakenPushes.splice(index, 1);
+}
+
+/**
+ * The interrupted run settled: re-send whole, in send order, every push it
+ * did not take, then the held FIFO as one batch, all with `nextTurn`.
+ */
+function releaseAfterInterrupt(pi: ExtensionAPI): void {
+  if (leadInterrupt) leadInterrupt.runOpen = false;
+  // Re-sent with no terminal bookkeeping: the first send already advanced it.
+  for (const message of untakenPushes.splice(0)) {
+    try {
+      pi.sendMessage(message, { deliverAs: "nextTurn" });
+    } catch {
+      // A torn-down session: nothing left to queue into.
+    }
+  }
+  submitHeldPushBatch(pi, "nextTurn");
+}
+
+/**
  * This process's own-turn accounting, reported upstream in every subtree
  * snapshot (`installSubtreePublisher`) so the parent can release a held settle
  * without guessing whether a wake turn is coming. One process is one launch
@@ -1327,7 +1411,7 @@ function scheduleSettleWake(pi: ExtensionAPI, delayMs: number): void {
 }
 
 function requestPushWake(pi: ExtensionAPI): void {
-  if (!wakeOptions || !heldPushQueue.length || !leadIdleRef.current || !isOwningAgentIdle() || pushWakeBackingOff()) return;
+  if (interruptHolding() || !wakeOptions || !heldPushQueue.length || !leadIdleRef.current || !isOwningAgentIdle() || pushWakeBackingOff()) return;
   // A lapsed reservation's retry may exit early, leaving `owed` false with no
   // publish of its own; the parent's held settle waits on that flip.
   if (!reserveWakeStart(wakeOptions, () => { requestPushWake(pi); publishOwnTurn?.(); })) return;
@@ -1385,7 +1469,7 @@ function admitPush(pi: ExtensionAPI, held: HeldPush | HeldRawSend, batchTail: re
   } catch {
     return; // stale session accessor
   }
-  if (leadCompactingRef.current || leadWakeStartPendingRef.current || isOwningAgentIdle() || held.deliverAs === "followUp" || heldPushQueue.length > 0) {
+  if (leadCompactingRef.current || leadWakeStartPendingRef.current || isOwningAgentIdle() || held.deliverAs === "followUp" || heldPushQueue.length > 0 || interruptHolding()) {
     if (held.kind === "push") {
       if (held.terminal) held.terminal.state = "held";
       held.actionGeneration = held.record?.workGeneration;
@@ -1401,7 +1485,7 @@ function admitPush(pi: ExtensionAPI, held: HeldPush | HeldRawSend, batchTail: re
       heldPushQueue.push(held, ...batchTail);
       submitHeldPushBatch(pi, held.deliverAs === "steer" ? "steer" : "followUp");
     } else {
-      pi.sendMessage(labelRawSend(held.message), { deliverAs: held.deliverAs, triggerTurn: true });
+      sendIntoRun(pi, labelRawSend(held.message), held.deliverAs);
     }
   } else {
     sendPush(pi, held.registry, held.record, held.family, held.payload, held.deliverAs, held.terminal);
@@ -1773,14 +1857,15 @@ function sendPush(
   // helper (and `details.agent_id`, which stays the raw uuid) untouched.
   const displayId = record?.alias ? `${record.alias} (${record.agentId})` : record?.agentId;
   try {
-    pi.sendMessage(
+    sendIntoRun(
+      pi,
       {
         customType: family,
         content: labelAdapterText(buildPushContent(family, displayId, payload, status)),
         display: true,
         details: withSummaryId(details) as never,
       },
-      { deliverAs, triggerTurn: true },
+      deliverAs,
     );
     if (terminal) {
       terminal.state = "enqueued";
@@ -1798,7 +1883,7 @@ function sendPush(
  * queued until `sendMessage` returns synchronously; rejection restores every
  * terminal obligation and lets the ordinary settle/wake path retry it.
  */
-function submitHeldPushBatch(pi: ExtensionAPI, deliverAs: "steer" | "followUp", turnBoundary = false): number {
+function submitHeldPushBatch(pi: ExtensionAPI, deliverAs: "steer" | "followUp" | "nextTurn", turnBoundary = false): number {
   if (heldPushQueue.length === 0) return 0;
   const snapshot = heldPushQueue.slice();
   const terminalStates = snapshot.flatMap((held) => held.kind === "push" && held.terminal
@@ -1809,18 +1894,18 @@ function submitHeldPushBatch(pi: ExtensionAPI, deliverAs: "steer" | "followUp", 
   const items = withItemSummaryIds(snapshot.map(materializeHeldInput));
   const modelItems = items.filter((_item, index) => snapshot[index]!.kind !== "goal-replacement");
   if (modelItems.length > 0) {
+    const batch: LeadCustomMessage = {
+      customType: PUSH_BATCH_CUSTOM_TYPE,
+      content: labelAdapterText(buildPushBatchContent(modelItems)),
+      display: true,
+      details: { version: PUSH_BATCH_VERSION, items } as never,
+    };
     try {
-      pi.sendMessage(
-        {
-          customType: PUSH_BATCH_CUSTOM_TYPE,
-          content: labelAdapterText(buildPushBatchContent(modelItems)),
-          display: true,
-          details: { version: PUSH_BATCH_VERSION, items } as never,
-        },
-        { deliverAs, triggerTurn: true },
-      );
+      if (deliverAs === "nextTurn") pi.sendMessage(batch, { deliverAs });
+      else sendIntoRun(pi, batch, deliverAs);
     } catch {
-      requestPushWake(pi);
+      // A rejected `nextTurn` queue means a torn-down session; no wake for it.
+      if (deliverAs !== "nextTurn") requestPushWake(pi);
       return 0;
     }
     // Queued at `agent_end`, the batch is picked up by Pi's post-run
@@ -1840,7 +1925,8 @@ function submitHeldPushBatch(pi: ExtensionAPI, deliverAs: "steer" | "followUp", 
 
 /** Idle release applies a control-only queue or reserves one counted wake for mixed/prose input. Confirmed starts and lead turn boundaries release one FIFO batch. */
 export function flushHeldPushes(pi: ExtensionAPI | undefined, confirmedStart = false, agentEndBoundary = false): number {
-  if (!pi || !shouldPushToLead() || !leadIdleRef.current || leadCompactingRef.current || leadWakeStartPendingRef.current) return 0;
+  // A run a dashboard interrupt is cutting takes nothing more; its settle queues the FIFO for the next prompt.
+  if (!pi || !shouldPushToLead() || !leadIdleRef.current || leadCompactingRef.current || leadWakeStartPendingRef.current || interruptHolding()) return 0;
   if (agentEndBoundary) return submitHeldPushBatch(pi, "followUp", true);
   if (!confirmedStart) {
     const snapshot = heldPushQueue.slice();
@@ -1858,6 +1944,9 @@ export function flushHeldPushes(pi: ExtensionAPI | undefined, confirmedStart = f
 /** Factory-scope wake lifecycle, also active in fork owners. Registration allocates no timers; only a reserved user wake does. Worker/explore roles never reserve wakes. */
 export function registerPushFlush(pi: ExtensionAPI, options: WakeStartOptions & { publish?: () => void }): void {
   resetPushWakeBreaker();
+  // A fresh registration tracks only its own sends and its own interrupts.
+  untakenPushes.length = 0;
+  leadInterrupt = undefined;
   wakeOptions = options;
   publishOwnTurn = options.publish;
   pi.on("agent_start", () => {
@@ -1865,14 +1954,23 @@ export function registerPushFlush(pi: ExtensionAPI, options: WakeStartOptions & 
     // any owed turn in one snapshot (see `ownTurnRef`).
     ownTurnRef.started += 1;
     boundaryTurnOwed = false;
+    // A new run: a dashboard interrupt's mark ends here (see `leadInterrupt`).
+    leadInterrupt = undefined;
     resetPushWakeBreaker();
     clearWakeStart();
     flushHeldPushes(pi, true);
+  });
+  pi.on("message_start", (event) => {
+    forgetTakenPush((event as { message?: unknown } | undefined)?.message);
   });
   pi.on("agent_end", () => {
     flushHeldPushes(pi, false, true);
   });
   pi.on("agent_settled", () => {
+    // Synchronously, before the deferred settle flush below can wake on the
+    // held queue: the interrupted run's leftovers wait for the next prompt.
+    if (interruptHolding()) releaseAfterInterrupt(pi);
+    untakenPushes.length = 0;
     clearWakeStart();
     if (pushWakeAwaitingStart) {
       pushWakeAwaitingStart = false;
@@ -1897,6 +1995,8 @@ export function registerPushFlush(pi: ExtensionAPI, options: WakeStartOptions & 
     resetPushWakeBreaker();
     clearWakeStart();
     heldPushQueue.length = 0;
+    untakenPushes.length = 0;
+    leadInterrupt = undefined;
     boundaryTurnOwed = false;
     syncOwnTurnOwed();
     leadIdleRef.current = undefined;

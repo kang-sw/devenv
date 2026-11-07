@@ -10,6 +10,7 @@ import {
   INTAKE_TOOL,
   labelWhiteboard,
   parseInboxDrain,
+  parseInterruptDrain,
   statusFigures,
   userPrompt,
   type DashboardEvent,
@@ -29,6 +30,7 @@ import {
   type DrainResult,
   type Watcher,
   type WaitOutcome,
+  type WakeKind,
 } from './watcher'
 
 // The Claude Code mod: the one hooks module a package's hooks.json names,
@@ -85,8 +87,11 @@ import {
 //   drain tool and submits as the user's own message under the whiteboard
 //   label: at once while idle; while a main-thread turn runs, held until it
 //   ends, unless the user promoted it to steering, which is appended into
-//   the running turn at the next main-thread tool call's result (see
-//   watcher.ts).
+//   the running turn at the next main-thread tool call's result. The same
+//   wait wakes on the page's interrupt, which aborts the running
+//   main-thread turn through $.turn.abort when that turn started before the
+//   click, and holds what the cut turn leaves behind as rows rather than
+//   submitting it (see watcher.ts).
 // - Status band (off until claude.status_band_enabled is set): a framed band
 //   above the prompt with the model, folder, git, context, rate-limit and
 //   cost figures, and the held key's todos, agenda and mailbox address (its
@@ -245,20 +250,23 @@ export function launcherPath(pluginRoot: string): string {
  * resolution) adds that named inbox. The wait itself owner-checks the slug
  * and falls back to reply-id-only when this key does not own it.
  */
-export function waitArgv(launcher: string, key: string, slug?: string, board = false): string[] {
+export function waitArgv(launcher: string, key: string, slug?: string, board = false, interrupt = false): string[] {
   const argv = ['python3', launcher, 'mailbox', 'wait', '--session-key', key]
   if (slug) argv.push('--slug', slug)
   // Also wake on a message held in the session's board-answer inbox (peek only).
   if (board) argv.push('--board-inbox')
+  // Also wake on an interrupt entry in that inbox (peek only).
+  if (interrupt) argv.push('--board-interrupt')
   return [...argv, '--timeout', WAIT_TIMEOUT, '--format', 'json']
 }
 
 /**
- * What woke a `--board-inbox` wait that exited with an arrival, from its
- * JSON `kinds`: mail, a held board message, or both. Output that names
- * neither reads as both, so nothing that arrived goes unhandled.
+ * What woke a board-flagged wait that exited with an arrival, from its JSON
+ * `kinds`: mail, a held board message, or both, and an interrupt entry as
+ * its own outcome with whatever else woke it beside. Output that names
+ * nothing reads as both, so nothing that arrived goes unhandled.
  */
-export function wakeKinds(stdout: string): 'mail' | 'board' | 'both' {
+export function wakeKinds(stdout: string): WaitOutcome {
   let kinds: unknown
   try {
     kinds = (JSON.parse(stdout.trim()) as { kinds?: unknown } | null)?.kinds
@@ -266,9 +274,9 @@ export function wakeKinds(stdout: string): 'mail' | 'board' | 'both' {
     return 'both'
   }
   const has = (k: string) => Array.isArray(kinds) && kinds.includes(k)
-  if (has('mail') && !has('board')) return 'mail'
-  if (has('board') && !has('mail')) return 'board'
-  return 'both'
+  const rest: WakeKind | undefined = has('mail') ? (has('board') ? 'both' : 'mail') : has('board') ? 'board' : undefined
+  if (has('interrupt')) return rest === undefined ? { interrupt: true } : { interrupt: true, also: rest }
+  return rest ?? 'both'
 }
 
 /** Main-loop-only guard and key validation for the bind tool. */
@@ -404,8 +412,9 @@ export function resultText(res: ToolCallResult): string | undefined {
 /**
  * Consume one spawned `mailbox wait` stream; abort ends it (returning the
  * stream kills the child). Every abort listener it adds is removed when it
- * settles: the loop's signal lives as long as the binding. A `board` wait's
- * arrival says from its output which kind woke it.
+ * settles: the loop's signal lives as long as the binding. The arrival of a
+ * wait armed with any board flag (`board`) says from its output which kind
+ * woke it.
  */
 export async function consumeWait(
   stream: Pick<HookStream<ProcessSpawnChunk, ProcessSpawnResult>, 'next' | 'return'>,
@@ -498,6 +507,14 @@ export const register: Register = (on) => {
    * it over as false, so mail during that turn is submitted as when idle.
    */
   let mainTurn = false
+  /**
+   * The running main-thread turn's id from its turn.start, which
+   * $.turn.abort takes, and when that turn started (epoch ms on this host's
+   * wall clock, the one the dashboard stamps an interrupt with); the id is
+   * cleared with mainTurn.
+   */
+  let mainTurnId: string | undefined
+  let mainTurnAt = 0
   /** Whether the latest session.start's mailbox probe passed; the manual row says the push is bound only then. */
   let pushAvailable: Promise<boolean> = Promise.resolve(false)
   /**
@@ -802,10 +819,10 @@ export const register: Register = (on) => {
       const created = createWatcher({
         mode,
         label,
-        wait: async (key, slug, board, signal) => {
+        wait: async (key, slug, flags, signal) => {
           if (signal.aborted) return 'stopped'
-          const stream = $.process.spawn({ argv: waitArgv(launcher, key, slug, board) })
-          return consumeWait(stream, signal, (text) => $.ui.log(`${label}: ${text}`, { to: 'debug' }), board)
+          const stream = $.process.spawn({ argv: waitArgv(launcher, key, slug, flags.board, flags.interrupt) })
+          return consumeWait(stream, signal, (text) => $.ui.log(`${label}: ${text}`, { to: 'debug' }), flags.board || flags.interrupt)
         },
         drain: async (key) => {
           if (!recvTool) return { kind: 'failed', reason: 'MCP server not resolved' }
@@ -874,6 +891,18 @@ export const register: Register = (on) => {
             const res = await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: labelWhiteboard($.plugin.name, text) }] } })
             if (res.deny !== undefined) throw new Error(`row refused: ${res.deny}`)
             dashboard.whiteboardSteered(text)
+          },
+          // The page's interrupt: its entries claimed alone, never a message.
+          drainInterrupt: async (key) => {
+            await serverResolved
+            if (!server) throw new Error('MCP server not resolved')
+            return parseInterruptDrain(await callText(server, INBOX_DRAIN_TOOL, { session_key: key, interrupt_only: true, format: 'json' }))
+          },
+          // The id is read now, so the abort names the turn the caller checked.
+          mainTurn: () => {
+            const turnId = mainTurnId
+            if (!mainTurn || turnId === undefined) return undefined
+            return { startedAt: mainTurnAt, abort: () => $.turn.abort({ turnId }) }
           },
         },
       })
@@ -1436,9 +1465,20 @@ export const register: Register = (on) => {
   // A main-thread turn start also tells the compaction and reconnect
   // features, whose resume prompts yield to a turn already started, and the
   // manual feature, which sets up after `/clear` (no session.start follows
-  // it) or a failed start at the first main-thread turn.
+  // it) or a failed start at the first main-thread turn. Its id and start
+  // time are kept for a dashboard interrupt, and the mailbox push hears of
+  // it, which ends an earlier interrupt's hold on turn-end submits.
   on('turn.start', async ($, e, next) => {
-    if (e.agentId === undefined) mainTurn = true
+    if (e.agentId === undefined) {
+      mainTurn = true
+      mainTurnId = e.turnId
+      mainTurnAt = Date.now()
+      try {
+        watcher?.turnStarted()
+      } catch (err) {
+        $.ui.log(`${$.plugin.name} mailbox: turn start handling failed: ${String(err)}`, { to: 'debug' })
+      }
+    }
     dashboard.turnStarted(e.agentId)
     try {
       manual.turnStarted(e.agentId)
@@ -1469,6 +1509,7 @@ export const register: Register = (on) => {
     } finally {
       if (e.agentId === undefined) {
         mainTurn = false
+        mainTurnId = undefined
         try {
           watcher?.turnCompleted()
         } catch (err) {
@@ -1593,6 +1634,7 @@ export const register: Register = (on) => {
       autoKey = undefined
       manualKey = undefined
       mainTurn = false
+      mainTurnId = undefined
       stopWatcher(`session.end ${e.reason}`)
     } catch (err) {
       $.ui.log(`${$.plugin.name} mailbox: stop failed: ${String(err)}`, { to: 'debug' })

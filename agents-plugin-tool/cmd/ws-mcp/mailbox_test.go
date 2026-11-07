@@ -686,3 +686,105 @@ func TestMailboxWaitWithoutBoardInboxFlagIgnoresAnInboxEntry(t *testing.T) {
 		t.Fatalf("timeout JSON = %#v, want timed_out with board 0 and kinds []", got)
 	}
 }
+
+// seedBoardInterrupt writes an interrupt entry into sessionKey's board-answer
+// inbox, taking back any held message, and returns the inbox directory.
+func seedBoardInterrupt(t *testing.T, env []string, sessionKey string) string {
+	t.Helper()
+	t.Setenv("WS_CACHE_HOME", cacheHomeFromEnv(t, env))
+	stateDir, err := wsdashboard.Dir("")
+	if err != nil {
+		t.Fatalf("wsdashboard.Dir: %v", err)
+	}
+	inbox := wsinbox.Dir(wsdashboard.SessionDir(stateDir, wsmailbox.ReplyID(sessionKey)))
+	if _, _, err := wsinbox.Interrupt(inbox, time.Now()); err != nil {
+		t.Fatalf("seed interrupt: %v", err)
+	}
+	return inbox
+}
+
+type mailboxWaitInterruptJSON struct {
+	TimedOut  bool     `json:"timed_out"`
+	Unread    int      `json:"unread"`
+	Board     int      `json:"board"`
+	Interrupt *int     `json:"interrupt"`
+	Kinds     []string `json:"kinds"`
+	Rearm     struct {
+		Command string `json:"command"`
+	} `json:"rearm"`
+}
+
+func TestMailboxWaitBoardInterruptFlagWakesOnAnInterruptEntry(t *testing.T) {
+	bin := buildWsMCPMailboxTestBin(t)
+	env := mailboxTestEnv(t)
+	const sessionKey = "amber-tide-fox"
+	seedBoardMessage(t, env, sessionKey, "held follow-up")
+
+	// A held follow-up wakes neither an interrupt-only wait nor an
+	// interrupt-plus-steer wait.
+	for _, flags := range [][]string{{"--board-interrupt"}, {"--board-steer", "--board-interrupt"}} {
+		args := append([]string{"mailbox", "wait", "--session-key", sessionKey, "--timeout", "1s", "--format", "json"}, flags...)
+		cmd := exec.Command(bin, args...)
+		cmd.Env = env
+		out, err := cmd.CombinedOutput()
+		if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != mailboxWaitExitTimeout {
+			t.Fatalf("mailbox wait %v over a held follow-up did not time out: err=%v out=%s", flags, err, out)
+		}
+		var got mailboxWaitInterruptJSON
+		if uerr := json.Unmarshal(bytes.TrimSpace(out), &got); uerr != nil || !got.TimedOut || got.Interrupt == nil || *got.Interrupt != 0 {
+			t.Fatalf("timed-out JSON = %s (%v), want interrupt 0", out, uerr)
+		}
+	}
+
+	// The interrupt takes the follow-up back and writes its entry.
+	seedBoardInterrupt(t, env, sessionKey)
+	for _, tc := range []struct {
+		flags []string
+		rearm string
+	}{
+		{[]string{"--board-interrupt"}, " --board-interrupt"},
+		{[]string{"--board-inbox", "--board-interrupt"}, " --board-inbox --board-interrupt"},
+		{[]string{"--board-interrupt", "--board-steer"}, " --board-steer --board-interrupt"},
+	} {
+		args := append([]string{"mailbox", "wait", "--session-key", sessionKey, "--timeout", "10s", "--format", "json"}, tc.flags...)
+		cmd := exec.Command(bin, args...)
+		cmd.Env = env
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("mailbox wait %v failed: %v\n%s", tc.flags, err, out)
+		}
+		var got mailboxWaitInterruptJSON
+		if uerr := json.Unmarshal(bytes.TrimSpace(out), &got); uerr != nil {
+			t.Fatalf("invalid mailbox wait JSON: %v\n%s", uerr, out)
+		}
+		if got.TimedOut || got.Board != 0 || got.Interrupt == nil || *got.Interrupt != 1 || strings.Join(got.Kinds, ",") != "interrupt" {
+			t.Fatalf("mailbox wait %v JSON = %s, want one interrupt arrival", tc.flags, out)
+		}
+		if !strings.HasSuffix(got.Rearm.Command, tc.rearm) {
+			t.Fatalf("re-arm command = %q, want it to end with %q", got.Rearm.Command, tc.rearm)
+		}
+	}
+
+	text := exec.Command(bin, "mailbox", "wait", "--session-key", sessionKey, "--timeout", "10s", "--board-interrupt")
+	text.Env = env
+	out, err := text.CombinedOutput()
+	if err != nil {
+		t.Fatalf("mailbox wait --board-interrupt (text) failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "unread 0\ninterrupt 1\n") || strings.Contains(string(out), "board ") {
+		t.Fatalf("text output = %q, want unread 0 then interrupt 1", out)
+	}
+}
+
+func TestMailboxWaitBoardInboxFlagIgnoresAnInterruptEntry(t *testing.T) {
+	bin := buildWsMCPMailboxTestBin(t)
+	env := mailboxTestEnv(t)
+	const sessionKey = "amber-tide-fox"
+	seedBoardInterrupt(t, env, sessionKey)
+	cmd := exec.Command(bin, "mailbox", "wait", "--session-key", sessionKey, "--timeout", "1s", "--board-inbox", "--format", "json")
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != mailboxWaitExitTimeout {
+		t.Fatalf("mailbox wait --board-inbox over an interrupt entry did not time out: err=%v out=%s", err, out)
+	}
+}

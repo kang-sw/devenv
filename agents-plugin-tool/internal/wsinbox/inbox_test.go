@@ -426,3 +426,182 @@ func TestSteerAndDrainRaceHasOneWinner(t *testing.T) {
 		}
 	}
 }
+
+func TestInterruptClaimsEveryHeldMessageAndWritesTheEntry(t *testing.T) {
+	dir := Dir(t.TempDir())
+	first, _ := send(t, dir, "promoted")
+	steered, err := Steer(dir, first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _ := send(t, dir, "follow-up", Chip{ID: "03", Answer: "a"})
+	now := time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)
+	held, name, err := Interrupt(dir, now)
+	if err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+	if len(held) != 2 || held[0].Name != steered || held[1].Name != second || held[0].Entry.Text() != "promoted" || held[1].Entry.Text() != "follow-up\n\n(03) a" {
+		t.Fatalf("Interrupt held = %+v", held)
+	}
+	names, _ := Names(dir)
+	if len(names) != 1 || names[0] != name {
+		t.Fatalf("inbox after Interrupt = %v, want only the interrupt entry %q", names, name)
+	}
+	e, err := readEntry(filepath.Join(dir, name))
+	if err != nil || !e.Interrupt || e.SentAt != now.UnixMilli() || e.SchemaVersion != SchemaVersion || len(e.Parts) != 0 || e.Steer {
+		t.Fatalf("interrupt entry = %+v, %v", e, err)
+	}
+	// Nothing held: the claim is empty and a second entry is written.
+	again, name2, err := Interrupt(dir, now.Add(time.Second))
+	if err != nil || len(again) != 0 || name2 == name {
+		t.Fatalf("second Interrupt = %+v, %q, %v", again, name2, err)
+	}
+	if names, _ := InterruptNames(dir); len(names) != 2 {
+		t.Fatalf("InterruptNames = %v, want both entries", names)
+	}
+}
+
+func TestInterruptPutsTheClaimsBackWhenTheEntryWriteFails(t *testing.T) {
+	dir := Dir(t.TempDir())
+	first, _ := send(t, dir, "one")
+	steered, err := Steer(dir, first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _ := send(t, dir, "two")
+	orig := writeInterruptEntry
+	writeInterruptEntry = func(string, Entry) (string, error) { return "", errors.New("disk full") }
+	t.Cleanup(func() { writeInterruptEntry = orig })
+	if held, name, err := Interrupt(dir, time.Now()); err == nil || held != nil || name != "" {
+		t.Fatalf("Interrupt with a failing write = %+v, %q, %v", held, name, err)
+	}
+	names, _ := Names(dir)
+	if len(names) != 2 || names[0] != steered || names[1] != second {
+		t.Fatalf("inbox after a failed Interrupt = %v, want both messages back", names)
+	}
+	if des, _ := os.ReadDir(dir); len(des) != 2 {
+		t.Fatalf("inbox dir holds %d files, want no claim file left", len(des))
+	}
+}
+
+func TestInterruptEntryIsNeverAMessage(t *testing.T) {
+	dir := Dir(t.TempDir())
+	_, name, err := Interrupt(dir, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Never a merge target, so the attachment cap never counts it.
+	if target, ok, err := MergeTarget(dir); err != nil || ok {
+		t.Fatalf("merge target with only an interrupt entry = %+v, %v", target, err)
+	}
+	msg, merged := send(t, dir, "after")
+	if merged || msg == name {
+		t.Fatalf("send after an interrupt merged=%v name=%s", merged, msg)
+	}
+	if target, ok, _ := MergeTarget(dir); !ok || target.Name != msg {
+		t.Fatalf("merge target = %+v, want the message %q", target, msg)
+	}
+	// Held and MessageNames leave it out; Names and InterruptNames list it.
+	if held, _ := Held(dir); len(held) != 1 || held[0].Name != msg {
+		t.Fatalf("Held = %+v, want only the message", held)
+	}
+	if names, _ := MessageNames(dir); len(names) != 1 || names[0] != msg {
+		t.Fatalf("MessageNames = %v", names)
+	}
+	if names, _ := InterruptNames(dir); len(names) != 1 || names[0] != name {
+		t.Fatalf("InterruptNames = %v", names)
+	}
+	if names, _ := Names(dir); len(names) != 2 {
+		t.Fatalf("Names = %v, want both entries", names)
+	}
+	// Cancel and Steer refuse it and leave it in place.
+	if _, err := Cancel(dir, name); !errors.Is(err, ErrGone) {
+		t.Fatalf("Cancel of an interrupt entry: %v, want ErrGone", err)
+	}
+	if _, err := Steer(dir, name); !errors.Is(err, ErrGone) {
+		t.Fatalf("Steer of an interrupt entry: %v, want ErrGone", err)
+	}
+	if names, _ := InterruptNames(dir); len(names) != 1 || names[0] != name {
+		t.Fatalf("InterruptNames after refused cancel and steer = %v", names)
+	}
+	if names, _ := MessageNames(Dir(t.TempDir())); names != nil {
+		t.Fatalf("MessageNames of a missing inbox = %v", names)
+	}
+}
+
+func TestDrainsAndTheInterruptEntry(t *testing.T) {
+	dir := Dir(t.TempDir())
+	first, _ := send(t, dir, "promoted")
+	if _, err := Steer(dir, first); err != nil {
+		t.Fatal(err)
+	}
+	_, interrupt, err := Interrupt(dir, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	steered, _ := send(t, dir, "steer me")
+	steered, err = Steer(dir, steered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	followUp, _ := send(t, dir, "follow-up")
+
+	// The steer-only drain leaves the interrupt entry in place.
+	got, err := DrainSteer(dir)
+	if err != nil || len(got) != 1 || got[0].Name != steered {
+		t.Fatalf("DrainSteer = %+v, %v", got, err)
+	}
+	if names, _ := InterruptNames(dir); len(names) != 1 || names[0] != interrupt {
+		t.Fatalf("InterruptNames after the steer drain = %v", names)
+	}
+	// The interrupt drain takes only it, keeping no drained record.
+	got, err = DrainInterrupt(dir)
+	if err != nil || len(got) != 1 || got[0].Name != interrupt || !got[0].Entry.Interrupt || got[0].Entry.SentAt == 0 {
+		t.Fatalf("DrainInterrupt = %+v, %v", got, err)
+	}
+	if again, err := DrainInterrupt(dir); err != nil || len(again) != 0 {
+		t.Fatalf("second DrainInterrupt = %+v, %v", again, err)
+	}
+	if held, _ := Held(dir); len(held) != 1 || held[0].Name != followUp {
+		t.Fatalf("held after the interrupt drain = %+v", held)
+	}
+	if rec, _ := DrainedNames(dir); len(rec) != 1 || rec[0] != steered {
+		t.Fatalf("drained records = %v, want only the steered message", rec)
+	}
+
+	// The full drain drops an interrupt entry: not returned, not recorded.
+	_, interrupt, err = Interrupt(dir, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	later, _ := send(t, dir, "later")
+	got, err = Drain(dir)
+	if err != nil || len(got) != 1 || got[0].Name != later {
+		t.Fatalf("Drain = %+v, %v", got, err)
+	}
+	if names, _ := Names(dir); len(names) != 0 {
+		t.Fatalf("inbox after the full drain = %v", names)
+	}
+	rec, _ := DrainedNames(dir)
+	for _, n := range rec {
+		if n == interrupt {
+			t.Fatalf("the full drain kept the interrupt entry as a drained record: %v", rec)
+		}
+	}
+	if len(rec) != 2 {
+		t.Fatalf("drained records = %v", rec)
+	}
+	// A full drain over an interrupt entry alone returns nothing.
+	if _, _, err := Interrupt(dir, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := Drain(dir); err != nil || len(got) != 0 {
+		t.Fatalf("Drain of an interrupt entry alone = %+v, %v", got, err)
+	}
+	if names, _ := Names(dir); len(names) != 0 {
+		t.Fatalf("inbox after the full drain = %v", names)
+	}
+	if got, err := DrainInterrupt(Dir(t.TempDir())); err != nil || got != nil {
+		t.Fatalf("DrainInterrupt of a missing inbox = %+v, %v", got, err)
+	}
+}

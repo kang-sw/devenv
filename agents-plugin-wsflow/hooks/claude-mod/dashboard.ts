@@ -142,6 +142,27 @@ export function parseInboxDrain(text: string): string[] {
   })
 }
 
+/**
+ * The creation times (epoch ms) of the interrupt entries an `interrupt_only`
+ * inbox drain's `format: "json"` text claimed. A record that is not an
+ * interrupt entry with a numeric `sent_at`, and text of another shape, yield
+ * nothing: without a time the entry cannot be checked against the running
+ * turn's start, and an interrupt must never cut a turn it was not meant for.
+ */
+export function parseInterruptDrain(text: string): number[] {
+  let messages: unknown
+  try {
+    messages = (JSON.parse(text.trim()) as { messages?: unknown } | null)?.messages
+  } catch {
+    return []
+  }
+  if (!Array.isArray(messages)) return []
+  return messages.flatMap((m): number[] => {
+    const r = m as { interrupt?: unknown; sent_at?: unknown } | null
+    return r?.interrupt === true && typeof r.sent_at === 'number' && Number.isFinite(r.sent_at) ? [r.sent_at] : []
+  })
+}
+
 export type Origin = 'terminal' | 'whiteboard' | 'mail'
 
 /** Prompt origins that are the person's own message: typed, from a remote client, or an SDK host's turn. */

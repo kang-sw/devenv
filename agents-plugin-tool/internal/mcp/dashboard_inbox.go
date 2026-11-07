@@ -16,7 +16,8 @@ import (
 // page and the daemon held on disk. The adapter calls it at the end of a
 // turn and injects what it returns as the user's own message; with
 // steer_only it calls it mid-turn and takes only the messages the user
-// promoted to steering.
+// promoted to steering; with interrupt_only it takes only the interrupt
+// entries, the user's requests to stop the running turn.
 
 const dashboardInboxDrainTool = "dashboard.inbox_drain"
 
@@ -27,6 +28,8 @@ type dashboardInboxMessage struct {
 	Text   string         `json:"text"`
 	Parts  []string       `json:"parts"`
 	Chips  []wsinbox.Chip `json:"chips"`
+	// Interrupt marks an interrupt entry, which carries no text.
+	Interrupt bool `json:"interrupt,omitempty"`
 }
 
 // sessionInboxDir is the board-answer inbox of the session behind
@@ -53,9 +56,16 @@ func (s *Server) handleDashboardInboxDrain(id json.RawMessage, args map[string]a
 	if err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 	}
+	steerOnly, interruptOnly := boolArgument(args["steer_only"]), boolArgument(args["interrupt_only"])
+	if steerOnly && interruptOnly {
+		return toolTextResponse(id, "", fmt.Errorf("%s: steer_only and interrupt_only cannot be combined", tool))
+	}
 	drain := wsinbox.Drain
-	if boolArgument(args["steer_only"]) {
+	switch {
+	case steerOnly:
 		drain = wsinbox.DrainSteer
+	case interruptOnly:
+		drain = wsinbox.DrainInterrupt
 	}
 	records, drainErr := drain(dir)
 	if len(records) > 0 {
@@ -76,7 +86,7 @@ func (s *Server) handleDashboardInboxDrain(id json.RawMessage, args map[string]a
 			if chips == nil {
 				chips = []wsinbox.Chip{}
 			}
-			messages = append(messages, dashboardInboxMessage{ID: r.ID(), SentAt: e.SentAt, Text: e.Text(), Parts: parts, Chips: chips})
+			messages = append(messages, dashboardInboxMessage{ID: r.ID(), SentAt: e.SentAt, Text: e.Text(), Parts: parts, Chips: chips, Interrupt: e.Interrupt})
 		}
 		return toolJSONResponse(id, map[string]any{"messages": messages}, nil)
 	}

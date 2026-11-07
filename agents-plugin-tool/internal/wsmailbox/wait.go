@@ -50,6 +50,13 @@ type WaitTarget struct {
 	// InboxSteerOnly narrows the InboxDir watch to entries marked for
 	// steering: a held follow-up does not wake the wait, a steered one does.
 	InboxSteerOnly bool
+	// InboxInterrupt also watches InboxDir for interrupt entries, counted in
+	// WaitResult.Interrupt, beside the held-message watch.
+	InboxInterrupt bool
+	// InboxInterruptOnly watches InboxDir for interrupt entries alone: no
+	// held message, steered or not, wakes the wait. It implies
+	// InboxInterrupt.
+	InboxInterruptOnly bool
 }
 
 // WaitResult is one Wait call's outcome: the envelopes found in each queue
@@ -59,19 +66,23 @@ type WaitResult struct {
 	TimedOut bool
 	Named    []Envelope // from the named inbox, when Slug was set and owned
 	Reply    []Envelope // from the caller's own reply-id queue
-	// Board is how many held entries the watched inbox (WaitTarget.InboxDir)
+	// Board is how many held messages the watched inbox (WaitTarget.InboxDir)
 	// had, only the steered ones under InboxSteerOnly; zero when it is not
-	// watched or empty.
+	// watched, under InboxInterruptOnly, or empty. It never counts an
+	// interrupt entry.
 	Board int
+	// Interrupt is how many interrupt entries the watched inbox had; zero
+	// unless InboxInterrupt or InboxInterruptOnly is set.
+	Interrupt int
 }
 
 // Total returns the combined unread mail count across both queues; held
 // inbox entries are counted in Board, not here.
 func (r WaitResult) Total() int { return len(r.Named) + len(r.Reply) }
 
-// Woke reports whether this result is an arrival: unread mail, or a held
-// inbox entry in a watched inbox.
-func (r WaitResult) Woke() bool { return r.Total() > 0 || r.Board > 0 }
+// Woke reports whether this result is an arrival: unread mail, a held
+// message in a watched inbox, or a watched interrupt entry.
+func (r WaitResult) Woke() bool { return r.Total() > 0 || r.Board > 0 || r.Interrupt > 0 }
 
 // DefaultWaitPoll is Wait's internal recheck interval when WaitOptions.Poll
 // is unset. Implementation-chosen default, not a cross-ticket contract.
@@ -168,13 +179,21 @@ type resolvedWaitTarget struct {
 	replyID    string
 	inboxDir   string // "" when the board-answer inbox is not watched
 	steerOnly  bool   // count only the inbox entries marked for steering
+	interrupt  bool   // also count the interrupt entries
+	noBoard    bool   // count no held message, only interrupt entries
 }
 
 // resolveWaitTarget performs every resolution step that only needs to run
 // once per Wait call: parsing/resolving an explicit Slug's store path, and
 // deriving the caller's reply-id + registry path.
 func resolveWaitTarget(target WaitTarget) (resolvedWaitTarget, error) {
-	r := resolvedWaitTarget{sessionKey: target.SessionKey, inboxDir: target.InboxDir, steerOnly: target.InboxSteerOnly}
+	r := resolvedWaitTarget{
+		sessionKey: target.SessionKey,
+		inboxDir:   target.InboxDir,
+		steerOnly:  target.InboxSteerOnly,
+		interrupt:  target.InboxInterrupt || target.InboxInterruptOnly,
+		noBoard:    target.InboxInterruptOnly,
+	}
 
 	if target.Slug != "" {
 		name, scope, err := ParseSlugScope(target.Slug)
@@ -217,8 +236,8 @@ func (r resolvedWaitTarget) peek() (WaitResult, error) {
 		return WaitResult{}, err
 	}
 	result := WaitResult{Named: named, Reply: replyStore.Queues[r.replyID]}
-	if r.inboxDir != "" {
-		names, err := wsinbox.Names(r.inboxDir)
+	if r.inboxDir != "" && !r.noBoard {
+		names, err := wsinbox.MessageNames(r.inboxDir)
 		if r.steerOnly {
 			names, err = wsinbox.SteerNames(r.inboxDir)
 		}
@@ -226,6 +245,13 @@ func (r resolvedWaitTarget) peek() (WaitResult, error) {
 			return WaitResult{}, err
 		}
 		result.Board = len(names)
+	}
+	if r.inboxDir != "" && r.interrupt {
+		names, err := wsinbox.InterruptNames(r.inboxDir)
+		if err != nil {
+			return WaitResult{}, err
+		}
+		result.Interrupt = len(names)
 	}
 	return result, nil
 }

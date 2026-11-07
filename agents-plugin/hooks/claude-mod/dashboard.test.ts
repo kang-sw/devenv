@@ -12,6 +12,7 @@ import {
   FLUSH_INTERVAL_MS,
   labelWhiteboard,
   parseInboxDrain,
+  parseInterruptDrain,
   PERMISSION_PROMPT,
   RETRY_MS,
   TEXT_FLUSH_INTERVAL_MS,
@@ -122,6 +123,16 @@ describe('pure helpers', () => {
     expect(parseInboxDrain('{"messages":[{"id":"a"}]}')).toEqual(['{"id":"a"}'])
     expect(parseInboxDrain('drained 1\nmessage x\nhi')).toEqual(['drained 1\nmessage x\nhi'])
     expect(parseInboxDrain('{"other":1}')).toEqual(['{"other":1}'])
+  })
+
+  test('an interrupt drain\'s JSON gives each interrupt entry\'s creation time; a record without one, or any other shape, gives nothing', () => {
+    const entry = (sentAt: unknown, interrupt: unknown = true) => ({ id: 'i', sent_at: sentAt, text: '', parts: [], chips: [], interrupt })
+    expect(parseInterruptDrain(JSON.stringify({ messages: [entry(1_800_000_000_000), entry(1_800_000_000_500)] }))).toEqual([1_800_000_000_000, 1_800_000_000_500])
+    expect(parseInterruptDrain('{"messages":[]}')).toEqual([])
+    expect(parseInterruptDrain(JSON.stringify({ messages: [entry('soon'), entry(null), entry(5, false), { id: 'm', text: 'hi' }, entry(7)] }))).toEqual([7])
+    expect(parseInterruptDrain('  ')).toEqual([])
+    expect(parseInterruptDrain('drained 1')).toEqual([])
+    expect(parseInterruptDrain('{"other":1}')).toEqual([])
   })
 
   test('a typed prompt is a terminal user message; this plugin\'s labelled prompt a whiteboard one; anything else none', () => {

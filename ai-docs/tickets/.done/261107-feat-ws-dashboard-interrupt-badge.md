@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 36ed1665e93f0191
 sage-review-completeness-reviewed: 36ed1665e93f0191
+completed: 2026-11-08
 ---
 
 # Dashboard: interrupt the lead's running turn from the session page
@@ -279,3 +280,83 @@ Pi that a click during long thinking stops the turn within a few seconds,
 returns a held message to the composer, that a message resent from the page
 after the interrupt starts a new turn (escalate to the lead if it does not),
 and that a click as the turn ends does not cut the next turn.
+
+### Result (07674bfaf) - 2026-11-08
+
+Landed in d480394df (Go), 003f3050e (Claude mod + wsflow mirror), 6b9e08afa
+(Pi), 4dc309263 (page), 07674bfaf (help text).
+
+- **Daemon / inbox.** `wsinbox.Entry.Interrupt` (carries only `SentAt`, the
+  click's epoch ms); `wsinbox.Interrupt` claims every held message (steered
+  or not) and writes the entry under `inboxMu`, putting claims back when the
+  write fails; `DrainInterrupt`, `MessageNames`, `InterruptNames`. The full
+  drain deletes an interrupt entry without a `drained/` record, the
+  steer-only drain leaves it, `MergeTarget`/`Held` skip it, cancel and steer
+  refuse it. `POST /s/<rid>/interrupt` answers
+  `{"held":[{id,text,chips,images,nums}]}` oldest first (cancel's shape,
+  shared helper). `dashboard.inbox_drain` gains `interrupt_only` (error with
+  `steer_only`; records carry `interrupt: true`, `sent_at`).
+  `ws-mcp mailbox wait --board-interrupt` combines with `--board-inbox`,
+  `--board-steer`, or stands alone; the result gains `interrupt` and the
+  `interrupt` kind; `board` never counts interrupt entries.
+- **Claude mod.** Main-thread `turn.start` stores the turn id and start time;
+  the wait carries `--board-interrupt` whenever board submission is on; an
+  interrupt drain aborts only a running main turn that started before the
+  newest `sent_at`, setting the interrupted mark before `$.turn.abort`
+  (rejection logged and ignored); the mark lasts until the next main
+  `turn.start` (or a stop). At an interrupted turn end queued mail and
+  carried steer texts are appended as rows, stranded steer rows are not
+  resubmitted, and messages the turn-end drain newly claims still submit.
+- **Pi.** The run start is stamped at owner-lead `agent_start`; a context
+  ref refreshed at `session_start`/`agent_start` feeds `ctx.abort()`. While
+  the mark stands (abort to next `agent_start`) the push FIFO is held, no
+  `agent_end` boundary batch or wake line starts a turn, carried steer texts
+  are queued as a `nextTurn` custom message, and at the interrupted settle
+  the pushes the run did not take (tracked by `details` identity through
+  `message_start`, verified in the installed pi-coding-agent) and then the
+  FIFO are queued as `nextTurn`. `pi.dashboard_enabled` description updated.
+- **Page.** Round red badge on the conversation/composer border, shown only
+  while live and the convlive `data-phase` is thinking, replying, tool, or
+  permission; one click posts, holds a disabled state until the phase leaves
+  that set, and restores held messages through `restoreHeld` (shared with
+  cancel: paragraphs in send order, images renumbered above the draft's). A
+  refusal restores the badge and shows `js.interrupt.fail`. Six `js.interrupt*`
+  keys in all 11 tables.
+
+Verification: `go build ./...`, `go vet`, `GOOS=windows go vet` clean; `go
+test ./internal/wsinbox ./internal/wsdashboard ./internal/mcp
+./internal/wsmailbox ./cmd/ws-mcp ./internal/wsrsrc ./internal/wsi18n` ok
+(TestStickyFallbackPort flaked once in a leaf run, file untouched); `claude
+plugin test` 677/677 and `claude plugin validate` on ws and wsflow; Pi
+`node --test` mailbox-waiter 98/98, spawner interrupt tests 7/7, full
+`npm test` no failures beyond the pre-existing baseline; `node --check
+dashboard.js`; headless Chromium against a test daemon (badge only in the
+working phases, no bubble for the entry, three held messages restored with
+renumbered images against a draft with an image, disabled state until idle,
+409 restores the badge, light/dark at 1280/390/320 px). Lite review: no
+Critical or Important findings.
+
+Decisions taken in this phase:
+- runtime.json unchanged: `>=0.48.11-dev` already is the ships-in version
+  (0.48.11 unreleased).
+- `--board-interrupt` is armed whenever board submission is on, idle
+  included, so an idle-armed wait spanning into a turn cannot miss the
+  interrupt; an idle wake consumes and drops the entry.
+- No entry sweep exists; the full drain drops an interrupt entry no
+  interrupt drain took.
+- Pi re-sends untaken pushes at the interrupted run's settle, not at the
+  abort: a non-TUI session keeps its queues and its continuation would take
+  them, so an abort-time re-send would duplicate.
+- Pi's ordering note corrected: idle mail after an interrupt wakes through
+  the push wake line, a `prompt()` turn, so `nextTurn` items ride it; only a
+  turn started by a custom message alone carries none, and a reload or `/new`
+  drops them.
+
+Open (not verified here): the live two-host check (click during long
+thinking stops the turn, held message returns, a resent message starts a
+turn, a click as the turn ends does not cut the next) is manual. Minor review
+notes left: Claude `wakeKinds` reads unreadable output of an interrupt-armed
+wait as `both` without the interrupt (delayed, not lost; Pi counts it); in
+the Claude notice drain mode a notice held at an interrupted turn end leaves
+the loop suspended until the model's recv, so a page message sent after the
+interrupt waits for terminal input (same gap Esc has).

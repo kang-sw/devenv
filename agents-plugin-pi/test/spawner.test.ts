@@ -95,7 +95,9 @@ import {
   leadIdleRef,
   ownerNotifyRef,
   leadWakeStartPendingRef,
+  isLeadInterrupted,
   markAgentExited,
+  markLeadInterrupted,
   observeChildSubtree,
   probeAgentLiveness,
   promptAgent,
@@ -2228,6 +2230,179 @@ describe("pushToLead: holding a mid-turn push until the lead's turn settles", ()
     assert.deepEqual(sent, [], "the settle-time wake waits for a macrotask, never inside the settle emission");
     await macrotask();
     assert.deepEqual(sent, [PUSH_BATCH_CUSTOM_TYPE]);
+  });
+});
+
+describe("a dashboard interrupt of the lead's run", () => {
+  type Sent = { message: { customType?: string; details?: { report?: string; items?: Array<{ details?: { report?: string } }> } }; options?: { deliverAs?: string; triggerTurn?: boolean } };
+  let shutdown: (() => void) | undefined;
+
+  /**
+   * The owner lead's push lifecycle against a minimal Pi: `start`, `end`, and
+   * `settle` emit the run events, `take` emits the `message_start` Pi gives a
+   * custom message it injects (its own copy with `role: "custom"`, holding
+   * the very `details` passed to `sendMessage`), `prompted` the one for a
+   * user prompt, and `runTimers` lets the pending deferred flushes and wake
+   * timers fire once.
+   */
+  function harness(startIdle = false) {
+    const handlers = new Map<string, Array<(event?: unknown) => void>>();
+    const timers = new Map<number, () => void>();
+    let nextTimer = 0;
+    let idle = startIdle;
+    const users: unknown[] = [];
+    const sent: Sent[] = [];
+    const api = {
+      on: (event: string, fn: (event?: unknown) => void) => { handlers.set(event, [...(handlers.get(event) ?? []), fn]); },
+      sendUserMessage: (content: unknown) => { users.push(content); },
+      sendMessage: (message: unknown, options?: unknown) => { sent.push({ message: message as never, options: options as never }); },
+    };
+    leadIdleRef.current = () => idle;
+    registerPushFlush(api as never, {
+      delayMs: () => 10,
+      scheduleTimer: (cb) => { timers.set(++nextTimer, cb); return nextTimer as never; },
+      clearTimer: (handle) => { timers.delete(handle as unknown as number); },
+    });
+    const emit = (event: string, payload?: unknown): void => { for (const fn of handlers.get(event) ?? []) fn(payload); };
+    shutdown = () => emit("session_shutdown");
+    return {
+      users,
+      sent,
+      start: () => { idle = false; emit("agent_start"); },
+      take: (message: Sent["message"]) => emit("message_start", { message: { role: "custom", ...message, timestamp: 0 } }),
+      prompted: (content: unknown) => emit("message_start", { message: { role: "user", content, timestamp: 0 } }),
+      end: () => emit("agent_end"),
+      settle: () => { idle = true; emit("agent_settled"); },
+      runTimers: () => { for (const [key, cb] of [...timers]) { timers.delete(key); cb(); } },
+      push: (deliverAs: "steer" | "followUp", report: string, terminal?: TerminalDelivery) =>
+        pushToLead(api as never, new Map(), undefined, "ws-agent-report", { report }, deliverAs, terminal),
+    };
+  }
+  const reports = (entry: Sent): Array<string | undefined> => (entry.message.details?.items ?? []).map((item) => item.details?.report);
+
+  beforeEach(() => {
+    heldPushQueue.length = 0;
+    leadCompactingRef.current = false;
+    leadWakeStartPendingRef.current = false;
+  });
+
+  afterEach(() => {
+    shutdown?.();
+    shutdown = undefined;
+    heldPushQueue.length = 0;
+    leadIdleRef.current = undefined;
+    leadWakeStartPendingRef.current = false;
+  });
+
+  test("held FIFO items, a steer arriving after the abort among them, wait for the next prompt as one nextTurn batch, with their terminal bookkeeping", () => {
+    const h = harness();
+    h.start();
+    const calls: string[] = [];
+    const terminal = { afterEnqueue: () => calls.push("after") } as unknown as TerminalDelivery;
+    h.push("followUp", "held before", terminal);
+    markLeadInterrupted();
+    h.push("steer", "steered after");
+    assert.deepEqual(h.sent, [], "a steer into a run being cut would be dropped with Pi's queues");
+    assert.equal(heldPushQueue.length, 2);
+    h.end();
+    h.settle();
+    assert.equal(h.sent.length, 1);
+    assert.equal(h.sent[0]!.message.customType, PUSH_BATCH_CUSTOM_TYPE);
+    assert.deepEqual(h.sent[0]!.options, { deliverAs: "nextTurn" });
+    assert.deepEqual(reports(h.sent[0]!), ["held before", "steered after"], "arrival order is kept");
+    assert.deepEqual(heldPushQueue, []);
+    assert.equal(terminal.state, "enqueued");
+    assert.deepEqual(calls, ["after"]);
+  });
+
+  test("no agent_end boundary batch and no wake line starts a turn after the interrupt; a push admitted after the settle behaves as usual", () => {
+    const h = harness();
+    h.start();
+    h.push("followUp", "first");
+    markLeadInterrupted();
+    h.end();
+    assert.deepEqual(h.sent, [], "a boundary batch would be taken by a continuation run");
+    h.settle();
+    h.runTimers();
+    assert.deepEqual(h.users, [], "nothing wakes the lead for what the cut run left");
+    assert.deepEqual(h.sent.map((entry) => entry.options?.deliverAs), ["nextTurn"]);
+    h.push("followUp", "after the settle");
+    assert.equal(h.users.length, 1, "the next push wakes the idle lead, and that prompt carries the nextTurn batch");
+    assert.equal(heldPushQueue.length, 1);
+  });
+
+  test("pushes steered into the run that it was not seen taking are re-sent whole as nextTurn at its settle; a taken one is not", () => {
+    const h = harness();
+    h.start();
+    h.push("steer", "taken");
+    h.push("steer", "untaken");
+    assert.deepEqual(h.sent.map((entry) => entry.options), [{ deliverAs: "steer", triggerTurn: true }, { deliverAs: "steer", triggerTurn: true }]);
+    h.take(h.sent[0]!.message);
+    markLeadInterrupted();
+    h.end();
+    h.settle();
+    assert.equal(h.sent.length, 3);
+    assert.strictEqual(h.sent[2]!.message, h.sent[1]!.message, "the very message Pi's abort dropped");
+    assert.deepEqual(h.sent[2]!.options, { deliverAs: "nextTurn" });
+  });
+
+  test("an untaken batch released at a confirmed start is re-sent whole as nextTurn", () => {
+    const h = harness(true);
+    h.push("followUp", "one");
+    h.push("followUp", "two");
+    assert.equal(h.users.length, 1, "the idle lead is woken");
+    h.start();
+    assert.equal(h.sent.length, 1);
+    assert.deepEqual(h.sent[0]!.options, { deliverAs: "steer", triggerTurn: true });
+    h.prompted(h.users[0]);
+    markLeadInterrupted();
+    h.end();
+    h.settle();
+    assert.equal(h.sent.length, 2);
+    assert.strictEqual(h.sent[1]!.message, h.sent[0]!.message);
+    assert.deepEqual(reports(h.sent[1]!), ["one", "two"]);
+    assert.deepEqual(h.sent[1]!.options, { deliverAs: "nextTurn" });
+  });
+
+  test("an ordinary settle forgets what its run left untaken, so a later interrupt re-sends none of it", () => {
+    const h = harness();
+    h.start();
+    h.push("steer", "left over");
+    h.end();
+    h.settle();
+    h.runTimers();
+    h.start();
+    markLeadInterrupted();
+    h.end();
+    h.settle();
+    assert.equal(h.sent.length, 1, "only the original steer");
+  });
+
+  test("the next agent_start clears the mark: pushes steer into the new run again", () => {
+    const h = harness();
+    h.start();
+    markLeadInterrupted();
+    assert.equal(isLeadInterrupted(), true);
+    h.end();
+    h.settle();
+    assert.equal(isLeadInterrupted(), true, "the mark stands until a new run starts");
+    h.start();
+    assert.equal(isLeadInterrupted(), false);
+    h.push("steer", "into the new run");
+    assert.deepEqual(h.sent.at(-1)!.options, { deliverAs: "steer", triggerTurn: true });
+  });
+
+  test("a continuation run that starts before the settle (an abort that kept Pi's queues) clears the mark and takes the held FIFO as usual", () => {
+    const h = harness();
+    h.start();
+    h.push("followUp", "held");
+    markLeadInterrupted();
+    h.end();
+    h.start();
+    assert.equal(isLeadInterrupted(), false);
+    assert.equal(h.sent.length, 1);
+    assert.deepEqual(h.sent[0]!.options, { deliverAs: "steer", triggerTurn: true });
+    assert.deepEqual(reports(h.sent[0]!), ["held"]);
   });
 });
 

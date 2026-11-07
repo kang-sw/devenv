@@ -74,12 +74,53 @@ import type { MailItem, OwnPrompt } from './captions'
  * never falls back to another row, since the first still rides the next
  * prompt.
  *
+ * The page's interrupt (the user asking it to stop the running turn) reaches
+ * the same inbox as an interrupt entry, never a message. While board
+ * submission is on, every wait also wakes on one (its interrupt flag, idle
+ * or mid-turn, beside or without the board flag), and such a wake is never
+ * read as a board message: the loop claims the interrupt entries alone
+ * (`drainInterrupt`) and, when a main-thread turn runs that started before
+ * the newest of them was made, aborts that turn. An entry claimed while no
+ * main-thread turn runs, or older than the running turn (a click that landed
+ * as the last turn ended), is dropped, so an interrupt never cuts a turn it
+ * was not meant for; a rejected abort (the turn had already ended) is only
+ * logged. Before asking for the abort the loop marks the session
+ * interrupted, since the turn end can come before the abort settles, and the
+ * mark lasts until the next main-thread turn starts (`turnStarted`). While it
+ * stands, nothing the cut turn leaves behind starts a turn: mail still queued
+ * at its end is appended as one row, a steered row no request read stays
+ * where it is, and carried steered texts become a row; the next prompt
+ * carries them all. Held messages the turn-end drain newly claims were sent
+ * after the click (the page took every earlier one back) and are submitted
+ * as usual, as is mail that arrives once the session is idle.
+ *
  * Every side effect is an injected edge so the loop is testable without a
  * live mailbox or engine.
  */
 
-/** A wait's outcome; `board` and `both` say a held board message woke it, alone or with mail. */
-export type WaitOutcome = 'mail' | 'board' | 'both' | 'timeout' | 'stopped' | 'error'
+/** What woke a wait that ended with an arrival: mail, a held board message, or both. */
+export type WakeKind = 'mail' | 'board' | 'both'
+
+/**
+ * A wait's outcome; `board` and `both` say a held board message woke it,
+ * alone or with mail. An interrupt entry is its own outcome, never a board
+ * message: `also` names whatever else woke the same wait.
+ */
+export type WaitOutcome = WakeKind | 'timeout' | 'stopped' | 'error' | { interrupt: true; also?: WakeKind }
+
+/** A wait's board flags: `board` also wakes it on a held board message, `interrupt` on an interrupt entry. */
+export interface WaitFlags {
+  board: boolean
+  interrupt: boolean
+}
+
+/** The running main-thread turn as the interrupt sees it. */
+export interface MainTurn {
+  /** When it started, epoch ms on the clock an interrupt entry's creation time is read on. */
+  startedAt: number
+  /** Abort it; rejects when it is no longer the running turn. */
+  abort: () => Promise<void>
+}
 
 export type DrainMode = 'direct' | 'notice'
 
@@ -122,6 +163,13 @@ export interface BoardEdges {
    * the row was refused.
    */
   steer: (texts: readonly string[]) => Promise<void>
+  /**
+   * Claim the interrupt entries of `key`'s inbox: each one's creation time,
+   * epoch ms on the clock `mainTurn` reads. Rejects when the drain failed.
+   */
+  drainInterrupt: (key: string) => Promise<number[]>
+  /** The running main-thread turn; undefined while none runs. */
+  mainTurn: () => MainTurn | undefined
 }
 
 export interface WatcherEdges {
@@ -130,10 +178,10 @@ export interface WatcherEdges {
   label: string
   /**
    * Run one `mailbox wait` for `key`, adding the binding's named inbox `slug`,
-   * and with `board` also waking on a held board message; must resolve
-   * `stopped` soon after `signal` aborts.
+   * and with `flags` also waking on a held board message or an interrupt
+   * entry; must resolve `stopped` soon after `signal` aborts.
    */
-  wait: (key: string, slug: string | undefined, board: boolean, signal: AbortSignal) => Promise<WaitOutcome>
+  wait: (key: string, slug: string | undefined, flags: WaitFlags, signal: AbortSignal) => Promise<WaitOutcome>
   /** Drain via mailbox recv (direct mode only). */
   drain: (key: string) => Promise<DrainResult>
   /**
@@ -163,7 +211,7 @@ export interface WatcherEdges {
   /** Show the user (never the model) drained mail that could not be submitted. */
   record: (text: string) => void
   log: (text: string) => void
-  /** Board messages; absent, the wait never carries the board flag and nothing is drained. */
+  /** Board messages; absent, the wait never carries a board flag and nothing is drained. */
   board?: BoardEdges
 }
 
@@ -293,11 +341,14 @@ export interface Watcher {
   requestStarted: () => void
   /**
    * The main-thread turn ended: drain and submit the held board messages,
-   * then submit whatever mail is still queued as one prompt, else append it.
-   * Never throws.
+   * then submit whatever mail is still queued as one prompt, else append it;
+   * after an interrupt, only the newly drained board messages are submitted
+   * and the rest is appended. Never throws.
    */
   turnCompleted: () => void
-  /** The board switch may have changed: a running wait whose board flag no longer matches is re-armed. */
+  /** A main-thread turn started: the interrupted mark, if any, is cleared. */
+  turnStarted: () => void
+  /** The board switch may have changed: a running wait whose board flags no longer match is re-armed. */
   boardChanged: () => void
 }
 
@@ -346,8 +397,14 @@ export function createWatcher(edges: WatcherEdges): Watcher {
   let steerStranded: string[] = []
   /** Whether a steered drain that outlasted its boundary's wait is still out. */
   let steerDraining = false
-  /** The wait now running: its own abort, which re-arms it without ending the loop, and its board flag. */
-  let waiting: { ctrl: AbortController; board: boolean } | undefined
+  /**
+   * Set just before a dashboard interrupt asks for the running turn's abort,
+   * cleared when the next main-thread turn starts: while set, what that turn
+   * leaves behind is appended rather than submitted.
+   */
+  let interrupted = false
+  /** The wait now running: its own abort, which re-arms it without ending the loop, and its board flags. */
+  let waiting: { ctrl: AbortController; flags: WaitFlags } | undefined
 
   /** Whether board submission is on now. */
   function boardEnabled(): boolean {
@@ -365,9 +422,20 @@ export function createWatcher(edges: WatcherEdges): Watcher {
     return !boardHeld && boardEnabled()
   }
 
-  /** Re-arm the running wait when its board flag no longer matches. */
+  /**
+   * The next wait's flags: the board flag as boardWanted says, and the
+   * interrupt flag whenever board submission is on, held message or not.
+   */
+  function waitFlags(): WaitFlags {
+    const enabled = boardEnabled()
+    return { board: enabled && !boardHeld, interrupt: enabled }
+  }
+
+  /** Re-arm the running wait when its flags no longer match. */
   function rearmStaleWait(): void {
-    if (waiting && waiting.board !== boardWanted()) waiting.ctrl.abort()
+    if (!waiting) return
+    const want = waitFlags()
+    if (waiting.flags.board !== want.board || waiting.flags.interrupt !== want.interrupt) waiting.ctrl.abort()
   }
 
   /** Write board messages that will not be submitted where the user can see them, and to the debug log. */
@@ -382,22 +450,53 @@ export function createWatcher(edges: WatcherEdges): Watcher {
   }
 
   /**
+   * After a dashboard interrupt, the cut turn's steered texts start no turn:
+   * a stranded row stays where it is, carried texts become one row, and the
+   * next prompt carries both. A stop since `at`, or a refused row, records
+   * the carried texts instead.
+   */
+  async function holdSteered(at: number, stranded: readonly string[], carried: readonly string[]): Promise<void> {
+    if (stranded.length > 0) {
+      edges.log(`${edges.label}: the turn was interrupted; ${stranded.length} unread steered message(s) stay in their row, which the next prompt carries`)
+    }
+    if (carried.length === 0 || !edges.board) return
+    if (stops !== at) {
+      keepBoard(`the push loop stopped: ${lastStop}`, carried)
+      return
+    }
+    edges.log(`${edges.label}: the turn was interrupted; appending ${carried.length} carried steered message(s) as a row instead of submitting them`)
+    try {
+      await edges.board.append(carried)
+    } catch (err) {
+      keepBoard(`the turn was interrupted; row append failed: ${String(err)}`, carried)
+    }
+  }
+
+  /**
    * Drain `myKey`'s held board messages and submit them as one prompt, after
    * any drain already running; the carried steered messages go first. With
-   * `drainHeld` false only the carried ones are submitted. Never rejects:
-   * answers `empty` when nothing was held or carried, `failed` when the drain
-   * failed (the held messages stay held; carried ones are still submitted),
-   * and `done` once claimed messages were submitted, appended, or recorded.
+   * `drainHeld` false only the carried ones are submitted. With `hold` (a
+   * dashboard interrupt cut the turn) the carried and stranded ones are held
+   * instead (holdSteered) and only what the drain claims is submitted. Never
+   * rejects: answers `empty` when nothing was held or carried, `failed` when
+   * the drain failed (the held messages stay held; carried ones are still
+   * submitted), and `done` once claimed messages were submitted, appended, or
+   * recorded.
    */
-  function flushBoard(myKey: string, drainHeld = true): Promise<'done' | 'empty' | { failed: string }> {
+  function flushBoard(myKey: string, drainHeld = true, hold = false): Promise<'done' | 'empty' | { failed: string }> {
     const at = stops
     const run = boardChain.then(async (): Promise<'done' | 'empty' | { failed: string }> => {
       const board = edges.board
       if (!board) return 'empty'
-      const stranded = steerStranded
+      let stranded = steerStranded
       steerStranded = []
-      const carried = steerCarry
+      let carried = steerCarry
       steerCarry = []
+      if (hold) {
+        await holdSteered(at, stranded, carried)
+        stranded = []
+        carried = []
+      }
       let drained: string[] = []
       let failed: string | undefined
       if (drainHeld) {
@@ -454,8 +553,9 @@ export function createWatcher(edges: WatcherEdges): Watcher {
     }
     steerCarry.push(...texts)
     // The turn ended while they were pending (an interrupt): its flush has
-    // run, so submit the carried messages now.
-    if (!edges.turnRunning()) void flushBoard(myKey, false)
+    // run, so submit the carried messages now, or after a dashboard
+    // interrupt append them as a row.
+    if (!edges.turnRunning()) void flushBoard(myKey, false, interrupted)
   }
 
   /**
@@ -529,8 +629,53 @@ export function createWatcher(edges: WatcherEdges): Watcher {
       return
     }
     // The turn ended while the row was pending: no model request reads it now.
+    if (interrupted) {
+      // A dashboard interrupt cut it: the row rides the next prompt instead.
+      edges.log(`${edges.label}: the turn was interrupted; ${texts.length} unread steered message(s) stay in their row, which the next prompt carries`)
+      return
+    }
     steerStranded.push(...texts)
     void flushBoard(myKey, false)
+  }
+
+  /**
+   * Claim `myKey`'s interrupt entries and abort the running main-thread turn
+   * when it started before the newest of them was made; drop them otherwise
+   * (no main-thread turn runs, or it started at or after that time). The
+   * interrupted mark goes up before the abort is asked for; a rejected abort
+   * is only logged, and whatever the mark held stays held. Never rejects:
+   * `failed` when the drain failed (the entries stay for the next wake).
+   */
+  async function interruptTurn(myKey: string): Promise<'done' | { failed: string }> {
+    const board = edges.board
+    if (!board) return 'done'
+    let times: number[]
+    try {
+      times = await board.drainInterrupt(myKey)
+    } catch (err) {
+      return { failed: String(err) }
+    }
+    if (times.length === 0) {
+      edges.log(`${edges.label}: dashboard interrupt wake for ${myKey} claimed nothing`)
+      return 'done'
+    }
+    const turn = board.mainTurn()
+    if (!turn) {
+      edges.log(`${edges.label}: ${times.length} dashboard interrupt(s) for ${myKey} claimed while no main-thread turn runs; dropped`)
+      return 'done'
+    }
+    const newest = Math.max(...times)
+    if (turn.startedAt >= newest) {
+      edges.log(`${edges.label}: ${times.length} dashboard interrupt(s) for ${myKey} made before the running turn started; dropped`)
+      return 'done'
+    }
+    // First: the turn end can come before the abort settles.
+    interrupted = true
+    edges.log(`${edges.label}: a dashboard interrupt for ${myKey}; aborting the running turn`)
+    void Promise.resolve()
+      .then(() => turn.abort())
+      .catch((err) => edges.log(`${edges.label}: aborting the running turn was refused (${String(err)}); it had likely ended`))
+    return 'done'
   }
 
   /** Queue `prompt` for the running main-thread turn; false when none runs, and the caller submits it. */
@@ -663,13 +808,13 @@ export function createWatcher(edges: WatcherEdges): Watcher {
     let emptyBoardStreak = 0
     while (!signal.aborted) {
       let outcome: WaitOutcome
-      const board = boardWanted()
-      const own = { ctrl: new AbortController(), board }
+      const flags = waitFlags()
+      const own = { ctrl: new AbortController(), flags }
       const relay = () => own.ctrl.abort()
       signal.addEventListener('abort', relay, { once: true })
       waiting = own
       try {
-        outcome = await edges.wait(myKey, mySlug, board, own.ctrl.signal)
+        outcome = await edges.wait(myKey, mySlug, flags, own.ctrl.signal)
       } catch (err) {
         edges.log(`${edges.label}: wait failed to start: ${String(err)}`)
         outcome = 'error'
@@ -679,7 +824,7 @@ export function createWatcher(edges: WatcherEdges): Watcher {
       }
       if (signal.aborted) return
       if (outcome === 'stopped') {
-        // Its own abort re-arms it with the board flag as it now stands.
+        // Its own abort re-arms it with the flags as they now stand.
         if (own.ctrl.signal.aborted) continue
         return
       }
@@ -692,6 +837,22 @@ export function createWatcher(edges: WatcherEdges): Watcher {
       if (outcome === 'error') {
         await backOff('wait error', 'mailbox wait exited abnormally')
         continue
+      }
+      if (typeof outcome === 'object') {
+        // The interrupt first; whatever else woke the same wait after it.
+        const res = await interruptTurn(myKey)
+        if (signal.aborted) return
+        const rest = outcome.also
+        if (typeof res === 'object') {
+          // The entry stays, and the peek would wake again at once.
+          if (rest === undefined) {
+            await backOff('dashboard interrupt drain error', res.failed)
+            continue
+          }
+          edges.log(`${edges.label}: dashboard interrupt drain failed for ${myKey}: ${res.failed}; handling the rest of the wake`)
+        } else if (rest === undefined) backoff = 0
+        if (rest === undefined) continue
+        outcome = rest
       }
       if (outcome === 'board' || outcome === 'both') {
         if (edges.turnRunning()) {
@@ -854,6 +1015,7 @@ export function createWatcher(edges: WatcherEdges): Watcher {
       steerUnread = []
       steerStranded = []
       boardHeld = false
+      interrupted = false
       if (!ctrl) return
       stops += 1
       lastStop = reason
@@ -891,6 +1053,8 @@ export function createWatcher(edges: WatcherEdges): Watcher {
     turnCompleted() {
       const taken = takeQueued()
       const at = stops
+      // A dashboard interrupt cut this turn: what it leaves behind starts no turn.
+      const hold = interrupted
       // Steer rows no model request read since they were appended: the
       // person refused or interrupted the call they rode on.
       if (steerUnread.length > 0) {
@@ -901,6 +1065,17 @@ export function createWatcher(edges: WatcherEdges): Watcher {
         if (!taken) return
         // A stop while the mail waited on the board drain took its conversation.
         if (stops !== at) return lose(taken.items, `the push loop stopped: ${lastStop}`)
+        if (hold) {
+          edges.log(`${edges.label}: the turn was interrupted; appending ${taken.items.length} prompt(s) still queued at its end as one row instead of submitting them`)
+          void (async () => {
+            try {
+              await edges.append(taken.prompts)
+            } catch (err) {
+              lose(taken.items, `the turn was interrupted; row append failed: ${String(err)}`)
+            }
+          })()
+          return
+        }
         edges.log(`${edges.label}: submitting ${taken.items.length} prompt(s) still queued at the turn end as one prompt`)
         void deliver(taken.items).then((why) => {
           if (why !== undefined) lose(taken.items, why)
@@ -914,7 +1089,7 @@ export function createWatcher(edges: WatcherEdges): Watcher {
         return
       }
       // The held board message goes first; the mail waits for it a bounded time.
-      const flushed = flushBoard(myKey, drainHeld).then((res) => {
+      const flushed = flushBoard(myKey, drainHeld, hold).then((res) => {
         if (typeof res === 'object') edges.log(`${edges.label}: turn-end dashboard drain failed (${res.failed}); the messages stay held`)
         // Cleared only now, so the wait does not wake on what this drain is about to claim.
         boardHeld = false
@@ -928,6 +1103,9 @@ export function createWatcher(edges: WatcherEdges): Watcher {
           timer.abort()
           sendMail()
         })
+    },
+    turnStarted() {
+      interrupted = false
     },
     boardChanged() {
       rearmStaleWait()

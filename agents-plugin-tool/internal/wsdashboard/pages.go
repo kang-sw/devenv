@@ -662,11 +662,11 @@ func (d *Daemon) handleIndex(w http.ResponseWriter, r *http.Request) {
 
 // handleSessionRoutes serves everything under /s/: a session page, its SSE
 // stream, its image, file view, history, and attachment routes, its message,
-// cancel, steer, and system-open routes, and the shared assets a page loads
+// cancel, steer, interrupt, and system-open routes, and the shared assets a page loads
 // by relative path.
 func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/s/")
-	if replyID, sub, _ := strings.Cut(rest, "/"); sub == "message" || sub == "cancel" || sub == "steer" {
+	if replyID, sub, _ := strings.Cut(rest, "/"); sub == "message" || sub == "cancel" || sub == "steer" || sub == "interrupt" {
 		d.handleInboxWrite(w, r, replyID, sub)
 		return
 	} else if sub == "open" {
@@ -800,7 +800,7 @@ func readMethod(w http.ResponseWriter, r *http.Request) bool {
 // frameAncestorsNone refuses every framing of a daemon page. A framed page's
 // own script posts carry the daemon's Origin, so the same-origin and loopback
 // guards on the write routes would pass a clickjacked board answer, message,
-// steer, cancel, or system open; only refusing the frame stops it.
+// steer, cancel, interrupt, or system open; only refusing the frame stops it.
 const frameAncestorsNone = "frame-ancestors 'none'"
 
 // writeHTML writes a daemon HTML page. A caller that sets its own

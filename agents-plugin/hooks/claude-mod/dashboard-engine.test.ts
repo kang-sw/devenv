@@ -69,6 +69,14 @@ function world(on: On, opts: { dashboard?: unknown; intake?: Intake } = {}) {
     dropPrompts: 0,
     /** Whether a steer-only inbox drain never answers, as a hung server's. */
     hangSteer: false,
+    /** Held interrupt entries, as their creation times: the interrupt-only drain claims these alone, a full drain drops them. */
+    interrupts: [] as number[],
+    /** Every interrupt-only inbox drain call's arguments. */
+    interruptDrains: [] as Record<string, unknown>[],
+    /** The turn id of every $.turn.abort the plugin asked for. */
+    aborts: [] as string[],
+    /** Whether the abort beneath rejects, as when the turn already ended. */
+    refuseAbort: false,
     recvAnswers: [] as { result: unknown; text: string }[],
     /** The chunks the next model request streams, and its result. */
     chunks: [] as unknown[],
@@ -89,8 +97,14 @@ function world(on: On, opts: { dashboard?: unknown; intake?: Intake } = {}) {
       const accepts = [...(w.acceptsStatus ? ['status'] : []), ...(w.acceptsCompact ? ['compact'] : [])]
       return text(`ok: 1 of 1 events applied\n${accepts.length > 0 ? `accepts: ${accepts.join(', ')}\n` : ''}`)
     }
+    if (e.tool === INBOX_DRAIN_TOOL && e.args.interrupt_only === true) {
+      w.interruptDrains.push({ ...e.args })
+      const claimed = w.interrupts.splice(0)
+      return text(JSON.stringify({ messages: claimed.map((t, i) => ({ id: `i${i}`, sent_at: t, text: '', parts: [], chips: [], interrupt: true })) }))
+    }
     if (e.tool === INBOX_DRAIN_TOOL) {
       const steerOnly = e.args.steer_only === true
+      if (!steerOnly) w.interrupts.splice(0)
       ;(steerOnly ? w.steerDrains : w.inboxDrains).push({ ...e.args })
       if (steerOnly && w.hangSteer) return new Promise<never>(() => {})
       const claimed = steerOnly ? w.steered.splice(0) : [...w.inbox.splice(0), ...w.steered.splice(0)]
@@ -121,6 +135,11 @@ function world(on: On, opts: { dashboard?: unknown; intake?: Intake } = {}) {
     return next(e)
   })
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
+  on('turn.abort', ($, e) => {
+    w.aborts.push(e.turnId)
+    if (w.refuseAbort) throw new Error(`turn ${e.turnId} is not the running turn`)
+    return { value: undefined }
+  })
   on('turn.complete', ($, e) => ({ text: e.answer }))
   on('turn.step', async function* ($, e) {
     for (const chunk of w.chunks) yield chunk as never
@@ -447,11 +466,124 @@ test('knob on: a steer row the turn ends without reading is submitted again at t
   expect(sent(w).filter((e) => e.kind === 'user')).toEqual([{ kind: 'user', text: 'now please', origin: 'whiteboard', at: expect.any(Number) }])
 })
 
+const INTERRUPT_FLAG = '--board-interrupt'
+/** A dashboard interrupt the user made after the running turn started, on this host's wall clock. */
+const afterStart = () => Date.now() + 60_000
+const mailAnswer = (content: string) => ({ result: undefined, text: JSON.stringify([{ reply_to: 'id:peer', content, sent_at: 't1' }]) })
+
+test('knob on: every wait carries the interrupt flag, the flagless re-arm after a held message included', async ($, on) => {
+  const w = world(on, { dashboard: true })
+  await start($, w)
+  expect(w.argvs.at(-1)).toEqual(expect.arrayContaining([BOARD_FLAG, INTERRUPT_FLAG]))
+  await $.turn.start({ text: 'x', turnId: 't1' })
+  w.inbox.push('pick B')
+  w.exits.at(-1)!(0, ['board'])
+  await w.clock.advance(50)
+  expect(w.argvs.at(-1)).not.toContain(BOARD_FLAG)
+  expect(w.argvs.at(-1)).toContain(INTERRUPT_FLAG)
+})
+
+test('knob on: an interrupt wake during the lead\'s turn is claimed by the interrupt-only drain and aborts that turn by the id its turn.start carried; a subagent\'s turn start is not it', async ($, on) => {
+  const w = world(on, { dashboard: true })
+  await start($, w)
+  await $.turn.start({ text: 'x', turnId: 't1' })
+  await $.turn.start({ text: 'look around', turnId: 's1', agentId: 'a77' } as never)
+  const steerDrainsBefore = w.steerDrains.length
+  w.inbox.push('pick B')
+  w.interrupts.push(afterStart())
+  w.exits.at(-1)!(0, ['interrupt'])
+  await w.clock.advance(50)
+  expect(w.interruptDrains).toEqual([{ session_key: KEY, interrupt_only: true, format: 'json' }])
+  expect(w.aborts).toEqual(['t1'])
+  // Never read as a board message: nothing else is drained or submitted.
+  expect(w.inboxDrains).toEqual([])
+  expect(w.steerDrains.length).toBe(steerDrainsBefore)
+  expect(w.inbox).toEqual(['pick B'])
+  expect(w.prompts).toEqual([])
+  // Re-armed with the flag.
+  expect(w.spawns).toBe(2)
+  expect(w.argvs.at(-1)).toContain(INTERRUPT_FLAG)
+})
+
+test('knob on: an interrupt claimed while idle, or made before the lead\'s turn started, is dropped without an abort', { timeoutMs: 20_000 }, async ($, on) => {
+  const w = world(on, { dashboard: true })
+  await start($, w)
+  w.interrupts.push(Date.now())
+  w.exits.at(-1)!(0, ['interrupt'])
+  await w.clock.advance(50)
+  expect(w.interruptDrains.length).toBe(1)
+  expect(w.aborts).toEqual([])
+  // A click that landed as the last turn ended, read once the next one runs.
+  w.interrupts.push(Date.now() - 1_000)
+  await $.turn.start({ text: 'x', turnId: 't1' })
+  w.exits.at(-1)!(0, ['interrupt'])
+  await w.clock.advance(50)
+  expect(w.interruptDrains.length).toBe(2)
+  expect(w.interrupts).toEqual([])
+  expect(w.aborts).toEqual([])
+  expect(w.spawns).toBe(3)
+})
+
+test('knob on: a refused abort is ignored and the wait re-arms', { timeoutMs: 20_000 }, async ($, on) => {
+  const w = world(on, { dashboard: true })
+  await start($, w)
+  await $.turn.start({ text: 'x', turnId: 't1' })
+  w.refuseAbort = true
+  w.interrupts.push(afterStart())
+  w.exits.at(-1)!(0, ['interrupt'])
+  await w.clock.advance(50)
+  expect(w.aborts).toEqual(['t1'])
+  expect(w.logs.some((l) => l.includes('aborting the running turn was refused'))).toBe(true)
+  expect(w.spawns).toBe(2)
+  // The loop goes on: mail still arrives.
+  w.recvAnswers.push(mailAnswer('hello'))
+  w.exits.at(-1)!(0, ['mail'])
+  await w.clock.advance(50)
+  expect(w.spawns).toBe(3)
+})
+
+test('knob on: an interrupted turn end appends queued mail and a carried steered message as rows, a message sent after the click still submits, and the next turn start ends the hold', { timeoutMs: 20_000 }, async ($, on) => {
+  const w = world(on, { dashboard: true })
+  await start($, w)
+  await $.turn.start({ text: 'x', turnId: 't1' })
+  // A steered message whose row the host refused: carried to the turn end.
+  w.steered.push('now please')
+  w.refuseRows = 1
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'u1', command: 'ls' } as never)
+  expect(w.rows).toEqual([])
+  // Mail queued for the turn.
+  w.recvAnswers.push(mailAnswer('hello'))
+  w.exits.at(-1)!(0, ['mail'])
+  await w.clock.advance(50)
+  w.interrupts.push(afterStart())
+  w.exits.at(-1)!(0, ['interrupt'])
+  await w.clock.advance(50)
+  expect(w.aborts).toEqual(['t1'])
+  w.inbox.push('after the click')
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: true, turnId: 't1', reason: 'aborted' } as never)
+  await w.clock.advance(50)
+  expect(w.prompts).toEqual([labelWhiteboard(w.plugin, 'after the click')])
+  expect(w.rows).toEqual([labelWhiteboard(w.plugin, 'now please'), expect.stringContaining('hello')])
+  await flush(w)
+  expect(sent(w).filter((e) => e.kind === 'user').map((e) => (e as { text: string }).text)).toEqual(['now please', 'after the click'])
+  // The next main-thread turn: its leftovers submit as before.
+  await $.turn.start({ text: 'after the click', turnId: 't2' })
+  w.recvAnswers.push(mailAnswer('again'))
+  w.exits.at(-1)!(0, ['mail'])
+  await w.clock.advance(50)
+  await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer' } as never)
+  await w.clock.advance(50)
+  expect(w.prompts.length).toBe(2)
+  expect(w.prompts[1]).toContain('again')
+  expect(w.rows.length).toBe(2)
+})
+
 for (const knob of [false, 'unreadable'] as const) {
   test(`knob ${String(knob)}: the wait carries no board flag and a turn end drains no inbox`, async ($, on) => {
     const w = world(on, { dashboard: knob })
     await start($, w)
     expect(w.argvs.at(-1)).not.toContain(BOARD_FLAG)
+    expect(w.argvs.at(-1)).not.toContain(INTERRUPT_FLAG)
     await $.turn.start({ text: 'x', turnId: 't' })
     await $.turn.complete({ answer: 'done', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer' } as never)
     await w.clock.advance(50)

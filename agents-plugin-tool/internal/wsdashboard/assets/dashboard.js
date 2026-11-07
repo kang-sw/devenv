@@ -348,6 +348,7 @@
     }
     if (name === "panels") drawerSwapped();
     if (name === "tree" || name === "convlive") drawerWait();
+    if (name === "convlive") syncBadge();
   }
 
   // --- conversation entries: merged by key, never re-rendered ----------------
@@ -772,37 +773,89 @@
       syncNote(wsT(res.merged ? "js.send.merged" : "js.send.ok"));
     });
   }
+  // restoreHeld puts held messages a cancel or an interrupt took back into
+  // the composer, oldest first, ahead of the draft: their texts joined as
+  // paragraphs, their answer chips, and their images as chips that reference
+  // the written files, with their markers in the returned text. Each
+  // message's numbers move above the highest the draft and the messages
+  // before it use, the markers with them, as the server numbers a merge.
+  function restoreHeld(list) {
+    var cur = ctext.value.trim(), top = imgSeq, backs = [], back;
+    Object.keys(markerNums(cur)).forEach(function (k) { top = Math.max(top, +k); });
+    imgs.forEach(function (p) { top = Math.max(top, p.n); });
+    list.forEach(function (res) {
+      var text = res.text || "", names = res.images || [], nums = res.nums || [], renum = {}, offset = top;
+      names.forEach(function (name, i) {
+        var n = nums[i] || i + 1, have = imgs.filter(function (p) { return p.ref === name; })[0];
+        renum[n] = have ? have.n : n + offset;
+        if (!have) imgs.push({ name: name, url: attachSrc(name), data: null, ref: name, n: renum[n] });
+        top = Math.max(top, renum[n]);
+      });
+      text = text.replace(new RegExp(MARKER, "g"), function (m, k) { return renum[+k] ? marker(renum[+k]) : m; });
+      // A message held before images were numbered has no markers: give
+      // each image one, or the next edit would drop it.
+      var marked = markerNums(text), missing = [];
+      names.forEach(function (name, i) { var n = renum[nums[i] || i + 1]; if (!marked[n]) missing.push(marker(n)); });
+      if (missing.length) text += (text ? "\n" : "") + missing.join(" ");
+      if (text) backs.push(text);
+    });
+    imgSeq = top;
+    back = backs.join("\n\n");
+    ctext.value = back + (back && cur ? "\n\n" : "") + cur;
+    grow();
+    imgs.sort(function (a, b) { return a.n - b.n; });
+    // A later message's answer replaces an earlier one's, and a chip
+    // attached since keeps its newer answer.
+    var got = {}, order = [];
+    list.forEach(function (res) {
+      (res.chips || []).forEach(function (c) { if (!got[c.id]) order.push(c.id); got[c.id] = c; });
+    });
+    order.forEach(function (id) { if (!chips[id]) { putChip(got[id]); setItem(id, got[id]); } });
+    renderChips();
+    renderImgs();
+  }
   function cancelHeld(btn) {
     btn.disabled = true;
     post("cancel", { id: btn.getAttribute("data-cancel") }, function (ok, res) {
       if (!ok) { btn.disabled = false; syncNote(wsT("js.cancel.fail", res)); return; }
-      var cur = ctext.value.trim(), back = res.text || "";
-      // Its images come back as chips that reference the written files,
-      // with their markers in the returned text. Numbers the draft already
-      // uses are moved above the draft's highest, the markers with them.
-      var names = res.images || [], nums = res.nums || [], top = imgSeq, renum = {};
-      Object.keys(markerNums(cur)).forEach(function (k) { top = Math.max(top, +k); });
-      imgs.forEach(function (p) { top = Math.max(top, p.n); });
-      names.forEach(function (name, i) {
-        var n = nums[i] || i + 1, have = imgs.filter(function (p) { return p.ref === name; })[0];
-        renum[n] = have ? have.n : n + top;
-        if (!have) imgs.push({ name: name, url: attachSrc(name), data: null, ref: name, n: renum[n] });
-        imgSeq = Math.max(imgSeq, renum[n]);
-      });
-      back = back.replace(new RegExp(MARKER, "g"), function (m, k) { return renum[+k] ? marker(renum[+k]) : m; });
-      // A message held before images were numbered has no markers: give
-      // each image one, or the next edit would drop it.
-      var marked = markerNums(back), missing = [];
-      names.forEach(function (name, i) { var n = renum[nums[i] || i + 1]; if (!marked[n]) missing.push(marker(n)); });
-      if (missing.length) back += (back ? "\n" : "") + missing.join(" ");
-      ctext.value = back + (back && cur ? "\n\n" : "") + cur;
-      grow();
-      imgs.sort(function (a, b) { return a.n - b.n; });
-      // A chip attached since keeps its newer answer.
-      (res.chips || []).forEach(function (c) { if (!chips[c.id]) { putChip(c); setItem(c.id, c); } });
-      renderChips();
-      renderImgs();
+      restoreHeld([res]);
       syncNote(wsT("js.cancel.ok"));
+      ctext.focus();
+    });
+  }
+  // --- interrupt badge ---------------------------------------------------------
+  // The badge on the border between the conversation and the composer shows
+  // while the session has a live adapter and its lead works on a turn (the
+  // convlive region's data-phase). One click stops the turn and takes every
+  // held message back into the composer. It then stays disabled until the
+  // phase leaves the working set, so a second click cannot cut the next turn.
+  var ibadge = $("ibadge"), ilabel = ibadge && ibadge.querySelector(".ilabel");
+  var WORKING = { thinking: 1, replying: 1, tool: 1, permission: 1 };
+  var liveMode = mode === "live", interrupting = false;
+  function leadWorking() {
+    var c = doc.querySelector("#r-convlive .clive");
+    return !!c && WORKING[c.getAttribute("data-phase")] === 1;
+  }
+  function syncBadge() {
+    if (!ibadge) return;
+    var on = liveMode && leadWorking();
+    if (!on) interrupting = false;
+    ibadge.hidden = !on;
+    ibadge.disabled = interrupting;
+    ibadge.classList.toggle("busy", interrupting);
+    var label = wsT(interrupting ? "js.interrupt.busy" : "js.interrupt");
+    if (ilabel && ilabel.textContent !== label) ilabel.textContent = label;
+  }
+  function interruptTurn() {
+    if (interrupting) return;
+    interrupting = true;
+    syncBadge();
+    post("interrupt", {}, function (ok, res) {
+      if (!ok) { interrupting = false; syncBadge(); syncNote(wsT("js.interrupt.fail", res)); return; }
+      var list = res.held || [];
+      if (!list.length) { syncNote(wsT("js.interrupt.ok")); return; }
+      restoreHeld(list);
+      syncNote(wsT("js.interrupt.restored"));
       ctext.focus();
     });
   }
@@ -910,6 +963,7 @@
     if (u) { if (!u.disabled) cancelHeld(u); return; }
     u = t.closest("#r-convlive [data-steer]");
     if (u) { if (!u.disabled) steerHeld(u); return; }
+    if (ibadge && t.closest("#ibadge")) { if (!ibadge.disabled) interruptTurn(); return; }
     if (gmenu && t.closest("#gear")) { gmenu.hidden = !gmenu.hidden; return; }
     if (gmenu && !gmenu.hidden && !t.closest("#gmenu")) gmenu.hidden = true;
     if (!live) return;
@@ -1406,6 +1460,8 @@
       if (ev.name === "mode") {
         if (ev.html !== mode) modeChanged(ev.html);
         modeHash = ev.hash;
+        liveMode = ev.html === "live";
+        syncBadge();
         return;
       }
       swap(ev.name, ev.hash, ev.html);
@@ -1447,6 +1503,7 @@
   q("iframe.doc-frame").forEach(function (f) { if (f.contentWindow) f.contentWindow.postMessage({ wbDoc: "size" }, "*"); });
   if (window.wbForm) window.wbForm();
   applySent();
+  syncBadge();
   fmtTimes(doc);
   mermaid();
   pinConvo();
