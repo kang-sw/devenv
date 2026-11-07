@@ -1,85 +1,134 @@
 ---
-title: "ws personal common store: a cross-project, git-tracked store for the user's own TODOs, notes, and search, opened from every dashboard page"
+title: "ws team tracker: agent-first shared stores (team and personal) on git, opened from the dashboard"
 related:
-  261107-epic-ws-dashboard-messenger-round2: starts after round 2's remaining children and their dogfood; the panel sits on the round-2 session page
+  261107-epic-ws-dashboard-messenger-round2: the dashboard and its pull-down drawer the tracker opens from
+  261107-feat-ws-dashboard-pull-down-drawer: the drawer frame tracker stores register into
 sage-review-design: required
 ---
 
-# ws personal common store: a cross-project, git-tracked store for the user's own TODOs, notes, and search, opened from every dashboard page
+# ws team tracker: agent-first shared stores (team and personal) on git, opened from the dashboard
 
 ## Scope
 
-The user (2026-11-07) wants one store that spans all their projects, for their
-own use, git-tracked and owned by ws-mcp rather than any one project, and
-reached from the dashboard that is already open per working folder:
+The user (2026-11-07) redirected this epic from a personal, one-machine store
+into a team platform: "wsflow랑 통합된 jira 같은 거고, 다만 어쨌든 사람보다는
+에이전트를 통한 소통에 좀 더 방점을 둔다는 거죠" (board (110) c). One person
+holds several stores ("a팀 저장소, b팀 저장소, 개인 저장소"), each a git
+repository sized for 50-60 people, reached from the dashboard.
 
-- a git-tracked store for human TODOs and notes, with its git history
-  searchable for past data;
-- search over the store and, later, over the user's own files;
-- when a local LLM is available, indexing the user's files during idle time;
-- a panel on every dashboard session page: a button at the top right that
-  drops the panel down over the page and folds it back up, so the user never
-  navigates away from the session page;
-- asking the current session's lead for help with the store from that panel:
-  no agent runs in the store; the panel sends a request to the session the
-  page belongs to, carrying the store's path, in the sense "I know what you
-  are doing, but help me update the common store for a moment".
-
-User wording: "git track되는 형태로, 뭔가 ws mcp의 루트에? 하여간에 모든
-프로젝트를 아우르는 저장소를 하나 둬서 제가 사용할 목적의 어떤 todo 리스트
-관리"; "각 대시보드 화면에서 '위로 접혀 올라가고, 누르면 내려오는' 형태의 패널
-버튼을 우상단에 두고"; "해당 노트 저장소에 에이전트를 띄우는 게 아니라, 그
-저장소의 현재 경로를 에이전트한테 알려줘서".
+- Stores hold feature-level work items ("특정 기능 누가 완성"), notes, and
+  simple TODOs (board (111) c), with assignment down a lead/follower
+  hierarchy.
+- Agents are the primary writers and readers: a lead session records
+  progress on tasks assigned to its user and answers the user's questions
+  about the stores.
+- Git is the storage and transport layer only, hidden behind the data model,
+  and works without a remote.
 
 ## Non-Scope
 
-- Any mention in ws or wsflow skills, playbooks, or MCP tool surfaces before
-  the user explicitly asks for it (see Cross-Child Decisions).
-- Syncing one store across machines as the designed default (user, (65) a);
-  a user may add a git remote by hand.
+- Binding tracker items to ws tickets: tickets are per-project, AI-only
+  artifacts; a tracker item carries at most an optional free-text project
+  reference (board (118) c, (121)).
+- Users who do not run ws or wsflow, and any UI outside the dashboard
+  (board (119) a).
+- Per-item confidentiality inside one store: confidentiality is the
+  repository boundary (board (124)).
 
 ## Child Tickets
 
-- Planned (phase 1): the store, the top-right drop-down panel on every
-  session page, human TODOs, and the ask-this-session request.
-- Planned (phase 2): search over the store and its git history.
-- Planned (phase 3): idle-time indexing and search of the user's files when a
-  local LLM is available; this phase starts with research (which local LLM
-  runtimes, which folders, CPU and power budget).
+- Planned (first): an unstyled, fast-iteration mockup that settles the data
+  structures (user, board (139) ok, 2026-11-07: "스타일을 제외한 목업(가능한
+  빠르게 이터레이션 할 수 있게)을 보면서 구체적으로 어떤 데이터 구조를
+  가져갈지 제대로 정하는 걸로"). Later children are planned only after it.
 
 ## Cross-Child Decisions
 
-- **Timing** (user, 2026-11-07, "(64) a"): captured now; design starts after
-  round 2's remaining children (link actions, Now markdown, status band) and
-  their dogfood land, because the panel sits on that page. Rejected: designing
-  in parallel with round 2.
-- **One store per machine** (user, "(65) a"): the store stays on the machine
-  by default; connecting a git remote is the user's own choice. Rationale: the
-  user also uses ws at work, and indexing or search results from a work
-  machine must not leave it through a personal store by default. Rejected: one
-  store shared across machines through a remote as the designed default.
-- **Only human-written content is git-tracked** (user, "(66) ok"): notes and
-  TODOs are tracked; the file index and embeddings are a local cache outside
-  git. "Past data" search covers the tracked content's git history. Rejected:
-  tracking the index - it is derived, rebuildable, and large.
-- **Exposure** (user, "(67) ok"): off by default in both ws and wsflow; no
-  skill, playbook, or MCP tool mentions it; the store's authoring rules are
-  served only by the dashboard daemon's REST API. The ask-this-session request
-  goes through the session's existing dashboard inbox and carries the store
-  path and that API address; the lead reads the rules there and edits the
-  store. The enable switch is a dashboard config key (ws and wsflow manifests
-  differ only in default).
-- **Phase order** (user, "(68) ok"): store + panel + TODOs + help request,
-  then search over the store and its history, then local-LLM file indexing,
-  the most uncertain part, last.
-- Shipped behavior stays downstream-first (AGENTS.md Architecture Rule 4): the
-  store is designed for any ws user's personal use, not for this repository.
+- **Storage model** (user, board (116) ok): each member appends events to
+  their own ref only. Every view is computed client-side by merging all refs.
+  This removes write contention and merge conflicts, and a lead's assignment
+  is an event in the lead's own ref. Rejected: per-item files on one shared
+  branch with rebase retry ((112), superseded); one CAS-guarded custom ref,
+  the ticket-lease pattern.
+- **Repository boundary** (user, board (124)): one repository per team or
+  confidentiality boundary. Everyone in a repository is assumed to share the
+  same NDA, and access control is delegated to the hosting repository's
+  permissions.
+- **Integrity** (user, board (117) c, (120) ok): commits are SSH-signed
+  (`gpg.format=ssh`) with a local key file. Push stays on whatever transport
+  the remote uses (HTTP at the user's company). Every client verifies
+  signatures against the member public keys in a roles file, and ignores and
+  flags events that break the rules. The agent generates the key and
+  configures git; a member sends a join request and an admin approves it.
+  Host-side enforcement (branch protection, rulesets, pre-receive hooks) is
+  optional hardening where the host supports it. Rejected: relying on the
+  host's key registration or signature verification.
+- **Roles** (user, board (124) b, (127) a, (130) a):
+  - Admins are a separate layer that edits the roles file. Several admins
+    may be listed, and a signature from any one of them is valid.
+  - Below the admins, lead/follower relations nest: a follower may itself
+    be a lead. Relations are one-directional and cycle-free.
+  - Within one repository each person has at most one lead, a tree. Leads
+    are stored as a list validated to length 1, so multiple leads can be
+    enabled later without a migration. A matrix organisation is expressed by
+    separate repositories.
+  - Only admins edit relations.
+  - Rejected: multiple leads per repository now; lead-invites-follower-accepts.
+- **Assignment** (user, board (128) c, (129) a, (125) c):
+  - An assigner targets either everyone within N levels below them, or
+    chosen people within that range.
+  - A mid-level lead may split a received task into subtasks for their own
+    followers, and subtask progress rolls up to the parent.
+  - Completion is chosen per task at assignment time: either the assignee
+    closes it, or the assigner must confirm. The default is assignee closes.
+- **Agent recording** (user, board (123) b): an agent automatically records
+  progress and completion only for tasks assigned to its user; anything else
+  is recorded on request. Rejected: recording only on request; automatic
+  session logs.
+- **Sync** (user, board (126) ok):
+  - A background poll of the remotes every 3 minutes.
+  - An immediate check when the drawer opens and when a lead session starts.
+  - The member's own writes are pushed immediately.
+  - New assignments show as a badge on the drawer handle, like the mailbox.
+  - Rejected: short-interval polling; webhook receivers, which need an
+    inbound server a personal machine does not have.
+- **Search and local AI** (user, board (114) ok, (122) ok): search indexes
+  are built per store and stay local, outside git. A local AI may search
+  across the user's stores read-only, only to answer the user's own query.
+  It shows the answer only to the user and writes nothing into another store.
+- **Exposure** (user, board (115) ok): the tracker becomes an MCP and skill
+  surface, active only where a store is configured. It is off by default in
+  both ws and wsflow. This supersedes the earlier "no skill, playbook, or MCP
+  tool mentions it" decision.
+- **Only human- or agent-authored content is tracked** (user, (66) ok,
+  carried over): indexes and embeddings are a local cache outside git.
+- **Personal store** (board (136) ok): a personal store is a repository
+  with one member, the same model as a team store.
+- **Dashboard placement** (board (137) ok, from (119) a, (126), (131) a):
+  each store is its own drawer handle; handles stack leftward from the
+  top-right corner.
+- **Config** (board (138) ok): the ws and wsflow manifests differ only in the
+  enable key's default.
+- **Mockup form** (board (140) ok, (141) ok): a standalone HTML+JS page under
+  `ai-docs/ref/`, with JSON fixtures of per-member event logs and a roles
+  file, every view computed in the browser. Its final state is committed to
+  git (user: "mock도 최종 완성 시점엔 git track 되어야해요"). It starts now:
+  the earlier timing gate (64) existed because the panel sat on the session
+  page, and the mockup touches no shipped code. Rejected: a Go or daemon
+  prototype, which iterates more slowly.
+- **Superseded** (board (135) ok): the personal-store decisions one store per
+  machine ((65) a), no exposure ((67)), and the old phase order ((68)) no
+  longer apply. The stem is kept and only the title and body were rewritten
+  (board (134) ok), because existing tickets and board items cite it.
+- Shipped behavior stays downstream-first (AGENTS.md Architecture Rule 4):
+  the tracker is designed for any team using ws, not for this repository.
 
 ## Completion Criteria
 
-- Done: the three phases have landed on `develop`, and the user has used the
-  panel from session pages in at least two projects to manage TODOs and to ask
-  a session for help with the store.
-- Dropped: the user stops using the panel or moves personal TODOs elsewhere.
-- Deferred: cross-machine sync as a designed feature; exposing the store to
-  ws/wsflow skills or MCP tools.
+- Done: the tracker children have landed on `develop`, and the user has used
+  the tracker from the dashboard with one team store over a remote and one
+  personal store (board (142) ok).
+- Dropped: the user stops using the tracker or moves team assignment
+  elsewhere.
+- Deferred: multiple leads within one repository; host-side enforcement as a
+  default; users without ws.
