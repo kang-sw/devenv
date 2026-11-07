@@ -12,6 +12,7 @@ import {
   parseInboxDrain,
   PERMISSION_PROMPT,
   RETRY_MS,
+  TEXT_FLUSH_INTERVAL_MS,
   userPrompt,
   whiteboardBody,
   type DashboardEvent,
@@ -183,22 +184,73 @@ describe('the feed', () => {
     expect(sent().filter((e) => e.kind === 'reply' && e.final).length).toBe(1)
   })
 
-  test('streamed reply text coalesces: one intake call per flush interval, not one per chunk', async () => {
+  test('streamed reply text coalesces: one intake call per text interval, not one per chunk', async () => {
     const { h, dash, advance } = await started()
     dash.turnStarted(undefined)
     dash.stepBegan(undefined, 't/0')
     await advance()
     const before = h.calls.length
-    for (let i = 0; i < 50; i++) {
+    // Three seconds of chunks, one every 50 ms.
+    for (let i = 0; i < 60; i++) {
       dash.stepChunk(undefined, 't/0', { kind: 'text', index: 0, text: 'x' })
-      await advance(FLUSH_INTERVAL_MS / 10)
+      await advance(50)
     }
-    await advance()
+    await advance(TEXT_FLUSH_INTERVAL_MS)
     const calls = h.calls.length - before
-    expect(calls).toBeGreaterThan(0)
-    expect(calls).toBeLessThanOrEqual(6)
+    expect(calls).toBeGreaterThanOrEqual(3)
+    expect(calls).toBeLessThanOrEqual(5)
     const replies = h.calls.slice(before).flatMap((c) => c.events).filter((e) => e.kind === 'reply')
-    expect(replies.at(-1)).toEqual({ kind: 'reply', text: 'x'.repeat(50) })
+    expect(replies.at(-1)).toEqual({ kind: 'reply', text: 'x'.repeat(60) })
+  })
+
+  test('text alone waits for the slow interval, not the fast one', async () => {
+    const { h, dash, advance, sent } = await started()
+    dash.turnStarted(undefined)
+    dash.stepBegan(undefined, 't/0')
+    dash.stepChunk(undefined, 't/0', { kind: 'text', index: 0, text: 'a' })
+    await advance()
+    expect(sent().filter((e) => e.kind === 'reply').at(-1)).toEqual({ kind: 'reply', text: 'a' })
+    const before = h.calls.length
+    dash.stepChunk(undefined, 't/0', { kind: 'text', index: 0, text: 'b' })
+    // The flush of 'a' was one fast interval ago.
+    await advance(TEXT_FLUSH_INTERVAL_MS - FLUSH_INTERVAL_MS - 1)
+    expect(h.calls.length).toBe(before)
+    await advance(1)
+    expect(h.calls.length).toBe(before + 1)
+    expect(h.calls.at(-1)?.events).toEqual([{ kind: 'reply', text: 'ab' }])
+  })
+
+  test('a tool begin while text waits on the slow timer flushes at the fast interval, carrying the text', async () => {
+    const { h, dash, advance } = await started()
+    dash.turnStarted(undefined)
+    dash.stepBegan(undefined, 't/0')
+    dash.stepChunk(undefined, 't/0', { kind: 'text', index: 0, text: 'a' })
+    await advance()
+    const before = h.calls.length
+    dash.stepChunk(undefined, 't/0', { kind: 'text', index: 0, text: 'b' })
+    await advance(FLUSH_INTERVAL_MS / 2)
+    expect(h.calls.length).toBe(before)
+    dash.toolBegan(undefined, 'u1', 'Bash', { command: 'ls' })
+    await advance(FLUSH_INTERVAL_MS)
+    expect(h.calls.length).toBe(before + 1)
+    const events = h.calls.at(-1)!.events
+    expect(kinds(events)).toEqual(['agent', 'reply'])
+    expect(events.at(-1)).toEqual({ kind: 'reply', text: 'ab' })
+  })
+
+  test('the reply\'s end flushes promptly, not on the slow timer', async () => {
+    const { h, dash, advance } = await started()
+    dash.turnStarted(undefined)
+    dash.stepBegan(undefined, 't/0')
+    dash.stepChunk(undefined, 't/0', { kind: 'text', index: 0, text: 'a' })
+    await advance()
+    const before = h.calls.length
+    dash.stepChunk(undefined, 't/0', { kind: 'text', index: 0, text: 'b' })
+    await advance(FLUSH_INTERVAL_MS / 2)
+    dash.stepEnded(undefined, 't/0', { answer: 'ab', toolUses: [] })
+    await advance(FLUSH_INTERVAL_MS)
+    expect(h.calls.length).toBe(before + 1)
+    expect(h.calls.at(-1)!.events.find((e) => e.kind === 'reply')).toMatchObject({ text: 'ab', final: true })
   })
 
   test('a tool step: the streaming call by name and characters, then running with its preview, then finished', async () => {
