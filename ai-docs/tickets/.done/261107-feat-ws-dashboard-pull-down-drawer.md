@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: ff04e6dac9d790ef
 sage-review-completeness-reviewed: ff04e6dac9d790ef
+completed: 2026-11-07
 ---
 
 # Dashboard: pull-down drawer from the top for Todo, Agenda, Tickets, and Mailbox
@@ -168,3 +169,73 @@ both pages, light and dark, wide and narrow:
 - the disk board file still shows its panels.
 
 Report what was not checked.
+
+### Result (e12879e10) - 2026-11-07
+
+Landed in `agents-plugin-tool/internal/wsdashboard/assets/` (`dashboard.tmpl`,
+`dashboard.css`, `dashboard.js`) and `pages_test.go`. No Go, SSE, or
+`wswhiteboard` change: the served board page is the `session` template in
+board mode, so both pages share the drawer.
+
+- **Frame:** `drawerTab({id, title, icon, count, badge, content})` in
+  `dashboard.js`. The four panels register through `panelTab(id)` as views
+  onto the one `panels` region (`#p-<id>`). Presence, title, icon, and chip
+  are re-read after every panels swap. A tab whose panel is absent drops
+  out, a persisted tab that is no longer present falls back to the first
+  present tab, and with no tab present the handle hides.
+- **Layout:** the drawer is `position: fixed` on both pages, spans `.dwrap`'s
+  width under the header, and is clipped (visibility, never `display:none`).
+  The handle hangs from the page's top edge at the header's right end while
+  closed and rides the sheet's bottom edge while open. The header reserves
+  the handle's room as right padding (`.top.dr-room`). The height is clamped
+  to [min(160, room), room], where room is 60% of the viewport cut short of
+  the composer with the handle below it.
+- **Behaviour:** the drawer opens by click or drag. It closes by click,
+  push-up, Escape, or outside click. Escape yields to the link and gear
+  menus and to a focused composer, and the link menu counts as inside.
+  Persistence uses `ws.dashboard.drawer`, `ws.dashboard.drawer.h`, and
+  `ws.dashboard.drawer.tab`. Handle counts are open todos (total minus done)
+  and unread mail. A lock cue shows while an approval waits (lead permission
+  in convlive, or a permission phase/row in the tree). A panels swap while
+  the drawer is closed lights the handle's dot, which replaces the
+  board-tab dot in `TAB`. `drbody` joined `PANES`.
+
+Verification:
+- `go build ./... && go vet ./internal/... ./cmd/...`: pass.
+- `go test -count=1 ./internal/wswhiteboard/ ./internal/wsdashboard/ ./internal/mcp/`: pass.
+  - `pages_test.go` now pins the drawer hooks on both pages and the panels
+    region in the drawer, out of `#bcol`.
+- Headless Chromium (cached Playwright): a throwaway harness over the page
+  fixture with four panels and live bump/approval toggles. It covered both
+  pages, light and dark, and 1400px and 420px widths. 178/178 checks
+  passed, plus the empty-panels session (handle and header room hidden) and
+  the disk board file (`RenderPage`: the 4 panels still in `aside.side`).
+  The checks covered:
+  - closed handle at top 0, aligned to the header's right edge;
+  - open by click and by drag;
+  - close by click, Escape, outside click, and push-up;
+  - Escape in the composer keeps the drawer open;
+  - tab switching;
+  - reload persistence of open state, tab, and height;
+  - a live panels swap while open keeps it open, keeps the tab, and keeps
+    `drbody` scroll;
+  - grid, board, convo, and composer rects and scroll offsets, and the
+    composer text, unchanged on open;
+  - handle counts;
+  - the dot on a closed swap;
+  - the approval cue closed and open;
+  - no page errors.
+
+Not checked: real touch input (only mouse pointer events), Safari and
+Firefox, reduced-motion, and a window short enough that the composer room
+falls under 160px.
+
+Decisions:
+- Header room is padding, not a trailing flex slot. A slot wraps alone on a
+  narrow screen and leaves the handle over the first line. On a 420px
+  screen the header items do not fit beside the handle, so narrow headers
+  now wrap to two lines.
+- Narrow screens (<=640px) drop the handle chevron and the tab icons, and
+  the tab strip scrolls horizontally.
+- Handle counts show only when non-zero. Peer leads' approvals in the tree
+  also light the approval cue.
