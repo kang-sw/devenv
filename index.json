@@ -635,7 +635,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-07T05:37:29Z"
+        "touched_at": "2026-11-07T05:38:16Z",
+        "impl": {
+          "branch": "impl/develop/ditch-watch-even"
+        }
       }
     },
     "261107-feat-ws-dashboard-status-band": {
