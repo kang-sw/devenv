@@ -5,6 +5,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 8a7315100dbe69a5
 sage-review-completeness-reviewed: 8a7315100dbe69a5
+completed: 2026-11-07
 ---
 
 # Dashboard conversation: incremental updates and on-demand older history
@@ -146,3 +147,41 @@ live region's hash; a new entry changes the entries region), the cache (an
 entry renders once), and the history route (cursor paging, end of history,
 access rules); a live check on a long session that scrolling up loads older
 messages and that streaming no longer re-renders the entries.
+
+### Result (b150fe83a) - 2026-11-07
+
+Landed as specified: the ring keeps `wslive.RingHistoryCap` (2000) entries
+on disk, `ReadRing` is the newest `RingCap` (50) view, and `ReadRingPage`
+pages older entries by an exclusive entry-name cursor (`ValidRingName`
+guards it). The conversation is two regions, `entries` (merged by
+`data-entry` inside `.centries`, never re-rendered) and `convlive`
+(streaming reply, approval/activity line, held messages, sent marks), in a
+`#convo` wrapper that owns scrolling and the pin. A per-session LRU entry
+cache (250 entries, dropped when the session leaves the index) renders each
+entry once. `GET /s/<rid>/history?before=&n=` answers
+`{html, before, end}`, and the page prepends older pages near the top with
+the scroll position kept.
+
+Verification: `go test ./internal/wslive/ ./internal/wsdashboard/
+./internal/wsinbox/ ./internal/mcp/` pass, and `-race` passes for wslive
+and wsdashboard. One test, `TestMessageRouteRefusesBadImages`, times out
+under `-race` on pristine develop too. Live check, headless Chromium
+against a 310-entry fixture with 300 ms streaming ticks:
+- 50 entries drawn;
+- entry nodes survive the streaming ticks;
+- scrolling up loaded all 310 entries in 6 requests, in order, with the
+  reading position kept;
+- a new message appended while scrolled up left `scrollTop` unchanged;
+- no console errors.
+
+Decisions:
+- The entries region keeps its title bar (the counts) outside the keyed
+  container. The page replaces the bar and merges the entries.
+- Both regions are `display: contents`, so the sticky bar spans `#convo`.
+- Develop was merged forward (29c81ad6e) to pick up composer image
+  attachments.
+  - Thumbnails now require the attachment file to exist; otherwise the path
+    shows as text, per the cache-key decision.
+  - The cache key includes each image's src.
+  - The history route extracts user-line images the same way the live view
+    does.

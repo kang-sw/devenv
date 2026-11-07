@@ -1,9 +1,11 @@
 (function () {
   // The dashboard page script, shared by / and /s/<reply-id>. The server
   // renders every region; this script only swaps a region when an SSE event
-  // names it, keeps the browser-side view state across swaps (open details,
-  // scroll offsets, board answers, layout and tab), and formats times. It
-  // never builds region HTML itself.
+  // names it (or, for the conversation entries, merges it by entry name),
+  // loads older conversation entries when scrolled to the top, keeps the
+  // browser-side view state across swaps (open details, scroll offsets,
+  // board answers, layout and tab), and formats times. It never builds
+  // region HTML itself.
   var doc = document, root = doc.documentElement;
   function q(sel, el) { return Array.prototype.slice.call((el || doc).querySelectorAll(sel)); }
   function $(id) { return doc.getElementById(id); }
@@ -62,19 +64,21 @@
     var k = openKey(d);
     if (k) openState[k] = d.open;
   }, true);
+  function restoreOpenOne(d) {
+    if (isPeer(d)) { d.open = load(PEER_KEY + d.getAttribute("data-peer")) === "1"; return; }
+    var k = openKey(d);
+    if (k && Object.prototype.hasOwnProperty.call(openState, k)) d.open = openState[k];
+  }
   function restoreOpen(el) {
-    q("details", el).forEach(function (d) {
-      if (isPeer(d)) { d.open = load(PEER_KEY + d.getAttribute("data-peer")) === "1"; return; }
-      var k = openKey(d);
-      if (k && Object.prototype.hasOwnProperty.call(openState, k)) d.open = openState[k];
-    });
+    if (el.tagName === "DETAILS") restoreOpenOne(el);
+    q("details", el).forEach(restoreOpenOne);
   }
 
   // --- scroll offsets -------------------------------------------------------
   // The panes that scroll on their own; the page itself scrolls on / and on
   // the board-first page. A pane hidden by the tabs view loses its offset, so
   // each pane's last visible offset is kept and put back when it shows again.
-  var PANES = ["bcol", "r-tree", "r-conversation"];
+  var PANES = ["bcol", "r-tree", "convo"];
   var paneScroll = {};
   PANES.forEach(function (id) {
     var el = $(id);
@@ -88,8 +92,10 @@
   }
   function restoreScroll(s) { s.forEach(function (p) { if (p[0].scrollTop !== p[1]) p[0].scrollTop = p[1]; }); }
 
-  // The conversation stays at the bottom while the user has it there.
-  var convo = region("conversation"), stick = true;
+  // The conversation stays at the bottom while the user has it there. Its
+  // two regions (entries, convlive) scroll together inside #convo, which
+  // owns the scroll and the pin.
+  var convo = $("convo"), stick = true;
   function atBottom() { return convo.scrollTop + convo.clientHeight >= convo.scrollHeight - 24; }
   function pinned() { if (visible(convo)) stick = atBottom(); return stick; }
   function pinConvo() { if (stick && visible(convo)) convo.scrollTop = convo.scrollHeight; }
@@ -105,8 +111,8 @@
   var LAYOUT_KEY = "ws.dashboard.layout";
   // TAB maps a region to the tab that shows it; PANE names the element whose
   // visibility tells whether a tab is shown in the current view.
-  var TAB = { tree: "convo", conversation: "convo", board: "board", panels: "board" };
-  var PANE = { convo: "r-conversation", board: "bcol" };
+  var TAB = { tree: "convo", entries: "convo", convlive: "convo", board: "board", panels: "board" };
+  var PANE = { convo: "convo", board: "bcol" };
   function tabShown(t) { return visible($(PANE[t])); }
   function tabDot(t) { var b = doc.querySelector('#tabbar [data-tab="' + t + '"]'); return b && b.querySelector(".tdot"); }
   function revealPanes() {
@@ -115,6 +121,7 @@
       if (visible(el) && Object.prototype.hasOwnProperty.call(paneScroll, id)) el.scrollTop = paneScroll[id];
     });
     pinConvo();
+    nearTop(); // a conversation shown too short to scroll still loads older entries
     Object.keys(PANE).forEach(function (t) { var d = tabDot(t); if (d && tabShown(t)) d.classList.remove("on"); });
   }
   function setLayout(v) {
@@ -140,7 +147,7 @@
   // panes divide (their span less the splitter), with the same pixel floors
   // the stylesheet sets.
   function shareAt(y) {
-    var t = $("r-tree"), c = $("r-conversation");
+    var t = $("r-tree"), c = $("convo");
     if (!visible(t) || !visible(c) || !splitter) return null;
     var top = t.getBoundingClientRect().top, room = c.getBoundingClientRect().bottom - top - splitter.offsetHeight;
     if (room <= 0) return null;
@@ -271,13 +278,16 @@
     if (el.getAttribute("data-h") === hash) { if (board) deferred = null; return; }
     if (board && editing()) { deferred = { hash: hash, html: html }; return; }
     if (board) deferred = null;
-    var pin = name === "conversation" && pinned();
+    var pin = (name === "entries" || name === "convlive") && pinned();
     var scroll = scrollState();
     var answers = board ? readAnswers(el) : null;
-    el.innerHTML = html;
+    if (name === "entries") mergeEntriesRegion(el, html);
+    else {
+      el.innerHTML = html;
+      restoreOpen(el);
+      fmtTimes(el);
+    }
     el.setAttribute("data-h", hash);
-    restoreOpen(el);
-    fmtTimes(el);
     if (board) {
       writeAnswers(el, answers);
       if (window.wbForm) window.wbForm();
@@ -285,7 +295,7 @@
       syncChips();
       syncNote();
     }
-    if (board || name === "conversation") applySent();
+    if (board || name === "convlive") applySent();
     restoreScroll(scroll);
     if (pin) pinConvo();
     if (live && TAB[name] && !tabShown(TAB[name])) {
@@ -293,6 +303,85 @@
       if (dot) dot.classList.add("on");
     }
   }
+
+  // --- conversation entries: merged by key, never re-rendered ----------------
+  // Each entry element carries data-entry, its ring entry name; names sort in
+  // time order. Only the entries container is searched: held bubbles in the
+  // convlive region carry data-entry too (their inbox id) and are not
+  // entries.
+  function entriesBox() { var r = region("entries"); return r && r.querySelector(".centries"); }
+  function frag(html) { var t = doc.createElement("template"); t.innerHTML = html; return t.content; }
+  // mergeEntries inserts each node of src whose name box lacks at its sorted
+  // place and returns how many it inserted; an entry already shown is kept
+  // as it is.
+  function mergeEntries(box, src) {
+    var have = {}, added = 0;
+    Array.prototype.forEach.call(box.children, function (c) { have[c.getAttribute("data-entry")] = true; });
+    Array.prototype.slice.call(src.children).forEach(function (n) {
+      var k = n.getAttribute("data-entry");
+      if (!k || have[k]) return;
+      // New entries are usually the newest (live) or the oldest (history),
+      // so walk back from the end only past entries that sort after k.
+      var c = box.lastElementChild;
+      while (c && (c.getAttribute("data-entry") || "") > k) c = c.previousElementSibling;
+      box.insertBefore(n, c ? c.nextSibling : box.firstChild);
+      have[k] = true;
+      added++;
+      restoreOpen(n);
+      fmtTimes(n);
+    });
+    return added;
+  }
+  // mergeEntriesRegion applies an entries region event: the title bar (its
+  // counts) is replaced, and the entries are merged.
+  function mergeEntriesRegion(el, html) {
+    var src = frag(html), box = entriesBox(), head = el.querySelector(".thead"), nhead = src.querySelector(".thead");
+    var nbox = src.querySelector(".centries");
+    if (!box || !nbox) { el.innerHTML = html; restoreOpen(el); fmtTimes(el); return; }
+    if (head && nhead) { head.parentNode.replaceChild(nhead, head); fmtTimes(nhead); }
+    mergeEntries(box, nbox);
+  }
+
+  // --- older history: loaded a page at a time when scrolled to the top -------
+  // The region draws the newest entries; older ones come from the history
+  // route, are prepended with the scroll position kept, and are never
+  // evicted. histBefore is the next page's cursor ("" asks for the newest
+  // page, so a page that drew no entries can still start loading).
+  var histBefore = null, histEnd = false, histBusy = false;
+  function loadHistory() {
+    if (histEnd || histBusy || !window.fetch || !convo || !visible(convo)) return;
+    var box = entriesBox();
+    if (!box) return;
+    if (histBefore === null) {
+      var first = box.firstElementChild;
+      histBefore = first ? first.getAttribute("data-entry") || "" : "";
+    }
+    histBusy = true;
+    var url = "/s/" + rid + "/history?n=50" + (histBefore ? "&before=" + encodeURIComponent(histBefore) : "");
+    fetch(url, { credentials: "same-origin", cache: "no-store" }).then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    }).then(function (res) {
+      histBusy = false;
+      var h = convo.scrollHeight, top = convo.scrollTop;
+      mergeEntries(box, frag(res.html || ""));
+      // Keep what the user was reading in place: the prepended height goes
+      // above the scroll offset.
+      convo.scrollTop = top + (convo.scrollHeight - h);
+      if (res.before) histBefore = res.before;
+      if (res.end || !res.before) histEnd = true;
+      nearTop();
+    }, function () {
+      // A failed fetch (daemon replaced, network) is retried on the next
+      // scroll to the top, after a pause.
+      setTimeout(function () { histBusy = false; }, 3000);
+    });
+  }
+  // nearTop loads older entries when the conversation is scrolled to (or
+  // too short to scroll away from) its top.
+  function nearTop() { if (convo && visible(convo) && convo.scrollTop < 160) loadHistory(); }
+  if (convo) convo.addEventListener("scroll", nearTop);
+
   function mermaid() {
     if (!q("pre.mermaid:not([data-processed])").length || !window.wbMermaidFile) return;
     if (window.mermaid) { window.wbMermaid(); return; }
@@ -607,7 +696,7 @@
     if (u) { var uid = u.getAttribute("data-unchip"); dropChip(uid); setItem(uid, null); renderChips(); syncNote(); return; }
     u = t.closest("[data-unimg]");
     if (u) { dropImg(imgs[+u.getAttribute("data-unimg")]); renderImgs(); syncNote(); return; }
-    u = t.closest("#r-conversation [data-cancel]");
+    u = t.closest("#r-convlive [data-cancel]");
     if (u) { if (!u.disabled) cancelHeld(u); return; }
     if (!live) return;
     var b = t.closest("#gmenu [data-input]");
@@ -683,5 +772,6 @@
   fmtTimes(doc);
   mermaid();
   pinConvo();
+  nearTop();
   connect();
 })();

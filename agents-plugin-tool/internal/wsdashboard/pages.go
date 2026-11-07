@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"net/http"
@@ -30,13 +31,19 @@ import (
 var dashboardFS embed.FS
 
 // Region names. The session page's regions in order; the index page has one.
+//
+// The conversation is two regions inside one scroll wrapper: entries (the
+// finished messages of the live view, which the page merges by entry name
+// and never re-renders) and convlive (the streaming reply, the approval or
+// activity line, the held messages), which a streaming tick changes alone.
 const (
-	regionHead         = "head"
-	regionTree         = "tree"
-	regionConversation = "conversation"
-	regionBoard        = "board"
-	regionPanels       = "panels"
-	regionSessions     = "sessions"
+	regionHead     = "head"
+	regionTree     = "tree"
+	regionEntries  = "entries"
+	regionConvLive = "convlive"
+	regionBoard    = "board"
+	regionPanels   = "panels"
+	regionSessions = "sessions"
 	// regionMode is a pseudo-region with no element: its value is the page
 	// mode, and a change tells the page that its layout no longer fits.
 	regionMode = "mode"
@@ -45,7 +52,7 @@ const (
 // sessionRegions lists the regions a session page in mode holds.
 func sessionRegions(mode string) []string {
 	if mode == modeLive {
-		return []string{regionHead, regionTree, regionConversation, regionBoard, regionPanels}
+		return []string{regionHead, regionTree, regionEntries, regionConvLive, regionBoard, regionPanels}
 	}
 	return []string{regionHead, regionBoard, regionPanels}
 }
@@ -217,10 +224,14 @@ type indexPageData struct {
 
 func (p indexPageData) regionByName(name string) renderedRegion { return p.regions[name] }
 
-// renderSessionRegions renders every region of a session page.
-func renderSessionRegions(view SessionView) (regionSet, error) {
+// renderSessionRegions renders every region of a session page, taking each
+// conversation entry from cache (nil renders every entry).
+func renderSessionRegions(view SessionView, cache *entryCache) (regionSet, error) {
 	a, err := loadDashboardAssets()
 	if err != nil {
+		return nil, err
+	}
+	if err := renderEntries(a, cache, view.ReplyID, &view.Conversation); err != nil {
 		return nil, err
 	}
 	regions := regionSet{regionMode: newRegion(view.Mode())}
@@ -232,6 +243,38 @@ func renderSessionRegions(view SessionView) (regionSet, error) {
 		regions[name] = newRegion(buf.String())
 	}
 	return regions, nil
+}
+
+// renderEntries sets each entry's Rendered element from cache, rendering it
+// (a lead reply's markdown, then the entry template) only on a miss.
+func renderEntries(a *dashboardAssets, cache *entryCache, replyID string, cv *ConversationView) error {
+	for i := range cv.Entries {
+		e := cv.Entries[i]
+		html, err := cache.render(replyID, e, func() (template.HTML, error) {
+			if e.Kind == wslive.RingReply && cv.markdown != nil {
+				e.HTML = cv.markdown(e.Text)
+			}
+			var buf bytes.Buffer
+			if err := a.tmpl.ExecuteTemplate(&buf, "entry", e); err != nil {
+				return "", fmt.Errorf("dashboard conversation entry %s: %w", e.Key, err)
+			}
+			return template.HTML(buf.String()), nil
+		})
+		if err != nil {
+			return err
+		}
+		cv.Entries[i].Rendered = html
+	}
+	return nil
+}
+
+// renderedEntries joins rendered entries into one fragment.
+func renderedEntries(entries []ConvEntry) string {
+	var b strings.Builder
+	for _, e := range entries {
+		b.WriteString(string(e.Rendered))
+	}
+	return b.String()
 }
 
 // renderSessionPage renders the whole session page around its regions.
@@ -301,17 +344,45 @@ func (r pageReader) readPage(s Session) (PageContent, bool) {
 	return PageContent{HasBoard: s.HasBoard}, true
 }
 
-// session builds one session page's view; false when the daemon does not
-// serve that reply-id.
-func (r pageReader) session(replyID string) (SessionView, bool) {
+// served reads a session this daemon serves and its page content; false
+// when it does not serve that reply-id.
+func (r pageReader) served(replyID string) (Session, PageContent, bool) {
 	if r.index == nil || !ValidReplyID(replyID) {
-		return SessionView{}, false
+		return Session{}, PageContent{}, false
 	}
 	s, ok := r.index.Session(replyID)
 	if !ok {
-		return SessionView{}, false
+		return Session{}, PageContent{}, false
 	}
 	page, ok := r.readPage(s)
+	if !ok {
+		return Session{}, PageContent{}, false
+	}
+	return s, page, true
+}
+
+// lookup returns a served session and its snapshot, reading each snapshot
+// once per lookup function.
+func (r pageReader) lookup() func(id string) (Session, *wslive.Snapshot, bool) {
+	snaps := map[string]*wslive.Snapshot{}
+	return func(id string) (Session, *wslive.Snapshot, bool) {
+		peer, ok := r.index.Session(id)
+		if !ok {
+			return Session{}, nil, false
+		}
+		snap, read := snaps[id]
+		if !read {
+			snap = r.readSnapshot(id)
+			snaps[id] = snap
+		}
+		return peer, snap, true
+	}
+}
+
+// session builds one session page's view; false when the daemon does not
+// serve that reply-id.
+func (r pageReader) session(replyID string) (SessionView, bool) {
+	s, page, ok := r.served(replyID)
 	if !ok {
 		return SessionView{}, false
 	}
@@ -322,21 +393,29 @@ func (r pageReader) session(replyID string) (SessionView, bool) {
 		in.Held, _ = wsinbox.Held(inbox)
 		in.Drained, _ = wsinbox.Drained(inbox)
 		in.AttachDir = wsinbox.AttachmentsDir(inbox)
-		snaps := map[string]*wslive.Snapshot{}
-		in.Lookup = func(id string) (Session, *wslive.Snapshot, bool) {
-			peer, ok := r.index.Session(id)
-			if !ok {
-				return Session{}, nil, false
-			}
-			snap, read := snaps[id]
-			if !read {
-				snap = r.readSnapshot(id)
-				snaps[id] = snap
-			}
-			return peer, snap, true
-		}
+		in.Lookup = r.lookup()
 	}
 	return buildSessionView(in), true
+}
+
+// history reads one page of a served session's older conversation (see
+// wslive.ReadRingPage) and builds its entries as the live view builds them.
+// It reads whenever the session page itself is served, adapter present or
+// not; false when the daemon does not serve that reply-id.
+func (r pageReader) history(replyID, before string, n int) (ConversationView, wslive.RingPage, bool, error) {
+	s, page, ok := r.served(replyID)
+	if !ok {
+		return ConversationView{}, wslive.RingPage{}, false, nil
+	}
+	ring, err := wslive.ReadRingPage(wslive.RingDir(SessionDir(r.dir, replyID)), before, n)
+	if err != nil {
+		return ConversationView{}, wslive.RingPage{}, true, err
+	}
+	reg := s.Registration
+	contacts := resolvedContacts(page.Contacts, reg.ReplyID)
+	cv := conversation(wslive.Lead{}, ring.Records, page.MailBodies, contacts, r.lookup(), replyMarkdown(reg.Project, reg.ReplyID))
+	userEntryImages(cv.Entries, wsinbox.AttachmentsDir(sessionInbox(r.dir, replyID)), reg.ReplyID)
+	return cv, ring, true, nil
 }
 
 // indexView builds the / view.
@@ -408,6 +487,8 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 		d.handleSessionEvents(w, r, replyID)
 	case sub == "image":
 		d.handleImage(w, r, replyID)
+	case sub == "history":
+		d.handleHistory(w, r, replyID)
 	case strings.HasPrefix(sub, "attachment/"):
 		d.handleAttachment(w, r, replyID, strings.TrimPrefix(sub, "attachment/"))
 	default:
@@ -421,7 +502,7 @@ func (d *Daemon) handleSessionPage(w http.ResponseWriter, r *http.Request, reply
 		http.Error(w, "unknown session", http.StatusNotFound)
 		return
 	}
-	regions, err := renderSessionRegions(view)
+	regions, err := renderSessionRegions(view, d.entries)
 	if err == nil {
 		var html string
 		if html, err = renderSessionPage(view, regions); err == nil {
@@ -431,6 +512,61 @@ func (d *Daemon) handleSessionPage(w http.ResponseWriter, r *http.Request, reply
 	}
 	fmt.Fprintf(d.log, "dashboard: render session %s: %v\n", replyID, err)
 	http.Error(w, "render failed", http.StatusInternalServerError)
+}
+
+// historyPageMax bounds one history page's n.
+const historyPageMax = 4 * wslive.RingCap
+
+// historyAnswer is the history route's answer: the rendered entries, oldest
+// first, the cursor for the next older page (empty when the page held no
+// entry), and whether no older entry remains, so the page stops asking.
+type historyAnswer struct {
+	HTML   string `json:"html"`
+	Before string `json:"before"`
+	End    bool   `json:"end"`
+}
+
+// handleHistory serves /s/<reply-id>/history?before=<entry name>&n=<count>:
+// the n entries (default wslive.RingCap) older than before, exclusive, or
+// the newest n when before is omitted. before is only ever a sort cursor,
+// never a path, and must have an entry name's grammar.
+func (d *Daemon) handleHistory(w http.ResponseWriter, r *http.Request, replyID string) {
+	query := r.URL.Query()
+	before := query.Get("before")
+	if before != "" && !wslive.ValidRingName(before) {
+		http.Error(w, "before is not a conversation entry name", http.StatusBadRequest)
+		return
+	}
+	n := wslive.RingCap
+	if raw := query.Get("n"); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil || v < 1 {
+			http.Error(w, "n must be a positive count", http.StatusBadRequest)
+			return
+		}
+		n = min(v, historyPageMax)
+	}
+	cv, page, ok, err := d.pages().history(replyID, before, n)
+	if !ok {
+		http.Error(w, "unknown session", http.StatusNotFound)
+		return
+	}
+	if err == nil {
+		var a *dashboardAssets
+		if a, err = loadDashboardAssets(); err == nil {
+			err = renderEntries(a, d.entries, replyID, &cv)
+		}
+	}
+	if err != nil {
+		fmt.Fprintf(d.log, "dashboard: history %s: %v\n", replyID, err)
+		http.Error(w, "render failed", http.StatusInternalServerError)
+		return
+	}
+	raw, _ := json.Marshal(historyAnswer{HTML: renderedEntries(cv.Entries), Before: page.Before, End: page.End})
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	_, _ = w.Write(raw)
 }
 
 // serveMermaid serves the shared mermaid script. Its name carries its hash,

@@ -304,15 +304,19 @@ func TestAttachmentRouteServesOnlyThisSessionsAttachments(t *testing.T) {
 
 // TestPageShowsAttachmentThumbnails: the held bubble shows its images
 // through the attachment route; a delivered user message's image lines
-// naming this session's attachments become thumbnails, and a line naming
-// any other path stays text.
+// naming this session's existing attachments become thumbnails, and a line
+// naming any other path, or an attachment since removed, stays text.
 func TestPageShowsAttachmentThumbnails(t *testing.T) {
 	f := startPageFixture(t)
 	f.send(t, `{"text":"held one","images":`+imagesJSON("a.png", pngBytes)+`}`)
 	held := f.held(t)[0].Entry.Images[0]
 	heldName := filepath.Base(held)
 	delivered := filepath.Join(f.attachDir(), "00000000000000bb-1.jpg")
-	text := "see these\n\n[image: " + delivered + "]\n[image: /elsewhere/shot.png]\n\n(03) a"
+	if err := os.WriteFile(delivered, []byte("jpg"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	removed := filepath.Join(f.attachDir(), "00000000000000cc-1.png")
+	text := "see these\n\n[image: " + delivered + "]\n[image: /elsewhere/shot.png]\n[image: " + removed + "]\n\n(03) a"
 	if err := wslive.AppendRing(wslive.RingDir(SessionDir(f.dir, "livesession")), []wslive.RingEntry{{Kind: wslive.RingUser, Origin: wslive.OriginWhiteboard, Text: text}}); err != nil {
 		t.Fatal(err)
 	}
@@ -320,7 +324,7 @@ func TestPageShowsAttachmentThumbnails(t *testing.T) {
 	for _, want := range []string{
 		`<div class="hpart">held one</div><div class="thumbs"><a class="thumb" href="/s/livesession/attachment/` + heldName + `"`,
 		`<img src="/s/livesession/attachment/` + heldName + `" alt="` + heldName + `"`,
-		`see these` + "\n\n" + `[image: /elsewhere/shot.png]` + "\n\n" + `(03) a<div class="thumbs"><a class="thumb" href="/s/livesession/attachment/00000000000000bb-1.jpg"`,
+		`see these` + "\n\n" + `[image: /elsewhere/shot.png]` + "\n" + `[image: ` + removed + `]` + "\n\n" + `(03) a<div class="thumbs"><a class="thumb" href="/s/livesession/attachment/00000000000000bb-1.jpg"`,
 		`id="cimgs"`,
 	} {
 		if !strings.Contains(page, want) {
@@ -330,16 +334,27 @@ func TestPageShowsAttachmentThumbnails(t *testing.T) {
 	if strings.Contains(page, "[image: "+delivered+"]") {
 		t.Error("the delivered attachment's image line is still shown as text")
 	}
+	if strings.Contains(page, "attachment/00000000000000cc-1.png") {
+		t.Error("a removed attachment renders as an image")
+	}
 }
 
 func TestUserImagesKeepsForeignLinesAndTidiesBlanks(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "attachments")
 	in := filepath.Join(dir, "0123456789abcdef-1.png")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(in, []byte("png"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gone := filepath.Join(dir, "0123456789abcdef-2.png")
 	cases := []struct{ text, want string }{
 		{"plain", "plain"},
 		{"[image: " + in + "]", ""},
 		{"hi\n\n[image: " + in + "]\n\n(03) a", "hi\n\n(03) a"},
 		{"hi\n\n[image: /x/y.png]", "hi\n\n[image: /x/y.png]"},
+		{"hi\n\n[image: " + gone + "]", "hi\n\n[image: " + gone + "]"},
 	}
 	for _, c := range cases {
 		if got, _ := userImages(c.text, dir, "livesession"); got != c.want {

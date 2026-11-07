@@ -1,9 +1,11 @@
 package wsdashboard
 
 import (
+	"os"
 	"strings"
 
 	"github.com/kang-sw/devenv/internal/wsinbox"
+	"github.com/kang-sw/devenv/internal/wslive"
 )
 
 // HeldView is a message the user sent from the page that the session has
@@ -29,13 +31,29 @@ type AttachmentView struct {
 	Path, Name, Src string
 }
 
-// attachmentView maps an image path to its view: a thumbnail for a file in
-// attachDir, the session replyID's attachments directory, else the path.
+// attachmentView maps an image path to its view: a thumbnail for a file
+// that exists in attachDir, the session replyID's attachments directory,
+// else the path, so a removed attachment shows as text, not a broken image.
 func attachmentView(attachDir, replyID, path string) AttachmentView {
-	if name, ok := wsinbox.AttachmentName(attachDir, path); ok && ValidReplyID(replyID) {
+	if name, ok := wsinbox.AttachmentName(attachDir, path); ok && ValidReplyID(replyID) && regularFile(path) {
 		return AttachmentView{Path: path, Name: name, Src: AttachmentSrc(replyID, name)}
 	}
 	return AttachmentView{Path: path}
+}
+
+func regularFile(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular()
+}
+
+// userEntryImages takes each user entry's attached images out of its text
+// (userImages).
+func userEntryImages(entries []ConvEntry, attachDir, replyID string) {
+	for i, e := range entries {
+		if e.Kind == wslive.RingUser {
+			entries[i].Text, entries[i].Images = userImages(e.Text, attachDir, replyID)
+		}
+	}
 }
 
 // userImages takes the image lines (wsinbox.ImageLine) that name this

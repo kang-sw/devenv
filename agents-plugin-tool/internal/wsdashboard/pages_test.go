@@ -130,14 +130,14 @@ func TestSessionPageRendersLiveRegions(t *testing.T) {
 		t.Fatalf("GET /s/livesession = %d: %s", code, body)
 	}
 	for _, want := range []string{
-		`data-region="tree"`, `data-region="conversation"`, `data-region="board"`, `data-region="panels"`,
+		`data-region="tree"`, `data-region="entries"`, `data-region="convlive"`, `data-region="board"`, `data-region="panels"`,
 		`id="composer"`, `id="gear"`, "live board text",
 		`id="splitter"`, `data-input="enter"`, `data-input="mod"`,
 		`<span class="src wb">whiteboard</span>`, `<span class="src">terminal</span>`,
 		"streamed &lt;partial&gt; reply",
 		// The mail whose history entry exists expands to its body; the
 		// other shows its first line only.
-		`mail second line`, `<div class="mailline sent nobody">`,
+		`mail second line`, `<div class="mailline sent nobody" data-entry=`,
 		// The peer is served here, so its name links to its page.
 		`href="/s/boardsession"`,
 	} {
@@ -180,8 +180,8 @@ func TestSessionPagesCarryScriptHooks(t *testing.T) {
 			t.Errorf("live session page still carries %q", gone)
 		}
 	}
-	if i, j, k := strings.Index(live, `data-region="tree"`), strings.Index(live, `id="splitter"`), strings.Index(live, `data-region="conversation"`); i < 0 || j < i || k < j {
-		t.Errorf("splitter is not between the tree and the conversation regions")
+	if i, j, k := strings.Index(live, `data-region="tree"`), strings.Index(live, `id="splitter"`), strings.Index(live, `<div id="convo" class="convo"><div id="r-entries"`); i < 0 || j < i || k < j {
+		t.Errorf("splitter is not between the tree and the conversation wrapper holding the entries region")
 	}
 	// The board column holds the panels region too.
 	if i, j := strings.Index(live, `id="bcol"`), strings.Index(live, `data-region="panels"`); i < 0 || j < i {
@@ -202,7 +202,7 @@ func TestBoardFirstPageHasNoLayoutControl(t *testing.T) {
 	if !strings.Contains(body, "only the board") || !strings.Contains(body, `data-mode="board"`) {
 		t.Errorf("board-first page lacks its board")
 	}
-	for _, absent := range []string{`id="gear"`, `id="composer"`, `id="splitter"`, `data-region="conversation"`, `id="tabbar"`} {
+	for _, absent := range []string{`id="gear"`, `id="composer"`, `id="splitter"`, `id="convo"`, `data-region="entries"`, `data-region="convlive"`, `id="tabbar"`} {
 		if strings.Contains(body, absent) {
 			t.Errorf("board-first page carries %q", absent)
 		}
@@ -442,12 +442,12 @@ func TestRegionHashIgnoresRenderTime(t *testing.T) {
 	// Times render as fixed UTC text; the page script formats them, so a
 	// re-render of unchanged state hashes the same.
 	view := SessionView{ReplyID: "x", Adapter: true, Lead: LeadView{Lead: wslive.Lead{Activity: wslive.Activity{Phase: wslive.PhaseThinking, PhaseStartedAt: testNow.UnixMilli()}}}}
-	a, err := renderSessionRegions(view)
+	a, err := renderSessionRegions(view, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(5 * time.Millisecond)
-	b, _ := renderSessionRegions(view)
+	b, _ := renderSessionRegions(view, nil)
 	if a[regionTree].Hash != b[regionTree].Hash {
 		t.Fatal("tree hash changed between identical renders")
 	}
@@ -461,14 +461,14 @@ func TestRenderedPermissionWaitAndEndedSessions(t *testing.T) {
 	lead := wslive.Lead{Activity: wslive.Activity{Phase: wslive.PhasePermission,
 		Permission: &wslive.Permission{ToolName: "Bash", ArgsPreview: "rm -rf <build>", StartedAt: now.UnixMilli()}}}
 	view := buildSessionView(pageInputs{Session: liveSession("self", "/p", now), Snapshot: liveSnap(now, lead), Now: now})
-	set, err := renderSessionRegions(view)
+	set, err := renderSessionRegions(view, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// The conversation says it in words; the tree's one-line lead row shows
 	// the approval phase with the tool and its arguments. No lead region
 	// exists to say it a third time.
-	conv := string(set[regionConversation].HTML)
+	conv := string(set[regionConvLive].HTML)
 	if !strings.Contains(conv, "waiting for approval in the terminal") || !strings.Contains(conv, "rm -rf &lt;build&gt;") {
 		t.Errorf("conversation region lacks the escaped permission wait: %s", conv)
 	}
@@ -535,7 +535,7 @@ func TestTreeRowsAreDense(t *testing.T) {
 	agent := wslive.Agent{ID: "0123456789abcdef0", Status: wslive.StatusRunning, StartedAt: now.UnixMilli(),
 		Activity: wslive.Activity{Phase: wslive.PhaseThinking, PhaseStartedAt: now.UnixMilli(), Caption: "ws:effort-high"}}
 	view := buildSessionView(pageInputs{Session: liveSession("self", "/p", now), Snapshot: liveSnap(now, lead, agent), Now: now})
-	set, err := renderSessionRegions(view)
+	set, err := renderSessionRegions(view, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

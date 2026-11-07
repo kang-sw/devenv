@@ -59,8 +59,12 @@ const (
 	// TextBytes bounds a streamed reply in the snapshot and a user message or
 	// reply in the ring; a longer text keeps its head and is marked truncated.
 	TextBytes = 64 << 10
-	// RingCap is the conversation ring's capacity.
+	// RingCap is the conversation's live view: the newest ring entries a
+	// page draws. Older entries stay on disk for paging (ReadRingPage).
 	RingCap = 50
+	// RingHistoryCap bounds the ring on disk: past it the oldest entries are
+	// trimmed.
+	RingHistoryCap = 2000
 
 	// HeartbeatInterval is how often a ws-mcp rewrites a session's snapshot
 	// while nothing changes, so a reader can tell an idle session from a

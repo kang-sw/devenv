@@ -168,7 +168,7 @@ func TestCancelRefusedOnAClaimedEntryAndASendAfterADrainStartsANewOne(t *testing
 		t.Fatal(err)
 	}
 	_, page = get(t, f.base+"/s/livesession")
-	if !strings.Contains(page, `<i data-id="03" data-answer="b" data-note="" data-state="sent">`) || strings.Contains(page, `data-entry=`) {
+	if !strings.Contains(page, `<i data-id="03" data-answer="b" data-note="" data-state="sent">`) || strings.Contains(page, `class="msg user held"`) {
 		t.Errorf("after the drain the page lacks the sent mark or still shows a held bubble")
 	}
 }
@@ -262,7 +262,7 @@ func TestStreamSendsTheConversationAfterASend(t *testing.T) {
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		ev, ok := nextRegion(t, events, time.Second)
-		if ok && ev.Name == regionConversation && strings.Contains(ev.HTML, `data-entry="`+id+`"`) {
+		if ok && ev.Name == regionConvLive && strings.Contains(ev.HTML, `data-entry="`+id+`"`) {
 			return
 		}
 	}
