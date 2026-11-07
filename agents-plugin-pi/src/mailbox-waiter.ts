@@ -53,6 +53,11 @@
  * and the drain is submitted as the user's own message. See
  * `startMailboxWaiter` for when a message is held until the turn ends, and
  * for the held message the user promoted to steering (`--board-steer`).
+ *
+ * The page's interrupt, the user asking it to stop the lead's running turn,
+ * reaches the same inbox as an interrupt entry, never a message. The wait
+ * also wakes on one (`--board-interrupt`), and the waiter aborts the running
+ * turn when it started before the entry was made; see `startMailboxWaiter`.
  */
 
 import { spawn } from "node:child_process";
@@ -74,21 +79,38 @@ export interface MailboxEnvelope {
 }
 
 /**
- * `mailbox wait`'s result, distilled from its CLI exit code and, for a wait
- * armed with `--board-inbox`, from the `kinds` its JSON output reports:
- * `mail` is unread mail only, `board` a held dashboard message only, and
- * `mail+board` both.
+ * What woke a wait that ended with an arrival: `mail` is unread mail only,
+ * `board` a held dashboard message only, and `mail+board` both.
  */
-export type MailboxWaitOutcome = "mail" | "board" | "mail+board" | "timeout" | "stopped" | "error";
+export type MailboxWakeKind = "mail" | "board" | "mail+board";
+
+/**
+ * An interrupt entry woke the wait: the user asked the dashboard page to stop
+ * the running turn. Never a board message; `also` names whatever else woke
+ * the same wait.
+ */
+export interface MailboxInterruptWake {
+  interrupt: true;
+  also?: MailboxWakeKind;
+}
+
+/**
+ * `mailbox wait`'s result, distilled from its CLI exit code and, for a wait
+ * armed with a board flag, from the `kinds` its JSON output reports.
+ */
+export type MailboxWaitOutcome = MailboxWakeKind | MailboxInterruptWake | "timeout" | "stopped" | "error";
 
 /**
  * How one wait is armed: `boardInbox` adds `--board-inbox`, which wakes on
  * any held dashboard message; `boardSteer` adds `--board-steer`, which wakes
- * only on one promoted to steering. At most one is set.
+ * only on one promoted to steering. At most one of the two is set.
+ * `boardInterrupt` adds `--board-interrupt`, which also wakes on an
+ * interrupt entry, beside either of them or alone.
  */
 export interface MailboxWaitArm {
   boardInbox: boolean;
   boardSteer?: boolean;
+  boardInterrupt?: boolean;
 }
 
 /** The custom-message `customType` every arriving mail item rides under. */
@@ -126,6 +148,19 @@ export function buildMailboxPushMessage(envelope: MailboxEnvelope): MailboxPushM
   };
 }
 
+/** The custom-message `customType` dashboard texts held for the user's next input ride under. */
+export const WS_WHITEBOARD_CUSTOM_TYPE = "ws-whiteboard";
+
+/**
+ * The custom message dashboard texts are queued as when they must wait for
+ * the user's next input instead of starting a turn (a dashboard interrupt cut
+ * the turn they were meant for). Its content is the same whiteboard-labelled
+ * text a submission carries, so the model reads it as the user's own words.
+ */
+export function buildWhiteboardHeldMessage(texts: readonly string[]): { customType: typeof WS_WHITEBOARD_CUSTOM_TYPE; content: string; display: true; details: { texts: string[] } } {
+  return { customType: WS_WHITEBOARD_CUSTOM_TYPE, content: whiteboardSubmissionText(texts), display: true, details: { texts: [...texts] } };
+}
+
 /**
  * Gate for arming the waiter: an owner lead (no spawn-role marker) that already
  * has its own session key. A fork/worker/explore child has no cross-session
@@ -153,6 +188,28 @@ export interface BoardInboxDeps {
   inject: (texts: string[]) => void;
   /** Steering a held message the user promoted; absent, every held message waits for the turn end. */
   steer?: BoardSteerDeps;
+  /** The page's interrupt of the running turn; absent, the wait never carries `--board-interrupt`. */
+  interrupt?: BoardInterruptDeps;
+}
+
+/**
+ * The page's interrupt: the user asking to stop the lead's running turn. It
+ * reaches the inbox as an interrupt entry, never a message, and the waiter
+ * aborts only a turn that started before the entry was made.
+ */
+export interface BoardInterruptDeps {
+  /** Claim the interrupt entries; resolve with each one's creation time, epoch ms on this host's wall clock. Throws on a tool error. */
+  drain: () => Promise<number[]>;
+  /** When the lead's running turn started, epoch ms on the same clock; `undefined` while none runs. */
+  turnStartedAt: () => number | undefined;
+  /** Raise the session's interrupted mark, which stands until the next turn starts. Called just before `abort`. */
+  mark: () => void;
+  /** Whether the interrupted mark stands. */
+  interrupted: () => boolean;
+  /** Abort the running turn. A throw is reported and ignored. */
+  abort: () => void;
+  /** Queue texts for the user's next input instead of submitting them (Pi's `nextTurn` delivery). */
+  hold: (texts: string[]) => void;
 }
 
 /**
@@ -220,7 +277,9 @@ export interface MailboxWaiterHandle {
   /**
    * The lead's turn ended (or compaction finished). A dashboard message held
    * during the turn is drained and submitted now, and the wait is re-armed
-   * with `--board-inbox`. A no-op when nothing is held.
+   * with `--board-inbox`; after a dashboard interrupt the carried steered
+   * texts are held for the user's next input instead. A no-op when nothing
+   * is held or carried.
    */
   leadSettled?: () => void;
   /** Resolves once the loop has fully exited, including subprocess close. */
@@ -291,6 +350,22 @@ function defaultSleep(ms: number): Promise<void> {
  * compaction carries its texts to the next idle drain, which injects them
  * ahead of what it claims, so a claimed message is never dropped; an idle
  * drain that a turn or a compaction overtook carries its texts the same way.
+ *
+ * With `interrupt` deps and the knob on, every wait also carries
+ * `--board-interrupt`, idle or mid-turn, beside whichever board flag it has
+ * or alone. Such a wake is never read as a board message: the loop claims
+ * the interrupt entries alone, before anything else the same wait reports,
+ * and aborts the running turn when it started before the newest of them was
+ * made. An entry claimed while no turn runs, or older than the running turn
+ * (a click that landed as the last turn ended), is dropped, so an interrupt
+ * never cuts a turn it was not meant for. The interrupted mark goes up
+ * before the abort is asked for and lasts until the next turn starts. While
+ * it stands no steer is sent (a steered message stays held, or is carried
+ * when its drain was already out), and the carried steered texts are held
+ * for the user's next input (`interrupt.hold`) rather than submitted, so a
+ * message the cut turn never read does not start a turn. Held messages the
+ * settle drain newly claims were sent after the click (the page took every
+ * earlier one back) and are submitted as usual.
  */
 export function startMailboxWaiter(deps: MailboxWaiterDeps): MailboxWaiterHandle {
   const controller = new AbortController();
@@ -329,9 +404,17 @@ export function startMailboxWaiter(deps: MailboxWaiterDeps): MailboxWaiterHandle
       return false;
     }
   };
+  const leadInterrupted = (): boolean => {
+    try {
+      return board?.interrupt?.interrupted() === true;
+    } catch {
+      return false;
+    }
+  };
+  // No steer reaches a turn a dashboard interrupt is cutting.
   const leadSteerable = (): boolean => {
     try {
-      return board?.steer?.steerable() === true;
+      return board?.steer?.steerable() === true && !leadInterrupted();
     } catch {
       return false;
     }
@@ -341,11 +424,12 @@ export function startMailboxWaiter(deps: MailboxWaiterDeps): MailboxWaiterHandle
    * messages first; `false` when the drain failed, though the carried ones
    * are injected anyway. Clears the hold either way. When the lead is no
    * longer idle once the drain settles, everything claimed is carried to the
-   * next settle instead of injected.
+   * next settle instead of injected. While the interrupted mark stands, the
+   * carried ones are held for the user's next input instead.
    */
   const drainBoard = async (drainHeld = true): Promise<boolean> => {
     held = false;
-    const carried = carry;
+    let carried = carry;
     carry = [];
     let texts: string[] = [];
     let drained = true;
@@ -357,8 +441,20 @@ export function startMailboxWaiter(deps: MailboxWaiterDeps): MailboxWaiterHandle
         drained = false;
       }
     }
+    if (controller.signal.aborted) return drained;
+    // Read after the drain's await, like the idle check below: steered texts
+    // the cut turn never read must not start the next one.
+    if (carried.length > 0 && leadInterrupted()) {
+      try {
+        board!.interrupt!.hold(carried);
+      } catch (error) {
+        report(`board hold failed: ${describe(error)}`);
+        carry = [...carried, ...carry];
+      }
+      carried = [];
+    }
     texts = [...carried, ...texts];
-    if (texts.length === 0 || controller.signal.aborted) return drained;
+    if (texts.length === 0) return drained;
     // Re-checked after the drain's await, as steerBoard does: a turn or a
     // compaction (a manual /compact) may have begun meanwhile, where Pi would
     // refuse the submission and the claimed texts would be lost. Carried
@@ -398,6 +494,44 @@ export function startMailboxWaiter(deps: MailboxWaiterDeps): MailboxWaiterHandle
     }
     return true;
   };
+  /**
+   * Claim the interrupt entries and abort the running turn when it started
+   * before the newest of them was made; drop them otherwise. `false` when
+   * the claim failed (the entries stay for the next wake).
+   */
+  const interruptTurn = async (): Promise<boolean> => {
+    const interrupt = board?.interrupt;
+    if (!interrupt) return true;
+    let times: number[];
+    try {
+      times = await interrupt.drain();
+    } catch (error) {
+      report(`board interrupt drain failed: ${describe(error)}`);
+      return false;
+    }
+    if (times.length === 0 || controller.signal.aborted) return true;
+    let startedAt: number | undefined;
+    try {
+      startedAt = interrupt.turnStartedAt();
+    } catch {
+      startedAt = undefined;
+    }
+    // Claimed while idle, or made before the running turn started: dropped.
+    if (startedAt === undefined || startedAt >= Math.max(...times)) return true;
+    // First: the turn's end, and whatever it would submit, can come before
+    // the abort settles.
+    try {
+      interrupt.mark();
+    } catch (error) {
+      report(`board interrupt mark failed: ${describe(error)}`);
+    }
+    try {
+      interrupt.abort();
+    } catch (error) {
+      report(`aborting the running turn failed: ${describe(error)}`);
+    }
+    return true;
+  };
 
   const done = (async () => {
     while (!controller.signal.aborted) {
@@ -418,13 +552,16 @@ export function startMailboxWaiter(deps: MailboxWaiterDeps): MailboxWaiterHandle
 
       const boardInbox = enabled && !held;
       const boardSteer = enabled && held && board?.steer !== undefined && leadSteerable();
+      // Idle included: an idle wake only claims and drops the entry, which
+      // would otherwise sit in the inbox until the next full drain.
+      const boardInterrupt = enabled && board?.interrupt !== undefined;
       const wait = new AbortController();
       const onStop = (): void => wait.abort();
       controller.signal.addEventListener("abort", onStop, { once: true });
       waitController = wait;
       let outcome: MailboxWaitOutcome;
       try {
-        outcome = await deps.runWait(wait.signal, { boardInbox, boardSteer });
+        outcome = await deps.runWait(wait.signal, { boardInbox, boardSteer, boardInterrupt });
       } catch (error) {
         outcome = "error";
         report(`wait failed: ${describe(error)}`);
@@ -439,7 +576,20 @@ export function startMailboxWaiter(deps: MailboxWaiterDeps): MailboxWaiterHandle
         break;
       }
 
-      let failed = outcome === "error";
+      let interruptFailed = false;
+      if (typeof outcome === "object") {
+        // The interrupt first, so the turn is cut before anything else the
+        // same wait reports is handled; then the rest as usual.
+        interruptFailed = !(await interruptTurn());
+        if (controller.signal.aborted) break;
+        if (outcome.also === undefined) {
+          // A failed claim leaves the entry, which the next wait would wake on at once.
+          if (interruptFailed) await sleep(backoffMs);
+          continue;
+        }
+        outcome = outcome.also;
+      }
+      let failed = outcome === "error" || interruptFailed;
       if (outcome === "mail" || outcome === "mail+board") {
         try {
           const envelopes = await deps.drainMail();
@@ -621,6 +771,8 @@ export interface SubprocessWaitOptions {
   boardInbox?: boolean;
   /** Adds `--board-steer` (when `boardInbox` is unset), so only a held message promoted to steering wakes the wait. Set per wait by the loop. */
   boardSteer?: boolean;
+  /** Adds `--board-interrupt`, so an interrupt entry also wakes the wait, beside either flag above or alone. Set per wait by the loop. */
+  boardInterrupt?: boolean;
   /** Diagnostic sink for the child's stderr and spawn failures; omitted diagnostics are discarded. */
   onStderr?: (line: string) => void;
 }
@@ -644,29 +796,31 @@ export function buildMailboxWaitArgv(options: SubprocessWaitOptions): string[] {
   if (slug) argv.push("--slug", slug);
   if (options.boardInbox) argv.push("--board-inbox");
   else if (options.boardSteer) argv.push("--board-steer");
+  if (options.boardInterrupt) argv.push("--board-interrupt");
   return argv;
 }
 
 /**
- * Refine a successful `--board-inbox` or `--board-steer` wait by the `kinds` its JSON output
- * reports. Output that cannot be read counts as both kinds: a mail drain of
- * an empty queue and a board check of an empty inbox are both harmless,
- * while a missed kind would leave that arrival unhandled.
+ * Refine a successful wait armed with a board flag by the `kinds` its JSON
+ * output reports. Output that cannot be read counts as every kind the wait
+ * was armed for: a mail drain of an empty queue, a board check of an empty
+ * inbox, and an interrupt claim that finds no entry are all harmless, while
+ * a missed kind would leave that arrival unhandled.
  */
-export function boardWakeOutcome(stdout: string): MailboxWaitOutcome {
+export function boardWakeOutcome(stdout: string, interruptArmed = false): MailboxWaitOutcome {
+  const unreadable: MailboxWaitOutcome = interruptArmed ? { interrupt: true, also: "mail+board" } : "mail+board";
   let kinds: unknown;
   try {
     kinds = (JSON.parse(stdout) as { kinds?: unknown } | null)?.kinds;
   } catch {
-    return "mail+board";
+    return unreadable;
   }
-  if (!Array.isArray(kinds)) return "mail+board";
+  if (!Array.isArray(kinds)) return unreadable;
   const mail = kinds.includes("mail");
   const board = kinds.includes("board");
-  if (mail && board) return "mail+board";
-  if (board) return "board";
-  if (mail) return "mail";
-  return "mail+board";
+  const rest: MailboxWakeKind | undefined = mail && board ? "mail+board" : board ? "board" : mail ? "mail" : undefined;
+  if (kinds.includes("interrupt")) return rest === undefined ? { interrupt: true } : { interrupt: true, also: rest };
+  return rest ?? unreadable;
 }
 
 /**
@@ -694,8 +848,8 @@ export function sessionMailboxWaitOptions(
  * the binary used to bootstrap the connected bridge, avoiding mutable staging
  * and runtime contracts. Release-backed sessions retain the Python launcher.
  * Stdout — the peeked mail — is ignored (`stdio` drops it) except for a
- * `--board-inbox` wait, whose `kinds` alone are read: the drain, not the
- * peek, is the source of truth.
+ * wait armed with a board flag, whose `kinds` alone are read: the drain, not
+ * the peek, is the source of truth.
  */
 export function createSubprocessWait(options: SubprocessWaitOptions): (signal: AbortSignal, arm?: MailboxWaitArm) => Promise<MailboxWaitOutcome> {
   const stderr = options.onStderr ?? (() => {});
@@ -703,9 +857,11 @@ export function createSubprocessWait(options: SubprocessWaitOptions): (signal: A
     new Promise<MailboxWaitOutcome>((resolve) => {
       const boardInbox = arm?.boardInbox === true;
       const boardSteer = !boardInbox && arm?.boardSteer === true;
+      const boardInterrupt = arm?.boardInterrupt === true;
       // Only a board wait reads stdout: its `kinds` tell mail from a board
-      // message. A mail-only wake needs no more than the exit code.
-      const readsKinds = boardInbox || boardSteer;
+      // message or an interrupt entry. A mail-only wake needs no more than
+      // the exit code.
+      const readsKinds = boardInbox || boardSteer || boardInterrupt;
       const reportStderr = (line: string): void => {
         if (signal.aborted) return;
         try {
@@ -718,7 +874,7 @@ export function createSubprocessWait(options: SubprocessWaitOptions): (signal: A
         resolve("stopped");
         return;
       }
-      const argv = buildMailboxWaitArgv({ ...options, boardInbox, boardSteer });
+      const argv = buildMailboxWaitArgv({ ...options, boardInbox, boardSteer, boardInterrupt });
       const child = spawn(options.runtimeBinary ?? "python3", options.runtimeBinary ? argv.slice(1) : argv, {
         cwd: options.pluginDir,
         stdio: ["ignore", readsKinds ? "pipe" : "ignore", "pipe"],
@@ -733,7 +889,7 @@ export function createSubprocessWait(options: SubprocessWaitOptions): (signal: A
         if (settled) return;
         settled = true;
         signal.removeEventListener("abort", onAbort);
-        resolve(readsKinds && outcome === "mail" ? boardWakeOutcome(stdout) : outcome);
+        resolve(readsKinds && outcome === "mail" ? boardWakeOutcome(stdout, boardInterrupt) : outcome);
       };
       const onAbort = (): void => {
         try {
@@ -823,24 +979,40 @@ export const DASHBOARD_INBOX_DRAIN_TOOL = "dashboard.inbox_drain";
  */
 export function createBridgeInboxDrain(callTool: MailboxToolCall, sessionKey: string, options: { steerOnly?: boolean } = {}): () => Promise<string[]> {
   const args = { session_key: sessionKey, ...(options.steerOnly ? { steer_only: true } : {}), format: "json" };
-  return async () => {
-    const result = await callTool(DASHBOARD_INBOX_DRAIN_TOOL, args);
-    const text = result.content.find((item) => item.type === "text")?.text;
-    if (result.isError) throw new Error(text ?? `${DASHBOARD_INBOX_DRAIN_TOOL} failed`);
-    if (!text) return [];
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      return [];
-    }
-    const messages = (parsed as { messages?: unknown } | null)?.messages;
-    if (!Array.isArray(messages)) return [];
-    return messages.flatMap((message) => {
-      const body = (message as { text?: unknown } | null)?.text;
-      return typeof body === "string" && body.trim() !== "" ? [body] : [];
-    });
-  };
+  return async () => (await callInboxDrain(callTool, args)).flatMap((message) => {
+    const body = (message as { text?: unknown } | null)?.text;
+    return typeof body === "string" && body.trim() !== "" ? [body] : [];
+  });
+}
+
+/**
+ * The real interrupt `drain`: claim only the session's interrupt entries
+ * (`interrupt_only`) and resolve with each one's creation time (`sent_at`,
+ * epoch ms). An entry without a readable time is left out, so it cannot pass
+ * the stale check and cut a turn. Errors as `createBridgeInboxDrain`.
+ */
+export function createBridgeInterruptDrain(callTool: MailboxToolCall, sessionKey: string): () => Promise<number[]> {
+  const args = { session_key: sessionKey, interrupt_only: true, format: "json" };
+  return async () => (await callInboxDrain(callTool, args)).flatMap((message) => {
+    const entry = message as { interrupt?: unknown; sent_at?: unknown } | null;
+    return entry?.interrupt === true && typeof entry.sent_at === "number" && Number.isFinite(entry.sent_at) ? [entry.sent_at] : [];
+  });
+}
+
+/** One `dashboard.inbox_drain` call: its `messages` records, `[]` for a malformed success; throws on a tool error. */
+async function callInboxDrain(callTool: MailboxToolCall, args: Record<string, unknown>): Promise<unknown[]> {
+  const result = await callTool(DASHBOARD_INBOX_DRAIN_TOOL, args);
+  const text = result.content.find((item) => item.type === "text")?.text;
+  if (result.isError) throw new Error(text ?? `${DASHBOARD_INBOX_DRAIN_TOOL} failed`);
+  if (!text) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return [];
+  }
+  const messages = (parsed as { messages?: unknown } | null)?.messages;
+  return Array.isArray(messages) ? messages : [];
 }
 
 /**

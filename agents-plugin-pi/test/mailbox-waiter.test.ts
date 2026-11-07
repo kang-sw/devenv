@@ -22,8 +22,10 @@ import {
   boardWakeOutcome,
   buildMailboxPushMessage,
   buildMailboxWaitArgv,
+  buildWhiteboardHeldMessage,
   createBridgeDrain,
   createBridgeInboxDrain,
+  createBridgeInterruptDrain,
   DASHBOARD_INBOX_DRAIN_TOOL,
   createMailboxWaiterSlot,
   createSubprocessWait,
@@ -35,7 +37,9 @@ import {
   stageMailboxRuntime,
   startMailboxWaiter,
   WS_MAILBOX_CUSTOM_TYPE,
+  WS_WHITEBOARD_CUSTOM_TYPE,
   type BoardInboxDeps,
+  type BoardInterruptDeps,
   type BoardSteerDeps,
   type MailboxEnvelope,
   type MailboxWaitArm,
@@ -235,19 +239,24 @@ describe("startMailboxWaiter", () => {
  * yields scripted outcomes, then blocks until its own signal aborts. An
  * abort from `leadSettled` resolves `stopped` like the real child does.
  */
-function boardWait(script: MailboxWaitOutcome[]): { runWait: (signal: AbortSignal, arm: MailboxWaitArm) => Promise<MailboxWaitOutcome>; arms: boolean[]; modes: string[]; blocked: () => boolean } {
+function boardWait(script: MailboxWaitOutcome[], onArm?: (index: number) => void): { runWait: (signal: AbortSignal, arm: MailboxWaitArm) => Promise<MailboxWaitOutcome>; arms: boolean[]; modes: string[]; interrupts: boolean[]; blocked: () => boolean } {
   const arms: boolean[] = [];
   // Each arm's board mode: `inbox`, `steer`, or `none`.
   const modes: string[] = [];
+  // Each arm's `--board-interrupt` flag.
+  const interrupts: boolean[] = [];
   let index = 0;
   let blocking = false;
   return {
     arms,
     modes,
+    interrupts,
     blocked: () => blocking,
     runWait: (signal, arm) => {
+      onArm?.(arms.length);
       arms.push(arm.boardInbox);
       modes.push(arm.boardInbox ? "inbox" : arm.boardSteer ? "steer" : "none");
+      interrupts.push(arm.boardInterrupt === true);
       if (index < script.length) return Promise.resolve(script[index++]!);
       blocking = true;
       return new Promise<MailboxWaitOutcome>((resolve) => {
@@ -273,6 +282,7 @@ function fakeBoard(overrides: Partial<BoardInboxDeps> & { held?: string[][] } = 
     drain: overrides.drain ?? (() => { drains += 1; return Promise.resolve(queue.shift() ?? []); }),
     inject: overrides.inject ?? ((texts) => { injected.push(texts); }),
     ...(overrides.steer ? { steer: overrides.steer } : {}),
+    ...(overrides.interrupt ? { interrupt: overrides.interrupt } : {}),
   };
 }
 
@@ -602,6 +612,240 @@ describe("startMailboxWaiter: steering a promoted dashboard message", () => {
   });
 });
 
+/**
+ * A fake interrupt side: `entries` are the creation times each claim
+ * returns in order; the mark is the session's interrupted mark, and each
+ * abort records whether the mark already stood.
+ */
+function fakeInterrupt(overrides: Partial<BoardInterruptDeps> & { entries?: number[][]; startedAt?: number } = {}): BoardInterruptDeps & { state: { marked: boolean }; startedRef: { current: number | undefined }; markedAtAbort: boolean[]; holds: string[][]; drains: () => number } {
+  const state = { marked: false };
+  const startedRef: { current: number | undefined } = { current: overrides.startedAt };
+  const markedAtAbort: boolean[] = [];
+  const holds: string[][] = [];
+  const entries = overrides.entries ?? [];
+  let drains = 0;
+  return {
+    state,
+    startedRef,
+    markedAtAbort,
+    holds,
+    drains: () => drains,
+    drain: overrides.drain ?? (() => { drains += 1; return Promise.resolve(entries.shift() ?? []); }),
+    turnStartedAt: overrides.turnStartedAt ?? (() => startedRef.current),
+    mark: overrides.mark ?? (() => { state.marked = true; }),
+    interrupted: overrides.interrupted ?? (() => state.marked),
+    abort: overrides.abort ?? (() => { markedAtAbort.push(state.marked); }),
+    hold: overrides.hold ?? ((texts) => { holds.push(texts); }),
+  };
+}
+
+describe("startMailboxWaiter: the dashboard interrupt", () => {
+  test("while board submission is on, every arm carries the interrupt flag: idle, beside the inbox flag, beside steer mode, and alone while a message is held", async () => {
+    let knob = true;
+    const steer = fakeSteer();
+    const interrupt = fakeInterrupt();
+    const board = fakeBoard({ steer, interrupt, enabled: () => knob });
+    // Arm 1 (idle) holds a mid-turn message; arm 2 is in steer mode; arm 3
+    // has a steer refused; arm 4 runs with the knob off.
+    const wait = boardWait(["board", "timeout", "timeout", "timeout"], (index) => {
+      if (index === 0) board.idleRef.current = false;
+      if (index === 1) steer.ref.current = false;
+      if (index === 2) knob = false;
+    });
+    const waiter = startMailboxWaiter({ runWait: wait.runWait, drainMail: () => Promise.resolve([]), admit: () => {}, sleep: immediateSleep, board });
+    await until(() => wait.modes.length === 5 && wait.blocked(), "the fifth wait");
+    waiter.stop();
+    await waiter.done;
+    assert.deepEqual(wait.modes.slice(0, 3), ["inbox", "steer", "none"]);
+    assert.deepEqual(wait.interrupts, [true, true, true, false, false], "the knob off drops it with the board flags");
+    assert.equal(interrupt.drains(), 0, "no interrupt wake, no claim");
+  });
+
+  test("without interrupt deps no arm carries the interrupt flag", async () => {
+    const wait = boardWait(["timeout"]);
+    const board = fakeBoard();
+    const waiter = startMailboxWaiter({ runWait: wait.runWait, drainMail: () => Promise.resolve([]), admit: () => {}, sleep: immediateSleep, board });
+    await until(() => wait.modes.length === 2 && wait.blocked(), "the second wait");
+    waiter.stop();
+    await waiter.done;
+    assert.deepEqual(wait.interrupts, [false, false]);
+  });
+
+  test("an interrupt wake during a turn claims the entries alone and aborts the turn with the mark already up", async () => {
+    const interrupt = fakeInterrupt({ entries: [[2_000]], startedAt: 1_000 });
+    const board = fakeBoard({ interrupt });
+    board.idleRef.current = false;
+    const wait = boardWait([{ interrupt: true }]);
+    const waiter = startMailboxWaiter({ runWait: wait.runWait, drainMail: () => assert.fail("an interrupt-only wake drains no mail"), admit: () => {}, sleep: immediateSleep, board });
+    await until(() => wait.modes.length === 2 && wait.blocked(), "the re-armed wait");
+    waiter.stop();
+    await waiter.done;
+    assert.equal(interrupt.drains(), 1);
+    assert.deepEqual(interrupt.markedAtAbort, [true], "the mark stands before the abort is asked for");
+    assert.equal(board.drains(), 0, "an interrupt is never read as a board message");
+    assert.deepEqual(board.injected, []);
+  });
+
+  test("an entry made before the running turn started is dropped without an abort", async () => {
+    // The newest entry decides: both older than (or as old as) the turn.
+    const interrupt = fakeInterrupt({ entries: [[1_500, 2_000]], startedAt: 2_000 });
+    const board = fakeBoard({ interrupt });
+    board.idleRef.current = false;
+    const wait = boardWait([{ interrupt: true }]);
+    const waiter = startMailboxWaiter({ runWait: wait.runWait, drainMail: () => Promise.resolve([]), admit: () => {}, sleep: immediateSleep, board });
+    await until(() => wait.modes.length === 2 && wait.blocked(), "the re-armed wait");
+    waiter.stop();
+    await waiter.done;
+    assert.equal(interrupt.drains(), 1, "the stale entry is still claimed, so it cannot cut a later turn");
+    assert.deepEqual(interrupt.markedAtAbort, []);
+    assert.equal(interrupt.state.marked, false);
+  });
+
+  test("an interrupt claimed while no turn runs is dropped", async () => {
+    const interrupt = fakeInterrupt({ entries: [[2_000]] });
+    const board = fakeBoard({ interrupt });
+    const wait = boardWait([{ interrupt: true }]);
+    const waiter = startMailboxWaiter({ runWait: wait.runWait, drainMail: () => Promise.resolve([]), admit: () => {}, sleep: immediateSleep, board });
+    await until(() => wait.modes.length === 2 && wait.blocked(), "the re-armed wait");
+    waiter.stop();
+    await waiter.done;
+    assert.equal(interrupt.drains(), 1);
+    assert.deepEqual(interrupt.markedAtAbort, []);
+    assert.equal(interrupt.state.marked, false);
+    assert.deepEqual(wait.interrupts, [true, true], "an idle wait carries the flag, so the entry is claimed rather than left");
+  });
+
+  test("a wake with the interrupt beside mail and a board message handles the interrupt first, then the rest", async () => {
+    const order: string[] = [];
+    const interrupt = fakeInterrupt({ startedAt: 1_000, drain: () => { order.push("interrupt"); return Promise.resolve([2_000]); } });
+    const board = fakeBoard({ interrupt });
+    board.idleRef.current = false;
+    const wait = boardWait([{ interrupt: true, also: "mail+board" }]);
+    const admitted: MailboxEnvelope[][] = [];
+    const waiter = startMailboxWaiter({
+      runWait: wait.runWait,
+      drainMail: () => { order.push("mail"); return Promise.resolve([{ from: "peer@machine", content: "hi" }]); },
+      admit: (envelopes) => admitted.push(envelopes),
+      sleep: immediateSleep,
+      board,
+    });
+    await until(() => wait.modes.length === 2 && wait.blocked(), "the re-armed wait");
+    waiter.stop();
+    await waiter.done;
+    assert.deepEqual(order, ["interrupt", "mail"]);
+    assert.deepEqual(interrupt.markedAtAbort, [true]);
+    assert.equal(admitted.length, 1, "the mail is still admitted (the push FIFO decides what reaches the turn)");
+    assert.deepEqual(wait.modes, ["inbox", "none"], "the board message is held for the turn end as usual");
+  });
+
+  test("a failed interrupt claim backs off and re-arms with the flag", async () => {
+    const sleeps: number[] = [];
+    const errors: string[] = [];
+    const interrupt = fakeInterrupt({ drain: () => Promise.reject(new Error("drain refused")) });
+    const board = fakeBoard({ interrupt });
+    board.idleRef.current = false;
+    const wait = boardWait([{ interrupt: true }]);
+    const waiter = startMailboxWaiter({ runWait: wait.runWait, drainMail: () => Promise.resolve([]), admit: () => {}, sleep: (ms) => { sleeps.push(ms); return Promise.resolve(); }, errorBackoffMs: 42, onError: (message) => errors.push(message), board });
+    await until(() => wait.modes.length === 2 && wait.blocked(), "the re-armed wait");
+    waiter.stop();
+    await waiter.done;
+    assert.deepEqual(sleeps, [42]);
+    assert.deepEqual(errors, ["board interrupt drain failed: drain refused"]);
+    assert.deepEqual(wait.interrupts, [true, true]);
+  });
+
+  test("a throwing abort is reported and the loop keeps running", async () => {
+    const errors: string[] = [];
+    const interrupt = fakeInterrupt({ entries: [[2_000]], startedAt: 1_000, abort: () => { throw new Error("stale ctx"); } });
+    const board = fakeBoard({ interrupt });
+    board.idleRef.current = false;
+    const wait = boardWait([{ interrupt: true }]);
+    const waiter = startMailboxWaiter({ runWait: wait.runWait, drainMail: () => Promise.resolve([]), admit: () => {}, sleep: immediateSleep, onError: (message) => errors.push(message), board });
+    await until(() => wait.modes.length === 2 && wait.blocked(), "the re-armed wait");
+    waiter.stop();
+    await waiter.done;
+    assert.deepEqual(errors, ["aborting the running turn failed: stale ctx"]);
+  });
+
+  test("a steer drain still out when the mark goes up carries its texts, which are held for the next input rather than steered or submitted", async () => {
+    const wait = boardWait(["board", "board"]);
+    let releaseDrain!: (texts: string[]) => void;
+    let steerDrainStarted = false;
+    const steer = fakeSteer({
+      drain: () => {
+        steerDrainStarted = true;
+        return new Promise<string[]>((resolve) => { releaseDrain = resolve; });
+      },
+    });
+    const interrupt = fakeInterrupt();
+    const board = fakeBoard({ held: [[]], steer, interrupt });
+    board.idleRef.current = false;
+    const waiter = startMailboxWaiter({ runWait: wait.runWait, drainMail: () => Promise.resolve([]), admit: () => {}, sleep: immediateSleep, board });
+    await until(() => steerDrainStarted, "the steer drain");
+    // The interrupt's mark lands while the steer drain is still out.
+    interrupt.mark();
+    releaseDrain(["now please"]);
+    await until(() => wait.modes.length === 3 && wait.blocked(), "the re-armed wait");
+    assert.deepEqual(steer.steered, [], "no steer reaches a turn the interrupt is cutting");
+    assert.equal(wait.modes.at(-1), "none", "and no steer-mode wait is armed while the mark stands");
+    board.idleRef.current = true;
+    waiter.leadSettled!();
+    await until(() => interrupt.holds.length > 0 && wait.blocked(), "the settle");
+    waiter.stop();
+    await waiter.done;
+    assert.deepEqual(interrupt.holds, [["now please"]]);
+    assert.deepEqual(board.injected, [], "the carried text starts no turn");
+  });
+
+  test("after an interrupt the settle drain holds the carried texts for the next input and still submits the messages it newly claims", async () => {
+    // A held follow-up, then a steer the host refused (carried), then the interrupt.
+    const wait = boardWait(["board", "board", { interrupt: true }]);
+    const errors: string[] = [];
+    const steer = fakeSteer({ inject: () => { throw new Error("no session"); } });
+    const interrupt = fakeInterrupt({ entries: [[2_000]], startedAt: 1_000 });
+    const board = fakeBoard({ held: [["sent after the click"]], steer, interrupt });
+    board.idleRef.current = false;
+    const waiter = startMailboxWaiter({ runWait: wait.runWait, drainMail: () => Promise.resolve([]), admit: () => {}, sleep: immediateSleep, onError: (message) => errors.push(message), board });
+    await until(() => interrupt.markedAtAbort.length === 1 && wait.blocked(), "the interrupt");
+    assert.deepEqual(wait.modes, ["inbox", "steer", "steer", "none"]);
+    board.idleRef.current = true;
+    waiter.leadSettled!();
+    await until(() => board.injected.length > 0 && wait.blocked(), "the settle drain");
+    waiter.stop();
+    await waiter.done;
+    assert.deepEqual(errors, ["board steer failed: no session; delivering it after the turn instead"]);
+    assert.deepEqual(interrupt.holds, [["now please"]], "the steered text the cut turn never read waits for the next input");
+    assert.deepEqual(board.injected, [["sent after the click"]], "a message sent after the click submits as usual");
+  });
+
+  test("without the mark, carried texts are submitted as usual", async () => {
+    const wait = boardWait(["board", "board"]);
+    const steer = fakeSteer({ inject: () => { throw new Error("no session"); } });
+    const interrupt = fakeInterrupt();
+    const board = fakeBoard({ held: [[]], steer, interrupt });
+    board.idleRef.current = false;
+    const waiter = startMailboxWaiter({ runWait: wait.runWait, drainMail: () => Promise.resolve([]), admit: () => {}, sleep: immediateSleep, onError: () => {}, board });
+    await until(() => steer.drains() === 1 && wait.blocked(), "the steer attempt");
+    board.idleRef.current = true;
+    waiter.leadSettled!();
+    await until(() => board.injected.length > 0 && wait.blocked(), "the settle");
+    waiter.stop();
+    await waiter.done;
+    assert.deepEqual(board.injected, [["now please"]]);
+    assert.deepEqual(interrupt.holds, []);
+  });
+});
+
+describe("buildWhiteboardHeldMessage", () => {
+  test("a held text is a whiteboard-labelled custom message, so the model reads it as the user's own words", () => {
+    const message = buildWhiteboardHeldMessage(["first", "second"]);
+    assert.equal(message.customType, WS_WHITEBOARD_CUSTOM_TYPE);
+    assert.equal(message.content, "[user message from the ws whiteboard]\nfirst\n\nsecond");
+    assert.equal(message.display, true);
+    assert.deepEqual(message.details, { texts: ["first", "second"] });
+  });
+});
+
 describe("boardSteerDeps", () => {
   test("steerable is the run flag without a compaction hold", () => {
     const state = { open: false, compacting: false };
@@ -649,6 +893,20 @@ describe("boardWakeOutcome", () => {
       assert.equal(boardWakeOutcome(stdout), "mail+board", stdout);
     }
   });
+
+  test("an interrupt kind is its own outcome, never a board message, with whatever else woke the wait beside it", () => {
+    assert.deepEqual(boardWakeOutcome(JSON.stringify({ kinds: ["interrupt"], interrupt: 1, board: 0 }), true), { interrupt: true });
+    assert.deepEqual(boardWakeOutcome(JSON.stringify({ kinds: ["mail", "interrupt"] }), true), { interrupt: true, also: "mail" });
+    assert.deepEqual(boardWakeOutcome(JSON.stringify({ kinds: ["board", "interrupt"] }), true), { interrupt: true, also: "board" });
+    assert.deepEqual(boardWakeOutcome(JSON.stringify({ kinds: ["mail", "board", "interrupt"] }), true), { interrupt: true, also: "mail+board" });
+    assert.equal(boardWakeOutcome(JSON.stringify({ kinds: ["board"] }), true), "board", "a wait armed for interrupts still reads a plain board wake as one");
+  });
+
+  test("unreadable output of a wait armed for interrupts counts the interrupt too", () => {
+    for (const stdout of ["", "not json", JSON.stringify({ kinds: [] })]) {
+      assert.deepEqual(boardWakeOutcome(stdout, true), { interrupt: true, also: "mail+board" }, stdout);
+    }
+  });
 });
 
 describe("createBridgeInboxDrain", () => {
@@ -681,6 +939,40 @@ describe("createBridgeInboxDrain", () => {
   test("an empty inbox, malformed output, and blank texts give no messages", async () => {
     for (const text of [JSON.stringify({ messages: [] }), "inbox empty", JSON.stringify({}), JSON.stringify({ messages: [{ text: "  " }, { text: 3 }, null] }), undefined]) {
       const drain = createBridgeInboxDrain(async () => ({ content: text === undefined ? [] : [{ type: "text", text }] }), "k");
+      assert.deepEqual(await drain(), [], String(text));
+    }
+  });
+});
+
+describe("createBridgeInterruptDrain", () => {
+  test("asks the drain tool for the interrupt entries alone and returns their creation times", async () => {
+    const calls: [string, Record<string, unknown>][] = [];
+    const drain = createBridgeInterruptDrain(async (name, args) => {
+      calls.push([name, args]);
+      return { content: [{ type: "text", text: JSON.stringify({ messages: [
+        { id: "i1", sent_at: 1_700_000_000_000, text: "", parts: [], chips: [], interrupt: true },
+        { id: "i2", sent_at: 1_700_000_000_500, text: "", parts: [], chips: [], interrupt: true },
+      ] }) }] };
+    }, "my-key");
+    assert.deepEqual(await drain(), [1_700_000_000_000, 1_700_000_000_500]);
+    assert.deepEqual(calls, [[DASHBOARD_INBOX_DRAIN_TOOL, { session_key: "my-key", interrupt_only: true, format: "json" }]]);
+  });
+
+  test("a record that is not an interrupt or has no readable time is left out, so it cannot pass the stale check", async () => {
+    const drain = createBridgeInterruptDrain(async () => ({ content: [{ type: "text", text: JSON.stringify({ messages: [
+      { id: "m", sent_at: 5, text: "a message" },
+      { id: "i1", interrupt: true },
+      { id: "i2", interrupt: true, sent_at: "5" },
+      null,
+      { id: "i3", interrupt: true, sent_at: 7 },
+    ] }) }] }), "k");
+    assert.deepEqual(await drain(), [7]);
+  });
+
+  test("throws on a tool-level error so the loop backs off; malformed output gives no entries", async () => {
+    await assert.rejects(createBridgeInterruptDrain(async () => ({ isError: true, content: [{ type: "text", text: "unknown_session" }] }), "k")(), /unknown_session/);
+    for (const text of ["not json", JSON.stringify({}), undefined]) {
+      const drain = createBridgeInterruptDrain(async () => ({ content: text === undefined ? [] : [{ type: "text", text }] }), "k");
       assert.deepEqual(await drain(), [], String(text));
     }
   });
@@ -835,6 +1127,13 @@ describe("createSubprocessWait", () => {
         "",
       ].join("\n"));
       assert.equal(await wait(new AbortController().signal, { boardInbox: false, boardSteer: true }), "board", "a steer-mode wait passes its flag and reads the kinds too");
+      await writeFile(launcherPath, [
+        "import json,sys",
+        "kinds=['interrupt'] if '--board-interrupt' in sys.argv else ['mail']",
+        "print(json.dumps({'timed_out':False,'unread':0,'board':0,'interrupt':1,'kinds':kinds}),flush=True)",
+        "",
+      ].join("\n"));
+      assert.deepEqual(await wait(new AbortController().signal, { boardInbox: false, boardInterrupt: true }), { interrupt: true }, "an interrupt-only wait passes its flag and reads the kinds too");
     } finally {
       await rm(fixtureDir, { recursive: true, force: true });
     }
@@ -1067,6 +1366,14 @@ describe("buildMailboxWaitArgv", () => {
     assert.deepEqual(buildMailboxWaitArgv({ ...base, boardInbox: false }), buildMailboxWaitArgv(base));
     assert.deepEqual(buildMailboxWaitArgv({ ...base, boardSteer: true }), [...buildMailboxWaitArgv(base), "--board-steer"]);
     assert.deepEqual(buildMailboxWaitArgv({ ...base, boardInbox: true, boardSteer: true }), [...buildMailboxWaitArgv(base), "--board-inbox"], "the inbox flag already wakes on a steered entry");
+  });
+
+  test("boardInterrupt adds --board-interrupt beside either board flag or alone", () => {
+    const base = { launcherPath: "/l.py", pluginDir: "/p", sessionKey: "k" };
+    assert.deepEqual(buildMailboxWaitArgv({ ...base, boardInterrupt: true }), [...buildMailboxWaitArgv(base), "--board-interrupt"]);
+    assert.deepEqual(buildMailboxWaitArgv({ ...base, boardInbox: true, boardInterrupt: true }), [...buildMailboxWaitArgv(base), "--board-inbox", "--board-interrupt"]);
+    assert.deepEqual(buildMailboxWaitArgv({ ...base, boardSteer: true, boardInterrupt: true }), [...buildMailboxWaitArgv(base), "--board-steer", "--board-interrupt"]);
+    assert.deepEqual(buildMailboxWaitArgv({ ...base, boardInterrupt: false }), buildMailboxWaitArgv(base));
   });
 
 
