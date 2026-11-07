@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/kang-sw/devenv/internal/wsi18n"
 	"github.com/kang-sw/devenv/internal/wsinbox"
 	"github.com/kang-sw/devenv/internal/wslive"
 )
@@ -52,12 +53,12 @@ func attachmentView(attachDir, replyID string, n int, path string) AttachmentVie
 // markedText renders a message text with each image marker
 // (wsinbox.ImageMarker) as a tag, escaping the rest; the page shows the text
 // as it is otherwise, whitespace kept.
-func markedText(text string) template.HTML {
+func markedText(lang, text string) template.HTML {
 	var b strings.Builder
 	last := 0
 	wsinbox.ImageMarkers(text, func(start, end, n int) {
 		b.WriteString(template.HTMLEscapeString(text[last:start]))
-		b.WriteString(`<span class="imgtag" title="attached image #` + strconv.Itoa(n) + `">#` + strconv.Itoa(n) + `</span>`)
+		b.WriteString(`<span class="imgtag" title="` + template.HTMLEscapeString(wsi18n.T(lang, "imgtag.title", n)) + `">#` + strconv.Itoa(n) + `</span>`)
 		last = end
 	})
 	b.WriteString(template.HTMLEscapeString(text[last:]))

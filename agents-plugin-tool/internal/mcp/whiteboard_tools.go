@@ -18,6 +18,7 @@ import (
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsgit"
+	"github.com/kang-sw/devenv/internal/wsi18n"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
@@ -97,6 +98,10 @@ type whiteboardPanelInput struct {
 	// daemon's session page) rather than one written to disk: a ticket row
 	// carries its repo-relative path as text instead of a file link.
 	served bool
+	// lang is the language of the text the panels draw (titles, counts, row
+	// phrases; a wsi18n code). Empty is English, which is what a page
+	// written to disk uses; only a served page follows its viewer.
+	lang string
 }
 
 type whiteboardMailbox struct {
@@ -145,7 +150,7 @@ func todoPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 		}
 	}
 	count := len(todos) - len(rows)
-	return wswhiteboard.Panel{ID: "todo", Title: "Todos", Icon: "todo", Count: fmt.Sprintf("%d/%d", count, len(todos)), Rows: rows, Folded: folded}, true
+	return wswhiteboard.Panel{ID: "todo", Title: wsi18n.T(in.lang, "panel.todo"), Icon: "todo", Count: fmt.Sprintf("%d/%d", count, len(todos)), Rows: rows, Folded: folded}, true
 }
 
 // agendaPanel shows each agenda blob as its key and the one-line summary
@@ -165,7 +170,7 @@ func agendaPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 	for _, k := range keys {
 		rows = append(rows, wswhiteboard.PanelRow{Label: k, Text: agendaSummary(agenda[k])})
 	}
-	return wswhiteboard.Panel{ID: "agenda", Title: "Agendas", Icon: "agenda", Count: fmt.Sprint(len(keys)), Rows: rows}, true
+	return wswhiteboard.Panel{ID: "agenda", Title: wsi18n.T(in.lang, "panel.agenda"), Icon: "agenda", Count: fmt.Sprint(len(keys)), Rows: rows}, true
 }
 
 func whiteboardPanels(in whiteboardPanelInput) []wswhiteboard.Panel {

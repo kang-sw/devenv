@@ -50,6 +50,10 @@ type SessionView struct {
 	// composer, and the layout control. Without one the page is board-first.
 	Adapter bool
 	Version string
+	// Lang is the page language (wsi18n); empty renders the default. LangPref
+	// is the language the browser chose in the gear menu, empty when it
+	// follows the browser. Both are set per request, never by the builders.
+	Lang, LangPref string
 
 	HasBoard bool
 	Seq      int
@@ -158,6 +162,8 @@ type PeerRow struct {
 
 // ConversationView is the conversation stream.
 type ConversationView struct {
+	// Lang is the language the entries render in (SessionView.Lang).
+	Lang    string
 	Entries []ConvEntry
 	// Reply is the lead's reply text still streaming; nil when none.
 	// ReplyHTML is its text rendered as markdown with raw HTML escaped.
@@ -208,6 +214,8 @@ type ConvEntry struct {
 	// PeerReplyID links a mail line's peer to its page when PeerLinked.
 	PeerReplyID string
 	PeerLinked  bool
+	// Lang is the language the entry renders in; the entry cache keys on it.
+	Lang string
 }
 
 // pageInputs is what buildSessionView reads.
@@ -518,8 +526,10 @@ func conversation(lead wslive.Lead, ring []wslive.RingRecord, bodies map[string]
 
 // IndexView is what / renders.
 type IndexView struct {
-	Version  string
-	Projects []ProjectGroup
+	// Lang and LangPref are SessionView's.
+	Lang, LangPref string
+	Version        string
+	Projects       []ProjectGroup
 	// Live and Busy count the live sessions and those not idle.
 	Live, Busy int
 }

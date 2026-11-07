@@ -20,12 +20,21 @@ import (
 // Everything here reaches a browser, so no returned field may carry the
 // session key.
 
-var _ wsdashboard.PageSource = (*DashboardSessionSource)(nil)
+var _ wsdashboard.LangPageSource = (*DashboardSessionSource)(nil)
 
-// ReadPage reads the page parts of the session reg names. It reports false
-// exactly when ReadSession does. A session without a board still reads, with
-// HasBoard false, since the dashboard lists it for its live snapshot.
+// ReadPage reads the page parts of the session reg names, in English. It
+// reports false exactly when ReadSession does. A session without a board
+// still reads, with HasBoard false, since the dashboard lists it for its live
+// snapshot.
 func (src *DashboardSessionSource) ReadPage(reg wsdashboard.Registration) (wsdashboard.PageContent, bool) {
+	return src.ReadPageLang(reg, "")
+}
+
+// ReadPageLang is ReadPage with the board's and panels' own text (panel
+// titles, counts, tooltips) in lang, a wsi18n code. The text of the board's
+// items, the panel rows' own titles, and everything else the session wrote
+// stays as written.
+func (src *DashboardSessionSource) ReadPageLang(reg wsdashboard.Registration, lang string) (wsdashboard.PageContent, bool) {
 	key, _, record, ok := src.lookupRecord(reg)
 	if !ok {
 		return wsdashboard.PageContent{}, false
@@ -49,7 +58,7 @@ func (src *DashboardSessionSource) ReadPage(reg wsdashboard.Registration) (wsdas
 	view := wswhiteboard.BuildView(record.Whiteboard, wswhiteboard.ViewInput{
 		Layout:   wswhiteboard.LayoutFull,
 		ReplyID:  reg.ReplyID,
-		Panels:   servedWhiteboardPanels(record, key, reg.ReplyID),
+		Panels:   servedWhiteboardPanels(record, key, reg.ReplyID, lang),
 		FileText: servedFileText(record.Root),
 		ImageSrc: func(path string) string {
 			return wsdashboard.ImageSrc(record.Root, reg.ReplyID, path)
@@ -61,6 +70,7 @@ func (src *DashboardSessionSource) ReadPage(reg wsdashboard.Registration) (wsdas
 		},
 		FileActions: wsdashboard.FileActions(record.Root, reg.ReplyID),
 	})
+	view.Lang = lang
 	regions, err := wswhiteboard.RenderRegions(view)
 	if err != nil {
 		appendDebugEvent("dashboard.page_render_failed", map[string]any{"error": err.Error()})
@@ -74,7 +84,7 @@ func (src *DashboardSessionSource) ReadPage(reg wsdashboard.Registration) (wsdas
 // The daemon process serves no session itself, so it holds no mailbox
 // identity: the mailbox panel shows the session's reply-id address and its
 // reply-id unread count, never a named inbox the session may own.
-func servedWhiteboardPanels(record sessionRecord, key, replyID string) []wswhiteboard.Panel {
+func servedWhiteboardPanels(record sessionRecord, key, replyID, lang string) []wswhiteboard.Panel {
 	return whiteboardPanels(whiteboardPanelInput{
 		rec:        record,
 		layout:     wswhiteboard.LayoutFull,
@@ -82,6 +92,7 @@ func servedWhiteboardPanels(record sessionRecord, key, replyID string) []wswhite
 		sessionKey: key,
 		replyID:    replyID,
 		served:     true,
+		lang:       lang,
 	})
 }
 

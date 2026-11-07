@@ -48,8 +48,8 @@
     target[edge] = nearest;
     p.hidden = !list.length;
     if (!list.length) return;
-    p.textContent = (edge === "top" ? "↑ " : "↓ ") + list.length + " open";
-    p.title = edge === "top" ? "scroll to the nearest open item above" : "scroll to the nearest open item below";
+    p.textContent = (edge === "top" ? "↑ " : "↓ ") + wsT("js.pill.open", list.length);
+    p.title = wsT(edge === "top" ? "js.pill.up" : "js.pill.down");
   }
   function update() {
     var rt = 0, rb = window.innerHeight;

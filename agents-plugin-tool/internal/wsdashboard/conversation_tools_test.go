@@ -1,6 +1,7 @@
 package wsdashboard
 
 import (
+	stdhtml "html"
 	"strings"
 	"testing"
 
@@ -48,7 +49,8 @@ func TestToolsEntryRendersACollapsedSummaryRow(t *testing.T) {
 		`6 calls · 1 failed`,
 		`+3 more batches`,
 	} {
-		if !strings.Contains(html, want) {
+		// Table text is escaped as text ("+" is &#43;); compare what a reader sees.
+		if !strings.Contains(stdhtml.UnescapeString(html), want) {
 			t.Errorf("tools row lacks %q:\n%s", want, html)
 		}
 	}

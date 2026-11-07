@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/kang-sw/devenv/internal/wsdoc"
+	"github.com/kang-sw/devenv/internal/wsi18n"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
 	"github.com/kang-sw/devenv/internal/wsstate"
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
@@ -69,24 +70,24 @@ func ticketPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 		}
 		return l
 	}
-	lanes := []wswhiteboard.PanelLane{lane("ready", ready, "")}
-	count := fmt.Sprintf("%d ready", len(ready))
+	lanes := []wswhiteboard.PanelLane{lane(wsi18n.T(in.lang, "panel.lane.ready"), ready, "")}
+	count := wsi18n.T(in.lang, "panel.tickets.count", len(ready))
 	if in.layout == wswhiteboard.LayoutFull {
 		// The chip counts the whole todo/ backlog, not the cards listed.
-		count += fmt.Sprintf(", %d todo", len(todo))
+		count = wsi18n.T(in.lang, "panel.tickets.count.full", len(ready), len(todo))
 		if len(todo) > 0 {
 			latest := latestTodoTickets(todo, whiteboardLatestTodo)
 			note := ""
 			if len(latest) < len(todo) {
-				note = fmt.Sprintf("latest %d of %d", len(latest), len(todo))
+				note = wsi18n.T(in.lang, "panel.lane.latest", len(latest), len(todo))
 			}
-			lanes = append(lanes, lane("todo", latest, note))
+			lanes = append(lanes, lane(wsi18n.T(in.lang, "panel.lane.todo"), latest, note))
 		}
 	}
 	if len(ready) == 0 && (in.layout != wswhiteboard.LayoutFull || len(todo) == 0) {
 		return wswhiteboard.Panel{}, false
 	}
-	return wswhiteboard.Panel{ID: "tickets", Title: "Tickets", Icon: "board", Count: count, Lanes: lanes}, true
+	return wswhiteboard.Panel{ID: "tickets", Title: wsi18n.T(in.lang, "panel.tickets"), Icon: "board", Count: count, Lanes: lanes}, true
 }
 
 // ticketCategory is the category word of a ticket stem (<date>-<category>-
@@ -186,26 +187,26 @@ func mailboxPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 			entry = store.Entries[in.replyID]
 		}
 	}
-	panel := wswhiteboard.Panel{ID: "mailbox", Title: "Mailbox", Icon: "mail", Count: fmt.Sprintf("%d unread", unread)}
-	status := fmt.Sprintf("%d unread", unread)
+	panel := wswhiteboard.Panel{ID: "mailbox", Title: wsi18n.T(in.lang, "panel.mailbox"), Icon: "mail", Count: wsi18n.T(in.lang, "panel.mail.unread", unread)}
+	status := wsi18n.T(in.lang, "panel.mail.unread", unread)
 	if in.layout == wswhiteboard.LayoutEmbed {
 		panel.Rows = []wswhiteboard.PanelRow{{Label: address, Text: status}}
 		return panel, true
 	}
 
 	if whiteboardMailboxListening(in.sessionKey) {
-		status += ", waiting for mail"
+		status = wsi18n.T(in.lang, "panel.mail.unread.wait", unread)
 	}
 	panel.Rows = append(panel.Rows, wswhiteboard.PanelRow{Label: address, Text: status})
 	for _, c := range wsmailbox.SortedContacts(entry.Contacts) {
-		panel.Rows = append(panel.Rows, wswhiteboard.PanelRow{Label: c.Address, Text: "last exchange " + c.LastExchange})
+		panel.Rows = append(panel.Rows, wswhiteboard.PanelRow{Label: c.Address, Text: wsi18n.T(in.lang, "panel.mail.exchange", c.LastExchange)})
 	}
 	for _, r := range history {
-		preposition := "from"
+		label := wsi18n.T(in.lang, "panel.mail.recv", r.Time, r.Counterparty)
 		if r.Direction == mailboxHistorySent {
-			preposition = "to"
+			label = wsi18n.T(in.lang, "panel.mail.sent", r.Time, r.Counterparty)
 		}
-		panel.Rows = append(panel.Rows, wswhiteboard.PanelRow{Label: fmt.Sprintf("%s %s %s %s", r.Time, r.Direction, preposition, r.Counterparty), Text: r.Title})
+		panel.Rows = append(panel.Rows, wswhiteboard.PanelRow{Label: label, Text: r.Title})
 	}
 	return panel, true
 }
