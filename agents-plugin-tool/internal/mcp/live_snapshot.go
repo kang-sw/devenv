@@ -470,7 +470,9 @@ func (s *Server) recordLiveMail(sessionKey string, entries []mailboxHistoryEntry
 	}
 	ring := make([]wslive.RingEntry, 0, len(entries))
 	for i, e := range entries {
-		line := wslive.RingEntry{Kind: wslive.RingMail, Direction: e.Direction, Peer: e.Counterparty, Title: mailboxHistoryTitle(e.Body)}
+		// The ring reaches the browser: scrub the body before the title cap.
+		title := mailboxHistoryTitle(wslive.ScrubSessionKeys(e.Body, sessionKey))
+		line := wslive.RingEntry{Kind: wslive.RingMail, Direction: e.Direction, Peer: e.Counterparty, Title: title}
 		if i < len(keys) {
 			line.HistoryKey = keys[i]
 		}
