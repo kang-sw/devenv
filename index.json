@@ -644,19 +644,6 @@
         }
       }
     },
-    "261107-feat-ws-tracker-ledger-protocol": {
-      "registered_at": "2026-11-07T14:35:26Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-07T15:07:14Z",
-        "impl": {
-          "branch": "impl/develop/gore-pod-grunt"
-        }
-      }
-    },
     "261108-bug-pi-esc-drops-queued-mail-batches": {
       "registered_at": "2026-11-07T15:11:11Z"
     },
