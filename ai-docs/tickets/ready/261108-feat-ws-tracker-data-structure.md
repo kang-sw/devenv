@@ -231,6 +231,30 @@ in-memory source.
 Done when: the golden parity tests pass for every listed viewer, every
 flagged reason has a unit test, and the scale test passes.
 
+### Result (4449ed91f) - 2026-11-08
+
+Landed `agents-plugin-tool/internal/wstracker` (payload types, `check.go`
+rules with the engine's reasons, the fold in `state.go`, linearization and
+verdicts in `replay.go`, `Derive` and the view struct in `view.go`) over a
+narrow `Source` interface that `*wsledger.Ledger` satisfies. The mockup
+takes (295): `endRec` withdraws the ended record's pending handoffs, and an
+unassign, return, or removal concurrent with the accept that handed the
+record reverses it. `wsledger` gains only the pure `KeyFingerprint`
+accessor.
+
+`testdata/gen-golden.js` writes golden files for the six fixture viewers
+plus two (295) case specs (`testdata/cases/`, linear and concurrent, two
+viewers each) and checks `testdata/reasons.json` against the engine (89
+engine-checked cases, one Go-only). `TestGoldenParity`, `TestFlaggedReasons`,
+`TestScale` (5,000 events in ~0.3 s, bound 5 s), and
+`TestVerdictsEqualFullReplay` pass.
+
+Departures: verdicts fold only the event's thread-local causal past (pinned
+to the full-past definition by a test); `roles.add_member` in the fixtures
+becomes genesis membership plus `roles.set_lead`; `store`, `sync`,
+`clones`, `events[].local/open/late`, and `stats.commits` are caller-filled
+and excluded from parity.
+
 ### Phase 2: wsledger binding, write path, and scenarios
 
 Depends on Phase 1.
