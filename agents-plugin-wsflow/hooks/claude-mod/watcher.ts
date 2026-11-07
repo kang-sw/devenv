@@ -64,7 +64,15 @@ import type { MailItem, OwnPrompt } from './captions'
  * turn's next model request reads them; a promoted message may overtake held
  * ones. When the host refuses that row, the claimed texts are carried to the
  * turn end and go out ahead of what the turn-end drain claims, so a steered
- * message is never lost after its claim; a stop records them instead.
+ * message is never lost after its claim; a stop records them instead. The
+ * boundary waits on that drain at most STEER_DRAIN_WAIT_MS: past it the
+ * boundary claims nothing (the messages stay held for the turn end), no later
+ * boundary starts another drain while it is out, and whatever it claims late
+ * is carried as a refused row's texts are. A steer row the turn ends without
+ * any model request reading (the person refused or interrupted the call) is
+ * submitted again at that turn end, ahead of the carried ones; that submit
+ * never falls back to another row, since the first still rides the next
+ * prompt.
  *
  * Every side effect is an injected edge so the loop is testable without a
  * live mailbox or engine.
@@ -97,9 +105,14 @@ export interface BoardEdges {
   enabled: () => boolean
   /** Claim every held message of `key`'s inbox, oldest first: their texts. Rejects when the drain failed. */
   drain: (key: string) => Promise<string[]>
-  /** Submit the drained messages as one prompt, the user's own; rejects when it did not reach the conversation. */
-  submit: (texts: readonly string[]) => Promise<void>
-  /** Append the same prompt as a user row instead; rejects when refused. */
+  /**
+   * Submit the drained messages as one prompt, the user's own; rejects when
+   * it did not reach the conversation. The first `shown` texts are steered
+   * messages already in the conversation as a row no model request read, and
+   * already recorded as the user's: submitted again only so a turn reads them.
+   */
+  submit: (texts: readonly string[], shown: number) => Promise<void>
+  /** Append the same prompt as a user row instead, and record it as the user's; rejects when refused. */
   append: (texts: readonly string[]) => Promise<void>
   /** Claim only the held messages of `key`'s inbox promoted to steering, oldest first: their texts. Rejects when the drain failed. */
   drainSteer: (key: string) => Promise<string[]>
@@ -161,6 +174,8 @@ export const BACKOFF_MAX_MS = 60_000
 export const EMPTY_DRAIN_BACKOFF_MS = 2_000
 /** At a turn end, the longest the queued mail waits for the held board message to go first. */
 export const BOARD_FIRST_WAIT_MS = 5_000
+/** At a tool boundary, the longest the tool result waits on the steered board message drain. */
+export const STEER_DRAIN_WAIT_MS = 2_000
 
 export function nextBackoff(prev: number): number {
   return prev <= 0 ? BACKOFF_MIN_MS : Math.min(prev * 2, BACKOFF_MAX_MS)
@@ -274,6 +289,8 @@ export interface Watcher {
    * them. Never rejects.
    */
   toolCompleted: () => Promise<void>
+  /** A main-thread model request started: every steer row appended so far is read. */
+  requestStarted: () => void
   /**
    * The main-thread turn ended: drain and submit the held board messages,
    * then submit whatever mail is still queued as one prompt, else append it.
@@ -320,6 +337,15 @@ export function createWatcher(edges: WatcherEdges): Watcher {
    * Session-wide like the queue: a rebind keeps them, a stop records them.
    */
   let steerCarry: string[] = []
+  /** Steered texts whose row was appended since the last main-thread model request started: none has read it yet. */
+  let steerUnread: string[] = []
+  /**
+   * Steered texts whose row the turn ended without reading: the next board
+   * flush submits them again, ahead of the carried ones, never as a row.
+   */
+  let steerStranded: string[] = []
+  /** Whether a steered drain that outlasted its boundary's wait is still out. */
+  let steerDraining = false
   /** The wait now running: its own abort, which re-arms it without ending the loop, and its board flag. */
   let waiting: { ctrl: AbortController; board: boolean } | undefined
 
@@ -368,39 +394,47 @@ export function createWatcher(edges: WatcherEdges): Watcher {
     const run = boardChain.then(async (): Promise<'done' | 'empty' | { failed: string }> => {
       const board = edges.board
       if (!board) return 'empty'
+      const stranded = steerStranded
+      steerStranded = []
       const carried = steerCarry
       steerCarry = []
-      let texts: string[] = []
+      let drained: string[] = []
       let failed: string | undefined
       if (drainHeld) {
         try {
-          texts = await board.drain(myKey)
+          drained = await board.drain(myKey)
         } catch (err) {
           failed = String(err)
         }
       }
-      texts = [...carried, ...texts]
+      // `fresh` is in no conversation row yet; `stranded` already is.
+      const fresh = [...carried, ...drained]
+      const texts = [...stranded, ...fresh]
       if (texts.length === 0) return failed === undefined ? 'empty' : { failed }
-      if (failed !== undefined) edges.log(`${edges.label}: dashboard message drain failed (${failed}); submitting the ${carried.length} carried steered message(s) alone`)
+      if (failed !== undefined) edges.log(`${edges.label}: dashboard message drain failed (${failed}); submitting the ${stranded.length + carried.length} carried steered message(s) alone`)
       // The drain claimed these: from here this is their only holder. A stop
       // since means the conversation they were for is gone.
       if (stops !== at) {
-        keepBoard(`the push loop stopped: ${lastStop}`, texts)
+        if (fresh.length > 0) keepBoard(`the push loop stopped: ${lastStop}`, fresh)
         return 'done'
       }
       edges.log(`${edges.label}: drained ${texts.length} dashboard message(s) for ${myKey}; submitting them as the user's`)
       let submitErr: unknown
       try {
-        await board.submit(texts)
+        await board.submit(texts, stranded.length)
         return failed === undefined ? 'done' : { failed }
       } catch (err) {
         submitErr = err
       }
+      if (fresh.length === 0) {
+        edges.log(`${edges.label}: dashboard message submit failed (${String(submitErr)}); the ${stranded.length} unread steered message(s) stay in their row, which the next prompt carries`)
+        return failed === undefined ? 'done' : { failed }
+      }
       edges.log(`${edges.label}: dashboard message submit failed (${String(submitErr)}); appending it as a row instead`)
       try {
-        await board.append(texts)
+        await board.append(fresh)
       } catch (err) {
-        keepBoard(`prompt submit failed: ${String(submitErr)}; row append failed: ${String(err)}`, texts)
+        keepBoard(`prompt submit failed: ${String(submitErr)}; row append failed: ${String(err)}`, fresh)
       }
       return failed === undefined ? 'done' : { failed }
     })
@@ -409,22 +443,68 @@ export function createWatcher(edges: WatcherEdges): Watcher {
   }
 
   /**
+   * Carry claimed steered texts no row holds to the next board flush (the
+   * turn end), or submit them now when that turn end has passed; a stop since
+   * `at` records them instead.
+   */
+  function carrySteer(myKey: string, at: number, texts: readonly string[]): void {
+    if (stops !== at) {
+      keepBoard(`the push loop stopped: ${lastStop}`, texts)
+      return
+    }
+    steerCarry.push(...texts)
+    // The turn ended while they were pending (an interrupt): its flush has
+    // run, so submit the carried messages now.
+    if (!edges.turnRunning()) void flushBoard(myKey, false)
+  }
+
+  /**
    * Claim the board messages promoted to steering and append them into the
    * running turn as one row. A refused row carries them to the next board
-   * flush (the turn end), so a claimed message is never lost. Never rejects.
+   * flush (the turn end), so a claimed message is never lost. The drain gets
+   * STEER_DRAIN_WAIT_MS: a hung server must not hold every tool result, so
+   * past it this boundary claims nothing and what the drain claims late is
+   * carried. Never rejects.
    */
   async function steerBoard(): Promise<void> {
     const board = edges.board
     const myKey = key
     if (!board || myKey === undefined || !boardEnabled()) return
-    const at = stops
-    let texts: string[]
-    try {
-      texts = await board.drainSteer(myKey)
-    } catch (err) {
-      edges.log(`${edges.label}: steered dashboard message drain failed for ${myKey}: ${String(err)}; they stay held`)
+    if (steerDraining) {
+      edges.log(`${edges.label}: an earlier steered dashboard message drain for ${myKey} is still out; this tool boundary claims nothing`)
       return
     }
+    const at = stops
+    steerDraining = true
+    const drain = Promise.resolve()
+      .then(() => board.drainSteer(myKey))
+      .finally(() => (steerDraining = false))
+    const timer = new AbortController()
+    const first = await Promise.race([
+      drain.then(
+        (texts) => ({ texts }),
+        (err: unknown) => ({ err }),
+      ),
+      edges.sleep(STEER_DRAIN_WAIT_MS, timer.signal).then(() => 'late' as const),
+    ])
+    timer.abort()
+    if (first === 'late') {
+      edges.log(`${edges.label}: steered dashboard message drain for ${myKey} outlasted ${STEER_DRAIN_WAIT_MS}ms; this tool boundary claims nothing`)
+      void drain.then(
+        (texts) => {
+          if (texts.length === 0) return
+          edges.log(`${edges.label}: a late steered dashboard message drain claimed ${texts.length} message(s); submitting them at the turn end`)
+          carrySteer(myKey, at, texts)
+        },
+        (err) => edges.log(`${edges.label}: late steered dashboard message drain failed for ${myKey}: ${String(err)}; they stay held`),
+      )
+      return
+    }
+    if ('err' in first) {
+      edges.log(`${edges.label}: steered dashboard message drain failed for ${myKey}: ${String(first.err)}; they stay held`)
+      return
+    }
+    const texts = first.texts
     if (texts.length === 0) return
     // The drain claimed these: from here this is their only holder.
     if (stops !== at) {
@@ -440,11 +520,17 @@ export function createWatcher(edges: WatcherEdges): Watcher {
         return
       }
       edges.log(`${edges.label}: steered dashboard message row refused (${String(err)}); submitting it at the turn end instead`)
-      steerCarry.push(...texts)
-      // The turn ended while the row was pending (an interrupt): its flush
-      // has run, so submit the carried messages now.
-      if (!edges.turnRunning()) void flushBoard(myKey, false)
+      carrySteer(myKey, at, texts)
+      return
     }
+    if (stops !== at) return
+    if (edges.turnRunning()) {
+      steerUnread.push(...texts)
+      return
+    }
+    // The turn ended while the row was pending: no model request reads it now.
+    steerStranded.push(...texts)
+    void flushBoard(myKey, false)
   }
 
   /** Queue `prompt` for the running main-thread turn; false when none runs, and the caller submits it. */
@@ -764,6 +850,9 @@ export function createWatcher(edges: WatcherEdges): Watcher {
       const left = takeQueued()
       if (left) lose(left.items, `the push loop stopped: ${reason}`)
       if (steerCarry.length > 0) keepBoard(`the push loop stopped: ${reason}`, steerCarry.splice(0))
+      // Already rows of the conversation the stop ends: nothing to record.
+      steerUnread = []
+      steerStranded = []
       boardHeld = false
       if (!ctrl) return
       stops += 1
@@ -796,9 +885,18 @@ export function createWatcher(edges: WatcherEdges): Watcher {
         lose(taken.items, `row append failed: ${String(err)}`)
       }
     },
+    requestStarted() {
+      steerUnread = []
+    },
     turnCompleted() {
       const taken = takeQueued()
       const at = stops
+      // Steer rows no model request read since they were appended: the
+      // person refused or interrupted the call they rode on.
+      if (steerUnread.length > 0) {
+        steerStranded.push(...steerUnread)
+        steerUnread = []
+      }
       const sendMail = () => {
         if (!taken) return
         // A stop while the mail waited on the board drain took its conversation.
@@ -810,7 +908,7 @@ export function createWatcher(edges: WatcherEdges): Watcher {
       }
       const myKey = key
       const drainHeld = boardHeld || boardWanted()
-      if (myKey === undefined || !edges.board || !(drainHeld || steerCarry.length > 0)) {
+      if (myKey === undefined || !edges.board || !(drainHeld || steerCarry.length > 0 || steerStranded.length > 0)) {
         boardHeld = false
         sendMail()
         return

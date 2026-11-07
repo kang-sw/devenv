@@ -835,7 +835,9 @@ export const register: Register = (on) => {
             if (!server) throw new Error('MCP server not resolved')
             return parseInboxDrain(await callText(server, INBOX_DRAIN_TOOL, { session_key: key, format: 'json' }))
           },
-          submit: async (texts) => {
+          // The first `shown` texts the feed already holds (an unread steer
+          // row submitted again): only the rest is recorded.
+          submit: async (texts, shown) => {
             const text = texts.join('\n\n')
             dashboard.whiteboardSubmitting()
             let entered = false
@@ -844,13 +846,16 @@ export const register: Register = (on) => {
               if (res.drop !== undefined) throw new Error(`prompt dropped: ${res.drop}`)
               entered = true
             } finally {
-              dashboard.whiteboardSubmitted(text, entered)
+              dashboard.whiteboardSubmitted(texts.slice(shown).join('\n\n'), entered)
             }
           },
+          // A dropped submit's fallback row: recorded as a steer row is, or
+          // the message would leave the page once its held entry clears.
           append: async (texts) => {
-            const text = labelWhiteboard($.plugin.name, texts.join('\n\n'))
-            const res = await $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] } })
+            const text = texts.join('\n\n')
+            const res = await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: labelWhiteboard($.plugin.name, text) }] } })
             if (res.deny !== undefined) throw new Error(`row refused: ${res.deny}`)
+            dashboard.whiteboardSteered(text)
           },
           // Promoted messages: claimed at a main-thread tool boundary and
           // appended into the running turn, as mailbox steer appends mail.
@@ -1222,7 +1227,9 @@ export const register: Register = (on) => {
   // model's own main-thread calls count: the mod's own drain and slug lookup
   // pass here too, with this plugin as origin, and no request follows them.
   // A row appended at a call the person interrupted reaches the model with
-  // their next prompt instead.
+  // their next prompt instead; a steered message's row is also submitted
+  // again at that turn end. The steered drain waits a bounded time, so a
+  // hung server never holds the tool result.
   // Registered first among the tool.call hooks, so it wraps the tools the mod
   // serves itself. It has no .catch: it fails only when the call beneath
   // does, and a skipped hook keeps what its next settled to, where a .catch
@@ -1355,6 +1362,8 @@ export const register: Register = (on) => {
 
   // The effort is known only from each model request: the band takes the
   // main loop's, with its model.
+  // A main-thread request also tells the mailbox push that the steer rows
+  // appended so far are read, so a turn end re-submits only unread ones.
   // The dashboard feed observes the stream while it runs; off, the stream is
   // forwarded as it was.
   on('turn.step', async function* ($, e, next) {
@@ -1363,6 +1372,11 @@ export const register: Register = (on) => {
         band.stepped(e.model, e.effort)
       } catch (err) {
         $.ui.log(`${$.plugin.name} band: model request handling failed: ${String(err)}`, { to: 'debug' })
+      }
+      try {
+        watcher?.requestStarted()
+      } catch (err) {
+        $.ui.log(`${$.plugin.name} mailbox: model request handling failed: ${String(err)}`, { to: 'debug' })
       }
     }
     if (!dashboard.active()) return yield* next(e)
