@@ -19,7 +19,7 @@ import (
 func TestResolveImplementSmallestSafeChangeStillGetsIndependentReview(t *testing.T) {
 	input := implementInput{
 		ReviewPhase: "full",
-		Target: implementTargetInput{Kind: "inline", Label: "tiny edit", ScopeLabel: "tiny edit", ScopeSlug: "tiny-edit"},
+		Target:      implementTargetInput{Kind: "inline", Label: "tiny edit", ScopeLabel: "tiny edit", ScopeSlug: "tiny-edit"},
 		Facts: implementFactsInput{
 			Scope: implementScopeFactsInput{
 				Span:            factString{Value: "single-file", Present: true},
