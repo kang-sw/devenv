@@ -5,6 +5,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: a9dc05efafa08874
 sage-review-completeness-reviewed: a9dc05efafa08874
+completed: 2026-11-07
 ---
 
 # Dashboard composer image attachment, delivered as file paths
@@ -172,6 +173,31 @@ accumulates, cancel keeps files, text lines, trim deletes, sweep), and the
 attachment route (confinement, access rules); a live check that a pasted
 screenshot sent from the page reaches a Claude session and a Pi session and
 each agent opens it by the delivered path.
+
+### Result (0801c68dc) - 2026-11-07
+
+Landed as one slice in 0801c68dc, then review fixes in 461d7b7ea.
+
+- **wsinbox.** `Entry.Images` holds absolute paths. `Text()` adds one `[image: <path>]` line per image (one paragraph) between the parts and the answer block. `Normalize` counts an image as content. It drops a repeated path, and refuses a non-absolute path, a path containing a newline (so a path cannot forge a second line), and more than `MaxImages` (8). `Merge` accumulates images. New: `AttachmentsDir` (absolute), `ValidAttachmentName` (`<16 hex>-<n>.<png|jpg|gif|webp>`), `AttachmentName` (checks the parent dir lexically, then the grammar), `ImageLine`/`ImageLinePath`, `SweepAttachments`. `trimDrained` deletes the images a trimmed record listed unless still referenced. `referencedAttachments` reads held, then drained, then held again, and counts every parseable file directly in `inbox/`, so claim and temp files count too. `DrainedCap` is now 50.
+- **Daemon.** `POST /s/<rid>/message` takes `images [{name, data}]` and `refs [names]`.
+  - The body limit is 256 KiB + 8 x base64(10 MiB). A body over that is refused with 413. A request without images or refs is still refused above 256 KiB, with 400.
+  - Count, base64, size, and `http.DetectContentType` sniff checks run before the lock. Refusals: 413 for count or size, 400 for bad base64, 415 for any other type.
+  - Under `inboxMu`: sweep (24 h), check refs (grammar + Lstat regular file; a refusal names the ref), count the newest held entry's images plus the request's, write files 0600 in a 0700 dir under a per-request upload id with O_EXCL, then Send. Any later refusal removes this request's files.
+  - Cancel answers `images: [names]`.
+  - New `GET /s/<rid>/attachment/<name>` (`attachment_route.go`): grammar check, Lstat regular file, the image route's headers. Access comes from the global guards; the route is added to the LAN guard test.
+- **Page.** The held bubble and delivered user messages show thumbnails (`AttachmentView`, the `thumbs` template). `userImages` takes this session's image lines out of the text; any other path stays text. In the composer, paste or drop creates removable chips (`#cimgs`), uploaded only on send. Cancel restores chips that reference the written files, and a re-send sends `refs`.
+- **Verification.** `go test -count=1 ./internal/wsinbox ./internal/wsdashboard` passes. New tests:
+  - `internal/wsinbox/attachments_test.go`: text lines, normalize, merge/cancel, confinement, trim (including the shared and held cases), sweep.
+  - `internal/wsdashboard/attachments_test.go`: the accepted types and mislabel/svg/bmp sniffing; the 400/413/415 refusals including the merged cap and the post-write cleanup; Origin 403 and no-adapter 409; cancel, ref re-send, bad and missing refs; sweep on write; attachment route confinement (symlink, other session); thumbnails.
+
+  `go test -count=1 ./internal/mcp ./cmd/...` passes. `go vet` is clean. The JS parses under node.
+- **Decisions.**
+  - Image lines form one paragraph, each line separated by `\n`.
+  - Paths are deduplicated, so the cap counts can only be over-strict.
+  - The attachment route sends `Cache-Control: no-cache`, like the image route.
+  - The daemon state dir is passed through `filepath.Abs`, so the page and the entries agree on paths.
+  - JS was written directly rather than as a leaf.
+- **Not done.** The live two-host check (a pasted screenshot reaching a Claude and a Pi session, each opening it by path) is manual and was not run. A symlinked state root that the daemon and ws-mcp spell differently would skip trim-time deletes, but the 24 h sweep still collects those files.
 
 ## Sage Review Round 1 (2026-11-07)
 

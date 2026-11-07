@@ -228,6 +228,17 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .achip .anote::before { content: "· "; }
 .unchip { border: 0; background: transparent; color: var(--wb-muted-fg); cursor: pointer; font-size: 13px; line-height: 1; padding: 0 5px; border-radius: 999px; }
 .unchip:hover { background: var(--wb-muted); color: var(--wb-fg); }
+/* composer image chips and message thumbnails */
+.cimgs { display: flex; flex-wrap: wrap; gap: 6px; }
+.cimgs:empty { display: none; }
+.ichip { position: relative; width: 56px; height: 56px; border-radius: 8px; overflow: hidden; background: var(--wb-muted); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-primary) 35%, transparent); flex: none; }
+.ichip img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.unimg { position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; border: 0; border-radius: 999px; padding: 0; line-height: 18px; font-size: 13px; cursor: pointer; background: color-mix(in srgb, var(--wb-card) 85%, transparent); color: var(--wb-fg); }
+.unimg:hover { background: var(--wb-card); }
+.composer.drop { outline: 2px dashed var(--wb-primary); outline-offset: -4px; }
+.thumbs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; white-space: normal; }
+.thumbs .thumb img { display: block; max-width: 160px; max-height: 120px; border-radius: 6px; object-fit: contain; background: var(--wb-muted); }
+.thumbs .ipath { font-size: 12px; color: var(--wb-muted-fg); word-break: break-all; }
 /* held: sent from the page, not yet received by the session */
 .msg.held .bub { background: transparent; box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--wb-primary) 45%, transparent); }
 .heldtag { font-size: 10px; font-weight: 800; letter-spacing: .04em; padding: 0 6px; border-radius: 4px; background: var(--wb-ph-perm); color: var(--wb-on-ph-perm); }

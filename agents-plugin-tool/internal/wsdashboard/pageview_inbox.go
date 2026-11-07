@@ -1,6 +1,8 @@
 package wsdashboard
 
 import (
+	"strings"
+
 	"github.com/kang-sw/devenv/internal/wsinbox"
 )
 
@@ -16,6 +18,52 @@ type HeldView struct {
 	// Parts are the merged sends' texts; the bubble divides them.
 	Parts []string
 	Chips []wsinbox.Chip
+	// Images are the entry's attached images.
+	Images []AttachmentView
+}
+
+// AttachmentView is one image a message carries. Src is the attachment
+// route's URL when Path names a file in this session's attachments
+// directory; the page shows any other path as text.
+type AttachmentView struct {
+	Path, Name, Src string
+}
+
+// attachmentView maps an image path to its view: a thumbnail for a file in
+// attachDir, the session replyID's attachments directory, else the path.
+func attachmentView(attachDir, replyID, path string) AttachmentView {
+	if name, ok := wsinbox.AttachmentName(attachDir, path); ok && ValidReplyID(replyID) {
+		return AttachmentView{Path: path, Name: name, Src: AttachmentSrc(replyID, name)}
+	}
+	return AttachmentView{Path: path}
+}
+
+// userImages takes the image lines (wsinbox.ImageLine) that name this
+// session's attachments out of a delivered user message, returning the text
+// left and their views. A line naming any other path stays in the text.
+func userImages(text, attachDir, replyID string) (string, []AttachmentView) {
+	if !strings.Contains(text, "[image: ") {
+		return text, nil
+	}
+	var kept []string
+	var images []AttachmentView
+	for _, line := range strings.Split(text, "\n") {
+		if path, ok := wsinbox.ImageLinePath(strings.TrimSpace(line)); ok {
+			if v := attachmentView(attachDir, replyID, path); v.Src != "" {
+				images = append(images, v)
+				continue
+			}
+		}
+		// Keep one blank line where a removed block left two.
+		if strings.TrimSpace(line) == "" && len(kept) > 0 && strings.TrimSpace(kept[len(kept)-1]) == "" {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	if len(images) == 0 {
+		return text, nil
+	}
+	return strings.Trim(strings.Join(kept, "\n"), "\n"), images
 }
 
 // SentMark is the latest answer sent for one board item, from the inbox:
@@ -25,11 +73,16 @@ type SentMark struct {
 	Held             bool
 }
 
-// heldViews lists the held entries, oldest first.
-func heldViews(held []wsinbox.Record) []HeldView {
+// heldViews lists the held entries, oldest first; attachDir and replyID
+// map their images as attachmentView does.
+func heldViews(held []wsinbox.Record, attachDir, replyID string) []HeldView {
 	out := make([]HeldView, 0, len(held))
 	for _, r := range held {
-		out = append(out, HeldView{ID: r.ID(), At: r.Entry.SentAt, Parts: r.Entry.Parts, Chips: r.Entry.Chips})
+		v := HeldView{ID: r.ID(), At: r.Entry.SentAt, Parts: r.Entry.Parts, Chips: r.Entry.Chips}
+		for _, path := range r.Entry.Images {
+			v.Images = append(v.Images, attachmentView(attachDir, replyID, path))
+		}
+		out = append(out, v)
 	}
 	return out
 }
