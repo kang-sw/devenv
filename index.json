@@ -635,7 +635,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-07T06:24:25Z"
+        "touched_at": "2026-11-07T06:24:54Z",
+        "impl": {
+          "branch": "impl/develop/expel-drank-liver"
+        }
       }
     },
     "261107-feat-ws-whiteboard-now-markdown": {
