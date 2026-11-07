@@ -238,13 +238,8 @@ func (s *inProcessSpawner) spawn(args []string) error {
 	n := len(s.calls)
 	s.calls = append(s.calls, append([]string(nil), args...))
 	s.mu.Unlock()
-	lan := len(args) == 4 && args[3] == "--lan"
-	var port int
-	var err error
-	if len(args) >= 3 {
-		port, err = strconv.Atoi(args[2])
-	}
-	if err != nil || (len(args) != 3 && !lan) || args[0] != "dashboard" || args[1] != "--port" {
+	port, lan, buildTime, ok := parseSpawnArgs(args)
+	if !ok {
 		s.t.Errorf("spawn args = %v", args)
 		return errors.New("bad args")
 	}
@@ -254,7 +249,7 @@ func (s *inProcessSpawner) spawn(args []string) error {
 		wait = 2 * time.Second
 	}
 	go func() {
-		d, err := StartDaemon(DaemonOptions{Dir: s.dir, Port: port, Version: version, LockWait: wait, LAN: lan, bindHost: "127.0.0.1"})
+		d, err := StartDaemon(DaemonOptions{Dir: s.dir, Port: port, Version: version, LockWait: wait, LAN: lan, BuildTime: buildTime, bindHost: "127.0.0.1"})
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		if err != nil {
@@ -264,6 +259,32 @@ func (s *inProcessSpawner) spawn(args []string) error {
 		s.daemons = append(s.daemons, d)
 	}()
 	return nil
+}
+
+// parseSpawnArgs reads the `dashboard --port N [--lan] [--build-time MS]`
+// argument list DaemonArgs builds.
+func parseSpawnArgs(args []string) (port int, lan bool, buildTime int64, ok bool) {
+	if len(args) < 3 || args[0] != "dashboard" || args[1] != "--port" {
+		return 0, false, 0, false
+	}
+	port, err := strconv.Atoi(args[2])
+	if err != nil {
+		return 0, false, 0, false
+	}
+	rest := args[3:]
+	if len(rest) > 0 && rest[0] == "--lan" {
+		lan, rest = true, rest[1:]
+	}
+	switch {
+	case len(rest) == 0:
+	case len(rest) == 2 && rest[0] == "--build-time":
+		if buildTime, err = strconv.ParseInt(rest[1], 10, 64); err != nil {
+			return 0, false, 0, false
+		}
+	default:
+		return 0, false, 0, false
+	}
+	return port, lan, buildTime, true
 }
 
 func (s *inProcessSpawner) closeAll() {
@@ -378,7 +399,7 @@ func TestEnsureHandoffAppliesAChangedLANMode(t *testing.T) {
 			t.Fatalf("lan %v: Ensure = %s, %v", lan, outcome, err)
 		}
 		waitDone(t, old)
-		if want := DaemonArgs(0, lan); len(sp.calls) != 1 || strings.Join(sp.calls[0], " ") != strings.Join(want, " ") {
+		if want := DaemonArgs(0, lan, 0); len(sp.calls) != 1 || strings.Join(sp.calls[0], " ") != strings.Join(want, " ") {
 			t.Fatalf("lan %v: spawn calls = %v, want one %v", lan, sp.calls, want)
 		}
 		ep, _ := ReadEndpoint(dir)
@@ -410,12 +431,120 @@ func TestEnsureFromAnOlderWsMcpLeavesANewerDaemonInTheOtherLANMode(t *testing.T)
 	}
 }
 
+// startBuiltDaemon starts a daemon reporting buildTime.
+func startBuiltDaemon(t *testing.T, dir, version string, buildTime int64) *Daemon {
+	t.Helper()
+	d, err := StartDaemon(DaemonOptions{Dir: dir, Port: 0, Version: version, BuildTime: buildTime, LockWait: 200 * time.Millisecond})
+	if err != nil {
+		t.Fatalf("StartDaemon(%s): %v", version, err)
+	}
+	t.Cleanup(d.Close)
+	return d
+}
+
+// TestEnsureHandoffOrdersSameVersionBuildsByBuildTime: at an equal version
+// the newer build replaces the daemon, and the replacement reports the
+// client's build time, so a second Ensure leaves it alone.
+func TestEnsureHandoffOrdersSameVersionBuildsByBuildTime(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		daemon        int64 // 0 = a daemon that omits the field
+		client        int64
+		wantReplaced  bool
+		wantSpawnArgs string
+	}{
+		{"older daemon build is replaced", 1000, 2000, true, "dashboard --port 0 --build-time 2000"},
+		{"daemon without the field is replaced", 0, 2000, true, "dashboard --port 0 --build-time 2000"},
+		{"newer daemon build is left", 3000, 2000, false, ""},
+		{"equal build time is left", 2000, 2000, false, ""},
+		{"unknown client build time is left", 1000, 0, false, ""},
+		{"unknown on both sides is left", 0, 0, false, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			old := startBuiltDaemon(t, dir, "0.48.0", tc.daemon)
+			sp := &inProcessSpawner{t: t, dir: dir, versions: []string{"0.48.0"}}
+			defer sp.closeAll()
+			opts := ensureOpts(dir, "0.48.0", sp.spawn)
+			opts.BuildTime = tc.client
+			outcome, err := Ensure(context.Background(), opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !tc.wantReplaced {
+				if outcome != OutcomeRunning || len(sp.calls) != 0 {
+					t.Fatalf("Ensure = %s, %d spawns; want the daemon left running", outcome, len(sp.calls))
+				}
+				select {
+				case <-old.Done():
+					t.Fatal("the daemon stopped")
+				default:
+				}
+				return
+			}
+			if outcome != OutcomeReplaced || len(sp.calls) != 1 || strings.Join(sp.calls[0], " ") != tc.wantSpawnArgs {
+				t.Fatalf("Ensure = %s, spawn calls %v; want a replacement with %q", outcome, sp.calls, tc.wantSpawnArgs)
+			}
+			waitDone(t, old)
+			ep, _ := ReadEndpoint(dir)
+			if info, err := Health(context.Background(), testClient(), ep); err != nil || info.BuildTime != tc.client {
+				t.Fatalf("new daemon health = %+v, %v; want build time %d", info, err, tc.client)
+			}
+			if outcome, err := Ensure(context.Background(), opts); err != nil || outcome != OutcomeRunning || len(sp.calls) != 1 {
+				t.Fatalf("second Ensure = %s, %v, %d spawns; the replacement must not flap", outcome, err, len(sp.calls))
+			}
+		})
+	}
+}
+
+// TestBuildTimeNeverOutranksVersion: the build time only breaks a version
+// tie; a newer build of an older version never replaces a newer version, and
+// an older build of a newer version still replaces an older version.
+func TestBuildTimeNeverOutranksVersion(t *testing.T) {
+	dir := t.TempDir()
+	d := startBuiltDaemon(t, dir, "0.49.0", 1000)
+	spawned := 0
+	opts := ensureOpts(dir, "0.48.0", func([]string) error { spawned++; return nil })
+	opts.BuildTime = 9000
+	if outcome, err := Ensure(context.Background(), opts); err != nil || outcome != OutcomeRunning || spawned != 0 {
+		t.Fatalf("Ensure = %s, %v, %d spawns", outcome, err, spawned)
+	}
+	select {
+	case <-d.Done():
+		t.Fatal("the newer-version daemon stopped")
+	default:
+	}
+	if keepRunning(HealthInfo{Version: "0.47.0", BuildTime: 9000}, EnsureOptions{Version: "0.48.0", BuildTime: 1000}) {
+		t.Fatal("an older version with a newer build time must still be replaced")
+	}
+}
+
+func TestExecutableBuildTimeReadsTheFileModificationTime(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ws-mcp")
+	if err := os.WriteFile(path, []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	when := time.UnixMilli(1700000000123)
+	if err := os.Chtimes(path, when, when); err != nil {
+		t.Fatal(err)
+	}
+	if got := ExecutableBuildTime(path); got != 1700000000123 {
+		t.Fatalf("ExecutableBuildTime = %d", got)
+	}
+	if got := ExecutableBuildTime(filepath.Join(t.TempDir(), "absent")); got != 0 {
+		t.Fatalf("ExecutableBuildTime of a missing file = %d, want 0 (unknown)", got)
+	}
+}
+
 func TestDaemonArgsCarryTheLANFlag(t *testing.T) {
-	if got := strings.Join(DaemonArgs(29417, false), " "); got != "dashboard --port 29417" {
+	if got := strings.Join(DaemonArgs(29417, false, 0), " "); got != "dashboard --port 29417" {
 		t.Fatalf("DaemonArgs off = %q", got)
 	}
-	if got := strings.Join(DaemonArgs(29417, true), " "); got != "dashboard --port 29417 --lan" {
+	if got := strings.Join(DaemonArgs(29417, true, 0), " "); got != "dashboard --port 29417 --lan" {
 		t.Fatalf("DaemonArgs on = %q", got)
+	}
+	if got := strings.Join(DaemonArgs(29417, true, 1700000000000), " "); got != "dashboard --port 29417 --lan --build-time 1700000000000" {
+		t.Fatalf("DaemonArgs with a build time = %q", got)
 	}
 }
 
