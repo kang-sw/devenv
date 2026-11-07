@@ -39,11 +39,13 @@
 // The feed never affects the session: handlers only record state and arm a
 // timer, and one flush at a time drains everything into a single intake
 // call, at most once per FLUSH_INTERVAL_MS, so streamed text and batch
-// changes coalesce. Discrete events wait in a bounded list. A call that
-// fails (rejects, answers an error, times out) puts its conversation events
-// back, waits RETRY_MS, and resyncs: `reset`, the open turn's `turn_start`,
-// and the full lead and subagent state. With no session key held the feed
-// keeps what it has and sends when a key arrives.
+// changes coalesce; while streamed reply text is the only pending change the
+// gap stretches to TEXT_FLUSH_INTERVAL_MS, and any discrete change cuts a
+// waiting slow timer back to the fast cadence. Discrete events wait in a
+// bounded list. A call that fails (rejects, answers an error, times out) puts
+// its conversation events back, waits RETRY_MS, and resyncs: `reset`, the
+// open turn's `turn_start`, and the full lead and subagent state. With no
+// session key held the feed keeps what it has and sends when a key arrives.
 
 /** The intake tool, as the MCP server names it. */
 export const INTAKE_TOOL = 'dashboard_intake'
@@ -53,6 +55,13 @@ export const INBOX_DRAIN_TOOL = 'dashboard_inbox_drain'
 export const ADAPTER = 'claude'
 /** Minimum gap between two intake calls: at most ten a second. */
 export const FLUSH_INTERVAL_MS = 100
+/**
+ * Minimum gap between two intake calls while the only pending change is
+ * streamed reply text: at most one a second. Ten calls a second while a reply
+ * streams made the terminal flicker; a discrete change keeps FLUSH_INTERVAL_MS
+ * and takes the waiting text with it.
+ */
+export const TEXT_FLUSH_INTERVAL_MS = 1000
 /** A call still unanswered after this is abandoned, so a hung server cannot stop the feed. */
 export const CALL_TIMEOUT_MS = 5000
 /** Wait after a call that was not delivered before the next one. */
@@ -468,6 +477,8 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
   let inFlight = false
   let lastFlushAt: number | undefined
   let cancelFlush: (() => void) | undefined
+  /** Whether the armed flush timer waits on the slow text cadence. */
+  let slowArmed = false
   /** Bumped by every reset, so a call answered after a stop or a restart changes nothing. */
   let generation = 0
 
@@ -488,10 +499,24 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
     return pending.length > 0 || replyDirty || [...agents.values()].some((r) => r.dirty)
   }
 
+  /** Whether streamed reply text is the only pending change, so the slow cadence applies. */
+  function textOnly(): boolean {
+    return replyDirty && pending.length === 0 && ![...agents.values()].some((r) => r.dirty)
+  }
+
   function scheduleFlush(): void {
-    if (stopped || inFlight || cancelFlush || !hasWork()) return
+    if (stopped || inFlight || !hasWork()) return
+    const slow = textOnly()
+    // A discrete change while text waits on the slow timer cuts it back to the fast cadence.
+    if (cancelFlush) {
+      if (slow || !slowArmed) return
+      cancelFlush()
+      cancelFlush = undefined
+    }
     const now = edges.now()
-    const delay = Math.max(0, lastFlushAt === undefined ? 0 : lastFlushAt + FLUSH_INTERVAL_MS - now, retryAt - now)
+    const interval = slow ? TEXT_FLUSH_INTERVAL_MS : FLUSH_INTERVAL_MS
+    const delay = Math.max(0, lastFlushAt === undefined ? 0 : lastFlushAt + interval - now, retryAt - now)
+    slowArmed = slow
     cancelFlush = edges.schedule(delay, () => {
       cancelFlush = undefined
       flush()
