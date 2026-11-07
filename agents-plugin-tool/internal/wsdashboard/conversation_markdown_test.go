@@ -1,6 +1,8 @@
 package wsdashboard
 
 import (
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -57,7 +59,11 @@ func TestFinishedLeadReplyRendersSanitizedHTML(t *testing.T) {
 	}
 	for _, want := range []string{
 		"<b>bold</b>", `<svg viewBox="0 0 20 10"><rect width="8" height="8"></rect><text x="10" y="8">s</text></svg>`,
-		`href="https://example.com"`, "docs/a.md", "<a>raw f</a>", `<code class="fpath">https://example.com/n.png</code>`,
+		`<a href="https://example.com" target="_blank" rel="noopener noreferrer" data-wl="url">ok</a>`,
+		`<a href="/s/self/file?path=docs%2Fa.md" data-wl="file" data-rel="docs/a.md" data-abs="` + filepath.Join("/proj", "docs", "a.md") + `" title="docs/a.md">f</a>`,
+		`<a href="/s/self/file?path=docs%2Fb.md" data-wl="file" data-rel="docs/b.md" data-abs="` + filepath.Join("/proj", "docs", "b.md") + `" title="docs/b.md">raw f</a>`,
+		`<span class="img-text"> <code class="fpath">https://example.com/n.png</code></span>`,
+		`<span class="img-text">i <a tabindex="0" data-wl="file" data-abs="` + filepath.Join("/", "outside.png") + `" title="../outside.png"><code class="fpath">../outside.png</code></a></span>`,
 		`src="/s/self/image?path=img%2Fa.png"`,
 	} {
 		if !strings.Contains(html, want) {
@@ -129,10 +135,116 @@ func TestMailAndUserEntriesKeepHTMLAsText(t *testing.T) {
 	}
 }
 
-func TestLeadReplyMermaidFenceStaysACodeBlock(t *testing.T) {
-	html := leadMarkdownView(t, []wslive.RingEntry{{Kind: wslive.RingReply, Text: "```mermaid\ngraph TD; A-->B\n```"}}, "")
-	if strings.Contains(html, `class="mermaid"`) || !strings.Contains(html, `<code class="language-mermaid">`) {
-		t.Errorf("mermaid fence in a bubble: %s", html)
+// TestFinishedReplyDrawsMermaidStreamingKeepsCode: a finished reply's
+// mermaid fence is a <pre class="mermaid"> the page draws once; the reply
+// still streaming keeps it a code block, since it re-renders every tick.
+func TestFinishedReplyDrawsMermaidStreamingKeepsCode(t *testing.T) {
+	fence := "```mermaid\ngraph TD; A-->B\n```"
+	finished := leadMarkdownView(t, []wslive.RingEntry{{Kind: wslive.RingReply, Text: fence}}, "")
+	if !strings.Contains(finished, `<pre class="mermaid">graph TD; A--&gt;B`) || strings.Contains(finished, `language-mermaid`) {
+		t.Errorf("finished reply does not draw mermaid: %s", finished)
+	}
+	streaming := leadMarkdownView(t, nil, fence)
+	if strings.Contains(streaming, `class="mermaid"`) || !strings.Contains(streaming, `<code class="language-mermaid">`) {
+		t.Errorf("streaming reply draws mermaid: %s", streaming)
+	}
+}
+
+// TestLeadReplyLinksAreActionLinks: a finished and a streaming reply mark
+// their links for the page's link menu: a file inside the session root
+// links its file view with its root-relative and absolute paths, a file
+// outside it is a copy-only action link with no href, and an http(s) link
+// is marked as a URL. A user message's text has no links at all.
+func TestLeadReplyLinksAreActionLinks(t *testing.T) {
+	text := "[plan](docs/a.md) [away](/etc/hosts) [web](https://example.com/x)"
+	for name, html := range map[string]string{
+		"finished":  leadMarkdownView(t, []wslive.RingEntry{{Kind: wslive.RingReply, Text: text}}, ""),
+		"streaming": leadMarkdownView(t, nil, text),
+	} {
+		for _, want := range []string{
+			`<a href="/s/self/file?path=docs%2Fa.md" data-wl="file" data-rel="docs/a.md" data-abs="` + filepath.Join("/proj", "docs", "a.md") + `" title="docs/a.md">plan</a>`,
+			`<a tabindex="0" data-wl="file" data-abs="` + filepath.FromSlash("/etc/hosts") + `" title="/etc/hosts">away</a>`,
+			`<a href="https://example.com/x" target="_blank" rel="noopener noreferrer" data-wl="url">web</a>`,
+		} {
+			if !strings.Contains(html, want) {
+				t.Errorf("%s reply lacks %q:\n%s", name, want, html)
+			}
+		}
+	}
+	user := leadMarkdownView(t, []wslive.RingEntry{{Kind: wslive.RingUser, Text: text}}, "")
+	if strings.Contains(user, "data-wl") {
+		t.Errorf("user message carries an action link: %s", user)
+	}
+}
+
+// TestFinishedReplyRawLinksMatchMarkdownLinks pins the sanitizer to the
+// link-actions rule: a raw <a> or <img> in a finished reply renders exactly
+// as the markdown link or image to the same target does, action-link and url
+// markers included, while a refused href leaves the anchor's text alone and a
+// refused src leaves the image's path as text.
+func TestFinishedReplyRawLinksMatchMarkdownLinks(t *testing.T) {
+	render := replyMarkdown("/proj", "self").finished
+	for _, target := range []string{"docs/a.md", "/etc/hosts", "../up.md", "https://example.com/x?a=1&b=2", "#sec"} {
+		md, raw := string(render("[L]("+target+")")), string(render(`<a href="`+target+`">L</a>`))
+		if md != raw || !strings.HasPrefix(md, "<a ") {
+			t.Errorf("link %q:\nmarkdown %s\nraw      %s", target, md, raw)
+		}
+	}
+	for _, target := range []string{"img/a.png", "docs/a.md", "/etc/x.png", "../up.png"} {
+		md, raw := string(render("![o]("+target+")")), string(render(`<img alt="o" src="`+target+`">`))
+		if md != raw {
+			t.Errorf("image %q:\nmarkdown %s\nraw      %s", target, md, raw)
+		}
+	}
+	for _, target := range []string{"javascript:alert(1)", "//evil.example/x", "mailto:a@b.example", "data:text/html,x", ""} {
+		if got := string(render(`<a href="` + target + `">L</a>`)); got != "<a>L</a>" {
+			t.Errorf("refused link %q: %s", target, got)
+		}
+	}
+	for target, want := range map[string]string{
+		"https://example.com/n.png": `<span class="img-text">o <code class="fpath">https://example.com/n.png</code></span>`,
+		"javascript:alert(1)":       `<span class="img-text">o <code class="fpath">javascript:alert(1)</code></span>`,
+		"":                          `<span class="img-text">o</span>`,
+	} {
+		if got := string(render(`<img alt="o" src="` + target + `">`)); got != want {
+			t.Errorf("refused image %q: %s, want %s", target, got, want)
+		}
+	}
+	if got := string(render(`<a href="https://example.com/x" data-wl="file" data-abs="/etc/passwd" data-rel="x" tabindex="0" data-wbref="7">forged</a> <a data-wl="url" data-wbref="0">bare</a>`)); got !=
+		`<a href="https://example.com/x" target="_blank" rel="noopener noreferrer" data-wl="url">forged</a> <a>bare</a>` {
+		t.Errorf("forged link markers survive: %s", got)
+	}
+}
+
+// TestFinishedReplyCannotReachSystemOpen aims a finished reply at the
+// system-open route (sysopen_route.go), which trusts a same-origin post from
+// a loopback viewer: a text/plain form forging its JSON body, a formaction
+// button, a raw link and image to the route, an SVG link, and a script
+// handler. None may leave a form, a script hook, or a URL attribute that
+// reaches the route; the route path survives only as copy-only path text.
+func TestFinishedReplyCannotReachSystemOpen(t *testing.T) {
+	text := `<form action="/s/self/open" method="post" enctype="text/plain"><input name='{"target":"https://evil.example/","x":"' value='"}'><button>go</button></form>` + "\n\n" +
+		`<button formaction="/s/self/open" formmethod="post" formenctype="text/plain" name='{"target":"https://evil.example/"}'>b</button> ` +
+		`<a href="/s/self/open" data-wl="url">o</a> <img alt="i" src="/s/self/open"> ` +
+		`<img src="x" onerror="fetch('/s/self/open',{method:'POST',body:'{}'})">` + "\n\n" +
+		`<svg><a href="/s/self/open"><text>s</text></a></svg>` + "\n\n" +
+		`<a href="javascript:fetch('/s/self/open')">j</a> <a href="/s/self/open?target=https://evil.example/" formaction="/s/self/open">q</a>`
+	got := string(replyMarkdown("/proj", "self").finished(text))
+	for _, bad := range []string{"<form", "<input", "<button", "formaction", "enctype", "onerror", "fetch(", "javascript:", "evil.example/\"", `data-wl="url"`} {
+		if strings.Contains(got, bad) {
+			t.Errorf("reply keeps %q:\n%s", bad, got)
+		}
+	}
+	if m := regexp.MustCompile(`\s(?:href|src|srcset|action)="[^"]*/open`).FindString(got); m != "" {
+		t.Errorf("reply keeps a URL attribute to the route (%s):\n%s", m, got)
+	}
+	for _, want := range []string{
+		`<a tabindex="0" data-wl="file" data-abs="` + filepath.FromSlash("/s/self/open") + `" title="/s/self/open">o</a>`,
+		`<span class="img-text">i <a tabindex="0" data-wl="file" data-abs="` + filepath.FromSlash("/s/self/open") + `" title="/s/self/open"><code class="fpath">/s/self/open</code></a></span>`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("reply lacks %q:\n%s", want, got)
+		}
 	}
 }
 

@@ -698,3 +698,19 @@ func TestRenderPageTodoRowIcons(t *testing.T) {
 		t.Errorf("done fold must be closed by default")
 	}
 }
+
+// TestOpenQuestionPillIsOnTheFullPageOnly pins where the open-question pill
+// script ships: the full page and the dashboard's shared form script carry
+// it, the embed (a snapshot with no scrolling board) does not.
+func TestOpenQuestionPillIsOnTheFullPageOnly(t *testing.T) {
+	if out := render(t, sampleView(LayoutFull)); !strings.Contains(out, "data-wb-title") || !strings.Contains(out, ".oq-pill") {
+		t.Errorf("full page lacks the open-question pill script or style")
+	}
+	if out := render(t, sampleView(LayoutEmbed)); strings.Contains(out, "data-wb-title") {
+		t.Errorf("embed carries the open-question pill script")
+	}
+	assets, err := PageAssets()
+	if err != nil || !strings.Contains(string(assets.FormScript), "data-wb-title") {
+		t.Errorf("shared form script lacks the open-question pill (err %v)", err)
+	}
+}

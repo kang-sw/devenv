@@ -227,7 +227,23 @@ func convert(md goldmark.Markdown, s string) template.HTML {
 	return template.HTML(strings.TrimRight(buf.String(), "\n"))
 }
 
-// resolveTarget maps a link or image destination to the href it renders
+// target is a resolved link or image destination: an href (an image's src),
+// a file target's path text, or a file target's action link.
+type target struct {
+	// href is the anchor's href or the image's src; empty for path text and
+	// for an action link, which carries its own.
+	href string
+	// text is a file target's path text (FileText); empty otherwise.
+	text string
+	// action is a file target's link actions on a page with FileActions;
+	// zero when the target has none.
+	action FileAction
+}
+
+// isAction reports whether the target renders as an action link.
+func (t target) isAction() bool { return t.action.Href != "" || t.action.Abs != "" }
+
+// resolveTarget maps a link or image destination to the target it renders
 // with, or reports false when it must render as text. Links accept relative
 // paths, file: URLs, http(s) URLs, and fragment-only in-page anchors; images
 // accept relative paths and file: URLs only, so a page never fetches from the
@@ -235,21 +251,22 @@ func convert(md goldmark.Markdown, s string) template.HTML {
 // absolute path is a file path; both, and every file: URL, go through the
 // page's FileLink, which links them from wherever the page is written. On a
 // page with FileText a file target instead comes back as path text, with an
-// empty href and ok true. An image file target on a page with ImageSrc comes
-// back as the src ImageSrc returns, unless it returns empty (see fileTarget).
-func (p *pageData) resolveTarget(dest string, image bool) (href, path string, ok bool) {
+// empty href, and on a page with FileActions also as an action link. An
+// image file target on a page with ImageSrc comes back as the src ImageSrc
+// returns, unless it returns empty (see fileTarget).
+func (p *pageData) resolveTarget(dest string, image bool) (target, bool) {
 	dest = strings.TrimSpace(dest)
 	switch {
 	case dest == "":
-		return "", "", false
+		return target{}, false
 	case strings.HasPrefix(dest, "#"):
-		return dest, "", !image
+		return target{href: dest}, !image
 	case drivePath.MatchString(dest):
-		return p.fileTarget(dest, "", image)
+		return p.fileTarget(dest, "", image), true
 	}
 	u, err := url.Parse(dest)
 	if err != nil {
-		return "", "", false
+		return target{}, false
 	}
 	suffix := ""
 	if u.RawQuery != "" {
@@ -260,10 +277,10 @@ func (p *pageData) resolveTarget(dest string, image bool) (href, path string, ok
 	}
 	switch strings.ToLower(u.Scheme) {
 	case "http", "https":
-		return dest, "", !image
+		return target{href: dest}, !image
 	case "file":
 		if u.Host != "" && u.Host != "localhost" {
-			return "", "", false
+			return target{}, false
 		}
 		path := u.Path
 		if path == "" {
@@ -273,37 +290,64 @@ func (p *pageData) resolveTarget(dest string, image bool) (href, path string, ok
 			path = path[1:] // file:///C:/x names the drive path C:/x
 		}
 		if path == "" {
-			return "", "", false
+			return target{}, false
 		}
-		return p.fileTarget(path, suffix, image)
+		return p.fileTarget(path, suffix, image), true
 	case "":
 		// "//host/x" is a network reference, not a file path.
 		if u.Host != "" || u.Path == "" {
-			return "", "", false
+			return target{}, false
 		}
-		return p.fileTarget(u.Path, suffix, image)
+		return p.fileTarget(u.Path, suffix, image), true
 	}
-	return "", "", false
+	return target{}, false
 }
 
 // fileTarget resolves a file path: for an image on a page with ImageSrc, as
 // the src ImageSrc returns (the destination's own query and fragment are
 // dropped), when that is non-empty; else as path text on a page with
-// FileText, else as the href fileHref builds.
-func (p *pageData) fileTarget(path, suffix string, image bool) (string, string, bool) {
+// FileText, with the FileActions action when the page has them, else as the
+// href fileHref builds.
+func (p *pageData) fileTarget(path, suffix string, image bool) target {
 	if image && p.ImageSrc != nil {
 		if src := p.ImageSrc(path); src != "" {
-			return src, "", true
+			return target{href: src}
 		}
 	}
 	if p.FileText != nil {
-		text := p.FileText(path)
-		if text == "" {
-			text = filepath.ToSlash(path)
+		t := target{text: p.FileText(path)}
+		if t.text == "" {
+			t.text = filepath.ToSlash(path)
 		}
-		return "", text, true
+		if p.linkActions() {
+			t.action = p.FileActions(path)
+			if !daemonPath(t.action.Href) {
+				t.action.Href = ""
+			}
+		}
+		return t
 	}
-	return p.fileHref(path, suffix), "", true
+	return target{href: p.fileHref(path, suffix)}
+}
+
+// linkActions reports whether the page renders the served page's action
+// links: it has FileActions and FileText.
+func (p *pageData) linkActions() bool { return p.FileActions != nil && p.FileText != nil }
+
+// daemonPath reports whether href is a scheme-less absolute path on the
+// serving host, the only href an action link takes from FileActions: no
+// scheme, no host ("//host/x" or a backslash a browser reads as one), no
+// control character.
+func daemonPath(href string) bool {
+	if len(href) < 2 || href[0] != '/' || href[1] == '/' || href[1] == '\\' {
+		return false
+	}
+	for i := 0; i < len(href); i++ {
+		if href[i] < 0x21 || href[i] == 0x7f || href[i] == '\\' {
+			return false
+		}
+	}
+	return true
 }
 
 // pathURLEscaper keeps a decoded "#" or "?" in a file name from starting a
@@ -404,20 +448,30 @@ func (r *mdRenderer) paragraph(w util.BufWriter, _ []byte, n ast.Node, entering 
 // text alone.
 func (r *mdRenderer) link(w util.BufWriter, source []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
 	n := node.(*ast.Link)
-	href, path, ok := r.page.resolveTarget(destination(n.Destination), false)
+	t, ok := r.page.resolveTarget(destination(n.Destination), false)
 	if !ok {
 		return ast.WalkContinue, nil
 	}
-	if path != "" {
+	if t.isAction() {
+		// A file link on a served page with link actions: the label is the
+		// action link.
+		if entering {
+			r.page.writeActionOpen(w, t, n.Title)
+		} else {
+			_, _ = w.WriteString("</a>")
+		}
+		return ast.WalkContinue, nil
+	}
+	if t.text != "" {
 		// A file link on a served page: the label, then the path as text
 		// unless the label already is that path.
-		if !entering && plainText(source, n) != path {
-			writePathText(w, path)
+		if !entering && plainText(source, n) != t.text {
+			writePathText(w, t.text)
 		}
 		return ast.WalkContinue, nil
 	}
 	if entering {
-		r.writeAnchorOpen(w, href, n.Title)
+		r.writeAnchorOpen(w, t.href, n.Title)
 	} else {
 		_, _ = w.WriteString("</a>")
 	}
@@ -432,21 +486,24 @@ func (r *mdRenderer) autoLink(w util.BufWriter, source []byte, node ast.Node, en
 	}
 	n := node.(*ast.AutoLink)
 	label := util.EscapeHTML(n.Label(source))
-	href, path, ok := "", "", false
+	t, ok := target{}, false
 	if n.AutoLinkType == ast.AutoLinkURL {
-		href, path, ok = r.page.resolveTarget(string(n.URL(source)), false)
+		t, ok = r.page.resolveTarget(string(n.URL(source)), false)
 	}
-	if path != "" {
-		writePathText(w, path)
-		return ast.WalkSkipChildren, nil
-	}
-	if !ok {
+	switch {
+	case !ok:
 		_, _ = w.Write(label)
-		return ast.WalkSkipChildren, nil
+	case t.isAction():
+		r.page.writeActionOpen(w, t, nil)
+		_, _ = w.Write(label)
+		_, _ = w.WriteString("</a>")
+	case t.text != "":
+		writePathText(w, t.text)
+	default:
+		r.writeAnchorOpen(w, t.href, nil)
+		_, _ = w.Write(label)
+		_, _ = w.WriteString("</a>")
 	}
-	r.writeAnchorOpen(w, href, nil)
-	_, _ = w.Write(label)
-	_, _ = w.WriteString("</a>")
 	return ast.WalkSkipChildren, nil
 }
 
@@ -460,44 +517,94 @@ func destination(raw []byte) string {
 	return string(util.ResolveEntityNames(v))
 }
 
+// writeAnchorOpen opens an anchor to a resolved link's href (linkAttrs).
 func (r *mdRenderer) writeAnchorOpen(w util.BufWriter, href string, title []byte) {
-	escaped := string(util.URLEscape([]byte(href), false))
-	_, _ = w.WriteString(`<a href="`)
-	_, _ = w.Write(util.EscapeHTML([]byte(escaped)))
-	_ = w.WriteByte('"')
-	r.page.writeTrustRef(w, escaped, false)
+	attrs := r.page.linkAttrs(href)
+	_, _ = w.WriteString(`<a`)
+	writeAttrs(w, attrs[:1])
+	r.page.writeTrustRef(w, attrs, false)
 	if len(title) > 0 {
-		_, _ = w.WriteString(` title="`)
-		_, _ = w.Write(util.EscapeHTML([]byte(destination(title))))
-		_ = w.WriteByte('"')
+		writeAttrs(w, [][2]string{{"title", destination(title)}})
 	}
-	for _, attr := range anchorAttrs(href) {
-		_, _ = w.WriteString(" " + attr[0] + `="` + attr[1] + `"`)
+	writeAttrs(w, attrs[1:])
+	_ = w.WriteByte('>')
+}
+
+// linkAttrs are the attributes a resolved link that is not an action link
+// opens with besides its title: the URL-escaped href, and for http(s) the
+// new-tab pair and, on a page with link actions, the url marker
+// (data-wl="url") the link menu keys on. The markdown link writer and the
+// reply sanitizer both take them from here, so an attribute added here
+// reaches every link either one resolves.
+func (p *pageData) linkAttrs(href string) [][2]string {
+	attrs := [][2]string{{"href", string(util.URLEscape([]byte(href), false))}}
+	if strings.HasPrefix(href, "http://") || strings.HasPrefix(href, "https://") {
+		// Leaving the board in place would drop an answer in progress.
+		attrs = append(attrs, [2]string{"target", "_blank"}, [2]string{"rel", "noopener noreferrer"})
+		if p.linkActions() {
+			attrs = append(attrs, [2]string{"data-wl", "url"})
+		}
+	}
+	return attrs
+}
+
+// writeActionOpen opens a file target's action link (View.FileActions),
+// titled with the link's own title or else the target's path text.
+func (p *pageData) writeActionOpen(w util.BufWriter, t target, title []byte) {
+	attrs := actionAttrs(t)
+	_, _ = w.WriteString(`<a`)
+	writeAttrs(w, attrs)
+	p.writeTrustRef(w, attrs, false)
+	if len(title) > 0 {
+		writeAttrs(w, [][2]string{{"title", destination(title)}})
+	} else {
+		writeAttrs(w, [][2]string{{"title", t.text}})
 	}
 	_ = w.WriteByte('>')
 }
 
-// anchorAttrs are the attributes a resolved link carries besides its href.
-// The markdown link writer and the reply sanitizer both take them from here,
-// so an attribute added here reaches every link either one resolves.
-func anchorAttrs(href string) [][2]string {
-	if strings.HasPrefix(href, "http://") || strings.HasPrefix(href, "https://") {
-		// Leaving the board in place would drop an answer in progress.
-		return [][2]string{{"target", "_blank"}, {"rel", "noopener noreferrer"}}
+// actionAttrs are the attributes a file target's action link opens with
+// besides its title: an href to the file view when the action has one, else
+// a tabindex for an anchor the link menu offers to copy only, then the file
+// marker (data-wl="file") with the root-relative and absolute paths. The
+// markdown writer and the reply sanitizer both take them from here.
+func actionAttrs(t target) [][2]string {
+	var attrs [][2]string
+	if t.action.Href != "" {
+		attrs = append(attrs, [2]string{"href", string(util.URLEscape([]byte(t.action.Href), false))})
+	} else {
+		attrs = append(attrs, [2]string{"tabindex", "0"})
 	}
-	return nil
+	attrs = append(attrs, [2]string{"data-wl", "file"})
+	if t.action.Rel != "" {
+		attrs = append(attrs, [2]string{"data-rel", t.action.Rel})
+	}
+	if t.action.Abs != "" {
+		attrs = append(attrs, [2]string{"data-abs", t.action.Abs})
+	}
+	return attrs
+}
+
+// writeAttrs writes each attribute with its value HTML-escaped.
+func writeAttrs(w util.BufWriter, attrs [][2]string) {
+	for _, a := range attrs {
+		_, _ = w.WriteString(" " + a[0] + `="`)
+		_, _ = w.Write(util.EscapeHTML([]byte(a[1])))
+		_ = w.WriteByte('"')
+	}
 }
 
 // writeTrustRef marks a link or image the markdown renderer resolved while a
 // finished reply renders (pageData.trusted): the mark is an index into the
-// page's own record of the URL, so the sanitizer takes the URL from that
-// record, never from the markup, and a forged or misplaced mark can only
-// yield a URL resolveTarget already produced, of the same kind.
-func (p *pageData) writeTrustRef(w util.BufWriter, url string, image bool) {
+// page's own record of the attributes it opened with, so the sanitizer takes
+// them from that record, never from the markup, and a forged or misplaced
+// mark can only yield attributes resolveTarget already produced, of the same
+// kind.
+func (p *pageData) writeTrustRef(w util.BufWriter, attrs [][2]string, image bool) {
 	if p.trusted == nil {
 		return
 	}
-	*p.trusted = append(*p.trusted, trustedURL{url: url, image: image})
+	*p.trusted = append(*p.trusted, trustedTarget{attrs: attrs, image: image})
 	_, _ = w.WriteString(` ` + trustAttr + `="` + strconv.Itoa(len(*p.trusted)-1) + `"`)
 }
 
@@ -508,16 +615,24 @@ func (r *mdRenderer) image(w util.BufWriter, source []byte, node ast.Node, enter
 		return ast.WalkContinue, nil
 	}
 	n := node.(*ast.Image)
-	src, path, ok := "", "", false
+	t, ok := target{}, false
 	if !r.inline {
-		src, path, ok = r.page.resolveTarget(destination(n.Destination), true)
+		t, ok = r.page.resolveTarget(destination(n.Destination), true)
 	}
-	if path != "" {
+	if t.text != "" {
 		// A board image on a served page: its alt text and its path, never
-		// a file: URL or a path the browser would resolve against the server.
+		// a file: URL or a path the browser would resolve against the server;
+		// with link actions the path is an action link.
 		_, _ = w.WriteString(`<span class="img-text">`)
 		writeAltText(w, source, n)
-		writePathText(w, path)
+		if t.isAction() {
+			_ = w.WriteByte(' ')
+			r.page.writeActionOpen(w, t, nil)
+			writePathCode(w, t.text)
+			_, _ = w.WriteString(`</a>`)
+		} else {
+			writePathText(w, t.text)
+		}
 		_, _ = w.WriteString(`</span>`)
 		return ast.WalkSkipChildren, nil
 	}
@@ -525,11 +640,11 @@ func (r *mdRenderer) image(w util.BufWriter, source []byte, node ast.Node, enter
 		writeAltText(w, source, n)
 		return ast.WalkSkipChildren, nil
 	}
-	escaped := string(util.URLEscape([]byte(src), false))
+	escaped := string(util.URLEscape([]byte(t.href), false))
 	_, _ = w.WriteString(`<img src="`)
 	_, _ = w.Write(util.EscapeHTML([]byte(escaped)))
 	_ = w.WriteByte('"')
-	r.page.writeTrustRef(w, escaped, true)
+	r.page.writeTrustRef(w, [][2]string{{"src", escaped}}, true)
 	_, _ = w.WriteString(` alt="`)
 	writeAltText(w, source, n)
 	_ = w.WriteByte('"')
@@ -544,7 +659,13 @@ func (r *mdRenderer) image(w util.BufWriter, source []byte, node ast.Node, enter
 
 // writePathText writes a file path a served page shows instead of a link.
 func writePathText(w util.BufWriter, path string) {
-	_, _ = w.WriteString(` <code class="fpath">`)
+	_ = w.WriteByte(' ')
+	writePathCode(w, path)
+}
+
+// writePathCode writes a file path as a path code span.
+func writePathCode(w util.BufWriter, path string) {
+	_, _ = w.WriteString(`<code class="fpath">`)
 	_, _ = w.Write(util.EscapeHTML([]byte(path)))
 	_, _ = w.WriteString(`</code>`)
 }

@@ -91,12 +91,7 @@ func TestEntryRendersOnceThroughTheCache(t *testing.T) {
 		t.Helper()
 		v := historyView(ring, "streaming", page, lookupOf(served, nil))
 		inner := v.Conversation.markdown
-		v.Conversation.markdown = func(s string, finished bool) template.HTML {
-			if finished {
-				markdowns++
-			}
-			return inner(s, finished)
-		}
+		v.Conversation.markdown = func(s string) template.HTML { markdowns++; return inner(s) }
 		set, err := renderSessionRegions(v, cache)
 		if err != nil {
 			t.Fatal(err)

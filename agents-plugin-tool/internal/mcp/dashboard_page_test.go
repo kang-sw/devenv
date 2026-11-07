@@ -49,9 +49,10 @@ var hrefPattern = regexp.MustCompile(`(?:href|src)="([^"]*)"`)
 
 // TestDashboardReadPageServesTheBoard pins the served board: the full
 // layout, the same fragments the static page renders when no file target is
-// involved, and the served link rule otherwise (file targets and ticket rows
-// as path text, never a file: URL or a relative href), with no session key
-// anywhere in what reaches the browser.
+// involved, and the served link rule otherwise (a file target is an action
+// link to the file view inside the root and a copy-only action link outside
+// it, ticket rows are path text, never a file: URL or a relative href), with
+// no session key anywhere in what reaches the browser.
 func TestDashboardReadPageServesTheBoard(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	src := dashboardPageSource(t, nil)
@@ -83,7 +84,8 @@ func TestDashboardReadPageServesTheBoard(t *testing.T) {
 		t.Errorf("the static page does not hold the served panels:\n%.600s", page.Board.Panels)
 	}
 
-	// File targets and tickets: path text under the served rule.
+	// File targets are action links and tickets path text under the served
+	// rule.
 	writeTicket(t, f.root, "ready", "261101-feat-ready-one", "Ready one")
 	writeTicket(t, f.root, "todo", "261102-feat-todo-one", "Todo one")
 	inside := filepath.ToSlash(filepath.Join(f.root, "docs", "inside.md"))
@@ -92,12 +94,12 @@ func TestDashboardReadPageServesTheBoard(t *testing.T) {
 	page = readPageOK(t, src, reg)
 	html := string(page.Board.Board) + string(page.Board.Panels)
 	for _, want := range []string{
-		`the plan <code class="fpath">ai-docs/plan.md</code>`,
-		`inside <code class="fpath">docs/inside.md</code>`,
+		`<a href="/s/` + reg.ReplyID + `/file?path=ai-docs%2Fplan.md" data-wl="file" data-rel="ai-docs/plan.md" data-abs="` + filepath.Join(f.root, "ai-docs", "plan.md") + `" title="ai-docs/plan.md">the plan</a>`,
+		`<a href="/s/` + reg.ReplyID + `/file?path=docs%2Finside.md" data-wl="file" data-rel="docs/inside.md" data-abs="` + filepath.Join(f.root, "docs", "inside.md") + `" title="docs/inside.md">inside</a>`,
 		// An image inside the root is the image route; one outside it stays
-		// path text.
+		// path text, as a copy-only action link.
 		`<img src="/s/` + reg.ReplyID + `/image?path=shots%2Fa.png" alt="shot">`,
-		`<span class="img-text">away <code class="fpath">` + outside + `</code></span>`,
+		`<span class="img-text">away <a tabindex="0" data-wl="file" data-abs="` + filepath.FromSlash(outside) + `" title="` + outside + `"><code class="fpath">` + outside + `</code></a></span>`,
 		`title="ai-docs/tickets/ready/261101-feat-ready-one.md"><span class="chip cat feat">feat</span>Ready one</span>`,
 		`title="ai-docs/tickets/todo/261102-feat-todo-one.md"><span class="chip cat feat">feat</span>Todo one</span>`,
 		"1 ready, 1 todo", // the full layout's ticket count
@@ -110,8 +112,9 @@ func TestDashboardReadPageServesTheBoard(t *testing.T) {
 		t.Error("served page carries a file: URL")
 	}
 	imageRoute := "/s/" + reg.ReplyID + "/image?path="
+	fileView := "/s/" + reg.ReplyID + "/file?path="
 	for _, m := range hrefPattern.FindAllStringSubmatch(html, -1) {
-		if !strings.HasPrefix(m[1], "#") && !strings.HasPrefix(m[1], "http://") && !strings.HasPrefix(m[1], "https://") && !strings.HasPrefix(m[1], imageRoute) {
+		if !strings.HasPrefix(m[1], "#") && !strings.HasPrefix(m[1], "http://") && !strings.HasPrefix(m[1], "https://") && !strings.HasPrefix(m[1], imageRoute) && !strings.HasPrefix(m[1], fileView) {
 			t.Errorf("served page carries a relative reference %q", m[0])
 		}
 	}

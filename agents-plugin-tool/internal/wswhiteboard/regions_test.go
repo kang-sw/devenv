@@ -139,3 +139,73 @@ func TestPanelLanesRenderCards(t *testing.T) {
 	)
 	wantNone(t, out, `<code class="fpath">ai-docs/tickets/ready/y.md</code>`)
 }
+
+// TestFileActionsRenderActionLinks pins the served-page link-action rule:
+// with FileActions set, a file link, a file autolink, and the path text of
+// an image ImageSrc does not serve become anchors marked data-wl="file"
+// that carry the action's file view href, relative path, and absolute
+// path; a path the action gives no href (outside the session root) is an
+// anchor with no href; an http(s) link is marked data-wl="url"; an in-page
+// anchor stays unmarked; and an action href that is not a scheme-less path
+// on the serving host is dropped.
+func TestFileActionsRenderActionLinks(t *testing.T) {
+	st := &State{Seq: 2, SettleSeq: 1}
+	st.Items = []Item{{ID: 1, Class: ClassPolicy, Topic: "t", Title: "files", Status: StatusOpen, Options: []string{"a", "b"},
+		Rationale: "see [the plan](ai-docs/plan.md) and [away](/elsewhere/x.md)\n\n" +
+			"![diagram](shots/a.bin)\n\n" +
+			"<file:///root/notes.md> and [web](https://example.com/) and [anchor](#item-1) and [bad](evil.md) and [net](host.md)"}}
+	actions := func(p string) FileAction {
+		switch p {
+		case "/elsewhere/x.md":
+			return FileAction{Abs: "/elsewhere/x.md"}
+		case "evil.md":
+			return FileAction{Href: "javascript:alert(1)", Rel: "evil.md", Abs: "/root/evil.md"}
+		case "host.md":
+			return FileAction{Href: "//evil.example/x", Rel: "host.md", Abs: "/root/host.md"}
+		}
+		rel := strings.TrimPrefix(p, "/root/")
+		return FileAction{Href: "/s/r/file?path=" + rel, Rel: rel, Abs: "/root/" + rel}
+	}
+	out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r",
+		FileText:    func(p string) string { return "REL:" + strings.TrimPrefix(p, "/root/") },
+		ImageSrc:    func(string) string { return "" },
+		FileActions: actions}))
+	wantAll(t, out,
+		`<a href="/s/r/file?path=ai-docs/plan.md" data-wl="file" data-rel="ai-docs/plan.md" data-abs="/root/ai-docs/plan.md" title="REL:ai-docs/plan.md">the plan</a>`,
+		`<a tabindex="0" data-wl="file" data-abs="/elsewhere/x.md" title="REL:/elsewhere/x.md">away</a>`,
+		`<span class="img-text">diagram <a href="/s/r/file?path=shots/a.bin" data-wl="file" data-rel="shots/a.bin" data-abs="/root/shots/a.bin" title="REL:shots/a.bin"><code class="fpath">REL:shots/a.bin</code></a></span>`,
+		`<a href="/s/r/file?path=notes.md" data-wl="file" data-rel="notes.md" data-abs="/root/notes.md" title="REL:notes.md">file:///root/notes.md</a>`,
+		`<a href="https://example.com/" target="_blank" rel="noopener noreferrer" data-wl="url">web</a>`,
+		`<a href="#item-1">anchor</a>`,
+		`<a tabindex="0" data-wl="file" data-rel="evil.md" data-abs="/root/evil.md" title="REL:evil.md">bad</a>`,
+		`<a tabindex="0" data-wl="file" data-rel="host.md" data-abs="/root/host.md" title="REL:host.md">net</a>`,
+	)
+	wantNone(t, out, "javascript:", "evil.example", "file:///root/notes.md\"", `<code class="fpath">REL:ai-docs/plan.md</code>`)
+}
+
+// TestFileActionsZeroKeepsPathText: a zero FileAction leaves a file target
+// to FileText's path text, and a page without FileActions marks no link.
+func TestFileActionsZeroKeepsPathText(t *testing.T) {
+	st := &State{Seq: 2, SettleSeq: 1}
+	st.Items = []Item{{ID: 1, Class: ClassPolicy, Topic: "t", Title: "files", Status: StatusOpen, Options: []string{"a", "b"},
+		Rationale: "see [the plan](ai-docs/plan.md) and [web](https://example.com/)"}}
+	zero := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r",
+		FileText: func(p string) string { return p }, FileActions: func(string) FileAction { return FileAction{} }}))
+	wantAll(t, zero, `the plan <code class="fpath">ai-docs/plan.md</code>`, `data-wl="url"`)
+	wantNone(t, zero, `data-wl="file"`)
+	plain := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r", FileText: func(p string) string { return p }}))
+	wantNone(t, plain, "data-wl")
+}
+
+// TestDiskBoardKeepsFileLinks: a board written to disk (FileLink, no
+// FileText) keeps its file: and relative links and marks none of them.
+func TestDiskBoardKeepsFileLinks(t *testing.T) {
+	st := &State{Seq: 2, SettleSeq: 1}
+	st.Items = []Item{{ID: 1, Class: ClassPolicy, Topic: "t", Title: "files", Status: StatusOpen, Options: []string{"a", "b"},
+		Rationale: "see [the plan](ai-docs/plan.md) and [abs](file:///abs/b.md) and [web](https://example.com/)"}}
+	out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r",
+		FileLink:    func(p string) string { return "file://" + p },
+		FileActions: func(string) FileAction { return FileAction{Href: "/s/r/file?path=x", Abs: "/x"} }}))
+	wantAll(t, out, `<a href="file://ai-docs/plan.md">the plan</a>`, `<a href="file:///abs/b.md">abs</a>`)
+	wantNone(t, out, "data-wl", "/s/r/file")
+}

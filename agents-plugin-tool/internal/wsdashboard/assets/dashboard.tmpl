@@ -1,5 +1,5 @@
 {{define "session"}}<!DOCTYPE html>
-<html data-mode="{{.Mode}}" data-rid="{{.ReplyID}}">
+<html data-mode="{{.Mode}}" data-rid="{{.ReplyID}}"{{if .SysOpen}} data-sysopen="1"{{end}}>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{.ReplyID}} - ws dashboard</title>
 <style>{{.Assets.WhiteboardCSS}}</style>
@@ -50,9 +50,9 @@ window.wbMermaidFile = {{.Assets.MermaidFile}};</script>
 
 {{define "peers"}}<div class="pgroup"><div class="pghead">{{icon "mail"}}peer leads<span class="chip">{{len .Live}}</span>{{with .Ended}}<span class="chip">ended {{len .}}</span>{{end}}</div>{{range .Rows}}{{template "peer" .}}{{end}}{{with .HiddenEnded}}<div class="thidden">{{.}} older ended peers hidden</div>{{end}}</div>{{end}}
 
-{{define "peerrow"}}<span class="amk">{{if and .Live .Adapter}}{{template "mark" .Lead.Phase}}{{else}}<span class="pdot"></span>{{end}}</span>{{if .Served}}<a class="pname" href="/s/{{.ReplyID}}">{{.Address}}</a>{{else}}<span class="pname">{{.Address}}</span>{{end}}{{if and .Harness .Live}}<span class="host sm">{{.Harness}}</span>{{end}}<span class="pline">{{if not .Live}}<span class="pstate">ended</span>{{else if not .Served}}<span class="pstate">not served here · no live state</span>{{else if .Adapter}}{{template "phase" .Lead.Phase}}{{with .Lead.Running}}<span class="ptool" title="{{.ToolName}}">{{toolName .ToolName}}</span>{{end}}{{end}}</span><span class="am">{{if .Adapter}}<span title="subagents">{{icon "agents"}}{{.AgentCount}}</span>{{end}}<span title="last mail exchange">{{icon "mail"}}{{template "ago" .LastExchange}}</span></span>{{end}}
+{{define "peerrow"}}<span class="amk">{{if and .Live .Adapter}}{{template "mark" .Lead.Phase}}{{else}}<span class="pdot"></span>{{end}}</span>{{if .Served}}<a class="pname" href="/s/{{.ReplyID}}">{{.Address}}</a>{{else}}<span class="pname">{{.Address}}</span>{{end}}{{if and .Harness .Live}}<span class="host sm">{{.Harness}}</span>{{end}}{{if not .Compact}}<span class="pline">{{if not .Live}}<span class="pstate">ended</span>{{else if not .Served}}<span class="pstate">not served here · no live state</span>{{else if .Adapter}}{{template "phase" .Lead.Phase}}{{with .Lead.Running}}<span class="ptool" title="{{.ToolName}}">{{toolName .ToolName}}</span>{{end}}{{end}}</span>{{end}}<span class="am">{{if and .Adapter (not .Compact)}}<span title="subagents">{{icon "agents"}}{{.AgentCount}}</span>{{end}}<span title="last mail exchange">{{icon "mail"}}{{template "ago" .LastExchange}}</span></span>{{end}}
 
-{{define "peer"}}{{if and .Served .Adapter}}<details class="peer {{if .Live}}live{{else}}ended{{end}}" data-peer="{{.ReplyID}}"><summary>{{template "peerrow" .}}</summary><div class="ptree"><ol class="brows">{{range .Lead.Finished}}{{template "batch" .}}{{end}}{{template "liverows" .Lead}}</ol>{{with .Agents}}<div class="kids">{{range .}}{{template "agent" .}}{{end}}</div>{{end}}</div></details>{{else}}<div class="peer {{if .Live}}{{if .Served}}live nophase{{else}}unserved{{end}}{{else}}ended{{end}}">{{template "peerrow" .}}</div>{{end}}{{end}}
+{{define "peer"}}{{if and .Served .Adapter (not .Compact)}}<details class="peer {{if .Live}}live{{else}}ended{{end}}" data-peer="{{.ReplyID}}"><summary>{{template "peerrow" .}}</summary><div class="ptree"><ol class="brows">{{range .Lead.Finished}}{{template "batch" .}}{{end}}{{template "liverows" .Lead}}</ol>{{with .Agents}}<div class="kids">{{range .}}{{template "agent" .}}{{end}}</div>{{end}}</div></details>{{else}}<div class="peer {{if .Live}}{{if .Compact}}live compact{{if not .Adapter}} nophase{{end}}{{else if .Served}}live nophase{{else}}unserved{{end}}{{else}}ended{{end}}">{{template "peerrow" .}}</div>{{end}}{{end}}
 
 {{/* The conversation's two regions share the #convo scroll wrapper. entries
 holds the finished messages, each keyed by data-entry (its ring entry name);
@@ -90,3 +90,63 @@ the rest, swapped whole: a streaming tick changes it alone. */}}
 {{define "r-sessions"}}<div class="totals"><span class="chip">live {{.Live}}</span><span class="chip">working {{.Busy}}</span></div>{{range .Projects}}<section class="project"><div class="pbar"><span class="pname">{{.Name}}</span><span class="ppath">{{.Path}}</span><span class="chip">{{len .Sessions}}</span></div>{{range .Sessions}}{{template "srow" .}}{{end}}{{if .Ended}}<div class="endedhead">ended</div>{{range .Ended}}{{template "srow" .}}{{end}}{{end}}{{with .HiddenEnded}}<div class="thidden">{{.}} sessions ended more than a day ago</div>{{end}}</section>{{else}}<div class="empty">No sessions are registered with this dashboard.</div>{{end}}{{end}}
 
 {{define "srow"}}<a class="sess{{if not .Live}} ended{{end}}" href="/s/{{.ReplyID}}"><span class="who"><span class="rid">{{.ReplyID}}</span><span class="sub">{{if .Tool}}<span class="tn">{{.Tool}}</span>{{end}}{{with .RunningAgents}}<span class="agents-mini">{{.}} subagents running</span>{{end}}{{if not .HasBoard}}<span class="agents-mini">no board</span>{{end}}</span></span>{{with .Harness}}<span class="host">{{.}}</span>{{else}}<span></span>{{end}}{{if .Adapter}}{{template "phase" .Phase}}{{else}}<span class="phase none" title="no live host adapter">no live state</span>{{end}}<span class="qs">{{with .CountPolicy}}<span class="chip policy" title="to answer">{{icon "ask"}}{{.}}</span>{{end}}{{with .CountAssumed}}<span class="chip assumed" title="assumed">{{icon "arrow"}}{{.}}</span>{{end}}</span><span class="when">{{template "ago" .LastSeen}}</span></a>{{end}}
+
+{{/* The file view's pages (file_route.go): a rendered markdown file, and the
+"not viewable" page that offers the path copies only. Neither is a region;
+both inline the board's stylesheet for its colours and markdown rules. */}}
+{{define "filecss"}}.fileview .fwrap { max-width: 920px; margin: 0 auto; padding: 18px 20px 48px; }
+.fileview .fhead { margin-bottom: 12px; }
+.fileview code.fpath { font-size: 12.5px; color: var(--wb-muted-fg); overflow-wrap: anywhere; }
+.fileview .fbody { background: var(--wb-card); border-radius: 10px; padding: 14px 18px; overflow-wrap: anywhere; }
+.fileview .fbody h1, .fileview .fbody h2, .fileview .fbody h3, .fileview .fbody h4 { font-weight: 700; margin: 14px 0 6px; }
+.fileview .fbody h1 { font-size: 1.5em; } .fileview .fbody h2 { font-size: 1.3em; } .fileview .fbody h3 { font-size: 1.15em; }
+.fileview .fbody > :first-child { margin-top: 0; }
+.fileview .fbody hr { border: 0; border-top: 1px solid var(--wb-muted); margin: 12px 0; }
+.fileview .fnone { margin: 0 0 12px; }
+.fileview .fcopy { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.fileview .fcopy button { font: inherit; font-size: 13px; padding: 5px 12px; border-radius: 8px; border: 0; background: var(--wb-muted); color: var(--wb-fg); cursor: pointer; }
+.fileview .fnote { font-size: 12.5px; color: var(--wb-muted-fg); }{{end}}
+
+{{define "file-md"}}<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Rel}}</title>
+<style>{{.WhiteboardCSS}}</style>
+<style>{{template "filecss"}}</style></head>
+<body class="fileview"><div class="fwrap"><div class="fhead"><code class="fpath">{{.Rel}}</code></div><article class="md fbody">{{.HTML}}</article></div></body></html>
+{{end}}
+
+{{define "file-none"}}<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Rel}}</title>
+<style>{{.WhiteboardCSS}}</style>
+<style>{{template "filecss"}}</style></head>
+<body class="fileview"><div class="fwrap"><div class="fhead"><code class="fpath">{{.Rel}}</code></div>
+<p class="fnone">This file is not viewable here: {{.Reason}}.</p>
+<div class="fcopy"><button type="button" data-copy="{{.Rel}}">Copy relative path</button><button type="button" data-copy="{{.Abs}}">Copy absolute path</button><span class="fnote" id="fnote" role="status"></span></div></div>
+<script nonce="{{.Nonce}}">(function () {
+  // A LAN page over plain http is not a secure context, where
+  // navigator.clipboard is missing: copy through a selected textarea there.
+  var doc = document, note = doc.getElementById("fnote");
+  function done(ok) { note.textContent = ok ? "Copied." : "Copy failed: select the path above."; }
+  function fallback(text) {
+    var t = doc.createElement("textarea");
+    t.value = text;
+    t.setAttribute("readonly", "");
+    t.style.position = "fixed";
+    t.style.opacity = "0";
+    doc.body.appendChild(t);
+    t.select();
+    var ok = false;
+    try { ok = doc.execCommand("copy"); } catch (e) { ok = false; }
+    doc.body.removeChild(t);
+    done(ok);
+  }
+  doc.addEventListener("click", function (e) {
+    var b = e.target && e.target.closest && e.target.closest("[data-copy]");
+    if (!b) return;
+    var text = b.getAttribute("data-copy");
+    if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(text).then(function () { done(true); }, function () { fallback(text); });
+    else fallback(text);
+  });
+})();</script></body></html>
+{{end}}

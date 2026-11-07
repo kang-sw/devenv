@@ -25,8 +25,11 @@ import (
 //   - replyDropped elements leave with their content; any other element
 //     outside the allow-lists leaves and keeps its content.
 //   - Every href, src, and srcset goes through resolveTarget, the markdown
-//     link and image rule; a URL the markdown renderer already resolved is
-//     taken from the page's record of it (writeTrustRef), never re-resolved.
+//     link and image rule, and a resolved link opens with the attributes the
+//     markdown writer gives it (linkAttrs, actionAttrs), so a served page's
+//     link menu takes it like any other; a link or image the markdown
+//     renderer already resolved takes its attributes from the page's record
+//     of them (writeTrustRef), never from the markup.
 //   - An inline style keeps only declarations free of url(, image-set(, src(,
 //     expression(, @import, and backslash escapes, and loses position, so no
 //     reply fetches through CSS or lays a layer over the page; the finished
@@ -44,10 +47,11 @@ const trustAttr = "data-wbref"
 // reply hash after it (sanitizeReply) keeps them apart from another reply's.
 const svgIDPrefix = "wbr-"
 
-// trustedURL is one URL the markdown renderer resolved while a finished
-// reply rendered, already URL-escaped as it wrote it.
-type trustedURL struct {
-	url   string
+// trustedTarget is the attributes a link or image the markdown renderer
+// resolved while a finished reply rendered opened with (linkAttrs,
+// actionAttrs, or an image's src), its URL already URL-escaped.
+type trustedTarget struct {
+	attrs [][2]string
 	image bool
 }
 
@@ -237,64 +241,83 @@ func (p *pageData) keepHTMLAttrs(n *xhtml.Node, name string, allowed map[string]
 	}
 }
 
-// trustedRef returns the URL writeTrustRef recorded at i when it is of the
-// asked kind.
-func (p *pageData) trustedRef(i int, image bool) (string, bool) {
+// trustedRef returns the attributes writeTrustRef recorded at i when they
+// are of the asked kind.
+func (p *pageData) trustedRef(i int, image bool) ([][2]string, bool) {
 	if p.trusted == nil || i < 0 || i >= len(*p.trusted) {
-		return "", false
+		return nil, false
 	}
 	t := (*p.trusted)[i]
-	return t.url, t.image == image
+	return t.attrs, t.image == image
 }
 
-// keepAnchorHref gives a link the href resolveTarget allows, with the
-// attributes every resolved link carries; a refused target, or one that
-// resolves to path text, leaves the anchor without an href, keeping its text.
+// keepAnchorHref gives a link the attributes the markdown link writer would
+// open it with: an href resolveTarget allows with linkAttrs, or a file
+// target's action link with actionAttrs, titled with its path unless it has
+// a title. A refused target, or one that resolves to path text, leaves the
+// anchor without an href, keeping its text.
 func (p *pageData) keepAnchorHref(n *xhtml.Node, raw string, ref int) {
-	href, ok := p.trustedRef(ref, false)
+	attrs, ok := p.trustedRef(ref, false)
 	if !ok {
-		href = ""
-		if resolved, path, ok := p.resolveTarget(raw, false); ok && path == "" {
-			href = string(util.URLEscape([]byte(resolved), false))
+		attrs = nil
+		t, ok := p.resolveTarget(raw, false)
+		switch {
+		case !ok:
+		case t.isAction():
+			attrs = actionAttrs(t)
+			if !hasAttr(n, "title") {
+				n.Attr = append(n.Attr, xhtml.Attribute{Key: "title", Val: t.text})
+			}
+		case t.text == "":
+			attrs = p.linkAttrs(t.href)
 		}
 	}
-	if href == "" {
-		return
-	}
-	attrs := []xhtml.Attribute{{Key: "href", Val: href}}
-	for _, a := range anchorAttrs(href) {
-		attrs = append(attrs, xhtml.Attribute{Key: a[0], Val: a[1]})
-	}
-	n.Attr = append(attrs, n.Attr...)
+	n.Attr = append(nodeAttrs(attrs), n.Attr...)
 }
 
 // keepImageSrc gives an image the src resolveTarget allows, and the srcset
 // candidates it allows; an image whose src it refuses, or resolves to path
-// text, becomes its alt text and that path, as a markdown image does.
+// text, becomes its alt text and that path, as a markdown image does, the
+// path an action link when the target has one.
 func (p *pageData) keepImageSrc(n *xhtml.Node, urls map[string]string, ref int) {
-	src, path := "", ""
-	if trusted, ok := p.trustedRef(ref, true); ok {
-		src = trusted
-	} else if raw := strings.TrimSpace(urls["src"]); raw != "" {
-		resolved, text, ok := p.resolveTarget(raw, true)
+	attrs, ok := p.trustedRef(ref, true)
+	if !ok {
+		attrs = nil
+		raw := strings.TrimSpace(urls["src"])
+		t, ok := p.resolveTarget(raw, true)
 		switch {
-		case ok && text == "":
-			src = string(util.URLEscape([]byte(resolved), false))
-		case ok:
-			path = text
-		default:
-			path = raw
+		case !ok:
+			replaceImage(n, raw, target{})
+			return
+		case t.text != "":
+			replaceImage(n, t.text, t)
+			return
+		}
+		attrs = [][2]string{{"src", string(util.URLEscape([]byte(t.href), false))}}
+	}
+	if set := p.resolveSrcset(urls["srcset"]); set != "" {
+		attrs = append(attrs, [2]string{"srcset", set})
+	}
+	n.Attr = append(nodeAttrs(attrs), n.Attr...)
+}
+
+// nodeAttrs turns writer attribute pairs into parsed-node attributes.
+func nodeAttrs(attrs [][2]string) []xhtml.Attribute {
+	out := make([]xhtml.Attribute, 0, len(attrs))
+	for _, a := range attrs {
+		out = append(out, xhtml.Attribute{Key: a[0], Val: a[1]})
+	}
+	return out
+}
+
+// hasAttr reports whether n carries the attribute key.
+func hasAttr(n *xhtml.Node, key string) bool {
+	for _, a := range n.Attr {
+		if a.Key == key {
+			return true
 		}
 	}
-	if src == "" {
-		replaceImage(n, path)
-		return
-	}
-	attrs := []xhtml.Attribute{{Key: "src", Val: src}}
-	if set := p.resolveSrcset(urls["srcset"]); set != "" {
-		attrs = append(attrs, xhtml.Attribute{Key: "srcset", Val: set})
-	}
-	n.Attr = append(attrs, n.Attr...)
+	return false
 }
 
 // resolveSrcset keeps each candidate whose URL resolveTarget serves as an
@@ -306,11 +329,11 @@ func (p *pageData) resolveSrcset(set string) string {
 		if len(fields) == 0 {
 			continue
 		}
-		resolved, path, ok := p.resolveTarget(fields[0], true)
-		if !ok || path != "" {
+		t, ok := p.resolveTarget(fields[0], true)
+		if !ok || t.text != "" {
 			continue
 		}
-		out := string(util.URLEscape([]byte(resolved), false))
+		out := string(util.URLEscape([]byte(t.href), false))
 		for _, d := range fields[1:] {
 			if srcsetDescriptor.MatchString(d) {
 				out += " " + d
@@ -322,8 +345,9 @@ func (p *pageData) resolveSrcset(set string) string {
 }
 
 // replaceImage puts an image's alt text and path in its place, the shape a
-// markdown image on a served page takes (mdRenderer.image).
-func replaceImage(n *xhtml.Node, path string) {
+// markdown image on a served page takes (mdRenderer.image): the path inside
+// t's action link when t is one.
+func replaceImage(n *xhtml.Node, path string, t target) {
 	alt := ""
 	for _, a := range n.Attr {
 		if a.Key == "alt" {
@@ -340,6 +364,12 @@ func replaceImage(n *xhtml.Node, path string) {
 			code := &xhtml.Node{Type: xhtml.ElementNode, Data: "code", DataAtom: atom.Code, Attr: []xhtml.Attribute{{Key: "class", Val: "fpath"}}}
 			code.AppendChild(&xhtml.Node{Type: xhtml.TextNode, Data: path})
 			span.AppendChild(&xhtml.Node{Type: xhtml.TextNode, Data: " "})
+			if t.isAction() {
+				link := &xhtml.Node{Type: xhtml.ElementNode, Data: "a", DataAtom: atom.A,
+					Attr: append(nodeAttrs(actionAttrs(t)), xhtml.Attribute{Key: "title", Val: t.text})}
+				link.AppendChild(code)
+				code = link
+			}
 			span.AppendChild(code)
 		}
 		parent.InsertBefore(span, n)

@@ -30,11 +30,12 @@ type PageContent struct {
 	Seq int
 	// Board is the session's whiteboard board and panels, rendered by the
 	// static page's templates (wswhiteboard.RenderRegions) with the served
-	// page's link rule: a file link renders as its repo-relative path text
-	// (View.FileText), a board image inside the session's project root as
-	// the image route's URL (View.ImageSrc, ImageSrc) and any other image
-	// as path text, and a panel row lists its file as Path text, never as a
-	// file: URL or a relative link.
+	// page's link rule: a file link renders as an action link titled with
+	// its repo-relative path (View.FileText, View.FileActions, FileActions),
+	// a board image inside the session's project root as the image route's
+	// URL (View.ImageSrc, ImageSrc) and any other image as its path, and a
+	// panel row lists its file as Path text, never as a file: URL or a
+	// relative link.
 	Board wswhiteboard.Regions
 	// Contacts are the session's mail correspondents, newest exchange first.
 	Contacts []Contact

@@ -191,6 +191,12 @@ func TestSessionPagesCarryScriptHooks(t *testing.T) {
 	if !strings.Contains(board, `<div id="bcol" class="bcol"><div id="r-board"`) {
 		t.Errorf("board-first page lacks the board column")
 	}
+	// Both pages run the open-question pill beside the answer form.
+	for name, page := range map[string]string{"live": live, "board-first": board} {
+		if !strings.Contains(page, "data-wb-title") {
+			t.Errorf("%s page lacks the open-question pill script", name)
+		}
+	}
 }
 
 func TestBoardFirstPageHasNoLayoutControl(t *testing.T) {

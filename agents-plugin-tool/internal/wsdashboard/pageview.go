@@ -109,7 +109,8 @@ type AgentNode struct {
 func (a AgentNode) IsRunning() bool { return a.Status == wslive.StatusRunning }
 
 // PeerGroup is the lead's peer leads: every live peer and the most recent
-// ended ones, each ordered by last exchange, newest first.
+// ended ones, each ordered by last exchange, newest first. Live lists the
+// same-worktree peers before the others.
 type PeerGroup struct {
 	Live  []PeerRow
 	Ended []PeerRow
@@ -138,6 +139,14 @@ type PeerRow struct {
 	// do Phase, Lead, and Agents carry its live state.
 	Adapter bool
 	Harness string
+	// SameWorktree reports a served peer whose registration Project is the
+	// viewed session's.
+	SameWorktree bool
+	// Compact marks a live served peer in another worktree: the page draws
+	// it as one line (name, harness, phase mark, last mail) with no
+	// expansion, so Agents and AgentCount stay empty and Lead carries the
+	// phase alone.
+	Compact bool
 	Lead    LeadView
 	// Agents is the peer's own subagent tree, one level deep: a peer's peer
 	// group never appears. AgentCount counts every agent it holds.
@@ -164,15 +173,10 @@ type ConversationView struct {
 	// answer, which the page marks on the item's card.
 	Held []HeldView
 	Sent []SentMark
-	// markdown renders a lead reply, finished or still streaming; an entry
-	// runs it only when the entry cache misses (renderEntries).
-	markdown replyRender
+	// markdown renders a finished lead reply (replyRender.finished); an
+	// entry runs it only when the entry cache misses (renderEntries).
+	markdown func(string) template.HTML
 }
-
-// replyRender renders a lead reply's text: a finished reply with its inline
-// HTML kept through the reply sanitizer, a streaming one with raw HTML shown
-// as text, so a half-closed tag never shakes the layout mid-stream.
-type replyRender func(text string, finished bool) template.HTML
 
 // ConvEntry is one conversation ring entry as the page shows it.
 type ConvEntry struct {
@@ -265,7 +269,7 @@ func buildSessionView(in pageInputs) SessionView {
 		}
 	}
 	contacts := resolvedContacts(in.Page.Contacts, reg.ReplyID)
-	v.Tree.Peers = peerGroup(contacts, lookup, in.Now)
+	v.Tree.Peers = peerGroup(contacts, reg.Project, lookup, in.Now)
 	v.Conversation = conversation(in.Snapshot.Lead, in.Ring, in.Page.MailBodies, contacts, lookup, replyMarkdown(reg.Project, reg.ReplyID))
 	userEntryImages(v.Conversation.Entries, in.AttachDir, reg.ReplyID)
 	v.Conversation.Held = heldViews(in.Held, in.AttachDir, reg.ReplyID)
@@ -355,8 +359,12 @@ func resolvedContacts(contacts []Contact, self string) []Contact {
 // peerGroup merges contacts that resolve to one reply-id into one row and
 // applies the retention rule: every live peer and the last endedPeerCap
 // ended ones. A served peer's liveness is its own registration; an unserved
-// one is live while its presence is (Contact.PresenceLive).
-func peerGroup(contacts []Contact, lookup func(string) (Session, *wslive.Snapshot, bool), now time.Time) PeerGroup {
+// one is live while its presence is (Contact.PresenceLive). project is the
+// viewed session's root: only a served peer registered under the same path
+// (compared after filepath.Clean, no symlink resolution) keeps its full live
+// state; a live served peer elsewhere is a Compact row and its subagent tree
+// is never read. Live peers list same-worktree first.
+func peerGroup(contacts []Contact, project string, lookup func(string) (Session, *wslive.Snapshot, bool), now time.Time) PeerGroup {
 	type merged struct {
 		row          PeerRow
 		named        bool
@@ -394,12 +402,18 @@ func peerGroup(contacts []Contact, lookup func(string) (Session, *wslive.Snapsho
 				row.Served = true
 				row.Live = s.Live
 				row.Harness = s.Harness
+				row.SameWorktree = s.Project != "" && filepath.Clean(s.Project) == filepath.Clean(project)
+				row.Compact = s.Live && !row.SameWorktree
 				if adapterPresent(snap, now) {
 					row.Adapter = true
-					row.Lead = leadView(snap.Lead)
-					// One level deep: the peer's own agents, never its peers.
-					row.Agents = agentTree(snap.Agents, lookup)
-					row.AgentCount = len(snap.Agents)
+					if row.Compact {
+						row.Lead = LeadView{Lead: snap.Lead}
+					} else {
+						row.Lead = leadView(snap.Lead)
+						// One level deep: the peer's own agents, never its peers.
+						row.Agents = agentTree(snap.Agents, lookup)
+						row.AgentCount = len(snap.Agents)
+					}
 				}
 			}
 		}
@@ -417,6 +431,7 @@ func peerGroup(contacts []Contact, lookup func(string) (Session, *wslive.Snapsho
 	}
 	byLast(group.Live)
 	byLast(group.Ended)
+	sort.SliceStable(group.Live, func(i, j int) bool { return group.Live[i].SameWorktree && !group.Live[j].SameWorktree })
 	if len(group.Ended) > endedPeerCap {
 		group.HiddenEnded = len(group.Ended) - endedPeerCap
 		group.Ended = group.Ended[:endedPeerCap]
@@ -428,24 +443,28 @@ func hasReplyIDPrefix(address string) bool {
 	return len(address) >= len(wsmailbox.ReplyIDPrefix) && address[:len(wsmailbox.ReplyIDPrefix)] == wsmailbox.ReplyIDPrefix
 }
 
-// replyMarkdown renders a lead reply as markdown under the served page's
-// link rule, the board's: a file link or a file image outside root is path
-// text, and an image inside root is the image route's URL. A finished
-// reply's inline HTML follows the same rule (wswhiteboard.TextTargets.HTML).
+// replyRender renders lead replies as markdown: finished a reply entry,
+// streaming the reply still streaming.
+type replyRender struct {
+	finished, streaming func(string) template.HTML
+}
+
+// replyMarkdown renders lead replies under the served page's link rule
+// (servedTargets): a file target is an action link for the page's link
+// menu, and an image inside root is the image route's URL. A finished
+// reply's inline HTML is kept through the reply sanitizer under the same
+// rule (wswhiteboard.TextTargets.HTML) and its mermaid fences are drawn by
+// the page; the streaming reply shows raw HTML as text and keeps mermaid
+// fences code blocks, since it re-renders every tick and a half-closed tag
+// would shake the layout and a diagram would redraw with it.
 func replyMarkdown(root, replyID string) replyRender {
-	targets := wswhiteboard.TextTargets{
-		FileText: func(path string) string {
-			if rel, ok := relativeInside(root, path); ok {
-				return filepath.ToSlash(rel)
-			}
-			return filepath.ToSlash(path)
-		},
-		ImageSrc: func(path string) string { return ImageSrc(root, replyID, path) },
-	}
-	return func(s string, finished bool) template.HTML {
-		t := targets
-		t.HTML = finished
-		return wswhiteboard.RenderText(s, t)
+	streaming := servedTargets(root, replyID)
+	finished := servedTargets(root, replyID)
+	finished.Mermaid = true
+	finished.HTML = true
+	return replyRender{
+		finished:  func(s string) template.HTML { return wswhiteboard.RenderText(s, finished) },
+		streaming: func(s string) template.HTML { return wswhiteboard.RenderText(s, streaming) },
 	}
 }
 
@@ -460,9 +479,9 @@ func conversation(lead wslive.Lead, ring []wslive.RingRecord, bodies map[string]
 			byAddress[c.Address] = c.ReplyID
 		}
 	}
-	cv := ConversationView{Reply: lead.Reply, Phase: lead.Phase, Permission: lead.Permission, markdown: render}
+	cv := ConversationView{Reply: lead.Reply, Phase: lead.Phase, Permission: lead.Permission, markdown: render.finished}
 	if lead.Reply != nil {
-		cv.ReplyHTML = render(lead.Reply.Text, false)
+		cv.ReplyHTML = render.streaming(lead.Reply.Text)
 	}
 	_, cv.Running, cv.Generating = splitBatches(lead.Batches)
 	for _, r := range ring {

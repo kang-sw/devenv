@@ -281,7 +281,9 @@
     var pin = (name === "entries" || name === "convlive") && pinned();
     var scroll = scrollState();
     var answers = board ? readAnswers(el) : null;
-    if (name === "entries") mergeEntriesRegion(el, html);
+    // A finished reply's mermaid fences draw once merged; the streaming
+    // reply (convlive) keeps them code blocks.
+    if (name === "entries") { mergeEntriesRegion(el, html); mermaid(); }
     else {
       el.innerHTML = html;
       restoreOpen(el);
@@ -368,6 +370,7 @@
       // Keep what the user was reading in place: the prepended height goes
       // above the scroll offset.
       convo.scrollTop = top + (convo.scrollHeight - h);
+      mermaid();
       if (res.before) histBefore = res.before;
       if (res.end || !res.before) histEnd = true;
       nearTop();
@@ -382,12 +385,19 @@
   function nearTop() { if (convo && visible(convo) && convo.scrollTop < 160) loadHistory(); }
   if (convo) convo.addEventListener("scroll", nearTop);
 
+  // mermaid draws every undrawn mermaid block, loading the shared script
+  // once; a call while it loads is covered by the draw its onload runs, and
+  // a failed load (daemon restarting) is retried by the next call.
+  var mermaidLoading = false;
   function mermaid() {
     if (!q("pre.mermaid:not([data-processed])").length || !window.wbMermaidFile) return;
     if (window.mermaid) { window.wbMermaid(); return; }
+    if (mermaidLoading) return;
+    mermaidLoading = true;
     var s = doc.createElement("script");
     s.src = window.wbMermaidFile; // relative: the server serves it beside the page
     s.onload = function () { window.wbMermaid(); };
+    s.onerror = function () { mermaidLoading = false; s.parentNode.removeChild(s); };
     doc.head.appendChild(s);
   }
 
@@ -866,6 +876,130 @@
     if (t.closest("#gear")) { gmenu.hidden = !gmenu.hidden; return; }
     if (gmenu && !gmenu.hidden && !t.closest("#gmenu")) gmenu.hidden = true;
   });
+
+  // --- link actions: the menu a served page's marked links open ------------
+  // The renderer marks a served link data-wl="file" (href: the file view, or
+  // no href outside the session root; data-rel, data-abs) or data-wl="url";
+  // no other anchor is touched. A plain click opens the menu; Cmd/Ctrl+click
+  // on a link with an href is left to the browser, which opens a new tab,
+  // and opens the menu otherwise. The system-browser item shows only on a
+  // page the server marked data-sysopen (a browser on the daemon's machine);
+  // the open route checks that again.
+  var lmenu = null, lmenuFrom = null, ltoast = null, ltoastTimer = 0;
+  function closeLinkMenu(refocus) {
+    if (!lmenu) return;
+    lmenu.parentNode.removeChild(lmenu);
+    lmenu = null;
+    if (refocus && lmenuFrom && lmenuFrom.isConnected) lmenuFrom.focus();
+    lmenuFrom = null;
+  }
+  function toast(text) {
+    if (!ltoast) {
+      ltoast = doc.createElement("div");
+      ltoast.className = "ltoast";
+      ltoast.setAttribute("role", "status");
+      doc.body.appendChild(ltoast);
+    }
+    ltoast.textContent = text;
+    ltoast.hidden = false;
+    clearTimeout(ltoastTimer);
+    ltoastTimer = setTimeout(function () { ltoast.hidden = true; }, 2200);
+  }
+  // copyText copies s: the Clipboard API where the page is a secure context,
+  // else (a LAN address over plain http has no navigator.clipboard) a hidden
+  // textarea and the copy command.
+  function copyText(s) {
+    function fallback() {
+      var t = doc.createElement("textarea");
+      t.value = s;
+      t.setAttribute("readonly", "");
+      t.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;opacity:0";
+      doc.body.appendChild(t);
+      t.select();
+      var ok = false;
+      try { ok = doc.execCommand("copy"); } catch (e) { ok = false; }
+      doc.body.removeChild(t);
+      toast(ok ? "Copied " + s : "Could not copy: " + s);
+    }
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(s).then(function () { toast("Copied " + s); }, fallback);
+    } else fallback();
+  }
+  function openLinkMenu(a, x, y) {
+    closeLinkMenu(false);
+    var kind = a.getAttribute("data-wl"), href = a.getAttribute("href");
+    var rel = a.getAttribute("data-rel"), abs = a.getAttribute("data-abs"), url = a.href;
+    var items = [];
+    if (href) items.push(["Open in new tab", function () { window.open(url, "_blank", "noopener"); }]);
+    if (href && root.hasAttribute("data-sysopen")) {
+      items.push(["Open in system browser", function () {
+        // A file link sends its file view path; the daemon opens it on the
+        // address this page was loaded from.
+        post("open", { target: kind === "url" ? url : href }, function (ok, v) { toast(ok ? "Opened in the system browser" : "Could not open: " + v); });
+      }]);
+    }
+    if (kind === "url") items.push(["Copy URL", function () { copyText(url); }]);
+    else {
+      if (rel) items.push(["Copy relative path", function () { copyText(rel); }]);
+      if (abs) items.push(["Copy absolute path", function () { copyText(abs); }]);
+    }
+    if (!items.length) return;
+    var m = doc.createElement("div");
+    m.className = "lmenu";
+    m.setAttribute("role", "menu");
+    items.forEach(function (it) {
+      var b = doc.createElement("button");
+      b.type = "button";
+      b.setAttribute("role", "menuitem");
+      b.textContent = it[0];
+      b.addEventListener("click", function (e) { e.stopPropagation(); closeLinkMenu(true); it[1](); });
+      m.appendChild(b);
+    });
+    doc.body.appendChild(m);
+    var w = m.offsetWidth, h = m.offsetHeight;
+    m.style.left = Math.max(4, Math.min(x, window.innerWidth - w - 4)) + "px";
+    m.style.top = Math.max(4, y + h + 4 > window.innerHeight ? y - h - 4 : y + 4) + "px";
+    lmenu = m;
+    lmenuFrom = a;
+    m.firstChild.focus();
+  }
+  // linkAt opens the menu for a marked link: at the pointer, or below the
+  // link for a keyboard activation.
+  function linkAt(a, e) {
+    var r = a.getBoundingClientRect();
+    if (e.detail === 0 || e.type === "keydown") openLinkMenu(a, r.left, r.bottom);
+    else openLinkMenu(a, e.clientX, e.clientY);
+  }
+  doc.addEventListener("click", function (e) {
+    var t = e.target;
+    if (lmenu && !(t && t.closest && t.closest(".lmenu"))) closeLinkMenu(false);
+    if (e.button !== 0 || !t || !t.closest) return;
+    var a = t.closest("a[data-wl]");
+    if (!a) return;
+    var href = a.getAttribute("href");
+    if (href && (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)) return;
+    e.preventDefault();
+    linkAt(a, e);
+  }, true);
+  doc.addEventListener("keydown", function (e) {
+    var inMenu = !!lmenu && lmenu.contains(doc.activeElement);
+    if (lmenu && e.key === "Escape") { if (inMenu) e.preventDefault(); closeLinkMenu(inMenu); return; }
+    if (inMenu && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+      var bs = Array.prototype.slice.call(lmenu.children), i = bs.indexOf(doc.activeElement);
+      e.preventDefault();
+      bs[(i + (e.key === "ArrowDown" ? 1 : bs.length - 1)) % bs.length].focus();
+      return;
+    }
+    // An action link with no href is not natively activatable.
+    var a = e.target && e.target.closest && e.target.closest("a[data-wl]:not([href])");
+    if (a && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); linkAt(a, e); }
+  });
+  // A user's scroll closes the menu; the conversation's own pinning to the
+  // newest reply scrolls too, and must not.
+  doc.addEventListener("wheel", function (e) { if (lmenu && !lmenu.contains(e.target)) closeLinkMenu(false); }, { capture: true, passive: true });
+  doc.addEventListener("touchmove", function (e) { if (lmenu && !lmenu.contains(e.target)) closeLinkMenu(false); }, { capture: true, passive: true });
+  window.addEventListener("resize", function () { closeLinkMenu(false); });
+  window.addEventListener("blur", function () { closeLinkMenu(false); });
 
   // --- stream ----------------------------------------------------------------
   var sse = $("sse"), sseLabel = sse && sse.querySelector(".sse-label");
