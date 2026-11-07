@@ -225,8 +225,9 @@ func (d *Daemon) handleFile(w http.ResponseWriter, r *http.Request, replyID stri
 }
 
 // fileMarkdownCSP lets a rendered markdown file load its images from the
-// image route and nothing else: no script, no frame, no form target.
-const fileMarkdownCSP = "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; base-uri 'none'; form-action 'none'"
+// image route and nothing else: no script, no frame, no form target, and no
+// page may frame it.
+const fileMarkdownCSP = "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; base-uri 'none'; form-action 'none'; " + frameAncestorsNone
 
 // writeFilePage renders one of the file view's pages: file-md (a rendered
 // markdown file) or file-none (a file the view does not show).
@@ -245,7 +246,7 @@ func (d *Daemon) writeFilePage(w http.ResponseWriter, name string, page fileView
 			return
 		}
 		page.Nonce = hex.EncodeToString(raw[:])
-		csp = "default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-" + page.Nonce + "'; base-uri 'none'; form-action 'none'"
+		csp = "default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-" + page.Nonce + "'; base-uri 'none'; form-action 'none'; " + frameAncestorsNone
 	}
 	page.WhiteboardCSS = a.data.WhiteboardCSS
 	var buf bytes.Buffer

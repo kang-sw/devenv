@@ -602,8 +602,21 @@ func readMethod(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+// frameAncestorsNone refuses every framing of a daemon page. A framed page's
+// own script posts carry the daemon's Origin, so the same-origin and loopback
+// guards on the write routes would pass a clickjacked board answer, message,
+// steer, cancel, or system open; only refusing the frame stops it.
+const frameAncestorsNone = "frame-ancestors 'none'"
+
+// writeHTML writes a daemon HTML page. A caller that sets its own
+// Content-Security-Policy includes frameAncestorsNone in it; without one the
+// page gets frameAncestorsNone alone.
 func writeHTML(w http.ResponseWriter, html string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if w.Header().Get("Content-Security-Policy") == "" {
+		w.Header().Set("Content-Security-Policy", frameAncestorsNone)
+	}
+	w.Header().Set("X-Frame-Options", "DENY")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")
