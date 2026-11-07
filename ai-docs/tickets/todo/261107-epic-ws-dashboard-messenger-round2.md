@@ -57,6 +57,9 @@ session page usable as the primary conversation surface for a lead session:
 - `261107-feat-ws-dashboard-pull-down-drawer` - the side panels (Todo,
   Agenda, Tickets, Mailbox) move into a drawer pulled down from the top, a
   frame later tabs register into (user, 2026-11-07).
+- `261107-feat-ws-dashboard-interrupt-badge` - a red interrupt badge on the
+  conversation/composer border stops the lead's running turn; held messages
+  return to the composer.
 - Related, not a child: `261107-feat-ws-whiteboard-now-markdown` - the Now
   slot takes markdown with inline HTML (affects disk boards too).
 - Done as bounded delegates, no ticket (2026-11-07): the composer buttons and
@@ -72,6 +75,9 @@ session page usable as the primary conversation surface for a lead session:
   promotion changes both adapters (user, 2026-11-07, option (a) of (29)).
   The status band is the second exception: both adapters feed a new `status`
   live event (user, 2026-11-07, board (88), (89), (93)).
+  The interrupt badge is the third: both adapters abort the main turn on an
+  interrupt inbox entry and hold that turn's end-of-turn submits (user,
+  2026-11-07, board (255), (257), (258), (265)).
 - The page keeps showing a waiting approval (conversation and agents tree)
   after any layout change.
 
