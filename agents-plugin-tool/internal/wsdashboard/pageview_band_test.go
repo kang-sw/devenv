@@ -113,7 +113,8 @@ func TestBandRepoStates(t *testing.T) {
 // only for a reported limit; Claude's exact cost bare and Pi's estimate as
 // ~$X or ~$X+; and the narrow-band rule's markers: with both chips shown,
 // both carry "both" and the higher percent "hi" (a tie keeps the 5-hour
-// limit), which the stylesheet keeps alone below 360px.
+// limit), which the stylesheet keeps alone below a 360px band (340px of the
+// line inside the composer's padding).
 func TestBandLimitAndCostChips(t *testing.T) {
 	five := time.Date(2026, 11, 7, 18, 0, 0, 0, time.UTC).UnixMilli()
 	week := time.Date(2026, 11, 8, 0, 0, 0, 0, time.UTC).UnixMilli() // a Sunday
@@ -151,7 +152,7 @@ func TestBandLimitAndCostChips(t *testing.T) {
 	contains(t, "pi incomplete estimate", sline, ">~$1.23&#43;</span>")
 
 	css := mustAsset(t, "dashboard.css")
-	contains(t, "stylesheet", css, ".r-sline { container-type: inline-size; }", "@container (max-width: 360px) { .sb-use.both:not(.hi) { display: none; } }")
+	contains(t, "stylesheet", css, ".r-sline { container-type: inline-size; }", "@container (max-width: 340px) { .sb-use.both:not(.hi) { display: none; } }")
 }
 
 func mustAsset(t *testing.T, name string) string {

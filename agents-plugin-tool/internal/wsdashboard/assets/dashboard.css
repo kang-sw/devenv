@@ -264,8 +264,9 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .sentmark.held { background: var(--wb-ph-perm); color: var(--wb-on-ph-perm); }
 /* status band: the context bar above the message box (ctx), the folder,
    branch, upstream, usage limits, and cost below it (sline). An empty region
-   collapses. sline is a size container: below 360px only the usage limit
-   under more pressure (.hi) stays. */
+   collapses. sline is a size container inside the composer's 10px padding:
+   below a 360px band (340px of sline) only the usage limit under more
+   pressure (.hi) stays. */
 .r-ctx:empty, .r-sline:empty { display: none; }
 .r-sline { container-type: inline-size; }
 .sb { display: flex; align-items: center; flex-wrap: wrap; gap: 3px 12px; min-width: 0; font-size: 12.5px; line-height: 1.3; padding: 0 2px; }
@@ -306,7 +307,7 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .sb-tok, .sb-cache { flex: none; font: 600 11.5px/1 var(--wb-mono); color: var(--wb-muted-fg); white-space: nowrap; }
 .sb-flag { flex: none; font-size: 10.5px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: var(--c); box-shadow: inset 0 0 0 1px var(--c); border-radius: 4px; padding: 1px 5px; white-space: nowrap; }
 @container (max-width: 560px) { .sb-sync .sl { display: none; } .sb { column-gap: 9px; } .sb-foot .sb-tail { margin-left: 0; } }
-@container (max-width: 360px) { .sb-use.both:not(.hi) { display: none; } }
+@container (max-width: 340px) { .sb-use.both:not(.hi) { display: none; } }
 @media (max-width: 560px) { .sb-flag { display: none; } }
 .cnote { font-size: 11.5px; color: var(--wb-muted-fg); }
 .cnote:empty { display: none; }
