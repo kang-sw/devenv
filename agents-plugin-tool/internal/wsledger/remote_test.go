@@ -661,3 +661,75 @@ func TestRemotePendingJournalSurvivesReopen(t *testing.T) {
 		t.Fatalf("pushed event ts = %s, want the original %s", e.TS, t0)
 	}
 }
+
+// TestRemoteSyncDoesNotUndoOwnRefRemoval covers a Sync that runs before any
+// Fetch noticed the removal (the push-delay timer runs Sync unattended): a
+// deleted or rewound own ref is not pushed back; only Restore does that.
+func TestRemoteSyncDoesNotUndoOwnRefRemoval(t *testing.T) {
+	w := newWorld(t)
+	url := w.newRemote("r")
+	ada := w.register(w.remoteOpts("ada", "c1"), url)
+	own := memberRef("ada", "c1")
+
+	appendOne(t, ada, "note", note("a1"))
+	syncOK(t, ada)
+	first := remoteRefs(t, url)[own]
+	appendOne(t, ada, "note", note("a2"))
+	syncOK(t, ada)
+
+	// Rewound behind what ada pushed, then a new write and a Sync.
+	remoteGit(t, url, "update-ref", own, first)
+	appendOne(t, ada, "note", note("a3"))
+	rep := syncOK(t, ada)
+	if rep.Pushed || !hasWarning(rep.Warnings, own, WarnRewound) {
+		t.Fatalf("sync after a remote rewind = %+v, want not pushed and a rewound warning", rep)
+	}
+	if got := remoteRefs(t, url)[own]; got != first {
+		t.Fatalf("remote own ref = %s, want it left at the rewound %s", got, first)
+	}
+
+	// Deleted, then a Sync with no Fetch in between.
+	if err := ada.Restore(context.Background(), own); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	remoteGit(t, url, "update-ref", "-d", own)
+	appendOne(t, ada, "note", note("a4"))
+	rep = syncOK(t, ada)
+	if rep.Pushed || !hasWarning(rep.Warnings, own, WarnDeleted) {
+		t.Fatalf("sync after a remote deletion = %+v, want not pushed and a deleted warning", rep)
+	}
+	if _, ok := remoteRefs(t, url)[own]; ok {
+		t.Fatal("Sync pushed the deleted own ref back")
+	}
+}
+
+// TestRemoteRestoreRefusesARefMovedMeanwhile: Restore leases on the value
+// its own fetch saw, so a ref that moves on the remote between that fetch
+// and the push is left alone.
+func TestRemoteRestoreRefusesARefMovedMeanwhile(t *testing.T) {
+	w := newWorld(t)
+	url := w.newRemote("r")
+	ada := w.register(w.remoteOpts("ada", "c1"), url)
+	adaRef := memberRef("ada", "c1")
+	appendOne(t, ada, "note", note("a1"))
+	syncOK(t, ada)
+	first := remoteRefs(t, url)[adaRef]
+	appendOne(t, ada, "note", note("a2"))
+	syncOK(t, ada)
+
+	ob := w.remoteOpts("bo", "c1")
+	ob.Runner = &hookRunner{inner: wsgit.ExecRunner{}, ref: adaRef, before: func() {
+		remoteGit(t, url, "update-ref", adaRef, first)
+	}}
+	bo := w.register(ob, url)
+	remoteGit(t, url, "update-ref", "-d", adaRef)
+	if rep := fetchOK(t, bo); !hasWarning(rep.Warnings, adaRef, WarnDeleted) {
+		t.Fatalf("fetch warnings %+v lack %s for %s", rep.Warnings, WarnDeleted, adaRef)
+	}
+	if err := bo.Restore(context.Background(), adaRef); err == nil {
+		t.Fatal("Restore pushed over a ref that moved on the remote after its fetch")
+	}
+	if got := remoteRefs(t, url)[adaRef]; got != first {
+		t.Fatalf("remote %s = %s, want the value set meanwhile %s", adaRef, got, first)
+	}
+}

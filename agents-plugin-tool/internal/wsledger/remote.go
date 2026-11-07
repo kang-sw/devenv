@@ -109,12 +109,12 @@ const (
 // transport or credential failure is an error.
 func (g *gitRepo) push(ctx context.Context, ref string, lease *string) (pushOutcome, error) {
 	args := []string{"push", "--porcelain", "--no-verify"}
-	spec := ref + ":" + ref
 	if lease != nil {
+		// No "+" on the refspec: a forced refspec overrides the lease. A
+		// matching lease alone permits a non-fast-forward update.
 		args = append(args, "--force-with-lease="+ref+":"+*lease)
-		spec = "+" + spec
 	}
-	args = append(args, remoteName, spec)
+	args = append(args, remoteName, ref+":"+ref)
 	_, err := g.run(ctx, remoteArgs(args...)...)
 	if err == nil {
 		return pushOK, nil
@@ -238,6 +238,13 @@ func (l *Ledger) absorbRemote(ctx context.Context) error {
 			if K != "" && K != S && l.git.isAncestor(ctx, S, K) {
 				warn(name, WarnRewound, "the remote moved this clone's ref back behind what it pushed; the local copy is kept, and Restore pushes it back")
 				l.ownBlocked = true
+			} else if K != S {
+				// The remote holds more of this clone's ref than recorded (a
+				// push whose record was lost); the push lease needs the
+				// actual value.
+				if err := l.setKnown(ctx, name, S); err != nil {
+					return err
+				}
 			}
 		case isOwn:
 			warn(name, WarnForeignAdvance, "the remote copy of this clone's ref holds commits this clone did not write; not taken. MoveToFreshClone moves the unpushed events to a fresh clone id")
@@ -328,12 +335,22 @@ func (l *Ledger) pushAll(ctx context.Context) (bool, error) {
 	if l.ownJoined() && known[claimRef(l.member)] == "" && local[claimRef(l.member)] != "" {
 		return false, nil // the claim did not reach the remote
 	}
-	out, err := l.git.push(ctx, own, nil)
+	// Leased on the value last known on the remote rather than a plain
+	// fast-forward, so a Sync that runs before any fetch noticed a deletion
+	// or a rewind (the push-delay timer runs Sync unattended) cannot push
+	// the ref back; only Restore does. The local tip always descends from
+	// that value, which the guard keeps true for this forced push.
+	lease := known[own]
+	if lease != "" && !l.git.isAncestor(ctx, lease, tip) {
+		return false, nil
+	}
+	out, err := l.git.push(ctx, own, &lease)
 	if err != nil {
 		return false, fmt.Errorf("ledger: push: %w", err)
 	}
 	if out == pushRejected {
-		l.foreign = true
+		// Deleted, rewound, or advanced by another writer: the fetch that
+		// follows every push tells which and warns.
 		return false, nil
 	}
 	return true, l.setKnown(ctx, own, tip)

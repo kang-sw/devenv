@@ -877,3 +877,32 @@ func TestCursorFilledGapReachesCaller(t *testing.T) {
 		}
 	}
 }
+
+// TestRevocationFirstInCommitKeepsSignerCheck: a revocation's verdict is
+// memoized from its own scoped pass; the events after it in the same
+// commit still take the commit's signer check.
+func TestRevocationFirstInCommitKeepsSignerCheck(t *testing.T) {
+	w := newWorld(t)
+	ada := w.create("ada", "c1")
+	bo := w.join("bo", "c1")
+	ts := w.clock.Now()
+
+	imp := w.forger(w.optsWithKey("ada", "evil", filepath.Join(w.root, "keys", "impostor")))
+	rev := evLine(t, 1, ts, TypeRevokeKey, KeyPayload{Member: "bo", Key: bo.pubKey})
+	after := evLine(t, 2, ts, "note", map[string]string{"n": "after the revocation"})
+	setRef(t, imp, memberRef("ada", "evil"), forgeCommit(t, imp, "", map[string]int{}, ts, rev, after), "")
+
+	for _, l := range []*Ledger{ada, bo} {
+		fetchOK(t, l)
+		evs := streamEvents(l, "ada.evil")
+		if len(evs) != 2 {
+			t.Fatalf("%s: events of ada.evil = %+v", l.stream, evs)
+		}
+		for _, e := range evs {
+			if e.Verdict != Flagged {
+				t.Fatalf("%s: %s (%s) verdict %s (%s), want Flagged by the signer check", l.stream, e.ID, e.Type, e.Verdict, e.Reason)
+			}
+			wantReason(t, e, "signer key")
+		}
+	}
+}

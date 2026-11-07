@@ -649,9 +649,6 @@ func (p *pass) stateBefore(n *node) *idState {
 }
 
 func (p *pass) judge(n *node) result {
-	if m, ok := p.e.revMemo[n]; ok {
-		return m
-	}
 	for _, w := range p.waiting {
 		if hb(w, n) {
 			return result{Waiting, fmt.Sprintf("waiting: its causal past holds %s, which is waiting", w.id)}
@@ -660,6 +657,12 @@ func (p *pass) judge(n *node) result {
 	st := p.stateBefore(n)
 	if n.first {
 		p.commitRes[n.commit] = p.signer(n, st)
+	}
+	// A memoized revocation still sets its commit's signer result above:
+	// the zero result is Valid, so the events after it in the commit would
+	// otherwise skip the signer check.
+	if m, ok := p.e.revMemo[n]; ok {
+		return m
 	}
 	if r := p.commitRes[n.commit]; r.verdict != Valid {
 		return r
