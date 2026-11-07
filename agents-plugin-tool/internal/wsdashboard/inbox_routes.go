@@ -243,11 +243,11 @@ func decodeImage(up imageUpload) (decodedImage, int, string) {
 }
 
 // sendMessage holds one checked message in the inbox at dir; d.inboxMu is
-// held. It sweeps old unreferenced attachments, resolves the references,
-// checks the merged entry's image cap before writing any file, writes the new
-// images, and sends. A refusal after files were written deletes them.
+// held. It resolves the references, sweeps old unreferenced attachments
+// other than those, checks the merged entry's image cap before writing any
+// file, writes the new images, and sends. A refusal after files were written
+// deletes them.
 func (d *Daemon) sendMessage(dir string, req messageRequest, images []decodedImage, now time.Time) (int, any) {
-	wsinbox.SweepAttachments(dir, now, attachmentSweepAge)
 	attachDir := wsinbox.AttachmentsDir(dir)
 	if len(req.RefNums) != 0 && len(req.RefNums) != len(req.Refs) {
 		return http.StatusBadRequest, fmt.Sprintf("%d image numbers for %d attachments", len(req.RefNums), len(req.Refs))
@@ -269,6 +269,10 @@ func (d *Daemon) sendMessage(dir string, req messageRequest, images []decodedIma
 		}
 		nums = append(nums, n)
 	}
+	// After the references resolve, and sparing them: a re-send of a message
+	// cancelled more than a day ago references images no entry lists, which
+	// the sweep would otherwise delete under the message.
+	wsinbox.SweepAttachments(dir, now, attachmentSweepAge, req.Refs...)
 	for _, img := range images {
 		nums = append(nums, img.n)
 	}

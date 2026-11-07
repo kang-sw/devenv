@@ -348,11 +348,15 @@ func TestSweepDeletesOnlyOldUnreferencedAttachments(t *testing.T) {
 		t.Fatal(err)
 	}
 	sendImages(t, dir, "held", heldImg)
-	SweepAttachments(dir, now, 24*time.Hour)
+	keptImg := attach(t, dir, "0000000000000005-1.png")
+	if err := os.Chtimes(keptImg, old, old); err != nil {
+		t.Fatal(err)
+	}
+	SweepAttachments(dir, now, 24*time.Hour, filepath.Base(keptImg))
 	if exists(orphan) {
 		t.Error("an old unreferenced attachment survived the sweep")
 	}
-	for _, p := range []string{young, heldImg, sentImg, foreign} {
+	for _, p := range []string{young, heldImg, sentImg, foreign, keptImg} {
 		if !exists(p) {
 			t.Errorf("the sweep deleted %s", filepath.Base(p))
 		}

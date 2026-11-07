@@ -847,10 +847,11 @@ func referencedAttachments(dir string) map[string]bool {
 }
 
 // SweepAttachments deletes each attachment of the inbox at dir that was last
-// modified more than maxAge before now and that no held entry and no drained
-// record lists: an image whose message was cancelled and never sent again.
-// The dashboard daemon runs it under its inbox lock on each message write.
-func SweepAttachments(dir string, now time.Time, maxAge time.Duration) {
+// modified more than maxAge before now and that no held entry, no drained
+// record, and no name in keep lists: an image whose message was cancelled and
+// never sent again. The dashboard daemon runs it under its inbox lock on each
+// message write, keeping the attachments that write references.
+func SweepAttachments(dir string, now time.Time, maxAge time.Duration, keep ...string) {
 	attachDir := AttachmentsDir(dir)
 	des, err := os.ReadDir(attachDir)
 	if err != nil {
@@ -871,6 +872,9 @@ func SweepAttachments(dir string, now time.Time, maxAge time.Duration) {
 		return
 	}
 	referenced := referencedAttachments(dir)
+	for _, n := range keep {
+		referenced[n] = true
+	}
 	for _, n := range old {
 		if !referenced[n] {
 			_ = os.Remove(filepath.Join(attachDir, n))

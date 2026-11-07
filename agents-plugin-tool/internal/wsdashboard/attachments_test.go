@@ -364,25 +364,36 @@ func TestCancelAndResendKeepImageNumbers(t *testing.T) {
 }
 
 // TestMessageWriteSweepsOldUnreferencedAttachments: a file no entry lists
-// and older than a day goes on the next message write, and a re-send that
-// references it is refused.
+// and older than a day goes on the next message write, except the files that
+// write references: re-sending a message cancelled more than a day ago keeps
+// its images.
 func TestMessageWriteSweepsOldUnreferencedAttachments(t *testing.T) {
 	f := startPageFixture(t)
-	id, _ := f.send(t, `{"images":`+imagesJSON("a.png", pngBytes)+`}`)
-	path := f.held(t)[0].Entry.Images[0]
+	id, _ := f.send(t, `{"images":`+imagesJSON("a.png", pngBytes, "b.png", pngBytes)+`}`)
+	paths := f.held(t)[0].Entry.Images
 	if code, _, raw := postJSON(t, f.base+"/s/livesession/cancel", f.base, `{"id":"`+id+`"}`); code != http.StatusOK {
 		t.Fatalf("cancel = %d: %s", code, raw)
 	}
 	old := time.Now().Add(-25 * time.Hour)
-	if err := os.Chtimes(path, old, old); err != nil {
-		t.Fatal(err)
+	for _, p := range paths {
+		if err := os.Chtimes(p, old, old); err != nil {
+			t.Fatal(err)
+		}
 	}
-	code, raw := f.postMessage(t, `{"refs":["`+filepath.Base(path)+`"]}`)
-	if code != http.StatusBadRequest || !strings.Contains(raw, filepath.Base(path)) {
-		t.Fatalf("send of a swept ref = %d (%s), want 400 naming it", code, raw)
+	kept, swept := paths[0], paths[1]
+	f.send(t, `{"text":"again","refs":["`+filepath.Base(kept)+`"]}`)
+	if held := f.held(t); len(held) != 1 || len(held[0].Entry.Images) != 1 || held[0].Entry.Images[0] != kept {
+		t.Fatalf("re-sent entry = %+v, want %s", held, kept)
 	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
+	if _, err := os.Stat(kept); err != nil {
+		t.Fatalf("the sweep deleted the re-sent image: %v", err)
+	}
+	if _, err := os.Stat(swept); !os.IsNotExist(err) {
 		t.Fatalf("the old unreferenced file survived: %v", err)
+	}
+	code, raw := f.postMessage(t, `{"refs":["`+filepath.Base(swept)+`"]}`)
+	if code != http.StatusBadRequest || !strings.Contains(raw, filepath.Base(swept)) {
+		t.Fatalf("send of a swept ref = %d (%s), want 400 naming it", code, raw)
 	}
 }
 
