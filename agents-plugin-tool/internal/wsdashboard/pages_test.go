@@ -159,7 +159,8 @@ func TestSessionPageRendersLiveRegions(t *testing.T) {
 
 // TestSessionPagesCarryScriptHooks pins the elements and attributes the page
 // script and stylesheet read: the board column, the drawer that holds the
-// panels, the tab bar and its dots, the layout menu, the composer, the live
+// panels, the tab bar and its dots, the layout menu, the composer and its
+// interrupt badge, the lead's phase on the convlive region, the live
 // indicator's label, and the banner.
 func TestSessionPagesCarryScriptHooks(t *testing.T) {
 	f := startPageFixture(t)
@@ -172,6 +173,8 @@ func TestSessionPagesCarryScriptHooks(t *testing.T) {
 		`id="tabbar"`, `data-tab="convo"`, `data-tab="board"`, `<span class="tdot"></span>`,
 		`id="gmenu"`, `data-layout="auto"`, `data-layout="split"`, `data-layout="tabs"`,
 		`id="ctext"`, `id="cnote"`, `id="csend"`, `aria-label="send"`, `class="sse-label"`, `id="dash-banner"`,
+		`<div id="composer" class="composer"><button type="button" class="ibadge" id="ibadge"`, `<span class="ilabel">Interrupt</span>`,
+		`<div class="conv clive" data-phase="replying">`,
 	} {
 		if !strings.Contains(live, want) {
 			t.Errorf("live session page lacks %q", want)
@@ -231,7 +234,7 @@ func TestBoardFirstPageHasNoLayoutControl(t *testing.T) {
 			t.Errorf("board-first page lacks %q", present)
 		}
 	}
-	for _, absent := range []string{`<button data-layout=`, `<button data-input=`, `id="composer"`, `id="splitter"`, `id="convo"`, `data-region="entries"`, `data-region="convlive"`, `id="tabbar"`} {
+	for _, absent := range []string{`<button data-layout=`, `<button data-input=`, `id="composer"`, `id="splitter"`, `id="convo"`, `data-region="entries"`, `data-region="convlive"`, `id="tabbar"`, `id="ibadge"`} {
 		if strings.Contains(body, absent) {
 			t.Errorf("board-first page carries %q", absent)
 		}
