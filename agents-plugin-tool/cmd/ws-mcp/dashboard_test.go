@@ -24,7 +24,7 @@ var dashboardTestClient = &http.Client{Timeout: 2 * time.Second}
 func TestStartDashboardWithTheKeyOffSpawnsNothing(t *testing.T) {
 	dir := t.TempDir()
 	calls := 0
-	outcome := startDashboard(context.Background(), mcp.DashboardSettings{Enabled: false, Port: 12345}, dir, func([]string) error { calls++; return nil }, io.Discard)
+	outcome := startDashboard(context.Background(), mcp.DashboardSettings{Enabled: false, Port: 12345}, dir, 0, func([]string) error { calls++; return nil }, io.Discard)
 	if calls != 0 || outcome != "" {
 		t.Fatalf("key off: %d spawns, outcome %q", calls, outcome)
 	}
@@ -36,7 +36,7 @@ func TestStartDashboardWithTheKeyOffSpawnsNothing(t *testing.T) {
 func TestStartDashboardPassesThePortKeyAsTheDaemonFlag(t *testing.T) {
 	var got []string
 	var log bytes.Buffer
-	outcome := startDashboard(context.Background(), mcp.DashboardSettings{Enabled: true, Port: 12345}, t.TempDir(), func(args []string) error {
+	outcome := startDashboard(context.Background(), mcp.DashboardSettings{Enabled: true, Port: 12345}, t.TempDir(), 0, func(args []string) error {
 		got = args
 		return errors.New("spawn refused in test")
 	}, &log)
@@ -51,7 +51,7 @@ func TestStartDashboardPassesThePortKeyAsTheDaemonFlag(t *testing.T) {
 func TestStartDashboardPassesLANAsTheDaemonFlag(t *testing.T) {
 	for _, lan := range []bool{true, false} {
 		var got []string
-		startDashboard(context.Background(), mcp.DashboardSettings{Enabled: true, Port: 12345, LAN: lan}, t.TempDir(), func(args []string) error {
+		startDashboard(context.Background(), mcp.DashboardSettings{Enabled: true, Port: 12345, LAN: lan}, t.TempDir(), 0, func(args []string) error {
 			got = args
 			return errors.New("spawn refused in test")
 		}, io.Discard)
@@ -62,6 +62,17 @@ func TestStartDashboardPassesLANAsTheDaemonFlag(t *testing.T) {
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("lan %v: spawn args = %v, want %v", lan, got, want)
 		}
+	}
+}
+
+func TestStartDashboardPassesTheBuildTimeAsTheDaemonFlag(t *testing.T) {
+	var got []string
+	startDashboard(context.Background(), mcp.DashboardSettings{Enabled: true, Port: 12345}, t.TempDir(), 1700000000000, func(args []string) error {
+		got = args
+		return errors.New("spawn refused in test")
+	}, io.Discard)
+	if want := []string{"dashboard", "--port", "12345", "--build-time", "1700000000000"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("spawn args = %v, want %v", got, want)
 	}
 }
 
@@ -258,6 +269,47 @@ func TestServeReplacesAnOlderDaemonThatThenOutlivesServe(t *testing.T) {
 	}
 	if info, err := wsdashboard.Health(context.Background(), dashboardTestClient, newEp); err != nil || info.Version != version {
 		t.Fatalf("daemon after serve exited: %+v, %v", info, err)
+	}
+}
+
+// TestServeReplacesAnOlderBuildOfTheSameVersion: a daemon of the same version
+// from an older build (by executable mtime) is replaced by a newer build's
+// serve, and the new daemon reports that build's time.
+func TestServeReplacesAnOlderBuildOfTheSameVersion(t *testing.T) {
+	oldBin := buildDashboardTestBin(t, "")
+	newBin := buildDashboardTestBin(t, "")
+	hourAgo := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(oldBin, hourAgo, hourAgo); err != nil {
+		t.Fatal(err)
+	}
+	env, dir := dashboardTestEnv(t)
+
+	old := exec.Command(oldBin, "dashboard", "--port", "0")
+	old.Env = env
+	if err := old.Start(); err != nil {
+		t.Fatal(err)
+	}
+	oldEp := waitForEndpoint(t, dir, version, 10*time.Second)
+	if info, err := wsdashboard.Health(context.Background(), dashboardTestClient, oldEp); err != nil || info.BuildTime != hourAgo.UnixMilli() {
+		t.Fatalf("old daemon health = %+v, %v; want build time %d from its executable", info, err, hourAgo.UnixMilli())
+	}
+
+	serveEnv := append(env, "WS_MCP_CONFIG_MANIFESTS="+writeDashboardTestManifest(t, true))
+	serve, stdin := startServe(t, newBin, serveEnv)
+	if err := waitExit(t, old, 20*time.Second); err != nil {
+		t.Fatalf("older build's daemon exit: %v", err)
+	}
+	newEp := waitForEndpoint(t, dir, version, 20*time.Second)
+	if newEp.Token == oldEp.Token || newEp.PID == oldEp.PID {
+		t.Fatalf("endpoint not replaced: %+v", newEp)
+	}
+	newInfo, err := wsdashboard.Health(context.Background(), dashboardTestClient, newEp)
+	if err != nil || newInfo.BuildTime != wsdashboard.ExecutableBuildTime(newBin) || newInfo.BuildTime <= hourAgo.UnixMilli() {
+		t.Fatalf("new daemon health = %+v, %v; want the new build's time", newInfo, err)
+	}
+	_ = stdin.Close()
+	if err := waitExit(t, serve, 10*time.Second); err != nil {
+		t.Fatalf("serve exit: %v", err)
 	}
 }
 
