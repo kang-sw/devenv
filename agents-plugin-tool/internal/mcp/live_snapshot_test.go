@@ -482,8 +482,8 @@ func TestDashboardIntakeReportsAcceptedKindsAndStatus(t *testing.T) {
 		"context": map[string]any{"tokens": 50_000, "window": 200_000, "cacheHit": 91.5},
 		"limits":  []any{map[string]any{"kind": "five_hour", "percent": 42, "resetsAt": 1_800_000_000_000}},
 		"cost":    map[string]any{"usd": 1.25, "estimate": true}})
-	if !strings.Contains(out, "ok: 1 of 1 events applied\n") || !strings.Contains(out, "\naccepts: status\n") {
-		t.Fatalf("intake reply = %q, want an accepts: status line", out)
+	if !strings.Contains(out, "ok: 1 of 1 events applied\n") || !strings.Contains(out, "\naccepts: status, compact\n") {
+		t.Fatalf("intake reply = %q, want an accepts: status, compact line", out)
 	}
 	path := wslive.SnapshotPath(f.sessionDir(f.replyA))
 	waitFor(t, "the usage in the snapshot", func() bool {
@@ -495,6 +495,34 @@ func TestDashboardIntakeReportsAcceptedKindsAndStatus(t *testing.T) {
 	off := newLiveFixture(t, false)
 	if out := intake(t, off.server, off.keyA, map[string]any{"kind": "reset"}); !strings.Contains(out, "dashboard off") || strings.Contains(out, "accepts:") {
 		t.Fatalf("dashboard off reply = %q, want no accepts line", out)
+	}
+}
+
+// TestDashboardIntakeCompaction pins the compact kind end to end: a start
+// shows the lead compacting in the snapshot, and an end clears it and
+// writes one compaction line to the ring.
+func TestDashboardIntakeCompaction(t *testing.T) {
+	f := newLiveFixture(t, true)
+	fastLive(t, 10*time.Millisecond)
+	out := intake(t, f.server, f.keyA, map[string]any{"kind": "compact", "phase": "start", "trigger": "auto"})
+	if !strings.Contains(out, "ok: 1 of 1 events applied\n") {
+		t.Fatalf("start reply = %q", out)
+	}
+	path := wslive.SnapshotPath(f.sessionDir(f.replyA))
+	waitFor(t, "the lead compacting in the snapshot", func() bool {
+		snap, err := wslive.ReadSnapshot(path)
+		return err == nil && snap.Lead.Phase == wslive.PhaseCompacting
+	})
+	if out := intake(t, f.server, f.keyA, map[string]any{"kind": "compact", "phase": "end"}); !strings.Contains(out, "ok: 1 of 1 events applied\n") {
+		t.Fatalf("end reply = %q", out)
+	}
+	waitFor(t, "the lead idle after the compaction", func() bool {
+		snap, err := wslive.ReadSnapshot(path)
+		return err == nil && snap.Lead.Phase == wslive.PhaseIdle
+	})
+	records, err := wslive.ReadRing(wslive.RingDir(f.sessionDir(f.replyA)))
+	if err != nil || len(records) != 1 || records[0].Kind != wslive.RingCompact || records[0].Trigger != wslive.TriggerAuto || records[0].CompactFailed {
+		t.Fatalf("ring = %+v (%v), want one auto compaction line", records, err)
 	}
 }
 

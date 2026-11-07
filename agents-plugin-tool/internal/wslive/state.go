@@ -36,12 +36,29 @@ const (
 	// KindStatus replaces the session's usage figures (context, limits,
 	// cost); a part it omits is shown as unknown. reset clears them too.
 	KindStatus = "status"
+	// KindCompact marks a main-conversation compaction: phase start shows
+	// the lead compacting, and end or failed settles it into a ring entry.
+	KindCompact = "compact"
+)
+
+// Compaction phases a compact event carries.
+const (
+	CompactStart  = "start"
+	CompactEnd    = "end"
+	CompactFailed = "failed"
+)
+
+// Compaction triggers: the host's own threshold or overflow compaction, or
+// one a person (or a command acting for one) asked for.
+const (
+	TriggerAuto   = "auto"
+	TriggerManual = "manual"
 )
 
 // OptionalKinds are the event kinds an older ws-mcp refuses: the intake
 // result names them in an "accepts:" line, and an adapter sends one only
 // while the latest result it received names it.
-var OptionalKinds = []string{KindStatus}
+var OptionalKinds = []string{KindStatus, KindCompact}
 
 // Event is one adapter event. Clocks are epoch milliseconds; an absent At
 // is the intake time.
@@ -66,6 +83,11 @@ type Event struct {
 	Text    string            `json:"text,omitempty"`
 	Final   bool              `json:"final,omitempty"`
 	Origin  string            `json:"origin,omitempty"`
+	// Phase and Trigger are a compact event's: CompactStart, CompactEnd, or
+	// CompactFailed, and TriggerAuto, TriggerManual, or empty when the host
+	// names neither.
+	Phase   string `json:"phase,omitempty"`
+	Trigger string `json:"trigger,omitempty"`
 	// Context, Limits, and Cost are a status event's figures. They are not
 	// under a "status" key, which is an agent's status above.
 	Context *UsageContext `json:"context,omitempty"`
@@ -113,6 +135,10 @@ type State struct {
 	turnOrigin     string
 	previousTurnMs int64
 	reply          *Reply
+	// compactStartedAt is the running compaction's start, 0 when none runs;
+	// compactTrigger is its trigger, which an end without one inherits.
+	compactStartedAt int64
+	compactTrigger   string
 
 	agents map[string]*agentState
 	usage  *Usage
@@ -180,6 +206,10 @@ func (st *State) Apply(ev Event, now int64) (Result, error) {
 		}
 		st.turnStartedAt, st.turnOrigin = at, origin
 		st.lead.done, st.lead.failed, st.lead.permission = 0, 0, nil
+		// No adapter starts a turn while a compaction runs, so one still
+		// marked running lost its end (the host failed under it): it stops
+		// showing, with no ring entry, since how it ended is unknown.
+		st.compactStartedAt, st.compactTrigger = 0, ""
 		res.Changed = true
 	case KindTurnEnd:
 		if st.reply != nil {
@@ -255,6 +285,29 @@ func (st *State) Apply(ev Event, now int64) (Result, error) {
 		usage := normalizeUsage(ev)
 		res.Changed = !reflect.DeepEqual(usage, st.usage)
 		st.usage = usage
+	case KindCompact:
+		if ev.AgentID != "" {
+			return Result{}, fmt.Errorf("compact is the main conversation's only; omit agentId")
+		}
+		trigger := strings.TrimSpace(ev.Trigger)
+		switch trigger {
+		case "", TriggerAuto, TriggerManual:
+		default:
+			return Result{}, fmt.Errorf("compact trigger must be %q or %q", TriggerAuto, TriggerManual)
+		}
+		switch ev.Phase {
+		case CompactStart:
+			st.compactStartedAt, st.compactTrigger = at, trigger
+		case CompactEnd, CompactFailed:
+			if trigger == "" {
+				trigger = st.compactTrigger
+			}
+			res.Ring = append(res.Ring, RingEntry{Kind: RingCompact, Trigger: trigger, CompactFailed: ev.Phase == CompactFailed})
+			st.compactStartedAt, st.compactTrigger = 0, ""
+		default:
+			return Result{}, fmt.Errorf("compact phase must be %q, %q, or %q", CompactStart, CompactEnd, CompactFailed)
+		}
+		res.Changed = true
 	case "":
 		return Result{}, fmt.Errorf("event kind is required")
 	default:
@@ -446,6 +499,9 @@ func closeBatches(act *activityState, at int64) {
 // refreshPhases recomputes each phase, restarting its clock on a change.
 func (st *State) refreshPhases(at int64) {
 	lead := derivePhase(&st.lead)
+	if st.compactStartedAt > 0 && lead != PhasePermission {
+		lead = PhaseCompacting
+	}
 	if lead == "" {
 		switch {
 		case st.reply != nil:
@@ -457,6 +513,9 @@ func (st *State) refreshPhases(at int64) {
 		}
 	}
 	st.lead.setPhase(lead, at)
+	if lead == PhaseCompacting {
+		st.lead.phaseStartedAt = st.compactStartedAt
+	}
 	for _, a := range st.agents {
 		phase := derivePhase(&a.activityState)
 		if phase == "" {

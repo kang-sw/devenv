@@ -7,7 +7,9 @@
   --wb-ph-reply: #0e7a83;  --wb-on-ph-reply: #ffffff;
   --wb-ph-tool: #2457c5;   --wb-on-ph-tool: #ffffff;
   --wb-ph-perm: #a35f00;   --wb-on-ph-perm: #ffffff;
+  --wb-ph-compact: #9a3a73; --wb-on-ph-compact: #ffffff;
   --wb-perm-ink: var(--wb-ph-perm);
+  --wb-compact-ink: var(--wb-ph-compact);
   --wb-ok: #1d7348; --wb-fail: #c0262d;
   --wb-warn: #c27a00; --wb-warn-ink: #a35f00;
 }
@@ -17,7 +19,9 @@
     --wb-ph-reply: #1b4a4f;  --wb-on-ph-reply: #c5ecef;
     --wb-ph-tool: #26385e;   --wb-on-ph-tool: #d2dcf6;
     --wb-ph-perm: #55400f;   --wb-on-ph-perm: #f6dfae;
+    --wb-ph-compact: #4f2342; --wb-on-ph-compact: #f5d2e7;
     --wb-perm-ink: var(--wb-on-ph-perm);
+    --wb-compact-ink: var(--wb-on-ph-compact);
     --wb-ok: #6cc39a; --wb-fail: #f0797e;
     --wb-warn: #e0a36c; --wb-warn-ink: #e0a36c;
   }
@@ -71,6 +75,7 @@
 .phase.replying { background: var(--wb-ph-reply); color: var(--wb-on-ph-reply); }
 .phase.tool { background: var(--wb-ph-tool); color: var(--wb-on-ph-tool); }
 .phase.permission { background: var(--wb-ph-perm); color: var(--wb-on-ph-perm); }
+.phase.compacting { background: var(--wb-ph-compact); color: var(--wb-on-ph-compact); }
 .phase.idle { background: var(--wb-muted); color: var(--wb-muted-fg); }
 .phase.none { background: transparent; color: var(--wb-muted-fg); box-shadow: inset 0 0 0 1px var(--wb-muted); font-weight: 600; }
 .ahead .phase, .peer .phase, .sess .phase { height: 18px; font-size: 11px; padding: 0 7px 0 6px; gap: 5px; }
@@ -197,6 +202,13 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .src.wb { background: var(--wb-now); color: var(--wb-on-now); }
 .src.mail { background: var(--wb-technical); color: var(--wb-on-technical); }
 .turnline { align-self: center; display: inline-flex; gap: 6px; align-items: center; font-size: 11px; color: var(--wb-muted-fg); box-shadow: inset 0 0 0 1px var(--wb-muted); border-radius: 999px; padding: 0 10px; }
+/* a compaction of the main conversation: running (in convlive), then landed or failed (a ring entry) in the same place */
+.sysline { align-self: center; display: inline-flex; gap: 6px; align-items: center; font-size: 11.5px; font-weight: 600; color: var(--wb-muted-fg); background: color-mix(in srgb, var(--wb-compact-ink) 9%, var(--wb-card)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-compact-ink) 35%, transparent); border-radius: 999px; padding: 2px 11px; }
+.sysline .mk { display: inline-flex; font-weight: 800; color: var(--wb-ok); }
+.sysline.running .mk { color: var(--wb-compact-ink); }
+.sysline.running .spin { width: 10px; height: 10px; }
+.sysline.fail .mk { color: var(--wb-fail); }
+.sysline .t { font-size: 11px; font-weight: 400; font-variant-numeric: tabular-nums; }
 .caret { display: inline-block; width: 7px; height: 13px; background: currentColor; vertical-align: -2px; margin-left: 2px; animation: dash-blink 1s steps(1) infinite; }
 @keyframes dash-blink { 50% { opacity: 0; } }
 .permwait { display: flex; gap: 8px; align-items: center; background: color-mix(in srgb, var(--wb-ph-perm) 16%, var(--wb-card)); border-radius: 10px; padding: 7px 11px; font-size: 13px; }
