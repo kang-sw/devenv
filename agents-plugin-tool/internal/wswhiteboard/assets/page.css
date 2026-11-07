@@ -13,6 +13,8 @@
   --wb-on-topic: #ffffff;
   --wb-now: var(--wb-primary);
   --wb-on-now: var(--wb-primary-fg);
+  --wb-line: color-mix(in srgb, var(--wb-fg) 16%, transparent);
+  --wb-wash: color-mix(in srgb, var(--wb-fg) 6%, transparent);
   --wb-policy: #b25000;      --wb-on-policy: #ffffff;
   --wb-technical: #2457c5;   --wb-on-technical: #ffffff;
   --wb-announced: #1d7348;   --wb-on-announced: #ffffff;
@@ -123,12 +125,30 @@ a { color: var(--wb-primary); }
 .md ul, .md ol { padding-left: 18px; }
 .md li { margin: 2px 0; }
 .md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { font-size: inherit; margin: 0 0 4px; }
-.md blockquote { padding-left: 10px; box-shadow: inset 3px 0 var(--wb-muted); }
+.md blockquote { padding: 5px 11px; border-left: 3px solid color-mix(in srgb, var(--wb-primary) 70%, transparent); border-radius: 0 6px 6px 0; background: color-mix(in srgb, var(--wb-primary) 7%, transparent); color: color-mix(in srgb, var(--wb-fg) 78%, var(--wb-muted-fg)); }
+.md blockquote > :first-child { margin-top: 0; }
+.md blockquote > :last-child { margin-bottom: 0; }
 .md img { max-width: 100%; height: auto; border-radius: 6px; vertical-align: middle; }
 .md pre { background: var(--wb-muted); border-radius: 8px; padding: 6px 9px; overflow-x: auto; font-size: 12.5px; }
 .md pre > code { background: none; padding: 0; font-size: inherit; }
-.md table { border-collapse: collapse; font-size: 12.5px; display: block; max-width: 100%; overflow-x: auto; }
-.md th, .md td { padding: 3px 8px; border-bottom: 1px solid var(--wb-muted); text-align: left; vertical-align: top; }
+/* a table is a block that scrolls sideways when its columns need more than the width; cells wrap at spaces */
+.md table { display: block; width: fit-content; max-width: 100%; overflow-x: auto; border-collapse: separate; border-spacing: 0; font-size: 12.5px; border: 1px solid var(--wb-line); border-radius: 8px; }
+.md th, .md td { padding: 5px 10px; vertical-align: top; overflow-wrap: break-word; }
+.md th:not([align]) { text-align: left; }
+.md th { background: var(--wb-wash); font-weight: 700; border-bottom: 1px solid var(--wb-line); }
+.md td { border-top: 1px solid var(--wb-line); }
+.md tbody tr:first-child td { border-top: 0; }
+.md tbody tr:nth-child(even) td { background: color-mix(in srgb, var(--wb-fg) 3%, transparent); }
+/* task lists: goldmark writes a disabled checkbox first in the item */
+.md li:has(> input[type="checkbox"]), .md li:has(> p > input[type="checkbox"]) { list-style: none; margin-left: -16px; }
+.md input[type="checkbox"] { accent-color: var(--wb-primary); margin: 0 6px 0 0; vertical-align: -2px; opacity: 1; }
+/* footnotes */
+.md sup { line-height: 0; }
+.md sup > a, .md .footnote-backref { text-decoration: none; font-weight: 600; }
+.md .footnotes { margin-top: 8px; font-size: 12px; color: var(--wb-muted-fg); }
+.md .footnotes hr { border: 0; border-top: 1px solid var(--wb-line); margin: 0 0 4px; }
+.md .footnotes ol { margin: 0; }
+.md .footnotes li p { margin: 0; }
 .md pre.mermaid { background: transparent; padding: 0; text-align: center; font-family: var(--wb-mono); }
 .md pre.mermaid svg { max-width: 100%; height: auto; }
 
@@ -219,8 +239,6 @@ details.now.stale > summary { background: var(--wb-muted); color: var(--wb-muted
 .now-body > :last-child { margin-bottom: 0; }
 .now-body > svg { width: 100%; height: auto; display: block; }
 .now-body img, .now-body canvas { max-width: 100%; height: auto; }
-.now-body table { border-collapse: collapse; font-size: 13px; }
-.now-body th, .now-body td { padding: 3px 8px; border-bottom: 1px solid var(--wb-muted); text-align: left; vertical-align: top; }
 .now-body pre { background: var(--wb-muted); border-radius: 8px; padding: 8px 10px; overflow-x: auto; font-size: 12.5px; }
 /* a served page's Now: a sandboxed frame sized to its content, which pads itself */
 .now-body.framed { padding: 0; }

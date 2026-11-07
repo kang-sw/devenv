@@ -43,5 +43,5 @@ func RenderText(s string, t TextTargets) template.HTML {
 		return p.Block(s)
 	}
 	p.trusted = &[]trustedTarget{}
-	return p.sanitizeReply(string(convert(p.rawMarkdown(), s)))
+	return p.sanitizeReply(string(p.convert(p.rawMarkdown(), s)))
 }

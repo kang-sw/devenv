@@ -59,8 +59,8 @@ var (
 	// HTML only.
 	fullDocumentPattern = regexp.MustCompile(`(?i)<!doctype|<html[\s>]`)
 	// nowParser parses Now markdown as renderNow's pipeline does (default
-	// block and inline parsers, raw HTML on, tables and strikethrough).
-	nowParser = goldmark.New(goldmark.WithExtensions(extension.Table, extension.Strikethrough)).Parser()
+	// block and inline parsers, raw HTML on, tables, strikethrough, task lists, footnotes).
+	nowParser = goldmark.New(goldmark.WithExtensions(extension.Table, extension.Strikethrough, extension.TaskList, extension.Footnote)).Parser()
 )
 
 // fullDocument reports whether Now markdown carries a whole HTML document:

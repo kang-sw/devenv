@@ -213,3 +213,58 @@ func TestReplyRenderWithoutHTMLStaysEscaped(t *testing.T) {
 	wantAll(t, out, "&lt;b&gt;x&lt;/b&gt;", `<a href="https://example.com" target="_blank" rel="noopener noreferrer">l</a>`)
 	wantNone(t, out, trustAttr)
 }
+
+// TestTaskListAndFootnotes pins the two extensions on every pipeline: a task
+// list renders disabled checkboxes, a footnote links its note, and two texts
+// that each define [^1] keep apart ids, in a finished reply (sanitized) as
+// on a board field and in the escaped streaming render.
+func TestTaskListAndFootnotes(t *testing.T) {
+	const list = "- [ ] todo\n- [x] done"
+	a := "first[^1]\n\n[^1]: note a"
+	b := "second[^1]\n\n[^1]: note b"
+	targets := TextTargets{HTML: true}
+	for name, tt := range map[string]TextTargets{"reply": targets, "escaped": {}} {
+		t.Run(name, func(t *testing.T) {
+			out := string(RenderText(list, tt))
+			if n := strings.Count(out, `type="checkbox"`); n != 2 || strings.Count(out, "disabled") != 2 || strings.Count(out, "checked") != 1 {
+				t.Errorf("want two disabled checkboxes, one checked:\n%s", out)
+			}
+			wantAll(t, out, "todo", "done")
+			oa, ob := string(RenderText(a, tt)), string(RenderText(b, tt))
+			pa, pb := footnoteIDs(t, oa), footnoteIDs(t, ob)
+			if pa == pb {
+				t.Errorf("two texts share footnote prefix %q", pa)
+			}
+			wantAll(t, oa, `<sup id="`+pa+`fnref:1"><a href="#`+pa+`fn:1"`, `<li id="`+pa+`fn:1">`, `href="#`+pa+`fnref:1"`, "note a")
+			wantAll(t, ob, `<li id="`+pb+`fn:1">`)
+			wantNone(t, oa, pb)
+		})
+	}
+	// Stable across renders of the same text.
+	if x, y := RenderText(a, targets), RenderText(a, targets); x != y {
+		t.Errorf("same text rendered two ways:\n%s\n%s", x, y)
+	}
+}
+
+// footnoteIDs returns the footnote id prefix out's first footnote carries.
+func footnoteIDs(t *testing.T, out string) string {
+	t.Helper()
+	m := regexp.MustCompile(`id="(wbf-[0-9a-f]{8}-)fnref:1"`).FindStringSubmatch(out)
+	if m == nil {
+		t.Fatalf("no footnote id:\n%s", out)
+	}
+	return m[1]
+}
+
+// TestReplySanitizerKeepsOnlyDisabledCheckboxesAndFootnoteIDs pins the two
+// sanitizer allowances the extensions need: an input is a disabled checkbox
+// or gone, and an id survives only on a footnote's sup and li.
+func TestReplySanitizerKeepsOnlyDisabledCheckboxesAndFootnoteIDs(t *testing.T) {
+	out := servedReply(`<input type="text" value="x" name="n"> <input type="checkbox" checked onclick="x()" name="n"> <input type="CHECKBOX">` +
+		"\n\n" + `<p id="item-3">p</p> <sup id="wbf-00000000-fnref:1">s</sup> <span id="wbf-00000000-fn:1">x</span> <li id="wbf-zz-fn:1">`)
+	wantAll(t, out, `<input type="checkbox" disabled="" checked=""/>`, `<input type="checkbox" disabled=""/>`, `<sup id="wbf-00000000-fnref:1">`)
+	if n := strings.Count(out, "<input"); n != 2 {
+		t.Errorf("want two inputs, got %d:\n%s", n, out)
+	}
+	wantNone(t, out, "text", "onclick", "name=", "item-3", `<span id=`, "wbf-zz")
+}

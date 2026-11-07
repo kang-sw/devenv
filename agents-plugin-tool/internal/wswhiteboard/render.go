@@ -239,6 +239,9 @@ type pageData struct {
 	trusted *[]trustedTarget
 	// svgIDs is the id prefix of the finished reply being sanitized.
 	svgIDs string
+	// footnotePrefix is the footnote id prefix of the text being rendered
+	// (convert).
+	footnotePrefix string
 }
 
 // MermaidFile is the shared mermaid script's name, beside the page.
