@@ -26,7 +26,9 @@ type Tracker struct {
 }
 
 // New returns the tracker of clone stream ("<member>.<clone>") over src,
-// with everything src holds read.
+// with everything src holds read. stream must be src's own writer clone
+// (for a *wsledger.Ledger, MemberID() + "." + CloneID()): Source cannot
+// report it, and NextID and Dispatch's judged ids are computed from it.
 func New(src Source, stream string) *Tracker {
 	t := &Tracker{src: src, stream: stream, genesis: src.Identity().Genesis}
 	t.Refresh()

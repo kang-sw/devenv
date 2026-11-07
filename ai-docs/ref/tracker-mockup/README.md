@@ -510,8 +510,8 @@ creation, and it has a topic and a blocked subtask.
 
 The model snags the scenario walk found are resolved by (284)-(292); see
 [SCENARIOS.md](SCENARIOS.md). (295) settled the last one: when the original of
-a pending handoff ends another way (unassign, removal, return, or another
-handoff accepted), the pending handoff ends as `withdrawn` with no event, its
+a pending handoff ends another way (unassign, removal, return, or a
+concurrent second handoff accepted), the pending handoff ends as `withdrawn` with no event, its
 `ended` pointing at the event that ended the original. An unassign, removal,
 or return of the original concurrent with an accept of its handoff wins, as
 removal beats writes (213): the accepted handoff ends `withdrawn`, the original

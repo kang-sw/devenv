@@ -1,6 +1,7 @@
 package wstracker
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -168,8 +169,9 @@ func TestScenario5AgentStatusHumanCorrection(t *testing.T) {
 	wantNotIn(t, "blocked below", v.Items[ship].Rollup.Blocked, ib)
 	// An agent never answers an assignment on its own.
 	_, err := tm.dispatch("lena.pc", TypeItemAccept, map[string]any{"item": "noa.pc#3"}, OriginAgentAuto)
-	if err == nil {
-		t.Fatal("agent-auto accept was dispatched")
+	var ref *Refusal
+	if !errors.As(err, &ref) || ref.Reason != "an agent never accepts, declines, returns or hands off an assignment on its own (agent-auto is invalid here)" {
+		t.Fatalf("agent-auto accept: %v", err)
 	}
 }
 
