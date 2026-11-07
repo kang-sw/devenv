@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -418,5 +420,114 @@ func TestDashboardTurnedOffStopsTheHeartbeat(t *testing.T) {
 	f.server.live.mu.Unlock()
 	if kept {
 		t.Fatal("the stopped session stayed in the hub")
+	}
+}
+
+// TestDashboardIntakeReportsAcceptedKindsAndStatus pins the support report
+// and the status kind end to end: an intake result names the optional kinds
+// this ws-mcp accepts, the "dashboard off" result names none, and a status
+// event's figures land in the snapshot's usage.
+func TestDashboardIntakeReportsAcceptedKindsAndStatus(t *testing.T) {
+	f := newLiveFixture(t, true)
+	fastLive(t, 10*time.Millisecond)
+	out := intake(t, f.server, f.keyA, map[string]any{"kind": "status",
+		"context": map[string]any{"tokens": 50_000, "window": 200_000, "cacheHit": 91.5},
+		"limits":  []any{map[string]any{"kind": "five_hour", "percent": 42, "resetsAt": 1_800_000_000_000}},
+		"cost":    map[string]any{"usd": 1.25, "estimate": true}})
+	if !strings.Contains(out, "ok: 1 of 1 events applied\n") || !strings.Contains(out, "\naccepts: status\n") {
+		t.Fatalf("intake reply = %q, want an accepts: status line", out)
+	}
+	path := wslive.SnapshotPath(f.sessionDir(f.replyA))
+	waitFor(t, "the usage in the snapshot", func() bool {
+		snap, err := wslive.ReadSnapshot(path)
+		return err == nil && snap.Usage != nil && snap.Usage.Context != nil && *snap.Usage.Context.Percent == 25 &&
+			len(snap.Usage.Limits) == 1 && snap.Usage.Cost != nil && snap.Usage.Cost.Estimate
+	})
+
+	off := newLiveFixture(t, false)
+	if out := intake(t, off.server, off.keyA, map[string]any{"kind": "reset"}); !strings.Contains(out, "dashboard off") || strings.Contains(out, "accepts:") {
+		t.Fatalf("dashboard off reply = %q, want no accepts line", out)
+	}
+}
+
+// TestDashboardSnapshotRepoFields pins the repo fields ws-mcp reads for the
+// session root: a repository without an upstream shows its branch with no
+// upstream, one with an upstream shows the upstream and its standing, and a
+// root that is not a repository shows the folder alone.
+func TestDashboardSnapshotRepoFields(t *testing.T) {
+	base := t.TempDir()
+	origin := filepath.Join(base, "origin")
+	work := filepath.Join(base, "work")
+	gitCmd(t, base, "init", "-q", "-b", "main", origin)
+	gitCmd(t, origin, "commit", "-q", "--allow-empty", "-m", "a")
+	gitCmd(t, base, "clone", "-q", origin, work)
+	gitCmd(t, work, "commit", "-q", "--allow-empty", "-m", "b")
+
+	repo := readSessionRepo(work)
+	if repo.Folder != "work" || repo.Branch != "main" || repo.Upstream != "origin/main" || repo.Ahead != 1 || repo.Behind != 0 || repo.Detached {
+		t.Fatalf("with upstream: %+v", repo)
+	}
+	gitCmd(t, work, "checkout", "-q", "-b", "topic")
+	if repo = readSessionRepo(work); repo.Branch != "topic" || repo.Upstream != "" || repo.Ahead != 0 {
+		t.Fatalf("no upstream: %+v", repo)
+	}
+	plain := filepath.Join(base, "plain")
+	if err := os.Mkdir(plain, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if repo = readSessionRepo(plain); repo != (wslive.Repo{Folder: "plain"}) {
+		t.Fatalf("not a repository: %+v", repo)
+	}
+
+	// End to end: the fixture's root is a fresh repository with no commit,
+	// so its snapshot carries the folder alone.
+	f := newLiveFixture(t, true)
+	fastLive(t, 10*time.Millisecond)
+	intake(t, f.server, f.keyA, map[string]any{"kind": "reset"})
+	path := wslive.SnapshotPath(f.sessionDir(f.replyA))
+	waitFor(t, "the repo in the snapshot", func() bool {
+		snap, err := wslive.ReadSnapshot(path)
+		return err == nil && snap.Repo != nil && snap.Repo.Folder == filepath.Base(f.root)
+	})
+}
+
+// TestDashboardRepoReadOncePerHeartbeat pins the git cost: change snapshots
+// inside one heartbeat interval reuse the cached repo read, and only a
+// write a heartbeat interval later reads again.
+func TestDashboardRepoReadOncePerHeartbeat(t *testing.T) {
+	f := newLiveFixture(t, true)
+	fastLive(t, 5*time.Millisecond)
+	var reads, writes atomic.Int32
+	orig := currentLiveSeams()
+	setLiveSeams(func(s *liveSeams) {
+		s.readRepo = func(root string) wslive.Repo { reads.Add(1); return wslive.Repo{Folder: filepath.Base(root), Branch: "main"} }
+		s.writeSnapshot = func(path string, data []byte) error { writes.Add(1); return orig.writeSnapshot(path, data) }
+	})
+	for i := 0; i < 4; i++ {
+		intake(t, f.server, f.keyA, map[string]any{"kind": "reply", "text": strings.Repeat("y", i+1)})
+		target := int32(i + 1)
+		waitFor(t, "a change snapshot", func() bool { return writes.Load() >= target })
+	}
+	if n := reads.Load(); n != 1 {
+		t.Fatalf("%d repo reads over %d change snapshots in one heartbeat interval, want 1", n, writes.Load())
+	}
+	snap, err := wslive.ReadSnapshot(wslive.SnapshotPath(f.sessionDir(f.replyA)))
+	if err != nil || snap.Repo == nil || snap.Repo.Branch != "main" {
+		t.Fatalf("snapshot repo = %+v, %v", snap.Repo, err)
+	}
+
+	// Once the cached read is a heartbeat interval old, the next write reads again.
+	setLiveSeams(func(s *liveSeams) { s.heartbeat = 40 * time.Millisecond })
+	time.Sleep(60 * time.Millisecond)
+	intake(t, f.server, f.keyA, map[string]any{"kind": "reply", "text": "z"})
+	waitFor(t, "a refreshed repo read", func() bool { return reads.Load() >= 2 })
+}
+
+func gitCmd(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, out)
 	}
 }

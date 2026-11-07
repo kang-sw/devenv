@@ -106,6 +106,48 @@ type BranchStatus struct {
 	Behind   int    `json:"behind,omitempty"`
 }
 
+// BranchSync reads root's branch and its standing against its upstream with
+// cheap ref reads only (rev-parse and rev-list, never a working-tree scan or a
+// fetch, so Behind reflects the last fetch). Head is the branch name, or ""
+// with OID set to the short commit id on a detached HEAD. Upstream is empty
+// when the branch tracks none. ok is false when root is not a repository or
+// HEAD names no commit yet.
+func BranchSync(ctx context.Context, runner Runner, root string) (status BranchStatus, ok bool) {
+	if runner == nil {
+		runner = ExecRunner{}
+	}
+	out, err := runner.RunGit(ctx, root, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return BranchStatus{}, false
+	}
+	head := strings.TrimSpace(string(out))
+	if head == "" {
+		return BranchStatus{}, false
+	}
+	if head == "HEAD" {
+		short, err := runner.RunGit(ctx, root, "rev-parse", "--short", "HEAD")
+		if err != nil {
+			return BranchStatus{}, false
+		}
+		return BranchStatus{OID: strings.TrimSpace(string(short))}, true
+	}
+	status.Head = head
+	up, err := runner.RunGit(ctx, root, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
+	if err != nil {
+		return status, true
+	}
+	status.Upstream = strings.TrimSpace(string(up))
+	counts, err := runner.RunGit(ctx, root, "rev-list", "--left-right", "--count", "HEAD...@{upstream}")
+	if err != nil {
+		return status, true
+	}
+	if fields := strings.Fields(string(counts)); len(fields) == 2 {
+		status.Ahead, _ = strconv.Atoi(fields[0])
+		status.Behind, _ = strconv.Atoi(fields[1])
+	}
+	return status, true
+}
+
 type FileStatus struct {
 	Path           string `json:"path"`
 	OldPath        string `json:"old_path,omitempty"`

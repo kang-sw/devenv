@@ -1,15 +1,18 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsdashboard"
+	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wslive"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
 )
@@ -32,6 +35,12 @@ import (
 // are logged as debug events only, and each write sends the registry's
 // fire-and-forget nudge (dashboardNudge). With the session's
 // dashboard.enabled off, nothing is written at all.
+//
+// The snapshot's repo fields (the session root's folder, branch, and
+// upstream standing) are read here, not sent by the adapter: a few git ref
+// reads, cached per session and refreshed at most once per heartbeat
+// interval from the timer goroutine, outside writeMu, so neither a change
+// snapshot nor an intake call ever waits on git.
 
 const dashboardIntakeTool = "dashboard.intake"
 
@@ -45,6 +54,7 @@ type liveSeams struct {
 	heartbeat      time.Duration
 	writeSnapshot  func(path string, data []byte) error
 	appendRing     func(dir string, entries []wslive.RingEntry) error
+	readRepo       func(root string) wslive.Repo
 }
 
 var (
@@ -55,6 +65,7 @@ var (
 		heartbeat:      wslive.HeartbeatInterval,
 		writeSnapshot:  writeWhiteboardFile,
 		appendRing:     wslive.AppendRing,
+		readRepo:       readSessionRepo,
 	}
 )
 
@@ -86,6 +97,7 @@ type liveSession struct {
 	// store in it changed; active reports whether the session may still be
 	// written to dir (its dashboard key on, its directory unchanged).
 	dir     string
+	root    string
 	replyID string
 	nudge   func()
 	active  func() bool
@@ -106,9 +118,15 @@ type liveSession struct {
 	// ringMu is taken before mu is released, so concurrent intake calls
 	// write their ring entries in the order their events applied.
 	ringMu sync.Mutex
+
+	// repoMu guards the cached repo read; it is taken before writeMu and
+	// held across a refresh, so two writes never read git twice.
+	repoMu sync.Mutex
+	repo   *wslive.Repo
+	repoAt time.Time
 }
 
-func (h *liveHub) session(key, dir string, nudge func(), active func() bool) *liveSession {
+func (h *liveHub) session(key, dir, root string, nudge func(), active func() bool) *liveSession {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.sessions == nil {
@@ -122,7 +140,7 @@ func (h *liveHub) session(key, dir string, nudge func(), active func() bool) *li
 		ls.stop()
 	}
 	state := wslive.NewState(key)
-	ls = &liveSession{dir: dir, replyID: state.ReplyID(), nudge: nudge, active: active, state: state}
+	ls = &liveSession{dir: dir, root: root, replyID: state.ReplyID(), nudge: nudge, active: active, state: state}
 	created := ls
 	ls.onStop = func() { h.drop(key, created) }
 	h.sessions[key] = ls
@@ -178,7 +196,8 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
-	if _, found := s.sessions.lookup(key); !found {
+	entry, found := s.sessions.lookup(key)
+	if !found {
 		return toolTextResponse(id, "", fmt.Errorf("%s: unknown_session: session key not found", tool))
 	}
 	adapter, _ := args["adapter"].(string)
@@ -194,7 +213,7 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 		return toolTextResponse(id, "dashboard off: nothing recorded\n", nil)
 	}
 
-	ls := s.live.session(key, dir, func() { s.dashboardNudge(key) }, func() bool {
+	ls := s.live.session(key, dir, entry.root, func() { s.dashboardNudge(key) }, func() bool {
 		current, on := s.liveSessionDir(key)
 		return on && current == dir
 	})
@@ -240,6 +259,7 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "ok: %d of %d events applied\n", applied, len(rawEvents))
+	b.WriteString("accepts: " + strings.Join(wslive.OptionalKinds, ", ") + "\n")
 	for _, p := range problems {
 		b.WriteString("skipped " + p + "\n")
 	}
@@ -290,11 +310,14 @@ func (ls *liveSession) fire() {
 		ls.onStop()
 		return
 	}
+	repo := ls.currentRepo()
 	ls.writeMu.Lock()
 	ls.mu.Lock()
 	ls.due = time.Time{}
-	data, err := json.Marshal(ls.state.Snapshot(time.Now().UnixMilli()))
+	snap := ls.state.Snapshot(time.Now().UnixMilli())
 	ls.mu.Unlock()
+	snap.Repo = repo
+	data, err := json.Marshal(snap)
 	if err == nil {
 		err = writeLiveSnapshot(ls.dir, data)
 	}
@@ -309,6 +332,44 @@ func (ls *liveSession) fire() {
 		ls.scheduleLocked(currentLiveSeams().heartbeat)
 	}
 	ls.mu.Unlock()
+}
+
+// currentRepo is the session root's cached repo read, refreshed when it is
+// a heartbeat interval old or was never read.
+func (ls *liveSession) currentRepo() *wslive.Repo {
+	ls.repoMu.Lock()
+	defer ls.repoMu.Unlock()
+	seams := currentLiveSeams()
+	if ls.repo == nil || time.Since(ls.repoAt) >= seams.heartbeat {
+		repo := wslive.CleanRepo(seams.readRepo(ls.root))
+		ls.repo, ls.repoAt = &repo, time.Now()
+	}
+	repo := *ls.repo
+	return &repo
+}
+
+// repoReadTimeout bounds one session's git reads.
+const repoReadTimeout = 5 * time.Second
+
+// readSessionRepo reads root's folder and branch standing; a root that is
+// not a repository has the folder alone.
+func readSessionRepo(root string) wslive.Repo {
+	repo := wslive.Repo{Folder: filepath.Base(root)}
+	if root == "" {
+		repo.Folder = ""
+		return repo
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), repoReadTimeout)
+	defer cancel()
+	st, ok := wsgit.BranchSync(ctx, nil, root)
+	if !ok {
+		return repo
+	}
+	repo.Branch, repo.Upstream, repo.Ahead, repo.Behind = st.Head, st.Upstream, st.Ahead, st.Behind
+	if st.Head == "" {
+		repo.Branch, repo.Detached = st.OID, true
+	}
+	return repo
 }
 
 func writeLiveSnapshot(dir string, data []byte) error {

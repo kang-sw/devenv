@@ -122,6 +122,73 @@ type Snapshot struct {
 	HeartbeatMs int64   `json:"heartbeatMs,omitempty"`
 	Lead        Lead    `json:"lead"`
 	Agents      []Agent `json:"agents,omitempty"`
+	// Usage is the session's usage figures as its adapter last reported them
+	// (a status event); absent before the first one.
+	Usage *Usage `json:"usage,omitempty"`
+	// Repo is the session root's folder and branch state, which the writing
+	// ws-mcp reads itself; absent until its first read.
+	Repo *Repo `json:"repo,omitempty"`
+}
+
+// Usage limit kinds: the plan's rolling 5-hour and weekly limits.
+const (
+	LimitFiveHour = "five_hour"
+	LimitSevenDay = "seven_day"
+)
+
+// Usage is what a status event reports. Each part is absent when the host
+// has no figure for it, and a status event replaces the whole value.
+type Usage struct {
+	Context *UsageContext `json:"context,omitempty"`
+	// Limits holds at most one limit per kind, the 5-hour limit first.
+	Limits []UsageLimit `json:"limits,omitempty"`
+	Cost   *UsageCost   `json:"cost,omitempty"`
+}
+
+// UsageContext is the context window's occupancy.
+type UsageContext struct {
+	// Tokens is the context's size in tokens; null while the host does not
+	// know it (after a compaction, until the next response).
+	Tokens *int64 `json:"tokens"`
+	// Window is the context window in tokens; 0 when unknown.
+	Window int64 `json:"window,omitempty"`
+	// Percent is Tokens of Window as the host reports it, else computed;
+	// absent while Tokens or Window is unknown.
+	Percent *float64 `json:"percent,omitempty"`
+	// CacheHit is the last response's prompt cache hit rate in percent:
+	// cache reads over uncached input, cache reads, and cache writes.
+	CacheHit *float64 `json:"cacheHit,omitempty"`
+}
+
+// UsageLimit is one plan usage limit.
+type UsageLimit struct {
+	// Kind is LimitFiveHour or LimitSevenDay.
+	Kind    string  `json:"kind"`
+	Percent float64 `json:"percent"`
+	// ResetsAt is when the limit's window resets (epoch ms); 0 when unknown.
+	ResetsAt int64 `json:"resetsAt,omitempty"`
+}
+
+// UsageCost is the session's cost in US dollars.
+type UsageCost struct {
+	USD float64 `json:"usd"`
+	// Estimate marks a figure summed from known prices rather than the
+	// host's own; Incomplete marks an estimate that left out calls of
+	// unknown price.
+	Estimate   bool `json:"estimate,omitempty"`
+	Incomplete bool `json:"incomplete,omitempty"`
+}
+
+// Repo is the session root's folder and branch state. Branch is empty when
+// the root is not a repository; Upstream is empty when the branch tracks
+// none, and Ahead and Behind count commits against it as of the last fetch.
+type Repo struct {
+	Folder   string `json:"folder"`
+	Branch   string `json:"branch,omitempty"`
+	Detached bool   `json:"detached,omitempty"`
+	Upstream string `json:"upstream,omitempty"`
+	Ahead    int    `json:"ahead,omitempty"`
+	Behind   int    `json:"behind,omitempty"`
 }
 
 // Activity is what the lead and a subagent share: the batch view and the
@@ -250,4 +317,17 @@ func (s Snapshot) Stale(now time.Time) bool {
 func AdapterPresent(path string, now time.Time) bool {
 	snap, err := ReadSnapshot(path)
 	return err == nil && snap.Adapter != "" && !snap.Stale(now)
+}
+
+// RepoRunes bounds a Repo's names; git output reaches a browser.
+const RepoRunes = 200
+
+// CleanRepo is r as the snapshot keeps it: each name one display line,
+// capped at RepoRunes, and counts never negative.
+func CleanRepo(r Repo) Repo {
+	r.Folder = cleanLine(r.Folder, RepoRunes)
+	r.Branch = cleanLine(r.Branch, RepoRunes)
+	r.Upstream = cleanLine(r.Upstream, RepoRunes)
+	r.Ahead, r.Behind = max(r.Ahead, 0), max(r.Behind, 0)
+	return r
 }
