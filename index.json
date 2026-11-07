@@ -632,7 +632,14 @@
       "registered_at": "2026-11-07T05:11:56Z"
     },
     "261107-feat-ws-whiteboard-xml-commands-topic-content": {
-      "registered_at": "2026-11-07T12:28:50Z"
+      "registered_at": "2026-11-07T12:28:50Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-07T12:37:04Z"
+      }
     }
   }
 }
