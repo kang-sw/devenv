@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	_ "embed"
 	"encoding/hex"
+	"fmt"
+	"hash/fnv"
 	"html/template"
 	"net/url"
 	"path/filepath"
@@ -125,7 +127,12 @@ func blockMarkdown(p *pageData, refs util.PrioritizedValue, rawHTML bool) goldma
 			parser.WithInlineParsers(inlineParsers(refs, rawHTML)...),
 			parser.WithParagraphTransformers(parser.DefaultParagraphTransformers()...),
 		)),
-		goldmark.WithExtensions(extension.Table, extension.Strikethrough),
+		goldmark.WithExtensions(
+			extension.Table, extension.Strikethrough, extension.TaskList,
+			extension.NewFootnote(extension.WithFootnoteIDPrefixFunction(func(ast.Node) []byte {
+				return []byte(p.footnotePrefix)
+			})),
+		),
 		goldmark.WithRendererOptions(options...),
 	)
 }
@@ -166,20 +173,20 @@ func (p *pageData) rawMarkdown() goldmark.Markdown {
 // neither balanced nor filtered, so an inline script still runs. Item
 // references resolve in its markdown text, never inside its HTML.
 func (p *pageData) renderNow(s string) template.HTML {
-	return convert(p.rawMarkdown(), s)
+	return p.convert(p.rawMarkdown(), s)
 }
 
 // Inline renders s as inline markdown: emphasis, code, links, and item
 // references; an image shows its alt text.
 func (p *pageData) Inline(s string) template.HTML {
-	return convert(p.markdown().inline, s)
+	return p.convert(p.markdown().inline, s)
 }
 
 // Block renders s as block markdown with hard-wrapped lines. Text that is
 // one paragraph renders without the <p> wrapper, so it sits inline beside an
 // option letter or a recommendation star.
 func (p *pageData) Block(s string) template.HTML {
-	return convert(p.markdown().block, s)
+	return p.convert(p.markdown().block, s)
 }
 
 // FirstLine renders the first non-blank line of s as inline markdown, the
@@ -217,7 +224,20 @@ func (p *pageData) IsBlock(s string) bool {
 	return image
 }
 
-func convert(md goldmark.Markdown, s string) template.HTML {
+// footnoteIDPrefix is the id prefix of the footnotes in one text: a hash of
+// that text, so two texts on one page that each define [^1] link to their
+// own note. Identical texts share it, and their links meet the first copy.
+func footnoteIDPrefix(s string) string {
+	h := fnv.New32a()
+	h.Write([]byte(s))
+	return fmt.Sprintf("%s%08x-", footnoteIDPrefixBase, h.Sum32())
+}
+
+// convert renders s through md, one of the page's pipelines.
+func (p *pageData) convert(md goldmark.Markdown, s string) template.HTML {
+	// Rendering is sequential per page; the footnote renderer reads the prefix
+	// through its closure (blockMarkdown).
+	p.footnotePrefix = footnoteIDPrefix(s)
 	var buf bytes.Buffer
 	if err := md.Convert([]byte(s), &buf); err != nil {
 		// Convert fails only on a writer error, which a bytes.Buffer never

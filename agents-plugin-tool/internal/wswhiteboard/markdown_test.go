@@ -1,6 +1,7 @@
 package wswhiteboard
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -338,4 +339,19 @@ func TestRenderTextFileActions(t *testing.T) {
 		FileActions: func(p string) FileAction { return FileAction{Href: "/s/r/file?path=" + p, Rel: p, Abs: "/root/" + p} },
 	}))
 	wantAll(t, out, `<a href="/s/r/file?path=docs/a.md" data-wl="file" data-rel="docs/a.md" data-abs="/root/docs/a.md" title="docs/a.md">a</a>`, `data-wl="url"`)
+}
+
+// TestMarkdownBoardTaskListAndFootnotes pins both extensions in item block
+// fields: a task list renders read-only checkboxes, and two fields that each
+// define [^1] get distinct ids.
+func TestMarkdownBoardTaskListAndFootnotes(t *testing.T) {
+	out := mdBoard(t, LayoutFull, Item{ID: 1, Class: ClassPolicy, Topic: "t", Title: "q",
+		Options:   []string{"- [ ] a\n- [x] b", "x[^1]\n\n[^1]: one"},
+		Rationale: "y[^1]\n\n[^1]: two",
+		Status:    StatusOpen})
+	wantAll(t, out, `<input disabled="" type="checkbox"> a`, `<input checked="" disabled="" type="checkbox"> b`)
+	ids := regexp.MustCompile(`<li id="(wbf-[0-9a-f]{8}-fn:1)">`).FindAllStringSubmatch(out, -1)
+	if len(ids) != 2 || ids[0][1] == ids[1][1] {
+		t.Errorf("want two distinct footnote ids, got %v", ids)
+	}
 }

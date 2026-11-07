@@ -34,6 +34,10 @@ import (
 //     expression(, @import, and backslash escapes, and loses position, so no
 //     reply fetches through CSS or lays a layer over the page; the finished
 //     bubble's contain: paint keeps the rest inside it.
+//   - A footnote's sup and li keep their id when it has the shape
+//     footnoteIDPrefix writes, and no other element keeps one, so a reply
+//     cannot claim a page id; a task-list checkbox is the one form control,
+//     always a disabled checkbox.
 //   - SVG keeps shapes, text, markers, and gradients: an id is prefixed with
 //     svgIDPrefix and a hash of the reply, so it collides neither with a page
 //     id nor with another reply's same-named id, and a presentation value may
@@ -42,6 +46,14 @@ import (
 // trustAttr carries a writeTrustRef index on a link or image the markdown
 // renderer resolved.
 const trustAttr = "data-wbref"
+
+// footnoteIDPrefixBase starts the ids of a text's footnotes; a hash of the
+// text follows (footnoteIDPrefix), as in svgIDPrefix.
+const footnoteIDPrefixBase = "wbf-"
+
+// footnoteID is an id the footnote renderer writes on a note reference or
+// a note.
+var footnoteID = regexp.MustCompile(`^` + footnoteIDPrefixBase + `[0-9a-f]{8}-(?:fn|fnref[0-9]*):[0-9]+$`)
 
 // svgIDPrefix keeps a reply's SVG ids apart from the page's own ids; the
 // reply hash after it (sanitizeReply) keeps them apart from another reply's.
@@ -118,7 +130,7 @@ func init() {
 		"table": "width", "caption": "", "colgroup": "span width", "col": "span width",
 		"thead": "", "tbody": "", "tfoot": "", "tr": "",
 		"th": "colspan rowspan align valign width height scope", "td": "colspan rowspan align valign width height",
-		"details": "open", "summary": "", "figure": "", "figcaption": "",
+		"details": "open", "summary": "", "input": "type checked disabled", "figure": "", "figcaption": "",
 		"section": "", "article": "", "aside": "", "header": "", "footer": "",
 	} {
 		replyElements[name] = setOf(strings.Fields(attrs)...)
@@ -220,6 +232,10 @@ func (p *pageData) keepHTMLAttrs(n *xhtml.Node, name string, allowed map[string]
 				ref = i
 			}
 			continue
+		case key == "id":
+			if (name != "sup" && name != "li") || !footnoteID.MatchString(a.Val) {
+				continue
+			}
 		case !replyGlobal[key] && !allowed[key]:
 			continue
 		case key == "href" || key == "src" || key == "srcset":
@@ -234,10 +250,34 @@ func (p *pageData) keepHTMLAttrs(n *xhtml.Node, name string, allowed map[string]
 	}
 	n.Attr = kept
 	switch name {
+	case "input":
+		keepCheckbox(n)
 	case "a":
 		p.keepAnchorHref(n, urls["href"], ref)
 	case "img":
 		p.keepImageSrc(n, urls, ref)
+	}
+}
+
+// keepCheckbox leaves a checkbox as a disabled one that keeps its checked
+// state, and removes any other input, so a reply holds no live control.
+func keepCheckbox(n *xhtml.Node) {
+	checkbox, checked := false, false
+	for _, a := range n.Attr {
+		switch a.Key {
+		case "type":
+			checkbox = strings.EqualFold(strings.TrimSpace(a.Val), "checkbox")
+		case "checked":
+			checked = true
+		}
+	}
+	if !checkbox {
+		n.Parent.RemoveChild(n)
+		return
+	}
+	n.Attr = []xhtml.Attribute{{Key: "type", Val: "checkbox"}, {Key: "disabled"}}
+	if checked {
+		n.Attr = append(n.Attr, xhtml.Attribute{Key: "checked"})
 	}
 }
 

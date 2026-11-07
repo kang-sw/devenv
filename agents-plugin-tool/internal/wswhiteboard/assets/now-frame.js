@@ -60,8 +60,10 @@
     var href = a.getAttribute("href") || "";
     if (href.charAt(0) === "#") {
       // The frame never scrolls, so an in-page anchor only means something
-      // on the host's board.
+      // on the host's board; a footnote's anchor names an element of this
+      // frame and has nowhere to go.
       e.preventDefault();
+      if (d.getElementById(href.slice(1))) return;
       post({ wbNow: "jump", id: href.slice(1) });
       return;
     }
