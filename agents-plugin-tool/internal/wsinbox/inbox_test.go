@@ -275,3 +275,154 @@ func TestUnreadableEntryStaysHeld(t *testing.T) {
 		t.Fatalf("unreadable entry not left held: %v", names)
 	}
 }
+
+func TestSteerRewritesTheEntryMarkedUnderAFreshName(t *testing.T) {
+	dir := Dir(t.TempDir())
+	name, _ := send(t, dir, "hello", Chip{ID: "03", Answer: "a"})
+	steered, err := Steer(dir, name)
+	if err != nil || steered == name {
+		t.Fatalf("Steer = %q, %v (was %q)", steered, err, name)
+	}
+	held, err := Held(dir)
+	if err != nil || len(held) != 1 || held[0].Name != steered {
+		t.Fatalf("held after steer = %+v, %v", held, err)
+	}
+	if e := held[0].Entry; !e.Steer || e.Text() != "hello\n\n(03) a" || e.SentAt == 0 {
+		t.Fatalf("steered entry = %+v", e)
+	}
+	// Steering it again leaves it as it is.
+	if again, err := Steer(dir, steered); err != nil || again != steered {
+		t.Fatalf("second Steer = %q, %v", again, err)
+	}
+	// The original name is gone, so a stale steer or cancel of it is refused.
+	if _, err := Steer(dir, name); !errors.Is(err, ErrGone) {
+		t.Fatalf("steer of the old name: %v, want ErrGone", err)
+	}
+	if _, err := Steer(dir, "../../registration"); !errors.Is(err, ErrGone) {
+		t.Fatalf("steer of a foreign name: %v, want ErrGone", err)
+	}
+	// A steered entry is still held: cancel takes it.
+	if e, err := Cancel(dir, steered); err != nil || !e.Steer {
+		t.Fatalf("cancel of a steered entry = %+v, %v", e, err)
+	}
+	if names, _ := Names(dir); len(names) != 0 {
+		t.Fatalf("inbox after cancel = %v", names)
+	}
+}
+
+func TestSendNeverMergesIntoASteeredEntry(t *testing.T) {
+	dir := Dir(t.TempDir())
+	name, _ := send(t, dir, "promoted")
+	steered, err := Steer(dir, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target, ok, err := MergeTarget(dir); err != nil || ok {
+		t.Fatalf("merge target with only a steered entry = %+v, %v", target, err)
+	}
+	next, merged := send(t, dir, "later")
+	if merged {
+		t.Fatal("send merged into a steered entry")
+	}
+	// The next send merges into the unsteered entry, not the steered one.
+	third, merged := send(t, dir, "and more")
+	if !merged {
+		t.Fatal("send did not merge into the unsteered held entry")
+	}
+	held, _ := Held(dir)
+	if len(held) != 2 || held[0].Name != steered || held[1].Name != third || held[1].Name == next {
+		t.Fatalf("held = %+v", held)
+	}
+	if held[0].Entry.Text() != "promoted" || held[1].Entry.Text() != "later\n\nand more" || held[1].Entry.Steer {
+		t.Fatalf("held texts = %q / %q", held[0].Entry.Text(), held[1].Entry.Text())
+	}
+	// A steered entry newer than the unsteered one is skipped as merge target.
+	if _, err := Steer(dir, third); err != nil {
+		t.Fatal(err)
+	}
+	fourth, _ := send(t, dir, "fourth")
+	if target, ok, _ := MergeTarget(dir); !ok || target.Name != fourth || target.Entry.Text() != "fourth" {
+		t.Fatalf("merge target = %+v, want the newest unsteered %q", target, fourth)
+	}
+}
+
+func TestSteerOnlyDrainTakesOnlySteeredEntries(t *testing.T) {
+	dir := Dir(t.TempDir())
+	if got, err := DrainSteer(dir); err != nil || got != nil {
+		t.Fatalf("steer drain of a missing inbox = %+v, %v", got, err)
+	}
+	first, _ := send(t, dir, "promoted")
+	steered, err := Steer(dir, first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	followUp, _ := send(t, dir, "follow-up")
+	if names, err := SteerNames(dir); err != nil || len(names) != 1 || names[0] != steered {
+		t.Fatalf("SteerNames = %v, %v", names, err)
+	}
+	got, err := DrainSteer(dir)
+	if err != nil || len(got) != 1 || got[0].Name != steered || got[0].Entry.Text() != "promoted" {
+		t.Fatalf("DrainSteer = %+v, %v", got, err)
+	}
+	if again, _ := DrainSteer(dir); len(again) != 0 {
+		t.Fatalf("second steer drain = %+v", again)
+	}
+	if names, _ := SteerNames(dir); len(names) != 0 {
+		t.Fatalf("SteerNames after the steer drain = %v", names)
+	}
+	// The follow-up stays held for the full drain.
+	if held, _ := Held(dir); len(held) != 1 || held[0].Name != followUp {
+		t.Fatalf("held after the steer drain = %+v", held)
+	}
+	rest, err := Drain(dir)
+	if err != nil || len(rest) != 1 || rest[0].Name != followUp {
+		t.Fatalf("full drain = %+v, %v", rest, err)
+	}
+	if rec, _ := Drained(dir); len(rec) != 2 || !rec[0].Entry.Steer || rec[1].Entry.Steer {
+		t.Fatalf("drained records = %+v", rec)
+	}
+}
+
+func TestFullDrainAlsoTakesSteeredEntries(t *testing.T) {
+	dir := Dir(t.TempDir())
+	first, _ := send(t, dir, "promoted")
+	if _, err := Steer(dir, first); err != nil {
+		t.Fatal(err)
+	}
+	send(t, dir, "follow-up")
+	got, err := Drain(dir)
+	if err != nil || len(got) != 2 || !got[0].Entry.Steer || got[1].Entry.Text() != "follow-up" {
+		t.Fatalf("Drain = %+v, %v", got, err)
+	}
+}
+
+func TestSteerAndDrainRaceHasOneWinner(t *testing.T) {
+	for i := 0; i < 50; i++ {
+		dir := Dir(t.TempDir())
+		name, _ := send(t, dir, "hello")
+		var wg sync.WaitGroup
+		var steered string
+		var steerErr error
+		var drained []Record
+		wg.Add(2)
+		go func() { defer wg.Done(); steered, steerErr = Steer(dir, name) }()
+		go func() { defer wg.Done(); drained, _ = Drain(dir) }()
+		wg.Wait()
+		held, _ := Held(dir)
+		total := len(drained) + len(held)
+		if total > 1 {
+			t.Fatalf("message duplicated: drained %+v held %+v", drained, held)
+		}
+		if steerErr == nil && total == 0 {
+			t.Fatalf("steer won (%s) but the message is gone", steered)
+		}
+		if steerErr != nil && !errors.Is(steerErr, ErrGone) {
+			t.Fatalf("steer error: %v", steerErr)
+		}
+		// Whatever is left is drained once.
+		rest, _ := Drain(dir)
+		if len(drained)+len(rest) != 1 {
+			t.Fatalf("message lost or duplicated: drained %d, rest %d", len(drained), len(rest))
+		}
+	}
+}

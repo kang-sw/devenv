@@ -583,6 +583,59 @@ func TestMailboxWaitBoardInboxFlagWakesOnAnInboxEntry(t *testing.T) {
 	}
 }
 
+func TestMailboxWaitBoardSteerFlagWakesOnlyOnASteeredEntry(t *testing.T) {
+	bin := buildWsMCPMailboxTestBin(t)
+	env := mailboxTestEnv(t)
+	const sessionKey = "amber-tide-fox"
+	seedBoardMessage(t, env, sessionKey, "held follow-up")
+
+	// A held follow-up does not wake a --board-steer wait.
+	cmd := exec.Command(bin, "mailbox", "wait", "--session-key", sessionKey, "--timeout", "1s", "--board-steer", "--format", "json")
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != mailboxWaitExitTimeout {
+		t.Fatalf("mailbox wait --board-steer over a held follow-up did not time out: err=%v out=%s", err, out)
+	}
+
+	stateDir, err := wsdashboard.Dir("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inbox := wsinbox.Dir(wsdashboard.SessionDir(stateDir, wsmailbox.ReplyID(sessionKey)))
+	names, _ := wsinbox.Names(inbox)
+	if _, err := wsinbox.Steer(inbox, names[0]); err != nil {
+		t.Fatal(err)
+	}
+	cmd = exec.Command(bin, "mailbox", "wait", "--session-key", sessionKey, "--timeout", "10s", "--board-steer", "--format", "json")
+	cmd.Env = env
+	out, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("mailbox wait --board-steer failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Board int      `json:"board"`
+		Kinds []string `json:"kinds"`
+		Rearm struct {
+			Command string `json:"command"`
+		} `json:"rearm"`
+	}
+	if uerr := json.Unmarshal(bytes.TrimSpace(out), &got); uerr != nil {
+		t.Fatalf("invalid mailbox wait JSON: %v\n%s", uerr, out)
+	}
+	if got.Board != 1 || strings.Join(got.Kinds, ",") != "board" {
+		t.Fatalf("mailbox wait JSON = %#v, want one board arrival", got)
+	}
+	if !strings.HasSuffix(got.Rearm.Command, " --board-steer") || strings.Contains(got.Rearm.Command, "--board-inbox") {
+		t.Fatalf("re-arm command = %q, want it to keep --board-steer only", got.Rearm.Command)
+	}
+
+	both := exec.Command(bin, "mailbox", "wait", "--session-key", sessionKey, "--timeout", "1s", "--board-inbox", "--board-steer")
+	both.Env = env
+	if out, err := both.CombinedOutput(); err == nil || !strings.Contains(string(out), "cannot be combined") {
+		t.Fatalf("--board-inbox with --board-steer = %v: %s, want a refusal", err, out)
+	}
+}
+
 func TestMailboxWaitBoardInboxFlagReportsBothKinds(t *testing.T) {
 	bin := buildWsMCPMailboxTestBin(t)
 	env := mailboxTestEnv(t)

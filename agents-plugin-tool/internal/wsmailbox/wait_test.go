@@ -374,3 +374,44 @@ func TestWaitWithInboxDirStillWakesOnMailAndLeavesBoardZero(t *testing.T) {
 		t.Fatalf("Wait = %#v, want a mail wake with Board 0", result)
 	}
 }
+
+func TestWaitSteerOnlyWakesOnASteeredEntryNotOnAHeldFollowUp(t *testing.T) {
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	inbox := filepath.Join(t.TempDir(), "inbox")
+	sendBoardMessage(t, inbox, "held follow-up")
+	target := WaitTarget{SessionKey: "amber-tide-fox", InboxDir: inbox, InboxSteerOnly: true}
+
+	// A held follow-up alone never wakes a steer-only wait.
+	clock := &fakeClock{now: time.Date(2026, 9, 13, 0, 0, 0, 0, time.UTC)}
+	result, err := Wait(target, WaitOptions{Timeout: 3 * DefaultWaitPoll, Now: clock.Now, Sleep: clock.Sleep})
+	if err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	if !result.TimedOut || result.Woke() {
+		t.Fatalf("Wait = %#v, want a timeout over a held follow-up", result)
+	}
+
+	// The user promotes it during the block: the wait wakes, counting only it.
+	names, _ := wsinbox.Names(inbox)
+	clock = &fakeClock{now: time.Date(2026, 9, 13, 0, 0, 0, 0, time.UTC)}
+	clock.onSleep = func(time.Duration) {
+		if clock.sleeps == 2 {
+			if _, err := wsinbox.Steer(inbox, names[0]); err != nil {
+				t.Errorf("Steer: %v", err)
+			}
+			sendBoardMessage(t, inbox, "a later follow-up")
+		}
+	}
+	result, err = Wait(target, WaitOptions{Now: clock.Now, Sleep: clock.Sleep})
+	if err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	if result.TimedOut || !result.Woke() || result.Board != 1 || result.Total() != 0 {
+		t.Fatalf("Wait = %#v, want a board wake counting the one steered entry", result)
+	}
+	// Wait only peeks: both entries are still held.
+	if held, _ := wsinbox.Names(inbox); len(held) != 2 {
+		t.Fatalf("held entries after Wait = %v, want both left held", held)
+	}
+}

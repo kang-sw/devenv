@@ -6,11 +6,14 @@ import (
 
 // HeldView is a message the user sent from the page that the session has
 // not received yet: it sits in the session's board-answer inbox until the
-// host adapter drains it at the end of a turn, and can be cancelled until
-// then.
+// host adapter drains it at the end of a turn, or at the next tool boundary
+// once promoted to steering, and can be cancelled until then.
 type HeldView struct {
-	// ID is the inbox entry's ID, which the cancel control names.
+	// ID is the inbox entry's ID, which the cancel and steer controls name.
 	ID string
+	// Steer is set once the user promoted the message to steering; the
+	// bubble then shows a steer marker instead of the steer control.
+	Steer bool
 	// At is the first send's time (epoch ms).
 	At int64
 	// Parts are the merged sends' texts; the bubble divides them.
@@ -29,7 +32,7 @@ type SentMark struct {
 func heldViews(held []wsinbox.Record) []HeldView {
 	out := make([]HeldView, 0, len(held))
 	for _, r := range held {
-		out = append(out, HeldView{ID: r.ID(), At: r.Entry.SentAt, Parts: r.Entry.Parts, Chips: r.Entry.Chips})
+		out = append(out, HeldView{ID: r.ID(), Steer: r.Entry.Steer, At: r.Entry.SentAt, Parts: r.Entry.Parts, Chips: r.Entry.Chips})
 	}
 	return out
 }

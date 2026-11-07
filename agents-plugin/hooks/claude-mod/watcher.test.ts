@@ -91,6 +91,14 @@ function harness(mode: DrainMode) {
     appendFailures: [] as Error[],
     submitted: [] as (readonly string[])[],
     appended: [] as (readonly string[])[],
+    /** Held entries promoted to steering: the steer-only drain takes these alone, the full drain takes them too. */
+    steeredInbox: [] as string[],
+    steerDrains: [] as string[],
+    steerDrainFailures: [] as Error[],
+    steerFailures: [] as Error[],
+    /** When set, the next steer row waits on it. */
+    heldSteers: [] as Deferred<void>[],
+    steered: [] as (readonly string[])[],
   }
   const order: string[] = []
   const edges: WatcherEdges = {
@@ -154,7 +162,7 @@ function harness(mode: DrainMode) {
         const failure = board.drainFailures.shift()
         if (failure) throw failure
         // An atomic claim: whatever is held now, once.
-        return board.inbox.splice(0)
+        return [...board.inbox.splice(0), ...board.steeredInbox.splice(0)]
       },
       submit: async (texts) => {
         const held = board.heldSubmits.shift()
@@ -168,6 +176,20 @@ function harness(mode: DrainMode) {
         const failure = board.appendFailures.shift()
         if (failure) throw failure
         board.appended.push(texts)
+      },
+      drainSteer: async (key) => {
+        board.steerDrains.push(key)
+        const failure = board.steerDrainFailures.shift()
+        if (failure) throw failure
+        return board.steeredInbox.splice(0)
+      },
+      steer: async (texts) => {
+        const held = board.heldSteers.shift()
+        if (held) await held.promise
+        const failure = board.steerFailures.shift()
+        if (failure) throw failure
+        board.steered.push(texts)
+        order.push('steer')
       },
     },
   }
@@ -1363,6 +1385,112 @@ describe('board messages', () => {
     expect(h.waits[1]!.signal.aborted).toBe(true)
     expect(h.waits.length).toBe(3)
     expect(h.waits[2]!.board).toBe(true)
+  })
+
+  test('a message promoted to steering is appended at the next tool boundary, ahead of the queued mail row; the unpromoted one stays held', async () => {
+    const { h, w } = await boardOn()
+    h.turn.running = true
+    h.board.inbox.push('later')
+    await wake(h, 'both', { kind: 'mail', mail: mailA })
+    h.board.steeredInbox.push('now please')
+    await w.toolCompleted()
+    expect(h.board.steerDrains).toEqual(['k1'])
+    expect(h.board.steered).toEqual([['now please']])
+    expect(h.appended).toEqual([formatBatch('pkg mailbox', RECV, 'k1', mailA)])
+    expect(h.order).toEqual(['steer'])
+    // The full drain never ran mid-turn: the unpromoted message is still held.
+    expect(h.board.drains).toEqual([])
+    expect(h.board.inbox).toEqual(['later'])
+    // A boundary with nothing steered appends nothing more.
+    await w.toolCompleted()
+    expect(h.board.steered.length).toBe(1)
+    h.turn.running = false
+    w.turnCompleted()
+    await tick()
+    expect(h.board.submitted).toEqual([['later']])
+  })
+
+  test('a refused steer row carries the message to the turn end, submitted ahead of the held one and never lost', async () => {
+    const { h, w } = await boardOn()
+    h.turn.running = true
+    h.board.inbox.push('later')
+    await wake(h, 'board')
+    h.board.steeredInbox.push('now please')
+    h.board.steerFailures.push(new Error('row refused: deny'))
+    await w.toolCompleted()
+    expect(h.board.steered).toEqual([])
+    expect(h.board.steeredInbox).toEqual([])
+    expect(h.records).toEqual([])
+    h.turn.running = false
+    w.turnCompleted()
+    await tick()
+    expect(h.board.submitted).toEqual([['now please', 'later']])
+    expect(h.records).toEqual([])
+  })
+
+  test('a carried steered message is submitted at the turn end even with the switch turned off, draining nothing held', async () => {
+    const { h, w } = await boardOn()
+    h.turn.running = true
+    h.board.steeredInbox.push('now please')
+    h.board.steerFailures.push(new Error('row refused: deny'))
+    await w.toolCompleted()
+    h.board.on = false
+    h.board.inbox.push('later')
+    h.turn.running = false
+    w.turnCompleted()
+    await tick()
+    expect(h.board.submitted).toEqual([['now please']])
+    expect(h.board.drains).toEqual([])
+    expect(h.board.inbox).toEqual(['later'])
+  })
+
+  test('a steer row refused after the turn ended (an interrupt) submits the carried message at once', async () => {
+    const { h, w } = await boardOn()
+    h.turn.running = true
+    h.board.steeredInbox.push('now please')
+    const held = deferred<void>()
+    h.board.heldSteers.push(held)
+    h.board.steerFailures.push(new Error('row refused: deny'))
+    const boundary = w.toolCompleted()
+    await tick()
+    h.turn.running = false
+    w.turnCompleted()
+    await tick()
+    held.resolve()
+    await boundary
+    await tick()
+    expect(h.board.submitted).toEqual([['now please']])
+  })
+
+  test('a stop records a carried steered message instead of dropping it', async () => {
+    const { h, w } = await boardOn()
+    h.turn.running = true
+    h.board.steeredInbox.push('now please')
+    h.board.steerFailures.push(new Error('row refused: deny'))
+    await w.toolCompleted()
+    w.stop('session.end clear')
+    expect(h.records.length).toBe(1)
+    expect(h.records[0]).toContain('now please')
+    h.turn.running = false
+    w.turnCompleted()
+    await tick()
+    expect(h.board.submitted).toEqual([])
+  })
+
+  test('with the switch off a tool boundary claims nothing steered; a failed steer drain leaves it held', async () => {
+    const { h, w } = await boardOn()
+    h.turn.running = true
+    h.board.steeredInbox.push('now please')
+    h.board.on = false
+    await w.toolCompleted()
+    expect(h.board.steerDrains).toEqual([])
+    h.board.on = true
+    h.board.steerDrainFailures.push(new Error('server gone'))
+    await w.toolCompleted()
+    expect(h.board.steerDrains).toEqual(['k1'])
+    expect(h.board.steeredInbox).toEqual(['now please'])
+    await w.toolCompleted()
+    expect(h.board.steered).toEqual([['now please']])
   })
 
   test('an entry cancelled while held is never injected', async () => {

@@ -47,6 +47,9 @@ type WaitTarget struct {
 	// because the dashboard's state directory is not this package's to know.
 	// Wait only peeks at it, never drains.
 	InboxDir string
+	// InboxSteerOnly narrows the InboxDir watch to entries marked for
+	// steering: a held follow-up does not wake the wait, a steered one does.
+	InboxSteerOnly bool
 }
 
 // WaitResult is one Wait call's outcome: the envelopes found in each queue
@@ -57,7 +60,8 @@ type WaitResult struct {
 	Named    []Envelope // from the named inbox, when Slug was set and owned
 	Reply    []Envelope // from the caller's own reply-id queue
 	// Board is how many held entries the watched inbox (WaitTarget.InboxDir)
-	// had; zero when it is not watched or empty.
+	// had, only the steered ones under InboxSteerOnly; zero when it is not
+	// watched or empty.
 	Board int
 }
 
@@ -163,13 +167,14 @@ type resolvedWaitTarget struct {
 	replyPath  string
 	replyID    string
 	inboxDir   string // "" when the board-answer inbox is not watched
+	steerOnly  bool   // count only the inbox entries marked for steering
 }
 
 // resolveWaitTarget performs every resolution step that only needs to run
 // once per Wait call: parsing/resolving an explicit Slug's store path, and
 // deriving the caller's reply-id + registry path.
 func resolveWaitTarget(target WaitTarget) (resolvedWaitTarget, error) {
-	r := resolvedWaitTarget{sessionKey: target.SessionKey, inboxDir: target.InboxDir}
+	r := resolvedWaitTarget{sessionKey: target.SessionKey, inboxDir: target.InboxDir, steerOnly: target.InboxSteerOnly}
 
 	if target.Slug != "" {
 		name, scope, err := ParseSlugScope(target.Slug)
@@ -214,6 +219,9 @@ func (r resolvedWaitTarget) peek() (WaitResult, error) {
 	result := WaitResult{Named: named, Reply: replyStore.Queues[r.replyID]}
 	if r.inboxDir != "" {
 		names, err := wsinbox.Names(r.inboxDir)
+		if r.steerOnly {
+			names, err = wsinbox.SteerNames(r.inboxDir)
+		}
 		if err != nil {
 			return WaitResult{}, err
 		}

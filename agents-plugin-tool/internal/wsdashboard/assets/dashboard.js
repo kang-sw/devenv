@@ -452,6 +452,16 @@
       ctext.focus();
     });
   }
+  // steerHeld promotes a held message to steering: the session receives it
+  // at its next tool call instead of when its turn ends. The conversation
+  // region's next swap shows the steer marker in place of the button.
+  function steerHeld(btn) {
+    btn.disabled = true;
+    post("steer", { id: btn.getAttribute("data-steer") }, function (ok, res) {
+      if (!ok) { btn.disabled = false; syncNote("Not promoted: " + res); return; }
+      syncNote("Promoted: the session receives it at its next tool call.");
+    });
+  }
   // applySent marks each board item the session was sent an answer for, or
   // holds one for, from the inbox records the conversation region carries.
   function applySent() {
@@ -503,6 +513,8 @@
     if (u) { var uid = u.getAttribute("data-unchip"); dropChip(uid); setItem(uid, null); renderChips(); syncNote(); return; }
     u = t.closest("#r-conversation [data-cancel]");
     if (u) { if (!u.disabled) cancelHeld(u); return; }
+    u = t.closest("#r-conversation [data-steer]");
+    if (u) { if (!u.disabled) steerHeld(u); return; }
     if (!live) return;
     var b = t.closest("#gmenu [data-input]");
     if (b) { save(INPUT_KEY, b.getAttribute("data-input")); setInput(b.getAttribute("data-input")); return; }

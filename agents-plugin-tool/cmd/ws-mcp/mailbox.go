@@ -67,6 +67,7 @@ func mailboxWait(args []string) {
 	timeout := fs.Duration("timeout", 0, "maximum time to block (e.g. 5m); 0 blocks until mail arrives")
 	format := fs.String("format", "", `output format: text or json`)
 	boardInbox := fs.Bool("board-inbox", false, "also wake on a message the user sent from the dashboard page (held in the session's board-answer inbox); the adapter collects it with the adapter-only dashboard.inbox_drain tool, and this wait only peeks. The result says which kind arrived: mail, board, or both")
+	boardSteer := fs.Bool("board-steer", false, "also wake on a dashboard message the user promoted to steering, but not on a held one that was not promoted: the wait an adapter arms during a running turn, when held messages wait for the turn end. Peek only, like --board-inbox, which it cannot be combined with; a steered message reports as board")
 	_ = fs.Parse(args)
 
 	*sessionKey = strings.TrimSpace(*sessionKey)
@@ -76,14 +77,18 @@ func mailboxWait(args []string) {
 	if *timeout < 0 {
 		fatal("mailbox wait", fmt.Errorf("--timeout must be >= 0 (0 blocks until mail arrives)"))
 	}
+	if *boardInbox && *boardSteer {
+		fatal("mailbox wait", fmt.Errorf("--board-inbox and --board-steer cannot be combined: --board-inbox already wakes on every held message"))
+	}
 
 	target := wsmailbox.WaitTarget{SessionKey: *sessionKey, Root: defaultRoot(*root), Slug: strings.TrimSpace(*slug)}
-	if *boardInbox {
+	if *boardInbox || *boardSteer {
 		stateDir, err := wsdashboard.Dir("")
 		if err != nil {
 			fatal("mailbox wait", err)
 		}
 		target.InboxDir = wsinbox.Dir(wsdashboard.SessionDir(stateDir, wsmailbox.ReplyID(*sessionKey)))
+		target.InboxSteerOnly = *boardSteer
 	}
 
 	// One-time startup diagnostic (never repeated in the poll loop): warn
@@ -157,7 +162,7 @@ func mailboxWait(args []string) {
 	// not only at read time. mcp.CLICommandName() prefers the declared shim
 	// name (a wait launched through the shim re-arms through it) and falls back
 	// to os.Args[0].
-	rearmCmd := buildMailboxWaitRearmCommand(mcp.CLICommandName(), *sessionKey, target.Slug, *timeout, *boardInbox)
+	rearmCmd := buildMailboxWaitRearmCommand(mcp.CLICommandName(), *sessionKey, target.Slug, *timeout, boardFlag(*boardInbox, *boardSteer))
 
 	select {
 	case out := <-done:
@@ -165,7 +170,7 @@ func mailboxWait(args []string) {
 		if out.err != nil {
 			fatal("mailbox wait", out.err)
 		}
-		emitMailboxWaitResult(out.result, *format, rearmCmd, *boardInbox)
+		emitMailboxWaitResult(out.result, *format, rearmCmd, *boardInbox || *boardSteer)
 	case <-ctx.Done():
 		clearMarker()
 		fmt.Fprintln(os.Stderr, "ws-mcp mailbox wait: interrupted")
@@ -247,12 +252,24 @@ func emitMailboxWaitResult(result wsmailbox.WaitResult, format, rearmCmd string,
 // moments can be far apart.
 const mailboxRearmNudge = "one mailbox wait covers a single wake; re-run the re-arm command to keep listening."
 
+// boardFlag is the board-inbox flag a wait was armed with: "--board-inbox",
+// "--board-steer", or "" for none.
+func boardFlag(boardInbox, boardSteer bool) string {
+	switch {
+	case boardInbox:
+		return "--board-inbox"
+	case boardSteer:
+		return "--board-steer"
+	}
+	return ""
+}
+
 // buildMailboxWaitRearmCommand reprints the command name (bin, from
 // mcp.CLICommandName) plus the wait-scoping flags this invocation received,
 // producing a command that re-arms an identical wait. It emits only the
 // resolved flags — --session-key (always required), and --slug / --timeout /
-// --board-inbox when set.
-func buildMailboxWaitRearmCommand(bin, sessionKey, slug string, timeout time.Duration, boardInbox bool) string {
+// the board flag (boardFlag) when set.
+func buildMailboxWaitRearmCommand(bin, sessionKey, slug string, timeout time.Duration, board string) string {
 	parts := []string{bin, "mailbox", "wait", "--session-key", sessionKey}
 	if slug != "" {
 		parts = append(parts, "--slug", slug)
@@ -260,8 +277,8 @@ func buildMailboxWaitRearmCommand(bin, sessionKey, slug string, timeout time.Dur
 	if timeout > 0 {
 		parts = append(parts, "--timeout", timeout.String())
 	}
-	if boardInbox {
-		parts = append(parts, "--board-inbox")
+	if board != "" {
+		parts = append(parts, board)
 	}
 	return strings.Join(parts, " ")
 }

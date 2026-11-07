@@ -36,8 +36,16 @@ function world(on: On, opts: { dashboard?: unknown; intake?: Intake } = {}) {
     origins: [] as unknown[],
     /** The board-answer inbox: one text per held message; a drain claims them all. */
     inbox: [] as string[],
-    /** Every inbox drain call's arguments. */
+    /** Held messages promoted to steering: a steer-only drain claims these alone, a full drain claims them too. */
+    steered: [] as string[],
+    /** Every full inbox drain call's arguments. */
     inboxDrains: [] as Record<string, unknown>[],
+    /** Every steer-only inbox drain call's arguments. */
+    steerDrains: [] as Record<string, unknown>[],
+    /** User rows the mod appended, as their text. */
+    rows: [] as string[],
+    /** How many of the next user rows the host refuses. */
+    refuseRows: 0,
     recvAnswers: [] as { result: unknown; text: string }[],
     /** The chunks the next model request streams, and its result. */
     chunks: [] as unknown[],
@@ -56,8 +64,10 @@ function world(on: On, opts: { dashboard?: unknown; intake?: Intake } = {}) {
       return w.intake === 'error' ? text('unknown session_key', true) : text('ok: 1 of 1 events applied')
     }
     if (e.tool === INBOX_DRAIN_TOOL) {
-      w.inboxDrains.push({ ...e.args })
-      return text(JSON.stringify({ messages: w.inbox.splice(0).map((t, i) => ({ id: `m${i}`, sent_at: 1, text: t, parts: [t], chips: [] })) }))
+      const steerOnly = e.args.steer_only === true
+      ;(steerOnly ? w.steerDrains : w.inboxDrains).push({ ...e.args })
+      const claimed = steerOnly ? w.steered.splice(0) : [...w.inbox.splice(0), ...w.steered.splice(0)]
+      return text(JSON.stringify({ messages: claimed.map((t, i) => ({ id: `m${i}`, sent_at: 1, text: t, parts: [t], chips: [] })) }))
     }
     if (e.tool !== 'config_get') return text(`no ${e.tool} here`, true)
     if (e.args.key === KNOB.dashboard && opts.dashboard === 'unreadable') return text('ws-mcp is unhealthy', true)
@@ -72,7 +82,15 @@ function world(on: On, opts: { dashboard?: unknown; intake?: Intake } = {}) {
   on('session.messages', () => ({ value: [] as never }))
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.end', ($, e) => ({ sessionId: e.sessionId }))
-  on('session.append', ($, e, next) => next(e))
+  on('session.append', ($, e, next) => {
+    if (e.message.type !== 'user') return next(e)
+    if (w.refuseRows > 0) {
+      w.refuseRows -= 1
+      return { deny: 'refused by the test' }
+    }
+    w.rows.push(e.message.content.map((b) => (b.type === 'text' ? b.text : '')).join(''))
+    return next(e)
+  })
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', ($, e) => ({ text: e.answer }))
   on('turn.step', async function* ($, e) {
@@ -278,15 +296,62 @@ test('knob on: a mid-turn wake holds the message until the turn ends, then submi
   await w.clock.advance(50)
   expect(w.inboxDrains).toEqual([])
   expect(w.argvs.at(-1)).not.toContain(BOARD_FLAG)
-  // A tool boundary injects nothing.
+  // A tool boundary injects nothing: its steer-only drain claims no unpromoted message.
+  const steerDrainsBefore = w.steerDrains.length
   await $.tool.call({ tool: 'Bash', tool_use_id: 'u1', command: 'ls' } as never)
+  expect(w.steerDrains.length).toBe(steerDrainsBefore + 1)
   expect(w.inboxDrains).toEqual([])
+  expect(w.inbox).toEqual(['pick B'])
+  expect(w.rows).toEqual([])
   expect(w.prompts).toEqual([])
   await $.turn.complete({ answer: 'done', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer' } as never)
   await w.clock.advance(50)
   expect(w.inboxDrains.length).toBe(1)
   expect(w.prompts).toEqual([labelWhiteboard(w.plugin, 'pick B')])
   expect(w.argvs.at(-1)).toContain(BOARD_FLAG)
+})
+
+test('knob on: a message promoted to steering is appended at the next main-thread tool boundary and enters the ring as whiteboard; the unpromoted one waits for the turn end', async ($, on) => {
+  const w = world(on, { dashboard: true })
+  await start($, w)
+  await $.turn.start({ text: 'x', turnId: 't' })
+  w.inbox.push('later')
+  w.steered.push('now please')
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'u1', command: 'ls' } as never)
+  expect(w.steerDrains.at(-1)).toEqual({ session_key: KEY, steer_only: true, format: 'json' })
+  expect(w.rows).toEqual([labelWhiteboard(w.plugin, 'now please')])
+  expect(w.inboxDrains).toEqual([])
+  expect(w.prompts).toEqual([])
+  await flush(w)
+  expect(sent(w).filter((e) => e.kind === 'user')).toEqual([{ kind: 'user', text: 'now please', origin: 'whiteboard', at: expect.any(Number) }])
+  // A subagent's tool call is no boundary of the lead's turn.
+  w.steered.push('not yet')
+  const before = w.steerDrains.length
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'u2', command: 'ls', agentId: 'a77' } as never)
+  expect(w.steerDrains.length).toBe(before)
+  w.steered.splice(0)
+  await $.turn.complete({ answer: 'done', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer' } as never)
+  await w.clock.advance(50)
+  expect(w.prompts).toEqual([labelWhiteboard(w.plugin, 'later')])
+  expect(w.rows.length).toBe(1)
+})
+
+test('knob on: a refused steer row submits the claimed message at the turn end, ahead of the held one, entering the ring once', async ($, on) => {
+  const w = world(on, { dashboard: true })
+  await start($, w)
+  await $.turn.start({ text: 'x', turnId: 't' })
+  w.inbox.push('later')
+  w.steered.push('now please')
+  w.refuseRows = 1
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'u1', command: 'ls' } as never)
+  expect(w.steered).toEqual([])
+  expect(w.rows).toEqual([])
+  expect(w.prompts).toEqual([])
+  await $.turn.complete({ answer: 'done', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer' } as never)
+  await w.clock.advance(50)
+  expect(w.prompts).toEqual([labelWhiteboard(w.plugin, 'now please\n\nlater')])
+  await flush(w)
+  expect(sent(w).filter((e) => e.kind === 'user')).toEqual([{ kind: 'user', text: 'now please\n\nlater', origin: 'whiteboard', at: expect.any(Number) }])
 })
 
 for (const knob of [false, 'unreadable'] as const) {

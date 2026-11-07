@@ -434,6 +434,11 @@ export interface Dashboard {
   whiteboardSubmitting: () => void
   /** That submit settled: entered, `text` is a whiteboard user message; not, its mark goes. */
   whiteboardSubmitted: (text: string, entered: boolean) => void
+  /**
+   * A dashboard message promoted to steering was appended into the running
+   * turn as a row (no prompt.submit hook sees it): a whiteboard user message.
+   */
+  whiteboardSteered: (text: string) => void
   /** A prompt is being submitted; `startsTurn` when it starts a turn rather than joining a running one. */
   promptSubmitting: (origin: Origin | undefined, startsTurn: boolean) => void
   /** A submitted prompt entered: a user message with its origin. */
@@ -790,6 +795,9 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
         return
       }
       if (own?.recorded) return
+      settleBefore({ kind: 'user', text: text.slice(0, TEXT_SEND_CAP), origin: 'whiteboard', at: edges.now() })
+    }),
+    whiteboardSteered: guard('whiteboard steer', (text: string) => {
       settleBefore({ kind: 'user', text: text.slice(0, TEXT_SEND_CAP), origin: 'whiteboard', at: edges.now() })
     }),
     userMessage: guard('user message', (text: string, origin: 'terminal' | 'whiteboard') => {

@@ -16,11 +16,13 @@ import (
 // The browser write routes: POST /s/<reply-id>/message holds a message the
 // user sent from the composer in the session's board-answer inbox (merged
 // into the held one when there is one), and POST /s/<reply-id>/cancel takes a
-// held message back. The inbox is the daemon's one write target; the
-// session's host adapter drains it at the end of a turn and injects the
-// message as the user's own. Both routes are offered only for a session with
-// a live host adapter, require an Origin equal to the daemon's own (which
-// stops cross-site form posts), and send no CORS headers.
+// held message back. POST /s/<reply-id>/steer promotes a held message to
+// steering: the adapter injects it at the session's next tool boundary
+// instead of at the turn end. The inbox is the daemon's one write target; the
+// session's host adapter drains it and injects the message as the user's own.
+// The routes are offered only for a session with a live host adapter, require
+// an Origin equal to the daemon's own (which stops cross-site form posts),
+// and send no CORS headers.
 
 // inboxBodyLimit bounds a write route's request body.
 const inboxBodyLimit = 256 << 10
@@ -31,7 +33,7 @@ type messageRequest struct {
 	Chips []wsinbox.Chip `json:"chips"`
 }
 
-// cancelRequest is the cancel route's body.
+// cancelRequest is the cancel and steer routes' body: the held message's id.
 type cancelRequest struct {
 	ID string `json:"id"`
 }
@@ -51,7 +53,8 @@ func sameOrigin(r *http.Request) bool {
 	return strings.EqualFold(u.Host, r.Host)
 }
 
-// handleInboxWrite serves the message and cancel routes of one session.
+// handleInboxWrite serves the message, cancel, and steer routes of one
+// session.
 func (d *Daemon) handleInboxWrite(w http.ResponseWriter, r *http.Request, replyID, route string) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -137,6 +140,24 @@ func (d *Daemon) inboxWrite(dir, route string, raw []byte, now time.Time) (int, 
 			chips = []wsinbox.Chip{}
 		}
 		return http.StatusOK, map[string]any{"text": strings.Join(entry.Parts, "\n\n"), "chips": chips}
+	case "steer":
+		var req cancelRequest
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return http.StatusBadRequest, "malformed steer"
+		}
+		name, ok := wsinbox.NameForID(req.ID)
+		if !ok {
+			return http.StatusBadRequest, "malformed message id"
+		}
+		steered, err := wsinbox.Steer(dir, name)
+		if errors.Is(err, wsinbox.ErrGone) {
+			return http.StatusConflict, "the session already received this message"
+		}
+		if err != nil {
+			fmt.Fprintf(d.log, "dashboard: inbox steer: %v\n", err)
+			return http.StatusInternalServerError, "could not steer the message"
+		}
+		return http.StatusOK, map[string]any{"id": wsinbox.Record{Name: steered}.ID()}
 	}
 	return http.StatusNotFound, "not found"
 }

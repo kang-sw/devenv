@@ -120,6 +120,43 @@ func TestDashboardInboxDrainTextAndJSONOutput(t *testing.T) {
 	}
 }
 
+func TestDashboardInboxDrainSteerOnlyTakesOnlySteeredMessages(t *testing.T) {
+	f := newLiveFixture(t, true)
+	dir := f.inboxDir(f.replyA)
+	sendBoard(t, dir, "promoted")
+	names, _ := wsinbox.Names(dir)
+	steered, err := wsinbox.Steer(dir, names[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	sendBoard(t, dir, "follow-up") // a new entry: a steered one accepts no merge
+
+	out := callToolWithKey(t, f.server, 3, f.keyA, dashboardInboxDrainTool, map[string]any{"steer_only": true, "format": "json"})
+	var got struct {
+		Messages []struct {
+			ID   string `json:"id"`
+			Text string `json:"text"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("json: %v\n%s", err, out)
+	}
+	if len(got.Messages) != 1 || got.Messages[0].Text != "promoted" || got.Messages[0].ID != strings.TrimSuffix(steered, ".json") {
+		t.Fatalf("steer-only drain = %+v", got)
+	}
+	if out := callToolWithKey(t, f.server, 4, f.keyA, dashboardInboxDrainTool, map[string]any{"steer_only": true}); out != "inbox empty\n" {
+		t.Fatalf("second steer-only drain = %q", out)
+	}
+	// The follow-up stayed held; the full drain takes it.
+	if held, _ := wsinbox.Held(dir); len(held) != 1 || held[0].Entry.Text() != "follow-up" {
+		t.Fatalf("held after the steer-only drain = %+v", held)
+	}
+	out = callToolWithKey(t, f.server, 5, f.keyA, dashboardInboxDrainTool, map[string]any{"steer_only": false})
+	if !strings.HasPrefix(out, "drained 1\n") || !strings.Contains(out, "\nfollow-up\n") {
+		t.Fatalf("full drain = %q", out)
+	}
+}
+
 func TestDashboardInboxDrainIsPerSessionAndRefusesUnknown(t *testing.T) {
 	f := newLiveFixture(t, true)
 	sendBoard(t, f.inboxDir(f.replyB), "for B")

@@ -173,9 +173,86 @@ func TestCancelRefusedOnAClaimedEntryAndASendAfterADrainStartsANewOne(t *testing
 	}
 }
 
+func TestSteerRouteRewritesTheHeldEntryMarkedAndAcceptsNoMerge(t *testing.T) {
+	f := startPageFixture(t)
+	id, _ := f.send(t, `{"text":"promote me","chips":[{"id":"03","answer":"a"}]}`)
+	code, _, raw := postJSON(t, f.base+"/s/livesession/steer", f.base, `{"id":"`+id+`"}`)
+	if code != http.StatusOK {
+		t.Fatalf("steer = %d: %s", code, raw)
+	}
+	var ans struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(raw), &ans); err != nil || ans.ID == "" || ans.ID == id {
+		t.Fatalf("steer answer %q (was %s): %v", raw, id, err)
+	}
+	// The entry is rewritten under a fresh name with the steer flag.
+	held := f.held(t)
+	if len(held) != 1 || held[0].ID() != ans.ID || !held[0].Entry.Steer || held[0].Entry.Text() != "promote me\n\n(03) a" {
+		t.Fatalf("held after steer = %+v", held)
+	}
+	// The page shows the steer marker and no steer control for it.
+	_, page := get(t, f.base+"/s/livesession")
+	if !strings.Contains(page, `class="heldtag steertag"`) || strings.Contains(page, `data-steer="`+ans.ID+`"`) || !strings.Contains(page, `data-cancel="`+ans.ID+`"`) {
+		t.Errorf("page lacks the steer marker, still offers steer, or lost cancel for the steered bubble")
+	}
+	// A later send starts a new held entry, which offers the steer control.
+	next, merged := f.send(t, `{"text":"later"}`)
+	if merged || next == ans.ID {
+		t.Fatalf("send after steer merged=%v id=%s", merged, next)
+	}
+	if held := f.held(t); len(held) != 2 || held[0].Entry.Text() != "promote me\n\n(03) a" || held[1].Entry.Steer {
+		t.Fatalf("held = %+v", held)
+	}
+	_, page = get(t, f.base+"/s/livesession")
+	if !strings.Contains(page, `data-steer="`+next+`"`) {
+		t.Errorf("page lacks the steer control for the unsteered bubble")
+	}
+	// The steered entry is still held: cancel takes it back.
+	if code, _, raw := postJSON(t, f.base+"/s/livesession/cancel", f.base, `{"id":"`+ans.ID+`"}`); code != http.StatusOK || !strings.Contains(raw, "promote me") {
+		t.Fatalf("cancel of the steered entry = %d: %s", code, raw)
+	}
+}
+
+func TestSteerRouteRefusesGoneUnknownAndAdapterlessSessions(t *testing.T) {
+	f := startPageFixture(t)
+	id, _ := f.send(t, `{"text":"one"}`)
+	// The original name is gone once the steer rewrote it.
+	if code, _, raw := postJSON(t, f.base+"/s/livesession/steer", f.base, `{"id":"`+id+`"}`); code != http.StatusOK {
+		t.Fatalf("steer = %d: %s", code, raw)
+	}
+	if code, _, raw := postJSON(t, f.base+"/s/livesession/steer", f.base, `{"id":"`+id+`"}`); code != http.StatusConflict {
+		t.Fatalf("steer of a rewritten entry = %d (%s), want 409", code, raw)
+	}
+	// A drained entry is refused: the session already received it.
+	drainedID, _ := f.send(t, `{"text":"two"}`)
+	if _, err := wsinbox.Drain(f.inbox("livesession")); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, raw := postJSON(t, f.base+"/s/livesession/steer", f.base, `{"id":"`+drainedID+`"}`); code != http.StatusConflict {
+		t.Fatalf("steer of a drained entry = %d (%s), want 409", code, raw)
+	}
+	// A well-formed id the inbox never held is gone too; a path is malformed.
+	if code, _, _ := postJSON(t, f.base+"/s/livesession/steer", f.base, `{"id":"20260101T000000.000000000Z-0badc0de"}`); code != http.StatusConflict {
+		t.Fatalf("steer of an unknown id = %d, want 409", code)
+	}
+	if code, _, _ := postJSON(t, f.base+"/s/livesession/steer", f.base, `{"id":"../../registration"}`); code != http.StatusBadRequest {
+		t.Fatalf("steer of a path = %d, want 400", code)
+	}
+	if code, _, _ := postJSON(t, f.base+"/s/livesession/steer", f.base, `not json`); code != http.StatusBadRequest {
+		t.Fatalf("malformed steer = %d, want 400", code)
+	}
+	if code, _, _ := postJSON(t, f.base+"/s/boardsession/steer", f.base, `{"id":"`+id+`"}`); code != http.StatusConflict {
+		t.Fatalf("steer for a session without an adapter = %d, want 409", code)
+	}
+	if code, _, _ := postJSON(t, f.base+"/s/nosuchsession/steer", f.base, `{"id":"`+id+`"}`); code != http.StatusNotFound {
+		t.Fatalf("steer for an unknown session = %d, want 404", code)
+	}
+}
+
 func TestWriteRoutesRequireTheDaemonsOwnOrigin(t *testing.T) {
 	f := startPageFixture(t)
-	for _, route := range []string{"message", "cancel"} {
+	for _, route := range []string{"message", "cancel", "steer"} {
 		for _, origin := range []string{"", "null", "http://evil.example", "https://" + strings.TrimPrefix(f.base, "http://"), "http://localhost:1"} {
 			code, header, _ := postJSON(t, f.base+"/s/livesession/"+route, origin, `{"text":"x","id":"x"}`)
 			if code != http.StatusForbidden {

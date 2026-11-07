@@ -12,15 +12,21 @@
 //
 //   - Drain renames each entry into the drained/ subdirectory, where it stays
 //     as the record the page's sent marks read (the newest DrainedCap).
-//   - Merge renames the newest entry to a claim file, writes the merged entry
-//     under a new name, and removes the claim. When the claim fails because a
-//     drain took the entry, the send becomes a new entry instead, so a send is
-//     never lost and a drained entry never comes back.
+//   - Merge renames the newest unsteered entry to a claim file, writes the
+//     merged entry under a new name, and removes the claim. When the claim
+//     fails because a drain took the entry, the send becomes a new entry
+//     instead, so a send is never lost and a drained entry never comes back.
 //   - Cancel renames the entry to a claim file, reads it, and removes it.
 //     When the claim fails, the entry was already drained.
+//   - Steer renames the entry to a claim file, writes the same entry marked
+//     for steering under a new name, and removes the claim. A steered entry
+//     is still held (cancel still takes it), but no later send merges into
+//     it, so a promoted message never absorbs text the user did not promote.
 //
 // Held means undrained: an entry in the inbox directory. A reader tells a
-// held entry from a drained one by the directory it sits in.
+// held entry from a drained one by the directory it sits in. A full drain
+// takes every held entry; a steer-only drain (DrainSteer) takes only the
+// steered ones, which the adapter injects mid-turn.
 //
 // Readers ignore unknown entry fields and treat absent ones as empty. The
 // package depends on nothing but the standard library, so the dashboard
@@ -93,6 +99,10 @@ type Entry struct {
 	Chips []Chip `json:"chips,omitempty"`
 	// SentAt is the first send's time, epoch milliseconds.
 	SentAt int64 `json:"sentAt,omitempty"`
+	// Steer marks an entry the user promoted to steering: the adapter
+	// injects it at the session's next tool boundary instead of at the turn
+	// end. A steered entry is never a merge target.
+	Steer bool `json:"steer,omitempty"`
 }
 
 // Record is an entry read from disk with its file name.
@@ -328,10 +338,10 @@ func claim(dir, name, op string) (string, error) {
 	return claimed, nil
 }
 
-// Send holds add in the inbox at dir: merged into the newest held entry when
-// there is one, or as a new entry. It returns the resulting entry's name and
-// whether it merged. add is normalized first (Normalize); its SentAt is set
-// from now when zero.
+// Send holds add in the inbox at dir: merged into the newest held entry that
+// is not steered when there is one, or as a new entry. It returns the
+// resulting entry's name and whether it merged. add is normalized first
+// (Normalize); its SentAt is set from now when zero.
 func Send(dir string, add Entry, now time.Time) (name string, merged bool, err error) {
 	if add.SentAt == 0 {
 		add.SentAt = now.UnixMilli()
@@ -343,16 +353,16 @@ func Send(dir string, add Entry, now time.Time) (name string, merged bool, err e
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", false, fmt.Errorf("create inbox dir: %w", err)
 	}
-	names, err := entryNames(dir)
+	rec, ok, err := MergeTarget(dir)
 	if err != nil {
 		return "", false, err
 	}
-	if len(names) == 0 {
+	if !ok {
 		name, err = writeEntry(dir, add)
 		return name, false, err
 	}
-	newest := names[len(names)-1]
-	claimed, err := claim(dir, newest, "merge")
+	target := rec.Name
+	claimed, err := claim(dir, target, "merge")
 	if errors.Is(err, ErrGone) {
 		// A drain took the held entry: this send starts the next message.
 		name, err = writeEntry(dir, add)
@@ -362,20 +372,76 @@ func Send(dir string, add Entry, now time.Time) (name string, merged bool, err e
 		return "", false, err
 	}
 	base, err := readEntry(claimed)
-	if err != nil {
-		// Leave an unreadable entry where it was; this send stands alone.
-		_ = os.Rename(claimed, filepath.Join(dir, newest))
+	if err != nil || base.Steer {
+		// Leave an unreadable entry where it was; this send stands alone. A
+		// steered one cannot be here unless it was steered after the target
+		// was chosen, and it accepts no merge either.
+		_ = os.Rename(claimed, filepath.Join(dir, target))
 		name, err = writeEntry(dir, add)
 		return name, false, err
 	}
 	name, err = writeEntry(dir, Merge(base, add))
 	if err != nil {
 		// Put the claimed entry back so the earlier send is not lost.
-		_ = os.Rename(claimed, filepath.Join(dir, newest))
+		_ = os.Rename(claimed, filepath.Join(dir, target))
 		return "", false, err
 	}
 	_ = os.Remove(claimed)
 	return name, true, nil
+}
+
+// MergeTarget is the held entry a send at dir would merge into: the newest
+// one that is not steered; false when there is none. An entry that cannot be
+// read is skipped. A caller that caps what one entry may carry counts the
+// target's share through it.
+func MergeTarget(dir string) (Record, bool, error) {
+	names, err := Names(dir)
+	if err != nil {
+		return Record{}, false, err
+	}
+	for i := len(names) - 1; i >= 0; i-- {
+		e, err := readEntry(filepath.Join(dir, names[i]))
+		if err != nil {
+			continue
+		}
+		if !e.Steer {
+			return Record{Name: names[i], Entry: e}, true, nil
+		}
+	}
+	return Record{}, false, nil
+}
+
+// Steer marks the held entry name at dir for steering: it claims the entry
+// and writes the same entry with Steer set under a fresh name, so entry files
+// stay never rewritten. It returns the steered entry's name; an entry already
+// steered is left as it is and its own name returned. It returns ErrGone
+// when the entry is no longer held.
+func Steer(dir, name string) (string, error) {
+	if !entryNamePattern.MatchString(name) {
+		return "", ErrGone
+	}
+	claimed, err := claim(dir, name, "steer")
+	if err != nil {
+		return "", err
+	}
+	entry, err := readEntry(claimed)
+	if err != nil || entry.Steer {
+		// Leave an unreadable or already steered entry held as it was.
+		_ = os.Rename(claimed, filepath.Join(dir, name))
+		if err != nil {
+			return "", err
+		}
+		return name, nil
+	}
+	entry.Steer = true
+	steered, err := writeEntry(dir, entry)
+	if err != nil {
+		// Put the claimed entry back so the message is not lost.
+		_ = os.Rename(claimed, filepath.Join(dir, name))
+		return "", err
+	}
+	_ = os.Remove(claimed)
+	return steered, nil
 }
 
 // Cancel takes the held entry name out of the inbox at dir and returns it.
@@ -402,13 +468,24 @@ func Cancel(dir, name string) (Entry, error) {
 // drained directory, and returns those this call claimed. An entry another
 // claim took first is skipped. The drained directory is then trimmed to the
 // newest DrainedCap records.
-func Drain(dir string) ([]Record, error) {
+func Drain(dir string) ([]Record, error) { return drain(dir, false) }
+
+// DrainSteer is Drain restricted to steered entries: it claims only the held
+// entries marked for steering and leaves every other one held.
+func DrainSteer(dir string) ([]Record, error) { return drain(dir, true) }
+
+func drain(dir string, steerOnly bool) ([]Record, error) {
 	names, err := entryNames(dir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
+	}
+	if steerOnly {
+		// An entry file is never rewritten, so reading it before the claim
+		// tells whether the claimed file is steered.
+		names = filterNames(dir, names, func(e Entry) bool { return e.Steer })
 	}
 	if len(names) == 0 {
 		return nil, nil
@@ -439,6 +516,19 @@ func Drain(dir string) ([]Record, error) {
 	}
 	trimDrained(drained)
 	return out, firstErr
+}
+
+// filterNames keeps the names whose entry reads and satisfies keep; an entry
+// that cannot be read (a claim took it meanwhile, or it does not parse) is
+// dropped.
+func filterNames(dir string, names []string, keep func(Entry) bool) []string {
+	out := names[:0:0]
+	for _, name := range names {
+		if e, err := readEntry(filepath.Join(dir, name)); err == nil && keep(e) {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 func trimDrained(dir string) {
@@ -476,6 +566,16 @@ func Names(dir string) ([]string, error) {
 		return nil, nil
 	}
 	return names, err
+}
+
+// SteerNames returns the names of the held entries at dir marked for
+// steering, oldest first; a missing directory holds none.
+func SteerNames(dir string) ([]string, error) {
+	names, err := Names(dir)
+	if err != nil || len(names) == 0 {
+		return nil, err
+	}
+	return filterNames(dir, names, func(e Entry) bool { return e.Steer }), nil
 }
 
 // DrainedNames returns the drained record names of the inbox at dir, oldest
