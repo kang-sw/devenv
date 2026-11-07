@@ -278,3 +278,37 @@ Decisions:
 - A Now fragment with several blocks puts a lone inline element such as
   `<canvas>` inside a `<p>`. Its script block stays verbatim, so the drawing
   still runs.
+
+#### Edition (5efec6d93) - 2026-11-07
+
+This ticket landed second, after 261107-feat-ws-dashboard-link-actions
+(5984e371b). The forward merge 5efec6d93 brings in the link-actions changes:
+
+- `TextTargets` carries `FileActions`, `Mermaid`, and `HTML`.
+- The dashboard keeps link-actions' `replyRender{finished, streaming}`, and
+  only the finished targets set `HTML`.
+- The markdown link writers take their opening attributes from shared
+  `linkAttrs` and `actionAttrs`, and the trust record stores that attribute
+  list.
+
+As a result:
+
+- A finished reply's markdown links keep the `data-wl` marker.
+- A raw `<a>` or `<img>` renders with the same attributes and shape as its
+  markdown form: an action link, a url-marked http(s) link, or action-linked
+  path text.
+- A refused href leaves `<a>text</a>`, and a refused src leaves the src as
+  path text.
+- Forged `data-wl`, `data-abs`, and `tabindex` attributes are dropped.
+
+The ws-mcp manual records this.
+
+Verification: `go build ./...`, `go vet ./...`, and `go test ./... -count=1`
+pass on the merged tree, all 21 packages. New tests:
+
+- `TestFinishedReplyRawLinksMatchMarkdownLinks`: raw/markdown parity across
+  link and image targets, refused targets, and forged markers.
+- `TestFinishedReplyCannotReachSystemOpen`: a text/plain form that forges the
+  JSON body, a formaction button, a raw link and an image to the route, an
+  SVG link, an onerror handler, and a javascript: link. None leaves a form,
+  a hook, or a URL attribute that reaches the route.
