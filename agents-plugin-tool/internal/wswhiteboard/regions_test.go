@@ -133,8 +133,8 @@ func TestPanelLanesRenderCards(t *testing.T) {
 	wantAll(t, out,
 		`<span class="lname">ready</span><span class="chip">2</span>`,
 		`<span class="lnote">latest 10 of 12</span>`,
-		`<li class="kcard"><span class="chip cat epic">epic</span><span class="ctitle"><a href="../t/x.md">An epic</a></span><span class="csub" title="261101-epic-x">261101-epic-x</span></li>`,
-		`<span class="ctitle" title="ai-docs/tickets/ready/y.md">Served</span>`,
+		`<li class="kcard"><span class="ctitle"><span class="chip cat epic">epic</span><a href="../t/x.md">An epic</a></span><span class="csub" title="261101-epic-x">261101-epic-x</span></li>`,
+		`<span class="ctitle" title="ai-docs/tickets/ready/y.md"><span class="chip cat feat">feat</span>Served</span>`,
 		`<li class="none">none</li>`,
 	)
 	wantNone(t, out, `<code class="fpath">ai-docs/tickets/ready/y.md</code>`)
