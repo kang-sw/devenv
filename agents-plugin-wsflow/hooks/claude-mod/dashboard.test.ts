@@ -3,7 +3,9 @@ import { describe, expect, test } from 'claude-code/testing'
 import {
   ADAPTER,
   argsPreview,
+  BATCH_CALL_CAP,
   BATCH_CAP,
+  BATCH_RETAIN_CAP,
   CALL_TIMEOUT_MS,
   callArgs,
   createDashboard,
@@ -279,7 +281,70 @@ describe('the feed', () => {
     events = await after(() => dash.stepEnded(undefined, 't/0', { answer: '', toolUses: [{ name: 'Bash', input: { command: 'ls' } }] }))
     views = batches(lastLead(events))
     expect(views.length).toBe(1)
-    expect(views[0]).toEqual({ epoch: expect.any(String), seq: 1, toolNames: ['Bash'], callCount: 1, failed: 0, startedAt: expect.any(Number), endedAt: expect.any(Number) })
+    expect(views[0]).toEqual({
+      epoch: expect.any(String),
+      seq: 1,
+      toolNames: ['Bash'],
+      callCount: 1,
+      failed: 0,
+      startedAt: expect.any(Number),
+      endedAt: expect.any(Number),
+      calls: [{ name: 'Bash', startedAt: expect.any(Number), endedAt: expect.any(Number), failed: false }],
+    })
+  })
+
+  test('a finished batch carries each call\'s name, clocks, and failed flag and the step\'s tokens; a running one neither', async () => {
+    const { h, dash, after } = await started()
+    dash.turnStarted(undefined)
+    dash.stepBegan(undefined, 't/0')
+    dash.stepChunk(undefined, 't/0', { kind: 'tool', index: 0, id: 'u1', name: 'Read' })
+    dash.stepChunk(undefined, 't/0', { kind: 'tool', index: 1, id: 'u2', name: 'Read' })
+    dash.stepChunk(undefined, 't/0', { kind: 'tool', index: 2, id: 'u3', name: 'Bash' })
+    dash.stepEnded(undefined, 't/0', {
+      answer: '',
+      toolUses: [{ name: 'Read', input: { file_path: '/secret' } }, { name: 'Read', input: {} }, { name: 'Bash', input: { command: 'rm -rf x' } }],
+      usage: { input_tokens: 5, output_tokens: 60, cache_read_input_tokens: 9000, cache_creation_input_tokens: 0 },
+    })
+    const t0 = h.now
+    dash.toolBegan(undefined, 'u1', 'Read', { file_path: '/secret' })
+    dash.toolBegan(undefined, 'u2', 'Read', {})
+    dash.toolBegan(undefined, 'u3', 'Bash', { command: 'rm -rf x' })
+    let events = await after(() => {
+      dash.toolEnded(undefined, 'u1', false)
+      dash.toolEnded(undefined, 'u2', true)
+    })
+    let view = batches(lastLead(events))[0] as View & { calls?: unknown; usage?: unknown }
+    expect(view.running).toBeDefined()
+    expect(view.calls).toBeUndefined()
+    expect(view.usage).toBeUndefined()
+    h.now += 700
+    const t3 = h.now
+    events = await after(() => dash.toolEnded(undefined, 'u3', false))
+    view = batches(lastLead(events))[0] as View & { calls?: unknown; usage?: unknown }
+    expect(view.calls).toEqual([
+      { name: 'Read', startedAt: t0, endedAt: t0, failed: false },
+      { name: 'Read', startedAt: t0, endedAt: t0, failed: true },
+      { name: 'Bash', startedAt: t0, endedAt: t3, failed: false },
+    ])
+    expect(view.usage).toEqual({ input: 5, output: 60, cacheRead: 9000, cacheWrite: 0 })
+    const payload = JSON.stringify(h.calls.at(-1))
+    expect(payload.includes('/secret')).toBe(false)
+    expect(payload.includes('rm -rf')).toBe(false)
+  })
+
+  test('the calls a finished batch lists are capped; a step with no usage sends none', async () => {
+    const { dash, after } = await started()
+    dash.turnStarted(undefined)
+    dash.stepBegan(undefined, 't/0')
+    const uses = Array.from({ length: BATCH_CALL_CAP + 4 }, (_, i) => ({ name: `T${i}`, input: {} }))
+    const events = await after(() => {
+      dash.stepEnded(undefined, 't/0', { answer: '', toolUses: uses, usage: null })
+      dash.turnCompleted(undefined, '', 'answer')
+    })
+    const view = batches(lastLead(events))[0] as View & { calls?: unknown[]; usage?: unknown }
+    expect(view.callCount).toBe(BATCH_CALL_CAP + 4)
+    expect(view.calls?.length).toBe(BATCH_CALL_CAP)
+    expect(view.usage).toBeUndefined()
   })
 
   test('a call still running at the turn end counts as failed; an error result counts as failed', async () => {
@@ -300,20 +365,54 @@ describe('the feed', () => {
     expect(kinds(events).at(-1)).toBe('turn_end')
   })
 
-  test('only the newest batches are kept', async () => {
-    const { dash, advance, sent } = await started()
-    dash.turnStarted(undefined)
-    for (let i = 0; i < BATCH_CAP + 3; i++) {
+  const grepSteps = (dash: ReturnType<typeof harness>['dash'], from: number, count: number) => {
+    for (let i = from; i < from + count; i++) {
       dash.stepBegan(undefined, `t/${i}`)
       dash.stepChunk(undefined, `t/${i}`, { kind: 'tool', index: 0, id: `u${i}`, name: 'Grep' })
       dash.toolBegan(undefined, `u${i}`, 'Grep', { pattern: 'x' })
       dash.toolEnded(undefined, `u${i}`, false)
       dash.stepEnded(undefined, `t/${i}`, { answer: '', toolUses: [{ name: 'Grep', input: {} }] })
     }
+  }
+
+  test('finished batches past the newest stay listed until a delivered call carried them, then only the newest are kept', async () => {
+    const { h, dash, advance, sent } = await started()
+    dash.turnStarted(undefined)
+    grepSteps(dash, 0, BATCH_CAP + 3)
+    // Eight finished between two calls: all go, so ws-mcp counts each.
     await advance()
-    const views = batches(lastLead(sent()))
-    expect(views.length).toBe(BATCH_CAP)
-    expect(views.map((v) => v.seq)).toEqual([4, 5, 6, 7, 8])
+    expect(batches(lastLead(sent())).map((v) => v.seq)).toEqual([1, 2, 3, 4, 5, 6, 7, 8])
+    // That call was delivered: the next lists only the newest.
+    grepSteps(dash, BATCH_CAP + 3, 1)
+    await advance()
+    expect(batches(lastLead(sent())).map((v) => v.seq)).toEqual([5, 6, 7, 8, 9])
+    // An undelivered call keeps what it carried: the resync lists it all again.
+    h.answers.push(new Error('server gone'))
+    grepSteps(dash, BATCH_CAP + 4, BATCH_CAP + 2)
+    await advance()
+    const seven = [10, 11, 12, 13, 14, 15, 16]
+    expect(batches(lastLead(sent())).map((v) => v.seq)).toEqual(seven)
+    await advance(RETRY_MS)
+    const retry = h.calls.at(-1)!.events
+    expect(kinds(retry)[0]).toBe('reset')
+    expect(batches(lastLead(retry)).map((v) => v.seq)).toEqual(seven)
+    grepSteps(dash, 2 * BATCH_CAP + 6, 1)
+    await advance()
+    expect(batches(lastLead(sent())).map((v) => v.seq)).toEqual([13, 14, 15, 16, 17])
+  })
+
+  test('with no delivered call, at most BATCH_RETAIN_CAP batches are kept', async () => {
+    const { h, dash, advance, sent } = await started()
+    dash.turnStarted(undefined)
+    h.key = undefined
+    grepSteps(dash, 0, BATCH_RETAIN_CAP + 6)
+    await advance()
+    h.key = KEY
+    dash.keyChanged()
+    await advance()
+    const seqs = batches(lastLead(sent())).map((v) => v.seq)
+    expect(seqs.length).toBe(BATCH_RETAIN_CAP)
+    expect(seqs[0]).toBe(7)
   })
 
   test('steps no hook saw: turn.complete\'s answer is still the finished reply, and a call opens its own batch', async () => {

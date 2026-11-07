@@ -44,6 +44,15 @@ const (
 	BatchCap       = 5
 	ToolNameCap    = 5
 	ArgsPreviewCap = 200
+	// BatchWireCap bounds the batches one agent event may list. An adapter
+	// lists, beyond the newest BatchCap, the finished batches no delivered
+	// intake call carried yet (at most 32), so each is counted once even when
+	// more than BatchCap finish between two calls; the state counts them all
+	// and keeps the newest BatchCap.
+	BatchWireCap = 40
+	// BatchCallCap bounds the per-call entries one batch carries; calls past
+	// it are counted (callCount) but not named.
+	BatchCallCap = 32
 	// ToolNameRunes bounds one tool name.
 	ToolNameRunes = 64
 	// FinishedAgentCap is how many finished agents the tree keeps beside
@@ -278,6 +287,38 @@ type BatchView struct {
 	EndedAt    int64           `json:"endedAt,omitempty"`
 	Running    *RunningView    `json:"running,omitempty"`
 	Generating *GeneratingView `json:"generating,omitempty"`
+	// Calls and Usage are a finished batch's per-call names and its model
+	// request's tokens, when the adapter sends them ("calls", "usage" on the
+	// wire). Only the lead's tool summary reads them, so the snapshot leaves
+	// them out.
+	Calls []BatchCall `json:"-"`
+	Usage *TokenUsage `json:"-"`
+}
+
+// BatchCall is one call of a batch as an adapter reports it: the tool's
+// name, its start and end (0 when unknown), and whether it failed. No
+// argument or result content is ever part of it.
+type BatchCall struct {
+	Name      string
+	StartedAt int64
+	EndedAt   int64
+	Failed    bool
+}
+
+// TokenUsage is one model request's token counts, or a sum of them: uncached
+// input, output, and prompt-cache reads and writes.
+type TokenUsage struct {
+	Input      int64 `json:"input,omitempty"`
+	Output     int64 `json:"output,omitempty"`
+	CacheRead  int64 `json:"cacheRead,omitempty"`
+	CacheWrite int64 `json:"cacheWrite,omitempty"`
+}
+
+func (u *TokenUsage) add(o TokenUsage) {
+	u.Input += o.Input
+	u.Output += o.Output
+	u.CacheRead += o.CacheRead
+	u.CacheWrite += o.CacheWrite
 }
 
 // RunningView is a running batch's in-flight summary; the argument preview

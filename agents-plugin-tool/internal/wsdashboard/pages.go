@@ -133,6 +133,10 @@ func loadDashboardAssets() (*dashboardAssets, error) {
 			"toolName": toolName,
 			"shortID":  shortID,
 			"marked":   markedText,
+			// The tool summary's token and batch lines.
+			"tokenText":  tokenText,
+			"tokenTitle": tokenTitle,
+			"batchMeta":  batchMeta,
 		}
 		a.tmpl, dashboardAssetsErr = template.New("dashboard").Funcs(funcs).ParseFS(dashboardFS, "assets/dashboard.tmpl")
 		if dashboardAssetsErr == nil {
@@ -183,6 +187,84 @@ func spanText(ms int64) string {
 		return fmt.Sprintf("%dm %ds", int(d/time.Minute), int(d%time.Minute/time.Second))
 	}
 	return fmt.Sprintf("%dh %dm", int(d/time.Hour), int(d%time.Hour/time.Minute))
+}
+
+// batchSpanText is one batch's duration: tenths of a second under ten
+// seconds, since most batches take one or two, else spanText.
+func batchSpanText(ms int64) string {
+	switch {
+	case ms < 100:
+		return "<0.1s"
+	case ms < 10_000:
+		return strconv.FormatFloat(float64(ms)/1000, 'f', 1, 64) + "s"
+	}
+	return spanText(ms)
+}
+
+// compactTokens is a token count in compact form: 950, 1.2k, 12.3k, 210k, 1.4M.
+func compactTokens(n int64) string {
+	switch {
+	case n < 1000:
+		return strconv.FormatInt(n, 10)
+	case n < 99_950:
+		return strconv.FormatFloat(float64(n)/1000, 'f', 1, 64) + "k"
+	case n < 999_500:
+		return strconv.FormatInt((n+500)/1000, 10) + "k"
+	}
+	return strconv.FormatFloat(float64(n)/1e6, 'f', 1, 64) + "M"
+}
+
+// tokenText is a token usage in one compact line: input and output, then
+// prompt-cache reads and writes when there were any.
+func tokenText(u *wslive.TokenUsage) string {
+	if u == nil {
+		return ""
+	}
+	parts := []string{"in " + compactTokens(u.Input), "out " + compactTokens(u.Output)}
+	if u.CacheRead > 0 {
+		parts = append(parts, "cache "+compactTokens(u.CacheRead))
+	}
+	if u.CacheWrite > 0 {
+		parts = append(parts, "write "+compactTokens(u.CacheWrite))
+	}
+	return strings.Join(parts, " · ")
+}
+
+// tokenTitle is a token usage's exact counts, for a title attribute.
+func tokenTitle(u *wslive.TokenUsage) string {
+	if u == nil {
+		return ""
+	}
+	return fmt.Sprintf("tokens: %d input · %d output · %d cache read · %d cache write", u.Input, u.Output, u.CacheRead, u.CacheWrite)
+}
+
+// batchMeta is a tool summary batch line's trailing text: its duration,
+// failed calls, and the request's tokens. A batch without per-call tools
+// (an older adapter's) leads with its call count, which its chips cannot
+// show; so does one whose calls outnumber those it named.
+func batchMeta(b wslive.ToolBatch) string {
+	var parts []string
+	named := 0
+	for _, t := range b.Tools {
+		named += t.Calls
+	}
+	if named < b.Calls {
+		if b.Calls == 1 {
+			parts = append(parts, "1 call")
+		} else {
+			parts = append(parts, strconv.Itoa(b.Calls)+" calls")
+		}
+	}
+	if b.DurationMs > 0 {
+		parts = append(parts, batchSpanText(b.DurationMs))
+	}
+	if b.Failed > 0 {
+		parts = append(parts, strconv.Itoa(b.Failed)+" failed")
+	}
+	if b.Usage != nil {
+		parts = append(parts, tokenText(b.Usage))
+	}
+	return strings.Join(parts, " · ")
 }
 
 // renderedRegion is one region's HTML and its content hash.

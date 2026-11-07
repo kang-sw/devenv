@@ -1,8 +1,10 @@
 package wslive
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -37,7 +39,7 @@ func TestToolsRowFlushesBeforeTheNextConversationEntry(t *testing.T) {
 		t.Fatalf("reply flush ring = %v", kinds(res.Ring))
 	}
 	got := res.Ring[0].Tools
-	want := &ToolSummary{Calls: 2, DurationMs: 100, Tools: []ToolTally{{Name: "Bash", Calls: 2}}, Batches: []ToolBatch{{Names: []string{"Bash"}, Calls: 2}}}
+	want := &ToolSummary{Calls: 2, DurationMs: 100, Tools: []ToolTally{{Name: "Bash", Calls: 2}}, Batches: []ToolBatch{{Names: []string{"Bash"}, Calls: 2, DurationMs: 100}}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("summary = %+v, want %+v", got, want)
 	}
@@ -145,9 +147,9 @@ func TestToolsRowCountsCallsPerTool(t *testing.T) {
 		Tools:      []ToolTally{{Name: "Bash", Calls: 5}, {Name: "Read", Calls: 1}},
 		OtherCalls: 5,
 		Batches: []ToolBatch{
-			{Names: []string{"Bash"}, Calls: 4},
-			{Names: []string{"Read", "Bash"}, Calls: 5, Failed: 1},
-			{Calls: 2},
+			{Names: []string{"Bash"}, Calls: 4, DurationMs: 10},
+			{Names: []string{"Read", "Bash"}, Calls: 5, Failed: 1, DurationMs: 10},
+			{Calls: 2, DurationMs: 10},
 		},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -196,5 +198,148 @@ func TestToolsEntryRoundTripsThroughTheRing(t *testing.T) {
 	recs, err := ReadRing(dir)
 	if err != nil || len(recs) != 1 || !reflect.DeepEqual(recs[0].RingEntry, entry) {
 		t.Fatalf("read %+v err %v", recs, err)
+	}
+}
+
+func withCalls(b map[string]any, calls ...map[string]any) map[string]any {
+	b["calls"] = calls
+	return b
+}
+
+func call(name string, start, end int64, failed bool) map[string]any {
+	return map[string]any{"name": name, "startedAt": start, "endedAt": end, "failed": failed}
+}
+
+// TestToolsRowIsExactWithPerCallData pins the exact path: a batch carrying
+// its calls credits each call to its own tool (overall and per batch, in
+// call order), keeps its duration and failed count, and its request's
+// tokens add to the gap's totals. A batch without calls beside it still
+// takes the approximate path.
+func TestToolsRowIsExactWithPerCallData(t *testing.T) {
+	st := NewState(ownerKey)
+	b1 := withCalls(finishedAt(1, 100, 1300, 4, 1, "Read", "Bash"),
+		call("Read", 110, 200, false), call("Bash", 110, 1300, true), call("Read", 120, 210, false), call("Read", 130, 220, false))
+	b1["usage"] = map[string]any{"input": 12, "output": 340, "cacheRead": 45_000, "cacheWrite": 1_200}
+	b2 := withCalls(finishedAt(2, 1400, 1500, 1, 0, "Grep"), call("Grep", 1400, 1500, false))
+	b2["usage"] = map[string]any{"input": 3, "output": 60, "cacheRead": 46_000}
+	b3 := finishedAt(3, 1600, 1700, 3, 0, "Edit", "Bash") // an older adapter's batch: no calls, no usage
+	mustApply(t, st, Event{Kind: KindAgent, Batches: batchesJSON(t, b1, b2, b3)}, 2000)
+
+	got := st.Snapshot(2001).Lead.ToolGap
+	want := &ToolSummary{
+		Calls: 8, Failed: 1, DurationMs: 1600,
+		Tools:      []ToolTally{{Name: "Read", Calls: 3}, {Name: "Bash", Calls: 2}, {Name: "Edit", Calls: 1}, {Name: "Grep", Calls: 1}},
+		OtherCalls: 1,
+		Batches: []ToolBatch{
+			{Names: []string{"Read", "Bash"}, Tools: []ToolTally{{Name: "Read", Calls: 3}, {Name: "Bash", Calls: 1}}, Calls: 4, Failed: 1, DurationMs: 1200,
+				Usage: &TokenUsage{Input: 12, Output: 340, CacheRead: 45_000, CacheWrite: 1_200}},
+			{Names: []string{"Grep"}, Tools: []ToolTally{{Name: "Grep", Calls: 1}}, Calls: 1, DurationMs: 100, Usage: &TokenUsage{Input: 3, Output: 60, CacheRead: 46_000}},
+			{Names: []string{"Edit", "Bash"}, Calls: 3, DurationMs: 100},
+		},
+		Usage: &TokenUsage{Input: 15, Output: 400, CacheRead: 91_000, CacheWrite: 1_200},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("summary = %+v\nwant      %+v", got, want)
+	}
+	// The ring entry is the same summary, and it round-trips through a file.
+	res := mustApply(t, st, Event{Kind: KindReply, Final: true, Text: "done"}, 2100)
+	if !reflect.DeepEqual(res.Ring[0].Tools, want) {
+		t.Fatalf("ring summary = %+v", res.Ring[0].Tools)
+	}
+	dir := t.TempDir()
+	if err := AppendRing(dir, res.Ring[:1]); err != nil {
+		t.Fatal(err)
+	}
+	if recs, err := ReadRing(dir); err != nil || !reflect.DeepEqual(recs[0].Tools, want) {
+		t.Fatalf("read back %+v err %v", recs, err)
+	}
+	// The snapshot's batch list never carries the per-call data.
+	raw, err := json.Marshal(st.Snapshot(2200))
+	if err != nil || strings.Contains(string(raw), `"calls"`) || strings.Contains(string(raw), "cacheRead") {
+		t.Fatalf("snapshot carries per-call data: %s", raw)
+	}
+}
+
+// TestBatchCallsAndUsageAreBounded pins normalization of the new fields: at
+// most BatchCallCap calls (never more than callCount), a malformed call or
+// usage is dropped without the batch, names are scrubbed of session keys and
+// capped, and negative token counts read 0.
+func TestBatchCallsAndUsageAreBounded(t *testing.T) {
+	st := NewState(ownerKey)
+	var many []map[string]any
+	for i := 0; i < BatchCallCap+8; i++ {
+		many = append(many, call("Read", 1, 2, false))
+	}
+	big := withCalls(finishedAt(1, 0, 10, BatchCallCap+8, 0, "Read"), many...)
+	short := withCalls(finishedAt(2, 10, 20, 1, 0, "Bash"), call("Bash", 10, 20, false), call("Bash", 10, 20, false))
+	odd := finishedAt(3, 20, 30, 3, 0, "Bash")
+	odd["calls"] = []any{"not a call", map[string]any{"name": "  "}, map[string]any{"name": "run " + ownerKey + " " + strings.Repeat("x", 200), "startedAt": 25, "endedAt": 21}}
+	odd["usage"] = map[string]any{"input": -5, "output": 7}
+	bad := withCalls(finishedAt(4, 30, 40, 1, 0, "Grep"), call("Grep", 30, 40, false))
+	bad["usage"] = "lots"
+	mustApply(t, st, Event{Kind: KindAgent, Batches: batchesJSON(t, big, short, odd, bad)}, 100)
+
+	batches := st.lead.batches
+	if len(batches) != 4 {
+		t.Fatalf("kept %d batches, want all 4 (a malformed new field drops only itself)", len(batches))
+	}
+	if n := len(batches[0].Calls); n != BatchCallCap {
+		t.Fatalf("calls kept %d, want %d", n, BatchCallCap)
+	}
+	if n := len(batches[1].Calls); n != 1 {
+		t.Fatalf("calls past callCount kept: %d", n)
+	}
+	c := batches[2].Calls
+	if len(c) != 1 || strings.Contains(c[0].Name, ownerKey) || len([]rune(c[0].Name)) > ToolNameRunes || c[0].StartedAt != 25 || c[0].EndedAt != 0 {
+		t.Fatalf("odd calls = %+v", c)
+	}
+	if u := batches[2].Usage; u == nil || *u != (TokenUsage{Output: 7}) {
+		t.Fatalf("odd usage = %+v", u)
+	}
+	if batches[3].Usage != nil || len(batches[3].Calls) != 1 {
+		t.Fatalf("malformed usage kept or calls lost: %+v", batches[3])
+	}
+	gap := st.Snapshot(101).Lead.ToolGap
+	if gap.Calls != BatchCallCap+8+1+3+1 || gap.OtherCalls != 8+2 {
+		t.Fatalf("gap calls %d other %d", gap.Calls, gap.OtherCalls)
+	}
+}
+
+// TestFinishedBatchesPastTheWindowCountOnce pins the batch-loss fix: an
+// adapter lists every finished batch no delivered call carried yet, beyond
+// the newest BatchCap, and each is counted exactly once whether it arrives
+// in one list, again in a resent list, or after it left the list.
+func TestFinishedBatchesPastTheWindowCountOnce(t *testing.T) {
+	st := NewState(ownerKey)
+	mustApply(t, st, Event{Kind: KindTurnStart, At: 1}, 1)
+	var list []map[string]any
+	for i := int64(1); i <= 8; i++ {
+		list = append(list, withCalls(finishedAt(i, i*10, i*10+5, 1, 0, "Bash"), call("Bash", i*10, i*10+5, false)))
+	}
+	mustApply(t, st, Event{Kind: KindAgent, Batches: batchesJSON(t, list...)}, 100)
+	snap := st.Snapshot(101)
+	if len(snap.Lead.Batches) != BatchCap || snap.Lead.Batches[0].Seq != 4 {
+		t.Fatalf("kept batches %+v, want the newest %d", snap.Lead.Batches, BatchCap)
+	}
+	if snap.Lead.ToolGap.Calls != 8 || snap.Lead.Done != 8 {
+		t.Fatalf("gap calls %d done %d, want 8 and 8", snap.Lead.ToolGap.Calls, snap.Lead.Done)
+	}
+	// A call that was delivered but whose answer was lost: the same list again.
+	mustApply(t, st, Event{Kind: KindAgent, Batches: batchesJSON(t, list...)}, 110)
+	// The adapter learned of delivery: only the window, plus a new batch.
+	next := append(append([]map[string]any(nil), list[4:]...), withCalls(finishedAt(9, 90, 95, 2, 0, "Read"), call("Read", 90, 95, false), call("Read", 90, 95, false)))
+	mustApply(t, st, Event{Kind: KindAgent, Batches: batchesJSON(t, next...)}, 120)
+	snap = st.Snapshot(121)
+	if snap.Lead.ToolGap.Calls != 10 || snap.Lead.Done != 10 || len(snap.Lead.ToolGap.Batches) != 9 {
+		t.Fatalf("after resend: gap calls %d done %d batches %d, want 10, 10, 9", snap.Lead.ToolGap.Calls, snap.Lead.Done, len(snap.Lead.ToolGap.Batches))
+	}
+	// The wire cap keeps the newest BatchWireCap of an oversized list.
+	var huge []map[string]any
+	for i := int64(100); i < 100+BatchWireCap+5; i++ {
+		huge = append(huge, finishedAt(i, i, i+1, 1, 0, "Grep"))
+	}
+	mustApply(t, st, Event{Kind: KindAgent, Batches: batchesJSON(t, huge...)}, 130)
+	if got := st.Snapshot(131).Lead.ToolGap.Calls; got != 10+BatchWireCap {
+		t.Fatalf("gap calls after an oversized list = %d, want %d", got, 10+BatchWireCap)
 	}
 }

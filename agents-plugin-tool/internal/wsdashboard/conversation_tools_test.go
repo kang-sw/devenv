@@ -99,3 +99,54 @@ func TestOpenGapShowsALiveToolsRow(t *testing.T) {
 		t.Errorf("a snapshot without an open gap rendered a tools row:\n%s", none)
 	}
 }
+
+// TestExactToolsRowShowsTokensDurationsAndRepeats pins the per-call render:
+// the row head adds the gap's token totals, and each batch line shows its
+// tools as chips with xN for repeats, then its duration, failed count, and
+// the request's tokens instead of a bare call count. A batch without
+// per-call data still leads with its call count.
+func TestExactToolsRowShowsTokensDurationsAndRepeats(t *testing.T) {
+	summary := &wslive.ToolSummary{
+		Calls: 6, Failed: 1, DurationMs: 4_000,
+		Tools: []wslive.ToolTally{{Name: "Read", Calls: 3}, {Name: "Bash", Calls: 2}, {Name: "Grep", Calls: 1}},
+		Batches: []wslive.ToolBatch{
+			{Names: []string{"Read", "Bash"}, Tools: []wslive.ToolTally{{Name: "Read", Calls: 3}, {Name: "Bash", Calls: 1}}, Calls: 4, Failed: 1, DurationMs: 1_234,
+				Usage: &wslive.TokenUsage{Input: 12, Output: 1_100, CacheRead: 210_400, CacheWrite: 4_200}},
+			{Names: []string{"Bash", "Grep"}, Calls: 2, DurationMs: 40},
+		},
+		Usage: &wslive.TokenUsage{Input: 12_300, Output: 1_100, CacheRead: 210_400},
+	}
+	ring := []wslive.RingRecord{ringRecord(1, wslive.RingEntry{Kind: wslive.RingTools, Tools: summary})}
+	set, err := renderSessionRegions(historyView(ring, "", PageContent{}, nil), newEntryCache())
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(set[regionEntries].HTML)
+	for _, want := range []string{
+		`<span class="ttok" title="tokens: 12300 input · 1100 output · 210400 cache read · 0 cache write">in 12.3k · out 1.1k · cache 210k</span>`,
+		`Read<b class="x">×3</b></span>`,
+		`<span class="tool" title="Bash">Bash</span>`,
+		`>1.2s · 1 failed · in 12 · out 1.1k · cache 210k · write 4.2k</span>`,
+		`>2 calls · &lt;0.1s</span>`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("exact tools row lacks %q:\n%s", want, html)
+		}
+	}
+	if strings.Contains(html, `>1 call`) || strings.Contains(html, `4 calls`) {
+		t.Errorf("an exact batch line still shows a bare call count:\n%s", html)
+	}
+}
+
+func TestCompactTokensAndBatchSpans(t *testing.T) {
+	for n, want := range map[int64]string{0: "0", 950: "950", 1_000: "1.0k", 12_345: "12.3k", 99_949: "99.9k", 99_950: "100k", 210_400: "210k", 999_499: "999k", 999_500: "1.0M", 1_400_000: "1.4M"} {
+		if got := compactTokens(n); got != want {
+			t.Errorf("compactTokens(%d) = %q, want %q", n, got, want)
+		}
+	}
+	for ms, want := range map[int64]string{50: "<0.1s", 420: "0.4s", 9_960: "10.0s", 12_000: "12s", 75_000: "1m 15s"} {
+		if got := batchSpanText(ms); got != want {
+			t.Errorf("batchSpanText(%d) = %q, want %q", ms, got, want)
+		}
+	}
+}
