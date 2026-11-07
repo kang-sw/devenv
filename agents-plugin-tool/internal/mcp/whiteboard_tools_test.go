@@ -3,10 +3,8 @@ package mcp
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -52,17 +50,25 @@ func (f *whiteboardFixture) call(t *testing.T, name string, args map[string]any)
 	return callToolOnce(t, f.s, f.id, name, args)
 }
 
-func (f *whiteboardFixture) update(t *testing.T, payload string) string {
+func (f *whiteboardFixture) update(t *testing.T, commands string) string {
 	t.Helper()
-	var v any
-	if err := json.Unmarshal([]byte(payload), &v); err != nil {
-		t.Fatalf("bad payload %s: %v", payload, err)
-	}
-	resp := f.call(t, "whiteboard.update", map[string]any{"payload": v})
+	resp := f.call(t, "whiteboard.update", map[string]any{"commands": commands})
 	if isToolError(resp) {
-		t.Fatalf("whiteboard.update(%s) failed: %s", payload, toolText(t, resp))
+		t.Fatalf("whiteboard.update(%s) failed: %s", commands, toolText(t, resp))
 	}
 	return toolText(t, resp)
+}
+
+// embedDirCommand is the wb:embed-dir command for dir; attribute values are
+// never decoded, so the path is written as is.
+func embedDirCommand(dir string) string {
+	return `<wb:embed-dir path="` + dir + `"/>`
+}
+
+// collapseSpace folds every whitespace run to one space, so an assertion on
+// playbook prose does not depend on where the source wraps a line.
+func collapseSpace(text string) string {
+	return strings.Join(strings.Fields(text), " ")
 }
 
 func (f *whiteboardFixture) dir() string {
@@ -149,11 +155,21 @@ func TestWhiteboardToolsAdvertiseMinimalSchema(t *testing.T) {
 			names = append(names, name)
 		}
 		sort.Strings(names)
-		if strings.Join(names, ",") != "payload,session_key" {
-			t.Fatalf("%s advertises %v, want only session_key and payload", tool.Name, names)
-		}
-		if payload, _ := props["payload"].(map[string]any); payload["type"] != "object" || payload["properties"] != nil {
-			t.Fatalf("%s payload must be an opaque object: %v", tool.Name, payload)
+		switch tool.Name {
+		case "whiteboard.update":
+			if strings.Join(names, ",") != "commands,session_key" {
+				t.Fatalf("%s advertises %v, want only session_key and commands", tool.Name, names)
+			}
+			if commands, _ := props["commands"].(map[string]any); commands["type"] != "string" {
+				t.Fatalf("%s commands must be a string: %v", tool.Name, commands)
+			}
+		case "whiteboard.query":
+			if strings.Join(names, ",") != "payload,session_key" {
+				t.Fatalf("%s advertises %v, want only session_key and payload", tool.Name, names)
+			}
+			if payload, _ := props["payload"].(map[string]any); payload["type"] != "object" || payload["properties"] != nil {
+				t.Fatalf("%s payload must be an opaque object: %v", tool.Name, payload)
+			}
 		}
 		if !strings.Contains(tool.Description, "Lead-only") || !strings.Contains(tool.Description, "`whiteboard` playbook") {
 			t.Fatalf("%s description must be lead-only and point at the whiteboard playbook: %q", tool.Name, tool.Description)
@@ -223,9 +239,16 @@ func TestWhiteboardUpdateRendersPageEmbedAndStampInOrder(t *testing.T) {
 	}
 	defer func() { whiteboardRename = orig }()
 
-	text := f.update(t, `{"add":[
-		{"class":"policy","topic":"layout","title":"Two columns?","options":["yes","no"],"recommendation":"a: reads faster"},
-		{"class":"technical","topic":"layout","title":"Sticky sidebar","rationale":"keeps todos visible"}]}`)
+	text := f.update(t, `<wb:add class="policy" topic="layout">
+<wb:title>Two columns?</wb:title>
+<wb:option>yes</wb:option>
+<wb:option>no</wb:option>
+<wb:recommend>a: reads faster</wb:recommend>
+</wb:add>
+<wb:add class="technical" topic="layout">
+<wb:title>Sticky sidebar</wb:title>
+<wb:why>keeps todos visible</wb:why>
+</wb:add>`)
 	if got := resultLine(t, text, "ids: "); got != "(01), (02)" {
 		t.Fatalf("ids line = %q", got)
 	}
@@ -261,11 +284,11 @@ func TestWhiteboardUpdateRendersPageEmbedAndStampInOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp := f.call(t, "whiteboard.update", map[string]any{"session_key": key2, "payload": map[string]any{}}); isToolError(resp) {
+	if resp := f.call(t, "whiteboard.update", map[string]any{"session_key": key2, "commands": ""}); isToolError(resp) {
 		t.Fatalf("second session update failed: %s", resp)
 	}
 	os.RemoveAll(f.dir())
-	f.update(t, `{}`)
+	f.update(t, ``)
 	if n := excludeEntries(t, f.root); n != 1 {
 		t.Fatalf("exclude entries after re-creating the folder = %d, want 1", n)
 	}
@@ -273,13 +296,13 @@ func TestWhiteboardUpdateRendersPageEmbedAndStampInOrder(t *testing.T) {
 
 func TestWhiteboardEmbedRetentionAndDistinctNames(t *testing.T) {
 	f := newWhiteboardFixture(t)
-	first := resultLine(t, f.update(t, `{}`), "embed: ")
-	second := resultLine(t, f.update(t, `{}`), "embed: ")
+	first := resultLine(t, f.update(t, ``), "embed: ")
+	second := resultLine(t, f.update(t, ``), "embed: ")
 	if first == second {
 		t.Fatalf("two identical renders must produce distinct embed names: %s", first)
 	}
 	for i := 0; i < 4; i++ {
-		f.update(t, `{}`)
+		f.update(t, ``)
 	}
 	names := f.embeds(t, f.dir())
 	if len(names) != 5 {
@@ -298,7 +321,7 @@ func TestWhiteboardEmbedRetentionAndDistinctNames(t *testing.T) {
 	if err := os.Chtimes(filepath.Join(f.dir(), newestBefore), past, past); err != nil {
 		t.Fatal(err)
 	}
-	f.update(t, `{}`)
+	f.update(t, ``)
 	if _, err := os.Stat(filepath.Join(f.dir(), oldest)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("the lowest-sequence embed %s must be evicted despite its fresh mtime", oldest)
 	}
@@ -313,19 +336,12 @@ func TestWhiteboardEmbedRetentionAndDistinctNames(t *testing.T) {
 func TestWhiteboardEmbedDir(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	host := t.TempDir()
-	payload := func(dir string) string {
-		raw, _ := json.Marshal(map[string]any{"embed_dir": dir})
-		return string(raw)
-	}
 	for _, bad := range []string{"relative/dir", filepath.Join(host, "missing")} {
-		raw, _ := json.Marshal(map[string]any{"embed_dir": bad})
-		var v any
-		json.Unmarshal(raw, &v)
-		if resp := f.call(t, "whiteboard.update", map[string]any{"payload": v}); !isToolError(resp) {
+		if resp := f.call(t, "whiteboard.update", map[string]any{"commands": embedDirCommand(bad)}); !isToolError(resp) {
 			t.Fatalf("embed_dir %q must be refused: %s", bad, resp)
 		}
 	}
-	embed := resultLine(t, f.update(t, payload(host)), "embed: ")
+	embed := resultLine(t, f.update(t, embedDirCommand(host)), "embed: ")
 	if strings.Contains(embed, "/") || !strings.HasPrefix(embed, f.replyID()+"-") {
 		t.Fatalf("embed with embed_dir must be the bare file name: %q", embed)
 	}
@@ -337,7 +353,7 @@ func TestWhiteboardEmbedDir(t *testing.T) {
 	}
 	// Remembered for later updates, and never evicted there.
 	for i := 0; i < 6; i++ {
-		later := resultLine(t, f.update(t, `{}`), "embed: ")
+		later := resultLine(t, f.update(t, ``), "embed: ")
 		if strings.Contains(later, "/") {
 			t.Fatalf("later embed must still go to embed_dir: %q", later)
 		}
@@ -354,14 +370,14 @@ func TestWhiteboardEmbedDir(t *testing.T) {
 	}
 	// A vanished folder refuses the update, naming it.
 	gone := t.TempDir()
-	f.update(t, payload(gone))
+	f.update(t, embedDirCommand(gone))
 	os.RemoveAll(gone)
-	resp := f.call(t, "whiteboard.update", map[string]any{"payload": map[string]any{}})
+	resp := f.call(t, "whiteboard.update", map[string]any{"commands": ""})
 	if !isToolError(resp) || !strings.Contains(toolText(t, resp), gone) {
 		t.Fatalf("update with a vanished embed_dir must be refused naming it: %s", resp)
 	}
 	// "" clears it, and embeds return to the repository folder.
-	embed = resultLine(t, f.update(t, `{"embed_dir":""}`), "embed: ")
+	embed = resultLine(t, f.update(t, `<wb:embed-dir path=""/>`), "embed: ")
 	if !strings.HasPrefix(embed, "ai-docs/whiteboards/") {
 		t.Fatalf("cleared embed_dir must return embeds to the repository: %q", embed)
 	}
@@ -387,12 +403,12 @@ func TestWhiteboardRenameRetriesSharingViolation(t *testing.T) {
 				}
 				return origRename(from, to)
 			}
-			f.update(t, `{"add":[{"class":"policy","topic":"t","title":"x"}]}`)
+			f.update(t, `<wb:add class="policy" topic="t"><wb:title>x</wb:title></wb:add>`)
 			if failures != 0 || f.stamp(t) != "wbStamp(\"1\");\n" {
 				t.Fatalf("the %s rename must succeed after retries; failures left %d", target, failures)
 			}
 			for i := 0; i < 4; i++ {
-				f.update(t, `{}`)
+				f.update(t, ``)
 			}
 			// A violation that outlasts the retries fails the render. The batch
 			// is not persisted, and the embed files still match the record: the
@@ -403,7 +419,7 @@ func TestWhiteboardRenameRetriesSharingViolation(t *testing.T) {
 				}
 				return origRename(from, to)
 			}
-			resp := f.call(t, "whiteboard.update", map[string]any{"payload": map[string]any{"add": []any{map[string]any{"class": "policy", "topic": "t", "title": "y"}}}})
+			resp := f.call(t, "whiteboard.update", map[string]any{"commands": `<wb:add class="policy" topic="t"><wb:title>y</wb:title></wb:add>`})
 			if !isToolError(resp) || !strings.Contains(toolText(t, resp), "write "+map[string]string{"page": "full page", "stamp": "stamp"}[target]) {
 				t.Fatalf("persistent sharing violation must fail the render: %s", resp)
 			}
@@ -430,177 +446,179 @@ func TestWhiteboardExcludeFailureLeavesNoFolder(t *testing.T) {
 	if err := os.MkdirAll(exclude, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if resp := f.call(t, "whiteboard.update", map[string]any{"payload": map[string]any{}}); !isToolError(resp) {
+	if resp := f.call(t, "whiteboard.update", map[string]any{"commands": ""}); !isToolError(resp) {
 		t.Fatalf("an unwritable exclude file must fail the first render: %s", resp)
 	}
 	if _, err := os.Stat(f.dir()); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("a failed exclude registration must leave no folder, so the next render retries it")
 	}
 	os.Remove(exclude)
-	f.update(t, `{}`)
+	f.update(t, ``)
 	if n := excludeEntries(t, f.root); n != 1 {
 		t.Fatalf("the retried render must register the exclude: %d entries", n)
 	}
 }
 
-func TestWhiteboardRefusalsCarryProblemsAndSchema(t *testing.T) {
+func TestWhiteboardRefusalsCarryProblemsAndGrammar(t *testing.T) {
 	f := newWhiteboardFixture(t)
-	resp := f.call(t, "whiteboard.update", map[string]any{"payload": `{"add":[]}`})
+	resp := f.call(t, "whiteboard.update", map[string]any{"commands": `<wb:answer id="9" value="a">a</wb:answer>
+<wb:add class="policy" topic="t" color="red"><wb:title>x</wb:title></wb:add>
+<wb:mystery/>`})
 	text := toolText(t, resp)
-	if !isToolError(resp) || !strings.Contains(text, "payload: must be an object; got string") {
-		t.Fatalf("JSON-string payload must be refused type-accurately: %s", text)
+	if !isToolError(resp) {
+		t.Fatalf("a bad batch must be refused: %s", text)
 	}
-	resp = f.call(t, "whiteboard.update", map[string]any{"payload": map[string]any{
-		"add":    `[{"class":"policy"}]`,
-		"answer": []any{map[string]any{"id": 9, "answer": "a"}},
-		"extra":  true,
-	}})
-	text = toolText(t, resp)
 	for _, want := range []string{
 		"nothing was applied",
-		"payload.add: must be an array of objects; got string",
-		"payload.answer[0].id: (09) is not in the store",
-		"payload.answer[0].answer_quote: required",
-		"payload.extra: unknown field",
-		"## Payload",
-		"whiteboard.update payload: {",
-		"close_topics?: [topic],",
+		"command 1 <wb:answer> (line 1) (09): not in the store",
+		"command 2 <wb:add> (line 2): unknown attribute color",
+		"command 3 <wb:mystery> (line 3): unknown command",
+		"## Commands",
+		"`commands` is one string of flat commands.",
 		// The rsrc renderer substitutes only {{.Name}} placeholders, so the
 		// item-reference example survives rendering.
 		"`supersedes {{12}}`",
 	} {
 		if !strings.Contains(text, want) {
-			t.Fatalf("refusal missing %q:\n%s", want, text)
+			t.Fatalf("update refusal missing %q:\n%s", want, text)
 		}
+	}
+	if strings.Contains(text, "## Query") {
+		t.Fatalf("the update refusal must repeat the Commands section only:\n%s", text)
 	}
 	if _, err := os.Stat(f.dir()); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("a refused first update must write nothing")
 	}
+
 	resp = f.call(t, "whiteboard.query", map[string]any{"payload": map[string]any{"status": "done"}})
-	if text := toolText(t, resp); !isToolError(resp) || !strings.Contains(text, "payload.status: must be one of") || !strings.Contains(text, "whiteboard.query payload:") {
-		t.Fatalf("query refusal must carry the problem and the schema: %s", text)
+	text = toolText(t, resp)
+	if !isToolError(resp) || !strings.Contains(text, "payload.status: must be one of") {
+		t.Fatalf("query refusal must carry the problem: %s", text)
+	}
+	if !strings.Contains(text, "## Query") || !strings.Contains(text, "whiteboard.query payload:") || strings.Contains(text, "## Commands") {
+		t.Fatalf("query refusal must repeat the Query section and not the Commands section: %s", text)
 	}
 }
 
-func TestWhiteboardQueryAndNowPathThroughTools(t *testing.T) {
+// The retired payload argument goes through the full tools/call path, whose
+// central precheck would otherwise refuse it as an undeclared argument with
+// no migration hint (handlerOwnedArguments defers it to the handler).
+func TestWhiteboardUpdateRefusesTheRetiredPayloadArgument(t *testing.T) {
 	f := newWhiteboardFixture(t)
-	mustWrite(t, f.root, "tmp/now.html", `<svg viewBox="0 0 10 10"><text>diagram-marker</text></svg>`)
-	f.update(t, `{"add":[{"class":"technical","topic":"t","title":"settle me"}],"now_path":"tmp/now.html"}`)
+	for name, payload := range map[string]any{
+		"object": map[string]any{"add": []any{map[string]any{"class": "policy", "topic": "t", "title": "x"}}},
+		"empty":  map[string]any{},
+		"string": `{"add":[]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			resp := f.call(t, "whiteboard.update", map[string]any{"payload": payload})
+			text := toolText(t, resp)
+			if !isToolError(resp) {
+				t.Fatalf("a payload argument must be refused: %s", text)
+			}
+			for _, want := range []string{
+				"payload: no longer accepted; whiteboard.update takes commands",
+				"nothing was applied",
+				"## Commands",
+				"`commands` is one string of flat commands.",
+			} {
+				if !strings.Contains(text, want) {
+					t.Fatalf("payload refusal missing %q:\n%s", want, text)
+				}
+			}
+			if strings.Contains(text, "unknown argument") {
+				t.Fatalf("the refusal must come from the handler, not the precheck: %s", text)
+			}
+		})
+	}
+	// Carrying both is still a refusal, and nothing renders.
+	resp := f.call(t, "whiteboard.update", map[string]any{"payload": map[string]any{}, "commands": ""})
+	if !isToolError(resp) {
+		t.Fatalf("payload beside commands must be refused: %s", resp)
+	}
+	if _, err := os.Stat(f.dir()); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a refused payload call must write nothing")
+	}
+	// An argument the handler does not own is still refused by the precheck.
+	if resp := f.call(t, "whiteboard.update", map[string]any{"commands": "", "bogus": 1}); !isToolError(resp) {
+		t.Fatalf("an undeclared argument must still be refused: %s", resp)
+	}
+}
+
+func TestWhiteboardUpdateRefusesNonStringCommands(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	for name, commands := range map[string]any{
+		"object": map[string]any{"add": []any{}},
+		"array":  []any{"<wb:floor id=\"1\"/>"},
+		"number": 7,
+		"bool":   true,
+	} {
+		t.Run(name, func(t *testing.T) {
+			resp := f.call(t, "whiteboard.update", map[string]any{"commands": commands})
+			text := toolText(t, resp)
+			if !isToolError(resp) || !strings.Contains(text, "commands: must be a string of wb: commands") || !strings.Contains(text, "## Commands") {
+				t.Fatalf("a non-string commands must be refused with the grammar: %s", text)
+			}
+		})
+	}
+	if _, err := os.Stat(f.dir()); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a refused call must write nothing")
+	}
+}
+
+func TestWhiteboardQueryAndTopicBodyThroughTools(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	f.update(t, `<wb:add class="technical" topic="t"><wb:title>settle me</wb:title></wb:add>
+<wb:topic name="t">
+background body-marker line
+</wb:topic>`)
 	pagePath := filepath.Join(f.dir(), f.replyID()+".html")
 	page, _ := os.ReadFile(pagePath)
-	if now, item := strings.Index(string(page), "diagram-marker"), strings.Index(string(page), "settle me"); now < 0 || now > item {
-		t.Fatalf("Now must render above the topics on the render that changed it (now %d, item %d)", now, item)
+	if body, item := strings.Index(string(page), "body-marker"), strings.Index(string(page), "settle me"); body < 0 || body > item {
+		t.Fatalf("a topic body must render above its items (body %d, item %d)", body, item)
 	}
-	os.Remove(filepath.Join(f.root, "tmp", "now.html"))
-	f.update(t, `{"answer":[{"id":1,"answer":"ok","answer_quote":"(01) ok"}]}`)
+	if strings.Contains(string(page), `id="wb-now"`) || strings.Contains(string(page), `class="now`) {
+		t.Fatalf("the page must carry no Now slot")
+	}
+	f.update(t, `<wb:answer id="1" value="ok">(01) ok</wb:answer>`)
 	page, _ = os.ReadFile(pagePath)
-	if now, item := strings.Index(string(page), "diagram-marker"), strings.Index(string(page), "settle me"); now < 0 || now > item {
-		t.Fatalf("now_path content must survive the file's deletion and stay above the topics once unchanged (now %d, item %d)", now, item)
+	if !strings.Contains(string(page), "body-marker") {
+		t.Fatalf("the body must survive an update that does not touch it")
 	}
 	text := toolText(t, f.call(t, "whiteboard.query", map[string]any{"payload": map[string]any{"id": 1}}))
 	if !strings.Contains(text, "(01) [answered] [technical] t: settle me") || !strings.Contains(text, `answer_quote: "(01) ok"`) {
 		t.Fatalf("query output:\n%s", text)
 	}
+	if strings.Contains(text, "topic body:") {
+		t.Fatalf("a query without topic must not print a body:\n%s", text)
+	}
+	text = toolText(t, f.call(t, "whiteboard.query", map[string]any{"payload": map[string]any{"topic": "t"}}))
+	if !strings.Contains(text, "topic body:") || !strings.Contains(text, "background body-marker line") || !strings.Contains(text, "settle me") {
+		t.Fatalf("query with topic must print the body and the items:\n%s", text)
+	}
 	if text := toolText(t, f.call(t, "whiteboard.query", map[string]any{})); !strings.Contains(text, "(01)") {
 		t.Fatalf("query with no payload must list every item:\n%s", text)
 	}
-}
-
-func TestWhiteboardNowFileIsStablePerSession(t *testing.T) {
-	f := newWhiteboardFixture(t)
-	nowFile := func(result string) string {
-		t.Helper()
-		m := regexp.MustCompile(`(?m)^now_file: (.+)$`).FindStringSubmatch(result)
-		if m == nil {
-			t.Fatalf("update result has no now_file line:\n%s", result)
-		}
-		return m[1]
-	}
-	first := nowFile(f.update(t, `{}`))
-	want := filepath.Join(f.dir(), f.replyID()+".now.md")
-	if first != want {
-		t.Fatalf("now_file = %q, want %q", first, want)
-	}
-	if strings.Contains(first, f.key) {
-		t.Fatalf("now_file %q must not contain the session key", first)
-	}
-	if _, err := os.Stat(first); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("the server must not create the Now file itself (stat err %v)", err)
-	}
-	// The lead writes the file, passes it back, and the path stays put.
-	if err := os.WriteFile(first, []byte("**plan** now-file-marker"), 0o644); err != nil {
-		t.Fatalf("write now file: %v", err)
-	}
-	second := nowFile(f.update(t, fmt.Sprintf(`{"now_path":%q}`, first)))
-	if second != first {
-		t.Fatalf("now_file moved between updates: %q then %q", first, second)
-	}
-	page, _ := os.ReadFile(filepath.Join(f.dir(), f.replyID()+".html"))
-	if !strings.Contains(string(page), "now-file-marker") {
-		t.Fatalf("the page must show the Now file's text")
-	}
-	if third := nowFile(f.update(t, `{"now_path":""}`)); third != first {
-		t.Fatalf("now_file moved after a clear: %q then %q", first, third)
-	}
-	page, _ = os.ReadFile(filepath.Join(f.dir(), f.replyID()+".html"))
-	if strings.Contains(string(page), "now-file-marker") {
-		t.Fatalf("an empty now_path must clear the Now slot")
-	}
-
-	// Another session of the same root gets its own file.
-	key2, root2 := parseLoginResponse(t, callLogin(t, f.s, 910001, f.root, nil))
-	other := &whiteboardFixture{s: f.s, key: key2, root: root2, id: 100}
-	if other.key == f.key {
-		t.Fatalf("second login minted the same key")
-	}
-	if got := nowFile(other.update(t, `{}`)); got == first || filepath.Dir(got) != filepath.Dir(first) {
-		t.Fatalf("a second session's now_file = %q, first = %q", got, first)
+	// wb:edit changes the stored body, and the next query shows the change.
+	f.update(t, `<wb:edit topic="t"><wb:old>body-marker</wb:old><wb:new>edited-marker</wb:new></wb:edit>`)
+	text = toolText(t, f.call(t, "whiteboard.query", map[string]any{"payload": map[string]any{"topic": "t"}}))
+	if !strings.Contains(text, "background edited-marker line") || strings.Contains(text, "body-marker") {
+		t.Fatalf("query after wb:edit:\n%s", text)
 	}
 }
 
-func TestWhiteboardNowInlineIsRefused(t *testing.T) {
+// No update result carries a now_file line, and the retired Now file is no
+// longer part of the board's files.
+func TestWhiteboardUpdateResultHasNoNowFile(t *testing.T) {
 	f := newWhiteboardFixture(t)
-	resp := f.call(t, "whiteboard.update", map[string]any{"payload": map[string]any{"now": "<p>n</p>"}})
-	text := toolText(t, resp)
-	if !isToolError(resp) || !strings.Contains(text, "payload.now: no longer accepted") || !strings.Contains(text, "now_path") {
-		t.Fatalf("inline now must be refused with a pointer at now_path: %s", text)
-	}
-}
-
-func TestWhiteboardNowStaysFreshAcrossImplicitRenders(t *testing.T) {
-	f := newWhiteboardFixture(t)
-	pagePath := filepath.Join(f.dir(), f.replyID()+".html")
-	nowTag := func() string {
-		t.Helper()
-		page, err := os.ReadFile(pagePath)
-		if err != nil {
-			t.Fatalf("read page: %v", err)
-		}
-		return regexp.MustCompile(`<details class="now[^>]*>`).FindString(string(page))
-	}
-	const fresh, stale = `<details class="now" id="wb-now" open>`, `<details class="now stale" id="wb-now">`
-	mustWrite(t, f.root, "tmp/n.md", "<p>n</p>")
-	f.update(t, `{"add":[{"class":"technical","topic":"t","title":"x"}],"now_path":"tmp/n.md"}`)
-	if got := nowTag(); got != fresh {
-		t.Fatalf("after the update that set Now: %q, want %q", got, fresh)
-	}
-	for _, step := range []struct {
-		tool string
-		args map[string]any
-	}{
-		{"todo.add", map[string]any{"key": "a", "title": "write tests"}},
-		{"agenda.set", map[string]any{"key": "notes", "value": map[string]any{"x": 1}}},
-	} {
-		if resp := f.call(t, step.tool, step.args); isToolError(resp) {
-			t.Fatalf("%s failed: %s", step.tool, resp)
-		}
-		if got := nowTag(); got != fresh {
-			t.Fatalf("after %s: %q, want %q (an implicit render must not make Now stale)", step.tool, got, fresh)
+	text := f.update(t, ``)
+	for _, line := range strings.Split(text, "\n") {
+		if strings.HasPrefix(line, "now_file:") {
+			t.Fatalf("update result must carry no now_file line:\n%s", text)
 		}
 	}
-	f.update(t, `{"answer":[{"id":1,"answer":"ok","answer_quote":"(01) ok"}]}`)
-	if got := nowTag(); got != stale {
-		t.Fatalf("after an update without now: %q, want %q", got, stale)
+	if whiteboardFilePattern.MatchString("abc.now.md") {
+		t.Fatalf("the file pattern must not match .now.md")
 	}
 }
 
@@ -615,7 +633,7 @@ func TestWhiteboardTodoAndAgendaWritesRenderFullPageOnly(t *testing.T) {
 			if _, err := os.Stat(f.dir()); !errors.Is(err, os.ErrNotExist) {
 				t.Fatalf("writes before the board exists must not render")
 			}
-			f.update(t, `{}`)
+			f.update(t, ``)
 			embedsBefore := len(f.embeds(t, f.dir()))
 			steps := []struct {
 				tool string
@@ -663,14 +681,14 @@ func TestWhiteboardToolsRefuseSpawnedKeys(t *testing.T) {
 	}
 	for _, key := range []string{worker, delegate} {
 		for _, tool := range []string{"whiteboard.update", "whiteboard.query"} {
-			resp := f.call(t, tool, map[string]any{"session_key": key, "payload": map[string]any{}})
+			resp := f.call(t, tool, map[string]any{"session_key": key})
 			if !isToolError(resp) || !strings.Contains(resp, "not available to a spawned session") {
 				t.Fatalf("%s with a spawned key must be refused: %s", tool, resp)
 			}
 		}
 	}
 	// The top-level lead works with the knob at its builtin off.
-	f.update(t, `{}`)
+	f.update(t, ``)
 }
 
 // The whiteboard is a top-level-lead channel, so with the knob on a worker
@@ -950,21 +968,24 @@ func TestWhiteboardGarbageCollection(t *testing.T) {
 	if _, err := os.Stat(f.dir()); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("GC must not create the whiteboard folder")
 	}
-	f.update(t, `{}`)
+	f.update(t, ``)
 	live := f.embeds(t, f.dir())
-	orphans := []string{"deadorphanid.html", "deadorphanid.stamp.js", "deadorphanid-0123abcd.html", "deadorphanid.now.md"}
+	orphans := []string{"deadorphanid.html", "deadorphanid.stamp.js", "deadorphanid-0123abcd.html"}
 	for _, name := range orphans {
 		mustWrite(t, f.dir(), name, "x")
 	}
 	mustWrite(t, f.dir(), "notes.txt", "kept: not a whiteboard file")
-	mustWrite(t, f.dir(), f.replyID()+".now.md", "kept: a live session's Now file")
+	// The retired Now file is no board file any more: a leftover from an
+	// older build, live session or dead, is left alone like any other file.
+	mustWrite(t, f.dir(), "deadorphanid.now.md", "kept: not a whiteboard file")
+	mustWrite(t, f.dir(), f.replyID()+".now.md", "kept: not a whiteboard file")
 	manual()
 	for _, name := range orphans {
 		if _, err := os.Stat(filepath.Join(f.dir(), name)); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("orphan %s must be deleted", name)
 		}
 	}
-	for _, name := range append(live, f.replyID()+".html", f.replyID()+".stamp.js", f.replyID()+".now.md", "notes.txt", whiteboardGCMarker) {
+	for _, name := range append(live, f.replyID()+".html", f.replyID()+".stamp.js", "deadorphanid.now.md", f.replyID()+".now.md", "notes.txt", whiteboardGCMarker) {
 		if _, err := os.Stat(filepath.Join(f.dir(), name)); err != nil {
 			t.Fatalf("%s must be kept: %v", name, err)
 		}
@@ -1006,21 +1027,26 @@ func TestWhiteboardWorkflowTextFollowsKnob(t *testing.T) {
 	for _, want := range []string{
 		"### Whiteboard",
 		"The whiteboard is your primary channel to the user.",
-		"#### Payload",
-		"whiteboard.update payload: {",
-		"write `{{12}}` in `title`",
+		"#### Commands",
+		"`commands` is one string of flat commands.",
+		"write `{{12}}` in an item field",
 		"Whiteboard: <full> - (102), (103)",
 		"session's dashboard page URL while the dashboard daemon serves the session,",
 		"- Discussion IDs come from the whiteboard store",
 	} {
-		if !strings.Contains(manualOn, want) {
+		if !strings.Contains(collapseSpace(manualOn), want) {
 			t.Fatalf("knob on: manual missing %q", want)
+		}
+	}
+	for _, gone := range []string{"#### Payload", "whiteboard.update payload:", "now_path", "now_file"} {
+		if strings.Contains(manualOn, gone) {
+			t.Fatalf("knob on: manual still carries the retired %q", gone)
 		}
 	}
 	if strings.Contains(manualOn, lineDiscussionNoCounter) || strings.Contains(manualOn, "\n# Whiteboard") {
 		t.Fatalf("knob on: the counter rule must be replaced and the playbook title dropped")
 	}
-	if injected := toolText(t, f.call(t, "workflow_manual", map[string]any{})); !strings.Contains(injected, "### Whiteboard") || !strings.Contains(injected, "#### Payload") {
+	if injected := toolText(t, f.call(t, "workflow_manual", map[string]any{})); !strings.Contains(injected, "### Whiteboard") || !strings.Contains(injected, "#### Commands") {
 		t.Fatalf("knob on: the workflow_manual tool must carry the whiteboard section too")
 	}
 	capture := withNamespace(whiteboardCaptureLine)
@@ -1048,14 +1074,15 @@ func TestWhiteboardWorkflowTextFollowsKnob(t *testing.T) {
 func TestWhiteboardPlaybookStatesPointerAndEmbedDirWithoutNamingAHost(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	text := toolText(t, f.call(t, "playbook.read", map[string]any{"name": "whiteboard"}))
+	flat := collapseSpace(text)
 	for _, want := range []string{
 		"Whiteboard: <full> - (102), (103)",
 		"session's dashboard page URL while the dashboard daemon serves the session,",
 		"When the host's instructions name a folder its embedded files must live in,",
-		"pass that folder as `embed_dir` on your first update after the session starts",
+		"send `<wb:embed-dir path=\"<folder>\"/>` on your first update after the session starts",
 		"embed the bare file name the update returns",
 	} {
-		if !strings.Contains(text, want) {
+		if !strings.Contains(flat, want) {
 			t.Fatalf("whiteboard playbook missing %q:\n%s", want, text)
 		}
 	}

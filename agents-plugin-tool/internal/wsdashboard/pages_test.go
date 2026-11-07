@@ -62,10 +62,12 @@ func writeSnapshot(t *testing.T, dir, id string, snap *wslive.Snapshot) {
 	}
 }
 
-// boardRegions renders a small board through the whiteboard renderer.
-func boardRegions(t *testing.T, now string) wswhiteboard.Regions {
+// boardRegions renders a small board through the whiteboard renderer: one
+// topic holding body, which the dashboard shows in a topic-body frame.
+func boardRegions(t *testing.T, body string) wswhiteboard.Regions {
 	t.Helper()
-	view := wswhiteboard.BuildView(&wswhiteboard.State{Seq: 1, Now: now}, wswhiteboard.ViewInput{Layout: wswhiteboard.LayoutFull})
+	state := &wswhiteboard.State{Seq: 1, Topics: []wswhiteboard.TopicDoc{{Name: "Plan", Body: body, Changed: 1}}}
+	view := wswhiteboard.BuildView(state, wswhiteboard.ViewInput{Layout: wswhiteboard.LayoutFull})
 	regions, err := wswhiteboard.RenderRegions(view)
 	if err != nil {
 		t.Fatal(err)
@@ -133,6 +135,8 @@ func TestSessionPageRendersLiveRegions(t *testing.T) {
 	for _, want := range []string{
 		`data-region="tree"`, `data-region="entries"`, `data-region="convlive"`, `data-region="board"`, `data-region="panels"`,
 		`id="composer"`, `id="gear"`, "live board text",
+		// A topic body sits in its sandboxed frame; there is no Now slot.
+		`<iframe class="doc-frame" title="Plan" data-doc="Plan"`,
 		`id="splitter"`, `data-input="enter"`, `data-input="mod"`,
 		`<span class="src wb">whiteboard</span>`, `<span class="src">terminal</span>`,
 		"streamed &lt;partial&gt; reply",
@@ -146,7 +150,7 @@ func TestSessionPageRendersLiveRegions(t *testing.T) {
 			t.Errorf("session page lacks %q", want)
 		}
 	}
-	for _, leak := range []string{"hist-1.json", "hist-gone.json", f.project + "/", "file:"} {
+	for _, leak := range []string{"hist-1.json", "hist-gone.json", f.project + "/", "file:", `id="wb-now"`} {
 		if strings.Contains(body, leak) {
 			t.Errorf("session page carries %q", leak)
 		}

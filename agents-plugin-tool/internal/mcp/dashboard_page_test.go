@@ -3,6 +3,7 @@ package mcp
 import (
 	"encoding/json"
 	"fmt"
+	stdhtml "html"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -71,7 +72,7 @@ func TestDashboardReadPageServesTheBoard(t *testing.T) {
 	// A board without file targets: the regions are what the static full
 	// page shows.
 	f.call(t, "todo.add", map[string]any{"key": "step", "title": "a step"})
-	f.update(t, `{"add":[{"class":"technical","topic":"t","title":"a question","rationale":"plain reason"}]}`)
+	f.update(t, `<wb:add class="technical" topic="t"><wb:title>a question</wb:title><wb:why>plain reason</wb:why></wb:add>`)
 	page = readPageOK(t, src, reg)
 	if !page.HasBoard || page.Seq == 0 || page.Board.Board == "" || page.Board.Panels == "" {
 		t.Fatalf("board page = %+v", page)
@@ -89,7 +90,7 @@ func TestDashboardReadPageServesTheBoard(t *testing.T) {
 	writeTicket(t, f.root, "todo", "261102-feat-todo-one", "Todo one")
 	inside := filepath.ToSlash(filepath.Join(f.root, "docs", "inside.md"))
 	outside := filepath.ToSlash(filepath.Join(t.TempDir(), "out.png"))
-	f.update(t, fmt.Sprintf(`{"add":[{"class":"policy","topic":"t","title":"files","options":["a","b"],"rationale":"see [the plan](./ai-docs/plan.md) and [inside](%s) and ![shot](shots/a.png) and ![away](%s)"}]}`, inside, outside))
+	f.update(t, fmt.Sprintf(`<wb:add class="policy" topic="t"><wb:title>files</wb:title><wb:option>a</wb:option><wb:option>b</wb:option><wb:why>see [the plan](./ai-docs/plan.md) and [inside](%s) and ![shot](shots/a.png) and ![away](%s)</wb:why></wb:add>`, inside, outside))
 	page = readPageOK(t, src, reg)
 	html := string(page.Board.Board) + string(page.Board.Panels)
 	for _, want := range []string{
@@ -133,6 +134,56 @@ func TestDashboardReadPageServesTheBoard(t *testing.T) {
 	b2, _ := json.Marshal(after.Whiteboard)
 	if string(b1) != string(b2) {
 		t.Fatalf("ReadPage changed the stored board:\n%s\n%s", b1, b2)
+	}
+}
+
+// TestDashboardServedPageRendersTopicBodyInAFrame pins the served board's
+// topic body: one sandboxed doc-frame iframe per body (opaque origin, no
+// allow-same-origin, since the daemon's routes accept messages and steer
+// sessions), its text and inline HTML in the frame's document, a local image
+// inlined as a data: URL because the frame sends no cookie, and no Now slot.
+func TestDashboardServedPageRendersTopicBodyInAFrame(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	now := time.Now()
+	src := dashboardPageSource(t, &now)
+	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
+	mustWrite(t, f.root, "shots/a.png", "not-really-a-png")
+	f.update(t, "<wb:add class=\"technical\" topic=\"Rollout\"><wb:title>an item</wb:title></wb:add>\n"+
+		"<wb:topic name=\"Rollout\">\n## 배경\n본문 body-marker <details><summary>more</summary>raw</details>\n\n![shot](shots/a.png)\n</wb:topic>\n"+
+		"<wb:topic name=\"Body only\">\nsecond-marker\n</wb:topic>")
+	html := string(readPageOK(t, src, reg).Board.Board)
+
+	if strings.Contains(html, `id="wb-now"`) || strings.Contains(html, `class="now`) {
+		t.Errorf("the served board carries a Now slot:\n%.600s", html)
+	}
+	frames := regexp.MustCompile(`<iframe class="doc-frame" title="([^"]*)" data-doc="([^"]*)" sandbox="([^"]*)" srcdoc="([^"]*)"></iframe>`).FindAllStringSubmatch(html, -1)
+	if len(frames) != 2 {
+		t.Fatalf("doc-frame iframes = %d, want one per topic body:\n%.600s", len(frames), html)
+	}
+	docs := map[string]string{}
+	for _, m := range frames {
+		if m[1] != m[2] {
+			t.Errorf("frame title %q and data-doc %q differ", m[1], m[2])
+		}
+		if m[3] != "allow-scripts allow-popups allow-popups-to-escape-sandbox" || strings.Contains(m[3], "allow-same-origin") {
+			t.Errorf("frame sandbox = %q", m[3])
+		}
+		docs[m[2]] = stdhtml.UnescapeString(m[4])
+	}
+	rollout := docs["Rollout"]
+	for _, want := range []string{"본문 body-marker", "<details><summary>more</summary>raw</details>", `<img src="data:image/png;base64,`} {
+		if !strings.Contains(rollout, want) {
+			t.Errorf("the Rollout frame document lacks %q:\n%.800s", want, rollout)
+		}
+	}
+	if strings.Contains(rollout, "/image?path=") {
+		t.Errorf("a frame image must be inlined, not loaded through the cookie-gated route")
+	}
+	if !strings.Contains(docs["Body only"], "second-marker") {
+		t.Errorf("a topic with a body and no items must render its frame: %v", docs)
+	}
+	if strings.Contains(html, "<details><summary>more") {
+		t.Errorf("a body's raw HTML must reach the served page only inside its frame's srcdoc")
 	}
 }
 
@@ -301,7 +352,7 @@ func TestDashboardFingerprintCoversPageStores(t *testing.T) {
 	now := time.Now()
 	src := dashboardPageSource(t, &now)
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
-	f.update(t, `{"add":[{"class":"technical","topic":"t","title":"a question"}]}`)
+	f.update(t, `<wb:add class="technical" topic="t"><wb:title>a question</wb:title></wb:add>`)
 
 	fp := readFingerprint(t, src, reg)
 	if again := readFingerprint(t, src, reg); again != fp {
@@ -364,7 +415,7 @@ func TestDashboardPointerLineFollowsTheLastNudge(t *testing.T) {
 	path := "ai-docs/whiteboards/" + replyID + ".html"
 	update := func(s *Server, key string) string {
 		t.Helper()
-		resp := dashCall(t, s, "whiteboard.update", map[string]any{"session_key": key, "payload": map[string]any{}})
+		resp := dashCall(t, s, "whiteboard.update", map[string]any{"session_key": key, "commands": ""})
 		if isToolError(resp) {
 			t.Fatalf("whiteboard.update failed: %s", resp)
 		}
