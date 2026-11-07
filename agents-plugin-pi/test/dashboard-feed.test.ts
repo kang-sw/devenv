@@ -14,8 +14,11 @@ import {
   FLUSH_INTERVAL_MS,
   INTAKE_CALL_TIMEOUT_MS,
   RETRY_MS,
+  STATUS_KIND,
+  acceptedKinds,
   createDashboardFeed,
   dashboardAgentEntries,
+  dashboardStatus,
   dashboardUserMessage,
   inputTurnOrigin,
   registerDashboardLeadEvents,
@@ -23,6 +26,8 @@ import {
   type DashboardAgentEntry,
   type DashboardEvent,
   type DashboardFeedOptions,
+  type DashboardStatus,
+  type DashboardUsage,
 } from "../src/dashboard-feed.ts";
 import { ADAPTER_MESSAGE_LABEL, WHITEBOARD_MESSAGE_LABEL, labelAdapterText, labelWhiteboardText, whiteboardLabeledBody, whiteboardSubmissionText } from "../src/adapter-label.ts";
 import { createBatchBuffer, observeBatchEvent } from "../src/agent-batches.ts";
@@ -542,6 +547,142 @@ describe("knob off", () => {
     feed.agentsChanged();
     await advance(FLUSH_INTERVAL_MS * 3);
     assert.equal(calls.length, 0);
+  });
+});
+
+describe("usage status", () => {
+  const accepting = (n = 1) => ({ content: [{ type: "text", text: `ok: ${n} of ${n} events applied\naccepts: status\n` }] });
+  const plain = (n = 1) => ({ content: [{ type: "text", text: `ok: ${n} of ${n} events applied\n` }] });
+  const statusEvents = (events: DashboardEvent[]) => events.filter((event) => event.kind === STATUS_KIND);
+  const figures = (tokens: number | null): DashboardStatus => ({ context: { tokens, window: 200_000, ...(tokens === null ? {} : { percent: tokens / 2000 }) }, cost: { usd: 1.25, estimate: true, incomplete: false } });
+
+  test("the accepts line is read from the result text; a result without it names nothing", () => {
+    assert.deepEqual(acceptedKinds(accepting()), ["status"]);
+    assert.deepEqual(acceptedKinds({ content: [{ type: "text", text: "ok: 1 of 1 events applied\naccepts: status, later\n" }] }), ["status", "later"]);
+    assert.deepEqual(acceptedKinds(plain()), []);
+    assert.deepEqual(acceptedKinds({ content: [{ type: "text", text: "dashboard: off" }] }), []);
+    assert.deepEqual(acceptedKinds(undefined), []);
+    assert.deepEqual(acceptedKinds({ content: [{ type: "text", text: "note: accepts: status" }] }), [], "only a line that opens with it counts");
+  });
+
+  test("status is never sent to a ws-mcp whose results do not advertise it", async () => {
+    let reads = 0;
+    const { feed, calls, events, advance } = harness({ status: () => { reads++; return figures(1000); }, answer: async () => plain() });
+    feed.start();
+    await advance(0);
+    feed.statusChanged();
+    feed.leadEvent(userEnd("hello"));
+    await advance(FLUSH_INTERVAL_MS * 3);
+    assert.equal(calls.length, 2);
+    assert.deepEqual(statusEvents(events()), []);
+    assert.equal(reads, 0, "the figures are not even read");
+  });
+
+  test("once a result advertises it, the figures are sent, and resent only when they change", async () => {
+    let current = figures(1000);
+    const { feed, calls, events, advance } = harness({ status: () => current, answer: async () => accepting() });
+    feed.start();
+    await advance(0);
+    assert.deepEqual(calls[0]!.args.events, [{ kind: "reset" }], "never before a result advertises it");
+    await advance(FLUSH_INTERVAL_MS);
+    assert.equal(calls.length, 2);
+    assert.deepEqual(calls[1]!.args.events, [{ kind: "status", ...figures(1000) }]);
+    feed.statusChanged();
+    await advance(FLUSH_INTERVAL_MS * 2);
+    assert.equal(calls.length, 2, "unchanged figures are not resent");
+    current = figures(2000);
+    feed.statusChanged();
+    await advance(FLUSH_INTERVAL_MS);
+    assert.deepEqual(statusEvents(events()).map((event) => (event.context as { tokens: number }).tokens), [1000, 2000]);
+  });
+
+  test("a later result without the line (an older ws-mcp, dashboard off) or an error result stops it", async () => {
+    for (const lacking of [plain(), { content: [{ type: "text", text: "dashboard: off" }] }, { content: [{ type: "text", text: "accepts: status" }], isError: true }]) {
+      let answer: unknown = accepting();
+      let current = figures(1000);
+      const { feed, events, advance } = harness({ status: () => current, answer: async () => answer });
+      feed.start();
+      await advance(FLUSH_INTERVAL_MS * 2);
+      assert.equal(statusEvents(events()).length, 1);
+      answer = lacking;
+      feed.leadEvent(userEnd("hello"));
+      await advance(FLUSH_INTERVAL_MS);
+      current = figures(2000);
+      feed.statusChanged();
+      await advance(FLUSH_INTERVAL_MS * 2 + RETRY_MS * 2);
+      assert.equal(statusEvents(events()).length, 1, `no status after ${JSON.stringify(lacking)}`);
+    }
+  });
+
+  test("after a resync the held figures are sent again, behind the reset", async () => {
+    let failNext = false;
+    const { feed, calls, advance } = harness({
+      status: () => figures(1000),
+      answer: async () => { if (failNext) { failNext = false; throw new Error("lost"); } return accepting(); },
+    });
+    feed.start();
+    await advance(FLUSH_INTERVAL_MS * 2);
+    assert.equal(calls.length, 2);
+    failNext = true;
+    feed.leadEvent(userEnd("hello"));
+    await advance(FLUSH_INTERVAL_MS);
+    assert.equal(calls.length, 3);
+    await advance(RETRY_MS + FLUSH_INTERVAL_MS * 2);
+    const after = calls.slice(3).flatMap((call) => call.args.events);
+    assert.equal(after[0]!.kind, "reset");
+    const resent = after.findIndex((event) => event.kind === STATUS_KIND);
+    assert.ok(resent > 0, "the unchanged figures go again after the reset");
+    assert.deepEqual(after[resent], { kind: "status", ...figures(1000) });
+  });
+
+  test("a compaction's unknown context tokens go as null", async () => {
+    let current = figures(1000);
+    const { feed, events, advance } = harness({ status: () => current, answer: async () => accepting() });
+    feed.start();
+    await advance(FLUSH_INTERVAL_MS * 2);
+    current = figures(null);
+    feed.statusChanged();
+    await advance(FLUSH_INTERVAL_MS);
+    assert.deepEqual(statusEvents(events()).at(-1)!.context, { tokens: null, window: 200_000 });
+  });
+});
+
+describe("dashboardStatus", () => {
+  const cost = (knownUsd: number, knownContributors: number, unknownContributors: number) => ({ knownUsd, knownContributors, unknownContributors, descendants: knownContributors + unknownContributors });
+  const usage = (lead: ReturnType<typeof cost>, direct: ReturnType<typeof cost>, cache: Partial<DashboardUsage["lead"]> = {}): DashboardUsage => ({
+    lead: { input: 10, output: 2, cacheRead: 0, cacheWrite: 0, cost: lead, ...cache },
+    direct,
+  });
+
+  test("context is Pi's own reading: its percent as is, its window before the model's", () => {
+    assert.deepEqual(dashboardStatus({ tokens: 50_000, percent: 25, contextWindow: 200_000 }, 100_000, undefined), { context: { tokens: 50_000, window: 200_000, percent: 25 } });
+    assert.deepEqual(dashboardStatus(undefined, 100_000, undefined), { context: { tokens: null, window: 100_000 } });
+    assert.equal(dashboardStatus(undefined, undefined, undefined), undefined, "nothing to report");
+  });
+
+  test("right after a compaction the tokens are null and no percent is sent", () => {
+    assert.deepEqual(dashboardStatus({ tokens: null, percent: null, contextWindow: 200_000 }, 200_000, undefined), { context: { tokens: null, window: 200_000 } });
+  });
+
+  test("the cache hit is the lead's last response rate, once a cache read or write was seen", () => {
+    const ctx = { tokens: 1000, percent: 0.5, contextWindow: 200_000 };
+    assert.equal(dashboardStatus(ctx, undefined, usage(cost(0, 0, 0), cost(0, 0, 0), { cacheRead: 30, latestCacheHitRate: 92.5 }))!.context!.cacheHit, 92.5);
+    assert.equal(dashboardStatus(ctx, undefined, usage(cost(0, 0, 0), cost(0, 0, 0), { latestCacheHitRate: 0 }))!.context!.cacheHit, undefined, "a provider with no cache shows none");
+  });
+
+  test("the cost is the lead's and the direct delegates' known-price calls summed, as an estimate", () => {
+    assert.deepEqual(dashboardStatus(undefined, undefined, usage(cost(0.5, 1, 0), cost(0.75, 2, 0)))!.cost, { usd: 1.25, estimate: true, incomplete: false });
+    assert.deepEqual(dashboardStatus(undefined, undefined, usage(cost(0, 0, 0), cost(0.75, 1, 0)))!.cost, { usd: 0.75, estimate: true, incomplete: false });
+  });
+
+  test("a call of unknown price marks the cost incomplete, on either side", () => {
+    assert.equal(dashboardStatus(undefined, undefined, usage(cost(0.5, 1, 1), cost(0.75, 1, 0)))!.cost!.incomplete, true);
+    assert.equal(dashboardStatus(undefined, undefined, usage(cost(0.5, 1, 0), cost(0, 0, 1)))!.cost!.incomplete, true);
+  });
+
+  test("with no known-price call yet the cost is left out", () => {
+    assert.equal(dashboardStatus(undefined, undefined, usage(cost(0, 0, 1), cost(0, 0, 2))), undefined);
+    assert.deepEqual(dashboardStatus(undefined, 200_000, usage(cost(0, 0, 0), cost(0, 0, 0))), { context: { tokens: null, window: 200_000 } });
   });
 });
 

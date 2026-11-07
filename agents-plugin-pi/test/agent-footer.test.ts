@@ -19,6 +19,7 @@ import { agentWidgetRefreshRef, evictForCapacity, stopAgent, type RpcAgentRecord
 import { truncateToWidth, visibleWidth } from "../src/pi-tui.ts";
 import { applySessionShutdownAgentFooter, applySessionStartAgentFooter, bindDisplaySummaryRender, registerAgentFooterGitEvents, registerAgentFooterOutputEvents } from "../src/index.ts";
 import { createDisplaySummaryStore } from "../src/display-summary.ts";
+import { dashboardStatus } from "../src/dashboard-feed.ts";
 import { symlinkSkip } from "./fixtures/symlink-probe.ts";
 
 const roots = new Set<string>();
@@ -315,6 +316,28 @@ describe("incremental lead usage", () => {
     const rendered = plain(component.render(140).join("\n"));
     assert.match(rendered, /↑22/); assert.match(rendered, /↓4/); assert.match(rendered, /CH17\.6%/); assert.match(rendered, /L ~\$0\.80/);
     controller.stop();
+  });
+
+  test("usage exposes the figures behind L, D, and CH, which the dashboard status sums as one estimate", async () => {
+    const dir = root(), storage = createAgentStorageContext("lead", dir), child = record("child", storage, .75), unpriced = record("unpriced", storage, "unknown");
+    const registry: RpcAgentRegistry = new Map(), ui = context();
+    const lifecycle = createAgentFooterSessionLifecycle(async () => ({ truncateToWidth, visibleWidth }));
+    assert.equal(lifecycle.usage(), undefined, "no footer, no figures");
+    await lifecycle.start(undefined, ui.ctx, registry, storage);
+    const component = ui.mount();
+    assert.equal(dashboardStatus(undefined, undefined, lifecycle.usage())?.cost, undefined, "no priced call yet");
+    lifecycle.acceptUsage({ role: "assistant", usage: { input: 10, output: 2, cacheRead: 30, cacheWrite: 0, cost: { total: .5 } } });
+    registry.set(child.agentId, child); lifecycle.refreshAgents();
+    assert.match(plain(component.render(140)[1]), /CH75\.0% .*L ~\$0\.50 \+ D ~\$0\.75/);
+    assert.deepEqual(dashboardStatus(ui.ctx.getContextUsage(), undefined, lifecycle.usage()), {
+      context: { tokens: 50_000, window: 200_000, percent: 25, cacheHit: 75 },
+      cost: { usd: 1.25, estimate: true, incomplete: false },
+    });
+    registry.set(unpriced.agentId, unpriced); lifecycle.refreshAgents();
+    assert.match(plain(component.render(140)[1]), /D ~\$0\.75 \+ \?/);
+    assert.deepEqual(dashboardStatus(undefined, undefined, lifecycle.usage())?.cost, { usd: 1.25, estimate: true, incomplete: true });
+    lifecycle.stop();
+    assert.equal(lifecycle.usage(), undefined);
   });
 
   test("a missing checkpoint with existing history starts unknown rather than scanning or inventing an exact lifetime value", () => {

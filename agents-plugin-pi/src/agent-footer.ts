@@ -9,7 +9,8 @@ import { createFooterGitCache, type GitCacheOptions } from "./footer-git-status.
 import { relative, resolve, sep } from "node:path";
 import type { AgentStorageContext } from "./agent-storage.ts";
 import { isLeadOrFork, type SpawnRole } from "./process-role.ts";
-import { attachFooterCostEstimate, releaseFooterCostEstimate } from "./agent-cost.ts";
+import { attachFooterCostEstimate, releaseFooterCostEstimate, type LeadUsageSummary } from "./agent-cost.ts";
+import type { CumulativeCost } from "./agent-telemetry.ts";
 import type { RpcAgentRegistry } from "./spawner.ts";
 import { createOutputRateTracker, formatOutputRate } from "./output-rate.ts";
 
@@ -37,7 +38,11 @@ export interface AgentFooterContext {
   getContextUsage?(): { tokens?: number | null; percent?: number | null; contextWindow?: number } | undefined;
   ui: { setFooter(factory: ((tui: FooterTui, theme: FooterTheme, data: FooterData) => AgentFooterComponent) | undefined): void };
 }
+/** The figures the footer renders its cost and cache rate from: the lead's own usage and its direct delegates' cost. */
+export interface AgentFooterUsage { lead: LeadUsageSummary; direct: CumulativeCost }
 export interface AgentFooterController {
+  /** The figures behind the footer's `L`/`D` cost and `CH` rate, as last rendered. */
+  usage(): AgentFooterUsage;
   turnEnd(): void;
   input(): void;
   refresh(): void;
@@ -57,6 +62,8 @@ export interface AgentFooterSessionLifecycle {
   acceptUsage(source: unknown): void;
   observeOutput(event: unknown): void;
   checkpoint(): void;
+  /** The mounted footer's figures; undefined while no footer runs. */
+  usage(): AgentFooterUsage | undefined;
   stop(): void;
 }
 
@@ -83,6 +90,7 @@ export function createAgentFooterSessionLifecycle(
     acceptUsage(source) { current?.acceptUsage(source); },
     observeOutput(event) { current?.observeOutput(event); },
     checkpoint() { current?.checkpoint(); },
+    usage() { return current?.usage(); },
     stop() { generation += 1; current?.stop(); current = undefined; },
   };
 }
@@ -212,6 +220,7 @@ export function createAgentFooterController(
   });
 
   return {
+    usage() { return { lead: presentation.lead, direct: presentation.direct }; },
     turnEnd() { git.turnEnd(); },
     input() { git.input(); },
     refresh() { if (!stopped) renderRequest?.(); },
