@@ -109,6 +109,12 @@ func parseKey(line string) (norm, fp string, err error) {
 	return fields[0] + " " + fields[1], "SHA256:" + base64.RawStdEncoding.EncodeToString(sum[:]), nil
 }
 
+// KeyFingerprint normalizes an OpenSSH public key line to "<type> <base64>"
+// and returns its fingerprint ("SHA256:<unpadded base64>"), the form the
+// identity state compares keys by. It is a pure accessor for the domain
+// layer, which mirrors the key rules when it pre-validates identity events.
+func KeyFingerprint(line string) (norm, fp string, err error) { return parseKey(line) }
+
 // keyFP returns the fingerprint of a key, or "" when it does not parse.
 func keyFP(line string) string {
 	_, fp, err := parseKey(line)

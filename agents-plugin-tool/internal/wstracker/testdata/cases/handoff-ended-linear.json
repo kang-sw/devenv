@@ -1,0 +1,297 @@
+{
+ "name": "handoff-ended-linear",
+ "comment": "(295) linear: a pending handoff ends withdrawn with its original (unassign, return, removal); accept and decline then find no pending assignment.",
+ "viewers": [
+  "ada.pc",
+  "bo.pc"
+ ],
+ "now": "2026-11-02T09:00:00Z",
+ "genesis": {
+  "admins": [
+   "ada",
+   "bo"
+  ],
+  "members": [
+   {
+    "id": "ada",
+    "name": "Ada",
+    "keys": [
+     "ada-k1"
+    ],
+    "leads": []
+   },
+   {
+    "id": "maya",
+    "name": "Maya",
+    "keys": [
+     "maya-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "raj",
+    "name": "Raj",
+    "keys": [
+     "raj-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "bo",
+    "name": "Bo",
+    "keys": [
+     "bo-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "lena",
+    "name": "Lena",
+    "keys": [
+     "lena-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "omar",
+    "name": "Omar",
+    "keys": [
+     "omar-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "sven",
+    "name": "Sven",
+    "keys": [
+     "sven-k1"
+    ],
+    "leads": [
+     "raj"
+    ]
+   }
+  ]
+ },
+ "commits": {
+  "maya.pc": [
+   {
+    "ts": "2026-11-01T09:00:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "X"
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "maya.pc#1",
+       "mode": "chosen",
+       "people": [
+        "lena"
+       ]
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Y"
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "maya.pc#3",
+       "mode": "chosen",
+       "people": [
+        "omar"
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:04:00Z",
+    "seen": {
+     "sven.pc": 2,
+     "lena.pc": 3,
+     "omar.pc": 1
+    },
+    "events": [
+     [
+      "item.unassign",
+      {
+       "item": "maya.pc#1",
+       "assignee": "lena"
+      }
+     ],
+     [
+      "item.return",
+      {
+       "item": "sven.pc#1",
+       "assignee": "lena",
+       "note": "busy"
+      }
+     ]
+    ]
+   }
+  ],
+  "sven.pc": [
+   {
+    "ts": "2026-11-01T09:01:00Z",
+    "seen": {
+     "maya.pc": 4
+    },
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Z"
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "sven.pc#1",
+       "mode": "chosen",
+       "people": [
+        "lena"
+       ]
+      }
+     ]
+    ]
+   }
+  ],
+  "lena.pc": [
+   {
+    "ts": "2026-11-01T09:02:00Z",
+    "seen": {
+     "maya.pc": 4,
+     "sven.pc": 2
+    },
+    "events": [
+     [
+      "item.handoff",
+      {
+       "item": "maya.pc#1",
+       "to": "raj"
+      }
+     ],
+     [
+      "item.accept",
+      {
+       "item": "sven.pc#1"
+      }
+     ],
+     [
+      "item.handoff",
+      {
+       "item": "sven.pc#1",
+       "to": "bo"
+      }
+     ]
+    ]
+   }
+  ],
+  "omar.pc": [
+   {
+    "ts": "2026-11-01T09:03:00Z",
+    "seen": {
+     "maya.pc": 4,
+     "sven.pc": 2,
+     "lena.pc": 3
+    },
+    "events": [
+     [
+      "item.handoff",
+      {
+       "item": "maya.pc#3",
+       "to": "raj"
+      }
+     ]
+    ]
+   }
+  ],
+  "ada.pc": [
+   {
+    "ts": "2026-11-01T09:05:00Z",
+    "seen": {
+     "maya.pc": 6,
+     "sven.pc": 2,
+     "lena.pc": 3,
+     "omar.pc": 1
+    },
+    "events": [
+     [
+      "roles.remove_member",
+      {
+       "member": "omar"
+      }
+     ]
+    ]
+   }
+  ],
+  "raj.pc": [
+   {
+    "ts": "2026-11-01T09:06:00Z",
+    "seen": {
+     "maya.pc": 6,
+     "sven.pc": 2,
+     "lena.pc": 3,
+     "omar.pc": 1,
+     "ada.pc": 1
+    },
+    "events": [
+     [
+      "item.accept",
+      {
+       "item": "maya.pc#1"
+      }
+     ],
+     [
+      "item.accept",
+      {
+       "item": "maya.pc#3"
+      }
+     ]
+    ]
+   }
+  ],
+  "bo.pc": [
+   {
+    "ts": "2026-11-01T09:07:00Z",
+    "seen": {
+     "maya.pc": 6,
+     "sven.pc": 2,
+     "lena.pc": 3,
+     "omar.pc": 1,
+     "ada.pc": 1,
+     "raj.pc": 2
+    },
+    "events": [
+     [
+      "item.decline",
+      {
+       "item": "sven.pc#1"
+      }
+     ]
+    ]
+   }
+  ]
+ }
+}

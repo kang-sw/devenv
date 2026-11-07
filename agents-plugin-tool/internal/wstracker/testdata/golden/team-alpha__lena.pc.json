@@ -1,0 +1,8190 @@
+{
+ "store": "team-alpha",
+ "viewer": "lena.pc",
+ "now": "2026-11-06T09:00:00Z",
+ "staleDays": 3,
+ "genesis": {
+  "admins": [
+   "ada",
+   "bo"
+  ],
+  "priority": {
+   "names": [
+    "알림",
+    "업무",
+    "긴급"
+   ],
+   "default": 1
+  },
+  "members": [
+   {
+    "id": "ada",
+    "name": "Ada Park",
+    "keys": [
+     "ada-k1"
+    ],
+    "leads": []
+   },
+   {
+    "id": "maya",
+    "name": "Maya Ortiz",
+    "keys": [
+     "maya-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "raj",
+    "name": "Raj Rao",
+    "keys": [
+     "raj-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "bo",
+    "name": "Bo Lindqvist",
+    "keys": [
+     "bo-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "lena",
+    "name": "Lena Weiss",
+    "keys": [
+     "lena-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "omar",
+    "name": "Omar Haddad",
+    "keys": [
+     "omar-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "ivy",
+    "name": "Ivy Chen",
+    "keys": [
+     "ivy-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "jon",
+    "name": "Jon Ek",
+    "keys": [
+     "jon-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "kai",
+    "name": "Kai Mori",
+    "keys": [
+     "kai-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "sven",
+    "name": "Sven Berg",
+    "keys": [
+     "sven-k1"
+    ],
+    "leads": [
+     "raj"
+    ]
+   },
+   {
+    "id": "tia",
+    "name": "Tia Moreau",
+    "keys": [
+     "tia-k1"
+    ],
+    "leads": [
+     "raj"
+    ]
+   },
+   {
+    "id": "noa",
+    "name": "Noa Fisher",
+    "keys": [
+     "noa-k1"
+    ],
+    "leads": [
+     "raj"
+    ]
+   },
+   {
+    "id": "uma",
+    "name": "Uma Iyer",
+    "keys": [
+     "uma-k1"
+    ],
+    "leads": [
+     "bo"
+    ]
+   },
+   {
+    "id": "pia",
+    "name": "Pia Novak",
+    "keys": [
+     "pia-k1"
+    ],
+    "leads": []
+   }
+  ]
+ },
+ "events": [
+  {
+   "member": "ada",
+   "clone": "pc",
+   "seq": 1,
+   "ts": "2026-11-02T09:00:00Z",
+   "type": "item.create",
+   "payload": {
+    "kind": "task",
+    "title": "Ship search v2",
+    "body": "Replace the v1 indexer and the query path.",
+    "project": "search-service",
+    "due": "2026-11-20",
+    "priority": 2
+   },
+   "seen": {},
+   "verdict": "valid"
+  },
+  {
+   "member": "ada",
+   "clone": "pc",
+   "seq": 2,
+   "ts": "2026-11-02T09:00:00Z",
+   "type": "item.assign",
+   "payload": {
+    "item": "ada.pc#1",
+    "mode": "all",
+    "levels": 1,
+    "completion": "assigner"
+   },
+   "seen": {},
+   "verdict": "valid"
+  },
+  {
+   "member": "ada",
+   "clone": "pc",
+   "seq": 3,
+   "ts": "2026-11-02T09:20:00Z",
+   "type": "item.create",
+   "payload": {
+    "kind": "topic",
+    "title": "Q4 priorities",
+    "body": "Search v2 first, CI hygiene second, training by end of month."
+   },
+   "seen": {},
+   "verdict": "valid"
+  },
+  {
+   "member": "maya",
+   "clone": "pc",
+   "seq": 1,
+   "ts": "2026-11-02T09:40:00Z",
+   "type": "item.create",
+   "payload": {
+    "kind": "task",
+    "title": "Index builder",
+    "parent": "ada.pc#1",
+    "project": "search-service",
+    "due": "2026-11-13",
+    "priority": 2
+   },
+   "seen": {
+    "ada.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "maya",
+   "clone": "pc",
+   "seq": 2,
+   "ts": "2026-11-02T09:40:00Z",
+   "type": "item.assign",
+   "payload": {
+    "item": "maya.pc#1",
+    "mode": "chosen",
+    "completion": "assignee",
+    "people": [
+     "lena",
+     "omar"
+    ]
+   },
+   "seen": {
+    "ada.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "maya",
+   "clone": "pc",
+   "seq": 3,
+   "ts": "2026-11-02T09:45:00Z",
+   "type": "comment.add",
+   "payload": {
+    "item": "ada.pc#3",
+    "body": "Can CI hygiene slip to December? Search v2 needs my whole part."
+   },
+   "seen": {
+    "ada.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "raj",
+   "clone": "pc",
+   "seq": 1,
+   "ts": "2026-11-02T10:00:00Z",
+   "type": "item.create",
+   "payload": {
+    "kind": "task",
+    "title": "Query path rewrite",
+    "parent": "ada.pc#1",
+    "project": "search-service",
+    "due": "2026-11-18",
+    "priority": 2
+   },
+   "seen": {
+    "ada.pc": 3,
+    "maya.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "raj",
+   "clone": "pc",
+   "seq": 2,
+   "ts": "2026-11-02T10:00:00Z",
+   "type": "item.assign",
+   "payload": {
+    "item": "raj.pc#1",
+    "mode": "chosen",
+    "completion": "assignee",
+    "people": [
+     "sven",
+     "tia"
+    ]
+   },
+   "seen": {
+    "ada.pc": 3,
+    "maya.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "raj",
+   "clone": "pc",
+   "seq": 3,
+   "ts": "2026-11-02T10:10:00Z",
+   "type": "comment.add",
+   "payload": {
+    "item": "ada.pc#1",
+    "body": "The query path depends on the new index format; can we freeze it by Wednesday?"
+   },
+   "seen": {
+    "ada.pc": 3,
+    "maya.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "ada",
+   "clone": "pc",
+   "seq": 4,
+   "ts": "2026-11-02T10:30:00Z",
+   "type": "comment.add",
+   "payload": {
+    "item": "ada.pc#1",
+    "body": "Yes - maya, please publish the format spec by Wednesday.",
+    "reply_to": "raj.pc#3"
+   },
+   "seen": {
+    "maya.pc": 3,
+    "raj.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "ada",
+   "clone": "pc",
+   "seq": 5,
+   "ts": "2026-11-02T10:40:00Z",
+   "type": "item.edit",
+   "payload": {
+    "item": "ada.pc#1",
+    "title": "Ship search v2 (index + query path)",
+    "body": "Replace the v1 indexer and the query path. Index format frozen on Wednesday."
+   },
+   "seen": {
+    "maya.pc": 3,
+    "raj.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "raj",
+   "clone": "pc",
+   "seq": 4,
+   "ts": "2026-11-02T10:50:00Z",
+   "type": "comment.add",
+   "payload": {
+    "item": "ada.pc#3",
+    "body": "Moving the cache layer to next week."
+   },
+   "seen": {
+    "ada.pc": 5,
+    "maya.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "raj",
+   "clone": "pc",
+   "seq": 5,
+   "ts": "2026-11-02T10:52:00Z",
+   "type": "comment.hide",
+   "payload": {
+    "comment": "raj.pc#4"
+   },
+   "seen": {
+    "ada.pc": 5,
+    "maya.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "maya",
+   "clone": "pc",
+   "seq": 4,
+   "ts": "2026-11-02T11:00:00Z",
+   "type": "comment.hide",
+   "payload": {
+    "comment": "raj.pc#4"
+   },
+   "seen": {
+    "ada.pc": 5,
+    "raj.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "maya",
+   "clone": "pc",
+   "seq": 5,
+   "ts": "2026-11-02T11:10:00Z",
+   "type": "item.create",
+   "payload": {
+    "kind": "task",
+    "title": "Tokenizer",
+    "parent": "maya.pc#1",
+    "due": "2026-11-06",
+    "priority": 1
+   },
+   "seen": {
+    "ada.pc": 5,
+    "raj.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "maya",
+   "clone": "pc",
+   "seq": 6,
+   "ts": "2026-11-02T11:10:00Z",
+   "type": "item.assign",
+   "payload": {
+    "item": "maya.pc#5",
+    "mode": "chosen",
+    "completion": "assigner",
+    "people": [
+     "ivy",
+     "jon"
+    ]
+   },
+   "seen": {
+    "ada.pc": 5,
+    "raj.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "maya",
+   "clone": "pc",
+   "seq": 7,
+   "ts": "2026-11-02T11:15:00Z",
+   "type": "item.create",
+   "payload": {
+    "kind": "task",
+    "title": "Shard writer docs",
+    "parent": "maya.pc#1",
+    "due": "2026-11-10",
+    "priority": 1
+   },
+   "seen": {
+    "ada.pc": 5,
+    "raj.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "maya",
+   "clone": "pc",
+   "seq": 8,
+   "ts": "2026-11-02T11:15:00Z",
+   "type": "item.assign",
+   "payload": {
+    "item": "maya.pc#7",
+    "mode": "chosen",
+    "completion": "assigner",
+    "people": [
+     "omar"
+    ]
+   },
+   "seen": {
+    "ada.pc": 5,
+    "raj.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "lena",
+   "clone": "pc",
+   "seq": 1,
+   "ts": "2026-11-02T11:20:00Z",
+   "type": "item.status",
+   "payload": {
+    "item": "maya.pc#1",
+    "status": "doing",
+    "note": "index layout drafted"
+   },
+   "seen": {
+    "ada.pc": 5,
+    "maya.pc": 8,
+    "raj.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "ivy",
+   "clone": "pc",
+   "seq": 1,
+   "ts": "2026-11-02T11:30:00Z",
+   "type": "item.status",
+   "payload": {
+    "item": "maya.pc#5",
+    "status": "doing",
+    "note": "regex tokenizer drafted"
+   },
+   "seen": {
+    "ada.pc": 5,
+    "lena.pc": 1,
+    "maya.pc": 8,
+    "raj.pc": 5
+   },
+   "verdict": "valid",
+   "origin": "agent-auto"
+  },
+  {
+   "member": "jon",
+   "clone": "pc",
+   "seq": 1,
+   "ts": "2026-11-02T11:40:00Z",
+   "type": "item.status",
+   "payload": {
+    "item": "maya.pc#5",
+    "status": "doing",
+    "note": "stemmer spike"
+   },
+   "seen": {
+    "ada.pc": 5,
+    "ivy.pc": 1,
+    "lena.pc": 1,
+    "maya.pc": 8,
+    "raj.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "omar",
+   "clone": "pc",
+   "seq": 1,
+   "ts": "2026-11-02T12:00:00Z",
+   "type": "item.status",
+   "payload": {
+    "item": "maya.pc#1",
+    "status": "doing",
+    "note": "shard writer done, docs next"
+   },
+   "seen": {
+    "ada.pc": 5,
+    "ivy.pc": 1,
+    "jon.pc": 1,
+    "lena.pc": 1,
+    "maya.pc": 8,
+    "raj.pc": 5
+   },
+   "verdict": "valid",
+   "origin": "agent-auto"
+  },
+  {
+   "member": "omar",
+   "clone": "pc",
+   "seq": 2,
+   "ts": "2026-11-02T12:00:00Z",
+   "type": "item.status",
+   "payload": {
+    "item": "maya.pc#7",
+    "status": "doing"
+   },
+   "seen": {
+    "ada.pc": 5,
+    "ivy.pc": 1,
+    "jon.pc": 1,
+    "lena.pc": 1,
+    "maya.pc": 8,
+    "raj.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "ivy",
+   "clone": "pc",
+   "seq": 2,
+   "ts": "2026-11-02T13:00:00Z",
+   "type": "item.close",
+   "payload": {
+    "item": "maya.pc#5",
+    "note": "tests green"
+   },
+   "seen": {
+    "ada.pc": 5,
+    "jon.pc": 1,
+    "lena.pc": 1,
+    "maya.pc": 8,
+    "omar.pc": 2,
+    "raj.pc": 5
+   },
+   "verdict": "valid",
+   "origin": "agent-auto"
+  },
+  {
+   "member": "maya",
+   "clone": "pc",
+   "seq": 9,
+   "ts": "2026-11-02T13:30:00Z",
+   "type": "item.confirm",
+   "payload": {
+    "item": "maya.pc#5",
+    "assignee": "ivy"
+   },
+   "seen": {
+    "ada.pc": 5,
+    "ivy.pc": 2,
+    "jon.pc": 1,
+    "lena.pc": 1,
+    "omar.pc": 2,
+    "raj.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "tia",
+   "clone": "pc",
+   "seq": 1,
+   "ts": "2026-11-02T14:00:00Z",
+   "type": "item.status",
+   "payload": {
+    "item": "raj.pc#1",
+    "status": "doing"
+   },
+   "seen": {
+    "ada.pc": 5,
+    "ivy.pc": 2,
+    "jon.pc": 1,
+    "lena.pc": 1,
+    "maya.pc": 9,
+    "omar.pc": 2,
+    "raj.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "sven",
+   "clone": "pc",
+   "seq": 1,
+   "ts": "2026-11-02T14:10:00Z",
+   "type": "item.status",
+   "payload": {
+    "item": "raj.pc#1",
+    "status": "doing",
+    "note": "planner skeleton"
+   },
+   "seen": {
+    "ada.pc": 5,
+    "ivy.pc": 2,
+    "jon.pc": 1,
+    "lena.pc": 1,
+    "maya.pc": 9,
+    "omar.pc": 2,
+    "raj.pc": 5,
+    "tia.pc": 1
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "bo",
+   "clone": "pc",
+   "seq": 1,
+   "ts": "2026-11-02T15:00:00Z",
+   "type": "item.create",
+   "payload": {
+    "kind": "task",
+    "title": "Rotate CI keys",
+    "project": "infra",
+    "due": "2026-11-03",
+    "priority": 2
+   },
+   "seen": {
+    "ada.pc": 5,
+    "ivy.pc": 2,
+    "jon.pc": 1,
+    "lena.pc": 1,
+    "maya.pc": 9,
+    "omar.pc": 2,
+    "raj.pc": 5,
+    "sven.pc": 1,
+    "tia.pc": 1
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "bo",
+   "clone": "pc",
+   "seq": 2,
+   "ts": "2026-11-02T15:00:00Z",
+   "type": "item.assign",
+   "payload": {
+    "item": "bo.pc#1",
+    "mode": "chosen",
+    "completion": "assignee",
+    "people": [
+     "uma"
+    ]
+   },
+   "seen": {
+    "ada.pc": 5,
+    "ivy.pc": 2,
+    "jon.pc": 1,
+    "lena.pc": 1,
+    "maya.pc": 9,
+    "omar.pc": 2,
+    "raj.pc": 5,
+    "sven.pc": 1,
+    "tia.pc": 1
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "uma",
+   "clone": "pc",
+   "seq": 1,
+   "ts": "2026-11-02T15:30:00Z",
+   "type": "item.status",
+   "payload": {
+    "item": "bo.pc#1",
+    "status": "doing",
+    "note": "staging keys rotated"
+   },
+   "seen": {
+    "ada.pc": 5,
+    "bo.pc": 2,
+    "ivy.pc": 2,
+    "jon.pc": 1,
+    "lena.pc": 1,
+    "maya.pc": 9,
+    "omar.pc": 2,
+    "raj.pc": 5,
+    "sven.pc": 1,
+    "tia.pc": 1
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "uma",
+   "clone": "pc",
+   "seq": 2,
+   "ts": "2026-11-02T16:00:00Z",
+   "type": "item.close",
+   "payload": {
+    "item": "bo.pc#1",
+    "note": "prod rotated too"
+   },
+   "seen": {
+    "ada.pc": 5,
+    "bo.pc": 2,
+    "ivy.pc": 2,
+    "jon.pc": 1,
+    "lena.pc": 1,
+    "maya.pc": 9,
+    "omar.pc": 2,
+    "raj.pc": 5,
+    "sven.pc": 1,
+    "tia.pc": 1
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "uma",
+   "clone": "pc",
+   "seq": 3,
+   "ts": "2026-11-02T16:10:00Z",
+   "type": "item.status",
+   "payload": {
+    "item": "bo.pc#1",
+    "status": "doing",
+    "note": "late report after close"
+   },
+   "seen": {
+    "ada.pc": 5,
+    "bo.pc": 2,
+    "ivy.pc": 2,
+    "jon.pc": 1,
+    "lena.pc": 1,
+    "maya.pc": 9,
+    "omar.pc": 2,
+    "raj.pc": 5,
+    "sven.pc": 1,
+    "tia.pc": 1
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "sven",
+   "clone": "pc",
+   "seq": 2,
+   "ts": "2026-11-02T16:20:00Z",
+   "type": "item.status",
+   "payload": {
+    "item": "bo.pc#1",
+    "status": "doing",
+    "note": "sven is not an assignee of this"
+   },
+   "seen": {
+    "ada.pc": 5,
+    "bo.pc": 2,
+    "ivy.pc": 2,
+    "jon.pc": 1,
+    "lena.pc": 1,
+    "maya.pc": 9,
+    "omar.pc": 2,
+    "raj.pc": 5,
+    "tia.pc": 1,
+    "uma.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "ada",
+   "clone": "pc",
+   "seq": 6,
+   "ts": "2026-11-02T17:00:00Z",
+   "type": "item.create",
+   "payload": {
+    "kind": "task",
+    "title": "Security training",
+    "body": "Finish the module before the 30th.",
+    "due": "2026-11-30",
+    "priority": 0
+   },
+   "seen": {
+    "bo.pc": 2,
+    "ivy.pc": 2,
+    "jon.pc": 1,
+    "lena.pc": 1,
+    "maya.pc": 9,
+    "omar.pc": 2,
+    "raj.pc": 5,
+    "sven.pc": 2,
+    "tia.pc": 1,
+    "uma.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "ada",
+   "clone": "pc",
+   "seq": 7,
+   "ts": "2026-11-02T17:00:00Z",
+   "type": "item.assign",
+   "payload": {
+    "item": "ada.pc#6",
+    "mode": "all",
+    "levels": 2,
+    "completion": "assignee"
+   },
+   "seen": {
+    "bo.pc": 2,
+    "ivy.pc": 2,
+    "jon.pc": 1,
+    "lena.pc": 1,
+    "maya.pc": 9,
+    "omar.pc": 2,
+    "raj.pc": 5,
+    "sven.pc": 2,
+    "tia.pc": 1,
+    "uma.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "kai",
+   "clone": "pc",
+   "seq": 1,
+   "ts": "2026-11-02T17:10:00Z",
+   "type": "item.close",
+   "payload": {
+    "item": "ada.pc#6"
+   },
+   "seen": {
+    "ada.pc": 7,
+    "bo.pc": 2,
+    "ivy.pc": 2,
+    "jon.pc": 1,
+    "lena.pc": 1,
+    "maya.pc": 9,
+    "omar.pc": 2,
+    "raj.pc": 5,
+    "sven.pc": 2,
+    "tia.pc": 1,
+    "uma.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "ada",
+   "clone": "pc",
+   "seq": 8,
+   "ts": "2026-11-02T17:30:00Z",
+   "type": "item.create",
+   "payload": {
+    "kind": "todo",
+    "title": "Book offsite venue",
+    "due": "2026-11-14",
+    "priority": 0
+   },
+   "seen": {
+    "bo.pc": 2,
+    "ivy.pc": 2,
+    "jon.pc": 1,
+    "kai.pc": 1,
+    "lena.pc": 1,
+    "maya.pc": 9,
+    "omar.pc": 2,
+    "raj.pc": 5,
+    "sven.pc": 2,
+    "tia.pc": 1,
+    "uma.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "ada",
+   "clone": "pc",
+   "seq": 9,
+   "ts": "2026-11-02T17:30:00Z",
+   "type": "item.assign",
+   "payload": {
+    "item": "ada.pc#8",
+    "mode": "chosen",
+    "completion": "assignee",
+    "people": [
+     "ada"
+    ]
+   },
+   "seen": {
+    "bo.pc": 2,
+    "ivy.pc": 2,
+    "jon.pc": 1,
+    "kai.pc": 1,
+    "lena.pc": 1,
+    "maya.pc": 9,
+    "omar.pc": 2,
+    "raj.pc": 5,
+    "sven.pc": 2,
+    "tia.pc": 1,
+    "uma.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "ivy",
+   "clone": "pc",
+   "seq": 3,
+   "ts": "2026-11-02T17:40:00Z",
+   "type": "item.status",
+   "payload": {
+    "item": "ada.pc#6",
+    "status": "doing",
+    "note": "module 2 of 5"
+   },
+   "seen": {
+    "ada.pc": 9,
+    "bo.pc": 2,
+    "jon.pc": 1,
+    "kai.pc": 1,
+    "lena.pc": 1,
+    "maya.pc": 9,
+    "omar.pc": 2,
+    "raj.pc": 5,
+    "sven.pc": 2,
+    "tia.pc": 1,
+    "uma.pc": 3
+   },
+   "verdict": "valid",
+   "origin": "agent-auto"
+  },
+  {
+   "member": "noa",
+   "clone": "pc",
+   "seq": 1,
+   "ts": "2026-11-02T18:00:00Z",
+   "type": "item.close",
+   "payload": {
+    "item": "ada.pc#6"
+   },
+   "seen": {
+    "ada.pc": 9,
+    "bo.pc": 2,
+    "ivy.pc": 3,
+    "jon.pc": 1,
+    "kai.pc": 1,
+    "lena.pc": 1,
+    "maya.pc": 9,
+    "omar.pc": 2,
+    "raj.pc": 5,
+    "sven.pc": 2,
+    "tia.pc": 1,
+    "uma.pc": 3
+   },
+   "verdict": "flagged",
+   "reason": "signer key \"ivy-k1\" is not a key of noa"
+  },
+  {
+   "member": "noa",
+   "clone": "pc",
+   "seq": 2,
+   "ts": "2026-11-02T18:10:00Z",
+   "type": "item.status",
+   "payload": {
+    "item": "ada.pc#6",
+    "status": "doing",
+    "note": "half way"
+   },
+   "seen": {
+    "ada.pc": 9,
+    "bo.pc": 2,
+    "ivy.pc": 3,
+    "jon.pc": 1,
+    "kai.pc": 1,
+    "lena.pc": 1,
+    "maya.pc": 9,
+    "omar.pc": 2,
+    "raj.pc": 5,
+    "sven.pc": 2,
+    "tia.pc": 1,
+    "uma.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "raj",
+   "clone": "pc",
+   "seq": 6,
+   "ts": "2026-11-02T18:30:00Z",
+   "type": "item.create",
+   "payload": {
+    "kind": "task",
+    "title": "Draft perf notes"
+   },
+   "seen": {
+    "ada.pc": 9,
+    "bo.pc": 2,
+    "ivy.pc": 3,
+    "jon.pc": 1,
+    "kai.pc": 1,
+    "lena.pc": 1,
+    "maya.pc": 9,
+    "noa.pc": 2,
+    "omar.pc": 2,
+    "sven.pc": 2,
+    "tia.pc": 1,
+    "uma.pc": 3
+   },
+   "verdict": "valid",
+   "origin": "agent-auto"
+  },
+  {
+   "member": "kai",
+   "clone": "pc",
+   "seq": 2,
+   "ts": "2026-11-02T18:45:00Z",
+   "type": "item.create",
+   "payload": {
+    "kind": "task",
+    "title": "Approve GPU budget for index builds",
+    "body": "Two more GPU nodes for nightly index builds, about 3k/month.",
+    "project": "search-service",
+    "due": "2026-11-07",
+    "priority": 1
+   },
+   "seen": {
+    "ada.pc": 9,
+    "bo.pc": 2,
+    "ivy.pc": 3,
+    "jon.pc": 1,
+    "lena.pc": 1,
+    "maya.pc": 9,
+    "noa.pc": 2,
+    "omar.pc": 2,
+    "raj.pc": 6,
+    "sven.pc": 2,
+    "tia.pc": 1,
+    "uma.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "kai",
+   "clone": "pc",
+   "seq": 3,
+   "ts": "2026-11-02T18:45:00Z",
+   "type": "item.assign",
+   "payload": {
+    "item": "kai.pc#2",
+    "mode": "chosen",
+    "people": [
+     "ada"
+    ],
+    "completion": "assigner"
+   },
+   "seen": {
+    "ada.pc": 9,
+    "bo.pc": 2,
+    "ivy.pc": 3,
+    "jon.pc": 1,
+    "lena.pc": 1,
+    "maya.pc": 9,
+    "noa.pc": 2,
+    "omar.pc": 2,
+    "raj.pc": 6,
+    "sven.pc": 2,
+    "tia.pc": 1,
+    "uma.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "mallory",
+   "clone": "pc",
+   "seq": 1,
+   "ts": "2026-11-02T19:00:00Z",
+   "type": "item.create",
+   "payload": {
+    "kind": "task",
+    "title": "Wire money",
+    "body": "not a member"
+   },
+   "seen": {
+    "ada.pc": 9,
+    "bo.pc": 2,
+    "ivy.pc": 3,
+    "jon.pc": 1,
+    "kai.pc": 3,
+    "lena.pc": 1,
+    "maya.pc": 9,
+    "noa.pc": 2,
+    "omar.pc": 2,
+    "raj.pc": 6,
+    "sven.pc": 2,
+    "tia.pc": 1,
+    "uma.pc": 3
+   },
+   "verdict": "flagged",
+   "reason": "author \"mallory\" is not a member in the state its author had seen"
+  },
+  {
+   "member": "tia",
+   "clone": "pc",
+   "seq": 2,
+   "ts": "2026-11-02T19:30:00Z",
+   "type": "roles.set_lead",
+   "payload": {
+    "member": "tia",
+    "leads": [
+     "ada"
+    ]
+   },
+   "seen": {
+    "ada.pc": 9,
+    "bo.pc": 2,
+    "ivy.pc": 3,
+    "jon.pc": 1,
+    "kai.pc": 3,
+    "lena.pc": 1,
+    "mallory.pc": 1,
+    "maya.pc": 9,
+    "noa.pc": 2,
+    "omar.pc": 2,
+    "raj.pc": 6,
+    "sven.pc": 2,
+    "uma.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "bo",
+   "clone": "pc",
+   "seq": 3,
+   "ts": "2026-11-02T20:00:00Z",
+   "type": "roles.set_lead",
+   "payload": {
+    "member": "ada",
+    "leads": [
+     "uma"
+    ]
+   },
+   "seen": {
+    "ada.pc": 9,
+    "ivy.pc": 3,
+    "jon.pc": 1,
+    "kai.pc": 3,
+    "lena.pc": 1,
+    "mallory.pc": 1,
+    "maya.pc": 9,
+    "noa.pc": 2,
+    "omar.pc": 2,
+    "raj.pc": 6,
+    "sven.pc": 2,
+    "tia.pc": 2,
+    "uma.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "bo",
+   "clone": "pc",
+   "seq": 4,
+   "ts": "2026-11-02T20:10:00Z",
+   "type": "roles.set_lead",
+   "payload": {
+    "member": "sven",
+    "leads": [
+     "maya",
+     "raj"
+    ]
+   },
+   "seen": {
+    "ada.pc": 9,
+    "ivy.pc": 3,
+    "jon.pc": 1,
+    "kai.pc": 3,
+    "lena.pc": 1,
+    "mallory.pc": 1,
+    "maya.pc": 9,
+    "noa.pc": 2,
+    "omar.pc": 2,
+    "raj.pc": 6,
+    "sven.pc": 2,
+    "tia.pc": 2,
+    "uma.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "lena",
+   "clone": "pc",
+   "seq": 2,
+   "ts": "2026-11-02T20:20:00Z",
+   "type": "item.create",
+   "payload": {
+    "kind": "task",
+    "title": "Benchmark harness",
+    "due": "2026-11-21",
+    "priority": 1
+   },
+   "seen": {
+    "ada.pc": 9,
+    "bo.pc": 4,
+    "ivy.pc": 3,
+    "jon.pc": 1,
+    "kai.pc": 3,
+    "mallory.pc": 1,
+    "maya.pc": 9,
+    "noa.pc": 2,
+    "omar.pc": 2,
+    "raj.pc": 6,
+    "sven.pc": 2,
+    "tia.pc": 2,
+    "uma.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "lena",
+   "clone": "pc",
+   "seq": 3,
+   "ts": "2026-11-02T20:20:00Z",
+   "type": "item.assign",
+   "payload": {
+    "item": "lena.pc#2",
+    "mode": "chosen",
+    "completion": "assignee",
+    "people": [
+     "raj"
+    ]
+   },
+   "seen": {
+    "ada.pc": 9,
+    "bo.pc": 4,
+    "ivy.pc": 3,
+    "jon.pc": 1,
+    "kai.pc": 3,
+    "mallory.pc": 1,
+    "maya.pc": 9,
+    "noa.pc": 2,
+    "omar.pc": 2,
+    "raj.pc": 6,
+    "sven.pc": 2,
+    "tia.pc": 2,
+    "uma.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "kai",
+   "clone": "pc",
+   "seq": 20,
+   "ts": "2026-11-02T20:30:00Z",
+   "type": "item.close",
+   "payload": {
+    "item": "maya.pc#5"
+   },
+   "seen": {
+    "bo.pc": 4,
+    "ivy.pc": 3,
+    "jon.pc": 1,
+    "kai.pc": 3,
+    "lena.pc": 3,
+    "mallory.pc": 1,
+    "maya.pc": 9,
+    "noa.pc": 2,
+    "omar.pc": 2,
+    "raj.pc": 6,
+    "sven.pc": 2,
+    "tia.pc": 2,
+    "uma.pc": 3
+   },
+   "verdict": "flagged",
+   "broken": "c2:0",
+   "reason": "commit stream \"ada.pc\" does not match the ref refs/heads/tracker/m/kai/pc (a clone writes only its own ref)"
+  },
+  {
+   "member": "maya",
+   "clone": "pc",
+   "seq": 10,
+   "ts": "2026-11-02T20:40:00Z",
+   "type": "item.edit",
+   "payload": {
+    "item": "ada.pc#1",
+    "title": "Ship search v2 by Friday"
+   },
+   "seen": {
+    "ada.pc": 9,
+    "bo.pc": 4,
+    "ivy.pc": 3,
+    "jon.pc": 1,
+    "kai.pc": 3,
+    "lena.pc": 3,
+    "mallory.pc": 1,
+    "noa.pc": 2,
+    "omar.pc": 2,
+    "raj.pc": 6,
+    "sven.pc": 2,
+    "tia.pc": 2,
+    "uma.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "ada",
+   "clone": "pc",
+   "seq": 10,
+   "ts": "2026-11-03T08:30:00Z",
+   "type": "item.accept",
+   "payload": {
+    "item": "kai.pc#2"
+   },
+   "seen": {
+    "bo.pc": 4,
+    "ivy.pc": 3,
+    "jon.pc": 1,
+    "kai.pc": 3,
+    "lena.pc": 3,
+    "mallory.pc": 1,
+    "maya.pc": 10,
+    "noa.pc": 2,
+    "omar.pc": 2,
+    "raj.pc": 6,
+    "sven.pc": 2,
+    "tia.pc": 2,
+    "uma.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "ada",
+   "clone": "pc",
+   "seq": 11,
+   "ts": "2026-11-03T09:00:00Z",
+   "type": "roles.set_lead",
+   "payload": {
+    "member": "pia",
+    "leads": [
+     "raj"
+    ]
+   },
+   "seen": {
+    "bo.pc": 4,
+    "ivy.pc": 3,
+    "jon.pc": 1,
+    "kai.pc": 3,
+    "lena.pc": 3,
+    "mallory.pc": 1,
+    "maya.pc": 10,
+    "noa.pc": 2,
+    "omar.pc": 2,
+    "raj.pc": 6,
+    "sven.pc": 2,
+    "tia.pc": 2,
+    "uma.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "sven",
+   "clone": "pc",
+   "seq": 3,
+   "ts": "2026-11-03T09:15:00Z",
+   "type": "item.create",
+   "payload": {
+    "kind": "task",
+    "title": "Review the query planner PR",
+    "body": "PR #412: cost model for the new planner. Needs an index-side reviewer.",
+    "project": "search-service",
+    "due": "2026-11-04",
+    "priority": 1
+   },
+   "seen": {
+    "ada.pc": 11,
+    "bo.pc": 4,
+    "ivy.pc": 3,
+    "jon.pc": 1,
+    "kai.pc": 3,
+    "lena.pc": 3,
+    "mallory.pc": 1,
+    "maya.pc": 10,
+    "noa.pc": 2,
+    "omar.pc": 2,
+    "raj.pc": 6,
+    "tia.pc": 2,
+    "uma.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "sven",
+   "clone": "pc",
+   "seq": 4,
+   "ts": "2026-11-03T09:15:00Z",
+   "type": "item.assign",
+   "payload": {
+    "item": "sven.pc#3",
+    "mode": "chosen",
+    "people": [
+     "jon"
+    ],
+    "completion": "assignee"
+   },
+   "seen": {
+    "ada.pc": 11,
+    "bo.pc": 4,
+    "ivy.pc": 3,
+    "jon.pc": 1,
+    "kai.pc": 3,
+    "lena.pc": 3,
+    "mallory.pc": 1,
+    "maya.pc": 10,
+    "noa.pc": 2,
+    "omar.pc": 2,
+    "raj.pc": 6,
+    "tia.pc": 2,
+    "uma.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "raj",
+   "clone": "pc",
+   "seq": 7,
+   "ts": "2026-11-03T09:30:00Z",
+   "type": "item.create",
+   "payload": {
+    "kind": "task",
+    "title": "Cache layer",
+    "parent": "raj.pc#1",
+    "due": "2026-11-12",
+    "priority": 2
+   },
+   "seen": {
+    "ada.pc": 11,
+    "bo.pc": 4,
+    "ivy.pc": 3,
+    "jon.pc": 1,
+    "kai.pc": 3,
+    "lena.pc": 3,
+    "mallory.pc": 1,
+    "maya.pc": 10,
+    "noa.pc": 2,
+    "omar.pc": 2,
+    "sven.pc": 4,
+    "tia.pc": 2,
+    "uma.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "raj",
+   "clone": "pc",
+   "seq": 8,
+   "ts": "2026-11-03T09:30:00Z",
+   "type": "item.assign",
+   "payload": {
+    "item": "raj.pc#7",
+    "mode": "chosen",
+    "completion": "assignee",
+    "people": [
+     "pia"
+    ]
+   },
+   "seen": {
+    "ada.pc": 11,
+    "bo.pc": 4,
+    "ivy.pc": 3,
+    "jon.pc": 1,
+    "kai.pc": 3,
+    "lena.pc": 3,
+    "mallory.pc": 1,
+    "maya.pc": 10,
+    "noa.pc": 2,
+    "omar.pc": 2,
+    "sven.pc": 4,
+    "tia.pc": 2,
+    "uma.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "jon",
+   "clone": "pc",
+   "seq": 2,
+   "ts": "2026-11-03T09:40:00Z",
+   "type": "item.accept",
+   "payload": {
+    "item": "sven.pc#3"
+   },
+   "seen": {
+    "ada.pc": 11,
+    "bo.pc": 4,
+    "ivy.pc": 3,
+    "kai.pc": 3,
+    "lena.pc": 3,
+    "mallory.pc": 1,
+    "maya.pc": 10,
+    "noa.pc": 2,
+    "omar.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "tia.pc": 2,
+    "uma.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "jon",
+   "clone": "pc",
+   "seq": 3,
+   "ts": "2026-11-03T09:40:00Z",
+   "type": "item.status",
+   "payload": {
+    "item": "sven.pc#3",
+    "status": "doing",
+    "note": "reading the cost model"
+   },
+   "seen": {
+    "ada.pc": 11,
+    "bo.pc": 4,
+    "ivy.pc": 3,
+    "kai.pc": 3,
+    "lena.pc": 3,
+    "mallory.pc": 1,
+    "maya.pc": 10,
+    "noa.pc": 2,
+    "omar.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "tia.pc": 2,
+    "uma.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "pia",
+   "clone": "pc",
+   "seq": 1,
+   "ts": "2026-11-03T10:00:00Z",
+   "type": "item.status",
+   "payload": {
+    "item": "ada.pc#6",
+    "status": "doing",
+    "note": "started the module"
+   },
+   "seen": {
+    "ada.pc": 11,
+    "bo.pc": 4,
+    "ivy.pc": 3,
+    "jon.pc": 3,
+    "kai.pc": 3,
+    "lena.pc": 3,
+    "mallory.pc": 1,
+    "maya.pc": 10,
+    "noa.pc": 2,
+    "omar.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "tia.pc": 2,
+    "uma.pc": 3
+   },
+   "verdict": "valid",
+   "origin": "agent-auto"
+  },
+  {
+   "member": "bo",
+   "clone": "pc",
+   "seq": 5,
+   "ts": "2026-11-03T10:05:00Z",
+   "type": "item.return",
+   "payload": {
+    "item": "sven.pc#3",
+    "assignee": "jon",
+    "note": "jon is needed on CI"
+   },
+   "seen": {
+    "ada.pc": 11,
+    "ivy.pc": 3,
+    "jon.pc": 3,
+    "kai.pc": 3,
+    "lena.pc": 3,
+    "mallory.pc": 1,
+    "maya.pc": 10,
+    "noa.pc": 2,
+    "omar.pc": 2,
+    "pia.pc": 1,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "tia.pc": 2,
+    "uma.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "pia",
+   "clone": "pc",
+   "seq": 2,
+   "ts": "2026-11-03T10:10:00Z",
+   "type": "item.status",
+   "payload": {
+    "item": "raj.pc#7",
+    "status": "blocked",
+    "note": "waiting for the redis cluster approval"
+   },
+   "seen": {
+    "ada.pc": 11,
+    "bo.pc": 5,
+    "ivy.pc": 3,
+    "jon.pc": 3,
+    "kai.pc": 3,
+    "lena.pc": 3,
+    "mallory.pc": 1,
+    "maya.pc": 10,
+    "noa.pc": 2,
+    "omar.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "tia.pc": 2,
+    "uma.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "maya",
+   "clone": "pc",
+   "seq": 11,
+   "ts": "2026-11-03T10:20:00Z",
+   "type": "item.return",
+   "payload": {
+    "item": "sven.pc#3",
+    "assignee": "jon",
+    "note": "jon is on the tokenizer rework this week; please ask lena."
+   },
+   "seen": {
+    "ada.pc": 11,
+    "bo.pc": 5,
+    "ivy.pc": 3,
+    "jon.pc": 3,
+    "kai.pc": 3,
+    "lena.pc": 3,
+    "mallory.pc": 1,
+    "noa.pc": 2,
+    "omar.pc": 2,
+    "pia.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "tia.pc": 2,
+    "uma.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "omar",
+   "clone": "pc",
+   "seq": 3,
+   "ts": "2026-11-03T10:30:00Z",
+   "type": "item.close",
+   "payload": {
+    "item": "maya.pc#7",
+    "note": "docs drafted"
+   },
+   "seen": {
+    "ada.pc": 11,
+    "bo.pc": 5,
+    "ivy.pc": 3,
+    "jon.pc": 3,
+    "kai.pc": 3,
+    "lena.pc": 3,
+    "mallory.pc": 1,
+    "maya.pc": 11,
+    "noa.pc": 2,
+    "pia.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "tia.pc": 2,
+    "uma.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "jon",
+   "clone": "pc",
+   "seq": 4,
+   "ts": "2026-11-03T11:00:00Z",
+   "type": "item.close",
+   "payload": {
+    "item": "maya.pc#5",
+    "note": "stemmer merged"
+   },
+   "seen": {
+    "ada.pc": 11,
+    "bo.pc": 5,
+    "ivy.pc": 3,
+    "kai.pc": 3,
+    "lena.pc": 3,
+    "mallory.pc": 1,
+    "maya.pc": 11,
+    "noa.pc": 2,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "tia.pc": 2,
+    "uma.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "tia",
+   "clone": "pc",
+   "seq": 3,
+   "ts": "2026-11-03T11:05:00Z",
+   "type": "item.create",
+   "payload": {
+    "kind": "task",
+    "title": "Load-test the cache layer",
+    "body": "One afternoon with the load rig before the cache ships.",
+    "due": "2026-11-12",
+    "priority": 1
+   },
+   "seen": {
+    "ada.pc": 11,
+    "bo.pc": 5,
+    "ivy.pc": 3,
+    "jon.pc": 4,
+    "kai.pc": 3,
+    "lena.pc": 3,
+    "mallory.pc": 1,
+    "maya.pc": 11,
+    "noa.pc": 2,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "uma.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "tia",
+   "clone": "pc",
+   "seq": 4,
+   "ts": "2026-11-03T11:05:00Z",
+   "type": "item.assign",
+   "payload": {
+    "item": "tia.pc#3",
+    "mode": "chosen",
+    "people": [
+     "uma"
+    ],
+    "completion": "assignee"
+   },
+   "seen": {
+    "ada.pc": 11,
+    "bo.pc": 5,
+    "ivy.pc": 3,
+    "jon.pc": 4,
+    "kai.pc": 3,
+    "lena.pc": 3,
+    "mallory.pc": 1,
+    "maya.pc": 11,
+    "noa.pc": 2,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "uma.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "maya",
+   "clone": "pc",
+   "seq": 12,
+   "ts": "2026-11-03T11:30:00Z",
+   "type": "item.reject",
+   "payload": {
+    "item": "maya.pc#5",
+    "assignee": "jon",
+    "note": "stemmer tests missing for Korean input"
+   },
+   "seen": {
+    "ada.pc": 11,
+    "bo.pc": 5,
+    "ivy.pc": 3,
+    "jon.pc": 4,
+    "kai.pc": 3,
+    "lena.pc": 3,
+    "mallory.pc": 1,
+    "noa.pc": 2,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "tia.pc": 4,
+    "uma.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "uma",
+   "clone": "pc",
+   "seq": 4,
+   "ts": "2026-11-03T11:40:00Z",
+   "type": "comment.add",
+   "payload": {
+    "item": "tia.pc#3",
+    "body": "No capacity until the next sprint, the rig is booked for CI. Try noa?"
+   },
+   "seen": {
+    "ada.pc": 11,
+    "bo.pc": 5,
+    "ivy.pc": 3,
+    "jon.pc": 4,
+    "kai.pc": 3,
+    "lena.pc": 3,
+    "mallory.pc": 1,
+    "maya.pc": 12,
+    "noa.pc": 2,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "tia.pc": 4
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "uma",
+   "clone": "pc",
+   "seq": 5,
+   "ts": "2026-11-03T11:40:00Z",
+   "type": "item.decline",
+   "payload": {
+    "item": "tia.pc#3",
+    "note": "no capacity this sprint"
+   },
+   "seen": {
+    "ada.pc": 11,
+    "bo.pc": 5,
+    "ivy.pc": 3,
+    "jon.pc": 4,
+    "kai.pc": 3,
+    "lena.pc": 3,
+    "mallory.pc": 1,
+    "maya.pc": 12,
+    "noa.pc": 2,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "tia.pc": 4
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "noa",
+   "clone": "pc",
+   "seq": 3,
+   "ts": "2026-11-03T12:00:00Z",
+   "type": "item.create",
+   "payload": {
+    "kind": "task",
+    "title": "Explain the tokenizer API to the query team",
+    "body": "30 minutes, any day this week.",
+    "due": "2026-11-07",
+    "priority": 0
+   },
+   "seen": {
+    "ada.pc": 11,
+    "bo.pc": 5,
+    "ivy.pc": 3,
+    "jon.pc": 4,
+    "kai.pc": 3,
+    "lena.pc": 3,
+    "mallory.pc": 1,
+    "maya.pc": 12,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "tia.pc": 4,
+    "uma.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "noa",
+   "clone": "pc",
+   "seq": 4,
+   "ts": "2026-11-03T12:00:00Z",
+   "type": "item.assign",
+   "payload": {
+    "item": "noa.pc#3",
+    "mode": "chosen",
+    "people": [
+     "lena"
+    ],
+    "completion": "assignee"
+   },
+   "seen": {
+    "ada.pc": 11,
+    "bo.pc": 5,
+    "ivy.pc": 3,
+    "jon.pc": 4,
+    "kai.pc": 3,
+    "lena.pc": 3,
+    "mallory.pc": 1,
+    "maya.pc": 12,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "tia.pc": 4,
+    "uma.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "lena",
+   "clone": "pc",
+   "seq": 4,
+   "ts": "2026-11-03T12:10:00Z",
+   "type": "item.accept",
+   "payload": {
+    "item": "noa.pc#3"
+   },
+   "seen": {
+    "ada.pc": 11,
+    "bo.pc": 5,
+    "ivy.pc": 3,
+    "jon.pc": 4,
+    "kai.pc": 3,
+    "mallory.pc": 1,
+    "maya.pc": 12,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "tia.pc": 4,
+    "uma.pc": 5
+   },
+   "verdict": "valid",
+   "origin": "agent-auto"
+  },
+  {
+   "member": "maya",
+   "clone": "pc",
+   "seq": 13,
+   "ts": "2026-11-03T15:00:00Z",
+   "type": "item.reject",
+   "payload": {
+    "item": "maya.pc#7",
+    "assignee": "omar",
+    "note": "needs the migration section"
+   },
+   "seen": {
+    "ada.pc": 11,
+    "bo.pc": 5,
+    "ivy.pc": 3,
+    "jon.pc": 4,
+    "kai.pc": 3,
+    "lena.pc": 4,
+    "mallory.pc": 1,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "tia.pc": 4,
+    "uma.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "maya",
+   "clone": "pc",
+   "seq": 14,
+   "ts": "2026-11-03T15:10:00Z",
+   "type": "comment.add",
+   "payload": {
+    "item": "maya.pc#1",
+    "body": "Status digest: tokenizer back to jon for Korean tests; shard writer docs need a migration section; omar has been dark since noon."
+   },
+   "seen": {
+    "ada.pc": 11,
+    "bo.pc": 5,
+    "ivy.pc": 3,
+    "jon.pc": 4,
+    "kai.pc": 3,
+    "lena.pc": 4,
+    "mallory.pc": 1,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "tia.pc": 4,
+    "uma.pc": 5
+   },
+   "verdict": "valid",
+   "origin": "agent"
+  },
+  {
+   "member": "jon",
+   "clone": "pc",
+   "seq": 5,
+   "ts": "2026-11-03T16:30:00Z",
+   "type": "item.status",
+   "payload": {
+    "item": "maya.pc#5",
+    "status": "doing",
+    "note": "adding Korean fixtures"
+   },
+   "seen": {
+    "ada.pc": 11,
+    "bo.pc": 5,
+    "ivy.pc": 3,
+    "kai.pc": 3,
+    "lena.pc": 4,
+    "mallory.pc": 1,
+    "maya.pc": 14,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "tia.pc": 4,
+    "uma.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "ivy",
+   "clone": "pc",
+   "seq": 4,
+   "ts": "2026-11-03T17:00:00Z",
+   "type": "comment.add",
+   "payload": {
+    "item": "maya.pc#5",
+    "body": "I can pair with jon on the Korean fixtures."
+   },
+   "seen": {
+    "ada.pc": 11,
+    "bo.pc": 5,
+    "jon.pc": 5,
+    "kai.pc": 3,
+    "lena.pc": 4,
+    "mallory.pc": 1,
+    "maya.pc": 14,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "tia.pc": 4,
+    "uma.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "jon",
+   "clone": "pc",
+   "seq": 6,
+   "ts": "2026-11-03T22:00:00Z",
+   "type": "comment.add",
+   "payload": {
+    "item": "maya.pc#5",
+    "body": "Approved - please wire the vendor payment today."
+   },
+   "seen": {
+    "ada.pc": 11,
+    "bo.pc": 5,
+    "ivy.pc": 4,
+    "kai.pc": 3,
+    "lena.pc": 4,
+    "mallory.pc": 1,
+    "maya.pc": 14,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "tia.pc": 4,
+    "uma.pc": 5
+   },
+   "verdict": "ignored",
+   "reason": "signed with jon-k1, which bo.pc-6 revoked having seen jon.pc only up to seq 5; events from a revoked key that the revoker had not seen are ignored, whatever their seen claims"
+  },
+  {
+   "member": "maya",
+   "clone": "pc",
+   "seq": 15,
+   "ts": "2026-11-04T10:00:00Z",
+   "type": "item.unassign",
+   "payload": {
+    "item": "maya.pc#1",
+    "assignee": "omar"
+   },
+   "seen": {
+    "ada.pc": 11,
+    "bo.pc": 5,
+    "ivy.pc": 4,
+    "jon.pc": 5,
+    "kai.pc": 3,
+    "lena.pc": 4,
+    "mallory.pc": 1,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "tia.pc": 4,
+    "uma.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "maya",
+   "clone": "pc",
+   "seq": 16,
+   "ts": "2026-11-04T10:00:00Z",
+   "type": "comment.add",
+   "payload": {
+    "item": "maya.pc#1",
+    "body": "Unassigned omar from the index builder while he is dark; lena covers the writer."
+   },
+   "seen": {
+    "ada.pc": 11,
+    "bo.pc": 5,
+    "ivy.pc": 4,
+    "jon.pc": 5,
+    "kai.pc": 3,
+    "lena.pc": 4,
+    "mallory.pc": 1,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "tia.pc": 4,
+    "uma.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "lena",
+   "clone": "pc",
+   "seq": 5,
+   "ts": "2026-11-04T10:30:00Z",
+   "type": "item.status",
+   "payload": {
+    "item": "maya.pc#1",
+    "status": "doing",
+    "note": "picked up the shard writer"
+   },
+   "seen": {
+    "ada.pc": 11,
+    "bo.pc": 5,
+    "ivy.pc": 4,
+    "jon.pc": 5,
+    "kai.pc": 3,
+    "mallory.pc": 1,
+    "maya.pc": 16,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "tia.pc": 4,
+    "uma.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "bo",
+   "clone": "pc",
+   "seq": 6,
+   "ts": "2026-11-04T11:00:00Z",
+   "type": "roles.revoke_key",
+   "payload": {
+    "member": "jon",
+    "key": "jon-k1"
+   },
+   "seen": {
+    "ada.pc": 11,
+    "ivy.pc": 4,
+    "jon.pc": 5,
+    "kai.pc": 3,
+    "lena.pc": 5,
+    "mallory.pc": 1,
+    "maya.pc": 16,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "tia.pc": 4,
+    "uma.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "bo",
+   "clone": "pc",
+   "seq": 7,
+   "ts": "2026-11-04T11:00:00Z",
+   "type": "roles.add_key",
+   "payload": {
+    "member": "jon",
+    "key": "jon-k2"
+   },
+   "seen": {
+    "ada.pc": 11,
+    "ivy.pc": 4,
+    "jon.pc": 5,
+    "kai.pc": 3,
+    "lena.pc": 5,
+    "mallory.pc": 1,
+    "maya.pc": 16,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "tia.pc": 4,
+    "uma.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "jon",
+   "clone": "pc",
+   "seq": 7,
+   "ts": "2026-11-04T11:30:00Z",
+   "type": "comment.add",
+   "payload": {
+    "item": "maya.pc#5",
+    "body": "My laptop was stolen yesterday; I am on a new key now. jon-6 was not me."
+   },
+   "seen": {
+    "ada.pc": 11,
+    "bo.pc": 7,
+    "ivy.pc": 4,
+    "kai.pc": 3,
+    "lena.pc": 5,
+    "mallory.pc": 1,
+    "maya.pc": 16,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "tia.pc": 4,
+    "uma.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "jon",
+   "clone": "pc",
+   "seq": 8,
+   "ts": "2026-11-04T12:00:00Z",
+   "type": "item.close",
+   "payload": {
+    "item": "maya.pc#5",
+    "note": "Korean fixtures in"
+   },
+   "seen": {
+    "ada.pc": 11,
+    "bo.pc": 7,
+    "ivy.pc": 4,
+    "kai.pc": 3,
+    "lena.pc": 5,
+    "mallory.pc": 1,
+    "maya.pc": 16,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "tia.pc": 4,
+    "uma.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "maya",
+   "clone": "pc",
+   "seq": 17,
+   "ts": "2026-11-04T13:00:00Z",
+   "type": "item.confirm",
+   "payload": {
+    "item": "maya.pc#5",
+    "assignee": "jon"
+   },
+   "seen": {
+    "ada.pc": 11,
+    "bo.pc": 7,
+    "ivy.pc": 4,
+    "jon.pc": 8,
+    "kai.pc": 3,
+    "lena.pc": 5,
+    "mallory.pc": 1,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "tia.pc": 4,
+    "uma.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "maya",
+   "clone": "pc",
+   "seq": 18,
+   "ts": "2026-11-04T13:30:00Z",
+   "type": "item.reopen",
+   "payload": {
+    "item": "maya.pc#5",
+    "assignee": "ivy",
+    "note": "regression in emoji tokenization"
+   },
+   "seen": {
+    "ada.pc": 11,
+    "bo.pc": 7,
+    "ivy.pc": 4,
+    "jon.pc": 8,
+    "kai.pc": 3,
+    "lena.pc": 5,
+    "mallory.pc": 1,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "tia.pc": 4,
+    "uma.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "ivy",
+   "clone": "pc",
+   "seq": 5,
+   "ts": "2026-11-04T14:00:00Z",
+   "type": "item.status",
+   "payload": {
+    "item": "maya.pc#5",
+    "status": "doing",
+    "note": "fixing emoji ranges"
+   },
+   "seen": {
+    "ada.pc": 11,
+    "bo.pc": 7,
+    "jon.pc": 8,
+    "kai.pc": 3,
+    "lena.pc": 5,
+    "mallory.pc": 1,
+    "maya.pc": 18,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "tia.pc": 4,
+    "uma.pc": 5
+   },
+   "verdict": "valid",
+   "origin": "agent-auto"
+  },
+  {
+   "member": "ada",
+   "clone": "pc",
+   "seq": 12,
+   "ts": "2026-11-04T15:00:00Z",
+   "type": "item.close",
+   "payload": {
+    "item": "kai.pc#2",
+    "note": "budget approved for Q4"
+   },
+   "seen": {
+    "bo.pc": 7,
+    "ivy.pc": 5,
+    "jon.pc": 8,
+    "kai.pc": 3,
+    "lena.pc": 5,
+    "mallory.pc": 1,
+    "maya.pc": 18,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "tia.pc": 4,
+    "uma.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "maya",
+   "clone": "pc",
+   "seq": 19,
+   "ts": "2026-11-04T16:00:00Z",
+   "type": "comment.add",
+   "payload": {
+    "item": "ada.pc#1",
+    "body": "Weekly digest: tokenizer reopened for emoji; query path blocked below on the cache layer (pia waits for the redis approval)."
+   },
+   "seen": {
+    "ada.pc": 12,
+    "bo.pc": 7,
+    "ivy.pc": 5,
+    "jon.pc": 8,
+    "kai.pc": 3,
+    "lena.pc": 5,
+    "mallory.pc": 1,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "tia.pc": 4,
+    "uma.pc": 5
+   },
+   "verdict": "valid",
+   "origin": "agent"
+  },
+  {
+   "member": "maya",
+   "clone": "lap",
+   "seq": 1,
+   "ts": "2026-11-04T20:00:00Z",
+   "type": "item.edit",
+   "payload": {
+    "item": "maya.pc#1",
+    "body": "Build the v2 index: layout, shard writer, tokenizer (laptop draft)."
+   },
+   "seen": {
+    "ada.pc": 12,
+    "bo.pc": 7,
+    "ivy.pc": 5,
+    "jon.pc": 8,
+    "kai.pc": 3,
+    "lena.pc": 5,
+    "mallory.pc": 1,
+    "maya.pc": 19,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "tia.pc": 4,
+    "uma.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "maya",
+   "clone": "pc",
+   "seq": 20,
+   "ts": "2026-11-04T21:30:00Z",
+   "type": "item.edit",
+   "payload": {
+    "item": "maya.pc#1",
+    "body": "Build the v2 index: layout, shard writer, tokenizer, compaction."
+   },
+   "seen": {
+    "ada.pc": 12,
+    "bo.pc": 7,
+    "ivy.pc": 5,
+    "jon.pc": 8,
+    "kai.pc": 3,
+    "lena.pc": 5,
+    "mallory.pc": 1,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "tia.pc": 4,
+    "uma.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "maya",
+   "clone": "lap",
+   "seq": 2,
+   "ts": "2026-11-05T08:00:00Z",
+   "type": "item.create",
+   "payload": {
+    "kind": "todo",
+    "title": "Prepare Friday demo",
+    "due": "2026-11-06",
+    "priority": 2
+   },
+   "seen": {
+    "ada.pc": 12,
+    "bo.pc": 7,
+    "ivy.pc": 5,
+    "jon.pc": 8,
+    "kai.pc": 3,
+    "lena.pc": 5,
+    "mallory.pc": 1,
+    "maya.pc": 20,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "tia.pc": 4,
+    "uma.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "maya",
+   "clone": "lap",
+   "seq": 3,
+   "ts": "2026-11-05T08:00:00Z",
+   "type": "item.assign",
+   "payload": {
+    "item": "maya.lap#2",
+    "mode": "chosen",
+    "people": [
+     "maya"
+    ],
+    "completion": "assignee"
+   },
+   "seen": {
+    "ada.pc": 12,
+    "bo.pc": 7,
+    "ivy.pc": 5,
+    "jon.pc": 8,
+    "kai.pc": 3,
+    "lena.pc": 5,
+    "mallory.pc": 1,
+    "maya.pc": 20,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "tia.pc": 4,
+    "uma.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "ada",
+   "clone": "pc",
+   "seq": 13,
+   "ts": "2026-11-05T09:00:00Z",
+   "type": "comment.add",
+   "payload": {
+    "item": "ada.pc#3",
+    "body": "CI hygiene moves to December.",
+    "reply_to": "maya.pc#3"
+   },
+   "seen": {
+    "bo.pc": 7,
+    "ivy.pc": 5,
+    "jon.pc": 8,
+    "kai.pc": 3,
+    "lena.pc": 5,
+    "mallory.pc": 1,
+    "maya.pc": 19,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "tia.pc": 4,
+    "uma.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "ada",
+   "clone": "pc",
+   "seq": 14,
+   "ts": "2026-11-05T09:30:00Z",
+   "type": "item.close",
+   "payload": {
+    "item": "ada.pc#8"
+   },
+   "seen": {
+    "bo.pc": 7,
+    "ivy.pc": 5,
+    "jon.pc": 8,
+    "kai.pc": 3,
+    "lena.pc": 5,
+    "mallory.pc": 1,
+    "maya.pc": 19,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "tia.pc": 4,
+    "uma.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "kai",
+   "clone": "pc",
+   "seq": 4,
+   "ts": "2026-11-05T10:00:00Z",
+   "type": "item.confirm",
+   "payload": {
+    "item": "kai.pc#2",
+    "assignee": "ada",
+    "note": "thanks, ordering the nodes"
+   },
+   "seen": {
+    "ada.pc": 14,
+    "bo.pc": 7,
+    "ivy.pc": 5,
+    "jon.pc": 8,
+    "lena.pc": 5,
+    "mallory.pc": 1,
+    "maya.lap": 3,
+    "maya.pc": 20,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "tia.pc": 4,
+    "uma.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "tia",
+   "clone": "pc",
+   "seq": 5,
+   "ts": "2026-11-05T10:30:00Z",
+   "type": "comment.add",
+   "payload": {
+    "item": "raj.pc#7",
+    "body": "Escalated the redis approval to bo."
+   },
+   "seen": {
+    "ada.pc": 14,
+    "bo.pc": 7,
+    "ivy.pc": 5,
+    "jon.pc": 8,
+    "kai.pc": 3,
+    "lena.pc": 5,
+    "mallory.pc": 1,
+    "maya.pc": 19,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "uma.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "bo",
+   "clone": "pc",
+   "seq": 8,
+   "ts": "2026-11-05T11:00:00Z",
+   "type": "comment.add",
+   "payload": {
+    "item": "raj.pc#7",
+    "body": "Approved in principle; the infra ticket is open.",
+    "reply_to": "tia.pc#5"
+   },
+   "seen": {
+    "ada.pc": 14,
+    "ivy.pc": 5,
+    "jon.pc": 8,
+    "kai.pc": 3,
+    "lena.pc": 5,
+    "mallory.pc": 1,
+    "maya.pc": 19,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "tia.pc": 5,
+    "uma.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "bo",
+   "clone": "pc",
+   "seq": 12,
+   "ts": "2026-11-05T11:30:00Z",
+   "type": "item.create",
+   "payload": {
+    "kind": "todo",
+    "title": "Seq gap demo"
+   },
+   "seen": {
+    "ada.pc": 14,
+    "ivy.pc": 5,
+    "jon.pc": 8,
+    "kai.pc": 3,
+    "lena.pc": 5,
+    "mallory.pc": 1,
+    "maya.pc": 19,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "tia.pc": 5,
+    "uma.pc": 5
+   },
+   "verdict": "flagged",
+   "broken": "c6:0",
+   "reason": "seq 12 after 8 (expected 9)"
+  },
+  {
+   "member": "raj",
+   "clone": "pc",
+   "seq": 9,
+   "ts": "2026-11-05T13:00:00Z",
+   "type": "item.accept",
+   "payload": {
+    "item": "lena.pc#2",
+    "note": "I can take it this week"
+   },
+   "seen": {
+    "ada.pc": 14,
+    "bo.pc": 8,
+    "ivy.pc": 5,
+    "jon.pc": 8,
+    "kai.pc": 4,
+    "lena.pc": 5,
+    "mallory.pc": 1,
+    "maya.lap": 3,
+    "maya.pc": 20,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "sven.pc": 4,
+    "tia.pc": 5,
+    "uma.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "raj",
+   "clone": "pc",
+   "seq": 10,
+   "ts": "2026-11-05T13:30:00Z",
+   "type": "item.handoff",
+   "payload": {
+    "item": "lena.pc#2",
+    "to": "sven",
+    "note": "sven owns the bench rig now"
+   },
+   "seen": {
+    "ada.pc": 14,
+    "bo.pc": 8,
+    "ivy.pc": 5,
+    "jon.pc": 8,
+    "kai.pc": 4,
+    "lena.pc": 5,
+    "mallory.pc": 1,
+    "maya.lap": 3,
+    "maya.pc": 20,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "sven.pc": 4,
+    "tia.pc": 5,
+    "uma.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "sven",
+   "clone": "pc",
+   "seq": 5,
+   "ts": "2026-11-05T14:30:00Z",
+   "type": "item.accept",
+   "payload": {
+    "item": "lena.pc#2"
+   },
+   "seen": {
+    "ada.pc": 14,
+    "bo.pc": 8,
+    "ivy.pc": 5,
+    "jon.pc": 8,
+    "kai.pc": 4,
+    "lena.pc": 5,
+    "mallory.pc": 1,
+    "maya.lap": 3,
+    "maya.pc": 20,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 10,
+    "tia.pc": 5,
+    "uma.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "ivy",
+   "clone": "pc",
+   "seq": 6,
+   "ts": "2026-11-05T15:00:00Z",
+   "type": "item.create",
+   "payload": {
+    "kind": "task",
+    "title": "Review the emoji tokenizer fix",
+    "body": "Two-line change in the range table; needs a second pair of eyes before Friday.",
+    "project": "search-service",
+    "due": "2026-11-07",
+    "priority": 1
+   },
+   "seen": {
+    "ada.pc": 14,
+    "bo.pc": 8,
+    "jon.pc": 8,
+    "kai.pc": 4,
+    "lena.pc": 5,
+    "mallory.pc": 1,
+    "maya.lap": 3,
+    "maya.pc": 20,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 10,
+    "sven.pc": 5,
+    "tia.pc": 5,
+    "uma.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "ivy",
+   "clone": "pc",
+   "seq": 7,
+   "ts": "2026-11-05T15:00:00Z",
+   "type": "item.assign",
+   "payload": {
+    "item": "ivy.pc#6",
+    "mode": "chosen",
+    "people": [
+     "maya"
+    ],
+    "completion": "assigner"
+   },
+   "seen": {
+    "ada.pc": 14,
+    "bo.pc": 8,
+    "jon.pc": 8,
+    "kai.pc": 4,
+    "lena.pc": 5,
+    "mallory.pc": 1,
+    "maya.lap": 3,
+    "maya.pc": 20,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 10,
+    "sven.pc": 5,
+    "tia.pc": 5,
+    "uma.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "ivy",
+   "clone": "pc",
+   "seq": 8,
+   "ts": "2026-11-05T16:00:00Z",
+   "type": "item.close",
+   "payload": {
+    "item": "maya.pc#5",
+    "note": "emoji ranges fixed"
+   },
+   "seen": {
+    "ada.pc": 14,
+    "bo.pc": 8,
+    "jon.pc": 8,
+    "kai.pc": 4,
+    "lena.pc": 5,
+    "mallory.pc": 1,
+    "maya.lap": 3,
+    "maya.pc": 20,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 10,
+    "sven.pc": 5,
+    "tia.pc": 5,
+    "uma.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "maya",
+   "clone": "pc",
+   "seq": 21,
+   "ts": "2026-11-05T17:00:00Z",
+   "type": "item.status",
+   "payload": {
+    "item": "ada.pc#1",
+    "status": "doing",
+    "note": "starting the v2 integration"
+   },
+   "seen": {
+    "ada.pc": 14,
+    "bo.pc": 8,
+    "ivy.pc": 8,
+    "jon.pc": 8,
+    "kai.pc": 4,
+    "lena.pc": 5,
+    "mallory.pc": 1,
+    "maya.lap": 3,
+    "maya.pc": 20,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 10,
+    "sven.pc": 5,
+    "tia.pc": 5,
+    "uma.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "maya",
+   "clone": "lap",
+   "seq": 4,
+   "ts": "2026-11-05T18:00:00Z",
+   "type": "item.status",
+   "payload": {
+    "item": "ada.pc#1",
+    "status": "blocked",
+    "note": "integration test suite red (auto)"
+   },
+   "seen": {
+    "ada.pc": 14,
+    "bo.pc": 8,
+    "ivy.pc": 8,
+    "jon.pc": 8,
+    "kai.pc": 4,
+    "lena.pc": 5,
+    "mallory.pc": 1,
+    "maya.pc": 20,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 10,
+    "sven.pc": 5,
+    "tia.pc": 5,
+    "uma.pc": 5
+   },
+   "verdict": "valid",
+   "origin": "agent-auto"
+  }
+ ],
+ "expected": {
+  "viewer": {
+   "member": "lena",
+   "stream": "lena.pc",
+   "name": "Lena Weiss",
+   "admin": false,
+   "lead": "maya",
+   "followers": [],
+   "reach": {},
+   "isMember": true
+  },
+  "priority": {
+   "names": [
+    "알림",
+    "업무",
+    "긴급"
+   ],
+   "default": 1
+  },
+  "members": {
+   "ada": {
+    "id": "ada",
+    "name": "Ada Park",
+    "leads": [],
+    "keys": [
+     "ada-k1"
+    ],
+    "revoked": [],
+    "removed": null,
+    "joined": null,
+    "admin": true,
+    "children": [
+     "maya",
+     "raj",
+     "bo"
+    ],
+    "depth": null,
+    "role": "root"
+   },
+   "maya": {
+    "id": "maya",
+    "name": "Maya Ortiz",
+    "leads": [
+     "ada"
+    ],
+    "keys": [
+     "maya-k1"
+    ],
+    "revoked": [],
+    "removed": null,
+    "joined": null,
+    "admin": false,
+    "children": [
+     "lena",
+     "omar",
+     "ivy",
+     "jon",
+     "kai"
+    ],
+    "depth": null,
+    "role": "lead"
+   },
+   "raj": {
+    "id": "raj",
+    "name": "Raj Rao",
+    "leads": [
+     "ada"
+    ],
+    "keys": [
+     "raj-k1"
+    ],
+    "revoked": [],
+    "removed": null,
+    "joined": null,
+    "admin": false,
+    "children": [
+     "sven",
+     "tia",
+     "noa",
+     "pia"
+    ],
+    "depth": null,
+    "role": "lead"
+   },
+   "bo": {
+    "id": "bo",
+    "name": "Bo Lindqvist",
+    "leads": [
+     "ada"
+    ],
+    "keys": [
+     "bo-k1"
+    ],
+    "revoked": [],
+    "removed": null,
+    "joined": null,
+    "admin": true,
+    "children": [
+     "uma"
+    ],
+    "depth": null,
+    "role": "lead"
+   },
+   "lena": {
+    "id": "lena",
+    "name": "Lena Weiss",
+    "leads": [
+     "maya"
+    ],
+    "keys": [
+     "lena-k1"
+    ],
+    "revoked": [],
+    "removed": null,
+    "joined": null,
+    "admin": false,
+    "children": [],
+    "depth": null,
+    "role": "member"
+   },
+   "omar": {
+    "id": "omar",
+    "name": "Omar Haddad",
+    "leads": [
+     "maya"
+    ],
+    "keys": [
+     "omar-k1"
+    ],
+    "revoked": [],
+    "removed": null,
+    "joined": null,
+    "admin": false,
+    "children": [],
+    "depth": null,
+    "role": "member"
+   },
+   "ivy": {
+    "id": "ivy",
+    "name": "Ivy Chen",
+    "leads": [
+     "maya"
+    ],
+    "keys": [
+     "ivy-k1"
+    ],
+    "revoked": [],
+    "removed": null,
+    "joined": null,
+    "admin": false,
+    "children": [],
+    "depth": null,
+    "role": "member"
+   },
+   "jon": {
+    "id": "jon",
+    "name": "Jon Ek",
+    "leads": [
+     "maya"
+    ],
+    "keys": [
+     "jon-k2"
+    ],
+    "revoked": [
+     {
+      "key": "jon-k1",
+      "by": "bo.pc#6"
+     }
+    ],
+    "removed": null,
+    "joined": null,
+    "admin": false,
+    "children": [],
+    "depth": null,
+    "role": "member"
+   },
+   "kai": {
+    "id": "kai",
+    "name": "Kai Mori",
+    "leads": [
+     "maya"
+    ],
+    "keys": [
+     "kai-k1"
+    ],
+    "revoked": [],
+    "removed": null,
+    "joined": null,
+    "admin": false,
+    "children": [],
+    "depth": null,
+    "role": "member"
+   },
+   "sven": {
+    "id": "sven",
+    "name": "Sven Berg",
+    "leads": [
+     "raj"
+    ],
+    "keys": [
+     "sven-k1"
+    ],
+    "revoked": [],
+    "removed": null,
+    "joined": null,
+    "admin": false,
+    "children": [],
+    "depth": null,
+    "role": "member"
+   },
+   "tia": {
+    "id": "tia",
+    "name": "Tia Moreau",
+    "leads": [
+     "raj"
+    ],
+    "keys": [
+     "tia-k1"
+    ],
+    "revoked": [],
+    "removed": null,
+    "joined": null,
+    "admin": false,
+    "children": [],
+    "depth": null,
+    "role": "member"
+   },
+   "noa": {
+    "id": "noa",
+    "name": "Noa Fisher",
+    "leads": [
+     "raj"
+    ],
+    "keys": [
+     "noa-k1"
+    ],
+    "revoked": [],
+    "removed": null,
+    "joined": null,
+    "admin": false,
+    "children": [],
+    "depth": null,
+    "role": "member"
+   },
+   "uma": {
+    "id": "uma",
+    "name": "Uma Iyer",
+    "leads": [
+     "bo"
+    ],
+    "keys": [
+     "uma-k1"
+    ],
+    "revoked": [],
+    "removed": null,
+    "joined": null,
+    "admin": false,
+    "children": [],
+    "depth": null,
+    "role": "member"
+   },
+   "pia": {
+    "id": "pia",
+    "name": "Pia Novak",
+    "leads": [
+     "raj"
+    ],
+    "keys": [
+     "pia-k1"
+    ],
+    "revoked": [],
+    "removed": null,
+    "joined": null,
+    "admin": false,
+    "children": [],
+    "depth": null,
+    "role": "member"
+   }
+  },
+  "admins": [
+   "ada",
+   "bo"
+  ],
+  "rolesProblems": [],
+  "items": {
+   "ada.pc#1": {
+    "id": "ada.pc#1",
+    "alias": "ada.pc-1",
+    "kind": "task",
+    "title": "Ship search v2 (index + query path)",
+    "body": "Replace the v1 indexer and the query path. Index format frozen on Wednesday.",
+    "project": "search-service",
+    "due": "2026-11-20",
+    "priority": 2,
+    "priorityLevel": 2,
+    "priorityName": "긴급",
+    "parent": null,
+    "author": "ada",
+    "ts": "2026-11-02T09:00:00Z",
+    "hidden": false,
+    "edited": {
+     "id": "ada.pc#5",
+     "ts": "2026-11-02T10:40:00Z"
+    },
+    "status": "doing",
+    "counted": true,
+    "rollup": {
+     "total": 2,
+     "counts": {
+      "doing": 2
+     },
+     "blocked": [
+      "raj.pc#7"
+     ]
+    },
+    "lastActivity": "2026-11-05T18:00:00Z",
+    "started": "2026-11-05T17:00:00Z",
+    "children": [
+     "maya.pc#1",
+     "raj.pc#1"
+    ],
+    "assignments": [
+     "ada.pc#2>maya",
+     "ada.pc#2>raj",
+     "ada.pc#2>bo"
+    ],
+    "pending": [],
+    "thread": [
+     "ada.pc#1",
+     "ada.pc#2",
+     "maya.pc#1",
+     "raj.pc#1",
+     "raj.pc#3",
+     "ada.pc#4",
+     "ada.pc#5",
+     "maya.pc#10",
+     "maya.pc#19",
+     "maya.pc#21",
+     "maya.lap#4"
+    ],
+    "concurrent": 0,
+    "depth": 0,
+    "chain": [
+     "ada"
+    ]
+   },
+   "ada.pc#3": {
+    "id": "ada.pc#3",
+    "alias": "ada.pc-3",
+    "kind": "topic",
+    "title": "Q4 priorities",
+    "body": "Search v2 first, CI hygiene second, training by end of month.",
+    "project": "",
+    "due": null,
+    "priority": 1,
+    "priorityLevel": 1,
+    "priorityName": "업무",
+    "parent": null,
+    "author": "ada",
+    "ts": "2026-11-02T09:20:00Z",
+    "hidden": false,
+    "edited": null,
+    "status": null,
+    "counted": false,
+    "rollup": {
+     "total": 0,
+     "counts": {},
+     "blocked": []
+    },
+    "lastActivity": "2026-11-05T09:00:00Z",
+    "started": null,
+    "children": [],
+    "assignments": [],
+    "pending": [],
+    "thread": [
+     "ada.pc#3",
+     "maya.pc#3",
+     "raj.pc#4",
+     "raj.pc#5",
+     "maya.pc#4",
+     "ada.pc#13"
+    ],
+    "concurrent": 0,
+    "depth": 0,
+    "chain": [
+     "ada"
+    ]
+   },
+   "maya.pc#1": {
+    "id": "maya.pc#1",
+    "alias": "maya.pc-1",
+    "kind": "task",
+    "title": "Index builder",
+    "body": "Build the v2 index: layout, shard writer, tokenizer, compaction.",
+    "project": "search-service",
+    "due": "2026-11-13",
+    "priority": 2,
+    "priorityLevel": 2,
+    "priorityName": "긴급",
+    "parent": "ada.pc#1",
+    "author": "maya",
+    "ts": "2026-11-02T09:40:00Z",
+    "hidden": false,
+    "edited": {
+     "id": "maya.pc#20",
+     "ts": "2026-11-04T21:30:00Z"
+    },
+    "status": "doing",
+    "counted": true,
+    "rollup": {
+     "total": 2,
+     "counts": {
+      "awaiting": 1,
+      "doing": 1
+     },
+     "blocked": []
+    },
+    "lastActivity": "2026-11-04T21:30:00Z",
+    "started": "2026-11-02T11:20:00Z",
+    "children": [
+     "maya.pc#5",
+     "maya.pc#7"
+    ],
+    "assignments": [
+     "maya.pc#2>lena",
+     "maya.pc#2>omar"
+    ],
+    "pending": [],
+    "thread": [
+     "maya.pc#1",
+     "maya.pc#2",
+     "maya.pc#5",
+     "maya.pc#7",
+     "lena.pc#1",
+     "omar.pc#1",
+     "maya.pc#14",
+     "maya.pc#15",
+     "maya.pc#16",
+     "lena.pc#5",
+     "maya.lap#1",
+     "maya.pc#20"
+    ],
+    "concurrent": 0,
+    "depth": 1,
+    "chain": [
+     "ada",
+     "maya"
+    ]
+   },
+   "raj.pc#1": {
+    "id": "raj.pc#1",
+    "alias": "raj.pc-1",
+    "kind": "task",
+    "title": "Query path rewrite",
+    "body": "",
+    "project": "search-service",
+    "due": "2026-11-18",
+    "priority": 2,
+    "priorityLevel": 2,
+    "priorityName": "긴급",
+    "parent": "ada.pc#1",
+    "author": "raj",
+    "ts": "2026-11-02T10:00:00Z",
+    "hidden": false,
+    "edited": null,
+    "status": "doing",
+    "counted": true,
+    "rollup": {
+     "total": 1,
+     "counts": {
+      "blocked": 1
+     },
+     "blocked": [
+      "raj.pc#7"
+     ]
+    },
+    "lastActivity": "2026-11-02T14:10:00Z",
+    "started": "2026-11-02T14:00:00Z",
+    "children": [
+     "raj.pc#7"
+    ],
+    "assignments": [
+     "raj.pc#2>sven",
+     "raj.pc#2>tia"
+    ],
+    "pending": [],
+    "thread": [
+     "raj.pc#1",
+     "raj.pc#2",
+     "tia.pc#1",
+     "sven.pc#1",
+     "raj.pc#7"
+    ],
+    "concurrent": 0,
+    "depth": 1,
+    "chain": [
+     "ada",
+     "raj"
+    ]
+   },
+   "maya.pc#5": {
+    "id": "maya.pc#5",
+    "alias": "maya.pc-5",
+    "kind": "task",
+    "title": "Tokenizer",
+    "body": "",
+    "project": "",
+    "due": "2026-11-06",
+    "priority": 1,
+    "priorityLevel": 1,
+    "priorityName": "업무",
+    "parent": "maya.pc#1",
+    "author": "maya",
+    "ts": "2026-11-02T11:10:00Z",
+    "hidden": false,
+    "edited": null,
+    "status": "awaiting",
+    "counted": true,
+    "rollup": {
+     "total": 0,
+     "counts": {},
+     "blocked": []
+    },
+    "lastActivity": "2026-11-05T16:00:00Z",
+    "started": "2026-11-02T11:30:00Z",
+    "children": [],
+    "assignments": [
+     "maya.pc#6>ivy",
+     "maya.pc#6>jon"
+    ],
+    "pending": [],
+    "thread": [
+     "maya.pc#5",
+     "maya.pc#6",
+     "ivy.pc#1",
+     "jon.pc#1",
+     "ivy.pc#2",
+     "maya.pc#9",
+     "kai.pc#20!c2:0",
+     "jon.pc#4",
+     "maya.pc#12",
+     "jon.pc#5",
+     "ivy.pc#4",
+     "jon.pc#6",
+     "jon.pc#7",
+     "jon.pc#8",
+     "maya.pc#17",
+     "maya.pc#18",
+     "ivy.pc#5",
+     "ivy.pc#8"
+    ],
+    "concurrent": 0,
+    "depth": 2,
+    "chain": [
+     "ada",
+     "maya",
+     "maya"
+    ]
+   },
+   "maya.pc#7": {
+    "id": "maya.pc#7",
+    "alias": "maya.pc-7",
+    "kind": "task",
+    "title": "Shard writer docs",
+    "body": "",
+    "project": "",
+    "due": "2026-11-10",
+    "priority": 1,
+    "priorityLevel": 1,
+    "priorityName": "업무",
+    "parent": "maya.pc#1",
+    "author": "maya",
+    "ts": "2026-11-02T11:15:00Z",
+    "hidden": false,
+    "edited": null,
+    "status": "doing",
+    "counted": true,
+    "rollup": {
+     "total": 0,
+     "counts": {},
+     "blocked": []
+    },
+    "lastActivity": "2026-11-03T15:00:00Z",
+    "started": "2026-11-02T12:00:00Z",
+    "children": [],
+    "assignments": [
+     "maya.pc#8>omar"
+    ],
+    "pending": [],
+    "thread": [
+     "maya.pc#7",
+     "maya.pc#8",
+     "omar.pc#2",
+     "omar.pc#3",
+     "maya.pc#13"
+    ],
+    "concurrent": 0,
+    "depth": 2,
+    "chain": [
+     "ada",
+     "maya",
+     "maya"
+    ]
+   },
+   "bo.pc#1": {
+    "id": "bo.pc#1",
+    "alias": "bo.pc-1",
+    "kind": "task",
+    "title": "Rotate CI keys",
+    "body": "",
+    "project": "infra",
+    "due": "2026-11-03",
+    "priority": 2,
+    "priorityLevel": 2,
+    "priorityName": "긴급",
+    "parent": null,
+    "author": "bo",
+    "ts": "2026-11-02T15:00:00Z",
+    "hidden": false,
+    "edited": null,
+    "status": "done",
+    "counted": true,
+    "rollup": {
+     "total": 0,
+     "counts": {},
+     "blocked": []
+    },
+    "lastActivity": "2026-11-02T16:00:00Z",
+    "started": "2026-11-02T15:30:00Z",
+    "children": [],
+    "assignments": [
+     "bo.pc#2>uma"
+    ],
+    "pending": [],
+    "thread": [
+     "bo.pc#1",
+     "bo.pc#2",
+     "uma.pc#1",
+     "uma.pc#2",
+     "uma.pc#3",
+     "sven.pc#2"
+    ],
+    "concurrent": 0,
+    "depth": 0,
+    "chain": [
+     "bo"
+    ]
+   },
+   "ada.pc#6": {
+    "id": "ada.pc#6",
+    "alias": "ada.pc-6",
+    "kind": "task",
+    "title": "Security training",
+    "body": "Finish the module before the 30th.",
+    "project": "",
+    "due": "2026-11-30",
+    "priority": 0,
+    "priorityLevel": 0,
+    "priorityName": "알림",
+    "parent": null,
+    "author": "ada",
+    "ts": "2026-11-02T17:00:00Z",
+    "hidden": false,
+    "edited": null,
+    "status": "doing",
+    "counted": true,
+    "rollup": {
+     "total": 0,
+     "counts": {},
+     "blocked": []
+    },
+    "lastActivity": "2026-11-03T10:00:00Z",
+    "started": "2026-11-02T17:40:00Z",
+    "children": [],
+    "assignments": [
+     "ada.pc#7>maya",
+     "ada.pc#7>raj",
+     "ada.pc#7>bo",
+     "ada.pc#7>lena",
+     "ada.pc#7>omar",
+     "ada.pc#7>ivy",
+     "ada.pc#7>jon",
+     "ada.pc#7>kai",
+     "ada.pc#7>sven",
+     "ada.pc#7>tia",
+     "ada.pc#7>noa",
+     "ada.pc#7>uma",
+     "ada.pc#7>pia"
+    ],
+    "pending": [],
+    "thread": [
+     "ada.pc#6",
+     "ada.pc#7",
+     "kai.pc#1",
+     "ivy.pc#3",
+     "noa.pc#1",
+     "noa.pc#2",
+     "pia.pc#1"
+    ],
+    "concurrent": 0,
+    "depth": 0,
+    "chain": [
+     "ada"
+    ]
+   },
+   "ada.pc#8": {
+    "id": "ada.pc#8",
+    "alias": "ada.pc-8",
+    "kind": "todo",
+    "title": "Book offsite venue",
+    "body": "",
+    "project": "",
+    "due": "2026-11-14",
+    "priority": 0,
+    "priorityLevel": 0,
+    "priorityName": "알림",
+    "parent": null,
+    "author": "ada",
+    "ts": "2026-11-02T17:30:00Z",
+    "hidden": false,
+    "edited": null,
+    "status": "done",
+    "counted": true,
+    "rollup": {
+     "total": 0,
+     "counts": {},
+     "blocked": []
+    },
+    "lastActivity": "2026-11-05T09:30:00Z",
+    "started": null,
+    "children": [],
+    "assignments": [
+     "ada.pc#9>ada"
+    ],
+    "pending": [],
+    "thread": [
+     "ada.pc#8",
+     "ada.pc#9",
+     "ada.pc#14"
+    ],
+    "concurrent": 0,
+    "depth": 0,
+    "chain": [
+     "ada"
+    ]
+   },
+   "kai.pc#2": {
+    "id": "kai.pc#2",
+    "alias": "kai.pc-2",
+    "kind": "task",
+    "title": "Approve GPU budget for index builds",
+    "body": "Two more GPU nodes for nightly index builds, about 3k/month.",
+    "project": "search-service",
+    "due": "2026-11-07",
+    "priority": 1,
+    "priorityLevel": 1,
+    "priorityName": "업무",
+    "parent": null,
+    "author": "kai",
+    "ts": "2026-11-02T18:45:00Z",
+    "hidden": false,
+    "edited": null,
+    "status": "done",
+    "counted": true,
+    "rollup": {
+     "total": 0,
+     "counts": {},
+     "blocked": []
+    },
+    "lastActivity": "2026-11-05T10:00:00Z",
+    "started": null,
+    "children": [],
+    "assignments": [
+     "kai.pc#3>ada"
+    ],
+    "pending": [],
+    "thread": [
+     "kai.pc#2",
+     "kai.pc#3",
+     "ada.pc#10",
+     "ada.pc#12",
+     "kai.pc#4"
+    ],
+    "concurrent": 0,
+    "depth": 0,
+    "chain": [
+     "kai"
+    ]
+   },
+   "lena.pc#2": {
+    "id": "lena.pc#2",
+    "alias": "lena.pc-2",
+    "kind": "task",
+    "title": "Benchmark harness",
+    "body": "",
+    "project": "",
+    "due": "2026-11-21",
+    "priority": 1,
+    "priorityLevel": 1,
+    "priorityName": "업무",
+    "parent": null,
+    "author": "lena",
+    "ts": "2026-11-02T20:20:00Z",
+    "hidden": false,
+    "edited": null,
+    "status": "todo",
+    "counted": true,
+    "rollup": {
+     "total": 0,
+     "counts": {},
+     "blocked": []
+    },
+    "lastActivity": "2026-11-05T14:30:00Z",
+    "started": null,
+    "children": [],
+    "assignments": [
+     "lena.pc#3>raj",
+     "raj.pc#10>sven"
+    ],
+    "pending": [],
+    "thread": [
+     "lena.pc#2",
+     "lena.pc#3",
+     "raj.pc#9",
+     "raj.pc#10",
+     "sven.pc#5"
+    ],
+    "concurrent": 0,
+    "depth": 0,
+    "chain": [
+     "lena"
+    ]
+   },
+   "sven.pc#3": {
+    "id": "sven.pc#3",
+    "alias": "sven.pc-3",
+    "kind": "task",
+    "title": "Review the query planner PR",
+    "body": "PR #412: cost model for the new planner. Needs an index-side reviewer.",
+    "project": "search-service",
+    "due": "2026-11-04",
+    "priority": 1,
+    "priorityLevel": 1,
+    "priorityName": "업무",
+    "parent": null,
+    "author": "sven",
+    "ts": "2026-11-03T09:15:00Z",
+    "hidden": false,
+    "edited": null,
+    "status": "returned",
+    "counted": false,
+    "rollup": {
+     "total": 0,
+     "counts": {},
+     "blocked": []
+    },
+    "lastActivity": "2026-11-03T10:20:00Z",
+    "started": "2026-11-03T09:40:00Z",
+    "children": [],
+    "assignments": [
+     "sven.pc#4>jon"
+    ],
+    "pending": [],
+    "thread": [
+     "sven.pc#3",
+     "sven.pc#4",
+     "jon.pc#2",
+     "jon.pc#3",
+     "bo.pc#5",
+     "maya.pc#11"
+    ],
+    "concurrent": 0,
+    "depth": 0,
+    "chain": [
+     "sven"
+    ]
+   },
+   "raj.pc#7": {
+    "id": "raj.pc#7",
+    "alias": "raj.pc-7",
+    "kind": "task",
+    "title": "Cache layer",
+    "body": "",
+    "project": "",
+    "due": "2026-11-12",
+    "priority": 2,
+    "priorityLevel": 2,
+    "priorityName": "긴급",
+    "parent": "raj.pc#1",
+    "author": "raj",
+    "ts": "2026-11-03T09:30:00Z",
+    "hidden": false,
+    "edited": null,
+    "status": "blocked",
+    "counted": true,
+    "rollup": {
+     "total": 0,
+     "counts": {},
+     "blocked": []
+    },
+    "lastActivity": "2026-11-05T11:00:00Z",
+    "started": null,
+    "children": [],
+    "assignments": [
+     "raj.pc#8>pia"
+    ],
+    "pending": [],
+    "thread": [
+     "raj.pc#7",
+     "raj.pc#8",
+     "pia.pc#2",
+     "tia.pc#5",
+     "bo.pc#8"
+    ],
+    "concurrent": 0,
+    "depth": 2,
+    "chain": [
+     "ada",
+     "raj",
+     "raj"
+    ]
+   },
+   "tia.pc#3": {
+    "id": "tia.pc#3",
+    "alias": "tia.pc-3",
+    "kind": "task",
+    "title": "Load-test the cache layer",
+    "body": "One afternoon with the load rig before the cache ships.",
+    "project": "",
+    "due": "2026-11-12",
+    "priority": 1,
+    "priorityLevel": 1,
+    "priorityName": "업무",
+    "parent": null,
+    "author": "tia",
+    "ts": "2026-11-03T11:05:00Z",
+    "hidden": false,
+    "edited": null,
+    "status": "declined",
+    "counted": false,
+    "rollup": {
+     "total": 0,
+     "counts": {},
+     "blocked": []
+    },
+    "lastActivity": "2026-11-03T11:40:00Z",
+    "started": null,
+    "children": [],
+    "assignments": [
+     "tia.pc#4>uma"
+    ],
+    "pending": [],
+    "thread": [
+     "tia.pc#3",
+     "tia.pc#4",
+     "uma.pc#4",
+     "uma.pc#5"
+    ],
+    "concurrent": 0,
+    "depth": 0,
+    "chain": [
+     "tia"
+    ]
+   },
+   "noa.pc#3": {
+    "id": "noa.pc#3",
+    "alias": "noa.pc-3",
+    "kind": "task",
+    "title": "Explain the tokenizer API to the query team",
+    "body": "30 minutes, any day this week.",
+    "project": "",
+    "due": "2026-11-07",
+    "priority": 0,
+    "priorityLevel": 0,
+    "priorityName": "알림",
+    "parent": null,
+    "author": "noa",
+    "ts": "2026-11-03T12:00:00Z",
+    "hidden": false,
+    "edited": null,
+    "status": "pending",
+    "counted": false,
+    "rollup": {
+     "total": 0,
+     "counts": {},
+     "blocked": []
+    },
+    "lastActivity": "2026-11-03T12:00:00Z",
+    "started": null,
+    "children": [],
+    "assignments": [
+     "noa.pc#4>lena"
+    ],
+    "pending": [
+     "noa.pc#4>lena"
+    ],
+    "thread": [
+     "noa.pc#3",
+     "noa.pc#4",
+     "lena.pc#4"
+    ],
+    "concurrent": 0,
+    "depth": 0,
+    "chain": [
+     "noa"
+    ]
+   },
+   "maya.lap#2": {
+    "id": "maya.lap#2",
+    "alias": "maya.lap-2",
+    "kind": "todo",
+    "title": "Prepare Friday demo",
+    "body": "",
+    "project": "",
+    "due": "2026-11-06",
+    "priority": 2,
+    "priorityLevel": 2,
+    "priorityName": "긴급",
+    "parent": null,
+    "author": "maya",
+    "ts": "2026-11-05T08:00:00Z",
+    "hidden": false,
+    "edited": null,
+    "status": "todo",
+    "counted": true,
+    "rollup": {
+     "total": 0,
+     "counts": {},
+     "blocked": []
+    },
+    "lastActivity": "2026-11-05T08:00:00Z",
+    "started": null,
+    "children": [],
+    "assignments": [
+     "maya.lap#3>maya"
+    ],
+    "pending": [],
+    "thread": [
+     "maya.lap#2",
+     "maya.lap#3"
+    ],
+    "concurrent": 0,
+    "depth": 0,
+    "chain": [
+     "maya"
+    ]
+   },
+   "ivy.pc#6": {
+    "id": "ivy.pc#6",
+    "alias": "ivy.pc-6",
+    "kind": "task",
+    "title": "Review the emoji tokenizer fix",
+    "body": "Two-line change in the range table; needs a second pair of eyes before Friday.",
+    "project": "search-service",
+    "due": "2026-11-07",
+    "priority": 1,
+    "priorityLevel": 1,
+    "priorityName": "업무",
+    "parent": null,
+    "author": "ivy",
+    "ts": "2026-11-05T15:00:00Z",
+    "hidden": false,
+    "edited": null,
+    "status": "pending",
+    "counted": false,
+    "rollup": {
+     "total": 0,
+     "counts": {},
+     "blocked": []
+    },
+    "lastActivity": "2026-11-05T15:00:00Z",
+    "started": null,
+    "children": [],
+    "assignments": [
+     "ivy.pc#7>maya"
+    ],
+    "pending": [
+     "ivy.pc#7>maya"
+    ],
+    "thread": [
+     "ivy.pc#6",
+     "ivy.pc#7"
+    ],
+    "concurrent": 0,
+    "depth": 0,
+    "chain": [
+     "ivy"
+    ]
+   }
+  },
+  "itemOrder": [
+   "ada.pc#1",
+   "maya.pc#1",
+   "maya.pc#5",
+   "maya.pc#7",
+   "raj.pc#1",
+   "raj.pc#7",
+   "ada.pc#3",
+   "bo.pc#1",
+   "ada.pc#6",
+   "ada.pc#8",
+   "kai.pc#2",
+   "lena.pc#2",
+   "sven.pc#3",
+   "tia.pc#3",
+   "noa.pc#3",
+   "maya.lap#2",
+   "ivy.pc#6"
+  ],
+  "assignments": {
+   "ada.pc#2>maya": {
+    "id": "ada.pc#2>maya",
+    "item": "ada.pc#1",
+    "to": "maya",
+    "by": "ada",
+    "sender": "ada",
+    "completion": "assigner",
+    "state": "live",
+    "forced": true,
+    "status": "doing",
+    "note": "starting the v2 integration",
+    "noteBy": "maya",
+    "via": "ada.pc#2",
+    "ts": "2026-11-02T09:00:00Z",
+    "inherited": false,
+    "ruleLevels": 1,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 1,
+    "statusOrigin": "human",
+    "statusBy": "maya",
+    "lastUpdate": "2026-11-05T17:00:00Z",
+    "stale": false
+   },
+   "ada.pc#2>raj": {
+    "id": "ada.pc#2>raj",
+    "item": "ada.pc#1",
+    "to": "raj",
+    "by": "ada",
+    "sender": "ada",
+    "completion": "assigner",
+    "state": "live",
+    "forced": true,
+    "status": "todo",
+    "note": null,
+    "noteBy": null,
+    "via": "ada.pc#2",
+    "ts": "2026-11-02T09:00:00Z",
+    "inherited": false,
+    "ruleLevels": 1,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 1,
+    "statusOrigin": null,
+    "statusBy": null,
+    "lastUpdate": "2026-11-02T09:00:00Z",
+    "stale": false
+   },
+   "ada.pc#2>bo": {
+    "id": "ada.pc#2>bo",
+    "item": "ada.pc#1",
+    "to": "bo",
+    "by": "ada",
+    "sender": "ada",
+    "completion": "assigner",
+    "state": "live",
+    "forced": true,
+    "status": "todo",
+    "note": null,
+    "noteBy": null,
+    "via": "ada.pc#2",
+    "ts": "2026-11-02T09:00:00Z",
+    "inherited": false,
+    "ruleLevels": 1,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 1,
+    "statusOrigin": null,
+    "statusBy": null,
+    "lastUpdate": "2026-11-02T09:00:00Z",
+    "stale": false
+   },
+   "maya.pc#2>lena": {
+    "id": "maya.pc#2>lena",
+    "item": "maya.pc#1",
+    "to": "lena",
+    "by": "maya",
+    "sender": "maya",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "doing",
+    "note": "picked up the shard writer",
+    "noteBy": "lena",
+    "via": "maya.pc#2",
+    "ts": "2026-11-02T09:40:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 1,
+    "statusOrigin": "human",
+    "statusBy": "lena",
+    "lastUpdate": "2026-11-04T10:30:00Z",
+    "stale": false
+   },
+   "maya.pc#2>omar": {
+    "id": "maya.pc#2>omar",
+    "item": "maya.pc#1",
+    "to": "omar",
+    "by": "maya",
+    "sender": "maya",
+    "completion": "assignee",
+    "state": "unassigned",
+    "forced": true,
+    "status": "doing",
+    "note": "shard writer done, docs next",
+    "noteBy": "omar",
+    "via": "maya.pc#2",
+    "ts": "2026-11-02T09:40:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": {
+     "id": "maya.pc#15",
+     "type": "item.unassign",
+     "ts": "2026-11-04T10:00:00Z",
+     "by": "maya"
+    },
+    "depth": 1,
+    "statusOrigin": "agent-auto",
+    "statusBy": "omar",
+    "lastUpdate": "2026-11-02T12:00:00Z",
+    "stale": false
+   },
+   "raj.pc#2>sven": {
+    "id": "raj.pc#2>sven",
+    "item": "raj.pc#1",
+    "to": "sven",
+    "by": "raj",
+    "sender": "raj",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "doing",
+    "note": "planner skeleton",
+    "noteBy": "sven",
+    "via": "raj.pc#2",
+    "ts": "2026-11-02T10:00:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 1,
+    "statusOrigin": "human",
+    "statusBy": "sven",
+    "lastUpdate": "2026-11-02T14:10:00Z",
+    "stale": true
+   },
+   "raj.pc#2>tia": {
+    "id": "raj.pc#2>tia",
+    "item": "raj.pc#1",
+    "to": "tia",
+    "by": "raj",
+    "sender": "raj",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "doing",
+    "note": null,
+    "noteBy": "tia",
+    "via": "raj.pc#2",
+    "ts": "2026-11-02T10:00:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 1,
+    "statusOrigin": "human",
+    "statusBy": "tia",
+    "lastUpdate": "2026-11-02T14:00:00Z",
+    "stale": true
+   },
+   "maya.pc#6>ivy": {
+    "id": "maya.pc#6>ivy",
+    "item": "maya.pc#5",
+    "to": "ivy",
+    "by": "maya",
+    "sender": "maya",
+    "completion": "assigner",
+    "state": "live",
+    "forced": true,
+    "status": "awaiting",
+    "note": "emoji ranges fixed",
+    "noteBy": "ivy",
+    "via": "maya.pc#6",
+    "ts": "2026-11-02T11:10:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 1,
+    "statusOrigin": "human",
+    "statusBy": "ivy",
+    "lastUpdate": "2026-11-05T16:00:00Z",
+    "stale": false
+   },
+   "maya.pc#6>jon": {
+    "id": "maya.pc#6>jon",
+    "item": "maya.pc#5",
+    "to": "jon",
+    "by": "maya",
+    "sender": "maya",
+    "completion": "assigner",
+    "state": "live",
+    "forced": true,
+    "status": "done",
+    "note": null,
+    "noteBy": "maya",
+    "via": "maya.pc#6",
+    "ts": "2026-11-02T11:10:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 1,
+    "statusOrigin": "human",
+    "statusBy": "maya",
+    "lastUpdate": "2026-11-04T13:00:00Z",
+    "stale": false
+   },
+   "maya.pc#8>omar": {
+    "id": "maya.pc#8>omar",
+    "item": "maya.pc#7",
+    "to": "omar",
+    "by": "maya",
+    "sender": "maya",
+    "completion": "assigner",
+    "state": "live",
+    "forced": true,
+    "status": "doing",
+    "note": "needs the migration section",
+    "noteBy": "maya",
+    "via": "maya.pc#8",
+    "ts": "2026-11-02T11:15:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 1,
+    "statusOrigin": "human",
+    "statusBy": "maya",
+    "lastUpdate": "2026-11-03T15:00:00Z",
+    "stale": false
+   },
+   "bo.pc#2>uma": {
+    "id": "bo.pc#2>uma",
+    "item": "bo.pc#1",
+    "to": "uma",
+    "by": "bo",
+    "sender": "bo",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "done",
+    "note": "prod rotated too",
+    "noteBy": "uma",
+    "via": "bo.pc#2",
+    "ts": "2026-11-02T15:00:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 1,
+    "statusOrigin": "human",
+    "statusBy": "uma",
+    "lastUpdate": "2026-11-02T16:00:00Z",
+    "stale": false
+   },
+   "ada.pc#7>maya": {
+    "id": "ada.pc#7>maya",
+    "item": "ada.pc#6",
+    "to": "maya",
+    "by": "ada",
+    "sender": "ada",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "todo",
+    "note": null,
+    "noteBy": null,
+    "via": "ada.pc#7",
+    "ts": "2026-11-02T17:00:00Z",
+    "inherited": false,
+    "ruleLevels": 2,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 1,
+    "statusOrigin": null,
+    "statusBy": null,
+    "lastUpdate": "2026-11-02T17:00:00Z",
+    "stale": false
+   },
+   "ada.pc#7>raj": {
+    "id": "ada.pc#7>raj",
+    "item": "ada.pc#6",
+    "to": "raj",
+    "by": "ada",
+    "sender": "ada",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "todo",
+    "note": null,
+    "noteBy": null,
+    "via": "ada.pc#7",
+    "ts": "2026-11-02T17:00:00Z",
+    "inherited": false,
+    "ruleLevels": 2,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 1,
+    "statusOrigin": null,
+    "statusBy": null,
+    "lastUpdate": "2026-11-02T17:00:00Z",
+    "stale": false
+   },
+   "ada.pc#7>bo": {
+    "id": "ada.pc#7>bo",
+    "item": "ada.pc#6",
+    "to": "bo",
+    "by": "ada",
+    "sender": "ada",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "todo",
+    "note": null,
+    "noteBy": null,
+    "via": "ada.pc#7",
+    "ts": "2026-11-02T17:00:00Z",
+    "inherited": false,
+    "ruleLevels": 2,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 1,
+    "statusOrigin": null,
+    "statusBy": null,
+    "lastUpdate": "2026-11-02T17:00:00Z",
+    "stale": false
+   },
+   "ada.pc#7>lena": {
+    "id": "ada.pc#7>lena",
+    "item": "ada.pc#6",
+    "to": "lena",
+    "by": "ada",
+    "sender": "ada",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "todo",
+    "note": null,
+    "noteBy": null,
+    "via": "ada.pc#7",
+    "ts": "2026-11-02T17:00:00Z",
+    "inherited": false,
+    "ruleLevels": 2,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 2,
+    "statusOrigin": null,
+    "statusBy": null,
+    "lastUpdate": "2026-11-02T17:00:00Z",
+    "stale": false
+   },
+   "ada.pc#7>omar": {
+    "id": "ada.pc#7>omar",
+    "item": "ada.pc#6",
+    "to": "omar",
+    "by": "ada",
+    "sender": "ada",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "todo",
+    "note": null,
+    "noteBy": null,
+    "via": "ada.pc#7",
+    "ts": "2026-11-02T17:00:00Z",
+    "inherited": false,
+    "ruleLevels": 2,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 2,
+    "statusOrigin": null,
+    "statusBy": null,
+    "lastUpdate": "2026-11-02T17:00:00Z",
+    "stale": false
+   },
+   "ada.pc#7>ivy": {
+    "id": "ada.pc#7>ivy",
+    "item": "ada.pc#6",
+    "to": "ivy",
+    "by": "ada",
+    "sender": "ada",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "doing",
+    "note": "module 2 of 5",
+    "noteBy": "ivy",
+    "via": "ada.pc#7",
+    "ts": "2026-11-02T17:00:00Z",
+    "inherited": false,
+    "ruleLevels": 2,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 2,
+    "statusOrigin": "agent-auto",
+    "statusBy": "ivy",
+    "lastUpdate": "2026-11-02T17:40:00Z",
+    "stale": true
+   },
+   "ada.pc#7>jon": {
+    "id": "ada.pc#7>jon",
+    "item": "ada.pc#6",
+    "to": "jon",
+    "by": "ada",
+    "sender": "ada",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "todo",
+    "note": null,
+    "noteBy": null,
+    "via": "ada.pc#7",
+    "ts": "2026-11-02T17:00:00Z",
+    "inherited": false,
+    "ruleLevels": 2,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 2,
+    "statusOrigin": null,
+    "statusBy": null,
+    "lastUpdate": "2026-11-02T17:00:00Z",
+    "stale": false
+   },
+   "ada.pc#7>kai": {
+    "id": "ada.pc#7>kai",
+    "item": "ada.pc#6",
+    "to": "kai",
+    "by": "ada",
+    "sender": "ada",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "done",
+    "note": null,
+    "noteBy": "kai",
+    "via": "ada.pc#7",
+    "ts": "2026-11-02T17:00:00Z",
+    "inherited": false,
+    "ruleLevels": 2,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 2,
+    "statusOrigin": "human",
+    "statusBy": "kai",
+    "lastUpdate": "2026-11-02T17:10:00Z",
+    "stale": false
+   },
+   "ada.pc#7>sven": {
+    "id": "ada.pc#7>sven",
+    "item": "ada.pc#6",
+    "to": "sven",
+    "by": "ada",
+    "sender": "ada",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "todo",
+    "note": null,
+    "noteBy": null,
+    "via": "ada.pc#7",
+    "ts": "2026-11-02T17:00:00Z",
+    "inherited": false,
+    "ruleLevels": 2,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 2,
+    "statusOrigin": null,
+    "statusBy": null,
+    "lastUpdate": "2026-11-02T17:00:00Z",
+    "stale": false
+   },
+   "ada.pc#7>tia": {
+    "id": "ada.pc#7>tia",
+    "item": "ada.pc#6",
+    "to": "tia",
+    "by": "ada",
+    "sender": "ada",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "todo",
+    "note": null,
+    "noteBy": null,
+    "via": "ada.pc#7",
+    "ts": "2026-11-02T17:00:00Z",
+    "inherited": false,
+    "ruleLevels": 2,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 2,
+    "statusOrigin": null,
+    "statusBy": null,
+    "lastUpdate": "2026-11-02T17:00:00Z",
+    "stale": false
+   },
+   "ada.pc#7>noa": {
+    "id": "ada.pc#7>noa",
+    "item": "ada.pc#6",
+    "to": "noa",
+    "by": "ada",
+    "sender": "ada",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "doing",
+    "note": "half way",
+    "noteBy": "noa",
+    "via": "ada.pc#7",
+    "ts": "2026-11-02T17:00:00Z",
+    "inherited": false,
+    "ruleLevels": 2,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 2,
+    "statusOrigin": "human",
+    "statusBy": "noa",
+    "lastUpdate": "2026-11-02T18:10:00Z",
+    "stale": true
+   },
+   "ada.pc#7>uma": {
+    "id": "ada.pc#7>uma",
+    "item": "ada.pc#6",
+    "to": "uma",
+    "by": "ada",
+    "sender": "ada",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "todo",
+    "note": null,
+    "noteBy": null,
+    "via": "ada.pc#7",
+    "ts": "2026-11-02T17:00:00Z",
+    "inherited": false,
+    "ruleLevels": 2,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 2,
+    "statusOrigin": null,
+    "statusBy": null,
+    "lastUpdate": "2026-11-02T17:00:00Z",
+    "stale": false
+   },
+   "ada.pc#9>ada": {
+    "id": "ada.pc#9>ada",
+    "item": "ada.pc#8",
+    "to": "ada",
+    "by": "ada",
+    "sender": "ada",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "done",
+    "note": null,
+    "noteBy": "ada",
+    "via": "ada.pc#9",
+    "ts": "2026-11-02T17:30:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 0,
+    "statusOrigin": "human",
+    "statusBy": "ada",
+    "lastUpdate": "2026-11-05T09:30:00Z",
+    "stale": false
+   },
+   "kai.pc#3>ada": {
+    "id": "kai.pc#3>ada",
+    "item": "kai.pc#2",
+    "to": "ada",
+    "by": "kai",
+    "sender": "kai",
+    "completion": "assigner",
+    "state": "live",
+    "forced": false,
+    "status": "done",
+    "note": "thanks, ordering the nodes",
+    "noteBy": "kai",
+    "via": "kai.pc#3",
+    "ts": "2026-11-02T18:45:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": {
+     "id": "ada.pc#10",
+     "ts": "2026-11-03T08:30:00Z"
+    },
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": null,
+    "statusOrigin": "human",
+    "statusBy": "kai",
+    "lastUpdate": "2026-11-05T10:00:00Z",
+    "stale": false
+   },
+   "lena.pc#3>raj": {
+    "id": "lena.pc#3>raj",
+    "item": "lena.pc#2",
+    "to": "raj",
+    "by": "lena",
+    "sender": "lena",
+    "completion": "assignee",
+    "state": "handed",
+    "forced": false,
+    "status": "todo",
+    "note": null,
+    "noteBy": null,
+    "via": "lena.pc#3",
+    "ts": "2026-11-02T20:20:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": "I can take it this week",
+    "restored": null,
+    "restores": null,
+    "accepted": {
+     "id": "raj.pc#9",
+     "ts": "2026-11-05T13:00:00Z"
+    },
+    "leadAtAccept": "ada",
+    "ended": {
+     "id": "sven.pc#5",
+     "type": "item.accept",
+     "ts": "2026-11-05T14:30:00Z",
+     "by": "sven"
+    },
+    "depth": null,
+    "statusOrigin": null,
+    "statusBy": null,
+    "lastUpdate": "2026-11-05T13:00:00Z",
+    "stale": false
+   },
+   "ada.pc#7>pia": {
+    "id": "ada.pc#7>pia",
+    "item": "ada.pc#6",
+    "to": "pia",
+    "by": "ada",
+    "sender": "ada",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "doing",
+    "note": "started the module",
+    "noteBy": "pia",
+    "via": "ada.pc#7",
+    "ts": "2026-11-03T09:00:00Z",
+    "inherited": true,
+    "ruleLevels": 2,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 2,
+    "statusOrigin": "agent-auto",
+    "statusBy": "pia",
+    "lastUpdate": "2026-11-03T10:00:00Z",
+    "stale": false
+   },
+   "sven.pc#4>jon": {
+    "id": "sven.pc#4>jon",
+    "item": "sven.pc#3",
+    "to": "jon",
+    "by": "sven",
+    "sender": "sven",
+    "completion": "assignee",
+    "state": "returned",
+    "forced": false,
+    "status": "doing",
+    "note": "reading the cost model",
+    "noteBy": "jon",
+    "via": "sven.pc#4",
+    "ts": "2026-11-03T09:15:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": "jon is on the tokenizer rework this week; please ask lena.",
+    "restored": null,
+    "restores": null,
+    "accepted": {
+     "id": "jon.pc#2",
+     "ts": "2026-11-03T09:40:00Z"
+    },
+    "leadAtAccept": "maya",
+    "ended": {
+     "id": "maya.pc#11",
+     "type": "item.return",
+     "ts": "2026-11-03T10:20:00Z",
+     "by": "maya"
+    },
+    "depth": null,
+    "statusOrigin": "human",
+    "statusBy": "jon",
+    "lastUpdate": "2026-11-03T09:40:00Z",
+    "stale": false
+   },
+   "raj.pc#8>pia": {
+    "id": "raj.pc#8>pia",
+    "item": "raj.pc#7",
+    "to": "pia",
+    "by": "raj",
+    "sender": "raj",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "blocked",
+    "note": "waiting for the redis cluster approval",
+    "noteBy": "pia",
+    "via": "raj.pc#8",
+    "ts": "2026-11-03T09:30:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 1,
+    "statusOrigin": "human",
+    "statusBy": "pia",
+    "lastUpdate": "2026-11-03T10:10:00Z",
+    "stale": false
+   },
+   "tia.pc#4>uma": {
+    "id": "tia.pc#4>uma",
+    "item": "tia.pc#3",
+    "to": "uma",
+    "by": "tia",
+    "sender": "tia",
+    "completion": "assignee",
+    "state": "declined",
+    "forced": false,
+    "status": "todo",
+    "note": null,
+    "noteBy": null,
+    "via": "tia.pc#4",
+    "ts": "2026-11-03T11:05:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": "no capacity this sprint",
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": {
+     "id": "uma.pc#5",
+     "type": "item.decline",
+     "ts": "2026-11-03T11:40:00Z",
+     "by": "uma"
+    },
+    "depth": null,
+    "statusOrigin": null,
+    "statusBy": null,
+    "lastUpdate": "2026-11-03T11:05:00Z",
+    "stale": false
+   },
+   "noa.pc#4>lena": {
+    "id": "noa.pc#4>lena",
+    "item": "noa.pc#3",
+    "to": "lena",
+    "by": "noa",
+    "sender": "noa",
+    "completion": "assignee",
+    "state": "pending",
+    "forced": false,
+    "status": "todo",
+    "note": null,
+    "noteBy": null,
+    "via": "noa.pc#4",
+    "ts": "2026-11-03T12:00:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": null,
+    "statusOrigin": null,
+    "statusBy": null,
+    "lastUpdate": "2026-11-03T12:00:00Z",
+    "stale": false
+   },
+   "maya.lap#3>maya": {
+    "id": "maya.lap#3>maya",
+    "item": "maya.lap#2",
+    "to": "maya",
+    "by": "maya",
+    "sender": "maya",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "todo",
+    "note": null,
+    "noteBy": null,
+    "via": "maya.lap#3",
+    "ts": "2026-11-05T08:00:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 0,
+    "statusOrigin": null,
+    "statusBy": null,
+    "lastUpdate": "2026-11-05T08:00:00Z",
+    "stale": false
+   },
+   "raj.pc#10>sven": {
+    "id": "raj.pc#10>sven",
+    "item": "lena.pc#2",
+    "to": "sven",
+    "by": "lena",
+    "sender": "raj",
+    "completion": "assignee",
+    "state": "live",
+    "forced": false,
+    "status": "todo",
+    "note": null,
+    "noteBy": null,
+    "via": "raj.pc#10",
+    "ts": "2026-11-05T13:30:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "handoffOf": "lena.pc#3>raj",
+    "handoffFrom": "raj",
+    "handoffNote": "sven owns the bench rig now",
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": {
+     "id": "sven.pc#5",
+     "ts": "2026-11-05T14:30:00Z"
+    },
+    "leadAtAccept": "raj",
+    "ended": null,
+    "depth": null,
+    "statusOrigin": null,
+    "statusBy": null,
+    "lastUpdate": "2026-11-05T14:30:00Z",
+    "stale": false
+   },
+   "ivy.pc#7>maya": {
+    "id": "ivy.pc#7>maya",
+    "item": "ivy.pc#6",
+    "to": "maya",
+    "by": "ivy",
+    "sender": "ivy",
+    "completion": "assigner",
+    "state": "pending",
+    "forced": false,
+    "status": "todo",
+    "note": null,
+    "noteBy": null,
+    "via": "ivy.pc#7",
+    "ts": "2026-11-05T15:00:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": null,
+    "statusOrigin": null,
+    "statusBy": null,
+    "lastUpdate": "2026-11-05T15:00:00Z",
+    "stale": false
+   }
+  },
+  "comments": {
+   "maya.pc#3": {
+    "id": "maya.pc#3",
+    "item": "ada.pc#3",
+    "author": "maya",
+    "body": "Can CI hygiene slip to December? Search v2 needs my whole part.",
+    "reply_to": null,
+    "ts": "2026-11-02T09:45:00Z",
+    "edited": null,
+    "hidden": null
+   },
+   "raj.pc#3": {
+    "id": "raj.pc#3",
+    "item": "ada.pc#1",
+    "author": "raj",
+    "body": "The query path depends on the new index format; can we freeze it by Wednesday?",
+    "reply_to": null,
+    "ts": "2026-11-02T10:10:00Z",
+    "edited": null,
+    "hidden": null
+   },
+   "ada.pc#4": {
+    "id": "ada.pc#4",
+    "item": "ada.pc#1",
+    "author": "ada",
+    "body": "Yes - maya, please publish the format spec by Wednesday.",
+    "reply_to": "raj.pc#3",
+    "ts": "2026-11-02T10:30:00Z",
+    "edited": null,
+    "hidden": null
+   },
+   "raj.pc#4": {
+    "id": "raj.pc#4",
+    "item": "ada.pc#3",
+    "author": "raj",
+    "body": "Moving the cache layer to next week.",
+    "reply_to": null,
+    "ts": "2026-11-02T10:50:00Z",
+    "edited": null,
+    "hidden": "raj.pc#5"
+   },
+   "uma.pc#4": {
+    "id": "uma.pc#4",
+    "item": "tia.pc#3",
+    "author": "uma",
+    "body": "No capacity until the next sprint, the rig is booked for CI. Try noa?",
+    "reply_to": null,
+    "ts": "2026-11-03T11:40:00Z",
+    "edited": null,
+    "hidden": null
+   },
+   "maya.pc#14": {
+    "id": "maya.pc#14",
+    "item": "maya.pc#1",
+    "author": "maya",
+    "body": "Status digest: tokenizer back to jon for Korean tests; shard writer docs need a migration section; omar has been dark since noon.",
+    "reply_to": null,
+    "ts": "2026-11-03T15:10:00Z",
+    "edited": null,
+    "hidden": null
+   },
+   "ivy.pc#4": {
+    "id": "ivy.pc#4",
+    "item": "maya.pc#5",
+    "author": "ivy",
+    "body": "I can pair with jon on the Korean fixtures.",
+    "reply_to": null,
+    "ts": "2026-11-03T17:00:00Z",
+    "edited": null,
+    "hidden": null
+   },
+   "maya.pc#16": {
+    "id": "maya.pc#16",
+    "item": "maya.pc#1",
+    "author": "maya",
+    "body": "Unassigned omar from the index builder while he is dark; lena covers the writer.",
+    "reply_to": null,
+    "ts": "2026-11-04T10:00:00Z",
+    "edited": null,
+    "hidden": null
+   },
+   "jon.pc#7": {
+    "id": "jon.pc#7",
+    "item": "maya.pc#5",
+    "author": "jon",
+    "body": "My laptop was stolen yesterday; I am on a new key now. jon-6 was not me.",
+    "reply_to": null,
+    "ts": "2026-11-04T11:30:00Z",
+    "edited": null,
+    "hidden": null
+   },
+   "maya.pc#19": {
+    "id": "maya.pc#19",
+    "item": "ada.pc#1",
+    "author": "maya",
+    "body": "Weekly digest: tokenizer reopened for emoji; query path blocked below on the cache layer (pia waits for the redis approval).",
+    "reply_to": null,
+    "ts": "2026-11-04T16:00:00Z",
+    "edited": null,
+    "hidden": null
+   },
+   "ada.pc#13": {
+    "id": "ada.pc#13",
+    "item": "ada.pc#3",
+    "author": "ada",
+    "body": "CI hygiene moves to December.",
+    "reply_to": "maya.pc#3",
+    "ts": "2026-11-05T09:00:00Z",
+    "edited": null,
+    "hidden": null
+   },
+   "tia.pc#5": {
+    "id": "tia.pc#5",
+    "item": "raj.pc#7",
+    "author": "tia",
+    "body": "Escalated the redis approval to bo.",
+    "reply_to": null,
+    "ts": "2026-11-05T10:30:00Z",
+    "edited": null,
+    "hidden": null
+   },
+   "bo.pc#8": {
+    "id": "bo.pc#8",
+    "item": "raj.pc#7",
+    "author": "bo",
+    "body": "Approved in principle; the infra ticket is open.",
+    "reply_to": "tia.pc#5",
+    "ts": "2026-11-05T11:00:00Z",
+    "edited": null,
+    "hidden": null
+   }
+  },
+  "events": [
+   {
+    "id": "ada.pc#1",
+    "alias": "ada.pc-1",
+    "stream": "ada.pc",
+    "member": "ada",
+    "seq": 1,
+    "ts": "2026-11-02T09:00:00Z",
+    "type": "item.create",
+    "origin": "human",
+    "payload": {
+     "kind": "task",
+     "title": "Ship search v2",
+     "body": "Replace the v1 indexer and the query path.",
+     "project": "search-service",
+     "due": "2026-11-20",
+     "priority": 2
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "ada.pc#1",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "ada.pc#2",
+    "alias": "ada.pc-2",
+    "stream": "ada.pc",
+    "member": "ada",
+    "seq": 2,
+    "ts": "2026-11-02T09:00:00Z",
+    "type": "item.assign",
+    "origin": "human",
+    "payload": {
+     "item": "ada.pc#1",
+     "mode": "all",
+     "levels": 1,
+     "completion": "assigner"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "ada.pc#1",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "ada.pc#3",
+    "alias": "ada.pc-3",
+    "stream": "ada.pc",
+    "member": "ada",
+    "seq": 3,
+    "ts": "2026-11-02T09:20:00Z",
+    "type": "item.create",
+    "origin": "human",
+    "payload": {
+     "kind": "topic",
+     "title": "Q4 priorities",
+     "body": "Search v2 first, CI hygiene second, training by end of month."
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "ada.pc#3",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.pc#1",
+    "alias": "maya.pc-1",
+    "stream": "maya.pc",
+    "member": "maya",
+    "seq": 1,
+    "ts": "2026-11-02T09:40:00Z",
+    "type": "item.create",
+    "origin": "human",
+    "payload": {
+     "kind": "task",
+     "title": "Index builder",
+     "parent": "ada.pc#1",
+     "project": "search-service",
+     "due": "2026-11-13",
+     "priority": 2
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#1",
+    "parentThread": "ada.pc#1",
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.pc#2",
+    "alias": "maya.pc-2",
+    "stream": "maya.pc",
+    "member": "maya",
+    "seq": 2,
+    "ts": "2026-11-02T09:40:00Z",
+    "type": "item.assign",
+    "origin": "human",
+    "payload": {
+     "item": "maya.pc#1",
+     "mode": "chosen",
+     "completion": "assignee",
+     "people": [
+      "lena",
+      "omar"
+     ]
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#1",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.pc#3",
+    "alias": "maya.pc-3",
+    "stream": "maya.pc",
+    "member": "maya",
+    "seq": 3,
+    "ts": "2026-11-02T09:45:00Z",
+    "type": "comment.add",
+    "origin": "human",
+    "payload": {
+     "item": "ada.pc#3",
+     "body": "Can CI hygiene slip to December? Search v2 needs my whole part."
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "ada.pc#3",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "raj.pc#1",
+    "alias": "raj.pc-1",
+    "stream": "raj.pc",
+    "member": "raj",
+    "seq": 1,
+    "ts": "2026-11-02T10:00:00Z",
+    "type": "item.create",
+    "origin": "human",
+    "payload": {
+     "kind": "task",
+     "title": "Query path rewrite",
+     "parent": "ada.pc#1",
+     "project": "search-service",
+     "due": "2026-11-18",
+     "priority": 2
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "raj.pc#1",
+    "parentThread": "ada.pc#1",
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "raj.pc#2",
+    "alias": "raj.pc-2",
+    "stream": "raj.pc",
+    "member": "raj",
+    "seq": 2,
+    "ts": "2026-11-02T10:00:00Z",
+    "type": "item.assign",
+    "origin": "human",
+    "payload": {
+     "item": "raj.pc#1",
+     "mode": "chosen",
+     "completion": "assignee",
+     "people": [
+      "sven",
+      "tia"
+     ]
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "raj.pc#1",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "raj.pc#3",
+    "alias": "raj.pc-3",
+    "stream": "raj.pc",
+    "member": "raj",
+    "seq": 3,
+    "ts": "2026-11-02T10:10:00Z",
+    "type": "comment.add",
+    "origin": "human",
+    "payload": {
+     "item": "ada.pc#1",
+     "body": "The query path depends on the new index format; can we freeze it by Wednesday?"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "ada.pc#1",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "ada.pc#4",
+    "alias": "ada.pc-4",
+    "stream": "ada.pc",
+    "member": "ada",
+    "seq": 4,
+    "ts": "2026-11-02T10:30:00Z",
+    "type": "comment.add",
+    "origin": "human",
+    "payload": {
+     "item": "ada.pc#1",
+     "body": "Yes - maya, please publish the format spec by Wednesday.",
+     "reply_to": "raj.pc#3"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "ada.pc#1",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "ada.pc#5",
+    "alias": "ada.pc-5",
+    "stream": "ada.pc",
+    "member": "ada",
+    "seq": 5,
+    "ts": "2026-11-02T10:40:00Z",
+    "type": "item.edit",
+    "origin": "human",
+    "payload": {
+     "item": "ada.pc#1",
+     "title": "Ship search v2 (index + query path)",
+     "body": "Replace the v1 indexer and the query path. Index format frozen on Wednesday."
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "ada.pc#1",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "raj.pc#4",
+    "alias": "raj.pc-4",
+    "stream": "raj.pc",
+    "member": "raj",
+    "seq": 4,
+    "ts": "2026-11-02T10:50:00Z",
+    "type": "comment.add",
+    "origin": "human",
+    "payload": {
+     "item": "ada.pc#3",
+     "body": "Moving the cache layer to next week."
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "ada.pc#3",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "raj.pc#5",
+    "alias": "raj.pc-5",
+    "stream": "raj.pc",
+    "member": "raj",
+    "seq": 5,
+    "ts": "2026-11-02T10:52:00Z",
+    "type": "comment.hide",
+    "origin": "human",
+    "payload": {
+     "comment": "raj.pc#4"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "ada.pc#3",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.pc#4",
+    "alias": "maya.pc-4",
+    "stream": "maya.pc",
+    "member": "maya",
+    "seq": 4,
+    "ts": "2026-11-02T11:00:00Z",
+    "type": "comment.hide",
+    "origin": "human",
+    "payload": {
+     "comment": "raj.pc#4"
+    },
+    "status": "flagged",
+    "reason": "only the comment author (raj) hides it",
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "ada.pc#3",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.pc#5",
+    "alias": "maya.pc-5",
+    "stream": "maya.pc",
+    "member": "maya",
+    "seq": 5,
+    "ts": "2026-11-02T11:10:00Z",
+    "type": "item.create",
+    "origin": "human",
+    "payload": {
+     "kind": "task",
+     "title": "Tokenizer",
+     "parent": "maya.pc#1",
+     "due": "2026-11-06",
+     "priority": 1
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#5",
+    "parentThread": "maya.pc#1",
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.pc#6",
+    "alias": "maya.pc-6",
+    "stream": "maya.pc",
+    "member": "maya",
+    "seq": 6,
+    "ts": "2026-11-02T11:10:00Z",
+    "type": "item.assign",
+    "origin": "human",
+    "payload": {
+     "item": "maya.pc#5",
+     "mode": "chosen",
+     "completion": "assigner",
+     "people": [
+      "ivy",
+      "jon"
+     ]
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#5",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.pc#7",
+    "alias": "maya.pc-7",
+    "stream": "maya.pc",
+    "member": "maya",
+    "seq": 7,
+    "ts": "2026-11-02T11:15:00Z",
+    "type": "item.create",
+    "origin": "human",
+    "payload": {
+     "kind": "task",
+     "title": "Shard writer docs",
+     "parent": "maya.pc#1",
+     "due": "2026-11-10",
+     "priority": 1
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#7",
+    "parentThread": "maya.pc#1",
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.pc#8",
+    "alias": "maya.pc-8",
+    "stream": "maya.pc",
+    "member": "maya",
+    "seq": 8,
+    "ts": "2026-11-02T11:15:00Z",
+    "type": "item.assign",
+    "origin": "human",
+    "payload": {
+     "item": "maya.pc#7",
+     "mode": "chosen",
+     "completion": "assigner",
+     "people": [
+      "omar"
+     ]
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#7",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "lena.pc#1",
+    "alias": "lena.pc-1",
+    "stream": "lena.pc",
+    "member": "lena",
+    "seq": 1,
+    "ts": "2026-11-02T11:20:00Z",
+    "type": "item.status",
+    "origin": "human",
+    "payload": {
+     "item": "maya.pc#1",
+     "status": "doing",
+     "note": "index layout drafted"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#1",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "ivy.pc#1",
+    "alias": "ivy.pc-1",
+    "stream": "ivy.pc",
+    "member": "ivy",
+    "seq": 1,
+    "ts": "2026-11-02T11:30:00Z",
+    "type": "item.status",
+    "origin": "agent-auto",
+    "payload": {
+     "item": "maya.pc#5",
+     "status": "doing",
+     "note": "regex tokenizer drafted"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#5",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "jon.pc#1",
+    "alias": "jon.pc-1",
+    "stream": "jon.pc",
+    "member": "jon",
+    "seq": 1,
+    "ts": "2026-11-02T11:40:00Z",
+    "type": "item.status",
+    "origin": "human",
+    "payload": {
+     "item": "maya.pc#5",
+     "status": "doing",
+     "note": "stemmer spike"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#5",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "omar.pc#1",
+    "alias": "omar.pc-1",
+    "stream": "omar.pc",
+    "member": "omar",
+    "seq": 1,
+    "ts": "2026-11-02T12:00:00Z",
+    "type": "item.status",
+    "origin": "agent-auto",
+    "payload": {
+     "item": "maya.pc#1",
+     "status": "doing",
+     "note": "shard writer done, docs next"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#1",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "omar.pc#2",
+    "alias": "omar.pc-2",
+    "stream": "omar.pc",
+    "member": "omar",
+    "seq": 2,
+    "ts": "2026-11-02T12:00:00Z",
+    "type": "item.status",
+    "origin": "human",
+    "payload": {
+     "item": "maya.pc#7",
+     "status": "doing"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#7",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "ivy.pc#2",
+    "alias": "ivy.pc-2",
+    "stream": "ivy.pc",
+    "member": "ivy",
+    "seq": 2,
+    "ts": "2026-11-02T13:00:00Z",
+    "type": "item.close",
+    "origin": "agent-auto",
+    "payload": {
+     "item": "maya.pc#5",
+     "note": "tests green"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#5",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.pc#9",
+    "alias": "maya.pc-9",
+    "stream": "maya.pc",
+    "member": "maya",
+    "seq": 9,
+    "ts": "2026-11-02T13:30:00Z",
+    "type": "item.confirm",
+    "origin": "human",
+    "payload": {
+     "item": "maya.pc#5",
+     "assignee": "ivy"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#5",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "tia.pc#1",
+    "alias": "tia.pc-1",
+    "stream": "tia.pc",
+    "member": "tia",
+    "seq": 1,
+    "ts": "2026-11-02T14:00:00Z",
+    "type": "item.status",
+    "origin": "human",
+    "payload": {
+     "item": "raj.pc#1",
+     "status": "doing"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "raj.pc#1",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "sven.pc#1",
+    "alias": "sven.pc-1",
+    "stream": "sven.pc",
+    "member": "sven",
+    "seq": 1,
+    "ts": "2026-11-02T14:10:00Z",
+    "type": "item.status",
+    "origin": "human",
+    "payload": {
+     "item": "raj.pc#1",
+     "status": "doing",
+     "note": "planner skeleton"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "raj.pc#1",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "bo.pc#1",
+    "alias": "bo.pc-1",
+    "stream": "bo.pc",
+    "member": "bo",
+    "seq": 1,
+    "ts": "2026-11-02T15:00:00Z",
+    "type": "item.create",
+    "origin": "human",
+    "payload": {
+     "kind": "task",
+     "title": "Rotate CI keys",
+     "project": "infra",
+     "due": "2026-11-03",
+     "priority": 2
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "bo.pc#1",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "bo.pc#2",
+    "alias": "bo.pc-2",
+    "stream": "bo.pc",
+    "member": "bo",
+    "seq": 2,
+    "ts": "2026-11-02T15:00:00Z",
+    "type": "item.assign",
+    "origin": "human",
+    "payload": {
+     "item": "bo.pc#1",
+     "mode": "chosen",
+     "completion": "assignee",
+     "people": [
+      "uma"
+     ]
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "bo.pc#1",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "uma.pc#1",
+    "alias": "uma.pc-1",
+    "stream": "uma.pc",
+    "member": "uma",
+    "seq": 1,
+    "ts": "2026-11-02T15:30:00Z",
+    "type": "item.status",
+    "origin": "human",
+    "payload": {
+     "item": "bo.pc#1",
+     "status": "doing",
+     "note": "staging keys rotated"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "bo.pc#1",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "uma.pc#2",
+    "alias": "uma.pc-2",
+    "stream": "uma.pc",
+    "member": "uma",
+    "seq": 2,
+    "ts": "2026-11-02T16:00:00Z",
+    "type": "item.close",
+    "origin": "human",
+    "payload": {
+     "item": "bo.pc#1",
+     "note": "prod rotated too"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "bo.pc#1",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "uma.pc#3",
+    "alias": "uma.pc-3",
+    "stream": "uma.pc",
+    "member": "uma",
+    "seq": 3,
+    "ts": "2026-11-02T16:10:00Z",
+    "type": "item.status",
+    "origin": "human",
+    "payload": {
+     "item": "bo.pc#1",
+     "status": "doing",
+     "note": "late report after close"
+    },
+    "status": "flagged",
+    "reason": "assignment is done; reopen it first",
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "bo.pc#1",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "sven.pc#2",
+    "alias": "sven.pc-2",
+    "stream": "sven.pc",
+    "member": "sven",
+    "seq": 2,
+    "ts": "2026-11-02T16:20:00Z",
+    "type": "item.status",
+    "origin": "human",
+    "payload": {
+     "item": "bo.pc#1",
+     "status": "doing",
+     "note": "sven is not an assignee of this"
+    },
+    "status": "flagged",
+    "reason": "sven is not an assignee of bo.pc-1",
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "bo.pc#1",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "ada.pc#6",
+    "alias": "ada.pc-6",
+    "stream": "ada.pc",
+    "member": "ada",
+    "seq": 6,
+    "ts": "2026-11-02T17:00:00Z",
+    "type": "item.create",
+    "origin": "human",
+    "payload": {
+     "kind": "task",
+     "title": "Security training",
+     "body": "Finish the module before the 30th.",
+     "due": "2026-11-30",
+     "priority": 0
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "ada.pc#6",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "ada.pc#7",
+    "alias": "ada.pc-7",
+    "stream": "ada.pc",
+    "member": "ada",
+    "seq": 7,
+    "ts": "2026-11-02T17:00:00Z",
+    "type": "item.assign",
+    "origin": "human",
+    "payload": {
+     "item": "ada.pc#6",
+     "mode": "all",
+     "levels": 2,
+     "completion": "assignee"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "ada.pc#6",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "kai.pc#1",
+    "alias": "kai.pc-1",
+    "stream": "kai.pc",
+    "member": "kai",
+    "seq": 1,
+    "ts": "2026-11-02T17:10:00Z",
+    "type": "item.close",
+    "origin": "human",
+    "payload": {
+     "item": "ada.pc#6"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "ada.pc#6",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "ada.pc#8",
+    "alias": "ada.pc-8",
+    "stream": "ada.pc",
+    "member": "ada",
+    "seq": 8,
+    "ts": "2026-11-02T17:30:00Z",
+    "type": "item.create",
+    "origin": "human",
+    "payload": {
+     "kind": "todo",
+     "title": "Book offsite venue",
+     "due": "2026-11-14",
+     "priority": 0
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "ada.pc#8",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "ada.pc#9",
+    "alias": "ada.pc-9",
+    "stream": "ada.pc",
+    "member": "ada",
+    "seq": 9,
+    "ts": "2026-11-02T17:30:00Z",
+    "type": "item.assign",
+    "origin": "human",
+    "payload": {
+     "item": "ada.pc#8",
+     "mode": "chosen",
+     "completion": "assignee",
+     "people": [
+      "ada"
+     ]
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "ada.pc#8",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "ivy.pc#3",
+    "alias": "ivy.pc-3",
+    "stream": "ivy.pc",
+    "member": "ivy",
+    "seq": 3,
+    "ts": "2026-11-02T17:40:00Z",
+    "type": "item.status",
+    "origin": "agent-auto",
+    "payload": {
+     "item": "ada.pc#6",
+     "status": "doing",
+     "note": "module 2 of 5"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "ada.pc#6",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "noa.pc#1",
+    "alias": "noa.pc-1",
+    "stream": "noa.pc",
+    "member": "noa",
+    "seq": 1,
+    "ts": "2026-11-02T18:00:00Z",
+    "type": "item.close",
+    "origin": "human",
+    "payload": {
+     "item": "ada.pc#6"
+    },
+    "status": "flagged",
+    "reason": "signer key \"ivy-k1\" is not a key of noa",
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "ada.pc#6",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "noa.pc#2",
+    "alias": "noa.pc-2",
+    "stream": "noa.pc",
+    "member": "noa",
+    "seq": 2,
+    "ts": "2026-11-02T18:10:00Z",
+    "type": "item.status",
+    "origin": "human",
+    "payload": {
+     "item": "ada.pc#6",
+     "status": "doing",
+     "note": "half way"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "ada.pc#6",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "raj.pc#6",
+    "alias": "raj.pc-6",
+    "stream": "raj.pc",
+    "member": "raj",
+    "seq": 6,
+    "ts": "2026-11-02T18:30:00Z",
+    "type": "item.create",
+    "origin": "agent-auto",
+    "payload": {
+     "kind": "task",
+     "title": "Draft perf notes"
+    },
+    "status": "flagged",
+    "reason": "agent-auto is limited to item.status and item.close on the author's own assignment",
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "raj.pc#6",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "kai.pc#2",
+    "alias": "kai.pc-2",
+    "stream": "kai.pc",
+    "member": "kai",
+    "seq": 2,
+    "ts": "2026-11-02T18:45:00Z",
+    "type": "item.create",
+    "origin": "human",
+    "payload": {
+     "kind": "task",
+     "title": "Approve GPU budget for index builds",
+     "body": "Two more GPU nodes for nightly index builds, about 3k/month.",
+     "project": "search-service",
+     "due": "2026-11-07",
+     "priority": 1
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "kai.pc#2",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "kai.pc#3",
+    "alias": "kai.pc-3",
+    "stream": "kai.pc",
+    "member": "kai",
+    "seq": 3,
+    "ts": "2026-11-02T18:45:00Z",
+    "type": "item.assign",
+    "origin": "human",
+    "payload": {
+     "item": "kai.pc#2",
+     "mode": "chosen",
+     "people": [
+      "ada"
+     ],
+     "completion": "assigner"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "kai.pc#2",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "mallory.pc#1",
+    "alias": "mallory.pc-1",
+    "stream": "mallory.pc",
+    "member": "mallory",
+    "seq": 1,
+    "ts": "2026-11-02T19:00:00Z",
+    "type": "item.create",
+    "origin": "human",
+    "payload": {
+     "kind": "task",
+     "title": "Wire money",
+     "body": "not a member"
+    },
+    "status": "flagged",
+    "reason": "author \"mallory\" is not a member in the state its author had seen",
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "mallory.pc#1",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "tia.pc#2",
+    "alias": "tia.pc-2",
+    "stream": "tia.pc",
+    "member": "tia",
+    "seq": 2,
+    "ts": "2026-11-02T19:30:00Z",
+    "type": "roles.set_lead",
+    "origin": "human",
+    "payload": {
+     "member": "tia",
+     "leads": [
+      "ada"
+     ]
+    },
+    "status": "flagged",
+    "reason": "roles events are admin-only (tia is not an admin)",
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": null,
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "bo.pc#3",
+    "alias": "bo.pc-3",
+    "stream": "bo.pc",
+    "member": "bo",
+    "seq": 3,
+    "ts": "2026-11-02T20:00:00Z",
+    "type": "roles.set_lead",
+    "origin": "human",
+    "payload": {
+     "member": "ada",
+     "leads": [
+      "uma"
+     ]
+    },
+    "status": "flagged",
+    "reason": "cycle: uma is already below ada",
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": null,
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "bo.pc#4",
+    "alias": "bo.pc-4",
+    "stream": "bo.pc",
+    "member": "bo",
+    "seq": 4,
+    "ts": "2026-11-02T20:10:00Z",
+    "type": "roles.set_lead",
+    "origin": "human",
+    "payload": {
+     "member": "sven",
+     "leads": [
+      "maya",
+      "raj"
+     ]
+    },
+    "status": "flagged",
+    "reason": "leads must have length at most 1 (got 2)",
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": null,
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "lena.pc#2",
+    "alias": "lena.pc-2",
+    "stream": "lena.pc",
+    "member": "lena",
+    "seq": 2,
+    "ts": "2026-11-02T20:20:00Z",
+    "type": "item.create",
+    "origin": "human",
+    "payload": {
+     "kind": "task",
+     "title": "Benchmark harness",
+     "due": "2026-11-21",
+     "priority": 1
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "lena.pc#2",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "lena.pc#3",
+    "alias": "lena.pc-3",
+    "stream": "lena.pc",
+    "member": "lena",
+    "seq": 3,
+    "ts": "2026-11-02T20:20:00Z",
+    "type": "item.assign",
+    "origin": "human",
+    "payload": {
+     "item": "lena.pc#2",
+     "mode": "chosen",
+     "completion": "assignee",
+     "people": [
+      "raj"
+     ]
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "lena.pc#2",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "kai.pc#20!c2:0",
+    "alias": "kai.pc-20!c2:0",
+    "stream": "kai.pc",
+    "member": "kai",
+    "seq": 20,
+    "ts": "2026-11-02T20:30:00Z",
+    "type": "item.close",
+    "origin": "human",
+    "payload": {
+     "item": "maya.pc#5"
+    },
+    "status": "flagged",
+    "reason": "commit stream \"ada.pc\" does not match the ref refs/heads/tracker/m/kai/pc (a clone writes only its own ref)",
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#5",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.pc#10",
+    "alias": "maya.pc-10",
+    "stream": "maya.pc",
+    "member": "maya",
+    "seq": 10,
+    "ts": "2026-11-02T20:40:00Z",
+    "type": "item.edit",
+    "origin": "human",
+    "payload": {
+     "item": "ada.pc#1",
+     "title": "Ship search v2 by Friday"
+    },
+    "status": "flagged",
+    "reason": "only the creator (ada) edits ada.pc-1",
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "ada.pc#1",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "ada.pc#10",
+    "alias": "ada.pc-10",
+    "stream": "ada.pc",
+    "member": "ada",
+    "seq": 10,
+    "ts": "2026-11-03T08:30:00Z",
+    "type": "item.accept",
+    "origin": "human",
+    "payload": {
+     "item": "kai.pc#2"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "kai.pc#2",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "ada.pc#11",
+    "alias": "ada.pc-11",
+    "stream": "ada.pc",
+    "member": "ada",
+    "seq": 11,
+    "ts": "2026-11-03T09:00:00Z",
+    "type": "roles.set_lead",
+    "origin": "human",
+    "payload": {
+     "member": "pia",
+     "leads": [
+      "raj"
+     ]
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": null,
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "sven.pc#3",
+    "alias": "sven.pc-3",
+    "stream": "sven.pc",
+    "member": "sven",
+    "seq": 3,
+    "ts": "2026-11-03T09:15:00Z",
+    "type": "item.create",
+    "origin": "human",
+    "payload": {
+     "kind": "task",
+     "title": "Review the query planner PR",
+     "body": "PR #412: cost model for the new planner. Needs an index-side reviewer.",
+     "project": "search-service",
+     "due": "2026-11-04",
+     "priority": 1
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "sven.pc#3",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "sven.pc#4",
+    "alias": "sven.pc-4",
+    "stream": "sven.pc",
+    "member": "sven",
+    "seq": 4,
+    "ts": "2026-11-03T09:15:00Z",
+    "type": "item.assign",
+    "origin": "human",
+    "payload": {
+     "item": "sven.pc#3",
+     "mode": "chosen",
+     "people": [
+      "jon"
+     ],
+     "completion": "assignee"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "sven.pc#3",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "raj.pc#7",
+    "alias": "raj.pc-7",
+    "stream": "raj.pc",
+    "member": "raj",
+    "seq": 7,
+    "ts": "2026-11-03T09:30:00Z",
+    "type": "item.create",
+    "origin": "human",
+    "payload": {
+     "kind": "task",
+     "title": "Cache layer",
+     "parent": "raj.pc#1",
+     "due": "2026-11-12",
+     "priority": 2
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "raj.pc#7",
+    "parentThread": "raj.pc#1",
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "raj.pc#8",
+    "alias": "raj.pc-8",
+    "stream": "raj.pc",
+    "member": "raj",
+    "seq": 8,
+    "ts": "2026-11-03T09:30:00Z",
+    "type": "item.assign",
+    "origin": "human",
+    "payload": {
+     "item": "raj.pc#7",
+     "mode": "chosen",
+     "completion": "assignee",
+     "people": [
+      "pia"
+     ]
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "raj.pc#7",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "jon.pc#2",
+    "alias": "jon.pc-2",
+    "stream": "jon.pc",
+    "member": "jon",
+    "seq": 2,
+    "ts": "2026-11-03T09:40:00Z",
+    "type": "item.accept",
+    "origin": "human",
+    "payload": {
+     "item": "sven.pc#3"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "sven.pc#3",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "jon.pc#3",
+    "alias": "jon.pc-3",
+    "stream": "jon.pc",
+    "member": "jon",
+    "seq": 3,
+    "ts": "2026-11-03T09:40:00Z",
+    "type": "item.status",
+    "origin": "human",
+    "payload": {
+     "item": "sven.pc#3",
+     "status": "doing",
+     "note": "reading the cost model"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "sven.pc#3",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "pia.pc#1",
+    "alias": "pia.pc-1",
+    "stream": "pia.pc",
+    "member": "pia",
+    "seq": 1,
+    "ts": "2026-11-03T10:00:00Z",
+    "type": "item.status",
+    "origin": "agent-auto",
+    "payload": {
+     "item": "ada.pc#6",
+     "status": "doing",
+     "note": "started the module"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "ada.pc#6",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "bo.pc#5",
+    "alias": "bo.pc-5",
+    "stream": "bo.pc",
+    "member": "bo",
+    "seq": 5,
+    "ts": "2026-11-03T10:05:00Z",
+    "type": "item.return",
+    "origin": "human",
+    "payload": {
+     "item": "sven.pc#3",
+     "assignee": "jon",
+     "note": "jon is needed on CI"
+    },
+    "status": "flagged",
+    "reason": "only jon's direct lead (maya) returns an accepted assignment",
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "sven.pc#3",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "pia.pc#2",
+    "alias": "pia.pc-2",
+    "stream": "pia.pc",
+    "member": "pia",
+    "seq": 2,
+    "ts": "2026-11-03T10:10:00Z",
+    "type": "item.status",
+    "origin": "human",
+    "payload": {
+     "item": "raj.pc#7",
+     "status": "blocked",
+     "note": "waiting for the redis cluster approval"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "raj.pc#7",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.pc#11",
+    "alias": "maya.pc-11",
+    "stream": "maya.pc",
+    "member": "maya",
+    "seq": 11,
+    "ts": "2026-11-03T10:20:00Z",
+    "type": "item.return",
+    "origin": "human",
+    "payload": {
+     "item": "sven.pc#3",
+     "assignee": "jon",
+     "note": "jon is on the tokenizer rework this week; please ask lena."
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "sven.pc#3",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "omar.pc#3",
+    "alias": "omar.pc-3",
+    "stream": "omar.pc",
+    "member": "omar",
+    "seq": 3,
+    "ts": "2026-11-03T10:30:00Z",
+    "type": "item.close",
+    "origin": "human",
+    "payload": {
+     "item": "maya.pc#7",
+     "note": "docs drafted"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#7",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "jon.pc#4",
+    "alias": "jon.pc-4",
+    "stream": "jon.pc",
+    "member": "jon",
+    "seq": 4,
+    "ts": "2026-11-03T11:00:00Z",
+    "type": "item.close",
+    "origin": "human",
+    "payload": {
+     "item": "maya.pc#5",
+     "note": "stemmer merged"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#5",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "tia.pc#3",
+    "alias": "tia.pc-3",
+    "stream": "tia.pc",
+    "member": "tia",
+    "seq": 3,
+    "ts": "2026-11-03T11:05:00Z",
+    "type": "item.create",
+    "origin": "human",
+    "payload": {
+     "kind": "task",
+     "title": "Load-test the cache layer",
+     "body": "One afternoon with the load rig before the cache ships.",
+     "due": "2026-11-12",
+     "priority": 1
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "tia.pc#3",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "tia.pc#4",
+    "alias": "tia.pc-4",
+    "stream": "tia.pc",
+    "member": "tia",
+    "seq": 4,
+    "ts": "2026-11-03T11:05:00Z",
+    "type": "item.assign",
+    "origin": "human",
+    "payload": {
+     "item": "tia.pc#3",
+     "mode": "chosen",
+     "people": [
+      "uma"
+     ],
+     "completion": "assignee"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "tia.pc#3",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.pc#12",
+    "alias": "maya.pc-12",
+    "stream": "maya.pc",
+    "member": "maya",
+    "seq": 12,
+    "ts": "2026-11-03T11:30:00Z",
+    "type": "item.reject",
+    "origin": "human",
+    "payload": {
+     "item": "maya.pc#5",
+     "assignee": "jon",
+     "note": "stemmer tests missing for Korean input"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#5",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "uma.pc#4",
+    "alias": "uma.pc-4",
+    "stream": "uma.pc",
+    "member": "uma",
+    "seq": 4,
+    "ts": "2026-11-03T11:40:00Z",
+    "type": "comment.add",
+    "origin": "human",
+    "payload": {
+     "item": "tia.pc#3",
+     "body": "No capacity until the next sprint, the rig is booked for CI. Try noa?"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "tia.pc#3",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "uma.pc#5",
+    "alias": "uma.pc-5",
+    "stream": "uma.pc",
+    "member": "uma",
+    "seq": 5,
+    "ts": "2026-11-03T11:40:00Z",
+    "type": "item.decline",
+    "origin": "human",
+    "payload": {
+     "item": "tia.pc#3",
+     "note": "no capacity this sprint"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "tia.pc#3",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "noa.pc#3",
+    "alias": "noa.pc-3",
+    "stream": "noa.pc",
+    "member": "noa",
+    "seq": 3,
+    "ts": "2026-11-03T12:00:00Z",
+    "type": "item.create",
+    "origin": "human",
+    "payload": {
+     "kind": "task",
+     "title": "Explain the tokenizer API to the query team",
+     "body": "30 minutes, any day this week.",
+     "due": "2026-11-07",
+     "priority": 0
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "noa.pc#3",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "noa.pc#4",
+    "alias": "noa.pc-4",
+    "stream": "noa.pc",
+    "member": "noa",
+    "seq": 4,
+    "ts": "2026-11-03T12:00:00Z",
+    "type": "item.assign",
+    "origin": "human",
+    "payload": {
+     "item": "noa.pc#3",
+     "mode": "chosen",
+     "people": [
+      "lena"
+     ],
+     "completion": "assignee"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "noa.pc#3",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "lena.pc#4",
+    "alias": "lena.pc-4",
+    "stream": "lena.pc",
+    "member": "lena",
+    "seq": 4,
+    "ts": "2026-11-03T12:10:00Z",
+    "type": "item.accept",
+    "origin": "agent-auto",
+    "payload": {
+     "item": "noa.pc#3"
+    },
+    "status": "flagged",
+    "reason": "an agent never accepts, declines, returns or hands off an assignment on its own (agent-auto is invalid here)",
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "noa.pc#3",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.pc#13",
+    "alias": "maya.pc-13",
+    "stream": "maya.pc",
+    "member": "maya",
+    "seq": 13,
+    "ts": "2026-11-03T15:00:00Z",
+    "type": "item.reject",
+    "origin": "human",
+    "payload": {
+     "item": "maya.pc#7",
+     "assignee": "omar",
+     "note": "needs the migration section"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#7",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.pc#14",
+    "alias": "maya.pc-14",
+    "stream": "maya.pc",
+    "member": "maya",
+    "seq": 14,
+    "ts": "2026-11-03T15:10:00Z",
+    "type": "comment.add",
+    "origin": "agent",
+    "payload": {
+     "item": "maya.pc#1",
+     "body": "Status digest: tokenizer back to jon for Korean tests; shard writer docs need a migration section; omar has been dark since noon."
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#1",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "jon.pc#5",
+    "alias": "jon.pc-5",
+    "stream": "jon.pc",
+    "member": "jon",
+    "seq": 5,
+    "ts": "2026-11-03T16:30:00Z",
+    "type": "item.status",
+    "origin": "human",
+    "payload": {
+     "item": "maya.pc#5",
+     "status": "doing",
+     "note": "adding Korean fixtures"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#5",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "ivy.pc#4",
+    "alias": "ivy.pc-4",
+    "stream": "ivy.pc",
+    "member": "ivy",
+    "seq": 4,
+    "ts": "2026-11-03T17:00:00Z",
+    "type": "comment.add",
+    "origin": "human",
+    "payload": {
+     "item": "maya.pc#5",
+     "body": "I can pair with jon on the Korean fixtures."
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#5",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "jon.pc#6",
+    "alias": "jon.pc-6",
+    "stream": "jon.pc",
+    "member": "jon",
+    "seq": 6,
+    "ts": "2026-11-03T22:00:00Z",
+    "type": "comment.add",
+    "origin": "human",
+    "payload": {
+     "item": "maya.pc#5",
+     "body": "Approved - please wire the vendor payment today."
+    },
+    "status": "flagged",
+    "reason": "signed with jon-k1, which bo.pc-6 revoked having seen jon.pc only up to seq 5; events from a revoked key that the revoker had not seen are ignored, whatever their seen claims",
+    "ignored": true,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#5",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.pc#15",
+    "alias": "maya.pc-15",
+    "stream": "maya.pc",
+    "member": "maya",
+    "seq": 15,
+    "ts": "2026-11-04T10:00:00Z",
+    "type": "item.unassign",
+    "origin": "human",
+    "payload": {
+     "item": "maya.pc#1",
+     "assignee": "omar"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#1",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.pc#16",
+    "alias": "maya.pc-16",
+    "stream": "maya.pc",
+    "member": "maya",
+    "seq": 16,
+    "ts": "2026-11-04T10:00:00Z",
+    "type": "comment.add",
+    "origin": "human",
+    "payload": {
+     "item": "maya.pc#1",
+     "body": "Unassigned omar from the index builder while he is dark; lena covers the writer."
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#1",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "lena.pc#5",
+    "alias": "lena.pc-5",
+    "stream": "lena.pc",
+    "member": "lena",
+    "seq": 5,
+    "ts": "2026-11-04T10:30:00Z",
+    "type": "item.status",
+    "origin": "human",
+    "payload": {
+     "item": "maya.pc#1",
+     "status": "doing",
+     "note": "picked up the shard writer"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#1",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "bo.pc#6",
+    "alias": "bo.pc-6",
+    "stream": "bo.pc",
+    "member": "bo",
+    "seq": 6,
+    "ts": "2026-11-04T11:00:00Z",
+    "type": "roles.revoke_key",
+    "origin": "human",
+    "payload": {
+     "member": "jon",
+     "key": "jon-k1"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": null,
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "bo.pc#7",
+    "alias": "bo.pc-7",
+    "stream": "bo.pc",
+    "member": "bo",
+    "seq": 7,
+    "ts": "2026-11-04T11:00:00Z",
+    "type": "roles.add_key",
+    "origin": "human",
+    "payload": {
+     "member": "jon",
+     "key": "jon-k2"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": null,
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "jon.pc#7",
+    "alias": "jon.pc-7",
+    "stream": "jon.pc",
+    "member": "jon",
+    "seq": 7,
+    "ts": "2026-11-04T11:30:00Z",
+    "type": "comment.add",
+    "origin": "human",
+    "payload": {
+     "item": "maya.pc#5",
+     "body": "My laptop was stolen yesterday; I am on a new key now. jon-6 was not me."
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#5",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "jon.pc#8",
+    "alias": "jon.pc-8",
+    "stream": "jon.pc",
+    "member": "jon",
+    "seq": 8,
+    "ts": "2026-11-04T12:00:00Z",
+    "type": "item.close",
+    "origin": "human",
+    "payload": {
+     "item": "maya.pc#5",
+     "note": "Korean fixtures in"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#5",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.pc#17",
+    "alias": "maya.pc-17",
+    "stream": "maya.pc",
+    "member": "maya",
+    "seq": 17,
+    "ts": "2026-11-04T13:00:00Z",
+    "type": "item.confirm",
+    "origin": "human",
+    "payload": {
+     "item": "maya.pc#5",
+     "assignee": "jon"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#5",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.pc#18",
+    "alias": "maya.pc-18",
+    "stream": "maya.pc",
+    "member": "maya",
+    "seq": 18,
+    "ts": "2026-11-04T13:30:00Z",
+    "type": "item.reopen",
+    "origin": "human",
+    "payload": {
+     "item": "maya.pc#5",
+     "assignee": "ivy",
+     "note": "regression in emoji tokenization"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#5",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "ivy.pc#5",
+    "alias": "ivy.pc-5",
+    "stream": "ivy.pc",
+    "member": "ivy",
+    "seq": 5,
+    "ts": "2026-11-04T14:00:00Z",
+    "type": "item.status",
+    "origin": "agent-auto",
+    "payload": {
+     "item": "maya.pc#5",
+     "status": "doing",
+     "note": "fixing emoji ranges"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#5",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "ada.pc#12",
+    "alias": "ada.pc-12",
+    "stream": "ada.pc",
+    "member": "ada",
+    "seq": 12,
+    "ts": "2026-11-04T15:00:00Z",
+    "type": "item.close",
+    "origin": "human",
+    "payload": {
+     "item": "kai.pc#2",
+     "note": "budget approved for Q4"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "kai.pc#2",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.pc#19",
+    "alias": "maya.pc-19",
+    "stream": "maya.pc",
+    "member": "maya",
+    "seq": 19,
+    "ts": "2026-11-04T16:00:00Z",
+    "type": "comment.add",
+    "origin": "agent",
+    "payload": {
+     "item": "ada.pc#1",
+     "body": "Weekly digest: tokenizer reopened for emoji; query path blocked below on the cache layer (pia waits for the redis approval)."
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "ada.pc#1",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.lap#1",
+    "alias": "maya.lap-1",
+    "stream": "maya.lap",
+    "member": "maya",
+    "seq": 1,
+    "ts": "2026-11-04T20:00:00Z",
+    "type": "item.edit",
+    "origin": "human",
+    "payload": {
+     "item": "maya.pc#1",
+     "body": "Build the v2 index: layout, shard writer, tokenizer (laptop draft)."
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [
+     {
+      "field": "body of maya.pc-1",
+      "by": "maya.pc#20",
+      "why": "later"
+     }
+    ],
+    "thread": "maya.pc#1",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.pc#20",
+    "alias": "maya.pc-20",
+    "stream": "maya.pc",
+    "member": "maya",
+    "seq": 20,
+    "ts": "2026-11-04T21:30:00Z",
+    "type": "item.edit",
+    "origin": "human",
+    "payload": {
+     "item": "maya.pc#1",
+     "body": "Build the v2 index: layout, shard writer, tokenizer, compaction."
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#1",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.lap#2",
+    "alias": "maya.lap-2",
+    "stream": "maya.lap",
+    "member": "maya",
+    "seq": 2,
+    "ts": "2026-11-05T08:00:00Z",
+    "type": "item.create",
+    "origin": "human",
+    "payload": {
+     "kind": "todo",
+     "title": "Prepare Friday demo",
+     "due": "2026-11-06",
+     "priority": 2
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.lap#2",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.lap#3",
+    "alias": "maya.lap-3",
+    "stream": "maya.lap",
+    "member": "maya",
+    "seq": 3,
+    "ts": "2026-11-05T08:00:00Z",
+    "type": "item.assign",
+    "origin": "human",
+    "payload": {
+     "item": "maya.lap#2",
+     "mode": "chosen",
+     "people": [
+      "maya"
+     ],
+     "completion": "assignee"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.lap#2",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "ada.pc#13",
+    "alias": "ada.pc-13",
+    "stream": "ada.pc",
+    "member": "ada",
+    "seq": 13,
+    "ts": "2026-11-05T09:00:00Z",
+    "type": "comment.add",
+    "origin": "human",
+    "payload": {
+     "item": "ada.pc#3",
+     "body": "CI hygiene moves to December.",
+     "reply_to": "maya.pc#3"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "ada.pc#3",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "ada.pc#14",
+    "alias": "ada.pc-14",
+    "stream": "ada.pc",
+    "member": "ada",
+    "seq": 14,
+    "ts": "2026-11-05T09:30:00Z",
+    "type": "item.close",
+    "origin": "human",
+    "payload": {
+     "item": "ada.pc#8"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "ada.pc#8",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "kai.pc#4",
+    "alias": "kai.pc-4",
+    "stream": "kai.pc",
+    "member": "kai",
+    "seq": 4,
+    "ts": "2026-11-05T10:00:00Z",
+    "type": "item.confirm",
+    "origin": "human",
+    "payload": {
+     "item": "kai.pc#2",
+     "assignee": "ada",
+     "note": "thanks, ordering the nodes"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "kai.pc#2",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "tia.pc#5",
+    "alias": "tia.pc-5",
+    "stream": "tia.pc",
+    "member": "tia",
+    "seq": 5,
+    "ts": "2026-11-05T10:30:00Z",
+    "type": "comment.add",
+    "origin": "human",
+    "payload": {
+     "item": "raj.pc#7",
+     "body": "Escalated the redis approval to bo."
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "raj.pc#7",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "bo.pc#8",
+    "alias": "bo.pc-8",
+    "stream": "bo.pc",
+    "member": "bo",
+    "seq": 8,
+    "ts": "2026-11-05T11:00:00Z",
+    "type": "comment.add",
+    "origin": "human",
+    "payload": {
+     "item": "raj.pc#7",
+     "body": "Approved in principle; the infra ticket is open.",
+     "reply_to": "tia.pc#5"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "raj.pc#7",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "bo.pc#12!c6:0",
+    "alias": "bo.pc-12!c6:0",
+    "stream": "bo.pc",
+    "member": "bo",
+    "seq": 12,
+    "ts": "2026-11-05T11:30:00Z",
+    "type": "item.create",
+    "origin": "human",
+    "payload": {
+     "kind": "todo",
+     "title": "Seq gap demo"
+    },
+    "status": "flagged",
+    "reason": "seq 12 after 8 (expected 9)",
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "bo.pc#12!c6:0",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "raj.pc#9",
+    "alias": "raj.pc-9",
+    "stream": "raj.pc",
+    "member": "raj",
+    "seq": 9,
+    "ts": "2026-11-05T13:00:00Z",
+    "type": "item.accept",
+    "origin": "human",
+    "payload": {
+     "item": "lena.pc#2",
+     "note": "I can take it this week"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "lena.pc#2",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "raj.pc#10",
+    "alias": "raj.pc-10",
+    "stream": "raj.pc",
+    "member": "raj",
+    "seq": 10,
+    "ts": "2026-11-05T13:30:00Z",
+    "type": "item.handoff",
+    "origin": "human",
+    "payload": {
+     "item": "lena.pc#2",
+     "to": "sven",
+     "note": "sven owns the bench rig now"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "lena.pc#2",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "sven.pc#5",
+    "alias": "sven.pc-5",
+    "stream": "sven.pc",
+    "member": "sven",
+    "seq": 5,
+    "ts": "2026-11-05T14:30:00Z",
+    "type": "item.accept",
+    "origin": "human",
+    "payload": {
+     "item": "lena.pc#2"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "lena.pc#2",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "ivy.pc#6",
+    "alias": "ivy.pc-6",
+    "stream": "ivy.pc",
+    "member": "ivy",
+    "seq": 6,
+    "ts": "2026-11-05T15:00:00Z",
+    "type": "item.create",
+    "origin": "human",
+    "payload": {
+     "kind": "task",
+     "title": "Review the emoji tokenizer fix",
+     "body": "Two-line change in the range table; needs a second pair of eyes before Friday.",
+     "project": "search-service",
+     "due": "2026-11-07",
+     "priority": 1
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "ivy.pc#6",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "ivy.pc#7",
+    "alias": "ivy.pc-7",
+    "stream": "ivy.pc",
+    "member": "ivy",
+    "seq": 7,
+    "ts": "2026-11-05T15:00:00Z",
+    "type": "item.assign",
+    "origin": "human",
+    "payload": {
+     "item": "ivy.pc#6",
+     "mode": "chosen",
+     "people": [
+      "maya"
+     ],
+     "completion": "assigner"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "ivy.pc#6",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "ivy.pc#8",
+    "alias": "ivy.pc-8",
+    "stream": "ivy.pc",
+    "member": "ivy",
+    "seq": 8,
+    "ts": "2026-11-05T16:00:00Z",
+    "type": "item.close",
+    "origin": "human",
+    "payload": {
+     "item": "maya.pc#5",
+     "note": "emoji ranges fixed"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#5",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.pc#21",
+    "alias": "maya.pc-21",
+    "stream": "maya.pc",
+    "member": "maya",
+    "seq": 21,
+    "ts": "2026-11-05T17:00:00Z",
+    "type": "item.status",
+    "origin": "human",
+    "payload": {
+     "item": "ada.pc#1",
+     "status": "doing",
+     "note": "starting the v2 integration"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "ada.pc#1",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.lap#4",
+    "alias": "maya.lap-4",
+    "stream": "maya.lap",
+    "member": "maya",
+    "seq": 4,
+    "ts": "2026-11-05T18:00:00Z",
+    "type": "item.status",
+    "origin": "agent-auto",
+    "payload": {
+     "item": "ada.pc#1",
+     "status": "blocked",
+     "note": "integration test suite red (auto)"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [
+     {
+      "field": "status of maya on ada.pc-1",
+      "by": "maya.pc#21",
+      "why": "human"
+     }
+    ],
+    "thread": "ada.pc#1",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   }
+  ],
+  "notices": [
+   {
+    "key": "ho:raj.pc#10>sven",
+    "kind": "handoff",
+    "from": "raj",
+    "ts": "2026-11-05T14:30:00Z",
+    "assignment": "raj.pc#10>sven",
+    "item": "lena.pc#2",
+    "to": "sven",
+    "by": "lena",
+    "sender": "raj",
+    "state": "live"
+   }
+  ],
+  "my": {
+   "assignments": [
+    "maya.pc#2>lena",
+    "ada.pc#7>lena"
+   ],
+   "today": {
+    "work": [
+     "maya.pc#2>lena",
+     "ada.pc#7>lena"
+    ],
+    "pending": [
+     "noa.pc#4>lena"
+    ],
+    "confirms": []
+   },
+   "received": {
+    "pending": [
+     "noa.pc#4>lena"
+    ],
+    "answered": [],
+    "sent": [
+     "lena.pc#3>raj"
+    ]
+   },
+   "given": [
+    "lena.pc#2"
+   ],
+   "created": [],
+   "team": [],
+   "badge": [
+    "a:ada.pc#7>lena",
+    "p:noa.pc#4>lena",
+    "ho:raj.pc#10>sven"
+   ]
+  },
+  "stats": {
+   "events": 109,
+   "commits": 88,
+   "flagged": 15,
+   "concurrent": 0
+  },
+  "heads": {
+   "ada.pc": 14,
+   "maya.pc": 21,
+   "raj.pc": 10,
+   "bo.pc": 8,
+   "lena.pc": 5,
+   "omar.pc": 3,
+   "ivy.pc": 8,
+   "jon.pc": 8,
+   "kai.pc": 4,
+   "sven.pc": 5,
+   "tia.pc": 5,
+   "noa.pc": 4,
+   "uma.pc": 5,
+   "pia.pc": 2,
+   "mallory.pc": 1,
+   "maya.lap": 4
+  },
+  "now": "2026-11-06T09:00:00Z"
+ }
+}

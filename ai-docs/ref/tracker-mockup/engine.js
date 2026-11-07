@@ -334,10 +334,6 @@
         it = needItem(S, p.item);
         r = pendingRec(S, it.id, a);
         if (!r) rej(liveRec(S, it.id, a) ? a + '\'s assignment on ' + it.alias + ' is already live' : a + ' has no pending assignment on ' + it.alias);
-        if (n.type === 'item.accept' && r.handoffOf) {
-          var orig = S.asg[r.handoffOf];
-          if (!orig || orig.state !== 'live') rej('the handed-off assignment of ' + (orig ? orig.to : '?') + ' already ended');
-        }
         break;
 
       case 'item.return': {
@@ -552,8 +548,13 @@
 
   // End a record. Unassign, return, withdraw and an accepted handoff beat any
   // concurrent status write on it: the writes are marked, valid but not in effect.
+  // (295) A pending handoff of the record ends with it, as withdrawn, pointing at
+  // the same event: there is nothing left to hand on.
   function endRec(S, r, n, state, C) {
     r.state = state; r.ended = n;
+    vals(S.asg).forEach(function (x) {
+      if (x.handoffOf === r.id && x.state === 'pending') { x.state = 'withdrawn'; x.ended = n; }
+    });
     if (!C) return;
     var label = r.to + '\'s assignment on ' + alias(r.item);
     r.writes.forEach(function (w) {
@@ -578,6 +579,23 @@
       mark(n, gone.ended, 'removed', lb, { winner: gone.ended.id });
       mark(gone.ended, n, 'removed', lb, { winner: gone.ended.id });
     }
+  }
+
+  // (295) An unassign, return, or removal of a record that is concurrent with the
+  // accept that handed it on wins, as removal beats writes (213): the accepted
+  // handoff ends withdrawn (the accept and its holder's writes are marked, valid
+  // but not in effect), and the record comes back live for the ending event to end.
+  function handedConc(r, n) { return r.state === 'handed' && !!r.ended && r.ended.type === 'item.accept' && !hb(r.ended, n); }
+  function handedRec(S, item, who, n) {
+    var rs = recsOn(S, item).filter(function (r) { return r.to === who && handedConc(r, n); });
+    return rs[rs.length - 1] || null;
+  }
+  function reverseHanded(S, q, n, C) {
+    var acc = q.ended;
+    var h = vals(S.asg).filter(function (x) { return x.handoffOf === q.id && x.accepted === acc; })[0];
+    if (h && h.state === 'live') { h.writes.push(acc); endRec(S, h, n, 'withdrawn', C); }
+    q.state = 'live'; q.ended = null;
+    return q;
   }
 
   function apply(S, n, C) {
@@ -636,6 +654,7 @@
         break;
       case 'item.return':
         r = liveRec(S, p.item, p.assignee);
+        if (!r) { q = handedRec(S, p.item, p.assignee, n); r = q && reverseHanded(S, q, n, C); }
         if (!r) break;
         endRec(S, r, n, 'returned', C); r.answerNote = p.note || null;
         // (291) returning an accepted handoff restores the original assignment with
@@ -648,10 +667,12 @@
       case 'item.unassign':
         if (p.assignee) {
           r = openRec(S, p.item, p.assignee);
+          if (!r) { q = handedRec(S, p.item, p.assignee, n); r = q && reverseHanded(S, q, n, C); }
           liveRules(S, p.item).forEach(function (rule) { if (rule.by === (r ? r.by : a)) rule.excluded[p.assignee] = true; });
           if (r) endRec(S, r, n, r.state === 'pending' ? 'withdrawn' : 'unassigned', C);
         } else {
           liveRules(S, p.item).forEach(function (rule) { if (rule.by === a) rule.ended = n.id; });
+          recsOn(S, p.item).filter(function (x) { return x.by === a && handedConc(x, n); }).forEach(function (x) { reverseHanded(S, x, n, C); });
           openRecs(S, p.item).filter(function (x) { return x.by === a || (x.state === 'pending' && x.sender === a); })
             .forEach(function (x) { endRec(S, x, n, x.state === 'pending' ? 'withdrawn' : 'unassigned', C); });
         }
@@ -700,6 +721,7 @@
       case 'roles.remove_member': // (287) the member's live assignments end as unassigned, pending ones as withdrawn
         m = S.members[p.member]; if (!m) break;
         m.removed = n.id; delete S.admins[p.member];
+        vals(S.asg).forEach(function (x) { if (x.to === p.member && handedConc(x, n)) reverseHanded(S, x, n, C); });
         vals(S.asg).forEach(function (x) {
           if (x.to === p.member && (x.state === 'live' || x.state === 'pending')) endRec(S, x, n, x.state === 'pending' ? 'withdrawn' : 'unassigned', C);
         });

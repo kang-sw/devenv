@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 432e361218a76e73
 sage-review-completeness-reviewed: 432e361218a76e73
+completed: 2026-11-08
 ---
 
 # ws tracker data structure: Go domain layer (events, validation, fold, view state) over wsledger
@@ -231,6 +232,30 @@ in-memory source.
 Done when: the golden parity tests pass for every listed viewer, every
 flagged reason has a unit test, and the scale test passes.
 
+### Result (4449ed91f) - 2026-11-08
+
+Landed `agents-plugin-tool/internal/wstracker` (payload types, `check.go`
+rules with the engine's reasons, the fold in `state.go`, linearization and
+verdicts in `replay.go`, `Derive` and the view struct in `view.go`) over a
+narrow `Source` interface that `*wsledger.Ledger` satisfies. The mockup
+takes (295): `endRec` withdraws the ended record's pending handoffs, and an
+unassign, return, or removal concurrent with the accept that handed the
+record reverses it. `wsledger` gains only the pure `KeyFingerprint`
+accessor.
+
+`testdata/gen-golden.js` writes golden files for the six fixture viewers
+plus two (295) case specs (`testdata/cases/`, linear and concurrent, two
+viewers each) and checks `testdata/reasons.json` against the engine (89
+engine-checked cases, one Go-only). `TestGoldenParity`, `TestFlaggedReasons`,
+`TestScale` (5,000 events in ~0.3 s, bound 5 s), and
+`TestVerdictsEqualFullReplay` pass.
+
+Departures: verdicts fold only the event's thread-local causal past (pinned
+to the full-past definition by a test); `roles.add_member` in the fixtures
+becomes genesis membership plus `roles.set_lead`; `store`, `sync`,
+`clones`, `events[].local/open/late`, and `stats.commits` are caller-filled
+and excluded from parity.
+
 ### Phase 2: wsledger binding, write path, and scenarios
 
 Depends on Phase 1.
@@ -258,6 +283,35 @@ Depends on Phase 1.
 
 Done when: the scenario ports, the extra cases, and the integration test
 pass, and Phase 1's tests still pass.
+
+### Result (c6c5fe5c8) - 2026-11-08
+
+Landed `Tracker` (`tracker.go`: cursor-driven `Refresh`, `View`,
+`Dispatch`, `NextID`, `Refusal`), `Veto(genesis)` and `Open` (`veto.go`),
+and a seen-closure causality index (`causal.go`) the veto uses because
+`VetoFunc` gets no `Concurrent`. `Open` opens once without the veto to
+read the genesis and again with it (and chains any caller veto). The veto
+folds the removal's past with the domain's own roles-only fold
+(`replayRoles`), so a domain-flagged `roles.set_lead` moves nobody.
+`Dispatch` folds the whole held state plus the call's earlier events,
+runs the protocol's author check, and mirrors `verify.go`'s identity
+rules plus (209). The waiting-event caveat is documented at the site.
+
+Tests: `TestScenario1`-`9` over an in-memory team world seeded from the
+omar.pc golden (his clone holds every pushed commit), with offline/sync
+for scenarios 6 and 7. Also `TestVetoLeadsNobody` (crafted past),
+`TestDispatchRefusal`, `TestRemovalEndsLiveAndPending`,
+`TestAdminHandoffPendingThenRemoval`, `TestHandoffOriginalEndedConcurrent`
+(both fold orders), `TestIncrementalRefresh` (new events, filled gap,
+revocation cut), and `TestRealLedgerTwoWriters` (temp bare repository,
+real `ssh-keygen`, two writers, same view, vetoed removal flagged on
+both). The full verification passes. Review follow-ups landed in
+de649c429.
+
+Open coverage: identity pre-validation branches that need real SSH keys
+(key in use, not held, already revoked) have no committed test. The lite
+reviewer probed them against a real ledger and found reason parity word
+for word.
 
 ## Verification
 
