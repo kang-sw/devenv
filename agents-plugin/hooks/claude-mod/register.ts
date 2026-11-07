@@ -75,13 +75,16 @@ import {
 // - Dashboard feed (behind claude.dashboard_enabled): the lead's and its
 //   subagents' live activity, its replies, the user's messages and turn
 //   summaries handed to the session's own MCP server under the
-//   conversation's lead key, which keeps the session's live dashboard view;
-//   observe-only, it never changes an event (see dashboard.ts). Under the
-//   same knob the mailbox push's wait also wakes on a message the user sent
-//   from the dashboard page, which the mod drains through the session's
-//   adapter-only inbox drain tool and submits as the user's own message
-//   under the whiteboard label: at once while idle, held until the turn
-//   ends while one runs (see watcher.ts).
+//   conversation's lead key, which keeps the session's live dashboard view,
+//   with the session's usage figures for its status band; it never changes
+//   an event it observes (see dashboard.ts). Under the same knob the mailbox
+//   push's wait also wakes on a message the user sent from the dashboard
+//   page, which the mod drains through the session's adapter-only inbox
+//   drain tool and submits as the user's own message under the whiteboard
+//   label: at once while idle; while a main-thread turn runs, held until it
+//   ends, unless the user promoted it to steering, which is appended into
+//   the running turn at the next main-thread tool call's result (see
+//   watcher.ts).
 // - Status band (off until claude.status_band_enabled is set): a framed band
 //   above the prompt with the model, folder, git, context, rate-limit and
 //   cost figures, and the held key's todos, agenda and mailbox address (its
