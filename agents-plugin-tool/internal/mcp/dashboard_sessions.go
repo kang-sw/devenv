@@ -99,15 +99,22 @@ func dashboardStamp(t time.Time) string { return t.UTC().Format(time.RFC3339) }
 // its session-scope overlay. An undeclared key (no dashboard manifest
 // loaded) or a resolve error is off.
 func (s *Server) dashboardSessionEnabled(sessionKey string) bool {
+	on, _ := s.dashboardSessionResolve(sessionKey)
+	return on
+}
+
+// dashboardSessionResolve is dashboardSessionEnabled with the resolve error
+// kept apart: an undeclared key is off with no error.
+func (s *Server) dashboardSessionResolve(sessionKey string) (bool, error) {
 	if _, ok := s.declared.lookup(DashboardEnabledKey); !ok {
-		return false
+		return false, nil
 	}
 	got, err := s.resolveConfigGet(sessionKey, DashboardEnabledKey)
 	if err != nil {
-		return false
+		return false, err
 	}
 	on, _ := got.Value.(bool)
-	return on
+	return on, nil
 }
 
 // dashboardTouch records a keyed call by a top-level lead session rooted at
