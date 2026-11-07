@@ -204,7 +204,7 @@ func Create(ctx context.Context, opts Options) (*Ledger, error) {
 		if err := l.refresh(ctx); err != nil {
 			return err
 		}
-		return l.joinLocked(ctx)
+		return l.joinLocked(ctx, true)
 	})
 	if err != nil {
 		return nil, err
@@ -228,7 +228,7 @@ func Join(ctx context.Context, opts Options) (*Ledger, error) {
 		if err := l.refresh(ctx); err != nil {
 			return err
 		}
-		return l.joinLocked(ctx)
+		return l.joinLocked(ctx, false)
 	})
 	if err != nil {
 		return nil, err
@@ -393,8 +393,10 @@ func (l *Ledger) writeGenesis(ctx context.Context) error {
 
 // joinLocked writes this clone's member.join and the claim ref, claim
 // first, unless the identity state already holds this key for the member.
-func (l *Ledger) joinLocked(ctx context.Context) error {
-	if l.view.holdsKey(l.member, l.fp) {
+// The creator writes both although genesis holds its key, so every member
+// id, the creator's included, has a claim ref; its join is a valid no-op.
+func (l *Ledger) joinLocked(ctx context.Context, creator bool) error {
+	if !creator && l.view.holdsKey(l.member, l.fp) {
 		return nil
 	}
 	for _, n := range l.view.streams[l.stream] {
@@ -405,9 +407,13 @@ func (l *Ledger) joinLocked(ctx context.Context) error {
 	if len(l.journal.pending(l.committedMax)) > 0 {
 		return errors.New("ledger: cannot join with pending writes")
 	}
+	tip := l.ownTip()
+	if tip != "" {
+		// A claim commit must be the first commit of its stream.
+		return errors.New("ledger: this clone already has commits but no membership; join from a fresh store directory")
+	}
 	payload, _ := json.Marshal(JoinPayload{Member: l.member, Name: l.opts.Name, Key: l.pubKey})
 	ev := journalEvent{Seq: max(l.journal.maxSeq(), l.committedMax) + 1, TS: l.now(), Type: TypeMemberJoin, Payload: payload}
-	tip := l.ownTip()
 	oid, err := l.writeEventCommit(ctx, tip, l.seenNow(), ev.TS, []journalEvent{ev})
 	if err != nil {
 		return err
@@ -560,12 +566,36 @@ func (l *Ledger) refresh(ctx context.Context) error {
 	if err := l.checkSignatures(ctx); err != nil {
 		return err
 	}
-	l.committedMax = 0
-	if st := l.refs[l.ownRef()]; st != nil {
-		l.committedMax = st.maxSeq
-	}
+	l.committedMax = l.ownSeqThrough("")
 	l.rebuild()
 	return nil
+}
+
+// ownSeqThrough is the highest seq of this clone's ref that is inside
+// causality, counted the way the envelope pass of verification counts it
+// (well-formed commit, own stream, good signature, continuous seq), through
+// the commit stop ("" = the tip). A writer's next seq follows it, so an
+// event broken on its ref never drags the next valid one into a gap.
+func (l *Ledger) ownSeqThrough(stop string) int {
+	st := l.refs[l.ownRef()]
+	if st == nil {
+		return 0
+	}
+	expected := 1
+	for _, c := range st.commits {
+		info := l.sigCache[c.OID]
+		if c.Bad == "" && c.Stream == st.owner && info.state == sigGood && info.fp != "" {
+			for _, ln := range c.Lines {
+				if ln.Bad == "" && ln.Seq == expected {
+					expected++
+				}
+			}
+		}
+		if c.OID == stop {
+			break
+		}
+	}
+	return expected - 1
 }
 
 func (l *Ledger) loadRef(ctx context.Context, st *refState, oid string) error {

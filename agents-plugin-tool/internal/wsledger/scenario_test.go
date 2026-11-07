@@ -26,7 +26,6 @@ func wantReason(t *testing.T, e Event, substr string) {
 }
 
 func TestCreateWritesCreatorJoinAndClaim(t *testing.T) {
-	t.Skip("implementation defect: Create writes no creator member.join or claim ref (joinLocked returns early because genesis already holds the key)")
 	w := newWorld(t)
 	ada := w.create("ada", "c1")
 	if refTip(t, ada, claimRef("ada")) == "" {
@@ -293,7 +292,6 @@ func TestSeqGapAndDuplicateBroken(t *testing.T) {
 }
 
 func TestWriterNextSeqFollowsHighestValidSeq(t *testing.T) {
-	t.Skip("implementation defect: committedMax counts seqs of broken lines on the own ref, so the next seq lands in a gap")
 	w := newWorld(t)
 	ada := w.create("ada", "c1")
 	bo := w.join("bo", "c1")

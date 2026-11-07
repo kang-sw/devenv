@@ -74,7 +74,6 @@ type refState struct {
 	tip     string
 	commits []*commitRec
 	lines   map[string]int // event file -> line count at tip
-	maxSeq  int            // highest seq of a well-formed line
 	// poisoned is set once a commit is not a pure append: later commits'
 	// diffs no longer prove what each one added.
 	poisoned string
@@ -100,13 +99,6 @@ func (st *refState) absorb(raw rawCommit) {
 			st.lines[raw.Path] = prev + len(raw.Added)
 			if c.Bad == "" && raw.Path != dayPath(c.TS) {
 				c.Bad = fmt.Sprintf("event file %s does not match the commit's date", raw.Path)
-			}
-		}
-	}
-	if c.Bad == "" {
-		for _, l := range c.Lines {
-			if l.Bad == "" {
-				st.maxSeq = max(st.maxSeq, l.Seq)
 			}
 		}
 	}
