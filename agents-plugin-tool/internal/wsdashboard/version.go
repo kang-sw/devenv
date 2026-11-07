@@ -9,9 +9,15 @@ import (
 //
 // A version is MAJOR.MINOR.PATCH with an optional leading "v" and an optional
 // "-<pre>" suffix. The numeric core compares first; with equal cores a
-// pre-release ("0.48.10-dev") is older than the release ("0.48.10"), and two
-// pre-releases compare as strings. A version that does not parse is older
-// than any that does, and two unparsable versions are equal.
+// suffixed version ("0.48.10-dev") is newer than the bare release
+// ("0.48.10"), and two suffixed versions compare as strings. A version that
+// does not parse is older than any that does, and two unparsable versions
+// are equal.
+//
+// This departs from semver, where a pre-release precedes its release: the
+// source version names the release it follows (it becomes "X-dev" in the
+// commit that releases X), so a "-dev" build is post-release code and must
+// outrank a stale release daemon of the same core.
 //
 // The order is total, so two ws-mcp builds never each see the other's daemon
 // as older: replacement cannot flap.
@@ -35,9 +41,9 @@ func CompareVersions(a, b string) int {
 	case pa == pb:
 		return 0
 	case pa == "":
-		return 1
-	case pb == "":
 		return -1
+	case pb == "":
+		return 1
 	}
 	return strings.Compare(pa, pb)
 }

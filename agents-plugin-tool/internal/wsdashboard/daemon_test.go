@@ -322,11 +322,26 @@ func TestEnsureHandoffReplacesAnOlderDaemon(t *testing.T) {
 	}
 }
 
+// TestEnsureHandoffReplacesAReleaseDaemonWithADevBuild: a "-dev" build follows
+// the release of its core, so it replaces a release daemon of the same core.
+func TestEnsureHandoffReplacesAReleaseDaemonWithADevBuild(t *testing.T) {
+	dir := t.TempDir()
+	old := startTestDaemon(t, dir, "0.48.0")
+	sp := &inProcessSpawner{t: t, dir: dir, versions: []string{"0.48.0-dev"}}
+	defer sp.closeAll()
+	outcome, err := Ensure(context.Background(), ensureOpts(dir, "0.48.0-dev", sp.spawn))
+	if err != nil || outcome != OutcomeReplaced {
+		t.Fatalf("Ensure = %s, %v", outcome, err)
+	}
+	waitDone(t, old)
+}
+
 func TestEnsureFromAnOlderWsMcpLeavesANewerDaemonRunning(t *testing.T) {
 	for _, tc := range []struct{ daemon, client string }{
 		{"0.49.0", "0.48.0"},
 		{"0.48.0", "0.48.0"},
-		{"0.48.0", "0.48.0-dev"},
+		{"0.48.0-dev", "0.48.0"},
+		{"0.48.0-dev", "0.48.0-dev"},
 	} {
 		dir := t.TempDir()
 		d := startTestDaemon(t, dir, tc.daemon)
