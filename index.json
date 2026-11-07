@@ -648,7 +648,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-07T05:37:37Z"
+        "touched_at": "2026-11-07T05:38:12Z",
+        "impl": {
+          "branch": "impl/develop/quit-derby-giddy"
+        }
       }
     }
   }
