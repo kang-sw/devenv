@@ -86,7 +86,11 @@ tools never depend on it. Its state lives under `<cache root>/dashboard/`:
 - `sessions/<reply-id>/inbox/` - the board-answer inbox (`internal/wsinbox`):
   held messages the user sent from the page, one file each; `drained/` keeps
   the newest 20 as sent records. The adapter-only `dashboard.inbox_drain` tool
-  drains it, and `mailbox wait --board-inbox` also wakes on it (peek only).
+  drains it, and `mailbox wait --board-inbox` also wakes on it (peek only). A
+  message promoted to steering is rewritten with `steer: true` and is no
+  longer a merge target; `dashboard.inbox_drain steer_only: true` claims only
+  those, and `mailbox wait --board-steer` wakes only on one (the wait an
+  adapter arms mid-turn; exclusive with `--board-inbox`).
 
 After a store write the serving ws-mcp sends `POST /nudge {reply_id,
 project}`; the daemon also re-reads every session every 30 seconds.
@@ -102,10 +106,13 @@ text; a board image inside the session's project root loads through `GET
 image-extension file that still resolves inside the root after every symlink
 (404 otherwise), and any other image renders as path text. The live layout's
 composer sends: `POST /s/<reply-id>/message {text, chips}` holds the message
-in the session's inbox (merged into a still-held one), and `POST
-/s/<reply-id>/cancel {id}` takes a held one back; both require an `Origin`
-equal to the daemon's own, and a session without a fresh adapter snapshot gets
-409. `whiteboard.update`'s `full:` line names
+in the session's inbox (merged into a still-held one that is not steered),
+`POST /s/<reply-id>/cancel {id}` takes a held one back, and `POST
+/s/<reply-id>/steer {id}` promotes a held one to steering, answering the
+rewritten entry's new `{id}` (409 once the session has received it). The
+adapter claims a steered message at the session's next tool boundary instead
+of at the turn end. All three require an `Origin` equal to the daemon's own,
+and a session without a fresh adapter snapshot gets 409. `whiteboard.update`'s `full:` line names
 `http://127.0.0.1:<port>/s/<reply-id>` once the session's last nudge was
 answered, and the page path otherwise.
 

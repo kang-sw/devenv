@@ -106,6 +106,34 @@ func TestMergeAccumulatesImagesAndCancelKeepsTheFiles(t *testing.T) {
 	}
 }
 
+// TestSteerKeepsTheEntrysImages: a steer rewrites the whole entry, so the
+// steered entry lists the same image paths, the files stay, and the
+// steer-only drain hands the paths to the adapter.
+func TestSteerKeepsTheEntrysImages(t *testing.T) {
+	dir := Dir(t.TempDir())
+	a := attach(t, dir, "0123456789abcdef-1.png")
+	b := attach(t, dir, "0123456789abcdef-2.jpg")
+	name, _ := sendImages(t, dir, "look", a, b)
+	steered, err := Steer(dir, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	held, _ := Held(dir)
+	if len(held) != 1 || held[0].Name != steered || !held[0].Entry.Steer {
+		t.Fatalf("held after steer = %+v", held)
+	}
+	if imgs := held[0].Entry.Images; len(imgs) != 2 || imgs[0] != a || imgs[1] != b {
+		t.Fatalf("steered images = %v, want [%s %s]", imgs, a, b)
+	}
+	if !exists(a) || !exists(b) {
+		t.Fatal("steer deleted an attachment")
+	}
+	got, err := DrainSteer(dir)
+	if err != nil || len(got) != 1 || len(got[0].Entry.Images) != 2 {
+		t.Fatalf("DrainSteer = %+v, %v", got, err)
+	}
+}
+
 func TestAttachmentNameConfinesToTheDir(t *testing.T) {
 	ad := AttachmentsDir(Dir(t.TempDir()))
 	good := filepath.Join(ad, "0123456789abcdef-3.jpg")

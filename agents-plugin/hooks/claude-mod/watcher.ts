@@ -57,6 +57,15 @@ import type { MailItem, OwnPrompt } from './captions'
  * is the message recorded for the user. A crash between the drain and the
  * submit loses the message, the same gap mail has.
  *
+ * A held message the user promoted to steering is the one exception to
+ * holding it for the turn end: every main-thread tool boundary (while board
+ * submission is on) claims the steered messages alone (`drainSteer`) and
+ * appends them as one user row (`steer`) before the queued mail row, so the
+ * turn's next model request reads them; a promoted message may overtake held
+ * ones. When the host refuses that row, the claimed texts are carried to the
+ * turn end and go out ahead of what the turn-end drain claims, so a steered
+ * message is never lost after its claim; a stop records them instead.
+ *
  * Every side effect is an injected edge so the loop is testable without a
  * live mailbox or engine.
  */
@@ -92,6 +101,14 @@ export interface BoardEdges {
   submit: (texts: readonly string[]) => Promise<void>
   /** Append the same prompt as a user row instead; rejects when refused. */
   append: (texts: readonly string[]) => Promise<void>
+  /** Claim only the held messages of `key`'s inbox promoted to steering, oldest first: their texts. Rejects when the drain failed. */
+  drainSteer: (key: string) => Promise<string[]>
+  /**
+   * Append steered messages into the running turn as one user row, the
+   * user's own, and record them in the dashboard conversation; rejects when
+   * the row was refused.
+   */
+  steer: (texts: readonly string[]) => Promise<void>
 }
 
 export interface WatcherEdges {
@@ -251,9 +268,10 @@ export interface Watcher {
   /** The model's own recv for `key` completed successfully: resume a loop suspended on that key. */
   recvCompleted: (key: string) => void
   /**
-   * A model-issued main-thread tool call completed: append everything queued
-   * as one row before its result returns, so the request that follows the
-   * result reads it. Never rejects.
+   * A model-issued main-thread tool call completed: append the board
+   * messages promoted to steering, then everything queued, each as one row
+   * before its result returns, so the request that follows the result reads
+   * them. Never rejects.
    */
   toolCompleted: () => Promise<void>
   /**
@@ -296,18 +314,29 @@ export function createWatcher(edges: WatcherEdges): Watcher {
   let boardHeld = false
   /** Board drains run one at a time, so a turn end and an idle wake never interleave their submits. */
   let boardChain: Promise<unknown> = Promise.resolve()
+  /**
+   * Steered board messages claimed at a tool boundary whose row the host
+   * refused: the next board flush submits them ahead of what it drains.
+   * Session-wide like the queue: a rebind keeps them, a stop records them.
+   */
+  let steerCarry: string[] = []
   /** The wait now running: its own abort, which re-arms it without ending the loop, and its board flag. */
   let waiting: { ctrl: AbortController; board: boolean } | undefined
 
-  /** Whether the next wait carries the board flag: board submission on and nothing held for a turn end. */
-  function boardWanted(): boolean {
-    if (boardHeld || !edges.board) return false
+  /** Whether board submission is on now. */
+  function boardEnabled(): boolean {
+    if (!edges.board) return false
     try {
       return edges.board.enabled()
     } catch (err) {
       edges.log(`${edges.label}: reading the board switch failed: ${String(err)}`)
       return false
     }
+  }
+
+  /** Whether the next wait carries the board flag: board submission on and nothing held for a turn end. */
+  function boardWanted(): boolean {
+    return !boardHeld && boardEnabled()
   }
 
   /** Re-arm the running wait when its board flag no longer matches. */
@@ -328,22 +357,31 @@ export function createWatcher(edges: WatcherEdges): Watcher {
 
   /**
    * Drain `myKey`'s held board messages and submit them as one prompt, after
-   * any drain already running. Never rejects: answers `empty` when nothing
-   * was held, `failed` when the drain failed (the messages stay held), and
-   * `done` once claimed messages were submitted, appended, or recorded.
+   * any drain already running; the carried steered messages go first. With
+   * `drainHeld` false only the carried ones are submitted. Never rejects:
+   * answers `empty` when nothing was held or carried, `failed` when the drain
+   * failed (the held messages stay held; carried ones are still submitted),
+   * and `done` once claimed messages were submitted, appended, or recorded.
    */
-  function flushBoard(myKey: string): Promise<'done' | 'empty' | { failed: string }> {
+  function flushBoard(myKey: string, drainHeld = true): Promise<'done' | 'empty' | { failed: string }> {
     const at = stops
     const run = boardChain.then(async (): Promise<'done' | 'empty' | { failed: string }> => {
       const board = edges.board
       if (!board) return 'empty'
-      let texts: string[]
-      try {
-        texts = await board.drain(myKey)
-      } catch (err) {
-        return { failed: String(err) }
+      const carried = steerCarry
+      steerCarry = []
+      let texts: string[] = []
+      let failed: string | undefined
+      if (drainHeld) {
+        try {
+          texts = await board.drain(myKey)
+        } catch (err) {
+          failed = String(err)
+        }
       }
-      if (texts.length === 0) return 'empty'
+      texts = [...carried, ...texts]
+      if (texts.length === 0) return failed === undefined ? 'empty' : { failed }
+      if (failed !== undefined) edges.log(`${edges.label}: dashboard message drain failed (${failed}); submitting the ${carried.length} carried steered message(s) alone`)
       // The drain claimed these: from here this is their only holder. A stop
       // since means the conversation they were for is gone.
       if (stops !== at) {
@@ -354,7 +392,7 @@ export function createWatcher(edges: WatcherEdges): Watcher {
       let submitErr: unknown
       try {
         await board.submit(texts)
-        return 'done'
+        return failed === undefined ? 'done' : { failed }
       } catch (err) {
         submitErr = err
       }
@@ -364,10 +402,49 @@ export function createWatcher(edges: WatcherEdges): Watcher {
       } catch (err) {
         keepBoard(`prompt submit failed: ${String(submitErr)}; row append failed: ${String(err)}`, texts)
       }
-      return 'done'
+      return failed === undefined ? 'done' : { failed }
     })
     boardChain = run.catch(() => {})
     return run.catch((err) => ({ failed: String(err) }))
+  }
+
+  /**
+   * Claim the board messages promoted to steering and append them into the
+   * running turn as one row. A refused row carries them to the next board
+   * flush (the turn end), so a claimed message is never lost. Never rejects.
+   */
+  async function steerBoard(): Promise<void> {
+    const board = edges.board
+    const myKey = key
+    if (!board || myKey === undefined || !boardEnabled()) return
+    const at = stops
+    let texts: string[]
+    try {
+      texts = await board.drainSteer(myKey)
+    } catch (err) {
+      edges.log(`${edges.label}: steered dashboard message drain failed for ${myKey}: ${String(err)}; they stay held`)
+      return
+    }
+    if (texts.length === 0) return
+    // The drain claimed these: from here this is their only holder.
+    if (stops !== at) {
+      keepBoard(`the push loop stopped: ${lastStop}`, texts)
+      return
+    }
+    edges.log(`${edges.label}: appending ${texts.length} steered dashboard message(s) to the running turn as one row`)
+    try {
+      await board.steer(texts)
+    } catch (err) {
+      if (stops !== at) {
+        keepBoard(`the push loop stopped: ${lastStop}; steer row: ${String(err)}`, texts)
+        return
+      }
+      edges.log(`${edges.label}: steered dashboard message row refused (${String(err)}); submitting it at the turn end instead`)
+      steerCarry.push(...texts)
+      // The turn ended while the row was pending (an interrupt): its flush
+      // has run, so submit the carried messages now.
+      if (!edges.turnRunning()) void flushBoard(myKey, false)
+    }
   }
 
   /** Queue `prompt` for the running main-thread turn; false when none runs, and the caller submits it. */
@@ -686,6 +763,7 @@ export function createWatcher(edges: WatcherEdges): Watcher {
     stop(reason) {
       const left = takeQueued()
       if (left) lose(left.items, `the push loop stopped: ${reason}`)
+      if (steerCarry.length > 0) keepBoard(`the push loop stopped: ${reason}`, steerCarry.splice(0))
       boardHeld = false
       if (!ctrl) return
       stops += 1
@@ -704,6 +782,11 @@ export function createWatcher(edges: WatcherEdges): Watcher {
       if (suspended && suspended.key === doneKey && doneKey === key) suspended.resume()
     },
     async toolCompleted() {
+      try {
+        await steerBoard()
+      } catch (err) {
+        edges.log(`${edges.label}: steering dashboard messages failed: ${String(err)}`)
+      }
       const taken = takeQueued()
       if (!taken) return
       edges.log(`${edges.label}: appending ${taken.items.length} queued prompt(s) to the running turn as one row`)
@@ -726,13 +809,14 @@ export function createWatcher(edges: WatcherEdges): Watcher {
         })
       }
       const myKey = key
-      if (myKey === undefined || !edges.board || !(boardHeld || boardWanted())) {
+      const drainHeld = boardHeld || boardWanted()
+      if (myKey === undefined || !edges.board || !(drainHeld || steerCarry.length > 0)) {
         boardHeld = false
         sendMail()
         return
       }
       // The held board message goes first; the mail waits for it a bounded time.
-      const flushed = flushBoard(myKey).then((res) => {
+      const flushed = flushBoard(myKey, drainHeld).then((res) => {
         if (typeof res === 'object') edges.log(`${edges.label}: turn-end dashboard drain failed (${res.failed}); the messages stay held`)
         // Cleared only now, so the wait does not wake on what this drain is about to claim.
         boardHeld = false

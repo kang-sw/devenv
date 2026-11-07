@@ -21,18 +21,21 @@ import (
 // The browser write routes: POST /s/<reply-id>/message holds a message the
 // user sent from the composer in the session's board-answer inbox (merged
 // into the held one when there is one), and POST /s/<reply-id>/cancel takes a
-// held message back. The inbox is the daemon's one write target; the
-// session's host adapter drains it at the end of a turn and injects the
-// message as the user's own. Both routes are offered only for a session with
-// a live host adapter, require an Origin equal to the daemon's own (which
-// stops cross-site form posts), and send no CORS headers.
+// held message back. POST /s/<reply-id>/steer promotes a held message to
+// steering: the adapter injects it at the session's next tool boundary
+// instead of at the turn end. The inbox is the daemon's one write target; the
+// session's host adapter drains it and injects the message as the user's own.
+// The routes are offered only for a session with a live host adapter, require
+// an Origin equal to the daemon's own (which stops cross-site form posts),
+// and send no CORS headers.
 //
 // A message may attach images: new ones as base64 data, and ones a cancel
 // returned to the composer as references to their already written files.
 // The route writes the new ones into the inbox's attachments directory in the
 // same request that holds the message, and the held entry lists their
 // absolute paths; the session receives each as an "[image: <path>]" line it
-// opens with its own read tool.
+// opens with its own read tool. A steer rewrites the entry whole, so a
+// steered entry keeps its image paths.
 
 const (
 	// inboxBodyLimit bounds a write route's request body, and a message's
@@ -94,7 +97,7 @@ func sessionInbox(dir, replyID string) string {
 	return inbox
 }
 
-// cancelRequest is the cancel route's body.
+// cancelRequest is the cancel and steer routes' body: the held message's id.
 type cancelRequest struct {
 	ID string `json:"id"`
 }
@@ -114,7 +117,8 @@ func sameOrigin(r *http.Request) bool {
 	return strings.EqualFold(u.Host, r.Host)
 }
 
-// handleInboxWrite serves the message and cancel routes of one session.
+// handleInboxWrite serves the message, cancel, and steer routes of one
+// session.
 func (d *Daemon) handleInboxWrite(w http.ResponseWriter, r *http.Request, replyID, route string) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -248,11 +252,12 @@ func (d *Daemon) sendMessage(dir string, req messageRequest, images []decodedIma
 		paths = append(paths, path)
 	}
 	if count := len(paths) + len(images); count > 0 {
-		// A send merges into the newest held entry, so the cap applies to
-		// the two together. A drain racing this can only make the count
-		// over-strict.
-		if held, _ := wsinbox.Held(dir); len(held) > 0 {
-			count += len(held[len(held)-1].Entry.Images)
+		// A send merges into the newest unsteered held entry, so the cap
+		// applies to the two together; a steered entry takes no merge, so
+		// its images do not count. A drain racing this can only make the
+		// count over-strict.
+		if target, ok, _ := wsinbox.MergeTarget(dir); ok {
+			count += len(target.Entry.Images)
 		}
 		if count > wsinbox.MaxImages {
 			return http.StatusRequestEntityTooLarge, fmt.Sprintf("the held message would carry %d images: a message holds at most %d", count, wsinbox.MaxImages)
@@ -319,8 +324,9 @@ func removeFiles(paths []string) {
 	}
 }
 
-// inboxWrite performs the cancel route against the inbox at dir; d.inboxMu
-// is held, so the daemon's own sends and cancels never race each other, and
+// inboxWrite performs the cancel and steer routes against the inbox at dir;
+// d.inboxMu is held, so the daemon's own sends, cancels, and steers never
+// race each other or the attachment sweep, and
 // the inbox's claims settle a race with the adapter's drain.
 func (d *Daemon) inboxWrite(dir, route string, raw []byte) (int, any) {
 	switch route {
@@ -355,6 +361,24 @@ func (d *Daemon) inboxWrite(dir, route string, raw []byte) (int, any) {
 			}
 		}
 		return http.StatusOK, map[string]any{"text": strings.Join(entry.Parts, "\n\n"), "chips": chips, "images": images}
+	case "steer":
+		var req cancelRequest
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return http.StatusBadRequest, "malformed steer"
+		}
+		name, ok := wsinbox.NameForID(req.ID)
+		if !ok {
+			return http.StatusBadRequest, "malformed message id"
+		}
+		steered, err := wsinbox.Steer(dir, name)
+		if errors.Is(err, wsinbox.ErrGone) {
+			return http.StatusConflict, "the session already received this message"
+		}
+		if err != nil {
+			fmt.Fprintf(d.log, "dashboard: inbox steer: %v\n", err)
+			return http.StatusInternalServerError, "could not steer the message"
+		}
+		return http.StatusOK, map[string]any{"id": wsinbox.Record{Name: steered}.ID()}
 	}
 	return http.StatusNotFound, "not found"
 }

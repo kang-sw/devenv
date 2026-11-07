@@ -811,6 +811,19 @@ export const register: Register = (on) => {
             const res = await $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] } })
             if (res.deny !== undefined) throw new Error(`row refused: ${res.deny}`)
           },
+          // Promoted messages: claimed at a main-thread tool boundary and
+          // appended into the running turn, as mailbox steer appends mail.
+          drainSteer: async (key) => {
+            await serverResolved
+            if (!server) throw new Error('MCP server not resolved')
+            return parseInboxDrain(await callText(server, INBOX_DRAIN_TOOL, { session_key: key, steer_only: true, format: 'json' }))
+          },
+          steer: async (texts) => {
+            const text = texts.join('\n\n')
+            const res = await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: labelWhiteboard($.plugin.name, text) }] } })
+            if (res.deny !== undefined) throw new Error(`row refused: ${res.deny}`)
+            dashboard.whiteboardSteered(text)
+          },
         },
       })
       watcher = created
@@ -1158,7 +1171,9 @@ export const register: Register = (on) => {
 
   // Mailbox steer: mail queued while a main-thread turn runs is appended at
   // the turn's next tool boundary, before the result returns, since a tool
-  // result is always followed by a model request in the same turn. Only the
+  // result is always followed by a model request in the same turn; dashboard
+  // messages the user promoted to steering are claimed and appended there
+  // too, ahead of the mail (the watcher's toolCompleted). Only the
   // model's own main-thread calls count: the mod's own drain and slug lookup
   // pass here too, with this plugin as origin, and no request follows them.
   // A row appended at a call the person interrupted reaches the model with

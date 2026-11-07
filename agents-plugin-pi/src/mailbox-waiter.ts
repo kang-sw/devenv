@@ -51,12 +51,14 @@
  * (`board` deps, `--board-inbox`): the wait peeks the session's board-answer
  * inbox, the adapter-only `dashboard.inbox_drain` tool claims its entries,
  * and the drain is submitted as the user's own message. See
- * `startMailboxWaiter` for when a message is held until the turn ends.
+ * `startMailboxWaiter` for when a message is held until the turn ends, and
+ * for the held message the user promoted to steering (`--board-steer`).
  */
 
 import { spawn } from "node:child_process";
 import { chmodSync, copyFileSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { whiteboardSubmissionText } from "./adapter-label.ts";
 import type { SpawnRole } from "./process-role.ts";
 
 /**
@@ -79,9 +81,14 @@ export interface MailboxEnvelope {
  */
 export type MailboxWaitOutcome = "mail" | "board" | "mail+board" | "timeout" | "stopped" | "error";
 
-/** How one wait is armed: `boardInbox` adds `--board-inbox`. */
+/**
+ * How one wait is armed: `boardInbox` adds `--board-inbox`, which wakes on
+ * any held dashboard message; `boardSteer` adds `--board-steer`, which wakes
+ * only on one promoted to steering. At most one is set.
+ */
 export interface MailboxWaitArm {
   boardInbox: boolean;
+  boardSteer?: boolean;
 }
 
 /** The custom-message `customType` every arriving mail item rides under. */
@@ -144,6 +151,50 @@ export interface BoardInboxDeps {
   drain: () => Promise<string[]>;
   /** Submit one drain as the user's own input. */
   inject: (texts: string[]) => void;
+  /** Steering a held message the user promoted; absent, every held message waits for the turn end. */
+  steer?: BoardSteerDeps;
+}
+
+/**
+ * Delivery of held dashboard messages the user promoted to steering: drained
+ * alone and sent into the running turn instead of after it.
+ */
+export interface BoardSteerDeps {
+  /**
+   * `true` while a steer reaches the running turn: the lead's run flag is
+   * set and no compaction holds the session (Pi refuses a prompt then, and
+   * the message would be lost). Must not throw.
+   */
+  steerable: () => boolean;
+  /** Claim only the held messages promoted to steering; resolve with their texts. Throws on a tool error. */
+  drain: () => Promise<string[]>;
+  /** Send one steer drain into the running turn as the user's own input. */
+  inject: (texts: string[]) => void;
+}
+
+/** What `boardSteerDeps` takes from the extension. */
+export interface BoardSteerWiring {
+  /** The lead's own run flag (`agent_start` to `agent_settled`). */
+  turnOpen: () => boolean;
+  /** The lead's compaction hold. */
+  compacting: () => boolean;
+  /** The steer-only inbox drain (`createBridgeInboxDrain` with `steerOnly`). */
+  drain: () => Promise<string[]>;
+  /** Pi's `sendUserMessage`. */
+  sendUserMessage: (text: string, options: { deliverAs: "steer" }) => void;
+}
+
+/**
+ * The extension's steer deps. A steer is a user message under the
+ * whiteboard label, so the dashboard feed records it as a whiteboard user
+ * message (`dashboardUserMessage`), as it records a follow-up submission.
+ */
+export function boardSteerDeps(wiring: BoardSteerWiring): BoardSteerDeps {
+  return {
+    steerable: () => wiring.turnOpen() && !wiring.compacting(),
+    drain: wiring.drain,
+    inject: (texts) => wiring.sendUserMessage(whiteboardSubmissionText(texts), { deliverAs: "steer" }),
+  };
 }
 
 export interface MailboxWaiterDeps {
@@ -228,6 +279,17 @@ function defaultSleep(ms: number): Promise<void> {
  * `--board-inbox`: the wait only peeks, so a held entry would wake it at
  * once. `leadSettled()` then ends that wait; the loop drains, injects, and
  * re-arms with the flag.
+ *
+ * While a message is held and the lead can take a steer (`steer` deps), the
+ * wait is armed with `--board-steer` instead: a held follow-up does not wake
+ * it, and a message the user promotes does. That wake drains the steered
+ * messages alone and sends them into the running turn, ahead of any held
+ * follow-up or mail. While a steer would be refused (a compaction hold, or
+ * no run), the wait is armed without steer mode, so a steered entry left
+ * held cannot wake it at once; `leadSettled()` (also called once compaction
+ * ends) re-arms it. A steer drain that outlasts the run or enters a
+ * compaction carries its texts to the next idle drain, which injects them
+ * ahead of what it claims, so a claimed message is never dropped.
  */
 export function startMailboxWaiter(deps: MailboxWaiterDeps): MailboxWaiterHandle {
   const controller = new AbortController();
@@ -245,6 +307,9 @@ export function startMailboxWaiter(deps: MailboxWaiterDeps): MailboxWaiterHandle
   const describe = (error: unknown): string => error instanceof Error ? error.message : String(error);
   // A board message seen during a turn and left in the inbox until the turn ends.
   let held = false;
+  // Steered messages claimed when a steer would no longer reach the turn:
+  // the next idle drain injects them first.
+  let carry: string[] = [];
   // The in-flight wait's own controller: `leadSettled` aborts it to re-arm,
   // while `controller` (stop) ends the loop.
   let waitController: AbortController | undefined;
@@ -263,22 +328,63 @@ export function startMailboxWaiter(deps: MailboxWaiterDeps): MailboxWaiterHandle
       return false;
     }
   };
-  /** Drain and inject; `false` when the drain failed. Clears the hold either way. */
-  const drainBoard = async (): Promise<boolean> => {
-    held = false;
-    let texts: string[];
+  const leadSteerable = (): boolean => {
     try {
-      texts = await board!.drain();
-    } catch (error) {
-      report(`board drain failed: ${describe(error)}`);
+      return board?.steer?.steerable() === true;
+    } catch {
       return false;
     }
+  };
+  /**
+   * Drain (unless `drainHeld` is false) and inject, the carried steered
+   * messages first; `false` when the drain failed, though the carried ones
+   * are injected anyway. Clears the hold either way.
+   */
+  const drainBoard = async (drainHeld = true): Promise<boolean> => {
+    held = false;
+    const carried = carry;
+    carry = [];
+    let texts: string[] = [];
+    let drained = true;
+    if (drainHeld) {
+      try {
+        texts = await board!.drain();
+      } catch (error) {
+        report(`board drain failed: ${describe(error)}`);
+        drained = false;
+      }
+    }
+    texts = [...carried, ...texts];
     if (texts.length > 0 && !controller.signal.aborted) {
       try {
         board!.inject(texts);
       } catch (error) {
         report(`board inject failed: ${describe(error)}`);
       }
+    }
+    return drained;
+  };
+  /** Drain the steered messages and steer them in; `false` when the drain failed. */
+  const steerBoard = async (): Promise<boolean> => {
+    let texts: string[];
+    try {
+      texts = await board!.steer!.drain();
+    } catch (error) {
+      report(`board steer drain failed: ${describe(error)}`);
+      return false;
+    }
+    if (texts.length === 0 || controller.signal.aborted) return true;
+    // Re-checked after the drain's await: the run may have ended or a
+    // compaction begun, where Pi would refuse the steer and lose it.
+    if (!leadSteerable()) {
+      carry.push(...texts);
+      return true;
+    }
+    try {
+      board!.steer!.inject(texts);
+    } catch (error) {
+      report(`board steer failed: ${describe(error)}; delivering it after the turn instead`);
+      carry.push(...texts);
     }
     return true;
   };
@@ -290,8 +396,9 @@ export function startMailboxWaiter(deps: MailboxWaiterDeps): MailboxWaiterHandle
       if (controller.signal.aborted) break;
       if (held && !enabled) held = false;
       // Checked here rather than only in leadSettled, so a turn that ended
-      // while this loop was busy still releases the held message.
-      if (held && leadIdle() && !(await drainBoard())) {
+      // while this loop was busy still releases the held message. Carried
+      // steered messages go out even with the knob turned off since.
+      if ((held || carry.length > 0) && leadIdle() && !(await drainBoard(held))) {
         // A failed drain leaves the entry held in the inbox; the next wait
         // (re-armed with the flag) wakes on it again after the backoff.
         if (!controller.signal.aborted) await sleep(backoffMs);
@@ -300,13 +407,14 @@ export function startMailboxWaiter(deps: MailboxWaiterDeps): MailboxWaiterHandle
       if (controller.signal.aborted) break;
 
       const boardInbox = enabled && !held;
+      const boardSteer = enabled && held && board?.steer !== undefined && leadSteerable();
       const wait = new AbortController();
       const onStop = (): void => wait.abort();
       controller.signal.addEventListener("abort", onStop, { once: true });
       waitController = wait;
       let outcome: MailboxWaitOutcome;
       try {
-        outcome = await deps.runWait(wait.signal, { boardInbox });
+        outcome = await deps.runWait(wait.signal, { boardInbox, boardSteer });
       } catch (error) {
         outcome = "error";
         report(`wait failed: ${describe(error)}`);
@@ -343,6 +451,11 @@ export function startMailboxWaiter(deps: MailboxWaiterDeps): MailboxWaiterHandle
         if (!leadIdle()) held = true;
         else if (!(await drainBoard())) failed = true;
       }
+      if ((outcome === "board" || outcome === "mail+board") && boardSteer && !controller.signal.aborted) {
+        // A steer refused now leaves the entry held; the next wait is armed
+        // without steer mode, so it does not wake on it again at once.
+        if (leadSteerable() && !(await steerBoard())) failed = true;
+      }
       if (failed && !controller.signal.aborted) await sleep(backoffMs);
     }
   })();
@@ -350,7 +463,7 @@ export function startMailboxWaiter(deps: MailboxWaiterDeps): MailboxWaiterHandle
   return {
     stop: () => controller.abort(),
     leadSettled: () => {
-      if (held) waitController?.abort();
+      if (held || carry.length > 0) waitController?.abort();
     },
     done,
   };
@@ -496,6 +609,8 @@ export interface SubprocessWaitOptions {
   timeoutArg?: string;
   /** Adds `--board-inbox`, so a held dashboard message also wakes the wait. Set per wait by the loop. */
   boardInbox?: boolean;
+  /** Adds `--board-steer` (when `boardInbox` is unset), so only a held message promoted to steering wakes the wait. Set per wait by the loop. */
+  boardSteer?: boolean;
   /** Diagnostic sink for the child's stderr and spawn failures; omitted diagnostics are discarded. */
   onStderr?: (line: string) => void;
 }
@@ -518,11 +633,12 @@ export function buildMailboxWaitArgv(options: SubprocessWaitOptions): string[] {
   const slug = options.slug?.trim();
   if (slug) argv.push("--slug", slug);
   if (options.boardInbox) argv.push("--board-inbox");
+  else if (options.boardSteer) argv.push("--board-steer");
   return argv;
 }
 
 /**
- * Refine a successful `--board-inbox` wait by the `kinds` its JSON output
+ * Refine a successful `--board-inbox` or `--board-steer` wait by the `kinds` its JSON output
  * reports. Output that cannot be read counts as both kinds: a mail drain of
  * an empty queue and a board check of an empty inbox are both harmless,
  * while a missed kind would leave that arrival unhandled.
@@ -576,6 +692,10 @@ export function createSubprocessWait(options: SubprocessWaitOptions): (signal: A
   return (signal, arm) =>
     new Promise<MailboxWaitOutcome>((resolve) => {
       const boardInbox = arm?.boardInbox === true;
+      const boardSteer = !boardInbox && arm?.boardSteer === true;
+      // Only a board wait reads stdout: its `kinds` tell mail from a board
+      // message. A mail-only wake needs no more than the exit code.
+      const readsKinds = boardInbox || boardSteer;
       const reportStderr = (line: string): void => {
         if (signal.aborted) return;
         try {
@@ -588,15 +708,13 @@ export function createSubprocessWait(options: SubprocessWaitOptions): (signal: A
         resolve("stopped");
         return;
       }
-      const argv = buildMailboxWaitArgv({ ...options, boardInbox });
-      // Only a board-inbox wait reads stdout: its `kinds` tell mail from a
-      // board message. A mail-only wake needs no more than the exit code.
+      const argv = buildMailboxWaitArgv({ ...options, boardInbox, boardSteer });
       const child = spawn(options.runtimeBinary ?? "python3", options.runtimeBinary ? argv.slice(1) : argv, {
         cwd: options.pluginDir,
-        stdio: ["ignore", boardInbox ? "pipe" : "ignore", "pipe"],
+        stdio: ["ignore", readsKinds ? "pipe" : "ignore", "pipe"],
       });
       let stdout = "";
-      let stdoutEnded = !boardInbox;
+      let stdoutEnded = !readsKinds;
       let onStdoutEnd: (() => void) | undefined;
       child.stdout?.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
       child.stdout?.on("end", () => { stdoutEnded = true; onStdoutEnd?.(); });
@@ -605,7 +723,7 @@ export function createSubprocessWait(options: SubprocessWaitOptions): (signal: A
         if (settled) return;
         settled = true;
         signal.removeEventListener("abort", onAbort);
-        resolve(boardInbox && outcome === "mail" ? boardWakeOutcome(stdout) : outcome);
+        resolve(readsKinds && outcome === "mail" ? boardWakeOutcome(stdout) : outcome);
       };
       const onAbort = (): void => {
         try {
@@ -689,12 +807,14 @@ export const DASHBOARD_INBOX_DRAIN_TOOL = "dashboard.inbox_drain";
 /**
  * The real board `drain`: claim every held dashboard message through the
  * bridge's client (`format: "json"` returns `{messages: [{text, ...}]}`) and
- * resolve with their texts in order. A tool-level error throws, so the loop
- * backs off; a malformed success degrades to no messages.
+ * resolve with their texts in order; with `steerOnly`, only the messages
+ * promoted to steering (the steer `drain`). A tool-level error throws, so
+ * the loop backs off; a malformed success degrades to no messages.
  */
-export function createBridgeInboxDrain(callTool: MailboxToolCall, sessionKey: string): () => Promise<string[]> {
+export function createBridgeInboxDrain(callTool: MailboxToolCall, sessionKey: string, options: { steerOnly?: boolean } = {}): () => Promise<string[]> {
+  const args = { session_key: sessionKey, ...(options.steerOnly ? { steer_only: true } : {}), format: "json" };
   return async () => {
-    const result = await callTool(DASHBOARD_INBOX_DRAIN_TOOL, { session_key: sessionKey, format: "json" });
+    const result = await callTool(DASHBOARD_INBOX_DRAIN_TOOL, args);
     const text = result.content.find((item) => item.type === "text")?.text;
     if (result.isError) throw new Error(text ?? `${DASHBOARD_INBOX_DRAIN_TOOL} failed`);
     if (!text) return [];

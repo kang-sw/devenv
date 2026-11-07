@@ -14,7 +14,9 @@ import (
 // dashboard_inbox.go is the adapter-only drain of a session's board-answer
 // inbox (internal/wsinbox): the messages the user sent from the dashboard
 // page and the daemon held on disk. The adapter calls it at the end of a
-// turn and injects what it returns as the user's own message.
+// turn and injects what it returns as the user's own message; with
+// steer_only it calls it mid-turn and takes only the messages the user
+// promoted to steering.
 
 const dashboardInboxDrainTool = "dashboard.inbox_drain"
 
@@ -51,7 +53,11 @@ func (s *Server) handleDashboardInboxDrain(id json.RawMessage, args map[string]a
 	if err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 	}
-	records, drainErr := wsinbox.Drain(dir)
+	drain := wsinbox.Drain
+	if boolArgument(args["steer_only"]) {
+		drain = wsinbox.DrainSteer
+	}
+	records, drainErr := drain(dir)
 	if len(records) > 0 {
 		// The daemon re-reads so the page's held bubble clears.
 		s.dashboardNudge(key)

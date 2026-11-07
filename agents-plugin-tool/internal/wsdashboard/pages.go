@@ -464,7 +464,7 @@ func (d *Daemon) handleIndex(w http.ResponseWriter, r *http.Request) {
 // assets a page loads by relative path.
 func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/s/")
-	if replyID, sub, _ := strings.Cut(rest, "/"); sub == "message" || sub == "cancel" {
+	if replyID, sub, _ := strings.Cut(rest, "/"); sub == "message" || sub == "cancel" || sub == "steer" {
 		d.handleInboxWrite(w, r, replyID, sub)
 		return
 	}

@@ -172,6 +172,38 @@ func TestMessageRouteRefusesBadImages(t *testing.T) {
 	}
 }
 
+// TestImageCapSkipsASteeredEntry: a steered entry takes no merge, so a
+// later send's images are capped against the new entry it starts, not
+// against the steered one's images.
+func TestImageCapSkipsASteeredEntry(t *testing.T) {
+	f := startPageFixture(t)
+	full := []string{}
+	for i := 0; i < wsinbox.MaxImages; i++ {
+		full = append(full, "p.png", pngBytes)
+	}
+	id, _ := f.send(t, `{"text":"full","images":`+imagesJSON(full...)+`}`)
+	if code, _, raw := postJSON(t, f.base+"/s/livesession/steer", f.base, `{"id":"`+id+`"}`); code != http.StatusOK {
+		t.Fatalf("steer = %d: %s", code, raw)
+	}
+	held := f.held(t)
+	if len(held) != 1 || !held[0].Entry.Steer || len(held[0].Entry.Images) != wsinbox.MaxImages {
+		t.Fatalf("held after steer = %+v", held)
+	}
+	// Counting the steered entry would refuse this as 16 images.
+	if _, merged := f.send(t, `{"text":"next","images":`+imagesJSON(full...)+`}`); merged {
+		t.Fatal("a send merged into the steered entry")
+	}
+	held = f.held(t)
+	if len(held) != 2 || !held[0].Entry.Steer || held[1].Entry.Steer || len(held[0].Entry.Images) != wsinbox.MaxImages || len(held[1].Entry.Images) != wsinbox.MaxImages {
+		t.Fatalf("held = %+v", held)
+	}
+	// The new entry is the merge target now, and it is full.
+	code, raw := f.postMessage(t, `{"images":`+imagesJSON("one.png", pngBytes)+`}`)
+	if code != http.StatusRequestEntityTooLarge || !strings.Contains(raw, "9 images") {
+		t.Fatalf("send over the new entry's cap = %d (%s), want 413", code, raw)
+	}
+}
+
 // TestImageMessageNeedsOriginAndAdapter: an image-bearing message keeps the
 // write route's Origin check and its no-adapter refusal, and writes nothing.
 func TestImageMessageNeedsOriginAndAdapter(t *testing.T) {
