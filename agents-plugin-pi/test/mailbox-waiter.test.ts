@@ -14,9 +14,11 @@ import { access, chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "no
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { dashboardUserMessage } from "../src/dashboard-feed.ts";
 import {
   afterCompactionHold,
   attachMailboxRuntimeCleanup,
+  boardSteerDeps,
   boardWakeOutcome,
   buildMailboxPushMessage,
   buildMailboxWaitArgv,
@@ -34,6 +36,7 @@ import {
   startMailboxWaiter,
   WS_MAILBOX_CUSTOM_TYPE,
   type BoardInboxDeps,
+  type BoardSteerDeps,
   type MailboxEnvelope,
   type MailboxWaitArm,
   type MailboxWaitOutcome,
@@ -232,15 +235,19 @@ describe("startMailboxWaiter", () => {
  * yields scripted outcomes, then blocks until its own signal aborts. An
  * abort from `leadSettled` resolves `stopped` like the real child does.
  */
-function boardWait(script: MailboxWaitOutcome[]): { runWait: (signal: AbortSignal, arm: MailboxWaitArm) => Promise<MailboxWaitOutcome>; arms: boolean[]; blocked: () => boolean } {
+function boardWait(script: MailboxWaitOutcome[]): { runWait: (signal: AbortSignal, arm: MailboxWaitArm) => Promise<MailboxWaitOutcome>; arms: boolean[]; modes: string[]; blocked: () => boolean } {
   const arms: boolean[] = [];
+  // Each arm's board mode: `inbox`, `steer`, or `none`.
+  const modes: string[] = [];
   let index = 0;
   let blocking = false;
   return {
     arms,
+    modes,
     blocked: () => blocking,
     runWait: (signal, arm) => {
       arms.push(arm.boardInbox);
+      modes.push(arm.boardInbox ? "inbox" : arm.boardSteer ? "steer" : "none");
       if (index < script.length) return Promise.resolve(script[index++]!);
       blocking = true;
       return new Promise<MailboxWaitOutcome>((resolve) => {
@@ -265,6 +272,7 @@ function fakeBoard(overrides: Partial<BoardInboxDeps> & { held?: string[][] } = 
     idle: overrides.idle ?? (() => idleRef.current),
     drain: overrides.drain ?? (() => { drains += 1; return Promise.resolve(queue.shift() ?? []); }),
     inject: overrides.inject ?? ((texts) => { injected.push(texts); }),
+    ...(overrides.steer ? { steer: overrides.steer } : {}),
   };
 }
 
@@ -428,6 +436,169 @@ describe("startMailboxWaiter: dashboard board inbox", () => {
   });
 });
 
+/**
+ * A fake steer side: `steerable` answers from `answers` in order and then
+ * from `ref`, so a test can flip it at a chosen check.
+ */
+function fakeSteer(overrides: Partial<BoardSteerDeps> & { held?: string[][]; answers?: boolean[] } = {}): BoardSteerDeps & { steered: string[][]; drains: () => number; ref: { current: boolean } } {
+  const steered: string[][] = [];
+  const queue = overrides.held ?? [["now please"]];
+  const answers = [...(overrides.answers ?? [])];
+  const ref = { current: true };
+  let drains = 0;
+  return {
+    steered,
+    ref,
+    drains: () => drains,
+    steerable: overrides.steerable ?? (() => (answers.length > 0 ? answers.shift()! : ref.current)),
+    drain: overrides.drain ?? (() => { drains += 1; return Promise.resolve(queue.shift() ?? []); }),
+    inject: overrides.inject ?? ((texts) => { steered.push(texts); }),
+  };
+}
+
+describe("startMailboxWaiter: steering a promoted dashboard message", () => {
+  test("a held message arms the steer-mode wait; a promoted one wakes it, is drained alone, and is steered into the running turn", async () => {
+    // The first wake holds a follow-up mid-turn; the second is the promotion.
+    const wait = boardWait(["board", "board"]);
+    const steer = fakeSteer();
+    const board = fakeBoard({ held: [["a follow-up"]], steer });
+    board.idleRef.current = false;
+    const waiter = startMailboxWaiter({ runWait: wait.runWait, drainMail: () => Promise.resolve([]), admit: () => {}, sleep: immediateSleep, board });
+    await until(() => steer.steered.length > 0 && wait.blocked(), "the steer and re-arm");
+    assert.deepEqual(wait.modes, ["inbox", "steer", "steer"], "a held follow-up does not wake the steer-mode wait, so it re-arms in steer mode");
+    assert.deepEqual(steer.steered, [["now please"]]);
+    assert.equal(steer.drains(), 1);
+    assert.equal(board.drains(), 0, "the full drain never runs mid-turn");
+    assert.deepEqual(board.injected, []);
+
+    steer.ref.current = false;
+    board.idleRef.current = true;
+    waiter.leadSettled!();
+    await until(() => board.injected.length > 0 && wait.blocked(), "the settle drain");
+    waiter.stop();
+    await waiter.done;
+    assert.deepEqual(board.injected, [["a follow-up"]], "the follow-up arrives after the steered message, at the settle");
+    assert.equal(wait.modes.at(-1), "inbox");
+  });
+
+  test("while a steer would be refused the wait is armed without steer mode, so a steered entry cannot wake it at once; leadSettled restores steer mode", async () => {
+    // The fake reads its script at each arm: the promotion's wake is added once steer mode is back.
+    const script: MailboxWaitOutcome[] = ["board"];
+    const wait = boardWait(script);
+    const steer = fakeSteer();
+    steer.ref.current = false; // a compaction holds the session
+    const board = fakeBoard({ steer });
+    board.idleRef.current = false;
+    const waiter = startMailboxWaiter({ runWait: wait.runWait, drainMail: () => Promise.resolve([]), admit: () => {}, sleep: immediateSleep, board });
+    await until(() => wait.modes.length === 2, "the held wait");
+    assert.deepEqual(wait.modes, ["inbox", "none"]);
+    assert.equal(steer.drains(), 0);
+
+    // The compaction ends mid-turn: its leadSettled re-arms in steer mode, and the promoted entry is steered.
+    steer.ref.current = true;
+    script.push("board");
+    waiter.leadSettled!();
+    await until(() => steer.steered.length > 0 && wait.blocked(), "the steer after the hold");
+    waiter.stop();
+    await waiter.done;
+    assert.deepEqual(wait.modes, ["inbox", "none", "steer", "steer"]);
+    assert.deepEqual(steer.steered, [["now please"]]);
+  });
+
+  test("a steer wake that finds a steer refused leaves the entry held and re-arms without steer mode", async () => {
+    const wait = boardWait(["board", "board"]);
+    // Steerable when armed, refused at the wake, and after.
+    const steer = fakeSteer({ answers: [true, false] });
+    steer.ref.current = false;
+    const board = fakeBoard({ steer });
+    board.idleRef.current = false;
+    const sleeps: number[] = [];
+    const waiter = startMailboxWaiter({ runWait: wait.runWait, drainMail: () => Promise.resolve([]), admit: () => {}, sleep: (ms) => { sleeps.push(ms); return Promise.resolve(); }, board });
+    await until(() => wait.modes.length === 3 && wait.blocked(), "the re-armed wait");
+    waiter.stop();
+    await waiter.done;
+    assert.deepEqual(wait.modes, ["inbox", "steer", "none"]);
+    assert.equal(steer.drains(), 0, "nothing is claimed while a steer would be refused");
+    assert.deepEqual(sleeps, [], "no backoff is needed: the next wait cannot wake on the left entry");
+  });
+
+  test("a steer drain that outlasts the run carries its texts to the settle, injected ahead of the held follow-up", async () => {
+    const wait = boardWait(["board", "board"]);
+    // Steerable when armed and at the wake; the run ends during the drain.
+    const steer = fakeSteer({ answers: [true, true, false] });
+    steer.ref.current = false;
+    const board = fakeBoard({ held: [["a follow-up"]], steer });
+    board.idleRef.current = false;
+    const waiter = startMailboxWaiter({ runWait: wait.runWait, drainMail: () => Promise.resolve([]), admit: () => {}, sleep: immediateSleep, board });
+    await until(() => steer.drains() === 1 && wait.blocked(), "the steer drain");
+    assert.deepEqual(steer.steered, [], "a steer the run would refuse is not sent");
+    board.idleRef.current = true;
+    waiter.leadSettled!();
+    await until(() => board.injected.length > 0 && wait.blocked(), "the settle drain");
+    waiter.stop();
+    await waiter.done;
+    assert.deepEqual(board.injected, [["now please", "a follow-up"]]);
+  });
+
+  test("a throwing steer inject is reported and its texts go out at the settle; a carried text goes out even with the knob turned off", async () => {
+    const wait = boardWait(["board", "board"]);
+    const errors: string[] = [];
+    const steer = fakeSteer({ inject: () => { throw new Error("no session"); } });
+    let knob = true;
+    const board = fakeBoard({ held: [["a follow-up"]], steer, enabled: () => knob });
+    board.idleRef.current = false;
+    const waiter = startMailboxWaiter({ runWait: wait.runWait, drainMail: () => Promise.resolve([]), admit: () => {}, sleep: immediateSleep, onError: (message) => errors.push(message), board });
+    await until(() => steer.drains() === 1 && wait.blocked(), "the steer attempt");
+    assert.deepEqual(errors, ["board steer failed: no session; delivering it after the turn instead"]);
+    knob = false;
+    board.idleRef.current = true;
+    waiter.leadSettled!();
+    await until(() => board.injected.length > 0 && wait.blocked(), "the settle");
+    waiter.stop();
+    await waiter.done;
+    assert.deepEqual(board.injected, [["now please"]], "the carried text goes out; the held follow-up is not drained with the knob off");
+    assert.equal(board.drains(), 0);
+  });
+
+  test("a failed steer drain backs off and re-arms in steer mode, so the level-triggered wait retries it", async () => {
+    const wait = boardWait(["board", "board"]);
+    const sleeps: number[] = [];
+    const errors: string[] = [];
+    const steer = fakeSteer({ drain: () => Promise.reject(new Error("drain refused")) });
+    const board = fakeBoard({ steer });
+    board.idleRef.current = false;
+    const waiter = startMailboxWaiter({ runWait: wait.runWait, drainMail: () => Promise.resolve([]), admit: () => {}, sleep: (ms) => { sleeps.push(ms); return Promise.resolve(); }, errorBackoffMs: 42, onError: (message) => errors.push(message), board });
+    await until(() => wait.modes.length === 3 && wait.blocked(), "the re-armed wait");
+    waiter.stop();
+    await waiter.done;
+    assert.deepEqual(sleeps, [42]);
+    assert.deepEqual(errors, ["board steer drain failed: drain refused"]);
+    assert.deepEqual(wait.modes, ["inbox", "steer", "steer"]);
+  });
+});
+
+describe("boardSteerDeps", () => {
+  test("steerable is the run flag without a compaction hold", () => {
+    const state = { open: false, compacting: false };
+    const deps = boardSteerDeps({ turnOpen: () => state.open, compacting: () => state.compacting, drain: () => Promise.resolve([]), sendUserMessage: () => {} });
+    assert.equal(deps.steerable(), false, "no run");
+    state.open = true;
+    assert.equal(deps.steerable(), true);
+    state.compacting = true;
+    assert.equal(deps.steerable(), false, "a compaction refuses the prompt");
+  });
+
+  test("a steer is a labelled user message delivered as steer, which the feed records as a whiteboard user message", () => {
+    const sent: [string, unknown][] = [];
+    const deps = boardSteerDeps({ turnOpen: () => true, compacting: () => false, drain: () => Promise.resolve([]), sendUserMessage: (text, options) => { sent.push([text, options]); } });
+    deps.inject(["now please", "(03) a"]);
+    assert.equal(sent.length, 1);
+    assert.deepEqual(sent[0]![1], { deliverAs: "steer" });
+    // Pi turns sendUserMessage text into a role-user message, the one the feed reads at message_end.
+    assert.deepEqual(dashboardUserMessage({ role: "user", content: [{ type: "text", text: sent[0]![0] }] }), { text: "now please\n\n(03) a", origin: "whiteboard" });
+  });
+});
+
 describe("afterCompactionHold", () => {
   test("runs after a hold release that the same compaction event schedules later", async () => {
     let compacting = true;
@@ -465,6 +636,16 @@ describe("createBridgeInboxDrain", () => {
     assert.deepEqual(await drain(), ["first", "second\n\n(01) ok"]);
     assert.deepEqual(calls, [[DASHBOARD_INBOX_DRAIN_TOOL, { session_key: "my-key", format: "json" }]]);
     assert.equal(DASHBOARD_INBOX_DRAIN_TOOL, "dashboard.inbox_drain");
+  });
+
+  test("steerOnly asks the tool for the steered messages alone", async () => {
+    const calls: Record<string, unknown>[] = [];
+    const drain = createBridgeInboxDrain(async (_name, args) => {
+      calls.push(args);
+      return { content: [{ type: "text", text: JSON.stringify({ messages: [{ id: "a", text: "now please" }] }) }] };
+    }, "my-key", { steerOnly: true });
+    assert.deepEqual(await drain(), ["now please"]);
+    assert.deepEqual(calls, [{ session_key: "my-key", steer_only: true, format: "json" }]);
   });
 
   test("throws on a tool-level error so the loop backs off", async () => {
@@ -622,6 +803,13 @@ describe("createSubprocessWait", () => {
       const wait = createSubprocessWait({ launcherPath, pluginDir: fixtureDir, sessionKey: "k" });
       assert.equal(await wait(new AbortController().signal, { boardInbox: true }), "board");
       assert.equal(await wait(new AbortController().signal, { boardInbox: false }), "mail", "a mail-only wait reads the exit code alone");
+      await writeFile(launcherPath, [
+        "import json,sys",
+        "kinds=['board'] if '--board-steer' in sys.argv and '--board-inbox' not in sys.argv else ['mail']",
+        "print(json.dumps({'timed_out':False,'unread':0,'board':1,'kinds':kinds}),flush=True)",
+        "",
+      ].join("\n"));
+      assert.equal(await wait(new AbortController().signal, { boardInbox: false, boardSteer: true }), "board", "a steer-mode wait passes its flag and reads the kinds too");
     } finally {
       await rm(fixtureDir, { recursive: true, force: true });
     }
@@ -852,6 +1040,8 @@ describe("buildMailboxWaitArgv", () => {
     const base = { launcherPath: "/l.py", pluginDir: "/p", sessionKey: "k" };
     assert.deepEqual(buildMailboxWaitArgv({ ...base, boardInbox: true }), [...buildMailboxWaitArgv(base), "--board-inbox"]);
     assert.deepEqual(buildMailboxWaitArgv({ ...base, boardInbox: false }), buildMailboxWaitArgv(base));
+    assert.deepEqual(buildMailboxWaitArgv({ ...base, boardSteer: true }), [...buildMailboxWaitArgv(base), "--board-steer"]);
+    assert.deepEqual(buildMailboxWaitArgv({ ...base, boardInbox: true, boardSteer: true }), [...buildMailboxWaitArgv(base), "--board-inbox"], "the inbox flag already wakes on a steered entry");
   });
 
 

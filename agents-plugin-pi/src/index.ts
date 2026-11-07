@@ -191,6 +191,7 @@ import {
   agentWidgetRefreshRef,
   heldPushQueue,
   isOwningAgentIdle,
+  leadCompactingRef,
   leadIdleRef,
   ownerNotifyRef,
   pushToLead,
@@ -220,7 +221,7 @@ import { ChildApprovalGate } from "./approval-protocol.ts";
 import { isLeadOrFork, readSpawnRole, WS_PI_FORK_CONTEXT_ENV, WS_PI_PARENT_SESSION_KEY_ENV, type SpawnRole } from "./process-role.ts";
 import { createApprovalRelay, registerExecuteGateway } from "./execute-gateway.ts";
 import { registerBackgroundTaskShutdown } from "./background-tasks.ts";
-import { afterCompactionHold, attachMailboxRuntimeCleanup, buildMailboxPushMessage, createBridgeDrain, createBridgeInboxDrain, createMailboxWaiterSlot, createSubprocessWait, reportDistinctLinesOnce, resolveMailboxSelfSlug, sessionMailboxWaitOptions, shouldArmMailboxWaiter, stageMailboxRuntime, startMailboxWaiter, type MailboxToolCall, type MailboxWaiterHandle, type StagedMailboxRuntime } from "./mailbox-waiter.ts";
+import { afterCompactionHold, attachMailboxRuntimeCleanup, boardSteerDeps, buildMailboxPushMessage, createBridgeDrain, createBridgeInboxDrain, createMailboxWaiterSlot, createSubprocessWait, reportDistinctLinesOnce, resolveMailboxSelfSlug, sessionMailboxWaitOptions, shouldArmMailboxWaiter, stageMailboxRuntime, startMailboxWaiter, type MailboxToolCall, type MailboxWaiterHandle, type StagedMailboxRuntime } from "./mailbox-waiter.ts";
 import { armForkRoleWiring, registerFork } from "./fork.ts";
 import {
   createThreadRegistryHandle,
@@ -639,9 +640,10 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   let mailboxWaiterHandle: MailboxWaiterHandle | undefined;
   // The owner lead's own turn, from Pi `agent_start` to `agent_settled`: a
   // dashboard message that arrives inside it stays held in the inbox until
-  // the settle, so the page can still merge into or cancel it. Compaction
-  // also blocks a prompt, so its end (or failure) releases a held message
-  // the same way, once the compaction hold itself has cleared.
+  // the settle, so the page can still merge into or cancel it, unless the
+  // user promotes it to steering. Compaction also blocks a prompt, so its
+  // end (or failure) releases a held message the same way, once the
+  // compaction hold itself has cleared, and restores steer mode mid-turn.
   let leadTurnOpen = false;
   pi.on("agent_start", () => { leadTurnOpen = true; });
   pi.on("agent_settled", () => {
@@ -1006,6 +1008,14 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
               // followUp only matters if a turn started since the idle
               // check; an idle lead starts a turn with it either way.
               inject: (texts) => { pi.sendUserMessage(whiteboardSubmissionText(texts), { deliverAs: "followUp" }); },
+              // A message the user promoted is steered into the running
+              // turn, as a user message the feed records as whiteboard.
+              steer: boardSteerDeps({
+                turnOpen: () => leadTurnOpen,
+                compacting: () => leadCompactingRef.current,
+                drain: createBridgeInboxDrain(mailboxCallTool, key, { steerOnly: true }),
+                sendUserMessage: (text, options) => { pi.sendUserMessage(text, options); },
+              }),
             },
           });
         },
