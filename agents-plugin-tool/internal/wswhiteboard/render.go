@@ -19,7 +19,7 @@ import (
 // full page's stamp script and, when it holds a mermaid block, the shared
 // mermaid script (MermaidAsset).
 //
-//go:embed assets/page.tmpl assets/page.css assets/form.js assets/live.js assets/mermaid-init.js assets/sprite.svg
+//go:embed assets/page.tmpl assets/page.css assets/form.js assets/live.js assets/pill.js assets/mermaid-init.js assets/sprite.svg
 var assetFS embed.FS
 
 type pageAssets struct {
@@ -27,6 +27,8 @@ type pageAssets struct {
 	css  template.CSS
 	form string
 	live string
+	// pill is the open-question pill, shared by the full page and the dashboard.
+	pill string
 	// mermaidInit themes and runs mermaid after the shared script loads.
 	mermaidInit template.JS
 	sprite      template.HTML
@@ -64,6 +66,7 @@ func loadAssets() (*pageAssets, error) {
 			css:         template.CSS(read("page.css")),
 			form:        read("form.js"),
 			live:        read("live.js"),
+			pill:        read("pill.js"),
 			mermaidInit: template.JS(read("mermaid-init.js")),
 			sprite:      template.HTML(strings.TrimSpace(read("sprite.svg"))),
 			icons:       map[string]bool{},
@@ -172,7 +175,7 @@ func PageAssets() (SharedAssets, error) {
 	if err != nil {
 		return SharedAssets{}, fmt.Errorf("whiteboard page assets: %w", err)
 	}
-	return SharedAssets{CSS: a.css, Sprite: a.sprite, FormScript: template.JS(a.form), MermaidInit: a.mermaidInit}, nil
+	return SharedAssets{CSS: a.css, Sprite: a.sprite, FormScript: template.JS(a.form + "\n" + a.pill), MermaidInit: a.mermaidInit}, nil
 }
 
 // pageData is what the page template executes on: the view plus the inlined
@@ -214,7 +217,7 @@ func newPageData(view View, a *pageAssets) *pageData {
 	full := view.Layout != LayoutEmbed
 	script := a.form
 	if full {
-		script += a.live
+		script += a.pill + a.live
 	}
 	p := &pageData{
 		View:        view,
