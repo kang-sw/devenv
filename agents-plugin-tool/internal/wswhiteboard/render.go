@@ -1,6 +1,7 @@
 package wswhiteboard
 
 import (
+	"bufio"
 	"bytes"
 	"embed"
 	"fmt"
@@ -84,9 +85,10 @@ func loadAssets() (*pageAssets, error) {
 				}
 				return template.HTML(`<svg class="i" aria-hidden="true"><use href="#i-` + name + `"/></svg>`), nil
 			},
-			"lines": rationaleLines,
-			"box":   rowBox,
-			"href":  rowHref,
+			"lines":       rationaleLines,
+			"box":         rowBox,
+			"href":        rowHref,
+			"actionAttrs": panelActionAttrs,
 		}
 		a.tmpl, assetsErr = template.New("page").Funcs(funcs).ParseFS(assetFS, "assets/page.tmpl")
 		if assetsErr == nil {
@@ -94,6 +96,17 @@ func loadAssets() (*pageAssets, error) {
 		}
 	})
 	return loadedAssets, assetsErr
+}
+
+// panelActionAttrs are the attributes of a panel row's file action link: the
+// ones actionAttrs gives a markdown file target, so the link menu reads both
+// alike, then the row's path as the title.
+func panelActionAttrs(r PanelRow) template.HTMLAttr {
+	var buf bytes.Buffer
+	w := bufio.NewWriter(&buf)
+	writeAttrs(w, append(actionAttrs(target{action: r.Action}), [2]string{"title", r.Path}))
+	_ = w.Flush()
+	return template.HTMLAttr(buf.String())
 }
 
 // RenderPage renders view as one self-contained HTML document: the full page

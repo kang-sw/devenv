@@ -28,8 +28,8 @@ func splitDatePrefix(stem string) (embedded, rest string, ok bool) {
 }
 
 type TicketCreateOptions struct {
-	Stem         string // semantic stem (no date prefix)
-	InitialState string // "idea" | "todo" | "ready"
+	Stem         string           // semantic stem (no date prefix)
+	InitialState string           // "idea" | "todo" | "ready"
 	SageReview   SageReviewConfig // resolved per-stage sage review config
 	Today        string           // YYMMDD; if empty, use time.Now().Format("060102")
 	// Assignee, when non-empty, stamps an `assignee:` YAML sequence into the

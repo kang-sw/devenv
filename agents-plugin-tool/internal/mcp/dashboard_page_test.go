@@ -84,8 +84,7 @@ func TestDashboardReadPageServesTheBoard(t *testing.T) {
 		t.Errorf("the static page does not hold the served panels:\n%.600s", page.Board.Panels)
 	}
 
-	// File targets are action links and tickets path text under the served
-	// rule.
+	// File targets and ticket rows are action links under the served rule.
 	writeTicket(t, f.root, "ready", "261101-feat-ready-one", "Ready one")
 	writeTicket(t, f.root, "todo", "261102-feat-todo-one", "Todo one")
 	inside := filepath.ToSlash(filepath.Join(f.root, "docs", "inside.md"))
@@ -100,8 +99,8 @@ func TestDashboardReadPageServesTheBoard(t *testing.T) {
 		// path text, as a copy-only action link.
 		`<img src="/s/` + reg.ReplyID + `/image?path=shots%2Fa.png" alt="shot">`,
 		`<span class="img-text">away <a tabindex="0" data-wl="file" data-abs="` + filepath.FromSlash(outside) + `" title="` + outside + `"><code class="fpath">` + outside + `</code></a></span>`,
-		`title="ai-docs/tickets/ready/261101-feat-ready-one.md"><span class="chip cat feat">feat</span>Ready one</span>`,
-		`title="ai-docs/tickets/todo/261102-feat-todo-one.md"><span class="chip cat feat">feat</span>Todo one</span>`,
+		`<span class="chip cat feat">feat</span><a href="/s/` + reg.ReplyID + `/file?path=ai-docs%2Ftickets%2Fready%2F261101-feat-ready-one.md" data-wl="file" data-rel="ai-docs/tickets/ready/261101-feat-ready-one.md" data-abs="` + filepath.Join(f.root, "ai-docs", "tickets", "ready", "261101-feat-ready-one.md") + `" title="ai-docs/tickets/ready/261101-feat-ready-one.md">Ready one</a></span>`,
+		`<span class="chip cat feat">feat</span><a href="/s/` + reg.ReplyID + `/file?path=ai-docs%2Ftickets%2Ftodo%2F261102-feat-todo-one.md" data-wl="file" data-rel="ai-docs/tickets/todo/261102-feat-todo-one.md" data-abs="` + filepath.Join(f.root, "ai-docs", "tickets", "todo", "261102-feat-todo-one.md") + `" title="ai-docs/tickets/todo/261102-feat-todo-one.md">Todo one</a></span>`,
 		"1 ready, 1 todo", // the full layout's ticket count
 	} {
 		if !strings.Contains(html, want) {

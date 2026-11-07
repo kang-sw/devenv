@@ -26,7 +26,7 @@ type TicketCloseOptions struct {
 
 type TicketMoveOptions struct {
 	TicketStem string
-	To         string // "idea" | "todo" | "ready"
+	To         string           // "idea" | "todo" | "ready"
 	SageReview SageReviewConfig // resolved per-stage sage review config
 	Today      string           // kept for symmetry; unused in the initial implementation
 }

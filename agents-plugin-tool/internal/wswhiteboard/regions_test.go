@@ -183,6 +183,43 @@ func TestFileActionsRenderActionLinks(t *testing.T) {
 	wantNone(t, out, "javascript:", "evil.example", "file:///root/notes.md\"", `<code class="fpath">REL:ai-docs/plan.md</code>`)
 }
 
+// TestPanelRowPathActionLink pins a served page's ticket row: with link
+// actions the Text is the file action link, titled with the path, on a card
+// and on a plain row; a Link row and the page without link actions keep their
+// markup, and an action href that is not a daemon path is dropped.
+func TestPanelRowPathActionLink(t *testing.T) {
+	panels := []Panel{{ID: "tickets", Title: "Tickets", Icon: "board",
+		Rows: []PanelRow{{Label: "ready", Text: "Plain", Path: "ai-docs/tickets/ready/z.md"}},
+		Lanes: []PanelLane{{Name: "ready", Count: "3", Rows: []PanelRow{
+			{Label: "feat", Text: "Served", Sub: "261102-feat-y", Path: "ai-docs/tickets/ready/y.md"},
+			{Label: "feat", Text: "Outside", Path: "/elsewhere/o.md"},
+			{Label: "feat", Text: "Evil", Path: "evil.md"},
+		}}}}}
+	actions := func(p string) FileAction {
+		switch p {
+		case "/elsewhere/o.md":
+			return FileAction{Abs: "/elsewhere/o.md"}
+		case "evil.md":
+			return FileAction{Href: "javascript:alert(1)", Rel: "evil.md", Abs: "/root/evil.md"}
+		}
+		return FileAction{Href: "/s/r/file?path=" + p, Rel: p, Abs: "/root/" + p}
+	}
+	in := ViewInput{Layout: LayoutFull, ReplyID: "r", Panels: panels, FileText: func(p string) string { return p }, FileActions: actions}
+	out := render(t, BuildView(&State{}, in))
+	wantAll(t, out,
+		`<span class="ctitle"><span class="chip cat feat">feat</span><a href="/s/r/file?path=ai-docs/tickets/ready/y.md" data-wl="file" data-rel="ai-docs/tickets/ready/y.md" data-abs="/root/ai-docs/tickets/ready/y.md" title="ai-docs/tickets/ready/y.md">Served</a></span>`,
+		`<a tabindex="0" data-wl="file" data-abs="/elsewhere/o.md" title="/elsewhere/o.md">Outside</a>`,
+		`<a tabindex="0" data-wl="file" data-rel="evil.md" data-abs="/root/evil.md" title="evil.md">Evil</a>`,
+		`<span><a href="/s/r/file?path=ai-docs/tickets/ready/z.md" data-wl="file" data-rel="ai-docs/tickets/ready/z.md" data-abs="/root/ai-docs/tickets/ready/z.md" title="ai-docs/tickets/ready/z.md">Plain</a></span>`,
+	)
+	wantNone(t, out, "javascript:", `<code class="fpath">`)
+	if panels[0].Lanes[0].Rows[0].IsAction() || panels[0].Rows[0].IsAction() {
+		t.Error("BuildView changed the caller's panels")
+	}
+	in.FileActions = nil
+	wantNone(t, render(t, BuildView(&State{}, in)), "data-wl")
+}
+
 // TestFileActionsZeroKeepsPathText: a zero FileAction leaves a file target
 // to FileText's path text, and a page without FileActions marks no link.
 func TestFileActionsZeroKeepsPathText(t *testing.T) {
