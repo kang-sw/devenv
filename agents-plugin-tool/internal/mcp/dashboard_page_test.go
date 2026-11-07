@@ -470,7 +470,7 @@ func TestDashboardReadPageLangTranslatesBoardAndPanelText(t *testing.T) {
 	src := dashboardPageSource(t, nil)
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
 	f.call(t, "todo.add", map[string]any{"key": "step", "title": "a step"})
-	f.update(t, `{"add":[{"class":"technical","topic":"t","title":"a question","rationale":"plain reason"}]}`)
+	f.update(t, `<wb:add class="technical" topic="t"><wb:title>a question</wb:title><wb:why>plain reason</wb:why></wb:add>`)
 	writeTicket(t, f.root, "ready", "261101-feat-ready-one", "Ready one")
 	writeTicket(t, f.root, "todo", "261102-feat-todo-one", "Todo one")
 
