@@ -396,7 +396,6 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 }
 @media (max-width: 640px) {
   .dwrap { padding: 8px 10px; }
-  .dash.live .top h1 { display: none; }
 }
 
 /* board-first page: no live layer; the board in one readable column that
