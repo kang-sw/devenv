@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: cebf58d92f987715
 sage-review-completeness-reviewed: cebf58d92f987715
+completed: 2026-11-07
 ---
 
 # Whiteboard: the Now slot takes markdown with inline HTML; lead replies render inline HTML
