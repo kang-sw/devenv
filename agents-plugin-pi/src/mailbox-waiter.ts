@@ -289,7 +289,8 @@ function defaultSleep(ms: number): Promise<void> {
  * held cannot wake it at once; `leadSettled()` (also called once compaction
  * ends) re-arms it. A steer drain that outlasts the run or enters a
  * compaction carries its texts to the next idle drain, which injects them
- * ahead of what it claims, so a claimed message is never dropped.
+ * ahead of what it claims, so a claimed message is never dropped; an idle
+ * drain that a turn or a compaction overtook carries its texts the same way.
  */
 export function startMailboxWaiter(deps: MailboxWaiterDeps): MailboxWaiterHandle {
   const controller = new AbortController();
@@ -338,7 +339,9 @@ export function startMailboxWaiter(deps: MailboxWaiterDeps): MailboxWaiterHandle
   /**
    * Drain (unless `drainHeld` is false) and inject, the carried steered
    * messages first; `false` when the drain failed, though the carried ones
-   * are injected anyway. Clears the hold either way.
+   * are injected anyway. Clears the hold either way. When the lead is no
+   * longer idle once the drain settles, everything claimed is carried to the
+   * next settle instead of injected.
    */
   const drainBoard = async (drainHeld = true): Promise<boolean> => {
     held = false;
@@ -355,12 +358,19 @@ export function startMailboxWaiter(deps: MailboxWaiterDeps): MailboxWaiterHandle
       }
     }
     texts = [...carried, ...texts];
-    if (texts.length > 0 && !controller.signal.aborted) {
-      try {
-        board!.inject(texts);
-      } catch (error) {
-        report(`board inject failed: ${describe(error)}`);
-      }
+    if (texts.length === 0 || controller.signal.aborted) return drained;
+    // Re-checked after the drain's await, as steerBoard does: a turn or a
+    // compaction (a manual /compact) may have begun meanwhile, where Pi would
+    // refuse the submission and the claimed texts would be lost. Carried
+    // instead, the next settle injects them.
+    if (!leadIdle()) {
+      carry = [...texts, ...carry];
+      return drained;
+    }
+    try {
+      board!.inject(texts);
+    } catch (error) {
+      report(`board inject failed: ${describe(error)}`);
     }
     return drained;
   };
