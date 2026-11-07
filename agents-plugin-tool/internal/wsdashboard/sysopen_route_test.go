@@ -156,7 +156,8 @@ func TestSessionPageOffersSystemOpenToLocalViewersOnly(t *testing.T) {
 		t.Errorf("local session page = %d, lacks the system-open flag", localPage.Code)
 	}
 	lanPage := serve(f.d, viewer{peer: "192.168.7.30:50000", host: "192.168.7.20:" + port, cookie: token}, http.MethodGet, "/s/livesession", "")
-	if lanPage.Code != http.StatusOK || strings.Contains(lanPage.Body.String(), "data-sysopen") {
+	// The page script names the attribute too; only the <html> tag sets it.
+	if lanPage.Code != http.StatusOK || strings.Contains(lanPage.Body.String(), `data-sysopen="1"`) {
 		t.Errorf("LAN session page = %d, carries the system-open flag", lanPage.Code)
 	}
 }
