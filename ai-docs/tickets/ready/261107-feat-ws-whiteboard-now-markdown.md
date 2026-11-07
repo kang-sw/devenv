@@ -205,3 +205,76 @@ mermaid), inline HTML and inline SVG pass through, a `<script>` canvas
 fragment still runs as before, other fields still escape HTML, a full
 document is still refused, and `now_path` reads a `.md` file; the
 playbook-drift tests across ws, wsflow, and Pi stay green.
+
+### Result (ed5d4779d) - 2026-11-07
+
+Landed in ed5d4779d, plus review fix 2cb58bf97.
+
+- Now: rendered on every page render through a raw goldmark pipeline,
+  `pageData.renderNow` in `wswhiteboard/markdown.go`. It adds goldmark's HTML
+  block and raw HTML parsers and `html.WithUnsafe` to the board's block
+  pipeline, so markdown, mermaid, tables, and `{{nn}}` work as in item
+  fields. Raw HTML is written as is (unbalanced, unfiltered), so an inline
+  canvas script still runs. `now_path` reads a markdown file. The full
+  document refusal, the `view.go` and `store.go` comments, and the template
+  (`now-body md`) say so.
+- Finished lead replies: `TextTargets.HTML` runs the same raw pipeline, then
+  `wswhiteboard/sanitize.go`, which parses and re-serializes the output with
+  `golang.org/x/net/html` against an allow-list:
+  - Script, fetch, embed, form, style, and media elements are dropped with
+    their content. Unlisted elements are unwrapped.
+  - `href`, `src`, and `srcset` go through `resolveTarget`. A link the
+    markdown renderer resolved is taken from a per-render server record by
+    `data-wbref` index, never from the markup.
+  - Inline style filter drops `url(`, `image-set(`, `src(`, `expression(`,
+    `@import`, backslash escapes, and `position`.
+  - SVG ids get a per-reply prefix (`wbr-<hash>-`), and only local `url(#id)`
+    references are allowed.
+
+  The dashboard sets `HTML` only for a finished reply
+  (`replyRender(text, finished)`). Streaming replies, user messages, and mail
+  bodies keep HTML as text. The finished bubble has `contain: paint`, and
+  reply SVG is capped at `max-width: 100%`.
+- Playbook: the ws whiteboard playbook now gives `now` as markdown and
+  `now_path` as a `.md` file path. It says raw HTML shows as text everywhere
+  but `now`, that `{{nn}}` works in Now's markdown text but not inside its
+  HTML, and adds a caveat on HTML block extent, blank lines inside HTML, and
+  hard-wrapped inline-tag lines. The wsflow mirror was regenerated, the Pi
+  mirror synced byte-identical, and the manifest regenerated.
+
+Verification:
+- `go build ./...`, `go vet ./...`, and `go test ./... -count=1` in
+  `agents-plugin-tool` all pass, across all 21 packages, including
+  `internal/mcp`, `internal/wsrsrc` (manifest, wsflow, and Pi mirror drift),
+  `internal/wswhiteboard`, and `internal/wsdashboard`.
+- `python3 -m unittest discover -s agents-plugin-wsflow/tests`: 20 tests OK.
+- New tests:
+  - `sanitize_test.go`: inline HTML and SVG kept; block-tag swallow;
+    stray-tag balancing; about 40 script and fetch vectors, including
+    form, link, and image aimed at a system-open route, mXSS through
+    math/noscript, and entity-obfuscated schemes; style position stripped;
+    URL contract; per-candidate srcset; trust-ref forgery, including
+    unclosed-attribute capture; per-reply SVG ids; escaping without HTML.
+  - `render_test.go`: Now markdown with headings, lists, mermaid, inline HTML,
+    and SVG across disk, embed, served, and regions output; the inline
+    script canvas fragment; HTML caveats including `{{nn}}`.
+  - `store_test.go`: `.md` `now_path`; the new full-document refusal text.
+  - `conversation_markdown_test.go`: finished reply HTML and SVG, streaming
+    reply as text, stray closing tags kept inside the bubble, position:fixed
+    dropped plus `contain: paint`, and user and mail entries escaped.
+- Lite review: clean with one minor (SVG ids collided across replies), fixed
+  in 2cb58bf97.
+
+Decisions:
+- `golang.org/x/net` is pinned at v0.35.0, the newest release whose go.mod
+  stays at go 1.18. v0.36+ would rewrite `go 1.23` to `go 1.23.0` and pin
+  setup-go to exact Go 1.23.0. MVS bumps `x/sys` 0.22 -> 0.30.
+- A refused or path-text image becomes alt text plus
+  `<code class="fpath">path</code>`. A refused anchor keeps its text and
+  loses `href`.
+- `anchorAttrs` is the single source of a resolved link's extra attributes
+  for both the markdown writer and the sanitizer, so the link-actions marker
+  reaches reply HTML links.
+- A Now fragment with several blocks puts a lone inline element such as
+  `<canvas>` inside a `<p>`. Its script block stays verbatim, so the drawing
+  still runs.
