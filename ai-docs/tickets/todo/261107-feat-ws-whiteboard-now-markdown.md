@@ -1,11 +1,12 @@
 ---
-title: "Whiteboard: the Now slot takes markdown with inline HTML"
+title: "Whiteboard: the Now slot takes markdown with inline HTML; lead replies render inline HTML"
 related:
   261107-epic-ws-dashboard-messenger-round2: raised while dogfooding the round-2 session page; affects disk boards too, so not a child
   261107-feat-ws-dashboard-link-actions: same markdown renderer; served-page link targets apply to Now too
+  261107-feat-ws-dashboard-conversation-history: done; its per-entry render cache renders a finished reply once
 ---
 
-# Whiteboard: the Now slot takes markdown with inline HTML
+# Whiteboard: the Now slot takes markdown with inline HTML; lead replies render inline HTML
 
 ## Background
 
@@ -18,11 +19,18 @@ inline HTML still allowed (2026-11-07: "now 바 쪽이 지금 raw HTML 받게 �
 있죠? 이거 그냥 다른 화이트보드 엘리먼트들처럼 평범하게 markdown 받게 하고,
 차라리 inline html도 쓸 수 있게 하는 방향으로 가면 어떨까 싶어요?").
 
+The user then asked for the same HTML embedding in the session page
+conversation (2026-11-07: "conversation 쪽 출력에도 혹시 now bar와 같은 html
+렌더링을 적용하는 게 가능할까요? html embedding이 가능하게요."). Conversation
+bubbles render through `wswhiteboard.RenderText` (`markdown_text.go`), the
+same pipeline.
+
 ## Decisions
 
-- **Inline HTML in Now only** (user, 2026-11-07, "(55) a"): `now` and
-  `now_path` are rendered as markdown through the board's renderer with raw
-  HTML passed through; every other board field keeps raw HTML shown as text.
+- **Inline HTML in Now only, on the board** (user, 2026-11-07, "(55) a"): `now`
+  and `now_path` are rendered as markdown through the board's renderer with
+  raw HTML passed through; every other board field keeps raw HTML shown as
+  text. (The conversation is not a board field; see the lead-reply decisions.)
   Rejected: inline HTML in all board fields - those carry user quotes and
   code, where a stray tag would vanish. Now is the lead's free canvas and its
   HTML trust is unchanged from today.
@@ -40,7 +48,28 @@ inline HTML still allowed (2026-11-07: "now 바 쪽이 지금 raw HTML 받게 �
   as markdown with inline HTML, since block HTML passes through. The playbook
   gains one caveat line: inside HTML, an indented line after a blank line
   becomes a code block.
-- **Kept rules**: a full document is still refused; inline SVG and canvas
+- **Lead replies render inline HTML** (user, "(59) ok"): in the session page
+  conversation, finished lead replies render markdown with inline HTML; user
+  messages, mail bodies, and turn lines keep raw HTML shown as text. Rejected:
+  HTML in every conversation entry - mail bodies come from peer sessions, a
+  different trust boundary.
+- **Finished replies only** (user, "(60) ok"): a streaming reply keeps raw HTML
+  as text and switches to HTML once finished, rendered once through the entry
+  cache, the same rule as mermaid in 261107-feat-ws-dashboard-link-actions.
+  Rejected: HTML while streaming - half-closed tags shake the layout every
+  tick.
+- **Balanced on the server** (user, "(61) ok"): a reply's HTML is parsed and
+  re-serialized on the server (e.g. `golang.org/x/net/html`, a new module
+  dependency) so a stray closing tag stays inside the bubble and cannot break
+  the page structure.
+- **No scripts in replies** (user, "(62) a"): reply HTML allows HTML, CSS, and
+  inline SVG; `<script>` elements and `on*` event attributes are removed in
+  the same server pass. Rejected: scripts as in Now - up to 2000 entries
+  reload on scroll-up so scripts would re-run, and a reply quoting a file's
+  HTML without a fence would execute it; dynamic drawings belong in Now.
+- **One ticket** (user, "(63) ok"): both changes switch the same renderer
+  option, so they share this ticket.
+- **Kept rules for Now**: a full document is still refused; inline SVG and canvas
   drawn by an inline script still work; no external `src`, `href`, or fetch.
 
 ## Constraints
@@ -52,12 +81,16 @@ inline HTML still allowed (2026-11-07: "now 바 쪽이 지금 raw HTML 받게 �
 
 ## Phases
 
-### Phase 1: Markdown Now slot and schema text
+### Phase 1: Markdown Now slot, schema text, and lead-reply HTML
 
 Render Now through the markdown pipeline with raw HTML allowed for that slot
-only, and update every schema text listed above.
+(the only board field), update every schema text listed above, and render
+finished lead replies with sanitized inline HTML.
 
-Verification: render tests that Now markdown renders (headings, lists,
+Verification: conversation tests that a finished lead reply renders inline
+HTML and inline SVG, a streaming reply shows HTML as text, user and mail
+entries still escape HTML, a stray closing tag stays inside the bubble, and
+`<script>` and `on*` attributes are removed. Render tests that Now markdown renders (headings, lists,
 mermaid), inline HTML and inline SVG pass through, a `<script>` canvas
 fragment still runs as before, other fields still escape HTML, a full
 document is still refused, and `now_path` reads a `.md` file; the
