@@ -185,8 +185,8 @@
   // a line. The placeholder tells which one is on.
   var INPUT_KEY = "ws.dashboard.input", inputMode = "enter";
   var HINT = {
-    enter: "Message this session. Enter sends, Shift+Enter adds a line. Board answers attach.",
-    mod: "Message this session. Ctrl/Cmd+Enter sends, Enter adds a line. Board answers attach."
+    enter: "Message this session. Enter sends, Shift+Enter adds a line. Board answers and pasted images attach.",
+    mod: "Message this session. Ctrl/Cmd+Enter sends, Enter adds a line. Board answers and pasted images attach."
   };
   function setInput(v) {
     inputMode = v === "mod" ? "mod" : "enter";
@@ -418,16 +418,115 @@
       });
     }, function () { done(false, "the dashboard is not reachable"); });
   }
+  // --- composer images -------------------------------------------------------
+  // A pasted or dropped image is a thumbnail chip held in the page and
+  // uploaded only with the send, so an abandoned paste never touches disk. A
+  // chip a cancel returned has a ref instead of data: the file the daemon
+  // already wrote, which a re-send names rather than uploads again.
+  var cimgs = $("cimgs"), imgs = [];
+  var IMG_TYPES = { "image/png": 1, "image/jpeg": 1, "image/gif": 1, "image/webp": 1 };
+  var IMG_MAX = 8, IMG_BYTES = 10 * 1024 * 1024;
+  function attachSrc(name) { return "/s/" + rid + "/attachment/" + encodeURIComponent(name); }
+  function addFiles(files) {
+    var refused = "";
+    files.forEach(function (f) {
+      if (!IMG_TYPES[f.type]) { refused = (f.name || "the file") + " is not a PNG, JPEG, GIF, or WebP image"; return; }
+      if (f.size > IMG_BYTES) { refused = (f.name || "the image") + " is larger than 10 MiB"; return; }
+      if (imgs.length >= IMG_MAX) { refused = "a message holds at most " + IMG_MAX + " images"; return; }
+      var it = { name: f.name || "pasted image", url: URL.createObjectURL(f), data: null, ref: "" };
+      imgs.push(it);
+      var rd = new FileReader();
+      rd.onload = function () { var v = String(rd.result); it.data = v.slice(v.indexOf(",") + 1); };
+      rd.onerror = function () { dropImg(it); renderImgs(); syncNote("Could not read " + it.name + "."); };
+      rd.readAsDataURL(f);
+    });
+    renderImgs();
+    syncNote(refused ? "Not attached: " + refused + "." : "");
+  }
+  function dropImg(it) {
+    var i = imgs.indexOf(it);
+    if (i < 0) return;
+    imgs.splice(i, 1);
+    if (!it.ref) URL.revokeObjectURL(it.url);
+  }
+  function renderImgs() {
+    if (!cimgs) return;
+    cimgs.textContent = "";
+    imgs.forEach(function (it, i) {
+      var el = doc.createElement("span"), im = doc.createElement("img"), x = doc.createElement("button");
+      el.className = "ichip";
+      im.src = it.url;
+      im.alt = it.name;
+      el.title = it.name;
+      el.appendChild(im);
+      x.className = "unimg";
+      x.setAttribute("data-unimg", String(i));
+      x.title = "remove this image";
+      x.textContent = "×";
+      el.appendChild(x);
+      cimgs.appendChild(el);
+    });
+  }
+  // imageFiles is the image files a clipboard or drop carries.
+  function imageFiles(dt) {
+    var out = [];
+    if (!dt) return out;
+    if (dt.items && dt.items.length) {
+      Array.prototype.forEach.call(dt.items, function (item) {
+        if (item.kind !== "file") return;
+        var f = item.getAsFile();
+        if (f) out.push(f);
+      });
+    } else if (dt.files) {
+      out = Array.prototype.slice.call(dt.files);
+    }
+    return out;
+  }
+  var composer = $("composer");
+  if (ctext && cimgs && composer) {
+    ctext.addEventListener("paste", function (e) {
+      var files = imageFiles(e.clipboardData).filter(function (f) { return f.type.indexOf("image/") === 0; });
+      if (!files.length) return;
+      // A paste that carries text as well (a copied web page) still pastes
+      // its text; a screenshot carries only the image.
+      var types = Array.prototype.slice.call(e.clipboardData.types || []);
+      if (types.indexOf("text/plain") < 0) e.preventDefault();
+      addFiles(files);
+    });
+    var hasFiles = function (e) { return e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], "Files") >= 0; };
+    composer.addEventListener("dragover", function (e) {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      composer.classList.add("drop");
+    });
+    composer.addEventListener("dragleave", function (e) {
+      if (!composer.contains(e.relatedTarget)) composer.classList.remove("drop");
+    });
+    composer.addEventListener("drop", function (e) {
+      composer.classList.remove("drop");
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      addFiles(imageFiles(e.dataTransfer));
+      ctext.focus();
+    });
+  }
   var sending = false;
   function sendMessage() {
     if (sending) return;
-    var t = ctext.value.trim(), list = chipList();
-    if (!t && !list.length) { syncNote("Nothing to send: write a message or answer the board."); return; }
+    var t = ctext.value.trim(), list = chipList(), pics = imgs.slice();
+    if (!t && !list.length && !pics.length) { syncNote("Nothing to send: write a message, answer the board, or attach an image."); return; }
+    if (pics.some(function (p) { return !p.ref && p.data === null; })) { syncNote("Still reading an image: send again in a moment."); return; }
+    var body = { text: t, chips: list };
+    var up = pics.filter(function (p) { return !p.ref; }), refs = pics.filter(function (p) { return !!p.ref; });
+    if (up.length) body.images = up.map(function (p) { return { name: p.name, data: p.data }; });
+    if (refs.length) body.refs = refs.map(function (p) { return p.ref; });
     sending = true;
-    post("message", { text: t, chips: list }, function (ok, res) {
+    post("message", body, function (ok, res) {
       sending = false;
       if (!ok) { syncNote("Not sent: " + res); return; }
       if (ctext.value.trim() === t) { ctext.value = ""; grow(); }
+      pics.forEach(dropImg);
+      renderImgs();
       // Compare by value: a board event during the send, or clearing one
       // card, re-reads the chips into new objects. Drop every sent chip
       // before clearing any card, since clearing one re-syncs the rest.
@@ -448,6 +547,11 @@
       // A chip attached since keeps its newer answer.
       (res.chips || []).forEach(function (c) { if (!chips[c.id]) { putChip(c); setItem(c.id, c); } });
       renderChips();
+      // Its images come back as chips that reference the written files.
+      (res.images || []).forEach(function (n) {
+        if (!imgs.some(function (p) { return p.ref === n; })) imgs.push({ name: n, url: attachSrc(n), data: null, ref: n });
+      });
+      renderImgs();
       syncNote("Cancelled: the message is back in the composer.");
       ctext.focus();
     });
@@ -499,6 +603,8 @@
     if (cnote && t.closest("#r-board")) { syncChips(); syncNote(); }
     var u = t.closest("[data-unchip]");
     if (u) { var uid = u.getAttribute("data-unchip"); dropChip(uid); setItem(uid, null); renderChips(); syncNote(); return; }
+    u = t.closest("[data-unimg]");
+    if (u) { dropImg(imgs[+u.getAttribute("data-unimg")]); renderImgs(); syncNote(); return; }
     u = t.closest("#r-conversation [data-cancel]");
     if (u) { if (!u.disabled) cancelHeld(u); return; }
     if (!live) return;
@@ -556,7 +662,7 @@
   function modeChanged(next) {
     // The other mode has other regions, and a reload renders them; text typed
     // in the composer or answers picked on the board are never dropped for it.
-    if ((ctext && ctext.value) || boardAnswers()) {
+    if ((ctext && ctext.value) || boardAnswers() || imgs.length) {
       banner("The session's live state " + (next === "live" ? "appeared" : "went away") + ". Reload to update the layout.");
       return;
     }
