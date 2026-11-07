@@ -1018,7 +1018,7 @@ func TestWhiteboardWorkflowTextFollowsKnob(t *testing.T) {
 	if strings.Contains(strings.ToLower(manualOff), "whiteboard") {
 		t.Fatalf("knob off: the manual must carry no whiteboard text")
 	}
-	if !strings.Contains(manualOff, lineDiscussionNoCounter) || !strings.Contains(discussOff, lineDiscussNotPersisted) || strings.Contains(ticketOff, "id_floor") {
+	if !strings.Contains(manualOff, lineDiscussionNoCounter) || !strings.Contains(discussOff, lineDiscussNotPersisted) || strings.Contains(ticketOff, "wb:floor") {
 		t.Fatalf("knob off: the shipped rules must render unchanged")
 	}
 
@@ -1060,7 +1060,7 @@ func TestWhiteboardWorkflowTextFollowsKnob(t *testing.T) {
 	if idx < 0 || idx > strings.Index(ticketOn, "### Trace a change before writing it") || idx < strings.Index(ticketOn, "### Queue state") {
 		t.Fatalf("knob on: lead-ticket must carry the queue step inside Queue state:\n%s", ticketOn)
 	}
-	for _, want := range []string{"`id_floor` set to the queue's last-ID line", "the query does not return"} {
+	for _, want := range []string{"a `wb:floor` at the queue's last-ID line", "the query does not return"} {
 		if !strings.Contains(bullet, want) {
 			t.Fatalf("queue step missing %q", want)
 		}
