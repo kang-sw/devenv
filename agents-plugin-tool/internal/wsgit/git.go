@@ -159,15 +159,16 @@ type TreeCounts struct {
 }
 
 // WorkingTreeCounts reads root's working-tree standing with one `git status
-// --porcelain`, untracked files included and ignored ones not. It takes no
-// optional lock, so a periodic read never makes a concurrent git command of
-// the user's fail on index.lock. ok is false when git fails (not a
+// --porcelain`, untracked files included (one entry per untracked directory,
+// whatever the user's status.showUntrackedFiles says) and ignored ones not.
+// It takes no optional lock, so a periodic read never makes a concurrent git
+// command of the user's fail on index.lock. ok is false when git fails (not a
 // repository, a canceled or timed-out read).
 func WorkingTreeCounts(ctx context.Context, runner Runner, root string) (counts TreeCounts, ok bool) {
 	if runner == nil {
 		runner = ExecRunner{}
 	}
-	out, err := runner.RunGit(ctx, root, "--no-optional-locks", "status", "--porcelain")
+	out, err := runner.RunGit(ctx, root, "--no-optional-locks", "status", "--porcelain", "--untracked-files=normal")
 	if err != nil {
 		return TreeCounts{}, false
 	}

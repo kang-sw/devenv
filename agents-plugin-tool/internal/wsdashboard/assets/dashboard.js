@@ -1161,8 +1161,11 @@
     var d = drhandle && drhandle.querySelector(".tdot");
     if (d && !drOpen && drHas) d.classList.add("on");
   }
+  function drHeaderBottom() {
+    return drheader ? Math.max(0, Math.round(drheader.getBoundingClientRect().bottom)) : 0;
+  }
   function drMeasure() {
-    drTop = drheader ? Math.max(0, Math.round(drheader.getBoundingClientRect().bottom)) : 0;
+    drTop = drHeaderBottom();
     drawer.style.setProperty("--drtop", drTop + "px");
   }
   // drMax is the tallest sheet: 60% of the window, and short of the
@@ -1287,6 +1290,18 @@
     // follows its bottom edge. A resize re-clamps the height without saving.
     window.addEventListener("resize", function () { drApply(false); });
     if (window.ResizeObserver && drheader) new ResizeObserver(function () { drApply(false); }).observe(drheader);
+    // The board-first page scrolls the document, and the header with it: the
+    // sheet follows the header's bottom (the live layout never scrolls, so
+    // this never fires there). Once a frame, and only when the bottom moved,
+    // so a click's animation is not cut short.
+    var drScrollFrame = 0;
+    window.addEventListener("scroll", function () {
+      if (drScrollFrame || !drHas) return;
+      drScrollFrame = requestAnimationFrame(function () {
+        drScrollFrame = 0;
+        if (!drDrag && drHeaderBottom() !== drTop) drApply(false);
+      });
+    }, { passive: true });
     drOpen = drHas && drWant;
     drApply(false);
   }

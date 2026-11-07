@@ -189,3 +189,32 @@ func TestWorkingTreeCountsUnmerged(t *testing.T) {
 		t.Fatalf("unmerged: ok=%v %+v, want %+v", ok, c, want)
 	}
 }
+
+// TestWorkingTreeCountsIgnoresShowUntrackedFilesConfig pins the untracked
+// count to the documented one-entry-per-directory form: a repository whose
+// status.showUntrackedFiles is "all" (each file) or "no" (none) counts the same.
+func TestWorkingTreeCountsIgnoresShowUntrackedFilesConfig(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	for _, mode := range []string{"all", "no"} {
+		t.Run(mode, func(t *testing.T) {
+			work := t.TempDir()
+			gitIn(t, work, "init", "-q", "-b", "main")
+			commitFile(t, work, "a")
+			gitIn(t, work, "config", "status.showUntrackedFiles", mode)
+			if err := os.MkdirAll(filepath.Join(work, "dir"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			for _, n := range []string{"new1", "dir/x", "dir/y"} {
+				if err := os.WriteFile(filepath.Join(work, n), []byte("x"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			c, ok := WorkingTreeCounts(context.Background(), nil, work)
+			if want := (TreeCounts{Untracked: 2}); !ok || c != want {
+				t.Fatalf("showUntrackedFiles=%s: ok=%v %+v, want %+v", mode, ok, c, want)
+			}
+		})
+	}
+}

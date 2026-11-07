@@ -258,13 +258,22 @@ func footnoteIDs(t *testing.T, out string) string {
 
 // TestReplySanitizerKeepsOnlyDisabledCheckboxesAndFootnoteIDs pins the two
 // sanitizer allowances the extensions need: an input is a disabled checkbox
-// or gone, and an id survives only on a footnote's sup and li.
+// or gone, and an id survives only on a footnote's sup and li, and only with
+// the text's own footnote prefix (a reply cannot forge another message's
+// footnote ids).
 func TestReplySanitizerKeepsOnlyDisabledCheckboxesAndFootnoteIDs(t *testing.T) {
 	out := servedReply(`<input type="text" value="x" name="n"> <input type="checkbox" checked onclick="x()" name="n"> <input type="CHECKBOX">` +
-		"\n\n" + `<p id="item-3">p</p> <sup id="wbf-00000000-fnref:1">s</sup> <span id="wbf-00000000-fn:1">x</span> <li id="wbf-zz-fn:1">`)
-	wantAll(t, out, `<input type="checkbox" disabled="" checked=""/>`, `<input type="checkbox" disabled=""/>`, `<sup id="wbf-00000000-fnref:1">`)
+		"\n\n" + `<p id="item-3">p</p> <span id="wbf-00000000-fn:1">x</span> <li id="wbf-zz-fn:1">`)
+	wantAll(t, out, `<input type="checkbox" disabled="" checked=""/>`, `<input type="checkbox" disabled=""/>`)
 	if n := strings.Count(out, "<input"); n != 2 {
 		t.Errorf("want two inputs, got %d:\n%s", n, out)
 	}
 	wantNone(t, out, "text", "onclick", "name=", "item-3", `<span id=`, "wbf-zz")
+
+	// The text's own footnote ids survive; a foreign prefix, well-formed or
+	// not, does not.
+	own := servedReply("own[^1]\n\n[^1]: note\n\n" + `<sup id="wbf-00000000-fnref:1">f</sup>`)
+	pre := footnoteIDs(t, own)
+	wantAll(t, own, `<sup id="`+pre+`fnref:1">`, `<li id="`+pre+`fn:1">`)
+	wantNone(t, own, "wbf-00000000")
 }
