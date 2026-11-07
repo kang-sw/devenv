@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: bf17251f214bce8f
 sage-review-completeness-reviewed: bf17251f214bce8f
+completed: 2026-11-07
 ---
 
 # Dashboard UI language setting with per-language translation tables
@@ -157,3 +158,80 @@ pages; `node --check` on changed scripts; a headless Chromium check (cached
 Playwright under `~/.npm/_npx/*/node_modules/playwright`) of the session
 list, an adapter session page, and a board-first session page in both
 languages.
+
+### Result (4a34e37e6) - 2026-11-07
+
+Landed on `impl/develop/slaw-wavy-satin`: `5c9ddbe2b` (the `wsi18n` package),
+`304859436` (wiring through the dashboard, whiteboard page, and mcp panels),
+`2c95bfe6c` (merge of develop after the whiteboard XML-command ticket landed
+first, keying its additions), `4a34e37e6` (panel test moved to the command
+string).
+
+What shipped:
+
+- `internal/wsi18n`: flat JSON tables `tables/en.json`, `tables/ko.json`
+  (embedded, `{0}` placeholders, `.one`/`.other` plurals). `lang.name` in each
+  table names it, and the gear lists the embedded tables, so a new language is
+  one file. `T`/`Plural` fall back to English, then to the key. Keys with a
+  `js.` prefix form the client table, shipped as `window.wsI18n` with
+  `wsT`/`wsTn`.
+- Language resolution is server-side: cookie `ws_dashboard_lang`, then
+  `Accept-Language`, then English. It is read by the page, both SSE streams,
+  and the history route, so the first byte is already in the chosen language
+  (no flash). An explicit "follow the browser" item clears the cookie.
+- The gear: full on adapter pages; language-only on the session list and
+  board-first pages. Its Escape and click handling no longer wait for a live
+  layout. A switch reloads, or shows a banner when a composer draft, board
+  answers, or an image is held (the `modeChanged` guard, reused as
+  `holdsDraft`).
+- One parsed template set per language (a parsed set's FuncMap is fixed). The
+  entry cache key is prefixed with the language. `ReadPageLang`
+  (`LangPageSource`) lets the mcp source translate panel titles, counts, lane
+  names, and mailbox phrases; `PageSource` is unchanged. Go-built strings
+  (`tokenText`, `tokenTitle`, `batchMeta`, band flags, phase words, file-view
+  reasons, panel builders) are keyed.
+- Out of scope and untouched: board items, chat, agent content, MCP strings,
+  the reply-box protocol text, answer values, held-message chips.
+
+Implementer's calls (recorded as the ticket requires):
+
+- Standalone whiteboard outputs: the page written to disk, the embed, and the
+  fingerprint stay English (`View.Lang` empty); only the served page follows
+  its viewer. `RenderPage` still honours `View.Lang`, and the page carries its
+  own client table script.
+- Class tags (`policy`, `technical`, `announced`, `assumed`) stay
+  untranslated: they are protocol vocabulary the lead writes and the user
+  answers against.
+- `<html lang>` stays absent; the language travels in `data-lang` and
+  `data-langpref` on `<html>`. No supersession of 261030.
+- Table text is escaped as text, so `+` appears as `&#43;`; the tools-row test
+  compares the unescaped text.
+- The XML-commands ticket landed first: its topic-notes tooltip is keyed
+  (`wb.doc`), the topic-bar titles its rewritten topic block carried are
+  re-keyed, and the Now keys are removed with the slot. A framed doc
+  iframe's title is the topic name (user content), left as is.
+- Tests that count `<script>` elements in standalone whiteboard pages now
+  count the string-table script too. `TestBoardFirstPageHasNoLayoutControl`
+  now expects the language-only gear and still forbids layout/input items.
+
+Verification (from `agents-plugin-tool/`):
+
+- `go build ./...` and `go vet ./internal/... ./cmd/...`: pass.
+- `go test -count=1 ./internal/wsdashboard/ ./internal/wswhiteboard/
+  ./internal/wsi18n/ ./internal/mcp/`: pass (mcp in a full run, apart from the
+  one panel test fixed in `4a34e37e6` and re-run alone: pass).
+- `node --check` on `dashboard.js`, `pill.js`, and the other asset scripts:
+  pass.
+- Key-sweep tests (`wsi18n/keys_test.go`): every used key is in the English
+  table, every English key is used, other tables hold only English keys,
+  placeholders match, plural pairs complete.
+- Headless Chromium (Playwright from `~/.npm/_npx/*`), session list, adapter
+  page, and board-first page, each with an `en-US` and a `ko-KR` browser, run
+  after the develop merge: default follows the browser; picking Korean sets
+  the cookie and the page, the other pages, and the stream title render
+  Korean; picking English and "follow the browser" return correctly (cookie
+  cleared); no page errors; no `lang` attribute.
+- Lite review (one independent pass): no Critical or Important findings. Two
+  minors left unfixed: with a held draft the cookie is written but the open
+  stream can keep delivering old-language regions until reload, and `setLang`
+  has no automated browser test beyond the Chromium run above.
