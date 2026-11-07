@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: d11731ecb0142c7c
 sage-review-completeness-reviewed: d11731ecb0142c7c
+completed: 2026-11-07
 ---
 
 # Dashboard: session status band (context, branch, sync, usage) around the composer
