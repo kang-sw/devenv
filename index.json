@@ -641,7 +641,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-07T15:06:37Z"
+        "touched_at": "2026-11-07T15:07:14Z",
+        "impl": {
+          "branch": "impl/develop/gore-pod-grunt"
+        }
       }
     }
   }
