@@ -50,7 +50,11 @@
 
 {{define "srow"}}<div class="srow{{if .Void}} void{{end}}" id="item-{{.ID}}"><span class="stext"><span class="id"{{if .Void}} title="{{.Status}}"{{end}}>{{.Label}}</span>{{template "newdot" .}}<b>{{.Page.Inline .Title}}</b>{{with .PickedOption}} <span class="pick" title="picked"><span class="k">{{.Letter}}</span>{{$.Page.FirstLine .Text}}</span>{{end}}{{with .Reading}} <span class="ans" title="the lead's reading">{{template "text" ($.Parts .)}}</span>{{end}}{{with .AnswerQuote}} <span class="quote" title="your words">“{{.}}”</span>{{end}}{{template "links" .}}</span></div>{{end}}
 
-{{define "panel"}}<details class="panel" id="p-{{.ID}}"{{if .Page.Full}} open{{end}}><summary>{{icon .IconName}}{{.Title}}{{with .Count}}<span class="chip">{{.}}</span>{{end}}</summary><div class="body"><ul class="rows">{{range .Rows}}{{template "row" .}}{{end}}</ul>{{with .Folded}}<details class="folded"><summary class="chip" title="done">done {{len .}}</summary><ul class="rows">{{range .}}{{template "row" .}}{{end}}</ul></details>{{end}}</div></details>{{end}}
+{{define "panel"}}<details class="panel" id="p-{{.ID}}"{{if .Page.Full}} open{{end}}><summary>{{icon .IconName}}{{.Title}}{{with .Count}}<span class="chip">{{.}}</span>{{end}}</summary><div class="body">{{with .Lanes}}<div class="lanes">{{range .}}{{template "lane" .}}{{end}}</div>{{end}}{{if .Rows}}<ul class="rows">{{range .Rows}}{{template "row" .}}{{end}}</ul>{{end}}{{with .Folded}}<details class="folded"><summary class="chip" title="done">done {{len .}}</summary><ul class="rows">{{range .}}{{template "row" .}}{{end}}</ul></details>{{end}}</div></details>{{end}}
+
+{{define "lane"}}<section class="lane"><h4><span class="lname">{{.Name}}</span><span class="chip">{{.Count}}</span>{{with .Note}}<span class="lnote">{{.}}</span>{{end}}</h4><ul class="kcards">{{range .Rows}}{{template "card" .}}{{else}}<li class="none">none</li>{{end}}</ul></section>{{end}}
+
+{{define "card"}}<li class="kcard">{{with .Label}}<span class="chip cat {{.}}">{{.}}</span>{{end}}<span class="ctitle"{{if and (not .Link) .Path}} title="{{.Path}}"{{end}}>{{if .Link}}<a href="{{href .Link}}">{{.Text}}</a>{{else}}{{.Text}}{{end}}</span>{{with .Sub}}<span class="csub" title="{{.}}">{{.}}</span>{{end}}</li>{{end}}
 
 {{define "row"}}{{if .State}}<li class="{{.State}}"{{with .Label}} title="{{.}}"{{end}}><span class="box">{{icon (box .State)}}</span><span>{{template "rowtext" .}}</span></li>{{else}}<li class="keyed">{{with .Label}}<code>{{.}}</code>{{end}}<span>{{template "rowtext" .}}</span></li>{{end}}{{end}}
 

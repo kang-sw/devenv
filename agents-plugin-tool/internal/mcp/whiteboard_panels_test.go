@@ -135,6 +135,19 @@ func TestWhiteboardTicketPanel(t *testing.T) {
 	if !strings.Contains(full, `<span class="chip">2 ready, 12 todo</span>`) {
 		t.Fatalf("ticket chip must count the whole backlog: %s", full)
 	}
+	for _, want := range []string{
+		`<span class="lname">ready</span><span class="chip">2</span>`,
+		`<span class="lname">todo</span><span class="chip">10</span><span class="lnote">latest 10 of 12</span>`,
+		`<span class="chip cat bug">bug</span>`,
+		`<span class="csub" title="261101-feat-ready-a">261101-feat-ready-a</span>`,
+	} {
+		if !strings.Contains(full, want) {
+			t.Fatalf("ticket lanes lack %q: %s", want, full)
+		}
+	}
+	if strings.Contains(full, `class="fpath"`) {
+		t.Fatalf("a card must not show its path as body text")
+	}
 	if strings.Contains(full, "Idea X") {
 		t.Fatalf("idea tickets must not be listed")
 	}
