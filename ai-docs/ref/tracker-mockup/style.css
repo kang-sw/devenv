@@ -292,3 +292,5 @@ details.unpushed summary { cursor: pointer; color: var(--warn); }
 .cnum { font-size: 11px; color: var(--muted-fg); }
 .citem { display: flex; gap: 3px; align-items: center; flex-wrap: wrap; margin: 2px 0; cursor: pointer; }
 .tm-work.notice { font-style: normal; }
+
+.sup { margin: 2px 0; font-size: 12px; }

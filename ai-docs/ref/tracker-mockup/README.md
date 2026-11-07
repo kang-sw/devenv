@@ -60,8 +60,9 @@ build, no server, no dependencies.
       roll-up and blocked warning, priority, due (or "due today"), stale, a
       "by agent" chip when an agent wrote the current status, the latest note,
       and quick actions including *Hand off*.
-    - *Received requests*: pending assignments to me (Accept / Decline /
-      Discuss), the ones I answered, and the ones I sent (Withdraw).
+    - *Received requests*: answer notices (what I sent was declined, or
+      returned by the accepter's lead), pending assignments to me (Accept /
+      Decline / Discuss), the ones I answered, and the ones I sent (Withdraw).
     - *Assigned by me*: what I assigned or handed to others, live or pending,
       with each assignee's status and Confirm / Reject.
     - *My team*: shown to a viewer with followers or notices. Reference
@@ -90,11 +91,14 @@ build, no server, no dependencies.
     marked.
   - *Calendar*: a month grid of items by due day, with month navigation.
 - **Thread view** (side sheet). Meta (status, priority, due, creator, project,
-  parent), the body, item actions, the assignees with their state and actions,
-  and the subtask threads. Below that comes one chronological timeline of
-  comments (quote reply, edit, hide), status changes, assignments and answers,
-  edits, agent records with `agent` / `auto` chips, subtask lines, flagged and
-  waiting events with their reason, and amber "concurrent change" boxes. The
+  parent), the body, item actions (an admin also gets Edit / Hide on a removed
+  creator's item), the assignees with their state and actions (an admin also
+  gets *Hand off (admin)* on any member's live assignment), and the subtask
+  threads. Below that comes one chronological timeline of comments (quote
+  reply, edit, hide), status changes, assignments and answers, edits, agent
+  records with `agent` / `auto` chips, subtask lines, flagged and waiting
+  events with their reason, amber "concurrent change" boxes, and quiet
+  "superseded by" notes on a member's losing write from another clone. The
   composer posts a comment, as a reply when one is chosen, with an origin; with
   an own assignment on the thread, quick status buttons use the composer text
   as the note.
@@ -167,12 +171,12 @@ folded in causal order.
 | type | payload | rule |
 |---|---|---|
 | `item.create` | `kind` (`task`/`todo`/`topic`), `title`, `body?`, `project?`, `due?`, `priority?`, `parent?` | A `parent` must be assigned to or created by the author. `project` is one free-text string, the only grouping (no labels or tags). `due` is a `YYYY-MM-DD` date. `priority` is a level in the author's current range; omitted, the item starts at the store's default level. |
-| `item.edit` | `item`, any of `title`/`body`/`project`/`due`/`priority` | Creator only. `due: null` clears the date; priority cannot be cleared. Each field merges by the (203) rule. |
-| `item.hide` | `item` | Creator only. A tombstone: the content stays in history. Flagged while someone else holds an open (live or pending) assignment on the item. |
+| `item.edit` | `item`, any of `title`/`body`/`project`/`due`/`priority` | Creator only; an admin may also edit an item whose creator was removed (292). `due: null` clears the date; priority cannot be cleared. Each field merges by the (203) rule. |
+| `item.hide` | `item` | Creator only; an admin may also hide an item whose creator was removed (292). A tombstone: the content stays in history. Flagged while someone else holds an open (live or pending) assignment on the item. |
 | `item.assign` | `item`, `mode` (`all`/`chosen`), `levels` (all), `people` (chosen), `completion` (`assignee`/`assigner`, default `assignee`) | Creator only; an admin may also assign an item whose creator was removed. `chosen` may target anyone in the store: the author, or someone the author reaches (the author is in their lead chain, any depth), is a **forced** assignment, live at once; anyone else gets a **pending** assignment. `all` targets everyone within N levels below the author, forced only, and stays live: anyone who later enters the range inherits it. Flagged when every chosen person already holds a live or pending assignment. Not allowed on topics. |
-| `item.handoff` | `item`, `to`, `note?` | The holder of a live assignment hands it to anyone. It makes a pending assignment to `to` with the original's assigner and completion mode; on accept the original assignment ends (`handed`). Flagged on a done assignment, when `to` already holds one, or while another handoff of it is pending. |
+| `item.handoff` | `item`, `to`, `assignee?`, `note?` | The holder of a live assignment hands it to anyone; an admin may hand off any member's live assignment by naming its holder in `assignee` (286), so open work can be taken over before the member is removed. It makes a pending assignment to `to` with the original's assigner and completion mode; on accept the original assignment ends (`handed`) and the new one starts with the original's status and note (290). Flagged on a done assignment, when `to` is the holder or already holds one, or while another handoff of it is pending. |
 | `item.accept` / `item.decline` | `item`, `note?` | The target of a pending assignment, on it. Accept makes it live; for a handoff it also ends the original (flagged if the original already ended). Decline ends it as `declined`. |
-| `item.return` | `item`, `assignee`, `note?` | Only the assignee's direct lead, on an accepted (formerly pending) live assignment. Ends it as `returned`; the assigner may send again. |
+| `item.return` | `item`, `assignee`, `note?` | Only the assignee's direct lead, on an accepted (formerly pending) live assignment. Ends it as `returned`; the assigner may send again. Returning an accepted handoff restores the original assignment with its prior status (291), unless its holder was removed or holds another assignment on the item by then. |
 | `item.unassign` | `item`, `assignee?` | By the assigner; the sender of a pending assignment may also withdraw it. An admin may also unassign when the assignee or assigner was removed. Without `assignee`, it withdraws all of the author's assignments on the item and ends the live rule. |
 | `item.status` | `item`, `status` (`todo`/`doing`/`blocked`), `note?` | Assignee only (live). The creator self-assigns first. Allowed while awaiting confirmation, which withdraws the close. Not allowed on done. |
 | `item.close` | `item`, `note?` | Assignee. Moves to `done`, or to `awaiting` when completion is `assigner`. |
@@ -184,7 +188,7 @@ folded in causal order.
 | `roles.set_lead` | `member`, `leads` | Admin. Length at most 1, no cycle. |
 | `roles.add_admin` / `roles.remove_admin` | `member` | Admin. The last admin cannot be removed. |
 | `roles.add_key` / `roles.revoke_key` | `member`, `key` | Admin. Revocation rule below. |
-| `roles.remove_member` | `member` | Admin. The member must lead nobody and must not be an admin. Their earlier events stay valid. |
+| `roles.remove_member` | `member` | Admin. The member must lead nobody and must not be an admin. Their earlier events stay valid. Their live assignments end as `unassigned` and their pending ones as `withdrawn` (287), so nothing stays counted under a removed member; like an unassign, this beats a concurrent status write. |
 | `roles.set_priority_levels` | `names` (1-9 display names, lowest first), `default` | Admin. Changes the level count and names; a field write, so concurrent changes merge by (203). |
 
 `agent-auto` is valid only on `item.status` and `item.close` for the author's
@@ -198,10 +202,10 @@ An assignment record is `<assign event id>><member>` (for a handoff,
 it: the assigner, or the handing-off assignee), a completion mode, and a state:
 
 ```text
-pending --accept--> live --unassign--> unassigned
+pending --accept--> live --unassign / member removed--> unassigned
    |                  |--return-----> returned   (accepted ones only, by the assignee's direct lead)
-   |--decline--> declined               |--handoff accepted--> handed
-   |--withdraw--> withdrawn
+   |--decline--> declined               |--handoff accepted--> handed --that handoff returned--> live (restored)
+   |--withdraw / member removed--> withdrawn
 forced (author, or someone the author reaches) starts live
 ```
 
@@ -218,7 +222,14 @@ forced (author, or someone the author reaches) starts live
 - **Handoff.** On accept the original assignee's assignment ends as `handed`
   and the original assigner gets a notice like the lead. The handed-on
   assignment keeps the original assigner, so confirm and unassign stay with
-  them.
+  them, and starts with the original's status and note (290). An admin may
+  hand off any member's live assignment (286): the takeover path before a
+  removal. If the accepter's lead returns an accepted handoff, the original
+  assignment comes back live with its prior status (291).
+- **Answer notices** (285). The sender of a pending assignment gets a notice
+  when it is declined or, once accepted, returned; for a returned handoff the
+  original assigner gets one too. Notices are derived from the assignment
+  records, never events.
 - `returned` and `declined` are terminal: the assigner may assign again.
 - Completion mode (assignee closes / assigner confirms) stays per assignment.
 
@@ -235,14 +246,17 @@ forced (author, or someone the author reaches) starts live
   root. Topics and items whose status is pending, declined, or returned are not
   counted. The parent's own status stays manual, set by its assignee.
 - Priority displays as the level name; a stored value outside the current range
-  displays as the top level. Stale = a live assignment in `doing` or `blocked`
-  with no status update for 3 days (by the mock clock). Overdue = due before
+  displays as the top level. Stale (284) = a live assignment in `doing` or
+  `blocked` with no status write for 3 days by the viewer's clock (the mock
+  clock here). The threshold is a client-side constant (`STALE_DAYS`, or
+  `deriveViewState(input, {staleDays})`), not shared data; todo work never
+  goes stale. Overdue = due before
   today and not done.
 
 ## View state (the future backend API shape)
 
 `store.view(stream, now)` returns one plain JSON object, built by
-`deriveViewState(input, { stream, now })` plus the store's sync info. The view
+`deriveViewState(input, { stream, now, staleDays? })` plus the store's sync info. The view
 reads nothing else, and writes only through `store.dispatch(stream, events,
 ts)`, which returns each new event's id and verdict. This object is the shape
 the Go data-structure child should serve.
@@ -258,14 +272,17 @@ items        { id: { id, alias, kind, title, body, project, due, priority, prior
                      assignments[], pending[], thread[eventId], concurrent, depth, chain[] } }
 itemOrder[]  item ids in tree order
 assignments  { id: { id, item, to, by, sender, completion, state, forced, status, note, noteBy, via, ts,
-                     inherited, ruleLevels, handoffOf, handoffNote, answerNote, accepted{id, ts},
+                     inherited, ruleLevels, handoffOf, handoffFrom, handoffNote, answerNote,
+                     restored{id, ts}, restores, accepted{id, ts},
                      leadAtAccept, ended{id, type, ts, by}, depth, statusOrigin, statusBy,
                      lastUpdate, stale } }
 comments     { id: { id, item, author, body, reply_to, ts, edited{id, ts}, hidden } }
 events[]     display order: { id, alias, stream, member, seq, ts, type, origin, payload, status
                      (applied|flagged|waiting), reason, ignored, markers[{kind, field, other,
-                     otherMember, winner, mine, theirs}], thread, parentThread, local, open, late }
-notices[]    { key, kind (accepted|handoff), assignment, item, to, by, sender, from?, ts, state }
+                     otherMember, winner, mine, theirs}], superseded[{field, by, why (later|human)}],
+                     thread, parentThread, local, open, late }
+notices[]    { key, kind (accepted|handoff|declined|returned), assignment, item, to, by, sender, ts,
+               state, from?, endedBy?, note?, restores? }   keys acc:/ho:/dec:/ret: + assignment id
 my           { assignments[], today{work[], pending[], confirms[]}, received{pending[], answered[], sent[]},
                given[itemId], created[itemId], team[{id, depth, open[], pending[], waiting[], done, blocked,
                stale, last}],
@@ -303,8 +320,13 @@ one member can show different states until they sync.
      id, clone id, and seq. Writes by two different members get a
      "concurrent change" marker naming both values. Writes by one member from
      two clones (item and comment text have a single writer, so this is their
-     only concurrency) get no marker: the later `ts` wins and the losing write
-     stays in the thread (271).
+     only concurrency) get no marker: the later `ts` wins (271), except that a
+     `human`-origin write beats a concurrent `agent` / `agent-auto` write of
+     the same member (288). Among a field's concurrent writes, an agent write
+     with a same-member human write beside it drops out first; the later `ts`
+     rule picks among the rest. The losing same-member write stays in the
+     thread with a quiet "superseded by <event>" note (289), not a conflict
+     box.
    - **Removal against writes.** An unassign, return, withdraw, or accepted
      handoff that is concurrent with a status write or close on that
      assignment always wins. Both events are marked, and the write shows as
@@ -371,7 +393,10 @@ page clock starts at 2026-11-06 09:00. The fixtures show:
   maya concurrently unassigned (`omar.pc-5` vs `maya.pc-15`).
 - maya edits the body of "Index builder" from `maya.lap` and, without having
   fetched it, from `maya.pc` later: the later edit is shown, both stay in the
-  thread, no marker.
+  thread, no marker; `maya.lap-1` carries the "superseded" note (271, 289).
+- maya sets "Ship search v2" to doing by hand on `maya.pc`; an hour later her
+  agent on `maya.lap`, not having fetched it, auto-sets blocked: the human
+  write wins despite the earlier ts, and `maya.lap-4` is superseded (288).
 - assignments of every kind:
   - forced: maya's subtasks to her followers, ada's live "everyone within L1/L2"
   - pending, accepted, assigner confirms: `kai.pc-2` sent up to ada; ada
@@ -470,11 +495,23 @@ creation, and it has a topic and a blocked subtask.
 | 275 | The view reads only one derived view-state object and writes only by dispatching events; its shape is in [View state](#view-state-the-future-backend-api-shape) as the future backend API. |
 | 276 b | View modes: kanban (drag moves only one's own assignment), activity timeline, due timeline, and calendar, next to the cards and the tree. Styling is deferred. |
 | 267 a, 281 a | A scenario walk through the page and engine rules, recorded in [SCENARIOS.md](SCENARIOS.md) with view and model snags. |
+| 284 | Stale = a live assignment in doing or blocked with no status write for 3 days; the threshold is a client-side constant. |
+| 285 | The sender gets a derived notice when their pending assignment is declined or their accepted one returned; no new event. |
+| 286 | An admin may `item.handoff` any member's live assignment (pending until the new holder accepts), before removal. |
+| 287 | `roles.remove_member` ends the member's live assignments as unassigned and pending ones as withdrawn. |
+| 288 | Same member, concurrent writes from different clones with different origins: the human write wins over agent / agent-auto; same origin keeps (271). |
+| 289 | The losing same-member write gets a quiet "superseded by <event>" note in history; no conflict box. |
+| 290 | A handoff's new assignment starts with the original's status and note. |
+| 291 | Returning an accepted handoff restores the original assignment with its prior status and notifies the original assigner. |
+| 292 | Extends (208): an admin may `item.edit` and `item.hide` an item whose creator was removed. |
+| 293 | Accepted as interpreted in v3: forced reach is any depth of the lead chain (`levels` dropped from `chosen`); (271) holds for every field; a kanban drop on done dispatches `item.close`; stale counts doing and blocked only; a viewer switch pushes the previous clone and fetches the new one; the push delay and join are not modeled. |
 
 ## Open questions
 
-The model snags the scenario walk found are listed with recommended
-resolutions in [SCENARIOS.md](SCENARIOS.md); the lead decides them.
+The model snags the scenario walk found are resolved by (284)-(292); see
+[SCENARIOS.md](SCENARIOS.md). Still open: a pending handoff whose original
+assignment ended some other way (unassign, removal) stays pending and can
+only be declined or withdrawn, since accept is flagged.
 
 ## Not modeled in v3
 
@@ -482,5 +519,5 @@ Real signatures and crypto; git refs, pushes, and fetches (sync is simulated
 per clone); the background poll and the 5-minute push delay (push happens at
 Sync, panel collapse, and viewer switch); the self-join (stand-in:
 `roles.add_member`) and claim refs; re-issue of a revoked key's own events;
-search; the MCP surface; notifications beyond the handle badge and the My team
-notices; labels and tags (278 a); multiple leads; snapshots; styling.
+search; the MCP surface; notifications beyond the handle badge and the
+derived notices; labels and tags (278 a); multiple leads; snapshots; styling.

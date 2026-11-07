@@ -8,8 +8,11 @@ Snags are classified:
 
 - **view**: the page shows or offers the wrong thing; the model is fine. Small
   ones were fixed in the page during the walk.
-- **model**: a rule is missing or produces a bad outcome. Not changed here;
-  each comes with a recommended resolution for the lead to decide.
+- **model**: a rule is missing or produces a bad outcome. Recorded with a
+  recommended resolution; the lead resolved all nine as board (284)-(292),
+  and the follow-up applied them to the engine and page. Scenarios 2, 3, 4,
+  5, 7 and 8 were walked again afterwards; each snag below ends with its
+  resolution and the re-walk result.
 
 ## 1. Morning check
 
@@ -51,6 +54,8 @@ Snags:
   "everyone within L2" training floods the lead view). Recommendation: settle
   this definition and keep the threshold a client-side constant (a view
   concern, not shared data).
+  **Resolved (284)** as recommended: `STALE_DAYS` in the engine, overridable
+  per view with `deriveViewState(input, {staleDays})`. Re-walk: same counts.
 
 ## 3. Accepted, returned by the accepter's lead, sent again
 
@@ -76,6 +81,11 @@ Snags:
   accepter's lead (on accept) and the original assigner (on an accepted
   handoff). Recommendation: add a derived notice to the sender on decline and
   on return (no new event type).
+  **Resolved (285)**: derived `declined` / `returned` notices (keys `dec:` /
+  `ret:`). Re-walk: after maya's return, noa's badge holds
+  `ret:noa.pc#4>lena` and her Received requests card opens with "Maya Ortiz
+  (lead of Lena Weiss) returned Lena Weiss's accepted assignment" and the
+  note. The fixture shows the decline side: tia has `dec:tia.pc#4>uma`.
 
 ## 4. A member leaves
 
@@ -83,7 +93,7 @@ Steps: as `ada.pc` (admin), try to take over omar's open work (maya's "Shard
 writer docs", ada's "Security training"), then remove omar with
 `roles.remove_member`, then look at his assignments again.
 
-Outcome: before removal ada has no way to move omar's work: unassign belongs
+Outcome (first walk, before (286), (287)): before removal ada has no way to move omar's work: unassign belongs
 to the assigner (maya), and (208) lets an admin unassign only after the
 assignee or assigner was removed; a handoff belongs to omar. Removal is valid
 (omar leads nobody and is not an admin). After it, omar's two live
@@ -102,11 +112,23 @@ Snags:
   while the member is still around and the new holder accepts explicitly.
   The alternative, settling the order as remove-then-unassign, needs no new
   rule but leaves work unowned in between.
+  **Resolved (286)**: `item.handoff` takes an `assignee`, allowed for an
+  admin on any member's live assignment. Re-walk: ada opens "Shard writer
+  docs", clicks *Hand off (admin)* on omar's row, hands it to jon; jon's
+  Received card shows "admin handoff of Omar Haddad's assignment by Ada Park
+  (assigner Maya Ortiz)"; jon accepts and starts at omar's `blocked`
+  (290); omar's assignment is `handed`; then ada removes omar. The scenario's
+  order now works.
 - M4 (model): removing a member leaves their live and pending assignments in
   place, still counted in item status and roll-ups. Recommendation: in the
   fold, `roles.remove_member` ends the member's live assignments as
   `unassigned` and pending ones as `withdrawn`, attributed to the removal
   event; history stays.
+  **Resolved (287)** as recommended. Re-walk: after removal omar's remaining
+  "Security training" assignment is `unassigned` by `ada.pc-16` (the sheet
+  says "member removed"), and no live assignment of omar is left counted.
+  Without the takeover, "Shard writer docs" becomes `unassigned` and maya
+  (its creator) reassigns it.
 - V4 (view, fixed): the assignees table offered no Unassign to an admin on a
   removed member's assignment, although the engine allows it (208).
 
@@ -133,6 +155,11 @@ Snags:
   `blocked`, silently. Recommendation: keep (271) for writes of the same
   origin, but when concurrent same-member writes differ in origin (human vs
   agent), mark them like a cross-member conflict (or let the human write win).
+  **Resolved (288)**: the human write wins; same origin keeps (271). A new
+  fixture case exercises it: maya's human `doing` on "Ship search v2" from
+  `maya.pc` at 17:00 beats her agent-auto `blocked` from `maya.lap` at 18:00.
+  Re-walk: maya's assignment shows `doing` (human), and `maya.lap-4` carries
+  "superseded by maya.pc-21 (a human write from another clone)" (289).
 
 ## 6. Offline for days on one clone, then sync
 
@@ -168,6 +195,10 @@ Snags:
   always win (inherent to ts winners, accepted by (203)). Recommendation:
   keep no conflict box, but show a quiet "superseded by maya.pc-21 (later
   edit from another clone)" note on the losing edit line.
+  **Resolved (289)** as recommended: events carry `superseded[{field, by,
+  why}]`, and the thread shows the note. Re-walk: the laptop edit line reads
+  "superseded by maya.pc-22 (a later write from another clone): body of
+  maya.pc-7"; the fixture's `maya.lap-1` has the same note.
 
 ## 8. An assignee hands off to a peer; the peer accepts
 
@@ -187,11 +218,21 @@ Snags:
   item's status drops from doing to todo, and lena's progress note stays only
   on the ended record. Recommendation: the new assignment starts with the
   original's status and note (or the handoff note).
+  **Resolved (290)**: status and note carry over. Re-walk: ivy's accepted
+  assignment is `doing` with lena's note, and the item stays `doing`.
 - M8 (model): if the accepter's lead returns an accepted handoff, nobody holds
   the work. Checked in the engine: lena `handed`, ivy `returned`, item status
   `returned` with no live assignee. Recommendation: returning an accepted
   handoff restores the original assignment (`handed` back to `live`), or at
   least notifies the original assigner (ties to M2).
+  **Resolved (291)**: both. Re-walk: maya returns ivy's accepted handoff from
+  her My team notice; lena's assignment is live again at `doing` (restored),
+  the item stays `doing`, and lena's Received card says "Lena Weiss's
+  assignment is restored". Checked in the engine: when the original
+  assigner is not the returning lead (raj's handoff to sven, returned by
+  raj), the assigner lena gets the `ret:` notice and raj's assignment is
+  restored. No restore happens when the original holder was removed or
+  holds another assignment on the item by then.
 
 ## 9. A typo in a team member's item
 
@@ -212,29 +253,36 @@ Snags:
   `item.edit` stays creator-only (checked: an admin's edit after removing the
   creator is flagged). Recommendation: extend (208) to `item.edit` and
   `item.hide` by an admin when the creator was removed.
+  **Resolved (292)** as recommended. Checked in the engine: after removing
+  noa, ada's `item.edit` of `noa.pc-3` applies (a non-admin's is still
+  flagged); `item.hide` still needs the open assignments ended first. The
+  sheet offers *Edit (admin: creator removed)* and *Hide item (admin)*.
 
 ## Summary
 
-| # | scenario | outcome | view snags (fixed) | model snags |
+| # | scenario | outcome (after the resolutions) | view snags (fixed) | model snags (resolved) |
 |---|---|---|---|---|
 | 1 | morning check | works | V1 due today | - |
-| 2 | lead finds stuck work | works | V2 follower's unaccepted outgoing work | M1 stale definition |
-| 3 | accept, return, send again | works | V3 "sent by me" heading | M2 sender not notified |
-| 4 | member leaves | order impossible; removal leaves work counted | V4 admin Unassign | M3 takeover before removal, M4 removal ends assignments |
-| 5 | agent update, human correction | works | V5 "by agent" chip | M5 same-member agent vs human |
+| 2 | lead finds stuck work | works | V2 follower's unaccepted outgoing work | M1 |
+| 3 | accept, return, send again | works; the sender is notified | V3 "sent by me" heading | M2 |
+| 4 | member leaves | works in the scenario's order: admin handoff, then removal | V4 admin Unassign | M3, M4 |
+| 5 | agent update, human correction | works, also across clones | V5 "by agent" chip | M5 |
 | 6 | offline days, then sync | works | - | - |
-| 7 | same body from two clones | works as settled | - | M6 silent loss |
-| 8 | handoff to a peer | works | - | M7 status reset, M8 returned handoff orphans work |
-| 9 | typo in a member's item | works | - | M9 removed creator's text |
+| 7 | same body from two clones | works; the losing edit is marked superseded | - | M6 |
+| 8 | handoff to a peer | works; status carries over, a returned handoff restores the original | - | M7, M8 |
+| 9 | typo in a member's item | works | - | M9 |
 
-| model snag | recommended resolution |
-|---|---|
-| M1 stale is undefined | Settle "live, doing or blocked, no status write for 3 days"; threshold a client constant. |
-| M2 sender not notified of decline or return | Derived notice to the sender on decline and on return; no new event. |
-| M3 admin cannot take over before removal | Allow an admin `item.handoff` on any member's live assignment (pending until the new holder accepts). |
-| M4 removal leaves assignments live and counted | `roles.remove_member` ends the member's live (`unassigned`) and pending (`withdrawn`) assignments in the fold. |
-| M5 same-member agent write silently beats a human correction | Keep (271) for same-origin writes; mark (or prefer the human) when origins differ. |
-| M6 a member's losing clone edit vanishes silently | Keep no conflict box; add a quiet "superseded by ..." note on the losing line. |
-| M7 handoff resets status to todo | Start the handed-on assignment with the original's status and note. |
-| M8 returning an accepted handoff orphans the work | Restore the original assignment on return, or notify the original assigner. |
-| M9 nobody can edit a removed creator's item | Extend (208) to `item.edit` / `item.hide` by an admin when the creator was removed. |
+| model snag | recommended resolution | board resolution |
+|---|---|---|
+| M1 stale is undefined | Settle "live, doing or blocked, no status write for 3 days"; threshold a client constant. | (284) as recommended |
+| M2 sender not notified of decline or return | Derived notice to the sender on decline and on return; no new event. | (285) as recommended |
+| M3 admin cannot take over before removal | Allow an admin `item.handoff` on any member's live assignment (pending until the new holder accepts). | (286) as recommended |
+| M4 removal leaves assignments live and counted | `roles.remove_member` ends the member's live (`unassigned`) and pending (`withdrawn`) assignments in the fold. | (287) as recommended |
+| M5 same-member agent write silently beats a human correction | Keep (271) for same-origin writes; mark (or prefer the human) when origins differ. | (288) the human write wins |
+| M6 a member's losing clone edit vanishes silently | Keep no conflict box; add a quiet "superseded by ..." note on the losing line. | (289) as recommended |
+| M7 handoff resets status to todo | Start the handed-on assignment with the original's status and note. | (290) as recommended |
+| M8 returning an accepted handoff orphans the work | Restore the original assignment on return, or notify the original assigner. | (291) both |
+| M9 nobody can edit a removed creator's item | Extend (208) to `item.edit` / `item.hide` by an admin when the creator was removed. | (292) as recommended |
+
+The six interpretations v3 made where the plan was silent are accepted as
+(293); see the README Settled table.

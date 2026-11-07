@@ -78,8 +78,11 @@
     return h;
   }
   var END_TEXT = { declined: 'declined', returned: 'returned by the lead', handed: 'handed on', unassigned: 'unassigned', withdrawn: 'withdrawn' };
+  function endedBy(r) { return r.ended && VS.events.filter(function (e) { return e.id === r.ended.id; }).map(function (e) { return e.type === 'roles.remove_member' ? ' (member removed)' : ''; })[0] || ''; }
   function source(r) {
-    if (r.handoffOf) return 'handoff from <b>' + esc(nm(r.sender)) + '</b> (assigner ' + esc(nm(r.by)) + ')' + (r.state === 'pending' ? ', not accepted yet' : r.accepted ? ', accepted' : '');
+    if (r.handoffOf) return (r.sender === r.handoffFrom ? 'handoff from <b>' + esc(nm(r.sender)) + '</b>' : 'admin handoff of <b>' + esc(nm(r.handoffFrom)) + '</b>\'s assignment by <b>' + esc(nm(r.sender)) + '</b>') +
+      ' (assigner ' + esc(nm(r.by)) + ')' + (r.state === 'pending' ? ', not accepted yet' : r.accepted ? ', accepted' + (r.state !== 'live' ? ', then ' + END_TEXT[r.state] : '') : END_TEXT[r.state] ? ', ' + END_TEXT[r.state] : '');
+    if (r.restored) return 'from <b>' + esc(nm(r.by)) + '</b>, restored when the handoff was returned (' + esc(alias(r.restored.id)) + ')';
     if (r.to === r.by) return 'self-assigned';
     if (!r.forced) return 'sent by <b>' + esc(nm(r.by)) + '</b>, ' + (r.state === 'pending' ? 'not accepted yet' : r.accepted ? 'accepted' + (r.state !== 'live' ? ', then ' + END_TEXT[r.state] : '') : END_TEXT[r.state] || r.state);
     return 'from <b>' + esc(nm(r.by)) + '</b> (forced: their lead chain)' + (r.inherited ? ' (inherited: everyone within L' + (r.ruleLevels || '?') + ', reached later)' : '');
@@ -114,7 +117,7 @@
       case 'item.assign':
         return 'assigned' + ref(p.item) + ' to ' + (p.mode === 'all' ? '<b>everyone within L' + esc(p.levels) + '</b> (forced, live: later followers inherit)' :
           '<b>' + esc((p.people || []).map(function (x) { return x === n.member ? 'self' : x; }).join(', ')) + '</b>') + ', ' + complText(p.completion);
-      case 'item.handoff': return 'handed off their assignment' + ref(p.item) + ' to <b>' + esc(p.to) + '</b> (pending until accepted)' + (p.note ? ': ' + esc(p.note) : '');
+      case 'item.handoff': return 'handed off ' + (p.assignee && p.assignee !== n.member ? '<b>' + esc(p.assignee) + '</b>\'s assignment (admin)' : 'their assignment') + ref(p.item) + ' to <b>' + esc(p.to) + '</b> (pending until accepted)' + (p.note ? ': ' + esc(p.note) : '');
       case 'item.accept': return 'accepted the assignment' + ref(p.item) + (p.note ? ': ' + esc(p.note) : '');
       case 'item.decline': return 'declined the assignment' + ref(p.item) + (p.note ? ': ' + esc(p.note) : '');
       case 'item.return': return 'returned ' + esc(p.assignee) + '\'s accepted assignment' + ref(p.item) + ' (ends it)' + (p.note ? ': ' + esc(p.note) : '');
@@ -163,10 +166,16 @@
     if (n.markers.length) h += '<span class="chip conc-c">concurrent</span>';
     return h;
   }
+  // (289) a same-member write that lost to another clone's concurrent write: a quiet note, no conflict box
+  function supHtml(n) {
+    return (n.superseded || []).map(function (x) {
+      return '<div class="sup muted">superseded by ' + esc(alias(x.by)) + ' (' + (x.why === 'human' ? 'a human write' : 'a later write') + ' from another clone): ' + esc(x.field) + '</div>';
+    }).join('');
+  }
   function evLine(n, inThread) {
     return '<li class="ev' + (n.status !== 'applied' ? ' ' + n.status : '') + (n.markers.length ? ' concm' : '') + (n.origin !== 'human' ? ' agent' : '') + '"' + attr('ev', n.id) + '>' +
       '<span class="when">' + esc(fmtTs(n.ts)) + '</span><span class="al">' + esc(n.alias) + '</span> <b>' + esc(nm(n.member)) + '</b> ' + originChip(n.origin) +
-      ' ' + describe(n, inThread) + ' ' + flags(n) + (n.reason ? '<span class="reason">' + esc(n.reason) + '</span>' : '') + markerHtml(n) + '</li>';
+      ' ' + describe(n, inThread) + ' ' + flags(n) + (n.reason ? '<span class="reason">' + esc(n.reason) + '</span>' : '') + markerHtml(n) + supHtml(n) + '</li>';
   }
 
   // ------------------------------------------------------- viewer / badge state
@@ -251,9 +260,17 @@
   }
 
   function cardRequests() {
-    var R = VS.my.received;
-    if (!R.pending.length && !R.answered.length && !R.sent.length) return '';
-    var h = R.pending.length ? R.pending.map(function (id) { return pendRow(A(id), answerBtns(A(id))); }).join('') : '<p class="muted">No pending assignments to you.</p>';
+    var R = VS.my.received, ans = VS.notices.filter(function (x) { return x.kind === 'declined' || x.kind === 'returned'; });
+    if (!R.pending.length && !R.answered.length && !R.sent.length && !ans.length) return '';
+    var h = ans.length ? '<div class="sub">answers to what I sent</div>' + ans.map(function (x) {
+      var r = A(x.assignment);
+      var txt = x.kind === 'declined' ? '<b>' + esc(nm(x.to)) + '</b> declined' :
+        '<b>' + esc(nm(x.endedBy)) + '</b> (lead of ' + esc(nm(x.to)) + ') returned ' + esc(nm(x.to)) + '\'s accepted ' + (r.handoffOf ? 'handoff' : 'assignment') +
+        (x.restores ? '; ' + esc(nm(x.from)) + '\'s assignment is restored' : r.handoffOf ? '; nobody holds it now' : '');
+      return '<div class="tm-work click notice"' + attr('item', x.item) + attr('notice', x.key) + '>' + isNew(x.key) + recChip(r) + titleRef(x.item) + '<span class="muted">' + txt +
+        (x.note ? ': &ldquo;' + esc(x.note) + '&rdquo;' : '') + ', ' + esc(fmtTs(x.ts)) + '</span></div>';
+    }).join('') : '';
+    h += R.pending.length ? R.pending.map(function (id) { return pendRow(A(id), answerBtns(A(id))); }).join('') : '<p class="muted">No pending assignments to you.</p>';
     if (R.answered.length) h += '<div class="sub">answered</div>' + R.answered.map(function (id) { return pendRow(A(id)); }).join('');
     if (R.sent.length) h += '<div class="sub">sent by me</div>' + R.sent.map(function (id) {
       var r = A(id);
@@ -264,7 +281,7 @@
 
   // Lead perspective: notices, then what each follower (down to 3 levels) works on, whoever assigned it.
   function cardMyTeam(v) {
-    var team = VS.my.team, notices = VS.notices;
+    var team = VS.my.team, notices = VS.notices.filter(function (x) { return x.kind === 'accepted' || x.kind === 'handoff'; });
     if (!team.length && !notices.length) return '';
     var totals = { open: 0, blocked: 0, pending: 0, stale: 0 }, h = '';
     if (notices.length) h += '<div class="sub">for reference: accepted assignments</div>' + notices.map(function (x) {
@@ -597,19 +614,19 @@
     return '<li class="cmt' + (n.status !== 'applied' ? ' ' + n.status : '') + (n.markers.length ? ' concm' : '') + (n.member === v ? ' mine' : '') + '"' + attr('ev', n.id) + '>' +
       '<div class="ch"><b>' + esc(nm(n.member)) + '</b>' + originChip(n.origin) + '<span class="when">' + esc(fmtTs(n.ts)) + '</span><span class="al">' + esc(n.alias) + '</span>' +
       (c.edited ? '<span class="chip">edited</span>' : '') + flags(n) + '<span class="grow"></span>' + acts + '</div>' + reply + txt +
-      (n.reason ? '<span class="reason">' + esc(n.reason) + '</span>' : '') + markerHtml(n) + '</li>';
+      (n.reason ? '<span class="reason">' + esc(n.reason) + '</span>' : '') + markerHtml(n) + supHtml(n) + '</li>';
   }
 
   function sheetHtml(v, it) {
     var recs = it.assignments.map(A), mineR = recs.filter(function (r) { return r.to === v && r.state === 'live'; })[0];
     var minePend = recs.filter(function (r) { return r.to === v && r.state === 'pending'; })[0];
-    var acts = '';
+    var acts = '', gone = VS.viewer.admin && VS.members[it.author] && VS.members[it.author].removed; // (292)
     if (minePend) acts += btn('accept', 'Accept assignment', { item: it.id }, 'primary') + btn('note', 'Decline', { item: it.id, op: 'item.decline' });
-    if (it.author === v && !it.hidden) acts += btn('edit', 'Edit', { item: it.id });
+    if ((it.author === v || gone) && !it.hidden) acts += btn('edit', it.author === v ? 'Edit' : 'Edit (admin: creator removed)', { item: it.id });
     if (it.author === v && it.kind !== 'topic' && !it.hidden) acts += btn('assign', 'Assign', { item: it.id });
     if (mineR && mineR.status !== 'done' && !it.hidden) acts += btn('handoff', 'Hand off...', { item: it.id });
     if ((mineR || it.author === v) && it.kind !== 'topic' && !it.hidden) acts += btn('split', 'Split into subtask', { item: it.id });
-    if (it.author === v && !it.hidden) acts += btn('ihide', 'Hide item', { item: it.id });
+    if ((it.author === v || gone) && !it.hidden) acts += btn('ihide', it.author === v ? 'Hide item' : 'Hide item (admin)', { item: it.id });
 
     var h = '<div class="sh-top"><div class="sh-head"><div>' + kindChip(it) + '</div><h2>' + esc(it.title) + '</h2>' +
       '<button class="btn mini" data-act="sheet-close" title="close (Esc)"><svg class="i"><use href="#i-x"/></svg></button></div>';
@@ -634,12 +651,13 @@
           var departed = (VS.members[r.to] || {}).removed || (VS.members[r.by] || {}).removed;
           if (r.by === v || (departed && VS.viewer.admin)) b += btn('unassign', r.by === v ? 'Unassign' : 'Unassign (admin, member removed)', { item: r.item, who: r.to });
           if (r.accepted && lead === v) b += btn('note', 'Return (lead of ' + esc(r.to) + ')', { item: r.item, who: r.to, op: 'item.return' });
+          if (VS.viewer.admin && r.to !== v && r.status !== 'done' && !it.hidden) b += btn('handoff', 'Hand off (admin)', { item: r.item, who: r.to }); // (286)
         } else if (r.state === 'pending') {
           if (r.to === v) b += btn('accept', 'Accept', { item: r.item }, 'primary') + btn('note', 'Decline', { item: r.item, op: 'item.decline' });
           if (r.by === v || r.sender === v) b += btn('unassign', 'Withdraw', { item: r.item, who: r.to });
         }
         return '<tr class="' + (r.state !== 'live' && r.state !== 'pending' ? 'gone' : '') + '"' + attr('rec', r.id) + '><td><b>' + esc(nm(r.to)) + '</b><br><span class="muted">' + source(r) + '</span></td><td>' +
-          recChip(r) + (r.ended ? ' <span class="muted">' + esc(alias(r.ended.id)) + '</span>' : '') +
+          recChip(r) + (r.ended ? ' <span class="muted">' + esc(alias(r.ended.id)) + endedBy(r) + '</span>' : '') +
           '<br><span class="muted">' + complText(r.completion) + '</span></td><td>' + (r.note ? '&ldquo;' + esc(r.note) + '&rdquo;' : r.answerNote ? '&ldquo;' + esc(r.answerNote) + '&rdquo;' : '<span class="muted">no note</span>') +
           '<div class="tb">' + b + '</div></td></tr>';
       }).join('') + '</table>';
@@ -738,8 +756,12 @@
           fld('completion', complRadios()) + fld('assign to', '<div class="people" id="people">' + peopleHtml(v) + '</div>') + '<div class="hint" id="hint"></div>', 'Split'];
         break;
       case 'handoff':
-        T = ['Hand off ' + it.alias, 'item.handoff: a pending assignment to the new person. When they accept, your assignment ends and the assigner (' + esc(nm((VS.my.assignments.map(A).filter(function (r) { return r.item === it.id; })[0] || {}).by)) + ') is notified.',
-          fld('to', '<select name="to">' + memberOpts('', function (m) { return m.id !== v && !m.removed; }) + '</select>') + fld('note (optional)', '<input type="text" name="note">'), 'Hand off'];
+        var hfrom = d.who || v, hrec = it.assignments.map(A).filter(function (r) { return r.to === hfrom && r.state === 'live'; })[0] || {};
+        T = ['Hand off ' + (hfrom === v ? '' : esc(nm(hfrom)) + '\'s assignment on ') + it.alias,
+          'item.handoff: a pending assignment to the new person, starting with the current status and note. When they accept, ' + (hfrom === v ? 'your' : esc(nm(hfrom)) + '\'s') +
+          ' assignment ends and the assigner (' + esc(nm(hrec.by)) + ') is notified.' + (hfrom === v ? '' : ' Admin only: takeover of a member\'s work before removal.'),
+          fld('to', '<select name="to">' + memberOpts('', function (m) { return m.id !== hfrom && !m.removed; }) + '</select>') + fld('note (optional)', '<input type="text" name="note">') +
+          '<input type="hidden" name="who" value="' + esc(d.who || '') + '">', 'Hand off'];
         break;
       case 'status':
         T = ['Set status', 'item.status on your own assignment (done goes through Close).',
@@ -901,6 +923,7 @@
       }
       case 'handoff': {
         var hp = { item: item, to: val('to') };
+        if (val('who') && val('who') !== viewerOf(ui.store).split('.')[0]) hp.assignee = val('who');
         if (val('note')) hp.note = val('note');
         evs.push(['item.handoff', hp]);
         break;

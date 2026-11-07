@@ -33,7 +33,10 @@
   // Priority levels are store configuration (roles file, roles.set_priority_levels).
   // Codes are integers 0..n-1, larger = more urgent; names are display names only.
   var DEFAULT_PRIORITY = { names: ['알림', '업무', '긴급'], default: 1 };
-  var STALE_DAYS = 3; // doing/blocked with no status update for this long counts as stale
+  // Stale (284): a live assignment in doing or blocked with no status write for this
+  // many days by the viewer's clock. A client-side constant, not shared data; a
+  // view may pass its own as deriveViewState(input, {staleDays}).
+  var STALE_DAYS = 3;
   var DUE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
   function clone(x) { return x === undefined ? undefined : JSON.parse(JSON.stringify(x)); }
@@ -210,6 +213,8 @@
     if (m.removed) rej(id + ' was removed (' + alias(m.removed) + ')');
     return m;
   }
+  // (208, 292) An admin stands in for a removed creator: assign, unassign, edit, hide.
+  function creatorGone(S, it, a) { var cr = S.members[it.author]; return !!(S.admins[a] && cr && cr.removed); }
   function needAdmin(S, a) { if (!S.admins[a]) rej('roles events are admin-only (' + a + ' is not an admin)'); }
   function keyInUse(S, key) {
     return vals(S.members).some(function (m) { return m.keys.indexOf(key) >= 0 || m.revoked[key]; });
@@ -269,7 +274,7 @@
 
       case 'item.edit':
         it = needItem(S, p.item);
-        if (it.author !== a) rej('only the creator (' + it.author + ') edits ' + it.alias);
+        if (it.author !== a && !creatorGone(S, it, a)) rej('only the creator (' + it.author + ') edits ' + it.alias);
         if (it.hidden) rej(it.alias + ' is hidden');
         if (!ITEM_FIELDS.some(function (f) { return has(p, f); })) rej('nothing to edit (' + ITEM_FIELDS.join(', ') + ')');
         if (has(p, 'priority') && p.priority == null) rej('priority cannot be cleared; set a level');
@@ -278,7 +283,7 @@
 
       case 'item.hide': {
         it = needItem(S, p.item);
-        if (it.author !== a) rej('only the creator (' + it.author + ') hides ' + it.alias);
+        if (it.author !== a && !creatorGone(S, it, a)) rej('only the creator (' + it.author + ') hides ' + it.alias);
         if (it.hidden) rej(it.alias + ' is already hidden');
         var open = openRecs(S, it.id).filter(function (x) { return x.to !== a && x.status !== 'done'; });
         if (open.length) rej('unassign the open assignments first (' + open.map(function (x) { return x.to; }).join(', ') + ')');
@@ -289,8 +294,7 @@
         it = needItem(S, p.item);
         if (it.hidden) rej(it.alias + ' is hidden');
         if (it.kind === 'topic') rej('topics have no assignment');
-        var cr = S.members[it.author];
-        if (it.author !== a && !(S.admins[a] && cr && cr.removed))
+        if (it.author !== a && !creatorGone(S, it, a))
           rej('only the creator (' + it.author + ') assigns ' + it.alias + '; an assignee hands off their own assignment with item.handoff');
         var completion = p.completion || 'assignee';
         if (completion !== 'assignee' && completion !== 'assigner') rej('completion must be assignee or assigner');
@@ -312,10 +316,12 @@
       case 'item.handoff': {
         it = needItem(S, p.item);
         if (it.hidden) rej(it.alias + ' is hidden');
-        r = needRec(S, it.id, a);
+        var from = p.assignee || a; // (286) an admin may hand off any member's live assignment
+        if (from !== a && !S.admins[a]) rej('only the assignee (' + from + ') hands off their assignment; an admin may hand off any member\'s');
+        r = needRec(S, it.id, from);
         if (r.status === 'done') rej('assignment is done; nothing to hand off');
         if (!p.to) rej('to required');
-        if (p.to === a) rej('hand off to someone else');
+        if (p.to === from) rej('hand off to someone else');
         needMember(S, p.to);
         if (openRec(S, it.id, p.to)) rej(p.to + ' already holds a live or pending assignment on ' + it.alias);
         var pend = vals(S.asg).filter(function (x) { return x.handoffOf === r.id && x.state === 'pending'; })[0];
@@ -490,17 +496,35 @@
   // = no conflict. Several = concurrent writes; the shown value is the display
   // winner (later ts, then member, clone, seq) and every head stays in history.
   // Concurrent writes by one member from two of their clones get no marker (271):
-  // the later ts simply wins and the losing write stays in the thread.
+  // the later ts wins, except that a human-origin write beats a concurrent agent or
+  // agent-auto write of the same member (288). The losing write stays in the thread
+  // with a quiet "superseded" note (289), never a conflict box.
+  function winner(heads) { // heads are pairwise concurrent
+    var cand = heads.filter(function (h) {
+      return h.n.origin === 'human' || !heads.some(function (o) { return o.n.author === h.n.author && o.n.origin === 'human'; });
+    });
+    return cand.reduce(function (b, h) { return !b || later(h.n, b.n) ? h : b; }, null);
+  }
+  function supersede(n, label, by, why) {
+    n.superseded = (n.superseded || []).filter(function (x) { return x.field !== label; });
+    if (by) n.superseded.push({ field: label, by: by.id, why: why });
+  }
   function write(S, key, label, n, v, C) {
     var heads = (S.reg[key] || []).filter(function (h) { return !hb(h.n, n); }), conc = heads.slice();
     heads.push({ n: n, v: v });
     S.reg[key] = heads;
-    var w = heads.reduce(function (b, h) { return !b || later(h.n, b.n) ? h : b; }, null);
-    if (C) conc.forEach(function (h) {
-      if (h.n.author === n.author) return;
-      mark(h.n, n, 'field', label, { winner: w.n.id, mine: show(h.v), theirs: show(v) });
-      mark(n, h.n, 'field', label, { winner: w.n.id, mine: show(v), theirs: show(h.v) });
-    });
+    var w = winner(heads);
+    if (C) {
+      conc.forEach(function (h) {
+        if (h.n.author === n.author) return;
+        mark(h.n, n, 'field', label, { winner: w.n.id, mine: show(h.v), theirs: show(v) });
+        mark(n, h.n, 'field', label, { winner: w.n.id, mine: show(v), theirs: show(h.v) });
+      });
+      heads.forEach(function (h) {
+        if (h === w || h.n.author !== w.n.author) supersede(h.n, label, null);
+        else supersede(h.n, label, w.n, later(h.n, w.n) ? 'human' : 'later');
+      });
+    }
     return w.v;
   }
 
@@ -591,7 +615,7 @@
         break;
       }
       case 'item.handoff':
-        r = liveRec(S, p.item, a);
+        r = liveRec(S, p.item, p.assignee || a);
         if (!r || !S.members[p.to] || openRec(S, p.item, p.to)) break;
         addRec(S, n, p.item, p.to, r.by, r.completion, { forced: false, state: 'pending', sender: a, handoffOf: r.id, answerNote: null, handoffNote: p.note || null });
         break;
@@ -600,7 +624,11 @@
         if (!r) { onEnded(S, p.item, a, n, C); break; }
         r.state = 'live'; r.accepted = n; r.answerNote = p.note || null; r.last = n;
         r.leadAtAccept = ((S.members[a] || {}).leads || [])[0] || null;
-        if (r.handoffOf && S.asg[r.handoffOf] && S.asg[r.handoffOf].state === 'live') endRec(S, S.asg[r.handoffOf], n, 'handed', C);
+        q = r.handoffOf && S.asg[r.handoffOf];
+        if (q && q.state === 'live') { // (290) the new assignment starts with the original's status and note
+          endRec(S, q, n, 'handed', C);
+          r.status = q.status; r.note = q.note; r.noteBy = q.noteBy;
+        }
         break;
       case 'item.decline':
         r = pendingRec(S, p.item, a);
@@ -608,7 +636,14 @@
         break;
       case 'item.return':
         r = liveRec(S, p.item, p.assignee);
-        if (r) { endRec(S, r, n, 'returned', C); r.answerNote = p.note || null; }
+        if (!r) break;
+        endRec(S, r, n, 'returned', C); r.answerNote = p.note || null;
+        // (291) returning an accepted handoff restores the original assignment with
+        // its prior status, unless its holder was removed or holds another one now
+        q = r.handoffOf && S.asg[r.handoffOf];
+        if (q && q.state === 'handed' && q.ended === r.accepted && S.members[q.to] && !S.members[q.to].removed && !openRec(S, q.item, q.to)) {
+          q.state = 'live'; q.ended = null; q.restored = n; r.restores = q.id;
+        }
         break;
       case 'item.unassign':
         if (p.assignee) {
@@ -662,8 +697,12 @@
         m = S.members[p.member]; if (!m) break;
         m.keys = m.keys.filter(function (k) { return k !== p.key; }); m.revoked[p.key] = n.id;
         break;
-      case 'roles.remove_member':
-        m = S.members[p.member]; if (m) { m.removed = n.id; delete S.admins[p.member]; }
+      case 'roles.remove_member': // (287) the member's live assignments end as unassigned, pending ones as withdrawn
+        m = S.members[p.member]; if (!m) break;
+        m.removed = n.id; delete S.admins[p.member];
+        vals(S.asg).forEach(function (x) {
+          if (x.to === p.member && (x.state === 'live' || x.state === 'pending')) endRec(S, x, n, x.state === 'pending' ? 'withdrawn' : 'unassigned', C);
+        });
         break;
       case 'roles.set_priority_levels':
         S.prio = write(S, 'prio', 'priority levels', n, { names: (p.names || []).slice(), default: p.default }, C);
@@ -802,6 +841,7 @@
   // (no engine objects, no functions). `input` is what the viewer's clone holds.
   function deriveViewState(input, opts) {
     var g = replay(input), stream = opts.stream, v = memberOf(stream), now = opts.now || '', S = g.S;
+    var staleDays = opts.staleDays || STALE_DAYS;
     var me = S.members[v] || null, R = reach(S.members, v, 99);
 
     var events = g.log.map(function (n) {
@@ -811,6 +851,7 @@
           var o = g.byId[m.other];
           return { kind: m.kind, field: m.field, other: m.other, otherMember: o ? o.author : null, winner: m.winner, mine: m.mine || null, theirs: m.theirs || null };
         }),
+        superseded: clone(n.superseded || []),
         thread: n.thread, parentThread: n.parentThread, local: !!n.commit._local, open: !!n.commit._open, late: !!n.commit._late };
     });
 
@@ -820,13 +861,15 @@
       assignments[r.id] = { id: r.id, item: r.item, to: r.to, by: r.by, sender: r.sender, completion: r.completion, state: r.state,
         forced: r.forced, status: r.status, note: r.note, noteBy: r.noteBy, via: r.via, ts: r.ts,
         inherited: !!r.inherited, ruleLevels: g.rules[r.via] ? g.rules[r.via].levels : null,
-        handoffOf: r.handoffOf, handoffNote: r.handoffNote || null, answerNote: r.answerNote,
+        handoffOf: r.handoffOf, handoffFrom: r.handoffOf && S.asg[r.handoffOf] ? S.asg[r.handoffOf].to : null,
+        handoffNote: r.handoffNote || null, answerNote: r.answerNote,
+        restored: r.restored ? { id: r.restored.id, ts: r.restored.ts } : null, restores: r.restores || null,
         accepted: r.accepted ? { id: r.accepted.id, ts: r.accepted.ts } : null, leadAtAccept: r.leadAtAccept,
         ended: r.ended ? { id: r.ended.id, type: r.ended.type, ts: r.ended.ts, by: r.ended.author } : null,
         depth: r.to === r.by ? 0 : (reach(S.members, r.by, 99)[r.to] || null),
         statusOrigin: r.last && r.writes.indexOf(r.last) >= 0 ? r.last.origin : null, statusBy: r.noteBy,
         lastUpdate: last,
-        stale: !!(live && now && (r.status === 'doing' || r.status === 'blocked') && daysBetween(last, now) >= STALE_DAYS) };
+        stale: !!(live && now && (r.status === 'doing' || r.status === 'blocked') && daysBetween(last, now) >= staleDays) };
     });
 
     var lastAct = {}, threads = {};
@@ -894,12 +937,22 @@
       return it.author === v && !it.hidden && it.kind !== 'topic' && !A.some(function (r) { return r.item === id && (r.state === 'live' || r.state === 'pending'); });
     });
 
+    // Notices are derived, never events. accepted: to the accepter's lead at accept
+    // time; handoff: to the original assigner when a handoff is accepted; declined /
+    // returned (285): to the sender, and for a returned handoff also to the original
+    // assigner (291).
     var notices = [];
     A.forEach(function (r) {
-      if (!r.accepted) return;
-      var base = { assignment: r.id, item: r.item, to: r.to, by: r.by, sender: r.sender, ts: r.accepted.ts, state: r.state };
-      if (r.leadAtAccept === v) notices.push(Object.assign({ key: 'acc:' + r.id, kind: 'accepted' }, base));
-      else if (r.handoffOf && assignments[r.handoffOf] && assignments[r.handoffOf].by === v) notices.push(Object.assign({ key: 'ho:' + r.id, kind: 'handoff', from: assignments[r.handoffOf].to }, base));
+      var base = { assignment: r.id, item: r.item, to: r.to, by: r.by, sender: r.sender, state: r.state };
+      if (r.accepted) {
+        var b1 = Object.assign({ ts: r.accepted.ts }, base);
+        if (r.leadAtAccept === v) notices.push(Object.assign({ key: 'acc:' + r.id, kind: 'accepted' }, b1));
+        else if (r.handoffOf && assignments[r.handoffOf] && assignments[r.handoffOf].by === v) notices.push(Object.assign({ key: 'ho:' + r.id, kind: 'handoff', from: r.handoffFrom }, b1));
+      }
+      if (r.to === v || !r.ended) return;
+      var b2 = Object.assign({ ts: r.ended.ts, endedBy: r.ended.by, note: r.answerNote, from: r.handoffFrom, restores: r.restores }, base);
+      if (r.state === 'declined' && r.sender === v) notices.push(Object.assign({ key: 'dec:' + r.id, kind: 'declined' }, b2));
+      if (r.state === 'returned' && (r.sender === v || (r.handoffOf && r.by === v)) && r.ended.by !== v) notices.push(Object.assign({ key: 'ret:' + r.id, kind: 'returned' }, b2));
     });
 
     var R3 = reach(S.members, v, 3), team = [];
