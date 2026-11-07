@@ -238,7 +238,8 @@
   var LANG_COOKIE = "ws_dashboard_lang";
   function markLang() {
     var pref = root.getAttribute("data-langpref") || "";
-    q("#gmenu [data-lang]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-lang") === pref)); });
+    var sel = $("glang");
+    if (sel) sel.value = pref;
   }
   function setLang(v) {
     doc.cookie = LANG_COOKIE + "=" + encodeURIComponent(v) + "; Path=/; SameSite=Lax; Max-Age=" + (v ? 31536000 : 0);
@@ -248,6 +249,7 @@
     else location.reload();
   }
   markLang();
+  if ($("glang")) $("glang").addEventListener("change", function () { setLang(this.value); });
 
   // --- board answers --------------------------------------------------------
   // A board swap replaces the answer form; picks, notes, and checked
@@ -908,8 +910,6 @@
     if (u) { if (!u.disabled) cancelHeld(u); return; }
     u = t.closest("#r-convlive [data-steer]");
     if (u) { if (!u.disabled) steerHeld(u); return; }
-    var lg = t.closest("#gmenu [data-lang]");
-    if (lg) { setLang(lg.getAttribute("data-lang")); return; }
     if (gmenu && t.closest("#gear")) { gmenu.hidden = !gmenu.hidden; return; }
     if (gmenu && !gmenu.hidden && !t.closest("#gmenu")) gmenu.hidden = true;
     if (!live) return;
