@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 36ed1665e93f0191
 sage-review-completeness-reviewed: 36ed1665e93f0191
+completed: 2026-11-08
 ---
 
 # Dashboard: interrupt the lead's running turn from the session page
