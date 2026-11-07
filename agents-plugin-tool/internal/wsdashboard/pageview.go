@@ -109,7 +109,8 @@ type AgentNode struct {
 func (a AgentNode) IsRunning() bool { return a.Status == wslive.StatusRunning }
 
 // PeerGroup is the lead's peer leads: every live peer and the most recent
-// ended ones, each ordered by last exchange, newest first.
+// ended ones, each ordered by last exchange, newest first. Live lists the
+// same-worktree peers before the others.
 type PeerGroup struct {
 	Live  []PeerRow
 	Ended []PeerRow
@@ -138,6 +139,14 @@ type PeerRow struct {
 	// do Phase, Lead, and Agents carry its live state.
 	Adapter bool
 	Harness string
+	// SameWorktree reports a served peer whose registration Project is the
+	// viewed session's.
+	SameWorktree bool
+	// Compact marks a live served peer in another worktree: the page draws
+	// it as one line (name, harness, phase mark, last mail) with no
+	// expansion, so Agents and AgentCount stay empty and Lead carries the
+	// phase alone.
+	Compact bool
 	Lead    LeadView
 	// Agents is the peer's own subagent tree, one level deep: a peer's peer
 	// group never appears. AgentCount counts every agent it holds.
@@ -259,7 +268,7 @@ func buildSessionView(in pageInputs) SessionView {
 		}
 	}
 	contacts := resolvedContacts(in.Page.Contacts, reg.ReplyID)
-	v.Tree.Peers = peerGroup(contacts, lookup, in.Now)
+	v.Tree.Peers = peerGroup(contacts, reg.Project, lookup, in.Now)
 	v.Conversation = conversation(in.Snapshot.Lead, in.Ring, in.Page.MailBodies, contacts, lookup, replyMarkdown(reg.Project, reg.ReplyID))
 	userEntryImages(v.Conversation.Entries, in.AttachDir, reg.ReplyID)
 	v.Conversation.Held = heldViews(in.Held, in.AttachDir, reg.ReplyID)
@@ -349,8 +358,12 @@ func resolvedContacts(contacts []Contact, self string) []Contact {
 // peerGroup merges contacts that resolve to one reply-id into one row and
 // applies the retention rule: every live peer and the last endedPeerCap
 // ended ones. A served peer's liveness is its own registration; an unserved
-// one is live while its presence is (Contact.PresenceLive).
-func peerGroup(contacts []Contact, lookup func(string) (Session, *wslive.Snapshot, bool), now time.Time) PeerGroup {
+// one is live while its presence is (Contact.PresenceLive). project is the
+// viewed session's root: only a served peer registered under the same path
+// (compared after filepath.Clean, no symlink resolution) keeps its full live
+// state; a live served peer elsewhere is a Compact row and its subagent tree
+// is never read. Live peers list same-worktree first.
+func peerGroup(contacts []Contact, project string, lookup func(string) (Session, *wslive.Snapshot, bool), now time.Time) PeerGroup {
 	type merged struct {
 		row          PeerRow
 		named        bool
@@ -388,12 +401,18 @@ func peerGroup(contacts []Contact, lookup func(string) (Session, *wslive.Snapsho
 				row.Served = true
 				row.Live = s.Live
 				row.Harness = s.Harness
+				row.SameWorktree = s.Project != "" && filepath.Clean(s.Project) == filepath.Clean(project)
+				row.Compact = s.Live && !row.SameWorktree
 				if adapterPresent(snap, now) {
 					row.Adapter = true
-					row.Lead = leadView(snap.Lead)
-					// One level deep: the peer's own agents, never its peers.
-					row.Agents = agentTree(snap.Agents, lookup)
-					row.AgentCount = len(snap.Agents)
+					if row.Compact {
+						row.Lead = LeadView{Lead: snap.Lead}
+					} else {
+						row.Lead = leadView(snap.Lead)
+						// One level deep: the peer's own agents, never its peers.
+						row.Agents = agentTree(snap.Agents, lookup)
+						row.AgentCount = len(snap.Agents)
+					}
 				}
 			}
 		}
@@ -411,6 +430,7 @@ func peerGroup(contacts []Contact, lookup func(string) (Session, *wslive.Snapsho
 	}
 	byLast(group.Live)
 	byLast(group.Ended)
+	sort.SliceStable(group.Live, func(i, j int) bool { return group.Live[i].SameWorktree && !group.Live[j].SameWorktree })
 	if len(group.Ended) > endedPeerCap {
 		group.HiddenEnded = len(group.Ended) - endedPeerCap
 		group.Ended = group.Ended[:endedPeerCap]
