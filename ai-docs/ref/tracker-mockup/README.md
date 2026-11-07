@@ -1,225 +1,339 @@
-# Tracker mockup v1
+# Tracker mockup v2
 
-A layout mockup for deciding the data structures of the team tracker (epic
-`261107-epic-ws-personal-common-store`): it shows how the tracker would be laid
-out and used, inside a frame that imitates the dashboard session page. The data
-model below is a first concrete proposal, not a decision. Everything the page
-shows is computed in the browser by merging the per-member event logs on top of
-the roles file, which is the epic's storage model (each member appends only to
-their own ref; views are client-side merges). v0 was the same data layer behind
-a raw page (JSON panes and tables); v1 keeps the engine and puts a layout on it.
+A layout and data-model mockup for the team tracker (epic
+`261107-epic-ws-personal-common-store`), inside a frame that imitates the
+dashboard session page. Everything the page shows is computed in the browser
+from per-member commit lists on top of a roles file: each member appends only to
+their own ref, and every view is a client-side merge. v1 settled the frame and
+the cards. v2 applies the board decisions of 2026-11-07, listed in
+[Settled](#settled). Items are threads, progress is a status, commits carry
+`seen`, concurrent changes are shown, and members can send each other peer
+requests.
 
 ## Open it
 
-Open `index.html` from the file system (double-click, or `file://` URL). No
+Open `index.html` from the file system (double-click, or a `file://` URL). No
 build, no server, no dependencies.
 
-- `index.html` - the frame and the mount points; `style.css` - neutral light
-  layout styling with the dashboard's variables and drawer geometry.
-- `engine.js` - the data layer: merge the per-member logs, validate and flag each
-  event, derive assignment/item state and roll-up (`window.TrackerEngine`).
-- `app.js` - the view and the actions. `fixtures.js` - a script that assigns
-  `window.TRACKER_FIXTURES` (`fetch` of local JSON is blocked on `file://`);
-  edit it to keep a data change.
+- `index.html` holds the frame and mount points. `style.css` holds the neutral
+  layout styling, with the dashboard's variables and drawer geometry.
+- `engine.js` is the data layer (`window.TrackerEngine`). It computes causality
+  from `seen`, validates each event against what its author had seen, folds the
+  state, marks concurrent changes, and derives roll-ups.
+- `app.js` is the view and the actions.
+- `fixtures.js` assigns `window.TRACKER_FIXTURES`, because `fetch` of local JSON
+  is blocked on `file://`. Edit it to keep a data change.
 
 ## What the page shows
 
-- **Frame.** A header like the dashboard session page (back link, title, host
-  chip, live dot) with the mockup's "viewing as" switch left after the title, a
-  static conversation placeholder, and a composer. The pull-down drawer hangs
-  from the top right with one handle per store, stacking leftward: `panels` (a
-  static stub), `team-alpha` (14 members), `hana-personal` (one member). A
-  handle shows a badge for assignments that are new to the viewer; opening the
-  store clears it (the badge is the "like the mailbox" cue from the epic), and
-  the rows that were new carry a `new` chip for that visit. Click a handle to
-  open or close, `Esc` closes the sheet, then the drawer.
-- **Store drawer cards.**
-  - *My assignments*: what I must do, with state, who assigned it (and the
-    chain up to the root item's author), level, completion mode, progress, the
-    next action and the Report / Close / Split buttons; below it my own
-    unassigned items.
-  - *Assigned by me / team progress*: items I handed down, with the roll-up and
-    each assignee's state, progress and a Confirm button when I must confirm.
-  - *Items*: all items as a parent/child tree, filter by kind and status.
-  - *Team*: the org tree with leads/followers, admins, and my reach by level.
-  - *Activity*: the merged event log, newest first, with a flagged-only filter
-    and the result of the last action.
-  - *Data*: the raw roles file and every member log as editable JSON, behind a
-    collapsed toggle. Edit, press `apply`, and every view recomputes. Edits live
-    in memory only; `reset store to fixtures` or a reload restores `fixtures.js`.
-- **Item detail** opens as a side sheet (it overlays the right of the drawer):
-  title, kind, project reference, creator, status and roll-up, body, assignees
-  with per-assignee state, completion mode and progress, the subtask tree with
-  roll-up, and the event history timeline (who, when, human vs agent, auto
-  marker, flagged events with the reason).
-- **Actions** are small dialogs: create item, assign (everyone within N levels,
-  or chosen people within N, with a live preview of who is reached), split a
-  received item into subtasks, report progress, close, confirm. Each appends
-  events to the viewer's log, re-renders, and reports whether the event applied
-  or was flagged. They are not pre-validated, so you can deliberately produce a
-  flagged event (for example assign to someone beyond N levels, or assign twice).
-- "Due actions" are shown as the derived next action on each row (report,
-  close, wait for confirmation, confirm); due dates are not modeled.
+- **Frame.** A header like the dashboard's, with the mockup's "viewing as"
+  switch. The switch labels each member root, lead, or member. A static
+  conversation sits in the middle and a pull-down drawer has one handle per
+  store. A handle badge counts new assignments and new pending requests for the
+  viewer, and opening the store clears it. A handle shows ⊘ when the store is
+  offline or has no remote.
+- **Store header.** Sync state: online or offline, last synced, "N of my writes
+  not yet pushed", and upstream commits not fetched yet (mock). The buttons are
+  `Sync now` and `Go offline` / `Come back online`. While offline, new commits
+  are held locally (`not pushed`). Coming back online pushes them and fetches the
+  fixture's late commits. The personal store has no remote, which is the same
+  path as a long offline.
+- **Cards.**
+  - *My assignments*: everything assigned to me, from a lead, self-assigned, or
+    an accepted request. Each row shows status, source, completion mode, the
+    roll-up and blocked warning, the latest note, the last update, and quick
+    actions.
+  - *Received requests*: pending requests to me (Accept / Decline / Discuss),
+    the ones I answered, and the ones I sent.
+  - *Assigned by me*: what I handed to others, with each assignee's status and
+    Confirm / Reject.
+  - *My team*: shown only to a viewer with followers. It covers each follower
+    down to 3 levels, as an indented tree, with everything they work on whoever
+    assigned it. That includes status chips, notes, blocked warnings, last
+    update, and pending requests they have not accepted.
+  - *Items*: the tree of threads, filtered by kind (`request` included) and
+    status (open / blocked / done / hidden).
+  - *Team*: the org tree, admins, joined members, revoked keys, and an admin
+    roles-event dialog.
+  - *Activity*: the merged log in causal order, newest first, with filters for
+    flagged-only and concurrent-only.
+  - *Data*: the raw roles file, each ref's commit list, and the upstream (late)
+    commits, all editable. `apply` recomputes everything and `reset` restores the
+    fixtures.
+- **Thread view** (side sheet). It holds the meta and roll-up, the body, item
+  actions, the assignees with their actions, and the subtask threads. Below
+  that comes one chronological timeline:
+  - comments, with quote reply, edit, and hide
+  - status changes, assignments, edits, closes, and request answers
+  - agent records, with `agent` / `auto` chips
+  - subtask lines
+  - flagged and waiting events with their reason
+  - amber "concurrent change" boxes that name both values and the shown winner
 
-## Proposed data model
+  The composer at the bottom posts a comment, as a reply when one is chosen,
+  with an origin. When the viewer holds an assignment on the thread, quick
+  status buttons appear that use the composer text as the note.
+- **Actions** append one commit to the viewer's ref, holding one or more events,
+  then report each event as applied or flagged. The actions are create (any
+  kind, optionally a request, optionally self-assigned in the same commit),
+  edit, comment, reply, edit or hide own comment, assign (everyone or chosen
+  within N, completion mode), split into a subtask, status, close, confirm,
+  reject, unassign, reopen, hide item, request accept / decline / return, and
+  every `roles.*` event. Actions are not pre-validated, so you can produce
+  flagged events on purpose.
 
-### Roles file
+## Data model
+
+### Roles file (genesis)
 
 ```json
 { "admins": ["ada", "bo"],
   "members": [ { "id": "maya", "name": "Maya Ortiz", "keys": ["maya-k1"], "leads": ["ada"] } ] }
 ```
 
-- `admins`: member ids. A signature from any one admin is valid for admin-only
-  events. Admins are a layer by permission only; they are also ordinary members
-  and may sit anywhere in the tree.
-- `members[].id`: stable id, also the name of that member's log (ref).
-- `members[].keys`: public key ids that may sign for this member. Mock
-  signature is `sig: "<keyid>"`; no crypto.
-- `members[].leads`: list of lead ids, validated to length at most 1 (epic:
-  list now so multiple leads need no migration). Empty list = a root.
-  Relations are one-directional and cycle-free.
+`admins` lists member ids. A member with `leads: []` is a root, and several
+roots are allowed. `leads` is a list validated to length at most 1. Later
+changes are admin `roles.*` events, folded in causal order.
 
-The roles file is the genesis state. Admin-signed `roles.*` events are replayed
-on top of it in merge order, so the org tree shown is "roles file + admin
-events".
-
-### Event envelope
+### Commit
 
 ```json
-{ "author": "lena", "seq": 3, "ts": "2026-11-02T10:00:00Z", "sig": "lena-k1",
-  "type": "item.assign", "via": "agent", "auto": true, "payload": { } }
+{ "author": "maya", "ts": "2026-11-04T10:00:00Z", "signer": "maya-k1",
+  "seen": { "ada": 13, "lena": 4, "omar": 3 },
+  "events": [ { "seq": 15, "type": "item.unassign", "payload": { "item": "maya#1", "assignee": "omar" } },
+              { "seq": 16, "type": "comment.add", "payload": { "item": "maya#1", "body": "..." } } ] }
 ```
 
-- `author`: member id; must equal the owner of the log it sits in.
-- `seq`: per-author, starts at 1, must be exactly previous + 1 in the log.
-- `ts`: ISO timestamp, informational plus merge ordering.
-- `sig`: mock signature = a key id that must be listed for `author`.
-- `type`, `payload`: see below.
-- `via: "agent"`: written by an agent session rather than typed by the human.
-- `auto: true`: recorded unprompted (epic: only progress and close, only on the
-  author's own assigned tasks). Absent = recorded on request.
-- Event id = `author#seq`. An item's id is the id of its `item.create` event.
-
-Merge order across all logs: `ts`, then `author` id, then `seq`. Replay is one
-pass in that order; each event is validated against the state built so far and
-either applied or flagged.
+- One commit per write, holding one or more events. The commit is the signed
+  unit, so the mock carries `signer` (a key id) on the commit. Events carry no
+  signature.
+- `seq` is per author, continuous across commits. Event id is `author#seq`,
+  shown as `maya-15`. An item's id is the id of its `item.create`, and a
+  comment's id is the id of its `comment.add`. There is no global sequence.
+- `seen` maps each other member to the last seq the author had received when
+  writing. The author's own earlier events are always seen.
+- `ts` is informational. It is used for display, as a tie-break, and for the
+  display winner.
+- An event has an optional `origin`: `human` (default), `agent`, or
+  `agent-auto`.
+- Fields starting with `_` are mock bookkeeping, not model. `_local` marks a
+  commit not pushed yet, and `_received: "late"` marks a commit that arrived
+  late.
 
 ### Event types
 
-| type | payload | meaning |
+| type | payload | rule |
 |---|---|---|
-| `item.create` | `kind` (`task`/`note`/`todo`), `title`, `body?`, `project?`, `parent?` | Create an item. `task` = feature-level work, `note` = free text, `todo` = simple TODO. `project` = optional free-text project reference. `parent` = item id this is a subtask of. |
-| `item.assign` | `item`, `mode` (`all`/`chosen`), `levels` (N), `people?` (for `chosen`), `completion` (`assignee`/`assigner`) | Creator assigns an item to everyone within N levels below them, or to chosen people within N levels. `completion` is chosen per assignment: assignee closes it, or the assigner must confirm. One assignment record per assignee. |
-| `progress.report` | `item`, `pct` (0-100), `note?` | An assignee reports progress on their assignment (or the creator on an unassigned own item). |
-| `item.close` | `item` | An assignee closes their assignment: `done` if completion is `assignee`, else `awaiting_confirm`. The creator closes an unassigned own item. |
-| `item.confirm` | `item`, `assignee` | The assigner confirms an `awaiting_confirm` assignment, making it `done`. |
-| `roles.add_member` | `member` (`id`, `name`, `keys`, `leads`) | Admin adds a member (stands in for join request plus admin approval). |
-| `roles.set_lead` | `member`, `leads` | Admin changes a member's lead list. |
+| `item.create` | `kind` (`task`/`todo`/`topic`), `title`, `body?`, `project?`, `parent?`, `request?` | A `parent` must be assigned to or created by the author. `project` is one free-text string. A `request` names a recipient (see Requests). Topics cannot be requests. |
+| `item.edit` | `item`, any of `title`/`body`/`project` | Creator only. |
+| `item.hide` | `item` | Creator only. A tombstone: the content stays in history. Flagged while someone else holds an open assignment on the item. |
+| `item.assign` | `item`, `mode` (`all`/`chosen`), `levels`, `people?`, `completion` (`assignee`/`assigner`, default `assignee`) | Creator only. An admin may also assign an item whose creator was removed. Targets must be within N levels below the author, or the author (self-assignment). `all` stays live: anyone who later enters the range inherits it. Not allowed on topics or requests. |
+| `item.unassign` | `item`, `assignee?` | By the assigner. An admin may also unassign when the assignee or assigner was removed. Without `assignee`, it withdraws all of the author's assignments on the item and ends the live rule. |
+| `item.status` | `item`, `status` (`todo`/`doing`/`blocked`), `note?` | Assignee only. The creator self-assigns first. Allowed while awaiting confirmation, which withdraws the close. Not allowed on done. |
+| `item.close` | `item`, `note?` | Assignee. Moves to `done`, or to `awaiting` when completion is `assigner`. |
+| `item.confirm` / `item.reject` | `item`, `assignee`, `note?` | Assigner, on an `awaiting` assignment. Moves to `done` / back to `doing`. |
+| `item.reopen` | `item`, `assignee?`, `note?` | The assigner or the assignee reopens a `done` assignment, back to `doing`. |
+| `request.accept` / `request.decline` | `item`, `note?` | Recipient, on a pending request. |
+| `request.return` | `item`, `note?` | Only the recipient's direct lead, on an accepted request. Cancels the resulting assignment. |
+| `comment.add` | `item`, `body`, `reply_to?` | Anyone in the store. `reply_to` is one comment in the same thread (flat timeline, quote reply). |
+| `comment.edit` / `comment.hide` | `comment`, `body` (edit) | Comment author only. Hide is a tombstone. |
+| `roles.add_member` | `member` (`id`, `name`, `keys`, `leads`) | Admin. Stands in for join request plus approval. |
+| `roles.set_lead` | `member`, `leads` | Admin. Length at most 1, no cycle. |
+| `roles.add_admin` / `roles.remove_admin` | `member` | Admin. The last admin cannot be removed. |
+| `roles.add_key` / `roles.revoke_key` | `member`, `key` | Admin. Revocation rule below. |
+| `roles.remove_member` | `member` | Admin. The member must lead nobody and must not be an admin. Their earlier events stay valid. |
 
-Derived (never stored): assignment state `open` / `awaiting_confirm` / `done`;
-item status; ancestor chain (parent links up to the root item; "from ancestor"
-in my-assignments is the root item's author); progress roll-up.
+`agent-auto` is valid only on `item.status` and `item.close` for the author's
+own assignment. It is always invalid on `request.*`, because an agent never
+accepts or declines a request on its own.
 
-Roll-up: an assignment is 100 when done; otherwise the mean of the progress of
-the assignee's own subtasks under that item if any exist (their own reports are
-then ignored), else their last reported `pct` (0 if none). An item's progress is
-the mean over its assignments; unassigned items use own `pct` or closed = 100;
-notes have none.
+### Requests
 
-### Flagged (ignored) events
+- A request is a task or todo thread whose `item.create` names a recipient in
+  `request`. Anyone may request anyone, including leads and people above them,
+  with no org-tree check. This field form was chosen over a separate
+  `request.create` event, so a request is an ordinary thread from its first
+  event.
+- While **pending**, a request shows on the recipient's Received requests card
+  and handle badge, and in their lead's My team view. It is excluded from
+  roll-up counts.
+- **Accept** makes it the recipient's own assignment, with self-assignment
+  semantics: assigner equals assignee, completion `assignee` (the recipient
+  closes). The requester did not assign it and has no confirm step.
+  **Decline** closes it as declined. Questions and discussion are comments in
+  the thread.
+- **Return** comes from the recipient's direct lead. It needs no approval up
+  front, and it removes the assignment. `returned` is terminal: the requester
+  can comment or send a new request.
 
-Replay never applies these; the merged log shows each with its reason.
+### Derived state
 
-- unsigned; `sig` key not listed for the author; author not in the roles file
-- author does not match the ref owner; `seq` gap or duplicate
-- `auto` without `via: "agent"`, or on a type other than progress/close
-- assignment: not the creator, note, target outside N levels (or not below the
-  assigner), nothing new to assign
-- progress/close by a non-assignee, after the assignment closed; confirm by
-  non-assigner or when no confirmation is required
-- `roles.*` by a non-admin; lead list longer than 1; cycle; unknown lead/member
-- subtask whose parent is neither assigned to nor created by the author
+- An assignment's status is `todo`, `doing`, `blocked`, `awaiting`, or `done`.
+  An item's own status comes from its active assignments: all done means
+  `done`, any blocked means `blocked`, then awaiting, then doing, then todo,
+  and no assignment means `unassigned`. A request that is not accepted shows
+  its request state. Topics have none.
+- Roll-up: a parent shows its children by status ("done 3/5 · blocked 1") and a
+  "blocked below" warning when any descendant is blocked, all the way up to the
+  root. Topics and requests that are not accepted are not counted. The parent's
+  own status stays manual, set by its assignee.
+
+## Validation and concurrency
+
+1. **Causal past.** An event's causal past is its own earlier events plus every
+   event its commit's `seen` names, closed transitively. If `seen` names an
+   event this client has not received, the event is **waiting**: shown, not
+   applied, and with no verdict yet.
+2. **Order.** Events are put in one order that respects the causal past. Ties go
+   by `ts`, then author id, then seq. This is only for folding and display.
+3. **Verdict.** Each event is checked against the state folded from its causal
+   past only. That is the state its author had seen, never later arrivals. So a
+   late arrival never changes the verdict of an event already shown.
+4. **Final fold.** It applies every valid event leniently and marks concurrent
+   changes. Two events are concurrent when neither is in the other's causal
+   past.
+   - **Field writes.** These are assignment status (written by the assignee
+     with status / close and by the assigner with confirm / reject / reopen),
+     a member's lead, and item or comment text. Item and comment text has a
+     single writer, so it cannot conflict across authors. Each field is a
+     multi-value register. Concurrent writes are all kept and both get a
+     "concurrent change" marker naming both values. The **display winner** is
+     the later `ts`, then the greater author id, then the greater seq.
+   - **Removal against writes.** An unassign or request return that is
+     concurrent with a status write or close on that assignment always wins:
+     the assigner or lead decided. Both events are marked, and the write shows
+     as valid when written but not in effect. The same applies to a subtask
+     created under an assignment that was concurrently removed.
+5. **Revocation.** `roles.revoke_key` cuts at what the revoker had seen of that
+   member. Events signed with the revoked key with a seq above the cutoff are
+   ignored, even when their `seen` predates the revocation, because a stolen key
+   cannot pretend to be old. Events at or below the cutoff stay valid. This is
+   the one rule that can turn an already shown event into ignored (open
+   question 1).
+
+Flagged reasons, as the engine words them:
+
+- the commit author does not own the ref
+- a seq gap or duplicate (a broken event consumes no seq)
+- unsigned, or a signer key that is not the author's in its causal past
+- a key already revoked in its own causal past, or revoked later and above the
+  revoker's cutoff
+- author not a member, or removed
+- `agent-auto` outside status or close, or on a request answer
+- edits or hides by anyone other than the creator or comment author
+- assignment by a non-creator, outside reach, on a topic or a request, empty,
+  or already covered
+- status, close, or reopen by a non-assignee, or after unassignment
+- status or close on a done assignment, or close while already awaiting
+- confirm or reject by a non-assigner, when not awaiting, or when no
+  confirmation is required
+- request answers by a non-recipient or when not pending
+- return by anyone but the recipient's direct lead, or when not accepted
+- a reply to a comment that is unseen, hidden, or in another thread
+- `roles.*` by a non-admin, a lead list over length 1, a cycle, an unknown
+  member, a key in use, or removing the last admin
+
+## Fixtures (`team-alpha`)
+
+Fourteen members in three levels. Ada is the team lead (admin). The part leads
+are Maya (lena, omar, ivy, jon, kai), Raj (sven, tia, noa, and later pia), and
+Bo (admin; uma). Default viewer is maya. The fixtures show:
+
+- threads with comments and quote replies
+- an edit of `ada-1`
+- a hidden comment (`raj-4`), plus a flagged hide by someone else
+- reject (`maya-12`), reopen (`maya-18`), and unassign (`maya-15`)
+- pia's blocked "Cache layer" raising "blocked below" on `raj-1` and `ada-1`
+- pia, added later, inheriting ada's live "Security training, everyone within
+  L2"
+- jon-k1 revoked by `bo-6` after seeing jon up to seq 5. `jon-6`, signed with
+  jon-k1 and backdated with an old `seen`, is ignored. jon continues on jon-k2.
+- omar long offline. His three commits sit upstream and arrive on the next
+  sync. They create a field conflict with maya's reject on "Shard writer docs"
+  (omar's later `blocked` is the display winner) and a status report on the
+  assignment maya concurrently unassigned (`omar-5` vs `maya-15`).
+- peer requests:
+  - `sven-3` to jon: accepted, then returned by maya, after a flagged return by
+    bo
+  - `tia-3` to uma: declined, with a comment
+  - `noa-3` to lena: pending, plus a flagged `agent-auto` accept
+  - `kai-2`, sent upward to the team lead ada: accepted and closed
+- about a dozen flagged demos, one for most reasons above
+
+`hana-personal` has one member with no remote. Its todos are self-assigned in
+the same commit as their creation, and it has a topic and a blocked subtask.
+
+## Engine notes for the real implementation
+
+- **Incremental apply [181].** Keep a cursor per member ref and apply new events
+  as they arrive. A late event re-replays only its thread. A roles change
+  re-replays everything, because reach and membership feed every check. The
+  mockup simply replays everything on each render, in O(n²) over the causal
+  past, which is fine at fixture scale.
+- **Ref layout [183].** Each member's ref stores events under
+  `events/YYYY/MM/DD.jsonl`.
+- **No snapshots [184]** in v1.
+- **Local clone [185].** A bare repo under `~/.ws/tracker/<store>/`, which is
+  user data, not cache. The index is cache.
+
+## Settled
+
+| board | decision |
+|---|---|
+| 149 | The roles file is genesis. Later changes are admin `roles.*` events. |
+| 150, 151 | Admins are a list of member ids. Several roots are allowed. |
+| 157 | `roles.add_admin`, `remove_admin`, `revoke_key`, `remove_member`. Events signed before a revocation stay valid. |
+| 147 | An event's author owns the ref it sits in. Admin takeover of a departed member's work is an event in the admin's own ref. |
+| 148 | Everyone in a store sees everything. "Viewing as" changes only the perspective. |
+| 154, 156 | One commit per write, several events. The commit is the signed unit, with no per-event `sig`. |
+| 153, 171 | Event id `author#seq`, no global sequence, shown as `maya-12`. |
+| 168 | Every commit records `seen`. It replaces timestamp merge order. |
+| 167 | Validate against the author's seen state. Verdicts never flip on late arrival. Concurrent conflicts are shown with a deterministic display winner. |
+| 168 | A revoked-key event that arrives after the revocation is ignored whatever its `seen` says. |
+| 169 | No remote and long offline are the same path. The drawer shows last synced and unpushed writes. Sync failure is retried. |
+| 170 | Deletion is a hide (tombstone) event. |
+| 181-185 | Engine notes above. |
+| 166 | Thread-centric items: one timeline, subtasks as child threads, a composer with quick status. |
+| 175, 162 | Kinds `task` / `todo` / `topic`. One `item.create` plus `item.edit` by the creator. |
+| 176, 177 | `comment.add`. The author edits or hides. Flat timeline with an optional `reply_to`. |
+| 146 | Project reference is one optional free-text string. |
+| 158 | "Everyone within N" stays live. |
+| 159, 144 | Delegating down creates a subtask under one's own name. Only the creator assigns. A subtask's parent is assigned to or created by its author. |
+| 145 | Completion mode per assignment event, default assignee closes. |
+| 160 | `item.unassign`, `item.reopen`, `item.reject`. |
+| 161 | Progress is a status `todo`/`doing`/`blocked`/`done` plus a note. No percentage. |
+| 178 | The roll-up counts children by status and warns on blocked up to the root. The parent's own status stays manual. |
+| 163 | Self-assignment for one's own work. "My assignments" gathers everything. |
+| 155 | One `origin`: `human` / `agent` / `agent-auto`. |
+| 186-189 | Peer requests to anyone. Pending requests are not counted. Accepting needs no approval, but the recipient's lead may return. An agent never accepts or declines. |
 
 ## Open questions
 
-Each is a v0 call to confirm or change, with the alternative.
+1. **Revocation flips a shown verdict.** The cutoff rule (what the revoker had
+   seen) is the same on every client. But a client that received the stolen-key
+   event before the revocation shows it as applied until the revocation
+   arrives, then shows it as ignored. Keep this one sanctioned flip?
+   Alternative: judge by local arrival order, which keeps verdicts stable per
+   client but lets clients disagree.
+2. **In-flight legitimate events of a revoked key.** A victim's own commits
+   signed with the old key and not yet seen by the revoker are ignored too. Is
+   re-issuing them as new events (with a new seq and the new key) the recovery
+   path?
+3. **Two devices, one member.** Two offline devices of the same member both
+   write seq N. The second push is non-fast-forward. Does the client rebase
+   (renumber seq, recompute `seen`), or is one device per member a rule?
+4. **Removal wins over concurrent status writes.** An unassign or return beats a
+   concurrent status or close, instead of the ts display winner. Confirm.
+5. **Accepted request completion.** Accepted requests use "recipient closes" and
+   the requester has no confirm. Should the requester be able to choose
+   "requester confirms" when sending?
+6. **Returned is terminal.** A returned request does not go back to pending.
+   Alternative: return to pending so the recipient's lead can redirect it.
 
-1. **Roles file vs admin events.** v0: the roles file is genesis and admin
-   `roles.*` events patch it during replay. Alternative: the roles file is the
-   only truth, edited as a file by admin commits (then membership changes are
-   not time-ordered with other events, and there is no `roles.*` event type).
-2. **Admins as ids.** v0: `admins` lists member ids, so an admin is always a
-   member with keys. Alternative: admins own separate key entries and need not
-   be members; or admin status is a flag on the member record.
-3. **Admin set changes.** v0 has no event to add or remove admins or keys
-   (key rotation, revocation, leaving the team). Alternative: `roles.add_admin`,
-   `roles.revoke_key`, `roles.remove_member` events; revocation needs a rule for
-   events signed before the revocation.
-4. **Roots.** v0: a root has `leads: []` and several roots are allowed.
-   Alternative: exactly one root, or a mandatory top-level admin.
-5. **Merge order.** v0: `ts`, then author id, then seq. Alternative: Lamport or
-   causal clock (event names the last event it saw) so unsynchronised clocks
-   cannot reorder cause and effect, at the cost of an extra field; or order by
-   git commit graph. v0 trusts author clocks, so a wrong clock can place an
-   event before its precondition and get it flagged.
-6. **Event id.** v0: `author#seq`. Alternative: the git commit hash (needs the
-   id to exist only after commit, so events cannot reference each other in one
-   commit) or a random id.
-7. **One event per commit?** Not modeled. v0 shows events only; mapping events
-   to commits (one event per commit, or a batch per commit) is open.
-8. **Assignment reach.** v0: `levels` N counts levels below the assigner;
-   `all` resolves the target list at replay time and is not re-evaluated when
-   members join later. Alternative: store the resolved list in the event
-   (survives tree edits unchanged), or keep `all` live (new followers inherit).
-9. **Who may assign.** v0: only the item's creator; re-delegation goes through
-   a subtask item that the assignee creates and assigns. Alternative: an
-   assignee re-assigns the same item in place (single item, longer chain).
-10. **Subtask parent rule.** v0: parent must be assigned to or created by the
-    author. A subtask is an independent item with a `parent` link; the parent
-    assignment's roll-up reads only subtasks authored by that assignee.
-11. **Assignment records.** v0: one record per (item, assignee), no
-    unassign, reassign, or re-open; a second assignment to the same person is
-    flagged. Alternatives: `item.unassign`, `item.reopen`, `item.reject` after
-    an assigner declines a confirmation.
-12. **Completion mode.** v0: per assignment (an item can have one assignee who
-    closes and another needing confirmation). Alternative: per item.
-13. **Progress shape.** v0: numeric `pct` plus note. Alternative: a state enum
-    (`todo`/`doing`/`blocked`/`done`) with a free-text note, no percentage;
-    roll-up then counts states instead of averaging.
-14. **Roll-up rule.** v0: unweighted mean; subtask roll-up overrides the
-    assignee's own reports once subtasks exist; `awaiting_confirm` counts as
-    the last reported pct, not 100. Alternatives: weights, minimum, or counting
-    done leaf tasks.
-15. **Notes and todos.** v0: `kind` field on one `item.create`; notes cannot be
-    assigned and have no progress; todos and tasks differ only by label.
-    Alternative: separate event types, or todos as a checklist inside a task.
-    Note edits (`item.edit`) do not exist yet, so titles and bodies cannot
-    change after creation.
-16. **Project reference.** v0: one free-text `project` string on the item.
-    Alternative: a list, or a structured `{repo, path}` hint.
-17. **Agent recording marker.** v0: `via: "agent"` plus `auto: true` on the
-    envelope; the only rule enforced is that `auto` is limited to progress and
-    close. Alternative: a single `origin` enum (`human`/`agent-requested`/
-    `agent-auto`), or recording the agent session id.
-18. **Signature placement.** v0 mocks `sig` as a key id inside the event. In git
-    the commit signature is the real carrier, so the field may disappear and
-    "signer" becomes "commit signer verified against `keys`". Alternative:
-    keep an explicit per-event signature even inside a signed commit.
-19. **Per-author ref ownership.** v0 flags an event whose `author` differs from
-    the ref owner. Alternative: let admins or a lead write into a follower's
-    ref (for example to reassign work of a departed member); then the rule
-    becomes an allow-list.
-20. **Visibility.** Everyone in a store sees every item and every event (epic:
-    confidentiality is the repository boundary), so the "viewing as" switch only
-    changes perspective (my assignments, action targets), not what is visible.
-21. **Personal store progress.** v0 lets a creator report progress and close on
-    their own unassigned items, so a one-member store works without
-    self-assignment. Alternative: allow self-assignment, or a distinct `todo`
-    state machine.
+## Not modeled in v2
 
-## Not modeled in v0
-
-Join request flow, real signatures, git commits and refs, sync, search, MCP
-surface, notifications and the dashboard badge, edits and deletion of items,
-comments, due dates, labels or priorities.
+Real signatures and crypto; git refs, pushes, and fetches (sync is simulated);
+the background poll; join requests (stand-in: `roles.add_member`); search; the
+MCP surface; notifications beyond the handle badge; due dates, labels, and
+priorities; multiple leads; snapshots; per-viewer local machines (the offline
+toggle and unpushed commits belong to the page, not to the selected viewer).
