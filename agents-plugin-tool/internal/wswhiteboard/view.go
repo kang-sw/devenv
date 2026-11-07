@@ -197,8 +197,55 @@ type PanelRow struct {
 	// Link: a served page lists a ticket by its repo-relative path instead
 	// of linking it. A card shows it as a tooltip rather than as body text.
 	Path string
+	// Action, set by BuildView on a page with link actions (FileActions and
+	// FileText) for a row with a Path, makes Text the served page's file
+	// action link, titled with Path; the zero value leaves Path as above.
+	Action FileAction
 	// Sub is a card's muted second line; plain rows ignore it.
 	Sub string
+}
+
+// IsAction reports whether the row's Text renders as a file action link.
+func (r PanelRow) IsAction() bool { return r.Action.Href != "" || r.Action.Abs != "" }
+
+// withActions returns panels with each row's Path resolved through
+// FileActions into the row's Action, the way fileTarget resolves a markdown
+// file target (including its daemon-path check on the href). The input is
+// left as it was.
+func withActions(panels []Panel, fileActions func(string) FileAction) []Panel {
+	row := func(r PanelRow) PanelRow {
+		if r.Path != "" && r.Link == "" {
+			r.Action = fileActions(r.Path)
+			if !daemonPath(r.Action.Href) {
+				r.Action.Href = ""
+			}
+		}
+		return r
+	}
+	rows := func(in []PanelRow) []PanelRow {
+		if in == nil {
+			return nil
+		}
+		out := make([]PanelRow, len(in))
+		for i, r := range in {
+			out[i] = row(r)
+		}
+		return out
+	}
+	out := make([]Panel, len(panels))
+	for i, p := range panels {
+		p.Rows, p.Folded = rows(p.Rows), rows(p.Folded)
+		if p.Lanes != nil {
+			lanes := make([]PanelLane, len(p.Lanes))
+			for j, l := range p.Lanes {
+				l.Rows = rows(l.Rows)
+				lanes[j] = l
+			}
+			p.Lanes = lanes
+		}
+		out[i] = p
+	}
+	return out
 }
 
 // ViewInput is what BuildView needs beyond the State.
@@ -226,6 +273,9 @@ func BuildView(state *State, in ViewInput) View {
 		FileText:    in.FileText,
 		ImageSrc:    in.ImageSrc,
 		FileActions: in.FileActions,
+	}
+	if in.FileActions != nil && in.FileText != nil {
+		view.Panels = withActions(in.Panels, in.FileActions)
 	}
 	for _, item := range state.Items {
 		view.Stored[item.ID] = true

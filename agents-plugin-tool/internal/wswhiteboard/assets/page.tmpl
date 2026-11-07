@@ -54,10 +54,10 @@
 
 {{define "lane"}}<section class="lane"><h4><span class="lname">{{.Name}}</span><span class="chip">{{.Count}}</span>{{with .Note}}<span class="lnote">{{.}}</span>{{end}}</h4><ul class="kcards">{{range .Rows}}{{template "card" .}}{{else}}<li class="none">none</li>{{end}}</ul></section>{{end}}
 
-{{define "card"}}<li class="kcard"><span class="ctitle"{{if and (not .Link) .Path}} title="{{.Path}}"{{end}}>{{with .Label}}<span class="chip cat {{.}}">{{.}}</span>{{end}}{{if .Link}}<a href="{{href .Link}}">{{.Text}}</a>{{else}}{{.Text}}{{end}}</span>{{with .Sub}}<span class="csub" title="{{.}}">{{.}}</span>{{end}}</li>{{end}}
+{{define "card"}}<li class="kcard"><span class="ctitle"{{if and (not .Link) (not .IsAction) .Path}} title="{{.Path}}"{{end}}>{{with .Label}}<span class="chip cat {{.}}">{{.}}</span>{{end}}{{if .Link}}<a href="{{href .Link}}">{{.Text}}</a>{{else if .IsAction}}<a{{actionAttrs .}}>{{.Text}}</a>{{else}}{{.Text}}{{end}}</span>{{with .Sub}}<span class="csub" title="{{.}}">{{.}}</span>{{end}}</li>{{end}}
 
 {{define "row"}}{{if .State}}<li class="{{.State}}"{{with .Label}} title="{{.}}"{{end}}><span class="box">{{icon (box .State)}}</span><span>{{template "rowtext" .}}</span></li>{{else}}<li class="keyed">{{with .Label}}<code>{{.}}</code>{{end}}<span>{{template "rowtext" .}}</span></li>{{end}}{{end}}
 
-{{define "rowtext"}}{{if .Link}}<a href="{{href .Link}}">{{.Text}}</a>{{else}}{{.Text}}{{with .Path}} <code class="fpath">{{.}}</code>{{end}}{{end}}{{end}}
+{{define "rowtext"}}{{if .Link}}<a href="{{href .Link}}">{{.Text}}</a>{{else if .IsAction}}<a{{actionAttrs .}}>{{.Text}}</a>{{else}}{{.Text}}{{with .Path}} <code class="fpath">{{.}}</code>{{end}}{{end}}{{end}}
 
 {{define "reply"}}{{if .Answerable}}<div class="reply{{if not .BulkAck}} solo{{end}}">{{if .BulkAck}}<label class="allok" title="acknowledge every technical/announced item and confirm every assumed one"><input type="checkbox" id="ack-all">{{icon "check"}}{{.CountBulk}}</label>{{end}}<textarea id="reply-text" readonly placeholder="(nn) a; (mm) ok"></textarea><button class="btn primary" id="reply-copy" title="copy answers">{{icon "copy"}}</button><span class="hint" id="reply-hint"></span></div>{{end}}{{end}}

@@ -32,7 +32,7 @@ func (s *Server) whiteboardMailbox(sessionKey, root string) whiteboardMailbox {
 // ticketPanel shows the tickets as kanban lanes: every ready/ ticket and, on
 // the full page only, the latest whiteboardLatestTodo todo/ tickets. Each
 // card links to its file, or on a served page carries its repo-relative path
-// as a tooltip. idea/ tickets are never listed.
+// (which the page makes the file action link, titled with that path). idea/ tickets are never listed.
 func ticketPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 	tickets, err := wsdoc.TicketsList(in.root, wsdoc.TicketListOptions{Statuses: []string{"ready", "todo"}})
 	if err != nil {
