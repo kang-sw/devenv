@@ -1,30 +1,65 @@
-# Tracker mockup v0
+# Tracker mockup v1
 
-An unstyled page for deciding the data structures of the team tracker (epic
-`261107-epic-ws-personal-common-store`). v0 is a first concrete proposal, not a
-decision. Everything the page shows is computed in the browser by merging the
-per-member event logs on top of the roles file, which is the epic's storage
-model (each member appends only to their own ref; views are client-side merges).
+A layout mockup for deciding the data structures of the team tracker (epic
+`261107-epic-ws-personal-common-store`): it shows how the tracker would be laid
+out and used, inside a frame that imitates the dashboard session page. The data
+model below is a first concrete proposal, not a decision. Everything the page
+shows is computed in the browser by merging the per-member event logs on top of
+the roles file, which is the epic's storage model (each member appends only to
+their own ref; views are client-side merges). v0 was the same data layer behind
+a raw page (JSON panes and tables); v1 keeps the engine and puts a layout on it.
 
 ## Open it
 
 Open `index.html` from the file system (double-click, or `file://` URL). No
-build, no server, no dependencies. Fixtures are `fixtures.js` (a script that
-assigns `window.TRACKER_FIXTURES`, because `fetch` of local JSON is blocked on
-`file://`).
+build, no server, no dependencies.
 
-- Top bar: store switcher (`team-alpha` with 14 members, `hana-personal` with
-  one) and a "viewing as" member switcher.
-- Left: summary, actions, my assignments, org tree, item list, item detail
-  (click an item id), merged event log (checkbox: flagged only).
-- Right: the roles file and every member log as editable JSON. Edit, press
-  `apply`, and every view recomputes. Edits live in memory only; `reset store to
-  fixtures` or a page reload restores `fixtures.js`. To keep a change, edit
-  `fixtures.js`.
-- Actions append events to the viewer's log and show the produced events and
-  whether they applied or were flagged. They are not pre-validated, so you can
-  deliberately produce a flagged event (for example assign to someone beyond N
-  levels).
+- `index.html` - the frame and the mount points; `style.css` - neutral light
+  layout styling with the dashboard's variables and drawer geometry.
+- `engine.js` - the data layer: merge the per-member logs, validate and flag each
+  event, derive assignment/item state and roll-up (`window.TrackerEngine`).
+- `app.js` - the view and the actions. `fixtures.js` - a script that assigns
+  `window.TRACKER_FIXTURES` (`fetch` of local JSON is blocked on `file://`);
+  edit it to keep a data change.
+
+## What the page shows
+
+- **Frame.** A header like the dashboard session page (back link, title, host
+  chip, live dot) with the mockup's "viewing as" switch left after the title, a
+  static conversation placeholder, and a composer. The pull-down drawer hangs
+  from the top right with one handle per store, stacking leftward: `panels` (a
+  static stub), `team-alpha` (14 members), `hana-personal` (one member). A
+  handle shows a badge for assignments that are new to the viewer; opening the
+  store clears it (the badge is the "like the mailbox" cue from the epic), and
+  the rows that were new carry a `new` chip for that visit. Click a handle to
+  open or close, `Esc` closes the sheet, then the drawer.
+- **Store drawer cards.**
+  - *My assignments*: what I must do, with state, who assigned it (and the
+    chain up to the root item's author), level, completion mode, progress, the
+    next action and the Report / Close / Split buttons; below it my own
+    unassigned items.
+  - *Assigned by me / team progress*: items I handed down, with the roll-up and
+    each assignee's state, progress and a Confirm button when I must confirm.
+  - *Items*: all items as a parent/child tree, filter by kind and status.
+  - *Team*: the org tree with leads/followers, admins, and my reach by level.
+  - *Activity*: the merged event log, newest first, with a flagged-only filter
+    and the result of the last action.
+  - *Data*: the raw roles file and every member log as editable JSON, behind a
+    collapsed toggle. Edit, press `apply`, and every view recomputes. Edits live
+    in memory only; `reset store to fixtures` or a reload restores `fixtures.js`.
+- **Item detail** opens as a side sheet (it overlays the right of the drawer):
+  title, kind, project reference, creator, status and roll-up, body, assignees
+  with per-assignee state, completion mode and progress, the subtask tree with
+  roll-up, and the event history timeline (who, when, human vs agent, auto
+  marker, flagged events with the reason).
+- **Actions** are small dialogs: create item, assign (everyone within N levels,
+  or chosen people within N, with a live preview of who is reached), split a
+  received item into subtasks, report progress, close, confirm. Each appends
+  events to the viewer's log, re-renders, and reports whether the event applied
+  or was flagged. They are not pre-validated, so you can deliberately produce a
+  flagged event (for example assign to someone beyond N levels, or assign twice).
+- "Due actions" are shown as the derived next action on each row (report,
+  close, wait for confirmation, confirm); due dates are not modeled.
 
 ## Proposed data model
 
