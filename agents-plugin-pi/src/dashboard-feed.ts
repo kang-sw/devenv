@@ -23,7 +23,16 @@
  *   `accepts:` line: an older ws-mcp skips the kind, and a "dashboard off" or
  *   error result names nothing. Figures are read when a flush drains after a
  *   dirty mark, sent only when they changed, and sent again after a resync,
- *   since `reset` clears them on the server.
+ *   since `reset` clears them on the server;
+ * - `compact` around each compaction of the lead's conversation (Pi
+ *   `session_before_compact`, then `session_compact` or
+ *   `session_compact_failed`): `start`, then `end` when it lands or `failed`
+ *   when it fails or a handler cancels it, with its trigger (`manual` for a
+ *   `/compact` or an extension's compaction, `auto` for Pi's threshold or
+ *   overflow compaction), gated on the `accepts:` line like `status`. A
+ *   compaction still running is held and its start sent again after a
+ *   resync. The usage figures Pi reads after a landing reach the page
+ *   through `status`.
  *
  * Pi itself has no tool permission prompt, so the lead never sends a
  * permission wait; only a subagent's pending `ws-worker-exec` approval does.
@@ -97,7 +106,7 @@ export function resolveDashboardEnabled(config: GoalLoopConfig | undefined): boo
 export type DashboardOrigin = "terminal" | "whiteboard" | "mail";
 
 export interface DashboardEvent {
-  kind: "reset" | "turn_start" | "turn_end" | "agent" | "permission" | "reply" | "user" | "status";
+  kind: "reset" | "turn_start" | "turn_end" | "agent" | "permission" | "reply" | "user" | "status" | "compact";
   [field: string]: unknown;
 }
 
@@ -155,6 +164,15 @@ export interface DashboardFeed {
 
 /** The optional event kind that carries usage figures, sent only while the intake names it. */
 export const STATUS_KIND = "status";
+
+/** The optional event kind that marks a lead compaction, sent only while the intake names it. */
+export const COMPACT_KIND = "compact";
+
+/** A compaction's trigger as the intake takes it, from Pi's compaction reason. */
+export function compactTrigger(reason: unknown): "auto" | "manual" | undefined {
+  if (reason === "manual") return "manual";
+  return reason === "threshold" || reason === "overflow" ? "auto" : undefined;
+}
 
 /** A `status` event's figures; a part with no figure is left out. Pi reports no usage limits. */
 export interface DashboardStatus {
@@ -351,6 +369,12 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
   let statusAccepted = false;
   /** The last sent usage figures, as JSON; undefined when ws-mcp holds none of ours. */
   let lastStatusSent: string | undefined;
+  /** The lead's compaction while it runs: its trigger and start. */
+  let compacting: { trigger?: "auto" | "manual"; at: number } | undefined;
+  /** Whether ws-mcp does not hold `compacting`'s start yet. */
+  let compactDirty = false;
+  /** Whether the latest intake result named `compact` among the kinds it accepts. */
+  let compactAccepted = false;
   let inFlight = false;
   let lastFlushAt: number | undefined;
   let cancelFlush: (() => void) | undefined;
@@ -360,8 +384,12 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
     return statusDirty && statusAccepted && options.status !== undefined;
   }
 
+  function compactDue(): boolean {
+    return compactDirty && compactAccepted && compacting !== undefined;
+  }
+
   function hasWork(): boolean {
-    return pending.length > 0 || leadDirty || agentsDirty || streamMessage !== undefined || statusDue();
+    return pending.length > 0 || leadDirty || agentsDirty || streamMessage !== undefined || statusDue() || compactDue();
   }
 
   function scheduleFlush(): void {
@@ -451,6 +479,13 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
     return out;
   }
 
+  /** A running compaction's start, when ws-mcp does not hold it yet. */
+  function compactStartEvent(): DashboardEvent | undefined {
+    if (!compactDue()) return undefined;
+    compactDirty = false;
+    return { kind: COMPACT_KIND, phase: "start", ...(compacting!.trigger ? { trigger: compacting!.trigger } : {}), at: compacting!.at };
+  }
+
   /** The usage figures, when they changed since the last send. */
   function statusEvent(): DashboardEvent | undefined {
     if (!statusDue()) return undefined;
@@ -478,6 +513,8 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
     if (agentsDirty) events.push(...agentEvents());
     const stream = streamEvent();
     if (stream) events.push(stream);
+    const start = compactStartEvent();
+    if (start) events.push(start);
     const status = statusEvent();
     if (status) events.push(status);
     return events;
@@ -492,11 +529,12 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
     agentsDirty = options.agents !== undefined;
     lastStatusSent = undefined;
     statusDirty = options.status !== undefined;
+    compactDirty = compacting !== undefined;
   }
 
   /** The conversation events of an undelivered call, which a resync cannot rebuild from current state. */
   function requeue(events: DashboardEvent[]): void {
-    const kept = events.filter((event) => event.kind === "user" || event.kind === "turn_start" || event.kind === "turn_end" || (event.kind === "reply" && event.final === true));
+    const kept = events.filter((event) => event.kind === "user" || event.kind === "turn_start" || event.kind === "turn_end" || (event.kind === "reply" && event.final === true) || (event.kind === COMPACT_KIND && event.phase !== "start"));
     pending = [...kept, ...pending];
     if (pending.length > PENDING_EVENT_CAP) pending.splice(0, pending.length - PENDING_EVENT_CAP);
   }
@@ -549,6 +587,9 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
         statusDirty = options.status !== undefined;
       }
       statusAccepted = accepted;
+      const compactOn = outcome === "delivered" && accepts.includes(COMPACT_KIND);
+      if (compactOn && !compactAccepted) compactDirty = compacting !== undefined;
+      compactAccepted = compactOn;
       if (!stopped && outcome !== "delivered") {
         // Dropped (off) or maybe lost (failed): ws-mcp's state is stale either way.
         markResync();
@@ -600,7 +641,7 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
   }
 
   function onLeadEvent(event: unknown): void {
-    const e = event as { type?: string; message?: unknown; assistantMessageEvent?: unknown; text?: unknown; source?: unknown };
+    const e = event as { type?: string; message?: unknown; assistantMessageEvent?: unknown; text?: unknown; source?: unknown; reason?: unknown };
     switch (e.type) {
       case "input": {
         // An input with no origin of its own (the adapter's wake message for
@@ -647,6 +688,24 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
         scheduleFlush();
         return;
       }
+      case "session_before_compact":
+        compacting = { ...(compactTrigger(e.reason) ? { trigger: compactTrigger(e.reason) } : {}), at: now() };
+        compactDirty = true;
+        scheduleFlush();
+        return;
+      case "session_compact":
+      case "session_compact_failed": {
+        if (compactAccepted) {
+          // A start ws-mcp does not hold yet goes ahead of its end.
+          const start = compactStartEvent();
+          if (start) push(start);
+          const trigger = compactTrigger(e.reason);
+          settleBefore({ kind: COMPACT_KIND, phase: e.type === "session_compact" ? "end" : "failed", ...(trigger ? { trigger } : {}), at: now() });
+        }
+        compacting = undefined;
+        compactDirty = false;
+        return;
+      }
       case "message_start":
       case "tool_execution_start":
       case "tool_execution_end":
@@ -682,6 +741,9 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
     statusDirty = false;
     statusAccepted = false;
     lastStatusSent = undefined;
+    compacting = undefined;
+    compactDirty = false;
+    compactAccepted = false;
   }
 
   return {
@@ -728,12 +790,15 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
 export const DASHBOARD_LEAD_EVENTS = [
   "input", "agent_start", "agent_end", "agent_settled", "turn_end",
   "message_start", "message_update", "message_end", "tool_execution_start", "tool_execution_end",
+  "session_before_compact", "session_compact", "session_compact_failed",
 ] as const;
 
 /**
  * Subscribes the lead events once per extension load (Pi offers no
  * unsubscribe, so a reload must not stack handlers); each handler forwards to
- * whichever feed is current and returns nothing, so it never changes an event.
+ * whichever feed is current and returns nothing, so it never changes an event
+ * (a `session_before_compact` handler that returns nothing neither cancels
+ * nor replaces the compaction).
  */
 export function registerDashboardLeadEvents(pi: { on(event: string, handler: (event: unknown) => void): void }, feed: () => DashboardFeed | undefined): void {
   for (const name of DASHBOARD_LEAD_EVENTS) {

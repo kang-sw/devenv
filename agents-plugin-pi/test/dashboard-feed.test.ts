@@ -8,6 +8,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import {
   AGENT_POLL_MS,
+  COMPACT_KIND,
   DASHBOARD_INTAKE_TOOL,
   DASHBOARD_LEAD_EVENTS,
   KNOB_RECHECK_MS,
@@ -16,6 +17,7 @@ import {
   RETRY_MS,
   STATUS_KIND,
   acceptedKinds,
+  compactTrigger,
   createDashboardFeed,
   dashboardAgentEntries,
   dashboardStatus,
@@ -644,6 +646,88 @@ describe("usage status", () => {
     feed.statusChanged();
     await advance(FLUSH_INTERVAL_MS);
     assert.deepEqual(statusEvents(events()).at(-1)!.context, { tokens: null, window: 200_000 });
+  });
+});
+
+describe("compaction", () => {
+  const accepting = (kinds = "status, compact") => ({ content: [{ type: "text", text: `ok: 1 of 1 events applied\naccepts: ${kinds}\n` }] });
+  const compacts = (events: DashboardEvent[]) => events.filter((event) => event.kind === COMPACT_KIND);
+  const before = (reason: string) => ({ type: "session_before_compact", reason, willRetry: false });
+  const landed = (reason: string) => ({ type: "session_compact", reason, fromExtension: false, willRetry: false });
+  const failed = (reason: string) => ({ type: "session_compact_failed", reason, aborted: true, fromExtension: false, willRetry: false });
+
+  test("Pi's reason maps to the trigger: manual stays manual, threshold and overflow are auto", () => {
+    assert.equal(compactTrigger("manual"), "manual");
+    assert.equal(compactTrigger("threshold"), "auto");
+    assert.equal(compactTrigger("overflow"), "auto");
+    assert.equal(compactTrigger("other"), undefined);
+    assert.equal(compactTrigger(undefined), undefined);
+  });
+
+  test("a compaction sends its start while it runs, then its end with the trigger; a failure or cancel ends as failed", async () => {
+    const { feed, events, advance } = harness({ answer: async () => accepting() });
+    feed.start();
+    await advance(FLUSH_INTERVAL_MS);
+    feed.leadEvent(before("threshold"));
+    await advance(FLUSH_INTERVAL_MS);
+    assert.deepEqual(compacts(events()), [{ kind: "compact", phase: "start", trigger: "auto", at: 10_000 + FLUSH_INTERVAL_MS }]);
+    feed.leadEvent(landed("threshold"));
+    await advance(FLUSH_INTERVAL_MS);
+    assert.deepEqual(compacts(events()).at(-1), { kind: "compact", phase: "end", trigger: "auto", at: 10_000 + FLUSH_INTERVAL_MS * 2 });
+    feed.leadEvent(before("manual"));
+    feed.leadEvent(failed("manual"));
+    await advance(FLUSH_INTERVAL_MS);
+    // The start ws-mcp never got goes ahead of its end, so the end is not orphaned.
+    assert.deepEqual(compacts(events()).slice(-2).map((event) => [event.phase, event.trigger]), [["start", "manual"], ["failed", "manual"]]);
+  });
+
+  test("compact is never sent while the intake results do not name it", async () => {
+    const { feed, events, advance } = harness({ answer: async () => accepting("status") });
+    feed.start();
+    await advance(FLUSH_INTERVAL_MS);
+    feed.leadEvent(before("manual"));
+    await advance(FLUSH_INTERVAL_MS);
+    feed.leadEvent(landed("manual"));
+    await advance(FLUSH_INTERVAL_MS * 3);
+    assert.deepEqual(compacts(events()), []);
+  });
+
+  test("a resync while a compaction runs sends its start again behind the reset; an end lost with a failed call is put back", async () => {
+    let failNext = false;
+    const { feed, calls, events, advance } = harness({
+      answer: async () => { if (failNext) { failNext = false; throw new Error("lost"); } return accepting(); },
+    });
+    feed.start();
+    await advance(FLUSH_INTERVAL_MS);
+    feed.leadEvent(before("threshold"));
+    await advance(FLUSH_INTERVAL_MS);
+    failNext = true;
+    feed.leadEvent(userEnd("hello"));
+    await advance(FLUSH_INTERVAL_MS);
+    const lost = calls.length;
+    await advance(RETRY_MS + FLUSH_INTERVAL_MS * 2);
+    const after = calls.slice(lost).flatMap((call) => call.args.events);
+    assert.equal(after[0]!.kind, "reset");
+    assert.deepEqual(compacts(after).map((event) => [event.phase, event.at]), [["start", 10_000 + FLUSH_INTERVAL_MS]], "the start keeps its own time");
+    failNext = true;
+    feed.leadEvent(landed("threshold"));
+    await advance(FLUSH_INTERVAL_MS);
+    const lostEnd = calls.length;
+    await advance(RETRY_MS + FLUSH_INTERVAL_MS * 2);
+    const retried = calls.slice(lostEnd).flatMap((call) => call.args.events);
+    assert.equal(retried[0]!.kind, "reset");
+    assert.deepEqual(compacts(retried).map((event) => event.phase), ["end"], "the settled compaction's start is not resent");
+    assert.equal(compacts(events()).filter((event) => event.phase === "end").length, 2, "sent once, lost, sent again");
+  });
+
+  test("the compaction events are lead events the registered handlers forward, and a handler returns nothing", () => {
+    for (const name of ["session_before_compact", "session_compact", "session_compact_failed"]) {
+      assert.ok((DASHBOARD_LEAD_EVENTS as readonly string[]).includes(name), name);
+    }
+    const { feed } = harness();
+    feed.start();
+    assert.equal(feed.leadEvent(before("manual")), undefined);
+    assert.equal(feed.leadEvent({ type: "session_compact" }), undefined);
   });
 });
 
