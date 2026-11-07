@@ -81,9 +81,8 @@ func refusedByGuard(rec *httptest.ResponseRecorder) bool {
 }
 
 // guardedRoutes is every route the daemon serves, with a request that
-// reaches it.
+// reaches it, but the shared mermaid script (TestLANModeServesTheMermaidScriptToAll).
 func guardedRoutes() []struct{ method, path, body string } {
-	mermaid, _ := wswhiteboard.MermaidAsset()
 	return []struct{ method, path, body string }{
 		{http.MethodGet, "/health", ""},
 		{http.MethodPost, "/shutdown", ""},
@@ -102,7 +101,37 @@ func guardedRoutes() []struct{ method, path, body string } {
 		// A target the route refuses, so a passing request never runs the
 		// OS open command.
 		{http.MethodPost, "/s/livesession/open", `{"target":"ftp://guard.test/"}`},
-		{http.MethodGet, "/s/" + mermaid, ""},
+	}
+}
+
+// TestLANModeServesTheMermaidScriptToAll pins the guard's one exemption: a
+// read of the shared mermaid script passes without the token, since a Now
+// frame's opaque origin sends no cookie, while any other method on its path,
+// and a near miss of its name, still meets the guard.
+func TestLANModeServesTheMermaidScriptToAll(t *testing.T) {
+	f := startPageFixture(t, lanMode)
+	mermaid, data := wswhiteboard.MermaidAsset()
+	stranger := viewer{name: "foreign peer, no token", peer: "192.168.7.30:50000", host: "192.168.7.20:" + strconv.Itoa(f.d.Endpoint().Port)}
+	for _, method := range []string{http.MethodGet, http.MethodHead} {
+		rec := serve(f.d, stranger, method, "/s/"+mermaid, "")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s mermaid script without the token = %d, want 200", method, rec.Code)
+		}
+		if method == http.MethodGet && rec.Body.Len() != len(data) {
+			t.Errorf("mermaid script body = %d bytes, want %d", rec.Body.Len(), len(data))
+		}
+		if len(rec.Result().Cookies()) != 0 {
+			t.Errorf("the mermaid script set a cookie")
+		}
+	}
+	for _, target := range []struct{ method, path string }{
+		{http.MethodPost, "/s/" + mermaid},
+		{http.MethodGet, "/s/" + mermaid + "x"},
+		{http.MethodGet, "/s/livesession/" + mermaid},
+	} {
+		if rec := serve(f.d, stranger, target.method, target.path, ""); !refusedByGuard(rec) {
+			t.Errorf("%s %s without the token = %d, want the guard's 401", target.method, target.path, rec.Code)
+		}
 	}
 }
 

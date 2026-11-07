@@ -298,6 +298,7 @@
     var pin = (name === "entries" || name === "convlive") && pinned();
     var scroll = scrollState();
     var answers = board ? readAnswers(el) : null;
+    var frameH = board ? frameHeight(el) : "";
     // A finished reply's mermaid fences draw once merged; the streaming
     // reply (convlive) keeps them code blocks.
     if (name === "entries") { mergeEntriesRegion(el, html); mermaid(); }
@@ -308,6 +309,7 @@
     }
     el.setAttribute("data-h", hash);
     if (board) {
+      setFrameHeight(el, frameH);
       writeAnswers(el, answers);
       if (window.wbForm) window.wbForm();
       mermaid();
@@ -1018,6 +1020,55 @@
   window.addEventListener("resize", function () { closeLinkMenu(false); });
   window.addEventListener("blur", function () { closeLinkMenu(false); });
 
+  // --- the board's Now frame ------------------------------------------------
+  // The server renders the board's Now slot in a sandboxed frame with an
+  // opaque origin (wswhiteboard framedNow), so its scripts cannot reach this
+  // page or the daemon's routes. The frame's script (now-frame.js) posts its
+  // content height, its marked-link clicks, and its item-reference clicks. A
+  // message counts only when its source is a Now frame on this page, and its
+  // fields are data, checked as such: a link opens the same menu a board
+  // link does, with an href kept only in the shapes the renderer gives one
+  // (an http(s) URL for a url link, a scheme-less daemon path for a file
+  // link), so a forged message can at most offer a menu the user must pick
+  // from.
+  function nowFrame(win) {
+    return q("iframe.now-frame").filter(function (f) { return f.contentWindow === win; })[0];
+  }
+  function str(v) { return typeof v === "string" ? v : ""; }
+  function num(v) { return typeof v === "number" && isFinite(v) ? v : 0; }
+  function frameLink(m) {
+    var kind = str(m.kind), href = str(m.href);
+    if (kind === "url") { if (!/^https?:\/\//i.test(href)) return null; }
+    else if (kind === "file") { if (!/^\/[^\/\\\x00-\x20\x7f][^\\\x00-\x20\x7f]*$/.test(href)) href = ""; }
+    else return null;
+    var a = doc.createElement("a");
+    a.setAttribute("data-wl", kind);
+    if (href) a.setAttribute("href", href);
+    if (str(m.rel)) a.setAttribute("data-rel", str(m.rel));
+    if (str(m.abs)) a.setAttribute("data-abs", str(m.abs));
+    return a;
+  }
+  window.addEventListener("message", function (e) {
+    var f = nowFrame(e.source), m = e.data;
+    if (!f || !m || typeof m !== "object") return;
+    if (m.wbNow === "height") {
+      var h = num(m.height);
+      if (h >= 0 && h < 100000) f.style.height = Math.ceil(h) + "px";
+    } else if (m.wbNow === "jump") {
+      var item = /^item-\d+$/.test(str(m.id)) && $(m.id);
+      if (item) item.scrollIntoView({ block: "start" });
+    } else if (m.wbNow === "link") {
+      var a = frameLink(m);
+      if (!a) return;
+      var r = f.getBoundingClientRect();
+      openLinkMenu(a, r.left + num(m.x), r.top + num(m.y));
+    }
+  });
+  // A swap re-creates the frame, which starts at no height until it posts
+  // one; it takes the old frame's height meanwhile.
+  function frameHeight(el) { var f = el.querySelector("iframe.now-frame"); return f ? f.style.height : ""; }
+  function setFrameHeight(el, h) { var f = el.querySelector("iframe.now-frame"); if (f && h) f.style.height = h; }
+
   // --- stream ----------------------------------------------------------------
   var sse = $("sse"), sseLabel = sse && sse.querySelector(".sse-label");
   function connected(on) {
@@ -1076,6 +1127,9 @@
     setTab("convo");
   }
   restoreOpen(doc);
+  // A Now frame that posted its height before the listener above existed
+  // posts it again.
+  q("iframe.now-frame").forEach(function (f) { if (f.contentWindow) f.contentWindow.postMessage({ wbNow: "size" }, "*"); });
   if (window.wbForm) window.wbForm();
   applySent();
   fmtTimes(doc);

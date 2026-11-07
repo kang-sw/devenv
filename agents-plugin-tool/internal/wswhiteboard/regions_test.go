@@ -1,15 +1,20 @@
 package wswhiteboard
 
 import (
+	"html"
+	"regexp"
 	"strings"
 	"testing"
 )
 
 // TestRenderRegionsMatchThePage pins the dashboard's reuse contract: the
 // board and panel fragments are exactly what the full page renders for the
-// same view, so a served page cannot drift from the static one.
+// same view, so a served page cannot drift from the static one. The Now
+// slot is the one difference, framed in the regions
+// (TestServedNowRendersInASandboxedFrame), so it is cleared here.
 func TestRenderRegionsMatchThePage(t *testing.T) {
 	view := sampleView(LayoutFull)
+	view.Now = ""
 	page := render(t, view)
 	regions, err := RenderRegions(view)
 	if err != nil {
@@ -245,4 +250,74 @@ func TestDiskBoardKeepsFileLinks(t *testing.T) {
 		FileActions: func(string) FileAction { return FileAction{Href: "/s/r/file?path=x", Abs: "/x"} }}))
 	wantAll(t, out, `<a href="file://ai-docs/plan.md">the plan</a>`, `<a href="file:///abs/b.md">abs</a>`)
 	wantNone(t, out, "data-wl", "/s/r/file")
+}
+
+// frameDoc returns the srcdoc document of the one Now frame in board,
+// unescaped as a browser reads the attribute.
+func frameDoc(t *testing.T, board string) string {
+	t.Helper()
+	m := regexp.MustCompile(`<iframe class="now-frame"[^>]* srcdoc="([^"]*)"></iframe>`).FindAllStringSubmatch(board, -1)
+	if len(m) != 1 {
+		t.Fatalf("board holds %d Now frames, want 1:\n%.600s", len(m), board)
+	}
+	return html.UnescapeString(m[0][1])
+}
+
+// TestServedNowRendersInASandboxedFrame pins the served page's Now trust:
+// RenderRegions puts Now's HTML, scripts included, in a srcdoc frame with
+// allow-scripts but never allow-same-origin, so none of it runs in the
+// daemon's origin, and the frame document carries the page stylesheet (the
+// theme variables), the frame script, and Now's own markup. The disk page
+// keeps rendering Now inline.
+func TestServedNowRendersInASandboxedFrame(t *testing.T) {
+	const now = "**plan**\n\n<canvas id=\"c\" width=\"40\" height=\"20\"></canvas>\n<script>\nfetch('/s/r/message', {method: 'POST'});\n</script>"
+	st := &State{Seq: 2, NowSeq: 2, Now: now, Items: []Item{{ID: 1, Class: ClassPolicy, Topic: "t", Title: "x", Status: StatusOpen, Options: []string{"a", "b"}}}}
+	view := BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"})
+	regions, err := RenderRegions(view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	board := string(regions.Board)
+	if !strings.Contains(board, `<div class="now-body framed"><iframe class="now-frame" title="now" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" srcdoc="`) {
+		t.Fatalf("Now frame missing or its sandbox changed:\n%.600s", board)
+	}
+	wantNone(t, board, "allow-same-origin", "<script", "<canvas")
+	assets, _ := loadAssets()
+	doc := frameDoc(t, board)
+	wantAll(t, doc, `<base target="_blank">`, "--wb-now:", "<strong>plan</strong>", `<canvas id="c"`, "fetch('/s/r/message'", assets.nowFrame, `<body class="now-frame"><div class="now-body md">`)
+	if strings.Contains(doc, "<script src=") {
+		t.Errorf("a Now without a mermaid block loads mermaid in its frame")
+	}
+
+	page := render(t, view)
+	wantAll(t, page, `<div class="now-body md"><p><strong>plan</strong></p>`, "fetch('/s/r/message'")
+	wantNone(t, page, "<iframe", "srcdoc")
+}
+
+// TestFramedNowImagesTakeNowImageSrc pins where NowImageSrc applies: a file
+// image in the framed Now takes it, an empty result falls back to ImageSrc,
+// and an item's image and the disk page's Now keep ImageSrc.
+func TestFramedNowImagesTakeNowImageSrc(t *testing.T) {
+	st := &State{Seq: 2, NowSeq: 2, Now: "![a](a.png) ![big](big.png)",
+		Items: []Item{{ID: 1, Class: ClassPolicy, Topic: "t", Title: "x", Status: StatusOpen, Options: []string{"a", "b"}, Rationale: "![item](a.png)"}}}
+	in := ViewInput{Layout: LayoutFull, ReplyID: "r",
+		FileText: func(p string) string { return p },
+		ImageSrc: func(p string) string { return "/route/" + p },
+		NowImageSrc: func(p string) string {
+			if p == "big.png" {
+				return ""
+			}
+			return "data:image/png;base64,QUJD"
+		}}
+	regions, err := RenderRegions(BuildView(st, in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := frameDoc(t, string(regions.Board))
+	wantAll(t, doc, `<img src="data:image/png;base64,QUJD" alt="a">`, `<img src="/route/big.png" alt="big">`)
+	wantAll(t, string(regions.Board), `<img src="/route/a.png" alt="item">`)
+	wantNone(t, string(regions.Board), `src="data:image/png;base64,QUJD" alt="item"`)
+
+	page := render(t, BuildView(st, in))
+	wantNone(t, page, "data:image")
 }

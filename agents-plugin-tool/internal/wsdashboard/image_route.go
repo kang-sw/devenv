@@ -1,6 +1,8 @@
 package wsdashboard
 
 import (
+	"encoding/base64"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -64,6 +66,35 @@ func ImageSrc(root, replyID, path string) string {
 		return ""
 	}
 	return "/s/" + replyID + "/image?path=" + url.QueryEscape(filepath.ToSlash(rel))
+}
+
+// imageDataMax bounds the image ImageDataURL inlines; a larger one falls
+// back to the image route.
+const imageDataMax = 2 << 20
+
+// ImageDataURL is a board image at path (relative to root, or absolute)
+// inlined as a data: URL, under the image route's own containment checks
+// (containedImage), for the Now slot's sandboxed frame: the frame's opaque
+// origin sends no cookie, so in LAN mode the image route would refuse it. It
+// is empty when the route would refuse the path or the file is larger than
+// imageDataMax; the page then falls back to the route's URL (ImageSrc). The
+// file is read on every render, which is what keeps the inlined image
+// current.
+func ImageDataURL(root, path string) string {
+	file, ctype, ok := containedImage(root, path)
+	if !ok {
+		return ""
+	}
+	f, err := os.Open(file)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, imageDataMax+1))
+	if err != nil || len(data) > imageDataMax {
+		return ""
+	}
+	return "data:" + ctype + ";base64," + base64.StdEncoding.EncodeToString(data)
 }
 
 // relativeInside lexically resolves path against root and returns it

@@ -60,6 +60,12 @@ type View struct {
 	// path text (or FileLink's href without FileText); links and autolinks
 	// never use it.
 	ImageSrc func(path string) string
+	// NowImageSrc, when set, serves a file image in the Now slot of
+	// RenderRegions' fragments in ImageSrc's place. That Now renders in a
+	// sandboxed frame whose requests carry no cookie, so a served page that
+	// needs one to reach its image route returns the image inline, as a
+	// data: URL. An empty result falls back to ImageSrc.
+	NowImageSrc func(path string) string
 	// FileActions, when set on a page with FileText, turns a file target
 	// into an action link, the element a served page's link menu takes: a
 	// file link or autolink renders as an anchor around its label, and the
@@ -253,10 +259,12 @@ type ViewInput struct {
 	Layout  Layout
 	ReplyID string
 	Panels  []Panel
-	// FileLink, FileText, ImageSrc, and FileActions are copied to the View.
+	// FileLink, FileText, ImageSrc, NowImageSrc, and FileActions are copied
+	// to the View.
 	FileLink    func(path string) string
 	FileText    func(path string) string
 	ImageSrc    func(path string) string
+	NowImageSrc func(path string) string
 	FileActions func(path string) FileAction
 }
 
@@ -272,6 +280,7 @@ func BuildView(state *State, in ViewInput) View {
 		FileLink:    in.FileLink,
 		FileText:    in.FileText,
 		ImageSrc:    in.ImageSrc,
+		NowImageSrc: in.NowImageSrc,
 		FileActions: in.FileActions,
 	}
 	if in.FileActions != nil && in.FileText != nil {
