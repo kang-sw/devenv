@@ -22,6 +22,14 @@
 // Held means undrained: an entry in the inbox directory. A reader tells a
 // held entry from a drained one by the directory it sits in.
 //
+// Images a send attaches live in the attachments/ subdirectory as
+// <upload-id>-<n>.<ext> files the dashboard daemon writes; an entry records
+// their absolute paths. A file is never renamed and its name is never tied to
+// an entry name, since a merge gives the entry a new name. A file is deleted
+// only once no held entry and no drained record lists it: when the drained
+// record listing it is trimmed (Drain), or by the daemon's sweep of old
+// unreferenced files (SweepAttachments).
+//
 // Readers ignore unknown entry fields and treat absent ones as empty. The
 // package depends on nothing but the standard library, so the dashboard
 // daemon, ws-mcp, and the mailbox wait all share it.
@@ -46,12 +54,16 @@ import (
 const (
 	// SchemaVersion is the entry format version.
 	SchemaVersion = 1
-	// DrainedCap is how many drained entries stay as sent records.
-	DrainedCap = 20
+	// DrainedCap is how many drained entries stay as sent records; a trimmed
+	// record's images go with it.
+	DrainedCap = 50
+	// MaxImages is how many images one held entry may carry.
+	MaxImages = 8
 
-	dirName        = "inbox"
-	drainedDirName = "drained"
-	stampLayout    = "20060102T150405.000000000Z"
+	dirName            = "inbox"
+	drainedDirName     = "drained"
+	attachmentsDirName = "attachments"
+	stampLayout        = "20060102T150405.000000000Z"
 
 	// Limits on one send.
 	maxTextBytes = 64 << 10
@@ -72,6 +84,10 @@ var (
 	entryNamePattern = regexp.MustCompile(`^[0-9]{8}T[0-9]{6}\.[0-9]{9}Z-[0-9a-f]{8}\.json$`)
 	chipIDPattern    = regexp.MustCompile(`^[0-9]{1,6}$`)
 	answerPattern    = regexp.MustCompile(`^[A-Za-z0-9]{1,16}$`)
+	// attachmentNamePattern is <upload-id>-<n>.<ext>: a 16-hex upload id
+	// minted per message request, the image's 1-based index in it, and the
+	// extension of its sniffed type.
+	attachmentNamePattern = regexp.MustCompile(`^[0-9a-f]{16}-[1-9][0-9]?\.(png|jpg|gif|webp)$`)
 )
 
 // Chip is one board item's answer: the option letter, ok, or no, and an
@@ -91,6 +107,9 @@ type Entry struct {
 	// Chips holds one answer per board item; a later send's chip for the
 	// same item replaced the earlier one in place.
 	Chips []Chip `json:"chips,omitempty"`
+	// Images holds the absolute paths of the attached image files, in send
+	// order; a path is listed once.
+	Images []string `json:"images,omitempty"`
 	// SentAt is the first send's time, epoch milliseconds.
 	SentAt int64 `json:"sentAt,omitempty"`
 }
@@ -110,6 +129,50 @@ func Dir(sessionDir string) string { return filepath.Join(sessionDir, dirName) }
 // DrainedDir is where drained entries stay as sent records.
 func DrainedDir(inboxDir string) string { return filepath.Join(inboxDir, drainedDirName) }
 
+// AttachmentsDir is where the images attached to the inbox at inboxDir live.
+// It is absolute, as the paths an entry lists are, so a caller that named
+// the inbox by a relative path still matches them.
+func AttachmentsDir(inboxDir string) string {
+	dir := filepath.Join(inboxDir, attachmentsDirName)
+	if abs, err := filepath.Abs(dir); err == nil {
+		return abs
+	}
+	return dir
+}
+
+// ValidAttachmentName reports whether name is an attachment file name
+// (<upload-id>-<n>.<ext>), so a caller-supplied name never names another
+// path.
+func ValidAttachmentName(name string) bool { return attachmentNamePattern.MatchString(name) }
+
+// AttachmentName returns the file name of path when it names an attachment
+// directly inside attachDir; false for any other path. It reads no file.
+func AttachmentName(attachDir, path string) (string, bool) {
+	if path == "" || !filepath.IsAbs(path) {
+		return "", false
+	}
+	path = filepath.Clean(path)
+	if filepath.Dir(path) != filepath.Clean(attachDir) {
+		return "", false
+	}
+	name := filepath.Base(path)
+	return name, ValidAttachmentName(name)
+}
+
+// ImageLine is the line the delivered message carries for one attached
+// image; the dashboard page reads it back to show the image.
+func ImageLine(path string) string { return "[image: " + path + "]" }
+
+// ImageLinePath returns the path an ImageLine carries; false for any other
+// line.
+func ImageLinePath(line string) (string, bool) {
+	if !strings.HasPrefix(line, "[image: ") || !strings.HasSuffix(line, "]") {
+		return "", false
+	}
+	path := line[len("[image: ") : len(line)-1]
+	return path, path != ""
+}
+
 // NameForID maps an entry ID back to its file name; false when id is not a
 // well-formed entry ID, so a caller-supplied ID never names another path.
 func NameForID(id string) (string, bool) {
@@ -118,13 +181,20 @@ func NameForID(id string) (string, bool) {
 }
 
 // Text is the message the session receives: each part as its own paragraph,
-// then the answer block.
+// then one ImageLine per image, then the answer block.
 func (e Entry) Text() string {
 	var paras []string
 	for _, p := range e.Parts {
 		if p = strings.TrimSpace(p); p != "" {
 			paras = append(paras, p)
 		}
+	}
+	if len(e.Images) > 0 {
+		lines := make([]string, len(e.Images))
+		for i, path := range e.Images {
+			lines[i] = ImageLine(path)
+		}
+		paras = append(paras, strings.Join(lines, "\n"))
 	}
 	if block := AnswerBlock(e.Chips); block != "" {
 		paras = append(paras, block)
@@ -166,9 +236,9 @@ func AnswerBlock(chips []Chip) string {
 }
 
 // Normalize trims and checks one send: empty parts are dropped, chips are
-// validated, and a later chip for an item replaces an earlier one. It
-// returns ErrEmpty when nothing is left to send and an ErrInvalid error for a
-// malformed one.
+// validated, a later chip for an item replaces an earlier one, and a repeated
+// image path is dropped. An image counts as content. It returns ErrEmpty when
+// nothing is left to send and an ErrInvalid error for a malformed one.
 func Normalize(e Entry) (Entry, error) {
 	out := Entry{SchemaVersion: SchemaVersion, SentAt: e.SentAt}
 	size := 0
@@ -204,7 +274,19 @@ func Normalize(e Entry) (Entry, error) {
 		}
 		out.Chips = putChip(out.Chips, c)
 	}
-	if len(out.Parts) == 0 && len(out.Chips) == 0 {
+	for _, path := range e.Images {
+		if path = strings.TrimSpace(path); path == "" {
+			continue
+		}
+		if !filepath.IsAbs(path) || strings.ContainsAny(path, "\x00\r\n") {
+			return Entry{}, fmt.Errorf("%w: image path %q", ErrInvalid, path)
+		}
+		out.Images = putImage(out.Images, path)
+	}
+	if len(out.Images) > MaxImages {
+		return Entry{}, fmt.Errorf("%w: more than %d images", ErrInvalid, MaxImages)
+	}
+	if len(out.Parts) == 0 && len(out.Chips) == 0 && len(out.Images) == 0 {
 		return Entry{}, ErrEmpty
 	}
 	return out, nil
@@ -221,8 +303,19 @@ func putChip(chips []Chip, c Chip) []Chip {
 	return append(chips, c)
 }
 
-// Merge appends add's parts to base's and lays add's chips over base's: the
-// later chip for an item wins. base's first-send time is kept.
+// putImage appends path unless images already lists it.
+func putImage(images []string, path string) []string {
+	for _, p := range images {
+		if p == path {
+			return images
+		}
+	}
+	return append(images, path)
+}
+
+// Merge appends add's parts and images to base's and lays add's chips over
+// base's: the later chip for an item wins. base's first-send time is kept.
+// The image cap is the caller's to check before the send.
 func Merge(base, add Entry) Entry {
 	out := Entry{SchemaVersion: SchemaVersion, SentAt: base.SentAt}
 	if out.SentAt == 0 {
@@ -232,6 +325,12 @@ func Merge(base, add Entry) Entry {
 	out.Chips = append([]Chip{}, base.Chips...)
 	for _, c := range add.Chips {
 		out.Chips = putChip(out.Chips, c)
+	}
+	for _, path := range base.Images {
+		out.Images = putImage(out.Images, path)
+	}
+	for _, path := range add.Images {
+		out.Images = putImage(out.Images, path)
 	}
 	return out
 }
@@ -401,7 +500,8 @@ func Cancel(dir, name string) (Entry, error) {
 // Drain claims every held entry at dir, oldest first, moving each into the
 // drained directory, and returns those this call claimed. An entry another
 // claim took first is skipped. The drained directory is then trimmed to the
-// newest DrainedCap records.
+// newest DrainedCap records, and the images only trimmed records listed are
+// deleted.
 func Drain(dir string) ([]Record, error) {
 	names, err := entryNames(dir)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -437,17 +537,111 @@ func Drain(dir string) ([]Record, error) {
 		}
 		out = append(out, Record{Name: name, Entry: entry})
 	}
-	trimDrained(drained)
+	trimDrained(dir)
 	return out, firstErr
 }
 
+// trimDrained trims the drained records of the inbox at dir to the newest
+// DrainedCap, then deletes the images the trimmed records listed that no
+// held entry and no remaining record lists.
 func trimDrained(dir string) {
-	names, err := entryNames(dir)
+	drained := DrainedDir(dir)
+	names, err := entryNames(drained)
 	if err != nil || len(names) <= DrainedCap {
 		return
 	}
+	attachDir := AttachmentsDir(dir)
+	var listed []string
 	for _, name := range names[:len(names)-DrainedCap] {
-		_ = os.Remove(filepath.Join(dir, name))
+		if e, err := readEntry(filepath.Join(drained, name)); err == nil {
+			for _, path := range e.Images {
+				if n, ok := AttachmentName(attachDir, path); ok {
+					listed = append(listed, n)
+				}
+			}
+		}
+		_ = os.Remove(filepath.Join(drained, name))
+	}
+	if len(listed) == 0 {
+		return
+	}
+	referenced := referencedAttachments(dir)
+	for _, n := range listed {
+		if !referenced[n] {
+			_ = os.Remove(filepath.Join(attachDir, n))
+		}
+	}
+}
+
+// referencedAttachments is the set of attachment names some entry of the
+// inbox at dir lists. It reads the held side, then the drained records, then
+// the held side again: a drain moves an entry from held to drained, so an
+// entry that moves between the reads is seen in one of them. The held side
+// is every file directly in dir that parses as an entry, so an entry a merge
+// or cancel has claimed, or a merge is writing, counts too.
+func referencedAttachments(dir string) map[string]bool {
+	attachDir := AttachmentsDir(dir)
+	out := map[string]bool{}
+	add := func(e Entry) {
+		for _, path := range e.Images {
+			if n, ok := AttachmentName(attachDir, path); ok {
+				out[n] = true
+			}
+		}
+	}
+	readHeldSide := func() {
+		des, err := os.ReadDir(dir)
+		if err != nil {
+			return
+		}
+		for _, de := range des {
+			if de.IsDir() {
+				continue
+			}
+			if e, err := readEntry(filepath.Join(dir, de.Name())); err == nil {
+				add(e)
+			}
+		}
+	}
+	readHeldSide()
+	if records, err := readAll(DrainedDir(dir)); err == nil {
+		for _, r := range records {
+			add(r.Entry)
+		}
+	}
+	readHeldSide()
+	return out
+}
+
+// SweepAttachments deletes each attachment of the inbox at dir that was last
+// modified more than maxAge before now and that no held entry and no drained
+// record lists: an image whose message was cancelled and never sent again.
+// The dashboard daemon runs it under its inbox lock on each message write.
+func SweepAttachments(dir string, now time.Time, maxAge time.Duration) {
+	attachDir := AttachmentsDir(dir)
+	des, err := os.ReadDir(attachDir)
+	if err != nil {
+		return
+	}
+	var old []string
+	for _, de := range des {
+		if !de.Type().IsRegular() || !ValidAttachmentName(de.Name()) {
+			continue
+		}
+		info, err := de.Info()
+		if err != nil || now.Sub(info.ModTime()) <= maxAge {
+			continue
+		}
+		old = append(old, de.Name())
+	}
+	if len(old) == 0 {
+		return
+	}
+	referenced := referencedAttachments(dir)
+	for _, n := range old {
+		if !referenced[n] {
+			_ = os.Remove(filepath.Join(attachDir, n))
+		}
 	}
 }
 

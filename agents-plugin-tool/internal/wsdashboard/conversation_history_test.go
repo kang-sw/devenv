@@ -326,3 +326,39 @@ func TestStreamSendsOnlyTheLiveRegionForAStreamingTick(t *testing.T) {
 		t.Fatalf("after a new message got %+v (%v)", ev, ok)
 	}
 }
+
+// TestEntryCacheRendersARemovedAttachmentAsText: a user line's thumbnail is
+// part of its cache key, so once the attachment file is gone the entry
+// renders anew with the path as text, not a cached broken image.
+func TestEntryCacheRendersARemovedAttachmentAsText(t *testing.T) {
+	attachDir := t.TempDir()
+	img := attachDir + "/0123456789abcdef-1.png"
+	if err := os.WriteFile(img, []byte("png"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ring := []wslive.RingRecord{ringRecord(1, wslive.RingEntry{Kind: wslive.RingUser, Origin: wslive.OriginWhiteboard, Text: "look\n\n[image: " + img + "]"})}
+	cache := newEntryCache()
+	render := func() string {
+		t.Helper()
+		v := buildSessionView(pageInputs{Session: liveSession("self", "/proj", testNow), Snapshot: liveSnap(testNow, wslive.Lead{}), Ring: ring, Now: testNow, AttachDir: attachDir})
+		set, err := renderSessionRegions(v, cache)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(set[regionEntries].HTML)
+	}
+	if html := render(); !strings.Contains(html, `src="/s/self/attachment/0123456789abcdef-1.png"`) {
+		t.Fatalf("existing attachment has no thumbnail: %s", html)
+	}
+	render()
+	if cache.buildCount() != 1 {
+		t.Fatalf("builds = %d, want 1", cache.buildCount())
+	}
+	if err := os.Remove(img); err != nil {
+		t.Fatal(err)
+	}
+	html := render()
+	if cache.buildCount() != 2 || strings.Contains(html, "/attachment/") || !strings.Contains(html, "[image: "+img+"]") {
+		t.Fatalf("after removal: %d builds, html %s", cache.buildCount(), html)
+	}
+}

@@ -22,6 +22,7 @@ func dashboardCommand(args []string) {
 	fs := flag.NewFlagSet("dashboard", flag.ExitOnError)
 	port := fs.Int("port", wsdashboard.DefaultPort, "preferred loopback port; 0 lets the OS choose, and a taken port falls back to an OS-chosen one")
 	lan := fs.Bool("lan", false, "listen on every network interface and admit a request from another device only with the LAN access token; ws-mcp serve passes it when the global dashboard.lan_enabled value is on")
+	buildTime := fs.Int64("build-time", 0, "the ws-mcp build time in Unix milliseconds to report in /health; ws-mcp serve passes its own executable's, and 0 reads this executable's")
 	lockWait := fs.Duration("lock-wait", wsdashboard.DefaultLockWait, "how long to wait for another daemon to release the single-instance lock")
 	_ = fs.Parse(args)
 
@@ -32,14 +33,20 @@ func dashboardCommand(args []string) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		fatal("dashboard", err)
 	}
+	if *buildTime <= 0 {
+		if exe, err := os.Executable(); err == nil {
+			*buildTime = wsdashboard.ExecutableBuildTime(exe)
+		}
+	}
 	daemon, err := wsdashboard.StartDaemon(wsdashboard.DaemonOptions{
-		Dir:      dir,
-		Port:     *port,
-		LAN:      *lan,
-		Version:  version,
-		LockWait: *lockWait,
-		Log:      openDashboardLog(dir),
-		Sessions: mcp.NewDashboardSessionSource(),
+		Dir:       dir,
+		Port:      *port,
+		LAN:       *lan,
+		Version:   version,
+		BuildTime: *buildTime,
+		LockWait:  *lockWait,
+		Log:       openDashboardLog(dir),
+		Sessions:  mcp.NewDashboardSessionSource(),
 	})
 	if errors.Is(err, wsdashboard.ErrLocked) {
 		fmt.Fprintln(os.Stderr, "ws-mcp dashboard: another dashboard daemon is running (it holds the lock); exiting")
@@ -90,20 +97,21 @@ type dashboardSpawner func(args []string) error
 // startDashboard is the serve-startup hook: with the dashboard key on, it
 // makes sure a daemon at least as new as this ws-mcp runs, in the LAN mode
 // the global dashboard.lan_enabled value asks for (a same-version daemon in the
-// other mode is replaced). It never fails or
+// other mode, or from an older build time, is replaced). It never fails or
 // delays serve: the caller runs it on its own goroutine, and every error is
 // a stderr line.
-func startDashboard(ctx context.Context, settings mcp.DashboardSettings, dir string, spawn dashboardSpawner, logw io.Writer) wsdashboard.Outcome {
+func startDashboard(ctx context.Context, settings mcp.DashboardSettings, dir string, buildTime int64, spawn dashboardSpawner, logw io.Writer) wsdashboard.Outcome {
 	if !settings.Enabled {
 		return ""
 	}
 	outcome, err := wsdashboard.Ensure(ctx, wsdashboard.EnsureOptions{
-		Dir:     dir,
-		Version: version,
-		Port:    settings.Port,
-		LAN:     settings.LAN,
-		Spawn:   spawn,
-		Log:     logw,
+		Dir:       dir,
+		Version:   version,
+		BuildTime: buildTime,
+		Port:      settings.Port,
+		LAN:       settings.LAN,
+		Spawn:     spawn,
+		Log:       logw,
 	})
 	if err != nil {
 		fmt.Fprintf(logw, "ws-mcp: dashboard unavailable: %v\n", err)
@@ -129,6 +137,12 @@ func serveDashboard(server *mcp.Server) {
 		fmt.Fprintf(os.Stderr, "ws-mcp: dashboard unavailable: %v\n", err)
 		return
 	}
+	// The build time comes from the original executable, before
+	// DaemonExecutable may stage a copy whose mtime is the copy time.
+	var buildTime int64
+	if exe, err := os.Executable(); err == nil {
+		buildTime = wsdashboard.ExecutableBuildTime(exe)
+	}
 	spawn := func(args []string) error {
 		exe, err := os.Executable()
 		if err != nil {
@@ -140,5 +154,5 @@ func serveDashboard(server *mcp.Server) {
 		}
 		return wsdashboard.SpawnDetached(exe, args, dir)
 	}
-	startDashboard(context.Background(), settings, dir, spawn, os.Stderr)
+	startDashboard(context.Background(), settings, dir, buildTime, spawn, os.Stderr)
 }

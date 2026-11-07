@@ -52,6 +52,9 @@ type DaemonOptions struct {
 	LAN bool
 	// Version is reported by /health and written to the endpoint file.
 	Version string
+	// BuildTime is reported by /health (ExecutableBuildTime); zero is
+	// unknown and is omitted.
+	BuildTime int64
 	// LockWait bounds the wait for the single-instance lock; zero means
 	// DefaultLockWait.
 	LockWait time.Duration
@@ -99,6 +102,8 @@ type Daemon struct {
 	// lan is LAN mode; tokenMu serializes reading and minting the LAN token.
 	lan     bool
 	tokenMu sync.Mutex
+	// buildTime is the build time /health reports; zero is unknown.
+	buildTime int64
 
 	closeOnce sync.Once
 	stop      chan struct{}
@@ -114,6 +119,10 @@ type HealthInfo struct {
 	StartedAt string `json:"started_at"`
 	// LAN reports LAN mode; an older daemon omits it, which reads as off.
 	LAN bool `json:"lan"`
+	// BuildTime is the daemon's ws-mcp build time in Unix milliseconds
+	// (ExecutableBuildTime); an older daemon omits it, which reads as older
+	// than any known build.
+	BuildTime int64 `json:"build_time,omitempty"`
 }
 
 // StartDaemon takes the single-instance lock, binds the port, writes the
@@ -163,15 +172,16 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		return nil, err
 	}
 	d := &Daemon{
-		dir:     opts.Dir,
-		lock:    lock,
-		log:     logw,
-		source:  opts.Sessions,
-		broker:  newBroker(),
-		entries: newEntryCache(),
-		lan:     opts.LAN,
-		stop:    make(chan struct{}),
-		done:    make(chan struct{}),
+		dir:       opts.Dir,
+		lock:      lock,
+		log:       logw,
+		source:    opts.Sessions,
+		broker:    newBroker(),
+		entries:   newEntryCache(),
+		lan:       opts.LAN,
+		buildTime: opts.BuildTime,
+		stop:      make(chan struct{}),
+		done:      make(chan struct{}),
 		endpoint: Endpoint{
 			SchemaVersion: endpointSchemaVersion,
 			Port:          listener.Addr().(*net.TCPAddr).Port,
@@ -374,6 +384,7 @@ func (d *Daemon) handleHealth(w http.ResponseWriter, r *http.Request) {
 		Port:      d.endpoint.Port,
 		StartedAt: d.endpoint.StartedAt,
 		LAN:       d.lan,
+		BuildTime: d.buildTime,
 	})
 }
 

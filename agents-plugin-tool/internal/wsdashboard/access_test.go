@@ -94,6 +94,7 @@ func guardedRoutes() []struct{ method, path, body string } {
 		{http.MethodGet, "/s/livesession/events", ""},
 		{http.MethodGet, "/s/livesession/image?path=shot.png", ""},
 		{http.MethodGet, "/s/livesession/history", ""},
+		{http.MethodGet, "/s/livesession/attachment/0123456789abcdef-1.png", ""},
 		{http.MethodPost, "/s/livesession/message", `{"text":"from the guard test"}`},
 		{http.MethodPost, "/s/livesession/cancel", `{"id":"x"}`},
 		{http.MethodGet, "/s/" + mermaid, ""},

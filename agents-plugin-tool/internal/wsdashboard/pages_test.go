@@ -202,7 +202,7 @@ func TestBoardFirstPageHasNoLayoutControl(t *testing.T) {
 	if !strings.Contains(body, "only the board") || !strings.Contains(body, `data-mode="board"`) {
 		t.Errorf("board-first page lacks its board")
 	}
-	for _, absent := range []string{`id="gear"`, `id="composer"`, `id="splitter"`, `data-region="conversation"`, `id="tabbar"`} {
+	for _, absent := range []string{`id="gear"`, `id="composer"`, `id="splitter"`, `id="convo"`, `data-region="entries"`, `data-region="convlive"`, `id="tabbar"`} {
 		if strings.Contains(body, absent) {
 			t.Errorf("board-first page carries %q", absent)
 		}

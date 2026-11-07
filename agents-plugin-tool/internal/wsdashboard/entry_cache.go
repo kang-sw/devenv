@@ -4,6 +4,7 @@ import (
 	"container/list"
 	"html/template"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/kang-sw/devenv/internal/wslive"
@@ -39,11 +40,17 @@ func newEntryCache() *entryCache { return &entryCache{sessions: map[string]*sess
 
 // entryCacheKey is the entry's name plus every other input its HTML depends
 // on. A mail line's HTML also depends on whether its body is still in the
-// mailbox history and whether this daemon serves its peer, so a body leaving
-// that ring or a peer leaving the index renders anew instead of freezing the
-// old line into every later render.
+// mailbox history and whether this daemon serves its peer, and a user line's
+// on which of its attachment files still exist (attachmentView), so a body
+// leaving that ring, a peer leaving the index, or an attachment removed
+// renders anew instead of freezing the old line into every later render.
 func entryCacheKey(e ConvEntry) string {
-	return e.Key + "\x00" + strconv.FormatBool(e.HasBody) + "\x00" + strconv.FormatBool(e.PeerLinked) + "\x00" + e.PeerReplyID
+	var b strings.Builder
+	b.WriteString(e.Key + "\x00" + strconv.FormatBool(e.HasBody) + "\x00" + strconv.FormatBool(e.PeerLinked) + "\x00" + e.PeerReplyID)
+	for _, img := range e.Images {
+		b.WriteString("\x00" + img.Src)
+	}
+	return b.String()
 }
 
 // render returns the entry's cached HTML, building and caching it on a miss.

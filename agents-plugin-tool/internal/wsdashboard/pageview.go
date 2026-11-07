@@ -181,6 +181,8 @@ type ConvEntry struct {
 	// bodies, and turn lines stay plain text. It is set only while the entry
 	// renders on an entry cache miss.
 	HTML template.HTML
+	// Images are a user message's attached images, taken out of its text.
+	Images []AttachmentView
 	// Rendered is the entry's whole element, from the entry cache.
 	Rendered template.HTML
 	// Body is a mail line's full message from the mailbox history; HasBody
@@ -203,8 +205,11 @@ type pageInputs struct {
 	// Held and Drained are the session's board-answer inbox: the messages
 	// sent from the page and not yet received, and the newest received ones.
 	Held, Drained []wsinbox.Record
-	Now           time.Time
-	Version       string
+	// AttachDir is the session's absolute inbox attachments directory: an
+	// image path inside it shows as a thumbnail.
+	AttachDir string
+	Now       time.Time
+	Version   string
 	// Lookup returns a session this daemon serves and its snapshot (nil when
 	// it has none).
 	Lookup func(replyID string) (Session, *wslive.Snapshot, bool)
@@ -256,7 +261,8 @@ func buildSessionView(in pageInputs) SessionView {
 	contacts := resolvedContacts(in.Page.Contacts, reg.ReplyID)
 	v.Tree.Peers = peerGroup(contacts, lookup, in.Now)
 	v.Conversation = conversation(in.Snapshot.Lead, in.Ring, in.Page.MailBodies, contacts, lookup, replyMarkdown(reg.Project, reg.ReplyID))
-	v.Conversation.Held = heldViews(in.Held)
+	userEntryImages(v.Conversation.Entries, in.AttachDir, reg.ReplyID)
+	v.Conversation.Held = heldViews(in.Held, in.AttachDir, reg.ReplyID)
 	v.Conversation.Sent = sentMarks(in.Drained, in.Held)
 	return v
 }

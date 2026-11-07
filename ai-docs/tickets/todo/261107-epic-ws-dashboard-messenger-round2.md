@@ -24,15 +24,21 @@ session page usable as the primary conversation surface for a lead session:
 - conversation performance for very long sessions and on-demand loading of
   older history (user, 2026-11-07: the user runs very long sessions; child
   ticket);
-- promoting a held message to steering (user, 2026-11-07; child ticket).
+- promoting a held message to steering (user, 2026-11-07; child ticket;
+- link click actions and mermaid in the conversation (user, 2026-11-07; child
+  ticket);
+- a session status band with context usage first (user, 2026-11-07; child
+  ticket).
 
 ## Non-Scope
 
 - Approving or denying permission prompts from the page: the page shows that
   an approval is waiting; the user handles it in the terminal (user decision,
   2026-11-07: auto mode is the default posture, so manual approvals are rare).
-- Slash commands, skill search, login, and usage tracking: the user drives the
-  lead in natural language and these are not the dashboard's role.
+- Slash commands, skill search, login, and usage management: the user drives
+  the lead in natural language and these are not the dashboard's role.
+  Read-only usage display in the status band is in scope (user, 2026-11-07,
+  `261107-feat-ws-dashboard-status-band`).
 
 ## Child Tickets
 
@@ -43,6 +49,13 @@ session page usable as the primary conversation surface for a lead session:
   scroll-up beyond the 50 drawn messages.
 - `261107-feat-ws-dashboard-steer-promotion` - a held message promoted to
   steering, injected at the next main-thread tool boundary.
+- `261107-feat-ws-dashboard-link-actions` - Cmd/Ctrl+click and a click menu
+  for links, a file view route, system-browser open, and mermaid in finished
+  conversation messages.
+- `261107-feat-ws-dashboard-status-band` - context, branch, sync, and usage
+  around the composer (mockup variant C).
+- Related, not a child: `261107-feat-ws-whiteboard-now-markdown` - the Now
+  slot takes markdown with inline HTML (affects disk boards too).
 - Done as bounded delegates, no ticket (2026-11-07): the composer buttons and
   input mode, the fixed split, the lead status de-duplication (one delegate),
   and lead-reply markdown rendering (one delegate).
