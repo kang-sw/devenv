@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/wsi18n"
 	"github.com/kang-sw/devenv/internal/wsinbox"
 	"github.com/kang-sw/devenv/internal/wslive"
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
@@ -62,8 +63,21 @@ func sessionRegions(mode string) []string {
 }
 
 type dashboardAssets struct {
-	tmpl *template.Template
-	data pageAssetsData
+	// tmpl is the default language's template set; tmpls holds one per
+	// language, each parsed with the translation funcs bound to it, since a
+	// parsed set's FuncMap is fixed (templateFor picks).
+	tmpl  *template.Template
+	tmpls map[string]*template.Template
+	data  pageAssetsData
+}
+
+// templateFor is the template set that renders in lang; an unsupported or
+// empty lang renders the default language.
+func (a *dashboardAssets) templateFor(lang string) *template.Template {
+	if t, ok := a.tmpls[lang]; ok {
+		return t
+	}
+	return a.tmpl
 }
 
 // pageAssetsData is what a page template inlines.
@@ -120,30 +134,112 @@ func loadDashboardAssets() (*dashboardAssets, error) {
 				icons[m[1]] = true
 			}
 		}
-		funcs := template.FuncMap{
-			"icon": func(name string) (template.HTML, error) {
-				if !icons[name] {
-					return "", fmt.Errorf("dashboard page: no sprite symbol %q", name)
-				}
-				return template.HTML(`<svg class="i" aria-hidden="true"><use href="#i-` + name + `"/></svg>`), nil
-			},
-			"region":   renderRegionElement,
-			"clock":    clockText,
-			"spanText": spanText,
-			"toolName": toolName,
-			"shortID":  shortID,
-			"marked":   markedText,
-			// The tool summary's token and batch lines.
-			"tokenText":  tokenText,
-			"tokenTitle": tokenTitle,
-			"batchMeta":  batchMeta,
+		a.tmpls = map[string]*template.Template{}
+		for _, l := range wsi18n.Languages() {
+			t, err := template.New("dashboard").Funcs(pageFuncs(l.Code, icons)).ParseFS(dashboardFS, "assets/dashboard.tmpl")
+			if err != nil {
+				dashboardAssetsErr = err
+				break
+			}
+			a.tmpls[l.Code] = t
 		}
-		a.tmpl, dashboardAssetsErr = template.New("dashboard").Funcs(funcs).ParseFS(dashboardFS, "assets/dashboard.tmpl")
+		a.tmpl = a.tmpls[wsi18n.Default]
 		if dashboardAssetsErr == nil {
 			loadedDashboard = a
 		}
 	})
 	return loadedDashboard, dashboardAssetsErr
+}
+
+// pageFuncs is the template FuncMap for one language: the page helpers and
+// the translation funcs t, tn, and tcode, with the Go-built display strings
+// (token usage, batch lines, phase and band words) bound to lang.
+func pageFuncs(lang string, icons map[string]bool) template.FuncMap {
+	return template.FuncMap{
+		"icon": func(name string) (template.HTML, error) {
+			if !icons[name] {
+				return "", fmt.Errorf("dashboard page: no sprite symbol %q", name)
+			}
+			return template.HTML(`<svg class="i" aria-hidden="true"><use href="#i-` + name + `"/></svg>`), nil
+		},
+		"region":   renderRegionElement,
+		"clock":    clockText,
+		"spanText": spanText,
+		"toolName": toolName,
+		"shortID":  shortID,
+		"marked":   func(text string) template.HTML { return markedText(lang, text) },
+		// The tool summary's token and batch lines.
+		"tokenText":  func(u *wslive.TokenUsage) string { return tokenText(lang, u) },
+		"tokenTitle": func(u *wslive.TokenUsage) string { return tokenTitle(lang, u) },
+		"batchMeta":  func(b wslive.ToolBatch) string { return batchMeta(lang, b) },
+		"phaseWord":  func(phase string) string { return phaseWord(lang, phase) },
+		"flagText":   func(flag string) string { return flagText(lang, flag) },
+		"limitName":  func(name string) string { return limitName(lang, name) },
+		// Translation: t is a table lookup, tn the count form of a key, tcode
+		// a lookup whose one placeholder renders as <code>.
+		"t":     func(key string, args ...any) string { return wsi18n.T(lang, key, args...) },
+		"tn":    func(key string, n int, args ...any) string { return wsi18n.Plural(lang, key, n, args...) },
+		"tcode": func(key string, arg string) template.HTML { return codeText(lang, key, arg) },
+		// lang is the language this set renders in; langs the available ones;
+		// i18n the inline script giving the page scripts their table.
+		"lang":  func() string { return effectiveLang(lang) },
+		"langs": wsi18n.Languages,
+		"i18n":  func() template.JS { return wsi18n.Script(lang) },
+	}
+}
+
+// effectiveLang is lang when a table exists for it, else the default.
+func effectiveLang(lang string) string {
+	if wsi18n.Supported(lang) {
+		return lang
+	}
+	return wsi18n.Default
+}
+
+// codeText is the table text for key with its {0} placeholder drawn as a
+// <code> element holding arg; the rest of the text and arg are escaped.
+func codeText(lang, key, arg string) template.HTML {
+	text, _ := wsi18n.Lookup(lang, key)
+	before, after, found := strings.Cut(text, "{0}")
+	if !found {
+		return template.HTML(template.HTMLEscapeString(text))
+	}
+	return template.HTML(template.HTMLEscapeString(before) + "<code>" + template.HTMLEscapeString(arg) + "</code>" + template.HTMLEscapeString(after))
+}
+
+// phaseWord is a lead or agent phase's display word.
+func phaseWord(lang, phase string) string {
+	switch phase {
+	case "permission":
+		return wsi18n.T(lang, "phase.approval")
+	case "thinking":
+		return wsi18n.T(lang, "phase.thinking")
+	case "replying":
+		return wsi18n.T(lang, "phase.replying")
+	case "tool":
+		return wsi18n.T(lang, "phase.tool")
+	case "compacting":
+		return wsi18n.T(lang, "phase.compacting")
+	case "idle":
+		return wsi18n.T(lang, "phase.idle")
+	}
+	return phase
+}
+
+// flagText is the context bar's warning word (ContextBar.Flag) in lang.
+func flagText(lang, flag string) string {
+	if flag == "near limit" {
+		return wsi18n.T(lang, "band.flag.near")
+	}
+	return wsi18n.T(lang, "band.flag.high")
+}
+
+// limitName is a usage limit chip's name (LimitChip.Name) in lang.
+func limitName(lang, name string) string {
+	if name == "weekly" {
+		return wsi18n.T(lang, "band.limit.weekly")
+	}
+	return wsi18n.T(lang, "band.limit.5h")
 }
 
 // clockText is a time's fallback text, UTC and fixed, so a region's HTML
@@ -216,53 +312,49 @@ func compactTokens(n int64) string {
 
 // tokenText is a token usage in one compact line: input and output, then
 // prompt-cache reads and writes when there were any.
-func tokenText(u *wslive.TokenUsage) string {
+func tokenText(lang string, u *wslive.TokenUsage) string {
 	if u == nil {
 		return ""
 	}
-	parts := []string{"in " + compactTokens(u.Input), "out " + compactTokens(u.Output)}
+	parts := []string{wsi18n.T(lang, "tok.in", compactTokens(u.Input)), wsi18n.T(lang, "tok.out", compactTokens(u.Output))}
 	if u.CacheRead > 0 {
-		parts = append(parts, "cache "+compactTokens(u.CacheRead))
+		parts = append(parts, wsi18n.T(lang, "tok.cache", compactTokens(u.CacheRead)))
 	}
 	if u.CacheWrite > 0 {
-		parts = append(parts, "write "+compactTokens(u.CacheWrite))
+		parts = append(parts, wsi18n.T(lang, "tok.write", compactTokens(u.CacheWrite)))
 	}
 	return strings.Join(parts, " · ")
 }
 
 // tokenTitle is a token usage's exact counts, for a title attribute.
-func tokenTitle(u *wslive.TokenUsage) string {
+func tokenTitle(lang string, u *wslive.TokenUsage) string {
 	if u == nil {
 		return ""
 	}
-	return fmt.Sprintf("tokens: %d input · %d output · %d cache read · %d cache write", u.Input, u.Output, u.CacheRead, u.CacheWrite)
+	return wsi18n.T(lang, "tok.title", u.Input, u.Output, u.CacheRead, u.CacheWrite)
 }
 
 // batchMeta is a tool summary batch line's trailing text: its duration,
 // failed calls, and the request's tokens. A batch without per-call tools
 // (an older adapter's) leads with its call count, which its chips cannot
 // show; so does one whose calls outnumber those it named.
-func batchMeta(b wslive.ToolBatch) string {
+func batchMeta(lang string, b wslive.ToolBatch) string {
 	var parts []string
 	named := 0
 	for _, t := range b.Tools {
 		named += t.Calls
 	}
 	if named < b.Calls {
-		if b.Calls == 1 {
-			parts = append(parts, "1 call")
-		} else {
-			parts = append(parts, strconv.Itoa(b.Calls)+" calls")
-		}
+		parts = append(parts, wsi18n.Plural(lang, "batch.calls", b.Calls))
 	}
 	if b.DurationMs > 0 {
 		parts = append(parts, batchSpanText(b.DurationMs))
 	}
 	if b.Failed > 0 {
-		parts = append(parts, strconv.Itoa(b.Failed)+" failed")
+		parts = append(parts, wsi18n.T(lang, "count.failed", b.Failed))
 	}
 	if b.Usage != nil {
-		parts = append(parts, tokenText(b.Usage))
+		parts = append(parts, tokenText(lang, b.Usage))
 	}
 	return strings.Join(parts, " · ")
 }
@@ -322,13 +414,15 @@ func renderSessionRegions(view SessionView, cache *entryCache) (regionSet, error
 	if err != nil {
 		return nil, err
 	}
+	view.Conversation.Lang = view.Lang
 	if err := renderEntries(a, cache, view.ReplyID, &view.Conversation); err != nil {
 		return nil, err
 	}
+	tmpl := a.templateFor(view.Lang)
 	regions := regionSet{regionMode: newRegion(view.Mode())}
 	for _, name := range sessionRegions(view.Mode()) {
 		var buf bytes.Buffer
-		if err := a.tmpl.ExecuteTemplate(&buf, "r-"+name, view); err != nil {
+		if err := tmpl.ExecuteTemplate(&buf, "r-"+name, view); err != nil {
 			return nil, fmt.Errorf("dashboard region %s: %w", name, err)
 		}
 		regions[name] = newRegion(buf.String())
@@ -341,12 +435,13 @@ func renderSessionRegions(view SessionView, cache *entryCache) (regionSet, error
 func renderEntries(a *dashboardAssets, cache *entryCache, replyID string, cv *ConversationView) error {
 	for i := range cv.Entries {
 		e := cv.Entries[i]
+		e.Lang = cv.Lang
 		html, err := cache.render(replyID, e, func() (template.HTML, error) {
 			if e.Kind == wslive.RingReply && cv.markdown != nil {
 				e.HTML = cv.markdown(e.Text)
 			}
 			var buf bytes.Buffer
-			if err := a.tmpl.ExecuteTemplate(&buf, "entry", e); err != nil {
+			if err := a.templateFor(cv.Lang).ExecuteTemplate(&buf, "entry", e); err != nil {
 				return "", fmt.Errorf("dashboard conversation entry %s: %w", e.Key, err)
 			}
 			return template.HTML(buf.String()), nil
@@ -376,7 +471,7 @@ func renderSessionPage(view SessionView, regions regionSet, sysOpen bool) (strin
 		return "", err
 	}
 	var buf bytes.Buffer
-	err = a.tmpl.ExecuteTemplate(&buf, "session", sessionPageData{SessionView: view, Assets: a.data, SysOpen: sysOpen, regions: regions})
+	err = a.templateFor(view.Lang).ExecuteTemplate(&buf, "session", sessionPageData{SessionView: view, Assets: a.data, SysOpen: sysOpen, regions: regions})
 	return buf.String(), err
 }
 
@@ -386,7 +481,7 @@ func renderIndexRegions(view IndexView) (regionSet, error) {
 		return nil, err
 	}
 	var buf bytes.Buffer
-	if err := a.tmpl.ExecuteTemplate(&buf, "r-"+regionSessions, view); err != nil {
+	if err := a.templateFor(view.Lang).ExecuteTemplate(&buf, "r-"+regionSessions, view); err != nil {
 		return nil, fmt.Errorf("dashboard region %s: %w", regionSessions, err)
 	}
 	return regionSet{regionSessions: newRegion(buf.String())}, nil
@@ -398,7 +493,7 @@ func renderIndexPage(view IndexView, regions regionSet, lan *LANAccess) (string,
 		return "", err
 	}
 	var buf bytes.Buffer
-	err = a.tmpl.ExecuteTemplate(&buf, "index", indexPageData{IndexView: view, Assets: a.data, LAN: lan, regions: regions})
+	err = a.templateFor(view.Lang).ExecuteTemplate(&buf, "index", indexPageData{IndexView: view, Assets: a.data, LAN: lan, regions: regions})
 	return buf.String(), err
 }
 
@@ -406,6 +501,8 @@ func renderIndexPage(view IndexView, regions regionSet, lan *LANAccess) (string,
 // no state of its own: every render re-reads, so a replacement daemon
 // renders the same pages from the same files.
 type pageReader struct {
+	// lang is the viewer's language, passed to a LangPageSource.
+	lang    string
 	dir     string
 	index   *Index
 	source  SessionSource
@@ -430,6 +527,9 @@ func (r pageReader) readSnapshot(replyID string) *wslive.Snapshot {
 }
 
 func (r pageReader) readPage(s Session) (PageContent, bool) {
+	if ls, ok := r.source.(LangPageSource); ok {
+		return ls.ReadPageLang(s.Registration, r.lang)
+	}
 	if ps, ok := r.source.(PageSource); ok {
 		return ps.ReadPage(s.Registration)
 	}
@@ -529,6 +629,13 @@ func (d *Daemon) pages() pageReader {
 	return pageReader{dir: d.dir, index: d.index, source: d.source, version: d.endpoint.Version}
 }
 
+// pagesIn is pages reading in the viewer's language.
+func (d *Daemon) pagesIn(lang string) pageReader {
+	r := d.pages()
+	r.lang = lang
+	return r
+}
+
 // handleIndex serves /.
 func (d *Daemon) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
@@ -538,7 +645,9 @@ func (d *Daemon) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if !readMethod(w, r) {
 		return
 	}
-	view := d.pages().indexView()
+	lang, pref := requestLang(r)
+	view := d.pagesIn(lang).indexView()
+	view.Lang, view.LangPref = lang, pref
 	regions, err := renderIndexRegions(view)
 	if err == nil {
 		var html string
@@ -595,11 +704,13 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d *Daemon) handleSessionPage(w http.ResponseWriter, r *http.Request, replyID string) {
-	view, ok := d.pages().session(replyID)
+	lang, pref := requestLang(r)
+	view, ok := d.pagesIn(lang).session(replyID)
 	if !ok {
 		http.Error(w, "unknown session", http.StatusNotFound)
 		return
 	}
+	view.Lang, view.LangPref = lang, pref
 	regions, err := renderSessionRegions(view, d.entries)
 	if err == nil {
 		var html string
@@ -644,7 +755,8 @@ func (d *Daemon) handleHistory(w http.ResponseWriter, r *http.Request, replyID s
 		}
 		n = min(v, historyPageMax)
 	}
-	cv, page, ok, err := d.pages().history(replyID, before, n)
+	lang, _ := requestLang(r)
+	cv, page, ok, err := d.pagesIn(lang).history(replyID, before, n)
 	if !ok {
 		http.Error(w, "unknown session", http.StatusNotFound)
 		return
@@ -652,6 +764,7 @@ func (d *Daemon) handleHistory(w http.ResponseWriter, r *http.Request, replyID s
 	if err == nil {
 		var a *dashboardAssets
 		if a, err = loadDashboardAssets(); err == nil {
+			cv.Lang = lang
 			err = renderEntries(a, d.entries, replyID, &cv)
 		}
 	}

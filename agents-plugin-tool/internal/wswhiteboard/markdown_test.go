@@ -305,8 +305,8 @@ func TestMarkdownMermaidBlock(t *testing.T) {
 			if strings.Index(init, "getComputedStyle(probe)") > strings.Index(init, "m.initialize(") {
 				t.Errorf("colours must resolve before mermaid.initialize")
 			}
-			if strings.Count(out, "<script") != 3 {
-				t.Errorf("want the page script, the shared mermaid script, and the theme script, got %d", strings.Count(out, "<script"))
+			if strings.Count(out, "<script") != 4 {
+				t.Errorf("want the string table, the page script, the shared mermaid script, and the theme script, got %d", strings.Count(out, "<script"))
 			}
 
 			plain := mdBoard(t, layout, Item{ID: 1, Class: ClassPolicy, Topic: "t", Title: "no diagram", Options: []string{"x", "y"}, Rationale: "```go\nx\n```", Status: StatusOpen})

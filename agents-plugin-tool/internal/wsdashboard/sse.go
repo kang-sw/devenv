@@ -92,7 +92,8 @@ func (d *Daemon) handleSessionEvents(w http.ResponseWriter, r *http.Request, rep
 	if !streamMethod(w, r) {
 		return
 	}
-	pages := d.pages()
+	lang, _ := requestLang(r)
+	pages := d.pagesIn(lang)
 	if _, ok := pages.session(replyID); !ok {
 		http.Error(w, "unknown session", http.StatusNotFound)
 		return
@@ -102,6 +103,7 @@ func (d *Daemon) handleSessionEvents(w http.ResponseWriter, r *http.Request, rep
 		if !ok {
 			return nil, false
 		}
+		view.Lang = lang
 		regions, err := renderSessionRegions(view, d.entries)
 		if err != nil {
 			fmt.Fprintf(d.log, "dashboard: render session %s: %v\n", replyID, err)
@@ -125,9 +127,12 @@ func (d *Daemon) handleIndexEvents(w http.ResponseWriter, r *http.Request) {
 	if !streamMethod(w, r) {
 		return
 	}
-	pages := d.pages()
+	lang, _ := requestLang(r)
+	pages := d.pagesIn(lang)
 	d.stream(w, r, func() (regionSet, bool) {
-		regions, err := renderIndexRegions(pages.indexView())
+		view := pages.indexView()
+		view.Lang = lang
+		regions, err := renderIndexRegions(view)
 		if err != nil {
 			fmt.Fprintf(d.log, "dashboard: render index: %v\n", err)
 			return nil, true

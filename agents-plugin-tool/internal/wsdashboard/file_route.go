@@ -10,10 +10,10 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/kang-sw/devenv/internal/wsi18n"
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
@@ -159,8 +159,10 @@ type fileViewPage struct {
 	Rel, Abs string
 	// HTML is a markdown file's rendered body.
 	HTML template.HTML
-	// Reason says why a file is not viewable.
+	// Reason says why a file is not viewable, in the page's language.
 	Reason string
+	// Lang is the page's language (wsi18n).
+	Lang string
 	// Nonce admits the not-viewable page's one inline script.
 	Nonce         string
 	WhiteboardCSS template.CSS
@@ -193,9 +195,10 @@ func (d *Daemon) handleFile(w http.ResponseWriter, r *http.Request, replyID stri
 		http.ServeContent(w, r, "", info.ModTime(), f)
 		return
 	}
-	page := fileViewPage{Rel: filepath.ToSlash(rel), Abs: filepath.Join(filepath.Clean(s.Project), rel)}
+	lang, _ := requestLang(r)
+	page := fileViewPage{Rel: filepath.ToSlash(rel), Abs: filepath.Join(filepath.Clean(s.Project), rel), Lang: lang}
 	if info.Size() > fileViewMax {
-		page.Reason = "it is larger than " + strconv.Itoa(fileViewMax>>20) + " MiB"
+		page.Reason = wsi18n.T(lang, "file.reason.large", fileViewMax>>20)
 		d.writeFilePage(w, "file-none", page)
 		return
 	}
@@ -205,11 +208,11 @@ func (d *Daemon) handleFile(w http.ResponseWriter, r *http.Request, replyID stri
 		http.Error(w, "file not found", http.StatusNotFound)
 		return
 	case len(data) > fileViewMax:
-		page.Reason = "it is larger than " + strconv.Itoa(fileViewMax>>20) + " MiB"
+		page.Reason = wsi18n.T(lang, "file.reason.large", fileViewMax>>20)
 		d.writeFilePage(w, "file-none", page)
 		return
 	case !utf8.Valid(data) || bytes.IndexByte(data, 0) >= 0:
-		page.Reason = "it is not text"
+		page.Reason = wsi18n.T(lang, "file.reason.binary")
 		d.writeFilePage(w, "file-none", page)
 		return
 	}
@@ -250,7 +253,7 @@ func (d *Daemon) writeFilePage(w http.ResponseWriter, name string, page fileView
 	}
 	page.WhiteboardCSS = a.data.WhiteboardCSS
 	var buf bytes.Buffer
-	if err := a.tmpl.ExecuteTemplate(&buf, name, page); err != nil {
+	if err := a.templateFor(page.Lang).ExecuteTemplate(&buf, name, page); err != nil {
 		http.Error(w, "render failed", http.StatusInternalServerError)
 		return
 	}

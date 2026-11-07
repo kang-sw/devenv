@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/kang-sw/devenv/internal/wsi18n"
 )
 
 const sampleDoc = `<p>One update writes the full page and an embed; the embed keeps the latest five.</p>
@@ -295,8 +297,9 @@ func TestRenderPageEscapesItemTextButNotTopicBody(t *testing.T) {
 		if !strings.Contains(out, `<use href="#i-list"/>`) {
 			t.Errorf("%s: unknown panel icon did not fall back to the list symbol", name)
 		}
-		if got := strings.Count(out, "<script>"); got != 1 {
-			t.Errorf("%s: page holds %d script elements, want only its own", name, got)
+		// Its own, after the client string table every page carries.
+		if got := strings.Count(out, "<script>"); got != 2 {
+			t.Errorf("%s: page holds %d script elements, want the string table and its own", name, got)
 		}
 	}
 }
@@ -362,8 +365,8 @@ func TestTopicBodyKeepsInlineScript(t *testing.T) {
 	if want := "<p><canvas id=\"c\" width=\"120\" height=\"40\"></canvas></p>\n" + script; body != want {
 		t.Errorf("body = %q, want %q", body, want)
 	}
-	if got := strings.Count(page, "<script>"); got != 2 {
-		t.Errorf("page holds %d script elements, want its own and the body's", got)
+	if got := strings.Count(page, "<script>"); got != 3 {
+		t.Errorf("page holds %d script elements, want the string table, its own and the body's", got)
 	}
 }
 
@@ -783,5 +786,41 @@ func TestOpenQuestionPillIsOnTheFullPageOnly(t *testing.T) {
 	assets, err := PageAssets()
 	if err != nil || !strings.Contains(string(assets.FormScript), "data-wb-title") {
 		t.Errorf("shared form script lacks the open-question pill (err %v)", err)
+	}
+}
+
+// A standalone page renders in the language its view names: the static text
+// (tooltips, the folded count) comes from the language's table, the board's
+// own content (titles, panel rows) stays as written, and the page carries the
+// client table its scripts read. A view with no language is English.
+func TestRenderPageFollowsViewLanguage(t *testing.T) {
+	en := render(t, sampleView(LayoutFull))
+	view := sampleView(LayoutFull)
+	view.Lang = "ko"
+	ko := render(t, view)
+
+	for _, want := range []string{`title="` + wsi18n.T("ko", "chip.answer") + `"`, `title="` + wsi18n.T("ko", "wb.allok") + `"`} {
+		if !strings.Contains(ko, want) {
+			t.Errorf("Korean page lacks %q", want)
+		}
+	}
+	for _, english := range []string{wsi18n.T("en", "chip.answer"), wsi18n.T("en", "wb.allok")} {
+		if !strings.Contains(en, `title="`+english+`"`) {
+			t.Errorf("English page lacks %q", english)
+		}
+		if strings.Contains(ko, `title="`+english+`"`) {
+			t.Errorf("Korean page still carries the English %q", english)
+		}
+	}
+	if !strings.Contains(ko, `lang: "ko"`) || !strings.Contains(en, `lang: "en"`) {
+		t.Error("the page does not carry its language's client table")
+	}
+	for _, keep := range []string{"Tool surface decision 1", "첫 범위는 세션 보드 하나", "First mockup round"} {
+		if !strings.Contains(ko, keep) {
+			t.Errorf("Korean page lost board content %q", keep)
+		}
+	}
+	if strings.Contains(ko, " lang=") {
+		t.Error("the page sets a lang attribute")
 	}
 }

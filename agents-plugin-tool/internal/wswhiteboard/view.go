@@ -74,6 +74,11 @@ type View struct {
 	// through here and stay unmarked; a finished reply's raw anchors and
 	// images do, through the reply sanitizer (sanitize.go).
 	FileActions func(path string) FileAction
+	// Lang is the language of the text the page itself draws (a wsi18n
+	// code; empty renders English). A page written to disk renders in
+	// English: it has no viewer to follow. The served dashboard page sets
+	// it, after BuildView, per viewer.
+	Lang string
 }
 
 // FileAction is what a served page's link menu offers for one file target.

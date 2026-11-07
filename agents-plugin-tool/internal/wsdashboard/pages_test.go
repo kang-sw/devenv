@@ -224,7 +224,14 @@ func TestBoardFirstPageHasNoLayoutControl(t *testing.T) {
 	if !strings.Contains(body, "only the board") || !strings.Contains(body, `data-mode="board"`) {
 		t.Errorf("board-first page lacks its board")
 	}
-	for _, absent := range []string{`id="gear"`, `id="composer"`, `id="splitter"`, `id="convo"`, `data-region="entries"`, `data-region="convlive"`, `id="tabbar"`} {
+	// The gear is there for the language item alone: no layout or input
+	// choice, which only a live layout has.
+	for _, present := range []string{`id="gear"`, `data-lang="ko"`, `data-lang=""`} {
+		if !strings.Contains(body, present) {
+			t.Errorf("board-first page lacks %q", present)
+		}
+	}
+	for _, absent := range []string{`<button data-layout=`, `<button data-input=`, `id="composer"`, `id="splitter"`, `id="convo"`, `data-region="entries"`, `data-region="convlive"`, `id="tabbar"`} {
 		if strings.Contains(body, absent) {
 			t.Errorf("board-first page carries %q", absent)
 		}

@@ -36,10 +36,10 @@
       if (!ms) return;
       var f = t.getAttribute("data-f");
       if (f === "since") t.textContent = dur(now - ms);
-      else if (f === "ago") t.textContent = dur(now - ms) + " ago";
-      else if (f === "wd") t.textContent = new Date(ms).toLocaleDateString(undefined, { weekday: "short" });
+      else if (f === "ago") t.textContent = wsT("js.ago", dur(now - ms));
+      else if (f === "wd") t.textContent = new Date(ms).toLocaleDateString(wsI18n.lang, { weekday: "short" });
       else { var d = new Date(ms); t.textContent = two(d.getHours()) + ":" + two(d.getMinutes()); }
-      t.title = new Date(ms).toLocaleString();
+      t.title = new Date(ms).toLocaleString(wsI18n.lang);
     });
     q("em.u-pace[data-reset]", el).forEach(function (e) { pace(e, now); });
   }
@@ -211,10 +211,7 @@
   // adds a line on Shift+Enter; "mod" sends on Ctrl/Cmd+Enter and Enter adds
   // a line. The placeholder tells which one is on.
   var INPUT_KEY = "ws.dashboard.input", inputMode = "enter";
-  var HINT = {
-    enter: "Message this session. Enter sends, Shift+Enter adds a line. Board answers and pasted images attach.",
-    mod: "Message this session. Ctrl/Cmd+Enter sends, Enter adds a line. Board answers and pasted images attach."
-  };
+  var HINT = { enter: wsT("js.hint.enter"), mod: wsT("js.hint.mod") };
   function setInput(v) {
     inputMode = v === "mod" ? "mod" : "enter";
     q("#gmenu [data-input]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-input") === inputMode)); });
@@ -229,8 +226,28 @@
   if (live) {
     // "auto" crosses its breakpoint on a resize without a click.
     window.addEventListener("resize", revealPanes);
-    doc.addEventListener("keydown", function (e) { if (e.key === "Escape" && gmenu && !gmenu.hidden) gmenu.hidden = true; });
   }
+  // The gear menu is on every page (the list and board-first pages hold only
+  // its language item), so its Escape and its language setting do not wait
+  // for a live layout.
+  if (gmenu) doc.addEventListener("keydown", function (e) { if (e.key === "Escape" && !gmenu.hidden) gmenu.hidden = true; });
+  // Language: the choice lives in a cookie the server reads, so every page,
+  // its stream, and its history render in it from the first byte. An empty
+  // value deletes the cookie and follows the browser again. The page shows
+  // the new language after a reload, which waits while a draft is held.
+  var LANG_COOKIE = "ws_dashboard_lang";
+  function markLang() {
+    var pref = root.getAttribute("data-langpref") || "";
+    q("#gmenu [data-lang]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-lang") === pref)); });
+  }
+  function setLang(v) {
+    doc.cookie = LANG_COOKIE + "=" + encodeURIComponent(v) + "; Path=/; SameSite=Lax; Max-Age=" + (v ? 31536000 : 0);
+    root.setAttribute("data-langpref", v);
+    markLang();
+    if (holdsDraft()) banner(wsT("js.banner.lang"));
+    else location.reload();
+  }
+  markLang();
 
   // --- board answers --------------------------------------------------------
   // A board swap replaces the answer form; picks, notes, and checked
@@ -510,7 +527,7 @@
       }
       x.className = "unchip";
       x.setAttribute("data-unchip", c.id);
-      x.title = "remove this answer";
+      x.title = wsT("js.chip.remove");
       x.textContent = "×";
       el.appendChild(x);
       cchips.appendChild(el);
@@ -529,7 +546,7 @@
   // post sends a write route's JSON body; done(ok, answer) gets the parsed
   // answer, or the server's refusal text.
   function post(route, body, done) {
-    if (!window.fetch) { done(false, "this browser cannot send"); return; }
+    if (!window.fetch) { done(false, wsT("js.post.nobrowser")); return; }
     fetch("/s/" + rid + "/" + route, {
       method: "POST", credentials: "same-origin", cache: "no-store",
       headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
@@ -540,7 +557,7 @@
         try { v = JSON.parse(s); } catch (e) { v = {}; }
         done(true, v);
       });
-    }, function () { done(false, "the dashboard is not reachable"); });
+    }, function () { done(false, wsT("js.post.unreachable")); });
   }
   // --- composer images -------------------------------------------------------
   // A pasted or dropped image is a thumbnail chip held in the page and
@@ -605,20 +622,20 @@
   function addFiles(files) {
     var refused = "", added = [];
     files.forEach(function (f) {
-      if (!IMG_TYPES[f.type]) { refused = (f.name || "the file") + " is not a PNG, JPEG, GIF, or WebP image"; return; }
-      if (f.size > IMG_BYTES) { refused = (f.name || "the image") + " is larger than 10 MiB"; return; }
-      if (imgs.length >= IMG_MAX) { refused = "a message holds at most " + IMG_MAX + " images"; return; }
+      if (!IMG_TYPES[f.type]) { refused = wsT("js.img.type", f.name || wsT("js.img.thefile")); return; }
+      if (f.size > IMG_BYTES) { refused = wsT("js.img.big", f.name || wsT("js.img.theimage")); return; }
+      if (imgs.length >= IMG_MAX) { refused = wsT("js.img.max", IMG_MAX); return; }
       var it = { name: f.name || "pasted image", url: URL.createObjectURL(f), data: null, ref: "", n: nextNum() };
       imgs.push(it);
       added.push(it.n);
       var rd = new FileReader();
       rd.onload = function () { var v = String(rd.result); it.data = v.slice(v.indexOf(",") + 1); };
-      rd.onerror = function () { dropImg(it); release(it); deleteMarkers(it.n); renderImgs(); syncNote("Could not read " + it.name + "."); };
+      rd.onerror = function () { dropImg(it); release(it); deleteMarkers(it.n); renderImgs(); syncNote(wsT("js.img.readfail", it.name)); };
       rd.readAsDataURL(f);
     });
     renderImgs();
     insertMarkers(added);
-    syncNote(refused ? "Not attached: " + refused + "." : "");
+    syncNote(refused ? wsT("js.img.refused", refused) : "");
   }
   function dropImg(it) {
     var i = imgs.indexOf(it);
@@ -663,14 +680,14 @@
       el.className = "ichip";
       im.src = it.url;
       im.alt = it.name;
-      el.title = "Image #" + it.n + ": " + it.name;
+      el.title = wsT("js.img.title", it.n, it.name);
       el.appendChild(im);
       num.className = "inum";
       num.textContent = "#" + it.n;
       el.appendChild(num);
       x.className = "unimg";
       x.setAttribute("data-unimg", String(i));
-      x.title = "remove this image";
+      x.title = wsT("js.img.remove");
       x.textContent = "×";
       el.appendChild(x);
       cimgs.appendChild(el);
@@ -724,8 +741,8 @@
   function sendMessage() {
     if (sending) return;
     var t = ctext.value.trim(), list = chipList(), pics = imgs.slice();
-    if (!t && !list.length && !pics.length) { syncNote("Nothing to send: write a message, answer the board, or attach an image."); return; }
-    if (pics.some(function (p) { return !p.ref && p.data === null; })) { syncNote("Still reading an image: send again in a moment."); return; }
+    if (!t && !list.length && !pics.length) { syncNote(wsT("js.send.empty")); return; }
+    if (pics.some(function (p) { return !p.ref && p.data === null; })) { syncNote(wsT("js.send.reading")); return; }
     var body = { text: t, chips: list };
     var up = pics.filter(function (p) { return !p.ref; }), refs = pics.filter(function (p) { return !!p.ref; });
     if (up.length) body.images = up.map(function (p) { return { name: p.name, data: p.data, n: p.n }; });
@@ -736,7 +753,7 @@
     sending = true;
     post("message", body, function (ok, res) {
       sending = false;
-      if (!ok) { syncNote("Not sent: " + res); return; }
+      if (!ok) { syncNote(wsT("js.send.fail", res)); return; }
       if (ctext.value.trim() === t) { ctext.value = ""; grow(); }
       pics.forEach(function (p) { dropImg(p); release(p); });
       clearTrash();
@@ -750,13 +767,13 @@
       sent.forEach(function (c) { dropChip(c.id); });
       sent.forEach(function (c) { setItem(c.id, null); });
       renderChips();
-      syncNote(res.merged ? "Added to the held message." : "Sent.");
+      syncNote(wsT(res.merged ? "js.send.merged" : "js.send.ok"));
     });
   }
   function cancelHeld(btn) {
     btn.disabled = true;
     post("cancel", { id: btn.getAttribute("data-cancel") }, function (ok, res) {
-      if (!ok) { btn.disabled = false; syncNote("Not cancelled: " + res); return; }
+      if (!ok) { btn.disabled = false; syncNote(wsT("js.cancel.fail", res)); return; }
       var cur = ctext.value.trim(), back = res.text || "";
       // Its images come back as chips that reference the written files,
       // with their markers in the returned text. Numbers the draft already
@@ -783,7 +800,7 @@
       (res.chips || []).forEach(function (c) { if (!chips[c.id]) { putChip(c); setItem(c.id, c); } });
       renderChips();
       renderImgs();
-      syncNote("Cancelled: the message is back in the composer.");
+      syncNote(wsT("js.cancel.ok"));
       ctext.focus();
     });
   }
@@ -793,8 +810,8 @@
   function steerHeld(btn) {
     btn.disabled = true;
     post("steer", { id: btn.getAttribute("data-steer") }, function (ok, res) {
-      if (!ok) { btn.disabled = false; syncNote("Not promoted: " + res); return; }
-      syncNote("Promoted: the session receives it at its next tool call.");
+      if (!ok) { btn.disabled = false; syncNote(wsT("js.steer.fail", res)); return; }
+      syncNote(wsT("js.steer.ok"));
     });
   }
   // applySent marks each board item the session was sent an answer for, or
@@ -810,7 +827,7 @@
       m.className = "sentmark " + state;
       m.textContent = state + " · " + (i.getAttribute("data-answer") || "note");
       var note = i.getAttribute("data-note");
-      m.title = (state === "held" ? "held until the session's turn ends" : "sent to the session") + (note ? ": " + note : "");
+      m.title = wsT(state === "held" ? "js.sent.held.title" : "js.sent.sent.title") + (note ? ": " + note : "");
       var id = head.querySelector(".id");
       head.insertBefore(m, id ? id.nextSibling : head.firstChild);
     });
@@ -891,6 +908,10 @@
     if (u) { if (!u.disabled) cancelHeld(u); return; }
     u = t.closest("#r-convlive [data-steer]");
     if (u) { if (!u.disabled) steerHeld(u); return; }
+    var lg = t.closest("#gmenu [data-lang]");
+    if (lg) { setLang(lg.getAttribute("data-lang")); return; }
+    if (gmenu && t.closest("#gear")) { gmenu.hidden = !gmenu.hidden; return; }
+    if (gmenu && !gmenu.hidden && !t.closest("#gmenu")) gmenu.hidden = true;
     if (!live) return;
     var b = t.closest("#gmenu [data-input]");
     if (b) { save(INPUT_KEY, b.getAttribute("data-input")); setInput(b.getAttribute("data-input")); return; }
@@ -898,8 +919,6 @@
     if (b) { save(LAYOUT_KEY, b.getAttribute("data-layout")); setLayout(b.getAttribute("data-layout")); return; }
     b = t.closest("#tabbar [data-tab]");
     if (b) { setTab(b.getAttribute("data-tab")); return; }
-    if (t.closest("#gear")) { gmenu.hidden = !gmenu.hidden; return; }
-    if (gmenu && !gmenu.hidden && !t.closest("#gmenu")) gmenu.hidden = true;
   });
 
   // --- link actions: the menu a served page's marked links open ------------
@@ -944,10 +963,10 @@
       var ok = false;
       try { ok = doc.execCommand("copy"); } catch (e) { ok = false; }
       doc.body.removeChild(t);
-      toast(ok ? "Copied " + s : "Could not copy: " + s);
+      toast(wsT(ok ? "js.toast.copied" : "js.toast.copyfail", s));
     }
     if (navigator.clipboard && window.isSecureContext) {
-      navigator.clipboard.writeText(s).then(function () { toast("Copied " + s); }, fallback);
+      navigator.clipboard.writeText(s).then(function () { toast(wsT("js.toast.copied", s)); }, fallback);
     } else fallback();
   }
   function openLinkMenu(a, x, y) {
@@ -955,18 +974,18 @@
     var kind = a.getAttribute("data-wl"), href = a.getAttribute("href");
     var rel = a.getAttribute("data-rel"), abs = a.getAttribute("data-abs"), url = a.href;
     var items = [];
-    if (href) items.push(["Open in new tab", function () { window.open(url, "_blank", "noopener"); }]);
+    if (href) items.push([wsT("js.menu.newtab"), function () { window.open(url, "_blank", "noopener"); }]);
     if (href && root.hasAttribute("data-sysopen")) {
-      items.push(["Open in system browser", function () {
+      items.push([wsT("js.menu.sysopen"), function () {
         // A file link sends its file view path; the daemon opens it on the
         // address this page was loaded from.
-        post("open", { target: kind === "url" ? url : href }, function (ok, v) { toast(ok ? "Opened in the system browser" : "Could not open: " + v); });
+        post("open", { target: kind === "url" ? url : href }, function (ok, v) { toast(ok ? wsT("js.toast.opened") : wsT("js.toast.openfail", v)); });
       }]);
     }
-    if (kind === "url") items.push(["Copy URL", function () { copyText(url); }]);
+    if (kind === "url") items.push([wsT("js.menu.copyurl"), function () { copyText(url); }]);
     else {
-      if (rel) items.push(["Copy relative path", function () { copyText(rel); }]);
-      if (abs) items.push(["Copy absolute path", function () { copyText(abs); }]);
+      if (rel) items.push([wsT("js.menu.copyrel"), function () { copyText(rel); }]);
+      if (abs) items.push([wsT("js.menu.copyabs"), function () { copyText(abs); }]);
     }
     if (!items.length) return;
     var m = doc.createElement("div");
@@ -1071,13 +1090,13 @@
   // The todo chip reads "done/total" and the mailbox chip "N unread".
   panelTab("todo", function (count) {
     var m = /^(\d+)\/(\d+)$/.exec(count), n = m ? +m[2] - +m[1] : 0;
-    return n > 0 ? { n: n, title: n + (n === 1 ? " open todo" : " open todos") } : null;
+    return n > 0 ? { n: n, title: wsTn("js.drawer.todo", n) } : null;
   });
   panelTab("agenda");
   panelTab("tickets");
   panelTab("mailbox", function (count) {
-    var m = /^(\d+) unread$/.exec(count), n = m ? +m[1] : 0;
-    return n > 0 ? { n: n, title: n + " unread mail" } : null;
+    var m = /^\D*(\d+)/.exec(count), n = m ? +m[1] : 0;
+    return n > 0 ? { n: n, title: wsT("js.drawer.unread", n) } : null;
   });
 
   function drPresent() { return drEntries.filter(function (t) { return !!t.content(); }); }
@@ -1136,9 +1155,9 @@
     }
   }
   function drTitle() {
-    var t = (drOpen ? "close" : "open") + " the side panels: click or drag", tip = drhandle.getAttribute("data-tip");
+    var t = wsT(drOpen ? "js.drawer.close" : "js.drawer.open"), tip = drhandle.getAttribute("data-tip");
     if (tip) t += " (" + tip + ")";
-    if (drhandle.classList.contains("wait")) t += "; an approval is waiting";
+    if (drhandle.classList.contains("wait")) t += "; " + wsT("js.drawer.waiting");
     drhandle.title = t;
   }
   // drawerWait marks the handle while an approval waits, open or closed:
@@ -1367,8 +1386,8 @@
   function connected(on) {
     if (!sse) return;
     sse.classList.toggle("off", !on);
-    if (sseLabel) sseLabel.textContent = on ? "live" : "offline";
-    sse.title = on ? "live updates" : "not connected, retrying";
+    if (sseLabel) sseLabel.textContent = wsT(on ? "js.sse.live" : "js.sse.offline");
+    sse.title = wsT(on ? "js.sse.title.on" : "js.sse.title.off");
   }
   function connect() {
     if (!window.EventSource) return;
@@ -1394,7 +1413,7 @@
     es.addEventListener("gone", function () {
       es.close();
       connected(false);
-      banner("The dashboard no longer serves this session.");
+      banner(wsT("js.banner.gone"));
     });
   }
   function banner(text) {
@@ -1403,11 +1422,14 @@
     b.textContent = text;
     b.hidden = false;
   }
+  // holdsDraft reports unsent work a reload would drop: composer text,
+  // answers picked on the board, or an attached image.
+  function holdsDraft() { return !!((ctext && ctext.value) || boardAnswers() || imgs.length); }
   function modeChanged(next) {
     // The other mode has other regions, and a reload renders them; text typed
     // in the composer or answers picked on the board are never dropped for it.
-    if ((ctext && ctext.value) || boardAnswers() || imgs.length) {
-      banner("The session's live state " + (next === "live" ? "appeared" : "went away") + ". Reload to update the layout.");
+    if (holdsDraft()) {
+      banner(wsT(next === "live" ? "js.banner.appeared" : "js.banner.wentaway"));
       return;
     }
     location.reload();

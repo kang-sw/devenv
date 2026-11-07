@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/kang-sw/devenv/internal/wsi18n"
 )
 
 // The page assets: one template set, the shared stylesheet, the answer-form
@@ -24,10 +26,13 @@ import (
 var assetFS embed.FS
 
 type pageAssets struct {
-	tmpl *template.Template
-	css  template.CSS
-	form string
-	live string
+	// tmpl is the English template set; tmpls holds one per language, each
+	// parsed with the translation funcs bound to it (templateFor picks).
+	tmpl  *template.Template
+	tmpls map[string]*template.Template
+	css   template.CSS
+	form  string
+	live  string
 	// pill is the open-question pill, shared by the full page and the dashboard.
 	pill string
 	// mermaidInit themes and runs mermaid after the shared script loads.
@@ -81,24 +86,44 @@ func loadAssets() (*pageAssets, error) {
 		for _, match := range spriteSymbolPattern.FindAllStringSubmatch(string(a.sprite), -1) {
 			a.icons[match[1]] = true
 		}
-		funcs := template.FuncMap{
-			"icon": func(name string) (template.HTML, error) {
-				if !a.icons[name] {
-					return "", fmt.Errorf("whiteboard page: no sprite symbol %q", name)
-				}
-				return template.HTML(`<svg class="i" aria-hidden="true"><use href="#i-` + name + `"/></svg>`), nil
-			},
-			"lines":       rationaleLines,
-			"box":         rowBox,
-			"href":        rowHref,
-			"actionAttrs": panelActionAttrs,
+		a.tmpls = map[string]*template.Template{}
+		for _, l := range wsi18n.Languages() {
+			lang := l.Code
+			funcs := template.FuncMap{
+				"icon": func(name string) (template.HTML, error) {
+					if !a.icons[name] {
+						return "", fmt.Errorf("whiteboard page: no sprite symbol %q", name)
+					}
+					return template.HTML(`<svg class="i" aria-hidden="true"><use href="#i-` + name + `"/></svg>`), nil
+				},
+				"lines":       rationaleLines,
+				"box":         rowBox,
+				"href":        rowHref,
+				"actionAttrs": panelActionAttrs,
+				"t":           func(key string, args ...any) string { return wsi18n.T(lang, key, args...) },
+				"i18n":        func() template.JS { return wsi18n.Script(lang) },
+			}
+			var t *template.Template
+			if t, assetsErr = template.New("page").Funcs(funcs).ParseFS(assetFS, "assets/page.tmpl"); assetsErr != nil {
+				break
+			}
+			a.tmpls[lang] = t
 		}
-		a.tmpl, assetsErr = template.New("page").Funcs(funcs).ParseFS(assetFS, "assets/page.tmpl")
+		a.tmpl = a.tmpls[wsi18n.Default]
 		if assetsErr == nil {
 			loadedAssets = a
 		}
 	})
 	return loadedAssets, assetsErr
+}
+
+// templateFor is the template set that renders in lang; an unsupported or
+// empty lang renders English.
+func (a *pageAssets) templateFor(lang string) *template.Template {
+	if t, ok := a.tmpls[lang]; ok {
+		return t
+	}
+	return a.tmpl
 }
 
 // panelActionAttrs are the attributes of a panel row's file action link: the
@@ -123,7 +148,7 @@ func RenderPage(view View) (string, error) {
 	}
 	data := newPageData(view, a, false)
 	var buf bytes.Buffer
-	if err := a.tmpl.ExecuteTemplate(&buf, "page", data); err != nil {
+	if err := a.templateFor(view.Lang).ExecuteTemplate(&buf, "page", data); err != nil {
 		return "", fmt.Errorf("whiteboard page: %w", err)
 	}
 	return buf.String(), nil
@@ -159,11 +184,12 @@ func RenderRegions(view View) (Regions, error) {
 	view.StampFile = ""
 	data := newPageData(view, a, true)
 	var board, panels bytes.Buffer
-	if err := a.tmpl.ExecuteTemplate(&board, "board", data); err != nil {
+	tmpl := a.templateFor(view.Lang)
+	if err := tmpl.ExecuteTemplate(&board, "board", data); err != nil {
 		return Regions{}, fmt.Errorf("whiteboard board: %w", err)
 	}
 	for _, panel := range view.Panels {
-		if err := a.tmpl.ExecuteTemplate(&panels, "panel", data.PanelOf(panel)); err != nil {
+		if err := tmpl.ExecuteTemplate(&panels, "panel", data.PanelOf(panel)); err != nil {
 			return Regions{}, fmt.Errorf("whiteboard panel %s: %w", panel.ID, err)
 		}
 	}

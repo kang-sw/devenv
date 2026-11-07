@@ -21,6 +21,15 @@ type PageSource interface {
 	ReadPage(reg Registration) (page PageContent, ok bool)
 }
 
+// LangPageSource is a PageSource whose page text follows the viewer's
+// language: the board and panels it renders carry text the dashboard draws
+// (panel titles, counts, tooltips). The daemon reads it through ReadPageLang
+// when the source has one; lang is a wsi18n code, empty for the default.
+type LangPageSource interface {
+	PageSource
+	ReadPageLang(reg Registration, lang string) (page PageContent, ok bool)
+}
+
 // PageContent is what a PageSource reads for one session.
 type PageContent struct {
 	// HasBoard reports whether the session has a whiteboard; Board is empty

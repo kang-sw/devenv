@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsdashboard"
+	"github.com/kang-sw/devenv/internal/wsi18n"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
 )
 
@@ -456,5 +457,48 @@ func TestDashboardPointerLineFollowsTheLastNudge(t *testing.T) {
 	dashCall(t, sOff, "todo.list", map[string]any{"session_key": keyOff})
 	if got := update(sOff, keyOff); got != "ai-docs/whiteboards/"+wsmailbox.ReplyID(keyOff)+".html" {
 		t.Fatalf("full: of a key-off session = %q", got)
+	}
+}
+
+// TestDashboardReadPageLangTranslatesBoardAndPanelText pins the language of
+// the served board's own text: panel titles, counts, lane names and the
+// board's static labels follow the viewer's language, while what the session
+// wrote (item titles, ticket titles) stays as written, and the English read
+// is the page a disk render shows.
+func TestDashboardReadPageLangTranslatesBoardAndPanelText(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	src := dashboardPageSource(t, nil)
+	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
+	f.call(t, "todo.add", map[string]any{"key": "step", "title": "a step"})
+	f.update(t, `<wb:add class="technical" topic="t"><wb:title>a question</wb:title><wb:why>plain reason</wb:why></wb:add>`)
+	writeTicket(t, f.root, "ready", "261101-feat-ready-one", "Ready one")
+	writeTicket(t, f.root, "todo", "261102-feat-todo-one", "Todo one")
+
+	en, ok := src.ReadPageLang(reg, "en")
+	if !ok {
+		t.Fatal("ReadPageLang found no session")
+	}
+	if plain := readPageOK(t, src, reg); plain.Board != en.Board {
+		t.Fatal("ReadPage is not the English ReadPageLang")
+	}
+	ko, _ := src.ReadPageLang(reg, "ko")
+	enHTML, koHTML := string(en.Board.Board)+string(en.Board.Panels), string(ko.Board.Board)+string(ko.Board.Panels)
+	for _, want := range []string{"Tickets", "1 ready, 1 todo", "Todos"} {
+		if !strings.Contains(enHTML, want) {
+			t.Errorf("English page lacks %q", want)
+		}
+	}
+	for _, want := range []string{wsi18n.T("ko", "panel.tickets"), wsi18n.T("ko", "panel.tickets.count.full", 1, 1), wsi18n.T("ko", "panel.todo")} {
+		if !strings.Contains(koHTML, want) {
+			t.Errorf("Korean page lacks %q", want)
+		}
+	}
+	for _, keep := range []string{"a question", "Ready one", "Todo one", "a step"} {
+		if !strings.Contains(koHTML, keep) {
+			t.Errorf("Korean page lost the session's own text %q", keep)
+		}
+	}
+	if strings.Contains(koHTML, ">Tickets<") || strings.Contains(koHTML, "1 ready, 1 todo") {
+		t.Error("Korean page still carries English panel text")
 	}
 }
