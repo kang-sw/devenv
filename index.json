@@ -631,19 +631,6 @@
     "261107-epic-ws-personal-common-store": {
       "registered_at": "2026-11-07T05:11:56Z"
     },
-    "261107-feat-ws-dashboard-interrupt-badge": {
-      "registered_at": "2026-11-07T14:51:39Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-07T15:18:31Z",
-        "impl": {
-          "branch": "impl/develop/plank-shrug-perm"
-        }
-      }
-    },
     "261108-bug-git-merge-directory-rename-moves-tickets": {
       "registered_at": "2026-11-07T16:19:45Z"
     },
@@ -656,7 +643,7 @@
         "email": "ki6080@gmail.com",
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-11-07T16:20:57Z",
         "impl": {
           "branch": "impl/develop/elope-bluff-race"
