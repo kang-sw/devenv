@@ -107,7 +107,7 @@ type BranchStatus struct {
 }
 
 // BranchSync reads root's branch and its standing against its upstream with
-// cheap ref reads only (rev-parse and rev-list, never a working-tree scan or a
+// cheap ref reads only (rev-parse, symbolic-ref, and rev-list, never a working-tree scan or a
 // fetch, so Behind reflects the last fetch). Head is the branch name, or ""
 // with OID set to the short commit id on a detached HEAD. Upstream is empty
 // when the branch tracks none. ok is false when root is not a repository or
@@ -116,20 +116,21 @@ func BranchSync(ctx context.Context, runner Runner, root string) (status BranchS
 	if runner == nil {
 		runner = ExecRunner{}
 	}
-	out, err := runner.RunGit(ctx, root, "rev-parse", "--abbrev-ref", "HEAD")
+	short, err := runner.RunGit(ctx, root, "rev-parse", "--short", "HEAD")
 	if err != nil {
 		return BranchStatus{}, false
 	}
-	head := strings.TrimSpace(string(out))
-	if head == "" {
+	oid := strings.TrimSpace(string(short))
+	if oid == "" {
 		return BranchStatus{}, false
 	}
-	if head == "HEAD" {
-		short, err := runner.RunGit(ctx, root, "rev-parse", "--short", "HEAD")
-		if err != nil {
-			return BranchStatus{}, false
-		}
-		return BranchStatus{OID: strings.TrimSpace(string(short))}, true
+	// The full ref name, trimmed here: both `rev-parse --abbrev-ref HEAD` and
+	// `symbolic-ref --short HEAD` print "heads/main" when a tag shares the
+	// branch's name. A detached HEAD fails symbolic-ref.
+	ref, err := runner.RunGit(ctx, root, "symbolic-ref", "-q", "HEAD")
+	head := strings.TrimPrefix(strings.TrimSpace(string(ref)), "refs/heads/")
+	if err != nil || head == "" {
+		return BranchStatus{OID: oid}, true
 	}
 	status.Head = head
 	up, err := runner.RunGit(ctx, root, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
