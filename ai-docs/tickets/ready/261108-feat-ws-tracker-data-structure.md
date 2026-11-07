@@ -283,6 +283,35 @@ Depends on Phase 1.
 Done when: the scenario ports, the extra cases, and the integration test
 pass, and Phase 1's tests still pass.
 
+### Result (c6c5fe5c8) - 2026-11-08
+
+Landed `Tracker` (`tracker.go`: cursor-driven `Refresh`, `View`,
+`Dispatch`, `NextID`, `Refusal`), `Veto(genesis)` and `Open` (`veto.go`),
+and a seen-closure causality index (`causal.go`) the veto uses because
+`VetoFunc` gets no `Concurrent`. `Open` opens once without the veto to
+read the genesis and again with it (and chains any caller veto). The veto
+folds the removal's past with the domain's own roles-only fold
+(`replayRoles`), so a domain-flagged `roles.set_lead` moves nobody.
+`Dispatch` folds the whole held state plus the call's earlier events,
+runs the protocol's author check, and mirrors `verify.go`'s identity
+rules plus (209). The waiting-event caveat is documented at the site.
+
+Tests: `TestScenario1`-`9` over an in-memory team world seeded from the
+omar.pc golden (his clone holds every pushed commit), with offline/sync
+for scenarios 6 and 7. Also `TestVetoLeadsNobody` (crafted past),
+`TestDispatchRefusal`, `TestRemovalEndsLiveAndPending`,
+`TestAdminHandoffPendingThenRemoval`, `TestHandoffOriginalEndedConcurrent`
+(both fold orders), `TestIncrementalRefresh` (new events, filled gap,
+revocation cut), and `TestRealLedgerTwoWriters` (temp bare repository,
+real `ssh-keygen`, two writers, same view, vetoed removal flagged on
+both). The full verification passes. Review follow-ups landed in
+de649c429.
+
+Open coverage: identity pre-validation branches that need real SSH keys
+(key in use, not held, already revoked) have no committed test. The lite
+reviewer probed them against a real ledger and found reason parity word
+for word.
+
 ## Verification
 
 From `agents-plugin-tool/`: `go build ./...`, `go vet ./internal/...`,
