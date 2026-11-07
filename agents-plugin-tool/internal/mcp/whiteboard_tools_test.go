@@ -940,6 +940,72 @@ func TestWhiteboardKnobSessionScope(t *testing.T) {
 	}
 }
 
+func TestWhiteboardFirstUpdateTurnsSessionKnobOn(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	other, _ := parseLoginResponse(t, callLogin(t, f.s, 920000, f.root, nil))
+	if f.manualHasWhiteboard(t, f.key) {
+		t.Fatalf("precondition: knob resolves off")
+	}
+	// A query never flips the knob.
+	f.call(t, "whiteboard.query", map[string]any{})
+	if f.manualHasWhiteboard(t, f.key) {
+		t.Fatalf("whiteboard.query must not turn the knob on")
+	}
+	f.update(t, `<wb:add class="policy" topic="t"><wb:title>q?</wb:title></wb:add>`)
+	if v, ok := f.s.sessions.getOverride(f.key, "workflow.whiteboard_enabled.claude"); !ok || v != "on" {
+		t.Fatalf("session claude bucket = %q, %v; want on", v, ok)
+	}
+	if !f.manualHasWhiteboard(t, f.key) {
+		t.Fatalf("the manual after the first update must carry the whiteboard section")
+	}
+	if f.manualHasWhiteboard(t, other) {
+		t.Fatalf("another session must stay off")
+	}
+}
+
+func TestWhiteboardUpdateLeavesExplicitSessionOff(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	f.tune(t, map[string]any{"value": "off", "scope": "session"})
+	f.update(t, `<wb:add class="policy" topic="t"><wb:title>q?</wb:title></wb:add>`)
+	if f.manualHasWhiteboard(t, f.key) {
+		t.Fatalf("an explicit session off must stand after a whiteboard update")
+	}
+	// A session all-bucket off stands even when a global harness bucket also says off.
+	g := newWhiteboardFixture(t)
+	g.tune(t, map[string]any{"value": "off", "harness": "claude"})
+	g.tune(t, map[string]any{"value": "off", "harness": "*", "scope": "session"})
+	g.update(t, `<wb:add class="policy" topic="t"><wb:title>q?</wb:title></wb:add>`)
+	if g.manualHasWhiteboard(t, g.key) {
+		t.Fatalf("a session all off must stand after a whiteboard update")
+	}
+}
+
+func TestWhiteboardUpdateOverridesNonSessionOffAtSessionScope(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	f.tune(t, map[string]any{"value": "off", "harness": "claude"})
+	f.update(t, `<wb:add class="policy" topic="t"><wb:title>q?</wb:title></wb:add>`)
+	if !f.manualHasWhiteboard(t, f.key) {
+		t.Fatalf("a global off must be overridden at session scope by the first update")
+	}
+	if !strings.Contains(toolText(t, f.call(t, "config.list", map[string]any{})), "workflow.whiteboard_enabled") {
+		t.Fatalf("config.list still lists the knob")
+	}
+}
+
+func TestWhiteboardRefusedUpdateDoesNotTurnKnobOn(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	resp := f.call(t, "whiteboard.update", map[string]any{"commands": `<wb:bogus/>`})
+	if !isToolError(resp) {
+		t.Fatalf("a bogus command must be refused: %s", resp)
+	}
+	if _, ok := f.s.sessions.getOverride(f.key, "workflow.whiteboard_enabled.claude"); ok {
+		t.Fatalf("a refused batch must not write the session knob")
+	}
+	if f.manualHasWhiteboard(t, f.key) {
+		t.Fatalf("a refused batch must not turn the manual section on")
+	}
+}
+
 func TestWhiteboardKnobRepoScopeReachesFreshBootstrapManual(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	f.tune(t, map[string]any{"value": "on", "harness": "*", "scope": "repo"})
