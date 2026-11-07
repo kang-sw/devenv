@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>tracker mockup v0</title>
+<style>
+  /* layout only; everything else is browser default */
+  #grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1em; align-items: start; }
+  textarea { width: 100%; box-sizing: border-box; font-family: monospace; }
+  pre { white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h1>tracker mockup v0</h1>
+<p>
+  store <select id="store"></select>
+  viewing as <select id="viewer"></select>
+  <span id="msg"></span>
+</p>
+<div id="grid">
+  <div id="views"></div>
+  <div id="raw"></div>
+</div>
+<script src="fixtures.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
