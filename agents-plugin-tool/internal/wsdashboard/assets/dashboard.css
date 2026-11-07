@@ -188,6 +188,9 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .msg .bub.md h1, .msg .bub.md h2, .msg .bub.md h3, .msg .bub.md h4, .msg .bub.md h5, .msg .bub.md h6 { font-weight: 700; margin-top: 8px; }
 .msg .bub.md > h1:first-child, .msg .bub.md > h2:first-child, .msg .bub.md > h3:first-child { margin-top: 0; }
 .msg .bub.md hr { border: 0; border-top: 1px solid var(--wb-muted); margin: 8px 0; }
+/* a finished reply keeps its sanitized inline HTML; paint containment keeps any of it from drawing over the composer or the steer controls */
+.msg.fromlead[data-entry] > .bub.md { contain: paint; }
+.msg .bub.md svg { max-width: 100%; height: auto; }
 .src { font-size: 10px; font-weight: 800; letter-spacing: .04em; padding: 0 6px; border-radius: 4px; background: var(--wb-muted); color: var(--wb-muted-fg); white-space: nowrap; }
 .src.wb { background: var(--wb-now); color: var(--wb-on-now); }
 .src.mail { background: var(--wb-technical); color: var(--wb-on-technical); }

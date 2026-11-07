@@ -95,8 +95,8 @@ func loadAssets() (*pageAssets, error) {
 
 // RenderPage renders view as one self-contained HTML document: the full page
 // for LayoutFull, the embed snapshot for LayoutEmbed. Item text renders as
-// markdown with raw HTML escaped (markdown.go); view.Now is written
-// unescaped, as the HTML fragment it is.
+// markdown with raw HTML escaped (markdown.go); view.Now renders as markdown
+// with its raw HTML written as is (pageData.renderNow).
 func RenderPage(view View) (string, error) {
 	a, err := loadAssets()
 	if err != nil {
@@ -183,7 +183,8 @@ type pageData struct {
 	CSS         template.CSS
 	Script      template.JS
 	Sprite      template.HTML
-	NowHTML     template.HTML
+	// NowHTML is view.Now rendered by renderNow on every page render.
+	NowHTML template.HTML
 
 	CountPolicy, CountAssumed, CountAcks, CountFresh int
 	// CountBulk is how many items the bulk checkbox answers.
@@ -202,6 +203,9 @@ type pageData struct {
 	// link may point at.
 	onPage map[int]bool
 	md     *markdown
+	// trusted, set only while a finished reply renders, records each URL the
+	// markdown renderer resolved (writeTrustRef) for the sanitizer.
+	trusted *[]trustedURL
 }
 
 // MermaidFile is the shared mermaid script's name, beside the page.
@@ -223,7 +227,6 @@ func newPageData(view View, a *pageAssets) *pageData {
 		CSS:         a.css,
 		Script:      template.JS("(function () {\n" + script + "})();\n"),
 		Sprite:      a.sprite,
-		NowHTML:     template.HTML(view.Now),
 		MermaidInit: a.mermaidInit,
 		icons:       a.icons,
 		onPage:      map[int]bool{},
@@ -244,6 +247,11 @@ func newPageData(view View, a *pageAssets) *pageData {
 		}
 	}
 	p.CountBulk = p.CountAssumed + p.CountAcks
+	// After onPage is complete, so a reference in Now links like one in an
+	// item; a mermaid block in Now sets Mermaid before the template runs.
+	if view.Now != "" {
+		p.NowHTML = p.renderNow(view.Now)
+	}
 	return p
 }
 

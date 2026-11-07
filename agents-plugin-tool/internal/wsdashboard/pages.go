@@ -253,7 +253,7 @@ func renderEntries(a *dashboardAssets, cache *entryCache, replyID string, cv *Co
 		e := cv.Entries[i]
 		html, err := cache.render(replyID, e, func() (template.HTML, error) {
 			if e.Kind == wslive.RingReply && cv.markdown != nil {
-				e.HTML = cv.markdown(e.Text)
+				e.HTML = cv.markdown(e.Text, true)
 			}
 			var buf bytes.Buffer
 			if err := a.tmpl.ExecuteTemplate(&buf, "entry", e); err != nil {

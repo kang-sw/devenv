@@ -245,6 +245,84 @@ func TestRenderPageEscapesItemTextButNotNow(t *testing.T) {
 	}
 }
 
+// nowBody renders a board whose Now slot holds now, with item 90 on the page
+// for references, and returns the Now body's inner HTML and the page.
+func nowBody(t *testing.T, now string, in ViewInput) (body, page string) {
+	t.Helper()
+	st := &State{Seq: 2, NowSeq: 2, Now: now, Items: []Item{{ID: 90, Class: ClassTechnical, Topic: "t", Title: "target", Status: StatusOpen}}}
+	in.ReplyID = "r"
+	page = render(t, BuildView(st, in))
+	const open = `<div class="now-body md">`
+	start := strings.Index(page, open)
+	end := strings.Index(page, "</div></details>")
+	if start < 0 || end < start {
+		t.Fatalf("no Now body in:\n%s", page)
+	}
+	return page[start+len(open) : end], page
+}
+
+// TestNowRendersMarkdownWithInlineHTML pins the Now slot's renderer: block
+// markdown as in item fields, mermaid included, with raw HTML and inline SVG
+// written as is, on the disk board and the served page alike.
+func TestNowRendersMarkdownWithInlineHTML(t *testing.T) {
+	now := "# Plan\n\n- one\n- **two**\n\n```mermaid\ngraph TD; A-->B\n```\n\n" + sampleNow
+	for name, in := range map[string]ViewInput{
+		"disk":   {Layout: LayoutFull},
+		"embed":  {Layout: LayoutEmbed},
+		"served": {Layout: LayoutFull, FileText: func(p string) string { return p }, ImageSrc: func(string) string { return "" }},
+	} {
+		body, page := nowBody(t, now, in)
+		wantAll(t, body, "<h1>Plan</h1>", "<li><strong>two</strong></li>", `<pre class="mermaid">graph TD; A--&gt;B`, sampleNow)
+		if !UsesMermaid(page) {
+			t.Errorf("%s: a mermaid block in Now does not load the mermaid script", name)
+		}
+	}
+	view := BuildView(&State{Seq: 2, NowSeq: 2, Now: now}, ViewInput{Layout: LayoutFull, ReplyID: "r"})
+	regions, err := RenderRegions(view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !regions.Mermaid || !strings.Contains(string(regions.Board), "<h1>Plan</h1>") || !strings.Contains(string(regions.Board), sampleNow) {
+		t.Errorf("served board regions render Now differently: mermaid=%v\n%s", regions.Mermaid, regions.Board)
+	}
+}
+
+// TestNowKeepsInlineScript pins the Now slot's trust: a canvas drawn by an
+// inline script reaches the page unchanged, blank lines inside the script
+// included, since a script block runs to its closing tag. The canvas line,
+// markdown text with an inline tag, gains a paragraph.
+func TestNowKeepsInlineScript(t *testing.T) {
+	script := "<script>\nconst g = document.getElementById(\"c\").getContext(\"2d\");\n\ng.fillRect(0, 0, 10, 10);\n</script>"
+	body, page := nowBody(t, "<canvas id=\"c\" width=\"120\" height=\"40\"></canvas>\n"+script, ViewInput{Layout: LayoutFull})
+	if want := "<p><canvas id=\"c\" width=\"120\" height=\"40\"></canvas></p>\n" + script; body != want {
+		t.Errorf("Now body = %q, want %q", body, want)
+	}
+	if got := strings.Count(page, "<script>"); got != 2 {
+		t.Errorf("page holds %d script elements, want its own and Now's", got)
+	}
+}
+
+// TestNowHTMLCaveats pins the rules the whiteboard playbook states for HTML
+// in Now: a block tag keeps the lines after it raw up to a blank line, an
+// indented line after a blank line becomes a code block, a fragment that
+// starts with an inline tag is markdown text whose line breaks render as
+// <br>, and {{nn}} resolves in markdown text but not inside HTML.
+func TestNowHTMLCaveats(t *testing.T) {
+	body, _ := nowBody(t, "<div>\n**raw**\n</div>\n\n**md**", ViewInput{Layout: LayoutFull})
+	wantAll(t, body, "<div>\n**raw**\n</div>", "<strong>md</strong>")
+
+	body, _ = nowBody(t, "<svg viewBox=\"0 0 10 10\">\n<rect width=\"4\" height=\"4\"/>\n\n    <text>x</text>\n</svg>", ViewInput{Layout: LayoutFull})
+	wantAll(t, body, "<pre><code>&lt;text&gt;x&lt;/text&gt;")
+
+	body, _ = nowBody(t, "<b>Status</b> green\n<i>next</i> deploy", ViewInput{Layout: LayoutFull})
+	if body != "<b>Status</b> green<br>\n<i>next</i> deploy" {
+		t.Errorf("inline-tag fragment = %q", body)
+	}
+
+	body, _ = nowBody(t, "See {{90}}\n\n<div title=\"{{90}}\">{{90}}</div>", ViewInput{Layout: LayoutFull})
+	wantAll(t, body, `See <a href="#item-90">(90)</a>`, `<div title="{{90}}">{{90}}</div>`)
+}
+
 func TestRenderPageTopicBlockOrder(t *testing.T) {
 	out := render(t, sampleView(LayoutFull))
 	start := strings.Index(out, `<span class="tname">embed layout</span>`)

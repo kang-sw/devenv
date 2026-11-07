@@ -42,17 +42,89 @@ func TestLeadReplyRendersAsMarkdown(t *testing.T) {
 	}
 }
 
-func TestLeadReplyEscapesRawHTMLAndUnsafeTargets(t *testing.T) {
-	text := "<script>alert(1)</script> and <b>bold</b>\n\n[x](javascript:alert(1)) [ok](https://example.com) [f](docs/a.md)\n\n![i](../outside.png) ![in](img/a.png)"
+// TestFinishedLeadReplyRendersSanitizedHTML pins a finished reply's inline
+// HTML: kept, inline SVG included, inside the sanitizer's allow-list, with
+// its URLs under the markdown link rule (wswhiteboard sanitize_test.go holds
+// the full vector list).
+func TestFinishedLeadReplyRendersSanitizedHTML(t *testing.T) {
+	text := "<script>alert(1)</script> and <b>bold</b>\n\n<svg viewBox=\"0 0 20 10\"><rect width=\"8\" height=\"8\"/><text x=\"10\" y=\"8\">s</text></svg>\n\n" +
+		"[x](javascript:alert(1)) [ok](https://example.com) [f](docs/a.md) <a href=\"docs/b.md\">raw f</a> <img src=\"https://example.com/n.png\" onerror=\"alert(2)\">\n\n![i](../outside.png) ![in](img/a.png)"
 	html := leadMarkdownView(t, []wslive.RingEntry{{Kind: wslive.RingReply, Text: text}}, "")
-	for _, bad := range []string{"<script>", "<b>bold", "javascript:", `src="../outside.png"`, "file:"} {
+	for _, bad := range []string{"<script>", "alert", "javascript:", `src="../outside.png"`, `src="https://`, "file:", `href="docs`} {
 		if strings.Contains(html, bad) {
 			t.Errorf("reply carries %q:\n%s", bad, html)
 		}
 	}
-	for _, want := range []string{"&lt;script&gt;", "&lt;b&gt;bold", `href="https://example.com"`, "docs/a.md", `src="/s/self/image?path=img%2Fa.png"`} {
+	for _, want := range []string{
+		"<b>bold</b>", `<svg viewBox="0 0 20 10"><rect width="8" height="8"></rect><text x="10" y="8">s</text></svg>`,
+		`href="https://example.com"`, "docs/a.md", "<a>raw f</a>", `<code class="fpath">https://example.com/n.png</code>`,
+		`src="/s/self/image?path=img%2Fa.png"`,
+	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("reply lacks %q:\n%s", want, html)
+		}
+	}
+}
+
+// TestStreamingReplyShowsHTMLAsText pins the streaming rule: raw HTML stays
+// text until the reply finishes, so a half-closed tag cannot shake the page.
+func TestStreamingReplyShowsHTMLAsText(t *testing.T) {
+	html := leadMarkdownView(t, nil, "<b>bold</b> and <details><summary>s")
+	if !strings.Contains(html, "&lt;b&gt;bold&lt;/b&gt; and &lt;details&gt;&lt;summary&gt;s") || strings.Contains(html, "<b>bold") || strings.Contains(html, "<details>") {
+		t.Errorf("streaming reply renders HTML:\n%s", html)
+	}
+}
+
+// TestStrayClosingTagStaysInsideTheBubble pins the balancing: a finished
+// reply's stray closing tags cannot close the bubble or the entry.
+func TestStrayClosingTagStaysInsideTheBubble(t *testing.T) {
+	html := leadMarkdownView(t, []wslive.RingEntry{{Kind: wslive.RingReply, Text: "</div></div></div><b>x"}}, "")
+	if !strings.Contains(html, `<div class="bub md"><b>x</b></div></div>`) {
+		t.Errorf("stray closing tags leaked out of the bubble:\n%s", html)
+	}
+}
+
+// TestFinishedReplyCannotOverlayThePage pins the overlay guard: a reply's
+// position:fixed is removed, and the finished bubble's paint containment
+// keeps whatever else it draws inside it.
+func TestFinishedReplyCannotOverlayThePage(t *testing.T) {
+	html := leadMarkdownView(t, []wslive.RingEntry{{Kind: wslive.RingReply, Text: `<div style="position:fixed;inset:0;z-index:999;background:red">covered</div>`}}, "")
+	if !strings.Contains(html, `<div style="inset: 0; z-index: 999; background: red">covered</div>`) || strings.Contains(html, "fixed") {
+		t.Errorf("reply keeps a fixed layer:\n%s", html)
+	}
+	a, err := loadDashboardAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(a.data.CSS), ".msg.fromlead[data-entry] > .bub.md { contain: paint; }") {
+		t.Error("the finished reply bubble does not contain its paint")
+	}
+}
+
+// TestMailAndUserEntriesKeepHTMLAsText pins the trust boundary: only a lead
+// reply renders HTML; a user message and a mail body, from another author,
+// show it as text.
+func TestMailAndUserEntriesKeepHTMLAsText(t *testing.T) {
+	now := testNow
+	recs := []wslive.RingRecord{
+		{Name: "na", At: now.Add(-2 * time.Minute), RingEntry: wslive.RingEntry{Kind: wslive.RingUser, Text: "<b>user</b>"}},
+		{Name: "nb", At: now.Add(-time.Minute), RingEntry: wslive.RingEntry{Kind: wslive.RingMail, Direction: wslive.MailRecv, Peer: "id:peer", Title: "<i>title</i>", HistoryKey: "h1"}},
+	}
+	v := buildSessionView(pageInputs{Session: liveSession("self", "/proj", now), Snapshot: liveSnap(now, wslive.Lead{}), Ring: recs,
+		Page: PageContent{MailBodies: map[string]string{"h1": "<i>title</i>\n<script>x()</script>"}}, Now: now})
+	regions, err := renderSessionRegions(v, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(regions[regionEntries].HTML)
+	for _, want := range []string{"&lt;b&gt;user&lt;/b&gt;", "&lt;i&gt;title&lt;/i&gt;", "&lt;script&gt;x()&lt;/script&gt;"} {
+		if !strings.Contains(html, want) {
+			t.Errorf("entries lack %q:\n%s", want, html)
+		}
+	}
+	for _, bad := range []string{"<b>user", "<i>title", "<script>"} {
+		if strings.Contains(html, bad) {
+			t.Errorf("entries render %q as HTML:\n%s", bad, html)
 		}
 	}
 }

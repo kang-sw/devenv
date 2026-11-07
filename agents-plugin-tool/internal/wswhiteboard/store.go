@@ -49,7 +49,7 @@ var (
 	statusValues      = []string{StatusOpen, StatusAnswered, StatusAssumed, StatusWithdrawn, StatusSuperseded}
 	patchStatusValues = []string{StatusOpen, StatusWithdrawn, StatusSuperseded}
 	// fullDocumentPattern detects a whole HTML document where the Now slot
-	// takes a fragment.
+	// takes markdown with inline HTML.
 	fullDocumentPattern = regexp.MustCompile(`(?i)<!doctype|<html[\s>]`)
 )
 
@@ -115,7 +115,7 @@ type State struct {
 // Env carries the side effects Apply needs, so the store stays testable.
 type Env struct {
 	Now time.Time
-	// ReadFile reads a now_path file once.
+	// ReadFile reads a now_path markdown file once.
 	ReadFile func(path string) ([]byte, error)
 	// IsDir reports whether path is an existing directory (embed_dir).
 	IsDir func(path string) bool
@@ -309,24 +309,24 @@ func Apply(state *State, payload any, env Env) (Outcome, []string) {
 	if hasNow && hasNowPath {
 		p.add("payload: now and now_path are exclusive; pass one")
 	} else if hasNow || hasNowPath {
-		var fragment string
+		var content string
 		var ok bool
 		if hasNow {
-			fragment, ok = stringValue(p, "payload.now", obj["now"])
+			content, ok = stringValue(p, "payload.now", obj["now"])
 		} else if path, pathOK := stringValue(p, "payload.now_path", obj["now_path"]); pathOK {
 			data, err := env.ReadFile(path)
 			if err != nil {
 				p.add("payload.now_path: cannot read %s: %v", path, err)
 			} else {
-				fragment, ok = string(data), true
+				content, ok = string(data), true
 			}
 		}
 		if ok {
-			if fullDocumentPattern.MatchString(fragment) {
-				p.add("payload.now: the Now slot takes an HTML fragment, not a full document (found <!DOCTYPE or <html)")
-			} else if fragment != work.Now {
-				work.Now = fragment
-				if fragment == "" {
+			if fullDocumentPattern.MatchString(content) {
+				p.add("payload.now: the Now slot takes markdown with inline HTML, not a full document (found <!DOCTYPE or <html)")
+			} else if content != work.Now {
+				work.Now = content
+				if content == "" {
 					work.NowSeq = 0
 				} else {
 					work.NowSeq = mark

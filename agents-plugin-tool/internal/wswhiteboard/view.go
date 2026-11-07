@@ -24,8 +24,8 @@ type View struct {
 	// StampFile is the change-signal script the full page polls, a bare
 	// file name beside the page. Empty for the embed.
 	StampFile string
-	// Now is the Now slot's HTML fragment, written unescaped by design;
-	// empty when the slot is clear.
+	// Now is the Now slot's markdown with inline HTML, the HTML written as is
+	// by design; empty when the slot is clear.
 	Now string
 	// NowFresh marks Now changed by the latest update: it renders open, and
 	// collapsed and greyed otherwise.

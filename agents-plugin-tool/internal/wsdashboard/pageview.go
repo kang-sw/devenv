@@ -149,7 +149,7 @@ type PeerRow struct {
 type ConversationView struct {
 	Entries []ConvEntry
 	// Reply is the lead's reply text still streaming; nil when none.
-	// ReplyHTML is its text rendered as markdown.
+	// ReplyHTML is its text rendered as markdown with raw HTML escaped.
 	Reply     *wslive.Reply
 	ReplyHTML template.HTML
 	// Phase and Permission drive the trailing activity or approval line.
@@ -164,10 +164,15 @@ type ConversationView struct {
 	// answer, which the page marks on the item's card.
 	Held []HeldView
 	Sent []SentMark
-	// markdown renders a lead reply; an entry runs it only when the entry
-	// cache misses (renderEntries).
-	markdown func(string) template.HTML
+	// markdown renders a lead reply, finished or still streaming; an entry
+	// runs it only when the entry cache misses (renderEntries).
+	markdown replyRender
 }
+
+// replyRender renders a lead reply's text: a finished reply with its inline
+// HTML kept through the reply sanitizer, a streaming one with raw HTML shown
+// as text, so a half-closed tag never shakes the layout mid-stream.
+type replyRender func(text string, finished bool) template.HTML
 
 // ConvEntry is one conversation ring entry as the page shows it.
 type ConvEntry struct {
@@ -177,9 +182,10 @@ type ConvEntry struct {
 	Key string
 	// At is the entry's time (epoch ms).
 	At int64
-	// HTML is a lead reply's text rendered as markdown; user messages, mail
-	// bodies, and turn lines stay plain text. It is set only while the entry
-	// renders on an entry cache miss.
+	// HTML is a lead reply's text rendered as markdown with its inline HTML
+	// sanitized; user messages, mail bodies, and turn lines stay plain text,
+	// raw HTML included. It is set only while the entry renders on an entry
+	// cache miss.
 	HTML template.HTML
 	// Images are a user message's attached images, taken out of its text.
 	Images []AttachmentView
@@ -424,8 +430,9 @@ func hasReplyIDPrefix(address string) bool {
 
 // replyMarkdown renders a lead reply as markdown under the served page's
 // link rule, the board's: a file link or a file image outside root is path
-// text, and an image inside root is the image route's URL.
-func replyMarkdown(root, replyID string) func(string) template.HTML {
+// text, and an image inside root is the image route's URL. A finished
+// reply's inline HTML follows the same rule (wswhiteboard.TextTargets.HTML).
+func replyMarkdown(root, replyID string) replyRender {
 	targets := wswhiteboard.TextTargets{
 		FileText: func(path string) string {
 			if rel, ok := relativeInside(root, path); ok {
@@ -435,14 +442,18 @@ func replyMarkdown(root, replyID string) func(string) template.HTML {
 		},
 		ImageSrc: func(path string) string { return ImageSrc(root, replyID, path) },
 	}
-	return func(s string) template.HTML { return wswhiteboard.RenderText(s, targets) }
+	return func(s string, finished bool) template.HTML {
+		t := targets
+		t.HTML = finished
+		return wswhiteboard.RenderText(s, t)
+	}
 }
 
 // conversation turns the ring into the page's stream: each mail line gets
 // its body while the mailbox history still holds it and a link to its peer's
 // page when this daemon serves the peer. A lead reply's markdown is left to
 // the entry render (renderEntries), which caches it.
-func conversation(lead wslive.Lead, ring []wslive.RingRecord, bodies map[string]string, contacts []Contact, lookup func(string) (Session, *wslive.Snapshot, bool), render func(string) template.HTML) ConversationView {
+func conversation(lead wslive.Lead, ring []wslive.RingRecord, bodies map[string]string, contacts []Contact, lookup func(string) (Session, *wslive.Snapshot, bool), render replyRender) ConversationView {
 	byAddress := map[string]string{}
 	for _, c := range contacts {
 		if c.ReplyID != "" {
@@ -451,7 +462,7 @@ func conversation(lead wslive.Lead, ring []wslive.RingRecord, bodies map[string]
 	}
 	cv := ConversationView{Reply: lead.Reply, Phase: lead.Phase, Permission: lead.Permission, markdown: render}
 	if lead.Reply != nil {
-		cv.ReplyHTML = render(lead.Reply.Text)
+		cv.ReplyHTML = render(lead.Reply.Text, false)
 	}
 	_, cv.Running, cv.Generating = splitBatches(lead.Batches)
 	for _, r := range ring {
