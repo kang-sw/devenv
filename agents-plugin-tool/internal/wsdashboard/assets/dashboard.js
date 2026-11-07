@@ -95,7 +95,9 @@
   // The panes that scroll on their own; the page itself scrolls on / and on
   // the board-first page. A pane hidden by the tabs view loses its offset, so
   // each pane's last visible offset is kept and put back when it shows again.
-  var PANES = ["bcol", "r-tree", "convo"];
+  // The drawer's body (drbody) is never display:none, only clipped, so a
+  // panels swap keeps its offset whether the drawer is open or closed.
+  var PANES = ["bcol", "r-tree", "convo", "drbody"];
   var paneScroll = {};
   PANES.forEach(function (id) {
     var el = $(id);
@@ -127,8 +129,9 @@
   var grid = $("grid"), gmenu = $("gmenu"), live = !!$("tabbar");
   var LAYOUT_KEY = "ws.dashboard.layout";
   // TAB maps a region to the tab that shows it; PANE names the element whose
-  // visibility tells whether a tab is shown in the current view.
-  var TAB = { tree: "convo", entries: "convo", convlive: "convo", board: "board", panels: "board" };
+  // visibility tells whether a tab is shown in the current view. The panels
+  // live in the drawer, whose handle carries their dot instead.
+  var TAB = { tree: "convo", entries: "convo", convlive: "convo", board: "board" };
   var PANE = { convo: "convo", board: "bcol" };
   function tabShown(t) { return visible($(PANE[t])); }
   function tabDot(t) { var b = doc.querySelector('#tabbar [data-tab="' + t + '"]'); return b && b.querySelector(".tdot"); }
@@ -317,12 +320,15 @@
       syncNote();
     }
     if (board || name === "convlive") applySent();
+    if (name === "panels") drawerSync();
     restoreScroll(scroll);
     if (pin) pinConvo();
     if (live && TAB[name] && !tabShown(TAB[name])) {
       var dot = tabDot(TAB[name]);
       if (dot) dot.classList.add("on");
     }
+    if (name === "panels") drawerSwapped();
+    if (name === "tree" || name === "convlive") drawerWait();
   }
 
   // --- conversation entries: merged by key, never re-rendered ----------------
@@ -1019,6 +1025,271 @@
   doc.addEventListener("touchmove", function (e) { if (lmenu && !lmenu.contains(e.target)) closeLinkMenu(false); }, { capture: true, passive: true });
   window.addEventListener("resize", function () { closeLinkMenu(false); });
   window.addEventListener("blur", function () { closeLinkMenu(false); });
+
+  // --- drawer: the side panels pulled down from the top --------------------
+  // A frame of registered tabs over the page. Each entry is { id, title,
+  // icon, count, badge, content }: functions read at every sync, content
+  // returning the element the tab shows or null when the tab is absent, and
+  // badge (optional) a count for the handle or null. The four panels are the
+  // first entries: views onto the one panels region, read again after each
+  // swap, so a later tab registers here without reworking the frame. Open
+  // state, height, and last tab are this browser's (ws.dashboard.drawer*).
+  var drawer = $("drawer"), drclip = $("drclip"), drsheet = $("drsheet"), drtabs = $("drtabs"), drbody = $("drbody");
+  var drhandle = $("drhandle"), drcounts = $("drcounts"), drheader = doc.querySelector(".dwrap > .top");
+  var DR_OPEN = "ws.dashboard.drawer", DR_H = "ws.dashboard.drawer.h", DR_TAB = "ws.dashboard.drawer.tab";
+  var DR_MIN = 160, DR_DEF = 320, DR_SHUT = 80;
+  var drEntries = [], drWant = false, drOpen = false, drHas = false, drSel = null, drH = DR_DEF, drTop = 0, drTabScroll = {};
+  function drawerTab(entry) { drEntries.push(entry); }
+  var SVGNS = "http://www.w3.org/2000/svg";
+  function iconEl(href) {
+    var svg = doc.createElementNS(SVGNS, "svg"), use = doc.createElementNS(SVGNS, "use");
+    svg.setAttribute("class", "i");
+    svg.setAttribute("aria-hidden", "true");
+    use.setAttribute("href", href);
+    svg.appendChild(use);
+    return svg;
+  }
+  // panelTab registers a panel of the panels region (#p-<id>) as a tab: its
+  // title, icon, and count chip come from the panel's own title bar.
+  function panelTab(id, badge) {
+    function el() { var r = region("panels"); return r ? r.querySelector('[id="p-' + id + '"]') : null; }
+    function head() { var p = el(); return p ? p.querySelector("summary") : null; }
+    drawerTab({
+      id: id,
+      title: function () {
+        var h = head();
+        return h ? Array.prototype.filter.call(h.childNodes, function (n) { return n.nodeType === 3; }).map(function (n) { return n.nodeValue; }).join("").trim() : id;
+      },
+      icon: function () { var h = head(), u = h && h.querySelector("svg.i use"); return u ? u.getAttribute("href") : ""; },
+      count: function () { var h = head(), c = h && h.querySelector(".chip"); return c ? c.textContent.trim() : ""; },
+      badge: badge,
+      content: el
+    });
+  }
+  // The todo chip reads "done/total" and the mailbox chip "N unread".
+  panelTab("todo", function (count) {
+    var m = /^(\d+)\/(\d+)$/.exec(count), n = m ? +m[2] - +m[1] : 0;
+    return n > 0 ? { n: n, title: n + (n === 1 ? " open todo" : " open todos") } : null;
+  });
+  panelTab("agenda");
+  panelTab("tickets");
+  panelTab("mailbox", function (count) {
+    var m = /^(\d+) unread$/.exec(count), n = m ? +m[1] : 0;
+    return n > 0 ? { n: n, title: n + " unread mail" } : null;
+  });
+
+  function drPresent() { return drEntries.filter(function (t) { return !!t.content(); }); }
+  // drawerSync re-reads the entries: the tab strip, the shown panel, the
+  // handle's counts, and whether there is a drawer at all. A sync never
+  // changes the open state, the tab, or the scroll.
+  function drawerSync() {
+    if (!drawer) return;
+    var present = drPresent(), ids = {};
+    present.forEach(function (t) { ids[t.id] = true; });
+    var sel = drSel && ids[drSel] ? drSel : present.length ? present[0].id : null;
+    // tab buttons: updated in place, so a focused tab keeps its focus
+    q("[data-drtab]", drtabs).forEach(function (b) { if (!ids[b.getAttribute("data-drtab")]) drtabs.removeChild(b); });
+    present.forEach(function (t, i) {
+      var b = drtabs.querySelector('[data-drtab="' + t.id + '"]');
+      if (!b) {
+        b = doc.createElement("button");
+        b.type = "button";
+        b.setAttribute("role", "tab");
+        b.setAttribute("data-drtab", t.id);
+      }
+      if (drtabs.children[i] !== b) drtabs.insertBefore(b, drtabs.children[i] || null);
+      var icon = t.icon(), title = t.title(), count = t.count();
+      var sig = icon + "\n" + title + "\n" + count;
+      if (b.getAttribute("data-sig") !== sig) {
+        b.setAttribute("data-sig", sig);
+        b.textContent = "";
+        if (icon) b.appendChild(iconEl(icon));
+        b.appendChild(doc.createTextNode(title));
+        if (count) { var c = doc.createElement("span"); c.className = "chip"; c.textContent = count; b.appendChild(c); }
+      }
+      b.setAttribute("aria-selected", String(t.id === sel));
+      b.tabIndex = t.id === sel ? 0 : -1;
+    });
+    drEntries.forEach(function (t) {
+      var el = t.content();
+      if (!el) return;
+      el.hidden = t.id !== sel;
+      if (el.tagName === "DETAILS" && !el.open) el.open = true;
+    });
+    drSel = sel;
+    // handle counts
+    drcounts.textContent = "";
+    var tips = [];
+    present.forEach(function (t) {
+      var bd = t.badge && t.badge(t.count());
+      if (!bd) return;
+      var s = doc.createElement("span"), n = doc.createElement("b"), icon = t.icon();
+      s.className = "dr-badge";
+      s.title = bd.title;
+      if (icon) s.appendChild(iconEl(icon));
+      n.textContent = String(bd.n);
+      s.appendChild(n);
+      drcounts.appendChild(s);
+      tips.push(bd.title);
+    });
+    drhandle.setAttribute("data-tip", tips.join(", "));
+    drTitle();
+    var has = present.length > 0;
+    if (has !== drHas) {
+      drHas = has;
+      drhandle.hidden = !has;
+      if (drheader) drheader.classList.toggle("dr-room", has);
+      drOpen = has && drWant;
+      drApply(false);
+    }
+  }
+  function drTitle() {
+    var t = (drOpen ? "close" : "open") + " the side panels: click or drag", tip = drhandle.getAttribute("data-tip");
+    if (tip) t += " (" + tip + ")";
+    if (drhandle.classList.contains("wait")) t += "; an approval is waiting";
+    drhandle.title = t;
+  }
+  // drawerWait marks the handle while an approval waits, open or closed:
+  // an open drawer can cover the agents tree's approval row.
+  function drawerWait() {
+    if (!drhandle) return;
+    drhandle.classList.toggle("wait", !!doc.querySelector("#r-convlive .permwait, #r-tree .phase.permission, #r-tree .brow.perm"));
+    drTitle();
+  }
+  // A panels change the drawer is closed over lights the handle's dot.
+  function drawerSwapped() {
+    var d = drhandle && drhandle.querySelector(".tdot");
+    if (d && !drOpen && drHas) d.classList.add("on");
+  }
+  function drMeasure() {
+    drTop = drheader ? Math.max(0, Math.round(drheader.getBoundingClientRect().bottom)) : 0;
+    drawer.style.setProperty("--drtop", drTop + "px");
+  }
+  // drMax is the tallest sheet: 60% of the window, and short of the
+  // composer with the handle below it.
+  function drMax() {
+    var m = Math.round(window.innerHeight * 0.6), c = $("composer");
+    if (visible(c)) m = Math.min(m, Math.round(c.getBoundingClientRect().top) - drTop - drhandle.offsetHeight - 6);
+    return Math.max(0, m);
+  }
+  function drClamp(h) { var hi = drMax(); return Math.max(Math.min(DR_MIN, hi), Math.min(hi, h)); }
+  // drApply lays the drawer out for its state; anim animates a click's
+  // toggle only.
+  function drApply(anim) {
+    if (!drawer) return;
+    drMeasure();
+    var h = drClamp(drH);
+    drawer.classList.toggle("anim", !!anim);
+    drawer.classList.toggle("open", drOpen);
+    drsheet.style.height = h + "px";
+    drclip.style.height = (drOpen ? h : 0) + "px";
+    drhandle.style.top = (drOpen ? drTop + h : 0) + "px";
+    drhandle.setAttribute("aria-expanded", String(drOpen));
+    drTitle();
+  }
+  function drSetOpen(open) {
+    if (!drHas) return;
+    if (!open && drsheet.contains(doc.activeElement)) drhandle.focus();
+    drWant = drOpen = open;
+    save(DR_OPEN, open ? "1" : null);
+    if (open) { var d = drhandle.querySelector(".tdot"); if (d) d.classList.remove("on"); }
+    drApply(true);
+  }
+  function drSelect(id) {
+    if (id === drSel) return;
+    if (drSel) drTabScroll[drSel] = drbody.scrollTop;
+    drSel = id;
+    save(DR_TAB, id);
+    drawerSync();
+    drbody.scrollTop = drTabScroll[id] || 0;
+  }
+  if (drawer) {
+    drWant = load(DR_OPEN) === "1";
+    var savedH = parseFloat(load(DR_H));
+    if (isFinite(savedH) && savedH > 0) drH = savedH;
+    drSel = load(DR_TAB);
+    drawerSync();
+    drawerWait();
+    // drag: the handle follows the pointer; past the header's bottom the
+    // sheet comes with it, and the release sets the height or, short of
+    // DR_SHUT, closes. A press that never moves is a click.
+    var drDrag = null, drDragged = false;
+    drhandle.addEventListener("pointerdown", function (e) {
+      if (e.button !== undefined && e.button !== 0) return;
+      drMeasure();
+      drDrag = { y0: e.clientY, off: e.clientY - drhandle.getBoundingClientRect().top, moved: false, ext: 0 };
+      try { drhandle.setPointerCapture(e.pointerId); } catch (x) { /* no capture: the moves still land */ }
+    });
+    drhandle.addEventListener("pointermove", function (e) {
+      if (!drDrag) return;
+      if (!drDrag.moved && Math.abs(e.clientY - drDrag.y0) < 5) return;
+      drDrag.moved = true;
+      var y = e.clientY - drDrag.off, max = drMax(), ext = Math.max(0, Math.min(max, y - drTop));
+      drDrag.ext = ext;
+      drawer.classList.remove("anim");
+      drawer.classList.add("drag");
+      drsheet.style.height = Math.max(Math.min(DR_MIN, max), ext) + "px";
+      drclip.style.height = ext + "px";
+      drhandle.style.top = (ext > 0 ? drTop + ext : Math.max(0, Math.min(y, drTop))) + "px";
+    });
+    function drEnd() {
+      var d = drDrag;
+      drDrag = null;
+      if (!d || !d.moved) return;
+      drawer.classList.remove("drag");
+      drDragged = true;
+      setTimeout(function () { drDragged = false; }, 0);
+      if (d.ext < DR_SHUT) { drSetOpen(false); return; }
+      drH = drClamp(d.ext);
+      save(DR_H, String(drH));
+      drWant = drOpen = true;
+      save(DR_OPEN, "1");
+      var dot = drhandle.querySelector(".tdot");
+      if (dot) dot.classList.remove("on");
+      drApply(false);
+    }
+    drhandle.addEventListener("pointerup", drEnd);
+    drhandle.addEventListener("pointercancel", drEnd);
+    drhandle.addEventListener("click", function () { if (!drDragged) drSetOpen(!drOpen); });
+    drtabs.addEventListener("click", function (e) {
+      var b = e.target.closest && e.target.closest("[data-drtab]");
+      if (b) drSelect(b.getAttribute("data-drtab"));
+    });
+    drtabs.addEventListener("keydown", function (e) {
+      var d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+      if (!d) return;
+      var bs = q("[data-drtab]", drtabs), i = bs.indexOf(doc.activeElement);
+      if (i < 0) return;
+      e.preventDefault();
+      var b = bs[(i + d + bs.length) % bs.length];
+      drSelect(b.getAttribute("data-drtab"));
+      b.focus();
+    });
+    // Escape closes the drawer after any open menu (link menu, gear menu)
+    // has had it, and never while the composer has focus: there Escape
+    // starts the composer's Escape-then-Tab way out. Capture runs this
+    // before the menus' own listeners close them.
+    doc.addEventListener("keydown", function (e) {
+      if (e.key !== "Escape" || !drOpen || e.defaultPrevented) return;
+      if (lmenu || (gmenu && !gmenu.hidden)) return;
+      if (ctext && doc.activeElement === ctext) return;
+      drSetOpen(false);
+    }, true);
+    // A click outside the drawer closes it; the link menu a drawer link
+    // opens counts as inside.
+    doc.addEventListener("click", function (e) {
+      var t = e.target;
+      if (!drOpen || drDragged || !t || !t.closest) return;
+      if (t.closest("#drclip, #drhandle, .lmenu")) return;
+      drSetOpen(false);
+    }, true);
+    // The header can wrap or change height (a chip appears): the sheet
+    // follows its bottom edge. A resize re-clamps the height without saving.
+    window.addEventListener("resize", function () { drApply(false); });
+    if (window.ResizeObserver && drheader) new ResizeObserver(function () { drApply(false); }).observe(drheader);
+    drOpen = drHas && drWant;
+    drApply(false);
+  }
 
   // --- the board's Now frame ------------------------------------------------
   // The server renders the board's Now slot in a sandboxed frame with an

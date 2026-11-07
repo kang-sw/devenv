@@ -153,9 +153,9 @@ func TestSessionPageRendersLiveRegions(t *testing.T) {
 }
 
 // TestSessionPagesCarryScriptHooks pins the elements and attributes the page
-// script and stylesheet read: the board column that scrolls the board and
-// panels together, the tab bar and its dots, the layout menu, the composer,
-// the live indicator's label, and the banner.
+// script and stylesheet read: the board column, the drawer that holds the
+// panels, the tab bar and its dots, the layout menu, the composer, the live
+// indicator's label, and the banner.
 func TestSessionPagesCarryScriptHooks(t *testing.T) {
 	f := startPageFixture(t)
 	code, live := get(t, f.base+"/s/livesession")
@@ -183,13 +183,24 @@ func TestSessionPagesCarryScriptHooks(t *testing.T) {
 	if i, j, k := strings.Index(live, `data-region="tree"`), strings.Index(live, `id="splitter"`), strings.Index(live, `<div id="convo" class="convo"><div id="r-entries"`); i < 0 || j < i || k < j {
 		t.Errorf("splitter is not between the tree and the conversation wrapper holding the entries region")
 	}
-	// The board column holds the panels region too.
-	if i, j := strings.Index(live, `id="bcol"`), strings.Index(live, `data-region="panels"`); i < 0 || j < i {
-		t.Errorf("panels region is not inside the board column")
-	}
 	_, board := get(t, f.base+"/s/boardsession")
 	if !strings.Contains(board, `<div id="bcol" class="bcol"><div id="r-board"`) {
 		t.Errorf("board-first page lacks the board column")
+	}
+	// Both pages carry the drawer: the panels region sits in its body, out
+	// of the board column.
+	for name, page := range map[string]string{"live": live, "board-first": board} {
+		for _, want := range []string{
+			`<div class="drawer" id="drawer">`, `id="drclip"`, `id="drsheet"`, `id="drtabs"`, `id="drhandle"`, `id="drcounts"`, `class="dr-wait"`,
+			`<div class="dr-body" id="drbody"><div id="r-panels" class="region r-panels" data-region="panels"`,
+		} {
+			if !strings.Contains(page, want) {
+				t.Errorf("%s page lacks drawer hook %q", name, want)
+			}
+		}
+		if i, j := strings.Index(page, `data-region="panels"`), strings.Index(page, `id="bcol"`); i < 0 || j < 0 || i > j {
+			t.Errorf("%s page: the panels region is not in the drawer ahead of the board column", name)
+		}
 	}
 	// Both pages run the open-question pill beside the answer form.
 	for name, page := range map[string]string{"live": live, "board-first": board} {
