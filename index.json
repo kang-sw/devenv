@@ -625,19 +625,6 @@
     "261107-epic-ws-dashboard-messenger-round2": {
       "registered_at": "2026-11-07T03:56:25Z"
     },
-    "261107-feat-ws-dashboard-composer-image-attach": {
-      "registered_at": "2026-11-07T03:56:30Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-07T04:14:45Z",
-        "impl": {
-          "branch": "impl/develop/ended-reply-cross"
-        }
-      }
-    },
     "261107-feat-ws-dashboard-conversation-history": {
       "registered_at": "2026-11-07T04:09:02Z",
       "lease": {
@@ -650,6 +637,9 @@
           "branch": "impl/develop/thong-duo-boxer"
         }
       }
+    },
+    "261107-feat-ws-dashboard-link-actions": {
+      "registered_at": "2026-11-07T04:37:41Z"
     },
     "261107-feat-ws-dashboard-steer-promotion": {
       "registered_at": "2026-11-07T04:09:08Z",
