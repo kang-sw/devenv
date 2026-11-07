@@ -41,6 +41,11 @@ repository sized for 50-60 people, reached from the dashboard.
   structures (user, board (139) ok, 2026-11-07: "스타일을 제외한 목업(가능한
   빠르게 이터레이션 할 수 있게)을 보면서 구체적으로 어떤 데이터 구조를
   가져갈지 제대로 정하는 걸로"). Later children are planned only after it.
+- `261107-feat-ws-tracker-ledger-protocol`: the payload-agnostic protocol
+  layer (per-clone refs, signed commits, identity, causality, sync, rewind
+  refusal), planned ahead of the data structures by board (235) a, since the
+  data structures do not affect it. The data-structure layer stays behind the
+  mockup.
 
 ## Cross-Child Decisions
 
@@ -59,7 +64,10 @@ repository sized for 50-60 people, reached from the dashboard.
   the remote uses (HTTP at the user's company). Every client verifies
   signatures against the member public keys in a roles file, and ignores and
   flags events that break the rules. The agent generates the key and
-  configures git; a member sends a join request and an admin approves it.
+  configures git. Membership is a self-join by anyone with write access to
+  the repository, with admins arranging and removing members afterward
+  (board (231) b, (232) b; superseding the earlier admin-approved join
+  request).
   Host-side enforcement (branch protection, rulesets, pre-receive hooks) is
   optional hardening where the host supports it. Rejected: relying on the
   host's key registration or signature verification.
@@ -88,7 +96,11 @@ repository sized for 50-60 people, reached from the dashboard.
 - **Sync** (user, board (126) ok):
   - A background poll of the remotes every 3 minutes.
   - An immediate check when the drawer opens and when a lead session starts.
-  - The member's own writes are pushed immediately.
+  - The member's own writes are pushed after a 5-minute idle delay, at an
+    explicit apply (a button that drops down while writes are pending), or
+    when the tracker panel is collapsed (board (241), amending (126)'s
+    immediate push, which with batched commits (227) a would commit per
+    write).
   - New assignments show as a badge on the drawer handle, like the mailbox.
   - Rejected: short-interval polling; webhook receivers, which need an
     inbound server a personal machine does not have.

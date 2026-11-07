@@ -306,29 +306,36 @@ the same commit as their creation, and it has a topic and a blocked subtask.
 | 163 | Self-assignment for one's own work. "My assignments" gathers everything. |
 | 155 | One `origin`: `human` / `agent` / `agent-auto`. |
 | 186-189 | Peer requests to anyone. Pending requests are not counted. Accepting needs no approval, but the recipient's lead may return. An agent never accepts or declines. |
+| 201 | A member whose key was revoked continues under the same id after `roles.add_key`. |
+| 202 | Changing status while awaiting the assigner's confirm cancels the completion request. |
+| 203 | Concurrent writes to one field: the display winner is the later ts, then member id, then seq. Both values are kept and shown. |
+| 204 | An event whose `seen` names an unreceived event is waiting: no verdict until the gap fills. |
+| 205 | A broken event (seq gap or duplicate, wrong ref, bad signature) consumes no seq. |
+| 206 | `item.edit` also edits the project field. |
+| 207 | Hiding an item that still holds someone else's active assignment is flagged. |
+| 208 | An admin may act on a removed member's work. |
+| 209 | A member can be removed only when they lead nobody and are not an admin. |
+| 210 (Q1) | Revocation cuts at what the revoker had seen: the one sanctioned verdict flip, the same on every client. |
+| 211 (Q2) | A victim's own events cut by a revocation are re-issued with the new key; the originals stay ignored. |
+| 212, 230, 237 (Q3) | One ref per clone, `refs/heads/tracker/m/<member>/<clone>`; event id `<member>.<clone>#<seq>`; `seen` per clone stream. No one-device rule. Supersedes 153/171's `author#seq`. |
+| 213 (Q4) | Unassign and return beat a concurrent status write or close. |
+| 214 (Q5) | A requester may choose "requester confirms" when sending, as with assignment. |
+| 215 (Q6) | A returned request stays returned; the requester sends again if needed. |
+| 227 | Writes batch in a local journal and close into one signed commit when `seen` would change or at push. Supersedes 154's one commit per write. |
+| 229 | Registering an empty repository creates the store; the registrant is sole admin. |
+| 231, 232 | Self-join by an own-ref `member.join` event, first come per id; trust is repository access. Replaces the `roles.add_member` stand-in. |
+| 233 | A person's PCs share one copied key file. |
+| 234 | A deleted or rewound remote ref is refused and kept locally, with a manual restore push. |
+| 235, 236 | Protocol layer first (`261107-feat-ws-tracker-ledger-protocol`): identity is protocol, leads and assignment reach are data structure, payloads are opaque to the protocol. |
+| 241 | Own writes push after a 5-minute idle delay, at an explicit apply, or when the panel collapses. |
+| 247 | Genesis is the single commit of `refs/heads/tracker/genesis`, never updated. |
 
 ## Open questions
 
-1. **Revocation flips a shown verdict.** The cutoff rule (what the revoker had
-   seen) is the same on every client. But a client that received the stolen-key
-   event before the revocation shows it as applied until the revocation
-   arrives, then shows it as ignored. Keep this one sanctioned flip?
-   Alternative: judge by local arrival order, which keeps verdicts stable per
-   client but lets clients disagree.
-2. **In-flight legitimate events of a revoked key.** A victim's own commits
-   signed with the old key and not yet seen by the revoker are ignored too. Is
-   re-issuing them as new events (with a new seq and the new key) the recovery
-   path?
-3. **Two devices, one member.** Two offline devices of the same member both
-   write seq N. The second push is non-fast-forward. Does the client rebase
-   (renumber seq, recompute `seen`), or is one device per member a rule?
-4. **Removal wins over concurrent status writes.** An unassign or return beats a
-   concurrent status or close, instead of the ts display winner. Confirm.
-5. **Accepted request completion.** Accepted requests use "recipient closes" and
-   the requester has no confirm. Should the requester be able to choose
-   "requester confirms" when sending?
-6. **Returned is terminal.** A returned request does not go back to pending.
-   Alternative: return to pending so the recipient's lead can redirect it.
+None. The six questions v2 raised were settled as 210-215 above (Q1-Q6).
+The page still models the v2 behavior for 212 (one ref per member), 214 (no
+requester confirm), and 227 (one commit per write); the Settled rows are
+authoritative.
 
 ## Not modeled in v2
 
