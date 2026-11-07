@@ -145,7 +145,12 @@ links resolved against the file's own directory, other UTF-8 text as
 copies. A file outside the root offers the copies only. A board image inside
 the root loads through `GET /s/<reply-id>/image?path=<root-relative path>`,
 which serves only an image-extension file under the same containment, and
-any other image renders as its path. A finished lead reply draws its mermaid
+any other image renders as its path. On a served page a board's Now field
+renders in a sandboxed `srcdoc` frame (`allow-scripts allow-popups
+allow-popups-to-escape-sandbox`, an opaque origin that sends no cookie), so
+its images are inlined as `data:` URLs up to 2 MiB under the same containment
+(`wsdashboard.ImageDataURL`); a larger image falls back to the image route,
+which a LAN viewer's frame cannot load. A finished lead reply draws its mermaid
 fences; the reply still streaming keeps them code blocks. A finished lead
 reply also keeps its inline HTML and SVG through an allow-list sanitizer: no
 script, form, embed, or fetching element or attribute survives, and a raw
@@ -183,7 +188,10 @@ Host. LAN mode (`dashboard.lan_enabled`, read from the global config layer
 only and passed as `dashboard --lan`) binds every interface: a request whose
 peer address and Host are both loopback still passes with no token, and every
 other request, on every route, needs the LAN access token, which is separate
-from the endpoint file's shutdown token. The token arrives as `?token=` on the
+from the endpoint file's shutdown token, with one exception: GET and HEAD of
+the shared mermaid script (`/s/<content-hash>.js`, the vendored library under
+a hash name, so it reveals nothing of any session) pass without it, because
+the Now frame's opaque origin loads it with no cookie. The token arrives as `?token=` on the
 address the index page shows to a viewer on this machine only; that answer
 sets an HttpOnly cookie, which the page's links, SSE stream, images, and posts
 then carry, so no rendered URL holds it. `/health` reports the mode as `lan`,

@@ -35,8 +35,9 @@ import (
 //     reply fetches through CSS or lays a layer over the page; the finished
 //     bubble's contain: paint keeps the rest inside it.
 //   - A footnote's sup and li keep their id when it has the shape
-//     footnoteIDPrefix writes, and no other element keeps one, so a reply
-//     cannot claim a page id; a task-list checkbox is the one form control,
+//     footnoteIDPrefix writes and carries this text's own prefix, and no other
+//     element keeps one, so a reply cannot claim a page id or another
+//     message's footnote id; a task-list checkbox is the one form control,
 //     always a disabled checkbox.
 //   - SVG keeps shapes, text, markers, and gradients: an id is prefixed with
 //     svgIDPrefix and a hash of the reply, so it collides neither with a page
@@ -233,7 +234,7 @@ func (p *pageData) keepHTMLAttrs(n *xhtml.Node, name string, allowed map[string]
 			}
 			continue
 		case key == "id":
-			if (name != "sup" && name != "li") || !footnoteID.MatchString(a.Val) {
+			if (name != "sup" && name != "li") || !footnoteID.MatchString(a.Val) || !strings.HasPrefix(a.Val, p.footnotePrefix) {
 				continue
 			}
 		case !replyGlobal[key] && !allowed[key]:

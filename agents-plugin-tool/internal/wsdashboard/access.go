@@ -25,6 +25,12 @@ import (
 //     DNS-rebinding page;
 //   - it carries the LAN access token.
 //
+// One route needs neither: GET and HEAD of the shared mermaid script
+// (publicAsset), which the Now slot's sandboxed frame loads from an opaque
+// origin that sends no cookie. That frame also inlines its images as data:
+// URLs (ImageDataURL, up to 2 MiB); a larger image falls back to the image
+// route, which a LAN viewer's frame cannot load.
+//
 // The LAN token is not the endpoint file's shutdown token and is never
 // written to the endpoint file, so a LAN browser never holds the shutdown
 // credential. It persists in its own owner-only file in the state directory,
