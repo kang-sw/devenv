@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: ff04e6dac9d790ef
 sage-review-completeness-reviewed: ff04e6dac9d790ef
+completed: 2026-11-07
 ---
 
 # Dashboard: pull-down drawer from the top for Todo, Agenda, Tickets, and Mailbox
