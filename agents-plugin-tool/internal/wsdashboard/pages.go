@@ -208,7 +208,11 @@ func renderRegionElement(host regionHost, name string) template.HTML {
 
 type sessionPageData struct {
 	SessionView
-	Assets  pageAssetsData
+	Assets pageAssetsData
+	// SysOpen offers the link menu's "open in system browser" item: the
+	// page was asked for by a browser on this machine. It is outside every
+	// region, since regions are shared by every viewer's stream.
+	SysOpen bool
 	regions regionSet
 }
 
@@ -278,14 +282,15 @@ func renderedEntries(entries []ConvEntry) string {
 	return b.String()
 }
 
-// renderSessionPage renders the whole session page around its regions.
-func renderSessionPage(view SessionView, regions regionSet) (string, error) {
+// renderSessionPage renders the whole session page around its regions;
+// sysOpen offers the system-open link action (sessionPageData.SysOpen).
+func renderSessionPage(view SessionView, regions regionSet, sysOpen bool) (string, error) {
 	a, err := loadDashboardAssets()
 	if err != nil {
 		return "", err
 	}
 	var buf bytes.Buffer
-	err = a.tmpl.ExecuteTemplate(&buf, "session", sessionPageData{SessionView: view, Assets: a.data, regions: regions})
+	err = a.tmpl.ExecuteTemplate(&buf, "session", sessionPageData{SessionView: view, Assets: a.data, SysOpen: sysOpen, regions: regions})
 	return buf.String(), err
 }
 
@@ -461,12 +466,16 @@ func (d *Daemon) handleIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleSessionRoutes serves everything under /s/: a session page, its SSE
-// stream, its image and attachment routes, its message and cancel routes, and the shared
-// assets a page loads by relative path.
+// stream, its image, file view, history, and attachment routes, its message,
+// cancel, steer, and system-open routes, and the shared assets a page loads
+// by relative path.
 func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/s/")
 	if replyID, sub, _ := strings.Cut(rest, "/"); sub == "message" || sub == "cancel" || sub == "steer" {
 		d.handleInboxWrite(w, r, replyID, sub)
+		return
+	} else if sub == "open" {
+		d.handleSystemOpen(w, r, replyID)
 		return
 	}
 	if !readMethod(w, r) {
@@ -488,6 +497,8 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 		d.handleSessionEvents(w, r, replyID)
 	case sub == "image":
 		d.handleImage(w, r, replyID)
+	case sub == "file":
+		d.handleFile(w, r, replyID)
 	case sub == "history":
 		d.handleHistory(w, r, replyID)
 	case strings.HasPrefix(sub, "attachment/"):
@@ -506,7 +517,7 @@ func (d *Daemon) handleSessionPage(w http.ResponseWriter, r *http.Request, reply
 	regions, err := renderSessionRegions(view, d.entries)
 	if err == nil {
 		var html string
-		if html, err = renderSessionPage(view, regions); err == nil {
+		if html, err = renderSessionPage(view, regions, localViewer(r)); err == nil {
 			writeHTML(w, html)
 			return
 		}

@@ -422,36 +422,42 @@ func hasReplyIDPrefix(address string) bool {
 	return len(address) >= len(wsmailbox.ReplyIDPrefix) && address[:len(wsmailbox.ReplyIDPrefix)] == wsmailbox.ReplyIDPrefix
 }
 
-// replyMarkdown renders a lead reply as markdown under the served page's
-// link rule, the board's: a file link or a file image outside root is path
-// text, and an image inside root is the image route's URL.
-func replyMarkdown(root, replyID string) func(string) template.HTML {
-	targets := wswhiteboard.TextTargets{
-		FileText: func(path string) string {
-			if rel, ok := relativeInside(root, path); ok {
-				return filepath.ToSlash(rel)
-			}
-			return filepath.ToSlash(path)
-		},
-		ImageSrc: func(path string) string { return ImageSrc(root, replyID, path) },
+// replyRender renders lead replies as markdown: finished a reply entry,
+// streaming the reply still streaming.
+type replyRender struct {
+	finished, streaming func(string) template.HTML
+}
+
+// replyMarkdown renders lead replies under the served page's link rule
+// (servedTargets): a file target is an action link for the page's link
+// menu, and an image inside root is the image route's URL. A finished
+// reply's mermaid fences are drawn by the page; the streaming reply keeps
+// them code blocks, since it re-renders every tick and a diagram would
+// redraw with it.
+func replyMarkdown(root, replyID string) replyRender {
+	streaming := servedTargets(root, replyID)
+	finished := servedTargets(root, replyID)
+	finished.Mermaid = true
+	return replyRender{
+		finished:  func(s string) template.HTML { return wswhiteboard.RenderText(s, finished) },
+		streaming: func(s string) template.HTML { return wswhiteboard.RenderText(s, streaming) },
 	}
-	return func(s string) template.HTML { return wswhiteboard.RenderText(s, targets) }
 }
 
 // conversation turns the ring into the page's stream: each mail line gets
 // its body while the mailbox history still holds it and a link to its peer's
 // page when this daemon serves the peer. A lead reply's markdown is left to
 // the entry render (renderEntries), which caches it.
-func conversation(lead wslive.Lead, ring []wslive.RingRecord, bodies map[string]string, contacts []Contact, lookup func(string) (Session, *wslive.Snapshot, bool), render func(string) template.HTML) ConversationView {
+func conversation(lead wslive.Lead, ring []wslive.RingRecord, bodies map[string]string, contacts []Contact, lookup func(string) (Session, *wslive.Snapshot, bool), render replyRender) ConversationView {
 	byAddress := map[string]string{}
 	for _, c := range contacts {
 		if c.ReplyID != "" {
 			byAddress[c.Address] = c.ReplyID
 		}
 	}
-	cv := ConversationView{Reply: lead.Reply, Phase: lead.Phase, Permission: lead.Permission, markdown: render}
+	cv := ConversationView{Reply: lead.Reply, Phase: lead.Phase, Permission: lead.Permission, markdown: render.finished}
 	if lead.Reply != nil {
-		cv.ReplyHTML = render(lead.Reply.Text)
+		cv.ReplyHTML = render.streaming(lead.Reply.Text)
 	}
 	_, cv.Running, cv.Generating = splitBatches(lead.Batches)
 	for _, r := range ring {

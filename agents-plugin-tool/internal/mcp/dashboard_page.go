@@ -12,8 +12,9 @@ import (
 
 // The dashboard daemon's session page, read through DashboardSessionSource:
 // the board and its panels rendered with the static page's templates under
-// the served-page link rule (a file link is path text; a board image inside
-// the session's project root is the image route's URL, and path text
+// the served-page link rule (a file link is an action link for the page's
+// link menu, opening the file view inside the session's project root; a
+// board image inside the root is the image route's URL, and path text
 // otherwise), the mail correspondents, and the mailbox history bodies.
 // Everything here reaches a browser, so no returned field may carry the
 // session key.
@@ -52,6 +53,7 @@ func (src *DashboardSessionSource) ReadPage(reg wsdashboard.Registration) (wsdas
 		ImageSrc: func(path string) string {
 			return wsdashboard.ImageSrc(record.Root, reg.ReplyID, path)
 		},
+		FileActions: wsdashboard.FileActions(record.Root, reg.ReplyID),
 	})
 	regions, err := wswhiteboard.RenderRegions(view)
 	if err != nil {
