@@ -634,19 +634,6 @@
     "261107-feat-ws-dashboard-status-band": {
       "registered_at": "2026-11-07T04:37:52Z"
     },
-    "261107-feat-ws-dashboard-steer-promotion": {
-      "registered_at": "2026-11-07T04:09:08Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-07T04:27:42Z",
-        "impl": {
-          "branch": "impl/develop/mummy-cover-defy"
-        }
-      }
-    },
     "261107-feat-ws-whiteboard-now-markdown": {
       "registered_at": "2026-11-07T04:37:46Z"
     }
