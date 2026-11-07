@@ -37,7 +37,15 @@
 // whose arguments are streaming), a tool chunk announces its call in the
 // step's batch at once (calls start while the step still streams), and the
 // batch ends when the step has ended and every call has. A step with no tool
-// call makes no batch.
+// call makes no batch, so its tokens are reported nowhere. A finished batch's
+// view also carries its calls (tool name, start, end, failed; never an
+// argument or a result) and the request's token usage.
+//
+// Each finished batch reaches ws-mcp at least once: beyond the newest
+// BATCH_CAP, a buffer keeps every finished batch no delivered intake call
+// carried yet (up to BATCH_RETAIN_CAP) and lists it, and ws-mcp counts a
+// batch once by its epoch and seq. So batches that finish faster than calls
+// deliver (a slow call, a retry) are still counted.
 //
 // Permission waits: a tool.check that resolves `ask` for a person to answer
 // marks the call as asked; it still shows only as a running tool. A
@@ -86,6 +94,10 @@ export const TEXT_SEND_CAP = 64 * 1024 + 1
 export const BATCH_CAP = 5
 export const TOOL_NAME_CAP = 5
 export const ARGS_PREVIEW_CAP = 200
+/** Batches a buffer keeps at most while finished ones wait for a delivered call; past it the oldest go uncounted. */
+export const BATCH_RETAIN_CAP = 32
+/** Calls a finished batch's view lists; the rest are only counted. */
+export const BATCH_CALL_CAP = 32
 /** Finished subagents kept beside every running one, as the snapshot keeps them. */
 export const FINISHED_AGENT_CAP = 5
 /** The notification type that confirms a permission dialog is open. */
@@ -205,7 +217,10 @@ function cleanToolName(name: string): string {
 // ---- The batch model ------------------------------------------------------
 
 type Call = { id: string; toolName: string; argsPreview: string; startedAt?: number; endedAt?: number; isError?: boolean }
-type Batch = { seq: number; step: string; startedAt: number; endedAt?: number; calls: Call[] }
+type Batch = { seq: number; step: string; startedAt: number; endedAt?: number; calls: Call[]; usage?: TokenUsage; delivered?: boolean }
+
+/** A model request's token usage as the intake takes it. */
+export type TokenUsage = { input: number; output: number; cacheRead: number; cacheWrite: number }
 type GeneratingKind = 'thinking' | 'replying' | 'tool'
 type Generating = { startedAt: number; kind: GeneratingKind; phaseStartedAt: number; toolName?: string; chars?: number }
 
@@ -223,6 +238,18 @@ export type BatchView = {
   endedAt?: number
   running?: { toolName: string; argsPreview: string; startedAt: number; done: number; othersRunning: number }
   generating?: { kind: GeneratingKind; phaseStartedAt: number; toolName?: string; chars?: number }
+  /** A finished batch's calls, up to BATCH_CALL_CAP: names and clocks only. */
+  calls?: { name: string; startedAt: number; endedAt?: number; failed: boolean }[]
+  /** A finished batch's request tokens, when the step reported any. */
+  usage?: TokenUsage
+}
+
+/** A step result's usage as a TokenUsage; undefined when absent or all zero. */
+export function stepTokens(u: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number } | null | undefined): TokenUsage | undefined {
+  if (!u) return undefined
+  const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.round(v) : 0)
+  const t = { input: n(u.input_tokens), output: n(u.output_tokens), cacheRead: n(u.cache_read_input_tokens), cacheWrite: n(u.cache_creation_input_tokens) }
+  return t.input || t.output || t.cacheRead || t.cacheWrite ? t : undefined
 }
 
 export function createBuffer(epoch: string): Buffer {
@@ -237,8 +264,29 @@ function openBatch(buf: Buffer): Batch | undefined {
 function startBatch(buf: Buffer, step: string, now: number): Batch {
   const batch: Batch = { seq: buf.nextSeq++, step, startedAt: now, calls: [] }
   buf.batches.push(batch)
-  if (buf.batches.length > BATCH_CAP) buf.batches.splice(0, buf.batches.length - BATCH_CAP)
+  trimBatches(buf)
   return batch
+}
+
+/** Keeps the newest BATCH_CAP batches and, older than those, the ones not yet delivered, up to BATCH_RETAIN_CAP in all. */
+function trimBatches(buf: Buffer): void {
+  const n = buf.batches.length
+  let drop = 0
+  while (n - drop > BATCH_CAP && (buf.batches[drop]!.delivered === true || n - drop > BATCH_RETAIN_CAP)) drop++
+  if (drop > 0) buf.batches.splice(0, drop)
+}
+
+/**
+ * A delivered intake call carried `views`: the finished batches among them
+ * are delivered, and those older than the newest BATCH_CAP leave the buffer.
+ */
+export function markDelivered(buf: Buffer, views: readonly { epoch?: unknown; seq?: unknown; endedAt?: unknown }[]): void {
+  for (const view of views) {
+    if (view.epoch !== buf.epoch || view.endedAt === undefined) continue
+    const batch = buf.batches.find((b) => b.seq === view.seq)
+    if (batch?.endedAt !== undefined) batch.delivered = true
+  }
+  trimBatches(buf)
 }
 
 /** The open batch of `step`, ending an open batch of an earlier step first. */
@@ -290,8 +338,8 @@ export function stepChunk(buf: Buffer, step: string, chunk: { kind: string; id?:
   }
 }
 
-/** The request `step` ended: its generating view goes, and its batch takes the calls' arguments. */
-export function stepEnded(buf: Buffer, step: string, toolUses: readonly { name: string; input: unknown }[], now: number): boolean {
+/** The request `step` ended: its generating view goes, and its batch takes the calls' arguments and the request's tokens. */
+export function stepEnded(buf: Buffer, step: string, toolUses: readonly { name: string; input: unknown }[], now: number, usage?: TokenUsage): boolean {
   const had = buf.generating !== undefined
   if (buf.streaming === step) {
     buf.streaming = undefined
@@ -308,6 +356,7 @@ export function stepEnded(buf: Buffer, step: string, toolUses: readonly { name: 
     if (!call) batch.calls.push({ id: '', toolName: cleanToolName(use.name), argsPreview: argsPreview(use.input) })
     else if (call.argsPreview === '') call.argsPreview = argsPreview(use.input)
   })
+  if (usage) batch.usage = usage
   settleBatch(buf, batch, now)
   return true
 }
@@ -361,6 +410,13 @@ export function batchViews(buf: Buffer): BatchView[] {
     const view: BatchView = { epoch: buf.epoch, seq: batch.seq, toolNames, callCount: batch.calls.length, failed, startedAt: batch.startedAt }
     if (batch.endedAt !== undefined) {
       view.endedAt = Math.max(batch.endedAt, 1)
+      view.calls = batch.calls.slice(0, BATCH_CALL_CAP).map((c) => ({
+        name: c.toolName,
+        startedAt: c.startedAt ?? batch.startedAt,
+        ...(c.endedAt !== undefined ? { endedAt: c.endedAt } : {}),
+        failed: c.isError === true || c.endedAt === undefined,
+      }))
+      if (batch.usage) view.usage = { ...batch.usage }
       return view
     }
     const done = batch.calls.filter((c) => c.endedAt !== undefined).length
@@ -524,7 +580,11 @@ export interface Dashboard {
   turnCompleted: (agentId: string | undefined, answer: string, reason: string) => void
   stepBegan: (agentId: string | undefined, step: string) => void
   stepChunk: (agentId: string | undefined, step: string, chunk: { kind: string; index?: number; text?: string; id?: string; name?: string; json?: string }) => void
-  stepEnded: (agentId: string | undefined, step: string, result: { answer?: string; toolUses?: readonly { name: string; input: unknown }[] }) => void
+  stepEnded: (
+    agentId: string | undefined,
+    step: string,
+    result: { answer?: string; toolUses?: readonly { name: string; input: unknown }[]; usage?: Parameters<typeof stepTokens>[0] },
+  ) => void
   toolBegan: (agentId: string | undefined, id: string | undefined, tool: string, args: Record<string, unknown>) => void
   toolEnded: (agentId: string | undefined, id: string | undefined, isError: boolean) => void
   toolChecked: (check: { agentId?: string; id?: string; tool: string; input: unknown; approver?: string }, decision: string) => void
@@ -739,6 +799,15 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
     return needStart ? [{ kind: 'reset' }, lastTurnStart!] : [{ kind: 'reset' }]
   }
 
+  /** A delivered call carried these events: each agent's finished batches in them are delivered. */
+  function markSent(events: DashboardEvent[]): void {
+    for (const e of events) {
+      if (e.kind !== 'agent' || !Array.isArray(e.batches)) continue
+      const r = agents.get(typeof e.agentId === 'string' ? e.agentId : LEAD)
+      if (r) markDelivered(r.buf, e.batches as BatchView[])
+    }
+  }
+
   /** Finished subagents past the cap leave the local tree, as they leave the snapshot's. */
   function pruneFinished(): void {
     const finished = [...agents.entries()].filter(([id, r]) => id !== LEAD && r.status !== 'running')
@@ -783,6 +852,7 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
       if (callGeneration !== generation) return
       inFlight = false
       lastFlushAt = edges.now()
+      if (delivered) markSent(events)
       // Only an answered call's `accepts:` line turns status on; any other outcome turns it off.
       const accepted = accepts.includes(STATUS_KIND)
       if (accepted && !statusAccepted) statusDirty = status !== undefined
@@ -998,7 +1068,7 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
     }),
     stepEnded: guard('step end', (agentId: string | undefined, step: string, result: Parameters<Dashboard['stepEnded']>[2]) => {
       const id = idOf(agentId)
-      if (stepEnded(rec(id).buf, step, result.toolUses ?? [], edges.now())) markDirty(id)
+      if (stepEnded(rec(id).buf, step, result.toolUses ?? [], edges.now(), stepTokens(result.usage))) markDirty(id)
       if (id !== LEAD) return
       const answer = typeof result.answer === 'string' ? result.answer : ''
       if (answer !== '') {

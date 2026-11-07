@@ -11,12 +11,17 @@ import {
   cleanToolName,
   AGENT_BATCH_CAP,
   BATCH_ARGS_PREVIEW_CAP,
+  BATCH_CALL_CAP,
+  BATCH_RETAIN_CAP,
   BATCH_TOOL_NAME_CAP,
   batchView,
   batchViews,
   closeOpenBatch,
   createBatchBuffer,
+  dashboardBatchViews,
   flattenArgsPreview,
+  markBatchesDelivered,
+  messageTokens,
   observeBatchEvent,
   type AgentBatchBuffer,
 } from "../src/agent-batches.ts";
@@ -455,5 +460,73 @@ describe("failure count", () => {
       observeBatchEvent(buffer, { type }, 20);
       assert.equal(batchView(buffer.batches[0]).failed, 2, `${type}: the in-flight call and the never-started one`);
     }
+  });
+});
+
+describe("dashboard views", () => {
+  /** One finished single-call batch per step, started at `t`. */
+  function finishOne(buffer: AgentBatchBuffer, id: string, t: number): void {
+    observeBatchEvent(buffer, messageEnd({ id, name: "grep" }), t);
+    observeBatchEvent(buffer, start(id, "grep"), t);
+    observeBatchEvent(buffer, end(id), t + 1);
+  }
+
+  test("a finished batch carries its calls and its message's tokens; the widget's views carry neither, nor does a running batch", () => {
+    const buffer = createBatchBuffer({ retainUndelivered: true });
+    const message = messageEnd({ id: "a", name: "read", arguments: { path: "/secret" } }, { id: "b", name: "bash", arguments: { command: "rm -rf x" } }, { id: "c", name: "read" });
+    (message.message as Record<string, unknown>).usage = { input: 12, output: 340, cacheRead: 45_000, cacheWrite: 0, cost: { total: 0.01 } };
+    observeBatchEvent(buffer, message, 100);
+    observeBatchEvent(buffer, start("a", "read"), 110);
+    observeBatchEvent(buffer, start("b", "bash"), 110);
+    observeBatchEvent(buffer, end("a"), 150);
+    assert.equal(dashboardBatchViews(buffer)[0]!.calls, undefined, "a running batch lists no calls");
+    observeBatchEvent(buffer, end("b", { isError: true }), 900);
+    observeBatchEvent(buffer, { type: "turn_end" }, 950);
+    const view = dashboardBatchViews(buffer)[0]!;
+    assert.deepEqual(view.calls, [
+      { name: "read", startedAt: 110, endedAt: 150, failed: false },
+      { name: "bash", startedAt: 110, endedAt: 900, failed: true },
+      { name: "read", startedAt: 100, failed: true },
+    ]);
+    assert.deepEqual(view.usage, { input: 12, output: 340, cacheRead: 45_000, cacheWrite: 0 });
+    assert.ok(!JSON.stringify(view).includes("/secret") && !JSON.stringify(view).includes("rm -rf"), "no argument reaches the view");
+    const widget = batchViews(buffer)[0]!;
+    assert.equal(widget.calls, undefined);
+    assert.equal(widget.usage, undefined);
+  });
+
+  test("calls are capped; a message without usage sends none", () => {
+    const buffer = createBatchBuffer();
+    const calls = Array.from({ length: BATCH_CALL_CAP + 3 }, (_, i) => ({ id: `c${i}`, name: `t${i}` }));
+    observeBatchEvent(buffer, messageEnd(...calls), 1);
+    closeOpenBatch(buffer, 2);
+    const view = dashboardBatchViews(buffer)[0]!;
+    assert.equal(view.callCount, BATCH_CALL_CAP + 3);
+    assert.equal(view.calls!.length, BATCH_CALL_CAP);
+    assert.equal(view.usage, undefined);
+    assert.equal(messageTokens({ usage: { input: -1, output: "x" } }), undefined);
+  });
+
+  test("a retaining buffer keeps finished batches past the newest until a delivered call carried them, up to BATCH_RETAIN_CAP", () => {
+    const buffer = createBatchBuffer({ retainUndelivered: true });
+    for (let i = 0; i < AGENT_BATCH_CAP + 3; i++) finishOne(buffer, `c${i}`, i * 10);
+    const views = dashboardBatchViews(buffer);
+    assert.deepEqual(views.map((view) => view.seq), [1, 2, 3, 4, 5, 6, 7, 8]);
+    // A view of another buffer's epoch marks nothing.
+    markBatchesDelivered(buffer, views.map((view) => ({ ...view, epoch: "other" })));
+    assert.equal(buffer.batches.length, AGENT_BATCH_CAP + 3);
+    markBatchesDelivered(buffer, views);
+    assert.deepEqual(buffer.batches.map((batch) => batch.seq), [4, 5, 6, 7, 8]);
+    finishOne(buffer, "next", 200);
+    assert.deepEqual(buffer.batches.map((batch) => batch.seq), [5, 6, 7, 8, 9], "delivered batches leave as new ones arrive");
+
+    const never = createBatchBuffer({ retainUndelivered: true });
+    for (let i = 0; i < BATCH_RETAIN_CAP + 4; i++) finishOne(never, `c${i}`, i * 10);
+    assert.equal(never.batches.length, BATCH_RETAIN_CAP);
+    assert.equal(never.batches[0]!.seq, 5);
+
+    const widget = createBatchBuffer();
+    for (let i = 0; i < AGENT_BATCH_CAP + 3; i++) finishOne(widget, `c${i}`, i * 10);
+    assert.equal(widget.batches.length, AGENT_BATCH_CAP, "a widget buffer keeps its cap whatever is delivered");
   });
 });

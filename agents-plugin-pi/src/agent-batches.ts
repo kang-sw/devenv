@@ -27,6 +27,16 @@
  * `toolcall_start` names its tool directly and a `toolcall_delta` holds only
  * its `delta` text; every delta is O(1).
  *
+ * The dashboard feed's lead buffer differs in two ways
+ * (`createBatchBuffer({ retainUndelivered: true })`, `dashboardBatchViews`):
+ * it keeps, beyond the newest `AGENT_BATCH_CAP`, every finished batch no
+ * delivered intake call carried yet (up to `BATCH_RETAIN_CAP`;
+ * `markBatchesDelivered` releases them), so ws-mcp counts each batch once
+ * even when several finish between two calls; and a finished batch's view
+ * carries its calls (tool name, clocks, failed; never an argument or a
+ * result) and its message's token usage. Neither reaches the widget or a
+ * relayed view.
+ *
  * Pure data and pure functions only: no IO, no timers, no registry access.
  */
 
@@ -41,6 +51,20 @@ export const BATCH_ARGS_PREVIEW_CAP = 200;
 
 /** Characters of a call's result kept on a direct child's buffer for a later summary request. */
 export const BATCH_RESULT_PREVIEW_CAP = 400;
+
+/** Batches a retaining buffer keeps at most while finished ones wait for a delivered call; past it the oldest go uncounted. */
+export const BATCH_RETAIN_CAP = 32;
+
+/** Calls a finished batch's dashboard view lists; the rest are only counted. */
+export const BATCH_CALL_CAP = 32;
+
+/** One assistant message's token usage, as the dashboard intake takes it. */
+export interface BatchTokenUsage {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
 
 /** One tool call inside a batch. Clocks are epoch milliseconds. */
 export interface BatchCall {
@@ -62,6 +86,10 @@ export interface ToolBatch {
   /** Present once the batch is finished. */
   endedAt?: number;
   calls: BatchCall[];
+  /** The assistant message's token usage, when it reported any. */
+  usage?: BatchTokenUsage;
+  /** A retaining buffer's mark: a delivered intake call carried this batch finished. */
+  delivered?: boolean;
 }
 
 /** Generating-phase kinds: thinking (also before the first content block), reply text, tool-call argument streaming. */
@@ -97,6 +125,8 @@ export interface AgentBatchBuffer {
   batches: ToolBatch[];
   /** The assistant message in flight, outside the capped `batches` list. */
   generating?: GeneratingState;
+  /** Keep finished batches older than the newest `AGENT_BATCH_CAP` until they are delivered (the dashboard feed's lead). */
+  retainUndelivered?: boolean;
 }
 
 /** The running batch's in-flight summary. */
@@ -132,10 +162,23 @@ export interface BatchView {
   running?: BatchRunningView;
   /** Present exactly when the view is an assistant message still generating. */
   generating?: BatchGeneratingView;
+  /** A finished batch's calls, up to `BATCH_CALL_CAP`; dashboard views only. */
+  calls?: { name: string; startedAt: number; endedAt?: number; failed: boolean }[];
+  /** A finished batch's token usage; dashboard views only. */
+  usage?: BatchTokenUsage;
 }
 
-export function createBatchBuffer(): AgentBatchBuffer {
-  return { epoch: Math.random().toString(36).slice(2, 10).padEnd(8, "0"), nextSeq: 1, batches: [] };
+export function createBatchBuffer(options: { retainUndelivered?: boolean } = {}): AgentBatchBuffer {
+  return { epoch: Math.random().toString(36).slice(2, 10).padEnd(8, "0"), nextSeq: 1, batches: [], ...(options.retainUndelivered ? { retainUndelivered: true } : {}) };
+}
+
+/** An assistant message's `usage` as a `BatchTokenUsage`; undefined when absent or all zero. */
+export function messageTokens(message: unknown): BatchTokenUsage | undefined {
+  const u = (message as { usage?: unknown } | undefined)?.usage as { input?: unknown; output?: unknown; cacheRead?: unknown; cacheWrite?: unknown } | undefined;
+  if (!u || typeof u !== "object") return undefined;
+  const n = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.round(v) : 0);
+  const t = { input: n(u.input), output: n(u.output), cacheRead: n(u.cacheRead), cacheWrite: n(u.cacheWrite) };
+  return t.input || t.output || t.cacheRead || t.cacheWrite ? t : undefined;
 }
 
 /**
@@ -200,8 +243,30 @@ function openBatch(buffer: AgentBatchBuffer): ToolBatch | undefined {
 function startBatch(buffer: AgentBatchBuffer, now: number, calls: BatchCall[]): ToolBatch {
   const batch: ToolBatch = { seq: buffer.nextSeq++, startedAt: now, calls };
   buffer.batches.push(batch);
-  if (buffer.batches.length > AGENT_BATCH_CAP) buffer.batches.splice(0, buffer.batches.length - AGENT_BATCH_CAP);
+  trimBatches(buffer);
   return batch;
+}
+
+/** Keeps the newest `AGENT_BATCH_CAP`; a retaining buffer also keeps older undelivered ones, up to `BATCH_RETAIN_CAP` in all. */
+function trimBatches(buffer: AgentBatchBuffer): void {
+  const n = buffer.batches.length;
+  let drop = 0;
+  while (n - drop > AGENT_BATCH_CAP && (!buffer.retainUndelivered || buffer.batches[drop]!.delivered === true || n - drop > BATCH_RETAIN_CAP)) drop++;
+  if (drop > 0) buffer.batches.splice(0, drop);
+}
+
+/**
+ * A delivered intake call carried `views`: the finished batches among them
+ * are delivered, and those older than the newest `AGENT_BATCH_CAP` leave a
+ * retaining buffer.
+ */
+export function markBatchesDelivered(buffer: AgentBatchBuffer, views: readonly { epoch?: unknown; seq?: unknown; endedAt?: unknown }[]): void {
+  for (const view of views) {
+    if (view.epoch !== buffer.epoch || view.endedAt === undefined) continue;
+    const batch = buffer.batches.find((candidate) => candidate.seq === view.seq);
+    if (batch?.endedAt !== undefined) batch.delivered = true;
+  }
+  trimBatches(buffer);
 }
 
 /** Ends the open batch and drops any generating message. Returns whether anything changed. */
@@ -295,7 +360,9 @@ export function observeBatchEvent(
       if (calls.length === 0) return hadGenerating;
       const open = openBatch(buffer);
       if (open) open.endedAt = now;
-      startBatch(buffer, now, calls);
+      const batch = startBatch(buffer, now, calls);
+      const usage = messageTokens(evt.message);
+      if (usage) batch.usage = usage;
       return true;
     }
     case "tool_execution_start": {
@@ -367,6 +434,27 @@ function generatingView(buffer: AgentBatchBuffer, generating: GeneratingState): 
     phase.chars = generating.chars ?? 0;
   }
   return { epoch: buffer.epoch, seq: buffer.nextSeq, toolNames: [], callCount: 0, failed: 0, startedAt: generating.startedAt, generating: phase };
+}
+
+/**
+ * The buffer's views for the dashboard intake: `batchViews`, each finished
+ * batch also carrying its calls (names, clocks, failed) and token usage.
+ */
+export function dashboardBatchViews(buffer: AgentBatchBuffer): BatchView[] {
+  const views = batchViews(buffer);
+  for (const batch of buffer.batches) {
+    if (batch.endedAt === undefined) continue;
+    const view = views.find((candidate) => candidate.seq === batch.seq && candidate.generating === undefined);
+    if (!view) continue;
+    view.calls = batch.calls.slice(0, BATCH_CALL_CAP).map((call) => ({
+      name: call.toolName,
+      startedAt: call.startedAt ?? batch.startedAt,
+      ...(call.endedAt !== undefined ? { endedAt: call.endedAt } : {}),
+      failed: call.isError === true || call.endedAt === undefined,
+    }));
+    if (batch.usage) view.usage = { ...batch.usage };
+  }
+  return views;
 }
 
 /** The buffer's views, oldest first; a generating message's view is last. */

@@ -72,7 +72,7 @@ function world(on: On, opts: { dashboard?: unknown; intake?: Intake } = {}) {
     recvAnswers: [] as { result: unknown; text: string }[],
     /** The chunks the next model request streams, and its result. */
     chunks: [] as unknown[],
-    step: { answer: '', toolUses: [] as { name: string; input: unknown }[] },
+    step: { answer: '', toolUses: [] as { name: string; input: unknown }[], usage: null as Record<string, unknown> | null },
     toolResult: { result: 'ok', text: 'ok' } as Record<string, unknown>,
     logs: [] as string[],
     /** What the permission check beneath decides. */
@@ -124,7 +124,7 @@ function world(on: On, opts: { dashboard?: unknown; intake?: Intake } = {}) {
   on('turn.complete', ($, e) => ({ text: e.answer }))
   on('turn.step', async function* ($, e) {
     for (const chunk of w.chunks) yield chunk as never
-    return { turnId: e.turnId, index: e.index, answer: w.step.answer, toolUses: w.step.toolUses, stopReason: 'end_turn', usage: null } as never
+    return { turnId: e.turnId, index: e.index, answer: w.step.answer, toolUses: w.step.toolUses, stopReason: 'end_turn', usage: w.step.usage } as never
   })
   on('session.compact', async () => {
     if (w.compactGate) await w.compactGate
@@ -194,7 +194,11 @@ test('knob on: the lead\'s turn reaches the intake tool under the bound key, by 
     { kind: 'input', index: 1, json: '{"command":"ls"}' },
     { kind: 'stop', stopReason: 'tool_use', usage: null },
   ]
-  w.step = { answer: 'Looking', toolUses: [{ name: 'Bash', input: { command: 'ls' } }] }
+  w.step = {
+    answer: 'Looking',
+    toolUses: [{ name: 'Bash', input: { command: 'ls' } }],
+    usage: { input_tokens: 12, output_tokens: 340, cache_read_input_tokens: 45000, cache_creation_input_tokens: 1200, model: 'm' },
+  }
   const chunks = await step($, w)
   // Observe-only: the stream reaches the loop unchanged.
   expect(chunks).toEqual(w.chunks)
@@ -217,6 +221,9 @@ test('knob on: the lead\'s turn reaches the intake tool under the bound key, by 
     failed: 0,
     startedAt: expect.any(Number),
     endedAt: expect.any(Number),
+    // The step result's usage and the call's own clocks ride on the finished batch; its arguments never do.
+    calls: [{ name: 'Bash', startedAt: expect.any(Number), endedAt: expect.any(Number), failed: false }],
+    usage: { input: 12, output: 340, cacheRead: 45000, cacheWrite: 1200 },
   })
   expect(kinds(w).at(-1)).toBe('turn_end')
 })

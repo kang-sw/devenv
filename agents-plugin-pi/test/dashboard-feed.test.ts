@@ -172,6 +172,44 @@ describe("lead feed", () => {
     assert.equal(calls.length <= 3, true, "the whole turn coalesced into a few calls");
   });
 
+  test("a finished lead batch carries its calls and the message's tokens; finished batches past five stay listed until a call carrying them is delivered", async () => {
+    let fail = false;
+    const { feed, calls, events, advance } = harness({ answer: async () => (fail ? { isError: true, content: [{ type: "text", text: "nope" }] } : { content: [{ type: "text", text: "ok" }] }) });
+    feed.start();
+    await advance(0);
+    feed.leadEvent({ type: "agent_start" });
+    const step = (id: string, usage?: Record<string, number>) => {
+      const message = assistantEnd("", [{ id, name: "grep", arguments: { pattern: "secret-pattern" } }]);
+      if (usage) (message.message as Record<string, unknown>).usage = usage;
+      feed.leadEvent(message);
+      feed.leadEvent({ type: "tool_execution_start", toolCallId: id, toolName: "grep", args: { pattern: "secret-pattern" } });
+      feed.leadEvent({ type: "tool_execution_end", toolCallId: id, toolName: "grep", result: { content: [] }, isError: false });
+    };
+    step("c1", { input: 3, output: 40, cacheRead: 9000, cacheWrite: 100 });
+    for (let i = 2; i <= 8; i++) step(`c${i}`);
+    await advance(FLUSH_INTERVAL_MS);
+    type View = { seq: number; calls?: Array<{ name: string; failed: boolean }>; usage?: unknown };
+    const leadViews = () => events().filter((event) => event.kind === "agent" && event.agentId === undefined).at(-1)!.batches as View[];
+    let views = leadViews();
+    assert.deepEqual(views.map((view) => view.seq), [1, 2, 3, 4, 5, 6, 7, 8], "eight finished between two calls: all go");
+    assert.deepEqual(views[0]!.calls?.map((call) => [call.name, call.failed]), [["grep", false]]);
+    assert.deepEqual(views[0]!.usage, { input: 3, output: 40, cacheRead: 9000, cacheWrite: 100 });
+    assert.ok(!JSON.stringify(calls.at(-1)).includes("secret-pattern"), "no argument reaches the intake");
+    step("c9");
+    await advance(FLUSH_INTERVAL_MS);
+    assert.deepEqual(leadViews().map((view) => view.seq), [5, 6, 7, 8, 9], "that call was delivered: only the newest now");
+    // An undelivered call keeps what it carried: the resync lists it again.
+    fail = true;
+    for (let i = 10; i <= 16; i++) step(`c${i}`);
+    await advance(FLUSH_INTERVAL_MS);
+    fail = false;
+    await advance(RETRY_MS);
+    const retry = calls.at(-1)!.args.events;
+    assert.equal(retry[0]!.kind, "reset");
+    views = retry.filter((event) => event.kind === "agent" && event.agentId === undefined).at(-1)!.batches as View[];
+    assert.deepEqual(views.map((view) => view.seq), [10, 11, 12, 13, 14, 15, 16]);
+  });
+
   test("an in-process toolcall_start is named from its partial message, like an RPC event", async () => {
     const { feed, events, advance } = harness();
     feed.start();

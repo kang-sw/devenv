@@ -110,7 +110,8 @@ type activityState struct {
 	caption    string
 	permission *Permission
 	// counted holds the finished batches already added to done and failed,
-	// keyed epoch/seq; it is pruned to the batches still listed.
+	// keyed epoch/seq; it is pruned to the batches the adapter still lists
+	// (more than the BatchCap kept in batches: see BatchWireCap).
 	counted        map[string]bool
 	done, failed   int
 	phase          string
@@ -451,10 +452,15 @@ func batchKey(b BatchView) string {
 }
 
 // setBatches replaces the batch list, adding every newly finished batch to
-// the done and failed totals once, and returns those batches.
+// the done and failed totals once, and returns those batches. The whole list
+// is counted; only its newest BatchCap are kept.
 func (act *activityState) setBatches(batches []BatchView) []BatchView {
+	fresh := act.countFinished(batches, true)
+	if len(batches) > BatchCap {
+		batches = batches[len(batches)-BatchCap:]
+	}
 	act.batches = batches
-	return act.countFinished()
+	return fresh
 }
 
 // gapAdd adds the lead's newly finished batches to the open tool gap.
@@ -481,15 +487,18 @@ func (st *State) FlushTools() []RingEntry {
 	return res.Ring
 }
 
-// countFinished counts each newly finished batch once and returns them in
-// list order.
-func (act *activityState) countFinished() []BatchView {
+// countFinished counts each newly finished batch of list once and returns
+// them in list order. With prune, list is the adapter's whole list and the
+// batches it no longer holds are forgotten: an adapter drops a finished
+// batch only after a delivered call carried it, so a forgotten one never
+// comes back to be counted again.
+func (act *activityState) countFinished(list []BatchView, prune bool) []BatchView {
 	var fresh []BatchView
 	if act.counted == nil {
 		act.counted = map[string]bool{}
 	}
-	listed := make(map[string]bool, len(act.batches))
-	for _, b := range act.batches {
+	listed := make(map[string]bool, len(list))
+	for _, b := range list {
 		key := batchKey(b)
 		listed[key] = true
 		if b.EndedAt > 0 && !act.counted[key] {
@@ -499,9 +508,11 @@ func (act *activityState) countFinished() []BatchView {
 			fresh = append(fresh, b)
 		}
 	}
-	for key := range act.counted {
-		if !listed[key] {
-			delete(act.counted, key)
+	if prune {
+		for key := range act.counted {
+			if !listed[key] {
+				delete(act.counted, key)
+			}
 		}
 	}
 	return fresh
@@ -535,7 +546,7 @@ func closeBatches(act *activityState, at int64) []BatchView {
 		kept = append(kept, b)
 	}
 	act.batches = kept
-	return act.countFinished()
+	return act.countFinished(kept, false)
 }
 
 // refreshPhases recomputes each phase, restarting its clock on a change.
@@ -701,6 +712,11 @@ func (act *activityState) view() Activity {
 
 func (b BatchView) clone() BatchView {
 	b.ToolNames = append([]string(nil), b.ToolNames...)
+	b.Calls = append([]BatchCall(nil), b.Calls...)
+	if b.Usage != nil {
+		u := *b.Usage
+		b.Usage = &u
+	}
 	if b.Running != nil {
 		r := *b.Running
 		b.Running = &r
@@ -723,13 +739,25 @@ type batchIn struct {
 	EndedAt    *int64          `json:"endedAt"`
 	Running    *RunningView    `json:"running"`
 	Generating *GeneratingView `json:"generating"`
+	// Usage and Calls are optional, and parsed apart so a malformed one is
+	// dropped alone and never takes the batch with it.
+	Usage json.RawMessage   `json:"usage"`
+	Calls []json.RawMessage `json:"calls"`
+}
+
+// callIn is one entry of a batch's calls as an adapter sends it.
+type callIn struct {
+	Name      string `json:"name"`
+	StartedAt int64  `json:"startedAt"`
+	EndedAt   int64  `json:"endedAt"`
+	Failed    bool   `json:"failed"`
 }
 
 var epochPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,32}$`)
 
 // normalizeBatches validates and bounds an adapter's batch list: a
 // malformed batch is dropped, names and previews are cleaned and capped, and
-// only the newest BatchCap are kept.
+// only the newest BatchWireCap are kept (setBatches keeps BatchCap of them).
 func (st *State) normalizeBatches(raw []json.RawMessage) []BatchView {
 	out := []BatchView{}
 	for _, item := range raw {
@@ -737,8 +765,8 @@ func (st *State) normalizeBatches(raw []json.RawMessage) []BatchView {
 			out = append(out, b)
 		}
 	}
-	if len(out) > BatchCap {
-		out = out[len(out)-BatchCap:]
+	if len(out) > BatchWireCap {
+		out = out[len(out)-BatchWireCap:]
 	}
 	return out
 }
@@ -769,7 +797,7 @@ func (st *State) normalizeBatch(raw json.RawMessage) (BatchView, bool) {
 		if !ok || strings.TrimSpace(s) == "" || len(out.ToolNames) >= ToolNameCap {
 			continue
 		}
-		s = cleanToolName(s)
+		s = cleanToolName(st.scrub.scrub(s))
 		dup := false
 		for _, have := range out.ToolNames {
 			dup = dup || have == s
@@ -784,6 +812,8 @@ func (st *State) normalizeBatch(raw json.RawMessage) (BatchView, bool) {
 			return BatchView{}, false
 		}
 		out.EndedAt = *in.EndedAt
+		out.Calls = st.normalizeCalls(in.Calls, in.CallCount)
+		out.Usage = normalizeTokens(in.Usage)
 	case in.Running != nil:
 		r := *in.Running
 		if r.Done < 0 || r.OthersRunning < 0 || r.StartedAt < 0 {
@@ -811,6 +841,46 @@ func (st *State) normalizeBatch(raw json.RawMessage) (BatchView, bool) {
 		out.Generating = &g
 	}
 	return out, true
+}
+
+// normalizeCalls is a finished batch's per-call entries: a malformed entry is
+// dropped, names are scrubbed and capped like toolNames, unknown or
+// inconsistent clocks read 0, and at most BatchCallCap (and never more than
+// the batch's callCount) are kept. nil when none is left.
+func (st *State) normalizeCalls(raw []json.RawMessage, callCount int) []BatchCall {
+	var out []BatchCall
+	for _, item := range raw {
+		if len(out) >= min(BatchCallCap, callCount) {
+			break
+		}
+		var in callIn
+		if json.Unmarshal(item, &in) != nil || strings.TrimSpace(in.Name) == "" {
+			continue
+		}
+		c := BatchCall{Name: cleanToolName(st.scrub.scrub(in.Name)), StartedAt: max(in.StartedAt, 0), Failed: in.Failed}
+		if in.EndedAt >= c.StartedAt {
+			c.EndedAt = in.EndedAt
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+// normalizeTokens is a batch's usage: negative counts read 0, and nil when
+// absent, malformed, or all zero.
+func normalizeTokens(raw json.RawMessage) *TokenUsage {
+	if len(raw) == 0 {
+		return nil
+	}
+	var in TokenUsage
+	if json.Unmarshal(raw, &in) != nil {
+		return nil
+	}
+	u := TokenUsage{Input: max(in.Input, 0), Output: max(in.Output, 0), CacheRead: max(in.CacheRead, 0), CacheWrite: max(in.CacheWrite, 0)}
+	if u == (TokenUsage{}) {
+		return nil
+	}
+	return &u
 }
 
 // normalizeUsage is a status event's figures as the snapshot keeps them:

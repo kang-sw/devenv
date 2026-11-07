@@ -11,7 +11,10 @@
  *   `agent_settled`), with the origin of the input or mailbox wake that
  *   started it;
  * - the lead's batch views, from a lead-side `AgentBatchBuffer` fed by the
- *   same event model the agent widget uses for children;
+ *   same event model the agent widget uses for children; a finished batch
+ *   also carries its calls (names, clocks, failed) and its message's token
+ *   usage, and stays listed past the newest five until a delivered call
+ *   carried it, so ws-mcp counts every batch once;
  * - one `agent` event per subagent whose state changed, keyed by its native
  *   agent id, and a `permission` event while an execute-worker waits on an
  *   approval;
@@ -59,7 +62,7 @@
  */
 
 import { ADAPTER_MESSAGE_LABEL, whiteboardLabeledBody } from "./adapter-label.ts";
-import { batchViews, createBatchBuffer, observeBatchEvent, type AgentBatchBuffer, type BatchView } from "./agent-batches.ts";
+import { createBatchBuffer, dashboardBatchViews, markBatchesDelivered, observeBatchEvent, type AgentBatchBuffer, type BatchView } from "./agent-batches.ts";
 import { classifyRegistryRowState, rowName, type AgentRowState } from "./agent-display.ts";
 import type { LeadUsageSummary } from "./agent-cost.ts";
 import type { CumulativeCost } from "./agent-telemetry.ts";
@@ -349,7 +352,7 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
 
   let stopped = true;
   let pending: DashboardEvent[] = [];
-  let lead: AgentBatchBuffer = createBatchBuffer();
+  let lead: AgentBatchBuffer = createBatchBuffer({ retainUndelivered: true });
   let leadDirty = false;
   let agentsDirty = false;
   let sentAgents = new Map<string, SentAgent>();
@@ -407,7 +410,7 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
   }
 
   function leadEventNow(): DashboardEvent {
-    return { kind: "agent", batches: batchViews(lead) };
+    return { kind: "agent", batches: dashboardBatchViews(lead) };
   }
 
   /** Streamed text, when it changed since the last send. */
@@ -580,6 +583,10 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
       cancelTimeout?.();
       inFlight = false;
       lastFlushAt = now();
+      if (!stopped && outcome === "delivered") {
+        // The lead's finished batches it carried are counted: older ones may leave the buffer.
+        for (const event of events) if (event.kind === "agent" && event.agentId === undefined && Array.isArray(event.batches)) markBatchesDelivered(lead, event.batches as BatchView[]);
+      }
       // Only a delivered call's `accepts:` line turns status on; any other outcome turns it off.
       const accepted = outcome === "delivered" && accepts.includes(STATUS_KIND);
       if (accepted && !statusAccepted) {
@@ -725,7 +732,7 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
     cancelPoll?.();
     cancelPoll = undefined;
     pending = [];
-    lead = createBatchBuffer();
+    lead = createBatchBuffer({ retainUndelivered: true });
     leadDirty = false;
     agentsDirty = false;
     sentAgents = new Map();
