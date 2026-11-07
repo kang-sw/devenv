@@ -725,15 +725,18 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
     return out
   }
 
+  function streamedText(r: { blocks: Map<number, string> }): string {
+    return [...r.blocks.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([, t]) => t)
+      .join('\n')
+  }
+
   function streamEvent(): DashboardEvent | undefined {
     if (!replyDirty) return undefined
     replyDirty = false
     if (!reply) return undefined
-    const text = [...reply.blocks.entries()]
-      .sort(([a], [b]) => a - b)
-      .map(([, t]) => t)
-      .join('\n')
-      .slice(0, TEXT_SEND_CAP)
+    const text = streamedText(reply).slice(0, TEXT_SEND_CAP)
     if (text === '' || text === lastReplySent) return undefined
     lastReplySent = text
     return { kind: 'reply', text }
@@ -1075,7 +1078,16 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
         finishReply()
         lastFinal = answer
         settleBefore({ kind: 'reply', text: answer.slice(0, TEXT_SEND_CAP), final: true, at: edges.now() })
-      } else if (reply?.step === step) finishReply()
+      } else if (reply?.step === step) {
+        // A tool-calling step carries no answer, but the text it streamed is lead output that must stay in the conversation.
+        const streamed = streamedText(reply)
+        finishReply()
+        if (streamed.trim() !== '') {
+          // lastFinal keeps turn.complete from sending the same text again if it repeats it.
+          lastFinal = streamed
+          settleBefore({ kind: 'reply', text: streamed.slice(0, TEXT_SEND_CAP), final: true, at: edges.now() })
+        }
+      }
     }),
     toolBegan: guard('tool start', (agentId: string | undefined, id: string | undefined, tool: string, args: Record<string, unknown>) => {
       const aid = idOf(agentId)
