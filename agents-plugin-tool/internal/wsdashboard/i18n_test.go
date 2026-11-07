@@ -46,7 +46,7 @@ func TestSessionPageFollowsTheLanguageChoice(t *testing.T) {
 	}{
 		{"default is English", "", "", "en", "", `>Conversation<`, "대화"},
 		{"browser language Korean", "", "ko-KR,ko;q=0.9", "ko", "", "대화", ">Conversation<"},
-		{"unsupported browser language", "", "fr-FR", "en", "", `>Conversation<`, "대화"},
+		{"unsupported browser language", "", "nl-NL", "en", "", `>Conversation<`, "대화"},
 		{"cookie beats the browser", "ko", "en-US", "ko", "ko", "대화", ">Conversation<"},
 		{"cookie English beats a Korean browser", "en", "ko-KR", "en", "en", `>Conversation<`, "대화"},
 	}
@@ -89,12 +89,12 @@ func TestEveryPageHasAGearWithTheLanguageItem(t *testing.T) {
 		if !strings.Contains(body, "window.wsT") {
 			t.Errorf("%s: no client string table", c.name)
 		}
-		// The follow-the-browser item and one button per embedded language.
-		if !strings.Contains(body, `data-lang=""`) {
+		// The follow-the-browser option and one option per embedded language.
+		if !strings.Contains(body, `<option value="">`) {
 			t.Errorf("%s: no follow-the-browser item", c.name)
 		}
 		for _, l := range wsi18n.Languages() {
-			if !strings.Contains(body, `data-lang="`+l.Code+`"`) || !strings.Contains(body, l.Name) {
+			if !strings.Contains(body, `<option value="`+l.Code+`">`+l.Name+`</option>`) {
 				t.Errorf("%s: no item for %s", c.name, l.Code)
 			}
 		}

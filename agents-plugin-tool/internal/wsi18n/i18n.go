@@ -58,6 +58,9 @@ var (
 	loadOnce sync.Once
 	tables   map[string]map[string]string
 	langs    []Language
+	// byLower maps a lowercased table code to the code itself, so a cookie
+	// or tag in any case finds its table (BCP 47 tags are case-insensitive).
+	byLower map[string]string
 )
 
 func load() {
@@ -67,6 +70,7 @@ func load() {
 			panic(fmt.Sprintf("wsi18n: read tables: %v", err))
 		}
 		tables = map[string]map[string]string{}
+		byLower = map[string]string{}
 		for _, e := range entries {
 			code, ok := strings.CutSuffix(e.Name(), ".json")
 			if !ok {
@@ -81,6 +85,7 @@ func load() {
 				panic(fmt.Sprintf("wsi18n: parse %s: %v", e.Name(), err))
 			}
 			tables[code] = table
+			byLower[strings.ToLower(code)] = code
 		}
 		if tables[Default] == nil {
 			panic("wsi18n: no " + Default + " table")
@@ -114,6 +119,41 @@ func Supported(code string) bool {
 	return ok
 }
 
+// canonical returns the table code a tag in any case names, or "".
+func canonical(code string) string {
+	load()
+	return byLower[strings.ToLower(code)]
+}
+
+// matchTag maps one Accept-Language tag to the table code that serves it, or
+// "" when none does. Chinese is told apart by script (zh-Hans, zh-Hant) or,
+// without one, by region: Taiwan, Hong Kong, and Macau are Traditional and
+// every other Chinese tag, bare zh included, is Simplified. Portuguese of
+// any region is the Brazilian table. Every other language matches on its
+// primary subtag.
+func matchTag(tag string) string {
+	tag = strings.ToLower(tag)
+	if c := canonical(tag); c != "" {
+		return c
+	}
+	parts := strings.Split(tag, "-")
+	switch parts[0] {
+	case "zh":
+		for _, p := range parts[1:] {
+			switch p {
+			case "hant", "tw", "hk", "mo":
+				return canonical("zh-Hant")
+			case "hans", "cn", "sg":
+				return canonical("zh-Hans")
+			}
+		}
+		return canonical("zh-Hans")
+	case "pt":
+		return canonical("pt-BR")
+	}
+	return canonical(parts[0])
+}
+
 // Table returns a copy of one language's own table (nil for an unsupported
 // code), for tests and tooling.
 func Table(code string) map[string]string {
@@ -132,10 +172,7 @@ func Table(code string) map[string]string {
 // Pref reads the language cookie's value: the code when it names an
 // available language, else "" (follow the browser).
 func Pref(cookie string) string {
-	if Supported(cookie) {
-		return cookie
-	}
-	return ""
+	return canonical(cookie)
 }
 
 // Resolve picks the page language: an explicit cookie choice, else the first
@@ -165,14 +202,13 @@ func Resolve(cookie, acceptLanguage string) string {
 		if q <= 0 {
 			continue
 		}
-		primary, _, _ := strings.Cut(tag, "-")
-		cands = append(cands, cand{primary, q})
+		if code := matchTag(tag); code != "" {
+			cands = append(cands, cand{code, q})
+		}
 	}
 	sort.SliceStable(cands, func(i, j int) bool { return cands[i].q > cands[j].q })
-	for _, c := range cands {
-		if Supported(c.code) {
-			return c.code
-		}
+	if len(cands) > 0 {
+		return cands[0].code
 	}
 	return Default
 }

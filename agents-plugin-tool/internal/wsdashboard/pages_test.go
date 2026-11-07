@@ -226,7 +226,7 @@ func TestBoardFirstPageHasNoLayoutControl(t *testing.T) {
 	}
 	// The gear is there for the language item alone: no layout or input
 	// choice, which only a live layout has.
-	for _, present := range []string{`id="gear"`, `data-lang="ko"`, `data-lang=""`} {
+	for _, present := range []string{`id="gear"`, `<option value="ko">`, `<option value="">`} {
 		if !strings.Contains(body, present) {
 			t.Errorf("board-first page lacks %q", present)
 		}

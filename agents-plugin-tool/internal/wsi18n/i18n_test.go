@@ -59,9 +59,26 @@ func TestResolve(t *testing.T) {
 		{"cookie wins over the browser", "ko", "en-US,en;q=0.9", "ko"},
 		{"unknown cookie follows the browser", "xx", "ko-KR,ko;q=0.9", "ko"},
 		{"no cookie, Korean browser", "", "ko-KR,ko;q=0.9,en;q=0.8", "ko"},
-		{"first supported language by quality", "", "fr;q=0.9,ko;q=0.8,en;q=0.7", "ko"},
+		{"first supported language by quality", "", "nl;q=0.9,ko;q=0.8,en;q=0.7", "ko"},
 		{"quality order beats header order", "", "en;q=0.5,ko;q=0.9", "ko"},
-		{"unsupported browser language", "", "fr-FR,de;q=0.8", "en"},
+		{"unsupported browser language", "", "nl-NL,sv;q=0.8", "en"},
+		{"French browser", "", "fr-CA,fr;q=0.9", "fr"},
+		{"Japanese browser", "", "ja-JP,ja;q=0.9,en;q=0.8", "ja"},
+		{"German beats English by quality", "", "en;q=0.5,de-AT;q=0.9", "de"},
+		{"Brazilian Portuguese", "", "pt-BR,pt;q=0.9", "pt-BR"},
+		{"European Portuguese takes the same table", "", "pt-PT", "pt-BR"},
+		{"bare zh is Simplified", "", "zh", "zh-Hans"},
+		{"zh-CN is Simplified", "", "zh-CN,zh;q=0.9", "zh-Hans"},
+		{"zh-SG is Simplified", "", "zh-SG", "zh-Hans"},
+		{"zh-Hans is Simplified", "", "zh-Hans-CN", "zh-Hans"},
+		{"zh-TW is Traditional", "", "zh-TW,zh;q=0.9", "zh-Hant"},
+		{"zh-HK is Traditional", "", "zh-HK", "zh-Hant"},
+		{"zh-MO is Traditional", "", "zh-MO", "zh-Hant"},
+		{"zh-Hant is Traditional", "", "zh-Hant", "zh-Hant"},
+		{"a script beats a region", "", "zh-Hant-CN", "zh-Hant"},
+		{"tag case does not matter", "", "ZH-tw", "zh-Hant"},
+		{"cookie in any case names the table", "zh-hant", "en", "zh-Hant"},
+		{"cookie names a Chinese script", "zh-Hans", "zh-TW", "zh-Hans"},
 		{"no header", "", "", "en"},
 		{"q=0 refuses a language", "", "ko;q=0,en", "en"},
 	}
@@ -69,6 +86,9 @@ func TestResolve(t *testing.T) {
 		if got := Resolve(c.cookie, c.accept); got != c.want {
 			t.Errorf("%s: Resolve(%q, %q) = %q, want %q", c.name, c.cookie, c.accept, got, c.want)
 		}
+	}
+	if Pref("zh-Hant") != "zh-Hant" || Pref("ZH-HANT") != "zh-Hant" || Pref("zh") != "" {
+		t.Fatal("Pref admits a table code in any case, not a bare language")
 	}
 	if Pref("ko") != "ko" || Pref("") != "" || Pref("xx") != "" {
 		t.Fatal("Pref admits only an available language")
