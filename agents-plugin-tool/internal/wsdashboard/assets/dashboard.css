@@ -352,3 +352,13 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
   .sess { grid-template-columns: minmax(0, 1fr) auto auto; }
   .sess .qs, .sess > span:nth-child(2) { display: none; }
 }
+
+/* ===== link actions: the menu a served page's marked links open ===== */
+a[data-wl] { cursor: pointer; }
+a[data-wl]:not([href]) { color: var(--wb-primary); text-decoration: underline dotted; }
+a[data-wl="file"]:not([href]) { color: inherit; }
+.lmenu { position: fixed; z-index: 60; min-width: 190px; background: var(--wb-card); border-radius: 10px; box-shadow: var(--wb-shadow-hi); padding: 5px; display: grid; gap: 2px; }
+.lmenu button { border: 0; background: transparent; border-radius: 7px; padding: 6px 9px; text-align: left; cursor: pointer; color: inherit; font: inherit; font-size: 13px; }
+.lmenu button:hover, .lmenu button:focus-visible { background: var(--wb-muted); outline: none; }
+.ltoast { position: fixed; z-index: 61; left: 50%; bottom: 18px; transform: translateX(-50%); max-width: min(560px, calc(100vw - 32px)); background: var(--wb-fg); color: var(--wb-card); border-radius: 8px; padding: 7px 12px; font-size: 12.5px; box-shadow: var(--wb-shadow-hi); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ltoast[hidden] { display: none; }

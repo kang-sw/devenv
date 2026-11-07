@@ -93,10 +93,14 @@ func guardedRoutes() []struct{ method, path, body string } {
 		{http.MethodGet, "/s/livesession", ""},
 		{http.MethodGet, "/s/livesession/events", ""},
 		{http.MethodGet, "/s/livesession/image?path=shot.png", ""},
+		{http.MethodGet, "/s/livesession/file?path=shot.png", ""},
 		{http.MethodGet, "/s/livesession/history", ""},
 		{http.MethodGet, "/s/livesession/attachment/0123456789abcdef-1.png", ""},
 		{http.MethodPost, "/s/livesession/message", `{"text":"from the guard test"}`},
 		{http.MethodPost, "/s/livesession/cancel", `{"id":"x"}`},
+		// A target the route refuses, so a passing request never runs the
+		// OS open command.
+		{http.MethodPost, "/s/livesession/open", `{"target":"ftp://guard.test/"}`},
 		{http.MethodGet, "/s/" + mermaid, ""},
 	}
 }

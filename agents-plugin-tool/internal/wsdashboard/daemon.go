@@ -70,6 +70,9 @@ type DaemonOptions struct {
 	// bindHost overrides the address the daemon binds, so a test runs LAN
 	// mode on loopback; empty derives it from LAN.
 	bindHost string
+	// openSystem replaces the system-open route's OS open command, so a
+	// test never starts a browser; nil runs systemOpen.
+	openSystem func(target string) error
 }
 
 // nudgeBodyLimit bounds a /nudge request body.
@@ -104,6 +107,8 @@ type Daemon struct {
 	tokenMu sync.Mutex
 	// buildTime is the build time /health reports; zero is unknown.
 	buildTime int64
+	// openSystem opens a system-open route's target (systemOpen).
+	openSystem func(target string) error
 
 	closeOnce sync.Once
 	stop      chan struct{}
@@ -172,16 +177,17 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		return nil, err
 	}
 	d := &Daemon{
-		dir:       opts.Dir,
-		lock:      lock,
-		log:       logw,
-		source:    opts.Sessions,
-		broker:    newBroker(),
-		entries:   newEntryCache(),
-		lan:       opts.LAN,
-		buildTime: opts.BuildTime,
-		stop:      make(chan struct{}),
-		done:      make(chan struct{}),
+		dir:        opts.Dir,
+		lock:       lock,
+		log:        logw,
+		source:     opts.Sessions,
+		broker:     newBroker(),
+		entries:    newEntryCache(),
+		lan:        opts.LAN,
+		buildTime:  opts.BuildTime,
+		openSystem: opts.openSystem,
+		stop:       make(chan struct{}),
+		done:       make(chan struct{}),
 		endpoint: Endpoint{
 			SchemaVersion: endpointSchemaVersion,
 			Port:          listener.Addr().(*net.TCPAddr).Port,
@@ -190,6 +196,9 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 			Token:         token,
 			StartedAt:     time.Now().UTC().Format(time.RFC3339),
 		},
+	}
+	if d.openSystem == nil {
+		d.openSystem = systemOpen
 	}
 	if d.lan {
 		// Mint the token now, so the localhost index shows it before any
@@ -327,9 +336,10 @@ func (d *Daemon) Close() {
 // Handler is the daemon's HTTP surface. Every route first passes the access
 // guard (the loopback Host guard, or in LAN mode the guard that also admits
 // the LAN token; access.go); the daemon sends no CORS headers. The pages (/,
-// /s/<reply-id>, their SSE streams, and a session's image route) are
-// read-only; a session's message and cancel routes (inbox_routes.go) are the
-// only browser writes.
+// /s/<reply-id>, their SSE streams, and a session's image, file view, and
+// history routes) are read-only; a session's message, cancel, and steer
+// routes (inbox_routes.go) are the only browser writes, and its system-open
+// route (sysopen_route.go) the only route that runs a host command.
 func (d *Daemon) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", d.handleHealth)

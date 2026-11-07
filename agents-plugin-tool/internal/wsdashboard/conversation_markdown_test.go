@@ -1,6 +1,7 @@
 package wsdashboard
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -57,10 +58,45 @@ func TestLeadReplyEscapesRawHTMLAndUnsafeTargets(t *testing.T) {
 	}
 }
 
-func TestLeadReplyMermaidFenceStaysACodeBlock(t *testing.T) {
-	html := leadMarkdownView(t, []wslive.RingEntry{{Kind: wslive.RingReply, Text: "```mermaid\ngraph TD; A-->B\n```"}}, "")
-	if strings.Contains(html, `class="mermaid"`) || !strings.Contains(html, `<code class="language-mermaid">`) {
-		t.Errorf("mermaid fence in a bubble: %s", html)
+// TestFinishedReplyDrawsMermaidStreamingKeepsCode: a finished reply's
+// mermaid fence is a <pre class="mermaid"> the page draws once; the reply
+// still streaming keeps it a code block, since it re-renders every tick.
+func TestFinishedReplyDrawsMermaidStreamingKeepsCode(t *testing.T) {
+	fence := "```mermaid\ngraph TD; A-->B\n```"
+	finished := leadMarkdownView(t, []wslive.RingEntry{{Kind: wslive.RingReply, Text: fence}}, "")
+	if !strings.Contains(finished, `<pre class="mermaid">graph TD; A--&gt;B`) || strings.Contains(finished, `language-mermaid`) {
+		t.Errorf("finished reply does not draw mermaid: %s", finished)
+	}
+	streaming := leadMarkdownView(t, nil, fence)
+	if strings.Contains(streaming, `class="mermaid"`) || !strings.Contains(streaming, `<code class="language-mermaid">`) {
+		t.Errorf("streaming reply draws mermaid: %s", streaming)
+	}
+}
+
+// TestLeadReplyLinksAreActionLinks: a finished and a streaming reply mark
+// their links for the page's link menu: a file inside the session root
+// links its file view with its root-relative and absolute paths, a file
+// outside it is a copy-only action link with no href, and an http(s) link
+// is marked as a URL. A user message's text has no links at all.
+func TestLeadReplyLinksAreActionLinks(t *testing.T) {
+	text := "[plan](docs/a.md) [away](/etc/hosts) [web](https://example.com/x)"
+	for name, html := range map[string]string{
+		"finished":  leadMarkdownView(t, []wslive.RingEntry{{Kind: wslive.RingReply, Text: text}}, ""),
+		"streaming": leadMarkdownView(t, nil, text),
+	} {
+		for _, want := range []string{
+			`<a href="/s/self/file?path=docs%2Fa.md" data-wl="file" data-rel="docs/a.md" data-abs="` + filepath.Join("/proj", "docs", "a.md") + `" title="docs/a.md">plan</a>`,
+			`<a tabindex="0" data-wl="file" data-abs="` + filepath.FromSlash("/etc/hosts") + `" title="/etc/hosts">away</a>`,
+			`<a href="https://example.com/x" target="_blank" rel="noopener noreferrer" data-wl="url">web</a>`,
+		} {
+			if !strings.Contains(html, want) {
+				t.Errorf("%s reply lacks %q:\n%s", name, want, html)
+			}
+		}
+	}
+	user := leadMarkdownView(t, []wslive.RingEntry{{Kind: wslive.RingUser, Text: text}}, "")
+	if strings.Contains(user, "data-wl") {
+		t.Errorf("user message carries an action link: %s", user)
 	}
 }
 

@@ -60,6 +60,32 @@ type View struct {
 	// path text (or FileLink's href without FileText); links and autolinks
 	// never use it.
 	ImageSrc func(path string) string
+	// FileActions, when set on a page with FileText, turns a file target
+	// into an action link, the element a served page's link menu takes: a
+	// file link or autolink renders as an anchor around its label, and the
+	// path text of an image ImageSrc does not serve as an anchor around that
+	// path. The anchor is marked data-wl="file" and carries the
+	// FileAction's Href (only a scheme-less absolute path such as
+	// "/s/<reply-id>/file?..."; anything else is dropped), Rel as data-rel,
+	// and Abs as data-abs; it is titled with the FileText path unless the
+	// link has a title of its own. A zero FileAction leaves the target to
+	// FileText's path text. A page with FileActions also marks every http(s)
+	// link it resolves data-wl="url". Raw anchors in the Now slot never pass
+	// through here and stay unmarked.
+	FileActions func(path string) FileAction
+}
+
+// FileAction is what a served page's link menu offers for one file target.
+type FileAction struct {
+	// Href opens the file on the serving daemon (its file view); empty
+	// when the daemon would refuse it, as for a path outside the session
+	// root, which the menu then offers to copy only.
+	Href string
+	// Rel is the path relative to the session root, with forward slashes;
+	// empty outside the root.
+	Rel string
+	// Abs is the absolute path.
+	Abs string
 }
 
 // TopicView is one topic block.
@@ -179,24 +205,26 @@ type ViewInput struct {
 	Layout  Layout
 	ReplyID string
 	Panels  []Panel
-	// FileLink, FileText, and ImageSrc are copied to the View.
-	FileLink func(path string) string
-	FileText func(path string) string
-	ImageSrc func(path string) string
+	// FileLink, FileText, ImageSrc, and FileActions are copied to the View.
+	FileLink    func(path string) string
+	FileText    func(path string) string
+	ImageSrc    func(path string) string
+	FileActions func(path string) FileAction
 }
 
 // BuildView derives a page view from state.
 func BuildView(state *State, in ViewInput) View {
 	view := View{
-		Layout:   in.Layout,
-		ReplyID:  in.ReplyID,
-		Seq:      state.Seq,
-		Now:      state.Now,
-		Panels:   in.Panels,
-		Stored:   map[int]bool{},
-		FileLink: in.FileLink,
-		FileText: in.FileText,
-		ImageSrc: in.ImageSrc,
+		Layout:      in.Layout,
+		ReplyID:     in.ReplyID,
+		Seq:         state.Seq,
+		Now:         state.Now,
+		Panels:      in.Panels,
+		Stored:      map[int]bool{},
+		FileLink:    in.FileLink,
+		FileText:    in.FileText,
+		ImageSrc:    in.ImageSrc,
+		FileActions: in.FileActions,
 	}
 	for _, item := range state.Items {
 		view.Stored[item.ID] = true
