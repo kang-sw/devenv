@@ -57,8 +57,9 @@ build, no server, no dependencies.
       assignments waiting for my answer, and closes waiting for my confirm.
     - *My assignments*: my live assignments (forced, self-assigned, accepted,
       or taken over by handoff), with status, source, completion mode, the
-      roll-up and blocked warning, priority, due, stale, the latest note, and
-      quick actions including *Hand off*.
+      roll-up and blocked warning, priority, due (or "due today"), stale, a
+      "by agent" chip when an agent wrote the current status, the latest note,
+      and quick actions including *Hand off*.
     - *Received requests*: pending assignments to me (Accept / Decline /
       Discuss), the ones I answered, and the ones I sent (Withdraw).
     - *Assigned by me*: what I assigned or handed to others, live or pending,
@@ -67,7 +68,8 @@ build, no server, no dependencies.
       notices first (a follower accepted a pending assignment; a handoff of an
       assignment I gave was accepted), with Return. Then each follower down to
       3 levels as an indented tree with their open work, blocked, stale, and
-      unaccepted counts.
+      unaccepted counts, plus the pending assignments they sent that nobody
+      accepted yet ("waiting on others").
     - *Items*: the tree of threads, filtered by kind (`request` = items with a
       pending assignment) and status (open / blocked / done / hidden).
     - *Team*: the org tree, admins, clones per member, revoked keys, the
@@ -257,14 +259,16 @@ items        { id: { id, alias, kind, title, body, project, due, priority, prior
 itemOrder[]  item ids in tree order
 assignments  { id: { id, item, to, by, sender, completion, state, forced, status, note, noteBy, via, ts,
                      inherited, ruleLevels, handoffOf, handoffNote, answerNote, accepted{id, ts},
-                     leadAtAccept, ended{id, type, ts, by}, depth, lastUpdate, stale } }
+                     leadAtAccept, ended{id, type, ts, by}, depth, statusOrigin, statusBy,
+                     lastUpdate, stale } }
 comments     { id: { id, item, author, body, reply_to, ts, edited{id, ts}, hidden } }
 events[]     display order: { id, alias, stream, member, seq, ts, type, origin, payload, status
                      (applied|flagged|waiting), reason, ignored, markers[{kind, field, other,
                      otherMember, winner, mine, theirs}], thread, parentThread, local, open, late }
 notices[]    { key, kind (accepted|handoff), assignment, item, to, by, sender, from?, ts, state }
 my           { assignments[], today{work[], pending[], confirms[]}, received{pending[], answered[], sent[]},
-               given[itemId], created[itemId], team[{id, depth, open[], pending[], done, blocked, stale, last}],
+               given[itemId], created[itemId], team[{id, depth, open[], pending[], waiting[], done, blocked,
+               stale, last}],
                badge[key] }
 stats        { events, commits, flagged, concurrent }
 heads        { stream: seq }   the seen a write would carry now

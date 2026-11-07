@@ -46,7 +46,10 @@
   var ST_LABEL = { todo: 'todo', doing: 'doing', blocked: 'blocked', awaiting: 'awaiting confirm', done: 'done',
     unassigned: 'unassigned', pending: 'pending', declined: 'declined', returned: 'returned', handed: 'handed off', withdrawn: 'withdrawn' };
   function stChip(s) { return s ? '<span class="chip st-' + esc(s) + '">' + esc(ST_LABEL[s] || s) + '</span>' : ''; }
-  function recChip(r) { return r.state === 'live' ? stChip(r.status) : stChip(r.state); }
+  function recChip(r) {
+    if (r.state !== 'live') return stChip(r.state);
+    return stChip(r.status) + (r.statusOrigin && r.statusOrigin !== 'human' ? '<span class="chip agent" title="the current status was written by ' + esc(r.statusBy) + '\'s agent (' + esc(r.statusOrigin) + ')">by agent</span>' : '');
+  }
   function prChip(it) {
     if (!it || it.kind === 'topic') return '';
     return '<span class="chip pr pr-' + it.priorityLevel + '" title="priority ' + it.priorityLevel + ' of ' + (VS.priority.names.length - 1) +
@@ -54,8 +57,9 @@
   }
   function dueChip(it) {
     if (!it || !it.due) return '';
-    var over = it.due < today() && it.status !== 'done';
-    return '<span class="chip due' + (over ? ' over' : '') + '" title="due ' + esc(it.due) + (over ? ', overdue' : '') + '">due ' + esc(it.due.slice(5)) + '</span>';
+    var over = it.due < today() && it.status !== 'done', now = it.due === today() && it.status !== 'done';
+    return '<span class="chip due' + (over ? ' over' : now ? ' now' : '') + '" title="due ' + esc(it.due) + (over ? ', overdue' : now ? ', due today' : '') + '">' +
+      (now ? 'due today' : 'due ' + esc(it.due.slice(5))) + '</span>';
   }
   function kindChip(it) {
     return '<span class="chip kind">' + esc(it.kind) + '</span>' + (it.pending.length ? '<span class="chip req">pending assignment</span>' : '') +
@@ -251,7 +255,7 @@
     if (!R.pending.length && !R.answered.length && !R.sent.length) return '';
     var h = R.pending.length ? R.pending.map(function (id) { return pendRow(A(id), answerBtns(A(id))); }).join('') : '<p class="muted">No pending assignments to you.</p>';
     if (R.answered.length) h += '<div class="sub">answered</div>' + R.answered.map(function (id) { return pendRow(A(id)); }).join('');
-    if (R.sent.length) h += '<div class="sub">sent by me (pending until accepted)</div>' + R.sent.map(function (id) {
+    if (R.sent.length) h += '<div class="sub">sent by me</div>' + R.sent.map(function (id) {
       var r = A(id);
       return pendRow(r, r.state === 'pending' ? '<span class="muted">to <b>' + esc(nm(r.to)) + '</b></span>' + btn('unassign', 'Withdraw', { item: r.item, who: r.to }) : '<span class="muted">to <b>' + esc(nm(r.to)) + '</b></span>');
     }).join('');
@@ -279,6 +283,7 @@
         (p.blocked ? '<span class="chip st-blocked">' + p.blocked + ' blocked</span>' : '') +
         (p.stale ? '<span class="chip warn">' + p.stale + ' stale</span>' : '') +
         (p.pending.length ? '<span class="chip st-pending">' + p.pending.length + ' unaccepted</span>' : '') +
+        (p.waiting.length ? '<span class="chip st-pending" title="pending assignments they sent that nobody accepted yet">' + p.waiting.length + ' waiting on others</span>' : '') +
         '<span class="grow"></span><span class="muted ts" title="last update on their work">' + esc(fmtTs(p.last)) + '</span></div>';
       x += p.open.map(function (id) {
         var r = A(id), it = VS.items[r.item];
@@ -291,6 +296,11 @@
         var r = A(id);
         return '<div class="tm-work click pend"' + attr('item', r.item) + '>' + stChip('pending') + titleRef(r.item) +
           '<span class="muted">' + source(r) + '</span><span class="grow"></span><span class="muted ts">' + esc(fmtTs(r.ts)) + '</span></div>';
+      }).join('');
+      x += p.waiting.map(function (id) {
+        var r = A(id);
+        return '<div class="tm-work click pend"' + attr('item', r.item) + '>' + stChip('pending') + titleRef(r.item) +
+          '<span class="muted">sent to ' + esc(nm(r.to)) + (r.handoffOf ? ' (handoff)' : '') + ', not accepted yet</span><span class="grow"></span><span class="muted ts">' + esc(fmtTs(r.ts)) + '</span></div>';
       }).join('');
       return x + '</div>';
     }).join('');
@@ -621,7 +631,8 @@
         if (r.state === 'live') {
           if (r.by === v && r.status === 'awaiting') b += btn('confirm', 'Confirm', { item: r.item, who: r.to }, 'primary') + btn('note', 'Reject', { item: r.item, who: r.to, op: 'item.reject' });
           if ((r.by === v || r.to === v) && r.status === 'done') b += btn('note', 'Reopen', { item: r.item, who: r.to, op: 'item.reopen' });
-          if (r.by === v) b += btn('unassign', 'Unassign', { item: r.item, who: r.to });
+          var departed = (VS.members[r.to] || {}).removed || (VS.members[r.by] || {}).removed;
+          if (r.by === v || (departed && VS.viewer.admin)) b += btn('unassign', r.by === v ? 'Unassign' : 'Unassign (admin, member removed)', { item: r.item, who: r.to });
           if (r.accepted && lead === v) b += btn('note', 'Return (lead of ' + esc(r.to) + ')', { item: r.item, who: r.to, op: 'item.return' });
         } else if (r.state === 'pending') {
           if (r.to === v) b += btn('accept', 'Accept', { item: r.item }, 'primary') + btn('note', 'Decline', { item: r.item, op: 'item.decline' });

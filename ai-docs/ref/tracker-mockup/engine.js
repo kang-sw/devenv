@@ -824,6 +824,7 @@
         accepted: r.accepted ? { id: r.accepted.id, ts: r.accepted.ts } : null, leadAtAccept: r.leadAtAccept,
         ended: r.ended ? { id: r.ended.id, type: r.ended.type, ts: r.ended.ts, by: r.ended.author } : null,
         depth: r.to === r.by ? 0 : (reach(S.members, r.by, 99)[r.to] || null),
+        statusOrigin: r.last && r.writes.indexOf(r.last) >= 0 ? r.last.origin : null, statusBy: r.noteBy,
         lastUpdate: last,
         stale: !!(live && now && (r.status === 'doing' || r.status === 'blocked') && daysBetween(last, now) >= STALE_DAYS) };
     });
@@ -908,7 +909,8 @@
         var recs = A.filter(function (r) { return r.to === id && visible(r); });
         var open = recs.filter(function (r) { return r.state === 'live' && r.status !== 'done'; }).sort(byRank);
         var pend = recs.filter(function (r) { return r.state === 'pending'; });
-        team.push({ id: id, depth: R3[id], open: ids(open), pending: ids(pend),
+        var waiting = A.filter(function (r) { return r.sender === id && r.to !== id && r.state === 'pending' && visible(r); });
+        team.push({ id: id, depth: R3[id], open: ids(open), pending: ids(pend), waiting: ids(waiting),
           done: recs.filter(function (r) { return r.state === 'live' && r.status === 'done'; }).length,
           blocked: open.filter(function (r) { return r.status === 'blocked'; }).length,
           stale: open.filter(function (r) { return r.stale; }).length,
